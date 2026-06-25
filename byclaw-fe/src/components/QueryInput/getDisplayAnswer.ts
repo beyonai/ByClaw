@@ -7,7 +7,7 @@ export default function getDisplayAnswer(messageList?: IMessageListItem[]) {
 
   let text = '';
   messageList.forEach((item) => {
-    if (item.contentType === SSEMessageType.text) {
+    if (`${item.contentType}` === `${SSEMessageType.text}`) {
       text += `${get(item, 'content.substance') || ''}\n`;
     }
   });
