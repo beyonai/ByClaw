@@ -1,7 +1,7 @@
 import React from 'react';
 
 import { getIntl } from '@umijs/max';
-import { Button, ConfigProvider, Divider, message, Popover, Space } from 'antd';
+import { Button, ConfigProvider, Divider, message, Popover, Progress, Space } from 'antd';
 import { get, isBoolean, isEmpty, isNil, pullAllBy, set, trim, compact, omit } from 'lodash';
 import classNames from 'classnames';
 import { agentTypeMap } from '@/constants/agent';
@@ -19,6 +19,8 @@ import STTComp, { STTCompRef, RecordingStatus } from '@/components/QueryInput/co
 import type { IGlobalContext } from '@/layout/components/provider/global';
 import type { UploadFileRef } from './components/UploadFile';
 import type { IAgentFileUploadConf } from '../../hooks/useAgentUploadFileConfig';
+import type { DefaultValueSchema } from './RichInput/types';
+import type { ContextUsed } from '@/hooks/useContextUsed';
 
 export type IProps = {
   getMessageList?: () => Array<IMessage>;
@@ -46,6 +48,9 @@ export type IProps = {
   onMounted?: () => void;
   uploadFileConfig?: IAgentFileUploadConf;
   employeesList?: IAgentCache[];
+  inputDraft?: DefaultValueSchema;
+  onInputDraftChange?: (draft: DefaultValueSchema) => void;
+  contextUsed?: ContextUsed;
 };
 
 export type IState = {
@@ -112,6 +117,7 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
     EventEmitter.on('queryInput-paste-files', this.onPasteFiles);
     EventEmitter.emit('pcLayout-contains-chatLayout', true, { waitForListeners: true });
     this.props.onMounted?.();
+    this.restoreInputDraft();
   }
 
   componentWillUnmount() {
@@ -128,8 +134,22 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
     this.setState((prev) => ({ ...prev, showMentionPopoverType: '' }));
   };
 
+  restoreInputDraft = () => {
+    const { inputDraft } = this.props;
+    if (!inputDraft || (!inputDraft.text && isEmpty(inputDraft.resourceList))) return;
+
+    this.richInputRef.current?.setText(inputDraft);
+    this.setState((prevState) => ({
+      ...prevState,
+      inputValue: inputDraft.text || '',
+      resourceList: inputDraft.resourceList || [],
+    }));
+  };
+
   setCommonStateBySchema = (schema: any) => {
     const { queryQuestion, inputSchema, mentionItem, payload: { files } = {} } = schema;
+
+    const inputValue = inputSchema.text || queryQuestion || '';
 
     this.setState((prevState) => ({
       ...prevState,
@@ -148,13 +168,13 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
           },
         };
       }),
-      inputValue: queryQuestion,
+      inputValue,
     }));
 
-    if (inputSchema) {
+    if (inputValue) {
       setTimeout(() => {
         // 目的：等待因为agentId和agentType的改变，导致RichInput的组件的内容修改
-        this.richInputRef.current?.setText(inputSchema);
+        this.richInputRef.current?.appendText(inputValue);
       });
     }
 
@@ -324,6 +344,7 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
       inputValue: '',
       fileList: [],
     }));
+    this.props.onInputDraftChange?.({ text: '', resourceList: [] });
 
     return true;
   };
@@ -477,7 +498,11 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
     const uploadFileConfig = this.getUploadFileConfig();
     if (!uploadFileConfig) return true;
     const { fileList } = this.state;
-    if (uploadFileConfig.maxFileCount > 0 && fileList && fileList.length >= uploadFileConfig.maxFileCount) {
+    if (
+      uploadFileConfig.maxFileCount > 0 &&
+      fileList &&
+      fileList.length + files.length > uploadFileConfig.maxFileCount
+    ) {
       message.error(getIntl().formatMessage({ id: 'upload.maxFilesLimit' }, { count: uploadFileConfig.maxFileCount }));
       return false;
     }
@@ -538,6 +563,7 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
               inputValue: text,
               connectNet: resourceList.some((item) => `${item.resourceId}` === `${connectNetAgentId}`),
             }));
+            this.props.onInputDraftChange?.({ text, resourceList });
             if (!cannotAt && agentId !== currentAgentId) {
               let nextAgentType = agentType;
               if (!currentAgentId && agentId) {
@@ -560,6 +586,24 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
           resourceAgentIds={this.getResourceAgentIds()}
         />
         {this.getAssitantTrigger()}
+      </div>
+    );
+  }
+
+  renderContextUsed() {
+    const { contextUsed } = this.props;
+    if (!contextUsed || !contextUsed.percent) return null;
+
+    return (
+      <div>
+        <Progress
+          type="circle"
+          strokeWidth={20}
+          size={16}
+          percent={contextUsed.percent}
+          strokeColor={contextUsed.strokeColor}
+          format={() => contextUsed.format}
+        />
       </div>
     );
   }

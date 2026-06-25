@@ -37,6 +37,7 @@ import { DingtalkCircleFilled } from '@ant-design/icons';
 import { getByParamGroupCode } from '@/pages/manager/service/System';
 import { getCatalogOnResource, getDcSystemConfigListByStandType } from '@/pages/manager/service/DigitalEmployeeMgr';
 import { getDcSystemConfig } from '@/pages/manager/service/session';
+import { listResourceUseAuth } from '@/pages/manager/service/resources';
 import ExampleModal from './ExampleModal';
 import MemoryConfigModal from './MemoryConfigModal';
 import AbilityBoundaryModal from './AbilityBoundaryModal';
@@ -90,7 +91,6 @@ const promptFieldGroups = {
 
 const promptFieldNames = Array.from(new Set(Object.values(promptFieldGroups).flat()));
 const rolePromptFieldNames = [
-  'roleAttributes',
   'processingFlow',
   'personalityDimensions',
   'wordPreferences',
@@ -100,23 +100,6 @@ const rolePromptFieldNames = [
   'customPromptTabs',
   'customPromptValues',
 ];
-
-const parseConfigList = (value: any) => {
-  if (Array.isArray(value)) {
-    return value;
-  }
-
-  if (typeof value !== 'string' || !value) {
-    return [];
-  }
-
-  try {
-    const parsed = JSON.parse(value);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-};
 
 const parseJsonRecursively = (str: string, maxDepth: number = 5): any => {
   if (maxDepth <= 0 || typeof str !== 'string') return str;
@@ -157,6 +140,61 @@ const getDigitalEmployeeTemplate = (templates: any[] = [], ownerType?: string, a
 
   return findTemplate(templates) || {};
 };
+
+const getBundledSkillCode = (item: any) => {
+  if (!item) {
+    return '';
+  }
+  if (typeof item === 'string') {
+    return item;
+  }
+  return item.skillCode || item.resourceCode || item.value || item.code || item.resourceId || item.id || '';
+};
+
+const normalizeBundledSkillCodes = (skills: any[] = []) =>
+  compact(skills.map((item) => `${getBundledSkillCode(item) || ''}`.trim()));
+
+const normalizeBundledSkillItems = (skills: any[] = [], options: any[] = []) =>
+  compact(
+    skills.map((item) => {
+      const rawCode = `${getBundledSkillCode(item) || ''}`.trim();
+      const option =
+        options.find((skill) =>
+          [
+            skill?.value,
+            skill?.skillCode,
+            skill?.resourceCode,
+            skill?.code,
+            skill?.resourceId,
+            skill?.id,
+            skill?.label,
+            skill?.resourceName,
+            skill?.itemName,
+            skill?.name,
+          ]
+            .filter((value) => value !== undefined && value !== null)
+            .some((value) => `${value}`.trim() === rawCode)
+        ) || (typeof item === 'object' && item !== null ? item : null);
+
+      const resourceId = option?.resourceId || option?.skillId || option?.id;
+      const skillCode = `${
+        option?.skillCode || option?.resourceCode || option?.value || option?.code || rawCode || ''
+      }`.trim();
+      const normalized = {
+        resourceId,
+        skillCode,
+        skillType: option?.skillType,
+        skillUrl: option?.skillUrl,
+        versionUrl: option?.versionUrl,
+      };
+      Object.keys(normalized).forEach((key) => {
+        if (normalized[key] === undefined || normalized[key] === null || normalized[key] === '') {
+          delete normalized[key];
+        }
+      });
+      return normalized.skillCode || normalized.resourceId ? normalized : null;
+    })
+  );
 
 const mapTemplatePromptsToConfigList = (prompts: any[] = [], templateKey?: string) =>
   prompts.map((item, index) => ({
@@ -322,6 +360,7 @@ const ConfigForm = (props) => {
   const [catalogList, setCatalogList] = useState([]);
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [robotModalOpen, setRobotModalOpen] = useState(false);
+  const [modelPopoverOpen, setModelPopoverOpen] = useState(false);
   const [robotItem, setRobotItem] = useState<RobotConfig>({ channel: '' });
   const [templateData, setTemplateData] = useState([]);
   const [configurableTabs, setConfigurableTabs] = useState<
@@ -335,6 +374,7 @@ const ConfigForm = (props) => {
   const formOwnerType = Form.useWatch('ownerType', form, { form, preserve: true });
   const effectiveOwnerType = formOwnerType || ownerType;
   const selectedSkills = Form.useWatch('bundledSkills', { form, preserve: true }) || [];
+  const selectedSkillCodes = useMemo(() => normalizeBundledSkillCodes(selectedSkills), [selectedSkills]);
 
   useEffect(() => {
     let mounted = true;
@@ -420,19 +460,28 @@ const ConfigForm = (props) => {
     const fetchBundledSkills = async () => {
       setBundledSkillLoading(true);
       try {
-        const res = await getDcSystemConfig({
-          paramCode: 'OPENCLAW_BUNDLED_SKILLS',
+        const res = await listResourceUseAuth({
+          resourceBizTypeList: ['SKILL'],
+          pageNum: 1,
+          pageSize: 9999,
         });
         if (!mounted) return;
 
-        const list = parseConfigList(res?.paramValue);
+        const pageInfo = res?.data || res || {};
+        const list = pageInfo?.list || pageInfo?.rows || [];
         setBundledSkillOptions(
           list
             .map((item) => ({
               ...item,
-              value: item.skillCode || item.skillName,
-              label: item.skillName || item.skillCode,
-              description: isEN ? item.skillDescEn || item.skillDescZh : item.skillDescZh || item.skillDescEn,
+              value: item.skillCode || item.resourceCode || item.code || item.itemCode,
+              label: item.itemName || item.name || item.resourceName || item.resourceCode || '-',
+              description: item.resourceDesc || item.description || item.pluginDesc || item.desc || '',
+              skillCode: item.skillCode || item.resourceCode || item.code || item.itemCode,
+              skillType: item.skillType || 'hub',
+              skillUrl: item.skillUrl || '',
+              versionUrl:
+                item.versionUrl ||
+                (item.resourceId ? `/byaiService/tool/getSkillVersion?skillId=${item.resourceId}` : ''),
             }))
             .filter((item) => item.value)
         );
@@ -525,9 +574,12 @@ const ConfigForm = (props) => {
   const [uploadImgs, setUploadImgs] = useState([]);
   const [avatarUploadLoading, setAvatarUploadLoading] = useState(false);
   const [avatarMenuOpen, setAvatarMenuOpen] = useState(false);
+  const [brandVersion, setBrandVersion] = useState<'commercial' | 'openSource' | null>(null);
+  const [brandVersionLoaded, setBrandVersionLoaded] = useState(false);
   const [exampleOpen, setExampleOpen] = useState(false);
   const [memoryModalOpen, setMemoryModalOpen] = useState(false);
   const internalSyncRef = useRef(false);
+  const isOpenSource = brandVersionLoaded && brandVersion !== 'commercial';
 
   const [relResourceInfoModalOpen, setRelResourceInfoModalOpen] = useState(false);
   const [selectedToolItem, setSelectedToolItem] = useState(null);
@@ -540,6 +592,31 @@ const ConfigForm = (props) => {
   const [customPromptName, setCustomPromptName] = useState('');
   const [activePromptTabKey, setActivePromptTabKey] = useState();
   const customPromptTabs = Form.useWatch('customPromptTabs', { form, preserve: true }) || [];
+
+  useEffect(() => {
+    let mounted = true;
+
+    getDcSystemConfig({ paramCode: 'BYAI_BRAND_VERSION' })
+      .then((res: any) => {
+        if (!mounted) return;
+        const nextBrandVersion = res?.paramValue;
+        setBrandVersion(nextBrandVersion === 'commercial' ? 'commercial' : null);
+      })
+      .catch(() => {
+        if (mounted) {
+          setBrandVersion(null);
+        }
+      })
+      .finally(() => {
+        if (mounted) {
+          setBrandVersionLoaded(true);
+        }
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const handleRobotModalOk = useCallback((item) => {
     setRobotModalOpen(false);
@@ -694,20 +771,18 @@ const ConfigForm = (props) => {
 
   useEffect(() => {
     if (!agentId) return;
-    if (!Array.isArray(templateData) || templateData.length === 0) return;
 
     const parsedConfig = parseCorePersonaDefinition(corePersonaDefinitionValue, isEN);
-    const templateKeys = templateData.map((item) => getPromptConfigKey(item)).filter(Boolean);
-    const templateTipMap = templateData.reduce((result, item) => {
+    const templateTipMap = (Array.isArray(templateData) ? templateData : []).reduce((result, item) => {
       const key = getPromptConfigKey(item);
       if (key && item.tip) {
         result[key] = item.tip;
       }
       return result;
     }, {});
-    const matchesCurrentTemplate = templateKeys.some((key) => parsedConfig.tabs.some((tab) => tab.key === key));
 
-    if (parsedConfig.isArray && parsedConfig.tabs.length > 0 && matchesCurrentTemplate) {
+    // In edit mode, prefer the saved corePersonaDefinition payload over template defaults.
+    if (parsedConfig.isArray && parsedConfig.tabs.length > 0) {
       const parsedTabs = parsedConfig.tabs.map((tab) => ({
         ...tab,
         tip: tab.tip || templateTipMap[tab.key] || '',
@@ -722,6 +797,8 @@ const ConfigForm = (props) => {
       internalSyncRef.current = false;
       return;
     }
+
+    if (!Array.isArray(templateData) || templateData.length === 0) return;
 
     const { tabs, fieldValues, corePersonaDefinitionJson } = buildTemplatePromptConfig(templateData, isEN);
     let roleObj = {};
@@ -886,13 +963,16 @@ const ConfigForm = (props) => {
         ...form.getFieldsValue(allFieldNames),
         ...overrideValues,
       };
+      const hasAgentPromptField =
+        allTabs.some((tab) => tab.key === 'agent') || Object.prototype.hasOwnProperty.call(current, 'agent');
+      const effectiveWorkStandard = hasAgentPromptField ? current.agent || '' : current.workStandard || '';
 
       rolePromptFieldNames.forEach((key) => {
         roleObj[key] =
           current[key] ||
           (key === 'customPromptTabs' ? [] : key === 'customPromptValues' ? {} : key === 'bundledSkills' ? [] : '');
       });
-      roleObj.roleAttributes = current.roleAttributes || current.workStandard || current.agent || '';
+      roleObj.workStandard = effectiveWorkStandard;
 
       // 将所有配置存成 JSON 放到 corePersonaDefinition 字段（数组格式）
       const corePersonaDefinition: Array<{ name: string; nameEn?: string; key: string; value: string; tip?: string }> =
@@ -966,6 +1046,7 @@ const ConfigForm = (props) => {
       form.setFieldsValue({
         role: JSON.stringify(roleObj),
         corePersonaDefinition: corePersonaDefinitionJson,
+        workStandard: effectiveWorkStandard,
       });
       internalSyncRef.current = false;
 
@@ -977,12 +1058,29 @@ const ConfigForm = (props) => {
 
   const updateBundledSkills = useCallback(
     async (nextSkills = []) => {
-      form.setFieldsValue({ bundledSkills: nextSkills });
-      await syncRoleToForm({ bundledSkills: nextSkills });
+      const normalizedSkills = normalizeBundledSkillItems(nextSkills, bundledSkillOptions);
+      form.setFieldsValue({ bundledSkills: normalizedSkills });
+      await syncRoleToForm({ bundledSkills: normalizedSkills });
       updateResource();
     },
-    [form, syncRoleToForm, updateResource]
+    [bundledSkillOptions, form, syncRoleToForm, updateResource]
   );
+
+  useEffect(() => {
+    if (!bundledSkillOptions.length) {
+      return;
+    }
+    const currentSkills = form.getFieldValue('bundledSkills') || [];
+    if (!Array.isArray(currentSkills) || currentSkills.length === 0) {
+      return;
+    }
+    const normalizedSkills = normalizeBundledSkillItems(currentSkills, bundledSkillOptions);
+    if (JSON.stringify(currentSkills) === JSON.stringify(normalizedSkills)) {
+      return;
+    }
+    form.setFieldsValue({ bundledSkills: normalizedSkills });
+    syncRoleToForm({ bundledSkills: normalizedSkills });
+  }, [bundledSkillOptions, form, syncRoleToForm]);
 
   const filteredBundledSkillOptions = useMemo(() => {
     const keyword = trim(bundledSkillSearchName).toLowerCase();
@@ -990,7 +1088,7 @@ const ConfigForm = (props) => {
       return bundledSkillOptions;
     }
     return bundledSkillOptions.filter((item) => {
-      return [item.label, item.value, item.description].some((value) =>
+      return [item.label, item.value, item.skillCode, item.resourceCode, item.description].some((value) =>
         `${value || ''}`.toLowerCase().includes(keyword)
       );
     });
@@ -1191,13 +1289,15 @@ const ConfigForm = (props) => {
       };
     });
   };
-  const avatarMenu = [
-    {
-      key: 'upload',
-      label: intl.formatMessage({ id: 'employeeDetail.uploadImage' }),
-      icon: <AntdIcon type="icon-shouye-icon-wrapper1" />,
-    },
-  ];
+  const avatarMenu = isOpenSource
+    ? [
+        {
+          key: 'upload',
+          label: intl.formatMessage({ id: 'employeeDetail.uploadImage' }),
+          icon: <AntdIcon type="icon-shouye-icon-wrapper1" />,
+        },
+      ]
+    : [];
 
   const onAvatarClick = (url, onLoadCallback?) => () => {
     // 如果url是对象，表示还在上传中，不进行处理
@@ -1638,8 +1738,11 @@ const ConfigForm = (props) => {
                       resultDataRef={resultDataRef}
                       prologueRef={prologueRef}
                       setModelName={setModelName}
+                      onClose={() => setModelPopoverOpen(false)}
                     />
                   }
+                  open={modelPopoverOpen}
+                  onOpenChange={setModelPopoverOpen}
                   trigger={!isReadOnly ? ['click'] : []}
                   placement="bottomRight"
                   arrow={false}
@@ -2045,58 +2148,56 @@ const ConfigForm = (props) => {
               )}
 
               {/* 配置技能 */}
-              {bundledSkillOptions.length > 0 && (
-                <div className={styles.skillsSection}>
-                  <div className={styles.sectionHeader}>
-                    <span className={styles.sectionTitle}>
-                      {intl.formatMessage({ id: 'employeeDetail.configureBundledSkills' })}
-                    </span>
-                    <Button
-                      type="link"
-                      size="small"
-                      disabled={isReadOnly}
-                      onClick={() => {
-                        setBundledSkillSearchName('');
-                        setBundledSkillModalOpen(true);
-                      }}
-                    >
-                      + {intl.formatMessage({ id: 'common.plus' })}
-                    </Button>
-                  </div>
-                  {selectedSkills.length > 0 && (
-                    <div className={styles.skillsList}>
-                      {selectedSkills
-                        .map((code) => bundledSkillOptions.find((item) => item.value === code))
-                        .filter(Boolean)
-                        .map((item) => (
-                          <Card key={item.value} className={classnames(styles.configCard, styles.skillCard)}>
-                            <div className={styles.skillContent}>
-                              <AntdIcon type="icon-chajiantubiao" className={styles.fontSize36MarginRight12} />
-                              <div className={styles.skillInfo}>
-                                <div className={styles.skillHeader}>
-                                  <span className={styles.skillName}>{item.label}</span>
-                                </div>
-                                <div className={styles.skillDescription}>{item.description}</div>
-                              </div>
-                              <div className={styles.skillActions}>
-                                {!isReadOnly && (
-                                  <Space>
-                                    <AntdIcon
-                                      type="icon-a-Deleteshanchu"
-                                      onClick={() => {
-                                        updateBundledSkills(selectedSkills.filter((code) => code !== item.value));
-                                      }}
-                                    />
-                                  </Space>
-                                )}
-                              </div>
-                            </div>
-                          </Card>
-                        ))}
-                    </div>
-                  )}
+              <div className={styles.skillsSection}>
+                <div className={styles.sectionHeader}>
+                  <span className={styles.sectionTitle}>
+                    {intl.formatMessage({ id: 'employeeDetail.configureBundledSkills' })}
+                  </span>
+                  <Button
+                    type="link"
+                    size="small"
+                    disabled={isReadOnly}
+                    onClick={() => {
+                      setBundledSkillSearchName('');
+                      setBundledSkillModalOpen(true);
+                    }}
+                  >
+                    + {intl.formatMessage({ id: 'common.plus' })}
+                  </Button>
                 </div>
-              )}
+                {selectedSkillCodes.length > 0 && (
+                  <div className={styles.skillsList}>
+                    {selectedSkillCodes
+                      .map((code) => bundledSkillOptions.find((item) => item.value === code))
+                      .filter(Boolean)
+                      .map((item) => (
+                        <Card key={item.value} className={classnames(styles.configCard, styles.skillCard)}>
+                          <div className={styles.skillContent}>
+                            <AntdIcon type="icon-chajiantubiao" className={styles.fontSize36MarginRight12} />
+                            <div className={styles.skillInfo}>
+                              <div className={styles.skillHeader}>
+                                <span className={styles.skillName}>{item.label}</span>
+                              </div>
+                              <div className={styles.skillDescription}>{item.description}</div>
+                            </div>
+                            <div className={styles.skillActions}>
+                              {!isReadOnly && (
+                                <Space>
+                                  <AntdIcon
+                                    type="icon-a-Deleteshanchu"
+                                    onClick={() => {
+                                      updateBundledSkills(selectedSkillCodes.filter((code) => code !== item.value));
+                                    }}
+                                  />
+                                </Space>
+                              )}
+                            </div>
+                          </div>
+                        </Card>
+                      ))}
+                  </div>
+                )}
+              </div>
 
               {/* 配置机器人 */}
               {robotChannelOptions.length > 0 && (
@@ -2513,12 +2614,6 @@ const ConfigForm = (props) => {
               coreCompetencies: coreCompetenciesFromTpl,
               abilityBoundary: data.constraints || '',
               exampleQuestions: faqsText,
-              roleAttributes:
-                data.roleAttributes ||
-                data.workStandard ||
-                parsedSystemFields.workStandard ||
-                parsedSystemFields.agent ||
-                '',
               processingFlow: data.processingFlow || '',
               personalityDimensions: data.personalityDimensions || '',
               wordPreferences: data.wordPreferences || '',
@@ -2561,7 +2656,6 @@ const ConfigForm = (props) => {
             } catch {
               roleObj = {};
             }
-            roleObj.roleAttributes = data.roleAttributes || data.workStandard || '';
             roleObj.processingFlow = data.processingFlow || '';
             roleObj.personalityDimensions = data.personalityDimensions || '';
             roleObj.wordPreferences = data.wordPreferences || '';
@@ -2729,7 +2823,7 @@ const ConfigForm = (props) => {
               {filteredBundledSkillOptions.length > 0 ? (
                 <div className={styles.bundledSkillCardList}>
                   {filteredBundledSkillOptions.map((item) => {
-                    const isSelected = selectedSkills.includes(item.value);
+                    const isSelected = selectedSkillCodes.includes(item.value);
 
                     return (
                       <div key={item.value} className={styles.bundledSkillModalCard}>
@@ -2759,10 +2853,10 @@ const ConfigForm = (props) => {
                             size="small"
                             onClick={() => {
                               if (isSelected) {
-                                updateBundledSkills(selectedSkills.filter((code) => code !== item.value));
+                                updateBundledSkills(selectedSkillCodes.filter((code) => code !== item.value));
                                 return;
                               }
-                              updateBundledSkills([...selectedSkills, item.value]);
+                              updateBundledSkills([...selectedSkillCodes, item.value]);
                             }}
                           >
                             {isSelected

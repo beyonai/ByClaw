@@ -451,12 +451,10 @@ def _load_skills(
     resource_list: list[Any],
     user_code: str,
     tools_dict: dict[str, Any],
-    agent_id: str = "",
 ) -> tuple[str, str, list[dict[str, str]]] | None:
     """加载 skill，返回 (task_prompt, first_skill_path, skill_catalog)；无 skill 时返回 None。
 
-    路径A：resource_list 中有 SKILL 条目，按 resourceId 精确加载。
-    路径B：无 SKILL 条目时，自动扫描 _build_skill_dirs 返回的目录（personal_dir 覆盖 agent_dir）。
+    仅支持路径A：resource_list 中有 SKILL 条目，按 resourceId 精确加载。
 
     skill_catalog 格式：[{"name": ..., "description": ..., "location": "SKILL.md 绝对路径"}]
     由调用方写入 config["configurable"]["extras"]["skill_catalog"]，供 activate_skill 工具按需加载。
@@ -504,47 +502,6 @@ def _load_skills(
                 content,
                 skill_md,
             ))
-    else:
-        # 路径B：无显式条目，自动扫描 skill 目录。
-        # _build_skill_dirs 返回 [agent_dir, personal_dir]，优先级从低到高。
-        # 后扫描的目录（personal_dir）以 skill 目录名为 key 覆盖前者，避免重复注入。
-        skill_dirs = _build_skill_dirs(user_code=user_code, agent_id=agent_id)
-        _log.info(
-            "_load_skills: no explicit SKILL entries, scanning dirs=%s", skill_dirs
-        )
-        # key = skill 目录名，value = skill_md Path；后扫描覆盖前扫描
-        skill_map: dict[str, Path] = {}
-        for skill_dir in skill_dirs:
-            skill_dir_path = Path(skill_dir)
-            if not skill_dir_path.is_dir():
-                continue
-            for skill_md in sorted(skill_dir_path.rglob("SKILL.md")):
-                skill_map[skill_md.parent.name] = skill_md
-
-        for skill_dir_name, skill_md in sorted(skill_map.items()):
-            if not first_skill_path:
-                first_skill_path = str(skill_md.parent)
-            try:
-                content = skill_md.read_text(encoding="utf-8")
-            except OSError as exc:
-                _log.warning(
-                    "_load_skills: failed to read %s: %s, skipping", skill_md, exc
-                )
-                continue
-            meta = _parse_skill_meta(content)
-            content, w = _replace_skill_placeholders(content, tools_dict)
-            all_warnings.extend(w)
-            skill_entries.append((
-                meta.get("name") or skill_dir_name,
-                meta.get("description") or "",
-                content,
-                skill_md,
-            ))
-            _log.info(
-                "_load_skills: auto-loaded skill '%s' from %s",
-                meta.get("name") or skill_dir_name,
-                skill_md,
-            )
 
     if not skill_entries:
         return None
@@ -567,41 +524,6 @@ def _load_skills(
         task_prompt += "\n\n" + "\n".join(all_warnings)
     return task_prompt, first_skill_path, skill_catalog
 
-
-# ── 路径B：自动 skill 发现（路径构建在此，扫描/解析委托 SDK）─────────────────────
-
-
-def _extract_rel_skills(agent_list: list[Any]) -> set[str]:
-    """从 agent_list 第一个 agent 的 relSkills 提取白名单。空集合=不过滤。"""
-    agent_cfg = agent_list[0] if agent_list and isinstance(agent_list, list) else {}
-    if not isinstance(agent_cfg, dict):
-        return set()
-    rel = agent_cfg.get("relSkills") or []
-    if isinstance(rel, str):
-        try:
-            rel = json.loads(rel)
-        except (ValueError, TypeError):
-            rel = []
-    return {str(s).strip() for s in rel if s}
-
-
-def _build_skill_dirs(user_code: str, agent_id: str) -> list[str]:
-    """构建 skill 目录列表（agent 级 + 个人级），供 OntologyAgent.ask(skill_dirs=) 使用。"""
-    minio_root = os.environ.get(
-        "FILE_STORAGE_MINIO_MOUNT_PATH", "/data/byai/byaiAllInOne/mino"
-    )
-    agent_dir = os.environ.get("AGENT_SKILLS_DIR", "/app/skills")
-    personal_dir = str(
-        Path(minio_root)
-        / f"byclaw-{user_code}"
-        / "by"
-        / f"byclaw-{user_code}"
-        / "by"
-        / ".bydc"
-        / f"agent_{agent_id}"
-        / "skills"
-    )
-    return [agent_dir, personal_dir]
 
 
 def _normalize_recall(raw: Any) -> list[str]:
@@ -946,6 +868,9 @@ def _create_early_langfuse_trace(
                 "user_code": user_id,
                 "env": os.getenv("HOST", ""),
                 "worker": os.getenv("DATACLOUD_GATEWAY_WORKER_ID", ""),
+                "host": os.getenv("HOST", ""),
+                "host_ssh_port": os.getenv("HOST_PORT", "22"),
+                "container_name": f"byclaw-data-{os.getenv('CONTAINER_SUFFIX', 'standalone')}",
             },
         )
         return (lf, span)
@@ -1482,9 +1407,9 @@ class DataCloudWorker(GatewayWorker):
         )
         return None
 
-    async def start_heartbeat(self) -> None:
+    async def start_heartbeat(self, **kwargs: Any) -> None:
         setup_logging(extra_namespaces=("byclaw_data",))
-        await super().start_heartbeat()
+        await super().start_heartbeat(**kwargs)
 
         init_plugin = self.plugin_registry.get_plugin("datacloud_init_agent_conf")
         loaded_agent_ids = (
@@ -1512,9 +1437,9 @@ class DataCloudWorker(GatewayWorker):
                 OntologyAgent,
                 OntologyAgentConfig,
             )  # noqa: PLC0415
-            from datacloud_data_service.config import get_settings  # noqa: PLC0415
+            from datacloud_platform.config import get_settings  # noqa: PLC0415
 
-            from byclaw_data.mcp.result_file_storage import (
+            from byclaw_data.platform.result_file_storage import (
                 build_result_file_storage,  # noqa: PLC0415
             )
 
@@ -1548,10 +1473,46 @@ class DataCloudWorker(GatewayWorker):
             else "None (dynamic agents will skip OWL inject)",
         )
 
+        # 扩展本体池：从所有 AgentConfig 的 mounted_objects 收集全量对象，
+        # 加载到 TOOL_POOL（全部 LOCKED）。
+        # 不再依赖 extResourceList（已废弃），统一由 relResourceList 声明对象。
+        # 超过 TOOL_POOL_THRESHOLD 时启用锚点驱动模式（is_anchor_mode()==True）。
+        if self._resource_path and self._shared_loader is not None:
+            _all_object_codes: list[str] = list(dict.fromkeys(
+                code
+                for cfg in self.plugin_registry.get_agent_configs_snapshot().configs
+                for code in (cfg.extra.get("mounted_objects") or [])
+                if isinstance(code, str)
+            ))
+            if _all_object_codes:
+                try:
+                    from datacloud_analysis.tools.tool_pool import (  # noqa: PLC0415
+                        _init_ext_tool_pool,
+                    )
+
+                    _init_ext_tool_pool(
+                        resource_path=self._resource_path,
+                        loader=self._shared_loader,
+                        ext_codes=_all_object_codes,
+                    )
+                    logger.info(
+                        "DataCloudWorker: TOOL_POOL initialized all_codes_count=%d",
+                        len(_all_object_codes),
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.warning(
+                        "DataCloudWorker: _init_ext_tool_pool failed", exc_info=True
+                    )
+            else:
+                logger.info(
+                    "DataCloudWorker: no mounted_objects found, TOOL_POOL init skipped"
+                )
+
     async def _resolve_agent_configs_snapshot(
         self,
         execution: Any,
         session_id: str,
+        target_agent_type: str = "",
     ) -> Any:
         """Return the current in-memory snapshot without dill serialization.
 
@@ -1678,6 +1639,7 @@ class DataCloudWorker(GatewayWorker):
             getattr(_cmd_header, "session_id", "") or context.session_id or ""
         )
         _cmd_user_code = str(getattr(_cmd_header, "user_code", "") or "")
+        _cmd_user_name = str(getattr(_cmd_header, "user_name", "") or "")
         _cmd_message_id = str(getattr(_cmd_header, "message_id", "") or "")
         _cmd_agent_id = str(
             (getattr(_cmd_header, "metadata", None) or {}).get("agentId", "") or ""
@@ -1784,9 +1746,9 @@ class DataCloudWorker(GatewayWorker):
                                 OntologyAgent,
                                 OntologyAgentConfig,
                             )  # noqa: PLC0415
-                            from datacloud_data_service.config import get_settings  # noqa: PLC0415
+                            from datacloud_platform.config import get_settings  # noqa: PLC0415
 
-                            from byclaw_data.mcp.result_file_storage import (
+                            from byclaw_data.platform.result_file_storage import (
                                 build_result_file_storage,
                             )  # noqa: PLC0415
 
@@ -1839,6 +1801,66 @@ class DataCloudWorker(GatewayWorker):
             _resolved_locale,
             getattr(context, "locale", "<not set>"),
         )
+
+        # ── 用户 token 设置（从 Redis 读取，写入 context）──
+        # 先用 user_code 查 SHARE_BFM_USER_CODE_{user_code} 得到 user_id，
+        # 再用 user:{user_id}:login:auth 读取 token hash。
+        _auth_user_id = _cmd_user_code
+        _auth_user_name = _cmd_user_name
+        if _auth_user_id:
+            try:
+                _uid_key = f"SHARE_BFM_USER_CODE_{_auth_user_id}"
+                _real_user_id: str = str(await self.redis.get(_uid_key) or "").strip()
+                if not _real_user_id:
+                    logger.warning(
+                        "[user-auth] user_id not found in redis: key=%s session=%s",
+                        _uid_key,
+                        context.session_id,
+                    )
+                _redis_auth_key = f"user:{_real_user_id or _auth_user_id}:login:auth"
+                _redis_auth_data: dict[str, str] = await self.redis.hgetall(_redis_auth_key)
+                if _redis_auth_data:
+                    _whale_token = _redis_auth_data.get("WHALE_AGENT_AUTHORIZATION", "")
+                    _sso_token = _redis_auth_data.get("Sso-Token", "")
+                    _beyond_token = _redis_auth_data.get("Beyond-Token", "")
+                    _auth_user_name = _redis_auth_data.get("userName")
+                    # 写入 context 属性
+                    try:
+                        if _auth_user_name:
+                            context.user_name = _auth_user_name
+                        if _whale_token:
+                            context.whale_agent_authorization = _whale_token
+                        if _sso_token:
+                            context.sso_token = _sso_token
+                        if _beyond_token:
+                            context.beyond_token = _beyond_token
+                    except AttributeError:
+                        pass
+                    # 回填到 header_metadata，使下游 header_metadata.get("Beyond-Token") 等读取生效
+                    if _whale_token and not header_metadata.get("WHALE_AGENT_AUTHORIZATION"):
+                        header_metadata["WHALE_AGENT_AUTHORIZATION"] = _whale_token
+                    if _sso_token and not header_metadata.get("Sso-Token"):
+                        header_metadata["Sso-Token"] = _sso_token
+                    if _beyond_token and not header_metadata.get("Beyond-Token"):
+                        header_metadata["Beyond-Token"] = _beyond_token
+                    if _auth_user_name and not header_metadata.get("userName"):
+                        header_metadata["userName"] = _auth_user_name
+                    logger.info(
+                        "[user-auth] loaded tokens from redis: key=%s session=%s"
+                        " whale=%s sso=%s beyond=%s",
+                        _redis_auth_key,
+                        context.session_id,
+                        f"{_whale_token[:4]}...{_whale_token[-4:]}" if len(_whale_token) > 8 else ("***" if _whale_token else "<empty>"),
+                        f"{_sso_token[:4]}...{_sso_token[-4:]}" if len(_sso_token) > 8 else ("***" if _sso_token else "<empty>"),
+                        f"{_beyond_token[:4]}...{_beyond_token[-4:]}" if len(_beyond_token) > 8 else ("***" if _beyond_token else "<empty>"),
+                    )
+            except Exception:
+                logger.warning(
+                    "[user-auth] failed to load tokens from redis: user_id=%s session=%s",
+                    _auth_user_id,
+                    context.session_id,
+                    exc_info=True,
+                )
 
         # 来源 1：extra_payload.call_object_ids / call_view_ids（内部委派）
         # 来源 2：extra_payload.resource_list 中的 OBJECT / VIEW 资源码（前端选择）
@@ -2228,7 +2250,6 @@ class DataCloudWorker(GatewayWorker):
                 resource_list=_resource_list_for_extract,
                 user_code=_dyn_user_code,
                 tools_dict={},  # 动态路径无 AgentConfig，占位符替换跳过
-                agent_id=str(by_agent_id or ""),
             )
             _dyn_minio_root = os.environ.get(
                 "FILE_STORAGE_MINIO_MOUNT_PATH", "/data/byai/byaiAllInOne/mino"
@@ -2238,6 +2259,7 @@ class DataCloudWorker(GatewayWorker):
             )
             _dyn_extras: dict[str, Any] = {
                 "user_code": _dyn_user_code,
+                "user_name": _auth_user_name,
                 "beyond_token": _dyn_beyond_token,
                 "skill_workspace_dir": _dyn_skill_ws,
             }
@@ -2630,24 +2652,46 @@ class DataCloudWorker(GatewayWorker):
         }
 
         try:
-            from datacloud_analysis.langfuse_handler import (  # noqa: PLC0415
-                current_tool_spans,
-                make_langfuse_callback,
-            )
-
-            # 从 early trace span 取 trace_id 和 span id，
-            # trace_id 确保 LangChain callback 挂载到同一条 trace，
-            # span id 作为 parent_span_id 使 LangGraph 根节点直接成为 datacloud-agent 的子节点
+            # LangGraph 的根 span 必须挂在 datacloud-agent span 之下（父子关系），
+            # 而不是框架层的 worker.execute/DEBUG 节点（否则两者平级）。
+            # parent_observation_id = datacloud-agent span 的 id。
             _early_span = _early_lf_trace[1] if _early_lf_trace else None
             _lf_trace_id = str(getattr(_early_span, "trace_id", "") or "")
-            _lf_span_id = str(getattr(_early_span, "id", "") or "")
-            _lf_handler = make_langfuse_callback(_lf_trace_id or None, parent_span_id=_lf_span_id or None)
+            _early_span_id = str(getattr(_early_span, "id", "") or "")
+
+            _lf_handler = None
+            if _lf_trace_id and _early_span_id:
+                # 优先用新包（by_framework_trace_langfuse），parent 明确为 datacloud-agent span
+                try:
+                    from by_framework_trace_langfuse import (  # noqa: PLC0415
+                        build_langchain_callback,
+                    )
+                    _lf_handler = build_langchain_callback(
+                        trace_id=_lf_trace_id,
+                        parent_observation_id=_early_span_id,
+                    )
+                except (ImportError, Exception):
+                    pass
+
+            if _lf_handler is None:
+                # 降级：用旧包（datacloud_analysis.langfuse_handler）
+                try:
+                    from datacloud_analysis.langfuse_handler import (  # noqa: PLC0415
+                        make_langfuse_callback,
+                    )
+                    _lf_handler = make_langfuse_callback(
+                        _lf_trace_id or None,
+                        parent_span_id=_early_span_id or None,
+                    )
+                except (ImportError, Exception):
+                    pass
+
             if _lf_handler is not None:
                 config["callbacks"] = [_lf_handler]
                 config["metadata"] = {
                     "thread_id": thread_id,
                     "agent_id": str(by_agent_id or ""),
-                    # LangchainCallbackHandler 读取这几个字段写入 Langfuse trace/span
+                    # LangChain CallbackHandler 读取这几个字段写入 Langfuse trace/span
                     "langfuse_trace_name": f"agent.workflow {by_agent_name or by_agent_id or ''}".strip(),
                     "langfuse_user_id": str(getattr(getattr(command, "header", None), "user_code", "") or ""),
                     "langfuse_session_id": context.session_id or "",
@@ -2656,6 +2700,9 @@ class DataCloudWorker(GatewayWorker):
                         f"agent_name:{by_agent_name or ''}",
                     ],
                 }
+                from datacloud_analysis.langfuse_handler import (  # noqa: PLC0415
+                    current_tool_spans,
+                )
                 _lf_spans_list: list[dict[str, Any]] = []
                 current_tool_spans.set(_lf_spans_list)
         except Exception:
@@ -2773,7 +2820,6 @@ class DataCloudWorker(GatewayWorker):
                     resource_list=_resource_list_for_extract,
                     user_code=_user_code_for_skill,
                     tools_dict=tools_dict,
-                    agent_id=str(by_agent_id or ""),
                 )
                 if _skill_task_prompt:
                     _task_prompt, _first_skill_dir, _skill_catalog = _skill_task_prompt
@@ -2890,11 +2936,15 @@ class DataCloudWorker(GatewayWorker):
             # ── Langfuse：补写 trace input / output ──────────────────────────
             try:
                 _lf_callbacks = config.get("callbacks") or []
+                # 兼容新旧两种 handler 类名：
+                # 旧: LangchainCallbackHandler（datacloud_analysis.langfuse_handler）
+                # 新: CallbackHandler（by_framework_trace_langfuse，来自 langfuse.langchain）
+                _LANGFUSE_CB_NAMES = {"LangchainCallbackHandler", "CallbackHandler"}
                 _lf_handler = next(
                     (
                         cb
                         for cb in _lf_callbacks
-                        if type(cb).__name__ == "LangchainCallbackHandler"
+                        if type(cb).__name__ in _LANGFUSE_CB_NAMES
                     ),
                     None,
                 )

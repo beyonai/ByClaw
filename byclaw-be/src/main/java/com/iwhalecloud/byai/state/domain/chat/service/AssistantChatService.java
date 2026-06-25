@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.security.SecureRandom;
 import com.iwhalecloud.byai.manager.entity.men.MenResCom;
 import com.iwhalecloud.byai.manager.entity.men.MenTask;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
@@ -104,6 +105,9 @@ public class AssistantChatService {
     @Autowired
     private SuasSuperassistApplicationService suasSuperassistApplicationService;
 
+    @Autowired
+    private TargetAgentResolver targetAgentResolver;
+
     /**
      * 对话处理方法（带首词响应开始时间）
      *
@@ -150,7 +154,9 @@ public class AssistantChatService {
             long time02 = System.currentTimeMillis();
             logger.info("chat time01:{}", time02 - time01);
 
-            normalizeDefaultSuperAssistantAgentId(assistantChatDto);
+            if (assistantChatDto != null) {
+                assistantChatDto.setAgentId(targetAgentResolver.resolveAgentId(assistantChatDto));
+            }
 
             // 执行聊天处理：Gateway 模式下 handleGatewayMode() 内部阻塞等待 Redis 监听器完成，
             // 返回后即可安全执行 storeMessage/afterProcess，最终由 finally 关闭流
@@ -472,30 +478,6 @@ public class AssistantChatService {
     }
 
     /**
-     * 默认超级助手现在落库为真实 DIG_EMPLOYEE 资源，前端会传真实 resourceId。 但下游 Gateway 仍以 agentId=null 表示“main/超级助手”路由，因此这里统一通过
-     * resourceCode 是否以 main 结尾来识别默认超级助手，避免继续依赖历史的 agentId=-1 哨兵值。
-     *
-     * @author qin.guoquan
-     * @date 2026-05-09 15:20:00
-     */
-    private void normalizeDefaultSuperAssistantAgentId(AssistantChatDto assistantChatDto) {
-        if (assistantChatDto == null || assistantChatDto.getAgentId() == null) {
-            return;
-        }
-        SsResource ssResource = ssResourceService.findById(assistantChatDto.getAgentId());
-        if (ssResource == null) {
-            return;
-        }
-        boolean isDigitalEmployee = Constants.ResourceBizType.DIG_EMPLOYEE.equals(ssResource.getResourceBizType());
-        boolean isDefaultSuperAssistant = StringUtils.endsWith(ssResource.getResourceCode(), "main");
-        if (isDigitalEmployee && isDefaultSuperAssistant) {
-            logger.info("识别到默认超级助手，清空agentId以沿用main路由, userId={}, agentId={}, resourceCode={}",
-                CurrentUserHolder.getCurrentUserId(), assistantChatDto.getAgentId(), ssResource.getResourceCode());
-            assistantChatDto.setAgentId(null);
-        }
-    }
-
-    /**
      * 创建群聊会话并维护成员关系
      *
      * @param assistantChatDto 对话请求参数
@@ -519,6 +501,11 @@ public class AssistantChatService {
         sessionMembersDto.setEnterpriseId(CurrentUserHolder.getEnterpriseId());
         sessionMembersDto.setSessionType(SessionType.H_AS.getCode());
         sessionMembersDto.setIsDebug(assistantChatDto.getIsDebug());
+        
+        if (assistantChatDto.getIsTroubleshootSession()) {
+            sessionMembersDto.setIsDebug(1);
+        }
+
         sessionMembersDto.setSessionExts(assistantChatDto.getSessionExts());
         sessionMembersDto.setCreateTime(new Date());
         sessionMembersDto.setUpdateTime(new Date());
@@ -670,4 +657,24 @@ public class AssistantChatService {
         }
     }
 
+    private static String getNumericMsgId() {
+        try {
+            // 使用默认的 SecureRandom 实例（算法通常为 SHA1PRNG 或 NativePRNG）
+            SecureRandom random = new SecureRandom();
+            // 生成 32 位有符号整数
+            int randomInt = random.nextInt();
+            // 转换为无符号 32 位整数（0 ~ 2^32-1）
+            long unsigned = randomInt & 0xFFFFFFFFL;
+            return Long.toString(unsigned);
+        } catch (Exception e) {
+            // 降级方案：时间戳反转取前 10 位
+            String timestamp = Long.toString(System.currentTimeMillis());
+            String reversed = new StringBuilder(timestamp).reverse().toString();
+            return reversed.length() > 10 ? reversed.substring(0, 10) : reversed;
+        }
+    }
+
+    public static String getClientRequestId() {
+        return getNumericMsgId() + "_" + getNumericMsgId();
+    }
 }

@@ -58,6 +58,10 @@ export default {
   // Refine Modal
   'refineModal.title': 'Auto-Generate Configuration',
   'refineModal.regenerate': 'Regenerate',
+  'refineModal.generating': 'Generating configuration...',
+  'refineModal.waitingStream': 'Connecting to the model and preparing results',
+  'refineModal.generateFailed': 'Generation failed. Please try again.',
+  'refineModal.generateIncomplete': 'The generated result is incomplete. Please try again.',
   'refineModal.namePlaceholder': 'Enter name',
   'refineModal.character': 'Character Profile',
   'refineModal.characterPlaceholder': 'Enter character profile',
@@ -138,13 +142,11 @@ export default {
   'thirdPartyCreateModel.homeAddressRequired': 'Please enter home page address',
 
   // ModelPopover
-  'modelPopover.largeModel': 'Large Model',
   'modelPopover.QALargeModelConfiguration': 'QA Large Model Configuration',
-  'modelPopover.history': 'History',
-  'modelPopover.temperature': 'Temperature',
-  'modelPopover.maxToken': 'Max Tokens',
-  'modelPopover.prompt': 'Prompt',
-  'modelPopover.promptPlaceholder': 'Describe the image content concisely and accurately with clear hierarchy',
+  'modelPopover.mine': 'Mine',
+  'modelPopover.public': 'Public',
+  'modelPopover.noModels': 'No models available',
+  'modelPopover.confirm': 'OK',
 
   // BaseListModal
   'baseListModal.createTime': 'Create Time',
@@ -213,6 +215,7 @@ export default {
   'employeeDetail.digitalEmployeeDesc': 'Digital Employee Description',
   'employeeDetail.digitalEmployeeDescRequired': 'Please enter digital employee description',
   'employeeDetail.digitalEmployeeDescPlaceholder': 'Please enter digital employee description',
+  'employeeDetail.fieldMaxLength': '{field} cannot exceed {max} characters. Current length: {current}',
   'employeeDetail.coreAbility': 'Core Ability',
   'employeeDetail.example': 'Example',
   'employeeDetail.viewOldVersion': 'View Old Version',

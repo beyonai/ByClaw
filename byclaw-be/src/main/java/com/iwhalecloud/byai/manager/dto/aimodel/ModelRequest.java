@@ -11,4 +11,8 @@ public class ModelRequest {
     private Long tagId;
 
     private String status;
+
+    private String modelType;
+
+    private String ownerType;
 }

@@ -218,6 +218,49 @@ describe("aimodel-default-run-sync", () => {
         );
     });
 
+    it("waits for hot reload to expose a newly written default provider", async () => {
+        let diskCfg = {
+            agents: {
+                list: [{ id: "main", model: "minimax-portal/MiniMax-M2.7-highspeed" }],
+                defaults: { model: { primary: "minimax-portal/MiniMax-M2.7-highspeed" } },
+            },
+            models: {
+                providers: {} as Record<string, { api?: string; models: Array<{ id: string }> }>,
+            },
+        };
+        let currentCfg = structuredClone(diskCfg);
+        const deps = {
+            api: {
+                logger: { info: vi.fn(), warn: vi.fn() },
+                runtime: {
+                    config: {
+                        current: () => currentCfg,
+                        loadConfig: () => diskCfg,
+                        writeConfigFile: vi.fn(async (next) => {
+                            diskCfg = next as typeof diskCfg;
+                            setTimeout(() => {
+                                currentCfg = structuredClone(diskCfg);
+                            }, 20);
+                        }),
+                    },
+                },
+            },
+            redisJsonStore: {},
+            pluginConfig: { mainParentAgentId: "main" },
+            getFlushNow: () => undefined,
+        } as Parameters<typeof resolveMainDefaultAimodelOnAgentRun>[0];
+
+        const override = await resolveMainDefaultAimodelOnAgentRun(deps, "main", {
+            runtimeConfigWaitMs: 200,
+            runtimeConfigPollMs: 5,
+        });
+
+        expect(override).toEqual({
+            providerOverride: "baiying-m-10004014",
+            modelOverride: "deepseek-v4-flash",
+        });
+    });
+
     it("resolves main agent id from session key when ctx.agentId is missing", async () => {
         const deps = createDeps();
         const override = await resolveMainDefaultAimodelOnAgentRun(

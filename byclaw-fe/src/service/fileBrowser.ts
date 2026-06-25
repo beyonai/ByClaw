@@ -30,6 +30,12 @@ export interface FileBrowserMoveParams {
   targetDirectory: string;
 }
 
+export interface FileBrowserCopyParams {
+  resourceId: string | number;
+  sourcePath: string;
+  targetDirectory: string;
+}
+
 export interface FileBrowserCreateFolderParams {
   resourceId: string | number;
   path: string;
@@ -79,8 +85,16 @@ export function moveFiles(params: FileBrowserMoveParams) {
   return POST('/byaiService/fileBrowser/move', params);
 }
 
+export function copyFile(params: FileBrowserCopyParams) {
+  return POST('/byaiService/fileBrowser/copy', params);
+}
+
 export function createFolder(params: FileBrowserCreateFolderParams) {
   return POST('/byaiService/fileBrowser/createFolder', params);
+}
+
+export function ensureFolder(params: FileBrowserCreateFolderParams) {
+  return POST('/byaiService/fileBrowser/ensureFolder', params);
 }
 
 export interface FileBrowserSearchParams {

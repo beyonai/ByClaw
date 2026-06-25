@@ -1,8 +1,8 @@
-import React, { useCallback, useState, useEffect, useRef } from 'react';
-import { CloudSyncOutlined, UploadOutlined, SearchOutlined, PlusOutlined } from '@ant-design/icons';
+import React, { useCallback, useContext, useState, useEffect, useRef } from 'react';
+import { UploadOutlined, SearchOutlined, PlusOutlined } from '@ant-design/icons';
 import { useIntl, getLocale, useSelector, useNavigate, useSearchParams } from '@umijs/max';
 import type { TabsProps } from 'antd';
-import { Button, Input, Space, Tooltip, message, Tabs } from 'antd';
+import { Button, Input, Space, Tooltip, message, Tabs, Segmented } from 'antd';
 import classnames from 'classnames';
 import AntdIcon from '@/components/AntdIcon';
 import useModuleEvent from '@/hooks/useModuleEvent';
@@ -24,13 +24,15 @@ import ResourceDetail from './components/ResourceDetail';
 import AuthListDrawer from '@/pages/manager/components/AuthListDrawer';
 import UseApplyAuditDrawer from '@/pages/manager/components/UseApplyAuditDrawer';
 import DetailPanel from '@/pages/knowledgeCenter/components/DetailPanel';
-import EcosystemCollector from '@/pages/knowledgeCenter/components/EcosystemCollector';
+import SkillDetailDrawer from '@/pages/manager/components/SkillDetailDrawer/SkillDetailDrawer';
 import { useSkillDetailDrawer } from '@/pages/manager/components/SkillDetailDrawer/useSkillDetailDrawer';
 import ResourceFilter from './components/ResourceFilter';
 import { getDefaultParams } from './components/ResourceFilter';
 import ResourceList from './components/ResourceList';
 import { saveTool } from '@/pages/manager/service/DigitalEmployeeMgr';
 import { resourceBizTypeMap } from '@/constants/knowledge';
+import { SiderContentContext } from '@/layout/sider/siderContentContext';
+import useGlobal from '@/hooks/useGlobal';
 import { get, trim, intersection, isEmpty } from 'lodash';
 import styles from './index.module.less';
 
@@ -53,14 +55,27 @@ interface IResourceItem {
   canDelete?: boolean;
   canApplyUse?: boolean;
   canAuditUse?: boolean;
+  skillType?: string;
+  sourceType?: string;
+  version?: string;
+  skillUrl?: string;
+  skillPackageFormat?: string;
+  skillOriginalFilename?: string;
+  skillPackageSize?: number | string;
+  skillPackageHash?: string;
+  targetContent?: string;
+  syncStatus?: string;
+  syncError?: string;
+  lastSyncTime?: string;
 }
 
 interface Props {
   resourceType: string; // 对应资源类型
 }
 
-const getBannerUrl = (bannerList: any[], label: string) => {
-  const banner = bannerList.find((item) => item?.label === label);
+const getBannerUrl = (bannerList: any[], labels: string | string[]) => {
+  const labelList = Array.isArray(labels) ? labels : [labels];
+  const banner = bannerList.find((item) => labelList.includes(item?.label));
   return `${banner?.url ?? ''}`.trim().replace(/^`|`$/g, '').trim();
 };
 
@@ -83,13 +98,15 @@ const parseBannerList = (value: any) => {
 
 const Resources: React.FC<Props> = ({ resourceType }) => {
   const intl = useIntl();
+  const { EventEmitter } = useGlobal();
 
   // 根据 resourceType 判断资源名称
   const getResourceName = () => {
     if (resourceType === 'KG_DOC') return intl.formatMessage({ id: 'resource.knowledge' });
-    if (resourceType === 'TOOL') return intl.formatMessage({ id: 'resource.tool' });
-    if (resourceType === 'OBJECT') return intl.formatMessage({ id: 'resource.object' });
-    if (resourceType === 'VIEW') return intl.formatMessage({ id: 'resource.view' });
+    if (resourceType === 'TOOL') return intl.formatMessage({ id: 'common.tool' });
+    if (resourceType === 'OBJECT') return intl.formatMessage({ id: 'common.object' });
+    if (resourceType === 'VIEW') return intl.formatMessage({ id: 'common.viewName' });
+    if (resourceType === 'SKILL') return intl.formatMessage({ id: 'common.skill' });
     return intl.formatMessage({ id: 'resource.default' }); // 默认值
   };
   const resourceName = getResourceName();
@@ -100,14 +117,8 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [importModalOpen, setImportModalOpen] = useState(false);
-  const [collectorOpen, setCollectorOpen] = useState(false);
-  const [collectorInitialSource, setCollectorInitialSource] = useState<string>();
-  const [collectorInitialSourceUrl, setCollectorInitialSourceUrl] = useState('');
-  const [collectorInitialScope, setCollectorInitialScope] = useState('');
-  const [collectorInitialCollectMode, setCollectorInitialCollectMode] = useState('');
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [detailPanelOpen, setDetailPanelOpen] = useState(false);
-  const [resourceDetailOpen, setResourceDetailOpen] = useState(false);
   const [currentItem, setCurrentItem] = useState<IResourceItem | null>(null);
   const [catalogId, setCatalogId] = useState<string>('');
   const [searchValue, setSearchValue] = useState('');
@@ -125,6 +136,7 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
   };
 
   const [activeTab, setActiveTab] = useState<'personal' | 'enterprise'>(defaultTab());
+  const { setDetailPanel, clearDetailPanel } = useContext(SiderContentContext);
 
   useEffect(() => {
     const tabFromUrl = searchParams.get('tab');
@@ -153,11 +165,56 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
   const [brandVersion, setBrandVersion] = useState<'commercial' | 'openSource' | null>(null);
   const [bannerList, setBannerList] = useState<any[]>([]);
   const [bannerLoaded, setBannerLoaded] = useState(false);
+  const [skillCardViewMode, setSkillCardViewMode] = useState<'current' | 'new'>('current');
 
   const topLevelCatalogList = React.useMemo(() => getTopLevelCatalogs(catalogList), [catalogList]);
   const refreshList = useCallback(() => {
     setRefreshKey((prevKey) => prevKey + 1);
   }, []);
+
+  const notifySiderResourceListReload = useCallback(() => {
+    EventEmitter.emit('beyond-resourceList-resourceType-reload', {
+      resourceType,
+      resetSkillFilters: false,
+      skipResourceCenterRefresh: true,
+    });
+  }, [EventEmitter, resourceType]);
+
+  useEffect(() => {
+    const handleResourceTypeReload = (
+      changedResourceType?:
+        | string
+        | { resourceType?: string; resetSkillFilters?: boolean; skipResourceCenterRefresh?: boolean }
+    ) => {
+      if (typeof changedResourceType !== 'string' && changedResourceType?.skipResourceCenterRefresh) {
+        return;
+      }
+      const nextResourceType =
+        typeof changedResourceType === 'string' ? changedResourceType : changedResourceType?.resourceType;
+      if (nextResourceType !== resourceType) {
+        return;
+      }
+      if (
+        resourceType === 'SKILL' &&
+        (typeof changedResourceType === 'string' || changedResourceType?.resetSkillFilters !== false)
+      ) {
+        const nextSearchParams = new URLSearchParams(searchParams);
+        nextSearchParams.set('tab', 'personal');
+        setCatalogId('');
+        setSearchValue('');
+        setDebouncedSearchValue('');
+        setDropdownParam(getDefaultParams());
+        setActiveTab('personal');
+        setSearchParams(nextSearchParams);
+      }
+      refreshList();
+    };
+
+    EventEmitter.on('beyond-resourceList-resourceType-reload', handleResourceTypeReload);
+    return () => {
+      EventEmitter.off('beyond-resourceList-resourceType-reload', handleResourceTypeReload);
+    };
+  }, [EventEmitter, refreshList, resourceType, searchParams, setSearchParams]);
 
   // 防抖定时器
   const debounceTimer = useRef<NodeJS.Timeout | null>(null);
@@ -204,18 +261,6 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
   }, [resourceType]);
 
   useEffect(() => {
-    if (resourceType !== 'KG_DOC' || searchParams.get('ecosystem') !== '1') {
-      return;
-    }
-    setCollectorInitialSource(searchParams.get('source') || undefined);
-    setCollectorInitialSourceUrl(searchParams.get('sourceUrl') || '');
-    setCollectorInitialScope(searchParams.get('scope') || '');
-    setCollectorInitialCollectMode(searchParams.get('collectMode') || '');
-    setActiveTab('personal');
-    setCollectorOpen(true);
-  }, [resourceType, searchParams]);
-
-  useEffect(() => {
     try {
       queryFixedEntryOperationCapability()
         .then((res: any) => {
@@ -248,12 +293,31 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
     if (resourceType === 'OBJECT') {
       return fixedEntryCapability.canImportEnterpriseObject;
     }
+    if (resourceType === 'SKILL') {
+      return fixedEntryCapability.canImportEnterpriseSkill === true;
+    }
     return true;
   }, [activeTab, fixedEntryCapability, resourceType]);
 
   const handleDetail = useCallback(
     async (item: IResourceItem) => {
       const { resourceBizType, resourceId, resourceSourcePkId } = item;
+
+      if (resourceBizType === 'SKILL') {
+        if (resourceId) {
+          setDetailPanel?.(
+            <SkillDetailDrawer
+              resourceId={resourceId}
+              title={intl.formatMessage({ id: 'common.skill' })}
+              open
+              panel
+              onClose={() => clearDetailPanel?.()}
+            />,
+            { width: 350 }
+          );
+        }
+        return;
+      }
 
       if (
         resourceBizType &&
@@ -320,10 +384,20 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
         return;
       }
 
-      setCurrentItem(item);
-      setResourceDetailOpen(true);
+      setDetailPanel?.(
+        <ResourceDetail
+          visible
+          panel
+          resourceId={item.resourceId}
+          item={item}
+          resourceName={resourceName}
+          onCancel={() => clearDetailPanel?.()}
+          onEdit={() => {}}
+        />,
+        { width: 350 }
+      );
     },
-    [activeTab, intl, navigate, showSkillDetailDrawer]
+    [activeTab, clearDetailPanel, intl, navigate, resourceName, resourceType, setDetailPanel, showSkillDetailDrawer]
   );
 
   const handleEditItem = (item: IResourceItem) => {
@@ -360,6 +434,17 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
 
   const tabBarExtraContent = (
     <Space>
+      {resourceType === 'SKILL' && (
+        <Segmented
+          size="small"
+          value={skillCardViewMode}
+          options={[
+            { label: intl.formatMessage({ id: 'resource.skillView.current' }), value: 'current' },
+            { label: intl.formatMessage({ id: 'resource.skillView.new' }), value: 'new' },
+          ]}
+          onChange={(value) => setSkillCardViewMode(value as 'current' | 'new')}
+        />
+      )}
       <ResourceFilter
         resourceType={resourceType}
         onOk={(param: any) => {
@@ -390,32 +475,6 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
           setDebouncedSearchValue(searchValue);
         }}
       />
-
-      {resourceType === 'KG_DOC' && (
-        <Tooltip
-          title={
-            activeTab === 'enterprise' && !canImportCurrentEnterpriseResource ? noPermissionDisabledTip : undefined
-          }
-        >
-          <span>
-            <Button
-              icon={<CloudSyncOutlined />}
-              disabled={activeTab === 'enterprise' && !canImportCurrentEnterpriseResource}
-              onClick={() => {
-                if (activeTab === 'enterprise' && !canImportCurrentEnterpriseResource) {
-                  return;
-                }
-                setCollectorInitialSource(undefined);
-                setCollectorInitialSourceUrl('');
-                setCollectorInitialScope('');
-                setCollectorOpen(true);
-              }}
-            >
-              {intl.formatMessage({ id: 'knowledgeCenter.ecosystem.entry' })}
-            </Button>
-          </span>
-        </Tooltip>
-      )}
 
       {brandVersion === 'openSource' && resourceType === 'KG_DOC' && (activeTab === 'personal' || isAdmin) && (
         <Tooltip title={!knowledgeCapability?.allowKnowledgeBaseCreate ? knowledgeCapabilityDisabledTip : undefined}>
@@ -484,19 +543,27 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
   const defaultBannerUrl = getRuntimeActualUrl(isEN ? '/beyond/market-en.png' : '/beyond/market.png');
   const bannerLabel = React.useMemo(() => {
     if (resourceType === 'KG_DOC') {
-      return activeTab === 'personal' ? '个人知识' : '企业知识';
+      return activeTab === 'personal'
+        ? [intl.formatMessage({ id: 'resource.banner.personalKnowledge' }), '个人知识']
+        : [intl.formatMessage({ id: 'resource.banner.enterpriseKnowledge' }), '企业知识'];
     }
     if (resourceType === 'TOOL') {
-      return activeTab === 'personal' ? '个人工具' : '企业工具';
+      return activeTab === 'personal'
+        ? [intl.formatMessage({ id: 'resource.banner.personalTool' }), '个人工具']
+        : [intl.formatMessage({ id: 'resource.banner.enterpriseTool' }), '企业工具'];
     }
     if (resourceType === 'VIEW') {
-      return activeTab === 'personal' ? '个人视图' : '企业视图';
+      return activeTab === 'personal'
+        ? [intl.formatMessage({ id: 'resource.banner.personalView' }), '个人视图']
+        : [intl.formatMessage({ id: 'resource.banner.enterpriseView' }), '企业视图'];
     }
     if (resourceType === 'OBJECT') {
-      return activeTab === 'personal' ? '个人对象' : '企业对象';
+      return activeTab === 'personal'
+        ? [intl.formatMessage({ id: 'resource.banner.personalObject' }), '个人对象']
+        : [intl.formatMessage({ id: 'resource.banner.enterpriseObject' }), '企业对象'];
     }
-    return '';
-  }, [activeTab, resourceType]);
+    return [];
+  }, [activeTab, intl, resourceType]);
   const customBannerUrl = getBannerUrl(bannerList, bannerLabel);
   const bannerUrl = customBannerUrl ? getRuntimeActualUrl(customBannerUrl) : defaultBannerUrl;
 
@@ -569,6 +636,7 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
           onApplyUse={handleApplyUse}
           onAuditUse={handleAuditUse}
           onRefresh={refreshList}
+          skillCardViewMode={skillCardViewMode}
         />
       </div>
       <ResourceImport
@@ -585,19 +653,7 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
         onSuccess={() => {
           setImportModalOpen(false);
           refreshList();
-        }}
-      />
-      <EcosystemCollector
-        open={collectorOpen}
-        ownerType={activeTab}
-        catalogId={catalogId}
-        catalogList={catalogList}
-        initialSource={collectorInitialSource}
-        initialSourceUrl={collectorInitialSourceUrl}
-        initialScope={collectorInitialScope}
-        initialCollectMode={collectorInitialCollectMode}
-        onCancel={() => {
-          setCollectorOpen(false);
+          notifySiderResourceListReload();
         }}
       />
       <ResourceEdit
@@ -617,6 +673,7 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
             await updateResource(values);
             message.success(intl.formatMessage({ id: 'common.saveSuccess' }));
             refreshList();
+            notifySiderResourceListReload();
           } catch (error: any) {
             console.error('保存失败:', error);
             // 优先透传后端错误信息（msg / message / 字符串），缺失时再回退到通用文案
@@ -683,20 +740,6 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
           createType={currentItem?.resourceId ? 'import' : 'create'}
           catalogId={catalogId}
           catalogList={catalogList}
-        />
-      )}
-      {resourceDetailOpen && (
-        <ResourceDetail
-          visible={resourceDetailOpen}
-          resourceId={currentItem?.resourceId}
-          item={currentItem}
-          resourceType={resourceType}
-          resourceName={resourceName}
-          onCancel={() => {
-            setResourceDetailOpen(false);
-            setCurrentItem(null);
-          }}
-          onEdit={() => {}}
         />
       )}
       {skillDetailDrawerHolder}

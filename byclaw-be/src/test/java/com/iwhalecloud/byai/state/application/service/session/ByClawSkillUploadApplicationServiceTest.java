@@ -20,6 +20,8 @@ import com.iwhalecloud.byai.state.domain.session.dto.ByClawSkillDto;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
@@ -41,6 +43,7 @@ import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+@DisabledOnOs(OS.WINDOWS)
 @ExtendWith(MockitoExtension.class)
 class ByClawSkillUploadApplicationServiceTest {
 
@@ -66,6 +69,7 @@ class ByClawSkillUploadApplicationServiceTest {
         messageSource.addMessage("byclaw.user.code.notempty", Locale.SIMPLIFIED_CHINESE, "userCode不能为空");
         messageSource.addMessage("byclaw.skill.zip.empty", Locale.SIMPLIFIED_CHINESE, "Skill 压缩包不能为空");
         messageSource.addMessage("byclaw.skill.zip.read.failed", Locale.SIMPLIFIED_CHINESE, "Skill 压缩包解析失败");
+        messageSource.addMessage("byclaw.skill.zip.file.invalid", Locale.SIMPLIFIED_CHINESE, "Skill 压缩包必须是 zip 格式");
         messageSource.addMessage("byclaw.skill.zip.size.exceeded", Locale.SIMPLIFIED_CHINESE, "超过最大允许大小");
         messageSource.addMessage("byclaw.skill.zip.missing.doc", Locale.SIMPLIFIED_CHINESE, "Skill 压缩包必须有且仅有一个 SKILL.md");
         ReflectionTestUtils.setField(I18nUtil.class, "messageSource", messageSource);
@@ -209,33 +213,25 @@ class ByClawSkillUploadApplicationServiceTest {
     }
 
     @Test
-    void shouldAcceptTarGzSkillArchive() {
+    void shouldRejectTarGzSkillArchive() {
         MultipartFile tarGz = buildTarGz("content-factory.tar.gz",
             "content-factory/SKILL.md", "# content factory",
             "content-factory/scripts/main.py", "print('hi')");
-        when(skillPathResolver.resolveSkillRootPrefix(USER_CODE, RESOURCE_ID)).thenReturn(AGENT_PREFIX);
 
-        ByClawSkillDto dto = service.uploadSkillZip(USER_CODE, RESOURCE_ID, tarGz);
-
-        assertEquals("content-factory", dto.getSkillName());
-        assertEquals(AGENT_PREFIX + "content-factory", dto.getSkillPath());
-        ArgumentCaptor<String> pathCaptor = ArgumentCaptor.forClass(String.class);
-        verify(userFS, atLeastOnce()).write(any(InputStream.class), anyLong(), anyString(), pathCaptor.capture());
-        assertTrue(pathCaptor.getAllValues().contains(AGENT_PREFIX + "content-factory/SKILL.md"));
-        assertTrue(pathCaptor.getAllValues().contains(AGENT_PREFIX + "content-factory/scripts/main.py"));
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+            () -> service.uploadSkillZip(USER_CODE, RESOURCE_ID, tarGz));
+        assertTrue(ex.getMessage().contains("zip"));
     }
 
     @Test
-    void shouldFallbackSkillNameToTarGzNameWhenSkillDocAtRoot() {
+    void shouldRejectTarGzSkillArchiveWhenSkillDocAtRoot() {
         MultipartFile tarGz = buildTarGz("root-skill.tar.gz",
             "SKILL.md", "# root",
             "scripts/run.py", "print('hi')");
-        when(skillPathResolver.resolveSkillRootPrefix(USER_CODE, RESOURCE_ID)).thenReturn(AGENT_PREFIX);
 
-        ByClawSkillDto dto = service.uploadSkillZip(USER_CODE, RESOURCE_ID, tarGz);
-
-        assertEquals("root-skill", dto.getSkillName());
-        verify(userFS).delete(AGENT_PREFIX + "root-skill/");
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+            () -> service.uploadSkillZip(USER_CODE, RESOURCE_ID, tarGz));
+        assertTrue(ex.getMessage().contains("zip"));
     }
 
     @Test

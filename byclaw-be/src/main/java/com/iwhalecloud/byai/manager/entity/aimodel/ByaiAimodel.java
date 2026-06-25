@@ -8,8 +8,7 @@ import java.util.Date;
 import lombok.Data;
 
 /**
- * 模型定义表 byai_aimodel
- * 与接口文档 Model 对应，用于模型管理（列表/编辑/调试/启停/详情）
+ * 模型定义表 byai_aimodel 与接口文档 Model 对应，用于模型管理（列表/编辑/调试/启停/详情）
  *
  * @author system
  */
@@ -31,6 +30,9 @@ public class ByaiAimodel implements Serializable {
 
     /** 模型编号，如 gpt3.5；接口 modelCode */
     private String modelNo;
+
+    /** 模型协议：OpenAI / Anthropic */
+    private String modelProtocol;
 
     /** 模型地址；接口 apiEndpoint */
     private String url;
@@ -59,12 +61,17 @@ public class ByaiAimodel implements Serializable {
     /** 入参模板 */
     private String inparamTemplate;
 
+    /** 模型归属: PUBLIC(公共) / PERSONAL(个人) */
+    private String ownerType;
+
+    /** 模型来源: null(用户创建) / TOKEN_SERVER(系统分配) */
+    private String sourceType;
+
     /** 创建人ID */
     private Long createBy;
 
     /** 创建时间（表仅有此时间字段；接口 updatedAt 可由 create_time 或 in_params 提供） */
     private Date createTime;
-
 
     /**
      * 1 是默认的， 0 是非默认的

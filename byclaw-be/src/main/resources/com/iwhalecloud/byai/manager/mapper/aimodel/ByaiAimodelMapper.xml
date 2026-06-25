@@ -18,6 +18,7 @@
         <result column="in_params" property="inParams"/>
         <result column="inparam_template" property="inparamTemplate"/>
         <result column="create_by" property="createBy"/>
+        <result column="owner_type" property="ownerType"/>
         <result column="create_time" property="createTime"/>
         <result column="is_default" property="isDefault"/>
     </resultMap>
@@ -26,7 +27,7 @@
     <sql id="Base_Column_List">
         model_id, model_type, model_name, model_no, url, ori_url, auth_token,
         status, is_support_chart, is_deepthink, max_content_token, in_params, inparam_template,
-        create_by, create_time
+        create_by, owner_type, create_time
     </sql>
 
     <!-- 分页列表用：byai_aimodel 别名 a，与 byai_tag_relation（tag_id=3）左关联以产出 is_default -->
@@ -61,6 +62,12 @@
                 <bind name="systemPattern" value="'%' + system + '%'"/>
                 AND a.in_params LIKE #{systemPattern}
             </if>
+            <if test="createBy != null">
+                AND a.create_by = #{createBy}
+            </if>
+            <if test="ownerType != null and ownerType != ''">
+                AND a.owner_type = #{ownerType}
+            </if>
         </where>
     </sql>
 
@@ -69,7 +76,7 @@
         SELECT
             distinct a.model_id, a.model_type, a.model_name, a.model_no, a.url, a.ori_url, a.auth_token,
             a.status, a.is_support_chart, a.is_deepthink, a.max_content_token, a.in_params, a.inparam_template,
-            a.create_by, a.create_time,
+            a.create_by, a.owner_type, a.create_time,
             CASE WHEN d.obj_id IS NOT NULL THEN 1 ELSE 0 END AS is_default
         FROM byai_aimodel a
         LEFT JOIN  byai_tag_relation d
@@ -125,14 +132,20 @@
         and
             d.obj_type = 'AI_MODEL'
         and
-            d.tag_id = 3
+            d.tag_id = 1
         <where>
             and b.obj_type = 'AI_MODEL'
             <if test="status != null and status != ''">
                 AND a.status = #{status}
             </if>
+            <if test="modelType != null and modelType != ''">
+                AND a.model_type = #{modelType}
+            </if>
             <if test="tagId != null and tagId != ''">
                 AND b.tag_id = #{tagId}
+            </if>
+            <if test="ownerType != null and ownerType != ''">
+                AND a.owner_type = #{ownerType}
             </if>
         </where>
 
@@ -165,16 +178,64 @@
         and
         d.obj_type = 'AI_MODEL'
         and
-        d.tag_id = 3
+        d.tag_id = 1
         <where>
             and b.obj_type = 'AI_MODEL'
             <if test="status != null and status != ''">
                 AND a.status = #{status}
             </if>
+            <if test="modelType != null and modelType != ''">
+                AND a.model_type = #{modelType}
+            </if>
             <if test="tagId != null and tagId != ''">
                 AND b.tag_id = #{tagId}
+            </if>
+            <if test="ownerType != null and ownerType != ''">
+                AND a.owner_type = #{ownerType}
             </if>
         </where>
 
     </select>
+
+    <select id="listDefaultAiModel" resultMap="BaseResultMap">
+        SELECT
+            a.model_id,
+            a.model_type,
+            a.model_name,
+            a.model_no,
+            a.url,
+            a.ori_url,
+            a.auth_token,
+            a.status,
+            a.is_support_chart,
+            a.is_deepthink,
+            a.max_content_token,
+            a.in_params,
+            a.create_by,
+            a.create_time,
+            a.inparam_template,
+            a.model_protocol
+        FROM byai_aimodel a
+        <where>
+            <if test="tagId != null">
+                AND a.model_id IN (
+                    SELECT obj_id
+                    FROM byai_tag_relation
+                    WHERE obj_type = 'AI_MODEL'
+                      AND tag_id = #{tagId}
+                )
+            </if>
+            <if test="status != null and status != ''">
+                AND a.status = #{status}
+            </if>
+            <if test="modelType != null and modelType != ''">
+                AND a.model_type = #{modelType}
+            </if>
+            <if test="modelProtocol != null and modelProtocol != ''">
+                AND a.model_protocol = #{modelProtocol}
+            </if>
+        </where>
+    </select>
+
+
 </mapper>

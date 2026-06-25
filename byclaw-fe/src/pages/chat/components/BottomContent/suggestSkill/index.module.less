@@ -48,8 +48,8 @@
   cursor: pointer;
   display: flex;
   align-items: flex-start;
-  gap: 12px;
-  padding: 16px;
+  gap: 8px;
+  padding: 12px;
   // 填满 Col 高度，使同一行卡片等高
   height: 100%;
   background: #fff;
@@ -82,11 +82,44 @@
   }
 }
 
+.skillDefaultAvatar {
+  position: relative;
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  overflow: hidden;
+  display: flex;
+  align-items: flex-end;
+  padding: 7px;
+  color: rgba(20, 22, 26, 0.7);
+  background: radial-gradient(circle at 74% 22%, rgba(255, 255, 255, 0.78) 0, rgba(255, 255, 255, 0) 34%),
+    linear-gradient(145deg, #fce4c8 0%, #f7f0ff 48%, #d8f5e8 100%);
+  box-shadow: inset 0 0 0 1px rgba(20, 22, 26, 0.04);
+
+  span {
+    position: relative;
+    z-index: 1;
+    font-size: 11px;
+    line-height: 14px;
+    font-weight: 700;
+  }
+
+  .skillDefaultAvatarOrb {
+    position: absolute;
+    top: 9px;
+    right: 7px;
+    width: 24px;
+    height: 24px;
+    border-radius: 999px;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(255, 172, 116, 0.42));
+  }
+}
+
 // 图标块：圆角方形底色 + 居中图标
 .iconBox {
   // flex: 0 0 auto;
-  width: 36px;
-  height: 36px;
+  // width: 42px;
+  // height: 42px;
   // display: flex;
   // align-items: center;
   // justify-content: center;
@@ -95,9 +128,9 @@
   // line-height: 1;
   // background: #f5f5f7;
   // color: #1d1d1f;
-  .defaultHeaderIconIcon {
-    font-size: 32px;
-  }
+  // .defaultHeaderIconIcon {
+  //   font-size: 32px;
+  // }
 }
 
 .content {

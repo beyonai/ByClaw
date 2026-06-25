@@ -52,6 +52,8 @@ public interface SsSandboxRecordMapper {
     List<SsSandboxRecord> selectRunningByUserAndSandboxType(@Param("userCode") String userCode,
                                                             @Param("sandboxType") String sandboxType);
 
+    List<SsSandboxRecord> selectRunningAutoscaleRecords();
+
     /**
      * 更新沙箱状态为已释放
      *
@@ -82,6 +84,47 @@ public interface SsSandboxRecordMapper {
                             @Param("lastRenewAt") Date lastRenewAt,
                             @Param("nextRenewAt") Date nextRenewAt,
                             @Param("lastAccessTime") Date lastAccessTime,
+                            @Param("lockVersion") Integer lockVersion);
+
+    int updateResizeSuccess(@Param("id") Long id,
+                            @Param("sandboxId") String sandboxId,
+                            @Param("endpoint") String endpoint,
+                            @Param("gatewayToken") String gatewayToken,
+                            @Param("profileKey") String profileKey,
+                            @Param("resourceRequests") String resourceRequests,
+                            @Param("resourceLimits") String resourceLimits,
+                            @Param("resizeStatus") String resizeStatus,
+                            @Param("lastResizeAt") Date lastResizeAt,
+                            @Param("lastResizeReason") String lastResizeReason,
+                            @Param("lastResizeDurationMs") Long lastResizeDurationMs,
+                            @Param("lastResizeSuccess") Integer lastResizeSuccess,
+                            @Param("lastResizeFromProfile") String lastResizeFromProfile,
+                            @Param("lastResizeToProfile") String lastResizeToProfile,
+                            @Param("lastResizeError") String lastResizeError,
+                            @Param("lockVersion") Integer lockVersion);
+
+    int claimResize(@Param("id") Long id,
+                    @Param("fromProfileKey") String fromProfileKey,
+                    @Param("toProfileKey") String toProfileKey,
+                    @Param("resizeStatus") String resizeStatus,
+                    @Param("lastResizeAt") Date lastResizeAt,
+                    @Param("lastResizeReason") String lastResizeReason,
+                    @Param("lastResizeSuccess") Integer lastResizeSuccess,
+                    @Param("lastResizeFromProfile") String lastResizeFromProfile,
+                    @Param("lastResizeToProfile") String lastResizeToProfile,
+                    @Param("lastResizeError") String lastResizeError,
+                    @Param("processingStaleBefore") Date processingStaleBefore,
+                    @Param("lockVersion") Integer lockVersion);
+
+    int updateResizeSummary(@Param("id") Long id,
+                            @Param("resizeStatus") String resizeStatus,
+                            @Param("lastResizeAt") Date lastResizeAt,
+                            @Param("lastResizeReason") String lastResizeReason,
+                            @Param("lastResizeDurationMs") Long lastResizeDurationMs,
+                            @Param("lastResizeSuccess") Integer lastResizeSuccess,
+                            @Param("lastResizeFromProfile") String lastResizeFromProfile,
+                            @Param("lastResizeToProfile") String lastResizeToProfile,
+                            @Param("lastResizeError") String lastResizeError,
                             @Param("lockVersion") Integer lockVersion);
 
     int updateStatusToFailed(@Param("id") Long id,
@@ -198,6 +241,8 @@ public interface SsSandboxRecordMapper {
     SsSandboxRecord selectLatestBySandboxId(@Param("userCode") String userCode,
                                             @Param("sandboxType") String sandboxType,
                                             @Param("sandboxId") String sandboxId);
+
+    SsSandboxRecord selectLatestBySandboxIdAnyUser(@Param("sandboxId") String sandboxId);
 
     int updateAutoRelease(@Param("id") Long id,
                           @Param("autoRelease") Integer autoRelease,

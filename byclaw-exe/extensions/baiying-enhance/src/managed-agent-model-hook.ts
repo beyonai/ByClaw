@@ -9,6 +9,8 @@ import {
     isManagedModelRegisteredInConfig,
     parseModelPrimaryRef,
 } from "./agent-session-model-reconcile.js";
+import { resolveChannelSessionIdForTool } from "./channel-session-resolve.js";
+import { setActiveLangfuseSessionId } from "./langfuse-observation.js";
 import { resolveAgentIdFromSessionKey } from "./session-agent-id.js";
 import { MANAGED_AGENT_PREFIX } from "./types.js";
 
@@ -103,6 +105,40 @@ export function buildManagedAgentRuntimeModelSystemContext(params: {
     "- If the user asks what model you are using, answer from this runtime fact.",
     "- Ignore earlier transcript self-identification if it names a different model; it may be stale after a live platform model switch.",
   ].join("\n");
+}
+
+export function resolveLangfuseSessionIdFromHookContext(ctx: {
+  sessionId?: string;
+  sessionKey?: string;
+}): string | undefined {
+  const sessionKey = ctx.sessionKey?.trim();
+  if (sessionKey) {
+    const resolved = resolveChannelSessionIdForTool(ctx, sessionKey).sessionId;
+    if (resolved) {
+      return resolved;
+    }
+    const directMarker = ":direct:";
+    const directIndex = sessionKey.lastIndexOf(directMarker);
+    if (directIndex >= 0) {
+      const directSessionId = sessionKey.slice(directIndex + directMarker.length).trim();
+      if (directSessionId) {
+        return directSessionId;
+      }
+    }
+  }
+  const sessionId = ctx.sessionId?.trim();
+  return sessionId || undefined;
+}
+
+async function attachLangfuseSessionToActiveSpan(ctx: {
+  sessionId?: string;
+  sessionKey?: string;
+  trace?: unknown;
+}): Promise<void> {
+  const sessionId = resolveLangfuseSessionIdFromHookContext(ctx);
+  if (sessionId) {
+    await setActiveLangfuseSessionId(sessionId);
+  }
 }
 
 export function shouldDeferManagedAgentModelOverrideForRun(params: {
@@ -368,6 +404,7 @@ export function registerManagedAgentModelHooks(
   });
 
   api.on("before_model_resolve", async (_event, ctx) => {
+    await attachLangfuseSessionToActiveSpan(ctx);
     const agentId = ctx.agentId?.trim() || resolveAgentIdFromSessionKey(ctx.sessionKey);
     if (aimodelRunSync) {
       const mainDefault = await resolveMainDefaultAimodelOnAgentRun(aimodelRunSync, agentId);
@@ -415,6 +452,7 @@ export function registerManagedAgentModelHooks(
   });
 
   api.on("before_prompt_build", async (_event, ctx) => {
+    await attachLangfuseSessionToActiveSpan(ctx);
     const agentId = ctx.agentId?.trim() || resolveAgentIdFromSessionKey(ctx.sessionKey);
     const managedContext = buildManagedAgentRuntimeModelSystemContext({
       cfg: currentRuntimeConfig(api),

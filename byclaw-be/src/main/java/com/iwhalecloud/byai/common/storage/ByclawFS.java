@@ -43,6 +43,10 @@ public abstract class ByclawFS {
         return objectStorage.get(buildLocation(filePath));
     }
 
+    public FileMetadata metadata(String filePath) {
+        return objectStorage.metadata(buildLocation(filePath));
+    }
+
     public Boolean delete(String filePath) {
         String normalizedPath = normalizeInputPath(filePath);
         if (normalizedPath.endsWith("/")) {

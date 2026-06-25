@@ -306,3 +306,49 @@ export function buildThinkingEndText(language: string | undefined, duration: num
         ? `\n\nThinking end after ${(duration / 1000).toFixed(1)}s`
         : `\n\n思考结束，耗时${(duration / 1000).toFixed(1)}秒`;
 }
+
+export function buildCompactionNoticeText(language: string | undefined, params: {
+    phase: "start" | "end";
+    completed?: boolean;
+    willRetry?: boolean;
+}): string {
+    if (isEnglishLanguage(language)) {
+        if (params.phase === "start") {
+            return "Automatic context compression started.";
+        }
+        return "Automatic context compression completed.";
+    }
+    if (params.phase === "start") {
+        return "上下文自动压缩开始";
+    }
+    return "上下文自动压缩完成";
+}
+
+export function buildMaxTokenErrorText(language: string | undefined) {
+    if (isEnglishLanguage(language)) {
+        return "Due to reaching the maximum output limit of the model, the answer was truncated. Raise the maxToken parameter of the model and try again.";
+    }
+    return "因达到模型单次输出上限被截断，未能完整生成。请尝试调高该模型的**maxToken**参数后重试。";
+}
+
+/**
+ * 上下文溢出型 length 截断时，自动续跑前给用户的可见提示（落思考流标题区）。
+ * 区别于 maxToken：这里是上下文窗口满，系统会自动压缩历史并继续，无需用户操作。
+ */
+export function buildContextOverflowContinueText(language: string | undefined) {
+    if (isEnglishLanguage(language)) {
+        return "The conversation reached the context-window limit, so this turn was interrupted. Compacting the history automatically and continuing now — please wait, no action needed.";
+    }
+    return "对话已达到上下文窗口上限，本轮被中断。系统正在自动整理(压缩)历史并继续，请稍候，无需任何操作。";
+}
+
+/**
+ * 自动续跑后上下文仍然溢出（已达续跑次数上限）时的终态告知（落正文）。
+ * 明确此情形调高 maxToken 无效，引导用户精简问题或新开会话。
+ */
+export function buildContextOverflowText(language: string | undefined) {
+    if (isEnglishLanguage(language)) {
+        return "The context is still too large to continue even after automatic compaction. Please simplify your question or start a new conversation.";
+    }
+    return "自动整理(压缩)后上下文仍然过大，无法继续生成。请精简问题或新开一个会话。";
+}

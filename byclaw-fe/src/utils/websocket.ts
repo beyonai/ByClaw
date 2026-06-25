@@ -2,7 +2,7 @@
  * WebSocket 管理工具类 - 全局单例模式
  */
 
-import { getToken } from './auth';
+import { clearToken, getToken, loginRedirect } from './auth';
 
 interface WebSocketMessage {
   type: string;
@@ -39,6 +39,10 @@ class WebSocketManager {
   private connectionSeq = 0;
 
   private activeConnectionId = 0;
+
+  private redirectedForExpiredToken = false;
+
+  private connectionToken: string | null = null;
 
   private handleVisibilityChange = (): void => {
     if (document.visibilityState === 'visible') {
@@ -106,17 +110,21 @@ class WebSocketManager {
    */
   public init(): void {
     this.manuallyDisconnected = false;
-    if (this.ws || this.isConnecting) {
+
+    const token = this.getConnectionToken();
+    if (!token) {
       return;
     }
 
-    const token = getToken();
-    if (!token) {
-      console.warn('Token 不存在，无法建立 WebSocket 连接');
-      return;
+    if (this.ws || this.isConnecting) {
+      if (this.connectionToken === token) {
+        return;
+      }
+      this.resetConnectionState();
     }
 
     this.isConnecting = true;
+    this.connectionToken = token;
 
     try {
       // 创建 WebSocket 连接
@@ -243,6 +251,9 @@ class WebSocketManager {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       return Promise.resolve();
     }
+    if (!this.getConnectionToken()) {
+      return Promise.reject(new Error('WebSocket token unavailable'));
+    }
     this.init();
     return new Promise((resolve, reject) => {
       let timer: ReturnType<typeof setTimeout>;
@@ -299,6 +310,7 @@ class WebSocketManager {
   public disconnect(): void {
     this.manuallyDisconnected = true;
     this.activeConnectionId = 0;
+    this.connectionToken = null;
     this.stopHeartbeat();
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
@@ -334,6 +346,68 @@ class WebSocketManager {
     }
     this.init();
   };
+
+  private getConnectionToken(): string | null {
+    const token = getToken();
+    if (!token) {
+      console.warn('Token 不存在，无法建立 WebSocket 连接');
+      return null;
+    }
+    if (this.isJwtExpired(token)) {
+      this.handleExpiredToken();
+      return null;
+    }
+    this.redirectedForExpiredToken = false;
+    return token;
+  }
+
+  private isJwtExpired(token: string): boolean {
+    try {
+      const payload = token.split('.')[1];
+      if (!payload) {
+        return false;
+      }
+      const normalizedPayload = payload.replace(/-/g, '+').replace(/_/g, '/');
+      const paddedPayload = normalizedPayload.padEnd(
+        normalizedPayload.length + ((4 - (normalizedPayload.length % 4)) % 4),
+        '='
+      );
+      const payloadBytes = Uint8Array.from(window.atob(paddedPayload), (char) => char.charCodeAt(0));
+      const payloadJson = new TextDecoder().decode(payloadBytes);
+      const { exp } = JSON.parse(payloadJson);
+      return typeof exp === 'number' && exp * 1000 <= Date.now();
+    } catch (error) {
+      console.warn('Token 过期时间解析失败，继续尝试建立 WebSocket 连接:', error);
+      return false;
+    }
+  }
+
+  private handleExpiredToken(): void {
+    if (this.redirectedForExpiredToken) {
+      return;
+    }
+    this.redirectedForExpiredToken = true;
+    this.manuallyDisconnected = true;
+    this.connectionToken = null;
+    this.rejectConnectWaiters(new Error('Token expiration'));
+    clearToken();
+    loginRedirect({ openLoginModal: '1' });
+  }
+
+  private resetConnectionState(): void {
+    this.activeConnectionId = 0;
+    this.connectionToken = null;
+    this.stopHeartbeat();
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    if (this.ws) {
+      this.ws.close();
+      this.ws = null;
+    }
+    this.isConnecting = false;
+  }
 
   /**
    * 重连调度

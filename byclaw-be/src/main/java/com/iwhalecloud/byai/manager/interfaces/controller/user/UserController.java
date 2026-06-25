@@ -1,7 +1,9 @@
 package com.iwhalecloud.byai.manager.interfaces.controller.user;
 
 import com.iwhalecloud.byai.manager.application.service.user.UserApplicationService;
+import com.iwhalecloud.byai.manager.application.service.user.UserTokenQuotaApplicationService;
 import com.iwhalecloud.byai.manager.entity.superassist.SuasSuperassist;
+import com.iwhalecloud.byai.manager.entity.users.UserTokenQuota;
 import com.iwhalecloud.byai.manager.domain.superassist.service.SuasSuperassistService;
 import com.iwhalecloud.byai.common.qo.QueryObject;
 import com.iwhalecloud.byai.manager.qo.users.SearchUserQo;
@@ -38,6 +40,9 @@ public class UserController {
 
     @Autowired
     protected SuasSuperassistService suasSuperassistService;
+
+    @Autowired
+    private UserTokenQuotaApplicationService userTokenQuotaApplicationService;
 
     /**
      * 新增用户
@@ -208,6 +213,31 @@ public class UserController {
     @RequestMapping(value = "/batchUpdateUserPhones", method = RequestMethod.GET)
     public ResponseUtil batchUpdateUserPhones() {
         return userApplicationService.batchUpdateUserPhones();
+    }
+
+    /**
+     * 查询用户Token额度配置（同时返回系统默认值）
+     */
+    @RequestMapping(value = "/getTokenQuota", method = RequestMethod.POST)
+    public ResponseUtil getTokenQuota(@RequestBody Map<String, Object> params) {
+        Long userId = params.get("userId") != null ? Long.valueOf(params.get("userId").toString()) : null;
+        UserTokenQuota quota = userTokenQuotaApplicationService.getUserQuota(userId);
+        Map<String, Object> result = new java.util.HashMap<>();
+        result.put("quota", quota);
+        result.put("systemDefault", userTokenQuotaApplicationService.getSystemDefaultQuota());
+        return ResponseUtil.success(result);
+    }
+
+    /**
+     * 分配用户Token额度
+     */
+    @RequestMapping(value = "/assignTokenQuota", method = RequestMethod.POST)
+    public ResponseUtil assignTokenQuota(@RequestBody Map<String, Object> params) {
+        Long userId = params.get("userId") != null ? Long.valueOf(params.get("userId").toString()) : null;
+        Long monthlyQuotaLimit = params.get("monthlyQuotaLimit") != null ? Long.valueOf(params.get("monthlyQuotaLimit").toString()) : null;
+        String remark = params.get("remark") != null ? params.get("remark").toString() : null;
+        userTokenQuotaApplicationService.assignQuota(userId, monthlyQuotaLimit, remark);
+        return ResponseUtil.success(true);
     }
 
 }

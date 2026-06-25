@@ -35,8 +35,36 @@ type NativeAgentJson = {
     allowSpawnFrom?: string[];
 };
 
-export type AimodelProviderApi = "openai-completions" | "anthropic-messages";
+const CODE_TO_WIKI_EMPLOYEE_NAME = "百应平台赋能助手";
+const CODE_TO_WIKI_TOOL_NAME = "code_to_wiki";
+
+function isSkillRelResource(raw: Record<string, unknown>): boolean {
+    const t = String(raw.resourceBizType ?? raw.resourceType ?? "").trim().toUpperCase();
+    return t === "SKILL";
+}
+
+export type AimodelProviderApi = "openai-completions" | "openai-responses" | "anthropic-messages";
 export type AimodelModelInput = "text" | "image";
+export type AimodelThinkingLevel =
+    | "off"
+    | "minimal"
+    | "low"
+    | "medium"
+    | "high"
+    | "xhigh"
+    | "adaptive"
+    | "max";
+export type AimodelThinkingLevelMap = Partial<Record<AimodelThinkingLevel, string | null>>;
+export type AimodelThinkingBudgets = Partial<
+    Record<Exclude<AimodelThinkingLevel, "off" | "xhigh" | "adaptive">, number>
+>;
+
+export type AimodelModelCompat = {
+    thinkingFormat?: string;
+    supportedReasoningEfforts?: string[];
+    reasoningEffortMap?: Record<string, string>;
+    supportsUsageInStreaming?: boolean;
+};
 
 export type ProviderBundle = {
     baseUrl: string;
@@ -47,6 +75,16 @@ export type ProviderBundle = {
     contextWindow?: number;
     maxTokens?: number;
     input?: AimodelModelInput[];
+    reasoning?: boolean;
+    thinkingLevelMap?: AimodelThinkingLevelMap;
+    thinkingBudgets?: AimodelThinkingBudgets;
+    compat?: AimodelModelCompat;
+};
+
+export type BaiyingHubSkillRef = {
+    skillCode: string;
+    skillUrl: string;
+    versionUrl: string;
 };
 
 export type AdaptedManagedAgent = {
@@ -77,6 +115,14 @@ export type AdaptedManagedAgent = {
     associatedResources?: BaiyingAssociatedResource[];
     /** Core competencies from Baiying detail. */
     coreCompetencies?: BaiyingCoreCompetency[];
+    /** Hub skills that need local version sync before OpenClaw loads them. */
+    hubSkills?: BaiyingHubSkillRef[];
+};
+
+const MANAGED_AGENT_EXPERIMENTAL: NonNullable<AgentListEntry["experimental"]> = {
+    // Baiying employees need the baiying_call plugin tool directly visible.
+    // Global lean mode compacts plugin tools behind exec/wait, which breaks that contract.
+    localModelLean: false,
 };
 
 function slugifyBase(name: string): string {
@@ -140,11 +186,76 @@ export function extractBaiyingPrologueModelId(raw: unknown): string | undefined 
     return normalizeModelId((prologue as Record<string, unknown>).modelId);
 }
 
+function normalizeSkillRefCode(raw: unknown): string {
+    if (typeof raw === "string" || typeof raw === "number") {
+        return String(raw).trim();
+    }
+    return "";
+}
+
+function normalizeHubSkillRef(raw: Record<string, unknown>): BaiyingHubSkillRef | null {
+    const skillType = nonEmpty(raw.skillType).toLowerCase();
+    if (skillType !== "hub") {
+        return null;
+    }
+    const skillCode = normalizeSkillRefCode(raw.skillCode);
+    const skillUrl = nonEmpty(raw.skillUrl);
+    const versionUrl = nonEmpty(raw.versionUrl);
+    if (!skillCode || !skillUrl || !versionUrl) {
+        return null;
+    }
+    return { skillCode, skillUrl, versionUrl };
+}
+
+function normalizeRelSkillCodes(raw: unknown): string[] {
+    if (!Array.isArray(raw)) {
+        return [];
+    }
+    const out: string[] = [];
+    for (const item of raw) {
+        if (typeof item === "string" || typeof item === "number") {
+            const name = normalizeSkillRefCode(item);
+            if (name) {
+                out.push(name);
+            }
+            continue;
+        }
+        if (!item || typeof item !== "object" || Array.isArray(item)) {
+            continue;
+        }
+        const skillCode = normalizeSkillRefCode((item as Record<string, unknown>).skillCode);
+        if (skillCode) {
+            out.push(skillCode);
+        }
+    }
+    return out;
+}
+
+function normalizeHubSkillRefs(raw: unknown): BaiyingHubSkillRef[] {
+    if (!Array.isArray(raw)) {
+        return [];
+    }
+    const out: BaiyingHubSkillRef[] = [];
+    const seen = new Set<string>();
+    for (const item of raw) {
+        if (!item || typeof item !== "object" || Array.isArray(item)) {
+            continue;
+        }
+        const ref = normalizeHubSkillRef(item as Record<string, unknown>);
+        if (!ref || seen.has(ref.skillCode)) {
+            continue;
+        }
+        seen.add(ref.skillCode);
+        out.push(ref);
+    }
+    return out;
+}
+
 /** OpenClaw `agents.list[].skills`: default `[]`; fill from `relSkills` on Baiying detail / agent JSON, else legacy root `skills`. */
 function normalizeAgentListSkills(raw: Record<string, unknown>): string[] {
-    const fromRel = normalizeStringList(raw.relSkills);
+    const fromRel = normalizeRelSkillCodes(raw.relSkills);
     if (fromRel.length > 0) {
-        return fromRel;
+        return Array.from(new Set(fromRel));
     }
     const fromSkills = normalizeStringList(raw.skills);
     if (fromSkills.length > 0) {
@@ -158,12 +269,17 @@ function normalizeAgentListTools(
     raw: Record<string, unknown>,
 ): NonNullable<AgentListEntry["tools"]> {
     const allow = normalizeStringList(raw.relTools);
+    const extraTools =
+        nonEmpty(raw.resourceName) === CODE_TO_WIKI_EMPLOYEE_NAME ||
+        nonEmpty(raw.name) === CODE_TO_WIKI_EMPLOYEE_NAME
+            ? [CODE_TO_WIKI_TOOL_NAME]
+            : [];
     return allow.length > 0
         ? {
-              allow: Array.from(new Set([...allow, "baiying_call"])),
+              allow: Array.from(new Set([...allow, "baiying_call", ...extraTools])),
           }
         : {
-              alsoAllow: ["baiying_call"],
+              alsoAllow: Array.from(new Set(["baiying_call", ...extraTools])),
           };
 }
 
@@ -211,18 +327,15 @@ function adaptRawBaiyingDetail(params: {
     const agentSseUrl = nonEmpty(detail.agentSseUrl) || undefined;
     const agentHomeUrl = nonEmpty(detail.agentHomeUrl) || undefined;
 
-    // Associated resources (API may return either relResourceInfoList or relResourceList).
-    const relResources = Array.isArray(detail.relResourceInfoList)
-        ? detail.relResourceInfoList
-        : Array.isArray(detail.relResourceList)
-          ? detail.relResourceList
-          : [];
+    // Associated resources from Baiying detail.
+    const relResources = Array.isArray(detail.relResourceList) ? detail.relResourceList : [];
     const associatedResources: BaiyingAssociatedResource[] = relResources
         .filter(
             (r: unknown) =>
                 r &&
                 typeof r === "object" &&
-                typeof (r as Record<string, unknown>).resourceId === "string",
+                typeof (r as Record<string, unknown>).resourceId === "string" &&
+                !isSkillRelResource(r as Record<string, unknown>),
         )
         .map((r: Record<string, unknown>) => ({
             resourceId: String(r.resourceId),
@@ -254,6 +367,7 @@ function adaptRawBaiyingDetail(params: {
     const agentId = `${MANAGED_AGENT_PREFIX}${sourceKey}`;
 
     const listSkills = normalizeAgentListSkills(detail);
+    const hubSkills = normalizeHubSkillRefs(detail.relSkills);
     const listTools = normalizeAgentListTools(detail);
 
     // For NONE-type agents, do not bind model/provider from agent JSON.
@@ -262,6 +376,7 @@ function adaptRawBaiyingDetail(params: {
         id: agentId,
         name,
         identity: { name },
+        experimental: MANAGED_AGENT_EXPERIMENTAL,
         skills: listSkills,
         tools: listTools,
     };
@@ -281,6 +396,7 @@ function adaptRawBaiyingDetail(params: {
         resourceDesc: String(detail.resourceDesc),
         associatedResources: associatedResources.length > 0 ? associatedResources : undefined,
         coreCompetencies: coreCompetencies.length > 0 ? coreCompetencies : undefined,
+        hubSkills: hubSkills.length > 0 ? hubSkills : undefined,
     };
 }
 
@@ -338,8 +454,10 @@ export function adaptAgentJson(params: {
             id: agentId,
             name,
             identity: { name },
+            experimental: MANAGED_AGENT_EXPERIMENTAL,
             skills: normalizeAgentListSkills(asRecord),
         };
+        const hubSkills = normalizeHubSkillRefs(asRecord.relSkills);
 
         return {
             sourceKey,
@@ -349,6 +467,7 @@ export function adaptAgentJson(params: {
             allowSpawnFrom: ["main"],
             listEntry,
             systemPrompt: instructions,
+            hubSkills: hubSkills.length > 0 ? hubSkills : undefined,
         };
     }
 
@@ -380,8 +499,10 @@ export function adaptAgentJson(params: {
                     ? native.name.trim()
                     : agentId,
         },
+        experimental: MANAGED_AGENT_EXPERIMENTAL,
         skills: normalizeAgentListSkills(asRecord),
     };
+    const hubSkills = normalizeHubSkillRefs(asRecord.relSkills);
 
     return {
         sourceKey,
@@ -391,5 +512,6 @@ export function adaptAgentJson(params: {
         allowSpawnFrom: normalizeAllowSpawnFrom(native.allowSpawnFrom),
         listEntry,
         systemPrompt,
+        hubSkills: hubSkills.length > 0 ? hubSkills : undefined,
     };
 }

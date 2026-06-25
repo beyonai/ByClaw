@@ -1,0 +1,1291 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>superAgentChat 长会话风险与 WebSocket 升级方案</title>
+  <style>
+    :root {
+      --ink: #17202a;
+      --muted: #5d6d7e;
+      --line: #d6dde7;
+      --soft: #f6f8fb;
+      --blue: #1f6feb;
+      --green: #1f883d;
+      --orange: #b65c00;
+      --red: #cf222e;
+      --purple: #8250df;
+      --card: #ffffff;
+    }
+
+    * { box-sizing: border-box; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: #f4f6f9;
+      font: 15px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    .page-shell {
+      width: min(1380px, calc(100% - 40px));
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 240px minmax(0, 1fr);
+      gap: 22px;
+      align-items: start;
+      padding: 36px 0 56px;
+    }
+
+    .content { min-width: 0; }
+
+    .side-nav {
+      position: sticky;
+      top: 18px;
+      max-height: calc(100vh - 36px);
+      overflow: auto;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px 14px;
+      box-shadow: 0 1px 2px rgba(31, 35, 40, .04);
+    }
+
+    .side-nav strong {
+      display: block;
+      font-size: 15px;
+      margin-bottom: 10px;
+    }
+
+    .side-nav a {
+      display: block;
+      color: var(--muted);
+      text-decoration: none;
+      border-left: 3px solid transparent;
+      border-radius: 5px;
+      padding: 7px 8px 7px 10px;
+      font-size: 13px;
+      line-height: 1.35;
+    }
+
+    .side-nav a:hover {
+      color: var(--blue);
+      background: #eef6ff;
+      border-left-color: var(--blue);
+    }
+
+    .side-nav .sub-link {
+      margin-left: 10px;
+      padding-top: 5px;
+      padding-bottom: 5px;
+      padding-left: 14px;
+      font-size: 12px;
+      color: #6b7788;
+    }
+
+    header {
+      background: linear-gradient(135deg, #0b3d91 0%, #155bd5 58%, #1f883d 100%);
+      color: #fff;
+      padding: 42px 0;
+    }
+
+    header .wrap {
+      width: min(1180px, calc(100% - 40px));
+      margin: 0 auto;
+    }
+
+    h1, h2, h3 { line-height: 1.25; margin: 0; }
+    h1 { font-size: 34px; letter-spacing: .2px; }
+    h2 { font-size: 24px; margin-top: 34px; }
+    h3 { font-size: 18px; margin-top: 24px; }
+
+    p { margin: 10px 0; }
+
+    .subtitle {
+      max-width: 900px;
+      margin-top: 14px;
+      color: rgba(255, 255, 255, .88);
+      font-size: 17px;
+    }
+
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 22px;
+    }
+
+    .pill {
+      border: 1px solid rgba(255, 255, 255, .38);
+      background: rgba(255, 255, 255, .12);
+      border-radius: 999px;
+      padding: 5px 12px;
+      font-size: 13px;
+    }
+
+    section {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      margin-top: 22px;
+      padding: 24px;
+      box-shadow: 0 1px 2px rgba(31, 35, 40, .04);
+      scroll-margin-top: 18px;
+    }
+
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 14px;
+      margin-top: 22px;
+    }
+
+    .summary article {
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+    }
+
+    .summary strong {
+      display: block;
+      font-size: 17px;
+      margin-bottom: 7px;
+    }
+
+    .yes { color: var(--green); }
+    .warn { color: var(--orange); }
+    .risk { color: var(--red); }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+    }
+
+    ul, ol {
+      padding-left: 22px;
+      margin: 10px 0 0;
+    }
+
+    li { margin: 6px 0; }
+
+    code {
+      background: #eef2f7;
+      border: 1px solid #d8dee8;
+      border-radius: 5px;
+      padding: 1px 5px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 13px;
+    }
+
+    .callout {
+      border-left: 4px solid var(--blue);
+      background: #f2f7ff;
+      padding: 12px 14px;
+      margin: 14px 0;
+      border-radius: 6px;
+    }
+
+    .callout.warn { border-left-color: var(--orange); background: #fff8f0; color: var(--ink); }
+    .callout.risk { border-left-color: var(--red); background: #fff5f5; color: var(--ink); }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 12px;
+      font-size: 14px;
+    }
+
+    th, td {
+      border: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+      padding: 10px 12px;
+    }
+
+    th { background: var(--soft); }
+
+    .diagram {
+      width: 100%;
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      margin-top: 14px;
+      padding: 10px;
+    }
+
+    svg {
+      display: block;
+      min-width: 940px;
+      max-width: 100%;
+      height: auto;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    .node { fill: #fff; stroke: #9aa8ba; stroke-width: 1.5; rx: 8; }
+    .node-blue { fill: #eef6ff; stroke: #1f6feb; }
+    .node-green { fill: #eefbf2; stroke: #1f883d; }
+    .node-orange { fill: #fff5e6; stroke: #b65c00; }
+    .node-red { fill: #fff1f1; stroke: #cf222e; }
+    .node-purple { fill: #f5f0ff; stroke: #8250df; }
+    .label { fill: #17202a; font-size: 14px; font-weight: 650; }
+    .sub { fill: #5d6d7e; font-size: 12px; }
+    .edge { stroke: #5d6d7e; stroke-width: 1.8; fill: none; marker-end: url(#arrow); }
+    .edge-red { stroke: #cf222e; stroke-width: 2; fill: none; marker-end: url(#arrow-red); stroke-dasharray: 7 5; }
+    .edge-green { stroke: #1f883d; stroke-width: 2; fill: none; marker-end: url(#arrow-green); }
+    .note { fill: #fff8d8; stroke: #d4a72c; stroke-width: 1.3; rx: 8; }
+
+    .roadmap {
+      counter-reset: step;
+      list-style: none;
+      padding-left: 0;
+    }
+
+    .roadmap li {
+      position: relative;
+      padding: 14px 14px 14px 52px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      margin: 10px 0;
+      background: #fff;
+    }
+
+    .roadmap li::before {
+      counter-increment: step;
+      content: counter(step);
+      position: absolute;
+      left: 14px;
+      top: 15px;
+      width: 25px;
+      height: 25px;
+      border-radius: 50%;
+      background: var(--blue);
+      color: #fff;
+      display: grid;
+      place-items: center;
+      font-weight: 700;
+      font-size: 13px;
+    }
+
+    footer {
+      color: var(--muted);
+      text-align: center;
+      padding: 24px 0 0;
+      font-size: 13px;
+    }
+
+    @media (max-width: 1000px) {
+      h1 { font-size: 28px; }
+      .page-shell {
+        width: min(100% - 24px, 1180px);
+        grid-template-columns: 1fr;
+        gap: 14px;
+      }
+
+      .side-nav {
+        position: static;
+        max-height: none;
+      }
+
+      .side-nav a {
+        display: inline-block;
+        margin: 2px 4px 2px 0;
+        border-left: 0;
+        border: 1px solid var(--line);
+      }
+
+      .side-nav .sub-link {
+        margin-left: 0;
+      }
+
+      .summary, .grid-2 { grid-template-columns: 1fr; }
+      section { padding: 18px; }
+      header .wrap { width: min(100% - 24px, 1180px); }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <h1>superAgentChat 长会话风险与 WebSocket 升级方案</h1>
+      <p class="subtitle">
+        基于当前 ByClaw 后端 `POST /chat/superAgentChat`、Gateway Redis Stream、前端 SSE 发送器和已有 Netty WebSocket 能力的代码梳理。
+      </p>
+      <div class="meta">
+        <span class="pill">范围：byclaw-be / byclaw-fe</span>
+        <span class="pill">接口：/byaiService/chat/superAgentChat</span>
+        <span class="pill">生成日期：2026-06-01</span>
+      </div>
+    </div>
+  </header>
+
+  <div class="page-shell">
+    <aside class="side-nav" aria-label="章节目录">
+      <strong>章节目录</strong>
+      <a href="#current-problems">一、当前问题</a>
+      <a href="#current-architecture">二、当前架构图</a>
+      <a href="#failure-flow">三、故障流程图</a>
+      <a href="#websocket-fit">四、WebSocket 是否合适</a>
+      <a href="#multi-end-compatibility">五、多端兼容判断</a>
+      <a href="#target-architecture">六、目标实时架构</a>
+      <a href="#upgrade-plan">七、推荐升级方案</a>
+      <a href="#message-protocol">八、统一消息协议建议</a>
+      <a href="#migration-flow">九、迁移流程图</a>
+      <a href="#verification">十、验证清单</a>
+      <a href="#implementation-steps">十一、代码升级步骤</a>
+      <a class="sub-link" href="#reuse-code">11.1 可复用代码</a>
+      <a class="sub-link" href="#ws-message-model">11.2 WS 消息模型</a>
+      <a class="sub-link" href="#channel-management">11.3 Channel 管理</a>
+      <a class="sub-link" href="#idempotency-store">11.4 发送幂等</a>
+      <a class="sub-link" href="#event-store">11.5 Event Store</a>
+      <a class="sub-link" href="#route-service-upgrade">11.6 RouteService</a>
+      <a class="sub-link" href="#redis-stream-to-ws">11.7 Redis Stream 接入 WS</a>
+      <a class="sub-link" href="#no-message-loss">11.8 消息不丢</a>
+      <a class="sub-link" href="#debounce-idempotency">11.9 幂等与防抖</a>
+      <a class="sub-link" href="#delivery-router">11.10 Delivery Router</a>
+      <a class="sub-link" href="#multi-end-sdk">11.11 多端 SDK</a>
+      <a class="sub-link" href="#gray-release">11.12 过渡灰度</a>
+      <a class="sub-link" href="#acceptance-steps">11.13 验收顺序</a>
+      <a href="#final-recommendation">十二、最终建议</a>
+    </aside>
+
+  <main class="content">
+    <div class="summary">
+      <article>
+        <strong class="risk">现状判断</strong>
+        `superAgentChat` 是 HTTP POST + SSE 输出流，会占用 Servlet 请求直到流结束。长任务、网络抖动、代理超时或前端 20 分钟超时都可能导致前端收不到最终事件。
+      </article>
+      <article>
+        <strong class="yes">WebSocket 适配度</strong>
+        WebSocket 是合适的升级方向，项目已有 Netty WebSocket、Channel 管理、多端广播、`NettyArrayOutputStream` 等基础，可以渐进复用。
+      </article>
+      <article>
+        <strong class="warn">关键前提</strong>
+        WebSocket 不是天然“永不丢消息”。要彻底解决，需要事件持久化、断点续传、幂等请求和最终状态查询。
+      </article>
+    </div>
+
+    <section id="current-problems">
+      <h2>一、superAgentChat 当前问题</h2>
+      <div class="grid-2">
+        <div>
+          <h3>代码事实</h3>
+          <ul>
+            <li>`ChatChannelController.postChat` 设置 `text/event-stream`，然后直接使用 `HttpServletResponse.getOutputStream()`。</li>
+            <li>`RouteService.route` 在请求线程中消费 `ctx.gatewayEventQueue`，每条 Gateway 事件再写回 SSE。</li>
+            <li>Gateway 事件队列 `poll(5, TimeUnit.MINUTES)`，连续 5 分钟没有事件就抛出 `Gateway 响应超时`。</li>
+            <li>前端 `SendHelper` 对聊天请求设置 `REQ_TIMEOUT = 1200000`，即 20 分钟硬超时。</li>
+            <li>`SessionStreamManager.stopSessionListener` 会清理 `OutputStreamManager` 中的上下文；之后 Redis 监听器无法再把事件投递给原请求。</li>
+          </ul>
+        </div>
+        <div>
+          <h3>风险表现</h3>
+          <ul>
+            <li>长时间无 token / 无阶段事件时，后端先因 5 分钟静默超时中断。</li>
+            <li>任务总时长超过 20 分钟时，前端主动 abort。</li>
+            <li>Nginx、Ingress、LB、浏览器、移动网络都可能提前断开 SSE。</li>
+            <li>断开后任务可能仍在 Gateway/Worker 侧运行，但当前前端连接已经无法收到后续 `answerDelta` 或 `appStreamResponse`。</li>
+            <li>最终消息是否完整入库取决于后续事件是否还能被监听、消费和持久化，存在边界风险。</li>
+          </ul>
+        </div>
+      </div>
+      <div class="callout risk">
+        结论：当前问题不是“Servlet 必然丢消息”这么简单，而是“聊天任务生命周期绑定到一次 HTTP/SSE 连接”。连接断开时，前端可见流和后端任务流缺少可靠的补偿协议。
+      </div>
+    </section>
+
+    <section id="current-architecture">
+      <h2>二、当前架构图</h2>
+      <div class="diagram">
+        <svg viewBox="0 0 1080 470" role="img" aria-label="当前 superAgentChat SSE 架构图">
+          <defs>
+            <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+              <path d="M0,0 L0,6 L9,3 z" fill="#5d6d7e" />
+            </marker>
+            <marker id="arrow-red" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+              <path d="M0,0 L0,6 L9,3 z" fill="#cf222e" />
+            </marker>
+          </defs>
+
+          <rect class="node-blue" x="35" y="70" width="160" height="72" rx="8" />
+          <text class="label" x="115" y="101" text-anchor="middle">前端 SendHelper</text>
+          <text class="sub" x="115" y="123" text-anchor="middle">fetchEventSource POST</text>
+
+          <rect class="node" x="250" y="70" width="180" height="72" rx="8" />
+          <text class="label" x="340" y="101" text-anchor="middle">ChatChannelController</text>
+          <text class="sub" x="340" y="123" text-anchor="middle">ServletOutputStream</text>
+
+          <rect class="node-green" x="485" y="70" width="160" height="72" rx="8" />
+          <text class="label" x="565" y="101" text-anchor="middle">ChannelService</text>
+          <text class="sub" x="565" y="123" text-anchor="middle">Web/App/Dingtalk</text>
+
+          <rect class="node-green" x="700" y="70" width="170" height="72" rx="8" />
+          <text class="label" x="785" y="101" text-anchor="middle">AssistantChatService</text>
+          <text class="sub" x="785" y="123" text-anchor="middle">ScriptService</text>
+
+          <rect class="node-purple" x="700" y="230" width="170" height="82" rx="8" />
+          <text class="label" x="785" y="260" text-anchor="middle">RouteService</text>
+          <text class="sub" x="785" y="282" text-anchor="middle">poll 队列并写 SSE</text>
+
+          <rect class="node-orange" x="910" y="230" width="135" height="82" rx="8" />
+          <text class="label" x="977" y="260" text-anchor="middle">Redis Stream</text>
+          <text class="sub" x="977" y="282" text-anchor="middle">Gateway 事件</text>
+
+          <rect class="node-orange" x="910" y="70" width="135" height="72" rx="8" />
+          <text class="label" x="977" y="101" text-anchor="middle">Gateway / Worker</text>
+          <text class="sub" x="977" y="123" text-anchor="middle">LLM 执行</text>
+
+          <rect class="note" x="270" y="245" width="330" height="96" rx="8" />
+          <text class="label" x="435" y="275" text-anchor="middle">连接绑定问题</text>
+          <text class="sub" x="435" y="298" text-anchor="middle">一次 HTTP 请求 = 一次聊天流生命周期</text>
+          <text class="sub" x="435" y="319" text-anchor="middle">请求断开后，前端缺少可靠补发机制</text>
+
+          <path class="edge" d="M195 106 H250" />
+          <path class="edge" d="M430 106 H485" />
+          <path class="edge" d="M645 106 H700" />
+          <path class="edge" d="M870 106 H910" />
+          <path class="edge" d="M977 142 V230" />
+          <path class="edge" d="M910 271 H870" />
+          <path class="edge" d="M700 271 C540 270 430 226 340 142" />
+          <path class="edge" d="M250 116 C190 172 170 226 115 142" />
+
+          <path class="edge-red" d="M785 312 C760 378 660 410 520 398 C360 384 220 300 125 142" />
+          <text class="sub" x="512" y="422" text-anchor="middle" fill="#cf222e">5 分钟静默超时 / 20 分钟前端超时 / 代理断开时，最终事件可能不可见</text>
+        </svg>
+      </div>
+    </section>
+
+    <section id="failure-flow">
+      <h2>三、故障流程图</h2>
+      <div class="diagram">
+        <svg viewBox="0 0 1080 420" role="img" aria-label="长会话消息丢失故障流程图">
+          <defs>
+            <marker id="arrow-green" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+              <path d="M0,0 L0,6 L9,3 z" fill="#1f883d" />
+            </marker>
+          </defs>
+
+          <rect class="node-blue" x="35" y="60" width="150" height="62" rx="8" />
+          <text class="label" x="110" y="87" text-anchor="middle">用户发起聊天</text>
+          <text class="sub" x="110" y="108" text-anchor="middle">POST SSE</text>
+
+          <rect class="node-green" x="235" y="60" width="165" height="62" rx="8" />
+          <text class="label" x="317" y="87" text-anchor="middle">后端启动监听</text>
+          <text class="sub" x="317" y="108" text-anchor="middle">Redis Stream → Queue</text>
+
+          <rect class="node-purple" x="455" y="60" width="165" height="62" rx="8" />
+          <text class="label" x="537" y="87" text-anchor="middle">请求线程写流</text>
+          <text class="sub" x="537" y="108" text-anchor="middle">answerDelta</text>
+
+          <rect class="node-red" x="675" y="42" width="180" height="98" rx="8" />
+          <text class="label" x="765" y="75" text-anchor="middle">连接中断</text>
+          <text class="sub" x="765" y="98" text-anchor="middle">5 分钟静默 / 20 分钟</text>
+          <text class="sub" x="765" y="119" text-anchor="middle">Nginx/LB/网络波动</text>
+
+          <rect class="node-orange" x="905" y="60" width="140" height="62" rx="8" />
+          <text class="label" x="975" y="87" text-anchor="middle">清理上下文</text>
+          <text class="sub" x="975" y="108" text-anchor="middle">remove ctx</text>
+
+          <rect class="node-orange" x="235" y="250" width="165" height="70" rx="8" />
+          <text class="label" x="317" y="279" text-anchor="middle">Worker 继续产出</text>
+          <text class="sub" x="317" y="301" text-anchor="middle">后续事件进入 Redis</text>
+
+          <rect class="node-red" x="455" y="250" width="165" height="70" rx="8" />
+          <text class="label" x="537" y="279" text-anchor="middle">监听无法投递</text>
+          <text class="sub" x="537" y="301" text-anchor="middle">ctx 不存在或已停止</text>
+
+          <rect class="node-red" x="675" y="250" width="180" height="70" rx="8" />
+          <text class="label" x="765" y="279" text-anchor="middle">前端最终态缺失</text>
+          <text class="sub" x="765" y="301" text-anchor="middle">无 appStreamResponse</text>
+
+          <path class="edge" d="M185 91 H235" />
+          <path class="edge" d="M400 91 H455" />
+          <path class="edge" d="M620 91 H675" />
+          <path class="edge" d="M855 91 H905" />
+          <path class="edge-red" d="M975 122 C950 205 790 236 620 285" />
+          <path class="edge" d="M400 285 H455" />
+          <path class="edge-red" d="M620 285 H675" />
+          <path class="edge-green" d="M110 122 C105 355 845 375 975 122" />
+          <text class="sub" x="540" y="378" text-anchor="middle" fill="#1f883d">正确补救方向：重连后按 traceId + lastEventId 补发，而不是依赖旧连接还活着</text>
+        </svg>
+      </div>
+    </section>
+
+    <section id="websocket-fit">
+      <h2>四、WebSocket 是否合适</h2>
+      <p>
+        合适，尤其适合 ByClaw 这类“长任务、多阶段、需要多端同步、可能需要用户中途输入/审批/继续执行”的聊天场景。相较于当前 HTTP/SSE，WebSocket 可以减少一次请求长时间占用 Servlet 线程的问题，并把消息收发抽象成持续连接上的帧协议。
+      </p>
+
+      <table>
+        <thead>
+          <tr>
+            <th>维度</th>
+            <th>HTTP POST + SSE 当前方案</th>
+            <th>WebSocket 升级后</th>
+            <th>注意事项</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>连接模型</td>
+            <td>一次聊天绑定一次 HTTP 请求。</td>
+            <td>一个用户维护长连接，多次聊天请求走消息帧。</td>
+            <td>需要心跳、重连、鉴权刷新。</td>
+          </tr>
+          <tr>
+            <td>长任务支持</td>
+            <td>容易受 Servlet、代理、浏览器超时影响。</td>
+            <td>更适合长任务和双向交互。</td>
+            <td>LB/网关仍可能断开，必须支持恢复。</td>
+          </tr>
+          <tr>
+            <td>多端同步</td>
+            <td>当前已有广播到 WS 设备的辅助逻辑。</td>
+            <td>天然可以把同一用户多设备纳入统一事件通道。</td>
+            <td>需要 session/channel 映射和发送端排除。</td>
+          </tr>
+          <tr>
+            <td>消息可靠性</td>
+            <td>断开后缺少补发机制。</td>
+            <td>可以做 ack、offset、重放。</td>
+            <td>可靠性来自协议设计，不来自 WebSocket 本身。</td>
+          </tr>
+          <tr>
+            <td>改造成本</td>
+            <td>保留现状成本低，但边界问题会反复出现。</td>
+            <td>中等偏高；后端已有 Netty 基础可复用。</td>
+            <td>建议双栈灰度，避免一次性切断 SSE。</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="callout">
+        推荐判断：如果目标是 PC、Web、App、小程序统一实时接入，WebSocket 是合适的主方案。短期可以保留 `superAgentChat` 兜底，但目标态应把聊天发送、实时同步、断点恢复、取消和 ACK 都收敛到统一 WebSocket 协议。
+      </div>
+    </section>
+
+    <section id="multi-end-compatibility">
+      <h2>五、多端兼容判断</h2>
+      <p>
+        多端统一走 WebSocket 是可行的，但不能让每个端各自理解一套聊天细节。正确做法是服务端提供统一 WebSocket Chat Gateway，PC、Web、App、小程序都接入同一套消息协议：发送消息用 `CHAT_START`，接收流式事件用 `CHAT_EVENT`，断线或后来进入会话用 `CHAT_RESUME` 补齐缺失事件。
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>端类型</th>
+            <th>接入方式</th>
+            <th>同步策略</th>
+            <th>关键要求</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>PC / Web</td>
+            <td>页面启动后建立用户级 WebSocket，按 `deviceId` 注册 Channel。</td>
+            <td>当前端发送 `CHAT_START` 后，本端收到 `CHAT_ACCEPTED`，其他在线端收到同一 `traceId` 的 `SESSION_EVENT` 和后续 `CHAT_EVENT`。</td>
+            <td>刷新页面后用本地保存的 `lastEventId` 发起 `CHAT_RESUME`。</td>
+          </tr>
+          <tr>
+            <td>App</td>
+            <td>App 前台保持 WebSocket；弱网重连后重新注册 `deviceId`。</td>
+            <td>上线时发送 `SYNC_SESSION` 或 `CHAT_RESUME`，服务端按会话维度补发缺失事件或返回最终态快照。</td>
+            <td>需要心跳、指数退避重连、token 过期续签和离线期间事件补齐。</td>
+          </tr>
+          <tr>
+            <td>小程序</td>
+            <td>使用平台 WebSocket 能力连接同一 Chat Gateway。</td>
+            <td>进入会话页时用 `sessionId + lastEventId` 同步；后台断开后前台恢复继续补发。</td>
+            <td>需要控制连接数量，统一域名白名单，避免多个页面重复建连。</td>
+          </tr>
+          <tr>
+            <td>同一用户多设备</td>
+            <td>一个用户可对应多个活跃 Channel：`userId -> deviceId -> channel`。</td>
+            <td>发送端收到完整事件，其他端也收到同一事件；服务端通过 `sourceDeviceId` 避免 UI 重复插入用户消息。</td>
+            <td>所有端必须保存 `clientMessageId`、`traceId`、`lastEventId`，用于幂等和恢复。</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="callout warn">
+        多端统一 WebSocket 的核心不是“每个端各写一套 socket 逻辑”，而是沉淀统一客户端 SDK：连接、鉴权、心跳、重连、ACK、幂等、断点恢复都由 SDK 负责，业务 UI 只消费统一的聊天事件。
+      </div>
+
+      <h3>PC 发起聊天后其他端如何同步</h3>
+      <ol>
+        <li>PC 端生成 `clientMessageId` 和 `idempotencyKey`，通过 WebSocket 发送 `CHAT_START`。</li>
+        <li>服务端创建或复用聊天任务，生成 `traceId`、`queryMessageId`、`messageId`，写入 Chat Task Store 和 Event Store。</li>
+        <li>服务端向 PC 回复 `CHAT_ACCEPTED`，同时向该用户其他在线 Channel 广播 `SESSION_EVENT:userMessage`，其他端在 UI 中插入“来自 PC 的用户消息”。</li>
+        <li>Gateway/Worker 产生 `answerDelta`、`reasoningLogDelta`、`appStreamResponse` 等事件后，服务端先写 Event Store，再通过 Delivery Router 广播给所有在线端。</li>
+        <li>每个端消费事件后更新本地 `lastEventId` 并发送 `CHAT_EVENT_ACK`；如果某端离线，重新连接后用 `CHAT_RESUME` 补发 `lastEventId` 之后的事件。</li>
+      </ol>
+
+      <div class="diagram">
+        <svg viewBox="0 0 1080 430" role="img" aria-label="多端 WebSocket 同步流程图">
+          <rect class="node-blue" x="35" y="45" width="145" height="64" rx="8" />
+          <text class="label" x="107" y="72" text-anchor="middle">PC 端</text>
+          <text class="sub" x="107" y="94" text-anchor="middle">CHAT_START</text>
+
+          <rect class="node-blue" x="35" y="180" width="145" height="64" rx="8" />
+          <text class="label" x="107" y="207" text-anchor="middle">App 端</text>
+          <text class="sub" x="107" y="229" text-anchor="middle">在线接收</text>
+
+          <rect class="node-blue" x="35" y="315" width="145" height="64" rx="8" />
+          <text class="label" x="107" y="342" text-anchor="middle">小程序端</text>
+          <text class="sub" x="107" y="364" text-anchor="middle">重连补发</text>
+
+          <rect class="node-purple" x="250" y="170" width="170" height="84" rx="8" />
+          <text class="label" x="335" y="201" text-anchor="middle">WebSocket Gateway</text>
+          <text class="sub" x="335" y="224" text-anchor="middle">userId/deviceId/channel</text>
+
+          <rect class="node-green" x="480" y="45" width="165" height="64" rx="8" />
+          <text class="label" x="562" y="72" text-anchor="middle">Idempotency Store</text>
+          <text class="sub" x="562" y="94" text-anchor="middle">clientMessageId 去重</text>
+
+          <rect class="node-green" x="480" y="180" width="165" height="64" rx="8" />
+          <text class="label" x="562" y="207" text-anchor="middle">Chat Task Store</text>
+          <text class="sub" x="562" y="229" text-anchor="middle">traceId / status</text>
+
+          <rect class="node-green" x="480" y="315" width="165" height="64" rx="8" />
+          <text class="label" x="562" y="342" text-anchor="middle">Event Store</text>
+          <text class="sub" x="562" y="364" text-anchor="middle">eventId 顺序事件</text>
+
+          <rect class="node-orange" x="715" y="180" width="150" height="64" rx="8" />
+          <text class="label" x="790" y="207" text-anchor="middle">Gateway / Worker</text>
+          <text class="sub" x="790" y="229" text-anchor="middle">LLM 事件产出</text>
+
+          <rect class="node-purple" x="925" y="170" width="125" height="84" rx="8" />
+          <text class="label" x="987" y="201" text-anchor="middle">Delivery Router</text>
+          <text class="sub" x="987" y="224" text-anchor="middle">广播所有端</text>
+
+          <path class="edge" d="M180 77 C220 77 220 186 250 196" />
+          <path class="edge" d="M420 190 C448 140 456 83 480 77" />
+          <path class="edge" d="M420 212 H480" />
+          <path class="edge" d="M645 212 H715" />
+          <path class="edge" d="M790 244 C790 318 700 347 645 347" />
+          <path class="edge" d="M645 347 C780 347 890 286 925 229" />
+          <path class="edge-green" d="M925 196 C760 116 445 122 180 77" />
+          <path class="edge-green" d="M925 212 C735 214 435 214 180 212" />
+          <path class="edge-green" d="M925 238 C775 350 410 360 180 347" />
+          <text class="sub" x="522" y="406" text-anchor="middle" fill="#1f883d">所有在线端实时收到同一 eventId；离线端重连后按 lastEventId 补齐</text>
+        </svg>
+      </div>
+    </section>
+
+    <section id="target-architecture">
+      <h2>六、目标实时架构</h2>
+      <div class="diagram">
+        <svg viewBox="0 0 1080 510" role="img" aria-label="WebSocket 目标架构图">
+          <rect class="node-blue" x="35" y="70" width="165" height="78" rx="8" />
+          <text class="label" x="117" y="101" text-anchor="middle">多端 WS SDK</text>
+          <text class="sub" x="117" y="123" text-anchor="middle">PC/Web/App/小程序</text>
+
+          <rect class="node-purple" x="255" y="70" width="170" height="78" rx="8" />
+          <text class="label" x="340" y="101" text-anchor="middle">WS Chat Gateway</text>
+          <text class="sub" x="340" y="123" text-anchor="middle">鉴权/心跳/重连恢复</text>
+
+          <rect class="node-green" x="480" y="70" width="170" height="78" rx="8" />
+          <text class="label" x="565" y="101" text-anchor="middle">Chat Command</text>
+          <text class="sub" x="565" y="123" text-anchor="middle">start / cancel / resume</text>
+
+          <rect class="node-green" x="705" y="70" width="170" height="78" rx="8" />
+          <text class="label" x="790" y="101" text-anchor="middle">AssistantChatService</text>
+          <text class="sub" x="790" y="123" text-anchor="middle">复用核心编排</text>
+
+          <rect class="node-orange" x="925" y="70" width="125" height="78" rx="8" />
+          <text class="label" x="987" y="101" text-anchor="middle">Gateway</text>
+          <text class="sub" x="987" y="123" text-anchor="middle">Worker/LLM</text>
+
+          <rect class="node-orange" x="705" y="250" width="170" height="78" rx="8" />
+          <text class="label" x="790" y="281" text-anchor="middle">Redis Stream</text>
+          <text class="sub" x="790" y="303" text-anchor="middle">原始事件通道</text>
+
+          <rect class="node-green" x="480" y="250" width="170" height="78" rx="8" />
+          <text class="label" x="565" y="281" text-anchor="middle">Event Store</text>
+          <text class="sub" x="565" y="303" text-anchor="middle">eventId / traceId / 状态</text>
+
+          <rect class="node-blue" x="255" y="250" width="170" height="78" rx="8" />
+          <text class="label" x="340" y="281" text-anchor="middle">Delivery Router</text>
+          <text class="sub" x="340" y="303" text-anchor="middle">按用户多端推送</text>
+
+          <rect class="node-purple" x="35" y="250" width="165" height="78" rx="8" />
+          <text class="label" x="117" y="281" text-anchor="middle">断点恢复</text>
+          <text class="sub" x="117" y="303" text-anchor="middle">lastEventId 重放</text>
+
+          <rect class="note" x="320" y="392" width="430" height="76" rx="8" />
+          <text class="label" x="535" y="423" text-anchor="middle">核心原则</text>
+          <text class="sub" x="535" y="446" text-anchor="middle">所有端统一 WebSocket；事件先落库再广播；幂等保证只执行一次</text>
+
+          <path class="edge" d="M200 109 H255" />
+          <path class="edge" d="M425 109 H480" />
+          <path class="edge" d="M650 109 H705" />
+          <path class="edge" d="M875 109 H925" />
+          <path class="edge" d="M987 148 V289 H875" />
+          <path class="edge" d="M705 289 H650" />
+          <path class="edge-green" d="M480 289 H425" />
+          <path class="edge-green" d="M255 289 H200" />
+          <path class="edge-green" d="M117 250 V148" />
+          <path class="edge" d="M565 250 V148" />
+          <path class="edge" d="M340 250 V148" />
+        </svg>
+      </div>
+    </section>
+
+    <section id="upgrade-plan">
+      <h2>七、推荐升级方案</h2>
+      <ol class="roadmap">
+        <li>
+          <strong>先做止血层：保留 SSE，补 heartbeat 和可配置超时。</strong>
+          这是过渡期动作，降低当前 `superAgentChat` 的消息丢失概率；目标态聊天主链路统一迁移到 WebSocket。
+        </li>
+        <li>
+          <strong>建立统一事件模型。</strong>
+          所有 `initialization`、`answerDelta`、`reasoningLogDelta`、`answerEnd`、`appStreamResponse`、`error` 都包装成统一结构：`eventId`、`sessionId`、`traceId`、`messageId`、`eventType`、`payload`、`sourceDeviceId`、`createdAt`。
+        </li>
+        <li>
+          <strong>落地 Event Store。</strong>
+          事件必须先写入 Event Store，再广播到各端。在线端实时消费，离线端或重连端按 `lastEventId` 补发，最终态用 `traceId` 查询。
+        </li>
+        <li>
+          <strong>新增统一 WebSocket Chat Gateway。</strong>
+          在现有 Netty `WebSocketHandler` 基础上扩展 `CHAT_START`、`CHAT_ACCEPTED`、`CHAT_EVENT`、`CHAT_EVENT_ACK`、`CHAT_RESUME`、`CHAT_CANCEL`、`SYNC_SESSION`、`HEARTBEAT`。
+        </li>
+        <li>
+          <strong>服务端解耦连接与任务。</strong>
+          `CHAT_START` 创建任务并立即返回 `CHAT_ACCEPTED`；Gateway/Worker 后续事件进入 Event Store，再由 Delivery Router 推送到所有在线 Channel。任一端连接断开都不停止任务。
+        </li>
+        <li>
+          <strong>多端统一 SDK。</strong>
+          PC、Web、App、小程序使用同一套协议封装：生成 `clientMessageId`、维护 `deviceId`、保存 `lastEventId`、自动重连、自动 `CHAT_RESUME`、按事件更新 UI。
+        </li>
+        <li>
+          <strong>幂等和并发控制。</strong>
+          以 `userId + sessionId + clientMessageId` 作为发送幂等键，同一键重复发送只返回已存在的 `traceId`，不会重复创建任务；同一会话是否允许并行发送由会话策略控制。
+        </li>
+      </ol>
+    </section>
+
+    <section id="message-protocol">
+      <h2>八、统一消息协议建议</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>方向</th>
+            <th>类型</th>
+            <th>字段</th>
+            <th>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Client → Server</td>
+            <td>`CHAT_START`</td>
+            <td>`clientMessageId`, `idempotencyKey`, `deviceId`, `sessionId`, `chatContent`, `accessTerminal`, `metadata`</td>
+            <td>开始一次聊天；服务端按 `userId + sessionId + clientMessageId` 幂等去重。</td>
+          </tr>
+          <tr>
+            <td>Server → Client</td>
+            <td>`CHAT_ACCEPTED`</td>
+            <td>`clientMessageId`, `traceId`, `queryMessageId`, `messageId`, `deduplicated`</td>
+            <td>表示任务已创建；如果是重复请求，`deduplicated=true` 并返回原任务标识。</td>
+          </tr>
+          <tr>
+            <td>Server → Client</td>
+            <td>`CHAT_EVENT`</td>
+            <td>`eventId`, `traceId`, `eventType`, `payload`, `sourceDeviceId`, `createdAt`</td>
+            <td>统一承载 `answerDelta`、`reasoningLogDelta`、`appStreamResponse` 等现有事件。</td>
+          </tr>
+          <tr>
+            <td>Client → Server</td>
+            <td>`CHAT_EVENT_ACK`</td>
+            <td>`traceId`, `lastEventId`</td>
+            <td>可选，用于服务端统计和裁剪缓存。</td>
+          </tr>
+          <tr>
+            <td>Client → Server</td>
+            <td>`CHAT_RESUME`</td>
+            <td>`traceId`, `sessionId`, `lastEventId`, `deviceId`</td>
+            <td>断线重连、页面刷新、其他端进入会话后补发缺失事件。</td>
+          </tr>
+          <tr>
+            <td>Client → Server</td>
+            <td>`SYNC_SESSION`</td>
+            <td>`sessionId`, `lastEventId`, `deviceId`</td>
+            <td>新设备进入会话时同步会话内仍在运行或最近完成的消息事件。</td>
+          </tr>
+          <tr>
+            <td>Client → Server</td>
+            <td>`CHAT_CANCEL`</td>
+            <td>`traceId`, `deviceId`, `reason`</td>
+            <td>用户主动取消；服务端应向 Gateway/Worker 传播取消。</td>
+          </tr>
+          <tr>
+            <td>双向</td>
+            <td>`HEARTBEAT`</td>
+            <td>`ts`</td>
+            <td>保持连接活性，检测半开连接。</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>发送幂等性处理</h3>
+      <p>
+        多端都能发送消息后，必须防止弱网重试、页面双击、App 重连重放、小程序重复触发造成重复任务。推荐以 `clientMessageId` 作为端侧生成的稳定消息 ID，服务端用 `userId + sessionId + clientMessageId` 建唯一索引。
+      </p>
+      <div class="diagram">
+        <svg viewBox="0 0 1080 410" role="img" aria-label="WebSocket 发送幂等流程图">
+          <rect class="node-blue" x="35" y="70" width="160" height="70" rx="8" />
+          <text class="label" x="115" y="99" text-anchor="middle">任一端发送</text>
+          <text class="sub" x="115" y="121" text-anchor="middle">clientMessageId</text>
+
+          <rect class="node-purple" x="250" y="70" width="170" height="70" rx="8" />
+          <text class="label" x="335" y="99" text-anchor="middle">WS Chat Gateway</text>
+          <text class="sub" x="335" y="121" text-anchor="middle">校验鉴权/会话</text>
+
+          <rect class="node-orange" x="485" y="55" width="170" height="100" rx="8" />
+          <text class="label" x="570" y="88" text-anchor="middle">幂等键查询</text>
+          <text class="sub" x="570" y="111" text-anchor="middle">userId + sessionId</text>
+          <text class="sub" x="570" y="132" text-anchor="middle">+ clientMessageId</text>
+
+          <rect class="node-green" x="735" y="35" width="175" height="70" rx="8" />
+          <text class="label" x="822" y="64" text-anchor="middle">不存在</text>
+          <text class="sub" x="822" y="86" text-anchor="middle">创建任务并落库</text>
+
+          <rect class="node-red" x="735" y="170" width="175" height="70" rx="8" />
+          <text class="label" x="822" y="199" text-anchor="middle">已存在</text>
+          <text class="sub" x="822" y="221" text-anchor="middle">返回原 traceId</text>
+
+          <rect class="node-green" x="485" y="290" width="170" height="70" rx="8" />
+          <text class="label" x="570" y="319" text-anchor="middle">CHAT_ACCEPTED</text>
+          <text class="sub" x="570" y="341" text-anchor="middle">deduplicated 标记</text>
+
+          <rect class="node-purple" x="735" y="290" width="175" height="70" rx="8" />
+          <text class="label" x="822" y="319" text-anchor="middle">广播用户消息</text>
+          <text class="sub" x="822" y="341" text-anchor="middle">所有端同一条</text>
+
+          <path class="edge" d="M195 105 H250" />
+          <path class="edge" d="M420 105 H485" />
+          <path class="edge-green" d="M655 88 C690 70 705 70 735 70" />
+          <path class="edge-red" d="M655 124 C690 205 705 205 735 205" />
+          <path class="edge-green" d="M822 105 C810 270 650 252 570 290" />
+          <path class="edge-red" d="M735 220 C650 250 600 260 570 290" />
+          <path class="edge" d="M655 325 H735" />
+          <text class="sub" x="535" y="388" text-anchor="middle" fill="#5d6d7e">重复发送只复用原任务，不重复调用 Gateway/Worker，不重复插入用户消息</text>
+        </svg>
+      </div>
+    </section>
+
+    <section id="migration-flow">
+      <h2>九、迁移流程图</h2>
+      <div class="diagram">
+        <svg viewBox="0 0 1080 360" role="img" aria-label="迁移路线流程图">
+          <rect class="node-blue" x="40" y="80" width="160" height="70" rx="8" />
+          <text class="label" x="120" y="109" text-anchor="middle">阶段 0</text>
+          <text class="sub" x="120" y="131" text-anchor="middle">当前 SSE 止血</text>
+
+          <rect class="node-green" x="245" y="80" width="160" height="70" rx="8" />
+          <text class="label" x="325" y="109" text-anchor="middle">阶段 1</text>
+          <text class="sub" x="325" y="131" text-anchor="middle">事件模型与存储</text>
+
+          <rect class="node-purple" x="450" y="80" width="160" height="70" rx="8" />
+          <text class="label" x="530" y="109" text-anchor="middle">阶段 2</text>
+          <text class="sub" x="530" y="131" text-anchor="middle">WS Gateway</text>
+
+          <rect class="node-orange" x="655" y="80" width="160" height="70" rx="8" />
+          <text class="label" x="735" y="109" text-anchor="middle">阶段 3</text>
+          <text class="sub" x="735" y="131" text-anchor="middle">PC/Web 接入</text>
+
+          <rect class="node-green" x="860" y="80" width="160" height="70" rx="8" />
+          <text class="label" x="940" y="109" text-anchor="middle">阶段 4</text>
+          <text class="sub" x="940" y="131" text-anchor="middle">App/小程序接入</text>
+
+          <rect class="note" x="180" y="220" width="720" height="72" rx="8" />
+          <text class="label" x="540" y="250" text-anchor="middle">上线门槛</text>
+          <text class="sub" x="540" y="273" text-anchor="middle">统一 WS 协议、断线补发、最终态查询、发送幂等、多端同步和监控告警覆盖</text>
+
+          <path class="edge" d="M200 115 H245" />
+          <path class="edge" d="M405 115 H450" />
+          <path class="edge" d="M610 115 H655" />
+          <path class="edge" d="M815 115 H860" />
+          <path class="edge-green" d="M325 150 V220" />
+          <path class="edge-green" d="M530 150 V220" />
+          <path class="edge-green" d="M735 150 V220" />
+        </svg>
+      </div>
+    </section>
+
+    <section id="verification">
+      <h2>十、验证清单</h2>
+      <div class="grid-2">
+        <div>
+          <h3>功能验证</h3>
+          <ul>
+            <li>普通短会话：事件顺序与现有 SSE 一致。</li>
+            <li>超过 20 分钟长会话：不中断或断后可恢复。</li>
+            <li>5 分钟无业务事件：heartbeat 生效，不误判失败。</li>
+            <li>刷新页面后：按 `traceId + lastEventId` 补齐缺失事件。</li>
+            <li>同一用户多设备：发送端不重复，其他设备可同步。</li>
+            <li>PC 发起聊天后，Web、App、小程序在线端能实时看到用户消息和模型增量回复。</li>
+            <li>App/小程序后来进入同一会话：能通过 `SYNC_SESSION` 或 `CHAT_RESUME` 补齐缺失事件。</li>
+            <li>任一端弱网重试同一 `clientMessageId`：只产生一个任务、一条用户消息、一组回复事件。</li>
+          </ul>
+        </div>
+        <div>
+          <h3>工程验证</h3>
+          <ul>
+            <li>WebSocket 鉴权、token 过期、重连退避。</li>
+            <li>任务取消能传递到 Gateway/Worker。</li>
+            <li>Event Store TTL、容量、清理策略明确。</li>
+            <li>监控：连接数、重连次数、补发次数、事件延迟、任务最终态缺失数。</li>
+            <li>压测：长连接数量、单用户多会话、慢客户端背压。</li>
+            <li>多端 SDK：PC/Web/App/小程序的 `deviceId`、ACK、重连、补发和幂等行为一致。</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="implementation-steps">
+      <h2>十一、基于当前代码的 WebSocket 升级步骤</h2>
+      <p>
+        这一节按当前项目已有代码落地，不另起一套聊天系统。核心思路是：复用 `AssistantChatService`、`ScriptService`、`RouteService` 的聊天编排能力，扩展现有 Netty WebSocket 层，把 `superAgentChat` 的“一次 HTTP 请求承载一次长流”改成“WebSocket 命令启动任务，事件落库后广播到所有端”。
+      </p>
+
+      <h3 id="reuse-code">11.1 盘点可复用代码</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>现有代码</th>
+            <th>当前职责</th>
+            <th>升级后用法</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>`ChatChannelController.postChat`</td>
+            <td>HTTP SSE 入口，设置响应头并传入 `ServletOutputStream`。</td>
+            <td>保留为过渡兜底；新链路不再依赖它维持长会话。</td>
+          </tr>
+          <tr>
+            <td>`WebSocketHandler`</td>
+            <td>已有 Netty WebSocket 文本帧入口，按 `MessageType` 分发。</td>
+            <td>扩展识别 `CHAT_START`、`CHAT_RESUME`、`CHAT_EVENT_ACK`、`SYNC_SESSION`、`CHAT_CANCEL`。</td>
+          </tr>
+          <tr>
+            <td>`ChatService.llmChat`</td>
+            <td>当前 WebSocket 聊天入口，使用 `NettyArrayOutputStream` 调 `AssistantChatService.chat`。</td>
+            <td>改造成命令入口：先做幂等和任务登记，再异步启动聊天任务。</td>
+          </tr>
+          <tr>
+            <td>`NettyArrayOutputStream`</td>
+            <td>把 `OutputStream.write` 直接写成 WebSocket 帧。</td>
+            <td>短期可用；目标态建议替换为事件收集器，避免直接写当前连接导致断线丢事件。</td>
+          </tr>
+          <tr>
+            <td>`RouteService.route`</td>
+            <td>监听 Redis Stream 队列，在请求线程写 SSE。</td>
+            <td>保留 Gateway/Worker 对接逻辑，但把“写流”改为“写 Event Store + Delivery Router 广播”。</td>
+          </tr>
+          <tr>
+            <td>`MultiDeviceBroadcastService` / `ChannelManager`</td>
+            <td>已有同一用户多 WebSocket Channel 广播能力。</td>
+            <td>作为多端同步基础，增强 `deviceId`、`sourceDeviceId`、ACK、在线状态管理。</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3 id="ws-message-model">11.2 第一步：定义统一 WS 消息模型</h3>
+      <p>
+        在 `MessageType` 或独立枚举中新增聊天命令类型，避免继续复用语义过宽的 `LLM_MESSAGE`。建议新增：
+      </p>
+      <ul>
+        <li>`CHAT_START`：任一端发送用户消息。</li>
+        <li>`CHAT_ACCEPTED`：服务端确认任务已创建或命中幂等记录。</li>
+        <li>`CHAT_EVENT`：服务端推送统一事件，承载现有 `answerDelta`、`reasoningLogDelta`、`appStreamResponse`。</li>
+        <li>`CHAT_EVENT_ACK`：端侧确认已消费到哪个 `eventId`。</li>
+        <li>`CHAT_RESUME`：按 `traceId + lastEventId` 补发缺失事件。</li>
+        <li>`SYNC_SESSION`：新端进入会话页后按 `sessionId + lastEventId` 同步会话事件。</li>
+        <li>`CHAT_CANCEL`：取消指定 `traceId` 的运行任务。</li>
+      </ul>
+      <p>
+        同时扩展 `ChatMessage` 或新增 `WsChatCommand`，字段包含 `deviceId`、`clientMessageId`、`idempotencyKey`、`sessionId`、`traceId`、`lastEventId`、`payload`。
+      </p>
+
+      <h3 id="channel-management">11.3 第二步：改造连接注册和多端 Channel 管理</h3>
+      <p>
+        当前 `ChannelManager` 已按用户管理多个 Channel。升级时把映射增强为 `userId -> deviceId -> channel`，握手或首个认证帧中必须带 `deviceId`、端类型和版本号。
+      </p>
+      <ol>
+        <li>在 WebSocket 握手鉴权成功后，把 `LoginInfo` 写入 Channel 属性，继续沿用当前做法。</li>
+        <li>新增 `deviceId` Channel 属性，PC、Web、App、小程序都由 SDK 生成并持久化。</li>
+        <li>同一 `deviceId` 新连接上线时，关闭或覆盖旧 Channel，避免一个设备重复收消息。</li>
+        <li>广播时携带 `sourceDeviceId`，发送端和其他端都收到统一事件，但 UI 可根据该字段避免重复插入本地乐观消息。</li>
+      </ol>
+
+      <h3 id="idempotency-store">11.4 第三步：增加发送幂等表或缓存</h3>
+      <p>
+        在服务端建立幂等记录，唯一键建议为 `userId + sessionId + clientMessageId`。字段至少包括 `traceId`、`queryMessageId`、`messageId`、`taskId`、`status`、`createdAt`。
+      </p>
+      <ol>
+        <li>收到 `CHAT_START` 后先查幂等记录。</li>
+        <li>如果存在，直接返回 `CHAT_ACCEPTED(deduplicated=true)`，并按 `traceId + lastEventId` 补发已有事件。</li>
+        <li>如果不存在，先插入幂等记录和用户消息事件，再启动后续聊天任务。</li>
+        <li>数据库唯一索引兜底并发：两个端同时提交同一 `clientMessageId`，只有一个插入成功，另一个读取已存在记录。</li>
+      </ol>
+
+      <h3 id="event-store">11.5 第四步：建设 Event Store</h3>
+      <p>
+        当前风险的根因是事件直接写当前连接。目标态必须改成事件先持久化，再推送。Event Store 可以先用 Redis Stream 加 TTL 落地，稳定后再把关键事件入库。
+      </p>
+      <ol>
+        <li>定义事件结构：`eventId`、`userId`、`sessionId`、`traceId`、`messageId`、`eventType`、`payload`、`sourceDeviceId`、`createdAt`。</li>
+        <li>`eventId` 必须单调递增，至少在同一 `traceId` 内有序。</li>
+        <li>所有事件写入成功后再调用 Delivery Router 广播。</li>
+        <li>`CHAT_RESUME` 从 Event Store 查询 `eventId > lastEventId` 的事件并按顺序补发。</li>
+        <li>如果事件已过期，返回最终消息快照和 `snapshot=true`，避免端侧永远卡在流式状态。</li>
+      </ol>
+
+      <h3 id="route-service-upgrade">11.6 第五步：改造 RouteService 写流路径</h3>
+      <p>
+        `RouteService.route` 当前在循环里消费 `ctx.gatewayEventQueue`，然后调用 `pythonSseService.getContentFromPythonStreamV3(..., ctx.res, ...)` 写回 `OutputStream`。升级时需要拆出“解析事件”和“投递事件”两个动作。
+      </p>
+      <ol>
+        <li>保留 Gateway SDK 发送和 Redis Stream 监听逻辑。</li>
+        <li>把每条 Redis 事件转换成统一 `ChatEvent`。</li>
+        <li>调用 `chatEventStore.append(event)` 写入 Event Store。</li>
+        <li>调用 `deliveryRouter.broadcast(userId, sessionId, event)` 推送给所有在线端。</li>
+        <li>收到 `appStreamResponse` 或 `error` 后更新任务状态，并释放运行态标记。</li>
+      </ol>
+      <div class="callout">
+        这一改造是解决当前问题的关键点：即使某个端的 WebSocket 断开，Gateway/Worker 后续事件仍会进入 Event Store，端重连后可以补发，不再依赖旧连接还活着。
+      </div>
+
+      <h3 id="redis-stream-to-ws">11.7 第六步：Gateway SDK Redis Stream 接入 WebSocket</h3>
+      <p>
+        当前 `RouteService.route` 已经通过 Gateway SDK 发送消息，并由 `SessionStreamManager` 启动 Redis Stream 监听器；`RedisStreamMessageListener` 收到消息后把 JSON 投入 `ctx.gatewayEventQueue`。升级 WebSocket 时，不需要推翻 Gateway SDK 和 Redis Stream，只需要把“请求线程消费队列写 SSE”替换成“Stream 消费器写 Event Store，然后 Delivery Router 广播 WebSocket”。
+      </p>
+      <div class="diagram">
+        <svg viewBox="0 0 1080 500" role="img" aria-label="Gateway SDK Redis Stream 接入 WebSocket 架构图">
+          <rect class="node-blue" x="35" y="60" width="145" height="70" rx="8" />
+          <text class="label" x="107" y="89" text-anchor="middle">多端 WS SDK</text>
+          <text class="sub" x="107" y="111" text-anchor="middle">CHAT_START</text>
+
+          <rect class="node-purple" x="235" y="60" width="150" height="70" rx="8" />
+          <text class="label" x="310" y="89" text-anchor="middle">WS Chat Gateway</text>
+          <text class="sub" x="310" y="111" text-anchor="middle">鉴权/幂等/任务</text>
+
+          <rect class="node-green" x="445" y="60" width="145" height="70" rx="8" />
+          <text class="label" x="517" y="89" text-anchor="middle">RouteService</text>
+          <text class="sub" x="517" y="111" text-anchor="middle">Gateway SDK send</text>
+
+          <rect class="node-orange" x="650" y="60" width="145" height="70" rx="8" />
+          <text class="label" x="722" y="89" text-anchor="middle">Gateway/Worker</text>
+          <text class="sub" x="722" y="111" text-anchor="middle">执行 Agent/LLM</text>
+
+          <rect class="node-orange" x="850" y="60" width="170" height="70" rx="8" />
+          <text class="label" x="935" y="89" text-anchor="middle">Redis Stream</text>
+          <text class="sub" x="935" y="111" text-anchor="middle">session data_stream</text>
+
+          <rect class="node-purple" x="650" y="235" width="170" height="78" rx="8" />
+          <text class="label" x="735" y="266" text-anchor="middle">Stream Consumer</text>
+          <text class="sub" x="735" y="289" text-anchor="middle">XREADGROUP / ACK</text>
+
+          <rect class="node-green" x="445" y="235" width="145" height="78" rx="8" />
+          <text class="label" x="517" y="266" text-anchor="middle">Event Store</text>
+          <text class="sub" x="517" y="289" text-anchor="middle">eventId 持久化</text>
+
+          <rect class="node-purple" x="235" y="235" width="150" height="78" rx="8" />
+          <text class="label" x="310" y="266" text-anchor="middle">Delivery Router</text>
+          <text class="sub" x="310" y="289" text-anchor="middle">广播在线 Channel</text>
+
+          <rect class="node-blue" x="35" y="235" width="145" height="78" rx="8" />
+          <text class="label" x="107" y="266" text-anchor="middle">PC/Web/App</text>
+          <text class="sub" x="107" y="289" text-anchor="middle">CHAT_EVENT</text>
+
+          <rect class="node" x="445" y="390" width="375" height="62" rx="8" />
+          <text class="label" x="632" y="416" text-anchor="middle">恢复链路</text>
+          <text class="sub" x="632" y="438" text-anchor="middle">CHAT_RESUME / SYNC_SESSION 从 Event Store 补发 eventId &gt; lastEventId</text>
+
+          <path class="edge" d="M180 95 H235" />
+          <path class="edge" d="M385 95 H445" />
+          <path class="edge" d="M590 95 H650" />
+          <path class="edge" d="M795 95 H850" />
+          <path class="edge" d="M935 130 C940 210 865 274 820 274" />
+          <path class="edge-green" d="M650 274 H590" />
+          <path class="edge-green" d="M445 274 H385" />
+          <path class="edge-green" d="M235 274 H180" />
+          <path class="edge" d="M517 313 V390" />
+          <path class="edge-green" d="M445 421 C320 415 220 350 160 313" />
+          <text class="sub" x="535" y="472" text-anchor="middle" fill="#1f883d">不丢消息的关键：Redis 消息先变成持久 ChatEvent，再 WebSocket 广播；断线端按 eventId 补发</text>
+        </svg>
+      </div>
+      <ol>
+        <li>`CHAT_START` 命中幂等后，由服务端调用现有 Gateway SDK 发送消息，保持 `sessionId`、`traceId`、`messageId` 与当前链路一致。</li>
+        <li>Gateway/Worker 继续把 `answerDelta`、`reasoningLogDelta`、`appStreamResponse`、`error` 写入 `byai_gateway:session:{sessionId}:data_stream`。</li>
+        <li>把 `SessionStreamManager` 的监听职责从“投递到当前请求上下文”升级为“投递到稳定的 Stream Consumer”。Consumer 不依赖 `ServletOutputStream` 或某个 WebSocket Channel。</li>
+        <li>Consumer 解析 Redis 消息，校验 `trace_id`，转换为统一 `ChatEvent`，生成服务端 `eventId`。</li>
+        <li>先调用 `chatEventStore.append(chatEvent)`，成功后再执行 Redis Stream ACK；如果 Event Store 写失败，不 ACK，让消息留在 pending 或重新消费。</li>
+        <li>Event Store 写成功后调用 `deliveryRouter.broadcast(chatEvent)`，把同一 `eventId` 推送给 PC、Web、App、小程序所有在线端。</li>
+        <li>端侧收到 `CHAT_EVENT` 后更新 UI，保存 `lastEventId`，再发送 `CHAT_EVENT_ACK`。ACK 只表示端已消费，不决定服务端是否保留事件。</li>
+      </ol>
+
+      <h3 id="no-message-loss">11.8 第七步：保证消息不丢的处理规则</h3>
+      <p>
+        WebSocket 连接本身仍可能断开，因此“不丢消息”的边界必须放在 Redis Stream、Event Store 和补发协议上，而不是放在单条 WebSocket 连接上。
+      </p>
+      <div class="diagram">
+        <svg viewBox="0 0 1080 390" role="img" aria-label="消息不丢处理流程图">
+          <rect class="node-orange" x="45" y="75" width="150" height="70" rx="8" />
+          <text class="label" x="120" y="104" text-anchor="middle">Redis Stream</text>
+          <text class="sub" x="120" y="126" text-anchor="middle">未 ACK 可重读</text>
+
+          <rect class="node-purple" x="255" y="75" width="160" height="70" rx="8" />
+          <text class="label" x="335" y="104" text-anchor="middle">Consumer</text>
+          <text class="sub" x="335" y="126" text-anchor="middle">解析/校验/转换</text>
+
+          <rect class="node-green" x="475" y="75" width="160" height="70" rx="8" />
+          <text class="label" x="555" y="104" text-anchor="middle">Event Store</text>
+          <text class="sub" x="555" y="126" text-anchor="middle">唯一 eventId</text>
+
+          <rect class="node-purple" x="695" y="75" width="160" height="70" rx="8" />
+          <text class="label" x="775" y="104" text-anchor="middle">Delivery Router</text>
+          <text class="sub" x="775" y="126" text-anchor="middle">在线广播</text>
+
+          <rect class="node-blue" x="915" y="75" width="130" height="70" rx="8" />
+          <text class="label" x="980" y="104" text-anchor="middle">各端</text>
+          <text class="sub" x="980" y="126" text-anchor="middle">ACK lastEventId</text>
+
+          <rect class="node-red" x="255" y="240" width="160" height="70" rx="8" />
+          <text class="label" x="335" y="269" text-anchor="middle">写库失败</text>
+          <text class="sub" x="335" y="291" text-anchor="middle">不 ACK Redis</text>
+
+          <rect class="node-orange" x="475" y="240" width="160" height="70" rx="8" />
+          <text class="label" x="555" y="269" text-anchor="middle">连接断开</text>
+          <text class="sub" x="555" y="291" text-anchor="middle">事件已持久化</text>
+
+          <rect class="node-green" x="695" y="240" width="160" height="70" rx="8" />
+          <text class="label" x="775" y="269" text-anchor="middle">重连补发</text>
+          <text class="sub" x="775" y="291" text-anchor="middle">eventId &gt; lastEventId</text>
+
+          <path class="edge" d="M195 110 H255" />
+          <path class="edge" d="M415 110 H475" />
+          <path class="edge-green" d="M635 110 H695" />
+          <path class="edge-green" d="M855 110 H915" />
+          <path class="edge-red" d="M335 145 V240" />
+          <path class="edge-red" d="M335 240 C260 210 230 160 195 126" />
+          <path class="edge" d="M555 145 V240" />
+          <path class="edge-green" d="M635 275 H695" />
+          <path class="edge-green" d="M775 240 C825 190 890 160 942 145" />
+          <text class="sub" x="540" y="350" text-anchor="middle" fill="#5d6d7e">Redis ACK 在 Event Store 写成功之后；WebSocket ACK 只用于端侧进度和补发优化</text>
+        </svg>
+      </div>
+      <ul>
+        <li>Redis Stream ACK 时机：必须在 Event Store 写成功之后，不能在 WebSocket 推送成功之后才 ACK，否则慢端会拖垮消费。</li>
+        <li>Event Store 唯一约束：`traceId + gatewayMessageId/eventType/sequence` 或服务端生成的 `eventId` 要能防止 Consumer 重放导致重复事件。</li>
+        <li>WebSocket 发送失败：只记录该 `deviceId` 未 ACK，不回滚 Event Store；端重连后按 `lastEventId` 补齐。</li>
+        <li>最终态兜底：如果增量事件过期，端通过 `traceId` 拉取最终 `appStreamResponse` 或消息快照。</li>
+      </ul>
+
+      <h3 id="debounce-idempotency">11.9 第八步：消息幂等性和防抖处理</h3>
+      <p>
+        多端 WebSocket 后，重复消息主要来自四类场景：用户双击发送、弱网重试、WebSocket 重连后 SDK 重放、多个端误用同一草稿提交。处理方式要分前端防抖和服务端幂等两层。
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>问题</th>
+            <th>前端/端侧处理</th>
+            <th>服务端处理</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>按钮双击 / 快速回车</td>
+            <td>发送按钮进入 pending；300-500ms 防抖；同一输入框提交复用同一个 `clientMessageId`。</td>
+            <td>唯一键 `userId + sessionId + clientMessageId`，重复请求返回原 `traceId`。</td>
+          </tr>
+          <tr>
+            <td>弱网超时重试</td>
+            <td>重试时不能重新生成 `clientMessageId`，只重发同一个 `CHAT_START`。</td>
+            <td>如果任务已创建，返回 `CHAT_ACCEPTED(deduplicated=true)` 并补发已有事件。</td>
+          </tr>
+          <tr>
+            <td>WebSocket 重连重放</td>
+            <td>SDK 维护 pending 队列；已收到 `CHAT_ACCEPTED` 的消息只发 `CHAT_RESUME`，不再发 `CHAT_START`。</td>
+            <td>根据幂等记录和任务状态判断是返回原任务，还是拒绝非法重复。</td>
+          </tr>
+          <tr>
+            <td>多端同时发送</td>
+            <td>不同端独立生成不同 `clientMessageId`；UI 标明发送端。</td>
+            <td>是否允许同一 session 并行运行由会话策略决定；不允许时返回 `SESSION_BUSY` 或排队。</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="callout warn">
+        防抖只能改善用户体验，不能作为可靠防重手段。真正防止重复任务必须靠服务端幂等键和数据库唯一约束。
+      </div>
+
+      <h3 id="delivery-router">11.10 第九步：新增 Delivery Router</h3>
+      <p>
+        Delivery Router 封装多端广播逻辑，不让业务服务直接操作 Netty Channel。它可以复用 `MultiDeviceBroadcastService`，但需要补齐事件格式和 ACK 记录。
+      </p>
+      <ol>
+        <li>查询 `ChannelManager.getChannels(userId)` 获取该用户所有在线端。</li>
+        <li>把 `ChatEvent` 包装为 `CHAT_EVENT` 帧。</li>
+        <li>推送给所有在线 Channel，包括发送端。发送端根据 `clientMessageId` 合并本地乐观消息。</li>
+        <li>记录每个 `deviceId` 的最后 ACK eventId，用于监控和补发优化。</li>
+      </ol>
+
+      <h3 id="multi-end-sdk">11.11 第十步：前端和多端 SDK 改造</h3>
+      <p>
+        前端当前 `SendHelper` 使用 `fetchEventSource('/byaiService/chat/superAgentChat')`。目标态新增统一 WS SDK，PC、Web、App、小程序都按同一协议实现。
+      </p>
+      <ol>
+        <li>封装 `connect()`：负责 token、deviceId、心跳、重连退避。</li>
+        <li>封装 `sendChat()`：生成 `clientMessageId`，发送 `CHAT_START`，返回本地可追踪的 pending message。</li>
+        <li>封装 `onChatEvent()`：把 `CHAT_EVENT` 转换成现有 UI 可消费的 message patch，尽量复用 `answerDeltaHandler`、`reasoningLogHandler`。</li>
+        <li>封装 `resume()`：重连后对运行中的 `traceId` 发送 `CHAT_RESUME`。</li>
+        <li>封装 `syncSession()`：进入会话页时按 `sessionId + lastEventId` 发送 `SYNC_SESSION`。</li>
+      </ol>
+
+      <h3 id="gray-release">11.12 第十一步：保留 superAgentChat 过渡和灰度</h3>
+      <p>
+        不建议一次性删除 `superAgentChat`。迁移期可以让 PC/Web 指定用户或指定 agent 先走 WebSocket，其余继续走 SSE。稳定后 App、小程序接入同一 WS Gateway，最后把 `superAgentChat` 降级为兼容接口或内部 fallback。
+      </p>
+      <ol>
+        <li>增加开关：按租户、用户、agent、端类型控制是否启用 WS。</li>
+        <li>新旧链路事件格式保持一致，便于对比回放。</li>
+        <li>同一会话不要同时启用 SSE 和 WS 两条主发送链路，避免重复任务。</li>
+        <li>灰度期间重点看：重复消息数、补发成功率、最终态缺失数、平均重连次数、连接数峰值。</li>
+      </ol>
+
+      <h3 id="acceptance-steps">11.13 第十二步：上线验收顺序</h3>
+      <ol>
+        <li>后端单测：幂等键重复提交只创建一个任务。</li>
+        <li>后端集成测试：模拟 Redis Stream 事件，确认 Event Store 先落库再广播。</li>
+        <li>前端联调：PC 发起聊天，Web/App/小程序在线端实时收到同一事件序列。</li>
+        <li>断线测试：任一端断开 30 秒后重连，`CHAT_RESUME` 能补齐缺失 `eventId`。</li>
+        <li>弱网测试：同一 `clientMessageId` 重发 3 次，服务端返回同一 `traceId`。</li>
+        <li>长任务测试：超过 20 分钟仍能收到最终 `appStreamResponse`，中途刷新能恢复。</li>
+      </ol>
+    </section>
+
+    <section id="final-recommendation">
+      <h2>十二、最终建议</h2>
+      <p>
+        推荐采用“短期 SSE 止血 + 中期统一 WebSocket Chat Gateway + 多端 SDK 接入 + 事件可靠投递”的路线。WebSocket 是合适的升级方向，尤其能更好地支撑长任务、多端同步和交互式 Agent 工作流；但要避免只改连接协议而不做事件持久化、断点恢复和发送幂等。
+      </p>
+      <p>
+        目标形态应该是：PC、Web、App、小程序都通过 WebSocket 接入；聊天任务独立运行；事件先可靠保存再广播；在线端实时收到同一 `eventId`；离线或重连端按 `lastEventId` 补发；重复发送按 `clientMessageId` 幂等复用原任务。这样才能同时解决长会话丢消息、多端同步和重复提交问题。
+      </p>
+    </section>
+
+    <footer>
+      ByClaw architecture note: superAgentChat long session and WebSocket migration analysis.
+    </footer>
+  </main>
+  </div>
+</body>
+</html>

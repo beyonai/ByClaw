@@ -5,6 +5,7 @@ import com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmplo
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import org.apache.commons.collections4.CollectionUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -51,6 +52,11 @@ public class InitDigEmployeeRedisRunner implements ApplicationRunner {
         if (!initDigEmployeeRedisEnabled) {
             logger.info("数字员工Redis全量初始化开关 INIT_DIG_EMPLOYEE_REDIS_ENABLED={}，跳过初始化",
                 initDigEmployeeRedisEnabled);
+            return;
+        }
+        String env = System.getenv("BE_ENV");
+        boolean isDev = StringUtils.isNotEmpty(env) && "development".equals(env);
+        if (isDev) {
             return;
         }
         if (digEmployeeRedisSyncProperties == null || !digEmployeeRedisSyncProperties.isJsonRedisSyncEnabled()) {

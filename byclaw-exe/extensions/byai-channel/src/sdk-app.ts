@@ -5,26 +5,27 @@ import {
   WorkerRegistry,
   WorkerRunner,
   GatewayDataEmitter,
-  EventType,
   type AskAgentCommand,
   WorkerHeartbeat,
   ActionType,
 } from "@byclaw/by-framework";
 import type { OpenClawConfig } from "openclaw/plugin-sdk";
 import { resolveInboundLanguage } from "./i18n.js";
-import { getByaiRuntime } from "./runtime.js";
+import { getByaiRuntime, getRuntimeConfig } from "./runtime.js";
 import { deliverReplyToAgentViaSdk } from "./sdk-message-processor.js";
 import {
   resolveActiveSdkRequestByTraceId,
-  clearActiveSdkRequestByTarget,
-  emitSdkChunkTracked,
   registerSdkEmitter,
-  shouldDeferActiveSdkFinal,
   clearActiveSdkRequestRecord,
   resolveSdkLocalFilePath,
 } from "./session-context.js";
 import type { ResolvedByaiAccount, ByaiSdkInboundMessage, SdkInboundFile } from "./types.js";
 import { getRedisInfo, getUserCode } from "./utils.js";
+import {
+  isBaiyingEnhanceConfigured,
+  waitForBaiyingEnhanceColdStartReady,
+} from "./baiying-enhance-readiness.js";
+import { normalizeByaiAgentId } from "./session-key.js";
 
 export interface ByaiSdkAppOptions {
   account: ResolvedByaiAccount;
@@ -39,7 +40,7 @@ export interface ByaiSdkAppOptions {
 
 type ByaiSdkLogger = NonNullable<ByaiSdkAppOptions["log"]>;
 
-function getInboundMessageFromByFramework(data: AskAgentCommand) {
+async function getInboundMessageFromByFramework(data: AskAgentCommand) {
   let questionText = "";
   let files: SdkInboundFile[] | undefined;
   if (typeof data.content === "string") {
@@ -79,12 +80,43 @@ function getInboundMessageFromByFramework(data: AskAgentCommand) {
       resourceId: string;
       resourceType: string;
       resourceName: string;
+      resourceCode: string;
+      extData?: string;
     }[] = data.extraPayload?.resource_list || [];
     const { sessionId } = data.header;
+    const baiyingCallHandledResourceTypes = ["AGENT", "TOOLKIT", "TOOL", "MCP", "OBJECT", "VIEW", "KG_DOC", "KG_DB", "KG_QA"];
+    const userCode = getUserCode();
+    const runtime = getByaiRuntime();
     resourceList.forEach((item) => {
       if (item.resourceType !== "DIG_EMPLOYEE") {
         if (item.resourceType === "KG_DOC_FILE") {
           remindTextArr.push(`- file: ${resolveSdkLocalFilePath(item.resourceId, sessionId)}`);
+        } else if (item.resourceType?.toLowerCase() === "skill") {
+          if (!item.extData) return;
+          let skillExt: {
+            skillUrl: string;
+            version: string;
+            skillType: "inner" | "hub";
+          };
+          try {
+            skillExt = JSON.parse(item.extData);
+          } catch (error) {
+            return;
+          }
+          if (skillExt.skillType === "inner") {
+            remindTextArr.push(`- skill: ${path.join("/app/skills", item.resourceCode)}`);
+          } else if (skillExt.skillType === "hub") {
+            if (userCode && skillExt.skillUrl?.includes(userCode)) {
+              const normalizeAgentId = normalizeByaiAgentId(data.extraPayload?.agent_id || "main");
+              const workspaceDir = runtime.agent.resolveAgentWorkspaceDir(getRuntimeConfig(), normalizeAgentId)
+              if (workspaceDir) {
+                remindTextArr.push(`- skill: ${path.join(workspaceDir, "skills", item.resourceCode)}`);
+              }
+            } else {
+              const skillsRoot = path.join(runtime.state.resolveStateDir(), "skills");
+              remindTextArr.push(`- skill: ${path.join(skillsRoot, item.resourceCode)}`);
+            }
+          }
         } else {
           remindTextArr.push(
             `- resource: resource_id=${item.resourceId}, resource_type=${item.resourceType}, resource_name=${item.resourceName}`,
@@ -94,11 +126,7 @@ function getInboundMessageFromByFramework(data: AskAgentCommand) {
     });
     if (remindTextArr.length) {
       let handleResourceTips = "";
-      if (
-        resourceList.some(
-          (item) => item.resourceType !== "KG_DOC_FILE" && item.resourceType !== "DIG_EMPLOYEE",
-        )
-      ) {
+      if (resourceList.some((item) => baiyingCallHandledResourceTypes.includes(item.resourceType))) {
         if (data.extraPayload?.agent_id || data.extraPayload?.agent_code) {
           handleResourceTips =
             "For the resources, you can use \`baiying_call\` tool to handle them.";
@@ -210,15 +238,6 @@ export class ByaiSdkApp {
     return this.log ?? {};
   }
 
-  private currentConfig(): OpenClawConfig {
-    const runtime = getByaiRuntime();
-    const cfg = runtime.config;
-    if (typeof cfg.current === "function") {
-      return cfg.current() as OpenClawConfig;
-    }
-    return cfg.loadConfig() as OpenClawConfig;
-  }
-
   async start(): Promise<void> {
     if (this.runner) {
       return;
@@ -282,6 +301,27 @@ export class ByaiSdkApp {
 
     registerSdkEmitter(this.account.accountId, emitter);
 
+    if (isBaiyingEnhanceConfigured(getRuntimeConfig())) {
+      const rawWaitMs = Number.parseInt(
+        process.env.BAIYING_ENHANCE_COLD_START_WAIT_MS || "60000",
+        10,
+      );
+      const waitMs = Number.isFinite(rawWaitMs) ? Math.max(0, rawWaitMs) : 60000;
+      info?.(
+        `[${this.account.accountId}] waiting for baiying-enhance cold-start readiness before subscribing, waitMs=${waitMs}`,
+      );
+      const readiness = await waitForBaiyingEnhanceColdStartReady(waitMs);
+      if (readiness.ready) {
+        info?.(
+          `[${this.account.accountId}] baiying-enhance cold-start readiness complete before subscribing, waitedMs=${readiness.waitedMs}, reason=${readiness.reason ?? "ready"}`,
+        );
+      } else {
+        error?.(
+          `[${this.account.accountId}] baiying-enhance cold-start readiness not complete before subscribing, waitedMs=${readiness.waitedMs}, reason=${readiness.reason ?? "timeout"}; continuing`,
+        );
+      }
+    }
+
     const subscription = runner.subscribe(async ({ streamName, msgId, data }) => {
       if (data.actionType === ActionType.RESUME) {
         // 这里处理resume任务，目的是将原session从sessions_yield的状态中唤醒
@@ -308,7 +348,7 @@ export class ByaiSdkApp {
         created_at: Date.now(),
         updated_at: Date.now(),
       });
-      const { text, files } = getInboundMessageFromByFramework(gatewayMsg);
+      const { text, files } = await getInboundMessageFromByFramework(gatewayMsg);
       info?.(`处理问题: ${text}`);
 
       const metadataLanguage =
@@ -352,20 +392,14 @@ export class ByaiSdkApp {
         await deliverReplyToAgentViaSdk({
           message: inbound,
           account: this.account,
-          cfg: this.currentConfig(),
+          cfg: getRuntimeConfig(),
           abortController,
           log: this.log,
           onReply: async (text, options) => {
             if (!text) {
               return;
             }
-            await emitSdkChunkTracked({
-              emitter,
-              sessionId,
-              traceId,
-              text,
-              options: options || {},
-            });
+            await emitter.emitChunk(sessionId, traceId, text, options || {});
           },
         });
 

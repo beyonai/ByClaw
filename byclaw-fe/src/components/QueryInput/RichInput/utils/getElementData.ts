@@ -96,12 +96,18 @@ export default function getElementData(type: IResourceType, data: any) {
     case ResourceType.knowledgeBase:
     case ResourceType.tool:
     case ResourceType.OBJECT:
+    case ResourceType.SKILL:
     case ResourceType.folder:
     case ResourceType.file:
     case ResourceType.database: {
       let idKeyField = '';
       let nameKeyField = '';
-      if (type === ResourceType.knowledgeBase || type === ResourceType.tool || type === ResourceType.OBJECT) {
+      if (
+        type === ResourceType.knowledgeBase ||
+        type === ResourceType.tool ||
+        type === ResourceType.OBJECT ||
+        type === ResourceType.SKILL
+      ) {
         idKeyField = 'resourceId';
         nameKeyField = 'resourceName';
       } else if (type === ResourceType.folder || type === ResourceType.file) {

@@ -30,13 +30,18 @@ LLM_REQUIRED_ABILITY = "6"
 
 LLM_PROFILES = {LLMModelProfile.STANDARD.value, LLMModelProfile.LIGHTWEIGHT.value}
 EMBEDDING_PROFILE = LLMModelProfile.EMBEDDING.value
+_shared_redis_client: Any | None = None
 
 
 class RedisModelConfigProvider(ModelConfigProvider):
     """Load by_qa model settings from the byclaw Redis model type hash."""
 
     def __init__(self, redis_client: Any | None = None):
-        self._redis = redis_client or _create_redis_client_from_env()
+        self._redis = (
+            redis_client
+            if redis_client is not None
+            else _get_shared_redis_client()
+        )
         self._models_by_type: dict[str, list[dict[str, Any]]] = {}
         self._cache_loaded = False
         self._cache_lock = asyncio.Lock()
@@ -317,6 +322,14 @@ def _create_redis_client_from_env() -> Any:
         username=os.getenv("BYAI_REDIS_USERNAME", os.getenv("REDIS_USERNAME")) or None,
         password=os.getenv("BYAI_REDIS_PASSWORD", os.getenv("REDIS_PASSWORD")) or None,
     )
+
+
+def _get_shared_redis_client() -> Any:
+    global _shared_redis_client
+    if _shared_redis_client is None:
+        _shared_redis_client = _create_redis_client_from_env()
+        logger.info("Created shared Redis client for model configuration")
+    return _shared_redis_client
 
 
 __all__ = [

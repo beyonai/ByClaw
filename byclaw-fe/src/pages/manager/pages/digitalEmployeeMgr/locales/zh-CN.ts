@@ -60,6 +60,10 @@ export default {
   // 优化模态框
   'refineModal.title': '一键生成配置',
   'refineModal.regenerate': '重新生成',
+  'refineModal.generating': '正在生成配置...',
+  'refineModal.waitingStream': '正在连接模型并准备生成结果',
+  'refineModal.generateFailed': '生成失败，请重试',
+  'refineModal.generateIncomplete': '生成结果不完整，请重试',
   'refineModal.namePlaceholder': '请输入名称',
   'refineModal.character': '人设描述',
   'refineModal.characterPlaceholder': '请输入人设描述',
@@ -139,13 +143,11 @@ export default {
   'thirdPartyCreateModel.homeAddressRequired': '请输入首页地址',
 
   // ModelPopover
-  'modelPopover.largeModel': '大模型',
   'modelPopover.QALargeModelConfiguration': '问答大模型配置',
-  'modelPopover.history': '历史记录',
-  'modelPopover.temperature': '温度',
-  'modelPopover.maxToken': '回复上限',
-  'modelPopover.prompt': '提示词',
-  'modelPopover.promptPlaceholder': '描述图片的内容，要求简洁准确，层次分明',
+  'modelPopover.mine': '我的',
+  'modelPopover.public': '公共',
+  'modelPopover.noModels': '暂无模型',
+  'modelPopover.confirm': '确定',
 
   // BaseListModal
   'baseListModal.createTime': '创建时间',
@@ -216,6 +218,7 @@ export default {
   'employeeDetail.digitalEmployeeDesc': '数字员工描述',
   'employeeDetail.digitalEmployeeDescRequired': '请输入数字员工描述',
   'employeeDetail.digitalEmployeeDescPlaceholder': '请输入数字员工描述',
+  'employeeDetail.fieldMaxLength': '{field}不能超过{max}个字符，当前为{current}个字符',
   'employeeDetail.coreAbility': '岗位职责',
   'employeeDetail.example': '样例',
   'employeeDetail.viewOldVersion': '查看旧版',

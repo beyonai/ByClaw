@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildAgentsMd,
   buildByaiBusinessExtensionsMd,
+  buildToolsMd,
   buildSoul,
   MANAGED_SEED_MARKER,
   removeManagedBootstrapIfPresent,
@@ -76,5 +77,47 @@ describe("workspace-seed corePersonaDefinition", () => {
     expect(md).toContain("## 百应业务拓展属性");
     expect(md).toContain("**拓展属性**");
     expect(md).toContain("BYAI_BUSINESS_EXTENSIONS.md");
+  });
+
+  it("buildAgentsMd excludes SKILL relResourceList resources", () => {
+    const md = buildAgentsMd({
+      relResourceList: [
+        {
+          resourceId: "skill-001",
+          resourceName: "DWS",
+          resourceBizType: "SKILL",
+          resourceCode: "dws",
+        },
+      ],
+    } as Parameters<typeof buildAgentsMd>[0]);
+    expect(md).not.toContain("DWS");
+    expect(md).not.toContain("Associated resources");
+  });
+
+  it("buildToolsMd renders relResourceList resources", () => {
+    const md = buildToolsMd({
+      relResourceList: [
+        {
+          resourceId: "10000018",
+          resourceName: "用户信息表",
+          resourceBizType: "OBJECT",
+          resourceCode: "po_users",
+          resourceDesc: "平台用户维度对象",
+        },
+        {
+          resourceId: "skill-001",
+          resourceName: "DWS",
+          resourceBizType: "SKILL",
+          resourceCode: "dws",
+          resourceDesc: "DWS skill should be loaded through relSkills",
+        },
+      ],
+    } as Parameters<typeof buildToolsMd>[0]);
+    expect(md).toContain("用户信息表");
+    expect(md).toContain("id: 10000018");
+    expect(md).toContain("type: OBJECT");
+    expect(md).not.toContain("DWS");
+    expect(md).not.toContain("type: SKILL");
+    expect(md).not.toContain("(none declared");
   });
 });

@@ -170,7 +170,7 @@ Redis Pub/Sub 默认启用；如需关闭，可设置 `digEmployeeChangeSubscrib
 
 当前实现中，托管 agent 会自动带上 `baiying_call`。该工具会：
 
-- 使用注册时从 `DIG_EMPLOYEE_{resourceId}` 读取的 `relResourceList / relResourceInfoList`
+- 使用注册时从 `DIG_EMPLOYEE_{resourceId}` 读取的 `relResourceList` 非 SKILL 资源；SKILL 由 `relSkills` 映射到 `agents.list[].skills`
 - 按需从 Redis 读取关联资源 `{BIZTYPE}_{resourceId}`，不扫描本地资源目录
 - 在提示词中展开知识库、toolkit、MCP、AGENT 等能力
 - 由插件内置的 **TypeScript 执行器**（`src/executor/`，按资源类型拆分为 `toolkit.ts` / `tool.ts` / `agent.ts` / `mcp.ts` / `doc.ts` 等）在进程内统一执行并做参数校验/回填；历史上的 `~/.openclaw/skills/baiying/executor.py` 已废弃不再调用
@@ -179,6 +179,7 @@ Redis Pub/Sub 默认启用；如需关闭，可设置 `digEmployeeChangeSubscrib
 
 - [docs/PLUGIN_OVERVIEW.zh-CN.md](docs/PLUGIN_OVERVIEW.zh-CN.md)
 - [docs/AGENT_JSON_WORKSPACE_MD_MAPPING.md](docs/AGENT_JSON_WORKSPACE_MD_MAPPING.md)（JSON → 工作区 Markdown 映射）
+- [docs/HUB_SKILL_SYNC_SOLUTION.zh-CN.html](docs/HUB_SKILL_SYNC_SOLUTION.zh-CN.html)（Hub Skill 自动更新与动态加载过滤方案）
 
 ## Redis Agent JSON 格式
 
@@ -192,7 +193,8 @@ Redis Pub/Sub 默认启用；如需关闭，可设置 `digEmployeeChangeSubscrib
 插件把托管 agent 合并进当前生效配置（通常为 **`openclaw.json`**）时，每个 **`baiying-agent-*`** 列表项都会写出 **`skills`** 字段：
 
 - 默认 **`[]`**（不再省略该字段）。
-- 若 JSON **根**上存在非空的 **`relSkills`**（字符串数组，例如 `["dws","clawhub"]`），则写入 **`agents.list[].skills`**（元素会 `trim`，空串丢弃）。
+- 若 JSON **根**上存在非空的 **`relSkills`**，则写入 **`agents.list[].skills`**。兼容旧字符串数组（例如 `["dws","clawhub"]`），也支持对象数组：`{ "skillCode": "dws", "skillType": "inner" }` 只引用内置 skill；`{ "skillCode": "guizang-ppt-skill-main", "skillType": "hub", "skillUrl": "/byaiService/tool/downloadSkillZip?skillId=10026639", "versionUrl": "/byaiService/tool/getSkillVersion?skillId=10026639" }` 会写入 `skillCode`。
+- 对 `skillType: "hub"` 的对象，`hubSkillAutoSync` 默认开启：插件会从 Redis 服务注册表 `byai_gateway:sd:instances:ByaiService` 发现 ByaiService，先请求 `versionUrl`，当本地 `${OPENCLAW_STATE_DIR}/skills/<skillCode>/.baiying-hub-skill.json` 版本不一致或缺少 `SKILL.md` 时，再请求 `skillUrl` 下载 zip 并覆盖 `${OPENCLAW_STATE_DIR}/skills/<skillCode>`。鉴权复用登录态/Redis 登录 Hash/环境变量中的 `Beyond-Token`、`Sso-Token`、`Authorization`、`X-User-Id`。
 - 若无有效 `relSkills`，则回退读取根级 **`skills`**（兼容旧版原生 JSON）；仍无则为 **`[]`**。
 - 若 `workspaceSkillAutoEnable` 未关闭，插件还会自动扫描用户上传的 `skills/<目录>/SKILL.md`，并优先使用 `SKILL.md` frontmatter 里的 `name` 作为 OpenClaw skill filter 名称：默认只把当前 agent workspace 下的 skill 并入该 agent，不读取其它 agent workspace；main workspace (`workspace/skills`) 仅在 `workspaceSkillIncludeMainShared: true` 时作为共享 skill 并入托管子 agent。扫描有 `fs.watch` 与 `workspaceSkillScanIntervalMs` 兜底（默认 `500` ms）；兜底扫描只做 skill diff，不重新读取数字员工 Redis，也不会触发托管 Agent 增删。
 - 对 rclone/FUSE 等网盘挂载，`fs.watch` 与目录类型上报可能不可靠；插件会依赖周期扫描，并在 `Dirent` 类型未知时用 `stat()` 兜底识别 skill 目录。

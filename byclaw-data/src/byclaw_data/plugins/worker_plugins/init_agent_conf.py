@@ -623,6 +623,18 @@ class InitDataCloudDigitalEmployeePlugin(Plugin):
         rel_resource_list = detail_data.get("relResourceList") or []
         if not isinstance(rel_resource_list, list):
             rel_resource_list = []
+
+        # 读取 extResourceList → ext_codes（加载到 TOOL_POOL，初始 LOCKED，LLM 不可见）
+        ext_resource_list = detail_data.get("extResourceList") or []
+        if not isinstance(ext_resource_list, list):
+            ext_resource_list = []
+        self._ext_codes = [
+            r.get("resourceCode") for r in ext_resource_list
+            if isinstance(r, dict)
+            and r.get("resourceBizType") in {"OBJECT", "VIEW"}
+            and r.get("resourceCode")
+        ]
+
         dynamic_tools, build_diag = self._build_dynamic_tools_with_diagnostics(
             agent_id=agent_id,
             rel_resource_list=rel_resource_list,
@@ -1279,10 +1291,10 @@ class InitDataCloudDigitalEmployeePlugin(Plugin):
             # 构造失败时降级为 None，由 configure_loader 自动回退至 LocalResultFileStorage。
             result_file_storage: Any = None
             try:
-                from byclaw_data.mcp.result_file_storage import (  # noqa: PLC0415
+                from byclaw_data.platform.result_file_storage import (  # noqa: PLC0415
                     build_result_file_storage,
                 )
-                from datacloud_data_service.config import get_settings  # noqa: PLC0415
+                from datacloud_platform.config import get_settings  # noqa: PLC0415
 
                 result_file_storage = build_result_file_storage(settings=get_settings())
             except Exception as _rfs_exc:  # noqa: BLE001

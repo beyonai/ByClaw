@@ -14,6 +14,12 @@ public class SandboxProperties {
 
     private VolumeConfig volume = new VolumeConfig();
 
+    private ProfileConfig profile = new ProfileConfig();
+
+    private TierAutoscaleConfig tierAutoscale = new TierAutoscaleConfig();
+
+    private HealthConfig health = new HealthConfig();
+
     /**
      * Redis metadata cache TTL. DB remains the lifecycle source of truth.
      */
@@ -80,6 +86,87 @@ public class SandboxProperties {
     }
 
     @Data
+    public static class ProfileConfig {
+        /**
+         * Disabled by default so legacy standalone/Docker deployments keep the old service_key-only flow.
+         */
+        private boolean enabled = false;
+    }
+
+    @Data
+    public static class TierAutoscaleConfig {
+        /**
+         * Dynamic sandbox resizing is opt-in. ByClaw records and decides, OpenSandbox performs the resize.
+         */
+        private boolean enabled = false;
+
+        /**
+         * Minimum interval before another scale-up action is accepted for the same sandbox.
+         */
+        private Duration scaleUpCooldown = Duration.ofMinutes(2);
+
+        /**
+         * Minimum interval before another scale-down action is accepted for the same sandbox.
+         */
+        private Duration scaleDownCooldown = Duration.ofMinutes(5);
+
+        /**
+         * Minimum interval before a scale-down is accepted after a successful scale-up/OOM handling.
+         */
+        private Duration scaleDownAfterUpProtection = Duration.ofMinutes(15);
+
+        /**
+         * PROCESSING records older than this are treated as abandoned and can be claimed again.
+         */
+        private Duration processingTimeout = Duration.ofMinutes(10);
+
+        /**
+         * Optional Prometheus API used to select a right-sized downscale target instead of always stepping down once.
+         */
+        private String prometheusBaseUrl;
+
+        private Duration prometheusQueryWindow = Duration.ofMinutes(5);
+
+        private double downscaleCpuHeadroom = 2.0D;
+
+        private double downscaleMemoryHeadroom = 1.25D;
+
+        private String boundaryBlacklistPodSuffix = "-0";
+    }
+
+    @Data
+    public static class HealthConfig {
+        /**
+         * Hard switch for sandbox health detection. Runtime/admin switch is stored in Redis.
+         */
+        private boolean enabled = false;
+
+        private long switchCacheTtlSeconds = 300L;
+
+        private long modelCacheTtlSeconds = 300L;
+
+        private int watchTtlSeconds = 90;
+
+        private double idleMemoryLimitRatio = 0.55D;
+
+        private double busyMemoryLimitRatio = 0.75D;
+
+        private double criticalMemoryLimitRatio = 0.88D;
+
+        private double busyCpuRequestRatio = 1.0D;
+
+        private double criticalCpuRequestRatio = 1.8D;
+
+        private int consecutiveBusySamples = 2;
+
+        private int recoverSamples = 2;
+
+        private int sampleIntervalSeconds = 30;
+
+        private int snapshotTtlSeconds = 120;
+    }
+
+    @Data
     public static class OpenSandboxConfig {
         private String baseUrl;
         private String apiKey;
@@ -96,7 +183,7 @@ public class SandboxProperties {
         private boolean listSandboxesBeforeCreate = true;
 
         /**
-         * 列表接口路径（相对 baseUrl），默认 GET /v1/sandboxes?userCode=&serviceKey=
+         * 列表接口路径（相对 baseUrl），默认 GET /v1/sandboxes?metadata=userCode%3D...%26serviceKey%3D...
          */
         private String listSandboxesPath = "/v1/sandboxes";
 

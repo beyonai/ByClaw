@@ -19,6 +19,11 @@ import { asString, isRecord } from "./types.js";
 import { extractOpenclawMcpForwardHeaders } from "./capability-builder.js";
 import { resolveChannelRequestContextBySessionKey } from "../channel-session-resolve.js";
 
+function normalizeLangfuseTraceId(value: unknown): string {
+  const text = asString(value);
+  return /^[0-9a-f]{32}$/i.test(text) && !/^0+$/i.test(text) ? text.toLowerCase() : "";
+}
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -91,11 +96,6 @@ export type DocPollResult = {
    * were observed.
    */
   text: string;
-  /** Terminal event's own content (kept for diagnostics). */
-  terminal_text?: string;
-  /** Concatenation of all `answerDelta` events observed during polling. */
-  delta_text?: string;
-  raw_message?: Dict;
   matched_stream_id?: string;
   stream_name: string;
 };
@@ -191,6 +191,34 @@ export function resolveDocChannelTraceId(requestPayload: Dict): string {
   const channelTraceId = asString(resourceContext.channel_trace_id);
   if (channelTraceId) return channelTraceId;
   return "";
+}
+
+export function resolveLangfuseParentObservationId(requestPayload: Dict): string {
+  const topLevel = isRecord(requestPayload)
+    ? asString(requestPayload.langfuseParentObservationId) ||
+      asString(requestPayload.langfuse_parent_observation_id)
+    : "";
+  if (topLevel) return topLevel;
+  const resourceContext: ResourceContext = isRecord(requestPayload)
+    ? (isRecord(requestPayload.resource_context) ? (requestPayload.resource_context as ResourceContext) : {})
+    : {};
+  return (
+    asString(resourceContext.langfuse_parent_observation_id) ||
+    asString(resourceContext.langfuseParentObservationId)
+  );
+}
+
+export function resolveLangfuseTraceId(requestPayload: Dict): string {
+  const topLevel = isRecord(requestPayload)
+    ? asString(requestPayload.langfuseTraceId) || asString(requestPayload.langfuse_trace_id)
+    : "";
+  if (topLevel) return normalizeLangfuseTraceId(topLevel) || topLevel;
+  const resourceContext: ResourceContext = isRecord(requestPayload)
+    ? (isRecord(requestPayload.resource_context) ? (requestPayload.resource_context as ResourceContext) : {})
+    : {};
+  const resourceTraceId = asString(resourceContext.langfuse_trace_id) || asString(resourceContext.langfuseTraceId);
+  if (resourceTraceId) return normalizeLangfuseTraceId(resourceTraceId) || resourceTraceId;
+  return normalizeLangfuseTraceId(resolveDocChannelTraceId(requestPayload));
 }
 
 
@@ -375,7 +403,6 @@ export async function pollDocResult(params: {
   const blockMs = Math.max(200, Math.min(Math.round(params.intervalSec * 1000), 5000));
   const drainMs = params.postTerminalDrainMs ?? 1500;
   const deltaParts: string[] = [];
-  let latestDeltaText = "";
 
   // Terminal state captured when we first see a final event; we keep
   // draining the stream after this to pick up trailing deltas.
@@ -447,7 +474,6 @@ export async function pollDocResult(params: {
         const eventText = extractDocTextFromData(msg.data) || stateMsg;
         if (eventType.toLowerCase().includes("answerdelta") && eventText) {
           deltaParts.push(eventText);
-          latestDeltaText = eventText;
           await emitDelta(eventText, deltaParts.join(""), eventType);
           continue;
         }
@@ -482,10 +508,7 @@ export async function pollDocResult(params: {
     };
   }
 
-  const aggregatedText =
-    delta.length >= terminalText.length
-      ? delta || terminalText || latestDeltaText
-      : terminalText;
+  const aggregatedText = terminalText || delta;
 
   // Top-up onDelta: if the final aggregated text differs from what the delta
   // stream pushed (e.g. terminal carries extra content, or worker published
@@ -499,9 +522,7 @@ export async function pollDocResult(params: {
     success: !terminalIsError,
     event_type: terminalEventType,
     text: aggregatedText,
-    terminal_text: terminalText,
     // delta_text: delta,
-    raw_message: terminalMsg,
     matched_stream_id: terminalStreamId,
     stream_name: streamName,
   };

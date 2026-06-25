@@ -1,31 +1,45 @@
-export const fileIconMap: Record<string, string> = {
-  ppt: 'icon-PPT',
-  pptx: 'icon-PPT',
-  excel: 'icon-Excel',
-  xlsx: 'icon-Excel',
-  text: 'icon-jishiben',
-  txt: 'icon-jishiben',
-  md: 'icon-jishiben',
-  word: 'icon-Word',
-  doc: 'icon-Word',
-  docx: 'icon-Word',
-  paper: 'icon-PDF',
-  pdf: 'icon-PDF',
-  table: 'icon-Excel',
-  record: 'icon-jishiben',
-  ocr: 'icon-jishiben',
-  file: 'icon-jishiben',
-  image: 'icon-Image',
-  png: 'icon-Image',
-  jpg: 'icon-Image',
-  jpeg: 'icon-Image',
-  gif: 'icon-Image',
-  webp: 'icon-Image',
-  bmp: 'icon-Image',
-  tiff: 'icon-Image',
-  ico: 'icon-Image',
-  svg: 'icon-Image',
-  folder: 'icon-wenjianjia',
-  chat: 'icon-wenjianjia',
-  other: 'icon-wenjianjia',
+const fileIconTypeGroups: Record<string, string[]> = {
+  PPT: ['ppt', 'pptx'],
+  Excel: ['excel', 'xls', 'xlsx', 'csv', 'table'],
+  jishiben: ['text', 'txt', 'record', 'ocr', 'file'],
+  markdown: ['md', 'markdown'],
+  Word: ['word', 'doc', 'docx'],
+  PDF: ['paper', 'pdf'],
+  Image: ['image', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'tiff', 'ico', 'svg'],
+  shipin: ['mp4', 'avi', 'mov', 'mkv', 'webm'],
+  yinpin: ['mp3', 'wav', 'flac'],
+  'a-Data-fileshujuwenjian': ['zip', 'rar', '7z', 'tar', 'gz', 'other'],
+  'a-Codedaima': ['js', 'ts', 'jsx', 'tsx', 'py', 'java', 'c', 'cpp', 'go', 'rs', 'rb', 'sh'],
+  wenjianjialanse: ['folder', 'chat'],
+};
+
+const fileIconTypeMap = Object.entries(fileIconTypeGroups).reduce<Record<string, string>>((map, [iconType, keys]) => {
+  keys.forEach((key) => {
+    map[key] = iconType;
+  });
+  return map;
+}, {});
+
+export const getFileIconType = (
+  fileName?: string,
+  options?: {
+    isDirectory?: boolean;
+    directoryIconType?: string;
+    defaultIconType?: string;
+  }
+) => {
+  const {
+    isDirectory = false,
+    directoryIconType = 'wenjianjialanse',
+    defaultIconType = 'a-Data-fileshujuwenjian',
+  } = options || {};
+
+  if (isDirectory) {
+    return directoryIconType;
+  }
+
+  const normalizedFileName = String(fileName || '').toLowerCase();
+  const ext = normalizedFileName.includes('.') ? normalizedFileName.split('.').pop() : normalizedFileName;
+
+  return (ext && fileIconTypeMap[ext]) || defaultIconType;
 };

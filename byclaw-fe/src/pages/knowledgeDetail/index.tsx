@@ -42,6 +42,7 @@ const KnowledgeDetail: React.FC = () => {
   const [showAddFolder, setShowAddFolder] = useState(false);
   const [baseInfo, setBaseInfo] = useState<any>({});
   const [uploadLoading, setUploadLoading] = useState(false);
+  const [selectedBuildCount, setSelectedBuildCount] = useState(0);
   const [knowledgeCapability, setKnowledgeCapability] = useState<KnowledgeCapability | null>(null);
   const [operationPermissions, setOperationPermissions] = useState<ResourceOperationPermissions | null>(null);
 
@@ -64,6 +65,10 @@ const KnowledgeDetail: React.FC = () => {
   }, [folderPath]);
 
   const canManageKnowledge = Boolean(operationPermissions?.hasManagePermission);
+  const canCreateFolder =
+    canManageKnowledge &&
+    resourceBizType !== ResourceTypeMap.knowledgeBaseQa &&
+    resourceBizType !== ResourceTypeMap.knowledgeBaseTerm;
 
   useEffect(() => {
     let mounted = true;
@@ -138,6 +143,7 @@ const KnowledgeDetail: React.FC = () => {
         <DirectoryManage
           ref={directoryRef}
           searchValue={searchValue}
+          setSearchValue={setSearchValue}
           baseInfo={baseInfo}
           setShowAddFolder={setShowAddFolder}
           canManage={canManageKnowledge}
@@ -145,6 +151,7 @@ const KnowledgeDetail: React.FC = () => {
           setUploadLoading={setUploadLoading}
           folderPath={folderPath}
           setFolderPath={setFolderPath}
+          onBuildSelectionChange={setSelectedBuildCount}
         />
       ),
     },
@@ -221,14 +228,26 @@ const KnowledgeDetail: React.FC = () => {
                 />
                 {tabKey === 'directoryManage' && (
                   <>
-                    {canManageKnowledge &&
-                      resourceBizType !== ResourceTypeMap.knowledgeBaseQa &&
-                      resourceBizType !== ResourceTypeMap.knowledgeBaseTerm && (
+                    {canCreateFolder && (
                       <Button
                         icon={<AntdIcon type="icon-a-Folder-pluswenjianjia-tianjia" style={{ fontSize: 18 }} />}
                         onClick={() => setShowAddFolder(true)}
                       >
                         {intl.formatMessage({ id: 'knowledgeDetail.newFolder' })}
+                      </Button>
+                    )}
+                    {canManageKnowledge && (
+                      <Button
+                        icon={<span className="iconfont icon-goujian" />}
+                        disabled={selectedBuildCount === 0}
+                        onClick={() => {
+                          directoryRef.current?.buildSelectedFiles();
+                        }}
+                      >
+                        {intl.formatMessage(
+                          { id: 'directoryManage.batchBuildWithCount' },
+                          { count: selectedBuildCount }
+                        )}
                       </Button>
                     )}
                     {canManageKnowledge && (

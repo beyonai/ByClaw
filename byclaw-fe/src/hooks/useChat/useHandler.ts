@@ -334,8 +334,9 @@ function useHandler(props: IProps) {
 
   const browserHandler = useCallback(
     (onionsProps: IOnionsProps) => {
-      const { sseRes } = onionsProps;
+      const { sseRes, newAnswerMsg } = onionsProps;
 
+      if (newAnswerMsg?.sessionId !== globalContext.sessionId) return onionsProps;
       if (!sseRes) return onionsProps;
 
       if ([`${SSEMessageType.jsonBlock}`].includes(`${sseRes?.message?.contentType}`)) {
@@ -376,7 +377,7 @@ function useHandler(props: IProps) {
 
       return onionsProps;
     },
-    [sandboxesInfo]
+    [sandboxesInfo, globalContext.sessionId]
   );
 
   return {

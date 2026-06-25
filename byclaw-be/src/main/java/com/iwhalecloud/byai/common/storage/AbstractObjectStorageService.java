@@ -85,6 +85,11 @@ public abstract class AbstractObjectStorageService<T> implements ObjectStorage {
     }
 
     @Override
+    public FileMetadata metadata(StorageLocation location) {
+        throw new UnsupportedOperationException(getStorageType() + " does not support metadata(StorageLocation)");
+    }
+
+    @Override
     public boolean exists(StorageLocation location) {
         throw new UnsupportedOperationException(getStorageType() + " does not support exists(StorageLocation)");
     }

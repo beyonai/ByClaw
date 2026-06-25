@@ -119,6 +119,11 @@ public class ResourceAuthVo extends AuthVo {
     private String createUserName;
 
     /**
+     * 使用数。技能场景下表示绑定该技能的数字员工数量。
+     */
+    private Long useCount;
+
+    /**
      * 是否有权限
      */
     private boolean hasPermission;
@@ -212,6 +217,67 @@ public class ResourceAuthVo extends AuthVo {
      * 资源归属类型
      */
     private String ownerType;
+
+    /**
+     * 技能类型：hub 表示个人/企业技能中心技能，inner 表示系统内置技能。
+     */
+    private String skillType;
+
+    /**
+     * 技能来源类型：对话框上传、技能管理上传、文件管理上传、系统内置等。
+     */
+    private String sourceType;
+
+    /**
+     * 技能版本。
+     */
+    private String version;
+
+    /**
+     * 技能包对象存储路径 / 内部路径。
+     */
+    private String skillUrl;
+
+    /**
+     * 技能包格式。
+     */
+    private String skillPackageFormat;
+
+    /**
+     * 技能包原始文件名。
+     */
+    private String skillOriginalFilename;
+
+    /**
+     * 技能包大小。
+     */
+    private Long skillPackageSize;
+
+    /**
+     * 技能包哈希。
+     */
+    private String skillPackageHash;
+
+    /**
+     * 技能目标 JSON 内容。
+     */
+    private String targetContent;
+
+    /**
+     * 技能同步状态。
+     */
+    private String syncStatus;
+
+    /**
+     * 技能同步错误信息。
+     */
+    private String syncError;
+
+    /**
+     * 最近同步时间。
+     */
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "GMT+8")
+    private Date lastSyncTime;
 
     /**
      * 是否可编辑资源信息

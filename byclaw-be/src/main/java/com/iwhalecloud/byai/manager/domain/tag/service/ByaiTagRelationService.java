@@ -8,7 +8,9 @@ import com.iwhalecloud.byai.manager.entity.tag.ByaiTagRelation;
 import com.iwhalecloud.byai.manager.mapper.tag.ByaiTagRelationMapper;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -19,6 +21,8 @@ import org.springframework.util.CollectionUtils;
  */
 @Service
 public class ByaiTagRelationService {
+
+    private static final Long DEFAULT_MODEL_TAG_ID = 1L;
 
     @Autowired
     private ByaiTagRelationMapper byaiTagRelationMapper;
@@ -77,19 +81,31 @@ public class ByaiTagRelationService {
      * @param creatorBy 创建人ID，可为 null
      */
     public void saveAimodelAbilities(Long modelId, List<String> abilities, Long creatorBy) {
-        if (modelId == null || CollectionUtils.isEmpty(abilities)) {
+        if (modelId == null) {
             return;
         }
-        byaiTagRelationMapper.deleteByObjTypeAndObjId(Constants.OBJ_TYPE_AIMODEL, modelId);
+        LambdaQueryWrapper<ByaiTagRelation> deleteWrapper = new LambdaQueryWrapper<>();
+        deleteWrapper.eq(ByaiTagRelation::getObjType, Constants.OBJ_TYPE_AIMODEL);
+        deleteWrapper.eq(ByaiTagRelation::getObjId, modelId);
+        deleteWrapper.ne(ByaiTagRelation::getTagId, DEFAULT_MODEL_TAG_ID);
+        byaiTagRelationMapper.delete(deleteWrapper);
+        if (CollectionUtils.isEmpty(abilities)) {
+            return;
+        }
         Date now = new Date();
         List<ByaiTagRelation> list = new ArrayList<>();
-        for (String ability : abilities) {
+        Set<String> normalizedAbilities = new LinkedHashSet<>(abilities);
+        for (String ability : normalizedAbilities) {
             if (StringUtils.isEmpty(ability)) {
+                continue;
+            }
+            Long tagId = Long.valueOf(ability);
+            if (DEFAULT_MODEL_TAG_ID.equals(tagId)) {
                 continue;
             }
             ByaiTagRelation rel = new ByaiTagRelation();
             rel.setRelationId(sequenceService.nextVal());
-            rel.setTagId(Long.valueOf(ability));
+            rel.setTagId(tagId);
             rel.setObjId(modelId);
             rel.setObjType(Constants.OBJ_TYPE_AIMODEL);
             rel.setCreateTime(now);

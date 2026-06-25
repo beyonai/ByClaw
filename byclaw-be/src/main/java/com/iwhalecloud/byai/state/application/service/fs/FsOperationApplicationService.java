@@ -17,6 +17,7 @@ import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 import com.iwhalecloud.byai.common.exception.BaseException;
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.common.storage.ResourceFS;
@@ -59,6 +60,10 @@ public class FsOperationApplicationService {
     private static final String USER_FS_ROOT = "/by";
 
     private static final String USER_BUCKET_PREFIX = "/byclaw-";
+
+    private static final String RESOURCE_SKILL_ROOT = "/resource/skill";
+
+    private static final String EXTERNAL_RESOURCE_SKILL_ROOT = "/byclaw/resource/skill";
 
     @Autowired
     private UserFS userFS;
@@ -279,6 +284,7 @@ public class FsOperationApplicationService {
 
     private void checkWritePermission(FsSpaceType spaceType, Long resourceId, String path) {
         checkLogin();
+        assertNotResourceManagedPath(path);
         if (spaceType == FsSpaceType.RESOURCE) {
             // 写、删除、重命名都会改变资源内容，必须具备资源管理权限。
             validateResourcePath(resourceId, path);
@@ -514,6 +520,20 @@ public class FsOperationApplicationService {
             throw new BaseException("byclaw.fs.user.path.prefix.invalid");
         }
         return normalizedPath;
+    }
+
+    private void assertNotResourceManagedPath(String path) {
+        String normalizedPath = StringUtils.removeEnd(normalizePath(path), "/");
+        if (isResourceManagedSkillPath(normalizedPath)) {
+            throw new BaseException(I18nUtil.get("byclaw.filebrowser.resource.managed.readonly", normalizedPath));
+        }
+    }
+
+    private boolean isResourceManagedSkillPath(String normalizedPath) {
+        return RESOURCE_SKILL_ROOT.equals(normalizedPath)
+            || normalizedPath.startsWith(RESOURCE_SKILL_ROOT + "/")
+            || EXTERNAL_RESOURCE_SKILL_ROOT.equals(normalizedPath)
+            || normalizedPath.startsWith(EXTERNAL_RESOURCE_SKILL_ROOT + "/");
     }
 
     private String normalizePath(String path) {

@@ -11,12 +11,15 @@ import com.iwhalecloud.byai.manager.application.service.digitemploy.event.DigEmp
 import com.iwhalecloud.byai.manager.domain.auth.service.PrivilegeGrantService;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceArtifactTypeEnum;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtDigEmployeeService;
+import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtSkillService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtToolKitService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceArtifactService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceRelDetailService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
+import com.iwhalecloud.byai.manager.entity.resource.SsResExtSkill;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.entity.resource.SsResourceArtifact;
+import com.iwhalecloud.byai.manager.entity.resource.SsResourceRelDetail;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.MessageSource;
@@ -276,6 +279,88 @@ class ToolManServiceTest {
         verify(ssResourceService).findById(502L);
         verify(ssResourceService).updateResourceEntity(enterpriseResource);
         assertThat(enterpriseResource.getResourceStatus()).isNotNull();
+    }
+
+    @Test
+    void deleteManagedResource_skillRejectsWhenReferencedByDigitalEmployee() {
+        ToolManService service = new ToolManService();
+        SsResourceService ssResourceService = mock(SsResourceService.class);
+        AuthApplicationService authApplicationService = mock(AuthApplicationService.class);
+        SsResExtSkillService ssResExtSkillService = mock(SsResExtSkillService.class);
+        SsResourceRelDetailService ssResourceRelDetailService = mock(SsResourceRelDetailService.class);
+
+        ReflectionTestUtils.setField(service, "ssResourceService", ssResourceService);
+        ReflectionTestUtils.setField(service, "authApplicationService", authApplicationService);
+        ReflectionTestUtils.setField(service, "ssResExtSkillService", ssResExtSkillService);
+        ReflectionTestUtils.setField(service, "ssResourceRelDetailService", ssResourceRelDetailService);
+        ReflectionTestUtils.setField(service, "datasetSystem", "");
+        prepareI18nUtil();
+
+        SsResource skillResource = new SsResource();
+        skillResource.setResourceId(801L);
+        skillResource.setResourceName("demo-skill");
+        skillResource.setResourceCode("demo-skill");
+        skillResource.setResourceBizType(ResourceBizType.SKILL.getCode());
+        skillResource.setOwnerType("enterprise");
+
+        SsResource digitalEmployee = new SsResource();
+        digitalEmployee.setResourceId(901L);
+        digitalEmployee.setResourceName("默认数字员工");
+        digitalEmployee.setResourceBizType(ResourceBizType.DIG_EMPLOYEE.getCode());
+        digitalEmployee.setResourceStatus(2);
+
+        SsResourceRelDetail relation = new SsResourceRelDetail();
+        relation.setResourceId(901L);
+        relation.setRelResourceId(801L);
+
+        when(ssResourceService.findById(801L)).thenReturn(skillResource);
+        when(authApplicationService.hasResourceManagePermission(skillResource)).thenReturn(true);
+        when(ssResExtSkillService.findById(801L)).thenReturn(null);
+        when(ssResourceRelDetailService.list(org.mockito.ArgumentMatchers.any(
+            com.baomidou.mybatisplus.core.conditions.Wrapper.class))).thenReturn(List.of(relation));
+        when(ssResourceService.findByIdList(List.of(901L))).thenReturn(List.of(digitalEmployee));
+
+        assertThatThrownBy(() -> service.deleteManagedResource(801L))
+            .isInstanceOf(RuntimeException.class)
+            .hasMessageContaining("tool.resource.delete.digemployee.relation.exists");
+
+        verify(ssResourceService, never()).removeById(anyLong());
+        verify(ssResourceRelDetailService, never()).removeAllByResourceIdOrRelResourceId(anyLong());
+    }
+
+    @Test
+    void deleteManagedResource_rejectsInnerSkillEvenWithManagePermission() {
+        ToolManService service = new ToolManService();
+        SsResourceService ssResourceService = mock(SsResourceService.class);
+        AuthApplicationService authApplicationService = mock(AuthApplicationService.class);
+        SsResExtSkillService ssResExtSkillService = mock(SsResExtSkillService.class);
+
+        ReflectionTestUtils.setField(service, "ssResourceService", ssResourceService);
+        ReflectionTestUtils.setField(service, "authApplicationService", authApplicationService);
+        ReflectionTestUtils.setField(service, "ssResExtSkillService", ssResExtSkillService);
+        ReflectionTestUtils.setField(service, "datasetSystem", "");
+        prepareI18nUtil();
+
+        SsResource skillResource = new SsResource();
+        skillResource.setResourceId(802L);
+        skillResource.setResourceName("inner-skill");
+        skillResource.setResourceCode("inner-skill");
+        skillResource.setResourceBizType(ResourceBizType.SKILL.getCode());
+        skillResource.setOwnerType("enterprise");
+
+        SsResExtSkill extSkill = new SsResExtSkill();
+        extSkill.setResourceId(802L);
+        extSkill.setSkillType(SsResExtSkillService.INNER_SKILL_TYPE);
+
+        when(ssResourceService.findById(802L)).thenReturn(skillResource);
+        when(authApplicationService.hasResourceManagePermission(skillResource)).thenReturn(true);
+        when(ssResExtSkillService.findById(802L)).thenReturn(extSkill);
+
+        assertThatThrownBy(() -> service.deleteManagedResource(802L))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("byclaw.skill.inner.readonly");
+
+        verify(ssResourceService, never()).removeById(anyLong());
     }
 
     @Test

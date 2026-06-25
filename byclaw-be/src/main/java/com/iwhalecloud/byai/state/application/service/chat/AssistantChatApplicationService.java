@@ -10,10 +10,14 @@ import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.message.entity.ByaiMessage;
+import com.iwhalecloud.byai.common.message.entity.ByaiMessageRelObjDto;
 import com.iwhalecloud.byai.common.message.service.ByaiMessageHotService;
+import com.iwhalecloud.byai.common.message.service.ByaiMessageRelObjService;
 import com.iwhalecloud.byai.common.storage.model.StorageLocation;
 import com.iwhalecloud.byai.common.util.DateUtils;
+import com.iwhalecloud.byai.common.util.OkHttpUtil;
 import com.iwhalecloud.byai.common.util.StringUtil;
+import com.iwhalecloud.byai.gateway.sandbox.service.SandboxEndpointService;
 import com.iwhalecloud.byai.manager.domain.customer.service.FilesService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtDigEmployeeService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
@@ -24,9 +28,11 @@ import com.iwhalecloud.byai.manager.entity.file.Files;
 import com.iwhalecloud.byai.manager.entity.resource.SsResExtDigEmployee;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
+import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.qo.resource.DigEmployeeExtQo;
 import com.iwhalecloud.byai.state.common.dto.AnswerDelta;
 import com.iwhalecloud.byai.state.common.dto.MessageStructDto;
+import com.iwhalecloud.byai.state.common.exception.BdpRuntimeException;
 import com.iwhalecloud.byai.state.domain.chat.dto.FileUploadDto;
 import com.iwhalecloud.byai.state.domain.chat.dto.PrologueDto;
 import com.iwhalecloud.byai.state.domain.chat.dto.RunningChatSnapshotResponse;
@@ -35,20 +41,27 @@ import com.iwhalecloud.byai.state.domain.chat.service.ChatProcessContext;
 import com.iwhalecloud.byai.state.domain.chat.service.OutputStreamManager;
 import com.iwhalecloud.byai.state.domain.chat.service.RunningChatSnapshotService;
 import com.iwhalecloud.byai.state.domain.chat.service.RunningOutputStreamRegistry;
+import com.iwhalecloud.byai.state.domain.chat.service.ScriptService;
+import com.iwhalecloud.byai.state.domain.chat.service.SessionStreamManager;
 import com.iwhalecloud.byai.state.domain.file.service.ConversationFileStorage;
 import com.iwhalecloud.byai.state.domain.file.service.ConversationStoragePathResolver;
 import com.iwhalecloud.byai.state.domain.session.enums.SessionType;
 import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 import com.iwhalecloud.byai.state.domain.template.enums.DebugModeEnum;
-import com.iwhalecloud.byai.state.domain.chat.service.TargetAgentTypeResolver;
+import com.iwhalecloud.byai.state.domain.chat.service.TargetAgentResolver;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
+
+import java.io.IOException;
 import java.util.Date;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * @author he.duming
@@ -77,7 +90,7 @@ public class AssistantChatApplicationService {
     private ConversationFileStorage conversationFileStorage;
 
     @Autowired
-    private TargetAgentTypeResolver targetAgentTypeResolver;
+    private TargetAgentResolver targetAgentResolver;
 
     @Autowired
     private ByaiSystemConfigService byaiSystemConfigService;
@@ -89,6 +102,9 @@ public class AssistantChatApplicationService {
     private ByaiMessageHotService byaiMessageHotService;
 
     @Autowired
+    private ByaiMessageRelObjService byaiMessageRelObjService;
+
+    @Autowired
     private RunningOutputStreamRegistry runningOutputStreamRegistry;
 
     @Autowired
@@ -97,8 +113,43 @@ public class AssistantChatApplicationService {
     @Autowired
     private OutputStreamManager outputStreamManager;
 
+    @Autowired
+    private RedisTemplate<String, Object> redisTemplate;
+
     AssistantChatApplicationService(GatewayClient<?> gatewayClient) {
         this.gatewayClient = gatewayClient;
+    }
+
+    public JSONObject getSessionStatus(String sessionId, Long agentId) throws IOException {
+        if (StringUtils.isBlank(sessionId)) {
+            throw new BdpRuntimeException(I18nUtil.get("assistant.chat.session.id.not.empty"));
+        }
+        Long resolveAgentId = targetAgentResolver.resolveAgentId(agentId);
+        String statusValue = readSessionStatusValue(sessionId, resolveAgentId);
+        if (StringUtils.isBlank(statusValue)) {
+            return new JSONObject();
+        }
+        try {
+            return JSON.parseObject(statusValue);
+        }
+        catch (Exception e) {
+            throw new BdpRuntimeException("session status is not valid json", e);
+        }
+    }
+
+    private String readSessionStatusValue(String sessionId, Long agentId) {
+        Object value = redisTemplate.opsForHash()
+            .get(buildSessionStatusKey(sessionId), resolveSessionStatusField(agentId));
+        return value == null ? null : String.valueOf(value);
+    }
+
+    private String buildSessionStatusKey(String sessionId) {
+        return SessionStreamManager.SESSION_STATUS_KEY_PREFIX + sessionId
+            + SessionStreamManager.SESSION_STATUS_KEY_SUFFIX;
+    }
+
+    private String resolveSessionStatusField(Long agentId) {
+        return agentId == null ? SessionStreamManager.DEFAULT_SESSION_STATUS_FIELD : String.valueOf(agentId);
     }
 
     /**
@@ -116,7 +167,7 @@ public class AssistantChatApplicationService {
             workerAgentType = ssResource.getWorkerAgentType();
         }
 
-        String targetAgentType = targetAgentTypeResolver.resolve(workerAgentType, stopChatDto.getAgentId(), null,
+        String targetAgentType = targetAgentResolver.resolveAgentType(workerAgentType, stopChatDto.getAgentId(), null,
             CurrentUserHolder.getCurrentUserCode());
 
         gatewayClient.cancelTask(String.valueOf(stopChatDto.getMessageId()), String.valueOf(stopChatDto.getSessionId()),
@@ -415,5 +466,26 @@ public class AssistantChatApplicationService {
             }
         }
         return jsonArray.toJSONString();
+    }
+
+    /**
+     * 根据消息ID获取 traceId。
+     * <p>
+     * 根据 byai_message_relobj 表查询：res_msg_id = messageId 或 ask_msg_id = messageId， 命中后取 ask_msg_id 与 res_msg_id 编码出
+     * traceId。
+     *
+     * @param messageId 消息ID
+     * @return traceId，未查询到关联记录时返回 null
+     */
+    public String getTraceIdByMessageId(Long messageId) {
+        if (messageId == null) {
+            throw new BdpRuntimeException(I18nUtil.get("assistant.chat.message.id.not.empty"));
+        }
+        List<ByaiMessageRelObjDto> relList = byaiMessageRelObjService.findByAskOrResMsgId(messageId);
+        if (CollectionUtils.isEmpty(relList)) {
+            return null;
+        }
+        ByaiMessageRelObjDto rel = relList.get(0);
+        return ScriptService.getTraceId(rel.getAskMsgId(), rel.getResMsgId());
     }
 }

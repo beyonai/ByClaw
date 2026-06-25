@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { getLocale } from '@umijs/max';
-import { POST } from '@/service/common/request';
+import { GET, POST } from '@/service/common/request';
 import { getSessionKey, getssoToken, getToken, ssotokenKey, tokenKey } from '@/pages/manager/utils/auth';
 import { generateSignature } from '@/pages/manager/utils/signature';
 
@@ -32,6 +32,10 @@ export async function setModelStatus(params: any) {
 
 export async function setDefaultModel(params: any) {
   return POST('/byaiService/new/model/setDefaultModel', { ...params }, withCustomHandle);
+}
+
+export async function completeAllModelConfig() {
+  return GET('/byaiService/new/model/completeAllModelConfig', {}, { ...withCustomHandle, languageConf: false });
 }
 
 const getDeltaText = (payload: any) => {

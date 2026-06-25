@@ -5,7 +5,14 @@
       "Bash(mvn:*)",
       "Bash(npx tsc *)",
       "WebSearch",
-      "Bash(gh api *)"
+      "Bash(gh api *)",
+      "Bash(node -e \"const s=require\\('./package.json'\\).scripts; console.log\\(JSON.stringify\\(s,null,1\\)\\)\")",
+      "Bash(npx eslint *)",
+      "Bash(echo \"=== exit $? ===\")",
+      "Bash(echo \"=== eslint exit $? ===\")",
+      "Bash(echo \"=== refix exit $? ===\")",
+      "Bash(npx stylelint *)",
+      "Bash(echo \"=== stylelint exit $? ===\")"
     ]
   }
 }

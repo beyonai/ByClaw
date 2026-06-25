@@ -14,18 +14,48 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+_DEFAULT_ONTOLOGY_SERVICE = "byclaw-datacloud"
+
 
 def _init_discovery_redis() -> None:
     """全局初始化服务发现 Redis（幂等）。"""
     from by_framework.common.redis_client import init_redis  # type: ignore[import-untyped]
 
     init_redis(
-        host=os.getenv("REDIS_HOST", "localhost"),
-        port=int(os.getenv("REDIS_PORT", "6379")),
-        db=int(os.getenv("REDIS_DATABASE", "0")),
-        password=os.getenv("REDIS_PASSWORD") or None,
-        username=os.getenv("REDIS_USERNAME") or None,
+        host=os.getenv("DATACLOUD_GATEWAY_REDIS_HOST", os.getenv("REDIS_HOST", "localhost")),
+        port=int(os.getenv("DATACLOUD_GATEWAY_REDIS_PORT", os.getenv("REDIS_PORT", "6379"))),
+        db=int(os.getenv("DATACLOUD_GATEWAY_REDIS_DATABASE", os.getenv("REDIS_DATABASE", "0"))),
+        password=os.getenv("DATACLOUD_GATEWAY_REDIS_PASSWORD", os.getenv("REDIS_PASSWORD")) or None,
+        username=os.getenv("DATACLOUD_GATEWAY_REDIS_USERNAME", os.getenv("REDIS_USERNAME")) or None,
     )
+
+
+async def _post_via_discovery(
+    service_name: str,
+    path: str,
+    payload: dict[str, Any],
+    headers: dict[str, str],
+) -> Any:
+    """通过服务发现调用指定服务的 POST 接口。"""
+    from by_framework.core.discovery import DiscoveryClient  # type: ignore[import-untyped]
+    from by_framework.util.discovery_http_client import DiscoveryHttpClient  # type: ignore[import-untyped]
+    from by_framework.util.http_client import RetryConfig  # type: ignore[import-untyped]
+
+    _init_discovery_redis()
+    discovery_client = DiscoveryClient(cache_interval=5)
+    retry_config = RetryConfig(max_attempts=3, retry_on_status_codes={502, 503, 504})
+    try:
+        async with DiscoveryHttpClient(discovery_client, retry_config=retry_config, health_threshold_ms=-1) as client:
+            response = await client.post(service_name, path, headers=headers, json=payload)
+    finally:
+        await discovery_client.close()
+
+    body: dict[str, Any] = response.data if isinstance(response.data, dict) else {}
+    if not response.is_success or body.get("code", 0) != 0:
+        raise ValueError(f"HTTP {response.status_code} {service_name}{path}: {body.get('msg', body)}")
+    if body and "data" in body:
+        return body["data"]
+    return body
 
 
 def post_json(path: str, payload: dict[str, Any], service_env: str = "BE_DOMAINNAME") -> Any:
@@ -48,29 +78,27 @@ def post_json(path: str, payload: dict[str, Any], service_env: str = "BE_DOMAINN
     return _run_async_in_thread(_post_via_discovery(service_name, path, payload, headers))
 
 
-async def _post_via_discovery(
-    service_name: str,
-    path: str,
-    payload: dict[str, Any],
-    headers: dict[str, str],
-) -> Any:
-    from by_framework.core.discovery import DiscoveryClient  # type: ignore[import-untyped]
-    from by_framework.util.discovery_http_client import DiscoveryHttpClient  # type: ignore[import-untyped]
-    from by_framework.util.http_client import RetryConfig  # type: ignore[import-untyped]
+def post_ontology_api(path: str, payload: dict[str, Any]) -> Any:
+    """调用 datacloud_data_service 的 ontology-manager API。
 
-    _init_discovery_redis()
-    discovery_client = DiscoveryClient(cache_interval=5)
-    retry_config = RetryConfig(max_attempts=3, retry_on_status_codes={502, 503, 504})
-    try:
-        async with DiscoveryHttpClient(discovery_client, retry_config=retry_config, health_threshold_ms=-1) as client:
-            response = await client.post(service_name, path, headers=headers, json=payload)
-    finally:
-        await discovery_client.close()
+    通过 DATACLOUD_SERVICE_NAME 环境变量指定服务发现名，默认 byclaw-datacloud。
 
-    body: dict[str, Any] = response.data if isinstance(response.data, dict) else {}
-    if not response.is_success or body.get("code", 0) != 0:
-        raise ValueError(f"HTTP {response.status_code} {service_name}{path}: {body.get('msg', body)}")
-    return body.get("data")
+    Args:
+        path: API 路径，如 "/object/collect"
+        payload: 请求体
+    """
+    service_name = os.environ.get("DATACLOUD_DOMAINNAME", _DEFAULT_ONTOLOGY_SERVICE).strip()
+
+    token = os.environ.get("BEYOND_TOKEN", "").strip()
+    user_code = os.environ.get("USER_CODE", "").strip()
+    headers: dict[str, str] = {"Content-Type": "application/json"}
+    if token:
+        headers["Beyond-Token"] = token
+    if user_code:
+        headers["X-User-Code"] = user_code
+
+    api_path = f"/api/v1/ontology-manager{path}"
+    return _run_async_in_thread(_post_via_discovery(service_name, api_path, payload, headers))
 
 
 def _run_async_in_thread(coro: Any) -> Any:
@@ -128,11 +156,11 @@ def load_embedding_model_from_redis() -> bool:
 
     try:
         client = _redis.Redis(
-            host=os.environ.get("REDIS_HOST", "localhost"),
-            port=int(os.environ.get("REDIS_PORT", "6379")),
-            db=int(os.environ.get("REDIS_DATABASE", "0")),
-            password=os.environ.get("REDIS_PASSWORD") or None,
-            username=os.environ.get("REDIS_USERNAME") or None,
+            host=os.getenv("DATACLOUD_GATEWAY_REDIS_HOST", os.getenv("REDIS_HOST", "localhost")),
+            port=int(os.getenv("DATACLOUD_GATEWAY_REDIS_PORT", os.getenv("REDIS_PORT", "6379"))),
+            db=int(os.getenv("DATACLOUD_GATEWAY_REDIS_DATABASE", os.getenv("REDIS_DATABASE", "0"))),
+            password=os.getenv("DATACLOUD_GATEWAY_REDIS_PASSWORD", os.getenv("REDIS_PASSWORD")) or None,
+            username=os.getenv("DATACLOUD_GATEWAY_REDIS_USERNAME", os.getenv("REDIS_USERNAME")) or None,
             decode_responses=True,
         )
 

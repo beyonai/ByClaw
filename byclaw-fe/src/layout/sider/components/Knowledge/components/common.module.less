@@ -51,12 +51,24 @@
     }
 
     .@{antPrefix}-tree-node-content-wrapper {
+      display: inline-flex;
+      align-items: center;
+      min-width: 0;
+      max-width: 100%;
       padding-left: 0;
       padding-right: 22px;
     }
 
+    .@{antPrefix}-tree-node-content-wrapper .@{antPrefix}-tree-iconEle {
+      flex: none;
+    }
+
     .@{antPrefix}-tree-treenode .@{antPrefix}-tree-node-content-wrapper > .@{antPrefix}-tree-title {
       position: static;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
     .@{antPrefix}-tree-treenode:hover {

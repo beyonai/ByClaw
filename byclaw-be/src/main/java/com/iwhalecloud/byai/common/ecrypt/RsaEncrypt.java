@@ -1,7 +1,6 @@
 package com.iwhalecloud.byai.common.ecrypt;
 
-
-
+import com.iwhalecloud.byai.common.web.ApplicationContextUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import java.math.BigInteger;
@@ -16,19 +15,18 @@ public class RsaEncrypt {
 
     private static final Logger logger = LoggerFactory.getLogger(RsaEncrypt.class);
 
-    // 请不要擅自修改该以下2个密码串
-    public static final String PUBILC_KEY = "65537";
-
-    public static final String MODULES = "118249911269313777353369205468358971445904616358074252669429944094950609311848727388859640174096832607664732279928019002795333396858212446930193162882569448161371673123891912144968110489981164388431260818873249786366362488910362896712606417158347288417834035704864053434682010900207183838254091105621956825021";
-
     /**
      * 加密
-     * 
+     *
      * @param input
      * @return
      */
     public static String encrypt(String input) {
-        RSAPublicKey pubKey = getPublicKey(MODULES, PUBILC_KEY);
+
+        String modules = ApplicationContextUtil.getEnvProperty("byclaw.rsa.modules");
+        String publicKey = ApplicationContextUtil.getEnvProperty("byclaw.rsa.public-key");
+
+        RSAPublicKey pubKey = getPublicKey(modules, publicKey);
         String outString = "";
         try {
             outString = encryptByPublicKey(input, pubKey);
@@ -42,7 +40,7 @@ public class RsaEncrypt {
 
     /**
      * 使用模和指数生成RSA公钥 注意：【此代码用了默认补位方式，为RSA/None/PKCS1Padding，不同JDK默认的补位方式可能不同，如Android默认是RSA /None/NoPadding】
-     * 
+     *
      * @param modulus 模
      * @param exponent 指数
      * @return
@@ -63,7 +61,7 @@ public class RsaEncrypt {
 
     /**
      * 公钥加密
-     * 
+     *
      * @param data
      * @param publicKey
      * @return

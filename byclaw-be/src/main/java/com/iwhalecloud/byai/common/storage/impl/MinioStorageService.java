@@ -110,6 +110,7 @@ public class MinioStorageService extends AbstractFileIngressStorageService<Minio
      */
     public void uploadBytes(String bucketName, String objectKey, byte[] bytes, String contentType) {
         try {
+            objectKey = normalizeObjectKey(objectKey);
             createBucketIfAbsent(bucketName);
             PutObjectArgs putObjectArgs = PutObjectArgs.builder().bucket(bucketName).object(objectKey)
                 .stream(new ByteArrayInputStream(bytes), bytes.length, -1).contentType(contentType).build();
@@ -129,6 +130,7 @@ public class MinioStorageService extends AbstractFileIngressStorageService<Minio
      * @return true-对象存在，false-对象不存在
      */
     public boolean objectExists(String bucketName, String objectKey) {
+        objectKey = normalizeObjectKey(objectKey);
         try {
             StatObjectArgs statObjectArgs = StatObjectArgs.builder().bucket(bucketName).object(objectKey).build();
             getClient().statObject(statObjectArgs);
@@ -152,6 +154,7 @@ public class MinioStorageService extends AbstractFileIngressStorageService<Minio
     public List<Item> listObjectKeys(String bucketName, String prefix, boolean recursive) {
         List<Item> objectKeys = new ArrayList<>();
         try {
+            prefix = normalizeObjectKey(prefix);
             Iterable<Result<Item>> results = getClient()
                 .listObjects(ListObjectsArgs.builder().bucket(bucketName).prefix(prefix).recursive(recursive).build());
             for (Result<Item> result : results) {
@@ -178,6 +181,8 @@ public class MinioStorageService extends AbstractFileIngressStorageService<Minio
      */
     public void copyObject(String bucketName, String sourceObjectKey, String targetObjectKey) {
         try {
+            sourceObjectKey = normalizeObjectKey(sourceObjectKey);
+            targetObjectKey = normalizeObjectKey(targetObjectKey);
             CopySource source = CopySource.builder().bucket(bucketName).object(sourceObjectKey).build();
             CopyObjectArgs copyObjectArgs = CopyObjectArgs.builder().bucket(bucketName).object(targetObjectKey)
                 .source(source).build();
@@ -192,6 +197,7 @@ public class MinioStorageService extends AbstractFileIngressStorageService<Minio
      * 删除对象；若对象不存在则安静跳过。
      */
     public void deleteObjectIfExists(String bucketName, String objectKey) {
+        objectKey = normalizeObjectKey(objectKey);
         if (!objectExists(bucketName, objectKey)) {
             return;
         }
@@ -208,7 +214,7 @@ public class MinioStorageService extends AbstractFileIngressStorageService<Minio
     public FileMetadata put(StorageLocation location, InputStream inputStream, long size, String contentType) {
         try {
             String bucketName = location.getBucketOrRoot();
-            String objectKey = location.getPath();
+            String objectKey = normalizeObjectKey(location.getPath());
             createBucketIfAbsent(bucketName);
             PutObjectArgs putObjectArgs = PutObjectArgs.builder().bucket(bucketName).object(objectKey)
                 .stream(inputStream, size, -1).contentType(contentType).build();
@@ -231,7 +237,12 @@ public class MinioStorageService extends AbstractFileIngressStorageService<Minio
 
     @Override
     public InputStream get(StorageLocation location) {
-        return doDownloadFile(location.getPath(), location.getBucketOrRoot());
+        return doDownloadFile(normalizeObjectKey(location.getPath()), location.getBucketOrRoot());
+    }
+
+    @Override
+    public FileMetadata metadata(StorageLocation location) {
+        return buildObjectMetadata(location.getPath(), location.getBucketOrRoot());
     }
 
     @Override
@@ -255,7 +266,8 @@ public class MinioStorageService extends AbstractFileIngressStorageService<Minio
             }
 
             StorageObject storageObject = StorageObject.builder().bucketOrRoot(prefix.getBucketOrRoot())
-                .path(item.objectName()).isDir(item.isDir()).size(item.size()).build();
+                .path(item.objectName()).isDir(item.isDir()).size(item.size())
+                .lastModified(item.lastModified() == null ? null : item.lastModified().toString()).build();
             objects.add(storageObject);
         }
         return objects;
@@ -383,7 +395,7 @@ public class MinioStorageService extends AbstractFileIngressStorageService<Minio
     protected FileMetadata doUploadFile(MultipartFile multipartFile, String storagePath, String bucketName,
         FileStorageContext fileStorageContext) {
         try {
-            String objectName = storagePath + multipartFile.getOriginalFilename();
+            String objectName = normalizeObjectKey(storagePath + multipartFile.getOriginalFilename());
             PutObjectArgs putObjectArgs = PutObjectArgs.builder().bucket(bucketName).object(objectName)
                 .stream(multipartFile.getInputStream(), multipartFile.getSize(), -1).build();
 
@@ -410,6 +422,7 @@ public class MinioStorageService extends AbstractFileIngressStorageService<Minio
     @Override
     protected InputStream doDownloadFile(String fileId, String bucketName) {
         try {
+            fileId = normalizeObjectKey(fileId);
             GetObjectArgs getObjectArgs = GetObjectArgs.builder().bucket(bucketName).object(fileId).build();
 
             InputStream inputStream = getClient().getObject(getObjectArgs);
@@ -443,6 +456,7 @@ public class MinioStorageService extends AbstractFileIngressStorageService<Minio
     @Override
     protected void doDeleteFile(String objectUrl, String bucketName) {
         try {
+            objectUrl = normalizeObjectKey(objectUrl);
             RemoveObjectArgs removeObjectArgs = RemoveObjectArgs.builder().bucket(bucketName).object(objectUrl).build();
 
             getClient().removeObject(removeObjectArgs);
@@ -463,7 +477,12 @@ public class MinioStorageService extends AbstractFileIngressStorageService<Minio
      */
     @Override
     protected FileMetadata doGetObjectMetadata(String objectKey, String bucketName) {
+        return buildObjectMetadata(objectKey, bucketName);
+    }
+
+    private FileMetadata buildObjectMetadata(String objectKey, String bucketName) {
         try {
+            objectKey = normalizeObjectKey(objectKey);
             StatObjectArgs statObjectArgs = StatObjectArgs.builder().bucket(bucketName).object(objectKey).build();
             StatObjectResponse statObjectResponse = getClient().statObject(statObjectArgs);
             String fileUrl = generateFileAccessUrl(bucketName, objectKey);
@@ -478,6 +497,7 @@ public class MinioStorageService extends AbstractFileIngressStorageService<Minio
             fileMetadata.setBucketName(bucketName);
             fileMetadata.setFileTag(statObjectResponse.etag());
             fileMetadata.setStorageType(getStorageType());
+            fileMetadata.setLastModified(statObjectResponse.lastModified() == null ? null : statObjectResponse.lastModified().toString());
             return fileMetadata;
         }
         catch (ErrorResponseException e) {
@@ -516,6 +536,14 @@ public class MinioStorageService extends AbstractFileIngressStorageService<Minio
                 Boolean.TRUE.equals(minioConfig.getSecure()), e);
             throw new BaseException(I18nUtil.get("storage.minio.create.bucket.failed", bucketName), e);
         }
+    }
+
+    private String normalizeObjectKey(String objectKey) {
+        String normalized = StringUtils.trimToEmpty(objectKey).replace('\\', '/').replaceAll("/+", "/");
+        while (normalized.startsWith("/")) {
+            normalized = normalized.substring(1);
+        }
+        return normalized;
     }
 
 }

@@ -67,6 +67,20 @@ export async function updateDigitalEmployee(params: any) {
   return POST('/byaiService/digitalEmployeeController/updateDigitalEmployee', withResourceImplDefaults(params));
 }
 
+export async function installDigitalEmployeeRelResources(params: {
+  digitalEmployeeId: string | number;
+  relIds: Array<string | number>;
+}) {
+  return POST('/byaiService/digitalEmployeeController/installRelResources', { ...params });
+}
+
+export async function uninstallDigitalEmployeeRelResources(params: {
+  digitalEmployeeId: string | number;
+  relIds: Array<string | number>;
+}) {
+  return POST('/byaiService/digitalEmployeeController/uninstallRelResources', { ...params });
+}
+
 export async function publishApp(params: any) {
   return POST('/byaiService/digitalEmployeeController/publishApp', { ...params });
 }

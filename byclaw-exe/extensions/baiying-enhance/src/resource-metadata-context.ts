@@ -27,6 +27,10 @@ export function buildExecutorResourceContext(params: {
   channelSessionId?: string;
   /** Gateway/channel trace id passthrough for DOC async routing. */
   channelTraceId?: string;
+  /** Langfuse/OTel trace id used to keep downstream callAgent spans in the same trace. */
+  langfuseTraceId?: string;
+  /** Current Langfuse observation id; forwarded as parent observation for downstream callAgent spans. */
+  langfuseParentObservationId?: string;
   language?: string;
   beyondToken?: string;
   parentSessionKey?: string;
@@ -71,6 +75,8 @@ export function buildExecutorResourceContext(params: {
 
   const channelSid = nonEmpty(params.channelSessionId);
   const channelTraceId = nonEmpty(params.channelTraceId);
+  const langfuseTraceId = nonEmpty(params.langfuseTraceId);
+  const langfuseParentObservationId = nonEmpty(params.langfuseParentObservationId);
   const sessionKey = nonEmpty(params.sessionKey);
   const out: Record<string, unknown> = {
     root_agent: rootAgent,
@@ -96,6 +102,14 @@ export function buildExecutorResourceContext(params: {
       openclawHeaders["channel-trace-id"] = channelTraceId;
     }
     out.openclaw_mcp_headers = openclawHeaders;
+  }
+  if (langfuseParentObservationId) {
+    out.langfuse_parent_observation_id = langfuseParentObservationId;
+    out.langfuseParentObservationId = langfuseParentObservationId;
+  }
+  if (langfuseTraceId) {
+    out.langfuse_trace_id = langfuseTraceId;
+    out.langfuseTraceId = langfuseTraceId;
   }
   return out;
 }

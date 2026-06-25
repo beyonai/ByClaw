@@ -2,13 +2,13 @@
 
 ## 数据类型（data_type）
 
-| 类型 | SQLite 映射 | 说明 |
-|------|-------------|------|
-| `STRING` | `TEXT` | 字符串 |
+| 类型 | 表 映射      | 说明 |
+|------|-----------|------|
+| `STRING` | `TEXT`    | 字符串 |
 | `INTEGER` | `INTEGER` | 整数 |
-| `FLOAT` | `REAL` | 浮点数 |
+| `FLOAT` | `REAL`    | 浮点数 |
 | `BOOLEAN` | `INTEGER` | 布尔值（0/1） |
-| `DATE` | `TEXT` | 日期（ISO 8601） |
+| `DATE` | `TEXT`    | 日期（ISO 8601） |
 
 ## 属性角色（property_role）
 

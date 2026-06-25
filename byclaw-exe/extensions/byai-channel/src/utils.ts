@@ -2,6 +2,10 @@
 import { createRedis, GatewayDataEmitter, SseMessageType } from "@byclaw/by-framework";
 import { getByaiRuntime } from "./runtime";
 
+export function generateRandomId() {
+  return crypto.randomUUID().replace(/-/g, '');
+}
+
 let prevEmitIncrementKey = '';
 // 用于累积流式内容的缓冲区
 const streamSnapshots: Record<string, string> = {};
@@ -156,11 +160,19 @@ export async function emitOutOfBandSdkEvent(params: {
       userCode,
       created: Math.floor(Date.now() / 1000),
       contentType: SseMessageType.text,
-      id: crypto.randomUUID().replace(/-/g, '').toUpperCase(),
+      id: generateRandomId().toUpperCase(),
     },
     sessionId: params.sessionId || "",
-    traceId: crypto.randomUUID().replace(/-/g, '').toUpperCase(),
+    traceId: generateRandomId(),
     eventType: params.eventType,
   });
   redis.quit();
+}
+
+export function createRedisInstance() {
+  const redisInfo = getRedisInfo();
+  if (!redisInfo) {
+    return null;
+  }
+  return createRedis(redisInfo);
 }

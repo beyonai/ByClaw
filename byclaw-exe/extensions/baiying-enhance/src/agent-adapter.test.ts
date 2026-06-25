@@ -1,16 +1,10 @@
-import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { adaptAgentJson, extractBaiyingPrologueModelId } from "./agent-adapter.js";
 import { MANAGED_AGENT_PREFIX } from "./types.js";
 
 describe("adaptAgentJson", () => {
     it("extracts modelId from DIG_EMPLOYEE_10000281 prologue", () => {
-        const raw = JSON.parse(
-            readFileSync(
-                new URL("../../../../DIG_EMPLOYEE_10000281.json", import.meta.url),
-                "utf8",
-            ),
-        );
+        const raw = { prologue: JSON.stringify({ modelId: -2000 }) };
         expect(extractBaiyingPrologueModelId(raw)).toBe("-2000");
     });
 
@@ -43,6 +37,7 @@ describe("adaptAgentJson", () => {
         expect(res.modelRef).toBe("");
         expect(res.systemPrompt).toBe("Be brief.");
         expect(res.listEntry.model).toBeUndefined();
+        expect(res.listEntry.experimental).toEqual({ localModelLean: false });
         expect(res.listEntry.skills).toEqual([]);
     });
 
@@ -67,6 +62,7 @@ describe("adaptAgentJson", () => {
         expect(res.modelRef).toBe("");
         expect(res.provider).toBeUndefined();
         expect(res.listEntry.model).toBeUndefined();
+        expect(res.listEntry.experimental).toEqual({ localModelLean: false });
         expect(res.systemPrompt).toBe("Help users.");
         expect(res.listEntry.skills).toEqual([]);
     });
@@ -134,7 +130,7 @@ describe("adaptAgentJson", () => {
             coreCompetencies: JSON.stringify([
                 { coreCompetency: "Password Reset", description: "Help reset passwords" },
             ]),
-            relResourceInfoList: [
+            relResourceList: [
                 {
                     resourceId: "doc-001",
                     resourceName: "IT FAQ",
@@ -186,6 +182,49 @@ describe("adaptAgentJson", () => {
         expect(res.baiyingModelId).toBeUndefined();
     });
 
+    it("uses relResourceList for associated resources", () => {
+        const raw = {
+            resourceId: "10039008",
+            resourceName: "Ontology helper",
+            relSkills: ["dws"],
+            relResourceList: [
+                {
+                    resourceId: "10000045",
+                    resourceName: "销售管理视图",
+                    resourceBizType: "VIEW",
+                    resourceCode: "scene_sales_management",
+                    resourceDesc: "销售漏斗视图",
+                },
+                {
+                    resourceId: "skill-001",
+                    resourceName: "DWS",
+                    resourceBizType: "SKILL",
+                    resourceCode: "dws",
+                    resourceDesc: "DWS skill should be loaded through relSkills",
+                },
+            ],
+        };
+        const res = adaptAgentJson({
+            raw,
+            fileName: "DIG_EMPLOYEE_10039008.json",
+            embedApiKeysFromJson: false,
+        });
+        expect("error" in res).toBe(false);
+        if ("error" in res) {
+            return;
+        }
+        expect(res.associatedResources).toHaveLength(1);
+        expect(res.associatedResources![0]).toMatchObject({
+            resourceId: "10000045",
+            resourceName: "销售管理视图",
+            resourceBizType: "VIEW",
+            resourceCode: "scene_sales_management",
+            resourceDesc: "销售漏斗视图",
+        });
+        expect(res.associatedResources!.some((r) => r.resourceBizType === "SKILL")).toBe(false);
+        expect(res.listEntry.skills).toEqual(["dws"]);
+    });
+
     it("smoke: DIG_EMPLOYEE_10000115.json maps relSkills to agents.list skills", () => {
         const raw = {
             resourceId: "10000115",
@@ -203,6 +242,96 @@ describe("adaptAgentJson", () => {
         }
         expect(res.agentId).toBe(`${MANAGED_AGENT_PREFIX}10000115`);
         expect(res.listEntry.skills).toEqual(["dws", "clawhub"]);
+    });
+
+    it("maps object-form relSkills and retains hub sync metadata", () => {
+        const raw = {
+            resourceId: "10026037",
+            resourceName: "Hub Skill Demo",
+            relSkills: [
+                { skillCode: "dws", skillType: "inner" },
+                {
+                    skillCode: "guizang-ppt-skill-main",
+                    skillType: "hub",
+                    skillUrl: "/byaiService/tool/downloadSkillZip?skillId=10026639",
+                    versionUrl: "/byaiService/tool/getSkillVersion?skillId=10026639",
+                },
+            ],
+        };
+        const res = adaptAgentJson({
+            raw,
+            fileName: "DIG_EMPLOYEE_10026037.json",
+            embedApiKeysFromJson: false,
+        });
+        expect("error" in res).toBe(false);
+        if ("error" in res) {
+            return;
+        }
+        expect(res.listEntry.skills).toEqual(["dws", "guizang-ppt-skill-main"]);
+        expect(res.hubSkills).toEqual([
+            {
+                skillCode: "guizang-ppt-skill-main",
+                skillUrl: "/byaiService/tool/downloadSkillZip?skillId=10026639",
+                versionUrl: "/byaiService/tool/getSkillVersion?skillId=10026639",
+            },
+        ]);
+    });
+
+    it("keeps relSkills compatibility for mixed legacy strings and object refs", () => {
+        const raw = {
+            resourceId: "10026038",
+            resourceName: "Mixed Skill Demo",
+            relSkills: [
+                " dws ",
+                { skillCode: "dws", skillType: "inner" },
+                {
+                    skillCode: "hub-skill",
+                    skillType: "hub",
+                    skillUrl: "/byaiService/tool/downloadSkillZip?skillId=2",
+                    versionUrl: "/byaiService/tool/getSkillVersion?skillId=2",
+                },
+                { skillCode: "inner-skill", skillType: "inner" },
+                { skillCode: "", skillType: "inner" },
+                null,
+            ],
+        };
+        const res = adaptAgentJson({
+            raw,
+            fileName: "DIG_EMPLOYEE_10026038.json",
+            embedApiKeysFromJson: false,
+        });
+        expect("error" in res).toBe(false);
+        if ("error" in res) {
+            return;
+        }
+        expect(res.listEntry.skills).toEqual(["dws", "hub-skill", "inner-skill"]);
+        expect(res.hubSkills).toEqual([
+            {
+                skillCode: "hub-skill",
+                skillUrl: "/byaiService/tool/downloadSkillZip?skillId=2",
+                versionUrl: "/byaiService/tool/getSkillVersion?skillId=2",
+            },
+        ]);
+    });
+
+    it("falls back to legacy skills when relSkills has no usable skill codes", () => {
+        const raw = {
+            resourceId: "10026040",
+            resourceName: "Fallback Skill Demo",
+            relSkills: [{ skillType: "inner" }, null, ""],
+            skills: ["legacy-skill"],
+        };
+        const res = adaptAgentJson({
+            raw,
+            fileName: "DIG_EMPLOYEE_10026040.json",
+            embedApiKeysFromJson: false,
+        });
+        expect("error" in res).toBe(false);
+        if ("error" in res) {
+            return;
+        }
+        expect(res.listEntry.skills).toEqual(["legacy-skill"]);
+        expect(res.hubSkills).toBeUndefined();
     });
 
     it("maps raw Baiying detail relTools to agents.list tools.allow", () => {
@@ -223,6 +352,48 @@ describe("adaptAgentJson", () => {
         }
         expect(res.listEntry.tools).toEqual({
             allow: ["*", "read", "write", "baiying_call"],
+        });
+        expect(res.listEntry.experimental).toEqual({ localModelLean: false });
+    });
+
+    it("adds code_to_wiki for 百应平台赋能助手 without relTools", () => {
+        const raw = {
+            resourceId: "10011258",
+            resourceName: "百应平台赋能助手",
+            integrationType: "NONE",
+        };
+        const res = adaptAgentJson({
+            raw,
+            fileName: "DIG_EMPLOYEE_10011258.json",
+            embedApiKeysFromJson: false,
+        });
+        expect("error" in res).toBe(false);
+        if ("error" in res) {
+            return;
+        }
+        expect(res.listEntry.tools).toEqual({
+            alsoAllow: ["baiying_call", "code_to_wiki"],
+        });
+    });
+
+    it("adds code_to_wiki for 百应平台赋能助手 with relTools", () => {
+        const raw = {
+            resourceId: "10011259",
+            resourceName: "百应平台赋能助手",
+            integrationType: "NONE",
+            relTools: ["read"],
+        };
+        const res = adaptAgentJson({
+            raw,
+            fileName: "DIG_EMPLOYEE_10011259.json",
+            embedApiKeysFromJson: false,
+        });
+        expect("error" in res).toBe(false);
+        if ("error" in res) {
+            return;
+        }
+        expect(res.listEntry.tools).toEqual({
+            allow: ["read", "baiying_call", "code_to_wiki"],
         });
     });
 

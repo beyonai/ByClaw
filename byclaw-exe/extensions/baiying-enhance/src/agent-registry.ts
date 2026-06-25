@@ -6,6 +6,7 @@ import {
   resolveAimodelTypeListRedisKey,
   resolveAimodelSecretProviderName,
 } from "./aimodel-config.js";
+import { MANAGED_MODEL_STREAMING_USAGE_COMPAT } from "./config-write.js";
 import { MANAGED_AGENT_PREFIX, MANAGED_PROVIDER_PREFIX } from "./types.js";
 import { resolveDefaultManagedWorkspacePath } from "./workspace-paths.js";
 
@@ -18,6 +19,7 @@ type SecretProviderConfig = {
   jsonOnly: true;
   allowInsecurePath: true;
   timeoutMs: number;
+  noOutputTimeoutMs: number;
 };
 
 type ConfigWithSecrets = OpenClawConfig & {
@@ -33,11 +35,22 @@ type DefaultAimodelBundle = {
 };
 
 function defaultModelDefinition(provider: ProviderBundle) {
+  const params =
+    provider.thinkingBudgets && Object.keys(provider.thinkingBudgets).length > 0
+      ? { baiyingThinkingBudgets: provider.thinkingBudgets }
+      : undefined;
+  const compat = {
+    ...(provider.compat ?? {}),
+    ...MANAGED_MODEL_STREAMING_USAGE_COMPAT,
+  };
   return {
     id: provider.modelId,
     name: provider.modelName ?? provider.modelId,
     api: provider.api,
-    reasoning: false,
+    reasoning: provider.reasoning ?? false,
+    ...(provider.thinkingLevelMap ? { thinkingLevelMap: provider.thinkingLevelMap } : {}),
+    compat,
+    ...(params ? { params } : {}),
     input: provider.input ?? (["text"] as Array<"text" | "image">),
     cost: {
       input: 0,
@@ -56,6 +69,7 @@ function buildAimodelSecretProviderConfig(params: {
   redisKey: string;
   typeListRedisKey: string;
 }): SecretProviderConfig {
+  const resolverTimeoutMs = resolveAimodelSecretResolverTimeoutMs();
   return {
     source: "exec",
     command: params.command,
@@ -77,8 +91,15 @@ function buildAimodelSecretProviderConfig(params: {
     },
     jsonOnly: true,
     allowInsecurePath: true,
-    timeoutMs: 5000,
+    timeoutMs: resolverTimeoutMs,
+    noOutputTimeoutMs: resolverTimeoutMs,
   };
+}
+
+function resolveAimodelSecretResolverTimeoutMs(): number {
+  const raw = process.env.BAIYING_AIMODEL_SECRET_RESOLVER_TIMEOUT_MS?.trim();
+  const parsed = raw ? Number.parseInt(raw, 10) : NaN;
+  return Number.isInteger(parsed) && parsed >= 1000 && parsed <= 120000 ? parsed : 30000;
 }
 
 function ensureConfigModelContainers(cfg: OpenClawConfig): void {

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   buildManagedAgentRuntimeModelSystemContext,
   hasManagedModelConfigDrift,
+  resolveLangfuseSessionIdFromHookContext,
   resolveManagedAgentModelFromConfig,
   shouldDeferManagedAgentModelOverrideForRun,
   syncManagedAgentSessionModelForInbound,
@@ -170,6 +171,26 @@ describe("buildManagedAgentRuntimeModelSystemContext", () => {
         currentModel: "deepseek-v4-flash",
       }),
     ).toBeUndefined();
+  });
+});
+
+describe("resolveLangfuseSessionIdFromHookContext", () => {
+  it("uses the byai-channel direct session id from sessionKey", () => {
+    expect(
+      resolveLangfuseSessionIdFromHookContext({
+        sessionId: "openclaw-session",
+        sessionKey: "agent:baiying-agent-10000455:byai-channel:direct:10006251",
+      }),
+    ).toBe("10006251");
+  });
+
+  it("falls back to hook sessionId when sessionKey has no channel session id", () => {
+    expect(
+      resolveLangfuseSessionIdFromHookContext({
+        sessionId: "openclaw-session",
+        sessionKey: "agent:main:main",
+      }),
+    ).toBe("openclaw-session");
   });
 });
 

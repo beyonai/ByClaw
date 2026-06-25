@@ -209,4 +209,9 @@ public class AssistantChatDto {
      */
     private String resumeMessageId;
 
+    /**
+     * 是否是故障排除会话。需要支持按照messageId反查会话信息
+     */
+    private Boolean isTroubleshootSession = false;
+
 }

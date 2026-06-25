@@ -1,55 +1,19 @@
 ---
 name: structured-ontology-manager
-description: "对话式结构化个人本体管理：通过自然语言创建、删除个人结构化本体对象和视图，数据存储在个人 SQLite 中"
-allowed-tools: execute, read_file
+description: 当你想让 Agent 查询或操作你自己定义的业务数据（而不是系统内置数据）时使用本技能。它能够帮你用自然语言定义一张新的数据表，并基于这张表开发出本体对象，设定字段和字段含义，数据自动存入专属 数据表；还能创建跨表视图，让 Agent 同时查询多个对象。定义完成后挂载到当前数字员工，Agent 就能直接查询和操作你的数据了。你可以通过以下对话唤起本技能：「帮我创建一个任务管理对象」「我想建一个拜访记录表，包含客户名、拜访日期、跟进结果」「查看我有哪些本体对象」「把任务对象挂载到我的助理」。
 ---
 
 # 个人结构化本体管理
 
-通过自然语言对话，管理结构化本体对象和视图。支持创建、删除操作，对象数据持久化到 SQLite。
+通过自然语言对话，管理结构化本体对象和视图。支持创建、删除操作，对象数据持久化到 数据表。
 
-## ⚡ 环境准备（首次执行时一次性完成）
+## ⚠️ 执行规则（最高优先级，不得违反）
 
-> 以下步骤按顺序执行，**全部通过后才能调用脚本**。后续会话中若 `/tmp/ont_env` 存在且可执行则跳过。
-
-### 第 1 步：安装 uv
-
-```bash
-export PATH="$HOME/.local/bin:$PATH"
-which uv >/dev/null 2>&1 || curl -LsSf https://astral.sh/uv/install.sh | sh
-```
-
-> ⚠️ 不要用 `source ~/.bashrc`，沙箱可能不是 bash。
-
-### 第 2 步：创建 Python 3.12 虚拟环境（必须在 /tmp）
-
-```bash
-export PATH="$HOME/.local/bin:$PATH"
-[ -f /tmp/ont_env/bin/python ] || uv venv --python 3.12 --link-mode copy /tmp/ont_env
-```
-
-> ⚠️ **必须在 /tmp 下创建**，不要在工作目录（可能挂载在 fuseblk/S3，不支持 symlink）。`--link-mode copy` 是必需的。
-
-### 第 3 步：安装依赖
-
-```bash
-export PATH="$HOME/.local/bin:$PATH"
-uv pip install --python /tmp/ont_env/bin/python \
-  by-datacloud \
-  by-framework \
-  -i https://mirrors.aliyun.com/pypi/simple/ \
-  --extra-index-url https://pypi.org/simple/
-```
-
-> ⚠️ `by-datacloud`，`by-framework` 从公网 PyPI 安装（阿里云镜像可能没有）。必须加 `--extra-index-url https://pypi.org/simple/`。
-
-### 第 4 步：验证环境就绪
-
-```bash
-/tmp/ont_env/bin/python -c "import by_framework; import by_datacloud; print('OK')"
-```
-
-如果输出 `OK` 则环境准备完成，否则根据报错排查。
+1. **必须直接执行脚本**，禁止自行编写任何 Python/Shell 代码来替代或模拟脚本功能
+2. **禁止重写脚本逻辑**：即使你能理解脚本内容，也不允许复现、改写或内联其逻辑
+3. **所有操作通过 Bash 调用已有脚本完成**，脚本路径见下方意图路由表
+4. **解析脚本输出**：读取脚本 stdout 的 JSON，`ok: true` 为成功，`ok: false` 为失败，失败时将 `error` 字段内容告知用户
+5. **不允许推测结果**：脚本未执行前不得告知用户操作成功或失败
 
 ## 🌐 必需环境变量
 
@@ -63,7 +27,7 @@ uv pip install --python /tmp/ont_env/bin/python \
 | `REDIS_HOST` | ✅ 必需 | 无 | Redis 主机 |
 | `REDIS_PORT` | ✅ 必需 | `6379` | Redis 端口 |
 | `REDIS_PASSWORD` | ✅ 必需 | 无 | Redis 密码 |
-| `OPENCLAW_GATEWAY_TOKEN` | ❌ 可选 | 无 | SQLite 服务认证 |
+| `OPENCLAW_GATEWAY_TOKEN` | ❌ 可选 | 无 | 服务认证 |
 
 > 快速检查：`env | grep -E 'BEYOND_TOKEN|USER_CODE|BE_DOMAINNAME|REDIS_HOST'`
 
@@ -72,10 +36,7 @@ uv pip install --python /tmp/ont_env/bin/python \
 环境就绪后，所有脚本统一调用方式：
 
 ```bash
-export PATH="$HOME/.local/bin:$PATH"
-export BE_DOMAINNAME=${BE_DOMAINNAME:-ByaiService}
-cd /by/.openclaw/workspace-baiying-agent-10002987
-/tmp/ont_env/bin/python skills/structured-ontology-manager/scripts/<script>.py '<JSON>'
+/usr/local/bin/python3 <script>.py '<JSON>'
 ```
 
 > JSON 参数作为第一个命令行参数传入，所有输出为 JSON（stdout）。
@@ -106,18 +67,26 @@ cd /by/.openclaw/workspace-baiying-agent-10002987
 
 ## 意图路由
 
-| 用户表达 | 意图 | 脚本 | 入参示例 |
-|----------|------|------|----------|
-| 查看/列出 + 对象/视图 | 查询列表 | `list_resources.py` | `{}` 或 `{"resource_biz_type":"VIEW"}` |
-| 创建/新建 + 对象（收集阶段） | 收集对象信息 | `create_object.py` | `{"action":"collect","entity_code":"xxx","entity_name":"xxx","entity_desc":"xxx","fields":[...]}` |
-| 确认提交（对象） | 提交对象 | `create_object.py` | `{"action":"submit","entity_code":"xxx"}` |
-| 创建/新建 + 视图（收集阶段） | 收集视图信息 | `create_view.py` | `{"action":"collect","view_code":"xxx","view_name":"xxx"}` |
-| 确认提交（视图） | 提交视图 | `create_view.py` | `{"action":"submit","view_code":"xxx"}` |
-| 删除 + 对象 | 删除对象 | `delete_object.py` | `{"entity_code":"xxx"}` |
-| 删除 + 视图 | 删除视图 | `delete_view.py` | `{"view_code":"xxx"}` |
-| 挂载/添加到助理/数字员工 | 挂载本体 | `mount_resource.py` | `{"agent_id":10004452,"resource_code":"xxx"}` |
-| 查看术语类型 | 查枚举 | `list_term_types.py` | `{}` |
-| 查看术语值 | 查枚举值 | `get_term_type_values.py` | `{"term_type_code":"xxx"}` |
+每条意图对应一条 Bash 命令，**直接执行，不得改写**：
+
+| 用户表达 | Bash 命令（在 skill 根目录执行） |
+|----------|--------------------------------|
+| 查看/列出 + 对象 | `/usr/local/bin/python3 scripts/list_resources.py '{}'` |
+| 查看/列出 + 视图 | `/usr/local/bin/python3 scripts/list_resources.py '{"resource_biz_type":"VIEW"}'` |
+| 创建/新建 + 对象（收集阶段） | `/usr/local/bin/python3 scripts/create_object.py '{"action":"collect","entity_code":"<code>","entity_name":"<name>","entity_desc":"<desc>","fields":[...],"session_id":"<sid>"}'` |
+| 确认提交（对象） | `/usr/local/bin/python3 scripts/create_object.py '{"action":"submit","entity_code":"<code>","session_id":"<sid>"}'` |
+| 创建/新建 + 视图（收集阶段） | `/usr/local/bin/python3 scripts/create_view.py '{"action":"collect","view_code":"<code>","view_name":"<name>","object_codes":[...]}',"session_id":"<sid>"` |
+| 确认提交（视图） | `/usr/local/bin/python3 scripts/create_view.py '{"action":"submit","view_code":"<code>","session_id":"<sid>"}'` |
+| 删除 + 对象 | `/usr/local/bin/python3 scripts/delete_object.py '{"entity_code":"<code>"}'` |
+| 删除 + 视图 | `/usr/local/bin/python3 scripts/delete_view.py '{"view_code":"<code>"}'` |
+| 挂载/添加到助理/数字员工 | `/usr/local/bin/python3 scripts/mount_resource.py '{"agent_id":<id>,"resource_code":"<code>"}'` |
+| 查看术语类型 | `/usr/local/bin/python3 scripts/list_term_types.py '{}'` |
+| 查看术语值 | `/usr/local/bin/python3 scripts/get_term_type_values.py '{"term_type_code":"<code>"}'` |
+
+**输出处理规则**：
+- `{"ok": true, ...}` → 操作成功，向用户展示 `data` 中的关键信息
+- `{"ok": false, "error": "..."}` → 操作失败，将 `error` 原文告知用户，**不要猜测原因或自行重试**
+- `{"ok": true, "missing": [...]}` → 收集阶段还缺字段，根据 `missing` 列表向用户追问，**不要尝试填充默认值**
 
 ## 字段说明
 

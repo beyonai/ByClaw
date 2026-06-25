@@ -1,17 +1,23 @@
 package com.iwhalecloud.byai.gateway.sandbox.spec;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.OS;
+import org.mockito.ArgumentCaptor;
 
 import com.iwhalecloud.byai.gateway.sandbox.client.model.CreateSandboxRequest;
 import com.iwhalecloud.byai.gateway.sandbox.workspace.SandboxWorkspaceBootstrapInitializer;
-
+import com.iwhalecloud.byai.gateway.sandbox.workspace.model.SandboxFsInitContext;
+@DisabledOnOs(OS.WINDOWS)
 class GenericSandboxSpecProcessorTest {
 
     @Test
@@ -57,5 +63,40 @@ class GenericSandboxSpecProcessorTest {
 
         assertThat(request.getEnv()).isNull();
         verifyNoInteractions(bootstrapInitializer);
+    }
+
+    @Test
+    void buildCreateRequest_bootstrapUsesVolumeHostPathAndSubPathAsWorkspaceTarget() {
+        SandboxWorkspaceBootstrapInitializer bootstrapInitializer = mock(SandboxWorkspaceBootstrapInitializer.class);
+        GenericSandboxSpecProcessor processor = new GenericSandboxSpecProcessor(bootstrapInitializer);
+
+        SandboxServiceSpec spec = new SandboxServiceSpec();
+        spec.setImage("demo/image:latest");
+
+        VolumeSpec volume = new VolumeSpec();
+        volume.setKey("base");
+        volume.setScope(VolumeScope.PRIVATE);
+        volume.setHostPath("${FILE_STORAGE_LOCAL_PATH}");
+        volume.setSubPath("byclaw-${user_code}/by");
+        volume.setMountPath("/by");
+        volume.setReadOnly(false);
+        spec.setVolumes(List.of(volume));
+
+        CopyTemplateOp copyTemplate = new CopyTemplateOp();
+        copyTemplate.setTargetVolumeKey("base");
+        BootstrapSpec bootstrap = new BootstrapSpec();
+        bootstrap.setCopyTemplate(copyTemplate);
+        spec.setBootstrap(bootstrap);
+        spec.setTemplateJson("{\"profile\":\"test\"}");
+
+        processor.buildCreateRequest("user001", "openclaw",
+            Map.of("FILE_STORAGE_LOCAL_PATH", "/mnt/byclaw-workspace"), Map.of(), spec);
+
+        ArgumentCaptor<SandboxFsInitContext> captor = ArgumentCaptor.forClass(SandboxFsInitContext.class);
+        verify(bootstrapInitializer).initialize(captor.capture());
+        assertThat(captor.getValue().getWorkspaceTargetPath())
+            .isEqualTo("/mnt/byclaw-workspace/byclaw-user001/by");
+        assertThat(captor.getValue().getTemplateSourcePath().toString())
+            .isEqualTo("/mnt/byclaw-workspace/byclaw-user001/by");
     }
 }

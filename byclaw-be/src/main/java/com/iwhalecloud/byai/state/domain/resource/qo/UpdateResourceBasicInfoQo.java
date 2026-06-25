@@ -16,5 +16,7 @@ public class UpdateResourceBasicInfoQo {
 
     private String resourceDesc;
 
+    private String avatar;
+
     private Long catalogId;
 }
