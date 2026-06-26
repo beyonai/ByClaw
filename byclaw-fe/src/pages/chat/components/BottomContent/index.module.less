@@ -7,3 +7,28 @@
   margin: 10px auto 20px;
   position: relative;
 }
+
+.tabs {
+  :global {
+    .@{antPrefix}-tabs-tab-btn {
+      font-weight: bold;
+      color: var(--beyond-color-text-tertiary) !important;
+      &:hover {
+        color: var(--beyond-color-text-secondary) !important;
+      }
+    }
+    .@{antPrefix}-tabs-tab-active {
+      .@{antPrefix}-tabs-tab-btn {
+        color: var(--beyond-color-primary-text) !important;
+
+        &:hover {
+          color: var(--beyond-color-primary-text-hover) !important;
+        }
+      }
+    }
+    .@{antPrefix}-tabs-ink-bar {
+      height: 2px !important;
+      background-color: var(--beyond-color-primary-text) !important;
+    }
+  }
+}

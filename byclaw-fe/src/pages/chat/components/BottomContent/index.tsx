@@ -100,6 +100,7 @@ export default function BottomContent() {
           oldTabKeyRef.current = key;
         }}
         items={tabList || []}
+        className={styles.tabs}
       />
     </div>
   );

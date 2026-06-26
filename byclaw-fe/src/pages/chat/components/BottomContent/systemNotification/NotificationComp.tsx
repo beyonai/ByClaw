@@ -1,20 +1,20 @@
 import React from 'react';
-import { ClockCircleOutlined } from '@ant-design/icons';
 import { Tag, Typography } from 'antd';
 import { isNil } from 'lodash';
 import { useIntl } from '@umijs/max';
+import classNames from 'classnames';
 
 import { INotificationItem } from './index';
 
 import styles from './index.module.less';
 
-type PriorityMeta = { labelId?: string; label?: string; color: string };
+type PriorityMeta = { labelId?: string; label?: string; tone: string };
 
 const priorityMap: Record<string, PriorityMeta> = {
-  '1': { labelId: 'systemNotification.priority.low', color: 'default' },
-  '2': { labelId: 'systemNotification.priority.medium', color: 'processing' },
-  '3': { labelId: 'systemNotification.priority.high', color: 'warning' },
-  '4': { labelId: 'systemNotification.priority.urgent', color: 'error' },
+  '1': { labelId: 'systemNotification.priority.low', tone: 'default' },
+  '2': { labelId: 'systemNotification.priority.medium', tone: 'success' },
+  '3': { labelId: 'systemNotification.priority.high', tone: 'warning' },
+  '4': { labelId: 'systemNotification.priority.urgent', tone: 'error' },
 };
 
 function getPriorityMeta(priority?: string | number) {
@@ -25,9 +25,19 @@ function getPriorityMeta(priority?: string | number) {
     priorityMap[String(priority)] || {
       labelId: priority ? undefined : 'systemNotification.priority.unset',
       label: priority ? `P${priority}` : undefined,
-      color: 'default',
+      tone: 'default',
     }
   );
+}
+
+function isUnread(value: unknown) {
+  if (isNil(value)) {
+    return false;
+  }
+  if (typeof value === 'boolean') {
+    return !value;
+  }
+  return ['0', 'false', 'unread', 'n'].includes(String(value).toLowerCase());
 }
 
 function NotificationComp(props: { item: INotificationItem }) {
@@ -36,28 +46,22 @@ function NotificationComp(props: { item: INotificationItem }) {
 
   const priorityMeta = getPriorityMeta(item.priority);
   const title = item.title || intl.formatMessage({ id: 'systemNotification.unnamedNotification' });
+  const unread = isUnread(item.isRead);
 
   return (
-    <div className={styles.content}>
+    <div className={classNames(styles.content, { [styles.unreadContent]: unread })}>
+      {/* <span className={styles.unreadDot} /> */}
       <div className={styles.titleRow}>
         <Typography.Text className={styles.title} ellipsis={{ tooltip: title }}>
           {title}
         </Typography.Text>
-        <Tag icon={<ClockCircleOutlined />} className={styles.dateTag}>
-          {item.createTime || '-'}
-        </Tag>
         {priorityMeta && (
-          <Tag color={priorityMeta.color} className={styles.priorityTag}>
+          <Tag color={priorityMeta.tone} className={styles.priorityTag}>
             {priorityMeta.labelId ? intl.formatMessage({ id: priorityMeta.labelId }) : priorityMeta.label}
           </Tag>
         )}
+        <span className={styles.dateText}>{item.createTime || '-'}</span>
       </div>
-      <Typography.Paragraph
-        className={styles.desc}
-        ellipsis={{ rows: 2, tooltip: { title: item.content, placement: 'topLeft' } }}
-      >
-        {item.content || '-'}
-      </Typography.Paragraph>
     </div>
   );
 }
