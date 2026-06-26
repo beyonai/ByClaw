@@ -1,16 +1,23 @@
-import React, { useCallback, useState, useEffect, useMemo } from 'react';
+import React, { useCallback, useState, useEffect, useMemo, useRef } from 'react';
 import { Spin, message } from 'antd';
 import { useIntl, useSelector } from '@umijs/max';
 import InfiniteScroll from '@/components/InfiniteScroll';
 import Empty from '@/components/Empty';
 import ResourceCard from '../ResourceCard';
-import { listResourceUseAuth, deleteResource, deleteKnowledge } from '@/pages/manager/service/resources';
+import {
+  listResourceUseAuth,
+  deleteResource,
+  deleteKnowledge,
+  queryWorkspacePersonalSkillList,
+} from '@/pages/manager/service/resources';
 import { findDetailsById } from '@/pages/manager/service/DigitalEmployeeMgr';
 import { useRequest } from '@/hooks/useRequest';
 import useGlobal from '@/hooks/useGlobal';
 import type { IState as IEmployeesState } from '@/models/useEmployees';
 import type { KnowledgeCapability } from '@/service/knowledgeCenter';
 import { buildResourceListFilterParam, getBaseResourceBizTypeList } from '../../utils';
+import { isWorkspaceSkill, mapWorkspaceSkillRows } from '../../workspaceSkill/utils';
+import { useDigitalEmployeeManagePermission } from '../../workspaceSkill/useDigitalEmployeeManagePermission';
 import styles from './index.module.less';
 
 interface IResourceItem {
@@ -18,7 +25,9 @@ interface IResourceItem {
   resourceName: string;
   resourceDesc?: string;
   resourceLogoUrl?: string;
+  avatar?: string;
   createUserName?: string;
+  creatorName?: string;
   createTime?: number | string;
   resourceBizType?: string;
   resourceSourcePkId?: string;
@@ -40,6 +49,7 @@ interface IResourceItem {
   syncStatus?: string;
   syncError?: string;
   lastSyncTime?: string;
+  useCount?: number | string;
 }
 
 interface ResourceListProps {
@@ -57,9 +67,18 @@ interface ResourceListProps {
   onApplyUse: (item: IResourceItem) => void;
   onAuditUse: (item: IResourceItem) => void;
   onRefresh: () => void;
+  skillCardViewMode?: 'current' | 'new';
 }
 
 const PAGE_SIZE_DEFAULT = 30;
+
+const getSkillPosterColumnCount = (width: number) => {
+  if (width >= 1680) return 5;
+  if (width >= 1280) return 4;
+  if (width >= 960) return 3;
+  if (width >= 640) return 2;
+  return 1;
+};
 
 const normalizeResponseData = (response: any) => response?.data ?? response;
 
@@ -88,29 +107,48 @@ const ResourceList: React.FC<ResourceListProps> = ({
   onApplyUse,
   onAuditUse,
   onRefresh,
+  skillCardViewMode = 'current',
 }) => {
   // 根据 resourceType 生成 resourceBizTypeList，使用useMemo缓存结果
   const baseResourceBizTypeList = useMemo(() => getBaseResourceBizTypeList(resourceType), [resourceType]);
 
   const intl = useIntl();
-  const { agentInfo } = useGlobal();
+  const { agentId, agentInfo } = useGlobal();
   const { userInfo, defaultDigEmployeeId } = useSelector(
     ({ user, employees }: { user: any; employees: IEmployeesState }) => ({
       userInfo: user.userInfo,
       defaultDigEmployeeId: employees.defaultDigEmployeeId,
     })
   );
-  const activeDigitalEmployeeId = agentInfo?.agentId || defaultDigEmployeeId || userInfo?.defaultDigEmployeeId;
+  const activeDigitalEmployeeId =
+    agentId || agentInfo?.agentId || defaultDigEmployeeId || userInfo?.defaultDigEmployeeId;
+  const userCode = userInfo?.userCode;
+  // 通过 ref 读取，避免把 activeDigitalEmployeeId/userCode 放进 getList 依赖；
+  // 否则切换数字员工会让所有资源类型(含 KG_DOC/TOOL/...)的列表都触发一次冗余刷新。
+  const activeDigitalEmployeeIdRef = useRef(activeDigitalEmployeeId);
+  activeDigitalEmployeeIdRef.current = activeDigitalEmployeeId;
+  const userCodeRef = useRef(userCode);
+  userCodeRef.current = userCode;
+  // 工作空间技能删除入口需当前用户对该数字员工有管理权限，无权限时隐藏（后端同样会拦截）。
+  const canManageActiveEmployee = useDigitalEmployeeManagePermission(
+    resourceType === 'SKILL' ? activeDigitalEmployeeId : undefined
+  );
   const [loading, setLoading] = useState(false);
   const [list, setList] = useState<IResourceItem[]>([]);
   const [installedResourceIds, setInstalledResourceIds] = useState<ReadonlySet<string>>(new Set());
+  const [skillPosterColumnCount, setSkillPosterColumnCount] = useState(1);
+  const skillPosterListRef = useRef<HTMLDivElement>(null);
   const [pageInfo, setPageInfo] = useState({
     pageNum: 1,
     pageSize: PAGE_SIZE_DEFAULT,
     total: 0,
   });
 
-  const hasMore = pageInfo.total > list.length;
+  // 工作空间技能不计入分页 total（它来自独立接口、仅首页追加），
+  // hasMore 只按已加载的“已资源化技能”数量与 total 比较，避免提前判定到底而漏翻页。
+  const loadedResourcedCount = useMemo(() => list.filter((item) => !isWorkspaceSkill(item)).length, [list]);
+  const hasMore = pageInfo.total > loadedResourcedCount;
+  const isSkillPosterMode = resourceType === 'SKILL' && skillCardViewMode === 'new';
 
   const getList = useCallback(
     async (params?: Record<string, any>, append = false) => {
@@ -135,8 +173,34 @@ const ResourceList: React.FC<ResourceListProps> = ({
         });
 
         const pageData = res?.data || res || {};
-        const rows = (pageData?.list || pageData?.rows || []) as IResourceItem[];
-        setList((prev) => (append ? [...prev, ...rows] : rows));
+        const rows = ((pageData?.list || pageData?.rows || []) as IResourceItem[]).map((item) => ({
+          ...item,
+          resourceLogoUrl: item.resourceLogoUrl || item.avatar,
+        }));
+
+        // 个人技能 tab 首页追加“用户开发(工作空间)技能”。仅在第一页、无目录筛选时拉取，
+        // 翻页只走 listResourceUseAuth；后端已按个人已资源化技能去重，前端无需再去重。
+        let workspaceRows: IResourceItem[] = [];
+        const shouldLoadWorkspaceSkills =
+          resourceType === 'SKILL' && activeTab === 'personal' && !append && pageNum === 1 && !selectedCatalogId;
+        if (shouldLoadWorkspaceSkills && activeDigitalEmployeeIdRef.current) {
+          try {
+            const workspaceRes = await queryWorkspacePersonalSkillList({
+              keyword,
+              resourceId: `${activeDigitalEmployeeIdRef.current}`,
+              userCode: userCodeRef.current,
+            });
+            const workspaceData = (workspaceRes as any)?.data ?? workspaceRes;
+            workspaceRows = mapWorkspaceSkillRows(
+              Array.isArray(workspaceData) ? workspaceData : workspaceData?.list || workspaceData?.rows || []
+            ) as IResourceItem[];
+          } catch (error) {
+            console.warn('query workspace personal skills failed', error);
+          }
+        }
+
+        const nextRows = workspaceRows.length ? [...workspaceRows, ...rows] : rows;
+        setList((prev) => (append ? [...prev, ...rows] : nextRows));
         setPageInfo({
           pageNum: Number(pageData?.pageNum || pageNum || 1),
           pageSize: Number(pageData?.pageSize || pageSize || 30),
@@ -146,7 +210,7 @@ const ResourceList: React.FC<ResourceListProps> = ({
         setLoading(false);
       }
     },
-    [activeTab, baseResourceBizTypeList, catalogId, dropdownParam, searchValue]
+    [activeTab, baseResourceBizTypeList, catalogId, dropdownParam, resourceType, searchValue]
   );
 
   const { mutate: handleDel } = useRequest({
@@ -219,6 +283,56 @@ const ResourceList: React.FC<ResourceListProps> = ({
     };
   }, [resourceType]);
 
+  useEffect(() => {
+    if (!isSkillPosterMode) {
+      setSkillPosterColumnCount(1);
+      return undefined;
+    }
+
+    const target = skillPosterListRef.current;
+    let rafId = 0;
+    let timerId = 0;
+
+    const updateColumnCount = () => {
+      window.cancelAnimationFrame(rafId);
+      rafId = window.requestAnimationFrame(() => {
+        const width =
+          skillPosterListRef.current?.clientWidth ||
+          skillPosterListRef.current?.parentElement?.clientWidth ||
+          window.innerWidth;
+        setSkillPosterColumnCount(getSkillPosterColumnCount(width));
+      });
+    };
+
+    updateColumnCount();
+    timerId = window.setTimeout(updateColumnCount, 80);
+
+    if (!target || typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', updateColumnCount);
+      return () => {
+        window.cancelAnimationFrame(rafId);
+        window.clearTimeout(timerId);
+        window.removeEventListener('resize', updateColumnCount);
+      };
+    }
+
+    const resizeObserver = new ResizeObserver(updateColumnCount);
+    resizeObserver.observe(target);
+    return () => {
+      window.cancelAnimationFrame(rafId);
+      window.clearTimeout(timerId);
+      resizeObserver.disconnect();
+    };
+  }, [isSkillPosterMode, list.length, loading]);
+
+  const skillPosterColumns = useMemo(() => {
+    const columns = Array.from({ length: skillPosterColumnCount }, () => [] as IResourceItem[]);
+    list.forEach((item, index) => {
+      columns[index % skillPosterColumnCount].push(item);
+    });
+    return columns;
+  }, [list, skillPosterColumnCount]);
+
   const loadMore = useCallback(() => {
     if (loading || !hasMore) return;
     // 直接使用当前的pageInfo状态，避免将其作为依赖项
@@ -237,6 +351,26 @@ const ResourceList: React.FC<ResourceListProps> = ({
   const getScrollableTarget = useMemo(() => {
     return `${resourceType}ListScroller`;
   }, [resourceType]);
+
+  const renderResourceCard = (item: IResourceItem) => (
+    <ResourceCard
+      key={item.resourceId}
+      resource={item}
+      resourceType={resourceType}
+      variant={isSkillPosterMode ? 'skillPoster' : 'default'}
+      onCardClick={() => onDetail(item)}
+      actionConfig={{
+        scene: activeTab === 'personal' ? 'personal' : 'enterprise',
+        installedResourceIds,
+        canManageWorkspaceSkill: canManageActiveEmployee,
+        onEdit: () => onEdit(item),
+        onAuth: (authType) => onAuth(item, authType),
+        onApplyUse: () => onApplyUse(item),
+        onAuditUse: () => onAuditUse(item),
+        onDelete: () => handleDel(item),
+      }}
+    />
+  );
 
   return (
     <div id={getScrollableTarget} className={styles.sectionsContainer}>
@@ -270,24 +404,22 @@ const ResourceList: React.FC<ResourceListProps> = ({
             }}
           >
             <div className={styles.categorySection}>
-              <div className={styles.employeeList}>
-                {list.map((item) => (
-                  <ResourceCard
-                    key={item.resourceId}
-                    resource={item}
-                    resourceType={resourceType}
-                    onCardClick={() => onDetail(item)}
-                    actionConfig={{
-                      scene: activeTab === 'personal' ? 'personal' : 'enterprise',
-                      installedResourceIds,
-                      onEdit: () => onEdit(item),
-                      onAuth: (authType) => onAuth(item, authType),
-                      onApplyUse: () => onApplyUse(item),
-                      onAuditUse: () => onAuditUse(item),
-                      onDelete: () => handleDel(item),
-                    }}
-                  />
-                ))}
+              <div
+                ref={skillPosterListRef}
+                className={isSkillPosterMode ? styles.skillPosterList : styles.employeeList}
+                style={
+                  isSkillPosterMode
+                    ? ({ '--skill-poster-column-count': skillPosterColumnCount } as React.CSSProperties)
+                    : undefined
+                }
+              >
+                {isSkillPosterMode &&
+                  skillPosterColumns.map((columnItems, columnIndex) => (
+                    <div className={styles.skillPosterColumn} key={`skill-poster-column-${columnIndex}`}>
+                      {columnItems.map((item) => renderResourceCard(item))}
+                    </div>
+                  ))}
+                {!isSkillPosterMode && list.map((item) => renderResourceCard(item))}
               </div>
             </div>
           </InfiniteScroll>

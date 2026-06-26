@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Button, Modal, Spin } from 'antd';
+import { Button, Modal, Spin, Table } from 'antd';
 import { CloseOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import { queryResourceMembers } from '@/pages/manager/service/resources';
 // import ResourceMembers from '../ResourceMembers';
 import classnames from 'classnames';
+import dayjs from 'dayjs';
 import styles from './index.module.less';
 
 interface IResourceItem {
@@ -18,6 +19,20 @@ interface IResourceItem {
   createTime?: number | string;
   resourceSourcePkId?: string;
   extInfo?: any;
+  useList?: ResourceMemberItem[];
+  managerList?: ResourceMemberItem[];
+  usedDigitalEmployees?: UsedDigitalEmployee[];
+}
+
+interface ResourceMemberItem {
+  grantToObjName?: string;
+  grantToObjId?: string | number;
+}
+
+interface UsedDigitalEmployee {
+  resourceId?: string | number;
+  resourceName?: string;
+  useStartTime?: string | number;
 }
 
 interface ResourceDetailProps {
@@ -119,51 +134,93 @@ const ResourceDetail: React.FC<ResourceDetailProps> = ({
   const getPropertiesInfo = () => {
     try {
       const targetContent = detailData?.extInfo?.targetContent ? JSON.parse(detailData.extInfo.targetContent) : null;
-      return targetContent?.fields
-        ? renderDetailField(
-          `${resourceName}${intl.formatMessage({ id: 'resource.property' })}`,
-          <div className={styles.targetContent}>
-            {targetContent.fields.map((field: any) => field.propertyName).join('、')}
-          </div>
-        )
-        : null;
+      if (!targetContent?.fields) {
+        return null;
+      }
+      const content = (
+        <div className={styles.targetContent}>
+          {targetContent.fields.map((field: any) => field.propertyName).join('、')}
+        </div>
+      );
+      return renderDetailField(`${resourceName}${intl.formatMessage({ id: 'resource.property' })}`, content);
     } catch (error) {
       return null;
     }
   };
 
-  const renderMemberNames = (members?: Array<{ grantToObjName?: string }>) => {
-    const names = (Array.isArray(members) ? members : []).map((member) => member.grantToObjName).filter(Boolean);
+  const renderMemberNames = (members?: ResourceMemberItem[]) => {
+    const names = (Array.isArray(members) ? members : [])
+      .map((member) => member.grantToObjName || member.grantToObjId)
+      .filter(Boolean);
 
     return names.length ? names.join('、') : intl.formatMessage({ id: 'common.none' });
+  };
+
+  const formatDateTime = (value?: string | number) => {
+    if (!value) return intl.formatMessage({ id: 'common.none' });
+    const parsed = dayjs(value);
+    return parsed.isValid() ? parsed.format('YYYY-MM-DD HH:mm:ss') : String(value);
+  };
+
+  const renderUsedDigitalEmployees = () => {
+    const employees = Array.isArray(item?.usedDigitalEmployees) ? item?.usedDigitalEmployees : [];
+    if (!employees.length) {
+      return null;
+    }
+
+    return renderDetailField(
+      intl.formatMessage({ id: 'skillDetail.usedDigitalEmployees' }),
+      <Table
+        size="small"
+        pagination={false}
+        columns={[
+          {
+            dataIndex: 'resourceName',
+            title: intl.formatMessage({ id: 'skillDetail.digitalEmployeeName' }),
+            render: (text: React.ReactNode) => text || intl.formatMessage({ id: 'common.none' }),
+          },
+          {
+            dataIndex: 'useStartTime',
+            title: intl.formatMessage({ id: 'skillDetail.useStartTime' }),
+            width: 180,
+            render: (text: string | number) => formatDateTime(text),
+          },
+        ]}
+        dataSource={employees.map((employee, index) => ({
+          ...employee,
+          key: employee.resourceId ?? index,
+        }))}
+      />
+    );
   };
 
   // 获取关联对象
   const getRelatedObjects = () => {
     try {
       const targetContent = detailData?.extInfo?.targetContent ? JSON.parse(detailData.extInfo.targetContent) : null;
-      return targetContent?.objects && targetContent.objects.length > 0
-        ? renderDetailField(
-          intl.formatMessage({ id: 'resource.relatedObjects' }),
-          <div className={styles.targetContent}>
-            <div className={styles.objectCardGrid}>
-              {targetContent.objects.map((object: any, index: number) => (
-                <div
-                  key={index}
-                  className={classnames(
-                    styles.objectCard,
-                    selectedObject?.resourceCode === object.resourceCode && styles.selectedObjectCard
-                  )}
-                  onClick={() => handleObjectClick(object)}
-                >
-                  <div className={styles.objectCardTitle}>{object.resourceName}</div>
-                  <div className={styles.objectCardCode}>{object.resourceCode}</div>
-                </div>
-              ))}
-            </div>
+      if (!targetContent?.objects?.length) {
+        return null;
+      }
+      const content = (
+        <div className={styles.targetContent}>
+          <div className={styles.objectCardGrid}>
+            {targetContent.objects.map((object: any, index: number) => (
+              <div
+                key={index}
+                className={classnames(
+                  styles.objectCard,
+                  selectedObject?.resourceCode === object.resourceCode && styles.selectedObjectCard
+                )}
+                onClick={() => handleObjectClick(object)}
+              >
+                <div className={styles.objectCardTitle}>{object.resourceName}</div>
+                <div className={styles.objectCardCode}>{object.resourceCode}</div>
+              </div>
+            ))}
           </div>
-        )
-        : null;
+        </div>
+      );
+      return renderDetailField(intl.formatMessage({ id: 'resource.relatedObjects' }), content);
     } catch (error) {
       return null;
     }
@@ -203,13 +260,15 @@ const ResourceDetail: React.FC<ResourceDetailProps> = ({
 
           {renderDetailField(
             intl.formatMessage({ id: 'common.userPerson' }),
-            <div className={styles.memberList}>{renderMemberNames(detailData?.useList)}</div>
+            <div className={styles.memberList}>{renderMemberNames(detailData?.useList || item?.useList)}</div>
           )}
 
           {renderDetailField(
             intl.formatMessage({ id: 'common.manager' }),
-            <div className={styles.memberList}>{renderMemberNames(detailData?.managerList)}</div>
+            <div className={styles.memberList}>{renderMemberNames(detailData?.managerList || item?.managerList)}</div>
           )}
+
+          {renderUsedDigitalEmployees()}
         </div>
       )}
     </>

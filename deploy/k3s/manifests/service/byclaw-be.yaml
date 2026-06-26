@@ -39,6 +39,8 @@ spec:
               value: "https"
             - name: BYCLAW_SANDBOX_PROFILE_ENABLED
               value: "true"
+            - name: BYCLAW_SANDBOX_HEALTH_ENABLED
+              value: "true"
             - name: BYCLAW_SANDBOX_TIER_AUTOSCALE_ENABLED
               value: "true"
             - name: BYCLAW_SANDBOX_VOLUME_BACKEND

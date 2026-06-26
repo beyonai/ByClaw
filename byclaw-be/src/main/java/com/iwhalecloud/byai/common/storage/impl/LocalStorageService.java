@@ -108,6 +108,7 @@ public class LocalStorageService extends AbstractFileIngressStorageService<Void>
             metadata.setFileSize(Files.size(path));
             metadata.setFileType(FilenameUtils.getExtension(objectKey));
             metadata.setStorageType(getStorageType());
+            metadata.setLastModified(Files.getLastModifiedTime(path).toInstant().toString());
             return metadata;
         }
         catch (IOException e) {
@@ -303,6 +304,12 @@ public class LocalStorageService extends AbstractFileIngressStorageService<Void>
             .bucketOrRoot(bucketOrRoot)
             .path(relativePath)
             .isDir(isDirectory);
+        try {
+            builder.lastModified(Files.getLastModifiedTime(path).toInstant().toString());
+        }
+        catch (IOException ignored) {
+            // Last modified time is optional metadata for list operations.
+        }
         if (!isDirectory) {
             try {
                 builder.size(Files.size(path));

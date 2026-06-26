@@ -20,6 +20,7 @@ import {
   cancelActiveSdkCompletionCheck,
   scheduleActiveSdkCompletionCheck,
 } from "./sdk-session-completion.js";
+import { isOpenClawContextOverflowDispatchError } from "./dispatch-error.js";
 import {
   resolveAssistantDisplayStream,
   resolveAssistantEventKind,
@@ -31,6 +32,7 @@ import type { OpenClawPluginApi } from "@openclaw/plugin-sdk/core";
 import { isSubagentSessionKey } from "openclaw/plugin-sdk/routing";
 import { emitIncrementalText, generateRandomId, getAgentNameById, normalizeReasoningPreviewText } from "./utils";
 import {
+  buildCompactionNoticeText,
   buildThinkingEndText,
   buildToolResultTitle as buildLocalizedToolResultTitle,
   buildToolStartTitle as buildLocalizedToolStartTitle,
@@ -345,10 +347,14 @@ async function handleLifecycleEvent(
       eventType: EventType.ANSWER_DELTA,
     });
   }
+  const completionReason =
+    phase === "error" && isOpenClawContextOverflowDispatchError(data?.error)
+      ? "root_lifecycle_context_overflow_error"
+      : `root_lifecycle_${phase}`;
   scheduleActiveSdkCompletionCheck(
     api,
     activeRequest.sessionKey,
-    `root_lifecycle_${phase}`,
+    completionReason,
   );
 }
 
@@ -361,15 +367,47 @@ async function handleCompactionEvent(
   if (!phase) {
     return;
   }
+  const activeSessionKey = sessionKey ?? request.sessionKey;
   if (phase === "start") {
-    markActiveSdkCompactionRetryPending(sessionKey ?? request.sessionKey, true);
+    markActiveSdkCompactionRetryPending(activeSessionKey, true);
+    await emitSdkChunk(request, buildCompactionNoticeText(request.language, {
+      phase: "start",
+    }), {
+      messageId: `${event.runId || activeSessionKey}:compaction:start`,
+      parentMessageId: "-1",
+      eventType: EventType.REASONING_LOG_DELTA,
+      contentType: SseReasonMessageType.think_status_title,
+      objectType: "compaction",
+      status: "_START_",
+      metadata: {
+        isCompactionNotice: true,
+        compactionPhase: "start",
+      },
+    });
     return;
   }
   if (phase === "end") {
-    markActiveSdkCompactionRetryPending(
-      sessionKey ?? request.sessionKey,
-      Boolean(event.data?.willRetry),
-    );
+    const completed = Boolean(event.data?.completed);
+    const willRetry = Boolean(event.data?.willRetry);
+    markActiveSdkCompactionRetryPending(activeSessionKey, willRetry);
+    await emitSdkChunk(request, buildCompactionNoticeText(request.language, {
+      phase: "end",
+      completed,
+      willRetry,
+    }), {
+      messageId: `${event.runId || activeSessionKey}:compaction:end`,
+      parentMessageId: "-1",
+      eventType: EventType.REASONING_LOG_DELTA,
+      contentType: SseReasonMessageType.think_status_title,
+      objectType: "compaction",
+      status: completed ? "_DONE_" : "_ERROR_",
+      metadata: {
+        isCompactionNotice: true,
+        compactionPhase: "end",
+        completed,
+        willRetry,
+      },
+    });
   }
 }
 

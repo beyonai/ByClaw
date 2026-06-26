@@ -28,6 +28,16 @@ SELECT byai.add_column_if_missing('byai', 'sandbox_service_spec', 'enabled', 'IN
 SELECT byai.add_column_if_missing('byai', 'sandbox_service_spec', 'default_profile_key', 'VARCHAR(64)');
 SELECT byai.add_column_if_missing('byai', 'sandbox_service_spec', 'autoscale_enabled', 'INTEGER DEFAULT 0');
 
+DO $$
+BEGIN
+  IF to_regclass('byai.ss_sandbox_resize_record') IS NOT NULL THEN
+    PERFORM byai.add_column_if_missing('byai', 'ss_sandbox_resize_record', 'idempotency_key', 'VARCHAR(512)');
+    PERFORM byai.add_column_if_missing('byai', 'ss_sandbox_resize_record', 'skip_reason', 'TEXT');
+    EXECUTE 'CREATE INDEX IF NOT EXISTS idx_ss_sandbox_resize_record_idempotency ON "byai"."ss_sandbox_resize_record" (idempotency_key, started_at DESC)';
+  END IF;
+END;
+$$ LANGUAGE plpgsql;
+
 CREATE TABLE IF NOT EXISTS "byai"."sandbox_service_profile" (
   id BIGINT NOT NULL DEFAULT nextval('byai.seq_any_table'::regclass),
   service_type VARCHAR(128) NOT NULL,
@@ -119,7 +129,7 @@ SELECT
     "startup": {
       "entrypoint": [
         "/bin/sh",
-        "-lc",
+        "-c",
         "umask 0000; mkdir -p /by/.sessions /by/.openclaw; chmod a+rwx /by /by/.sessions /by/.openclaw 2>/dev/null || true; chmod -R a+rwX /by/.sessions /by/.openclaw 2>/dev/null || true; exec /usr/local/bin/startAll.sh"
       ]
     },

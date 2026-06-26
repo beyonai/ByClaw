@@ -35,6 +35,14 @@ type NativeAgentJson = {
     allowSpawnFrom?: string[];
 };
 
+const CODE_TO_WIKI_EMPLOYEE_NAME = "百应平台赋能助手";
+const CODE_TO_WIKI_TOOL_NAME = "code_to_wiki";
+
+function isSkillRelResource(raw: Record<string, unknown>): boolean {
+    const t = String(raw.resourceBizType ?? raw.resourceType ?? "").trim().toUpperCase();
+    return t === "SKILL";
+}
+
 export type AimodelProviderApi = "openai-completions" | "openai-responses" | "anthropic-messages";
 export type AimodelModelInput = "text" | "image";
 export type AimodelThinkingLevel =
@@ -55,6 +63,7 @@ export type AimodelModelCompat = {
     thinkingFormat?: string;
     supportedReasoningEfforts?: string[];
     reasoningEffortMap?: Record<string, string>;
+    supportsUsageInStreaming?: boolean;
 };
 
 export type ProviderBundle = {
@@ -260,12 +269,17 @@ function normalizeAgentListTools(
     raw: Record<string, unknown>,
 ): NonNullable<AgentListEntry["tools"]> {
     const allow = normalizeStringList(raw.relTools);
+    const extraTools =
+        nonEmpty(raw.resourceName) === CODE_TO_WIKI_EMPLOYEE_NAME ||
+        nonEmpty(raw.name) === CODE_TO_WIKI_EMPLOYEE_NAME
+            ? [CODE_TO_WIKI_TOOL_NAME]
+            : [];
     return allow.length > 0
         ? {
-              allow: Array.from(new Set([...allow, "baiying_call"])),
+              allow: Array.from(new Set([...allow, "baiying_call", ...extraTools])),
           }
         : {
-              alsoAllow: ["baiying_call"],
+              alsoAllow: Array.from(new Set(["baiying_call", ...extraTools])),
           };
 }
 
@@ -313,18 +327,15 @@ function adaptRawBaiyingDetail(params: {
     const agentSseUrl = nonEmpty(detail.agentSseUrl) || undefined;
     const agentHomeUrl = nonEmpty(detail.agentHomeUrl) || undefined;
 
-    // Associated resources (API may return either relResourceInfoList or relResourceList).
-    const relResources = Array.isArray(detail.relResourceInfoList)
-        ? detail.relResourceInfoList
-        : Array.isArray(detail.relResourceList)
-          ? detail.relResourceList
-          : [];
+    // Associated resources from Baiying detail.
+    const relResources = Array.isArray(detail.relResourceList) ? detail.relResourceList : [];
     const associatedResources: BaiyingAssociatedResource[] = relResources
         .filter(
             (r: unknown) =>
                 r &&
                 typeof r === "object" &&
-                typeof (r as Record<string, unknown>).resourceId === "string",
+                typeof (r as Record<string, unknown>).resourceId === "string" &&
+                !isSkillRelResource(r as Record<string, unknown>),
         )
         .map((r: Record<string, unknown>) => ({
             resourceId: String(r.resourceId),

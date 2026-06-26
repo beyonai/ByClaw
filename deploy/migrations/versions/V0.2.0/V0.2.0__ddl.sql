@@ -149,3 +149,164 @@ COMMENT ON COLUMN byai.ss_res_ext_skill.target_content IS '技能资源JSON内�
 COMMENT ON COLUMN byai.ss_res_ext_skill.sync_status IS '同步状态：PENDING=待同步，SUCCESS=同步成功，FAILED=同步失败';
 COMMENT ON COLUMN byai.ss_res_ext_skill.sync_error IS '最近一次同步失败原因';
 COMMENT ON COLUMN byai.ss_res_ext_skill.last_sync_time IS '最近一次同步时间';
+
+CREATE OR REPLACE FUNCTION byai.add_column_if_missing(
+    p_schema_name TEXT,
+    p_table_name TEXT,
+    p_column_name TEXT,
+    p_column_definition TEXT
+) RETURNS VOID AS $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = p_schema_name
+          AND table_name = p_table_name
+          AND column_name = p_column_name
+    ) THEN
+        EXECUTE 'ALTER TABLE ' || quote_ident(p_schema_name) || '.' || quote_ident(p_table_name)
+            || ' ADD COLUMN ' || quote_ident(p_column_name) || ' ' || p_column_definition;
+    END IF;
+END;
+$$ LANGUAGE plpgsql;
+
+SELECT byai.add_column_if_missing('byai', 'ss_sandbox_resize_record', 'idempotency_key', 'VARCHAR(512)');
+SELECT byai.add_column_if_missing('byai', 'ss_sandbox_resize_record', 'skip_reason', 'TEXT');
+
+CREATE INDEX IF NOT EXISTS idx_ss_sandbox_resize_record_idempotency
+    ON byai.ss_sandbox_resize_record (idempotency_key, started_at DESC);
+
+COMMENT ON COLUMN byai.ss_sandbox_resize_record.idempotency_key IS '扩缩容动作幂等键';
+COMMENT ON COLUMN byai.ss_sandbox_resize_record.skip_reason IS '扩缩容动作跳过原因';
+
+DROP FUNCTION byai.add_column_if_missing(TEXT, TEXT, TEXT, TEXT);
+
+-- 个人中心-个人参数配置表
+-- 数据库保存密文，Redis 同步运行期明文缓存，供外部按用户 key 读取。
+CREATE TABLE IF NOT EXISTS byai.po_user_private_param (
+    param_id BIGINT PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    param_key VARCHAR(128) NOT NULL,
+    param_value_cipher TEXT NOT NULL,
+    param_value_last4 VARCHAR(16),
+    description VARCHAR(512),
+    status VARCHAR(32) NOT NULL DEFAULT 'NORMAL',
+    create_by BIGINT,
+    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    update_by BIGINT,
+    update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    delete_flag CHAR(1) NOT NULL DEFAULT '0'
+);
+
+COMMENT ON TABLE byai.po_user_private_param IS '个人中心-个人参数配置表';
+COMMENT ON COLUMN byai.po_user_private_param.param_id IS '个人参数主键ID';
+COMMENT ON COLUMN byai.po_user_private_param.user_id IS '所属用户ID';
+COMMENT ON COLUMN byai.po_user_private_param.param_key IS '参数名，环境变量格式';
+COMMENT ON COLUMN byai.po_user_private_param.param_value_cipher IS '参数值密文';
+COMMENT ON COLUMN byai.po_user_private_param.param_value_last4 IS '参数值后四位，用于前端提示';
+COMMENT ON COLUMN byai.po_user_private_param.description IS '参数说明';
+COMMENT ON COLUMN byai.po_user_private_param.status IS '参数状态，NORMAL正常，DISABLED停用';
+COMMENT ON COLUMN byai.po_user_private_param.create_by IS '创建人ID';
+COMMENT ON COLUMN byai.po_user_private_param.create_time IS '创建时间';
+COMMENT ON COLUMN byai.po_user_private_param.update_by IS '更新人ID';
+COMMENT ON COLUMN byai.po_user_private_param.update_time IS '更新时间';
+COMMENT ON COLUMN byai.po_user_private_param.delete_flag IS '逻辑删除标识，0未删除，1已删除';
+
+CREATE INDEX IF NOT EXISTS idx_po_user_private_param_user
+    ON byai.po_user_private_param (user_id, delete_flag, update_time DESC);
+
+CREATE INDEX IF NOT EXISTS idx_po_user_private_param_status
+    ON byai.po_user_private_param (user_id, delete_flag, status, update_time DESC);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uk_po_user_private_param_key
+    ON byai.po_user_private_param (user_id, param_key)
+    WHERE delete_flag = '0';
+
+-- 沙箱健康检测-水位模型配置表
+CREATE TABLE IF NOT EXISTS byai.sandbox_health_watermark_model (
+    id BIGSERIAL PRIMARY KEY,
+    model_name VARCHAR(128) NOT NULL,
+    service_type VARCHAR(64) NOT NULL,
+    profile_key VARCHAR(64),
+    enabled INTEGER NOT NULL DEFAULT 1,
+    priority INTEGER NOT NULL DEFAULT 0,
+    idle_memory_limit_ratio NUMERIC(8,4) NOT NULL,
+    busy_memory_limit_ratio NUMERIC(8,4) NOT NULL,
+    critical_memory_limit_ratio NUMERIC(8,4) NOT NULL,
+    busy_cpu_request_ratio NUMERIC(8,4) NOT NULL,
+    critical_cpu_request_ratio NUMERIC(8,4) NOT NULL,
+    consecutive_busy_samples INTEGER NOT NULL DEFAULT 2,
+    recover_samples INTEGER NOT NULL DEFAULT 2,
+    sample_interval_seconds INTEGER NOT NULL DEFAULT 30,
+    snapshot_ttl_seconds INTEGER NOT NULL DEFAULT 120,
+    watch_ttl_seconds INTEGER NOT NULL DEFAULT 90,
+    remark VARCHAR(512),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+COMMENT ON TABLE byai.sandbox_health_watermark_model IS '沙箱健康检测-水位模型配置表';
+COMMENT ON COLUMN byai.sandbox_health_watermark_model.id IS '主键ID';
+COMMENT ON COLUMN byai.sandbox_health_watermark_model.model_name IS '水位模型名称';
+COMMENT ON COLUMN byai.sandbox_health_watermark_model.service_type IS '沙箱服务类型，例如openclaw；default表示兜底模型';
+COMMENT ON COLUMN byai.sandbox_health_watermark_model.profile_key IS '沙箱规格Key，例如xs/s/m/l；为空表示服务类型默认模型';
+COMMENT ON COLUMN byai.sandbox_health_watermark_model.enabled IS '是否启用，1启用，0停用';
+COMMENT ON COLUMN byai.sandbox_health_watermark_model.priority IS '匹配优先级，同一匹配范围内数值越大优先级越高';
+COMMENT ON COLUMN byai.sandbox_health_watermark_model.idle_memory_limit_ratio IS '空闲内存limit水位阈值';
+COMMENT ON COLUMN byai.sandbox_health_watermark_model.busy_memory_limit_ratio IS '繁忙内存limit水位阈值';
+COMMENT ON COLUMN byai.sandbox_health_watermark_model.critical_memory_limit_ratio IS '阻断内存limit水位阈值';
+COMMENT ON COLUMN byai.sandbox_health_watermark_model.busy_cpu_request_ratio IS '繁忙CPU request水位阈值';
+COMMENT ON COLUMN byai.sandbox_health_watermark_model.critical_cpu_request_ratio IS '阻断CPU request水位阈值';
+COMMENT ON COLUMN byai.sandbox_health_watermark_model.consecutive_busy_samples IS '连续繁忙采样次数';
+COMMENT ON COLUMN byai.sandbox_health_watermark_model.recover_samples IS '连续恢复采样次数';
+COMMENT ON COLUMN byai.sandbox_health_watermark_model.sample_interval_seconds IS '采样周期，单位秒';
+COMMENT ON COLUMN byai.sandbox_health_watermark_model.snapshot_ttl_seconds IS '健康快照Redis TTL，单位秒';
+COMMENT ON COLUMN byai.sandbox_health_watermark_model.watch_ttl_seconds IS '健康检测watch Redis TTL，单位秒';
+COMMENT ON COLUMN byai.sandbox_health_watermark_model.remark IS '备注';
+COMMENT ON COLUMN byai.sandbox_health_watermark_model.created_at IS '创建时间';
+COMMENT ON COLUMN byai.sandbox_health_watermark_model.updated_at IS '更新时间';
+
+CREATE UNIQUE INDEX IF NOT EXISTS uk_sandbox_health_watermark_enabled
+    ON byai.sandbox_health_watermark_model (service_type, COALESCE(profile_key, ''))
+    WHERE enabled = 1;
+
+CREATE INDEX IF NOT EXISTS idx_sandbox_health_watermark_scope
+    ON byai.sandbox_health_watermark_model (service_type, profile_key, enabled, priority DESC);
+
+alter table byai.ss_res_ext_dig_employee alter column tag_name type varchar(255);
+
+
+-- 模型表新增 owner_type 字段: 区分个人模型 (PERSONAL) 和公共模型 (PUBLIC)
+ALTER TABLE byai.byai_aimodel ADD COLUMN owner_type VARCHAR(20) DEFAULT 'PUBLIC';
+COMMENT ON COLUMN byai.byai_aimodel.owner_type IS '模型归属: PUBLIC(公共) / PERSONAL(个人)';
+
+-- 模型表新增 source_type 字段: 区分模型来源
+ALTER TABLE byai.byai_aimodel ADD COLUMN source_type VARCHAR(32) DEFAULT NULL;
+COMMENT ON COLUMN byai.byai_aimodel.source_type IS '模型来源: null(用户创建) / TOKEN_SERVER(系统分配)';
+
+-- 用户 Token 额度配置表（管理员可为每位用户分配独立额度）
+CREATE TABLE IF NOT EXISTS byai.po_user_token_quota (
+    quota_id BIGINT PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    monthly_quota_limit BIGINT NOT NULL,
+    remark VARCHAR(512),
+    create_by BIGINT,
+    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    update_by BIGINT,
+    update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    delete_flag CHAR(1) NOT NULL DEFAULT '0'
+);
+
+COMMENT ON TABLE byai.po_user_token_quota IS '用户Token额度配置表';
+COMMENT ON COLUMN byai.po_user_token_quota.quota_id IS '主键ID';
+COMMENT ON COLUMN byai.po_user_token_quota.user_id IS '用户ID（关联po_users.user_id）';
+COMMENT ON COLUMN byai.po_user_token_quota.monthly_quota_limit IS '月度Token限额';
+COMMENT ON COLUMN byai.po_user_token_quota.remark IS '备注';
+COMMENT ON COLUMN byai.po_user_token_quota.create_by IS '创建人ID';
+COMMENT ON COLUMN byai.po_user_token_quota.create_time IS '创建时间';
+COMMENT ON COLUMN byai.po_user_token_quota.update_by IS '更新人ID';
+COMMENT ON COLUMN byai.po_user_token_quota.update_time IS '更新时间';
+COMMENT ON COLUMN byai.po_user_token_quota.delete_flag IS '逻辑删除标识，0未删除，1已删除';
+
+CREATE UNIQUE INDEX IF NOT EXISTS uk_po_user_token_quota_user
+    ON byai.po_user_token_quota (user_id) WHERE delete_flag = '0';

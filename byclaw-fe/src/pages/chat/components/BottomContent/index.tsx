@@ -1,6 +1,7 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { Tabs } from 'antd';
 import { useIntl, useSelector } from '@umijs/max';
+import { isEmpty, compact } from 'lodash';
 
 import useGlobal from '@/hooks/useGlobal';
 
@@ -12,12 +13,15 @@ import SystemNotification from './systemNotification';
 import type { TabsProps } from 'antd/lib/tabs';
 import styles from './index.module.less';
 
+const emptyObj: Record<string, unknown> = {};
+
 export default function BottomContent() {
   const intl = useIntl();
 
   const { agentInfo } = useGlobal();
-  const { agentId } = agentInfo || {};
+  const { agentId } = agentInfo || emptyObj;
 
+  const [relatedQuestions, setRelatedQuestions] = useState<string[]>([]);
   const [currentTab, setCurrentTab] = useState('suggestQuestion');
   const oldTabKeyRef = useRef('suggestQuestion');
 
@@ -28,7 +32,7 @@ export default function BottomContent() {
       {
         key: 'suggestQuestion',
         label: intl.formatMessage({ id: 'chat.bottomContent.suggestQuestion' }),
-        children: <RecommendQuestion />,
+        children: <RecommendQuestion relatedQuestions={relatedQuestions} />,
         // destroyOnHidden: true,
       },
       {
@@ -42,7 +46,7 @@ export default function BottomContent() {
       items.push({
         key: 'suggestSkill',
         label: intl.formatMessage({ id: 'chat.bottomContent.suggestSkill' }),
-        children: <SuggestSkill agentId={agentId} />,
+        children: <SuggestSkill agentId={agentId as string} />,
         // destroyOnHidden: true,
       });
     }
@@ -56,16 +60,35 @@ export default function BottomContent() {
     }
 
     return items;
-  }, [intl, agentId, userInfo]);
+  }, [intl, agentId, userInfo, relatedQuestions]);
 
   useEffect(() => {
+    const { agentId, prologue } = agentInfo || emptyObj;
+
+    let relatedQuestions: string[] = [];
+
+    try {
+      const obj = JSON.parse((prologue as string) || '{}');
+      const { openingQuestion } = obj;
+      relatedQuestions = compact(JSON.parse(openingQuestion || '[]'));
+    } catch (error) {
+      console.error('Error parsing prologue:', error);
+    }
+
+    setRelatedQuestions(relatedQuestions);
+
+    if (!isEmpty(relatedQuestions)) {
+      setCurrentTab('suggestQuestion');
+      return;
+    }
+
     if (agentId) {
       setCurrentTab('suggestSkill');
       return;
     }
 
     setCurrentTab(oldTabKeyRef.current === 'suggestSkill' ? 'suggestQuestion' : oldTabKeyRef.current);
-  }, [agentId]);
+  }, [agentInfo]);
 
   return (
     <div className={styles.bottomContent}>

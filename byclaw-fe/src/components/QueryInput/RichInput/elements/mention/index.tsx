@@ -30,7 +30,7 @@ export type MentionElementType = {
   children: { text: string }[];
 };
 
-const MentionElement = ({ attributes, element }: RenderElementProps) => {
+const MentionElement = ({ attributes, children, element }: RenderElementProps) => {
   const el = element as MentionElementType;
   const { name, chatAvatar, resourceType, isDefaultAgent } = el;
   const editor = useSlateStatic();
@@ -59,29 +59,37 @@ const MentionElement = ({ attributes, element }: RenderElementProps) => {
   const ele = (
     <span
       {...attributes}
-      contentEditable={false}
       className={classNames(styles.mention, {
         // 这个类名需要在别的地方querySelector获取，因此用global的方式
         'default-agent': isDefaultAgent,
       })}
-      onClick={() => {
-        if (isDefaultAgent) {
-          // 删除该节点
-          // 找到当前节点的路径
-          const path = ReactEditor.findPath(editor, element);
-          // 删除节点
-          Transforms.removeNodes(editor, { at: path });
-        }
-      }}
     >
-      {prefix}
-      {name}
-      {isDefaultAgent && <CloseCircleFilled className={styles.deleteIcon} />}
-      {isSuperAssistant && (
-        <span className={styles.aiMark}>
-          <span>{getIntl().formatMessage({ id: 'common.digitalClone' })}</span>
-        </span>
-      )}
+      <span
+        contentEditable={false}
+        onClick={(event) => {
+          if (isDefaultAgent) {
+            event.preventDefault();
+            event.stopPropagation();
+            try {
+              // 默认员工标签是 Slate void 节点，删除前先通过 ReactEditor 定位真实路径。
+              const path = ReactEditor.findPath(editor, element);
+              Transforms.removeNodes(editor, { at: path });
+            } catch (e) {
+              // 节点可能已被外部状态更新移除，忽略即可，避免再次触发 Slate DOM 映射异常。
+            }
+          }
+        }}
+      >
+        {prefix}
+        {name}
+        {isDefaultAgent && <CloseCircleFilled className={styles.deleteIcon} />}
+        {isSuperAssistant && (
+          <span className={styles.aiMark}>
+            <span>{getIntl().formatMessage({ id: 'common.digitalClone' })}</span>
+          </span>
+        )}
+      </span>
+      {children}
     </span>
   );
   if (el.isDefaultAgent) {

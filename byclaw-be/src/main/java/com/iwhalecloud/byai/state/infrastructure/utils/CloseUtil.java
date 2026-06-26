@@ -10,12 +10,17 @@ import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 public class CloseUtil {
-    public static void close(ChannelHandlerContext ctx){
+    public static void close(ChannelHandlerContext ctx) {
         try {
-            LoginInfo userInfo = ctx.attr(Constant.ATT_USER_INFO).get();
-            ChannelManager.removeChannel(userInfo.getUserId(), ctx.channel());
+            LoginInfo userInfo = ctx.channel().attr(Constant.ATT_USER_INFO).get();
+            if (userInfo == null) {
+                userInfo = ctx.attr(Constant.ATT_USER_INFO).get();
+            }
+            if (userInfo != null && userInfo.getUserId() != null) {
+                ChannelManager.removeChannel(userInfo.getUserId(), ctx.channel());
+            }
         }
-        catch (Exception e){
+        catch (Exception e) {
             log.warn(e.getMessage(), e);
         }
         ctx.close();

@@ -11,7 +11,9 @@
   gap: 16px;
   padding: 4px;
   overflow-y: auto;
-  // flex: 1;
+  flex: 1;
+  min-height: 0;
+  align-content: start;
 
   &::-webkit-scrollbar {
     width: 4px;
@@ -86,7 +88,7 @@
   gap: 10px;
   margin-bottom: 4px;
   position: relative;
-  // padding-right: 30px; /* 为更多按钮留出空间 */
+  justify-content: space-between;
 }
 
 .defaultLogo {
@@ -158,24 +160,23 @@
   font-size: 24px;
 }
 
-.moreButton {
-  cursor: pointer;
-  padding: 4px;
-  border-radius: 4px;
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  justify-content: center;
-  gap: 8px;
-  transition: all 0.2s ease;
-  position: absolute;
-  top: -5px;
-  right: -10px;
-  z-index: 1;
+.skillPosterActionBtn {
+  border: none;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 6px 18px rgba(20, 22, 26, 0.12);
+}
 
-  &:hover {
-    color: #165dff;
-  }
+.cardActionBtnIcon {
+  font-size: 16px;
+}
+
+.cardActionBtnWrapper {
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.card:hover .cardActionBtnWrapper {
+  opacity: 1;
 }
 
 .loadingContainer {

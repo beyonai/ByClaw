@@ -4,6 +4,7 @@ import {
   DownOutlined,
   FileTextOutlined,
   GlobalOutlined,
+  KeyOutlined,
   LockOutlined,
   MailOutlined,
   RightOutlined,
@@ -22,12 +23,13 @@ import { getPublicPath } from '@/utils';
 import classNames from 'classnames';
 import PasswordModal from './components/PasswordModal';
 import PersonalEmailSettings from './components/PersonalEmailSettings';
+import PersonalParamSettings from './components/PersonalParamSettings';
 import styles from './index.module.less';
 
 const { Option } = Select;
 const { Text } = Typography;
 
-type SettingsMenuKey = 'general' | 'email';
+type SettingsMenuKey = 'general' | 'personalParams' | 'email';
 type VersionInfo = {
   version: string;
   branch: string;
@@ -83,7 +85,7 @@ const Settings: React.FC = () => {
         value !== undefined &&
         value !== null &&
         value !== '' &&
-        !['commitFull', 'commit', 'commitMsg', 'module'].includes(key)
+        !['commitFull', 'commit', 'commitMsg', 'module', 'branch', 'version'].includes(key)
       );
     })
     .map(([key, value]) => ({
@@ -108,59 +110,6 @@ const Settings: React.FC = () => {
           </Space>
         </div>
       </Card>
-
-      {/* 版本信息 */}
-      <>
-        {versionInfo?.version && (
-          <div className={classNames(styles.settingBox, styles.versionSettingBox, 'ub ub-ver')}>
-            <div className={styles.settingItem}>
-              <div className={styles.settingLabel}>
-                {/* <SkinOutlined className={styles.settingIcon} /> */}
-                <span>{intl.formatMessage({ id: 'sider.version' })}</span>
-              </div>
-              <Button
-                aria-controls="settings-version-details"
-                aria-expanded={versionDetailsOpen}
-                aria-label={versionInfo.version}
-                className={styles.versionButton}
-                size="small"
-                type="text"
-                onClick={() => setVersionDetailsOpen((open) => !open)}
-              >
-                <span>{versionInfo.version}</span>
-                <DownOutlined
-                  className={classNames(styles.versionButtonIcon, {
-                    [styles.versionButtonIconOpen]: versionDetailsOpen,
-                  })}
-                />
-              </Button>
-            </div>
-            <Collapse
-              activeKey={versionDetailsOpen ? ['versionDetails'] : []}
-              className={styles.versionCollapse}
-              collapsible="disabled"
-              ghost
-              items={[
-                {
-                  key: 'versionDetails',
-                  label: null,
-                  showArrow: false,
-                  children: (
-                    <div id="settings-version-details">
-                      <Descriptions
-                        className={styles.versionDescriptions}
-                        column={1}
-                        items={versionDetailItems}
-                        size="small"
-                      />
-                    </div>
-                  ),
-                },
-              ]}
-            />
-          </div>
-        )}
-      </>
 
       <div className={classNames(styles.settingBox, 'ub ub-ver')}>
         {/* 界面主题 */}
@@ -233,6 +182,59 @@ const Settings: React.FC = () => {
         </div>
       )}
 
+      {/* 版本信息 */}
+      <>
+        {versionInfo?.version && (
+          <div className={classNames(styles.settingBox, styles.versionSettingBox, 'ub ub-ver')}>
+            <div className={styles.settingItem}>
+              <div className={styles.settingLabel}>
+                {/* <SkinOutlined className={styles.settingIcon} /> */}
+                <span>{intl.formatMessage({ id: 'sider.version' })}</span>
+              </div>
+              <Button
+                aria-controls="settings-version-details"
+                aria-expanded={versionDetailsOpen}
+                aria-label={versionInfo.version}
+                className={styles.versionButton}
+                size="small"
+                type="text"
+                onClick={() => setVersionDetailsOpen((open) => !open)}
+              >
+                <span>{versionInfo.version}</span>
+                <DownOutlined
+                  className={classNames(styles.versionButtonIcon, {
+                    [styles.versionButtonIconOpen]: versionDetailsOpen,
+                  })}
+                />
+              </Button>
+            </div>
+            <Collapse
+              activeKey={versionDetailsOpen ? ['versionDetails'] : []}
+              className={styles.versionCollapse}
+              collapsible="disabled"
+              ghost
+              items={[
+                {
+                  key: 'versionDetails',
+                  label: null,
+                  showArrow: false,
+                  children: (
+                    <div id="settings-version-details">
+                      <Descriptions
+                        className={styles.versionDescriptions}
+                        column={1}
+                        items={versionDetailItems}
+                        size="small"
+                      />
+                    </div>
+                  ),
+                },
+              ]}
+            />
+          </div>
+        )}
+      </>
+
       {/* 退出登录 */}
       <div
         className={classNames(styles.settingBox, 'ub ub-ac ub-pc')}
@@ -255,6 +257,22 @@ const Settings: React.FC = () => {
       </div>
     </>
   );
+
+  const settingsTitleIdMap: Record<SettingsMenuKey, string> = {
+    general: 'settings.general',
+    personalParams: 'settings.personalParams',
+    email: 'settings.personalEmail',
+  };
+
+  const renderActiveSettings = () => {
+    if (activeMenu === 'general') {
+      return renderGeneralSettings();
+    }
+    if (activeMenu === 'personalParams') {
+      return <PersonalParamSettings />;
+    }
+    return <PersonalEmailSettings />;
+  };
 
   return (
     <div className={styles.settingsPage}>
@@ -279,6 +297,11 @@ const Settings: React.FC = () => {
               label: intl.formatMessage({ id: 'settings.general' }),
             },
             {
+              key: 'personalParams',
+              icon: <KeyOutlined />,
+              label: intl.formatMessage({ id: 'settings.personalParams' }),
+            },
+            {
               key: 'email',
               icon: <MailOutlined />,
               label: intl.formatMessage({ id: 'settings.personalEmail' }),
@@ -289,13 +312,9 @@ const Settings: React.FC = () => {
 
       <main className={styles.settingsMain}>
         <div className={styles.settingsContent}>
-          <span className={styles.settingsTitle}>
-            {activeMenu === 'general'
-              ? intl.formatMessage({ id: 'settings.general' })
-              : intl.formatMessage({ id: 'settings.personalEmail' })}
-          </span>
+          <span className={styles.settingsTitle}>{intl.formatMessage({ id: settingsTitleIdMap[activeMenu] })}</span>
 
-          {activeMenu === 'general' ? renderGeneralSettings() : <PersonalEmailSettings />}
+          {renderActiveSettings()}
         </div>
 
         {showPassword && (

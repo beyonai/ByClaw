@@ -1,12 +1,12 @@
 ---
 name: unstructured-ontology-manager
-description: "对话式非结构化个人本体管理：通过自然语言创建、删除个人非结构化本体对象，数据来源绑定知识库目录"
+description: 当你有文档、图片、视频等非结构化内容存在知识库里，想让 Agent 能像查结构化数据一样精准检索和操作它们时使用本技能。它能够帮你给非结构化内容打上结构化标签（定义字段，如日期、主题、参会人），让每份文档/图片/视频都带有可查询的属性，实现结构化数据与非结构化内容的融合检索。定义的标签字段相当于表的字段，支持新增、修改、删除操作。与结构化本体的区别在于：内容本身存在知识库里，而不是动态表。你可以通过以下对话唤起本技能：「帮我创建一个会议纪要对象，绑定到我的会议知识库」「我的周报存在知识库里，想让 Agent 能按日期和项目名检索」「查看我的知识库有哪些」「把会议纪要对象挂载到我的助理」。
 allowed-tools: execute, read_file
 ---
 
 # 个人非结构化本体管理
 
-通过自然语言对话，管理非结构化本体对象。支持创建、删除操作，对象绑定知识库目录（不建 SQLite 表）。
+通过自然语言对话，管理非结构化本体对象。支持创建、删除操作，对象绑定知识库目录（不建表）。
 
 ## ⚠️ 执行规则（最高优先级，不得违反）
 
@@ -25,13 +25,14 @@ allowed-tools: execute, read_file
 - 删除非结构化本体对象（不删知识库）
 - 挂载本体到当前数字员工/个人助理
 - 查询可绑定的术语类型
+- 在知识库中创建目录或文件夹
 - 查询术语类型的值列表
 
 ## 与结构化本体的区别
 
 | 维度 | structured-ontology-manager | unstructured-ontology-manager |
-|------|-----------------------------|---------------------------------|
-| 数据来源 | SQLite 动态表 | 知识库目录文档 |
+|------|----------------------------|---------------------------------|
+| 数据来源 | 动态表 | 知识库目录文档 |
 | `entity_source` | `DYNAMIC_TABLE` | `KNOWLEDGE_BASE` |
 | 额外操作 | 建表/删表 | 绑定 `kb_id` + `kb_directory` |
 | 视图支持 | ✅ | ❌ |
@@ -57,11 +58,12 @@ allowed-tools: execute, read_file
 | 查看/列出 + 对象 | `/usr/local/bin/python3 scripts/list_resources.py '{}'` |
 | 查看知识库列表 | `/usr/local/bin/python3 scripts/list_knowledge_bases.py '{}'` |
 | 查看知识库目录 | `/usr/local/bin/python3 scripts/list_kb_directories.py '{"kb_id":"<kb_id>"}'` |
-| 创建/新建 + 对象（收集阶段） | `/usr/local/bin/python3 scripts/create_object.py '{"action":"collect","entity_code":"<code>","entity_name":"<name>","kb_id":"<kb_id>","kb_directory":"<dir>","fields":[]},"session_id":"<sid>"'` |
+| 创建/新建 + 对象（收集阶段） | `/usr/local/bin/python3 scripts/create_object.py '{"action":"collect","entity_code":"<code>","entity_name":"<name>","kb_id":"<resourceCode>","kb_directory":"<dir>","fields":[]},"session_id":"<sid>"'` |
 | 确认提交 | `/usr/local/bin/python3 scripts/create_object.py '{"action":"submit","entity_code":"<code>","session_id":"<sid>"}'` |
 | 删除 + 对象 | `/usr/local/bin/python3 scripts/delete_object.py '{"entity_code":"<code>"}'` |
 | 挂载/添加到助理/数字员工 | `/usr/local/bin/python3 scripts/mount_resource.py '{"agent_id":<id>,"resource_code":"<code>"}'` |
 | 查看术语类型 | `/usr/local/bin/python3 scripts/list_term_types.py '{}'` |
+| 创建目录/文件夹 | `/usr/local/bin/python3 scripts/create_directory.py '{"resource_id":"<resourceId>","directory_name":"<name>"}'` |
 | 查看术语值 | `/usr/local/bin/python3 scripts/get_term_type_values.py '{"term_type_code":"<code>"}'` |
 
 **输出处理规则**：
@@ -76,6 +78,8 @@ allowed-tools: execute, read_file
 - `kb_id`：知识库编码，必须使用 `list_knowledge_bases.py` 返回的 **`resourceCode`** 字段，**不是 `resourceId`**
   - 示例：`resourceCode: "16"`（不是 `resourceId: "10000765"`）
 - `kb_directory`：知识库目录路径，来自 `list_kb_directories.py` 返回的 `directoryPath` 字段
+- `resource_id`：创建目录时使用，来自 `list_knowledge_bases.py` 返回的 **`resourceId`** 字段（如 `"10000765"`），**不是 `resourceCode`**
+- `directory_name`：要创建的目录或文件夹名称
 
 ## 认证与环境变量
 

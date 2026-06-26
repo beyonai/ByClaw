@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+// 头部原有SDK会话溢出媒体处理导入
 import type { GatewayDataEmitter } from "@byclaw/by-framework";
 import { deliverReplyToAgentViaSdk } from "./sdk-message-processor.js";
 import {
@@ -11,7 +12,10 @@ import {
 } from "./session-context.js";
 import { setByaiRuntime } from "./runtime.js";
 import type { ResolvedByaiAccount } from "./types.js";
+// 新版本新增导入（冲突右侧）
+import { isOpenClawContextOverflowDispatchError } from "./dispatch-error.js";
 
+// 冲突HEAD：SDK自动续答不携带原始媒体的测试套件
 describe("deliverReplyToAgentViaSdk overflow continuation media handling", () => {
   it("does not attach the original inbound media to the auto-continue dispatch", async () => {
     const account: ResolvedByaiAccount = {
@@ -118,5 +122,35 @@ describe("deliverReplyToAgentViaSdk overflow continuation media handling", () =>
     expect(emittedStates).toContain("");
 
     clearActiveSdkRequestByTarget(account.accountId, "test-agent:user-media");
+  });
+});
+
+// 冲突新版本D0.2.0：上下文溢出错误识别工具测试套件
+describe("isOpenClawContextOverflowDispatchError", () => {
+  it("recognizes OpenClaw recoverable context overflow dispatch errors", () => {
+    expect(
+      isOpenClawContextOverflowDispatchError(
+        new Error(
+          "Context overflow: prompt too large for the model. Try /reset (or /new) to start a fresh session, or use a larger-context model.",
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      isOpenClawContextOverflowDispatchError(
+        "Context overflow: prompt too large for the model (precheck).",
+      ),
+    ).toBe(true);
+    expect(
+      isOpenClawContextOverflowDispatchError(
+        "Context overflow: estimated context size exceeds safe threshold during tool loop.",
+      ),
+    ).toBe(true);
+  });
+
+  it("does not classify unrelated dispatch errors as recoverable overflow", () => {
+    expect(isOpenClawContextOverflowDispatchError(new Error("Redis connection failed"))).toBe(
+      false,
+    );
+    expect(isOpenClawContextOverflowDispatchError("provider returned HTTP 401")).toBe(false);
   });
 });

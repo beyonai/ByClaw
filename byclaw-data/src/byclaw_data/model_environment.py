@@ -184,6 +184,10 @@ def build_llm_config(model: dict[str, Any] | None) -> dict[str, Any] | None:
         config["DATACLOUD_LLM_MODEL_KWARGS"] = json.dumps(
             instance_param.get("extendParam"), ensure_ascii=False
         )
+    # 透传模型上下文窗口上限，用于 _trim_messages_window 按比例计算预算
+    max_content_token = model.get("maxContentToken")
+    if max_content_token:
+        config["DATACLOUD_LLM_MAX_CONTENT_TOKEN"] = str(max_content_token)
     applied = _apply_config_to_environment(config)
     logger.debug("[model_env] build_llm_config: applied env keys=%s", sorted(applied.keys()))
     return applied

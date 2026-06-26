@@ -107,8 +107,19 @@ export const byclawWikiConfigSchema = {
     },
     notificationDingtalkActionCardBtnUrl: {
       type: "string",
-      description: "DingTalk ActionCard single button jump URL.",
-      default: "http://39.105.105.85/beyond/chat",
+      description: "Optional DingTalk ActionCard button URL. Leave empty to send the card without a jump URL.",
+      default: "",
+    },
+    notificationDocumentUploadUrl: {
+      type: "string",
+      description:
+        "COS upload endpoint for generated operation documents. Relative paths resolve against BYCLAW_WIKI_COS_UPLOAD_BASE_URL or http://localhost:3000.",
+      default: "/api/cos/upload",
+    },
+    notificationDocumentUploadPrefix: {
+      type: "string",
+      description: "Optional COS object prefix for generated operation documents.",
+      default: "",
     },
     notificationRobotType: {
       enum: ["generic", "wecom", "dingtalk", "feishu"],
@@ -262,8 +273,10 @@ export function resolveByclawWikiConfig(raw: unknown): ResolvedByclawWikiConfig 
       ),
       dingtalkActionCardBtnUrl: readString(
         config.notificationDingtalkActionCardBtnUrl,
-        "http://39.105.105.85/beyond/chat",
+        "",
       ),
+      documentUploadUrl: readString(config.notificationDocumentUploadUrl, "/api/cos/upload"),
+      documentUploadPrefix: readString(config.notificationDocumentUploadPrefix, ""),
       robotType: readRobotType(config.notificationRobotType),
       maxOutputChars: readPositiveInteger(config.notificationMaxOutputChars, 3000),
       minOutputChars: readNonNegativeInteger(config.notificationMinOutputChars, 1),

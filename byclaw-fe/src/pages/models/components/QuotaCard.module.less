@@ -1,0 +1,138 @@
+.card {
+  margin-bottom: 20px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #f0f7ff 0%, #f8fbff 100%);
+  border: 1px solid #e6f0ff;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1f2533;
+}
+
+.quotaSection {
+  margin-bottom: 12px;
+}
+
+.quotaLabel {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  color: #707680;
+  margin-bottom: 4px;
+}
+
+.exceededTip {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #ff4d4f;
+}
+
+.quotaDesc {
+  margin-top: 6px;
+  font-size: 11px;
+  color: #999;
+}
+
+.statsRow {
+  display: flex;
+  gap: 32px;
+  margin-bottom: 12px;
+}
+
+.statItem {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.statValue {
+  font-size: 20px;
+  font-weight: 600;
+  color: #1f2533;
+}
+
+.statLabel {
+  font-size: 12px;
+  color: #707680;
+}
+
+.usages {
+  border-top: 1px solid #e6f0ff;
+  padding-top: 12px;
+}
+
+.usagesTitle {
+  font-size: 12px;
+  color: #707680;
+  margin-bottom: 8px;
+  font-weight: 500;
+}
+
+.usageItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  font-size: 12px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.7);
+  margin-bottom: 6px;
+  transition: background 0.2s;
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.95);
+  }
+}
+
+.usageLeft {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  margin-right: 12px;
+}
+
+.usageModel {
+  color: #4a5058;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+  line-height: 1.4;
+}
+
+.usageBar {
+  height: 3px;
+  margin-top: 4px;
+  border-radius: 2px;
+  background: #e8edf3;
+  overflow: hidden;
+}
+
+.usageBarFill {
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #6da6f7 0%, #1677ff 100%);
+  transition: width 0.3s ease;
+}
+
+.usageTokens {
+  color: #1f2533;
+  font-weight: 600;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}

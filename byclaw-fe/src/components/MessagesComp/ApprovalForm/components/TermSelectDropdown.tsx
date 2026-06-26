@@ -51,7 +51,13 @@ function TermSelectDropdown(props: IProps) {
   }, [options, selectedValues]);
   const displayValue = useMemo<string>(() => {
     if (isMultiple) {
-      return selectedOptions.map((option) => `${option.label}(${option.value})`).join('、');
+      return selectedValues
+        .map((selectedValue) => {
+          const selectedOption = options.find((option) => option.value === selectedValue);
+
+          return selectedOption ? `${selectedOption.label}(${selectedOption.value})` : `${selectedValue}`;
+        })
+        .join('、');
     }
 
     if (selectedOptions[0]) {
@@ -59,7 +65,7 @@ function TermSelectDropdown(props: IProps) {
     }
 
     return Array.isArray(value) ? '' : `${value || ''}`;
-  }, [isMultiple, selectedOptions, value]);
+  }, [isMultiple, options, selectedOptions, selectedValues, value]);
   const hasMore = !!item.hasMore;
 
   const refresh = () => {

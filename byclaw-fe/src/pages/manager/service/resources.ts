@@ -177,6 +177,18 @@ export function queryFixedEntryOperationCapability() {
   return GET<FixedEntryOperationCapability>('/byaiService/auth/privilegeGrant/queryFixedEntryOperationCapability');
 }
 
+export interface GeneratedResourceImage {
+  imageBase64: string;
+  mimeType: string;
+  fileName: string;
+}
+
+export function generateResourceImage(params: { resourceName?: string; resourceDesc?: string }) {
+  return POST<GeneratedResourceImage>('/byaiService/tool/generateResourceImage', params, {
+    timeout: 180000,
+  });
+}
+
 /**
  * 申请资源使用权限
  * 当用户没有资源使用权限时，可提交使用申请
@@ -431,9 +443,19 @@ export const previewFile = (filePath: string) => {
  * 技能上传成功后返回的数据
  */
 export interface UploadSkillZipResponse {
+  resourceId?: string | number;
   skillName: string;
   skillPath: string;
   skillDocObjectKey: string;
+  skillDesc?: string;
+  displaySourceType?: string;
+  resourceBacked?: boolean;
+}
+
+export interface QuerySkillListParams {
+  userCode?: string;
+  resourceId?: string | number;
+  keyword?: string;
 }
 
 /**
@@ -453,6 +475,51 @@ export const uploadSkillZip = (data: FormData) => {
       },
     }
   );
+};
+
+/**
+ * 查询当前数字员工 workspace 中未绑定到数字员工关系表的目录技能。
+ */
+export const queryWorkspaceSkillList = (params: QuerySkillListParams) => {
+  return POST<{ code: number; msg: string; data: UploadSkillZipResponse[]; success: boolean }>(
+    '/byaiService/tool/qryWorkspaceSkillList',
+    params
+  );
+};
+
+export const queryLobsterInstalledSkillList = queryWorkspaceSkillList;
+
+/**
+ * 查询当前数字员工 workspace 中、尚未进入个人技能资源列表的目录技能（用户开发）。
+ * 与 queryWorkspaceSkillList 的区别：去重口径为“个人 tab 已资源化技能”，供首页右侧个人技能 tab 合并展示。
+ */
+export const queryWorkspacePersonalSkillList = (params: QuerySkillListParams) => {
+  return POST<{ code: number; msg: string; data: UploadSkillZipResponse[]; success: boolean }>(
+    '/byaiService/tool/qryWorkspacePersonalSkillList',
+    params
+  );
+};
+
+export interface WorkspaceSkillParams {
+  skillPath: string;
+  resourceId?: string | number;
+  userCode?: string;
+  overwriteConfirmed?: boolean;
+}
+
+export const queryWorkspaceSkillDetail = (params: WorkspaceSkillParams) => {
+  return POST<{ code: number; msg: string; data: UploadSkillZipResponse; success: boolean }>(
+    '/byaiService/tool/getWorkspaceSkillDetail',
+    params
+  );
+};
+
+export const checkWorkspaceSkillShareConflicts = (params: WorkspaceSkillParams) => {
+  return POST<ResourceImportResult>('/byaiService/tool/checkWorkspaceSkillShareConflicts', params);
+};
+
+export const resourceizeWorkspaceSkill = (params: WorkspaceSkillParams) => {
+  return POST<ResourceImportResult>('/byaiService/tool/resourceizeWorkspaceSkill', params);
 };
 
 /**

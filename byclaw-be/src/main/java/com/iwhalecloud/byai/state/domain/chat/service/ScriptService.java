@@ -8,6 +8,7 @@ import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
 import com.iwhalecloud.byai.state.domain.chat.model.ChatInitializationDto;
 import com.iwhalecloud.byai.state.domain.session.dto.SessionMembersDto;
 import com.iwhalecloud.byai.state.domain.session.service.SessionService;
+import com.iwhalecloud.byai.state.domain.session.service.SessionExtService;
 import java.io.OutputStream;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -30,6 +31,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.manager.entity.men.MenTask;
+import com.iwhalecloud.byai.manager.entity.session.ByaiSessionExt;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSessionMember;
 import com.iwhalecloud.byai.common.constants.Constants;
 import com.iwhalecloud.byai.common.constants.chat.ChatObjType;
@@ -105,6 +107,9 @@ public class ScriptService extends AbstractChatProcess {
     private SessionMemberService sessionMemberService;
 
     @Autowired
+    private SessionExtService sessionExtService;
+
+    @Autowired
     private PlatformTransactionManager transactionManager;
 
     @Autowired
@@ -140,6 +145,8 @@ public class ScriptService extends AbstractChatProcess {
         if (StringUtils.isNotEmpty(ctx.assistantChatDto.getTraceId()) && ctx.assistantChatDto.getLlmMessageId() == null) {
             ctx.assistantChatDto.setLlmMessageId(getModelAnswerMessageIdByTraceId(ctx.assistantChatDto.getTraceId()));
         }
+
+        // @TODO 需要删掉这些 UPDATE FEEDBACK 的逻辑。更新消息全部统一走 continueRunningTrace。必须保证 messageId 和 traceId 的唯一性和一致性。
 
         // 判断是否更新任务
         if (ctx.continueRunningTrace) {
@@ -208,6 +215,10 @@ public class ScriptService extends AbstractChatProcess {
                 ctx.userMessageId);
         }
 
+        if (ctx.assistantChatDto.getIsTroubleshootSession()) {
+            saveTroubleshootSessionExt(ctx);
+        }
+
         // 多端广播：将用户发送的消息推送到用户的其他设备
         if (!ctx.continueRunningTrace) {
             broadcastUserMessage(ctx);
@@ -235,8 +246,22 @@ public class ScriptService extends AbstractChatProcess {
         ctx.params = paramService.getParams(ctx);
     }
 
-    private void resolveRunningTraceState(ChatProcessContext ctx) {
-        if (ctx == null || ctx.sessionId == null) {
+    /**
+     * troubleshoot 会话：向 byai_session_ext 表插入一条 troubleshoot_message_id 扩展记录。
+     *
+     * @param ctx 聊天流程上下文
+     */
+    private void saveTroubleshootSessionExt(ChatProcessContext ctx) {
+        ByaiSessionExt byaiSessionExt = new ByaiSessionExt();
+        byaiSessionExt.setExtId(sequenceService.nextVal());
+        byaiSessionExt.setSessionId(ctx.sessionId);
+        byaiSessionExt.setExtParamName("troubleshoot_message_id");
+        byaiSessionExt.setExtParamCode("troubleshoot_message_id");
+        byaiSessionExt.setExtParamValue(ctx.modelAnswerMessageId.toString());
+        sessionExtService.save(byaiSessionExt);
+    }
+
+    private void resolveRunningTraceState(ChatProcessContext ctx) {        if (ctx == null || ctx.sessionId == null) {
             return;
         }
 
@@ -261,7 +286,7 @@ public class ScriptService extends AbstractChatProcess {
         ctx.traceId = runningTraceId;
     }
 
-    private String getTraceId(Long userMessageId, Long modelAnswerMessageId) {
+    public static String getTraceId(Long userMessageId, Long modelAnswerMessageId) {
         return TraceIdCodec.encode(userMessageId, modelAnswerMessageId);
     }
 

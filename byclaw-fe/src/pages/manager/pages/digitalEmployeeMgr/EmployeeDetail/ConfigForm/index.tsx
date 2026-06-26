@@ -91,7 +91,6 @@ const promptFieldGroups = {
 
 const promptFieldNames = Array.from(new Set(Object.values(promptFieldGroups).flat()));
 const rolePromptFieldNames = [
-  'roleAttributes',
   'processingFlow',
   'personalityDimensions',
   'wordPreferences',
@@ -361,6 +360,7 @@ const ConfigForm = (props) => {
   const [catalogList, setCatalogList] = useState([]);
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [robotModalOpen, setRobotModalOpen] = useState(false);
+  const [modelPopoverOpen, setModelPopoverOpen] = useState(false);
   const [robotItem, setRobotItem] = useState<RobotConfig>({ channel: '' });
   const [templateData, setTemplateData] = useState([]);
   const [configurableTabs, setConfigurableTabs] = useState<
@@ -574,9 +574,12 @@ const ConfigForm = (props) => {
   const [uploadImgs, setUploadImgs] = useState([]);
   const [avatarUploadLoading, setAvatarUploadLoading] = useState(false);
   const [avatarMenuOpen, setAvatarMenuOpen] = useState(false);
+  const [brandVersion, setBrandVersion] = useState<'commercial' | 'openSource' | null>(null);
+  const [brandVersionLoaded, setBrandVersionLoaded] = useState(false);
   const [exampleOpen, setExampleOpen] = useState(false);
   const [memoryModalOpen, setMemoryModalOpen] = useState(false);
   const internalSyncRef = useRef(false);
+  const isOpenSource = brandVersionLoaded && brandVersion !== 'commercial';
 
   const [relResourceInfoModalOpen, setRelResourceInfoModalOpen] = useState(false);
   const [selectedToolItem, setSelectedToolItem] = useState(null);
@@ -589,6 +592,31 @@ const ConfigForm = (props) => {
   const [customPromptName, setCustomPromptName] = useState('');
   const [activePromptTabKey, setActivePromptTabKey] = useState();
   const customPromptTabs = Form.useWatch('customPromptTabs', { form, preserve: true }) || [];
+
+  useEffect(() => {
+    let mounted = true;
+
+    getDcSystemConfig({ paramCode: 'BYAI_BRAND_VERSION' })
+      .then((res: any) => {
+        if (!mounted) return;
+        const nextBrandVersion = res?.paramValue;
+        setBrandVersion(nextBrandVersion === 'commercial' ? 'commercial' : null);
+      })
+      .catch(() => {
+        if (mounted) {
+          setBrandVersion(null);
+        }
+      })
+      .finally(() => {
+        if (mounted) {
+          setBrandVersionLoaded(true);
+        }
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const handleRobotModalOk = useCallback((item) => {
     setRobotModalOpen(false);
@@ -743,20 +771,18 @@ const ConfigForm = (props) => {
 
   useEffect(() => {
     if (!agentId) return;
-    if (!Array.isArray(templateData) || templateData.length === 0) return;
 
     const parsedConfig = parseCorePersonaDefinition(corePersonaDefinitionValue, isEN);
-    const templateKeys = templateData.map((item) => getPromptConfigKey(item)).filter(Boolean);
-    const templateTipMap = templateData.reduce((result, item) => {
+    const templateTipMap = (Array.isArray(templateData) ? templateData : []).reduce((result, item) => {
       const key = getPromptConfigKey(item);
       if (key && item.tip) {
         result[key] = item.tip;
       }
       return result;
     }, {});
-    const matchesCurrentTemplate = templateKeys.some((key) => parsedConfig.tabs.some((tab) => tab.key === key));
 
-    if (parsedConfig.isArray && parsedConfig.tabs.length > 0 && matchesCurrentTemplate) {
+    // In edit mode, prefer the saved corePersonaDefinition payload over template defaults.
+    if (parsedConfig.isArray && parsedConfig.tabs.length > 0) {
       const parsedTabs = parsedConfig.tabs.map((tab) => ({
         ...tab,
         tip: tab.tip || templateTipMap[tab.key] || '',
@@ -771,6 +797,8 @@ const ConfigForm = (props) => {
       internalSyncRef.current = false;
       return;
     }
+
+    if (!Array.isArray(templateData) || templateData.length === 0) return;
 
     const { tabs, fieldValues, corePersonaDefinitionJson } = buildTemplatePromptConfig(templateData, isEN);
     let roleObj = {};
@@ -935,13 +963,16 @@ const ConfigForm = (props) => {
         ...form.getFieldsValue(allFieldNames),
         ...overrideValues,
       };
+      const hasAgentPromptField =
+        allTabs.some((tab) => tab.key === 'agent') || Object.prototype.hasOwnProperty.call(current, 'agent');
+      const effectiveWorkStandard = hasAgentPromptField ? current.agent || '' : current.workStandard || '';
 
       rolePromptFieldNames.forEach((key) => {
         roleObj[key] =
           current[key] ||
           (key === 'customPromptTabs' ? [] : key === 'customPromptValues' ? {} : key === 'bundledSkills' ? [] : '');
       });
-      roleObj.roleAttributes = current.roleAttributes || current.workStandard || current.agent || '';
+      roleObj.workStandard = effectiveWorkStandard;
 
       // 将所有配置存成 JSON 放到 corePersonaDefinition 字段（数组格式）
       const corePersonaDefinition: Array<{ name: string; nameEn?: string; key: string; value: string; tip?: string }> =
@@ -1015,6 +1046,7 @@ const ConfigForm = (props) => {
       form.setFieldsValue({
         role: JSON.stringify(roleObj),
         corePersonaDefinition: corePersonaDefinitionJson,
+        workStandard: effectiveWorkStandard,
       });
       internalSyncRef.current = false;
 
@@ -1257,13 +1289,15 @@ const ConfigForm = (props) => {
       };
     });
   };
-  const avatarMenu = [
-    {
-      key: 'upload',
-      label: intl.formatMessage({ id: 'employeeDetail.uploadImage' }),
-      icon: <AntdIcon type="icon-shouye-icon-wrapper1" />,
-    },
-  ];
+  const avatarMenu = isOpenSource
+    ? [
+        {
+          key: 'upload',
+          label: intl.formatMessage({ id: 'employeeDetail.uploadImage' }),
+          icon: <AntdIcon type="icon-shouye-icon-wrapper1" />,
+        },
+      ]
+    : [];
 
   const onAvatarClick = (url, onLoadCallback?) => () => {
     // 如果url是对象，表示还在上传中，不进行处理
@@ -1704,8 +1738,11 @@ const ConfigForm = (props) => {
                       resultDataRef={resultDataRef}
                       prologueRef={prologueRef}
                       setModelName={setModelName}
+                      onClose={() => setModelPopoverOpen(false)}
                     />
                   }
+                  open={modelPopoverOpen}
+                  onOpenChange={setModelPopoverOpen}
                   trigger={!isReadOnly ? ['click'] : []}
                   placement="bottomRight"
                   arrow={false}
@@ -2577,12 +2614,6 @@ const ConfigForm = (props) => {
               coreCompetencies: coreCompetenciesFromTpl,
               abilityBoundary: data.constraints || '',
               exampleQuestions: faqsText,
-              roleAttributes:
-                data.roleAttributes ||
-                data.workStandard ||
-                parsedSystemFields.workStandard ||
-                parsedSystemFields.agent ||
-                '',
               processingFlow: data.processingFlow || '',
               personalityDimensions: data.personalityDimensions || '',
               wordPreferences: data.wordPreferences || '',
@@ -2625,7 +2656,6 @@ const ConfigForm = (props) => {
             } catch {
               roleObj = {};
             }
-            roleObj.roleAttributes = data.roleAttributes || data.workStandard || '';
             roleObj.processingFlow = data.processingFlow || '';
             roleObj.personalityDimensions = data.personalityDimensions || '';
             roleObj.wordPreferences = data.wordPreferences || '';

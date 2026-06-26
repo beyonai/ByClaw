@@ -168,3 +168,11 @@ export async function emitOutOfBandSdkEvent(params: {
   });
   redis.quit();
 }
+
+export function createRedisInstance() {
+  const redisInfo = getRedisInfo();
+  if (!redisInfo) {
+    return null;
+  }
+  return createRedis(redisInfo);
+}

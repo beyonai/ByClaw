@@ -65,13 +65,14 @@ public interface SandboxServiceProfileEntityMapper extends BaseMapper<SandboxSer
                enabled,
                sort_order AS "sortOrder"
         FROM sandbox_service_profile
-        WHERE 1 = 1
+        <where>
         <if test="serviceType != null and serviceType != ''">
           AND service_type = #{serviceType}
         </if>
         <if test="enabledOnly">
           AND enabled = 1
         </if>
+        </where>
         ORDER BY service_type ASC, sort_order ASC, profile_key ASC
         </script>
         """)

@@ -392,7 +392,7 @@ export async function executeDocViaSdk(
       success: true,
       status: "completed",
       backend: "sdk",
-      data: { poll },
+      data: { text: poll.text || "" },
       type: "doc_sync",
       target: buildTarget(input, input.sendParams),
     };

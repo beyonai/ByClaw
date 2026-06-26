@@ -327,7 +327,7 @@ describe("Baiying AI model config", () => {
     );
   });
 
-  it("writes managed provider config without persisted apiKey and with agent model primary", () => {
+  it("writes managed provider config without persisted plaintext apiKey and with agent model primary", () => {
     const provider = parseBaiyingAimodelProviderBundle({
       payload: createAimodelPayload(),
       modelId: "-2000",
@@ -372,19 +372,29 @@ describe("Baiying AI model config", () => {
     expect(cfg.agents?.defaults?.models?.["baiying-m-neg-2000/glm-5-turbo"]).toEqual({
       alias: "项目管理数字员工",
     });
-    expect(cfg.models?.providers?.[providerKey]).toEqual({
+    expect(cfg.models?.providers?.[providerKey]).toEqual(
+      expect.objectContaining({
       baseUrl: "https://lab.iwhalecloud.com/gpt-proxy/v1",
       api: "openai-completions",
+      apiKey: {
+        source: "exec",
+        provider: "baiying-aimodel-redis",
+        id: "model:-2000",
+      },
       models: [
         expect.objectContaining({
           id: "glm-5-turbo",
           api: "openai-completions",
+          compat: expect.objectContaining({
+            supportsUsageInStreaming: true,
+          }),
           input: ["text"],
           contextWindow: 128000,
           maxTokens: 1024,
         }),
       ],
-    });
+    }),
+    );
     expect(cfg.secrets?.providers?.["baiying-aimodel-redis"]).toEqual(
       expect.objectContaining({
         source: "exec",

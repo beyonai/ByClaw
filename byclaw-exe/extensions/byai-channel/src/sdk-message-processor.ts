@@ -11,7 +11,7 @@ import {
   saveMediaBuffer,
 } from "openclaw/plugin-sdk/media-runtime";
 import { getByaiRuntime } from "./runtime.js";
-import { buildAgentSessionKey, resolveAgentIdFromSessionKey } from "openclaw/plugin-sdk/routing";
+import { resolveAgentIdFromSessionKey } from "openclaw/plugin-sdk/routing";
 import type { SdkInboundFile, SdkProcessorDeps } from "./types.js";
 import {
   bindActiveSdkRequestRunId,
@@ -34,16 +34,153 @@ import {
 } from "./session-dispatch-gate.js";
 import { waitForSdkSessionDispatchSettled } from "./session-dispatch-settle.js";
 import { consumeWorkspaceReloadHint } from "./workspace-reload-hints.js";
-import { waitForManagedBaiyingAgentConfig } from "./managed-agent-config-wait.js";
+import { waitForBaiyingAgentConfig } from "./managed-agent-config-wait.js";
 import { EventType, SseReasonMessageType } from "@byclaw/by-framework";
 import { getAgentNameById } from "./utils.js";
 import {
   buildAgentReadyTitle,
-  buildContextOverflowContinueText,
   buildContextOverflowText,
 } from "./i18n.js";
+import {
+  createByaiSdkDiagnosticTrace,
+  emitByaiSdkDispatchCompleted,
+  emitByaiSdkDispatchStarted,
+  emitByaiSdkMessageReceived,
+  runWithByaiSdkDiagnosticTrace,
+} from "./diagnostics.js";
+import {
+  formatDispatchError,
+  isOpenClawContextOverflowDispatchError,
+} from "./dispatch-error.js";
+import {
+  BYAI_CHANNEL_ID,
+  buildBroadcastSessionKey,
+  resolveByaiSessionKey,
+  resolveSdkTargetAgentId,
+} from "./session-key.js";
+import { waitForManagedBaiyingAgentConfig } from "./managed-agent-config-wait.js";
 
-const CHANNEL_ID = "byai-channel" as const;
+const CHANNEL_ID = BYAI_CHANNEL_ID;
+const MANAGED_BAIYING_AGENT_PREFIX = "baiying-agent-";
+export { buildBroadcastSessionKey };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function parsePrimaryModelRef(primary: string): { provider: string; model: string } | null {
+  const trimmed = primary.trim();
+  const slash = trimmed.indexOf("/");
+  if (slash <= 0 || slash >= trimmed.length - 1) {
+    return null;
+  }
+  const provider = trimmed.slice(0, slash).trim();
+  const model = trimmed.slice(slash + 1).trim();
+  return provider && model ? { provider, model } : null;
+}
+
+function providerHasModel(provider: unknown, modelId: string): boolean {
+  if (!isRecord(provider)) {
+    return false;
+  }
+  const models = provider.models;
+  if (Array.isArray(models)) {
+    return models.some((model) =>
+      typeof model === "string" ? model === modelId : isRecord(model) && model.id === modelId,
+    );
+  }
+  return isRecord(models) && Object.prototype.hasOwnProperty.call(models, modelId);
+}
+
+function resolveManagedAgentPrimaryModel(
+  cfg: import("openclaw/plugin-sdk").OpenClawConfig,
+  agentId: string,
+): { provider: string; model: string; primary: string } | null {
+  if (!agentId.startsWith(MANAGED_BAIYING_AGENT_PREFIX)) {
+    return null;
+  }
+  const entry = cfg.agents?.list?.find((agent) => agent.id === agentId);
+  const rawModel = entry?.model;
+  const primary =
+    typeof rawModel === "string"
+      ? rawModel.trim()
+      : isRecord(rawModel) && typeof rawModel.primary === "string"
+        ? rawModel.primary.trim()
+        : "";
+  if (!primary) {
+    return null;
+  }
+  const parsed = parsePrimaryModelRef(primary);
+  if (!parsed) {
+    return null;
+  }
+  const provider = cfg.models?.providers?.[parsed.provider];
+  if (!providerHasModel(provider, parsed.model)) {
+    return null;
+  }
+  return { ...parsed, primary };
+}
+
+async function alignManagedAgentSessionModel(params: {
+  rt: ReturnType<typeof getByaiRuntime>;
+  cfg: import("openclaw/plugin-sdk").OpenClawConfig;
+  sessionAgentId: string;
+  sessionKey: string;
+  log?: {
+    info?: (msg: string) => void;
+    warn?: (msg: string) => void;
+  };
+}): Promise<void> {
+  const target = resolveManagedAgentPrimaryModel(params.cfg, params.sessionAgentId);
+  if (!target) {
+    return;
+  }
+  const sessionApi = params.rt.agent?.session;
+  if (!sessionApi?.patchSessionEntry || !sessionApi.resolveStorePath) {
+    params.log?.warn?.(
+      `[diagnose-sdk] managed agent session model alignment skipped: runtime session patch API unavailable, agent=${params.sessionAgentId}`,
+    );
+    return;
+  }
+  const storePath = sessionApi.resolveStorePath(params.cfg.session?.store, {
+    agentId: params.sessionAgentId,
+  });
+  const now = Date.now();
+  await sessionApi.patchSessionEntry({
+    storePath,
+    sessionKey: params.sessionKey,
+    fallbackEntry: {
+      sessionId: crypto.randomUUID(),
+      updatedAt: now,
+    },
+    preserveActivity: true,
+    update: (entry: Record<string, unknown>) => {
+      const patch: Record<string, unknown> = {};
+      if (entry.modelProvider !== target.provider) {
+        patch.modelProvider = target.provider;
+      }
+      if (entry.model !== target.model) {
+        patch.model = target.model;
+      }
+      if (entry.providerOverride !== target.provider) {
+        patch.providerOverride = target.provider;
+      }
+      if (entry.modelOverride !== target.model) {
+        patch.modelOverride = target.model;
+      }
+      if (entry.modelOverrideSource !== "auto") {
+        patch.modelOverrideSource = "auto";
+      }
+      if (entry.contextTokens !== undefined) {
+        patch.contextTokens = undefined;
+      }
+      return Object.keys(patch).length > 0 ? patch : null;
+    },
+  });
+  params.log?.info?.(
+    `[diagnose-sdk] aligned managed agent session model before dispatch: agent=${params.sessionAgentId}, session=${params.sessionKey}, model=${target.primary}`,
+  );
+}
 
 /**
  * 上下文溢出型 length 截断后自动续跑的最大次数。core 在续跑的 pre-prompt 会压缩历史，
@@ -59,67 +196,6 @@ function buildOverflowContinuePrompt(language: string | undefined): string {
   return language === "en_US" || (language ?? "").toLowerCase().startsWith("en")
     ? "Your previous answer was cut off because the conversation reached the context-window limit. The history has now been compacted. Continue and complete that interrupted answer based on the trimmed context."
     : "上一轮回答因对话达到上下文窗口上限而被截断。历史现已整理(压缩)，请基于整理后的上下文继续并完成上一轮未完成的回答。";
-}
-
-export function buildBroadcastSessionKey(
-  baseSessionKey: string,
-  originalAgentId: string,
-  targetAgentId: string,
-): string {
-  const prefix = `agent:${originalAgentId}:`;
-  if (baseSessionKey.startsWith(prefix)) {
-    return `agent:${targetAgentId}:${baseSessionKey.slice(prefix.length)}`;
-  }
-  return baseSessionKey;
-}
-
-function resolveSdkTargetAgentId(
-  routingAgentId: string,
-  extraPayload: {
-    agent_id?: string;
-    agent_code?: string;
-  },
-): string {
-  if (extraPayload.agent_id) {
-    return `baiying-agent-${extraPayload.agent_id}`;
-  }
-  if (extraPayload.agent_code) {
-    return extraPayload.agent_code;
-  }
-  return routingAgentId;
-}
-
-function resolveSdkSessionKey(params: {
-  routing: {
-    sessionKey: string;
-    agentId: string;
-    channel: string;
-    accountId: string;
-  };
-  targetAgentId: string;
-  sessionId: string;
-  userId: string;
-  perSessionId: boolean;
-}): string {
-  if (!params.perSessionId) {
-    if (params.targetAgentId === params.routing.agentId) {
-      return params.routing.sessionKey;
-    }
-    return buildBroadcastSessionKey(
-      params.routing.sessionKey,
-      params.routing.agentId,
-      params.targetAgentId,
-    );
-  }
-
-  const peerId = params.sessionId.trim() || params.userId;
-  return buildAgentSessionKey({
-    agentId: params.targetAgentId,
-    channel: params.routing.channel,
-    accountId: params.routing.accountId,
-    peer: { kind: "direct", id: peerId },
-    dmScope: "per-peer",
-  });
 }
 
 async function resolveSdkInboundMediaPayload(params: {
@@ -236,11 +312,12 @@ async function resolveSdkInboundMediaPayload(params: {
 }
 
 export async function deliverReplyToAgentViaSdk(deps: SdkProcessorDeps): Promise<void> {
-  const { message, account, cfg, log } = deps;
+  const { message, account, cfg: initialCfg, log } = deps;
 
   const rt = getByaiRuntime();
+  let cfg = initialCfg;
   const routePeerId = message.sessionId?.trim() || message.userId;
-  const routing = rt.channel.routing.resolveAgentRoute({
+  let routing = rt.channel.routing.resolveAgentRoute({
     cfg,
     channel: CHANNEL_ID,
     accountId: account.accountId,
@@ -248,13 +325,26 @@ export async function deliverReplyToAgentViaSdk(deps: SdkProcessorDeps): Promise
   });
 
   const extraPayload = message.extraPayload as {
-    agent_id?: string;
-    agent_code?: string;
-    agent_name?: string;
+    agent_id?: unknown;
+    agent_code?: unknown;
+    agent_name?: unknown;
   };
 
-  const targetAgentId = resolveSdkTargetAgentId(routing.agentId, extraPayload);
-  const sessionKey = resolveSdkSessionKey({
+  let targetAgentId = resolveSdkTargetAgentId(routing.agentId, extraPayload);
+  cfg = await waitForManagedBaiyingAgentConfig({
+    runtime: rt,
+    cfg,
+    agentId: targetAgentId,
+    log,
+  });
+  routing = rt.channel.routing.resolveAgentRoute({
+    cfg,
+    channel: CHANNEL_ID,
+    accountId: account.accountId,
+    peer: { kind: "direct", id: routePeerId },
+  });
+  targetAgentId = resolveSdkTargetAgentId(routing.agentId, extraPayload);
+  const sessionKey = resolveByaiSessionKey({
     routing,
     targetAgentId,
     sessionId: message.sessionId,
@@ -263,7 +353,7 @@ export async function deliverReplyToAgentViaSdk(deps: SdkProcessorDeps): Promise
   });
 
   const { meta } = await runSessionDispatchExclusive(sessionKey, async () => {
-    const dispatchCfg = await waitForManagedBaiyingAgentConfig({
+    const dispatchCfg = await waitForBaiyingAgentConfig({
       runtime: rt,
       cfg,
       agentId: targetAgentId,
@@ -297,9 +387,9 @@ type DeliverReplyUnderGateDeps = SdkProcessorDeps & {
   };
   targetAgentId: string;
   extraPayload: {
-    agent_id?: string;
-    agent_code?: string;
-    agent_name?: string;
+    agent_id?: unknown;
+    agent_code?: unknown;
+    agent_name?: unknown;
   };
 };
 
@@ -310,6 +400,14 @@ async function deliverReplyToAgentViaSdkUnderGate(
     deps;
 
   const rt = getByaiRuntime();
+  const diagnosticTrace = createByaiSdkDiagnosticTrace(message.traceId);
+  const diagnosticRef = {
+    sessionId: message.sessionId,
+    sessionKey,
+    messageId: message.messageId,
+    userId: message.userId,
+    traceId: message.traceId,
+  };
   const sessionAgentId = resolveAgentIdFromSessionKey(sessionKey);
   let sessionAgentName = sessionAgentId;
   if (extraPayload.agent_id || extraPayload.agent_code) {
@@ -344,8 +442,17 @@ async function deliverReplyToAgentViaSdkUnderGate(
     }
   }
 
+  await alignManagedAgentSessionModel({
+    rt,
+    cfg,
+    sessionAgentId,
+    sessionKey,
+    log,
+  });
+
   const { accountId } = account;
   const To = `${sessionAgentId}:${message.sessionId}`;
+  const receivedAt = emitByaiSdkMessageReceived(diagnosticRef, diagnosticTrace);
 
   const activeRequest = registerActiveSdkRequest({
     accountId,
@@ -353,6 +460,7 @@ async function deliverReplyToAgentViaSdkUnderGate(
     to: To,
     sessionId: message.sessionId,
     traceId: message.traceId,
+    createdAt: receivedAt,
     language: message.language,
     languageProvided: message.languageProvided,
     channelExtension: message.channelExtension,
@@ -422,70 +530,122 @@ async function deliverReplyToAgentViaSdkUnderGate(
       ...(includeMedia ? inboundMediaPayload : {}),
     };
 
-    const { dispatcher, replyOptions } = rt.channel.reply.createReplyDispatcherWithTyping({
-      deliver: () => {},
-    });
+    let dispatchStartedAt = 0;
+    try {
+      const { dispatcher, replyOptions } = rt.channel.reply.createReplyDispatcherWithTyping({
+        deliver: () => {},
+      });
 
-    const finalizedCtx = rt.channel.reply.finalizeInboundContext(ctxPayload);
-    log?.info?.(`[diagnose-sdk] finalized ctx, SessionKey: ${finalizedCtx.SessionKey}, To: ${To}`);
+      const finalizedCtx = rt.channel.reply.finalizeInboundContext(ctxPayload);
+      log?.info?.(`[diagnose-sdk] finalized ctx, SessionKey: ${finalizedCtx.SessionKey}, To: ${To}`);
 
-    const dispatchResult = await rt.channel.reply.withReplyDispatcher({
-      dispatcher,
-      run: () =>
-        rt.channel.reply.dispatchReplyFromConfig({
-          ctx: finalizedCtx,
-          cfg,
-          dispatcher,
-          replyOptions: {
-            ...replyOptions,
-            abortSignal: deps.abortController?.signal,
-            disableBlockStreaming: true,
-            onAgentRunStart: async (runId: string) => {
-              bindActiveSdkRequestRunId(sessionKey, runId);
-              registerAgentRunEndPromise(runId);
-              log?.info?.(`onAgentRunStart called, runId: ${runId}`);
-              await onReply(buildAgentReadyTitle(message.language, sessionAgentName), {
-                parentMessageId: "-1",
-                eventType: EventType.REASONING_LOG_DELTA,
-                contentType: SseReasonMessageType.think_title,
-              });
-            },
-            onReasoningStream: () => {},
-            onReasoningEnd: () => {},
-            onPartialReply: () => {},
-            onCompactionStart: async () => {
-              markActiveSdkCompactionRetryPending(sessionKey, true);
-              await onReply("", {
-                parentMessageId: "-1",
-                eventType: EventType.ANSWER_DELTA,
-                contentType: "5007",
-              });
-            },
-            onCompactionEnd: async () => {
-              markActiveSdkCompactionRetryPending(sessionKey, false);
-            },
-          },
+      dispatchStartedAt = emitByaiSdkDispatchStarted(diagnosticRef, diagnosticTrace);
+      const turnResult = await runWithByaiSdkDiagnosticTrace(diagnosticTrace, () =>
+        rt.channel.inbound.runPreparedReply({
+          channel: CHANNEL_ID,
+          accountId,
+          routeSessionKey: sessionKey,
+          storePath: rt.channel.session.resolveStorePath(cfg.session?.store, {
+            agentId: sessionAgentId,
+          }),
+          ctxPayload: finalizedCtx,
+          recordInboundSession: rt.channel.session.recordInboundSession,
+          record: { createIfMissing: true },
+          messageId: finalizedCtx.MessageSid,
+          runDispatch: () =>
+            runWithByaiSdkDiagnosticTrace(diagnosticTrace, () =>
+              rt.channel.reply.withReplyDispatcher({
+                dispatcher,
+                run: () =>
+                  runWithByaiSdkDiagnosticTrace(diagnosticTrace, () =>
+                    rt.channel.reply.dispatchReplyFromConfig({
+                      ctx: finalizedCtx,
+                      cfg,
+                      dispatcher,
+                      replyOptions: {
+                        ...replyOptions,
+                        abortSignal: deps.abortController?.signal,
+                        disableBlockStreaming: true,
+                        onAgentRunStart: async (runId: string) => {
+                          bindActiveSdkRequestRunId(sessionKey, runId);
+                          registerAgentRunEndPromise(runId);
+                          log?.info?.(`[diagnose-sdk] onAgentRunStart called, runId: ${runId}`);
+                          await onReply(buildAgentReadyTitle(message.language, sessionAgentName), {
+                            parentMessageId: "-1",
+                            eventType: EventType.REASONING_LOG_DELTA,
+                            contentType: SseReasonMessageType.think_title,
+                          });
+                        },
+                        onReasoningStream: () => {},
+                        onReasoningEnd: () => {},
+                        onPartialReply: () => {},
+                        onCompactionStart: async () => {
+                          markActiveSdkCompactionRetryPending(sessionKey, true);
+                          await onReply("", {
+                            parentMessageId: "-1",
+                            eventType: EventType.ANSWER_DELTA,
+                            contentType: "5007",
+                          });
+                        },
+                        onCompactionEnd: async () => {
+                          markActiveSdkCompactionRetryPending(sessionKey, false);
+                        },
+                      },
+                    }),
+                  ),
+              }),
+            ),
         }),
-    });
-    log?.info?.(
-      `[diagnose-sdk] dispatch finished, queuedFinal=${String(dispatchResult.queuedFinal)}, counts=${JSON.stringify(dispatchResult.counts)}`,
-    );
+      );
+      const dispatchResult = turnResult.dispatchResult;
+      emitByaiSdkDispatchCompleted(diagnosticRef, diagnosticTrace, {
+        startedAt: dispatchStartedAt,
+        outcome: "completed",
+      });
+      log?.info?.(
+        `[diagnose-sdk] dispatch finished, queuedFinal=${String(dispatchResult.queuedFinal)}, counts=${JSON.stringify(dispatchResult.counts)}`,
+      );
+    } catch (err) {
+      if (dispatchStartedAt > 0) {
+        emitByaiSdkDispatchCompleted(diagnosticRef, diagnosticTrace, {
+          startedAt: dispatchStartedAt,
+          outcome: "error",
+          error: err,
+        });
+      }
+      throw err;
+    }
   }
 
+  let deferDispatchSettleToAgentEvents = false;
   try {
     await runOneDispatch(message.text);
     await maybeContinueAfterOverflow();
   } catch (err) {
-    log?.error?.(`[diagnose-sdk] Message dispatch failed: ${String(err)}`);
-    clearActiveSdkRequestByTarget(accountId, To);
-    throw err;
+    const errorText = formatDispatchError(err);
+    if (isOpenClawContextOverflowDispatchError(err)) {
+      deferDispatchSettleToAgentEvents = true;
+      log?.warn?.(
+        `[diagnose-sdk] Message dispatch reported context overflow; keeping SDK stream open for OpenClaw recovery: ${errorText}`,
+      );
+    } else {
+      log?.error?.(`[diagnose-sdk] Message dispatch failed: ${errorText}`);
+      clearActiveSdkRequestByTarget(accountId, To);
+      throw err;
+    }
   } finally {
-    const settle = await waitForSdkSessionDispatchSettled(sessionKey, {
-      abortSignal: deps.abortController?.signal,
-    });
-    log?.info?.(
-      `[diagnose-sdk] session dispatch settled: sessionKey=${sessionKey}, settled=${String(settle.settled)}, timedOut=${String(settle.timedOut)}, waitMs=${settle.waitMs}, rootLifecyclePhase=${settle.rootLifecyclePhase ?? "none"}, queueDepth=${sessionDispatchQueueDepth(sessionKey)}`,
-    );
+    if (deferDispatchSettleToAgentEvents) {
+      log?.info?.(
+        `[diagnose-sdk] session dispatch settle deferred to OpenClaw recovery events: sessionKey=${sessionKey}, queueDepth=${sessionDispatchQueueDepth(sessionKey)}`,
+      );
+    } else {
+      const settle = await waitForSdkSessionDispatchSettled(sessionKey, {
+        abortSignal: deps.abortController?.signal,
+      });
+      log?.info?.(
+        `[diagnose-sdk] session dispatch settled: sessionKey=${sessionKey}, settled=${String(settle.settled)}, timedOut=${String(settle.timedOut)}, waitMs=${settle.waitMs}, rootLifecyclePhase=${settle.rootLifecyclePhase ?? "none"}, queueDepth=${sessionDispatchQueueDepth(sessionKey)}`,
+      );
+    }
   }
 
   // 上下文溢出型 length 截断的自动续跑编排：在已持有的 dispatch gate 内、settle 之前同步执行。

@@ -30,7 +30,7 @@ public interface ByaiAimodelMapper extends BaseMapper<ByaiAimodel> {
      */
     List<ByaiAimodel> selectByCondition(@Param("status") String status, @Param("ability") Long ability,
         @Param("system") String system, @Param("modelId") Long modelId, @Param("modelName") String modelName,
-        @Param("keyword") String keyword);
+        @Param("keyword") String keyword, @Param("createBy") Long createBy, @Param("ownerType") String ownerType);
 
     /**
      * 统计符合条件的总数

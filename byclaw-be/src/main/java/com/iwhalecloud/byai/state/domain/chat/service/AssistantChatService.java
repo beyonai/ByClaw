@@ -105,6 +105,9 @@ public class AssistantChatService {
     @Autowired
     private SuasSuperassistApplicationService suasSuperassistApplicationService;
 
+    @Autowired
+    private TargetAgentResolver targetAgentResolver;
+
     /**
      * 对话处理方法（带首词响应开始时间）
      *
@@ -151,7 +154,9 @@ public class AssistantChatService {
             long time02 = System.currentTimeMillis();
             logger.info("chat time01:{}", time02 - time01);
 
-            normalizeDefaultSuperAssistantAgentId(assistantChatDto);
+            if (assistantChatDto != null) {
+                assistantChatDto.setAgentId(targetAgentResolver.resolveAgentId(assistantChatDto));
+            }
 
             // 执行聊天处理：Gateway 模式下 handleGatewayMode() 内部阻塞等待 Redis 监听器完成，
             // 返回后即可安全执行 storeMessage/afterProcess，最终由 finally 关闭流
@@ -473,30 +478,6 @@ public class AssistantChatService {
     }
 
     /**
-     * 默认超级助手现在落库为真实 DIG_EMPLOYEE 资源，前端会传真实 resourceId。 但下游 Gateway 仍以 agentId=null 表示“main/超级助手”路由，因此这里统一通过
-     * resourceCode 是否以 main 结尾来识别默认超级助手，避免继续依赖历史的 agentId=-1 哨兵值。
-     *
-     * @author qin.guoquan
-     * @date 2026-05-09 15:20:00
-     */
-    private void normalizeDefaultSuperAssistantAgentId(AssistantChatDto assistantChatDto) {
-        if (assistantChatDto == null || assistantChatDto.getAgentId() == null) {
-            return;
-        }
-        SsResource ssResource = ssResourceService.findById(assistantChatDto.getAgentId());
-        if (ssResource == null) {
-            return;
-        }
-        boolean isDigitalEmployee = Constants.ResourceBizType.DIG_EMPLOYEE.equals(ssResource.getResourceBizType());
-        boolean isDefaultSuperAssistant = StringUtils.endsWith(ssResource.getResourceCode(), "main");
-        if (isDigitalEmployee && isDefaultSuperAssistant) {
-            logger.info("识别到默认超级助手，清空agentId以沿用main路由, userId={}, agentId={}, resourceCode={}",
-                CurrentUserHolder.getCurrentUserId(), assistantChatDto.getAgentId(), ssResource.getResourceCode());
-            assistantChatDto.setAgentId(null);
-        }
-    }
-
-    /**
      * 创建群聊会话并维护成员关系
      *
      * @param assistantChatDto 对话请求参数
@@ -520,6 +501,11 @@ public class AssistantChatService {
         sessionMembersDto.setEnterpriseId(CurrentUserHolder.getEnterpriseId());
         sessionMembersDto.setSessionType(SessionType.H_AS.getCode());
         sessionMembersDto.setIsDebug(assistantChatDto.getIsDebug());
+        
+        if (assistantChatDto.getIsTroubleshootSession()) {
+            sessionMembersDto.setIsDebug(1);
+        }
+
         sessionMembersDto.setSessionExts(assistantChatDto.getSessionExts());
         sessionMembersDto.setCreateTime(new Date());
         sessionMembersDto.setUpdateTime(new Date());

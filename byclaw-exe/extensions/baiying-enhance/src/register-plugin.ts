@@ -13,6 +13,18 @@ import { createRedisJsonStore, setSharedRedisJsonStore } from "./redis-json-stor
 import { loadBaiyingRedisEnvDefaults } from "./redis-env.js";
 import { createBaiyingCallToolFactory } from "./baiying-call-tool.js";
 import type { BaiyingEnhancePluginConfig } from "./types.js";
+import { loadAuthContext, resolveAuthFilePath } from "./executor/auth.js";
+import { loadPrivateParamsRuntime } from "./personal-params.js";
+import { resolveChannelSessionIdForTool } from "./channel-session-resolve.js";
+import {
+  extractFinalAssistantOutput,
+  scheduleLangfuseFinalOutputBackfill,
+} from "./langfuse-final-output.js";
+import {
+  markBaiyingEnhanceColdStartReady,
+  markBaiyingEnhanceColdStartUnavailable,
+  resetBaiyingEnhanceColdStartReadiness,
+} from "./cold-start-readiness.js";
 
 function resolvePluginPath(api: OpenClawPluginApi, raw: string): string {
   if (path.isAbsolute(raw)) {
@@ -54,6 +66,15 @@ function resolveExecutorResourcesDir(
 const registry = new AgentRegistryState();
 const pluginRuntimeDir = path.dirname(fileURLToPath(import.meta.url));
 const PLUGIN_ID = "baiying-enhance";
+
+function resolveColdStartReadySettleMs(): number {
+  const raw = Number.parseInt(process.env.BAIYING_COLD_START_READY_SETTLE_MS || "2000", 10);
+  return Number.isFinite(raw) ? Math.max(0, raw) : 2000;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function warnIfConversationHooksBlocked(api: OpenClawPluginApi): void {
   try {
@@ -123,6 +144,62 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
     { name: "baiying_call" },
   );
 
+  api.on("resolve_exec_env", async (event) => {
+    if (event.toolName !== "exec") {
+      return {};
+    }
+    try {
+      const authContext = await loadAuthContext(resolveAuthFilePath(pluginCfg.authFilePath));
+      const runtime = await loadPrivateParamsRuntime({
+        authContext,
+        logger: {
+          info: (message) => api.logger.info(message),
+          warn: (message) => api.logger.warn(message),
+          error: (message) => api.logger.error(message),
+        },
+      });
+      return runtime?.params ?? {};
+    } catch (err) {
+      api.logger.warn(
+        `baiying-enhance: resolve_exec_env private params skipped: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+      return {};
+    }
+  });
+
+  api.on("agent_end", (event, ctx) => {
+    const run = async () => {
+      const sessionKey = typeof ctx?.sessionKey === "string" ? ctx.sessionKey : "";
+      const channelResolve = resolveChannelSessionIdForTool(ctx, sessionKey);
+      if (channelResolve.source === "child") {
+        return;
+      }
+      const output = extractFinalAssistantOutput(Array.isArray(event.messages) ? event.messages : []);
+      if (!output) {
+        return;
+      }
+      scheduleLangfuseFinalOutputBackfill({
+        traceId: channelResolve.traceId,
+        sessionId: channelResolve.sessionId,
+        userId: process.env.USER_CODE,
+        output,
+        logger: {
+          info: (message) => api.logger.info(message),
+          warn: (message) => api.logger.warn(message),
+        },
+      });
+    };
+    void run().catch((err) => {
+      api.logger.warn(
+        `baiying-enhance: Langfuse final output hook failed: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    });
+  });
+
   registerManagedAgentModelHooks(api, {
     api,
     redisJsonStore,
@@ -150,6 +227,7 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
     start: async (ctx) => {
       const startMs = performance.now();
       serviceStopped = false;
+      resetBaiyingEnhanceColdStartReadiness("service_starting");
 
       const [
         { createAgentWatchdog },
@@ -312,8 +390,25 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
         if (serviceStopped) {
           return;
         }
+        const authorizedIds = digEmployeeAuthWatch?.getAuthorizedIds();
+        if (authorizedIds === undefined) {
+          markBaiyingEnhanceColdStartUnavailable("dig_employee_auth_unavailable");
+          api.logger.warn(
+            "baiying-enhance: cold-start readiness unavailable because dig-employee auth did not load",
+          );
+        } else {
+          const settleMs = resolveColdStartReadySettleMs();
+          if (settleMs > 0) {
+            await delay(settleMs);
+          }
+          markBaiyingEnhanceColdStartReady("initial_managed_agent_sync_complete");
+          api.logger.info(
+            `baiying-enhance: cold-start readiness signalled after initial managed agent sync (${authorizedIds.size} authorized id(s), settleMs=${settleMs})`,
+          );
+        }
         await digEmployeeChangeSubscriber?.start();
       })().catch((err) => {
+        markBaiyingEnhanceColdStartUnavailable("background_startup_sync_failed");
         api.logger.warn(
           `baiying-enhance: background startup sync failed: ${
             err instanceof Error ? err.message : String(err)

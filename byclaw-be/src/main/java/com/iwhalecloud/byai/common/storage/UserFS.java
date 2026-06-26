@@ -29,6 +29,10 @@ public interface UserFS {
      */
     InputStream read(String filePath);
 
+    default FileMetadata metadata(String filePath) {
+        throw new UnsupportedOperationException("metadata is not supported");
+    }
+
     /**
      * 用户文件系统：删除
      *

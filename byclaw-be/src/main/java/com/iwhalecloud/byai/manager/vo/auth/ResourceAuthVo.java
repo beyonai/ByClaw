@@ -119,6 +119,11 @@ public class ResourceAuthVo extends AuthVo {
     private String createUserName;
 
     /**
+     * 使用数。技能场景下表示绑定该技能的数字员工数量。
+     */
+    private Long useCount;
+
+    /**
      * 是否有权限
      */
     private boolean hasPermission;

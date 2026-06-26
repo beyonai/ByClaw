@@ -1,0 +1,133 @@
+.jsonCodeEditor {
+  position: relative;
+  border: 1px solid #d9d9d9;
+  border-radius: 6px;
+  overflow: hidden;
+  transition: border-color 0.2s;
+  background: #fafafa;
+
+  &:hover {
+    border-color: var(--beyond-color-primary, #1677ff);
+  }
+
+  &:focus-within {
+    border-color: var(--beyond-color-primary, #1677ff);
+    box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.06);
+  }
+
+  &.maximized {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 1100;
+    border-radius: 0;
+    border: none;
+    background: #fff;
+    min-height: unset !important;
+
+    .highlight {
+      top: 36px;
+    }
+
+    .textarea {
+      height: calc(100% - 36px);
+      min-height: unset !important;
+      margin-top: 36px;
+      resize: none;
+    }
+  }
+}
+
+.maximizedToolbar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 36px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0 12px;
+  background: #fafafa;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.exitBtn {
+  font-size: 16px;
+  cursor: pointer;
+  color: var(--beyond-color-primary, #1677ff);
+
+  &:hover {
+    opacity: 0.7;
+  }
+}
+
+.highlight {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  overflow: auto;
+  pointer-events: none;
+  z-index: 1;
+
+  :global {
+    pre.shiki {
+      margin: 0;
+      padding: 8px 12px;
+      background: transparent !important;
+      font-size: 13px;
+      line-height: 20px;
+      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+
+      > code {
+        font-family: inherit;
+      }
+    }
+  }
+}
+
+.textarea {
+  position: relative;
+  z-index: 2;
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: inherit;
+  padding: 8px 12px;
+  margin: 0;
+  border: none;
+  outline: none;
+  resize: vertical;
+  background: transparent;
+  color: transparent;
+  caret-color: #333;
+  font-size: 13px;
+  line-height: 20px;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow: auto;
+
+  &::selection {
+    background: rgba(22, 119, 255, 0.15);
+  }
+}
+
+.placeholder {
+  position: absolute;
+  top: 8px;
+  left: 12px;
+  z-index: 0;
+  color: #bfbfbf;
+  font-size: 13px;
+  line-height: 20px;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+  pointer-events: none;
+}

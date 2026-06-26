@@ -5,25 +5,43 @@ import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
 import com.iwhalecloud.byai.common.constants.Constants;
 import com.iwhalecloud.byai.common.constants.resource.ImplType;
+import com.iwhalecloud.byai.common.constants.resource.ResourceBizType;
 import com.iwhalecloud.byai.common.feign.request.conversation.AgentPrologueDto;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.util.ListUtil;
 import com.iwhalecloud.byai.common.util.MapParamUtil;
+import com.iwhalecloud.byai.common.util.RedisUtil;
+import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeApplicationService;
 import com.iwhalecloud.byai.manager.domain.aimodel.enums.ModelProtocol;
 import com.iwhalecloud.byai.manager.domain.aimodel.service.ByaiAimodelDomainService;
+import com.iwhalecloud.byai.manager.domain.auth.enums.Color;
+import com.iwhalecloud.byai.manager.domain.auth.enums.GrantToObjType;
+import com.iwhalecloud.byai.manager.domain.auth.enums.GrantType;
+import com.iwhalecloud.byai.manager.domain.auth.enums.OperType;
+import com.iwhalecloud.byai.manager.domain.auth.service.PrivilegeGrantService;
+import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtSkillService;
+import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceRelDetailService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeDTO;
+import com.iwhalecloud.byai.manager.dto.digitemploy.RelResourceInfo;
+import com.iwhalecloud.byai.manager.dto.resource.SsResExtSkillDto;
 import com.iwhalecloud.byai.manager.entity.aimodel.ByaiAimodel;
+import com.iwhalecloud.byai.manager.entity.auth.PrivilegeGrant;
+import com.iwhalecloud.byai.manager.entity.resource.SsResExtSkill;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
+import com.iwhalecloud.byai.manager.entity.resource.SsResourceRelDetail;
 import com.iwhalecloud.byai.manager.entity.superassist.SuasSuperassist;
 import com.iwhalecloud.byai.manager.domain.superassist.service.SuasSuperassistService;
 import com.iwhalecloud.byai.manager.qo.aimodel.DefaultAiModelQo;
 import com.iwhalecloud.byai.state.application.service.dataset.DatasetApplicationService;
+import java.util.ArrayList;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import org.slf4j.Logger;
@@ -48,6 +66,12 @@ public class SuasSuperassistApplicationService {
     private SsResourceService ssResourceService;
 
     @Autowired
+    private SsResExtSkillService ssResExtSkillService;
+
+    @Autowired
+    private PrivilegeGrantService privilegeGrantService;
+
+    @Autowired
     private ByaiAimodelDomainService byaiAimodelService;
 
     @Autowired
@@ -58,6 +82,9 @@ public class SuasSuperassistApplicationService {
 
     @Autowired
     private DatasetApplicationService datasetApplicationService;
+
+    @Autowired
+    private SsResourceRelDetailService ssResourceRelDetailService;
 
     @Autowired
     private DigitalEmployeeApplicationService digitalEmployeeApplicationService;
@@ -82,7 +109,8 @@ public class SuasSuperassistApplicationService {
         }
         catch (Exception e) {
             logger.error("初始化超级助手知识库失败:{}", e.getMessage(), e);
-            return new SuasSuperassist();
+            // 返回 null 让调用方知道需要从数据库重新查询
+            return null;
         }
 
     }
@@ -152,7 +180,7 @@ public class SuasSuperassistApplicationService {
      * @param loginInfo 登陆用户信息
      */
     private Long initDigEmployeeByTemplate(LoginInfo loginInfo, Long defaultDatasetId) {
-
+        Long userId = loginInfo.getUserId();
         Long defaultDigEmployeeId = loginInfo.getDefaultDigEmployeeId();
 
         // 获取初始化模板
@@ -167,6 +195,9 @@ public class SuasSuperassistApplicationService {
 
             String resourceCode = jsonObject.getString("resourceCode");
             String modelProtocol = jsonObject.getString("modelProtocol");
+            String relSkillCodes = jsonObject.getString("relSkillCodes");
+            String relToolCodes = jsonObject.getString("relToolCodes");
+            String isRelDefaultDataset = jsonObject.getString("isRelDefaultDataset");
 
             // 如果已经存在了，不再进行初始化
             SsResource ssResource = ssResourceService.findByIdOrCode(null, resourceCode);
@@ -196,8 +227,19 @@ public class SuasSuperassistApplicationService {
             else {
 
                 // 其他类型数字员工设置默认模型
-                String resourceDesc = digitalEmployeeDTO.getResourceDesc();
-                digitalEmployeeDTO.setPrologue(this.buildPrologue(resourceDesc, modelProtocol));
+                String prologue = digitalEmployeeDTO.getPrologue();
+                digitalEmployeeDTO.setPrologue(this.buildPrologue(prologue, modelProtocol));
+
+                // 是否关联默认知识库
+                if (Constants.YES_VALUE_Y.equalsIgnoreCase(isRelDefaultDataset)) {
+                    digitalEmployeeDTO.setRelIds(List.of(defaultDatasetId));
+                }
+
+                // 关联工具agent|tool|view
+                this.handleRelToolCodes(digitalEmployeeDTO, relToolCodes, userId);
+
+                // 处理关联技能
+                this.handleRelSkillCodes(digitalEmployeeDTO, relSkillCodes, userId);
 
                 // 保存数字员工
                 digitalEmployeeApplicationService.saveDigitalEmployee(digitalEmployeeDTO);
@@ -208,19 +250,143 @@ public class SuasSuperassistApplicationService {
     }
 
     /**
+     * 构奸关联工具编码
+     *
+     * @param digitalEmployeeDTO 数字员工新增对象
+     * @param relToolCodes 工具编码
+     */
+    private void handleRelToolCodes(DigitalEmployeeDTO digitalEmployeeDTO, String relToolCodes, Long userId) {
+
+        List<String> splitToolCodes = StringUtil.splitStr(relToolCodes, ",");
+        if (ListUtil.isEmpty(splitToolCodes)) {
+            return;
+        }
+
+        for (String resourceCode : splitToolCodes) {
+
+            SsResource ssResource = ssResourceService.findByIdOrCode(null, resourceCode);
+            if (ssResource == null) {
+                continue;
+            }
+
+            // 授权资源
+            this.authResource(ssResource, userId);
+
+            // 关联资源标识
+            Long resourceId = ssResource.getResourceId();
+            digitalEmployeeDTO.getRelIds().add(resourceId);
+
+            // 视图类型关联子选项相关
+            if (ResourceBizType.VIEW.getCode().equalsIgnoreCase(ssResource.getResourceBizType())) {
+                List<SsResourceRelDetail> resourceRelDetails = ssResourceRelDetailService.findByResourceId(resourceId);
+                RelResourceInfo relResourceInfo = new RelResourceInfo();
+                relResourceInfo.setRelId(String.valueOf(ssResource.getResourceId()));
+
+                List<String> activeResourceIds = new ArrayList<>();
+                for (SsResourceRelDetail resourceRelDetail : resourceRelDetails) {
+                    activeResourceIds.add(String.valueOf(resourceRelDetail.getRelResourceId()));
+                }
+                relResourceInfo.setActiveResourceIds(activeResourceIds);
+                digitalEmployeeDTO.getRelResourceInfoList().add(relResourceInfo);
+            }
+        }
+
+    }
+
+    /**
+     * 处理关联技能
+     *
+     * @param digitalEmployeeDTO 保存入参
+     * @param relSkillCodes 关联技能编码
+     * @param userId 用户标识
+     */
+    private void handleRelSkillCodes(DigitalEmployeeDTO digitalEmployeeDTO, String relSkillCodes, Long userId) {
+
+        // 关联技能
+        List<String> splitSkillCodes = StringUtil.splitStr(relSkillCodes, ",");
+        List<SsResExtSkillDto> ssResExtSkills = ssResExtSkillService.findBySkillCodes(splitSkillCodes);
+        if (ListUtil.isEmpty(ssResExtSkills)) {
+            return;
+        }
+
+        // 授权资源
+        for (SsResExtSkillDto ssResExtSkillDto : ssResExtSkills) {
+            this.authResource(ssResExtSkillDto, userId);
+        }
+
+        // 写入技能
+        digitalEmployeeDTO.setSkills(this.buildJsonSkillByCode(ssResExtSkills));
+    }
+
+    /**
+     * 授权资源
+     *
+     * @param ssResource 资源
+     * @param userId 用户标识
+     */
+    private void authResource(SsResource ssResource, Long userId) {
+
+        PrivilegeGrant privilegeGrant = new PrivilegeGrant();
+        privilegeGrant.setPrivilegeGrantId(sequenceService.nextVal());
+        privilegeGrant.setGrantType(GrantType.AVAILABLE_USE);
+        privilegeGrant.setGrantObjType(ssResource.getResourceBizType());
+        privilegeGrant.setGrantObjId(ssResource.getResourceId());
+        privilegeGrant.setGrantToObjId(userId);
+        privilegeGrant.setGrantToObjType(GrantToObjType.USER);
+        privilegeGrant.setGrantToType(Color.RED);
+        privilegeGrant.setOperType(OperType.READ);
+        privilegeGrant.setStatusCd("A");
+        privilegeGrant.setCreateDate(new Date());
+        privilegeGrantService.save(privilegeGrant);
+
+        // 2.还要redis中插入一条红名单数据
+        String key = "DATASET:AUTHORITY:1_RED_READ_PERSON_" + privilegeGrant.getGrantToObjId();
+        String value = ssResource.getResourceBizType() + "_" + ssResource.getResourceId();
+        RedisUtil.addSet(key, value);
+    }
+
+    /**
+     * 构建关联技能
+     *
+     * @param ssResExtSkills 关联技能
+     * @return String
+     */
+    private String buildJsonSkillByCode(List<SsResExtSkillDto> ssResExtSkills) {
+        if (ListUtil.isEmpty(ssResExtSkills)) {
+            return null;
+        }
+
+        List<Map<String, Object>> skillsList = new ArrayList<>();
+        for (SsResExtSkillDto ssResExtSkillDto : ssResExtSkills) {
+            Map<String, Object> objectMap = new HashMap<>();
+            skillsList.add(objectMap);
+
+            objectMap.put("resourceId", ssResExtSkillDto.getResourceId());
+            objectMap.put("skillCode", ssResExtSkillDto.getResourceCode());
+            SsResExtSkill ssResExtSkill = ssResExtSkillDto.getSsResExtSkill();
+            if (ssResExtSkill == null) {
+                continue;
+            }
+
+            objectMap.put("skillType", ssResExtSkill.getSkillType());
+            objectMap.put("skillUrl", ssResExtSkill.getSkillUrl());
+            objectMap.put("versionUrl", "/byaiService/tool/getSkillVersion?skillId=" + ssResExtSkill.getResourceId());
+        }
+
+        return JSON.toJSONString(skillsList);
+    }
+
+    /**
      * 设置其他初始化数字员工模型信息
      *
-     * @param resourceDesc 描述
+     * @param prologue 描述
      * @param modelProtocol 默认模型协议
      * @return String
      */
-    private String buildPrologue(String resourceDesc, String modelProtocol) {
-        AgentPrologueDto prologue = new AgentPrologueDto();
-        prologue.setDescText(resourceDesc);
-        prologue.setRole(resourceDesc);
-        prologue.setBackground(resourceDesc);
-        prologue.setModelInfo(this.buildDefaultModelInfo(modelProtocol));
-        return JSON.toJSONString(prologue);
+    private String buildPrologue(String prologue, String modelProtocol) {
+        AgentPrologueDto agentPrologueDto = JSON.parseObject(prologue, AgentPrologueDto.class);
+        agentPrologueDto.setModelInfo(this.buildDefaultModelInfo(modelProtocol));
+        return JSON.toJSONString(agentPrologueDto);
     }
 
     /**

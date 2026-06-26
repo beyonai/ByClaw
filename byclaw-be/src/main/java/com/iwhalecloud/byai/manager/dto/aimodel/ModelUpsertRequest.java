@@ -83,4 +83,7 @@ public class ModelUpsertRequest implements Serializable {
      */
     private String extendParam;
 
+    /** 模型归属: PUBLIC / PERSONAL */
+    private String ownerType;
+
 }

@@ -1,0 +1,80 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 8px;
+}
+
+.router {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  margin-bottom: 8px;
+  border-radius: 6px;
+  background: var(--user-fill-color, #f2f6fa);
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.middle {
+  font-size: 13px;
+}
+
+.content {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.quotaCard {
+  padding: 12px;
+  margin-bottom: 12px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #f0f7ff 0%, #f8fbff 100%);
+  border: 1px solid #e6f0ff;
+}
+
+.quotaTitle {
+  font-size: 12px;
+  font-weight: 600;
+  color: #1f2533;
+  margin-bottom: 8px;
+}
+
+.quotaDetail {
+  display: flex;
+  align-items: center;
+  margin-top: 6px;
+  font-size: 11px;
+  color: #707680;
+}
+
+.modelItem {
+  padding: 8px 10px;
+  margin-bottom: 4px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.2s;
+
+  &:hover {
+    background: #f5f7fa;
+  }
+}
+
+.modelName {
+  font-size: 13px;
+  font-weight: 500;
+  color: #1f2533;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modelMeta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 11px;
+}

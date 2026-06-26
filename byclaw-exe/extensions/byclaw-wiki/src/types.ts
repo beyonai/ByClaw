@@ -33,6 +33,8 @@ export type ByclawWikiPluginConfig = {
   notificationDingtalkSecret?: unknown;
   notificationDingtalkActionCardBtnTitle?: unknown;
   notificationDingtalkActionCardBtnUrl?: unknown;
+  notificationDocumentUploadUrl?: unknown;
+  notificationDocumentUploadPrefix?: unknown;
   notificationRobotType?: unknown;
   notificationMaxOutputChars?: unknown;
   notificationMinOutputChars?: unknown;
@@ -46,6 +48,8 @@ export type ResolvedNotificationConfig = {
   dingtalkSecret?: string;
   dingtalkActionCardBtnTitle: string;
   dingtalkActionCardBtnUrl: string;
+  documentUploadUrl: string;
+  documentUploadPrefix: string;
   robotType: NotificationRobotType;
   maxOutputChars: number;
   minOutputChars: number;
@@ -155,5 +159,11 @@ export type CodegraphToolResult = {
     skippedReason?: string;
     statusCode?: number;
     error?: string;
+    uploadedDocument?: {
+      key: string;
+      name: string;
+      size: number;
+      contentType: string;
+    };
   };
 };

@@ -141,6 +141,8 @@ public class DigitalEmployeeApplicationService {
 
     private static final String DEFAULT_SUPER_ASSISTANT_RESOURCE_CODE_SUFFIX = "_main";
 
+    private static final int DIG_EMPLOYEE_TEXT_FIELD_MAX_LENGTH = 4000;
+
     @Autowired
     private SequenceService sequenceService;
 
@@ -366,16 +368,49 @@ public class DigitalEmployeeApplicationService {
             .setCatalogIds(ssResourceCatalogService.findSelfAndDescendantCatalogIds(digitalEmployeeQo.getCatalogId()));
     }
 
+    private void validateDigitalEmployeeTextFieldLengths(DigitalEmployeeDTO digitalEmployeeDTO) {
+        if (digitalEmployeeDTO == null) {
+            return;
+        }
+        validateDigitalEmployeeTextFieldLength("digemployee.field.ability", digitalEmployeeDTO.getAbility());
+        validateDigitalEmployeeTextFieldLength("digemployee.field.constraints", digitalEmployeeDTO.getConstraints());
+        validateDigitalEmployeeTextFieldLength("digemployee.field.faqs", digitalEmployeeDTO.getFaqs());
+        validateDigitalEmployeeTextFieldLength("digemployee.field.roleAttributes", digitalEmployeeDTO.getRoleAttributes());
+        validateDigitalEmployeeTextFieldLength("digemployee.field.processingFlow", digitalEmployeeDTO.getProcessingFlow());
+        validateDigitalEmployeeTextFieldLength("digemployee.field.personalityDimensions",
+            digitalEmployeeDTO.getPersonalityDimensions());
+        validateDigitalEmployeeTextFieldLength("digemployee.field.wordPreferences", digitalEmployeeDTO.getWordPreferences());
+        validateDigitalEmployeeTextFieldLength("digemployee.field.sentenceAndTone", digitalEmployeeDTO.getSentenceAndTone());
+        validateDigitalEmployeeTextFieldLength("digemployee.field.corePersonaDefinition",
+            digitalEmployeeDTO.getCorePersonaDefinition());
+        validateDigitalEmployeeTextFieldLength("digemployee.field.coreCompetencies", digitalEmployeeDTO.getCoreCompetencies());
+        validateDigitalEmployeeTextFieldLength("digemployee.field.advancedSettings", digitalEmployeeDTO.getAdvancedSettings());
+    }
+
+    private void validateDigitalEmployeeTextFieldLength(String fieldLabelKey, String value) {
+        if (StringUtils.isEmpty(value)) {
+            return;
+        }
+        int length = value.codePointCount(0, value.length());
+        if (length > DIG_EMPLOYEE_TEXT_FIELD_MAX_LENGTH) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
+                I18nUtil.get("digemployee.field.length.exceed", I18nUtil.get(fieldLabelKey),
+                    DIG_EMPLOYEE_TEXT_FIELD_MAX_LENGTH, length));
+        }
+    }
+
     /**
      * 创建数字员工
      *
      * @param digitalEmployeeDTO 数字员工
      * @return ResponseUtil
      */
+    @Transactional(rollbackFor = Exception.class)
     public SsResource saveDigitalEmployee(DigitalEmployeeDTO digitalEmployeeDTO) {
 
         boolean isFrontAccess = digitalEmployeeDTO.isFrontAccess();
         normalizeRelSkillsForSave(digitalEmployeeDTO);
+        validateDigitalEmployeeTextFieldLengths(digitalEmployeeDTO);
         // 商业版本（dataset.system=WHALE_AGENT）下，企业 tab 不允许创建编码型（011）/ 调试型（010）数字员工
         validateCommercialEditionDigitalEmployeeCreation(digitalEmployeeDTO);
         String resourceName = digitalEmployeeDTO.getResourceName();
@@ -613,10 +648,12 @@ public class DigitalEmployeeApplicationService {
      * @param digitalEmployeeDTO 修改对象
      * @return SsResource
      */
+    @Transactional(rollbackFor = Exception.class)
     public SsResource updateDigitalEmployee(DigitalEmployeeDTO digitalEmployeeDTO) {
 
         boolean isFrontAccess = digitalEmployeeDTO.isFrontAccess();
         normalizeRelSkillsForSave(digitalEmployeeDTO);
+        validateDigitalEmployeeTextFieldLengths(digitalEmployeeDTO);
 
         Long resourceId = digitalEmployeeDTO.getResourceId();
         String resourceName = digitalEmployeeDTO.getResourceName();
@@ -810,31 +847,40 @@ public class DigitalEmployeeApplicationService {
         if (digitalEmployee == null) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("resource.not.found"));
         }
-        Long defaultDigEmployeeId = CurrentUserHolder.getDefaultDigEmployeeId();
-        if (defaultDigEmployeeId == null || !Objects.equals(defaultDigEmployeeId, digitalEmployee.getResourceId())) {
-            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("user.permission.nopermission"));
-        }
+        // 技能安装目标是前端当前选中的数字员工：显式 @ 的数字员工优先，没有 @ 时才回退默认数字员工。
+        // 因此这里按目标数字员工的管理权限校验，不再强制要求它必须等于 defaultDigEmployeeId。
         if (!authApplicationService.hasResourceManagePermission(digitalEmployee)) {
-            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("user.permission.nopermission"));
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
+                I18nUtil.get("digemployee.skill.install.no.manage.permission", digitalEmployee.getResourceName()));
         }
         for (SsResource resource : installRelResources) {
             if (resource != null && StringUtils.equals(RESOURCE_BIZ_TYPE_SKILL, resource.getResourceBizType())
                 && !authApplicationService.hasResourceUsePermission(resource)) {
-                throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("user.permission.nopermission"));
+                throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
+                    I18nUtil.get("digemployee.skill.install.no.use.permission", resource.getResourceName()));
             }
         }
+    }
+
+    /**
+     * 校验当前用户对指定数字员工是否有管理权限（删除/卸载工作空间技能前置校验）。
+     * 与绑定技能卸载使用同一套校验，避免漂移。
+     *
+     * @param digitalEmployeeId 数字员工资源 ID
+     */
+    public void assertSkillUninstallPermission(Long digitalEmployeeId) {
+        SsResource digitalEmployee = ssResourceService.findById(digitalEmployeeId);
+        validateSkillUninstallPermission(digitalEmployee);
     }
 
     private void validateSkillUninstallPermission(SsResource digitalEmployee) {
         if (digitalEmployee == null) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("resource.not.found"));
         }
-        Long defaultDigEmployeeId = CurrentUserHolder.getDefaultDigEmployeeId();
-        if (defaultDigEmployeeId == null || !Objects.equals(defaultDigEmployeeId, digitalEmployee.getResourceId())) {
-            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("user.permission.nopermission"));
-        }
+        // 技能卸载同安装一样，按请求里的当前数字员工校验管理权限。
         if (!authApplicationService.hasResourceManagePermission(digitalEmployee)) {
-            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("user.permission.nopermission"));
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
+                I18nUtil.get("digemployee.skill.uninstall.no.manage.permission", digitalEmployee.getResourceName()));
         }
     }
 
@@ -983,7 +1029,8 @@ public class DigitalEmployeeApplicationService {
         if (ssResource == null) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("resource.not.found"));
         }
-        if (isCurrentUserBoundDefaultDigitalEmployee(ssResource)) {
+        if (isCurrentUserBoundDefaultDigitalEmployee(ssResource)
+            || isCurrentUserOwnDefaultSuperAssistantResource(ssResource)) {
             return;
         }
         validateDigitalEmployeeManagePermission(ssResource);
@@ -995,6 +1042,26 @@ public class DigitalEmployeeApplicationService {
         }
         Long defaultDigEmployeeId = CurrentUserHolder.getDefaultDigEmployeeId();
         return ssResource.getResourceId().equals(defaultDigEmployeeId);
+    }
+
+    /**
+     * 当前用户自己的超级助手资源使用稳定编码 {userCode}_main；即使用户把其他个人助理设为默认数字员工，
+     * 也应允许用户继续编辑自己的超级助手配置。
+     */
+    private boolean isCurrentUserOwnDefaultSuperAssistantResource(SsResource ssResource) {
+        Long currentUserId = CurrentUserHolder.getCurrentUserId();
+        String currentUserCode = CurrentUserHolder.getCurrentUserCode();
+        if (!isDefaultPersonalResource(ssResource) || currentUserId == null || ssResource.getResourceId() == null) {
+            return false;
+        }
+        if (!StringUtils.equals(ResourceBizTypeEnum.DIG_EMPLOYEE.name(), ssResource.getResourceBizType())) {
+            return false;
+        }
+        if (!Objects.equals(currentUserId, ssResource.getCreateBy())) {
+            return false;
+        }
+        String expectedResourceCode = buildDefaultSuperAssistantResourceCode(currentUserCode, currentUserId);
+        return StringUtils.equals(expectedResourceCode, ssResource.getResourceCode());
     }
 
     private boolean isDefaultPersonalResource(SsResource ssResource) {

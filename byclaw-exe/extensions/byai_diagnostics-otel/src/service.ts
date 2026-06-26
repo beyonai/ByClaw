@@ -66,8 +66,8 @@ const DROPPED_OTEL_ATTRIBUTE_KEYS = new Set([
   "openclaw.trace_id",
 ]);
 const LOW_CARDINALITY_VALUE_RE = /^[A-Za-z0-9_.:-]{1,120}$/u;
-const MAX_OTEL_CONTENT_ATTRIBUTE_CHARS = 128 * 1024;
-const MAX_OTEL_CONTENT_ARRAY_ITEMS = 200;
+const MAX_OTEL_CONTENT_ATTRIBUTE_CHARS = 16 * 1024;
+const MAX_OTEL_CONTENT_ARRAY_ITEMS = 50;
 const MAX_OTEL_LOG_BODY_CHARS = 4 * 1024;
 const MAX_OTEL_LOG_ATTRIBUTE_COUNT = 64;
 const MAX_OTEL_LOG_ATTRIBUTE_VALUE_CHARS = 4 * 1024;
@@ -370,6 +370,21 @@ function normalizeLangfuseSessionId(value: string | undefined): string | undefin
   return normalizeLangfuseTraceAttributeId(value);
 }
 
+function extractDirectChannelSessionId(sessionKey: string | undefined): string | undefined {
+  const marker = ":direct:";
+  const markerIndex = sessionKey?.lastIndexOf(marker) ?? -1;
+  if (markerIndex < 0) {
+    return undefined;
+  }
+  return readOtelSessionValue(sessionKey?.slice(markerIndex + marker.length));
+}
+
+function resolveLangfuseSessionId(evt: { sessionKey?: unknown; sessionId?: unknown }) {
+  const sessionKey = readOtelSessionValue(evt.sessionKey);
+  const sessionId = readOtelSessionValue(evt.sessionId);
+  return normalizeLangfuseSessionId(extractDirectChannelSessionId(sessionKey) ?? sessionKey ?? sessionId);
+}
+
 function readOtelUserId(evt: { userId?: unknown }): string | undefined {
   return readOtelSessionValue(evt.userId);
 }
@@ -418,7 +433,7 @@ function assignDiagnosticSessionAttributes(
     }
   }
   if (options.includeLangfuseSessionAttributes) {
-    const langfuseSessionId = normalizeLangfuseSessionId(sessionKey ?? sessionId);
+    const langfuseSessionId = resolveLangfuseSessionId(evt);
     if (langfuseSessionId) {
       attributes["langfuse.session.id"] = langfuseSessionId;
       attributes["session.id"] = langfuseSessionId;
@@ -616,6 +631,9 @@ function assignLangfuseGenAiUsageAttrs(
       : undefined;
   assignPositiveNumberAttr(attrs, "gen_ai.usage.input_tokens", genAiInputTokens);
   assignPositiveNumberAttr(attrs, "gen_ai.usage.output_tokens", usage.output);
+  assignPositiveNumberAttr(attrs, "gen_ai.usage.prompt_tokens", genAiInputTokens);
+  assignPositiveNumberAttr(attrs, "gen_ai.usage.completion_tokens", usage.output);
+  assignPositiveNumberAttr(attrs, "gen_ai.usage.total_tokens", usage.total);
   assignPositiveNumberAttr(
     attrs,
     "gen_ai.usage.cache_read.input_tokens",
@@ -629,6 +647,54 @@ function assignLangfuseGenAiUsageAttrs(
   if (usage.costUsd !== undefined && usage.costUsd > 0) {
     attrs["gen_ai.usage.cost"] = usage.costUsd;
   }
+  const usageDetails: Record<string, number> = {};
+  assignPositiveNumberAttr(usageDetails, "input", genAiInputTokens);
+  assignPositiveNumberAttr(usageDetails, "output", usage.output);
+  assignPositiveNumberAttr(usageDetails, "total", usage.total);
+  assignPositiveNumberAttr(usageDetails, "cache_read", usage.cacheRead);
+  assignPositiveNumberAttr(usageDetails, "cache_write", usage.cacheWrite);
+  if (Object.keys(usageDetails).length > 0) {
+    attrs["langfuse.observation.usage_details"] = JSON.stringify(usageDetails);
+  }
+}
+
+function assignByaiTokenUsageAttrs(
+  attrs: Record<string, string | number | boolean>,
+  usage: ModelCallUsageSnapshot | undefined,
+): void {
+  if (!usage) {
+    return;
+  }
+  assignPositiveNumberAttr(attrs, "byai.tokens.input", usage.input);
+  assignPositiveNumberAttr(attrs, "byai.tokens.output", usage.output);
+  assignPositiveNumberAttr(attrs, "byai.tokens.cache_read", usage.cacheRead);
+  assignPositiveNumberAttr(attrs, "byai.tokens.cache_write", usage.cacheWrite);
+  assignPositiveNumberAttr(attrs, "byai.tokens.total", usage.total);
+  assignPositiveNumberAttr(
+    attrs,
+    "langfuse.observation.metadata.byai_tokens_input",
+    usage.input,
+  );
+  assignPositiveNumberAttr(
+    attrs,
+    "langfuse.observation.metadata.byai_tokens_output",
+    usage.output,
+  );
+  assignPositiveNumberAttr(
+    attrs,
+    "langfuse.observation.metadata.byai_tokens_cache_read",
+    usage.cacheRead,
+  );
+  assignPositiveNumberAttr(
+    attrs,
+    "langfuse.observation.metadata.byai_tokens_cache_write",
+    usage.cacheWrite,
+  );
+  assignPositiveNumberAttr(
+    attrs,
+    "langfuse.observation.metadata.byai_tokens_total",
+    usage.total,
+  );
 }
 
 function assignModelCallSizeTimingAttrs(
@@ -646,6 +712,26 @@ function assignModelCallSizeTimingAttrs(
     "openclaw.model_call.time_to_first_byte_ms",
     evt.timeToFirstByteMs,
   );
+  assignPositiveNumberAttr(
+    attrs,
+    "langfuse.observation.metadata.openclaw_time_to_first_byte_ms",
+    evt.timeToFirstByteMs,
+  );
+}
+
+function assignLangfuseCompletionStartTimeAttr(
+  attrs: Record<string, string | number | boolean>,
+  evt: { durationMs?: number; timeToFirstByteMs?: number; ts: number },
+): void {
+  const timeToFirstByteMs = positiveFiniteNumber(evt.timeToFirstByteMs);
+  if (timeToFirstByteMs === undefined) {
+    return;
+  }
+  const durationMs = positiveFiniteNumber(evt.durationMs) ?? 0;
+  const startedAtMs = Math.max(0, evt.ts - durationMs);
+  attrs["langfuse.observation.completion_start_time"] = new Date(
+    startedAtMs + timeToFirstByteMs,
+  ).toISOString();
 }
 
 function assignGenAiSpanIdentityAttrs(
@@ -1320,7 +1406,13 @@ function assignOtelLogEventAttributes(
 
 function traceFlagsToOtel(traceFlags: string | undefined): TraceFlags {
   const parsed = Number.parseInt(traceFlags ?? "00", 16);
-  return (parsed & TraceFlags.SAMPLED) !== 0 ? TraceFlags.SAMPLED : TraceFlags.NONE;
+  if ((parsed & TraceFlags.SAMPLED) !== 0) {
+    return TraceFlags.SAMPLED;
+  }
+  // BYAI gateway diagnostics can omit or clear the sampled bit while still
+  // handing the span id to downstream Langfuse traces as their parent.
+  // Force sampling here so the advertised parent observation is exported.
+  return TraceFlags.SAMPLED;
 }
 
 function contextForTraceContext(traceContext: DiagnosticTraceContext | undefined) {
@@ -1366,6 +1458,10 @@ function addTraceAttributes(
 function readDiagnosticExtraString(evt: DiagnosticEventPayload, key: string): string | undefined {
   const value = (evt as unknown as Record<string, unknown>)[key];
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function readDiagnosticExtraNumber(evt: DiagnosticEventPayload, key: string): number | undefined {
+  return nonNegativeFiniteNumber((evt as unknown as Record<string, unknown>)[key]);
 }
 
 function isByaiSdkDiagnosticEvent(evt: { channel?: string; source?: string }): boolean {
@@ -1578,6 +1674,14 @@ export function createDiagnosticsOtelService(
       const activeTrustedSpans = new Map<string, ReturnType<typeof tracer.startSpan>>();
       const activeTrustedSpanAliases = new Map<string, ReturnType<typeof tracer.startSpan>>();
       const pendingTrustedRunFinalizers = new Map<string, ReturnType<typeof setImmediate>>();
+      const activeByaiMessageProcessedSpansBySessionKey = new Map<
+        string,
+        ReturnType<typeof tracer.startSpan>
+      >();
+      const activeByaiMessageProcessedSpansByTraceId = new Map<
+        string,
+        ReturnType<typeof tracer.startSpan>
+      >();
       type ActiveByaiInboundSpan = {
         span: ReturnType<typeof tracer.startSpan>;
         sessionKey: string;
@@ -1600,12 +1704,16 @@ export function createDiagnosticsOtelService(
         for (const span of new Set([
           ...activeTrustedSpans.values(),
           ...activeTrustedSpanAliases.values(),
+          ...activeByaiMessageProcessedSpansBySessionKey.values(),
+          ...activeByaiMessageProcessedSpansByTraceId.values(),
           ...[...activeByaiInboundSpansBySessionKey.values()].map((entry) => entry.span),
         ])) {
           span.end(stopAt);
         }
         activeTrustedSpans.clear();
         activeTrustedSpanAliases.clear();
+        activeByaiMessageProcessedSpansBySessionKey.clear();
+        activeByaiMessageProcessedSpansByTraceId.clear();
         activeByaiInboundSpansBySessionKey.clear();
         activeByaiInboundSpansByRunId.clear();
         langfuseUserContext.sessionUserIdsBySessionKey.clear();
@@ -2058,6 +2166,67 @@ export function createDiagnosticsOtelService(
         }
         return span;
       };
+      const byaiTraceIdForEvent = (evt: DiagnosticEventPayload) =>
+        readDiagnosticExtraString(evt, "byai.traceId") ?? normalizeTraceContext(evt.trace)?.traceId;
+      const findByaiMessageProcessedSpan = (evt: DiagnosticEventPayload) => {
+        const sessionKey = readOtelSessionValue(
+          (evt as { sessionKey?: string | undefined }).sessionKey,
+        );
+        const bySession = sessionKey
+          ? activeByaiMessageProcessedSpansBySessionKey.get(sessionKey)
+          : undefined;
+        const byaiTraceId = byaiTraceIdForEvent(evt);
+        const byTrace = byaiTraceId
+          ? activeByaiMessageProcessedSpansByTraceId.get(byaiTraceId)
+          : undefined;
+        return bySession ?? byTrace;
+      };
+      const trackByaiMessageProcessedSpan = (
+        evt: DiagnosticEventPayload,
+        span: ReturnType<typeof tracer.startSpan>,
+      ) => {
+        const sessionKey = readOtelSessionValue(
+          (evt as { sessionKey?: string | undefined }).sessionKey,
+        );
+        if (sessionKey) {
+          activeByaiMessageProcessedSpansBySessionKey.set(sessionKey, span);
+        }
+        const byaiTraceId = byaiTraceIdForEvent(evt);
+        if (byaiTraceId) {
+          activeByaiMessageProcessedSpansByTraceId.set(byaiTraceId, span);
+        }
+      };
+      const takeByaiMessageProcessedSpan = (evt: DiagnosticEventPayload) => {
+        const sessionKey = readOtelSessionValue(
+          (evt as { sessionKey?: string | undefined }).sessionKey,
+        );
+        const bySession = sessionKey
+          ? activeByaiMessageProcessedSpansBySessionKey.get(sessionKey)
+          : undefined;
+        const byaiTraceId = byaiTraceIdForEvent(evt);
+        const byTrace = byaiTraceId
+          ? activeByaiMessageProcessedSpansByTraceId.get(byaiTraceId)
+          : undefined;
+        const span = bySession ?? byTrace;
+        if (span) {
+          for (const [key, activeSpan] of activeByaiMessageProcessedSpansBySessionKey) {
+            if (activeSpan === span) {
+              activeByaiMessageProcessedSpansBySessionKey.delete(key);
+            }
+          }
+          for (const [key, activeSpan] of activeByaiMessageProcessedSpansByTraceId) {
+            if (activeSpan === span) {
+              activeByaiMessageProcessedSpansByTraceId.delete(key);
+            }
+          }
+          for (const [key, activeSpan] of activeTrustedSpans) {
+            if (activeSpan === span) {
+              activeTrustedSpans.delete(key);
+            }
+          }
+        }
+        return span;
+      };
       const takeTrackedTrustedSpan = (
         evt: DiagnosticEventPayload,
         metadata: DiagnosticEventMetadata,
@@ -2291,6 +2460,9 @@ export function createDiagnosticsOtelService(
         assignGenAiSpanIdentityAttrs(spanAttrs, evt);
         assignPositiveNumberAttr(spanAttrs, "gen_ai.usage.input_tokens", genAiInputTokens);
         assignPositiveNumberAttr(spanAttrs, "gen_ai.usage.output_tokens", usage.output);
+        assignPositiveNumberAttr(spanAttrs, "gen_ai.usage.prompt_tokens", genAiInputTokens);
+        assignPositiveNumberAttr(spanAttrs, "gen_ai.usage.completion_tokens", usage.output);
+        assignPositiveNumberAttr(spanAttrs, "gen_ai.usage.total_tokens", usage.total);
         assignPositiveNumberAttr(
           spanAttrs,
           "gen_ai.usage.cache_read.input_tokens",
@@ -2303,6 +2475,28 @@ export function createDiagnosticsOtelService(
         );
         if (typeof evt.costUsd === "number" && Number.isFinite(evt.costUsd) && evt.costUsd > 0) {
           spanAttrs["gen_ai.usage.cost"] = evt.costUsd;
+        }
+        assignLangfuseGenAiUsageAttrs(spanAttrs, {
+          input: genAiInputTokens,
+          output: usage.output,
+          total: usage.total,
+          costUsd: evt.costUsd,
+        });
+        const byaiUsageSpan = findByaiMessageProcessedSpan(evt);
+        if (byaiUsageSpan) {
+          const byaiUsageAttrs: Record<string, string | number | boolean> = {};
+          const byaiTotalTokens =
+            genAiInputTokens !== undefined || usage.output !== undefined
+              ? genAiInputTokens + (usage.output ?? 0)
+              : usage.total;
+          assignByaiTokenUsageAttrs(byaiUsageAttrs, {
+            input: genAiInputTokens,
+            output: usage.output,
+            cacheRead: usage.cacheRead,
+            cacheWrite: usage.cacheWrite,
+            total: byaiTotalTokens,
+          });
+          setSpanAttrs(byaiUsageSpan, byaiUsageAttrs);
         }
 
         const span = spanWithDuration("openclaw.model.usage", spanAttrs, evt.durationMs, {
@@ -2427,11 +2621,34 @@ export function createDiagnosticsOtelService(
 
       const recordMessageDispatchStarted = (
         evt: Extract<DiagnosticEventPayload, { type: "message.dispatch.started" }>,
+        metadata: DiagnosticEventMetadata,
       ) => {
-        messageDispatchStartedCounter.add(1, {
+        const attrs = {
           "openclaw.channel": lowCardinalityAttr(evt.channel),
           "openclaw.source": lowCardinalityAttr(evt.source),
-        });
+        };
+        messageDispatchStartedCounter.add(1, attrs);
+        if (!tracesEnabled || !metadata.trusted || !isByaiSdkDiagnosticEvent(evt)) {
+          return;
+        }
+        const traceContext = trustedTraceContext(evt, metadata);
+        if (!traceContext?.spanId || activeTrustedSpans.has(traceContext.spanId)) {
+          return;
+        }
+        const spanAttrs: Record<string, string | number | boolean> = { ...attrs };
+        assignLangfuseTraceAttributes(spanAttrs, evt, options, langfuseUserContext);
+        const sessionKey = readOtelSessionValue(evt.sessionKey);
+        const byaiInboundSpan = sessionKey
+          ? activeByaiInboundSpansBySessionKey.get(sessionKey)
+          : undefined;
+        const span = spanWithDuration("openclaw.message.processed", spanAttrs, undefined, {
+            parentContext:
+              byaiInboundParentContext(byaiInboundSpan) ??
+              contextForTrustedTraceContext(evt, metadata),
+            startTimeMs: evt.ts,
+          });
+        trackTrustedSpan(evt, metadata, span);
+        trackByaiMessageProcessedSpan(evt, span);
       };
 
       const recordMessageDispatchCompleted = (
@@ -2471,6 +2688,7 @@ export function createDiagnosticsOtelService(
 
       const recordMessageProcessed = (
         evt: Extract<DiagnosticEventPayload, { type: "message.processed" }>,
+        metadata: DiagnosticEventMetadata,
       ) => {
         const attrs = {
           "openclaw.channel": lowCardinalityAttr(evt.channel),
@@ -2483,15 +2701,42 @@ export function createDiagnosticsOtelService(
         if (!tracesEnabled) {
           return;
         }
-        const spanAttrs: Record<string, string | number> = { ...attrs };
+        const spanAttrs: Record<string, string | number | boolean> = { ...attrs };
         if (evt.reason) {
           spanAttrs["openclaw.reason"] = lowCardinalityAttr(evt.reason, "unknown");
         }
-        const span = spanWithDuration("openclaw.message.processed", spanAttrs, evt.durationMs);
+        assignLangfuseTraceAttributes(spanAttrs, evt, options, langfuseUserContext);
+        const sessionKey = readOtelSessionValue(evt.sessionKey);
+        const byaiInboundSpan = sessionKey
+          ? activeByaiInboundSpansBySessionKey.get(sessionKey)
+          : undefined;
+        const trustedTrace = trustedTraceContext(evt, metadata);
+        const trackedSpan = trustedTrace?.spanId
+          ? activeTrustedSpans.get(trustedTrace.spanId)
+          : undefined;
+        const trackedByaiSpan = takeByaiMessageProcessedSpan(evt);
+        const span =
+          trackedSpan ??
+          trackedByaiSpan ??
+          spanWithDuration("openclaw.message.processed", spanAttrs, evt.durationMs, {
+            parentContext:
+              activeTrustedParentContext(evt, metadata) ??
+              byaiInboundParentContext(byaiInboundSpan) ??
+              contextForTrustedTraceContext(evt, metadata),
+            endTimeMs: evt.ts,
+          });
+        setSpanAttrs(span, spanAttrs);
         if (evt.outcome === "error" && evt.error) {
           span.setStatus({ code: SpanStatusCode.ERROR, message: redactSensitiveText(evt.error) });
         }
-        span.end();
+        if (trackedSpan && trustedTrace?.spanId) {
+          activeTrustedSpans.delete(trustedTrace.spanId);
+        }
+        if (trackedSpan || trackedByaiSpan) {
+          span.end(evt.ts);
+          return;
+        }
+        span.end(evt.ts);
       };
 
       const messageDeliveryAttrs = (
@@ -2695,6 +2940,48 @@ export function createDiagnosticsOtelService(
 
       const recordRunAttempt = (evt: Extract<DiagnosticEventPayload, { type: "run.attempt" }>) => {
         runAttemptCounter.add(1, { "openclaw.attempt": evt.attempt });
+      };
+
+      const recordRunProgress = (
+        evt: Extract<DiagnosticEventPayload, { type: "run.progress" }>,
+      ) => {
+        if (
+          evt.reason !== "byai.first_visible_response" &&
+          evt.reason !== "byai.first_answer_delta"
+        ) {
+          return;
+        }
+        const span = findByaiMessageProcessedSpan(evt);
+        if (!span) {
+          return;
+        }
+        const firstResponseMs = readDiagnosticExtraNumber(evt, "byai.firstResponseMs");
+        if (firstResponseMs === undefined) {
+          return;
+        }
+        const eventType = readDiagnosticExtraString(evt, "byai.firstResponseEventType");
+        const attrs: Record<string, string | number | boolean> = {};
+        if (evt.reason === "byai.first_visible_response") {
+          attrs["byai.first_visible_response_ms"] = firstResponseMs;
+          attrs["langfuse.observation.metadata.byai_first_visible_response_ms"] =
+            firstResponseMs;
+          if (eventType) {
+            const normalizedEventType = lowCardinalityAttr(eventType);
+            attrs["byai.first_visible_response_event_type"] = normalizedEventType;
+            attrs["langfuse.observation.metadata.byai_first_visible_response_event_type"] =
+              normalizedEventType;
+          }
+        } else {
+          attrs["byai.first_answer_delta_ms"] = firstResponseMs;
+          attrs["langfuse.observation.metadata.byai_first_answer_delta_ms"] = firstResponseMs;
+          if (eventType) {
+            const normalizedEventType = lowCardinalityAttr(eventType);
+            attrs["byai.first_answer_delta_event_type"] = normalizedEventType;
+            attrs["langfuse.observation.metadata.byai_first_answer_delta_event_type"] =
+              normalizedEventType;
+          }
+        }
+        setSpanAttrs(span, attrs);
       };
 
       const toolLoopAttrs = (
@@ -3174,6 +3461,7 @@ export function createDiagnosticsOtelService(
           spanAttrs["openclaw.transport"] = evt.transport;
         }
         assignModelCallSizeTimingAttrs(spanAttrs, evt);
+        assignLangfuseCompletionStartTimeAttr(spanAttrs, evt);
         assignOtelModelContentAttributes(spanAttrs, modelContent, contentCapturePolicy);
         assignLangfuseGenAiUsageAttrs(spanAttrs, readAssistantUsageFromModelCallContent(modelContent));
         const span =
@@ -3228,6 +3516,7 @@ export function createDiagnosticsOtelService(
           spanAttrs["openclaw.transport"] = evt.transport;
         }
         assignModelCallSizeTimingAttrs(spanAttrs, evt);
+        assignLangfuseCompletionStartTimeAttr(spanAttrs, evt);
         assignOtelModelContentAttributes(spanAttrs, modelContent, contentCapturePolicy);
         assignLangfuseGenAiUsageAttrs(spanAttrs, readAssistantUsageFromModelCallContent(modelContent));
         const span =
@@ -3324,6 +3613,7 @@ export function createDiagnosticsOtelService(
           runId: evt.runId,
           sessionKey: evt.sessionKey,
           observationId: span.spanContext().spanId,
+          traceId: span.spanContext().traceId,
           startedAtMs: evt.ts,
         });
       };
@@ -3620,6 +3910,9 @@ export function createDiagnosticsOtelService(
         ctx.logger.error(`${serviceId}: internal diagnostics capability unavailable`);
         return;
       }
+      ctx.logger.info(
+        `${serviceId}: internal diagnostics subscribed (traces=${tracesEnabled}, metrics=${metricsEnabled}, logs=${logsEnabled}, sdkPreloaded=${sdkPreloaded}, endpoint=${endpoint ? "configured" : "default"})`,
+      );
 
       unsubscribe = subscribe((evt, metadata, privateData) => {
         try {
@@ -3643,13 +3936,13 @@ export function createDiagnosticsOtelService(
               recordMessageReceived(evt, metadata);
               return;
             case "message.dispatch.started":
-              recordMessageDispatchStarted(evt);
+              recordMessageDispatchStarted(evt, metadata);
               return;
             case "message.dispatch.completed":
               recordMessageDispatchCompleted(evt, metadata);
               return;
             case "message.processed":
-              recordMessageProcessed(evt);
+              recordMessageProcessed(evt, metadata);
               return;
             case "message.delivery.started":
               recordMessageDeliveryStarted(evt);
@@ -3691,6 +3984,7 @@ export function createDiagnosticsOtelService(
               recordRunAttempt(evt);
               return;
             case "run.progress":
+              recordRunProgress(evt);
               return;
             case "diagnostic.heartbeat":
               recordHeartbeat(evt);
