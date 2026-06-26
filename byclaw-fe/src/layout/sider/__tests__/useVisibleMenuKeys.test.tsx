@@ -45,7 +45,7 @@ describe('useVisibleMenuKeys', () => {
     });
 
     await waitFor(() => {
-      expect(result.current).toEqual(['sessions', 'skill', 'file']);
+      expect(result.current).toEqual(['sessions', 'skill', 'file', 'model']);
     });
   });
 
@@ -60,7 +60,7 @@ describe('useVisibleMenuKeys', () => {
     const { result } = renderHook(() => useVisibleMenuKeys({ userId: 1 }));
 
     await waitFor(() => {
-      expect(result.current).toEqual(['sessions', 'file']);
+      expect(result.current).toEqual(['sessions', 'file', 'model']);
     });
   });
 

@@ -17,6 +17,7 @@ type Props = {
   agentId: string;
   initialSessionId?: string;
   initialText: string;
+  messageId?: string;
   onClose: () => void;
   open: boolean;
   traceId?: string;
@@ -26,8 +27,9 @@ function TroubleshootSessionContent({
   agentId,
   initialSessionId,
   initialText,
+  messageId,
   traceId,
-}: Pick<Props, 'agentId' | 'initialSessionId' | 'initialText' | 'traceId'>) {
+}: Pick<Props, 'agentId' | 'initialSessionId' | 'initialText' | 'messageId' | 'traceId'>) {
   const parentGlobalContext = useGlobal();
   const [sessionId, setSessionId] = React.useState(initialSessionId || '');
   const [currentAgentId, setCurrentAgentId] = React.useState(agentId);
@@ -48,8 +50,12 @@ function TroubleshootSessionContent({
   }, [initialSessionId]);
 
   React.useEffect(() => {
-    cacheTroubleshootSession(traceId, sessionId);
-  }, [sessionId, traceId]);
+    cacheTroubleshootSession({
+      traceId,
+      messageId,
+      sessionId,
+    });
+  }, [messageId, sessionId, traceId]);
 
   React.useEffect(() => {
     const agentInfo = [...agentList, ...employeesList].find(
@@ -88,6 +94,9 @@ function TroubleshootSessionContent({
           cannotAt={false}
           hideChatTitle
           sessionId={sessionId}
+          sendExtraParams={{
+            troubleshootMessageId: messageId,
+          }}
           agentType={agentType}
           setAgentType={setAgentType}
           queryInputProps={{
@@ -103,6 +112,7 @@ export default function TroubleshootSessionDrawer({
   agentId,
   initialSessionId,
   initialText,
+  messageId,
   onClose,
   open,
   traceId,
@@ -123,6 +133,7 @@ export default function TroubleshootSessionDrawer({
         agentId={agentId}
         initialSessionId={initialSessionId}
         initialText={initialText}
+        messageId={messageId}
         traceId={traceId}
       />
     </Drawer>
