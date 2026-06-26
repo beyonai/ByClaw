@@ -150,6 +150,7 @@ public class SessionService {
      * @return ResponseUtil
      */
     public ByaiSession update(ByaiSession byaiSession) {
+        byaiSession.setUpdateTime(new Date());
         byaiSessionMapper.updateById(byaiSession);
         return byaiSession;
     }
