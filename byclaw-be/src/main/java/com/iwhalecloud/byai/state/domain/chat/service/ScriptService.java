@@ -215,7 +215,7 @@ public class ScriptService extends AbstractChatProcess {
                 ctx.userMessageId);
         }
 
-        if (ctx.assistantChatDto.getIsTroubleshootSession()) {
+        if (StringUtils.isNotBlank(ctx.assistantChatDto.getTroubleshootMessageId())) {
             saveTroubleshootSessionExt(ctx);
         }
 
@@ -257,7 +257,7 @@ public class ScriptService extends AbstractChatProcess {
         byaiSessionExt.setSessionId(ctx.sessionId);
         byaiSessionExt.setExtParamName("troubleshoot_message_id");
         byaiSessionExt.setExtParamCode("troubleshoot_message_id");
-        byaiSessionExt.setExtParamValue(ctx.modelAnswerMessageId.toString());
+        byaiSessionExt.setExtParamValue(ctx.assistantChatDto.getTroubleshootMessageId());
         sessionExtService.save(byaiSessionExt);
     }
 

@@ -1,11 +1,35 @@
-const troubleshootSessionCache = new Map<string, string>();
+type TroubleshootSessionCachePayload = {
+  traceId?: string;
+  messageId?: string;
+  sessionId?: string;
+};
 
-export function cacheTroubleshootSession(traceId?: string, sessionId?: string) {
-  if (!traceId || !sessionId) return;
-  troubleshootSessionCache.set(traceId, sessionId);
+const troubleshootSessionCacheByTraceId = new Map<string, string>();
+const troubleshootSessionCacheByMessageId = new Map<string, string>();
+
+export function cacheTroubleshootSession(payload: TroubleshootSessionCachePayload = {}) {
+  const { traceId, messageId, sessionId } = payload;
+  if (!sessionId) return;
+
+  if (traceId) {
+    troubleshootSessionCacheByTraceId.set(`${traceId}`, sessionId);
+  }
+
+  if (messageId) {
+    troubleshootSessionCacheByMessageId.set(`${messageId}`, sessionId);
+  }
 }
 
-export function getCachedTroubleshootSession(traceId?: string) {
+export function getCachedTroubleshootSession(payload: Omit<TroubleshootSessionCachePayload, 'sessionId'> = {}) {
+  const { traceId, messageId } = payload;
+
+  if (messageId) {
+    const cachedSessionId = troubleshootSessionCacheByMessageId.get(`${messageId}`);
+    if (cachedSessionId) {
+      return cachedSessionId;
+    }
+  }
+
   if (!traceId) return undefined;
-  return troubleshootSessionCache.get(traceId);
+  return troubleshootSessionCacheByTraceId.get(`${traceId}`);
 }
