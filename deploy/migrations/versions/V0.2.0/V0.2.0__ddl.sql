@@ -282,7 +282,7 @@ COMMENT ON COLUMN byai.byai_aimodel.owner_type IS '模型归属: PUBLIC(公共) 
 
 -- 模型表新增 source_type 字段: 区分模型来源
 ALTER TABLE byai.byai_aimodel ADD COLUMN source_type VARCHAR(32) DEFAULT NULL;
-COMMENT ON COLUMN byai.byai_aimodel.source_type IS '模型来源: null(用户创建) / TOKEN_SERVER(系统分配)';
+COMMENT ON COLUMN byai.byai_aimodel.source_type IS '模型来源: null(用户创建) / TOKEN_SAVER(系统分配)';
 
 -- 用户 Token 额度配置表（管理员可为每位用户分配独立额度）
 CREATE TABLE IF NOT EXISTS byai.po_user_token_quota (
