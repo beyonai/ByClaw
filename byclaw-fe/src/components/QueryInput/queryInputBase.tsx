@@ -147,9 +147,9 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
   };
 
   setCommonStateBySchema = (schema: any) => {
-    const { queryQuestion, inputSchema, mentionItem, payload: { files } = {} } = schema;
+    const { queryQuestion, inputSchema = {}, mentionItem, payload: { files } = {} } = schema;
 
-    const inputValue = inputSchema.text || queryQuestion || '';
+    const inputValue = inputSchema?.text || queryQuestion || '';
 
     this.setState((prevState) => ({
       ...prevState,
