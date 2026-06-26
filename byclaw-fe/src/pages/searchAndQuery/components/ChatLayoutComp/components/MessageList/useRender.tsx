@@ -64,7 +64,7 @@ export default function useRender({
       return (
         <div className="ub ub-ac">
           <CopyComp richText={text} text={getDisplayQuestion({ text, resourceList })} />
-          <Divider type="vertical" />
+          {/* <Divider type="vertical" /> */}
           <MoreActions deleteMessage={deleteMessage} msg={msg} />
         </div>
       );

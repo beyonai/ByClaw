@@ -7,6 +7,7 @@ import { Button, Popconfirm, Tooltip } from 'antd';
 import React from 'react';
 
 import btnStyles from '@/components/MessageList/index.module.less';
+import { agentTypeMap } from '@/constants/agent';
 import { getTraceIdByMessageId, qryTroubleshootSession } from '@/service/message';
 import { cacheTroubleshootSession, getCachedTroubleshootSession } from '../../TroubleshootSessionDrawer/sessionCache';
 import useTroubleshootDrawer from '../../TroubleshootSessionDrawer/useTroubleshootDrawer';
@@ -15,8 +16,24 @@ const traceIdCache = new Map<string, string>();
 const traceIdRequestCache = new Map<string, Promise<string>>();
 const troubleshootSessionRequestCache = new Map<string, Promise<string>>();
 
-function MoreActions(porps: { deleteMessage: (message: IMessage) => void; msg: IMessage; disabledList?: string[] }) {
-  const { deleteMessage, msg, disabledList } = porps;
+const getMessageAgentType = (msg: IMessage) => {
+  try {
+    const metadata = msg.metadata ? JSON.parse(msg.metadata) : {};
+    if (metadata?.agentType) return `${metadata.agentType}`;
+  } catch {
+    // ignore invalid metadata
+  }
+
+  return msg.agentType ? `${msg.agentType}` : '';
+};
+
+function MoreActions(porps: {
+  deleteMessage: (message: IMessage) => void;
+  msg: IMessage;
+  disabledList?: string[];
+  showTroubleshoot?: boolean;
+}) {
+  const { deleteMessage, msg, disabledList, showTroubleshoot = false } = porps;
   const { messageId, traceId } = msg;
   const [troubleshootActionLoading, setTroubleshootActionLoading] = React.useState(false);
 
@@ -136,29 +153,34 @@ function MoreActions(porps: { deleteMessage: (message: IMessage) => void; msg: I
   }, [getLatestTraceId, messageId, openTroubleshootDrawer, syncTroubleshootSessionCache, traceId]);
 
   const canDelete = messageId && !disabledList?.includes('delete');
+  const canShowTroubleshoot = showTroubleshoot && getMessageAgentType(msg) === agentTypeMap.askAgent;
 
   return (
     <div className={`ub ub-ac ${btnStyles.moreActions}`}>
       {troubleshootDrawerHolder}
-      <div className={btnStyles.actionsBarItem} role="presentation">
-        <Tooltip title={intl.formatMessage({ id: 'messageList.troubleshoot' })}>
-          <Button
-            type="text"
-            size="small"
-            loading={troubleshootLoading || troubleshootActionLoading}
-            icon={<BugOutlined className={btnStyles.icon} />}
-            onClick={handleTroubleshoot}
-          >
-            <span className={btnStyles.actionsBarText}>{intl.formatMessage({ id: 'messageList.troubleshoot' })}</span>
-          </Button>
-        </Tooltip>
-      </div>
+      {canShowTroubleshoot ? (
+        <div className={btnStyles.actionsBarItem} role="presentation">
+          <Tooltip title={intl.formatMessage({ id: 'messageList.troubleshootTooltip' })}>
+            <Button
+              type="text"
+              size="small"
+              loading={troubleshootLoading || troubleshootActionLoading}
+              icon={<BugOutlined className={btnStyles.icon} />}
+              onClick={handleTroubleshoot}
+            >
+              <span className={btnStyles.actionsBarText}>{intl.formatMessage({ id: 'messageList.troubleshoot' })}</span>
+            </Button>
+          </Tooltip>
+        </div>
+      ) : null}
       {canDelete ? (
         <div className={btnStyles.actionsBarItem} role="presentation">
           <Popconfirm title={intl.formatMessage({ id: 'messageList.deleteMessageConfirm' })} onConfirm={myDeleteMsg}>
-            <Tooltip title={intl.formatMessage({ id: 'common.delete' })}>
+            <Tooltip title={intl.formatMessage({ id: 'messageList.deleteMessage' })}>
               <Button type="text" size="small" icon={<DeleteOutlined className={btnStyles.icon} />}>
-                <span className={btnStyles.actionsBarText}>{intl.formatMessage({ id: 'common.delete' })}</span>
+                {showTroubleshoot ? (
+                  <span className={btnStyles.actionsBarText}>{intl.formatMessage({ id: 'common.delete' })}</span>
+                ) : null}
               </Button>
             </Tooltip>
           </Popconfirm>
