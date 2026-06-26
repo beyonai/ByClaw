@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Empty, List, Spin, message } from 'antd';
+import { Spin, message } from 'antd';
 import classNames from 'classnames';
 import { isEmpty } from 'lodash';
 import { useIntl } from '@umijs/max';
@@ -11,6 +11,7 @@ import useAppStore from '@/models/common/useAppStore';
 
 import VersionComp from './VersionComp';
 import NotificationComp from './NotificationComp';
+import EmptyComp from '@/components/Empty';
 
 import type { IVersionNotification } from '@/typescript/version';
 
@@ -23,6 +24,7 @@ export interface INotificationItem {
   priority?: string | number;
   createTime: string;
   bizType?: number;
+  isRead?: string | number | boolean;
 }
 
 interface IPageData {
@@ -206,7 +208,7 @@ export default function SystemNotification() {
     return (
       <div className={styles.systemNotification}>
         <div className={styles.emptyWrap}>
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={null} />
+          <EmptyComp description={null} />
         </div>
         {contextHolder}
       </div>
@@ -216,27 +218,22 @@ export default function SystemNotification() {
   return (
     <div className={styles.systemNotification}>
       {versionNotification && (
-        <div style={{ padding: '0 8px' }} className="pointer" onClick={() => getDetail(versionNotification)}>
+        <div className={classNames(styles.noticeItem, 'pointer')} onClick={() => getDetail(versionNotification)}>
           <VersionComp item={versionNotification as IVersionNotification} />
         </div>
       )}
       <div ref={scrollWrapRef} className={classNames(styles.scrollWrap, { [styles.scrolled]: scrolled })}>
-        <List
-          split={false}
-          dataSource={list}
-          className={styles.list}
-          renderItem={(item) => {
-            return (
-              <List.Item
-                className={classNames(styles.noticeItem)}
-                key={item.id || `${item.title}-${item.createTime}`}
-                onClick={() => getDetail(item)}
-              >
-                <NotificationComp item={item as INotificationItem} />
-              </List.Item>
-            );
-          }}
-        />
+        <div className={styles.list}>
+          {list.map((item) => (
+            <div
+              className={classNames(styles.noticeItem, 'pointer')}
+              key={item.id || `${item.title}-${item.createTime}`}
+              onClick={() => getDetail(item)}
+            >
+              <NotificationComp item={item as INotificationItem} />
+            </div>
+          ))}
+        </div>
         {loadingMore ? (
           <div className={styles.endRow}>
             <Spin size="small" />
