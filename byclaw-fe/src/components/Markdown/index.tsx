@@ -108,7 +108,6 @@ const MarkdownRender = React.memo(
             return <ImgComponent key={src} src={src} alt={alt} />;
           }
           if (domNode.name === 'a') {
-            console.log(domNode);
             return <ATag domNode={domNode} />;
           }
 
