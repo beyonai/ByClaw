@@ -69,7 +69,7 @@ export const HtmlRender = (props: { content?: string; safe?: boolean; href?: str
       if (ref.current?.src) URL.revokeObjectURL(ref.current.src);
     };
   }, [content, safe, href]);
-  console.log('loading', loading);
+
   return (
     <section className={styles.html}>
       {loading && (
