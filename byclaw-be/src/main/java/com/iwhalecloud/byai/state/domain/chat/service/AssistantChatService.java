@@ -501,7 +501,7 @@ public class AssistantChatService {
         sessionMembersDto.setSessionType(SessionType.H_AS.getCode());
         sessionMembersDto.setIsDebug(assistantChatDto.getIsDebug());
         
-        if (assistantChatDto.getIsTroubleshootSession()) {
+        if (StringUtils.isNotBlank(assistantChatDto.getTroubleshootMessageId())) {
             sessionMembersDto.setIsDebug(1);
         }
 

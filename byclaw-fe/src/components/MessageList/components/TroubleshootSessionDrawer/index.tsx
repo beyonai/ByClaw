@@ -95,7 +95,7 @@ function TroubleshootSessionContent({
           hideChatTitle
           sessionId={sessionId}
           sendExtraParams={{
-            isTroubleshootSession: true,
+            troubleshootMessageId: messageId,
           }}
           agentType={agentType}
           setAgentType={setAgentType}
