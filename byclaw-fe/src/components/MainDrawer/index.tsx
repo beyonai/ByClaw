@@ -16,6 +16,9 @@ import { Resizable } from '../Resizable';
 
 const FragmentComp = () => null;
 const Mobile = lazy(() => import('@/pages/mobile/AuthPage'));
+const PreViewFile = React.lazy(() =>
+  import('@/components/Preview/Twins').then((module) => ({ default: module.PreViewFile }))
+);
 
 export type IDrawerMessage = Partial<IMessage> & {
   messageId: string;
@@ -104,6 +107,10 @@ function MainDrawer() {
     }
     if (drawerType === 'mobile') {
       return Mobile;
+    }
+
+    if (drawerType === 'preview') {
+      return PreViewFile;
     }
 
     return FragmentComp;
