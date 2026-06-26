@@ -558,8 +558,11 @@ export default {
   'messageForm.pleaseUpload': '请上传{files}',
 
   'messageList.deleteMessageConfirm': '确定删除该消息吗？',
+  'messageList.copyMessage': '复制消息',
+  'messageList.deleteMessage': '删除消息',
+  'messageList.saveMessage': '保存消息',
   'messageList.troubleshoot': '运维',
-  'messageList.troubleshootTooltip': '利用百应运维数字员工，帮您排除故障',
+  'messageList.troubleshootTooltip': '调用百应运维数字员工排查问题',
   'messageList.troubleshootPrompt': '需要排查的trace_id={traceId}，\n',
 
   'citeRender.title': '引用消息',

@@ -114,19 +114,16 @@
   line-height: 1.4;
 }
 
-.usageBar {
-  height: 3px;
+.usageProgress {
   margin-top: 4px;
-  border-radius: 2px;
-  background: #e8edf3;
-  overflow: hidden;
-}
 
-.usageBarFill {
-  height: 100%;
-  border-radius: 2px;
-  background: linear-gradient(90deg, #6da6f7 0%, #1677ff 100%);
-  transition: width 0.3s ease;
+  :global(.@{antPrefix}-progress-outer) {
+    display: block;
+  }
+
+  :global(.@{antPrefix}-progress-inner) {
+    background: #e8edf3;
+  }
 }
 
 .usageTokens {

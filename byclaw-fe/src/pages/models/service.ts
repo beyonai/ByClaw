@@ -1,6 +1,6 @@
 import { GET, POST } from '@/service/common/request';
 
-type Resp<T = any> = { code: number; msg: string; data: T };
+type Resp<T = any> = { code: number; msg: string; data: T; success?: boolean };
 type PageData<T = any> = { rows?: T[]; list?: T[]; total: number };
 
 const withCustomHandle = {

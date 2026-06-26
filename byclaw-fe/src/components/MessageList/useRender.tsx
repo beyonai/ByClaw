@@ -3,7 +3,7 @@ import React, { Suspense, useCallback } from 'react';
 import { ArrowRightOutlined, InfoCircleOutlined } from '@ant-design/icons';
 // @ts-ignore
 import { useIntl, useSelector } from '@umijs/max';
-import { Divider, Space, Tooltip, Typography, Button } from 'antd';
+import { Space, Tooltip, Typography, Button } from 'antd';
 import classnames from 'classnames';
 import { get, isArray, isEmpty, noop, compact } from 'lodash';
 
@@ -81,9 +81,8 @@ export default function useRender({
 
       return (
         <div className="ub ub-ac">
-          <CopyComp richText={text} text={getDisplayQuestion({ text, resourceList })} />
-          <Divider type="vertical" />
           <Space size={2}>
+            <CopyComp richText={text} text={getDisplayQuestion({ text, resourceList })} />
             {canRefrence && (
               <div className={classnames(styles.actionsBarItem)} role="presentation">
                 <Button
@@ -127,7 +126,8 @@ export default function useRender({
       return (
         <div className="full-width ub ub-ver" style={{ position: 'relative' }}>
           <div className={classnames('ub ub-ac ub-wrap', styles.beyondAnswerActions)} style={{ gap: '6px 0' }}>
-            <Space size={1}>
+            <Space size={2}>
+              <CopyComp text={getDisplayAnswer(messageList)} showText />
               {[IMessageState.Done, IMessageState.Cancel].includes(messageState) && (
                 <>
                   {canRefrence && (
@@ -159,26 +159,24 @@ export default function useRender({
                     </Button>
                   </div> */}
                   <div className={classnames(styles.actionsBarItem)} role="presentation">
-                    <Button
-                      type="text"
-                      size="small"
-                      icon={<AntdIcon type="icon-a-Starxingxing" className={styles.icon} />}
-                      onClick={() => {
-                        EventEmitter.emit('beyond-messageList-set-multichoices-msgid', [msgId]);
-                        EventEmitter.emit('beyond-messageList-open-multichoices', ['collect']);
-                      }}
-                    >
-                      <span className={styles.actionsBarText}>{intl.formatMessage({ id: 'common.save' })}</span>
-                    </Button>
+                    <Tooltip title={intl.formatMessage({ id: 'messageList.saveMessage' })}>
+                      <Button
+                        type="text"
+                        size="small"
+                        icon={<AntdIcon type="icon-a-Starxingxing" className={styles.icon} />}
+                        onClick={() => {
+                          EventEmitter.emit('beyond-messageList-set-multichoices-msgid', [msgId]);
+                          EventEmitter.emit('beyond-messageList-open-multichoices', ['collect']);
+                        }}
+                      >
+                        <span className={styles.actionsBarText}>{intl.formatMessage({ id: 'common.save' })}</span>
+                      </Button>
+                    </Tooltip>
                   </div>
                   {/* <Memory msg={msg} /> */}
                 </>
               )}
-              <MoreActions deleteMessage={deleteMessage} msg={msg} />
-            </Space>
-            <Divider type="vertical" size="small" />
-            <Space size="small">
-              <CopyComp text={getDisplayAnswer(messageList)} />
+              <MoreActions deleteMessage={deleteMessage} msg={msg} showTroubleshoot />
               {[IMessageState.Done, IMessageState.Cancel].includes(messageState) && (
                 <ThumbUp updateMessage={updateMessage} msg={msg} />
               )}

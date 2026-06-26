@@ -1,8 +1,11 @@
 import { Button, Empty, Space } from 'antd';
 import React from 'react';
-import type { IntlShape } from 'react-intl';
 import CardList from '@/pages/manager/components/CardList';
 import styles from '../index.module.less';
+
+type IntlShape = {
+  formatMessage: (descriptor: { id: string }, values?: Record<string, any>) => string;
+};
 
 type Props = {
   intl: IntlShape;
@@ -30,7 +33,7 @@ const ModelCardSection: React.FC<Props> = ({
   cardItemFn,
 }) => {
   return (
-    <div className={styles.cardList} style={{ minHeight: 0 }}>
+    <div className={styles.cardList}>
       {!list.length && !isLoading && !actionLoading ? (
         <div className={styles.emptyState}>
           <div className={styles.emptyBadge}>AI</div>

@@ -1,4 +1,4 @@
-import { Tag } from 'antd';
+import { Tag, Tooltip } from 'antd';
 import classNames from 'classnames';
 import dayjs from 'dayjs';
 import React from 'react';
@@ -41,13 +41,15 @@ const PublicModelCard: React.FC<Props> = ({ record }) => {
         <div className={styles.metaGrid}>
           <div className={styles.metaCard}>
             <div className={styles.metaLabel}>{intl.formatMessage({ id: 'personalModel.form.modelCode' })}</div>
-            <div className={classNames(styles.metaValue, 'ellipsis')} title={modelCode}>
-              {modelCode || '-'}
-            </div>
+            <Tooltip title={modelCode || '-'}>
+              <div className={classNames(styles.metaValue, 'ellipsis')}>{modelCode || '-'}</div>
+            </Tooltip>
           </div>
           <div className={styles.metaCard}>
             <div className={styles.metaLabel}>Context</div>
-            <div className={styles.metaValue}>{contextTokens ? `${contextTokens} tokens` : '-'}</div>
+            <Tooltip title={contextTokens ? `${contextTokens} tokens` : '-'}>
+              <div className={styles.metaValue}>{contextTokens ? `${contextTokens} tokens` : '-'}</div>
+            </Tooltip>
           </div>
         </div>
       </div>

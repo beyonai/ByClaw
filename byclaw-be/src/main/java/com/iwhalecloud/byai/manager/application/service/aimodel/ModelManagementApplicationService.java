@@ -118,7 +118,7 @@ public class ModelManagementApplicationService {
         String displayName = request.getDisplayName() != null ? request.getDisplayName().trim() : "";
         if (StringUtil.isNotEmpty(displayName)) {
             if (StringUtil.isEmpty(request.getId())) {
-                if (byaiAimodelDomainService.existsByModelNameExcludeId(displayName, null)) {
+                if (!"PERSONAL".equalsIgnoreCase(request.getOwnerType()) && byaiAimodelDomainService.existsByModelNameExcludeId(displayName, null)) {
                     throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40002, "aimodel.name.duplicate");
                 }
             }
