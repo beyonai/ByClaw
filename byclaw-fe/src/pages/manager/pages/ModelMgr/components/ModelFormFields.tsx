@@ -410,7 +410,7 @@ const ModelFormFields: React.FC<Props> = ({
             </Form.Item>
             {isLlmModel ? (
               <>
-                <div className={styles.hintBlock} style={{ gridColumn: 'span 3' }}>
+                <div className={`${styles.hintBlock} ${styles.gridColSpan3}`}>
                   <div className={styles.hintTitle}>{intl.formatMessage({ id: 'modelMgr.modal.reasoningTitle' })}</div>
                   <div className={styles.hint}>{intl.formatMessage({ id: 'modelMgr.modal.reasoningDesc' })}</div>
                 </div>
@@ -476,7 +476,7 @@ const ModelFormFields: React.FC<Props> = ({
                 <Form.Item
                   label={intl.formatMessage({ id: 'modelMgr.modal.reasoningEffortMap' })}
                   name="reasoningEffortMapText"
-                  style={{ gridColumn: 'span 3' }}
+                  className={styles.gridColSpan3}
                 >
                   <TextArea
                     disabled={!reasoningEnabled}
@@ -487,19 +487,19 @@ const ModelFormFields: React.FC<Props> = ({
                 {reasoningCapability === 'budget' ? (
                   <>
                     <Form.Item label="minimal budget" name={['reasoningConfig', 'budgets', 'minimal']}>
-                      <InputNumber disabled={!reasoningEnabled} style={{ width: '100%' }} min={1} />
+                      <InputNumber disabled={!reasoningEnabled} className={styles.fullWidth} min={1} />
                     </Form.Item>
                     <Form.Item label="low budget" name={['reasoningConfig', 'budgets', 'low']}>
-                      <InputNumber disabled={!reasoningEnabled} style={{ width: '100%' }} min={1} />
+                      <InputNumber disabled={!reasoningEnabled} className={styles.fullWidth} min={1} />
                     </Form.Item>
                     <Form.Item label="medium budget" name={['reasoningConfig', 'budgets', 'medium']}>
-                      <InputNumber disabled={!reasoningEnabled} style={{ width: '100%' }} min={1} />
+                      <InputNumber disabled={!reasoningEnabled} className={styles.fullWidth} min={1} />
                     </Form.Item>
                     <Form.Item label="high budget" name={['reasoningConfig', 'budgets', 'high']}>
-                      <InputNumber disabled={!reasoningEnabled} style={{ width: '100%' }} min={1} />
+                      <InputNumber disabled={!reasoningEnabled} className={styles.fullWidth} min={1} />
                     </Form.Item>
                     <Form.Item label="max budget" name={['reasoningConfig', 'budgets', 'max']}>
-                      <InputNumber disabled={!reasoningEnabled} style={{ width: '100%' }} min={1} />
+                      <InputNumber disabled={!reasoningEnabled} className={styles.fullWidth} min={1} />
                     </Form.Item>
                   </>
                 ) : null}

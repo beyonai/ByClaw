@@ -550,7 +550,11 @@ export default {
   'messageForm.pleaseUpload': 'Please upload {files}',
 
   'messageList.deleteMessageConfirm': 'Are you sure to delete this message?',
+  'messageList.copyMessage': 'Copy message',
+  'messageList.deleteMessage': 'Delete message',
+  'messageList.saveMessage': 'Save message',
   'messageList.troubleshoot': 'Troubleshoot',
+  'messageList.troubleshootTooltip': 'Call the Baiying operations digital employee to troubleshoot the issue',
   'messageList.troubleshootPrompt': 'The traceId of the current message is {traceId}. Please help me troubleshoot it.',
 
   'citeRender.title': 'Referenced Messages',

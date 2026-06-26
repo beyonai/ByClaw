@@ -122,13 +122,23 @@ const ModelsPage: React.FC = () => {
   };
 
   const handleDelete = async (record: any) => {
-    const res = await deleteMyModel({ id: record.id });
-    if (res?.code !== 0) {
-      message.error(res?.msg || intl.formatMessage({ id: 'personalModel.delete.confirm' }));
-      return;
+    try {
+      const res = await deleteMyModel({ id: record.id });
+      if (res?.code !== 0 || res?.success === false) {
+        message.error(res?.msg || intl.formatMessage({ id: 'personalModel.delete.failed' }), 5);
+        return;
+      }
+      message.success(intl.formatMessage({ id: 'personalModel.delete.success' }));
+      fetchList(pagination.pageNum);
+    } catch (error: any) {
+      const errorMsg =
+        error?.response?.data?.msg ||
+        error?.data?.msg ||
+        error?.msg ||
+        error?.message ||
+        (typeof error === 'string' ? error : '');
+      message.error(errorMsg || intl.formatMessage({ id: 'personalModel.delete.failed' }), 5);
     }
-    message.success(intl.formatMessage({ id: 'personalModel.delete.success' }));
-    fetchList(pagination.pageNum);
   };
 
   const handleSetStatus = async (record: any, status: string) => {
@@ -146,7 +156,6 @@ const ModelsPage: React.FC = () => {
   };
 
   const handleSaved = () => {
-    formAction.onCancel();
     fetchList(pagination.pageNum);
   };
 
@@ -173,7 +182,7 @@ const ModelsPage: React.FC = () => {
               value={keyword}
               onChange={(e) => setKeyword(e.target.value)}
               onPressEnter={() => fetchList(1)}
-              style={{ width: 260 }}
+              className={styles.searchInput}
             />
             <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>
               {intl.formatMessage({ id: 'personalModel.add' })}
@@ -230,7 +239,7 @@ const ModelsPage: React.FC = () => {
               value={publicKeyword}
               onChange={(e) => setPublicKeyword(e.target.value)}
               onPressEnter={() => fetchPublicList(1)}
-              style={{ width: 260 }}
+              className={styles.searchInput}
             />
           </div>
 
