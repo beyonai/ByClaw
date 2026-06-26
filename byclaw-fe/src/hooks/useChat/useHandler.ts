@@ -335,13 +335,11 @@ function useHandler(props: IProps) {
   const browserHandler = useCallback(
     (onionsProps: IOnionsProps) => {
       const { sseRes, newAnswerMsg } = onionsProps;
-
-      if (newAnswerMsg?.sessionId !== globalContext.sessionId) return onionsProps;
+      if (newAnswerMsg?.sessionId !== curSessioneRef.current) return onionsProps;
       if (!sseRes) return onionsProps;
 
       if ([`${SSEMessageType.jsonBlock}`].includes(`${sseRes?.message?.contentType}`)) {
         const jsonStr = get(sseRes, 'message.content.substance.json', '');
-
         try {
           const jsonObj = JSON.parse(jsonStr);
           if (!jsonObj?.command?.startsWith('bycli')) return onionsProps;
@@ -377,7 +375,7 @@ function useHandler(props: IProps) {
 
       return onionsProps;
     },
-    [sandboxesInfo, globalContext.sessionId]
+    [sandboxesInfo]
   );
 
   return {
