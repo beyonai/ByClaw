@@ -2366,7 +2366,7 @@ class DataCloudWorker(GatewayWorker):
                 resource_list=_resource_list_for_extract,
                 user_code=_dyn_user_code,
                 tools_dict={},  # 动态路径无 AgentConfig，占位符替换跳过
-                agent_id="",  # 动态路径暂不扫描路径B
+                agent_id=str(by_agent_id or ""),
             )
             _dyn_minio_root = os.environ.get(
                 "FILE_STORAGE_MINIO_MOUNT_PATH", "/data/byai/byaiAllInOne/mino"
