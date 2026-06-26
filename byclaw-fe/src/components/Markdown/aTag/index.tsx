@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { get } from 'lodash';
 import classnames from 'classnames';
 import { useIntl } from '@umijs/max';
+import { domToReact } from 'html-react-parser';
 import { CloudDownloadOutlined, LoadingOutlined, EyeOutlined } from '@ant-design/icons';
 import useGlobal from '@/hooks/useGlobal';
 
@@ -70,7 +71,7 @@ function ATag({ domNode }: { domNode: any }) {
       });
   };
 
-  if (!href) return domNode;
+  if (!href || !canPreview) return <>{domToReact([domNode])}</>;
 
   return (
     <>
