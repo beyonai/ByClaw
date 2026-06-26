@@ -15,6 +15,7 @@ import {
   scheduleActiveSdkCompletionCheck,
 } from "./sdk-session-completion.js";
 import type { OpenClawPluginApi } from "@openclaw/plugin-sdk/core";
+import { normalizeUsage } from "openclaw/plugin-sdk/agent-harness-runtime";
 import type { Language, PluginHookAgentContext, PluginHookAgentEndEvent } from "./types.js";
 import {
   BYAI_USER_MD_SECTION_END,
@@ -78,13 +79,30 @@ type CompactionHookEvent = {
   sessionFile?: string;
 };
 
+// Raw provider usage payload. Key names vary across providers, so we run it
+// through openclaw's normalizeUsage instead of reading fields directly. Only
+// the buckets normalizeUsage understands are typed here; it tolerates the rest.
 type LlmOutputUsage = {
   input?: number;
   output?: number;
   cacheRead?: number;
   cacheWrite?: number;
   total?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  promptTokens?: number;
+  completionTokens?: number;
+  input_tokens?: number;
+  output_tokens?: number;
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  cache_read_input_tokens?: number;
+  cache_creation_input_tokens?: number;
+  cached_tokens?: number;
+  total_tokens?: number;
   totalTokens?: number;
+  prompt_tokens_details?: { cached_tokens?: number };
+  input_tokens_details?: { cached_tokens?: number };
 };
 
 type LlmOutputHookEvent = {
@@ -94,7 +112,15 @@ type LlmOutputHookEvent = {
   model?: string;
   contextTokenBudget?: number;
   contextWindowReferenceTokens?: number;
+  // Run-accumulated usage across the whole tool loop. NOT a context size: a
+  // multi-tool turn re-reads the context as cacheRead on every model call, so
+  // summing these buckets multiplies one context by the call count.
   usage?: LlmOutputUsage;
+  // The single most recent assistant message. Its usage reflects one model
+  // call, which is what openclaw uses for the "context used" snapshot
+  // (see embedded-agent-runner/run.ts: "current context usage, not
+  // accumulated tool-loop usage").
+  lastAssistant?: { usage?: LlmOutputUsage };
 };
 
 type LlmOutputHookContext = PluginHookAgentContext & {
@@ -185,35 +211,68 @@ function resolveSessionStatusRedisKey(sessionId: string) {
   return `byai:session:${sessionId}:status`;
 }
 
-async function refreshSessionStatusRedis(
+// Writes the post-compaction context size using the token count the compaction
+// hook already carries (`event.tokenCount` = tokensAfter). We must NOT read the
+// session store here: after_compaction fires inside the runner, before
+// agentCommand persists the new totalTokens, so the store still holds the
+// pre-compaction value. The context budget (denominator) is stable across a
+// run, so we reuse it from the latest llm_output record already in redis.
+async function refreshCompactionSessionStatusRedis(
   sessionKey: string | undefined,
-  source: string,
+  tokensAfter: number | undefined,
 ): Promise<void> {
   const normalizedSessionKey = sessionKey?.trim();
   if (!normalizedSessionKey) {
+    return;
+  }
+  const usedTokens = normalizeNonNegativeNumber(tokensAfter);
+  if (usedTokens === undefined) {
     return;
   }
   const sessionId = resolveByaiSessionIdFromSessionKey(normalizedSessionKey);
   if (!sessionId) {
     return;
   }
-  try {
-    const status = await resolveByaiSessionStatus(normalizedSessionKey);
-    const agentId = status.agentId as string;
-    const redis = createRedisInstance();
-    if (!redis) {
-      return;
-    }
-    redis.hset(resolveSessionStatusRedisKey(sessionId), agentId, JSON.stringify({
-      ...status,
-      sessionId,
-      source,
-    }));
-  } catch (err) {
-    console.warn(
-      `[byai-channel] refresh session status failed: sessionKey=${normalizedSessionKey}, source=${source}, error=${String(err)}`,
-    );
+  const redis = createRedisInstance();
+  if (!redis) {
+    return;
   }
+  const agentId = resolveByaiAgentIdFromSessionKey(normalizedSessionKey);
+  const statusKey = resolveSessionStatusRedisKey(sessionId);
+  let contextTokens: number | null = null;
+  let modelProvider: string | null = null;
+  let model: string | null = null;
+  try {
+    const existingRaw = await redis.hget(statusKey, agentId);
+    if (existingRaw) {
+      const existing = JSON.parse(existingRaw) as Record<string, unknown>;
+      contextTokens = normalizeNonNegativeNumber(existing.contextTokens) ?? null;
+      modelProvider = typeof existing.modelProvider === "string" ? existing.modelProvider : null;
+      model = typeof existing.model === "string" ? existing.model : null;
+    }
+  } catch {
+    // Missing/garbled prior record just means we cannot compute percent yet;
+    // the next llm_output call will repopulate the budget.
+  }
+  const percent =
+    contextTokens !== null && contextTokens > 0
+      ? Math.min(Math.round((usedTokens / contextTokens) * 100), 100)
+      : null;
+  redis.hset(statusKey, agentId, JSON.stringify({
+    ok: true,
+    exists: true,
+    sessionKey: normalizedSessionKey,
+    agentId,
+    sessionId,
+    fresh: true,
+    realtime: true,
+    source: "after_compaction",
+    usedTokens,
+    contextTokens,
+    percent,
+    modelProvider,
+    model,
+  }));
 }
 
 function normalizeNonNegativeNumber(value: unknown): number | undefined {
@@ -222,7 +281,18 @@ function normalizeNonNegativeNumber(value: unknown): number | undefined {
     : undefined;
 }
 
-function resolveLlmOutputUsedTokens(usage: LlmOutputUsage | undefined): number | undefined {
+type NormalizedLlmUsage = {
+  input?: number;
+  output?: number;
+  cacheRead?: number;
+  cacheWrite?: number;
+  total?: number;
+};
+
+// Prompt/context size for one model call: uncached input + cache reads + cache
+// writes. Matches openclaw's derivePromptTokens so the percentage lines up with
+// the Web UI's context-used meter. Output tokens are intentionally excluded.
+function resolveLlmOutputUsedTokens(usage: NormalizedLlmUsage | undefined): number | undefined {
   if (!usage) {
     return undefined;
   }
@@ -247,7 +317,12 @@ async function refreshRealtimeSessionStatusRedis(
   if (!sessionId) {
     return;
   }
-  const usedTokens = resolveLlmOutputUsedTokens(event.usage);
+  // Use the last single model call, not the run-accumulated event.usage, so the
+  // reported context size matches the Web UI (which snapshots the latest call's
+  // prompt tokens). normalizeUsage also reconciles provider key-name and
+  // OpenAI-style "cached tokens included in prompt" differences.
+  const lastCallUsage = normalizeUsage(event.lastAssistant?.usage) ?? normalizeUsage(event.usage);
+  const usedTokens = resolveLlmOutputUsedTokens(lastCallUsage);
   if (usedTokens === undefined) {
     return;
   }
@@ -281,11 +356,44 @@ async function refreshRealtimeSessionStatusRedis(
     percent,
     modelProvider: event.provider ?? null,
     model: event.model ?? null,
-    inputTokens: normalizeNonNegativeNumber(event.usage?.input) ?? null,
-    cacheRead: normalizeNonNegativeNumber(event.usage?.cacheRead) ?? null,
-    cacheWrite: normalizeNonNegativeNumber(event.usage?.cacheWrite) ?? null,
-    outputTokens: normalizeNonNegativeNumber(event.usage?.output) ?? null,
+    inputTokens: normalizeNonNegativeNumber(lastCallUsage?.input) ?? null,
+    cacheRead: normalizeNonNegativeNumber(lastCallUsage?.cacheRead) ?? null,
+    cacheWrite: normalizeNonNegativeNumber(lastCallUsage?.cacheWrite) ?? null,
+    outputTokens: normalizeNonNegativeNumber(lastCallUsage?.output) ?? null,
   }));
+}
+
+// Baseline context-used snapshot at turn start. before_dispatch fires once per
+// inbound dispatch, before any token is spent this turn. Reading the session
+// store here is safe and intentional: it still holds the *previous* turn's
+// persisted totalTokens, which is exactly the context size this turn starts
+// from. The first llm_output of the turn then overwrites this with live data.
+async function refreshRunStartSessionStatusRedis(sessionKey: string | undefined): Promise<void> {
+  const normalizedSessionKey = sessionKey?.trim();
+  if (!normalizedSessionKey) {
+    return;
+  }
+  const sessionId = resolveByaiSessionIdFromSessionKey(normalizedSessionKey);
+  if (!sessionId) {
+    return;
+  }
+  try {
+    const status = await resolveByaiSessionStatus(normalizedSessionKey);
+    const agentId = status.agentId as string;
+    const redis = createRedisInstance();
+    if (!redis) {
+      return;
+    }
+    redis.hset(resolveSessionStatusRedisKey(sessionId), agentId, JSON.stringify({
+      ...status,
+      sessionId,
+      source: "before_dispatch",
+    }));
+  } catch (err) {
+    console.warn(
+      `[byai-channel] run-start session status refresh failed: sessionKey=${normalizedSessionKey}, error=${String(err)}`,
+    );
+  }
 }
 
 function getRedisInfo(): RedisInfo | null {
@@ -432,7 +540,11 @@ export function registerByaiHooks(api: OpenClawPluginApi): void {
     if (event?.compactedCount !== -1) {
       return;
     }
-    refreshSessionStatusRedis(ctx.sessionKey, "after_compaction");
+    // Use the post-compaction token count from the event; the session store is
+    // not yet updated at this point (see refreshCompactionSessionStatusRedis).
+    void refreshCompactionSessionStatusRedis(ctx.sessionKey, event.tokenCount).catch((err) => {
+      api.logger.warn(`[byai-channel] after_compaction session status refresh failed: ${String(err)}`);
+    });
     setImmediate(() => {
       void enqueueAfterAgentEvents(
         `after_compaction sessionKey=${ctx.sessionKey ?? ""}`,
@@ -456,6 +568,16 @@ export function registerByaiHooks(api: OpenClawPluginApi): void {
     if (!sessionKey) {
       return;
     }
+    // Baseline context-used snapshot for the turn. before_dispatch fires once
+    // per inbound dispatch, before any token is spent, so the session store
+    // still holds the previous turn's totalTokens — exactly the context size
+    // this turn starts from. The first llm_output then overwrites it with live
+    // data. Done before the request/agent guards below so it is not skipped.
+    void refreshRunStartSessionStatusRedis(sessionKey).catch((err) => {
+      api.logger.warn(
+        `[byai-channel] before_dispatch session status refresh failed: ${String(err)}`,
+      );
+    });
     const request = resolveActiveSdkRequestBySessionKey(sessionKey);
     if (!request) {
       return;
@@ -609,7 +731,6 @@ export function registerByaiHooks(api: OpenClawPluginApi): void {
     }
     const runBinding = resolveActiveSdkRunBinding(runId);
     const language = runBinding?.request?.language;
-    const sessionKey = runBinding?.sessionKey ?? ctx.sessionKey;
     let resolve = getAgentRunEndPromiseResolver(runId);
     let _success = event.success;
     let _error = event.error;
@@ -651,6 +772,9 @@ export function registerByaiHooks(api: OpenClawPluginApi): void {
         error: _error,
       });
     }
-    refreshSessionStatusRedis(sessionKey, "agent_end");
+    // Intentionally no session-status write here: agent_end fires inside the
+    // runner before agentCommand persists this turn's totalTokens, so reading
+    // the store would publish a stale (previous-turn) value and could clobber
+    // the fresh figure already written by llm_output / after_compaction.
   });
 }
