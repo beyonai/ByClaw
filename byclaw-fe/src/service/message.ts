@@ -18,6 +18,11 @@ export const getMessageById = (payload: { messageId: string }) =>
 export const getTraceIdByMessageId = (messageId: string) =>
   GET<string>(`/byaiService/chat/getTraceIdByMessageId?messageId=${encodeURIComponent(messageId)}`);
 
+export const qryTroubleshootSession = (payload: { messageId: string | number }) =>
+  POST<any>('/byaiService/assiman/qryTroubleshootSession', {
+    ...payload,
+  });
+
 export const updateMesFeedback = (data: any) =>
   POST<any>('/byaiService/assiman/updateMesFeedback', data, withCustomHandle);
 

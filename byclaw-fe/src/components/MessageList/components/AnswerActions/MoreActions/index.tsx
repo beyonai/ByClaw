@@ -7,17 +7,18 @@ import { Button, Popconfirm, Tooltip } from 'antd';
 import React from 'react';
 
 import btnStyles from '@/components/MessageList/index.module.less';
-import { getTraceIdByMessageId } from '@/service/message';
+import { getTraceIdByMessageId, qryTroubleshootSession } from '@/service/message';
+import { cacheTroubleshootSession, getCachedTroubleshootSession } from '../../TroubleshootSessionDrawer/sessionCache';
 import useTroubleshootDrawer from '../../TroubleshootSessionDrawer/useTroubleshootDrawer';
 
 const traceIdCache = new Map<string, string>();
-// 同一条消息在 traceId 还没落库时，避免每次点击都重新请求一次。
 const traceIdRequestCache = new Map<string, Promise<string>>();
+const troubleshootSessionRequestCache = new Map<string, Promise<string>>();
 
 function MoreActions(porps: { deleteMessage: (message: IMessage) => void; msg: IMessage; disabledList?: string[] }) {
   const { deleteMessage, msg, disabledList } = porps;
   const { messageId, traceId } = msg;
-  const [traceIdLoading, setTraceIdLoading] = React.useState(false);
+  const [troubleshootActionLoading, setTroubleshootActionLoading] = React.useState(false);
 
   const intl = useIntl();
   const {
@@ -30,38 +31,109 @@ function MoreActions(porps: { deleteMessage: (message: IMessage) => void; msg: I
     deleteMessage(msg);
   }, [deleteMessage, msg]);
 
-  const handleTroubleshoot = React.useCallback(() => {
+  const getLatestTraceId = React.useCallback(() => {
     if (traceId) {
-      // 消息自身已经带 traceId，直接打开抽屉。
-      openTroubleshootDrawer(traceId);
-      return;
+      return Promise.resolve(traceId);
     }
 
-    if (!messageId) return;
+    if (!messageId) {
+      return Promise.resolve('');
+    }
 
     const cachedTraceId = traceIdCache.get(messageId);
     if (cachedTraceId) {
-      // 之前已经查到过 traceId，后续点击直接复用。
-      openTroubleshootDrawer(cachedTraceId);
+      return Promise.resolve(cachedTraceId);
+    }
+
+    const traceIdRequest = traceIdRequestCache.get(messageId) || getTraceIdByMessageId(messageId);
+    traceIdRequestCache.set(messageId, traceIdRequest);
+
+    return traceIdRequest
+      .then((fetchedTraceId) => {
+        if (!fetchedTraceId) return '';
+        traceIdCache.set(messageId, fetchedTraceId);
+        return fetchedTraceId;
+      })
+      .catch(() => '')
+      .finally(() => {
+        traceIdRequestCache.delete(messageId);
+      });
+  }, [messageId, traceId]);
+
+  const syncTroubleshootSessionCache = React.useCallback(
+    async (sessionId?: string) => {
+      if (!sessionId || !messageId) return sessionId;
+
+      const latestTraceId = traceId || (await getLatestTraceId());
+      cacheTroubleshootSession({
+        messageId,
+        traceId: latestTraceId,
+        sessionId,
+      });
+      return sessionId;
+    },
+    [getLatestTraceId, messageId, traceId]
+  );
+
+  const handleTroubleshoot = React.useCallback(() => {
+    if (!messageId) {
+      openTroubleshootDrawer({ traceId });
       return;
     }
 
-    // 首次点击且消息里没有 traceId 时，调用接口补查并把结果存起来。
-    const traceIdRequest = traceIdRequestCache.get(messageId) || getTraceIdByMessageId(messageId);
-    traceIdRequestCache.set(messageId, traceIdRequest);
-    setTraceIdLoading(true);
-    traceIdRequest
-      .then((fetchedTraceId) => {
-        if (!fetchedTraceId) return;
-        traceIdCache.set(messageId, fetchedTraceId);
-        openTroubleshootDrawer(fetchedTraceId);
-      })
-      .catch(() => undefined)
-      .finally(() => {
-        traceIdRequestCache.delete(messageId);
-        setTraceIdLoading(false);
+    const cachedSessionId = getCachedTroubleshootSession({ messageId, traceId });
+    if (cachedSessionId) {
+      void syncTroubleshootSessionCache(cachedSessionId);
+      openTroubleshootDrawer({
+        messageId,
+        sessionId: cachedSessionId,
+        traceId,
       });
-  }, [messageId, openTroubleshootDrawer, traceId]);
+      return;
+    }
+
+    setTroubleshootActionLoading(true);
+    const troubleshootSessionRequest =
+      troubleshootSessionRequestCache.get(messageId) ||
+      qryTroubleshootSession({ messageId }).then(async (res) => {
+        const fetchedSessionId = `${res?.data?.sessionId || res?.sessionId || ''}`;
+        if (fetchedSessionId) {
+          await syncTroubleshootSessionCache(fetchedSessionId);
+        }
+        return fetchedSessionId;
+      });
+
+    troubleshootSessionRequestCache.set(messageId, troubleshootSessionRequest);
+
+    troubleshootSessionRequest
+      .then(async (fetchedSessionId) => {
+        if (fetchedSessionId) {
+          openTroubleshootDrawer({
+            messageId,
+            sessionId: fetchedSessionId,
+            traceId,
+          });
+          return;
+        }
+
+        const fetchedTraceId = await getLatestTraceId();
+        openTroubleshootDrawer({
+          messageId,
+          traceId: fetchedTraceId || traceId,
+        });
+      })
+      .catch(async () => {
+        const fetchedTraceId = await getLatestTraceId();
+        openTroubleshootDrawer({
+          messageId,
+          traceId: fetchedTraceId || traceId,
+        });
+      })
+      .finally(() => {
+        troubleshootSessionRequestCache.delete(messageId);
+        setTroubleshootActionLoading(false);
+      });
+  }, [getLatestTraceId, messageId, openTroubleshootDrawer, syncTroubleshootSessionCache, traceId]);
 
   const canDelete = messageId && !disabledList?.includes('delete');
 
@@ -73,7 +145,7 @@ function MoreActions(porps: { deleteMessage: (message: IMessage) => void; msg: I
           <Button
             type="text"
             size="small"
-            loading={troubleshootLoading || traceIdLoading}
+            loading={troubleshootLoading || troubleshootActionLoading}
             icon={<BugOutlined className={btnStyles.icon} />}
             onClick={handleTroubleshoot}
           >
