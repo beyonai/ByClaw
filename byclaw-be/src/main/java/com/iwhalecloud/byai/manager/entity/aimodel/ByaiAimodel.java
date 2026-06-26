@@ -64,7 +64,7 @@ public class ByaiAimodel implements Serializable {
     /** 模型归属: PUBLIC(公共) / PERSONAL(个人) */
     private String ownerType;
 
-    /** 模型来源: null(用户创建) / TOKEN_SERVER(系统分配) */
+    /** 模型来源: null(用户创建) / TOKEN_SAVER(系统分配) */
     private String sourceType;
 
     /** 创建人ID */

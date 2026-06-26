@@ -1,4 +1,4 @@
-package com.iwhalecloud.byai.state.application.service.tokenserver;
+package com.iwhalecloud.byai.state.application.service.tokensaver;
 
 import java.net.URI;
 import java.util.ArrayList;
@@ -26,17 +26,23 @@ import com.iwhalecloud.byai.manager.mapper.aimodel.ByaiAimodelMapper;
 import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 
 /**
- * TokenServer 模型自动分配服务
+ * TokenSaver 模型自动分配服务
  * <p>
- * 当 dcSystemConfig 中 ENABLE_TOKEN_SERVER=true 时，
- * 在用户登录时检查该用户是否已有 TokenServer 模型，
- * 若没有则调用 TokenServer API 获取模型配置并插入到个人模型中。
+ * 当 MODEL_QUOTA.tokenSaver.enabled=true 时，
+ * 在用户登录时检查该用户是否已有 TokenSaver 模型，
+ * 若没有则调用 TokenSaver API 获取模型配置并插入到个人模型中。
  * </p>
  */
 @Service
-public class TokenServerProvisionService {
+public class TokenSaverProvisionService {
 
-    private static final Logger log = LoggerFactory.getLogger(TokenServerProvisionService.class);
+    private static final Logger log = LoggerFactory.getLogger(TokenSaverProvisionService.class);
+
+    private static final String SOURCE_TYPE_TOKEN_SAVER = "TOKEN_SAVER";
+
+    private static final String DEFAULT_MODEL_DISPLAY_NAME = "TokenSaver Model";
+
+    private static final String DEFAULT_MODEL_CODE = "token-saver-model";
 
     @Autowired
     private ByaiSystemConfigService systemConfigService;
@@ -50,7 +56,7 @@ public class TokenServerProvisionService {
     private final RestTemplate restTemplate = new RestTemplate();
 
     /**
-     * 用户登录时检查并自动分配 TokenServer 模型
+     * 用户登录时检查并自动分配 TokenSaver 模型
      *
      * @param userId   用户ID
      * @param userCode 用户工号
@@ -58,48 +64,42 @@ public class TokenServerProvisionService {
     @SuppressWarnings("unchecked")
     public void provisionIfNeeded(Long userId, String userCode) {
         try {
-            // 从 MODEL_QUOTA JSON 读取 tokenServer 配置
             String json = systemConfigService.getDcSystemConfigValueByCode("MODEL_QUOTA");
             if (json == null || json.trim().isEmpty()) {
                 return;
             }
             JSONObject config = JSON.parseObject(json);
-            JSONObject tokenServer = config.getJSONObject("tokenServer");
-            if (tokenServer == null || !tokenServer.getBooleanValue("enabled")) {
+            JSONObject tokenSaver = config.getJSONObject("tokenSaver");
+            if (tokenSaver == null || !tokenSaver.getBooleanValue("enabled")) {
                 return;
             }
 
-            // 检查是否已有 TokenServer 模型
             LambdaQueryWrapper<ByaiAimodel> query = new LambdaQueryWrapper<>();
             query.eq(ByaiAimodel::getCreateBy, userId)
-                 .eq(ByaiAimodel::getSourceType, "TOKEN_SERVER");
+                 .eq(ByaiAimodel::getSourceType, SOURCE_TYPE_TOKEN_SAVER);
             Long count = byaiAimodelMapper.selectCount(query);
             if (count != null && count > 0) {
                 return;
             }
 
-            // 获取 TokenServer API 地址
-            String apiUrl = tokenServer.getString("apiUrl");
+            String apiUrl = tokenSaver.getString("apiUrl");
             if (apiUrl == null || apiUrl.trim().isEmpty()) {
-                log.warn("MODEL_QUOTA.tokenServer.apiUrl 未配置，跳过 TokenServer 模型分配");
+                log.warn("MODEL_QUOTA.tokenSaver.apiUrl 未配置，跳过 TokenSaver 模型分配");
                 return;
             }
 
-            // 获取模型编码
-            String modelCode = tokenServer.getString("modelCode");
+            String modelCode = tokenSaver.getString("modelCode");
 
-            // 调用 TokenServer API 获取模型配置
-            Map<String, Object> modelConfig = callTokenServerApi(apiUrl, userCode);
+            Map<String, Object> modelConfig = callTokenSaverApi(apiUrl, userCode);
             if (modelConfig == null) {
-                log.warn("TokenServer API 返回空，用户={}", userCode);
+                log.warn("TokenSaver API 返回空，用户={}", userCode);
                 return;
             }
 
-            // 构建 upsert 请求插入个人模型
             ModelUpsertRequest upsertRequest = new ModelUpsertRequest();
-            upsertRequest.setDisplayName(getStringOrDefault(modelConfig, "modelName", "TokenServer Model"));
+            upsertRequest.setDisplayName(getStringOrDefault(modelConfig, "modelName", DEFAULT_MODEL_DISPLAY_NAME));
             upsertRequest.setModelCode(getStringOrDefault(modelConfig, "modelCode",
-                    (modelCode != null && !modelCode.isEmpty()) ? modelCode : "token-server-model"));
+                    (modelCode != null && !modelCode.isEmpty()) ? modelCode : DEFAULT_MODEL_CODE));
             upsertRequest.setApiEndpoint(getStringOrDefault(modelConfig, "apiEndpoint", ""));
             upsertRequest.setApiToken(getStringOrDefault(modelConfig, "apiKey", ""));
             upsertRequest.setModelType("LLM");
@@ -110,7 +110,6 @@ public class TokenServerProvisionService {
 
             modelManagementApplicationService.upsertModel(upsertRequest, userId);
 
-            // 更新 source_type 为 TOKEN_SERVER
             LambdaQueryWrapper<ByaiAimodel> findNew = new LambdaQueryWrapper<>();
             findNew.eq(ByaiAimodel::getCreateBy, userId)
                    .eq(ByaiAimodel::getModelNo, upsertRequest.getModelCode())
@@ -118,22 +117,22 @@ public class TokenServerProvisionService {
                    .last("LIMIT 1");
             ByaiAimodel inserted = byaiAimodelMapper.selectOne(findNew);
             if (inserted != null) {
-                inserted.setSourceType("TOKEN_SERVER");
+                inserted.setSourceType(SOURCE_TYPE_TOKEN_SAVER);
                 byaiAimodelMapper.updateById(inserted);
             }
 
-            log.info("TokenServer 模型分配成功，用户={}, modelCode={}", userCode, upsertRequest.getModelCode());
+            log.info("TokenSaver 模型分配成功，用户={}, modelCode={}", userCode, upsertRequest.getModelCode());
 
         } catch (Exception e) {
-            log.warn("TokenServer 模型分配失败，用户={}: {}", userCode, e.getMessage());
+            log.warn("TokenSaver 模型分配失败，用户={}: {}", userCode, e.getMessage());
         }
     }
 
     /**
-     * 调用 TokenServer API 获取模型配置
+     * 调用 TokenSaver API 获取模型配置
      */
     @SuppressWarnings("unchecked")
-    private Map<String, Object> callTokenServerApi(String apiUrl, String userCode) {
+    private Map<String, Object> callTokenSaverApi(String apiUrl, String userCode) {
         try {
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
@@ -148,13 +147,12 @@ public class TokenServerProvisionService {
             if (respBody == null) {
                 return null;
             }
-            // 如果有 data 字段则取 data，否则直接用 body
             if (respBody.containsKey("data") && respBody.get("data") instanceof Map) {
                 return (Map<String, Object>) respBody.get("data");
             }
             return respBody;
         } catch (Exception e) {
-            log.warn("调用 TokenServer API 失败: {}", e.getMessage());
+            log.warn("调用 TokenSaver API 失败: {}", e.getMessage());
             return null;
         }
     }

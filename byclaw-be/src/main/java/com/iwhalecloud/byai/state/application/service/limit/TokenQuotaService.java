@@ -28,7 +28,7 @@ import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
  * Token 月度限额服务
  * <p>
  * 基于 Langfuse 用量数据实现用户每月公共模型 Token 用量限制。
- * 受限模型: ownerType=PUBLIC 或 sourceType=TOKEN_SERVER
+ * 受限模型: ownerType=PUBLIC 或 sourceType=TOKEN_SAVER
  * </p>
  */
 @Service
@@ -84,7 +84,7 @@ public class TokenQuotaService {
     /**
      * 判断指定数字员工使用的模型是否受限额约束
      * 通过 resourceId 查询 ss_res_ext_dig_employee 的 prologue 获取 modelId，
-     * 再判断: ownerType=PUBLIC 或 sourceType=TOKEN_SERVER 才受限
+     * 再判断: ownerType=PUBLIC 或 sourceType=TOKEN_SAVER 才受限
      * 用户自购个人模型(ownerType=PERSONAL 且 sourceType 为空)不受限
      *
      * @param resourceId 数字员工资源ID (ss_res_ext_dig_employee.resource_id)
@@ -111,7 +111,7 @@ public class TokenQuotaService {
             if ("PUBLIC".equals(model.getOwnerType())) {
                 return true;
             }
-            if ("TOKEN_SERVER".equals(model.getSourceType())) {
+            if ("TOKEN_SAVER".equals(model.getSourceType())) {
                 return true;
             }
             return false;
@@ -160,9 +160,9 @@ public class TokenQuotaService {
     }
 
     /**
-     * 获取受限额约束的模型编码集合（公共模型 + TokenServer 个人模型）
+     * 获取受限额约束的模型编码集合（公共模型 + TokenSaver 个人模型）
      *
-     * @param userId 用户ID（用于查询其 TokenServer 模型）
+     * @param userId 用户ID（用于查询其 TokenSaver 模型）
      * @return 受限模型的 modelCode(modelNo) 集合
      */
     public Set<String> getQuotaSubjectModelCodes(Long userId) {
@@ -180,11 +180,11 @@ public class TokenQuotaService {
             }
         }
 
-        // TokenServer 个人模型
+        // TokenSaver 个人模型
         if (userId != null) {
             LambdaQueryWrapper<ByaiAimodel> tsQuery = new LambdaQueryWrapper<>();
             tsQuery.eq(ByaiAimodel::getCreateBy, userId)
-                   .eq(ByaiAimodel::getSourceType, "TOKEN_SERVER")
+                   .eq(ByaiAimodel::getSourceType, "TOKEN_SAVER")
                    .select(ByaiAimodel::getModelNo);
             List<ByaiAimodel> tsModels = byaiAimodelMapper.selectList(tsQuery);
             for (ByaiAimodel m : tsModels) {
