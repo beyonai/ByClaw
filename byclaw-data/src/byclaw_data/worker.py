@@ -1203,7 +1203,8 @@ class DataCloudWorker(GatewayWorker):
         self._resume_result_cache: OrderedDict[str, dict[str, Any]] = OrderedDict()
         self._resume_inflight: dict[str, asyncio.Future[dict[str, Any]]] = {}
         self.command_plugin_manager = CommandPluginManager.from_defaults()
-        self._shared_loader: Any | None = None
+        self._runtime_manager: Any | None = None
+        self._loader_snapshot: Any | None = None
         self._resource_path: str = os.environ.get("DATACLOUD_ONTOLOGY_PATH", "")
         self._ontology_agent: Any | None = None
         self._model_config_sig: str = ""
@@ -1437,7 +1438,7 @@ class DataCloudWorker(GatewayWorker):
 
         Three-level fallback:
         1. First AgentConfig with a non-None extra["loader"].
-        2. self._shared_loader cached at start_heartbeat time.
+        2. self._loader_snapshot.loader cached at start_heartbeat time.
         3. None — OntologyToolLoader will skip OWL injection gracefully.
         """
         for cfg in self.plugin_registry.agent_configs if self.plugin_registry else []:
@@ -1445,8 +1446,8 @@ class DataCloudWorker(GatewayWorker):
             loader = extra.get("loader")
             if loader is not None:
                 return loader
-        if self._shared_loader is not None:
-            return self._shared_loader
+        if self._loader_snapshot is not None:
+            return self._loader_snapshot.loader
         logger.warning(
             "DataCloudWorker._extract_shared_loader: no OntologyLoader found in any "
             "AgentConfig; dynamic agent will proceed with loader=None (OWL injection skipped)"
@@ -1510,20 +1511,34 @@ class DataCloudWorker(GatewayWorker):
                 "OntologyAgent skipped. Dynamic agent path will fail on first request."
             )
 
-        # 动态路径：从首个已加载 AgentConfig 取 loader 并缓存至 worker 级别
-        self._shared_loader = self._extract_shared_loader()
+        # 动态路径：通过 LoaderRuntimeManager 获取 loader，收口到 platform 层
+        from datacloud_platform.loader_runtime import (  # noqa: PLC0415
+            LoaderRuntimeManager,
+        )
+        from datacloud_platform import get_platform  # noqa: PLC0415
+        from datacloud_platform.config import get_settings  # noqa: PLC0415
+
+        self._runtime_manager = LoaderRuntimeManager(
+            platform=get_platform(),
+            settings=get_settings(),
+        )
+        self._loader_snapshot = self._runtime_manager.get_loader("default")
         logger.info(
-            "DataCloudWorker: _shared_loader=%s",
+            "DataCloudWorker: _loader_snapshot=%s",
             "ready"
-            if self._shared_loader is not None
+            if self._loader_snapshot is not None
             else "None (dynamic agents will skip OWL inject)",
         )
+
+        # 将 runtime_manager 传递给 init_agent_conf plugin
+        if init_plugin is not None and hasattr(init_plugin, "set_runtime_manager"):
+            init_plugin.set_runtime_manager(self._runtime_manager)
 
         # 扩展本体池：从所有 AgentConfig 的 mounted_objects 收集全量对象，
         # 加载到 TOOL_POOL（全部 LOCKED）。
         # 不再依赖 extResourceList（已废弃），统一由 relResourceList 声明对象。
         # 超过 TOOL_POOL_THRESHOLD 时启用锚点驱动模式（is_anchor_mode()==True）。
-        if self._resource_path and self._shared_loader is not None:
+        if self._resource_path and self._loader_snapshot is not None:
             _all_object_codes: list[str] = list(dict.fromkeys(
                 code
                 for cfg in self.plugin_registry.get_agent_configs_snapshot().configs
@@ -1538,7 +1553,7 @@ class DataCloudWorker(GatewayWorker):
 
                     _init_ext_tool_pool(
                         resource_path=self._resource_path,
-                        loader=self._shared_loader,
+                        loader=self._loader_snapshot.loader,
                         ext_codes=_all_object_codes,
                     )
                     logger.info(
@@ -2333,14 +2348,14 @@ class DataCloudWorker(GatewayWorker):
                     _rel_resource_list,
                     mounted_objects=list(_dyn_object_ids) + list(_dyn_view_ids),
                 )
-                if _scope_entries and self._shared_loader is not None:
+                if _scope_entries and self._loader_snapshot is not None:
                     from datacloud_analysis.tools.tool_pool import (
                         OntologyToolLoader,
                     )
 
                     tool_context = RequestToolContext.build(
                         allowed_scope=_scope_entries,
-                        loader=self._shared_loader,
+                        loader=self._loader_snapshot.loader,
                         tool_loader_cls=OntologyToolLoader,
                     )
                     logger.info(
