@@ -10,7 +10,7 @@ import logging
 import os
 import re
 import sys
-import time
+
 import traceback
 import uuid
 from collections import OrderedDict
@@ -324,11 +324,13 @@ _SCOPE_VALID_TYPES = frozenset({"ONTOLOGY_BASE", "SCENE", "OBJECT", "VIEW"})
 def _build_scope_entries(
     rel_resource_list: list[dict[str, Any]],
     mounted_objects: list[str] | None = None,
+    config_extra: dict | None = None,
 ) -> "list[Any]":
     """解析 rel_resource_list → list[ScopeEntry]。
 
     当 rel_resource_list 非空时以其为准；为空时从 mounted_objects 降级为 OBJECT 类型
-    ScopeEntry（兼容旧格式）。
+    ScopeEntry（兼容旧格式）；仍为空时从 config_extra.mounted_objects（AgentConfig 挂载
+    对象）回退填充，确保 search_ontology 范围受 Agent 自身 mounted_objects 限制。
     """
     try:
         from datacloud_analysis.tools.request_tool_context import ScopeEntry
@@ -361,6 +363,17 @@ def _build_scope_entries(
             for c in mounted_objects
             if isinstance(c, str) and c.strip()
         ]
+
+    # 回退：从 AgentConfig.extra.mounted_objects 生成 OBJECT 类型 ScopeEntry
+    if config_extra:
+        agent_mounted = config_extra.get("mounted_objects", [])
+        if agent_mounted:
+            return [
+                ScopeEntry(code=c, scope_type="OBJECT", base_id="")
+                for c in agent_mounted
+                if isinstance(c, str) and c.strip()
+            ]
+
     return []
 
 
@@ -2084,6 +2097,10 @@ class DataCloudWorker(GatewayWorker):
             runtime_agent_key,
         )
 
+        # 传统路径 tool_context 桥接变量
+        # _is_dynamic_agent=False 时在 else 块内构建，注入外层 config 中
+        _tool_context_for_config: Any = None
+
         if not _is_dynamic_agent:
             target_agent_id_for_load = str(
                 by_agent_id or runtime_agent_key or ""
@@ -2344,9 +2361,28 @@ class DataCloudWorker(GatewayWorker):
                     RequestToolContext,
                 )
 
+                # 当 _rel_resource_list 和动态 mounted_objects 均为空时，
+                # 回退到 AgentConfig.extra.mounted_objects，限制 search_ontology 范围
+                _agent_config_extra: dict[str, Any] | None = None
+                try:
+                    _agent_configs = context.list_agent_configs()
+                    _cfg = next(
+                        (
+                            c
+                            for c in _agent_configs
+                            if str(c.agent_id) == str(by_agent_id)
+                        ),
+                        None,
+                    )
+                    if _cfg is not None:
+                        _agent_config_extra = getattr(_cfg, "extra", None) or {}
+                except Exception:
+                    _agent_config_extra = None
+
                 _scope_entries = _build_scope_entries(
                     _rel_resource_list,
                     mounted_objects=list(_dyn_object_ids) + list(_dyn_view_ids),
+                    config_extra=_agent_config_extra,
                 )
                 if _scope_entries and self._loader_snapshot is not None:
                     from datacloud_analysis.tools.tool_pool import (
@@ -2553,13 +2589,13 @@ class DataCloudWorker(GatewayWorker):
             )
 
             # 🆕 从 extra 中提取 mounted_objects（优先），或从 tool_metadata 中提取（兼容旧逻辑）
-            mounted_objects = []
+            _raw_mounted_objects: list[str] = []
             if "mounted_objects" in config_extra:
-                mounted_objects = config_extra.get("mounted_objects", [])
+                _raw_mounted_objects = list(config_extra.get("mounted_objects") or [])
                 logger.info(
                     "Agent config: agent_id=%s mounted_objects=%s (from extra)",
                     by_agent_id,
-                    mounted_objects,
+                    _raw_mounted_objects,
                 )
             else:
                 # 兼容旧逻辑：从 tool_metadata 中提取
@@ -2567,12 +2603,59 @@ class DataCloudWorker(GatewayWorker):
                     resource_biz_type = metadata.get("resource_biz_type")
                     resource_code = metadata.get("resource_code")
                     if resource_biz_type in {"OBJECT", "VIEW"} and resource_code:
-                        mounted_objects.append(resource_code)
+                        _raw_mounted_objects.append(resource_code)
                 logger.info(
                     "Agent config: agent_id=%s mounted_objects=%s (from tool_metadata)",
                     by_agent_id,
-                    mounted_objects,
+                    _raw_mounted_objects,
                 )
+
+            # 统一通过 _build_scope_entries 构建作用域条目，支持 rel_resource_list
+            # 优先级 + AgentConfig.extra.mounted_objects 第三级回退
+            _scope_entries = _build_scope_entries(
+                _rel_resource_list,
+                mounted_objects=_raw_mounted_objects if _raw_mounted_objects else None,
+                config_extra=config_extra,
+            )
+            if _scope_entries:
+                mounted_objects = [
+                    entry.code
+                    for entry in _scope_entries
+                    if getattr(entry, "scope_type", "OBJECT") in ("OBJECT", "VIEW")
+                ]
+            else:
+                mounted_objects = _raw_mounted_objects
+
+            # 🆕 传统路径：将 _scope_entries 构建为 RequestToolContext 注入外层 config
+            # 解决 _is_dynamic_agent=False 时 configurable.tool_context 缺失导致
+            # search_ontology 无 allowed_scope 限制、搜穿全库的问题
+            if _scope_entries and self._loader_snapshot is not None:
+                try:
+                    from datacloud_analysis.tools.request_tool_context import (
+                        RequestToolContext,
+                    )
+                    from datacloud_analysis.tools.tool_pool import (
+                        OntologyToolLoader,
+                    )
+
+                    _tool_context_for_config = RequestToolContext.build(
+                        allowed_scope=_scope_entries,
+                        loader=self._loader_snapshot.loader,
+                        tool_loader_cls=OntologyToolLoader,
+                    )
+                    logger.info(
+                        "DataCloudWorker: tool_context built scope_len=%d "
+                        "anchor_mode=%s session=%s (traditional path)",
+                        len(_scope_entries),
+                        _tool_context_for_config.anchor_mode,
+                        context.session_id,
+                    )
+                except Exception as _tc_err:
+                    logger.warning(
+                        "DataCloudWorker: tool_context build failed "
+                        "(traditional path): %s",
+                        _tc_err,
+                    )
             # 改动4: SkillsMiddleware 在运行时自动处理技能发现，无需在 worker 中手动加载
             logger.info(
                 "Agent runtime tools: agent_id=%s tool_keys=%s",
@@ -2746,6 +2829,10 @@ class DataCloudWorker(GatewayWorker):
                 ),
                 # per-agent LLM 配置（非 None 时覆盖环境变量）
                 **({"llm_config": _agent_llm_config} if _agent_llm_config else {}),
+                # 传统路径注入 tool_context，限制 search_ontology 搜索范围
+                **({"tool_context": _tool_context_for_config}
+                    if _tool_context_for_config is not None
+                    else {}),
             },
             "recursion_limit": 100,
         }
