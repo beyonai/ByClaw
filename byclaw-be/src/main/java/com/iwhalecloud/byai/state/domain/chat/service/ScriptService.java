@@ -606,8 +606,14 @@ public class ScriptService extends AbstractChatProcess {
         List<ResourceVo> resourceList = ctx.getAssistantChatDto().getResourceList();
         for (int i = 0; resourceList != null && i < resourceList.size(); i++) {
             ResourceVo resourceVo = resourceList.get(i);
+            if (resourceVo == null || resourceVo.getResourceType() == null) {
+                continue;
+            }
             if (AgentMetaEnum.DIG_EMPLOYEE.getCode().equalsIgnoreCase(resourceVo.getResourceType().getCode())) {
-                allAgentIds.add(Long.parseLong(resourceVo.getResourceId()));
+                Long resourceId = parseResourceIdAsLong(resourceVo);
+                if (resourceId != null) {
+                    allAgentIds.add(resourceId);
+                }
             }
         }
         if (CollectionUtils.isNotEmpty(ctx.getAgentIds())) {
@@ -634,6 +640,20 @@ public class ScriptService extends AbstractChatProcess {
                 sessionMember.setRequestCount((currentCount == null ? 0L : currentCount) + 1L);
                 sessionMemberService.updateById(sessionMember);
             }
+        }
+    }
+
+    private Long parseResourceIdAsLong(ResourceVo resourceVo) {
+        if (resourceVo == null || StringUtils.isBlank(resourceVo.getResourceId())) {
+            return null;
+        }
+        try {
+            return Long.parseLong(resourceVo.getResourceId());
+        }
+        catch (NumberFormatException e) {
+            log.warn("resourceId无法转换为Long，跳过会话成员统计，resourceType={}, resourceId={}",
+                resourceVo.getResourceType(), resourceVo.getResourceId());
+            return null;
         }
     }
 
