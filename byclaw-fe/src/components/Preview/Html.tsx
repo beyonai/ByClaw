@@ -28,10 +28,9 @@ export interface HtmlPreviewProps {
   title?: string;
 }
 
-export const HtmlRender = (props: { content?: string; safe?: boolean; href?: string }) => {
+export const HtmlRender = React.memo((props: { content?: string; safe?: boolean; href?: string }) => {
   const { content, href, safe = true } = props;
   const [loading, setLoading] = useState<boolean>(false);
-  const [key, setKey] = useState<number>(Date.now());
   const ref = useRef<HTMLIFrameElement>(null);
 
   const onLoad = () => {
@@ -39,6 +38,8 @@ export const HtmlRender = (props: { content?: string; safe?: boolean; href?: str
   };
 
   useEffect(() => {
+    let objectUrl: string | undefined;
+
     // 如果存在资源链接，则使用资源链接
     if (href && !content) {
       if (ref.current) {
@@ -53,7 +54,8 @@ export const HtmlRender = (props: { content?: string; safe?: boolean; href?: str
         const blob = new Blob([content], { type: 'text/html' });
         if (ref.current) {
           setLoading(true);
-          ref.current.src = URL.createObjectURL(blob);
+          objectUrl = URL.createObjectURL(blob);
+          ref.current.src = objectUrl;
         }
       }
       if (!safe) {
@@ -65,8 +67,7 @@ export const HtmlRender = (props: { content?: string; safe?: boolean; href?: str
     }
 
     return () => {
-      if (safe) setKey(Date.now());
-      if (ref.current?.src) URL.revokeObjectURL(ref.current.src);
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [content, safe, href]);
 
@@ -77,10 +78,10 @@ export const HtmlRender = (props: { content?: string; safe?: boolean; href?: str
           <span />
         </div>
       )}
-      <iframe ref={ref} key={key} title={getIntl().formatMessage({ id: 'preview.htmlPreview' })} onLoad={onLoad} />
+      <iframe ref={ref} title={getIntl().formatMessage({ id: 'preview.htmlPreview' })} onLoad={onLoad} />
     </section>
   );
-};
+});
 
 export default function HtmlPreview(props: HtmlPreviewProps) {
   const { data, title } = props;
