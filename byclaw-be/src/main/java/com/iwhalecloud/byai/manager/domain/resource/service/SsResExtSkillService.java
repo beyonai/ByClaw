@@ -149,4 +149,5 @@ public class SsResExtSkillService {
         }
         return ssResExtSkillMapper.findBySkillCodes(skillCodes);
     }
+
 }
