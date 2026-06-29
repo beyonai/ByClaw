@@ -34,9 +34,11 @@ function ATag({ domNode }: { domNode: any }) {
 
   const openOnDrawer = (previewInfo: { blob: Blob | null }) => {
     EventEmitter.emit('beyond-main-driver-open-type', {
+      title: name,
       width: '50vw',
       drawerType: 'preview',
       canClose: true,
+      canFullScreen: true,
     });
     EventEmitter.emit('beyond-main-driver-message', {
       data: previewInfo.blob,
@@ -46,7 +48,13 @@ function ATag({ domNode }: { domNode: any }) {
     });
   };
 
-  const onPreview = () => {
+  const stopFileActionEvent = (event: React.MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  const onPreview = (event: React.MouseEvent) => {
+    stopFileActionEvent(event);
     if (!href) return;
     const url = getFileUrl(href);
 
@@ -91,7 +99,10 @@ function ATag({ domNode }: { domNode: any }) {
           {!isLoading && canDownload && (
             <div
               className={classnames(styles.fileItemDownload, 'ub ub-ac ub-pc pointer download')}
-              onClick={() => downloadFile({ fileUrl: href, fileName: name })}
+              onClick={(event) => {
+                stopFileActionEvent(event);
+                downloadFile({ fileUrl: href, fileName: name });
+              }}
               title={intl.formatMessage({ id: 'common.download' })}
             >
               <CloudDownloadOutlined style={{ fontSize: '18px' }} />

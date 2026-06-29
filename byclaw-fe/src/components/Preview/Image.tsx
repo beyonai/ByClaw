@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 
 export interface ImagePreviewProps {
   url?: string;
@@ -6,7 +6,7 @@ export interface ImagePreviewProps {
   title?: string;
 }
 
-export default function ImagePreview(props: ImagePreviewProps) {
+export default React.memo(function ImagePreview(props: ImagePreviewProps) {
   const { url, data, title } = props;
   const [src, setSrc] = useState<string>();
 
@@ -33,4 +33,4 @@ export default function ImagePreview(props: ImagePreviewProps) {
   }, [data, title]);
 
   return <figure style={{ width: '100%' }}>{src && <img style={{ width: '100%' }} src={src} alt={title} />}</figure>;
-}
+});

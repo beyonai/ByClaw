@@ -7,10 +7,10 @@ interface MdPreviewProps {
   content?: string;
 }
 
-export default function MdPreview({ content }: MdPreviewProps) {
+export default React.memo(function MdPreview({ content }: MdPreviewProps) {
   return (
     <section className={ss.md}>
       <Markdown remarkPlugins={[remarkGfm]}>{content}</Markdown>
     </section>
   );
-}
+});
