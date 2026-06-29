@@ -631,6 +631,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
   const fetchList = useCallback(
     async (path: string, options: { force?: boolean; categoryKey?: FileCategoryKey | undefined } = {}) => {
       const cacheKey = options.categoryKey ?? activeCategoryKey;
+      if (!cacheKey) return;
       const categoryRootPath = getCategoryRootPath(cacheKey);
       const normalizedPath = ensureDirectoryPath(normalizeFileBrowserPath(path || categoryRootPath));
       const requestPath =
@@ -832,7 +833,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
   }, [activeSessionId, fileCategories, resourceId]);
 
   useEffect(() => {
-    if (resourceId && pathInitialized && currentPath) {
+    if (resourceId && pathInitialized && activeCategoryKey && currentPath) {
       void fetchList(currentPath).then(() => {
         if (activeCategoryKey === 'session' && currentPath === SESSION_FILE_PATH && activeSessionId) {
           void expandCurrentSessionDirectory(activeSessionId);
@@ -860,7 +861,15 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
     async (key: string | string[]) => {
       const nextKey = Array.isArray(key) ? key[0] : key;
       if (!nextKey) {
+        activeCategoryKeyRef.current = undefined;
+        currentPathRef.current = '';
         setActiveCategoryKey(undefined);
+        setCurrentPath('');
+        setSearchValue('');
+        setIsSearching(false);
+        setItems([]);
+        setChildrenByPath({});
+        setExpandedTreeKeys([]);
         return;
       }
       const nextCategory = fileCategories.find((item) => item.key === nextKey);
@@ -2251,7 +2260,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       />
       <Collapse
         accordion
-        activeKey={activeCategoryKey}
+        activeKey={activeCategoryKey ? [activeCategoryKey] : []}
         onChange={handleCategoryChange}
         className={styles.categoryCollapse}
         items={fileCategories.map((category) => ({
