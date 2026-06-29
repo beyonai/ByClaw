@@ -2,7 +2,7 @@ import { IMessageListItem } from '@/typescript/message';
 import { SSEMessageType } from '@/constants/message';
 import { get } from 'lodash';
 
-function getSubstanceText(substance: unknown): string {
+export function getSubstanceText(substance: unknown): string {
   if (substance === null || substance === undefined) return '';
   if (typeof substance === 'string') return substance;
   if (typeof substance === 'number' || typeof substance === 'boolean') return `${substance}`;

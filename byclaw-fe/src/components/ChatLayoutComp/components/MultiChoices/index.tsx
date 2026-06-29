@@ -23,6 +23,7 @@ import {
   referenceToOpenClawHandler,
   referenceToWisdomPenHandler,
 } from '@/components/ChatLayoutComp/components/MultiChoices/util';
+import getDisplayAnswer, { getSubstanceText } from '@/components/QueryInput/getDisplayAnswer';
 import { getMessageText } from '@/utils/messgae';
 
 import { uploadFiles } from '@/service/file';
@@ -114,7 +115,7 @@ function MultiChoices(props: IProps) {
       const sender = ['1', '4'].includes(`${msg?.usage || ''}`)
         ? intl.formatMessage({ id: 'multiChoices.export.senderUser' })
         : intl.formatMessage({ id: 'multiChoices.export.senderAssistant' });
-      const content = getMessageText(msg) || '';
+      const content = getDisplayAnswer(msg?.messageList) || getSubstanceText(msg?.text) || getMessageText(msg) || '';
       const resourceName = metadata?.resourceName || msg?.resourceList?.[0]?.resourceName || '';
       const resourceType = metadata?.resourceType || msg?.resourceList?.[0]?.resourceType || '';
 
@@ -161,6 +162,10 @@ function MultiChoices(props: IProps) {
           setWorkspaceModalOpen(false);
 
           EventEmitter.emit('beyond-resourceList-resourceType-reload', 'SPACE');
+          EventEmitter.emit('fileBrowser-session-files-updated', {
+            sessionId: payload.sessionId,
+            filePath: payload.filePath,
+          });
         })
         .catch((error) => {
           console.error('Failed to save to workspace:', error);
@@ -285,11 +290,11 @@ function MultiChoices(props: IProps) {
                             { id: 'multiChoices.export.messageTitle' },
                             { index: index + 1 }
                           )}\n`;
-                          content += `**${intl.formatMessage({ id: 'multiChoices.export.messageId' })}**: ${
-                            messageInfo.messageId
-                          }\n`;
                           content += `**${intl.formatMessage({ id: 'multiChoices.export.sessionId' })}**: ${
                             messageInfo.sessionId
+                          }\n`;
+                          content += `**${intl.formatMessage({ id: 'multiChoices.export.messageId' })}**: ${
+                            messageInfo.messageId
                           }\n`;
                           content += `**${intl.formatMessage({ id: 'multiChoices.export.sender' })}**: ${
                             messageInfo.sender
@@ -495,6 +500,7 @@ function MultiChoices(props: IProps) {
         onClose={() => setSaveToKnowledgeOpen(false)}
         multiChoicesMsgId={multiChoicesMsgId}
         messageList={messageList}
+        resourceId={currentSession?.objectId}
         agentName={
           [...agentList, ...employeesList].find((item) => `${item.agentId}` === `${currentSession.objectId}`)?.name ||
           intl.formatMessage({ id: 'common.digitalEmployee' })
