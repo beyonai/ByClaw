@@ -9,11 +9,14 @@ import ss from './Office.module.less';
 type PdfInit = (el: HTMLElement, opts?: any) => JsPdfPreview;
 type DocxInit = (el: HTMLElement, opts?: any) => JsDocxPreview;
 type PptxInit = (el: HTMLElement, opts?: any) => any;
+type ExcelPreviewer = JsExcelPreview & {
+  renderExcel?: (data: ArrayBuffer) => Promise<any>;
+};
 
 const clamp = (val: number, min = 0, max = 1) => Math.max(min, Math.min(val, max));
 
 interface OfficeProps {
-  data?: string | Blob;
+  data?: string | Blob | ArrayBuffer;
   type?: string;
   loading?: boolean;
   fileName?: string;
@@ -39,7 +42,27 @@ const libs: {
   jsPreviewExcel?: typeof jsPreviewExcel;
 } = {};
 
-export const Office: Offices = (props) => {
+const blobToArrayBuffer = (blob: Blob) => {
+  if (typeof blob.arrayBuffer === 'function') {
+    return blob.arrayBuffer();
+  }
+
+  return new Promise<ArrayBuffer>((resolve, reject) => {
+    const reader = new FileReader();
+
+    reader.onload = () => {
+      if (reader.result instanceof ArrayBuffer) {
+        resolve(reader.result);
+      } else {
+        reject(new Error('Failed to read blob as ArrayBuffer'));
+      }
+    };
+    reader.onerror = () => reject(reader.error);
+    reader.readAsArrayBuffer(blob);
+  });
+};
+
+export const Office: Offices = (props: any) => {
   const { type, data, fileName, ...rest } = props;
 
   if (type === 'pdf' || fileName?.endsWith('.pdf')) {
@@ -62,9 +85,35 @@ function OfficeExcel(props: OfficeProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [inited, setInited] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [previewData, setPreviewData] = useState<string | ArrayBuffer>();
+
+  useEffect(() => {
+    let disposed = false;
+
+    if (data instanceof Blob) {
+      setLoading(true);
+      blobToArrayBuffer(data)
+        .then((buffer) => {
+          if (!disposed) {
+            setPreviewData(buffer);
+          }
+        })
+        .finally(() => {
+          if (!disposed) {
+            setLoading(false);
+          }
+        });
+    } else {
+      setPreviewData(data);
+    }
+
+    return () => {
+      disposed = true;
+    };
+  }, [data]);
 
   useLayoutEffect(() => {
-    let viewer: JsExcelPreview | undefined;
+    let viewer: ExcelPreviewer | undefined;
     const root = rootRef.current;
     const task1 = new Promise<typeof jsPreviewExcel | undefined>((resolve) => {
       if (libs.jsPreviewExcel) {
@@ -90,7 +139,7 @@ function OfficeExcel(props: OfficeProps) {
         })
         .catch(() => resolve());
     });
-    if (data) {
+    if (previewData) {
       setInited(false);
       // 保证资源都加载完
       const task = Promise.all([task1, task2])
@@ -113,14 +162,17 @@ function OfficeExcel(props: OfficeProps) {
             viewer = preview;
           }
           // 预览
-          return data ? viewer?.preview(data) : Promise.resolve();
+          if (previewData instanceof ArrayBuffer && typeof viewer?.renderExcel === 'function') {
+            return viewer.renderExcel(previewData);
+          }
+          return viewer?.preview(previewData) || Promise.resolve();
         })
         .finally(() => setLoading(false));
     }
     return () => {
       viewer?.destroy();
     };
-  }, [data]);
+  }, [previewData]);
 
   return (
     <section className={ss.office}>

@@ -167,4 +167,4 @@ function MainDrawer() {
   );
 }
 
-export default MainDrawer;
+export default React.memo(MainDrawer);
