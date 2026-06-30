@@ -24,6 +24,12 @@ interface JsonValueProps {
   defaultExpanded?: boolean;
 }
 
+interface ExpandableStringValueProps {
+  value: string;
+}
+
+const STRING_COLLAPSE_LENGTH = 200;
+
 // JSON值类型检测
 const getValueType = (value: any): string => {
   if (value === null) return 'null';
@@ -44,12 +50,50 @@ const getTypeIcon = () => {
 let JsonArray: React.FC<JsonRendererProps>;
 let JsonObject: React.FC<JsonRendererProps>;
 
+const ExpandableStringValue: React.FC<ExpandableStringValueProps> = ({ value }) => {
+  const [expanded, setExpanded] = useState(false);
+
+  if (value.length <= STRING_COLLAPSE_LENGTH) {
+    return <span className={styles.stringValue}>&quot;{value}&quot;</span>;
+  }
+
+  if (expanded) {
+    return (
+      <span className={styles.stringValue}>
+        &quot;{value}&quot;
+        <button
+          type="button"
+          className={styles.stringToggleButton}
+          aria-label="收起字符串"
+          onClick={() => setExpanded(false)}
+        >
+          收起
+        </button>
+      </span>
+    );
+  }
+
+  return (
+    <span className={styles.stringValue}>
+      &quot;{value.slice(0, STRING_COLLAPSE_LENGTH)}
+      <button
+        type="button"
+        className={styles.stringToggleButton}
+        aria-label="展开完整字符串"
+        onClick={() => setExpanded(true)}
+      >
+        ...(点击查看更多)
+      </button>
+      &quot;
+    </span>
+  );
+};
+
 // 渲染JSON值
 const JsonValue: React.FC<JsonValueProps> = ({ value, level, showCopyButton, defaultExpanded, isLast = false }) => {
   const intl = useIntl();
   const [copied, setCopied] = useState(false);
   const valueType = getValueType(value);
-
   const handleCopy = async () => {
     try {
       await copyTextToClipboard(JSON.stringify(value, null, 2));
@@ -71,7 +115,7 @@ const JsonValue: React.FC<JsonValueProps> = ({ value, level, showCopyButton, def
       case 'number':
         return <span className={styles.numberValue}>{value}</span>;
       case 'string':
-        return <span className={styles.stringValue}>&quot;{value}&quot;</span>;
+        return <ExpandableStringValue value={value} />;
       case 'array':
         return <JsonArray data={value} level={level + 1} isLast={isLast} defaultExpanded={defaultExpanded} />;
       case 'object':
