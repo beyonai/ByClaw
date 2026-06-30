@@ -6,6 +6,7 @@ import styles from './ModelCard.module.less';
 
 type Props = {
   data: any;
+  current?: boolean;
   onEdit: () => void;
   onDebug: () => void;
   onDelete: () => void;
@@ -17,19 +18,26 @@ const STATUS_MAP: Record<string, { color: string; label: string }> = {
   DISABLED: { color: 'default', label: 'personalModel.status.disabled' },
 };
 
-const ModelCard: React.FC<Props> = ({ data, onEdit, onDebug, onDelete, onSetStatus }) => {
+const ModelCard: React.FC<Props> = ({ data, current, onEdit, onDebug, onDelete, onSetStatus }) => {
   const intl = useIntl();
   const { modelType, displayName, status, modelCode, providerName, contextTokens } = data || {};
   const statusInfo = STATUS_MAP[status] || STATUS_MAP.DISABLED;
   const isEnabled = status === 'ENABLED';
 
   return (
-    <div className={styles.cardItem}>
+    <div className={classNames(styles.cardItem, { [styles.cardCurrent]: current })}>
       <div className={styles.cardAccent} />
       <div className={styles.cardHead}>
         <div className={styles.titleBlock}>
-          <div className={classNames(styles.title, 'ellipsis')} title={displayName}>
-            {displayName || '-'}
+          <div className={styles.titleRow}>
+            <div className={classNames(styles.title, 'ellipsis')} title={displayName}>
+              {displayName || '-'}
+            </div>
+            {/* {current && (
+              <Tag color="blue" className={styles.currentTag}>
+                {intl.formatMessage({ id: 'personalModel.currentInUse' })}
+              </Tag>
+            )} */}
           </div>
           <div className={styles.subtitleRow}>
             <span className={styles.modelPill}>{modelType || 'LLM'}</span>

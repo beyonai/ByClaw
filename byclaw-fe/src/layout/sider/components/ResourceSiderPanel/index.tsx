@@ -575,6 +575,34 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
     };
   }, [EventEmitter, loadResources, resourceType, breadcrumb.length]);
 
+  useEffect(() => {
+    const handleSiderMenuRefresh = (payload?: { key?: string }) => {
+      if (payload?.key !== config.siderKey) {
+        return;
+      }
+
+      if (breadcrumbRef.current.length > 0) {
+        breadcrumbRef.current = [];
+        setBreadcrumb([]);
+        setCurrentLevelOriginalList([]);
+      }
+      paginationRef.current = {
+        pageNum: 0,
+        total: 0,
+        loadedCount: 0,
+      };
+      resourceListRef.current = [];
+      setResourceList([]);
+      setHasMore(false);
+      loadResources({ reset: true, queryKeyword: keywordRef.current });
+    };
+
+    EventEmitter.on('sider-menu-tab-click-refresh', handleSiderMenuRefresh);
+    return () => {
+      EventEmitter.off('sider-menu-tab-click-refresh', handleSiderMenuRefresh);
+    };
+  }, [EventEmitter, config.siderKey, loadResources]);
+
   const handleSearch = () => {
     const nextKeyword = trim(searchValue);
     keywordRef.current = nextKeyword;

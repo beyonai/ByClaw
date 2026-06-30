@@ -1441,6 +1441,22 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
     [activeSessionId, expandCurrentSessionDirectory, fetchList, intl, resourceId]
   );
 
+  useEffect(() => {
+    const handler = (payload?: { key?: string }) => {
+      if (payload?.key !== 'file') return;
+      const currentCategoryKey = activeCategoryKeyRef.current;
+      const currentCategory = fileCategories.find((item) => item.key === currentCategoryKey);
+      if (currentCategory) {
+        void handleRefreshCategory(currentCategory);
+      }
+    };
+
+    EventEmitter.on('sider-menu-tab-click-refresh', handler);
+    return () => {
+      EventEmitter.off('sider-menu-tab-click-refresh', handler);
+    };
+  }, [EventEmitter, fileCategories, handleRefreshCategory]);
+
   const openCategoryPath = useCallback(
     async (category: FileCategoryItem, path: string) => {
       const categoryPath = ensureDirectoryPath(path || getCategoryActivePath(category, activeSessionId));

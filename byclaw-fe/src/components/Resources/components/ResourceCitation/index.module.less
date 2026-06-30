@@ -294,3 +294,73 @@
 .searchInput {
   width: 300px;
 }
+
+/* 小面板弹窗：列表形态 */
+.compactStateWrap {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.compactList {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 4px;
+
+  &::-webkit-scrollbar {
+    width: 4px;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: #e8e8e8;
+    border-radius: 2px;
+  }
+}
+
+.compactListItem {
+  cursor: pointer;
+}
+
+.compactActionTrigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  color: #707680;
+  cursor: pointer;
+
+  &:hover {
+    background-color: rgba(22, 93, 255, 0.1);
+    color: var(--beyond-color-primary);
+  }
+}
+
+.compactAvatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  color: #165dff;
+}
+
+.compactTitleRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.compactDesc {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #9aa1ac;
+  font-size: 12px;
+}

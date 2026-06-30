@@ -1,10 +1,29 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { Badge, List, Progress, Spin, Tag } from 'antd';
-import { useIntl, useLocation, useNavigate } from '@umijs/max';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Badge, Card, Descriptions, List, Progress, Spin, Tag } from 'antd';
+import { useIntl, useLocation, useNavigate, useSelector } from '@umijs/max';
 import AntdIcon from '@/components/AntdIcon';
 import ActiveSiderAgentBar, { useActiveSiderAgent } from '@/layout/sider/components/ActiveSiderAgentBar';
+import useGlobal from '@/hooks/useGlobal';
 import { getMyModels, getMyQuota } from '@/pages/models/service';
+import { getCompositeAppInfo } from '@/service/digitalEmployees';
+import { getModelDetail } from '@/pages/manager/service/ModelMgr';
 import styles from './index.module.less';
+
+function unwrapData(res: any) {
+  if (!res) return res;
+  if (Object.prototype.hasOwnProperty.call(res, 'data')) return res.data;
+  return res;
+}
+
+function safeJsonParse(value: any) {
+  if (!value) return {};
+  if (typeof value === 'object') return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return {};
+  }
+}
 
 const MODEL_TYPE_COLOR: Record<string, string> = {
   LLM: 'blue',
@@ -16,8 +35,18 @@ const ModelSiderPanel: React.FC = () => {
   const intl = useIntl();
   const navigate = useNavigate();
   const { pathname } = useLocation();
+  const { agentId, EventEmitter } = useGlobal();
   const activeSiderAgent = useActiveSiderAgent();
   const isModelsPage = pathname.startsWith('/models');
+  const { defaultDigEmployeeId, userInfo } = useSelector(({ employees, user }: any) => ({
+    defaultDigEmployeeId: employees?.defaultDigEmployeeId,
+    userInfo: user?.userInfo,
+  }));
+
+  const resourceId = useMemo(
+    () => `${agentId || defaultDigEmployeeId || userInfo?.defaultDigEmployeeId || ''}`,
+    [agentId, defaultDigEmployeeId, userInfo?.defaultDigEmployeeId]
+  );
 
   const formatTokens = (n: number) => {
     if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
@@ -34,6 +63,11 @@ const ModelSiderPanel: React.FC = () => {
   } | null>(null);
   const [models, setModels] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [agentDetail, setAgentDetail] = useState<any>(null);
+  const [agentDetailLoading, setAgentDetailLoading] = useState(false);
+  const [modelDetail, setModelDetail] = useState<any>(null);
+
+  const modelInfo = useMemo(() => safeJsonParse(agentDetail?.prologue)?.modelInfo || {}, [agentDetail?.prologue]);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -51,9 +85,51 @@ const ModelSiderPanel: React.FC = () => {
     }
   }, []);
 
+  const fetchAgentDetail = useCallback(async () => {
+    if (!resourceId) return;
+    setAgentDetailLoading(true);
+    try {
+      const res = await getCompositeAppInfo({ resourceId });
+      const detail = unwrapData(res);
+      setAgentDetail(detail);
+      const mi = safeJsonParse(detail?.prologue)?.modelInfo || {};
+      if (mi.modelId) {
+        const modelRes = await getModelDetail({ id: `${mi.modelId}` });
+        setModelDetail(unwrapData(modelRes));
+      }
+    } catch {
+      // ignore
+    } finally {
+      setAgentDetailLoading(false);
+    }
+  }, [resourceId]);
+
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  useEffect(() => {
+    setAgentDetail(null);
+    setModelDetail(null);
+  }, [resourceId]);
+
+  useEffect(() => {
+    fetchAgentDetail();
+  }, [fetchAgentDetail]);
+
+  useEffect(() => {
+    const handler = (payload?: { key?: string }) => {
+      if (payload?.key === 'model') {
+        fetchData();
+        fetchAgentDetail();
+      }
+    };
+
+    EventEmitter.on('sider-menu-tab-click-refresh', handler);
+    return () => {
+      EventEmitter.off('sider-menu-tab-click-refresh', handler);
+    };
+  }, [EventEmitter, fetchData, fetchAgentDetail]);
 
   return (
     <div className={styles.container}>
@@ -76,7 +152,35 @@ const ModelSiderPanel: React.FC = () => {
       </div>
 
       <div className={styles.content}>
-        <Spin spinning={loading}>
+        <Spin spinning={loading || agentDetailLoading}>
+          {agentDetail && (
+            <Card className={styles.agentModelCard} size="small">
+              <div className={styles.agentModelHeader}>
+                <div className={styles.agentModelName}>
+                  {modelInfo?.model ||
+                    modelDetail?.modelName ||
+                    intl.formatMessage({ id: 'fileBrowserEntry.model.notConfigured' })}
+                </div>
+                <Tag color={modelInfo?.modelId ? 'green' : 'default'}>
+                  {modelInfo?.modelId
+                    ? intl.formatMessage({ id: 'fileBrowserEntry.model.configured' })
+                    : intl.formatMessage({ id: 'fileBrowserEntry.model.notConfiguredShort' })}
+                </Tag>
+              </div>
+              <Descriptions column={2} size="small" className={styles.agentModelDesc}>
+                <Descriptions.Item label={intl.formatMessage({ id: 'fileBrowserEntry.model.temperature' })}>
+                  {modelInfo?.temperature ?? '-'}
+                </Descriptions.Item>
+                <Descriptions.Item label={intl.formatMessage({ id: 'fileBrowserEntry.model.history' })}>
+                  {modelInfo?.history ?? '-'}
+                </Descriptions.Item>
+                <Descriptions.Item label={intl.formatMessage({ id: 'fileBrowserEntry.model.maxToken' })}>
+                  {modelInfo?.maxToken ?? modelDetail?.maxContentToken ?? '-'}
+                </Descriptions.Item>
+              </Descriptions>
+            </Card>
+          )}
+
           {quota && (
             <div className={styles.quotaCard}>
               <div className={styles.quotaTitle}>{intl.formatMessage({ id: 'personalModel.quota.title' })}</div>

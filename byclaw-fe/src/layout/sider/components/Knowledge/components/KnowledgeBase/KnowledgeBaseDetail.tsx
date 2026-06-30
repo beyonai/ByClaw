@@ -661,6 +661,19 @@ const KnowledgeBaseDetail = (props: KnowledgeBaseDetailProps) => {
     };
   }, [EventEmitter, activeSessionId, refreshKnowledgeDetail]);
 
+  useEffect(() => {
+    const handleSiderMenuRefresh = (payload?: { key?: string }) => {
+      if (payload?.key === 'knowledge') {
+        void refreshKnowledgeDetail();
+      }
+    };
+
+    EventEmitter.on('sider-menu-tab-click-refresh', handleSiderMenuRefresh);
+    return () => {
+      EventEmitter.off('sider-menu-tab-click-refresh', handleSiderMenuRefresh);
+    };
+  }, [EventEmitter, refreshKnowledgeDetail]);
+
   const clearTreeClickTimer = useCallback(() => {
     if (treeClickTimerRef.current !== null) {
       window.clearTimeout(treeClickTimerRef.current);
