@@ -189,7 +189,7 @@ export const PreViewFile = React.memo((props: TwinsProps & { extra?: React.React
             <Spin />
           </div>
         )}
-        <div style={{ display: !!content && tab === 'source' ? 'block' : 'none' }} className={'full-width full-height'}>
+        <div style={{ display: !!content && tab === 'source' ? 'block' : 'none' }} className={ss.textPane}>
           <Suspense fallback={<Spin />}>
             <TextHighlightComponent content={content?.[1]} lang={content?.[0] as any} lineNumber />
           </Suspense>
@@ -215,7 +215,7 @@ export const PreViewFile = React.memo((props: TwinsProps & { extra?: React.React
         </div>
         <div
           style={{ display: !!uri && tab === 'preview' && ['md'].includes(type) ? 'block' : 'none' }}
-          className={'full-width full-height'}
+          className={ss.textPane}
         >
           <Suspense fallback={<Spin />}>
             <MdPreviewComponent content={content?.[1]} />

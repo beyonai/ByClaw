@@ -1,5 +1,5 @@
-import React, { useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { Button, Empty, Input, message, Modal, Spin, Tooltip, Upload } from 'antd';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Button, Empty, Input, message, Modal, Tooltip, Upload } from 'antd';
 import { CaretUpOutlined, CaretDownOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons';
 // @ts-ignore
 import { useIntl } from '@umijs/max';
@@ -7,7 +7,7 @@ import AntdIcon from '@/components/AntdIcon';
 import KnowledgeBreadcrumb from '@/components/KnowledgeBreadcrumb';
 import ButtonsWithMore from '@/components/ButtonsWithMore';
 import InfiniteScrollTable from '@/components/InfiniteScrollTable';
-import { HALF_MAIN_CONTENT_DETAIL_PANEL_WIDTH, SiderContentContext } from '@/layout/sider/siderContentContext';
+import useGlobal from '@/hooks/useGlobal';
 import { getFileIconType } from '@/constants/icon';
 import {
   listFiles,
@@ -27,21 +27,9 @@ import RenameModal from './RenameModal';
 import MoveModal from './MoveModal';
 import styles from './index.module.less';
 
-const PreViewFile = React.lazy(() =>
-  import('@/components/Preview/Twins').then((module) => ({ default: module.PreViewFile }))
-);
-
 interface FileBrowserPanelProps {
   resourceId: string;
   mode?: 'full' | 'preview';
-}
-
-interface FilePreviewPanelProps {
-  blob: Blob | null;
-  fileName: string;
-  fileType: string;
-  loading: boolean;
-  onClose: () => void;
 }
 
 function getFileType(name: string): string {
@@ -59,31 +47,11 @@ function canPreviewFile(record: FileBrowserItem) {
 type SortField = 'name' | 'size' | 'lastModified';
 type SortOrder = 'asc' | 'desc' | 'none';
 
-const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({ blob, fileName, fileType, loading, onClose }) => (
-  <div className={styles.previewPanel}>
-    <div className={styles.previewHeader}>
-      <span className={styles.previewTitle}>{fileName}</span>
-      <span className={styles.previewClose} onClick={onClose}>
-        <AntdIcon type="icon-a-Closeguanbi1" />
-      </span>
-    </div>
-    <div className={styles.previewBody}>
-      <Spin spinning={loading} wrapperClassName={styles.previewSpin}>
-        {blob && (
-          <React.Suspense fallback={null}>
-            <PreViewFile data={blob} type={fileType} title={fileName} className={styles.previewContent} />
-          </React.Suspense>
-        )}
-      </Spin>
-    </div>
-  </div>
-);
-
 const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId, mode = 'full' }) => {
   const intl = useIntl();
   const t = useCallback((id: string, values?: Record<string, any>) => intl.formatMessage({ id }, values), [intl]);
   const isPreviewMode = mode === 'preview';
-  const { setDetailPanel, clearDetailPanel } = useContext(SiderContentContext);
+  const { EventEmitter } = useGlobal();
 
   const [currentPath, setCurrentPath] = useState<string>('');
   const [items, setItems] = useState<FileBrowserItem[]>([]);
@@ -229,6 +197,13 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId, mode = 
     const parent = folderPath[folderPath.length - 2];
     if (parent) setCurrentPath(parent.id);
   }, [folderPath]);
+
+  const handleGoRoot = useCallback(() => {
+    setInputKeyword('');
+    setSearchKeyword('');
+    setIsSearching(false);
+    setCurrentPath('/');
+  }, []);
 
   const handleEnterDir = useCallback((item: FileBrowserItem) => {
     setInputKeyword('');
@@ -396,18 +371,25 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId, mode = 
 
   const renderPreviewPanel = useCallback(
     (item: FileBrowserItem, options: { blob?: Blob | null; loading: boolean }) => {
-      setDetailPanel?.(
-        <FilePreviewPanel
-          blob={options.blob ?? null}
-          fileName={item.name}
-          fileType={getFileType(item.name)}
-          loading={options.loading}
-          onClose={() => clearDetailPanel?.()}
-        />,
-        { width: HALF_MAIN_CONTENT_DETAIL_PANEL_WIDTH }
-      );
+      if (options.loading) {
+        EventEmitter.emit('beyond-main-driver-open-type', {
+          title: item.name,
+          width: '50vw',
+          minWidth: '360px',
+          maxWidth: '70vw',
+          drawerType: 'preview',
+          canClose: true,
+          canFullScreen: false,
+        });
+      }
+      EventEmitter.emit('beyond-main-driver-message', {
+        data: options.blob ?? undefined,
+        type: getFileType(item.name),
+        title: item.name,
+        className: styles.previewContent,
+      });
     },
-    [clearDetailPanel, setDetailPanel]
+    [EventEmitter]
   );
 
   const handlePreview = useCallback(
@@ -423,10 +405,9 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId, mode = 
         renderPreviewPanel(item, { blob, loading: false });
       } catch (e: any) {
         message.error(e?.message || t('fileBrowser.preview.failed'));
-        clearDetailPanel?.();
       }
     },
-    [clearDetailPanel, renderPreviewPanel, resourceId, t]
+    [renderPreviewPanel, resourceId, t]
   );
 
   const handleCreateFolder = useCallback(async () => {
@@ -743,7 +724,13 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId, mode = 
               </span>
             </Tooltip>
           )}
-          {!isPreviewMode && <AntdIcon type="icon-a-Homeshouye" style={{ fontSize: 16 }} />}
+          {!isPreviewMode && (
+            <Tooltip title={t('fileBrowser.root')}>
+              <span className={styles.backBtn} style={{ cursor: 'pointer' }} onClick={handleGoRoot}>
+                <AntdIcon type="icon-a-Homeshouye" style={{ fontSize: 16 }} />
+              </span>
+            </Tooltip>
+          )}
           <KnowledgeBreadcrumb folderPath={folderPath} handleBreadcrumbClick={handleBreadcrumbClick} />
         </div>
       )}
