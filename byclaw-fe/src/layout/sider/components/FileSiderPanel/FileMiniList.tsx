@@ -1581,7 +1581,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       clearClickTimer();
       EventEmitter.emit('queryInput-insert-item', {
         item: normalizeReferenceItem(item, resourceId),
-        type: isDirectory(item) ? DragType.folder : DragType.file,
+        type: isDirectory(item) ? DragType.commonFolder : DragType.commonFile,
       });
     },
     [EventEmitter, clearClickTimer, resourceId]

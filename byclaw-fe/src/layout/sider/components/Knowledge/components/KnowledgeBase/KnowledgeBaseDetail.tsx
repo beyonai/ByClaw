@@ -233,16 +233,21 @@ function toKnowledgeTreeItem(
     directoryPath || String(item.id !== null && item.id !== undefined ? item.id : `${parentId}/${item.name}`);
 
   return {
-    id: String(item.id ?? ''),
+    id: String(item.id ?? item.directoryPath ?? ''),
     collectionName: item.name,
     datasetId,
     type: item.type,
     fileId: item.fileId !== null && item.fileId !== undefined ? String(item.fileId) : undefined,
     parentId,
-    directoryPath: item.directoryPath,
+    directoryPath,
     title: item.name,
     key: pathKey,
     isLeaf: item.type === 'file',
+    resourceCode: JSON.stringify({
+      parentId,
+      datasetId,
+      directoryPath,
+    }),
   };
 }
 
@@ -356,7 +361,7 @@ interface KnowledgeBaseDetailProps {
 
 function onDragStart(info: Parameters<Required<TreeProps>['onDragStart']>[0]) {
   const data = info.node as unknown as IKnowledgeDetailTreeItem;
-  onTreeNodeDragStart(info.event, data, data.type === 'file' ? DragType.file : DragType.folder);
+  onTreeNodeDragStart(info.event, data, data.type === 'file' ? DragType.knowledgeFile : DragType.knowledgeFolder);
 }
 
 function getNodeIcon(p: AntdTreeNodeAttribute) {
@@ -682,7 +687,8 @@ const KnowledgeBaseDetail = (props: KnowledgeBaseDetailProps) => {
   }, []);
 
   const getTreeNodeDragType = useCallback(
-    (item: IKnowledgeDetailTreeItem): IDragType => (item.type === 'file' ? DragType.file : DragType.folder),
+    (item: IKnowledgeDetailTreeItem): IDragType =>
+      item.type === 'file' ? DragType.knowledgeFile : DragType.knowledgeFolder,
     []
   );
 

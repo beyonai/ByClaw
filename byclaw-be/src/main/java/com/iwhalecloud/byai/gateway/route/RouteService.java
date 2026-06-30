@@ -290,7 +290,7 @@ public class RouteService {
     /**
      * 替换内容中的资源占位符
      * 将 {{resourceType_resourceId}} 格式替换为对应的资源名称
-     * 如果资源类型为 DIG_EMPLOYEE，则在名称前添加 @ 符号
+     * 如果资源类型为 DIG_EMPLOYEE，则在名称前添加 @ 符号，并在替换内容后添加空格
      *
      * @param content 原始内容
      * @param resourceList 资源列表
@@ -312,6 +312,8 @@ public class RouteService {
                 // 构建ID格式：resourceType_resourceId，如 DIG_EMPLOYEE_10812779
                 String resourceKey = resource.getResourceType().getCode() + "_" + resource.getResourceId();
                 resourceMap.put(resourceKey, resource);
+            } else if (StringUtils.isNotBlank(resource.getId())) {
+                resourceMap.put(resource.getId(), resource);
             }
         }
 
@@ -321,13 +323,21 @@ public class RouteService {
             String replacement = resolveResourcePlaceholder(placeholder, resourceMap);
 
             if (replacement != null) {
-                matcher.appendReplacement(result, java.util.regex.Matcher.quoteReplacement(replacement));
+                replacement = prefixResourcePlaceholder(replacement);
+                matcher.appendReplacement(result, java.util.regex.Matcher.quoteReplacement(replacement + " "));
             }
             // 如果找不到对应的资源，保留原占位符
         }
         matcher.appendTail(result);
 
         return result.toString();
+    }
+
+    private String prefixResourcePlaceholder(String replacement) {
+        if (replacement.startsWith("@")) {
+            return replacement;
+        }
+        return "#" + replacement;
     }
 
     private String resolveResourcePlaceholder(String placeholder, Map<String, ResourceVo> resourceMap) {

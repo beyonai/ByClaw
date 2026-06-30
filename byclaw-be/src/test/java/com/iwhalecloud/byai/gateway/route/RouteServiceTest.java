@@ -272,7 +272,34 @@ class RouteServiceTest {
         ArgumentCaptor<Object> contentCaptor = ArgumentCaptor.forClass(Object.class);
         verify(gatewayClient).sendMessage(anyString(), anyString(), contentCaptor.capture(), anyString(), any(),
                 anyString(), anyString(), anyString(), anyString(), any(), any());
-        org.assertj.core.api.Assertions.assertThat(contentCaptor.getValue()).isEqualTo("@liu0518#persona-cfo22");
+        org.assertj.core.api.Assertions.assertThat(contentCaptor.getValue()).isEqualTo("@liu0518#persona-cfo 22");
+    }
+
+    @Test
+    void route_prefixesNonMentionPlaceholderBeforeSendingToGateway() throws Exception {
+        ChatProcessContext ctx = buildContext();
+        ctx.getAssistantChatDto().setChatContent(
+                "{{SKILL_/.openclaw/workspace-baiying-agent-10000998/skills/persona-cfo}}22");
+
+        ResourceVo skill = new ResourceVo();
+        skill.setResourceType(AgentMetaEnum.SKILL);
+        skill.setResourceId("/.openclaw/workspace-baiying-agent-10000998/skills/persona-cfo");
+        skill.setResourceName("persona-cfo");
+        ctx.getAssistantChatDto().setResourceList(Arrays.asList(skill));
+
+        when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(), any(), any()))
+                .thenAnswer(invocation -> {
+                    ctx.gatewayEventQueue.offer(currentTraceDoneEvent(ctx));
+                    return successResponse();
+                });
+
+        routeService.route(ctx);
+
+        ArgumentCaptor<Object> contentCaptor = ArgumentCaptor.forClass(Object.class);
+        verify(gatewayClient).sendMessage(anyString(), anyString(), contentCaptor.capture(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(), any(), any());
+        org.assertj.core.api.Assertions.assertThat(contentCaptor.getValue()).isEqualTo("#persona-cfo 22");
     }
 
     private ChatProcessContext buildContext() {

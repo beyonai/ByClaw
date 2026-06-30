@@ -84,42 +84,71 @@ async function getInboundMessageFromByFramework(data: AskAgentCommand) {
       extData?: string;
     }[] = data.extraPayload?.resource_list || [];
     const { sessionId } = data.header;
-    const baiyingCallHandledResourceTypes = ["AGENT", "TOOLKIT", "TOOL", "MCP", "OBJECT", "VIEW", "KG_DOC", "KG_DB", "KG_QA"];
+    const baiyingCallHandledResourceTypes = ["AGENT", "TOOLKIT", "TOOL", "MCP", "OBJECT", "VIEW", "KG_DOC", "KG_DB", "KG_QA", "KG_DOC_FILE", "KG_DOC_FOLDER"];
     const userCode = getUserCode();
     const runtime = getByaiRuntime();
     resourceList.forEach((item) => {
-      if (item.resourceType !== "DIG_EMPLOYEE") {
-        if (item.resourceType === "KG_DOC_FILE") {
-          remindTextArr.push(`- file: ${resolveSdkLocalFilePath(item.resourceId, sessionId)}`);
-        } else if (item.resourceType?.toLowerCase() === "skill") {
-          if (!item.extData) return;
-          let skillExt: {
-            skillUrl: string;
-            version: string;
-            skillType: "inner" | "hub";
-          };
+      if (item.resourceType === "DIG_EMPLOYEE") {
+        return;
+      }
+      if (item.resourceType === "COMMON_FILE") {
+        remindTextArr.push(`- file: ${resolveSdkLocalFilePath(item.resourceId, sessionId)}`);
+      } else if (item.resourceType === "COMMON_FOLDER") {
+        remindTextArr.push(`- folder: ${resolveSdkLocalFilePath(item.resourceId, sessionId)}`);
+      } else if (item.resourceType?.toLowerCase() === "skill") {
+        if (!item.extData) return;
+        let skillExt: {
+          skillUrl: string;
+          version: string;
+          skillType: "inner" | "hub";
+        };
+        try {
+          skillExt = JSON.parse(item.extData);
+        } catch (error) {
+          return;
+        }
+        if (skillExt.skillType === "inner") {
+          remindTextArr.push(`- skill: ${path.join("/app/skills", item.resourceCode)}`);
+        } else if (skillExt.skillType === "hub") {
+          if (userCode && skillExt.skillUrl?.includes(userCode)) {
+            const normalizeAgentId = normalizeByaiAgentId(data.extraPayload?.agent_id || "main");
+            const workspaceDir = runtime.agent.resolveAgentWorkspaceDir(getRuntimeConfig(), normalizeAgentId)
+            if (workspaceDir) {
+              remindTextArr.push(`- skill: ${path.join(workspaceDir, "skills", item.resourceCode)}`);
+            }
+          } else {
+            const skillsRoot = path.join(runtime.state.resolveStateDir(), "skills");
+            remindTextArr.push(`- skill: ${path.join(skillsRoot, item.resourceCode)}`);
+          }
+        }
+      } else {
+        let { resourceType } = item;
+        let resourceId: string | undefined;
+        if (["KG_DOC_FILE", "KG_DOC_FOLDER"].includes(resourceType)) {
+          // 知识库文件和文件夹都归类为知识库
+          resourceType = "KG_DOC";
           try {
-            skillExt = JSON.parse(item.extData);
-          } catch (error) {
+            const { datasetId } = JSON.parse(item.resourceCode);
+            // 知识库id
+            resourceId = datasetId;
+          } catch (e) {
+          }
+          if (!resourceId) {
+            console.warn(`Knowledge base resource id is empty: ${item.resourceName}`);
             return;
           }
-          if (skillExt.skillType === "inner") {
-            remindTextArr.push(`- skill: ${path.join("/app/skills", item.resourceCode)}`);
-          } else if (skillExt.skillType === "hub") {
-            if (userCode && skillExt.skillUrl?.includes(userCode)) {
-              const normalizeAgentId = normalizeByaiAgentId(data.extraPayload?.agent_id || "main");
-              const workspaceDir = runtime.agent.resolveAgentWorkspaceDir(getRuntimeConfig(), normalizeAgentId)
-              if (workspaceDir) {
-                remindTextArr.push(`- skill: ${path.join(workspaceDir, "skills", item.resourceCode)}`);
-              }
-            } else {
-              const skillsRoot = path.join(runtime.state.resolveStateDir(), "skills");
-              remindTextArr.push(`- skill: ${path.join(skillsRoot, item.resourceCode)}`);
-            }
-          }
+        }
+        if (item.resourceType === "KG_DOC_FILE") {
+          remindTextArr.push(
+            `- resource: resource_id=${resourceId}, resource_type=${resourceType}, itemName=${item.resourceName}, itemPath=${item.resourceId}`,
+          );
+        } else if (item.resourceType === "KG_DOC_FOLDER") {
+          remindTextArr.push(
+            `- resource: resource_id=${resourceId}, resource_type=${resourceType}, folderName=${item.resourceName}, folderPath=${item.resourceId}`,
+          );
         } else {
           remindTextArr.push(
-            `- resource: resource_id=${item.resourceId}, resource_type=${item.resourceType}, resource_name=${item.resourceName}`,
+            `- resource: resource_id=${resourceId}, resource_type=${resourceType}, resource_name=${item.resourceName}`,
           );
         }
       }
