@@ -356,6 +356,28 @@ def _build_scope_entries(
             result.append(ScopeEntry(code=code, scope_type=biz_type, base_id=base_id))
         return result
 
+    # 降级：从 config_extra.rel_resource_list 回退（保留 SCENE/OBJECT 类型 + base_id）
+    if config_extra:
+        rel_rl = config_extra.get("rel_resource_list", [])
+        if rel_rl:
+            result = []
+            for item in rel_rl:
+                if not isinstance(item, dict):
+                    continue
+                biz_type = str(item.get("resourceBizType") or "")
+                if biz_type not in _SCOPE_VALID_TYPES:
+                    continue
+                code = str(item.get("resourceCode") or "").strip()
+                if not code:
+                    continue
+                base_code = str(item.get("ontologyBaseCode") or "").strip()
+                if biz_type == "ONTOLOGY_BASE":
+                    base_id = code
+                else:
+                    base_id = base_code
+                result.append(ScopeEntry(code=code, scope_type=biz_type, base_id=base_id))
+            return result
+
     # 降级：从 mounted_objects 生成 OBJECT 类型 ScopeEntry
     if mounted_objects:
         return [
@@ -363,16 +385,6 @@ def _build_scope_entries(
             for c in mounted_objects
             if isinstance(c, str) and c.strip()
         ]
-
-    # 回退：从 AgentConfig.extra.mounted_objects 生成 OBJECT 类型 ScopeEntry
-    if config_extra:
-        agent_mounted = config_extra.get("mounted_objects", [])
-        if agent_mounted:
-            return [
-                ScopeEntry(code=c, scope_type="OBJECT", base_id="")
-                for c in agent_mounted
-                if isinstance(c, str) and c.strip()
-            ]
 
     return []
 
@@ -1469,7 +1481,6 @@ class DataCloudWorker(GatewayWorker):
 
     async def start_heartbeat(self, **kwargs: Any) -> None:
         setup_logging(extra_namespaces=("byclaw_data",))
-        await super().start_heartbeat(**kwargs)
 
         init_plugin = self.plugin_registry.get_plugin("datacloud_init_agent_conf")
         loaded_agent_ids = (
@@ -1581,6 +1592,8 @@ class DataCloudWorker(GatewayWorker):
                 logger.info(
                     "DataCloudWorker: no mounted_objects found, TOOL_POOL init skipped"
                 )
+
+        await super().start_heartbeat(**kwargs)
 
     async def _resolve_agent_configs_snapshot(
         self,
@@ -2629,12 +2642,23 @@ class DataCloudWorker(GatewayWorker):
             # 🆕 传统路径：将 _scope_entries 构建为 RequestToolContext 注入外层 config
             # 解决 _is_dynamic_agent=False 时 configurable.tool_context 缺失导致
             # search_ontology 无 allowed_scope 限制、搜穿全库的问题
+            _dc_logger.info(
+                "DataCloudWorker: _scope_entries=%s loader_snapshot=%s session=%s",
+                [(getattr(e, "code", "?"), getattr(e, "scope_type", "?"), getattr(e, "base_id", "?"))
+                 for e in _scope_entries] if _scope_entries else "EMPTY",
+                "ready" if self._loader_snapshot is not None else "None",
+                context.session_id,
+            )
             if _scope_entries and self._loader_snapshot is not None:
+                _dc_logger.info(
+                    "DataCloudWorker: entering tool_context build, scope=%d session=%s",
+                    len(_scope_entries), context.session_id,
+                )
                 try:
                     from datacloud_analysis.tools.request_tool_context import (
                         RequestToolContext,
                     )
-                    from datacloud_analysis.tools.tool_pool import (
+                    from datacloud_analysis.tools.ontology_tool_loader import (
                         OntologyToolLoader,
                     )
 
@@ -2642,6 +2666,10 @@ class DataCloudWorker(GatewayWorker):
                         allowed_scope=_scope_entries,
                         loader=self._loader_snapshot.loader,
                         tool_loader_cls=OntologyToolLoader,
+                    )
+                    _dc_logger.info(
+                        "DataCloudWorker: tool_context BUILT anchor_mode=%s session=%s",
+                        _tool_context_for_config.anchor_mode, context.session_id,
                     )
                     logger.info(
                         "DataCloudWorker: tool_context built scope_len=%d "
@@ -2651,10 +2679,8 @@ class DataCloudWorker(GatewayWorker):
                         context.session_id,
                     )
                 except Exception as _tc_err:
-                    logger.warning(
-                        "DataCloudWorker: tool_context build failed "
-                        "(traditional path): %s",
-                        _tc_err,
+                    _dc_logger.warning(
+                        "DataCloudWorker: tool_context build FAILED: %s", _tc_err, exc_info=True,
                     )
             # 改动4: SkillsMiddleware 在运行时自动处理技能发现，无需在 worker 中手动加载
             logger.info(

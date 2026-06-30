@@ -636,7 +636,7 @@ class InitDataCloudDigitalEmployeePlugin(Plugin):
         self._ext_codes = [
             r.get("resourceCode") for r in ext_resource_list
             if isinstance(r, dict)
-            and r.get("resourceBizType") in {"OBJECT", "VIEW"}
+            and r.get("resourceBizType") in {"OBJECT", "VIEW", "SCENE", "ONTOLOGY_BASE"}
             and r.get("resourceCode")
         ]
 
@@ -655,13 +655,44 @@ class InitDataCloudDigitalEmployeePlugin(Plugin):
             snapshot = self._rel_resource_snapshot(rel)
             resource_biz_type = snapshot["resourceBizType"]
             resource_code = snapshot["resourceCode"]
-            if resource_biz_type in {"OBJECT", "VIEW"} and resource_code:
+            if resource_biz_type in {"OBJECT", "VIEW", "SCENE", "ONTOLOGY_BASE"} and resource_code:
                 mounted_objects.append(resource_code)
 
         shared_loader: Any = None
         if mounted_objects and self._runtime_manager is not None:
             snapshot = self._runtime_manager.get_loader("default")
             shared_loader = snapshot.loader
+
+        # SCENE 工具注册（本地/远程统一，platform 自动路由）
+        for rel in rel_resource_list:
+            snapshot = self._rel_resource_snapshot(rel)
+            if snapshot["resourceBizType"] != "SCENE":
+                continue
+            base_code = str(rel.get("ontologyBaseCode") or "").strip()
+            if not base_code:
+                continue
+
+            scene_id = snapshot["resourceCode"]
+            from datacloud_analysis.tools.ontology_tool_loader import (  # noqa: PLC0415
+                OntologyToolLoader as _OntologyToolLoader,
+            )
+            from datacloud_analysis.tools.tool_pool import register_tool  # noqa: PLC0415
+
+            try:
+                scene_tools = _OntologyToolLoader(
+                    scene_ids=[scene_id],
+                    base_id=base_code,
+                    loader=shared_loader,
+                ).load()
+            except Exception:
+                logger.warning(
+                    "[InitPlugin] SCENE tool loading failed: agent_id=%s scene_id=%s",
+                    agent_id, scene_id, exc_info=True,
+                )
+                continue
+
+            for tool_name, tool_obj in scene_tools.items():
+                register_tool(tool_name, tool_obj, object_code=scene_id)
 
         # 始终注册 data_query_{code}：LLM 不直接调用，由 query_clarification_plugin
         # before_callback redirect 决策从 tools_map 中查找并执行。
@@ -678,7 +709,7 @@ class InitDataCloudDigitalEmployeePlugin(Plugin):
                 snapshot = self._rel_resource_snapshot(rel)
                 resource_code = snapshot["resourceCode"]
                 resource_biz_type = snapshot["resourceBizType"]
-                if resource_biz_type not in {"OBJECT", "VIEW"} or not resource_code:
+                if resource_biz_type not in {"OBJECT", "VIEW", "SCENE", "ONTOLOGY_BASE"} or not resource_code:
                     continue
                 tool_name = f"data_query_{resource_code}"
                 try:
@@ -779,6 +810,7 @@ class InitDataCloudDigitalEmployeePlugin(Plugin):
             extra={
                 "tool_metadata": tool_metadata,
                 "mounted_objects": mounted_objects,
+                "rel_resource_list": rel_resource_list,  # 原始资源列表（含 bizType + base_code）
                 "loader": shared_loader,  # OntologyLoader 实例，供 create_agent 动态生成工具
                 "skip_action_families": skip_action_families,
                 # data_query_* 工具仅供 redirect，不暴露给 LLM，通过此字段传递到 tools_map
@@ -860,7 +892,7 @@ class InitDataCloudDigitalEmployeePlugin(Plugin):
         for rel in rel_resource_list:
             snapshot = self._rel_resource_snapshot(rel)
             biz_type = snapshot["resourceBizType"]
-            if biz_type in {"OBJECT", "VIEW"}:
+            if biz_type in {"OBJECT", "VIEW", "SCENE", "ONTOLOGY_BASE"}:
                 ontology_candidates.append(snapshot)
             elif biz_type == "AGENT":
                 delegate_candidates.append(snapshot)
@@ -964,6 +996,59 @@ class InitDataCloudDigitalEmployeePlugin(Plugin):
                     "OBJECT/VIEW use generic query_objects tool",
                     agent_id,
                     snapshot["resourceCode"],
+                )
+                continue
+
+            # SCENE 类型：由 OntologyToolLoader(scene_ids=...) 统一加载（本地/远程自动路由）
+            if resource_biz_type == "SCENE":
+                base_code = str(rel.get("ontologyBaseCode") or "").strip()
+                if not base_code:
+                    report["skipped"].append(
+                        {**snapshot, "reason": "scene_missing_ontology_base_code"}
+                    )
+                    continue
+                from datacloud_analysis.tools.ontology_tool_loader import (  # noqa: PLC0415
+                    OntologyToolLoader as _OntologyToolLoader,
+                )
+
+                scene_id = snapshot["resourceCode"]
+                try:
+                    scene_tools = _OntologyToolLoader(
+                        scene_ids=[scene_id],
+                        base_id=base_code,
+                    ).load()
+                except Exception:
+                    logger.warning(
+                        "[InitPlugin] SCENE tool loading failed: agent_id=%s scene=%s",
+                        agent_id, scene_id, exc_info=True,
+                    )
+                    report["failed"].append(
+                        {**snapshot, "reason": "scene_tool_load_exception"}
+                    )
+                    continue
+
+                for tool_name, tool_obj in scene_tools.items():
+                    tools[tool_name] = tool_obj
+                    from datacloud_analysis.tools.tool_pool import (  # noqa: PLC0415
+                        register_tool,
+                    )
+                    register_tool(tool_name, tool_obj, object_code=scene_id)
+
+                report["built"].append(
+                    {**snapshot, "tool_count": len(scene_tools)}
+                )
+                continue
+
+            # TODO: ONTOLOGY_BASE 工具注册待实现
+            if resource_biz_type == "ONTOLOGY_BASE":
+                logger.warning(
+                    "[InitPlugin][ToolLoad][Ontology] agent_id=%s resource_code=%s "
+                    "ONTOLOGY_BASE 工具注册暂未实现，但已识别到该资源类型",
+                    agent_id,
+                    snapshot["resourceCode"],
+                )
+                report["skipped"].append(
+                    {**snapshot, "reason": "ontology_base_not_implemented"}
                 )
                 continue
 
