@@ -220,6 +220,17 @@ public class RouteService {
                     throw new BdpRuntimeException("Gateway 响应超时");
                 }
 
+                // 用户停止会话：stopChat 向队列投递的停止哨兵。退出事件循环，
+                // 由 execute() 继续调用 storeMessage/afterProcess 将已堆积内容按正常完成落库。
+                if (ChatProcessContext.STOP_SENTINEL_EVENT.equals(dataJson.getString("event_type"))) {
+                    if (ctx.messageContext != null) {
+                        ctx.messageContext.setComplete(true);
+                    }
+                    log.info("收到停止哨兵，退出事件循环并落库已堆积消息, sessionId: {}", sessionId);
+                    chatStreamRuntimeCoordinator.stopIfStarted(sessionId, runtimeStarted);
+                    break;
+                }
+
                 String eventType = dataJson.getString("event_type");
 
                 JSONObject metadata = dataJson.getJSONObject("metadata");

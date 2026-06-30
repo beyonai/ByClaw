@@ -50,9 +50,12 @@ import com.iwhalecloud.byai.state.domain.chat.service.TargetAgentResolver;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
+
+import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
 import java.util.Date;
@@ -64,6 +67,7 @@ import java.util.List;
  * @description TODO
  */
 
+@Slf4j
 @Service
 public class AssistantChatApplicationService {
 
@@ -107,6 +111,11 @@ public class AssistantChatApplicationService {
 
     @Autowired
     private OutputStreamManager outputStreamManager;
+
+    // 使用 @Lazy 打破依赖环：ScriptService 经由 paramService → ... → dingtalk 链路最终又依赖本类。
+    @Lazy
+    @Autowired
+    private ScriptService scriptService;
 
     @Autowired
     private RedisTemplate<String, Object> redisTemplate;
@@ -153,6 +162,9 @@ public class AssistantChatApplicationService {
      * @param stopChatDto 入参
      */
     public void stopChat(StopChatDto stopChatDto) {
+        // 停止前将已堆积的消息落库，避免本轮回答内容丢失。
+        flushAccumulatedMessage(stopChatDto);
+
         SsResource ssResource = ssResourceService.findById(stopChatDto.getAgentId());
         String workerAgentType = null;
         if (ssResource == null) {
@@ -167,8 +179,57 @@ public class AssistantChatApplicationService {
 
         gatewayClient.cancelTask(String.valueOf(stopChatDto.getMessageId()), String.valueOf(stopChatDto.getSessionId()),
             "user cancel task", targetAgentType, CurrentUserHolder.getCurrentUserCode(), "force");
+
         runningOutputStreamRegistry.release(stopChatDto.getSessionId(), stopChatDto.getMessageId());
         runningChatSnapshotService.delete(stopChatDto.getSessionId(), stopChatDto.getMessageId());
+    }
+
+    /**
+     * 停止会话时将当前已堆积的消息落库。
+     * <p>
+     * 优先级：
+     * <ol>
+     *   <li>同 pod：本 pod 持有运行中的 {@link ChatProcessContext}。
+     *     HTTP SSE 场景请求线程阻塞在事件队列上，向队列投递停止哨兵，由该线程按正常完成落库；
+     *     其他场景（WebSocket / 无队列）直接调用 {@code flushOnStop} 落库。</li>
+     *   <li>跨 pod：本 pod 没有上下文（监听器在其他 pod），退回到读取 Redis 运行态快照并幂等 upsert 落库。</li>
+     * </ol>
+     * 任一路径失败都不应阻断停止主流程（cancelTask 已执行），异常仅记录日志。
+     *
+     * @param stopChatDto 停止入参
+     */
+    private void flushAccumulatedMessage(StopChatDto stopChatDto) {
+        Long sessionId = stopChatDto.getSessionId();
+        if (sessionId == null) {
+            return;
+        }
+        try {
+            ChatProcessContext ctx = outputStreamManager.getContext(String.valueOf(sessionId));
+            if (ctx != null) {
+                if (ctx.getGatewayEventQueue() != null) {
+                    // 同 pod HTTP SSE：交给阻塞中的请求线程落库，保证写流仍在请求线程执行。
+                    JSONObject sentinel = new JSONObject();
+                    sentinel.put("event_type", ChatProcessContext.STOP_SENTINEL_EVENT);
+                    sentinel.put("session_id", String.valueOf(sessionId));
+                    ctx.getGatewayEventQueue().offer(sentinel);
+                }
+                else {
+                    // 同 pod 但无队列（如 WebSocket）：直接落库收尾。
+                    scriptService.flushOnStop(ctx);
+                }
+                return;
+            }
+            // 跨 pod：本 pod 无上下文，从 Redis 快照落库。
+            boolean flushed = scriptService.flushFromSnapshot(sessionId, stopChatDto.getMessageId());
+            if (!flushed) {
+                log.info("stopChat 无可落库内容（本 pod 无上下文且无快照）, sessionId: {}, messageId: {}", sessionId,
+                    stopChatDto.getMessageId());
+            }
+        }
+        catch (Exception e) {
+            log.error("stopChat 落库已堆积消息失败, sessionId: {}, messageId: {}", sessionId,
+                stopChatDto.getMessageId(), e);
+        }
     }
 
     /**
