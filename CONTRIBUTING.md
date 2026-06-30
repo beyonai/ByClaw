@@ -9,8 +9,10 @@ Thank you for contributing to Byclaw.
 1. Clone the repository.
 2. Initialize each module you work on (see its README):
    - `byclaw-fe/`: Node.js and `pnpm` (or npm as documented there).
-   - `byclaw-be/`: JDK 17+ and Maven.
-   - `byclaw-exe/`: Python 3.10+ with `uv` or `pip` in a virtual environment.
+   - `byclaw-be/`: JDK 21+ and Maven (enforced via maven-enforcer; the code uses Java 21 features).
+   - `byclaw-exe/`: see the module README for setup.
+   - `byclaw-data/`: Python 3.12+ with `uv` (see module README).
+   - `byclaw-qa/`: Python 3.12+ with `uv` (see module README).
 
 ## Style and commits
 
