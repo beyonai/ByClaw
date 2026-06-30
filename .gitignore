@@ -110,3 +110,5 @@ byclaw-data/.vscode/settings.json
 .workbuddy/
 byclaw-data/scene_detail_demo.py
 byclaw-data/search_ontology_demo.py
+byclaw-data/check_trace_prompt.py
+byclaw-data/verify_core_persona_fix.py
