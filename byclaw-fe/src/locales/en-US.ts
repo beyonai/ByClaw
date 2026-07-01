@@ -84,6 +84,8 @@ export default {
   'common.prev': 'Previous',
   'common.next': 'Next',
 
+  'search.referenceSuccess': 'Referenced successfully',
+
   'resource.belongField': 'Business Field',
   'resource.belongFieldPlaceholder': 'Please select a business field',
   'resource.knowledge': 'Knowledge',

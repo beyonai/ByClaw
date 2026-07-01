@@ -24,6 +24,7 @@ import useNewChat from '../header/components/NewChat/useNewChat';
 import { getDisplayUserNameInChat } from '@/utils/chat';
 import useGlobal from '@/hooks/useGlobal';
 import { clearEasyConfirmInputDraft } from '@/components/ChatLayoutComp/components/EasyConfirm';
+import { EMPLOYEE_RESOURCE_TAB_KEYS } from './employeeResourceTabs';
 
 import type { IState as IEmployeesState } from '@/models/useEmployees';
 import { SiderContentContext, DEFAULT_SIDER_CONTENT_WIDTH } from './siderContentContext';
@@ -31,16 +32,6 @@ import { SiderContentContext, DEFAULT_SIDER_CONTENT_WIDTH } from './siderContent
 export const DEF_SIDER = 'sessions';
 
 const CENTER_TAB_KEYS = new Set(['agent', 'knowledge', 'tool', 'view', 'object', 'ontology', 'skill', 'file', 'model']);
-const EMPLOYEE_RESOURCE_TAB_KEYS = new Set([
-  'knowledge',
-  'tool',
-  'view',
-  'object',
-  'ontology',
-  'skill',
-  'file',
-  'model',
-]);
 
 const SIDER_ACTIVE_TAB_BY_PATH: Partial<Record<string, (typeof tabItems)[number]['key']>> = {
   '/dialogueRecord': 'sessions',
