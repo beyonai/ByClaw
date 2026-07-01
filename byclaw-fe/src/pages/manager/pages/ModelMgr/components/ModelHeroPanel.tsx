@@ -2,10 +2,13 @@ import { ThunderboltOutlined } from '@ant-design/icons';
 import { Button, Input, Space, Tooltip } from 'antd';
 import classNames from 'classnames';
 import React from 'react';
-import type { IntlShape } from 'react-intl';
 import AntdIcon from '@/pages/manager/components/AntdIcon';
 import commonStyles from '@/pages/manager/less/commonTabList.less';
 import styles from '../index.module.less';
+
+type IntlShape = {
+  formatMessage: (descriptor: { id: string }, values?: Record<string, any>) => string;
+};
 
 type Props = {
   intl: IntlShape;

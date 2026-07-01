@@ -8,7 +8,7 @@
 
 插件按顺序尝试两种结构（取第一个可用的 Agent 条目）：
 
-1. **`agent_list` 数组**：使用 **`agent_list[0]`** 作为条目（字段名与下文「条目字段」一致）。关联资源字段：优先 `relResourceInfoList`；若缺失且存在 **`relResourceList`**，则在读取阶段视为同一列表（与 `src/agent-adapter.ts` 对详情 JSON 的处理一致）。
+1. **`agent_list` 数组**：使用 **`agent_list[0]`** 作为条目（字段名与下文「条目字段」一致）。关联资源字段统一读取 **`relResourceList`**。
 2. **百应详情根对象**：根上同时存在 **`resourceId`** 与 **`resourceName`**（字符串）时，视为详情格式；部分字段会从 JSON 字符串再解析（如 `prologue`、`coreCompetencies`）。
 
 若两种方式都得不到有效条目：
@@ -30,12 +30,14 @@
 |------|------|
 | 始终写出 `skills` | 每个托管子 agent（`baiying-agent-*`）在 **`agents.list[]`** 中都带有 **`skills`** 字段，不再依赖「有值才出现」。 |
 | 默认空数组 | 无可用配置时为 **`[]`**。 |
-| **`relSkills`（优先）** | JSON **根**上为非空数组时，**`agents.list[].skills`** 写入每项 skill 名称。兼容字符串数组（如 `["dws","clawhub"]`），也支持对象数组：`skillType: "inner"` 只引用 `skillCode`；`skillType: "hub"` 写入 `skillCode` 并触发 hub 下载同步。 |
+| **`relSkills`（优先）** | JSON **根**上为非空数组时，**`agents.list[].skills`** 写入每项 skill 名称。兼容字符串数组（如 `["dws","clawhub"]`）和 JSON 字符串数组快照，也支持对象数组：带 `skillPath` / `skillDocObjectKey`（含 `targetContent` JSON 内字段）的对象优先按路径型 skill 处理，不因 `skillType: "inner"` 固定到 `/app/skills`；无路径信息的 `skillType: "inner"` 会先用 `${OPENCLAW_STATE_DIR}/plugin-skills/<skillCode>/SKILL.md` 解析实际 filter name，找不到时才保留 `skillCode`；`skillType: "hub"` 写入 `skillCode` 并触发 hub 下载同步。路径型 skill 会从 workspace skill 或 `${OPENCLAW_STATE_DIR}/plugin-skills` 目录解析 `SKILL.md` frontmatter `name`，读不到时退回路径末段目录名。 |
 | **Hub skill 同步** | `hubSkillAutoSync` 默认开启；hub 对象的 `versionUrl` / `skillUrl` 可为 ByaiService 相对路径。插件通过 Redis 服务注册表发现 ByaiService，每次同步先查版本，只有本地 `${OPENCLAW_STATE_DIR}/skills/<skillCode>` 缺失或版本不同才下载覆盖，并写 `.baiying-hub-skill.json`。 |
-| **`skills`（兼容）** | 若无有效 **`relSkills`**，则读取根级 **`skills`**（旧版「原生简化」JSON）；仍无则为 **`[]`**。 |
-| **Workspace 上传 skill** | 默认扫描 `skills/<目录>/SKILL.md`，优先使用 `SKILL.md` frontmatter `name` 作为 skill filter 名称：只把当前 agent workspace 下的 skill 并入该 agent，不读取其它 agent workspace；main workspace (`workspace/skills`) 下的 skill 仅在 `workspaceSkillIncludeMainShared: true` 时作为共享 skill 并入托管子 agent。 |
+| **`skills`（兼容）** | 若无有效 **`relSkills`**，则读取根级 **`skills`**（旧版「原生简化」JSON，兼容数组或 JSON 字符串数组）；仍无则为 **`[]`**。 |
+| **Workspace / plugin skill 扫描** | 默认扫描 `skills/<目录>/SKILL.md`，优先使用 `SKILL.md` frontmatter `name` 作为 skill filter 名称：workspace skill 只把当前 agent workspace 下的 skill 并入该 agent，不读取其它 agent workspace；main workspace (`workspace/skills`) 下的 skill 仅在 `workspaceSkillIncludeMainShared: true` 时作为共享 skill 并入托管子 agent；`${OPENCLAW_STATE_DIR}/plugin-skills` 会被扫描并监听，用于解析已声明的 `skillCode`/路径，不会把目录下所有 skill 无差别并入每个 agent。 |
 
 适用结构：百应详情根对象、`agent_list` 与首条目同文件根上的字段、以及原生根对象——均从**根对象**读取 `relSkills` / `skills`。Workspace skill 只识别一层目录下的 `SKILL.md`，不会采纳更深层级文件。该配置写回默认走 `agents` hot reload；插件会同步更新禁用的内部 `skills.entries.__baiying_enhance_reload` 标记，促使 OpenClaw 刷新 skills/tools 快照，不需要重启 OpenClaw。对 rclone/FUSE 等网盘挂载，插件不只依赖 `fs.watch`，还会用周期扫描兜底；当目录类型上报为 unknown 时会通过 `stat()` 再确认。
+
+`relResourceList` 中 `resourceBizType` / `resourceType` 为 `SKILL` 的条目不会注入 `baiying_call` 或 Workspace Markdown；SKILL 只通过 `relSkills` 进入 OpenClaw skills。
 
 ### `agents.list[].tools`
 
@@ -97,7 +99,7 @@
 | `intro` | `resourceDesc` | `## Capabilities overview` |
 | `coreCompetencies`（数组） | `coreCompetencies`（JSON 字符串解析为数组） | `## Core competencies`，每项包含：`coreCompetency`、`description`、`acceptBoundary`、`rejectBoundary`、`example` |
 | `corePersonaDefinition`（JSON 拓展数组） | 同上 | `## 百应业务拓展属性`：列表摘要 `name`→`value`，并提示详见 `BYAI_BUSINESS_EXTENSIONS.md` |
-| `relResourceInfoList` | `relResourceInfoList`，若无则用 `relResourceList` | `## Associated resources`（列出名称、类型、`resourceDesc`） |
+| `relResourceList` | `relResourceList` | `## Associated resources`（仅非 SKILL 资源；列出名称、类型、`resourceDesc`） |
 
 ---
 
@@ -124,7 +126,7 @@
 
 | 来源 | 作用 |
 |------|------|
-| `relResourceInfoList` 或 `relResourceList` | `## Available resources`：资源名、`resourceId`、`resourceBizType` 或 `resourceType`、`resourceCode`、`resourceDesc` |
+| `relResourceList` | `## Available resources`：仅非 SKILL 资源；资源名、`resourceId`、`resourceBizType` 或 `resourceType`、`resourceCode`、`resourceDesc` |
 | 条目 `resourceId` + 适配层 **`sourceKey`**（作为 fallback） | 对 DOC 类资源（见下）在列表项中补充说明 **`agent_id`** 取值 |
 
 DOC 类资源类型（用于决定是否展示 `agent_id`）：`DOC`、`ATOM`、`KG_DOC`、`KG_DB`、`KG_QA`。

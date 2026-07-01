@@ -20,6 +20,11 @@ import {
   extractFinalAssistantOutput,
   scheduleLangfuseFinalOutputBackfill,
 } from "./langfuse-final-output.js";
+import {
+  markBaiyingEnhanceColdStartReady,
+  markBaiyingEnhanceColdStartUnavailable,
+  resetBaiyingEnhanceColdStartReadiness,
+} from "./cold-start-readiness.js";
 
 function resolvePluginPath(api: OpenClawPluginApi, raw: string): string {
   if (path.isAbsolute(raw)) {
@@ -61,6 +66,15 @@ function resolveExecutorResourcesDir(
 const registry = new AgentRegistryState();
 const pluginRuntimeDir = path.dirname(fileURLToPath(import.meta.url));
 const PLUGIN_ID = "baiying-enhance";
+
+function resolveColdStartReadySettleMs(): number {
+  const raw = Number.parseInt(process.env.BAIYING_COLD_START_READY_SETTLE_MS || "2000", 10);
+  return Number.isFinite(raw) ? Math.max(0, raw) : 2000;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function warnIfConversationHooksBlocked(api: OpenClawPluginApi): void {
   try {
@@ -213,6 +227,7 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
     start: async (ctx) => {
       const startMs = performance.now();
       serviceStopped = false;
+      resetBaiyingEnhanceColdStartReadiness("service_starting");
 
       const [
         { createAgentWatchdog },
@@ -375,8 +390,25 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
         if (serviceStopped) {
           return;
         }
+        const authorizedIds = digEmployeeAuthWatch?.getAuthorizedIds();
+        if (authorizedIds === undefined) {
+          markBaiyingEnhanceColdStartUnavailable("dig_employee_auth_unavailable");
+          api.logger.warn(
+            "baiying-enhance: cold-start readiness unavailable because dig-employee auth did not load",
+          );
+        } else {
+          const settleMs = resolveColdStartReadySettleMs();
+          if (settleMs > 0) {
+            await delay(settleMs);
+          }
+          markBaiyingEnhanceColdStartReady("initial_managed_agent_sync_complete");
+          api.logger.info(
+            `baiying-enhance: cold-start readiness signalled after initial managed agent sync (${authorizedIds.size} authorized id(s), settleMs=${settleMs})`,
+          );
+        }
         await digEmployeeChangeSubscriber?.start();
       })().catch((err) => {
+        markBaiyingEnhanceColdStartUnavailable("background_startup_sync_failed");
         api.logger.warn(
           `baiying-enhance: background startup sync failed: ${
             err instanceof Error ? err.message : String(err)

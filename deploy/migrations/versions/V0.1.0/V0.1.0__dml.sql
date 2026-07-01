@@ -50,7 +50,7 @@ UPDATE "byai"."sandbox_service_spec" SET "spec_json" = '{
     "startup": {
         "entrypoint": [
             "sh",
-            "-lc",
+            "-c",
             "mkdir -p /by/node-diagnostics && chmod 1777 /by/node-diagnostics && node dist/index.js gateway --bind=lan --port=8080 --allow-unconfigured --verbose & filebrowser --root /by/.openclaw --port 8082 --address 0.0.0.0 --noauth --baseurl /filebrowser"
         ]
     },

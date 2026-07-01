@@ -92,6 +92,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
   /** 对话的额外参数 */
   const tempParamsRef = useRef(sendExtraParams);
   tempParamsRef.current = sendExtraParams;
+  const shouldSkipSessionListCache = Boolean(sendExtraParams?.troubleshootMessageId);
 
   const prevAgentId = useRef(agentId);
 
@@ -105,12 +106,16 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
 
   const addSession = useCallback(
     (newSession: ISession) => {
+      if (shouldSkipSessionListCache) {
+        return;
+      }
+
       dispatch({
         type: 'session/addSession',
         payload: newSession,
       });
     },
-    [dispatch]
+    [dispatch, shouldSkipSessionListCache]
   );
 
   const updateSession = useCallback(

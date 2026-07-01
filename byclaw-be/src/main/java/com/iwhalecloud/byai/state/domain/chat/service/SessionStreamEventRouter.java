@@ -205,6 +205,10 @@ public class SessionStreamEventRouter {
         LoginInfo previousLoginInfo = CurrentUserHolder.getLoginInfo();
         try {
             CurrentUserHolder.setLoginInfo(buildBackgroundLoginInfo(sessionId, payload));
+
+            // 同步更新会话的updateTime
+            sessionService.touchUpdateTime(sessionId);
+
             return memoryMessageService.save(sessionId, ChatUseageEnum.SYSTEM_RESPONSE.getCode(), messageContext,
                 assistantChatDto);
         }

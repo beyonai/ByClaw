@@ -131,7 +131,7 @@ const ModelCardItem: React.FC<Props> = ({
           <div className={styles.sectionLabel}>{intl.formatMessage({ id: 'modelMgr.filterSystem' })}</div>
           <div className={styles.tagRow}>
             {Array.isArray(systemsArr) && systemsArr.length ? (
-              renderSystemTags(systemsArr, systemLabelMap)
+              renderSystemTags(intl, systemsArr, systemLabelMap)
             ) : (
               <span className={styles.emptyText}>-</span>
             )}

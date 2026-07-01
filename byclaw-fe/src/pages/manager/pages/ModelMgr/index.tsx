@@ -12,16 +12,16 @@ import ModelCardSection from './components/ModelCardSection';
 import ModelFormModal from './components/ModelFormModal';
 import ModelFilterPanel from './components/ModelFilterPanel';
 import ModelHeroPanel from './components/ModelHeroPanel';
-import { systemNameMap, type FilterChip, type ModelStatus } from './components/modelMgrViewUtils';
+import { getSystemName, type FilterChip, type ModelStatus } from './components/modelMgrViewUtils';
 import styles from './index.module.less';
 
 type ModelTagItem = {
-  // 兼容后端不同返回口径：camelCase / snake_case
+  // Support both camelCase and snake_case response fields.
   paramName?: string;
   paramValue?: string;
   param_name?: string;
   param_value?: string;
-  // 兼容其它 standType 静态数据口径
+  // Support static-data fields from other standType APIs.
   standDisplayValue?: string;
   standCode?: string;
   [key: string]: any;
@@ -92,7 +92,7 @@ const ModelMgr: React.FC = () => {
     return map;
   }, [abilityTreeData]);
 
-  // 系统筛选改为接口动态拉取（对齐数字员工“来源”）
+  // System filters are loaded from the API, aligned with digital employee sources.
 
   const activeFilterCount = [status, ability, system, keyword.trim()].filter(Boolean).length;
   const resultSummary = useMemo(() => {
@@ -166,7 +166,7 @@ const ModelMgr: React.FC = () => {
           systems.forEach((systemItem: any) => {
             const value = `${systemItem ?? ''}`.trim();
             if (!value || nextSystemLabelMap[value]) return;
-            nextSystemLabelMap[value] = systemNameMap[value] || value;
+            nextSystemLabelMap[value] = getSystemName(intl, value);
           });
         });
         setSystemLabelMap(nextSystemLabelMap);
@@ -185,7 +185,7 @@ const ModelMgr: React.FC = () => {
         });
       },
     });
-  }, [dispatch]);
+  }, [dispatch, intl]);
 
   const resetAndFetch = useCallback(
     (override?: Partial<{ keyword: string; status?: ModelStatus; ability?: string; system?: string }>) => {
@@ -202,13 +202,13 @@ const ModelMgr: React.FC = () => {
   );
 
   useEffect(() => {
-    // 初次进入页面加载
+    // Initial page load.
     fetchList({ pageNum: 1, pageSize: pagination.pageSize });
     fetchOverviewStats();
   }, []);
 
   useEffect(() => {
-    // 能力筛选项改为后端动态下发：/system/staticdata/getDcSystemConfigListByStandType (standType=MODEL_TAGS)
+    // Ability filters are served by /system/staticdata/getDcSystemConfigListByStandType (standType=MODEL_TAGS).
     getDcSystemConfigListByStandType({ standType: 'MODEL_TAGS' })
       .then((res: any) => {
         const list: ModelTagItem[] = Array.isArray(res?.data) ? res.data : [];
@@ -283,7 +283,7 @@ const ModelMgr: React.FC = () => {
       chips.push({
         key: 'system',
         label: `${intl.formatMessage({ id: 'modelMgr.filterSystem' })} · ${
-          systemLabelMap?.[system] || systemNameMap[system] || system
+          systemLabelMap?.[system] || getSystemName(intl, system)
         }`,
         onClose: () => {
           setSystem(undefined);

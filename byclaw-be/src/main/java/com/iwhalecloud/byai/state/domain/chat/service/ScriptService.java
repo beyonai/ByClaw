@@ -8,6 +8,7 @@ import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
 import com.iwhalecloud.byai.state.domain.chat.model.ChatInitializationDto;
 import com.iwhalecloud.byai.state.domain.session.dto.SessionMembersDto;
 import com.iwhalecloud.byai.state.domain.session.service.SessionService;
+import com.iwhalecloud.byai.state.domain.session.service.SessionExtService;
 import java.io.OutputStream;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -30,6 +31,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.manager.entity.men.MenTask;
+import com.iwhalecloud.byai.manager.entity.session.ByaiSessionExt;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSessionMember;
 import com.iwhalecloud.byai.common.constants.Constants;
 import com.iwhalecloud.byai.common.constants.chat.ChatObjType;
@@ -45,6 +47,7 @@ import com.iwhalecloud.byai.state.domain.chat.enums.ChatTransport;
 import com.iwhalecloud.byai.state.domain.agent.enums.AgentMetaEnum;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
 import com.iwhalecloud.byai.state.domain.chat.dto.RunningChatInfo;
+import com.iwhalecloud.byai.state.domain.chat.dto.RunningChatSnapshotResponse;
 import com.iwhalecloud.byai.state.domain.chat.model.ChatResponse;
 import com.iwhalecloud.byai.state.domain.chat.model.MessageContext;
 import com.iwhalecloud.byai.state.domain.men.enums.SystemCodeEnum;
@@ -105,6 +108,9 @@ public class ScriptService extends AbstractChatProcess {
     private SessionMemberService sessionMemberService;
 
     @Autowired
+    private SessionExtService sessionExtService;
+
+    @Autowired
     private PlatformTransactionManager transactionManager;
 
     @Autowired
@@ -118,6 +124,12 @@ public class ScriptService extends AbstractChatProcess {
 
     @Autowired
     private RunningOutputStreamRegistry runningOutputStreamRegistry;
+
+    @Autowired
+    private RunningChatSnapshotService runningChatSnapshotService;
+
+    @Autowired
+    private com.iwhalecloud.byai.common.message.service.ByaiMessageHotService byaiMessageHotService;
 
     /**
      * 参数准备：生成消息ID、组装请求参数、初始化上下文等。
@@ -140,6 +152,8 @@ public class ScriptService extends AbstractChatProcess {
         if (StringUtils.isNotEmpty(ctx.assistantChatDto.getTraceId()) && ctx.assistantChatDto.getLlmMessageId() == null) {
             ctx.assistantChatDto.setLlmMessageId(getModelAnswerMessageIdByTraceId(ctx.assistantChatDto.getTraceId()));
         }
+
+        // @TODO 需要删掉这些 UPDATE FEEDBACK 的逻辑。更新消息全部统一走 continueRunningTrace。必须保证 messageId 和 traceId 的唯一性和一致性。
 
         // 判断是否更新任务
         if (ctx.continueRunningTrace) {
@@ -208,6 +222,10 @@ public class ScriptService extends AbstractChatProcess {
                 ctx.userMessageId);
         }
 
+        if (StringUtils.isNotBlank(ctx.assistantChatDto.getTroubleshootMessageId())) {
+            saveTroubleshootSessionExt(ctx);
+        }
+
         // 多端广播：将用户发送的消息推送到用户的其他设备
         if (!ctx.continueRunningTrace) {
             broadcastUserMessage(ctx);
@@ -235,8 +253,22 @@ public class ScriptService extends AbstractChatProcess {
         ctx.params = paramService.getParams(ctx);
     }
 
-    private void resolveRunningTraceState(ChatProcessContext ctx) {
-        if (ctx == null || ctx.sessionId == null) {
+    /**
+     * troubleshoot 会话：向 byai_session_ext 表插入一条 troubleshoot_message_id 扩展记录。
+     *
+     * @param ctx 聊天流程上下文
+     */
+    private void saveTroubleshootSessionExt(ChatProcessContext ctx) {
+        ByaiSessionExt byaiSessionExt = new ByaiSessionExt();
+        byaiSessionExt.setExtId(sequenceService.nextVal());
+        byaiSessionExt.setSessionId(ctx.sessionId);
+        byaiSessionExt.setExtParamName("troubleshoot_message_id");
+        byaiSessionExt.setExtParamCode("troubleshoot_message_id");
+        byaiSessionExt.setExtParamValue(ctx.assistantChatDto.getTroubleshootMessageId());
+        sessionExtService.save(byaiSessionExt);
+    }
+
+    private void resolveRunningTraceState(ChatProcessContext ctx) {        if (ctx == null || ctx.sessionId == null) {
             return;
         }
 
@@ -261,7 +293,7 @@ public class ScriptService extends AbstractChatProcess {
         ctx.traceId = runningTraceId;
     }
 
-    private String getTraceId(Long userMessageId, Long modelAnswerMessageId) {
+    public static String getTraceId(Long userMessageId, Long modelAnswerMessageId) {
         return TraceIdCodec.encode(userMessageId, modelAnswerMessageId);
     }
 
@@ -340,6 +372,11 @@ public class ScriptService extends AbstractChatProcess {
      */
     @Override
     public void storeMessage(ChatProcessContext ctx) {
+        // 落库一次性闸门：用户停止会话时可能已抢先落库，避免请求线程重复 insert。
+        if (!ctx.tryBeginPersist()) {
+            log.info("storeMessage 跳过：消息已落库, sessionId: {}, traceId: {}", ctx.sessionId, ctx.traceId);
+            return;
+        }
         // Netty群聊中使用保存消息路径
         if (ctx.gatewayError) {
             // Gateway error 事件已由 Redis 监听器写入前端，此处仅持久化消息，不再写流
@@ -470,6 +507,52 @@ public class ScriptService extends AbstractChatProcess {
     }
 
     /**
+     * 用户停止会话（stopChat）时，将当前已堆积的消息落库。
+     * <p>
+     * 同 pod 场景：直接复用运行中的 {@link ChatProcessContext}，走与正常完成一致的
+     * {@link #completeAsyncGatewayContext} 路径（storeMessage + afterProcess + 停止监听），
+     * 消息按正常完成状态入库。落库一次性闸门保证不会与 owner 请求线程的后续落库重复。
+     *
+     * @param ctx 运行中的聊天上下文
+     */
+    public void flushOnStop(ChatProcessContext ctx) {
+        if (ctx == null) {
+            return;
+        }
+        if (ctx.messageContext != null) {
+            ctx.messageContext.setComplete(true);
+        }
+        completeAsyncGatewayContext(ctx);
+    }
+
+    /**
+     * 跨 pod 场景：本 pod 没有运行中的上下文（监听器与内存上下文在其他 pod），
+     * 退回到读取 {@link RunningChatSnapshotService} 在 Redis 中保存的运行态快照，
+     * 用按 messageId 幂等的 upsert 将已堆积内容落库，按正常完成状态（FINISH）入库。
+     * <p>
+     * 仅在快照存在时生效（当前 WebSocket 链路每条事件都会刷新快照）。落库后由调用方负责
+     * 清理 running 标记与快照。
+     *
+     * @param sessionId            会话 ID
+     * @param modelAnswerMessageId 模型回答消息 ID
+     * @return true 表示命中快照并已落库；false 表示无快照可落库
+     */
+    public boolean flushFromSnapshot(Long sessionId, Long modelAnswerMessageId) {
+        if (sessionId == null) {
+            return false;
+        }
+        RunningChatSnapshotResponse snapshot = runningChatSnapshotService.get(sessionId, null, modelAnswerMessageId);
+        if (snapshot == null || snapshot.getMessageId() == null) {
+            return false;
+        }
+        // 按正常完成状态落库，保持与同 pod 路径一致。
+        snapshot.setMsgStatus(com.iwhalecloud.byai.state.domain.message.enums.MsgStatus.FINISH.getCode());
+        byaiMessageHotService.updateSelective(snapshot);
+        log.info("stopChat 跨 pod 从快照落库完成, sessionId: {}, messageId: {}", sessionId, snapshot.getMessageId());
+        return true;
+    }
+
+    /**
      * 异常处理：统一处理主流程中的异常，记录索引、抛出业务异常等。
      */
     @Override
@@ -496,6 +579,11 @@ public class ScriptService extends AbstractChatProcess {
 
     private void saveExceptionRequiresNew(ChatProcessContext ctx) {
         if (ctx == null || ctx.assistantChatDto == null) {
+            return;
+        }
+        // 落库一次性闸门：避免与 stopChat 主动落库重复 insert。
+        if (!ctx.tryBeginPersist()) {
+            log.info("saveException 跳过：消息已落库, sessionId: {}, traceId: {}", ctx.sessionId, ctx.traceId);
             return;
         }
 
@@ -582,8 +670,14 @@ public class ScriptService extends AbstractChatProcess {
         List<ResourceVo> resourceList = ctx.getAssistantChatDto().getResourceList();
         for (int i = 0; resourceList != null && i < resourceList.size(); i++) {
             ResourceVo resourceVo = resourceList.get(i);
+            if (resourceVo == null || resourceVo.getResourceType() == null) {
+                continue;
+            }
             if (AgentMetaEnum.DIG_EMPLOYEE.getCode().equalsIgnoreCase(resourceVo.getResourceType().getCode())) {
-                allAgentIds.add(Long.parseLong(resourceVo.getResourceId()));
+                Long resourceId = parseResourceIdAsLong(resourceVo);
+                if (resourceId != null) {
+                    allAgentIds.add(resourceId);
+                }
             }
         }
         if (CollectionUtils.isNotEmpty(ctx.getAgentIds())) {
@@ -610,6 +704,20 @@ public class ScriptService extends AbstractChatProcess {
                 sessionMember.setRequestCount((currentCount == null ? 0L : currentCount) + 1L);
                 sessionMemberService.updateById(sessionMember);
             }
+        }
+    }
+
+    private Long parseResourceIdAsLong(ResourceVo resourceVo) {
+        if (resourceVo == null || StringUtils.isBlank(resourceVo.getResourceId())) {
+            return null;
+        }
+        try {
+            return Long.parseLong(resourceVo.getResourceId());
+        }
+        catch (NumberFormatException e) {
+            log.warn("resourceId无法转换为Long，跳过会话成员统计，resourceType={}, resourceId={}",
+                resourceVo.getResourceType(), resourceVo.getResourceId());
+            return null;
         }
     }
 

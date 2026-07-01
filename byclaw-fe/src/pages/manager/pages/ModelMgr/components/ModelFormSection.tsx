@@ -21,7 +21,7 @@ const ModelFormSection: React.FC<Props> = ({ title, desc, open, onToggle, childr
         <span className={styles.sectionAction}>{open ? <DownOutlined /> : <RightOutlined />}</span>
       </button>
       <div className={styles.sectionDesc}>{desc}</div>
-      <div style={{ display: open ? 'block' : 'none' }}>{children}</div>
+      <div className={open ? styles.sectionContentOpen : styles.sectionContentClosed}>{children}</div>
     </div>
   );
 };

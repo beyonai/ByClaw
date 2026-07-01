@@ -18,9 +18,17 @@ jest.mock('@/utils/cookie', () => ({
   },
 }));
 
+jest.mock('@/utils/websocket', () => ({
+  __esModule: true,
+  default: {
+    init: jest.fn(),
+  },
+}));
+
 import userModel from '../common/user';
 import CookieUtil from '@/utils/cookie';
 import { setUserToken } from '@/utils/auth';
+import webSocketManager from '@/utils/websocket';
 
 describe('models/common/user', () => {
   const effects = (userModel as any).effects;
@@ -79,6 +87,7 @@ describe('models/common/user', () => {
     expect((CookieUtil as any).set).toHaveBeenCalledWith('uc', 'alice');
     expect(localStorage.getItem('uc')).toBe('alice');
     expect(setUserToken).toHaveBeenCalledWith(payload);
+    expect(webSocketManager.init).toHaveBeenCalled();
     expect(put).toHaveBeenCalledWith({
       type: 'save',
       payload: {

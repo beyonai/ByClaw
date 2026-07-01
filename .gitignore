@@ -108,5 +108,5 @@ byclaw-data/.vscode/settings.json
 .vscode/launch.json
 
 .workbuddy/
-byclaw-data/scene_detail_demo.py
-byclaw-data/search_ontology_demo.py
+
+.codegraph

@@ -1,10 +1,13 @@
 import { Tag } from 'antd';
 import React from 'react';
-import type { IntlShape } from 'react-intl';
 import type { ITreeData } from '@/pages/manager/pages/OrgMgr/components/TreeFilter';
 import TreeFilter from '@/pages/manager/pages/OrgMgr/components/TreeFilter';
 import type { FilterChip } from './modelMgrViewUtils';
 import styles from '../index.module.less';
+
+type IntlShape = {
+  formatMessage: (descriptor: { id: string }, values?: Record<string, any>) => string;
+};
 
 type Props = {
   intl: IntlShape;

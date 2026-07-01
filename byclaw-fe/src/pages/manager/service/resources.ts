@@ -489,6 +489,17 @@ export const queryWorkspaceSkillList = (params: QuerySkillListParams) => {
 
 export const queryLobsterInstalledSkillList = queryWorkspaceSkillList;
 
+/**
+ * 查询当前数字员工 workspace 中、尚未进入个人技能资源列表的目录技能（用户开发）。
+ * 与 queryWorkspaceSkillList 的区别：去重口径为“个人 tab 已资源化技能”，供首页右侧个人技能 tab 合并展示。
+ */
+export const queryWorkspacePersonalSkillList = (params: QuerySkillListParams) => {
+  return POST<{ code: number; msg: string; data: UploadSkillZipResponse[]; success: boolean }>(
+    '/byaiService/tool/qryWorkspacePersonalSkillList',
+    params
+  );
+};
+
 export interface WorkspaceSkillParams {
   skillPath: string;
   resourceId?: string | number;

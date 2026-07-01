@@ -14,6 +14,11 @@ import lombok.Setter;
 public class ResourceMemberQueryResultVo {
 
     /**
+     * 资源名称
+     */
+    private String resourceName;
+
+    /**
      * 资源真实业务类型
      */
     private String resourceBizType;

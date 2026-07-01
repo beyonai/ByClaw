@@ -11,6 +11,9 @@ const Knowledge = lazy(() => import('@/layout/sider/components/Knowledge'));
 const ResourceSiderPanel = lazy(() => import('@/layout/sider/components/ResourceSiderPanel'));
 const SearchAndQuery = lazy(() => import('@/layout/sider/components/SearchAndQuery'));
 const FileSiderPanel = lazy(() => import('@/layout/sider/components/FileSiderPanel'));
+const ModelSiderPanel = lazy(() => import('@/layout/sider/components/ModelSiderPanel'));
+
+const OntologySiderPanel = lazy(() => import('@/layout/sider/components/OntologySiderPanel'));
 
 const ToolSiderPanel = () => <ResourceSiderPanel resourceType="TOOL" />;
 const ViewSiderPanel = () => <ResourceSiderPanel resourceType="VIEW" />;
@@ -42,6 +45,14 @@ export const tabItems: any[] = [
     ChildComponent: SearchAndQuery,
     navigatePath: '/searchAndQuery',
     forceRender: true,
+  },
+  {
+    key: 'model',
+    icon: 'icon-a-Braindanao',
+    activeIcon: 'icon-a-Braindanao',
+    label: 'common.model',
+    ChildComponent: ModelSiderPanel,
+    navigatePath: '/models',
   },
   {
     key: 'knowledge',
@@ -80,6 +91,14 @@ export const tabItems: any[] = [
     // hideSider: true,
   },
   {
+    key: 'ontology',
+    icon: 'icon-a-yemian-line',
+    activeIcon: 'icon-yemian-fill',
+    label: 'sider.ontology',
+    ChildComponent: OntologySiderPanel,
+    navigatePath: '/ontologyCenter',
+  },
+  {
     key: 'skill',
     icon: 'icon-a-changjing-line',
     activeIcon: 'icon-changjing-fill',
@@ -111,9 +130,8 @@ const SiderContent = (props: IProps) => {
 
   const items = useMemo(
     () =>
-      visibleKeys
-        .map((key) => tabItems.find((pageItem) => pageItem.key === key))
-        .filter((pageItem): pageItem is (typeof tabItems)[number] => !!pageItem)
+      tabItems
+        .filter((pageItem) => visibleKeys.includes(pageItem.key))
         .map((pageItem) => {
           const { key, ChildComponent, destroyOnHidden = false, disabled, forceRender = false } = pageItem;
           return {

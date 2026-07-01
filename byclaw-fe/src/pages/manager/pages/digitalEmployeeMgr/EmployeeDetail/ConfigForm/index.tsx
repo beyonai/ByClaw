@@ -62,6 +62,8 @@ import { DEFAULT_DIGITAL_EMPLOYEE_TEMPLATES } from '@/pages/manager/constants/di
 const { TextArea } = Input;
 
 const nanoid = customAlphabet('abcdefghijklmnopqrstuvwxyz1234567890', 6);
+const PROMPT_TEXT_FIELD_DEFAULT_MAX_LENGTH = 10000;
+const getPromptTextLength = (value: any) => Array.from(`${value ?? ''}`).length;
 
 // 能力图标选项
 const abilityIcons = [
@@ -139,6 +141,21 @@ const getDigitalEmployeeTemplate = (templates: any[] = [], ownerType?: string, a
     list.find((item) => item?.ownerType === effectiveOwnerType);
 
   return findTemplate(templates) || {};
+};
+
+const getDigitalEmployeeTemplateMaxLength = (templates: any[] = [], ownerType?: string, agentType?: string) => {
+  const effectiveOwnerType = ownerType === 'personal' ? 'personal' : 'enterprise';
+  const ownerTemplates = (Array.isArray(templates) ? templates : []).filter(
+    (item) => item?.ownerType === effectiveOwnerType
+  );
+  const matchedTemplate =
+    effectiveOwnerType === 'personal'
+      ? ownerTemplates.find((item) => item?.key === 'BYCLAW_ASSISTANT') ||
+        ownerTemplates.find((item) => item?.agentType === '001') ||
+        ownerTemplates[0]
+      : ownerTemplates.find((item) => item?.agentType === agentType);
+
+  return Number(matchedTemplate?.maxLength) || PROMPT_TEXT_FIELD_DEFAULT_MAX_LENGTH;
 };
 
 const getBundledSkillCode = (item: any) => {
@@ -360,8 +377,10 @@ const ConfigForm = (props) => {
   const [catalogList, setCatalogList] = useState([]);
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [robotModalOpen, setRobotModalOpen] = useState(false);
+  const [modelPopoverOpen, setModelPopoverOpen] = useState(false);
   const [robotItem, setRobotItem] = useState<RobotConfig>({ channel: '' });
   const [templateData, setTemplateData] = useState([]);
+  const [promptTextMaxLength, setPromptTextMaxLength] = useState(PROMPT_TEXT_FIELD_DEFAULT_MAX_LENGTH);
   const [configurableTabs, setConfigurableTabs] = useState<
     Array<{ key: string; name: string; isSystem: boolean; tip?: string }>
   >([]);
@@ -709,6 +728,8 @@ const ConfigForm = (props) => {
     const fetchTemplateData = async () => {
       const applyTemplateData = (templates: any[] = []) => {
         const template = getDigitalEmployeeTemplate(templates, effectiveOwnerType, agentType);
+        const nextMaxLength = getDigitalEmployeeTemplateMaxLength(templates, effectiveOwnerType, agentType);
+        setPromptTextMaxLength(nextMaxLength);
         const templatePrompts =
           Array.isArray(template?.prompts) && template.prompts.length > 0
             ? template.prompts
@@ -770,20 +791,18 @@ const ConfigForm = (props) => {
 
   useEffect(() => {
     if (!agentId) return;
-    if (!Array.isArray(templateData) || templateData.length === 0) return;
 
     const parsedConfig = parseCorePersonaDefinition(corePersonaDefinitionValue, isEN);
-    const templateKeys = templateData.map((item) => getPromptConfigKey(item)).filter(Boolean);
-    const templateTipMap = templateData.reduce((result, item) => {
+    const templateTipMap = (Array.isArray(templateData) ? templateData : []).reduce((result, item) => {
       const key = getPromptConfigKey(item);
       if (key && item.tip) {
         result[key] = item.tip;
       }
       return result;
     }, {});
-    const matchesCurrentTemplate = templateKeys.some((key) => parsedConfig.tabs.some((tab) => tab.key === key));
 
-    if (parsedConfig.isArray && parsedConfig.tabs.length > 0 && matchesCurrentTemplate) {
+    // In edit mode, prefer the saved corePersonaDefinition payload over template defaults.
+    if (parsedConfig.isArray && parsedConfig.tabs.length > 0) {
       const parsedTabs = parsedConfig.tabs.map((tab) => ({
         ...tab,
         tip: tab.tip || templateTipMap[tab.key] || '',
@@ -798,6 +817,8 @@ const ConfigForm = (props) => {
       internalSyncRef.current = false;
       return;
     }
+
+    if (!Array.isArray(templateData) || templateData.length === 0) return;
 
     const { tabs, fieldValues, corePersonaDefinitionJson } = buildTemplatePromptConfig(templateData, isEN);
     let roleObj = {};
@@ -1093,14 +1114,106 @@ const ConfigForm = (props) => {
     });
   }, [bundledSkillOptions, bundledSkillSearchName]);
 
+  const handlePromptTextAreaChange = useCallback(
+    (fieldLabel, value) => {
+      const currentLength = getPromptTextLength(value);
+      if (currentLength <= promptTextMaxLength) {
+        return;
+      }
+
+      message.warning(
+        intl.formatMessage(
+          { id: 'employeeDetail.fieldMaxLength' },
+          {
+            field: fieldLabel,
+            max: promptTextMaxLength,
+            current: currentLength,
+          }
+        )
+      );
+    },
+    [intl, promptTextMaxLength]
+  );
+
+  const showPromptOverLimitWarning = useCallback(
+    (fieldLabel, currentLength) => {
+      message.warning(
+        intl.formatMessage(
+          { id: 'employeeDetail.fieldMaxLength' },
+          {
+            field: fieldLabel,
+            max: promptTextMaxLength,
+            current: currentLength,
+          }
+        )
+      );
+    },
+    [intl, promptTextMaxLength]
+  );
+
+  const getNextPromptTextLength = useCallback((target, nextText) => {
+    const value = target?.value || '';
+    const selectionStart = target?.selectionStart ?? value.length;
+    const selectionEnd = target?.selectionEnd ?? selectionStart;
+    const selectedLength = getPromptTextLength(value.slice(selectionStart, selectionEnd));
+    return getPromptTextLength(value) - selectedLength + getPromptTextLength(nextText);
+  }, []);
+
   const renderPromptTextArea = useCallback(
-    (name, placeholder) => (
+    (name, placeholder, fieldLabel) => (
       <Form.Item name={name} className={styles.marginBottomNone}>
         <TextArea
           className={styles.personalityDefinitionTextArea}
           autoSize={{ minRows: 5, maxRows: 10 }}
           placeholder={placeholder}
           disabled={isReadOnly}
+          maxLength={promptTextMaxLength}
+          showCount={{
+            formatter: ({ count }) => `${count}/${promptTextMaxLength}`,
+          }}
+          onBeforeInput={(e) => {
+            const inputType = e?.nativeEvent?.inputType || '';
+            if (inputType === 'insertFromPaste') return;
+            const nextText = e?.data || '';
+            if (!nextText) return;
+            const nextLength = getNextPromptTextLength(e.currentTarget, nextText);
+            if (nextLength > promptTextMaxLength) {
+              e.preventDefault();
+              showPromptOverLimitWarning(fieldLabel, nextLength);
+            }
+          }}
+          onChange={(e) => handlePromptTextAreaChange(fieldLabel, e.target.value)}
+          onPaste={(e) => {
+            const pastedText = e.clipboardData?.getData('text') || '';
+            const target = e.currentTarget;
+            const value = target?.value || '';
+            const selectionStart = target?.selectionStart ?? value.length;
+            const selectionEnd = target?.selectionEnd ?? selectionStart;
+            const selectedText = value.slice(selectionStart, selectionEnd);
+            const baseLength = getPromptTextLength(value) - getPromptTextLength(selectedText);
+            const remainingLength = promptTextMaxLength - baseLength;
+            const nextLength = baseLength + getPromptTextLength(pastedText);
+
+            if (nextLength <= promptTextMaxLength) {
+              return;
+            }
+
+            e.preventDefault();
+            showPromptOverLimitWarning(fieldLabel, nextLength);
+
+            if (remainingLength <= 0) {
+              return;
+            }
+
+            const allowedText = Array.from(pastedText).slice(0, remainingLength).join('');
+            const nextValue = `${value.slice(0, selectionStart)}${allowedText}${value.slice(selectionEnd)}`;
+            form.setFieldsValue({ [name]: nextValue });
+            syncRoleToForm({ [name]: nextValue }).then(updateResource);
+            window.setTimeout(() => {
+              const nextCursor = selectionStart + allowedText.length;
+              target?.setSelectionRange?.(nextCursor, nextCursor);
+            });
+          }}
           onBlur={() => {
             if (!compositionRef.current) {
               updateResource();
@@ -1113,7 +1226,17 @@ const ConfigForm = (props) => {
         />
       </Form.Item>
     ),
-    [isReadOnly, updateResource, handleCompositionEnd]
+    [
+      form,
+      getNextPromptTextLength,
+      handlePromptTextAreaChange,
+      isReadOnly,
+      promptTextMaxLength,
+      showPromptOverLimitWarning,
+      syncRoleToForm,
+      updateResource,
+      handleCompositionEnd,
+    ]
   );
 
   const handleAddCustomPromptTab = useCallback(async () => {
@@ -1210,7 +1333,8 @@ const ConfigForm = (props) => {
       ),
       children: renderPromptTextArea(
         item.key,
-        intl.formatMessage({ id: 'employeeDetail.promptField.customPlaceholder' }, { name: item.name })
+        intl.formatMessage({ id: 'employeeDetail.promptField.customPlaceholder' }, { name: item.name }),
+        item.name
       ),
     }));
 
@@ -1737,8 +1861,11 @@ const ConfigForm = (props) => {
                       resultDataRef={resultDataRef}
                       prologueRef={prologueRef}
                       setModelName={setModelName}
+                      onClose={() => setModelPopoverOpen(false)}
                     />
                   }
+                  open={modelPopoverOpen}
+                  onOpenChange={setModelPopoverOpen}
                   trigger={!isReadOnly ? ['click'] : []}
                   placement="bottomRight"
                   arrow={false}

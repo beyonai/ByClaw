@@ -147,7 +147,9 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
   };
 
   setCommonStateBySchema = (schema: any) => {
-    const { queryQuestion, inputSchema, mentionItem, payload: { files } = {} } = schema;
+    const { queryQuestion, inputSchema = {}, mentionItem, payload: { files } = {} } = schema;
+
+    const inputValue = inputSchema?.text || queryQuestion || '';
 
     this.setState((prevState) => ({
       ...prevState,
@@ -166,13 +168,13 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
           },
         };
       }),
-      inputValue: queryQuestion,
+      inputValue,
     }));
 
-    if (inputSchema) {
+    if (inputValue) {
       setTimeout(() => {
         // 目的：等待因为agentId和agentType的改变，导致RichInput的组件的内容修改
-        this.richInputRef.current?.setText(inputSchema);
+        this.richInputRef.current?.appendText(inputValue);
       });
     }
 

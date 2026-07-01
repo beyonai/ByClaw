@@ -86,7 +86,7 @@ export default class SendHelper {
         body: JSON.stringify(body),
         headers,
         openWhenHidden: true, // 窗口切换时不需要断开
-        onopen: (res) => {
+        onopen: async (res) => {
           console.log('---------- onopen', res);
           if (res.status === 401 || res.status === 403) {
             globalLogout();
@@ -97,6 +97,20 @@ export default class SendHelper {
           if (res.status !== 200) {
             // eslint-disable-next-line prefer-promise-reject-errors
             return Promise.reject(`${res.status}`);
+          }
+
+          // 后端异常处理器返回 application/json 而非 event-stream 时，解析错误消息
+          const contentType = res.headers.get('content-type') || '';
+          if (contentType.includes('application/json')) {
+            try {
+              const body = await res.clone().json();
+              if (body && body.code !== 0 && body.msg) {
+                return Promise.reject(body.msg);
+              }
+            } catch (e) {
+              // ignore parse error
+            }
+            return Promise.reject('request_error');
           }
 
           return Promise.resolve();

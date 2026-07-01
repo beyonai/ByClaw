@@ -1,20 +1,39 @@
 import { message } from 'antd';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { IntlShape } from 'react-intl';
 import { normalizeModelType } from './modelFormUtils';
 import { copyTextToClipboard } from '@/pages/manager/utils/copy';
 
+type IntlShape = {
+  formatMessage: (descriptor: { id: string }, values?: Record<string, any>) => string;
+};
+
 type Params = {
   intl: IntlShape;
-  dispatch: any;
   open: boolean;
   currentModelType?: any;
   getCurrentModelId: () => string | number | undefined;
+  allowRerankTable?: boolean;
+  formatDebugError?: (error: any) => string | undefined;
+  runDebugRequest: (params: {
+    modelId: string | number;
+    input: string;
+    modelType?: any;
+    signal: AbortSignal;
+    onDelta: (delta: string) => void;
+  }) => Promise<any>;
 };
 
 const TYPE_INTERVAL_MS = 20;
 
-const useModelDebug = ({ intl, dispatch, open, currentModelType, getCurrentModelId }: Params) => {
+const useModelDebug = ({
+  intl,
+  open,
+  currentModelType,
+  getCurrentModelId,
+  allowRerankTable = true,
+  formatDebugError,
+  runDebugRequest,
+}: Params) => {
   const [debugInputMode, setDebugInputMode] = useState<'template' | 'auto'>('auto');
   const [debugInput, setDebugInput] = useState('');
   const [debugOutput, setDebugOutput] = useState('');
@@ -132,29 +151,22 @@ const useModelDebug = ({ intl, dispatch, open, currentModelType, getCurrentModel
     setRerankResult(null);
     setDebugOutputLoading(true);
     const currentType = normalizeModelType(currentModelType);
-    const effectType =
-      currentType === 'RERANK'
-        ? 'modelMgr/debugModelRerank'
-        : currentType === 'EMBEDDING'
-          ? 'modelMgr/debugModelEmbedding'
-          : 'modelMgr/debugModel';
 
-    dispatch({
-      type: effectType,
-      payload: {
-        id: `${currentModelId}`,
-        input: `${debugInput}`,
-        signal: abortRef.current.signal,
-        onDelta: (delta: string) => {
-          if (currentType === 'RERANK' || currentType === 'EMBEDDING') return;
-          if (!delta) return;
-          setDebugOutputLoading(false);
-          gotDeltaRef.current = true;
-          charQueueRef.current.push(...Array.from(delta));
-          ensureTyping();
-        },
+    runDebugRequest({
+      modelId: `${currentModelId}`,
+      input: `${debugInput}`,
+      modelType: currentModelType,
+      signal: abortRef.current.signal,
+      onDelta: (delta: string) => {
+        if (currentType === 'RERANK' || currentType === 'EMBEDDING') return;
+        if (!delta) return;
+        setDebugOutputLoading(false);
+        gotDeltaRef.current = true;
+        charQueueRef.current.push(...Array.from(delta));
+        ensureTyping();
       },
-      success: (res: any) => {
+    })
+      .then((res: any) => {
         setDebugOutputLoading(false);
         if (currentType === 'RERANK' || currentType === 'EMBEDDING') {
           streamDoneRef.current = true;
@@ -223,12 +235,24 @@ const useModelDebug = ({ intl, dispatch, open, currentModelType, getCurrentModel
           ensureTyping();
         }
         streamDoneRef.current = true;
-      },
-      fail: () => {
+      })
+      .catch((error) => {
+        const errorText = formatDebugError?.(error);
+        if (errorText) {
+          setDebugOutput(errorText);
+        }
         setDebugOutputLoading(false);
-      },
-    });
-  }, [abortDebug, currentModelType, debugInput, dispatch, ensureTyping, getCurrentModelId, intl]);
+      });
+  }, [
+    abortDebug,
+    currentModelType,
+    debugInput,
+    ensureTyping,
+    formatDebugError,
+    getCurrentModelId,
+    intl,
+    runDebugRequest,
+  ]);
 
   const copyText = useCallback(
     async (text: string, successMessageId: string) => {
@@ -264,8 +288,8 @@ const useModelDebug = ({ intl, dispatch, open, currentModelType, getCurrentModel
 
   const shouldShowRerankTable = useMemo(() => {
     const currentType = normalizeModelType(currentModelType);
-    return currentType === 'RERANK' && Array.isArray(rerankResult) && rerankResult.length > 0;
-  }, [currentModelType, rerankResult]);
+    return allowRerankTable && currentType === 'RERANK' && Array.isArray(rerankResult) && rerankResult.length > 0;
+  }, [allowRerankTable, currentModelType, rerankResult]);
 
   return {
     copyText,

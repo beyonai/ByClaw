@@ -127,6 +127,12 @@ export default {
   'orgMgr.members.exitOrganizationContent': 'Exit Organization Confirmation',
   'orgMgr.members.exitOrganizationSuccess': 'Exit Organization Success',
   'orgMgr.members.resetPasswordSuccess': 'Password reset successfully',
+  'orgMgr.members.assignTokenQuota': 'Assign Token Quota',
+  'orgMgr.members.assignTokenQuota.title': 'Assign Token Quota',
+  'orgMgr.members.assignTokenQuota.label': 'Monthly Token Quota',
+  'orgMgr.members.assignTokenQuota.placeholder': 'Enter quota, 0 to disable',
+  'orgMgr.members.assignTokenQuota.success': 'Quota assigned successfully',
+  'orgMgr.members.assignTokenQuota.hint': 'Uses system default if not set',
   'orgMgr.batchExitOrganization': 'Batch Exit Organization',
   'orgMgr.batchExitOrganizationTitle': 'Batch Exit Organization',
   'orgMgr.batchExitOrganizationContent': 'Batch Exit Organization Confirmation',
@@ -370,6 +376,7 @@ export default {
   'modelMgr.resultEmpty': 'No model data',
   'modelMgr.emptyTitle': 'No models to display yet',
   'modelMgr.emptyDesc': 'Create a model first, or reset the filters to review existing records.',
+  'modelMgr.system.superAssistant': 'Personal assistant',
 
   // Model Management Error Messages
   'modelMgr.error.requestFail': 'Request failed',
@@ -394,6 +401,7 @@ export default {
   'modelMgr.modal.modelCodePlaceholder': 'Enter model code',
   'modelMgr.modal.contextTokens': 'Max context length',
   'modelMgr.modal.contextTokensPlaceholder': 'Enter max context length',
+  'modelMgr.modal.contextTokensMin': 'Max context length must be at least {min}',
   'modelMgr.modal.systemTags': 'System tags',
   'modelMgr.modal.systemTagsPlaceholder': 'Select system tags',
   'modelMgr.modal.ability': 'Capability',
@@ -401,7 +409,10 @@ export default {
   'modelMgr.modal.status': 'Status',
   'modelMgr.modal.debugPanelTitle': 'Model debug',
   'modelMgr.modal.debugRunPlaceholder': 'Click "Run" to call debug API and see output',
+  'modelMgr.modal.modelFallbackTitle': 'Model',
   'modelMgr.modal.saveSuccess': 'Saved successfully',
+  'modelMgr.modal.saveWithoutId':
+    'Saved successfully, but the model ID was not returned. Reopen the dialog or refresh the list before debugging again.',
   'modelMgr.modal.saveAndContinue': 'Save and continue',
   'modelMgr.modal.saveAndClose': 'Save and close',
   'modelMgr.modal.heroDesc':
@@ -454,6 +465,7 @@ export default {
   'modelMgr.modal.temperature': 'Temperature',
   'modelMgr.modal.topP': 'Top P',
   'modelMgr.modal.maxTokens': 'Max Tokens',
+  'modelMgr.modal.maxTokensMin': 'Max Tokens must be at least {min}',
   'modelMgr.modal.frequencyPenalty': 'Frequency Penalty',
   'modelMgr.modal.presencePenalty': 'Presence Penalty',
   'modelMgr.modal.providerRequired': 'Please select a model provider',
@@ -485,6 +497,10 @@ export default {
   'modelMgr.modal.footerHint': 'Finish the model basics and connection setup first, then save or debug.',
   'modelMgr.modal.copyInputSuccess': 'Request copied',
   'modelMgr.modal.copyOutputSuccess': 'Output copied',
+  'modelMgr.modal.debugTableView': 'Table',
+  'modelMgr.modal.debugLoading': 'Requesting...',
+  'modelMgr.modal.debugTableRank': 'Rank',
+  'modelMgr.modal.debugTableText': 'Text',
   // /** LLM debug input default user message */
   'modelMgr.modal.debugDefaultUserMessage': "How's the weather today?",
   // /** RERANK debug input default query */

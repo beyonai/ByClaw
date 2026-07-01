@@ -16,6 +16,9 @@ import { Resizable } from '../Resizable';
 
 const FragmentComp = () => null;
 const Mobile = lazy(() => import('@/pages/mobile/AuthPage'));
+const PreViewFile = React.lazy(() =>
+  import('@/components/Preview/Twins').then((module) => ({ default: module.PreViewFile }))
+);
 
 export type IDrawerMessage = Partial<IMessage> & {
   messageId: string;
@@ -27,15 +30,17 @@ type IMyDrawerProps = {
   onFullScreen: () => void;
   open: boolean;
   drawerCfg: Partial<typeof INIT_DRAWER_CFG>;
+  drawerType?: string;
 };
 
 const MyDrawer = (props: IMyDrawerProps) => {
   const { children, onClose, open, onFullScreen } = props;
-  const { drawerCfg } = props;
+  const { drawerCfg, drawerType } = props;
+  const canFullScreen = drawerCfg?.canFullScreen && drawerType !== 'preview';
 
   const showHeader = useMemo(() => {
-    return drawerCfg?.title || drawerCfg?.canClose || drawerCfg?.canFullScreen;
-  }, [drawerCfg]);
+    return drawerCfg?.title || drawerCfg?.canClose || canFullScreen;
+  }, [canFullScreen, drawerCfg]);
 
   const drawer = (
     <div
@@ -64,7 +69,7 @@ const MyDrawer = (props: IMyDrawerProps) => {
                     <CloseOutlined />
                   </div>
                 )}
-                {drawerCfg?.canFullScreen && (
+                {canFullScreen && (
                   <div className={classnames('pointer ub ub-ac ub-pc', styles.icon)} onClick={() => onFullScreen()}>
                     <ArrowsAltOutlined />
                   </div>
@@ -97,13 +102,17 @@ function MainDrawer() {
     driverOpen,
   } = useActionEffect();
 
-  const ContentComp = React.useMemo(() => {
+  const ContentComp = React.useMemo<React.ComponentType<any>>(() => {
     keyRef.current = getRandomNumber(0, 100);
     if (['iframe', 'vnc'].includes(drawerType)) {
       return IframeRender;
     }
     if (drawerType === 'mobile') {
       return Mobile;
+    }
+
+    if (drawerType === 'preview') {
+      return PreViewFile;
     }
 
     return FragmentComp;
@@ -123,6 +132,7 @@ function MainDrawer() {
         driverOpen('');
       }}
       drawerCfg={drawerCfg}
+      drawerType={drawerType}
       onFullScreen={() => {
         EventEmitter.emit('beyond-fullscreen-modal-message', {
           ...(contentPayload || {}),
@@ -160,4 +170,4 @@ function MainDrawer() {
   );
 }
 
-export default MainDrawer;
+export default React.memo(MainDrawer);

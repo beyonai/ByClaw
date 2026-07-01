@@ -28,6 +28,7 @@ import AbsoluteDrawer from '@/components/AbsoluteDrawer';
 import FullAbsoluteDrawer from '@/components/FullAbsoluteDrawer';
 import MainDrawer from '@/components/MainDrawer';
 import MinorDrawer from '@/components/MinorDrawer';
+import { Resizable } from '@/components/Resizable';
 import DragFileEventHandler from '@/components/QueryInput/dragFileEventHandler';
 import useAgentUploadFileConfig from '@/hooks/useAgentUploadFileConfig';
 import useVersionNotification from '@/hooks/useVersionNotification';
@@ -108,6 +109,20 @@ const PCLayout = () => {
       setSiderContentWidth(DEFAULT_SIDER_CONTENT_WIDTH);
     }
   }, [clearDetailPanel, pathname]);
+
+  React.useEffect(() => {
+    const handleMainDriverOpen = (payload: any) => {
+      const nextDrawerType = typeof payload === 'object' ? payload?.drawerType : payload;
+      if (`${nextDrawerType}`.toLowerCase() === 'preview') {
+        clearDetailPanel();
+      }
+    };
+
+    myEventEmitter.on('beyond-main-driver-open-type', handleMainDriverOpen);
+    return () => {
+      myEventEmitter.off('beyond-main-driver-open-type', handleMainDriverOpen);
+    };
+  }, [clearDetailPanel]);
 
   const { setLoginModalOpen } = useAppStore();
   useVersionNotification(myEventEmitter);
@@ -329,19 +344,21 @@ const PCLayout = () => {
                       <Outlet />
                     </Content>
                     {detailPanel && (
-                      <aside
-                        className={styles.detailPanel}
-                        style={
-                          detailPanelBasis
-                            ? {
-                              flex: `0 0 ${detailPanelBasis}`,
-                              width: detailPanelBasis,
-                            }
-                            : undefined
-                        }
-                      >
-                        {detailPanel}
-                      </aside>
+                      <Resizable left limit={{ minWidth: 360, maxWidth: '70vw' }}>
+                        <aside
+                          className={styles.detailPanel}
+                          style={
+                            detailPanelBasis
+                              ? {
+                                flex: '0 0 auto',
+                                width: detailPanelBasis,
+                              }
+                              : undefined
+                          }
+                        >
+                          {detailPanel}
+                        </aside>
+                      </Resizable>
                     )}
                   </SiderContentContext.Provider>
                   <MainDrawer />

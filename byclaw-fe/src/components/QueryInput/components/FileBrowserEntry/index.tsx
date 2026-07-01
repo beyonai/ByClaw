@@ -1,11 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Button, Card, Descriptions, Spin, Table, Tag, Tooltip, message } from 'antd';
+import { Button, Card, Descriptions, Spin, Table, Tag, message } from 'antd';
 import dayjs from 'dayjs';
 // @ts-ignore
 import { useIntl, useLocation, useSelector } from '@umijs/max';
 
-import fileBrowserIcon from '@/assets/filebrowser/file.png';
+// import fileBrowserIcon from '@/assets/filebrowser/file.png';
 import SkillDetailDrawer from '@/pages/employees/components/SkillDetailDrawer/SkillDetailDrawer';
 import FileBrowserPanel from './components/FileBrowserPanel';
 import { queryRelResourceInfo } from '@/pages/manager/service/DigitalEmployeeMgr';
@@ -47,7 +47,7 @@ interface OpenFileBrowserPayload {
   resourceId?: string;
 }
 
-export default function FileBrowserEntry({ listenGlobalOpen = false, showTrigger = true }: FileBrowserEntryProps) {
+export default function FileBrowserEntry({ listenGlobalOpen = false }: FileBrowserEntryProps) {
   const intl = useIntl();
   const t = useCallback((id: string, values?: Record<string, any>) => intl.formatMessage({ id }, values), [intl]);
   const [open, setOpen] = useState(false);
@@ -179,14 +179,14 @@ export default function FileBrowserEntry({ listenGlobalOpen = false, showTrigger
     };
   }, [EventEmitter, listenGlobalOpen, openFileBrowser]);
 
-  const handleOpenKeyDown = (event: React.KeyboardEvent<HTMLSpanElement>) => {
-    if (event.key !== 'Enter' && event.key !== ' ') return;
-    event.preventDefault();
-    openFileBrowser();
-  };
+  // const handleOpenKeyDown = (event: React.KeyboardEvent<HTMLSpanElement>) => {
+  //   if (event.key !== 'Enter' && event.key !== ' ') return;
+  //   event.preventDefault();
+  //   openFileBrowser();
+  // };
 
   const container = portalContainer || resolvePortalContainer();
-  const fileManagementTip = t('queryInput.tooltip.fileManagement');
+  // const fileManagementTip = t('queryInput.tooltip.fileManagement');
   const isMobileRoute = pathname === '/mobile' || pathname.startsWith('/mobile/');
 
   if (isMobileRoute || !beyondToken) {
@@ -309,7 +309,7 @@ export default function FileBrowserEntry({ listenGlobalOpen = false, showTrigger
 
   return (
     <>
-      {showTrigger && (
+      {/* {showTrigger && (
         <Tooltip title={fileManagementTip}>
           <span
             aria-label={fileManagementTip}
@@ -323,7 +323,7 @@ export default function FileBrowserEntry({ listenGlobalOpen = false, showTrigger
             <img className={styles.fileBrowserIcon} src={fileBrowserIcon} alt={fileManagementTip} />
           </span>
         </Tooltip>
-      )}
+      )} */}
       {open &&
         container &&
         createPortal(

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import DOMPurify from 'dompurify'; // HTML 净化器
 import cn from 'classnames';
 import { codeToHtml, BundledLanguage } from 'shiki/bundle-web.mjs';
@@ -24,7 +24,7 @@ interface TextHighlightProps {
  * @param props
  * @returns
  */
-export default function TextHighlight(props: TextHighlightProps) {
+const TextHighlight = React.memo(function TextHighlight(props: TextHighlightProps) {
   const { lang = 'markdown', content, className, lineNumber } = props;
   const [, setLoading] = useState<boolean>(false);
   const [attr, setAttr] = useState<{ dangerouslySetInnerHTML?: { __html: string } }>({});
@@ -40,4 +40,6 @@ export default function TextHighlight(props: TextHighlightProps) {
   }, [content]);
 
   return <div className={cn(styles.text, className, { [styles.lineNumber]: lineNumber })} {...attr} />;
-}
+});
+
+export default TextHighlight;

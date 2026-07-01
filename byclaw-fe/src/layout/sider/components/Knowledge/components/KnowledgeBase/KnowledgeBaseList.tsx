@@ -163,6 +163,19 @@ const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
   }, [EventEmitter, loadKnowledgeBases]);
 
   useEffect(() => {
+    const handleSiderMenuRefresh = (payload?: { key?: string }) => {
+      if (payload?.key === 'knowledge') {
+        loadKnowledgeBases(true);
+      }
+    };
+
+    EventEmitter.on('sider-menu-tab-click-refresh', handleSiderMenuRefresh);
+    return () => {
+      EventEmitter.off('sider-menu-tab-click-refresh', handleSiderMenuRefresh);
+    };
+  }, [EventEmitter, loadKnowledgeBases]);
+
+  useEffect(() => {
     const handleResourceInstalled = () => {
       loadKnowledgeBases(true);
     };

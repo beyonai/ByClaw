@@ -529,3 +529,60 @@ div.beyond-typography,
 .beyond-typography p {
   margin-bottom: 0;
 }
+
+// 安装进行中遮罩（样式 A）：半透明覆盖整卡 + 居中提示 + 底部不确定进度条
+.installingOverlay {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: inherit;
+  background: rgba(255, 255, 255, 0.78);
+  cursor: default;
+  overflow: hidden;
+}
+
+.installingInner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.installingText {
+  font-size: 13px;
+  color: #165dff;
+}
+
+.installingBar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  background: rgba(22, 93, 255, 0.12);
+  overflow: hidden;
+}
+
+.installingBarInner {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  width: 40%;
+  background: #165dff;
+  border-radius: 3px;
+  animation: installing-indeterminate 1.1s ease-in-out infinite;
+}
+
+@keyframes installing-indeterminate {
+  0% {
+    left: -40%;
+  }
+
+  100% {
+    left: 100%;
+  }
+}

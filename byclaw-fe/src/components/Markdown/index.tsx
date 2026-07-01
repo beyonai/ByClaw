@@ -13,6 +13,7 @@ import parse from 'html-react-parser';
 import useGlobal from '@/hooks/useGlobal';
 import { LayoutMode } from '@/constants/system';
 import { IMessage } from '@/typescript/message';
+import ATag from './aTag';
 
 // import createImageCollectorExtension, { addImageCollectedIds } from './imageExtension';
 import createTableExtension from './tableExtension';
@@ -105,6 +106,9 @@ const MarkdownRender = React.memo(
             const { src, alt } = domNode.attribs;
             // 使用src作为key，确保相同src的图片不会重新渲染
             return <ImgComponent key={src} src={src} alt={alt} />;
+          }
+          if (domNode.name === 'a') {
+            return <ATag domNode={domNode} />;
           }
 
           return domNode;

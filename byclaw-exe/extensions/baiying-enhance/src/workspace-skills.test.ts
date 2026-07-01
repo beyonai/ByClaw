@@ -2,10 +2,24 @@ import { promises as fs } from "node:fs";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { describe, expect, it, vi } from "vitest";
-import { mergeSkillNames, scanWorkspaceSkillNames } from "./workspace-skills.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  mergeSkillNames,
+  mergeWorkspaceSkillsIntoManagedAgents,
+  scanWorkspaceSkillNames,
+} from "./workspace-skills.js";
 
 describe("workspace-skills", () => {
+  const originalOpenClawStateDir = process.env.OPENCLAW_STATE_DIR;
+
+  afterEach(() => {
+    if (originalOpenClawStateDir === undefined) {
+      delete process.env.OPENCLAW_STATE_DIR;
+    } else {
+      process.env.OPENCLAW_STATE_DIR = originalOpenClawStateDir;
+    }
+  });
+
   it("scans only one-level skills with SKILL.md", async () => {
     const workspace = await mkdtemp(path.join(tmpdir(), "baiying-skills-"));
     await mkdir(path.join(workspace, "skills", "zeta"), { recursive: true });
@@ -68,6 +82,128 @@ describe("workspace-skills", () => {
       "shared",
       "alpha",
       "beta",
+    ]);
+  });
+
+  it("merges path-based extra skills using SKILL.md frontmatter names", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "baiying-extra-skills-"));
+    const stateDir = await mkdtemp(path.join(tmpdir(), "baiying-plugin-skills-state-"));
+    const sharedWorkspace = await mkdtemp(path.join(tmpdir(), "baiying-extra-shared-skills-"));
+    process.env.OPENCLAW_STATE_DIR = stateDir;
+    await mkdir(path.join(workspace, "skills", "uploaded-folder"), { recursive: true });
+    await writeFile(
+      path.join(workspace, "skills", "uploaded-folder", "SKILL.md"),
+      "---\nname: extra-filter-name\n---\n# Extra\n",
+      "utf8",
+    );
+    await mkdir(path.join(sharedWorkspace, "skills", "shared-extra"), { recursive: true });
+    await writeFile(
+      path.join(sharedWorkspace, "skills", "shared-extra", "SKILL.md"),
+      "---\nname: shared-extra-filter\n---\n# Shared\n",
+      "utf8",
+    );
+    await mkdir(path.join(workspace, "skills", "workspace-only"), { recursive: true });
+    await writeFile(path.join(workspace, "skills", "workspace-only", "SKILL.md"), "# Workspace\n", "utf8");
+    await mkdir(path.join(stateDir, "plugin-skills", "plugin-extra"), { recursive: true });
+    await writeFile(
+      path.join(stateDir, "plugin-skills", "plugin-extra", "SKILL.md"),
+      "---\nname: plugin-extra-filter\n---\n# Plugin Extra\n",
+      "utf8",
+    );
+
+    const api = {
+      runtime: {
+        config: {
+          loadConfig: () => ({
+            agents: {
+              list: [{ id: "baiying-agent-1", workspace }],
+            },
+          }),
+        },
+      },
+    } as any;
+
+    await expect(
+      mergeWorkspaceSkillsIntoManagedAgents({
+        api,
+        managed: [
+          {
+            agentId: "baiying-agent-1",
+            listEntry: { id: "baiying-agent-1", skills: ["json-skill"] },
+            extraSkillPaths: [
+              `${workspace}/skills/uploaded-folder/SKILL.md`,
+              `${workspace}/skills/missing-extra`,
+              `${sharedWorkspace}/skills/shared-extra`,
+              `${stateDir}/plugin-skills/plugin-extra`,
+            ],
+          },
+        ],
+        includeMainShared: false,
+        mainParentAgentId: "main",
+      }),
+    ).resolves.toMatchObject([
+      {
+        listEntry: {
+          skills: [
+            "json-skill",
+            "extra-filter-name",
+            "missing-extra",
+            "shared-extra-filter",
+            "plugin-extra-filter",
+            "workspace-only",
+          ],
+        },
+      },
+    ]);
+  });
+
+  it("resolves declared skill codes against OPENCLAW_STATE_DIR/plugin-skills", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "baiying-plugin-skills-workspace-"));
+    const stateDir = await mkdtemp(path.join(tmpdir(), "baiying-plugin-skills-state-"));
+    process.env.OPENCLAW_STATE_DIR = stateDir;
+    await mkdir(path.join(stateDir, "plugin-skills", "inner-dir-code"), { recursive: true });
+    await writeFile(
+      path.join(stateDir, "plugin-skills", "inner-dir-code", "SKILL.md"),
+      "---\nname: inner-filter-name\n---\n# Inner\n",
+      "utf8",
+    );
+    await mkdir(path.join(stateDir, "plugin-skills", "unused-plugin-skill"), { recursive: true });
+    await writeFile(
+      path.join(stateDir, "plugin-skills", "unused-plugin-skill", "SKILL.md"),
+      "---\nname: unused-filter-name\n---\n# Unused\n",
+      "utf8",
+    );
+
+    const api = {
+      runtime: {
+        config: {
+          loadConfig: () => ({
+            agents: {
+              list: [{ id: "baiying-agent-1", workspace }],
+            },
+          }),
+        },
+      },
+    } as any;
+
+    await expect(
+      mergeWorkspaceSkillsIntoManagedAgents({
+        api,
+        managed: [
+          {
+            agentId: "baiying-agent-1",
+            listEntry: { id: "baiying-agent-1", skills: ["inner-dir-code"] },
+          },
+        ],
+        includeMainShared: false,
+        mainParentAgentId: "main",
+      }),
+    ).resolves.toMatchObject([
+      {
+        listEntry: {
+          skills: ["inner-filter-name"],
+        },
+      },
     ]);
   });
 });

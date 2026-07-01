@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.atomic.AtomicBoolean;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -26,6 +27,13 @@ import lombok.Setter;
 @Getter
 @Setter
 public class ChatProcessContext {
+
+    /**
+     * 停止会话哨兵事件类型。stopChat 同 pod + HTTP SSE 场景下，向 {@link #gatewayEventQueue}
+     * 投递携带该 event_type 的事件，使阻塞在队列上的请求线程退出循环并按正常完成落库。
+     */
+    public static final String STOP_SENTINEL_EVENT = "__byclaw_stop_sentinel__";
+
     /** SSE响应输出流 */
     public OutputStream res;
 
@@ -188,5 +196,23 @@ public class ChatProcessContext {
 
     public boolean isWebSocketTransport() {
         return ChatTransport.WEBSOCKET.equals(transport);
+    }
+
+    /**
+     * 消息持久化一次性闸门：保证一次对话的 storeMessage / 异常落库只执行一次。
+     * <p>
+     * 用户停止会话（stopChat）时可能主动触发落库，而 owner pod 的请求线程在
+     * gatewayEventQueue.poll 超时或随后收到事件时也会走落库路径，两者竞争同一份累积内容，
+     * 通过该闸门去重，避免重复 insert byai_message。
+     */
+    public final transient AtomicBoolean messagePersisted = new AtomicBoolean(false);
+
+    /**
+     * 尝试占用落库闸门。
+     *
+     * @return true 表示本次调用方抢到落库权，应执行持久化；false 表示已被其他线程落库，应跳过。
+     */
+    public boolean tryBeginPersist() {
+        return messagePersisted.compareAndSet(false, true);
     }
 }

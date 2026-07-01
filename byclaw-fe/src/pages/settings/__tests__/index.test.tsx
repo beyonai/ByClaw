@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 
 import Settings from '..';
 
@@ -43,6 +43,11 @@ jest.mock('../components/PersonalEmailSettings', () => ({
   default: () => <div>PersonalEmailSettings</div>,
 }));
 
+jest.mock('../components/PersonalParamSettings', () => ({
+  __esModule: true,
+  default: () => <div>PersonalParamSettings</div>,
+}));
+
 describe('Settings version info', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -73,10 +78,8 @@ describe('Settings version info', () => {
     });
   });
 
-  it('expands filtered version details after clicking the version button', async () => {
-    await act(async () => {
-      render(<Settings />);
-    });
+  it('expands filtered version details after clicking the version button', () => {
+    render(<Settings />);
 
     expect(screen.queryByText('2026-06-16 10:00:00')).not.toBeInTheDocument();
 

@@ -102,6 +102,14 @@ export default {
   'employeeDetail.bundledSkillsPlaceholder': 'Please select skills',
   'employeeDetail.bundledSkillsSearchPlaceholder': 'Search skill name, code, or description',
   'employeeDetail.configureKnowledge': 'Configure Knowledge',
+  'employeeDetail.configureOntology': 'Configure Ontology',
+  'employeeDetail.ontology.selectTitle': 'Select Ontology Resource',
+  'employeeDetail.ontology.base': 'Ontology Base',
+  'employeeDetail.ontology.scene': 'Scene',
+  'employeeDetail.ontology.resource': 'Ontology Resource',
+  'employeeDetail.ontology.searchBase': 'Search ontology base',
+  'employeeDetail.ontology.searchScene': 'Search scene',
+  'employeeDetail.ontology.relation': 'Relation',
   'employeeDetail.qaKnowledge': 'Q&A Knowledge Base',
   'employeeDetail.documentKnowledge': 'Document Knowledge Base',
   'employeeDetail.tagSearchPlaceholder': 'Add tags, press Enter to complete',
@@ -142,13 +150,11 @@ export default {
   'thirdPartyCreateModel.homeAddressRequired': 'Please enter home page address',
 
   // ModelPopover
-  'modelPopover.largeModel': 'Large Model',
   'modelPopover.QALargeModelConfiguration': 'QA Large Model Configuration',
-  'modelPopover.history': 'History',
-  'modelPopover.temperature': 'Temperature',
-  'modelPopover.maxToken': 'Max Tokens',
-  'modelPopover.prompt': 'Prompt',
-  'modelPopover.promptPlaceholder': 'Describe the image content concisely and accurately with clear hierarchy',
+  'modelPopover.mine': 'Mine',
+  'modelPopover.public': 'Public',
+  'modelPopover.noModels': 'No models available',
+  'modelPopover.confirm': 'OK',
 
   // BaseListModal
   'baseListModal.createTime': 'Create Time',

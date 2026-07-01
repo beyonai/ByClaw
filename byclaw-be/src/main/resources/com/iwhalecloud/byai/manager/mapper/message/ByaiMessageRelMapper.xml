@@ -277,6 +277,14 @@
         ORDER BY create_time DESC
     </select>
 
+    <select id="selectByAskOrResMsgId" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List" />
+        FROM byai_message_relobj
+        WHERE res_msg_id = #{messageId}
+           OR ask_msg_id = #{messageId}
+        ORDER BY create_time DESC
+    </select>
+
     <sql id="SearchMemWhere">
         <where>
             <if test="req.isAllNotSelect == false and req.relIdList != null and req.relIdList.size() > 0">

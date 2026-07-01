@@ -105,6 +105,14 @@ export default {
   'employeeDetail.bundledSkillsPlaceholder': '请选择技能',
   'employeeDetail.bundledSkillsSearchPlaceholder': '搜索名称或描述',
   'employeeDetail.configureKnowledge': '配置知识',
+  'employeeDetail.configureOntology': '配置本体',
+  'employeeDetail.ontology.selectTitle': '选择本体资源',
+  'employeeDetail.ontology.base': '本体库',
+  'employeeDetail.ontology.scene': '场景',
+  'employeeDetail.ontology.resource': '本体资源',
+  'employeeDetail.ontology.searchBase': '搜索本体库',
+  'employeeDetail.ontology.searchScene': '搜索场景',
+  'employeeDetail.ontology.relation': '关系',
   'employeeDetail.qaKnowledge': '问答对知识库',
   'employeeDetail.documentKnowledge': '文档知识库',
   'employeeDetail.tagSearchPlaceholder': '新增标签,按回车完成',
@@ -143,13 +151,11 @@ export default {
   'thirdPartyCreateModel.homeAddressRequired': '请输入首页地址',
 
   // ModelPopover
-  'modelPopover.largeModel': '大模型',
   'modelPopover.QALargeModelConfiguration': '问答大模型配置',
-  'modelPopover.history': '历史记录',
-  'modelPopover.temperature': '温度',
-  'modelPopover.maxToken': '回复上限',
-  'modelPopover.prompt': '提示词',
-  'modelPopover.promptPlaceholder': '描述图片的内容，要求简洁准确，层次分明',
+  'modelPopover.mine': '我的',
+  'modelPopover.public': '公共',
+  'modelPopover.noModels': '暂无模型',
+  'modelPopover.confirm': '确定',
 
   // BaseListModal
   'baseListModal.createTime': '创建时间',

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { isRedisKeyspaceNotificationsEnabled, parseAuthorizedIds } from "./dig-employee-auth-watch.js";
+import {
+  isRedisConnectionClosedError,
+  isRedisKeyspaceNotificationsEnabled,
+  parseAuthorizedIds,
+} from "./dig-employee-auth-watch.js";
 
 describe("parseAuthorizedIds", () => {
   it("parses hash fields shaped as resourceId -> DIG_EMPLOYEE", () => {
@@ -37,5 +41,18 @@ describe("isRedisKeyspaceNotificationsEnabled", () => {
   it("returns true when hash or generic key events are enabled", () => {
     expect(isRedisKeyspaceNotificationsEnabled("Kh")).toBe(true);
     expect(isRedisKeyspaceNotificationsEnabled("AKE$")).toBe(true);
+  });
+});
+
+describe("isRedisConnectionClosedError", () => {
+  it("matches ioredis closed connection errors", () => {
+    expect(isRedisConnectionClosedError(new Error("Connection is closed."))).toBe(true);
+    expect(isRedisConnectionClosedError(new Error("Stream isn't writeable and enableOfflineQueue options is false"))).toBe(
+      true,
+    );
+  });
+
+  it("does not match unrelated redis errors", () => {
+    expect(isRedisConnectionClosedError(new Error("WRONGPASS invalid username-password pair"))).toBe(false);
   });
 });

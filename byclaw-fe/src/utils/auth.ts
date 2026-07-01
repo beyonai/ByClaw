@@ -1,5 +1,6 @@
 import { getRuntimeActualUrl, getRootUnAuthPagePath } from '@/utils';
 import cookie from './cookie';
+import { isNil } from 'lodash';
 import { getDcSystemConfigValueByCodes } from '@/service/layout';
 
 export const sessionKey = 'SESSION';
@@ -101,18 +102,23 @@ export const initAdminVipList = async () => {
     });
 
     if (Array.isArray(response) && response.length > 0) {
-      const userCodeConfig = response.find((item: any) => item.paramCode === 'USERCODE');
-      if (userCodeConfig?.paramValue) {
+      const userCodeConfig = response.find((item: any) => item.paramCode === 'USERCODE_CONFIG');
+
+      if (!isNil(userCodeConfig?.paramValue)) {
+        let paramValueArray = userCodeConfig?.paramValue;
+
         try {
           // paramValue 是 JSON 字符串，需要解析
-          const paramValueArray = JSON.parse(userCodeConfig.paramValue);
-          // 将 'adminvip' 和配置的值合并
-          adminVipListCache = ['adminvip', ...(Array.isArray(paramValueArray) ? paramValueArray : [])];
+          paramValueArray = JSON.parse(userCodeConfig.paramValue);
         } catch (e) {
           console.error('解析 paramValue 失败:', e);
-          // 解析失败时使用默认值
-          adminVipListCache = ['adminvip'];
         }
+
+        // 将 'adminvip' 和配置的值合并
+        adminVipListCache = [
+          'adminvip',
+          ...(Array.isArray(paramValueArray) ? paramValueArray : paramValueArray.split(',')),
+        ];
       } else {
         // 没有配置值时使用默认值
         adminVipListCache = ['adminvip'];

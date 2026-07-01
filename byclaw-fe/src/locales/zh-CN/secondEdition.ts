@@ -108,7 +108,7 @@ export default {
 
   // AccessTokenMgmt 组件
   'accessToken.manageAccessTokens': '管理访问令牌',
-  'accessToken.tokenHint': '这些令牌有访问通过API访问你权限下资源的管理权限，请注意保管好凭证',
+  'accessToken.tokenHint': '这些令牌拥有通过 API 访问你权限范围内资源的管理权限，请妥善保管相关凭证。',
   'accessToken.generateToken': '生成令牌',
   'accessToken.downloadSDK': '下载加密SDK',
   'accessToken.searchToken': '搜索令牌',
@@ -271,6 +271,7 @@ export default {
   'fileBrowser.toolbar.upload': '上传',
   'fileBrowser.toolbar.newFolder': '新建文件夹',
   'fileBrowser.toolbar.refresh': '刷新',
+  'fileBrowser.toolbar.locate': '定位',
   'fileBrowser.toolbar.move': '移动',
   'fileBrowser.toolbar.delete': '删除',
   'fileBrowser.toolbar.back': '返回上一层',
@@ -334,5 +335,5 @@ export default {
   'fileSider.saveToKnowledge.rootTip': '当前目录下暂无文件夹，可直接保存到此目录',
   'fileSider.saveToKnowledge.noManagePermission': '您对当前数字员工下的知识库，无管理权限，无法操作',
 
-  'context.used.format': '上下文已使用{percent}%. {usedTokens} / {contextTokens}',
+  'context.used.format': '上下文已使用{percent}%，{usedTokens} / {contextTokens}',
 };

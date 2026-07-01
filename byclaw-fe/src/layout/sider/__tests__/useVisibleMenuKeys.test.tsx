@@ -2,19 +2,26 @@ jest.mock('@/service/auth', () => ({
   getDcSystemConfigListByStandType: jest.fn(),
 }));
 
+jest.mock('@/pages/manager/service/session', () => ({
+  getDcSystemConfig: jest.fn(),
+}));
+
 import { renderHook, waitFor } from '@testing-library/react';
 
 import { DEFAULT_MENU_CONFIG, getVisibleMenuKeysFromConfig } from '@/constants/system';
 import { getDcSystemConfigListByStandType } from '@/service/auth';
+import { getDcSystemConfig } from '@/pages/manager/service/session';
 import useVisibleMenuKeys from '../useVisibleMenuKeys';
 
 const mockGetDcSystemConfigListByStandType = getDcSystemConfigListByStandType as jest.MockedFunction<
   typeof getDcSystemConfigListByStandType
 >;
+const mockGetDcSystemConfig = getDcSystemConfig as jest.MockedFunction<typeof getDcSystemConfig>;
 
 describe('useVisibleMenuKeys', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockGetDcSystemConfig.mockResolvedValue({ paramValue: '' });
   });
 
   it('waits for userInfo before loading menu config', async () => {
@@ -38,7 +45,7 @@ describe('useVisibleMenuKeys', () => {
     });
 
     await waitFor(() => {
-      expect(result.current).toEqual(['sessions', 'skill', 'file']);
+      expect(result.current).toEqual(['sessions', 'skill', 'file', 'model', 'ontology']);
     });
   });
 
@@ -53,7 +60,24 @@ describe('useVisibleMenuKeys', () => {
     const { result } = renderHook(() => useVisibleMenuKeys({ userId: 1 }));
 
     await waitFor(() => {
-      expect(result.current).toEqual(['sessions', 'file']);
+      expect(result.current).toEqual(['sessions', 'file', 'model', 'ontology']);
+    });
+  });
+
+  it('temporarily hides view and object even when remote config enables them', async () => {
+    mockGetDcSystemConfigListByStandType.mockResolvedValue({
+      data: [
+        { paramName: '会话', paramValue: 'true', paramSeq: 1 },
+        { paramName: '视图', paramValue: 'true', paramSeq: 2 },
+        { paramName: '对象', paramValue: 'true', paramSeq: 3 },
+        { paramName: '本体', paramValue: 'true', paramSeq: 4 },
+      ],
+    });
+
+    const { result } = renderHook(() => useVisibleMenuKeys({ userId: 1 }));
+
+    await waitFor(() => {
+      expect(result.current).toEqual(['sessions', 'ontology', 'skill', 'file', 'model']);
     });
   });
 

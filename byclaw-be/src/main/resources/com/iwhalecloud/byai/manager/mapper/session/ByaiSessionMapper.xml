@@ -94,7 +94,7 @@
                      OR a.session_content LIKE CONCAT('%', #{searchKeyword}, '%'))
             </if>
         </where>
-        ORDER BY a.create_time DESC
+        ORDER BY COALESCE(a.update_time, a.create_time) DESC,a.create_time DESC
     </select>
 
     <!-- 查询模板会话列表 -->
