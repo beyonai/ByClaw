@@ -421,6 +421,8 @@ export default {
   'knowledgeDetail.directory': 'Directory',
   'knowledgeDetail.keywords': 'keywords',
   'knowledgeDetail.newFolder': 'New Folder',
+  'knowledgeDetail.newSubFolder': 'New Subfolder',
+  'knowledgeDetail.newSiblingFolder': 'New Sibling Folder',
   'knowledgeDetail.uploadFile': 'Upload File',
   'knowledgeDetail.sameNameFileOverwriteTip': 'Same name files will be overwritten',
   'knowledgeDetail.uploadSuccess': 'Upload successful',

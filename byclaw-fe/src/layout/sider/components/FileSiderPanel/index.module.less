@@ -243,17 +243,22 @@
 }
 
 .categoryBody {
+  flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
 }
 
 .listSpin {
+  flex: 1;
   min-height: 80px;
 
   :global {
     .@{antPrefix}-spin-container {
+      height: 100%;
       min-height: 80px;
+      display: flex;
+      flex-direction: column;
     }
   }
 }
@@ -364,6 +369,7 @@
 
 .treeTitleName {
   display: inline-flex;
+  flex-direction: column;
   min-width: 0;
   max-width: 100%;
 }
@@ -387,6 +393,159 @@
 
 .previewableTreeTitle .treeTitleText {
   cursor: pointer;
+}
+
+.searchPathText {
+  display: inline-block;
+  max-width: 100%;
+  color: #8c8c8c;
+  font-size: 12px;
+  line-height: 18px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.searchResultBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 4px 8px 8px;
+  border-bottom: 1px solid var(~'--@{antPrefix}-color-border-secondary');
+}
+
+.searchBackButton {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #4a5058;
+  cursor: pointer;
+
+  &:hover,
+  &:focus {
+    background: #f2f4f7;
+    color: var(--beyond-color-primary, #1677ff);
+    outline: none;
+  }
+}
+
+.searchResultText {
+  min-width: 0;
+  color: #595959;
+  font-size: 13px;
+  line-height: 20px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.searchListScroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.searchFileItem {
+  position: relative;
+  padding: 8px;
+  cursor: default;
+
+  &:hover {
+    padding-right: 48px;
+
+    .searchMoreActionWrap {
+      visibility: visible;
+    }
+
+    .searchMoreAction {
+      visibility: visible;
+    }
+  }
+
+  :global {
+    .@{antPrefix}-list-item-meta {
+      min-width: 0;
+      align-items: center;
+    }
+
+    .@{antPrefix}-list-item-meta-avatar {
+      margin-right: 8px !important;
+    }
+
+    .@{antPrefix}-list-item-meta-content {
+      min-width: 0;
+    }
+
+    .@{antPrefix}-list-item-meta-title {
+      margin-bottom: 0;
+    }
+
+    .@{antPrefix}-list-item-meta-description {
+      line-height: 18px;
+    }
+  }
+}
+
+.searchFileIcon {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--beyond-color-primary);
+
+  :global(.@{antPrefix}-icon),
+  :global(.anticon) {
+    font-size: 18px;
+  }
+}
+
+.searchFileName {
+  display: inline-block;
+  max-width: 100%;
+  color: #4a5058;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 22px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.searchMoreActionWrap {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+  visibility: hidden;
+}
+
+.searchMoreAction {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  color: #4a5058;
+  cursor: pointer;
+
+  &:hover {
+    background: #f2f4f7;
+    color: var(--beyond-color-primary, #1677ff);
+  }
 }
 
 .treeActionTrigger {

@@ -155,16 +155,10 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId, mode = 
   const getSortIcon = useCallback(
     (field: SortField) => {
       const isActive = sortField === field && sortOrder !== 'none';
-      const activeColor = 'var(--beyond-color-primary, #1677ff)';
-      const inactiveColor = '#bfbfbf';
       return (
         <span className={styles.sortIcons}>
-          <CaretUpOutlined
-            style={{ color: isActive && sortOrder === 'asc' ? activeColor : inactiveColor, fontSize: 10 }}
-          />
-          <CaretDownOutlined
-            style={{ color: isActive && sortOrder === 'desc' ? activeColor : inactiveColor, fontSize: 10 }}
-          />
+          <CaretUpOutlined className={isActive && sortOrder === 'asc' ? styles.sortIconActive : styles.sortIcon} />
+          <CaretDownOutlined className={isActive && sortOrder === 'desc' ? styles.sortIconActive : styles.sortIcon} />
         </span>
       );
     },
@@ -213,6 +207,13 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId, mode = 
   }, []);
 
   const handleRefresh = useCallback(() => {
+    setInputKeyword('');
+    setSearchKeyword('');
+    setIsSearching(false);
+    fetchList(currentPath);
+  }, [currentPath, fetchList]);
+
+  const handleExitSearch = useCallback(() => {
     setInputKeyword('');
     setSearchKeyword('');
     setIsSearching(false);
@@ -585,8 +586,7 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId, mode = 
         const isDir = record.isDir || (record as any).dir;
         const canPreview = canPreviewFile(record);
         const iconType = getFileIconType(v, { isDirectory: isDir });
-        const cursor = isDir || canPreview ? 'pointer' : 'default';
-        const style: React.CSSProperties = { cursor };
+        const clickable = isDir || canPreview;
         const onClick = isDir
           ? () => handleEnterDir(record)
           : canPreview
@@ -594,12 +594,14 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId, mode = 
             : () => message.warning(t('fileBrowser.preview.unavailable'));
 
         return (
-          <div onClick={onClick} style={{ display: 'flex', alignItems: 'center', ...style }} title={record.path}>
-            <AntdIcon type={`icon-${iconType}`} style={{ fontSize: 24, marginRight: 14, flexShrink: 0 }} />
-            <div style={{ overflow: 'hidden' }}>
-              <div className="textEllipsis" style={{ cursor }}>
-                {v}
-              </div>
+          <div
+            onClick={onClick}
+            className={clickable ? styles.fileNameCellClickable : styles.fileNameCell}
+            title={record.path}
+          >
+            <AntdIcon type={`icon-${iconType}`} className={styles.fileNameIcon} />
+            <div className={styles.fileNameContent}>
+              <div className="textEllipsis">{v}</div>
               {isSearching && <div className={styles.searchPath}>{record.path}</div>}
             </div>
           </div>
@@ -669,12 +671,12 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId, mode = 
                 return false;
               }}
             >
-              <Button icon={<AntdIcon type="icon-a-Uploadshangchuan" style={{ fontSize: 18 }} />} size="small">
+              <Button icon={<AntdIcon type="icon-a-Uploadshangchuan" className={styles.toolbarIcon} />} size="small">
                 {t('fileBrowser.toolbar.upload')}
               </Button>
             </Upload>
             <Button
-              icon={<AntdIcon type="icon-a-Folder-pluswenjianjia-tianjia" style={{ fontSize: 18 }} />}
+              icon={<AntdIcon type="icon-a-Folder-pluswenjianjia-tianjia" className={styles.toolbarIcon} />}
               size="small"
               onClick={() => {
                 setCreateFolderName('');
@@ -692,7 +694,13 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId, mode = 
             value={inputKeyword}
             suffix={<SearchOutlined onClick={() => handleSearch(inputKeyword)} />}
             placeholder={t('fileBrowser.toolbar.search')}
-            onChange={(event) => setInputKeyword(event.target.value)}
+            onChange={(event) => {
+              const nextValue = event.target.value;
+              setInputKeyword(nextValue);
+              if (!nextValue.trim() && isSearching) {
+                handleExitSearch();
+              }
+            }}
             onPressEnter={() => handleSearch(inputKeyword)}
             size="small"
           />
@@ -702,6 +710,11 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId, mode = 
 
       {isSearching ? (
         <div className={styles.breadcrumbBar}>
+          <Tooltip title={t('fileBrowser.search.back')}>
+            <span className={styles.backBtn} onClick={handleExitSearch}>
+              <AntdIcon type="icon-a-Returnfanhui" className={styles.breadcrumbIcon} />
+            </span>
+          </Tooltip>
           <span className={styles.searchResult}>
             {sortedItems.length > 0
               ? t('fileBrowser.search.result', { keyword: searchKeyword, count: sortedItems.length })
@@ -712,22 +725,15 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId, mode = 
         <div className={styles.breadcrumbBar}>
           {!isPreviewMode && (
             <Tooltip title={t('fileBrowser.toolbar.back')}>
-              <span
-                className={styles.backBtn}
-                onClick={handleGoBack}
-                style={{
-                  opacity: folderPath.length <= 1 ? 0.3 : 1,
-                  cursor: folderPath.length <= 1 ? 'not-allowed' : 'pointer',
-                }}
-              >
-                <AntdIcon type="icon-a-Returnfanhui" style={{ fontSize: 16 }} />
+              <span className={folderPath.length <= 1 ? styles.backBtnDisabled : styles.backBtn} onClick={handleGoBack}>
+                <AntdIcon type="icon-a-Returnfanhui" className={styles.breadcrumbIcon} />
               </span>
             </Tooltip>
           )}
           {!isPreviewMode && (
             <Tooltip title={t('fileBrowser.root')}>
-              <span className={styles.backBtn} style={{ cursor: 'pointer' }} onClick={handleGoRoot}>
-                <AntdIcon type="icon-a-Homeshouye" style={{ fontSize: 16 }} />
+              <span className={styles.backBtn} onClick={handleGoRoot}>
+                <AntdIcon type="icon-a-Homeshouye" className={styles.breadcrumbIcon} />
               </span>
             </Tooltip>
           )}

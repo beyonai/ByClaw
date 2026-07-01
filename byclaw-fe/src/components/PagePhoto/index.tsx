@@ -67,6 +67,14 @@ const PagePhoto = (props: InnerProps) => {
 
   const { className, ...restUploadProps } = uploadProps || {};
 
+  // 已上传图片(base64)与外部头像走 getAgentAvatarUrl；本地默认图(public 静态资源)直接使用，
+  // 避免 getAgentAvatarUrl 在 publicPath 为 '/' 时误加 /byaiService/ 前缀导致 404。
+  const resolvedSrc = imageUrl
+    ? getAgentAvatarUrl(imageUrl)
+    : typeof defaultImage === 'string' && defaultImage
+      ? defaultImage
+      : getAgentAvatarUrl(defResourceIcon);
+
   return (
     <Upload
       name="pagePhoto"
@@ -82,7 +90,7 @@ const PagePhoto = (props: InnerProps) => {
     >
       <div className={classnames(styles.contentBox, contentBoxClassName)}>
         <img
-          src={getAgentAvatarUrl(imageUrl || defaultImage || defResourceIcon)}
+          src={resolvedSrc}
           className={styles.coverImage}
           alt="logo"
           onError={() => {
