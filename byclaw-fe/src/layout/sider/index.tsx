@@ -267,7 +267,7 @@ const Sidebar = () => {
     <>
       <div className={classnames(styles.siderBar, 'hideThumb')}>
         <div className={styles.logo}>
-          <img alt="BYAI" src={getFaviconIcon} />
+          <img key="BYAI" alt="BYAI" src={getFaviconIcon} />
         </div>
         <SiderSearch />
         <Tooltip placement="right" title={intl.formatMessage({ id: 'sider.newChat' })}>

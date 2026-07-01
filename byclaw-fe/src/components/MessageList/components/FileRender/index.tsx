@@ -184,7 +184,7 @@ function FileRender(props: IProps) {
           </div>
         )}
         <div style={{ position: 'relative' }}>
-          {imgUrl && <img src={imgUrl} alt="" className={styles.fileItemIcon} />}
+          {imgUrl && <img key={imgUrl} src={imgUrl} alt="" className={styles.fileItemIcon} />}
           {!imgUrl && <IconRender fileType={(fileType || '').toLowerCase()} />}
         </div>
         <div className={classnames(styles.fileItemInfo, 'ub-f1 overflow-hidden')}>
