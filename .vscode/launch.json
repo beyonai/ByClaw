@@ -17,7 +17,7 @@
       "cwd": "${workspaceFolder}/byclaw-data",
       "envFile": "${workspaceFolder}/byclaw-data/.env",
       "env": {
-        "PYTHONPATH": "${workspaceFolder}/../by-datacloud/packages/datacloud-analysis/src;${workspaceFolder}/../by-datacloud/packages/datacloud-data/src;${workspaceFolder}/../by-datacloud/packages/datacloud-knowledge/src;${env:PYTHONPATH}",
+        "PYTHONPATH": "${workspaceFolder}/byclaw-data/src;${workspaceFolder}/../by-datacloud/packages/datacloud-platform/src;${workspaceFolder}/../by-datacloud/packages/datacloud-analysis/src;${workspaceFolder}/../by-datacloud/packages/datacloud-data/src;${workspaceFolder}/../by-datacloud/packages/datacloud-knowledge/src;${env:PYTHONPATH}",
       },
       "justMyCode": false
     },
@@ -30,7 +30,7 @@
       "cwd": "${workspaceFolder}/byclaw-data",
       "envFile": "${workspaceFolder}/byclaw-data/.env2",
       "env": {
-        "PYTHONPATH": "${workspaceFolder}/../by-datacloud/packages/datacloud-analysis/src;${workspaceFolder}/../by-datacloud/packages/datacloud-data/src;${workspaceFolder}/../by-datacloud/packages/datacloud-knowledge/src;${env:PYTHONPATH}",
+        "PYTHONPATH": "${workspaceFolder}/byclaw-data/src;${workspaceFolder}/../by-datacloud/packages/datacloud-platform/src;${workspaceFolder}/../by-datacloud/packages/datacloud-analysis/src;${workspaceFolder}/../by-datacloud/packages/datacloud-data/src;${workspaceFolder}/../by-datacloud/packages/datacloud-knowledge/src;${env:PYTHONPATH}",
       },
       "justMyCode": false
     }

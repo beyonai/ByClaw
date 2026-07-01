@@ -58,6 +58,15 @@ def _load_owl_if_configured() -> Any | None:
     if _owl_loaded_path == resolved:
         return None  # already loaded this path
     loader = _load_owl_into_default_base(resolved)
+    # ── OWL → JSON 持久化（后续重启走 objects_registry.json 快速路径）──
+    from datacloud_platform import get_platform
+
+    p = get_platform()
+    onto = p._ontology_for("default")
+    if hasattr(onto, "save_parsed_content"):
+        base_path = p._base_path_for("default")
+        parsed = onto.parse_owl(Path(resolved))
+        onto.save_parsed_content(base_path, parsed)
     _owl_loaded_path = resolved
     return loader
 
@@ -102,18 +111,28 @@ def _init_enterprise_base_and_scene() -> None:
         )
 
     # ── 2. 创建 CRM 场景（幂等）──
-    scene_id = "crm"
+    scene_code = "crm"
+    # create_scene 自动生成 snowflake scene_id，需要从返回值获取真实 ID
     try:
-        p.create_scene(
+        created = p.create_scene(
             enterprise_id,
             {
                 "scene_name": "CRM客户管理",
-                "scene_code": scene_id,
+                "scene_code": scene_code,
                 "scene_desc": "CRM场景，包含OWL导入的全部本体",
             },
         )
+        scene_id = created["scene_id"]
     except ValueError:
-        pass  # scene already exists
+        # scene already exists — find it by scene_code
+        scenes = p.list_scenes(enterprise_id)
+        scene_id = ""
+        for s in scenes:
+            if isinstance(s, dict) and s.get("scene_code") == scene_code:
+                scene_id = s["scene_id"]
+                break
+        if not scene_id:
+            raise RuntimeError(f"Scene with scene_code={scene_code!r} not found after create failed")
 
     # ── 3. 将所有 OWL 对象和视图挂到 CRM 场景下（幂等，adapter 层去重）──
     p.add_scene_members(
@@ -166,7 +185,6 @@ def _init_platform_if_needed() -> None:
         _NoopKnowledgeBackend,
         _NoopStorageBackend,
     )
-    from datacloud_platform.backends.presets import register_preset
     from datacloud_platform.backends.registry import (
         register_backend_type,
         register_implementation,
@@ -188,21 +206,27 @@ def _init_platform_if_needed() -> None:
     register_implementation("storage", "datacloud-data", lambda: _onto)
     register_implementation("storage", "none", lambda: _NoopStorageBackend())
 
-    register_preset("LOCAL", {})
+    # 注册远程 backend 实现（在 register_backend_type 之后）
+    from datacloud_platform.backends.presets import _register_remote_implementations  # noqa: PLC0415
+
+    _register_remote_implementations()
 
     registry = OntologyBaseRegistry()
-    registry.register(
-        OntologyBaseEntry(
-            base_id="default",
-            display_name="默认本地库",
-            source_type="LOCAL",
-            backend_config={
-                "ontology": {
-                    "base_path": os.environ.get("DATACLOUD_ONTOLOGY_PATH", ""),
-                }
-            },
+    # 加载持久化的 bases（API 创建的远程 base 也在其中）
+    registry.restore()
+    if not registry.exists("default"):
+        registry.register(
+            OntologyBaseEntry(
+                base_id="default",
+                display_name="默认本地库",
+                source_type="LOCAL",
+                backend_config={
+                    "ontology": {
+                        "base_path": os.environ.get("DATACLOUD_ONTOLOGY_PATH", ""),
+                    }
+                },
+            )
         )
-    )
     platform = DatacloudPlatform(_base_registry=registry)
 
     import datacloud_platform

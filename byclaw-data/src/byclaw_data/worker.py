@@ -10,7 +10,7 @@ import logging
 import os
 import re
 import sys
-import time
+
 import traceback
 import uuid
 from collections import OrderedDict
@@ -318,6 +318,77 @@ def _build_dynamic_cache_key(mounted_objects: list[str]) -> str:
     return f"dynamic:{fingerprint}"
 
 
+_SCOPE_VALID_TYPES = frozenset({"ONTOLOGY_BASE", "SCENE", "OBJECT", "VIEW"})
+
+
+def _build_scope_entries(
+    rel_resource_list: list[dict[str, Any]],
+    mounted_objects: list[str] | None = None,
+    config_extra: dict | None = None,
+) -> "list[Any]":
+    """解析 rel_resource_list → list[ScopeEntry]。
+
+    当 rel_resource_list 非空时以其为准；为空时从 mounted_objects 降级为 OBJECT 类型
+    ScopeEntry（兼容旧格式）；仍为空时从 config_extra.mounted_objects（AgentConfig 挂载
+    对象）回退填充，确保 search_ontology 范围受 Agent 自身 mounted_objects 限制。
+    """
+    try:
+        from datacloud_analysis.tools.request_tool_context import ScopeEntry
+    except Exception:
+        return []
+
+    if rel_resource_list:
+        result = []
+        for item in rel_resource_list:
+            if not isinstance(item, dict):
+                continue
+            biz_type = str(item.get("resourceBizType") or "")
+            if biz_type not in _SCOPE_VALID_TYPES:
+                continue
+            code = str(item.get("resourceCode") or "").strip()
+            if not code:
+                continue
+            base_code = str(item.get("ontologyBaseCode") or "").strip()
+            if biz_type == "ONTOLOGY_BASE":
+                base_id = code
+            else:
+                base_id = base_code
+            result.append(ScopeEntry(code=code, scope_type=biz_type, base_id=base_id))
+        return result
+
+    # 降级：从 config_extra.rel_resource_list 回退（保留 SCENE/OBJECT 类型 + base_id）
+    if config_extra:
+        rel_rl = config_extra.get("rel_resource_list", [])
+        if rel_rl:
+            result = []
+            for item in rel_rl:
+                if not isinstance(item, dict):
+                    continue
+                biz_type = str(item.get("resourceBizType") or "")
+                if biz_type not in _SCOPE_VALID_TYPES:
+                    continue
+                code = str(item.get("resourceCode") or "").strip()
+                if not code:
+                    continue
+                base_code = str(item.get("ontologyBaseCode") or "").strip()
+                if biz_type == "ONTOLOGY_BASE":
+                    base_id = code
+                else:
+                    base_id = base_code
+                result.append(ScopeEntry(code=code, scope_type=biz_type, base_id=base_id))
+            return result
+
+    # 降级：从 mounted_objects 生成 OBJECT 类型 ScopeEntry
+    if mounted_objects:
+        return [
+            ScopeEntry(code=c, scope_type="OBJECT", base_id="")
+            for c in mounted_objects
+            if isinstance(c, str) and c.strip()
+        ]
+
+    return []
+
+
 def _extract_tool_resource_codes(
     resource_list: list[Any],
 ) -> tuple[list[str], list[str]]:
@@ -451,10 +522,12 @@ def _load_skills(
     resource_list: list[Any],
     user_code: str,
     tools_dict: dict[str, Any],
+    agent_id: str = "",
 ) -> tuple[str, str, list[dict[str, str]]] | None:
     """加载 skill，返回 (task_prompt, first_skill_path, skill_catalog)；无 skill 时返回 None。
 
-    仅支持路径A：resource_list 中有 SKILL 条目，按 resourceId 精确加载。
+    路径A：resource_list 中有 SKILL 条目，按 resourceId 精确加载，轻量 index + activate_skill 懒加载。
+    路径B：agent_id 目录下有 skills/ 子目录，全量内容直接注入 system prompt，无需 activate_skill。
 
     skill_catalog 格式：[{"name": ..., "description": ..., "location": "SKILL.md 绝对路径"}]
     由调用方写入 config["configurable"]["extras"]["skill_catalog"]，供 activate_skill 工具按需加载。
@@ -470,60 +543,114 @@ def _load_skills(
     minio_root = os.environ.get(
         "FILE_STORAGE_MINIO_MOUNT_PATH", "/data/byai/byaiAllInOne/mino"
     )
-    # skill_entries: [(name, description, raw_content, skill_md_path)]
-    skill_entries: list[tuple[str, str, str, Path]] = []
+    # skill_entries: [(name, description, raw_content, skill_md_path, is_path_b)]
+    skill_entries: list[tuple[str, str, str, Path, bool]] = []
     all_warnings: list[str] = []
     first_skill_path = ""
     _log = logging.getLogger(__name__)
 
     if skill_ids:
-        # 路径A：显式 SKILL 条目
+        # 路径A：显式 SKILL 条目，懒加载
         for resource_id in skill_ids:
             skill_path = (
-                Path(minio_root) / f"byclaw-{user_code}" / "by" / resource_id.lstrip("/")
+                Path(minio_root)
+                / f"byclaw-{user_code}"
+                / "by"
+                / resource_id.lstrip("/")
             )
             if not first_skill_path:
                 first_skill_path = str(skill_path)
             skill_md = skill_path / "SKILL.md"
             if not skill_md.exists():
-                _log.warning("_load_skills: SKILL.md not found at %s, skipping", skill_md)
+                _log.warning(
+                    "_load_skills: SKILL.md not found at %s, skipping", skill_md
+                )
                 continue
             try:
                 content = skill_md.read_text(encoding="utf-8")
             except OSError as exc:
-                _log.warning("_load_skills: failed to read %s: %s, skipping", skill_md, exc)
+                _log.warning(
+                    "_load_skills: failed to read %s: %s, skipping", skill_md, exc
+                )
                 continue
             meta = _parse_skill_meta(content)
             content, w = _replace_skill_placeholders(content, tools_dict)
             all_warnings.extend(w)
-            skill_entries.append((
-                meta.get("name") or skill_path.name,
-                meta.get("description") or "",
-                content,
-                skill_md,
-            ))
+            skill_entries.append(
+                (
+                    meta.get("name") or skill_path.name,
+                    meta.get("description") or "",
+                    content,
+                    skill_md,
+                    False,
+                )
+            )
+
+    # 路径B：agent 预置 skill，全量直接注入 system prompt
+    if agent_id:
+        bydc_dir = (
+            Path(minio_root)
+            / f"byclaw-{user_code}"
+            / "by"
+            / ".ByDC"
+            / user_code
+            / f"agent_{agent_id}"
+            / "skills"
+        )
+        if bydc_dir.is_dir():
+            loaded_mds: set[Path] = {skill_md for _, _, _, skill_md, _ in skill_entries}
+            for skill_dir in sorted(bydc_dir.iterdir()):
+                if not skill_dir.is_dir():
+                    continue
+                skill_md = skill_dir / "SKILL.md"
+                if not skill_md.exists() or skill_md in loaded_mds:
+                    continue
+                try:
+                    content = skill_md.read_text(encoding="utf-8")
+                except OSError as exc:
+                    _log.warning(
+                        "_load_skills path-B: failed to read %s: %s", skill_md, exc
+                    )
+                    continue
+                meta = _parse_skill_meta(content)
+                content, w = _replace_skill_placeholders(content, tools_dict)
+                all_warnings.extend(w)
+                if not first_skill_path:
+                    first_skill_path = str(skill_dir)
+                skill_entries.append(
+                    (
+                        meta.get("name") or skill_dir.name,
+                        meta.get("description") or "",
+                        content,
+                        skill_md,
+                        True,
+                    )
+                )
 
     if not skill_entries:
         return None
 
-    # skill_catalog 供 activate_skill 工具按需加载完整指令
+    # 路径A 和路径B 统一采用轻量索引 + activate_skill 按需加载
+    # 所有 skill 条目都写入 skill_catalog 供 activate_skill 懒加载
     skill_catalog = [
         {"name": name, "description": desc, "location": str(skill_md)}
-        for name, desc, _, skill_md in skill_entries
+        for name, desc, _, skill_md, _ in skill_entries
     ]
 
-    # system prompt 只注入轻量索引，完整指令由 activate_skill 按需拉取
-    index_lines = ["## 可用 Skills\n"]
-    for name, desc, _, _ in skill_entries:
-        index_lines.append(f"- **{name}**：{desc}" if desc else f"- **{name}**")
-    index_lines.append(
-        "\n> 当用户提到某个 skill 名称或请求对应分析时，先调用 `activate_skill(name=...)` 加载完整指令，再按指令执行。"
-    )
-    task_prompt = "\n".join(index_lines)
+    # 生成轻量索引提示词
+    if skill_entries:
+        index_lines = ["## 可用 Skills\n"]
+        for name, desc, _, _, _ in skill_entries:
+            index_lines.append(f"- **{name}**：{desc}" if desc else f"- **{name}**")
+        index_lines.append(
+            "\n> 当用户提到某个 skill 名称或请求对应分析时，先调用 `activate_skill(name=...)` 加载完整指令，再按指令执行。"
+        )
+        task_prompt = "\n".join(index_lines)
+    else:
+        task_prompt = ""
     if all_warnings:
         task_prompt += "\n\n" + "\n".join(all_warnings)
     return task_prompt, first_skill_path, skill_catalog
-
 
 
 def _normalize_recall(raw: Any) -> list[str]:
@@ -857,7 +984,8 @@ def _create_early_langfuse_trace(
                 "session_id": session_id,
                 "agent_id": agent_id,
                 "history_count": len(history) if history else 0,
-                "context_messages": (history or []) + [{"role": "user", "content": str(question)[:500]}],
+                "context_messages": (history or [])
+                + [{"role": "user", "content": str(question)[:500]}],
             },
             metadata={
                 "object_type": "early_span",
@@ -1157,7 +1285,8 @@ class DataCloudWorker(GatewayWorker):
         self._resume_result_cache: OrderedDict[str, dict[str, Any]] = OrderedDict()
         self._resume_inflight: dict[str, asyncio.Future[dict[str, Any]]] = {}
         self.command_plugin_manager = CommandPluginManager.from_defaults()
-        self._shared_loader: Any | None = None
+        self._runtime_manager: Any | None = None
+        self._loader_snapshot: Any | None = None
         self._resource_path: str = os.environ.get("DATACLOUD_ONTOLOGY_PATH", "")
         self._ontology_agent: Any | None = None
         self._model_config_sig: str = ""
@@ -1391,7 +1520,7 @@ class DataCloudWorker(GatewayWorker):
 
         Three-level fallback:
         1. First AgentConfig with a non-None extra["loader"].
-        2. self._shared_loader cached at start_heartbeat time.
+        2. self._loader_snapshot.loader cached at start_heartbeat time.
         3. None — OntologyToolLoader will skip OWL injection gracefully.
         """
         for cfg in self.plugin_registry.agent_configs if self.plugin_registry else []:
@@ -1399,8 +1528,8 @@ class DataCloudWorker(GatewayWorker):
             loader = extra.get("loader")
             if loader is not None:
                 return loader
-        if self._shared_loader is not None:
-            return self._shared_loader
+        if self._loader_snapshot is not None:
+            return self._loader_snapshot.loader
         logger.warning(
             "DataCloudWorker._extract_shared_loader: no OntologyLoader found in any "
             "AgentConfig; dynamic agent will proceed with loader=None (OWL injection skipped)"
@@ -1409,7 +1538,6 @@ class DataCloudWorker(GatewayWorker):
 
     async def start_heartbeat(self, **kwargs: Any) -> None:
         setup_logging(extra_namespaces=("byclaw_data",))
-        await super().start_heartbeat(**kwargs)
 
         init_plugin = self.plugin_registry.get_plugin("datacloud_init_agent_conf")
         loaded_agent_ids = (
@@ -1464,20 +1592,34 @@ class DataCloudWorker(GatewayWorker):
                 "OntologyAgent skipped. Dynamic agent path will fail on first request."
             )
 
-        # 动态路径：从首个已加载 AgentConfig 取 loader 并缓存至 worker 级别
-        self._shared_loader = self._extract_shared_loader()
+        # 动态路径：通过 LoaderRuntimeManager 获取 loader，收口到 platform 层
+        from datacloud_platform.loader_runtime import (  # noqa: PLC0415
+            LoaderRuntimeManager,
+        )
+        from datacloud_platform import get_platform  # noqa: PLC0415
+        from datacloud_platform.config import get_settings  # noqa: PLC0415
+
+        self._runtime_manager = LoaderRuntimeManager(
+            platform=get_platform(),
+            settings=get_settings(),
+        )
+        self._loader_snapshot = self._runtime_manager.get_loader("default")
         logger.info(
-            "DataCloudWorker: _shared_loader=%s",
+            "DataCloudWorker: _loader_snapshot=%s",
             "ready"
-            if self._shared_loader is not None
+            if self._loader_snapshot is not None
             else "None (dynamic agents will skip OWL inject)",
         )
+
+        # 将 runtime_manager 传递给 init_agent_conf plugin
+        if init_plugin is not None and hasattr(init_plugin, "set_runtime_manager"):
+            init_plugin.set_runtime_manager(self._runtime_manager)
 
         # 扩展本体池：从所有 AgentConfig 的 mounted_objects 收集全量对象，
         # 加载到 TOOL_POOL（全部 LOCKED）。
         # 不再依赖 extResourceList（已废弃），统一由 relResourceList 声明对象。
         # 超过 TOOL_POOL_THRESHOLD 时启用锚点驱动模式（is_anchor_mode()==True）。
-        if self._resource_path and self._shared_loader is not None:
+        if self._resource_path and self._loader_snapshot is not None:
             _all_object_codes: list[str] = list(dict.fromkeys(
                 code
                 for cfg in self.plugin_registry.get_agent_configs_snapshot().configs
@@ -1492,7 +1634,7 @@ class DataCloudWorker(GatewayWorker):
 
                     _init_ext_tool_pool(
                         resource_path=self._resource_path,
-                        loader=self._shared_loader,
+                        loader=self._loader_snapshot.loader,
                         ext_codes=_all_object_codes,
                     )
                     logger.info(
@@ -1507,6 +1649,8 @@ class DataCloudWorker(GatewayWorker):
                 logger.info(
                     "DataCloudWorker: no mounted_objects found, TOOL_POOL init skipped"
                 )
+
+        await super().start_heartbeat(**kwargs)
 
     async def _resolve_agent_configs_snapshot(
         self,
@@ -1579,9 +1723,7 @@ class DataCloudWorker(GatewayWorker):
         ) as _rid:
             try:
                 result = await self._process_command_inner(command, context, _rid)
-                _update_early_langfuse_trace(
-                    _early_lf_trace_ctx.get(), status="ok"
-                )
+                _update_early_langfuse_trace(_early_lf_trace_ctx.get(), status="ok")
                 # ── 自动评分：写入客观指标到 Langfuse scores 表 ─────────────
                 _lf_handle = _early_lf_trace_ctx.get()
                 if _lf_handle is not None:
@@ -1664,11 +1806,17 @@ class DataCloudWorker(GatewayWorker):
             )
             for _m in _raw_hist:
                 if isinstance(_m, _EHM):
-                    _early_history.append({"role": "user", "content": str(_m.content or "")[:500]})
+                    _early_history.append(
+                        {"role": "user", "content": str(_m.content or "")[:500]}
+                    )
                 elif isinstance(_m, _EAI):
-                    _early_history.append({"role": "assistant", "content": str(_m.content or "")[:500]})
+                    _early_history.append(
+                        {"role": "assistant", "content": str(_m.content or "")[:500]}
+                    )
                 elif isinstance(_m, _ESM):
-                    _early_history.append({"role": "system", "content": str(_m.content or "")[:200]})
+                    _early_history.append(
+                        {"role": "system", "content": str(_m.content or "")[:200]}
+                    )
         except Exception:
             pass
         _early_lf_trace = _create_early_langfuse_trace(
@@ -1818,7 +1966,9 @@ class DataCloudWorker(GatewayWorker):
                         context.session_id,
                     )
                 _redis_auth_key = f"user:{_real_user_id or _auth_user_id}:login:auth"
-                _redis_auth_data: dict[str, str] = await self.redis.hgetall(_redis_auth_key)
+                _redis_auth_data: dict[str, str] = await self.redis.hgetall(
+                    _redis_auth_key
+                )
                 if _redis_auth_data:
                     _whale_token = _redis_auth_data.get("WHALE_AGENT_AUTHORIZATION", "")
                     _sso_token = _redis_auth_data.get("Sso-Token", "")
@@ -1837,7 +1987,9 @@ class DataCloudWorker(GatewayWorker):
                     except AttributeError:
                         pass
                     # 回填到 header_metadata，使下游 header_metadata.get("Beyond-Token") 等读取生效
-                    if _whale_token and not header_metadata.get("WHALE_AGENT_AUTHORIZATION"):
+                    if _whale_token and not header_metadata.get(
+                        "WHALE_AGENT_AUTHORIZATION"
+                    ):
                         header_metadata["WHALE_AGENT_AUTHORIZATION"] = _whale_token
                     if _sso_token and not header_metadata.get("Sso-Token"):
                         header_metadata["Sso-Token"] = _sso_token
@@ -1850,9 +2002,15 @@ class DataCloudWorker(GatewayWorker):
                         " whale=%s sso=%s beyond=%s",
                         _redis_auth_key,
                         context.session_id,
-                        f"{_whale_token[:4]}...{_whale_token[-4:]}" if len(_whale_token) > 8 else ("***" if _whale_token else "<empty>"),
-                        f"{_sso_token[:4]}...{_sso_token[-4:]}" if len(_sso_token) > 8 else ("***" if _sso_token else "<empty>"),
-                        f"{_beyond_token[:4]}...{_beyond_token[-4:]}" if len(_beyond_token) > 8 else ("***" if _beyond_token else "<empty>"),
+                        f"{_whale_token[:4]}...{_whale_token[-4:]}"
+                        if len(_whale_token) > 8
+                        else ("***" if _whale_token else "<empty>"),
+                        f"{_sso_token[:4]}...{_sso_token[-4:]}"
+                        if len(_sso_token) > 8
+                        else ("***" if _sso_token else "<empty>"),
+                        f"{_beyond_token[:4]}...{_beyond_token[-4:]}"
+                        if len(_beyond_token) > 8
+                        else ("***" if _beyond_token else "<empty>"),
                     )
             except Exception:
                 logger.warning(
@@ -1880,6 +2038,10 @@ class DataCloudWorker(GatewayWorker):
         _resource_list_raw = extra_payload.get("resource_list")
         _resource_list_for_extract: list[Any] = (
             _resource_list_raw if isinstance(_resource_list_raw, list) else []
+        )
+        _rel_resource_list_raw = extra_payload.get("rel_resource_list")
+        _rel_resource_list: list[Any] = (
+            _rel_resource_list_raw if isinstance(_rel_resource_list_raw, list) else []
         )
         _res_object_codes, _res_view_codes = _extract_tool_resource_codes(
             _resource_list_for_extract
@@ -2025,6 +2187,10 @@ class DataCloudWorker(GatewayWorker):
             by_agent_name,
             runtime_agent_key,
         )
+
+        # 传统路径 tool_context 桥接变量
+        # _is_dynamic_agent=False 时在 else 块内构建，注入外层 config 中
+        _tool_context_for_config: Any = None
 
         if not _is_dynamic_agent:
             target_agent_id_for_load = str(
@@ -2250,6 +2416,7 @@ class DataCloudWorker(GatewayWorker):
                 resource_list=_resource_list_for_extract,
                 user_code=_dyn_user_code,
                 tools_dict={},  # 动态路径无 AgentConfig，占位符替换跳过
+                agent_id=str(by_agent_id or ""),
             )
             _dyn_minio_root = os.environ.get(
                 "FILE_STORAGE_MINIO_MOUNT_PATH", "/data/byai/byaiAllInOne/mino"
@@ -2278,6 +2445,58 @@ class DataCloudWorker(GatewayWorker):
                     "No skill found (dynamic path): session=%s resource_list_len=%d",
                     context.session_id,
                     len(_resource_list_for_extract),
+                )
+
+            # ── 情形一：构建 RequestToolContext（per-request 授权范围） ─────────────────
+            tool_context: Any = None
+            try:
+                from datacloud_analysis.tools.request_tool_context import (
+                    RequestToolContext,
+                )
+
+                # 当 _rel_resource_list 和动态 mounted_objects 均为空时，
+                # 回退到 AgentConfig.extra.mounted_objects，限制 search_ontology 范围
+                _agent_config_extra: dict[str, Any] | None = None
+                try:
+                    _agent_configs = context.list_agent_configs()
+                    _cfg = next(
+                        (
+                            c
+                            for c in _agent_configs
+                            if str(c.agent_id) == str(by_agent_id)
+                        ),
+                        None,
+                    )
+                    if _cfg is not None:
+                        _agent_config_extra = getattr(_cfg, "extra", None) or {}
+                except Exception:
+                    _agent_config_extra = None
+
+                _scope_entries = _build_scope_entries(
+                    _rel_resource_list,
+                    mounted_objects=list(_dyn_object_ids) + list(_dyn_view_ids),
+                    config_extra=_agent_config_extra,
+                )
+                if _scope_entries and self._loader_snapshot is not None:
+                    from datacloud_analysis.tools.tool_pool import (
+                        OntologyToolLoader,
+                    )
+
+                    tool_context = RequestToolContext.build(
+                        allowed_scope=_scope_entries,
+                        loader=self._loader_snapshot.loader,
+                        tool_loader_cls=OntologyToolLoader,
+                    )
+                    logger.info(
+                        "DataCloudWorker: tool_context built scope_len=%d anchor_mode=%s session=%s",
+                        len(_scope_entries),
+                        tool_context.anchor_mode,
+                        context.session_id,
+                    )
+            except Exception as _tc_err:
+                logger.warning(
+                    "DataCloudWorker: tool_context build failed (fallback to TOOL_POOL): %s",
+                    _tc_err,
                 )
 
             if isinstance(command, ResumeCommand) or _paradigm_resume_value is not None:
@@ -2317,6 +2536,7 @@ class DataCloudWorker(GatewayWorker):
                     user_code=_get_gateway_user_code(context),
                     session_id=context.session_id,
                     extras=_dyn_extras,
+                    tool_context=tool_context,
                 )
 
             logger.info(
@@ -2446,6 +2666,20 @@ class DataCloudWorker(GatewayWorker):
             _req_locale = str(getattr(context, "locale", "") or "zh_CN")
             if "locale" not in prompts_dict:
                 prompts_dict["locale"] = _req_locale
+
+            # 诊断日志：打印 prompts_dict 的内容
+            _task_prompt_in_dict = prompts_dict.get("task_prompt", "")
+            logger.info(
+                "[TASK_PROMPT_DIAG] prompts_dict loaded: agent_id=%s keys=%s task_prompt_len=%d task_prompt_preview=%s",
+                by_agent_id,
+                sorted(prompts_dict.keys()),
+                len(_task_prompt_in_dict) if _task_prompt_in_dict else 0,
+                (
+                    _task_prompt_in_dict[:100].replace("\n", " ")
+                    if _task_prompt_in_dict
+                    else "EMPTY"
+                ),
+            )
             config_extra = getattr(config_for_this_call, "extra", None) or {}
             tools_dict = config_extra.get("redirect_tools", {})
             tool_metadata = config_extra.get("tool_metadata", {})
@@ -2462,13 +2696,13 @@ class DataCloudWorker(GatewayWorker):
             )
 
             # 🆕 从 extra 中提取 mounted_objects（优先），或从 tool_metadata 中提取（兼容旧逻辑）
-            mounted_objects = []
+            _raw_mounted_objects: list[str] = []
             if "mounted_objects" in config_extra:
-                mounted_objects = config_extra.get("mounted_objects", [])
+                _raw_mounted_objects = list(config_extra.get("mounted_objects") or [])
                 logger.info(
                     "Agent config: agent_id=%s mounted_objects=%s (from extra)",
                     by_agent_id,
-                    mounted_objects,
+                    _raw_mounted_objects,
                 )
             else:
                 # 兼容旧逻辑：从 tool_metadata 中提取
@@ -2476,12 +2710,72 @@ class DataCloudWorker(GatewayWorker):
                     resource_biz_type = metadata.get("resource_biz_type")
                     resource_code = metadata.get("resource_code")
                     if resource_biz_type in {"OBJECT", "VIEW"} and resource_code:
-                        mounted_objects.append(resource_code)
+                        _raw_mounted_objects.append(resource_code)
                 logger.info(
                     "Agent config: agent_id=%s mounted_objects=%s (from tool_metadata)",
                     by_agent_id,
-                    mounted_objects,
+                    _raw_mounted_objects,
                 )
+
+            # 统一通过 _build_scope_entries 构建作用域条目，支持 rel_resource_list
+            # 优先级 + AgentConfig.extra.mounted_objects 第三级回退
+            _scope_entries = _build_scope_entries(
+                _rel_resource_list,
+                mounted_objects=_raw_mounted_objects if _raw_mounted_objects else None,
+                config_extra=config_extra,
+            )
+            if _scope_entries:
+                mounted_objects = [
+                    entry.code
+                    for entry in _scope_entries
+                    if getattr(entry, "scope_type", "OBJECT") in ("OBJECT", "VIEW")
+                ]
+            else:
+                mounted_objects = _raw_mounted_objects
+
+            # 🆕 传统路径：将 _scope_entries 构建为 RequestToolContext 注入外层 config
+            # 解决 _is_dynamic_agent=False 时 configurable.tool_context 缺失导致
+            # search_ontology 无 allowed_scope 限制、搜穿全库的问题
+            _dc_logger.info(
+                "DataCloudWorker: _scope_entries=%s loader_snapshot=%s session=%s",
+                [(getattr(e, "code", "?"), getattr(e, "scope_type", "?"), getattr(e, "base_id", "?"))
+                 for e in _scope_entries] if _scope_entries else "EMPTY",
+                "ready" if self._loader_snapshot is not None else "None",
+                context.session_id,
+            )
+            if _scope_entries and self._loader_snapshot is not None:
+                _dc_logger.info(
+                    "DataCloudWorker: entering tool_context build, scope=%d session=%s",
+                    len(_scope_entries), context.session_id,
+                )
+                try:
+                    from datacloud_analysis.tools.request_tool_context import (
+                        RequestToolContext,
+                    )
+                    from datacloud_analysis.tools.ontology_tool_loader import (
+                        OntologyToolLoader,
+                    )
+
+                    _tool_context_for_config = RequestToolContext.build(
+                        allowed_scope=_scope_entries,
+                        loader=self._loader_snapshot.loader,
+                        tool_loader_cls=OntologyToolLoader,
+                    )
+                    _dc_logger.info(
+                        "DataCloudWorker: tool_context BUILT anchor_mode=%s session=%s",
+                        _tool_context_for_config.anchor_mode, context.session_id,
+                    )
+                    logger.info(
+                        "DataCloudWorker: tool_context built scope_len=%d "
+                        "anchor_mode=%s session=%s (traditional path)",
+                        len(_scope_entries),
+                        _tool_context_for_config.anchor_mode,
+                        context.session_id,
+                    )
+                except Exception as _tc_err:
+                    _dc_logger.warning(
+                        "DataCloudWorker: tool_context build FAILED: %s", _tc_err, exc_info=True,
+                    )
             # 改动4: SkillsMiddleware 在运行时自动处理技能发现，无需在 worker 中手动加载
             logger.info(
                 "Agent runtime tools: agent_id=%s tool_keys=%s",
@@ -2559,11 +2853,21 @@ class DataCloudWorker(GatewayWorker):
                         agent_id=str(by_agent_id).strip() if by_agent_id else None,
                     )
                 self.graphs[cache_key] = target_graph
+                logger.info(
+                    "[DEBUG] Graph built and cached: cache_key=%s agent_id=%s",
+                    cache_key,
+                    by_agent_id,
+                )
                 while len(self.graphs) > self._GRAPH_CACHE_MAX:
                     evicted_key, _ = self.graphs.popitem(last=False)
                     logger.info("Graph cache evicted: key=%s", evicted_key)
             else:
                 self.graphs.move_to_end(cache_key)
+                logger.info(
+                    "[DEBUG] Using cached graph: cache_key=%s agent_id=%s",
+                    cache_key,
+                    by_agent_id,
+                )
 
         thread_id = str(
             header_metadata.get("resume_thread_id")
@@ -2647,6 +2951,10 @@ class DataCloudWorker(GatewayWorker):
                 ),
                 # per-agent LLM 配置（非 None 时覆盖环境变量）
                 **({"llm_config": _agent_llm_config} if _agent_llm_config else {}),
+                # 传统路径注入 tool_context，限制 search_ontology 搜索范围
+                **({"tool_context": _tool_context_for_config}
+                    if _tool_context_for_config is not None
+                    else {}),
             },
             "recursion_limit": 100,
         }
@@ -2666,6 +2974,7 @@ class DataCloudWorker(GatewayWorker):
                     from by_framework_trace_langfuse import (  # noqa: PLC0415
                         build_langchain_callback,
                     )
+
                     _lf_handler = build_langchain_callback(
                         trace_id=_lf_trace_id,
                         parent_observation_id=_early_span_id,
@@ -2679,6 +2988,7 @@ class DataCloudWorker(GatewayWorker):
                     from datacloud_analysis.langfuse_handler import (  # noqa: PLC0415
                         make_langfuse_callback,
                     )
+
                     _lf_handler = make_langfuse_callback(
                         _lf_trace_id or None,
                         parent_span_id=_early_span_id or None,
@@ -2693,7 +3003,9 @@ class DataCloudWorker(GatewayWorker):
                     "agent_id": str(by_agent_id or ""),
                     # LangChain CallbackHandler 读取这几个字段写入 Langfuse trace/span
                     "langfuse_trace_name": f"agent.workflow {by_agent_name or by_agent_id or ''}".strip(),
-                    "langfuse_user_id": str(getattr(getattr(command, "header", None), "user_code", "") or ""),
+                    "langfuse_user_id": str(
+                        getattr(getattr(command, "header", None), "user_code", "") or ""
+                    ),
                     "langfuse_session_id": context.session_id or "",
                     "langfuse_tags": [
                         f"agent_id:{by_agent_id or ''}",
@@ -2703,6 +3015,7 @@ class DataCloudWorker(GatewayWorker):
                 from datacloud_analysis.langfuse_handler import (  # noqa: PLC0415
                     current_tool_spans,
                 )
+
                 _lf_spans_list: list[dict[str, Any]] = []
                 current_tool_spans.set(_lf_spans_list)
         except Exception:
@@ -2820,10 +3133,37 @@ class DataCloudWorker(GatewayWorker):
                     resource_list=_resource_list_for_extract,
                     user_code=_user_code_for_skill,
                     tools_dict=tools_dict,
+                    agent_id=str(by_agent_id or ""),
                 )
                 if _skill_task_prompt:
                     _task_prompt, _first_skill_dir, _skill_catalog = _skill_task_prompt
-                    graph_input["prompts_overwrite"]["task_prompt"] = _task_prompt
+                    # 合并 corePersonaDefinition 的 task_prompt 与 skill 的 task_prompt
+                    _core_task_prompt = prompts_dict.get("task_prompt", "")
+                    logger.info(
+                        "[TASK_PROMPT_DIAG] Has skill: session=%s core_len=%d skill_len=%d",
+                        context.session_id,
+                        len(_core_task_prompt) if _core_task_prompt else 0,
+                        len(_task_prompt),
+                    )
+                    if _core_task_prompt:
+                        _merged_task_prompt = (
+                            f"{_core_task_prompt}\n\n---\n\n{_task_prompt}"
+                        )
+                        logger.info(
+                            "[TASK_PROMPT_DIAG] Merged: session=%s merged_len=%d core_preview=%s",
+                            context.session_id,
+                            len(_merged_task_prompt),
+                            _core_task_prompt[:100].replace("\n", " "),
+                        )
+                    else:
+                        _merged_task_prompt = _task_prompt
+                        logger.warning(
+                            "[TASK_PROMPT_DIAG] No core_task_prompt found in prompts_dict! session=%s",
+                            context.session_id,
+                        )
+                    graph_input["prompts_overwrite"]["task_prompt"] = (
+                        _merged_task_prompt
+                    )
                     _skill_ws = str(
                         Path(_minio_root) / f"byclaw-{_user_code_for_skill}" / "by"
                     )
@@ -2833,7 +3173,7 @@ class DataCloudWorker(GatewayWorker):
                         "beyond_token": _beyond_token_for_skill,
                         "skill_workspace_dir": _skill_ws,
                         "skill_dir": _skill_dir,
-                        "task_prompt": _task_prompt,
+                        "task_prompt": _merged_task_prompt,
                         "agent_id": str(by_agent_id or ""),
                         "be_domainname": os.environ.get("BE_DOMAINNAME", ""),
                         "skill_catalog": _skill_catalog,
@@ -2845,11 +3185,29 @@ class DataCloudWorker(GatewayWorker):
                         _skill_dir,
                     )
                 else:
-                    logger.warning(
-                        "[skill-diag] skill load returned None: session=%s skill_ids=%s",
+                    # 无 skill 时，将 corePersonaDefinition 的 task_prompt 写入 prompts_overwrite
+                    _core_task_prompt = prompts_dict.get("task_prompt", "")
+                    logger.info(
+                        "[TASK_PROMPT_DIAG] No skill: session=%s core_len=%d",
                         context.session_id,
-                        _skill_ids,
+                        len(_core_task_prompt) if _core_task_prompt else 0,
                     )
+                    if _core_task_prompt:
+                        graph_input["prompts_overwrite"]["task_prompt"] = (
+                            _core_task_prompt
+                        )
+                        logger.info(
+                            "[TASK_PROMPT_DIAG] corePersonaDefinition injected: session=%s preview=%s",
+                            context.session_id,
+                            _core_task_prompt[:100].replace("\n", " "),
+                        )
+                    else:
+                        logger.warning(
+                            "[TASK_PROMPT_DIAG] No corePersonaDefinition and no skill! session=%s skill_ids=%s prompts_dict_keys=%s",
+                            context.session_id,
+                            _skill_ids,
+                            list(prompts_dict.keys()),
+                        )
             logger.debug(
                 "[i18n-diag] graph_input.prompts_overwrite set: locale=%r",
                 str(getattr(context, "locale", "") or "zh_CN"),
@@ -3092,12 +3450,24 @@ class DataCloudWorker(GatewayWorker):
                 context.session_id,
                 conf_hash,
             )
+            logger.info(
+                "[DEBUG] About to call target_graph.astream_events, graph_input keys=%s",
+                list(graph_input.keys())
+                if isinstance(graph_input, dict)
+                else type(graph_input).__name__,
+            )
             async for event in target_graph.astream_events(
                 graph_input, config=config, version="v2"
             ):
                 stream_event_count += 1
+                if stream_event_count == 1:
+                    logger.info(
+                        "[DEBUG] First event received, kind=%s", event.get("event")
+                    )
                 await context.check_cancelled()
                 kind: str = str(event["event"])
+                if stream_event_count <= 5:
+                    logger.info("[DEBUG] Event #%d kind=%s", stream_event_count, kind)
 
                 if kind == "on_chat_model_start":
                     # _runs 在此时刚写入，记录 LLM 调用的 Langfuse observation id
