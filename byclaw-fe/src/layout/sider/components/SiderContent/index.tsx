@@ -13,8 +13,6 @@ const SearchAndQuery = lazy(() => import('@/layout/sider/components/SearchAndQue
 const FileSiderPanel = lazy(() => import('@/layout/sider/components/FileSiderPanel'));
 const ModelSiderPanel = lazy(() => import('@/layout/sider/components/ModelSiderPanel'));
 
-const OntologySiderPanel = lazy(() => import('@/layout/sider/components/OntologySiderPanel'));
-
 const ToolSiderPanel = () => <ResourceSiderPanel resourceType="TOOL" />;
 const ViewSiderPanel = () => <ResourceSiderPanel resourceType="VIEW" />;
 const ObjectSiderPanel = () => <ResourceSiderPanel resourceType="OBJECT" />;
@@ -89,14 +87,6 @@ export const tabItems: any[] = [
     ChildComponent: ObjectSiderPanel,
     navigatePath: '/objectCenter',
     // hideSider: true,
-  },
-  {
-    key: 'ontology',
-    icon: 'icon-a-yemian-line',
-    activeIcon: 'icon-yemian-fill',
-    label: 'sider.ontology',
-    ChildComponent: OntologySiderPanel,
-    navigatePath: '/ontologyCenter',
   },
   {
     key: 'skill',

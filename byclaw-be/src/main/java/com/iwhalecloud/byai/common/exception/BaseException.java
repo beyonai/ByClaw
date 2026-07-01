@@ -51,10 +51,6 @@ public class BaseException extends RuntimeException {
 
     @Override
     public String getMessage() {
-        try {
-            return I18nUtil.get(this.errorMsg);
-        } catch (Exception e) {
-            return this.errorMsg;
-        }
+        return I18nUtil.get(this.errorMsg);
     }
 }

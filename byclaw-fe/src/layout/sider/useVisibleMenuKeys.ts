@@ -5,12 +5,7 @@ import { getDcSystemConfig } from '@/pages/manager/service/session';
 import { DEFAULT_MENU_CONFIG, getVisibleMenuKeysFromConfig } from '@/constants/system';
 
 const defaultVisibleKeys = getVisibleMenuKeysFromConfig(DEFAULT_MENU_CONFIG);
-// 临时屏蔽视图/对象入口，保留 tabItems 与中心页代码，后续需要时可恢复。
-const TEMP_HIDDEN_MENU_KEYS = new Set(['view', 'object']);
-// 'model' 和 'ontology' 始终追加为默认可见项；视图/对象在最终输出阶段临时屏蔽。
-const NEW_DEFAULT_VISIBLE_KEYS = ['skill', 'file', 'model', 'ontology'];
-
-const hideTemporaryMenuKeys = (visibleKeys: string[]) => visibleKeys.filter((key) => !TEMP_HIDDEN_MENU_KEYS.has(key));
+const NEW_DEFAULT_VISIBLE_KEYS = ['skill', 'file', 'model'];
 
 const appendMissingNewDefaultKeys = (visibleKeys: string[], configData: any[] = []) => {
   const configuredKeySet = new Set(
@@ -24,7 +19,7 @@ const appendMissingNewDefaultKeys = (visibleKeys: string[], configData: any[] = 
     }
   });
 
-  return hideTemporaryMenuKeys(nextVisibleKeys);
+  return nextVisibleKeys;
 };
 
 const useVisibleMenuKeys = (userInfo: any) => {
@@ -60,12 +55,12 @@ const useVisibleMenuKeys = (userInfo: any) => {
           const visibleMenuKeys = getVisibleMenuKeysFromConfig(configData);
           setVisibleKeys(appendMissingNewDefaultKeys(visibleMenuKeys, configData));
         } else {
-          setVisibleKeys(hideTemporaryMenuKeys(defaultVisibleKeys));
+          setVisibleKeys(defaultVisibleKeys);
         }
       })
       .catch(() => {
         if (active) {
-          setVisibleKeys(hideTemporaryMenuKeys(defaultVisibleKeys));
+          setVisibleKeys(defaultVisibleKeys);
         }
       });
 

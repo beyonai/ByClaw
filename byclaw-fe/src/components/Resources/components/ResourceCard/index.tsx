@@ -89,7 +89,6 @@ type ResourceCardActionConfig = {
   restoreDisabledTip?: React.ReactNode;
   applyDisabledTip?: React.ReactNode;
   extraMenuItems?: MenuProps['items'];
-  hiddenMenuItemKeys?: string[];
   onApplyUse?: () => void;
   onAuditUse?: () => void;
   onDelete?: () => void;
@@ -239,10 +238,6 @@ const canInstallResource = (resource: IResourceCardItem, resourceType?: string) 
   const bizType = resource?.resourceBizType || resourceType;
   if (bizType === 'SKILL' || resourceType === 'SKILL') {
     return Boolean(resource?.resourceId && resource?.hasUsePermission);
-  }
-  // 本体库走"按粒度安装"选择器（库/场景/对象/视图），不提供内建的整库快装入口。
-  if (bizType === 'ONTOLOGY_BASE' || resourceType === 'ONTOLOGY_BASE') {
-    return false;
   }
   return Boolean(resource?.resourceId && bizType && bizType !== 'DIG_EMPLOYEE');
 };
@@ -564,8 +559,7 @@ const RenderContent = (props: ResourceCardProps) => {
       items.push(...actionConfig.extraMenuItems);
     }
 
-    const hiddenMenuItemKeySet = new Set(actionConfig?.hiddenMenuItemKeys || []);
-    return hiddenMenuItemKeySet.size ? items.filter((item) => item && !hiddenMenuItemKeySet.has(`${item.key}`)) : items;
+    return items;
   }, [
     actionConfig,
     activeDigitalEmployeeId,

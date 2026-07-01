@@ -45,7 +45,7 @@ describe('useVisibleMenuKeys', () => {
     });
 
     await waitFor(() => {
-      expect(result.current).toEqual(['sessions', 'skill', 'file', 'model', 'ontology']);
+      expect(result.current).toEqual(['sessions', 'skill', 'file', 'model']);
     });
   });
 
@@ -60,24 +60,7 @@ describe('useVisibleMenuKeys', () => {
     const { result } = renderHook(() => useVisibleMenuKeys({ userId: 1 }));
 
     await waitFor(() => {
-      expect(result.current).toEqual(['sessions', 'file', 'model', 'ontology']);
-    });
-  });
-
-  it('temporarily hides view and object even when remote config enables them', async () => {
-    mockGetDcSystemConfigListByStandType.mockResolvedValue({
-      data: [
-        { paramName: '会话', paramValue: 'true', paramSeq: 1 },
-        { paramName: '视图', paramValue: 'true', paramSeq: 2 },
-        { paramName: '对象', paramValue: 'true', paramSeq: 3 },
-        { paramName: '本体', paramValue: 'true', paramSeq: 4 },
-      ],
-    });
-
-    const { result } = renderHook(() => useVisibleMenuKeys({ userId: 1 }));
-
-    await waitFor(() => {
-      expect(result.current).toEqual(['sessions', 'ontology', 'skill', 'file', 'model']);
+      expect(result.current).toEqual(['sessions', 'file', 'model']);
     });
   });
 
