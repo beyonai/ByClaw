@@ -45,6 +45,14 @@ export const tabItems: any[] = [
     forceRender: true,
   },
   {
+    key: 'model',
+    icon: 'icon-a-Braindanao',
+    activeIcon: 'icon-a-Braindanao',
+    label: 'common.model',
+    ChildComponent: ModelSiderPanel,
+    navigatePath: '/models',
+  },
+  {
     key: 'knowledge',
     icon: 'icon-a-Boxhezioutline',
     activeIcon: 'icon-zhishi-fill',
@@ -97,14 +105,6 @@ export const tabItems: any[] = [
     ChildComponent: FileSiderPanel,
     navigatePath: '/files',
   },
-  {
-    key: 'model',
-    icon: 'icon-a-Braindanao',
-    activeIcon: 'icon-a-Braindanao',
-    label: 'common.model',
-    ChildComponent: ModelSiderPanel,
-    navigatePath: '/models',
-  },
 ] as const;
 
 type IProps = {
@@ -120,9 +120,8 @@ const SiderContent = (props: IProps) => {
 
   const items = useMemo(
     () =>
-      visibleKeys
-        .map((key) => tabItems.find((pageItem) => pageItem.key === key))
-        .filter((pageItem): pageItem is (typeof tabItems)[number] => !!pageItem)
+      tabItems
+        .filter((pageItem) => visibleKeys.includes(pageItem.key))
         .map((pageItem) => {
           const { key, ChildComponent, destroyOnHidden = false, disabled, forceRender = false } = pageItem;
           return {

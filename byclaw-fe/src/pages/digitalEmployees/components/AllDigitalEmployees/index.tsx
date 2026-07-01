@@ -1,7 +1,7 @@
 // tslint:disable:ordered-imports
 import React, { useEffect, useMemo, useReducer, useState } from 'react';
 // @ts-ignore
-import { useDispatch, useIntl, useSelector, getLocale, useNavigate, useSearchParams } from '@umijs/max';
+import { useDispatch, useIntl, useSelector, useNavigate, useSearchParams } from '@umijs/max';
 import { Spin, Tabs, message } from 'antd';
 import classnames from 'classnames';
 import { compact, head, isEmpty, size } from 'lodash';
@@ -72,7 +72,6 @@ function AllDigitalEmployees(
 ) {
   const { searchName, dropdownParam, buildFilterParam } = props;
 
-  const local = getLocale();
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const intl = useIntl();
@@ -100,12 +99,8 @@ function AllDigitalEmployees(
 
   const hasMore = paginationInfo.total > size(list);
 
-  const isEN = React.useMemo(() => {
-    return local.includes('en');
-  }, [local]);
-  const defaultBannerUrl = getRuntimeActualUrl(isEN ? '/beyond/market-en.png' : '/beyond/market.png');
   const customBannerUrl = getBannerUrl(bannerList, [intl.formatMessage({ id: 'digitalEmployees.title' }), '数字员工']);
-  const bannerUrl = customBannerUrl ? getRuntimeActualUrl(customBannerUrl) : defaultBannerUrl;
+  const bannerUrl = customBannerUrl ? getRuntimeActualUrl(customBannerUrl) : '';
 
   useEffect(() => {
     getDcSystemConfig({ paramCode: 'BYAI_BANNER' })
@@ -408,7 +403,11 @@ function AllDigitalEmployees(
 
   return (
     <div className="full-width full-height ub ub-ver">
-      <div className="mb-16">{bannerLoaded && <img className={styles.marketBg} src={bannerUrl} alt="poster" />}</div>
+      {bannerLoaded && bannerUrl && (
+        <div className="mb-16">
+          <img className={styles.marketBg} src={bannerUrl} alt="poster" />
+        </div>
+      )}
       <div
         id="guideStep2-5"
         className={classnames('ub ub-ac gap8', styles.body)}

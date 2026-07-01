@@ -1,8 +1,9 @@
 export default {
-  'personalModel.title': 'My Models',
+  'personalModel.title': 'Model Center',
   'personalModel.tab.mine': 'My Models',
   'personalModel.tab.public': 'Public Models',
   'personalModel.readonly': 'Read-only',
+  'personalModel.currentInUse': 'In use by current agent',
   'personalModel.empty': 'No models available',
   'personalModel.quota.title': 'Usage Overview',
   'personalModel.quota.totalTokens': 'Total Tokens',

@@ -227,8 +227,14 @@ public class ParamService {
 
         List<Long> resourceIds = new ArrayList<>();
         for (ResourceVo resourceVo : resourceList) {
+            if (resourceVo == null || resourceVo.getResourceType() == null) {
+                continue;
+            }
             if (resourceBizType.equals(resourceVo.getResourceType().getCode())) {
-                resourceIds.add(Long.valueOf(resourceVo.getResourceId()));
+                Long resourceId = parseResourceIdAsLong(resourceVo.getResourceId());
+                if (resourceId != null) {
+                    resourceIds.add(resourceId);
+                }
             }
         }
 
@@ -255,7 +261,14 @@ public class ParamService {
         Set<Long> skillResourceIdSet = new HashSet<>(skillResourceIds);
         // 为命中的技能资源补充扩展字段（仅当补充字段为空时）
         for (ResourceVo resourceVo : resourceList) {
-            Long resourceId = Long.valueOf(resourceVo.getResourceId());
+            if (resourceVo == null || resourceVo.getResourceType() == null
+                || !ResourceBizType.SKILL.getCode().equals(resourceVo.getResourceType().getCode())) {
+                continue;
+            }
+            Long resourceId = parseResourceIdAsLong(resourceVo.getResourceId());
+            if (resourceId == null) {
+                continue;
+            }
             if (!skillResourceIdSet.contains(resourceId) || StringUtils.isNotEmpty(resourceVo.getExtData())) {
                 continue;
             }
@@ -268,6 +281,18 @@ public class ParamService {
             extData.put("skillUrl", skillExt.getSkillUrl());
             extData.put("version", skillExt.getVersion());
             resourceVo.setExtData(extData.toJSONString());
+        }
+    }
+
+    private Long parseResourceIdAsLong(String resourceId) {
+        if (resourceId == null || StringUtils.isBlank(resourceId)) {
+            return null;
+        }
+        try {
+            return Long.valueOf(resourceId);
+        }
+        catch (NumberFormatException e) {
+            return null;
         }
     }
 
@@ -417,7 +442,7 @@ public class ParamService {
             String[] parts = formattedId.split("_");
             if (parts.length > 0) {
                 String lastPart = parts[parts.length - 1];
-                return Long.parseLong(lastPart);
+                return parseResourceIdAsLong(lastPart);
             }
         }
         catch (NumberFormatException e) {

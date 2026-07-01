@@ -7,6 +7,7 @@ import styles from './PublicModelCard.module.less';
 
 type Props = {
   record: any;
+  current?: boolean;
 };
 
 const STATUS_MAP: Record<string, { color: string; label: string }> = {
@@ -14,18 +15,25 @@ const STATUS_MAP: Record<string, { color: string; label: string }> = {
   DISABLED: { color: 'default', label: 'personalModel.status.disabled' },
 };
 
-const PublicModelCard: React.FC<Props> = ({ record }) => {
+const PublicModelCard: React.FC<Props> = ({ record, current }) => {
   const intl = useIntl();
   const { modelType, displayName, status, modelCode, providerName, contextTokens, updatedAt } = record || {};
   const statusInfo = STATUS_MAP[status] || STATUS_MAP.DISABLED;
 
   return (
-    <div className={styles.cardItem}>
+    <div className={classNames(styles.cardItem, { [styles.cardCurrent]: current })}>
       <div className={styles.cardAccent} />
       <div className={styles.cardHead}>
         <div className={styles.titleBlock}>
-          <div className={classNames(styles.title, 'ellipsis')} title={displayName}>
-            {displayName || '-'}
+          <div className={styles.titleRow}>
+            <div className={classNames(styles.title, 'ellipsis')} title={displayName}>
+              {displayName || '-'}
+            </div>
+            {/* {current && (
+              <Tag color="blue" className={styles.currentTag}>
+                {intl.formatMessage({ id: 'personalModel.currentInUse' })}
+              </Tag>
+            )} */}
           </div>
           <div className={styles.subtitleRow}>
             <span className={styles.modelPill}>{modelType || 'LLM'}</span>

@@ -1,8 +1,9 @@
 export default {
-  'personalModel.title': '我的模型',
+  'personalModel.title': '模型中心',
   'personalModel.tab.mine': '我的模型',
   'personalModel.tab.public': '公共模型',
   'personalModel.readonly': '只读',
+  'personalModel.currentInUse': '已配置',
   'personalModel.empty': '暂无模型',
   'personalModel.quota.title': '用量概览',
   'personalModel.quota.totalTokens': 'Total Tokens',

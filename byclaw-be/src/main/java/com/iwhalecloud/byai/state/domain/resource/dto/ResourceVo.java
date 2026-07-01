@@ -5,6 +5,8 @@ import lombok.Data;
 
 @Data
 public class ResourceVo {
+    // 由前端拼接的，resourceType_resourceId 格式，用于唯一标识资源
+    private String id;
 
     private String resourceId;
 

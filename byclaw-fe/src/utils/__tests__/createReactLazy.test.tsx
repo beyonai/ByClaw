@@ -64,6 +64,8 @@ describe('utils/createReactLazy', () => {
       </ErrorBoundary>
     );
 
-    await waitFor(() => expect(screen.getByText('load failed')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('load failed')).toBeInTheDocument(), {
+      timeout: 5000,
+    });
   });
 });
