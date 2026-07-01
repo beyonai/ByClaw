@@ -262,7 +262,7 @@ RUN rm -fr /root/.agents/skills
 # 本地构建 wheel 的方法见 middleware/openclaw/sau/README.md
 ARG SAU_VERSION=0.1.0
 ENV SAU_BASE_DIR=/by/sau \
-    TZ=Asia/Shanghai
+    PLAYWRIGHT_BROWSERS_PATH=/opt/playwright
 COPY middleware/openclaw/sau/social_auto_upload-${SAU_VERSION}-py3-none-any.whl /tmp/
 RUN set -eux; \
     mkdir -p /by/sau/cookies; \
