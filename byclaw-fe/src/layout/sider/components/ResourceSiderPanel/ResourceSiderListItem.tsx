@@ -124,7 +124,13 @@ const ResourceSiderListItem: React.FC<ResourceSiderListItemProps> = ({
           <span className={styles.resourceAvatar}>
             {drillable && <AntdIcon type="icon-a-xiangyou" className={styles.drillIcon} />}
             {resourceType === 'SKILL' && resourceImage ? (
-              <img className={styles.resourceAvatarImage} src={getFileUrl(resourceImage)} alt="" />
+              <img
+                key={getFileUrl(resourceImage)}
+                className={styles.resourceAvatarImage}
+                src={getFileUrl(resourceImage)}
+                alt=""
+                fetchPriority="low"
+              />
             ) : resourceType === 'SKILL' && item.resourceBizType === ResourceTypeMap.SKILL ? (
               <span className={styles.skillDefaultAvatar}>
                 <span className={styles.skillDefaultAvatarOrb} />
