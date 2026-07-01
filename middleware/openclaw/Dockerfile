@@ -263,12 +263,12 @@ RUN rm -fr /root/.agents/skills
 ARG SAU_VERSION=0.1.0
 ENV SAU_BASE_DIR=/by/sau \
     TZ=Asia/Shanghai
-COPY middleware/openclaw/sau/social_auto_upload-${SAU_VERSION}-py3-none-any.whl /tmp/sau.whl
+COPY middleware/openclaw/sau/social_auto_upload-${SAU_VERSION}-py3-none-any.whl /tmp/
 RUN set -eux; \
     mkdir -p /by/sau/cookies; \
-    python3 -m pip install --no-cache-dir /tmp/sau.whl; \
+    python3 -m pip install --no-cache-dir /tmp/social_auto_upload-${SAU_VERSION}-py3-none-any.whl; \
     patchright install chromium; \
-    rm -f /tmp/sau.whl; \
+    rm -f /tmp/social_auto_upload-${SAU_VERSION}-py3-none-any.whl; \
     sau --help >/dev/null; \
     test -f "$(python3 -c 'from utils.base_social_media import stealth_js_path; print(stealth_js_path())')"; \
     echo "sau installed: $(sau --version 2>/dev/null || echo 'version n/a')"
