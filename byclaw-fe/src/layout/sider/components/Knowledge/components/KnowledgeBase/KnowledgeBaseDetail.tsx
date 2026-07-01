@@ -1,24 +1,10 @@
 import React, { useState, useRef, useEffect, useCallback, useContext, useMemo } from 'react';
-import {
-  Input,
-  Breadcrumb,
-  Tree,
-  Spin,
-  App,
-  ConfigProvider,
-  Dropdown,
-  Modal,
-  Space,
-  Typography,
-  List,
-  Button,
-  Tooltip,
-  Upload,
-} from 'antd';
+import { Input, Breadcrumb, Tree, Spin, App, ConfigProvider, Dropdown, Button, Tooltip, Upload } from 'antd';
 import { EllipsisOutlined, LeftOutlined } from '@ant-design/icons';
 import classnames from 'classnames';
 import { AntdTreeNodeAttribute, EventDataNode } from 'antd/es/tree';
 import AntdIcon from '@/components/AntdIcon';
+import CopyToFileBrowserModal from '@/components/CopyToFileBrowserModal';
 import UploadConfirmModal, { type UploadConfirmFile } from '@/components/UploadConfirmModal';
 import { useIntl, useSelector } from '@umijs/max';
 import useVirtualHeight from '@/hooks/useVirtualHeight';
@@ -40,7 +26,6 @@ import {
 } from '@/service/knowledgeCenter';
 import { downloadFile } from '@/utils/file';
 import { getFileIconType } from '@/constants/icon';
-import { IMessageState, SSEEventStatus } from '@/constants/message';
 import {
   getMimeType,
   isPreviewable,
@@ -131,27 +116,6 @@ function getMessagePayloadSessionId(payload: any) {
       payload?.data?.sessionId ||
       payload?.data?.currentSessionId
   );
-}
-
-function getPayloadMessage(payload: any) {
-  return payload?.message || payload?.data || payload;
-}
-
-function hasPayloadFiles(payload: any) {
-  const message = getPayloadMessage(payload);
-  return Boolean(
-    payload?.fileList?.length ||
-      payload?.imageList?.length ||
-      payload?.files?.length ||
-      message?.fileList?.length ||
-      message?.imageList?.length ||
-      message?.files?.length
-  );
-}
-
-function isPayloadDone(payload: any) {
-  const message = getPayloadMessage(payload);
-  return message?.status === SSEEventStatus.done || message?.messageState === IMessageState.Done;
 }
 
 function getFileIdentity(file: any) {
@@ -268,13 +232,21 @@ function mergeKnowledgeTreeChildren(
   return Array.from(childMap.values());
 }
 
+function isSameTreeNodeKey(a: React.Key, b: React.Key) {
+  const normalize = (key: React.Key) => {
+    const value = String(key ?? '');
+    return value.length > 1 ? value.replace(/\/+$/, '') : value;
+  };
+  return normalize(a) === normalize(b);
+}
+
 function mergeTreeNodeChildren(
   list: IKnowledgeDetailTreeItem[],
   key: React.Key,
   children: IKnowledgeDetailTreeItem[]
 ): IKnowledgeDetailTreeItem[] {
   return list.map((node) => {
-    if (node.key === key) {
+    if (isSameTreeNodeKey(node.key, key)) {
       return {
         ...node,
         children: mergeKnowledgeTreeChildren(node.children, children),
@@ -423,6 +395,7 @@ const KnowledgeBaseDetail = (props: KnowledgeBaseDetailProps) => {
   const [searchHydratedKeys, setSearchHydratedKeys] = useState<Set<React.Key>>(new Set());
   const treeWrap = useRef<HTMLDivElement>(null);
   const treeClickTimerRef = useRef<number | null>(null);
+  const expandedDirKeysRef = useRef<Set<string>>(new Set());
   const messageFileSignatureRef = useRef('');
   const messageFileSignatureSessionIdRef = useRef('');
   const virtualHeight = useVirtualHeight(treeWrap);
@@ -491,12 +464,26 @@ const KnowledgeBaseDetail = (props: KnowledgeBaseDetailProps) => {
     [dataset.resourceId, dataset.resourceSourcePkId]
   );
 
+  const repopulateExpandedDirectories = useCallback(async () => {
+    const expandedKeys = Array.from(expandedDirKeysRef.current);
+    if (!expandedKeys.length) return;
+    // 按路径深度升序，确保父目录先于子目录被填充
+    const orderedKeys = expandedKeys.sort(
+      (a, b) => a.split('/').filter(Boolean).length - b.split('/').filter(Boolean).length
+    );
+    for (const key of orderedKeys) {
+      const children = await qryFlatternList(key, { rootLoading: false });
+      setTreeData((origin) => mergeTreeNodeChildren(origin, key, children));
+    }
+  }, [qryFlatternList]);
+
   const refreshKnowledgeDetail = useCallback(
     async (options?: { rootLoading?: boolean }) => {
       const keyword = searchValue.trim();
       setSearchHydratedKeys(new Set());
       if (!keyword) {
         await qryFlatternList('-1', options);
+        await repopulateExpandedDirectories();
         return;
       }
 
@@ -518,24 +505,30 @@ const KnowledgeBaseDetail = (props: KnowledgeBaseDetailProps) => {
         setLoading(false);
       }
     },
-    [dataset.resourceId, dataset.resourceSourcePkId, qryFlatternList, searchValue]
+    [dataset.resourceId, dataset.resourceSourcePkId, qryFlatternList, repopulateExpandedDirectories, searchValue]
   );
 
   const refreshKnowledgeDirectory = useCallback(
     async (directoryPath: string) => {
       if (searchValue.trim()) {
-        await refreshKnowledgeDetail({ rootLoading: false });
+        await refreshKnowledgeDetail();
         return;
       }
       const normalizedDirectoryPath = normalizeKnowledgePath(directoryPath || '/');
       if (normalizedDirectoryPath === '/') {
-        await qryFlatternList('-1', { rootLoading: false });
+        await qryFlatternList('-1');
+        await repopulateExpandedDirectories();
         return;
       }
-      const children = await qryFlatternList(normalizedDirectoryPath, { rootLoading: false });
-      setTreeData((origin) => mergeTreeNodeChildren(origin, normalizedDirectoryPath, children));
+      setLoading(true);
+      try {
+        const children = await qryFlatternList(normalizedDirectoryPath, { rootLoading: false });
+        setTreeData((origin) => mergeTreeNodeChildren(origin, normalizedDirectoryPath, children));
+      } finally {
+        setLoading(false);
+      }
     },
-    [qryFlatternList, refreshKnowledgeDetail, searchValue]
+    [qryFlatternList, refreshKnowledgeDetail, repopulateExpandedDirectories, searchValue]
   );
 
   const getTreeItemDirectoryPath = useCallback((item: IKnowledgeDetailTreeItem) => {
@@ -638,31 +631,33 @@ const KnowledgeBaseDetail = (props: KnowledgeBaseDetailProps) => {
   }, [activeSessionId, currentSessionMessageFileSignature, refreshKnowledgeDetail]);
 
   useEffect(() => {
-    const shouldRefresh = (payload?: any) => {
+    let refreshTimer: number | null = null;
+
+    // 回答完成后合并刷新一次，避免流式过程中频繁刷新
+    const scheduleRefresh = () => {
+      if (refreshTimer !== null) {
+        window.clearTimeout(refreshTimer);
+      }
+      refreshTimer = window.setTimeout(() => {
+        refreshTimer = null;
+        void refreshKnowledgeDetail();
+      }, 500);
+    };
+
+    const handleAnswerCompleted = (payload?: any) => {
       const payloadSessionId = getMessagePayloadSessionId(payload);
       if (payloadSessionId && activeSessionId && payloadSessionId !== activeSessionId) {
-        return false;
+        return;
       }
-      return hasPayloadFiles(payload) || isPayloadDone(payload);
+      scheduleRefresh();
     };
 
-    const handleSessionFileCreated = (payload: any) => {
-      if (shouldRefresh(payload)) {
-        void refreshKnowledgeDetail();
-      }
-    };
-
-    const handleSessionFileUpdated = (payload: any) => {
-      if (shouldRefresh(payload)) {
-        void refreshKnowledgeDetail();
-      }
-    };
-
-    EventEmitter.on('beyond-create-message', handleSessionFileCreated);
-    EventEmitter.on('beyond-update-message', handleSessionFileUpdated);
+    EventEmitter.on('chat-answer-completed', handleAnswerCompleted);
     return () => {
-      EventEmitter.off('beyond-create-message', handleSessionFileCreated);
-      EventEmitter.off('beyond-update-message', handleSessionFileUpdated);
+      if (refreshTimer !== null) {
+        window.clearTimeout(refreshTimer);
+      }
+      EventEmitter.off('chat-answer-completed', handleAnswerCompleted);
     };
   }, [EventEmitter, activeSessionId, refreshKnowledgeDetail]);
 
@@ -1004,6 +999,8 @@ const KnowledgeBaseDetail = (props: KnowledgeBaseDetailProps) => {
         modalAction.handleShow('edit', item);
       } else if (key === 'createFolder') {
         openAddFolder(getTreeItemDirectoryPath(item));
+      } else if (key === 'createSiblingFolder') {
+        openAddFolder(getParentDirectoryPath(resolveTreeItemDirectoryPath(item) || '/'));
       } else if (key === 'delete') {
         const parentDirectoryPath = getParentDirectoryPath(resolveTreeItemDirectoryPath(item) || '/');
         modal.confirm({
@@ -1110,8 +1107,15 @@ const KnowledgeBaseDetail = (props: KnowledgeBaseDetailProps) => {
               treeData={treeData}
               loadData={expandFolder}
               onExpand={(_, info) => {
+                const node = info.node as EventDataNode<IKnowledgeDetailTreeItem>;
+                const nodeKey = String(node.key);
                 if (info.expanded) {
-                  void hydrateSearchDirectoryChildren(info.node as EventDataNode<IKnowledgeDetailTreeItem>);
+                  if (node.type !== 'file') {
+                    expandedDirKeysRef.current.add(nodeKey);
+                  }
+                  void hydrateSearchDirectoryChildren(node);
+                } else {
+                  expandedDirKeysRef.current.delete(nodeKey);
                 }
               }}
               icon={getNodeIcon}
@@ -1144,7 +1148,11 @@ const KnowledgeBaseDetail = (props: KnowledgeBaseDetailProps) => {
                         </Upload>
                       ),
                     },
-                    { key: 'createFolder', label: intl.formatMessage({ id: 'knowledgeDetail.newFolder' }) }
+                    { key: 'createFolder', label: intl.formatMessage({ id: 'knowledgeDetail.newSubFolder' }) },
+                    {
+                      key: 'createSiblingFolder',
+                      label: intl.formatMessage({ id: 'knowledgeDetail.newSiblingFolder' }),
+                    }
                   );
                 }
                 const canPreview = item.type === 'file' && isPreviewable(getKnowledgeItemName(item));
@@ -1234,13 +1242,14 @@ const KnowledgeBaseDetail = (props: KnowledgeBaseDetailProps) => {
         onOk={handleUploadConfirmOk}
         onCancel={handleUploadConfirmCancel}
       />
-      <Modal
+      <CopyToFileBrowserModal
         open={copyModalOpen}
-        title={intl.formatMessage({
-          id: copyTargetType === 'session' ? 'fileBrowser.copy.toSessionTitle' : 'fileBrowser.copy.toSharedTitle',
-        })}
-        okText={intl.formatMessage({ id: 'common.confirm' })}
-        cancelText={intl.formatMessage({ id: 'common.cancel' })}
+        targetType={copyTargetType}
+        sourceName={copyTarget ? getKnowledgeItemName(copyTarget) : ''}
+        targetDirectory={copyDirectoryPath}
+        folderPath={copyFolderPath}
+        folders={copyFolders}
+        loading={copyFolderLoading}
         confirmLoading={copyingToFileBrowser}
         onOk={handleConfirmSaveToFileBrowser}
         onCancel={() => {
@@ -1248,56 +1257,13 @@ const KnowledgeBaseDetail = (props: KnowledgeBaseDetailProps) => {
           setCopyModalOpen(false);
           setCopyTarget(null);
         }}
-        destroyOnClose
-      >
-        <Space direction="vertical" size={12} className={styles.modalContentStack}>
-          <Typography.Text type="secondary">
-            {intl.formatMessage({ id: 'fileBrowser.copy.source' })}
-            {copyTarget ? getKnowledgeItemName(copyTarget) : ''}
-          </Typography.Text>
-          <Typography.Text>
-            {intl.formatMessage({ id: 'fileBrowser.copy.targetDirectory' })}
-            {copyDirectoryPath}
-          </Typography.Text>
-          <Breadcrumb
-            items={copyFolderPath.map((folder, index) => ({
-              key: folder.id,
-              title: (
-                <span
-                  className={styles.clickableText}
-                  onClick={() => {
-                    const target = copyFolderPath[index];
-                    if (target) {
-                      void loadCopyFolders(target.id);
-                    }
-                  }}
-                >
-                  {folder.title}
-                </span>
-              ),
-            }))}
-          />
-          <Spin spinning={copyFolderLoading}>
-            <List
-              dataSource={copyFolders}
-              locale={{ emptyText: intl.formatMessage({ id: 'fileBrowser.copy.noSubFolder' }) }}
-              renderItem={(folder) => (
-                <List.Item
-                  onClick={() => {
-                    void loadCopyFolders(buildTargetFolderPath(copyDirectoryPath, folder.name));
-                  }}
-                  className={styles.clickableListItem}
-                >
-                  <List.Item.Meta
-                    avatar={<AntdIcon type="icon-wenjianjialanse" />}
-                    title={<Typography.Text>{folder.name}</Typography.Text>}
-                  />
-                </List.Item>
-              )}
-            />
-          </Spin>
-        </Space>
-      </Modal>
+        onBreadcrumbClick={(target) => {
+          void loadCopyFolders(target.id);
+        }}
+        onFolderClick={(folder) => {
+          void loadCopyFolders(buildTargetFolderPath(copyDirectoryPath, folder.name));
+        }}
+      />
     </ConfigProvider>
   );
 };

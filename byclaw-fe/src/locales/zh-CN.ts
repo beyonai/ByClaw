@@ -431,6 +431,8 @@ export default {
   'knowledgeDetail.directory': '目录管理',
   'knowledgeDetail.keywords': '关键字',
   'knowledgeDetail.newFolder': '新建文件夹',
+  'knowledgeDetail.newSubFolder': '新增子级目录',
+  'knowledgeDetail.newSiblingFolder': '新增同级目录',
   'knowledgeDetail.uploadFile': '上传文件',
   'knowledgeDetail.sameNameFileOverwriteTip': '相同文件名将覆盖更新',
   'knowledgeDetail.uploadSuccess': '上传成功',
