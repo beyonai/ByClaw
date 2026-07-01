@@ -12,7 +12,6 @@ import AbilityExampleModal from '../../../EmployeeDetail/ConfigForm/AbilityExamp
 import styles from './index.module.less';
 
 const { TextArea } = Input;
-const { Panel } = Collapse;
 
 // 能力图标选项
 const abilityIcons = [
@@ -112,6 +111,68 @@ const MyForm = (props) => {
   const handleCompositionEnd = () => {
     compositionRef.current = false;
   };
+
+  const abilityCollapseItems = coreAbilities.map((ability, index) => ({
+    key: ability.id,
+    label: (
+      <div className={styles.abilityPanelHeader}>
+        <Popover
+          trigger="click"
+          open={iconPopoverOpen[ability.id]}
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
+          onOpenChange={(_open) => {}}
+          placement="bottomLeft"
+        >
+          <div className={styles.abilityIcon} style={{ color: ability.color }}>
+            <AntdIcon type={ability.icon} style={{ fontSize: 16 }} />
+          </div>
+        </Popover>
+        <Form.Item style={{ marginBottom: 0, flex: 1 }}>
+          <Input
+            placeholder={intl.formatMessage({ id: 'refineModal.abilityNamePlaceholder' }, { index: index + 1 })}
+            value={ability.name}
+            onChange={(e) => {
+              setCoreAbilities(
+                coreAbilities.map((item) => (item.id === ability.id ? { ...item, name: e.target.value } : item))
+              );
+            }}
+            bordered={false}
+            className={styles.abilityNameInput}
+            onClick={(e) => e.stopPropagation()}
+          />
+        </Form.Item>
+        <div className={styles.abilityPanelActions}>
+          {coreAbilities.length > 1 && (
+            <AntdIcon
+              type="icon-a-Deleteshanchu"
+              className={styles.actionIcon}
+              onClick={(e) => {
+                e.stopPropagation();
+                setCoreAbilities(coreAbilities.filter((item) => item.id !== ability.id));
+              }}
+            />
+          )}
+        </div>
+      </div>
+    ),
+    children: (
+      <div className={styles.abilityPanelContent}>
+        <Form.Item label="" style={{ marginBottom: 0 }}>
+          <TextArea
+            placeholder={intl.formatMessage({ id: 'refineModal.abilityDescPlaceholder' })}
+            value={ability.description}
+            onChange={(e) => {
+              setCoreAbilities(
+                coreAbilities.map((item) => (item.id === ability.id ? { ...item, description: e.target.value } : item))
+              );
+            }}
+            rows={3}
+            autoSize={{ minRows: 3, maxRows: 6 }}
+          />
+        </Form.Item>
+      </div>
+    ),
+  }));
 
   return (
     <Form form={form} layout="vertical" className={styles.formSection}>
@@ -217,104 +278,18 @@ const MyForm = (props) => {
         <Collapse
           activeKey={coreAbilities.filter((item) => item.expanded).map((item) => item.id)}
           onChange={(keys) => {
+            const activeKeys = Array.isArray(keys) ? keys : [keys];
             setCoreAbilities(
               coreAbilities.map((item) => ({
                 ...item,
-                expanded: keys.includes(item.id),
+                expanded: activeKeys.includes(item.id),
               }))
             );
           }}
           className={styles.abilityCollapse}
           ghost
-        >
-          {coreAbilities.map((ability, index) => (
-            <Panel
-              key={ability.id}
-              header={
-                <div className={styles.abilityPanelHeader}>
-                  <Popover
-                    trigger="click"
-                    open={iconPopoverOpen[ability.id]}
-                    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-                    onOpenChange={(_open) => {}}
-                    placement="bottomLeft"
-                  >
-                    <div className={styles.abilityIcon} style={{ color: ability.color }}>
-                      <AntdIcon type={ability.icon} style={{ fontSize: 16 }} />
-                    </div>
-                  </Popover>
-                  <Form.Item style={{ marginBottom: 0, flex: 1 }}>
-                    <Input
-                      placeholder={intl.formatMessage(
-                        { id: 'refineModal.abilityNamePlaceholder' },
-                        { index: index + 1 }
-                      )}
-                      value={ability.name}
-                      onChange={(e) => {
-                        setCoreAbilities(
-                          coreAbilities.map((item) =>
-                            item.id === ability.id ? { ...item, name: e.target.value } : item
-                          )
-                        );
-                      }}
-                      bordered={false}
-                      className={styles.abilityNameInput}
-                      onClick={(e) => e.stopPropagation()}
-                    />
-                  </Form.Item>
-                  <div className={styles.abilityPanelActions}>
-                    {/* <AntdIcon
-                      type="icon-a-Cross-ringjiaochahuan"
-                      className={styles.actionIcon}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setEditingBoundaryAbilityId(ability.id);
-                        setBoundaryModalOpen(true);
-                      }}
-                    />
-                    <AntdIcon
-                      type="icon-a-Tips-onetishi"
-                      className={styles.actionIcon}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setEditingExampleAbilityId(ability.id);
-                        setExampleModalOpen(true);
-                      }}
-                    /> */}
-                    {coreAbilities.length > 1 && (
-                      <AntdIcon
-                        type="icon-a-Deleteshanchu"
-                        className={styles.actionIcon}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setCoreAbilities(coreAbilities.filter((item) => item.id !== ability.id));
-                        }}
-                      />
-                    )}
-                  </div>
-                </div>
-              }
-            >
-              <div className={styles.abilityPanelContent}>
-                <Form.Item label="" style={{ marginBottom: 0 }}>
-                  <TextArea
-                    placeholder={intl.formatMessage({ id: 'refineModal.abilityDescPlaceholder' })}
-                    value={ability.description}
-                    onChange={(e) => {
-                      setCoreAbilities(
-                        coreAbilities.map((item) =>
-                          item.id === ability.id ? { ...item, description: e.target.value } : item
-                        )
-                      );
-                    }}
-                    rows={3}
-                    autoSize={{ minRows: 3, maxRows: 6 }}
-                  />
-                </Form.Item>
-              </div>
-            </Panel>
-          ))}
-        </Collapse>
+          items={abilityCollapseItems}
+        />
       </div>
       <AbilityBoundaryModal
         open={boundaryModalOpen}
@@ -418,6 +393,36 @@ const MyForm = (props) => {
             placeholder={intl.formatMessage({
               id: 'employeeDetail.personalityDefinitionRequired',
             })}
+            onCompositionStart={() => {
+              compositionRef.current = true;
+            }}
+            onCompositionEnd={handleCompositionEnd}
+          />
+        </Form.Item>
+        <Form.Item label={intl.formatMessage({ id: 'refineModal.workStandard' })} name="workStandard">
+          <TextArea
+            rows={4}
+            placeholder={intl.formatMessage({ id: 'refineModal.workStandardPlaceholder' })}
+            onCompositionStart={() => {
+              compositionRef.current = true;
+            }}
+            onCompositionEnd={handleCompositionEnd}
+          />
+        </Form.Item>
+        <Form.Item label={intl.formatMessage({ id: 'refineModal.toolStandard' })} name="toolStandard">
+          <TextArea
+            rows={4}
+            placeholder={intl.formatMessage({ id: 'refineModal.toolStandardPlaceholder' })}
+            onCompositionStart={() => {
+              compositionRef.current = true;
+            }}
+            onCompositionEnd={handleCompositionEnd}
+          />
+        </Form.Item>
+        <Form.Item label={intl.formatMessage({ id: 'refineModal.memoryStandard' })} name="memoryStandard">
+          <TextArea
+            rows={4}
+            placeholder={intl.formatMessage({ id: 'refineModal.memoryStandardPlaceholder' })}
             onCompositionStart={() => {
               compositionRef.current = true;
             }}
