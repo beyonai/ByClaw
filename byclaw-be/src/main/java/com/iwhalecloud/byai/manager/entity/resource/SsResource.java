@@ -17,7 +17,7 @@ import org.apache.commons.lang3.StringUtils;
 
 @Getter
 @Setter
-@TableName("ss_resource")
+@TableName("byai.ss_resource")
 public class SsResource implements Serializable {
 
     @Serial

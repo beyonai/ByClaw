@@ -168,6 +168,11 @@ export default [
             component: './objectCenter',
           },
           {
+            path: '/ontologyCenter',
+            name: 'ontologyCenter',
+            component: './ontologyCenter',
+          },
+          {
             path: '/skillCenter',
             name: 'skillCenter',
             component: './skillCenter',

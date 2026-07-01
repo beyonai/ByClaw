@@ -1,0 +1,310 @@
+@antPrefix: ant;
+
+// 三大分块：本体库信息 / 场景信息 / 关联信息
+.block {
+  border: 0.5px solid rgba(0, 0, 0, 0.1);
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+  background: #fff;
+}
+
+.blockTitle {
+  display: flex;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 500;
+  color: #4e5969;
+  margin-bottom: 12px;
+
+  &::before {
+    content: '';
+    width: 3px;
+    height: 13px;
+    border-radius: 2px;
+    background: #378add;
+    margin-right: 8px;
+  }
+}
+
+.baseName {
+  font-size: 18px;
+  font-weight: 500;
+  color: #1d2129;
+  margin-bottom: 8px;
+}
+
+// 关系区头部：左侧缩放工具，右侧列表/图表切换
+.relHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  gap: 8px;
+}
+
+.relTools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.metaRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+
+  .baseId {
+    color: #999;
+    font-size: 12px;
+  }
+}
+
+.sceneDesc {
+  font-size: 13px;
+  color: #888;
+  line-height: 1.6;
+  margin: -4px 0 12px;
+  padding-left: 2px;
+}
+
+.zoomLabel {
+  font-size: 12px;
+  color: #888;
+  min-width: 40px;
+  text-align: center;
+}
+
+.graphScroll {
+  max-height: 420px;
+  overflow: auto;
+  border: 0.5px solid rgba(0, 0, 0, 0.08);
+  border-radius: 8px;
+  background: #f7f9fc;
+}
+
+.relationTable {
+  :global {
+    .@{antPrefix}-table-cell {
+      vertical-align: middle;
+    }
+  }
+}
+
+.cardinalityTag {
+  max-width: 106px;
+  margin-right: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.desc {
+  color: #666;
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+
+.sceneRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+
+  .sceneLabel {
+    font-size: 13px;
+    color: #333;
+  }
+}
+
+.entityList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.entityName {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.entityCode {
+  font-size: 12px;
+  color: #999;
+  margin: 2px 0 6px;
+}
+
+.entityMeta {
+  display: flex;
+  gap: 6px;
+}
+
+// 可下钻卡片：hover 浮起 + 右箭头
+.cardClickable {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 0.5px solid rgba(0, 0, 0, 0.1);
+  border-radius: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: all 0.16s ease;
+
+  &:hover {
+    border-color: #378add;
+    box-shadow: 0 2px 8px rgba(55, 138, 221, 0.12);
+
+    .chevron {
+      color: #378add;
+      transform: translateX(2px);
+    }
+  }
+
+  .cardMain {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .chevron {
+    color: #ccc;
+    font-size: 12px;
+    transition: all 0.16s ease;
+  }
+}
+
+// 面包屑
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 14px;
+  font-size: 13px;
+
+  .crumbSep {
+    font-size: 10px;
+    color: #bbb;
+  }
+
+  .crumbLink {
+    color: #378add;
+    cursor: pointer;
+
+    &:hover {
+      text-decoration: underline;
+    }
+  }
+
+  .crumbCurrent {
+    color: #333;
+    font-weight: 500;
+  }
+}
+
+// 详情面板
+.panelHeader {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 8px;
+
+  .panelTitle {
+    font-size: 16px;
+    font-weight: 500;
+  }
+}
+
+.panelTags {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.sectionTitle {
+  font-size: 13px;
+  font-weight: 500;
+  margin: 18px 0 8px;
+}
+
+.actionRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 0.5px solid rgba(0, 0, 0, 0.1);
+  border-radius: 8px;
+  padding: 8px 12px;
+
+  .actionName {
+    font-size: 13px;
+    font-weight: 500;
+  }
+}
+
+.constraintCell {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.mono {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 12px;
+}
+
+.flowGraph {
+  height: auto;
+  max-width: none;
+  background: #f7f9fc;
+  border-radius: 8px;
+
+  .flowNode {
+    fill: #fff;
+    stroke: #d9e2ef;
+    stroke-width: 1;
+  }
+
+  .flowNodeName {
+    fill: #1d2129;
+    font-size: 12px;
+    font-weight: 500;
+  }
+
+  .flowNodeCode {
+    fill: #86909c;
+    font-size: 10px;
+  }
+
+  .flowRelation {
+    fill: #eef6ff;
+    stroke: #7ab5ea;
+    stroke-width: 1;
+  }
+
+  .flowRelationName {
+    fill: #185fa5;
+    font-size: 12px;
+    font-weight: 500;
+  }
+
+  .flowCardinality {
+    fill: #fff;
+    stroke: #d9e8f7;
+    stroke-width: 1;
+  }
+
+  .flowCardinalityText {
+    fill: #4e5969;
+    font-size: 10px;
+  }
+
+  .flowLine {
+    stroke: #9db7d4;
+    stroke-width: 1.4;
+  }
+
+  .flowArrowHead {
+    fill: #9db7d4;
+  }
+}
