@@ -1,5 +1,5 @@
 import React, { useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { Breadcrumb, Button, Dropdown, Empty, Input, List, message, Modal, Tooltip, Typography } from 'antd';
+import { Breadcrumb, Button, Dropdown, Empty, Input, message, Modal } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
 import { useIntl, useLocation, useNavigate, useSelector } from '@umijs/max';
 import { trim } from 'lodash';
@@ -36,46 +36,14 @@ import { SiderContentContext } from '@/layout/sider/siderContentContext';
 import { getManagerMenuConfig, normalizeMenuUrl } from '@/pages/manager/layout/sider/menuConfig';
 import { getRuntimeActualUrl } from '@/utils';
 import { getToken } from '@/utils/auth';
-import { getFileUrl } from '@/utils/file';
+import ResourceSiderListItem, {
+  getResourceImageUrl,
+  PROPERTY_RESOURCE_TYPE,
+  type ResourceItem,
+  type ResourceSiderType,
+} from './ResourceSiderListItem';
 import styles from './index.module.less';
-
-const { Title, Paragraph } = Typography;
-
-type ResourceSiderType = 'TOOL' | 'VIEW' | 'OBJECT' | 'SKILL';
 const PAGE_SIZE = 30;
-
-interface ResourceItem {
-  resourceId: string | number;
-  resourceCode?: string;
-  resourceName: string;
-  description?: string;
-  resourceDesc?: string;
-  resourceLogoUrl?: string;
-  avatar?: string;
-  logoUrl?: string;
-  resourceImageUrl?: string;
-  resourceImage?: string;
-  coverUrl?: string;
-  coverImageUrl?: string;
-  resourceBizType?: string;
-  resourceSourcePkId?: string;
-  createTime?: number | string;
-  createUserName?: string;
-  extInfo?: any;
-  isTop?: string | number;
-  propertyName?: string;
-  propertyCode?: string;
-  propertyGroup?: string;
-  dataType?: string;
-  sourceType?: string;
-  displaySourceType?: string;
-  resourceBacked?: boolean;
-  skillPath?: string;
-  skillDocObjectKey?: string;
-  useStartTime?: string;
-  objectKey?: string;
-  targetContent?: string;
-}
 
 interface Props {
   resourceType: ResourceSiderType;
@@ -126,7 +94,6 @@ const resourceConfigMap: Record<
   },
 };
 
-const PROPERTY_RESOURCE_TYPE = 'PROPERTY';
 const SHARE_GRANT_TYPE = 'FORCE_USE';
 const UI_SKILL_MENU_CODE = 'menu_ui_agent';
 const UI_SKILL_MENU_NAME = '界面技能';
@@ -157,39 +124,6 @@ const dedupeResourceList = (items: ResourceItem[]) => {
     seen.add(key);
     return true;
   });
-};
-
-const parseResourceTargetContent = (item?: ResourceItem) => {
-  const targetContent = item?.extInfo?.targetContent || item?.targetContent;
-  if (!targetContent || typeof targetContent !== 'string') {
-    return null;
-  }
-  try {
-    return JSON.parse(targetContent);
-  } catch {
-    return null;
-  }
-};
-
-const getResourceImageUrl = (item?: ResourceItem) => {
-  const targetContent = parseResourceTargetContent(item);
-  return (
-    item?.resourceLogoUrl ||
-    item?.avatar ||
-    item?.logoUrl ||
-    item?.resourceImageUrl ||
-    item?.resourceImage ||
-    item?.coverUrl ||
-    item?.coverImageUrl ||
-    targetContent?.resourceLogoUrl ||
-    targetContent?.avatar ||
-    targetContent?.logoUrl ||
-    targetContent?.resourceImageUrl ||
-    targetContent?.resourceImage ||
-    targetContent?.coverUrl ||
-    targetContent?.coverImageUrl ||
-    ''
-  );
 };
 
 const mapBoundSkillRows = (rows: ResourceItem[], resourceType: ResourceSiderType) => {
@@ -724,11 +658,6 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
     }
   };
 
-  const getResourceIcon = () => {
-    if (resourceType === 'TOOL' || resourceType === 'SKILL') return 'icon-chajiantubiao';
-    return 'icon-chuangjianfangshi-shujuku';
-  };
-
   const getResourceName = (resourceBizType?: string) => {
     if (resourceBizType === ResourceTypeMap.TOOL || resourceBizType === resourceBizTypeMap.TOOL) {
       return intl.formatMessage({ id: 'resource.tool' });
@@ -1189,59 +1118,18 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
           renderEmpty={<Empty image={Empty.PRESENTED_IMAGE_SIMPLE} />}
           renderItem={(item: ResourceItem) => {
             const drillable = canDrillDown(item);
-            const resourceImage = getResourceImageUrl(item);
 
             return (
-              <List.Item
+              <ResourceSiderListItem
                 key={item.resourceId}
-                className={styles.resourceItem}
-                onClick={() => handleResourceItemClick(item, drillable)}
-                onDoubleClick={() => handleResourceItemDoubleClick(item)}
+                item={item}
+                resourceType={resourceType}
+                drillable={drillable}
                 actions={[renderDetailDropdown(item)]}
-              >
-                <List.Item.Meta
-                  avatar={
-                    <span className={styles.resourceAvatar}>
-                      {drillable && <AntdIcon type="icon-a-xiangyou" className={styles.drillIcon} />}
-                      {resourceType === 'SKILL' && resourceImage ? (
-                        <img className={styles.resourceAvatarImage} src={getFileUrl(resourceImage)} alt="" />
-                      ) : resourceType === 'SKILL' && item.resourceBizType === ResourceTypeMap.SKILL ? (
-                        <span className={styles.skillDefaultAvatar}>
-                          <span className={styles.skillDefaultAvatarOrb} />
-                        </span>
-                      ) : (
-                        <AntdIcon
-                          type={
-                            item.resourceBizType === PROPERTY_RESOURCE_TYPE || String(item.resourceId).includes('-')
-                              ? 'icon-a-Database-networkshujukuwangluo'
-                              : getResourceIcon()
-                          }
-                        />
-                      )}
-                    </span>
-                  }
-                  title={
-                    <Title className={employeeStyles.name}>
-                      <Tooltip title={item.resourceName}>
-                        <span className={employeeStyles.nameRow}>
-                          <span className={employeeStyles.nameText}>{item.resourceName}</span>
-                          {renderSkillSourceTag(item)}
-                        </span>
-                      </Tooltip>
-                    </Title>
-                  }
-                  description={
-                    item.resourceDesc && (
-                      <Paragraph
-                        className={employeeStyles.description}
-                        ellipsis={{ tooltip: { title: item.resourceDesc, placement: 'right' } }}
-                      >
-                        {item.resourceDesc}
-                      </Paragraph>
-                    )
-                  }
-                />
-              </List.Item>
+                renderSkillSourceTag={renderSkillSourceTag}
+                onClick={handleResourceItemClick}
+                onDoubleClick={handleResourceItemDoubleClick}
+              />
             );
           }}
         />

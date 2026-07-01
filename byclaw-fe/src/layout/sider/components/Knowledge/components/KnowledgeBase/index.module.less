@@ -28,6 +28,57 @@
 
 .knowledgeItem {
   cursor: default;
+  :global {
+    .@{antPrefix}-list-item-meta {
+      display: flex;
+    }
+  }
+}
+
+.knowledgeName {
+  margin: 0;
+  display: block;
+  font-size: 14px;
+  line-height: 22px;
+  font-weight: 500;
+  color: #14161a;
+}
+
+.knowledgeNameRow {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  gap: 4px;
+}
+
+.knowledgeNameText {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.knowledgePinBadge {
+  display: inline-block;
+  font-size: 12px;
+  color: #a4aab2;
+  vertical-align: text-top;
+  margin-left: 4px;
+  flex-shrink: 0;
+}
+
+.knowledgeDescription {
+  color: var(--beyond-color-text-tertiary);
+  display: block;
+  font-size: 13px;
+  line-height: 20px;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .selectable {
