@@ -26,6 +26,8 @@ public enum ResourceBizType {
     VIEW("VIEW", "视图"),
     ACTION("ACTION", "动作"),
     OBJECT("OBJECT", "对象"),
+    ONTOLOGY_BASE("ONTOLOGY_BASE", "本体库"),
+    SCENE("SCENE", "场景"),
     DB_DATASET("DB_DATASET", "数据集"),
     MCP_TOOL("MCP_TOOL", "MCP工具");
 
