@@ -25,6 +25,8 @@ public enum KnowledgeServiceOperation {
     DELETE_DIR("deleteDir", "/api/v1/directories/delete"),
     UPLOAD_FILE("uploadFile", "/api/v1/knowledge-items/import"),
     DELETE_FILE("deleteFile", "/api/v1/knowledge-items/delete"),
+    READ_FILE("readFile", "/api/v1/readFile"),
+    KNOWLEDGE_SEARCH("knowledgeSearch", "/api/v1/knowledgeItems/search"),
     KNOWLEDGE_BUILD("knowledgeBuild", "/api/v1/fileToMarkdownIndex"),
     DOWNLOAD_FILE("downloadFile", "/api/v1/downloadFile"),
     FILE_BUILD_STATUS("fileBuildStatus", "/api/v1/fileBuildStatus");
