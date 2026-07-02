@@ -11,6 +11,7 @@ import { getFileUrl } from '@/utils/file';
 import { useRequest } from '@/hooks/useRequest';
 import useGlobal from '@/hooks/useGlobal';
 import type { IState as IEmployeesState } from '@/models/useEmployees';
+import { resourceBizTypeMap } from '@/constants/knowledge';
 import { SiderContentContext } from '@/layout/sider/siderContentContext';
 import { isWorkspaceSkill } from '../../workspaceSkill/utils';
 import { useActiveSiderAgent } from '@/layout/sider/components/ActiveSiderAgentBar';
@@ -57,6 +58,7 @@ export interface IResourceCardItem {
   canRestore?: boolean;
   resourceStatus?: number | string;
   ownerType?: string;
+  isDefault?: boolean | string;
   openSuperHelper?: string;
   tagName?: string;
   skillType?: string;
@@ -355,7 +357,15 @@ const RenderContent = (props: ResourceCardProps) => {
   useEffect(() => {
     setSkillPosterAspect(undefined);
   }, [displayImage]);
+  const isDigitalEmployeeResource = resource.resourceBizType === resourceBizTypeMap.DIG_EMPLOYEE;
+  const isDefaultDigitalEmployee =
+    isDigitalEmployeeResource && (Boolean(resource.isDefault) || ownerType === 'personal_default');
+  const isPersonalDigitalEmployee = isDigitalEmployeeResource && ownerType === 'personal';
+
   const getDisplayTopRightTag = () => {
+    if (isDefaultDigitalEmployee) {
+      return intl.formatMessage({ id: 'resource.defaultDigitalEmployee' });
+    }
     // 优先展示真实标签。
     if (resource.tagName) {
       return resource.tagName;
@@ -779,7 +789,15 @@ const RenderContent = (props: ResourceCardProps) => {
                 {displayTitle}
               </Paragraph>
               {effectiveTopRightTag ? (
-                <span className={classnames(styles.tag, { [styles.cancelledTag]: isCancelledResource })}>
+                <span
+                  className={classnames(styles.tag, {
+                    [styles.digitalEmployeeDefaultTag]: isDefaultDigitalEmployee,
+                    [styles.digitalEmployeePersonalTag]: !isDefaultDigitalEmployee && isPersonalDigitalEmployee,
+                    [styles.digitalEmployeeTag]:
+                      isDigitalEmployeeResource && !isDefaultDigitalEmployee && !isPersonalDigitalEmployee,
+                    [styles.cancelledTag]: isCancelledResource,
+                  })}
+                >
                   <span className={styles.tagText}>{effectiveTopRightTag}</span>
                 </span>
               ) : null}

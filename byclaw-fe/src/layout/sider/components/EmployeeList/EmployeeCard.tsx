@@ -187,7 +187,6 @@ const EmployeeCard: React.FC<EmployeeCardProps> = ({
   );
 
   const TagRender = useCallback((item: IAgentCache) => {
-    console.log(item);
     if (item?.isDefault) {
       return (
         <span className={classNames(styles.defaultTag)}>
