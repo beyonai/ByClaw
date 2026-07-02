@@ -74,7 +74,7 @@ public class ChatService {
     public void llmChat(ChannelHandlerContext ctx, ChatMessage message) {
         LoginInfo currentUser = ctx.channel().attr(Constant.ATT_USER_INFO).get();
 
-        // Token 月度限额检查（仅对公共模型和TokenServer模型生效）
+        // Token 月度限额检查（仅对公共模型和 TokenSaver 模型生效）
         try {
             if (currentUser != null
                     && tokenQuotaService.isModelSubjectToQuota(message.getAgentId())

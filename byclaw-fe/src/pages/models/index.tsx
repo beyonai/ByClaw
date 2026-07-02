@@ -1,7 +1,9 @@
 import { Button, Col, Empty, Input, message, Pagination, Row, Spin, Tabs } from 'antd';
 import { PlusOutlined, SearchOutlined } from '@ant-design/icons';
-import React, { useCallback, useEffect, useState } from 'react';
-import { useIntl } from '@umijs/max';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useIntl, useSelector } from '@umijs/max';
+import useGlobal from '@/hooks/useGlobal';
+import { getCompositeAppInfo } from '@/service/digitalEmployees';
 import useShowModal from '@/pages/manager/hooks/useShowModal';
 import QuotaCard from './components/QuotaCard';
 import ModelCard from './components/ModelCard';
@@ -12,10 +14,37 @@ import styles from './index.module.less';
 
 const PAGE_SIZE = 12;
 
+function unwrapData(res: any) {
+  if (!res) return res;
+  if (Object.prototype.hasOwnProperty.call(res, 'data')) return res.data;
+  return res;
+}
+
+function safeJsonParse(value: any) {
+  if (!value) return {};
+  if (typeof value === 'object') return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return {};
+  }
+}
+
 const ModelsPage: React.FC = () => {
   const intl = useIntl();
   const [formState, formAction] = useShowModal();
   const [activeTab, setActiveTab] = useState<string>('mine');
+
+  const { agentId } = useGlobal();
+  const { defaultDigEmployeeId, userInfo } = useSelector(({ employees, user }: any) => ({
+    defaultDigEmployeeId: employees?.defaultDigEmployeeId,
+    userInfo: user?.userInfo,
+  }));
+  const resourceId = useMemo(
+    () => `${agentId || defaultDigEmployeeId || userInfo?.defaultDigEmployeeId || ''}`,
+    [agentId, defaultDigEmployeeId, userInfo?.defaultDigEmployeeId]
+  );
+  const [currentModelCode, setCurrentModelCode] = useState('');
 
   const [list, setList] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -90,6 +119,40 @@ const ModelsPage: React.FC = () => {
   }, [fetchList, fetchQuota]);
 
   useEffect(() => {
+    let cancelled = false;
+    if (!resourceId) {
+      setCurrentModelCode('');
+      return undefined;
+    }
+    (async () => {
+      try {
+        const res = await getCompositeAppInfo({ resourceId });
+        const modelInfo = safeJsonParse(unwrapData(res)?.prologue)?.modelInfo || {};
+        if (!cancelled) setCurrentModelCode(modelInfo?.model || '');
+      } catch {
+        if (!cancelled) setCurrentModelCode('');
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [resourceId]);
+
+  const sortedList = useMemo(() => {
+    if (!currentModelCode) return list;
+    const matched = list.filter((m) => m.modelCode === currentModelCode);
+    if (!matched.length) return list;
+    return [...matched, ...list.filter((m) => m.modelCode !== currentModelCode)];
+  }, [list, currentModelCode]);
+
+  const sortedPublicList = useMemo(() => {
+    if (!currentModelCode) return publicList;
+    const matched = publicList.filter((m) => m.modelCode === currentModelCode);
+    if (!matched.length) return publicList;
+    return [...matched, ...publicList.filter((m) => m.modelCode !== currentModelCode)];
+  }, [publicList, currentModelCode]);
+
+  useEffect(() => {
     if (activeTab === 'public') {
       fetchPublicList();
     }
@@ -122,13 +185,23 @@ const ModelsPage: React.FC = () => {
   };
 
   const handleDelete = async (record: any) => {
-    const res = await deleteMyModel({ id: record.id });
-    if (res?.code !== 0) {
-      message.error(res?.msg || intl.formatMessage({ id: 'personalModel.delete.confirm' }));
-      return;
+    try {
+      const res = await deleteMyModel({ id: record.id });
+      if (res?.code !== 0 || res?.success === false) {
+        message.error(res?.msg || intl.formatMessage({ id: 'personalModel.delete.failed' }), 5);
+        return;
+      }
+      message.success(intl.formatMessage({ id: 'personalModel.delete.success' }));
+      fetchList(pagination.pageNum);
+    } catch (error: any) {
+      const errorMsg =
+        error?.response?.data?.msg ||
+        error?.data?.msg ||
+        error?.msg ||
+        error?.message ||
+        (typeof error === 'string' ? error : '');
+      message.error(errorMsg || intl.formatMessage({ id: 'personalModel.delete.failed' }), 5);
     }
-    message.success(intl.formatMessage({ id: 'personalModel.delete.success' }));
-    fetchList(pagination.pageNum);
   };
 
   const handleSetStatus = async (record: any, status: string) => {
@@ -146,7 +219,6 @@ const ModelsPage: React.FC = () => {
   };
 
   const handleSaved = () => {
-    formAction.onCancel();
     fetchList(pagination.pageNum);
   };
 
@@ -173,7 +245,7 @@ const ModelsPage: React.FC = () => {
               value={keyword}
               onChange={(e) => setKeyword(e.target.value)}
               onPressEnter={() => fetchList(1)}
-              style={{ width: 260 }}
+              className={styles.searchInput}
             />
             <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>
               {intl.formatMessage({ id: 'personalModel.add' })}
@@ -184,10 +256,11 @@ const ModelsPage: React.FC = () => {
             {list.length > 0 ? (
               <>
                 <Row gutter={[16, 16]} className={styles.grid}>
-                  {list.map((item) => (
+                  {sortedList.map((item) => (
                     <Col key={item.id} xs={24} sm={12} md={8} lg={6}>
                       <ModelCard
                         data={item}
+                        current={!!currentModelCode && item.modelCode === currentModelCode}
                         onEdit={() => handleEdit(item)}
                         onDebug={() => handleDebug(item)}
                         onDelete={() => handleDelete(item)}
@@ -230,7 +303,7 @@ const ModelsPage: React.FC = () => {
               value={publicKeyword}
               onChange={(e) => setPublicKeyword(e.target.value)}
               onPressEnter={() => fetchPublicList(1)}
-              style={{ width: 260 }}
+              className={styles.searchInput}
             />
           </div>
 
@@ -238,9 +311,12 @@ const ModelsPage: React.FC = () => {
             {publicList.length > 0 ? (
               <>
                 <Row gutter={[16, 16]} className={styles.grid}>
-                  {publicList.map((item) => (
+                  {sortedPublicList.map((item) => (
                     <Col key={item.id} xs={24} sm={12} md={8} lg={6}>
-                      <PublicModelCard record={item} />
+                      <PublicModelCard
+                        record={item}
+                        current={!!currentModelCode && item.modelCode === currentModelCode}
+                      />
                     </Col>
                   ))}
                 </Row>

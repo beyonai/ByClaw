@@ -34,7 +34,7 @@ import Manage from './Manage';
 import Operation from './Operation';
 
 const PREVIEW_HOST = `${window.location.origin}${window.routerBase === '/' ? '/' : window.routerBase}`;
-const DIGITAL_EMPLOYEE_TEXT_FIELD_MAX_LENGTH = 4000;
+const DIGITAL_EMPLOYEE_TEXT_FIELD_MAX_LENGTH = 5000;
 const DIGITAL_EMPLOYEE_TEXT_FIELD_CONFIG = [
   { key: 'resourceDesc', labelId: 'employeeDetail.digitalEmployeeDesc' },
   { key: 'ability', labelId: 'employeeDetail.coreAbility' },
@@ -51,12 +51,60 @@ const DIGITAL_EMPLOYEE_TEXT_FIELD_CONFIG = [
 
 const getTextLength = (value) => Array.from(`${value ?? ''}`).length;
 
-const getOverLengthDigitalEmployeeField = (payload) =>
-  DIGITAL_EMPLOYEE_TEXT_FIELD_CONFIG.map((item) => ({
-    ...item,
-    length: getTextLength(payload?.[item.key]),
-    maxLength: item.maxLength || DIGITAL_EMPLOYEE_TEXT_FIELD_MAX_LENGTH,
-  })).find((item) => item.length > item.maxLength);
+const getPromptFieldLabelText = (item, isEN) => {
+  const defaultName = isEN ? item?.nameEn || item?.name : item?.name || item?.nameEn;
+  if (defaultName) return defaultName;
+  return item?.key;
+};
+
+const parseJsonRecursively = (value, maxDepth = 5) => {
+  if (maxDepth <= 0 || typeof value !== 'string') return value;
+  try {
+    const parsed = JSON.parse(value);
+    return typeof parsed === 'string' ? parseJsonRecursively(parsed, maxDepth - 1) : parsed;
+  } catch {
+    return value;
+  }
+};
+
+const getOverLengthPromptField = (corePersonaDefinition, isEN, maxLength = DIGITAL_EMPLOYEE_TEXT_FIELD_MAX_LENGTH) => {
+  if (!corePersonaDefinition) return null;
+
+  try {
+    const parsedData = parseJsonRecursively(corePersonaDefinition);
+    const promptList = typeof parsedData === 'string' ? JSON.parse(parsedData) : parsedData;
+    if (!Array.isArray(promptList)) return null;
+
+    return promptList
+      .map((item) => {
+        const value = item?.value ?? '';
+        return {
+          key: item?.key,
+          labelText: getPromptFieldLabelText(item, isEN),
+          length: getTextLength(value),
+          maxLength,
+        };
+      })
+      .find((item) => item.length > item.maxLength);
+  } catch {
+    return null;
+  }
+};
+
+const getOverLengthDigitalEmployeeField = (payload, isEN, promptMaxLength = DIGITAL_EMPLOYEE_TEXT_FIELD_MAX_LENGTH) => {
+  const overLengthPromptField = getOverLengthPromptField(payload?.corePersonaDefinition, isEN, promptMaxLength);
+  if (overLengthPromptField) {
+    return overLengthPromptField;
+  }
+
+  return DIGITAL_EMPLOYEE_TEXT_FIELD_CONFIG.filter((item) => item.key !== 'corePersonaDefinition')
+    .map((item) => ({
+      ...item,
+      length: getTextLength(payload?.[item.key]),
+      maxLength: item.maxLength || DIGITAL_EMPLOYEE_TEXT_FIELD_MAX_LENGTH,
+    }))
+    .find((item) => item.length > item.maxLength);
+};
 
 export const skillHandler = (it) => {
   const resourceType = it.grantResourceType || it.resourceBizType;
@@ -142,16 +190,6 @@ const parseDigitalEmployeeTemplates = (value) => {
     }
   }
   return [value];
-};
-
-const parseJsonRecursively = (value, maxDepth = 5) => {
-  if (maxDepth <= 0 || typeof value !== 'string') return value;
-  try {
-    const parsed = JSON.parse(value);
-    return typeof parsed === 'string' ? parseJsonRecursively(parsed, maxDepth - 1) : parsed;
-  } catch {
-    return value;
-  }
 };
 
 const normalizePromptConfigKey = (key, item = {}) => {
@@ -262,6 +300,20 @@ const getDigitalEmployeeTemplate = (templates, ownerType, agentType) => {
   return findTemplate(templates) || {};
 };
 
+const getDigitalEmployeeTemplateMaxLength = (templates, ownerType, agentType) => {
+  const list = Array.isArray(templates) ? templates : [];
+  const effectiveOwnerType = ownerType === 'personal' ? 'personal' : 'enterprise';
+  const ownerTemplates = list.filter((item) => item?.ownerType === effectiveOwnerType);
+  const matchedTemplate =
+    effectiveOwnerType === 'personal'
+      ? ownerTemplates.find((item) => item?.key === 'BYCLAW_ASSISTANT') ||
+        ownerTemplates.find((item) => item?.agentType === '001') ||
+        ownerTemplates[0]
+      : ownerTemplates.find((item) => item?.agentType === agentType);
+
+  return Number(matchedTemplate?.maxLength) || DIGITAL_EMPLOYEE_TEXT_FIELD_MAX_LENGTH;
+};
+
 const EmployeeDetail = ({ loading }) => {
   const dispatch = useDispatch();
   const intl = useIntl();
@@ -340,6 +392,7 @@ const EmployeeDetail = ({ loading }) => {
   }, [agentId, ownerType, queryCatalogId, form]);
   const agentName = Form.useWatch('resourceName', form);
   const ask = Form.useWatch('descText', form);
+  const watchedOwnerType = Form.useWatch('ownerType', form, { form, preserve: true });
   const homeType = Form.useWatch('homeType', form, { form, preserve: true });
   const agentHomeUrl = Form.useWatch('agentHomeUrl', form, { form, preserve: true });
 
@@ -380,6 +433,7 @@ const EmployeeDetail = ({ loading }) => {
   const [detailAgentType, setDetailAgentType] = useState();
   const [detailCreateType, setDetailCreateType] = useState();
   const [resourceStatus, setResourceStatus] = useState();
+  const [promptFieldMaxLength, setPromptFieldMaxLength] = useState(DIGITAL_EMPLOYEE_TEXT_FIELD_MAX_LENGTH);
 
   const effectiveDigitalType = agentId ? detailCreateType || digitalType : digitalType;
 
@@ -999,6 +1053,8 @@ const EmployeeDetail = ({ loading }) => {
   const fetchDefaultTemplate = useCallback(async () => {
     const applyTemplate = (templates = []) => {
       const templateConfig = getDigitalEmployeeTemplate(templates, ownerType, effectiveAgentType || agentType);
+      const nextMaxLength = getDigitalEmployeeTemplateMaxLength(templates, ownerType, effectiveAgentType || agentType);
+      setPromptFieldMaxLength(nextMaxLength);
       const relSkills = Array.isArray(templateConfig?.relSkills) ? templateConfig.relSkills : [];
       const relTools = Array.isArray(templateConfig?.relTools) ? templateConfig.relTools : [];
 
@@ -1041,6 +1097,33 @@ const EmployeeDetail = ({ loading }) => {
       applyTemplate();
     }
   }, [agentType, effectiveAgentType, ownerType, form]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const fetchPromptFieldMaxLength = async () => {
+      try {
+        const res = await getDcSystemConfig({ paramCode: 'TEMPLATE_DIGITAL_EMPLOYEE' });
+        if (cancelled) return;
+        const templates = parseDigitalEmployeeTemplates(res?.paramValue || res);
+        const nextMaxLength = getDigitalEmployeeTemplateMaxLength(
+          templates,
+          watchedOwnerType || ownerType,
+          effectiveAgentType || agentType
+        );
+        setPromptFieldMaxLength(nextMaxLength);
+      } catch {
+        if (!cancelled) {
+          setPromptFieldMaxLength(DIGITAL_EMPLOYEE_TEXT_FIELD_MAX_LENGTH);
+        }
+      }
+    };
+
+    fetchPromptFieldMaxLength();
+    return () => {
+      cancelled = true;
+    };
+  }, [agentType, effectiveAgentType, ownerType, watchedOwnerType]);
 
   useEffect(() => {
     if (agentId) {
@@ -1280,9 +1363,12 @@ const EmployeeDetail = ({ loading }) => {
             })()
           ),
         };
-        const overLengthField = getOverLengthDigitalEmployeeField(flattened);
+        const overLengthField = getOverLengthDigitalEmployeeField(flattened, isEN, promptFieldMaxLength);
         if (overLengthField) {
-          const fieldName = intl.formatMessage({ id: overLengthField.labelId }).replace(/[:：]\s*$/, '');
+          const fieldName = (overLengthField.labelText || intl.formatMessage({ id: overLengthField.labelId })).replace(
+            /[:：]\s*$/,
+            ''
+          );
           message.error(
             intl.formatMessage(
               { id: 'employeeDetail.fieldMaxLength' },
@@ -1419,6 +1505,7 @@ const EmployeeDetail = ({ loading }) => {
       intl,
       isFrontAccess,
       auditErrors,
+      promptFieldMaxLength,
     ]
   );
 

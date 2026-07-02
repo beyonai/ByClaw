@@ -97,8 +97,10 @@ export default function getElementData(type: IResourceType, data: any) {
     case ResourceType.tool:
     case ResourceType.OBJECT:
     case ResourceType.SKILL:
-    case ResourceType.folder:
-    case ResourceType.file:
+    case ResourceType.knowledgeFolder:
+    case ResourceType.knowledgeFile:
+    case ResourceType.commonFolder:
+    case ResourceType.commonFile:
     case ResourceType.database: {
       let idKeyField = '';
       let nameKeyField = '';
@@ -110,7 +112,12 @@ export default function getElementData(type: IResourceType, data: any) {
       ) {
         idKeyField = 'resourceId';
         nameKeyField = 'resourceName';
-      } else if (type === ResourceType.folder || type === ResourceType.file) {
+      } else if (
+        type === ResourceType.knowledgeFolder ||
+        type === ResourceType.knowledgeFile ||
+        type === ResourceType.commonFolder ||
+        type === ResourceType.commonFile
+      ) {
         idKeyField = 'id';
         nameKeyField = 'collectionName';
       } else if (type === ResourceType.database) {

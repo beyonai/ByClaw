@@ -1,6 +1,6 @@
 import React, { useCallback, useContext, useState, useEffect, useRef } from 'react';
 import { UploadOutlined, SearchOutlined, PlusOutlined } from '@ant-design/icons';
-import { useIntl, getLocale, useSelector, useNavigate, useSearchParams } from '@umijs/max';
+import { useIntl, useSelector, useNavigate, useSearchParams } from '@umijs/max';
 import type { TabsProps } from 'antd';
 import { Button, Input, Space, Tooltip, message, Tabs, Segmented } from 'antd';
 import classnames from 'classnames';
@@ -536,11 +536,6 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
     },
   ];
 
-  const local = getLocale();
-  const isEN = React.useMemo(() => {
-    return local.includes('en');
-  }, [local]);
-  const defaultBannerUrl = getRuntimeActualUrl(isEN ? '/beyond/market-en.png' : '/beyond/market.png');
   const bannerLabel = React.useMemo(() => {
     if (resourceType === 'KG_DOC') {
       return activeTab === 'personal'
@@ -565,7 +560,7 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
     return [];
   }, [activeTab, intl, resourceType]);
   const customBannerUrl = getBannerUrl(bannerList, bannerLabel);
-  const bannerUrl = customBannerUrl ? getRuntimeActualUrl(customBannerUrl) : defaultBannerUrl;
+  const bannerUrl = customBannerUrl ? getRuntimeActualUrl(customBannerUrl) : '';
 
   useEffect(() => {
     getDcSystemConfig({ paramCode: 'BYAI_BANNER' })
@@ -599,7 +594,11 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
         }}
       />
       <div className={classnames('full-width ub ub-ver ub-f1', styles.wrapper)}>
-        <div className="mb-16">{bannerLoaded && <img className={styles.marketBg} src={bannerUrl} alt="poster" />}</div>
+        {bannerLoaded && bannerUrl && (
+          <div className="mb-16">
+            <img className={styles.marketBg} src={bannerUrl} alt="poster" />
+          </div>
+        )}
         <div className={classnames('ub ub-ac gap8', styles.filterBar)}>
           <Tabs
             className={classnames('ub-f1', styles.tabs)}

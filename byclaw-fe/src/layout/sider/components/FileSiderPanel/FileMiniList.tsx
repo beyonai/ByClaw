@@ -1,4 +1,4 @@
-import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Collapse,
   Button,
@@ -26,7 +26,6 @@ import employeeStyles from '@/layout/sider/components/EmployeeList/index.module.
 import useGlobal from '@/hooks/useGlobal';
 import { getHistoryState } from '@/utils/browser';
 import { copyTextToClipboard } from '@/utils/copy';
-import { HALF_MAIN_CONTENT_DETAIL_PANEL_WIDTH, SiderContentContext } from '@/layout/sider/siderContentContext';
 import {
   getMimeType,
   isPreviewable,
@@ -58,10 +57,6 @@ import { getFileIconType } from '@/constants/icon';
 import { IMessageState, SSEEventStatus } from '@/constants/message';
 import commonStyles from '../Knowledge/components/common.module.less';
 import styles from './index.module.less';
-
-const PreViewFile = React.lazy(() =>
-  import('@/components/Preview/Twins').then((module) => ({ default: module.PreViewFile }))
-);
 
 function getIconType(name: string, isDir: boolean): string {
   return getFileIconType(name, {
@@ -148,14 +143,6 @@ function getFileType(name: string): string {
 
 interface FileMiniListProps {
   resourceId: string;
-}
-
-interface FilePreviewPanelProps {
-  blob: Blob | null;
-  fileName: string;
-  fileType: string;
-  loading: boolean;
-  onClose: () => void;
 }
 
 interface FileTreeItem extends FileBrowserItem {
@@ -488,30 +475,9 @@ interface FileCategoryCache {
   childrenByPath: Record<string, FileBrowserItem[]>;
 }
 
-const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({ blob, fileName, fileType, loading, onClose }) => (
-  <div className={styles.previewPanel}>
-    <div className={styles.previewHeader}>
-      <span className={styles.previewTitle}>{fileName}</span>
-      <span className={styles.previewClose} onClick={onClose}>
-        <AntdIcon type="icon-a-Closeguanbi1" />
-      </span>
-    </div>
-    <div className={styles.previewBody}>
-      <Spin spinning={loading} wrapperClassName={styles.previewSpin}>
-        {blob && (
-          <React.Suspense fallback={null}>
-            <PreViewFile data={blob} type={fileType} title={fileName} className={styles.previewContent} />
-          </React.Suspense>
-        )}
-      </Spin>
-    </div>
-  </div>
-);
-
 const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
   const intl = useIntl();
   const { EventEmitter, sessionId } = useGlobal();
-  const { setDetailPanel, clearDetailPanel } = useContext(SiderContentContext);
   const clickTimerRef = useRef<number | null>(null);
   const categoryCacheRef = useRef<Partial<Record<FileCategoryKey, FileCategoryCache>>>({});
   const activeCategoryKeyRef = useRef<FileCategoryKey | undefined>('root');
@@ -631,6 +597,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
   const fetchList = useCallback(
     async (path: string, options: { force?: boolean; categoryKey?: FileCategoryKey | undefined } = {}) => {
       const cacheKey = options.categoryKey ?? activeCategoryKey;
+      if (!cacheKey) return;
       const categoryRootPath = getCategoryRootPath(cacheKey);
       const normalizedPath = ensureDirectoryPath(normalizeFileBrowserPath(path || categoryRootPath));
       const requestPath =
@@ -832,7 +799,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
   }, [activeSessionId, fileCategories, resourceId]);
 
   useEffect(() => {
-    if (resourceId && pathInitialized && currentPath) {
+    if (resourceId && pathInitialized && activeCategoryKey && currentPath) {
       void fetchList(currentPath).then(() => {
         if (activeCategoryKey === 'session' && currentPath === SESSION_FILE_PATH && activeSessionId) {
           void expandCurrentSessionDirectory(activeSessionId);
@@ -860,7 +827,15 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
     async (key: string | string[]) => {
       const nextKey = Array.isArray(key) ? key[0] : key;
       if (!nextKey) {
+        activeCategoryKeyRef.current = undefined;
+        currentPathRef.current = '';
         setActiveCategoryKey(undefined);
+        setCurrentPath('');
+        setSearchValue('');
+        setIsSearching(false);
+        setItems([]);
+        setChildrenByPath({});
+        setExpandedTreeKeys([]);
         return;
       }
       const nextCategory = fileCategories.find((item) => item.key === nextKey);
@@ -920,11 +895,17 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       }
     };
 
+    const handleSessionFilesUpdated = (payload: any) => {
+      void refreshExpandedDirectories(payload);
+    };
+
     EventEmitter.on('beyond-create-message', handleSessionFileCreated);
     EventEmitter.on('beyond-update-message', handleSessionFileUpdated);
+    EventEmitter.on('fileBrowser-session-files-updated', handleSessionFilesUpdated);
     return () => {
       EventEmitter.off('beyond-create-message', handleSessionFileCreated);
       EventEmitter.off('beyond-update-message', handleSessionFileUpdated);
+      EventEmitter.off('fileBrowser-session-files-updated', handleSessionFilesUpdated);
     };
   }, [EventEmitter, activeSessionId, refreshExpandedDirectories]);
 
@@ -1089,18 +1070,25 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
 
   const renderPreviewPanel = useCallback(
     (item: FileBrowserItem, options: { blob?: Blob | null; loading: boolean }) => {
-      setDetailPanel?.(
-        <FilePreviewPanel
-          blob={options.blob ?? null}
-          fileName={item.name}
-          fileType={getFileType(item.name)}
-          loading={options.loading}
-          onClose={() => clearDetailPanel?.()}
-        />,
-        { width: HALF_MAIN_CONTENT_DETAIL_PANEL_WIDTH }
-      );
+      if (options.loading) {
+        EventEmitter.emit('beyond-main-driver-open-type', {
+          title: item.name,
+          width: '50vw',
+          minWidth: '360px',
+          maxWidth: '70vw',
+          drawerType: 'preview',
+          canClose: true,
+          canFullScreen: false,
+        });
+      }
+      EventEmitter.emit('beyond-main-driver-message', {
+        data: options.blob ?? undefined,
+        type: getFileType(item.name),
+        title: item.name,
+        className: styles.previewContent,
+      });
     },
-    [clearDetailPanel, setDetailPanel]
+    [EventEmitter]
   );
 
   const handlePreview = useCallback(
@@ -1119,10 +1107,9 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
         renderPreviewPanel(item, { blob, loading: false });
       } catch (error: any) {
         message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.preview.failed' }));
-        clearDetailPanel?.();
       }
     },
-    [clearDetailPanel, intl, message, renderPreviewPanel, resourceId]
+    [intl, message, renderPreviewPanel, resourceId]
   );
 
   const handleDownload = useCallback(
@@ -1454,6 +1441,22 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
     [activeSessionId, expandCurrentSessionDirectory, fetchList, intl, resourceId]
   );
 
+  useEffect(() => {
+    const handler = (payload?: { key?: string }) => {
+      if (payload?.key !== 'file') return;
+      const currentCategoryKey = activeCategoryKeyRef.current;
+      const currentCategory = fileCategories.find((item) => item.key === currentCategoryKey);
+      if (currentCategory) {
+        void handleRefreshCategory(currentCategory);
+      }
+    };
+
+    EventEmitter.on('sider-menu-tab-click-refresh', handler);
+    return () => {
+      EventEmitter.off('sider-menu-tab-click-refresh', handler);
+    };
+  }, [EventEmitter, fileCategories, handleRefreshCategory]);
+
   const openCategoryPath = useCallback(
     async (category: FileCategoryItem, path: string) => {
       const categoryPath = ensureDirectoryPath(path || getCategoryActivePath(category, activeSessionId));
@@ -1578,7 +1581,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       clearClickTimer();
       EventEmitter.emit('queryInput-insert-item', {
         item: normalizeReferenceItem(item, resourceId),
-        type: isDirectory(item) ? DragType.folder : DragType.file,
+        type: isDirectory(item) ? DragType.commonFolder : DragType.commonFile,
       });
     },
     [EventEmitter, clearClickTimer, resourceId]
@@ -1784,6 +1787,20 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
         targetDirectory: copyDirectoryPath,
       });
       message.success(intl.formatMessage({ id: 'fileBrowser.copy.success' }));
+      const activeSessionPath = getSessionFilePath(activeSessionId);
+      const sessionFolderExpanded =
+        activeSessionId &&
+        expandedTreeKeys
+          .map((key) => ensureDirectoryPath(normalizeFileBrowserPath(String(key))))
+          .includes(activeSessionPath);
+      if (
+        copyTargetType === 'session' &&
+        activeCategoryKeyRef.current === 'session' &&
+        sessionFolderExpanded &&
+        isPathIn(copyDirectoryPath, activeSessionPath)
+      ) {
+        await refreshExpandedDirectories({ sessionId: activeSessionId });
+      }
       setCopyModalOpen(false);
       setCopyTarget(null);
     } catch (error: any) {
@@ -1791,7 +1808,16 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
     } finally {
       setCopyingToFileBrowser(false);
     }
-  }, [copyDirectoryPath, copyTarget, intl, resourceId]);
+  }, [
+    activeSessionId,
+    copyDirectoryPath,
+    copyTarget,
+    copyTargetType,
+    expandedTreeKeys,
+    intl,
+    refreshExpandedDirectories,
+    resourceId,
+  ]);
 
   const handleConfirmKnowledgeUpload = useCallback(
     async (processFrontMatter: boolean) => {
@@ -2251,7 +2277,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       />
       <Collapse
         accordion
-        activeKey={activeCategoryKey}
+        activeKey={activeCategoryKey ? [activeCategoryKey] : []}
         onChange={handleCategoryChange}
         className={styles.categoryCollapse}
         items={fileCategories.map((category) => ({

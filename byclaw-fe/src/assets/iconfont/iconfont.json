@@ -6,6 +6,13 @@
   "description": "",
   "glyphs": [
     {
+      "icon_id": "40072593",
+      "name": "brain-filled",
+      "font_class": "brain-filled",
+      "unicode": "eb02",
+      "unicode_decimal": 60162
+    },
+    {
       "icon_id": "12719944",
       "name": "构建",
       "font_class": "goujian",

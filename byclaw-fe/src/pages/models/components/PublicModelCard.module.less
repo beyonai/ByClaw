@@ -11,6 +11,21 @@
   }
 }
 
+.cardCurrent {
+  border-color: #165dff;
+  box-shadow: 0 0 0 1px #165dff;
+}
+
+.currentTag {
+  margin-left: 8px;
+}
+
+.titleRow {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
 .cardAccent {
   position: absolute;
   top: 0;
@@ -66,11 +81,12 @@
 
 .metaGrid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
 
 .metaCard {
+  min-width: 0;
   padding: 8px;
   background: #fafafa;
   border-radius: 4px;
@@ -83,8 +99,12 @@
 }
 
 .metaValue {
+  min-width: 0;
+  overflow: hidden;
   font-size: 13px;
   color: #1f2533;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .cardBottom {

@@ -126,7 +126,17 @@ public enum AgentMetaEnum {
     /**
      * 用户工作空间技能
      */
-    SKILL("SKILL", "技能");
+    SKILL("SKILL", "技能"),
+
+    /**
+     * 通用文件
+     */
+    COMMON_FILE("COMMON_FILE", "通用文件"),
+
+    /**
+     * 通用文件夹
+     */
+    COMMON_FOLDER("COMMON_FOLDER", "通用文件夹");
 
     /**
      * 枚举代码

@@ -16,7 +16,7 @@ import lombok.extern.slf4j.Slf4j;
 /**
  * Token 月度限额检查切面
  * 对话请求前检查用户本月公共模型 Token 是否已超限
- * 仅对公共模型和 TokenServer 模型生效，自购个人模型不受限
+ * 仅对公共模型和 TokenSaver 模型生效，自购个人模型不受限
  */
 @Slf4j
 @Aspect

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo } from 'react';
-
+import { isEqual } from 'lodash';
 import { useDispatch, useSelector } from '@umijs/max';
 
 import { subscribeChatStream } from '@/hooks/useSseSender/chatStream';
@@ -26,11 +26,16 @@ type State = {
   };
 };
 
+type INotificationMessage = { session?: ISession; data?: { session?: ISession } };
+
+let lastNotificationInfo: INotificationMessage | null = null;
+const EmptyArr: ISession[] = [];
+
 export default function useGlobalChatRuntime() {
   const dispatch = useDispatch();
   const { userInfo, sessionList } = useSelector((state: State) => ({
     userInfo: state.user.userInfo,
-    sessionList: state.session.sessionList || [],
+    sessionList: state.session.sessionList || EmptyArr,
   }));
 
   const userId = userInfo?.userId;
@@ -51,7 +56,7 @@ export default function useGlobalChatRuntime() {
 
     try {
       const list: RunningChatInfo[] = await getChatRunningStatus({ sessionIds: sessionIds.split(',') });
-      hydrateRunningSessions(list || []);
+      hydrateRunningSessions(list || EmptyArr);
     } catch (error) {
       console.error(error);
     }
@@ -81,9 +86,15 @@ export default function useGlobalChatRuntime() {
       onPayload: handleParsedChatStream,
     });
 
-    const handleNotification = (message: { session?: ISession; data?: { session?: ISession } }) => {
+    const handleNotification = (message: INotificationMessage) => {
+      const isSame = isEqual(lastNotificationInfo, message); // 幂等校验
+      if (isSame) {
+        return;
+      }
+      lastNotificationInfo = message;
+
       const session = message.session || message.data?.session;
-      if (!session || `${userId}` !== `${session.creatorId}`) {
+      if (!session || `${userId}` !== `${session.creatorId}` || isSame) {
         return;
       }
 

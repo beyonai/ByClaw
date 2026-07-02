@@ -10,7 +10,11 @@
 
   pre.shiki {
     position: relative;
-    padding: 6px 12px;
+    box-sizing: border-box;
+    margin: 0;
+    padding: 6px 12px 12px;
+    max-height: none;
+    overflow: visible;
 
     > code {
       position: relative;
@@ -20,13 +24,16 @@
 }
 
 .text {
+  flex: 1;
+  width: 100%;
   border-radius: 8px;
-  overflow: hidden;
+  min-height: 100%;
+  overflow: visible;
 
   &.lineNumber {
     :global {
       pre.shiki {
-        padding: 6px 12px 6px 3rem;
+        padding: 6px 12px 12px 3rem;
 
         &:has(code > span.line:nth-of-type(1000)) {
           padding-left: 4rem !important;

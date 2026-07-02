@@ -1,54 +1,97 @@
 import React, { useCallback, useEffect, useState, useMemo } from 'react';
 // @ts-ignore
-import { connect, useDispatch, useIntl, useNavigate } from '@umijs/max';
-import { Badge, Empty, Input, message, Spin } from 'antd';
-import { debounce } from 'lodash';
-import AntdIcon from '@/components/AntdIcon';
-import { canJumpAgent, agentHandler, getAgentChatAvatar, getAgentPath, getAvatarUrl } from '@/utils/agent';
+import { connect, useDispatch, useIntl, useNavigate, useSelector } from '@umijs/max';
+import { Input, message } from 'antd';
+import { canJumpAgent, agentHandler, getAgentPath } from '@/utils/agent';
 import { escapeRegExp } from '@/utils/tools';
 import classnames from 'classnames';
-import { getSearchList } from '@/service/layout';
 import useGlobal from '@/hooks/useGlobal';
 import useTracker from '@/hooks/useTracker';
+import useVisibleMenuKeys from '@/layout/sider/useVisibleMenuKeys';
+import { useActiveSiderAgent } from '@/layout/sider/components/ActiveSiderAgentBar';
+import KnowledgeBaseListItem from '@/layout/sider/components/Knowledge/components/KnowledgeBase/KnowledgeBaseListItem';
+import { IKnowledgeBaseItem } from '@/layout/sider/components/Knowledge/components/KnowledgeBase/types';
+import ResourceSiderListItem from '@/layout/sider/components/ResourceSiderPanel/ResourceSiderListItem';
 
-import RenderRightTop from '@/pages/digitalEmployees/components/AllDigitalEmployees/RenderRightTop';
 import styles from './index.module.less';
 import { SearchOutlined } from '@ant-design/icons';
-
-interface HeaderSearchPageProps {
-  keyword?: string;
-  setShowSearch: (show: boolean) => void;
-  onMouseEnter?: () => void;
-  onMouseLeave?: () => void;
-  showSearch: boolean;
-  displayInModal?: boolean;
-}
+import type { HeaderSearchPageProps, SearchTabItem } from './types';
+import { normalizeResourceItem, resourceSiderTypeByTabKey } from './utils';
+import useHeaderSearchResults from './useHeaderSearchResults';
+import useEmployeeResourceSearch from './useEmployeeResourceSearch';
+import useKnowledgeResourceInteraction from './useKnowledgeResourceInteraction';
+import useEmployeeResourceDrill from './useEmployeeResourceDrill';
+import SearchTabs from './SearchTabs';
+import SearchSection from './SearchSection';
+import { SearchEmpty, SearchLoading } from './SearchState';
+import DigitalEmployeeResultItem from './DigitalEmployeeResultItem';
+import ChatRecordResultItem from './ChatRecordResultItem';
+import EmployeeResourceContent from './EmployeeResourceContent';
 
 const HeaderSearchPage = (props: HeaderSearchPageProps) => {
-  const { keyword: ctrlKeyword, setShowSearch, onMouseEnter, onMouseLeave, showSearch, displayInModal } = props;
+  const {
+    keyword: ctrlKeyword,
+    className,
+    setShowSearch,
+    onMouseEnter,
+    onMouseLeave,
+    showSearch,
+    displayInModal,
+  } = props;
   const intl = useIntl();
   const dispatch = useDispatch();
   const navigate = useNavigate();
+  const { userInfo } = useSelector(({ user }: any) => ({
+    userInfo: user.userInfo,
+  }));
+  const visibleKeys = useVisibleMenuKeys(userInfo);
+  const activeSiderAgent = useActiveSiderAgent();
 
   const { trackerEmployeeClick } = useTracker();
 
-  const { setAgentId, setSessionId } = useGlobal();
-
-  const cancelTokenQKRef = React.useRef<AbortController>(new AbortController());
-  const [isLoading, setIsLoading] = React.useState<boolean>(false);
+  const { setAgentId, setSessionId, EventEmitter } = useGlobal();
 
   const [stateKeyword, setStateKeyword] = useState(ctrlKeyword || '');
 
-  const keyword = ctrlKeyword || stateKeyword;
+  const keyword = ctrlKeyword ?? stateKeyword;
 
   // 当前tab
   const [activeTab, setActiveTab] = useState(intl.formatMessage({ id: 'common.comprehensive' }));
 
-  // 搜索结果
-  const [result, setResult] = useState({
-    digitList: [], // 数字员工的列表
-    userList: [], // 企业员工的列表
-    sessionList: [], // 会话列表
+  const { isLoading, result, myGetSearchList, cancelSearch } = useHeaderSearchResults();
+  const {
+    employeeResourceResultMap,
+    visibleEmployeeResourceTabs,
+    myGetEmployeeResourceList,
+    cancelEmployeeResourceSearch,
+  } = useEmployeeResourceSearch({
+    visibleKeys,
+    activeSiderAgentResourceId: activeSiderAgent.resourceId,
+  });
+  const {
+    currentKnowledgeBase,
+    setCurrentKnowledgeBase,
+    handleKnowledgeBaseItemClick,
+    handleKnowledgeBaseItemDoubleClick,
+    handleKnowledgeBaseGoBack,
+  } = useKnowledgeResourceInteraction({
+    visibleEmployeeResourceTabs,
+    eventEmitter: EventEmitter,
+    setActiveTab,
+  });
+  const {
+    employeeResourceDrillState,
+    employeeResourceDrillLoading,
+    resetEmployeeResourceDrill,
+    getEmployeeResourceDrillable,
+    handleEmployeeResourceItemClick,
+    handleEmployeeResourceDoubleClick,
+    handleEmployeeResourceGoBack,
+  } = useEmployeeResourceDrill({
+    visibleEmployeeResourceTabs,
+    employeeResourceResultMap,
+    eventEmitter: EventEmitter,
+    setActiveTab,
   });
 
   const digitList = useMemo(
@@ -59,45 +102,32 @@ const HeaderSearchPage = (props: HeaderSearchPageProps) => {
     [result?.digitList]
   );
 
-  // 模糊搜索（keyword 为空时也请求后端，用于首次打开展示默认列表）
-  const myGetSearchList = useCallback(
-    debounce((myKeyword: string) => {
-      if (cancelTokenQKRef.current) {
-        cancelTokenQKRef.current.abort();
-      }
-
-      cancelTokenQKRef.current = new AbortController();
-
-      setIsLoading(true);
-
-      getSearchList(
-        {
-          pageSize: 20,
-          pageIndex: 1,
-          type: 'all',
-          keyword: myKeyword.trim(),
-        },
-        cancelTokenQKRef.current
-      )
-        .then((response) => {
-          setResult(response);
-          setIsLoading(false);
-        })
-        .catch((err) => {
-          if (!err || err.name !== 'CanceledError') {
-            setIsLoading(false);
-          }
-        });
-    }, 300),
-    [dispatch]
-  );
-
   useEffect(() => {
     if (!showSearch) {
+      cancelSearch();
+      cancelEmployeeResourceSearch();
+      setCurrentKnowledgeBase(null);
+      resetEmployeeResourceDrill();
       return;
     }
+    resetEmployeeResourceDrill();
     myGetSearchList(keyword);
-  }, [keyword, showSearch, myGetSearchList]);
+    myGetEmployeeResourceList(keyword);
+
+    return () => {
+      cancelSearch();
+      cancelEmployeeResourceSearch();
+    };
+  }, [
+    keyword,
+    showSearch,
+    myGetSearchList,
+    myGetEmployeeResourceList,
+    cancelSearch,
+    cancelEmployeeResourceSearch,
+    setCurrentKnowledgeBase,
+    resetEmployeeResourceDrill,
+  ]);
 
   /** 弹窗首次打开时立即拉取，避免仅依赖 debounce 的首帧延迟 */
   useEffect(() => {
@@ -105,7 +135,8 @@ const HeaderSearchPage = (props: HeaderSearchPageProps) => {
       return;
     }
     myGetSearchList.flush();
-  }, [showSearch, myGetSearchList]);
+    myGetEmployeeResourceList.flush();
+  }, [showSearch, myGetSearchList, myGetEmployeeResourceList]);
 
   // 搜索高亮
   const highlight = useCallback(
@@ -132,147 +163,122 @@ const HeaderSearchPage = (props: HeaderSearchPageProps) => {
 
   // 渲染数字员工
   const renderItemEmployee = useCallback(
-    (item: any) => (
-      <div
-        className={styles.itemBox}
-        key={item.id}
-        onClick={() => {
-          const isCanJump = canJumpAgent(item);
-          if (!isCanJump) {
-            message.destroy();
-            message.error(intl.formatMessage({ id: 'headerSearch.applyPermissionTip' }));
-            return;
-          }
+    (item: any) => {
+      const handleClick = (employee: any) => {
+        const isCanJump = canJumpAgent(employee);
+        if (!isCanJump) {
+          message.destroy();
+          message.error(intl.formatMessage({ id: 'headerSearch.applyPermissionTip' }));
+          return;
+        }
 
-          trackerEmployeeClick(item, 'siderAgentRedirect');
+        trackerEmployeeClick(employee, 'siderAgentRedirect');
 
-          dispatch({
-            type: 'chat/save',
-            payload: {
-              curSession: {},
-            },
-          });
-          setShowSearch(false);
-          setAgentId?.(item.id);
-          navigate(getAgentPath(item));
-        }}
-      >
-        <div className={styles.itemEmployeeImgBox}>
-          <img className={styles.itemEmployeeImg} src={getAvatarUrl(item.avatar)} alt="" />
-        </div>
-        <div className={styles.itemContent}>
-          <div className={styles.renderRightTop}>
-            <RenderRightTop employee={item} />
-          </div>
-          <span className={styles.itemTitle}>{highlight(item.name)}</span>
-          <span className={styles.itemDesc}>{highlight(item.resourceDesc)}</span>
-        </div>
-      </div>
-    ),
-    [dispatch, highlight]
+        dispatch({
+          type: 'chat/save',
+          payload: {
+            curSession: {},
+          },
+        });
+        setShowSearch(false);
+        setAgentId?.(employee.id);
+        navigate(getAgentPath(employee));
+      };
+
+      return <DigitalEmployeeResultItem key={item.id} item={item} highlight={highlight} onClick={handleClick} />;
+    },
+    [dispatch, highlight, intl, navigate, setAgentId, setShowSearch, trackerEmployeeClick]
   );
 
   // 渲染聊天记录
   const renderItemChat = useCallback(
-    (item: any) => (
-      <div
-        className={styles.itemBox}
-        key={item.sessionId}
-        onClick={() => {
-          setSessionId?.(`${item.sessionId}`);
-          setAgentId?.('');
+    (item: any) => {
+      const handleClick = (chat: any) => {
+        setSessionId?.(`${chat.sessionId}`);
+        setAgentId?.('');
 
-          navigate('/chat');
+        navigate('/chat');
 
-          setShowSearch(false);
-        }}
-      >
-        <div className={styles.avatarWrapper}>
-          <Badge count={item.unread} size="small">
-            <div
-              style={{
-                width: 32,
-                height: 32,
-                borderRadius: '50%',
-                backgroundColor: `var(--${PREFIX_NAME}-${item.theme}-2)`,
-              }}
-            >
-              {getAgentChatAvatar(item.avatar)}
-            </div>
-          </Badge>
-        </div>
-        <div className={styles.itemContent}>
-          <span className={styles.itemTitle}>{highlight(item.sessionName)}</span>
-          <span className={styles.itemDesc}>{highlight(item.sessionContent || item.createTime)}</span>
-        </div>
-      </div>
-    ),
-    [dispatch, highlight]
+        setShowSearch(false);
+      };
+
+      return <ChatRecordResultItem key={item.sessionId} item={item} highlight={highlight} onClick={handleClick} />;
+    },
+    [highlight, navigate, setAgentId, setSessionId, setShowSearch]
   );
 
-  const emptyStyle = {
-    height: '60vh',
-  };
+  const renderItemEmployeeResource = useCallback(
+    (tabKey: string, item: any) => {
+      const resourceType = resourceSiderTypeByTabKey[tabKey];
+      if (!resourceType) {
+        return null;
+      }
 
-  // 渲染空状态
-  const renderEmpty = () => (
-    <div className={styles.empty} style={emptyStyle}>
-      <Empty
-        image="https://gw.alipayobjects.com/zos/antfincdn/ZHrcdLPrvN/empty.svg"
-        imageStyle={{ height: 80 }}
-        description={<span className={styles.noContent}>{intl.formatMessage({ id: 'workCenter.noContent' })}</span>}
+      const resourceItem = normalizeResourceItem(item);
+      const drillable = getEmployeeResourceDrillable(tabKey, resourceItem);
+
+      return (
+        <ResourceSiderListItem
+          key={`${resourceItem.resourceBizType || ''}_${resourceItem.resourceId || resourceItem.resourceCode}`}
+          item={resourceItem}
+          resourceType={resourceType}
+          drillable={drillable}
+          renderName={(currentItem) => highlight(currentItem.resourceName)}
+          renderDescription={(currentItem) =>
+            highlight(currentItem.resourceDesc || currentItem.description || currentItem.resourceBizType || '')
+          }
+          onClick={(currentItem, currentDrillable) =>
+            void handleEmployeeResourceItemClick(tabKey, currentItem, currentDrillable)
+          }
+          onDoubleClick={() => handleEmployeeResourceDoubleClick(tabKey, resourceItem)}
+        />
+      );
+    },
+    [getEmployeeResourceDrillable, handleEmployeeResourceDoubleClick, handleEmployeeResourceItemClick, highlight]
+  );
+
+  const renderItemKnowledgeBase = useCallback(
+    (item: IKnowledgeBaseItem) => (
+      <KnowledgeBaseListItem
+        key={item.resourceId}
+        item={item}
+        onClick={handleKnowledgeBaseItemClick}
+        onDoubleClick={handleKnowledgeBaseItemDoubleClick}
       />
-    </div>
+    ),
+    [handleKnowledgeBaseItemClick, handleKnowledgeBaseItemDoubleClick]
   );
 
   // 渲染列表
-  const renderList = (list: any, renderItem: any) => {
+  const renderList = (list: any, renderItem: any, className?: string) => {
     if ((list || []).length === 0) {
-      return renderEmpty(intl.formatMessage({ id: 'common.noData' }));
+      return <SearchEmpty intl={intl} />;
     }
-    return <div>{list.map(renderItem)}</div>;
+    return <div className={className}>{list.map(renderItem)}</div>;
   };
 
-  // 渲染分组
-  const renderSection = (title: any, data: any, renderItem: any) =>
-    (data || []).length ? (
-      <div className={styles.section}>
-        <div className={styles.sectionHeader}>
-          <span className={styles.sectionTitle}>{title}</span>
-          {data.length > 3 && (
-            <div
-              className={styles.sectionMore}
-              onClick={() => {
-                setActiveTab(title);
-              }}
-            >
-              <span className={styles.sectionMorespan}>{intl.formatMessage({ id: 'common.viewMore' })}</span>
-              <AntdIcon type="icon-a-Rightyou" className={styles.sectionMoreImg} />
-            </div>
-          )}
-        </div>
-        <div>{renderList(data.slice(0, 3), renderItem)}</div>
-      </div>
-    ) : null;
-
-  // 渲染加载状态
-  const renderLoading = () => {
-    return (
-      <div className={styles.empty} style={emptyStyle}>
-        <Spin spinning={isLoading} tip={intl.formatMessage({ id: 'common.querying' })} size="large" />
-      </div>
-    );
+  const getEmployeeResourceRenderItem = (tabKey: string) =>
+    tabKey === 'knowledge' ? renderItemKnowledgeBase : (item: any) => renderItemEmployeeResource(tabKey, item);
+  const getEmployeeResourceListClassName = (tabKey: string) => {
+    if (tabKey === 'knowledge') {
+      return styles.knowledgeResourceList;
+    }
+    if (resourceSiderTypeByTabKey[tabKey]) {
+      return styles.employeeResourceSiderList;
+    }
+    return undefined;
   };
 
   // 内容区域
   const renderContent = () => {
     let content = null;
-    const total = digitList.length + result?.userList?.length + result?.sessionList?.length;
+    const employeeResourceTotal = Object.values(employeeResourceResultMap).reduce((sum, list) => sum + list.length, 0);
+    const total = digitList.length + result?.sessionList?.length + employeeResourceTotal;
     if (isLoading) {
-      return renderLoading();
+      return <SearchLoading intl={intl} />;
     }
     if (total === 0) {
-      return renderEmpty(intl.formatMessage({ id: 'common.noData' }));
+      return <SearchEmpty intl={intl} />;
     }
     const comprehensive = intl.formatMessage({ id: 'common.comprehensive' });
     const digitalEmployee = intl.formatMessage({ id: 'common.digitalEmployee' });
@@ -280,8 +286,34 @@ const HeaderSearchPage = (props: HeaderSearchPageProps) => {
     if (activeTab === comprehensive) {
       content = (
         <div className={styles.tabContent}>
-          {renderSection(digitalEmployee, digitList, renderItemEmployee)}
-          {renderSection(chatRecord, result?.sessionList, renderItemChat)}
+          <SearchSection
+            title={digitalEmployee}
+            data={digitList}
+            renderItem={renderItemEmployee}
+            renderList={renderList}
+            viewMoreText={intl.formatMessage({ id: 'common.viewMore' })}
+            onViewMore={(title) => setActiveTab(String(title))}
+          />
+          {visibleEmployeeResourceTabs.map((tab) => (
+            <SearchSection
+              key={tab.key}
+              title={tab.title}
+              data={employeeResourceResultMap[tab.key]}
+              renderItem={getEmployeeResourceRenderItem(tab.key)}
+              renderList={renderList}
+              listClassName={getEmployeeResourceListClassName(tab.key)}
+              viewMoreText={intl.formatMessage({ id: 'common.viewMore' })}
+              onViewMore={(title) => setActiveTab(String(title))}
+            />
+          ))}
+          <SearchSection
+            title={chatRecord}
+            data={result?.sessionList}
+            renderItem={renderItemChat}
+            renderList={renderList}
+            viewMoreText={intl.formatMessage({ id: 'common.viewMore' })}
+            onViewMore={(title) => setActiveTab(String(title))}
+          />
         </div>
       );
     }
@@ -291,6 +323,27 @@ const HeaderSearchPage = (props: HeaderSearchPageProps) => {
     if (activeTab === chatRecord) {
       content = <div className={styles.tabContent}>{renderList(result?.sessionList, renderItemChat)}</div>;
     }
+    const activeEmployeeResourceTab = visibleEmployeeResourceTabs.find((tab) => activeTab === tab.title);
+    if (activeEmployeeResourceTab) {
+      content = (
+        <div className={styles.tabContent}>
+          <EmployeeResourceContent
+            tabKey={activeEmployeeResourceTab.key}
+            list={employeeResourceResultMap[activeEmployeeResourceTab.key]}
+            currentKnowledgeBase={currentKnowledgeBase}
+            activeSiderAgentResourceId={activeSiderAgent.resourceId}
+            employeeResourceDrillState={employeeResourceDrillState}
+            employeeResourceDrillLoading={employeeResourceDrillLoading}
+            intl={intl}
+            renderList={renderList}
+            renderItemKnowledgeBase={renderItemKnowledgeBase}
+            renderItemEmployeeResource={renderItemEmployeeResource}
+            onKnowledgeBaseGoBack={handleKnowledgeBaseGoBack}
+            onEmployeeResourceGoBack={handleEmployeeResourceGoBack}
+          />
+        </div>
+      );
+    }
     return (
       <div className={styles.content} style={{ height: '60vh' }}>
         {content}
@@ -298,13 +351,18 @@ const HeaderSearchPage = (props: HeaderSearchPageProps) => {
     );
   };
 
-  const TABS = useMemo(
+  const TABS: SearchTabItem[] = useMemo(
     () => [
       { key: '1', title: intl.formatMessage({ id: 'common.comprehensive' }) },
       { key: '2', title: intl.formatMessage({ id: 'common.digitalEmployee' }) },
       { key: '4', title: intl.formatMessage({ id: 'common.chatRecord' }) },
+
+      ...visibleEmployeeResourceTabs.map((tab) => ({
+        key: `employeeResource_${tab.key}`,
+        title: tab.title,
+      })),
     ],
-    [intl]
+    [intl, visibleEmployeeResourceTabs]
   );
 
   if (!showSearch) {
@@ -313,9 +371,13 @@ const HeaderSearchPage = (props: HeaderSearchPageProps) => {
 
   return (
     <div
-      className={classnames(styles.searchContentWrap, {
-        [styles.absolute]: !displayInModal,
-      })}
+      className={classnames(
+        styles.searchContentWrap,
+        {
+          [styles.absolute]: !displayInModal,
+        },
+        className
+      )}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
     >
@@ -329,17 +391,7 @@ const HeaderSearchPage = (props: HeaderSearchPageProps) => {
           placeholder={intl.formatMessage({ id: 'layouHeader.search' })}
         />
       )}
-      <div className={styles.searchTabs}>
-        {TABS.map((tab) => (
-          <span
-            key={tab.key}
-            className={classnames(styles.searchTab, activeTab === tab.title && styles.activeTab)}
-            onClick={() => setActiveTab(tab.title)}
-          >
-            {tab.title}
-          </span>
-        ))}
-      </div>
+      <SearchTabs tabs={TABS} activeTab={activeTab} onTabChange={setActiveTab} />
       {/* 内容区域 */}
       {renderContent()}
     </div>

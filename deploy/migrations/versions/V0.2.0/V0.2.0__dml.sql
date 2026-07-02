@@ -615,6 +615,9 @@ VALUES(15,'BYAI','SKILL','ATOM','钉钉连接器','钉钉协同办公技能。�
 INSERT INTO byai.ss_resource(resource_id,system_code,resource_biz_type,resource_type,resource_name,resource_desc,resource_version_id,host_type,catalog_id,man_org_id,man_user_id,create_by,create_time,update_by,update_time,com_acct_id,resource_status,resource_d_verid,resource_r_verid,resource_code,publish_time,auth_status,publish_portal,parent_resource_id,publish_type,owner_type,impl_type,worker_agent_type)
 VALUES(16,'BYAI','SKILL','ATOM','可视化报告生成','数据可视化报告技能。输入各类经营数据（表格、文本、API数据），输出专业的交互式数据分析报告，包含智能图表、地图点位展示、KPI看板和经营建议，支持导出PDF。适用于经营分析、选址评估、竞品对比、数据汇报、商圈研究。','1.0','hosted',10,-1,10001,10001,CURRENT_TIMESTAMP,10001,CURRENT_TIMESTAMP,1,2,-1,-1,'amap-visual-report-generator',CURRENT_TIMESTAMP,'passed',1,-1,'publish','enterprise','SKILL','NONE');
 
+INSERT INTO byai.ss_resource (resource_id, system_code, resource_source_pk_id, resource_biz_type, resource_type, resource_name, resource_desc, avatar, sample, tags, resource_version_id, host_type, catalog_id, man_org_id, man_user_id, index_list, create_by, create_time, update_by, update_time, com_acct_id, resource_status, resource_d_verid, resource_r_verid, resource_code, publish_time, shelf_time, unshelf_time, auth_status, publish_portal, parent_resource_id, publish_type, owner_type, impl_type, worker_agent_type)
+VALUES (17, 'BYAI', null, 'SKILL', 'ATOM', '可视化技能锻造工坊', '可视化 UI 技能锻造工坊，提供拖拽式低代码工作台，支持可视化配置技能入参表单、编排执行流程，可录制业务操作自动生成标准化 OpenClaw 技能包，内置预览沙箱调试，一键打包部署带前端交互面板的自定义技能，面向业务运营快速搭建可视化操作类数字员工能力，区别于纯代码生成的基础 skill-foundry，专注产出带 UI 交互表单的业务工具技能', null, null, null, '1.0', 'hosted', 10, -1, '10001', null, 10001, '2026-06-29 08:38:43.079632', 10001, '2026-06-29 08:38:43.079632', 1, 2, -1, -1, 'ui-skill-foundry', '2026-06-29 08:38:43.079632', null, null, 'passed', 1, -1, 'publish', 'enterprise', 'SKILL', 'NONE');
+
 -- inner来源技能(1~16)
 DELETE from byai.ss_res_ext_skill WHERE skill_type in('inner');
 INSERT INTO byai.ss_res_ext_skill(resource_id,skill_type,source_type,version,skill_url,skill_package_format,skill_original_filename,skill_package_size,skill_package_hash,sync_status,sync_error,last_sync_time) VALUES(1,'inner','SYSTEM_BUILTIN','v0.1','','zip',NULL,NULL,NULL,'SUCCESS',NULL,CURRENT_TIMESTAMP);
@@ -633,6 +636,7 @@ INSERT INTO byai.ss_res_ext_skill(resource_id,skill_type,source_type,version,ski
 INSERT INTO byai.ss_res_ext_skill(resource_id,skill_type,source_type,version,skill_url,skill_package_format,skill_original_filename,skill_package_size,skill_package_hash,sync_status,sync_error,last_sync_time) VALUES(14,'inner','SYSTEM_BUILTIN','v0.1','','zip',NULL,NULL,NULL,'SUCCESS',NULL,CURRENT_TIMESTAMP);
 INSERT INTO byai.ss_res_ext_skill(resource_id,skill_type,source_type,version,skill_url,skill_package_format,skill_original_filename,skill_package_size,skill_package_hash,sync_status,sync_error,last_sync_time) VALUES(15,'inner','SYSTEM_BUILTIN','v0.1','','zip',NULL,NULL,NULL,'SUCCESS',NULL,CURRENT_TIMESTAMP);
 INSERT INTO byai.ss_res_ext_skill(resource_id,skill_type,source_type,version,skill_url,skill_package_format,skill_original_filename,skill_package_size,skill_package_hash,sync_status,sync_error,last_sync_time) VALUES(16,'inner','SYSTEM_BUILTIN','v0.1','','zip',NULL,NULL,NULL,'SUCCESS',NULL,CURRENT_TIMESTAMP);
+INSERT INTO byai.ss_res_ext_skill(resource_id,skill_type,source_type,version,skill_url,skill_package_format,skill_original_filename,skill_package_size,skill_package_hash,sync_status,sync_error,last_sync_time) VALUES(17,'inner','SYSTEM_BUILTIN','v0.1','','zip',NULL,NULL,NULL,'SUCCESS',NULL,CURRENT_TIMESTAMP);
 
 -- 第四步：更新已存在的扩展表记录（直接关联主表获取种子数据，避免 CTE 作用域问题）
 UPDATE byai.ss_res_ext_skill e
@@ -672,7 +676,7 @@ FROM byai.ss_resource r
 WHERE e.resource_id = r.resource_id
   AND r.resource_biz_type = 'SKILL'
   AND r.owner_type = 'enterprise'
-  AND r.resource_code IN ('podcast-outline','tech-article','podcast-video','podcast-voice','podcast-script','slide-dec','unstructured-ontology-manager','structured-ontology-manager','crm-demo-showcase','github-issues-mgmt','github-code-analysis','iwhalehub','gbrain','bycli','dws','amap-visual-report-generator');
+  AND r.resource_code IN ('podcast-outline','tech-article','podcast-video','podcast-voice','podcast-script','slide-dec','unstructured-ontology-manager','structured-ontology-manager','crm-demo-showcase','github-issues-mgmt','github-code-analysis','iwhalehub','gbrain','bycli','dws','amap-visual-report-generator','ui-skill-foundry');
 
 -- 沙箱健康检测-默认水位模型初始化
 INSERT INTO byai.sandbox_health_watermark_model (
@@ -863,9 +867,9 @@ COMMIT;
 
 UPDATE byai.byai_aimodel SET owner_type = 'PUBLIC' WHERE owner_type IS NULL;
 
--- Token 月度限额 & TokenServer 配置（合并为单个 JSON key）
+-- Token 月度限额 & tokenSaver 配置（合并为单个 JSON key）
 DELETE FROM byai.byai_system_config WHERE param_code IN ('MODEL_QUOTA');
 INSERT INTO byai.byai_system_config (param_id, param_type, param_code, param_name, param_en_name, param_value, param_desc)
-VALUES (nextval('byai.seq_any_table'), 'json', 'MODEL_QUOTA', '模型额度与TokenServer配置', 'MODEL_QUOTA',
-'{"monthlyQuotaLimit":30000000,"tokenServer":{"enabled":false,"apiUrl":"","modelCode":""}}',
-'monthlyQuotaLimit: 每用户每月公共模型Token上限; tokenServer: 登录时自动分配模型配置');
+VALUES (nextval('byai.seq_any_table'), 'json', 'MODEL_QUOTA', '模型额度与tokenSaver配置', 'MODEL_QUOTA',
+'{"monthlyQuotaLimit":30000000,"tokenSaver":{"enabled":false,"apiUrl":"","modelCode":""}}',
+'monthlyQuotaLimit: 每用户每月公共模型Token上限; tokenSaver: 登录时自动分配模型配置');

@@ -33,4 +33,5 @@ export interface IKnowledgeDetailTreeItem extends IKnowledgeCollectionItem {
   directoryPath?: string;
   children?: IKnowledgeDetailTreeItem[];
   isLeaf?: boolean;
+  resourceCode?: string;
 }

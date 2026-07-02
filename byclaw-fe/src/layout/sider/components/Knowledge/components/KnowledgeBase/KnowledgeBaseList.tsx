@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useContext, useRef } from 'react';
-import { Input, Dropdown, List, message, Typography } from 'antd';
+import { Input, Dropdown, message } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
 import { trim, get, isEmpty, intersection, debounce } from 'lodash';
 import { useIntl, useSelector } from '@umijs/max';
@@ -8,7 +8,6 @@ import ResourceDetail from '@/components/Resources/components/ResourceDetail';
 import DetailPanel from '@/pages/knowledgeCenter/components/DetailPanel';
 import ShareModal from '@/pages/knowledgeCenter/components/shareModal';
 import AddAuthModal from '@/pages/manager/components/AuthListDrawer/AddAuthModal';
-import { getRuntimeActualUrl } from '@/utils';
 import withDrag, { DragType, IDragType } from '@/components/QueryInput/withDrag';
 import { queryDigEmployeeRelResourceAuth } from '@/pages/manager/service/resources';
 import { batchHandleAuth, listAuthDetail } from '@/pages/manager/service/DigitalResourceMgr';
@@ -20,10 +19,10 @@ import useModuleEvent from '@/hooks/useModuleEvent';
 import useGlobal from '@/hooks/useGlobal';
 import employeeStyles from '@/layout/sider/components/EmployeeList/index.module.less';
 import { SiderContentContext } from '@/layout/sider/siderContentContext';
-import styles from './index.module.less';
+import KnowledgeBaseListItem from './KnowledgeBaseListItem';
 
-const { Title, Paragraph } = Typography;
 const SHARE_GRANT_TYPE = 'FORCE_USE';
+const Draggable = withDrag(DragType.knowledgeBase);
 
 const getGrantItem = (item: any) => ({
   ...item,
@@ -64,7 +63,6 @@ interface KnowledgeBaseListProps {
   activeAgentResourceId?: string;
 }
 
-const Draggable = withDrag(DragType.knowledgeBase);
 // const PERSONAL_DEFAULT_OWNER_TYPE = 'personal_default';
 
 const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
@@ -159,6 +157,19 @@ const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
     EventEmitter.on('default-digital-employee-changed', handleDefaultDigitalEmployeeChanged);
     return () => {
       EventEmitter.off('default-digital-employee-changed', handleDefaultDigitalEmployeeChanged);
+    };
+  }, [EventEmitter, loadKnowledgeBases]);
+
+  useEffect(() => {
+    const handleSiderMenuRefresh = (payload?: { key?: string }) => {
+      if (payload?.key === 'knowledge') {
+        loadKnowledgeBases(true);
+      }
+    };
+
+    EventEmitter.on('sider-menu-tab-click-refresh', handleSiderMenuRefresh);
+    return () => {
+      EventEmitter.off('sider-menu-tab-click-refresh', handleSiderMenuRefresh);
     };
   }, [EventEmitter, loadKnowledgeBases]);
 
@@ -443,47 +454,13 @@ const KnowledgeBaseList = (props: KnowledgeBaseListProps) => {
 
           return (
             <Draggable key={item.resourceId} data={item}>
-              <List.Item
-                key={item.resourceId}
-                className={styles.knowledgeItem}
+              <KnowledgeBaseListItem
+                item={item}
                 actions={actions}
-                onClick={(event) => handleKnowledgeBaseItemClick(event, item)}
-                onDoubleClick={(event) => handleKnowledgeBaseItemDoubleClick(event, item)}
-              >
-                <List.Item.Meta
-                  title={
-                    <Title className={employeeStyles.name}>
-                      <span className={employeeStyles.nameRow} title={item.resourceName}>
-                        <span className={employeeStyles.nameText}>{item.resourceName}</span>
-                        {`${item?.isTop}` === '1' && isUser && (
-                          <AntdIcon type="icon-zhiding-fill" className={employeeStyles.pinBadge} />
-                        )}
-                      </span>
-                    </Title>
-                  }
-                  description={
-                    <Paragraph
-                      className={employeeStyles.description}
-                      ellipsis={{ tooltip: { title: item.resourceDesc, placement: 'right' } }}
-                    >
-                      {item.resourceDesc}
-                    </Paragraph>
-                  }
-                  avatar={
-                    item.resourceLogoUrl ? (
-                      <img
-                        className={styles.avatar}
-                        src={getRuntimeActualUrl(`/byaiService${item.resourceLogoUrl}`)}
-                        alt=""
-                      />
-                    ) : (
-                      <span className={styles.defaultAvatar}>
-                        <AntdIcon type="icon-chuangjianfangshi-wendangku" style={{ fontSize: 16 }} />
-                      </span>
-                    )
-                  }
-                />
-              </List.Item>
+                isUser={isUser}
+                onClick={handleKnowledgeBaseItemClick}
+                onDoubleClick={handleKnowledgeBaseItemDoubleClick}
+              />
             </Draggable>
           );
         }}

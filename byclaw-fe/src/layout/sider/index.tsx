@@ -24,14 +24,14 @@ import useNewChat from '../header/components/NewChat/useNewChat';
 import { getDisplayUserNameInChat } from '@/utils/chat';
 import useGlobal from '@/hooks/useGlobal';
 import { clearEasyConfirmInputDraft } from '@/components/ChatLayoutComp/components/EasyConfirm';
+import { EMPLOYEE_RESOURCE_TAB_KEYS } from './employeeResourceTabs';
 
 import type { IState as IEmployeesState } from '@/models/useEmployees';
 import { SiderContentContext, DEFAULT_SIDER_CONTENT_WIDTH } from './siderContentContext';
 
 export const DEF_SIDER = 'sessions';
 
-const CENTER_TAB_KEYS = new Set(['agent', 'knowledge', 'tool', 'view', 'object', 'skill', 'file']);
-const EMPLOYEE_RESOURCE_TAB_KEYS = new Set(['knowledge', 'tool', 'view', 'object', 'skill', 'file']);
+const CENTER_TAB_KEYS = new Set(['agent', 'knowledge', 'tool', 'view', 'object', 'ontology', 'skill', 'file', 'model']);
 
 const SIDER_ACTIVE_TAB_BY_PATH: Partial<Record<string, (typeof tabItems)[number]['key']>> = {
   '/dialogueRecord': 'sessions',
@@ -109,6 +109,7 @@ const Sidebar = () => {
       setActiveKey(tab.key);
       setManualSiderOpenKey(tab.key);
       setSiderCollapsed(false);
+      EventEmitter.emit('sider-menu-tab-click-refresh', { key: tab.key });
 
       if (!tab.navigatePath) {
         return;
@@ -130,7 +131,7 @@ const Sidebar = () => {
         navigate(tab.navigatePath);
       }
     },
-    [clearDetailPanel, navigate, pathname, setSiderCollapsed]
+    [EventEmitter, clearDetailPanel, navigate, pathname, setSiderCollapsed]
   );
 
   const showSearchAndQueryTab = React.useMemo(() => {
@@ -143,10 +144,10 @@ const Sidebar = () => {
   }, [agentList, employeesList, pathname]);
 
   const myTabItems = React.useMemo(() => {
+    const visibleKeySet = new Set(visibleKeys);
     return compact(
-      visibleKeys.map((key) => {
-        const tab = tabItems.find((item) => item.key === key);
-        if (!tab) {
+      tabItems.map((tab) => {
+        if (!visibleKeySet.has(tab.key)) {
           return null;
         }
         if (tab.key === 'sessions') {

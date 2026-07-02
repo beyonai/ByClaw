@@ -3,8 +3,10 @@ import path from "node:path";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/compat";
 import type { AgentListEntry } from "./types.js";
 import { resolveAgentWorkspaceDir } from "./workspace-seed.js";
+import { resolveStateDir } from "./workspace-paths.js";
 
 const SKILLS_DIR_NAME = "skills";
+const PLUGIN_SKILLS_DIR_NAME = "plugin-skills";
 const SKILL_DOC_FILE_NAME = "SKILL.md";
 
 function normalizeSkillName(raw: unknown): string {
@@ -91,8 +93,96 @@ async function isDirectoryEntry(parentDir: string, ent: Awaited<ReturnType<typeo
   }
 }
 
-export async function scanWorkspaceSkillNames(workspaceDir: string): Promise<string[]> {
+type ScannedSkill = {
+  dirName: string;
+  skillName: string;
+};
+
+async function readSkillNameFromSkillFile(skillFilePath: string, dirName: string): Promise<string | undefined> {
+  try {
+    const content = await fs.readFile(skillFilePath, "utf8");
+    return parseSkillFrontmatterName(content) ?? dirName;
+  } catch {
+    return undefined;
+  }
+}
+
+function skillDirNameFromPath(raw: unknown): string {
+  if (typeof raw !== "string") {
+    return "";
+  }
+  const normalized = raw.trim().replace(/\\/g, "/").replace(/\/+/g, "/").replace(/\/+$/g, "");
+  if (!normalized) {
+    return "";
+  }
+  const parts = normalized.split("/").filter(Boolean);
+  if (parts.length === 0) {
+    return "";
+  }
+  const last = parts[parts.length - 1] ?? "";
+  if (last.toLowerCase() === SKILL_DOC_FILE_NAME.toLowerCase()) {
+    return normalizeSkillName(parts[parts.length - 2]);
+  }
+  return normalizeSkillName(last);
+}
+
+function skillFilePathFromPath(raw: unknown): string {
+  if (typeof raw !== "string") {
+    return "";
+  }
+  const normalized = raw.trim().replace(/\\/g, "/").replace(/\/+/g, "/").replace(/\/+$/g, "");
+  if (
+    !normalized.includes(`/${SKILLS_DIR_NAME}/`) &&
+    !normalized.includes(`/${PLUGIN_SKILLS_DIR_NAME}/`)
+  ) {
+    return "";
+  }
+  const last = normalized.split("/").filter(Boolean).at(-1) ?? "";
+  if (last.toLowerCase() === SKILL_DOC_FILE_NAME.toLowerCase()) {
+    return normalized;
+  }
+  return `${normalized}/${SKILL_DOC_FILE_NAME}`;
+}
+
+async function readWorkspaceSkillNameByPath(workspaceDir: string, skillPath: unknown): Promise<string> {
+  const dirName = skillDirNameFromPath(skillPath);
+  if (!dirName) {
+    return "";
+  }
+  const directSkillFilePath = skillFilePathFromPath(skillPath);
+  if (directSkillFilePath) {
+    const directName = await readSkillNameFromSkillFile(directSkillFilePath, dirName);
+    if (directName) {
+      return directName;
+    }
+  }
   const skillsDir = path.join(workspaceDir, SKILLS_DIR_NAME);
+  try {
+    await fs.access(path.join(skillsDir, dirName, SKILL_DOC_FILE_NAME));
+  } catch {
+    return dirName;
+  }
+  return readSkillName(skillsDir, dirName);
+}
+
+async function scanWorkspaceSkillNamesByPaths(
+  workspaceDir: string,
+  skillPaths: unknown[] | undefined,
+): Promise<string[]> {
+  if (!Array.isArray(skillPaths) || skillPaths.length === 0) {
+    return [];
+  }
+  const names: string[] = [];
+  for (const skillPath of skillPaths) {
+    const name = await readWorkspaceSkillNameByPath(workspaceDir, skillPath);
+    if (name) {
+      names.push(name);
+    }
+  }
+  return mergeSkillNames(names);
+}
+
+async function scanSkillRoot(skillsDir: string): Promise<ScannedSkill[]> {
   let entries: Awaited<ReturnType<typeof fs.readdir>>;
   try {
     entries = await fs.readdir(skillsDir, { withFileTypes: true });
@@ -100,7 +190,7 @@ export async function scanWorkspaceSkillNames(workspaceDir: string): Promise<str
     return [];
   }
 
-  const names: string[] = [];
+  const skills: ScannedSkill[] = [];
   for (const ent of entries) {
     if (ent.name.startsWith(".")) {
       continue;
@@ -117,15 +207,44 @@ export async function scanWorkspaceSkillNames(workspaceDir: string): Promise<str
     } catch {
       continue;
     }
-    names.push(await readSkillName(skillsDir, skillName));
+    skills.push({ dirName: skillName, skillName: await readSkillName(skillsDir, skillName) });
   }
 
-  return mergeSkillNames(names.sort((a, b) => a.localeCompare(b)));
+  return skills.sort((a, b) => a.skillName.localeCompare(b.skillName));
+}
+
+function skillNamesFromScanned(skills: ScannedSkill[]): string[] {
+  return mergeSkillNames(skills.map((skill) => skill.skillName));
+}
+
+export async function scanWorkspaceSkillNames(workspaceDir: string): Promise<string[]> {
+  return skillNamesFromScanned(await scanSkillRoot(path.join(workspaceDir, SKILLS_DIR_NAME)));
+}
+
+function resolvePluginSkillsDir(): string {
+  return path.join(resolveStateDir(), PLUGIN_SKILLS_DIR_NAME);
+}
+
+export async function scanPluginSkillNames(): Promise<string[]> {
+  return skillNamesFromScanned(await scanSkillRoot(resolvePluginSkillsDir()));
+}
+
+function resolveSkillNamesFromPluginRoot(rawSkills: unknown[], pluginSkills: ScannedSkill[]): string[] {
+  if (pluginSkills.length === 0) {
+    return mergeSkillNames(rawSkills);
+  }
+  const lookup = new Map<string, string>();
+  for (const skill of pluginSkills) {
+    lookup.set(skill.dirName, skill.skillName);
+    lookup.set(skill.skillName, skill.skillName);
+  }
+  return mergeSkillNames(rawSkills.map((raw) => lookup.get(normalizeSkillName(raw)) ?? raw));
 }
 
 type AgentWithSkills = {
   agentId: string;
   listEntry: AgentListEntry;
+  extraSkillPaths?: string[];
 };
 
 export async function mergeWorkspaceSkillsIntoManagedAgents<T extends AgentWithSkills>(params: {
@@ -137,13 +256,15 @@ export async function mergeWorkspaceSkillsIntoManagedAgents<T extends AgentWithS
   const sharedSkills = params.includeMainShared
     ? await scanWorkspaceSkillNames(resolveAgentWorkspaceDir(params.api, params.mainParentAgentId))
     : [];
+  const pluginSkills = await scanSkillRoot(resolvePluginSkillsDir());
 
   const out: T[] = [];
   for (const agent of params.managed) {
-    const agentSkills = await scanWorkspaceSkillNames(
-      resolveAgentWorkspaceDir(params.api, agent.agentId),
-    );
-    const skills = mergeSkillNames(agent.listEntry.skills ?? [], agentSkills, sharedSkills);
+    const workspaceDir = resolveAgentWorkspaceDir(params.api, agent.agentId);
+    const baseSkills = resolveSkillNamesFromPluginRoot(agent.listEntry.skills ?? [], pluginSkills);
+    const extraSkills = await scanWorkspaceSkillNamesByPaths(workspaceDir, agent.extraSkillPaths);
+    const agentSkills = await scanWorkspaceSkillNames(workspaceDir);
+    const skills = mergeSkillNames(baseSkills, extraSkills, agentSkills, sharedSkills);
     out.push({
       ...agent,
       listEntry: {
@@ -167,6 +288,7 @@ export function watchWorkspaceSkillDirs(params: {
   if (params.includeMainShared) {
     dirs.add(path.join(resolveAgentWorkspaceDir(params.api, params.mainParentAgentId), SKILLS_DIR_NAME));
   }
+  dirs.add(resolvePluginSkillsDir());
   for (const agent of params.managed) {
     dirs.add(path.join(resolveAgentWorkspaceDir(params.api, agent.agentId), SKILLS_DIR_NAME));
   }

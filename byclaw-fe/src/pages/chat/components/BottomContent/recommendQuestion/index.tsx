@@ -240,7 +240,7 @@ export default function RecommendQuestion({ relatedQuestions }: { relatedQuestio
           <Row gutter={[14, 14]} className={styles.grid}>
             {list.map((item) => (
               <Col span={8} key={item.questionId}>
-                <div className={styles.questionItem} onClick={() => onClickQuestion(item)}>
+                <div className={classNames(styles.questionItem, 'pointer')} onClick={() => onClickQuestion(item)}>
                   {item.icon && (
                     <span className={styles.iconBox}>
                       {isIconFont(item.icon) ? <AntdIcon type={item.icon} /> : item.icon}
