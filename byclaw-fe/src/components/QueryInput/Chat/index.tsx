@@ -12,7 +12,6 @@ import QueryInputBase, { IProps as pIProps, IState as pIState } from '@/componen
 import { chatModeMap } from '@/constants/query';
 
 import UploadFile from '../components/UploadFile';
-import FileBrowserEntry from '../components/FileBrowserEntry';
 
 import type { UserInfo } from '@/models/common/user';
 import type { IFile } from '@/typescript/file';
@@ -307,7 +306,6 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
     return (
       <>
         <Space size="large" className={styles.bottomRight}>
-          <FileBrowserEntry />
           <MentionPopover
             type="@"
             chatMode={chatMode}
