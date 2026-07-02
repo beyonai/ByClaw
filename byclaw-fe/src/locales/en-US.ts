@@ -84,6 +84,8 @@ export default {
   'common.prev': 'Previous',
   'common.next': 'Next',
 
+  'search.referenceSuccess': 'Referenced successfully',
+
   'resource.belongField': 'Business Field',
   'resource.belongFieldPlaceholder': 'Please select a business field',
   'resource.knowledge': 'Knowledge',
@@ -130,6 +132,8 @@ export default {
   'resource.kgQa': 'Q&A',
   'resource.systemBuiltin': 'System Built-in',
   'resource.personalDefaultAssistant': 'Default',
+  'resource.defaultPersonalAssistant': 'Default Assistant',
+  'resource.defaultDigitalEmployee': 'Default',
   'resource.personalDefaultKnowledgeDoc': 'Default',
   'resource.personalDefaultKnowledgeDeleteNotAllowed': 'Default personal knowledge base cannot be deleted',
   'resource.personalAssistant': 'Assistant',
@@ -419,6 +423,8 @@ export default {
   'knowledgeDetail.directory': 'Directory',
   'knowledgeDetail.keywords': 'keywords',
   'knowledgeDetail.newFolder': 'New Folder',
+  'knowledgeDetail.newSubFolder': 'New Subfolder',
+  'knowledgeDetail.newSiblingFolder': 'New Sibling Folder',
   'knowledgeDetail.uploadFile': 'Upload File',
   'knowledgeDetail.sameNameFileOverwriteTip': 'Same name files will be overwritten',
   'knowledgeDetail.uploadSuccess': 'Upload successful',

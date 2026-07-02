@@ -39,6 +39,7 @@ This is the dispatcher. Skills are the implementation. **Read the skill file bef
 | User shares a link, article, tweet, or idea | `references/idea-ingest/SKILL.md` |
 | "watch this video", "process this YouTube link", "ingest this PDF", "save this podcast", "process this book", "summarize this book", "PDF book", "ingest it into my brain", "what's in this screenshot", "check out this repo" | `references/media-ingest/SKILL.md` |
 | Meeting transcript received | `references/meeting-ingestion/SKILL.md` |
+| "拆需求", "拆 bug", "从会议/PRD/PDF 提需求", "extract requirements and bugs", "req bug ingest", "PRD 提需求" | `references/req-bug-ingest/SKILL.md` |
 | Generic "ingest this" (auto-routes to above) | `references/ingest/SKILL.md` |
 
 ## Thinking skills (from GStack)

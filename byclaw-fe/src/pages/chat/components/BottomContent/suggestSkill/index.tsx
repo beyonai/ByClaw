@@ -120,6 +120,7 @@ export default function SuggestSkill({ agentId }: { agentId?: string }) {
   const [inited, setInited] = useState(false);
   const [selectedSkills, setSelectedSkills] = useState<number[]>([]);
   const [installingSkillId, setInstallingSkillId] = useState<number | null>(null);
+  const [failedSkillImageUrls, setFailedSkillImageUrls] = useState<Set<string>>(() => new Set());
   // 滚动容器 DOM 引用，用于监听滚动控制顶部渐变遮罩
   const scrollWrapRef = React.useRef<HTMLDivElement>(null);
   // 是否已向下滚动：滚动后顶部内容渐变淡出，滚到顶部时不遮挡首行
@@ -332,17 +333,29 @@ export default function SuggestSkill({ agentId }: { agentId?: string }) {
               const desc = getDesc(item);
 
               const displayImage = item.resourceLogoUrl || item.avatar;
+              const displayImageUrl = displayImage ? getFileUrl(displayImage) : '';
+              const imageLoadFailed = displayImageUrl ? failedSkillImageUrls.has(displayImageUrl) : false;
               const canClick = selectedSkills.includes(item.grantResourceId);
               const installing = installingSkillId === item.grantResourceId;
 
               const skillNode = (
                 <div className={classNames(styles.skillItem)} onClick={canClick ? () => onClickSkill(item) : undefined}>
                   <span className={styles.iconBox}>
-                    {displayImage ? (
+                    {displayImageUrl && !imageLoadFailed ? (
                       <img
                         className={styles.avatar}
-                        src={getFileUrl(displayImage)}
+                        src={displayImageUrl}
                         alt={`${item.resourceName || item.resourceCode}`}
+                        onError={() => {
+                          setFailedSkillImageUrls((prev) => {
+                            if (prev.has(displayImageUrl)) {
+                              return prev;
+                            }
+                            const next = new Set(prev);
+                            next.add(displayImageUrl);
+                            return next;
+                          });
+                        }}
                       />
                     ) : (
                       // <AntdIcon type="icon-chajiantubiao" className={styles.defaultHeaderIconIcon} />

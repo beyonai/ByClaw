@@ -182,6 +182,7 @@ function useChat(props: IProps) {
     textHandler,
     rewriteQuestionHandler,
     browserHandler,
+    answerCompletedHandler,
   } = useHandler({ addSession, setSessionId });
 
   const flowHandler = useMemo(
@@ -196,6 +197,7 @@ function useChat(props: IProps) {
           messageHandler,
           resComIdsHandler,
           browserHandler,
+          answerCompletedHandler,
         ].filter(isFunction)
       ),
     [
@@ -207,6 +209,7 @@ function useChat(props: IProps) {
       messageHandler,
       resComIdsHandler,
       browserHandler,
+      answerCompletedHandler,
     ]
   );
 

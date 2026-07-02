@@ -2,7 +2,7 @@ import React, { useCallback, useContext, useState, useEffect, useRef } from 'rea
 import { UploadOutlined, SearchOutlined, PlusOutlined } from '@ant-design/icons';
 import { useIntl, useSelector, useNavigate, useSearchParams } from '@umijs/max';
 import type { TabsProps } from 'antd';
-import { Button, Input, Space, Tooltip, message, Tabs, Segmented } from 'antd';
+import { Button, Input, Space, Tooltip, message, Tabs } from 'antd';
 import classnames from 'classnames';
 import AntdIcon from '@/components/AntdIcon';
 import useModuleEvent from '@/hooks/useModuleEvent';
@@ -165,7 +165,6 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
   const [brandVersion, setBrandVersion] = useState<'commercial' | 'openSource' | null>(null);
   const [bannerList, setBannerList] = useState<any[]>([]);
   const [bannerLoaded, setBannerLoaded] = useState(false);
-  const [skillCardViewMode, setSkillCardViewMode] = useState<'current' | 'new'>('current');
 
   const topLevelCatalogList = React.useMemo(() => getTopLevelCatalogs(catalogList), [catalogList]);
   const refreshList = useCallback(() => {
@@ -434,17 +433,6 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
 
   const tabBarExtraContent = (
     <Space>
-      {resourceType === 'SKILL' && (
-        <Segmented
-          size="small"
-          value={skillCardViewMode}
-          options={[
-            { label: intl.formatMessage({ id: 'resource.skillView.current' }), value: 'current' },
-            { label: intl.formatMessage({ id: 'resource.skillView.new' }), value: 'new' },
-          ]}
-          onChange={(value) => setSkillCardViewMode(value as 'current' | 'new')}
-        />
-      )}
       <ResourceFilter
         resourceType={resourceType}
         onOk={(param: any) => {
@@ -635,7 +623,7 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
           onApplyUse={handleApplyUse}
           onAuditUse={handleAuditUse}
           onRefresh={refreshList}
-          skillCardViewMode={skillCardViewMode}
+          skillCardViewMode="new"
         />
       </div>
       <ResourceImport

@@ -526,7 +526,8 @@ public class AuthController {
 
     private boolean isEnterpriseAllResourceBizType(String resourceBizType) {
         return isKnowledgeBizType(resourceBizType)
-            || StringUtils.equalsAny(resourceBizType, "AGENT", "MCP", "TOOLKIT", "OBJECT", "VIEW", "SKILL");
+            || StringUtils.equalsAny(resourceBizType, "AGENT", "MCP", "TOOLKIT", "OBJECT", "VIEW", "SKILL",
+                "ONTOLOGY_BASE", "SCENE");
     }
 
     @RequestMapping(value = "/listResource", method = RequestMethod.POST)

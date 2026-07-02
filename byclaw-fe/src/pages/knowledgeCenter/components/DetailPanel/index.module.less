@@ -7,8 +7,15 @@
 }
 
 .pagePhotoWrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
   margin-right: 16px;
   color: var(--beyond-color-primary);
+  background: var(--beyond-color-fill-quaternary, #f5f5f5);
+  border-radius: 8px;
 
   :global {
     .@{antPrefix}-upload {
@@ -16,4 +23,8 @@
       height: 64px !important;
     }
   }
+}
+
+.knowledgeLogoIcon {
+  font-size: 32px;
 }

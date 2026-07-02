@@ -41,7 +41,7 @@ beforeEach(() => {
   requestAnimationFrameMock.mockClear();
 });
 
-function renderApprovalForm() {
+function renderApprovalForm({ firstStepRequired = false } = {}) {
   const messageListItemContent: OperationFormConfirmation = {
     sourceAgentType: 'agent',
     metadata: '{}',
@@ -65,6 +65,7 @@ function renderApprovalForm() {
               fieldPath: 'customerName',
               fieldName: 'Customer Name',
               fieldType: 'string',
+              required: firstStepRequired,
             },
           ],
         ],
@@ -352,4 +353,18 @@ describe('ApprovalForm', () => {
       expect(screen.queryByText('Project Name')).not.toBeInTheDocument();
     });
   }, 15000);
+
+  it('skips the current step without validating required fields', async () => {
+    const { messageListItemContent } = renderApprovalForm({ firstStepRequired: true });
+
+    fireEvent.click(getButton('common.skip'));
+
+    expect(messageListItemContent.substance[0].confirmed).toBe(false);
+    expect(screen.queryByText(/is required/)).not.toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(screen.getByText('Project Name')).toBeInTheDocument();
+    });
+    expect(screen.queryByText('Customer Name')).not.toBeInTheDocument();
+  });
 });

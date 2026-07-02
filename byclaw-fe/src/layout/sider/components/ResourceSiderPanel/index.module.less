@@ -94,6 +94,53 @@
 
 .resourceItem {
   cursor: default;
+  :global {
+    .@{antPrefix}-list-item-meta {
+      display: flex;
+    }
+    .@{antPrefix}-list-item-meta-content {
+      flex: 1;
+      overflow: hidden;
+    }
+  }
+}
+
+.resourceName {
+  display: block;
+  margin: 0;
+  min-width: 0;
+  color: var(--beyond-color-text-primary, #14161a);
+  font-size: var(--beyond-font-size, 14px);
+  font-weight: 500;
+  line-height: 20px;
+}
+
+.resourceNameRow {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  gap: 4px;
+}
+
+.resourceNameText {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.resourceDescription {
+  display: block;
+  margin: 0;
+  overflow: hidden;
+  color: var(--beyond-color-text-tertiary, #707680);
+  font-size: var(--beyond-font-size-sm, 12px);
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .skillSourceTag {

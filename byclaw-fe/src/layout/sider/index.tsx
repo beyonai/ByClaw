@@ -24,6 +24,8 @@ import useNewChat from '../header/components/NewChat/useNewChat';
 import { getDisplayUserNameInChat } from '@/utils/chat';
 import useGlobal from '@/hooks/useGlobal';
 import { clearEasyConfirmInputDraft } from '@/components/ChatLayoutComp/components/EasyConfirm';
+import { EMPLOYEE_RESOURCE_TAB_KEYS } from './employeeResourceTabs';
+import { useActiveSiderAgent } from './components/ActiveSiderAgentBar';
 
 import type { IState as IEmployeesState } from '@/models/useEmployees';
 import { SiderContentContext, DEFAULT_SIDER_CONTENT_WIDTH } from './siderContentContext';
@@ -31,16 +33,6 @@ import { SiderContentContext, DEFAULT_SIDER_CONTENT_WIDTH } from './siderContent
 export const DEF_SIDER = 'sessions';
 
 const CENTER_TAB_KEYS = new Set(['agent', 'knowledge', 'tool', 'view', 'object', 'ontology', 'skill', 'file', 'model']);
-const EMPLOYEE_RESOURCE_TAB_KEYS = new Set([
-  'knowledge',
-  'tool',
-  'view',
-  'object',
-  'ontology',
-  'skill',
-  'file',
-  'model',
-]);
 
 const SIDER_ACTIVE_TAB_BY_PATH: Partial<Record<string, (typeof tabItems)[number]['key']>> = {
   '/dialogueRecord': 'sessions',
@@ -48,6 +40,7 @@ const SIDER_ACTIVE_TAB_BY_PATH: Partial<Record<string, (typeof tabItems)[number]
 };
 
 const CHAT_PANEL_PATHS = ['/chat', '/dialogueRecord', '/employees', '/searchAndQuery', '/functionCloud', '/sandbox'];
+const MAX_EMPLOYEE_RESOURCE_AGENT_NAME_LENGTH = 15;
 
 const isSameOrChildPath = (pathname: string, path: string) => pathname === path || pathname.startsWith(`${path}/`);
 
@@ -90,6 +83,7 @@ const Sidebar = () => {
   const { totalUnread } = unreadInfo;
   const { token } = theme.useToken();
   const intl = useIntl();
+  const activeSiderAgent = useActiveSiderAgent();
   const currentTab = React.useMemo(() => getCurrentTabByPathname(pathname), [pathname]);
   const [activeKey, setActiveKey] = React.useState<(typeof tabItems)[number]['key']>(
     () => currentTab?.key ?? DEF_SIDER
@@ -185,6 +179,25 @@ const Sidebar = () => {
     [myTabItems]
   );
   const isEmployeeResourceActive = EMPLOYEE_RESOURCE_TAB_KEYS.has(activeKey);
+  const employeeResourceGroupLabel = React.useMemo(() => {
+    const label = intl.formatMessage({
+      id: 'sider.employeeResourceGroup.label',
+    });
+    if (!activeSiderAgent.name) {
+      return label;
+    }
+    const displayName =
+      activeSiderAgent.name.length > MAX_EMPLOYEE_RESOURCE_AGENT_NAME_LENGTH
+        ? `${activeSiderAgent.name.slice(0, MAX_EMPLOYEE_RESOURCE_AGENT_NAME_LENGTH)}...`
+        : activeSiderAgent.name;
+    return `${displayName} · ${label}`;
+  }, [activeSiderAgent.name, intl]);
+  const employeeResourceGroupTitle = React.useMemo(() => {
+    const label = intl.formatMessage({
+      id: 'sider.employeeResourceGroup.label',
+    });
+    return activeSiderAgent.name ? `${activeSiderAgent.name} · ${label}` : label;
+  }, [activeSiderAgent.name, intl]);
 
   const { userDropdownItems, onUserDropdownClick, userDropdownRender } = useUserDropdown(userInfo);
 
@@ -276,7 +289,7 @@ const Sidebar = () => {
     <>
       <div className={classnames(styles.siderBar, 'hideThumb')}>
         <div className={styles.logo}>
-          <img alt="BYAI" src={getFaviconIcon} />
+          <img key="BYAI" alt="BYAI" src={getFaviconIcon} />
         </div>
         <SiderSearch />
         <Tooltip placement="right" title={intl.formatMessage({ id: 'sider.newChat' })}>
@@ -299,7 +312,6 @@ const Sidebar = () => {
               placement="right"
               title={intl.formatMessage({
                 id: 'sider.employeeResourceGroup.tooltip',
-                defaultMessage: '知识、工具、视图、对象、技能、文件会跟随当前数字员工切换',
               })}
             >
               <div
@@ -308,11 +320,8 @@ const Sidebar = () => {
                   isEmployeeResourceActive && styles.employeeResourceGroupActive
                 )}
               >
-                <span className={styles.employeeResourceGroupLabel}>
-                  {intl.formatMessage({
-                    id: 'sider.employeeResourceGroup.label',
-                    defaultMessage: '联动资源',
-                  })}
+                <span className={styles.employeeResourceGroupLabel} title={employeeResourceGroupTitle}>
+                  {employeeResourceGroupLabel}
                 </span>
                 <div className={styles.employeeResourceGroupItems}>{employeeResourceTabItems.map(renderTabItem)}</div>
               </div>

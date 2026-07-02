@@ -83,6 +83,8 @@ export default {
   'common.prev': '上一步',
   'common.next': '下一步',
 
+  'search.referenceSuccess': '引用成功',
+
   'resource.belongField': '所属领域',
   'resource.belongFieldPlaceholder': '请选择',
   'resource.knowledge': '知识',
@@ -127,6 +129,8 @@ export default {
   'resource.kgQa': '问答知识库',
   'resource.systemBuiltin': '系统内置',
   'resource.personalDefaultAssistant': '默认个人助理',
+  'resource.defaultPersonalAssistant': '默认个人助理',
+  'resource.defaultDigitalEmployee': '默认数字员工',
   'resource.personalDefaultKnowledgeDoc': '默认知识库',
   'resource.personalDefaultKnowledgeDeleteNotAllowed': '默认个人知识库不允许删除',
   'resource.personalAssistant': '个人助理',
@@ -429,6 +433,8 @@ export default {
   'knowledgeDetail.directory': '目录管理',
   'knowledgeDetail.keywords': '关键字',
   'knowledgeDetail.newFolder': '新建文件夹',
+  'knowledgeDetail.newSubFolder': '新增子级目录',
+  'knowledgeDetail.newSiblingFolder': '新增同级目录',
   'knowledgeDetail.uploadFile': '上传文件',
   'knowledgeDetail.sameNameFileOverwriteTip': '相同文件名将覆盖更新',
   'knowledgeDetail.uploadSuccess': '上传成功',

@@ -166,6 +166,8 @@ public class SsResExtDocService {
             "import_item", "一次性完成原文件写入、markdown 副本写入与 chunk 索引写入。"));
         resourceService.add(buildKgDocService(qADomainName, "删除知识库文档", "POST", "/api/v1/knowledge-items/delete",
             "delete_item", "逻辑删除知识库中的单个文档。"));
+        resourceService.add(buildKgDocService(qADomainName, "读取文件内容", "POST", "/api/v1/readFile",
+            "readFile", "根据文件路径读取指定知识库下的 Markdown 内容。"));
         resourceService.add(buildKgDocService(qADomainName, "检索文档 chunk", "POST", "/api/v1/knowledge-items/search",
             "search_chunk", "用于执行 chunk 级混合检索。"));
         resourceService.add(

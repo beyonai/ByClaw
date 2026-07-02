@@ -13,6 +13,8 @@ import com.iwhalecloud.byai.common.feign.response.pythonbuild.ProcessStatus;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetBuild;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetDto;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetIdDto;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeReadFileRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeSearchRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeUploadConflictCheckRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeUploadConflictCheckResponse;
 import com.iwhalecloud.byai.manager.dto.resource.RemoveFileDto;
@@ -27,6 +29,8 @@ import com.iwhalecloud.byai.state.domain.resource.dto.ObjectZipImportResult;
 import com.iwhalecloud.byai.state.domain.resource.vo.DatasetDetailVo;
 import com.iwhalecloud.byai.state.domain.resource.vo.DatasetVo;
 import com.iwhalecloud.byai.state.domain.resource.vo.KnowledgeCapabilityVo;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbFileReadResult;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeSearchResult;
 import com.iwhalecloud.byai.common.feign.request.knowledge.Folder;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
@@ -288,6 +292,30 @@ public class DatasetController {
     public void download(@RequestParam("resourceId") Long resourceId,
         @RequestParam("directoryPath") String directoryPath, HttpServletResponse response) {
         datasetApplicationService.download(resourceId, directoryPath, response);
+    }
+
+    /**
+     * 读取知识库文件 Markdown 内容，供技能侧按资源 ID 调用。
+     *
+     * @param request 文件读取参数
+     * @return 文件内容
+     */
+    @PostMapping(value = "/readFile")
+    public ResponseUtil<KbFileReadResult> readFile(@RequestBody KnowledgeReadFileRequest request) {
+        return ResponseUtil.successResponse(I18nUtil.get("dataset.dir.file.query.success"),
+            datasetApplicationService.readFile(request));
+    }
+
+    /**
+     * 知识库 chunk 检索，供技能侧按资源 ID 列表调用。
+     *
+     * @param request 检索参数
+     * @return chunk 检索结果
+     */
+    @PostMapping(value = "/knowledgeItems/search")
+    public ResponseUtil<KnowledgeSearchResult> searchKnowledgeItems(@RequestBody KnowledgeSearchRequest request) {
+        return ResponseUtil.successResponse(I18nUtil.get("dataset.dir.file.query.success"),
+            datasetApplicationService.searchKnowledgeItems(request));
     }
 
     /**

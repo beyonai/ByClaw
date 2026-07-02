@@ -55,7 +55,7 @@ Every fact written to a brain page must carry an inline `[Source: ...]` citation
 
 ## Phases
 
-> **Router note:** This skill is a router. For specialized ingestion, see: idea-ingest, media-ingest, meeting-ingestion.
+> **Router note:** This skill is a router. For specialized ingestion, see: idea-ingest, media-ingest, meeting-ingestion, req-bug-ingest.
 
 1. **Parse the source.** Extract people, companies, dates, and events from the input.
 2. **For each entity mentioned:**
