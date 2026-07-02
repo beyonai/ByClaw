@@ -17,9 +17,11 @@ import {
   queryDigEmployeeRelResourceAuth,
   queryResourceMembers,
   qryByClawFileByUserCode,
+  queryWorkspaceSkillList,
   readFile,
   downloadSkillZip,
 } from '@/pages/manager/service/resources';
+import { mapWorkspaceSkillRows } from '@/components/Resources/workspaceSkill/utils';
 import useGlobal from '@/hooks/useGlobal';
 
 const Draggable = withDrag(DragType.tool);
@@ -208,6 +210,28 @@ const ResourceList = (props: Props) => {
             Array.isArray(currentResourceBizTypeList) && currentResourceBizTypeList.length
               ? allRows.filter((item: any) => currentResourceBizTypeList.includes(item.resourceBizType))
               : allRows;
+          // 与左侧“技能中心”同口径：技能 tab 首屏在“已绑定技能”之外，合并“用户开发（工作空间未绑定）”技能。
+          if (myResourceType === 'SKILL' && reset) {
+            try {
+              const workspaceSkillResponse: any = await queryWorkspaceSkillList({
+                resourceId: normalizedAgentId,
+                userCode: userInfo?.userCode,
+                keyword: searchValue.current.trim(),
+              });
+              const workspaceRaw = Array.isArray(workspaceSkillResponse)
+                ? workspaceSkillResponse
+                : Array.isArray(workspaceSkillResponse?.data)
+                  ? workspaceSkillResponse.data
+                  : Array.isArray(workspaceSkillResponse?.rows)
+                    ? workspaceSkillResponse.rows
+                    : Array.isArray(workspaceSkillResponse?.list)
+                      ? workspaceSkillResponse.list
+                      : [];
+              rows = [...rows, ...mapWorkspaceSkillRows(workspaceRaw)];
+            } catch (error) {
+              console.warn('query workspace skills failed', error);
+            }
+          }
         } else {
           const response = await listResourceUseAuth({
             pageSize,
