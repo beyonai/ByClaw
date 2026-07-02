@@ -121,6 +121,7 @@
   .nameRow {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     width: 100%;
     min-width: 0; // 允许 flex 子元素收缩
     overflow: hidden;
@@ -128,18 +129,51 @@
   }
 
   .tag {
+    line-height: 100%;
     padding: 2px 4px;
     border-radius: 4px;
-    background-color: rgba(22, 93, 255, 0.1);
     flex-shrink: 0; // 标签不收缩
 
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+
+    background-color: rgba(22, 93, 255, 0.1);
+
     .tagText {
-      font-size: 12px;
       background: linear-gradient(90deg, #088cff 0%, #00cdd5 100%);
+      font-size: 12px;
       -webkit-background-clip: text;
       background-clip: text;
       -webkit-text-fill-color: transparent;
       color: transparent;
+    }
+  }
+
+  .defaultTag {
+    .tag;
+
+    padding: 3px 5px;
+    background: linear-gradient(90deg, #315dff 0%, #bf5cff 100%);
+
+    .tagText {
+      background: none;
+      -webkit-text-fill-color: #fff;
+      color: #fff;
+    }
+  }
+
+  .personalTag {
+    .tag;
+
+    // padding: 3px 5px;
+    // background: linear-gradient(90deg, #315dff 0%, #bf5cff 100%);
+    background: var(--beyond-color-primary-hover);
+
+    .tagText {
+      background: none;
+      -webkit-text-fill-color: #fff;
+      color: #fff;
     }
   }
 
