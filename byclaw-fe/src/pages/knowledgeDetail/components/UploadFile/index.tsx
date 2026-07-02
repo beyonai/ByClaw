@@ -67,8 +67,8 @@ const UploadFile = (props: IProps) => {
     });
     formData.append('resourceId', baseInfo?.resourceId);
     formData.append('directoryPath', uploadDirectory);
-    // 当前交互需要将开关值取反后传给后端：开关打开时传 false，关闭时传 true。
-    formData.append('processFrontMatter', String(!processFrontMatter));
+    // 开关打开时解析 YAML Front Matter，关闭时不解析。
+    formData.append('processFrontMatter', String(processFrontMatter));
     // QA import 暂不支持原子覆盖，后端收到 true 后会先删同路径同名旧文件再导入新文件。
     formData.append('overwrite', String(hasUploadConflicts));
 
