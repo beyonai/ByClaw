@@ -144,7 +144,7 @@ export default function useSaveToKnowledge({ resourceId, clearClickTimer }: UseS
       formData.append('resourceId', String(kb.resourceId));
       formData.append('directoryPath', directoryPath);
       formData.append('files', file);
-      formData.append('processFrontMatter', String(!options.processFrontMatter));
+      formData.append('processFrontMatter', String(Boolean(options.processFrontMatter)));
       formData.append('overwrite', String(Boolean(options.overwrite)));
       await uploadKnowledgeFiles(formData);
     },

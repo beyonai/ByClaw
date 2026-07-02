@@ -573,7 +573,7 @@ const KnowledgeBaseDetail = (props: KnowledgeBaseDetailProps) => {
       });
       formData.append('resourceId', String(dataset.resourceId));
       formData.append('directoryPath', pendingUploadPath);
-      formData.append('processFrontMatter', String(!processFrontMatter));
+      formData.append('processFrontMatter', String(processFrontMatter));
       formData.append('overwrite', String(pendingUploadConflicts.length > 0));
 
       setUploadLoading(true);
