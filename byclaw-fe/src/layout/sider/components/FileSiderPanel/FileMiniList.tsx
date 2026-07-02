@@ -687,7 +687,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       });
       formData.append('resourceId', String(target.knowledgeBase.resourceId));
       formData.append('directoryPath', target.directoryPath);
-      formData.append('processFrontMatter', String(!processFrontMatter));
+      formData.append('processFrontMatter', String(processFrontMatter));
       formData.append('overwrite', String(Boolean(options.overwrite)));
 
       await uploadKnowledgeFiles(formData);
