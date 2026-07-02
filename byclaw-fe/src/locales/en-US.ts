@@ -132,6 +132,8 @@ export default {
   'resource.kgQa': 'Q&A',
   'resource.systemBuiltin': 'System Built-in',
   'resource.personalDefaultAssistant': 'Default',
+  'resource.defaultPersonalAssistant': 'Default Assistant',
+  'resource.defaultDigitalEmployee': 'Default',
   'resource.personalDefaultKnowledgeDoc': 'Default',
   'resource.personalDefaultKnowledgeDeleteNotAllowed': 'Default personal knowledge base cannot be deleted',
   'resource.personalAssistant': 'Assistant',

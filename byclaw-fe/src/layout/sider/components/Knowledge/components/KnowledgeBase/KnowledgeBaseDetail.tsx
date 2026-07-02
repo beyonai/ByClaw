@@ -6,7 +6,7 @@ import { AntdTreeNodeAttribute, EventDataNode } from 'antd/es/tree';
 import AntdIcon from '@/components/AntdIcon';
 import CopyToFileBrowserModal from '@/components/CopyToFileBrowserModal';
 import UploadConfirmModal, { type UploadConfirmFile } from '@/components/UploadConfirmModal';
-import { useIntl, useSelector } from '@umijs/max';
+import { useIntl } from '@umijs/max';
 import useVirtualHeight from '@/hooks/useVirtualHeight';
 import useGlobal from '@/hooks/useGlobal';
 import { downloadResourceFile } from '@/service/file';
@@ -116,58 +116,6 @@ function getMessagePayloadSessionId(payload: any) {
       payload?.data?.sessionId ||
       payload?.data?.currentSessionId
   );
-}
-
-function getFileIdentity(file: any) {
-  return (
-    file?.fileCode || file?.objectKey || file?.path || file?.url || file?.downloadUrl || file?.name || file?.fileName
-  );
-}
-
-function getMessageFilesSignature(message: any) {
-  return [...(message?.fileList || []), ...(message?.imageList || []), ...(message?.files || [])]
-    .map(getFileIdentity)
-    .filter(Boolean)
-    .join(',');
-}
-
-function getMessageContentFileSignature(content: any) {
-  const substance = content?.substance || {};
-  return [
-    ...(content?.fileList || []),
-    ...(content?.imageList || []),
-    ...(content?.files || []),
-    ...(substance?.fileList || []),
-    ...(substance?.imageList || []),
-    ...(substance?.files || []),
-  ]
-    .map(getFileIdentity)
-    .filter(Boolean)
-    .join(',');
-}
-
-function getMessageFileSignature(messageList: any[]) {
-  return (messageList || [])
-    .map((message) => {
-      const itemSignature = [...(message?.thinkList || []), ...(message?.messageList || [])]
-        .map((item: any) =>
-          [
-            item?.contentType || '',
-            item?.status || '',
-            item?.content?.orderId || '',
-            getMessageContentFileSignature(item?.content),
-          ].join(':')
-        )
-        .join(';');
-      return [
-        message?.messageId || message?.msgId || '',
-        message?.messageState ?? '',
-        message?.status || '',
-        getMessageFilesSignature(message),
-        itemSignature,
-      ].join(':');
-    })
-    .join('|');
 }
 
 function getKnowledgeItemName(item: Pick<IKnowledgeDetailTreeItem, 'title' | 'collectionName'>) {
@@ -396,16 +344,9 @@ const KnowledgeBaseDetail = (props: KnowledgeBaseDetailProps) => {
   const treeWrap = useRef<HTMLDivElement>(null);
   const treeClickTimerRef = useRef<number | null>(null);
   const expandedDirKeysRef = useRef<Set<string>>(new Set());
-  const messageFileSignatureRef = useRef('');
-  const messageFileSignatureSessionIdRef = useRef('');
   const virtualHeight = useVirtualHeight(treeWrap);
   const { EventEmitter, sessionId } = useGlobal();
   const activeSessionId = useMemo(() => getNormalizedSessionId(sessionId), [sessionId]);
-  const currentSessionMessageFileSignature = useSelector((state: any) => {
-    if (!activeSessionId) return '';
-    const messageInfo = state?.messageStore?.sessionListMap?.get?.(`${activeSessionId}`);
-    return getMessageFileSignature(messageInfo?.list || []);
-  });
 
   const intl = useIntl();
   const { modal, message } = App.useApp();
@@ -611,24 +552,6 @@ const KnowledgeBaseDetail = (props: KnowledgeBaseDetailProps) => {
   useEffect(() => {
     void refreshKnowledgeDetail();
   }, [refreshKnowledgeDetail]);
-
-  useEffect(() => {
-    if (!activeSessionId) {
-      messageFileSignatureRef.current = '';
-      messageFileSignatureSessionIdRef.current = '';
-      return;
-    }
-
-    if (messageFileSignatureSessionIdRef.current !== activeSessionId) {
-      messageFileSignatureRef.current = currentSessionMessageFileSignature;
-      messageFileSignatureSessionIdRef.current = activeSessionId;
-      return;
-    }
-
-    if (messageFileSignatureRef.current === currentSessionMessageFileSignature) return;
-    messageFileSignatureRef.current = currentSessionMessageFileSignature;
-    void refreshKnowledgeDetail();
-  }, [activeSessionId, currentSessionMessageFileSignature, refreshKnowledgeDetail]);
 
   useEffect(() => {
     let refreshTimer: number | null = null;
