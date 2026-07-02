@@ -358,6 +358,42 @@ describe('Header Search', () => {
     expect(screen.getByTestId('knowledge-base-detail')).toBeInTheDocument();
   });
 
+  it('resets the knowledge tab to the root list when searching after opening detail', async () => {
+    mockVisibleMenuKeys = ['knowledge'];
+    mockActiveSiderAgent = { resourceId: 'agent-1', name: 'Agent One' };
+    mockQueryDigEmployeeRelResourceAuth.mockResolvedValue({
+      rows: [
+        {
+          resourceId: 'knowledge-resource-1',
+          resourceName: 'Knowledge Result',
+          resourceDesc: 'Knowledge Desc',
+          resourceBizType: 'KG_DOC',
+        },
+      ],
+    });
+
+    render(<Search showSearch displayInModal setShowSearch={jest.fn()} />);
+
+    await flushSearch();
+
+    fireEvent.click(screen.getAllByText('sider.knowledge')[0]);
+
+    const knowledgeBaseListItem = await screen.findByTestId('knowledge-base-list-item');
+    fireEvent.click(knowledgeBaseListItem);
+    await act(async () => {
+      jest.advanceTimersByTime(220);
+      await Promise.resolve();
+    });
+
+    expect(screen.getByTestId('knowledge-base-detail')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText('layouHeader.search'), { target: { value: 'new keyword' } });
+    await flushSearch();
+
+    expect(screen.queryByTestId('knowledge-base-detail')).not.toBeInTheDocument();
+    expect(await screen.findByTestId('knowledge-base-list-item')).toBeInTheDocument();
+  });
+
   it('shows a success message after double-clicking a knowledge item to emit insert event', async () => {
     mockVisibleMenuKeys = ['knowledge'];
     mockActiveSiderAgent = { resourceId: 'agent-1', name: 'Agent One' };

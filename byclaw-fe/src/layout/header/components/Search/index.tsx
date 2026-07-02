@@ -110,6 +110,7 @@ const HeaderSearchPage = (props: HeaderSearchPageProps) => {
       resetEmployeeResourceDrill();
       return;
     }
+    setCurrentKnowledgeBase(null);
     resetEmployeeResourceDrill();
     myGetSearchList(keyword);
     myGetEmployeeResourceList(keyword);
