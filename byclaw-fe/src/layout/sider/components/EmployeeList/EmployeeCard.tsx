@@ -52,7 +52,7 @@ const EmployeeCard: React.FC<EmployeeCardProps> = ({
 
   const isInput = isInputMode(chatMode);
   const shouldShowTag = employee?.tagName || employee?.isDefault;
-  const defaultTagText = intl.formatMessage({id: 'resource.defaultDigitalEmployee'});
+  const defaultTagText = intl.formatMessage({ id: 'resource.defaultDigitalEmployee' });
 
   const menuItems = (item: IAgentCache) => {
     const items = [];
@@ -186,6 +186,31 @@ const EmployeeCard: React.FC<EmployeeCardProps> = ({
     [agentId]
   );
 
+  const TagRender = useCallback((item: IAgentCache) => {
+    console.log(item);
+    if (item?.isDefault) {
+      return (
+        <span className={classNames(styles.defaultTag)}>
+          <span className={styles.tagText}>{defaultTagText}</span>
+        </span>
+      );
+    }
+
+    if (item?.ownerType === 'personal' || item?.ownerType === 'personal_default') {
+      return (
+        <span className={classNames(styles.personalTag)}>
+          <span className={styles.tagText}>{item?.tagName}</span>
+        </span>
+      );
+    }
+
+    return (
+      <span className={styles.tag}>
+        <span className={styles.tagText}>{item?.tagName}</span>
+      </span>
+    );
+  }, []);
+
   return (
     <List.Item
       {...rest}
@@ -275,27 +300,19 @@ const EmployeeCard: React.FC<EmployeeCardProps> = ({
                   {employee?.resourceName || employee?.name || employee?.id || ''}
                 </span>
                 {`${employee?.isTop}` === '1' && <AntdIcon type="icon-zhiding-fill" className={styles.pinBadge} />}
-                {shouldShowTag && (
-                  <span className={classNames(styles.tag, { [styles.defaultTag]: employee?.isDefault })}>
-                    <span className={styles.tagText}>
-                      {employee?.isDefault ? (
-                        <span className={styles.defaultTagText}>{defaultTagText}</span>
-                      ) : (
-                        employee?.tagName 
-                      )}
-                    </span>
-                  </span>
-                )}
               </span>
             </Title>
           }
           description={
-            <Paragraph
-              className={styles.description}
-              ellipsis={{ tooltip: { title: employee?.resourceDesc, placement: 'right' } }}
-            >
-              {employee?.resourceDesc}
-            </Paragraph>
+            <div className="ub ub-ac ub-pj gap4">
+              <Paragraph
+                className={classNames(styles.description, 'ub-f1')}
+                ellipsis={{ tooltip: { title: employee?.resourceDesc, placement: 'right' } }}
+              >
+                {employee?.resourceDesc}
+              </Paragraph>
+              {shouldShowTag && TagRender(employee)}
+            </div>
           }
         />
       )}
