@@ -93,6 +93,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
   const fetchListRequestSeqRef = useRef(0);
   const searchRequestSeqRef = useRef(0);
   const isSearchingRef = useRef(false);
+  const categorySwitchRequestRef = useRef<{ key: FileCategoryKey; path: string } | null>(null);
   const [currentPath, setCurrentPath] = useState('');
   const [activeCategoryKey, setActiveCategoryKey] = useState<FileCategoryKey | undefined>('root');
   const [items, setItems] = useState<FileBrowserItem[]>([]);
@@ -363,6 +364,15 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
 
   useEffect(() => {
     if (resourceId && pathInitialized && activeCategoryKey && currentPath) {
+      const pendingSwitch = categorySwitchRequestRef.current;
+      if (pendingSwitch) {
+        const normalizedCurrentPath = ensureDirectoryPath(normalizeFileBrowserPath(currentPath));
+        if (activeCategoryKey !== pendingSwitch.key || normalizedCurrentPath !== pendingSwitch.path) {
+          return;
+        }
+        categorySwitchRequestRef.current = null;
+        return;
+      }
       void fetchList(currentPath).then(() => {
         if (activeCategoryKey === 'session' && currentPath === SESSION_FILE_PATH && activeSessionId) {
           void expandCurrentSessionDirectory(activeSessionId);
@@ -382,6 +392,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
   useEffect(() => {
     if (!activeCategory || !pathInitialized) return;
     const nextPath = getCategoryActivePath(activeCategory, activeSessionId);
+    if (ensureDirectoryPath(normalizeFileBrowserPath(currentPathRef.current)) === nextPath) return;
     currentPathRef.current = nextPath;
     setCurrentPath(nextPath);
   }, [activeCategory, activeSessionId, pathInitialized]);
@@ -390,6 +401,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
     async (key: string | string[]) => {
       const nextKey = Array.isArray(key) ? key[0] : key;
       if (!nextKey) {
+        categorySwitchRequestRef.current = null;
         activeCategoryKeyRef.current = undefined;
         currentPathRef.current = '';
         setActiveCategoryKey(undefined);
@@ -405,6 +417,10 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       const nextCategory = fileCategories.find((item) => item.key === nextKey);
       if (!nextCategory) return;
       const nextCategoryPath = getCategoryActivePath(nextCategory, activeSessionId);
+      categorySwitchRequestRef.current = {
+        key: nextCategory.key,
+        path: ensureDirectoryPath(normalizeFileBrowserPath(nextCategoryPath)),
+      };
 
       // Clear cache so switching tabs always reloads the data.
       const cached = categoryCacheRef.current[nextCategory.key];

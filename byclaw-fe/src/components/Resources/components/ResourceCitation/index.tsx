@@ -5,6 +5,9 @@ import { debounce, trim } from 'lodash';
 import classnames from 'classnames';
 import AntdIcon from '@/components/AntdIcon';
 import withDrag, { DragType } from '@/components/QueryInput/withDrag';
+import { ResourceTypeMap } from '@/constants/resource';
+import { getResourceImageUrl } from '@/layout/sider/components/ResourceSiderPanel/ResourceSiderListItem';
+import { getFileUrl } from '@/utils/file';
 import styles from './index.module.less';
 import employeeStyles from '@/layout/sider/components/EmployeeList/index.module.less';
 // import Empty from '@/components/Empty';
@@ -387,6 +390,32 @@ const ResourceList = (props: Props) => {
       default:
         return 'icon-chuangjianfangshi-wendangku';
     }
+  };
+
+  const renderCompactAvatar = (item: IResourceItem) => {
+    const resourceImage = getResourceImageUrl(item);
+
+    if (resourceType === 'SKILL' && resourceImage) {
+      return (
+        <img
+          key={getFileUrl(resourceImage)}
+          className={styles.compactAvatarImage}
+          src={getFileUrl(resourceImage)}
+          alt=""
+          fetchPriority="low"
+        />
+      );
+    }
+
+    if (resourceType === 'SKILL' && item.resourceBizType === ResourceTypeMap.SKILL) {
+      return (
+        <span className={styles.skillDefaultAvatar}>
+          <span className={styles.skillDefaultAvatarOrb} />
+        </span>
+      );
+    }
+
+    return <AntdIcon type={getResourceIcon(item.resourceName)} className={styles.defaultLogoIcon} />;
   };
 
   // 处理技能下载（带防抖）
@@ -847,7 +876,7 @@ const ResourceList = (props: Props) => {
                   <List.Item.Meta
                     avatar={
                       <span className={styles.compactAvatar}>
-                        <AntdIcon type={getResourceIcon(item.resourceName)} className={styles.defaultLogoIcon} />
+                        {renderCompactAvatar(item)}
                       </span>
                     }
                     title={

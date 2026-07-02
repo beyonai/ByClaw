@@ -144,6 +144,22 @@
     }
   }
 
+  .defaultTag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 6px;
+    border-radius: 4px;
+    background: linear-gradient(90deg, #315dff 0%, #bf5cff 100%);
+
+    .tagText,
+    .defaultTagText {
+      background: none;
+      -webkit-text-fill-color: #fff;
+      color: #fff;
+    }
+  }
+
   .nameText {
     flex: 0 1 auto; // 自适应宽度，可以收缩但不强制占满
     min-width: 0; // 允许收缩

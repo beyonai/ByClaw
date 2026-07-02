@@ -129,6 +129,8 @@ export default {
   'resource.kgQa': '问答知识库',
   'resource.systemBuiltin': '系统内置',
   'resource.personalDefaultAssistant': '默认个人助理',
+  'resource.defaultPersonalAssistant': '默认个人助理',
+  'resource.defaultDigitalEmployee': '默认数字员工',
   'resource.personalDefaultKnowledgeDoc': '默认知识库',
   'resource.personalDefaultKnowledgeDeleteNotAllowed': '默认个人知识库不允许删除',
   'resource.personalAssistant': '个人助理',
