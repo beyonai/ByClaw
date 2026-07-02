@@ -1548,6 +1548,15 @@ class DataCloudWorker(GatewayWorker):
             else "None (dynamic agents will skip OWL inject)",
         )
 
+        # 启动术语同步后台 Worker（db 连接参数从环境变量自动读取）
+        try:
+            from datacloud_knowledge.sync import term_sync_worker  # type: ignore[import-untyped]
+
+            asyncio.create_task(term_sync_worker(), name="term-sync-worker")
+            logger.info("DataCloudWorker: term_sync_worker 已启动")
+        except ImportError:
+            logger.debug("datacloud_knowledge 不可用，跳过 term_sync_worker")
+
     async def _resolve_agent_configs_snapshot(
         self,
         execution: Any,
