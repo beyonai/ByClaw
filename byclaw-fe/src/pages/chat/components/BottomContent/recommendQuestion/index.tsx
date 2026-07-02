@@ -178,26 +178,8 @@ export default function RecommendQuestion({ relatedQuestions }: { relatedQuestio
 
   const onClickQuestion = useCallback(
     (item: IRecommendQuestion) => {
-      EventEmitter.emit('queryInput-set-schema', {
+      EventEmitter.emit('queryInput-set-schema-imme', {
         queryQuestion: item.question,
-        payload: {
-          files: [],
-          extParams: {
-            files: [],
-          },
-          agentType: '',
-          dataCloud: {},
-          functionCloud: {},
-          memory: {},
-        },
-        msgOpt: {
-          queryMsg: {
-            imageList: [],
-            fileList: [],
-          },
-        },
-        agentId: '',
-        agentType: '',
         inputSchema: {
           text: item.question,
         },
@@ -258,7 +240,7 @@ export default function RecommendQuestion({ relatedQuestions }: { relatedQuestio
           <Row gutter={[14, 14]} className={styles.grid}>
             {list.map((item) => (
               <Col span={8} key={item.questionId}>
-                <div className={styles.questionItem} onClick={() => onClickQuestion(item)}>
+                <div className={classNames(styles.questionItem, 'pointer')} onClick={() => onClickQuestion(item)}>
                   {item.icon && (
                     <span className={styles.iconBox}>
                       {isIconFont(item.icon) ? <AntdIcon type={item.icon} /> : item.icon}

@@ -28,7 +28,9 @@ import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -101,6 +103,10 @@ class ByClawSkillResourceApplicationServiceTest {
         when(ssResExtSkillService.findById(7001L)).thenReturn(null);
         when(ssResourceRelDetailService.find(9001L, 7001L)).thenReturn(List.of());
         when(sequenceService.nextVal()).thenReturn(8001L);
+        SsResource digitalEmployee = new SsResource();
+        digitalEmployee.setResourceId(9001L);
+        when(ssResourceService.findById(9001L)).thenReturn(digitalEmployee);
+        when(authApplicationService.hasResourceManagePermission(digitalEmployee)).thenReturn(true);
 
         service.registerChatUploadedSkills("user001", 9001L, List.of(uploadFile), List.of(uploadedSkill));
 
@@ -136,6 +142,27 @@ class ByClawSkillResourceApplicationServiceTest {
             eq(ResourceArtifactTypeEnum.STANDARD_JSON.name()), eq("minio"), eq("skill/SKILL_7001.json"),
             eq("chat-upload-skill-json"));
         verify(digitalEmployeeApplicationService).synOpenClawWorkSpace(9001L);
+    }
+
+    @Test
+    void registerChatUploadedSkills_rejectsWhenNoManagePermission() {
+        // 仅有使用权限（别人授权的个人助理）安装技能时，应直接拒绝，而不是“提示成功但不生效”。
+        MockMultipartFile uploadFile = new MockMultipartFile("files", "demo-skill.zip", "application/zip",
+            skillZipBytes("demo-skill"));
+        ByClawSkillDto uploadedSkill = new ByClawSkillDto("demo-skill",
+            "/.openclaw/workspace-baiying-agent-9001/skills/demo-skill",
+            "/.openclaw/workspace-baiying-agent-9001/skills/demo-skill/SKILL.md");
+
+        SsResource digitalEmployee = new SsResource();
+        digitalEmployee.setResourceId(9001L);
+        when(ssResourceService.findById(9001L)).thenReturn(digitalEmployee);
+        when(authApplicationService.hasResourceManagePermission(digitalEmployee)).thenReturn(false);
+
+        assertThatThrownBy(() -> service.registerChatUploadedSkills("user001", 9001L, List.of(uploadFile),
+            List.of(uploadedSkill))).isInstanceOf(IllegalArgumentException.class);
+
+        verify(ssResourceService, never()).saveResource(any(SsResource.class));
+        verify(digitalEmployeeApplicationService, never()).synOpenClawWorkSpace(anyLong());
     }
 
     @Test

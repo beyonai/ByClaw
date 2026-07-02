@@ -24,6 +24,7 @@ const sqlExecuteParameters = {
       ],
     },
     mode: {
+      type: "string",
       enum: ["auto", "all", "get", "run"],
     },
     maxRows: {

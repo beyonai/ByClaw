@@ -16,8 +16,7 @@ import {
   Typography,
   message,
 } from 'antd';
-import type { ColumnsType, TablePaginationConfig } from 'antd/es/table';
-import type { SorterResult } from 'antd/es/table/interface';
+import type { ColumnsType, TableProps } from 'antd/es/table';
 import dayjs from 'dayjs';
 // @ts-ignore
 import { useIntl } from '@umijs/max';
@@ -146,11 +145,7 @@ const PersonalParamSettings: React.FC = () => {
     loadParams({ status, pageNum: 1 });
   };
 
-  const handleTableChange = (
-    pagination: TablePaginationConfig,
-    _filters: Record<string, React.Key[] | null>,
-    sorter: SorterResult<PersonalParam> | SorterResult<PersonalParam>[]
-  ) => {
+  const handleTableChange: TableProps<PersonalParam>['onChange'] = (pagination, _filters, sorter) => {
     const sorterInfo = Array.isArray(sorter) ? sorter[0] : sorter;
     loadParams({
       pageNum: pagination.current || 1,
@@ -197,6 +192,7 @@ const PersonalParamSettings: React.FC = () => {
     {
       title: intl.formatMessage({ id: 'settings.params.description' }),
       dataIndex: 'description',
+      width: 220,
       render: (description) => description || '-',
     },
     {
@@ -204,7 +200,7 @@ const PersonalParamSettings: React.FC = () => {
       dataIndex: 'status',
       width: 120,
       render: (_, record) =>
-        (record.enabled ?? record.status === 'NORMAL') ? (
+        record.enabled ?? record.status === 'NORMAL' ? (
           <Tag color="green">{intl.formatMessage({ id: 'settings.params.enabled' })}</Tag>
         ) : (
           <Tag>{intl.formatMessage({ id: 'settings.params.disabled' })}</Tag>
@@ -236,6 +232,7 @@ const PersonalParamSettings: React.FC = () => {
       title: intl.formatMessage({ id: 'common.operation' }),
       key: 'action',
       width: 210,
+      fixed: 'right',
       render: (_, record) => {
         const enabled = record.enabled ?? record.status === 'NORMAL';
         return (
@@ -306,6 +303,7 @@ const PersonalParamSettings: React.FC = () => {
             showTotal: (count) => intl.formatMessage({ id: 'settings.params.paginationTotal' }, { total: count }),
           }}
           onChange={handleTableChange}
+          scroll={{ x: 1080 }}
           locale={{ emptyText: <Empty description={intl.formatMessage({ id: 'settings.params.empty' })} /> }}
         />
       </Card>
@@ -320,6 +318,8 @@ const PersonalParamSettings: React.FC = () => {
         confirmLoading={saving}
         onOk={handleSave}
         onCancel={() => setModalOpen(false)}
+        okText={intl.formatMessage({ id: 'common.confirm' })}
+        cancelText={intl.formatMessage({ id: 'common.cancel' })}
         width={640}
         destroyOnHidden
       >
@@ -362,9 +362,7 @@ const PersonalParamSettings: React.FC = () => {
             <Input.Password
               autoComplete="new-password"
               placeholder={
-                editingParam?.hasValue
-                  ? intl.formatMessage({ id: 'settings.params.valueEditPlaceholder' })
-                  : undefined
+                editingParam?.hasValue ? intl.formatMessage({ id: 'settings.params.valueEditPlaceholder' }) : undefined
               }
             />
           </Form.Item>

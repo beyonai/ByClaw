@@ -70,11 +70,21 @@ export default {
   'refineModal.abilityNamePlaceholder': 'Ability {index} name',
   'refineModal.abilityDescPlaceholder': 'Please enter the ability description',
   'refineModal.workStandard': 'Work Guidelines',
+  'refineModal.workStandardPlaceholder': 'Enter work guidelines',
+  'refineModal.toolStandard': 'Tool Guidelines',
+  'refineModal.toolStandardPlaceholder': 'Enter tool guidelines',
+  'refineModal.memoryStandard': 'Memory Guidelines',
+  'refineModal.memoryStandardPlaceholder': 'Enter memory guidelines',
   'refineModal.step.basic': 'Basic Info',
   'refineModal.step.persona': 'Role & Persona',
   'refineModal.step.workflow': 'Workflow',
   'refineModal.step.style': 'Communication',
   'refineModal.progress': 'Completed {done} / {total} items',
+  'refineModal.generating': 'Generating configuration...',
+  'refineModal.waitingStream': 'Connecting to the model and preparing results',
+  'refineModal.streamProgress': 'Received {count} characters, analyzing fields',
+  'refineModal.generateFailed': 'Generation failed. Please try again later.',
+  'refineModal.generateIncomplete': 'The generated result is incomplete. Please regenerate.',
 
   // Employee Detail
   'employeeDetail.refine': 'Auto-Complete',
@@ -138,13 +148,11 @@ export default {
   'thirdPartyCreateModel.homeAddressRequired': 'Please enter home page address',
 
   // ModelPopover
-  'modelPopover.largeModel': 'Large Model',
   'modelPopover.QALargeModelConfiguration': 'QA Large Model Configuration',
-  'modelPopover.history': 'History',
-  'modelPopover.temperature': 'Temperature',
-  'modelPopover.maxToken': 'Max Tokens',
-  'modelPopover.prompt': 'Prompt',
-  'modelPopover.promptPlaceholder': 'Describe the image content concisely and accurately with clear hierarchy',
+  'modelPopover.mine': 'Mine',
+  'modelPopover.public': 'Public',
+  'modelPopover.noModels': 'No models available',
+  'modelPopover.confirm': 'OK',
 
   // BaseListModal
   'baseListModal.createTime': 'Create Time',

@@ -1,10 +1,11 @@
 section.twins {
   position: relative;
+  box-sizing: border-box;
   border: 1px solid #ced3d9;
   border-radius: 8px;
   flex: 1 1 0%;
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
   background-color: #fff;
   display: flex;
   flex-direction: column;
@@ -50,6 +51,7 @@ section.twins {
     overflow: auto;
     padding-left: 12px;
     padding-right: 10px;
+    box-sizing: border-box;
 
     .loading {
       position: absolute;
@@ -59,6 +61,23 @@ section.twins {
       justify-content: center;
       z-index: 10;
     }
+  }
+}
+
+.textPane {
+  width: 100%;
+  min-height: 100%;
+  display: flex;
+
+  > div {
+    width: 100%;
+    min-height: 100%;
+    display: flex;
+  }
+
+  :global(pre.shiki) {
+    flex: 1;
+    margin: 0;
   }
 }
 

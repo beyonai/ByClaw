@@ -88,9 +88,11 @@ and restart Gateway.
           // notificationDingtalkAccessToken: "...",
           notificationDingtalkSecret: "SEC...",
           notificationDingtalkActionCardBtnTitle: "通过",
-          notificationDingtalkActionCardBtnUrl: "http://39.105.105.85/byaiService/datasetController/buildKnowledgeFromDoc",
-          notificationResourceId: "10024308",
-          notificationDirectoryPath: "/",
+          // Optional. Leave empty to send the ActionCard without a jump URL.
+          notificationDingtalkActionCardBtnUrl: "",
+          // Upload the generated markdown document before sending the robot notification.
+          notificationDocumentUploadUrl: "/api/cos/upload",
+          notificationDocumentUploadPrefix: "",
           notificationRobotType: "dingtalk"
         }
       }
@@ -98,6 +100,54 @@ and restart Gateway.
   }
 }
 ```
+
+## Configuration reference
+
+All fields below live under `plugins.entries["byclaw-wiki"].config`.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `repositories` | array | ByClaw `develop` | Git repositories to mirror and index. |
+| `dataDir` | string | `OPENCLAW_STATE_DIR/byclaw-wiki` | Plugin data directory. Relative paths resolve under `OPENCLAW_STATE_DIR`. |
+| `timezone` | string | `Asia/Shanghai` | IANA timezone used by the weekly sync schedule. |
+| `syncDayOfWeek` | number | `6` | Weekly sync day. `0` is Sunday, `6` is Saturday. |
+| `syncHour` | number | `3` | Weekly sync hour in `timezone`. |
+| `syncMinute` | number | `0` | Weekly sync minute in `timezone`. |
+| `runOnStartup` | boolean | `true` | Start a background sync when the Gateway service starts. |
+| `toolName` | string | `code_to_wiki` | Registered OpenClaw tool name. |
+| `httpPath` | string | `/plugins/byclaw-wiki` | Gateway route for status and manual sync. |
+| `gitCommand` | string | `git` | Git executable used for clone, fetch, checkout, and commit detection. |
+| `codegraphCommand` | string | `codegraph` | CodeGraph executable used for indexing and queries. |
+| `commandTimeoutMs` | number | `300000` | Timeout for each Git or CodeGraph command. |
+| `maxOutputBytes` | number | `131072` | Maximum stdout/stderr bytes captured per command stream. |
+| `retryInitialDelayMs` | number | `300000` | Initial retry delay after clone, pull, or index failure. |
+| `retryMaxDelayMs` | number | `21600000` | Maximum exponential backoff retry delay. |
+| `retryMaxAttempts` | number | `3` | Maximum automatic retry attempts after a failed sync. |
+| `includeRawOutputInToolResult` | boolean | `true` | Include raw CodeGraph output in tool results. |
+| `gitDepth` | number | `1` | Git clone/fetch depth. |
+| `notificationWebhookUrl` | string | unset | Full group robot webhook URL. |
+| `notificationDingtalkAccessToken` | string | unset | DingTalk custom robot access token, used when `notificationWebhookUrl` is unset. |
+| `notificationDingtalkSecret` | string | unset | DingTalk robot `SEC` secret for signed webhook requests. |
+| `notificationDingtalkActionCardBtnTitle` | string | `通过` | DingTalk ActionCard single-button title. |
+| `notificationDingtalkActionCardBtnUrl` | string | empty | DingTalk ActionCard button URL read directly from config; no query parameters are appended. |
+| `notificationDocumentUploadUrl` | string | `/api/cos/upload` | COS upload endpoint for generated markdown documents. |
+| `notificationDocumentUploadPrefix` | string | empty | Optional COS object prefix sent as multipart field `prefix` only when non-empty. |
+| `notificationRobotType` | string | `generic` | Robot payload format: `generic`, `wecom`, `dingtalk`, or `feishu`. |
+| `notificationMaxOutputChars` | number | `3000` | Compatibility setting retained for older configs; robot notifications no longer include full document bodies. |
+| `notificationMinOutputChars` | number | `1` | Minimum generated document characters required before sending a notification. |
+
+Each `repositories` item supports:
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `id` | string | yes | Stable repository id used by `code_to_wiki`. |
+| `remoteUrl` | string | yes | Git repository URL. |
+| `branch` | string | yes | Branch to clone, fetch, checkout, and index. |
+| `localPath` | string | no | Checkout path. Relative paths resolve under `<dataDir>/repos`. |
+
+Relative `notificationDocumentUploadUrl` values resolve against
+`BYCLAW_WIKI_COS_UPLOAD_BASE_URL`; when it is unset, the local default base is
+`http://localhost:3000`.
 
 ## Tool usage
 
@@ -131,16 +181,28 @@ For DingTalk robots with signing enabled, also configure
 each request and appends them to the webhook URL.
 
 DingTalk notifications are sent as a single-button ActionCard. The default
-button is `通过`, and the default button URL is
-`http://39.105.105.85/beyond/chat`; set
-`notificationDingtalkActionCardBtnTitle` and
-`notificationDingtalkActionCardBtnUrl` to customize it.
+button is `通过`. Configure `notificationDingtalkActionCardBtnUrl` only when
+the ActionCard button should jump to a specific page; otherwise it remains
+blank. The plugin no longer discovers backend URLs from Redis or appends
+dataset document parameters to the button URL.
 
-When `notificationDingtalkActionCardBtnUrl` points to the backend
-`/byaiService/datasetController/buildKnowledgeFromDoc` endpoint, byclaw-wiki appends
-`resourceId`, `directoryPath`, `docName`, `doc`, and `language=zh-CN` query
-parameters to the button URL. Configure `notificationResourceId` for the target
-knowledge base and optionally `notificationDirectoryPath`; it defaults to `/`.
+Before sending a robot notification, byclaw-wiki uploads the generated
+`documentMarkdown` as a `.md` file to `notificationDocumentUploadUrl` using
+`multipart/form-data` field `files`. When `notificationDocumentUploadPrefix` is
+non-empty, it is sent as the optional `prefix` field. Relative upload URLs such
+as `/api/cos/upload` resolve against `BYCLAW_WIKI_COS_UPLOAD_BASE_URL`; when
+unset, the local default is `http://localhost:3000`. The returned COS `key` is
+included in the tool result.
+
+The DingTalk robot message body is intentionally concise:
+
+```text
+有新文档需要审核：
+
+用户问：《用户的问题》
+
+百应平台赋能助手 已生成文档，点击去审核是否更新到知识库
+```
 
 Supported `notificationRobotType` values:
 

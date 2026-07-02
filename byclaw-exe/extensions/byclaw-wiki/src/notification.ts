@@ -7,6 +7,14 @@ import type {
 } from "./types.js";
 
 const DINGTALK_CUSTOM_ROBOT_WEBHOOK = "https://oapi.dingtalk.com/robot/send";
+const DEFAULT_DOCUMENT_UPLOAD_BASE_URL = "http://43.139.67.47:8080/";
+
+type UploadedDocumentationFile = {
+  key: string;
+  name: string;
+  size: number;
+  contentType: string;
+};
 
 export type DocumentationNotificationRequest = {
   config: ResolvedNotificationConfig;
@@ -24,6 +32,7 @@ export type DocumentationNotificationResult = {
   skippedReason?: string;
   statusCode?: number;
   error?: string;
+  uploadedDocument?: UploadedDocumentationFile;
 };
 
 function resolveBaseWebhookUrl(config: ResolvedNotificationConfig): string | undefined {
@@ -60,13 +69,6 @@ function resolveWebhookUrl(config: ResolvedNotificationConfig): string | undefin
   return url.toString();
 }
 
-function truncateText(value: string, maxChars: number): string {
-  if (value.length <= maxChars) {
-    return value;
-  }
-  return `${value.slice(0, Math.max(0, maxChars - 30))}\n\n... output truncated ...`;
-}
-
 function resolveNotificationTitle(params: DocumentationNotificationRequest): string {
   return params.documentTitle || "Byclaw Wiki: 操作文档待更新";
 }
@@ -87,51 +89,78 @@ function buildDocumentName(params: DocumentationNotificationRequest): string {
   return `${baseName}-${timestamp}.md`;
 }
 
-function appendQueryParams(rawUrl: string, queryParams: URLSearchParams): string {
-  const hashIndex = rawUrl.indexOf("#");
-  const beforeHash = hashIndex >= 0 ? rawUrl.slice(0, hashIndex) : rawUrl;
-  const hash = hashIndex >= 0 ? rawUrl.slice(hashIndex) : "";
-  const separator = beforeHash.includes("?")
-    ? beforeHash.endsWith("?") || beforeHash.endsWith("&")
-      ? ""
-      : "&"
-    : "?";
-  return `${beforeHash}${separator}${queryParams.toString()}${hash}`;
-}
-
-function buildActionCardButtonUrl(params: DocumentationNotificationRequest): string {
-  const rawUrl = params.config.dingtalkActionCardBtnUrl.trim();
-  if (!rawUrl) {
+function resolveUploadUrl(rawUrl: string): string {
+  const trimmed = rawUrl.trim();
+  if (!trimmed) {
     return "";
   }
-
-  const queryParams = new URLSearchParams();
-  if (params.config.resourceId?.trim()) {
-    queryParams.set("resourceId", params.config.resourceId.trim());
+  try {
+    return new URL(trimmed).toString();
+  } catch {
+    const baseUrl =
+      process.env.BYCLAW_WIKI_COS_UPLOAD_BASE_URL?.trim() ||
+      process.env.BYCLAW_WIKI_WEB_BASE_URL?.trim() ||
+      DEFAULT_DOCUMENT_UPLOAD_BASE_URL;
+    return new URL(trimmed.startsWith("/") ? trimmed : `/${trimmed}`, baseUrl).toString();
   }
-  queryParams.set("directoryPath", params.config.directoryPath.trim() || "/");
-  queryParams.set("docName", buildDocumentName(params));
-  queryParams.set("doc", truncateText(params.documentMarkdown.trim(), params.config.maxOutputChars));
-  queryParams.set("language", "zh-CN");
-  return appendQueryParams(rawUrl, queryParams);
+}
+
+async function parseDocumentUploadResponse(response: Response): Promise<UploadedDocumentationFile> {
+  const payload = await response.json().catch(() => ({})) as {
+    message?: string;
+    files?: Array<Partial<UploadedDocumentationFile>>;
+  };
+  if (!response.ok) {
+    throw new Error(payload.message || `document upload failed HTTP ${response.status}`);
+  }
+  const file = payload.files?.[0];
+  if (!file?.key || !file.name || typeof file.size !== "number" || !file.contentType) {
+    throw new Error("document upload response did not include a valid files[0] item");
+  }
+  return {
+    key: file.key,
+    name: file.name,
+    size: file.size,
+    contentType: file.contentType,
+  };
+}
+
+async function uploadGeneratedDocument(
+  params: DocumentationNotificationRequest,
+  signal: AbortSignal,
+): Promise<UploadedDocumentationFile | undefined> {
+  const uploadUrl = resolveUploadUrl(params.config.documentUploadUrl);
+  if (!uploadUrl) {
+    return undefined;
+  }
+
+  const fileName = buildDocumentName(params);
+  const formData = new FormData();
+  const blob = new Blob([params.documentMarkdown.trim()], {
+    type: "text/markdown; charset=utf-8",
+  });
+  formData.append("files", blob, fileName);
+  const prefix = params.config.documentUploadPrefix.trim();
+  if (prefix) {
+    formData.append("prefix", prefix);
+  }
+
+  const response = await fetch(uploadUrl, {
+    method: "POST",
+    body: formData,
+    signal,
+  });
+  return await parseDocumentUploadResponse(response);
 }
 
 function buildMarkdown(params: DocumentationNotificationRequest): string {
-  const title = resolveNotificationTitle(params);
   const question = params.question || params.query || "(未提供问题)";
-  const documentMarkdown = truncateText(params.documentMarkdown.trim(), params.config.maxOutputChars);
   return [
-    `# ${title}`,
+    "有新文档需要审核：",
     "",
-    `- 仓库: ${params.repository.id}`,
-    `- 分支: ${params.repository.branch}`,
-    `- 问题: ${question}`,
+    `用户问：《${question}》`,
     "",
-    "## 操作文档草稿",
-    "",
-    documentMarkdown,
-    "",
-    "请审核是否需要更新到知识库。",
+    "百应平台赋能助手 已生成文档，点击去审核是否更新到知识库",
   ].join("\n");
 }
 
@@ -140,7 +169,6 @@ function buildPayload(params: {
   config: ResolvedNotificationConfig;
   title: string;
   markdown: string;
-  buttonUrl?: string;
 }): unknown {
   const { robotType, config, title, markdown } = params;
   switch (robotType) {
@@ -154,7 +182,7 @@ function buildPayload(params: {
     case "dingtalk":
       {
         const btnTitle = config.dingtalkActionCardBtnTitle.trim() || "通过";
-        const btnUrl = params.buttonUrl ?? config.dingtalkActionCardBtnUrl.trim();
+        const btnUrl = config.dingtalkActionCardBtnUrl.trim();
         return {
           msgtype: "actionCard",
           msgUuid: randomUUID(),
@@ -238,8 +266,8 @@ export async function sendDocumentationNotification(
     }
 
     const title = resolveNotificationTitle(params);
+    const uploadedDocument = await uploadGeneratedDocument(params, controller.signal);
     const markdown = buildMarkdown(params);
-    const buttonUrl = buildActionCardButtonUrl(params);
     const response = await fetch(webhookUrl, {
       method: "POST",
       headers: {
@@ -251,7 +279,6 @@ export async function sendDocumentationNotification(
           config: params.config,
           title,
           markdown,
-          buttonUrl,
         }),
       ),
       signal: controller.signal,
@@ -263,6 +290,7 @@ export async function sendDocumentationNotification(
       ok: response.ok && robotResponse.ok,
       statusCode: response.status,
       error: response.ok && robotResponse.ok ? undefined : robotResponse.error ?? response.statusText,
+      uploadedDocument,
     };
   } catch (error) {
     return {

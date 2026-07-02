@@ -1,8 +1,10 @@
 import secondEdition from './en-US/secondEdition';
 import manager from './en-US/manager';
+import personalModel from '@/pages/models/locales/en-US';
 
 export default {
   ...manager,
+  ...personalModel,
   // Common Actions
   'common.add': 'Add',
   'common.create': 'Create',
@@ -82,6 +84,8 @@ export default {
   'common.prev': 'Previous',
   'common.next': 'Next',
 
+  'search.referenceSuccess': 'Referenced successfully',
+
   'resource.belongField': 'Business Field',
   'resource.belongFieldPlaceholder': 'Please select a business field',
   'resource.knowledge': 'Knowledge',
@@ -93,10 +97,13 @@ export default {
   'resource.installKnowledge': 'Install Knowledge',
   'resource.installConfirm': 'Install to the current default digital employee?',
   'resource.installSuccess': 'Installed successfully',
+  'resource.installing': 'Installing…',
   'resource.uninstallSkill': 'Uninstall',
   'resource.uninstallSkillConfirm': 'Uninstall this skill from "{employeeName}"?',
   'resource.uninstallWorkspaceSkillConfirm':
     'Delete user-developed skill "{skillName}" from "{employeeName}"? This will remove the skill directory.',
+  'resource.deleteWorkspaceSkillConfirm':
+    'Delete user-developed skill "{skillName}"? This will remove the skill directory.',
   'resource.uninstallSuccess': 'Uninstalled successfully',
   'resource.currentDigitalEmployee': 'Current digital employee',
   'resource.noDefaultDigitalEmployee': 'No default digital employee found',
@@ -125,6 +132,8 @@ export default {
   'resource.kgQa': 'Q&A',
   'resource.systemBuiltin': 'System Built-in',
   'resource.personalDefaultAssistant': 'Default',
+  'resource.defaultPersonalAssistant': 'Default Assistant',
+  'resource.defaultDigitalEmployee': 'Default',
   'resource.personalDefaultKnowledgeDoc': 'Default',
   'resource.personalDefaultKnowledgeDeleteNotAllowed': 'Default personal knowledge base cannot be deleted',
   'resource.personalAssistant': 'Assistant',
@@ -168,6 +177,7 @@ export default {
   'common.clickHere': 'Click Here',
   'common.clickToViewDetail': 'Click to View Details',
   'common.file': 'File',
+  'common.model': 'Model',
   'common.todo': 'Todo',
   'common.task': 'Task',
   'common.member': 'Member',
@@ -413,6 +423,8 @@ export default {
   'knowledgeDetail.directory': 'Directory',
   'knowledgeDetail.keywords': 'keywords',
   'knowledgeDetail.newFolder': 'New Folder',
+  'knowledgeDetail.newSubFolder': 'New Subfolder',
+  'knowledgeDetail.newSiblingFolder': 'New Sibling Folder',
   'knowledgeDetail.uploadFile': 'Upload File',
   'knowledgeDetail.sameNameFileOverwriteTip': 'Same name files will be overwritten',
   'knowledgeDetail.uploadSuccess': 'Upload successful',
@@ -544,7 +556,11 @@ export default {
   'messageForm.pleaseUpload': 'Please upload {files}',
 
   'messageList.deleteMessageConfirm': 'Are you sure to delete this message?',
+  'messageList.copyMessage': 'Copy message',
+  'messageList.deleteMessage': 'Delete message',
+  'messageList.saveMessage': 'Save message',
   'messageList.troubleshoot': 'Troubleshoot',
+  'messageList.troubleshootTooltip': 'Call the Baiying operations digital employee to troubleshoot the issue',
   'messageList.troubleshootPrompt': 'The traceId of the current message is {traceId}. Please help me troubleshoot it.',
 
   'citeRender.title': 'Referenced Messages',
@@ -650,6 +666,13 @@ export default {
   'directoryManage.buildFile': 'Build File',
   'directoryManage.buildConfirm': 'Are you sure to build file "{fileName}"?',
   'directoryManage.buildSubmitted': 'Build task submitted and is being processed in the background',
+  'directoryManage.batchBuild': 'Batch Build',
+  'directoryManage.batchBuildWithCount': 'Batch Build ({count})',
+  'directoryManage.batchBuildFiles': 'Batch Build Files',
+  'directoryManage.batchBuildConfirm': 'Build the selected {count} file(s)?',
+  'directoryManage.batchBuildSubmitted': '{count} build task(s) submitted and are being processed in the background',
+  'directoryManage.noBuildableFiles': 'No buildable files in the current list',
+  'directoryManage.selectFilesToBuild': 'Select files to build first',
   'directoryManage.buildFailed': 'Build failed',
   'directoryManage.resolveFilePathFailed': 'Failed to resolve file path, please try again later',
   'directoryManage.missingKnowledgeBaseInfo': 'Missing knowledge base information',

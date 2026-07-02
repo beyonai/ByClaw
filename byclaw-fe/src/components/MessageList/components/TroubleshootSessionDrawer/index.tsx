@@ -10,18 +10,28 @@ import GlobalContext, { Platform } from '@/layout/components/provider/global';
 import { EventEmitter$Cls } from '@/utils/eventEmitter';
 
 import type { IAgentCache, IAgentType } from '@/typescript/agent';
+import { cacheTroubleshootSession } from './sessionCache';
 import styles from './index.module.less';
 
 type Props = {
   agentId: string;
+  initialSessionId?: string;
   initialText: string;
+  messageId?: string;
   onClose: () => void;
   open: boolean;
+  traceId?: string;
 };
 
-function TroubleshootSessionContent({ agentId, initialText }: Pick<Props, 'agentId' | 'initialText'>) {
+function TroubleshootSessionContent({
+  agentId,
+  initialSessionId,
+  initialText,
+  messageId,
+  traceId,
+}: Pick<Props, 'agentId' | 'initialSessionId' | 'initialText' | 'messageId' | 'traceId'>) {
   const parentGlobalContext = useGlobal();
-  const [sessionId, setSessionId] = React.useState('');
+  const [sessionId, setSessionId] = React.useState(initialSessionId || '');
   const [currentAgentId, setCurrentAgentId] = React.useState(agentId);
   const [agentType, setAgentType] = React.useState<IAgentType>(agentTypeMap.common);
   const eventEmitterRef = React.useRef(new EventEmitter$Cls());
@@ -36,6 +46,18 @@ function TroubleshootSessionContent({ agentId, initialText }: Pick<Props, 'agent
   }, [agentId]);
 
   React.useEffect(() => {
+    setSessionId(initialSessionId || '');
+  }, [initialSessionId]);
+
+  React.useEffect(() => {
+    cacheTroubleshootSession({
+      traceId,
+      messageId,
+      sessionId,
+    });
+  }, [messageId, sessionId, traceId]);
+
+  React.useEffect(() => {
     const agentInfo = [...agentList, ...employeesList].find(
       (item: IAgentCache) => `${item.agentId || item.id}` === `${agentId}`
     );
@@ -43,6 +65,8 @@ function TroubleshootSessionContent({ agentId, initialText }: Pick<Props, 'agent
   }, [agentId, agentList, employeesList]);
 
   React.useEffect(() => {
+    if (!initialText || initialSessionId) return undefined;
+
     const timer = setTimeout(() => {
       eventEmitterRef.current.emit('queryInput-set-value', initialText);
     }, 300);
@@ -50,7 +74,7 @@ function TroubleshootSessionContent({ agentId, initialText }: Pick<Props, 'agent
     return () => {
       clearTimeout(timer);
     };
-  }, [initialText]);
+  }, [initialSessionId, initialText]);
 
   return (
     <GlobalContext.Provider
@@ -70,6 +94,9 @@ function TroubleshootSessionContent({ agentId, initialText }: Pick<Props, 'agent
           cannotAt={false}
           hideChatTitle
           sessionId={sessionId}
+          sendExtraParams={{
+            troubleshootMessageId: messageId,
+          }}
           agentType={agentType}
           setAgentType={setAgentType}
           queryInputProps={{
@@ -81,7 +108,15 @@ function TroubleshootSessionContent({ agentId, initialText }: Pick<Props, 'agent
   );
 }
 
-export default function TroubleshootSessionDrawer({ agentId, initialText, onClose, open }: Props) {
+export default function TroubleshootSessionDrawer({
+  agentId,
+  initialSessionId,
+  initialText,
+  messageId,
+  onClose,
+  open,
+  traceId,
+}: Props) {
   const intl = useIntl();
 
   return (
@@ -89,19 +124,18 @@ export default function TroubleshootSessionDrawer({ agentId, initialText, onClos
       open={open}
       width="50vw"
       mask={false}
+      className={styles.drawer}
       title={intl.formatMessage({ id: 'messageList.troubleshoot' })}
       onClose={onClose}
       destroyOnHidden
-      bodyStyle={{ height: '100%', padding: 0 }}
-      styles={{
-        body: {
-          height: '100%',
-          overflow: 'hidden',
-          padding: 0,
-        },
-      }}
     >
-      <TroubleshootSessionContent agentId={agentId} initialText={initialText} />
+      <TroubleshootSessionContent
+        agentId={agentId}
+        initialSessionId={initialSessionId}
+        initialText={initialText}
+        messageId={messageId}
+        traceId={traceId}
+      />
     </Drawer>
   );
 }

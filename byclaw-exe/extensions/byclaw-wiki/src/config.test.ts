@@ -45,7 +45,9 @@ describe("resolveByclawWikiConfig", () => {
     assert.equal(config.includeRawOutputInToolResult, true);
     assert.equal(config.gitDepth, 1);
     assert.equal(config.notification.dingtalkActionCardBtnTitle, "通过");
-    assert.equal(config.notification.dingtalkActionCardBtnUrl, "http://39.105.105.85/beyond/chat");
+    assert.equal(config.notification.dingtalkActionCardBtnUrl, "");
+    assert.equal(config.notification.documentUploadUrl, "/api/cos/upload");
+    assert.equal(config.notification.documentUploadPrefix, "");
     assert.equal(config.repositories.length, 1);
     assert.equal(config.repositories[0]?.id, "byclaw");
     assert.equal(config.repositories[0]?.remoteUrl, "https://github.com/beyonai/ByClaw.git");
@@ -100,8 +102,8 @@ describe("resolveByclawWikiConfig", () => {
       notificationDingtalkSecret: "SEC-example",
       notificationDingtalkActionCardBtnTitle: "审核通过",
       notificationDingtalkActionCardBtnUrl: "https://example.test/approve",
-      notificationResourceId: 10024308,
-      notificationDirectoryPath: "/",
+      notificationDocumentUploadUrl: "https://example.test/api/cos/upload",
+      notificationDocumentUploadPrefix: "custom/docs/",
       notificationRobotType: "wecom",
       notificationMaxOutputChars: 1200,
       notificationMinOutputChars: 10,
@@ -112,8 +114,8 @@ describe("resolveByclawWikiConfig", () => {
     assert.equal(config.notification.dingtalkSecret, "SEC-example");
     assert.equal(config.notification.dingtalkActionCardBtnTitle, "审核通过");
     assert.equal(config.notification.dingtalkActionCardBtnUrl, "https://example.test/approve");
-    assert.equal(config.notification.resourceId, "10024308");
-    assert.equal(config.notification.directoryPath, "/");
+    assert.equal(config.notification.documentUploadUrl, "https://example.test/api/cos/upload");
+    assert.equal(config.notification.documentUploadPrefix, "custom/docs/");
     assert.equal(config.notification.robotType, "wecom");
     assert.equal(config.notification.maxOutputChars, 1200);
     assert.equal(config.notification.minOutputChars, 10);

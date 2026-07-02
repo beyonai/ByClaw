@@ -64,4 +64,17 @@ public class SessionExtService {
         return byaiSessionExtMapper.selectOne(queryWrapper);
     }
 
+    /**
+     * 根据参数编码和参数值查询列表
+     * @param paramCode 参数编码
+     * @param paramValue 参数值
+     * @return List
+     */
+    public List<ByaiSessionExt> selectListByParamCodeAndValue(String paramCode, String paramValue) {
+        LambdaQueryWrapper<ByaiSessionExt> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.eq(ByaiSessionExt::getExtParamCode, paramCode);
+        queryWrapper.eq(ByaiSessionExt::getExtParamValue, paramValue);
+        return byaiSessionExtMapper.selectList(queryWrapper);
+    }
+
 }

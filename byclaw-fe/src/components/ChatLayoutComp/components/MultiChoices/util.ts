@@ -5,6 +5,7 @@ import { IMessage } from '@/typescript/message';
 import { ResourceTypeMap } from '@/constants/resource';
 import { SSEMessageType } from '@/constants/message';
 import { getMessageText } from '@/utils/messgae';
+import getDisplayAnswer, { getSubstanceText } from '@/components/QueryInput/getDisplayAnswer';
 
 const getExportMessageInfo = (msg: IMessage, intl = getIntl()) => {
   let metadata: Record<string, any> = {};
@@ -18,7 +19,7 @@ const getExportMessageInfo = (msg: IMessage, intl = getIntl()) => {
   const sender = ['1', '4'].includes(`${msg?.usage || ''}`)
     ? intl.formatMessage({ id: 'multiChoices.export.senderUser' })
     : intl.formatMessage({ id: 'multiChoices.export.senderAssistant' });
-  const content = getMessageText(msg) || '';
+  const content = getDisplayAnswer(msg?.messageList) || getSubstanceText(msg?.text) || getMessageText(msg) || '';
   const resourceName = metadata?.resourceName || msg?.resourceList?.[0]?.resourceName || '';
   const resourceType = metadata?.resourceType || msg?.resourceList?.[0]?.resourceType || '';
 
@@ -59,11 +60,11 @@ export const referenceToOpenClawHandler = (messageList: IMessage[], multiChoices
       }
 
       messageContent += `# ${intl.formatMessage({ id: 'multiChoices.export.messageTitle' }, { index: index + 1 })}\n`;
-      messageContent += `**${intl.formatMessage({ id: 'multiChoices.export.messageId' })}**: ${
-        messageInfo.messageId
-      }\n`;
       messageContent += `**${intl.formatMessage({ id: 'multiChoices.export.sessionId' })}**: ${
         messageInfo.sessionId
+      }\n`;
+      messageContent += `**${intl.formatMessage({ id: 'multiChoices.export.messageId' })}**: ${
+        messageInfo.messageId
       }\n`;
       messageContent += `**${intl.formatMessage({ id: 'multiChoices.export.sender' })}**: ${messageInfo.sender}\n`;
       messageContent += `**${intl.formatMessage({ id: 'common.time' })}**: ${messageInfo.createTime}\n`;
@@ -166,7 +167,7 @@ export const referenceToWisdomPenContentList = (messageList: IMessage[], multiCh
         isCollected = isChatBI || isWriterContentType || isAsr;
       });
 
-      const text = getMessageText(message);
+      const text = getDisplayAnswer(message.messageList) || getSubstanceText(message.text) || getMessageText(message);
       if (!isCollected) {
         const outlineRetrieveListItem = { text: '' };
 

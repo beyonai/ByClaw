@@ -1,6 +1,7 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { Tabs } from 'antd';
 import { useIntl, useSelector } from '@umijs/max';
+import { isEmpty, compact } from 'lodash';
 
 import useGlobal from '@/hooks/useGlobal';
 
@@ -11,7 +12,6 @@ import SystemNotification from './systemNotification';
 
 import type { TabsProps } from 'antd/lib/tabs';
 import styles from './index.module.less';
-import { isEmpty } from 'lodash';
 
 const emptyObj: Record<string, unknown> = {};
 
@@ -70,7 +70,7 @@ export default function BottomContent() {
     try {
       const obj = JSON.parse((prologue as string) || '{}');
       const { openingQuestion } = obj;
-      relatedQuestions = JSON.parse(openingQuestion || '[]');
+      relatedQuestions = compact(JSON.parse(openingQuestion || '[]'));
     } catch (error) {
       console.error('Error parsing prologue:', error);
     }
@@ -100,6 +100,7 @@ export default function BottomContent() {
           oldTabKeyRef.current = key;
         }}
         items={tabList || []}
+        className={styles.tabs}
       />
     </div>
   );

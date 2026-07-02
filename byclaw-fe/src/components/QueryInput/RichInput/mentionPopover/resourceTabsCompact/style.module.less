@@ -1,0 +1,193 @@
+.wrap {
+  padding: 12px;
+  height: 100%;
+  width: 100%;
+  min-width: 0;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  border-radius: 8px;
+  border: 1px solid #eef0f3;
+  overflow: hidden;
+}
+
+.tabsWrap {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+
+  :global {
+    .@{antPrefix}-tabs {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .@{antPrefix}-tabs-content-holder {
+      flex: 1;
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    .@{antPrefix}-tabs-content {
+      height: 100%;
+    }
+
+    .@{antPrefix}-tabs-tabpane {
+      height: 100%;
+    }
+  }
+}
+
+.searchRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  margin-bottom: 8px;
+}
+
+.searchInput {
+  flex: 1;
+  min-width: 0;
+}
+
+.tabBar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: nowrap;
+  flex: 0 0 auto;
+  margin-bottom: 8px;
+  overflow-x: auto;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+.typeItem {
+  padding: 8px 16px;
+  border-radius: 28px;
+  font-size: 14px;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  background-color: #f5f5f5;
+  font-weight: 400;
+  color: rgba(112, 118, 128, 1);
+
+  &:hover {
+    color: var(--beyond-color-primary);
+  }
+
+  &.active {
+    color: var(--beyond-color-primary);
+    background-color: rgba(22, 93, 255, 0.1);
+  }
+}
+
+.listContainer {
+  padding: 0;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.filePathHeader {
+  padding: 8px 12px;
+  border-bottom: 1px solid #eef0f3;
+}
+
+.backButton {
+  background: none;
+  border: none;
+  color: #1890ff;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 4px 8px;
+  border-radius: 4px;
+
+  &:hover {
+    background: rgba(24, 144, 255, 0.1);
+  }
+}
+
+.fileList {
+  padding: 4px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.fileItem {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background-color 0.2s;
+  position: relative;
+
+  &:hover {
+    background-color: #f5f5f5;
+  }
+
+  &:hover .downloadBtn {
+    opacity: 1;
+  }
+}
+
+.folderItem {
+  font-weight: 500;
+}
+
+.fileIcon {
+  font-size: 18px;
+  margin-right: 8px;
+}
+
+.fileName {
+  font-size: 14px;
+  color: #333;
+  flex: 1;
+}
+
+.downloadBtn {
+  opacity: 0;
+  background: none;
+  border: none;
+  color: #1890ff;
+  cursor: pointer;
+  padding: 4px 8px;
+  font-size: 14px;
+  transition: opacity 0.2s;
+
+  &:hover {
+    color: #40a9ff;
+  }
+}
+
+.loading {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 20px;
+  color: #999;
+}
+
+.loadingContainer {
+  min-height: 200px;
+}
+
+.emptyContainer {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}

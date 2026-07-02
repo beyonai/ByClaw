@@ -182,6 +182,7 @@ function useChat(props: IProps) {
     textHandler,
     rewriteQuestionHandler,
     browserHandler,
+    answerCompletedHandler,
   } = useHandler({ addSession, setSessionId });
 
   const flowHandler = useMemo(
@@ -196,6 +197,7 @@ function useChat(props: IProps) {
           messageHandler,
           resComIdsHandler,
           browserHandler,
+          answerCompletedHandler,
         ].filter(isFunction)
       ),
     [
@@ -207,6 +209,7 @@ function useChat(props: IProps) {
       messageHandler,
       resComIdsHandler,
       browserHandler,
+      answerCompletedHandler,
     ]
   );
 
@@ -352,18 +355,20 @@ function useChat(props: IProps) {
     updateMessage(answerMsg);
     chatSessionRuntimeManager.completeBySession(answerMsg.sessionId || sessionId);
 
-    return webSocketManager.sendMessageWhenReady({
-      type: 'STOP_CHAT',
-      clientRequestId: runningInfo.clientRequestId,
-      sessionId: answerMsg.sessionId || runningInfo.sessionId || sessionId,
-      messageId: answerMsg.messageId || runningInfo.modelAnswerMessageId,
-      agentId: runningInfo.agentId || answerMsg.agentId || null,
-      agentCode: runningInfo.agentCode || null,
-      agentType: runningInfo.agentType || answerMsg.agentType,
-    }).catch((error) => {
-      // STOP_CHAT 尽力发送，WS 未连接时忽略，避免 Unhandled Rejection。
-      console.error('WebSocket 发送 STOP_CHAT 失败:', error);
-    });
+    return webSocketManager
+      .sendMessageWhenReady({
+        type: 'STOP_CHAT',
+        clientRequestId: runningInfo.clientRequestId,
+        sessionId: answerMsg.sessionId || runningInfo.sessionId || sessionId,
+        messageId: answerMsg.messageId || runningInfo.modelAnswerMessageId,
+        agentId: runningInfo.agentId || answerMsg.agentId || null,
+        agentCode: runningInfo.agentCode || null,
+        agentType: runningInfo.agentType || answerMsg.agentType,
+      })
+      .catch((error) => {
+        // STOP_CHAT 尽力发送，WS 未连接时忽略，避免 Unhandled Rejection。
+        console.error('WebSocket 发送 STOP_CHAT 失败:', error);
+      });
   });
 
   useEffect(() => {
@@ -682,16 +687,18 @@ function useChat(props: IProps) {
 
       cancel();
 
-      return webSocketManager.sendMessageWhenReady({
-        type: 'STOP_CHAT',
-        clientRequestId,
-        ...pick(newAnswerMsg, ['agentId', 'sessionId', 'messageId', 'agentType']),
-        agentId: Number(_agentId) ? _agentId : null,
-        agentCode: Number(_agentId) ? null : _agentId,
-      }).catch((error) => {
-        // STOP_CHAT 尽力发送，WS 未连接时忽略，避免 Unhandled Rejection。
-        console.error('WebSocket 发送 STOP_CHAT 失败:', error);
-      });
+      return webSocketManager
+        .sendMessageWhenReady({
+          type: 'STOP_CHAT',
+          clientRequestId,
+          ...pick(newAnswerMsg, ['agentId', 'sessionId', 'messageId', 'agentType']),
+          agentId: Number(_agentId) ? _agentId : null,
+          agentCode: Number(_agentId) ? null : _agentId,
+        })
+        .catch((error) => {
+          // STOP_CHAT 尽力发送，WS 未连接时忽略，避免 Unhandled Rejection。
+          console.error('WebSocket 发送 STOP_CHAT 失败:', error);
+        });
     }, 100);
 
     // 更新回答消息

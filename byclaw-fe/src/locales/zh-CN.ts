@@ -1,8 +1,10 @@
 import secondEdition from './zh-CN/secondEdition';
 import manager from './zh-CN/manager';
+import personalModel from '@/pages/models/locales/zh-CN';
 
 export default {
   ...manager,
+  ...personalModel,
   // 通用操作
   'common.add': '新增',
   'common.create': '新建',
@@ -81,6 +83,8 @@ export default {
   'common.prev': '上一步',
   'common.next': '下一步',
 
+  'search.referenceSuccess': '引用成功',
+
   'resource.belongField': '所属领域',
   'resource.belongFieldPlaceholder': '请选择',
   'resource.knowledge': '知识',
@@ -92,10 +96,12 @@ export default {
   'resource.installKnowledge': '安装知识',
   'resource.installConfirm': '确认安装到当前默认数字员工？',
   'resource.installSuccess': '安装成功',
+  'resource.installing': '安装中…',
   'resource.uninstallSkill': '卸载',
   'resource.uninstallSkillConfirm': '确认从当前数字员工“{employeeName}”卸载该技能？',
   'resource.uninstallWorkspaceSkillConfirm':
     '确认删除当前数字员工“{employeeName}”下的用户开发技能“{skillName}”？该操作会删除技能目录。',
+  'resource.deleteWorkspaceSkillConfirm': '确认删除用户开发技能“{skillName}”？该操作会删除技能目录。',
   'resource.uninstallSuccess': '卸载成功',
   'resource.currentDigitalEmployee': '当前数字员工',
   'resource.noDefaultDigitalEmployee': '未找到默认数字员工',
@@ -123,6 +129,8 @@ export default {
   'resource.kgQa': '问答知识库',
   'resource.systemBuiltin': '系统内置',
   'resource.personalDefaultAssistant': '默认个人助理',
+  'resource.defaultPersonalAssistant': '默认个人助理',
+  'resource.defaultDigitalEmployee': '默认数字员工',
   'resource.personalDefaultKnowledgeDoc': '默认知识库',
   'resource.personalDefaultKnowledgeDeleteNotAllowed': '默认个人知识库不允许删除',
   'resource.personalAssistant': '个人助理',
@@ -156,6 +164,7 @@ export default {
   'common.clickHere': '点击这里',
   'common.clickToViewDetail': '点击查看详情',
   'common.file': '文件',
+  'common.model': '模型',
   'common.todo': '待办',
   'common.task': '任务',
   'common.member': '成员',
@@ -424,6 +433,8 @@ export default {
   'knowledgeDetail.directory': '目录管理',
   'knowledgeDetail.keywords': '关键字',
   'knowledgeDetail.newFolder': '新建文件夹',
+  'knowledgeDetail.newSubFolder': '新增子级目录',
+  'knowledgeDetail.newSiblingFolder': '新增同级目录',
   'knowledgeDetail.uploadFile': '上传文件',
   'knowledgeDetail.sameNameFileOverwriteTip': '相同文件名将覆盖更新',
   'knowledgeDetail.uploadSuccess': '上传成功',
@@ -553,8 +564,12 @@ export default {
   'messageForm.pleaseUpload': '请上传{files}',
 
   'messageList.deleteMessageConfirm': '确定删除该消息吗？',
-  'messageList.troubleshoot': '排障',
-  'messageList.troubleshootPrompt': '当前消息的traceId为{traceId}，请帮我排除故障',
+  'messageList.copyMessage': '复制消息',
+  'messageList.deleteMessage': '删除消息',
+  'messageList.saveMessage': '保存消息',
+  'messageList.troubleshoot': '运维',
+  'messageList.troubleshootTooltip': '调用百应运维数字员工排查问题',
+  'messageList.troubleshootPrompt': '需要排查的trace_id={traceId}，\n',
 
   'citeRender.title': '引用消息',
   'citeRender.deleteConfirm': '确定删除该引用吗？',
@@ -657,6 +672,13 @@ export default {
   'directoryManage.buildFile': '构建文件',
   'directoryManage.buildConfirm': '确定要构建文件 "{fileName}" 吗？',
   'directoryManage.buildSubmitted': '已提交构建任务，后台处理中',
+  'directoryManage.batchBuild': '批量构建',
+  'directoryManage.batchBuildWithCount': '批量构建({count})',
+  'directoryManage.batchBuildFiles': '批量构建文件',
+  'directoryManage.batchBuildConfirm': '确定要构建已选择的 {count} 个文件吗？',
+  'directoryManage.batchBuildSubmitted': '已提交 {count} 个构建任务，后台处理中',
+  'directoryManage.noBuildableFiles': '当前没有可构建的文件',
+  'directoryManage.selectFilesToBuild': '请先选择需要构建的文件',
   'directoryManage.buildFailed': '构建失败',
   'directoryManage.resolveFilePathFailed': '无法解析文件路径，请稍后重试',
   'directoryManage.missingKnowledgeBaseInfo': '缺少文档库信息',

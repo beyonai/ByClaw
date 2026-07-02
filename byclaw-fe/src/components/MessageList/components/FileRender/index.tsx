@@ -32,6 +32,24 @@ export type IProps = {
   message?: IMessage;
 } & IFileRender;
 
+export const PREVIEWABLE = [
+  'h5',
+  'txt',
+  'html',
+  'pdf',
+  'md',
+  'image',
+  'jpg',
+  'json',
+  'png',
+  'gif',
+  'bmp',
+  'webp',
+  'pptx',
+  'docx',
+  'xlsx',
+];
+
 function FileRender(props: IProps) {
   const { fileItem, onClose, rightBottomRender, canQuote } = props;
   const intl = useIntl();
@@ -54,23 +72,7 @@ function FileRender(props: IProps) {
   const fileName = nameArr?.join('.');
 
   const canDownload = downloadUrl || queryFile?.fileUrl || queryFile?.fileId;
-  const canPreview = [
-    'h5',
-    'txt',
-    'html',
-    'pdf',
-    'md',
-    'image',
-    'jpg',
-    'json',
-    'png',
-    'gif',
-    'bmp',
-    'webp',
-    'pptx',
-    'docx',
-    'xlsx',
-  ].includes(fileType);
+  const canPreview = PREVIEWABLE.includes(fileType);
 
   const isLoading = status === 'uploading' || previewing || downloading;
 
@@ -182,7 +184,7 @@ function FileRender(props: IProps) {
           </div>
         )}
         <div style={{ position: 'relative' }}>
-          {imgUrl && <img src={imgUrl} alt="" className={styles.fileItemIcon} />}
+          {imgUrl && <img key={imgUrl} src={imgUrl} alt="" className={styles.fileItemIcon} />}
           {!imgUrl && <IconRender fileType={(fileType || '').toLowerCase()} />}
         </div>
         <div className={classnames(styles.fileItemInfo, 'ub-f1 overflow-hidden')}>

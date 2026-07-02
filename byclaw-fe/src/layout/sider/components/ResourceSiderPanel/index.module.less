@@ -94,15 +94,79 @@
 
 .resourceItem {
   cursor: default;
+  :global {
+    .@{antPrefix}-list-item-meta {
+      display: flex;
+    }
+    .@{antPrefix}-list-item-meta-content {
+      flex: 1;
+      overflow: hidden;
+    }
+  }
+}
+
+.resourceName {
+  display: block;
+  margin: 0;
+  min-width: 0;
+  color: var(--beyond-color-text-primary, #14161a);
+  font-size: var(--beyond-font-size, 14px);
+  font-weight: 500;
+  line-height: 20px;
+}
+
+.resourceNameRow {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  gap: 4px;
+}
+
+.resourceNameText {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.resourceDescription {
+  display: block;
+  margin: 0;
+  overflow: hidden;
+  color: var(--beyond-color-text-tertiary, #707680);
+  font-size: var(--beyond-font-size-sm, 12px);
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .skillSourceTag {
   flex: none;
-  margin-inline-end: 0;
   margin-left: 6px;
-  line-height: 18px;
-  border-radius: 10px;
-  font-size: 11px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background-color: rgba(22, 93, 255, 0.1);
+  max-width: 150px;
+  color: #088cff;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.skillSourceTagText {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+  background: linear-gradient(90deg, #088cff 0%, #00cdd5 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: #088cff;
 }
 
 .resourceAvatar {

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, Suspense } from 'react';
 import { createPortal } from 'react-dom';
 import { Segmented, Spin } from 'antd';
 import { EyeOutlined, FileDoneOutlined } from '@ant-design/icons';
@@ -7,13 +7,24 @@ import AntdIcon from '@/components/AntdIcon';
 import { copyWithMessage } from '@/utils/copy';
 import { BundledLanguage } from 'shiki';
 import { Animated } from '../Animated';
-import { KeepAlive } from '../KeepAlive';
-import { HtmlRender } from './Html';
-import TextHighlight from './TextHighlight';
-import MdPreview from './Md';
-import ImagePreview from './Image';
-import { Office } from './Office';
+// import { KeepAlive } from '../KeepAlive';
 import ss from './Twins.module.less';
+
+const HtmlRenderComponent = React.lazy(() =>
+  import('@/components/Preview/Html').then((module) => ({ default: module.HtmlRender }))
+);
+const TextHighlightComponent = React.lazy(() =>
+  import('@/components/Preview/TextHighlight').then((module) => ({ default: module.default }))
+);
+const MdPreviewComponent = React.lazy(() =>
+  import('@/components/Preview/Md').then((module) => ({ default: module.default }))
+);
+const ImagePreviewComponent = React.lazy(() =>
+  import('@/components/Preview/Image').then((module) => ({ default: module.default }))
+);
+const OfficeComponent = React.lazy(() =>
+  import('@/components/Preview/Office').then((module) => ({ default: module.Office }))
+);
 
 const typeMap: Record<string, string> = {
   md: 'text/markdown',
@@ -39,13 +50,21 @@ const langMap: Record<string, BundledLanguage> = {
   html: 'html',
 };
 
+const officeTypes = ['pptx', 'docx', 'xlsx'];
+
+const createNamedBlob = (blob: Blob, type: string, title?: string) => {
+  if (!title) return blob;
+
+  return new File([blob], title, { type: typeMap[type] || blob.type });
+};
+
 export interface TwinsProps {
   data?: string | Blob;
   type?: string;
   title?: string;
 }
 
-export const PreViewFile = (props: TwinsProps & { extra?: React.ReactNode; className?: string }) => {
+export const PreViewFile = React.memo((props: TwinsProps & { extra?: React.ReactNode; className?: string }) => {
   const { data, type = 'txt', title, extra, className } = props;
   const [tab, setTab] = useState<'source' | 'preview'>();
 
@@ -55,12 +74,25 @@ export const PreViewFile = (props: TwinsProps & { extra?: React.ReactNode; class
   /** 内容 - 用于展示源代码 */
   const [content, setContent] = useState<[ext: string, data: string]>();
   const [loading, setLoading] = useState(false);
+  const canDownload = !!uri || (data instanceof Blob && officeTypes.includes(type));
 
   const onDownload = () => {
-    if (!uri) return;
+    let downloadUrl = uri;
+
+    if (!downloadUrl && data instanceof Blob && officeTypes.includes(type)) {
+      downloadUrl = URL.createObjectURL(createNamedBlob(data, type, title));
+      setTimeout(() => {
+        if (downloadUrl) {
+          URL.revokeObjectURL(downloadUrl);
+        }
+      }, 0);
+    }
+
+    if (!downloadUrl) return;
+
     const a = document.createElement('a');
 
-    a.href = uri;
+    a.href = downloadUrl;
     a.download = title || 'preview.md';
     a.click();
   };
@@ -72,7 +104,9 @@ export const PreViewFile = (props: TwinsProps & { extra?: React.ReactNode; class
   useEffect(() => {
     let _uri: string | undefined;
 
-    if (data instanceof Blob) {
+    setUri(undefined);
+
+    if (data instanceof Blob && !officeTypes.includes(type)) {
       let blob: Blob = data;
 
       // 可查看源码
@@ -95,8 +129,7 @@ export const PreViewFile = (props: TwinsProps & { extra?: React.ReactNode; class
       }
 
       if (title) {
-        const _type = typeMap[type || 'txt'];
-        blob = new File([data], title, { type: _type });
+        blob = createNamedBlob(data, type, title);
       }
 
       _uri = URL.createObjectURL(blob);
@@ -107,25 +140,26 @@ export const PreViewFile = (props: TwinsProps & { extra?: React.ReactNode; class
     }
     return () => {
       setContent(undefined);
-      if (uri) URL.revokeObjectURL(uri);
+      if (_uri) URL.revokeObjectURL(_uri);
     };
   }, [data, type, title]);
 
   const tabs = useMemo(() => {
     const _tabs: any[] = [];
     // 可预览
-    if (
-      ['h5', 'html', 'pdf', 'md', 'image', 'jpg', 'png', 'gif', 'bmp', 'webp', 'pptx', 'docx', 'xlsx'].includes(type)
-    ) {
+    if (['h5', 'html', 'pdf', 'md', 'image', 'jpg', 'png', 'gif', 'bmp', 'webp', ...officeTypes].includes(type)) {
       _tabs.push({ value: 'preview', icon: <EyeOutlined /> });
     }
     if (content) {
       _tabs.push({ value: 'source', icon: <FileDoneOutlined /> });
     }
-    if (_tabs.length) setTab(_tabs[0].value);
+    if (_tabs.length) {
+      setTab(_tabs[0].value);
+    } else {
+      setTab(undefined);
+    }
     return _tabs;
   }, [uri, content]);
-
   return (
     <section className={cn(ss.twins, className)}>
       <nav className={ss.twins}>
@@ -139,9 +173,11 @@ export const PreViewFile = (props: TwinsProps & { extra?: React.ReactNode; class
         )}
 
         <span style={{ flex: 1 }} />
-        <span className={ss.icon}>
-          <AntdIcon type="icon-a-Downloadxiazai" onClick={onDownload} />
-        </span>
+        {canDownload && (
+          <span className={ss.icon}>
+            <AntdIcon type="icon-a-Downloadxiazai" onClick={onDownload} />
+          </span>
+        )}
         <span className={ss.icon} style={{ display: ['h5', 'html', 'md', 'txt'].includes(type) ? '' : 'none' }}>
           <AntdIcon type="icon-a-Copyfuzhi1" onClick={onCopy} />
         </span>
@@ -153,35 +189,50 @@ export const PreViewFile = (props: TwinsProps & { extra?: React.ReactNode; class
             <Spin />
           </div>
         )}
-        {!!content && (
-          <KeepAlive active={tab === 'source'}>
-            <TextHighlight content={content[1]} lang={content[0] as any} lineNumber />
-          </KeepAlive>
-        )}
-        {!!uri && ['h5', 'html', 'pdf'].includes(type) && (
-          <KeepAlive active={tab === 'preview'}>
-            <HtmlRender href={uri} />
-          </KeepAlive>
-        )}
-        {!!uri && ['jpg', 'png', 'gif', 'bmp', 'webp'].includes(type) && (
-          <KeepAlive active={tab === 'preview'}>
-            <ImagePreview url={uri} title={title} />
-          </KeepAlive>
-        )}
-        {!!uri && type === 'md' && (
-          <KeepAlive active={tab === 'preview'}>
-            <MdPreview content={content?.[1]} />
-          </KeepAlive>
-        )}
-        {data && ['pptx', 'xlsx', 'docx'].includes(type) && (
-          <KeepAlive active={tab === 'preview'}>
-            <Office data={data} type={type} />
-          </KeepAlive>
-        )}
+        <div style={{ display: !!content && tab === 'source' ? 'block' : 'none' }} className={ss.textPane}>
+          <Suspense fallback={<Spin />}>
+            <TextHighlightComponent content={content?.[1]} lang={content?.[0] as any} lineNumber />
+          </Suspense>
+        </div>
+        <div
+          style={{ display: !!uri && tab === 'preview' && ['h5', 'html', 'pdf'].includes(type) ? 'block' : 'none' }}
+          className={'full-width full-height'}
+        >
+          <Suspense fallback={<Spin />}>
+            <HtmlRenderComponent href={uri} />
+          </Suspense>
+        </div>
+        <div
+          style={{
+            display:
+              !!uri && tab === 'preview' && ['jpg', 'png', 'gif', 'bmp', 'webp'].includes(type) ? 'block' : 'none',
+          }}
+          className={'full-width full-height'}
+        >
+          <Suspense fallback={<Spin />}>
+            <ImagePreviewComponent url={uri} title={title} />
+          </Suspense>
+        </div>
+        <div
+          style={{ display: !!uri && tab === 'preview' && ['md'].includes(type) ? 'block' : 'none' }}
+          className={ss.textPane}
+        >
+          <Suspense fallback={<Spin />}>
+            <MdPreviewComponent content={content?.[1]} />
+          </Suspense>
+        </div>
+        <div
+          style={{ display: data && tab === 'preview' && officeTypes.includes(type) ? 'block' : 'none' }}
+          className={'full-width full-height'}
+        >
+          <Suspense fallback={<Spin />}>
+            <OfficeComponent data={data} type={type} />
+          </Suspense>
+        </div>
       </div>
     </section>
   );
-};
+});
 
 export default function Twins(props: TwinsProps) {
   const { data, type = 'txt', title } = props;

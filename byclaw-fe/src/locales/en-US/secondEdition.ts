@@ -271,11 +271,15 @@ export default {
   'fileBrowser.column.actions': 'Actions',
   'fileBrowser.toolbar.upload': 'Upload',
   'fileBrowser.toolbar.newFolder': 'New Folder',
+  'fileBrowser.action.newSubFolder': 'New Subfolder',
+  'fileBrowser.action.newSiblingFolder': 'New Sibling Folder',
   'fileBrowser.toolbar.refresh': 'Refresh',
+  'fileBrowser.toolbar.locate': 'Locate',
   'fileBrowser.toolbar.move': 'Move',
   'fileBrowser.toolbar.delete': 'Delete',
   'fileBrowser.toolbar.back': 'Go back',
   'fileBrowser.toolbar.search': 'Search files and folders',
+  'fileBrowser.search.back': 'Back',
   'fileBrowser.action.preview': 'Preview',
   'fileBrowser.action.download': 'Download',
   'fileBrowser.action.rename': 'Rename',
@@ -337,5 +341,5 @@ export default {
   'fileSider.saveToKnowledge.rootTip': 'No folders in this directory. You can save here directly',
   'fileSider.saveToKnowledge.noManagePermission':
     'You do not have management permission for knowledge bases under the current digital employee.',
-  'context.used.format': '{percent}% context used. {usedTokens} / {contextTokens}',
+  'context.used.format': '{percent}% context used, {usedTokens} / {contextTokens}',
 };

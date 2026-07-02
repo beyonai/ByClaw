@@ -294,3 +294,104 @@
 .searchInput {
   width: 300px;
 }
+
+/* 小面板弹窗：列表形态 */
+.compactStateWrap {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.compactList {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 4px;
+
+  &::-webkit-scrollbar {
+    width: 4px;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: #e8e8e8;
+    border-radius: 2px;
+  }
+}
+
+.compactListItem {
+  cursor: pointer;
+}
+
+.compactActionTrigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  color: #707680;
+  cursor: pointer;
+
+  &:hover {
+    background-color: rgba(22, 93, 255, 0.1);
+    color: var(--beyond-color-primary);
+  }
+}
+
+.compactAvatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  color: #165dff;
+}
+
+.compactAvatarImage {
+  width: 32px;
+  height: 32px;
+  display: block;
+  border-radius: 8px;
+  object-fit: cover;
+}
+
+.skillDefaultAvatar {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  display: block;
+  overflow: hidden;
+  border-radius: 8px;
+  background: radial-gradient(circle at 74% 22%, rgba(255, 255, 255, 0.78) 0, rgba(255, 255, 255, 0) 34%),
+    linear-gradient(145deg, #fce4c8 0%, #f7f0ff 48%, #d8f5e8 100%);
+  box-shadow: inset 0 0 0 1px rgba(20, 22, 26, 0.04);
+}
+
+.skillDefaultAvatarOrb {
+  position: absolute;
+  top: 6px;
+  right: 5px;
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(255, 172, 116, 0.42));
+  box-shadow: 0 8px 18px rgba(217, 103, 61, 0.18);
+}
+
+.compactTitleRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.compactDesc {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #9aa1ac;
+  font-size: 12px;
+}

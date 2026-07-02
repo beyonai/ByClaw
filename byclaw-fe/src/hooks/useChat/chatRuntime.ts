@@ -233,7 +233,11 @@ export const flushRestoredChatStreamBuffer = (restoreKey: string) => {
 export const handleChatStreamError = (message: any) => {
   const context = findChatStreamContext(message);
   if (!context) return;
-  set(context.answerMsg, 'messageTip', get(message, 'message') || get(message, 'chatContent') || 'WebSocket error');
+  const errorMsg = get(message, 'message') || get(message, 'chatContent') || 'WebSocket error';
+  set(context.answerMsg, 'messageTip', errorMsg);
+  if (!context.answerMsg.text) {
+    set(context.answerMsg, 'text', errorMsg);
+  }
   completeChatStreamContext(context, IMessageState.Error);
   context.answerMsg = context.updateMessage(context.answerMsg);
 };

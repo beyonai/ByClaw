@@ -37,12 +37,13 @@ export interface KnowledgeTargetSelectorProps {
   onLoadFolderChildren?: (directoryPath: string) => Promise<QueryDirAndFileByLevelItem[] | void>;
   emptyText?: React.ReactNode;
   folderEmptyText?: React.ReactNode;
+  footerExtra?: React.ReactNode;
   className?: string;
 }
 
 type KnowledgeTargetSelectorContentProps = Omit<
   KnowledgeTargetSelectorProps,
-  'open' | 'onOk' | 'onCancel' | 'confirmLoading' | 'okDisabled' | 'width' | 'zIndex' | 'destroyOnClose'
+  'open' | 'onOk' | 'onCancel' | 'confirmLoading' | 'okDisabled' | 'width' | 'zIndex' | 'destroyOnClose' | 'footerExtra'
 >;
 
 function normalizeDirectoryPath(path?: string) {
@@ -290,6 +291,7 @@ const KnowledgeTargetSelector: React.FC<KnowledgeTargetSelectorProps> = (props) 
     width = 900,
     zIndex,
     destroyOnClose = true,
+    footerExtra,
     ...selectorProps
   } = props;
   const intl = useIntl();
@@ -309,6 +311,7 @@ const KnowledgeTargetSelector: React.FC<KnowledgeTargetSelectorProps> = (props) 
       destroyOnClose={destroyOnClose}
     >
       <KnowledgeTargetSelectorContent {...selectorProps} />
+      {footerExtra}
     </Modal>
   );
 };

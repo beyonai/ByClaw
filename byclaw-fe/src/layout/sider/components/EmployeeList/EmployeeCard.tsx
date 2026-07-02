@@ -51,6 +51,8 @@ const EmployeeCard: React.FC<EmployeeCardProps> = ({
   const intl = useIntl();
 
   const isInput = isInputMode(chatMode);
+  const shouldShowTag = employee?.tagName || employee?.isDefault;
+  const defaultTagText = intl.formatMessage({id: 'resource.defaultDigitalEmployee'});
 
   const menuItems = (item: IAgentCache) => {
     const items = [];
@@ -273,14 +275,13 @@ const EmployeeCard: React.FC<EmployeeCardProps> = ({
                   {employee?.resourceName || employee?.name || employee?.id || ''}
                 </span>
                 {`${employee?.isTop}` === '1' && <AntdIcon type="icon-zhiding-fill" className={styles.pinBadge} />}
-                {employee?.tagName && (
-                  <span className={styles.tag}>
+                {shouldShowTag && (
+                  <span className={classNames(styles.tag, { [styles.defaultTag]: employee?.isDefault })}>
                     <span className={styles.tagText}>
-                      {employee?.tagName}
                       {employee?.isDefault ? (
-                        <>（{intl.formatMessage({ id: 'resource.currentDefaultAssistant' })}）</>
+                        <span className={styles.defaultTagText}>{defaultTagText}</span>
                       ) : (
-                        ''
+                        employee?.tagName 
                       )}
                     </span>
                   </span>

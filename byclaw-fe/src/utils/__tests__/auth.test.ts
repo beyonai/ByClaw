@@ -86,7 +86,7 @@ describe('utils/auth', () => {
   it('initAdminVipList caches config values from service', async () => {
     const auth = loadAuthModule();
     const { getDcSystemConfigValueByCodes } = require('@/service/layout');
-    getDcSystemConfigValueByCodes.mockResolvedValue([{ paramCode: 'USERCODE', paramValue: '["alice","bob"]' }]);
+    getDcSystemConfigValueByCodes.mockResolvedValue([{ paramCode: 'USERCODE_CONFIG', paramValue: '["alice","bob"]' }]);
 
     await auth.initAdminVipList();
 
@@ -99,7 +99,7 @@ describe('utils/auth', () => {
     const auth = loadAuthModule();
     const { getDcSystemConfigValueByCodes } = require('@/service/layout');
     const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
-    getDcSystemConfigValueByCodes.mockResolvedValue([{ paramCode: 'USERCODE', paramValue: '{invalid}' }]);
+    getDcSystemConfigValueByCodes.mockResolvedValue([{ paramCode: 'USERCODE_CONFIG', paramValue: '{invalid}' }]);
 
     await auth.initAdminVipList();
 

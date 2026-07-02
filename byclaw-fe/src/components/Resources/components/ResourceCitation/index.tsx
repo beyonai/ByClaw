@@ -5,7 +5,11 @@ import { debounce, trim } from 'lodash';
 import classnames from 'classnames';
 import AntdIcon from '@/components/AntdIcon';
 import withDrag, { DragType } from '@/components/QueryInput/withDrag';
+import { ResourceTypeMap } from '@/constants/resource';
+import { getResourceImageUrl } from '@/layout/sider/components/ResourceSiderPanel/ResourceSiderListItem';
+import { getFileUrl } from '@/utils/file';
 import styles from './index.module.less';
+import employeeStyles from '@/layout/sider/components/EmployeeList/index.module.less';
 // import Empty from '@/components/Empty';
 import {
   listResourceUseAuth,
@@ -37,6 +41,7 @@ interface IResourceItem {
   objectKey?: string;
   isFromResourceModule?: boolean;
   skillPath?: string;
+  skillUrl?: string;
 }
 
 interface Props {
@@ -52,6 +57,9 @@ interface Props {
   ownerType?: string;
   resources?: IResourceItem[];
   loadingOverride?: boolean;
+
+  /** 渲染形态：grid（默认，卡片网格）或 list（列表，用于小面板弹窗） */
+  layout?: 'grid' | 'list';
 }
 
 const ResourceList = (props: Props) => {
@@ -67,6 +75,7 @@ const ResourceList = (props: Props) => {
     agentId,
     resources,
     loadingOverride,
+    layout = 'grid',
   } = props;
 
   const { EventEmitter, sessionId } = useGlobal();
@@ -383,10 +392,36 @@ const ResourceList = (props: Props) => {
     }
   };
 
+  const renderCompactAvatar = (item: IResourceItem) => {
+    const resourceImage = getResourceImageUrl(item);
+
+    if (resourceType === 'SKILL' && resourceImage) {
+      return (
+        <img
+          key={getFileUrl(resourceImage)}
+          className={styles.compactAvatarImage}
+          src={getFileUrl(resourceImage)}
+          alt=""
+          fetchPriority="low"
+        />
+      );
+    }
+
+    if (resourceType === 'SKILL' && item.resourceBizType === ResourceTypeMap.SKILL) {
+      return (
+        <span className={styles.skillDefaultAvatar}>
+          <span className={styles.skillDefaultAvatarOrb} />
+        </span>
+      );
+    }
+
+    return <AntdIcon type={getResourceIcon(item.resourceName)} className={styles.defaultLogoIcon} />;
+  };
+
   // 处理技能下载（带防抖）
   const handleDownloadSkill = useMemo(() => {
     const download = async (item: IResourceItem) => {
-      const skillPath = item.skillPath || item.resourceId || item.objectKey;
+      const skillPath = item.skillUrl || item.skillPath;
       if (!skillPath) {
         message.error(intl.formatMessage({ id: 'resource.skillDownload.noSkillPath' }));
         return;
@@ -696,6 +731,113 @@ const ResourceList = (props: Props) => {
     );
   };
 
+  // 渲染卡片/列表项的操作下拉菜单（详情 / 下载 / 删除）
+  const renderActionDropdown = (item: IResourceItem, variant: 'grid' | 'list' = 'grid'): React.ReactNode => {
+    if (resourceType !== 'OBJECT' && resourceType !== 'VIEW' && resourceType !== 'SPACE' && resourceType !== 'SKILL') {
+      return null;
+    }
+    return (
+      <Dropdown
+        trigger={variant === 'list' ? ['hover'] : undefined}
+        menu={{
+          onClick: ({ domEvent }) => {
+            domEvent.stopPropagation();
+          },
+          items: [
+            ...(resourceType === 'OBJECT' || resourceType === 'VIEW'
+              ? [
+                {
+                  key: 'detail',
+                  label: intl.formatMessage({ id: 'common.detail' }),
+                  onClick: () => handleMoreClick({ stopPropagation: () => {} } as React.MouseEvent, item),
+                },
+              ]
+              : []),
+            ...(resourceType === 'SPACE'
+              ? [
+                {
+                  key: 'download',
+                  label: intl.formatMessage({ id: 'common.download' }),
+                  onClick: async () => {
+                    try {
+                      const userCode = userInfo?.userCode || '3174953401447148';
+                      const parts = item.objectKey?.split('/') || [];
+                      const sessionId = parts.length >= 2 ? parts[2] : '10026200';
+                      const filePath = item.resourceName || '';
+
+                      const response = await readFile({
+                        userCode,
+                        sessionId,
+                        filePath,
+                        begin_line: 0,
+                        end_line: -1,
+                        objectKey: item.objectKey || '',
+                      });
+
+                      if (response?.file) {
+                        const blob = new Blob([response.file], { type: 'text/plain' });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = item.resourceName || 'file.md';
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(url);
+                      } else {
+                        message.error(intl.formatMessage({ id: 'resource.downloadFailedNoContent' }));
+                      }
+                    } catch (error) {
+                      console.error('下载失败：', error);
+                      message.error(intl.formatMessage({ id: 'resource.downloadFailedRetry' }));
+                    }
+                  },
+                },
+              ]
+              : []),
+            ...(resourceType === 'SKILL'
+              ? [
+                {
+                  key: 'download',
+                  label: intl.formatMessage({ id: 'common.download' }),
+                  onClick: () => handleDownloadSkill(item),
+                  disabled: !!deletingSkill,
+                },
+                {
+                  key: 'delete',
+                  label: intl.formatMessage({ id: 'common.delete' }),
+                  onClick: () => handleDeleteSkill(item),
+                  disabled: !!downloadingSkill,
+                  danger: true,
+                },
+              ]
+              : []),
+          ],
+        }}
+        placement="bottomRight"
+      >
+        {variant === 'list' ? (
+          <span
+            className={styles.compactActionTrigger}
+            onClick={(event) => {
+              event.stopPropagation();
+            }}
+          >
+            <AntdIcon type="icon-a-Moregengduo" />
+          </span>
+        ) : (
+          <Button
+            className={classnames(styles.skillPosterActionBtn, styles.cardActionBtnWrapper)}
+            icon={<AntdIcon type="icon-a-Moregengduo" className={styles.cardActionBtnIcon} />}
+            onClick={(event) => {
+              event.stopPropagation();
+            }}
+          />
+        )}
+      </Dropdown>
+    );
+  };
+
   useEffect(() => {
     const reload = (resourceType: string) => {
       loadResources(true, resourceType);
@@ -710,127 +852,81 @@ const ResourceList = (props: Props) => {
 
   return (
     <div className={styles.container} style={style}>
-      <div className={styles.cardGrid} id={`${resourceType}ListScroller`}>
-        {resourceList.map((item) => (
-          <Draggable key={item.resourceId} data={item} disabled={disableClick}>
-            <div
-              className={classnames(styles.card, { [styles.disabledCard]: disableClick })}
-              onClick={disableClick ? undefined : () => onSelect?.({ ...item, isFromResourceModule: true })}
-            >
-              <div className={styles.cardHeader}>
-                <div className={styles.defaultLogo}>
-                  <AntdIcon type={getResourceIcon(item.resourceName)} className={styles.defaultLogoIcon} />
+      {layout === 'list' ? (
+        loading ? (
+          <div className={classnames('ub ub-ac ub-pc', styles.compactStateWrap)}>
+            <Spin />
+          </div>
+        ) : resourceList.length === 0 ? (
+          <div className={classnames('ub ub-ac ub-pc', styles.compactStateWrap)}>
+            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} />
+          </div>
+        ) : (
+          <List
+            className={classnames(employeeStyles.employeesList, styles.compactList)}
+            dataSource={resourceList}
+            split={false}
+            renderItem={(item) => (
+              <Draggable key={item.resourceId} data={item} disabled={disableClick}>
+                <List.Item
+                  className={classnames(styles.compactListItem, { [styles.disabledCard]: disableClick })}
+                  onClick={disableClick ? undefined : () => onSelect?.({ ...item, isFromResourceModule: true })}
+                  actions={[renderActionDropdown(item, 'list')].filter(Boolean) as React.ReactNode[]}
+                >
+                  <List.Item.Meta
+                    avatar={
+                      <span className={styles.compactAvatar}>
+                        {renderCompactAvatar(item)}
+                      </span>
+                    }
+                    title={
+                      <span className={styles.compactTitleRow}>
+                        <span className={styles.nameText}>{item.resourceName}</span>
+                        {renderResourceBizTypeTag(item.resourceBizType)}
+                      </span>
+                    }
+                    description={
+                      item.resourceDesc ? <span className={styles.compactDesc}>{item.resourceDesc}</span> : null
+                    }
+                  />
+                </List.Item>
+              </Draggable>
+            )}
+          />
+        )
+      ) : (
+        <div className={styles.cardGrid} id={`${resourceType}ListScroller`}>
+          {resourceList.map((item) => (
+            <Draggable key={item.resourceId} data={item} disabled={disableClick}>
+              <div
+                className={classnames(styles.card, { [styles.disabledCard]: disableClick })}
+                onClick={disableClick ? undefined : () => onSelect?.({ ...item, isFromResourceModule: true })}
+              >
+                <div className={styles.cardHeader}>
+                  <div className={styles.defaultLogo}>
+                    <AntdIcon type={getResourceIcon(item.resourceName)} className={styles.defaultLogoIcon} />
+                  </div>
+                  <Tooltip title={item.resourceName} placement="bottom">
+                    <div className={styles.title}>{item.resourceName}</div>
+                  </Tooltip>
+                  {/* 标签 */}
+                  {renderResourceBizTypeTag(item.resourceBizType)}
+                  {renderActionDropdown(item)}
                 </div>
-                <Tooltip title={item.resourceName} placement="bottom">
-                  <div className={styles.title}>{item.resourceName}</div>
+                <Tooltip title={item.resourceDesc} placement="bottom">
+                  <div className={styles.desc}>{item.resourceDesc}</div>
                 </Tooltip>
-                {/* 标签 */}
-                {renderResourceBizTypeTag(item.resourceBizType)}
-                {(resourceType === 'OBJECT' ||
-                  resourceType === 'VIEW' ||
-                  resourceType === 'SPACE' ||
-                  resourceType === 'SKILL') && (
-                  <Dropdown
-                    menu={{
-                      onClick: ({ domEvent }) => {
-                        domEvent.stopPropagation();
-                      },
-                      items: [
-                        ...(resourceType === 'OBJECT' || resourceType === 'VIEW'
-                          ? [
-                            {
-                              key: 'detail',
-                              label: intl.formatMessage({ id: 'common.detail' }),
-                              onClick: () => handleMoreClick({ stopPropagation: () => {} } as React.MouseEvent, item),
-                            },
-                          ]
-                          : []),
-                        ...(resourceType === 'SPACE'
-                          ? [
-                            {
-                              key: 'download',
-                              label: intl.formatMessage({ id: 'common.download' }),
-                              onClick: async () => {
-                                try {
-                                  const userCode = userInfo?.userCode || '3174953401447148';
-                                  const parts = item.objectKey?.split('/') || [];
-                                  const sessionId = parts.length >= 2 ? parts[2] : '10026200';
-                                  const filePath = item.resourceName || '';
-
-                                  const response = await readFile({
-                                    userCode,
-                                    sessionId,
-                                    filePath,
-                                    begin_line: 0,
-                                    end_line: -1,
-                                    objectKey: item.objectKey || '',
-                                  });
-
-                                  if (response?.file) {
-                                    const blob = new Blob([response.file], { type: 'text/plain' });
-                                    const url = URL.createObjectURL(blob);
-                                    const a = document.createElement('a');
-                                    a.href = url;
-                                    a.download = item.resourceName || 'file.md';
-                                    document.body.appendChild(a);
-                                    a.click();
-                                    document.body.removeChild(a);
-                                    URL.revokeObjectURL(url);
-                                  } else {
-                                    message.error(intl.formatMessage({ id: 'resource.downloadFailedNoContent' }));
-                                  }
-                                } catch (error) {
-                                  console.error('下载失败：', error);
-                                  message.error(intl.formatMessage({ id: 'resource.downloadFailedRetry' }));
-                                }
-                              },
-                            },
-                          ]
-                          : []),
-                        ...(resourceType === 'SKILL'
-                          ? [
-                            {
-                              key: 'download',
-                              label: intl.formatMessage({ id: 'common.download' }),
-                              onClick: () => handleDownloadSkill(item),
-                              disabled: !!deletingSkill,
-                            },
-                            {
-                              key: 'delete',
-                              label: intl.formatMessage({ id: 'common.delete' }),
-                              onClick: () => handleDeleteSkill(item),
-                              disabled: !!downloadingSkill,
-                              danger: true,
-                            },
-                          ]
-                          : []),
-                      ],
-                    }}
-                    placement="bottomRight"
-                  >
-                    <Button
-                      className={classnames(styles.skillPosterActionBtn, styles.cardActionBtnWrapper)}
-                      icon={<AntdIcon type="icon-a-Moregengduo" className={styles.cardActionBtnIcon} />}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                      }}
-                    />
-                  </Dropdown>
-                )}
               </div>
-              <Tooltip title={item.resourceDesc} placement="bottom">
-                <div className={styles.desc}>{item.resourceDesc}</div>
-              </Tooltip>
-            </div>
-          </Draggable>
-        ))}
-      </div>
-      {loading && (
+            </Draggable>
+          ))}
+        </div>
+      )}
+      {layout !== 'list' && loading && (
         <div className={classnames('ub ub-ac ub-pc', styles.loadingContainer)}>
           <Spin />
         </div>
       )}
-      {!loading && resourceList.length === 0 && (
+      {layout !== 'list' && !loading && resourceList.length === 0 && (
         <div className={styles.emptyContainer}>
           <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} />
         </div>

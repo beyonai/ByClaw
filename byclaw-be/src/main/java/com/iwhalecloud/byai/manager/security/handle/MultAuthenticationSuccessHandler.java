@@ -35,6 +35,7 @@ import com.iwhalecloud.byai.common.util.threadPoolUti.ThreadPoolUtil;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.common.login.bean.LoginResponse;
 import com.iwhalecloud.byai.common.constants.Constants;
+import com.iwhalecloud.byai.state.application.service.tokensaver.TokenSaverProvisionService;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.ServletOutputStream;
 import jakarta.servlet.http.HttpServletRequest;
@@ -103,6 +104,9 @@ public class MultAuthenticationSuccessHandler implements AuthenticationSuccessHa
 
     @Autowired
     private AuthRedisSyncService authRedisSyncService;
+
+    @Autowired
+    private TokenSaverProvisionService tokenSaverProvisionService;
 
     private final Executor executor = ThreadPoolUtil.getThreadPool(8, 16, 32, 60, "refresh-aimodel");
 
@@ -199,6 +203,7 @@ public class MultAuthenticationSuccessHandler implements AuthenticationSuccessHa
             try {
                 sandboxService.launchSandbox(sandboxUserCode, null);
                 authRedisSyncService.asyncSyncUserAuthToRedis(loginInfo.getUserId());
+                tokenSaverProvisionService.provisionIfNeeded(loginInfo.getUserId(), sandboxUserCode);
             }
             catch (Exception e) {
                 logger.warn("登录后异步启动沙箱失败，用户编码：{}", sandboxUserCode, e);

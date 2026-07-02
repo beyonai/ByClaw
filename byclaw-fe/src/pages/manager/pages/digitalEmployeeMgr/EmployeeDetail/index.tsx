@@ -34,7 +34,7 @@ import Manage from './Manage';
 import Operation from './Operation';
 
 const PREVIEW_HOST = `${window.location.origin}${window.routerBase === '/' ? '/' : window.routerBase}`;
-const DIGITAL_EMPLOYEE_TEXT_FIELD_MAX_LENGTH = 4000;
+const DIGITAL_EMPLOYEE_TEXT_FIELD_MAX_LENGTH = 5000;
 const DIGITAL_EMPLOYEE_TEXT_FIELD_CONFIG = [
   { key: 'resourceDesc', labelId: 'employeeDetail.digitalEmployeeDesc' },
   { key: 'ability', labelId: 'employeeDetail.coreAbility' },
@@ -51,12 +51,60 @@ const DIGITAL_EMPLOYEE_TEXT_FIELD_CONFIG = [
 
 const getTextLength = (value) => Array.from(`${value ?? ''}`).length;
 
-const getOverLengthDigitalEmployeeField = (payload) =>
-  DIGITAL_EMPLOYEE_TEXT_FIELD_CONFIG.map((item) => ({
-    ...item,
-    length: getTextLength(payload?.[item.key]),
-    maxLength: item.maxLength || DIGITAL_EMPLOYEE_TEXT_FIELD_MAX_LENGTH,
-  })).find((item) => item.length > item.maxLength);
+const getPromptFieldLabelText = (item, isEN) => {
+  const defaultName = isEN ? item?.nameEn || item?.name : item?.name || item?.nameEn;
+  if (defaultName) return defaultName;
+  return item?.key;
+};
+
+const parseJsonRecursively = (value, maxDepth = 5) => {
+  if (maxDepth <= 0 || typeof value !== 'string') return value;
+  try {
+    const parsed = JSON.parse(value);
+    return typeof parsed === 'string' ? parseJsonRecursively(parsed, maxDepth - 1) : parsed;
+  } catch {
+    return value;
+  }
+};
+
+const getOverLengthPromptField = (corePersonaDefinition, isEN, maxLength = DIGITAL_EMPLOYEE_TEXT_FIELD_MAX_LENGTH) => {
+  if (!corePersonaDefinition) return null;
+
+  try {
+    const parsedData = parseJsonRecursively(corePersonaDefinition);
+    const promptList = typeof parsedData === 'string' ? JSON.parse(parsedData) : parsedData;
+    if (!Array.isArray(promptList)) return null;
+
+    return promptList
+      .map((item) => {
+        const value = item?.value ?? '';
+        return {
+          key: item?.key,
+          labelText: getPromptFieldLabelText(item, isEN),
+          length: getTextLength(value),
+          maxLength,
+        };
+      })
+      .find((item) => item.length > item.maxLength);
+  } catch {
+    return null;
+  }
+};
+
+const getOverLengthDigitalEmployeeField = (payload, isEN, promptMaxLength = DIGITAL_EMPLOYEE_TEXT_FIELD_MAX_LENGTH) => {
+  const overLengthPromptField = getOverLengthPromptField(payload?.corePersonaDefinition, isEN, promptMaxLength);
+  if (overLengthPromptField) {
+    return overLengthPromptField;
+  }
+
+  return DIGITAL_EMPLOYEE_TEXT_FIELD_CONFIG.filter((item) => item.key !== 'corePersonaDefinition')
+    .map((item) => ({
+      ...item,
+      length: getTextLength(payload?.[item.key]),
+      maxLength: item.maxLength || DIGITAL_EMPLOYEE_TEXT_FIELD_MAX_LENGTH,
+    }))
+    .find((item) => item.length > item.maxLength);
+};
 
 export const skillHandler = (it) => {
   const resourceType = it.grantResourceType || it.resourceBizType;
@@ -144,41 +192,103 @@ const parseDigitalEmployeeTemplates = (value) => {
   return [value];
 };
 
-const parseJsonRecursively = (value, maxDepth = 5) => {
-  if (maxDepth <= 0 || typeof value !== 'string') return value;
-  try {
-    const parsed = JSON.parse(value);
-    return typeof parsed === 'string' ? parseJsonRecursively(parsed, maxDepth - 1) : parsed;
-  } catch {
-    return value;
-  }
-};
-
 const normalizePromptConfigKey = (key, item = {}) => {
   const candidates = [key, item?.name, item?.nameEn, item?.paramName, item?.paramEnName].filter(Boolean);
   if (candidates.some((value) => ['agent', '工作规范', 'Work Specification'].includes(value))) {
     return 'agent';
   }
+  if (
+    candidates.some((value) =>
+      ['persona', 'soul', 'corePersonaDefinition', '人格定义', 'Persona', 'Personality Definition'].includes(value)
+    )
+  ) {
+    return 'soul';
+  }
+  if (candidates.some((value) => ['tool', 'tools', '工具规范', 'Tool Specification'].includes(value))) {
+    return 'tools';
+  }
+  if (candidates.some((value) => ['memory', '记忆规范', 'Memory Specification'].includes(value))) {
+    return 'memory';
+  }
   return key;
 };
 
-const extractWorkStandardFromCorePersonaDefinition = (value) => {
-  if (!value) return '';
+const extractPromptFieldsFromCorePersonaDefinition = (value) => {
+  const systemFieldValues = {};
+  const customPromptTabs = [];
+  const customPromptValues = {};
+  const systemFields = new Set([
+    'agent',
+    'soul',
+    'tools',
+    'memory',
+    'questionRewrite',
+    'questionDecomposition',
+    'singleSummary',
+    'multipleSummary',
+    'comprehensiveAnswer',
+    'corePersonaDefinition',
+    'workStandard',
+    'toolStandard',
+    'memoryStandard',
+  ]);
+
+  if (!value) {
+    return { systemFieldValues, customPromptTabs, customPromptValues };
+  }
+
   try {
     const parsedData = parseJsonRecursively(value);
     const corePersonaData = typeof parsedData === 'string' ? JSON.parse(parsedData) : parsedData;
-    let workStandard = '';
+
     if (Array.isArray(corePersonaData)) {
-      const agentPrompt = corePersonaData.find((item) => normalizePromptConfigKey(item?.key, item) === 'agent');
-      workStandard = agentPrompt?.value || '';
+      corePersonaData.forEach((item) => {
+        if (!item?.key) return;
+
+        const key = normalizePromptConfigKey(item.key, item);
+        const normalizedValue = parseJsonRecursively(item.value || '');
+        const fieldValue =
+          typeof normalizedValue === 'string' ? normalizedValue : JSON.stringify(normalizedValue || '');
+
+        if (systemFields.has(key)) {
+          systemFieldValues[key] = fieldValue;
+          return;
+        }
+
+        if (fieldValue) {
+          customPromptTabs.push({
+            key,
+            name: item.name || key,
+          });
+          customPromptValues[key] = fieldValue;
+        }
+      });
     } else if (corePersonaData && typeof corePersonaData === 'object') {
-      workStandard = corePersonaData.agent || corePersonaData.workStandard || '';
+      Object.keys(corePersonaData).forEach((rawKey) => {
+        const key = normalizePromptConfigKey(rawKey);
+        const normalizedValue = parseJsonRecursively(corePersonaData[rawKey]);
+        const fieldValue =
+          typeof normalizedValue === 'string' ? normalizedValue : JSON.stringify(normalizedValue || '');
+
+        if (systemFields.has(key)) {
+          systemFieldValues[key] = fieldValue;
+          return;
+        }
+
+        if (fieldValue) {
+          customPromptTabs.push({
+            key,
+            name: key,
+          });
+          customPromptValues[key] = fieldValue;
+        }
+      });
     }
-    const normalizedValue = parseJsonRecursively(workStandard);
-    return typeof normalizedValue === 'string' ? normalizedValue : JSON.stringify(normalizedValue || '');
   } catch {
-    return '';
+    return { systemFieldValues, customPromptTabs, customPromptValues };
   }
+
+  return { systemFieldValues, customPromptTabs, customPromptValues };
 };
 
 const getDigitalEmployeeTemplate = (templates, ownerType, agentType) => {
@@ -188,6 +298,20 @@ const getDigitalEmployeeTemplate = (templates, ownerType, agentType) => {
     list.find((item) => item?.ownerType === effectiveOwnerType);
 
   return findTemplate(templates) || {};
+};
+
+const getDigitalEmployeeTemplateMaxLength = (templates, ownerType, agentType) => {
+  const list = Array.isArray(templates) ? templates : [];
+  const effectiveOwnerType = ownerType === 'personal' ? 'personal' : 'enterprise';
+  const ownerTemplates = list.filter((item) => item?.ownerType === effectiveOwnerType);
+  const matchedTemplate =
+    effectiveOwnerType === 'personal'
+      ? ownerTemplates.find((item) => item?.key === 'BYCLAW_ASSISTANT') ||
+        ownerTemplates.find((item) => item?.agentType === '001') ||
+        ownerTemplates[0]
+      : ownerTemplates.find((item) => item?.agentType === agentType);
+
+  return Number(matchedTemplate?.maxLength) || DIGITAL_EMPLOYEE_TEXT_FIELD_MAX_LENGTH;
 };
 
 const EmployeeDetail = ({ loading }) => {
@@ -268,6 +392,7 @@ const EmployeeDetail = ({ loading }) => {
   }, [agentId, ownerType, queryCatalogId, form]);
   const agentName = Form.useWatch('resourceName', form);
   const ask = Form.useWatch('descText', form);
+  const watchedOwnerType = Form.useWatch('ownerType', form, { form, preserve: true });
   const homeType = Form.useWatch('homeType', form, { form, preserve: true });
   const agentHomeUrl = Form.useWatch('agentHomeUrl', form, { form, preserve: true });
 
@@ -308,6 +433,7 @@ const EmployeeDetail = ({ loading }) => {
   const [detailAgentType, setDetailAgentType] = useState();
   const [detailCreateType, setDetailCreateType] = useState();
   const [resourceStatus, setResourceStatus] = useState();
+  const [promptFieldMaxLength, setPromptFieldMaxLength] = useState(DIGITAL_EMPLOYEE_TEXT_FIELD_MAX_LENGTH);
 
   const effectiveDigitalType = agentId ? detailCreateType || digitalType : digitalType;
 
@@ -632,57 +758,14 @@ const EmployeeDetail = ({ loading }) => {
             });
 
             // 从 corePersonaDefinition 中解析自定义 tab 和值（支持数组格式：[{name, key, value}, ...]）
-            let customPromptTabsFromCore: Array<{ key: string; name: string }> = [];
-            let customPromptValuesFromCore: Record<string, string> = {};
             const corePersonaDefinitionValue = res?.corePersonaDefinition || res?.personalityDefinition || '';
-            const promptWorkStandard = extractWorkStandardFromCorePersonaDefinition(corePersonaDefinitionValue);
+            const {
+              systemFieldValues: promptFieldValuesFromCore,
+              customPromptTabs: customPromptTabsFromCore,
+              customPromptValues: customPromptValuesFromCore,
+            } = extractPromptFieldsFromCorePersonaDefinition(corePersonaDefinitionValue);
+            const promptWorkStandard = promptFieldValuesFromCore.agent || promptFieldValuesFromCore.workStandard || '';
             const effectiveWorkStandard = promptWorkStandard || res?.workStandard || res?.roleAttributes || '';
-            try {
-              const corePersonaData = JSON.parse(corePersonaDefinitionValue);
-              const systemFields = [
-                'agent',
-                'soul',
-                'tools',
-                'memory',
-                'questionRewrite',
-                'questionDecomposition',
-                'singleSummary',
-                'multipleSummary',
-                'comprehensiveAnswer',
-                'corePersonaDefinition',
-                'workStandard',
-                'toolStandard',
-                'memoryStandard',
-              ];
-
-              if (Array.isArray(corePersonaData)) {
-                // 数组格式：[{name, key, value}, ...]
-                corePersonaData.forEach((item) => {
-                  if (item && item.key && item.value) {
-                    if (!systemFields.includes(item.key)) {
-                      customPromptTabsFromCore.push({
-                        key: item.key,
-                        name: item.name || item.key,
-                      });
-                      customPromptValuesFromCore[item.key] = item.value;
-                    }
-                  }
-                });
-              } else if (typeof corePersonaData === 'object' && corePersonaData !== null) {
-                // 兼容旧的对象格式：{key: value, ...}
-                Object.keys(corePersonaData).forEach((key) => {
-                  if (!systemFields.includes(key) && corePersonaData[key]) {
-                    customPromptTabsFromCore.push({
-                      key: key,
-                      name: key,
-                    });
-                    customPromptValuesFromCore[key] = corePersonaData[key];
-                  }
-                });
-              }
-            } catch (error) {
-              console.error('解析失败 corePersonaDefinition:', error);
-            }
 
             const roleJson = JSON.stringify({
               processingFlow: res?.processingFlow || '',
@@ -690,18 +773,23 @@ const EmployeeDetail = ({ loading }) => {
               wordPreferences: res?.wordPreferences || '',
               sentenceAndTone: res?.sentenceAndTone || '',
               bundledSkills: parseBundledSkills(res?.skills || res?.bundledSkills || prologueRoleJson?.bundledSkills),
+              agent: promptFieldValuesFromCore.agent || effectiveWorkStandard,
+              soul: promptFieldValuesFromCore.soul || '',
+              tools: res?.toolStandard || promptFieldValuesFromCore.tools || '',
+              memory: res?.memoryStandard || promptFieldValuesFromCore.memory || '',
               workStandard: effectiveWorkStandard,
               corePersonaDefinition:
                 res?.corePersonaDefinition || res?.personalityDefinition || DEFAULT_PERSONALITY_DEFINITION,
               personalityDefinition:
                 res?.corePersonaDefinition || res?.personalityDefinition || DEFAULT_PERSONALITY_DEFINITION,
-              toolStandard: res?.toolStandard || '',
-              memoryStandard: res?.memoryStandard || '',
-              questionRewrite: res?.questionRewrite || '',
-              questionDecomposition: res?.questionDecomposition || '',
-              singleSummary: res?.singleSummary || '',
-              multipleSummary: res?.multipleSummary || '',
-              comprehensiveAnswer: res?.comprehensiveAnswer || '',
+              toolStandard: res?.toolStandard || promptFieldValuesFromCore.tools || '',
+              memoryStandard: res?.memoryStandard || promptFieldValuesFromCore.memory || '',
+              questionRewrite: res?.questionRewrite || promptFieldValuesFromCore.questionRewrite || '',
+              questionDecomposition:
+                res?.questionDecomposition || promptFieldValuesFromCore.questionDecomposition || '',
+              singleSummary: res?.singleSummary || promptFieldValuesFromCore.singleSummary || '',
+              multipleSummary: res?.multipleSummary || promptFieldValuesFromCore.multipleSummary || '',
+              comprehensiveAnswer: res?.comprehensiveAnswer || promptFieldValuesFromCore.comprehensiveAnswer || '',
               customPromptTabs:
                 customPromptTabsFromCore.length > 0
                   ? customPromptTabsFromCore
@@ -773,16 +861,21 @@ const EmployeeDetail = ({ loading }) => {
               wordPreferences: res?.wordPreferences || '',
               sentenceAndTone: res?.sentenceAndTone || '',
               bundledSkills: parseBundledSkills(res?.skills || res?.bundledSkills || prologueRoleJson?.bundledSkills),
+              agent: promptFieldValuesFromCore.agent || effectiveWorkStandard,
+              soul: promptFieldValuesFromCore.soul || '',
+              tools: res?.toolStandard || promptFieldValuesFromCore.tools || '',
+              memory: res?.memoryStandard || promptFieldValuesFromCore.memory || '',
               workStandard: effectiveWorkStandard,
               corePersonaDefinition:
                 res?.corePersonaDefinition || res?.personalityDefinition || DEFAULT_PERSONALITY_DEFINITION,
-              toolStandard: res?.toolStandard || '',
-              memoryStandard: res?.memoryStandard || '',
-              questionRewrite: res?.questionRewrite || '',
-              questionDecomposition: res?.questionDecomposition || '',
-              singleSummary: res?.singleSummary || '',
-              multipleSummary: res?.multipleSummary || '',
-              comprehensiveAnswer: res?.comprehensiveAnswer || '',
+              toolStandard: res?.toolStandard || promptFieldValuesFromCore.tools || '',
+              memoryStandard: res?.memoryStandard || promptFieldValuesFromCore.memory || '',
+              questionRewrite: res?.questionRewrite || promptFieldValuesFromCore.questionRewrite || '',
+              questionDecomposition:
+                res?.questionDecomposition || promptFieldValuesFromCore.questionDecomposition || '',
+              singleSummary: res?.singleSummary || promptFieldValuesFromCore.singleSummary || '',
+              multipleSummary: res?.multipleSummary || promptFieldValuesFromCore.multipleSummary || '',
+              comprehensiveAnswer: res?.comprehensiveAnswer || promptFieldValuesFromCore.comprehensiveAnswer || '',
               customPromptTabs:
                 customPromptTabsFromCore.length > 0
                   ? customPromptTabsFromCore
@@ -960,6 +1053,8 @@ const EmployeeDetail = ({ loading }) => {
   const fetchDefaultTemplate = useCallback(async () => {
     const applyTemplate = (templates = []) => {
       const templateConfig = getDigitalEmployeeTemplate(templates, ownerType, effectiveAgentType || agentType);
+      const nextMaxLength = getDigitalEmployeeTemplateMaxLength(templates, ownerType, effectiveAgentType || agentType);
+      setPromptFieldMaxLength(nextMaxLength);
       const relSkills = Array.isArray(templateConfig?.relSkills) ? templateConfig.relSkills : [];
       const relTools = Array.isArray(templateConfig?.relTools) ? templateConfig.relTools : [];
 
@@ -1002,6 +1097,33 @@ const EmployeeDetail = ({ loading }) => {
       applyTemplate();
     }
   }, [agentType, effectiveAgentType, ownerType, form]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const fetchPromptFieldMaxLength = async () => {
+      try {
+        const res = await getDcSystemConfig({ paramCode: 'TEMPLATE_DIGITAL_EMPLOYEE' });
+        if (cancelled) return;
+        const templates = parseDigitalEmployeeTemplates(res?.paramValue || res);
+        const nextMaxLength = getDigitalEmployeeTemplateMaxLength(
+          templates,
+          watchedOwnerType || ownerType,
+          effectiveAgentType || agentType
+        );
+        setPromptFieldMaxLength(nextMaxLength);
+      } catch {
+        if (!cancelled) {
+          setPromptFieldMaxLength(DIGITAL_EMPLOYEE_TEXT_FIELD_MAX_LENGTH);
+        }
+      }
+    };
+
+    fetchPromptFieldMaxLength();
+    return () => {
+      cancelled = true;
+    };
+  }, [agentType, effectiveAgentType, ownerType, watchedOwnerType]);
 
   useEffect(() => {
     if (agentId) {
@@ -1241,9 +1363,12 @@ const EmployeeDetail = ({ loading }) => {
             })()
           ),
         };
-        const overLengthField = getOverLengthDigitalEmployeeField(flattened);
+        const overLengthField = getOverLengthDigitalEmployeeField(flattened, isEN, promptFieldMaxLength);
         if (overLengthField) {
-          const fieldName = intl.formatMessage({ id: overLengthField.labelId }).replace(/[:：]\s*$/, '');
+          const fieldName = (overLengthField.labelText || intl.formatMessage({ id: overLengthField.labelId })).replace(
+            /[:：]\s*$/,
+            ''
+          );
           message.error(
             intl.formatMessage(
               { id: 'employeeDetail.fieldMaxLength' },
@@ -1380,6 +1505,7 @@ const EmployeeDetail = ({ loading }) => {
       intl,
       isFrontAccess,
       auditErrors,
+      promptFieldMaxLength,
     ]
   );
 

@@ -73,11 +73,21 @@ export default {
   'refineModal.abilityNamePlaceholder': '能力{index}名称',
   'refineModal.abilityDescPlaceholder': '请输入能力描述',
   'refineModal.workStandard': '工作规范',
+  'refineModal.workStandardPlaceholder': '请输入工作规范',
+  'refineModal.toolStandard': '工具规范',
+  'refineModal.toolStandardPlaceholder': '请输入工具规范',
+  'refineModal.memoryStandard': '记忆规范',
+  'refineModal.memoryStandardPlaceholder': '请输入记忆规范',
   'refineModal.step.basic': '基础信息',
   'refineModal.step.persona': '角色与人设',
   'refineModal.step.workflow': '工作规范',
   'refineModal.step.style': '沟通风格',
   'refineModal.progress': '已完成 {done} / {total} 项',
+  'refineModal.generating': '正在生成配置...',
+  'refineModal.waitingStream': '正在连接模型并准备生成结果',
+  'refineModal.streamProgress': '已接收 {count} 字符，正在分析字段',
+  'refineModal.generateFailed': '生成失败，请稍后重试',
+  'refineModal.generateIncomplete': '生成结果不完整，请重新生成',
 
   // 员工详情
   'employeeDetail.refine': '一键完善',
@@ -139,13 +149,11 @@ export default {
   'thirdPartyCreateModel.homeAddressRequired': '请输入首页地址',
 
   // ModelPopover
-  'modelPopover.largeModel': '大模型',
   'modelPopover.QALargeModelConfiguration': '问答大模型配置',
-  'modelPopover.history': '历史记录',
-  'modelPopover.temperature': '温度',
-  'modelPopover.maxToken': '回复上限',
-  'modelPopover.prompt': '提示词',
-  'modelPopover.promptPlaceholder': '描述图片的内容，要求简洁准确，层次分明',
+  'modelPopover.mine': '我的',
+  'modelPopover.public': '公共',
+  'modelPopover.noModels': '暂无模型',
+  'modelPopover.confirm': '确定',
 
   // BaseListModal
   'baseListModal.createTime': '创建时间',

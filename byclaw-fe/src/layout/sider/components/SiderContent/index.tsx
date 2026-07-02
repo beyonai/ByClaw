@@ -11,6 +11,7 @@ const Knowledge = lazy(() => import('@/layout/sider/components/Knowledge'));
 const ResourceSiderPanel = lazy(() => import('@/layout/sider/components/ResourceSiderPanel'));
 const SearchAndQuery = lazy(() => import('@/layout/sider/components/SearchAndQuery'));
 const FileSiderPanel = lazy(() => import('@/layout/sider/components/FileSiderPanel'));
+const ModelSiderPanel = lazy(() => import('@/layout/sider/components/ModelSiderPanel'));
 
 const ToolSiderPanel = () => <ResourceSiderPanel resourceType="TOOL" />;
 const ViewSiderPanel = () => <ResourceSiderPanel resourceType="VIEW" />;
@@ -42,6 +43,14 @@ export const tabItems: any[] = [
     ChildComponent: SearchAndQuery,
     navigatePath: '/searchAndQuery',
     forceRender: true,
+  },
+  {
+    key: 'model',
+    icon: 'icon-a-Braindanao',
+    activeIcon: 'icon-brain-filled',
+    label: 'common.model',
+    ChildComponent: ModelSiderPanel,
+    navigatePath: '/models',
   },
   {
     key: 'knowledge',
@@ -111,9 +120,8 @@ const SiderContent = (props: IProps) => {
 
   const items = useMemo(
     () =>
-      visibleKeys
-        .map((key) => tabItems.find((pageItem) => pageItem.key === key))
-        .filter((pageItem): pageItem is (typeof tabItems)[number] => !!pageItem)
+      tabItems
+        .filter((pageItem) => visibleKeys.includes(pageItem.key))
         .map((pageItem) => {
           const { key, ChildComponent, destroyOnHidden = false, disabled, forceRender = false } = pageItem;
           return {
