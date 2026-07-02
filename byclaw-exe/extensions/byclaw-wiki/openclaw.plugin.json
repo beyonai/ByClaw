@@ -1,7 +1,7 @@
 {
   "id": "byclaw-wiki",
   "name": "Byclaw Wiki",
-  "description": "Keep configured GitHub repositories indexed with CodeGraph and expose code_to_wiki for source-aware answers.",
+  "description": "Clone requested Git repositories on demand, index them with CodeGraph for fast source analysis, and generate/read Zread Wiki output.",
   "version": "0.1.0",
   "enabledByDefault": true,
   "activation": {
@@ -16,75 +16,9 @@
     "type": "object",
     "additionalProperties": false,
     "properties": {
-      "repositories": {
-        "type": "array",
-        "description": "Git repositories to mirror and index. Defaults to beyonai/ByClaw develop.",
-        "items": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "id",
-            "remoteUrl",
-            "branch"
-          ],
-          "properties": {
-            "id": {
-              "type": "string",
-              "description": "Stable repository id used by code_to_wiki."
-            },
-            "remoteUrl": {
-              "type": "string",
-              "description": "GitHub repository URL."
-            },
-            "branch": {
-              "type": "string",
-              "description": "Branch to clone, pull, and index."
-            },
-            "localPath": {
-              "type": "string",
-              "description": "Optional managed checkout path. Relative paths resolve under dataDir/repos."
-            }
-          }
-        }
-      },
       "dataDir": {
         "type": "string",
         "description": "Plugin data directory. Defaults to OPENCLAW_STATE_DIR/byclaw-wiki."
-      },
-      "timezone": {
-        "type": "string",
-        "description": "IANA timezone for the weekly sync schedule.",
-        "default": "Asia/Shanghai"
-      },
-      "syncDayOfWeek": {
-        "type": "number",
-        "description": "Scheduled sync day, where 0 is Sunday and 6 is Saturday.",
-        "default": 6
-      },
-      "syncHour": {
-        "type": "number",
-        "description": "Scheduled sync hour in timezone.",
-        "default": 3
-      },
-      "syncMinute": {
-        "type": "number",
-        "description": "Scheduled sync minute in timezone.",
-        "default": 0
-      },
-      "runOnStartup": {
-        "type": "boolean",
-        "description": "Run a sync when the plugin service starts.",
-        "default": true
-      },
-      "toolName": {
-        "type": "string",
-        "description": "Registered OpenClaw tool name.",
-        "default": "code_to_wiki"
-      },
-      "httpPath": {
-        "type": "string",
-        "description": "Gateway HTTP route for status and manual sync.",
-        "default": "/plugins/byclaw-wiki"
       },
       "gitCommand": {
         "type": "string",
@@ -93,95 +27,129 @@
       },
       "codegraphCommand": {
         "type": "string",
-        "description": "CodeGraph executable.",
+        "description": "CodeGraph executable used for indexing and code analysis.",
         "default": "codegraph"
+      },
+      "zreadCommand": {
+        "type": "string",
+        "description": "Zread CLI executable used by wiki_* modes.",
+        "default": "zread"
+      },
+      "zreadHome": {
+        "type": "string",
+        "description": "Service-level HOME directory used when running zread. Defaults to <dataDir>/zread-home."
       },
       "commandTimeoutMs": {
         "type": "number",
-        "description": "Timeout for git and codegraph commands.",
+        "description": "Timeout for Git and CodeGraph commands.",
         "default": 300000
       },
       "maxOutputBytes": {
         "type": "number",
-        "description": "Maximum command output captured per stream.",
+        "description": "Maximum stdout/stderr bytes captured per Git or CodeGraph command stream.",
         "default": 131072
       },
-      "retryInitialDelayMs": {
+      "zreadTimeoutMs": {
         "type": "number",
-        "description": "Initial retry delay after clone, pull, or index failure.",
-        "default": 300000
+        "description": "Timeout for Zread generate commands.",
+        "default": 1800000
       },
-      "retryMaxDelayMs": {
+      "zreadMaxOutputBytes": {
         "type": "number",
-        "description": "Maximum exponential backoff retry delay.",
-        "default": 21600000
+        "description": "Maximum stdout/stderr bytes captured per Zread command stream.",
+        "default": 262144
       },
-      "retryMaxAttempts": {
+      "redisHost": {
+        "type": "string",
+        "description": "Redis host for resolving Baiying AI model config. Defaults to REDIS_HOST."
+      },
+      "redisPort": {
         "type": "number",
-        "description": "Maximum automatic retry attempts after a failed sync.",
-        "default": 3
+        "description": "Redis port. Defaults to REDIS_PORT or 6379."
+      },
+      "redisUsername": {
+        "type": "string",
+        "description": "Redis username. Defaults to REDIS_USERNAME."
+      },
+      "redisPassword": {
+        "type": "string",
+        "description": "Redis password. Defaults to REDIS_PASSWORD."
+      },
+      "redisDatabase": {
+        "type": "number",
+        "description": "Redis database. Defaults to REDIS_DATABASE, REDIS_DB, or 0."
+      },
+      "redisConnectTimeoutMs": {
+        "type": "number",
+        "description": "Redis connection timeout for Zread model resolution.",
+        "default": 5000
+      },
+      "zreadAimodelEnabled": {
+        "type": "boolean",
+        "description": "Resolve the Zread LLM config from Baiying Redis AI model config before wiki_* operations.",
+        "default": true
+      },
+      "zreadAimodelConfigRedisKey": {
+        "type": "string",
+        "description": "Redis Hash key for Baiying AI model config.",
+        "default": "byai:aimodel:config"
+      },
+      "zreadAimodelTypeListRedisKey": {
+        "type": "string",
+        "description": "Redis Hash key for Baiying AI model type list.",
+        "default": "byai:aimodel:typelist"
+      },
+      "zreadAimodelTypeListField": {
+        "type": "string",
+        "description": "Redis typelist field used to select the default Zread LLM.",
+        "default": "LLM"
+      },
+      "zreadAimodelModelId": {
+        "type": "string",
+        "description": "Optional explicit Baiying model id. When unset, the LLM typelist default is used."
+      },
+      "zreadAimodelProvider": {
+        "type": "string",
+        "description": "Optional Zread provider override. Defaults to instanceParam.zreadProvider or openai."
+      },
+      "zreadLlmProvider": {
+        "type": "string",
+        "description": "Fallback Zread LLM provider used when Redis model resolution fails."
+      },
+      "zreadLlmModel": {
+        "type": "string",
+        "description": "Fallback Zread LLM model used when Redis model resolution fails."
+      },
+      "zreadLlmBaseUrl": {
+        "type": "string",
+        "description": "Fallback Zread LLM base URL used when Redis model resolution fails."
+      },
+      "zreadLlmApiKey": {
+        "type": "string",
+        "description": "Fallback Zread LLM API key. Prefer zreadLlmApiKeyEnv when possible."
+      },
+      "zreadLlmApiKeyEnv": {
+        "type": "string",
+        "description": "Environment variable name containing the fallback Zread LLM API key."
+      },
+      "zreadMaxConcurrent": {
+        "type": "number",
+        "description": "Zread concurrency.max_concurrent written to config.yaml.",
+        "default": 1
+      },
+      "zreadMaxRetries": {
+        "type": "number",
+        "description": "Zread concurrency.max_retries written to config.yaml.",
+        "default": 0
       },
       "includeRawOutputInToolResult": {
         "type": "boolean",
-        "description": "Whether code_to_wiki returns raw CodeGraph output to OpenClaw. Default true lets agents inspect source and generate documents.",
+        "description": "Whether code_to_wiki returns raw CodeGraph/Zread output to OpenClaw.",
         "default": true
       },
       "gitDepth": {
         "type": "number",
-        "description": "Git clone/fetch depth. Default 1 keeps only the latest commit for faster sync.",
-        "default": 1
-      },
-      "notificationWebhookUrl": {
-        "type": "string",
-        "description": "Optional group robot webhook URL."
-      },
-      "notificationDingtalkAccessToken": {
-        "type": "string",
-        "description": "Optional DingTalk custom robot access token. Used to build the webhook URL when notificationWebhookUrl is not set."
-      },
-      "notificationDingtalkSecret": {
-        "type": "string",
-        "description": "Optional DingTalk robot SEC secret used to sign webhook requests."
-      },
-      "notificationDingtalkActionCardBtnTitle": {
-        "type": "string",
-        "description": "DingTalk ActionCard single button title.",
-        "default": "通过"
-      },
-      "notificationDingtalkActionCardBtnUrl": {
-        "type": "string",
-        "description": "Optional DingTalk ActionCard button URL. Leave empty to send the card without a jump URL.",
-        "default": ""
-      },
-      "notificationDocumentUploadUrl": {
-        "type": "string",
-        "description": "COS upload endpoint for generated operation documents. Relative paths resolve against BYCLAW_WIKI_COS_UPLOAD_BASE_URL or http://localhost:3000.",
-        "default": "/api/cos/upload"
-      },
-      "notificationDocumentUploadPrefix": {
-        "type": "string",
-        "description": "Optional COS object prefix for generated operation documents.",
-        "default": ""
-      },
-      "notificationRobotType": {
-        "type": "string",
-        "enum": [
-          "generic",
-          "wecom",
-          "dingtalk",
-          "feishu"
-        ],
-        "description": "Group robot payload format.",
-        "default": "generic"
-      },
-      "notificationMaxOutputChars": {
-        "type": "number",
-        "description": "Compatibility setting retained for older configs; robot notifications no longer include full document bodies.",
-        "default": 3000
-      },
-      "notificationMinOutputChars": {
-        "type": "number",
-        "description": "Minimum output characters required before sending a notification.",
+        "description": "Default Git clone/fetch depth. Default 1 keeps only the latest commit.",
         "default": 1
       }
     }

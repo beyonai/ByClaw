@@ -29,33 +29,47 @@ afterEach(() => {
 });
 
 describe("resolveByclawWikiConfig", () => {
-  it("defaults to beyonai ByClaw develop under OPENCLAW_STATE_DIR", () => {
+  it("keeps only runtime command and cache defaults", () => {
     stubEnv("OPENCLAW_STATE_DIR", path.join(path.sep, "by", ".openclaw"));
+    stubEnv("REDIS_HOST", undefined);
+    stubEnv("REDIS_PORT", undefined);
+    stubEnv("REDIS_USERNAME", undefined);
+    stubEnv("REDIS_PASSWORD", undefined);
+    stubEnv("REDIS_DATABASE", undefined);
+    stubEnv("REDIS_DB", undefined);
 
     const config = resolveByclawWikiConfig({});
 
-    assert.equal(config.toolName, "code_to_wiki");
-    assert.equal(config.timezone, "Asia/Shanghai");
-    assert.equal(config.syncDayOfWeek, 6);
-    assert.equal(config.syncHour, 3);
-    assert.equal(config.syncMinute, 0);
-    assert.equal(config.retryInitialDelayMs, 5 * 60 * 1000);
-    assert.equal(config.retryMaxDelayMs, 6 * 60 * 60 * 1000);
-    assert.equal(config.retryMaxAttempts, 3);
+    assert.equal(config.dataDir, path.join(path.sep, "by", ".openclaw", "byclaw-wiki"));
+    assert.equal(config.zreadHome, path.join(path.sep, "by", ".openclaw", "byclaw-wiki", "zread-home"));
+    assert.equal(config.gitCommand, "git");
+    assert.equal(config.codegraphCommand, "codegraph");
+    assert.equal(config.zreadCommand, "zread");
+    assert.equal(config.commandTimeoutMs, 300000);
+    assert.equal(config.maxOutputBytes, 128 * 1024);
+    assert.equal(config.zreadTimeoutMs, 30 * 60 * 1000);
+    assert.equal(config.zreadMaxOutputBytes, 256 * 1024);
+    assert.equal(config.redisHost, undefined);
+    assert.equal(config.redisPort, undefined);
+    assert.equal(config.redisUsername, undefined);
+    assert.equal(config.redisPassword, undefined);
+    assert.equal(config.redisDatabase, undefined);
+    assert.equal(config.redisConnectTimeoutMs, 5000);
+    assert.equal(config.zreadAimodelEnabled, true);
+    assert.equal(config.zreadAimodelConfigRedisKey, "byai:aimodel:config");
+    assert.equal(config.zreadAimodelTypeListRedisKey, "byai:aimodel:typelist");
+    assert.equal(config.zreadAimodelTypeListField, "LLM");
+    assert.equal(config.zreadAimodelModelId, undefined);
+    assert.equal(config.zreadAimodelProvider, undefined);
+    assert.equal(config.zreadLlmProvider, undefined);
+    assert.equal(config.zreadLlmModel, undefined);
+    assert.equal(config.zreadLlmBaseUrl, undefined);
+    assert.equal(config.zreadLlmApiKey, undefined);
+    assert.equal(config.zreadLlmApiKeyEnv, undefined);
+    assert.equal(config.zreadMaxConcurrent, 1);
+    assert.equal(config.zreadMaxRetries, 0);
     assert.equal(config.includeRawOutputInToolResult, true);
     assert.equal(config.gitDepth, 1);
-    assert.equal(config.notification.dingtalkActionCardBtnTitle, "通过");
-    assert.equal(config.notification.dingtalkActionCardBtnUrl, "");
-    assert.equal(config.notification.documentUploadUrl, "/api/cos/upload");
-    assert.equal(config.notification.documentUploadPrefix, "");
-    assert.equal(config.repositories.length, 1);
-    assert.equal(config.repositories[0]?.id, "byclaw");
-    assert.equal(config.repositories[0]?.remoteUrl, "https://github.com/beyonai/ByClaw.git");
-    assert.equal(config.repositories[0]?.branch, "develop");
-    assert.equal(
-      config.repositories[0]?.localPath,
-      path.join(path.sep, "by", ".openclaw", "byclaw-wiki", "repos", "byclaw"),
-    );
   });
 
   it("falls back to ~/.openclaw/byclaw-wiki when OPENCLAW_STATE_DIR is blank", () => {
@@ -66,27 +80,6 @@ describe("resolveByclawWikiConfig", () => {
     assert.equal(config.dataDir, path.join(homedir(), ".openclaw", "byclaw-wiki"));
   });
 
-  it("keeps configured repositories and resolves relative localPath under dataDir/repos", () => {
-    stubEnv("OPENCLAW_STATE_DIR", path.join(path.sep, "state"));
-
-    const config = resolveByclawWikiConfig({
-      repositories: [
-        {
-          id: "Main Repo",
-          remoteUrl: "https://github.com/example/main.git",
-          branch: "develop",
-          localPath: "main-checkout",
-        },
-      ],
-      dataDir: "/tmp/wiki-data",
-      runOnStartup: false,
-    });
-
-    assert.equal(config.runOnStartup, false);
-    assert.equal(config.repositories[0]?.id, "main-repo");
-    assert.equal(config.repositories[0]?.localPath, path.join(path.sep, "tmp", "wiki-data", "repos", "main-checkout"));
-  });
-
   it("resolves relative dataDir under OPENCLAW_STATE_DIR", () => {
     stubEnv("OPENCLAW_STATE_DIR", path.join(path.sep, "state"));
 
@@ -95,29 +88,69 @@ describe("resolveByclawWikiConfig", () => {
     assert.equal(config.dataDir, path.join(path.sep, "state", "wiki-cache"));
   });
 
-  it("resolves notification config from plugin config", () => {
+  it("accepts command overrides and numeric strings", () => {
     const config = resolveByclawWikiConfig({
-      notificationWebhookUrl: "https://example.test/direct",
-      notificationDingtalkAccessToken: "token-from-config",
-      notificationDingtalkSecret: "SEC-example",
-      notificationDingtalkActionCardBtnTitle: "审核通过",
-      notificationDingtalkActionCardBtnUrl: "https://example.test/approve",
-      notificationDocumentUploadUrl: "https://example.test/api/cos/upload",
-      notificationDocumentUploadPrefix: "custom/docs/",
-      notificationRobotType: "wecom",
-      notificationMaxOutputChars: 1200,
-      notificationMinOutputChars: 10,
+      dataDir: "/tmp/wiki-data",
+      zreadHome: "/tmp/zread-home",
+      gitCommand: "/usr/bin/git",
+      codegraphCommand: "/usr/local/bin/codegraph",
+      zreadCommand: "/opt/bin/zread",
+      commandTimeoutMs: "1000",
+      maxOutputBytes: "4096",
+      zreadTimeoutMs: "2000",
+      zreadMaxOutputBytes: "8192",
+      redisHost: "redis.internal",
+      redisPort: "6380",
+      redisUsername: "default",
+      redisPassword: "redis-password",
+      redisDatabase: "2",
+      redisConnectTimeoutMs: "3000",
+      zreadAimodelEnabled: false,
+      zreadAimodelConfigRedisKey: "custom:aimodel:config",
+      zreadAimodelTypeListRedisKey: "custom:aimodel:typelist",
+      zreadAimodelTypeListField: "llm",
+      zreadAimodelModelId: "10004014",
+      zreadAimodelProvider: "bigmodel-coding-plan",
+      zreadLlmProvider: "openai",
+      zreadLlmModel: "glm-5.1",
+      zreadLlmBaseUrl: "https://example.test/v1",
+      zreadLlmApiKey: "fallback-key",
+      zreadLlmApiKeyEnv: "ZREAD_LLM_API_KEY",
+      zreadMaxConcurrent: "3",
+      zreadMaxRetries: "2",
+      includeRawOutputInToolResult: false,
+      gitDepth: "5",
     });
 
-    assert.equal(config.notification.webhookUrl, "https://example.test/direct");
-    assert.equal(config.notification.dingtalkAccessToken, "token-from-config");
-    assert.equal(config.notification.dingtalkSecret, "SEC-example");
-    assert.equal(config.notification.dingtalkActionCardBtnTitle, "审核通过");
-    assert.equal(config.notification.dingtalkActionCardBtnUrl, "https://example.test/approve");
-    assert.equal(config.notification.documentUploadUrl, "https://example.test/api/cos/upload");
-    assert.equal(config.notification.documentUploadPrefix, "custom/docs/");
-    assert.equal(config.notification.robotType, "wecom");
-    assert.equal(config.notification.maxOutputChars, 1200);
-    assert.equal(config.notification.minOutputChars, 10);
+    assert.equal(config.dataDir, path.join(path.sep, "tmp", "wiki-data"));
+    assert.equal(config.zreadHome, path.join(path.sep, "tmp", "zread-home"));
+    assert.equal(config.gitCommand, "/usr/bin/git");
+    assert.equal(config.codegraphCommand, "/usr/local/bin/codegraph");
+    assert.equal(config.zreadCommand, "/opt/bin/zread");
+    assert.equal(config.commandTimeoutMs, 1000);
+    assert.equal(config.maxOutputBytes, 4096);
+    assert.equal(config.zreadTimeoutMs, 2000);
+    assert.equal(config.zreadMaxOutputBytes, 8192);
+    assert.equal(config.redisHost, "redis.internal");
+    assert.equal(config.redisPort, 6380);
+    assert.equal(config.redisUsername, "default");
+    assert.equal(config.redisPassword, "redis-password");
+    assert.equal(config.redisDatabase, 2);
+    assert.equal(config.redisConnectTimeoutMs, 3000);
+    assert.equal(config.zreadAimodelEnabled, false);
+    assert.equal(config.zreadAimodelConfigRedisKey, "custom:aimodel:config");
+    assert.equal(config.zreadAimodelTypeListRedisKey, "custom:aimodel:typelist");
+    assert.equal(config.zreadAimodelTypeListField, "LLM");
+    assert.equal(config.zreadAimodelModelId, "10004014");
+    assert.equal(config.zreadAimodelProvider, "bigmodel-coding-plan");
+    assert.equal(config.zreadLlmProvider, "openai");
+    assert.equal(config.zreadLlmModel, "glm-5.1");
+    assert.equal(config.zreadLlmBaseUrl, "https://example.test/v1");
+    assert.equal(config.zreadLlmApiKey, "fallback-key");
+    assert.equal(config.zreadLlmApiKeyEnv, "ZREAD_LLM_API_KEY");
+    assert.equal(config.zreadMaxConcurrent, 3);
+    assert.equal(config.zreadMaxRetries, 2);
+    assert.equal(config.includeRawOutputInToolResult, false);
+    assert.equal(config.gitDepth, 5);
   });
 });

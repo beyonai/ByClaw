@@ -31,6 +31,11 @@ This is the canonical contract for automated agents working in this repository:
 Human-oriented workflow and governance: [CONTRIBUTING.md](CONTRIBUTING.md).
 Claude-specific notes: [CLAUDE.md](CLAUDE.md).
 
+## Agent Skill Routing
+
+- For repository code analysis or Zread Wiki generation, load `middleware/openclaw/skills/byclaw-wiki-code-analysis/SKILL.md`.
+- For generated Wiki review, upload, admin notification, or publishing to a knowledge base, load `middleware/openclaw/skills/byclaw-wiki-publish/SKILL.md`.
+
 ## Verification commands
 
 **Frontend** (from repository root):

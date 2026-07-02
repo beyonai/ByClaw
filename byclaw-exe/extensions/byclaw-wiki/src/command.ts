@@ -3,6 +3,7 @@ import type { CommandResult } from "./types.js";
 
 export type RunCommandOptions = {
   cwd?: string;
+  env?: Record<string, string | undefined>;
   timeoutMs: number;
   maxOutputBytes: number;
 };
@@ -32,6 +33,7 @@ export async function runCommand(
   return await new Promise((resolve) => {
     const child = spawn(command, args, {
       cwd: options.cwd,
+      env: options.env ? { ...process.env, ...options.env } : process.env,
       stdio: ["ignore", "pipe", "pipe"],
     });
 

@@ -7,7 +7,7 @@ export default definePluginEntry({
   id: "byclaw-wiki",
   name: "Byclaw Wiki",
   description:
-    "Keep configured GitHub repositories indexed with CodeGraph and expose code_to_wiki for source-aware answers.",
+    "Clone requested Git repositories for CodeGraph analysis and Zread Wiki generation.",
   configSchema: () => ({
     jsonSchema: byclawWikiConfigSchema as unknown as Record<string, unknown>,
   }),

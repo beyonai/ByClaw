@@ -1,17 +1,50 @@
-import type { ByclawWikiRepositoryService } from "./repository-service.js";
-import type { CodeToWikiRequest, CodegraphToolResult, ResolvedByclawWikiConfig } from "./types.js";
-import { sendDocumentationNotification } from "./notification.js";
+import { RepositoryError, type ByclawWikiRepositoryService } from "./repository-service.js";
+import type {
+  CodeToWikiMode,
+  CodeToWikiRequest,
+  CodeToWikiToolResult,
+  CodegraphQueryMode,
+  CommandResult,
+  ResolvedByclawWikiConfig,
+  WikiPage,
+} from "./types.js";
+import { CODE_TO_WIKI_TOOL_NAME } from "./types.js";
+
+const codegraphModes = ["explore", "query", "node", "files", "callers", "callees", "impact"] as const;
+const wikiModes = ["wiki_status", "wiki_generate", "wiki_list", "wiki_read", "wiki_clear_draft"] as const;
 
 const codeToWikiParameters = {
   type: "object",
   additionalProperties: false,
+  required: ["repositoryUrl"],
   properties: {
-    repositoryId: {
+    repositoryUrl: {
       type: "string",
-      description: "Repository id from byclaw-wiki config. Defaults to byclaw.",
+      description: "Git repository URL to clone/cache on demand. HTTPS and SSH-style Git URLs are supported.",
+    },
+    branch: {
+      type: "string",
+      description: "Optional branch. When omitted, Git uses the repository default branch.",
+    },
+    gitDepth: {
+      type: "number",
+      minimum: 1,
+      description: "Optional shallow clone/fetch depth. Defaults to plugin gitDepth, usually 1.",
+    },
+    credentialRef: {
+      type: "string",
+      description:
+        "Optional environment variable name that contains a Git token for private HTTPS repositories. The token value itself must never be passed.",
+    },
+    refresh: {
+      type: "boolean",
+      description: "When true, fetch/pull the cached checkout before analysis or wiki generation.",
+      default: false,
     },
     mode: {
       enum: [
+        "status",
+        "pull",
         "explore",
         "query",
         "node",
@@ -19,11 +52,14 @@ const codeToWikiParameters = {
         "callers",
         "callees",
         "impact",
-        "status",
-        "notify_document",
+        "wiki_status",
+        "wiki_generate",
+        "wiki_list",
+        "wiki_read",
+        "wiki_clear_draft",
       ],
       description:
-        "CodeGraph operation. Use explore for source questions. Use notify_document after OpenClaw has generated the operation document.",
+        "Operation mode. CodeGraph modes analyze code; wiki_* modes inspect or generate Zread Wiki output.",
       default: "explore",
     },
     question: {
@@ -56,20 +92,38 @@ const codeToWikiParameters = {
       type: "string",
       description: "File filter for files mode.",
     },
-    documentTitle: {
+    wikiVersion: {
       type: "string",
-      description: "Document title for notify_document mode.",
+      description: "Zread wiki version to inspect. Defaults to current.",
     },
-    documentMarkdown: {
+    wikiPage: {
       type: "string",
-      description: "Generated operation document markdown to send to the configured group robot.",
+      description: "Zread wiki page slug or markdown file path for wiki_read.",
+    },
+    draftAction: {
+      enum: ["resume", "clear", "cancel"],
+      description: "How wiki_generate handles an existing Zread draft.",
+    },
+    skipFailed: {
+      type: "boolean",
+      description: "Pass --skip-failed to zread generate.",
+      default: false,
+    },
+    yes: {
+      type: "boolean",
+      description:
+        "Required true for mutating wiki modes such as wiki_generate and wiki_clear_draft, so the agent only runs them after user intent is clear.",
     },
   },
 } as const;
 
 function normalizeRequest(input: Record<string, unknown>): CodeToWikiRequest {
   return {
-    repositoryId: typeof input.repositoryId === "string" ? input.repositoryId : undefined,
+    repositoryUrl: typeof input.repositoryUrl === "string" ? input.repositoryUrl : "",
+    branch: typeof input.branch === "string" ? input.branch : undefined,
+    gitDepth: typeof input.gitDepth === "number" ? input.gitDepth : undefined,
+    credentialRef: typeof input.credentialRef === "string" ? input.credentialRef : undefined,
+    refresh: typeof input.refresh === "boolean" ? input.refresh : undefined,
     mode: typeof input.mode === "string" ? (input.mode as CodeToWikiRequest["mode"]) : "explore",
     question: typeof input.question === "string" ? input.question : undefined,
     query: typeof input.query === "string" ? input.query : undefined,
@@ -78,12 +132,19 @@ function normalizeRequest(input: Record<string, unknown>): CodeToWikiRequest {
     limit: typeof input.limit === "number" ? input.limit : undefined,
     maxDepth: typeof input.maxDepth === "number" ? input.maxDepth : undefined,
     filter: typeof input.filter === "string" ? input.filter : undefined,
-    documentTitle: typeof input.documentTitle === "string" ? input.documentTitle : undefined,
-    documentMarkdown: typeof input.documentMarkdown === "string" ? input.documentMarkdown : undefined,
+    wikiVersion: typeof input.wikiVersion === "string" ? input.wikiVersion : undefined,
+    wikiPage: typeof input.wikiPage === "string" ? input.wikiPage : undefined,
+    draftAction: typeof input.draftAction === "string" ? (input.draftAction as CodeToWikiRequest["draftAction"]) : undefined,
+    skipFailed: typeof input.skipFailed === "boolean" ? input.skipFailed : undefined,
+    yes: typeof input.yes === "boolean" ? input.yes : undefined,
   };
 }
 
-function buildCommandDetails(result: Awaited<ReturnType<ByclawWikiRepositoryService["runCodegraph"]>>) {
+function isCodegraphMode(mode: CodeToWikiMode): mode is CodegraphQueryMode {
+  return (codegraphModes as readonly string[]).includes(mode);
+}
+
+function buildCommandDetails(result: CommandResult) {
   return {
     ok: result.ok,
     command: result.command,
@@ -99,31 +160,59 @@ function buildCommandDetails(result: Awaited<ReturnType<ByclawWikiRepositoryServ
   };
 }
 
-function buildToolText(params: {
+function trimJoin(...parts: Array<string | undefined>): string {
+  return parts.map((part) => part?.trim()).filter(Boolean).join("\n\n");
+}
+
+function repositoryText(status: { repositoryUrl: string; branch?: string; localPath: string }): string {
+  return [
+    `Repository: ${status.repositoryUrl}`,
+    `Branch: ${status.branch ?? "default"}`,
+    `Local checkout path: ${status.localPath}`,
+  ].join("\n");
+}
+
+function wikiPagesText(pages: WikiPage[]): string {
+  if (pages.length === 0) {
+    return "No markdown pages found in the selected Zread wiki version.";
+  }
+  return pages.map((page) => `- ${page.title} (${page.slug}) -> ${page.file}`).join("\n");
+}
+
+function buildCodegraphText(params: {
   ok: boolean;
-  mode: string;
-  repositoryId: string;
-  localPath: string;
+  mode: CodegraphQueryMode;
+  repository: { repositoryUrl: string; branch?: string; localPath: string };
   output: string;
   includeRawOutput: boolean;
-  notification: { attempted: boolean; ok?: boolean; skippedReason?: string; error?: string };
 }): string {
+  const header = repositoryText(params.repository);
   const outputBytes = Buffer.byteLength(params.output);
-  const header = [
-    `Repository: ${params.repositoryId}`,
-    `Local checkout path: ${params.localPath}`,
-    "Use this local checkout path when you need to refer to where the indexed source code lives on disk.",
-  ].join("\n");
-
   if (params.includeRawOutput) {
     return params.ok
       ? `code_to_wiki ${params.mode} result:\n\n${header}\n\nCodeGraph output:\n\n${params.output}`
       : `code_to_wiki ${params.mode} failed:\n\n${header}\n\nCodeGraph output:\n\n${params.output}`;
   }
-
   return params.ok
-    ? `code_to_wiki ${params.mode} completed; raw CodeGraph output omitted (${outputBytes} bytes).\n\n${header}`
+    ? `code_to_wiki ${params.mode} completed; raw output omitted (${outputBytes} bytes).\n\n${header}`
     : `code_to_wiki ${params.mode} failed; raw output omitted (${outputBytes} bytes).\n\n${header}`;
+}
+
+function confirmationError(mode: CodeToWikiMode): { content: Array<{ type: "text"; text: string }>; details: CodeToWikiToolResult } {
+  return {
+    content: [{
+      type: "text",
+      text: `code_to_wiki ${mode} requires yes=true because it changes local Zread state or may run a long generation job.`,
+    }],
+    details: {
+      ok: false,
+      mode,
+      error: {
+        code: "confirmation_required",
+        message: `${mode} requires yes=true.`,
+      },
+    },
+  };
 }
 
 export function createCodeToWikiTool(params: {
@@ -135,168 +224,292 @@ export function createCodeToWikiTool(params: {
   };
 }) {
   return {
-    name: params.config.toolName,
+    name: CODE_TO_WIKI_TOOL_NAME,
     label: "Code To Wiki",
     description:
-      "Inspect the configured GitHub source repositories through CodeGraph before answering code, architecture, API, or implementation questions. Results include the repository local checkout path and, by default, raw CodeGraph output.",
+      "Clone/cache a requested Git repository, index it with CodeGraph for fast code analysis, and optionally generate/read Zread Wiki output. Upload, review, notification, and publishing are handled by separate skills.",
     parameters: codeToWikiParameters,
     async execute(_toolCallId: string, input: Record<string, unknown>) {
       const request = normalizeRequest(input);
       const mode = request.mode ?? "explore";
-      const repository = params.service.getRepository(request.repositoryId);
-      if (!repository) {
-        return {
-          content: [{ type: "text" as const, text: `code_to_wiki failed: unknown repository ${request.repositoryId}.` }],
-          details: {
-            ok: false,
+
+      try {
+        if (mode === "status") {
+          const status = await params.service.getStatus(request);
+          const details: CodeToWikiToolResult = {
+            ok: true,
             mode,
-            error: {
-              code: "unknown_repository",
-              message: `Unknown repository ${request.repositoryId}.`,
+            repository: {
+              repositoryUrl: status.repositoryUrl,
+              branch: status.branch,
+              localPath: status.localPath,
             },
-          },
-        };
-      }
-
-      if (mode === "status") {
-        const status = params.service.getStatus(repository.id);
-        const details: CodegraphToolResult = {
-          ok: true,
-          repository,
-          mode,
-          status,
-        };
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: `code_to_wiki status for ${repository.id}: ${status?.state ?? "unknown"}.\nLocal checkout path: ${repository.localPath}`,
-            },
-          ],
-          details,
-        };
-      }
-
-      if (mode === "notify_document") {
-        const documentMarkdown = request.documentMarkdown?.trim();
-        if (!documentMarkdown) {
+            status,
+          };
           return {
-            content: [
-              {
-                type: "text" as const,
-                text: "code_to_wiki notify_document failed: documentMarkdown is required.",
-              },
-            ],
-            details: {
-              ok: false,
-              repository,
-              mode,
-              error: {
-                code: "invalid_request",
-                message: "documentMarkdown is required for notify_document mode.",
-              },
-            },
+            content: [{
+              type: "text" as const,
+              text: `code_to_wiki status:\n\n${repositoryText(details.repository!)}\nState: ${status.state}\nCodeGraph indexed: ${status.codegraphIndexed}\nZread wiki exists: ${status.zreadWikiExists}`,
+            }],
+            details,
           };
         }
 
-        const notification = await sendDocumentationNotification({
-          config: params.config.notification,
-          repository,
-          question: request.question,
-          query: request.query,
-          documentTitle: request.documentTitle,
-          documentMarkdown,
-        });
-        if (notification.attempted && notification.ok) {
-          params.logger?.info(`byclaw-wiki: generated document notification sent for ${repository.id}`);
-        } else if (notification.attempted) {
-          params.logger?.warn(
-            `byclaw-wiki: generated document notification failed for ${repository.id}: ${notification.error ?? notification.statusCode ?? "unknown"}`,
-          );
-        } else {
-          params.logger?.info(
-            `byclaw-wiki: generated document notification skipped for ${repository.id}: ${notification.skippedReason ?? "unknown"}`,
-          );
+        if (mode === "pull") {
+          const status = await params.service.prepare(request, { refresh: true });
+          const details: CodeToWikiToolResult = {
+            ok: true,
+            mode,
+            repository: {
+              repositoryUrl: status.repositoryUrl,
+              branch: status.branch,
+              localPath: status.localPath,
+            },
+            status,
+          };
+          return {
+            content: [{
+              type: "text" as const,
+              text: `code_to_wiki pull completed:\n\n${repositoryText(details.repository!)}\nCommit: ${status.lastCommit ?? "unknown"}`,
+            }],
+            details,
+          };
         }
 
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: notification.attempted && notification.ok
-                ? `code_to_wiki sent generated document notification for ${repository.id}.`
-                : `code_to_wiki did not send generated document notification for ${repository.id}: ${notification.skippedReason ?? notification.error ?? "unknown"}.`,
-            },
-          ],
-          details: {
-            ok: Boolean(notification.attempted && notification.ok),
-            repository,
+        if (isCodegraphMode(mode)) {
+          const result = await params.service.runCodegraph(request, {
             mode,
-            notification,
-          },
-        };
-      }
-
-      try {
-        const query = request.question ?? request.query;
-        const result = await params.service.runCodegraph({
-          repositoryId: repository.id,
-          mode,
-          query,
-          target: request.target,
-          symbol: request.symbol,
-          limit: request.limit,
-          maxDepth: request.maxDepth,
-          filter: request.filter,
-        });
-        const output = [result.stdout.trim(), result.stderr.trim()].filter(Boolean).join("\n\n");
-        const details: CodegraphToolResult = {
-          ok: result.ok,
-          repository,
-          mode,
-          output: params.config.includeRawOutputInToolResult ? output : undefined,
-          outputBytes: Buffer.byteLength(output),
-          outputOmitted: !params.config.includeRawOutputInToolResult,
-          status: params.service.getStatus(repository.id),
-          command: buildCommandDetails(result),
-          error: result.ok
-            ? undefined
-            : {
-                code: result.timedOut ? "timeout" : "codegraph_failed",
-                message: output || `CodeGraph ${mode} failed.`,
-              },
-        };
-        return {
-          content: [
-            {
+            refresh: request.refresh,
+            query: request.question ?? request.query,
+            target: request.target,
+            symbol: request.symbol,
+            limit: request.limit,
+            maxDepth: request.maxDepth,
+            filter: request.filter,
+          });
+          const output = trimJoin(result.stdout, result.stderr);
+          const status = await params.service.getStatus(request);
+          const repository = {
+            repositoryUrl: status.repositoryUrl,
+            branch: status.branch,
+            localPath: status.localPath,
+          };
+          const details: CodeToWikiToolResult = {
+            ok: result.ok,
+            mode,
+            repository,
+            output: params.config.includeRawOutputInToolResult ? output : undefined,
+            outputBytes: Buffer.byteLength(output),
+            outputOmitted: !params.config.includeRawOutputInToolResult,
+            status,
+            command: buildCommandDetails(result),
+            error: result.ok
+              ? undefined
+              : {
+                  code: result.timedOut ? "timeout" : "codegraph_failed",
+                  message: output || `CodeGraph ${mode} failed.`,
+                },
+          };
+          return {
+            content: [{
               type: "text" as const,
-              text: buildToolText({
+              text: buildCodegraphText({
                 ok: result.ok,
                 mode,
-                repositoryId: repository.id,
-                localPath: repository.localPath,
+                repository,
                 output,
                 includeRawOutput: params.config.includeRawOutputInToolResult,
-                notification: { attempted: false, skippedReason: "lookup_only" },
               }),
-            },
-          ],
-          details,
-        };
+            }],
+            details,
+          };
+        }
+
+        if (!(wikiModes as readonly string[]).includes(mode)) {
+          throw new RepositoryError("INVALID_REQUEST", `Unsupported mode: ${mode}`);
+        }
+
+        if (mode === "wiki_status") {
+          const { status, zread } = await params.service.getZreadStatus(request);
+          const repository = {
+            repositoryUrl: status.repositoryUrl,
+            branch: status.branch,
+            localPath: status.localPath,
+          };
+          return {
+            content: [{
+              type: "text" as const,
+              text: [
+                "code_to_wiki wiki_status:",
+                "",
+                repositoryText(repository),
+                `Zread installed: ${zread.installed}`,
+                `Zread version: ${zread.version ?? "unknown"}`,
+                `Login/config available: ${zread.hasLogin || zread.hasConfig}`,
+                `Zread home: ${zread.homePath}`,
+                `Zread config: ${zread.configPath}`,
+                `Model source: ${zread.modelSource}`,
+                `Model: ${zread.modelProvider && zread.modelName ? `${zread.modelProvider}/${zread.modelName}` : "not configured"}`,
+                zread.modelConfigError ? `Model config error: ${zread.modelConfigError}` : undefined,
+                `Current wiki: ${zread.hasCurrentWiki}`,
+                `Draft exists: ${zread.hasDraft}`,
+                `Page count: ${zread.pageCount}`,
+              ].filter(Boolean).join("\n"),
+            }],
+            details: {
+              ok: true,
+              mode,
+              repository,
+              status,
+              zread,
+            } satisfies CodeToWikiToolResult,
+          };
+        }
+
+        if (mode === "wiki_generate") {
+          if (request.yes !== true) {
+            return confirmationError(mode);
+          }
+          const { status, zread, command } = await params.service.generateWiki(request, {
+            draftAction: request.draftAction,
+            skipFailed: request.skipFailed,
+          });
+          const output = trimJoin(command.stdout, command.stderr);
+          const repository = {
+            repositoryUrl: status.repositoryUrl,
+            branch: status.branch,
+            localPath: status.localPath,
+          };
+          return {
+            content: [{
+              type: "text" as const,
+              text: [
+                "code_to_wiki wiki_generate completed:",
+                "",
+                repositoryText(repository),
+                `Current wiki version: ${zread.currentVersion ?? "current"}`,
+                `Page count: ${zread.pageCount}`,
+                params.config.includeRawOutputInToolResult && output ? `Zread output:\n\n${output}` : undefined,
+              ].filter(Boolean).join("\n"),
+            }],
+            details: {
+              ok: true,
+              mode,
+              repository,
+              output: params.config.includeRawOutputInToolResult ? output : undefined,
+              outputBytes: Buffer.byteLength(output),
+              outputOmitted: !params.config.includeRawOutputInToolResult,
+              status,
+              zread,
+              command: buildCommandDetails(command),
+            } satisfies CodeToWikiToolResult,
+          };
+        }
+
+        if (mode === "wiki_list") {
+          const listed = await params.service.listWiki(request, request.wikiVersion ?? "current");
+          const repository = {
+            repositoryUrl: listed.status.repositoryUrl,
+            branch: listed.status.branch,
+            localPath: listed.status.localPath,
+          };
+          return {
+            content: [{
+              type: "text" as const,
+              text: [
+                `code_to_wiki wiki_list (${listed.version}):`,
+                "",
+                repositoryText(repository),
+                "",
+                wikiPagesText(listed.pages),
+              ].join("\n"),
+            }],
+            details: {
+              ok: true,
+              mode,
+              repository,
+              status: listed.status,
+              wiki: {
+                version: listed.version,
+                rootPath: listed.rootPath,
+                pages: listed.pages,
+              },
+            } satisfies CodeToWikiToolResult,
+          };
+        }
+
+        if (mode === "wiki_read") {
+          const read = await params.service.readWikiPage(request, request.wikiVersion ?? "current", request.wikiPage ?? "");
+          const repository = {
+            repositoryUrl: read.status.repositoryUrl,
+            branch: read.status.branch,
+            localPath: read.status.localPath,
+          };
+          return {
+            content: [{
+              type: "text" as const,
+              text: [
+                `code_to_wiki wiki_read (${read.version}/${read.page.slug}):`,
+                "",
+                repositoryText(repository),
+                "",
+                read.page.markdown ?? "",
+              ].join("\n"),
+            }],
+            details: {
+              ok: true,
+              mode,
+              repository,
+              status: read.status,
+              wiki: {
+                version: read.version,
+                rootPath: read.rootPath,
+                page: read.page,
+              },
+            } satisfies CodeToWikiToolResult,
+          };
+        }
+
+        if (mode === "wiki_clear_draft") {
+          if (request.yes !== true) {
+            return confirmationError(mode);
+          }
+          const { status, zread } = await params.service.clearWikiDraft(request);
+          const repository = {
+            repositoryUrl: status.repositoryUrl,
+            branch: status.branch,
+            localPath: status.localPath,
+          };
+          return {
+            content: [{
+              type: "text" as const,
+              text: `code_to_wiki wiki_clear_draft completed:\n\n${repositoryText(repository)}\nDraft exists: ${zread.hasDraft}`,
+            }],
+            details: {
+              ok: true,
+              mode,
+              repository,
+              status,
+              zread,
+            } satisfies CodeToWikiToolResult,
+          };
+        }
+
+        throw new RepositoryError("INVALID_REQUEST", `Unsupported mode: ${mode}`);
       } catch (error) {
+        const repositoryError = error instanceof RepositoryError;
         const message = error instanceof Error ? error.message : String(error);
-        const details: CodegraphToolResult = {
+        params.logger?.warn(`byclaw-wiki: code_to_wiki ${mode} failed: ${message}`);
+        const details: CodeToWikiToolResult = {
           ok: false,
-          repository,
           mode,
-          status: params.service.getStatus(repository.id),
           error: {
-            code: "execution_error",
+            code: repositoryError ? error.code.toLowerCase() : "execution_error",
             message,
           },
         };
         return {
-          content: [{ type: "text" as const, text: `code_to_wiki failed: ${message}` }],
+          content: [{ type: "text" as const, text: `code_to_wiki ${mode} failed: ${message}` }],
           details,
         };
       }

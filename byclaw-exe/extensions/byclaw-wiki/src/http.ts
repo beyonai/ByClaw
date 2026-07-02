@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
-import type { ByclawWikiRepositoryService } from "./repository-service.js";
-import type { ResolvedByclawWikiConfig } from "./types.js";
+import { RepositoryError, type ByclawWikiRepositoryService } from "./repository-service.js";
+import { BYCLAW_WIKI_HTTP_PATH } from "./types.js";
 
 const MAX_BODY_BYTES = 64 * 1024;
 
@@ -44,25 +44,27 @@ async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknow
   });
 }
 
+function readRepositoryRef(body: Record<string, unknown>) {
+  return {
+    repositoryUrl: typeof body.repositoryUrl === "string" ? body.repositoryUrl : "",
+    branch: typeof body.branch === "string" ? body.branch : undefined,
+    gitDepth: typeof body.gitDepth === "number" ? body.gitDepth : undefined,
+    credentialRef: typeof body.credentialRef === "string" ? body.credentialRef : undefined,
+  };
+}
+
 export function registerByclawWikiHttpRoute(params: {
   api: OpenClawPluginApi;
-  config: ResolvedByclawWikiConfig;
   service: ByclawWikiRepositoryService;
 }): void {
   params.api.registerHttpRoute({
-    path: params.config.httpPath,
+    path: BYCLAW_WIKI_HTTP_PATH,
     auth: "gateway",
     handler: async (req, res) => {
       if (req.method === "GET") {
         sendJson(res, 200, {
           ok: true,
           repositories: params.service.listStatuses(),
-          schedule: {
-            timezone: params.config.timezone,
-            dayOfWeek: params.config.syncDayOfWeek,
-            hour: params.config.syncHour,
-            minute: params.config.syncMinute,
-          },
         });
         return;
       }
@@ -73,7 +75,7 @@ export function registerByclawWikiHttpRoute(params: {
           ok: false,
           error: {
             code: "method_not_allowed",
-            message: "Use GET for status or POST for manual sync.",
+            message: "Use GET for cached status or POST with repositoryUrl to prepare a checkout.",
           },
         });
         return;
@@ -81,19 +83,15 @@ export function registerByclawWikiHttpRoute(params: {
 
       try {
         const body = await readJsonBody(req);
-        const repositoryId = typeof body.repositoryId === "string" ? body.repositoryId : undefined;
-        if (repositoryId) {
-          const status = await params.service.syncRepositoryById(repositoryId);
-          sendJson(res, 200, { ok: true, repositories: [status] });
-          return;
-        }
-        await params.service.syncAll("http");
-        sendJson(res, 200, { ok: true, repositories: params.service.listStatuses() });
+        const ref = readRepositoryRef(body);
+        const refresh = typeof body.refresh === "boolean" ? body.refresh : true;
+        const status = await params.service.prepare(ref, { refresh });
+        sendJson(res, 200, { ok: true, repository: status });
       } catch (error) {
         sendJson(res, 400, {
           ok: false,
           error: {
-            code: "sync_failed",
+            code: error instanceof RepositoryError ? error.code.toLowerCase() : "prepare_failed",
             message: error instanceof Error ? error.message : String(error),
           },
         });

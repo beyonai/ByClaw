@@ -1,81 +1,70 @@
-export type WikiRepositoryConfig = {
-  id: string;
-  remoteUrl: string;
-  branch: string;
-  localPath?: string;
-};
-
-export type ResolvedWikiRepositoryConfig = WikiRepositoryConfig & {
-  localPath: string;
-};
+export const CODE_TO_WIKI_TOOL_NAME = "code_to_wiki";
+export const BYCLAW_WIKI_HTTP_PATH = "/plugins/byclaw-wiki";
 
 export type ByclawWikiPluginConfig = {
-  repositories?: unknown;
   dataDir?: unknown;
-  timezone?: unknown;
-  syncDayOfWeek?: unknown;
-  syncHour?: unknown;
-  syncMinute?: unknown;
-  runOnStartup?: unknown;
-  toolName?: unknown;
-  httpPath?: unknown;
   gitCommand?: unknown;
   codegraphCommand?: unknown;
+  zreadCommand?: unknown;
+  zreadHome?: unknown;
   commandTimeoutMs?: unknown;
   maxOutputBytes?: unknown;
-  retryInitialDelayMs?: unknown;
-  retryMaxDelayMs?: unknown;
-  retryMaxAttempts?: unknown;
+  zreadTimeoutMs?: unknown;
+  zreadMaxOutputBytes?: unknown;
+  redisHost?: unknown;
+  redisPort?: unknown;
+  redisUsername?: unknown;
+  redisPassword?: unknown;
+  redisDatabase?: unknown;
+  redisConnectTimeoutMs?: unknown;
+  zreadAimodelEnabled?: unknown;
+  zreadAimodelConfigRedisKey?: unknown;
+  zreadAimodelTypeListRedisKey?: unknown;
+  zreadAimodelTypeListField?: unknown;
+  zreadAimodelModelId?: unknown;
+  zreadAimodelProvider?: unknown;
+  zreadLlmProvider?: unknown;
+  zreadLlmModel?: unknown;
+  zreadLlmBaseUrl?: unknown;
+  zreadLlmApiKey?: unknown;
+  zreadLlmApiKeyEnv?: unknown;
+  zreadMaxConcurrent?: unknown;
+  zreadMaxRetries?: unknown;
   includeRawOutputInToolResult?: unknown;
   gitDepth?: unknown;
-  notificationWebhookUrl?: unknown;
-  notificationDingtalkAccessToken?: unknown;
-  notificationDingtalkSecret?: unknown;
-  notificationDingtalkActionCardBtnTitle?: unknown;
-  notificationDingtalkActionCardBtnUrl?: unknown;
-  notificationDocumentUploadUrl?: unknown;
-  notificationDocumentUploadPrefix?: unknown;
-  notificationRobotType?: unknown;
-  notificationMaxOutputChars?: unknown;
-  notificationMinOutputChars?: unknown;
-};
-
-export type NotificationRobotType = "generic" | "wecom" | "dingtalk" | "feishu";
-
-export type ResolvedNotificationConfig = {
-  webhookUrl?: string;
-  dingtalkAccessToken?: string;
-  dingtalkSecret?: string;
-  dingtalkActionCardBtnTitle: string;
-  dingtalkActionCardBtnUrl: string;
-  documentUploadUrl: string;
-  documentUploadPrefix: string;
-  robotType: NotificationRobotType;
-  maxOutputChars: number;
-  minOutputChars: number;
 };
 
 export type ResolvedByclawWikiConfig = {
-  repositories: ResolvedWikiRepositoryConfig[];
-  defaultRepositoryId: string;
   dataDir: string;
-  timezone: string;
-  syncDayOfWeek: number;
-  syncHour: number;
-  syncMinute: number;
-  runOnStartup: boolean;
-  toolName: string;
-  httpPath: string;
   gitCommand: string;
   codegraphCommand: string;
+  zreadCommand: string;
+  zreadHome: string;
   commandTimeoutMs: number;
   maxOutputBytes: number;
-  retryInitialDelayMs: number;
-  retryMaxDelayMs: number;
-  retryMaxAttempts: number;
+  zreadTimeoutMs: number;
+  zreadMaxOutputBytes: number;
+  redisHost?: string;
+  redisPort?: number;
+  redisUsername?: string;
+  redisPassword?: string;
+  redisDatabase?: number;
+  redisConnectTimeoutMs: number;
+  zreadAimodelEnabled: boolean;
+  zreadAimodelConfigRedisKey: string;
+  zreadAimodelTypeListRedisKey: string;
+  zreadAimodelTypeListField: string;
+  zreadAimodelModelId?: string;
+  zreadAimodelProvider?: string;
+  zreadLlmProvider?: string;
+  zreadLlmModel?: string;
+  zreadLlmBaseUrl?: string;
+  zreadLlmApiKey?: string;
+  zreadLlmApiKeyEnv?: string;
+  zreadMaxConcurrent: number;
+  zreadMaxRetries: number;
   includeRawOutputInToolResult: boolean;
   gitDepth: number;
-  notification: ResolvedNotificationConfig;
 };
 
 export type CommandResult = {
@@ -92,35 +81,43 @@ export type CommandResult = {
   truncated: boolean;
 };
 
-export type RepositorySyncStatus = {
-  repositoryId: string;
-  remoteUrl: string;
-  branch: string;
+export type RepositoryRef = {
+  repositoryUrl: string;
+  branch?: string;
+  gitDepth?: number;
+  credentialRef?: string;
+};
+
+export type RepositoryRuntimeStatus = {
+  repositoryUrl: string;
+  sanitizedRepositoryUrl: string;
+  branch?: string;
   localPath: string;
-  state: "idle" | "syncing" | "ready" | "error";
-  lastSyncStartedAt?: string;
-  lastSyncFinishedAt?: string;
+  state: "missing" | "ready" | "error";
+  cloned: boolean;
+  codegraphIndexed: boolean;
+  zreadWikiExists: boolean;
+  zreadCurrentVersion?: string;
   lastIndexedAt?: string;
   lastCommit?: string;
   lastError?: string;
-  retryCount?: number;
-  nextRetryAt?: string;
 };
 
-export type CodegraphMode =
-  | "explore"
-  | "query"
-  | "node"
-  | "files"
-  | "callers"
-  | "callees"
-  | "impact"
-  | "status"
-  | "notify_document";
+export type CodegraphQueryMode = "explore" | "query" | "node" | "files" | "callers" | "callees" | "impact";
 
-export type CodeToWikiRequest = {
-  repositoryId?: string;
-  mode?: CodegraphMode;
+export type CodeToWikiMode =
+  | "status"
+  | "pull"
+  | CodegraphQueryMode
+  | "wiki_status"
+  | "wiki_generate"
+  | "wiki_list"
+  | "wiki_read"
+  | "wiki_clear_draft";
+
+export type CodeToWikiRequest = RepositoryRef & {
+  mode?: CodeToWikiMode;
+  refresh?: boolean;
   question?: string;
   query?: string;
   target?: string;
@@ -128,23 +125,59 @@ export type CodeToWikiRequest = {
   limit?: number;
   maxDepth?: number;
   filter?: string;
-  documentTitle?: string;
-  documentMarkdown?: string;
+  wikiVersion?: string;
+  wikiPage?: string;
+  draftAction?: "resume" | "clear" | "cancel";
+  skipFailed?: boolean;
+  yes?: boolean;
 };
 
-export type CodegraphToolResult = {
+export type ZreadStatus = {
+  installed: boolean;
+  version?: string;
+  hasLogin: boolean;
+  hasConfig: boolean;
+  configPath: string;
+  homePath: string;
+  modelConfigured: boolean;
+  modelSource: "redis" | "config" | "existing" | "none";
+  modelProvider?: string;
+  modelName?: string;
+  modelBaseUrl?: string;
+  modelConfigError?: string;
+  hasCurrentWiki: boolean;
+  hasDraft: boolean;
+  currentVersion?: string;
+  pageCount: number;
+};
+
+export type WikiPage = {
+  slug: string;
+  title: string;
+  file: string;
+  path: string;
+  markdown?: string;
+};
+
+export type CodeToWikiToolResult = {
   ok: boolean;
-  repository: {
-    id: string;
-    remoteUrl: string;
-    branch: string;
+  repository?: {
+    repositoryUrl: string;
+    branch?: string;
     localPath: string;
   };
-  mode: CodegraphMode;
+  mode: CodeToWikiMode;
   output?: string;
   outputBytes?: number;
   outputOmitted?: boolean;
-  status?: RepositorySyncStatus;
+  status?: RepositoryRuntimeStatus;
+  zread?: ZreadStatus;
+  wiki?: {
+    version: string;
+    rootPath: string;
+    pages?: WikiPage[];
+    page?: WikiPage;
+  };
   error?: {
     code: string;
     message: string;
@@ -152,18 +185,5 @@ export type CodegraphToolResult = {
   command?: Omit<CommandResult, "stdout" | "stderr"> & {
     stdoutBytes: number;
     stderrBytes: number;
-  };
-  notification?: {
-    attempted: boolean;
-    ok?: boolean;
-    skippedReason?: string;
-    statusCode?: number;
-    error?: string;
-    uploadedDocument?: {
-      key: string;
-      name: string;
-      size: number;
-      contentType: string;
-    };
   };
 };

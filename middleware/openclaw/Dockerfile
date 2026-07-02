@@ -85,6 +85,7 @@ USER root
 
 ARG OPENCLI_VERSION=1.8.0
 ARG OPENCLI_EXTENSION_VERSION=1.0.15
+ARG ZREAD_CLI_VERSION=0.2.13
 ARG INSTALL_BROWSER_STACK=true
 
 RUN chown root:root /app
@@ -175,6 +176,8 @@ RUN set -eux; \
         test -f /opt/opencli/extension/manifest.json; \
         ;; \
     esac; \
+    npm install -g "zread_cli@${ZREAD_CLI_VERSION}"; \
+    zread --help >/dev/null; \
     npm install -g @colbymchenry/codegraph; \
     codegraph version; \
     rm -rf /var/lib/apt/lists/*
