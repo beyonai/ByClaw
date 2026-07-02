@@ -67,7 +67,11 @@ public class OntologyBaseService {
      * 无法在此按个人/企业过滤；个人/企业区分由 ss_resource 层（ownerType 列）负责，这里返回全部。
      */
     public JSONArray listBases(String ownerType) {
-        JSONArray bases = feignDataCloudService.listOntologyBases();
+        return listBases(ownerType, null);
+    }
+
+    public JSONArray listBases(String ownerType, String keyword) {
+        JSONArray bases = feignDataCloudService.listOntologyBases(ownerType, keyword);
         return bases == null ? new JSONArray() : bases;
     }
 
@@ -84,6 +88,152 @@ public class OntologyBaseService {
     /** 对象详情：属性 + 动作（转发 datacloud）。 */
     public JSONObject objectDetail(String ownerType, String baseId, String objectCode) {
         return feignDataCloudService.getObjectDetail(normalizeOwnerType(ownerType), baseId, objectCode);
+    }
+
+    public JSONObject createBase(JSONObject request) {
+        return feignDataCloudService.createOntologyBase(payload(request));
+    }
+
+    public JSONObject updateBase(JSONObject request) {
+        return feignDataCloudService.updateOntologyBase(requiredString(request, "baseId"), payload(request));
+    }
+
+    public JSONObject createScene(JSONObject request) {
+        return feignDataCloudService.createScene(requiredString(request, "baseId"), payload(request));
+    }
+
+    public JSONObject updateScene(JSONObject request) {
+        return feignDataCloudService.updateScene(requiredString(request, "baseId"), requiredString(request, "sceneId"),
+            payload(request));
+    }
+
+    public JSONObject deleteScene(JSONObject request) {
+        return feignDataCloudService.deleteScene(requiredString(request, "baseId"), requiredString(request, "sceneId"));
+    }
+
+    public JSONObject querySceneOntologies(JSONObject request) {
+        return feignDataCloudService.queryOntologiesByScene(requiredString(request, "baseId"),
+            requiredString(request, "sceneId"), request.getInteger("page"), request.getInteger("pageSize"),
+            keyword(request), cacheMode(request));
+    }
+
+    public JSONObject addSceneMembers(JSONObject request) {
+        return feignDataCloudService.addSceneMembers(requiredString(request, "baseId"), requiredString(request, "sceneId"),
+            payload(request));
+    }
+
+    public JSONObject removeSceneMembers(JSONObject request) {
+        return feignDataCloudService.removeSceneMembers(requiredString(request, "baseId"),
+            requiredString(request, "sceneId"), payload(request));
+    }
+
+    public JSONArray listObjects(JSONObject request) {
+        return feignDataCloudService.listObjects(requiredString(request, "baseId"), cacheMode(request));
+    }
+
+    public JSONObject createObject(JSONObject request) {
+        return feignDataCloudService.createObject(requiredString(request, "baseId"), payload(request));
+    }
+
+    public JSONObject updateObject(JSONObject request) {
+        return feignDataCloudService.updateObject(requiredString(request, "baseId"),
+            requiredString(request, "objectCode", "code"), payload(request));
+    }
+
+    public JSONObject deleteObject(JSONObject request) {
+        return feignDataCloudService.deleteObject(requiredString(request, "baseId"),
+            requiredString(request, "objectCode", "code"));
+    }
+
+    public JSONArray listViews(JSONObject request) {
+        return feignDataCloudService.listViewsByBase(requiredString(request, "baseId"), cacheMode(request));
+    }
+
+    public JSONObject viewDetail(JSONObject request) {
+        return feignDataCloudService.getViewDetail(requiredString(request, "baseId"),
+            requiredString(request, "viewCode", "code"), cacheMode(request));
+    }
+
+    public JSONObject createView(JSONObject request) {
+        return feignDataCloudService.createView(requiredString(request, "baseId"), payload(request));
+    }
+
+    public JSONObject updateView(JSONObject request) {
+        return feignDataCloudService.updateView(requiredString(request, "baseId"),
+            requiredString(request, "viewCode", "code"), payload(request));
+    }
+
+    public JSONObject deleteView(JSONObject request) {
+        return feignDataCloudService.deleteView(requiredString(request, "baseId"), requiredString(request, "viewCode",
+            "code"));
+    }
+
+    public JSONArray listRelations(JSONObject request) {
+        return feignDataCloudService.listRelationsByBase(requiredString(request, "baseId"),
+            cacheMode(request));
+    }
+
+    public JSONObject relationDetail(JSONObject request) {
+        return feignDataCloudService.getRelationDetail(requiredString(request, "baseId"),
+            requiredString(request, "relationCode", "code"), cacheMode(request));
+    }
+
+    public JSONObject createRelation(JSONObject request) {
+        return feignDataCloudService.createRelation(requiredString(request, "baseId"), payload(request));
+    }
+
+    public JSONObject updateRelation(JSONObject request) {
+        return feignDataCloudService.updateRelation(requiredString(request, "baseId"),
+            requiredString(request, "relationCode", "code"), payload(request));
+    }
+
+    public JSONObject deleteRelation(JSONObject request) {
+        return feignDataCloudService.deleteRelation(requiredString(request, "baseId"),
+            requiredString(request, "relationCode", "code"));
+    }
+
+    public JSONArray listDatasources(JSONObject request) {
+        return feignDataCloudService.listDatasources(requiredString(request, "baseId"), cacheMode(request));
+    }
+
+    public JSONObject datasourceDetail(JSONObject request) {
+        return feignDataCloudService.getDatasourceDetail(requiredString(request, "baseId"),
+            requiredString(request, "dbId", "datasourceId"), cacheMode(request));
+    }
+
+    public JSONObject createDatasource(JSONObject request) {
+        return feignDataCloudService.createDatasource(requiredString(request, "baseId"), payload(request));
+    }
+
+    public JSONObject deleteDatasource(JSONObject request) {
+        return feignDataCloudService.deleteDatasource(requiredString(request, "baseId"), requiredString(request, "dbId",
+            "datasourceId"));
+    }
+
+    public JSONArray listActions(JSONObject request) {
+        return feignDataCloudService.listActions(requiredString(request, "baseId"), requiredString(request, "objectCode"),
+            cacheMode(request));
+    }
+
+    public JSONObject actionDetail(JSONObject request) {
+        return feignDataCloudService.getActionDetail(requiredString(request, "baseId"),
+            requiredString(request, "objectCode"), requiredString(request, "actionCode", "code"),
+            cacheMode(request));
+    }
+
+    public JSONObject createAction(JSONObject request) {
+        return feignDataCloudService.createAction(requiredString(request, "baseId"), requiredString(request,
+            "objectCode"), payload(request));
+    }
+
+    public JSONObject updateAction(JSONObject request) {
+        return feignDataCloudService.updateAction(requiredString(request, "baseId"),
+            requiredString(request, "objectCode"), requiredString(request, "actionCode", "code"), payload(request));
+    }
+
+    public JSONObject deleteAction(JSONObject request) {
+        return feignDataCloudService.deleteAction(requiredString(request, "baseId"),
+            requiredString(request, "objectCode"), requiredString(request, "actionCode", "code"));
     }
 
     /**
@@ -360,6 +510,52 @@ public class OntologyBaseService {
 
     private String normalizeOwnerType(String ownerType) {
         return StringUtils.isBlank(ownerType) ? "personal" : ownerType;
+    }
+
+    private String keyword(JSONObject request) {
+        return StringUtils.defaultIfBlank(request.getString("keyword"), request.getString("queryKeyword"));
+    }
+
+    private String cacheMode(JSONObject request) {
+        return StringUtils.defaultIfBlank(request.getString("cacheMode"), request.getString("cache_mode"));
+    }
+
+    private String requiredString(JSONObject request, String... keys) {
+        for (String key : keys) {
+            String value = request.getString(key);
+            if (StringUtils.isNotBlank(value)) {
+                return value;
+            }
+        }
+        throw new BaseException(String.join("/", keys) + " 不能为空");
+    }
+
+    @SuppressWarnings("unchecked")
+    private JSONObject payload(JSONObject request) {
+        Object nestedPayload = request.get("payload");
+        if (nestedPayload instanceof JSONObject) {
+            return (JSONObject) nestedPayload;
+        }
+        if (nestedPayload instanceof Map) {
+            JSONObject nested = new JSONObject();
+            nested.putAll((Map<String, Object>) nestedPayload);
+            return nested;
+        }
+
+        JSONObject body = new JSONObject();
+        body.putAll(request);
+        body.remove("ownerType");
+        body.remove("sceneId");
+        body.remove("dbId");
+        body.remove("datasourceId");
+        body.remove("keyword");
+        body.remove("queryKeyword");
+        body.remove("cacheMode");
+        body.remove("cache_mode");
+        body.remove("page");
+        body.remove("pageSize");
+        body.remove("payload");
+        return body;
     }
 
     /** 取首个非空字段值，兼容 datacloud 响应的 snake_case 与 camelCase 两种键名。 */
