@@ -210,6 +210,43 @@
   }
 }
 
+.digitalEmployeeTag {
+  line-height: 100%;
+  padding: 3px 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+
+  .tagText {
+    font-size: 14px;
+  }
+}
+
+.digitalEmployeeDefaultTag {
+  .digitalEmployeeTag;
+
+  padding: 4px 6px;
+  background: linear-gradient(90deg, #315dff 0%, #bf5cff 100%);
+
+  .tagText {
+    background: none;
+    -webkit-text-fill-color: #fff;
+    color: #fff;
+  }
+}
+
+.digitalEmployeePersonalTag {
+  .digitalEmployeeTag;
+
+  background: linear-gradient(90deg, #088cff 0%, #00cdd5 100%);
+
+  .tagText {
+    background: none;
+    -webkit-text-fill-color: #fff;
+    color: #fff;
+  }
+}
+
 .personalDefaultTag {
   background: linear-gradient(135deg, #0068ff 0%, #003681 100%);
   color: #fff;
