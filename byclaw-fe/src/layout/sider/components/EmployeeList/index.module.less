@@ -77,18 +77,17 @@
         background-color: #fff;
         :global {
           .@{antPrefix}-list-item-action {
+            display: block;
             opacity: 1;
-            visibility: visible;
             pointer-events: auto;
           }
         }
       }
       :global {
         .@{antPrefix}-list-item-action {
-          display: block;
+          display: none;
           margin-left: 10px;
           opacity: 0;
-          visibility: hidden;
           pointer-events: none;
         }
       }
