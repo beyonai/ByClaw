@@ -298,7 +298,7 @@ wheels = [
 
 [[package]]
 name = "by-qa"
-version = "0.1.17"
+version = "0.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -306,9 +306,9 @@ dependencies = [
     { name = "pydantic-settings" },
     { name = "python-dotenv" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d9/6e/a892c743163c5fe53a7446c72d982fbae64937cc829f02f38b465842f7f0/by_qa-0.1.17.tar.gz", hash = "sha256:29a844d3bd6a88390b87eb25b6460ca00d7aeb62e14f81ab88dbaf691287b53d", size = 355681, upload-time = "2026-06-30T06:44:25.206Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/72/89/9fc9f65ae368c0154c30ff983601bc066dbeee13c324aa23bcd971c30daa/by_qa-0.2.0.tar.gz", hash = "sha256:a6b4bf709710042929abc9804956084487c473f2ac9a0e6e6c08cdb69ab1e3e3", size = 353566, upload-time = "2026-07-02T01:47:20.322Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/72/45/3add25731944595e9f066825b8217e8bb481569e30db2106f391148c3b34/by_qa-0.1.17-py3-none-any.whl", hash = "sha256:ac785c0682466e516ee5e2edc21842298f2b0f7f436d836eb137c3f7be75467f", size = 196994, upload-time = "2026-06-30T06:44:23.213Z" },
+    { url = "https://files.pythonhosted.org/packages/0a/5c/3fc9b14a15b2da38938f03c1d27bc3e7eee1fe1770fc4d051c37d4e2b5ef/by_qa-0.2.0-py3-none-any.whl", hash = "sha256:d4129e0c509de22ea34ae1f3a0fc30a8c3d44f0952252c56cd17c2b05593511b", size = 192321, upload-time = "2026-07-02T01:47:18.741Z" },
 ]
 
 [package.optional-dependencies]
@@ -362,14 +362,14 @@ requires-dist = [
     { name = "by-framework", specifier = "==0.2.2.dev5" },
     { name = "by-framework-langgraph", specifier = "==0.0.3.dev2" },
     { name = "by-framework-trace-langfuse", specifier = "==0.0.3.dev2" },
-    { name = "by-qa", extras = ["all"], specifier = "==0.1.17" },
+    { name = "by-qa", extras = ["all"], specifier = "==0.2.0" },
     { name = "langfuse", specifier = "==4.3.1" },
 ]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "pytest", specifier = "==9.0.3" },
-    { name = "pytest-asyncio", specifier = "==1.3.0" },
+    { name = "pytest", specifier = ">=9.0.3" },
+    { name = "pytest-asyncio", specifier = ">=1.3.0" },
 ]
 
 [[package]]
