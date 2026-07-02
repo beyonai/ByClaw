@@ -65,7 +65,12 @@
   font-size: 12px;
   border-radius: 20px;
   color: var(--beyond-color-text-tertiary);
-  border: 0.5px solid #ced3d9;
+  border: 0.5px solid transparent;
+
+  &:hover,
+  &:focus {
+    border-color: #ced3d9;
+  }
 }
 .feedbackButton2 {
   font-size: 12px;

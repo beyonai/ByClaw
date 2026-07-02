@@ -102,6 +102,7 @@ const ResourceList = (props: Props) => {
   const [relatedObjectLoading, setRelatedObjectLoading] = useState(false);
   const [downloadingSkill, setDownloadingSkill] = useState<string | null>(null);
   const [deletingSkill, setDeletingSkill] = useState<string | null>(null);
+  const [failedResourceImageUrls, setFailedResourceImageUrls] = useState<Set<string>>(() => new Set());
 
   const intl = useIntl();
   const { userInfo } = useSelector((state: any) => state.user);
@@ -394,20 +395,32 @@ const ResourceList = (props: Props) => {
 
   const renderCompactAvatar = (item: IResourceItem) => {
     const resourceImage = getResourceImageUrl(item);
+    const resourceImageUrl = resourceImage ? getFileUrl(resourceImage) : '';
+    const imageLoadFailed = resourceImageUrl ? failedResourceImageUrls.has(resourceImageUrl) : false;
 
-    if (resourceType === 'SKILL' && resourceImage) {
+    if (resourceType === 'SKILL' && resourceImageUrl && !imageLoadFailed) {
       return (
         <img
-          key={getFileUrl(resourceImage)}
+          key={resourceImageUrl}
           className={styles.compactAvatarImage}
-          src={getFileUrl(resourceImage)}
+          src={resourceImageUrl}
           alt=""
           fetchPriority="low"
+          onError={() => {
+            setFailedResourceImageUrls((prev) => {
+              if (prev.has(resourceImageUrl)) {
+                return prev;
+              }
+              const next = new Set(prev);
+              next.add(resourceImageUrl);
+              return next;
+            });
+          }}
         />
       );
     }
 
-    if (resourceType === 'SKILL' && item.resourceBizType === ResourceTypeMap.SKILL) {
+    if (resourceType === 'SKILL' && (item.resourceBizType === ResourceTypeMap.SKILL || imageLoadFailed)) {
       return (
         <span className={styles.skillDefaultAvatar}>
           <span className={styles.skillDefaultAvatarOrb} />
@@ -871,14 +884,9 @@ const ResourceList = (props: Props) => {
                 <List.Item
                   className={classnames(styles.compactListItem, { [styles.disabledCard]: disableClick })}
                   onClick={disableClick ? undefined : () => onSelect?.({ ...item, isFromResourceModule: true })}
-                  actions={[renderActionDropdown(item, 'list')].filter(Boolean) as React.ReactNode[]}
                 >
                   <List.Item.Meta
-                    avatar={
-                      <span className={styles.compactAvatar}>
-                        {renderCompactAvatar(item)}
-                      </span>
-                    }
+                    avatar={<span className={styles.compactAvatar}>{renderCompactAvatar(item)}</span>}
                     title={
                       <span className={styles.compactTitleRow}>
                         <span className={styles.nameText}>{item.resourceName}</span>
@@ -889,6 +897,7 @@ const ResourceList = (props: Props) => {
                       item.resourceDesc ? <span className={styles.compactDesc}>{item.resourceDesc}</span> : null
                     }
                   />
+                  <span className={styles.compactActionWrapper}>{renderActionDropdown(item, 'list')}</span>
                 </List.Item>
               </Draggable>
             )}

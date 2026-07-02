@@ -320,7 +320,30 @@
 }
 
 .compactListItem {
+  position: relative;
   cursor: pointer;
+  transition: padding-right 0.2s ease;
+
+  &:hover {
+    padding-right: 42px !important;
+
+    .compactActionWrapper {
+      opacity: 1;
+      visibility: visible;
+      pointer-events: auto;
+    }
+  }
+}
+
+.compactActionWrapper {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
 }
 
 .compactActionTrigger {
