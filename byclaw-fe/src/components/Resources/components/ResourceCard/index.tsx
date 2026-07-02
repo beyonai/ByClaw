@@ -347,16 +347,21 @@ const RenderContent = (props: ResourceCardProps) => {
   const displayDescription =
     description ?? resource.resourceDesc ?? resource.intro ?? intl.formatMessage({ id: 'common.none' });
   const displayImage = resource.resourceLogoUrl || resource.avatar;
+  const displayImageUrl = displayImage ? getFileUrl(displayImage) : '';
   const [skillPosterAspect, setSkillPosterAspect] = useState<string>();
+  const [displayImageLoadFailed, setDisplayImageLoadFailed] = useState(false);
   const creatorName =
     resource?.creatorName ||
     resource?.createUserName ||
     resource?.memberName ||
     intl.formatMessage({ id: 'common.none' });
   const useCount = Number(resource?.useCount || resource?.focusCount || 0);
+  
   useEffect(() => {
     setSkillPosterAspect(undefined);
-  }, [displayImage]);
+    setDisplayImageLoadFailed(false);
+  }, [displayImageUrl]);
+
   const isDigitalEmployeeResource = resource.resourceBizType === resourceBizTypeMap.DIG_EMPLOYEE;
   const isDefaultDigitalEmployee =
     isDigitalEmployeeResource && (Boolean(resource.isDefault) || ownerType === 'personal_default');
@@ -677,10 +682,10 @@ const RenderContent = (props: ResourceCardProps) => {
             skillPosterAspect ? ({ '--skill-poster-aspect': skillPosterAspect } as React.CSSProperties) : undefined
           }
         >
-          {displayImage ? (
+          {displayImageUrl && !displayImageLoadFailed ? (
             <img
               className={styles.skillPosterImage}
-              src={getFileUrl(displayImage)}
+              src={displayImageUrl}
               alt={`${displayTitle}`}
               onLoad={(event) => {
                 const { naturalWidth, naturalHeight } = event.currentTarget;
@@ -689,6 +694,7 @@ const RenderContent = (props: ResourceCardProps) => {
                 }
                 setSkillPosterAspect(`${naturalWidth} / ${naturalHeight}`);
               }}
+              onError={() => setDisplayImageLoadFailed(true)}
             />
           ) : (
             <div className={styles.skillPosterPlaceholder}>
@@ -767,8 +773,13 @@ const RenderContent = (props: ResourceCardProps) => {
           <div className={styles.avatarContainer}>
             {avatarNode ? (
               avatarNode
-            ) : displayImage ? (
-              <img className={styles.avatar} src={getFileUrl(displayImage)} alt={`${displayTitle}`} />
+            ) : displayImageUrl && !displayImageLoadFailed ? (
+              <img
+                className={styles.avatar}
+                src={displayImageUrl}
+                alt={`${displayTitle}`}
+                onError={() => setDisplayImageLoadFailed(true)}
+              />
             ) : isSkillResource(resource, resourceType) ? (
               <div className={styles.skillDefaultAvatar}>
                 <div className={styles.skillDefaultAvatarOrb} />

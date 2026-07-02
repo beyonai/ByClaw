@@ -109,7 +109,13 @@ const ResourceSiderListItem: React.FC<ResourceSiderListItemProps> = ({
   onDoubleClick,
 }) => {
   const resourceImage = getResourceImageUrl(item);
+  const resourceImageUrl = resourceImage ? getFileUrl(resourceImage) : '';
+  const [imageLoadFailed, setImageLoadFailed] = React.useState(false);
   const description = item.resourceDesc || item.description;
+
+  React.useEffect(() => {
+    setImageLoadFailed(false);
+  }, [resourceImageUrl]);
 
   return (
     <List.Item
@@ -123,15 +129,16 @@ const ResourceSiderListItem: React.FC<ResourceSiderListItemProps> = ({
         avatar={
           <span className={styles.resourceAvatar}>
             {drillable && <AntdIcon type="icon-a-xiangyou" className={styles.drillIcon} />}
-            {resourceType === 'SKILL' && resourceImage ? (
+            {resourceType === 'SKILL' && resourceImageUrl && !imageLoadFailed ? (
               <img
-                key={getFileUrl(resourceImage)}
+                key={resourceImageUrl}
                 className={styles.resourceAvatarImage}
-                src={getFileUrl(resourceImage)}
+                src={resourceImageUrl}
                 alt=""
                 fetchPriority="low"
+                onError={() => setImageLoadFailed(true)}
               />
-            ) : resourceType === 'SKILL' && item.resourceBizType === ResourceTypeMap.SKILL ? (
+            ) : resourceType === 'SKILL' && (item.resourceBizType === ResourceTypeMap.SKILL || imageLoadFailed) ? (
               <span className={styles.skillDefaultAvatar}>
                 <span className={styles.skillDefaultAvatarOrb} />
               </span>
