@@ -299,7 +299,7 @@ const EmployeeCard: React.FC<EmployeeCardProps> = ({
                 <span className={classNames(styles.nameText)}>
                   {employee?.resourceName || employee?.name || employee?.id || ''}
                 </span>
-                {`${employee?.isTop}` === '1' && <AntdIcon type="icon-zhiding-fill" className={styles.pinBadge} />}
+                {shouldShowTag && TagRender(employee)}
               </span>
             </Title>
           }
@@ -311,7 +311,7 @@ const EmployeeCard: React.FC<EmployeeCardProps> = ({
               >
                 {employee?.resourceDesc}
               </Paragraph>
-              {shouldShowTag && TagRender(employee)}
+              {`${employee?.isTop}` === '1' && <AntdIcon type="icon-zhiding-fill" className={styles.pinBadge} />}
             </div>
           }
         />
