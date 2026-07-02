@@ -12,6 +12,8 @@ import {
   docCallMode,
   docSyncIntervalSec,
   docSyncTimeoutSec,
+  resolveLangfuseParentObservationId,
+  resolveLangfuseTraceId,
   resolveDocChannelTraceId,
   resolveDocSessionId,
 } from "../doc-shared.js";
@@ -279,6 +281,8 @@ async function executeOntologyResourceViaCallAgent(input: {
 
   const sessionId = resolveDocSessionId(input.parameters, resourceId || resourceCode);
   const channelTraceId = resolveDocChannelTraceId(input.parameters);
+  const langfuseParentObservationId = resolveLangfuseParentObservationId(input.parameters);
+  const langfuseTraceId = resolveLangfuseTraceId(input.parameters);
   const traceId = channelTraceId || `${sessionId}-${Date.now()}`;
   const targetAgentType =
     asString(input.parameters.target_agent_type) ||
@@ -296,6 +300,14 @@ async function executeOntologyResourceViaCallAgent(input: {
   const metadata = getCommonGatewayMetadata(input.parameters);
   if (metadata["channel-trace-id"]) {
     payload["channel-trace-id"] = metadata["channel-trace-id"];
+  }
+  if (langfuseParentObservationId) {
+    payload.langfuseParentObservationId = langfuseParentObservationId;
+    metadata.langfuseParentObservationId = langfuseParentObservationId;
+  }
+  if (langfuseTraceId) {
+    payload.langfuseTraceId = langfuseTraceId;
+    metadata.langfuseTraceId = langfuseTraceId;
   }
   const toolCallId = input.parameters.tool_call_id as string;
 
@@ -319,6 +331,8 @@ async function executeOntologyResourceViaCallAgent(input: {
       [callKey]: [resourceCode],
     },
     metadata,
+    langfuseParentObservationId,
+    langfuseTraceId,
     logger: input.logger,
     parentMessageId: toolCallId,
   });

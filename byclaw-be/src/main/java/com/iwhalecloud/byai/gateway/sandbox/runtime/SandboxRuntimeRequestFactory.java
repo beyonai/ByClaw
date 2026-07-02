@@ -57,6 +57,7 @@ final class SandboxRuntimeRequestFactory {
         payload.put("entrypoint", request != null ? request.getEntrypoint() : null);
         payload.put("env", request != null ? request.getEnv() : null);
         payload.put("image", buildImagePayload(request != null ? request.getImage() : null));
+        payload.put("resourceRequests", request != null ? request.getResourceRequests() : null);
         payload.put("resourceLimits", request != null ? request.getResourceLimits() : null);
         payload.put("volumes", buildVolumesPayload(request != null ? request.getVolumes() : null));
         payload.put("extensions", request != null ? request.getExtensions() : null);
@@ -97,10 +98,17 @@ final class SandboxRuntimeRequestFactory {
         Map<String, String> metadata = new LinkedHashMap<>();
         metadata.put("userCode", userCode);
         metadata.put("serviceKey", sandboxType);
+        return buildWhaleAgentListSandboxesRequest(DEFAULT_WHALE_AGENT_LIST_PAGE,
+            DEFAULT_WHALE_AGENT_LIST_PAGE_SIZE, metadata);
+    }
+
+    static WhaleAgentListSandboxesRequest buildWhaleAgentListSandboxesRequest(int page,
+                                                                              int pageSize,
+                                                                              Map<String, String> metadata) {
         return new WhaleAgentListSandboxesRequest(
-            DEFAULT_WHALE_AGENT_LIST_PAGE,
-            DEFAULT_WHALE_AGENT_LIST_PAGE_SIZE,
-            metadata);
+            page,
+            pageSize,
+            metadata != null ? metadata : Map.of());
     }
 
     static String extractGatewayToken(CreateSandboxRequest request) {
@@ -126,27 +134,19 @@ final class SandboxRuntimeRequestFactory {
 
     static boolean isReusableSandboxState(SandboxStatus status) {
         if (status == null || StringUtils.isBlank(status.getState())) {
-            return true;
+            return false;
         }
         String state = status.getState().trim().toLowerCase(java.util.Locale.ROOT);
-        return !"failed".equals(state)
-            && !"exited".equals(state)
-            && !"exit".equals(state)
-            && !"stopped".equals(state)
-            && !"terminated".equals(state)
-            && !"deleted".equals(state)
-            && !"removed".equals(state)
-            && !"canceled".equals(state)
-            && !"cancelled".equals(state);
+        return "running".equals(state) || "ready".equals(state);
     }
 
     static int stateRankForReuse(SandboxStatus status) {
         if (status == null || StringUtils.isBlank(status.getState())) {
-            return 0;
+            return 1;
         }
         return switch (status.getState().trim().toLowerCase(java.util.Locale.ROOT)) {
             case "running" -> 3;
-            case "pending" -> 2;
+            case "ready" -> 2;
             default -> 1;
         };
     }

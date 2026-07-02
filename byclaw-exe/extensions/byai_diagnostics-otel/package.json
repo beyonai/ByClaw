@@ -1,0 +1,41 @@
+{
+  "name": "@openclaw/diagnostics-otel",
+  "version": "1.0.0",
+  "private": true,
+  "description": "BYAI OpenTelemetry diagnostics exporter for Langfuse session traces.",
+  "type": "module",
+  "scripts": {
+    "build": "esbuild index.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/index.js --sourcemap --packages=external --external:openclaw",
+    "build:fast": "esbuild index.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/index.js --packages=external --external:openclaw",
+    "deploy:openclaw-bundled": "node scripts/deploy-to-openclaw-bundled.mjs",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@opentelemetry/api": "1.9.1",
+    "@opentelemetry/api-logs": "0.218.0",
+    "@opentelemetry/exporter-logs-otlp-proto": "0.218.0",
+    "@opentelemetry/exporter-metrics-otlp-proto": "0.218.0",
+    "@opentelemetry/exporter-trace-otlp-proto": "0.218.0",
+    "@opentelemetry/resources": "2.7.1",
+    "@opentelemetry/sdk-logs": "0.218.0",
+    "@opentelemetry/sdk-metrics": "2.7.1",
+    "@opentelemetry/sdk-node": "0.218.0",
+    "@opentelemetry/sdk-trace-base": "2.7.1",
+    "@opentelemetry/semantic-conventions": "1.41.1"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.12",
+    "vitest": "4.1.8"
+  },
+  "openclaw": {
+    "extensions": [
+      "./dist/index.js"
+    ],
+    "compat": {
+      "pluginApi": ">=2026.5.28"
+    },
+    "build": {
+      "openclawVersion": "2026.5.28"
+    }
+  }
+}

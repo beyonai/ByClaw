@@ -1,0 +1,1716 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>File Manager</title>
+  <script src="./openclaw-env.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #f7f8fa;
+      --surface: #ffffff;
+      --surface-soft: #fafbfc;
+      --border: rgba(0, 0, 0, 0.15);
+      --border-light: rgba(0, 0, 0, 0.06);
+      --text: #14161a;
+      --text-secondary: #40454d;
+      --text-tertiary: #707680;
+      --primary: #165dff;
+      --primary-bg: #e8f3ff;
+      --primary-hover: #4080ff;
+      --fill: rgba(0, 0, 0, 0.04);
+      --fill-hover: rgba(0, 0, 0, 0.06);
+      --screen-bg: #1a1d24;
+      --ok: #00b42a;
+      --warn: #ff7d00;
+      --err: #f53f3f;
+      --radius: 10px;
+      --radius-sm: 8px;
+      --radius-xs: 6px;
+    }
+
+    :root[data-theme="dark"] {
+      --bg: #111318;
+      --surface: #191c22;
+      --surface-soft: #20242c;
+      --border: rgba(255, 255, 255, 0.18);
+      --border-light: rgba(255, 255, 255, 0.08);
+      --text: #f2f3f5;
+      --text-secondary: #c8ccd4;
+      --text-tertiary: #8b929e;
+      --primary: #4080ff;
+      --primary-bg: rgba(64, 128, 255, 0.16);
+      --primary-hover: #6aa1ff;
+      --fill: rgba(255, 255, 255, 0.06);
+      --fill-hover: rgba(255, 255, 255, 0.1);
+      --screen-bg: #0b0d12;
+    }
+
+    html, body {
+      height: 100%;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    button, input {
+      font: inherit;
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.5;
+    }
+
+    .file-app {
+      height: 100%;
+      min-height: 100%;
+      display: flex;
+      flex-direction: column;
+      background: var(--surface);
+    }
+
+    .topbar {
+      height: 56px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 0 20px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border-light);
+      flex-shrink: 0;
+    }
+
+    .title {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+      font-size: 15px;
+      font-weight: 500;
+      color: var(--text);
+    }
+
+    .title-icon {
+      width: 30px;
+      height: 30px;
+      border-radius: var(--radius-sm);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--primary-bg);
+      color: var(--primary);
+      flex-shrink: 0;
+    }
+
+    svg {
+      width: 18px;
+      height: 18px;
+      display: block;
+    }
+
+    .title-meta {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .title-main {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .title-sub {
+      color: var(--text-tertiary);
+      font-size: 12px;
+      font-weight: 400;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .topbar-right {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--text-tertiary);
+      font-size: 13px;
+    }
+
+    .status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--text-tertiary);
+      flex-shrink: 0;
+    }
+
+    .status-dot.ok { background: var(--ok); }
+    .status-dot.warn { background: var(--warn); }
+    .status-dot.err { background: var(--err); }
+
+    .btn {
+      appearance: none;
+      border: 1px solid var(--border-light);
+      background: var(--surface);
+      color: var(--text);
+      font-size: 13px;
+      padding: 6px 14px;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s, color 0.15s;
+      white-space: nowrap;
+    }
+
+    .btn:hover:not(:disabled) {
+      background: var(--fill);
+      border-color: var(--border);
+    }
+
+    .btn-primary {
+      background: var(--primary);
+      border-color: var(--primary);
+      color: #fff;
+    }
+
+    .btn-primary:hover:not(:disabled) {
+      background: var(--primary-hover);
+      border-color: var(--primary-hover);
+    }
+
+    .btn-danger:hover:not(:disabled) {
+      color: var(--err);
+      border-color: rgba(245, 63, 63, 0.35);
+      background: rgba(245, 63, 63, 0.08);
+    }
+
+    .menu-wrap {
+      position: relative;
+      display: inline-flex;
+    }
+
+    .menu {
+      position: absolute;
+      top: calc(100% + 8px);
+      right: 0;
+      z-index: 30;
+      min-width: 142px;
+      padding: 6px;
+      border: 1px solid var(--border-light);
+      border-radius: var(--radius-sm);
+      background: var(--surface);
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.14);
+      display: none;
+    }
+
+    .menu.visible {
+      display: grid;
+      gap: 4px;
+    }
+
+    .menu button {
+      min-height: 32px;
+      border: none;
+      border-radius: var(--radius-xs);
+      background: transparent;
+      color: var(--text-secondary);
+      text-align: left;
+      padding: 0 10px;
+      cursor: pointer;
+    }
+
+    .menu button:hover,
+    .menu button.active {
+      color: var(--primary);
+      background: var(--primary-bg);
+    }
+
+    .body {
+      flex: 1;
+      min-height: 0;
+      display: grid;
+      grid-template-columns: 56px minmax(0, 1fr) 320px;
+      background: var(--bg);
+      overflow: hidden;
+    }
+
+    .sidebar {
+      background: var(--bg);
+      border-right: 1px solid var(--border-light);
+      padding: 10px 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .sidebar-spacer {
+      flex: 1;
+    }
+
+    .sidebar-btn,
+    .icon-btn {
+      width: 36px;
+      height: 36px;
+      border: none;
+      border-radius: var(--radius-sm);
+      background: transparent;
+      color: var(--text-secondary);
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.15s, color 0.15s, border-color 0.15s;
+    }
+
+    .icon-btn {
+      width: 32px;
+      height: 32px;
+      border: 1px solid var(--border-light);
+      background: var(--surface);
+    }
+
+    .sidebar-btn:hover:not(:disabled),
+    .icon-btn:hover:not(:disabled) {
+      background: var(--fill-hover);
+      color: var(--text);
+    }
+
+    .sidebar-btn.active,
+    .icon-btn.active {
+      background: var(--primary-bg);
+      color: var(--primary);
+      border-color: rgba(22, 93, 255, 0.18);
+    }
+
+    .main {
+      min-width: 0;
+      min-height: 0;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      overflow: hidden;
+    }
+
+    .pathbar {
+      min-height: 48px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 8px 12px;
+      background: var(--surface);
+      border: 1px solid var(--border-light);
+      border-radius: var(--radius);
+      flex-shrink: 0;
+    }
+
+    .breadcrumbs {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+      color: var(--text-secondary);
+      font-size: 13px;
+      overflow: hidden;
+    }
+
+    .path-stack {
+      display: grid;
+      gap: 4px;
+      min-width: 0;
+    }
+
+    .path-editor {
+      display: none;
+      width: min(460px, 62vw);
+      height: 32px;
+      border: 1px solid var(--primary);
+      border-radius: var(--radius-sm);
+      outline: none;
+      color: var(--text);
+      background: var(--surface);
+      padding: 0 10px;
+    }
+
+    .path-stack.editing .breadcrumbs {
+      display: none;
+    }
+
+    .path-stack.editing .path-editor {
+      display: block;
+    }
+
+    .crumb {
+      max-width: 190px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      padding: 3px 6px;
+      border: none;
+      border-radius: var(--radius-xs);
+      color: var(--text-secondary);
+      background: transparent;
+      cursor: pointer;
+    }
+
+    .crumb:hover,
+    .crumb.active {
+      color: var(--primary);
+      background: var(--primary-bg);
+    }
+
+    .slash {
+      color: var(--text-tertiary);
+    }
+
+    .search {
+      position: relative;
+      width: 260px;
+      flex-shrink: 0;
+    }
+
+    .search input {
+      width: 100%;
+      height: 32px;
+      border: 1px solid var(--border-light);
+      border-radius: var(--radius-sm);
+      outline: none;
+      padding: 0 12px 0 32px;
+      color: var(--text);
+      background: var(--bg);
+      transition: border-color 0.15s, background 0.15s;
+    }
+
+    .search input:focus {
+      border-color: var(--primary);
+      background: var(--surface);
+    }
+
+    .search svg {
+      position: absolute;
+      left: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 15px;
+      height: 15px;
+      color: var(--text-tertiary);
+      pointer-events: none;
+    }
+
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      flex-shrink: 0;
+    }
+
+    .summary-card {
+      min-height: 76px;
+      padding: 14px;
+      background: var(--surface);
+      border: 1px solid var(--border-light);
+      border-radius: var(--radius);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .summary-label {
+      color: var(--text-tertiary);
+      font-size: 12px;
+      margin-bottom: 4px;
+    }
+
+    .summary-value {
+      color: var(--text);
+      font-size: 20px;
+      font-weight: 600;
+    }
+
+    .summary-badge {
+      min-width: 42px;
+      height: 42px;
+      border-radius: var(--radius);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--primary-bg);
+      color: var(--primary);
+      font-size: 12px;
+    }
+
+    .content-panel {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      background: var(--surface);
+      border: 1px solid var(--border-light);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+
+    .content-toolbar {
+      min-height: 48px;
+      padding: 8px 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      border-bottom: 1px solid var(--border-light);
+      flex-shrink: 0;
+    }
+
+    .selection {
+      color: var(--text-tertiary);
+      font-size: 13px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .toolbar-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+
+    .file-table-wrap {
+      flex: 1;
+      min-height: 0;
+      overflow: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+
+    th, td {
+      height: 48px;
+      padding: 0 12px;
+      border-bottom: 1px solid var(--border-light);
+      text-align: left;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    th {
+      height: 40px;
+      color: var(--text-tertiary);
+      font-size: 12px;
+      font-weight: 500;
+      background: var(--surface-soft);
+    }
+
+    tbody tr {
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    tbody tr:hover {
+      background: var(--surface-soft);
+    }
+
+    tbody tr.active {
+      background: var(--primary-bg);
+    }
+
+    .col-name { width: 44%; }
+    .col-type { width: 120px; }
+    .col-size { width: 100px; }
+    .col-time { width: 180px; }
+    .col-action { width: 148px; }
+
+    .file-name {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+      color: var(--text);
+    }
+
+    .file-icon {
+      width: 30px;
+      height: 30px;
+      border-radius: var(--radius-sm);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--fill);
+      color: var(--text-secondary);
+      flex-shrink: 0;
+    }
+
+    .file-icon.folder {
+      color: var(--primary);
+      background: var(--primary-bg);
+    }
+
+    .file-icon.code {
+      color: #0e8a3a;
+      background: rgba(0, 180, 42, 0.12);
+    }
+
+    .file-icon.image {
+      color: #722ed1;
+      background: rgba(114, 46, 209, 0.12);
+    }
+
+    .file-main {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .file-title,
+    .file-path {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .file-path {
+      color: var(--text-tertiary);
+      font-size: 12px;
+    }
+
+    .row-actions {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .row-actions button {
+      min-width: 28px;
+      height: 28px;
+      border: none;
+      border-radius: var(--radius-xs);
+      background: transparent;
+      color: var(--text-tertiary);
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0 6px;
+    }
+
+    .row-actions button:hover {
+      background: var(--fill-hover);
+      color: var(--primary);
+    }
+
+    .detail {
+      min-width: 0;
+      min-height: 0;
+      background: var(--surface);
+      border-left: 1px solid var(--border-light);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .detail-header {
+      height: 56px;
+      padding: 0 16px;
+      border-bottom: 1px solid var(--border-light);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+    }
+
+    .detail-title {
+      font-weight: 500;
+    }
+
+    .detail-body {
+      flex: 1;
+      min-height: 0;
+      padding: 16px;
+      overflow: auto;
+    }
+
+    .preview {
+      min-height: 160px;
+      max-height: 260px;
+      border-radius: var(--radius);
+      background: var(--screen-bg);
+      color: #c9d1d9;
+      padding: 14px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      line-height: 1.7;
+      overflow: auto;
+      margin-bottom: 16px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .preview img {
+      max-width: 100%;
+      max-height: 220px;
+      display: block;
+      margin: 0 auto;
+      border-radius: var(--radius-sm);
+    }
+
+    .meta-list {
+      display: grid;
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+
+    .meta-item {
+      display: grid;
+      gap: 4px;
+    }
+
+    .meta-label {
+      color: var(--text-tertiary);
+      font-size: 12px;
+    }
+
+    .meta-value {
+      color: var(--text);
+      word-break: break-all;
+    }
+
+    .detail-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .empty-state {
+      flex: 1;
+      min-height: 260px;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 10px;
+      color: var(--text-tertiary);
+    }
+
+    .empty-state.visible {
+      display: flex;
+    }
+
+    .empty-icon {
+      width: 52px;
+      height: 52px;
+      border-radius: var(--radius);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--primary-bg);
+      color: var(--primary);
+    }
+
+    .loading {
+      position: absolute;
+      inset: 56px 0 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: rgba(247, 248, 250, 0.56);
+      z-index: 20;
+      color: var(--text-tertiary);
+    }
+
+    :root[data-theme="dark"] .loading {
+      background: rgba(17, 19, 24, 0.56);
+    }
+
+    .loading.visible {
+      display: flex;
+    }
+
+    .spinner {
+      width: 28px;
+      height: 28px;
+      border: 2px solid rgba(22, 93, 255, 0.16);
+      border-top-color: var(--primary);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      margin-right: 10px;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .toast {
+      position: fixed;
+      right: 20px;
+      bottom: 20px;
+      z-index: 40;
+      max-width: min(420px, calc(100vw - 40px));
+      padding: 10px 14px;
+      border-radius: var(--radius-sm);
+      background: var(--surface);
+      border: 1px solid var(--border-light);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
+      color: var(--text);
+      display: none;
+    }
+
+    .toast.visible {
+      display: block;
+    }
+
+    .toast.err {
+      color: var(--err);
+    }
+
+    .toast.ok {
+      color: var(--ok);
+    }
+
+    .hidden-input {
+      display: none;
+    }
+
+    @media (max-width: 1100px) {
+      .body {
+        grid-template-columns: 56px minmax(0, 1fr);
+      }
+
+      .detail {
+        display: none;
+      }
+
+      .summary {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 720px) {
+      .topbar {
+        height: auto;
+        min-height: 56px;
+        align-items: stretch;
+        flex-direction: column;
+        padding: 12px;
+      }
+
+      .topbar-right {
+        justify-content: space-between;
+        flex-wrap: wrap;
+      }
+
+      .body {
+        grid-template-columns: 1fr;
+      }
+
+      .sidebar {
+        height: 48px;
+        flex-direction: row;
+        border-right: none;
+        border-bottom: 1px solid var(--border-light);
+        padding: 0 8px;
+        overflow-x: auto;
+      }
+
+      .main {
+        padding: 8px;
+      }
+
+      .pathbar {
+        align-items: stretch;
+        flex-direction: column;
+      }
+
+      .search {
+        width: 100%;
+      }
+
+      .path-editor {
+        width: 100%;
+      }
+
+      .content-toolbar {
+        align-items: stretch;
+        flex-direction: column;
+      }
+
+      .toolbar-actions {
+        overflow-x: auto;
+        padding-bottom: 2px;
+      }
+
+      .col-type,
+      .col-size,
+      .col-time {
+        display: none;
+      }
+
+      .col-name {
+        width: auto;
+      }
+
+      .col-action {
+        width: 132px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="file-app">
+    <header class="topbar">
+      <div class="title">
+        <span class="title-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+            <path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h4l2 2h7A2.5 2.5 0 0 1 21 9.5v7A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5z"/>
+          </svg>
+        </span>
+        <span class="title-meta">
+          <span class="title-main" data-i18n="appTitle">文件管理</span>
+          <span class="title-sub" data-i18n="appSubtitle">ByClaw 工作区文件服务</span>
+        </span>
+      </div>
+      <div class="topbar-right">
+        <div class="status">
+          <span class="status-dot warn" id="statusDot"></span>
+          <span id="statusText" data-i18n="statusLoading">加载中</span>
+        </div>
+        <span class="menu-wrap">
+          <button class="icon-btn" id="languageButton" type="button" aria-haspopup="menu" title="Language">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+              <circle cx="12" cy="12" r="9"/>
+              <path d="M3 12h18"/>
+              <path d="M12 3a14 14 0 0 1 0 18"/>
+              <path d="M12 3a14 14 0 0 0 0 18"/>
+            </svg>
+          </button>
+          <span class="menu" id="languageMenu" role="menu">
+            <button type="button" data-lang="zh-CN" role="menuitem">简体中文</button>
+            <button type="button" data-lang="en-US" role="menuitem">English</button>
+          </span>
+        </span>
+        <span class="menu-wrap">
+          <button class="icon-btn" id="themeButton" type="button" aria-haspopup="menu" title="Theme">
+            <span id="themeIcon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+            </span>
+          </button>
+          <span class="menu" id="themeMenu" role="menu">
+            <button type="button" data-theme="system" role="menuitem" data-i18n="themeSystem">跟随系统</button>
+            <button type="button" data-theme="light" role="menuitem" data-i18n="themeLight">明亮</button>
+            <button type="button" data-theme="dark" role="menuitem" data-i18n="themeDark">暗色</button>
+          </span>
+        </span>
+        <button class="btn btn-primary" id="uploadTopBtn" type="button" data-i18n="upload">上传</button>
+      </div>
+    </header>
+
+    <main class="body">
+      <nav class="sidebar" aria-label="File manager toolbar">
+        <button class="sidebar-btn active" id="navFiles" type="button" title="Files">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h4l2 2h7A2.5 2.5 0 0 1 21 9.5v7A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5z"/></svg>
+        </button>
+        <button class="sidebar-btn" id="navUpload" type="button" title="Upload">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M4 16v2.5A2.5 2.5 0 0 0 6.5 21h11A2.5 2.5 0 0 0 20 18.5V16"/></svg>
+        </button>
+        <button class="sidebar-btn" id="navNewFolder" type="button" title="New folder">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 5v14M5 12h14"/></svg>
+        </button>
+        <button class="sidebar-btn" id="navRefresh" type="button" title="Refresh">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v6h-6"/></svg>
+        </button>
+        <span class="sidebar-spacer"></span>
+        <button class="sidebar-btn" id="navRoot" type="button" title="Root">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="m3 11 9-8 9 8"/><path d="M5 10v10h14V10"/><path d="M9 20v-6h6v6"/></svg>
+        </button>
+      </nav>
+
+      <section class="main">
+        <div class="pathbar">
+          <div class="path-stack" id="pathStack">
+            <div class="breadcrumbs" id="breadcrumbs"></div>
+            <input class="path-editor" id="pathEditor" type="text" spellcheck="false" autocomplete="off" data-i18n-placeholder="pathEditPlaceholder" placeholder="/">
+          </div>
+          <label class="search">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="11" cy="11" r="7"/><path d="m16.5 16.5 4 4"/></svg>
+            <input id="searchInput" type="search" data-i18n-placeholder="searchPlaceholder" placeholder="搜索文件或目录">
+          </label>
+        </div>
+
+        <div class="summary">
+          <div class="summary-card">
+            <div>
+              <div class="summary-label" data-i18n="currentDir">当前目录</div>
+              <div class="summary-value" id="summaryCount">0</div>
+            </div>
+            <div class="summary-badge" data-i18n="items">项目</div>
+          </div>
+          <div class="summary-card">
+            <div>
+              <div class="summary-label" data-i18n="folders">文件夹</div>
+              <div class="summary-value" id="summaryFolders">0</div>
+            </div>
+            <div class="summary-badge">DIR</div>
+          </div>
+          <div class="summary-card">
+            <div>
+              <div class="summary-label" data-i18n="files">文件</div>
+              <div class="summary-value" id="summaryFiles">0</div>
+            </div>
+            <div class="summary-badge">FILE</div>
+          </div>
+        </div>
+
+        <div class="content-panel">
+          <div class="content-toolbar">
+            <div class="selection" id="selectionText" data-i18n="noSelection">未选择文件</div>
+            <div class="toolbar-actions">
+              <button class="btn" id="newFolderBtn" type="button" data-i18n="newFolder">新建文件夹</button>
+              <button class="btn" id="refreshBtn" type="button" data-i18n="refresh">刷新</button>
+              <button class="btn btn-primary" id="uploadBtn" type="button" data-i18n="upload">上传</button>
+            </div>
+          </div>
+
+          <div class="file-table-wrap" id="tableWrap">
+            <table>
+              <thead>
+                <tr>
+                  <th class="col-name" data-i18n="name">名称</th>
+                  <th class="col-type" data-i18n="type">类型</th>
+                  <th class="col-size" data-i18n="size">大小</th>
+                  <th class="col-time" data-i18n="modified">更新时间</th>
+                  <th class="col-action" data-i18n="actions">操作</th>
+                </tr>
+              </thead>
+              <tbody id="fileRows"></tbody>
+            </table>
+            <div class="empty-state" id="emptyState">
+              <div class="empty-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h4l2 2h7A2.5 2.5 0 0 1 21 9.5v7A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5z"/></svg>
+              </div>
+              <div data-i18n="empty">暂无文件</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <aside class="detail">
+        <div class="detail-header">
+          <div class="detail-title" data-i18n="details">详情与预览</div>
+          <button class="icon-btn" id="clearSelectionBtn" type="button" title="Clear">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M18 6 6 18M6 6l12 12"/></svg>
+          </button>
+        </div>
+        <div class="detail-body">
+          <div class="preview" id="previewBox" data-i18n="selectPreview">选择文件后显示预览。</div>
+          <div class="meta-list">
+            <div class="meta-item">
+              <div class="meta-label" data-i18n="name">名称</div>
+              <div class="meta-value" id="metaName">-</div>
+            </div>
+            <div class="meta-item">
+              <div class="meta-label" data-i18n="path">路径</div>
+              <div class="meta-value" id="metaPath">-</div>
+            </div>
+            <div class="meta-item">
+              <div class="meta-label" data-i18n="type">类型</div>
+              <div class="meta-value" id="metaType">-</div>
+            </div>
+            <div class="meta-item">
+              <div class="meta-label" data-i18n="size">大小</div>
+              <div class="meta-value" id="metaSize">-</div>
+            </div>
+          </div>
+          <div class="detail-actions">
+            <button class="btn" id="renameBtn" type="button" disabled data-i18n="rename">重命名</button>
+            <button class="btn" id="downloadBtn" type="button" disabled data-i18n="download">下载</button>
+            <button class="btn btn-danger" id="deleteBtn" type="button" disabled data-i18n="delete">删除</button>
+          </div>
+        </div>
+      </aside>
+    </main>
+
+    <input class="hidden-input" id="fileInput" type="file" multiple>
+    <div class="loading" id="loading"><span class="spinner"></span><span data-i18n="loading">加载中</span></div>
+    <div class="toast" id="toast"></div>
+  </div>
+
+  <script>
+    const I18N = {
+      'zh-CN': {
+        appTitle: '文件管理',
+        appSubtitle: 'ByClaw 工作区文件服务',
+        statusLoading: '加载中',
+        statusReady: '已连接',
+        statusError: '连接异常',
+        upload: '上传',
+        themeSystem: '跟随系统',
+        themeLight: '明亮',
+        themeDark: '暗色',
+        searchPlaceholder: '搜索文件或目录',
+        currentDir: '当前目录',
+        folders: '文件夹',
+        files: '文件',
+        items: '项目',
+        noSelection: '未选择文件',
+        selected: '已选择：{name}',
+        newFolder: '新建文件夹',
+        refresh: '刷新',
+        name: '名称',
+        type: '类型',
+        size: '大小',
+        modified: '更新时间',
+        actions: '操作',
+        empty: '暂无文件',
+        details: '详情与预览',
+        selectPreview: '选择文件后显示预览。',
+        path: '路径',
+        rename: '重命名',
+        download: '下载',
+        delete: '删除',
+        loading: '加载中',
+        root: '工作区',
+        folder: '文件夹',
+        file: '文件',
+        imagePreview: '图片预览',
+        binaryPreview: '该文件暂不支持内嵌预览，可下载后查看。',
+        folderPreview: '这是一个文件夹，双击或点击名称进入。',
+        promptFolder: '请输入文件夹名称',
+        promptRename: '请输入新名称',
+        confirmDelete: '确认删除 {name}？',
+        uploadDone: '上传完成',
+        folderCreated: '文件夹已创建',
+        renamed: '重命名完成',
+        deleted: '删除完成',
+        languageLabel: '切换语言',
+        languageCurrent: '语言：{name}',
+        themeLabel: '切换主题',
+        themeCurrent: '主题：{name}',
+        pathEditHint: '双击输入工作区内路径',
+        pathEditPlaceholder: '输入允许访问路径，或输入相对路径',
+        openFolder: '打开文件夹',
+        previewFile: '预览文件',
+      },
+      'en-US': {
+        appTitle: 'File Manager',
+        appSubtitle: 'ByClaw workspace file service',
+        statusLoading: 'Loading',
+        statusReady: 'Connected',
+        statusError: 'Connection error',
+        upload: 'Upload',
+        themeSystem: 'System',
+        themeLight: 'Light',
+        themeDark: 'Dark',
+        searchPlaceholder: 'Search files or folders',
+        currentDir: 'Current folder',
+        folders: 'Folders',
+        files: 'Files',
+        items: 'Items',
+        noSelection: 'No file selected',
+        selected: 'Selected: {name}',
+        newFolder: 'New folder',
+        refresh: 'Refresh',
+        name: 'Name',
+        type: 'Type',
+        size: 'Size',
+        modified: 'Modified',
+        actions: 'Actions',
+        empty: 'No files',
+        details: 'Details and preview',
+        selectPreview: 'Select a file to preview.',
+        path: 'Path',
+        rename: 'Rename',
+        download: 'Download',
+        delete: 'Delete',
+        loading: 'Loading',
+        root: 'Workspace',
+        folder: 'Folder',
+        file: 'File',
+        imagePreview: 'Image preview',
+        binaryPreview: 'This file cannot be previewed inline. Download it to view.',
+        folderPreview: 'This is a folder. Double-click or click the name to open it.',
+        promptFolder: 'Folder name',
+        promptRename: 'New name',
+        confirmDelete: 'Delete {name}?',
+        uploadDone: 'Upload complete',
+        folderCreated: 'Folder created',
+        renamed: 'Renamed',
+        deleted: 'Deleted',
+        languageLabel: 'Switch language',
+        languageCurrent: 'Language: {name}',
+        themeLabel: 'Switch theme',
+        themeCurrent: 'Theme: {name}',
+        pathEditHint: 'Double-click to enter a workspace path',
+        pathEditPlaceholder: 'Enter an allowed path, or a relative path',
+        openFolder: 'Open folder',
+        previewFile: 'Preview file',
+      },
+    };
+
+    const ENV = window.OPENCLAW_FILEBROWSER_ENV || {};
+    const BASE = ENV.baseUrl || '/filebrowser';
+    const state = {
+      lang: '',
+      theme: '',
+      currentPath: ENV.defaultPath || '/',
+      items: [],
+      selected: null,
+      query: '',
+    };
+
+    const $ = (id) => document.getElementById(id);
+    const icons = {
+      folder: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h4l2 2h7A2.5 2.5 0 0 1 21 9.5v7A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5z"/></svg>',
+      file: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>',
+      code: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="m8 18-4-6 4-6M16 6l4 6-4 6M14 4l-4 16"/></svg>',
+      image: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m8 13 2-2 4 4 2-2 3 3"/><circle cx="8.5" cy="9" r="1.5"/></svg>',
+      themeSystem: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg>',
+      themeLight: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>',
+      themeDark: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5a7 7 0 1 0 11 11z"/></svg>',
+    };
+
+    function t(key, vars = {}) {
+      const dict = I18N[state.lang] || I18N['en-US'];
+      return (dict[key] || key).replace(/\{(\w+)\}/g, (_, name) => vars[name] ?? '');
+    }
+
+    function normalizeLang(value) {
+      const text = `${value || ''}`.toLowerCase();
+      return text.startsWith('zh') ? 'zh-CN' : 'en-US';
+    }
+
+    function encodePath(path) {
+      const normalized = normalizePath(path);
+      if (normalized === '/') return '/';
+      return normalized.split('/').filter(Boolean).map(encodeURIComponent).join('/').replace(/^/, '/');
+    }
+
+    function normalizePath(path) {
+      let value = decodeURIComponent(`${path || '/'}`);
+      if (!value.startsWith('/')) value = '/' + value;
+      value = value.replace(/\/+/g, '/');
+      return value.replace(/\/$/, '') || '/';
+    }
+
+    function joinPath(parent, name) {
+      const base = normalizePath(parent);
+      return normalizePath((base === '/' ? '' : base) + '/' + name);
+    }
+
+    function defaultPath() {
+      return normalizePath(ENV.defaultPath || '/');
+    }
+
+    function normalizeEditablePath(path) {
+      const value = `${path || ''}`.trim();
+      if (!value) return defaultPath();
+      if (value.startsWith('/')) return normalizePath(value);
+      return joinPath(defaultPath(), value);
+    }
+
+    function currentDisplayParts() {
+      const current = normalizePath(state.currentPath);
+      const root = defaultPath();
+      if (current === root) return [];
+      if (current.startsWith(root + '/')) {
+        return current.slice(root.length).split('/').filter(Boolean);
+      }
+      return current.split('/').filter(Boolean);
+    }
+
+    function currentDisplayBase() {
+      const current = normalizePath(state.currentPath);
+      const root = defaultPath();
+      return current === root || current.startsWith(root + '/') ? root : '';
+    }
+
+    function apiUrl(path, params = {}) {
+      const url = new URL(BASE + '/openclaw-api' + path, window.location.origin);
+      Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
+      return url.toString();
+    }
+
+    function rawUrl(path, download = false) {
+      return apiUrl(download ? '/download' : '/raw', { path });
+    }
+
+    function setLoading(visible) {
+      $('loading').classList.toggle('visible', visible);
+    }
+
+    function toast(message, type = '') {
+      const box = $('toast');
+      box.textContent = message;
+      box.className = `toast visible ${type}`;
+      clearTimeout(toast.timer);
+      toast.timer = setTimeout(() => box.className = 'toast', 2400);
+    }
+
+    async function request(path, options = {}) {
+      const response = await fetch(apiUrl(path, options.params || {}), {
+        ...options,
+        headers: {
+          ...(options.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
+          ...(options.headers || {}),
+        },
+      });
+      if (!response.ok) {
+        let detail = response.statusText;
+        try {
+          const body = await response.json();
+          detail = body.error || detail;
+        } catch (error) {}
+        throw new Error(detail || `HTTP ${response.status}`);
+      }
+      const type = response.headers.get('Content-Type') || '';
+      return type.includes('application/json') ? response.json() : response.text();
+    }
+
+    function languageName(lang) {
+      return normalizeLang(lang) === 'zh-CN' ? '简体中文' : 'English';
+    }
+
+    function themeName(theme) {
+      return t(theme === 'dark' ? 'themeDark' : theme === 'light' ? 'themeLight' : 'themeSystem');
+    }
+
+    function closeMenus(except = null) {
+      ['languageMenu', 'themeMenu'].forEach((id) => {
+        if (id !== except) $(id).classList.remove('visible');
+      });
+    }
+
+    function toggleMenu(id) {
+      const menu = $(id);
+      const willOpen = !menu.classList.contains('visible');
+      closeMenus(id);
+      menu.classList.toggle('visible', willOpen);
+    }
+
+    function updateLanguageControl() {
+      const label = t('languageCurrent', { name: languageName(state.lang) });
+      $('languageButton').setAttribute('title', `${label}。${t('languageLabel')}`);
+      $('languageButton').setAttribute('aria-label', label);
+      document.querySelectorAll('[data-lang]').forEach((el) => {
+        el.classList.toggle('active', el.dataset.lang === state.lang);
+      });
+    }
+
+    function updateThemeControl() {
+      const theme = state.theme || 'system';
+      const label = t('themeCurrent', { name: themeName(theme) });
+      $('themeButton').setAttribute('title', `${label}。${t('themeLabel')}`);
+      $('themeButton').setAttribute('aria-label', label);
+      $('themeIcon').innerHTML = icons[theme === 'dark' ? 'themeDark' : theme === 'light' ? 'themeLight' : 'themeSystem'];
+      document.querySelectorAll('[data-theme]').forEach((el) => {
+        el.classList.toggle('active', el.dataset.theme === theme);
+      });
+    }
+
+    function applyLanguage(lang) {
+      state.lang = normalizeLang(lang);
+      document.documentElement.lang = state.lang;
+      localStorage.setItem('openclaw.filebrowser.lang', state.lang);
+      document.querySelectorAll('[data-i18n]').forEach((el) => {
+        el.textContent = t(el.dataset.i18n);
+      });
+      document.querySelectorAll('[data-i18n-placeholder]').forEach((el) => {
+        el.setAttribute('placeholder', t(el.dataset.i18nPlaceholder));
+      });
+      document.title = t('appTitle');
+      updateLanguageControl();
+      updateThemeControl();
+      render();
+    }
+
+    function systemTheme() {
+      return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    }
+
+    function applyTheme(theme) {
+      state.theme = theme || 'system';
+      localStorage.setItem('openclaw.filebrowser.theme', state.theme);
+      document.documentElement.dataset.theme = state.theme === 'system' ? systemTheme() : state.theme;
+      updateThemeControl();
+    }
+
+    function setStatus(kind, label) {
+      $('statusDot').className = `status-dot ${kind}`;
+      $('statusText').textContent = label;
+    }
+
+    async function load(path = state.currentPath) {
+      setLoading(true);
+      try {
+        const data = await request('/list', { params: { path: normalizePath(path) } });
+        state.currentPath = normalizePath(data.path || path);
+        state.items = data.items || [];
+        state.selected = null;
+        setStatus('ok', t('statusReady'));
+        render();
+      } catch (error) {
+        setStatus('err', t('statusError'));
+        toast(error.message, 'err');
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    function renderBreadcrumbs() {
+      const wrap = $('breadcrumbs');
+      wrap.innerHTML = '';
+      const parts = currentDisplayParts();
+      const base = currentDisplayBase();
+      const rootBtn = document.createElement('button');
+      rootBtn.className = 'crumb' + (parts.length === 0 ? ' active' : '');
+      rootBtn.textContent = t('root');
+      rootBtn.title = `${defaultPath()} · ${t('pathEditHint')}`;
+      rootBtn.onclick = () => {
+        if (normalizePath(state.currentPath) !== defaultPath()) load(defaultPath());
+      };
+      rootBtn.ondblclick = (event) => {
+        event.preventDefault();
+        openPathEditor();
+      };
+      wrap.appendChild(rootBtn);
+      let path = base;
+      parts.forEach((part, index) => {
+        const slash = document.createElement('span');
+        slash.className = 'slash';
+        slash.textContent = '/';
+        wrap.appendChild(slash);
+        path = joinPath(path || '/', part);
+        const btn = document.createElement('button');
+        btn.className = 'crumb' + (index === parts.length - 1 ? ' active' : '');
+        const crumbPath = path;
+        btn.textContent = part;
+        btn.title = `${crumbPath} · ${t('pathEditHint')}`;
+        btn.onclick = () => {
+          if (normalizePath(state.currentPath) !== crumbPath) load(crumbPath);
+        };
+        btn.ondblclick = (event) => {
+          event.preventDefault();
+          openPathEditor();
+        };
+        wrap.appendChild(btn);
+      });
+    }
+
+    function openPathEditor() {
+      const stack = $('pathStack');
+      const input = $('pathEditor');
+      input.value = state.currentPath;
+      stack.classList.add('editing');
+      input.focus();
+      input.select();
+    }
+
+    function closePathEditor() {
+      $('pathStack').classList.remove('editing');
+    }
+
+    async function submitPathEditor() {
+      const nextPath = normalizeEditablePath($('pathEditor').value);
+      closePathEditor();
+      await load(nextPath);
+    }
+
+    function formatSize(size, isDir) {
+      if (isDir) return '-';
+      const value = Number(size || 0);
+      if (value < 1024) return `${value} B`;
+      if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+      if (value < 1024 * 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MB`;
+      return `${(value / 1024 / 1024 / 1024).toFixed(1)} GB`;
+    }
+
+    function fileKind(item) {
+      if (item.isDir) return 'folder';
+      const name = item.name.toLowerCase();
+      if (/\.(png|jpg|jpeg|gif|webp|svg)$/.test(name)) return 'image';
+      if (/\.(js|ts|tsx|jsx|json|md|py|java|sh|yml|yaml|html|css|less|xml)$/.test(name)) return 'code';
+      return 'file';
+    }
+
+    function filteredItems() {
+      const q = state.query.trim().toLowerCase();
+      const list = q ? state.items.filter((item) => item.name.toLowerCase().includes(q)) : state.items;
+      return list.slice().sort((a, b) => {
+        if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
+        return a.name.localeCompare(b.name, state.lang);
+      });
+    }
+
+    function renderRows() {
+      const rows = $('fileRows');
+      const list = filteredItems();
+      rows.innerHTML = '';
+      $('emptyState').classList.toggle('visible', list.length === 0);
+      list.forEach((item) => {
+        const kind = fileKind(item);
+        const tr = document.createElement('tr');
+        if (state.selected && state.selected.path === item.path) tr.className = 'active';
+        tr.innerHTML = `
+          <td class="col-name">
+            <div class="file-name">
+              <span class="file-icon ${kind}">${icons[kind]}</span>
+              <span class="file-main">
+                <span class="file-title"></span>
+                <span class="file-path"></span>
+              </span>
+            </div>
+          </td>
+          <td class="col-type"></td>
+          <td class="col-size"></td>
+          <td class="col-time"></td>
+          <td class="col-action">
+            <span class="row-actions">
+              <button type="button" data-action="open"></button>
+              <button type="button" data-action="rename"></button>
+              <button type="button" data-action="delete"></button>
+            </span>
+          </td>`;
+        tr.querySelector('.file-title').textContent = item.name;
+        tr.querySelector('.file-path').textContent = item.path;
+        tr.querySelector('.col-type').textContent = item.isDir ? t('folder') : (item.type || t('file'));
+        tr.querySelector('.col-size').textContent = formatSize(item.size, item.isDir);
+        tr.querySelector('.col-time').textContent = item.modified ? new Date(item.modified).toLocaleString(state.lang) : '-';
+        tr.querySelector('[data-action="open"]').textContent = item.isDir ? '↵' : '↗';
+        tr.querySelector('[data-action="rename"]').textContent = '✎';
+        tr.querySelector('[data-action="delete"]').textContent = '×';
+        tr.querySelector('[data-action="open"]').title = item.isDir ? t('openFolder') : t('previewFile');
+        tr.querySelector('[data-action="rename"]').title = t('rename');
+        tr.querySelector('[data-action="delete"]').title = t('delete');
+        tr.ondblclick = () => item.isDir ? load(item.path) : selectItem(item, true);
+        tr.onclick = () => selectItem(item);
+        tr.querySelector('[data-action="open"]').onclick = (event) => {
+          event.stopPropagation();
+          item.isDir ? load(item.path) : selectItem(item, true);
+        };
+        tr.querySelector('[data-action="rename"]').onclick = (event) => {
+          event.stopPropagation();
+          renameItem(item);
+        };
+        tr.querySelector('[data-action="delete"]').onclick = (event) => {
+          event.stopPropagation();
+          deleteItem(item);
+        };
+        rows.appendChild(tr);
+      });
+    }
+
+    function renderSummary() {
+      const count = state.items.length;
+      const folders = state.items.filter((item) => item.isDir).length;
+      $('summaryCount').textContent = count;
+      $('summaryFolders').textContent = folders;
+      $('summaryFiles').textContent = count - folders;
+      $('selectionText').textContent = state.selected ? t('selected', { name: state.selected.name }) : t('noSelection');
+    }
+
+    async function selectItem(item, forcePreview = false) {
+      state.selected = item;
+      renderDetails();
+      renderRows();
+      if (!item.isDir || forcePreview) await previewItem(item);
+    }
+
+    function renderDetails() {
+      const item = state.selected;
+      const enabled = !!item;
+      $('renameBtn').disabled = !enabled;
+      $('downloadBtn').disabled = !enabled || item.isDir;
+      $('deleteBtn').disabled = !enabled;
+      $('metaName').textContent = item ? item.name : '-';
+      $('metaPath').textContent = item ? item.path : '-';
+      $('metaType').textContent = item ? (item.isDir ? t('folder') : item.type || t('file')) : '-';
+      $('metaSize').textContent = item ? formatSize(item.size, item.isDir) : '-';
+      if (!item) $('previewBox').textContent = t('selectPreview');
+      if (item && item.isDir) $('previewBox').textContent = t('folderPreview');
+    }
+
+    async function previewItem(item) {
+      if (!item || item.isDir) return;
+      const box = $('previewBox');
+      const kind = fileKind(item);
+      if (kind === 'image') {
+        box.innerHTML = `<img src="${rawUrl(item.path)}" alt="${t('imagePreview')}">`;
+        return;
+      }
+      const name = item.name.toLowerCase();
+      if (!/\.(txt|md|json|js|ts|tsx|jsx|py|java|sh|yml|yaml|html|css|less|xml|log)$/.test(name)) {
+        box.textContent = t('binaryPreview');
+        return;
+      }
+      try {
+        const response = await fetch(rawUrl(item.path));
+        const text = await response.text();
+        box.textContent = text.slice(0, 24000);
+      } catch (error) {
+        box.textContent = error.message;
+      }
+    }
+
+    function render() {
+      renderBreadcrumbs();
+      renderSummary();
+      renderRows();
+      renderDetails();
+    }
+
+    async function createFolder() {
+      const name = window.prompt(t('promptFolder'));
+      if (!name) return;
+      setLoading(true);
+      try {
+        await request('/mkdir', { method: 'POST', body: JSON.stringify({ path: state.currentPath, name }) });
+        toast(t('folderCreated'), 'ok');
+        await load(state.currentPath);
+      } catch (error) {
+        toast(error.message, 'err');
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    async function renameItem(item = state.selected) {
+      if (!item) return;
+      const name = window.prompt(t('promptRename'), item.name);
+      if (!name || name === item.name) return;
+      setLoading(true);
+      try {
+        await request('/rename', { method: 'POST', body: JSON.stringify({ path: item.path, newName: name }) });
+        toast(t('renamed'), 'ok');
+        await load(state.currentPath);
+      } catch (error) {
+        toast(error.message, 'err');
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    async function deleteItem(item = state.selected) {
+      if (!item) return;
+      if (!window.confirm(t('confirmDelete', { name: item.name }))) return;
+      setLoading(true);
+      try {
+        await request('/delete', { method: 'DELETE', params: { path: item.path } });
+        toast(t('deleted'), 'ok');
+        await load(state.currentPath);
+      } catch (error) {
+        toast(error.message, 'err');
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    async function uploadFiles(files) {
+      if (!files || !files.length) return;
+      const form = new FormData();
+      Array.from(files).forEach((file) => form.append('files', file));
+      form.append('path', state.currentPath);
+      setLoading(true);
+      try {
+        await request('/upload', { method: 'POST', body: form });
+        toast(t('uploadDone'), 'ok');
+        await load(state.currentPath);
+      } catch (error) {
+        toast(error.message, 'err');
+      } finally {
+        $('fileInput').value = '';
+        setLoading(false);
+      }
+    }
+
+    function openDownload() {
+      if (!state.selected || state.selected.isDir) return;
+      window.location.href = rawUrl(state.selected.path, true);
+    }
+
+    function init() {
+      const savedLang = localStorage.getItem('openclaw.filebrowser.lang');
+      const savedTheme = localStorage.getItem('openclaw.filebrowser.theme');
+      state.lang = normalizeLang(savedLang || ENV.lang || navigator.language);
+      state.theme = savedTheme || ENV.theme || 'system';
+      $('languageButton').onclick = (event) => {
+        event.stopPropagation();
+        toggleMenu('languageMenu');
+      };
+      $('themeButton').onclick = (event) => {
+        event.stopPropagation();
+        toggleMenu('themeMenu');
+      };
+      $('languageMenu').onclick = (event) => {
+        event.stopPropagation();
+        const target = event.target.closest('[data-lang]');
+        if (!target) return;
+        applyLanguage(target.dataset.lang);
+        closeMenus();
+      };
+      $('themeMenu').onclick = (event) => {
+        event.stopPropagation();
+        const target = event.target.closest('[data-theme]');
+        if (!target) return;
+        applyTheme(target.dataset.theme);
+        closeMenus();
+      };
+      document.addEventListener('click', () => closeMenus());
+      $('pathEditor').onkeydown = (event) => {
+        if (event.key === 'Enter') submitPathEditor();
+        if (event.key === 'Escape') closePathEditor();
+      };
+      $('pathEditor').onblur = () => {
+        if ($('pathStack').classList.contains('editing')) submitPathEditor();
+      };
+      $('searchInput').oninput = (event) => {
+        state.query = event.target.value;
+        renderRows();
+      };
+      $('uploadBtn').onclick = () => $('fileInput').click();
+      $('uploadTopBtn').onclick = () => $('fileInput').click();
+      $('navUpload').onclick = () => $('fileInput').click();
+      $('fileInput').onchange = (event) => uploadFiles(event.target.files);
+      $('newFolderBtn').onclick = createFolder;
+      $('navNewFolder').onclick = createFolder;
+      $('refreshBtn').onclick = () => load(state.currentPath);
+      $('navRefresh').onclick = () => load(state.currentPath);
+      $('navRoot').onclick = () => load(defaultPath());
+      $('navRoot').ondblclick = openPathEditor;
+      $('clearSelectionBtn').onclick = () => {
+        state.selected = null;
+        render();
+      };
+      $('renameBtn').onclick = () => renameItem();
+      $('deleteBtn').onclick = () => deleteItem();
+      $('downloadBtn').onclick = openDownload;
+      if (window.matchMedia) {
+        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+          if (state.theme === 'system') applyTheme('system');
+        });
+      }
+      applyTheme(state.theme);
+      applyLanguage(state.lang);
+      load(new URLSearchParams(window.location.search).get('path') || defaultPath());
+    }
+
+    init();
+  </script>
+</body>
+</html>

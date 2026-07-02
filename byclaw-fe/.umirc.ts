@@ -11,7 +11,9 @@ const argvOptions = getArgvOptions();
 loadMonorepoEnvForUmi();
 
 /** 开发代理：在仓库根 .env 或 byclaw-fe/.env 中配置，避免改 .umirc.ts 产生冲突 */
-const target = `http://${process.env.BE_HOST || process.env.HOST || 'localhost'}:${process.env.BE_SERVER_PORT || '8086'}`;
+const target = `http://${process.env.BE_HOST || process.env.HOST || 'localhost'}:${
+  process.env.BE_SERVER_PORT || '8086'
+}`;
 
 const wsTarget = process.env.BYCLAW_PORTAL_URL_WS?.trim() || 'http://localhost:8082';
 
@@ -29,12 +31,13 @@ let myDefineConfig: Record<string, any> = {
 };
 
 if (argvOptions.runtime) {
-
   plugins.push('./config/runtime.ts');
   myDefineConfig = {
     runtimePublicPath: {},
   };
 }
+
+plugins.push('./config/plugins/slate-katex-prefetch');
 
 const cssLoader = {
   modules: {
@@ -67,12 +70,16 @@ export default defineConfig({
       changeOrigin: true,
       ws: true,
     },
-    [`${routerBase}byaiService`]: {
+    // openclaw 控制台整页代理：HTTP 资源与 WS 握手共用 /openclaw-ui 前缀，
+    // 需开启 ws 转发，且目标是后端（8086），而非 /ws 用的独立 ws 服务。
+    // 必须放在通配的 byaiService 规则之前，否则会被它先吃掉、WS 不转发。
+    [`${routerBase}byaiService/openclaw-ui`]: {
       target,
       changeOrigin: true,
+      ws: true,
     },
-    [`/filebrowser`]: {
-      target: 'http://127.0.0.1:8086/byaiService/filebrowser',
+    [`${routerBase}byaiService`]: {
+      target,
       changeOrigin: true,
     },
   },
@@ -85,15 +92,14 @@ export default defineConfig({
       cacheGroups: umiConfig.cacheGroups,
     });
 
-    // 配置 chunk 文件名，为 slate-katex chunk 移除 hash
+    // 配置 chunk 文件名，为 slate-katex chunk 使用 webpack contenthash
     if (!isDev) {
       // 获取当前的 chunkFilename 配置
       const currentChunkFilename = config.output.get('chunkFilename') || 'js/[name].[contenthash:8].js';
 
       config.output.chunkFilename((pathData: any) => {
-        // 如果是 slate-katex chunk，不使用 hash
-        if (pathData.chunk?.name && pathData.chunk?.name.startsWith('etag.')) {
-          return '[name].js';
+        if (pathData.chunk?.name === 'etag.slate-katex') {
+          return '[name].[contenthash:8].js';
         }
         // 其他 chunk 保持原有命名规则（带 hash）
         // 如果原有配置是函数，调用它；否则使用默认格式

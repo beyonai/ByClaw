@@ -50,7 +50,9 @@ import com.iwhalecloud.byai.manager.application.service.resource.AgentResourceSe
 import com.iwhalecloud.byai.manager.domain.aimodel.service.AiModelService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.entity.men.MenResCom;
+import com.iwhalecloud.byai.manager.entity.resource.SsResExtSkill;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
+import com.iwhalecloud.byai.manager.mapper.resource.SsResExtSkillMapper;
 import com.iwhalecloud.byai.state.common.exception.BdpRuntimeException;
 import com.iwhalecloud.byai.state.domain.agent.dto.AgentDto;
 import com.iwhalecloud.byai.state.domain.agent.enums.AgentMetaEnum;
@@ -106,6 +108,9 @@ public class ParamService {
     @Autowired
     private ByaiMessageHotService byaiMessageHotService;
 
+    @Autowired
+    private SsResExtSkillMapper ssResExtSkillMapper;
+
     /**
      * 请求python的参数拼接
      *
@@ -153,9 +158,9 @@ public class ParamService {
                 resComDitEmployeeIds = this.getDigEmployeeByResComId(resComId);
             }
 
-            List<Long> byResourceIds = this.getByResourceList(resourceList, ResourceBizType.DIG_EMPLOYEE.getCode());
-            if (ListUtil.isNotEmpty(byResourceIds)) {
-                chatAgentResourceInfo = this.getChatAgentResourceInfo(isDebug, byResourceIds);
+            List<Long> byAgentResourceIds = this.getByResourceList(resourceList, ResourceBizType.DIG_EMPLOYEE.getCode());
+            if (ListUtil.isNotEmpty(byAgentResourceIds)) {
+                chatAgentResourceInfo = this.getChatAgentResourceInfo(isDebug, byAgentResourceIds);
             }
             else {
 
@@ -176,6 +181,12 @@ public class ParamService {
 
                 chatAgentResourceInfo = this.getChatAgentResourceInfo(isDebug, authDigEmployeeIds);
             }
+        }
+        List<Long> skillResourceIds = this.getByResourceList(resourceList, ResourceBizType.SKILL.getCode());
+        if (ListUtil.isNotEmpty(skillResourceIds)) {
+            // 为技能资源补充扩展字段后，重新赋值 resource_list
+            this.fillSkillExtData(resourceList, skillResourceIds);
+            params.put("resource_list", resourceList);
         }
 
         // 过滤数字员工关联没有权限的资源
@@ -216,12 +227,73 @@ public class ParamService {
 
         List<Long> resourceIds = new ArrayList<>();
         for (ResourceVo resourceVo : resourceList) {
+            if (resourceVo == null || resourceVo.getResourceType() == null) {
+                continue;
+            }
             if (resourceBizType.equals(resourceVo.getResourceType().getCode())) {
-                resourceIds.add(Long.valueOf(resourceVo.getResourceId()));
+                Long resourceId = parseResourceIdAsLong(resourceVo.getResourceId());
+                if (resourceId != null) {
+                    resourceIds.add(resourceId);
+                }
             }
         }
 
         return resourceIds;
+    }
+
+    /**
+     * 为技能资源补充扩展字段（extData）。
+     * 查询 ss_res_ext_skill，遍历命中的资源，当 extData 为空时填充 skillType、skillUrl、version。
+     *
+     * @param resourceList 资源列表
+     * @param skillResourceIds 技能资源ID列表
+     */
+    private void fillSkillExtData(List<ResourceVo> resourceList, List<Long> skillResourceIds) {
+        // 查询技能扩展信息，按 resourceId 建立映射
+        List<SsResExtSkill> skillExtList = ssResExtSkillMapper.selectBatchIds(skillResourceIds);
+        Map<Long, SsResExtSkill> skillExtMap = Maps.newHashMap();
+        for (SsResExtSkill skillExt : skillExtList) {
+            if (skillExt != null && skillExt.getResourceId() != null) {
+                skillExtMap.put(skillExt.getResourceId(), skillExt);
+            }
+        }
+
+        Set<Long> skillResourceIdSet = new HashSet<>(skillResourceIds);
+        // 为命中的技能资源补充扩展字段（仅当补充字段为空时）
+        for (ResourceVo resourceVo : resourceList) {
+            if (resourceVo == null || resourceVo.getResourceType() == null
+                || !ResourceBizType.SKILL.getCode().equals(resourceVo.getResourceType().getCode())) {
+                continue;
+            }
+            Long resourceId = parseResourceIdAsLong(resourceVo.getResourceId());
+            if (resourceId == null) {
+                continue;
+            }
+            if (!skillResourceIdSet.contains(resourceId) || StringUtils.isNotEmpty(resourceVo.getExtData())) {
+                continue;
+            }
+            SsResExtSkill skillExt = skillExtMap.get(resourceId);
+            if (skillExt == null) {
+                continue;
+            }
+            JSONObject extData = new JSONObject();
+            extData.put("skillType", skillExt.getSkillType());
+            extData.put("skillUrl", skillExt.getSkillUrl());
+            extData.put("version", skillExt.getVersion());
+            resourceVo.setExtData(extData.toJSONString());
+        }
+    }
+
+    private Long parseResourceIdAsLong(String resourceId) {
+        if (resourceId == null || StringUtils.isBlank(resourceId)) {
+            return null;
+        }
+        try {
+            return Long.valueOf(resourceId);
+        }
+        catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     private void filterUnChoosedResource(List<AgentResourceChatInfoDto> chatAgentResourceInfo,
@@ -370,7 +442,7 @@ public class ParamService {
             String[] parts = formattedId.split("_");
             if (parts.length > 0) {
                 String lastPart = parts[parts.length - 1];
-                return Long.parseLong(lastPart);
+                return parseResourceIdAsLong(lastPart);
             }
         }
         catch (NumberFormatException e) {

@@ -2,12 +2,6 @@
 cd "$(dirname "$0")"
 . ../compose-detect.sh
 
-ENV_FILE="../../.env"
-
-set -a
-. "$ENV_FILE" 2>/dev/null
-set +a
-
 sh gen-nginx-conf.sh
 
 if [ "$STANDALONE_MODULES" = "NONE" ]; then

@@ -58,7 +58,9 @@ public class ByaiMessageHotService {
             ByaiMessage byaiMessage = new ByaiMessage();
             BeanUtils.copyProperties(byaiMessageHotDto, byaiMessage);
             byaiMessage.setId(sequenceService.nextVal());
-            byaiMessage.setMessageId(sequenceService.nextVal());
+            if (byaiMessage.getMessageId() == null) {
+                byaiMessage.setMessageId(sequenceService.nextVal());
+            }
             byaiMessage.setCreateTime(new Date());
             messages.add(byaiMessage);
         }

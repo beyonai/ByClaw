@@ -1,17 +1,20 @@
 package com.iwhalecloud.byai.state.interfaces.controller.dataset;
 
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbDirectoryCreate;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbDirectoryUpdate;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.feign.request.knowledge.FolderDelete;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.ProcessStatus;
-import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetBuild;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetDto;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetIdDto;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeUploadConflictCheckRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeUploadConflictCheckResponse;
 import com.iwhalecloud.byai.manager.dto.resource.RemoveFileDto;
 import com.iwhalecloud.byai.manager.dto.resource.UploadResult;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
@@ -19,6 +22,8 @@ import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.manager.qo.resource.DirAndFileQo;
 import com.iwhalecloud.byai.manager.vo.resource.DirAndFileVo;
 import com.iwhalecloud.byai.state.domain.resource.qo.DatasetQo;
+import com.iwhalecloud.byai.state.domain.resource.dto.ObjectZipImportItem;
+import com.iwhalecloud.byai.state.domain.resource.dto.ObjectZipImportResult;
 import com.iwhalecloud.byai.state.domain.resource.vo.DatasetDetailVo;
 import com.iwhalecloud.byai.state.domain.resource.vo.DatasetVo;
 import com.iwhalecloud.byai.state.domain.resource.vo.KnowledgeCapabilityVo;
@@ -28,6 +33,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -39,6 +45,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.state.application.service.dataset.DatasetApplicationService;
+import com.iwhalecloud.byai.state.application.service.dataset.OpenClawKnowledgeDocumentService;
 import jakarta.validation.Valid;
 
 /**
@@ -55,10 +62,10 @@ public class DatasetController {
     private final Logger logger = LoggerFactory.getLogger(DatasetController.class);
 
     @Autowired
-    private SsResourceService ssResourceService;
+    private DatasetApplicationService datasetApplicationService;
 
     @Autowired
-    private DatasetApplicationService datasetApplicationService;
+    private OpenClawKnowledgeDocumentService openClawKnowledgeDocumentService;
 
     /**
      * 分页查询资源列表。
@@ -117,7 +124,7 @@ public class DatasetController {
      */
     @GetMapping("/detail")
     public ResponseUtil<DatasetDetailVo> detail(@RequestParam("resourceId") Long resourceId) {
-        DatasetDetailVo datasetDetailVo = ssResourceService.findDatasetDetailById(resourceId);
+        DatasetDetailVo datasetDetailVo = datasetApplicationService.detail(resourceId);
         return ResponseUtil.successResponse(I18nUtil.get("dataset.detail.query.success"), datasetDetailVo);
     }
 
@@ -180,23 +187,51 @@ public class DatasetController {
         return ResponseUtil.successResponse(I18nUtil.get("dataset.dir.file.query.success"), dirAndFileVos);
     }
 
+    /**
+     * 按关键字递归搜索知识库目录和文件。
+     *
+     * @return ResponseUtil
+     */
+    @PostMapping("/searchDirAndFile")
+    public ResponseUtil<List<DirAndFileVo>> searchDirAndFile(@RequestBody DirAndFileQo dirAndFileQo) {
+        List<DirAndFileVo> dirAndFileVos = datasetApplicationService.searchDirAndFile(dirAndFileQo);
+        return ResponseUtil.successResponse(I18nUtil.get("dataset.dir.file.query.success"), dirAndFileVos);
+    }
+
+    /**
+     * 上传前检查同路径同名文件，供前端做覆盖确认。
+     *
+     * @param request 检查请求
+     * @return 冲突文件路径
+     */
+    @PostMapping("/checkUploadFileConflicts")
+    public ResponseUtil<KnowledgeUploadConflictCheckResponse> checkUploadFileConflicts(
+        @RequestBody KnowledgeUploadConflictCheckRequest request) {
+        return ResponseUtil.successResponse(I18nUtil.get("dataset.dir.file.query.success"),
+            datasetApplicationService.checkUploadFileConflicts(request));
+    }
+
     /***
      * 上传文件到知识库
      *
      * @param resourceId 资源标识
      * @param directoryPath 文件目录路径
      * @param fileDescription 文件描述
+     * @param processFrontMatter 是否解析 Markdown 文件中的 YAML front matter
+     * @param overwrite 同路径同名文件存在时是否覆盖
      * @return ResponseUtil
      */
     @PostMapping(value = "/uploadFiles", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseUtil<UploadResult> uploadFiles(@RequestPart("files") MultipartFile[] files,
         @RequestPart("resourceId") Long resourceId, @RequestPart(value = "directoryPath") String directoryPath,
-        @RequestPart(value = "fileDescription", required = false) String fileDescription) {
+        @RequestPart(value = "fileDescription", required = false) String fileDescription,
+        @RequestPart(value = "processFrontMatter", required = false) String processFrontMatter,
+        @RequestPart(value = "overwrite", required = false) String overwrite) {
         try {
 
             directoryPath = new String(directoryPath.getBytes(StandardCharsets.ISO_8859_1), StandardCharsets.UTF_8);
             UploadResult uploadResult = datasetApplicationService.uploadFiles(files, resourceId, directoryPath,
-                fileDescription);
+                fileDescription, Boolean.valueOf(processFrontMatter), Boolean.valueOf(overwrite));
             return ResponseUtil.successResponse(I18nUtil.get("dataset.file.upload.success"), uploadResult);
         }
         catch (Exception e) {
@@ -215,6 +250,32 @@ public class DatasetController {
     public ResponseUtil<Void> build(@RequestBody DatasetBuild datasetBuild) {
         datasetApplicationService.build(datasetBuild);
         return ResponseUtil.success(I18nUtil.get("dataset.build.success"));
+    }
+
+    /**
+     * 接收 OpenClaw 生成的 Markdown 文档，上传到知识库并立即触发构建。
+     *
+     * @param resourceId 知识库资源标识
+     * @param directoryPath 知识库目录路径，默认根目录 /
+     * @param docName 文档文件名，未传时自动生成
+     * @param doc OpenClaw 生成的 Markdown 文档内容
+     * @param language 预留语言参数，默认 zh-CN
+     * @return 构建结果
+     */
+    @GetMapping(value = "/buildKnowledgeFromDoc", produces = MediaType.TEXT_PLAIN_VALUE)
+    public ResponseEntity<String> buildKnowledgeFromDoc(@RequestParam("resourceId") Long resourceId,
+        @RequestParam(value = "directoryPath", required = false, defaultValue = "/") String directoryPath,
+        @RequestParam(value = "docName", required = false) String docName, @RequestParam("doc") String doc,
+        @RequestParam(value = "language", required = false, defaultValue = "zh-CN") String language) {
+        try {
+            return ResponseEntity.ok(
+                openClawKnowledgeDocumentService.buildKnowledgeFromDoc(resourceId, directoryPath, docName, doc,
+                    language));
+        }
+        catch (Exception e) {
+            logger.error("OpenClaw文档构建知识库失败", e);
+            return ResponseEntity.badRequest().body(e.getMessage());
+        }
     }
 
     /**
@@ -248,11 +309,17 @@ public class DatasetController {
      * @return resourceId
      */
     @PostMapping(value = "/importDatasetJson", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ResponseUtil<Long> importDatasetJson(@RequestParam(value = "ownerType", required = false) String ownerType,
-        @RequestParam(value = "catalogId", required = false) Long catalogId, @RequestPart("file") MultipartFile file) {
+    public ResponseUtil<ObjectZipImportResult> importDatasetJson(
+        @RequestParam(value = "ownerType", required = false) String ownerType,
+        @RequestParam(value = "catalogId", required = false) Long catalogId, @RequestPart("file") MultipartFile[] file) {
+        if (file != null && file.length > 1) {
+            return ResponseUtil.successResponse(I18nUtil.get("dataset.import.success"),
+                importDatasetJsonBatch(ownerType, catalogId, file));
+        }
         try {
-            Long resourceId = datasetApplicationService.importDatasetJson(ownerType, catalogId, file);
-            return ResponseUtil.successResponse(I18nUtil.get("dataset.import.success"), resourceId);
+            Long resourceId = datasetApplicationService.importDatasetJson(ownerType, catalogId, file[0]);
+            return ResponseUtil.successResponse(I18nUtil.get("dataset.import.success"),
+                buildDatasetImportSuccessResult(file[0], resourceId));
         }
         catch (IllegalArgumentException e) {
             return ResponseUtil.fail(e.getMessage());
@@ -262,6 +329,70 @@ public class DatasetController {
             return ResponseUtil.fail(I18nUtil.get("dataset.import.failed",
                 e.getMessage() != null ? e.getMessage() : I18nUtil.get("system.internal.error")));
         }
+    }
+
+    private ObjectZipImportResult importDatasetJsonBatch(String ownerType, Long catalogId, MultipartFile[] files) {
+        ObjectZipImportResult result = new ObjectZipImportResult();
+        result.setTotal(files == null ? 0 : files.length);
+        if (files == null) {
+            return result;
+        }
+        for (MultipartFile multipartFile : files) {
+            try {
+                Long resourceId = datasetApplicationService.importDatasetJson(ownerType, catalogId, multipartFile);
+                result.getItems().add(buildDatasetImportSuccessItem(multipartFile, resourceId));
+            }
+            catch (Exception e) {
+                result.getItems().add(buildDatasetImportFailedItem(multipartFile, e));
+            }
+        }
+        fillImportSummary(result);
+        return result;
+    }
+
+    private ObjectZipImportResult buildDatasetImportSuccessResult(MultipartFile file, Long resourceId) {
+        ObjectZipImportResult result = new ObjectZipImportResult();
+        result.getItems().add(buildDatasetImportSuccessItem(file, resourceId));
+        fillImportSummary(result);
+        return result;
+    }
+
+    private ObjectZipImportItem buildDatasetImportSuccessItem(MultipartFile file, Long resourceId) {
+        ObjectZipImportItem item = new ObjectZipImportItem();
+        String fileName = file == null ? null : file.getOriginalFilename();
+        item.setResourceCode(fileName);
+        item.setResourceName(fileName);
+        item.setResourceId(String.valueOf(resourceId));
+        item.setSuccess(true);
+        return item;
+    }
+
+    private ObjectZipImportItem buildDatasetImportFailedItem(MultipartFile file, Exception e) {
+        ObjectZipImportItem item = new ObjectZipImportItem();
+        String fileName = file == null ? null : file.getOriginalFilename();
+        item.setResourceCode(fileName);
+        item.setResourceName(fileName);
+        item.setSuccess(false);
+        item.setMessage(e.getMessage() != null ? e.getMessage() : I18nUtil.get("dataset.import.failed"));
+        return item;
+    }
+
+    private void fillImportSummary(ObjectZipImportResult result) {
+        if (result.getTotal() <= 0) {
+            result.setTotal(result.getItems().size());
+        }
+        List<ObjectZipImportItem> successItems = result.getItems().stream().filter(ObjectZipImportItem::isSuccess)
+            .collect(Collectors.toList());
+        List<ObjectZipImportItem> createdItems = successItems.stream().filter(item -> !item.isUpdated())
+            .collect(Collectors.toList());
+        List<ObjectZipImportItem> updatedItems = successItems.stream().filter(ObjectZipImportItem::isUpdated)
+            .collect(Collectors.toList());
+        result.setSuccess(successItems.size());
+        result.setFailed(result.getItems().size() - successItems.size());
+        result.setCreatedCount(createdItems.size());
+        result.setUpdatedCount(updatedItems.size());
+        result.setCreatedItems(new ArrayList<>(createdItems));
+        result.setUpdatedItems(new ArrayList<>(updatedItems));
     }
 
     /**

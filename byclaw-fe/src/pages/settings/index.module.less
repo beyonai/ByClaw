@@ -1,30 +1,89 @@
-.settingsContainer {
+.settingsPage {
   display: flex;
-  justify-content: center;
   width: 100%;
-  padding: 24px;
+  height: 100%;
+  min-height: 0;
+  background: radial-gradient(circle at 20% 10%, rgba(22, 93, 255, 0.08), transparent 26%),
+    linear-gradient(135deg, #f8fafc 0%, #f3f6fb 100%);
+}
+
+.settingsSider {
+  width: 240px;
+  flex-shrink: 0;
+  padding: 28px 16px;
+  border-right: 1px solid #0000000d;
+  background: rgba(255, 255, 255, 0.76);
+  backdrop-filter: blur(12px);
+
+  :global {
+    .@{antPrefix}-menu {
+      border-inline-end: none !important;
+      background: transparent;
+    }
+
+    .@{antPrefix}-menu-item {
+      height: 44px;
+      border-radius: 12px;
+      margin-inline: 0;
+      width: 100%;
+    }
+  }
+}
+
+.profileBlock {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 8px 22px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid #0000000d;
+}
+
+.profileName {
+  max-width: 148px;
+  overflow: hidden;
+  color: var(--beyond-color-text);
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.profileCode {
+  max-width: 148px;
+  overflow: hidden;
+  color: var(--beyond-color-text-tertiary);
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.settingsMain {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  padding: 32px;
+  overflow: auto;
 }
 
 .settingsContent {
   width: 100%;
-  max-width: 600px;
-  margin-top: 50px;
+  min-height: 100%;
   display: flex;
   flex-direction: column;
   gap: 24px;
 }
 
 .settingsTitle {
-  font-size: 20px;
-  font-weight: 500;
-  line-height: 28px;
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 32px;
   color: var(--beyond-color-text);
 }
 
 .settingsCard {
-  background-color: #0000000a;
+  background-color: #fff;
   border: none;
-  cursor: pointer;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
 
   &.noRadius {
     border-radius: unset;
@@ -61,9 +120,10 @@
 
 .settingBox {
   border-radius: 12px;
-  background-color: #0000000a;
+  background-color: #fff;
   padding: 16px 16px 16px 24px;
   gap: 16px;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
 
   &.canClick {
     cursor: pointer;
@@ -88,6 +148,68 @@
 
   .arrowIcon {
     color: var(--beyond-color-text-tertiary);
+  }
+}
+
+.versionSettingBox {
+  gap: 0;
+}
+
+.versionButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  // color: var(--beyond-color-primary);
+  font-weight: 500;
+}
+
+.versionButtonIcon {
+  font-size: 10px;
+  transition: transform 0.2s ease;
+}
+
+.versionButtonIconOpen {
+  transform: rotate(180deg);
+}
+
+.versionCollapse {
+  :global {
+    .@{antPrefix}-collapse-item {
+      border: none;
+    }
+
+    .@{antPrefix}-collapse-header {
+      display: none !important;
+    }
+
+    .@{antPrefix}-collapse-content-box {
+      padding: 12px 0 0 !important;
+    }
+  }
+}
+
+.versionDescriptions {
+  padding-top: 12px;
+  border-top: 1px solid #0000000d;
+
+  :global {
+    .@{antPrefix}-descriptions-row > th,
+    .@{antPrefix}-descriptions-row > td {
+      padding-bottom: 8px;
+    }
+
+    .@{antPrefix}-descriptions-item-label {
+      width: 96px;
+      color: var(--beyond-color-text-tertiary);
+      font-size: 13px;
+    }
+
+    .@{antPrefix}-descriptions-item-content {
+      min-width: 0;
+      color: var(--beyond-color-text);
+      font-size: 13px;
+      word-break: break-all;
+    }
   }
 }
 

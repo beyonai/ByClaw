@@ -63,7 +63,7 @@ public class AuthService {
 
                 Map<String, String> urlParamMap = parseUrl(uri);
                 if (MapUtils.isNotEmpty(urlParamMap)) {
-                    log.info("ws urlParamMap: {}", JSON.toJSONString(urlParamMap));
+                    log.info("ws urlParamMap: {}", JSON.toJSONString(maskSensitiveParams(urlParamMap)));
                     for (Map.Entry<String, String> entry : urlParamMap.entrySet()) {
                         String key = entry.getKey();
                         String value = entry.getValue();
@@ -82,6 +82,9 @@ public class AuthService {
             if (loginInfo == null) {
                 throw new RuntimeException(I18nUtil.get("ws.auth.signature.null"));
             }
+            // 补充后端生成的sso-token给bot使用
+            request.headers().set("sso-token", baseTokenFilter.createSsoToken(loginInfo.getUserCode()));
+
             Iterator<Map.Entry<String, String>> entryIterator = headers.iteratorAsString();
             Map<String, String> map = new HashMap<>();
             while (entryIterator.hasNext()) {
@@ -93,10 +96,7 @@ public class AuthService {
             ctx.channel().attr(Constant.ATT_USER_INFO).set(loginInfo);
             ctx.channel().attr(Constant.ATT_HEADER).set(map);
             channelManager.addChannel(loginInfo.getUserId(), ctx.channel());
-            log.info("WebSocket handshake completed for user {}", loginInfo);
-
-            // 补充后端生成的sso-token给bot使用
-            request.headers().add("sso-token", baseTokenFilter.createSsoToken(loginInfo.getUserCode()));
+            log.info("WebSocket handshake completed for userId {}", loginInfo.getUserId());
         } catch (ExpiredJwtException e) {
             // 转换异常，指定code，让前端知道时token过期，去调刷新token接口
             CloseUtil.close(ctx);
@@ -127,5 +127,22 @@ public class AuthService {
             log.error(e.getMessage(), e);
         }
         return params;
+    }
+
+    private static Map<String, String> maskSensitiveParams(Map<String, String> params) {
+        Map<String, String> maskedParams = new HashMap<>(params);
+        maskedParams.computeIfPresent("beyond-token", (key, value) -> maskToken(value));
+        maskedParams.computeIfPresent("sso-token", (key, value) -> maskToken(value));
+        return maskedParams;
+    }
+
+    private static String maskToken(String token) {
+        if (StringUtils.isBlank(token)) {
+            return token;
+        }
+        if (token.length() <= 12) {
+            return "***";
+        }
+        return token.substring(0, 6) + "***" + token.substring(token.length() - 6);
     }
 }

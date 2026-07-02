@@ -15,6 +15,14 @@ export const getMessageById = (payload: { messageId: string }) =>
     ...payload,
   });
 
+export const getTraceIdByMessageId = (messageId: string) =>
+  GET<string>(`/byaiService/chat/getTraceIdByMessageId?messageId=${encodeURIComponent(messageId)}`);
+
+export const qryTroubleshootSession = (payload: { messageId: string | number }) =>
+  POST<any>('/byaiService/assiman/qryTroubleshootSession', {
+    ...payload,
+  });
+
 export const updateMesFeedback = (data: any) =>
   POST<any>('/byaiService/assiman/updateMesFeedback', data, withCustomHandle);
 
@@ -59,6 +67,20 @@ export const getChatHistory = (payload: any) =>
 
 export const stopChat = (payload: any) =>
   POST<any>('/byaiService/chat/stopChat', {
+    ...payload,
+  });
+
+export const getChatRunningStatus = (payload: { sessionIds: Array<string | number> }) =>
+  POST<any>('/byaiService/chat/runningStatus', {
+    ...payload,
+  });
+
+export const getChatRunningSnapshot = (payload: {
+  sessionId: string | number;
+  traceId?: string;
+  modelAnswerMessageId?: string | number;
+}) =>
+  POST<any>('/byaiService/chat/runningSnapshot', {
     ...payload,
   });
 

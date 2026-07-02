@@ -1,19 +1,20 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/compat";
+import type { AimodelDefaultRunSyncDeps } from "./aimodel-default-run-sync.js";
 import {
-  applySessionModelFromPrimary,
-  isManagedModelRegisteredInConfig,
-  parseModelPrimaryRef,
+    buildMainDefaultAimodelRuntimeSystemContext,
+    resolveMainDefaultAimodelOnAgentRun,
+} from "./aimodel-default-run-sync.js";
+import {
+    applySessionModelFromPrimary,
+    isManagedModelRegisteredInConfig,
+    parseModelPrimaryRef,
 } from "./agent-session-model-reconcile.js";
+import { resolveChannelSessionIdForTool } from "./channel-session-resolve.js";
+import { setActiveLangfuseSessionId } from "./langfuse-observation.js";
+import { resolveAgentIdFromSessionKey } from "./session-agent-id.js";
 import { MANAGED_AGENT_PREFIX } from "./types.js";
 
-function resolveAgentIdFromSessionKey(sessionKey: string | undefined): string | undefined {
-  const trimmed = sessionKey?.trim();
-  if (!trimmed) {
-    return undefined;
-  }
-  const match = /^agent:([^:]+):/i.exec(trimmed);
-  return match?.[1]?.trim();
-}
+export { resolveAgentIdFromSessionKey } from "./session-agent-id.js";
 
 export type ManagedAgentModelResolveResult = {
   providerOverride: string;
@@ -78,9 +79,20 @@ export function buildManagedAgentRuntimeModelSystemContext(params: {
     };
   };
   agentId?: string;
+  currentProvider?: string;
+  currentModel?: string;
 }): string | undefined {
   const resolved = resolveManagedAgentModelFromConfig(params);
   if (!resolved) {
+    return undefined;
+  }
+  if (
+    shouldDeferManagedAgentModelOverrideForRun({
+      resolved,
+      currentProvider: params.currentProvider,
+      currentModel: params.currentModel,
+    })
+  ) {
     return undefined;
   }
   const modelName = params.cfg.models?.providers?.[resolved.providerOverride]?.models
@@ -93,6 +105,56 @@ export function buildManagedAgentRuntimeModelSystemContext(params: {
     "- If the user asks what model you are using, answer from this runtime fact.",
     "- Ignore earlier transcript self-identification if it names a different model; it may be stale after a live platform model switch.",
   ].join("\n");
+}
+
+export function resolveLangfuseSessionIdFromHookContext(ctx: {
+  sessionId?: string;
+  sessionKey?: string;
+}): string | undefined {
+  const sessionKey = ctx.sessionKey?.trim();
+  if (sessionKey) {
+    const resolved = resolveChannelSessionIdForTool(ctx, sessionKey).sessionId;
+    if (resolved) {
+      return resolved;
+    }
+    const directMarker = ":direct:";
+    const directIndex = sessionKey.lastIndexOf(directMarker);
+    if (directIndex >= 0) {
+      const directSessionId = sessionKey.slice(directIndex + directMarker.length).trim();
+      if (directSessionId) {
+        return directSessionId;
+      }
+    }
+  }
+  const sessionId = ctx.sessionId?.trim();
+  return sessionId || undefined;
+}
+
+async function attachLangfuseSessionToActiveSpan(ctx: {
+  sessionId?: string;
+  sessionKey?: string;
+  trace?: unknown;
+}): Promise<void> {
+  const sessionId = resolveLangfuseSessionIdFromHookContext(ctx);
+  if (sessionId) {
+    await setActiveLangfuseSessionId(sessionId);
+  }
+}
+
+export function shouldDeferManagedAgentModelOverrideForRun(params: {
+  resolved: ManagedAgentModelResolveResult;
+  currentProvider?: string;
+  currentModel?: string;
+}): boolean {
+  const currentProvider = params.currentProvider?.trim();
+  const currentModel = params.currentModel?.trim();
+  if (!currentProvider || !currentModel) {
+    return false;
+  }
+  return (
+    currentProvider !== params.resolved.providerOverride ||
+    currentModel !== params.resolved.modelOverride
+  );
 }
 
 const UNRESOLVED_SECRETREF_MARKER = "secretref-managed";
@@ -125,6 +187,14 @@ function isUnresolvedProviderApiKey(apiKey: unknown): boolean {
     return false;
   }
   return "source" in apiKey;
+}
+
+function isBaiyingAimodelSecretRef(apiKey: unknown): boolean {
+  if (!apiKey || typeof apiKey !== "object") {
+    return false;
+  }
+  const ref = apiKey as { source?: unknown; id?: unknown };
+  return ref.source === "exec" && typeof ref.id === "string" && ref.id.trim().startsWith("model:");
 }
 
 export function logManagedProviderRuntimeDiagnostics(params: {
@@ -164,7 +234,7 @@ export function logManagedProviderRuntimeDiagnostics(params: {
 export function warnUnresolvedManagedProviderApiKeysAfterSync(params: {
   cfg: {
     models?: {
-      providers?: Record<string, { apiKey?: unknown }>;
+      providers?: Record<string, { api?: unknown; apiKey?: unknown }>;
     };
   };
   managed: Array<{ providerKey?: string; modelRef?: string; agentId: string }>;
@@ -182,7 +252,7 @@ export function warnUnresolvedManagedProviderApiKeysAfterSync(params: {
       );
       continue;
     }
-    if (isUnresolvedProviderApiKey(provider.apiKey)) {
+    if (isUnresolvedProviderApiKey(provider.apiKey) && !isBaiyingAimodelSecretRef(provider.apiKey)) {
       params.log.warn(
         `baiying-enhance: runtime secrets snapshot did not materialize apiKey for models.providers.${providerKey} (${agent.modelRef ?? "no model"}); inbound LLM calls will fail auth until gateway secrets refresh succeeds (look for SECRETS_RELOADER_DEGRADED or exec provider errors for baiying-aimodel-redis)`,
       );
@@ -228,6 +298,45 @@ export function warnUnregisteredManagedModelPrimaries(params: {
  * runs. Reconcile-after-sync only touches sessions that already exist; brand-new
  * SDK/web sessions (for example byai-channel direct peers) need this per message.
  */
+async function syncMainAgentSessionModelForInbound(params: {
+  api: OpenClawPluginApi;
+  sessionKey?: string;
+  agentId?: string;
+  mainParentAgentId: string;
+}): Promise<void> {
+  const agentId = params.agentId?.trim() || resolveAgentIdFromSessionKey(params.sessionKey);
+  if (!agentId || agentId !== params.mainParentAgentId) {
+    return;
+  }
+  const cfg = currentRuntimeConfig(params.api);
+  const entry = cfg.agents?.list?.find((item) => item.id === agentId);
+  const primary =
+    (typeof entry?.model === "object" && entry.model?.primary?.trim()) ||
+    (typeof entry?.model === "string" && entry.model.trim()) ||
+    (typeof cfg.agents?.defaults?.model === "object" && cfg.agents.defaults.model.primary?.trim()) ||
+    "";
+  const parsed = primary ? parseModelPrimaryRef(primary) : null;
+  if (!parsed || !isManagedModelRegisteredInConfig(cfg, parsed.provider, parsed.model)) {
+    return;
+  }
+  const sessionApi = params.api.runtime?.agent?.session;
+  if (!sessionApi?.updateSessionStoreEntry || !sessionApi?.resolveStorePath) {
+    return;
+  }
+  const storePath = sessionApi.resolveStorePath(cfg.session?.store, { agentId });
+  const sessionKey = params.sessionKey?.trim();
+  if (!storePath || !sessionKey) {
+    return;
+  }
+  await sessionApi.updateSessionStoreEntry({
+    storePath,
+    sessionKey,
+    update: async (entry) => {
+      applySessionModelFromPrimary(entry as Record<string, unknown>, parsed);
+    },
+  });
+}
+
 export async function syncManagedAgentSessionModelForInbound(params: {
   api: OpenClawPluginApi;
   sessionKey?: string;
@@ -267,18 +376,42 @@ export async function syncManagedAgentSessionModelForInbound(params: {
   });
 }
 
-export function registerManagedAgentModelHooks(api: OpenClawPluginApi): void {
+export function registerManagedAgentModelHooks(
+  api: OpenClawPluginApi,
+  aimodelRunSync?: AimodelDefaultRunSyncDeps,
+): void {
+  const mainParentAgentId = aimodelRunSync?.pluginConfig.mainParentAgentId?.trim() || "main";
+  api.logger.info(
+    `baiying-enhance: registered typed hooks for main default LLM run-check (mainParentAgentId=${mainParentAgentId}, aimodelRunSync=${aimodelRunSync ? "on" : "off"})`,
+  );
+
   api.on("before_dispatch", async (event, ctx) => {
     const sessionKey = ctx.sessionKey?.trim() || event.sessionKey?.trim();
+    const agentId = resolveAgentIdFromSessionKey(sessionKey) ?? ctx.agentId?.trim();
+    if (aimodelRunSync) {
+      await syncMainAgentSessionModelForInbound({
+        api,
+        sessionKey,
+        agentId,
+        mainParentAgentId,
+      });
+    }
     await syncManagedAgentSessionModelForInbound({
       api,
       sessionKey,
-      agentId: resolveAgentIdFromSessionKey(sessionKey),
+      agentId,
     });
   });
 
   api.on("before_model_resolve", async (_event, ctx) => {
-    const agentId = ctx.agentId?.trim();
+    await attachLangfuseSessionToActiveSpan(ctx);
+    const agentId = ctx.agentId?.trim() || resolveAgentIdFromSessionKey(ctx.sessionKey);
+    if (aimodelRunSync) {
+      const mainDefault = await resolveMainDefaultAimodelOnAgentRun(aimodelRunSync, agentId);
+      if (mainDefault) {
+        return mainDefault;
+      }
+    }
     const resolve = () =>
       resolveManagedAgentModelFromConfig({
         cfg: currentRuntimeConfig(api),
@@ -286,6 +419,18 @@ export function registerManagedAgentModelHooks(api: OpenClawPluginApi): void {
       });
     const resolved = resolve();
     if (resolved) {
+      if (
+        shouldDeferManagedAgentModelOverrideForRun({
+          resolved,
+          currentProvider: ctx.modelProviderId,
+          currentModel: ctx.modelId,
+        })
+      ) {
+        api.logger.info(
+          `baiying-enhance: defer before_model_resolve override for ${agentId} (${ctx.modelProviderId ?? "unknown"}/${ctx.modelId ?? "unknown"} → ${resolved.providerOverride}/${resolved.modelOverride}); current run was prepared with the previous config snapshot`,
+        );
+        return undefined;
+      }
       return resolved;
     }
     const entry = currentRuntimeConfig(api).agents?.list?.find((item) => item.id === agentId);
@@ -307,12 +452,30 @@ export function registerManagedAgentModelHooks(api: OpenClawPluginApi): void {
   });
 
   api.on("before_prompt_build", async (_event, ctx) => {
-    const agentId = ctx.agentId?.trim();
-    return {
-      appendSystemContext: buildManagedAgentRuntimeModelSystemContext({
-        cfg: currentRuntimeConfig(api),
-        agentId,
-      }),
-    };
+    await attachLangfuseSessionToActiveSpan(ctx);
+    const agentId = ctx.agentId?.trim() || resolveAgentIdFromSessionKey(ctx.sessionKey);
+    const managedContext = buildManagedAgentRuntimeModelSystemContext({
+      cfg: currentRuntimeConfig(api),
+      agentId,
+      currentProvider: ctx.modelProviderId,
+      currentModel: ctx.modelId,
+    });
+    if (!aimodelRunSync || agentId !== mainParentAgentId) {
+      return managedContext ? { appendSystemContext: managedContext } : undefined;
+    }
+    const mainDefault = await resolveMainDefaultAimodelOnAgentRun(aimodelRunSync, agentId, {
+      allowConfigMutation: false,
+    });
+    if (!mainDefault) {
+      return managedContext ? { appendSystemContext: managedContext } : undefined;
+    }
+    const mainContext = buildMainDefaultAimodelRuntimeSystemContext({
+      providerKey: mainDefault.providerOverride,
+      modelRef: `${mainDefault.providerOverride}/${mainDefault.modelOverride}`,
+      modelCode: mainDefault.modelOverride,
+      hash: "",
+    });
+    const parts = [mainContext, managedContext].filter((part): part is string => Boolean(part));
+    return parts.length > 0 ? { appendSystemContext: parts.join("\n\n") } : undefined;
   });
 }

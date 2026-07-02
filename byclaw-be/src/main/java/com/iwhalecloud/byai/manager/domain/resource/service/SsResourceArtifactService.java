@@ -126,13 +126,22 @@ public class SsResourceArtifactService {
         if (resourceId == null) {
             return;
         }
-        LambdaUpdateWrapper<SsResourceArtifact> updateWrapper = new LambdaUpdateWrapper<>();
-        updateWrapper.eq(SsResourceArtifact::getResourceId, resourceId)
-            .eq(SsResourceArtifact::getStatusCd, STATUS_ACTIVE)
-            .set(SsResourceArtifact::getStatusCd, STATUS_INVALID)
-            .set(SsResourceArtifact::getUpdateBy, CurrentUserHolder.getCurrentUserId())
-            .set(SsResourceArtifact::getUpdateTime, new Date());
-        ssResourceArtifactMapper.update(null, updateWrapper);
+        List<SsResourceArtifact> activeArtifacts = listActiveArtifactsByResourceId(resourceId);
+        if (CollectionUtils.isEmpty(activeArtifacts)) {
+            return;
+        }
+        Long currentUserId = CurrentUserHolder.getCurrentUserId();
+        Date now = new Date();
+        for (SsResourceArtifact artifact : activeArtifacts) {
+            if (artifact == null || artifact.getArtifactId() == null) {
+                continue;
+            }
+            removeInvalidArtifactByUniqueKey(artifact);
+            artifact.setStatusCd(STATUS_INVALID);
+            artifact.setUpdateBy(currentUserId);
+            artifact.setUpdateTime(now);
+            ssResourceArtifactMapper.updateById(artifact);
+        }
     }
 
     public void removeArtifactsByResourceId(Long resourceId) {
@@ -150,5 +159,18 @@ public class SsResourceArtifactService {
             normalized = normalized.substring(1);
         }
         return normalized;
+    }
+
+    private void removeInvalidArtifactByUniqueKey(SsResourceArtifact artifact) {
+        if (artifact == null || artifact.getResourceId() == null
+            || StringUtils.isAnyBlank(artifact.getArtifactType(), artifact.getArtifactPath())) {
+            return;
+        }
+        LambdaQueryWrapper<SsResourceArtifact> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.eq(SsResourceArtifact::getResourceId, artifact.getResourceId())
+            .eq(SsResourceArtifact::getArtifactType, artifact.getArtifactType())
+            .eq(SsResourceArtifact::getArtifactPath, normalizePath(artifact.getArtifactPath()))
+            .eq(SsResourceArtifact::getStatusCd, STATUS_INVALID);
+        ssResourceArtifactMapper.delete(queryWrapper);
     }
 }

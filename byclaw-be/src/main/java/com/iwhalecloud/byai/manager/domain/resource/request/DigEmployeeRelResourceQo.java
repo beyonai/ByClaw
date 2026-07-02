@@ -21,8 +21,14 @@ public class DigEmployeeRelResourceQo extends QueryObject implements Serializabl
     /**
      * 数字员工资源ID。
      */
-    @ApiModelProperty(value = "数字员工资源ID", required = true)
+    @ApiModelProperty(value = "数字员工资源ID", required = false)
     private Long resourceId;
+
+    /**
+     * 资源类型。
+     */
+    @ApiModelProperty(value = "资源类型", required = false)
+    private List<String> resourceBizTypeList;
 
     /**
      * 目录ID。

@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: by-service
+  labels:
+    byclaw.io/tier: service
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: by-middleware
+  labels:
+    byclaw.io/tier: middleware
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: by-sandbox
+  labels:
+    byclaw.io/tier: sandbox
+    byclaw.io/workload: sandbox
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+  labels:
+    byclaw.io/tier: monitoring

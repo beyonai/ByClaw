@@ -71,6 +71,17 @@ export function logChannelDebug(
 const SENSITIVE_KEY_PATTERN =
   /(^|[-_])(authorization|cookie|token|secret|password|passwd|api[-_]?key|access[-_]?key|beyond[-_]?token)([-_]|$)/i;
 
+const privateRedactionValues = new Set<string>();
+
+export function registerPrivateParamLogRedactions(values: Iterable<string>): void {
+  for (const value of values) {
+    const normalized = String(value ?? "");
+    if (normalized) {
+      privateRedactionValues.add(normalized);
+    }
+  }
+}
+
 function writeInfo(logger: BaiyingEnhanceLogger | undefined, message: string): void {
   if (logger?.info) {
     logger.info(message);
@@ -85,12 +96,25 @@ function redactString(value: string): string {
   return `${value.slice(0, 4)}...${value.slice(-4)}`;
 }
 
+function redactPrivateParamValues(value: string): string {
+  let redacted = value;
+  for (const privateValue of privateRedactionValues) {
+    if (privateValue && redacted.includes(privateValue)) {
+      redacted = redacted.split(privateValue).join("***");
+    }
+  }
+  return redacted;
+}
+
 function sanitizeForLog(value: unknown, depth = 0): unknown {
   if (depth > 8) {
     return "<max-depth>";
   }
   if (Array.isArray(value)) {
     return value.map((item) => sanitizeForLog(item, depth + 1));
+  }
+  if (typeof value === "string") {
+    return redactPrivateParamValues(value);
   }
   if (!value || typeof value !== "object") {
     return value;

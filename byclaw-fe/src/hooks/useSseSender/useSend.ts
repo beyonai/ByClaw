@@ -5,16 +5,14 @@
  * 封装了SendHelper实例，提供统一的消息发送接口
  * 主要用于聊天功能，支持会话管理和回调处理
  */
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback } from 'react';
 import DOMPurify from 'dompurify'; // HTML 净化器
 
-import SendHelper from './sendHelper';
-import OpenclawSendHelper from './openclaw/sendHelper';
 // @ts-ignore
-import { useDispatch } from '@umijs/max';
-import useGlobal from '../useGlobal';
-import { isOpenClawAgent } from '@/utils/openClaw/utils';
-import { ISession } from '@/typescript/session';
+import { getLocale } from '@umijs/max';
+import webSocketManager from '@/utils/websocket';
+
+export { formatStreamPayload } from './chatStream';
 
 /**
  * Hook参数类型定义
@@ -43,35 +41,7 @@ type IParam = {
  */
 export default function useSend(params: IParam) {
   // 解构参数，设置默认值
-  const { language = 'cn', sessionId, hooks = {}, agentType, chatUrl } = params;
-  const sendHelper = useRef<any>(new SendHelper(chatUrl));
-
-  const { agentInfo } = useGlobal();
-
-  const dispatch = useDispatch();
-  const updateSession = useCallback(
-    (session: Partial<ISession>) => {
-      dispatch({
-        type: 'session/updateSession',
-        payload: session,
-      });
-    },
-    [dispatch]
-  );
-  const updateSessionRef = useRef(updateSession);
-  updateSessionRef.current = updateSession;
-
-  useEffect(() => {
-    if (agentInfo && isOpenClawAgent(agentInfo)) {
-      // 等到有接口获取openclaw的配置信息之后，就不需要传agentInfo进去了
-      sendHelper.current = new OpenclawSendHelper({
-        agentInfo,
-        updateSession: updateSessionRef,
-      });
-    } else {
-      sendHelper.current = new SendHelper(chatUrl);
-    }
-  }, [agentInfo, chatUrl]);
+  const { language = 'cn', sessionId } = params;
 
   /**
    * 发送消息函数
@@ -83,46 +53,48 @@ export default function useSend(params: IParam) {
    * @returns {object} 包含promise和cancel方法的对象
    */
   const send = useCallback(
-    (text: string, payload?: any, opts: Record<string, any> = {}) => {
-      console.group('----sendHelper send----', sendHelper.current, agentType);
+    (text: string, payload?: any) => {
       console.log('useSend payload---', payload);
 
       // 从选项中提取callback回调函数
-      const { callback, ...optsRest } = opts;
+      // const { callback, ...optsRest } = opts;
 
-      // 调用SendHelper实例的send方法
-      const { promise, cancel } = sendHelper.current.send(
-        {
-          language, // 语言设置
-          chatContent: DOMPurify.sanitize(text), // 聊天内容
-          relModelId: -1, // 相关模型ID（原传1，现说暂改为传-1先）
+      const { clientRequestId } = payload;
+      let closed = false;
+
+      const closeConsoleGroup = () => {
+        if (closed) return;
+        closed = true;
+      };
+
+      const promise = webSocketManager
+        .sendMessageWhenReady({
+          type: 'LLM_MESSAGE',
+          clientRequestId,
+          language: getLocale(),
+          chatContent: DOMPurify.sanitize(text),
+          relModelId: -1,
           accessTerminal: 'Web',
+          sessionId,
+          chatId: sessionId,
+          ...(payload || {}),
+        })
+        .then(() => ({}))
+        .catch((error) => {
+          // WS 连接失败（本地开发后端未启动等）属预期情况：记录但不抛出，避免 Unhandled Rejection。
+          console.error('WebSocket 发送消息失败:', error);
+          return {};
+        })
+        .finally(closeConsoleGroup);
 
-          sessionId, // 会话ID
-          chatId: sessionId, // 聊天ID，使用相同的sessionId
-          ...(payload || {}), // 合并其他载荷参数
+      return {
+        promise,
+        cancel: () => {
+          closeConsoleGroup();
         },
-        {
-          ...hooks, // 合并外部传入的hooks
-          ...optsRest, // 合并其他选项
-          callback: (formatMessage: any, sseMsg: any) => {
-            // 调用回调并传递完整会话信息
-            callback?.({ ...formatMessage }, sseMsg);
-          },
-        },
-        {
-          useEventSource: false, // 不使用EventSource，使用普通请求
-        }
-      );
-
-      // 请求完成后关闭console分组
-      promise.finally(() => {
-        console.groupEnd();
-      });
-
-      return { promise, cancel };
+      };
     },
-    [language, sessionId, agentType] // 依赖项：language和sessionId变化时重新创建函数
+    [language, sessionId] // 依赖项：language和sessionId变化时重新创建函数
   );
 
   // 返回包含send方法的对象

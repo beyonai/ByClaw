@@ -439,19 +439,19 @@ function EmployeesDrawer(props: IProps) {
   return (
     <>
       <div
-        className={classNames({
-          [styles.employeesDrawer]: canClick,
-        })}
-        data-employees-drawer="true"
+        // className={classNames({
+        //   [styles.employeesDrawer]: canClick,
+        // })}
+        // data-employees-drawer="true"
         onClick={(e) => {
           // 阻止事件冒泡到父元素（如 List.Item）
           e.stopPropagation();
           // 阻止默认行为
           e.preventDefault();
 
-          if (canClick) {
-            setOpen(true);
-          }
+          // if (canClick) {
+          //   setOpen(true);
+          // }
         }}
       >
         {props.children}

@@ -20,6 +20,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 
 import com.iwhalecloud.byai.common.feign.request.sandbox.SandboxLaunchRequest;
 import com.iwhalecloud.byai.gateway.sandbox.client.model.CreateSandboxRequest;
+import com.iwhalecloud.byai.gateway.sandbox.client.model.SandboxStatus;
 import com.iwhalecloud.byai.gateway.sandbox.config.SandboxProperties;
 import com.iwhalecloud.byai.gateway.sandbox.spec.SandboxServiceSpec;
 import com.iwhalecloud.byai.gateway.sandbox.spec.SandboxServiceSpecRepository;
@@ -69,7 +70,7 @@ class StandardSandboxLifecycleServiceTest {
         when(valueOperations.get(lockKey)).thenReturn("lock-token-mismatch");
 
         SandboxServiceSpec spec = new SandboxServiceSpec();
-        when(specRepository.findByServiceKey("openclaw")).thenReturn(java.util.Optional.of(spec));
+        when(specRepository.findByServiceKeyAndProfile("openclaw", null)).thenReturn(java.util.Optional.of(spec));
         CreateSandboxRequest createRequest = CreateSandboxRequest.builder().timeout(300).build();
         when(specProcessor.buildCreateRequest("user001", "openclaw", null, null, spec)).thenReturn(createRequest);
         when(runtimeProvider.findReusable("user001", "openclaw")).thenReturn(java.util.Optional.empty());
@@ -97,6 +98,47 @@ class StandardSandboxLifecycleServiceTest {
     }
 
     @Test
+    void launchSandbox_skipsReusableLookupWhenRequested() {
+        when(valueOperations.setIfAbsent(any(), any(), any())).thenReturn(true);
+
+        SandboxServiceSpec spec = new SandboxServiceSpec();
+        when(specRepository.findByServiceKeyAndProfile("openclaw", null)).thenReturn(java.util.Optional.of(spec));
+        CreateSandboxRequest createRequest = CreateSandboxRequest.builder().timeout(300).build();
+        when(specProcessor.buildCreateRequest("user001", "openclaw", null, null, spec)).thenReturn(createRequest);
+        SandboxRuntimeInstance createdInstance = SandboxRuntimeInstance.builder()
+            .sandboxId("sb-2")
+            .endpoints(List.of("http://created"))
+            .build();
+        when(runtimeProvider.create(eq(createRequest), eq(spec), eq("user001"), eq("openclaw"), any()))
+            .thenReturn(createdInstance);
+        when(runtimeProvider.resolveEndpoints(eq(createdInstance), eq(spec), eq(createRequest)))
+            .thenReturn(List.of("http://created"));
+
+        SandboxLaunchRequest request = new SandboxLaunchRequest();
+        request.setUserCode("user001");
+        request.setSandboxType("openclaw");
+        request.setSkipReusableSandbox(true);
+
+        var response = service.launchSandbox(request);
+
+        assertThat(response.isSuccess()).isTrue();
+        assertThat(response.getData().getSandboxId()).isEqualTo("sb-2");
+        verify(runtimeProvider, never()).findReusable(any(), any());
+        verify(runtimeProvider).create(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void reusableSandboxState_requiresReadyOrRunning() {
+        assertThat(SandboxRuntimeRequestFactory.isReusableSandboxState(new SandboxStatus("running", null, null, null)))
+            .isTrue();
+        assertThat(SandboxRuntimeRequestFactory.isReusableSandboxState(new SandboxStatus("ready", null, null, null)))
+            .isTrue();
+        assertThat(SandboxRuntimeRequestFactory.isReusableSandboxState(new SandboxStatus("pending", null, null, null)))
+            .isFalse();
+        assertThat(SandboxRuntimeRequestFactory.isReusableSandboxState(null)).isFalse();
+    }
+
+    @Test
     void launchSandbox_buildsRequestAndPersistsWhenCacheMiss() {
         String cacheKey = "byai:worker:sandbox:user001:openclaw";
         String lockKey = cacheKey + ":create-lock";
@@ -106,7 +148,7 @@ class StandardSandboxLifecycleServiceTest {
         when(valueOperations.get(lockKey)).thenReturn("lock-token-mismatch");
 
         SandboxServiceSpec spec = new SandboxServiceSpec();
-        when(specRepository.findByServiceKey("openclaw")).thenReturn(java.util.Optional.of(spec));
+        when(specRepository.findByServiceKeyAndProfile("openclaw", null)).thenReturn(java.util.Optional.of(spec));
 
         CreateSandboxRequest createRequest = CreateSandboxRequest.builder()
             .env(Map.of("KEY", "VALUE"))

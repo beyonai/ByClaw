@@ -270,9 +270,9 @@ public class AssistantManController {
         @ApiResponse(responseCode = "0", description = "查询成功"),
         @ApiResponse(responseCode = "500", description = "服务器内部错误")
     })
-    public ResponseUtil getContentFeedbackType() {
+    public ResponseUtil getContentFeedbackType(@RequestParam(name = "language", required = false) String language) {
 
-        return ResponseUtil.successResponse(messageService.getContentFeedbackType());
+        return ResponseUtil.successResponse(messageService.getContentFeedbackType(language));
     }
 
     /**
@@ -383,5 +383,26 @@ public class AssistantManController {
         @RequestBody SessionByAgentQo sessionByAgentQo) {
         PageInfo<Map<String, Object>> pageInfo = sessionMemberService.querySessionByAgent(sessionByAgentQo);
         return ResponseUtil.successResponse(pageInfo);
+    }
+
+    /**
+     * 根据 troubleshoot_message_id 查询关联会话
+     *
+     * @param messageId troubleshoot 消息ID
+     * @return ResponseUtil
+     */
+    @PostMapping("/qryTroubleshootSession")
+    @Operation(summary = "查询关联会话", description = "根据 troubleshoot_message_id 查询关联的会话信息")
+    @ApiResponses({
+        @ApiResponse(responseCode = "0", description = "查询成功"),
+        @ApiResponse(responseCode = "400", description = "消息ID不能为空"),
+        @ApiResponse(responseCode = "500", description = "服务器内部错误")
+    })
+    public ResponseUtil qryTroubleshootSession(@RequestBody Map<String, String> params) {
+        String messageId = params.get("messageId");
+        if (StringUtils.isBlank(messageId)) {
+            throw new BdpRuntimeException(I18nUtil.get("assistant.man.message.id.not.empty"));
+        }
+        return ResponseUtil.successResponse(messageService.qryTroubleshootSession(messageId));
     }
 }

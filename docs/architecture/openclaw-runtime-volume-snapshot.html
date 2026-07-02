@@ -1,0 +1,1809 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OpenClaw 运行态数据卷与快照恢复方案</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #172033;
+      --muted: #5c667a;
+      --line: #d8deea;
+      --panel: #f7f9fc;
+      --panel-strong: #eef3fa;
+      --accent: #1662d4;
+      --accent-soft: #e9f1ff;
+      --warn: #9a4b00;
+      --ok: #126b47;
+      --bad: #a62d2d;
+      --code: #101828;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: #ffffff;
+      line-height: 1.65;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 260px minmax(0, 1120px);
+      gap: 28px;
+      max-width: 1440px;
+      margin: 0 auto;
+      padding: 32px 24px 56px;
+      align-items: start;
+    }
+
+    main {
+      min-width: 0;
+    }
+
+    .hero {
+      padding: 22px 0 8px;
+    }
+
+    h1, h2, h3 {
+      line-height: 1.25;
+      margin: 0 0 14px;
+    }
+
+    h1 {
+      font-size: 34px;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      font-size: 24px;
+      margin-top: 36px;
+      padding-top: 24px;
+      border-top: 1px solid var(--line);
+    }
+
+    h3 {
+      font-size: 18px;
+      margin-top: 24px;
+    }
+
+    p {
+      margin: 10px 0;
+    }
+
+    a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+
+    .lede {
+      font-size: 18px;
+      color: var(--muted);
+      max-width: 920px;
+      margin-top: 12px;
+    }
+
+    .meta {
+      color: var(--muted);
+      font-size: 14px;
+      margin-top: 18px;
+    }
+
+    .toc {
+      position: sticky;
+      top: 20px;
+      max-height: calc(100vh - 40px);
+      overflow: auto;
+      margin: 0;
+      padding: 18px;
+      border: 1px solid var(--line);
+      background: var(--panel);
+    }
+
+    .toc-title {
+      font-weight: 700;
+      margin-bottom: 10px;
+    }
+
+    .toc-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 8px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .toc-sub {
+      margin: 5px 0 0;
+      padding: 0 0 0 12px;
+      list-style: none;
+      border-left: 1px solid var(--line);
+    }
+
+    .toc-sub li {
+      margin: 4px 0;
+    }
+
+    .toc a {
+      display: block;
+      padding: 7px 9px;
+      border-radius: 6px;
+      color: var(--ink);
+      background: #fff;
+      border: 1px solid transparent;
+    }
+
+    .toc a:hover {
+      text-decoration: none;
+      border-color: var(--line);
+      background: var(--accent-soft);
+    }
+
+    .toc-sub a {
+      padding: 5px 8px;
+      font-size: 13px;
+      color: var(--muted);
+      background: transparent;
+    }
+
+    .callout {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-left: 5px solid var(--accent);
+      padding: 16px 18px;
+      margin: 18px 0;
+    }
+
+    .callout.warning {
+      border-left-color: var(--warn);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 14px;
+      margin: 16px 0;
+    }
+
+    .box {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      padding: 16px;
+    }
+
+    .box strong {
+      display: block;
+      margin-bottom: 6px;
+    }
+
+    .diagram {
+      margin: 22px 0;
+      padding: 16px;
+      border: 1px solid var(--line);
+      background: #fff;
+    }
+
+    .diagram-title {
+      font-weight: 700;
+      margin-bottom: 10px;
+    }
+
+    .diagram svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      overflow: visible;
+    }
+
+    .svg-box {
+      fill: var(--panel);
+      stroke: #b9c4d6;
+      stroke-width: 1.2;
+      rx: 8;
+    }
+
+    .svg-box.primary {
+      fill: var(--accent-soft);
+      stroke: var(--accent);
+    }
+
+    .svg-box.good {
+      fill: #eaf7f0;
+      stroke: var(--ok);
+    }
+
+    .svg-box.warn {
+      fill: #fff3e1;
+      stroke: #d07a00;
+    }
+
+    .svg-box.bad {
+      fill: #fff0f0;
+      stroke: var(--bad);
+    }
+
+    .svg-label {
+      font: 600 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      fill: var(--ink);
+    }
+
+    .svg-small {
+      font: 12px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      fill: var(--muted);
+    }
+
+    .svg-arrow {
+      stroke: #536179;
+      stroke-width: 1.6;
+      fill: none;
+      marker-end: url(#arrow);
+    }
+
+    .svg-dashed {
+      stroke-dasharray: 6 5;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 16px 0;
+      font-size: 14px;
+    }
+
+    th, td {
+      border: 1px solid var(--line);
+      padding: 10px 12px;
+      vertical-align: top;
+      text-align: left;
+    }
+
+    th {
+      background: #eef3fa;
+    }
+
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      color: var(--code);
+      background: #eef2f7;
+      padding: 1px 5px;
+      border-radius: 4px;
+      font-size: 0.94em;
+    }
+
+    pre {
+      overflow-x: auto;
+      background: #101828;
+      color: #edf2f7;
+      padding: 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    pre code {
+      color: inherit;
+      background: transparent;
+      padding: 0;
+      border-radius: 0;
+    }
+
+    .tag {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--muted);
+      margin-right: 6px;
+    }
+
+    .ok { color: var(--ok); font-weight: 600; }
+    .bad { color: var(--bad); font-weight: 600; }
+    .warn { color: var(--warn); font-weight: 600; }
+
+    ul, ol {
+      padding-left: 22px;
+    }
+
+    li {
+      margin: 6px 0;
+    }
+
+    @media (max-width: 980px) {
+      .layout {
+        display: block;
+        padding: 24px 16px 44px;
+      }
+
+      .toc {
+        position: static;
+        max-height: none;
+        margin: 18px 0 26px;
+      }
+
+      .toc-grid {
+        grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      }
+    }
+  </style>
+</head>
+<body>
+<div class="layout">
+  <nav class="toc" aria-label="章节目录">
+    <div class="toc-title">章节目录</div>
+    <ul class="toc-grid">
+      <li><a href="#summary">1. 结论</a></li>
+      <li><a href="#current">2. 当前实现对比</a></li>
+      <li><a href="#replace-minio-volume">3. 替代 MinIO 数据卷</a></li>
+      <li><a href="#risk">4. 风险矩阵</a></li>
+      <li><a href="#docker">5. Docker 部署方案</a></li>
+      <li><a href="#file-nas-pvc">6. 文件型网盘 PVC 方案</a></li>
+      <li>
+        <a href="#docker-upgrade-plan">7. Docker 原地升级专项方案</a>
+        <ul class="toc-sub">
+          <li><a href="#docker-upgrade-topology">7.1 远端文件存储拓扑</a></li>
+          <li><a href="#docker-upgrade-selection">7.2 技术选型与流程</a></li>
+          <li><a href="#docker-upgrade-codegraph">7.3 项目代码改造点</a></li>
+          <li><a href="#docker-upgrade-migration">7.4 迁移方案</a></li>
+          <li><a href="#docker-upgrade-verification">7.5 验证方案</a></li>
+          <li><a href="#docker-upgrade-distributed">7.6 分布式支持</a></li>
+          <li><a href="#docker-upgrade-console">7.7 管理面板替代</a></li>
+        </ul>
+      </li>
+      <li>
+        <a href="#docker-vs-k3s">8. Docker 与 K3s 对比</a>
+        <ul class="toc-sub">
+          <li><a href="#docker-vs-k3s-baseline">8.1 当前基线</a></li>
+          <li><a href="#docker-vs-k3s-docker-change">8.2 Docker 改造点</a></li>
+          <li><a href="#docker-vs-k3s-k3s-change">8.3 K3s 改造点</a></li>
+          <li><a href="#docker-vs-k3s-conclusion">8.4 是否彻底解决</a></li>
+        </ul>
+      </li>
+      <li>
+        <a href="#k3s">9. K3s 部署方案</a>
+        <ul class="toc-sub">
+          <li><a href="#k3s-positioning">9.1 定位</a></li>
+          <li><a href="#k3s-pvc-pod">9.2 PVC 与 Pod</a></li>
+          <li><a href="#k3s-backup">9.3 备份恢复</a></li>
+          <li><a href="#k3s-spec">9.4 Spec 接入</a></li>
+        </ul>
+      </li>
+      <li>
+        <a href="#management">10. 管理界面与迁移</a>
+        <ul class="toc-sub">
+          <li><a href="#management-stack">10.1 推荐技术栈</a></li>
+          <li><a href="#management-file-browser">10.2 File Browser</a></li>
+          <li><a href="#management-k3s">10.3 K3s 管理面</a></li>
+          <li><a href="#management-docker">10.4 Docker 管理面</a></li>
+          <li><a href="#management-minio-migration">10.5 MinIO 迁移</a></li>
+        </ul>
+      </li>
+      <li><a href="#dataflow">11. 数据流改造</a></li>
+      <li><a href="#consistency">12. 一致性与快照</a></li>
+      <li><a href="#roadmap">13. 落地路线</a></li>
+      <li><a href="#final">14. 最终判断</a></li>
+    </ul>
+  </nav>
+
+  <main>
+    <header class="hero">
+    <h1>OpenClaw 运行态数据卷与快照恢复方案</h1>
+    <p class="lede">
+      目标是彻底避免把 S3/MinIO 的 rclone 网盘挂载用作运行时文件系统，从而规避随机读写、文件锁、WAL、fsync、mmap、rename 原子性和多实例写入一致性问题；同时保留系统级数据卷快照与恢复能力。
+    </p>
+    <p class="meta">
+      基于当前代码实现梳理：<code>Spec.json</code>、<code>GenericSandboxSpecProcessor</code>、<code>SandboxRuntimeRequestFactory</code>、<code>MinioBucketMountSupport</code>、<code>MinioStorageService</code>。
+    </p>
+    </header>
+
+  <section id="summary">
+    <h2>结论</h2>
+    <div class="callout">
+      <p>
+        首选兼容方案是保持 OpenClaw 容器内仍然只有一个 <code>/by</code> 运行态数据卷，但把 <code>/by</code> 的底层从对象型 S3/rclone mount 替换成文件型 NAS/NFS/SMB 存储。这样不改变 OpenClaw 现有路径习惯，也可以彻底避开 S3 对象存储模拟文件系统带来的兼容性问题。
+      </p>
+      <pre><code>/by  OpenClaw 运行态主卷：NAS/NFS/SMB 文件型存储，承载 state、DB、workspace、用户可见文件</code></pre>
+      <p>
+        最关键的 Spec 改造不是修改容器内路径，而是修改 <code>/by</code> 的卷来源：不再让 <code>hostPath=${FILE_STORAGE_MINIO_MOUNT_PATH}</code> 指向 rclone 挂载目录，而是让 <code>/by</code> 来自 Docker NFS/SMB volume、宿主机 NAS 挂载目录或 K3s NFS/SMB PVC。
+      </p>
+    </div>
+
+    <div class="diagram">
+      <div class="diagram-title">架构图：保留容器内 /by，替换底层卷来源</div>
+      <svg viewBox="0 0 1040 360" role="img" aria-label="OpenClaw 从 S3 rclone 挂载迁移到文件型 PVC 的架构图">
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#536179"></path>
+          </marker>
+        </defs>
+
+        <text x="30" y="34" class="svg-label">旧路径：对象存储伪装成文件系统</text>
+        <rect x="30" y="58" width="190" height="78" class="svg-box bad"></rect>
+        <text x="52" y="88" class="svg-label">MinIO / S3</text>
+        <text x="52" y="112" class="svg-small">对象存储语义</text>
+        <line x1="220" y1="97" x2="290" y2="97" class="svg-arrow"></line>
+        <rect x="290" y="58" width="190" height="78" class="svg-box warn"></rect>
+        <text x="312" y="88" class="svg-label">rclone mount</text>
+        <text x="312" y="112" class="svg-small">FUSE / VFS cache</text>
+        <line x1="480" y1="97" x2="550" y2="97" class="svg-arrow"></line>
+        <rect x="550" y="58" width="200" height="78" class="svg-box bad"></rect>
+        <text x="572" y="88" class="svg-label">容器 /by</text>
+        <text x="572" y="112" class="svg-small">DB / WAL / ffmpeg 随机写</text>
+        <line x1="750" y1="97" x2="820" y2="97" class="svg-arrow"></line>
+        <rect x="820" y="58" width="190" height="78" class="svg-box bad"></rect>
+        <text x="842" y="88" class="svg-label">兼容性风险</text>
+        <text x="842" y="112" class="svg-small">锁、fsync、rename、mmap</text>
+
+        <text x="30" y="208" class="svg-label">新路径：/by 直接来自文件型存储/PVC</text>
+        <rect x="30" y="232" width="220" height="78" class="svg-box good"></rect>
+        <text x="52" y="262" class="svg-label">Docker / K3s 卷后端</text>
+        <text x="52" y="286" class="svg-small">NAS、NFS、SMB 文件型存储</text>
+        <line x1="250" y1="271" x2="340" y2="271" class="svg-arrow"></line>
+        <rect x="340" y="232" width="220" height="78" class="svg-box primary"></rect>
+        <text x="362" y="262" class="svg-label">文件型 PVC</text>
+        <text x="362" y="286" class="svg-small">原生目录、权限、rename、锁</text>
+        <line x1="560" y1="271" x2="650" y2="271" class="svg-arrow"></line>
+        <rect x="650" y="232" width="220" height="78" class="svg-box good"></rect>
+        <text x="672" y="262" class="svg-label">容器 /by</text>
+        <text x="672" y="286" class="svg-small">OpenClaw state、DB、workspace</text>
+        <path d="M760 232 C760 178 160 178 160 136" class="svg-arrow svg-dashed"></path>
+        <text x="360" y="172" class="svg-small">MinIO/S3 保留为对象存储和备份目标，不再作为 /by 的文件系统来源</text>
+      </svg>
+    </div>
+  </section>
+
+  <section id="current">
+    <h2>当前实现对比</h2>
+    <h3>Spec.json 的现状</h3>
+    <p>当前 <code>Spec.json</code> 的 OpenClaw 容器只定义了一个业务数据卷：</p>
+    <pre><code>{
+  "env": {
+    "OPENCLAW_STATE_DIR": "/by/.openclaw",
+    "DWS_CONFIG_DIR": "/by/.openclaw/.dws",
+    "NODE_OPTIONS": "... --diagnostic-dir=/by/node-diagnostics ..."
+  },
+  "volumes": [
+    {
+      "key": "base",
+      "scope": "PRIVATE",
+      "subPath": "byclaw-${user_code}/by",
+      "hostPath": "${FILE_STORAGE_MINIO_MOUNT_PATH}",
+      "readOnly": false,
+      "mountPath": "/by"
+    }
+  ]
+}</code></pre>
+    <p>
+      这意味着用户文件、OpenClaw state、DWS 配置、Node 诊断文件都落在 <code>/by</code> 下。如果宿主机的 <code>${FILE_STORAGE_MINIO_MOUNT_PATH}</code> 是 rclone 挂载出来的 S3/MinIO bucket，那么运行态随机写也会落到对象存储网盘语义上。
+    </p>
+
+    <h3>后端如何把 Spec 变成容器请求</h3>
+    <p>
+      <code>GenericSandboxSpecProcessor.buildVolumes</code> 会渲染 <code>hostPath</code>、<code>subPath</code>、<code>mountPath</code>，并构造 sandbox volume。当前字段已经足以保持单卷 <code>/by</code> 模型，只需要把 <code>hostPath</code> 从 S3/rclone 挂载根目录切换为 NAS/NFS/SMB 文件型存储根目录。
+    </p>
+    <pre><code>hostPath = renderPathTemplate(v.getHostPath(), ...)
+mountPath = renderPathTemplate(v.getMountPath(), ...)
+subPath = renderPathTemplate(v.getSubPath(), ...)
+
+Volume.builder()
+  .host(new HostVolume(hostPath))
+  .mountPath(mountPath)
+  .scope(v.getScope().name())
+  .readOnly(...)
+  .subPath(subPath)</code></pre>
+    <p>
+      <code>SandboxRuntimeRequestFactory.buildVolumesPayload</code> 会把 volume 的 <code>mountPath</code>、<code>name</code>、<code>readOnly</code>、<code>subPath</code>、<code>scope</code> 传给运行时。也就是说，Spec 层已经有“多卷”的模型，只是当前 OpenClaw 配置没有把热状态卷拆出来。
+    </p>
+
+    <h3>MinIO/rclone 挂载现状</h3>
+    <p>
+      <code>MinioStorageService.mount</code> 会创建 bucket 并调用 <code>MinioBucketMountSupport.mountSingleBucketOnAllTargets</code>。后者在宿主机执行 rclone mount：
+    </p>
+    <pre><code>rclone mount ':s3:&lt;bucket&gt;' &lt;mountDirectory&gt; \
+  --s3-provider Minio \
+  --s3-endpoint '&lt;endpoint&gt;' \
+  --vfs-cache-mode minimal \
+  --allow-non-empty \
+  --poll-interval 2s \
+  --dir-cache-time 2s \
+  --attr-timeout 2s \
+  --daemon</code></pre>
+    <p>
+      <code>--vfs-cache-mode minimal</code> 对普通文件读取和下载场景可用，但不足以承载 SQLite/PGLite、ffmpeg 临时输出、包管理器缓存、git 工作区等随机读写场景。即使改成 <code>full</code>，也只能缓解体验，不能把对象存储变成强 POSIX 文件系统。
+    </p>
+  </section>
+
+  <section id="replace-minio-volume">
+    <h2>能否完全替代 MinIO 数据卷</h2>
+    <div class="callout">
+      <p>
+      可以完全替代 <strong>MinIO/rclone 数据卷挂载方案</strong>，也就是 OpenClaw 容器仍然挂载 <code>/by</code>，但 <code>/by</code> 不再来自 <code>${FILE_STORAGE_MINIO_MOUNT_PATH}</code> 这类 S3 网盘目录，而是来自开源文件型存储服务提供的 NAS/NFS/SMB。
+      </p>
+      <p>
+        不建议一并替代 <strong>MinIO 对象存储能力</strong>。当前代码中 <code>ByclawFS</code>、<code>UserFS</code>、<code>ResourceFS</code>、<code>ArchiveFS</code> 的抽象仍然适合通过 <code>ObjectStorage</code> 写入 MinIO/S3：它们表达的是上传、下载、列目录、删除、归档这类对象存储语义，而不是容器运行时磁盘语义。
+      </p>
+    </div>
+
+    <table>
+      <thead>
+      <tr>
+        <th>能力</th>
+        <th>当前实现</th>
+        <th>是否应替代</th>
+        <th>目标实现</th>
+      </tr>
+      </thead>
+      <tbody>
+      <tr>
+        <td>OpenClaw 运行态文件系统</td>
+        <td><code>/by</code> 由 rclone mount 提供，<code>OPENCLAW_STATE_DIR=/by/.openclaw</code></td>
+        <td><span class="ok">必须替代</span></td>
+        <td><code>/by</code> 使用 Docker NFS/SMB volume、宿主机 NAS 挂载目录或 K3s 文件型 PVC</td>
+      </tr>
+      <tr>
+        <td>临时计算工作区</td>
+        <td>用户和工具可能直接使用 <code>/by</code></td>
+        <td><span class="ok">必须替代</span></td>
+        <td>优先使用 <code>/by/tmp</code> 或可选额外临时卷；单卷模式下仍在 PVC 上</td>
+      </tr>
+      <tr>
+        <td>用户文件对象存储</td>
+        <td>MinIO bucket 中以 <code>/by</code> 为 objectKey 前缀</td>
+        <td><span class="warn">不建议替代</span></td>
+        <td>继续用 MinIO/S3 SDK 读写；需要本地文件路径时下载或同步到 PVC 的 <code>/by</code></td>
+      </tr>
+      <tr>
+        <td>公共资源 bucket</td>
+        <td><code>ResourceFS.init()</code> 初始化 bucket，历史 spec 可挂到 <code>/by/.openclaw/byresources</code></td>
+        <td><span class="warn">替代挂载，不替代对象存储</span></td>
+        <td>资源仍在 MinIO/S3，通过后端 API 或启动同步进入 <code>/by/.openclaw/resources</code></td>
+      </tr>
+      <tr>
+        <td>系统级快照恢复</td>
+        <td>S3/rclone mount 不具备真实文件系统快照语义</td>
+        <td><span class="ok">必须替代</span></td>
+        <td>Docker 用 NAS/NFS/SMB 服务端快照或备份；K3s 用 NFS/SMB PVC + 备份任务</td>
+      </tr>
+      </tbody>
+    </table>
+
+    <h3>替代后的边界</h3>
+    <pre><code>替代前：
+  MinIO/S3 bucket
+    -> rclone mount 到宿主机
+    -> sandbox volume 挂到容器 /by
+    -> OpenClaw state、DB、ffmpeg、用户文件全部混在 /by
+
+替代后：
+  /by    = NAS/NFS/SMB 文件型 PVC，OpenClaw 运行态和用户文件
+  MinIO  = 对象存储，用户文件、最终产物、备份、资源包
+  S3 SDK = OpenClaw 或后端在 /by 与 MinIO 之间搬运需要归档/共享的文件</code></pre>
+
+    <p>
+      因此，架构上的“完全替代”应该理解为：<strong>完全移除 OpenClaw 容器对 S3/rclone mount 数据卷的依赖</strong>。MinIO 仍然可以保留为对象存储服务和备份目标。
+    </p>
+  </section>
+
+  <section id="risk">
+    <h2>风险矩阵</h2>
+    <table>
+      <thead>
+      <tr>
+        <th>数据类型</th>
+        <th>当前落点</th>
+        <th>风险</th>
+        <th>推荐落点</th>
+      </tr>
+      </thead>
+      <tbody>
+      <tr>
+        <td>OpenClaw state / agent home / gbrain state</td>
+        <td><code>/by/.openclaw</code></td>
+        <td><span class="bad">高</span>：可能包含 DB、索引、锁、状态文件</td>
+        <td><code>/by/.openclaw</code>，但 <code>/by</code> 必须是 NAS/NFS/SMB 文件型存储</td>
+      </tr>
+      <tr>
+        <td>SQLite / PGLite / DuckDB / 向量索引</td>
+        <td>如果在 <code>/by</code> 下则危险</td>
+        <td><span class="bad">高</span>：WAL、fsync、随机写、mmap、锁语义不可靠</td>
+        <td><code>/by/.openclaw</code> 或 <code>/by/db</code>，前提是 <code>/by</code> 为文件型存储；高写入 DB 可后续拆到专用数据库或块存储</td>
+      </tr>
+      <tr>
+        <td>ffmpeg 转码输入、输出、临时分片</td>
+        <td>用户容易直接使用 <code>/by</code></td>
+        <td><span class="warn">中高</span>：seek、临时文件、输出回写慢且容易失败</td>
+        <td>单卷模式使用 <code>/by/tmp</code> 中转；高吞吐场景可额外挂 <code>/work</code></td>
+      </tr>
+      <tr>
+        <td>node_modules / venv / pip npm cache / git 工作区</td>
+        <td>如果 HOME 或工作区在 <code>/by</code> 下则危险</td>
+        <td><span class="warn">中高</span>：大量小文件、rename、锁、权限、性能问题</td>
+        <td>单卷模式使用 <code>/by/.cache</code>、<code>/by/.openclaw/tools</code></td>
+      </tr>
+      <tr>
+        <td>用户上传文件、最终产物、导出包、日志归档</td>
+        <td><code>/by</code></td>
+        <td><span class="ok">低</span>：对象存储适合整文件读写</td>
+        <td>S3/MinIO，优先 SDK，必要时只作为冷数据挂载</td>
+      </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="docker">
+    <h2>Docker 部署方案</h2>
+    <h3>定位</h3>
+    <p>
+      Docker 没有 Kubernetes PVC 抽象。当前升级目标应从“对象型存储 S3/rclone”切换为“文件型存储 NAS/NFS/SMB”。容器内仍然只挂一个 <code>/by</code>，但这个 <code>/by</code> 必须来自 NFS/SMB/NAS 这类原生文件系统，而不是 S3/rclone mount。块存储仍可作为高写入增强选项，但不是本次平移的主路线。
+    </p>
+
+    <div class="grid">
+      <div class="box">
+        <strong>/by</strong>
+        <p>Docker NFS/SMB volume 或 NAS 挂载目录。承载 OpenClaw 运行态和用户文件。</p>
+      </div>
+      <div class="box">
+        <strong>/by/tmp</strong>
+        <p>单卷模式下的临时计算目录。高吞吐场景可额外挂本地 <code>/work</code>。</p>
+      </div>
+      <div class="box">
+        <strong>MinIO/S3</strong>
+        <p>对象存储与备份目标，不再作为 OpenClaw 容器数据卷。</p>
+      </div>
+    </div>
+
+    <h3>Docker Compose 示例</h3>
+    <pre><code>services:
+  openclaw:
+    image: 10.10.165.101:8080/byclaw/byclaw-openclaw:develop
+    environment:
+      OPENCLAW_STATE_DIR: /by/.openclaw
+      OPENCLAW_HOME: /by/.openclaw/home
+      DWS_CONFIG_DIR: /by/.openclaw/.dws
+      TMPDIR: /by/tmp
+    volumes:
+      - openclaw_by_${USER_CODE}:/by
+
+volumes:
+  openclaw_by_${USER_CODE}:
+    driver: local
+    driver_opts:
+      type: nfs
+      o: addr=10.10.10.20,nfsvers=4.1,rw,hard,noatime
+      device: ":/exports/byclaw/byclaw-${USER_CODE}/by"</code></pre>
+
+    <h3>Docker 版 Spec.json 建议</h3>
+    <p>
+      建议保持 Spec 单卷模型，只替换 <code>hostPath</code> 的含义：它应该指向宿主机上的 NAS/NFS/SMB 文件型存储挂载根目录，而不是 <code>${FILE_STORAGE_MINIO_MOUNT_PATH}</code> 这种对象型存储 rclone 根目录。
+    </p>
+    <pre><code>{
+  "env": {
+    "OPENCLAW_STATE_DIR": "/by/.openclaw",
+    "OPENCLAW_HOME": "/by/.openclaw/home",
+    "DWS_CONFIG_DIR": "/by/.openclaw/.dws",
+    "TMPDIR": "/by/tmp"
+  },
+  "volumes": [
+    {
+      "key": "base",
+      "scope": "PRIVATE",
+      "hostPath": "${BYCLAW_SANDBOX_FILE_VOLUME_ROOT}",
+      "subPath": "byclaw-${user_code}/by",
+      "mountPath": "/by",
+      "readOnly": false
+    }
+  ],
+  "bootstrap": {
+    "copyTemplate": {
+      "copyIfMissing": true,
+      "targetVolumeKey": "base"
+    }
+  }
+}</code></pre>
+    <p>
+      这里 <code>bootstrap.copyTemplate.targetVolumeKey</code> 可以继续使用 <code>base</code>，因为 <code>base</code> 已经不是 S3/rclone mount，而是 NAS/NFS/SMB 文件型存储。
+    </p>
+
+    <h3>Docker 备份与快照恢复</h3>
+    <table>
+      <thead>
+      <tr>
+        <th>文件型存储</th>
+        <th>备份/快照方式</th>
+        <th>恢复方式</th>
+      </tr>
+      </thead>
+      <tbody>
+      <tr>
+        <td>企业 NAS</td>
+        <td>使用 NAS 原生快照、克隆、回滚能力</td>
+        <td>从 NAS 快照恢复用户目录后重启容器</td>
+      </tr>
+      <tr>
+        <td>NFS 导出目录</td>
+        <td>由 NFS 服务端底层 ZFS/Btrfs/LVM/NAS 快照承载</td>
+        <td>恢复服务端目录；客户端 Docker volume 无需感知</td>
+      </tr>
+      <tr>
+        <td>SMB/CIFS 共享</td>
+        <td>由 Windows 文件服务器、NAS 或后端卷提供快照</td>
+        <td>从共享目录快照恢复，再重新启动 OpenClaw</td>
+      </tr>
+      <tr>
+        <td>无原生快照的普通文件服务器</td>
+        <td>定时 <code>rsync</code> / <code>restic</code> / <code>borg</code> 到备份仓库</td>
+        <td>从备份集恢复到用户目录</td>
+      </tr>
+      </tbody>
+    </table>
+
+    <div class="callout warning">
+      <p>
+      Docker 多机分布式不建议再使用 rclone/S3 mount。若以文件型存储为升级目标，推荐直接使用企业 NAS/NFS/SMB 作为共享文件系统后端；它能解决 S3 对象存储语义问题。若后续出现高写入 DB 压力，再把这类强写入状态迁到块存储或 K3s PVC。
+      </p>
+    </div>
+  </section>
+
+  <section id="file-nas-pvc">
+    <h2>文件型网盘 PVC 方案</h2>
+    <div class="callout">
+      <p>
+        需要明确区分两类“网盘”：<strong>文件型网盘</strong> 和 <strong>对象型网盘</strong>。文件型网盘例如 NAS、NFS、SMB，本质上就是文件系统服务，可以直接作为 Docker volume 或 K3s PVC 的后端；对象型网盘例如 S3、OSS、COS、MinIO，本质上是对象存储，只有通过 FUSE 或 CSI 模拟文件系统，仍然会存在原子性、锁、权限、目录性能、随机写等兼容性问题。
+      </p>
+      <p>
+        因此，如果你们有 NAS/NFS/SMB 这类文件型存储，把 <code>/by</code> 改为文件型网盘 PVC，是最接近“平移原有 /by 数据卷体验”的方案，并且能彻底避开 S3 对象存储语义带来的兼容性问题。
+      </p>
+    </div>
+
+    <h3>开源文件型存储服务技术选型</h3>
+    <table>
+      <thead>
+      <tr>
+        <th>选型</th>
+        <th>定位</th>
+        <th>Docker 原地升级</th>
+        <th>K3s/PVC</th>
+        <th>管理界面</th>
+        <th>推荐结论</th>
+      </tr>
+      </thead>
+      <tbody>
+      <tr>
+        <td>CephFS + Rook-Ceph</td>
+        <td>开源分布式 POSIX 文件系统。CephFS 官方定位为 POSIX-compliant file system；Rook-Ceph 支持 CephFS RWX PVC。</td>
+        <td>可通过 CephFS kernel mount 或 NFS-Ganesha 暴露给 Docker 宿主机。</td>
+        <td>直接用 <code>rook-cephfs</code> StorageClass 创建 RWX PVC。</td>
+        <td>Ceph Dashboard 可看 CephFS、NFS、池和使用情况；文件树仍建议配 File Browser。</td>
+        <td><span class="ok">生产分布式首选</span>，但运维复杂度最高。</td>
+      </tr>
+      <tr>
+        <td>OpenMediaVault + NFS/SMB</td>
+        <td>基于 Debian 的开源 NAS 方案，提供 SMB/CIFS、NFS、FTP 等文件服务。</td>
+        <td>Docker 用 NFS/SMB volume 挂载 OMV 共享目录到 <code>/by</code>。</td>
+        <td>K3s 用 NFS CSI 或 SMB CSI 连接 OMV 共享目录。</td>
+        <td>OMV 自带 Web 管理界面，管理共享目录、权限、服务、磁盘。</td>
+        <td><span class="ok">中小规模、快速落地首选</span>，比 Ceph 简单。</td>
+      </tr>
+      <tr>
+        <td>Samba / NFS server</td>
+        <td>最小化开源文件服务。Samba 提供 SMB 文件服务；Linux NFS server 提供 NFSv4。</td>
+        <td>Docker local volume 使用 NFS/SMB driver_opts，或宿主机预挂载后 bind mount。</td>
+        <td>K3s 使用 NFS CSI / SMB CSI。</td>
+        <td>无完整 NAS 控制台，需要配合 Cockpit、File Browser 或自建管理页。</td>
+        <td><span class="warn">适合轻量部署</span>，管理面需要补齐。</td>
+      </tr>
+      <tr>
+        <td>Longhorn RWX</td>
+        <td>开源 K8s 存储。RWX volume 通过 Longhorn share-manager Pod 暴露 NFSv4.1。</td>
+        <td>不适合 Docker 原地方案。</td>
+        <td>K3s 中可直接创建 RWX PVC。</td>
+        <td>Longhorn UI 管 volume、replica、snapshot、backup；文件树仍用 File Browser。</td>
+        <td><span class="warn">K3s 简化选项</span>，本质是 Longhorn 卷 + NFS 导出。</td>
+      </tr>
+      <tr>
+        <td>SeaweedFS</td>
+        <td>开源分布式存储，提供 filer、S3、FUSE 等能力。</td>
+        <td>可通过 FUSE/挂载方式接入。</td>
+        <td>需评估 CSI/FUSE 路径。</td>
+        <td>有自带服务组件和生态工具。</td>
+        <td><span class="warn">不作为本方案首选</span>，因为目标是摆脱 FUSE/对象存储模拟文件系统风险。</td>
+      </tr>
+      </tbody>
+    </table>
+
+    <p>
+      本项目建议按规模选择：如果要快速从 MinIO/rclone 平移，先用 <strong>OpenMediaVault + NFSv4</strong> 或 <strong>Samba/NFS server</strong>；如果要建设长期分布式生产存储，选择 <strong>Rook-Ceph + CephFS</strong>；如果已经在 K3s 里使用 Longhorn，且希望最少组件完成 RWX 文件卷，可以评估 <strong>Longhorn RWX</strong>。
+    </p>
+
+    <h3>文件型网盘与对象型网盘对比</h3>
+    <table>
+      <thead>
+      <tr>
+        <th>类型</th>
+        <th>例子</th>
+        <th>能否直接承载 /by</th>
+        <th>原因</th>
+        <th>推荐定位</th>
+      </tr>
+      </thead>
+      <tbody>
+      <tr>
+        <td>文件型网盘</td>
+        <td>NAS、NFSv4、SMB/CIFS、企业文件存储</td>
+        <td><span class="ok">可以</span></td>
+        <td>原生文件系统语义，支持目录、权限、rename、随机读写、锁等 POSIX/类 POSIX 能力。</td>
+        <td>可直接作为 <code>/by</code> PVC 或 Docker volume 后端。</td>
+      </tr>
+      <tr>
+        <td>对象型网盘</td>
+        <td>S3、OSS、COS、MinIO bucket</td>
+        <td><span class="bad">不建议</span></td>
+        <td>对象存储是 GET/PUT/LIST 语义，需要 s3fs、goofys、rclone 或 CSI 模拟文件系统。</td>
+        <td>用于对象归档、共享、备份目标，不作为运行态文件系统。</td>
+      </tr>
+      <tr>
+        <td>块存储增强选项</td>
+        <td>Longhorn、Ceph RBD、云盘、SAN</td>
+        <td><span class="ok">可以</span></td>
+        <td>提供块设备，在其上格式化 ext4/xfs，文件系统语义完整。</td>
+        <td>高写入 DB、WAL、核心状态增强选项，不是本次文件型存储平移主线。</td>
+      </tr>
+      </tbody>
+    </table>
+
+    <h3>基于 NFS 的 K3s PVC</h3>
+    <p>
+      K3s 中可以使用 NFS CSI driver 或 nfs-subdir-external-provisioner 把 NAS/NFS 目录动态切成 PVC。OpenClaw 容器仍然只挂载一个 <code>/by</code>。
+    </p>
+    <pre><code>apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: byclaw-nfs
+provisioner: nfs.csi.k8s.io
+parameters:
+  server: 10.10.10.20
+  share: /exports/byclaw
+reclaimPolicy: Retain
+volumeBindingMode: Immediate
+mountOptions:
+  - nfsvers=4.1
+  - hard
+  - noatime
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: openclaw-by-user-001
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: byclaw-nfs
+  resources:
+    requests:
+      storage: 20Gi</code></pre>
+
+    <p>
+      对单用户单 OpenClaw 实例，<code>ReadWriteOnce</code> 或 <code>ReadWriteMany</code> 都可工作；如果要让 File Browser、迁移 Job、备份 Job 同时挂载同一个用户卷，NFS/SMB 的 <code>ReadWriteMany</code> 会比块存储 RWO 更方便。
+    </p>
+
+    <h3>基于 SMB/CIFS 的 K3s PVC</h3>
+    <p>
+      如果现有企业网盘是 Windows 文件共享或 SMB NAS，可使用 SMB CSI driver。注意把账号密码放入 Secret，不要写进 Spec。
+    </p>
+    <pre><code>apiVersion: v1
+kind: Secret
+metadata:
+  name: smbcreds
+type: Opaque
+stringData:
+  username: byclaw
+  password: change-me
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: byclaw-smb
+provisioner: smb.csi.k8s.io
+parameters:
+  source: //10.10.10.30/byclaw
+  csi.storage.k8s.io/node-stage-secret-name: smbcreds
+  csi.storage.k8s.io/node-stage-secret-namespace: default
+reclaimPolicy: Retain
+volumeBindingMode: Immediate
+mountOptions:
+  - dir_mode=0770
+  - file_mode=0660
+  - cache=strict
+  - noperm</code></pre>
+
+    <h3>基于 NFS/SMB 的 Docker volume</h3>
+    <p>
+      Docker 原地升级也可以直接把 <code>/by</code> 绑定到 NFS/SMB volume。这样不需要 K3s，也能把 rclone/S3 根目录替换为文件型网盘。
+    </p>
+    <pre><code>services:
+  openclaw:
+    image: 10.10.165.101:8080/byclaw/byclaw-openclaw:develop
+    environment:
+      OPENCLAW_STATE_DIR: /by/.openclaw
+      DWS_CONFIG_DIR: /by/.openclaw/.dws
+      TMPDIR: /by/tmp
+    volumes:
+      - openclaw_by_user001:/by
+
+volumes:
+  openclaw_by_user001:
+    driver: local
+    driver_opts:
+      type: nfs
+      o: addr=10.10.10.20,nfsvers=4.1,rw,hard,noatime
+      device: ":/exports/byclaw/byclaw-user001/by"</code></pre>
+
+    <h3>文件型网盘能解决什么</h3>
+    <table>
+      <thead>
+      <tr>
+        <th>问题</th>
+        <th>S3/rclone</th>
+        <th>NAS/NFS/SMB</th>
+      </tr>
+      </thead>
+      <tbody>
+      <tr>
+        <td>随机读写</td>
+        <td><span class="bad">模拟，风险高</span></td>
+        <td><span class="ok">原生文件系统能力</span></td>
+      </tr>
+      <tr>
+        <td>rename / 临时文件</td>
+        <td><span class="bad">可能退化为复制/删除</span></td>
+        <td><span class="ok">文件系统原语</span></td>
+      </tr>
+      <tr>
+        <td>目录性能</td>
+        <td><span class="warn">LIST 对象，目录是模拟概念</span></td>
+        <td><span class="ok">真实目录结构</span></td>
+      </tr>
+      <tr>
+        <td>权限</td>
+        <td><span class="warn">由 FUSE 层模拟</span></td>
+        <td><span class="ok">由 NAS/NFS/SMB 提供</span></td>
+      </tr>
+      <tr>
+        <td>File Browser 浏览</td>
+        <td><span class="warn">可浏览，但底层语义仍是对象存储</span></td>
+        <td><span class="ok">直接浏览真实文件系统</span></td>
+      </tr>
+      </tbody>
+    </table>
+
+    <h3>仍需注意的边界</h3>
+    <p>
+      文件型网盘可以彻底解决 S3 对象存储语义导致的文件系统兼容性问题，但它不是万能的本地 NVMe。高并发 DB、重度 SQLite/PGLite、频繁 fsync 的场景仍要关注 NAS 性能、锁实现、网络延迟和故障恢复策略。若运行态 DB 写入压力很高，分布式块存储或本地块存储仍然比 NFS/SMB 更稳。
+    </p>
+    <p>
+      推荐分层：普通 OpenClaw 工作区、用户文件、File Browser 浏览用 NAS/NFS/SMB PVC；对强一致、高写入 DB 或核心状态，优先 Longhorn/Ceph RBD 这类块存储 PVC。
+    </p>
+  </section>
+
+  <section id="docker-upgrade-plan">
+    <h2>Docker 原地升级专项方案</h2>
+    <p>
+      本节针对当前 <strong>openSandbox + Docker</strong> 架构给出可执行升级方案。目标是在不切换 K3s 的情况下，保持 <code>Spec.json</code> 单卷 <code>/by</code> 模型，把 <code>/by</code> 背后的对象型 S3/rclone 网盘替换成文件型 NAS/NFS/SMB 存储，从而彻底解决对象存储语义导致的文件系统兼容性问题。
+    </p>
+    <p>
+      这里的“文件型存储”不是部署服务器自己的本地目录，而是一套独立部署的开源文件存储服务。OpenMediaVault、Samba/NFS server、Rook-Ceph/CephFS 运行在存储服务器或存储集群上；ByClaw 和 openSandbox 所在服务器通过网络挂载它提供的 NFS、SMB 或 CephFS。
+    </p>
+
+    <h3 id="docker-upgrade-topology">1. 远端文件存储服务拓扑</h3>
+    <p>
+      所有 openSandbox Docker 节点都要把远端共享目录挂到一致的本地路径，例如 <code>/mnt/byclaw-file</code>。OpenClaw 容器仍只看到 <code>/by</code>，但 <code>/by</code> 的真实来源已经从 rclone/S3 变成远端文件系统。
+    </p>
+    <pre><code>[文件存储服务器或存储集群]
+  OpenMediaVault / Samba+NFS / CephFS
+  export: /exports/byclaw
+        |
+        | NFSv4 / SMB3 / CephFS
+        |
+[openSandbox Docker Host A]  mount -> /mnt/byclaw-file
+[openSandbox Docker Host B]  mount -> /mnt/byclaw-file
+        |
+        | ${BYCLAW_SANDBOX_FILE_VOLUME_ROOT}/byclaw-${user_code}/by
+        |
+[OpenClaw container] /by</code></pre>
+    <p>
+      ByClaw BE 可以不直接挂载这套文件系统；它主要通过 <code>OpenSandboxClient.createSandbox()</code> 请求 openSandbox 创建沙箱。真正必须挂载远端文件存储的是运行 OpenClaw 容器的 openSandbox Docker 节点。如果后端还要做模板复制、迁移或管理端文件预览，也可以额外挂载受控目录，但这不是容器运行态持久化的必要条件。
+    </p>
+
+    <h3 id="docker-upgrade-selection">2. 技术选型、系统架构、流程</h3>
+    <table>
+      <thead>
+      <tr>
+        <th>能力</th>
+        <th>推荐选型</th>
+        <th>说明</th>
+      </tr>
+      </thead>
+      <tbody>
+      <tr>
+        <td>运行态卷</td>
+        <td>远端 NFS/SMB/CephFS 共享目录 + openSandbox 节点统一挂载根</td>
+        <td>最少改造。openSandbox 把 PRIVATE volume 映射到 <code>BYCLAW_SANDBOX_FILE_VOLUME_ROOT</code>。</td>
+      </tr>
+      <tr>
+        <td>底层文件型存储</td>
+        <td>短期优先 OpenMediaVault + NFSv4/SMB；长期分布式优先 Rook-Ceph + CephFS</td>
+        <td>文件存储服务不与部署服务器同机。快照、配额、共享目录和权限在存储服务端统一管理。</td>
+      </tr>
+      <tr>
+        <td>Docker 管理面</td>
+        <td>Portainer</td>
+        <td>管理容器、镜像、volume、绑定关系。可作为现有 Docker 运维 UI。</td>
+      </tr>
+      <tr>
+        <td>文件浏览面</td>
+        <td>File Browser</td>
+        <td>替代 MinIO Console 的文件树浏览体验，挂载用户 <code>/by</code> 数据卷。</td>
+      </tr>
+      <tr>
+        <td>对象存储</td>
+        <td>保留 MinIO/S3</td>
+        <td>不再作为 <code>/by</code> 文件系统来源，只做归档、共享、备份目标。</td>
+      </tr>
+      </tbody>
+    </table>
+
+    <p>Docker 原地升级后的系统流程：</p>
+    <pre><code>ByClaw BE
+  -> OpenSandboxClient.createSandbox()
+  -> openSandbox Docker runtime
+  -> 解析 volume: scope=PRIVATE, subPath=byclaw-${user_code}/by, mountPath=/by
+  -> 从 BYCLAW_SANDBOX_FILE_VOLUME_ROOT 创建/绑定用户目录
+  -> docker run -v ${BYCLAW_SANDBOX_FILE_VOLUME_ROOT}/byclaw-${user_code}/by:/by
+  -> OpenClaw 在 /by 上运行，/by 背后是 NAS/NFS/SMB，不再是 rclone/S3</code></pre>
+
+    <p>
+      需要在 openSandbox 服务端新增或调整配置，不建议继续复用 <code>FILE_STORAGE_MINIO_MOUNT_PATH</code>：
+    </p>
+    <pre><code>BYCLAW_SANDBOX_FILE_VOLUME_ROOT=/mnt/byclaw-nas
+BYCLAW_SANDBOX_FILE_VOLUME_TYPE=nfs|smb|bind
+BYCLAW_SANDBOX_FILE_VOLUME_SNAPSHOT_PROVIDER=nas|zfs|btrfs|lvm|none
+BYCLAW_SANDBOX_FILE_BROWSER_ENABLED=true</code></pre>
+
+    <h3 id="docker-upgrade-codegraph">3. 项目代码改造点（CodeGraph 结论）</h3>
+    <p>
+      CodeGraph 对当前链路的结论是：ByClaw 后端会解析 <code>Spec.json</code>，但在 openSandbox 路线下最终只把卷的 <code>mountPath</code>、<code>name</code>、<code>readOnly</code>、<code>subPath</code>、<code>scope</code> 发给 openSandbox，不会把 <code>hostPath</code> 传过去。因此，单独把 <code>Spec.json</code> 里的 <code>hostPath</code> 改成新环境变量，不足以保证运行态离开 rclone/S3；必须同步改 openSandbox 服务端的 PRIVATE 卷后端。
+    </p>
+    <table>
+      <thead>
+      <tr>
+        <th>位置</th>
+        <th>当前行为</th>
+        <th>升级要求</th>
+      </tr>
+      </thead>
+      <tbody>
+      <tr>
+        <td><code>Spec.json</code></td>
+        <td><code>base</code> 卷挂到 <code>/by</code>，旧 <code>hostPath</code> 来自 <code>${FILE_STORAGE_MINIO_MOUNT_PATH}</code>。</td>
+        <td>继续保持单卷 <code>/by</code>，但文档和默认配置改为 <code>${BYCLAW_SANDBOX_FILE_VOLUME_ROOT}</code>。这个变量指向 openSandbox 节点上的远端文件存储挂载根。</td>
+      </tr>
+      <tr>
+        <td><code>GenericSandboxSpecProcessor.buildVolumes</code></td>
+        <td>会渲染 <code>hostPath</code>、<code>subPath</code>、<code>mountPath</code> 并构造 volume。</td>
+        <td>保留兼容。它能表达新 Spec，但不是 openSandbox 真正 bind mount 的最终执行者。</td>
+      </tr>
+      <tr>
+        <td><code>SandboxRuntimeRequestFactory.buildVolumesPayload</code></td>
+        <td>发送给 openSandbox 的 payload 不包含 <code>hostPath</code>。</td>
+        <td>推荐不扩大 payload 合约，而是在 openSandbox 服务端配置 <code>BYCLAW_SANDBOX_FILE_VOLUME_ROOT</code>。如果要由 ByClaw 控制 hostPath，则需要同步改 ByClaw 和 openSandbox API，改造面更大。</td>
+      </tr>
+      <tr>
+        <td><code>OpenSandboxRuntimeProvider</code></td>
+        <td>调用 <code>OpenSandboxClient.createSandbox()</code>，把容器创建委托给远端 openSandbox。</td>
+        <td>保持 provider 不变；升级重点放在 openSandbox Docker runtime 如何解释 PRIVATE volume。</td>
+      </tr>
+      <tr>
+        <td><code>MinioBucketMountSupport.buildMountCommand</code></td>
+        <td>构造 <code>rclone mount ':s3:&lt;bucket&gt;'</code> 命令，旧路线把对象存储模拟成文件系统。</td>
+        <td>从 OpenClaw 运行态链路移除。MinIO 可以继续作为对象归档和备份目标，但不能再作为 <code>/by</code> 的文件系统来源。</td>
+      </tr>
+      <tr>
+        <td><code>InitMinioBucketMountRunner.run</code></td>
+        <td><code>file.storage.type=minio</code> 时初始化公共 bucket；当前代码只调用 <code>resourceFS.init()</code>。</td>
+        <td>保留对象存储初始化也可以，但要和运行态卷解耦。不要再把这个 runner 的 mount 配置当成 OpenClaw <code>/by</code> 的供应方式。</td>
+      </tr>
+      <tr>
+        <td><code>ByclawUserFS</code> / <code>ByClawUserWorkspacePaths</code></td>
+        <td>项目内大量路径约定仍以 <code>/by</code> 作为用户工作区和 OpenClaw state 根。</td>
+        <td>不需要迁移容器内路径。只替换 <code>/by</code> 的底层存储，能最大限度减少业务代码改动。</td>
+      </tr>
+      </tbody>
+    </table>
+    <p>
+      Docker 原地升级的项目改造顺序应是：先给 openSandbox 增加文件型卷根配置；再把默认 Spec、数据库初始化 SQL、部署变量中出现的 <code>FILE_STORAGE_MINIO_MOUNT_PATH</code> 替换为运行态专用的 <code>BYCLAW_SANDBOX_FILE_VOLUME_ROOT</code>；最后把 MinIO/rclone mount 从 OpenClaw 运行态部署手册和启动脚本中下线。
+    </p>
+
+    <h3 id="docker-upgrade-migration">4. 迁移方案</h3>
+    <p>迁移原则：保持容器内 <code>/by</code> 路径和 <code>byclaw-${user_code}/by</code> 子目录结构不变，只替换底层存储。</p>
+    <pre><code># 1. 停止或冻结目标用户的 OpenClaw 容器，避免迁移期间继续写旧 rclone 目录
+opensandbox stop openclaw-${USER_CODE}
+
+# 2. 在远端文件存储服务上准备共享目录
+ssh storage-server "mkdir -p /exports/byclaw/byclaw-${USER_CODE}/by"
+ssh storage-server "chown -R 0:0 /exports/byclaw/byclaw-${USER_CODE}"
+
+# 3. 在每台 openSandbox Docker 节点挂载远端文件存储到同一路径
+mount -t nfs4 storage-server:/exports/byclaw /mnt/byclaw-file
+
+# 4. 从旧 MinIO/S3 迁移数据到新文件型存储
+mc alias set oldminio http://MINIO:9000 ACCESS_KEY SECRET_KEY
+mc mirror --overwrite oldminio/byclaw-${USER_CODE}/by \
+  /mnt/byclaw-file/byclaw-${USER_CODE}/by
+
+# 5. 切换 openSandbox 卷根目录配置
+BYCLAW_SANDBOX_FILE_VOLUME_ROOT=/mnt/byclaw-file
+
+# 6. 重启 OpenClaw，容器内仍然看到 /by
+opensandbox start openclaw-${USER_CODE}
+
+# 7. 灰度确认无误后，旧 rclone mount 只读保留一段时间，再下线</code></pre>
+
+    <p>
+      批量迁移时建议按用户维度分批：先迁移测试用户，再迁移低活跃用户，最后迁移高活跃用户。每个用户迁移完成后记录旧对象版本、迁移时间、目标卷路径、校验结果。
+    </p>
+
+    <h3 id="docker-upgrade-verification">5. 验证方案</h3>
+    <table>
+      <thead>
+      <tr>
+        <th>验证项</th>
+        <th>方法</th>
+        <th>通过标准</th>
+      </tr>
+      </thead>
+      <tbody>
+      <tr>
+        <td>远端挂载一致性</td>
+        <td>在每台 openSandbox Docker 节点执行 <code>findmnt /mnt/byclaw-file</code> 和 <code>touch /mnt/byclaw-file/.probe</code>。</td>
+        <td>所有节点看到同一个远端文件存储，路径一致，读写权限一致。</td>
+      </tr>
+      <tr>
+        <td>卷来源验证</td>
+        <td>进入 OpenClaw 容器执行 <code>df -T /by</code>、<code>mount | grep /by</code></td>
+        <td><code>/by</code> 不显示 fuse.rclone、s3fs、goofys 等对象存储挂载；应显示 nfs、cifs/smb3、cephfs 或文件型存储服务对应类型。</td>
+      </tr>
+      <tr>
+        <td>随机写验证</td>
+        <td>在 <code>/by/.openclaw</code> 下跑 SQLite WAL 写入、创建/rename/删除大量小文件。</td>
+        <td>无锁错误、无 I/O error，性能稳定。</td>
+      </tr>
+      <tr>
+        <td>ffmpeg 验证</td>
+        <td>在 <code>/by/tmp</code> 中转码大文件，输出到 <code>/by/output</code>。</td>
+        <td>seek、临时文件、最终输出均正常。</td>
+      </tr>
+      <tr>
+        <td>重启持久化</td>
+        <td>重启 OpenClaw 容器后检查 <code>/by/.openclaw</code>、DWS 配置、workspace。</td>
+        <td>状态保留，agent 不丢数据。</td>
+      </tr>
+      <tr>
+        <td>文件型存储快照/备份恢复</td>
+        <td>使用 NAS 原生快照，或 NFS/SMB 服务端底层快照；无快照时用 rsync/restic 备份恢复。</td>
+        <td>能恢复到指定时间点，OpenClaw 可启动。</td>
+      </tr>
+      <tr>
+        <td>回滚验证</td>
+        <td>保留旧 MinIO/rclone 数据，临时切回旧卷根启动。</td>
+        <td>灰度期具备可控回滚路径。</td>
+      </tr>
+      </tbody>
+    </table>
+
+    <h3 id="docker-upgrade-distributed">6. 新方案下分布式支持方案</h3>
+    <p>
+      Docker 原地升级的分布式能力取决于远端文件存储服务，而不是 Docker 自身。建议按成熟度分三档：
+    </p>
+    <table>
+      <thead>
+      <tr>
+        <th>等级</th>
+        <th>方案</th>
+        <th>适用性</th>
+        <th>限制</th>
+      </tr>
+      </thead>
+      <tbody>
+      <tr>
+        <td>L1 远端单节点文件服务</td>
+        <td>OpenMediaVault 或 Samba/NFS server 独立部署，openSandbox 节点通过 NFS/SMB 挂载</td>
+        <td>最简单，适合先替代 MinIO/rclone 数据卷。</td>
+        <td>文件服务节点需要 RAID、快照和备份；它不是部署服务器本机目录。</td>
+      </tr>
+      <tr>
+        <td>L2 多节点文件服务</td>
+        <td>企业 NAS / NFSv4 / SMB / HA NFS 共享到多台 openSandbox Docker 宿主机</td>
+        <td>推荐的 Docker 分布式升级路线。多节点都能看到同一个文件型存储根。</td>
+        <td>需要保证同一用户同一时刻只有一个 OpenClaw 写入，避免应用级并发写冲突。</td>
+      </tr>
+      <tr>
+        <td>L3 分布式文件系统</td>
+        <td>Rook-Ceph + CephFS，或 K3s + NFS/SMB/CephFS CSI PVC</td>
+        <td>长期推荐的文件型存储云原生路线。PVC、调度、文件浏览、备份流程统一。</td>
+        <td>需要从 Docker runtime 演进到 Kubernetes runtime。</td>
+      </tr>
+      </tbody>
+    </table>
+
+    <p>
+      如果坚持 Docker 多机，推荐 NFS/SMB/NAS 这类文件型存储承载 <code>/by</code>，不要再使用 rclone/S3 mount。NFS/SMB 能解决对象存储文件语义不兼容问题；若后续发现 SQLite/PGLite 等高频写状态压力较大，再把这部分状态单独迁到块存储或外部数据库。
+    </p>
+
+    <h3 id="docker-upgrade-console">7. 类 MinIO 控制面板的替代方案</h3>
+    <p>
+      NAS/NFS/SMB 文件型存储不是对象存储，所以不会天然提供 MinIO Console 那种 bucket/object 页面。需要组合替代：
+    </p>
+    <table>
+      <thead>
+      <tr>
+        <th>需求</th>
+        <th>Docker 方案</th>
+        <th>说明</th>
+      </tr>
+      </thead>
+      <tbody>
+      <tr>
+        <td>看卷、容器、挂载关系</td>
+        <td>Portainer</td>
+        <td>查看 Docker volumes、容器挂载、运行状态；适合运维面。</td>
+      </tr>
+      <tr>
+        <td>看 <code>/by</code> 文件树</td>
+        <td>File Browser</td>
+        <td>挂载用户卷到 File Browser，提供类似 MinIO Console 的文件浏览、下载、上传能力。</td>
+      </tr>
+      <tr>
+        <td>看快照和恢复点</td>
+        <td>OpenMediaVault UI、Ceph Dashboard、Cockpit/Samba 管理页，或自建运维页面</td>
+        <td>Docker 本身没有统一快照 UI；文件型存储的共享、快照、备份由开源文件存储服务侧提供。</td>
+      </tr>
+      <tr>
+        <td>看对象归档</td>
+        <td>保留 MinIO Console</td>
+        <td>只查看归档、备份、共享文件，不代表 OpenClaw 运行态文件系统。</td>
+      </tr>
+      </tbody>
+    </table>
+
+    <p>
+      项目内替代落地建议：先部署开源文件型存储服务控制面板，例如 OpenMediaVault UI 或 Ceph Dashboard；再部署一个受控的 File Browser 作为“用户卷文件查看器”，只挂载当前用户的 <code>/by</code>，默认只读；管理端继续用 Portainer 看 Docker volume；快照恢复能力先通过脚本封装，再逐步接入 ByClaw 管理后台。
+    </p>
+  </section>
+
+  <section id="docker-vs-k3s">
+    <h2>Docker 原地升级与 K3s 切换对比</h2>
+    <h3 id="docker-vs-k3s-baseline">当前 openSandbox + Docker 基线</h3>
+    <p>
+      当前 ByClaw 后端使用 <code>OpenSandboxRuntimeProvider</code> 调用 openSandbox API 创建沙箱。<code>GenericSandboxSpecProcessor</code> 会根据 <code>Spec.json</code> 生成 volume，但 <code>SandboxRuntimeRequestFactory.buildVolumesPayload</code> 传给 openSandbox 的 volume payload 只包含 <code>mountPath</code>、<code>name</code>、<code>readOnly</code>、<code>subPath</code>、<code>scope</code>，不包含 <code>hostPath</code>。
+    </p>
+    <p>
+      因此，在当前 openSandbox + Docker 架构下，能否彻底解决问题，不取决于 ByClaw 后端 Java 代码里写了什么 <code>hostPath</code>，而取决于 openSandbox 服务端如何解释 <code>scope=PRIVATE</code>、<code>subPath=byclaw-${user_code}/by</code> 和 <code>mountPath=/by</code>。
+    </p>
+
+    <table>
+      <thead>
+      <tr>
+        <th>路线</th>
+        <th>改造范围</th>
+        <th>是否能彻底解决 S3 文件系统问题</th>
+        <th>系统级快照恢复</th>
+        <th>适合阶段</th>
+      </tr>
+      </thead>
+      <tbody>
+      <tr>
+        <td>Docker 原地升级</td>
+        <td>保留 openSandbox + Docker；把 openSandbox 的 PRIVATE 卷后端从 rclone/S3 mount 改为 NAS/NFS/SMB 文件型存储根目录</td>
+        <td><span class="ok">可以</span>。前提是 <code>/by</code> 的真实来源不再经过 S3/rclone/s3fs</td>
+        <td>由 NAS/NFS/SMB 服务端或其底层存储提供快照/备份</td>
+        <td>当前架构快速止血、改动最小</td>
+      </tr>
+      <tr>
+        <td>K3s 切换</td>
+        <td>openSandbox 改成 K3s runtime，或新增 Kubernetes sandbox runtime；每个用户/沙箱创建 PVC 并挂到 <code>/by</code></td>
+        <td><span class="ok">可以</span>。前提是 PVC 来自 NFS/SMB/CephFS 等文件型存储，而不是 S3 CSI/FUSE</td>
+        <td>Kubernetes PVC + 文件存储快照/备份；强写入增强场景另行评估块存储</td>
+        <td>分布式生产、统一运维、长期演进</td>
+      </tr>
+      <tr>
+        <td>只改 Spec.json，不改 openSandbox 卷后端</td>
+        <td>仅把环境变量或 hostPath 名称改掉</td>
+        <td><span class="bad">不可以</span>。当前 openSandbox payload 不传 hostPath，服务端仍可能用旧 rclone/S3 根目录</td>
+        <td>仍然没有真实文件型存储快照/备份</td>
+        <td>不推荐</td>
+      </tr>
+      </tbody>
+    </table>
+
+    <div class="diagram">
+      <div class="diagram-title">部署图：Docker 原地升级 vs K3s PVC 化</div>
+      <svg viewBox="0 0 1040 430" role="img" aria-label="Docker 原地升级与 K3s PVC 化架构对比">
+        <defs>
+          <marker id="arrow2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#536179"></path>
+          </marker>
+        </defs>
+
+        <text x="42" y="38" class="svg-label">Docker 原地升级</text>
+        <rect x="40" y="62" width="420" height="300" class="svg-box"></rect>
+        <rect x="70" y="92" width="160" height="68" class="svg-box primary"></rect>
+        <text x="90" y="122" class="svg-label">openSandbox</text>
+        <text x="90" y="144" class="svg-small">Docker runtime</text>
+        <line x1="230" y1="126" x2="300" y2="126" class="svg-arrow" marker-end="url(#arrow2)"></line>
+        <rect x="300" y="92" width="130" height="68" class="svg-box good"></rect>
+        <text x="322" y="122" class="svg-label">OpenClaw</text>
+        <text x="322" y="144" class="svg-small">/by</text>
+        <line x1="365" y1="160" x2="365" y2="218" class="svg-arrow" marker-end="url(#arrow2)"></line>
+        <rect x="250" y="218" width="180" height="68" class="svg-box good"></rect>
+        <text x="272" y="248" class="svg-label">文件型存储</text>
+        <text x="272" y="270" class="svg-small">NAS / NFS / SMB</text>
+        <line x1="250" y1="252" x2="168" y2="252" class="svg-arrow" marker-end="url(#arrow2)"></line>
+        <rect x="70" y="218" width="130" height="68" class="svg-box"></rect>
+        <text x="92" y="248" class="svg-label">备份/快照</text>
+        <text x="92" y="270" class="svg-small">NAS 服务端</text>
+        <rect x="70" y="306" width="360" height="36" class="svg-box warn"></rect>
+        <text x="90" y="329" class="svg-small">关键改造：openSandbox PRIVATE 卷后端不再指向 rclone/S3 根目录</text>
+
+        <text x="582" y="38" class="svg-label">K3s PVC 化</text>
+        <rect x="580" y="62" width="420" height="300" class="svg-box"></rect>
+        <rect x="610" y="92" width="150" height="68" class="svg-box primary"></rect>
+        <text x="632" y="122" class="svg-label">K3s Runtime</text>
+        <text x="632" y="144" class="svg-small">Pod / Service</text>
+        <line x1="760" y1="126" x2="830" y2="126" class="svg-arrow" marker-end="url(#arrow2)"></line>
+        <rect x="830" y="92" width="130" height="68" class="svg-box good"></rect>
+        <text x="852" y="122" class="svg-label">OpenClaw</text>
+        <text x="852" y="144" class="svg-small">/by</text>
+        <line x1="895" y1="160" x2="895" y2="218" class="svg-arrow" marker-end="url(#arrow2)"></line>
+        <rect x="780" y="218" width="180" height="68" class="svg-box good"></rect>
+        <text x="802" y="248" class="svg-label">NFS/SMB PVC</text>
+        <text x="802" y="270" class="svg-small">文件型 StorageClass</text>
+        <line x1="780" y1="252" x2="698" y2="252" class="svg-arrow" marker-end="url(#arrow2)"></line>
+        <rect x="610" y="218" width="130" height="68" class="svg-box"></rect>
+        <text x="632" y="248" class="svg-label">备份/快照</text>
+        <text x="632" y="270" class="svg-small">NAS 或备份 Job</text>
+        <rect x="610" y="306" width="350" height="36" class="svg-box warn"></rect>
+        <text x="630" y="329" class="svg-small">关键改造：运行时能创建 PVC，并挂载到容器 /by</text>
+      </svg>
+    </div>
+
+    <h3 id="docker-vs-k3s-docker-change">Docker 原地升级需要改什么</h3>
+    <p>
+      Docker 路线可以彻底解决，而且是最贴近当前 openSandbox 架构的路线。关键不是把 <code>/by</code> 拆成多个目录，而是把 openSandbox 的卷供应逻辑改成：
+    </p>
+    <pre><code>收到 volume:
+  scope=PRIVATE
+  subPath=byclaw-${user_code}/by
+  mountPath=/by
+
+旧实现：
+  /by <- ${FILE_STORAGE_MINIO_MOUNT_PATH}/byclaw-${user_code}/by
+        其中 ${FILE_STORAGE_MINIO_MOUNT_PATH} 是 rclone/S3 mount
+
+新实现：
+  /by <- ${BYCLAW_SANDBOX_FILE_VOLUME_ROOT}/byclaw-${user_code}/by
+        其中 ${BYCLAW_SANDBOX_FILE_VOLUME_ROOT} 是 NAS/NFS/SMB 文件型存储挂载点</code></pre>
+    <p>
+      这条路可以继续使用当前 <code>Spec.json</code> 的单卷模型。为了避免误配置，建议新增专门的 openSandbox 配置项，例如 <code>BYCLAW_SANDBOX_FILE_VOLUME_ROOT</code>，不要复用 <code>FILE_STORAGE_MINIO_MOUNT_PATH</code>。
+    </p>
+
+    <h3 id="docker-vs-k3s-k3s-change">K3s 切换需要改什么</h3>
+    <p>
+      K3s 路线更完整，但需要运行时能力升级。当前 ByClaw 的 openSandbox client 只是把 volume 抽象交给远端 openSandbox；如果远端 openSandbox 仍是 Docker runtime，它不会自动拥有 Kubernetes PVC 能力。因此需要二选一：
+    </p>
+    <ul>
+      <li>改造 openSandbox 服务端，让它在 K3s 中创建 Pod、PVC、Service，并把用户 PVC 挂载到容器 <code>/by</code>。</li>
+      <li>在 ByClaw 增加新的 Kubernetes sandbox runtime provider，绕过 Docker openSandbox，直接用 Kubernetes API 创建 OpenClaw Pod/PVC。</li>
+    </ul>
+    <p>
+      K3s 方案的优势是：PVC、调度、服务发现、生命周期管理都标准化；当 StorageClass 使用 NFS/SMB CSI 时，<code>/by</code> 背后就是文件型存储。代价是从 Docker 编排切换到 Kubernetes 编排，需要处理镜像拉取、Service 暴露、endpoint 解析、沙箱复用、超时续期、删除回收等运行时逻辑。
+    </p>
+
+    <h3 id="docker-vs-k3s-conclusion">是否都能彻底解决</h3>
+    <div class="callout">
+      <p>
+      两条路线都能彻底解决，但必须满足同一个硬条件：<strong>OpenClaw 容器内的 <code>/by</code> 不能来自对象存储挂载，必须来自 NAS/NFS/SMB 这类文件型存储服务。</strong>
+      </p>
+      <p>
+        Docker 原地升级的彻底性取决于 openSandbox 服务端卷后端是否已经切到文件型存储；K3s 切换的彻底性取决于 PVC 的 StorageClass 是否是 NFS/SMB/CephFS 这类文件型存储，而不是 S3 CSI 或 FUSE 类驱动。
+      </p>
+    </div>
+  </section>
+
+  <section id="k3s">
+    <h2>K3s 部署方案</h2>
+    <h3 id="k3s-positioning">定位</h3>
+    <p>
+      K3s 版推荐使用 Kubernetes PVC。当前升级目标是文件型存储，因此 StorageClass 优先选择 NFS CSI 或 SMB CSI，让 <code>/by</code> 直接来自 NAS/NFS/SMB。Longhorn/Ceph RBD 这类块存储保留为高写入 DB 或核心状态增强选项；S3/MinIO 只作为对象存储和备份目标。
+    </p>
+    <p>
+      K3s 里的 PVC 同样不要求文件存储服务和 K3s 节点同机。推荐把 OpenMediaVault、Samba/NFS server 或 CephFS 作为独立存储服务部署在存储服务器/存储集群上，再由 NFS CSI、SMB CSI 或 CephFS CSI 把远端共享目录供应成 PVC。这样 Pod 只消费标准 PVC，不直接碰 S3/FUSE。
+    </p>
+
+    <div class="grid">
+      <div class="box">
+        <strong>NFS / SMB PVC</strong>
+        <p><code>/by</code> 的真实文件型存储，支持目录、权限、rename、随机读写。</p>
+      </div>
+      <div class="box">
+        <strong>可选 emptyDir / local SSD</strong>
+        <p>高吞吐 ffmpeg 或编译场景可额外挂 <code>/work</code>。最小改造不需要。</p>
+      </div>
+      <div class="box">
+        <strong>S3 / MinIO</strong>
+        <p>归档、共享、备份目标，不作为热文件系统。</p>
+      </div>
+    </div>
+
+    <h3 id="k3s-pvc-pod">PVC 与 Pod 示例</h3>
+    <p>
+      示例中的 <code>byclaw-nfs</code> StorageClass 应指向远端文件存储服务的导出目录，而不是 K3s 节点本地目录。多节点 K3s 下，调度到任意节点的 OpenClaw Pod 都应通过 CSI 挂到同一个远端文件系统。
+    </p>
+    <pre><code>apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: openclaw-by-user-001
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: byclaw-nfs
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openclaw-user-001
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: openclaw-user-001
+  template:
+    metadata:
+      labels:
+        app: openclaw-user-001
+    spec:
+      containers:
+        - name: openclaw
+          image: 10.10.165.101:8080/byclaw/byclaw-openclaw:develop
+          env:
+            - name: OPENCLAW_STATE_DIR
+              value: /by/.openclaw
+            - name: OPENCLAW_HOME
+              value: /by/.openclaw/home
+            - name: DWS_CONFIG_DIR
+              value: /by/.openclaw/.dws
+            - name: TMPDIR
+              value: /by/tmp
+          volumeMounts:
+            - name: by
+              mountPath: /by
+      volumes:
+        - name: by
+          persistentVolumeClaim:
+            claimName: openclaw-by-user-001</code></pre>
+
+    <h3 id="k3s-backup">文件型 PVC 的备份与恢复</h3>
+    <p>
+      NFS/SMB 文件型 PVC 的快照能力通常不由 Kubernetes <code>VolumeSnapshot</code> 直接提供，而是由 NAS、文件服务器或其底层 ZFS/Btrfs/LVM 实现。K3s 侧建议用 CronJob 做目录级备份，或调用 NAS API 触发快照。
+    </p>
+    <pre><code>apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: backup-openclaw-by-user-001
+spec:
+  schedule: "0 */6 * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: backup
+              image: alpine:3.20
+              command: ["sh", "-lc", "tar -C /by -czf /backup/openclaw-by-user-001-$(date +%Y%m%d%H%M).tgz ."]
+              volumeMounts:
+                - name: by
+                  mountPath: /by
+                  readOnly: true
+                - name: backup
+                  mountPath: /backup
+          volumes:
+            - name: by
+              persistentVolumeClaim:
+                claimName: openclaw-by-user-001
+            - name: backup
+              persistentVolumeClaim:
+                claimName: byclaw-backup-store</code></pre>
+
+    <h3 id="k3s-spec">K3s 版 Spec 接入建议</h3>
+    <p>
+      如果现有 sandbox runtime 已支持 Kubernetes PVC 类型，可以保持 Spec 单卷 <code>/by</code>，由运行时把 <code>scope=PRIVATE</code> 的 <code>base</code> 卷映射到用户级 PVC。如果暂时只支持 <code>hostPath/subPath</code>，可以由 sandbox runtime 在 K3s 节点上把 PVC 挂载路径暴露为 hostPath，但推荐直接扩展运行时支持 PVC。
+    </p>
+    <pre><code>{
+  "env": {
+    "OPENCLAW_STATE_DIR": "/by/.openclaw",
+    "OPENCLAW_HOME": "/by/.openclaw/home",
+    "DWS_CONFIG_DIR": "/by/.openclaw/.dws",
+    "TMPDIR": "/by/tmp"
+  },
+  "volumes": [
+    {
+      "key": "base",
+      "scope": "PRIVATE",
+      "mountPath": "/by",
+      "readOnly": false
+    }
+  ]
+}</code></pre>
+  </section>
+
+  <section id="management">
+    <h2>管理界面与迁移选型</h2>
+    <h3 id="management-stack">推荐技术栈</h3>
+    <table>
+      <thead>
+      <tr>
+        <th>层级</th>
+        <th>Docker 方案</th>
+        <th>K3s 方案</th>
+        <th>用途</th>
+      </tr>
+      </thead>
+      <tbody>
+      <tr>
+        <td>运行态数据卷</td>
+        <td>Docker NFS/SMB volume，或 openSandbox 节点上的远端文件存储挂载点</td>
+        <td>NFS CSI / SMB CSI PVC</td>
+        <td>承载 <code>/by</code>，解决随机读写和文件系统兼容性</td>
+      </tr>
+      <tr>
+        <td>卷管理 UI</td>
+        <td>Portainer 管理 Docker volumes；NAS 控制台管理容量、快照、共享目录</td>
+        <td>Kubernetes Dashboard / Rancher 管 PVC；NAS 控制台管文件系统快照</td>
+        <td>查看容量、健康状态、共享目录、备份、恢复</td>
+      </tr>
+      <tr>
+        <td>文件浏览 UI</td>
+        <td>File Browser 容器只读或受控读写挂载 <code>/by</code></td>
+        <td>File Browser 管理 Pod 挂载目标 PVC；NFS/SMB 支持 RWX 时可挂只读查看</td>
+        <td>替代 MinIO Console 的“浏览文件树”体验</td>
+      </tr>
+      <tr>
+        <td>对象存储与备份</td>
+        <td>MinIO/S3 保留为归档、跨服务共享、卷备份目标</td>
+        <td>MinIO/S3 作为业务对象存储和备份归档目标</td>
+        <td>不再作为 <code>/by</code> 文件系统来源</td>
+      </tr>
+      <tr>
+        <td>数据迁移</td>
+        <td><code>mc mirror</code> 或 <code>rclone sync</code> 从 MinIO bucket 同步到新 <code>/by</code> 卷</td>
+        <td>迁移 Job 挂载 PVC，同时使用 <code>mc mirror</code> 从 MinIO 拉取对象</td>
+        <td>保持原有 <code>byclaw-${user_code}/by</code> 目录结构平移</td>
+      </tr>
+      </tbody>
+    </table>
+
+    <h3 id="management-file-browser">为什么仍需要 File Browser</h3>
+    <p>
+      NAS 控制台、Portainer、Kubernetes Dashboard 或 Rancher 管的是共享目录、卷、PVC、容器和容量，不一定提供面向 OpenClaw 用户的文件树视图。要像 MinIO Console 一样展示 <code>/by/.openclaw</code>、<code>/by/output</code> 这种文件内容，仍需要 File Browser 这类文件管理 Web UI。
+    </p>
+    <p>
+      要平移 MinIO Console 的“看文件”体验，需要额外部署 File Browser 这类文件管理 Web UI。File Browser 官方定位就是自托管的文件和目录管理 Web 应用，支持多用户、权限、角色和 home 目录。Docker 侧也可以用 Portainer 查看和浏览 volume；Portainer 文档说明它可以查看 Docker volumes，并在 Swarm/Agent 场景浏览已有 volumes。
+    </p>
+
+    <h3 id="management-k3s">K3s 管理面</h3>
+    <pre><code>Kubernetes / Rancher / Dashboard:
+  - 查看 PVC、Pod、挂载关系
+  - 查看 StorageClass、容量请求、事件
+
+NAS 控制台:
+  - 查看 NFS/SMB 共享目录
+  - 查看容量、配额、快照、备份
+  - 从文件系统快照恢复用户目录
+
+File Browser:
+  - 挂载 openclaw-by-user-001 PVC 到 /srv
+  - Web 页面浏览 /srv/.openclaw、/srv/workspace、/srv/output
+  - 建议默认只读；需要修复文件时临时开启写权限</code></pre>
+
+    <h3 id="management-docker">Docker 管理面</h3>
+    <pre><code>Portainer:
+  - 查看 openclaw_by_${USER_CODE} volume
+  - 查看容器与 volume 绑定关系
+  - 管理容器、镜像、网络、volume
+
+NAS / 文件服务器控制台:
+  - NFS/SMB 共享目录
+  - 用户目录配额
+  - 快照 / 克隆 / 回滚 / 备份
+
+File Browser:
+  - 挂载同一个 /by 数据卷
+  - 提供类似 MinIO Console 的文件树浏览体验</code></pre>
+
+    <h3 id="management-minio-migration">MinIO 到 PVC 的迁移</h3>
+    <p>
+      迁移原则是保持容器内 <code>/by</code> 看到的目录结构不变。当前 Spec 使用 <code>subPath=byclaw-${user_code}/by</code>，因此新的 NAS/NFS/SMB 文件型存储根目录也建议保留这个结构，降低后端路径和用户文件查询逻辑的变更成本。
+    </p>
+    <div class="diagram">
+      <div class="diagram-title">迁移流程图：从 MinIO/rclone 平移到 /by 文件型存储</div>
+      <svg viewBox="0 0 1040 260" role="img" aria-label="MinIO 数据迁移到文件型存储的流程图">
+        <defs>
+          <marker id="arrow3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#536179"></path>
+          </marker>
+        </defs>
+
+        <rect x="35" y="74" width="145" height="82" class="svg-box bad"></rect>
+        <text x="57" y="106" class="svg-label">旧 MinIO</text>
+        <text x="57" y="130" class="svg-small">byclaw-user/by</text>
+        <line x1="180" y1="115" x2="250" y2="115" class="svg-arrow" marker-end="url(#arrow3)"></line>
+
+        <rect x="250" y="74" width="150" height="82" class="svg-box primary"></rect>
+        <text x="272" y="106" class="svg-label">mc mirror</text>
+        <text x="272" y="130" class="svg-small">一次全量 + 增量</text>
+        <line x1="400" y1="115" x2="470" y2="115" class="svg-arrow" marker-end="url(#arrow3)"></line>
+
+        <rect x="470" y="74" width="165" height="82" class="svg-box good"></rect>
+        <text x="492" y="106" class="svg-label">新文件型根目录</text>
+        <text x="492" y="130" class="svg-small">保留同名 subPath</text>
+        <line x1="635" y1="115" x2="705" y2="115" class="svg-arrow" marker-end="url(#arrow3)"></line>
+
+        <rect x="705" y="74" width="145" height="82" class="svg-box good"></rect>
+        <text x="727" y="106" class="svg-label">OpenClaw /by</text>
+        <text x="727" y="130" class="svg-small">切换卷来源</text>
+        <line x1="850" y1="115" x2="920" y2="115" class="svg-arrow" marker-end="url(#arrow3)"></line>
+
+        <rect x="920" y="74" width="95" height="82" class="svg-box"></rect>
+        <text x="938" y="106" class="svg-label">校验</text>
+        <text x="938" y="130" class="svg-small">冻结旧挂载</text>
+
+        <path d="M777 156 C777 210 107 210 107 156" class="svg-arrow svg-dashed" marker-end="url(#arrow3)"></path>
+        <text x="284" y="218" class="svg-small">灰度期可定时反向归档：文件型 /by -> MinIO/S3，保留对象存储备份和共享能力</text>
+      </svg>
+    </div>
+    <pre><code># 1. 准备新 NAS/NFS/SMB 文件型存储目录
+mkdir -p /mnt/byclaw-nas/byclaw-${USER_CODE}/by
+
+# 2. 从 MinIO/S3 迁移对象到文件型存储目录
+# mc mirror 支持在 filesystem、MinIO、S3-compatible hosts 之间同步。
+mc alias set oldminio http://MINIO:9000 ACCESS_KEY SECRET_KEY
+mc mirror --overwrite oldminio/byclaw-${USER_CODE}/by /mnt/byclaw-nas/byclaw-${USER_CODE}/by
+
+# 3. 启动 OpenClaw 时仍挂载同一个容器路径
+/mnt/byclaw-nas + subPath byclaw-${USER_CODE}/by -> /by
+
+# 4. 灰度校验后冻结旧 rclone mount，只保留 MinIO/S3 作为对象存储和备份层</code></pre>
+
+    <h3>访问控制建议</h3>
+    <ul>
+      <li>NAS 控制台、Portainer、Kubernetes Dashboard/Rancher、File Browser 都必须放在内网或管理网，接入统一身份认证。</li>
+      <li>File Browser 默认只读挂载用户文件型 PVC；写操作通过工单或短时授权开启。</li>
+      <li>K3s 使用 NFS/SMB RWX PVC 时，File Browser 可以并行只读查看；写权限仍需严格控制，避免破坏 OpenClaw 运行态。</li>
+      <li>MinIO Console 保留给对象存储管理员，不再作为 OpenClaw 运行态文件查看入口。</li>
+    </ul>
+  </section>
+
+  <section id="dataflow">
+    <h2>数据流改造</h2>
+    <h3>ffmpeg</h3>
+    <pre><code># 不推荐
+ffmpeg -i /by/input/video.mp4 ... /by/output/out.mp4
+
+# 推荐：/by 已经是 NAS/NFS/SMB 文件型存储时，可以直接在 /by/tmp 中转
+mkdir -p /by/tmp/session-001
+cp /by/input/video.mp4 /by/tmp/session-001/input.mp4
+ffmpeg -i /by/tmp/session-001/input.mp4 ... /by/tmp/session-001/out.mp4
+mv /by/tmp/session-001/out.mp4 /by/output/out.mp4</code></pre>
+
+    <h3>数据库</h3>
+    <pre><code># 不推荐
+/by/.openclaw/app.sqlite
+/by/.openclaw/pglite
+
+# 推荐：/by 为 NAS/NFS/SMB 文件型存储时
+/by/.openclaw/app.sqlite
+/by/.openclaw/pglite
+
+# 备份到冷存储
+sqlite3 /by/.openclaw/app.sqlite ".backup '/by/backups/app.sqlite'"</code></pre>
+
+    <h3>对象存储访问</h3>
+    <p>
+      长期方向建议把 <code>/by</code> 变成 NAS/NFS/SMB 文件型运行态卷；上传、下载、列目录、签名 URL 继续通过 MinIO/S3 API 表达对象存储语义。需要归档或跨服务共享的文件，从 <code>/by</code> 同步到对象存储。
+    </p>
+  </section>
+
+  <section id="consistency">
+    <h2>一致性与快照策略</h2>
+    <table>
+      <thead>
+      <tr>
+        <th>一致性级别</th>
+        <th>适用场景</th>
+        <th>动作</th>
+      </tr>
+      </thead>
+      <tbody>
+      <tr>
+        <td>Crash-consistent</td>
+        <td>普通文件、缓存、可重建索引</td>
+        <td>直接卷快照，恢复后按崩溃恢复处理</td>
+      </tr>
+      <tr>
+        <td>Filesystem-consistent</td>
+        <td>本地文件系统状态需要更稳时</td>
+        <td>快照前停写或 <code>fsfreeze</code>，快照后解冻</td>
+      </tr>
+      <tr>
+        <td>Application-consistent</td>
+        <td>SQLite/PGLite/Postgres/MySQL 等 DB</td>
+        <td>先 checkpoint/flush/数据库备份，再卷快照</td>
+      </tr>
+      </tbody>
+    </table>
+
+    <p>
+      对 OpenClaw 推荐默认使用 NAS 服务端快照或目录级备份，并为明确的 DB 文件增加 pre-backup hook：暂停 agent 写入、执行 checkpoint 或数据库备份、再触发文件型存储快照/备份。
+    </p>
+  </section>
+
+  <section id="roadmap">
+    <h2>落地路线</h2>
+    <ol>
+      <li>保持 OpenClaw spec 单卷模型：<code>base</code> 继续挂载到 <code>/by</code>。</li>
+      <li>把 <code>base.hostPath</code> 的来源从 <code>${FILE_STORAGE_MINIO_MOUNT_PATH}</code> 改成 openSandbox 节点上的远端文件存储挂载根、Docker NFS/SMB volume 根目录或 K3s NFS/SMB/CephFS PVC。</li>
+      <li><code>OPENCLAW_STATE_DIR</code>、<code>DWS_CONFIG_DIR</code>、OpenClaw HOME 可以继续位于 <code>/by/.openclaw</code>，因为 <code>/by</code> 已经不是 S3/rclone mount。</li>
+      <li>让 ffmpeg、解压、编译、包管理器缓存默认使用 <code>/by/tmp</code>、<code>/by/.cache</code> 或 <code>/by/.openclaw/tools</code>。</li>
+      <li>Docker 原地升级优先使用 NAS/NFS/SMB 文件型存储；分布式生产使用 K3s + NFS/SMB CSI PVC。高写入 DB 可按需独立迁到块存储。</li>
+      <li>把 S3/rclone mount 从“运行时磁盘”移除；需要对象存储能力时走 MinIO/S3 SDK 或后台同步。</li>
+    </ol>
+  </section>
+
+  <section id="final">
+    <h2>最终判断</h2>
+    <div class="callout">
+      <p>
+        彻底避免 S3/rclone 文件系统兼容性问题的办法，不是调大 rclone cache，而是让运行态不落在 S3 mount 上。
+      </p>
+      <p>
+        Docker 版用 NAS/NFS/SMB 文件型存储承载 <code>/by</code>，由 NAS 或文件服务器做快照/备份；K3s 版用 NFS/SMB CSI PVC 承载 <code>/by</code>，由文件型存储或备份 Job 做恢复点。S3 仍然重要，但它的位置应该是对象存储和备份归档层，而不是 OpenClaw 的运行时文件系统层。
+      </p>
+    </div>
+
+    <h3>参考资料</h3>
+    <ul>
+      <li><a href="https://docs.ceph.com/en/latest/cephfs/index.html">CephFS 官方文档</a>：CephFS 是 POSIX-compliant file system。</li>
+      <li><a href="https://rook.github.io/docs/rook/latest/Storage-Configuration/Shared-Filesystem-CephFS/filesystem-storage/">Rook-Ceph CephFS PVC 文档</a>：CephFS PVC 可被多个 Pod 共享使用。</li>
+      <li><a href="https://docs.openmediavault.org/">OpenMediaVault 文档</a>：开源 NAS，支持 SMB/CIFS、NFS 等文件服务。</li>
+      <li><a href="https://www.samba.org/samba/docs/">Samba 官方文档</a>：开源 SMB 文件服务。</li>
+      <li><a href="https://longhorn.io/docs/1.11.2/nodes-and-volumes/volumes/rwx-volumes/">Longhorn RWX 文档</a>：RWX volume 通过 NFSv4 share-manager 提供共享文件访问。</li>
+    </ul>
+  </section>
+  </main>
+</div>
+</body>
+</html>

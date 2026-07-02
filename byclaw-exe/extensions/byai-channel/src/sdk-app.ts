@@ -5,25 +5,27 @@ import {
   WorkerRegistry,
   WorkerRunner,
   GatewayDataEmitter,
-  EventType,
   type AskAgentCommand,
   WorkerHeartbeat,
   ActionType,
 } from "@byclaw/by-framework";
 import type { OpenClawConfig } from "openclaw/plugin-sdk";
 import { resolveInboundLanguage } from "./i18n.js";
-import { getByaiRuntime } from "./runtime.js";
+import { getByaiRuntime, getRuntimeConfig } from "./runtime.js";
 import { deliverReplyToAgentViaSdk } from "./sdk-message-processor.js";
 import {
   resolveActiveSdkRequestByTraceId,
-  clearActiveSdkRequestByTarget,
-  emitSdkChunkTracked,
   registerSdkEmitter,
-  shouldDeferActiveSdkFinal,
   clearActiveSdkRequestRecord,
   resolveSdkLocalFilePath,
 } from "./session-context.js";
 import type { ResolvedByaiAccount, ByaiSdkInboundMessage, SdkInboundFile } from "./types.js";
+import { getRedisInfo, getUserCode } from "./utils.js";
+import {
+  isBaiyingEnhanceConfigured,
+  waitForBaiyingEnhanceColdStartReady,
+} from "./baiying-enhance-readiness.js";
+import { normalizeByaiAgentId } from "./session-key.js";
 
 export interface ByaiSdkAppOptions {
   account: ResolvedByaiAccount;
@@ -38,26 +40,7 @@ export interface ByaiSdkAppOptions {
 
 type ByaiSdkLogger = NonNullable<ByaiSdkAppOptions["log"]>;
 
-function getRedisInfo() {
-  const { REDIS_USERNAME, REDIS_PASSWORD, REDIS_HOST, REDIS_PORT, REDIS_DATABASE } = process.env;
-  if (!REDIS_HOST || !REDIS_PORT) {
-    return null;
-  }
-  return {
-    username: REDIS_USERNAME,
-    password: REDIS_PASSWORD,
-    host: REDIS_HOST,
-    port: parseInt(REDIS_PORT, 10),
-    db: parseInt(REDIS_DATABASE || "0", 10),
-  };
-}
-
-function getUserCode(): string | null {
-  const code = String(process.env.USER_CODE ?? "").trim();
-  return code || null;
-}
-
-function getInboundMessageFromByFramework(data: AskAgentCommand) {
+async function getInboundMessageFromByFramework(data: AskAgentCommand) {
   let questionText = "";
   let files: SdkInboundFile[] | undefined;
   if (typeof data.content === "string") {
@@ -97,26 +80,82 @@ function getInboundMessageFromByFramework(data: AskAgentCommand) {
       resourceId: string;
       resourceType: string;
       resourceName: string;
+      resourceCode: string;
+      extData?: string;
     }[] = data.extraPayload?.resource_list || [];
     const { sessionId } = data.header;
+    const baiyingCallHandledResourceTypes = ["AGENT", "TOOLKIT", "TOOL", "MCP", "OBJECT", "VIEW", "KG_DOC", "KG_DB", "KG_QA", "KG_DOC_FILE", "KG_DOC_FOLDER"];
+    const userCode = getUserCode();
+    const runtime = getByaiRuntime();
     resourceList.forEach((item) => {
-      if (item.resourceType !== "DIG_EMPLOYEE") {
+      if (item.resourceType === "DIG_EMPLOYEE") {
+        return;
+      }
+      if (item.resourceType === "COMMON_FILE") {
+        remindTextArr.push(`- file: ${resolveSdkLocalFilePath(item.resourceId, sessionId)}`);
+      } else if (item.resourceType === "COMMON_FOLDER") {
+        remindTextArr.push(`- folder: ${resolveSdkLocalFilePath(item.resourceId, sessionId)}`);
+      } else if (item.resourceType?.toLowerCase() === "skill") {
+        if (!item.extData) return;
+        let skillExt: {
+          skillUrl: string;
+          version: string;
+          skillType: "inner" | "hub";
+        };
+        try {
+          skillExt = JSON.parse(item.extData);
+        } catch (error) {
+          return;
+        }
+        if (skillExt.skillType === "inner") {
+          remindTextArr.push(`- skill: ${path.join("/app/skills", item.resourceCode)}`);
+        } else if (skillExt.skillType === "hub") {
+          if (userCode && skillExt.skillUrl?.includes(userCode)) {
+            const normalizeAgentId = normalizeByaiAgentId(data.extraPayload?.agent_id || "main");
+            const workspaceDir = runtime.agent.resolveAgentWorkspaceDir(getRuntimeConfig(), normalizeAgentId)
+            if (workspaceDir) {
+              remindTextArr.push(`- skill: ${path.join(workspaceDir, "skills", item.resourceCode)}`);
+            }
+          } else {
+            const skillsRoot = path.join(runtime.state.resolveStateDir(), "skills");
+            remindTextArr.push(`- skill: ${path.join(skillsRoot, item.resourceCode)}`);
+          }
+        }
+      } else {
+        let { resourceType } = item;
+        let resourceId: string | undefined;
+        if (["KG_DOC_FILE", "KG_DOC_FOLDER"].includes(resourceType)) {
+          // 知识库文件和文件夹都归类为知识库
+          resourceType = "KG_DOC";
+          try {
+            const { datasetId } = JSON.parse(item.resourceCode);
+            // 知识库id
+            resourceId = datasetId;
+          } catch (e) {
+          }
+          if (!resourceId) {
+            console.warn(`Knowledge base resource id is empty: ${item.resourceName}`);
+            return;
+          }
+        }
         if (item.resourceType === "KG_DOC_FILE") {
-          remindTextArr.push(`- file: ${resolveSdkLocalFilePath(item.resourceId, sessionId)}`);
+          remindTextArr.push(
+            `- resource: resource_id=${resourceId}, resource_type=${resourceType}, itemName=${item.resourceName}, itemPath=${item.resourceId}`,
+          );
+        } else if (item.resourceType === "KG_DOC_FOLDER") {
+          remindTextArr.push(
+            `- resource: resource_id=${resourceId}, resource_type=${resourceType}, folderName=${item.resourceName}, folderPath=${item.resourceId}`,
+          );
         } else {
           remindTextArr.push(
-            `- resource: resource_id=${item.resourceId}, resource_type=${item.resourceType}, resource_name=${item.resourceName}`,
+            `- resource: resource_id=${resourceId}, resource_type=${resourceType}, resource_name=${item.resourceName}`,
           );
         }
       }
     });
     if (remindTextArr.length) {
       let handleResourceTips = "";
-      if (
-        resourceList.some(
-          (item) => item.resourceType !== "KG_DOC_FILE" && item.resourceType !== "DIG_EMPLOYEE",
-        )
-      ) {
+      if (resourceList.some((item) => baiyingCallHandledResourceTypes.includes(item.resourceType))) {
         if (data.extraPayload?.agent_id || data.extraPayload?.agent_code) {
           handleResourceTips =
             "For the resources, you can use \`baiying_call\` tool to handle them.";
@@ -228,15 +267,6 @@ export class ByaiSdkApp {
     return this.log ?? {};
   }
 
-  private currentConfig(): OpenClawConfig {
-    const runtime = getByaiRuntime();
-    const cfg = runtime.config;
-    if (typeof cfg.current === "function") {
-      return cfg.current() as OpenClawConfig;
-    }
-    return cfg.loadConfig() as OpenClawConfig;
-  }
-
   async start(): Promise<void> {
     if (this.runner) {
       return;
@@ -300,6 +330,27 @@ export class ByaiSdkApp {
 
     registerSdkEmitter(this.account.accountId, emitter);
 
+    if (isBaiyingEnhanceConfigured(getRuntimeConfig())) {
+      const rawWaitMs = Number.parseInt(
+        process.env.BAIYING_ENHANCE_COLD_START_WAIT_MS || "60000",
+        10,
+      );
+      const waitMs = Number.isFinite(rawWaitMs) ? Math.max(0, rawWaitMs) : 60000;
+      info?.(
+        `[${this.account.accountId}] waiting for baiying-enhance cold-start readiness before subscribing, waitMs=${waitMs}`,
+      );
+      const readiness = await waitForBaiyingEnhanceColdStartReady(waitMs);
+      if (readiness.ready) {
+        info?.(
+          `[${this.account.accountId}] baiying-enhance cold-start readiness complete before subscribing, waitedMs=${readiness.waitedMs}, reason=${readiness.reason ?? "ready"}`,
+        );
+      } else {
+        error?.(
+          `[${this.account.accountId}] baiying-enhance cold-start readiness not complete before subscribing, waitedMs=${readiness.waitedMs}, reason=${readiness.reason ?? "timeout"}; continuing`,
+        );
+      }
+    }
+
     const subscription = runner.subscribe(async ({ streamName, msgId, data }) => {
       if (data.actionType === ActionType.RESUME) {
         // 这里处理resume任务，目的是将原session从sessions_yield的状态中唤醒
@@ -326,7 +377,7 @@ export class ByaiSdkApp {
         created_at: Date.now(),
         updated_at: Date.now(),
       });
-      const { text, files } = getInboundMessageFromByFramework(gatewayMsg);
+      const { text, files } = await getInboundMessageFromByFramework(gatewayMsg);
       info?.(`处理问题: ${text}`);
 
       const metadataLanguage =
@@ -365,64 +416,19 @@ export class ByaiSdkApp {
         debug?.(`[${this.account.accountId}] failed to write session id file: ${String(err)}`);
       }
 
-      let hasDeltaChunk = false;
-      const sdkTarget = `user:${sessionId}`;
       const abortController = new AbortController();
       try {
         await deliverReplyToAgentViaSdk({
           message: inbound,
           account: this.account,
-          // cfg: this.currentConfig(),
-          cfg: this.cfg,
+          cfg: getRuntimeConfig(),
           abortController,
           log: this.log,
-          onReply: async (text, type, options) => {
+          onReply: async (text, options) => {
             if (!text) {
               return;
             }
-            if (type === "final") {
-              if (!hasDeltaChunk) {
-                hasDeltaChunk = true;
-                // 做一个防御，如果收到final之前没有任何的onPartialReply，则认为是没有流式输出，则直接发送final
-                await emitSdkChunkTracked({
-                  emitter,
-                  sessionId,
-                  traceId,
-                  text,
-                  options: options || {},
-                });
-              }
-              if (shouldDeferActiveSdkFinal(this.account.accountId, sdkTarget)) {
-                info?.(
-                  `[${this.account.accountId}] byai-channel SDK final deferred: target=${sdkTarget}`,
-                );
-                await emitSdkChunkTracked({
-                  emitter,
-                  sessionId,
-                  traceId,
-                  text: "\n\n",
-                  options: {},
-                });
-                return;
-              }
-              info?.(
-                `[${this.account.accountId}] byai-channel SDK emitState, eventType: ${EventType.APP_STREAM_RESPONSE}`,
-              );
-              await emitter.emitState(sessionId, traceId || "", "", {
-                eventType: EventType.APP_STREAM_RESPONSE,
-              });
-              clearActiveSdkRequestByTarget(this.account.accountId, sdkTarget);
-            } else {
-              hasDeltaChunk = true;
-              info?.(`[${this.account.accountId}] byai-channel SDK emitChunk: ${text}`);
-              await emitSdkChunkTracked({
-                emitter,
-                sessionId,
-                traceId,
-                text,
-                options: options || {},
-              });
-            }
+            await emitter.emitChunk(sessionId, traceId, text, options || {});
           },
         });
 
@@ -433,7 +439,6 @@ export class ByaiSdkApp {
             err,
           )}`,
         );
-        clearActiveSdkRequestByTarget(this.account.accountId, sdkTarget);
         try {
           await emitter.emitState(sessionId, traceId || "", "", {
             eventType: "error",

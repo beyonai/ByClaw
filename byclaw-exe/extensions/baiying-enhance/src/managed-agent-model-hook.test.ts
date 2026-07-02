@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import {
   buildManagedAgentRuntimeModelSystemContext,
   hasManagedModelConfigDrift,
+  resolveLangfuseSessionIdFromHookContext,
   resolveManagedAgentModelFromConfig,
+  shouldDeferManagedAgentModelOverrideForRun,
   syncManagedAgentSessionModelForInbound,
   warnUnresolvedManagedProviderApiKeysAfterSync,
 } from "./managed-agent-model-hook.js";
@@ -51,7 +53,7 @@ describe("hasManagedModelConfigDrift", () => {
 });
 
 describe("warnUnresolvedManagedProviderApiKeysAfterSync", () => {
-  it("warns when runtime provider apiKey is still a SecretRef", () => {
+  it("does not warn for Baiying aimodel SecretRefs handled by the runtime auth hook", () => {
     const warnings: string[] = [];
     warnUnresolvedManagedProviderApiKeysAfterSync({
       cfg: {
@@ -59,6 +61,30 @@ describe("warnUnresolvedManagedProviderApiKeysAfterSync", () => {
           providers: {
             "baiying-m-10004000": {
               apiKey: { source: "exec", provider: "baiying-aimodel-redis", id: "model:10004000" },
+            },
+          },
+        },
+      },
+      managed: [
+        {
+          agentId: "baiying-agent-10000455",
+          providerKey: "baiying-m-10004000",
+          modelRef: "baiying-m-10004000/qwen3.6-27b",
+        },
+      ],
+      log: { warn: (m) => warnings.push(m) },
+    });
+    expect(warnings).toHaveLength(0);
+  });
+
+  it("warns when an unmanaged runtime provider apiKey is still a SecretRef", () => {
+    const warnings: string[] = [];
+    warnUnresolvedManagedProviderApiKeysAfterSync({
+      cfg: {
+        models: {
+          providers: {
+            "baiying-m-10004000": {
+              apiKey: { source: "exec", provider: "vault", id: "provider/10004000" },
             },
           },
         },
@@ -131,9 +157,68 @@ describe("buildManagedAgentRuntimeModelSystemContext", () => {
     expect(
       buildManagedAgentRuntimeModelSystemContext({
         agentId: "main",
+      cfg: registeredCfg,
+    }),
+  ).toBeUndefined();
+  });
+
+  it("skips model facts when the active run still uses the previous model", () => {
+    expect(
+      buildManagedAgentRuntimeModelSystemContext({
+        agentId: "baiying-agent-10000455",
         cfg: registeredCfg,
+        currentProvider: "baiying-m-10004014",
+        currentModel: "deepseek-v4-flash",
       }),
     ).toBeUndefined();
+  });
+});
+
+describe("resolveLangfuseSessionIdFromHookContext", () => {
+  it("uses the byai-channel direct session id from sessionKey", () => {
+    expect(
+      resolveLangfuseSessionIdFromHookContext({
+        sessionId: "openclaw-session",
+        sessionKey: "agent:baiying-agent-10000455:byai-channel:direct:10006251",
+      }),
+    ).toBe("10006251");
+  });
+
+  it("falls back to hook sessionId when sessionKey has no channel session id", () => {
+    expect(
+      resolveLangfuseSessionIdFromHookContext({
+        sessionId: "openclaw-session",
+        sessionKey: "agent:main:main",
+      }),
+    ).toBe("openclaw-session");
+  });
+});
+
+describe("shouldDeferManagedAgentModelOverrideForRun", () => {
+  it("defers forced overrides when the current run was prepared with an older model", () => {
+    expect(
+      shouldDeferManagedAgentModelOverrideForRun({
+        resolved: {
+          providerOverride: "baiying-m-10003989",
+          modelOverride: "qwen3.6-35b-a3b",
+        },
+        currentProvider: "baiying-m-10004014",
+        currentModel: "deepseek-v4-flash",
+      }),
+    ).toBe(true);
+  });
+
+  it("allows overrides when the current run already matches the managed target", () => {
+    expect(
+      shouldDeferManagedAgentModelOverrideForRun({
+        resolved: {
+          providerOverride: "baiying-m-10003989",
+          modelOverride: "qwen3.6-35b-a3b",
+        },
+        currentProvider: "baiying-m-10003989",
+        currentModel: "qwen3.6-35b-a3b",
+      }),
+    ).toBe(false);
   });
 });
 

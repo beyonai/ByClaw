@@ -75,3 +75,13 @@ export async function setDataPermission(params: any) {
 export async function getDataPermission(params: any) {
   return POST('/auth/privilegeGrant/listMangerOrgUseDetail', params, withCustomHandle);
 }
+
+// 查询用户Token额度
+export async function getTokenQuota(params: any) {
+  return POST('/byaiService/system/user/getTokenQuota', params, withCustomHandle);
+}
+
+// 分配用户Token额度
+export async function assignTokenQuota(params: any) {
+  return POST('/byaiService/system/user/assignTokenQuota', params, withCustomHandle);
+}

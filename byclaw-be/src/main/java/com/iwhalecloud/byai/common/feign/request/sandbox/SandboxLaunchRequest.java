@@ -16,6 +16,10 @@ public class SandboxLaunchRequest {
     @JsonProperty("sandbox_type")
     private String sandboxType;
 
+    /** 沙箱资源规格分层，例如 xs/s/m/l。为空时使用默认规格或旧流程。 */
+    @JsonProperty("profile_key")
+    private String profileKey;
+
     /** 用户编码 */
     @JsonProperty("user_code")
     private String userCode;
@@ -27,6 +31,14 @@ public class SandboxLaunchRequest {
     /** 沙箱专用参数 */
     @JsonProperty("envs")
     private Map<String, String> envs;
+
+    /** 运行时元数据，用于远端列表过滤和一致性对账。 */
+    @JsonProperty("metadata")
+    private Map<String, String> metadata;
+
+    /** 是否跳过可复用远端沙箱查询，异常恢复等场景需要强制新建。 */
+    @JsonProperty("skip_reusable_sandbox")
+    private Boolean skipReusableSandbox;
 
     @JsonProperty("user_info")
     private Map<String, Object> userInfo;

@@ -1,0 +1,81 @@
+.emailSettings {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+
+  h2 {
+    margin: 0 0 8px;
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--beyond-color-text);
+  }
+
+  p {
+    margin: 0;
+    color: var(--beyond-color-text-tertiary);
+  }
+}
+
+.tableCard {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border: none;
+  background: #fff;
+
+  :global {
+    .@{antPrefix}-card-body {
+      padding: 0;
+    }
+
+    .@{antPrefix}-table-thead > tr > th {
+      white-space: nowrap;
+    }
+  }
+}
+
+.accountCell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.formGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 16px;
+}
+
+.serverSection {
+  padding: 14px 16px 2px;
+  margin-bottom: 16px;
+  border: 1px solid #0000000f;
+  border-radius: 12px;
+  background: #00000005;
+
+  h3 {
+    margin: 0 0 12px;
+    font-size: 15px;
+    font-weight: 600;
+  }
+}
+
+.serverGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 120px 150px;
+  gap: 0 16px;
+
+  :global {
+    .@{antPrefix}-input-number {
+      width: 100%;
+    }
+  }
+}

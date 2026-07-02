@@ -7,6 +7,7 @@ import { chatModeMap, IChatModeType } from '@/constants/query';
 import useGlobal from '@/hooks/useGlobal';
 
 import useAppStore from '@/models/common/useAppStore';
+import useContextUsed from '@/hooks/useContextUsed';
 
 const ChatQueryInput = lazy(() => import('@/components/QueryInput/Chat'));
 const EmployeesQueryInput = lazy(() => import('@/components/QueryInput/Employees'));
@@ -102,6 +103,11 @@ function QueryInput(props: IProps) {
     }
   }, [agentId]);
 
+  const contextUsed = useContextUsed({
+    agentId,
+    sessionId: props.sessionId,
+  });
+
   return (
     <Suspense fallback="">
       {/* <CleanSession /> */}
@@ -115,6 +121,7 @@ function QueryInput(props: IProps) {
         globalContext={globalContext}
         ref={queryInputRef}
         onMounted={onQueryInputCompMounted}
+        contextUsed={contextUsed}
       />
     </Suspense>
   );

@@ -20,12 +20,26 @@ type InfiniteScrollTableProps = {
     type: 'checkbox' | 'radio';
     onChange?: (selectedRowKeys: React.Key[], selectedRows: any[]) => void;
     selectedRowKeys?: React.Key[];
+    getCheckboxProps?: (record: any) => { disabled?: boolean };
   };
   emptyLocale?: any;
   scrollDivId: string;
   loading?: boolean;
   loader?: React.ReactNode;
   endMessage?: React.ReactNode;
+};
+
+const getColumnStyle = (width?: number | string): React.CSSProperties => {
+  if (width) {
+    return {
+      width,
+      flex: `0 0 ${typeof width === 'number' ? `${width}px` : width}`,
+    };
+  }
+  return {
+    flex: '1 1 0',
+    minWidth: 0,
+  };
 };
 
 const InfiniteScrollTable = (props: InfiniteScrollTableProps) => {
@@ -52,6 +66,17 @@ const InfiniteScrollTable = (props: InfiniteScrollTableProps) => {
     renderEndMessage = <div className="ub ub-ac ub-pc">{intl.formatMessage({ id: 'common.endMessage2' })}</div>;
   }
 
+  const getItemKey = (item: any) => {
+    if (!item) return undefined;
+    return typeof rowKey === 'function' ? rowKey(item) : item?.[rowKey];
+  };
+  const selectableDataSource = rowSelection?.getCheckboxProps
+    ? dataSource.filter((item) => !rowSelection.getCheckboxProps?.(item)?.disabled)
+    : dataSource;
+  const selectableRowKeys = selectableDataSource.map(getItemKey);
+  const selectedSelectableRowKeys = (rowSelection?.selectedRowKeys || []).filter((key) =>
+    selectableRowKeys.includes(key)
+  );
   return (
     <div className={classNames(styles.infiniteScrollTable)}>
       <div className={styles.tableHeader}>
@@ -59,12 +84,16 @@ const InfiniteScrollTable = (props: InfiniteScrollTableProps) => {
           <div className={styles.tableSelect}>
             {rowSelection?.type === 'checkbox' && (
               <Checkbox
-                checked={rowSelection?.selectedRowKeys?.length === dataSource.length}
+                checked={selectableRowKeys.length > 0 && selectedSelectableRowKeys.length === selectableRowKeys.length}
                 indeterminate={
-                  size(rowSelection?.selectedRowKeys) > 0 && size(rowSelection?.selectedRowKeys) < dataSource.length
+                  size(selectedSelectableRowKeys) > 0 && size(selectedSelectableRowKeys) < selectableRowKeys.length
                 }
+                disabled={selectableRowKeys.length === 0}
                 onChange={(e) => {
-                  rowSelection?.onChange?.(e.target.checked ? dataSource.map((item) => item[rowKey]) : [], dataSource);
+                  rowSelection?.onChange?.(
+                    e.target.checked ? selectableRowKeys : [],
+                    e.target.checked ? selectableDataSource : []
+                  );
                 }}
               />
             )}
@@ -72,14 +101,14 @@ const InfiniteScrollTable = (props: InfiniteScrollTableProps) => {
               <Radio
                 checked={rowSelection?.selectedRowKeys?.length === 1}
                 onChange={(e) => {
-                  rowSelection?.onChange?.(e.target.checked ? [dataSource[0][rowKey]] : [], [dataSource[0]]);
+                  rowSelection?.onChange?.(e.target.checked ? [getItemKey(dataSource[0])] : [], [dataSource[0]]);
                 }}
               />
             )}
           </div>
         )}
         {columns.map((item) => (
-          <div key={item.dataIndex} className={styles.th} style={item?.width ? { width: item?.width } : { flex: 1 }}>
+          <div key={item.dataIndex} className={styles.th} style={getColumnStyle(item?.width)}>
             {item.title}
           </div>
         ))}
@@ -119,38 +148,32 @@ const InfiniteScrollTable = (props: InfiniteScrollTableProps) => {
                     <div className={styles.tableSelect}>
                       {rowSelection?.type === 'checkbox' && (
                         <Checkbox
-                          checked={rowSelection?.selectedRowKeys?.includes(item[rowKey])}
+                          checked={rowSelection?.selectedRowKeys?.includes(getItemKey(item))}
+                          disabled={rowSelection.getCheckboxProps?.(item)?.disabled}
                           onChange={(e) => {
+                            const itemKey = getItemKey(item);
+                            const nextSelectedRowKeys = e.target.checked
+                              ? [...(rowSelection?.selectedRowKeys || []), itemKey]
+                              : rowSelection?.selectedRowKeys?.filter((i) => i !== itemKey) || [];
                             rowSelection?.onChange?.(
-                              e.target.checked
-                                ? [...(rowSelection?.selectedRowKeys || []), item[rowKey]]
-                                : rowSelection?.selectedRowKeys?.filter((i) => i !== item[rowKey]) || [],
-                              [
-                                ...(rowSelection?.selectedRowKeys?.map((i) =>
-                                  dataSource.find((j) => j[rowKey] === i)
-                                ) || []),
-                                item,
-                              ]
+                              nextSelectedRowKeys,
+                              dataSource.filter((row) => nextSelectedRowKeys.includes(getItemKey(row)))
                             );
                           }}
                         />
                       )}
                       {rowSelection?.type === 'radio' && (
                         <Radio
-                          checked={rowSelection?.selectedRowKeys?.includes(item[rowKey])}
+                          checked={rowSelection?.selectedRowKeys?.includes(getItemKey(item))}
                           onChange={(e) => {
-                            rowSelection?.onChange?.(e.target.checked ? [item[rowKey]] : [], [item]);
+                            rowSelection?.onChange?.(e.target.checked ? [getItemKey(item)] : [], [item]);
                           }}
                         />
                       )}
                     </div>
                   )}
                   {columns.map((column, index) => (
-                    <div
-                      className={styles.tr}
-                      key={index}
-                      style={column?.width ? { width: column?.width } : { flex: 1 }}
-                    >
+                    <div className={styles.tr} key={index} style={getColumnStyle(column?.width)}>
                       {column?.render ? column?.render(item[column.dataIndex], item) : item[column.dataIndex]}
                     </div>
                   ))}

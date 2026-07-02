@@ -1,0 +1,30 @@
+{
+  "name": "@openclaw/byclaw-wiki",
+  "version": "0.1.0",
+  "private": true,
+  "description": "OpenClaw plugin that keeps configured GitHub repositories indexed with CodeGraph and exposes code_to_wiki.",
+  "type": "module",
+  "scripts": {
+    "build": "esbuild index.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/index.js --sourcemap --packages=external --external:openclaw",
+    "build:fast": "esbuild index.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/index.js --packages=external --external:openclaw",
+    "test": "tsx --test src/config.test.ts src/schedule.test.ts src/notification.test.ts"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "esbuild": "0.25.0",
+    "tsx": "4.22.3"
+  },
+  "openclaw": {
+    "extensions": [
+      "./dist/index.js"
+    ],
+    "compat": {
+      "pluginApi": ">=2026.4.16",
+      "minGatewayVersion": ">=2026.4.16"
+    },
+    "build": {
+      "openclawVersion": "2026.4.16",
+      "pluginSdkVersion": "2026.4.16"
+    }
+  }
+}

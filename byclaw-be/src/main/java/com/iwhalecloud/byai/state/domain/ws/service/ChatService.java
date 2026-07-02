@@ -4,7 +4,21 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 
+import com.alibaba.fastjson.JSONObject;
+import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+import com.iwhalecloud.byai.state.application.service.chat.AssistantChatApplicationService;
+import com.iwhalecloud.byai.state.application.service.limit.TokenQuotaService;
+import com.iwhalecloud.byai.state.domain.chat.dto.RunningChatInfo;
+import com.iwhalecloud.byai.state.domain.chat.dto.StopChatDto;
+import com.iwhalecloud.byai.state.domain.chat.enums.MessageType;
+import com.iwhalecloud.byai.state.domain.chat.service.RunningOutputStreamRegistry;
+import com.iwhalecloud.byai.state.infrastructure.utils.PushUtil;
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
+import io.netty.handler.codec.http.HttpResponseStatus;
+import io.netty.util.CharsetUtil;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import com.iwhalecloud.byai.state.application.service.message.MessageService;
@@ -15,6 +29,7 @@ import com.iwhalecloud.byai.state.domain.ws.model.ChatMessage;
 import com.iwhalecloud.byai.state.infrastructure.utils.NettyResponse;
 import com.iwhalecloud.byai.state.domain.session.dto.MessageDto;
 import io.netty.channel.ChannelHandlerContext;
+import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -36,12 +51,21 @@ public class ChatService {
     @Autowired
     private MessageService messageService;
 
+    @Autowired
+    private AssistantChatApplicationService assistantChatApplicationService;
+
+    @Autowired
+    private RunningOutputStreamRegistry runningOutputStreamRegistry;
+
+    @Autowired
+    private TokenQuotaService tokenQuotaService;
+
     /**
      * Handles direct chat interactions with the Large Language Model.
      * <p>
      * This method processes single chat interactions by: 1. Retrieving the current user from the channel attributes 2.
      * Creating a streaming response channel 3. Delegating the chat processing to the assistant service
-     * 
+     *
      * @param ctx The Netty channel context for the connection
      * @param message The chat message containing session and content information
      * @throws IOException if there's an error in stream processing
@@ -49,9 +73,28 @@ public class ChatService {
      */
     public void llmChat(ChannelHandlerContext ctx, ChatMessage message) {
         LoginInfo currentUser = ctx.channel().attr(Constant.ATT_USER_INFO).get();
+
+        // Token 月度限额检查（仅对公共模型和 TokenSaver 模型生效）
+        try {
+            if (currentUser != null
+                    && tokenQuotaService.isModelSubjectToQuota(message.getAgentId())
+                    && tokenQuotaService.isQuotaExceeded(currentUser.getUserId())) {
+                JSONObject error = new JSONObject();
+                error.put("type", MessageType.ERROR.name());
+                error.put("clientRequestId", message.getClientRequestId());
+                error.put("sessionId", message.getSessionId() == null ? null : String.valueOf(message.getSessionId()));
+                error.put("chatContent", I18nUtil.get("token.quota.monthly.exceeded"));
+                PushUtil.sendMessageToChannel(ctx.channel(), new TextWebSocketFrame(error.toJSONString()));
+                return;
+            }
+        } catch (Exception e) {
+            log.warn("Token quota check failed in WS, allowing request: {}", e.getMessage());
+        }
+
         // 设置发送端 Channel，用于多端广播时排除发送端避免重复推送
         message.setSenderChannel(ctx.channel());
-        try (NettyArrayOutputStream outputStream = new NettyArrayOutputStream(ctx)) {
+        try (NettyArrayOutputStream outputStream = new NettyArrayOutputStream(ctx, message.getClientRequestId(),
+            "CHAT_STREAM")) {
             assistantChatService.chat(message, outputStream, currentUser);
         }
         catch (IOException e) {
@@ -96,6 +139,59 @@ public class ChatService {
             log.error("Error processing stream", e);
             // 发送错误消息给客户端
             NettyResponse.sendErrorResponse(ctx, "Error processing processing stream");
+        }
+    }
+
+    public void stopChat(ChannelHandlerContext ctx, ChatMessage message) {
+        LoginInfo currentUser = ctx.channel().attr(Constant.ATT_USER_INFO).get();
+        try {
+            if (currentUser != null) {
+                CurrentUserHolder.setLoginInfo(currentUser);
+            }
+            StopChatDto stopChatDto = new StopChatDto();
+            stopChatDto.setAgentId(message.getAgentId());
+            stopChatDto.setAgentCode(message.getAgentCode());
+            stopChatDto.setSessionId(message.getSessionId());
+            stopChatDto.setMessageId(message.getMessageId());
+            stopChatDto.setClientRequestId(message.getClientRequestId());
+            fillStopChatFromRunningInfo(stopChatDto);
+            assistantChatApplicationService.stopChat(stopChatDto);
+
+            JSONObject ack = new JSONObject();
+            ack.put("type", "STOP_CHAT_ACK");
+            ack.put("clientRequestId", message.getClientRequestId());
+            ack.put("sessionId", message.getSessionId() == null ? null : String.valueOf(message.getSessionId()));
+            ack.put("messageId", message.getMessageId());
+            ctx.writeAndFlush(new io.netty.handler.codec.http.websocketx.TextWebSocketFrame(ack.toJSONString()));
+        }
+        catch (Exception e) {
+            log.error("Error stopping chat", e);
+            NettyResponse.sendErrorResponse(ctx, "Error stopping chat");
+        }
+        finally {
+            CurrentUserHolder.clearLoginInfo();
+        }
+    }
+
+    private void fillStopChatFromRunningInfo(StopChatDto stopChatDto) {
+        if (stopChatDto == null || stopChatDto.getSessionId() == null) {
+            return;
+        }
+        RunningChatInfo runningInfo = runningOutputStreamRegistry.getRunning(stopChatDto.getSessionId());
+        if (!Boolean.TRUE.equals(runningInfo.getRunning())) {
+            return;
+        }
+        if (stopChatDto.getMessageId() == null) {
+            stopChatDto.setMessageId(runningInfo.getModelAnswerMessageId());
+        }
+        if (stopChatDto.getAgentId() == null) {
+            stopChatDto.setAgentId(runningInfo.getAgentId());
+        }
+        if (stopChatDto.getAgentCode() == null) {
+            stopChatDto.setAgentCode(runningInfo.getAgentCode());
+        }
+        if (stopChatDto.getClientRequestId() == null) {
+            stopChatDto.setClientRequestId(runningInfo.getClientRequestId());
         }
     }
 }

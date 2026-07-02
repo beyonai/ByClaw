@@ -11,7 +11,9 @@
   gap: 16px;
   padding: 4px;
   overflow-y: auto;
-  // flex: 1;
+  flex: 1;
+  min-height: 0;
+  align-content: start;
 
   &::-webkit-scrollbar {
     width: 4px;
@@ -86,7 +88,7 @@
   gap: 10px;
   margin-bottom: 4px;
   position: relative;
-  // padding-right: 30px; /* 为更多按钮留出空间 */
+  justify-content: space-between;
 }
 
 .defaultLogo {
@@ -102,13 +104,13 @@
 
 .title {
   flex: 1;
+  min-width: 0;
   color: #1f2533;
   font-size: 16px;
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  word-break: break-all;
 }
 
 .spaceTitle {
@@ -121,6 +123,7 @@
 }
 
 .nameText {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -130,11 +133,13 @@
   height: 35px;
   color: #9aa1ac;
   font-size: 12px;
-  // line-height: 22px;
+  line-height: 17px;
   overflow: hidden;
   display: -webkit-box;
+  -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   margin-bottom: 8px;
+  word-break: break-all;
 }
 
 .meta {
@@ -155,24 +160,23 @@
   font-size: 24px;
 }
 
-.moreButton {
-  cursor: pointer;
-  padding: 4px;
-  border-radius: 4px;
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  justify-content: center;
-  gap: 8px;
-  transition: all 0.2s ease;
-  position: absolute;
-  top: -5px;
-  right: -10px;
-  z-index: 1;
+.skillPosterActionBtn {
+  border: none;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 6px 18px rgba(20, 22, 26, 0.12);
+}
 
-  &:hover {
-    color: #165dff;
-  }
+.cardActionBtnIcon {
+  font-size: 16px;
+}
+
+.cardActionBtnWrapper {
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.card:hover .cardActionBtnWrapper {
+  opacity: 1;
 }
 
 .loadingContainer {
@@ -289,4 +293,74 @@
 
 .searchInput {
   width: 300px;
+}
+
+/* 小面板弹窗：列表形态 */
+.compactStateWrap {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.compactList {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 4px;
+
+  &::-webkit-scrollbar {
+    width: 4px;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: #e8e8e8;
+    border-radius: 2px;
+  }
+}
+
+.compactListItem {
+  cursor: pointer;
+}
+
+.compactActionTrigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  color: #707680;
+  cursor: pointer;
+
+  &:hover {
+    background-color: rgba(22, 93, 255, 0.1);
+    color: var(--beyond-color-primary);
+  }
+}
+
+.compactAvatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  color: #165dff;
+}
+
+.compactTitleRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.compactDesc {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #9aa1ac;
+  font-size: 12px;
 }

@@ -2,20 +2,21 @@
  * WebSocket 管理工具类 - 全局单例模式
  */
 
-import { getToken } from './auth';
-import { noop } from 'lodash';
-
-import type { ISession } from '@/typescript/session';
+import { clearToken, getToken, loginRedirect } from './auth';
 
 interface WebSocketMessage {
   type: string;
-  session?: ISession;
+  clientRequestId?: string;
+  sessionId?: string;
+  event?: string;
+  data?: any;
+  [key: string]: any;
 }
 
 type MessageHandler = (message: WebSocketMessage) => void;
 
 class WebSocketManager {
-  private static instance: WebSocketManager;
+  private static instance?: WebSocketManager;
 
   private ws: WebSocket | null = null;
 
@@ -27,21 +28,65 @@ class WebSocketManager {
 
   private messageHandlers: Map<string, MessageHandler[]> = new Map();
 
-  private hasNotification = false;
-
-  private onNotificationChange: (hasNotification: boolean) => void = noop;
-
-  private onAddNotificationSessionCb: (newSession: ISession) => void = noop;
-
   private reconnectCount: number = 0;
 
-  private constructor() {}
+  private manuallyDisconnected = false;
+
+  private connectResolvers: Array<() => void> = [];
+
+  private connectRejecters: Array<(error: Error) => void> = [];
+
+  private connectionSeq = 0;
+
+  private activeConnectionId = 0;
+
+  private redirectedForExpiredToken = false;
+
+  private connectionToken: string | null = null;
+
+  private handleVisibilityChange = (): void => {
+    if (document.visibilityState === 'visible') {
+      this.ensureConnected();
+    }
+  };
+
+  private constructor() {
+    if (typeof window !== 'undefined') {
+      window.addEventListener('online', this.ensureConnected);
+      document.addEventListener('visibilitychange', this.handleVisibilityChange);
+    }
+  }
 
   public static getInstance(): WebSocketManager {
+    const globalKey = '__BYCLAW_WEBSOCKET_MANAGER__';
+    const globalScope = globalThis as typeof globalThis & {
+      [globalKey]?: WebSocketManager;
+    };
+
+    if (globalScope[globalKey]) {
+      WebSocketManager.instance = globalScope[globalKey]!;
+      return WebSocketManager.instance!;
+    }
+
     if (!WebSocketManager.instance) {
       WebSocketManager.instance = new WebSocketManager();
+      globalScope[globalKey] = WebSocketManager.instance;
     }
-    return WebSocketManager.instance;
+    return WebSocketManager.instance!;
+  }
+
+  public static disposeInstance(instance: WebSocketManager): void {
+    const globalKey = '__BYCLAW_WEBSOCKET_MANAGER__';
+    const globalScope = globalThis as typeof globalThis & {
+      [globalKey]?: WebSocketManager;
+    };
+
+    if (globalScope[globalKey] === instance) {
+      delete globalScope[globalKey];
+    }
+    if (WebSocketManager.instance === instance) {
+      WebSocketManager.instance = undefined;
+    }
   }
 
   /**
@@ -64,33 +109,50 @@ class WebSocketManager {
    * 初始化 WebSocket 连接
    */
   public init(): void {
-    if (this.ws || this.isConnecting) {
+    this.manuallyDisconnected = false;
+
+    const token = this.getConnectionToken();
+    if (!token) {
       return;
     }
 
-    const token = getToken();
-    if (!token) {
-      console.warn('Token 不存在，无法建立 WebSocket 连接');
-      return;
+    if (this.ws || this.isConnecting) {
+      if (this.connectionToken === token) {
+        return;
+      }
+      this.resetConnectionState();
     }
 
     this.isConnecting = true;
+    this.connectionToken = token;
 
     try {
       // 创建 WebSocket 连接
       const wsUrl = this.getWebSocketUrl(`byaiService/ws?beyond-token=${token}`);
-      this.ws = new WebSocket(wsUrl);
+      const connectionId = this.connectionSeq + 1;
+      this.connectionSeq = connectionId;
+      this.activeConnectionId = connectionId;
+      const ws = new WebSocket(wsUrl);
+      this.ws = ws;
 
       // 设置请求头 - 在连接建立后发送认证信息
-      this.ws.onopen = () => {
+      ws.onopen = () => {
+        if (!this.isCurrentConnection(connectionId, ws)) {
+          ws.close();
+          return;
+        }
         console.log('WebSocket 连接成功');
         this.isConnecting = false;
 
         this.startHeartbeat();
         this.reconnectCount = 0;
+        this.resolveConnectWaiters();
       };
 
-      this.ws.onmessage = (event) => {
+      ws.onmessage = (event) => {
+        if (!this.isCurrentConnection(connectionId, ws)) {
+          return;
+        }
         try {
           const message: WebSocketMessage = JSON.parse(event.data);
           this.handleMessage(message);
@@ -99,7 +161,10 @@ class WebSocketManager {
         }
       };
 
-      this.ws.onclose = (event) => {
+      ws.onclose = (event) => {
+        if (!this.isCurrentConnection(connectionId, ws)) {
+          return;
+        }
         console.log('WebSocket 连接关闭:', event.code, event.reason);
         this.ws = null;
         this.isConnecting = false;
@@ -107,33 +172,35 @@ class WebSocketManager {
         this.scheduleReconnect();
       };
 
-      this.ws.onerror = (error) => {
+      ws.onerror = (error) => {
+        if (!this.isCurrentConnection(connectionId, ws)) {
+          return;
+        }
         console.error('WebSocket 连接错误:', error);
         this.isConnecting = false;
         this.stopHeartbeat();
+        this.rejectConnectWaiters(new Error('WebSocket connection error'));
       };
     } catch (error) {
       console.error('WebSocket 初始化失败:', error);
       this.isConnecting = false;
+      this.rejectConnectWaiters(error instanceof Error ? error : new Error('WebSocket init failed'));
       this.scheduleReconnect();
     }
+  }
+
+  private isCurrentConnection(connectionId: number, ws: WebSocket): boolean {
+    return this.ws === ws && this.activeConnectionId === connectionId;
   }
 
   /**
    * 处理接收到的消息
    */
   private handleMessage(message: WebSocketMessage): void {
-    // 如果有消息返回，设置红点标识
-    if (message.session) {
-      this.setHasNotification(true);
-
-      // 通知其他组件处理会话逻辑：如果会话不存在则添加，存在则更新
-      this.onAddNotificationSessionCb(message.session);
-    }
-
     // 调用注册的消息处理器
     const handlers = this.messageHandlers.get(message.type) || [];
-    handlers.forEach((handler) => {
+    const wildcardHandlers = this.messageHandlers.get('*') || [];
+    [...handlers, ...wildcardHandlers].forEach((handler) => {
       try {
         handler(message);
       } catch (error) {
@@ -180,6 +247,40 @@ class WebSocketManager {
     }
   }
 
+  public waitUntilConnected(timeout = 10000): Promise<void> {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      return Promise.resolve();
+    }
+    if (!this.getConnectionToken()) {
+      return Promise.reject(new Error('WebSocket token unavailable'));
+    }
+    this.init();
+    return new Promise((resolve, reject) => {
+      let timer: ReturnType<typeof setTimeout>;
+      const onResolve = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+      const onReject = (error: Error) => {
+        clearTimeout(timer);
+        reject(error);
+      };
+      timer = setTimeout(() => {
+        this.connectResolvers = this.connectResolvers.filter((item) => item !== onResolve);
+        this.connectRejecters = this.connectRejecters.filter((item) => item !== onReject);
+        reject(new Error('WebSocket connection timeout'));
+      }, timeout);
+
+      this.connectResolvers.push(onResolve);
+      this.connectRejecters.push(onReject);
+    });
+  }
+
+  public async sendMessageWhenReady(message: WebSocketMessage): Promise<void> {
+    await this.waitUntilConnected();
+    this.sendMessage(message);
+  }
+
   /**
    * 注册消息处理器
    */
@@ -204,46 +305,12 @@ class WebSocketManager {
   }
 
   /**
-   * 设置红点状态变化回调
-   */
-  public setOnNotificationChange(callback: (hasNotification: boolean) => void): void {
-    this.onNotificationChange = callback;
-  }
-
-  public setOnAddNotificationSessionCb(callback: (newSession: ISession) => void): void {
-    this.onAddNotificationSessionCb = callback;
-  }
-
-  /**
-   * 设置是否有通知
-   */
-  private setHasNotification(hasNotification: boolean): void {
-    if (this.hasNotification !== hasNotification) {
-      this.hasNotification = hasNotification;
-      if (this.onNotificationChange) {
-        this.onNotificationChange(hasNotification);
-      }
-    }
-  }
-
-  /**
-   * 获取当前是否有通知
-   */
-  public getHasNotification(): boolean {
-    return this.hasNotification;
-  }
-
-  /**
-   * 清除通知状态
-   */
-  public clearNotification(): void {
-    this.setHasNotification(false);
-  }
-
-  /**
    * 断开连接
    */
   public disconnect(): void {
+    this.manuallyDisconnected = true;
+    this.activeConnectionId = 0;
+    this.connectionToken = null;
     this.stopHeartbeat();
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
@@ -258,22 +325,120 @@ class WebSocketManager {
     this.isConnecting = false;
   }
 
+  public dispose(): void {
+    this.disconnect();
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('online', this.ensureConnected);
+      document.removeEventListener('visibilitychange', this.handleVisibilityChange);
+    }
+  }
+
+  private ensureConnected = (): void => {
+    if (this.manuallyDisconnected) {
+      return;
+    }
+    if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
+      return;
+    }
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this.init();
+  };
+
+  private getConnectionToken(): string | null {
+    const token = getToken();
+    if (!token) {
+      console.warn('Token 不存在，无法建立 WebSocket 连接');
+      return null;
+    }
+    if (this.isJwtExpired(token)) {
+      this.handleExpiredToken();
+      return null;
+    }
+    this.redirectedForExpiredToken = false;
+    return token;
+  }
+
+  private isJwtExpired(token: string): boolean {
+    try {
+      const payload = token.split('.')[1];
+      if (!payload) {
+        return false;
+      }
+      const normalizedPayload = payload.replace(/-/g, '+').replace(/_/g, '/');
+      const paddedPayload = normalizedPayload.padEnd(
+        normalizedPayload.length + ((4 - (normalizedPayload.length % 4)) % 4),
+        '='
+      );
+      const payloadBytes = Uint8Array.from(window.atob(paddedPayload), (char) => char.charCodeAt(0));
+      const payloadJson = new TextDecoder().decode(payloadBytes);
+      const { exp } = JSON.parse(payloadJson);
+      return typeof exp === 'number' && exp * 1000 <= Date.now();
+    } catch (error) {
+      console.warn('Token 过期时间解析失败，继续尝试建立 WebSocket 连接:', error);
+      return false;
+    }
+  }
+
+  private handleExpiredToken(): void {
+    if (this.redirectedForExpiredToken) {
+      return;
+    }
+    this.redirectedForExpiredToken = true;
+    this.manuallyDisconnected = true;
+    this.connectionToken = null;
+    this.rejectConnectWaiters(new Error('Token expiration'));
+    clearToken();
+    loginRedirect({ openLoginModal: '1' });
+  }
+
+  private resetConnectionState(): void {
+    this.activeConnectionId = 0;
+    this.connectionToken = null;
+    this.stopHeartbeat();
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    if (this.ws) {
+      this.ws.close();
+      this.ws = null;
+    }
+    this.isConnecting = false;
+  }
+
   /**
    * 重连调度
    */
   private scheduleReconnect(): void {
+    if (this.manuallyDisconnected) {
+      return;
+    }
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
     }
 
-    if (this.reconnectCount > 5) {
-      return;
-    }
-
     this.reconnectCount += 1;
+    const delay = Math.min(30000, 1000 * 2 ** Math.min(this.reconnectCount, 5));
     this.reconnectTimer = setTimeout(() => {
       this.init();
-    }, 5000); // 5秒后重连
+    }, delay);
+  }
+
+  private resolveConnectWaiters(): void {
+    const resolvers = [...this.connectResolvers];
+    this.connectResolvers = [];
+    this.connectRejecters = [];
+    resolvers.forEach((resolve) => resolve());
+  }
+
+  private rejectConnectWaiters(error: Error): void {
+    const rejecters = [...this.connectRejecters];
+    this.connectResolvers = [];
+    this.connectRejecters = [];
+    rejecters.forEach((reject) => reject(error));
   }
 
   /**
@@ -291,4 +456,18 @@ class WebSocketManager {
 }
 
 // 导出单例实例
-export default WebSocketManager.getInstance();
+const webSocketManager = WebSocketManager.getInstance();
+
+const hotModule =
+  typeof module !== 'undefined'
+    ? (module as unknown as { hot?: { dispose(callback: () => void): void } }).hot
+    : undefined;
+
+if (hotModule) {
+  hotModule.dispose(() => {
+    webSocketManager.dispose();
+    WebSocketManager.disposeInstance(webSocketManager);
+  });
+}
+
+export default webSocketManager;

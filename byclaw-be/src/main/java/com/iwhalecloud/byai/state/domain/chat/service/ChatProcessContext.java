@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.state.domain.chat.service;
 
 import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
+import com.iwhalecloud.byai.state.domain.chat.enums.ChatTransport;
 import com.iwhalecloud.byai.state.domain.message.dto.ByaiMessageHotDtoDto;
 import com.iwhalecloud.byai.common.message.entity.ByaiMessageHotDto;
 import com.iwhalecloud.byai.common.message.entity.ByaiMessageRelObjDto;
@@ -16,6 +17,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.atomic.AtomicBoolean;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -25,6 +27,13 @@ import lombok.Setter;
 @Getter
 @Setter
 public class ChatProcessContext {
+
+    /**
+     * 停止会话哨兵事件类型。stopChat 同 pod + HTTP SSE 场景下，向 {@link #gatewayEventQueue}
+     * 投递携带该 event_type 的事件，使阻塞在队列上的请求线程退出循环并按正常完成落库。
+     */
+    public static final String STOP_SENTINEL_EVENT = "__byclaw_stop_sentinel__";
+
     /** SSE响应输出流 */
     public OutputStream res;
 
@@ -119,9 +128,41 @@ public class ChatProcessContext {
     public boolean gatewayError = false;
 
     /**
-     * 是否仅发送worker消息，不需要获取redis中响应的消息
+     * 是否仅发送 Gateway/Framework 消息，不重复启动 Redis Stream 监听。
+     * 同一个 session 已有运行态时，后续请求使用该模式兼容旧 SSE 行为。
      */
     public boolean sendByFrameworkMsgOnly = false;
+
+    /**
+     * 是否继续当前正在运行的 trace。
+     * 命中时本次输入只转发给 worker，不作为新的用户消息广播或入库。
+     */
+    public boolean continueRunningTrace = false;
+
+    /**
+     * 是否异步完成响应。WebSocket 场景只负责发送 Gateway 消息，后续 Redis 流由事件路由服务推送和落库。
+     */
+    public boolean asyncResponse = false;
+
+    /**
+     * 消息发往 gateway 的targetAgentType
+     */
+    public String targetAgentType;
+
+    /**
+     * 当前聊天入口的传输方式。
+     */
+    public ChatTransport transport = ChatTransport.HTTP_SSE;
+
+    /**
+     * 前端生成的本轮回答关联标识，通常等于 answerMsg.msgId。
+     */
+    public String clientRequestId;
+
+    /**
+     * 当前正在处理的 Redis Stream 事件 ID，用于前端恢复运行中会话时按版本合并快照和实时流。
+     */
+    public String currentStreamId;
 
     /**
      * 当前请求写入 Redis 运行态标记时使用的所有者 token，用于结束时只清理自己创建的标记。
@@ -150,5 +191,28 @@ public class ChatProcessContext {
         this.assistantChatDto = assistantChatDto;
         this.tokenStatsMap = new HashMap<>();
         this.suggestionQuestion = new SuggestionQuestionVo();
+        this.clientRequestId = assistantChatDto == null ? null : assistantChatDto.getClientRequestId();
+    }
+
+    public boolean isWebSocketTransport() {
+        return ChatTransport.WEBSOCKET.equals(transport);
+    }
+
+    /**
+     * 消息持久化一次性闸门：保证一次对话的 storeMessage / 异常落库只执行一次。
+     * <p>
+     * 用户停止会话（stopChat）时可能主动触发落库，而 owner pod 的请求线程在
+     * gatewayEventQueue.poll 超时或随后收到事件时也会走落库路径，两者竞争同一份累积内容，
+     * 通过该闸门去重，避免重复 insert byai_message。
+     */
+    public final transient AtomicBoolean messagePersisted = new AtomicBoolean(false);
+
+    /**
+     * 尝试占用落库闸门。
+     *
+     * @return true 表示本次调用方抢到落库权，应执行持久化；false 表示已被其他线程落库，应跳过。
+     */
+    public boolean tryBeginPersist() {
+        return messagePersisted.compareAndSet(false, true);
     }
 }

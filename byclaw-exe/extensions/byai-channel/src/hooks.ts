@@ -1,32 +1,52 @@
-import { EventType, SseReasonMessageType } from "@byclaw/by-framework";
-import { createRedis } from "@byclaw/by-framework";
 import { enqueueAfterAgentEvents } from "./agent-event-serial.js";
+import { createRedis, EventType, SseReasonMessageType } from "@byclaw/by-framework";
 import {
+  markActiveSdkContextWindow,
   emitSdkChunkTracked,
   markActiveSdkOutboundSent,
   markActiveSdkOutboundSending,
+  markActiveSdkOverflowContinuePending,
+  markActiveSdkOverflowLength,
   resolveActiveSdkRequestBySessionKey,
   resolveActiveSdkRequestByTarget,
+  resolveActiveSdkRunBinding,
+  getAgentRunEndPromiseResolver,
   resolveSdkEmitter,
-  getSessionPathBySessionId,
+  registerAgentRunEndPromise,
 } from "./session-context.js";
 import {
   cancelActiveSdkCompletionCheck,
   scheduleActiveSdkCompletionCheck,
 } from "./sdk-session-completion.js";
 import type { OpenClawPluginApi } from "@openclaw/plugin-sdk/core";
-import type { Language } from "./types.js";
+import { normalizeUsage } from "openclaw/plugin-sdk/agent-harness-runtime";
+import type { Language, PluginHookAgentContext, PluginHookAgentEndEvent } from "./types.js";
 import {
   BYAI_USER_MD_SECTION_END,
   BYAI_USER_MD_SECTION_START,
   buildChannelExtensionPrompt,
+  buildCompactionNoticeText,
   buildLanguagePrompt,
+  buildMaxTokenErrorText,
   buildSessionFilesPrompt,
   buildUserMdByaiUserSection,
   buildUserMdReloadPrompt,
   resolveInboundLanguage,
 } from "./i18n.js";
+import { isContextPressureLength } from "./overflow-length.js";
 import { getByaiRuntime } from "./runtime.js";
+import { resolveAgentIdFromSessionKey } from "openclaw/plugin-sdk/routing";
+import { takePromptInjectionSnapshot } from "./prompt-injection-snapshot.js";
+import {
+  consumeWorkspaceReloadHint,
+  markWorkspaceReloadHint,
+} from "./workspace-reload-hints.js";
+import {
+  resolveByaiAgentIdFromSessionKey,
+  resolveByaiSessionIdFromSessionKey,
+} from "./session-key.js";
+import { resolveByaiSessionStatus } from "./session-status-route.js";
+import { createRedisInstance } from "./utils.js";
 import path from "node:path";
 import fs from "node:fs/promises";
 
@@ -57,6 +77,62 @@ type MessageHookContext = {
   conversationId?: string;
 };
 
+type CompactionHookEvent = {
+  messageCount?: number;
+  compactedCount?: number;
+  tokenCount?: number;
+  sessionFile?: string;
+};
+
+// Raw provider usage payload. Key names vary across providers, so we run it
+// through openclaw's normalizeUsage instead of reading fields directly. Only
+// the buckets normalizeUsage understands are typed here; it tolerates the rest.
+type LlmOutputUsage = {
+  input?: number;
+  output?: number;
+  cacheRead?: number;
+  cacheWrite?: number;
+  total?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  promptTokens?: number;
+  completionTokens?: number;
+  input_tokens?: number;
+  output_tokens?: number;
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  cache_read_input_tokens?: number;
+  cache_creation_input_tokens?: number;
+  cached_tokens?: number;
+  total_tokens?: number;
+  totalTokens?: number;
+  prompt_tokens_details?: { cached_tokens?: number };
+  input_tokens_details?: { cached_tokens?: number };
+};
+
+type LlmOutputHookEvent = {
+  runId?: string;
+  sessionKey?: string;
+  provider?: string;
+  model?: string;
+  contextTokenBudget?: number;
+  contextWindowReferenceTokens?: number;
+  // Run-accumulated usage across the whole tool loop. NOT a context size: a
+  // multi-tool turn re-reads the context as cacheRead on every model call, so
+  // summing these buckets multiplies one context by the call count.
+  usage?: LlmOutputUsage;
+  // The single most recent assistant message. Its usage reflects one model
+  // call, which is what openclaw uses for the "context used" snapshot
+  // (see embedded-agent-runner/run.ts: "current context usage, not
+  // accumulated tool-loop usage").
+  lastAssistant?: { usage?: LlmOutputUsage };
+};
+
+type LlmOutputHookContext = PluginHookAgentContext & {
+  contextTokenBudget?: number;
+  contextWindowReferenceTokens?: number;
+};
+
 type RedisInfo = {
   username?: string;
   password?: string;
@@ -72,7 +148,258 @@ type ByaiUserInfo = {
   sourceSystem?: string;
 };
 
-const pendingWorkspaceReloadHints = new Set<string>();
+const compactionHookNoticeKeys = new Set<string>();
+
+function shouldEmitCompactionHookNotice(key: string): boolean {
+  if (compactionHookNoticeKeys.has(key)) {
+    return false;
+  }
+  compactionHookNoticeKeys.add(key);
+  setTimeout(() => {
+    compactionHookNoticeKeys.delete(key);
+  }, 10 * 60 * 1000).unref?.();
+  return true;
+}
+
+async function emitCompactionHookNotice(
+  api: OpenClawPluginApi,
+  phase: "start" | "end",
+  event: CompactionHookEvent,
+  ctx: PluginHookAgentContext,
+): Promise<void> {
+  const sessionKey = ctx.sessionKey?.trim();
+  if (!sessionKey) {
+    return;
+  }
+  const request = resolveActiveSdkRequestBySessionKey(sessionKey);
+  if (!request) {
+    return;
+  }
+  const key = [
+    request.sessionKey,
+    ctx.runId ?? "",
+    phase,
+    event.sessionFile ?? "",
+  ].join(":");
+  if (!shouldEmitCompactionHookNotice(key)) {
+    return;
+  }
+  await emitSdkChunkTracked(request.sessionKey, {
+    emitter: resolveSdkEmitter(request.accountId),
+    sessionId: request.sessionId,
+    traceId: request.traceId,
+    text: buildCompactionNoticeText(request.language, {
+      phase,
+      completed: phase === "end",
+      willRetry: false,
+    }),
+    options: {
+      messageId: `${ctx.runId || request.sessionKey}:compaction:${phase}:hook`,
+      parentMessageId: "-1",
+      eventType: EventType.REASONING_LOG_DELTA,
+      contentType: SseReasonMessageType.think_status_title,
+      objectType: "compaction",
+      status: phase === "start" ? "_START_" : "_DONE_",
+      metadata: {
+        isCompactionNotice: true,
+        compactionPhase: phase,
+        source: "compaction_hook",
+      },
+    },
+  });
+  api.logger.info(
+    `[byai-channel] emitted compaction ${phase} notice from hook: sessionKey=${request.sessionKey}`,
+  );
+}
+
+function resolveSessionStatusRedisKey(sessionId: string) {
+  return `byai:session:${sessionId}:status`;
+}
+
+// Writes the post-compaction context size using the token count the compaction
+// hook already carries (`event.tokenCount` = tokensAfter). We must NOT read the
+// session store here: after_compaction fires inside the runner, before
+// agentCommand persists the new totalTokens, so the store still holds the
+// pre-compaction value. The context budget (denominator) is stable across a
+// run, so we reuse it from the latest llm_output record already in redis.
+async function refreshCompactionSessionStatusRedis(
+  sessionKey: string | undefined,
+  tokensAfter: number | undefined,
+): Promise<void> {
+  const normalizedSessionKey = sessionKey?.trim();
+  if (!normalizedSessionKey) {
+    return;
+  }
+  const usedTokens = normalizeNonNegativeNumber(tokensAfter);
+  if (usedTokens === undefined) {
+    return;
+  }
+  const sessionId = resolveByaiSessionIdFromSessionKey(normalizedSessionKey);
+  if (!sessionId) {
+    return;
+  }
+  const redis = createRedisInstance();
+  if (!redis) {
+    return;
+  }
+  const agentId = resolveByaiAgentIdFromSessionKey(normalizedSessionKey);
+  const statusKey = resolveSessionStatusRedisKey(sessionId);
+  let contextTokens: number | null = null;
+  let modelProvider: string | null = null;
+  let model: string | null = null;
+  try {
+    const existingRaw = await redis.hget(statusKey, agentId);
+    if (existingRaw) {
+      const existing = JSON.parse(existingRaw) as Record<string, unknown>;
+      contextTokens = normalizeNonNegativeNumber(existing.contextTokens) ?? null;
+      modelProvider = typeof existing.modelProvider === "string" ? existing.modelProvider : null;
+      model = typeof existing.model === "string" ? existing.model : null;
+    }
+  } catch {
+    // Missing/garbled prior record just means we cannot compute percent yet;
+    // the next llm_output call will repopulate the budget.
+  }
+  const percent =
+    contextTokens !== null && contextTokens > 0
+      ? Math.min(Math.round((usedTokens / contextTokens) * 100), 100)
+      : null;
+  redis.hset(statusKey, agentId, JSON.stringify({
+    ok: true,
+    exists: true,
+    sessionKey: normalizedSessionKey,
+    agentId,
+    sessionId,
+    fresh: true,
+    realtime: true,
+    source: "after_compaction",
+    usedTokens,
+    contextTokens,
+    percent,
+    modelProvider,
+    model,
+  }));
+}
+
+function normalizeNonNegativeNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? Math.floor(value)
+    : undefined;
+}
+
+type NormalizedLlmUsage = {
+  input?: number;
+  output?: number;
+  cacheRead?: number;
+  cacheWrite?: number;
+  total?: number;
+};
+
+// Prompt/context size for one model call: uncached input + cache reads + cache
+// writes. Matches openclaw's derivePromptTokens so the percentage lines up with
+// the Web UI's context-used meter. Output tokens are intentionally excluded.
+function resolveLlmOutputUsedTokens(usage: NormalizedLlmUsage | undefined): number | undefined {
+  if (!usage) {
+    return undefined;
+  }
+  const input = normalizeNonNegativeNumber(usage.input);
+  const cacheRead = normalizeNonNegativeNumber(usage.cacheRead);
+  const cacheWrite = normalizeNonNegativeNumber(usage.cacheWrite);
+  if (input === undefined && cacheRead === undefined && cacheWrite === undefined) {
+    return undefined;
+  }
+  return (input ?? 0) + (cacheRead ?? 0) + (cacheWrite ?? 0);
+}
+
+async function refreshRealtimeSessionStatusRedis(
+  event: LlmOutputHookEvent,
+  ctx: LlmOutputHookContext,
+): Promise<void> {
+  const sessionKey = (ctx.sessionKey ?? event.sessionKey)?.trim();
+  if (!sessionKey) {
+    return;
+  }
+  const sessionId = resolveByaiSessionIdFromSessionKey(sessionKey);
+  if (!sessionId) {
+    return;
+  }
+  // Use the last single model call, not the run-accumulated event.usage, so the
+  // reported context size matches the Web UI (which snapshots the latest call's
+  // prompt tokens). normalizeUsage also reconciles provider key-name and
+  // OpenAI-style "cached tokens included in prompt" differences.
+  const lastCallUsage = normalizeUsage(event.lastAssistant?.usage) ?? normalizeUsage(event.usage);
+  const usedTokens = resolveLlmOutputUsedTokens(lastCallUsage);
+  if (usedTokens === undefined) {
+    return;
+  }
+  const contextTokens =
+    normalizeNonNegativeNumber(event.contextTokenBudget) ??
+    normalizeNonNegativeNumber(ctx.contextTokenBudget) ??
+    normalizeNonNegativeNumber(event.contextWindowReferenceTokens) ??
+    normalizeNonNegativeNumber(ctx.contextWindowReferenceTokens) ??
+    null;
+  const percent =
+    contextTokens !== null && contextTokens > 0
+      ? Math.min(Math.round((usedTokens / contextTokens) * 100), 100)
+      : null;
+  const redis = createRedisInstance();
+  if (!redis) {
+    return;
+  }
+  const agentId = resolveByaiAgentIdFromSessionKey(sessionKey);
+  redis.hset(resolveSessionStatusRedisKey(sessionId), agentId, JSON.stringify({
+    ok: true,
+    exists: true,
+    sessionKey,
+    agentId,
+    sessionId,
+    fresh: true,
+    realtime: true,
+    source: "llm_output",
+    runId: event.runId ?? ctx.runId,
+    usedTokens,
+    contextTokens,
+    percent,
+    modelProvider: event.provider ?? null,
+    model: event.model ?? null,
+    inputTokens: normalizeNonNegativeNumber(lastCallUsage?.input) ?? null,
+    cacheRead: normalizeNonNegativeNumber(lastCallUsage?.cacheRead) ?? null,
+    cacheWrite: normalizeNonNegativeNumber(lastCallUsage?.cacheWrite) ?? null,
+    outputTokens: normalizeNonNegativeNumber(lastCallUsage?.output) ?? null,
+  }));
+}
+
+// Baseline context-used snapshot at turn start. before_dispatch fires once per
+// inbound dispatch, before any token is spent this turn. Reading the session
+// store here is safe and intentional: it still holds the *previous* turn's
+// persisted totalTokens, which is exactly the context size this turn starts
+// from. The first llm_output of the turn then overwrites this with live data.
+async function refreshRunStartSessionStatusRedis(sessionKey: string | undefined): Promise<void> {
+  const normalizedSessionKey = sessionKey?.trim();
+  if (!normalizedSessionKey) {
+    return;
+  }
+  const sessionId = resolveByaiSessionIdFromSessionKey(normalizedSessionKey);
+  if (!sessionId) {
+    return;
+  }
+  try {
+    const status = await resolveByaiSessionStatus(normalizedSessionKey);
+    const agentId = status.agentId as string;
+    const redis = createRedisInstance();
+    if (!redis) {
+      return;
+    }
+    redis.hset(resolveSessionStatusRedisKey(sessionId), agentId, JSON.stringify({
+      ...status,
+      sessionId,
+      source: "before_dispatch",
+    }));
+  } catch (err) {
+    console.warn(
+      `[byai-channel] run-start session status refresh failed: sessionKey=${normalizedSessionKey}, error=${String(err)}`,
+    );
+  }
+}
 
 function getRedisInfo(): RedisInfo | null {
   const {
@@ -193,11 +520,88 @@ async function syncWorkspaceUserMd(
     return;
   }
   await fs.writeFile(userMdPath, next, "utf8");
-  pendingWorkspaceReloadHints.add(path.resolve(workspaceDir));
+  markWorkspaceReloadHint(workspaceDir);
   api.logger.info(`byai-channel synced USER.md: ${userMdPath}`);
 }
 
 export function registerByaiHooks(api: OpenClawPluginApi): void {
+  api.on("before_compaction", (event: CompactionHookEvent, ctx: PluginHookAgentContext) => {
+    if (event?.messageCount !== -1) {
+      return;
+    }
+    setImmediate(() => {
+      void enqueueAfterAgentEvents(
+        `before_compaction sessionKey=${ctx.sessionKey ?? ""}`,
+        async () => {
+          await emitCompactionHookNotice(api, "start", event, ctx);
+        },
+      ).catch((err) => {
+        api.logger.error(`[byai-channel] before_compaction enqueue failed: ${String(err)}`);
+      });
+    });
+  });
+
+  api.on("after_compaction", (event: CompactionHookEvent, ctx: PluginHookAgentContext) => {
+    if (event?.compactedCount !== -1) {
+      return;
+    }
+    // Use the post-compaction token count from the event; the session store is
+    // not yet updated at this point (see refreshCompactionSessionStatusRedis).
+    void refreshCompactionSessionStatusRedis(ctx.sessionKey, event.tokenCount).catch((err) => {
+      api.logger.warn(`[byai-channel] after_compaction session status refresh failed: ${String(err)}`);
+    });
+    setImmediate(() => {
+      void enqueueAfterAgentEvents(
+        `after_compaction sessionKey=${ctx.sessionKey ?? ""}`,
+        async () => {
+          await emitCompactionHookNotice(api, "end", event, ctx);
+        },
+      ).catch((err) => {
+        api.logger.error(`[byai-channel] after_compaction enqueue failed: ${String(err)}`);
+      });
+    });
+  });
+
+  // USER.md sync runs once per inbound dispatch, not on every before_prompt_build
+  // iteration (tool rounds re-enter before_prompt_build while the embedded session
+  // lock may be released for model I/O — see attempt.session-lock.ts).
+  api.on("before_dispatch", async (event, ctx) => {
+    if (ctx.channelId !== "byai-channel") {
+      return;
+    }
+    const sessionKey = event.sessionKey?.trim() || ctx.sessionKey?.trim();
+    if (!sessionKey) {
+      return;
+    }
+    // Baseline context-used snapshot for the turn. before_dispatch fires once
+    // per inbound dispatch, before any token is spent, so the session store
+    // still holds the previous turn's totalTokens — exactly the context size
+    // this turn starts from. The first llm_output then overwrites it with live
+    // data. Done before the request/agent guards below so it is not skipped.
+    void refreshRunStartSessionStatusRedis(sessionKey).catch((err) => {
+      api.logger.warn(
+        `[byai-channel] before_dispatch session status refresh failed: ${String(err)}`,
+      );
+    });
+    const request = resolveActiveSdkRequestBySessionKey(sessionKey);
+    if (!request) {
+      return;
+    }
+    const agentId = resolveAgentIdFromSessionKey(sessionKey);
+    if (!agentId) {
+      return;
+    }
+    const rt = getByaiRuntime();
+    const cfg = rt.config.current?.() ?? rt.config.loadConfig();
+    const workspaceDir = rt.agent.resolveAgentWorkspaceDir(cfg, agentId);
+    const hintLanguage = request.language ?? resolveInboundLanguage(undefined).language;
+    try {
+      await syncWorkspaceUserMd(api, workspaceDir, hintLanguage);
+    } catch (err) {
+      api.logger.warn(`byai-channel sync USER.md failed: ${String(err)}`);
+    }
+  });
+
   api.on("before_prompt_build", (event: {
     prompt: string;
   }, ctx: {
@@ -212,6 +616,16 @@ export function registerByaiHooks(api: OpenClawPluginApi): void {
     trigger?: string;
     channelId?: string; 
   }): BeforePromptBuildResult => {
+    const snapshot = takePromptInjectionSnapshot(ctx.sessionKey);
+    if (snapshot?.appendSystemContext) {
+      api.logger.info(
+        `before_prompt_build hook emits (snapshot), sessionId=${ctx.sessionId}, appendSystemContext=${snapshot.appendSystemContext}`,
+      );
+      return {
+        appendSystemContext: snapshot.appendSystemContext,
+      };
+    }
+
     let hintLanguage = resolveInboundLanguage(undefined).language;
     if (ctx.sessionKey) {
       const earlyRequest = resolveActiveSdkRequestBySessionKey(ctx.sessionKey);
@@ -219,14 +633,10 @@ export function registerByaiHooks(api: OpenClawPluginApi): void {
         hintLanguage = earlyRequest.language;
       }
     }
-    void syncWorkspaceUserMd(api, ctx.workspaceDir, hintLanguage).catch((err) => {
-      api.logger.warn(`byai-channel sync USER.md failed: ${String(err)}`);
-    });
     const sections: string[] = [];
     const normalizedWorkspace = ctx.workspaceDir ? path.resolve(ctx.workspaceDir) : "";
-    if (normalizedWorkspace && pendingWorkspaceReloadHints.has(normalizedWorkspace)) {
+    if (consumeWorkspaceReloadHint(normalizedWorkspace)) {
       sections.push(buildUserMdReloadPrompt(hintLanguage));
-      pendingWorkspaceReloadHints.delete(normalizedWorkspace);
     }
     if (ctx.sessionKey) {
       const request = resolveActiveSdkRequestBySessionKey(ctx.sessionKey);
@@ -245,66 +655,13 @@ export function registerByaiHooks(api: OpenClawPluginApi): void {
       }
     }
     const appendSystemContext = sections.join("\n\n");
-    api.logger.info(`before_prompt_build hook emits, sessionId=${ctx.sessionId}, appendSystemContext=${appendSystemContext}`);
+    api.logger.info(
+      `before_prompt_build hook emits, sessionId=${ctx.sessionId}, appendSystemContext=${appendSystemContext}`,
+    );
     return {
       appendSystemContext,
     };
   });
-
-  /*
-  api.on("before_message_write", (event: BeforeMessageWriteEvent, ctx: BeforeMessageWriteContext) => {
-    const sessionKey = event?.sessionKey ?? ctx?.sessionKey;
-    if (!sessionKey) {
-      return;
-    }
-    const request = resolveActiveSdkRequestBySessionKey(sessionKey);
-    if (!request) {
-      return;
-    }
-    void enqueueAfterAgentEvents(
-      api,
-      `before_message_write emit sessionKey=${sessionKey}`,
-      async () => {
-        const activeRequest = resolveActiveSdkRequestBySessionKey(sessionKey) ?? request;
-        const sdkEmitter = resolveSdkEmitter(activeRequest.accountId);
-        if (!sdkEmitter) {
-          return;
-        }
-        const payload = buildBeforeMessageWritePayload(event?.message, {
-          sessionKey,
-          agentId: event?.agentId ?? ctx?.agentId,
-        });
-        if (!payload) {
-          return;
-        }
-        await emitSdkChunkTracked({
-          emitter: sdkEmitter,
-          sessionId: activeRequest.sessionId,
-          traceId: activeRequest.traceId,
-          text: `写入消息: ${payload.role}`,
-          options: {
-            messageId: payload.messageId,
-            parentMessageId: "-1",
-            eventType: EventType.REASONING_LOG_DELTA,
-            contentType: SseReasonMessageType.think_title,
-          },
-        });
-        await emitSdkChunkTracked({
-          emitter: sdkEmitter,
-          sessionId: activeRequest.sessionId,
-          traceId: activeRequest.traceId,
-          text: payload.text,
-          options: {
-            messageId: `${payload.messageId}-payload`,
-            parentMessageId: payload.messageId,
-            eventType: EventType.REASONING_LOG_DELTA,
-            contentType: SseReasonMessageType.think_code_result,
-          },
-        });
-      },
-    );
-  });
-  */
 
   api.on("message_sending", (event: MessageSendingEvent, ctx: MessageHookContext) => {
     if (ctx?.channelId !== "byai-channel") {
@@ -314,34 +671,22 @@ export function registerByaiHooks(api: OpenClawPluginApi): void {
     if (!request) {
       return;
     }
-    void enqueueAfterAgentEvents(
-      api,
-      `message_sending sessionKey=${request.sessionKey}`,
-      async () => {
-        const activeRequest = markActiveSdkOutboundSending(ctx?.accountId, event?.to);
-        if (!activeRequest) {
-          return;
-        }
-        if (!activeRequest.hasEmittedContent && event?.content) {
-          const sdkEmitter = resolveSdkEmitter(activeRequest.accountId);
-          if (sdkEmitter) {
-            await emitSdkChunkTracked({
-              emitter: sdkEmitter,
-              sessionId: activeRequest.sessionId,
-              traceId: activeRequest.traceId,
-              text: event.content,
-              options: {
-                messageId: activeRequest.sessionKey,
-                parentMessageId: "-1",
-                eventType: EventType.ANSWER_DELTA,
-              },
-            });
-            activeRequest.hasEmittedContent = true;
+    const accountId = ctx?.accountId;
+    const to = event?.to ?? "";
+    setImmediate(() => {
+      void enqueueAfterAgentEvents(
+        `message_sending sessionKey=${request.sessionKey}`,
+        async () => {
+          const activeRequest = markActiveSdkOutboundSending(accountId, to);
+          if (!activeRequest) {
+            return;
           }
-        }
-        cancelActiveSdkCompletionCheck(activeRequest.sessionKey);
-      },
-    );
+          cancelActiveSdkCompletionCheck(activeRequest.sessionKey);
+        },
+      ).catch((err) => {
+        api.logger.error(`[byai-channel] message_sending enqueue failed: ${String(err)}`);
+      });
+    });
   });
 
   api.on("message_sent", (event: MessageSendingEvent & { success?: boolean; error?: string }, ctx: MessageHookContext) => {
@@ -352,75 +697,162 @@ export function registerByaiHooks(api: OpenClawPluginApi): void {
     if (!request) {
       return;
     }
-    void enqueueAfterAgentEvents(
-      api,
-      `message_sent sessionKey=${request.sessionKey}`,
-      async () => {
-        const activeRequest = markActiveSdkOutboundSent(ctx?.accountId, event?.to);
-        if (!activeRequest) {
-          return;
-        }
-        if (!activeRequest.rootLifecyclePhase) {
-          activeRequest.rootLifecyclePhase = event?.success === false ? "error" : "end";
-        }
-        scheduleActiveSdkCompletionCheck(
-          api,
-          activeRequest.sessionKey,
-          `message_sent:${event?.success === false ? "failed" : "ok"}`,
-        );
-      },
-    );
+    const accountId = ctx?.accountId;
+    const to = event?.to ?? "";
+    const success = event?.success;
+    setImmediate(() => {
+      void enqueueAfterAgentEvents(
+        `message_sent sessionKey=${request.sessionKey}`,
+        async () => {
+          const activeRequest = markActiveSdkOutboundSent(accountId, to);
+          if (!activeRequest) {
+            return;
+          }
+          scheduleActiveSdkCompletionCheck(
+            api,
+            activeRequest.sessionKey,
+            `message_sent:${success === false ? "failed" : "ok"}`,
+          );
+        },
+      ).catch((err) => {
+        api.logger.error(`[byai-channel] message_sent enqueue failed: ${String(err)}`);
+      });
+    });
   });
-}
 
-function buildBeforeMessageWritePayload(
-  message: unknown,
-  ctx: {
-    sessionKey: string;
-    agentId?: string;
-  },
-): { role: string, text: string; messageId: string } | null {
-  const role = typeof (message as { role?: unknown })?.role === "string"
-    ? String((message as { role?: string }).role)
-    : "unknown";
-  const content = extractMessageContent(message);
-  if (!content) {
-    return null;
-  }
-  const summary = JSON.stringify(
-    {
-      role,
-      content,
+  // core 不把 contextTokenBudget 透传进 agent_end 的 ctx，但 model_call_started 的 event/ctx 都带。
+  // 在每次 model 调用开始时按 sessionKey 暂存有效窗口，供 agent_end 判别 length 截断是否属上下文压力。
+  api.on(
+    "model_call_started",
+    (
+      event: {
+        runId?: string;
+        sessionKey?: string;
+        contextTokenBudget?: number;
+        contextWindowReferenceTokens?: number;
+      },
+      ctx: {
+        sessionKey?: string;
+        contextTokenBudget?: number;
+        contextWindowReferenceTokens?: number;
+      },
+    ) => {
+      const sessionKey = ctx.sessionKey ?? event.sessionKey;
+      if (!sessionKey) {
+        return;
+      }
+      const budget = event.contextTokenBudget ?? ctx.contextTokenBudget;
+      // 用原生参考窗口优先于 budget（budget 可能被 cap 收窄），作为 threshold 判据的分母。
+      const window =
+        event.contextWindowReferenceTokens ??
+        ctx.contextWindowReferenceTokens ??
+        budget;
+      if (typeof window === "number" && window > 0) {
+        markActiveSdkContextWindow(sessionKey, window, budget);
+      }
     },
-    null,
-    2,
   );
-  return {
-    role,
-    text: JSON.stringify(summary, null, 2),
-    messageId: `before_message_write:${ctx.sessionKey}:${Date.now()}`,
-  };
-}
 
-function extractMessageContent(message: unknown): string {
-  const rawContent = (message as { content?: unknown })?.content;
-  if (typeof rawContent === "string") {
-    return rawContent.trim();
-  }
-  if (!Array.isArray(rawContent)) {
-    return "";
-  }
-  const texts = rawContent
-    .map((item) => {
-      if (!item || typeof item !== "object") {
-        return "";
+  api.on("llm_output", (event: LlmOutputHookEvent, ctx: LlmOutputHookContext) => {
+    void refreshRealtimeSessionStatusRedis(event, ctx).catch((err) => {
+      api.logger.warn(`[byai-channel] llm_output session status refresh failed: ${String(err)}`);
+    });
+  });
+
+  api.on("agent_end", (event: PluginHookAgentEndEvent, ctx: PluginHookAgentContext) => {
+    const { runId } = ctx;
+    if (!runId) {
+      return;
+    }
+    const runBinding = resolveActiveSdkRunBinding(runId);
+    const language = runBinding?.request?.language;
+    let resolve = getAgentRunEndPromiseResolver(runId);
+    let _success = event.success;
+    let _error = event.error;
+    // stopReason=length 等部分情况下，虽然 event.success = true。但是业务上可以认为失败了。
+    if (_success && Array.isArray(event.messages) && event.messages.length) {
+      const lastAssistant = event.messages
+        .slice()
+        .toReversed()
+        .find((message) => {
+          if (message && typeof message === "object" && "role" in message) {
+            return message.role === "assistant";
+          }
+          return false;
+        });
+      if (lastAssistant) {
+        const {
+          stopReason,
+          errorMessage,
+          usage,
+        } = lastAssistant as {
+          stopReason?: string;
+          errorMessage?: string;
+          usage?: {
+            input?: number;
+            output?: number;
+            cacheRead?: number;
+            cacheWrite?: number;
+            total?: number;
+            totalTokens?: number;
+          };
+        }
+        if (errorMessage) {
+          _success = false;
+          _error = errorMessage;
+        } else if (stopReason === "length") {
+          // 区分两类 length 截断：
+          // - 上下文压力型（length + 上下文已越过 core 压缩阈值 totalTokens > window-reserveTokens）：
+          //   core 不会自动续写，但会在下一条消息 pre-prompt 触发 threshold 压缩。标记之，让 under-gate
+          //   自动续跑并 emit 真答案；run-end 不带 error（这一截断 run 无可交付答案，避免 emit 误导文案）。
+          // - 真·maxToken 截断（模型写得多、被输出上限切断，上下文未越阈值）：保留原「调高 maxToken」提示。
+          // contextWindow 来自 model_call_started hook 的快照（core 不把它透传进 agent_end 的 ctx）。
+          const contextWindow = runBinding?.request?.lastContextWindow;
+          if (isContextPressureLength({ stopReason, usage, contextWindow })) {
+            markActiveSdkOverflowLength(sessionKey, true, {
+              stopReason,
+              usage,
+              contextWindow,
+            });
+            // 同步阻断完成门：截断 run 的 lifecycle-end 会 schedule 一个 200ms debounce 的完成
+            // 检查；必须在它触发前挡住，否则截断收尾、丢掉续跑答案。under-gate 编排会在续跑
+            // 结束（或放弃续跑）后释放该门。
+            markActiveSdkOverflowContinuePending(sessionKey, true);
+            api.logger.info(
+              `[byai-channel] context-pressure length detected: sessionKey=${sessionKey ?? ""} ` +
+                `runId=${runId} stopReason=${stopReason} ` +
+                `contextWindow=${contextWindow ?? "unknown"} usage=${JSON.stringify(usage ?? {})}`,
+            );
+            _success = true;
+            _error = undefined;
+          } else {
+            _success = false;
+            _error = buildMaxTokenErrorText(language);
+          }
+        } else if (stopReason === "aborted") {
+          // 兜底。正常来说 stopReason=aborted 时，error=true, 且有 errorMessage
+          _success = false;
+          _error = "The request was interrupted (timed out or cancelled voluntarily) and the reply could not be completed. Please try again.";
+        }
       }
-      const candidate = item as { type?: unknown; text?: unknown };
-      if (candidate.type !== "text" || typeof candidate.text !== "string") {
-        return "";
-      }
-      return candidate.text.trim();
-    })
-    .filter(Boolean);
-  return texts.join("\n").trim();
+    }
+    api.logger.info(
+      `agent_end hook emits, runId=${ctx.runId}, success=${_success}, error=${_error}`,
+    );
+    if (!resolve) {
+      registerAgentRunEndPromise(runId, {
+        success: _success,
+        error: _error,
+      });
+    } else {
+      resolve({
+        success: _success,
+        error: _error,
+      });
+    }
+    // Intentionally no session-status write here: agent_end fires inside the
+    // runner before agentCommand persists this turn's totalTokens, so reading
+    // the store would publish a stale (previous-turn) value and could clobber
+    // the fresh figure already written by llm_output / after_compaction.
+  });
 }

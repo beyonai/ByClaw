@@ -59,6 +59,7 @@ const ResourceTabs: React.FC<Props> = ({
   const [sharedResources, setSharedResources] = useState<any[]>([]);
   const [sharedLoading, setSharedLoading] = useState(false);
   const [brandVersion, setBrandVersion] = useState<'commercial' | 'openSource' | null>(null);
+  const [brandVersionLoaded, setBrandVersionLoaded] = useState(false);
   const sharedQueryKeyRef = useRef('');
   const debounceTimer = useRef<NodeJS.Timeout | null>(null);
 
@@ -74,7 +75,7 @@ const ResourceTabs: React.FC<Props> = ({
   const { layoutMode, agentInfo, EventEmitter } = useGlobal();
 
   const { agentType } = agentInfo || {};
-  const isOpenSource = brandVersion === 'openSource';
+  const isOpenSource = brandVersionLoaded && brandVersion !== 'commercial';
 
   const { message } = App.useApp();
 
@@ -97,10 +98,14 @@ const ResourceTabs: React.FC<Props> = ({
   useEffect(() => {
     getDcSystemConfig({ paramCode: 'BYAI_BRAND_VERSION' })
       .then((res: any) => {
-        setBrandVersion(res?.paramValue);
+        const nextBrandVersion = res?.paramValue;
+        setBrandVersion(nextBrandVersion === 'commercial' ? 'commercial' : null);
       })
       .catch(() => {
-        setBrandVersion('openSource');
+        setBrandVersion(null);
+      })
+      .finally(() => {
+        setBrandVersionLoaded(true);
       });
   }, []);
 
@@ -238,7 +243,7 @@ const ResourceTabs: React.FC<Props> = ({
       if (
         uploadFiles.some((file) => {
           const fileName = file.name.toLowerCase();
-          return !fileName.endsWith('.zip') && !fileName.endsWith('.tar.gz');
+          return !fileName.endsWith('.zip');
         })
       ) {
         message.error(intl.formatMessage({ id: 'resourceTabs.skillUpload.onlyZip' }));
@@ -393,7 +398,7 @@ const ResourceTabs: React.FC<Props> = ({
     if (visibleKeys.includes('tool')) visible.push('tool');
     if (visibleKeys.includes('view')) visible.push('view');
     if (visibleKeys.includes('object')) visible.push('object');
-    if (visibleKeys.includes('file')) visible.push('file');
+    if (isOpenSource) visible.push('file');
     if (isOpenSource) visible.push('skill');
     if (!visible.length) return;
     const newActiveTabValue = activeTab && visible.includes(activeTab) ? activeTab : visible[0];
@@ -511,68 +516,70 @@ const ResourceTabs: React.FC<Props> = ({
         ),
       });
     }
-    items.push({
-      key: 'file',
-      label: intl.formatMessage({ id: 'common.file' }),
-      children: (
-        <div className={styles.listContainer}>
-          {pathHistory.length > 0 && (
-            <div className={styles.filePathHeader}>
-              <button type="button" className={styles.backButton} onClick={handleBackClick}>
-                ← 返回上一级
-              </button>
-            </div>
-          )}
-          <div className={styles.fileList}>
-            {fileLoading ? (
-              <div className={classNames('ub ub-ac ub-pc', styles.loadingContainer)}>
-                <Spin />
+    if (isOpenSource) {
+      items.push({
+        key: 'file',
+        label: intl.formatMessage({ id: 'common.file' }),
+        children: (
+          <div className={styles.listContainer}>
+            {pathHistory.length > 0 && (
+              <div className={styles.filePathHeader}>
+                <button type="button" className={styles.backButton} onClick={handleBackClick}>
+                  ← 返回上一级
+                </button>
               </div>
-            ) : fileList.length === 0 ? (
-              <div className={styles.emptyContainer}>
-                <Empty image={AntdEmpty.PRESENTED_IMAGE_SIMPLE} />
-              </div>
-            ) : (
-              fileList.map((file, index) => (
-                <div
-                  key={`${file.name}-${index}`}
-                  className={`${styles.fileItem} ${file.dir ? styles.folderItem : styles.fileItem}`}
-                  onClick={() => {
-                    if (file.dir) {
-                      handleFolderClick(file.filePath);
-                    } else {
-                      onSelectFile({
-                        resourceId: `${file.filePath}/${file.name}`,
-                        resourceName: file.name,
-                        resourceType: 'FILE',
-                      });
-                    }
-                  }}
-                >
-                  <span className={styles.fileIcon}>{file.dir ? '📁' : '📄'}</span>
-                  <span className={styles.fileName}>{file.name}</span>
-                  {!file.dir && (
-                    <Button
-                      type="text"
-                      size="small"
-                      className={styles.downloadBtn}
-                      loading={downloadingFile === file.filePath}
-                      disabled={!!downloadingFile}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDownloadFile(file.filePath, file.name);
-                      }}
-                    >
-                      下载
-                    </Button>
-                  )}
-                </div>
-              ))
             )}
+            <div className={styles.fileList}>
+              {fileLoading ? (
+                <div className={classNames('ub ub-ac ub-pc', styles.loadingContainer)}>
+                  <Spin />
+                </div>
+              ) : fileList.length === 0 ? (
+                <div className={styles.emptyContainer}>
+                  <Empty image={AntdEmpty.PRESENTED_IMAGE_SIMPLE} />
+                </div>
+              ) : (
+                fileList.map((file, index) => (
+                  <div
+                    key={`${file.name}-${index}`}
+                    className={`${styles.fileItem} ${file.dir ? styles.folderItem : styles.fileItem}`}
+                    onClick={() => {
+                      if (file.dir) {
+                        handleFolderClick(file.filePath);
+                      } else {
+                        onSelectFile({
+                          resourceId: `${file.filePath}/${file.name}`,
+                          resourceName: file.name,
+                          resourceType: 'FILE',
+                        });
+                      }
+                    }}
+                  >
+                    <span className={styles.fileIcon}>{file.dir ? '📁' : '📄'}</span>
+                    <span className={styles.fileName}>{file.name}</span>
+                    {!file.dir && (
+                      <Button
+                        type="text"
+                        size="small"
+                        className={styles.downloadBtn}
+                        loading={downloadingFile === file.filePath}
+                        disabled={!!downloadingFile}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDownloadFile(file.filePath, file.name);
+                        }}
+                      >
+                        下载
+                      </Button>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
           </div>
-        </div>
-      ),
-    });
+        ),
+      });
+    }
     return items;
   }, [
     intl,
@@ -646,7 +653,7 @@ const ResourceTabs: React.FC<Props> = ({
       return visibleKeys.includes(tab.key);
     });
 
-    return [...baseTabs, ...filteredConditionalTabs, ...(isOpenSource ? [skillTab] : []), fileTab];
+    return [...baseTabs, ...filteredConditionalTabs, ...(isOpenSource ? [skillTab, fileTab] : [])];
   }, [agentType, intl, visibleKeys, isOpenSource]);
 
   if (!hasAnyTab) {

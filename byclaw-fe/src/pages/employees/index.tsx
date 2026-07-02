@@ -102,12 +102,12 @@ const Employees = () => {
     return payload;
   }, [appInfo]);
 
-  const canChat = useMemo(() => {
-    if (isBottom) return true;
-    const { grantType } = agentInfo || {};
-    console.log('grantType', grantType);
-    return !!grantType;
-  }, [agentInfo, isBottom]);
+  // const canChat = useMemo(() => {
+  //   if (isBottom) return true;
+  //   const { grantType } = agentInfo || {};
+  //   console.log('grantType', grantType);
+  //   return !!grantType;
+  // }, [agentInfo, isBottom]);
 
   const disableActionList = React.useMemo(() => {
     const list: ('delete' | 'apply' | 'unapply')[] = [];
@@ -323,20 +323,20 @@ const Employees = () => {
             </div>
           )}
 
-          {canChat && (
-            <div className={classnames({ 'ub-f1': isBottom })}>
-              <ChatLayoutComp
-                sessionId={sessionId || ''}
-                getContainer={() => document.getElementById('employees_wrapper')}
-                agentType={agentTypeMap.agent}
-                queryInputProps={{
-                  placeholder: '',
-                }}
-                isBottom={isBottom}
-                setIsBottom={setIsBottom}
-              />
-            </div>
-          )}
+          {/* {canChat && ( */}
+          <div className={classnames({ 'ub-f1': isBottom })}>
+            <ChatLayoutComp
+              sessionId={sessionId || ''}
+              getContainer={() => document.getElementById('employees_wrapper')}
+              agentType={agentTypeMap.agent}
+              queryInputProps={{
+                placeholder: '',
+              }}
+              isBottom={isBottom}
+              setIsBottom={setIsBottom}
+            />
+          </div>
+          {/* )} */}
         </div>
       </div>
 

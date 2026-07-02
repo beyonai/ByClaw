@@ -1,0 +1,68 @@
+.paramSettings {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+
+  p {
+    margin: 0;
+    color: var(--beyond-color-text-tertiary);
+  }
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 16px 0;
+}
+
+.keywordSearch {
+  width: 320px;
+}
+
+.statusFilter {
+  width: 160px;
+}
+
+.tableCard {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border: none;
+  background: #fff;
+
+  :global {
+    .@{antPrefix}-card-body {
+      padding: 0;
+    }
+
+    .@{antPrefix}-table-thead > tr > th {
+      white-space: nowrap;
+    }
+  }
+}
+
+.keyCell {
+  display: inline-flex;
+  max-width: 100%;
+}
+
+.formGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 16px;
+}
+
+.valueExtra {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}

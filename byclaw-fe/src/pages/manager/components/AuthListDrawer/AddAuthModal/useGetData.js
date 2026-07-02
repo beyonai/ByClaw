@@ -61,7 +61,7 @@ const useGetData = (props) => {
           ...params,
         },
         success: (res) => {
-          const { rows = [], pageNum: newPageIndex, total: newTotal } = res?.data || {};
+          const { rows = [], pageNum: newPageNum, total: newTotal } = res?.data || {};
           const temp = rows.map((item) => ({
             ...item,
             id: `${dataItemTypeMap.user.toLowerCase()}_${item.userId}`,
@@ -71,7 +71,7 @@ const useGetData = (props) => {
           setMemberList((pre) => [...pre, ...uniqBy(temp, 'userId')]);
           setPagination((pre) => ({
             ...pre,
-            pageNum: newPageIndex,
+            pageNum: newPageNum || params?.pageNum || 1,
             total: newTotal,
           }));
         },
@@ -93,7 +93,7 @@ const useGetData = (props) => {
           ...params,
         },
         success: (res) => {
-          const { rows = [], pageNum: newPageIndex, total: newTotal } = res?.data || {};
+          const { rows = [], pageNum: newPageNum, total: newTotal } = res?.data || {};
           setPostList((pre) => [
             ...pre,
             ...rows.map((ele) => ({
@@ -105,7 +105,7 @@ const useGetData = (props) => {
           ]);
           setPagination((pre) => ({
             ...pre,
-            pageNum: newPageIndex,
+            pageNum: newPageNum || params?.pageNum || 1,
             total: newTotal,
           }));
         },
@@ -146,23 +146,23 @@ const useGetData = (props) => {
   // 多功能集中复用的非搜索状态下的查询方法
   const handleGetList = useCallback(
     (params = {}, loadMore = false) => {
-      let newPageIndex = pageNum + 1;
+      let newPageNum = pageNum + 1;
       if (!loadMore) {
         setMemberList([]);
         setPostList([]);
         setPagination(defaultPagination);
-        newPageIndex = 1;
+        newPageNum = 1;
       }
 
       switch (listType) {
         case listTypeMap.post:
-          getPostList({ pageNum: newPageIndex, ...params });
+          getPostList({ pageNum: newPageNum, ...params });
           break;
 
         case listTypeMap.org:
         default:
           getMemberList({
-            pageNum: newPageIndex,
+            pageNum: newPageNum,
             orgId: params?.orgId ?? last(treePath)?.orgId,
             ...params,
           });

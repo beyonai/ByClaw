@@ -8,6 +8,8 @@ import {
   createGroupChat,
   addMessage,
   getMessageState,
+  getChatRunningSnapshot,
+  qryTroubleshootSession,
 } from '../message';
 
 // Mock the request module
@@ -62,6 +64,16 @@ describe('Message Service', () => {
           customHandle: true,
         },
       });
+    });
+  });
+
+  describe('qryTroubleshootSession', () => {
+    it('should call POST with messageId payload', () => {
+      const payload = { messageId: 'msg123' };
+
+      qryTroubleshootSession(payload);
+
+      expect(mockPOST).toHaveBeenCalledWith('/byaiService/assiman/qryTroubleshootSession', payload);
     });
   });
 
@@ -161,6 +173,16 @@ describe('Message Service', () => {
       getMessageState(payload);
 
       expect(mockPOST).toHaveBeenCalledWith('/byaiService/menTaskController/getResComList', payload);
+    });
+  });
+
+  describe('getChatRunningSnapshot', () => {
+    it('should call POST with running snapshot payload', () => {
+      const payload = { sessionId: 'session123', traceId: 'q1_a1', modelAnswerMessageId: 'a1' };
+
+      getChatRunningSnapshot(payload);
+
+      expect(mockPOST).toHaveBeenCalledWith('/byaiService/chat/runningSnapshot', payload);
     });
   });
 });

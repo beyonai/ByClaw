@@ -2,7 +2,20 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable indent */
 import React, { useEffect, useState, useRef, forwardRef, useImperativeHandle, useMemo } from 'react';
-import { Button, Checkbox, Dropdown, Pagination, message, Modal, Empty, Radio, Space, Row, Input } from 'antd';
+import {
+  Button,
+  Checkbox,
+  Dropdown,
+  Pagination,
+  message,
+  Modal,
+  Empty,
+  Radio,
+  Space,
+  Row,
+  Input,
+  Popconfirm,
+} from 'antd';
 import { useDispatch, useSelector, useIntl } from '@umijs/max';
 import { isEmpty } from 'lodash';
 import Ellipsis from '@/pages/manager/components/Ellipsis';
@@ -10,6 +23,8 @@ import Layout from '@/pages/manager/components/ausong/Layout';
 import ResizeTable from '@/pages/manager/components/ResizeTable';
 import { getFilterParams } from '@/pages/manager/utils/managerUtils';
 import { FilterOutlined } from '@ant-design/icons';
+import { getDcSystemConfig } from '@/pages/manager/service/session';
+import TokenQuotaModal from '../../components/TokenQuotaModal';
 import styles from './index.module.less';
 
 const { confirm } = Modal;
@@ -146,6 +161,18 @@ const OrgMember = (props, ref) => {
       return m;
     }, {})
   );
+  const [tokenQuotaVisible, setTokenQuotaVisible] = useState(false);
+  const [tokenQuotaRecord, setTokenQuotaRecord] = useState(null);
+  const [isCommercial, setIsCommercial] = useState(false);
+
+  useEffect(() => {
+    getDcSystemConfig({ paramCode: 'BYAI_BRAND_VERSION' })
+      .then((res) => {
+        const val = res?.paramValue || res?.data?.paramValue;
+        setIsCommercial(val === 'commercial');
+      })
+      .catch(() => setIsCommercial(false));
+  }, []);
 
   renderCountRef.current += 1;
 
@@ -366,14 +393,60 @@ const OrgMember = (props, ref) => {
                     // },
                     {
                       key: '2',
-                      label: intl.formatMessage({
-                        id: 'orgMgr.members.resetPassword',
-                      }),
+                      label: (
+                        <Popconfirm
+                          title={intl.formatMessage({ id: 'orgMgr.members.resetPasswordTitle' })}
+                          description={intl.formatMessage({ id: 'orgMgr.members.resetPasswordContent' })}
+                          onConfirm={(e) => {
+                            e?.stopPropagation?.();
+                            e?.domEvent?.stopPropagation?.();
+                            dispatch({
+                              type: 'memberMgr/resetPassword',
+                              payload: {
+                                userId: record?.userId,
+                                orgId: record?.orgId,
+                              },
+                              success: () => {
+                                message.success(
+                                  intl.formatMessage({
+                                    id: 'orgMgr.members.resetPasswordSuccess',
+                                  })
+                                );
+                              },
+                              fail: (res) => {
+                                message.error(res?.msg);
+                              },
+                            });
+                          }}
+                          onCancel={(e) => {
+                            e?.stopPropagation?.();
+                            e?.domEvent?.stopPropagation?.();
+                          }}
+                        >
+                          <div
+                            onClick={(e) => {
+                              e.stopPropagation();
+                            }}
+                          >
+                            {intl.formatMessage({
+                              id: 'orgMgr.members.resetPassword',
+                            })}
+                          </div>
+                        </Popconfirm>
+                      ),
                     },
                     // {
                     //   key: '3',
                     //   label: '设置角色',
                     // },
+                    ...(!isCommercial
+                      ? [
+                          {
+                            key: '4',
+                            label: intl.formatMessage({ id: 'orgMgr.members.assignTokenQuota' }),
+                          },
+                        ]
+                      : []),
                     {
                       key: '3',
                       label: (
@@ -388,23 +461,12 @@ const OrgMember = (props, ref) => {
                   onClick: ({ key }) => {
                     setInfo(record);
                     if (key === '2') {
-                      dispatch({
-                        type: 'memberMgr/resetPassword',
-                        payload: {
-                          userId: record?.userId,
-                          orgId: record?.orgId,
-                        },
-                        success: () => {
-                          message.success(
-                            intl.formatMessage({
-                              id: 'orgMgr.members.resetPasswordSuccess',
-                            })
-                          );
-                        },
-                        fail: (res) => {
-                          message.error(res?.msg);
-                        },
-                      });
+                      return;
+                    }
+                    if (key === '4') {
+                      setTokenQuotaRecord(record);
+                      setTokenQuotaVisible(true);
+                      return;
                     }
                     if (key === '3') {
                       confirm({
@@ -586,6 +648,12 @@ const OrgMember = (props, ref) => {
           <div />
         </Layout>
       </div>
+      <TokenQuotaModal
+        visible={tokenQuotaVisible}
+        record={tokenQuotaRecord}
+        onCancel={() => setTokenQuotaVisible(false)}
+        onOk={() => setTokenQuotaVisible(false)}
+      />
     </>
   );
 };

@@ -8,6 +8,7 @@ import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
 import com.iwhalecloud.byai.state.domain.chat.model.ChatInitializationDto;
 import com.iwhalecloud.byai.state.domain.session.dto.SessionMembersDto;
 import com.iwhalecloud.byai.state.domain.session.service.SessionService;
+import com.iwhalecloud.byai.state.domain.session.service.SessionExtService;
 import java.io.OutputStream;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -29,8 +30,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
-import com.iwhaleai.byai.framework.core.protocol.ActionType;
 import com.iwhalecloud.byai.manager.entity.men.MenTask;
+import com.iwhalecloud.byai.manager.entity.session.ByaiSessionExt;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSessionMember;
 import com.iwhalecloud.byai.common.constants.Constants;
 import com.iwhalecloud.byai.common.constants.chat.ChatObjType;
@@ -42,8 +43,11 @@ import com.iwhalecloud.byai.state.common.dto.AnswerDelta;
 import com.iwhalecloud.byai.state.common.enums.AgentTypeEnum;
 import com.iwhalecloud.byai.state.common.enums.MessageContentTypeEnum;
 import com.iwhalecloud.byai.state.common.exception.BdpRuntimeException;
+import com.iwhalecloud.byai.state.domain.chat.enums.ChatTransport;
 import com.iwhalecloud.byai.state.domain.agent.enums.AgentMetaEnum;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
+import com.iwhalecloud.byai.state.domain.chat.dto.RunningChatInfo;
+import com.iwhalecloud.byai.state.domain.chat.dto.RunningChatSnapshotResponse;
 import com.iwhalecloud.byai.state.domain.chat.model.ChatResponse;
 import com.iwhalecloud.byai.state.domain.chat.model.MessageContext;
 import com.iwhalecloud.byai.state.domain.men.enums.SystemCodeEnum;
@@ -104,6 +108,9 @@ public class ScriptService extends AbstractChatProcess {
     private SessionMemberService sessionMemberService;
 
     @Autowired
+    private SessionExtService sessionExtService;
+
+    @Autowired
     private PlatformTransactionManager transactionManager;
 
     @Autowired
@@ -113,7 +120,16 @@ public class ScriptService extends AbstractChatProcess {
     private RouteService routeService;
 
     @Autowired
+    private SessionStreamManager sessionStreamManager;
+
+    @Autowired
     private RunningOutputStreamRegistry runningOutputStreamRegistry;
+
+    @Autowired
+    private RunningChatSnapshotService runningChatSnapshotService;
+
+    @Autowired
+    private com.iwhalecloud.byai.common.message.service.ByaiMessageHotService byaiMessageHotService;
 
     /**
      * 参数准备：生成消息ID、组装请求参数、初始化上下文等。
@@ -126,20 +142,26 @@ public class ScriptService extends AbstractChatProcess {
         // 设置多端广播所需的用户标识和发送端 Channel
         ctx.userId = CurrentUserHolder.getCurrentUserId();
         ctx.senderChannel = ctx.assistantChatDto.getSenderChannel();
+        ctx.clientRequestId = ctx.assistantChatDto.getClientRequestId();
+        if (ctx.senderChannel != null || StringUtils.isNotBlank(ctx.clientRequestId)) {
+            ctx.transport = ChatTransport.WEBSOCKET;
+        }
+
+        resolveRunningTraceState(ctx);
 
         if (StringUtils.isNotEmpty(ctx.assistantChatDto.getTraceId()) && ctx.assistantChatDto.getLlmMessageId() == null) {
             ctx.assistantChatDto.setLlmMessageId(getModelAnswerMessageIdByTraceId(ctx.assistantChatDto.getTraceId()));
         }
 
-        if (ActionType.RESUME.equalsIgnoreCase(ctx.assistantChatDto.getActionType()) && StringUtils.isEmpty(ctx.assistantChatDto.getTraceId())) {
-            throw new BdpRuntimeException("[" + ActionType.RESUME + "] traceId is required!");
-        }
-        if (ActionType.RESUME.equalsIgnoreCase(ctx.assistantChatDto.getActionType())) {
-            resolveResumeSendMode(ctx);
-        }
+        // @TODO 需要删掉这些 UPDATE FEEDBACK 的逻辑。更新消息全部统一走 continueRunningTrace。必须保证 messageId 和 traceId 的唯一性和一致性。
 
         // 判断是否更新任务
-        if (TaskOperateTypeEnum.UPDATE.equals(ctx.assistantChatDto.getTaskOperateType())
+        if (ctx.continueRunningTrace) {
+            ctx.taskId = Optional.ofNullable(ctx.assistantChatDto).map(AssistantChatDto::getExtParams)
+                .filter(params -> params.containsKey("beyondTaskId"))
+                .map(params -> MapParamUtil.getLongValue(params, "beyondTaskId")).orElseGet(sequenceService::nextVal);
+        }
+        else if (TaskOperateTypeEnum.UPDATE.equals(ctx.assistantChatDto.getTaskOperateType())
             || TaskOperateTypeEnum.RERUN.equals(ctx.assistantChatDto.getTaskOperateType())
             || TaskOperateTypeEnum.FEEDBACK.equals(ctx.assistantChatDto.getTaskOperateType())) {
             // 获取到生成任务的问题
@@ -169,7 +191,10 @@ public class ScriptService extends AbstractChatProcess {
             // ctx.taskId = sequenceService.nextVal();
         }
         // 只有Netty中才会提前生成消息
-        if (TaskOperateTypeEnum.EXECUTE.equals(ctx.assistantChatDto.getTaskOperateType())) {
+        if (ctx.continueRunningTrace) {
+            // 已在 resolveRunningTraceState 中复用当前 running trace 的模型回答消息 ID。
+        }
+        else if (TaskOperateTypeEnum.EXECUTE.equals(ctx.assistantChatDto.getTaskOperateType())) {
             ctx.modelAnswerMessageId = sequenceService.nextVal();
         }
         else {
@@ -181,11 +206,13 @@ public class ScriptService extends AbstractChatProcess {
                 ctx.modelAnswerMessageId = sequenceService.nextVal();
             }
         }
-        ctx.traceId = getTraceId(ctx.userMessageId, ctx.modelAnswerMessageId);
+        if (!ctx.continueRunningTrace) {
+            ctx.traceId = getTraceId(ctx.userMessageId, ctx.modelAnswerMessageId);
+        }
 
-        if (TaskOperateTypeEnum.UPDATE.equals(ctx.assistantChatDto.getTaskOperateType())
+        if (!ctx.continueRunningTrace && (TaskOperateTypeEnum.UPDATE.equals(ctx.assistantChatDto.getTaskOperateType())
             || TaskOperateTypeEnum.RERUN.equals(ctx.assistantChatDto.getTaskOperateType())
-            || TaskOperateTypeEnum.FEEDBACK.equals(ctx.assistantChatDto.getTaskOperateType())) {
+            || TaskOperateTypeEnum.FEEDBACK.equals(ctx.assistantChatDto.getTaskOperateType()))) {
             ByaiMessageHotDtoDto askMsg = new ByaiMessageHotDtoDto();
             BeanUtils.copyProperties(ctx.taskHistoryMessages.get(0), askMsg);
             ctx.setAskMsg(askMsg);
@@ -195,17 +222,29 @@ public class ScriptService extends AbstractChatProcess {
                 ctx.userMessageId);
         }
 
+        if (StringUtils.isNotBlank(ctx.assistantChatDto.getTroubleshootMessageId())) {
+            saveTroubleshootSessionExt(ctx);
+        }
+
         // 多端广播：将用户发送的消息推送到用户的其他设备
-        broadcastUserMessage(ctx);
+        if (!ctx.continueRunningTrace) {
+            broadcastUserMessage(ctx);
+        }
 
         // 初始化一条前端的信息
-        initEvent(ctx);
+        if (!ctx.continueRunningTrace) {
+            initEvent(ctx);
+        }
 
         // 多端广播：将 initialization 事件推送到用户的其他设备
-        broadcastInitEvent(ctx);
+        if (!ctx.continueRunningTrace) {
+            broadcastInitEvent(ctx);
+        }
 
         // 将用户聊天内容存储到message表中
-        saveUserContent(ctx);
+        if (!ctx.continueRunningTrace) {
+            saveUserContent(ctx);
+        }
 
         ctx.messageContext = new MessageContext(AgentTypeEnum.getNameCode(ctx.assistantChatDto.getAgentType()),
             ctx.modelAnswerMessageId, ctx.taskId);
@@ -214,33 +253,56 @@ public class ScriptService extends AbstractChatProcess {
         ctx.params = paramService.getParams(ctx);
     }
 
-    private void resolveResumeSendMode(ChatProcessContext ctx) {
-        Long llmMessageId = ctx.assistantChatDto.getLlmMessageId();
-        if (llmMessageId == null) {
-            throw new BdpRuntimeException("[" + ActionType.RESUME + "] llmMessageId is required!");
-        }
+    /**
+     * troubleshoot 会话：向 byai_session_ext 表插入一条 troubleshoot_message_id 扩展记录。
+     *
+     * @param ctx 聊天流程上下文
+     */
+    private void saveTroubleshootSessionExt(ChatProcessContext ctx) {
+        ByaiSessionExt byaiSessionExt = new ByaiSessionExt();
+        byaiSessionExt.setExtId(sequenceService.nextVal());
+        byaiSessionExt.setSessionId(ctx.sessionId);
+        byaiSessionExt.setExtParamName("troubleshoot_message_id");
+        byaiSessionExt.setExtParamCode("troubleshoot_message_id");
+        byaiSessionExt.setExtParamValue(ctx.assistantChatDto.getTroubleshootMessageId());
+        sessionExtService.save(byaiSessionExt);
+    }
 
-        if (messageFactory.existsMessageIndexByResMsgId(llmMessageId)) {
+    private void resolveRunningTraceState(ChatProcessContext ctx) {        if (ctx == null || ctx.sessionId == null) {
             return;
         }
 
-        if (!runningOutputStreamRegistry.isRunning(ctx.sessionId, llmMessageId)) {
+        RunningChatInfo runningInfo = runningOutputStreamRegistry.getRunning(ctx.sessionId);
+        if (!Boolean.TRUE.equals(runningInfo.getRunning())) {
             return;
+        }
+
+        String requestTraceId = ctx.assistantChatDto.getTraceId();
+        String runningTraceId = runningInfo.getTraceId();
+        if (StringUtils.isBlank(requestTraceId) || !requestTraceId.equals(runningTraceId)) {
+            throw new BdpRuntimeException("当前会话仍在运行中，请等待完成或停止后再发送");
         }
 
         ctx.sendByFrameworkMsgOnly = true;
+        ctx.continueRunningTrace = true;
+        ctx.userMessageId = getUserMessageIdByTraceId(runningTraceId);
+        ctx.modelAnswerMessageId = runningInfo.getModelAnswerMessageId();
+        if (ctx.modelAnswerMessageId == null) {
+            ctx.modelAnswerMessageId = getModelAnswerMessageIdByTraceId(runningTraceId);
+        }
+        ctx.traceId = runningTraceId;
     }
 
-    private String getTraceId(Long userMessageId, Long modelAnswerMessageId) {
-        return userMessageId.toString() + "_" + modelAnswerMessageId.toString();
+    public static String getTraceId(Long userMessageId, Long modelAnswerMessageId) {
+        return TraceIdCodec.encode(userMessageId, modelAnswerMessageId);
     }
 
     private Long getUserMessageIdByTraceId(String traceId) {
-        return Long.parseLong(traceId.split("_")[0]);
+        return TraceIdCodec.decode(traceId).getUserMessageId();
     }
 
     private Long getModelAnswerMessageIdByTraceId(String traceId) {
-        return Long.parseLong(traceId.split("_")[1]);
+        return TraceIdCodec.decode(traceId).getModelAnswerMessageId();
     }
 
     /**
@@ -273,12 +335,12 @@ public class ScriptService extends AbstractChatProcess {
                 return;
             }
             JSONObject userMsg = new JSONObject();
-            userMsg.put("messageId", ctx.userMessageId);
+            userMsg.put("type", "NEW_MESSAGE");
             userMsg.put("sessionId", ctx.sessionId);
-            userMsg.put("chatContent", ctx.assistantChatDto.getChatContent());
-            userMsg.put("metadata", ctx.assistantChatDto.getMetadata());
-            multiDeviceBroadcastService.broadcastToUserDevices(ctx.userId, ctx.sessionId, "userMessage",
-                userMsg.toJSONString(), ctx.senderChannel);
+            userMsg.put("data", JSON.toJSON(ctx.askMsg));
+            userMsg.put("clientRequestId", ctx.assistantChatDto.getClientRequestId());
+            userMsg.put("agentId", ctx.assistantChatDto.getAgentId());
+            multiDeviceBroadcastService.broadcastRawToUser(ctx.userId, userMsg, ctx.senderChannel);
         }
         catch (Exception e) {
             log.warn("多端广播 userMessage 事件异常, sessionId: {}", ctx.sessionId, e);
@@ -310,6 +372,11 @@ public class ScriptService extends AbstractChatProcess {
      */
     @Override
     public void storeMessage(ChatProcessContext ctx) {
+        // 落库一次性闸门：用户停止会话时可能已抢先落库，避免请求线程重复 insert。
+        if (!ctx.tryBeginPersist()) {
+            log.info("storeMessage 跳过：消息已落库, sessionId: {}, traceId: {}", ctx.sessionId, ctx.traceId);
+            return;
+        }
         // Netty群聊中使用保存消息路径
         if (ctx.gatewayError) {
             // Gateway error 事件已由 Redis 监听器写入前端，此处仅持久化消息，不再写流
@@ -331,7 +398,7 @@ public class ScriptService extends AbstractChatProcess {
      *
      * @param ctx
      */
-    private void initEvent(ChatProcessContext ctx) {
+    private ChatInitializationDto initEvent(ChatProcessContext ctx) {
         ChatInitializationDto chatInitializationDto = new ChatInitializationDto();
 
         Map<String, Object> metadata;
@@ -344,6 +411,7 @@ public class ScriptService extends AbstractChatProcess {
         chatInitializationDto.setTraceId(ctx.traceId);
         CompletionsUtils.responseWrite(ctx.res, SseResponseEventEnum.initialization,
             JSON.toJSONString(chatInitializationDto));
+        return chatInitializationDto;
     }
 
     /**
@@ -417,6 +485,74 @@ public class ScriptService extends AbstractChatProcess {
     }
 
     /**
+     * WebSocket Gateway 异步模式在 Redis 流结束后由事件路由服务回调完成落库和收尾。
+     */
+    public void completeAsyncGatewayContext(ChatProcessContext ctx) {
+        try {
+            if (ctx.loginInfo != null) {
+                CurrentUserHolder.setLoginInfo(ctx.loginInfo);
+            }
+            storeMessage(ctx);
+            afterProcess(ctx);
+        }
+        catch (Exception e) {
+            log.error("WebSocket 异步会话收尾失败, sessionId: {}, traceId: {}", ctx.sessionId, ctx.traceId, e);
+        }
+        finally {
+            CurrentUserHolder.clearLoginInfo();
+            if (ctx.sessionId != null) {
+                sessionStreamManager.stopSessionListener(String.valueOf(ctx.sessionId));
+            }
+        }
+    }
+
+    /**
+     * 用户停止会话（stopChat）时，将当前已堆积的消息落库。
+     * <p>
+     * 同 pod 场景：直接复用运行中的 {@link ChatProcessContext}，走与正常完成一致的
+     * {@link #completeAsyncGatewayContext} 路径（storeMessage + afterProcess + 停止监听），
+     * 消息按正常完成状态入库。落库一次性闸门保证不会与 owner 请求线程的后续落库重复。
+     *
+     * @param ctx 运行中的聊天上下文
+     */
+    public void flushOnStop(ChatProcessContext ctx) {
+        if (ctx == null) {
+            return;
+        }
+        if (ctx.messageContext != null) {
+            ctx.messageContext.setComplete(true);
+        }
+        completeAsyncGatewayContext(ctx);
+    }
+
+    /**
+     * 跨 pod 场景：本 pod 没有运行中的上下文（监听器与内存上下文在其他 pod），
+     * 退回到读取 {@link RunningChatSnapshotService} 在 Redis 中保存的运行态快照，
+     * 用按 messageId 幂等的 upsert 将已堆积内容落库，按正常完成状态（FINISH）入库。
+     * <p>
+     * 仅在快照存在时生效（当前 WebSocket 链路每条事件都会刷新快照）。落库后由调用方负责
+     * 清理 running 标记与快照。
+     *
+     * @param sessionId            会话 ID
+     * @param modelAnswerMessageId 模型回答消息 ID
+     * @return true 表示命中快照并已落库；false 表示无快照可落库
+     */
+    public boolean flushFromSnapshot(Long sessionId, Long modelAnswerMessageId) {
+        if (sessionId == null) {
+            return false;
+        }
+        RunningChatSnapshotResponse snapshot = runningChatSnapshotService.get(sessionId, null, modelAnswerMessageId);
+        if (snapshot == null || snapshot.getMessageId() == null) {
+            return false;
+        }
+        // 按正常完成状态落库，保持与同 pod 路径一致。
+        snapshot.setMsgStatus(com.iwhalecloud.byai.state.domain.message.enums.MsgStatus.FINISH.getCode());
+        byaiMessageHotService.updateSelective(snapshot);
+        log.info("stopChat 跨 pod 从快照落库完成, sessionId: {}, messageId: {}", sessionId, snapshot.getMessageId());
+        return true;
+    }
+
+    /**
      * 异常处理：统一处理主流程中的异常，记录索引、抛出业务异常等。
      */
     @Override
@@ -443,6 +579,11 @@ public class ScriptService extends AbstractChatProcess {
 
     private void saveExceptionRequiresNew(ChatProcessContext ctx) {
         if (ctx == null || ctx.assistantChatDto == null) {
+            return;
+        }
+        // 落库一次性闸门：避免与 stopChat 主动落库重复 insert。
+        if (!ctx.tryBeginPersist()) {
+            log.info("saveException 跳过：消息已落库, sessionId: {}, traceId: {}", ctx.sessionId, ctx.traceId);
             return;
         }
 
@@ -529,8 +670,14 @@ public class ScriptService extends AbstractChatProcess {
         List<ResourceVo> resourceList = ctx.getAssistantChatDto().getResourceList();
         for (int i = 0; resourceList != null && i < resourceList.size(); i++) {
             ResourceVo resourceVo = resourceList.get(i);
+            if (resourceVo == null || resourceVo.getResourceType() == null) {
+                continue;
+            }
             if (AgentMetaEnum.DIG_EMPLOYEE.getCode().equalsIgnoreCase(resourceVo.getResourceType().getCode())) {
-                allAgentIds.add(Long.parseLong(resourceVo.getResourceId()));
+                Long resourceId = parseResourceIdAsLong(resourceVo);
+                if (resourceId != null) {
+                    allAgentIds.add(resourceId);
+                }
             }
         }
         if (CollectionUtils.isNotEmpty(ctx.getAgentIds())) {
@@ -557,6 +704,20 @@ public class ScriptService extends AbstractChatProcess {
                 sessionMember.setRequestCount((currentCount == null ? 0L : currentCount) + 1L);
                 sessionMemberService.updateById(sessionMember);
             }
+        }
+    }
+
+    private Long parseResourceIdAsLong(ResourceVo resourceVo) {
+        if (resourceVo == null || StringUtils.isBlank(resourceVo.getResourceId())) {
+            return null;
+        }
+        try {
+            return Long.parseLong(resourceVo.getResourceId());
+        }
+        catch (NumberFormatException e) {
+            log.warn("resourceId无法转换为Long，跳过会话成员统计，resourceType={}, resourceId={}",
+                resourceVo.getResourceType(), resourceVo.getResourceId());
+            return null;
         }
     }
 

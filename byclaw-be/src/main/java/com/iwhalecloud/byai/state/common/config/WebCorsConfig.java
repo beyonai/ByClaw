@@ -21,12 +21,19 @@ public class WebCorsConfig {
         //开放哪些Http方法，允许跨域访问
         List<String> allowedMethods = new ArrayList<>();
         allowedMethods.add("GET");
+        allowedMethods.add("HEAD");
         allowedMethods.add("POST");
         allowedMethods.add("PUT");
+        allowedMethods.add("PATCH");
         allowedMethods.add("DELETE");
+        allowedMethods.add("OPTIONS");
         config.setAllowedMethods(allowedMethods);
         //允许HTTP请求中的携带哪些Header信息
         config.addAllowedHeader("*");
+        config.addExposedHeader("Location");
+        config.addExposedHeader("Upload-Offset");
+        config.addExposedHeader("Upload-Length");
+        config.addExposedHeader("Tus-Resumable");
         //添加映射路径，“/**”表示对所有的路径实行全局跨域访问权限的设置
         UrlBasedCorsConfigurationSource configSource = new UrlBasedCorsConfigurationSource();
         configSource.registerCorsConfiguration("/**", config);

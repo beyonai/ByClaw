@@ -7,7 +7,7 @@
 
   // -webkit-overflow-scrolling: touch;
 
-  /* 禁用回弹效果 */
+  /* Disable scroll bounce. */
   // overscroll-behavior: none;
 }
 
@@ -65,7 +65,7 @@
     line-height: 20px;
     gap: 4px;
     color: var(~'--@{antPrefix}-color-text-tertiary');
-    margin-bottom: -8px; // 因为messageRow声明了gap=12px，想要margin-bottom=4px，所以这里要-8px
+    margin-bottom: -8px; // Offset the row gap so the visual bottom margin stays at 4px.
   }
 
   .assistantMark {
@@ -120,14 +120,8 @@
       column-gap: 4px;
       cursor: pointer;
 
-      .actionsBarText {
-        font-size: 12px;
-        color: var(--beyond-color-text-tertiary);
-        line-height: 1;
-        min-width: max-content;
-      }
       .icon {
-        font-size: 16px;
+        font-size: 14px;
         color: var(--beyond-color-text-tertiary);
       }
     }
@@ -140,6 +134,22 @@
       }
     }
   }
+}
+
+.moreActions {
+  column-gap: 2px;
+}
+
+.copyIcon {
+  font-size: 16px;
+  color: var(--beyond-color-text-tertiary);
+}
+
+.actionsBarText {
+  font-size: 12px;
+  color: var(--beyond-color-text-tertiary);
+  line-height: 1;
+  min-width: max-content;
 }
 
 .messageRow[data-frombeyond='true'] {
@@ -217,6 +227,11 @@
     line-height: @left-logo-size;
     text-align: center;
     background: var(~'--@{antPrefix}-color-primary-hover', #4080ff);
+  }
+
+  .avatarWrapper {
+    width: 40px;
+    height: 40px;
   }
 }
 

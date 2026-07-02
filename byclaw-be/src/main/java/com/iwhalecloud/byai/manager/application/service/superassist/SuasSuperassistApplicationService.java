@@ -1,23 +1,56 @@
 package com.iwhalecloud.byai.manager.application.service.superassist;
 
-import com.iwhalecloud.byai.common.constants.resource.OwnerType;
+import com.alibaba.fastjson2.JSON;
+import com.alibaba.fastjson2.JSONArray;
+import com.alibaba.fastjson2.JSONObject;
+import com.iwhalecloud.byai.common.constants.Constants;
+import com.iwhalecloud.byai.common.constants.resource.ResourceBizType;
+import com.iwhalecloud.byai.common.feign.request.conversation.AgentPrologueDto;
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
+import com.iwhalecloud.byai.common.util.ListUtil;
+import com.iwhalecloud.byai.common.util.MapParamUtil;
+import com.iwhalecloud.byai.common.util.RedisUtil;
+import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeApplicationService;
-import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceBizTypeEnum;
+import com.iwhalecloud.byai.manager.domain.aimodel.enums.ModelProtocol;
+import com.iwhalecloud.byai.manager.domain.aimodel.service.ByaiAimodelDomainService;
+import com.iwhalecloud.byai.manager.domain.auth.enums.Color;
+import com.iwhalecloud.byai.manager.domain.auth.enums.GrantToObjType;
+import com.iwhalecloud.byai.manager.domain.auth.enums.GrantType;
+import com.iwhalecloud.byai.manager.domain.auth.enums.OperType;
+import com.iwhalecloud.byai.manager.domain.auth.service.PrivilegeGrantService;
+import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtDigEmployeeService;
+import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtSkillService;
+import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceRelDetailService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
+import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeDTO;
+import com.iwhalecloud.byai.manager.dto.digitemploy.RelResourceInfo;
+import com.iwhalecloud.byai.manager.dto.digitemploy.SsResourceDTO;
+import com.iwhalecloud.byai.manager.dto.resource.SsResExtSkillDto;
+import com.iwhalecloud.byai.manager.entity.aimodel.ByaiAimodel;
+import com.iwhalecloud.byai.manager.entity.auth.PrivilegeGrant;
+import com.iwhalecloud.byai.manager.entity.resource.SsResExtDigEmployee;
+import com.iwhalecloud.byai.manager.entity.resource.SsResExtSkill;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
+import com.iwhalecloud.byai.manager.entity.resource.SsResourceRelDetail;
 import com.iwhalecloud.byai.manager.entity.superassist.SuasSuperassist;
 import com.iwhalecloud.byai.manager.domain.superassist.service.SuasSuperassistService;
-import com.iwhalecloud.byai.manager.mapper.resource.SsResourceMapper;
+import com.iwhalecloud.byai.manager.qo.aimodel.DefaultAiModelQo;
 import com.iwhalecloud.byai.state.application.service.dataset.DatasetApplicationService;
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
-import org.apache.commons.lang3.StringUtils;
+import java.util.Map;
+
+import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
+import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 /**
@@ -31,26 +64,37 @@ public class SuasSuperassistApplicationService {
     private final Logger logger = LoggerFactory.getLogger(SuasSuperassistApplicationService.class);
 
     @Autowired
-    private SuasSuperassistService suasSuperassistService;
+    private SequenceService sequenceService;
 
     @Autowired
     private SsResourceService ssResourceService;
 
     @Autowired
-    private SsResourceMapper ssResourceMapper;
+    private SsResExtSkillService ssResExtSkillService;
+
+    @Autowired
+    private PrivilegeGrantService privilegeGrantService;
+
+    @Autowired
+    private ByaiAimodelDomainService byaiAimodelService;
+
+    @Autowired
+    private SuasSuperassistService suasSuperassistService;
+
+    @Autowired
+    private ByaiSystemConfigService byaiSystemConfigService;
 
     @Autowired
     private DatasetApplicationService datasetApplicationService;
 
     @Autowired
+    private SsResExtDigEmployeeService ssResExtDigEmployeeService;
+
+    @Autowired
+    private SsResourceRelDetailService ssResourceRelDetailService;
+
+    @Autowired
     private DigitalEmployeeApplicationService digitalEmployeeApplicationService;
-
-    /**
-     * 知识库系统来源；WHALE_AGENT 表示个人默认知识库由外部智能体体系承接。
-     */
-    @Value("${dataset.system:}")
-    private String datasetSystem;
-
 
     /**
      * 初始化用户超级助手和知识库
@@ -63,14 +107,17 @@ public class SuasSuperassistApplicationService {
         try {
 
             SuasSuperassist suasSuperassist = this.createDefaultResourcesIfNotExists(loginInfo, false);
+
             loginInfo.setSessionDatasetId(suasSuperassist.getSessionDatasetId());
             loginInfo.setDefaultDigEmployeeId(suasSuperassist.getDefaultDigEmployeeId());
+
             return suasSuperassist;
 
         }
         catch (Exception e) {
-            logger.error("初始化超级助手知识库失败:" + e.getMessage(), e);
-            return new SuasSuperassist();
+            logger.error("初始化超级助手知识库失败:{}", e.getMessage(), e);
+            // 返回 null 让调用方知道需要从数据库重新查询
+            return null;
         }
 
     }
@@ -78,45 +125,514 @@ public class SuasSuperassistApplicationService {
     /**
      * 初始化用户超级助手、默认个人知识库和默认超级助手数字员工。
      */
-    public SuasSuperassist createDefaultResourcesIfNotExists(LoginInfo targetLoginInfo, boolean throwExceptions) {
+    public SuasSuperassist createDefaultResourcesIfNotExists(LoginInfo loginInfo, boolean throwExceptions) {
+
+        CurrentUserHolder.setLoginInfo(loginInfo);
+
+        Long assistantId = loginInfo.getAssistantId();
+        Long userId = loginInfo.getUserId();
+        String userCode = loginInfo.getUserCode();
+        String userName = loginInfo.getUserName();
+
+        SuasSuperassist suasSuperassist = suasSuperassistService.findById(assistantId);
+
+        if (suasSuperassist != null) {
+
+            // 如果知识库不存在，创建
+            Long sessionDatasetId = suasSuperassist.getSessionDatasetId();
+            if (sessionDatasetId == null) {
+                SsResource ssResource = datasetApplicationService.createDefaultPersonalDataset(userId, userCode,
+                    userName);
+                sessionDatasetId = ssResource.getResourceId();
+            }
+            suasSuperassist.setSessionDatasetId(sessionDatasetId);
+
+            // 根据模板初始化数字员工
+            Long defaultDigEmployeeId = this.initDigEmployeeByTemplate(loginInfo, sessionDatasetId);
+            suasSuperassist.setDefaultDigEmployeeId(defaultDigEmployeeId);
+
+            // 更新超级助手
+            suasSuperassistService.updateById(suasSuperassist);
+        }
+        else {
+
+            suasSuperassist = new SuasSuperassist();
+            suasSuperassist.setSuperassistId(sequenceService.nextVal());
+            suasSuperassist.setName(loginInfo.getUserName());
+            suasSuperassist.setIntro(loginInfo.getUserName());
+            suasSuperassist.setStatus("00");
+            suasSuperassist.setCreateTime(new Date());
+            suasSuperassist.setCreateUser(CurrentUserHolder.getCurrentUserId());
+            suasSuperassist.setComAcctId(CurrentUserHolder.getEnterpriseId());
+
+            // 初始化默认知识库
+            SsResource defDataset = datasetApplicationService.createDefaultPersonalDataset(userId, userCode, userName);
+            suasSuperassist.setSessionDatasetId(defDataset.getResourceId());
+
+            // 根据模板初始化数字员工
+            Long defaultDigEmployeeId = this.initDigEmployeeByTemplate(loginInfo, defDataset.getResourceId());
+            suasSuperassist.setDefaultDigEmployeeId(defaultDigEmployeeId);
+
+            // 保存超级助手
+            suasSuperassistService.save(suasSuperassist);
+        }
+
+        return suasSuperassist;
+
+    }
+
+    /**
+     * 初始化默认数字员工
+     *
+     * @param loginInfo 登陆用户信息
+     */
+    private Long initDigEmployeeByTemplate(LoginInfo loginInfo, Long defaultDatasetId) {
+        Long userId = loginInfo.getUserId();
+        Long defaultDigEmployeeId = loginInfo.getDefaultDigEmployeeId();
+
+        // 获取初始化模板
+        JSONArray initTemplates = this.getInitTemplateArray(loginInfo);
+
+        if (ListUtil.isEmpty(initTemplates)) {
+            return defaultDigEmployeeId;
+        }
+
+        // 解析模型中的数字员工
+        for (int i = 0; i < initTemplates.size(); i++) {
+
+            JSONObject jsonObject = initTemplates.getJSONObject(i);
+
+            String resourceCode = jsonObject.getString("resourceCode");
+            String modelProtocol = jsonObject.getString("modelProtocol");
+            String relSkillCodes = jsonObject.getString("relSkillCodes");
+            String relToolCodes = jsonObject.getString("relToolCodes");
+            String isRelDefaultDataset = jsonObject.getString("isRelDefaultDataset");
+
+            // 如果已经存在了，不再进行初始化
+            SsResource ssResource = ssResourceService.findByIdOrCode(null, resourceCode);
+            if (ssResource != null) {
+                // 对技能进行对比
+                this.compareDigEmployee(ssResource, jsonObject, loginInfo);
+
+                continue;
+            }
+
+            DigitalEmployeeDTO digitalEmployeeDTO = new DigitalEmployeeDTO();
+            MapParamUtil.copyProperties(jsonObject, digitalEmployeeDTO);
+            digitalEmployeeDTO.setRelIds(new ArrayList<>());
+            digitalEmployeeDTO.setRelResourceInfoList(new ArrayList<>());
+
+            // 其他类型数字员工设置默认模型
+            String prologue = digitalEmployeeDTO.getPrologue();
+
+            // 是否关联默认知识库
+            if (Constants.YES_VALUE_Y.equalsIgnoreCase(isRelDefaultDataset)) {
+                digitalEmployeeDTO.setRelIds(List.of(defaultDatasetId));
+                digitalEmployeeDTO.setPrologue(this.buildPrologue(prologue, modelProtocol, defaultDatasetId));
+            }
+            else {
+                digitalEmployeeDTO.setRelIds(new ArrayList<>());
+                digitalEmployeeDTO.setPrologue(this.buildPrologue(prologue, modelProtocol, null));
+            }
+
+            // 关联工具agent|tool|view
+            this.handleRelToolCodes(digitalEmployeeDTO, relToolCodes, userId);
+
+            // 处理关联技能
+            this.handleRelSkillCodes(digitalEmployeeDTO, relSkillCodes, userId);
+
+            // 保存数字员工
+            ssResource = digitalEmployeeApplicationService.saveDigitalEmployee(digitalEmployeeDTO);
+
+            // 如果是超级助手
+            if (Constants.YES_VALUE_T.equalsIgnoreCase(digitalEmployeeDTO.getOpenSuperHelper())) {
+                defaultDigEmployeeId = ssResource.getResourceId();
+            }
+
+            // 同步openClaw工作空间：透传原始入参，relTools / relPrompt 等不入 DB 的运行期字段需要从入参直接进 JSON。
+            digitalEmployeeApplicationService.synOpenClawWorkSpace(ssResource.getResourceId(), digitalEmployeeDTO);
+        }
+
+        return defaultDigEmployeeId;
+    }
+
+    /**
+     * 对比初始化的数字员工
+     *
+     * @param ssResource 资源信息
+     * @param jsonObject 模板资源配置
+     * @param loginInfo 登陆信息
+     */
+    private void compareDigEmployee(SsResource ssResource, JSONObject jsonObject, LoginInfo loginInfo) {
+
         try {
-            CurrentUserHolder.setLoginInfo(targetLoginInfo);
-            return doCreateDefaultResourcesIfNotExists(targetLoginInfo.getUserId(), targetLoginInfo.getUserCode(),
-                targetLoginInfo.getUserName(), targetLoginInfo.getAssistantId(), throwExceptions);
+            String resourceDesc = jsonObject.getString("resourceDesc");
+            if (StringUtil.isNotEmpty(resourceDesc) && StringUtil.isEmpty(ssResource.getResourceDesc())) {
+                ssResourceService.update(ssResource);
+            }
+
+            SsResExtDigEmployee ssResExtDigEmployee = ssResExtDigEmployeeService.findById(ssResource.getResourceId());
+            // 如果不为空，则更新
+            if (ssResExtDigEmployee != null) {
+
+                boolean isChange = this.compareExtDigEmployee(ssResExtDigEmployee, jsonObject, loginInfo);
+
+                if (isChange) {
+                    ssResExtDigEmployeeService.update(ssResExtDigEmployee);
+                }
+
+            }
+            else {
+
+                ssResExtDigEmployee = new SsResExtDigEmployee();
+                ssResExtDigEmployee.setResourceId(ssResource.getResourceId());
+
+                this.compareExtDigEmployee(ssResExtDigEmployee, jsonObject, loginInfo);
+
+                ssResExtDigEmployeeService.save(ssResExtDigEmployee);
+            }
+
+            digitalEmployeeApplicationService.syncExistingDigEmployeeConfigToRedisQuietly(ssResource.getResourceId());
         }
         catch (Exception e) {
-            if (throwExceptions) {
-                throw e;
+
+        }
+    }
+
+    /**
+     * 添加关联关系
+     *
+     * @param resourceId 资源
+     * @param relResourceId 关联资源
+     * @param userId 用户
+     * @param comAcctId 企业标识
+     */
+    private void saveSsResourceRelDetail(Long resourceId, Long relResourceId, Long userId, Long comAcctId) {
+        SsResourceRelDetail ssResourceRelDetail = new SsResourceRelDetail();
+        ssResourceRelDetail.setResourceRelDetailId(sequenceService.nextVal());
+        ssResourceRelDetail.setResourceId(resourceId);
+        ssResourceRelDetail.setRelResourceId(relResourceId);
+        ssResourceRelDetail.setRelStatus(1);
+        ssResourceRelDetail.setCreateTime(new Date());
+        ssResourceRelDetail.setCreateBy(userId);
+        ssResourceRelDetail.setComAcctId(comAcctId);
+        ssResourceRelDetailService.save(ssResourceRelDetail);
+    }
+
+    /**
+     * 对比数字员工扩展属性
+     *
+     * @param ssResExtDigEmployee 数据员工扩展信息
+     * @param jsonObject 当前模板数据
+     * @return boolean
+     */
+    private boolean compareExtDigEmployee(SsResExtDigEmployee ssResExtDigEmployee, JSONObject jsonObject,
+        LoginInfo loginInfo) {
+
+        Long userId = loginInfo.getUserId();
+        Long comAcctId = loginInfo.getComAcctId();
+        Long resourceId = ssResExtDigEmployee.getResourceId();
+
+        String prologue = jsonObject.getString("prologue");
+        String relToolCodes = jsonObject.getString("relToolCodes");
+        String coreCompetencies = jsonObject.getString("coreCompetencies");
+        String corePersonaDefinition = jsonObject.getString("corePersonaDefinition");
+
+        boolean isChange = false;
+        if (StringUtil.isNotEmpty(prologue) && StringUtil.isEmpty(ssResExtDigEmployee.getPrologue())) {
+            ssResExtDigEmployee.setPrologue(prologue);
+            isChange = true;
+        }
+        if (StringUtil.isNotEmpty(coreCompetencies) && StringUtil.isEmpty(ssResExtDigEmployee.getCoreCompetencies())) {
+            ssResExtDigEmployee.setCoreCompetencies(coreCompetencies);
+            isChange = true;
+        }
+
+        if (StringUtil.isNotEmpty(corePersonaDefinition)
+            && StringUtil.isEmpty(ssResExtDigEmployee.getCorePersonaDefinition())) {
+            ssResExtDigEmployee.setCorePersonaDefinition(corePersonaDefinition);
+            isChange = true;
+        }
+
+        Map<String, SsResourceDTO> relResourceMap = new HashMap<>(10);
+        List<SsResourceDTO> relResources = ssResourceService.findRelResource(resourceId);
+        for (SsResourceDTO ssResourceDTO : relResources) {
+            relResourceMap.put(ssResourceDTO.getResourceCode(), ssResourceDTO);
+        }
+
+        // 关联技能
+        String relSkillCodes = jsonObject.getString("relSkillCodes");
+        List<String> splitSkillCodes = StringUtil.splitStr(relSkillCodes, ",");
+        List<SsResExtSkillDto> ssResExtSkillDtos = ssResExtSkillService.findBySkillCodes(splitSkillCodes);
+        for (SsResExtSkillDto ssResExtSkillDto : ssResExtSkillDtos) {
+            String resourceCode = ssResExtSkillDto.getResourceCode();
+
+            // 如果存在关联表不存在的技能，授权添加关联关系
+            SsResourceDTO ssResourceDTO = relResourceMap.get(resourceCode);
+            if (ssResourceDTO == null) {
+
+                // 授权技能
+                this.authResource(ssResExtSkillDto, userId);
+
+                // 关联技能
+                this.saveSsResourceRelDetail(resourceId, ssResExtSkillDto.getResourceId(), userId, comAcctId);
+
+                isChange = true;
             }
-            logger.error("初始化默认个人知识库/默认超级助手失败，userId={}, error={}", targetLoginInfo.getUserId(),
-                e.getMessage(), e);
-            return this.findOrCreateEmptySuperassist(targetLoginInfo.getUserId(), targetLoginInfo.getUserName(),
-                targetLoginInfo.getAssistantId());
+
         }
+        // 设置关联技能的json信息
+        ssResExtDigEmployee.setSkills(this.buildJsonBySkillDto(ssResExtSkillDtos));
+
+        // 关联工具
+        List<String> splitToolCodes = StringUtil.splitStr(relToolCodes, ",");
+        for (String toolCode : splitToolCodes) {
+            SsResourceDTO ssResourceDTO = relResourceMap.get(toolCode);
+            if (ssResourceDTO == null) {
+                SsResource relSsResource = ssResourceService.findByIdOrCode(null, toolCode);
+
+                if (relSsResource == null) {
+                    continue;
+                }
+
+                // 授权工具
+                this.authResource(relSsResource, userId);
+
+                // 关联工具
+                this.saveSsResourceRelDetail(resourceId, relSsResource.getResourceId(), userId, comAcctId);
+
+                isChange = true;
+            }
+        }
+
+        return isChange;
     }
 
-    private SuasSuperassist doCreateDefaultResourcesIfNotExists(Long userId, String userCode, String userName,
-        Long assistantId, boolean throwExceptions) {
-        Long effectiveAssistantId = assistantId != null ? assistantId : userId;
-        SuasSuperassist suasSuperassist = suasSuperassistService.findById(effectiveAssistantId);
-        if (suasSuperassist == null) {
-            suasSuperassist = this.createSuasSuperassist(effectiveAssistantId, userName, null);
+    /**
+     * 构奸关联工具编码
+     *
+     * @param digitalEmployeeDTO 数字员工新增对象
+     * @param relToolCodes 工具编码
+     */
+    private void handleRelToolCodes(DigitalEmployeeDTO digitalEmployeeDTO, String relToolCodes, Long userId) {
+
+        List<String> splitToolCodes = StringUtil.splitStr(relToolCodes, ",");
+        if (ListUtil.isEmpty(splitToolCodes)) {
+            return;
         }
 
-        SsResource dataset = this.ensureDefaultDataset(suasSuperassist, userId, userCode, userName, throwExceptions);
-        this.ensureDefaultSuperAssistant(suasSuperassist, userId, userCode, userName, dataset, throwExceptions);
-        return suasSuperassist;
+        for (String resourceCode : splitToolCodes) {
+
+            SsResource ssResource = ssResourceService.findByIdOrCode(null, resourceCode);
+            if (ssResource == null) {
+                continue;
+            }
+
+            // 授权资源
+            this.authResource(ssResource, userId);
+
+            // 关联资源标识
+            Long resourceId = ssResource.getResourceId();
+            digitalEmployeeDTO.getRelIds().add(resourceId);
+
+            // 视图类型关联子选项相关
+            if (ResourceBizType.VIEW.getCode().equalsIgnoreCase(ssResource.getResourceBizType())) {
+                List<SsResourceRelDetail> resourceRelDetails = ssResourceRelDetailService.findByResourceId(resourceId);
+                RelResourceInfo relResourceInfo = new RelResourceInfo();
+                relResourceInfo.setRelId(String.valueOf(ssResource.getResourceId()));
+
+                List<String> activeResourceIds = new ArrayList<>();
+                for (SsResourceRelDetail resourceRelDetail : resourceRelDetails) {
+                    activeResourceIds.add(String.valueOf(resourceRelDetail.getRelResourceId()));
+                }
+                relResourceInfo.setActiveResourceIds(activeResourceIds);
+                digitalEmployeeDTO.getRelResourceInfoList().add(relResourceInfo);
+            }
+        }
+
     }
 
-    private SuasSuperassist createSuasSuperassist(Long superassistId, String userName, Long datasetId) {
-        SuasSuperassist suasSuperassist = new SuasSuperassist();
-        suasSuperassist.setSuperassistId(superassistId);
-        suasSuperassist.setName(userName);
-        suasSuperassist.setIntro("超级助手");
-        suasSuperassist.setStatus("00");
-        suasSuperassist.setSessionDatasetId(datasetId);
-        suasSuperassistService.addSuasSuperassist(suasSuperassist);
-        return suasSuperassist;
+    /**
+     * 处理关联技能
+     *
+     * @param digitalEmployeeDTO 保存入参
+     * @param relSkillCodes 关联技能编码
+     * @param userId 用户标识
+     */
+    private void handleRelSkillCodes(DigitalEmployeeDTO digitalEmployeeDTO, String relSkillCodes, Long userId) {
+
+        // 关联技能
+        List<String> splitSkillCodes = StringUtil.splitStr(relSkillCodes, ",");
+        List<SsResExtSkillDto> ssResExtSkills = ssResExtSkillService.findBySkillCodes(splitSkillCodes);
+        if (ListUtil.isEmpty(ssResExtSkills)) {
+            return;
+        }
+
+        // 授权资源
+        for (SsResExtSkillDto ssResExtSkillDto : ssResExtSkills) {
+            this.authResource(ssResExtSkillDto, userId);
+        }
+
+        // 写入技能
+        digitalEmployeeDTO.setSkills(this.buildJsonBySkillDto(ssResExtSkills));
+    }
+
+    /**
+     * 授权资源
+     *
+     * @param ssResource 资源
+     * @param userId 用户标识
+     */
+    private void authResource(SsResource ssResource, Long userId) {
+
+        PrivilegeGrant privilegeGrant = new PrivilegeGrant();
+        privilegeGrant.setPrivilegeGrantId(sequenceService.nextVal());
+        privilegeGrant.setGrantType(GrantType.AVAILABLE_USE);
+        privilegeGrant.setGrantObjType(ssResource.getResourceBizType());
+        privilegeGrant.setGrantObjId(ssResource.getResourceId());
+        privilegeGrant.setGrantToObjId(userId);
+        privilegeGrant.setGrantToObjType(GrantToObjType.USER);
+        privilegeGrant.setGrantToType(Color.RED);
+        privilegeGrant.setOperType(OperType.READ);
+        privilegeGrant.setStatusCd("A");
+        privilegeGrant.setCreateDate(new Date());
+        privilegeGrantService.save(privilegeGrant);
+
+        // 2.还要redis中插入一条红名单数据
+        String key = "DATASET:AUTHORITY:1_RED_READ_PERSON_" + privilegeGrant.getGrantToObjId();
+        String value = ssResource.getResourceBizType() + "_" + ssResource.getResourceId();
+        RedisUtil.addSet(key, value);
+    }
+
+    /**
+     * 构建关联技能
+     *
+     * @param ssResExtSkills 关联技能
+     * @return String
+     */
+    private String buildJsonBySkillDto(List<SsResExtSkillDto> ssResExtSkills) {
+        if (ListUtil.isEmpty(ssResExtSkills)) {
+            return null;
+        }
+
+        List<Map<String, Object>> skillsList = new ArrayList<>();
+        for (SsResExtSkillDto ssResExtSkillDto : ssResExtSkills) {
+            Map<String, Object> objectMap = new HashMap<>();
+            skillsList.add(objectMap);
+
+            objectMap.put("resourceId", ssResExtSkillDto.getResourceId());
+            objectMap.put("skillCode", ssResExtSkillDto.getResourceCode());
+            SsResExtSkill ssResExtSkill = ssResExtSkillDto.getSsResExtSkill();
+            if (ssResExtSkill == null) {
+                continue;
+            }
+
+            objectMap.put("skillType", ssResExtSkill.getSkillType());
+            objectMap.put("skillUrl", ssResExtSkill.getSkillUrl());
+            objectMap.put("versionUrl", "/byaiService/tool/getSkillVersion?skillId=" + ssResExtSkill.getResourceId());
+        }
+
+        return JSON.toJSONString(skillsList);
+    }
+
+    /**
+     * 设置其他初始化数字员工模型信息
+     *
+     * @param prologue 描述
+     * @param modelProtocol 默认模型协议
+     * @return String
+     */
+    private String buildPrologue(String prologue, String modelProtocol, Long defaultDatasetId) {
+        if (StringUtil.isEmpty(prologue)) {
+            return null;
+        }
+
+        AgentPrologueDto agentPrologueDto = JSON.parseObject(prologue, AgentPrologueDto.class);
+
+        agentPrologueDto.setModelInfo(this.buildDefaultModelInfo(modelProtocol));
+
+        // 添加默认知识库
+        if (defaultDatasetId != null) {
+            AgentPrologueDto.DatasetSearchConfig datasetSearchConfig = new AgentPrologueDto.DatasetSearchConfig();
+            datasetSearchConfig.setSearchMode("embedding");
+            datasetSearchConfig.setSimilarity(0.6);
+            datasetSearchConfig.setLimit(5);
+            agentPrologueDto.setDatasetSearchConfig(datasetSearchConfig);
+            agentPrologueDto.setDefaultDatasetId(defaultDatasetId);
+        }
+
+        return JSON.toJSONString(agentPrologueDto);
+    }
+
+    /**
+     * 初始化模型信息
+     *
+     * @return AgentPrologueDto
+     */
+    private AgentPrologueDto.ModelInfo buildDefaultModelInfo(String modelProtocol) {
+
+        ByaiAimodel byaiAimodel = null;
+        if (ModelProtocol.ANTHROPIC.equalsIgnoreCase(modelProtocol)) {
+            DefaultAiModelQo defaultAiModelQo = new DefaultAiModelQo();
+            defaultAiModelQo.setModelProtocol(modelProtocol);
+            defaultAiModelQo.setModelType(Constants.DEFAULT_MODEL_TYPE_LLM);
+            defaultAiModelQo.setStatus(Constants.STATUS_ENABLED);
+            byaiAimodel = byaiAimodelService.getDefaultAiModel(defaultAiModelQo);
+        }
+        else {
+            DefaultAiModelQo defaultAiModelQo = new DefaultAiModelQo();
+            defaultAiModelQo.setModelProtocol(modelProtocol);
+            defaultAiModelQo.setModelType(Constants.DEFAULT_MODEL_TYPE_LLM);
+            defaultAiModelQo.setStatus(Constants.STATUS_ENABLED);
+            defaultAiModelQo.setTagId(Constants.DEFAULT_MODEL_TAG_ID);
+            byaiAimodel = byaiAimodelService.getDefaultAiModel(defaultAiModelQo);
+        }
+
+        if (byaiAimodel == null) {
+            logger.error("当前默认模型不存在，默认个人助理将使用空模型配置初始化");
+            return null;
+        }
+
+        AgentPrologueDto.ModelInfo modelInfo = new AgentPrologueDto.ModelInfo();
+        modelInfo.setMaxToken(byaiAimodel.getMaxContentToken());
+        modelInfo.setModelId(byaiAimodel.getModelId());
+        modelInfo.setTemperature(byaiAimodel.getInparamTemplate());
+        modelInfo.setModel(byaiAimodel.getModelNo());
+        modelInfo.setHistory(6);
+        return modelInfo;
+    }
+
+    /**
+     * 获取初始化模板信息，替换好用户信息，根据当前语言环境获取
+     *
+     * @param loginInfo 登陆信息
+     * @return String
+     */
+    private JSONArray getInitTemplateArray(LoginInfo loginInfo) {
+
+        String paramCode = "INIT_DEFAULT_DIGEMPLOYEE_TEMPLATE";
+
+        String initTemplateStr = byaiSystemConfigService.findByParamCode(paramCode);
+
+        Long userId = loginInfo.getUserId();
+        String userCode = loginInfo.getUserCode();
+        String userName = loginInfo.getUserName();
+
+        // 使用 replace 纯文本替换，规避正则$符号异常
+        initTemplateStr = initTemplateStr.replace("${userId}", userId == null ? "" : String.valueOf(userId));
+        initTemplateStr = initTemplateStr.replace("${userCode}", userCode == null ? "" : userCode);
+        initTemplateStr = initTemplateStr.replace("${userName}", userName == null ? "" : userName);
+
+        JSONObject jsonObjectTemplate = JSON.parseObject(initTemplateStr);
+
+        // 选择中英文模板进行切换
+        if (I18nUtil.ENGLISH.equalsIgnoreCase(loginInfo.getLanguage())) {
+            return jsonObjectTemplate.getJSONArray(I18nUtil.ENGLISH);
+        }
+        else {
+            return jsonObjectTemplate.getJSONArray(I18nUtil.CHINSES);
+        }
+
     }
 
     public Long resolveCurrentUserDefaultDigitalEmployeeId() {
@@ -133,154 +649,6 @@ public class SuasSuperassistApplicationService {
         }
         SuasSuperassist suasSuperassist = suasSuperassistService.findById(assistantId);
         return suasSuperassist == null ? null : suasSuperassist.getDefaultDigEmployeeId();
-    }
-
-    private SsResource ensureDefaultDataset(SuasSuperassist suasSuperassist, Long userId, String userCode,
-        String userName, boolean throwExceptions) {
-        if (StringUtils.equalsIgnoreCase(datasetSystem, "WHALE_AGENT")) {
-            logger.info("dataset.system=WHALE_AGENT，跳过默认个人知识库初始化，userId={}", userId);
-            return null;
-        }
-        Long datasetId = suasSuperassist.getSessionDatasetId();
-        SsResource dataset = datasetId == null ? null : ssResourceService.findById(datasetId);
-        if (isValidDefaultDataset(dataset)) {
-            return dataset;
-        }
-
-        // 兜底：和默认助理同理，按 createBy=userId 反查是否已有 owner_type=personal_default 的 KG_DOC，
-        // 命中则直接复用，避免重复创建。
-        SsResource existing = findExistingDefaultDataset(userId);
-        if (isValidDefaultDataset(existing)) {
-            suasSuperassist.setSessionDatasetId(existing.getResourceId());
-            suasSuperassistService.updateById(suasSuperassist);
-            return existing;
-        }
-
-        try {
-            dataset = datasetApplicationService.createDefaultPersonalDataset(userId, userCode, userName);
-            suasSuperassist.setSessionDatasetId(dataset.getResourceId());
-            suasSuperassistService.updateById(suasSuperassist);
-            return dataset;
-        }
-        catch (Exception e) {
-            if (throwExceptions) {
-                throw e;
-            }
-            logger.error("初始化默认个人知识库失败，userId={}, error={}", userId, e.getMessage(), e);
-            return null;
-        }
-    }
-
-    /**
-     * 按 createBy=userId 反查该用户已存在的 owner_type=personal_default 知识库。
-     *
-     * @author qin.guoquan
-     * @date 2026-05-08
-     */
-    private SsResource findExistingDefaultDataset(Long userId) {
-        if (userId == null) {
-            return null;
-        }
-        LambdaQueryWrapper<SsResource> qw = new LambdaQueryWrapper<>();
-        qw.eq(SsResource::getResourceBizType, ResourceBizTypeEnum.KG_DOC.name())
-            .eq(SsResource::getOwnerType, OwnerType.PERSONAL_DEFAULT)
-            .eq(SsResource::getCreateBy, userId)
-            .orderByAsc(SsResource::getResourceId)
-            .last("limit 1");
-        List<SsResource> list = ssResourceMapper.selectList(qw);
-        return list == null || list.isEmpty() ? null : list.get(0);
-    }
-
-    private SsResource ensureDefaultSuperAssistant(SuasSuperassist suasSuperassist, Long userId,
-        String userCode, String userName, SsResource dataset, boolean throwExceptions) {
-        Long defaultDigEmployeeId = suasSuperassist.getDefaultDigEmployeeId();
-        SsResource defaultAssistant = defaultDigEmployeeId == null ? null
-            : ssResourceService.findById(defaultDigEmployeeId);
-        if (isValidDefaultSuperAssistant(defaultAssistant, userCode, userId)) {
-            return defaultAssistant;
-        }
-        boolean hasUserSelectedDefaultAssistant = isValidUserSelectedDefaultAssistant(defaultAssistant, userId);
-
-        // 默认超级助手以 resource_code={userCode}_main 作为唯一锚点。
-        // 如果用户已在左侧列表中选择其它数字员工做默认助理，这里只确保 _main 资源存在，不覆盖用户当前选择。
-        SsResource existing = findExistingDefaultSuperAssistant(userCode, userId);
-        if (hasUserSelectedDefaultAssistant && isValidDefaultSuperAssistant(existing, userCode, userId)) {
-            return defaultAssistant;
-        }
-        if (isValidDefaultSuperAssistant(existing, userCode, userId)) {
-            suasSuperassist.setDefaultDigEmployeeId(existing.getResourceId());
-            suasSuperassistService.updateById(suasSuperassist);
-            return existing;
-        }
-
-        try {
-            SsResource createdSuperAssistant = digitalEmployeeApplicationService.saveDefaultSuperAssistant(userId, userCode, userName,
-                dataset);
-            if (hasUserSelectedDefaultAssistant) {
-                return defaultAssistant;
-            }
-            suasSuperassist.setDefaultDigEmployeeId(createdSuperAssistant.getResourceId());
-            suasSuperassistService.updateById(suasSuperassist);
-            return createdSuperAssistant;
-        }
-        catch (Exception e) {
-            if (throwExceptions) {
-                throw e;
-            }
-            logger.error("初始化默认超级助手失败，userId={}, error={}", userId, e.getMessage(), e);
-            return hasUserSelectedDefaultAssistant ? defaultAssistant : null;
-        }
-    }
-
-    /**
-     * 按 resource_code={userCode}_main 反查该用户已存在的超级助手。
-     * 超级助手不再依赖 owner_type=personal_default，resource_code 后缀是唯一识别口径。
-     *
-     * @author qin.guoquan
-     * @date 2026-05-09 150800
-     */
-    private SsResource findExistingDefaultSuperAssistant(String userCode, Long userId) {
-        String resourceCode = DigitalEmployeeApplicationService.buildDefaultSuperAssistantResourceCode(userCode, userId);
-        if (StringUtils.isBlank(resourceCode)) {
-            return null;
-        }
-        LambdaQueryWrapper<SsResource> qw = new LambdaQueryWrapper<>();
-        qw.eq(SsResource::getResourceBizType, ResourceBizTypeEnum.DIG_EMPLOYEE.name())
-            .eq(SsResource::getResourceCode, resourceCode)
-            .orderByAsc(SsResource::getResourceId)
-            .last("limit 1");
-        List<SsResource> list = ssResourceMapper.selectList(qw);
-        return list == null || list.isEmpty() ? null : list.get(0);
-    }
-
-    private boolean isValidDefaultDataset(SsResource dataset) {
-        return dataset != null && StringUtils.equals(dataset.getResourceBizType(), ResourceBizTypeEnum.KG_DOC.name())
-            && StringUtils.equals(dataset.getOwnerType(), OwnerType.PERSONAL_DEFAULT);
-    }
-
-    private boolean isValidDefaultSuperAssistant(SsResource defaultAssistant, String userCode, Long userId) {
-        String resourceCode = DigitalEmployeeApplicationService.buildDefaultSuperAssistantResourceCode(userCode, userId);
-        return defaultAssistant != null
-            && StringUtils.equals(defaultAssistant.getResourceBizType(), ResourceBizTypeEnum.DIG_EMPLOYEE.name())
-            && StringUtils.equals(defaultAssistant.getResourceCode(), resourceCode);
-    }
-
-    /**
-     * 用户手动设置的默认助理可能是左侧列表里的任意数字员工。
-     * 登录初始化不能因为它不是 _main 超级助手，就把 default_dig_employee_id 覆盖回超级助手。
-     */
-    private boolean isValidUserSelectedDefaultAssistant(SsResource defaultAssistant, Long userId) {
-        return defaultAssistant != null
-            && StringUtils.equals(defaultAssistant.getResourceBizType(), ResourceBizTypeEnum.DIG_EMPLOYEE.name());
-    }
-
-    private SuasSuperassist findOrCreateEmptySuperassist(Long userId, String userName, Long assistantId) {
-        Long effectiveAssistantId = assistantId != null ? assistantId : userId;
-        SuasSuperassist suasSuperassist = suasSuperassistService.findById(effectiveAssistantId);
-        if (suasSuperassist != null) {
-            return suasSuperassist;
-        }
-        return this.createSuasSuperassist(effectiveAssistantId, userName, null);
     }
 
 }

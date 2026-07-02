@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { getLocale } from '@umijs/max';
-import { POST } from '@/service/common/request';
+import { GET, POST } from '@/service/common/request';
 import { getSessionKey, getssoToken, getToken, ssotokenKey, tokenKey } from '@/pages/manager/utils/auth';
 import { generateSignature } from '@/pages/manager/utils/signature';
 
@@ -34,13 +34,25 @@ export async function setDefaultModel(params: any) {
   return POST('/byaiService/new/model/setDefaultModel', { ...params }, withCustomHandle);
 }
 
+export async function completeAllModelConfig() {
+  return GET('/byaiService/new/model/completeAllModelConfig', {}, { ...withCustomHandle, languageConf: false });
+}
+
 const getDeltaText = (payload: any) => {
   if (!payload) return '';
   if (typeof payload === 'string') return payload;
+
+  // Anthropic Messages API SSE: content_block_delta + delta.text
+  if (payload?.type === 'content_block_delta') {
+    const anthropicText = payload?.delta?.text;
+    if (typeof anthropicText === 'string') return anthropicText;
+  }
+
   return (
     payload?.choices?.[0]?.delta?.content ||
     payload?.choices?.[0]?.message?.content ||
     payload?.delta?.content ||
+    payload?.delta?.text ||
     payload?.content ||
     payload?.output ||
     ''
@@ -111,32 +123,35 @@ export async function debugModelStream(params: any) {
   let buffer = '';
   let output = '';
 
-  const handleEvent = (eventText: string) => {
-    const lines = eventText
-      .split('\n')
-      .map((line) => line.trim())
-      .filter(Boolean);
-    const dataLines = lines.filter((line) => line.startsWith('data:'));
-    if (!dataLines.length) return false;
+  const handleDataLine = (line: string): boolean => {
+    if (!line.startsWith('data:')) return false;
+    const raw = line.slice(5).trim();
+    if (!raw) return false;
+    if (raw === '[DONE]') return true;
 
-    for (const line of dataLines) {
-      const raw = line.slice(5).trim();
-      if (!raw) continue;
-      if (raw === '[DONE]') return true;
-
-      try {
-        const parsed = JSON.parse(raw);
-        const delta = getDeltaText(parsed);
-        if (delta) {
-          output += delta;
-          onDelta?.(delta);
-        }
-      } catch (error) {
-        output += raw;
-        onDelta?.(raw);
+    try {
+      const parsed = JSON.parse(raw);
+      const delta = getDeltaText(parsed);
+      if (delta) {
+        output += delta;
+        onDelta?.(delta);
       }
+    } catch (error) {
+      output += raw;
+      onDelta?.(raw);
     }
 
+    return false;
+  };
+
+  const flushBufferLines = (): boolean => {
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      if (handleDataLine(trimmed)) return true;
+    }
     return false;
   };
 
@@ -145,25 +160,19 @@ export async function debugModelStream(params: any) {
     if (done) break;
 
     buffer += decoder.decode(value, { stream: true });
-    const events = buffer.split('\n\n');
-    buffer = events.pop() || '';
-
-    for (const eventText of events) {
-      const isDone = handleEvent(eventText);
-      if (isDone) {
-        return {
-          code: 0,
-          data: {
-            output,
-            success: true,
-          },
-        };
-      }
+    if (flushBufferLines()) {
+      return {
+        code: 0,
+        data: {
+          output,
+          success: true,
+        },
+      };
     }
   }
 
   if (buffer.trim()) {
-    handleEvent(buffer);
+    handleDataLine(buffer.trim());
   }
 
   return {

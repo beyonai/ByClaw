@@ -5,19 +5,20 @@
   "description": "Baiying-style dynamic agent registration and dispatch for OpenClaw",
   "type": "module",
   "scripts": {
-    "build": "esbuild index.ts --bundle --platform=node --format=esm --target=node20 --outfile=dist/index.js --sourcemap --external:openclaw --external:minio --loader:.md=text && esbuild src/aimodel-secret-resolver-cli.ts --bundle --platform=node --format=esm --target=node20 --outfile=dist/aimodel-secret-resolver-cli.js --sourcemap --banner:js='import { createRequire } from \"node:module\"; const require = createRequire(import.meta.url);'",
+    "build": "esbuild index.ts --bundle --splitting --platform=node --format=esm --target=node20 --outdir=dist --entry-names=[name] --chunk-names=chunks/[name]-[hash] --sourcemap --packages=external --external:openclaw --external:minio --loader:.md=text && esbuild src/aimodel-secret-resolver-cli.ts --bundle --platform=node --format=esm --target=node20 --outfile=dist/aimodel-secret-resolver-cli.js --sourcemap --packages=external --banner:js='import { createRequire } from \"node:module\"; const require = createRequire(import.meta.url);'",
     "test": "vitest run"
   },
   "dependencies": {
-    "@byclaw/by-framework": "^1.3.1",
+    "@byclaw/by-framework": "1.3.1",
+    "@opentelemetry/api": "1.9.1",
     "@sinclair/typebox": "0.34.48",
-    "ioredis": "^5.10.1"
+    "ioredis": "5.10.1"
   },
   "devDependencies": {
-    "@types/node": "^22.10.0",
-    "esbuild": "^0.25.0",
-    "tsx": "^4.21.0",
-    "vitest": "^3.0.5"
+    "@types/node": "22.19.17",
+    "esbuild": "0.25.12",
+    "tsx": "4.21.0",
+    "vitest": "3.2.4"
   },
   "openclaw": {
     "extensions": [

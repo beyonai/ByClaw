@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.file.service;
 
 import com.iwhalecloud.byai.common.constants.Constants;
+import com.iwhalecloud.byai.common.storage.impl.WhaleAgentStorageService;
 import com.iwhalecloud.byai.common.storage.model.StorageLocation;
 import org.springframework.stereotype.Component;
 
@@ -13,7 +14,8 @@ public class CommonFilePathResolver {
     public static final String NAMESPACE = "common-file";
 
     public StorageLocation icon(String path) {
-        return StorageLocation.of(NAMESPACE, Constants.BUCKET_NAME_ICON, path);
+        return StorageLocation.of(NAMESPACE, Constants.BUCKET_NAME_ICON, path,
+            WhaleAgentStorageService.SHARE_TYPE_PUBLIC);
     }
 
     public StorageLocation feedback(String path) {

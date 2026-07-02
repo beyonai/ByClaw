@@ -27,6 +27,15 @@ public class SuasSuperassistService {
     private SuasSuperassistMapper suasSuperassistMapper;
 
     /**
+     * 新增数据员工超级助手
+     *
+     * @param suasSuperassist 直级助手信息
+     */
+    public void save(SuasSuperassist suasSuperassist) {
+        suasSuperassistMapper.insert(suasSuperassist);
+    }
+
+    /**
      * 查询用户的超级助手
      *
      * @param superassistId 用户标识
@@ -47,8 +56,7 @@ public class SuasSuperassistService {
     }
 
     /**
-     * 查询所有把指定数字员工资源设为默认助理的超级助手记录。
-     * 用于在数字员工注销/删除时，找出受影响的用户，回退他们的默认助理设置。
+     * 查询所有把指定数字员工资源设为默认助理的超级助手记录。 用于在数字员工注销/删除时，找出受影响的用户，回退他们的默认助理设置。
      *
      * @param defaultDigEmployeeId 数字员工资源ID
      * @return 受影响的 SuasSuperassist 列表（可能为空）

@@ -1,0 +1,23 @@
+{
+  "skill_name": "podcast-script-generator",
+  "evals": [
+    {
+      "id": 0,
+      "prompt": "帮我生成一个关于「AI编程工具对程序员职业影响」的播客对白脚本，中文，大概5分钟的量",
+      "expected_output": "一个完整的 JSON，包含 title、outline 和 script 数组。script 应包含 host 和 guest 两个角色的自然对话，覆盖开场白、核心讨论（至少探讨2-3个关键点）、互动环节（至少2次实质性来回）、结尾总结。中文口语化，不生硬。",
+      "files": []
+    },
+    {
+      "id": 1,
+      "prompt": "把下面这段文章做成一个双人播客对白脚本（中文）：\n\n大模型时代，「提示词工程」（Prompt Engineering）正在成为一种新型技能。过去，程序员通过编写精确的代码来控制计算机；现在，提示词工程师通过精心设计的语言来引导AI模型产生期望输出。这门技能的核心在于：理解模型的「思维方式」，知道如何提问才能得到高质量的回答。但争议也随之而来——有人认为这是未来最重要的技能之一，也有人认为随着模型能力提升，提示词工程将逐渐消失。OpenAI自己的研究员就曾公开表示，未来的模型应该能「理解意图」而不是依赖精确的措辞。这场争论折射出一个更深层的问题：在AI快速进化的时代，什么样的技能才是真正「未来保值」的？",
+      "expected_output": "基于提供文本生成的播客脚本，提炼出提示词工程的核心争议点，host 引导讨论，guest 提供深度分析和个人见解，对话自然流畅不像在背课文。JSON 格式输出。",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Generate a podcast script in English about the impact of remote work on company culture and team cohesion. Make it about 5-7 minutes long.",
+      "expected_output": "An English-language podcast script JSON with natural conversational register (contractions, natural speech patterns). Host leads, guest provides substantive analysis. At least 2 genuine back-and-forth exchanges. Covers both benefits and challenges of remote work culture.",
+      "files": []
+    }
+  ]
+}

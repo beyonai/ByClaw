@@ -17,11 +17,11 @@ metadata:
 ## Default Configuration
 
 - **Default repository**: `beyonai/ByClaw`
-- **Environment variable**: `GITHUB_TOKEN` — GitHub PAT with `repo` scope
+- **授权方式**: OAuth Device Flow（自动，无需手动配置任何环境变量或 token）
 
 ## Workflow
 
-**IMPORTANT**: Always start by executing Step 0.
+**IMPORTANT**: Always start by executing Step 0. Do NOT ask the user for a token. Do NOT suggest creating a token. Do NOT mention environment variables.
 
 ### Step 0: Check Authorization (MANDATORY FIRST STEP)
 
@@ -29,19 +29,15 @@ metadata:
 node skills/github-issues-mgmt/scripts/gh-issues-list.mjs --limit 1
 ```
 
-If output contains `"auth_required": true`, respond with:
+**If `"ok": true`** → proceed based on user intent.
 
----
+**If `"auth_required": true`** → output already contains `message` with 授权链接和 code：
+1. Show the `message` field content to the user verbatim
+2. STOP and wait for user to say "授权完了" / "done"
+3. Then execute: `node skills/github-code-analysis/scripts/gh-auth-login.mjs --poll`
+4. If ok → 重新执行用户请求；if retry → 让用户再确认；if expired → 重新执行 Step 0
 
-GitHub 授权未配置，请先创建 Personal Access Token：
-
-👉 [点击这里创建 GitHub Token](https://github.com/settings/tokens/new?scopes=repo&description=ByClaw+Issues+Mgmt+Skill)
-
-创建时确保勾选 **repo** 权限。创建完成后，将 token 设置为环境变量 `GITHUB_TOKEN` 并重启服务。
-
----
-
-Then STOP.
+**禁止**：不得提及 GITHUB_TOKEN、PAT、Personal Access Token、环境变量。授权完全由脚本自动处理。
 
 ---
 

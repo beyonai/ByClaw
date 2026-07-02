@@ -36,4 +36,9 @@ public class UsersDTO extends Users {
     @UserTypesValidator(groups = { Add.class, Mod.class }, message = "{user.usertype.valid}")
     private List<String> userTypes;
 
+    /**
+     * 新增用户时传入的 SM4 加密密码。
+     */
+    private String password;
+
 }

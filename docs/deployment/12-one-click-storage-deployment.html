@@ -1,0 +1,504 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ByClaw 一键部署存储模式切换手册</title>
+  <style>
+    :root {
+      --bg: #f6f8fb;
+      --panel: #fff;
+      --text: #1f2937;
+      --muted: #5b6472;
+      --line: #d9e0ea;
+      --blue: #1765d6;
+      --green: #1f8a5b;
+      --amber: #a16207;
+      --red: #b42318;
+      --code: #0f172a;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+      color: var(--text);
+      background: var(--bg);
+      line-height: 1.65;
+    }
+    .layout {
+      display: grid;
+      grid-template-columns: 280px minmax(0, 1fr);
+      gap: 28px;
+      max-width: 1420px;
+      margin: 0 auto;
+      padding: 28px;
+    }
+    .toc {
+      position: sticky;
+      top: 20px;
+      height: calc(100vh - 40px);
+      overflow: auto;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+    }
+    .toc-title { font-weight: 700; margin-bottom: 10px; }
+    .toc ul { list-style: none; margin: 0; padding: 0; }
+    .toc li { margin: 8px 0; }
+    .toc a { color: var(--muted); text-decoration: none; font-size: 14px; }
+    .toc a:hover { color: var(--blue); }
+    section {
+      margin-bottom: 22px;
+      padding: 28px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+    }
+    .hero { padding: 34px 36px; }
+    h1 { margin: 0 0 14px; font-size: 34px; line-height: 1.2; letter-spacing: 0; }
+    h2 { margin: 0 0 16px; font-size: 24px; line-height: 1.3; letter-spacing: 0; }
+    h3 { margin: 20px 0 10px; font-size: 17px; line-height: 1.35; letter-spacing: 0; }
+    p { margin: 10px 0; }
+    .lede { color: var(--muted); font-size: 17px; max-width: 920px; }
+    .meta {
+      margin-top: 16px;
+      padding: 12px 14px;
+      border-left: 4px solid var(--blue);
+      background: #eef5ff;
+      color: #24405f;
+    }
+    code {
+      padding: 2px 5px;
+      border-radius: 4px;
+      background: #eef2f7;
+      color: var(--code);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.92em;
+    }
+    pre {
+      overflow: auto;
+      padding: 16px;
+      border-radius: 8px;
+      background: #111827;
+      color: #e5e7eb;
+      line-height: 1.45;
+    }
+    pre code { padding: 0; background: transparent; color: inherit; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0;
+      table-layout: fixed;
+    }
+    th, td {
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      vertical-align: top;
+      word-break: break-word;
+    }
+    th { background: #f0f4f8; text-align: left; }
+    .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+    .card { padding: 16px; border: 1px solid var(--line); border-radius: 8px; background: #fbfdff; }
+    .ok { color: var(--green); font-weight: 700; }
+    .warn { color: var(--amber); font-weight: 700; }
+    .box { margin: 14px 0; padding: 14px 16px; border: 1px solid #c9d8ee; border-radius: 8px; background: #f3f7ff; }
+    svg { width: 100%; height: auto; display: block; margin: 14px 0; }
+    .svg-node { fill: #fff; stroke: #b8c2d6; stroke-width: 2; }
+    .svg-blue { fill: #edf5ff; stroke: #80aee8; stroke-width: 2; }
+    .svg-green { fill: #edfdf6; stroke: #85c7a8; stroke-width: 2; }
+    .svg-amber { fill: #fff7ed; stroke: #f0bd72; stroke-width: 2; }
+    .svg-line { stroke: #1765d6; stroke-width: 2.5; fill: none; }
+    .svg-label { font-size: 18px; font-weight: 700; fill: #1f2937; }
+    .svg-small { font-size: 13px; fill: #536071; }
+    @media (max-width: 980px) {
+      .layout { grid-template-columns: 1fr; padding: 14px; }
+      .toc { position: static; height: auto; }
+      .grid { grid-template-columns: 1fr; }
+      section { padding: 20px; }
+      h1 { font-size: 28px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <nav class="toc" aria-label="固定目录">
+      <div class="toc-title">固定目录</div>
+      <ul>
+        <li><a href="#goal">0. 目标</a></li>
+        <li><a href="#modes">1. 三种模式</a></li>
+        <li><a href="#architecture">2. 架构图</a></li>
+        <li><a href="#flow">3. 部署流程</a></li>
+        <li><a href="#params">4. .env 参数说明</a></li>
+        <li><a href="#prepare-nfs">5. NFS 前置准备</a></li>
+        <li><a href="#ssh-init">6. SSH 初始化 NFS</a></li>
+        <li><a href="#commands">7. 一键命令</a></li>
+        <li><a href="#verify">8. 验证清单</a></li>
+        <li><a href="#user-space">9. 用户隔离</a></li>
+        <li><a href="#troubleshooting">10. 排障</a></li>
+      </ul>
+    </nav>
+
+    <main>
+      <section id="goal" class="hero">
+        <h1>ByClaw 一键部署存储模式切换手册</h1>
+        <p class="lede">
+          通过 <code>.env</code> 驱动存储方案，在纯 Docker 场景下一键切换 legacy MinIO、
+          NFS 全文件型、NFS + MinIO 混合三种部署模式。<code>deploy.sh</code> 只区分
+          <code>init</code> 和 <code>update</code> 两个部署阶段。
+        </p>
+        <div class="meta">
+          推荐新部署在 <code>.env</code> 设置 <code>BYCLAW_DEPLOY_STORAGE=nfs</code>：
+          OpenClaw 容器 <code>/by</code> 和 BE 文件 CRUD 都使用 <code>/mnt/byclaw-file</code>，
+          MinIO 不再作为运行态文件系统。
+        </div>
+      </section>
+
+      <section id="modes">
+        <h2>1. 三种存储模式</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>模式</th>
+              <th>.env 设置</th>
+              <th>OpenClaw /by</th>
+              <th>BE 上传/CRUD</th>
+              <th>MinIO</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>nfs</code></td>
+              <td><code>BYCLAW_DEPLOY_STORAGE=nfs</code></td>
+              <td>NFS</td>
+              <td>NFS</td>
+              <td>默认跳过</td>
+            </tr>
+            <tr>
+              <td><code>nfs-hybrid</code></td>
+              <td><code>BYCLAW_DEPLOY_STORAGE=nfs-hybrid</code></td>
+              <td>NFS</td>
+              <td>MinIO</td>
+              <td>启动</td>
+            </tr>
+            <tr>
+              <td><code>minio</code></td>
+              <td><code>BYCLAW_DEPLOY_STORAGE=minio</code></td>
+              <td>legacy MinIO/rclone</td>
+              <td>MinIO</td>
+              <td>启动</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="architecture">
+        <h2>2. SVG 架构图</h2>
+        <svg viewBox="0 0 1080 430" role="img" aria-label="一键部署架构图">
+          <defs>
+            <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#1765d6"></path>
+            </marker>
+          </defs>
+          <rect x="30" y="30" width="1020" height="360" rx="10" fill="#f7f9fc" stroke="#d8deea"></rect>
+          <rect x="60" y="84" width="245" height="120" rx="8" class="svg-amber"></rect>
+          <text x="92" y="120" class="svg-label">NFS Server</text>
+          <text x="92" y="150" class="svg-small">A_SERVER:/exports/byclaw</text>
+          <text x="92" y="174" class="svg-small">集中用户文件</text>
+
+          <rect x="410" y="84" width="260" height="120" rx="8" class="svg-green"></rect>
+          <text x="442" y="120" class="svg-label">Docker Host</text>
+          <text x="442" y="150" class="svg-small">/mnt/byclaw-file</text>
+          <text x="442" y="174" class="svg-small">NFS 挂载点</text>
+
+          <rect x="770" y="70" width="230" height="88" rx="8" class="svg-blue"></rect>
+          <text x="805" y="105" class="svg-label">OpenSandbox</text>
+          <text x="805" y="130" class="svg-small">private_volume.file_root</text>
+
+          <rect x="770" y="208" width="230" height="88" rx="8" class="svg-node"></rect>
+          <text x="812" y="243" class="svg-label">ByClaw BE</text>
+          <text x="805" y="268" class="svg-small">FILE_STORAGE_TYPE=file</text>
+
+          <rect x="410" y="260" width="260" height="88" rx="8" class="svg-node"></rect>
+          <text x="456" y="294" class="svg-label">MinIO</text>
+          <text x="442" y="320" class="svg-small">仅 minio / nfs-hybrid 需要</text>
+
+          <path d="M305 144 H408" class="svg-line" marker-end="url(#arrow)"></path>
+          <path d="M670 130 H768" class="svg-line" marker-end="url(#arrow)"></path>
+          <path d="M770 252 H672" class="svg-line" marker-end="url(#arrow)"></path>
+          <path d="M540 260 V206" class="svg-line" marker-end="url(#arrow)"></path>
+          <text x="328" y="128" class="svg-small">mount -t nfs4</text>
+          <text x="694" y="114" class="svg-small">/by bind</text>
+          <text x="686" y="238" class="svg-small">CRUD</text>
+        </svg>
+      </section>
+
+      <section id="flow">
+        <h2>3. SVG 部署流程图</h2>
+        <svg viewBox="0 0 1080 300" role="img" aria-label="一键部署流程图">
+          <defs>
+            <marker id="arrow2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#1765d6"></path>
+            </marker>
+          </defs>
+          <rect x="44" y="92" width="150" height="86" rx="8" class="svg-node"></rect>
+          <text x="78" y="126" class="svg-label">准备 .env</text>
+          <text x="70" y="150" class="svg-small">端口/账号/镜像</text>
+          <rect x="250" y="92" width="170" height="86" rx="8" class="svg-amber"></rect>
+          <text x="286" y="126" class="svg-label">挂载 NFS</text>
+          <text x="278" y="150" class="svg-small">findmnt 可见</text>
+          <rect x="480" y="92" width="170" height="86" rx="8" class="svg-green"></rect>
+          <text x="510" y="126" class="svg-label">选择模式</text>
+          <text x="500" y="150" class="svg-small">.env: nfs</text>
+          <rect x="710" y="92" width="170" height="86" rx="8" class="svg-blue"></rect>
+          <text x="744" y="126" class="svg-label">启动服务</text>
+          <text x="736" y="150" class="svg-small">middleware + app</text>
+          <rect x="930" y="92" width="110" height="86" rx="8" class="svg-node"></rect>
+          <text x="958" y="126" class="svg-label">验证</text>
+          <text x="950" y="150" class="svg-small">/by + CRUD</text>
+          <path d="M194 135 H248" class="svg-line" marker-end="url(#arrow2)"></path>
+          <path d="M420 135 H478" class="svg-line" marker-end="url(#arrow2)"></path>
+          <path d="M650 135 H708" class="svg-line" marker-end="url(#arrow2)"></path>
+          <path d="M880 135 H928" class="svg-line" marker-end="url(#arrow2)"></path>
+        </svg>
+      </section>
+
+      <section id="params">
+        <h2>4. .env 参数说明</h2>
+        <table>
+          <thead>
+            <tr><th>变量</th><th>取值</th><th>说明</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>BYCLAW_DEPLOY_STORAGE</code></td>
+              <td><code>nfs</code> / <code>nfs-hybrid</code> / <code>minio</code></td>
+              <td>唯一的存储 profile 开关，写入 <code>.env</code> 后由 <code>deploy.sh init/update</code> 读取。</td>
+            </tr>
+            <tr>
+              <td><code>BYCLAW_DEPLOY_INIT_NFS</code></td>
+              <td><code>true</code> / <code>false</code></td>
+              <td>仅 <code>sh deploy.sh init</code> 阶段生效。为 <code>true</code> 时通过 SSH 初始化 NFS Server 和客户端挂载。</td>
+            </tr>
+            <tr>
+              <td><code>BYCLAW_DEPLOY_START_MINIO</code></td>
+              <td><code>true</code> / <code>false</code></td>
+              <td><code>nfs</code> 模式默认跳过 MinIO；设为 <code>true</code> 可同时启动。</td>
+            </tr>
+            <tr>
+              <td><code>BYCLAW_SANDBOX_FILE_VOLUME_ROOT</code></td>
+              <td><code>/mnt/byclaw-file</code></td>
+              <td>NFS 在 Docker 宿主机、openSandbox、BE 容器中的统一路径。</td>
+            </tr>
+            <tr>
+              <td><code>FILE_STORAGE_LOCAL_PATH</code></td>
+              <td><code>/mnt/byclaw-file</code></td>
+              <td><code>FILE_STORAGE_TYPE=file</code> 时，BE CRUD 写入的文件根。</td>
+            </tr>
+            <tr>
+              <td><code>FILE_STORAGE_TYPE</code></td>
+              <td><code>file</code> / <code>minio</code></td>
+              <td>通常由 profile 自动设置。<code>nfs</code> 使用 <code>file</code>，<code>minio</code> 和 <code>nfs-hybrid</code> 使用 <code>minio</code>。</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="box">
+          不再推荐通过命令参数切换存储方案。标准入口是：首次部署执行 <code>sh deploy.sh init</code>，
+          仅初始化 NFS 执行 <code>sh deploy.sh nfs-init</code>，
+          增量更新执行 <code>sh deploy.sh update</code>，所有细节都写在 <code>.env</code>。
+        </div>
+      </section>
+
+      <section id="prepare-nfs">
+        <h2>5. NFS 前置准备</h2>
+        <h3>5.1 A 服务器导出目录</h3>
+        <pre><code>sudo apt-get update
+sudo apt-get install -y nfs-kernel-server
+sudo mkdir -p /exports/byclaw
+sudo chown -R root:root /exports/byclaw
+sudo chmod -R 755 /exports/byclaw
+
+echo '/exports/byclaw  *(rw,sync,no_subtree_check,no_root_squash)' | sudo tee -a /etc/exports
+sudo exportfs -rav
+sudo systemctl enable --now nfs-server</code></pre>
+
+        <h3>5.2 Docker 宿主机挂载</h3>
+        <pre><code>sudo apt-get update
+sudo apt-get install -y nfs-common
+sudo mkdir -p /mnt/byclaw-file
+sudo mount -t nfs4 A_SERVER:/exports/byclaw /mnt/byclaw-file \
+  -o rw,hard,noatime,nconnect=4,_netdev
+
+findmnt /mnt/byclaw-file
+touch /mnt/byclaw-file/.probe-$(hostname)</code></pre>
+      </section>
+
+      <section id="ssh-init">
+        <h2>6. SSH 初始化 NFS</h2>
+        <p>
+          如果部署机可以 SSH 到 NFS Server 和 Docker/openSandbox 宿主机，可以让脚本自动完成 NFS Server 导出、
+          客户端挂载、<code>/etc/fstab</code> 固化和读写探针。
+        </p>
+        <pre><code>BYCLAW_DEPLOY_INIT_NFS=true
+BYCLAW_NFS_SERVER_HOST=10.0.0.10
+BYCLAW_NFS_SERVER_PORT=22
+BYCLAW_NFS_SERVER_USER=root
+BYCLAW_NFS_SERVER_PASSWORD=
+BYCLAW_NFS_EXPORT_PATH=/exports/byclaw
+BYCLAW_NFS_EXPORT_CLIENTS=*
+
+BYCLAW_NFS_CLIENT_HOSTS=10.0.0.20,10.0.0.21
+BYCLAW_NFS_CLIENT_PORT=22
+BYCLAW_NFS_CLIENT_USER=root
+BYCLAW_NFS_CLIENT_PASSWORD=
+BYCLAW_NFS_MOUNT_OPTIONS=rw,hard,noatime,nconnect=4,_netdev</code></pre>
+
+        <div class="box">
+          密码为空时脚本使用 SSH key 登录；配置密码时，Shell 版本需要本机安装 <code>sshpass</code>。
+          远端用户建议使用 <code>root</code>，或配置免密 sudo。
+        </div>
+
+        <pre><code># 推荐：写入 .env 后在首次部署阶段自动初始化
+BYCLAW_DEPLOY_STORAGE=nfs
+BYCLAW_DEPLOY_INIT_NFS=true
+
+sh deploy.sh nfs-init
+
+# 也可以只执行 NFS 初始化脚本，适合先单独验证挂载
+cd deploy
+sh init-nfs.sh
+
+# PowerShell 首次部署
+.\deploy.ps1 init</code></pre>
+      </section>
+
+      <section id="commands">
+        <h2>7. 详细操作指南</h2>
+        <h3>7.1 首次部署</h3>
+        <pre><code>git clone https://github.com/beyonai/ByClaw.git
+cd ByClaw
+cp .env.example .env
+
+# 修改 .env 中数据库、Redis、端口、镜像、账号、存储方案等基础配置
+vim .env
+
+sh deploy.sh init</code></pre>
+
+        <h3>7.2 增量更新</h3>
+        <pre><code># 代码或镜像版本更新后，复用 .env，重新生成配置并重建容器
+sh deploy.sh update</code></pre>
+
+        <h3>7.3 .env 中切换模式</h3>
+        <pre><code># NFS 全文件型模式：OpenClaw /by 和 BE 文件 CRUD 都走 /mnt/byclaw-file
+BYCLAW_DEPLOY_STORAGE=nfs
+BYCLAW_DEPLOY_START_MINIO=false
+
+# legacy MinIO 模式：保持旧 MinIO/rclone 运行态方案
+BYCLAW_DEPLOY_STORAGE=minio
+
+# 混合模式：OpenClaw /by 走 NFS，上传/下载 API 继续走 MinIO
+BYCLAW_DEPLOY_STORAGE=nfs-hybrid</code></pre>
+
+        <h3>7.4 NFS 模式仍启动 MinIO</h3>
+        <pre><code># .env
+BYCLAW_DEPLOY_STORAGE=nfs
+BYCLAW_DEPLOY_START_MINIO=true
+
+sh deploy.sh update</code></pre>
+
+        <h3>7.5 Windows PowerShell</h3>
+        <pre><code>cp .env.example .env
+# 修改 .env 后执行：
+.\deploy.ps1 init
+
+# 增量更新：
+.\deploy.ps1 update</code></pre>
+      </section>
+
+      <section id="verify">
+        <h2>8. 验证清单</h2>
+        <table>
+          <thead>
+            <tr><th>检查项</th><th>命令</th><th>期望</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>NFS 挂载</td>
+              <td><code>findmnt /mnt/byclaw-file</code></td>
+              <td><span class="ok">显示 nfs4</span></td>
+            </tr>
+            <tr>
+              <td>openSandbox 配置</td>
+              <td><code>grep -A6 '\[docker.private_volume\]' deploy/middleware/opensandbox-server.toml</code></td>
+              <td><span class="ok">backend=file</span></td>
+            </tr>
+            <tr>
+              <td>BE 容器挂载</td>
+              <td><code>docker inspect byclaw-be-standalone | grep -A5 /mnt/byclaw-file</code></td>
+              <td><span class="ok">BE 能访问 NFS</span></td>
+            </tr>
+            <tr>
+              <td>用户空间</td>
+              <td><code>find /mnt/byclaw-file -maxdepth 3 -type d | head</code></td>
+              <td><span class="ok">出现 byclaw-${USER_CODE}/by</span></td>
+            </tr>
+            <tr>
+              <td>容器内 /by</td>
+              <td><code>mount | grep ' /by '</code></td>
+              <td><span class="ok">不是 rclone/s3fs/goofys/fuse</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="user-space">
+        <h2>9. 用户空间隔离策略</h2>
+        <p>
+          MinIO 模式下，新增或注册用户会初始化用户 bucket。NFS/file 模式下，同一条用户创建链路会创建
+          <code>/mnt/byclaw-file/byclaw-${USER_CODE}/by</code>，保持“一用户一隔离根”。
+        </p>
+        <pre><code># userCode=user001
+/mnt/byclaw-file/byclaw-user001/by
+
+# OpenClaw 容器内
+/by</code></pre>
+        <div class="box">
+          历史用户不会在 BE 启动时批量创建目录。迁移旧数据时，需要按用户创建目录并同步 MinIO 数据。
+        </div>
+      </section>
+
+      <section id="troubleshooting">
+        <h2>10. 排障</h2>
+        <table>
+          <thead>
+            <tr><th>现象</th><th>原因</th><th>处理</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>BE 创建用户失败或无法创建目录</td>
+              <td>BE 容器未挂载 <code>/mnt/byclaw-file</code>，或 NFS 权限不足</td>
+              <td>检查 BE compose volume 和 <code>touch /mnt/byclaw-file/.probe</code></td>
+            </tr>
+            <tr>
+              <td>OpenClaw /by 仍是 rclone</td>
+              <td><code>.env</code> 未设置 <code>BYCLAW_DEPLOY_STORAGE=nfs</code>，或 openSandbox TOML 未重生成</td>
+              <td>确认 <code>.env</code> 后执行 <code>sh deploy.sh update</code></td>
+            </tr>
+            <tr>
+              <td>NFS 模式仍启动了 MinIO</td>
+              <td>设置了 <code>MIDDLEWARE_MODULES</code> 或 <code>BYCLAW_DEPLOY_START_MINIO=true</code></td>
+              <td>清空变量后重启，或接受 MinIO 同时运行</td>
+            </tr>
+            <tr>
+              <td>文件列表看不到 OpenClaw 产物</td>
+              <td><code>FILE_STORAGE_TYPE</code> 仍是 <code>minio</code></td>
+              <td>全文件型模式设置 <code>BYCLAW_DEPLOY_STORAGE=nfs</code>，并迁移历史对象</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

@@ -1,23 +1,21 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Spin, Modal, Checkbox, Button, List, Tabs, Input, message, Empty, Popconfirm } from 'antd';
+import { Spin, Modal, Checkbox, Button, List, Tabs, Input, message, Empty, Tooltip, Dropdown } from 'antd';
 import { useIntl, useSelector } from '@umijs/max';
 import { debounce, trim } from 'lodash';
 import classnames from 'classnames';
 import AntdIcon from '@/components/AntdIcon';
 import withDrag, { DragType } from '@/components/QueryInput/withDrag';
 import styles from './index.module.less';
+import employeeStyles from '@/layout/sider/components/EmployeeList/index.module.less';
 // import Empty from '@/components/Empty';
 import {
   listResourceUseAuth,
+  deleteResource,
   queryDigEmployeeRelResourceAuth,
   queryResourceMembers,
-} from '@/pages/manager/service/resources';
-import {
   qryByClawFileByUserCode,
-  qrySkillListByUserCode,
   readFile,
   downloadSkillZip,
-  deleteSkill,
 } from '@/pages/manager/service/resources';
 import useGlobal from '@/hooks/useGlobal';
 
@@ -40,6 +38,7 @@ interface IResourceItem {
   objectKey?: string;
   isFromResourceModule?: boolean;
   skillPath?: string;
+  skillUrl?: string;
 }
 
 interface Props {
@@ -55,6 +54,9 @@ interface Props {
   ownerType?: string;
   resources?: IResourceItem[];
   loadingOverride?: boolean;
+
+  /** 渲染形态：grid（默认，卡片网格）或 list（列表，用于小面板弹窗） */
+  layout?: 'grid' | 'list';
 }
 
 const ResourceList = (props: Props) => {
@@ -70,6 +72,7 @@ const ResourceList = (props: Props) => {
     agentId,
     resources,
     loadingOverride,
+    layout = 'grid',
   } = props;
 
   const { EventEmitter, sessionId } = useGlobal();
@@ -83,7 +86,6 @@ const ResourceList = (props: Props) => {
   const [loading, setLoading] = useState(false);
   const [resourceList, setResourceList] = useState<IResourceItem[]>([]);
   const [pageIndex, setPageIndex] = useState(1);
-  const [hoveredCard, setHoveredCard] = useState<string | null>(null);
   const [showPropertiesModal, setShowPropertiesModal] = useState(false);
   const [selectedProperties, setSelectedProperties] = useState<string[]>([]);
   const [currentResource, setCurrentResource] = useState<IResourceItem | null>(null);
@@ -159,6 +161,12 @@ const ResourceList = (props: Props) => {
 
     try {
       let rows: any[] = [];
+      const currentResourceBizTypeList =
+        Array.isArray(resourceBizTypeList) && resourceBizTypeList.length
+          ? resourceBizTypeList
+          : myResourceType === 'SKILL'
+            ? ['SKILL']
+            : resourceBizTypeList;
 
       // 当 resourceType 为 SPACE 时，使用新的接口
       if (myResourceType === 'SPACE') {
@@ -174,23 +182,9 @@ const ResourceList = (props: Props) => {
             ...item,
             resourceId: item.objectKey || index,
             resourceName: item.fileName,
+            resourceDesc: item.objectKey,
           }));
         }
-      } else if (myResourceType === 'SKILL') {
-        const response = await qrySkillListByUserCode({
-          userCode: userInfo?.userCode,
-          keyword: searchValue.current.trim(),
-          resourceId: normalizedAgentId,
-        });
-        const dataList = Array.isArray(response) ? response : [];
-        // 将返回的数据映射为组件需要的格式
-        rows = dataList.map((item: any, index: number) => ({
-          ...item,
-          resourceId: item.skillPath || index,
-          resourceName: item.skillName,
-          resourceBizType: 'SKILL',
-          id: item.skillPath || index,
-        }));
       } else {
         const currentPage = reset ? 1 : pageIndex;
         if (normalizedAgentId) {
@@ -199,6 +193,7 @@ const ResourceList = (props: Props) => {
             pageSize,
             pageNum: currentPage,
             keyword: searchValue.current.trim(),
+            resourceBizTypeList: currentResourceBizTypeList,
           });
           const allRows = Array.isArray(response?.rows)
             ? response.rows
@@ -206,15 +201,15 @@ const ResourceList = (props: Props) => {
               ? response.list
               : [];
           rows =
-            Array.isArray(resourceBizTypeList) && resourceBizTypeList.length
-              ? allRows.filter((item: any) => resourceBizTypeList.includes(item.resourceBizType))
+            Array.isArray(currentResourceBizTypeList) && currentResourceBizTypeList.length
+              ? allRows.filter((item: any) => currentResourceBizTypeList.includes(item.resourceBizType))
               : allRows;
         } else {
           const response = await listResourceUseAuth({
             pageSize,
             pageNum: currentPage,
             keyword: searchValue.current.trim(),
-            resourceBizTypeList: resourceBizTypeList,
+            resourceBizTypeList: currentResourceBizTypeList,
             ownerType,
             resourceId: normalizedAgentId,
           });
@@ -394,19 +389,10 @@ const ResourceList = (props: Props) => {
     }
   };
 
-  // 处理鼠标悬停
-  const handleMouseEnter = (resourceId: string) => {
-    setHoveredCard(resourceId);
-  };
-
-  const handleMouseLeave = () => {
-    setHoveredCard(null);
-  };
-
   // 处理技能下载（带防抖）
   const handleDownloadSkill = useMemo(() => {
     const download = async (item: IResourceItem) => {
-      const skillPath = item.skillPath || item.resourceId || item.objectKey;
+      const skillPath = item.skillUrl || item.skillPath;
       if (!skillPath) {
         message.error(intl.formatMessage({ id: 'resource.skillDownload.noSkillPath' }));
         return;
@@ -476,24 +462,15 @@ const ResourceList = (props: Props) => {
   };
 
   const handleDeleteSkill = async (item: IResourceItem) => {
-    const skillPath = item.skillPath || item.resourceId || item.objectKey;
-    if (!skillPath) {
+    const resourceId = item.resourceId;
+    if (!resourceId) {
       message.error(intl.formatMessage({ id: 'common.deleteFail' }));
       return;
     }
-    setDeletingSkill(skillPath);
+    setDeletingSkill(resourceId);
     try {
-      const params: { skillPath: string; resourceId?: string | number; userCode?: string } = { skillPath };
-      if (normalizedAgentId) {
-        params.resourceId = normalizedAgentId;
-      }
-      if (userInfo?.userCode) {
-        params.userCode = userInfo.userCode;
-      }
-      await deleteSkill(params);
-      setResourceList((prev) =>
-        prev.filter((resource) => (resource.skillPath || resource.resourceId || resource.objectKey) !== skillPath)
-      );
+      await deleteResource({ resourceId });
+      setResourceList((prev) => prev.filter((resource) => resource.resourceId !== resourceId));
       message.success(intl.formatMessage({ id: 'common.deleteSuccess' }));
       EventEmitter.emit('beyond-resourceList-resourceType-reload', 'SKILL');
     } catch (error) {
@@ -725,6 +702,113 @@ const ResourceList = (props: Props) => {
     );
   };
 
+  // 渲染卡片/列表项的操作下拉菜单（详情 / 下载 / 删除）
+  const renderActionDropdown = (item: IResourceItem, variant: 'grid' | 'list' = 'grid'): React.ReactNode => {
+    if (resourceType !== 'OBJECT' && resourceType !== 'VIEW' && resourceType !== 'SPACE' && resourceType !== 'SKILL') {
+      return null;
+    }
+    return (
+      <Dropdown
+        trigger={variant === 'list' ? ['hover'] : undefined}
+        menu={{
+          onClick: ({ domEvent }) => {
+            domEvent.stopPropagation();
+          },
+          items: [
+            ...(resourceType === 'OBJECT' || resourceType === 'VIEW'
+              ? [
+                {
+                  key: 'detail',
+                  label: intl.formatMessage({ id: 'common.detail' }),
+                  onClick: () => handleMoreClick({ stopPropagation: () => {} } as React.MouseEvent, item),
+                },
+              ]
+              : []),
+            ...(resourceType === 'SPACE'
+              ? [
+                {
+                  key: 'download',
+                  label: intl.formatMessage({ id: 'common.download' }),
+                  onClick: async () => {
+                    try {
+                      const userCode = userInfo?.userCode || '3174953401447148';
+                      const parts = item.objectKey?.split('/') || [];
+                      const sessionId = parts.length >= 2 ? parts[2] : '10026200';
+                      const filePath = item.resourceName || '';
+
+                      const response = await readFile({
+                        userCode,
+                        sessionId,
+                        filePath,
+                        begin_line: 0,
+                        end_line: -1,
+                        objectKey: item.objectKey || '',
+                      });
+
+                      if (response?.file) {
+                        const blob = new Blob([response.file], { type: 'text/plain' });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = item.resourceName || 'file.md';
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(url);
+                      } else {
+                        message.error(intl.formatMessage({ id: 'resource.downloadFailedNoContent' }));
+                      }
+                    } catch (error) {
+                      console.error('下载失败：', error);
+                      message.error(intl.formatMessage({ id: 'resource.downloadFailedRetry' }));
+                    }
+                  },
+                },
+              ]
+              : []),
+            ...(resourceType === 'SKILL'
+              ? [
+                {
+                  key: 'download',
+                  label: intl.formatMessage({ id: 'common.download' }),
+                  onClick: () => handleDownloadSkill(item),
+                  disabled: !!deletingSkill,
+                },
+                {
+                  key: 'delete',
+                  label: intl.formatMessage({ id: 'common.delete' }),
+                  onClick: () => handleDeleteSkill(item),
+                  disabled: !!downloadingSkill,
+                  danger: true,
+                },
+              ]
+              : []),
+          ],
+        }}
+        placement="bottomRight"
+      >
+        {variant === 'list' ? (
+          <span
+            className={styles.compactActionTrigger}
+            onClick={(event) => {
+              event.stopPropagation();
+            }}
+          >
+            <AntdIcon type="icon-a-Moregengduo" />
+          </span>
+        ) : (
+          <Button
+            className={classnames(styles.skillPosterActionBtn, styles.cardActionBtnWrapper)}
+            icon={<AntdIcon type="icon-a-Moregengduo" className={styles.cardActionBtnIcon} />}
+            onClick={(event) => {
+              event.stopPropagation();
+            }}
+          />
+        )}
+      </Dropdown>
+    );
+  };
+
   useEffect(() => {
     const reload = (resourceType: string) => {
       loadResources(true, resourceType);
@@ -739,121 +823,81 @@ const ResourceList = (props: Props) => {
 
   return (
     <div className={styles.container} style={style}>
-      <div className={styles.cardGrid} id={`${resourceType}ListScroller`}>
-        {resourceList.map((item) => (
-          <Draggable key={item.resourceId} data={item} disabled={disableClick}>
-            <div
-              className={classnames(styles.card, { [styles.disabledCard]: disableClick })}
-              onClick={disableClick ? undefined : () => onSelect?.({ ...item, isFromResourceModule: true })}
-              onMouseEnter={() => handleMouseEnter(item.resourceId)}
-              onMouseLeave={handleMouseLeave}
-            >
-              <div className={styles.cardHeader}>
-                <div className={styles.defaultLogo}>
-                  <AntdIcon type={getResourceIcon(item.resourceName)} className={styles.defaultLogoIcon} />
-                </div>
-                <div
-                  className={classnames(styles.title, { [styles.spaceTitle]: resourceType === 'SPACE' })}
-                  title={item.resourceName}
+      {layout === 'list' ? (
+        loading ? (
+          <div className={classnames('ub ub-ac ub-pc', styles.compactStateWrap)}>
+            <Spin />
+          </div>
+        ) : resourceList.length === 0 ? (
+          <div className={classnames('ub ub-ac ub-pc', styles.compactStateWrap)}>
+            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} />
+          </div>
+        ) : (
+          <List
+            className={classnames(employeeStyles.employeesList, styles.compactList)}
+            dataSource={resourceList}
+            split={false}
+            renderItem={(item) => (
+              <Draggable key={item.resourceId} data={item} disabled={disableClick}>
+                <List.Item
+                  className={classnames(styles.compactListItem, { [styles.disabledCard]: disableClick })}
+                  onClick={disableClick ? undefined : () => onSelect?.({ ...item, isFromResourceModule: true })}
+                  actions={[renderActionDropdown(item, 'list')].filter(Boolean) as React.ReactNode[]}
                 >
-                  <div className="ub ub-ac">{item.resourceName}</div>
+                  <List.Item.Meta
+                    avatar={
+                      <span className={styles.compactAvatar}>
+                        <AntdIcon type={getResourceIcon(item.resourceName)} className={styles.defaultLogoIcon} />
+                      </span>
+                    }
+                    title={
+                      <span className={styles.compactTitleRow}>
+                        <span className={styles.nameText}>{item.resourceName}</span>
+                        {renderResourceBizTypeTag(item.resourceBizType)}
+                      </span>
+                    }
+                    description={
+                      item.resourceDesc ? <span className={styles.compactDesc}>{item.resourceDesc}</span> : null
+                    }
+                  />
+                </List.Item>
+              </Draggable>
+            )}
+          />
+        )
+      ) : (
+        <div className={styles.cardGrid} id={`${resourceType}ListScroller`}>
+          {resourceList.map((item) => (
+            <Draggable key={item.resourceId} data={item} disabled={disableClick}>
+              <div
+                className={classnames(styles.card, { [styles.disabledCard]: disableClick })}
+                onClick={disableClick ? undefined : () => onSelect?.({ ...item, isFromResourceModule: true })}
+              >
+                <div className={styles.cardHeader}>
+                  <div className={styles.defaultLogo}>
+                    <AntdIcon type={getResourceIcon(item.resourceName)} className={styles.defaultLogoIcon} />
+                  </div>
+                  <Tooltip title={item.resourceName} placement="bottom">
+                    <div className={styles.title}>{item.resourceName}</div>
+                  </Tooltip>
+                  {/* 标签 */}
+                  {renderResourceBizTypeTag(item.resourceBizType)}
+                  {renderActionDropdown(item)}
                 </div>
-                {/* 标签 */}
-                {renderResourceBizTypeTag(item.resourceBizType)}
-                {(resourceType === 'OBJECT' || resourceType === 'VIEW') && hoveredCard === item.resourceId && (
-                  <div className={styles.moreButton} onClick={(e) => handleMoreClick(e, item)}>
-                    <Button size="small">{intl.formatMessage({ id: 'common.detail' })}</Button>
-                  </div>
-                )}
-                {resourceType === 'SPACE' && hoveredCard === item.resourceId && (
-                  <div
-                    className={styles.moreButton}
-                    onClick={async (e) => {
-                      e.stopPropagation();
-                      try {
-                        const userCode = userInfo?.userCode || '3174953401447148';
-                        // 从 objectKey 中提取 sessionId，格式如 ".sessions/10014538/conversation/..."
-                        const parts = item.objectKey?.split('/') || [];
-                        const sessionId = parts.length >= 2 ? parts[2] : '10026200';
-                        // 使用列表的 filePath 值（接口返回的完整路径）
-                        const filePath = item.resourceName || '';
-
-                        const response = await readFile({
-                          userCode,
-                          sessionId,
-                          filePath,
-                          begin_line: 0,
-                          end_line: -1,
-                          objectKey: item.objectKey || '',
-                        });
-
-                        if (response?.file) {
-                          // 创建下载链接
-                          const blob = new Blob([response.file], { type: 'text/plain' });
-                          const url = URL.createObjectURL(blob);
-                          const a = document.createElement('a');
-                          a.href = url;
-                          a.download = item.resourceName || 'file.md';
-                          document.body.appendChild(a);
-                          a.click();
-                          document.body.removeChild(a);
-                          URL.revokeObjectURL(url);
-                        } else {
-                          message.error(intl.formatMessage({ id: 'resource.downloadFailedNoContent' }));
-                        }
-                      } catch (error) {
-                        console.error('下载失败：', error);
-                        message.error(intl.formatMessage({ id: 'resource.downloadFailedRetry' }));
-                      }
-                    }}
-                  >
-                    <Button size="small">{intl.formatMessage({ id: 'common.download' })}</Button>
-                  </div>
-                )}
-                {resourceType === 'SKILL' && hoveredCard === item.resourceId && (
-                  <div className={styles.moreButton} onClick={(e) => e.stopPropagation()}>
-                    <Button
-                      size="small"
-                      loading={downloadingSkill === (item.skillPath || item.resourceId || item.objectKey)}
-                      disabled={!!deletingSkill}
-                      onClick={() => {
-                        handleDownloadSkill(item);
-                      }}
-                    >
-                      {intl.formatMessage({ id: 'common.download' })}
-                    </Button>
-                    <Popconfirm
-                      title={intl.formatMessage({ id: 'common.deleteTips' })}
-                      // description={intl.formatMessage({ id: 'common.deleteConfirm2' }, { content: item.resourceName })}
-                      okText={intl.formatMessage({ id: 'common.confirm' })}
-                      cancelText={intl.formatMessage({ id: 'common.cancel' })}
-                      onConfirm={() => handleDeleteSkill(item)}
-                    >
-                      <Button
-                        size="small"
-                        danger
-                        loading={deletingSkill === (item.skillPath || item.resourceId || item.objectKey)}
-                        disabled={!!downloadingSkill}
-                      >
-                        {intl.formatMessage({ id: 'common.delete' })}
-                      </Button>
-                    </Popconfirm>
-                  </div>
-                )}
+                <Tooltip title={item.resourceDesc} placement="bottom">
+                  <div className={styles.desc}>{item.resourceDesc}</div>
+                </Tooltip>
               </div>
-              <div className={styles.desc} title={item.resourceDesc}>
-                {item.resourceDesc}
-              </div>
-            </div>
-          </Draggable>
-        ))}
-      </div>
-      {loading && (
+            </Draggable>
+          ))}
+        </div>
+      )}
+      {layout !== 'list' && loading && (
         <div className={classnames('ub ub-ac ub-pc', styles.loadingContainer)}>
           <Spin />
         </div>
       )}
-      {!loading && resourceList.length === 0 && (
+      {layout !== 'list' && !loading && resourceList.length === 0 && (
         <div className={styles.emptyContainer}>
           <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} />
         </div>

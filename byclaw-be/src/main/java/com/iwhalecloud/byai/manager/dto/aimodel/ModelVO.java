@@ -24,6 +24,9 @@ public class ModelVO implements Serializable {
     /** 提供商（如 OpenAI） */
     private String providerName;
 
+    /** 模型协议（OpenAI / Anthropic） */
+    private String modelProtocol;
+
     /** 型号（如 gpt-4-turbo-preview） */
     private String modelCode;
 
@@ -79,6 +82,9 @@ public class ModelVO implements Serializable {
     private Double frequencyPenalty;
 
     private Double presencePenalty;
+
+    /** Reasoning / Thinking 配置 */
+    private ModelReasoningConfig reasoningConfig;
 
     /** 最近更新时间（ISO8601 或 YYYY-MM-DD HH:mm:ss） */
     private String updatedAt;

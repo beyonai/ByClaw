@@ -6,6 +6,10 @@ import { isEmpty, get as lodashGet } from 'lodash';
 import { bathQryPropertyKey } from '@/service/system';
 import { getSandboxInfo } from '@/service/message';
 
+import { getLatestVersionNotification } from '@/pages/manager/service/NotificationMgr';
+
+import type { IVersionInfo, IVersionNotification } from '@/typescript/version';
+
 import type {
   SettingItemKey,
   ISettingConfContent,
@@ -38,7 +42,21 @@ export interface ISuggestQuestionItem {
   icon?: string;
 }
 
-type IState = {
+export type ISandboxesInfo = Partial<{
+  endpoints: string[];
+  instanceEndpoints: {
+    openclaw: string;
+    filebrowser: string;
+  };
+  sandboxId: string;
+  sandboxType: string;
+  userCode: string;
+  token: string;
+}>;
+
+export type ISandboxesInfoState = ISandboxesInfo | Promise<ISandboxesInfo>;
+
+export type IState = {
   isSiderCollapsed: boolean;
   setSiderCollapsed: (isCollapsed: boolean) => void;
 
@@ -71,18 +89,14 @@ type IState = {
   suggestQuestions: Array<ISuggestQuestionItem>;
   setSuggestQuestions: (questions: ISuggestQuestionItem[]) => void;
 
-  sandboxesInfo: Partial<{
-    endpoints: string[];
-    instanceEndpoints: {
-      openclaw: string;
-      filebrowser: string;
-    };
-    sandboxId: string;
-    sandboxType: string;
-    userCode: string;
-    token: string;
-  }>;
-  getSandboxesInfoUrl: () => Promise<void>;
+  sandboxesInfo: ISandboxesInfoState;
+  getSandboxesInfoUrl: () => Promise<ISandboxesInfo>;
+
+  versionInfo: null | IVersionInfo;
+  getVersionInfo: () => void;
+
+  versionNotification: null | IVersionNotification;
+  getVersionNotification: () => Promise<IVersionNotification | null>;
 };
 
 const useAppStore = create<IState>()(
@@ -189,13 +203,59 @@ const useAppStore = create<IState>()(
           setSuggestQuestions: (questions: ISuggestQuestionItem[]) => set({ suggestQuestions: questions }),
 
           sandboxesInfo: {},
-          async getSandboxesInfoUrl() {
-            try {
-              const res = await getSandboxInfo({});
+          getSandboxesInfoUrl() {
+            const sandboxesInfo = get().sandboxesInfo;
+            if (sandboxesInfo instanceof Promise) {
+              return sandboxesInfo;
+            }
 
-              set({ sandboxesInfo: lodashGet(res, '0') || {} });
-            } catch {
-              set({ sandboxesInfo: {} });
+            const sandboxesInfoPromise = getSandboxInfo({})
+              .then((res) => lodashGet(res, '0') || {})
+              .catch(() => ({}));
+
+            set({ sandboxesInfo: sandboxesInfoPromise });
+
+            sandboxesInfoPromise.then((nextSandboxesInfo) => {
+              if (get().sandboxesInfo === sandboxesInfoPromise) {
+                set({ sandboxesInfo: nextSandboxesInfo });
+              }
+            });
+
+            return sandboxesInfoPromise;
+          },
+
+          versionInfo: null,
+          getVersionInfo: async () => {
+            try {
+              const res = await fetch(`${_PUBLIC_PATH_}build-info.json`, {
+                method: 'GET',
+                priority: 'low',
+              });
+              const data = await res.json();
+              console.log(data);
+              set({ versionInfo: data || null });
+            } catch (err) {
+              console.log(err);
+            }
+          },
+
+          versionNotification: null,
+          getVersionNotification: async () => {
+            if (get().versionNotification) {
+              return get().versionNotification;
+            }
+
+            try {
+              const res = await getLatestVersionNotification();
+              if (res && res?.code === 0) {
+                set({ versionNotification: res.data || null });
+
+                return res.data || null;
+              }
+
+              return null;
+            } catch (err) {
+              console.log(err);
             }
           },
         };

@@ -76,6 +76,11 @@ export default [
             name: 'managerBusinessField',
             component: './manager/pages/BusinessFieldMgr',
           },
+          {
+            path: '/manager/notification',
+            name: 'managerNotification',
+            component: './manager/pages/NotificationMgr',
+          },
         ],
       },
       {
@@ -148,9 +153,24 @@ export default [
             component: './knowledgeCenter',
           },
           {
+            path: '/files',
+            name: 'files',
+            component: './files',
+          },
+          {
+            path: '/models',
+            name: 'models',
+            component: './models',
+          },
+          {
             path: '/objectCenter',
             name: 'objectCenter',
             component: './objectCenter',
+          },
+          {
+            path: '/ontologyCenter',
+            name: 'ontologyCenter',
+            component: './ontologyCenter',
           },
           {
             path: '/skillCenter',

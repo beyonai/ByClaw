@@ -18,5 +18,8 @@ public class StorageObject {
 
     private String contentType;
 
+    private String lastModified;
+
+    @Builder.Default
     private boolean isDir = false;
 }

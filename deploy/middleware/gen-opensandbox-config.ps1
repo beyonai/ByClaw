@@ -21,6 +21,12 @@ $networkName = "byclaw-network-$suffix"
 $port = if ($env:BYCLAW_SANDBOX_PORT) { $env:BYCLAW_SANDBOX_PORT } else { "9005" }
 $apiKey = if ($env:BYCLAW_SANDBOX_API_KEY) { $env:BYCLAW_SANDBOX_API_KEY } else { "dev" }
 $hostIp = if ($env:BYCLAW_SANDBOX_HOST) { $env:BYCLAW_SANDBOX_HOST } else { "127.0.0.1" }
+$volumeBackend = if ($env:BYCLAW_SANDBOX_VOLUME_BACKEND) { $env:BYCLAW_SANDBOX_VOLUME_BACKEND } else { "minio-mount" }
+$fileVolumeRoot = if ($env:BYCLAW_SANDBOX_FILE_VOLUME_ROOT) { $env:BYCLAW_SANDBOX_FILE_VOLUME_ROOT } else { "/mnt/byclaw-file" }
+$fileVolumeType = if ($env:BYCLAW_SANDBOX_FILE_VOLUME_TYPE) { $env:BYCLAW_SANDBOX_FILE_VOLUME_TYPE } else { "bind" }
+$snapshotProvider = if ($env:BYCLAW_SANDBOX_FILE_VOLUME_SNAPSHOT_PROVIDER) { $env:BYCLAW_SANDBOX_FILE_VOLUME_SNAPSHOT_PROVIDER } else { "none" }
+$fileBrowserEnabled = if ($env:BYCLAW_SANDBOX_FILE_BROWSER_ENABLED) { $env:BYCLAW_SANDBOX_FILE_BROWSER_ENABLED } else { "false" }
+$fileBrowserEnabled = $fileBrowserEnabled.ToLowerInvariant()
 
 $content = @"
 [server]
@@ -45,10 +51,17 @@ drop_capabilities = []
 no_new_privileges = false
 pids_limit = 4096
 
+[docker.private_volume]
+backend = "$volumeBackend"
+file_root = "$fileVolumeRoot"
+file_type = "$fileVolumeType"
+snapshot_provider = "$snapshotProvider"
+file_browser_enabled = $fileBrowserEnabled
+
 [ingress]
 mode = "direct"
 "@
 
 Set-Content -Path $output -Value $content -Encoding UTF8
-Write-Host "Generated $output (host_ip=$hostIp, port=$port, network=$networkName)"
+Write-Host "Generated $output (host_ip=$hostIp, port=$port, network=$networkName, volume_backend=$volumeBackend, file_root=$fileVolumeRoot)"
 Pop-Location

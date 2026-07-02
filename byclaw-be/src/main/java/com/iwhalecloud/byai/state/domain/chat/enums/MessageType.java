@@ -5,5 +5,6 @@ public enum MessageType {
     HEARTBEAT, //心跳
     SSE_STREAM,
     NOTIFICATION, // 通知
+    STOP_CHAT,
     ERROR;
 }

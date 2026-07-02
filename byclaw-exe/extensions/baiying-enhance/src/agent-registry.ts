@@ -3,8 +3,10 @@ import type { AdaptedManagedAgent, ProviderBundle } from "./agent-adapter.js";
 import {
   DEFAULT_AIMODEL_SECRET_PROVIDER_NAME,
   resolveAimodelConfigRedisKey,
+  resolveAimodelTypeListRedisKey,
   resolveAimodelSecretProviderName,
 } from "./aimodel-config.js";
+import { MANAGED_MODEL_STREAMING_USAGE_COMPAT } from "./config-write.js";
 import { MANAGED_AGENT_PREFIX, MANAGED_PROVIDER_PREFIX } from "./types.js";
 import { resolveDefaultManagedWorkspacePath } from "./workspace-paths.js";
 
@@ -17,6 +19,7 @@ type SecretProviderConfig = {
   jsonOnly: true;
   allowInsecurePath: true;
   timeoutMs: number;
+  noOutputTimeoutMs: number;
 };
 
 type ConfigWithSecrets = OpenClawConfig & {
@@ -25,13 +28,30 @@ type ConfigWithSecrets = OpenClawConfig & {
   };
 };
 
+type DefaultAimodelBundle = {
+  providerKey: string;
+  modelRef: string;
+  provider: ProviderBundle;
+};
+
 function defaultModelDefinition(provider: ProviderBundle) {
+  const params =
+    provider.thinkingBudgets && Object.keys(provider.thinkingBudgets).length > 0
+      ? { baiyingThinkingBudgets: provider.thinkingBudgets }
+      : undefined;
+  const compat = {
+    ...(provider.compat ?? {}),
+    ...MANAGED_MODEL_STREAMING_USAGE_COMPAT,
+  };
   return {
     id: provider.modelId,
     name: provider.modelName ?? provider.modelId,
-    api: "openai-completions" as const,
-    reasoning: false,
-    input: ["text"] as Array<"text" | "image">,
+    api: provider.api,
+    reasoning: provider.reasoning ?? false,
+    ...(provider.thinkingLevelMap ? { thinkingLevelMap: provider.thinkingLevelMap } : {}),
+    compat,
+    ...(params ? { params } : {}),
+    input: provider.input ?? (["text"] as Array<"text" | "image">),
     cost: {
       input: 0,
       output: 0,
@@ -47,7 +67,9 @@ function buildAimodelSecretProviderConfig(params: {
   command: string;
   args: string[];
   redisKey: string;
+  typeListRedisKey: string;
 }): SecretProviderConfig {
+  const resolverTimeoutMs = resolveAimodelSecretResolverTimeoutMs();
   return {
     source: "exec",
     command: params.command,
@@ -65,29 +87,22 @@ function buildAimodelSecretProviderConfig(params: {
     ],
     env: {
       BAIYING_AIMODEL_CONFIG_REDIS_KEY: params.redisKey,
+      BAIYING_AIMODEL_TYPELIST_REDIS_KEY: params.typeListRedisKey,
     },
     jsonOnly: true,
     allowInsecurePath: true,
-    timeoutMs: 5000,
+    timeoutMs: resolverTimeoutMs,
+    noOutputTimeoutMs: resolverTimeoutMs,
   };
 }
 
-/**
- * Merge managed Baiying agents into a copy of the active OpenClaw config.
- * Removes prior managed entries (same id prefix / provider prefix) before applying.
- */
-export function mergeManagedAgentsIntoConfig(params: {
-  base: OpenClawConfig;
-  managed: AdaptedManagedAgent[];
-  mainParentAgentId: string;
-  mergeAllowSpawnForMain: boolean;
-  aimodelConfigRedisKey?: string;
-  aimodelSecretProviderName?: string;
-  aimodelSecretResolverCommand?: string;
-  aimodelSecretResolverArgs?: string[];
-}): OpenClawConfig {
-  const cfg = structuredClone(params.base);
+function resolveAimodelSecretResolverTimeoutMs(): number {
+  const raw = process.env.BAIYING_AIMODEL_SECRET_RESOLVER_TIMEOUT_MS?.trim();
+  const parsed = raw ? Number.parseInt(raw, 10) : NaN;
+  return Number.isInteger(parsed) && parsed >= 1000 && parsed <= 120000 ? parsed : 30000;
+}
 
+function ensureConfigModelContainers(cfg: OpenClawConfig): void {
   if (!cfg.agents) {
     cfg.agents = {};
   }
@@ -97,6 +112,129 @@ export function mergeManagedAgentsIntoConfig(params: {
   if (!cfg.models.providers) {
     cfg.models.providers = {};
   }
+}
+
+function upsertDefaultAimodelProvider(
+  cfg: OpenClawConfig,
+  defaultModel: DefaultAimodelBundle,
+): void {
+  ensureConfigModelContainers(cfg);
+  cfg.models!.providers![defaultModel.providerKey] = {
+    baseUrl: defaultModel.provider.baseUrl,
+    apiKey: defaultModel.provider.apiKey,
+    api: defaultModel.provider.api,
+    models: [defaultModelDefinition(defaultModel.provider)],
+  };
+  if (!cfg.agents!.defaults) {
+    cfg.agents!.defaults = {};
+  }
+  cfg.agents!.defaults.model = {
+    ...(cfg.agents!.defaults.model ?? {}),
+    primary: defaultModel.modelRef,
+  };
+  cfg.agents!.defaults.models = {
+    ...(cfg.agents!.defaults.models ?? {}),
+    [defaultModel.modelRef]: {
+      alias: defaultModel.provider.modelName ?? defaultModel.provider.modelId,
+    },
+  };
+}
+
+function upsertMainAgentDefaultModel(
+  cfg: OpenClawConfig,
+  params: { mainParentAgentId: string; modelRef: string },
+): void {
+  const list = cfg.agents?.list;
+  if (!Array.isArray(list)) {
+    return;
+  }
+  const mainIdx = list.findIndex((a) => a.id === params.mainParentAgentId);
+  if (mainIdx < 0) {
+    return;
+  }
+  const main = list[mainIdx];
+  list[mainIdx] = {
+    ...main,
+    model: { primary: params.modelRef },
+  };
+}
+
+function upsertAimodelSecretProvider(
+  cfg: OpenClawConfig,
+  params: {
+    secretProviderName?: string;
+    aimodelConfigRedisKey?: string;
+    aimodelTypeListRedisKey?: string;
+    aimodelSecretResolverCommand?: string;
+    aimodelSecretResolverArgs?: string[];
+  },
+): void {
+  const secretProviderName = resolveAimodelSecretProviderName(
+    params.aimodelSecretProviderName ?? DEFAULT_AIMODEL_SECRET_PROVIDER_NAME,
+  );
+  const cfgWithSecrets = cfg as ConfigWithSecrets;
+  if (!cfgWithSecrets.secrets) {
+    cfgWithSecrets.secrets = {};
+  }
+  if (!cfgWithSecrets.secrets.providers) {
+    cfgWithSecrets.secrets.providers = {};
+  }
+  cfgWithSecrets.secrets.providers[secretProviderName] = buildAimodelSecretProviderConfig({
+    command: params.aimodelSecretResolverCommand ?? process.execPath,
+    args: params.aimodelSecretResolverArgs ?? ["aimodel-secret-resolver-cli.js"],
+    redisKey: resolveAimodelConfigRedisKey(params.aimodelConfigRedisKey),
+    typeListRedisKey: resolveAimodelTypeListRedisKey(params.aimodelTypeListRedisKey),
+  });
+}
+
+/**
+ * Upsert only the platform default LLM. Used before dig-employee auth is ready,
+ * so it must preserve existing managed agents/providers instead of replacing
+ * the whole managed registry.
+ */
+export function mergeDefaultAimodelIntoConfig(params: {
+  base: OpenClawConfig;
+  defaultModel: DefaultAimodelBundle;
+  mainParentAgentId: string;
+  aimodelConfigRedisKey?: string;
+  aimodelTypeListRedisKey?: string;
+  aimodelSecretProviderName?: string;
+  aimodelSecretResolverCommand?: string;
+  aimodelSecretResolverArgs?: string[];
+}): OpenClawConfig {
+  const cfg = structuredClone(params.base);
+  upsertDefaultAimodelProvider(cfg, params.defaultModel);
+  upsertMainAgentDefaultModel(cfg, {
+    mainParentAgentId: params.mainParentAgentId,
+    modelRef: params.defaultModel.modelRef,
+  });
+  upsertAimodelSecretProvider(cfg, params);
+  return cfg;
+}
+
+/**
+ * Merge managed Baiying agents into a copy of the active OpenClaw config.
+ * Removes prior managed entries (same id prefix / provider prefix) before applying.
+ */
+export function mergeManagedAgentsIntoConfig(params: {
+  base: OpenClawConfig;
+  managed: AdaptedManagedAgent[];
+  defaultModel?: {
+    providerKey: string;
+    modelRef: string;
+    provider: ProviderBundle;
+  } | null;
+  mainParentAgentId: string;
+  mergeAllowSpawnForMain: boolean;
+  aimodelConfigRedisKey?: string;
+  aimodelTypeListRedisKey?: string;
+  aimodelSecretProviderName?: string;
+  aimodelSecretResolverCommand?: string;
+  aimodelSecretResolverArgs?: string[];
+}): OpenClawConfig {
+  const cfg = structuredClone(params.base);
+
+  ensureConfigModelContainers(cfg);
 
   const providers = cfg.models.providers;
   const existingList = cfg.agents.list ?? [];
@@ -116,7 +254,13 @@ export function mergeManagedAgentsIntoConfig(params: {
   const secretProviderName = resolveAimodelSecretProviderName(
     params.aimodelSecretProviderName ?? DEFAULT_AIMODEL_SECRET_PROVIDER_NAME,
   );
-  const hasManagedProviders = params.managed.some((m) => m.provider && m.providerKey);
+  const hasDefaultProvider = Boolean(params.defaultModel?.provider && params.defaultModel.providerKey);
+  const hasManagedProviders =
+    hasDefaultProvider || params.managed.some((m) => m.provider && m.providerKey);
+
+  if (params.defaultModel?.provider && params.defaultModel.providerKey) {
+    upsertDefaultAimodelProvider(cfg, params.defaultModel);
+  }
 
   for (const m of params.managed) {
     const workspaceDir =
@@ -137,26 +281,16 @@ export function mergeManagedAgentsIntoConfig(params: {
 
   const cfgWithSecrets = cfg as ConfigWithSecrets;
   if (hasManagedProviders) {
-    if (!cfgWithSecrets.secrets) {
-      cfgWithSecrets.secrets = {};
-    }
-    if (!cfgWithSecrets.secrets.providers) {
-      cfgWithSecrets.secrets.providers = {};
-    }
-    cfgWithSecrets.secrets.providers[secretProviderName] = buildAimodelSecretProviderConfig({
-      command: params.aimodelSecretResolverCommand ?? process.execPath,
-      args: params.aimodelSecretResolverArgs ?? ["aimodel-secret-resolver-cli.js"],
-      redisKey: resolveAimodelConfigRedisKey(params.aimodelConfigRedisKey),
-    });
+    upsertAimodelSecretProvider(cfg, params);
   } else if (cfgWithSecrets.secrets?.providers) {
     delete cfgWithSecrets.secrets.providers[secretProviderName];
   }
 
   cfg.agents.list = list;
-  syncManagedModelsToAgentsDefaults(cfg, params.managed);
+  syncManagedModelsToAgentsDefaults(cfg, params.managed, params.defaultModel ?? null);
 
   const managedIds = params.managed.map((m) => m.agentId);
-  if (params.mergeAllowSpawnForMain) {
+  if (params.mergeAllowSpawnForMain || params.defaultModel?.modelRef) {
     const mainIdx = list.findIndex((a) => a.id === params.mainParentAgentId);
     if (mainIdx >= 0) {
       const main = list[mainIdx];
@@ -166,13 +300,17 @@ export function mergeManagedAgentsIntoConfig(params: {
       for (const id of managedIds) {
         allow.add(id);
       }
-      list[mainIdx] = {
+      const nextMain: typeof main = {
         ...main,
         subagents: {
           ...main.subagents,
           allowAgents: Array.from(allow),
         },
       };
+      if (params.defaultModel?.modelRef) {
+        nextMain.model = { primary: params.defaultModel.modelRef };
+      }
+      list[mainIdx] = nextMain;
       cfg.agents.list = list;
     }
   }
@@ -187,6 +325,7 @@ export function mergeManagedAgentsIntoConfig(params: {
 function syncManagedModelsToAgentsDefaults(
   cfg: OpenClawConfig,
   managed: AdaptedManagedAgent[],
+  defaultModel?: { modelRef: string; provider: ProviderBundle } | null,
 ): void {
   if (!cfg.agents) {
     cfg.agents = {};
@@ -198,6 +337,11 @@ function syncManagedModelsToAgentsDefaults(
   const next: Record<string, { alias?: string }> = {
     ...existing,
   };
+  if (defaultModel?.modelRef) {
+    next[defaultModel.modelRef] = {
+      alias: defaultModel.provider.modelName ?? defaultModel.provider.modelId,
+    };
+  }
   for (const m of managed) {
     const primary = m.listEntry.model?.primary?.trim() || m.modelRef?.trim() || "";
     if (!primary || primary in next) {

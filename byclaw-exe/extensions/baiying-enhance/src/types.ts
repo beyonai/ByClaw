@@ -1,10 +1,14 @@
 import type { OpenClawConfig } from "openclaw/plugin-sdk/compat";
 
+export const BAIYING_AIMODEL_PROVIDER_API = "baiying-aimodel";
+
 export type AgentListEntry = NonNullable<NonNullable<OpenClawConfig["agents"]>["list"]>[number];
 
 export type BaiyingEnhancePluginConfig = {
     /** @deprecated Ignored for Baiying resource snapshots; associated resources are read from Redis. */
     executorResourcesDir?: string;
+    /** Optional Baiying session file path. Defaults to `~/.openclaw/workspace/baiying-session.json`. */
+    authFilePath?: string;
     /** @deprecated Ignored; digital employees are read from Redis key `DIG_EMPLOYEE_{resourceId}`. */
     agentConfigDir?: string;
     /** Debounce (ms) for coalescing dig-employee Redis flush triggers. */
@@ -55,6 +59,25 @@ export type BaiyingEnhancePluginConfig = {
      */
     mainWorkspaceAgentsAutoSeed?: boolean;
     /**
+     * Redis Hash key for main workspace context templates. Default `byai:SystemConfig:paramCode`.
+     * The field value should be a SystemConfig JSON whose `paramValue` contains the template JSON.
+     */
+    mainContextTemplateRedisKey?: string;
+    /**
+     * SystemConfig paramCode for the super-assistant main workspace context template.
+     * Default `OPENCLAW_AGENT_CONTEXT_TEMPLATE_SUPER_ASSISTANT`.
+     */
+    mainContextTemplateParamCode?: string;
+    /**
+     * Poll Redis for `mainContextTemplateParamCode` changes independently of digital-employee sync.
+     * Default true; set false to disable Redis-driven main context refresh.
+     */
+    mainContextTemplateWatch?: boolean;
+    /**
+     * Poll interval in milliseconds for the main context template watcher. Default 2000.
+     */
+    mainContextTemplatePollMs?: number;
+    /**
      * When true (default) and `mainAgentsMdMode` is `if_managed_marker`, replace an **existing** main `AGENTS.md`
      * that lacks the plugin marker **once per workspace** (e.g. OpenClaw stock file), then record the path under
      * `OPENCLAW_STATE_DIR/baiying-enhance/main-agents-foreign-takeover.json`.
@@ -66,6 +89,13 @@ export type BaiyingEnhancePluginConfig = {
     defaultApiKey?: string;
     /** Redis Hash key for Baiying AI model config. Default `byai:aimodel:config`. */
     aimodelConfigRedisKey?: string;
+    /** Redis Hash key for Baiying AI model type list. Default `byai:aimodel:typelist`; field `LLM` supplies the default model. */
+    aimodelTypeListRedisKey?: string;
+    /**
+     * @deprecated Ignored. Default LLM is checked on each main agent run (before_model_resolve)
+     * against `aimodel-default-llm-index.json`; flush runs only when Redis typelist changed.
+     */
+    aimodelDefaultPollIntervalMs?: number;
     /** Exec SecretRef provider name for runtime Redis authToken lookup. Default `baiying-aimodel-redis`. */
     aimodelSecretProviderName?: string;
     /**
@@ -91,6 +121,11 @@ export type BaiyingEnhancePluginConfig = {
     skillDirs?: unknown;
     /** @deprecated Ignored. Former alias for `agentContentScanIntervalMs`. */
     pollIntervalMs?: number;
+    /**
+     * When true (default), object-form `relSkills` with `skillType: "hub"` are version-checked
+     * through ByaiService and installed under `${OPENCLAW_STATE_DIR}/skills/<skillCode>`.
+     */
+    hubSkillAutoSync?: boolean;
     /**
      * When true (default), merge user-uploaded workspace skills (`skills/<name>/SKILL.md`) into
      * managed agents' `agents.list[].skills` alongside JSON `relSkills` / `skills`.

@@ -9,6 +9,7 @@ import AntdIcon from '../AntdIcon';
 import DetailDrawer from './DetailDrawer';
 import styles from './index.module.less';
 import classNames from 'classnames';
+import { getFileIconType } from '@/constants/icon';
 
 export type IDrawerSourceFromInfo = {
   content: string;
@@ -33,18 +34,7 @@ type IProps = {
 
 export const RenderSourceIcon = ({ title, fontSize }: { title: string; fontSize?: number }) => {
   const renderIcon = useCallback((title: string, fontSize: number = 16) => {
-    let iconType = '';
-    if (/\.(doc|docx)$/.test(title)) {
-      iconType = 'Word';
-    } else if (title.endsWith('.pdf')) {
-      iconType = 'PDF';
-    } else if (/\.(xls|xlsx)$/.test(title)) {
-      iconType = 'Excel';
-    } else if (title.endsWith('.txt')) {
-      iconType = 'jishiben';
-    } else if (title.endsWith('.ppt')) {
-      iconType = 'PPT';
-    }
+    const iconType = getFileIconType(title, { defaultIconType: '' });
     if (iconType) {
       return <AntdIcon type={`icon-${iconType}`} style={{ fontSize }} />;
     }

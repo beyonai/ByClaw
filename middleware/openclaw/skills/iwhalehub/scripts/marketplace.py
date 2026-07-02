@@ -61,12 +61,12 @@ def build_headers(token_key: Optional[str], token_value: Optional[str]) -> Dict[
 
 
 def resolve_auth() -> Tuple[Optional[str], Optional[str]]:
+    env_api_key = os.getenv("BEYOND_TOKEN", "").strip()
+    if env_api_key:
+        return "beyond-token", env_api_key
     configured_api_key = os.getenv("IWHALEHUB_API_KEY", "").strip()
     if configured_api_key:
         return "beyond-token", configured_api_key
-    env_api_key = os.getenv("BYAI_ADMIN_TOKEN", "").strip()
-    if env_api_key:
-        return "beyond-token", env_api_key
     return None, None
 
 

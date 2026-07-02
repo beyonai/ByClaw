@@ -139,3 +139,38 @@ jobs:
         run: |
           uv sync --group dev
           uv run python -m pytest tests/ -v
+
+  version-pinning:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Check dependency version pinning
+        run: |
+          EXIT_CODE=0
+
+          echo "── Checking package.json files ──"
+          while IFS= read -r f; do
+            [ -f "$f" ] || continue
+            unpinned=$(grep -nE '"[^"]+"\s*:\s*"[\^~]' "$f" | grep -vE '"name"|"version"|"description"|"requires-python"' || true)
+            if [ -n "$unpinned" ]; then
+              echo "❌ Unpinned dependencies in $f:"
+              echo "$unpinned"
+              EXIT_CODE=1
+            fi
+          done < <(find . -name "package.json" -not -path "*/node_modules/*" -not -path "*/.cache/*")
+
+          echo "── Checking pyproject.toml files ──"
+          while IFS= read -r f; do
+            [ -f "$f" ] || continue
+            unpinned=$(grep -nE '^\s*"[^"]*(>=|<=|~=|!=|>[0-9]|<[0-9])' "$f" | grep -v 'requires-python' | grep -v 'requires = \[' || true)
+            if [ -n "$unpinned" ]; then
+              echo "❌ Unpinned dependencies in $f:"
+              echo "$unpinned"
+              EXIT_CODE=1
+            fi
+          done < <(find . -name "pyproject.toml" -not -path "*/.venv/*" -not -path "*/.cache/*")
+
+          if [ $EXIT_CODE -eq 0 ]; then
+            echo "✅ All dependencies are pinned to exact versions"
+          fi
+          exit $EXIT_CODE

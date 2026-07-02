@@ -8,6 +8,7 @@ import com.iwhalecloud.byai.manager.application.service.auth.AuthRedisSyncServic
 import com.iwhalecloud.byai.manager.application.service.log.LoginLogApplicationService;
 import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService;
 import com.iwhalecloud.byai.manager.application.service.superassist.SuasSuperassistApplicationService;
+import com.iwhalecloud.byai.manager.domain.superassist.service.SuasSuperassistService;
 import com.iwhalecloud.byai.manager.application.service.user.UserApplicationService;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
 import com.iwhalecloud.byai.common.storage.UserFS;
@@ -34,6 +35,7 @@ import com.iwhalecloud.byai.common.util.threadPoolUti.ThreadPoolUtil;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.common.login.bean.LoginResponse;
 import com.iwhalecloud.byai.common.constants.Constants;
+import com.iwhalecloud.byai.state.application.service.tokensaver.TokenSaverProvisionService;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.ServletOutputStream;
 import jakarta.servlet.http.HttpServletRequest;
@@ -98,7 +100,13 @@ public class MultAuthenticationSuccessHandler implements AuthenticationSuccessHa
     private SuasSuperassistApplicationService suasSuperassistApplicationService;
 
     @Autowired
+    private SuasSuperassistService suasSuperassistService;
+
+    @Autowired
     private AuthRedisSyncService authRedisSyncService;
+
+    @Autowired
+    private TokenSaverProvisionService tokenSaverProvisionService;
 
     private final Executor executor = ThreadPoolUtil.getThreadPool(8, 16, 32, 60, "refresh-aimodel");
 
@@ -146,8 +154,21 @@ public class MultAuthenticationSuccessHandler implements AuthenticationSuccessHa
 
         // 初始化超级助手知识库
         SuasSuperassist suasSuperassist = suasSuperassistApplicationService.createDatasetIfNotExists(loginInfo);
-        loginInfo.setSessionDatasetId(suasSuperassist.getSessionDatasetId());
-        loginInfo.setDefaultDigEmployeeId(suasSuperassist.getDefaultDigEmployeeId());
+        if (suasSuperassist == null) {
+            // 初始化失败时，从数据库查询已有的 SuasSuperassist，确保 defaultDigEmployeeId 不丢失
+            Long assistantId = loginInfo.getAssistantId();
+            if (assistantId != null && assistantId > 0) {
+                suasSuperassist = suasSuperassistService.findById(assistantId);
+            }
+            if (suasSuperassist == null) {
+                suasSuperassist = suasSuperassistService.findByUserId(loginInfo.getUserId());
+            }
+            logger.warn("初始化超级助手知识库失败，已从数据库查询，assistantId={}, userId={}", assistantId, loginInfo.getUserId());
+        }
+        if (suasSuperassist != null) {
+            loginInfo.setSessionDatasetId(suasSuperassist.getSessionDatasetId());
+            loginInfo.setDefaultDigEmployeeId(suasSuperassist.getDefaultDigEmployeeId());
+        }
 
         // 共享session实现
         loginApplicationService.shareSession(httpSession, loginInfo);
@@ -182,6 +203,7 @@ public class MultAuthenticationSuccessHandler implements AuthenticationSuccessHa
             try {
                 sandboxService.launchSandbox(sandboxUserCode, null);
                 authRedisSyncService.asyncSyncUserAuthToRedis(loginInfo.getUserId());
+                tokenSaverProvisionService.provisionIfNeeded(loginInfo.getUserId(), sandboxUserCode);
             }
             catch (Exception e) {
                 logger.warn("登录后异步启动沙箱失败，用户编码：{}", sandboxUserCode, e);

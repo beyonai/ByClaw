@@ -36,4 +36,40 @@ class DigitalEmployeeDtoJacksonTest {
 
         assertThat(dto.getSkills()).isEqualTo("[\"1password\",\"apple-notes\"]");
     }
+
+    @Test
+    void relSkills_acceptsLegacyStringArray() throws Exception {
+        String json = """
+            {
+              "resourceName": "zs001",
+              "relSkills": ["知识采集（OpenCLI）"]
+            }
+            """;
+
+        DigitalEmployeeDTO dto = objectMapper.readValue(json, DigitalEmployeeDTO.class);
+
+        assertThat(dto.getRelSkills()).containsExactly("知识采集（OpenCLI）");
+    }
+
+    @Test
+    void relSkills_acceptsStandardObjectArray() throws Exception {
+        String json = """
+            {
+              "resourceName": "zs001",
+              "relSkills": [
+                {
+                  "resourceId": 10001,
+                  "skillCode": "opencli-knowledge",
+                  "skillType": "hub",
+                  "skillUrl": "/byaiService/tool/downloadSkillZip?skillId=10001",
+                  "versionUrl": "/byaiService/tool/getSkillVersion?skillId=10001"
+                }
+              ]
+            }
+            """;
+
+        DigitalEmployeeDTO dto = objectMapper.readValue(json, DigitalEmployeeDTO.class);
+
+        assertThat(dto.getRelSkills()).hasSize(1);
+    }
 }

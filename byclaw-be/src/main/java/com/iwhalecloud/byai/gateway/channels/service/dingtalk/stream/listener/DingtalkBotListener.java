@@ -36,6 +36,7 @@ import com.iwhalecloud.byai.state.common.exception.BdpRuntimeException;
 import com.iwhalecloud.byai.state.domain.agent.enums.AgentMetaEnum;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
 import com.iwhalecloud.byai.state.domain.chat.model.MessageFileDto;
+import com.iwhalecloud.byai.state.domain.chat.service.AssistantChatService;
 import com.iwhalecloud.byai.state.domain.index.service.IndexService;
 import com.iwhalecloud.byai.state.domain.resource.dto.ResourceVo;
 import org.apache.commons.collections.CollectionUtils;
@@ -309,7 +310,8 @@ public class DingtalkBotListener implements OpenDingTalkCallbackListener<Map<Str
         }
 
         DingtalkCardStreamingOutputStream outputStream =
-                new DingtalkCardStreamingOutputStream(objectMapper, dingtalkCardService, cardSession);
+                new DingtalkCardStreamingOutputStream(objectMapper, dingtalkCardService, cardSession,
+                        null, CurrentUserHolder.getCurrentUserCode());
         try {
             channelService.chat(assistantChatDto, outputStream);
             outputStream.finish();
@@ -352,6 +354,9 @@ public class DingtalkBotListener implements OpenDingTalkCallbackListener<Map<Str
                 digitEmployVo.getId()
         ));
         assistantChatDto.setResourceList(buildResourceList(digitEmployVo));
+        assistantChatDto.setClientRequestId(AssistantChatService.getClientRequestId());
+
+
 
         Map<String, String> channelExt = new HashMap<>();
         channelExt.put(ChatChannelExtensionKeys.CHANNEL_TYPE, AssistantAccessChannel.DINGTALK.getTypeCode());

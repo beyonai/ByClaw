@@ -1,6 +1,6 @@
 package com.iwhalecloud.byai.common.ecrypt;
 
-
+import com.iwhalecloud.byai.common.web.ApplicationContextUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import java.io.UnsupportedEncodingException;
@@ -16,22 +16,15 @@ public final class RsaDecrypt {
 
     private static final Logger logger = LoggerFactory.getLogger(RsaDecrypt.class);
 
-
-    /**
-     * 公钥，请不要擅自修改该以下密码串
-     */
-    private static final String MODULES = "118249911269313777353369205468358971445904616358074252669429944094950609311848727388859640174096832607664732279928019002795333396858212446930193162882569448161371673123891912144968110489981164388431260818873249786366362488910362896712606417158347288417834035704864053434682010900207183838254091105621956825021";
-
-    /**
-     * 私钥，请不要擅自修改该以下密码串
-     */
-    private static final String PRIVATE_KEY = "48637328656722495419952397921862221863921217610635969833180547980888484743125170445612409181576120661186971074930797568386575629731449024512112042032173298256412636264324320870986152394015374623344670204072024939615784835070706841209134639407348192682679016061350533334334944953944634417183180191532927602945";
-
     private RsaDecrypt() {
     }
 
     public static String decrypt(String input) {
-        RSAPrivateKey priKey = getPrivateKey(MODULES, PRIVATE_KEY);
+
+        String modules = ApplicationContextUtil.getEnvProperty("byclaw.rsa.modules");
+        String privateKey = ApplicationContextUtil.getEnvProperty("byclaw.rsa.private-key");
+
+        RSAPrivateKey priKey = getPrivateKey(modules, privateKey);
         String output;
         try {
             output = decryptByPrivateKey(input, priKey);

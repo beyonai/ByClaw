@@ -2,6 +2,11 @@ package com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.cards;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.iwhalecloud.byai.common.constants.Constants;
+import com.iwhalecloud.byai.common.storage.util.UserBucketNameResolver;
+import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
+import com.iwhalecloud.byai.common.web.ApplicationContextUtil;
+import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -9,6 +14,7 @@ import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Consumer;
 
 /**
  * 兼容 ByteArrayOutputStream 的增量输出流。
@@ -53,9 +59,19 @@ public class DingtalkCardStreamingOutputStream extends ByteArrayOutputStream {
      */
     private static final Set<String> SUPPORTED_REASONING_STREAMING_CONTENT_TYPES = Set.of("1001", "1002", "3003", "3009");
 
+    private static final String FILE_PREVIEW_PLACEHOLDER = "{{file_preview_prefix}}";
+
+    private static final String FILE_PREVIEW_PATH = "/byaiService/commonFile/view";
+    private static final String FILE_PREVIEW_URL_SUFFIX = FILE_PREVIEW_PATH + "?filePath=";
+    private static final String WEB_BASE_URL_PARAM_CODE = Constants.WEB_BASE_URL;
+
     private final ObjectMapper objectMapper;
     private final DingtalkCardService dingtalkCardService;
     private final DingtalkCardStreamSession session;
+    private final Consumer<String> onContentUpdate;
+    /** 当前会话用户编码，用于生成文件预览 URL 的 bucketName（byclaw-{userCode}）。 */
+    private final String userCode;
+    private String filePreviewBaseUrl;
     /**
      * 暂存尚未拼成完整 JSON 对象的输出片段。
      * chat() 写入时可能一次只写入部分字符串，因此需要先缓冲，再按完整 JSON 块解析。
@@ -93,9 +109,30 @@ public class DingtalkCardStreamingOutputStream extends ByteArrayOutputStream {
             DingtalkCardService dingtalkCardService,
             DingtalkCardStreamSession session
     ) {
+        this(objectMapper, dingtalkCardService, session, null, null);
+    }
+
+    public DingtalkCardStreamingOutputStream(
+            ObjectMapper objectMapper,
+            DingtalkCardService dingtalkCardService,
+            DingtalkCardStreamSession session,
+            Consumer<String> onContentUpdate
+    ) {
+        this(objectMapper, dingtalkCardService, session, onContentUpdate, null);
+    }
+
+    public DingtalkCardStreamingOutputStream(
+            ObjectMapper objectMapper,
+            DingtalkCardService dingtalkCardService,
+            DingtalkCardStreamSession session,
+            Consumer<String> onContentUpdate,
+            String userCode
+    ) {
         this.objectMapper = objectMapper;
         this.dingtalkCardService = dingtalkCardService;
         this.session = session;
+        this.onContentUpdate = onContentUpdate;
+        this.userCode = userCode;
     }
 
     @Override
@@ -122,7 +159,7 @@ public class DingtalkCardStreamingOutputStream extends ByteArrayOutputStream {
      * 如果实时 streaming 过程中已经失败，或者卡片本身已 finalize，则直接跳过。
      */
     public synchronized void finish() throws Exception {
-        if (streamingFailed || session.isFinalized()) {
+        if (streamingFailed || session == null || dingtalkCardService == null || session.isFinalized()) {
             return;
         }
         flushReasoningTextBuffer();
@@ -134,6 +171,11 @@ public class DingtalkCardStreamingOutputStream extends ByteArrayOutputStream {
 
     public boolean hasStreamingFailed() {
         return streamingFailed;
+    }
+
+    public synchronized String getAccumulatedDisplayContent() {
+        flushReasoningTextBuffer();
+        return buildDisplayContent();
     }
 
     /**
@@ -297,15 +339,19 @@ public class DingtalkCardStreamingOutputStream extends ByteArrayOutputStream {
         if (streamingFailed) {
             return;
         }
+        String displayContent = buildDisplayContent();
+        if (onContentUpdate != null) {
+            onContentUpdate.accept(displayContent);
+        }
+        if (dingtalkCardService == null || session == null) {
+            return;
+        }
         try {
-            String displayContent = buildDisplayContent();
-            // logger.info("updateStreamingContent, displayContent: {}", displayContent);
-            // 真流式路径下，这里每收到一段增量就立即把“当前累计内容”刷到卡片上。
             dingtalkCardService.streamingUpdateAssistantReply(session, displayContent, false);
         } catch (Exception e) {
             streamingFailed = true;
             logger.warn("Streaming update failed during chat output, stop card streaming. outTrackId={}",
-                    session.getOutTrackId(), e);
+                    session == null ? "N/A" : session.getOutTrackId(), e);
         }
     }
 
@@ -316,17 +362,56 @@ public class DingtalkCardStreamingOutputStream extends ByteArrayOutputStream {
      */
     private String buildDisplayContent() {
         String reasoningDisplayContent = buildReasoningDisplayContent();
+        String raw;
         if (reasoningDisplayContent.isEmpty()) {
-            return answerBuffer.toString();
+            raw = answerBuffer.toString();
+        } else if (answerBuffer.isEmpty()) {
+            raw = reasoningDisplayContent;
+        } else {
+            raw = reasoningDisplayContent + MARKDOWN_SECTION_SEPARATOR + answerBuffer.toString();
         }
-        if (answerBuffer.isEmpty()) {
-            return reasoningDisplayContent;
+        return replaceFilePreviewPlaceholder(raw);
+    }
+
+    private String replaceFilePreviewPlaceholder(String content) {
+        if (!content.contains(FILE_PREVIEW_PLACEHOLDER)) {
+            return content;
         }
-        return reasoningDisplayContent + MARKDOWN_SECTION_SEPARATOR + answerBuffer.toString();
+        if (filePreviewBaseUrl == null) {
+            try {
+                ByaiSystemConfigService configService = ApplicationContextUtil.getBean(ByaiSystemConfigService.class);
+                String webBaseUrl = configService.getDcSystemConfigValueByCode(WEB_BASE_URL_PARAM_CODE);
+                filePreviewBaseUrl = (webBaseUrl != null ? webBaseUrl : "") + buildFilePreviewQuery();
+            } catch (Exception e) {
+                logger.warn("Failed to resolve WEB_BASE_URL from system config, skip placeholder replacement", e);
+                filePreviewBaseUrl = "";
+            }
+        }
+        if (filePreviewBaseUrl.isEmpty()) {
+            return content;
+        }
+        return content.replace(FILE_PREVIEW_PLACEHOLDER, filePreviewBaseUrl);
+    }
+
+    /**
+     * 构造文件预览 URL 的路径与查询串：
+     * {@code /byaiService/commonFile/view?bucketName=byclaw-{userCode}&filePath=}。
+     * userCode 为空时退回不带 bucketName 的旧格式。
+     */
+    private String buildFilePreviewQuery() {
+        if (StringUtils.isNotBlank(userCode)) {
+            try {
+                String bucketName = UserBucketNameResolver.buildUserBucketName(userCode);
+                return FILE_PREVIEW_PATH + "?bucketName=" + bucketName + "&filePath=";
+            } catch (Exception e) {
+                logger.warn("Failed to build bucketName from userCode={}, fallback without bucketName", userCode, e);
+            }
+        }
+        return FILE_PREVIEW_URL_SUFFIX;
     }
 
     private void updateCopyContent() {
-        if (answerBuffer.isEmpty()) {
+        if (answerBuffer.isEmpty() || dingtalkCardService == null || session == null) {
             return;
         }
         try {

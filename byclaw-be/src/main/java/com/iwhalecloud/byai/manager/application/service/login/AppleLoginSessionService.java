@@ -63,8 +63,8 @@ public class AppleLoginSessionService {
         // 获取或创建HttpSession
         HttpSession httpSession = request.getSession(true);
 
-        // 构建登录信息
         LoginInfo loginInfo = loginApplicationService.getLoginInfo(users);
+        loginInfo.setLanguage(request.getHeader(I18nUtil.LANGUAGE));
         loginInfo.setSessionId(httpSession.getId());
         // 设置登录类型为苹果登录
         loginInfo.setLoginType(LoginType.APPLE);

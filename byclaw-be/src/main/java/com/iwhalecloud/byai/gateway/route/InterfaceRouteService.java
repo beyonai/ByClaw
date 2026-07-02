@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
+import com.iwhalecloud.byai.common.util.OkHttpUtil;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -133,9 +134,8 @@ public class InterfaceRouteService {
 
     private void streamFromExternalAgent(String url, Map<String, Object> body, Map<String, Object> headers,
         ChatProcessContext ctx) throws IOException {
-        OkHttpClient client = new OkHttpClient.Builder().connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-            .readTimeout(READ_TIMEOUT_SECONDS, TimeUnit.SECONDS).writeTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-            .build();
+
+        OkHttpClient client = OkHttpUtil.getHttpClient();
 
         String jsonBody = JSON.toJSONString(body);
         Request.Builder reqBuilder = new Request.Builder().url(url).post(RequestBody.create(jsonBody, JSON_TYPE))

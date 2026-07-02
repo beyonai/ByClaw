@@ -1,0 +1,132 @@
+@antPrefix: ant;
+
+.container {
+  height: 100%;
+  padding: 16px 24px;
+  overflow: auto;
+}
+
+.refreshSummary {
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: var(--byBgGrey, #f5f6f8);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+
+  .searchInput {
+    width: 200px;
+  }
+}
+
+.wrapper {
+  position: relative;
+
+  .filterBar {
+    margin: 16px 0;
+  }
+
+  .tabs {
+    :global {
+      .@{antPrefix}-tabs-nav {
+        font-weight: 400;
+        margin: 0 !important;
+
+        .@{antPrefix}-tabs-tab {
+          height: 35px;
+          font-size: 14px;
+          border: 1px solid #e8e8e8;
+          border-radius: 10px;
+          padding: 6px 16px !important;
+          color: #333 !important;
+          margin-right: 12px;
+
+          + .@{antPrefix}-tabs-tab {
+            margin-left: 0 !important;
+          }
+
+          &.@{antPrefix}-tabs-tab-active {
+            background-color: #14161a;
+            border-color: transparent;
+            color: #fff !important;
+          }
+
+          &:hover:not(.@{antPrefix}-tabs-tab-active) {
+            border-color: #14161a;
+          }
+        }
+
+        .@{antPrefix}-tabs-tab-btn {
+          color: inherit !important;
+          text-shadow: none !important;
+          font-weight: unset;
+          font-size: 14px;
+          line-height: 22px !important;
+        }
+
+        .@{antPrefix}-tabs-ink-bar {
+          display: none;
+        }
+      }
+    }
+  }
+}
+
+.cardGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+  padding: 8px 0;
+}
+
+.baseCard {
+  border-radius: 12px;
+
+  .baseHeader {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+
+    .baseName {
+      font-size: 15px;
+      font-weight: 500;
+    }
+  }
+
+  .baseDesc {
+    color: #666;
+    font-size: 13px;
+    min-height: 38px;
+    margin-bottom: 12px;
+  }
+
+  .baseActions {
+    display: flex;
+    gap: 8px;
+  }
+}
+
+.emptyWrap {
+  display: flex;
+  justify-content: center;
+  padding: 48px 0;
+}
+
+.authHeaderIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  background: rgba(22, 93, 255, 0.1);
+  color: #165dff;
+  font-size: 20px;
+}

@@ -15,6 +15,15 @@ class SandboxLaunchRoutingTest {
     }
 
     @Test
+    void openclawProfileKeyKeepsOpenclawSandboxType() {
+        SandboxLaunchRouting routing = new SandboxLaunchRouting("openclaw-xs", 1001L);
+
+        assertThat(routing.getSandboxType()).isEqualTo(SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE);
+        assertThat(routing.getProfileKey()).isEqualTo("xs");
+        assertThat(routing.getEffectiveResourceId()).isEqualTo(SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
+    }
+
+    @Test
     void codeAgentAlwaysUsesDefaultCodeAgentResourceId() {
         SandboxLaunchRouting routing = new SandboxLaunchRouting(
             SandboxLaunchRouting.BYCLAW_CODE_AGENT_SANDBOX_TYPE, 1001L);

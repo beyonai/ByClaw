@@ -4,6 +4,7 @@ import {
   getResourceListByPage,
   type QueryDirAndFileByLevelParams,
   queryDirAndFileByLevel,
+  searchDirAndFile,
   deleteFolder,
   removeFile,
 } from '@/service/knowledgeCenter';
@@ -29,6 +30,9 @@ export const qrySharedKnowledgeBases = (data: any) => beShared(data);
 export const qryMyKnowledgeBases = (data: any) => getResourceListByPage(data);
 
 export const qryFolderAndFileList = (data: QueryDirAndFileByLevelParams) => queryDirAndFileByLevel(data);
+
+export const searchFolderAndFileList = (data: QueryDirAndFileByLevelParams & { keyword: string }) =>
+  searchDirAndFile(data);
 
 export const delFolderOrFile = (data: IKnowledgeDetailTreeItem, resourceId: string) => {
   if (data.type === 'directory') {

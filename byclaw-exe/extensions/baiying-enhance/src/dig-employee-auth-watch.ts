@@ -69,6 +69,11 @@ export function isRedisKeyspaceNotificationsEnabled(notifyKeyspaceEvents: string
   return /[K$]/.test(value);
 }
 
+export function isRedisConnectionClosedError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return /connection is closed|connection is already closed|stream isn't writeable/i.test(message);
+}
+
 function isSameSet(a: Set<string>, b: Set<string>): boolean {
   if (a.size !== b.size) {
     return false;
@@ -89,7 +94,7 @@ export function createDigEmployeeAuthWatch(params: {
   const host = process.env.REDIS_HOST?.trim();
   const port = Number.parseInt(process.env.REDIS_PORT?.trim() || "", 10);
   const db = Number.parseInt(process.env.REDIS_DATABASE?.trim() || "", 10);
-  const configuredPollMs = Number.parseInt(process.env.BAIYING_DIG_AUTH_POLL_MS || "", 500);
+  const configuredPollMs = Number.parseInt(process.env.BAIYING_DIG_AUTH_POLL_MS || "", 10);
   const connectTimeout = Math.max(
     500,
     Number.parseInt(process.env.BAIYING_DIG_AUTH_REDIS_CONNECT_TIMEOUT_MS || "3000", 10),
@@ -102,7 +107,9 @@ export function createDigEmployeeAuthWatch(params: {
   let redis: Redis | null = null;
   let subscriber: Redis | null = null;
   let pollTimer: ReturnType<typeof setTimeout> | null = null;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let stopped = false;
+  let starting = false;
   let userId = "";
   let authorizedIds = new Set<string>();
   let authFilterEnabled = false;
@@ -117,6 +124,38 @@ export function createDigEmployeeAuthWatch(params: {
   const shareUserCodeKey = `SHARE_BFM_USER_CODE_${userCode}`;
   const authKeyOf = (uid: string) => `USER:RESOURCES:AUTH:${uid}`;
 
+  const redisOptions = () => ({
+    host,
+    port,
+    db,
+    username: process.env.REDIS_USERNAME?.trim() || undefined,
+    password: process.env.REDIS_PASSWORD?.trim() || undefined,
+    lazyConnect: true,
+    enableOfflineQueue: false,
+    connectTimeout,
+    retryStrategy: () => null,
+    maxRetriesPerRequest: 2,
+  });
+
+  const closeRedis = async (client: Redis | null) => {
+    if (!client) {
+      return;
+    }
+    await client.quit().catch(() => {
+      client.disconnect(false);
+    });
+  };
+
+  const clearConnections = async () => {
+    const redisToClose = redis;
+    const subscriberToClose = subscriber;
+    redis = null;
+    subscriber = null;
+    keyspaceEnabled = false;
+    userId = "";
+    await Promise.all([closeRedis(subscriberToClose), closeRedis(redisToClose)]);
+  };
+
   const schedulePoll = (delayMs = pollMs) => {
     if (stopped) {
       return;
@@ -128,6 +167,17 @@ export function createDigEmployeeAuthWatch(params: {
       pollTimer = null;
       void refreshAuth();
     }, Math.max(200, delayMs));
+  };
+
+  const scheduleReconnect = (delayMs = 2000) => {
+    if (stopped || reconnectTimer) {
+      return;
+    }
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      void startWatch();
+    }, Math.max(200, delayMs));
+    reconnectTimer.unref?.();
   };
 
   const emitIfChanged = async (nextIds: Set<string>) => {
@@ -250,119 +300,131 @@ export function createDigEmployeeAuthWatch(params: {
               err instanceof Error ? err.message : String(err)
             }`,
           );
+          if (isRedisConnectionClosedError(err)) {
+            await clearConnections();
+            scheduleReconnect();
+          }
           markAuthUnavailable("redis refresh failed");
         }
       } while (refreshAgain);
     } finally {
       refreshInFlight = false;
-      schedulePoll(nextPollDelayMs);
+      if (redis) {
+        schedulePoll(nextPollDelayMs);
+      }
     }
   };
 
-  return {
-    start: async () => {
-      if (redis || stopped) {
-        return;
-      }
-      if (
-        !userCode ||
-        !host ||
-        Number.isNaN(port) ||
-        Number.isNaN(db) ||
-        Number.isNaN(connectTimeout)
-      ) {
-        params.logger.warn(
-          "baiying-enhance: dig-employee auth watch disabled (USER_CODE/REDIS_* env missing)",
-        );
-        return;
-      }
-      redis = new Redis({
-        host,
-        port,
-        db,
-        username: process.env.REDIS_USERNAME?.trim() || undefined,
-        password: process.env.REDIS_PASSWORD?.trim() || undefined,
-        lazyConnect: true,
-        enableOfflineQueue: false,
-        connectTimeout,
-        retryStrategy: () => null,
-        maxRetriesPerRequest: 2,
-      });
-      subscriber = new Redis({
-        host,
-        port,
-        db,
-        username: process.env.REDIS_USERNAME?.trim() || undefined,
-        password: process.env.REDIS_PASSWORD?.trim() || undefined,
-        lazyConnect: true,
-        enableOfflineQueue: false,
-        connectTimeout,
-        retryStrategy: () => null,
-        maxRetriesPerRequest: 2,
-      });
-      try {
-        await redis.connect();
-        await subscriber.connect();
-      } catch (err) {
-        params.logger.warn(
-          `baiying-enhance: dig-employee auth watch connect failed: ${
-            err instanceof Error ? err.message : String(err)
-          }`,
-        );
-        await redis.quit().catch(() => undefined);
-        await subscriber.quit().catch(() => undefined);
-        redis = null;
-        subscriber = null;
-        return;
-      }
-      try {
-        const notifyReply = await redis.config("GET", "notify-keyspace-events");
-        const notifyValue = Array.isArray(notifyReply) ? String(notifyReply[1] ?? "") : "";
-        keyspaceEnabled = isRedisKeyspaceNotificationsEnabled(notifyValue);
-        if (!keyspaceEnabled) {
-          if (Number.isNaN(configuredPollMs)) {
-            pollMs = 2000;
-          }
-          params.logger.warn(
-            `baiying-enhance: Redis notify-keyspace-events is empty/disabled; dig-employee auth watch uses poll-only mode (interval=${pollMs}ms). Configure Redis with notify-keyspace-events including Kh$ for instant hash updates.`,
-          );
-        }
-      } catch (err) {
-        keyspaceEnabled = false;
+  const handleConnectionClosed = (client: Redis, label: string) => {
+    if (stopped || (client !== redis && client !== subscriber)) {
+      return;
+    }
+    void (async () => {
+      await clearConnections();
+      markAuthUnavailable(`${label} connection closed`);
+      scheduleReconnect();
+    })();
+  };
+
+  const startWatch = async () => {
+    if (redis || starting || stopped) {
+      return;
+    }
+    if (
+      !userCode ||
+      !host ||
+      Number.isNaN(port) ||
+      Number.isNaN(db) ||
+      Number.isNaN(connectTimeout)
+    ) {
+      params.logger.warn(
+        "baiying-enhance: dig-employee auth watch disabled (USER_CODE/REDIS_* env missing)",
+      );
+      return;
+    }
+    starting = true;
+    const nextRedis = new Redis(redisOptions());
+    const nextSubscriber = new Redis(redisOptions());
+    nextRedis.on("error", (err) => {
+      params.logger.warn(`baiying-enhance: dig-employee auth Redis error: ${err.message}`);
+    });
+    nextSubscriber.on("error", (err) => {
+      params.logger.warn(`baiying-enhance: dig-employee auth subscriber Redis error: ${err.message}`);
+    });
+    nextRedis.on("end", () => handleConnectionClosed(nextRedis, "redis"));
+    nextSubscriber.on("end", () => handleConnectionClosed(nextSubscriber, "subscriber"));
+    try {
+      await nextRedis.connect();
+      await nextSubscriber.connect();
+    } catch (err) {
+      params.logger.warn(
+        `baiying-enhance: dig-employee auth watch connect failed: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+      await Promise.all([closeRedis(nextSubscriber), closeRedis(nextRedis)]);
+      starting = false;
+      scheduleReconnect();
+      return;
+    }
+    redis = nextRedis;
+    subscriber = nextSubscriber;
+    starting = false;
+    try {
+      const notifyReply = await redis.config("GET", "notify-keyspace-events");
+      const notifyValue = Array.isArray(notifyReply) ? String(notifyReply[1] ?? "") : "";
+      keyspaceEnabled = isRedisKeyspaceNotificationsEnabled(notifyValue);
+      if (!keyspaceEnabled) {
         if (Number.isNaN(configuredPollMs)) {
           pollMs = 2000;
         }
         params.logger.warn(
-          `baiying-enhance: unable to read Redis notify-keyspace-events; using poll-only mode (interval=${pollMs}ms): ${
-            err instanceof Error ? err.message : String(err)
-          }`,
+          `baiying-enhance: Redis notify-keyspace-events is empty/disabled; dig-employee auth watch uses poll-only mode (interval=${pollMs}ms). Configure Redis with notify-keyspace-events including Kh$ for instant hash updates.`,
         );
       }
-      if (keyspaceEnabled) {
-        subscriber.on("pmessage", (_pattern, _channel, message) => {
-          const event = normalizeId(message).toLowerCase();
-          if (HASH_CHANGE_EVENTS.has(event)) {
-            void refreshAuth();
-          }
-        });
+    } catch (err) {
+      keyspaceEnabled = false;
+      if (Number.isNaN(configuredPollMs)) {
+        pollMs = 2000;
       }
-      params.logger.info(
-        `baiying-enhance: dig-employee auth watch started (USER_CODE=${userCode}, mode=${
-          keyspaceEnabled ? "keyspace+poll" : "poll-only"
-        }, pollMs=${pollMs})`,
+      params.logger.warn(
+        `baiying-enhance: unable to read Redis notify-keyspace-events; using poll-only mode (interval=${pollMs}ms): ${
+          err instanceof Error ? err.message : String(err)
+        }`,
       );
-      await refreshAuth();
+    }
+    if (keyspaceEnabled) {
+      subscriber.on("pmessage", (_pattern, _channel, message) => {
+        const event = normalizeId(message).toLowerCase();
+        if (HASH_CHANGE_EVENTS.has(event)) {
+          void refreshAuth();
+        }
+      });
+    }
+    params.logger.info(
+      `baiying-enhance: dig-employee auth watch started (USER_CODE=${userCode}, mode=${
+        keyspaceEnabled ? "keyspace+poll" : "poll-only"
+      }, pollMs=${pollMs})`,
+    );
+    await refreshAuth();
+  };
+
+  return {
+    start: async () => {
+      stopped = false;
+      await startWatch();
     },
     stop: async () => {
       stopped = true;
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
       if (pollTimer) {
         clearTimeout(pollTimer);
         pollTimer = null;
       }
-      await subscriber?.quit().catch(() => undefined);
-      await redis?.quit().catch(() => undefined);
-      subscriber = null;
-      redis = null;
+      await clearConnections();
     },
     getAuthorizedIds: () => (authFilterEnabled ? new Set(authorizedIds) : undefined),
   };

@@ -24,6 +24,9 @@ public class ModelUpsertRequest implements Serializable {
     /** 提供商 */
     private String providerName;
 
+    /** 模型协议：OpenAI / Anthropic */
+    private String modelProtocol;
+
     /** 型号 */
     private String modelCode;
 
@@ -69,6 +72,9 @@ public class ModelUpsertRequest implements Serializable {
 
     private Double presencePenalty;
 
+    /** Reasoning / Thinking 配置 */
+    private ModelReasoningConfig reasoningConfig;
+
     /** 入参模板 */
     private String inparamTemplate;
 
@@ -76,5 +82,8 @@ public class ModelUpsertRequest implements Serializable {
      * 扩展json参数
      */
     private String extendParam;
+
+    /** 模型归属: PUBLIC / PERSONAL */
+    private String ownerType;
 
 }

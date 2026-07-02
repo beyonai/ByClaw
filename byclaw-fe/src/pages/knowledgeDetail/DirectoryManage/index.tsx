@@ -5,8 +5,11 @@ import {
   useEffect,
   useImperativeHandle,
   useMemo,
+  useContext,
+  lazy,
   useRef,
   useState,
+  Suspense,
 } from 'react';
 
 // @ts-ignore
@@ -19,32 +22,48 @@ import InfiniteScrollTable from '@/components/InfiniteScrollTable';
 import KnowledgeBreadcrumb from '@/components/KnowledgeBreadcrumb';
 import useShowModal from '@/hooks/useShowModal';
 import useKnowledgeStore from '@/models/useKnowledgeStore';
+import { HALF_MAIN_CONTENT_DETAIL_PANEL_WIDTH, SiderContentContext } from '@/layout/sider/siderContentContext';
 import { downloadResourceFile } from '@/service/file';
 import {
   buildDataset,
   deleteFolder,
   getFileBuildStatus,
+  queryDirAndFileByLevel as queryDirAndFileByLevelService,
   removeFile,
+  searchDirAndFile,
   type BuildDatasetPayload,
 } from '@/service/knowledgeCenter';
 import { downloadFile } from '@/utils/file';
+import { getFileIconType } from '@/constants/icon';
+import {
+  getMimeType,
+  isPreviewable,
+} from '@/components/QueryInput/components/FileBrowserEntry/components/FileBrowserPanel/constants';
 import DirectoryEmpty from '../components/DirectoryEmpty';
 import MoveModal from '../components/MoveModal';
 import RenameModal from '../components/RenameModal';
 import styles from './index.module.less';
 
+const PreViewFile = lazy(() =>
+  import('@/components/Preview/Twins').then((module) => ({ default: module.PreViewFile }))
+);
+
 export interface DirectoryManageRef {
   getDirectoryList: (params: Record<string, any>) => void;
+  buildSelectedFiles: () => void;
 }
 
 interface IProps {
   searchValue?: string;
+  setSearchValue?: React.Dispatch<React.SetStateAction<string>>;
   baseInfo: any;
+  canManage?: boolean;
   setShowAddFolder: (show: boolean) => void;
   uploadLoading: boolean;
   setUploadLoading: (loading: boolean) => void;
   folderPath: { id: string; title: string }[];
   setFolderPath: React.Dispatch<React.SetStateAction<IProps['folderPath']>>;
+  onBuildSelectionChange?: (count: number) => void;
 }
 
 type ActionItem = {
@@ -68,8 +87,227 @@ type IFileBuildStatus = {
   stepDict?: IBuildStatusItem[];
 };
 
+interface FilePreviewPanelProps {
+  blob: Blob | null;
+  fileName: string;
+  fileType: string;
+  loading: boolean;
+  onClose: () => void;
+}
+
+function normalizeDirectoryPath(path?: string) {
+  const normalizedPath = `${path || '/'}`.trim().replace(/\\/g, '/').replace(/\/+/g, '/');
+  if (!normalizedPath || normalizedPath === '/') {
+    return '/';
+  }
+  return normalizedPath.startsWith('/') ? normalizedPath : `/${normalizedPath}`;
+}
+
+function buildFolderPathFromDirectoryPath(directoryPath: string, rootTitle: string) {
+  const segments = normalizeDirectoryPath(directoryPath).split('/').filter(Boolean);
+  const nextFolderPath = [{ id: '-1', title: rootTitle }];
+  let accumulatedPath = '';
+  segments.forEach((segment) => {
+    accumulatedPath += `/${segment}`;
+    nextFolderPath.push({
+      id: accumulatedPath,
+      title: segment,
+    });
+  });
+  return nextFolderPath;
+}
+
+function normalizeDirectoryRows(rows: any[] = []) {
+  return rows.map((row) => ({
+    ...row,
+    collectionName: row.collectionName ?? row.name,
+  }));
+}
+
+function unwrapDirectoryRows(res: any) {
+  if (Array.isArray(res)) return res;
+  if (Array.isArray(res?.data)) return res.data;
+  return [];
+}
+
+function getDirectoryRowName(row: any) {
+  return String(row?.collectionName ?? row?.name ?? row?.fileName ?? '').trim();
+}
+
+function getFileType(name: string): string {
+  const ext = name.includes('.') ? name.split('.').pop()?.toLowerCase() || '' : '';
+  if (ext === 'jpeg') return 'jpg';
+  if (['html', 'htm'].includes(ext)) return 'h5';
+  return ext;
+}
+
+function getRawBlob(res: any) {
+  return res?.file instanceof Blob ? res.file : res instanceof Blob ? res : new Blob([res?.file || res]);
+}
+
+function canPreviewRecord(record: any) {
+  return record?.type === 'file' && isPreviewable(getDirectoryRowName(record));
+}
+
+function isBuildNotStartedRecord(record: any) {
+  const normalizedState = `${record?.fileUploadState ?? ''}`;
+  return !normalizedState || normalizedState === '1';
+}
+
+// function hasRunningBuildTask(record: any) {
+//   return `${record?.fileUploadState ?? ''}` === '2';
+// }
+
+const FilePreviewPanel = ({ blob, fileName, fileType, loading, onClose }: FilePreviewPanelProps) => (
+  <div className={styles.previewPanel}>
+    <div className={styles.previewHeader}>
+      <span className={styles.previewTitle}>{fileName}</span>
+      <span className={styles.previewClose} onClick={onClose}>
+        <AntdIcon type="icon-a-Closeguanbi1" />
+      </span>
+    </div>
+    <div className={styles.previewBody}>
+      <Spin spinning={loading} wrapperClassName={styles.previewSpin}>
+        {blob && (
+          <Suspense fallback={null}>
+            <PreViewFile data={blob} type={fileType} title={fileName} className={styles.previewContent} />
+          </Suspense>
+        )}
+      </Spin>
+    </div>
+  </div>
+);
+
+function getPathSegments(path?: string) {
+  return normalizeDirectoryPath(path).split('/').filter(Boolean);
+}
+
+function getParentDirectoryPath(path?: string) {
+  const segments = getPathSegments(path);
+  segments.pop();
+  return segments.length ? `/${segments.join('/')}` : '/';
+}
+
+function resolveSearchRowPath(row: any) {
+  const name = getDirectoryRowName(row);
+  const directoryPath = normalizeDirectoryPath(row?.directoryPath || row?.path || '');
+  if (row?.type === 'directory') {
+    return directoryPath === '/' && name ? `/${name}` : directoryPath;
+  }
+
+  if (!name) {
+    return directoryPath;
+  }
+
+  const segments = getPathSegments(directoryPath);
+  const lastSegment = segments[segments.length - 1];
+  if (lastSegment === name) {
+    return directoryPath;
+  }
+  return normalizeDirectoryPath(`${directoryPath}/${name}`);
+}
+
+function buildSearchDirectoryRows(rows: any[] = []) {
+  type SearchNode = {
+    path: string;
+    row: any;
+    children: SearchNode[];
+  };
+
+  const nodeMap = new Map<string, SearchNode>();
+  const rootNodes: SearchNode[] = [];
+
+  const appendChild = (parent: SearchNode | null, child: SearchNode) => {
+    const siblings = parent ? parent.children : rootNodes;
+    if (!siblings.some((item) => item.path === child.path)) {
+      siblings.push(child);
+    }
+  };
+
+  const getOrCreateDirectoryNode = (path: string) => {
+    const normalizedPath = normalizeDirectoryPath(path);
+    const existed = nodeMap.get(normalizedPath);
+    if (existed) {
+      return existed;
+    }
+
+    const segments = getPathSegments(normalizedPath);
+    const name = segments[segments.length - 1] || normalizedPath;
+    const node: SearchNode = {
+      path: normalizedPath,
+      row: {
+        name,
+        collectionName: name,
+        type: 'directory',
+        directoryPath: normalizedPath,
+        __synthetic: true,
+      },
+      children: [],
+    };
+    nodeMap.set(normalizedPath, node);
+
+    const parentPath = getParentDirectoryPath(normalizedPath);
+    const parentNode = parentPath === '/' ? null : getOrCreateDirectoryNode(parentPath);
+    appendChild(parentNode, node);
+    return node;
+  };
+
+  normalizeDirectoryRows(rows).forEach((row) => {
+    const rowPath = resolveSearchRowPath(row);
+    if (!rowPath || rowPath === '/') return;
+
+    const parentPath = getParentDirectoryPath(rowPath);
+    const parentNode = parentPath === '/' ? null : getOrCreateDirectoryNode(parentPath);
+    const existed = nodeMap.get(rowPath);
+    const nextRow = {
+      ...row,
+      name: getDirectoryRowName(row) || getPathSegments(rowPath).slice(-1)[0],
+      collectionName: row.collectionName ?? row.name ?? row.fileName ?? getPathSegments(rowPath).slice(-1)[0],
+      directoryPath: rowPath,
+    };
+
+    if (existed) {
+      existed.row = {
+        ...nextRow,
+        __synthetic: false,
+      };
+      appendChild(parentNode, existed);
+      return;
+    }
+
+    const node: SearchNode = {
+      path: rowPath,
+      row: nextRow,
+      children: [],
+    };
+    nodeMap.set(rowPath, node);
+    appendChild(parentNode, node);
+  });
+
+  const flatten = (nodes: SearchNode[], level = 0): any[] => {
+    return nodes.flatMap((node) => [
+      {
+        ...node.row,
+        __level: level,
+      },
+      ...flatten(node.children, level + 1),
+    ]);
+  };
+
+  return flatten(rootNodes);
+}
+
 const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) => {
-  const { searchValue = '', baseInfo, setShowAddFolder, uploadLoading, setUploadLoading } = props;
+  const {
+    searchValue = '',
+    setSearchValue,
+    baseInfo,
+    canManage = false,
+    setShowAddFolder,
+    uploadLoading,
+    setUploadLoading,
+    onBuildSelectionChange,
+  } = props;
 
   const { folderPath, setFolderPath } = props;
 
@@ -77,7 +315,8 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
 
   const intl = useIntl();
   const locale = getLocale();
-  const { message } = App.useApp();
+  const { message, modal: appModal } = App.useApp();
+  const { setDetailPanel, clearDetailPanel } = useContext(SiderContentContext);
   // 移动弹窗
   const [moveModalVisible, setMoveModalVisible] = useState(false);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -87,6 +326,8 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
   const [queryingBuildStatusIds, setQueryingBuildStatusIds] = useState<string[]>([]);
   const [pollingFileIds, setPollingFileIds] = useState<string[]>([]);
   const [visibleFileIds, setVisibleFileIds] = useState<string[]>([]);
+  const [selectedBuildRowKeys, setSelectedBuildRowKeys] = useState<React.Key[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
   const fileRefs = useRef<Record<string, HTMLTableRowElement | null>>({});
   const queryingFileIdsRef = useRef<Set<string>>(new Set());
   const queriedFileIdsRef = useRef<Set<string>>(new Set());
@@ -121,25 +362,72 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
   }, [folderPath]);
 
   const getDirectoryList = useCallback(
-    (_params?: Record<string, any>) => {
-      void _params;
+    async (_params?: Record<string, any>) => {
       const rid = baseInfo?.resourceId;
       if (rid === null || rid === undefined || rid === '') return;
-      queryDirAndFileByLevel({
-        resourceId: Number(rid),
-        directoryPath: getListDirectoryPath(),
-      });
+      const keyword = String(_params?.name ?? searchValue).trim();
+      if (keyword) {
+        setSearchLoading(true);
+        try {
+          const res = await searchDirAndFile({
+            resourceId: Number(rid),
+            directoryPath: '/',
+            keyword,
+          });
+          setState({
+            directoryList: buildSearchDirectoryRows(unwrapDirectoryRows(res)),
+          });
+        } catch (error) {
+          console.error(error);
+          setState({
+            directoryList: [],
+          });
+        } finally {
+          setSearchLoading(false);
+        }
+        return;
+      }
+      try {
+        await queryDirAndFileByLevel({
+          resourceId: Number(rid),
+          directoryPath: getListDirectoryPath(),
+        });
+      } catch (error: any) {
+        const errorMessage = typeof error === 'string' ? error : error?.message || error?.msg;
+        if (errorMessage) {
+          appModal.error({
+            title: '查询知识库目录失败',
+            content: <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{errorMessage}</div>,
+          });
+        }
+        setState({
+          directoryList: [],
+        });
+      }
     },
-    [baseInfo?.resourceId, getListDirectoryPath, queryDirAndFileByLevel]
+    [appModal, baseInfo?.resourceId, getListDirectoryPath, queryDirAndFileByLevel, searchValue, setState]
   );
 
   useEffect(() => {
     if (baseInfo?.resourceId === null || baseInfo?.resourceId === undefined || baseInfo?.resourceId === '') return;
+    queryingFileIdsRef.current.clear();
+    queriedFileIdsRef.current.clear();
+    postBuildPollingIdsRef.current.clear();
+    setFileBuildStatusMap({});
+    setQueryingBuildStatusIds([]);
+    setPollingFileIds([]);
+    setVisibleFileIds([]);
     setState({
       directoryList: [],
     });
-    getDirectoryList();
-  }, [baseInfo?.resourceId, currentFolderId, getDirectoryList, setState]);
+    const timer = window.setTimeout(
+      () => {
+        getDirectoryList();
+      },
+      searchValue.trim() ? 300 : 0
+    );
+    return () => window.clearTimeout(timer);
+  }, [baseInfo?.resourceId, currentFolderId, getDirectoryList, searchValue, setState]);
 
   useEffect(() => {
     return () => {
@@ -149,24 +437,9 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
     };
   }, [setState]);
 
-  // 暴露方法给父组件
-  useImperativeHandle(
-    ref,
-    () => ({
-      getDirectoryList,
-    }),
-    [getDirectoryList]
-  );
-
   const displayDirectoryList = useMemo(() => {
-    const kw = searchValue.trim().toLowerCase();
-    if (!kw) return directoryList;
-    return directoryList.filter((item: any) =>
-      String(item.collectionName ?? item.name ?? '')
-        .toLowerCase()
-        .includes(kw)
-    );
-  }, [directoryList, searchValue]);
+    return directoryList;
+  }, [directoryList]);
 
   /** 构建 / 查询构建状态 共用的完整文件路径 */
   const getBuildDirectoryPath = useCallback(
@@ -189,11 +462,27 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
   /** 列表接口可能不返回文件 id，构建与状态轮询用 id 或 directoryPath 区分行 */
   const getFileRowKey = useCallback(
     (record: any): string => {
-      const id = record?.id;
+      const p = String(getBuildDirectoryPath(record) || '').trim();
+      if (record?.type === 'file') {
+        const fileVersion =
+          record?.fileId ??
+          record?.createTime ??
+          record?.updateTime ??
+          record?.gmtModified ??
+          record?.modifyTime ??
+          record?.fileSize ??
+          record?.size;
+
+        if (p && fileVersion !== null && fileVersion !== undefined && `${fileVersion}` !== '') {
+          return `path:${p}|file:${fileVersion}`;
+        }
+      }
+
+      const id = record?.fileId ?? record?.id;
       if (id !== null && id !== undefined && `${id}` !== '') {
         return `id:${id}`;
       }
-      const p = String(getBuildDirectoryPath(record) || '').trim();
+
       return p ? `path:${p}` : '';
     },
     [getBuildDirectoryPath]
@@ -208,11 +497,36 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
     [displayDirectoryList, getFileRowKey]
   );
 
+  const buildableFileRecords = useMemo(
+    () => fileRecords.filter((record: any) => !buildingFileIds.includes(getFileRowKey(record))),
+    [buildingFileIds, fileRecords, getFileRowKey]
+  );
+
+  const selectedBuildFileRecords = useMemo(
+    () => buildableFileRecords.filter((record: any) => selectedBuildRowKeys.includes(getFileRowKey(record))),
+    [buildableFileRecords, getFileRowKey, selectedBuildRowKeys]
+  );
+
+  useEffect(() => {
+    const buildableRowKeys = buildableFileRecords.map((record: any) => getFileRowKey(record));
+    setSelectedBuildRowKeys((prev) => prev.filter((key) => buildableRowKeys.includes(`${key}`)));
+  }, [buildableFileRecords, getFileRowKey]);
+
+  useEffect(() => {
+    onBuildSelectionChange?.(selectedBuildFileRecords.length);
+  }, [onBuildSelectionChange, selectedBuildFileRecords.length]);
+
   const pollingFileIdsKey = useMemo(() => pollingFileIds.map((item) => `${item}`).join(','), [pollingFileIds]);
 
   const isTerminalBuildStatus = useCallback((status?: string) => {
     const normalizedStatus = `${status || ''}`;
     return !normalizedStatus || normalizedStatus === 'complete' || normalizedStatus === 'failed';
+  }, []);
+
+  const isFailedBuildStatus = useCallback((statusInfo?: Partial<IFileBuildStatus> | null) => {
+    const status = `${statusInfo?.status || ''}`;
+    const currentStepStatus = `${statusInfo?.currentStepStatus || ''}`;
+    return status === 'failed' || currentStepStatus === 'failed';
   }, []);
 
   const collectVisibleFileIds = useCallback(() => {
@@ -258,7 +572,12 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
       if (queryingBuildStatusIds.includes(rowKey)) return <Spin size="small" />;
 
       const statusInfo = rowKey ? fileBuildStatusMap[rowKey] : undefined;
-      if (!statusInfo) return '-';
+      if (!statusInfo) {
+        if (isBuildNotStartedRecord(record) && !buildingFileIds.includes(rowKey) && !pollingFileIds.includes(rowKey)) {
+          return '-';
+        }
+        return '-';
+      }
 
       const { status, currentStep, statusDict = [], stepDict = [] } = statusInfo;
 
@@ -273,7 +592,7 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
         '-'
       );
     },
-    [fileBuildStatusMap, getBuildStatusLabel, getFileRowKey, queryingBuildStatusIds]
+    [buildingFileIds, fileBuildStatusMap, getBuildStatusLabel, getFileRowKey, pollingFileIds, queryingBuildStatusIds]
   );
 
   useEffect(() => {
@@ -413,11 +732,11 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
             (item: any) => item?.type === 'file' && getFileRowKey(item) === rowKey
           );
           if (!record) {
-            return { rowKey, data: null, missingRecord: true as const };
+            return { rowKey, data: null, missingRecord: true as const, error: false as const };
           }
           const directoryPath = getBuildDirectoryPath(record);
           if (!directoryPath) {
-            return { rowKey, data: null, missingRecord: true as const };
+            return { rowKey, data: null, missingRecord: true as const, error: false as const };
           }
           try {
             const res = await getFileBuildStatus({ resourceId: rid, directoryPath });
@@ -425,12 +744,14 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
               rowKey,
               data: res || null,
               missingRecord: false as const,
+              error: false as const,
             };
           } catch (error) {
             return {
               rowKey,
               data: null,
               missingRecord: false as const,
+              error: true as const,
             };
           }
         })
@@ -448,24 +769,31 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
         return next;
       });
 
-      setPollingFileIds((prev) =>
-        prev.filter((rowKey) => {
-          const row = results.find((item) => item.rowKey === rowKey);
-          const isPostBuildPolling = postBuildPollingIdsRef.current.has(rowKey);
-          if (row?.missingRecord) {
-            postBuildPollingIdsRef.current.delete(rowKey);
-            return false;
-          }
-          if (!row?.data) return isPostBuildPolling;
+      const nextPollingIds = pollingFileIds.filter((rowKey) => {
+        const row = results.find((item) => item.rowKey === rowKey);
+        if (row?.missingRecord) {
+          postBuildPollingIdsRef.current.delete(rowKey);
+          return false;
+        }
+        if (row?.error) {
+          postBuildPollingIdsRef.current.delete(rowKey);
+          return false;
+        }
+        if (!row?.data) return false;
 
-          const status = `${row?.data?.status || ''}`;
-          if (status === 'complete' || status === 'failed') {
-            postBuildPollingIdsRef.current.delete(rowKey);
-            return false;
-          }
-          return isPostBuildPolling || !isTerminalBuildStatus(status);
-        })
-      );
+        if (isFailedBuildStatus(row.data)) {
+          postBuildPollingIdsRef.current.delete(rowKey);
+          return false;
+        }
+        const status = `${row?.data?.status || ''}`;
+        if (isTerminalBuildStatus(status)) {
+          postBuildPollingIdsRef.current.delete(rowKey);
+          return false;
+        }
+        return true;
+      });
+
+      setPollingFileIds(() => nextPollingIds);
 
       isPolling = false;
     };
@@ -488,60 +816,184 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
     isTerminalBuildStatus,
   ]);
 
-  const submitBuildTask = useCallback(
-    (record: any) => {
-      const directoryPath = getBuildDirectoryPath(record);
-      if (!directoryPath) {
-        message.error(intl.formatMessage({ id: 'directoryManage.resolveFilePathFailed' }));
-        return;
-      }
-
-      const rowKey = getFileRowKey(record);
-      if (!rowKey) {
-        message.error(intl.formatMessage({ id: 'directoryManage.resolveFilePathFailed' }));
-        return;
-      }
-
+  const submitBuildTasks = useCallback(
+    (records: any[]) => {
       const rid = baseInfo?.resourceId;
       if (rid === null || rid === undefined || rid === '') {
         message.error(intl.formatMessage({ id: 'directoryManage.missingKnowledgeBaseInfo' }));
         return;
       }
 
-      const payload: BuildDatasetPayload = {
-        directoryPath,
-        resourceId: String(rid),
-      };
+      const taskMap = new Map<
+        string,
+        {
+          rowKey: string;
+          payload: BuildDatasetPayload;
+        }
+      >();
 
-      setBuildingFileIds((prev) => (prev.includes(rowKey) ? prev : [...prev, rowKey]));
-      message.info(intl.formatMessage({ id: 'directoryManage.buildSubmitted' }));
+      records.forEach((record) => {
+        const directoryPath = getBuildDirectoryPath(record);
+        const rowKey = getFileRowKey(record);
+        if (!directoryPath || !rowKey || buildingFileIds.includes(rowKey)) return;
+        taskMap.set(rowKey, {
+          rowKey,
+          payload: {
+            directoryPath,
+            resourceId: String(rid),
+          },
+        });
+      });
+
+      const tasks = Array.from(taskMap.values());
+      if (tasks.length === 0) {
+        message.warning(intl.formatMessage({ id: 'directoryManage.noBuildableFiles' }));
+        return;
+      }
+
+      const taskKeys = tasks.map((task) => task.rowKey);
+      setBuildingFileIds((prev) => [...new Set([...prev, ...taskKeys])]);
+      message.info(
+        intl.formatMessage(
+          { id: tasks.length > 1 ? 'directoryManage.batchBuildSubmitted' : 'directoryManage.buildSubmitted' },
+          { count: tasks.length }
+        )
+      );
 
       window.setTimeout(() => {
-        void buildDataset(payload)
-          .then(() => {
-            queriedFileIdsRef.current.delete(rowKey);
-            postBuildPollingIdsRef.current.add(rowKey);
-            setPollingFileIds((prev) => (prev.includes(rowKey) ? prev : [...prev, rowKey]));
-            getDirectoryList();
-          })
-          .catch((error) => {
-            const errorMessage =
-              error?.response?.data?.msg ||
-              error?.msg ||
-              error?.message ||
-              intl.formatMessage({ id: 'directoryManage.buildFailed' });
-            message.error(errorMessage);
-            postBuildPollingIdsRef.current.delete(rowKey);
-            setPollingFileIds((prev) => prev.filter((k) => k !== rowKey));
-            getDirectoryList();
+        void Promise.allSettled(tasks.map((task) => buildDataset(task.payload)))
+          .then((results) => {
+            const successKeys = tasks
+              .filter((_, index) => results[index].status === 'fulfilled')
+              .map((task) => task.rowKey);
+            const failedResult = results.find(
+              (result): result is PromiseRejectedResult => result.status === 'rejected'
+            );
+
+            successKeys.forEach((rowKey) => {
+              queriedFileIdsRef.current.delete(rowKey);
+              postBuildPollingIdsRef.current.add(rowKey);
+            });
+
+            if (successKeys.length > 0) {
+              setPollingFileIds((prev) => [...new Set([...prev, ...successKeys])]);
+            }
+
+            if (failedResult) {
+              const error = failedResult.reason;
+              const errorMessage =
+                error?.response?.data?.msg ||
+                error?.msg ||
+                error?.message ||
+                intl.formatMessage({ id: 'directoryManage.buildFailed' });
+              message.error(errorMessage);
+            }
           })
           .finally(() => {
-            setBuildingFileIds((prev) => prev.filter((k) => k !== rowKey));
+            setBuildingFileIds((prev) => prev.filter((key) => !taskKeys.includes(key)));
           });
       }, 0);
     },
-    [baseInfo?.resourceId, getBuildDirectoryPath, getDirectoryList, getFileRowKey, intl, message]
+    [baseInfo?.resourceId, buildingFileIds, getBuildDirectoryPath, getDirectoryList, getFileRowKey, intl, message]
   );
+
+  const submitBuildTask = useCallback(
+    (record: any) => {
+      const directoryPath = getBuildDirectoryPath(record);
+      const rowKey = getFileRowKey(record);
+      if (!directoryPath || !rowKey) {
+        message.error(intl.formatMessage({ id: 'directoryManage.resolveFilePathFailed' }));
+        return;
+      }
+
+      submitBuildTasks([record]);
+    },
+    [getBuildDirectoryPath, getFileRowKey, intl, message, submitBuildTasks]
+  );
+
+  const handleBatchBuild = useCallback(() => {
+    if (selectedBuildFileRecords.length === 0) {
+      message.warning(intl.formatMessage({ id: 'directoryManage.selectFilesToBuild' }));
+      return;
+    }
+
+    Modal.confirm({
+      title: intl.formatMessage({ id: 'directoryManage.batchBuildFiles' }),
+      content: intl.formatMessage(
+        { id: 'directoryManage.batchBuildConfirm' },
+        { count: selectedBuildFileRecords.length }
+      ),
+      onOk: () => {
+        submitBuildTasks(selectedBuildFileRecords);
+      },
+    });
+  }, [intl, message, selectedBuildFileRecords, submitBuildTasks]);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      getDirectoryList,
+      buildSelectedFiles: handleBatchBuild,
+    }),
+    [getDirectoryList, handleBatchBuild]
+  );
+
+  const renderPreviewPanel = useCallback(
+    (record: any, options: { blob?: Blob | null; loading: boolean }) => {
+      const fileName = getDirectoryRowName(record);
+      setDetailPanel?.(
+        <FilePreviewPanel
+          blob={options.blob ?? null}
+          fileName={fileName}
+          fileType={getFileType(fileName)}
+          loading={options.loading}
+          onClose={() => clearDetailPanel?.()}
+        />,
+        { width: HALF_MAIN_CONTENT_DETAIL_PANEL_WIDTH }
+      );
+    },
+    [clearDetailPanel, setDetailPanel]
+  );
+
+  const handlePreviewFile = useCallback(
+    async (record: any) => {
+      if (!canPreviewRecord(record)) {
+        message.warning(intl.formatMessage({ id: 'fileBrowser.preview.unavailable' }));
+        return;
+      }
+
+      const directoryPath = getBuildDirectoryPath(record);
+      const rid = baseInfo?.resourceId;
+      if (!directoryPath || rid === null || rid === undefined || rid === '') {
+        message.error(intl.formatMessage({ id: 'directoryManage.resolveFilePathFailed' }));
+        return;
+      }
+
+      const fileName = getDirectoryRowName(record);
+      renderPreviewPanel(record, { loading: true });
+      try {
+        const res: any = await downloadResourceFile({
+          resourceId: rid,
+          directoryPath,
+        });
+        const rawBlob = getRawBlob(res);
+        const mimeType = getMimeType(fileName);
+        const blob = mimeType ? new Blob([rawBlob], { type: mimeType }) : rawBlob;
+        renderPreviewPanel(record, { blob, loading: false });
+      } catch (error: any) {
+        message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.preview.failed' }));
+        clearDetailPanel?.();
+      }
+    },
+    [baseInfo?.resourceId, clearDetailPanel, getBuildDirectoryPath, intl, message, renderPreviewPanel]
+  );
+  const checkDirectoryHasChildren = useCallback(async (resourceId: number, directoryPath: string) => {
+    const res = await queryDirAndFileByLevelService({
+      resourceId,
+      directoryPath,
+    });
+    return Array.isArray(res) && res.length > 0;
+  }, []);
 
   const handleAction = (key: string, record: any) => {
     switch (key) {
@@ -552,6 +1004,9 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
         break;
       case 'rename':
         modalAction.handleShow('edit', record);
+        break;
+      case 'preview':
+        void handlePreviewFile(record);
         break;
       case 'download': {
         const directoryPath = getBuildDirectoryPath(record);
@@ -588,7 +1043,7 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
             { id: 'common.deleteConfirm2' },
             { content: record?.collectionName ?? record?.name }
           ),
-          onOk: () => {
+          onOk: async () => {
             let promise: Promise<any>;
             if (record?.type === 'directory') {
               const directoryPath = getBuildDirectoryPath(record);
@@ -596,6 +1051,11 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
               if (!directoryPath || rid === null || rid === undefined || rid === '') {
                 message.error(intl.formatMessage({ id: 'directoryManage.deleteFolderMissingParams' }));
                 return Promise.reject(new Error('invalid delete folder params'));
+              }
+              const hasChildren = await checkDirectoryHasChildren(Number(rid), directoryPath);
+              if (hasChildren) {
+                message.warning(intl.formatMessage({ id: 'directoryManage.deleteFolderNotEmpty' }));
+                return;
               }
               promise = deleteFolder({ resourceId: Number(rid), directoryPath });
             } else {
@@ -620,6 +1080,20 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
                 }
                 message.success(intl.formatMessage({ id: 'common.deleteSuccess' }));
                 const deletedPath = getBuildDirectoryPath(record);
+                const deletedRowKey = getFileRowKey(record);
+                if (deletedRowKey) {
+                  queriedFileIdsRef.current.delete(deletedRowKey);
+                  queryingFileIdsRef.current.delete(deletedRowKey);
+                  postBuildPollingIdsRef.current.delete(deletedRowKey);
+                  setFileBuildStatusMap((prev) => {
+                    const next = { ...prev };
+                    delete next[deletedRowKey];
+                    return next;
+                  });
+                  setQueryingBuildStatusIds((prev) => prev.filter((id) => id !== deletedRowKey));
+                  setPollingFileIds((prev) => prev.filter((id) => id !== deletedRowKey));
+                  setVisibleFileIds((prev) => prev.filter((id) => id !== deletedRowKey));
+                }
                 setState({
                   directoryList: directoryList.filter((item) => {
                     return getBuildDirectoryPath(item) !== deletedPath;
@@ -646,8 +1120,14 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
 
   const getActions = useCallback(
     (record: any) => {
-      let actionList: ActionItem[] = [
-        {
+      if (record?.__synthetic) {
+        return [];
+      }
+
+      let actionList: ActionItem[] = [];
+
+      if (canManage) {
+        actionList.push({
           label: intl.formatMessage({ id: 'common.delete' }),
           key: 'delete',
           icon: (
@@ -655,10 +1135,10 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
               <span className="iconfont icon-a-Deleteshanchu" />
             </Tooltip>
           ),
-        },
-      ];
+        });
+      }
 
-      if (record?.type === 'directory') {
+      if (record?.type === 'directory' && canManage) {
         // 目录显示重命名按钮
         actionList.unshift({
           label: intl.formatMessage({ id: 'directoryManage.rename' }),
@@ -667,8 +1147,34 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
         });
       } else {
         const isBuilding = buildingFileIds.includes(getFileRowKey(record));
+        const fileActions: ActionItem[] = [];
 
-        actionList.unshift({
+        if (canManage) {
+          fileActions.push({
+            label: intl.formatMessage({ id: 'directoryManage.build' }),
+            key: 'build',
+            disabled: isBuilding,
+            icon: (
+              <Tooltip title={intl.formatMessage({ id: 'directoryManage.buildFile' })}>
+                {isBuilding ? <Spin size="small" /> : <span className="iconfont icon-goujian" />}
+              </Tooltip>
+            ),
+          });
+        }
+
+        if (canPreviewRecord(record)) {
+          fileActions.push({
+            label: intl.formatMessage({ id: 'fileBrowser.action.preview' }),
+            key: 'preview',
+            icon: (
+              <Tooltip title={intl.formatMessage({ id: 'fileBrowser.action.preview' })}>
+                <span className="iconfont icon-a-Preview-openyulan-dakai" />
+              </Tooltip>
+            ),
+          });
+        }
+
+        fileActions.push({
           label: intl.formatMessage({ id: 'common.download' }),
           key: 'download',
           icon: (
@@ -677,21 +1183,22 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
             </Tooltip>
           ),
         });
-        actionList.unshift({
-          label: intl.formatMessage({ id: 'directoryManage.build' }),
-          key: 'build',
-          disabled: isBuilding,
-          icon: (
-            <Tooltip title={intl.formatMessage({ id: 'directoryManage.buildFile' })}>
-              {isBuilding ? <Spin size="small" /> : <span className="iconfont icon-goujian" />}
-            </Tooltip>
-          ),
-        });
+
+        actionList = [...fileActions, ...actionList];
       }
 
       return actionList;
     },
-    [buildingFileIds, getFileRowKey, intl]
+    [buildingFileIds, canManage, getFileRowKey, intl]
+  );
+
+  const getFileRowRef = useCallback(
+    (rowKey: string) => (el: HTMLDivElement | null) => {
+      if (el) {
+        fileRefs.current[rowKey] = el as HTMLTableRowElement;
+      }
+    },
+    []
   );
 
   const columns = useMemo(
@@ -699,60 +1206,59 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
       {
         title: intl.formatMessage({ id: 'directoryManage.fileName' }),
         dataIndex: 'name',
-        width: '40%',
+        // width: '40%',
         align: 'center',
         render: (v: string, record: any) => {
-          let iconType = '';
-          if (/\.(doc|docx)$/.test(v)) {
-            iconType = 'Word';
-          } else if (v?.endsWith('.pdf')) {
-            iconType = 'PDF';
-          } else if (/\.(xls|xlsx)$/.test(v)) {
-            iconType = 'Excel';
-          } else if (v?.endsWith('.txt')) {
-            iconType = 'jishiben';
-          } else if (v?.endsWith('.ppt')) {
-            iconType = 'PPT';
-          } else if (v?.endsWith('.md')) {
-            iconType = 'markdown';
-          } else if (/\.(png|jpg|jpeg)$/.test(v)) {
-            iconType = 'Image';
-          } else if (record.type === 'directory') {
-            iconType = 'wenjianjia';
-          }
+          const iconType = getFileIconType(v, { isDirectory: record.type === 'directory' });
           let onClick: React.DOMAttributes<HTMLDivElement>['onClick'];
           let style: React.CSSProperties = {};
           if (record.type === 'directory') {
             style = { cursor: 'pointer' };
             onClick = () => {
-              setFolderPath((prev) => [
-                ...prev,
-                {
-                  id: record.id,
-                  title: record.collectionName ?? record.name,
-                },
-              ]);
+              if (searchValue.trim()) {
+                const directoryPath = getBuildDirectoryPath(record);
+                setFolderPath(buildFolderPathFromDirectoryPath(directoryPath, folderPath[0].title));
+                setSearchValue?.('');
+                return;
+              }
+              setFolderPath((prev) => {
+                const directoryPath = normalizeDirectoryPath(getBuildDirectoryPath(record));
+                return [
+                  ...prev,
+                  {
+                    id: directoryPath,
+                    title: record.collectionName ?? record.name,
+                  },
+                ];
+              });
             };
           }
 
           const isFile = record.type === 'file';
           const rowKey = isFile ? getFileRowKey(record) : '';
+          if (isFile) {
+            style = { cursor: canPreviewRecord(record) ? 'pointer' : 'default' };
+            onClick = () => {
+              void handlePreviewFile(record);
+            };
+          }
 
           return (
             <div
               onClick={onClick}
-              style={{ display: 'flex', alignItems: 'center', ...style }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                paddingLeft: Number(record?.__level || 0) * 28,
+                ...style,
+              }}
               title={v}
-              ref={
-                isFile
-                  ? (el) => {
-                    if (el) fileRefs.current[rowKey] = el as HTMLTableRowElement;
-                  }
-                  : undefined
-              }
+              ref={isFile ? getFileRowRef(rowKey) : undefined}
             >
-              <AntdIcon type={`icon-${iconType}`} style={{ fontSize: 24, marginRight: 14 }} />
-              <div className="textEllipsis">{v}</div>
+              <AntdIcon type={`icon-${iconType}`} className={styles.fileNameIcon} />
+              <div className={classNames('textEllipsis', styles.fileNameText)} style={{ cursor: style.cursor }}>
+                {v}
+              </div>
             </div>
           );
         },
@@ -821,14 +1327,49 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
       {
         title: intl.formatMessage({ id: 'common.operation' }),
         dataIndex: 'title',
-        align: 'center',
+        width: 150,
         render: (v: string, record: any) => {
           const actions = getActions(record);
-          return <ButtonsWithMore actions={actions} maximun={4} handleAction={(key) => handleAction(key, record)} />;
+          if (!actions.length) {
+            return null;
+          }
+          return (
+            <div className={styles.operationActions}>
+              <ButtonsWithMore actions={actions} maximun={4} handleAction={(key) => handleAction(key, record)} />
+            </div>
+          );
         },
       },
     ],
-    [getActions, getBuildProgressText, handleAction, intl]
+    [
+      folderPath,
+      getActions,
+      getBuildDirectoryPath,
+      getBuildProgressText,
+      getFileRowRef,
+      handleAction,
+      handlePreviewFile,
+      intl,
+      searchValue,
+      setSearchValue,
+    ]
+  );
+
+  const buildRowSelection = useMemo(
+    () =>
+      canManage
+        ? {
+          type: 'checkbox' as const,
+          selectedRowKeys: selectedBuildRowKeys,
+          onChange: (selectedRowKeys: React.Key[]) => {
+            setSelectedBuildRowKeys(selectedRowKeys);
+          },
+          getCheckboxProps: (record: any) => ({
+            disabled: record?.type !== 'file' || buildingFileIds.includes(getFileRowKey(record)),
+          }),
+        }
+        : undefined,
+    [buildingFileIds, canManage, getFileRowKey, selectedBuildRowKeys]
   );
 
   const handleBreadcrumbClick = (index: number) => {
@@ -846,10 +1387,13 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
           hasMore={false}
           dataSource={displayDirectoryList}
           columns={columns}
+          rowKey={getFileRowKey}
+          rowSelection={buildRowSelection}
           emptyLocale={{
             emptyText: (
               <DirectoryEmpty
                 baseInfo={baseInfo}
+                canManage={canManage}
                 setShowAddFolder={setShowAddFolder}
                 uploadLoading={uploadLoading}
                 setUploadLoading={setUploadLoading}
@@ -862,7 +1406,7 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
           }}
           endMessage={null}
           scrollDivId="directoryTable"
-          loading={directoryLoading}
+          loading={directoryLoading || searchLoading}
         />
       </div>
       {moveModalVisible && (

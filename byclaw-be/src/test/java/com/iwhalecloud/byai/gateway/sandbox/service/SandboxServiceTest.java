@@ -7,6 +7,7 @@ import java.util.Map;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import com.iwhalecloud.byai.common.feign.response.SandboxResponse;
@@ -15,7 +16,9 @@ import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.gateway.sandbox.model.SandboxInfo;
 import com.iwhalecloud.byai.gateway.sandbox.runtime.SandboxRuntimeInstance;
+import com.iwhalecloud.byai.gateway.sandbox.runtime.SandboxRuntimePage;
 import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService;
+import com.iwhalecloud.byai.manager.entity.sandbox.SandboxReconcileGroup;
 import com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxRecord;
 import com.iwhalecloud.byai.manager.mapper.sandbox.SsSandboxRecordMapper;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -24,6 +27,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -69,7 +73,7 @@ class SandboxServiceTest {
         ReflectionTestUtils.setField(sandboxService, "renewAheadSeconds", 120L);
 
         SandboxLaunchRouting routing = new SandboxLaunchRouting("openclaw", SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
-        when(sandboxLaunchContextFactory.resolveRouting(123L)).thenReturn(routing);
+        when(sandboxLaunchContextFactory.resolveRouting(123L, "user001")).thenReturn(routing);
 
         SsSandboxRecord record = new SsSandboxRecord();
         record.setId(1L);
@@ -121,6 +125,23 @@ class SandboxServiceTest {
     }
 
     @Test
+    void buildLaunchMetadata_preservesResourceIdSemanticsAndAddsLabelSafeResourceKey() {
+        SandboxService sandboxService = new SandboxService();
+        SsSandboxRecord record = new SsSandboxRecord();
+        record.setId(12L);
+        record.setUserCode("0027019281");
+        record.setSandboxType("openclaw");
+        record.setResourceId(SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
+
+        Map<String, String> metadata = ReflectionTestUtils.invokeMethod(sandboxService, "buildLaunchMetadata", record);
+
+        assertThat(metadata)
+            .doesNotContainKey("resourceId")
+            .containsEntry("resourceKey", "openclaw_-1")
+            .containsEntry("recordId", "12");
+    }
+
+    @Test
     void resolveLaunchGatewayToken_prefersHistoricalSandboxBinding() {
         SsSandboxRecordMapper sandboxRecordMapper = mock(SsSandboxRecordMapper.class);
         SandboxService sandboxService = new SandboxService();
@@ -138,12 +159,61 @@ class SandboxServiceTest {
     }
 
     @Test
+    void doLaunchSandbox_continuesWhenModelEnvsMissing() {
+        SandboxLaunchContextFactory sandboxLaunchContextFactory = mock(SandboxLaunchContextFactory.class);
+        SsSandboxRecordMapper sandboxRecordMapper = mock(SsSandboxRecordMapper.class);
+        SandboxLifecycleFacade sandboxLifecycleFacade = mock(SandboxLifecycleFacade.class);
+        SandboxMetadataCache sandboxMetadataCache = mock(SandboxMetadataCache.class);
+        com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService systemConfigService =
+            mock(com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService.class);
+        SandboxService sandboxService = new SandboxService();
+        ReflectionTestUtils.setField(sandboxService, "sandboxLaunchContextFactory", sandboxLaunchContextFactory);
+        ReflectionTestUtils.setField(sandboxService, "sandboxRecordMapper", sandboxRecordMapper);
+        ReflectionTestUtils.setField(sandboxService, "sandboxLifecycleFacade", sandboxLifecycleFacade);
+        ReflectionTestUtils.setField(sandboxService, "sandboxMetadataCache", sandboxMetadataCache);
+        ReflectionTestUtils.setField(sandboxService, "byaiSystemConfigService", systemConfigService);
+
+        SandboxLaunchRouting routing = new SandboxLaunchRouting("openclaw",
+            SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
+        Map<String, String> envs = Map.of(
+            "MODEL_BASE_URL", "https://model.example",
+            "MODEL_ID", "glm-5.1",
+            "MODEL_NAME", "glm-5.1",
+            "MODEL_ALIAS", "glm-5.1"
+        );
+        SandboxLaunchContext launchContext = new SandboxLaunchContext("openclaw", envs, Map.of(), "gateway-token");
+        when(sandboxLaunchContextFactory.buildContext("user001", 100L, "openclaw")).thenReturn(launchContext);
+        doAnswer(invocation -> {
+            SsSandboxRecord record = invocation.getArgument(0);
+            record.setId(99L);
+            return 1;
+        }).when(sandboxRecordMapper).insert(any(SsSandboxRecord.class));
+        SandboxLaunchData launchData = new SandboxLaunchData();
+        launchData.setSandboxId("sandbox-1");
+        launchData.setEndpoint("http://host/proxy/18789/chat?token=gateway-token");
+        when(sandboxLifecycleFacade.launchSandbox(any())).thenReturn(SandboxResponse.success(launchData));
+        when(sandboxRecordMapper.updateLaunchSuccess(eq(99L), eq("sandbox-1"), any(), eq("gateway-token"),
+            any(), any(), any(), any(), any(), eq(0))).thenReturn(1);
+
+        SandboxLaunchData result = ReflectionTestUtils.invokeMethod(sandboxService, "doLaunchSandbox",
+            "user001", 100L, routing);
+
+        assertThat(result).isNotNull();
+        assertThat(result.getSandboxId()).isEqualTo("sandbox-1");
+        verify(sandboxRecordMapper).insert(any(SsSandboxRecord.class));
+        verify(sandboxRecordMapper, never()).updateStatusToFailed(any(), any(), any(), any());
+        verify(sandboxLifecycleFacade).launchSandbox(any());
+    }
+
+    @Test
     void heartbeat_refreshesAllRunningSandboxesForCurrentUser() {
         SandboxMetadataCache sandboxMetadataCache = mock(SandboxMetadataCache.class);
         SsSandboxRecordMapper sandboxRecordMapper = mock(SsSandboxRecordMapper.class);
+        SandboxHealthWatchService sandboxHealthWatchService = mock(SandboxHealthWatchService.class);
         SandboxService sandboxService = new SandboxService();
         ReflectionTestUtils.setField(sandboxService, "sandboxRecordMapper", sandboxRecordMapper);
         ReflectionTestUtils.setField(sandboxService, "sandboxMetadataCache", sandboxMetadataCache);
+        ReflectionTestUtils.setField(sandboxService, "sandboxHealthWatchService", sandboxHealthWatchService);
 
         LoginInfo loginInfo = new LoginInfo();
         loginInfo.setUserCode("user001");
@@ -183,6 +253,146 @@ class SandboxServiceTest {
         verify(sandboxRecordMapper).updateLastAccessTime(eq(1L), any(Date.class), eq(3));
         verify(sandboxRecordMapper).updateLastAccessTime(eq(2L), any(Date.class), eq(7));
         verify(sandboxMetadataCache, times(2)).put(any(SandboxInfo.class));
+        verify(sandboxHealthWatchService).touch("user001", "openclaw");
+        verify(sandboxHealthWatchService).touch("user001", "byclaw-code-agent");
+    }
+
+    @Test
+    void heartbeatOpenclawSandbox_refreshesOnlyOpenclawRunningSandboxes() {
+        SandboxMetadataCache sandboxMetadataCache = mock(SandboxMetadataCache.class);
+        SsSandboxRecordMapper sandboxRecordMapper = mock(SsSandboxRecordMapper.class);
+        SandboxHealthWatchService sandboxHealthWatchService = mock(SandboxHealthWatchService.class);
+        SandboxService sandboxService = new SandboxService();
+        ReflectionTestUtils.setField(sandboxService, "sandboxRecordMapper", sandboxRecordMapper);
+        ReflectionTestUtils.setField(sandboxService, "sandboxMetadataCache", sandboxMetadataCache);
+        ReflectionTestUtils.setField(sandboxService, "sandboxHealthWatchService", sandboxHealthWatchService);
+
+        SsSandboxRecord openclawRecord = new SsSandboxRecord();
+        openclawRecord.setId(1L);
+        openclawRecord.setUserCode("user001");
+        openclawRecord.setSandboxType("openclaw");
+        openclawRecord.setResourceId(SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
+        openclawRecord.setStatus("RUNNING");
+        openclawRecord.setSandboxId("sandbox-openclaw");
+        openclawRecord.setLockVersion(3);
+        openclawRecord.setVersion(1);
+
+        when(sandboxRecordMapper.selectRunningByUserAndSandboxType("user001", "openclaw"))
+            .thenReturn(List.of(openclawRecord));
+        when(sandboxRecordMapper.updateLastAccessTime(eq(1L), any(Date.class), eq(3))).thenReturn(1);
+
+        boolean result = sandboxService.heartbeatOpenclawSandbox("user001");
+
+        assertThat(result).isTrue();
+        assertThat(openclawRecord.getLastAccessTime()).isNotNull();
+        verify(sandboxRecordMapper).selectRunningByUserAndSandboxType("user001", "openclaw");
+        verify(sandboxRecordMapper).updateLastAccessTime(eq(1L), any(Date.class), eq(3));
+        verify(sandboxRecordMapper, never()).selectRunningByUser("user001");
+        verify(sandboxMetadataCache).put(any(SandboxInfo.class));
+        verify(sandboxHealthWatchService).touch("user001", "openclaw");
+    }
+
+    @Test
+    void removeSandbox_recordsManualReleaseReasonWithCurrentOperator() {
+        SsSandboxRecordMapper sandboxRecordMapper = mock(SsSandboxRecordMapper.class);
+        SandboxService sandboxService = new SandboxService();
+        ReflectionTestUtils.setField(sandboxService, "sandboxRecordMapper", sandboxRecordMapper);
+
+        LoginInfo operator = new LoginInfo();
+        operator.setUserCode("operator001");
+        CurrentUserHolder.setLoginInfo(operator);
+
+        SsSandboxRecord record = new SsSandboxRecord();
+        record.setId(1L);
+        record.setUserCode("owner001");
+        record.setSandboxType("openclaw");
+        record.setResourceId(SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
+        record.setStatus("RUNNING");
+        record.setLockVersion(3);
+
+        when(sandboxRecordMapper.selectRunningByUserAndResources(eq("owner001"), isNull(), eq(List.of())))
+            .thenReturn(List.of(record));
+        when(sandboxRecordMapper.markReleasing(eq(1L), eq("release.manual:operator001"), any(Date.class), eq(3)))
+            .thenReturn(0);
+
+        sandboxService.removeSandbox("owner001", null);
+
+        verify(sandboxRecordMapper).markReleasing(eq(1L), eq("release.manual:operator001"), any(Date.class), eq(3));
+        verify(sandboxRecordMapper, never()).updateStatusToReleased(any(), any(), any(), any());
+    }
+
+    @Test
+    void removeSandboxById_recordsManualReleaseReasonWithCurrentOperator() {
+        SsSandboxRecordMapper sandboxRecordMapper = mock(SsSandboxRecordMapper.class);
+        SandboxService sandboxService = new SandboxService();
+        ReflectionTestUtils.setField(sandboxService, "sandboxRecordMapper", sandboxRecordMapper);
+
+        LoginInfo operator = new LoginInfo();
+        operator.setUserCode("admin001");
+        CurrentUserHolder.setLoginInfo(operator);
+
+        SsSandboxRecord record = new SsSandboxRecord();
+        record.setId(1L);
+        record.setUserCode("owner001");
+        record.setSandboxType("openclaw");
+        record.setResourceId(SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
+        record.setStatus("STARTING");
+        record.setLockVersion(5);
+
+        when(sandboxRecordMapper.selectById(1L)).thenReturn(record);
+        when(sandboxRecordMapper.markStartingReleased(eq(1L), eq("release.manual:admin001"), any(Date.class), eq(5)))
+            .thenReturn(0);
+
+        sandboxService.removeSandboxById(1L);
+
+        verify(sandboxRecordMapper).markStartingReleased(eq(1L), eq("release.manual:admin001"), any(Date.class), eq(5));
+        verify(sandboxRecordMapper, never()).markReleasing(any(), any(), any(), any());
+    }
+
+    @Test
+    void cleanupRemoteSandboxQuietly_removesRemoteBySandboxId() {
+        SandboxLifecycleFacade sandboxLifecycleFacade = mock(SandboxLifecycleFacade.class);
+        SandboxMetadataCache sandboxMetadataCache = mock(SandboxMetadataCache.class);
+        SandboxService sandboxService = new SandboxService();
+        ReflectionTestUtils.setField(sandboxService, "sandboxLifecycleFacade", sandboxLifecycleFacade);
+        ReflectionTestUtils.setField(sandboxService, "sandboxMetadataCache", sandboxMetadataCache);
+        when(sandboxLifecycleFacade.removeSandbox(any(SandboxInfo.class))).thenReturn(SandboxResponse.success(null));
+        ArgumentCaptor<SandboxInfo> sandboxInfoCaptor = ArgumentCaptor.forClass(SandboxInfo.class);
+
+        sandboxService.cleanupRemoteSandboxQuietly("user001", "openclaw", "sandbox-old", "test-cleanup");
+
+        verify(sandboxLifecycleFacade).removeSandbox(sandboxInfoCaptor.capture());
+        assertThat(sandboxInfoCaptor.getValue().getUserCode()).isEqualTo("user001");
+        assertThat(sandboxInfoCaptor.getValue().getSandboxType()).isEqualTo("openclaw");
+        assertThat(sandboxInfoCaptor.getValue().getSandboxId()).isEqualTo("sandbox-old");
+        verify(sandboxMetadataCache, never()).evict("user001", "openclaw");
+    }
+
+    @Test
+    void removeRemoteSandboxesForServiceTypeOrThrow_listsByServiceTypeAndRemovesAll() {
+        SandboxLifecycleFacade sandboxLifecycleFacade = mock(SandboxLifecycleFacade.class);
+        SandboxService sandboxService = new SandboxService();
+        ReflectionTestUtils.setField(sandboxService, "sandboxLifecycleFacade", sandboxLifecycleFacade);
+        ReflectionTestUtils.setField(sandboxService, "reconcileRemotePageSize", 200);
+        SandboxRuntimeInstance oldXs = SandboxRuntimeInstance.builder().sandboxId("sandbox-xs").build();
+        SandboxRuntimeInstance oldM = SandboxRuntimeInstance.builder().sandboxId("sandbox-m").build();
+        SandboxRuntimePage<SandboxRuntimeInstance> page = SandboxRuntimePage.<SandboxRuntimeInstance>builder()
+            .items(List.of(oldXs, oldM))
+            .pageNo(1)
+            .pageSize(200)
+            .build();
+        when(sandboxLifecycleFacade.listSandboxesByMetadata(eq(Map.of("userCode", "user001",
+            "serviceType", "openclaw")), eq(1), eq(200))).thenReturn(SandboxResponse.success(page));
+        when(sandboxLifecycleFacade.removeSandbox(any(SandboxInfo.class))).thenReturn(SandboxResponse.success(null));
+        ArgumentCaptor<SandboxInfo> sandboxInfoCaptor = ArgumentCaptor.forClass(SandboxInfo.class);
+
+        ReflectionTestUtils.invokeMethod(sandboxService, "removeRemoteSandboxesForServiceTypeOrThrow",
+            "user001", "openclaw", "openclaw", "sandbox-xs", "test-cleanup");
+
+        verify(sandboxLifecycleFacade, times(2)).removeSandbox(sandboxInfoCaptor.capture());
+        assertThat(sandboxInfoCaptor.getAllValues())
+            .extracting(SandboxInfo::getSandboxId)
+            .containsExactly("sandbox-xs", "sandbox-m");
     }
 
     @Test
@@ -311,6 +521,13 @@ class SandboxServiceTest {
         ReflectionTestUtils.setField(sandboxService, "sandboxLifecycleFacade", sandboxLifecycleFacade);
         ReflectionTestUtils.setField(sandboxService, "sandboxMetadataCache", sandboxMetadataCache);
         ReflectionTestUtils.setField(sandboxService, "sandboxUserContextRunner", sandboxUserContextRunner);
+        ReflectionTestUtils.setField(sandboxService, "reconcileJobLockEnabled", false);
+        ReflectionTestUtils.setField(sandboxService, "reconcileGroupLimit", 50);
+        ReflectionTestUtils.setField(sandboxService, "reconcileRecordLimitPerGroup", 500);
+        ReflectionTestUtils.setField(sandboxService, "reconcileRemotePageSize", 200);
+        ReflectionTestUtils.setField(sandboxService, "reconcileMaxRecordsPerRun", 3000);
+        ReflectionTestUtils.setField(sandboxService, "reconcileMaxDurationMs", 30000L);
+        ReflectionTestUtils.setField(sandboxService, "reconcileRemoteConcurrency", 1);
 
         SsSandboxRecord record = new SsSandboxRecord();
         record.setId(1L);
@@ -332,9 +549,16 @@ class SandboxServiceTest {
         dbLoginInfo.setUserName("User One");
         when(loginApplicationService.getLoginInfo("user001")).thenReturn(dbLoginInfo);
         when(sandboxRecordMapper.countReconcileSandboxes()).thenReturn(1);
-        when(sandboxRecordMapper.selectReconcileSandboxesPage(isNull(), isNull(), eq(1)))
+        SandboxReconcileGroup group = new SandboxReconcileGroup();
+        group.setUserCode("user001");
+        group.setSandboxType("openclaw");
+        group.setRecordCount(1);
+        when(sandboxRecordMapper.selectReconcileGroups(eq(50))).thenReturn(List.of(group));
+        when(sandboxRecordMapper.selectReconcileSandboxesByGroup(eq("user001"), eq("openclaw"), isNull(), isNull(),
+            eq(500)))
             .thenReturn(List.of(record));
-        when(sandboxLifecycleFacade.getSandbox(any(SandboxInfo.class))).thenReturn(SandboxResponse.success(null));
+        when(sandboxLifecycleFacade.listSandboxesByMetadata(eq(Map.of("userCode", "user001", "serviceKey", "openclaw")),
+            eq(1), eq(200))).thenReturn(SandboxResponse.success(SandboxRuntimePage.empty(1, 200)));
         when(sandboxRecordMapper.markReleased(eq(1L), eq("release.remote.missing"), any(Date.class), eq(0)))
             .thenReturn(1);
 

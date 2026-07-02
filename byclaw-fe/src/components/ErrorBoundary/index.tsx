@@ -23,7 +23,10 @@ export default class ErrorBoundary extends React.Component<Props, State> {
   }
 
   handleReload = () => {
-    window.location.reload();
+    const url = new URL(window.location.href);
+    url.searchParams.set('t', Date.now().toString());
+    window.location.href = url.toString();
+    // window.location.reload(true);
   };
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {

@@ -1,4 +1,4 @@
-import { message } from 'antd';
+import { message, Modal } from 'antd';
 import classNames from 'classnames';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useDispatch, useIntl, useSelector } from '@umijs/max';
@@ -12,16 +12,16 @@ import ModelCardSection from './components/ModelCardSection';
 import ModelFormModal from './components/ModelFormModal';
 import ModelFilterPanel from './components/ModelFilterPanel';
 import ModelHeroPanel from './components/ModelHeroPanel';
-import { systemNameMap, type FilterChip, type ModelStatus } from './components/modelMgrViewUtils';
+import { getSystemName, type FilterChip, type ModelStatus } from './components/modelMgrViewUtils';
 import styles from './index.module.less';
 
 type ModelTagItem = {
-  // 兼容后端不同返回口径：camelCase / snake_case
+  // Support both camelCase and snake_case response fields.
   paramName?: string;
   paramValue?: string;
   param_name?: string;
   param_value?: string;
-  // 兼容其它 standType 静态数据口径
+  // Support static-data fields from other standType APIs.
   standDisplayValue?: string;
   standCode?: string;
   [key: string]: any;
@@ -46,8 +46,10 @@ const ModelMgr: React.FC = () => {
       loading.effects['modelMgr/deleteModel'] ||
       loading.effects['modelMgr/debugModel'] ||
       loading.effects['modelMgr/debugModelRerank'] ||
+      loading.effects['modelMgr/completeAllModelConfig'] ||
       loading.effects['modelMgr/testModel']
   );
+  const completeLoading = useSelector(({ loading }: any) => loading.effects['modelMgr/completeAllModelConfig']);
 
   const [list, setList] = useState<any[]>([]);
   const [pagination, setPagination] = useState(initPagination);
@@ -90,7 +92,7 @@ const ModelMgr: React.FC = () => {
     return map;
   }, [abilityTreeData]);
 
-  // 系统筛选改为接口动态拉取（对齐数字员工“来源”）
+  // System filters are loaded from the API, aligned with digital employee sources.
 
   const activeFilterCount = [status, ability, system, keyword.trim()].filter(Boolean).length;
   const resultSummary = useMemo(() => {
@@ -164,7 +166,7 @@ const ModelMgr: React.FC = () => {
           systems.forEach((systemItem: any) => {
             const value = `${systemItem ?? ''}`.trim();
             if (!value || nextSystemLabelMap[value]) return;
-            nextSystemLabelMap[value] = systemNameMap[value] || value;
+            nextSystemLabelMap[value] = getSystemName(intl, value);
           });
         });
         setSystemLabelMap(nextSystemLabelMap);
@@ -183,7 +185,7 @@ const ModelMgr: React.FC = () => {
         });
       },
     });
-  }, [dispatch]);
+  }, [dispatch, intl]);
 
   const resetAndFetch = useCallback(
     (override?: Partial<{ keyword: string; status?: ModelStatus; ability?: string; system?: string }>) => {
@@ -200,13 +202,13 @@ const ModelMgr: React.FC = () => {
   );
 
   useEffect(() => {
-    // 初次进入页面加载
+    // Initial page load.
     fetchList({ pageNum: 1, pageSize: pagination.pageSize });
     fetchOverviewStats();
   }, []);
 
   useEffect(() => {
-    // 能力筛选项改为后端动态下发：/system/staticdata/getDcSystemConfigListByStandType (standType=MODEL_TAGS)
+    // Ability filters are served by /system/staticdata/getDcSystemConfigListByStandType (standType=MODEL_TAGS).
     getDcSystemConfigListByStandType({ standType: 'MODEL_TAGS' })
       .then((res: any) => {
         const list: ModelTagItem[] = Array.isArray(res?.data) ? res.data : [];
@@ -281,7 +283,7 @@ const ModelMgr: React.FC = () => {
       chips.push({
         key: 'system',
         label: `${intl.formatMessage({ id: 'modelMgr.filterSystem' })} · ${
-          systemLabelMap?.[system] || systemNameMap[system] || system
+          systemLabelMap?.[system] || getSystemName(intl, system)
         }`,
         onClose: () => {
           setSystem(undefined);
@@ -326,6 +328,7 @@ const ModelMgr: React.FC = () => {
         type: 'modelMgr/setDefaultModel',
         payload: {
           modelId: record.id,
+          modelType: record.modelType || 'LLM',
           tagId: '1',
         },
         success: () => {
@@ -353,6 +356,113 @@ const ModelMgr: React.FC = () => {
     resetAndFetch();
     fetchOverviewStats();
   }, [fetchOverviewStats, resetAndFetch]);
+
+  const formatCompleteValue = useCallback((value: any) => {
+    if (value === undefined || value === null || value === '') return '-';
+    if (typeof value === 'object') return JSON.stringify(value);
+    return `${value}`;
+  }, []);
+
+  const renderCompleteStatus = useCallback(
+    (statusValue: string) => {
+      const normalized = `${statusValue || 'SKIPPED'}`.toUpperCase();
+      let statusClass = styles.completeStatusSkipped;
+      let text = intl.formatMessage({ id: 'modelMgr.completeSkipped' });
+      if (normalized === 'UPDATED') {
+        statusClass = styles.completeStatusUpdated;
+        text = intl.formatMessage({ id: 'modelMgr.completeUpdated' });
+      } else if (normalized === 'FAILED') {
+        statusClass = styles.completeStatusFailed;
+        text = intl.formatMessage({ id: 'modelMgr.completeFailed' });
+      }
+      return <span className={classNames(styles.completeStatus, statusClass)}>{text}</span>;
+    },
+    [intl]
+  );
+
+  const showCompleteResult = useCallback(
+    (res: any) => {
+      const items = Array.isArray(res?.items) ? res.items : [];
+      Modal.info({
+        title: intl.formatMessage({ id: 'modelMgr.completeResultTitle' }),
+        width: 760,
+        content: (
+          <div className={styles.completeResult}>
+            <div className={styles.completeStats}>
+              {intl.formatMessage(
+                { id: 'modelMgr.completeStats' },
+                {
+                  total: res?.total ?? items.length,
+                  updated: res?.updated ?? 0,
+                  skipped: res?.skipped ?? 0,
+                  failed: res?.failed ?? 0,
+                }
+              )}
+            </div>
+            <div className={styles.completeResultList}>
+              {items.map((item: any, itemIndex: number) => {
+                const changes = Array.isArray(item?.changes) ? item.changes : [];
+                const warnings = Array.isArray(item?.warnings) ? item.warnings : [];
+                return (
+                  <div className={styles.completeResultItem} key={item?.id || item?.modelCode || itemIndex}>
+                    <div className={styles.completeResultHead}>
+                      <div>
+                        <div>{item?.displayName || item?.modelCode || item?.id || '-'}</div>
+                        <div className={styles.completeResultSub}>
+                          {item?.modelCode || '-'} · {item?.source || '-'} · {item?.confidence || '-'}
+                        </div>
+                      </div>
+                      {renderCompleteStatus(item?.status)}
+                    </div>
+                    {changes.length ? (
+                      <div className={styles.completeChangeList}>
+                        {changes.map((change: any, index: number) => (
+                          <div className={styles.completeChangeItem} key={`${change?.field || 'field'}-${index}`}>
+                            <span className={styles.completeChangeField}>{change?.field || '-'}</span>
+                            <span>
+                              {formatCompleteValue(change?.before)} → {formatCompleteValue(change?.after)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className={styles.completeMuted}>
+                        {item?.errorMessage || intl.formatMessage({ id: 'modelMgr.completeNoChanges' })}
+                      </div>
+                    )}
+                    {warnings.length ? <div className={styles.completeMuted}>{warnings.join('；')}</div> : null}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ),
+      });
+    },
+    [formatCompleteValue, intl, renderCompleteStatus]
+  );
+
+  const completeAllModelConfigAction = useCallback(() => {
+    Modal.confirm({
+      title: intl.formatMessage({ id: 'modelMgr.completeConfirmTitle' }),
+      content: intl.formatMessage({ id: 'modelMgr.completeConfirmContent' }),
+      okText: intl.formatMessage({ id: 'modelMgr.completeConfirmOk' }),
+      cancelText: intl.formatMessage({ id: 'common.cancel' }),
+      onOk: () =>
+        new Promise<void>((resolve) => {
+          dispatch({
+            type: 'modelMgr/completeAllModelConfig',
+            success: (res: any) => {
+              message.success(intl.formatMessage({ id: 'modelMgr.completeSuccess' }));
+              reloadAll();
+              showCompleteResult(res);
+              resolve();
+            },
+            fail: () => resolve(),
+          });
+        }),
+    });
+  }, [dispatch, intl, reloadAll, showCompleteResult]);
 
   const cardItemFn = useCallback(
     (record: any) => {
@@ -383,6 +493,8 @@ const ModelMgr: React.FC = () => {
           onSearch={resetAndFetch}
           onReset={clearFilters}
           onAdd={() => formAction.handleShow('add')}
+          onCompleteConfig={completeAllModelConfigAction}
+          completeLoading={!!completeLoading}
           activeFilterCount={activeFilterCount}
           total={overviewStats.total}
           enabledCount={overviewStats.enabledCount}

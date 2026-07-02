@@ -5,8 +5,8 @@ export const ResourceTypeMap = {
   knowledgeBase: 'KG_DOC', // 知识库
   knowledgeBaseQa: 'KG_QA', // 知识库问答
   knowledgeBaseTerm: 'KG_TERM', // 知识库问答
-  folder: 'KG_DOC_FOLDER', // 知识库文件夹
-  file: 'KG_DOC_FILE', // 知识库文件
+  knowledgeFolder: 'KG_DOC_FOLDER', // 知识库文件夹
+  knowledgeFile: 'KG_DOC_FILE', // 知识库文件
   database: 'KG_DB', // chatbi数据库
   doc: 'DOC', // KG_DOC,KG_QA,KG_TERM
 
@@ -17,9 +17,13 @@ export const ResourceTypeMap = {
   VIEW: 'VIEW',
   OBJECT: 'OBJECT',
   SKILL: 'SKILL',
+  PROPERTY: 'PROPERTY',
 
   Knowledge: 'Knowledge', // 知识库插件
   KnowledgeKIT: 'KnowledgeKIT', // 知识库插件库
+
+  commonFile: 'COMMON_FILE', // 通用文件
+  commonFolder: 'COMMON_FOLDER', // 通用文件夹
 } as const;
 
 export const FileUploadStatusMap = {

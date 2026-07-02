@@ -7,7 +7,18 @@ import styles from './index.module.less';
 
 const DialogueList = lazy(() => import('@/layout/sider/components/DialogueList'));
 const EmployeeList = lazy(() => import('@/layout/sider/components/EmployeeList'));
+const Knowledge = lazy(() => import('@/layout/sider/components/Knowledge'));
+const ResourceSiderPanel = lazy(() => import('@/layout/sider/components/ResourceSiderPanel'));
 const SearchAndQuery = lazy(() => import('@/layout/sider/components/SearchAndQuery'));
+const FileSiderPanel = lazy(() => import('@/layout/sider/components/FileSiderPanel'));
+const ModelSiderPanel = lazy(() => import('@/layout/sider/components/ModelSiderPanel'));
+
+const OntologySiderPanel = lazy(() => import('@/layout/sider/components/OntologySiderPanel'));
+
+const ToolSiderPanel = () => <ResourceSiderPanel resourceType="TOOL" />;
+const ViewSiderPanel = () => <ResourceSiderPanel resourceType="VIEW" />;
+const ObjectSiderPanel = () => <ResourceSiderPanel resourceType="OBJECT" />;
+const SkillSiderPanel = () => <ResourceSiderPanel resourceType="SKILL" />;
 
 export const tabItems: any[] = [
   {
@@ -36,36 +47,73 @@ export const tabItems: any[] = [
     forceRender: true,
   },
   {
+    key: 'model',
+    icon: 'icon-a-Braindanao',
+    activeIcon: 'icon-brain-filled',
+    label: 'common.model',
+    ChildComponent: ModelSiderPanel,
+    navigatePath: '/models',
+  },
+  {
     key: 'knowledge',
     icon: 'icon-a-Boxhezioutline',
     activeIcon: 'icon-zhishi-fill',
     label: 'sider.knowledge',
+    ChildComponent: Knowledge,
     navigatePath: '/knowledgeCenter',
-    hideSider: true,
+    // hideSider: true,
   },
   {
     key: 'tool',
     icon: 'icon-chajian',
     activeIcon: 'icon-chajian-fill',
     label: 'common.tool',
+    ChildComponent: ToolSiderPanel,
     navigatePath: '/toolCenter',
-    hideSider: true,
+    // hideSider: true,
   },
   {
     key: 'view',
     icon: 'icon-a-yemian-line',
     activeIcon: 'icon-yemian-fill',
     label: 'common.resourceType.view',
+    ChildComponent: ViewSiderPanel,
     navigatePath: '/viewCenter',
-    hideSider: true,
+    // hideSider: true,
   },
   {
     key: 'object',
-    icon: 'icon-tongxun',
-    activeIcon: 'icon-tongxun-fill',
+    icon: 'icon-mob-faxian02',
+    activeIcon: 'icon-mob-faxian01',
     label: 'common.resourceType.object',
+    ChildComponent: ObjectSiderPanel,
     navigatePath: '/objectCenter',
-    hideSider: true,
+    // hideSider: true,
+  },
+  {
+    key: 'ontology',
+    icon: 'icon-a-yemian-line',
+    activeIcon: 'icon-yemian-fill',
+    label: 'sider.ontology',
+    ChildComponent: OntologySiderPanel,
+    navigatePath: '/ontologyCenter',
+  },
+  {
+    key: 'skill',
+    icon: 'icon-a-changjing-line',
+    activeIcon: 'icon-changjing-fill',
+    label: 'common.skill',
+    ChildComponent: SkillSiderPanel,
+    navigatePath: '/skillCenter',
+    // hideSider: true,
+  },
+  {
+    key: 'file',
+    icon: 'icon-a-View-listxiangqingliebiao',
+    activeIcon: 'icon-a-View-listxiangqingliebiao1',
+    label: 'common.file',
+    ChildComponent: FileSiderPanel,
+    navigatePath: '/files',
   },
 ] as const;
 
@@ -82,9 +130,8 @@ const SiderContent = (props: IProps) => {
 
   const items = useMemo(
     () =>
-      visibleKeys
-        .map((key) => tabItems.find((pageItem) => pageItem.key === key))
-        .filter((pageItem): pageItem is (typeof tabItems)[number] => !!pageItem)
+      tabItems
+        .filter((pageItem) => visibleKeys.includes(pageItem.key))
         .map((pageItem) => {
           const { key, ChildComponent, destroyOnHidden = false, disabled, forceRender = false } = pageItem;
           return {

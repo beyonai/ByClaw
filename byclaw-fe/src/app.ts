@@ -12,7 +12,7 @@ import ErrorBoundary from '@/components/ErrorBoundary';
 
 autoFixContext([jsxRuntime, 'jsx', 'jsxs', 'jsxDEV'], [jsxDevRuntime, 'jsx', 'jsxs', 'jsxDEV']);
 
-const Version = '3.0.1';
+const Version = 'D0.2.0';
 
 // 声明全局 VConsole 类型
 // declare global {

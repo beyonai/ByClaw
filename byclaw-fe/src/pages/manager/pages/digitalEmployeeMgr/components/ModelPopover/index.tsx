@@ -1,29 +1,55 @@
 // @ts-nocheck
-import React, { useEffect } from 'react';
-import { Form, Input, InputNumber, Row, Select, Slider } from 'antd';
-import { debounce, merge } from 'lodash';
+import React, { useCallback, useEffect, useState } from 'react';
+import { Button, Form, Input, Radio, Spin, Tabs } from 'antd';
+import { merge } from 'lodash';
 import { useIntl } from '@umijs/max';
+import { POST } from '@/service/common/request';
 import styles from './index.module.less';
 
-const formItemLayout = {
-  labelCol: {
-    span: 5,
-  },
-  wrapperCol: {
-    span: 19,
-  },
-};
-
 const ModelPopover = (props) => {
-  const { modelList, resultDataRef, prologueRef, update, setModelName } = props;
+  const { modelList, prologueRef, update, setModelName, onClose } = props;
   const intl = useIntl();
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const _resultData = resultDataRef.current;
   const prologue = prologueRef.current;
-
   const [form] = Form.useForm();
-  const multiModel = Form.useWatch(['prologue', 'multiModel', 'enable'], form);
+  const [activeTab, setActiveTab] = useState('public');
+  const [personalModels, setPersonalModels] = useState([]);
+  const [publicModels, setPublicModels] = useState(modelList || []);
+  const [loading, setLoading] = useState(false);
+
+  const fetchModels = useCallback(async (ownerType: string) => {
+    setLoading(true);
+    try {
+      if (ownerType === 'PERSONAL') {
+        const res: any = await POST('/byaiService/personal/model/list', {
+          status: 'ENABLED',
+          pageNum: 1,
+          pageSize: 200,
+        });
+        const rows = res?.rows || res?.data?.rows || [];
+        return rows.map((item: any) => ({
+          modelId: item.id,
+          modelName: item.displayName,
+          modelNo: item.modelCode,
+        }));
+      }
+      const res: any = await POST('/byaiService/new/model/listModel', {
+        tagId: '3',
+        status: 'OOA',
+        ownerType: 'PUBLIC',
+      });
+      return res?.data || res || [];
+    } catch {
+      return [];
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchModels('PUBLIC').then(setPublicModels);
+    fetchModels('PERSONAL').then(setPersonalModels);
+  }, []);
 
   useEffect(() => {
     if (prologue) {
@@ -31,100 +57,71 @@ const ModelPopover = (props) => {
     }
   }, []);
 
+  const currentList = activeTab === 'mine' ? personalModels : publicModels;
+
+  const handleSelect = (modelId: number) => {
+    const allModels = [...personalModels, ...publicModels];
+    const selected = allModels.find((m) => m.modelId === modelId);
+    if (!selected) return;
+
+    form.setFieldValue(['prologue', 'modelInfo', 'modelId'], modelId);
+    form.setFieldValue(['prologue', 'modelInfo', 'model'], selected.modelName);
+    setModelName(selected.modelName);
+
+    prologueRef.current = merge({}, prologueRef.current, {
+      modelInfo: {
+        model: selected.modelName,
+        modelId: selected.modelId,
+      },
+    });
+    update?.();
+  };
+
+  const selectedModelId = form.getFieldValue(['prologue', 'modelInfo', 'modelId']);
+
   return (
     <div className={styles.popoverConfig}>
-      <Form
-        {...formItemLayout}
-        form={form}
-        onValuesChange={debounce(() => {
-          const values = form.getFieldsValue();
-          setModelName(values?.prologue?.modelInfo?.model ?? '');
-          prologueRef.current = merge({}, prologue, values.prologue);
-          update?.();
-        }, 400)}
-      >
-        <>
-          <Row>
-            <div className={styles.leftItem}>
-              <div className={styles.headerTitle}>
-                {intl.formatMessage({
-                  id: 'modelPopover.QALargeModelConfiguration',
-                })}
-              </div>
-            </div>
-          </Row>
-          <div style={{ display: 'none' }}>
-            <Form.Item name={['prologue', 'modelInfo', 'model']}>
-              <Input />
-            </Form.Item>
-          </div>
-          <Form.Item
-            label={intl.formatMessage({ id: 'modelPopover.largeModel' })}
-            name={['prologue', 'modelInfo', 'modelId']}
-          >
-            <Select
-              options={modelList}
-              fieldNames={{
-                label: 'modelName',
-                value: 'modelId',
-              }}
-              showSearch
-              onChange={(v, option) => {
-                form.setFieldValue(['prologue', 'modelInfo', 'model'], option?.modelName);
-              }}
-              optionFilterProp="modelName"
-              placeholder={intl.formatMessage(
-                { id: 'form.selectPlaceholder' },
-                {
-                  content: intl.formatMessage({
-                    id: 'modelPopover.largeModel',
-                  }),
-                }
-              )}
-            />
+      <Form form={form}>
+        <div style={{ display: 'none' }}>
+          <Form.Item name={['prologue', 'modelInfo', 'model']}>
+            <Input />
           </Form.Item>
-          <Form.Item
-            label={intl.formatMessage({ id: 'modelPopover.history' })}
-            name={['prologue', 'modelInfo', 'history']}
-          >
-            <InputNumber min={0} max={30} style={{ width: '100%' }} />
+          <Form.Item name={['prologue', 'modelInfo', 'modelId']}>
+            <Input />
           </Form.Item>
-          <Form.Item
-            label={intl.formatMessage({ id: 'modelPopover.temperature' })}
-            name={['prologue', 'modelInfo', 'temperature']}
-          >
-            <Slider max={1.9} step={0.1} included={false} />
-          </Form.Item>
-          <Form.Item
-            label={intl.formatMessage({ id: 'modelPopover.maxToken' })}
-            name={['prologue', 'modelInfo', 'maxToken']}
-          >
-            <Slider max={4000} />
-          </Form.Item>
-        </>
-
-        {multiModel && (
-          <>
-            <Form.Item
-              label={intl.formatMessage({ id: 'modelPopover.prompt' })}
-              name={['prologue', 'multiModel', 'prompt']}
-            >
-              <Input.TextArea
-                placeholder={intl.formatMessage({
-                  id: 'modelPopover.promptPlaceholder',
-                })}
-                rows={4}
-              />
-            </Form.Item>
-            <Form.Item
-              label={intl.formatMessage({ id: 'modelPopover.temperature' })}
-              name={['prologue', 'multiModel', 'temperature']}
-            >
-              <Slider max={1.9} step={0.1} included={false} />
-            </Form.Item>
-          </>
-        )}
+        </div>
       </Form>
+      <div className={styles.headerTitle}>{intl.formatMessage({ id: 'modelPopover.QALargeModelConfiguration' })}</div>
+      <Tabs
+        activeKey={activeTab}
+        onChange={setActiveTab}
+        size="small"
+        items={[
+          { key: 'mine', label: intl.formatMessage({ id: 'modelPopover.mine' }) },
+          { key: 'public', label: intl.formatMessage({ id: 'modelPopover.public' }) },
+        ]}
+      />
+      <Spin spinning={loading}>
+        <div className={styles.modelList}>
+          <Radio.Group value={selectedModelId} onChange={(e) => handleSelect(e.target.value)} style={{ width: '100%' }}>
+            {currentList.map((model) => (
+              <div key={model.modelId} className={styles.modelItem}>
+                <Radio value={model.modelId}>
+                  <span className={styles.modelName}>{model.modelName}</span>
+                </Radio>
+              </div>
+            ))}
+            {currentList.length === 0 && !loading && (
+              <div className={styles.emptyTip}>{intl.formatMessage({ id: 'modelPopover.noModels' })}</div>
+            )}
+          </Radio.Group>
+        </div>
+      </Spin>
+      <div className={styles.footer}>
+        <Button type="primary" size="small" onClick={onClose}>
+          {intl.formatMessage({ id: 'modelPopover.confirm' })}
+        </Button>
+      </div>
     </div>
   );
 };

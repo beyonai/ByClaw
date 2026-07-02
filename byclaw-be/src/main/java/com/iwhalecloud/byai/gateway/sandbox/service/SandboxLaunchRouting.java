@@ -16,15 +16,23 @@ public class SandboxLaunchRouting {
 
     private final String sandboxType;
 
+    private final String profileKey;
+
     private final Long effectiveResourceId;
 
     public SandboxLaunchRouting(String sandboxType, Long effectiveResourceId) {
-        this.sandboxType = sandboxType;
-        this.effectiveResourceId = normalizeEffectiveResourceId(sandboxType, effectiveResourceId);
+        ParsedSandboxKey parsed = parseSandboxKey(sandboxType);
+        this.sandboxType = parsed.sandboxType;
+        this.profileKey = parsed.profileKey;
+        this.effectiveResourceId = normalizeEffectiveResourceId(this.sandboxType, effectiveResourceId);
     }
 
     public String getSandboxType() {
         return sandboxType;
+    }
+
+    public String getProfileKey() {
+        return profileKey;
     }
 
     public Long getEffectiveResourceId() {
@@ -43,5 +51,20 @@ public class SandboxLaunchRouting {
             return DEFAULT_CODE_AGENT_RESOURCE_ID;
         }
         return resourceId;
+    }
+
+    public static ParsedSandboxKey parseSandboxKey(String serviceKey) {
+        if (serviceKey == null || serviceKey.isBlank()) {
+            return new ParsedSandboxKey(DEFAULT_SANDBOX_TYPE, null);
+        }
+        String value = serviceKey.trim();
+        String prefix = DEFAULT_SANDBOX_TYPE + "-";
+        if (value.startsWith(prefix) && value.length() > prefix.length()) {
+            return new ParsedSandboxKey(DEFAULT_SANDBOX_TYPE, value.substring(prefix.length()));
+        }
+        return new ParsedSandboxKey(value, null);
+    }
+
+    public record ParsedSandboxKey(String sandboxType, String profileKey) {
     }
 }

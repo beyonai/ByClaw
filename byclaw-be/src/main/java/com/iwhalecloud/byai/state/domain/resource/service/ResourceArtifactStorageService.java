@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.state.domain.resource.service;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -89,6 +90,24 @@ public class ResourceArtifactStorageService {
 
     public void deleteWithinResourceRoot(String relativePath) {
         deleteWithinResourceRootInternal(relativePath);
+    }
+
+    /**
+     * 从开放资源目录读取单个资源文件。
+     *
+     * @param relativePath 相对 /resource 的路径，例如 skill/org-hub/demo.zip
+     */
+    public InputStream readWithinResourceRoot(String relativePath) {
+        return resourceFS.read(buildResourceFilePath(relativePath));
+    }
+
+    /**
+     * 判断开放资源目录内指定资源文件是否存在。
+     *
+     * @param relativePath 相对 /resource 的路径，例如 skill/org-hub/demo.zip
+     */
+    public boolean existsWithinResourceRoot(String relativePath) {
+        return existsExactPath(buildResourceFilePath(relativePath));
     }
 
     private void uploadDirectory(Path localRoot, String subDirectory) {

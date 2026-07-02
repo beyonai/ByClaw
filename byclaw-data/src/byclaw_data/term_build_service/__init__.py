@@ -1,6 +1,6 @@
 """独立异步术语构建服务包。
 
-这个包和 `byclaw_data.mcp` 平级，不挂载到 MCP JSON-RPC 服务里，而是通过
+这个包和 `byclaw_data.platform` 平级，不挂载到 MCP JSON-RPC 服务里，而是通过
 `byclaw_data.term_build_service.main` 启动独立端口的 FastAPI 服务。
 
 对外只暴露 `create_app`，方便 Uvicorn factory、测试代码或其他启动器复用。

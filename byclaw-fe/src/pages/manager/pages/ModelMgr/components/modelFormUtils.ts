@@ -1,5 +1,3 @@
-import type { IntlShape } from 'react-intl';
-
 export type DebugInputMode = 'template' | 'auto';
 
 export type ModelTagItem = {
@@ -11,15 +9,48 @@ export type ModelTagItem = {
 };
 
 export const SYSTEM_SOURCE_TYPES = ['DIG_EMPLOYEE'];
+export const DEFAULT_CONTEXT_TOKENS = 1024 * 198;
+export const MAX_CONTEXT_TOKENS = 2000 * 1000;
+export const MIN_CONTEXT_TOKENS = 200000;
+export const CONTEXT_TOKENS_CONFIG = {
+  min: MIN_CONTEXT_TOKENS,
+  max: MAX_CONTEXT_TOKENS,
+  step: 1000,
+};
+export const DEFAULT_MAX_TOKENS = 1024 * 64;
+export const MIN_MAX_TOKENS = 65536;
+export const THINKING_LEVEL_OPTIONS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'adaptive', 'max'] as const;
+export const THINKING_CAPABILITY_OPTIONS = ['unsupported', 'binary', 'effort', 'budget', 'adaptive'] as const;
+export const THINKING_COMPAT_FORMAT_OPTIONS = [
+  'auto',
+  'openai',
+  'qwen',
+  'qwen-chat-template',
+  'deepseek',
+  'openrouter',
+  'together',
+  'zai',
+  'anthropic',
+] as const;
 
-export const tokenMarks = {
-  1000: '1K',
-  50000: '50K',
-  100000: '100K',
-  200000: '200K',
+export const DEFAULT_REASONING_CONFIG = {
+  enabled: false,
+  defaultLevel: 'off',
+  capability: 'unsupported',
+  compatFormat: 'auto',
+  supportedEfforts: [],
+  budgets: {},
 };
 
-export function buildDebugDefaults(intl: IntlShape) {
+export const tokenMarks = Array.from({ length: 4 }, (_, index) => {
+  const value = (index + 1) * 500 * 1000;
+  return [value, `${value / 1000}K`];
+}).reduce<Record<number, string>>((marks, [value, label]) => {
+  marks[value as number] = label as string;
+  return marks;
+}, {});
+
+export function buildDebugDefaults(intl: any) {
   return {
     defaultUserMessage: intl.formatMessage({ id: 'modelMgr.modal.debugDefaultUserMessage' }),
     defaultRerankQuery: intl.formatMessage({ id: 'modelMgr.modal.debugRerankQuery' }),
@@ -32,24 +63,45 @@ export function buildDebugDefaults(intl: IntlShape) {
   };
 }
 
+export const MODEL_PROTOCOL_OPTIONS = [
+  { label: 'OpenAI', value: 'OpenAI' },
+  { label: 'OpenAI Responses', value: 'OpenAI Responses' },
+  { label: 'Anthropic', value: 'Anthropic' },
+] as const;
+
+export function getDefaultLlmDebugSuffix(modelProtocol?: any) {
+  const protocol = `${modelProtocol ?? 'OpenAI'}`.trim().toLowerCase();
+  if (protocol === 'anthropic') return '/v1/messages';
+  return '/chat/completions';
+}
+
+export function getApiEndpointPlaceholder(modelProtocol?: any) {
+  const protocol = `${modelProtocol ?? 'OpenAI'}`.trim().toLowerCase();
+  if (protocol === 'anthropic') return 'https://api.example.com/anthropic';
+  return 'https://api.example.com/v1';
+}
+
 export function getDefaultFormValues() {
   return {
     status: 'ENABLED',
     abilities: [],
     systems: [],
     modelType: 'LLM',
+    modelProtocol: 'OpenAI',
     apiEndpoint: 'https://api.example.com/v1',
     headers: [{ key: '', value: '' }],
     connectTimeoutSec: 32,
     readTimeoutSec: 60,
     maxRetries: 3,
     retryIntervalSec: 1,
-    contextTokens: 128000,
+    contextTokens: DEFAULT_CONTEXT_TOKENS,
     temperature: 0.7,
     topP: 0.9,
-    maxTokens: 1024,
+    maxTokens: DEFAULT_MAX_TOKENS,
     frequencyPenalty: 0,
     presencePenalty: 0,
+    reasoningConfig: { ...DEFAULT_REASONING_CONFIG },
+    reasoningEffortMapText: '',
   };
 }
 
@@ -152,6 +204,127 @@ function safeParseJsonObject(text: string): any | null {
   }
 }
 
+export function formatReasoningEffortMapText(reasoningConfig?: any) {
+  const effortMap = reasoningConfig?.effortMap;
+  if (!effortMap || typeof effortMap !== 'object' || Array.isArray(effortMap)) {
+    return '';
+  }
+  return JSON.stringify(effortMap, null, 2);
+}
+
+function safeParseReasoningEffortMap(text: any) {
+  if (typeof text !== 'string' || !text.trim()) return undefined;
+  const parsed = safeParseJsonObject(text);
+  if (!parsed) return undefined;
+  const out: Record<string, string> = {};
+  Object.keys(parsed).forEach((key) => {
+    const k = `${key}`.trim();
+    const v = `${parsed[key] ?? ''}`.trim();
+    if (k && v) {
+      out[k] = v;
+    }
+  });
+  return Object.keys(out).length ? out : undefined;
+}
+
+export function buildReasoningConfigPayload(values: any) {
+  const raw = values?.reasoningConfig && typeof values.reasoningConfig === 'object' ? values.reasoningConfig : {};
+  const capability = `${raw.capability ?? DEFAULT_REASONING_CONFIG.capability}`.trim() || 'unsupported';
+  const enabled = Boolean(raw.enabled) && capability !== 'unsupported';
+  const next: Record<string, any> = {
+    enabled,
+    defaultLevel: enabled ? `${raw.defaultLevel ?? 'medium'}` : 'off',
+    capability,
+    compatFormat: `${raw.compatFormat ?? 'auto'}`,
+  };
+  if (!enabled) {
+    return next;
+  }
+  if (Array.isArray(raw.supportedEfforts) && raw.supportedEfforts.length) {
+    next.supportedEfforts = raw.supportedEfforts;
+  }
+  const effortMap = safeParseReasoningEffortMap(values?.reasoningEffortMapText);
+  if (effortMap) {
+    next.effortMap = effortMap;
+  }
+  if (raw.budgets && typeof raw.budgets === 'object' && !Array.isArray(raw.budgets)) {
+    const budgets: Record<string, number> = {};
+    Object.keys(raw.budgets).forEach((level) => {
+      const value = Number(raw.budgets[level]);
+      if (Number.isFinite(value) && value > 0) {
+        budgets[level] = Math.floor(value);
+      }
+    });
+    if (Object.keys(budgets).length) {
+      next.budgets = budgets;
+    }
+  }
+  return next;
+}
+
+function getReasoningBudget(reasoningConfig: any, level: string) {
+  const value = reasoningConfig?.budgets?.[level];
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : undefined;
+}
+
+function resolveDebugReasoningEffort(reasoningConfig: any, effortMapText: any, defaultLevel: string) {
+  const effortMap = safeParseReasoningEffortMap(effortMapText);
+  if (effortMap?.[defaultLevel]) return effortMap[defaultLevel];
+  if (defaultLevel === 'minimal' || defaultLevel === 'low' || defaultLevel === 'medium') return 'high';
+  if (defaultLevel === 'adaptive') return 'medium';
+  if (defaultLevel === 'xhigh' || defaultLevel === 'max') return 'max';
+  return defaultLevel;
+}
+
+function applyReasoningDebugParams(req: Record<string, any>, formValues: any) {
+  const reasoningConfig = formValues?.reasoningConfig || {};
+  const capability = `${reasoningConfig?.capability ?? 'unsupported'}`.trim().toLowerCase();
+  const defaultLevel = `${reasoningConfig?.defaultLevel ?? 'off'}`.trim().toLowerCase();
+  const enabled = Boolean(reasoningConfig?.enabled) && capability !== 'unsupported' && defaultLevel !== 'off';
+  if (!enabled) {
+    req.enable_thinking = false;
+    req.chat_template_kwargs = { enable_thinking: false };
+    return;
+  }
+  const compatFormat = `${reasoningConfig?.compatFormat ?? 'auto'}`.trim().toLowerCase();
+  if (['deepseek', 'openai', 'openrouter', 'zai'].includes(compatFormat)) {
+    req.reasoning_effort = resolveDebugReasoningEffort(
+      reasoningConfig,
+      formValues?.reasoningEffortMapText,
+      defaultLevel
+    );
+    return;
+  }
+  if (compatFormat === 'together') {
+    req.reasoning = { enabled: true };
+    return;
+  }
+  if (compatFormat === 'qwen') {
+    req.enable_thinking = true;
+    const budget = getReasoningBudget(reasoningConfig, defaultLevel);
+    if (budget) req.thinking_budget = budget;
+    return;
+  }
+  if (compatFormat === 'qwen-chat-template') {
+    req.chat_template_kwargs = { enable_thinking: true };
+    const budget = getReasoningBudget(reasoningConfig, defaultLevel);
+    if (budget) req.thinking_budget = budget;
+    return;
+  }
+  if (compatFormat === 'anthropic') {
+    if (defaultLevel === 'adaptive') {
+      req.thinking = { type: 'adaptive', display: 'summarized' };
+      return;
+    }
+    const budget = getReasoningBudget(reasoningConfig, defaultLevel);
+    req.thinking = budget ? { type: 'enabled', budget_tokens: budget } : { type: 'enabled' };
+    return;
+  }
+  req.enable_thinking = true;
+  req.chat_template_kwargs = { enable_thinking: true };
+}
+
 export function buildAutoDebugRequestText(options: {
   formValues: any;
   id?: string;
@@ -175,14 +348,21 @@ export function buildAutoDebugRequestText(options: {
   const prevObj = prevText ? safeParseJsonObject(prevText) : null;
   const modelType = normalizeModelType(formValues?.modelType);
   const isTypeSwitch = Array.isArray(changedKeys) && changedKeys.includes('modelType');
-  console.log(formValues);
   if (modelType === 'LLM') {
     const apiEndpoint = `${formValues?.apiEndpoint ?? ''}`.trim();
     const prevUrl = typeof prevObj?.url === 'string' ? prevObj.url.trim() : '';
-    let suffix = '/chat/completions';
+    const isProtocolSwitch = Array.isArray(changedKeys) && changedKeys.includes('modelProtocol');
+    let suffix = getDefaultLlmDebugSuffix(formValues?.modelProtocol);
     const endpointNotShortened = !previousApiEndpoint || apiEndpoint.length >= previousApiEndpoint.length;
-    if (!isTypeSwitch && endpointNotShortened && prevUrl && apiEndpoint && prevUrl.startsWith(apiEndpoint)) {
-      suffix = prevUrl.slice(apiEndpoint.length) || '';
+    if (
+      !isTypeSwitch &&
+      !isProtocolSwitch &&
+      endpointNotShortened &&
+      prevUrl &&
+      apiEndpoint &&
+      prevUrl.startsWith(apiEndpoint)
+    ) {
+      suffix = prevUrl.slice(apiEndpoint.length) || suffix;
     }
     const url = joinUrl(apiEndpoint, suffix);
 
@@ -192,7 +372,7 @@ export function buildAutoDebugRequestText(options: {
       prevHeaders: prevObj?.headers,
     });
     const modelNoOrCode = `${formValues?.model_no ?? formValues?.modelCode ?? ''}`.trim();
-    const defaultMessages = [{ role: 'user', content: defaultUserMessage ?? '今天天气如何' }];
+    const defaultMessages = [{ role: 'user', content: defaultUserMessage ?? "How's the weather today?" }];
     const messages =
       !isTypeSwitch && Array.isArray(prevObj?.messages) && prevObj.messages.length
         ? prevObj.messages
@@ -203,18 +383,16 @@ export function buildAutoDebugRequestText(options: {
     const temperature = !isTypeSwitch && typeof prevObj?.temperature === 'number' ? prevObj.temperature : 0.1;
     const stream = !isTypeSwitch && typeof prevObj?.stream === 'boolean' ? prevObj.stream : true;
 
-    return JSON.stringify(
-      {
-        url,
-        headers: Object.keys(headersObj).length ? headersObj : {},
-        model: modelNoOrCode,
-        messages,
-        temperature,
-        stream,
-      },
-      null,
-      2
-    );
+    const req: Record<string, any> = {
+      url,
+      headers: Object.keys(headersObj).length ? headersObj : {},
+      model: modelNoOrCode,
+      messages,
+      temperature,
+      stream,
+    };
+    applyReasoningDebugParams(req, formValues);
+    return JSON.stringify(req, null, 2);
   }
 
   if (modelType === 'RERANK') {
@@ -235,15 +413,15 @@ export function buildAutoDebugRequestText(options: {
       prevHeaders: prevObj?.headers,
     });
     const modelNoOrCode = `${formValues?.model_no ?? formValues?.modelCode ?? ''}`.trim();
-    const defaultQuery = defaultRerankQuery ?? '北京旅游攻略';
+    const defaultQuery = defaultRerankQuery ?? 'Beijing travel guide';
     const defaultDocs =
       defaultRerankDocs && defaultRerankDocs.length >= 4
         ? defaultRerankDocs
         : [
-          { text: '北京美食推荐', metadata: { id: 0 }, score: 0 },
-          { text: '天津旅游攻略', metadata: { id: 1 }, score: 0 },
-          { text: '小白开发教程', metadata: { id: 2 }, score: 0 },
-          { text: '故宫游玩攻略', metadata: { id: 3 }, score: 0 },
+          { text: 'Beijing food recommendation', metadata: { id: 0 }, score: 0 },
+          { text: 'Tianjin travel guide', metadata: { id: 1 }, score: 0 },
+          { text: 'Beginner dev tutorial', metadata: { id: 2 }, score: 0 },
+          { text: 'Forbidden City travel guide', metadata: { id: 3 }, score: 0 },
         ];
 
     const query =
@@ -288,7 +466,7 @@ export function buildAutoDebugRequestText(options: {
       prevHeaders: prevObj?.headers,
     });
     const modelNoOrCode = `${formValues?.model_no ?? formValues?.modelCode ?? ''}`.trim();
-    const defaultInput = '今天天气如何';
+    const defaultInput = defaultUserMessage ?? "How's the weather today?";
     const inputText =
       !isTypeSwitch && typeof prevObj?.input === 'string' && prevObj.input.trim() ? prevObj.input : defaultInput;
 
