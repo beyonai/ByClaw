@@ -34,17 +34,17 @@
 
 .skillPosterList {
   display: grid;
-  grid-template-columns: repeat(var(--skill-poster-column-count, 1), minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   margin: 0 6px;
-  gap: 28px;
-  align-items: flex-start;
-}
+  gap: 20px;
 
-.skillPosterColumn {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 28px;
+  @media (max-width: 1280px) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  @media (max-width: 760px) {
+    grid-template-columns: 1fr;
+  }
 }
 
 .sectionsContainer {

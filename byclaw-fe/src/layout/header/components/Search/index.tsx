@@ -15,7 +15,7 @@ import ResourceSiderListItem from '@/layout/sider/components/ResourceSiderPanel/
 
 import styles from './index.module.less';
 import { SearchOutlined } from '@ant-design/icons';
-import type { HeaderSearchPageProps, SearchTabItem } from './types';
+import type { HeaderSearchPageProps, KnowledgeResourceGroup, SearchTabItem } from './types';
 import { normalizeResourceItem, resourceSiderTypeByTabKey } from './utils';
 import useHeaderSearchResults from './useHeaderSearchResults';
 import useEmployeeResourceSearch from './useEmployeeResourceSearch';
@@ -27,6 +27,7 @@ import { SearchEmpty, SearchLoading } from './SearchState';
 import DigitalEmployeeResultItem from './DigitalEmployeeResultItem';
 import ChatRecordResultItem from './ChatRecordResultItem';
 import EmployeeResourceContent from './EmployeeResourceContent';
+import KnowledgeResourceGroupedContent from './KnowledgeResourceGroupedContent';
 
 const HeaderSearchPage = (props: HeaderSearchPageProps) => {
   const {
@@ -61,6 +62,8 @@ const HeaderSearchPage = (props: HeaderSearchPageProps) => {
   const { isLoading, result, myGetSearchList, cancelSearch } = useHeaderSearchResults();
   const {
     employeeResourceResultMap,
+    employeeResourceGroupMap,
+    knowledgeResourceGroups,
     visibleEmployeeResourceTabs,
     myGetEmployeeResourceList,
     cancelEmployeeResourceSearch,
@@ -110,6 +113,7 @@ const HeaderSearchPage = (props: HeaderSearchPageProps) => {
       resetEmployeeResourceDrill();
       return;
     }
+    setCurrentKnowledgeBase(null);
     resetEmployeeResourceDrill();
     myGetSearchList(keyword);
     myGetEmployeeResourceList(keyword);
@@ -208,7 +212,7 @@ const HeaderSearchPage = (props: HeaderSearchPageProps) => {
   );
 
   const renderItemEmployeeResource = useCallback(
-    (tabKey: string, item: any) => {
+    (tabKey: string, item: any, group?: KnowledgeResourceGroup) => {
       const resourceType = resourceSiderTypeByTabKey[tabKey];
       if (!resourceType) {
         return null;
@@ -216,6 +220,7 @@ const HeaderSearchPage = (props: HeaderSearchPageProps) => {
 
       const resourceItem = normalizeResourceItem(item);
       const drillable = getEmployeeResourceDrillable(tabKey, resourceItem);
+      const quoteDisabled = group?.quoteDisabled || resourceItem.quoteDisabled;
 
       return (
         <ResourceSiderListItem
@@ -230,7 +235,7 @@ const HeaderSearchPage = (props: HeaderSearchPageProps) => {
           onClick={(currentItem, currentDrillable) =>
             void handleEmployeeResourceItemClick(tabKey, currentItem, currentDrillable)
           }
-          onDoubleClick={() => handleEmployeeResourceDoubleClick(tabKey, resourceItem)}
+          onDoubleClick={quoteDisabled ? undefined : () => handleEmployeeResourceDoubleClick(tabKey, resourceItem)}
         />
       );
     },
@@ -238,27 +243,65 @@ const HeaderSearchPage = (props: HeaderSearchPageProps) => {
   );
 
   const renderItemKnowledgeBase = useCallback(
-    (item: IKnowledgeBaseItem) => (
-      <KnowledgeBaseListItem
-        key={item.resourceId}
-        item={item}
-        onClick={handleKnowledgeBaseItemClick}
-        onDoubleClick={handleKnowledgeBaseItemDoubleClick}
-      />
-    ),
+    (item: IKnowledgeBaseItem, group?: KnowledgeResourceGroup) => {
+      const quoteDisabled = group?.quoteDisabled || item.quoteDisabled;
+
+      return (
+        <KnowledgeBaseListItem
+          key={item.resourceId}
+          item={item}
+          onClick={handleKnowledgeBaseItemClick}
+          onDoubleClick={quoteDisabled ? undefined : handleKnowledgeBaseItemDoubleClick}
+        />
+      );
+    },
     [handleKnowledgeBaseItemClick, handleKnowledgeBaseItemDoubleClick]
   );
 
   // 渲染列表
-  const renderList = (list: any, renderItem: any, className?: string) => {
-    if ((list || []).length === 0) {
-      return <SearchEmpty intl={intl} />;
-    }
-    return <div className={className}>{list.map(renderItem)}</div>;
-  };
+  const renderList = useCallback(
+    (list: any, renderItem: any, className?: string) => {
+      if ((list || []).length === 0) {
+        return <SearchEmpty intl={intl} />;
+      }
+      return <div className={className}>{list.map(renderItem)}</div>;
+    },
+    [intl]
+  );
+
+  const renderKnowledgeResourceGroupPreview = useCallback(
+    () => (
+      <KnowledgeResourceGroupedContent
+        groups={knowledgeResourceGroups}
+        expandAllByDefault={Boolean(keyword.trim())}
+        renderList={renderList}
+        renderItem={renderItemKnowledgeBase}
+      />
+    ),
+    [keyword, knowledgeResourceGroups, renderItemKnowledgeBase, renderList]
+  );
+
+  const renderEmployeeResourceGroupPreview = useCallback(
+    (tabKey: string) => (
+      <KnowledgeResourceGroupedContent
+        groups={employeeResourceGroupMap[tabKey] || []}
+        listClassName={styles.employeeResourceSiderList}
+        expandAllByDefault={Boolean(keyword.trim())}
+        renderList={renderList}
+        renderItem={(item, group) => renderItemEmployeeResource(tabKey, item, group)}
+      />
+    ),
+    [employeeResourceGroupMap, keyword, renderItemEmployeeResource, renderList]
+  );
+
+  const handleKnowledgeFileClick = useCallback(() => {
+    setShowSearch(false);
+  }, [setShowSearch]);
 
   const getEmployeeResourceRenderItem = (tabKey: string) =>
     tabKey === 'knowledge' ? renderItemKnowledgeBase : (item: any) => renderItemEmployeeResource(tabKey, item);
+  const getEmployeeResourceRenderList = (tabKey: string) =>
+    tabKey === 'knowledge' ? renderKnowledgeResourceGroupPreview : () => renderEmployeeResourceGroupPreview(tabKey);
   const getEmployeeResourceListClassName = (tabKey: string) => {
     if (tabKey === 'knowledge') {
       return styles.knowledgeResourceList;
@@ -300,7 +343,7 @@ const HeaderSearchPage = (props: HeaderSearchPageProps) => {
               title={tab.title}
               data={employeeResourceResultMap[tab.key]}
               renderItem={getEmployeeResourceRenderItem(tab.key)}
-              renderList={renderList}
+              renderList={getEmployeeResourceRenderList(tab.key)}
               listClassName={getEmployeeResourceListClassName(tab.key)}
               viewMoreText={intl.formatMessage({ id: 'common.viewMore' })}
               onViewMore={(title) => setActiveTab(String(title))}
@@ -330,6 +373,9 @@ const HeaderSearchPage = (props: HeaderSearchPageProps) => {
           <EmployeeResourceContent
             tabKey={activeEmployeeResourceTab.key}
             list={employeeResourceResultMap[activeEmployeeResourceTab.key]}
+            knowledgeResourceGroups={knowledgeResourceGroups}
+            employeeResourceGroups={employeeResourceGroupMap[activeEmployeeResourceTab.key] || []}
+            expandAllGroupsByDefault={Boolean(keyword.trim())}
             currentKnowledgeBase={currentKnowledgeBase}
             activeSiderAgentResourceId={activeSiderAgent.resourceId}
             employeeResourceDrillState={employeeResourceDrillState}
@@ -339,6 +385,7 @@ const HeaderSearchPage = (props: HeaderSearchPageProps) => {
             renderItemKnowledgeBase={renderItemKnowledgeBase}
             renderItemEmployeeResource={renderItemEmployeeResource}
             onKnowledgeBaseGoBack={handleKnowledgeBaseGoBack}
+            onKnowledgeFileClick={handleKnowledgeFileClick}
             onEmployeeResourceGoBack={handleEmployeeResourceGoBack}
           />
         </div>

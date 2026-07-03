@@ -55,7 +55,7 @@ export const transformList = (flatList: IMessageListItem[], isStreamEnd: boolean
     const newNode: TreeNode = {
       messageIdx,
       ...item,
-      isCollapsed: false,
+      isCollapsed: true,
       messageLoadingStatus: 2, // 进行中 - 2(默认); 已完成 - 1
       children: [], // 显式初始化 children 为 TreeNode[] 类型
     };
@@ -131,7 +131,7 @@ export const transformList = (flatList: IMessageListItem[], isStreamEnd: boolean
       }
 
       default: {
-        let myShouldOpen = true;
+        let myShouldOpen = false;
 
         if (currentParent) {
           if (item?.objectType === 'function_response' && !currentParent.shouldOpen) {
@@ -169,7 +169,7 @@ export const transformList = (flatList: IMessageListItem[], isStreamEnd: boolean
               break;
             }
             default:
-              myShouldOpen = true;
+              myShouldOpen = false;
               break;
           }
         }

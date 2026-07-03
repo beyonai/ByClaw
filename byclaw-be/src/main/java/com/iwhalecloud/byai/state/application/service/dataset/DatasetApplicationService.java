@@ -6,7 +6,9 @@ import java.net.URLEncoder;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 import com.alibaba.fastjson.JSON;
@@ -23,9 +25,14 @@ import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbDirectoryCreate;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbDirectoryDelete;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbDirectoryUpdate;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileDownload;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileRead;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileToMarkdownIndex;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeSearch;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeUpdate;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileDelete;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbFileReadResult;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeSearchItem;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeSearchResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.ProcessStatus;
 import com.iwhalecloud.byai.common.util.JsonUtil;
 import com.iwhalecloud.byai.common.util.StringUtil;
@@ -39,6 +46,8 @@ import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetBuild;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetDto;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeReadFileRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeSearchRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeUploadConflictCheckRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeUploadConflictCheckResponse;
 import java.nio.charset.StandardCharsets;
@@ -1209,6 +1218,81 @@ public class DatasetApplicationService {
         assertPythonBuildSuccess(ret, "查询知识库文件构建状态");
         return ret.getResultObject();
 
+    }
+
+    /**
+     * 读取知识库文件 Markdown 内容。对外使用 ByClaw resourceId，内部转为 QA knCode。
+     */
+    public KbFileReadResult readFile(KnowledgeReadFileRequest request) {
+        if (request == null || request.getResourceId() == null) {
+            throw new BaseException("知识库资源标识不能为空");
+        }
+
+        SsResource ssResource = loadDatasetResource(request.getResourceId());
+        validateDatasetReadablePermission(ssResource);
+
+        KbFileRead kbFileRead = new KbFileRead();
+        kbFileRead.setKnCode(ssResource.getResourceCode());
+        kbFileRead.setFilePath(normalizeKnowledgeFilePath(request.getFilePath()));
+        kbFileRead.setStartLine(request.getStartLine());
+        kbFileRead.setEndLine(request.getEndLine());
+
+        PythonBuildResponse<KbFileReadResult> ret = feignPythonBuildService.readFile(kbFileRead);
+        assertPythonBuildSuccess(ret, "读取知识库文件内容");
+
+        KbFileReadResult result = ret.getResultObject();
+        if (result != null) {
+            result.setKnCode(String.valueOf(request.getResourceId()));
+        }
+        return result;
+    }
+
+    /**
+     * 执行知识库 chunk 检索。对外使用 ByClaw resourceIdList，内部转为 QA knCodeList。
+     */
+    public KnowledgeSearchResult searchKnowledgeItems(KnowledgeSearchRequest request) {
+        if (request == null || request.getResourceIdList() == null || request.getResourceIdList().isEmpty()) {
+            throw new BaseException("知识库资源标识列表不能为空");
+        }
+
+        List<String> knCodeList = new ArrayList<>();
+        Map<String, String> codeToResourceId = new HashMap<>();
+        for (Long resourceId : request.getResourceIdList()) {
+            if (resourceId == null) {
+                throw new BaseException("知识库资源标识不能为空");
+            }
+            SsResource ssResource = loadDatasetResource(resourceId);
+            validateDatasetReadablePermission(ssResource);
+            knCodeList.add(ssResource.getResourceCode());
+            codeToResourceId.put(ssResource.getResourceCode(), String.valueOf(resourceId));
+        }
+
+        KbKnowledgeSearch kbKnowledgeSearch = new KbKnowledgeSearch();
+        kbKnowledgeSearch.setQuery(request.getQuery());
+        kbKnowledgeSearch.setKnCodeList(knCodeList);
+        kbKnowledgeSearch.setTopK(request.getTopK());
+        kbKnowledgeSearch.setFileTypeList(request.getFileTypeList());
+        kbKnowledgeSearch.setSearchMode(request.getSearchMode());
+
+        PythonBuildResponse<KnowledgeSearchResult> ret = feignPythonBuildService.searchKnowledgeItems(kbKnowledgeSearch);
+        assertPythonBuildSuccess(ret, "检索知识库内容");
+
+        KnowledgeSearchResult result = ret.getResultObject();
+        if (result == null) {
+            return new KnowledgeSearchResult();
+        }
+        if (result.getData() != null) {
+            for (KnowledgeSearchItem item : result.getData()) {
+                if (item == null) {
+                    continue;
+                }
+                String resourceId = codeToResourceId.get(item.getKnCode());
+                if (resourceId != null) {
+                    item.setKnCode(resourceId);
+                }
+            }
+        }
+        return result;
     }
 
     /**

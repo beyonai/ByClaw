@@ -37,7 +37,19 @@ public class OntologyBaseController {
     @ApiOperation("本体库列表")
     @PostMapping("/base/list")
     public ResponseUtil<JSONArray> listBases(@RequestBody OntologyBaseQueryRequest request) {
-        return ResponseUtil.successRes(ontologyBaseService.listBases(request.getOwnerType()));
+        return ResponseUtil.successRes(ontologyBaseService.listBases(request.getOwnerType(), request.getQueryKeyword()));
+    }
+
+    @ApiOperation("创建本体库")
+    @PostMapping("/base/create")
+    public ResponseUtil<JSONObject> createBase(@RequestBody JSONObject request) {
+        return ResponseUtil.successRes(ontologyBaseService.createBase(request));
+    }
+
+    @ApiOperation("更新本体库")
+    @PostMapping("/base/update")
+    public ResponseUtil<JSONObject> updateBase(@RequestBody JSONObject request) {
+        return ResponseUtil.successRes(ontologyBaseService.updateBase(request));
     }
 
     @ApiOperation("场景列表")
@@ -56,12 +68,186 @@ public class OntologyBaseController {
                 request.getSceneId()));
     }
 
+    @ApiOperation("创建场景")
+    @PostMapping("/scene/create")
+    public ResponseUtil<JSONObject> createScene(@RequestBody JSONObject request) {
+        return ResponseUtil.successRes(ontologyBaseService.createScene(request));
+    }
+
+    @ApiOperation("更新场景")
+    @PostMapping("/scene/update")
+    public ResponseUtil<JSONObject> updateScene(@RequestBody JSONObject request) {
+        return ResponseUtil.successRes(ontologyBaseService.updateScene(request));
+    }
+
+    @ApiOperation("删除场景")
+    @PostMapping("/scene/delete")
+    public ResponseUtil<JSONObject> deleteScene(@RequestBody JSONObject request) {
+        return ResponseUtil.successRes(ontologyBaseService.deleteScene(request));
+    }
+
+    @ApiOperation("场景下本体分页查询")
+    @PostMapping("/scene/ontology/page")
+    public ResponseUtil<JSONObject> querySceneOntologies(@RequestBody JSONObject request) {
+        return ResponseUtil.successRes(ontologyBaseService.querySceneOntologies(request));
+    }
+
+    @ApiOperation("添加场景成员")
+    @PostMapping("/scene/member/add")
+    public ResponseUtil<JSONObject> addSceneMembers(@RequestBody JSONObject request) {
+        return ResponseUtil.successRes(ontologyBaseService.addSceneMembers(request));
+    }
+
+    @ApiOperation("移除场景成员")
+    @PostMapping("/scene/member/remove")
+    public ResponseUtil<JSONObject> removeSceneMembers(@RequestBody JSONObject request) {
+        return ResponseUtil.successRes(ontologyBaseService.removeSceneMembers(request));
+    }
+
+    @ApiOperation("对象列表")
+    @PostMapping("/object/list")
+    public ResponseUtil<JSONArray> listObjects(@RequestBody JSONObject request) {
+        return ResponseUtil.successRes(ontologyBaseService.listObjects(request));
+    }
+
     @ApiOperation("对象详情：属性/动作")
     @PostMapping("/object/detail")
     public ResponseUtil<JSONObject> objectDetail(@RequestBody OntologyBaseQueryRequest request) {
         return ResponseUtil
             .successRes(ontologyBaseService.objectDetail(request.getOwnerType(), request.getBaseId(),
                 request.getObjectCode()));
+    }
+
+    @ApiOperation("创建对象")
+    @PostMapping("/object/create")
+    public ResponseUtil<JSONObject> createObject(@RequestBody JSONObject request) {
+        return ResponseUtil.successRes(ontologyBaseService.createObject(request));
+    }
+
+    @ApiOperation("更新对象")
+    @PostMapping("/object/update")
+    public ResponseUtil<JSONObject> updateObject(@RequestBody JSONObject request) {
+        return ResponseUtil.successRes(ontologyBaseService.updateObject(request));
+    }
+
+    @ApiOperation("删除对象")
+    @PostMapping("/object/delete")
+    public ResponseUtil<JSONObject> deleteObject(@RequestBody JSONObject request) {
+        return ResponseUtil.successRes(ontologyBaseService.deleteObject(request));
+    }
+
+    @ApiOperation("视图列表")
+    @PostMapping("/view/list")
+    public ResponseUtil<JSONArray> listViews(@RequestBody JSONObject request) {
+        return ResponseUtil.successRes(ontologyBaseService.listViews(request));
+    }
+
+    @ApiOperation("视图详情")
+    @PostMapping("/view/detail")
+    public ResponseUtil<JSONObject> viewDetail(@RequestBody JSONObject request) {
+        return ResponseUtil.successRes(ontologyBaseService.viewDetail(request));
+    }
+
+    @ApiOperation("创建视图")
+    @PostMapping("/view/create")
+    public ResponseUtil<JSONObject> createView(@RequestBody JSONObject request) {
+        return ResponseUtil.successRes(ontologyBaseService.createView(request));
+    }
+
+    @ApiOperation("更新视图")
+    @PostMapping("/view/update")
+    public ResponseUtil<JSONObject> updateView(@RequestBody JSONObject request) {
+        return ResponseUtil.successRes(ontologyBaseService.updateView(request));
+    }
+
+    @ApiOperation("删除视图")
+    @PostMapping("/view/delete")
+    public ResponseUtil<JSONObject> deleteView(@RequestBody JSONObject request) {
+        return ResponseUtil.successRes(ontologyBaseService.deleteView(request));
+    }
+
+    @ApiOperation("关系列表")
+    @PostMapping("/relation/list")
+    public ResponseUtil<JSONArray> listRelations(@RequestBody JSONObject request) {
+        return ResponseUtil.successRes(ontologyBaseService.listRelations(request));
+    }
+
+    @ApiOperation("关系详情")
+    @PostMapping("/relation/detail")
+    public ResponseUtil<JSONObject> relationDetail(@RequestBody JSONObject request) {
+        return ResponseUtil.successRes(ontologyBaseService.relationDetail(request));
+    }
+
+    @ApiOperation("创建关系")
+    @PostMapping("/relation/create")
+    public ResponseUtil<JSONObject> createRelation(@RequestBody JSONObject request) {
+        return ResponseUtil.successRes(ontologyBaseService.createRelation(request));
+    }
+
+    @ApiOperation("更新关系")
+    @PostMapping("/relation/update")
+    public ResponseUtil<JSONObject> updateRelation(@RequestBody JSONObject request) {
+        return ResponseUtil.successRes(ontologyBaseService.updateRelation(request));
+    }
+
+    @ApiOperation("删除关系")
+    @PostMapping("/relation/delete")
+    public ResponseUtil<JSONObject> deleteRelation(@RequestBody JSONObject request) {
+        return ResponseUtil.successRes(ontologyBaseService.deleteRelation(request));
+    }
+
+    @ApiOperation("数据源列表")
+    @PostMapping("/datasource/list")
+    public ResponseUtil<JSONArray> listDatasources(@RequestBody JSONObject request) {
+        return ResponseUtil.successRes(ontologyBaseService.listDatasources(request));
+    }
+
+    @ApiOperation("数据源详情")
+    @PostMapping("/datasource/detail")
+    public ResponseUtil<JSONObject> datasourceDetail(@RequestBody JSONObject request) {
+        return ResponseUtil.successRes(ontologyBaseService.datasourceDetail(request));
+    }
+
+    @ApiOperation("创建数据源")
+    @PostMapping("/datasource/create")
+    public ResponseUtil<JSONObject> createDatasource(@RequestBody JSONObject request) {
+        return ResponseUtil.successRes(ontologyBaseService.createDatasource(request));
+    }
+
+    @ApiOperation("删除数据源")
+    @PostMapping("/datasource/delete")
+    public ResponseUtil<JSONObject> deleteDatasource(@RequestBody JSONObject request) {
+        return ResponseUtil.successRes(ontologyBaseService.deleteDatasource(request));
+    }
+
+    @ApiOperation("对象动作列表")
+    @PostMapping("/action/list")
+    public ResponseUtil<JSONArray> listActions(@RequestBody JSONObject request) {
+        return ResponseUtil.successRes(ontologyBaseService.listActions(request));
+    }
+
+    @ApiOperation("对象动作详情")
+    @PostMapping("/action/detail")
+    public ResponseUtil<JSONObject> actionDetail(@RequestBody JSONObject request) {
+        return ResponseUtil.successRes(ontologyBaseService.actionDetail(request));
+    }
+
+    @ApiOperation("创建对象动作")
+    @PostMapping("/action/create")
+    public ResponseUtil<JSONObject> createAction(@RequestBody JSONObject request) {
+        return ResponseUtil.successRes(ontologyBaseService.createAction(request));
+    }
+
+    @ApiOperation("更新对象动作")
+    @PostMapping("/action/update")
+    public ResponseUtil<JSONObject> updateAction(@RequestBody JSONObject request) {
+        return ResponseUtil.successRes(ontologyBaseService.updateAction(request));
+    }
+
+    @ApiOperation("删除对象动作")
+    @PostMapping("/action/delete")
+    public ResponseUtil<JSONObject> deleteAction(@RequestBody JSONObject request) {
+        return ResponseUtil.successRes(ontologyBaseService.deleteAction(request));
     }
 
     @ApiOperation("本体库 ss_resource 子树")

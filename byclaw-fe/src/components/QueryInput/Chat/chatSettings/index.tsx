@@ -63,9 +63,9 @@ function ListItemIcon({ data }: { data: ISettingConfContent }) {
       case 'browserPageData':
         return <AntdIcon type="icon-a-Browser-chromeliulanqi" />;
       case 'jingjiaSystem':
-        return <img alt="" src={jingjiaImg} />;
+        return <img key={jingjiaImg} alt="" src={jingjiaImg} />;
       case 'googleChrome':
-        return <img alt="" src={chromeImg} />;
+        return <img key={chromeImg} alt="" src={chromeImg} />;
       default: {
         if (icon) {
           return <AntdIcon type={icon} />;

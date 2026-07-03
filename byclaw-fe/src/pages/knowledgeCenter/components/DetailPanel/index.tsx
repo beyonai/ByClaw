@@ -4,10 +4,8 @@ import { Form, Input, message, Modal, TreeSelect } from 'antd';
 // @ts-ignore
 import { useIntl } from '@umijs/max';
 
-import PagePhoto from '@/components/PagePhoto';
+import AntdIcon from '@/components/AntdIcon';
 import { createAndShelf, queryResourceDetail, updateResource } from '@/service/knowledgeCenter';
-import { getPublicPath } from '@/utils';
-import { compressImgFileAndUpload } from '@/utils/file';
 import styles from './index.module.less';
 import { ResourceTypeMap } from '@/constants/resource';
 
@@ -85,23 +83,15 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
     async (values: any) => {
       setIsLoading(true);
 
-      const { resourceName, resourceDesc, logo, catalogId: selectedCatalogId } = values;
+      const { resourceName, resourceDesc, catalogId: selectedCatalogId } = values;
       try {
-        if (logo && logo instanceof File) {
-          const imgRes = await compressImgFileAndUpload({ file: logo });
-          // 入参少个s
-          values.datasetLogoId = imgRes?.datasetLogosId;
-          values.resourceLogoUrl = imgRes?.datasetLogosUrl;
-        }
-        delete values.logo;
-
         const commonPayload = {
           systemCode: 'BYAI',
           resourceBizType: ResourceTypeMap.knowledgeBase,
           resourceDesc,
           resourceName,
-          avatar: values.resourceLogoUrl || detailInfo?.avatar || info?.avatar,
-          datasetLogoId: values.datasetLogoId || detailInfo?.datasetLogoId || info?.datasetLogoId,
+          avatar: detailInfo?.avatar || info?.avatar,
+          datasetLogoId: detailInfo?.datasetLogoId || info?.datasetLogoId,
           type: 'dataset',
           catalogId: selectedCatalogId || undefined,
         };
@@ -165,14 +155,9 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
         }}
       >
         <div className="ub">
-          <Form.Item name="logo">
-            <PagePhoto
-              defaultImage={`${getPublicPath()}imgs/knowledgeCenter/defKnowledgeIcon.png`}
-              uploadProps={{
-                className: styles.pagePhotoWrap,
-              }}
-            />
-          </Form.Item>
+          <div className={styles.pagePhotoWrap}>
+            <AntdIcon type="icon-chuangjianfangshi-wendangku" className={styles.knowledgeLogoIcon} />
+          </div>
           <div className="ub-f1 ub ub-ver">
             <Form.Item
               name="resourceName"

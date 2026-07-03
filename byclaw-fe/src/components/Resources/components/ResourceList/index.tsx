@@ -72,14 +72,6 @@ interface ResourceListProps {
 
 const PAGE_SIZE_DEFAULT = 30;
 
-const getSkillPosterColumnCount = (width: number) => {
-  if (width >= 1680) return 5;
-  if (width >= 1280) return 4;
-  if (width >= 960) return 3;
-  if (width >= 640) return 2;
-  return 1;
-};
-
 const normalizeResponseData = (response: any) => response?.data ?? response;
 
 const collectInstalledResourceIds = (detail: any) => {
@@ -136,8 +128,6 @@ const ResourceList: React.FC<ResourceListProps> = ({
   const [loading, setLoading] = useState(false);
   const [list, setList] = useState<IResourceItem[]>([]);
   const [installedResourceIds, setInstalledResourceIds] = useState<ReadonlySet<string>>(new Set());
-  const [skillPosterColumnCount, setSkillPosterColumnCount] = useState(1);
-  const skillPosterListRef = useRef<HTMLDivElement>(null);
   const [pageInfo, setPageInfo] = useState({
     pageNum: 1,
     pageSize: PAGE_SIZE_DEFAULT,
@@ -283,56 +273,6 @@ const ResourceList: React.FC<ResourceListProps> = ({
     };
   }, [resourceType]);
 
-  useEffect(() => {
-    if (!isSkillPosterMode) {
-      setSkillPosterColumnCount(1);
-      return undefined;
-    }
-
-    const target = skillPosterListRef.current;
-    let rafId = 0;
-    let timerId = 0;
-
-    const updateColumnCount = () => {
-      window.cancelAnimationFrame(rafId);
-      rafId = window.requestAnimationFrame(() => {
-        const width =
-          skillPosterListRef.current?.clientWidth ||
-          skillPosterListRef.current?.parentElement?.clientWidth ||
-          window.innerWidth;
-        setSkillPosterColumnCount(getSkillPosterColumnCount(width));
-      });
-    };
-
-    updateColumnCount();
-    timerId = window.setTimeout(updateColumnCount, 80);
-
-    if (!target || typeof ResizeObserver === 'undefined') {
-      window.addEventListener('resize', updateColumnCount);
-      return () => {
-        window.cancelAnimationFrame(rafId);
-        window.clearTimeout(timerId);
-        window.removeEventListener('resize', updateColumnCount);
-      };
-    }
-
-    const resizeObserver = new ResizeObserver(updateColumnCount);
-    resizeObserver.observe(target);
-    return () => {
-      window.cancelAnimationFrame(rafId);
-      window.clearTimeout(timerId);
-      resizeObserver.disconnect();
-    };
-  }, [isSkillPosterMode, list.length, loading]);
-
-  const skillPosterColumns = useMemo(() => {
-    const columns = Array.from({ length: skillPosterColumnCount }, () => [] as IResourceItem[]);
-    list.forEach((item, index) => {
-      columns[index % skillPosterColumnCount].push(item);
-    });
-    return columns;
-  }, [list, skillPosterColumnCount]);
-
   const loadMore = useCallback(() => {
     if (loading || !hasMore) return;
     // 直接使用当前的pageInfo状态，避免将其作为依赖项
@@ -404,22 +344,8 @@ const ResourceList: React.FC<ResourceListProps> = ({
             }}
           >
             <div className={styles.categorySection}>
-              <div
-                ref={skillPosterListRef}
-                className={isSkillPosterMode ? styles.skillPosterList : styles.employeeList}
-                style={
-                  isSkillPosterMode
-                    ? ({ '--skill-poster-column-count': skillPosterColumnCount } as React.CSSProperties)
-                    : undefined
-                }
-              >
-                {isSkillPosterMode &&
-                  skillPosterColumns.map((columnItems, columnIndex) => (
-                    <div className={styles.skillPosterColumn} key={`skill-poster-column-${columnIndex}`}>
-                      {columnItems.map((item) => renderResourceCard(item))}
-                    </div>
-                  ))}
-                {!isSkillPosterMode && list.map((item) => renderResourceCard(item))}
+              <div className={isSkillPosterMode ? styles.skillPosterList : styles.employeeList}>
+                {list.map((item) => renderResourceCard(item))}
               </div>
             </div>
           </InfiniteScroll>

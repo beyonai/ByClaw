@@ -5,7 +5,13 @@ import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
 import com.iwhalecloud.byai.common.constants.Constants;
 import com.iwhalecloud.byai.common.constants.resource.ResourceBizType;
+import com.iwhalecloud.byai.common.feign.client.FeignTokenSaverService;
 import com.iwhalecloud.byai.common.feign.request.conversation.AgentPrologueDto;
+import com.iwhalecloud.byai.common.feign.request.token.TokenSaveRequest;
+import com.iwhalecloud.byai.common.feign.response.token.TokenApiResponse;
+import com.iwhalecloud.byai.common.feign.response.token.TokenDto;
+import com.iwhalecloud.byai.common.feign.response.token.TokenKeyResult;
+import com.iwhalecloud.byai.common.feign.response.token.TokenPageResult;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
@@ -14,7 +20,9 @@ import com.iwhalecloud.byai.common.util.MapParamUtil;
 import com.iwhalecloud.byai.common.util.RedisUtil;
 import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeApplicationService;
+import com.iwhalecloud.byai.manager.domain.aimodel.enums.ModelOwnerType;
 import com.iwhalecloud.byai.manager.domain.aimodel.enums.ModelProtocol;
+import com.iwhalecloud.byai.manager.domain.aimodel.enums.ModelSourceType;
 import com.iwhalecloud.byai.manager.domain.aimodel.service.ByaiAimodelDomainService;
 import com.iwhalecloud.byai.manager.domain.auth.enums.Color;
 import com.iwhalecloud.byai.manager.domain.auth.enums.GrantToObjType;
@@ -25,6 +33,8 @@ import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtDigEmployeeS
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtSkillService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceRelDetailService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
+import com.iwhalecloud.byai.manager.dto.aimodel.ModelQuota;
+import com.iwhalecloud.byai.manager.dto.aimodel.TokenSaver;
 import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeDTO;
 import com.iwhalecloud.byai.manager.dto.digitemploy.RelResourceInfo;
 import com.iwhalecloud.byai.manager.dto.digitemploy.SsResourceDTO;
@@ -38,14 +48,13 @@ import com.iwhalecloud.byai.manager.entity.resource.SsResourceRelDetail;
 import com.iwhalecloud.byai.manager.entity.superassist.SuasSuperassist;
 import com.iwhalecloud.byai.manager.domain.superassist.service.SuasSuperassistService;
 import com.iwhalecloud.byai.manager.qo.aimodel.DefaultAiModelQo;
+import com.iwhalecloud.byai.manager.qo.aimodel.FindAiModelQo;
 import com.iwhalecloud.byai.state.application.service.dataset.DatasetApplicationService;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-
 import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import org.slf4j.Logger;
@@ -77,6 +86,9 @@ public class SuasSuperassistApplicationService {
 
     @Autowired
     private ByaiAimodelDomainService byaiAimodelService;
+
+    @Autowired
+    private FeignTokenSaverService feignTokenSaverService;
 
     @Autowired
     private SuasSuperassistService suasSuperassistService;
@@ -571,14 +583,37 @@ public class SuasSuperassistApplicationService {
      */
     private AgentPrologueDto.ModelInfo buildDefaultModelInfo(String modelProtocol) {
 
+        String modelQuotaJson = byaiSystemConfigService.findByParamCode("MODEL_QUOTA");
+
+        ModelQuota modelQuota = JSON.parseObject(modelQuotaJson, ModelQuota.class);
+        TokenSaver tokenSaver = modelQuota.getTokenSaver();
+
         ByaiAimodel byaiAimodel = null;
-        if (ModelProtocol.ANTHROPIC.equalsIgnoreCase(modelProtocol)) {
+
+        if (tokenSaver != null && tokenSaver.getEnabled()) {
+
+            FindAiModelQo findAiModelQo = new FindAiModelQo();
+            findAiModelQo.setModelType(Constants.DEFAULT_MODEL_TYPE_LLM);
+            findAiModelQo.setCreateBy(CurrentUserHolder.getCurrentUserId());
+            findAiModelQo.setOwnerType(ModelOwnerType.PERSONAL);
+            findAiModelQo.setSourceType(ModelSourceType.TOKEN_SAVER);
+            List<ByaiAimodel> tokenSaverModels = byaiAimodelService.findAiModelByQo(findAiModelQo);
+            // 如果没有初始化过，则调用接口创建
+            if (ListUtil.isNotEmpty(tokenSaverModels)) {
+                tokenSaverModels.getFirst();
+            }
+            else {
+                byaiAimodel = this.createTokenSaverModel(tokenSaver);
+            }
+        }
+        else if (ModelProtocol.ANTHROPIC.equalsIgnoreCase(modelProtocol)) {
             DefaultAiModelQo defaultAiModelQo = new DefaultAiModelQo();
             defaultAiModelQo.setModelProtocol(modelProtocol);
             defaultAiModelQo.setModelType(Constants.DEFAULT_MODEL_TYPE_LLM);
             defaultAiModelQo.setStatus(Constants.STATUS_ENABLED);
             byaiAimodel = byaiAimodelService.getDefaultAiModel(defaultAiModelQo);
         }
+
         else {
             DefaultAiModelQo defaultAiModelQo = new DefaultAiModelQo();
             defaultAiModelQo.setModelProtocol(modelProtocol);
@@ -600,6 +635,53 @@ public class SuasSuperassistApplicationService {
         modelInfo.setModel(byaiAimodel.getModelNo());
         modelInfo.setHistory(6);
         return modelInfo;
+    }
+
+    /**
+     * 创建TokenSaver模型
+     *
+     * @return ByaiAimodel
+     */
+    private ByaiAimodel createTokenSaverModel(TokenSaver tokenSaver) {
+
+        String tokenName = "ByClaw_".concat(CurrentUserHolder.getCurrentUserCode());
+
+        // 创建tokenSaver
+        TokenSaveRequest tokenSaveRequest = new TokenSaveRequest();
+        tokenSaveRequest.setName(tokenName);
+        tokenSaveRequest.setUnlimitedQuota(true);
+        tokenSaveRequest.setExpiredTime(-1L);
+        TokenApiResponse<Void> token = feignTokenSaverService.createToken(tokenSaveRequest);
+        logger.info("创建tokenSaver模型:{}", JSON.toJSONString(token));
+
+        // 获取tokenSaver标识
+        TokenApiResponse<TokenPageResult> tokenApiResponse = feignTokenSaverService.searchTokens(null, tokenName, 1, 1);
+
+        TokenPageResult tokenPageResult = tokenApiResponse.getData();
+
+        List<TokenDto> items = tokenPageResult.getItems();
+
+        TokenDto tokenDto = items.getFirst();
+
+        // 获取tokenSaver的apiKey
+        TokenApiResponse<TokenKeyResult> tokenKeyResult = feignTokenSaverService.getTokenKey(tokenDto.getId());
+        TokenKeyResult data = tokenKeyResult.getData();
+
+        // 创建对应的模型
+        ByaiAimodel newByaiAimodel = new ByaiAimodel();
+        newByaiAimodel.setModelId(sequenceService.nextVal());
+        newByaiAimodel.setModelName(tokenName);
+        newByaiAimodel.setModelProtocol("OpenAI");
+        newByaiAimodel.setOwnerType(ModelOwnerType.PERSONAL);
+        newByaiAimodel.setSourceType(ModelSourceType.TOKEN_SAVER);
+        newByaiAimodel.setModelType(Constants.DEFAULT_MODEL_TYPE_LLM);
+        newByaiAimodel.setModelNo(tokenSaver.getModelCode());
+        newByaiAimodel.setUrl(tokenSaver.getApiUrl());
+        newByaiAimodel.setAuthToken(data.getKey());
+        newByaiAimodel.setCreateTime(new Date());
+        newByaiAimodel.setCreateBy(CurrentUserHolder.getCurrentUserId());
+        byaiAimodelService.upsert(newByaiAimodel);
+        return newByaiAimodel;
     }
 
     /**

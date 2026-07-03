@@ -2,6 +2,7 @@ jest.mock('@umijs/max', () => ({
   getIntl: () => ({
     formatMessage: ({ id }: { id: string }) => id,
   }),
+  getLocale: () => 'zh-CN',
   useIntl: () => ({
     formatMessage: ({ id }: { id: string }) => id,
   }),
@@ -157,5 +158,54 @@ describe('ResourceCard', () => {
     );
 
     expect(screen.queryByText('resource.installSkill')).toBeNull();
+  });
+
+  it('uses default digital employee tag style when the digital employee is default', () => {
+    renderWithQueryClient(
+      <ResourceCard
+        resource={{
+          resourceId: 'employee-1',
+          resourceName: 'Default Employee',
+          resourceBizType: 'DIG_EMPLOYEE',
+          isDefault: true,
+          tagName: 'Custom Tag',
+        }}
+      />
+    );
+
+    expect(screen.getByText('resource.defaultDigitalEmployee').parentElement).toHaveClass('digitalEmployeeDefaultTag');
+  });
+
+  it('uses personal digital employee tag style for personal digital employees', () => {
+    renderWithQueryClient(
+      <ResourceCard
+        resource={{
+          resourceId: 'employee-2',
+          resourceName: 'Personal Employee',
+          resourceBizType: 'DIG_EMPLOYEE',
+          ownerType: 'personal',
+          tagName: 'Personal Tag',
+        }}
+      />
+    );
+
+    expect(screen.getByText('Personal Tag').parentElement).toHaveClass('digitalEmployeePersonalTag');
+  });
+
+  it('keeps non digital employee tags on the base tag style', () => {
+    renderWithQueryClient(
+      <ResourceCard
+        resource={{
+          resourceId: 'tool-2',
+          resourceName: 'Tool',
+          resourceBizType: 'TOOLKIT',
+          tagName: 'Tool Tag',
+        }}
+      />
+    );
+
+    expect(screen.getByText('Tool Tag').parentElement).not.toHaveClass('digitalEmployeeTag');
+    expect(screen.getByText('Tool Tag').parentElement).not.toHaveClass('digitalEmployeePersonalTag');
+    expect(screen.getByText('Tool Tag').parentElement).not.toHaveClass('digitalEmployeeDefaultTag');
   });
 });
