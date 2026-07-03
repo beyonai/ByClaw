@@ -622,4 +622,121 @@ describe("BYAI diagnostics OTel correlation", () => {
     await service.stop?.(ctx as never);
     fs.rmSync(dir, { recursive: true, force: true });
   });
+
+  it("builds inbound spans for native channels when allowlisted", async () => {
+    const service = createDiagnosticsOtelService({
+      includeDiagnosticSessionAttributes: true,
+      includeLangfuseSessionAttributes: true,
+      inboundChannels: { channels: ["webchat"] },
+    });
+    const { ctx, emitTrusted } = createContext();
+    await service.start(ctx as never);
+
+    const sessionKey = "webchat:session-native";
+    const inboundTrace = {
+      traceId: "1111111111111111111111111111aaaa",
+      spanId: "11111111aaaa1111",
+      traceFlags: "01",
+    };
+    const dispatchTrace = {
+      traceId: "1111111111111111111111111111aaaa",
+      spanId: "22221111bbbb1111",
+      traceFlags: "01",
+    };
+    emitTrusted({
+      type: "message.received",
+      channel: "webchat",
+      sessionId: "session-native",
+      sessionKey,
+      messageId: "message-native",
+      trace: inboundTrace,
+      ts: 100,
+    } as never);
+    emitTrusted({
+      type: "message.dispatch.started",
+      channel: "webchat",
+      sessionId: "session-native",
+      sessionKey,
+      trace: dispatchTrace,
+      ts: 110,
+    } as never);
+    emitTrusted({
+      type: "model.usage",
+      sessionId: "session-native",
+      sessionKey,
+      channel: "webchat",
+      provider: "openai",
+      model: "gpt-5.5",
+      usage: { input: 10, output: 5, cacheRead: 3, cacheWrite: 2, total: 20 },
+      trace: dispatchTrace,
+      ts: 200,
+    } as never);
+    emitTrusted({
+      type: "message.dispatch.completed",
+      channel: "webchat",
+      sessionId: "session-native",
+      sessionKey,
+      trace: dispatchTrace,
+      outcome: "success",
+      durationMs: 150,
+      ts: 250,
+    } as never);
+
+    const inboundSpan = span("openclaw.message.inbound");
+    const messageSpan = span("openclaw.message.processed");
+    const startSpanCalls = telemetryState.tracer.startSpan.mock.calls;
+    const inboundCall = startSpanCalls.find(([name]) => name === "openclaw.message.inbound");
+    const messageProcessedCall = startSpanCalls.find(
+      ([name]) => name === "openclaw.message.processed",
+    );
+    expect(inboundCall?.[2]).toEqual({
+      spanContext: expect.objectContaining({
+        traceId: inboundTrace.traceId,
+        spanId: inboundTrace.spanId,
+        traceFlags: 1,
+      }),
+    });
+    expect(messageProcessedCall?.[2]).toEqual({
+      spanContext: inboundSpan.spanContext(),
+    });
+    expect(messageSpan.setAttributes).toHaveBeenCalledWith(
+      expect.objectContaining({
+        "byai.tokens.input": 15,
+        "byai.tokens.output": 5,
+        "byai.tokens.total": 20,
+      }),
+    );
+    expect(inboundSpan.end).toHaveBeenCalledWith(250);
+
+    await service.stop?.(ctx as never);
+  });
+
+  it("skips inbound spans for non-allowlisted channels by default", async () => {
+    const service = createDiagnosticsOtelService({
+      includeLangfuseSessionAttributes: true,
+    });
+    const { ctx, emitTrusted } = createContext();
+    await service.start(ctx as never);
+
+    emitTrusted({
+      type: "message.received",
+      channel: "webchat",
+      sessionId: "session-default",
+      sessionKey: "webchat:session-default",
+      messageId: "message-default",
+      trace: {
+        traceId: "22222222222222222222222222222222",
+        spanId: "cccccccccccccccc",
+        traceFlags: "01",
+      },
+      ts: 100,
+    } as never);
+
+    const inboundStart = telemetryState.tracer.startSpan.mock.calls.find(
+      ([name]) => name === "openclaw.message.inbound",
+    );
+    expect(inboundStart).toBeUndefined();
+
+    await service.stop?.(ctx as never);
+  });
 });
