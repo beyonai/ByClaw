@@ -44,4 +44,28 @@
         ORDER BY param_id desc
     </select>
 
+    <select id="selectOneByParamId" resultMap="ByaiSystemConfigResultMap">
+        SELECT
+            param_id,
+            param_type,
+            param_code,
+            param_name,
+            param_en_name,
+            param_value,
+            param_desc
+        FROM byai_system_config
+        WHERE param_id = #{paramId}
+        LIMIT 1
+    </select>
+
+    <delete id="deleteOneByParamId">
+        DELETE FROM byai_system_config
+        WHERE ctid = (
+            SELECT ctid
+            FROM byai_system_config
+            WHERE param_id = #{paramId}
+            LIMIT 1
+        )
+    </delete>
+
 </mapper>

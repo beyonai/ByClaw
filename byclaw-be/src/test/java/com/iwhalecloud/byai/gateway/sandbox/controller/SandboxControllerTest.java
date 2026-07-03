@@ -18,6 +18,7 @@ import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
 import com.iwhalecloud.byai.manager.entity.sandbox.SsSandboxRecord;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.mapper.sandbox.SsSandboxRecordMapper;
+import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 
 class SandboxControllerTest {
 
@@ -79,7 +80,9 @@ class SandboxControllerTest {
     void listRecords_returnsOpenclawEndpointForJsonStorage() {
         SandboxController controller = new SandboxController();
         SsSandboxRecordMapper sandboxRecordMapper = mock(SsSandboxRecordMapper.class);
+        ByaiSystemConfigService byaiSystemConfigService = mock(ByaiSystemConfigService.class);
         ReflectionTestUtils.setField(controller, "sandboxRecordMapper", sandboxRecordMapper);
+        ReflectionTestUtils.setField(controller, "byaiSystemConfigService", byaiSystemConfigService);
 
         SsSandboxRecord record = new SsSandboxRecord();
         record.setId(1L);
@@ -88,6 +91,7 @@ class SandboxControllerTest {
         record.setCreateTime(new Date());
         when(sandboxRecordMapper.selectByPage(null, null, 0, 20)).thenReturn(List.of(record));
         when(sandboxRecordMapper.countByCondition(null, null)).thenReturn(1);
+        when(byaiSystemConfigService.getDcSystemConfigValueByCode("WEB_BASE_URL")).thenReturn("");
 
         ResponseUtil response = controller.listRecords(Map.of());
 
