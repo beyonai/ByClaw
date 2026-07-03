@@ -2778,7 +2778,6 @@ export function createDiagnosticsOtelService(
           "openclaw.source": lowCardinalityAttr(evt.source),
         };
         messageDispatchStartedCounter.add(1, attrs);
-        debugInboundGate("message.dispatch.started", evt, metadata);
         if (!tracesEnabled || !passesInboundTrustGate(evt, metadata)) {
           return;
         }
@@ -2814,7 +2813,6 @@ export function createDiagnosticsOtelService(
         };
         messageDispatchCompletedCounter.add(1, attrs);
         messageDispatchDurationHistogram.record(evt.durationMs, attrs);
-        debugInboundGate("message.dispatch.completed", evt, metadata);
         if (!tracesEnabled || !passesInboundTrustGate(evt, metadata)) {
           return;
         }
