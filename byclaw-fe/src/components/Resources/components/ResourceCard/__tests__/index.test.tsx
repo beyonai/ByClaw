@@ -2,6 +2,7 @@ jest.mock('@umijs/max', () => ({
   getIntl: () => ({
     formatMessage: ({ id }: { id: string }) => id,
   }),
+  getLocale: () => 'zh-CN',
   useIntl: () => ({
     formatMessage: ({ id }: { id: string }) => id,
   }),
