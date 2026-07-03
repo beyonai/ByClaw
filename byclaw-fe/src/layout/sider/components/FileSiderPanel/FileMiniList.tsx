@@ -120,6 +120,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
   const [createFolderOpen, setCreateFolderOpen] = useState(false);
   const [createFolderParentPath, setCreateFolderParentPath] = useState('');
   const [createFolderName, setCreateFolderName] = useState('');
+  const [createFolderError, setCreateFolderError] = useState('');
   const [creatingFolder, setCreatingFolder] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameTarget, setRenameTarget] = useState<FileBrowserItem | null>(null);
@@ -1019,7 +1020,13 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
   const openCreateFolder = useCallback((parentPath: string) => {
     setCreateFolderParentPath(ensureDirectoryPath(parentPath || ROOT_FILE_PATH));
     setCreateFolderName('');
+    setCreateFolderError('');
     setCreateFolderOpen(true);
+  }, []);
+
+  const handleCreateFolderNameChange = useCallback((name: string) => {
+    setCreateFolderName(name);
+    setCreateFolderError('');
   }, []);
 
   const handleCreateFolder = useCallback(async () => {
@@ -1033,6 +1040,14 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
     setCreatingFolder(true);
     try {
       await ensureFolder({ resourceId, path: parentPath });
+      const siblingRes = await listFiles({ resourceId, path: parentPath });
+      const hasDuplicateFolder = unwrapListResponse<FileBrowserItem>(siblingRes).some(
+        (item) => isDirectory(item) && `${item.name || ''}`.trim() === folderName
+      );
+      if (hasDuplicateFolder) {
+        setCreateFolderError(intl.formatMessage({ id: 'fileBrowser.createFolder.duplicateName' }));
+        return;
+      }
       await createFileBrowserFolder({
         resourceId,
         path: buildTargetFolderPath(parentPath, folderName),
@@ -1040,6 +1055,7 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       message.success(intl.formatMessage({ id: 'fileBrowser.createFolder.success' }));
       setCreateFolderOpen(false);
       setCreateFolderName('');
+      setCreateFolderError('');
       setCreateFolderParentPath('');
       await refreshFileBrowserDirectory(parentPath);
     } catch (error: any) {
@@ -1419,14 +1435,16 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
         onUploadConfirmCancel={handleUploadConfirmCancel}
         createFolderOpen={createFolderOpen}
         createFolderName={createFolderName}
+        createFolderError={createFolderError}
         creatingFolder={creatingFolder}
-        onCreateFolderNameChange={setCreateFolderName}
+        onCreateFolderNameChange={handleCreateFolderNameChange}
         onCreateFolderOk={handleCreateFolder}
         onCreateFolderCancel={() => {
           if (creatingFolder) return;
           setCreateFolderOpen(false);
           setCreateFolderParentPath('');
           setCreateFolderName('');
+          setCreateFolderError('');
         }}
         renameOpen={renameOpen}
         renameTargetName={renameTarget?.name || ''}

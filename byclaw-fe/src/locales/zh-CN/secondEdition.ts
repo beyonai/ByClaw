@@ -328,6 +328,7 @@ export default {
   'fileBrowser.preview.failed': '预览失败',
   'fileBrowser.preview.unavailable': '文件不可在线预览，请下载查看',
   'fileBrowser.createFolder.prompt': '请输入文件夹名称',
+  'fileBrowser.createFolder.duplicateName': '当前目录下已存在同名文件夹',
   'fileBrowser.createFolder.success': '创建文件夹成功',
   'fileBrowser.createFolder.failed': '创建文件夹失败',
   'fileBrowser.search.result': '搜索 "{keyword}" 的结果：{count} 项',

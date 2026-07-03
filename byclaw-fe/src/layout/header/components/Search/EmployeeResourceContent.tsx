@@ -3,12 +3,16 @@ import { Spin } from 'antd';
 import AntdIcon from '@/components/AntdIcon';
 import KnowledgeBaseDetail from '@/layout/sider/components/Knowledge/components/KnowledgeBase/KnowledgeBaseDetail';
 import type { IKnowledgeBaseItem } from '@/layout/sider/components/Knowledge/components/KnowledgeBase/types';
-import type { EmployeeResourceDrillState } from './types';
+import KnowledgeResourceGroupedContent from './KnowledgeResourceGroupedContent';
+import type { EmployeeResourceDrillState, KnowledgeResourceGroup } from './types';
 import styles from './index.module.less';
 
 interface Props {
   tabKey: string;
   list: any[];
+  knowledgeResourceGroups: KnowledgeResourceGroup[];
+  employeeResourceGroups: KnowledgeResourceGroup[];
+  expandAllGroupsByDefault?: boolean;
   currentKnowledgeBase: IKnowledgeBaseItem | null;
   activeSiderAgentResourceId?: string;
   employeeResourceDrillState: EmployeeResourceDrillState | null;
@@ -17,15 +21,19 @@ interface Props {
     formatMessage: (descriptor: { id: string }) => string;
   };
   renderList: (list: any[], renderItem: (item: any) => React.ReactNode, className?: string) => React.ReactNode;
-  renderItemKnowledgeBase: (item: any) => React.ReactNode;
-  renderItemEmployeeResource: (tabKey: string, item: any) => React.ReactNode;
+  renderItemKnowledgeBase: (item: any, group?: KnowledgeResourceGroup) => React.ReactNode;
+  renderItemEmployeeResource: (tabKey: string, item: any, group?: KnowledgeResourceGroup) => React.ReactNode;
   onKnowledgeBaseGoBack: () => void;
+  onKnowledgeFileClick?: () => void;
   onEmployeeResourceGoBack: () => void;
 }
 
 const EmployeeResourceContent = ({
   tabKey,
   list,
+  knowledgeResourceGroups,
+  employeeResourceGroups,
+  expandAllGroupsByDefault,
   currentKnowledgeBase,
   activeSiderAgentResourceId,
   employeeResourceDrillState,
@@ -35,6 +43,7 @@ const EmployeeResourceContent = ({
   renderItemKnowledgeBase,
   renderItemEmployeeResource,
   onKnowledgeBaseGoBack,
+  onKnowledgeFileClick,
   onEmployeeResourceGoBack,
 }: Props) => {
   if (tabKey === 'knowledge') {
@@ -44,12 +53,21 @@ const EmployeeResourceContent = ({
           editable={false}
           dataset={currentKnowledgeBase}
           onGoBack={onKnowledgeBaseGoBack}
+          onFileClick={onKnowledgeFileClick}
           activeAgentResourceId={activeSiderAgentResourceId}
+          quoteDisabled={Boolean(currentKnowledgeBase.quoteDisabled)}
         />
       );
     }
 
-    return renderList(list, renderItemKnowledgeBase, styles.knowledgeResourceList);
+    return (
+      <KnowledgeResourceGroupedContent
+        groups={knowledgeResourceGroups}
+        expandAllByDefault={expandAllGroupsByDefault}
+        renderList={renderList}
+        renderItem={renderItemKnowledgeBase}
+      />
+    );
   }
 
   if (employeeResourceDrillState?.tabKey === tabKey) {
@@ -76,6 +94,18 @@ const EmployeeResourceContent = ({
           )
         )}
       </div>
+    );
+  }
+
+  if (employeeResourceGroups.length) {
+    return (
+      <KnowledgeResourceGroupedContent
+        groups={employeeResourceGroups}
+        listClassName={styles.employeeResourceSiderList}
+        expandAllByDefault={expandAllGroupsByDefault}
+        renderList={renderList}
+        renderItem={(item, group) => renderItemEmployeeResource(tabKey, item, group)}
+      />
     );
   }
 

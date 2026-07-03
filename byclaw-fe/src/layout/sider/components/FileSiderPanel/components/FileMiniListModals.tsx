@@ -28,6 +28,7 @@ interface FileMiniListModalsProps {
 
   createFolderOpen: boolean;
   createFolderName: string;
+  createFolderError?: string;
   creatingFolder: boolean;
   onCreateFolderNameChange: (name: string) => void;
   onCreateFolderOk: () => void;
@@ -94,6 +95,7 @@ const FileMiniListModals: React.FC<FileMiniListModalsProps> = ({
   onUploadConfirmCancel,
   createFolderOpen,
   createFolderName,
+  createFolderError,
   creatingFolder,
   onCreateFolderNameChange,
   onCreateFolderOk,
@@ -161,6 +163,7 @@ const FileMiniListModals: React.FC<FileMiniListModalsProps> = ({
       <CreateFolderModal
         open={createFolderOpen}
         value={createFolderName}
+        error={createFolderError}
         loading={creatingFolder}
         onChange={onCreateFolderNameChange}
         onOk={onCreateFolderOk}

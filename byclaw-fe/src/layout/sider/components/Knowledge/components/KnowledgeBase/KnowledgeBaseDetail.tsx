@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback, useContext, useMemo } from 'react';
-import { Input, Breadcrumb, Tree, Spin, App, ConfigProvider, Dropdown, Button, Tooltip, Upload } from 'antd';
+import { Input, Breadcrumb, Tree, Spin, App, ConfigProvider, Dropdown, Button, Tooltip, Upload, Empty } from 'antd';
 import { EllipsisOutlined, LeftOutlined } from '@ant-design/icons';
 import classnames from 'classnames';
 import { AntdTreeNodeAttribute, EventDataNode } from 'antd/es/tree';
@@ -163,15 +163,21 @@ function toKnowledgeTreeItem(
   };
 }
 
+function normalizeTreeNodeKey(key: React.Key) {
+  const value = String(key ?? '');
+  return value.length > 1 ? value.replace(/\/+$/, '') : value;
+}
+
 function mergeKnowledgeTreeChildren(
   existingChildren: IKnowledgeDetailTreeItem[] = [],
   nextChildren: IKnowledgeDetailTreeItem[]
 ) {
-  const childMap = new Map<React.Key, IKnowledgeDetailTreeItem>();
-  nextChildren.forEach((child) => childMap.set(child.key, child));
+  const childMap = new Map<string, IKnowledgeDetailTreeItem>();
+  nextChildren.forEach((child) => childMap.set(normalizeTreeNodeKey(child.key), child));
   existingChildren.forEach((child) => {
-    const nextChild = childMap.get(child.key);
-    childMap.set(child.key, {
+    const normalizedKey = normalizeTreeNodeKey(child.key);
+    const nextChild = childMap.get(normalizedKey);
+    childMap.set(normalizedKey, {
       ...(nextChild || child),
       ...child,
       children: child.children || nextChild?.children,
@@ -181,11 +187,7 @@ function mergeKnowledgeTreeChildren(
 }
 
 function isSameTreeNodeKey(a: React.Key, b: React.Key) {
-  const normalize = (key: React.Key) => {
-    const value = String(key ?? '');
-    return value.length > 1 ? value.replace(/\/+$/, '') : value;
-  };
-  return normalize(a) === normalize(b);
+  return normalizeTreeNodeKey(a) === normalizeTreeNodeKey(b);
 }
 
 function mergeTreeNodeChildren(
@@ -228,7 +230,8 @@ function buildKnowledgeSearchTree(items: QueryDirAndFileByLevelItem[], datasetId
       const isLast = index === segments.length - 1;
       const isDirectoryNode = !isLast || item.type === 'directory';
       const nodePath = isDirectoryNode ? `${accumulatedPath}${segment}/` : `${accumulatedPath}${segment}`;
-      let node = nodeMap.get(nodePath);
+      const nodeMapKey = normalizeTreeNodeKey(nodePath);
+      let node = nodeMap.get(nodeMapKey);
 
       if (!node) {
         node = {
@@ -244,7 +247,7 @@ function buildKnowledgeSearchTree(items: QueryDirAndFileByLevelItem[], datasetId
           isLeaf: !isDirectoryNode,
         };
         siblings.push(node);
-        nodeMap.set(nodePath, node);
+        nodeMap.set(nodeMapKey, node);
       } else if (isLast) {
         Object.assign(node, {
           id: String(item.id ?? node.id ?? ''),
@@ -275,8 +278,10 @@ interface KnowledgeBaseDetailProps {
   editable?: boolean;
   dataset: IKnowledgeBaseItem;
   onGoBack: () => void;
+  onFileClick?: (item: IKnowledgeDetailTreeItem) => void;
   onSelect?: (item: IKnowledgeCollectionItem, type: IDragType) => void;
   activeAgentResourceId?: string;
+  quoteDisabled?: boolean;
 }
 
 function onDragStart(info: Parameters<Required<TreeProps>['onDragStart']>[0]) {
@@ -289,13 +294,13 @@ function getNodeIcon(p: AntdTreeNodeAttribute) {
   const data = p as unknown as Partial<IKnowledgeDetailTreeItem>;
   const isDirectory = data.type === 'directory' || !isLeaf;
   const { expanded } = p as AntdTreeNodeAttribute & { expanded?: boolean };
-  const iconType =
-    isDirectory && expanded
-      ? 'a-Folder-openwenjianjia-kai'
-      : getFileIconType(title as string, {
-        isDirectory,
-        directoryIconType: 'wenjianjialanse',
-      });
+  let iconType = 'a-Folder-openwenjianjia-kai';
+  if (!isDirectory || !expanded) {
+    iconType = getFileIconType(title as string, {
+      isDirectory,
+      directoryIconType: 'wenjianjialanse',
+    });
+  }
 
   return <AntdIcon type={`icon-${iconType}`} />;
 }
@@ -336,11 +341,10 @@ const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({ blob, fileName, fil
 );
 
 const KnowledgeBaseDetail = (props: KnowledgeBaseDetailProps) => {
-  const { editable, dataset, onGoBack, onSelect, activeAgentResourceId } = props;
+  const { editable, dataset, onGoBack, onFileClick, onSelect, activeAgentResourceId, quoteDisabled } = props;
   const [searchValue, setSearchValue] = useState('');
   const [loading, setLoading] = useState(false);
   const [treeData, setTreeData] = useState<IKnowledgeDetailTreeItem[]>([]);
-  const [searchHydratedKeys, setSearchHydratedKeys] = useState<Set<React.Key>>(new Set());
   const treeWrap = useRef<HTMLDivElement>(null);
   const treeClickTimerRef = useRef<number | null>(null);
   const expandedDirKeysRef = useRef<Set<string>>(new Set());
@@ -421,7 +425,6 @@ const KnowledgeBaseDetail = (props: KnowledgeBaseDetailProps) => {
   const refreshKnowledgeDetail = useCallback(
     async (options?: { rootLoading?: boolean }) => {
       const keyword = searchValue.trim();
-      setSearchHydratedKeys(new Set());
       if (!keyword) {
         await qryFlatternList('-1', options);
         await repopulateExpandedDirectories();
@@ -863,24 +866,28 @@ const KnowledgeBaseDetail = (props: KnowledgeBaseDetailProps) => {
         treeClickTimerRef.current = null;
         if (node.type === 'file') {
           void handlePreviewFile(node);
+          onFileClick?.(node);
           return;
         }
         onSelect?.(node, getTreeNodeDragType(node));
       }, 220);
     },
-    [clearTreeClickTimer, getTreeNodeDragType, handlePreviewFile, onSelect]
+    [clearTreeClickTimer, getTreeNodeDragType, handlePreviewFile, onFileClick, onSelect]
   );
 
   const handleTreeNodeDoubleClick = useCallback(
     (event: React.MouseEvent, node: EventDataNode<IKnowledgeDetailTreeItem>) => {
       event.stopPropagation();
       clearTreeClickTimer();
+      if (quoteDisabled) {
+        return;
+      }
       EventEmitter.emit('queryInput-insert-item', {
         item: node,
         type: getTreeNodeDragType(node),
       });
     },
-    [EventEmitter, clearTreeClickTimer, getTreeNodeDragType]
+    [EventEmitter, clearTreeClickTimer, getTreeNodeDragType, quoteDisabled]
   );
 
   useEffect(() => {
@@ -889,7 +896,7 @@ const KnowledgeBaseDetail = (props: KnowledgeBaseDetailProps) => {
 
   const expandFolder = ({ key, children }: EventDataNode<IKnowledgeDetailTreeItem>) =>
     new Promise<void>((resolve) => {
-      if (children) {
+      if (searchValue.trim() || children) {
         resolve();
         return;
       }
@@ -898,23 +905,6 @@ const KnowledgeBaseDetail = (props: KnowledgeBaseDetailProps) => {
         resolve();
       });
     });
-
-  const hydrateSearchDirectoryChildren = useCallback(
-    async (node: EventDataNode<IKnowledgeDetailTreeItem>) => {
-      const keyword = searchValue.trim();
-      if (!keyword || node.type === 'file' || searchHydratedKeys.has(node.key)) {
-        return;
-      }
-      setSearchHydratedKeys((prev) => {
-        const next = new Set(prev);
-        next.add(node.key);
-        return next;
-      });
-      const children = await qryFlatternList(String(node.key), { rootLoading: false });
-      setTreeData((origin) => mergeTreeNodeChildren(origin, node.key, children));
-    },
-    [qryFlatternList, searchHydratedKeys, searchValue]
-  );
 
   const onMenuItemClick = useCallback(
     (key: string, item: IKnowledgeDetailTreeItem) => {
@@ -1021,111 +1011,114 @@ const KnowledgeBaseDetail = (props: KnowledgeBaseDetailProps) => {
         </div>
         <Spin spinning={loading} wrapperClassName={commonStyles.listSpinner}>
           <div ref={treeWrap} className={styles.treeWrap}>
-            <Tree.DirectoryTree
-              showIcon
-              allowDrop={() => false}
-              onDragStart={onDragStart}
-              selectable={false}
-              height={virtualHeight}
-              treeData={treeData}
-              loadData={expandFolder}
-              onExpand={(_, info) => {
-                const node = info.node as EventDataNode<IKnowledgeDetailTreeItem>;
-                const nodeKey = String(node.key);
-                if (info.expanded) {
-                  if (node.type !== 'file') {
-                    expandedDirKeysRef.current.add(nodeKey);
+            {!loading && treeData.length === 0 ? (
+              <div className={styles.detailEmpty}>
+                <Empty description={intl.formatMessage({ id: 'common.noData' })} image={Empty.PRESENTED_IMAGE_SIMPLE} />
+              </div>
+            ) : (
+              <Tree.DirectoryTree
+                showIcon
+                allowDrop={() => false}
+                onDragStart={onDragStart}
+                selectable={false}
+                height={virtualHeight}
+                treeData={treeData}
+                loadData={expandFolder}
+                onExpand={(_, info) => {
+                  const node = info.node as EventDataNode<IKnowledgeDetailTreeItem>;
+                  const nodeKey = String(node.key);
+                  if (info.expanded) {
+                    if (node.type !== 'file') {
+                      expandedDirKeysRef.current.add(nodeKey);
+                    }
+                  } else {
+                    expandedDirKeysRef.current.delete(nodeKey);
                   }
-                  void hydrateSearchDirectoryChildren(node);
-                } else {
-                  expandedDirKeysRef.current.delete(nodeKey);
-                }
-              }}
-              icon={getNodeIcon}
-              className={classnames(commonStyles.tree, styles.knowledgeTree, {
-                [styles.selectable]: !!onSelect,
-                [styles.notselectable]: !onSelect,
-              })}
-              onClick={handleTreeNodeClick}
-              onDoubleClick={handleTreeNodeDoubleClick}
-              draggable={editable ? { icon: <span /> } : false}
-              titleRender={(item) => {
-                if (!editable) {
-                  return item.title;
-                }
-                const menus = [];
-                if (item.type === 'directory') {
+                }}
+                icon={getNodeIcon}
+                className={classnames(commonStyles.tree, styles.knowledgeTree, {
+                  [styles.selectable]: !!onSelect,
+                  [styles.notselectable]: !onSelect,
+                })}
+                onClick={handleTreeNodeClick}
+                onDoubleClick={handleTreeNodeDoubleClick}
+                draggable={editable ? { icon: <span /> } : false}
+                titleRender={(item) => {
+                  if (!editable) {
+                    return item.title;
+                  }
+                  const menus = [];
+                  if (item.type === 'directory') {
+                    menus.push(
+                      {
+                        key: 'upload',
+                        label: (
+                          <Upload
+                            showUploadList={false}
+                            multiple
+                            beforeUpload={(_, fileList) => {
+                              void handleUploadSelect(getTreeItemDirectoryPath(item), fileList as unknown as File[]);
+                              return false;
+                            }}
+                          >
+                            <div>{intl.formatMessage({ id: 'knowledgeDetail.uploadFile' })}</div>
+                          </Upload>
+                        ),
+                      },
+                      { key: 'createFolder', label: intl.formatMessage({ id: 'knowledgeDetail.newSubFolder' }) },
+                      {
+                        key: 'createSiblingFolder',
+                        label: intl.formatMessage({ id: 'knowledgeDetail.newSiblingFolder' }),
+                      }
+                    );
+                  }
+                  const canPreview = item.type === 'file' && isPreviewable(getKnowledgeItemName(item));
+                  if (canPreview) {
+                    menus.push({
+                      key: 'preview',
+                      label: intl.formatMessage({ id: 'fileBrowser.action.preview' }),
+                    });
+                  }
                   menus.push(
                     {
-                      key: 'upload',
-                      label: (
-                        <Upload
-                          showUploadList={false}
-                          multiple
-                          beforeUpload={(_, fileList) => {
-                            void handleUploadSelect(getTreeItemDirectoryPath(item), fileList as unknown as File[]);
-                            return false;
-                          }}
-                        >
-                          <div>{intl.formatMessage({ id: 'knowledgeDetail.uploadFile' })}</div>
-                        </Upload>
-                      ),
+                      key: 'download',
+                      label: intl.formatMessage({ id: 'directoryManage.downloadFile' }),
                     },
-                    { key: 'createFolder', label: intl.formatMessage({ id: 'knowledgeDetail.newSubFolder' }) },
+                    { key: 'rename', label: intl.formatMessage({ id: 'directoryManage.rename' }) },
+                    { key: 'delete', label: intl.formatMessage({ id: 'common.delete' }) },
                     {
-                      key: 'createSiblingFolder',
-                      label: intl.formatMessage({ id: 'knowledgeDetail.newSiblingFolder' }),
+                      key: 'saveToSessionFiles',
+                      label: intl.formatMessage({ id: 'fileBrowser.save.toSessionFiles' }),
+                    },
+                    {
+                      key: 'saveToSharedFiles',
+                      label: intl.formatMessage({ id: 'fileBrowser.save.toSharedFiles' }),
                     }
                   );
-                }
-                const canPreview = item.type === 'file' && isPreviewable(getKnowledgeItemName(item));
-                menus.push(
-                  ...(canPreview
-                    ? [
-                      {
-                        key: 'preview',
-                        label: intl.formatMessage({ id: 'fileBrowser.action.preview' }),
-                      },
-                    ]
-                    : []),
-                  {
-                    key: 'download',
-                    label: intl.formatMessage({ id: 'directoryManage.downloadFile' }),
-                  },
-                  { key: 'rename', label: intl.formatMessage({ id: 'directoryManage.rename' }) },
-                  { key: 'delete', label: intl.formatMessage({ id: 'common.delete' }) },
-                  {
-                    key: 'saveToSessionFiles',
-                    label: intl.formatMessage({ id: 'fileBrowser.save.toSessionFiles' }),
-                  },
-                  {
-                    key: 'saveToSharedFiles',
-                    label: intl.formatMessage({ id: 'fileBrowser.save.toSharedFiles' }),
-                  }
-                );
-                return (
-                  <>
-                    {item.title}
-                    <Dropdown
-                      trigger={['hover']}
-                      menu={{
-                        items: menus,
-                        onClick: ({ key, domEvent }) => {
-                          domEvent.stopPropagation();
-                          onMenuItemClick(key, item);
-                        },
-                      }}
-                    >
-                      <EllipsisOutlined
-                        className={commonStyles.treeActionIcon}
-                        onClick={(event) => event.stopPropagation()}
-                        onMouseDown={(event) => event.stopPropagation()}
-                      />
-                    </Dropdown>
-                  </>
-                );
-              }}
-            />
+                  return (
+                    <>
+                      {item.title}
+                      <Dropdown
+                        trigger={['hover']}
+                        menu={{
+                          items: menus,
+                          onClick: ({ key, domEvent }) => {
+                            domEvent.stopPropagation();
+                            onMenuItemClick(key, item);
+                          },
+                        }}
+                      >
+                        <EllipsisOutlined
+                          className={commonStyles.treeActionIcon}
+                          onClick={(event) => event.stopPropagation()}
+                          onMouseDown={(event) => event.stopPropagation()}
+                        />
+                      </Dropdown>
+                    </>
+                  );
+                }}
+              />
+            )}
           </div>
         </Spin>
       </div>
