@@ -56,6 +56,9 @@ const useEmployeeResourceDrill = ({
 
   const handleEmployeeResourceDoubleClick = useCallback(
     (tabKey: string, item: ResourceItem) => {
+      if (item.quoteDisabled) {
+        return;
+      }
       const type = getEmployeeResourceQuoteType(tabKey);
       if (!type) {
         return;
@@ -100,7 +103,7 @@ const useEmployeeResourceDrill = ({
       setEmployeeResourceDrillLoading(true);
       try {
         const detail = await queryResourceMembers({ resourceId: item.resourceId });
-        const detailDrillItems = getEmployeeResourceDrillItems(detail);
+        const detailDrillItems = getEmployeeResourceDrillItems({ ...detail, quoteDisabled: item.quoteDisabled });
         const drillItems = detailDrillItems.length ? detailDrillItems : getEmployeeResourceDrillItems(item);
 
         setEmployeeResourceDrillState({

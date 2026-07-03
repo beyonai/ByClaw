@@ -275,8 +275,10 @@ interface KnowledgeBaseDetailProps {
   editable?: boolean;
   dataset: IKnowledgeBaseItem;
   onGoBack: () => void;
+  onFileClick?: (item: IKnowledgeDetailTreeItem) => void;
   onSelect?: (item: IKnowledgeCollectionItem, type: IDragType) => void;
   activeAgentResourceId?: string;
+  quoteDisabled?: boolean;
 }
 
 function onDragStart(info: Parameters<Required<TreeProps>['onDragStart']>[0]) {
@@ -289,13 +291,13 @@ function getNodeIcon(p: AntdTreeNodeAttribute) {
   const data = p as unknown as Partial<IKnowledgeDetailTreeItem>;
   const isDirectory = data.type === 'directory' || !isLeaf;
   const { expanded } = p as AntdTreeNodeAttribute & { expanded?: boolean };
-  const iconType =
-    isDirectory && expanded
-      ? 'a-Folder-openwenjianjia-kai'
-      : getFileIconType(title as string, {
-        isDirectory,
-        directoryIconType: 'wenjianjialanse',
-      });
+  let iconType = 'a-Folder-openwenjianjia-kai';
+  if (!isDirectory || !expanded) {
+    iconType = getFileIconType(title as string, {
+      isDirectory,
+      directoryIconType: 'wenjianjialanse',
+    });
+  }
 
   return <AntdIcon type={`icon-${iconType}`} />;
 }
@@ -336,7 +338,7 @@ const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({ blob, fileName, fil
 );
 
 const KnowledgeBaseDetail = (props: KnowledgeBaseDetailProps) => {
-  const { editable, dataset, onGoBack, onSelect, activeAgentResourceId } = props;
+  const { editable, dataset, onGoBack, onFileClick, onSelect, activeAgentResourceId, quoteDisabled } = props;
   const [searchValue, setSearchValue] = useState('');
   const [loading, setLoading] = useState(false);
   const [treeData, setTreeData] = useState<IKnowledgeDetailTreeItem[]>([]);
@@ -863,24 +865,28 @@ const KnowledgeBaseDetail = (props: KnowledgeBaseDetailProps) => {
         treeClickTimerRef.current = null;
         if (node.type === 'file') {
           void handlePreviewFile(node);
+          onFileClick?.(node);
           return;
         }
         onSelect?.(node, getTreeNodeDragType(node));
       }, 220);
     },
-    [clearTreeClickTimer, getTreeNodeDragType, handlePreviewFile, onSelect]
+    [clearTreeClickTimer, getTreeNodeDragType, handlePreviewFile, onFileClick, onSelect]
   );
 
   const handleTreeNodeDoubleClick = useCallback(
     (event: React.MouseEvent, node: EventDataNode<IKnowledgeDetailTreeItem>) => {
       event.stopPropagation();
       clearTreeClickTimer();
+      if (quoteDisabled) {
+        return;
+      }
       EventEmitter.emit('queryInput-insert-item', {
         item: node,
         type: getTreeNodeDragType(node),
       });
     },
-    [EventEmitter, clearTreeClickTimer, getTreeNodeDragType]
+    [EventEmitter, clearTreeClickTimer, getTreeNodeDragType, quoteDisabled]
   );
 
   useEffect(() => {
@@ -1079,15 +1085,13 @@ const KnowledgeBaseDetail = (props: KnowledgeBaseDetailProps) => {
                   );
                 }
                 const canPreview = item.type === 'file' && isPreviewable(getKnowledgeItemName(item));
+                if (canPreview) {
+                  menus.push({
+                    key: 'preview',
+                    label: intl.formatMessage({ id: 'fileBrowser.action.preview' }),
+                  });
+                }
                 menus.push(
-                  ...(canPreview
-                    ? [
-                      {
-                        key: 'preview',
-                        label: intl.formatMessage({ id: 'fileBrowser.action.preview' }),
-                      },
-                    ]
-                    : []),
                   {
                     key: 'download',
                     label: intl.formatMessage({ id: 'directoryManage.downloadFile' }),
