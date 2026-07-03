@@ -131,7 +131,7 @@ export const transformList = (flatList: IMessageListItem[], isStreamEnd: boolean
       }
 
       default: {
-        let myShouldOpen = true;
+        let myShouldOpen = false;
 
         if (currentParent) {
           if (item?.objectType === 'function_response' && !currentParent.shouldOpen) {
@@ -169,7 +169,7 @@ export const transformList = (flatList: IMessageListItem[], isStreamEnd: boolean
               break;
             }
             default:
-              myShouldOpen = true;
+              myShouldOpen = false;
               break;
           }
         }

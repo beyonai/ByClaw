@@ -38,6 +38,7 @@ export interface ResourceItem {
   useStartTime?: string;
   objectKey?: string;
   targetContent?: string;
+  quoteDisabled?: boolean;
 }
 
 export const PROPERTY_RESOURCE_TYPE = 'PROPERTY';
