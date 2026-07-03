@@ -1,7 +1,8 @@
 import ModalDrawer from '@/components/ModalDrawer';
 import { useRequest } from '@/hooks/useRequest';
-import { createFolder } from '@/service/knowledgeCenter';
+import { createFolder, queryDirAndFileByLevel } from '@/service/knowledgeCenter';
 import { Form, Input, message } from 'antd';
+import { useState } from 'react';
 // @ts-ignore
 import { useIntl } from '@umijs/max';
 
@@ -19,6 +20,7 @@ const AddFolderModal = (props: RenameModalProps) => {
 
   const intl = useIntl();
   const [form] = Form.useForm();
+  const [checkingDuplicate, setCheckingDuplicate] = useState(false);
 
   const { mutate, isLoading } = useRequest({
     mutationFn: (params) => createFolder(params),
@@ -32,13 +34,45 @@ const AddFolderModal = (props: RenameModalProps) => {
   });
 
   const handleOk = async () => {
+    if (checkingDuplicate || isLoading) {
+      return;
+    }
     const res = await form.validateFields();
     if (res) {
       const { folderName, directoryDescription } = res;
       const rid = baseInfo?.resourceId;
+      const trimmedFolderName = String(folderName || '').trim();
+      if (rid === undefined || rid === null || rid === '') {
+        return;
+      }
+      const resourceId = Number(rid);
+      try {
+        setCheckingDuplicate(true);
+        const siblingList = await queryDirAndFileByLevel({
+          resourceId,
+          directoryPath: parentDirectoryPath,
+        });
+        const duplicateFolder = (siblingList || []).some(
+          (item) => item.type === 'directory' && String(item.name || '').trim() === trimmedFolderName
+        );
+        if (duplicateFolder) {
+          form.setFields([
+            {
+              name: 'folderName',
+              errors: [intl.formatMessage({ id: 'directoryManage.folderNameDuplicate' })],
+            },
+          ]);
+          return;
+        }
+      } catch (error: any) {
+        message.error(error?.message || intl.formatMessage({ id: 'common.operationFailed' }));
+        return;
+      } finally {
+        setCheckingDuplicate(false);
+      }
       mutate({
-        resourceId: rid !== undefined && rid !== null && rid !== '' ? Number(rid) : rid,
-        directoryName: folderName,
+        resourceId,
+        directoryName: trimmedFolderName,
         directoryPath: parentDirectoryPath,
         directoryDescription: directoryDescription ?? '',
       });
@@ -54,7 +88,7 @@ const AddFolderModal = (props: RenameModalProps) => {
       showFoot={false}
       onCancel={onCancel}
       onOk={handleOk}
-      confirmLoading={isLoading}
+      confirmLoading={checkingDuplicate || isLoading}
     >
       <Form form={form} labelCol={{ span: 4 }} initialValues={{ directoryDescription: '' }}>
         <Form.Item
