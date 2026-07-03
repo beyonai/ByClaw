@@ -1,6 +1,6 @@
 ---
 name: by-knowledge-manager
-description: "Manage Baiying/by knowledge base content through the by-knowledge-manager CLI. Use when an agent or user needs to operate a knowledge base: list/create/rename/delete directories, check upload conflicts, upload or overwrite files, trigger or inspect builds, download files or directory archives, read file line ranges, remove files, or run semantic chunk search across one or more knowledge base resource IDs."
+description: "Manage knowledge base content through the by-knowledge-manager CLI. Use when an agent or user needs to operate a knowledge base: list/create/rename/delete directories, check upload conflicts, upload or overwrite files, trigger or inspect builds, download files or directory archives, read file line ranges, remove files, or run semantic chunk search across one or more knowledge base resource IDs."
 ---
 
 # BY Knowledge Manager
@@ -41,6 +41,7 @@ node /app/scripts/by-knowledge-manager.mjs upload \
 - Use `--dry-run` on mutating commands when validating paths or payloads before changing the knowledge base.
 - Ask before destructive or irreversible operations unless the user explicitly requested them: `delete-dir`, `remove-file`, and overwriting via `update-file`.
 - After any file or directory operation that changes knowledge base contents (`mkdir`, `rename-dir`, `delete-dir`, `upload`, `update-file`, `remove-file`), run `list` on the target parent directory to verify the expected result.
+- Only upload or update supported knowledge base file types: `.md`, `.markdown`, `.txt`, `.pdf`, `.docx`, `.doc`, `.pptx`, `.ppt`, `.xlsx`, `.xls`, `.csv`. Directly refuse requests to ingest any other file type.
 - Preserve knowledge base paths exactly. Paths are absolute inside the knowledge base, such as `/`, `/产品资料`, or `/产品资料/a.md`.
 - Report the CLI JSON result back to the user in plain language, especially `ok`, `action`, created/renamed paths, build status, conflict paths, downloaded output path, and search hits.
 
@@ -82,6 +83,8 @@ node /app/scripts/by-knowledge-manager.mjs list --resource-id RESOURCE_ID --dire
 
 ### Upload new files
 
+Only proceed when every target file has one of these extensions: `.md`, `.markdown`, `.txt`, `.pdf`, `.docx`, `.doc`, `.pptx`, `.ppt`, `.xlsx`, `.xls`, `.csv`. If any file has another extension, refuse the upload request instead of calling the CLI.
+
 Check conflicts first when the user does not explicitly want overwrite behavior:
 
 ```bash
@@ -103,6 +106,8 @@ node /app/scripts/by-knowledge-manager.mjs list --resource-id RESOURCE_ID --dire
 Use `--process-front-matter false` only when front matter should be preserved as normal content instead of processed by the backend.
 
 ### Overwrite existing files
+
+Only proceed when every replacement file has one of the supported upload extensions: `.md`, `.markdown`, `.txt`, `.pdf`, `.docx`, `.doc`, `.pptx`, `.ppt`, `.xlsx`, `.xls`, `.csv`. If any file has another extension, refuse the update request instead of calling the CLI.
 
 Use `update-file` only when overwrite is intended. It checks conflicts by default and uploads with overwrite enabled.
 

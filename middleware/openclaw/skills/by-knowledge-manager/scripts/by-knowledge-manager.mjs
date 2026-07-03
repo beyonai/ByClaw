@@ -10,6 +10,19 @@ const DEFAULT_CONTEXT_PATH = "/byaiService";
 const DEFAULT_SIGNATURE_SALT = "{#@*A12^c0+}";
 const DEFAULT_BACKEND_SERVICE_NAME = "ByaiService";
 const SERVICE_DISCOVERY_INSTANCE_PREFIX = "byai_gateway:sd:instances:";
+const SUPPORTED_UPLOAD_EXTENSIONS = new Set([
+  ".md",
+  ".markdown",
+  ".txt",
+  ".pdf",
+  ".docx",
+  ".doc",
+  ".pptx",
+  ".ppt",
+  ".xlsx",
+  ".xls",
+  ".csv",
+]);
 
 function parseArgs(argv) {
   const args = { _: [] };
@@ -757,13 +770,13 @@ function helpManual() {
       upload: {
         description: "上传文件到知识库目录，成功后自动触发构建",
         required: ["--resource-id", "--directory-path", "--file-path"],
-        optional: ["可重复传 --file-path", "--file-description", "--process-front-matter true|false", "--check-conflicts"],
+        optional: ["可重复传 --file-path", "--file-description", "--process-front-matter true|false", "--check-conflicts", "仅支持 .md/.markdown/.txt/.pdf/.docx/.doc/.pptx/.ppt/.xlsx/.xls/.csv"],
         example: "upload --resource-id 10037121 --directory-path /产品资料 --file-path /tmp/a.md",
       },
       "update-file": {
         description: "覆盖上传文件，默认先检查冲突，成功后自动触发构建",
         required: ["--resource-id", "--directory-path", "--file-path"],
-        optional: ["可重复传 --file-path", "--file-description", "--process-front-matter true|false", "--skip-conflict-check"],
+        optional: ["可重复传 --file-path", "--file-description", "--process-front-matter true|false", "--skip-conflict-check", "仅支持 .md/.markdown/.txt/.pdf/.docx/.doc/.pptx/.ppt/.xlsx/.xls/.csv"],
         example: "update-file --resource-id 10037121 --directory-path /产品资料 --file-path /tmp/a.md",
       },
       build: {
@@ -943,8 +956,13 @@ function localFiles(args) {
     throw new Error("缺少 --file-path");
   }
   for (const filePath of files) {
-    if (!fs.existsSync(expandHome(filePath))) {
+    const resolvedPath = expandHome(filePath);
+    if (!fs.existsSync(resolvedPath)) {
       throw new Error(`文件不存在: ${filePath}`);
+    }
+    const extension = path.extname(resolvedPath).toLowerCase();
+    if (!SUPPORTED_UPLOAD_EXTENSIONS.has(extension)) {
+      throw new Error(`不支持的文件类型: ${filePath}。仅支持 ${[...SUPPORTED_UPLOAD_EXTENSIONS].join(", ")}`);
     }
   }
   return files;
