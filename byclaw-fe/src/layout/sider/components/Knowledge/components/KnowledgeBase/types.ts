@@ -12,6 +12,7 @@ export interface IKnowledgeBaseItem {
   resourceStatus: string;
   isTop: string;
   ownerType?: string;
+  quoteDisabled?: boolean;
 }
 
 // 知识库文档类型定义

@@ -37,6 +37,8 @@ import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceArtifactSe
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceCatalogService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtToolKitService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceRelDetailService;
+import com.iwhalecloud.byai.manager.entity.ontology.SsResExtOntology;
+import com.iwhalecloud.byai.manager.mapper.ontology.SsResExtOntologyMapper;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtViewService;
 import com.iwhalecloud.byai.manager.domain.resource.util.DigEmployeeRedisKeys;
@@ -169,6 +171,9 @@ public class DigitalEmployeeApplicationService {
 
     @Autowired
     private SsResourceRelDetailService ssResourceRelDetailService;
+
+    @Autowired
+    private SsResExtOntologyMapper ssResExtOntologyMapper;
 
     @Autowired
     private SsResourceCatalogService ssResourceCatalogService;
@@ -822,6 +827,29 @@ public class DigitalEmployeeApplicationService {
         EmployeeIdDTO employeeIdDTO = new EmployeeIdDTO();
         employeeIdDTO.setResourceId(digitalEmployeeId);
         return this.findDetailsById(employeeIdDTO);
+    }
+
+    /**
+     * 以给定的全量目标 relIds 覆盖式同步数字员工的关联资源明细，并触发运行期重同步。
+     * 供本体绑定等场景复用：调用方自行计算好目标集合（多退少补），本方法只做落库 + 同步。
+     *
+     * @param digitalEmployeeId 数字员工资源 ID
+     * @param targetRelIds 目标全量关联资源 ID（为空表示清空全部关联）
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void syncRelResourcesByTargetIds(Long digitalEmployeeId, List<Long> targetRelIds) {
+        if (digitalEmployeeId == null) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
+                I18nUtil.get("digemployee.processor.param.notnull"));
+        }
+        SsResource ssResource = ssResourceService.findById(digitalEmployeeId);
+        List<SsResourceRelDetail> resourceRelDetails = ssResourceRelDetailService.findByResourceId(digitalEmployeeId);
+        List<Long> safeTarget = targetRelIds == null ? Collections.emptyList()
+            : targetRelIds.stream().filter(Objects::nonNull).distinct().collect(Collectors.toList());
+        this.compareSsResourceRelDetail(ssResource, safeTarget, resourceRelDetails, null);
+        this.rebuildAndSaveDigitalEmployeeRelSkills(digitalEmployeeId);
+        this.synOpenClawWorkSpace(digitalEmployeeId);
+        operationLogService.recordOperationLog(ssResource, OperationTypeEnum.UPDATE);
     }
 
     private List<SsResource> findInstallRelResources(List<Long> installRelIds) {
@@ -1795,6 +1823,9 @@ public class DigitalEmployeeApplicationService {
             }
         }
 
+        // 本体类关联资源：注入 ontologyBaseCode（取自 ss_res_ext_ontology.pid），并重建 relOntology 明细
+        enrichOntologyRelResources(relResourceList, digitalEmployeeDetailsDTO);
+
         digitalEmployeeDetailsDTO.setRelIds(relIds);
         digitalEmployeeDetailsDTO.setRelResourceList(relResourceList);
         List<Map<String, Object>> relSkills = buildRelSkillsFromRelations(resourceId);
@@ -1820,6 +1851,110 @@ public class DigitalEmployeeApplicationService {
         digitalEmployeeDetailsDTO.setTargetContent(null);
 
         return digitalEmployeeDetailsDTO;
+    }
+
+    /**
+     * 为本体类关联资源(ONTOLOGY_BASE/SCENE/VIEW/OBJECT)注入 ontologyBaseCode，并重建 relOntology 扁平明细。
+     * ontologyBaseCode 取自 ss_res_ext_ontology.pid；relOntology 的路径(sceneId/viewCode/objectCode 等)
+     * 由资源树本身重建：resource_code 即各级编码、resource_name 即名称、parent_resource_id 即层级，
+     * 不依赖 ext.target_content 格式（快照对象的 ext 为 datacloud 原始格式，缺 sceneId，会导致回显对不上）。
+     */
+    private void enrichOntologyRelResources(List<SsResourceDTO> relResourceList, DigitalEmployeeDetailsDTO details) {
+        if (CollectionUtils.isEmpty(relResourceList)) {
+            return;
+        }
+        Set<String> ontologyBizTypes = Set.of("ONTOLOGY_BASE", "SCENE", "VIEW", "OBJECT");
+        List<SsResourceDTO> ontologyResources = relResourceList.stream()
+            .filter(r -> r != null && ontologyBizTypes.contains(r.getResourceBizType())).collect(Collectors.toList());
+        if (CollectionUtils.isEmpty(ontologyResources)) {
+            return;
+        }
+        // ontologyBaseCode 注入（Part B）
+        List<Long> ids = ontologyResources.stream().map(SsResource::getResourceId).filter(Objects::nonNull)
+            .collect(Collectors.toList());
+        List<SsResExtOntology> exts = ssResExtOntologyMapper.selectByResourceIds(ids);
+        Map<Long, String> pidMap = new HashMap<>();
+        if (exts != null) {
+            for (SsResExtOntology e : exts) {
+                pidMap.put(e.getResourceId(), e.getPid());
+            }
+        }
+
+        // 构建 id->资源 映射用于回溯父链：先放入关联资源，再补齐缺失的祖先
+        Map<Long, SsResource> byId = new HashMap<>();
+        for (SsResourceDTO r : relResourceList) {
+            if (r != null && r.getResourceId() != null) {
+                byId.put(r.getResourceId(), r);
+            }
+        }
+        boolean added = true;
+        while (added) {
+            added = false;
+            List<Long> missing = new ArrayList<>();
+            for (SsResource r : new ArrayList<>(byId.values())) {
+                Long p = r.getParentResourceId();
+                if (p != null && p > 0 && !byId.containsKey(p)) {
+                    missing.add(p);
+                }
+            }
+            if (!missing.isEmpty()) {
+                List<SsResource> loaded = ssResourceService
+                    .findByIdList(missing.stream().distinct().collect(Collectors.toList()));
+                for (SsResource s : loaded) {
+                    if (s != null && !byId.containsKey(s.getResourceId())) {
+                        byId.put(s.getResourceId(), s);
+                        added = true;
+                    }
+                }
+            }
+        }
+
+        List<JSONObject> relOntology = new ArrayList<>();
+        for (SsResourceDTO dto : ontologyResources) {
+            String baseCode = pidMap.get(dto.getResourceId());
+            dto.setOntologyBaseCode(baseCode);
+
+            JSONObject entry = new JSONObject();
+            entry.put("resourceId", dto.getResourceId());
+            entry.put("resourceBizType", dto.getResourceBizType());
+            entry.put("ontologyBaseCode", baseCode);
+            entry.put("resourceName", dto.getResourceName());
+
+            String biz = dto.getResourceBizType();
+            if ("SCENE".equals(biz)) {
+                entry.put("sceneId", dto.getResourceCode());
+                entry.put("sceneName", dto.getResourceName());
+            }
+            else if ("VIEW".equals(biz)) {
+                entry.put("viewCode", dto.getResourceCode());
+                entry.put("viewName", dto.getResourceName());
+                SsResource scene = byId.get(dto.getParentResourceId());
+                if (scene != null) {
+                    entry.put("sceneId", scene.getResourceCode());
+                    entry.put("sceneName", scene.getResourceName());
+                }
+            }
+            else if ("OBJECT".equals(biz)) {
+                entry.put("objectCode", dto.getResourceCode());
+                entry.put("objectName", dto.getResourceName());
+                SsResource parent = byId.get(dto.getParentResourceId());
+                if (parent != null && "VIEW".equals(parent.getResourceBizType())) {
+                    entry.put("viewCode", parent.getResourceCode());
+                    entry.put("viewName", parent.getResourceName());
+                    SsResource scene = byId.get(parent.getParentResourceId());
+                    if (scene != null) {
+                        entry.put("sceneId", scene.getResourceCode());
+                        entry.put("sceneName", scene.getResourceName());
+                    }
+                }
+                else if (parent != null && "SCENE".equals(parent.getResourceBizType())) {
+                    entry.put("sceneId", parent.getResourceCode());
+                    entry.put("sceneName", parent.getResourceName());
+                }
+            }
+            relOntology.add(entry);
+        }
+        details.setRelOntology(relOntology);
     }
 
     /**

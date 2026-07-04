@@ -24,4 +24,12 @@ public interface SsResourceRelDetailService extends IService<SsResourceRelDetail
     List<SsResourceRelDetailDTO> querySkillsForOpenApi(Long resourceId);
 
         List<SsResourceRelDetail> find(Long resourceId, Long relResourceId);
+
+    /**
+     * 统计某资源被多少条关系明细引用（跨所有数字员工），用于虚拟资源孤儿判断。
+     *
+     * @param relResourceId 被关联资源 ID
+     * @return 引用条数
+     */
+    long countByRelResourceId(Long relResourceId);
 }

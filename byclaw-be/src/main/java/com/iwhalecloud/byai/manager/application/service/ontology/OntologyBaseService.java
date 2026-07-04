@@ -7,6 +7,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.iwhalecloud.byai.common.constants.resource.ResourceBizType;
 import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.feign.client.FeignDataCloudService;
+import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.dto.ontology.OntologyBaseRegisterRequest;
@@ -49,6 +50,7 @@ public class OntologyBaseService {
     private static final Long ROOT_PARENT_ID = -1L;
     /** 平台管理员 adminvip 的用户 id：企业本体刷新时统一记为创建者/更新者（写死，避免按编码查库）。 */
     private static final Long ADMIN_VIP_USER_ID = 10001L;
+    private static final String ADMIN_VIP_USER_CODE = "adminvip";
 
     @Autowired
     private FeignDataCloudService feignDataCloudService;
@@ -322,6 +324,7 @@ public class OntologyBaseService {
      */
     @Transactional(rollbackFor = Exception.class)
     public OntologyRefreshResult refreshEnterpriseBases(String ownerType) {
+        assertEnterpriseAdmin();
         String owner = normalizeOwnerType(ownerType);
         OntologyRefreshResult result = new OntologyRefreshResult();
         // 企业刷新统一以平台管理员 adminvip（id=10001）作为创建者/更新者
@@ -510,6 +513,18 @@ public class OntologyBaseService {
 
     private String normalizeOwnerType(String ownerType) {
         return StringUtils.isBlank(ownerType) ? "personal" : ownerType;
+    }
+
+    /**
+     * 校验刷新企业本体库的权限：仅平台/业务/组织管理员或超管(adminvip)可操作，与「企业 tab 创建资源」同一角色集。
+     */
+    private void assertEnterpriseAdmin() {
+        boolean allowed = CurrentUserHolder.isBusinessAdmin() || CurrentUserHolder.isOrganizationAdmin()
+            || CurrentUserHolder.isPlatformManager()
+            || ADMIN_VIP_USER_CODE.equalsIgnoreCase(CurrentUserHolder.getCurrentUserCode());
+        if (!allowed) {
+            throw new BaseException("无权限：仅管理员可刷新企业本体库");
+        }
     }
 
     private String keyword(JSONObject request) {

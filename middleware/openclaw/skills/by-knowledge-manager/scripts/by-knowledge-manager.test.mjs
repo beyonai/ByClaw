@@ -523,6 +523,17 @@ async function testUploadMissingFileFails() {
   });
 }
 
+async function testUploadUnsupportedFileTypeFailsBeforeRequest() {
+  const temp = makeTempMarkdown("archive.zip");
+  await withServer(async (server, port) => {
+    const result = await runCli(["upload", "--resource-id", "10023355", "--directory-path", "/docs", "--file-path", temp.filePath], port);
+    assert.equal(result.code, 1);
+    assertPublicOutput(result.json, "upload unsupported file type failure");
+    assert.match(result.json.error, /不支持的文件类型/);
+    assert.equal(server.requests.length, 0);
+  });
+}
+
 async function testUploadEmptyItemsFails() {
   const temp = makeTempMarkdown();
   await withServer(async (_server, port) => {
@@ -566,6 +577,17 @@ async function testUpdateFileSuccessChecksConflictOverwritesAndBuilds() {
     const upload = server.requests.find((item) => item.url === "/byaiService/datasetController/uploadFiles");
     assert.match(upload.bodyText, /name="overwrite"\r\n\r\ntrue/);
     assert.match(upload.bodyText, /name="processFrontMatter"\r\n\r\ntrue/);
+  });
+}
+
+async function testUpdateFileUnsupportedFileTypeFailsBeforeRequest() {
+  const temp = makeTempMarkdown("exists.zip");
+  await withServer(async (server, port) => {
+    const result = await runCli(["update-file", "--resource-id", "10023355", "--directory-path", "/docs", "--file-path", temp.filePath], port);
+    assert.equal(result.code, 1);
+    assertPublicOutput(result.json, "update-file unsupported file type failure");
+    assert.match(result.json.error, /不支持的文件类型/);
+    assert.equal(server.requests.length, 0);
   });
 }
 
@@ -859,10 +881,12 @@ const tests = [
   testCheckConflictsMissingFileNamesFails,
   testUploadSuccessAutoBuildsWithFrontMatterDefaultTrue,
   testUploadMissingFileFails,
+  testUploadUnsupportedFileTypeFailsBeforeRequest,
   testUploadEmptyItemsFails,
   testUploadItemWithoutPathFails,
   testUploadPartialItemWithoutPathFails,
   testUpdateFileSuccessChecksConflictOverwritesAndBuilds,
+  testUpdateFileUnsupportedFileTypeFailsBeforeRequest,
   testUpdateFileConflictCheckFailureFails,
   testUpdateFileBuildFailureFails,
   testBuildSuccess,

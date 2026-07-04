@@ -1,7 +1,7 @@
 import React, { useRef, useState, useEffect, useMemo, useContext } from 'react';
-import { Typography, Dropdown, Button, Popconfirm, Tooltip, message, Avatar, Spin } from 'antd';
+import { Typography, Dropdown, Button, Popconfirm, Tooltip, message, Spin } from 'antd';
 import type { MenuProps } from 'antd';
-import { useIntl, useSelector } from '@umijs/max';
+import { getLocale, useIntl, useSelector } from '@umijs/max';
 import classnames from 'classnames';
 import { debounce, noop } from 'lodash';
 import AntdIcon from '@/components/AntdIcon';
@@ -13,7 +13,7 @@ import useGlobal from '@/hooks/useGlobal';
 import type { IState as IEmployeesState } from '@/models/useEmployees';
 import { resourceBizTypeMap } from '@/constants/knowledge';
 import { SiderContentContext } from '@/layout/sider/siderContentContext';
-import { isWorkspaceSkill } from '../../workspaceSkill/utils';
+import { isWorkspaceSkill, SKILL_DISPLAY_SOURCE_USER_DEVELOPED } from '../../workspaceSkill/utils';
 import { useActiveSiderAgent } from '@/layout/sider/components/ActiveSiderAgentBar';
 import { useWorkspaceSkillActions } from '../../workspaceSkill/useWorkspaceSkillActions';
 import WorkspaceSkillShareAuthModal from '../../workspaceSkill/WorkspaceSkillShareAuthModal';
@@ -61,6 +61,7 @@ export interface IResourceCardItem {
   isDefault?: boolean | string;
   openSuperHelper?: string;
   tagName?: string;
+  displaySourceType?: string;
   skillType?: string;
   sourceType?: string;
   version?: string;
@@ -257,6 +258,24 @@ const isInnerSkillResource = (resource: IResourceCardItem, resourceType?: string
   return isSkillResource(resource, resourceType) && `${resource?.skillType || ''}`.toLowerCase() === 'inner';
 };
 
+const formatSkillAddedCount = (count: number, locale: string) => {
+  if (locale?.startsWith('zh')) {
+    if (count >= 10000) {
+      const wanCount = count / 10000;
+      return wanCount >= 10 ? `${Math.floor(wanCount)}万` : `${Number(wanCount.toFixed(1))}万`;
+    }
+    return `${count}`;
+  }
+
+  if (count >= 1000000) {
+    return `${Number((count / 1000000).toFixed(1))}M`;
+  }
+  if (count >= 1000) {
+    return `${Number((count / 1000).toFixed(1))}K`;
+  }
+  return `${count}`;
+};
+
 const RenderContent = (props: ResourceCardProps) => {
   const {
     resource,
@@ -271,7 +290,6 @@ const RenderContent = (props: ResourceCardProps) => {
   } = props;
   const { ownerType } = resource || {};
   const {
-    scene,
     onEdit = noop,
     onAuth = noop,
     onApplyUse = noop,
@@ -348,17 +366,27 @@ const RenderContent = (props: ResourceCardProps) => {
     description ?? resource.resourceDesc ?? resource.intro ?? intl.formatMessage({ id: 'common.none' });
   const displayImage = resource.resourceLogoUrl || resource.avatar;
   const displayImageUrl = displayImage ? getFileUrl(displayImage) : '';
-  const [skillPosterAspect, setSkillPosterAspect] = useState<string>();
   const [displayImageLoadFailed, setDisplayImageLoadFailed] = useState(false);
   const creatorName =
     resource?.creatorName ||
     resource?.createUserName ||
     resource?.memberName ||
     intl.formatMessage({ id: 'common.none' });
+
   const useCount = Number(resource?.useCount || resource?.focusCount || 0);
-  
+  const normalizedSkillSourceType = `${resource?.displaySourceType || resource?.sourceType || ''}`
+    .replace(/[-\s]/g, '_')
+    .toUpperCase();
+  const skillSourceLabelMap: Record<string, string> = {
+    ASSISTANT_BOUND: 'resource.skillSource.assistantBound',
+    LOBSTER_INSTALLED: 'resource.skillSource.lobsterInstalled',
+    [SKILL_DISPLAY_SOURCE_USER_DEVELOPED]: 'resource.skillSource.userDeveloped',
+  };
+  const skillSourceName = skillSourceLabelMap[normalizedSkillSourceType]
+    ? intl.formatMessage({ id: skillSourceLabelMap[normalizedSkillSourceType] })
+    : creatorName;
+  const formattedSkillAddedCount = formatSkillAddedCount(useCount, getLocale());
   useEffect(() => {
-    setSkillPosterAspect(undefined);
     setDisplayImageLoadFailed(false);
   }, [displayImageUrl]);
 
@@ -574,8 +602,8 @@ const RenderContent = (props: ResourceCardProps) => {
       });
     }
 
-    // 额外操作
-    if (!scene && actionConfig?.extraMenuItems?.length) {
+    // 额外操作（如本体的「绑定本体」）：不受 scene 限制，调用方传了就展示
+    if (actionConfig?.extraMenuItems?.length) {
       items.push(...actionConfig.extraMenuItems);
     }
 
@@ -676,24 +704,12 @@ const RenderContent = (props: ResourceCardProps) => {
           effectiveCardClick?.();
         }}
       >
-        <div
-          className={styles.skillPosterImageWrap}
-          style={
-            skillPosterAspect ? ({ '--skill-poster-aspect': skillPosterAspect } as React.CSSProperties) : undefined
-          }
-        >
+        <div className={styles.skillPosterImageWrap}>
           {displayImageUrl && !displayImageLoadFailed ? (
             <img
               className={styles.skillPosterImage}
               src={displayImageUrl}
               alt={`${displayTitle}`}
-              onLoad={(event) => {
-                const { naturalWidth, naturalHeight } = event.currentTarget;
-                if (!naturalWidth || !naturalHeight) {
-                  return;
-                }
-                setSkillPosterAspect(`${naturalWidth} / ${naturalHeight}`);
-              }}
               onError={() => setDisplayImageLoadFailed(true)}
             />
           ) : (
@@ -702,56 +718,63 @@ const RenderContent = (props: ResourceCardProps) => {
               <div className={styles.skillPosterPlaceholderSub}>{intl.formatMessage({ id: 'common.skill' })}</div>
             </div>
           )}
-          {effectiveTopRightTag ? (
-            <span className={classnames(styles.skillPosterTag, { [styles.cancelledTag]: isCancelledResource })}>
-              <span className={styles.tagText}>{effectiveTopRightTag}</span>
-            </span>
-          ) : null}
-          {headerExtra}
-          {!!effectiveMenuItems?.length && (
-            <div
-              className={styles.skillPosterAction}
-              onClick={(e) => {
-                e.stopPropagation();
-                e.preventDefault();
-              }}
-            >
-              <Dropdown menu={{ items: effectiveMenuItems }} placement="bottomRight">
-                <Button
-                  className={styles.skillPosterActionBtn}
-                  icon={<AntdIcon type="icon-a-Moregengduo" className={styles.cardActionBtnIcon} />}
-                />
-              </Dropdown>
-              {workspaceShareModal}
-            </div>
-          )}
         </div>
         {installing && <InstallingOverlay />}
-        <Paragraph className={styles.skillPosterTitle} ellipsis={{ rows: 2, tooltip: `${displayTitle}` }}>
-          {displayTitle}
-        </Paragraph>
-        <Paragraph
-          className={styles.skillPosterDesc}
-          ellipsis={{
-            rows: 2,
-            tooltip: typeof displayDescription === 'string' ? displayDescription : undefined,
-          }}
-        >
-          {displayDescription}
-        </Paragraph>
-        <div className={styles.skillPosterFooter}>
-          <div className={styles.skillPosterCreator}>
-            <Avatar size={22} className={styles.skillPosterCreatorAvatar}>
-              {creatorName.slice(0, 1)}
-            </Avatar>
-            <span className={styles.skillPosterCreatorName} title={creatorName}>
-              {creatorName}
+        <div className={styles.skillPosterBody}>
+          <div className={styles.skillPosterHeader}>
+            <Paragraph className={styles.skillPosterTitle} ellipsis={{ tooltip: `${displayTitle}` }}>
+              {displayTitle}
+            </Paragraph>
+            {effectiveTopRightTag ? (
+              <span className={classnames(styles.skillPosterTag, { [styles.cancelledTag]: isCancelledResource })}>
+                <span className={styles.tagText}>{effectiveTopRightTag}</span>
+              </span>
+            ) : null}
+            {headerExtra}
+          </div>
+          <Paragraph
+            className={styles.skillPosterDesc}
+            ellipsis={{
+              tooltip: typeof displayDescription === 'string' ? displayDescription : undefined,
+            }}
+          >
+            {displayDescription}
+          </Paragraph>
+          <div className={styles.skillPosterFooter}>
+            <span className={styles.skillPosterSource} title={skillSourceName}>
+              <span className={styles.skillPosterSourceIcon}>
+                <AntdIcon type="icon-chajiantubiao" />
+              </span>
+              <span className={styles.skillPosterCreatorName}>{skillSourceName}</span>
+            </span>
+            <span className={styles.skillPosterDivider} />
+            <span className={styles.skillPosterUseCount}>
+              {intl.formatMessage(
+                { id: 'resource.skillAddedCount' },
+                {
+                  count: formattedSkillAddedCount,
+                }
+              )}
             </span>
           </div>
-          <span className={styles.skillPosterUseCount}>
-            {intl.formatMessage({ id: 'resource.skillUseCount' }, { count: useCount })}
-          </span>
         </div>
+        {!!effectiveMenuItems?.length && (
+          <div
+            className={styles.skillPosterAction}
+            onClick={(e) => {
+              e.stopPropagation();
+              e.preventDefault();
+            }}
+          >
+            <Dropdown menu={{ items: effectiveMenuItems }} placement="bottomRight">
+              <Button
+                className={styles.skillPosterActionBtn}
+                icon={<AntdIcon type="icon-a-Moregengduo" className={styles.cardActionBtnIcon} />}
+              />
+            </Dropdown>
+            {workspaceShareModal}
+          </div>
+        )}
       </div>
     );
   }

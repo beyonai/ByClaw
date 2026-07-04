@@ -1,0 +1,331 @@
+.container {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 16px 24px;
+  overflow: hidden;
+}
+
+.back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  color: #4e5969;
+  cursor: pointer;
+  margin-bottom: 12px;
+  width: fit-content;
+
+  &:hover {
+    color: #378add;
+  }
+}
+
+// 顶部本体库信息
+.header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 0.5px solid rgba(0, 0, 0, 0.1);
+  border-radius: 12px;
+  margin-bottom: 14px;
+
+  .headerIcon {
+    width: 48px;
+    height: 48px;
+    border-radius: 12px;
+    background: rgba(55, 138, 221, 0.1);
+    color: #378add;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .headerMain {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .headerName {
+    font-size: 16px;
+    font-weight: 500;
+    color: #1d2129;
+  }
+
+  .headerCode {
+    font-size: 12px;
+    color: #999;
+    font-family: 'SFMono-Regular', Consolas, Menlo, monospace;
+    margin-top: 2px;
+  }
+
+  .headerActions {
+    display: flex;
+    gap: 8px;
+  }
+
+  .headerActionBtn {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #86909c;
+    cursor: pointer;
+
+    &:hover {
+      background: rgba(0, 0, 0, 0.04);
+      color: #f53f3f;
+    }
+  }
+}
+
+// 主体两栏
+.body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 12px;
+}
+
+.left {
+  width: 240px;
+  flex-shrink: 0;
+  border: 0.5px solid rgba(0, 0, 0, 0.1);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+
+  .leftHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 14px;
+    font-size: 14px;
+    font-weight: 500;
+    border-bottom: 0.5px solid rgba(0, 0, 0, 0.08);
+
+    .leftHeaderAdd {
+      color: #378add;
+      cursor: pointer;
+    }
+  }
+
+  .treeWrap {
+    flex: 1;
+    overflow: auto;
+    padding: 6px 8px;
+
+    .sceneIcon {
+      color: #f7ba1e;
+      flex-shrink: 0;
+      margin-right: 6px;
+    }
+  }
+
+  // 场景节点标题（父）
+  .treeScene {
+    display: flex;
+    align-items: center;
+    font-size: 13px;
+    color: #1d2129;
+
+    .treeSceneName {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .treeSceneActions {
+      display: none;
+      align-items: center;
+      gap: 8px;
+      color: #86909c;
+
+      :global(.anticon):hover {
+        color: #378add;
+      }
+
+      :global(.anticon):last-child:hover {
+        color: #f53f3f;
+      }
+    }
+
+    &:hover .treeSceneActions {
+      display: inline-flex;
+    }
+  }
+
+  // 类目节点标题（子：视图/对象/术语）
+  .treeCat {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: #4e5969;
+
+    .leafIconObject {
+      color: #185fa5;
+    }
+
+    .leafIconView {
+      color: #0f6e56;
+    }
+
+    .leafIconTerm {
+      color: #854f0b;
+    }
+  }
+
+  .treeCatActive {
+    color: #185fa5;
+    font-weight: 500;
+  }
+}
+
+.right {
+  flex: 1;
+  min-width: 0;
+  border: 0.5px solid rgba(0, 0, 0, 0.1);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+
+  .rightToolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 12px 14px 0;
+
+    .rightTitle {
+      font-size: 14px;
+      font-weight: 500;
+    }
+
+    .rightScene {
+      color: #86909c;
+      font-weight: 400;
+    }
+
+    .rightTools {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .searchInput {
+      width: 200px;
+    }
+  }
+
+  .spinFill {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+
+    :global(.beyond-spin-container) {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+  }
+
+  .listWrap {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: 8px 14px 14px;
+  }
+}
+
+// 叶子列表
+.leafList {
+  display: flex;
+  flex-direction: column;
+}
+
+.leafRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 6px;
+  border-bottom: 0.5px solid rgba(0, 0, 0, 0.06);
+
+  .leafIconObject {
+    font-size: 18px;
+    color: #185fa5;
+  }
+
+  .leafIconView {
+    font-size: 18px;
+    color: #0f6e56;
+  }
+
+  .leafMain {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .leafName {
+    font-size: 14px;
+    color: #1d2129;
+  }
+
+  .leafCode {
+    font-size: 12px;
+    color: #999;
+    font-family: 'SFMono-Regular', Consolas, Menlo, monospace;
+    margin-top: 2px;
+  }
+
+  .leafActions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .actLink {
+    font-size: 13px;
+    color: #378add;
+    cursor: pointer;
+
+    &:hover {
+      text-decoration: underline;
+    }
+  }
+
+  .actDanger {
+    font-size: 13px;
+    color: #f53f3f;
+    cursor: pointer;
+
+    &:hover {
+      text-decoration: underline;
+    }
+  }
+}
+
+.buildingTag {
+  font-size: 11px;
+  color: #a0a0a0;
+  margin-left: 4px;
+}
+
+.termEmpty {
+  padding: 24px 0;
+  text-align: center;
+}
+
+.buildingText {
+  font-size: 13px;
+  color: #999;
+  margin-top: 8px;
+}
