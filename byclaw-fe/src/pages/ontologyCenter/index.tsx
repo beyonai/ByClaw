@@ -1,8 +1,8 @@
 // @ts-nocheck
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Empty, Input, Modal, Spin, Table, Tabs, Tag, message } from 'antd';
-import { PlusOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons';
-import { useIntl } from '@umijs/max';
+import { LinkOutlined, PlusOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons';
+import { useIntl, useNavigate } from '@umijs/max';
 import classnames from 'classnames';
 import AntdIcon from '@/components/AntdIcon';
 import CommonTabs from '@/components/CommonTabs';
@@ -15,9 +15,9 @@ import { applyResourceUse, listResourceUseAuth } from '@/pages/manager/service/r
 import { queryCatalogTree } from '@/service/digitalEmployees';
 import { getTopLevelCatalogs, normalizeCatalogTree } from '@/utils/catalog';
 import { refreshOntologyBases } from '@/service/ontology';
+import { checkEnterpriseAdminPermission } from '@/service/auth';
 import RegisterOntologyModal from './RegisterOntologyModal';
-import OntologyDetailDrawer from './OntologyDetailDrawer';
-import InstallOntologyModal from './InstallOntologyModal';
+import BindOntologyDrawer from './BindOntologyDrawer';
 import styles from './index.module.less';
 
 const ONTOLOGY_BASE_BIZ_TYPE = 'ONTOLOGY_BASE';
@@ -28,6 +28,20 @@ const getBaseId = (row: any) => row?.pid || row?.ontologyBaseCode || row?.resour
 
 const OntologyCenter: React.FC = () => {
   const intl = useIntl();
+  const navigate = useNavigate();
+
+  // 卡片点击 → 跳转本体库管理页（携带展示信息，避免详情页再查一次）
+  const openBaseDetail = (row: any) => {
+    const query = new URLSearchParams({
+      baseId: `${getBaseId(row) || ''}`,
+      ownerType: `${row?.ownerType || ''}`,
+      resourceId: `${row?.resourceId || ''}`,
+      resourceName: `${row?.resourceName || row?.displayName || ''}`,
+      resourceCode: `${row?.resourceCode || getBaseId(row) || ''}`,
+    });
+    navigate(`/ontologyBaseDetail?${query.toString()}`);
+  };
+
   const [activeTab, setActiveTab] = useState<'personal' | 'enterprise'>('personal');
   const [list, setList] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -36,9 +50,10 @@ const OntologyCenter: React.FC = () => {
   const [catalogList, setCatalogList] = useState<any[]>([]);
   const [dropdownParam, setDropdownParam] = useState<any>(getDefaultParams());
   const [registerOpen, setRegisterOpen] = useState(false);
-  const [detailBase, setDetailBase] = useState<any>(null);
-  const [installBase, setInstallBase] = useState<any>(null);
+  const [bindBase, setBindBase] = useState<any>(null);
   const [refreshing, setRefreshing] = useState(false);
+  // 刷新本体仅管理员（平台/业务/组织）+ 超管可操作
+  const [canRefresh, setCanRefresh] = useState(false);
   const [refreshResult, setRefreshResult] = useState<any>(null);
   // 刷新防频繁：两次点击最小间隔
   const lastRefreshAtRef = useRef(0);
@@ -51,6 +66,10 @@ const OntologyCenter: React.FC = () => {
       const treeData = Array.isArray(res) ? res : Array.isArray(res?.data) ? res.data : [];
       setCatalogList(normalizeCatalogTree(treeData));
     });
+    // 企业本体「刷新本体」权限：平台/业务/组织管理员 + 超管
+    checkEnterpriseAdminPermission()
+      .then((res: any) => setCanRefresh(!!(res?.data ?? res)))
+      .catch(() => setCanRefresh(false));
   }, []);
 
   // 授权 / 使用申请审核 抽屉（复用资源中心同款组件）
@@ -159,9 +178,7 @@ const OntologyCenter: React.FC = () => {
               key={item.resourceId}
               resource={cardItem}
               resourceType={ONTOLOGY_BASE_BIZ_TYPE}
-              onCardClick={() =>
-                setDetailBase({ ...cardItem, ownerType: cardItem.ownerType || activeTab, baseId: getBaseId(cardItem) })
-              }
+              onCardClick={() => openBaseDetail({ ...cardItem, ownerType: cardItem.ownerType || activeTab })}
               actionConfig={{
                 scene: activeTab,
                 hiddenMenuItemKeys: ['edit', 'delete'],
@@ -170,11 +187,20 @@ const OntologyCenter: React.FC = () => {
                 onAuditUse: () => handleAuditUse(cardItem),
                 extraMenuItems: [
                   {
-                    key: 'install-scope',
-                    label: intl.formatMessage({ id: 'ontologyCenter.installScope' }),
+                    key: 'bind-ontology',
+                    label: (
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                        <LinkOutlined />
+                        {intl.formatMessage({ id: 'ontologyCenter.bind.entry' })}
+                      </span>
+                    ),
                     onClick: ({ domEvent }: any) => {
                       domEvent?.stopPropagation?.();
-                      setInstallBase({ ...cardItem, baseId: getBaseId(cardItem) });
+                      setBindBase({
+                        ...cardItem,
+                        ownerType: cardItem.ownerType || activeTab,
+                        baseId: getBaseId(cardItem),
+                      });
                     },
                   },
                 ],
@@ -216,11 +242,11 @@ const OntologyCenter: React.FC = () => {
               <Button type="primary" icon={<PlusOutlined />} onClick={() => setRegisterOpen(true)}>
                 {intl.formatMessage({ id: 'ontologyCenter.register.title' })}
               </Button>
-            ) : (
+            ) : canRefresh ? (
               <Button type="primary" icon={<ReloadOutlined />} loading={refreshing} onClick={handleRefresh}>
                 {intl.formatMessage({ id: 'ontologyCenter.refresh.title' })}
               </Button>
-            )}
+            ) : null}
           </div>
         }
         items={[
@@ -257,8 +283,7 @@ const OntologyCenter: React.FC = () => {
           loadList();
         }}
       />
-      <OntologyDetailDrawer open={!!detailBase} base={detailBase} onClose={() => setDetailBase(null)} />
-      <InstallOntologyModal open={!!installBase} base={installBase} onClose={() => setInstallBase(null)} />
+      <BindOntologyDrawer open={!!bindBase} base={bindBase} onClose={() => setBindBase(null)} />
 
       {authDrawerOpen && (
         <AuthListDrawer

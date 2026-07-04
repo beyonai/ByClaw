@@ -290,7 +290,6 @@ const RenderContent = (props: ResourceCardProps) => {
   } = props;
   const { ownerType } = resource || {};
   const {
-    scene,
     onEdit = noop,
     onAuth = noop,
     onApplyUse = noop,
@@ -373,7 +372,7 @@ const RenderContent = (props: ResourceCardProps) => {
     resource?.createUserName ||
     resource?.memberName ||
     intl.formatMessage({ id: 'common.none' });
-  
+
   const useCount = Number(resource?.useCount || resource?.focusCount || 0);
   const normalizedSkillSourceType = `${resource?.displaySourceType || resource?.sourceType || ''}`
     .replace(/[-\s]/g, '_')
@@ -603,8 +602,8 @@ const RenderContent = (props: ResourceCardProps) => {
       });
     }
 
-    // 额外操作
-    if (!scene && actionConfig?.extraMenuItems?.length) {
+    // 额外操作（如本体的「绑定本体」）：不受 scene 限制，调用方传了就展示
+    if (actionConfig?.extraMenuItems?.length) {
       items.push(...actionConfig.extraMenuItems);
     }
 

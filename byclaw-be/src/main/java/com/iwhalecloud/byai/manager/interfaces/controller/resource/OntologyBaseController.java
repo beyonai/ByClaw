@@ -4,8 +4,10 @@ import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.common.annotation.ManageLogAnnotation;
 import com.iwhalecloud.byai.manager.application.service.ontology.OntologyBaseService;
+import com.iwhalecloud.byai.manager.application.service.ontology.OntologyBindService;
 import com.iwhalecloud.byai.manager.dto.ontology.OntologyBaseQueryRequest;
 import com.iwhalecloud.byai.manager.dto.ontology.OntologyBaseRegisterRequest;
+import com.iwhalecloud.byai.manager.dto.ontology.OntologyBindRequest;
 import com.iwhalecloud.byai.manager.dto.ontology.OntologyRefreshResult;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
@@ -33,6 +35,23 @@ public class OntologyBaseController {
 
     @Autowired
     private OntologyBaseService ontologyBaseService;
+
+    @Autowired
+    private OntologyBindService ontologyBindService;
+
+    @ApiOperation("绑定本体到数字员工（覆盖式：以本次选中为准）")
+    @PostMapping("/bind/save")
+    @ManageLogAnnotation(name = "绑定本体", description = "把本体库下选中的节点覆盖式绑定到数字员工")
+    public ResponseUtil<Boolean> bind(@RequestBody OntologyBindRequest request) {
+        ontologyBindService.bindOntology(request);
+        return ResponseUtil.successRes(Boolean.TRUE);
+    }
+
+    @ApiOperation("查询数字员工已绑定的本体库列表")
+    @PostMapping("/bind/bases")
+    public ResponseUtil<java.util.List<SsResource>> boundBases(@RequestBody OntologyBindRequest request) {
+        return ResponseUtil.successRes(ontologyBindService.boundBases(request.getDigitalEmployeeId()));
+    }
 
     @ApiOperation("本体库列表")
     @PostMapping("/base/list")

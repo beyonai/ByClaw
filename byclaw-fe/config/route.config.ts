@@ -173,6 +173,11 @@ export default [
             component: './ontologyCenter',
           },
           {
+            path: '/ontologyBaseDetail',
+            name: 'ontologyBaseDetail',
+            component: './ontologyBaseDetail',
+          },
+          {
             path: '/skillCenter',
             name: 'skillCenter',
             component: './skillCenter',
