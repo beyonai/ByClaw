@@ -35,6 +35,24 @@
   overflow-x: hidden;
 }
 
+.listSpin {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+
+  :global {
+    .@{antPrefix}-spin-container {
+      flex: 1 1 0;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+  }
+}
+
 .searchActionRow {
   display: flex;
   align-items: center;
@@ -94,6 +112,14 @@
 
 .resourceItem {
   cursor: default;
+
+  &:hover,
+  &:focus-within {
+    .ontologyNodeMore {
+      opacity: 1;
+    }
+  }
+
   :global {
     .@{antPrefix}-list-item-meta {
       display: flex;
@@ -390,4 +416,190 @@
 /* 面包屑返回图标 */
 .breadcrumbBackIcon {
   font-size: 16px;
+}
+
+.ontologySiderContainer {
+  position: absolute;
+  inset: 0;
+  height: auto;
+  min-height: 0;
+  max-height: 100%;
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.ontologyScrollRegion {
+  min-height: 0;
+  max-height: 100%;
+  margin-top: 8px;
+  padding-right: 4px;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  overscroll-behavior: contain;
+  overflow-y: scroll;
+  overflow-x: hidden;
+
+  &::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    border-radius: 6px;
+    background: rgba(20, 22, 26, 0.22);
+  }
+
+  &::-webkit-scrollbar-thumb:hover {
+    background: rgba(20, 22, 26, 0.36);
+  }
+}
+
+.ontologyScrollSpin {
+  display: block;
+  min-height: 100%;
+
+  :global {
+    .@{antPrefix}-spin-container {
+      min-height: 100%;
+    }
+  }
+}
+
+.ontologyScrollContent {
+  min-height: 100%;
+}
+
+.ontologyNodeList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px 0;
+}
+
+.ontologyNodeRow {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) 28px;
+  align-items: center;
+  gap: 4px;
+  min-height: 42px;
+  padding: 5px 2px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 0.16s ease;
+
+  &:hover {
+    background-color: rgba(22, 93, 255, 0.06);
+
+    .ontologyNodeMore {
+      opacity: 1;
+    }
+  }
+}
+
+.ontologyNodeCheck {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ontologyNodeMain {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 8px;
+}
+
+.ontologyNodeIcon {
+  position: relative;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--beyond-color-primary);
+
+  :global(.@{antPrefix}-icon),
+  :global(.anticon) {
+    font-size: 17px;
+  }
+}
+
+.ontologyNodeText {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.ontologyNodeNameRow {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  overflow: hidden;
+  gap: 4px;
+}
+
+.ontologyNodeName {
+  display: block;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--beyond-color-text-primary, #14161a);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 18px;
+}
+
+.ontologyTypeTag {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  max-width: 52px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  background-color: rgba(22, 93, 255, 0.1);
+  line-height: 1;
+}
+
+.ontologyTypeTagText {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: linear-gradient(90deg, #088cff 0%, #00cdd5 100%);
+  color: transparent;
+  font-size: 12px;
+  font-weight: 600;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.ontologyNodeCode {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--beyond-color-text-tertiary, #707680);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.ontologyNodeMore {
+  opacity: 0;
+  color: #646a73;
+  transition: opacity 0.16s ease, color 0.16s ease;
+
+  &:hover {
+    color: var(--beyond-color-primary);
+  }
 }
