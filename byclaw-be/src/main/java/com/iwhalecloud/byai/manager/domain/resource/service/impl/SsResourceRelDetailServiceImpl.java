@@ -512,4 +512,14 @@ public class SsResourceRelDetailServiceImpl extends ServiceImpl<SsResourceRelDet
         return ssResourceRelDetailMapper.selectList(lambdaQueryWrapper);
     }
 
+    @Override
+    public long countByRelResourceId(Long relResourceId) {
+        if (relResourceId == null) {
+            return 0;
+        }
+        LambdaQueryWrapper<SsResourceRelDetail> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(SsResourceRelDetail::getRelResourceId, relResourceId);
+        return ssResourceRelDetailMapper.selectCount(wrapper);
+    }
+
 }

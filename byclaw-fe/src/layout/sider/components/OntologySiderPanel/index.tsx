@@ -1,37 +1,28 @@
 // @ts-nocheck
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Breadcrumb, Empty, Input, List, Spin, Tag, Tooltip, Tree, Typography } from 'antd';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Breadcrumb, Button, Empty, Input, List, Spin, Tooltip, Tree, Typography } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
 import { useIntl, useLocation, useNavigate } from '@umijs/max';
 import { trim } from 'lodash';
 import AntdIcon from '@/components/AntdIcon';
 import ActiveSiderAgentBar, { useActiveSiderAgent } from '@/layout/sider/components/ActiveSiderAgentBar';
-import { queryDigEmployeeRelResourceAuth } from '@/pages/manager/service/resources';
-import { getOntologyBaseTree } from '@/service/ontology';
+import { getBoundOntologyBases } from '@/service/ontology';
+import { useOntologyBindTree } from '@/pages/ontologyCenter/useOntologyBindTree';
+import OntologyNodeDrawer from '@/pages/ontologyCenter/OntologyNodeDrawer';
 import employeeStyles from '@/layout/sider/components/EmployeeList/index.module.less';
 import styles from '@/layout/sider/components/ResourceSiderPanel/index.module.less';
 
-const ONTOLOGY_BIZ_TYPES = ['ONTOLOGY_BASE', 'SCENE', 'OBJECT', 'VIEW'];
-
 const getArrayData = (response: any) => {
   if (Array.isArray(response)) return response;
+  if (Array.isArray(response?.data)) return response.data;
   if (Array.isArray(response?.rows)) return response.rows;
   if (Array.isArray(response?.list)) return response.list;
-  if (Array.isArray(response?.data)) return response.data;
   return [];
 };
 
-const getResponseData = (res: any) => res?.data ?? res ?? [];
-
-const bizLabelKey: Record<string, string> = {
-  SCENE: 'employeeDetail.ontology.scene',
-  OBJECT: 'common.resourceType.object',
-  VIEW: 'common.resourceType.view',
-};
-
 /**
- * 本体 sider 面板：浏览当前激活数字员工绑定了内容的本体库；进入库后展示「整库」树
- * （库 → 场景 → 对象/视图），并把该员工实际安装（绑定）的实体高亮标记。
+ * 本体 sider 面板：展示当前激活数字员工已绑定的本体库；进入某库后显示「整库」可勾选树
+ * （已绑定节点默认勾选）。修改后本体名后出现保存按钮，保存即覆盖式重写该库的 relOntology。
  */
 const OntologySiderPanel: React.FC = () => {
   const intl = useIntl();
@@ -43,12 +34,10 @@ const OntologySiderPanel: React.FC = () => {
   const [level, setLevel] = useState<'base' | 'tree'>('base');
   const [boundRows, setBoundRows] = useState<any[]>([]);
   const [selectedBase, setSelectedBase] = useState<any>(null);
-  const [treeRows, setTreeRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchValue, setSearchValue] = useState('');
-  const keywordRef = useRef('');
+  const [detailNode, setDetailNode] = useState<any>(null);
 
-  // 当前员工已绑定的本体资源（四级），用于 L1 取本体库 + 树高亮。
   const loadBound = useCallback(async () => {
     if (!activeSiderAgent.resourceId) {
       setBoundRows([]);
@@ -56,13 +45,8 @@ const OntologySiderPanel: React.FC = () => {
     }
     setLoading(true);
     try {
-      const response = await queryDigEmployeeRelResourceAuth({
-        pageNum: 1,
-        pageSize: 999,
-        keyword: '',
-        resourceId: activeSiderAgent.resourceId,
-        resourceBizTypeList: ONTOLOGY_BIZ_TYPES,
-      });
+      // 已绑定的本体库：由后端从已绑定叶子的 ontologyBaseCode 反查库返回
+      const response = await getBoundOntologyBases({ digitalEmployeeId: activeSiderAgent.resourceId });
       setBoundRows(getArrayData(response));
     } catch {
       setBoundRows([]);
@@ -75,15 +59,21 @@ const OntologySiderPanel: React.FC = () => {
     setLevel('base');
     setSelectedBase(null);
     setSearchValue('');
-    keywordRef.current = '';
     loadBound();
   }, [loadBound]);
 
-  // L1 本体库列表：取已绑定的 ONTOLOGY_BASE 行。
-  const bases = useMemo(() => boundRows.filter((r) => r.resourceBizType === 'ONTOLOGY_BASE'), [boundRows]);
+  // 绑定抽屉 / 其它处保存本体绑定后，刷新左侧已绑定本体列表
+  useEffect(() => {
+    const onBindSaved = () => {
+      setLevel('base');
+      setSelectedBase(null);
+      loadBound();
+    };
+    window.addEventListener('ontologyBindSaved', onBindSaved);
+    return () => window.removeEventListener('ontologyBindSaved', onBindSaved);
+  }, [loadBound]);
 
-  // 高亮集合：所有已绑定实体的 resourceId。
-  const boundIdSet = useMemo(() => new Set(boundRows.map((r) => `${r.resourceId}`)), [boundRows]);
+  const bases = useMemo(() => boundRows.filter((r) => r.resourceBizType === 'ONTOLOGY_BASE'), [boundRows]);
 
   const filteredBases = useMemo(() => {
     const kw = trim(searchValue).toLowerCase();
@@ -93,73 +83,43 @@ const OntologySiderPanel: React.FC = () => {
     );
   }, [bases, searchValue]);
 
-  const enterBase = useCallback(async (base: any) => {
+  const selectedBaseId = selectedBase
+    ? selectedBase.pid || selectedBase.ontologyBaseCode || selectedBase.resourceCode
+    : undefined;
+
+  const {
+    loading: treeLoading,
+    saving,
+    treeData,
+    checkedKeys,
+    onCheck,
+    expandedKeys,
+    setExpandedKeys,
+    dirty,
+    save,
+  } = useOntologyBindTree({
+    enabled: level === 'tree',
+    baseId: selectedBaseId,
+    ownerType: selectedBase?.ownerType || 'personal',
+    baseName: selectedBase?.resourceName,
+    digitalEmployeeId: activeSiderAgent?.resourceId,
+    onTitleClick: (meta: any) => setDetailNode(meta),
+  });
+
+  const enterBase = (base: any) => {
     setSelectedBase(base);
     setLevel('tree');
-    setLoading(true);
-    try {
-      const baseId = base.pid || base.ontologyBaseCode || base.resourceCode;
-      const res = await getOntologyBaseTree({ baseId });
-      const data = getResponseData(res);
-      setTreeRows(Array.isArray(data) ? data : []);
-    } catch {
-      setTreeRows([]);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  };
 
   const handleReset = () => {
     setLevel('base');
     setSelectedBase(null);
   };
 
-  // 整库树（库→场景→对象/视图），绑定实体高亮。
-  const treeData = useMemo(() => {
-    const byId: Record<string, any> = {};
-    treeRows.forEach((r) => {
-      const bound = boundIdSet.has(`${r.resourceId}`);
-      byId[`${r.resourceId}`] = {
-        key: `${r.resourceId}`,
-        title: (
-          <span style={bound ? { fontWeight: 500 } : undefined}>
-            {bound && (
-              <span
-                style={{
-                  display: 'inline-block',
-                  width: 6,
-                  height: 6,
-                  borderRadius: '50%',
-                  background: '#58D764',
-                  marginRight: 6,
-                }}
-              />
-            )}
-            {r.resourceName || r.resourceCode}
-            {r.resourceBizType !== 'ONTOLOGY_BASE' && bizLabelKey[r.resourceBizType] && (
-              <Tag style={{ marginLeft: 6, transform: 'scale(0.85)' }}>
-                {intl.formatMessage({ id: bizLabelKey[r.resourceBizType] })}
-              </Tag>
-            )}
-            {bound && (
-              <Tag color="green" style={{ marginLeft: 2, transform: 'scale(0.85)' }}>
-                {intl.formatMessage({ id: 'ontologyCenter.sider.installed' })}
-              </Tag>
-            )}
-          </span>
-        ),
-        children: [],
-      };
-    });
-    const roots: any[] = [];
-    treeRows.forEach((r) => {
-      const node = byId[`${r.resourceId}`];
-      const parent = byId[`${r.parentResourceId}`];
-      if (parent) parent.children.push(node);
-      else roots.push(node);
-    });
-    return roots;
-  }, [treeRows, boundIdSet, intl]);
+  const handleSave = async () => {
+    const ok = await save();
+    if (ok) loadBound();
+  };
 
   return (
     <div className={styles.container}>
@@ -179,17 +139,24 @@ const OntologySiderPanel: React.FC = () => {
       </div>
 
       {level === 'tree' && (
-        <Breadcrumb className={styles.breadcrumb}>
-          <Breadcrumb.Item>
-            <span onClick={handleReset}>
-              <AntdIcon type="icon-a-Leftzuo" className={styles.breadcrumbBackIcon} />
-              {intl.formatMessage({ id: 'dialogueRecord.all' })}
-            </span>
-          </Breadcrumb.Item>
-          <Breadcrumb.Item>
-            <span className={styles.breadcrumbUnclickable}>{selectedBase?.resourceName}</span>
-          </Breadcrumb.Item>
-        </Breadcrumb>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+          <Breadcrumb className={styles.breadcrumb}>
+            <Breadcrumb.Item>
+              <span onClick={handleReset}>
+                <AntdIcon type="icon-a-Leftzuo" className={styles.breadcrumbBackIcon} />
+                {intl.formatMessage({ id: 'dialogueRecord.all' })}
+              </span>
+            </Breadcrumb.Item>
+            <Breadcrumb.Item>
+              <span className={styles.breadcrumbUnclickable}>{selectedBase?.resourceName}</span>
+            </Breadcrumb.Item>
+          </Breadcrumb>
+          {dirty && (
+            <Button type="link" size="small" loading={saving} onClick={handleSave} style={{ padding: 0 }}>
+              {intl.formatMessage({ id: 'common.save' })}
+            </Button>
+          )}
+        </div>
       )}
 
       {level === 'base' && (
@@ -204,7 +171,7 @@ const OntologySiderPanel: React.FC = () => {
         </div>
       )}
 
-      <Spin spinning={loading}>
+      <Spin spinning={level === 'base' ? loading : treeLoading}>
         <div className={styles.listContainer}>
           {level === 'base' ? (
             <List
@@ -242,12 +209,31 @@ const OntologySiderPanel: React.FC = () => {
               )}
             />
           ) : treeData.length ? (
-            <Tree treeData={treeData} defaultExpandAll selectable={false} blockNode style={{ padding: '4px 8px' }} />
+            <Tree
+              checkable
+              checkStrictly
+              blockNode
+              selectable={false}
+              treeData={treeData}
+              checkedKeys={checkedKeys}
+              onCheck={onCheck}
+              expandedKeys={expandedKeys}
+              onExpand={(k) => setExpandedKeys(k)}
+              style={{ padding: '4px 8px' }}
+            />
           ) : (
-            !loading && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} />
+            !treeLoading && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} />
           )}
         </div>
       </Spin>
+
+      <OntologyNodeDrawer
+        open={!!detailNode}
+        node={detailNode}
+        baseId={selectedBaseId}
+        ownerType={selectedBase?.ownerType || 'personal'}
+        onClose={() => setDetailNode(null)}
+      />
     </div>
   );
 };

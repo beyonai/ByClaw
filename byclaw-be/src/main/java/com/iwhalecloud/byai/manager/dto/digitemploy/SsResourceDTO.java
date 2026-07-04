@@ -25,4 +25,10 @@ public class SsResourceDTO extends SsResource {
     private Long relDetailId;
 
     private Long relResourceId;
+
+    /**
+     * 所属本体库编码：仅 resourceBizType 为 ONTOLOGY_BASE/SCENE/VIEW/OBJECT 的本体类资源填充，
+     * 取自 ss_res_ext_ontology.pid，供运行期识别本体归属。
+     */
+    private String ontologyBaseCode;
 }
