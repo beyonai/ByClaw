@@ -674,6 +674,11 @@ const OntologyBaseDetail: React.FC = () => {
   const [distributionDrill, setDistributionDrill] = useState<any>(null);
   const [detailSelection, setDetailSelection] = useState<any>({ rows: [], type: '', context: {} });
   const [detailSelectionResetKey, setDetailSelectionResetKey] = useState(0);
+  const [distributionDrillSelection, setDistributionDrillSelection] = useState<any>({
+    rows: [],
+    type: '',
+    context: {},
+  });
 
   useEffect(() => {
     setFocusType(['base', 'scene', 'view'].includes(queryFocusType) ? queryFocusType : 'base');
@@ -694,6 +699,10 @@ const OntologyBaseDetail: React.FC = () => {
     setShowAllDistributions(false);
     setDistributionDrill(null);
   }, [selectedSceneId, selectedViewCode]);
+
+  useEffect(() => {
+    setDistributionDrillSelection({ rows: [], type: '', context: {} });
+  }, [distributionDrill?.key]);
 
   useEffect(() => {
     setDetailSelection({ rows: [], type: '', context: {} });
@@ -976,6 +985,14 @@ const OntologyBaseDetail: React.FC = () => {
 
   const handleReferenceSelectionChange = useCallback((selection: any) => {
     setDetailSelection({
+      rows: selection?.rows || [],
+      type: selection?.type || '',
+      context: selection?.context || {},
+    });
+  }, []);
+
+  const handleDistributionDrillSelectionChange = useCallback((selection: any) => {
+    setDistributionDrillSelection({
       rows: selection?.rows || [],
       type: selection?.type || '',
       context: selection?.context || {},
@@ -1270,12 +1287,15 @@ const OntologyBaseDetail: React.FC = () => {
       rows: bucket.rows || [],
       columns: distribution.columns || [],
       rowKey: distribution.rowKey,
+      referenceType: distribution.referenceType,
+      referenceContext: distribution.referenceContext || {},
     });
   };
 
   const renderDistributionDrill = () => {
     if (!distributionDrill) return null;
     const rows = distributionDrill.rows || [];
+    const selectedCount = distributionDrillSelection.rows?.length || 0;
     return (
       <ResourceSection
         title={
@@ -1284,18 +1304,39 @@ const OntologyBaseDetail: React.FC = () => {
             {distributionDrill.bucketName}
           </span>
         }
-        extra={<Button type="text" size="small" icon={<CloseOutlined />} onClick={() => setDistributionDrill(null)} />}
+        extra={
+          <div className={styles.drillHeaderActions}>
+            <Button
+              size="small"
+              disabled={!selectedCount || !distributionDrillSelection.type}
+              onClick={() =>
+                quoteRowsToChat(
+                  distributionDrillSelection.rows,
+                  distributionDrillSelection.type,
+                  distributionDrillSelection.context
+                )
+              }
+            >
+              {t('ontologyBaseDetail.batchReference', { count: selectedCount })}
+            </Button>
+            <Button type="text" size="small" icon={<CloseOutlined />} onClick={() => setDistributionDrill(null)} />
+          </div>
+        }
       >
         <div className={styles.drillPanel}>
           <div className={styles.drillSummary}>
             {t('ontologyBaseDetail.distributionDrillCount', { count: rows.length })}
           </div>
-          <Table
+          <ReferenceDetailTable
             size="small"
             rowKey={distributionDrill.rowKey || ((row: any, index: number) => row.code || row.id || index)}
             dataSource={rows}
             pagination={false}
             columns={distributionDrill.columns}
+            onReferenceSelectionChange={handleDistributionDrillSelectionChange}
+            referenceType={distributionDrill.referenceType}
+            referenceContext={distributionDrill.referenceContext}
+            selectionResetKey={distributionDrill.key}
           />
         </div>
       </ResourceSection>
@@ -1574,6 +1615,7 @@ const OntologyBaseDetail: React.FC = () => {
         data: sceneScaleDistribution,
         columns: sceneColumns,
         rowKey: 'sceneId',
+        referenceType: 'scene',
       },
       {
         key: 'object-source',
@@ -1582,6 +1624,7 @@ const OntologyBaseDetail: React.FC = () => {
         data: objectSourceDistribution,
         columns: objectColumns,
         rowKey: 'objectCode',
+        referenceType: 'object',
       },
       {
         key: 'view-object-count',
@@ -1590,6 +1633,7 @@ const OntologyBaseDetail: React.FC = () => {
         data: viewObjectCountDistribution,
         columns: viewColumns,
         rowKey: (row: any) => `${row.sceneId || ''}:${row.viewCode}`,
+        referenceType: 'view',
       },
       {
         key: 'relation-source',
@@ -1598,6 +1642,7 @@ const OntologyBaseDetail: React.FC = () => {
         data: relationSourceDistribution,
         columns: relationColumns,
         rowKey: (row: any, index: number) => `${row.sceneId || ''}:${row.relationCode || index}`,
+        referenceType: 'relation',
       },
       {
         key: 'action-object',
@@ -1606,6 +1651,7 @@ const OntologyBaseDetail: React.FC = () => {
         data: actionObjectDistribution,
         columns: actionColumns,
         rowKey: (row: any, index: number) => `${row.sceneId || ''}:${row.actionCode || row.code || index}`,
+        referenceType: 'action',
       },
       {
         key: 'scene-relation-density',
@@ -1614,6 +1660,7 @@ const OntologyBaseDetail: React.FC = () => {
         data: sceneRelationDensityDistribution,
         columns: sceneColumns,
         rowKey: 'sceneId',
+        referenceType: 'scene',
       },
       {
         key: 'datasource-type',
@@ -1623,6 +1670,7 @@ const OntologyBaseDetail: React.FC = () => {
         columns: datasourceColumns,
         rowKey: (row: any, index: number) =>
           `${row.sceneId || ''}:${row.dbId || row.datasourceCode || row.code || index}`,
+        referenceType: 'datasource',
       },
     ];
     return (
@@ -1815,6 +1863,8 @@ const OntologyBaseDetail: React.FC = () => {
         data: sceneObjectSourceDistribution,
         columns: objectColumns,
         rowKey: 'objectCode',
+        referenceType: 'object',
+        referenceContext: { scene: selectedScene },
       },
       {
         key: 'relation-target',
@@ -1823,6 +1873,8 @@ const OntologyBaseDetail: React.FC = () => {
         data: sceneRelationTargetDistribution,
         columns: relationColumns,
         rowKey: (row: any, index: number) => row.relationCode || index,
+        referenceType: 'relation',
+        referenceContext: { scene: selectedScene },
       },
       {
         key: 'view-object-count',
@@ -1831,6 +1883,8 @@ const OntologyBaseDetail: React.FC = () => {
         data: sceneViewObjectCountDistribution,
         columns: viewColumns,
         rowKey: 'viewCode',
+        referenceType: 'view',
+        referenceContext: { scene: selectedScene },
       },
       {
         key: 'object-property-count',
@@ -1839,6 +1893,8 @@ const OntologyBaseDetail: React.FC = () => {
         data: objectPropertyCountDistribution,
         columns: objectColumns,
         rowKey: 'objectCode',
+        referenceType: 'object',
+        referenceContext: { scene: selectedScene },
       },
       {
         key: 'relation-source',
@@ -1847,6 +1903,8 @@ const OntologyBaseDetail: React.FC = () => {
         data: sceneRelationSourceDistribution,
         columns: relationColumns,
         rowKey: (row: any, index: number) => row.relationCode || index,
+        referenceType: 'relation',
+        referenceContext: { scene: selectedScene },
       },
       {
         key: 'action-object',
@@ -1855,6 +1913,8 @@ const OntologyBaseDetail: React.FC = () => {
         data: sceneActionObjectDistribution,
         columns: actionColumns,
         rowKey: (row: any, index: number) => row.actionCode || row.code || index,
+        referenceType: 'action',
+        referenceContext: { scene: selectedScene },
       },
       {
         key: 'concept-type',
@@ -1863,6 +1923,8 @@ const OntologyBaseDetail: React.FC = () => {
         data: objectConceptTypeDistribution,
         columns: objectColumns,
         rowKey: 'objectCode',
+        referenceType: 'object',
+        referenceContext: { scene: selectedScene },
       },
     ];
     return (
@@ -1998,6 +2060,8 @@ const OntologyBaseDetail: React.FC = () => {
         data: sourceDistribution,
         columns: propertyColumns,
         rowKey: (row: any, index: number) => row.propertyCode || index,
+        referenceType: 'field',
+        referenceContext: { scene: selectedScene, view: selectedView },
       },
       {
         key: 'field-type',
@@ -2006,6 +2070,8 @@ const OntologyBaseDetail: React.FC = () => {
         data: dataTypeDistribution,
         columns: propertyColumns,
         rowKey: (row: any, index: number) => row.propertyCode || index,
+        referenceType: 'field',
+        referenceContext: { scene: selectedScene, view: selectedView },
       },
       {
         key: 'field-source-property',
@@ -2014,6 +2080,8 @@ const OntologyBaseDetail: React.FC = () => {
         data: fieldSourcePropertyDistribution,
         columns: propertyColumns,
         rowKey: (row: any, index: number) => row.propertyCode || index,
+        referenceType: 'field',
+        referenceContext: { scene: selectedScene, view: selectedView },
       },
       {
         key: 'object-field-contribution',
@@ -2022,6 +2090,8 @@ const OntologyBaseDetail: React.FC = () => {
         data: objectFieldContributionDistribution,
         columns: propertyColumns,
         rowKey: (row: any, index: number) => row.propertyCode || index,
+        referenceType: 'field',
+        referenceContext: { scene: selectedScene, view: selectedView },
       },
       {
         key: 'view-relation-object',
@@ -2030,6 +2100,8 @@ const OntologyBaseDetail: React.FC = () => {
         data: viewRelationObjectDistribution,
         columns: relationColumns,
         rowKey: (row: any, index: number) => row.relationCode || index,
+        referenceType: 'relation',
+        referenceContext: { scene: selectedScene, view: selectedView },
       },
     ];
     return (

@@ -7,27 +7,33 @@ import com.iwhalecloud.byai.common.log.exception.BaseRuntimeException;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.util.ListUtil;
 import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.DingtalkRobotRegistryService;
+import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.event.DigEmployeeChangeEventPublisher;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.event.DigEmployeeChangeEventType;
+import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceBizTypeEnum;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceRelDetailService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.dto.men.NoticeDetail;
 import com.iwhalecloud.byai.manager.dto.men.Notices;
 import com.iwhalecloud.byai.manager.dto.openapi.MountResourceDto;
+import com.iwhalecloud.byai.manager.dto.openapi.OpenPermissionCheckDto;
+import com.iwhalecloud.byai.manager.dto.openapi.OpenPermissionCheckResultDto;
 import com.iwhalecloud.byai.manager.entity.notification.ByaiNotification;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.entity.resource.SsResourceRelDetail;
-import com.iwhalecloud.byai.manager.entity.superassist.SuasSuperassistSubAgent;
 import com.iwhalecloud.byai.manager.infrastructure.cache.ShareCacheUtil;
 import com.iwhalecloud.byai.state.domain.notification.service.NotificationService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
-import org.apache.poi.util.StringUtil;
+import java.util.ArrayList;
+import java.util.Collections;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import java.util.Date;
 import java.util.List;
+import org.apache.commons.collections4.CollectionUtils;
+import org.apache.commons.lang3.StringUtils;
 
 /**
  * @author he.duming
@@ -56,6 +62,9 @@ public class OpenApiApplicationService {
 
     @Autowired
     private DigEmployeeChangeEventPublisher digEmployeeChangeEventPublisher;
+
+    @Autowired
+    private AuthApplicationService authApplicationService;
 
     /**
      * 开放通知
@@ -95,7 +104,7 @@ public class OpenApiApplicationService {
         }
 
         // 根据用户编码查找
-        if (StringUtil.isNotBlank(userCode)) {
+        if (StringUtils.isNotBlank(userCode)) {
             ShareBfmUser shareBfmUser = ShareCacheUtil.getShareBfmUser(userCode);
             return shareBfmUser.getUserId();
         }
@@ -104,26 +113,60 @@ public class OpenApiApplicationService {
     }
 
     /**
+     * 批量校验当前登录用户是否有数字员工管理权限。
+     *
+     * @param checkDto 校验入参
+     * @return 校验结果
+     */
+    public OpenPermissionCheckResultDto checkDigEmployeeManagePermission(OpenPermissionCheckDto checkDto) {
+        List<Long> agentIds = checkDto == null ? Collections.emptyList() : checkDto.getAgentIds();
+        OpenPermissionCheckResultDto result = new OpenPermissionCheckResultDto();
+        if (CollectionUtils.isEmpty(agentIds)) {
+            result.setAllPermitted(false);
+            return result;
+        }
+
+        for (Long agentId : agentIds) {
+            SsResource agent = ssResourceService.findById(agentId);
+            result.getItems().add(buildPermissionItem(agent, authApplicationService.hasResourceManagePermission(agent),
+                isDigitalEmployee(agent) ? null : I18nUtil.get("openapi.mount.agent.not.digital.employee")));
+        }
+        result.setAllPermitted(result.getItems().stream().allMatch(item -> item.isExists() && item.isHasPermission()));
+        return result;
+    }
+
+    /**
+     * 批量校验当前登录用户是否有资源使用权限。
+     *
+     * @param checkDto 校验入参
+     * @return 校验结果
+     */
+    public OpenPermissionCheckResultDto checkResourceUsePermission(OpenPermissionCheckDto checkDto) {
+        List<SsResource> resources = resolveResources(checkDto);
+        OpenPermissionCheckResultDto result = new OpenPermissionCheckResultDto();
+        if (CollectionUtils.isEmpty(resources)) {
+            result.setAllPermitted(false);
+            return result;
+        }
+
+        for (SsResource resource : resources) {
+            result.getItems().add(buildPermissionItem(resource, authApplicationService.hasResourceUsePermission(resource),
+                null));
+        }
+        result.setAllPermitted(result.getItems().stream().allMatch(item -> item.isExists() && item.isHasPermission()));
+        return result;
+    }
+
+    /**
      * 挂载数字员工资源
      *
      * @param mountResourceDto 资源信息
      */
     public void mountDigEmployeeResource(MountResourceDto mountResourceDto) {
-        Long agentId = mountResourceDto.getAgentId();
-        String relResourceCode = mountResourceDto.getRelResourceCode();
-
-        if (agentId == null) {
-            throw new BaseRuntimeException(I18nUtil.get("openapi.mount.agent.id.not.empty"));
-        }
-        if (StringUtil.isBlank(relResourceCode)) {
-            throw new BaseRuntimeException(I18nUtil.get("openapi.mount.rel.resource.code.not.empty"));
-        }
-
-        SsResource relSsResource = ssResourceService.findByIdOrCode(null, relResourceCode);
-        if (relSsResource == null) {
-            throw new BaseRuntimeException(I18nUtil.get("openapi.mount.rel.resource.not.found", relResourceCode));
-        }
-
+        SsResource agentResource = loadAndValidateMountAgent(mountResourceDto);
+        SsResource relSsResource = loadAndValidateMountResource(mountResourceDto);
+        validateMountPermission(agentResource, relSsResource);
+        Long agentId = agentResource.getResourceId();
         Long relResourceId = relSsResource.getResourceId();
         List<SsResourceRelDetail> resourceRelDetails = ssResourceRelDetailService.find(agentId, relResourceId);
         // 是否已经挂载过
@@ -160,30 +203,122 @@ public class OpenApiApplicationService {
      */
     public void unMountDigEmployeeResource(MountResourceDto mountResourceDto) {
 
-        Long agentId = mountResourceDto.getAgentId();
-        String relResourceCode = mountResourceDto.getRelResourceCode();
-
-        SsResource relSsResource = ssResourceService.findByIdOrCode(null, relResourceCode);
+        SsResource agentResource = loadAndValidateMountAgent(mountResourceDto);
+        SsResource relSsResource = loadMountResource(mountResourceDto);
 
         // 如果没有资源信息，返回
         if (relSsResource == null) {
             return;
         }
+        if (!authApplicationService.hasResourceManagePermission(agentResource)) {
+            throw new BaseRuntimeException(I18nUtil.get("openapi.mount.agent.no.manage.permission",
+                agentResource.getResourceName()));
+        }
 
         // 删除挂载的资源
         LambdaQueryWrapper<SsResourceRelDetail> queryWrapper = new LambdaQueryWrapper<>();
-        queryWrapper.eq(SsResourceRelDetail::getResourceId, agentId);
+        queryWrapper.eq(SsResourceRelDetail::getResourceId, agentResource.getResourceId());
         queryWrapper.eq(SsResourceRelDetail::getRelResourceId, relSsResource.getResourceId());
         ssResourceRelDetailService.remove(queryWrapper);
 
         try {
-            dingtalkRobotRegistryService.refreshRobotClientsForResource(agentId);
+            dingtalkRobotRegistryService.refreshRobotClientsForResource(agentResource.getResourceId());
         }
         catch (Exception e) {
-            logger.warn("Refresh DingTalk robot clients after update failed. resourceId={}", agentId, e);
+            logger.warn("Refresh DingTalk robot clients after update failed. resourceId={}", agentResource.getResourceId(),
+                e);
         }
 
         digEmployeeChangeEventPublisher.publishAfterCommitOrNow(DigEmployeeChangeEventType.DIG_EMPLOYEE_UPDATED,
-            agentId);
+            agentResource.getResourceId());
+    }
+
+    private SsResource loadAndValidateMountAgent(MountResourceDto mountResourceDto) {
+        Long agentId = mountResourceDto == null ? null : mountResourceDto.getAgentId();
+        if (agentId == null) {
+            throw new BaseRuntimeException(I18nUtil.get("openapi.mount.agent.id.not.empty"));
+        }
+        SsResource agentResource = ssResourceService.findById(agentId);
+        if (agentResource == null) {
+            throw new BaseRuntimeException(I18nUtil.get("openapi.mount.agent.not.found", agentId));
+        }
+        if (!isDigitalEmployee(agentResource)) {
+            throw new BaseRuntimeException(I18nUtil.get("openapi.mount.agent.not.digital.employee"));
+        }
+        return agentResource;
+    }
+
+    private SsResource loadAndValidateMountResource(MountResourceDto mountResourceDto) {
+        SsResource relSsResource = loadMountResource(mountResourceDto);
+        if (relSsResource == null) {
+            Object resourceKey = mountResourceDto == null || mountResourceDto.getRelResourceId() == null
+                ? mountResourceDto == null ? null : mountResourceDto.getRelResourceCode()
+                : mountResourceDto.getRelResourceId();
+            throw new BaseRuntimeException(I18nUtil.get("openapi.mount.rel.resource.not.found", resourceKey));
+        }
+        return relSsResource;
+    }
+
+    private SsResource loadMountResource(MountResourceDto mountResourceDto) {
+        Long relResourceId = mountResourceDto == null ? null : mountResourceDto.getRelResourceId();
+        String relResourceCode = mountResourceDto == null ? null : mountResourceDto.getRelResourceCode();
+        if (relResourceId == null && StringUtils.isBlank(relResourceCode)) {
+            throw new BaseRuntimeException(I18nUtil.get("openapi.mount.rel.resource.code.not.empty"));
+        }
+        return ssResourceService.findByIdOrCode(relResourceId, relResourceCode);
+    }
+
+    private void validateMountPermission(SsResource agentResource, SsResource relSsResource) {
+        if (!authApplicationService.hasResourceManagePermission(agentResource)) {
+            throw new BaseRuntimeException(I18nUtil.get("openapi.mount.agent.no.manage.permission",
+                agentResource.getResourceName()));
+        }
+        if (!authApplicationService.hasResourceUsePermission(relSsResource)) {
+            throw new BaseRuntimeException(I18nUtil.get("openapi.mount.rel.resource.no.use.permission",
+                relSsResource.getResourceName()));
+        }
+    }
+
+    private List<SsResource> resolveResources(OpenPermissionCheckDto checkDto) {
+        if (checkDto == null) {
+            return Collections.emptyList();
+        }
+        List<SsResource> resources = new ArrayList<>();
+        if (CollectionUtils.isNotEmpty(checkDto.getResourceIds())) {
+            for (Long resourceId : checkDto.getResourceIds()) {
+                resources.add(ssResourceService.findById(resourceId));
+            }
+        }
+        if (CollectionUtils.isNotEmpty(checkDto.getResourceCodes())) {
+            for (String resourceCode : checkDto.getResourceCodes()) {
+                resources.add(ssResourceService.findByIdOrCode(null, resourceCode));
+            }
+        }
+        return resources;
+    }
+
+    private OpenPermissionCheckResultDto.Item buildPermissionItem(SsResource resource, boolean hasPermission,
+        String invalidMessage) {
+        OpenPermissionCheckResultDto.Item item = new OpenPermissionCheckResultDto.Item();
+        if (resource == null) {
+            item.setExists(false);
+            item.setHasPermission(false);
+            item.setMessage(I18nUtil.get("resource.not.found"));
+            return item;
+        }
+        item.setResourceId(resource.getResourceId());
+        item.setResourceCode(resource.getResourceCode());
+        item.setResourceName(resource.getResourceName());
+        item.setResourceBizType(resource.getResourceBizType());
+        item.setExists(true);
+        item.setHasPermission(StringUtils.isBlank(invalidMessage) && hasPermission);
+        item.setMessage(StringUtils.isNotBlank(invalidMessage) ? invalidMessage
+            : hasPermission ? null : I18nUtil.get("user.permission.nopermission"));
+        return item;
+    }
+
+    private boolean isDigitalEmployee(SsResource resource) {
+        return resource != null
+            && StringUtils.equals(ResourceBizTypeEnum.DIG_EMPLOYEE.name(), resource.getResourceBizType());
     }
 }

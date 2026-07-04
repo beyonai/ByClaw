@@ -387,9 +387,13 @@
 }
 
 .resourceSectionTitle {
+  min-width: 0;
+  overflow: hidden;
   font-size: 15px;
   font-weight: 600;
   color: #1d2129;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sectionMoreButton {
@@ -547,6 +551,14 @@
   border: 0.5px solid rgba(29, 109, 242, 0.14);
   border-radius: 12px;
   background: #fff;
+}
+
+.drillHeaderActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .drillSummary {
