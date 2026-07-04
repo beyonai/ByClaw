@@ -46,6 +46,8 @@ Content-Type: application/json
 | `agentId` | 数字员工资源 ID，对应 `ss_resource.resource_id`，且资源业务类型应为 `DIG_EMPLOYEE` |
 | `resourceId` / `relResourceId` | 被校验或被绑定资源的资源 ID，对应 `ss_resource.resource_id` |
 | `resourceCode` / `relResourceCode` | 被校验或被绑定资源的资源编码，对应 `ss_resource.resource_code` |
+| `resourceBizType` / `relResourceBizType` | 被校验或被绑定资源的业务类型，例如 `OBJECT`、`VIEW`、`SCENE`、`ONTOLOGY_BASE` |
+| `ontologyBaseCode` | 所属本体库编码。对象、视图、场景按编码定位时必填 |
 
 ## 3. 校验数字员工管理权限
 
@@ -145,24 +147,53 @@ POST /open/api/v1/checkResourceUsePermission
 
 ### 4.2 请求参数
 
+按资源 ID 校验：
+
 ```json
 {
-  "resourceIds": [111111, 222222],
-  "resourceCodes": ["resource_code_a", "resource_code_b"]
+  "resourceIds": [111111, 222222]
+}
+```
+
+按资源编码校验：
+
+```json
+{
+  "resources": [
+    {
+      "resourceBizType": "OBJECT",
+      "resourceCode": "customer_info",
+      "ontologyBaseCode": "enterprise_default"
+    },
+    {
+      "resourceBizType": "VIEW",
+      "resourceCode": "order_view",
+      "ontologyBaseCode": "enterprise_default"
+    }
+  ]
 }
 ```
 
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
-| `resourceIds` | array<long> | 条件必填 | 资源 ID 列表。与 `resourceCodes` 至少传一个 |
-| `resourceCodes` | array<string> | 条件必填 | 资源编码列表。与 `resourceIds` 至少传一个 |
+| `resourceIds` | array<long> | 条件必填 | 资源 ID 列表。与 `resources`、`resourceCodes` 互斥 |
+| `resources` | array<object> | 条件必填 | 资源编码定位列表。与 `resourceIds` 互斥 |
+| `resources[].resourceBizType` | string | 是 | 资源业务类型 |
+| `resources[].resourceCode` | string | 是 | 资源编码 |
+| `resources[].ontologyBaseCode` | string | 条件必填 | 所属本体库编码。`resourceBizType` 为 `OBJECT`、`VIEW`、`SCENE` 时必填 |
+| `resourceCodes` | array<string> | 否 | 兼容字段。适用于同一资源类型、同一本体库下的批量编码校验 |
+| `resourceBizType` | string | 条件必填 | 使用 `resourceCodes` 时必填 |
+| `ontologyBaseCode` | string | 条件必填 | 使用 `resourceCodes` 且资源类型为 `OBJECT`、`VIEW`、`SCENE` 时必填 |
 
 说明：
 
-- 仅传 `resourceIds` 时，按资源 ID 批量校验。
-- 仅传 `resourceCodes` 时，按资源编码批量校验。
-- 同时传 `resourceIds` 和 `resourceCodes` 时，会分别按两组标识进行校验，并合并返回结果。
-- 如果同一资源同时出现在 `resourceIds` 和 `resourceCodes` 中，当前接口不做去重，下游可按需去重展示。
+- 资源 ID 模式和资源编码模式互斥，不允许同时传 `resourceIds` 和 `resources/resourceCodes`。
+- `resources` 和兼容字段 `resourceCodes` 同属编码模式，也不允许同时传。
+- 按资源 ID 校验时，`resourceId` 全局唯一，不需要传 `resourceBizType` 和 `ontologyBaseCode`。
+- 按资源编码校验时，必须传 `resourceBizType`。
+- 按资源编码校验，且资源类型为 `OBJECT`、`VIEW`、`SCENE` 时，必须传 `ontologyBaseCode`。
+- 推荐使用 `resources` 支持不同资源类型、不同本体库的混合批量校验。
+- `resourceCodes + resourceBizType + ontologyBaseCode` 仅用于同一类型、同一本体库下的兼容批量校验。
 
 ### 4.3 响应参数
 
@@ -181,6 +212,7 @@ POST /open/api/v1/checkResourceUsePermission
 | `resourceCode` | string | 否 | 资源编码 |
 | `resourceName` | string | 否 | 资源名称 |
 | `resourceBizType` | string | 否 | 资源业务类型 |
+| `ontologyBaseCode` | string | 否 | 所属本体库编码 |
 | `exists` | boolean | 是 | 资源是否存在 |
 | `hasPermission` | boolean | 是 | 当前用户是否拥有使用权限 |
 | `message` | string | 否 | 无权限或异常原因 |
@@ -199,15 +231,17 @@ POST /open/api/v1/checkResourceUsePermission
         "resourceCode": "resource_code_a",
         "resourceName": "企业本体库",
         "resourceBizType": "ONTOLOGY_BASE",
+        "ontologyBaseCode": null,
         "exists": true,
         "hasPermission": true,
         "message": null
       },
       {
         "resourceId": 222222,
-        "resourceCode": "resource_code_b",
+        "resourceCode": "customer_info",
         "resourceName": "客户信息表",
         "resourceBizType": "OBJECT",
+        "ontologyBaseCode": "enterprise_default",
         "exists": true,
         "hasPermission": false,
         "message": "当前用户无资源使用权限"
@@ -217,6 +251,7 @@ POST /open/api/v1/checkResourceUsePermission
         "resourceCode": "not_exist_code",
         "resourceName": null,
         "resourceBizType": null,
+        "ontologyBaseCode": null,
         "exists": false,
         "hasPermission": false,
         "message": "资源不存在"
@@ -233,8 +268,29 @@ curl -X POST "$BASE_URL/open/api/v1/checkResourceUsePermission" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <token>" \
   -d '{
-    "resourceIds": [111111, 222222],
-    "resourceCodes": ["resource_code_a", "resource_code_b"]
+    "resourceIds": [111111, 222222]
+  }'
+```
+
+按资源编码校验：
+
+```bash
+curl -X POST "$BASE_URL/open/api/v1/checkResourceUsePermission" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <token>" \
+  -d '{
+    "resources": [
+      {
+        "resourceBizType": "OBJECT",
+        "resourceCode": "customer_info",
+        "ontologyBaseCode": "enterprise_default"
+      },
+      {
+        "resourceBizType": "VIEW",
+        "resourceCode": "order_view",
+        "ontologyBaseCode": "enterprise_default"
+      }
+    ]
   }'
 ```
 
@@ -271,30 +327,26 @@ POST /open/api/v1/mountDigEmployeeResource
 ```json
 {
   "agentId": 123456789,
-  "relResourceCode": "resource_code_a"
-}
-```
-
-同时传资源 ID 与资源编码：
-
-```json
-{
-  "agentId": 123456789,
-  "relResourceId": 111111,
-  "relResourceCode": "resource_code_a"
+  "relResourceBizType": "OBJECT",
+  "relResourceCode": "customer_info",
+  "ontologyBaseCode": "enterprise_default"
 }
 ```
 
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
 | `agentId` | long | 是 | 数字员工资源 ID |
-| `relResourceId` | long | 条件必填 | 待绑定资源 ID。与 `relResourceCode` 至少传一个 |
-| `relResourceCode` | string | 条件必填 | 待绑定资源编码。与 `relResourceId` 至少传一个 |
+| `relResourceId` | long | 条件必填 | 待绑定资源 ID。与 `relResourceCode` 互斥 |
+| `relResourceCode` | string | 条件必填 | 待绑定资源编码。与 `relResourceId` 互斥 |
+| `relResourceBizType` | string | 条件必填 | 使用 `relResourceCode` 时必填 |
+| `ontologyBaseCode` | string | 条件必填 | 使用 `relResourceCode` 且资源类型为 `OBJECT`、`VIEW`、`SCENE` 时必填 |
 
 说明：
 
-- `relResourceId` 与 `relResourceCode` 可以任选其一。
-- 如果同时传 `relResourceId` 与 `relResourceCode`，二者必须指向同一个资源，否则会被视为资源不存在。
+- `relResourceId` 与 `relResourceCode` 二选一，不允许同时传。
+- `relResourceId` 全局唯一，不需要传 `relResourceBizType` 和 `ontologyBaseCode`。
+- 按编码绑定时必须传 `relResourceBizType`。
+- 按编码绑定，且 `relResourceBizType` 为 `OBJECT`、`VIEW`、`SCENE` 时，必须传 `ontologyBaseCode`。
 - 如果资源已经绑定到该数字员工，接口按幂等成功处理。
 
 ### 5.3 业务校验规则
@@ -305,6 +357,9 @@ POST /open/api/v1/mountDigEmployeeResource
 | 数字员工类型 | `agentId` 对应资源业务类型必须为 `DIG_EMPLOYEE` |
 | 数字员工管理权限 | 当前用户必须有该数字员工的管理权限 |
 | 待绑定资源存在性 | `relResourceId` 或 `relResourceCode` 必须能定位到一个有效资源 |
+| 绑定入参互斥 | `relResourceId` 与 `relResourceCode` 不允许同时传 |
+| 编码绑定资源类型 | 使用 `relResourceCode` 时，`relResourceBizType` 必填 |
+| 本体类编码绑定 | `relResourceBizType` 为 `OBJECT`、`VIEW`、`SCENE` 时，`ontologyBaseCode` 必填 |
 | 待绑定资源使用权限 | 当前用户必须有该资源的使用权限 |
 
 ### 5.4 成功响应示例
@@ -392,7 +447,9 @@ curl -X POST "$BASE_URL/open/api/v1/mountDigEmployeeResource" \
   -H "Authorization: Bearer <token>" \
   -d '{
     "agentId": 123456789,
-    "relResourceCode": "resource_code_a"
+    "relResourceBizType": "OBJECT",
+    "relResourceCode": "customer_info",
+    "ontologyBaseCode": "enterprise_default"
   }'
 ```
 
@@ -417,4 +474,3 @@ curl -X POST "$BASE_URL/open/api/v1/mountDigEmployeeResource" \
 2. `/open/api/v1/checkResourceUsePermission`
 
 提前确认当前用户是否具备操作条件，从而减少写接口失败。
-

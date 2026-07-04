@@ -45,6 +45,12 @@ public class OpenApiApplicationService {
 
     private static final Logger logger = LoggerFactory.getLogger(OpenApiApplicationService.class);
 
+    private static final String BIZ_TYPE_SCENE = "SCENE";
+
+    private static final String BIZ_TYPE_VIEW = "VIEW";
+
+    private static final String BIZ_TYPE_OBJECT = "OBJECT";
+
     @Autowired
     private SequenceService sequenceService;
 
@@ -142,17 +148,14 @@ public class OpenApiApplicationService {
      * @return 校验结果
      */
     public OpenPermissionCheckResultDto checkResourceUsePermission(OpenPermissionCheckDto checkDto) {
-        List<SsResource> resources = resolveResources(checkDto);
         OpenPermissionCheckResultDto result = new OpenPermissionCheckResultDto();
-        if (CollectionUtils.isEmpty(resources)) {
+        List<OpenPermissionCheckResultDto.Item> items = resolveResourcePermissionItems(checkDto);
+        if (CollectionUtils.isEmpty(items)) {
             result.setAllPermitted(false);
             return result;
         }
 
-        for (SsResource resource : resources) {
-            result.getItems().add(buildPermissionItem(resource, authApplicationService.hasResourceUsePermission(resource),
-                null));
-        }
+        result.getItems().addAll(items);
         result.setAllPermitted(result.getItems().stream().allMatch(item -> item.isExists() && item.isHasPermission()));
         return result;
     }
@@ -262,10 +265,28 @@ public class OpenApiApplicationService {
     private SsResource loadMountResource(MountResourceDto mountResourceDto) {
         Long relResourceId = mountResourceDto == null ? null : mountResourceDto.getRelResourceId();
         String relResourceCode = mountResourceDto == null ? null : mountResourceDto.getRelResourceCode();
+        String relResourceBizType = mountResourceDto == null ? null : mountResourceDto.getRelResourceBizType();
+        String ontologyBaseCode = mountResourceDto == null ? null : mountResourceDto.getOntologyBaseCode();
         if (relResourceId == null && StringUtils.isBlank(relResourceCode)) {
             throw new BaseRuntimeException(I18nUtil.get("openapi.mount.rel.resource.code.not.empty"));
         }
-        return ssResourceService.findByIdOrCode(relResourceId, relResourceCode);
+        if (relResourceId != null && StringUtils.isNotBlank(relResourceCode)) {
+            throw new BaseRuntimeException(I18nUtil.get("openapi.resource.id.code.exclusive"));
+        }
+        if (relResourceId != null) {
+            return ssResourceService.findById(relResourceId);
+        }
+
+        validateCodeQueryParams(relResourceCode, relResourceBizType, ontologyBaseCode);
+        List<SsResource> resources = ssResourceService.findByCodeAndBizTypeAndOntologyBaseCode(relResourceCode,
+            relResourceBizType, ontologyBaseCode);
+        if (CollectionUtils.isEmpty(resources)) {
+            return null;
+        }
+        if (resources.size() > 1) {
+            throw new BaseRuntimeException(I18nUtil.get("openapi.resource.code.not.unique"));
+        }
+        return resources.get(0);
     }
 
     private void validateMountPermission(SsResource agentResource, SsResource relSsResource) {
@@ -279,22 +300,77 @@ public class OpenApiApplicationService {
         }
     }
 
-    private List<SsResource> resolveResources(OpenPermissionCheckDto checkDto) {
+    private List<OpenPermissionCheckResultDto.Item> resolveResourcePermissionItems(OpenPermissionCheckDto checkDto) {
         if (checkDto == null) {
             return Collections.emptyList();
         }
-        List<SsResource> resources = new ArrayList<>();
-        if (CollectionUtils.isNotEmpty(checkDto.getResourceIds())) {
+        boolean hasIdMode = CollectionUtils.isNotEmpty(checkDto.getResourceIds());
+        boolean hasResourceRefs = CollectionUtils.isNotEmpty(checkDto.getResources());
+        boolean hasResourceCodes = CollectionUtils.isNotEmpty(checkDto.getResourceCodes());
+        boolean hasCodeMode = hasResourceRefs || hasResourceCodes;
+        if (hasIdMode && hasCodeMode) {
+            throw new BaseRuntimeException(I18nUtil.get("openapi.resource.id.code.exclusive"));
+        }
+        if (hasResourceRefs && hasResourceCodes) {
+            throw new BaseRuntimeException(I18nUtil.get("openapi.resource.code.mode.exclusive"));
+        }
+
+        List<OpenPermissionCheckResultDto.Item> items = new ArrayList<>();
+        if (hasIdMode) {
             for (Long resourceId : checkDto.getResourceIds()) {
-                resources.add(ssResourceService.findById(resourceId));
+                SsResource resource = ssResourceService.findById(resourceId);
+                items.add(buildPermissionItem(resource, authApplicationService.hasResourceUsePermission(resource), null));
             }
+            return items;
         }
-        if (CollectionUtils.isNotEmpty(checkDto.getResourceCodes())) {
-            for (String resourceCode : checkDto.getResourceCodes()) {
-                resources.add(ssResourceService.findByIdOrCode(null, resourceCode));
+
+        for (OpenPermissionCheckDto.ResourceCodeRef ref : buildResourceCodeRefs(checkDto)) {
+            String resourceCode = ref.getResourceCode();
+            String resourceBizType = ref.getResourceBizType();
+            String ontologyBaseCode = ref.getOntologyBaseCode();
+            String invalidMessage = getCodeQueryInvalidMessage(resourceCode, resourceBizType, ontologyBaseCode);
+            if (StringUtils.isNotBlank(invalidMessage)) {
+                items.add(buildInvalidPermissionItem(resourceCode, resourceBizType, ontologyBaseCode, invalidMessage));
+                continue;
             }
+
+            List<SsResource> resources = ssResourceService.findByCodeAndBizTypeAndOntologyBaseCode(resourceCode,
+                resourceBizType, ontologyBaseCode);
+            if (CollectionUtils.isEmpty(resources)) {
+                items.add(buildInvalidPermissionItem(resourceCode, resourceBizType, ontologyBaseCode,
+                    I18nUtil.get("resource.not.found")));
+                continue;
+            }
+            if (resources.size() > 1) {
+                items.add(buildInvalidPermissionItem(resourceCode, resourceBizType, ontologyBaseCode,
+                    I18nUtil.get("openapi.resource.code.not.unique")));
+                continue;
+            }
+            SsResource resource = resources.get(0);
+            OpenPermissionCheckResultDto.Item item = buildPermissionItem(resource,
+                authApplicationService.hasResourceUsePermission(resource), null);
+            item.setOntologyBaseCode(ontologyBaseCode);
+            items.add(item);
         }
-        return resources;
+        return items;
+    }
+
+    private List<OpenPermissionCheckDto.ResourceCodeRef> buildResourceCodeRefs(OpenPermissionCheckDto checkDto) {
+        if (CollectionUtils.isNotEmpty(checkDto.getResources())) {
+            return checkDto.getResources();
+        }
+        if (CollectionUtils.isEmpty(checkDto.getResourceCodes())) {
+            return Collections.emptyList();
+        }
+        List<OpenPermissionCheckDto.ResourceCodeRef> refs = new ArrayList<>();
+        for (String resourceCode : checkDto.getResourceCodes()) {
+            OpenPermissionCheckDto.ResourceCodeRef ref = new OpenPermissionCheckDto.ResourceCodeRef();
+            ref.setResourceCode(resourceCode);
+            ref.setResourceBizType(checkDto.getResourceBizType());
+            ref.setOntologyBaseCode(checkDto.getOntologyBaseCode());
+            refs.add(ref);
+        }
+        return refs;
     }
 
     private OpenPermissionCheckResultDto.Item buildPermissionItem(SsResource resource, boolean hasPermission,
@@ -317,8 +393,44 @@ public class OpenApiApplicationService {
         return item;
     }
 
+    private OpenPermissionCheckResultDto.Item buildInvalidPermissionItem(String resourceCode, String resourceBizType,
+        String ontologyBaseCode, String message) {
+        OpenPermissionCheckResultDto.Item item = new OpenPermissionCheckResultDto.Item();
+        item.setResourceCode(resourceCode);
+        item.setResourceBizType(resourceBizType);
+        item.setOntologyBaseCode(ontologyBaseCode);
+        item.setExists(false);
+        item.setHasPermission(false);
+        item.setMessage(message);
+        return item;
+    }
+
     private boolean isDigitalEmployee(SsResource resource) {
         return resource != null
             && StringUtils.equals(ResourceBizTypeEnum.DIG_EMPLOYEE.name(), resource.getResourceBizType());
+    }
+
+    private void validateCodeQueryParams(String resourceCode, String resourceBizType, String ontologyBaseCode) {
+        String invalidMessage = getCodeQueryInvalidMessage(resourceCode, resourceBizType, ontologyBaseCode);
+        if (StringUtils.isNotBlank(invalidMessage)) {
+            throw new BaseRuntimeException(invalidMessage);
+        }
+    }
+
+    private String getCodeQueryInvalidMessage(String resourceCode, String resourceBizType, String ontologyBaseCode) {
+        if (StringUtils.isBlank(resourceCode)) {
+            return I18nUtil.get("openapi.resource.code.not.empty");
+        }
+        if (StringUtils.isBlank(resourceBizType)) {
+            return I18nUtil.get("openapi.resource.biz.type.not.empty");
+        }
+        if (isOntologyChildBizType(resourceBizType) && StringUtils.isBlank(ontologyBaseCode)) {
+            return I18nUtil.get("openapi.resource.ontology.base.code.required");
+        }
+        return null;
+    }
+
+    private boolean isOntologyChildBizType(String resourceBizType) {
+        return StringUtils.equalsAny(resourceBizType, BIZ_TYPE_OBJECT, BIZ_TYPE_VIEW, BIZ_TYPE_SCENE);
     }
 }

@@ -25,7 +25,42 @@ public class OpenPermissionCheckDto {
     private List<Long> resourceIds;
 
     /**
-     * 资源编码列表。
+     * 资源编码定位列表。按编码校验时使用，不可与 resourceIds 同时传。
+     */
+    private List<ResourceCodeRef> resources;
+
+    /**
+     * 资源编码列表。兼容同一资源类型、同一本体库下的批量编码校验。
      */
     private List<String> resourceCodes;
+
+    /**
+     * 资源业务类型。使用 resourceCodes 时必填。
+     */
+    private String resourceBizType;
+
+    /**
+     * 所属本体库编码。resourceBizType 为 OBJECT、VIEW、SCENE 时必填。
+     */
+    private String ontologyBaseCode;
+
+    @Getter
+    @Setter
+    public static class ResourceCodeRef {
+
+        /**
+         * 资源业务类型。
+         */
+        private String resourceBizType;
+
+        /**
+         * 资源编码。
+         */
+        private String resourceCode;
+
+        /**
+         * 所属本体库编码。resourceBizType 为 OBJECT、VIEW、SCENE 时必填。
+         */
+        private String ontologyBaseCode;
+    }
 }

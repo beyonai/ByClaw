@@ -18,4 +18,8 @@ public class MountResourceDto {
 
     private String relResourceCode;
 
+    private String relResourceBizType;
+
+    private String ontologyBaseCode;
+
 }
