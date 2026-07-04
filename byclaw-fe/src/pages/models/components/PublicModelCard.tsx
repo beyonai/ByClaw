@@ -10,9 +10,9 @@ type Props = {
   current?: boolean;
 };
 
-const STATUS_MAP: Record<string, { color: string; label: string }> = {
-  ENABLED: { color: 'success', label: 'personalModel.status.enabled' },
-  DISABLED: { color: 'default', label: 'personalModel.status.disabled' },
+const STATUS_MAP: Record<string, { className?: string; label: string }> = {
+  ENABLED: { className: styles.currentTag, label: 'personalModel.action.enable' },
+  DISABLED: { label: 'personalModel.action.disable' },
 };
 
 const PublicModelCard: React.FC<Props> = ({ record, current }) => {
@@ -29,11 +29,6 @@ const PublicModelCard: React.FC<Props> = ({ record, current }) => {
             <div className={classNames(styles.title, 'ellipsis')} title={displayName}>
               {displayName || '-'}
             </div>
-            {/* {current && (
-              <Tag color="blue" className={styles.currentTag}>
-                {intl.formatMessage({ id: 'personalModel.currentInUse' })}
-              </Tag>
-            )} */}
           </div>
           <div className={styles.subtitleRow}>
             <span className={styles.modelPill}>{modelType || 'LLM'}</span>
@@ -42,7 +37,11 @@ const PublicModelCard: React.FC<Props> = ({ record, current }) => {
             </span>
           </div>
         </div>
-        <Tag color={statusInfo.color}>{intl.formatMessage({ id: statusInfo.label })}</Tag>
+        {current ? (
+          <Tag className={styles.currentTag}>{intl.formatMessage({ id: 'fileBrowserEntry.debug.currentModel' })}</Tag>
+        ) : (
+          <Tag className={statusInfo.className}>{intl.formatMessage({ id: statusInfo.label })}</Tag>
+        )}
       </div>
 
       <div className={styles.content}>
