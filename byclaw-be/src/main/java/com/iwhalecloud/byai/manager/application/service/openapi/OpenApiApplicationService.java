@@ -112,7 +112,17 @@ public class OpenApiApplicationService {
         Long agentId = mountResourceDto.getAgentId();
         String relResourceCode = mountResourceDto.getRelResourceCode();
 
+        if (agentId == null) {
+            throw new BaseRuntimeException(I18nUtil.get("openapi.mount.agent.id.not.empty"));
+        }
+        if (StringUtil.isBlank(relResourceCode)) {
+            throw new BaseRuntimeException(I18nUtil.get("openapi.mount.rel.resource.code.not.empty"));
+        }
+
         SsResource relSsResource = ssResourceService.findByIdOrCode(null, relResourceCode);
+        if (relSsResource == null) {
+            throw new BaseRuntimeException(I18nUtil.get("openapi.mount.rel.resource.not.found", relResourceCode));
+        }
 
         Long relResourceId = relSsResource.getResourceId();
         List<SsResourceRelDetail> resourceRelDetails = ssResourceRelDetailService.find(agentId, relResourceId);
