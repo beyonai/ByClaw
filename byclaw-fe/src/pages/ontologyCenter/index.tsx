@@ -188,6 +188,8 @@ const OntologyCenter: React.FC = () => {
                 extraMenuItems: [
                   {
                     key: 'bind-ontology',
+                    visible: (currentResource: any) =>
+                      Boolean(currentResource?.hasUsePermission || currentResource?.hasManagePermission),
                     label: (
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
                         <LinkOutlined />

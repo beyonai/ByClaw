@@ -5,6 +5,7 @@ import com.alibaba.fastjson.JSONObject;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.iwhalecloud.byai.common.constants.resource.ResourceBizType;
 import com.iwhalecloud.byai.common.exception.BaseException;
+import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeApplicationService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceRelDetailService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
@@ -52,6 +53,7 @@ public class OntologyBindService {
     private static final String LEVEL_OBJECT_IN_VIEW = "OBJECT_IN_VIEW";
 
     private static final String BIZ_BASE = ResourceBizType.ONTOLOGY_BASE.getCode();
+    private static final String BIZ_DIG_EMPLOYEE = ResourceBizType.DIG_EMPLOYEE.getCode();
     private static final String BIZ_SCENE = ResourceBizType.SCENE.getCode();
     private static final String BIZ_VIEW = ResourceBizType.VIEW.getCode();
     private static final String BIZ_OBJECT = ResourceBizType.OBJECT.getCode();
@@ -70,6 +72,9 @@ public class OntologyBindService {
 
     @Autowired
     private DigitalEmployeeApplicationService digitalEmployeeApplicationService;
+
+    @Autowired
+    private AuthApplicationService authApplicationService;
 
     /**
      * 覆盖式绑定：以本次选中为准，重写该本体库在此数字员工下的绑定。
@@ -90,6 +95,7 @@ public class OntologyBindService {
         if (baseRes == null) {
             throw new BaseException("本体库资源不存在，请先注册或刷新本体库");
         }
+        validateBindPermission(digitalEmployeeId, baseRes);
         String ownerType = baseRes.getOwnerType();
         Map<String, SsResource> byKey = new HashMap<>();
         for (SsResource r : baseResources) {
@@ -191,6 +197,21 @@ public class OntologyBindService {
 
     private boolean isOntologyBiz(String biz) {
         return BIZ_BASE.equals(biz) || BIZ_SCENE.equals(biz) || BIZ_VIEW.equals(biz) || BIZ_OBJECT.equals(biz);
+    }
+
+    private void validateBindPermission(Long digitalEmployeeId, SsResource baseRes) {
+        SsResource digitalEmployee = ssResourceService.findById(digitalEmployeeId);
+        if (digitalEmployee == null || !BIZ_DIG_EMPLOYEE.equals(digitalEmployee.getResourceBizType())) {
+            throw new BaseException("数字员工资源不存在或类型不正确");
+        }
+        if (!authApplicationService.hasResourceManagePermission(digitalEmployee)) {
+            throw new BaseException("当前用户对数字员工【" + digitalEmployee.getResourceName() + "】没有管理权限，无法绑定本体");
+        }
+        boolean hasBasePermission = authApplicationService.hasResourceManagePermission(baseRes)
+            || authApplicationService.hasResourceUsePermission(baseRes);
+        if (!hasBasePermission) {
+            throw new BaseException("当前用户对本体库【" + baseRes.getResourceName() + "】没有使用或管理权限，无法绑定本体");
+        }
     }
 
     /** 本体库下全部资源(经 ss_res_ext_ontology.pid 过滤)。 */
