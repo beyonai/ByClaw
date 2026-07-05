@@ -37,7 +37,10 @@ from _common import post_json
 def main() -> None:
     raw = sys.argv[1] if len(sys.argv) > 1 else sys.stdin.read().strip()
     if not raw:
-        print(json.dumps({"ok": False, "error": "缺少入参，需要 resource_id 和 directory_name"}), flush=True)
+        print(
+            json.dumps({"ok": False, "error": "缺少入参，需要 resource_id 和 directory_name"}),
+            flush=True,
+        )
         sys.exit(1)
 
     params: dict = json.loads(raw)
@@ -53,9 +56,18 @@ def main() -> None:
 
     data = post_json(
         path="/byaiService/datasetController/createFolder",
-        payload={"resourceId": int(resource_id), "directoryName": directory_name, "directoryPath": "/"},
+        payload={
+            "resourceId": int(resource_id),
+            "directoryName": directory_name,
+            "directoryPath": "/",
+        },
     )
-    print(json.dumps({"ok": True, "data": data if isinstance(data, dict) else {}}, ensure_ascii=False), flush=True)
+    print(
+        json.dumps(
+            {"ok": True, "data": data if isinstance(data, dict) else {}}, ensure_ascii=False
+        ),
+        flush=True,
+    )
 
 
 if __name__ == "__main__":

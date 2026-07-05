@@ -311,8 +311,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS uk_po_user_token_quota_user
     ON byai.po_user_token_quota (user_id) WHERE delete_flag = '0';
 
 -- ========== 本体（Ontology）资源化改造 ==========
--- 本体库/场景/对象/视图统一登记为 ss_resource；本体专用字段集中在扩展表 ss_res_ext_ontology。
--- 所属本体库编码复用扩展表既有的 pid 列（不在 ss_resource 上加列），与既有 ss_res_ext_ontology.pid 过滤一致。
+-- 本体库/场景/对象/视图统一登记为 ss_resource；本体库、场景、对象、视图分别写各自扩展表。
+-- 本体库编码存 ss_res_ext_ontology.pid；场景/对象/视图的所属本体库编码存各自扩展表 target_content.ontologyBaseCode。
 -- 1. 添加 source_content 列
 ALTER TABLE byai.ss_res_ext_ontology ADD source_content text;
 -- 2. 添加 target_content 列
@@ -322,7 +322,7 @@ COMMENT ON COLUMN byai.ss_res_ext_ontology.source_content IS '来源内容：预
 -- 4. 为 target_content 添加注释
 COMMENT ON COLUMN byai.ss_res_ext_ontology.target_content IS '目标内容：本体实体元数据明细 JSON 镜像，冗余 ownerType/baseId/sceneId/code 供 Worker 运行期消费';
 -- 5. 修改已有列 pid 的注释
-COMMENT ON COLUMN byai.ss_res_ext_ontology.pid IS '所属本体库编码：本体类资源（ONTOLOGY_BASE/SCENE/OBJECT/VIEW）专用，标识其所属本体库；用于隔离本体资源与普通对象/视图';
+COMMENT ON COLUMN byai.ss_res_ext_ontology.pid IS '本体库编码：ONTOLOGY_BASE 资源专用；场景/对象/视图使用各自扩展表';
 -- 6. 创建索引
 CREATE INDEX IF NOT EXISTS idx_ss_res_ext_ontology_pid
     ON byai.ss_res_ext_ontology (pid);

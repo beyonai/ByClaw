@@ -10,6 +10,8 @@ import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.DingtalkRob
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.event.DigEmployeeChangeEventPublisher;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.event.DigEmployeeChangeEventType;
+import com.iwhalecloud.byai.manager.application.service.ontology.OntologyBaseService;
+import com.iwhalecloud.byai.manager.application.service.ontology.OntologyResourceValidityService;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceBizTypeEnum;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceRelDetailService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
@@ -71,6 +73,12 @@ public class OpenApiApplicationService {
 
     @Autowired
     private AuthApplicationService authApplicationService;
+
+    @Autowired
+    private OntologyBaseService ontologyBaseService;
+
+    @Autowired
+    private OntologyResourceValidityService ontologyResourceValidityService;
 
     /**
      * 开放通知
@@ -137,7 +145,7 @@ public class OpenApiApplicationService {
             result.getItems().add(buildPermissionItem(agent, authApplicationService.hasResourceManagePermission(agent),
                 isDigitalEmployee(agent) ? null : I18nUtil.get("openapi.mount.agent.not.digital.employee")));
         }
-        result.setAllPermitted(result.getItems().stream().allMatch(item -> item.isExists() && item.isHasPermission()));
+        result.setAllPermitted(result.getItems().stream().allMatch(this::isPermissionCheckPassed));
         return result;
     }
 
@@ -156,7 +164,7 @@ public class OpenApiApplicationService {
         }
 
         result.getItems().addAll(items);
-        result.setAllPermitted(result.getItems().stream().allMatch(item -> item.isExists() && item.isHasPermission()));
+        result.setAllPermitted(result.getItems().stream().allMatch(this::isPermissionCheckPassed));
         return result;
     }
 
@@ -274,12 +282,22 @@ public class OpenApiApplicationService {
             throw new BaseRuntimeException(I18nUtil.get("openapi.resource.id.code.exclusive"));
         }
         if (relResourceId != null) {
-            return ssResourceService.findById(relResourceId);
+            SsResource resource = ssResourceService.findById(relResourceId);
+            return ontologyResourceValidityService.validateAndInvalidate(resource) ? resource : null;
         }
 
         validateCodeQueryParams(relResourceCode, relResourceBizType, ontologyBaseCode);
         List<SsResource> resources = ssResourceService.findByCodeAndBizTypeAndOntologyBaseCode(relResourceCode,
             relResourceBizType, ontologyBaseCode);
+        if (CollectionUtils.isEmpty(resources)) {
+            SsResource ontologyChildResource = ensureMountOntologyChildResource(relResourceBizType, ontologyBaseCode,
+                relResourceCode);
+            if (ontologyChildResource != null) {
+                return ontologyChildResource;
+            }
+            return null;
+        }
+        resources = ontologyResourceValidityService.filterValidOntologyResources(resources);
         if (CollectionUtils.isEmpty(resources)) {
             return null;
         }
@@ -287,6 +305,15 @@ public class OpenApiApplicationService {
             throw new BaseRuntimeException(I18nUtil.get("openapi.resource.code.not.unique"));
         }
         return resources.get(0);
+    }
+
+    private SsResource ensureMountOntologyChildResource(String resourceBizType, String ontologyBaseCode,
+        String resourceCode) {
+        SsResource baseResource = findAccessibleOntologyBaseResource(resourceBizType, ontologyBaseCode);
+        if (baseResource == null) {
+            return null;
+        }
+        return ontologyBaseService.ensureOntologyChildResource(baseResource, resourceBizType, resourceCode);
     }
 
     private void validateMountPermission(SsResource agentResource, SsResource relSsResource) {
@@ -319,7 +346,9 @@ public class OpenApiApplicationService {
         if (hasIdMode) {
             for (Long resourceId : checkDto.getResourceIds()) {
                 SsResource resource = ssResourceService.findById(resourceId);
-                items.add(buildPermissionItem(resource, authApplicationService.hasResourceUsePermission(resource), null));
+                boolean valid = resource != null && ontologyResourceValidityService.validateAndInvalidate(resource);
+                items.add(buildPermissionItem(valid ? resource : null,
+                    valid && authApplicationService.hasResourceUsePermission(resource), null));
             }
             return items;
         }
@@ -336,7 +365,12 @@ public class OpenApiApplicationService {
 
             List<SsResource> resources = ssResourceService.findByCodeAndBizTypeAndOntologyBaseCode(resourceCode,
                 resourceBizType, ontologyBaseCode);
+            resources = ontologyResourceValidityService.filterValidOntologyResources(resources);
             if (CollectionUtils.isEmpty(resources)) {
+                if (findAccessibleOntologyBaseResource(resourceBizType, ontologyBaseCode) != null) {
+                    items.add(buildVirtualOntologyChildPermissionItem(resourceCode, resourceBizType, ontologyBaseCode));
+                    continue;
+                }
                 items.add(buildInvalidPermissionItem(resourceCode, resourceBizType, ontologyBaseCode,
                     I18nUtil.get("resource.not.found")));
                 continue;
@@ -353,6 +387,35 @@ public class OpenApiApplicationService {
             items.add(item);
         }
         return items;
+    }
+
+    /**
+     * 本体场景/视图/对象可能仅存在于 byclaw-datacloud，尚未快照为 ss_resource。
+     * 若当前用户对所属本体库有管理或使用权限，则允许按需创建门户资源索引。
+     */
+    private SsResource findAccessibleOntologyBaseResource(String resourceBizType, String ontologyBaseCode) {
+        if (!isOntologyChildBizType(resourceBizType) || StringUtils.isBlank(ontologyBaseCode)) {
+            return null;
+        }
+        List<SsResource> bases = ssResourceService.findByCodeAndBizTypeAndOntologyBaseCode(ontologyBaseCode,
+            ResourceBizTypeEnum.ONTOLOGY_BASE.name(), null);
+        if (CollectionUtils.isEmpty(bases)) {
+            return null;
+        }
+        bases = ontologyResourceValidityService.filterValidOntologyResources(bases);
+        List<SsResource> accessibleBases = new ArrayList<>();
+        for (SsResource base : bases) {
+            if (authApplicationService.hasResourceAccessPermission(base)) {
+                accessibleBases.add(base);
+            }
+        }
+        if (accessibleBases.isEmpty()) {
+            return null;
+        }
+        if (accessibleBases.size() > 1) {
+            throw new BaseRuntimeException(I18nUtil.get("openapi.resource.code.not.unique"));
+        }
+        return accessibleBases.get(0);
     }
 
     private List<OpenPermissionCheckDto.ResourceCodeRef> buildResourceCodeRefs(OpenPermissionCheckDto checkDto) {
@@ -403,6 +466,25 @@ public class OpenApiApplicationService {
         item.setHasPermission(false);
         item.setMessage(message);
         return item;
+    }
+
+    private OpenPermissionCheckResultDto.Item buildVirtualOntologyChildPermissionItem(String resourceCode,
+        String resourceBizType, String ontologyBaseCode) {
+        OpenPermissionCheckResultDto.Item item = new OpenPermissionCheckResultDto.Item();
+        item.setResourceCode(resourceCode);
+        item.setResourceName(resourceCode);
+        item.setResourceBizType(resourceBizType);
+        item.setOntologyBaseCode(ontologyBaseCode);
+        item.setExists(false);
+        item.setHasPermission(true);
+        return item;
+    }
+
+    private boolean isPermissionCheckPassed(OpenPermissionCheckResultDto.Item item) {
+        if (item == null || !item.isHasPermission()) {
+            return false;
+        }
+        return item.isExists() || isOntologyChildBizType(item.getResourceBizType());
     }
 
     private boolean isDigitalEmployee(SsResource resource) {

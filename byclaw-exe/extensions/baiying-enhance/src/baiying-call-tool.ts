@@ -39,6 +39,17 @@ function normalizeText(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function normalizeTextList(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return Array.from(new Set(value.map(normalizeText).filter(Boolean)));
+  }
+  const text = normalizeText(value);
+  if (!text) {
+    return [];
+  }
+  return Array.from(new Set(text.split(/[,\s]+/).map((item) => item.trim()).filter(Boolean)));
+}
+
 function isDocResourceType(value: string): boolean {
   const t = normalizeText(value).toUpperCase();
   return t === "DOC" || t === "ATOM" || t === "KG_DOC" || t === "KG_DB" || t === "KG_QA";
@@ -281,16 +292,16 @@ export function buildBaiyingCallDescription(params: { agent: AdaptedManagedAgent
   }
 
   descParts.push(
-    "Use `resource_id` to choose a parent resource and `action` to choose a TOOLKIT/MCP child tool when needed; OBJECT/VIEW resources are dispatched through callAgent and usually do not need `action`.",
+    "Use `resource_id` to choose a parent resource, or `resource_ids` to choose multiple parent resources; use `action` to choose a TOOLKIT/MCP child tool when needed. SCENE/OBJECT/VIEW resources are dispatched through callAgent and usually do not need `action`.",
   );
   descParts.push(
     "For DOC resources (`KG_DOC`/`KG_DB`/`KG_QA`), `agent_id` is required by executor. This plugin auto-populates `agent_id` from agent.json `resourceId` (current agent sourceKey) and forwards it in the top-level payload.",
   );
   descParts.push(
-    "Pass structured backend parameters in `arguments`; OBJECT and VIEW resources are dispatched to `BYCLAW_DATA` with the selected resource code in `call_object_ids` or `call_view_ids`.",
+    "Pass structured backend parameters in `arguments`; SCENE, OBJECT, and VIEW resources are dispatched to `BYCLAW_DATA` with selected resource codes in `call_scene_ids`, `call_object_ids`, or `call_view_ids`, plus `ontology_resources` / `ontology_base_resource_groups` when ontology base codes are available.",
   );
   descParts.push(
-    "For OBJECT/VIEW calls with large payloads, backend may return `file_url` in response data; `file_url` is a local file path. Treat this local path as the authoritative payload reference and read it to process the full business data before producing final conclusions.",
+    "For SCENE/OBJECT/VIEW calls with large payloads, backend may return `file_url` in response data; `file_url` is a local file path. Treat this local path as the authoritative payload reference and read it to process the full business data before producing final conclusions.",
   );
   descParts.push(
     "When both inline summary fields and `file_url` exist, prefer the local-file content pointed to by `file_url` for detailed analysis, and clearly state any limitation if the local path cannot be accessed.",
@@ -387,9 +398,15 @@ export function createBaiyingCallToolFactory(params: {
         resource_id: Type.Optional(
           Type.String({ description: "Target parent resource ID from the available resources list" }),
         ),
+        resource_ids: Type.Optional(
+          Type.Array(Type.String(), {
+            description:
+              "Target multiple parent resource IDs from the available resources list. Useful for multiple ontology bases or multiple SCENE/VIEW/OBJECT resources in one call.",
+          }),
+        ),
         resource_type: Type.Optional(
           Type.String({
-            description: "Resource type filter (for example KG_DOC, TOOLKIT, MCP, OBJECT, VIEW)",
+            description: "Resource type filter (for example KG_DOC, TOOLKIT, MCP, SCENE, OBJECT, VIEW)",
           }),
         ),
         resource_name: Type.Optional(
@@ -400,7 +417,7 @@ export function createBaiyingCallToolFactory(params: {
         action: Type.Optional(
           Type.String({
             description:
-              "Child action/tool name for TOOLKIT, MCP, OBJECT, or VIEW resources; optional for DOC/AGENT/TOOL. For DOC async, use `get_doc_async_result` then `compose_doc_async_answer`.",
+              "Child action/tool name for TOOLKIT, MCP, SCENE, OBJECT, or VIEW resources; optional for DOC/AGENT/TOOL. For DOC async, use `get_doc_async_result` then `compose_doc_async_answer`.",
           }),
         ),
         arguments: Type.Optional(
@@ -409,7 +426,7 @@ export function createBaiyingCallToolFactory(params: {
             {
               additionalProperties: true,
               description:
-                "Structured backend arguments. Required for TOOLKIT / TOOL / MCP / OBJECT / VIEW child-tool execution.",
+                "Structured backend arguments. Required for TOOLKIT / TOOL / MCP / SCENE / OBJECT / VIEW child-tool execution.",
             },
           ),
         ),
@@ -482,6 +499,7 @@ export function createBaiyingCallToolFactory(params: {
           tool_call_id: _toolCallId,
           action: actionName || undefined,
           resource_id: normalizeText(toolParams.resource_id) || undefined,
+          resource_ids: normalizeTextList(toolParams.resource_ids),
           resource_type: normalizeText(toolParams.resource_type) || undefined,
           query_preview: normalizeText(toolParams.query).slice(0, 120) || undefined,
           has_arguments: !!structuredArguments,
@@ -634,17 +652,30 @@ export function createBaiyingCallToolFactory(params: {
 
         const resources = agent.associatedResources ?? [];
         const requestedResourceId = normalizeText(toolParams.resource_id);
+        const requestedResourceIds = normalizeTextList(toolParams.resource_ids);
+        const effectiveRequestedResourceIds =
+          requestedResourceIds.length > 0
+            ? requestedResourceIds
+            : requestedResourceId
+              ? [requestedResourceId]
+              : [];
         const hasRootAgentResource = !!(agent.agentSseUrl || agent.agentHomeUrl);
-        const isRootAgentRequest = hasRootAgentResource && requestedResourceId === agent.sourceKey;
+        const isRootAgentRequest =
+          hasRootAgentResource &&
+          effectiveRequestedResourceIds.length === 1 &&
+          effectiveRequestedResourceIds[0] === agent.sourceKey;
+        const selectedResources: BaiyingAssociatedResource[] = effectiveRequestedResourceIds.length > 0
+          ? effectiveRequestedResourceIds
+              .map((id) => resources.find((resource) => resource.resourceId === id))
+              .filter((resource): resource is BaiyingAssociatedResource => !!resource)
+          : [];
         let selectedResource: BaiyingAssociatedResource | undefined =
-          (requestedResourceId && !isRootAgentRequest
-            ? resources.find((resource) => resource.resourceId === requestedResourceId)
-            : undefined) ?? resources[0];
+          (!isRootAgentRequest ? selectedResources[0] : undefined) ?? resources[0];
         if (isRootAgentRequest) {
           selectedResource = undefined;
         }
 
-        let resourceId = requestedResourceId || selectedResource?.resourceId || agent.sourceKey;
+        let resourceId = effectiveRequestedResourceIds[0] || selectedResource?.resourceId || agent.sourceKey;
         const selectedResourceType = selectedResource ? normalizeResourceType(selectedResource) : "";
         let resourceType =
           normalizeText(toolParams.resource_type) ||
@@ -659,6 +690,7 @@ export function createBaiyingCallToolFactory(params: {
         const resourceContext = buildExecutorResourceContext({
           agent,
           resource: selectedResource,
+          resources: selectedResources.length > 0 ? selectedResources : selectedResource ? [selectedResource] : [],
           sessionKey: requesterSessionKey,
           channelSessionId: channelResolve.sessionId,
           channelTraceId: channelResolve.traceId,
@@ -690,6 +722,7 @@ export function createBaiyingCallToolFactory(params: {
           agent_id: agent.agentId,
           action: actionName || undefined,
           resolved_resource_id: resourceId,
+          resolved_resource_ids: selectedResources.map((resource) => resource.resourceId),
           resolved_resource_type: resourceType,
           selected_resource_id: selectedResource?.resourceId,
           selected_resource_name: selectedResource?.resourceName,
@@ -717,6 +750,7 @@ export function createBaiyingCallToolFactory(params: {
         logBaiyingRequest(params.logger, "executor.route", {
           agent_id: agent.agentId,
           resource_id: resourceId,
+          resource_ids: selectedResources.map((resource) => resource.resourceId),
           resource_type: resourceType,
           action: actionName || undefined,
           selected_resource: selectedResource,
