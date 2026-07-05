@@ -1580,6 +1580,7 @@ class DataCloudWorker(GatewayWorker):
                     result_file_storage=build_result_file_storage(
                         settings=get_settings()
                     ),
+                    base_id="default",
                 )
             )
             logger.info(
@@ -1909,6 +1910,7 @@ class DataCloudWorker(GatewayWorker):
                                     result_file_storage=build_result_file_storage(
                                         settings=get_settings()
                                     ),
+                                    base_id="default",
                                 )
                             )
                             logger.info(
@@ -2039,10 +2041,32 @@ class DataCloudWorker(GatewayWorker):
         _resource_list_for_extract: list[Any] = (
             _resource_list_raw if isinstance(_resource_list_raw, list) else []
         )
-        _rel_resource_list_raw = extra_payload.get("rel_resource_list")
+        _rel_resource_list_raw = extra_payload.get("rel_resource_list") or extra_payload.get("ontology_resources")
         _rel_resource_list: list[Any] = (
             _rel_resource_list_raw if isinstance(_rel_resource_list_raw, list) else []
         )
+        # 从 rel_resource_list 中提取 OBJECT / VIEW 资源码，注入 _dyn_object_ids / _dyn_view_ids，
+        # 使 _is_dynamic_agent 和下游图构建能感知 rel_resource_list 指定的资源范围。
+        # 兼容 camelCase（resourceCode/ontologyBaseCode/resourceBizType）和
+        # snake_case（resource_code/ontology_base_code/resource_biz_type）两种格式。
+        for _item in _rel_resource_list:
+            if not isinstance(_item, dict):
+                continue
+            _biz_type = str(
+                _item.get("resourceBizType") or _item.get("resource_biz_type") or ""
+            ).strip().upper()
+            _code = str(
+                _item.get("resourceCode") or _item.get("resource_code") or ""
+            ).strip()
+            _base_code = str(
+                _item.get("ontologyBaseCode") or _item.get("ontology_base_code") or ""
+            ).strip()
+            if not _code:
+                continue
+            if _biz_type == "OBJECT" and _code not in _dyn_object_ids:
+                _dyn_object_ids.append(_code)
+            elif _biz_type == "VIEW" and _code not in _dyn_view_ids:
+                _dyn_view_ids.append(_code)
         _res_object_codes, _res_view_codes = _extract_tool_resource_codes(
             _resource_list_for_extract
         )
@@ -2096,7 +2120,7 @@ class DataCloudWorker(GatewayWorker):
                 _res_view_codes,
             )
 
-        _is_dynamic_agent: bool = bool(_dyn_object_ids or _dyn_view_ids)
+        _is_dynamic_agent: bool = bool(_dyn_object_ids or _dyn_view_ids or _rel_resource_list)
         if _is_dynamic_agent:
             logger.info(
                 "DataCloudWorker: dynamic agent path activated "
@@ -2429,6 +2453,7 @@ class DataCloudWorker(GatewayWorker):
                 "user_name": _auth_user_name,
                 "beyond_token": _dyn_beyond_token,
                 "skill_workspace_dir": _dyn_skill_ws,
+                "rel_resource_list": _rel_resource_list,
             }
             if _dyn_skill_task_prompt:
                 _dyn_task_prompt, _dyn_first_dir, _dyn_catalog = _dyn_skill_task_prompt
