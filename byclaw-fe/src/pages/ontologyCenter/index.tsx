@@ -2,7 +2,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Empty, Input, Modal, Spin, Table, Tabs, Tag, message } from 'antd';
 import { LinkOutlined, PlusOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons';
-import { useIntl, useNavigate } from '@umijs/max';
+import { useIntl, useNavigate, useSelector } from '@umijs/max';
 import classnames from 'classnames';
 import AntdIcon from '@/components/AntdIcon';
 import CommonTabs from '@/components/CommonTabs';
@@ -18,13 +18,14 @@ import {
 } from '@/pages/manager/service/resources';
 import { queryCatalogTree } from '@/service/digitalEmployees';
 import { getTopLevelCatalogs, normalizeCatalogTree } from '@/utils/catalog';
+import { isAdminVip } from '@/utils/auth';
 import { refreshOntologyBases } from '@/service/ontology';
-import { checkEnterpriseAdminPermission } from '@/service/auth';
 import RegisterOntologyModal from './RegisterOntologyModal';
 import BindOntologyDrawer from './BindOntologyDrawer';
 import styles from './index.module.less';
 
 const ONTOLOGY_BASE_BIZ_TYPE = 'ONTOLOGY_BASE';
+const ENTERPRISE_REFRESH_USER_TYPES = ['PLAT_MAN', 'ORG_MAN', 'BUSINESS_MAN'];
 
 // 本体库编码：后端存扩展表 ss_res_ext_ontology.pid（随 ss_resource 列表 join 下发为 pid）；
 // 本体库行的 resourceCode 即 baseId，保留多重兜底。
@@ -61,6 +62,7 @@ const mergeOperationPermissions = async (rows: any[]) => {
 const OntologyCenter: React.FC = () => {
   const intl = useIntl();
   const navigate = useNavigate();
+  const userInfo = useSelector(({ user }: any) => user?.userInfo);
 
   // 卡片点击 → 跳转本体库管理页（携带展示信息，避免详情页再查一次）
   const openBaseDetail = (row: any) => {
@@ -84,24 +86,24 @@ const OntologyCenter: React.FC = () => {
   const [registerOpen, setRegisterOpen] = useState(false);
   const [bindBase, setBindBase] = useState<any>(null);
   const [refreshing, setRefreshing] = useState(false);
-  // 刷新本体仅管理员（平台/业务/组织）+ 超管可操作
-  const [canRefresh, setCanRefresh] = useState(false);
   const [refreshResult, setRefreshResult] = useState<any>(null);
   // 刷新防频繁：两次点击最小间隔
   const lastRefreshAtRef = useRef(0);
   const REFRESH_MIN_INTERVAL = 5000;
 
   const topLevelCatalogList = useMemo(() => getTopLevelCatalogs(catalogList), [catalogList]);
+  const canRefresh = useMemo(() => {
+    const userTypes = (userInfo?.usersOrganizations || []).map((item: any) => item?.userType).filter(Boolean);
+    return (
+      isAdminVip(userInfo) || userTypes.some((userType: string) => ENTERPRISE_REFRESH_USER_TYPES.includes(userType))
+    );
+  }, [userInfo]);
 
   useEffect(() => {
     queryCatalogTree({ catalogType: '6' }).then((res: any) => {
       const treeData = Array.isArray(res) ? res : Array.isArray(res?.data) ? res.data : [];
       setCatalogList(normalizeCatalogTree(treeData));
     });
-    // 企业本体「刷新本体」权限：平台/业务/组织管理员 + 超管
-    checkEnterpriseAdminPermission()
-      .then((res: any) => setCanRefresh(!!(res?.data ?? res)))
-      .catch(() => setCanRefresh(false));
   }, []);
 
   // 授权 / 使用申请审核 抽屉（复用资源中心同款组件）
