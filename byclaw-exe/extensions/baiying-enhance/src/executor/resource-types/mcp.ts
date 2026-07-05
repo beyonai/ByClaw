@@ -21,6 +21,119 @@ import { executeViaCallAgent } from "../call-agent.js";
 import { runLegacySseJsonRpcSequence } from "../mcp-legacy-sse.js";
 import { getCommonGatewayMetadata } from "../doc-shared.js";
 
+const ONTOLOGY_RESOURCE_TYPES = new Set(["SCENE", "VIEW", "OBJECT"]);
+
+function normalizeStringList(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return Array.from(new Set(value.map(asString).filter(Boolean)));
+  }
+  const text = asString(value);
+  return text ? [text] : [];
+}
+
+function ontologyCallKey(resourceType: string): "call_scene_ids" | "call_view_ids" | "call_object_ids" {
+  if (resourceType === "OBJECT") return "call_object_ids";
+  if (resourceType === "SCENE") return "call_scene_ids";
+  return "call_view_ids";
+}
+
+function normalizeOntologyResourceRecord(value: unknown): Dict | null {
+  if (!isRecord(value)) return null;
+  const type = (
+    asString(value.resource_biz_type) ||
+    asString(value.resourceBizType) ||
+    asString(value.resourceType) ||
+    asString(value.resource_type)
+  ).toUpperCase();
+  if (!ONTOLOGY_RESOURCE_TYPES.has(type)) return null;
+  const code =
+    asString(value.resourceCode) ||
+    asString(value.resource_code) ||
+    asString(value.code) ||
+    asString(value.resourceId) ||
+    asString(value.resource_id);
+  if (!code) return null;
+  const ontologyBaseCode =
+    asString(value.ontologyBaseCode) ||
+    asString(value.ontology_base_code);
+  return {
+    ontology_base_code: ontologyBaseCode,
+    resource_code: code,
+    resource_biz_type: type,
+  };
+}
+
+function ontologyResourceKey(item: Dict): string {
+  return [
+    (asString(item.resource_biz_type) || asString(item.resource_type)).toUpperCase(),
+    asString(item.ontology_base_code),
+    asString(item.resource_code),
+  ].join("\u0000");
+}
+
+function addOntologyResource(target: Dict[], value: unknown): void {
+  const normalized = normalizeOntologyResourceRecord(value);
+  if (!normalized) return;
+  if (target.some((item) => ontologyResourceKey(item) === ontologyResourceKey(normalized))) {
+    return;
+  }
+  target.push(normalized);
+}
+
+function ontologyResourcesFromContext(resourceContext: unknown): {
+  selected: Dict[];
+  available: Dict[];
+} {
+  if (!isRecord(resourceContext)) return { selected: [], available: [] };
+  const selected: Dict[] = [];
+  const available: Dict[] = [];
+  if (Array.isArray(resourceContext.selected_resources)) {
+    for (const item of resourceContext.selected_resources) addOntologyResource(selected, item);
+  }
+  addOntologyResource(selected, resourceContext.selected_resource);
+  if (Array.isArray(resourceContext.available_resources)) {
+    for (const item of resourceContext.available_resources) addOntologyResource(available, item);
+  }
+  return { selected, available };
+}
+
+function findOntologyResourceByCode(items: Dict[], resourceType: string, code: string): Dict | undefined {
+  return items.find(
+    (item) =>
+      (asString(item.resource_biz_type) || asString(item.resource_type)).toUpperCase() === resourceType &&
+      asString(item.resource_code) === code,
+  );
+}
+
+function summarizeOntologyResources(items: Dict[]): {
+  bases: string[];
+  groups: Dict[];
+} {
+  const groupMap = new Map<string, Dict>();
+  for (const item of items) {
+    const base = asString(item.ontology_base_code);
+    if (!base) continue;
+    const type = (asString(item.resource_biz_type) || asString(item.resource_type)).toUpperCase();
+    const code = asString(item.resource_code);
+    if (!code) continue;
+    const group = groupMap.get(base) ?? {
+      ontology_base_code: base,
+      call_scene_ids: [],
+      call_view_ids: [],
+      call_object_ids: [],
+    };
+    const key = ontologyCallKey(type);
+    const bucket = Array.isArray(group[key]) ? (group[key] as string[]) : [];
+    if (!bucket.includes(code)) bucket.push(code);
+    group[key] = bucket;
+    groupMap.set(base, group);
+  }
+  return {
+    bases: Array.from(groupMap.keys()),
+    groups: Array.from(groupMap.values()),
+  };
+}
+
 /** Mirror of `BaiYingExecutor._execute_mcp`. */
 export async function executeMcp(params: {
   capability: Capability;
@@ -34,7 +147,7 @@ export async function executeMcp(params: {
 }): Promise<ExecutorResponse> {
   const { capability } = params;
   const resourceType = String(capability.resource_type ?? "").trim().toUpperCase();
-  if (resourceType === "OBJECT" || resourceType === "VIEW") {
+  if (resourceType === "OBJECT" || resourceType === "VIEW" || resourceType === "SCENE") {
     return executeOntologyResourceViaCallAgent({
       capability,
       parameters: params.parameters,
@@ -275,6 +388,9 @@ async function executeOntologyResourceViaCallAgent(input: {
     asString(input.capability.metadata?.resource_code) ||
     asString(input.capability.mcp?.resource_code) ||
     resourceId;
+  const ontologyBaseCode =
+    asString(input.capability.metadata?.ontology_base_code) ||
+    asString(input.capability.metadata?.ontologyBaseCode);
   if (!resourceCode) {
     return makeError("ONTOLOGY_RESOURCE_CODE_NOT_FOUND", `${resourceType} resource_code not found`);
   }
@@ -295,8 +411,70 @@ async function executeOntologyResourceViaCallAgent(input: {
     asString(input.parameters.message) ||
     "执行数据资源调用";
   const payload = buildOntologyCallAgentPayload(input.parameters);
-  const callKey = resourceType === "OBJECT" ? "call_object_ids" : "call_view_ids";
-  payload[callKey] = [resourceCode];
+  const callKey = ontologyCallKey(resourceType);
+  const resourceContext = isRecord(input.parameters.resource_context)
+    ? (input.parameters.resource_context as Dict)
+    : {};
+  const contextResources = ontologyResourcesFromContext(resourceContext);
+  const ontologyResources: Dict[] = [];
+  if (Array.isArray(payload.ontology_resources)) {
+    for (const item of payload.ontology_resources) {
+      addOntologyResource(ontologyResources, item);
+    }
+  }
+  for (const item of contextResources.selected) {
+    addOntologyResource(ontologyResources, item);
+  }
+  addOntologyResource(ontologyResources, {
+    resource_biz_type: resourceType,
+    resource_code: resourceCode,
+    ...(ontologyBaseCode ? { ontology_base_code: ontologyBaseCode } : {}),
+  });
+  const allKnownResources = [...contextResources.selected, ...contextResources.available, ...ontologyResources];
+  for (const [type, key] of [
+    ["SCENE", "call_scene_ids"],
+    ["VIEW", "call_view_ids"],
+    ["OBJECT", "call_object_ids"],
+  ] as const) {
+    const existingCodes = normalizeStringList(payload[key]);
+    const selectedCodes = ontologyResources
+      .filter((item) => (asString(item.resource_biz_type) || asString(item.resource_type)).toUpperCase() === type)
+      .map((item) => asString(item.resource_code))
+      .filter(Boolean);
+    const codes = Array.from(new Set([...existingCodes, ...selectedCodes]));
+    if (codes.length > 0) {
+      payload[key] = codes;
+      for (const code of codes) {
+        addOntologyResource(
+          ontologyResources,
+          findOntologyResourceByCode(allKnownResources, type, code) ?? {
+            resource_biz_type: type,
+            resource_code: code,
+            ...(type === resourceType && ontologyBaseCode ? { ontology_base_code: ontologyBaseCode } : {}),
+          },
+        );
+      }
+    }
+  }
+  if (!Array.isArray(payload[callKey]) || (payload[callKey] as unknown[]).length === 0) {
+    payload[callKey] = [resourceCode];
+  }
+  if (ontologyResources.length > 0) {
+    payload.ontology_resources = ontologyResources;
+    const summary = summarizeOntologyResources(ontologyResources);
+    if (summary.bases.length === 1) {
+      payload.ontology_base_code = summary.bases[0];
+    } else if (summary.bases.length > 1) {
+      payload.ontology_base_codes = summary.bases;
+    } else if (ontologyBaseCode) {
+      payload.ontology_base_code = ontologyBaseCode;
+    }
+    if (summary.groups.length > 0) {
+      payload.ontology_base_resource_groups = summary.groups;
+    }
+  } else if (ontologyBaseCode) {
+    payload.ontology_base_code = ontologyBaseCode;
+  }
   const metadata = getCommonGatewayMetadata(input.parameters);
   if (metadata["channel-trace-id"]) {
     payload["channel-trace-id"] = metadata["channel-trace-id"];
@@ -327,8 +505,13 @@ async function executeOntologyResourceViaCallAgent(input: {
       resource_id: resourceId,
       resource_type: resourceType,
       resource_code: resourceCode,
+      ...(ontologyBaseCode ? { ontology_base_code: ontologyBaseCode } : {}),
       target_agent_type: targetAgentType,
-      [callKey]: [resourceCode],
+      call_scene_ids: normalizeStringList(payload.call_scene_ids),
+      call_view_ids: normalizeStringList(payload.call_view_ids),
+      call_object_ids: normalizeStringList(payload.call_object_ids),
+      ontology_resources: payload.ontology_resources,
+      ontology_base_resource_groups: payload.ontology_base_resource_groups,
     },
     metadata,
     langfuseParentObservationId,

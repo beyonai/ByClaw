@@ -58,6 +58,7 @@ describe("resource-type helpers", () => {
     expect(normalizeResourceType("AGENT")).toBe("agent");
     expect(normalizeResourceType("TOOLKIT")).toBe("toolkit");
     expect(normalizeResourceType("MCP")).toBe("mcp");
+    expect(normalizeResourceType("SCENE")).toBe("scene");
     expect(normalizeResourceType("OBJECT")).toBe("object");
     expect(normalizeResourceType("VIEW")).toBe("view");
     expect(normalizeResourceType("")).toBe("");
@@ -67,6 +68,45 @@ describe("resource-type helpers", () => {
     expect(normalizeResourceId("baiying_12345")).toBe("12345");
     expect(normalizeResourceId("12345")).toBe("12345");
     expect(normalizeResourceId(undefined)).toBe("");
+  });
+});
+
+describe("ontology resource metadata", () => {
+  it("preserves ontology_base_code from selected resource context", () => {
+    const capability = buildCapabilityFromDetail({
+      resourceId: "10040783",
+      hintedType: "OBJECT",
+      detail: {
+        resourceBizType: "OBJECT",
+        resourceName: "合同对象",
+        resourceCode: "p_contract",
+      },
+      resourceContext: {
+        selected_resource: {
+          resourceId: "10040783",
+          resourceBizType: "OBJECT",
+          resourceCode: "p_contract",
+          ontologyBaseCode: "default",
+        },
+      },
+    });
+
+    expect(capability?.metadata.ontology_base_code).toBe("default");
+  });
+
+  it("builds scene capabilities with ontology_base_code from selected resource context", () => {
+    const capability = buildCapabilityFromResourceContext("scene_sales", "SCENE", {
+      selected_resource: {
+        resourceId: "scene_sales",
+        resourceBizType: "SCENE",
+        resourceName: "销售场景",
+        resourceCode: "scene_sales",
+        ontologyBaseCode: "default",
+      },
+    });
+
+    expect(capability?.resource_type).toBe("SCENE");
+    expect(capability?.metadata.ontology_base_code).toBe("default");
   });
 });
 

@@ -193,6 +193,7 @@ describe("adaptAgentJson", () => {
                     resourceName: "销售管理视图",
                     resourceBizType: "VIEW",
                     resourceCode: "scene_sales_management",
+                    ontologyBaseCode: "default",
                     resourceDesc: "销售漏斗视图",
                 },
                 {
@@ -219,6 +220,7 @@ describe("adaptAgentJson", () => {
             resourceName: "销售管理视图",
             resourceBizType: "VIEW",
             resourceCode: "scene_sales_management",
+            ontologyBaseCode: "default",
             resourceDesc: "销售漏斗视图",
         });
         expect(res.associatedResources!.some((r) => r.resourceBizType === "SKILL")).toBe(false);
