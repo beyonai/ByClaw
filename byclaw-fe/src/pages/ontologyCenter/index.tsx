@@ -11,7 +11,11 @@ import ResourceFilter, { getDefaultParams } from '@/components/Resources/compone
 import { buildResourceListFilterParam } from '@/components/Resources/utils';
 import AuthListDrawer from '@/pages/manager/components/AuthListDrawer';
 import UseApplyAuditDrawer from '@/pages/manager/components/UseApplyAuditDrawer';
-import { applyResourceUse, listResourceUseAuth } from '@/pages/manager/service/resources';
+import {
+  applyResourceUse,
+  listResourceUseAuth,
+  queryResourceOperationPermissions,
+} from '@/pages/manager/service/resources';
 import { queryCatalogTree } from '@/service/digitalEmployees';
 import { getTopLevelCatalogs, normalizeCatalogTree } from '@/utils/catalog';
 import { refreshOntologyBases } from '@/service/ontology';
@@ -25,6 +29,34 @@ const ONTOLOGY_BASE_BIZ_TYPE = 'ONTOLOGY_BASE';
 // 本体库编码：后端存扩展表 ss_res_ext_ontology.pid（随 ss_resource 列表 join 下发为 pid）；
 // 本体库行的 resourceCode 即 baseId，保留多重兜底。
 const getBaseId = (row: any) => row?.pid || row?.ontologyBaseCode || row?.resourceCode || row?.baseId;
+
+const mergeOperationPermissions = async (rows: any[]) => {
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return [];
+  }
+  const results = await Promise.allSettled(
+    rows.map((row) =>
+      row?.resourceId ? queryResourceOperationPermissions({ resourceId: row.resourceId }) : Promise.resolve(null)
+    )
+  );
+  return rows.map((row, index) => {
+    const result = results[index];
+    if (result.status !== 'fulfilled') {
+      return row;
+    }
+    const permissions = (result.value as any)?.data || result.value;
+    if (!permissions) {
+      return row;
+    }
+    return {
+      ...row,
+      ...permissions,
+      resourceId: row.resourceId,
+      resourceBizType: row.resourceBizType,
+      ownerType: row.ownerType,
+    };
+  });
+};
 
 const OntologyCenter: React.FC = () => {
   const intl = useIntl();
@@ -94,7 +126,8 @@ const OntologyCenter: React.FC = () => {
           resourceBizTypeList: [ONTOLOGY_BASE_BIZ_TYPE],
         });
         const pageData = res?.data || res || {};
-        setList(pageData?.list || pageData?.rows || []);
+        const rows = pageData?.list || pageData?.rows || [];
+        setList(await mergeOperationPermissions(rows));
       } catch {
         setList([]);
       } finally {
@@ -167,8 +200,15 @@ const OntologyCenter: React.FC = () => {
     return (
       <div className={styles.cardGrid}>
         {list.map((item) => {
+          const canApplyUse =
+            item.canApplyUse ??
+            (activeTab === 'enterprise' &&
+              item.resourceBizType === ONTOLOGY_BASE_BIZ_TYPE &&
+              !item.hasUsePermission &&
+              !item.hasManagePermission);
           const cardItem = {
             ...item,
+            canApplyUse,
             // 本体的编辑/注销在远程本体管理门户完成，百应侧只做浏览、授权和安装绑定。
             canEdit: false,
             canDelete: false,

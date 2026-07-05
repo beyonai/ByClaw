@@ -7,8 +7,11 @@ import com.iwhalecloud.byai.common.constants.resource.ResourceBizType;
 import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeApplicationService;
+import com.iwhalecloud.byai.manager.domain.resource.request.ResourceUseAuthQo;
+import com.iwhalecloud.byai.manager.domain.resource.service.ResourceAuthApplicationService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceRelDetailService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
+import com.iwhalecloud.byai.manager.dto.ontology.OntologyBaseQueryRequest;
 import com.iwhalecloud.byai.manager.dto.ontology.OntologyBindNode;
 import com.iwhalecloud.byai.manager.dto.ontology.OntologyBindRequest;
 import com.iwhalecloud.byai.manager.entity.ontology.SsResExtOntology;
@@ -16,6 +19,8 @@ import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.entity.resource.SsResourceRelDetail;
 import com.iwhalecloud.byai.manager.mapper.ontology.SsResExtOntologyMapper;
 import com.iwhalecloud.byai.manager.mapper.resource.SsResourceMapper;
+import com.iwhalecloud.byai.manager.vo.auth.ResourceAuthVo;
+import com.iwhalecloud.byai.common.page.PageInfo;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
@@ -76,6 +81,9 @@ public class OntologyBindService {
     @Autowired
     private AuthApplicationService authApplicationService;
 
+    @Autowired
+    private ResourceAuthApplicationService resourceAuthApplicationService;
+
     /**
      * 覆盖式绑定：以本次选中为准，重写该本体库在此数字员工下的绑定。
      */
@@ -105,6 +113,9 @@ public class OntologyBindService {
         // 1. 逐个选中叶子：沿路径 upsert 虚拟资源，收集叶子资源 id
         Set<Long> leafIds = new LinkedHashSet<>();
         List<OntologyBindNode> nodes = req.getNodes() == null ? new ArrayList<>() : req.getNodes();
+        if (nodes.isEmpty() && !Boolean.TRUE.equals(req.getConfirmClear())) {
+            throw new BaseException("当前本体资源树选中节点数为0，请确认清空操作后再保存");
+        }
         for (OntologyBindNode node : nodes) {
             String level = StringUtils.defaultString(node.getLevel());
             switch (level) {
@@ -152,6 +163,21 @@ public class OntologyBindService {
 
         // 4. 迭代孤儿清理：本库中不再被任何关系引用、且无本体子节点的 场景/视图/对象
         cleanupOrphanResources(baseId);
+    }
+
+    /**
+     * 数字员工配置页可绑定的本体库候选列表。
+     *
+     * <p>这里不能走本体中心“企业全量可申请”口径，只返回当前用户已具备使用/管理权限或自己创建的本体库。
+     */
+    public PageInfo<ResourceAuthVo> candidateBases(OntologyBaseQueryRequest req) {
+        ResourceUseAuthQo qo = new ResourceUseAuthQo();
+        qo.setOwnerType(StringUtils.defaultIfBlank(req == null ? null : req.getOwnerType(), "personal"));
+        qo.setKeyword(req == null ? null : req.getQueryKeyword());
+        qo.setPageNum(1);
+        qo.setPageSize(200);
+        qo.setResourceBizTypeList(List.of(BIZ_BASE));
+        return resourceAuthApplicationService.listResourceAuth(qo);
     }
 
     /**

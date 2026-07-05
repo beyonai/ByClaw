@@ -26,4 +26,11 @@ public class OntologyBindRequest {
 
     /** 选中的叶子节点集合。 */
     private List<OntologyBindNode> nodes;
+
+    /**
+     * 是否确认清空该本体在数字员工上的绑定。
+     *
+     * <p>nodes 为空时属于清空语义，必须显式传 true，避免前端未选择节点时误触发覆盖式清空。
+     */
+    private Boolean confirmClear;
 }

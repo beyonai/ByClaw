@@ -1912,12 +1912,20 @@ public class DigitalEmployeeApplicationService {
         List<JSONObject> relOntology = new ArrayList<>();
         for (SsResourceDTO dto : ontologyResources) {
             String baseCode = pidMap.get(dto.getResourceId());
+            if (StringUtils.isBlank(baseCode) && "ONTOLOGY_BASE".equals(dto.getResourceBizType())) {
+                baseCode = dto.getResourceCode();
+            }
             dto.setOntologyBaseCode(baseCode);
+            SsResource baseResource = findOntologyBaseResource(dto, baseCode, byId);
 
             JSONObject entry = new JSONObject();
             entry.put("resourceId", dto.getResourceId());
             entry.put("resourceBizType", dto.getResourceBizType());
             entry.put("ontologyBaseCode", baseCode);
+            if (baseResource != null) {
+                entry.put("ontologyBaseName", baseResource.getResourceName());
+                entry.put("ownerType", baseResource.getOwnerType());
+            }
             entry.put("resourceName", dto.getResourceName());
 
             String biz = dto.getResourceBizType();
@@ -1955,6 +1963,32 @@ public class DigitalEmployeeApplicationService {
             relOntology.add(entry);
         }
         details.setRelOntology(relOntology);
+    }
+
+    private SsResource findOntologyBaseResource(SsResource resource, String baseCode, Map<Long, SsResource> byId) {
+        if (resource == null) {
+            return null;
+        }
+        if ("ONTOLOGY_BASE".equals(resource.getResourceBizType())) {
+            return resource;
+        }
+        Long cur = resource.getParentResourceId();
+        while (cur != null && cur > 0) {
+            SsResource parent = byId.get(cur);
+            if (parent == null) {
+                break;
+            }
+            if ("ONTOLOGY_BASE".equals(parent.getResourceBizType())) {
+                if (StringUtils.isBlank(baseCode) || StringUtils.equals(baseCode, parent.getResourceCode())) {
+                    return parent;
+                }
+            }
+            cur = parent.getParentResourceId();
+        }
+        return byId.values().stream()
+            .filter(r -> r != null && "ONTOLOGY_BASE".equals(r.getResourceBizType()))
+            .filter(r -> StringUtils.isBlank(baseCode) || StringUtils.equals(baseCode, r.getResourceCode())).findFirst()
+            .orElse(null);
     }
 
     /**
