@@ -15,6 +15,7 @@ import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationServ
 import com.iwhalecloud.byai.manager.application.service.digitemploy.event.DigEmployeeChangeEventPublisher;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.event.DigEmployeeChangeEventType;
 import com.iwhalecloud.byai.manager.application.service.memory.MemoryLibraryApplicationService;
+import com.iwhalecloud.byai.manager.application.service.ontology.OntologyResourceValidityService;
 import com.iwhalecloud.byai.manager.application.service.template.TemplateRuleInfoApplicationService;
 import com.iwhalecloud.byai.manager.domain.aimodel.service.AIService;
 import com.iwhalecloud.byai.manager.domain.aimodel.service.AiModelService;
@@ -37,8 +38,6 @@ import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceArtifactSe
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceCatalogService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtToolKitService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceRelDetailService;
-import com.iwhalecloud.byai.manager.entity.ontology.SsResExtOntology;
-import com.iwhalecloud.byai.manager.mapper.ontology.SsResExtOntologyMapper;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtViewService;
 import com.iwhalecloud.byai.manager.domain.resource.util.DigEmployeeRedisKeys;
@@ -152,6 +151,9 @@ public class DigitalEmployeeApplicationService {
     private SsResourceService ssResourceService;
 
     @Autowired
+    private OntologyResourceValidityService ontologyResourceValidityService;
+
+    @Autowired
     private ResourceRuntimeInfoResolver resourceRuntimeInfoResolver;
 
     @Autowired
@@ -171,9 +173,6 @@ public class DigitalEmployeeApplicationService {
 
     @Autowired
     private SsResourceRelDetailService ssResourceRelDetailService;
-
-    @Autowired
-    private SsResExtOntologyMapper ssResExtOntologyMapper;
 
     @Autowired
     private SsResourceCatalogService ssResourceCatalogService;
@@ -1809,6 +1808,7 @@ public class DigitalEmployeeApplicationService {
 
         // 关联资源表
         List<SsResourceDTO> relResourceList = ssResourceService.findRelResource(resourceId);
+        relResourceList = ontologyResourceValidityService.filterValidOntologyResources(relResourceList);
 
         List<Long> relIds = new ArrayList<>(10);
         if (CollectionUtils.isNotEmpty(relResourceList)) {
@@ -1823,7 +1823,7 @@ public class DigitalEmployeeApplicationService {
             }
         }
 
-        // 本体类关联资源：注入 ontologyBaseCode（取自 ss_res_ext_ontology.pid），并重建 relOntology 明细
+        // 本体类关联资源：注入 ontologyBaseCode，并重建 relOntology 明细
         enrichOntologyRelResources(relResourceList, digitalEmployeeDetailsDTO);
 
         digitalEmployeeDetailsDTO.setRelIds(relIds);
@@ -1855,7 +1855,7 @@ public class DigitalEmployeeApplicationService {
 
     /**
      * 为本体类关联资源(ONTOLOGY_BASE/SCENE/VIEW/OBJECT)注入 ontologyBaseCode，并重建 relOntology 扁平明细。
-     * ontologyBaseCode 取自 ss_res_ext_ontology.pid；relOntology 的路径(sceneId/viewCode/objectCode 等)
+     * ontologyBaseCode 取自各自扩展表；relOntology 的路径(sceneId/viewCode/objectCode 等)
      * 由资源树本身重建：resource_code 即各级编码、resource_name 即名称、parent_resource_id 即层级，
      * 不依赖 ext.target_content 格式（快照对象的 ext 为 datacloud 原始格式，缺 sceneId，会导致回显对不上）。
      */
@@ -1872,13 +1872,7 @@ public class DigitalEmployeeApplicationService {
         // ontologyBaseCode 注入（Part B）
         List<Long> ids = ontologyResources.stream().map(SsResource::getResourceId).filter(Objects::nonNull)
             .collect(Collectors.toList());
-        List<SsResExtOntology> exts = ssResExtOntologyMapper.selectByResourceIds(ids);
-        Map<Long, String> pidMap = new HashMap<>();
-        if (exts != null) {
-            for (SsResExtOntology e : exts) {
-                pidMap.put(e.getResourceId(), e.getPid());
-            }
-        }
+        Map<Long, String> pidMap = ssResourceService.findOntologyBaseCodeMap(ids);
 
         // 构建 id->资源 映射用于回溯父链：先放入关联资源，再补齐缺失的祖先
         Map<Long, SsResource> byId = new HashMap<>();
@@ -1912,12 +1906,20 @@ public class DigitalEmployeeApplicationService {
         List<JSONObject> relOntology = new ArrayList<>();
         for (SsResourceDTO dto : ontologyResources) {
             String baseCode = pidMap.get(dto.getResourceId());
+            if (StringUtils.isBlank(baseCode) && "ONTOLOGY_BASE".equals(dto.getResourceBizType())) {
+                baseCode = dto.getResourceCode();
+            }
             dto.setOntologyBaseCode(baseCode);
+            SsResource baseResource = findOntologyBaseResource(dto, baseCode, byId);
 
             JSONObject entry = new JSONObject();
             entry.put("resourceId", dto.getResourceId());
             entry.put("resourceBizType", dto.getResourceBizType());
             entry.put("ontologyBaseCode", baseCode);
+            if (baseResource != null) {
+                entry.put("ontologyBaseName", baseResource.getResourceName());
+                entry.put("ownerType", baseResource.getOwnerType());
+            }
             entry.put("resourceName", dto.getResourceName());
 
             String biz = dto.getResourceBizType();
@@ -1955,6 +1957,32 @@ public class DigitalEmployeeApplicationService {
             relOntology.add(entry);
         }
         details.setRelOntology(relOntology);
+    }
+
+    private SsResource findOntologyBaseResource(SsResource resource, String baseCode, Map<Long, SsResource> byId) {
+        if (resource == null) {
+            return null;
+        }
+        if ("ONTOLOGY_BASE".equals(resource.getResourceBizType())) {
+            return resource;
+        }
+        Long cur = resource.getParentResourceId();
+        while (cur != null && cur > 0) {
+            SsResource parent = byId.get(cur);
+            if (parent == null) {
+                break;
+            }
+            if ("ONTOLOGY_BASE".equals(parent.getResourceBizType())) {
+                if (StringUtils.isBlank(baseCode) || StringUtils.equals(baseCode, parent.getResourceCode())) {
+                    return parent;
+                }
+            }
+            cur = parent.getParentResourceId();
+        }
+        return byId.values().stream()
+            .filter(r -> r != null && "ONTOLOGY_BASE".equals(r.getResourceBizType()))
+            .filter(r -> StringUtils.isBlank(baseCode) || StringUtils.equals(baseCode, r.getResourceCode())).findFirst()
+            .orElse(null);
     }
 
     /**

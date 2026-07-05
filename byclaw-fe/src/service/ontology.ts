@@ -183,6 +183,7 @@ export function bindOntologySave(body: {
   baseId: string;
   baseName?: string;
   nodes: OntologyBindNode[];
+  confirmClear?: boolean;
 }) {
   return POST<any>('/byaiService/ontology/bind/save', body, ontologyRequestConfig);
 }
@@ -194,6 +195,11 @@ export function getBoundOntologyBases(params: { digitalEmployeeId: string | numb
     { digitalEmployeeId: params.digitalEmployeeId },
     ontologyRequestConfig
   );
+}
+
+/** 查询数字员工配置页可绑定的本体库候选列表（仅返回当前用户已具备使用/管理权限的本体库）。 */
+export function listBindableOntologyBases(params: { ownerType?: string; queryKeyword?: string } = {}) {
+  return POST<any>('/byaiService/ontology/bind/candidateBases', params, ontologyRequestConfig);
 }
 
 /** 单条刷新明细。 */

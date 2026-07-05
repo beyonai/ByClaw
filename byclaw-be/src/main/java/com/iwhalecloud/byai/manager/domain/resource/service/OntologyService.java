@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.resource.service;
 
 import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONObject;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.CollectionUtils;
 import com.iwhalecloud.byai.manager.domain.resource.enums.OperationTypeEnum;
@@ -18,10 +19,16 @@ import com.iwhalecloud.byai.manager.dto.ontology.OntologyDetailResponse;
 import com.iwhalecloud.byai.manager.dto.ontology.OntologyUpdateRequest;
 import com.iwhalecloud.byai.manager.entity.ontology.SsResExtOntology;
 import com.iwhalecloud.byai.manager.entity.resource.SsResExtAttribute;
+import com.iwhalecloud.byai.manager.entity.resource.SsResExtObject;
+import com.iwhalecloud.byai.manager.entity.resource.SsResExtScene;
+import com.iwhalecloud.byai.manager.entity.resource.SsResExtView;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.entity.resource.SsResourceRelDetail;
 import com.iwhalecloud.byai.manager.mapper.ontology.SsResExtOntologyMapper;
 import com.iwhalecloud.byai.manager.mapper.resource.SsResExtAttributeMapper;
+import com.iwhalecloud.byai.manager.mapper.resource.SsResExtObjectMapper;
+import com.iwhalecloud.byai.manager.mapper.resource.SsResExtSceneMapper;
+import com.iwhalecloud.byai.manager.mapper.resource.SsResExtViewMapper;
 import com.iwhalecloud.byai.manager.mapper.resource.SsResourceMapper;
 import com.iwhalecloud.byai.manager.mapper.resource.SsResourceRelDetailMapper;
 import com.iwhalecloud.byai.common.constants.resource.ResourceBizType;
@@ -76,6 +83,15 @@ public class OntologyService {
 
     @Autowired
     private SsResExtOntologyMapper ssResExtOntologyMapper;
+
+    @Autowired
+    private SsResExtSceneMapper ssResExtSceneMapper;
+
+    @Autowired
+    private SsResExtViewMapper ssResExtViewMapper;
+
+    @Autowired
+    private SsResExtObjectMapper ssResExtObjectMapper;
 
     @Autowired
     private SsResourceRelDetailMapper ssResourceRelDetailMapper;
@@ -171,15 +187,50 @@ public class OntologyService {
         }
 
         // 写入到本地的扩展表中
-        SsResExtOntology ssResExtOntology = new SsResExtOntology();
-        ssResExtOntology.setResourceId(resource.getResourceId());
-        ssResExtOntology.setPid(request.getPid());
-        ssResExtOntologyMapper.insert(ssResExtOntology);
+        insertOntologyExt(resource, request.getPid());
 
         // 记录操作日志
         operationLogService.recordOperationLog(resource, OperationTypeEnum.CREATE);
 
         return resource;
+    }
+
+    private void insertOntologyExt(SsResource resource, String ontologyBaseCode) {
+        JSONObject targetContent = new JSONObject();
+        targetContent.put("ontologyBaseCode", ontologyBaseCode);
+        targetContent.put("resourceBizType", resource.getResourceBizType());
+        targetContent.put("resourceCode", resource.getResourceCode());
+        targetContent.put("resourceName", resource.getResourceName());
+        targetContent.put("resourceDesc", resource.getResourceDesc());
+        String targetJson = JSON.toJSONString(targetContent);
+        String bizType = resource.getResourceBizType();
+        if (ResourceBizType.SCENE.getCode().equals(bizType)) {
+            SsResExtScene ext = new SsResExtScene();
+            ext.setResourceId(resource.getResourceId());
+            ext.setSceneCode(resource.getResourceCode());
+            ext.setTargetContent(targetJson);
+            ssResExtSceneMapper.insert(ext);
+            return;
+        }
+        if (ResourceBizType.VIEW.getCode().equals(bizType)) {
+            SsResExtView ext = new SsResExtView();
+            ext.setResourceId(resource.getResourceId());
+            ext.setTargetContent(targetJson);
+            ssResExtViewMapper.insert(ext);
+            return;
+        }
+        if (ResourceBizType.OBJECT.getCode().equals(bizType)) {
+            SsResExtObject ext = new SsResExtObject();
+            ext.setResourceId(resource.getResourceId());
+            ext.setTargetContent(targetJson);
+            ssResExtObjectMapper.insert(ext);
+            return;
+        }
+        SsResExtOntology ssResExtOntology = new SsResExtOntology();
+        ssResExtOntology.setResourceId(resource.getResourceId());
+        ssResExtOntology.setPid(ontologyBaseCode);
+        ssResExtOntology.setTargetContent(targetJson);
+        ssResExtOntologyMapper.insert(ssResExtOntology);
     }
 
     private void validateParam(String name, Long catalogId, Integer sourceType) {

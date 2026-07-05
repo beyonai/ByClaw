@@ -114,6 +114,7 @@ export function useOntologyBindTree({
   baseName,
   digitalEmployeeId,
   onTitleClick,
+  initialCheckedKeys,
 }: {
   enabled: boolean;
   baseId?: string;
@@ -121,6 +122,7 @@ export function useOntologyBindTree({
   baseName?: string;
   digitalEmployeeId?: string | number;
   onTitleClick?: (meta: any) => void;
+  initialCheckedKeys?: string[];
 }) {
   const intl = useIntl();
   const t = (id: string, v?: any) => intl.formatMessage({ id }, v);
@@ -302,7 +304,7 @@ export function useOntologyBindTree({
         setTreeData(root);
         setNodeMap(map);
         setExpandedKeys([baseKey, ...sceneNodes.map((n) => n.key)]);
-        const pre = await preselect(map);
+        const pre = Array.isArray(initialCheckedKeys) ? initialCheckedKeys : await preselect(map);
         setCheckedKeys(pre);
         setInitialKeys(pre);
       })
@@ -312,7 +314,7 @@ export function useOntologyBindTree({
       })
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, baseId, ownerType, digitalEmployeeId]);
+  }, [enabled, baseId, ownerType, digitalEmployeeId, initialCheckedKeys]);
 
   const onCheck = (_: any, info: any) => {
     const key = info.node.key;
@@ -329,27 +331,35 @@ export function useOntologyBindTree({
 
   const dirty = useMemo(() => sortedKey(checkedKeys) !== sortedKey(initialKeys), [checkedKeys, initialKeys]);
 
-  const save = async () => {
+  const selectedNodes = useMemo(
+    () =>
+      checkedKeys
+        .map((k) => nodeMap[k])
+        .filter(Boolean)
+        .map((n) => ({
+          level: n.level,
+          sceneId: n.sceneId,
+          sceneName: n.sceneName,
+          sceneDesc: n.sceneDesc,
+          viewCode: n.viewCode,
+          viewName: n.viewName,
+          viewDesc: n.viewDesc,
+          objectCode: n.objectCode,
+          objectName: n.objectName,
+          objectDesc: n.objectDesc,
+        })),
+    [checkedKeys, nodeMap]
+  );
+
+  const isClearing = dirty && initialKeys.length > 0 && checkedKeys.length === 0;
+
+  const save = async (options: { confirmClear?: boolean } = {}) => {
     if (!digitalEmployeeId) {
       message.error(t('resource.noDefaultDigitalEmployee'));
       return false;
     }
     // 保存全部勾选节点（含被自动选中的父节点），每个节点都入资源表 + 写资源关系
-    const nodes = checkedKeys
-      .map((k) => nodeMap[k])
-      .filter(Boolean)
-      .map((n) => ({
-        level: n.level,
-        sceneId: n.sceneId,
-        sceneName: n.sceneName,
-        sceneDesc: n.sceneDesc,
-        viewCode: n.viewCode,
-        viewName: n.viewName,
-        viewDesc: n.viewDesc,
-        objectCode: n.objectCode,
-        objectName: n.objectName,
-        objectDesc: n.objectDesc,
-      }));
+    const nodes = selectedNodes;
     setSaving(true);
     try {
       const res: any = await bindOntologySave({
@@ -358,6 +368,7 @@ export function useOntologyBindTree({
         baseId,
         baseName,
         nodes,
+        confirmClear: options.confirmClear,
       });
       if (res && res.code !== undefined && res.code !== 0 && res.code !== 200) {
         message.error(res.msg || res.message || t('common.operationFailed'));
@@ -375,5 +386,19 @@ export function useOntologyBindTree({
     }
   };
 
-  return { loading, saving, treeData, nodeMap, checkedKeys, onCheck, expandedKeys, setExpandedKeys, dirty, save };
+  return {
+    loading,
+    saving,
+    treeData,
+    nodeMap,
+    checkedKeys,
+    selectedNodes,
+    initialKeys,
+    isClearing,
+    onCheck,
+    expandedKeys,
+    setExpandedKeys,
+    dirty,
+    save,
+  };
 }

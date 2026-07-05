@@ -46,7 +46,6 @@ def main() -> None:
             "keyword": keyword,
             "pageNum": 1,
             "pageSize": 100,
-            "ownerType": "personal",
             "resourceStatus": "2",
             "resourceBizTypeList": [resource_biz_type],
             "permission": "",

@@ -1,11 +1,12 @@
 #!/usr/local/bin/python3
-"""查询个人本体对象列表（非结构化，仅 OBJECT 类型）。
+"""查询个人本体对象/视图列表。
 
 I/O 协议：stdin JSON → stdout JSON
 
 入参（stdin JSON，可选）:
     {
-        "keyword": ""   # 名称关键词过滤，默认空
+        "resource_biz_type": "OBJECT",   # "OBJECT" 或 "VIEW"，默认 "OBJECT"
+        "keyword": ""                    # 名称关键词过滤，默认空
     }
 
 出参（stdout JSON）:
@@ -14,8 +15,8 @@ I/O 协议：stdin JSON → stdout JSON
         "data": [
             {
                 "resourceId": "10000044",
-                "resourceCode": "by_meeting_note",
-                "resourceName": "会议纪要"
+                "resourceCode": "by_task",
+                "resourceName": "任务管理对象"
             }
         ]
     }
@@ -36,6 +37,7 @@ from _common import post_json
 def main() -> None:
     raw = sys.argv[1] if len(sys.argv) > 1 else sys.stdin.read().strip()
     params: dict = json.loads(raw) if raw else {}
+    resource_biz_type: str = params.get("resource_biz_type", "OBJECT").upper().strip()
     keyword: str = params.get("keyword", "")
 
     data = post_json(
@@ -44,9 +46,8 @@ def main() -> None:
             "keyword": keyword,
             "pageNum": 1,
             "pageSize": 100,
-            "ownerType": "personal",
             "resourceStatus": "2",
-            "resourceBizTypeList": ["OBJECT"],
+            "resourceBizTypeList": [resource_biz_type],
             "permission": "",
             "language": "zh-CN",
         },
