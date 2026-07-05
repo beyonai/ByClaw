@@ -14,10 +14,14 @@ import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.dto.ontology.OntologyBaseQueryRequest;
 import com.iwhalecloud.byai.manager.dto.ontology.OntologyBindNode;
 import com.iwhalecloud.byai.manager.dto.ontology.OntologyBindRequest;
-import com.iwhalecloud.byai.manager.entity.ontology.SsResExtOntology;
+import com.iwhalecloud.byai.manager.entity.resource.SsResExtObject;
+import com.iwhalecloud.byai.manager.entity.resource.SsResExtScene;
+import com.iwhalecloud.byai.manager.entity.resource.SsResExtView;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.entity.resource.SsResourceRelDetail;
-import com.iwhalecloud.byai.manager.mapper.ontology.SsResExtOntologyMapper;
+import com.iwhalecloud.byai.manager.mapper.resource.SsResExtObjectMapper;
+import com.iwhalecloud.byai.manager.mapper.resource.SsResExtSceneMapper;
+import com.iwhalecloud.byai.manager.mapper.resource.SsResExtViewMapper;
 import com.iwhalecloud.byai.manager.mapper.resource.SsResourceMapper;
 import com.iwhalecloud.byai.manager.vo.auth.ResourceAuthVo;
 import com.iwhalecloud.byai.common.page.PageInfo;
@@ -38,7 +42,7 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * 本体绑定服务：把某本体库下选中的节点(叶子集合)以「覆盖式(多退少补)」绑定到数字员工。
  *
- * <p>动作：①按选中叶子路径 upsert 虚拟资源(SCENE/VIEW/OBJECT + ss_res_ext_ontology.pid=本体库编码 + 重建元数据)；
+ * <p>动作：①按选中叶子路径 upsert 虚拟资源(SCENE/VIEW/OBJECT + 各自扩展表 target_content.ontologyBaseCode + 重建元数据)；
  * ②按本体库作用域覆盖数字员工关系明细(去掉本库旧的 ontology 资源 + 加入新叶子)，复用 DE 的关系同步；
  * ③迭代孤儿清理：本库中不再被任何关系引用、且无本体子节点的虚拟资源(SCENE/VIEW/OBJECT)删除。
  * relOntology / relResourceList.ontologyBaseCode 由详情侧从这些资源与 ext 元数据重建，本服务只负责资源与关系。
@@ -70,10 +74,16 @@ public class OntologyBindService {
     private SsResourceMapper ssResourceMapper;
 
     @Autowired
-    private SsResExtOntologyMapper ssResExtOntologyMapper;
+    private SsResourceRelDetailService ssResourceRelDetailService;
 
     @Autowired
-    private SsResourceRelDetailService ssResourceRelDetailService;
+    private SsResExtSceneMapper ssResExtSceneMapper;
+
+    @Autowired
+    private SsResExtViewMapper ssResExtViewMapper;
+
+    @Autowired
+    private SsResExtObjectMapper ssResExtObjectMapper;
 
     @Autowired
     private DigitalEmployeeApplicationService digitalEmployeeApplicationService;
@@ -83,6 +93,9 @@ public class OntologyBindService {
 
     @Autowired
     private ResourceAuthApplicationService resourceAuthApplicationService;
+
+    @Autowired
+    private OntologyResourceValidityService ontologyResourceValidityService;
 
     /**
      * 覆盖式绑定：以本次选中为准，重写该本体库在此数字员工下的绑定。
@@ -103,10 +116,14 @@ public class OntologyBindService {
         if (baseRes == null) {
             throw new BaseException("本体库资源不存在，请先注册或刷新本体库");
         }
+        if (!ontologyResourceValidityService.validateAndInvalidate(baseRes)) {
+            throw new BaseException("本体库资源在byclaw-data已不存在，请重新注册或刷新本体库");
+        }
         validateBindPermission(digitalEmployeeId, baseRes);
         String ownerType = baseRes.getOwnerType();
+        List<SsResource> validBaseResources = ontologyResourceValidityService.filterValidOntologyResources(baseResources);
         Map<String, SsResource> byKey = new HashMap<>();
-        for (SsResource r : baseResources) {
+        for (SsResource r : validBaseResources) {
             byKey.put(r.getResourceBizType() + "|" + r.getResourceCode(), r);
         }
 
@@ -116,6 +133,7 @@ public class OntologyBindService {
         if (nodes.isEmpty() && !Boolean.TRUE.equals(req.getConfirmClear())) {
             throw new BaseException("当前本体资源树选中节点数为0，请确认清空操作后再保存");
         }
+        nodes = ontologyResourceValidityService.filterExistingBindNodes(baseId, ownerType, nodes);
         for (OntologyBindNode node : nodes) {
             String level = StringUtils.defaultString(node.getLevel());
             switch (level) {
@@ -182,7 +200,7 @@ public class OntologyBindService {
 
     /**
      * 查询某数字员工「已绑定」的本体库列表：从其关联资源里挑出本体类叶子(SCENE/VIEW/OBJECT/ONTOLOGY_BASE)，
-     * 取各自 ontologyBaseCode(ss_res_ext_ontology.pid)去重，反查对应的 ONTOLOGY_BASE 资源返回。
+     * 取各自 ontologyBaseCode 去重，反查对应的 ONTOLOGY_BASE 资源返回。
      * 仅绑定了场景/对象(未绑库级)时，库级本身不在关系里，故必须经此反查，不能直接过滤 ONTOLOGY_BASE 关系。
      */
     public List<SsResource> boundBases(Long digitalEmployeeId) {
@@ -198,6 +216,7 @@ public class OntologyBindService {
         List<SsResource> resources = ssResourceMapper.selectBatchIds(relIds);
         List<SsResource> ontologyResources = resources == null ? new ArrayList<>()
             : resources.stream().filter(r -> isOntologyBiz(r.getResourceBizType())).collect(Collectors.toList());
+        ontologyResources = ontologyResourceValidityService.filterValidOntologyResources(ontologyResources);
         if (ontologyResources.isEmpty()) {
             return new ArrayList<>();
         }
@@ -205,12 +224,9 @@ public class OntologyBindService {
         // ONTOLOGY_BASE 资源：resourceCode 即本体库编码，直接用（不依赖 ext）
         ontologyResources.stream().filter(r -> BIZ_BASE.equals(r.getResourceBizType()))
             .map(SsResource::getResourceCode).filter(StringUtils::isNotBlank).forEach(baseCodes::add);
-        // 场景/视图/对象：本体库编码取自 ss_res_ext_ontology.pid
         List<Long> ontologyIds = ontologyResources.stream().map(SsResource::getResourceId).collect(Collectors.toList());
-        List<SsResExtOntology> exts = ssResExtOntologyMapper.selectByResourceIds(ontologyIds);
-        if (exts != null) {
-            exts.stream().map(SsResExtOntology::getPid).filter(StringUtils::isNotBlank).forEach(baseCodes::add);
-        }
+        ssResourceService.findOntologyBaseCodeMap(ontologyIds).values().stream().filter(StringUtils::isNotBlank)
+            .forEach(baseCodes::add);
         if (baseCodes.isEmpty()) {
             return new ArrayList<>();
         }
@@ -240,13 +256,12 @@ public class OntologyBindService {
         }
     }
 
-    /** 本体库下全部资源(经 ss_res_ext_ontology.pid 过滤)。 */
+    /** 本体库下全部资源(经各自扩展表过滤)。 */
     private List<SsResource> resourcesOfBase(String baseId) {
-        List<SsResExtOntology> exts = ssResExtOntologyMapper.selectByPid(baseId);
-        if (exts == null || exts.isEmpty()) {
+        List<Long> ids = ssResourceService.findOntologyResourceIdsByBaseCode(baseId);
+        if (ids.isEmpty()) {
             return new ArrayList<>();
         }
-        List<Long> ids = exts.stream().map(SsResExtOntology::getResourceId).collect(Collectors.toList());
         List<SsResource> rows = ssResourceMapper.selectBatchIds(ids);
         return rows == null ? new ArrayList<>() : rows;
     }
@@ -287,14 +302,34 @@ public class OntologyBindService {
         res.setOwnerType(ownerType);
         SsResource saved = ssResourceService.saveResource(res);
 
-        SsResExtOntology ext = new SsResExtOntology();
-        ext.setResourceId(saved.getResourceId());
-        ext.setPid(baseId);
-        ext.setTargetContent(metaJson);
-        ssResExtOntologyMapper.insert(ext);
+        insertExtByBizType(saved.getResourceId(), bizType, code, metaJson);
 
         byKey.put(key, saved);
         return saved;
+    }
+
+    private void insertExtByBizType(Long resourceId, String bizType, String code, String metaJson) {
+        if (BIZ_SCENE.equals(bizType)) {
+            SsResExtScene ext = new SsResExtScene();
+            ext.setResourceId(resourceId);
+            ext.setSceneCode(code);
+            ext.setTargetContent(metaJson);
+            ssResExtSceneMapper.insert(ext);
+            return;
+        }
+        if (BIZ_VIEW.equals(bizType)) {
+            SsResExtView ext = new SsResExtView();
+            ext.setResourceId(resourceId);
+            ext.setTargetContent(metaJson);
+            ssResExtViewMapper.insert(ext);
+            return;
+        }
+        if (BIZ_OBJECT.equals(bizType)) {
+            SsResExtObject ext = new SsResExtObject();
+            ext.setResourceId(resourceId);
+            ext.setTargetContent(metaJson);
+            ssResExtObjectMapper.insert(ext);
+        }
     }
 
     /**
@@ -317,10 +352,25 @@ public class OntologyBindService {
                 if (hasChild(r.getResourceId())) {
                     continue;
                 }
-                ssResExtOntologyMapper.deleteByResourceId(r.getResourceId());
+                deleteExtByBizType(r);
                 ssResourceMapper.deleteById(r.getResourceId());
                 changed = true;
             }
+        }
+    }
+
+    private void deleteExtByBizType(SsResource resource) {
+        if (resource == null || resource.getResourceId() == null) {
+            return;
+        }
+        if (BIZ_SCENE.equals(resource.getResourceBizType())) {
+            ssResExtSceneMapper.deleteById(resource.getResourceId());
+        }
+        else if (BIZ_VIEW.equals(resource.getResourceBizType())) {
+            ssResExtViewMapper.deleteById(resource.getResourceId());
+        }
+        else if (BIZ_OBJECT.equals(resource.getResourceBizType())) {
+            ssResExtObjectMapper.deleteById(resource.getResourceId());
         }
     }
 

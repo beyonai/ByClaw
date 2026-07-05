@@ -15,8 +15,14 @@ import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.dto.ontology.OntologyBaseRegisterRequest;
 import com.iwhalecloud.byai.manager.dto.ontology.OntologyRefreshResult;
 import com.iwhalecloud.byai.manager.entity.ontology.SsResExtOntology;
+import com.iwhalecloud.byai.manager.entity.resource.SsResExtObject;
+import com.iwhalecloud.byai.manager.entity.resource.SsResExtScene;
+import com.iwhalecloud.byai.manager.entity.resource.SsResExtView;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.mapper.ontology.SsResExtOntologyMapper;
+import com.iwhalecloud.byai.manager.mapper.resource.SsResExtObjectMapper;
+import com.iwhalecloud.byai.manager.mapper.resource.SsResExtSceneMapper;
+import com.iwhalecloud.byai.manager.mapper.resource.SsResExtViewMapper;
 import com.iwhalecloud.byai.manager.mapper.resource.SsResourceMapper;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -33,7 +39,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 /**
  * 本体库服务：包 datacloud 本体接口，并把本体库/场景/对象/视图快照进 ss_resource（resourceBizType
- * ONTOLOGY_BASE/SCENE/OBJECT/VIEW + parentResourceId 树；本体库编码存扩展表 ss_res_ext_ontology.pid），供门户浏览与数字员工绑定。
+ * ONTOLOGY_BASE/SCENE/OBJECT/VIEW + parentResourceId 树；本体库、场景、对象、视图分别写各自扩展表），供门户浏览与数字员工绑定。
  *
  * <p>注：REMOTE 本体库本期只落库级、不快照子树（元数据动态、避免漂移）。
  *
@@ -68,6 +74,18 @@ public class OntologyBaseService {
 
     @Autowired
     private AuthApplicationService authApplicationService;
+
+    @Autowired
+    private OntologyResourceValidityService ontologyResourceValidityService;
+
+    @Autowired
+    private SsResExtSceneMapper ssResExtSceneMapper;
+
+    @Autowired
+    private SsResExtViewMapper ssResExtViewMapper;
+
+    @Autowired
+    private SsResExtObjectMapper ssResExtObjectMapper;
 
     /**
      * 本体库列表（转发 datacloud）。注意：datacloud listOntologyBases 响应不含 ownerType 字段，
@@ -252,25 +270,88 @@ public class OntologyBaseService {
             return java.util.Collections.emptyList();
         }
         List<SsResource> rows = ssResourceMapper.selectBatchIds(ids);
+        rows = ontologyResourceValidityService.filterValidOntologyResources(rows);
         rows.sort(java.util.Comparator.comparing(SsResource::getParentResourceId,
             java.util.Comparator.nullsFirst(java.util.Comparator.naturalOrder())));
         return rows;
     }
 
-    /** 取本体库下所有 ss_resource 资源 id：经扩展表 ss_res_ext_ontology.pid（= 本体库编码）过滤。 */
+    /**
+     * 挂载数字员工时，场景/对象/视图可能还只存在于 datacloud，未落入 ss_resource。
+     * 仅允许资源化当前用户自己创建的本体库下的子资源，避免越权把企业或他人本体资源写成本地资源。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public SsResource ensureCurrentUserOntologyChildResource(String bizType, String baseId, String code) {
+        if (!isOntologyChildBizType(bizType) || StringUtils.isBlank(baseId) || StringUtils.isBlank(code)) {
+            return null;
+        }
+        SsResource existing = findSingleOntologyResource(code, bizType, baseId);
+        if (existing != null) {
+            return existing;
+        }
+
+        SsResource baseRes = findCurrentUserCreatedBase(baseId);
+        if (baseRes == null) {
+            return null;
+        }
+        String ownerType = normalizeOwnerType(baseRes.getOwnerType());
+        String sourceType = sourceTypeOfBase(baseRes);
+
+        if (ResourceBizType.SCENE.getCode().equals(bizType)) {
+            JSONObject scene = findSceneSummary(ownerType, baseId, code);
+            JSONObject detail = safeSceneDetail(ownerType, baseId, code);
+            JSONObject meta = mergeDetails(scene, detail);
+            if (meta.isEmpty()) {
+                return null;
+            }
+            return insertOntologyResource(ResourceBizType.SCENE.getCode(),
+                StringUtils.defaultIfBlank(firstNonBlank(meta, "sceneName", "scene_name", "name", "displayName"), code),
+                firstNonBlank(meta, "sceneDesc", "scene_desc", "description"), code, baseId,
+                baseRes.getResourceId(), ownerType, sourceType, meta, null, null);
+        }
+
+        OntologyChildContext context = findChildSceneContext(ownerType, baseId, code,
+            ResourceBizType.OBJECT.getCode().equals(bizType) ? "objects" : "views",
+            ResourceBizType.OBJECT.getCode().equals(bizType)
+                ? new String[] {"objectCode", "object_code"}
+                : new String[] {"viewCode", "view_code"});
+        JSONObject detail = ResourceBizType.OBJECT.getCode().equals(bizType)
+            ? safeObjectDetail(ownerType, baseId, code)
+            : safeViewDetail(baseId, code);
+        JSONObject meta = mergeDetails(context == null ? null : context.child, detail);
+        if (meta.isEmpty()) {
+            return null;
+        }
+        SsResource parent = context == null ? baseRes
+            : ensureSceneResource(baseRes, ownerType, baseId, sourceType, context.scene);
+        if (parent == null) {
+            parent = baseRes;
+        }
+
+        if (ResourceBizType.OBJECT.getCode().equals(bizType)) {
+            return insertOntologyResource(ResourceBizType.OBJECT.getCode(),
+                StringUtils.defaultIfBlank(firstNonBlank(meta, "objectName", "object_name", "name", "displayName"),
+                    code),
+                firstNonBlank(meta, "objectDesc", "object_desc", "description"), code, baseId,
+                parent.getResourceId(), ownerType, sourceType, meta, null, null);
+        }
+        return insertOntologyResource(ResourceBizType.VIEW.getCode(),
+            StringUtils.defaultIfBlank(firstNonBlank(meta, "viewName", "view_name", "name", "displayName"), code),
+            firstNonBlank(meta, "viewDesc", "view_desc", "description"), code, baseId,
+            parent.getResourceId(), ownerType, sourceType, meta, null, null);
+    }
+
+    /** 取本体库下所有 ss_resource 资源 id：本体库/场景/视图/对象分别按各自扩展表过滤。 */
     private List<Long> resourceIdsOfBase(String baseId) {
         if (StringUtils.isBlank(baseId)) {
             return java.util.Collections.emptyList();
         }
-        List<SsResExtOntology> exts = ssResExtOntologyMapper.selectByPid(baseId);
-        if (exts == null || exts.isEmpty()) {
-            return java.util.Collections.emptyList();
-        }
-        return exts.stream().map(SsResExtOntology::getResourceId).collect(Collectors.toList());
+        return ssResourceService.findOntologyResourceIdsByBaseCode(baseId);
     }
 
     /**
-     * 注册本体库：调 datacloud 创建/注册，再把库（LOCAL 时含场景/对象/视图子树）快照进 ss_resource。
+     * 注册本体库：调 datacloud 创建/注册，门户只落本体库级资源；场景/视图/对象由 datacloud 维护，
+     * 门户仅在绑定/挂载时按需创建资源索引。
      */
     @Transactional(rollbackFor = Exception.class)
     public SsResource registerBase(OntologyBaseRegisterRequest req) {
@@ -310,20 +391,11 @@ public class OntologyBaseService {
         SsResource baseRes = insertOntologyResource(ResourceBizType.ONTOLOGY_BASE.getCode(), displayName, description,
             baseId, baseId, ROOT_PARENT_ID, ownerType, sourceType, created, req.getCatalogId(), null);
 
-        if (LOCAL.equalsIgnoreCase(sourceType)) {
-            try {
-                snapshotSubtree(baseRes, ownerType, baseId, sourceType);
-            }
-            catch (Exception e) {
-                // 子树快照失败不阻断库级注册，记录日志后续可重建。
-                logger.error("snapshot ontology subtree failed, baseId={}", baseId, e);
-            }
-        }
         return baseRes;
     }
 
     /**
-     * 刷新企业本体库：从本体管理门户（datacloud listOntologyBases）拉取全部本体库，按 resource_code=baseId
+     * 刷新企业本体库：从本体管理门户按 ownerType 拉取本体库，按 resource_code=baseId
      * 在「该 ownerType + ONTOLOGY_BASE」范围内 upsert（存在则更新、不存在则新增，只落库级不快照子树）；
      * 远程已删、本地残留的置 resource_status=3（已下架）。返回汇总 + 明细。
      */
@@ -347,7 +419,7 @@ public class OntologyBaseService {
             }
         }
 
-        JSONArray bases = feignDataCloudService.listOntologyBases();
+        JSONArray bases = feignDataCloudService.listOntologyBases(owner, null);
         Set<String> remoteIds = new HashSet<>();
         if (bases != null) {
             for (int i = 0; i < bases.size(); i++) {
@@ -371,12 +443,8 @@ public class OntologyBaseService {
                     exist.setHostType(REMOTE.equalsIgnoreCase(sourceType) ? "hosted" : "local");
                     exist.setUpdateBy(adminUserId);
                     ssResourceService.updateResourceEntity(exist);
-                    ssResExtOntologyMapper.deleteByResourceId(exist.getResourceId());
-                    SsResExtOntology ext = new SsResExtOntology();
-                    ext.setResourceId(exist.getResourceId());
-                    ext.setPid(baseId);
-                    ext.setTargetContent(JSON.toJSONString(base));
-                    ssResExtOntologyMapper.insert(ext);
+                    replaceOntologyBaseExt(exist.getResourceId(), baseId, buildOntologyMeta(
+                        ResourceBizType.ONTOLOGY_BASE.getCode(), baseId, baseId, null, null, null, base));
                     result.setUpdated(result.getUpdated() + 1);
                     result.addDetail(baseId, displayName, "update");
                 }
@@ -457,6 +525,175 @@ public class OntologyBaseService {
         }
     }
 
+    private SsResource findSingleOntologyResource(String code, String bizType, String baseId) {
+        List<SsResource> resources = ssResourceService.findByCodeAndBizTypeAndOntologyBaseCode(code, bizType, baseId);
+        if (resources == null || resources.isEmpty()) {
+            return null;
+        }
+        if (resources.size() > 1) {
+            throw new BaseException("本体资源编码不唯一：" + code);
+        }
+        return resources.get(0);
+    }
+
+    private SsResource findCurrentUserCreatedBase(String baseId) {
+        Long currentUserId = CurrentUserHolder.getCurrentUserId();
+        if (currentUserId == null) {
+            return null;
+        }
+        List<SsResource> bases = ssResourceService.findByCodeAndBizTypeAndOntologyBaseCode(baseId,
+            ResourceBizType.ONTOLOGY_BASE.getCode(), null);
+        if (bases == null || bases.isEmpty()) {
+            return null;
+        }
+        SsResource matched = null;
+        for (SsResource base : bases) {
+            if (currentUserId.equals(base.getCreateBy())) {
+                if (matched != null) {
+                    throw new BaseException("本体库编码不唯一：" + baseId);
+                }
+                matched = base;
+            }
+        }
+        return matched;
+    }
+
+    private SsResource ensureSceneResource(SsResource baseRes, String ownerType, String baseId, String sourceType,
+        JSONObject scene) {
+        String sceneId = firstNonBlank(scene, "sceneId", "scene_id");
+        if (StringUtils.isBlank(sceneId)) {
+            return null;
+        }
+        SsResource existing = findSingleOntologyResource(sceneId, ResourceBizType.SCENE.getCode(), baseId);
+        if (existing != null) {
+            return existing;
+        }
+        JSONObject detail = safeSceneDetail(ownerType, baseId, sceneId);
+        JSONObject meta = mergeDetails(scene, detail);
+        return insertOntologyResource(ResourceBizType.SCENE.getCode(),
+            StringUtils.defaultIfBlank(firstNonBlank(meta, "sceneName", "scene_name", "name", "displayName"),
+                sceneId),
+            firstNonBlank(meta, "sceneDesc", "scene_desc", "description"), sceneId, baseId,
+            baseRes.getResourceId(), ownerType, sourceType, meta, null, null);
+    }
+
+    private JSONObject findSceneSummary(String ownerType, String baseId, String sceneId) {
+        JSONArray scenes = feignDataCloudService.listScenes(ownerType, baseId, null);
+        if (scenes == null) {
+            return null;
+        }
+        for (int i = 0; i < scenes.size(); i++) {
+            JSONObject scene = scenes.getJSONObject(i);
+            if (StringUtils.equals(sceneId, firstNonBlank(scene, "sceneId", "scene_id"))) {
+                return scene;
+            }
+        }
+        return null;
+    }
+
+    private OntologyChildContext findChildSceneContext(String ownerType, String baseId, String childCode,
+        String childrenKey, String... childCodeKeys) {
+        JSONArray scenes = feignDataCloudService.listScenes(ownerType, baseId, null);
+        if (scenes == null) {
+            return null;
+        }
+        for (int i = 0; i < scenes.size(); i++) {
+            JSONObject scene = scenes.getJSONObject(i);
+            String sceneId = firstNonBlank(scene, "sceneId", "scene_id");
+            if (StringUtils.isBlank(sceneId)) {
+                continue;
+            }
+            JSONObject detail = safeSceneDetail(ownerType, baseId, sceneId);
+            if (detail == null) {
+                continue;
+            }
+            JSONArray children = detail.getJSONArray(childrenKey);
+            if (children == null) {
+                continue;
+            }
+            for (int j = 0; j < children.size(); j++) {
+                JSONObject child = children.getJSONObject(j);
+                if (StringUtils.equals(childCode, firstNonBlank(child, childCodeKeys))) {
+                    return new OntologyChildContext(scene, child);
+                }
+            }
+        }
+        return null;
+    }
+
+    private JSONObject safeSceneDetail(String ownerType, String baseId, String sceneId) {
+        try {
+            return feignDataCloudService.getSceneDetails(ownerType, baseId, sceneId);
+        }
+        catch (Exception e) {
+            logger.warn("query datacloud scene detail failed, baseId={}, sceneId={}", baseId, sceneId, e);
+            return null;
+        }
+    }
+
+    private JSONObject safeObjectDetail(String ownerType, String baseId, String objectCode) {
+        try {
+            return feignDataCloudService.getObjectDetail(ownerType, baseId, objectCode);
+        }
+        catch (Exception e) {
+            logger.warn("query datacloud object detail failed, baseId={}, objectCode={}", baseId, objectCode, e);
+            return null;
+        }
+    }
+
+    private JSONObject safeViewDetail(String baseId, String viewCode) {
+        try {
+            return feignDataCloudService.getViewDetail(baseId, viewCode, null);
+        }
+        catch (Exception e) {
+            logger.warn("query datacloud view detail failed, baseId={}, viewCode={}", baseId, viewCode, e);
+            return null;
+        }
+    }
+
+    private JSONObject mergeDetails(JSONObject summary, JSONObject detail) {
+        JSONObject merged = new JSONObject();
+        if (summary != null) {
+            merged.putAll(summary);
+        }
+        if (detail != null) {
+            merged.putAll(detail);
+        }
+        return merged;
+    }
+
+    private String sourceTypeOfBase(SsResource baseRes) {
+        SsResExtOntology ext = ssResExtOntologyMapper.selectByResourceId(baseRes.getResourceId());
+        if (ext != null && StringUtils.isNotBlank(ext.getTargetContent())) {
+            try {
+                JSONObject target = JSON.parseObject(ext.getTargetContent());
+                return StringUtils.defaultIfBlank(firstNonBlank(target, "sourceType", "source_type"), LOCAL);
+            }
+            catch (Exception e) {
+                logger.warn("parse ontology base target content failed, resourceId={}", baseRes.getResourceId(), e);
+            }
+        }
+        return "hosted".equalsIgnoreCase(baseRes.getHostType()) ? REMOTE : LOCAL;
+    }
+
+    private boolean isOntologyChildBizType(String bizType) {
+        return ResourceBizType.SCENE.getCode().equals(bizType)
+            || ResourceBizType.OBJECT.getCode().equals(bizType)
+            || ResourceBizType.VIEW.getCode().equals(bizType);
+    }
+
+    private static class OntologyChildContext {
+
+        private final JSONObject scene;
+
+        private final JSONObject child;
+
+        private OntologyChildContext(JSONObject scene, JSONObject child) {
+            this.scene = scene;
+            this.child = child;
+        }
+    }
+
     /**
      * 建一行本体 ss_resource + 扩展表（target_content 存元数据明细镜像）。
      *
@@ -490,15 +727,79 @@ public class OntologyBaseService {
         }
         SsResource saved = ssResourceService.createResource(res);
 
-        SsResExtOntology ext = new SsResExtOntology();
-        ext.setResourceId(saved.getResourceId());
-        ext.setPid(baseCode);
-        if (detail != null) {
-            ext.setTargetContent(JSON.toJSONString(detail));
-        }
-        ssResExtOntologyMapper.insert(ext);
+        JSONObject targetContent = buildOntologyMeta(bizType, baseCode, code, name, desc, ownerType, detail);
+        insertExtByBizType(saved.getResourceId(), bizType, code, baseCode, targetContent);
         initializePersonalOntologyPrivileges(saved, ownerType);
         return saved;
+    }
+
+    private JSONObject buildOntologyMeta(String bizType, String baseCode, String code, String name, String desc,
+        String ownerType, JSONObject detail) {
+        JSONObject targetContent = new JSONObject();
+        if (detail != null) {
+            targetContent.putAll(detail);
+        }
+        targetContent.put("ontologyBaseCode", baseCode);
+        targetContent.put("resourceBizType", bizType);
+        targetContent.put("resourceCode", code);
+        targetContent.put("resourceName", name);
+        targetContent.put("resourceDesc", desc);
+        targetContent.put("ownerType", ownerType);
+        if (ResourceBizType.ONTOLOGY_BASE.getCode().equals(bizType)) {
+            targetContent.put("baseId", code);
+        }
+        else if (ResourceBizType.SCENE.getCode().equals(bizType)) {
+            targetContent.put("sceneId", code);
+            targetContent.put("sceneName", name);
+        }
+        else if (ResourceBizType.VIEW.getCode().equals(bizType)) {
+            targetContent.put("viewCode", code);
+            targetContent.put("viewName", name);
+        }
+        else if (ResourceBizType.OBJECT.getCode().equals(bizType)) {
+            targetContent.put("objectCode", code);
+            targetContent.put("objectName", name);
+        }
+        return targetContent;
+    }
+
+    private void insertExtByBizType(Long resourceId, String bizType, String code, String baseCode,
+        JSONObject targetContent) {
+        String targetJson = JSON.toJSONString(targetContent);
+        if (ResourceBizType.ONTOLOGY_BASE.getCode().equals(bizType)) {
+            replaceOntologyBaseExt(resourceId, baseCode, targetContent);
+            return;
+        }
+        if (ResourceBizType.SCENE.getCode().equals(bizType)) {
+            SsResExtScene ext = new SsResExtScene();
+            ext.setResourceId(resourceId);
+            ext.setSceneCode(code);
+            ext.setTargetContent(targetJson);
+            ssResExtSceneMapper.insert(ext);
+            return;
+        }
+        if (ResourceBizType.VIEW.getCode().equals(bizType)) {
+            SsResExtView ext = new SsResExtView();
+            ext.setResourceId(resourceId);
+            ext.setTargetContent(targetJson);
+            ssResExtViewMapper.insert(ext);
+            return;
+        }
+        if (ResourceBizType.OBJECT.getCode().equals(bizType)) {
+            SsResExtObject ext = new SsResExtObject();
+            ext.setResourceId(resourceId);
+            ext.setTargetContent(targetJson);
+            ssResExtObjectMapper.insert(ext);
+        }
+    }
+
+    private void replaceOntologyBaseExt(Long resourceId, String baseCode, JSONObject targetContent) {
+        ssResExtOntologyMapper.deleteByResourceId(resourceId);
+        SsResExtOntology ext = new SsResExtOntology();
+        ext.setResourceId(resourceId);
+        ext.setPid(baseCode);
+        ext.setTargetContent(JSON.toJSONString(targetContent));
+        ssResExtOntologyMapper.insert(ext);
     }
 
     private void initializePersonalOntologyPrivileges(SsResource resource, String ownerType) {
@@ -519,6 +820,9 @@ public class OntologyBaseService {
         List<Long> ids = resourceIdsOfBase(baseId);
         if (!ids.isEmpty()) {
             ssResExtOntologyMapper.deleteByResourceIds(ids);
+            ssResExtSceneMapper.deleteBatchIds(ids);
+            ssResExtViewMapper.deleteBatchIds(ids);
+            ssResExtObjectMapper.deleteBatchIds(ids);
             ssResourceMapper.deleteBatchIds(ids);
         }
         return true;

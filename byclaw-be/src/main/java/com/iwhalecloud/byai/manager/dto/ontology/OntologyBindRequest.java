@@ -18,7 +18,7 @@ public class OntologyBindRequest {
     /** 资源归属类型：personal / enterprise。 */
     private String ownerType;
 
-    /** 本体库编码（= ontologyBaseCode = ss_res_ext_ontology.pid）。 */
+    /** 本体库编码（= ontologyBaseCode）。 */
     private String baseId;
 
     /** 本体库名称（可选，展示/兜底用）。 */

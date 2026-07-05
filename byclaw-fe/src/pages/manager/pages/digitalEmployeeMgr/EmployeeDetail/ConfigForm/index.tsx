@@ -2473,13 +2473,6 @@ const ConfigForm = (props) => {
                         <Tag>{intl.formatMessage({ id: 'employeeDetail.ontology.object' })}</Tag>
                       </Space>
                     </div>
-                    <Button onClick={onOpenOntologyDrawer} disabled={isReadOnly}>
-                      {ontologySummary.hasBinding
-                        ? intl.formatMessage({ id: 'employeeDetail.ontology.manage' })
-                        : ontologySummary.isCleared
-                        ? intl.formatMessage({ id: 'employeeDetail.ontology.reselect' })
-                        : intl.formatMessage({ id: 'employeeDetail.ontology.addOntology' })}
-                    </Button>
                   </div>
                   {ontologySummary.hasBinding && (
                     <div className={styles.ontologyBaseList}>

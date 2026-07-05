@@ -10,6 +10,8 @@ import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.DingtalkRob
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.event.DigEmployeeChangeEventPublisher;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.event.DigEmployeeChangeEventType;
+import com.iwhalecloud.byai.manager.application.service.ontology.OntologyBaseService;
+import com.iwhalecloud.byai.manager.application.service.ontology.OntologyResourceValidityService;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceBizTypeEnum;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceRelDetailService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
@@ -71,6 +73,12 @@ public class OpenApiApplicationService {
 
     @Autowired
     private AuthApplicationService authApplicationService;
+
+    @Autowired
+    private OntologyBaseService ontologyBaseService;
+
+    @Autowired
+    private OntologyResourceValidityService ontologyResourceValidityService;
 
     /**
      * 开放通知
@@ -156,7 +164,7 @@ public class OpenApiApplicationService {
         }
 
         result.getItems().addAll(items);
-        result.setAllPermitted(result.getItems().stream().allMatch(item -> item.isExists() && item.isHasPermission()));
+        result.setAllPermitted(result.getItems().stream().allMatch(this::isPermissionCheckPassed));
         return result;
     }
 
@@ -274,12 +282,22 @@ public class OpenApiApplicationService {
             throw new BaseRuntimeException(I18nUtil.get("openapi.resource.id.code.exclusive"));
         }
         if (relResourceId != null) {
-            return ssResourceService.findById(relResourceId);
+            SsResource resource = ssResourceService.findById(relResourceId);
+            return ontologyResourceValidityService.validateAndInvalidate(resource) ? resource : null;
         }
 
         validateCodeQueryParams(relResourceCode, relResourceBizType, ontologyBaseCode);
         List<SsResource> resources = ssResourceService.findByCodeAndBizTypeAndOntologyBaseCode(relResourceCode,
             relResourceBizType, ontologyBaseCode);
+        if (CollectionUtils.isEmpty(resources)) {
+            SsResource ontologyChildResource = ensureMountOntologyChildResource(relResourceBizType, ontologyBaseCode,
+                relResourceCode);
+            if (ontologyChildResource != null) {
+                return ontologyChildResource;
+            }
+            return null;
+        }
+        resources = ontologyResourceValidityService.filterValidOntologyResources(resources);
         if (CollectionUtils.isEmpty(resources)) {
             return null;
         }
@@ -287,6 +305,15 @@ public class OpenApiApplicationService {
             throw new BaseRuntimeException(I18nUtil.get("openapi.resource.code.not.unique"));
         }
         return resources.get(0);
+    }
+
+    private SsResource ensureMountOntologyChildResource(String resourceBizType, String ontologyBaseCode,
+        String resourceCode) {
+        if (!isCurrentUserCreatedOntologyChildResource(resourceBizType, ontologyBaseCode)) {
+            return null;
+        }
+        return ontologyBaseService.ensureCurrentUserOntologyChildResource(resourceBizType, ontologyBaseCode,
+            resourceCode);
     }
 
     private void validateMountPermission(SsResource agentResource, SsResource relSsResource) {
@@ -319,7 +346,9 @@ public class OpenApiApplicationService {
         if (hasIdMode) {
             for (Long resourceId : checkDto.getResourceIds()) {
                 SsResource resource = ssResourceService.findById(resourceId);
-                items.add(buildPermissionItem(resource, authApplicationService.hasResourceUsePermission(resource), null));
+                boolean valid = resource != null && ontologyResourceValidityService.validateAndInvalidate(resource);
+                items.add(buildPermissionItem(valid ? resource : null,
+                    valid && authApplicationService.hasResourceUsePermission(resource), null));
             }
             return items;
         }
@@ -336,6 +365,7 @@ public class OpenApiApplicationService {
 
             List<SsResource> resources = ssResourceService.findByCodeAndBizTypeAndOntologyBaseCode(resourceCode,
                 resourceBizType, ontologyBaseCode);
+            resources = ontologyResourceValidityService.filterValidOntologyResources(resources);
             if (CollectionUtils.isEmpty(resources)) {
                 if (isCurrentUserCreatedOntologyChildResource(resourceBizType, ontologyBaseCode)) {
                     items.add(buildVirtualOntologyChildPermissionItem(resourceCode, resourceBizType, ontologyBaseCode));
