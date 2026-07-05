@@ -137,7 +137,7 @@ public class OpenApiApplicationService {
             result.getItems().add(buildPermissionItem(agent, authApplicationService.hasResourceManagePermission(agent),
                 isDigitalEmployee(agent) ? null : I18nUtil.get("openapi.mount.agent.not.digital.employee")));
         }
-        result.setAllPermitted(result.getItems().stream().allMatch(item -> item.isExists() && item.isHasPermission()));
+        result.setAllPermitted(result.getItems().stream().allMatch(this::isPermissionCheckPassed));
         return result;
     }
 
@@ -337,6 +337,10 @@ public class OpenApiApplicationService {
             List<SsResource> resources = ssResourceService.findByCodeAndBizTypeAndOntologyBaseCode(resourceCode,
                 resourceBizType, ontologyBaseCode);
             if (CollectionUtils.isEmpty(resources)) {
+                if (isCurrentUserCreatedOntologyChildResource(resourceBizType, ontologyBaseCode)) {
+                    items.add(buildVirtualOntologyChildPermissionItem(resourceCode, resourceBizType, ontologyBaseCode));
+                    continue;
+                }
                 items.add(buildInvalidPermissionItem(resourceCode, resourceBizType, ontologyBaseCode,
                     I18nUtil.get("resource.not.found")));
                 continue;
@@ -353,6 +357,26 @@ public class OpenApiApplicationService {
             items.add(item);
         }
         return items;
+    }
+
+    /**
+     * 本体场景/视图/对象可能仅存在于 byclaw-datacloud，尚未快照为 ss_resource。
+     * 若其所属本体库是当前用户创建的，则当前用户天然具备使用权限。
+     */
+    private boolean isCurrentUserCreatedOntologyChildResource(String resourceBizType, String ontologyBaseCode) {
+        if (!isOntologyChildBizType(resourceBizType) || StringUtils.isBlank(ontologyBaseCode)) {
+            return false;
+        }
+        Long currentUserId = CurrentUserHolder.getCurrentUserId();
+        if (currentUserId == null) {
+            return false;
+        }
+        List<SsResource> bases = ssResourceService.findByCodeAndBizTypeAndOntologyBaseCode(ontologyBaseCode,
+            ResourceBizTypeEnum.ONTOLOGY_BASE.name(), null);
+        if (CollectionUtils.isEmpty(bases)) {
+            return false;
+        }
+        return bases.stream().anyMatch(base -> currentUserId.equals(base.getCreateBy()));
     }
 
     private List<OpenPermissionCheckDto.ResourceCodeRef> buildResourceCodeRefs(OpenPermissionCheckDto checkDto) {
@@ -403,6 +427,25 @@ public class OpenApiApplicationService {
         item.setHasPermission(false);
         item.setMessage(message);
         return item;
+    }
+
+    private OpenPermissionCheckResultDto.Item buildVirtualOntologyChildPermissionItem(String resourceCode,
+        String resourceBizType, String ontologyBaseCode) {
+        OpenPermissionCheckResultDto.Item item = new OpenPermissionCheckResultDto.Item();
+        item.setResourceCode(resourceCode);
+        item.setResourceName(resourceCode);
+        item.setResourceBizType(resourceBizType);
+        item.setOntologyBaseCode(ontologyBaseCode);
+        item.setExists(false);
+        item.setHasPermission(true);
+        return item;
+    }
+
+    private boolean isPermissionCheckPassed(OpenPermissionCheckResultDto.Item item) {
+        if (item == null || !item.isHasPermission()) {
+            return false;
+        }
+        return item.isExists() || isOntologyChildBizType(item.getResourceBizType());
     }
 
     private boolean isDigitalEmployee(SsResource resource) {
