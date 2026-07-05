@@ -1718,6 +1718,38 @@ public class AuthApplicationService {
     }
 
     /**
+     * 为指定用户追加一条资源授权，不覆盖该资源已有授权名单。
+     */
+    public void ensureUserDirectPrivilege(SsResource ssResource, Long userId, String grantType) {
+        if (ssResource == null || ssResource.getResourceId() == null || userId == null
+            || StringUtils.isBlank(grantType)) {
+            return;
+        }
+        List<String> sameFamilyGrantTypes = resolveSameFamilyGrantTypes(grantType);
+        if (CollectionUtils.isNotEmpty(sameFamilyGrantTypes)
+            && hasSameDimensionPermissionFamily(ssResource.getResourceBizType(), ssResource.getResourceId(),
+                GrantToObjType.USER, userId, sameFamilyGrantTypes)) {
+            return;
+        }
+
+        PrivilegeGrant privilegeGrant = new PrivilegeGrant();
+        privilegeGrant.setGrantType(grantType);
+        privilegeGrant.setGrantObjId(ssResource.getResourceId());
+        privilegeGrant.setGrantObjType(ssResource.getResourceBizType());
+        privilegeGrant.setGrantToObjType(GrantToObjType.USER);
+        privilegeGrant.setGrantToObjId(userId);
+        privilegeGrant.setOperType(OperType.READ);
+        privilegeGrant.setGrantToType(Color.RED);
+        privilegeGrant.setAllowUnsubscribe(Constants.NOT_ALLOW_UNSUBSCRIBE);
+        privilegeGrant.setStatusCd("A");
+        privilegeGrantService.save(privilegeGrant);
+
+        String redisKey = buildPrivilegeGrantKey(privilegeGrant);
+        String redisValue = buildPrivilegeGrantValue(privilegeGrant);
+        writeRedis(grantType, redisKey, redisValue);
+    }
+
+    /**
      * 判断创建人在同一授权维度下是否已经持有指定权限族。
      */
     private boolean hasCreatorSameDimensionGrant(SsResource ssResource, Long creatorUserId, List<String> grantTypes) {
