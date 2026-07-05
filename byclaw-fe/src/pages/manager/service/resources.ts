@@ -528,7 +528,12 @@ export const resourceizeWorkspaceSkill = (params: WorkspaceSkillParams) => {
  * @param params 参数（包含skillPath技能路径、resourceId资源ID和可选的userCode用户编码）
  * @returns Promise<Blob> 文件流
  */
-export const downloadSkillZip = (params: { skillPath: string; resourceId?: string | number; userCode?: string }) => {
+export const downloadSkillZip = (params: {
+  skillPath?: string;
+  skillId?: string | number;
+  resourceId?: string | number;
+  userCode?: string;
+}) => {
   return POST<any>('/byaiService/tool/downloadSkillZip', params, {
     timeout: 480000,
     responseType: 'blob',

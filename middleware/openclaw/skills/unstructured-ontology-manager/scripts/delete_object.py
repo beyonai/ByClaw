@@ -17,7 +17,7 @@ I/O 协议：stdin JSON → stdout JSON
     2. deleteResourceByCode(entity_code) — 下架本体（门户服务）
     注意：不删除知识库，不删除 表（非结构化无表）
 
-所有业务逻辑由 datacloud_data_service 的 ontology-manager API 提供服务。
+所有业务逻辑由 datacloud_platform 的 ontology-manager API 提供服务。
 """
 
 from __future__ import annotations

@@ -217,14 +217,16 @@ def generate_weekly_report(seed: int | None = None) -> WeeklyReportData:
     last_weekday = today - timedelta(days=max(0, today.weekday() - 4))  # 上周五
 
     return WeeklyReportData(
-        visit_date=last_weekday.strftime("%Y年%m月%d日（周%w）".replace("0", "日")
-        .replace("1", "一")
-        .replace("2", "二")
-        .replace("3", "三")
-        .replace("4", "四")
-        .replace("5", "五")
-        .replace("6", "六")
-        .replace("7", "日")),
+        visit_date=last_weekday.strftime(
+            "%Y年%m月%d日（周%w）".replace("0", "日")
+            .replace("1", "一")
+            .replace("2", "二")
+            .replace("3", "三")
+            .replace("4", "四")
+            .replace("5", "五")
+            .replace("6", "六")
+            .replace("7", "日")
+        ),
         customer=customer,
         opportunity=opportunity,
     )

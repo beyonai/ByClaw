@@ -253,6 +253,41 @@
   font-size: 12px;
 }
 
+.nodePanel {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+}
+
+.nodePanelHeader {
+  flex: none;
+  height: 48px;
+  padding: 0 12px 0 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  color: #1d2129;
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.nodePanelBody {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 14px 16px;
+}
+
+.nodePanelFooter {
+  flex: none;
+  padding: 10px 12px;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+  background: #fff;
+}
+
 .flowGraph {
   height: auto;
   max-width: none;

@@ -137,6 +137,8 @@ export default function getElementData(type: IResourceType, data: any) {
         type: ELEMENT_RESOURCE,
         resourceName: name,
         resourceCode: data.resourceCode,
+        isFromResourceModule: data.isFromResourceModule,
+        showQuotePrefix: data.showQuotePrefix,
         // 引用XXX
         children: [{ text: getElementDisplayText({ resourceType: type, data: { name } }) }],
       };

@@ -14,6 +14,12 @@ public class MountResourceDto {
 
     private Long agentId;
 
+    private Long relResourceId;
+
     private String relResourceCode;
+
+    private String relResourceBizType;
+
+    private String ontologyBaseCode;
 
 }

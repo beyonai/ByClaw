@@ -27,7 +27,13 @@ import {
   message,
   Popconfirm,
 } from 'antd';
-import { FormOutlined, QuestionCircleOutlined, EyeOutlined, ExclamationCircleOutlined } from '@ant-design/icons';
+import {
+  FormOutlined,
+  QuestionCircleOutlined,
+  EyeOutlined,
+  ExclamationCircleOutlined,
+  PlusOutlined,
+} from '@ant-design/icons';
 import classnames from 'classnames';
 import { compact, set, trim } from 'lodash';
 import { customAlphabet } from 'nanoid';
@@ -132,6 +138,134 @@ const parseDigitalEmployeeTemplates = (value: any) => {
     }
   }
   return [value];
+};
+
+const parseMaybeArray = (value: any) => {
+  if (Array.isArray(value)) return value;
+  if (!value) return [];
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value || '[]');
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+};
+
+const addUniqueName = (list: string[], value: any) => {
+  const text = `${value || ''}`.trim();
+  if (text && !list.includes(text)) {
+    list.push(text);
+  }
+};
+
+const ontologyBaseIdentity = (baseId: any, baseName?: any) => `${baseId || baseName || ''}`;
+
+const ontologyBaseKey = (baseId: any, baseName: any, ownerType?: string) =>
+  ownerType ? `${ownerType}:${ontologyBaseIdentity(baseId, baseName)}` : ontologyBaseIdentity(baseId, baseName);
+
+const createOntologySummaryGroup = (baseId: any, baseName: any, ownerType?: string) => ({
+  key: ontologyBaseKey(baseId, baseName, ownerType),
+  identity: ontologyBaseIdentity(baseId, baseName),
+  baseId,
+  baseName: baseName || baseId || '',
+  ownerType,
+  scenes: new Set<string>(),
+  views: new Set<string>(),
+  objects: new Set<string>(),
+  previewNames: [] as string[],
+  dirty: false,
+  clearing: false,
+});
+
+const buildOntologyGroupFromBinding = (binding: any) => {
+  const group = createOntologySummaryGroup(binding?.baseId, binding?.baseName, binding?.ownerType);
+  group.dirty = Boolean(binding?.dirty);
+  group.clearing = Boolean(binding?.isClearing) || (binding?.dirty && (binding?.nodes || []).length === 0);
+  (binding?.nodes || []).forEach((node: any) => {
+    const level = `${node?.level || ''}`.toUpperCase();
+    if (level === 'SCENE') {
+      group.scenes.add(`${node?.sceneId || node?.sceneName || ''}`);
+      addUniqueName(group.previewNames, node?.sceneName || node?.sceneId);
+    }
+    if (level === 'VIEW') {
+      group.views.add(`${node?.sceneId || ''}:${node?.viewCode || node?.viewName || ''}`);
+      addUniqueName(group.previewNames, node?.viewName || node?.viewCode);
+    }
+    if (level.includes('OBJECT')) {
+      group.objects.add(`${node?.objectCode || node?.objectName || ''}`);
+      addUniqueName(group.previewNames, node?.objectName || node?.objectCode);
+    }
+  });
+  return group;
+};
+
+const buildOntologyGroupFromSavedRows = (rows: any[]) => {
+  const groups = new Map<string, any>();
+  rows.forEach((row: any) => {
+    const baseId = row?.ontologyBaseCode || row?.baseId || row?.baseCode || row?.resourceCode;
+    const baseName =
+      row?.ontologyBaseName ||
+      row?.baseName ||
+      (row?.resourceBizType === 'ONTOLOGY_BASE' ? row?.resourceName : '') ||
+      baseId;
+    if (!baseId && !baseName) return;
+    const key = ontologyBaseKey(baseId, baseName, row?.ownerType);
+    if (!groups.has(key)) {
+      groups.set(key, createOntologySummaryGroup(baseId, baseName, row?.ownerType));
+    }
+    const group = groups.get(key);
+    const bizType = `${row?.resourceBizType || row?.level || ''}`.toUpperCase();
+    if (bizType === 'SCENE' || row?.sceneId) {
+      group.scenes.add(`${row?.sceneId || row?.sceneName || row?.resourceCode || ''}`);
+      addUniqueName(group.previewNames, row?.sceneName || (bizType === 'SCENE' ? row?.resourceName : ''));
+    }
+    if (bizType === 'VIEW' || row?.viewCode) {
+      group.views.add(`${row?.sceneId || ''}:${row?.viewCode || row?.resourceCode || row?.viewName || ''}`);
+      addUniqueName(group.previewNames, row?.viewName || (bizType === 'VIEW' ? row?.resourceName : ''));
+    }
+    if (bizType === 'OBJECT' || row?.objectCode) {
+      group.objects.add(`${row?.objectCode || row?.resourceCode || row?.objectName || ''}`);
+      addUniqueName(group.previewNames, row?.objectName || (bizType === 'OBJECT' ? row?.resourceName : ''));
+    }
+  });
+  return groups;
+};
+
+const buildOntologyConfigSummary = (savedRelOntology: any, ontologyBindingMap: any) => {
+  const savedGroups = buildOntologyGroupFromSavedRows(parseMaybeArray(savedRelOntology));
+  Object.values(ontologyBindingMap || {})
+    .filter((binding: any) => binding?.dirty)
+    .forEach((binding: any) => {
+      if (!binding?.baseId && !binding?.baseName) return;
+      const group = buildOntologyGroupFromBinding(binding);
+      Array.from(savedGroups.entries()).forEach(([key, savedGroup]: any) => {
+        if (savedGroup?.identity === group.identity && key !== group.key) {
+          savedGroups.delete(key);
+        }
+      });
+      savedGroups.set(group.key, group);
+    });
+  const allGroups = Array.from(savedGroups.values());
+  const activeGroups = allGroups.filter((group) => !group.clearing);
+  const totals = activeGroups.reduce(
+    (acc, group) => ({
+      bases: acc.bases + 1,
+      scenes: acc.scenes + group.scenes.size,
+      views: acc.views + group.views.size,
+      objects: acc.objects + group.objects.size,
+    }),
+    { bases: 0, scenes: 0, views: 0, objects: 0 }
+  );
+  return {
+    groups: activeGroups,
+    totals,
+    hasBinding: activeGroups.length > 0,
+    hasPending: allGroups.some((group) => group.dirty),
+    isCleared: allGroups.length > 0 && activeGroups.length === 0,
+  };
 };
 
 const getDigitalEmployeeTemplate = (templates: any[] = [], ownerType?: string, agentType?: string) => {
@@ -368,6 +502,9 @@ const ConfigForm = (props) => {
     initialCoreCompetencies = [],
     ownerType,
     agentType,
+    onOpenOntologyDrawer,
+    savedRelOntology = [],
+    ontologyBindingMap = {},
   } = props;
 
   const intl = useIntl();
@@ -387,6 +524,10 @@ const ConfigForm = (props) => {
   const [agentTypeOptions, setAgentTypeOptions] = useState([]);
   const [bundledSkillOptions, setBundledSkillOptions] = useState([]);
   const [bundledSkillLoading, setBundledSkillLoading] = useState(false);
+  const ontologySummary = useMemo(
+    () => buildOntologyConfigSummary(savedRelOntology, ontologyBindingMap),
+    [savedRelOntology, ontologyBindingMap]
+  );
   const [bundledSkillModalOpen, setBundledSkillModalOpen] = useState(false);
   const [bundledSkillSearchName, setBundledSkillSearchName] = useState('');
   const formOwnerType = Form.useWatch('ownerType', form, { form, preserve: true });
@@ -2180,7 +2321,7 @@ const ConfigForm = (props) => {
               )}
 
               {/* 配置工具 */}
-              {employeeType !== '006' && (
+              {employeeType !== '006' && employeeType !== '005' && (
                 <div className={styles.skillsSection}>
                   <div className={styles.sectionHeader}>
                     <span className={styles.sectionTitle}>
@@ -2269,6 +2410,117 @@ const ConfigForm = (props) => {
                   </div>
                 </div>
               )}
+
+              {/* 配置本体 */}
+              <div className={styles.skillsSection}>
+                <div className={styles.sectionHeader}>
+                  <span className={styles.sectionTitle}>
+                    {intl.formatMessage({
+                      id: 'employeeDetail.configureOntology',
+                    })}
+                  </span>
+                  <Button
+                    type="link"
+                    size="small"
+                    icon={<PlusOutlined />}
+                    onClick={onOpenOntologyDrawer}
+                    disabled={isReadOnly}
+                  >
+                    {intl.formatMessage({ id: 'employeeDetail.ontology.addOntology' })}
+                  </Button>
+                </div>
+                <Card
+                  className={classnames(styles.configCard, styles.ontologyConfigCard, {
+                    [styles.ontologyEmptyCard]: !ontologySummary.hasBinding,
+                  })}
+                >
+                  <div className={styles.ontologyConfigHeader}>
+                    <div className={styles.ontologyIconBox}>
+                      <AntdIcon type="icon-a-Application-oneyingyong3" />
+                    </div>
+                    <div className={styles.ontologyConfigMain}>
+                      <div className={styles.ontologyConfigTitle}>
+                        {ontologySummary.hasBinding
+                          ? intl.formatMessage(
+                              { id: 'employeeDetail.ontology.boundSummary' },
+                              {
+                                baseCount: ontologySummary.totals.bases,
+                                sceneCount: ontologySummary.totals.scenes,
+                                viewCount: ontologySummary.totals.views,
+                                objectCount: ontologySummary.totals.objects,
+                              }
+                            )
+                          : ontologySummary.isCleared
+                          ? intl.formatMessage({ id: 'employeeDetail.ontology.clearedTitle' })
+                          : intl.formatMessage({ id: 'employeeDetail.ontology.emptyTitle' })}
+                        {ontologySummary.hasPending && (
+                          <Tag className={styles.ontologyStatusTag} color="orange">
+                            {intl.formatMessage({ id: 'employeeDetail.ontology.pendingSave' })}
+                          </Tag>
+                        )}
+                      </div>
+                      <div className={styles.ontologyConfigDesc}>
+                        {ontologySummary.hasBinding
+                          ? intl.formatMessage({ id: 'employeeDetail.ontology.boundTip' })
+                          : ontologySummary.isCleared
+                          ? intl.formatMessage({ id: 'employeeDetail.ontology.clearedDesc' })
+                          : intl.formatMessage({ id: 'employeeDetail.ontology.emptyDesc' })}
+                      </div>
+                      <Space size={6} wrap className={styles.ontologyTypeTags}>
+                        <Tag>{intl.formatMessage({ id: 'employeeDetail.ontology.base' })}</Tag>
+                        <Tag>{intl.formatMessage({ id: 'employeeDetail.ontology.scene' })}</Tag>
+                        <Tag>{intl.formatMessage({ id: 'employeeDetail.ontology.view' })}</Tag>
+                        <Tag>{intl.formatMessage({ id: 'employeeDetail.ontology.object' })}</Tag>
+                      </Space>
+                    </div>
+                  </div>
+                  {ontologySummary.hasBinding && (
+                    <div className={styles.ontologyBaseList}>
+                      {ontologySummary.groups.slice(0, 3).map((group) => (
+                        <div className={styles.ontologyBaseItem} key={group.key}>
+                          <div className={styles.ontologyBaseMeta}>
+                            <div className={styles.ontologyBaseTitle}>
+                              <span>{group.baseName}</span>
+                              <Tag className={styles.ontologyInlineTag}>
+                                {intl.formatMessage({ id: 'employeeDetail.ontology.base' })}
+                              </Tag>
+                              {group.dirty && (
+                                <Tag className={styles.ontologyStatusTag} color="orange">
+                                  {intl.formatMessage({ id: 'employeeDetail.ontology.pendingSave' })}
+                                </Tag>
+                              )}
+                            </div>
+                            <div className={styles.ontologyBaseDesc}>
+                              {group.previewNames.slice(0, 4).join('、') ||
+                                intl.formatMessage({ id: 'employeeDetail.ontology.configureTip' })}
+                            </div>
+                          </div>
+                          <Space size={6} wrap className={styles.ontologyCountTags}>
+                            <Tag>
+                              {intl.formatMessage(
+                                { id: 'employeeDetail.ontology.sceneCount' },
+                                { count: group.scenes.size }
+                              )}
+                            </Tag>
+                            <Tag>
+                              {intl.formatMessage(
+                                { id: 'employeeDetail.ontology.viewCount' },
+                                { count: group.views.size }
+                              )}
+                            </Tag>
+                            <Tag>
+                              {intl.formatMessage(
+                                { id: 'employeeDetail.ontology.objectCount' },
+                                { count: group.objects.size }
+                              )}
+                            </Tag>
+                          </Space>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </Card>
+              </div>
 
               {/* 配置技能 */}
               <div className={styles.skillsSection}>

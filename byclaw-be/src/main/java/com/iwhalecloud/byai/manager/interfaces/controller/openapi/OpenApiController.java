@@ -10,6 +10,8 @@ import com.iwhalecloud.byai.manager.dto.men.Notices;
 import com.iwhalecloud.byai.manager.dto.ontology.OntologyActionSaveRequest;
 import com.iwhalecloud.byai.common.annotation.ManageLogAnnotation;
 import com.iwhalecloud.byai.manager.dto.openapi.MountResourceDto;
+import com.iwhalecloud.byai.manager.dto.openapi.OpenPermissionCheckDto;
+import com.iwhalecloud.byai.manager.dto.openapi.OpenPermissionCheckResultDto;
 import com.iwhalecloud.byai.manager.entity.resource.SsResourceCatalog;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.qo.organization.CatalogQo;
@@ -82,6 +84,30 @@ public class OpenApiController {
         catalogQo.setCatalogType(6);
         List<SsResourceCatalog> catalogs = ssResourceCatalogService.queryCatalogTree(catalogQo);
         return ResponseUtil.successResponse(catalogs);
+    }
+
+    /**
+     * 批量查询当前登录用户是否有指定数字员工的管理权限。
+     *
+     * @return ResponseUtil
+     */
+    @ManageLogAnnotation(name = "API调用", description = "批量查询数字员工管理权限")
+    @PostMapping("/v1/checkDigEmployeeManagePermission")
+    public ResponseUtil<OpenPermissionCheckResultDto> checkDigEmployeeManagePermission(
+        @RequestBody OpenPermissionCheckDto checkDto) {
+        return ResponseUtil.successResponse(openApiApplicationService.checkDigEmployeeManagePermission(checkDto));
+    }
+
+    /**
+     * 批量查询当前登录用户是否有指定资源的使用权限。
+     *
+     * @return ResponseUtil
+     */
+    @ManageLogAnnotation(name = "API调用", description = "批量查询资源使用权限")
+    @PostMapping("/v1/checkResourceUsePermission")
+    public ResponseUtil<OpenPermissionCheckResultDto> checkResourceUsePermission(
+        @RequestBody OpenPermissionCheckDto checkDto) {
+        return ResponseUtil.successResponse(openApiApplicationService.checkResourceUsePermission(checkDto));
     }
 
     /**

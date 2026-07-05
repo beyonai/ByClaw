@@ -1,7 +1,7 @@
 // @ts-nocheck
 import React, { useEffect, useMemo, useState } from 'react';
 import { Button, Drawer, Empty, Spin, Table, Tag } from 'antd';
-import { MessageOutlined, PaperClipOutlined } from '@ant-design/icons';
+import { CloseOutlined, PaperClipOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import useGlobal from '@/hooks/useGlobal';
 import { getOntologySceneDetails, listOntologyScenes } from '@/service/ontology';
@@ -27,12 +27,16 @@ const OntologyNodeDrawer = ({
   node,
   baseId,
   ownerType = 'personal',
+  panel = false,
+  onReference,
   onClose,
 }: {
   open: boolean;
   node: any;
   baseId?: string;
   ownerType?: string;
+  panel?: boolean;
+  onReference?: () => void;
   onClose: () => void;
 }) => {
   const intl = useIntl();
@@ -95,16 +99,12 @@ const OntologyNodeDrawer = ({
 
   // ============ 对话联动 ============
   const insertToChat = () => {
+    if (onReference) {
+      onReference();
+      onClose();
+      return;
+    }
     EventEmitter?.emit('queryInput-set-value', { inputTxt: `@${nodeName} `, isInsert: true });
-    onClose();
-  };
-  const askByNode = () => {
-    let q = '';
-    if (level === 'BASE') q = t('ontologyNode.ask.base', { name: nodeName });
-    else if (level === 'SCENE') q = t('ontologyNode.ask.scene', { name: nodeName });
-    else if (level === 'VIEW') q = t('ontologyNode.ask.view', { name: nodeName });
-    else q = t('ontologyNode.ask.object', { name: nodeName });
-    EventEmitter?.emit('queryInput-set-value', { inputTxt: q, isInsert: false });
     onClose();
   };
 
@@ -277,28 +277,47 @@ const OntologyNodeDrawer = ({
     );
   };
 
+  const footer = (
+    <div className={styles.nodeFooter}>
+      <Button icon={<PaperClipOutlined />} onClick={insertToChat}>
+        {t('ontologyNode.action.reference')}
+      </Button>
+    </div>
+  );
+
+  const content = (
+    <>
+      <div className={styles.panelHeader}>
+        <span className={styles.panelTitle}>{nodeName}</span>
+        {nodeCode && <span className={styles.mono}>{nodeCode}</span>}
+      </div>
+      <Spin spinning={loading}>{renderBody()}</Spin>
+    </>
+  );
+
+  if (panel) {
+    if (!open) return null;
+    return (
+      <div className={styles.nodePanel}>
+        <div className={styles.nodePanelHeader}>
+          <span>{titleByLevel[level] || t('ontologyCenter.detail.title')}</span>
+          <Button type="text" size="small" icon={<CloseOutlined />} onClick={onClose} />
+        </div>
+        <div className={styles.nodePanelBody}>{content}</div>
+        <div className={styles.nodePanelFooter}>{footer}</div>
+      </div>
+    );
+  }
+
   return (
     <Drawer
       width={480}
       open={open}
       onClose={onClose}
       title={titleByLevel[level] || t('ontologyCenter.detail.title')}
-      footer={
-        <div className={styles.nodeFooter}>
-          <Button icon={<PaperClipOutlined />} onClick={insertToChat}>
-            {t('ontologyNode.action.reference')}
-          </Button>
-          <Button type="primary" icon={<MessageOutlined />} onClick={askByNode}>
-            {t('ontologyNode.action.ask')}
-          </Button>
-        </div>
-      }
+      footer={footer}
     >
-      <div className={styles.panelHeader}>
-        <span className={styles.panelTitle}>{nodeName}</span>
-        {nodeCode && <span className={styles.mono}>{nodeCode}</span>}
-      </div>
-      <Spin spinning={loading}>{renderBody()}</Spin>
+      {content}
     </Drawer>
   );
 };

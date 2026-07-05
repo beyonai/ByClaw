@@ -1,6 +1,6 @@
 // @ts-nocheck
 import React from 'react';
-import { Button, Drawer, Empty, Spin, Tree } from 'antd';
+import { Button, Drawer, Empty, Modal, Spin, Tree } from 'antd';
 import { useIntl } from '@umijs/max';
 import { useActiveSiderAgent } from '@/layout/sider/components/ActiveSiderAgentBar';
 import { useOntologyBindTree } from './useOntologyBindTree';
@@ -30,15 +30,34 @@ const BindOntologyDrawer = ({
   const baseName = base?.resourceName || base?.displayName || baseId;
   const baseDesc = base?.resourceDesc || base?.description;
 
-  const { loading, saving, treeData, checkedKeys, onCheck, expandedKeys, setExpandedKeys, save } = useOntologyBindTree({
-    enabled: open,
-    baseId,
-    ownerType,
-    baseName,
-    digitalEmployeeId: activeAgent?.resourceId,
-  });
+  const { loading, saving, treeData, checkedKeys, onCheck, expandedKeys, setExpandedKeys, dirty, isClearing, save } =
+    useOntologyBindTree({
+      enabled: open,
+      baseId,
+      ownerType,
+      baseName,
+      digitalEmployeeId: activeAgent?.resourceId,
+    });
 
   const handleSave = async () => {
+    if (isClearing) {
+      Modal.confirm({
+        title: t('common.confirm'),
+        content: `当前本体资源树选中节点数为 0，将清空该本体在当前数字员工【${
+          activeAgent?.name || ''
+        }】上的绑定，请确认`,
+        okText: t('common.confirm'),
+        cancelText: t('common.cancel'),
+        onOk: async () => {
+          const ok = await save({ confirmClear: true });
+          if (ok) {
+            onSuccess?.();
+            onClose();
+          }
+        },
+      });
+      return;
+    }
     const ok = await save();
     if (ok) {
       onSuccess?.();
@@ -55,7 +74,7 @@ const BindOntologyDrawer = ({
       footer={
         <div className={styles.footer}>
           <Button onClick={onClose}>{t('common.cancel')}</Button>
-          <Button type="primary" loading={saving} onClick={handleSave}>
+          <Button type="primary" loading={saving} disabled={!dirty || loading} onClick={handleSave}>
             {t('common.save')}
           </Button>
         </div>
@@ -70,6 +89,7 @@ const BindOntologyDrawer = ({
       <Spin spinning={loading}>
         {treeData.length ? (
           <Tree
+            className={styles.bindTree}
             checkable
             checkStrictly
             blockNode

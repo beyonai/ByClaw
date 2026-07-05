@@ -91,7 +91,7 @@ type ResourceCardActionConfig = {
   deleteDisabledTip?: React.ReactNode;
   restoreDisabledTip?: React.ReactNode;
   applyDisabledTip?: React.ReactNode;
-  extraMenuItems?: MenuProps['items'];
+  extraMenuItems?: ExtraResourceMenuItem[];
   hiddenMenuItemKeys?: string[];
   onApplyUse?: () => void;
   onAuditUse?: () => void;
@@ -101,6 +101,10 @@ type ResourceCardActionConfig = {
   onEdit?: () => void;
   onApply?: () => void;
   onSetDefault?: () => void;
+};
+
+type ExtraResourceMenuItem = NonNullable<MenuProps['items']>[number] & {
+  visible?: (resource: IResourceCardItem) => boolean;
 };
 
 export type ResourceCardProps = {
@@ -602,9 +606,14 @@ const RenderContent = (props: ResourceCardProps) => {
       });
     }
 
-    // 额外操作（如本体的「绑定本体」）：不受 scene 限制，调用方传了就展示
+    // 额外操作（如本体的「绑定本体」）：调用方可按当前资源权限控制展示。
     if (actionConfig?.extraMenuItems?.length) {
-      items.push(...actionConfig.extraMenuItems);
+      items.push(
+        ...actionConfig.extraMenuItems.filter((item: ExtraResourceMenuItem) => {
+          if (!item) return false;
+          return typeof item.visible === 'function' ? item.visible(resource) : true;
+        })
+      );
     }
 
     const hiddenMenuItemKeySet = new Set(actionConfig?.hiddenMenuItemKeys || []);

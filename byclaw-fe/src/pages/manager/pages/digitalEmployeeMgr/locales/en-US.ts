@@ -106,10 +106,33 @@ export default {
   'employeeDetail.ontology.selectTitle': 'Select Ontology Resource',
   'employeeDetail.ontology.base': 'Ontology Base',
   'employeeDetail.ontology.scene': 'Scene',
+  'employeeDetail.ontology.view': 'View',
+  'employeeDetail.ontology.object': 'Object',
   'employeeDetail.ontology.resource': 'Ontology Resource',
   'employeeDetail.ontology.searchBase': 'Search ontology base',
   'employeeDetail.ontology.searchScene': 'Search scene',
   'employeeDetail.ontology.relation': 'Relation',
+  'employeeDetail.ontology.bound': 'Bound',
+  'employeeDetail.ontology.configureTip':
+    'Select ontology bases, scenes, views, and objects that you can use. They will be bound after the digital employee is saved.',
+  'employeeDetail.ontology.emptyTitle': 'No ontology resources bound',
+  'employeeDetail.ontology.emptyDesc':
+    'Bind ontology bases, scenes, views, and objects you can use. Changes take effect after saving the digital employee.',
+  'employeeDetail.ontology.boundSummary':
+    '{baseCount} bases, {sceneCount} scenes, {viewCount} views, and {objectCount} objects bound',
+  'employeeDetail.ontology.boundTip':
+    'Ontology resources will sync to dialogue reference capability after the digital employee is saved.',
+  'employeeDetail.ontology.pendingSave': 'Pending save',
+  'employeeDetail.ontology.addOntology': 'Add ontology',
+  'employeeDetail.ontology.manage': 'Manage',
+  'employeeDetail.ontology.reselect': 'Select again',
+  'employeeDetail.ontology.clearedTitle': 'Ontology binding cleared',
+  'employeeDetail.ontology.clearedDesc': 'Saving the digital employee will clear its ontology bindings.',
+  'employeeDetail.ontology.sceneCount': 'Scenes {count}',
+  'employeeDetail.ontology.viewCount': 'Views {count}',
+  'employeeDetail.ontology.objectCount': 'Objects {count}',
+  'employeeDetail.ontology.saveFailed':
+    'The digital employee was saved, but ontology binding failed. Please configure ontology again.',
   'employeeDetail.qaKnowledge': 'Q&A Knowledge Base',
   'employeeDetail.documentKnowledge': 'Document Knowledge Base',
   'employeeDetail.tagSearchPlaceholder': 'Add tags, press Enter to complete',

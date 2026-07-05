@@ -4,6 +4,7 @@
 运行方式：
     /usr/local/bin/python3 /by/.openclaw/workspace-baiying-agent-10002029/skills/structured-ontology-manager/test_view_relations.py
 """
+
 from __future__ import annotations
 
 import os
@@ -14,8 +15,8 @@ from pathlib import Path
 
 sys.path.insert(0, "/tmp/ont_env/lib/python3.12/site-packages")
 
+from datacloud_knowledge.ingestion.ontology_build import _pack_zip
 from datacloud_knowledge.ingestion.owl_generate.generator import generate_from_definition
-from datacloud_knowledge.ingestion.ontology_build import _pack_zip  # noqa: PLC2701
 
 state = {
     "view_code": "pv_v_order_product_view_0027024630_f65fd2",
@@ -32,12 +33,30 @@ state = {
         }
     ],
     "fields": [
-        {"property_code": "product_code", "property_name": "产品编码", "data_type": "STRING",
-         "ext_property": {"property_role_rule": {"property_role": "DIMENSION", "rule_type": "name"}}},
-        {"property_code": "order_code", "property_name": "订单编码", "data_type": "STRING",
-         "ext_property": {"property_role_rule": {"property_role": "DIMENSION", "rule_type": "name"}}},
-        {"property_code": "total_amount", "property_name": "总金额", "data_type": "DOUBLE",
-         "ext_property": {"property_role_rule": {"property_role": "MEASURE", "rule_type": "amount"}}},
+        {
+            "property_code": "product_code",
+            "property_name": "产品编码",
+            "data_type": "STRING",
+            "ext_property": {
+                "property_role_rule": {"property_role": "DIMENSION", "rule_type": "name"}
+            },
+        },
+        {
+            "property_code": "order_code",
+            "property_name": "订单编码",
+            "data_type": "STRING",
+            "ext_property": {
+                "property_role_rule": {"property_role": "DIMENSION", "rule_type": "name"}
+            },
+        },
+        {
+            "property_code": "total_amount",
+            "property_name": "总金额",
+            "data_type": "DOUBLE",
+            "ext_property": {
+                "property_role_rule": {"property_role": "MEASURE", "rule_type": "amount"}
+            },
+        },
     ],
     "library_code": "PERSONAL_LIB",
     "domain_code": "PERSONAL_DOMAIN",
@@ -81,8 +100,7 @@ if not token:
     sys.exit(0)
 
 print("\n[4] 上传...")
-import httpx  # noqa: E402
-from datacloud_knowledge.ingestion.ontology_build import _import_view_zip  # noqa: PLC2701, E402
+from datacloud_knowledge.ingestion.ontology_build import _import_view_zip
 
 result = _import_view_zip(zip_path, token)
 print(f"    结果: {result}")
