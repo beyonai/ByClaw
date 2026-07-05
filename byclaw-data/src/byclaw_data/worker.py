@@ -1600,6 +1600,16 @@ class DataCloudWorker(GatewayWorker):
         from datacloud_platform import get_platform  # noqa: PLC0415
         from datacloud_platform.config import get_settings  # noqa: PLC0415
 
+        # 在 get_platform() 初始化单例之前注入 ByclawResultFileStorage。
+        # loader_runtime._configure_runtime_services() 在 platform 初始化时执行
+        # `from datacloud_platform.platform_file_storage import build_result_file_storage`，
+        # 必须在此之前完成 monkey-patch，否则拿到的是默认的 LocalResultFileStorage。
+        import datacloud_platform.platform_file_storage as _pf_storage  # noqa: PLC0415
+        from byclaw_data.platform.result_file_storage import (  # noqa: PLC0415
+            build_result_file_storage as _byclaw_build_result_file_storage,
+        )
+        _pf_storage.build_result_file_storage = _byclaw_build_result_file_storage
+
         self._runtime_manager = LoaderRuntimeManager(
             platform=get_platform(),
             settings=get_settings(),

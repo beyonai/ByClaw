@@ -29,16 +29,18 @@ def create_app(**kwargs):
 
     normalize_runtime_environment()
 
-    from datacloud_platform import get_platform
-    from datacloud_platform.api.server import create_app as create_platform_app
-
-    platform = get_platform()
-
-    # Inject ByClaw result_file_storage before creating app
+    # Inject ByClaw result_file_storage BEFORE get_platform() initialises the singleton.
+    # loader_runtime._configure_runtime_services() reads build_result_file_storage at
+    # platform-init time, so the override must be in place before that call.
     import datacloud_platform.platform_file_storage as pf_storage
     from byclaw_data.platform.result_file_storage import build_result_file_storage
 
     pf_storage.build_result_file_storage = build_result_file_storage
+
+    from datacloud_platform import get_platform
+    from datacloud_platform.api.server import create_app as create_platform_app
+
+    platform = get_platform()
 
     app = create_platform_app(platform, **kwargs)
     _wrap_lifespan_with_discovery(app)
