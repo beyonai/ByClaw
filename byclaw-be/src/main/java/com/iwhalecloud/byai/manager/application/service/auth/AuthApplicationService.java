@@ -2269,6 +2269,7 @@ public class AuthApplicationService {
                 blackMap.putIfAbsent(grantTargetKey, authDTO);
             }
         }
+        appendCreatorAuthDetail(authDetailQo, redMap);
 
         // 返回授权信息
         Map<String, Object> resultMap = new HashMap<>(5);
@@ -2276,6 +2277,33 @@ public class AuthApplicationService {
         resultMap.put("redList", new ArrayList<>(redMap.values()));
         resultMap.put("blackList", new ArrayList<>(blackMap.values()));
         return ResponseUtil.successResponse(I18nUtil.get("auth.detail.query.success"), resultMap);
+    }
+
+    /**
+     * 资源创建人天然拥有资源管理/使用语义。老授权抽屉只查显式授权记录，
+     * 这里补齐展示口径，避免历史资源或未落默认授权的资源显示为空。
+     */
+    private void appendCreatorAuthDetail(AuthDetailQo authDetailQo, Map<String, AuthDTO> redMap) {
+        if (authDetailQo == null || redMap == null || !isCreatorDefaultPrivilegeGrantType(authDetailQo.getGrantType())) {
+            return;
+        }
+        SsResource ssResource = ssResourceService.findById(authDetailQo.getGrantObjId());
+        if (ssResource == null || ssResource.getCreateBy() == null) {
+            return;
+        }
+        AuthDTO creatorAuth = new AuthDTO();
+        creatorAuth.setGrantToObjId(ssResource.getCreateBy());
+        creatorAuth.setGrantToObjType(GrantToObjType.USER);
+        creatorAuth.setGrantToObjName(getName(GrantToObjType.USER, ssResource.getCreateBy()));
+        creatorAuth.setGrantType(authDetailQo.getGrantType());
+        String creatorKey = buildGrantTargetKey(Color.RED, GrantToObjType.USER, ssResource.getCreateBy());
+        redMap.putIfAbsent(creatorKey, creatorAuth);
+    }
+
+    private boolean isCreatorDefaultPrivilegeGrantType(String grantType) {
+        return GrantType.ALLOW_MANAGE.equals(grantType)
+            || GrantType.FORCE_USE.equals(grantType)
+            || GrantType.AVAILABLE_USE.equals(grantType);
     }
 
     private String buildGrantTargetKey(String grantToType, String grantToObjType, Long grantToObjId) {

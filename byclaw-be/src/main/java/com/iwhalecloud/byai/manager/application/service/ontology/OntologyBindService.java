@@ -27,6 +27,7 @@ import com.iwhalecloud.byai.manager.vo.auth.ResourceAuthVo;
 import com.iwhalecloud.byai.common.page.PageInfo;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -133,7 +134,8 @@ public class OntologyBindService {
         if (nodes.isEmpty() && !Boolean.TRUE.equals(req.getConfirmClear())) {
             throw new BaseException("当前本体资源树选中节点数为0，请确认清空操作后再保存");
         }
-        nodes = ontologyResourceValidityService.filterExistingBindNodes(baseId, ownerType, nodes);
+        // 绑定入参来自 datacloud 实时树，不能在这里再按列表接口静默裁剪；
+        // 否则接口字段/口径差异会把用户刚选择的节点过滤掉，导致关系没有真正写入。
         for (OntologyBindNode node : nodes) {
             String level = StringUtils.defaultString(node.getLevel());
             switch (level) {
@@ -234,7 +236,22 @@ public class OntologyBindService {
         wrapper.eq(SsResource::getResourceBizType, BIZ_BASE);
         wrapper.in(SsResource::getResourceCode, baseCodes);
         List<SsResource> bases = ssResourceMapper.selectList(wrapper);
-        return bases == null ? new ArrayList<>() : bases;
+        bases = ontologyResourceValidityService.filterValidOntologyResources(bases == null ? new ArrayList<>() : bases);
+        return distinctBasesByCode(bases);
+    }
+
+    private List<SsResource> distinctBasesByCode(List<SsResource> bases) {
+        if (bases == null || bases.isEmpty()) {
+            return new ArrayList<>();
+        }
+        Map<String, SsResource> byCode = new LinkedHashMap<>();
+        for (SsResource base : bases) {
+            if (base == null || StringUtils.isBlank(base.getResourceCode())) {
+                continue;
+            }
+            byCode.putIfAbsent(base.getResourceCode(), base);
+        }
+        return new ArrayList<>(byCode.values());
     }
 
     private boolean isOntologyBiz(String biz) {

@@ -6,7 +6,6 @@ import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.common.feign.client.FeignDataCloudService;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
-import com.iwhalecloud.byai.manager.dto.ontology.OntologyBindNode;
 import com.iwhalecloud.byai.manager.entity.ontology.SsResExtOntology;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.mapper.ontology.SsResExtOntologyMapper;
@@ -45,11 +44,6 @@ public class OntologyResourceValidityService {
     private static final String BIZ_SCENE = "SCENE";
     private static final String BIZ_VIEW = "VIEW";
     private static final String BIZ_OBJECT = "OBJECT";
-    private static final String LEVEL_BASE = "BASE";
-    private static final String LEVEL_SCENE = "SCENE";
-    private static final String LEVEL_VIEW = "VIEW";
-    private static final String LEVEL_OBJECT_IN_SCENE = "OBJECT_IN_SCENE";
-    private static final String LEVEL_OBJECT_IN_VIEW = "OBJECT_IN_VIEW";
     private static final String INVALID_DESC_MARKER = "[本体资源失效：byclaw-data已找不到该资源]";
 
     @Autowired
@@ -67,52 +61,17 @@ public class OntologyResourceValidityService {
         }
         ValidationContext context = new ValidationContext(resources);
         return resources.stream().filter(resource -> !isOntologyBiz(resource.getResourceBizType())
-            || validateAndInvalidate(resource, context)).collect(Collectors.toList());
+            || (isListed(resource) && validateAndInvalidate(resource, context))).collect(Collectors.toList());
     }
 
     public boolean validateAndInvalidate(SsResource resource) {
         if (resource == null || !isOntologyBiz(resource.getResourceBizType())) {
             return true;
         }
-        return validateAndInvalidate(resource, new ValidationContext(List.of(resource)));
-    }
-
-    public List<OntologyBindNode> filterExistingBindNodes(String baseId, String ownerType, List<OntologyBindNode> nodes) {
-        if (CollectionUtils.isEmpty(nodes)) {
-            return nodes == null ? Collections.emptyList() : nodes;
-        }
-        ValidationContext context = new ValidationContext(Collections.emptyList());
-        return nodes.stream().filter(node -> bindNodeExists(baseId, ownerType, node, context)).collect(Collectors.toList());
-    }
-
-    private boolean bindNodeExists(String baseId, String ownerType, OntologyBindNode node, ValidationContext context) {
-        if (node == null) {
+        if (!isListed(resource)) {
             return false;
         }
-        String level = StringUtils.defaultString(node.getLevel());
-        Boolean exists;
-        switch (level) {
-            case LEVEL_BASE:
-                exists = existsInDataCloud(new ValidationTarget(BIZ_BASE, baseId, baseId, ownerType,
-                    StringUtils.isNotBlank(baseId)), context);
-                break;
-            case LEVEL_SCENE:
-                exists = existsInDataCloud(new ValidationTarget(BIZ_SCENE, baseId, node.getSceneId(), ownerType,
-                    StringUtils.isNotBlank(baseId) && StringUtils.isNotBlank(node.getSceneId())), context);
-                break;
-            case LEVEL_VIEW:
-                exists = existsInDataCloud(new ValidationTarget(BIZ_VIEW, baseId, node.getViewCode(), ownerType,
-                    StringUtils.isNotBlank(baseId) && StringUtils.isNotBlank(node.getViewCode())), context);
-                break;
-            case LEVEL_OBJECT_IN_SCENE:
-            case LEVEL_OBJECT_IN_VIEW:
-                exists = existsInDataCloud(new ValidationTarget(BIZ_OBJECT, baseId, node.getObjectCode(), ownerType,
-                    StringUtils.isNotBlank(baseId) && StringUtils.isNotBlank(node.getObjectCode())), context);
-                break;
-            default:
-                return true;
-        }
-        return exists == null || exists;
+        return validateAndInvalidate(resource, new ValidationContext(List.of(resource)));
     }
 
     private boolean validateAndInvalidate(SsResource resource, ValidationContext context) {
@@ -195,6 +154,10 @@ public class OntologyResourceValidityService {
             || BIZ_OBJECT.equals(bizType);
     }
 
+    private boolean isListed(SsResource resource) {
+        return resource != null && Objects.equals(resource.getResourceStatus(), ResourceStatus.LIST.getNum());
+    }
+
     private JSONObject parseMeta(String content) {
         if (StringUtils.isBlank(content)) {
             return new JSONObject();
@@ -261,11 +224,11 @@ public class OntologyResourceValidityService {
         }
 
         private Set<String> loadBaseCodes(String ownerType) {
-            String key = StringUtils.defaultString(ownerType);
+            String key = "ALL";
             if (baseCodesByOwnerType.containsKey(key)) {
                 return baseCodesByOwnerType.get(key);
             }
-            JSONArray bases = feignDataCloudService.listOntologyBases(ownerType, null);
+            JSONArray bases = feignDataCloudService.listOntologyBases(null, null);
             Set<String> codes = codeSet(bases, "baseId", "base_id", "resourceCode", "resource_code", "code", "id");
             baseCodesByOwnerType.put(key, codes);
             return codes;
