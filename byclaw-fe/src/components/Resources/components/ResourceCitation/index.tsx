@@ -21,7 +21,7 @@ import {
   readFile,
   downloadSkillZip,
 } from '@/pages/manager/service/resources';
-import { mapWorkspaceSkillRows } from '@/components/Resources/workspaceSkill/utils';
+import { mapWorkspaceSkillRows, isWorkspaceSkill } from '@/components/Resources/workspaceSkill/utils';
 import useGlobal from '@/hooks/useGlobal';
 
 const Draggable = withDrag(DragType.tool);
@@ -458,21 +458,30 @@ const ResourceList = (props: Props) => {
   // 处理技能下载（带防抖）
   const handleDownloadSkill = useMemo(() => {
     const download = async (item: IResourceItem) => {
-      const skillPath = item.skillUrl || item.skillPath;
-      if (!skillPath) {
+      // 资源化（已绑定）技能与用户开发（工作空间未绑定）技能的存储路径命名空间不同：
+      // - 资源化技能：按 skillId 走资源包下载；
+      // - 工作空间技能：按 skillPath 打包 /.openclaw/workspace-baiying-agent-{resourceId}/skills 下的目录。
+      // 不能都塞进 skillPath，否则工作空间技能会命中资源下载校验而报错。
+      const workspace = isWorkspaceSkill(item as any);
+      if (workspace ? !item.skillPath : !item.resourceId) {
         message.error(intl.formatMessage({ id: 'resource.skillDownload.noSkillPath' }));
         return;
       }
-      setDownloadingSkill(skillPath);
+      setDownloadingSkill(`${workspace ? item.skillPath : item.resourceId}`);
 
       try {
-        const params: { skillPath: string; resourceId?: string | number; userCode?: string } = { skillPath };
-        if (normalizedAgentId) {
-          params.resourceId = normalizedAgentId;
-        }
-        if (userInfo?.userCode) {
-          params.userCode = userInfo.userCode;
-        }
+        const params: {
+          skillPath?: string;
+          skillId?: string | number;
+          resourceId?: string | number;
+          userCode?: string;
+        } = workspace
+          ? {
+            skillPath: item.skillPath as string,
+            ...(normalizedAgentId ? { resourceId: normalizedAgentId } : {}),
+            ...(userInfo?.userCode ? { userCode: userInfo.userCode } : {}),
+          }
+          : { skillId: item.resourceId };
 
         const response = await downloadSkillZip(params);
 

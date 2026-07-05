@@ -29,7 +29,6 @@
   padding: 14px 16px;
   border: 0.5px solid rgba(0, 0, 0, 0.1);
   border-radius: 12px;
-  margin-bottom: 14px;
 
   .headerIcon {
     width: 48px;
@@ -45,6 +44,19 @@
   .headerMain {
     flex: 1;
     min-width: 0;
+  }
+
+  .headerSelectors {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+
+  .headerSelect {
+    width: 180px;
+    flex: 0 1 180px;
   }
 
   .headerName {
@@ -328,4 +340,398 @@
   font-size: 13px;
   color: #999;
   margin-top: 8px;
+}
+
+.headerNameRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.spinFill {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+
+  :global(.beyond-spin-container) {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+}
+
+.detailBody {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding-bottom: 4px;
+}
+
+.detailBodyLoading {
+  min-height: 240px;
+}
+
+.resourceSection {
+  margin-bottom: 14px;
+}
+
+.resourceSectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.resourceSectionTitle {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 15px;
+  font-weight: 600;
+  color: #1d2129;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sectionMoreButton {
+  padding: 0;
+  height: auto;
+  font-size: 13px;
+}
+
+.resourceContentTabs {
+  :global {
+    .@{antPrefix}-tabs-nav {
+      margin-bottom: 12px;
+    }
+
+    .@{antPrefix}-tabs-tab {
+      font-size: 18px;
+    }
+
+    .@{antPrefix}-tabs-content-holder {
+      padding: 14px;
+      border: 0.5px solid rgba(0, 0, 0, 0.08);
+      border-radius: 12px;
+      background: #fff;
+    }
+  }
+}
+
+.distributionToolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+
+.insightGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.insightPanel {
+  min-width: 0;
+  padding: 14px;
+  border: 0.5px solid rgba(0, 0, 0, 0.08);
+  border-radius: 12px;
+  background: #fff;
+}
+
+.sectionTitle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #1d2129;
+}
+
+.sectionInfoIcon {
+  color: #86909c;
+  font-size: 15px;
+  cursor: help;
+  flex: 0 0 auto;
+
+  &:hover {
+    color: #1d6df2;
+  }
+}
+
+.distributionList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.distributionRow {
+  min-width: 0;
+  border-radius: 8px;
+  padding: 4px 0;
+}
+
+.distributionRowClickable {
+  cursor: pointer;
+  transition: background 0.16s ease, padding 0.16s ease;
+
+  &:hover,
+  &:focus {
+    background: rgba(29, 109, 242, 0.06);
+    outline: none;
+    padding-right: 8px;
+    padding-left: 8px;
+  }
+}
+
+.distributionMeta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+.distributionName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #4e5969;
+  font-size: 13px;
+}
+
+.distributionValue {
+  flex: 0 0 auto;
+  color: #1d2129;
+  font-weight: 500;
+  font-size: 13px;
+}
+
+.distributionTrack {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(29, 109, 242, 0.08);
+}
+
+.distributionBar {
+  height: 100%;
+  border-radius: inherit;
+  background: #1d6df2;
+}
+
+.detailTabs {
+  padding: 2px 14px 14px;
+  border: 0.5px solid rgba(0, 0, 0, 0.08);
+  border-radius: 12px;
+  background: #fff;
+
+  :global {
+    .@{antPrefix}-tabs-extra-content {
+      display: flex;
+      align-items: center;
+      margin-left: 12px;
+    }
+  }
+}
+
+.detailTabsEmbedded {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.drillPanel {
+  padding: 14px;
+  border: 0.5px solid rgba(29, 109, 242, 0.14);
+  border-radius: 12px;
+  background: #fff;
+}
+
+.drillHeaderActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.drillSummary {
+  margin-bottom: 10px;
+  color: #4e5969;
+  font-size: 13px;
+}
+
+.searchInput {
+  width: 240px;
+}
+
+.detailTabTools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tableName {
+  min-width: 0;
+  color: #1d2129;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mono {
+  font-family: 'SFMono-Regular', Consolas, Menlo, monospace;
+  color: #86909c;
+  font-size: 12px;
+}
+
+.cardinalityTag {
+  max-width: 108px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+}
+
+.operationActions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.referenceTableWrap {
+  min-width: 0;
+}
+
+.relationPanel {
+  min-width: 0;
+}
+
+.relationPanelToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.relationGraphTools {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 24px;
+}
+
+.relationGraphWrap {
+  width: 100%;
+  max-height: 560px;
+  overflow: auto;
+  border-radius: 18px;
+  border: 0.5px solid rgba(29, 109, 242, 0.14);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(242, 247, 255, 0.96));
+}
+
+.relationGraph {
+  display: block;
+  max-width: none;
+}
+
+.relationGraphBg {
+  fill: #f8fbff;
+}
+
+.relationGraphGrid {
+  fill: none;
+  stroke: rgba(29, 109, 242, 0.07);
+  stroke-width: 1;
+}
+
+.relationGraphLine {
+  fill: none;
+  stroke: url('#relationLineGradient');
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  opacity: 0.9;
+}
+
+.relationGraphArrowHead {
+  fill: #8b5cf6;
+}
+
+.relationGraphDot {
+  fill: #fff;
+  stroke: #1d6df2;
+  stroke-width: 2;
+}
+
+.graphNodeCard {
+  fill: rgba(255, 255, 255, 0.94);
+  stroke: rgba(29, 109, 242, 0.22);
+  stroke-width: 1;
+}
+
+.graphNodeName {
+  font-size: 14px;
+  font-weight: 600;
+  fill: #1d2129;
+}
+
+.graphNodeCode {
+  font-size: 11px;
+  fill: #6b7280;
+  font-family: 'SFMono-Regular', Consolas, Menlo, monospace;
+}
+
+.graphRelationCard {
+  fill: url('#relationCardGradient');
+}
+
+.graphRelationName {
+  font-size: 14px;
+  font-weight: 700;
+  fill: #fff;
+}
+
+.graphCardinality {
+  fill: rgba(255, 255, 255, 0.22);
+  stroke: rgba(255, 255, 255, 0.35);
+}
+
+.graphCardinalityText {
+  font-size: 11px;
+  font-weight: 600;
+  fill: #fff;
+  letter-spacing: 0;
+}
+
+@media (max-width: 960px) {
+  .insightGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .searchInput {
+    width: 100%;
+  }
+
+  .header {
+    align-items: flex-start;
+    flex-wrap: wrap;
+
+    .headerSelectors {
+      order: 3;
+      width: 100%;
+    }
+
+    .headerSelect {
+      flex: 1;
+      min-width: 0;
+    }
+  }
 }

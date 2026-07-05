@@ -13,8 +13,10 @@ import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceBizTypeEnum;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus;
 import com.iwhalecloud.byai.manager.dto.digitemploy.SsResourceDTO;
 import com.iwhalecloud.byai.manager.dto.resource.ResourceQueryRequest;
+import com.iwhalecloud.byai.manager.entity.ontology.SsResExtOntology;
 import com.iwhalecloud.byai.manager.entity.resource.SsResExtDigEmployee;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
+import com.iwhalecloud.byai.manager.mapper.ontology.SsResExtOntologyMapper;
 import com.iwhalecloud.byai.manager.mapper.resource.SsResExtDigEmployeeMapper;
 import com.iwhalecloud.byai.manager.mapper.resource.SsResourceMapper;
 import com.iwhalecloud.byai.common.page.PageInfo;
@@ -25,6 +27,7 @@ import java.util.Collections;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 import com.iwhalecloud.byai.manager.qo.resource.DirAndFileQo;
 import com.iwhalecloud.byai.manager.qo.resource.ResourceQo;
 import com.iwhalecloud.byai.manager.vo.resource.DirAndFileVo;
@@ -34,6 +37,7 @@ import com.iwhalecloud.byai.state.domain.resource.vo.DatasetVo;
 import com.iwhalecloud.byai.common.util.PageHelperUtil;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import org.apache.commons.collections.MapUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -56,6 +60,10 @@ public class SsResourceService {
     /** 数字员工扩展表 Mapper */
     @Autowired
     private SsResExtDigEmployeeMapper ssResExtDigEmployeeMapper;
+
+    /** 本体资源扩展表 Mapper */
+    @Autowired
+    private SsResExtOntologyMapper ssResExtOntologyMapper;
 
     /**
      * 按条件分页查询文档库（数据集）列表
@@ -174,6 +182,39 @@ public class SsResourceService {
             queryWrapper.eq(SsResource::getResourceCode, resourceCode);
         }
         return ssResourceMapper.selectOne(queryWrapper);
+    }
+
+    /**
+     * 按资源编码、资源类型、本体库编码查询资源。
+     *
+     * <p>本体类子资源（SCENE/VIEW/OBJECT）的编码只在所属本体库内唯一，调用方应传
+     * ontologyBaseCode，经 ss_res_ext_ontology.pid 缩小范围后再匹配 ss_resource。
+     *
+     * @param resourceCode 资源编码
+     * @param resourceBizType 资源业务类型
+     * @param ontologyBaseCode 所属本体库编码，可空
+     * @return 匹配资源列表
+     */
+    public List<SsResource> findByCodeAndBizTypeAndOntologyBaseCode(String resourceCode, String resourceBizType,
+        String ontologyBaseCode) {
+        if (StringUtil.isEmpty(resourceCode) || StringUtil.isEmpty(resourceBizType)) {
+            return Collections.emptyList();
+        }
+
+        LambdaQueryWrapper<SsResource> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.eq(SsResource::getResourceCode, resourceCode);
+        queryWrapper.eq(SsResource::getResourceBizType, resourceBizType);
+
+        if (StringUtils.isNotBlank(ontologyBaseCode)) {
+            List<SsResExtOntology> exts = ssResExtOntologyMapper.selectByPid(ontologyBaseCode);
+            if (ListUtil.isEmpty(exts)) {
+                return Collections.emptyList();
+            }
+            List<Long> resourceIds = exts.stream().map(SsResExtOntology::getResourceId).collect(Collectors.toList());
+            queryWrapper.in(SsResource::getResourceId, resourceIds);
+        }
+
+        return ssResourceMapper.selectList(queryWrapper);
     }
 
     /**

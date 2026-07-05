@@ -70,6 +70,7 @@ const BindOntologyDrawer = ({
       <Spin spinning={loading}>
         {treeData.length ? (
           <Tree
+            className={styles.bindTree}
             checkable
             checkStrictly
             blockNode

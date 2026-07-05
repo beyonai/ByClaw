@@ -4,10 +4,12 @@ import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.iwhalecloud.byai.common.constants.resource.OwnerType;
 import com.iwhalecloud.byai.common.constants.resource.ResourceBizType;
 import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.feign.client.FeignDataCloudService;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
+import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.dto.ontology.OntologyBaseRegisterRequest;
@@ -63,6 +65,9 @@ public class OntologyBaseService {
 
     @Autowired
     private SsResourceService ssResourceService;
+
+    @Autowired
+    private AuthApplicationService authApplicationService;
 
     /**
      * 本体库列表（转发 datacloud）。注意：datacloud listOntologyBases 响应不含 ownerType 字段，
@@ -492,7 +497,15 @@ public class OntologyBaseService {
             ext.setTargetContent(JSON.toJSONString(detail));
         }
         ssResExtOntologyMapper.insert(ext);
+        initializePersonalOntologyPrivileges(saved, ownerType);
         return saved;
+    }
+
+    private void initializePersonalOntologyPrivileges(SsResource resource, String ownerType) {
+        if (resource == null || !OwnerType.PERSONAL.equals(ownerType)) {
+            return;
+        }
+        authApplicationService.ensureCreatorDefaultPrivileges(resource);
     }
 
     /** 注销本体库：调 datacloud 删除，并级联清理 ss_resource 子树及扩展表。 */
