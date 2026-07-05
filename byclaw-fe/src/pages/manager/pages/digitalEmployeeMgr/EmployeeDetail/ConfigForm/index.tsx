@@ -163,11 +163,8 @@ const addUniqueName = (list: string[], value: any) => {
 
 const ontologyBaseIdentity = (baseId: any, baseName?: any) => `${baseId || baseName || ''}`;
 
-const ontologyBaseKey = (baseId: any, baseName: any, ownerType?: string) =>
-  ownerType ? `${ownerType}:${ontologyBaseIdentity(baseId, baseName)}` : ontologyBaseIdentity(baseId, baseName);
-
 const createOntologySummaryGroup = (baseId: any, baseName: any, ownerType?: string) => ({
-  key: ontologyBaseKey(baseId, baseName, ownerType),
+  key: ontologyBaseIdentity(baseId, baseName),
   identity: ontologyBaseIdentity(baseId, baseName),
   baseId,
   baseName: baseName || baseId || '',
@@ -212,11 +209,14 @@ const buildOntologyGroupFromSavedRows = (rows: any[]) => {
       (row?.resourceBizType === 'ONTOLOGY_BASE' ? row?.resourceName : '') ||
       baseId;
     if (!baseId && !baseName) return;
-    const key = ontologyBaseKey(baseId, baseName, row?.ownerType);
+    const key = ontologyBaseIdentity(baseId, baseName);
     if (!groups.has(key)) {
       groups.set(key, createOntologySummaryGroup(baseId, baseName, row?.ownerType));
     }
     const group = groups.get(key);
+    group.baseId = group.baseId || baseId;
+    group.baseName = group.baseName === group.baseId && baseName ? baseName : group.baseName || baseName;
+    group.ownerType = group.ownerType || row?.ownerType;
     const bizType = `${row?.resourceBizType || row?.level || ''}`.toUpperCase();
     if (bizType === 'SCENE' || row?.sceneId) {
       group.scenes.add(`${row?.sceneId || row?.sceneName || row?.resourceCode || ''}`);
@@ -241,11 +241,6 @@ const buildOntologyConfigSummary = (savedRelOntology: any, ontologyBindingMap: a
     .forEach((binding: any) => {
       if (!binding?.baseId && !binding?.baseName) return;
       const group = buildOntologyGroupFromBinding(binding);
-      Array.from(savedGroups.entries()).forEach(([key, savedGroup]: any) => {
-        if (savedGroup?.identity === group.identity && key !== group.key) {
-          savedGroups.delete(key);
-        }
-      });
       savedGroups.set(group.key, group);
     });
   const allGroups = Array.from(savedGroups.values());

@@ -10,6 +10,7 @@ export const SNAPSHOT_PREFIX_BY_FOLDER: Record<string, readonly string[]> = {
   toolkit: ["TOOLKIT"],
   tool: ["TOOL"],
   mcp: ["MCP"],
+  scene: ["SCENE"],
   object: ["OBJECT"],
   view: ["VIEW"],
   doc: ["KG_DOC", "KG_DB", "KG_QA"],
@@ -30,6 +31,7 @@ export function normalizeResourceType(resourceType: unknown): string {
   if (normalized === "TOOLKIT") return "toolkit";
   if (normalized === "TOOL") return "tool";
   if (normalized === "MCP") return "mcp";
+  if (normalized === "SCENE") return "scene";
   if (normalized === "OBJECT") return "object";
   if (normalized === "VIEW") return "view";
   return normalized.toLowerCase();

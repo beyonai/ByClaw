@@ -309,11 +309,11 @@ public class OpenApiApplicationService {
 
     private SsResource ensureMountOntologyChildResource(String resourceBizType, String ontologyBaseCode,
         String resourceCode) {
-        if (!isCurrentUserCreatedOntologyChildResource(resourceBizType, ontologyBaseCode)) {
+        SsResource baseResource = findAccessibleOntologyBaseResource(resourceBizType, ontologyBaseCode);
+        if (baseResource == null) {
             return null;
         }
-        return ontologyBaseService.ensureCurrentUserOntologyChildResource(resourceBizType, ontologyBaseCode,
-            resourceCode);
+        return ontologyBaseService.ensureOntologyChildResource(baseResource, resourceBizType, resourceCode);
     }
 
     private void validateMountPermission(SsResource agentResource, SsResource relSsResource) {
@@ -367,7 +367,7 @@ public class OpenApiApplicationService {
                 resourceBizType, ontologyBaseCode);
             resources = ontologyResourceValidityService.filterValidOntologyResources(resources);
             if (CollectionUtils.isEmpty(resources)) {
-                if (isCurrentUserCreatedOntologyChildResource(resourceBizType, ontologyBaseCode)) {
+                if (findAccessibleOntologyBaseResource(resourceBizType, ontologyBaseCode) != null) {
                     items.add(buildVirtualOntologyChildPermissionItem(resourceCode, resourceBizType, ontologyBaseCode));
                     continue;
                 }
@@ -391,22 +391,31 @@ public class OpenApiApplicationService {
 
     /**
      * 本体场景/视图/对象可能仅存在于 byclaw-datacloud，尚未快照为 ss_resource。
-     * 若其所属本体库是当前用户创建的，则当前用户天然具备使用权限。
+     * 若当前用户对所属本体库有管理或使用权限，则允许按需创建门户资源索引。
      */
-    private boolean isCurrentUserCreatedOntologyChildResource(String resourceBizType, String ontologyBaseCode) {
+    private SsResource findAccessibleOntologyBaseResource(String resourceBizType, String ontologyBaseCode) {
         if (!isOntologyChildBizType(resourceBizType) || StringUtils.isBlank(ontologyBaseCode)) {
-            return false;
-        }
-        Long currentUserId = CurrentUserHolder.getCurrentUserId();
-        if (currentUserId == null) {
-            return false;
+            return null;
         }
         List<SsResource> bases = ssResourceService.findByCodeAndBizTypeAndOntologyBaseCode(ontologyBaseCode,
             ResourceBizTypeEnum.ONTOLOGY_BASE.name(), null);
         if (CollectionUtils.isEmpty(bases)) {
-            return false;
+            return null;
         }
-        return bases.stream().anyMatch(base -> currentUserId.equals(base.getCreateBy()));
+        bases = ontologyResourceValidityService.filterValidOntologyResources(bases);
+        List<SsResource> accessibleBases = new ArrayList<>();
+        for (SsResource base : bases) {
+            if (authApplicationService.hasResourceAccessPermission(base)) {
+                accessibleBases.add(base);
+            }
+        }
+        if (accessibleBases.isEmpty()) {
+            return null;
+        }
+        if (accessibleBases.size() > 1) {
+            throw new BaseRuntimeException(I18nUtil.get("openapi.resource.code.not.unique"));
+        }
+        return accessibleBases.get(0);
     }
 
     private List<OpenPermissionCheckDto.ResourceCodeRef> buildResourceCodeRefs(OpenPermissionCheckDto checkDto) {

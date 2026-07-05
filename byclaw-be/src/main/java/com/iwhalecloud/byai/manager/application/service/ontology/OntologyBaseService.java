@@ -10,6 +10,7 @@ import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.feign.client.FeignDataCloudService;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
+import com.iwhalecloud.byai.manager.domain.auth.enums.GrantType;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.dto.ontology.OntologyBaseRegisterRequest;
@@ -294,6 +295,26 @@ public class OntologyBaseService {
         if (baseRes == null) {
             return null;
         }
+        return ensureOntologyChildResource(baseRes, bizType, code);
+    }
+
+    /**
+     * 按指定本体库资源，将 datacloud 中存在的场景/视图/对象按需快照为门户资源索引。
+     * 调用方负责完成本体库访问权限校验。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public SsResource ensureOntologyChildResource(SsResource baseRes, String bizType, String code) {
+        if (baseRes == null || !isOntologyChildBizType(bizType) || StringUtils.isBlank(code)) {
+            return null;
+        }
+        String baseId = baseRes.getResourceCode();
+        if (StringUtils.isBlank(baseId)) {
+            return null;
+        }
+        SsResource existing = findSingleOntologyResource(code, bizType, baseId);
+        if (existing != null) {
+            return existing;
+        }
         String ownerType = normalizeOwnerType(baseRes.getOwnerType());
         String sourceType = sourceTypeOfBase(baseRes);
 
@@ -304,10 +325,12 @@ public class OntologyBaseService {
             if (meta.isEmpty()) {
                 return null;
             }
-            return insertOntologyResource(ResourceBizType.SCENE.getCode(),
+            SsResource saved = insertOntologyResource(ResourceBizType.SCENE.getCode(),
                 StringUtils.defaultIfBlank(firstNonBlank(meta, "sceneName", "scene_name", "name", "displayName"), code),
                 firstNonBlank(meta, "sceneDesc", "scene_desc", "description"), code, baseId,
-                baseRes.getResourceId(), ownerType, sourceType, meta, null, null);
+                baseRes.getResourceId(), ownerType, sourceType, meta, null, baseRes.getCreateBy());
+            grantCurrentUserOntologyChildPrivileges(baseRes, saved);
+            return saved;
         }
 
         OntologyChildContext context = findChildSceneContext(ownerType, baseId, code,
@@ -329,16 +352,20 @@ public class OntologyBaseService {
         }
 
         if (ResourceBizType.OBJECT.getCode().equals(bizType)) {
-            return insertOntologyResource(ResourceBizType.OBJECT.getCode(),
+            SsResource saved = insertOntologyResource(ResourceBizType.OBJECT.getCode(),
                 StringUtils.defaultIfBlank(firstNonBlank(meta, "objectName", "object_name", "name", "displayName"),
                     code),
                 firstNonBlank(meta, "objectDesc", "object_desc", "description"), code, baseId,
-                parent.getResourceId(), ownerType, sourceType, meta, null, null);
+                parent.getResourceId(), ownerType, sourceType, meta, null, baseRes.getCreateBy());
+            grantCurrentUserOntologyChildPrivileges(baseRes, saved);
+            return saved;
         }
-        return insertOntologyResource(ResourceBizType.VIEW.getCode(),
+        SsResource saved = insertOntologyResource(ResourceBizType.VIEW.getCode(),
             StringUtils.defaultIfBlank(firstNonBlank(meta, "viewName", "view_name", "name", "displayName"), code),
             firstNonBlank(meta, "viewDesc", "view_desc", "description"), code, baseId,
-            parent.getResourceId(), ownerType, sourceType, meta, null, null);
+            parent.getResourceId(), ownerType, sourceType, meta, null, baseRes.getCreateBy());
+        grantCurrentUserOntologyChildPrivileges(baseRes, saved);
+        return saved;
     }
 
     /** 取本体库下所有 ss_resource 资源 id：本体库/场景/视图/对象分别按各自扩展表过滤。 */
@@ -558,6 +585,21 @@ public class OntologyBaseService {
         return matched;
     }
 
+    private void grantCurrentUserOntologyChildPrivileges(SsResource baseRes, SsResource childResource) {
+        Long currentUserId = CurrentUserHolder.getCurrentUserId();
+        if (baseRes == null || childResource == null || childResource.getResourceId() == null || currentUserId == null) {
+            return;
+        }
+        boolean hasBaseManagePermission = authApplicationService.hasResourceManagePermission(baseRes);
+        boolean hasBaseUsePermission = authApplicationService.hasResourceUsePermission(baseRes);
+        if (hasBaseManagePermission || hasBaseUsePermission) {
+            authApplicationService.ensureUserDirectPrivilege(childResource, currentUserId, GrantType.FORCE_USE);
+        }
+        if (hasBaseManagePermission) {
+            authApplicationService.ensureUserDirectPrivilege(childResource, currentUserId, GrantType.ALLOW_MANAGE);
+        }
+    }
+
     private SsResource ensureSceneResource(SsResource baseRes, String ownerType, String baseId, String sourceType,
         JSONObject scene) {
         String sceneId = firstNonBlank(scene, "sceneId", "scene_id");
@@ -570,11 +612,13 @@ public class OntologyBaseService {
         }
         JSONObject detail = safeSceneDetail(ownerType, baseId, sceneId);
         JSONObject meta = mergeDetails(scene, detail);
-        return insertOntologyResource(ResourceBizType.SCENE.getCode(),
+        SsResource saved = insertOntologyResource(ResourceBizType.SCENE.getCode(),
             StringUtils.defaultIfBlank(firstNonBlank(meta, "sceneName", "scene_name", "name", "displayName"),
                 sceneId),
             firstNonBlank(meta, "sceneDesc", "scene_desc", "description"), sceneId, baseId,
-            baseRes.getResourceId(), ownerType, sourceType, meta, null, null);
+            baseRes.getResourceId(), ownerType, sourceType, meta, null, baseRes.getCreateBy());
+        grantCurrentUserOntologyChildPrivileges(baseRes, saved);
+        return saved;
     }
 
     private JSONObject findSceneSummary(String ownerType, String baseId, String sceneId) {

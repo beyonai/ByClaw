@@ -173,6 +173,7 @@ export type BaiyingAssociatedResource = {
     resourceType: string;
     resourceBizType?: string;
     resourceCode?: string;
+    ontologyBaseCode?: string;
     resourceDesc?: string;
     resourceSourcePkId?: string;
     systemCode?: string;
