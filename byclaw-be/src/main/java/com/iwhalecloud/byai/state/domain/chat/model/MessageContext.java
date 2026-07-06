@@ -11,6 +11,7 @@ import com.alibaba.fastjson.JSONObject;
 import com.google.common.collect.Lists;
 import com.iwhalecloud.byai.state.infrastructure.utils.CompletionsUtils;
 import com.iwhalecloud.byai.state.common.dto.AnswerDelta;
+import com.iwhalecloud.byai.state.common.enums.MessageContentTypeEnum;
 import com.iwhalecloud.byai.state.common.enums.AgentTypeEnum;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -332,6 +333,34 @@ public class MessageContext {
      */
     public String returnStreamAnswerText() {
         return streamAnswerText.toString();
+    }
+
+    public boolean hasPersistableContent() {
+        return StringUtils.isNotBlank(returnAnswerText())
+            || hasPersistableMessage(answerMessageList)
+            || hasPersistableMessage(reasonMessageList)
+            || CollectionUtils.isNotEmpty(chatRelatedResource)
+            || StringUtils.isNotBlank(callLogs)
+            || StringUtils.isNotBlank(resComIds);
+    }
+
+    private boolean hasPersistableMessage(List<AnswerDelta> messageList) {
+        if (CollectionUtils.isEmpty(messageList)) {
+            return false;
+        }
+        return messageList.stream().anyMatch(this::hasPersistableMessage);
+    }
+
+    private boolean hasPersistableMessage(AnswerDelta answerDelta) {
+        if (answerDelta == null || CollectionUtils.isEmpty(answerDelta.getChoices())) {
+            return false;
+        }
+        if (MessageContentTypeEnum.THINK_TITLE.getCode().equals(answerDelta.getContentType())) {
+            return false;
+        }
+        return answerDelta.getChoices().stream()
+            .anyMatch(choice -> choice != null && choice.getDelta() != null
+                && StringUtils.isNotBlank(choice.getDelta().getContent()));
     }
 
 }

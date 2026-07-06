@@ -114,7 +114,7 @@ public class SessionStreamEventRouter {
         }
 
         if (SseResponseEventEnum.error.equals(eventType)) {
-            handleWebSocketError(ctx, metadata);
+            handleWebSocketError(ctx, dataJson, metadata);
             return true;
         }
 
@@ -123,40 +123,78 @@ public class SessionStreamEventRouter {
         lineJson.put("event", eventType);
         lineJson.put("data", eventData);
 
+        String receivedTraceId = dataJson.getString("trace_id");
+        MessageContext messageContext = ctx.resolveMessageContext(receivedTraceId);
         pythonSseService.getContentFromPythonStreamV3(lineJson.toJSONString(), ctx.res,
-            ctx.messageContext, ctx.getAgentIds(), ctx);
+            messageContext, ctx.getAgentIds(), ctx);
         runningChatSnapshotService.save(ctx);
 
         if (SseResponseEventEnum.appStreamResponse.equals(eventType)) {
-            if (ctx.messageContext != null) {
-                ctx.messageContext.setComplete(true);
+            if (messageContext != null) {
+                messageContext.setComplete(true);
             }
-            scriptService.completeAsyncGatewayContext(ctx);
-            runningChatSnapshotService.delete(ctx);
+            if (ctx.markTraceComplete(receivedTraceId)) {
+                if (ctx.messageContext != null) {
+                    ctx.messageContext.setComplete(true);
+                }
+                scriptService.completeAsyncGatewayContext(ctx);
+                runningChatSnapshotService.delete(ctx);
+            }
         }
         return true;
     }
 
-    private void handleWebSocketError(ChatProcessContext ctx, JSONObject metadata) {
+    private void handleWebSocketError(ChatProcessContext ctx, JSONObject dataJson, JSONObject metadata) {
         String errorMsg = metadata != null ? metadata.getString("error") : "unknown gateway error";
         JSONObject errorPayload = new JSONObject();
         errorPayload.put("message", errorMsg);
         errorPayload.put("traceback", errorMsg);
         errorPayload.put("sessionId", String.valueOf(ctx.sessionId));
+        gatewayStreamEventProcessor.enrichLaneMetadata(ctx, dataJson, metadata, errorPayload);
         CompletionsUtils.responseWrite(ctx.res, SseResponseEventEnum.error, errorPayload.toJSONString(),
             ctx.sessionId);
-        ctx.gatewayError = true;
-        scriptService.completeAsyncGatewayContext(ctx);
-        runningChatSnapshotService.delete(ctx);
+        ctx.gatewayError = !ctx.isMultiAgentRequest() || ctx.getMultiAgentTraceIds().size() == 1;
+        if (ctx.markTraceComplete(dataJson == null ? null : dataJson.getString("trace_id"))) {
+            scriptService.completeAsyncGatewayContext(ctx);
+            runningChatSnapshotService.delete(ctx);
+        }
     }
 
     private void broadcastToOtherDevices(ChatProcessContext ctx, JSONObject dataJson) {
         try {
-            multiDeviceBroadcastService.broadcastRawEvent(ctx.getUserId(), ctx.getSessionId(), dataJson,
-                ctx.getSenderChannel(), ctx.getClientRequestId());
+            JSONObject broadcastEvent = buildBroadcastEvent(ctx, dataJson);
+            multiDeviceBroadcastService.broadcastRawEvent(ctx.getUserId(), ctx.getSessionId(),
+                broadcastEvent, ctx.getSenderChannel(), resolveBroadcastClientRequestId(ctx, broadcastEvent));
         }
         catch (Exception e) {
             log.warn("多端广播异常, sessionId: {}", ctx.sessionId, e);
+        }
+    }
+
+    private JSONObject buildBroadcastEvent(ChatProcessContext ctx, JSONObject dataJson) {
+        if (dataJson == null) {
+            return null;
+        }
+        JSONObject broadcastJson = new JSONObject(dataJson);
+        JSONObject metadata = dataJson.getJSONObject("metadata");
+        if (metadata == null) {
+            metadata = new JSONObject();
+        }
+        broadcastJson.put("data", gatewayStreamEventProcessor.buildEventData(ctx, dataJson, metadata));
+        return broadcastJson;
+    }
+
+    private String resolveBroadcastClientRequestId(ChatProcessContext ctx, JSONObject broadcastJson) {
+        if (broadcastJson == null) {
+            return ctx == null ? null : ctx.getClientRequestId();
+        }
+        try {
+            JSONObject payload = JSON.parseObject(broadcastJson.getString("data"));
+            String clientRequestId = payload == null ? null : payload.getString("clientRequestId");
+            return StringUtils.defaultIfBlank(clientRequestId, ctx == null ? null : ctx.getClientRequestId());
+        }
+        catch (Exception e) {
+            return ctx == null ? null : ctx.getClientRequestId();
         }
     }
 

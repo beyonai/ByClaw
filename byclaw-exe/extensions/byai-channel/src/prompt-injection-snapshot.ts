@@ -7,6 +7,7 @@ import {
   buildSessionFilesPrompt,
   buildUserMdReloadPrompt,
 } from "./i18n.js";
+import { buildByclawChatContextToolPrompt } from "./chat-context-tool.js";
 
 export type PromptInjectionSnapshot = {
   appendSystemContext: string;
@@ -42,6 +43,7 @@ export function buildPromptInjectionSnapshot(params: {
   }
   if (params.request.sessionId) {
     sections.push(buildSessionFilesPrompt(params.request.sessionId, params.request.language));
+    sections.push(buildByclawChatContextToolPrompt(params.request.language));
   }
   if (params.request.languageProvided) {
     sections.push(buildLanguagePrompt(params.request.language));

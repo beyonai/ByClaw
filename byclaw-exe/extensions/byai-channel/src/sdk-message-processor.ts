@@ -12,13 +12,15 @@ import {
 } from "openclaw/plugin-sdk/media-runtime";
 import { getByaiRuntime } from "./runtime.js";
 import { resolveAgentIdFromSessionKey } from "openclaw/plugin-sdk/routing";
-import type { SdkInboundFile, SdkProcessorDeps } from "./types.js";
+import type { ByaiLaneMetadata, SdkInboundFile, SdkProcessorDeps } from "./types.js";
 import {
   bindActiveSdkRequestRunId,
   clearActiveSdkRequestByTarget,
   registerActiveSdkRequest,
   resolveSdkLocalFilePath,
+  withSdkEmitMetadata,
 } from "./session-context.js";
+import { recordByclawChatContextMessage } from "./chat-context-store.js";
 import { ensureSessionReasoningStream, shouldForceReasoningStream } from "./reasoning-stream.js";
 import {
   buildPromptInjectionSnapshot,
@@ -47,6 +49,11 @@ import {
   resolveSdkTargetAgentId,
 } from "./session-key.js";
 import { waitForManagedBaiyingAgentConfig } from "./managed-agent-config-wait.js";
+import {
+  appendByaiLaneToSessionKey,
+  appendByaiLaneToTarget,
+  parseByaiLaneMetadata,
+} from "./multi-agent.js";
 
 const CHANNEL_ID = BYAI_CHANNEL_ID;
 const MANAGED_BAIYING_AGENT_PREFIX = "baiying-agent-";
@@ -54,6 +61,10 @@ export { buildBroadcastSessionKey };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === "string" ? value : "";
 }
 
 function parsePrimaryModelRef(primary: string): { provider: string; model: string } | null {
@@ -296,10 +307,17 @@ export async function deliverReplyToAgentViaSdk(deps: SdkProcessorDeps): Promise
     peer: { kind: "direct", id: routePeerId },
   });
 
-  const extraPayload = message.extraPayload as {
+  const laneMetadata = message.laneMetadata ?? parseByaiLaneMetadata(message.extraPayload);
+  const rawExtraPayload = message.extraPayload as {
     agent_id?: unknown;
     agent_code?: unknown;
     agent_name?: unknown;
+  };
+  const extraPayload = {
+    ...rawExtraPayload,
+    agent_id: rawExtraPayload?.agent_id ?? laneMetadata?.agentId,
+    agent_code: rawExtraPayload?.agent_code ?? laneMetadata?.agentCode,
+    agent_name: rawExtraPayload?.agent_name ?? laneMetadata?.agentName,
   };
 
   let targetAgentId = resolveSdkTargetAgentId(routing.agentId, extraPayload);
@@ -316,13 +334,14 @@ export async function deliverReplyToAgentViaSdk(deps: SdkProcessorDeps): Promise
     peer: { kind: "direct", id: routePeerId },
   });
   targetAgentId = resolveSdkTargetAgentId(routing.agentId, extraPayload);
-  const sessionKey = resolveByaiSessionKey({
+  const baseSessionKey = resolveByaiSessionKey({
     routing,
     targetAgentId,
     sessionId: message.sessionId,
     userId: message.userId,
     perSessionId: account.config.sessionKeyPerSessionId ?? false,
   });
+  const sessionKey = appendByaiLaneToSessionKey(baseSessionKey, laneMetadata);
 
   const { meta } = await runSessionDispatchExclusive(sessionKey, async () => {
     return await deliverReplyToAgentViaSdkUnderGate({
@@ -331,6 +350,7 @@ export async function deliverReplyToAgentViaSdk(deps: SdkProcessorDeps): Promise
       routing,
       targetAgentId,
       extraPayload,
+      laneMetadata,
     });
   });
 
@@ -355,13 +375,24 @@ type DeliverReplyUnderGateDeps = SdkProcessorDeps & {
     agent_code?: unknown;
     agent_name?: unknown;
   };
+  laneMetadata?: ByaiLaneMetadata;
 };
 
 async function deliverReplyToAgentViaSdkUnderGate(
   deps: DeliverReplyUnderGateDeps,
 ): Promise<void> {
-  const { message, account, cfg, log, onReply, sessionKey, routing, targetAgentId, extraPayload } =
-    deps;
+  const {
+    message,
+    account,
+    cfg,
+    log,
+    onReply,
+    sessionKey,
+    routing,
+    targetAgentId,
+    extraPayload,
+    laneMetadata,
+  } = deps;
 
   const rt = getByaiRuntime();
   const diagnosticTrace = createByaiSdkDiagnosticTrace(message.traceId);
@@ -374,12 +405,11 @@ async function deliverReplyToAgentViaSdkUnderGate(
   };
   const sessionAgentId = resolveAgentIdFromSessionKey(sessionKey);
   let sessionAgentName = sessionAgentId;
-  if (extraPayload.agent_id || extraPayload.agent_code) {
-    if (extraPayload.agent_name) {
-      sessionAgentName = extraPayload.agent_name;
-    } else {
-      sessionAgentName = getAgentNameById(targetAgentId) || sessionAgentId;
-    }
+  const payloadAgentName = stringValue(extraPayload.agent_name).trim();
+  if (payloadAgentName) {
+    sessionAgentName = payloadAgentName;
+  } else if (extraPayload.agent_id || extraPayload.agent_code) {
+    sessionAgentName = getAgentNameById(targetAgentId) || sessionAgentId;
   }
 
   const reasoningPreviewEnabled = shouldForceReasoningStream({
@@ -415,7 +445,7 @@ async function deliverReplyToAgentViaSdkUnderGate(
   });
 
   const { accountId } = account;
-  const To = `${sessionAgentId}:${message.sessionId}`;
+  const To = appendByaiLaneToTarget(`${sessionAgentId}:${message.sessionId}`, laneMetadata);
   const receivedAt = emitByaiSdkMessageReceived(diagnosticRef, diagnosticTrace);
 
   const activeRequest = registerActiveSdkRequest({
@@ -430,6 +460,19 @@ async function deliverReplyToAgentViaSdkUnderGate(
     channelExtension: message.channelExtension,
     abortController: deps.abortController,
     beyondToken: message.beyondToken,
+    laneMetadata,
+  });
+  recordByclawChatContextMessage({
+    id: laneMetadata?.queryMessageId ?? message.messageId,
+    role: "user",
+    sessionId: message.sessionId,
+    sessionKey,
+    traceId: message.traceId,
+    laneMetadata,
+    agentId: laneMetadata?.agentId ?? sessionAgentId,
+    agentName: laneMetadata?.agentName ?? sessionAgentName,
+    text: message.text,
+    createdAt: receivedAt,
   });
 
   const workspaceDir = rt.agent.resolveAgentWorkspaceDir(cfg, sessionAgentId);
@@ -526,11 +569,22 @@ async function deliverReplyToAgentViaSdkUnderGate(
                       onAgentRunStart: async (runId: string) => {
                         bindActiveSdkRequestRunId(sessionKey, runId);
                         log?.info?.(`[diagnose-sdk] onAgentRunStart called, runId: ${runId}}`);
-                        await onReply(buildAgentReadyTitle(message.language, sessionAgentName), {
-                          parentMessageId: "-1",
-                          eventType: EventType.REASONING_LOG_DELTA,
-                          contentType: SseReasonMessageType.think_title,
-                        });
+                        await onReply(
+                          buildAgentReadyTitle(message.language, sessionAgentName),
+                          withSdkEmitMetadata(
+                            {
+                              parentMessageId: "-1",
+                              eventType: EventType.REASONING_LOG_DELTA,
+                              contentType: SseReasonMessageType.think_title,
+                            },
+                            {
+                              laneMetadata,
+                              traceId: message.traceId,
+                              agentId: laneMetadata?.agentId ?? sessionAgentId,
+                              agentName: laneMetadata?.agentName ?? sessionAgentName,
+                            },
+                          ),
+                        );
                       },
                       onReasoningStream: () => {},
                       onReasoningEnd: () => {},

@@ -28,9 +28,32 @@ class MessageContextTest {
             .isEqualTo(" MODEL_API_KEY environment variable. This");
     }
 
+    @Test
+    void hasPersistableContent_detectsEmptyAndNonEmptyResponses() {
+        MessageContext emptyContext = new MessageContext();
+        assertThat(emptyContext.hasPersistableContent()).isFalse();
+
+        MessageContext titleOnlyContext = new MessageContext();
+        titleOnlyContext.recordAnswerStruct(answerDelta("ByClaw coder 智能体已就绪", "ready-order", "3003"));
+        assertThat(titleOnlyContext.hasPersistableContent()).isFalse();
+
+        MessageContext answerContext = new MessageContext();
+        answerContext.recordAnswerText(answerDelta("visible answer", "answer-order"));
+        answerContext.recordAnswerStruct(answerDelta("visible answer", "answer-order"));
+        assertThat(answerContext.hasPersistableContent()).isTrue();
+
+        MessageContext inferContext = new MessageContext();
+        inferContext.recordInferLog(answerDelta("visible thought", "thought-order"));
+        assertThat(inferContext.hasPersistableContent()).isTrue();
+    }
+
     private static String answerDelta(String content, String orderId) {
+        return answerDelta(content, orderId, "1002");
+    }
+
+    private static String answerDelta(String content, String orderId, String contentType) {
         AnswerDelta answerDelta = new AnswerDelta();
-        answerDelta.setContentType("1002");
+        answerDelta.setContentType(contentType);
         answerDelta.setOrderId(orderId);
 
         ChoiceDto choice = new ChoiceDto();

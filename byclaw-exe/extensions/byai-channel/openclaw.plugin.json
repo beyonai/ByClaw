@@ -7,6 +7,9 @@
   "contracts": {
     "gatewayMethodDispatch": [
       "authenticated-request"
+    ],
+    "tools": [
+      "byclaw_chat_context"
     ]
   },
   "channels": [

@@ -15,6 +15,7 @@ import {
   markActiveSdkRequestSubagentSpawned,
   registerAgentRunEndPromise,
 } from "./session-context";
+import { appendByclawAssistantContextDelta } from "./chat-context-store.js";
 import { registerPendingMessageToolSend } from "./pending-message-tool.js";
 import {
   cancelActiveSdkCompletionCheck,
@@ -260,6 +261,13 @@ async function handleAssistantEvent(
     key: `${event.runId}:assistant:answer`,
     rawText: stringValue(event.data?.text) || text,
     emit: async (answerDelta) => {
+      appendByclawAssistantContextDelta({
+        request,
+        id: request.laneMetadata?.answerMessageId ?? `${event.runId}:assistant`,
+        text: answerDelta,
+        agentId: request.laneMetadata?.agentId ?? event.agentId,
+        agentName: request.laneMetadata?.agentName,
+      });
       await emitSdkChunk(request, answerDelta, answerOptions);
     },
   });

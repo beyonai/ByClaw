@@ -1,6 +1,6 @@
 import { orderBy, size, uniqBy, isEmpty, get, isNil } from 'lodash';
 
-import { createMessage, fetchMessageHandler } from '@/utils/messgae';
+import { createMessage, fetchMessageHandler, hasVisibleMessageContent } from '@/utils/messgae';
 
 import { getMessages, getMessageState } from '@/service/message';
 
@@ -30,11 +30,13 @@ export const fetchMessage = async (param: {
   let cacheList: any[] = [];
   if (Array.isArray(list)) {
     // 后端同学说messageId时自增长的
-    cacheList = orderBy(list, ['messageId'], ['asc']).map((item) => {
-      const myMessage = fetchMessageHandler(item);
+    cacheList = orderBy(list, ['messageId'], ['asc'])
+      .map((item) => {
+        const myMessage = fetchMessageHandler(item);
 
-      return createMessage(myMessage);
-    });
+        return createMessage(myMessage);
+      })
+      .filter(hasVisibleMessageContent);
   }
 
   const resComIdsAll: string[] = [];

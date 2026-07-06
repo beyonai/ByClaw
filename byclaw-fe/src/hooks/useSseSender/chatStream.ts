@@ -10,6 +10,10 @@ export type ParsedChatStreamMessage = {
   formattedPayload: Record<string, unknown>;
   res: any;
   clientRequestId?: string;
+  laneId?: string;
+  turnId?: string;
+  agentId?: string;
+  agentName?: string;
   sseMsg: {
     event: string;
     sessionExts?: any;
@@ -31,8 +35,33 @@ type SubscribeChatStreamOptions = {
   onError?: (parsed: ParsedChatStreamMessage) => void;
 };
 
+const safeParseMetadata = (metadata: unknown): Record<string, unknown> => {
+  if (!metadata) return {};
+  if (typeof metadata === 'object') return metadata as Record<string, unknown>;
+  if (typeof metadata !== 'string') return {};
+  try {
+    const parsed = JSON.parse(metadata);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (error) {
+    return {};
+  }
+};
+
+const getStreamContextFields = (res: any) => {
+  const metadata = {
+    ...safeParseMetadata(get(res, 'metadata')),
+    ...safeParseMetadata(get(res, 'data.metadata')),
+  };
+  return {
+    ...pick(metadata, ['clientRequestId', 'laneId', 'turnId', 'agentId', 'agentCode', 'agentName']),
+    ...pick(get(res, 'data') || {}, ['clientRequestId', 'laneId', 'turnId', 'agentId', 'agentCode', 'agentName']),
+    ...pick(res, ['clientRequestId', 'laneId', 'turnId', 'agentId', 'agentCode', 'agentName']),
+  };
+};
+
 export function formatStreamPayload(eventName: string, res: any) {
   const payload = {};
+  const streamContextFields = getStreamContextFields(res);
 
   switch (eventName) {
     case 'createSession':
@@ -46,6 +75,7 @@ export function formatStreamPayload(eventName: string, res: any) {
     case 'answerEnd': {
       Object.assign(payload, answerDeltaHandler(res, eventName));
       Object.assign(payload, pick(res, ['messageId', 'queryMessageId', 'metadata', 'traceId']));
+      Object.assign(payload, streamContextFields);
       break;
     }
     case 'reasoningLogStart':
@@ -53,6 +83,7 @@ export function formatStreamPayload(eventName: string, res: any) {
     case 'reasoningLogEnd': {
       Object.assign(payload, reasoningLogHandler(res, eventName));
       Object.assign(payload, pick(res, ['messageId', 'queryMessageId', 'metadata', 'traceId']));
+      Object.assign(payload, streamContextFields);
       break;
     }
     case 'resComComplete':
@@ -65,6 +96,7 @@ export function formatStreamPayload(eventName: string, res: any) {
       set(payload, 'messageId', messageId);
       set(payload, 'queryMessageId', queryMessageId);
       set(payload, 'traceId', traceId);
+      Object.assign(payload, streamContextFields);
       set(payload, 'message', {
         contentType: SSEMessageType.appStreamResponse,
         content: {
@@ -78,6 +110,7 @@ export function formatStreamPayload(eventName: string, res: any) {
       break;
     }
     case 'error':
+      Object.assign(payload, streamContextFields);
       set(payload, 'message', {
         contentType: SSEMessageType.error,
         content: {
@@ -112,7 +145,21 @@ export function parseChatStreamMessage(message: any, id?: string): ParsedChatStr
 
   const formattedPayload = formatStreamPayload(eventName, res);
   const clientRequestId =
-    get(message, 'clientRequestId') || get(res, 'clientRequestId') || get(res, 'data.clientRequestId');
+    get(res, 'clientRequestId') ||
+    get(res, 'data.clientRequestId') ||
+    get(formattedPayload, 'clientRequestId') ||
+    get(message, 'clientRequestId');
+  const laneId =
+    get(res, 'laneId') || get(res, 'data.laneId') || get(formattedPayload, 'laneId') || get(message, 'laneId');
+  const turnId =
+    get(res, 'turnId') || get(res, 'data.turnId') || get(formattedPayload, 'turnId') || get(message, 'turnId');
+  const agentId =
+    get(res, 'agentId') || get(res, 'data.agentId') || get(formattedPayload, 'agentId') || get(message, 'agentId');
+  const agentName =
+    get(res, 'agentName') ||
+    get(res, 'data.agentName') ||
+    get(formattedPayload, 'agentName') ||
+    get(message, 'agentName');
   const streamId = get(message, 'streamId') || get(res, 'streamId') || get(res, 'data.streamId');
   const sseMsg = {
     event: eventName,
@@ -126,6 +173,10 @@ export function parseChatStreamMessage(message: any, id?: string): ParsedChatStr
     formattedPayload,
     res,
     clientRequestId: clientRequestId ? `${clientRequestId}` : undefined,
+    laneId: laneId ? `${laneId}` : undefined,
+    turnId: turnId ? `${turnId}` : undefined,
+    agentId: agentId ? `${agentId}` : undefined,
+    agentName: agentName ? `${agentName}` : undefined,
     sseMsg,
     isError: ['error'].includes(eventName),
     isDone: ['appStreamResponse'].includes(eventName),

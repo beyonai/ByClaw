@@ -5,6 +5,10 @@ import { defineBundledChannelEntry } from "openclaw/plugin-sdk/channel-entry-con
 import handleAgentEvent from "./src/agent-event.js";
 import { enqueueAfterAgentEvents, replaceAgentEventSubscription } from "./src/agent-event-serial.js";
 import { byaiChannelPlugin } from "./src/channel.js";
+import {
+  BYCLAW_CHAT_CONTEXT_TOOL_NAME,
+  createByclawChatContextTool,
+} from "./src/chat-context-tool.js";
 import { registerByaiHooks } from "./src/hooks.js";
 import { registerContextSnapshotHook } from "./src/context-snapshot.js";
 import { registerByaiSessionStatusRoute } from "./src/session-status-route.js";
@@ -45,6 +49,9 @@ async function enqueueAgentEvent(api: OpenClawPluginApi, event: AgentEvent): Pro
 }
 
 function registerFull(api: OpenClawPluginApi) {
+  api.registerTool((ctx) => createByclawChatContextTool(ctx as Record<string, unknown> | undefined), {
+    name: BYCLAW_CHAT_CONTEXT_TOOL_NAME,
+  });
   replaceAgentEventSubscription(api, () => api.runtime.events.onAgentEvent((event) => {
     // Keep SDK streaming completely outside OpenClaw's synchronous agent-event
     // dispatch stack. 2026.5.x releases the embedded session lock while the
