@@ -204,6 +204,10 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
 
   getAssitantTrigger = (): React.ReactNode => null;
 
+  getCurrentInputPayload = () => {
+    return this.richInputRef.current?.getPayload?.();
+  };
+
   autoSend = () => {
     if (this.autoSendRunner) {
       clearTimeout(this.autoSendRunner);
@@ -308,7 +312,9 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
   };
 
   getSendPayload = () => {
-    const { inputValue, resourceList } = this.state;
+    const currentInputPayload = this.getCurrentInputPayload();
+    const inputValue = currentInputPayload?.text ?? this.state.inputValue;
+    const resourceList = currentInputPayload?.resourceList ?? this.state.resourceList;
     const { myAgentType } = this.props;
     const sendVal = trim(inputValue);
 
@@ -326,6 +332,10 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
   // 所有子类的onSend都从父类这里触发，这里需要额外加一些公共的参数
   finallySendQuery = (data: any) => {
     let { resourceList = [] } = this.state;
+    const currentInputPayload = this.getCurrentInputPayload();
+    if (currentInputPayload?.resourceList) {
+      resourceList = currentInputPayload.resourceList;
+    }
 
     if (resourceList.length) {
       set(data, 'resourceList', resourceList);
@@ -358,7 +368,8 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
   };
 
   checkCanSend() {
-    const { inputValue } = this.state;
+    const currentInputPayload = this.getCurrentInputPayload();
+    const inputValue = currentInputPayload?.text ?? this.state.inputValue;
     const trimInputValue = trim(inputValue || '');
     return trimInputValue?.length > 0;
   }

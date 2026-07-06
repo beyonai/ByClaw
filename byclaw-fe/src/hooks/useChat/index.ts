@@ -644,11 +644,6 @@ function useChat(props: IProps) {
     let _agentId = (get(restPayload, 'agentId') || agentId) as string | undefined;
     let _agentType = (get(restPayload, 'agentType') || agentType) as IAgentType | undefined;
 
-    if (_agentId === ROOT_AGENT_ID || !_agentId) {
-      _agentId = defaultEmployee?.agentId || '';
-      _agentType = defaultEmployee?.agentType || agentTypeMap.agent;
-    }
-
     if (inheritQryMsgId) {
       // 如果传了inheritQryMsgId，表示是基于那个发送的消息再次发送，这个时候要取到上一次发送的agentType和resourceList
       const lastTimeQryMsg = messageListRef.current.find((item) => item.msgId === inheritQryMsgId);
@@ -681,6 +676,18 @@ function useChat(props: IProps) {
       }
     }
 
+    const digitalEmployeeResources = getDigitalEmployeeResources(resourceList);
+    const singleInlineAgent =
+      digitalEmployeeResources.length === 1 ? getAgentLaneIdentity(digitalEmployeeResources[0]) : null;
+    if (!get(restPayload, 'agentId') && singleInlineAgent?.agentKey) {
+      _agentId = singleInlineAgent.agentKey;
+    }
+
+    if (_agentId === ROOT_AGENT_ID || !_agentId) {
+      _agentId = defaultEmployee?.agentId || '';
+      _agentType = defaultEmployee?.agentType || agentTypeMap.agent;
+    }
+
     // 创建用户查询消息对象
     let newQueryMsg = createMessage({
       text: _queryQuestion,
@@ -696,7 +703,6 @@ function useChat(props: IProps) {
       newQueryMsg = updateMessage(newQueryMsg, { isAssign: true });
     }
 
-    const digitalEmployeeResources = getDigitalEmployeeResources(resourceList);
     const isMultiAgentSend = !isResumeChat && digitalEmployeeResources.length > 1;
     const turnId = newQueryMsg.msgId;
     const laneEntries = (
@@ -763,7 +769,15 @@ function useChat(props: IProps) {
               agentId: _agentId,
               sessionId,
               agentType: _agentType,
-              metadata: _agentId ? JSON.stringify({ agentId: _agentId }) : '',
+              agentCode: singleInlineAgent?.agentCode || undefined,
+              agentName: singleInlineAgent?.agentName || undefined,
+              metadata: _agentId
+                ? JSON.stringify({
+                  agentId: _agentId,
+                  agentCode: singleInlineAgent?.agentCode || undefined,
+                  agentName: singleInlineAgent?.agentName || undefined,
+                })
+                : '',
               ...get(msgOpt, 'answerMsg', {}),
             });
             return {
@@ -772,7 +786,7 @@ function useChat(props: IProps) {
                 laneId: answerMsg.msgId,
                 agentId: Number(_agentId) ? _agentId || null : null,
                 agentCode: Number(_agentId) ? null : _agentId || null,
-                agentName: '',
+                agentName: singleInlineAgent?.agentName || '',
                 clientRequestId: getClientRequestId(newQueryMsg.msgId, answerMsg.msgId),
                 queryMessageId: newQueryMsg.msgId,
                 answerMessageId: answerMsg.msgId,

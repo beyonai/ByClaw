@@ -1,4 +1,4 @@
-import { Button, message, Space } from 'antd';
+import { Button, message, Space, Tooltip } from 'antd';
 import classnames from 'classnames';
 import { get, isEmpty, pullAllBy, trim } from 'lodash';
 // @ts-ignore
@@ -17,6 +17,7 @@ import type { IAgentCache } from '@/typescript/agent';
 import type { IChatSettingValue } from '@/typescript/cloud';
 import type { IFile, IQueryFile } from '@/typescript/file';
 
+import { chatModeMap } from '@/constants/query';
 import { getDownloadOpenClawFileUrl, isOpenClawAgent, uploadFileToOpenClaw } from '@/utils/openClaw/utils';
 import queryStyles from '../index.module.less';
 import MentionPopover from '../RichInput/mentionPopover';
@@ -56,7 +57,9 @@ class EmployeesInputChat extends QueryInputBase<IProps, IState> {
 
   getSendPayload = () => {
     const { userInfo, myAgentType } = this.props;
-    const { fileList, inputValue, chatSettings, connectNetAgentId } = this.state;
+    const currentInputPayload = this.getCurrentInputPayload();
+    const { fileList, chatSettings, connectNetAgentId } = this.state;
+    const inputValue = currentInputPayload?.text ?? this.state.inputValue;
     const sendVal = trim(inputValue);
 
     const { agentId } = this.props.globalContext;
@@ -198,18 +201,47 @@ class EmployeesInputChat extends QueryInputBase<IProps, IState> {
       sessionId,
       dispatch,
       globalContext: { agentId, setSessionId },
+      chatMode,
     } = this.props;
     const { showMentionPopoverType } = this.state;
 
     const canQuote = this.checkCanQuote();
+    const mentionDigitalEmployeeTip = getIntl().formatMessage({ id: 'queryInput.tooltip.mentionDigitalEmployee' });
 
     return (
       <>
         <Space size="large" className={styles.bottomRight}>
           <FileBrowserEntry />
+          <MentionPopover
+            type="@"
+            chatMode={chatModeMap.expert}
+            agentId={agentId}
+            sessionId={sessionId}
+            onSelect={this.onSelectMentionPopoverItem}
+            popoverPos={showMentionPopoverType === '@' ? staticEmptyObject : undefined}
+            onClose={() => this.setState((prev) => ({ ...prev, showMentionPopoverType: '' }))}
+          >
+            <Tooltip title={mentionDigitalEmployeeTip}>
+              <span
+                aria-label={mentionDigitalEmployeeTip}
+                className={styles.attachment}
+                role="button"
+                tabIndex={0}
+                onClick={() => this.setState((prev) => ({ ...prev, showMentionPopoverType: '@' }))}
+                onKeyDown={(event) => {
+                  if (event.key !== 'Enter' && event.key !== ' ') return;
+                  event.preventDefault();
+                  this.setState((prev) => ({ ...prev, showMentionPopoverType: '@' }));
+                }}
+              >
+                @
+              </span>
+            </Tooltip>
+          </MentionPopover>
           {canQuote && (
             <MentionPopover
               type="#"
+              chatMode={chatMode}
               agentId={agentId}
               sessionId={sessionId}
               onSelect={this.onSelectMentionPopoverItem}
