@@ -75,8 +75,7 @@ public interface FeignTokenSaverService {
      */
     @RequestMapping(value = "/api/token/", method = RequestMethod.PUT, produces = MediaType.APPLICATION_JSON_VALUE,
         consumes = MediaType.APPLICATION_JSON_VALUE)
-    TokenApiResponse<TokenDto> updateToken(@RequestBody TokenSaveRequest request,
-        @RequestParam(value = "status_only", required = false) String statusOnly);
+    TokenApiResponse<TokenDto> updateToken(@RequestBody TokenSaveRequest request);
 
     /**
      * 删除单个令牌。
