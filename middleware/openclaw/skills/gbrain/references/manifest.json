@@ -80,9 +80,9 @@
       "description": "Ingest meeting transcripts with attendee enrichment, entity propagation, and timeline merge."
     },
     {
-      "name": "req-bug-ingest",
-      "path": "req-bug-ingest/SKILL.md",
-      "description": "Extract requirements and bugs from meetings, PRD, PDF, or Word into independent requirements/ and bugs/ pages with source hub linking."
+      "name": "document-object-split",
+      "path": "document-object-split/SKILL.md",
+      "description": "Split documents using get_object_detail.py for Ontology types; classify, extract, one page per instance, optional workspace export."
     },
     {
       "name": "citation-fixer",
