@@ -326,12 +326,18 @@ const getDigitalEmployeeTemplate = (templates, ownerType, agentType) => {
 
 const getDigitalEmployeeTemplateMaxLength = (templates, ownerType, agentType) => {
   const list = Array.isArray(templates) ? templates : [];
-  const effectiveOwnerType = String(ownerType || '').trim().toLowerCase() === 'personal' ? 'personal' : 'enterprise';
+  const effectiveOwnerType =
+    String(ownerType || '')
+      .trim()
+      .toLowerCase() === 'personal'
+      ? 'personal'
+      : 'enterprise';
   const effectiveAgentType = agentType === undefined || agentType === null ? '' : String(agentType).trim();
   const matchedTemplate = list.find(
     (item) =>
-      String(item?.ownerType || '').trim().toLowerCase() === effectiveOwnerType &&
-      String(item?.agentType ?? '').trim() === effectiveAgentType
+      String(item?.ownerType || '')
+        .trim()
+        .toLowerCase() === effectiveOwnerType && String(item?.agentType ?? '').trim() === effectiveAgentType
   );
 
   const maxLength = Number(matchedTemplate?.maxLength);
@@ -959,6 +965,10 @@ const EmployeeDetail = ({ loading }) => {
                     Object.prototype.hasOwnProperty.call(parsed, 'clientSecret') ||
                     Object.prototype.hasOwnProperty.call(parsed, 'robotCode') ||
                     Object.prototype.hasOwnProperty.call(parsed, 'AICardId') ||
+                    Object.prototype.hasOwnProperty.call(parsed, 'appId') ||
+                    Object.prototype.hasOwnProperty.call(parsed, 'appSecret') ||
+                    Object.prototype.hasOwnProperty.call(parsed, 'verificationToken') ||
+                    Object.prototype.hasOwnProperty.call(parsed, 'encryptKey') ||
                     false;
 
                   if (hasMachineChannelKeys) {
@@ -969,6 +979,10 @@ const EmployeeDetail = ({ loading }) => {
                         clientSecret: parsed?.clientSecret ?? '',
                         robotCode: parsed?.robotCode ?? '',
                         AICardId: parsed?.AICardId ?? '',
+                        appId: parsed?.appId ?? '',
+                        appSecret: parsed?.appSecret ?? '',
+                        verificationToken: parsed?.verificationToken ?? '',
+                        encryptKey: parsed?.encryptKey ?? '',
                       },
                     ];
                   }
@@ -982,6 +996,10 @@ const EmployeeDetail = ({ loading }) => {
                     Object.prototype.hasOwnProperty.call(machineChannelRaw, 'clientSecret') ||
                     Object.prototype.hasOwnProperty.call(machineChannelRaw, 'robotCode') ||
                     Object.prototype.hasOwnProperty.call(machineChannelRaw, 'AICardId') ||
+                    Object.prototype.hasOwnProperty.call(machineChannelRaw, 'appId') ||
+                    Object.prototype.hasOwnProperty.call(machineChannelRaw, 'appSecret') ||
+                    Object.prototype.hasOwnProperty.call(machineChannelRaw, 'verificationToken') ||
+                    Object.prototype.hasOwnProperty.call(machineChannelRaw, 'encryptKey') ||
                     false;
 
                   if (hasMachineChannelKeys) {
@@ -992,6 +1010,10 @@ const EmployeeDetail = ({ loading }) => {
                         clientSecret: machineChannelRaw?.clientSecret ?? '',
                         robotCode: machineChannelRaw?.robotCode ?? '',
                         AICardId: machineChannelRaw?.AICardId ?? '',
+                        appId: machineChannelRaw?.appId ?? '',
+                        appSecret: machineChannelRaw?.appSecret ?? '',
+                        verificationToken: machineChannelRaw?.verificationToken ?? '',
+                        encryptKey: machineChannelRaw?.encryptKey ?? '',
                       },
                     ];
                   }
@@ -1008,6 +1030,10 @@ const EmployeeDetail = ({ loading }) => {
                       clientSecret: item.clientSecret ?? '',
                       robotCode: item.robotCode ?? '',
                       AICardId: item.AICardId ?? '',
+                      appId: item.appId ?? '',
+                      appSecret: item.appSecret ?? '',
+                      verificationToken: item.verificationToken ?? '',
+                      encryptKey: item.encryptKey ?? '',
                     }))
                     .filter((it) => it.channel)
                 );
@@ -1397,7 +1423,9 @@ const EmployeeDetail = ({ loading }) => {
             templateId: rule.templateId,
           })),
           // 后端字段 machineChannel 期望（示例）：
-          // 多渠道：[{"channel":"DingTalk","clientId":"...","clientSecret":"...","robotCode":"...","AICardId":"..."}, {...}]
+          // 多渠道：
+          // 钉钉 [{"channel":"DingTalk","clientId":"...","clientSecret":"...","robotCode":"...","AICardId":"..."}]
+          // 飞书 [{"channel":"Feishu","appId":"...","appSecret":"...","verificationToken":"...","encryptKey":"..."}]
           machineChannel: JSON.stringify(
             (() => {
               if (!Array.isArray(robotConfigs) || robotConfigs.length === 0) {

@@ -5,7 +5,7 @@ import com.alibaba.fastjson.JSONObject;
 import com.alibaba.fastjson2.JSON;
 import com.iwhalecloud.byai.common.constants.resource.*;
 import com.iwhalecloud.byai.common.message.qo.MessageHotDelQo;
-import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.DingtalkRobotRegistryService;
+import com.iwhalecloud.byai.gateway.channels.service.robot.RobotChannelRegistryCoordinator;
 import com.iwhalecloud.byai.common.constants.auth.GrantToObjType;
 import com.iwhalecloud.byai.common.constants.auth.GrantType;
 import com.iwhalecloud.byai.common.message.entity.ByaiMessage;
@@ -251,7 +251,7 @@ public class DigitalEmployeeApplicationService {
     private UserService userService;
 
     @Autowired
-    private DingtalkRobotRegistryService dingtalkRobotRegistryService;
+    private RobotChannelRegistryCoordinator robotChannelRegistryCoordinator;
 
     @Autowired
     private DigEmployeeChangeEventPublisher digEmployeeChangeEventPublisher;
@@ -673,13 +673,7 @@ public class DigitalEmployeeApplicationService {
                 memoryConfigList, currentUserId, memoryLibraryId);
         }
 
-        try {
-            dingtalkRobotRegistryService.registerRobotClientsForResource(ssResource.getResourceId());
-        }
-        catch (Exception e) {
-            logger.warn("Register DingTalk robot clients after save failed. resourceId={}", ssResource.getResourceId(),
-                e);
-        }
+        robotChannelRegistryCoordinator.registerForResource(ssResource.getResourceId());
 
         digEmployeeChangeEventPublisher.publishAfterCommitOrNow(DigEmployeeChangeEventType.DIG_EMPLOYEE_CREATED,
             ssResource.getResourceId());
@@ -901,12 +895,7 @@ public class DigitalEmployeeApplicationService {
                 currentUserId, memoryLibraryId);
         }
 
-        try {
-            dingtalkRobotRegistryService.refreshRobotClientsForResource(resourceId);
-        }
-        catch (Exception e) {
-            logger.warn("Refresh DingTalk robot clients after update failed. resourceId={}", resourceId, e);
-        }
+        robotChannelRegistryCoordinator.refreshForResource(resourceId);
 
         digEmployeeChangeEventPublisher.publishAfterCommitOrNow(DigEmployeeChangeEventType.DIG_EMPLOYEE_UPDATED,
             resourceId);
@@ -1132,12 +1121,7 @@ public class DigitalEmployeeApplicationService {
         digEmployeeChangeEventPublisher.publishAfterCommitOrNow(DigEmployeeChangeEventType.DIG_EMPLOYEE_DELETED,
             resourceId);
 
-        try {
-            dingtalkRobotRegistryService.unregisterRobotClientsForResource(resourceId);
-        }
-        catch (Exception e) {
-            logger.warn("Unregister DingTalk robot clients after delete failed. resourceId={}", resourceId, e);
-        }
+        robotChannelRegistryCoordinator.unregisterForResource(resourceId);
     }
 
     private void validateDigitalEmployeeManagePermission(SsResource ssResource) {

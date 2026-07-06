@@ -376,7 +376,7 @@ export default {
   'digitalEmployeeMgr.clientIdRequired': 'Please enter clientId',
   'digitalEmployeeMgr.clientSecretRequired': 'Please enter clientSecret',
   'digitalEmployeeMgr.robotCodeRequired': 'Please enter robotCode',
-  'digitalEmployeeMgr.robotName': 'DingDing Robot',
+  'digitalEmployeeMgr.robotName': 'Robot',
   'digitalEmployeeMgr.clientIdLabel': 'clientId',
   'digitalEmployeeMgr.clientIdTooltip': 'DingTalk App -> Credentials & Basic Info -> Client ID',
   'digitalEmployeeMgr.clientSecretLabel': 'clientSecret',
@@ -386,6 +386,20 @@ export default {
   'digitalEmployeeMgr.aiCardIdLabel': 'AICardId',
   'digitalEmployeeMgr.aiCardIdTooltip':
     'DingTalk App -> Open API -> Card Platform -> Template List -> Copy Template ID',
+  'digitalEmployeeMgr.feishuAppIdRequired': 'Please enter appId',
+  'digitalEmployeeMgr.feishuAppSecretRequired': 'Please enter appSecret',
+  'digitalEmployeeMgr.feishuVerificationTokenRequired': 'Please enter Verification Token',
+  'digitalEmployeeMgr.feishuEncryptKeyRequired': 'Please enter Encrypt Key',
+  'digitalEmployeeMgr.feishuAppIdLabel': 'appId',
+  'digitalEmployeeMgr.feishuAppIdTooltip': 'Feishu Open Platform -> Credentials -> App ID',
+  'digitalEmployeeMgr.feishuAppSecretLabel': 'appSecret',
+  'digitalEmployeeMgr.feishuAppSecretTooltip': 'Feishu Open Platform -> Credentials -> App Secret',
+  'digitalEmployeeMgr.feishuVerificationTokenLabel': 'verificationToken',
+  'digitalEmployeeMgr.feishuVerificationTokenTooltip':
+    'Feishu Open Platform -> Event Subscription -> Verification Token',
+  'digitalEmployeeMgr.feishuEncryptKeyLabel': 'Encrypt Key',
+  'digitalEmployeeMgr.feishuEncryptKeyTooltip':
+    'Feishu Open Platform -> Event Subscription -> Encryption Strategy -> Encrypt Key',
 
   // Operation (Digital Employee Operations)
   'operation.basicInfo': 'Basic Information',

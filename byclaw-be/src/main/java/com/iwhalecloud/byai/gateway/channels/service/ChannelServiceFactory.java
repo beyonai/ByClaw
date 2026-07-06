@@ -4,6 +4,7 @@ import com.google.common.collect.Maps;
 import com.iwhalecloud.byai.gateway.channels.enums.ChannelType;
 import com.iwhalecloud.byai.gateway.channels.service.app.AppChannelService;
 import com.iwhalecloud.byai.gateway.channels.service.dingtalk.DingtalkChannelService;
+import com.iwhalecloud.byai.gateway.channels.service.feishu.FeishuChannelService;
 import com.iwhalecloud.byai.gateway.channels.service.web.WebChannelService;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.state.common.exception.BdpRuntimeException;
@@ -34,6 +35,9 @@ public class ChannelServiceFactory {
     private DingtalkChannelService dingtalkChannelService;
 
     @Autowired
+    private FeishuChannelService feishuChannelService;
+
+    @Autowired
     private WebChannelService webChannelService;
 
     /**
@@ -43,6 +47,7 @@ public class ChannelServiceFactory {
     public void init() {
         register(appChannelService);
         register(dingtalkChannelService);
+        register(feishuChannelService);
         register(webChannelService);
         log.info("渠道服务工厂初始化完成，共注册 {} 个渠道服务", CHANNEL_SERVICE_MAP.size());
     }
