@@ -2701,6 +2701,12 @@ export function createDiagnosticsOtelService(
           "openclaw.channel": lowCardinalityAttr(evt.channel),
           "openclaw.source": lowCardinalityAttr(evt.source),
         });
+        // Webchat inbound message log
+        const evtAny = evt as { channel?: string; source?: string; sessionKey?: unknown; messageId?: unknown; input?: unknown };
+        if (evtAny.channel === "webchat") {
+          const inputPreview = evtAny.input != null ? (typeof evtAny.input === "string" ? evtAny.input.slice(0, 100) : JSON.stringify(evtAny.input).slice(0, 100)) : "";
+          ctx.logger.info(`${serviceId}: [WEBCHAT INBOUND] channel=${evtAny.channel} source=${evtAny.source} sessionKey=${String(evtAny.sessionKey ?? "").slice(0, 24)} messageId=${evtAny.messageId !== undefined ? String(evtAny.messageId) : "-"} input=${inputPreview}`);
+        }
         if (!tracesEnabled || !passesInboundTrustGate(evt, metadata)) {
           return;
         }
