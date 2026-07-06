@@ -173,4 +173,43 @@ describe("byclaw_chat_context tool", () => {
 
     expect(snapshot.messages.map((message) => message.text)).toEqual(["reviewer lane"]);
   });
+
+  it("groups assistant deltas with the lane by sessionKey when agent metadata is missing", () => {
+    const sessionKey = "agent:baiying-agent-10002971:direct:s-3";
+    recordByclawChatContextMessage({
+      id: "q1",
+      role: "user",
+      sessionId: "s-3",
+      sessionKey,
+      text: "@ByClaw issue-triage 生成修复计划",
+      laneMetadata: {
+        agentId: "10002971",
+        agentName: "ByClaw issue-triage",
+      },
+    });
+    recordByclawChatContextMessage({
+      id: "a1",
+      role: "assistant",
+      sessionId: "s-3",
+      sessionKey,
+      text: "<html>修复计划</html>",
+    });
+
+    const snapshot = resolveByclawChatContext({
+      sessionId: "s-3",
+      includeCurrentLaneOnly: false,
+    });
+
+    expect(snapshot.messages.map((message) => message.text)).toEqual([
+      "@ByClaw issue-triage 生成修复计划",
+      "<html>修复计划</html>",
+    ]);
+    expect(snapshot.lanes).toHaveLength(1);
+    expect(snapshot.lanes[0]).toMatchObject({
+      agentId: "10002971",
+      agentName: "ByClaw issue-triage",
+      messageCount: 2,
+      sessionKey,
+    });
+  });
 });

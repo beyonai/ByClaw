@@ -95,12 +95,15 @@ function pruneChatContextSession(messages: Map<string, ByclawChatContextMessage>
 }
 
 function laneKeyOf(message: ByclawChatContextMessage): string {
+    const sessionKey = normalizeAlias(message.sessionKey);
+    if (sessionKey) {
+        return `sessionKey:${sessionKey}`;
+    }
     return [
         message.turnId ?? "",
         message.laneId ?? "",
         message.agentId ?? "",
         message.agentName ?? "",
-        message.sessionKey ?? "",
     ].join("|");
 }
 
@@ -268,17 +271,17 @@ export function resolveByclawChatContext(params: {
     const messages = allMessages.slice(-limit).map(copyChatContextMessage);
     const laneMap = new Map<string, ByclawChatContextLaneSummary>();
     for (const message of allMessages) {
-        if (!message.laneId && !message.agentId && !message.agentName) {
+        if (!message.sessionKey && !message.laneId && !message.agentId && !message.agentName) {
             continue;
         }
         const key = laneKeyOf(message);
         const existing = laneMap.get(key);
         laneMap.set(key, {
-            laneId: message.laneId,
-            turnId: message.turnId,
-            agentId: message.agentId,
-            agentName: message.agentName,
-            sessionKey: message.sessionKey,
+            laneId: message.laneId ?? existing?.laneId,
+            turnId: message.turnId ?? existing?.turnId,
+            agentId: message.agentId ?? existing?.agentId,
+            agentName: message.agentName ?? existing?.agentName,
+            sessionKey: message.sessionKey ?? existing?.sessionKey,
             messageCount: (existing?.messageCount ?? 0) + 1,
             lastUpdatedAt: Math.max(existing?.lastUpdatedAt ?? 0, message.updatedAt),
         });

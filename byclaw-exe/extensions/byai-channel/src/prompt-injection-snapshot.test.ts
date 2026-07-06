@@ -85,6 +85,50 @@ describe("prompt-injection-snapshot", () => {
     expect(snapshot.appendSystemContext).not.toContain("优先用过滤参数查询这些 agent/角色相关的历史：Agent Beta");
   });
 
+  it("adds chat-room lane metadata to channelExtension for implicit cross-agent follow-up", () => {
+    recordByclawChatContextMessage({
+      id: "issue-triage-message",
+      role: "assistant",
+      sessionId: "100",
+      sessionKey: "agent:baiying-agent-10002962:direct:100",
+      text: "报告 HTML：byclaw_issue_fix_plan.html",
+      laneMetadata: {
+        agentId: "10002962",
+        agentName: "ByClaw issue-triage",
+      },
+    });
+    recordByclawChatContextMessage({
+      id: "assistant-message",
+      role: "assistant",
+      sessionId: "100",
+      sessionKey: "agent:baiying-agent-10006192:direct:100",
+      text: "个人助理已就绪",
+      laneMetadata: {
+        agentId: "10006192",
+        agentName: "陈舵主的个人助理",
+      },
+    });
+    const request = mockRequest({
+      sessionKey: "agent:baiying-agent-10006192:direct:100",
+      laneMetadata: {
+        agentId: "10006192",
+        agentName: "陈舵主的个人助理",
+      },
+    });
+    const snapshot = buildPromptInjectionSnapshot({
+      request,
+      currentUserText: "issue修复计划帮我发送到我的会话空间下",
+    });
+
+    expect(snapshot.appendSystemContext).toContain("byclawChatRoom");
+    expect(snapshot.appendSystemContext).toContain("visibleAgentLanes");
+    expect(snapshot.appendSystemContext).toContain("ByClaw issue-triage");
+    expect(snapshot.appendSystemContext).toContain("报告 HTML：byclaw_issue_fix_plan.html");
+    expect(snapshot.appendSystemContext).toContain('"hasOtherAgentLanes":true');
+    expect(snapshot.appendSystemContext).toContain("byclaw_chat_context");
+    expect(snapshot.appendSystemContext).not.toContain("本轮任务很可能需要跨 agent 聊天室上下文");
+  });
+
   it("keeps the base chat context hint for independent lane tasks", () => {
     const request = mockRequest({
       laneMetadata: {
