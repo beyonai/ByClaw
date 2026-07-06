@@ -481,6 +481,7 @@ async function deliverReplyToAgentViaSdkUnderGate(
     sessionKey,
     buildPromptInjectionSnapshot({
       request: activeRequest,
+      currentUserText: message.text,
       workspaceDir,
       includeUserMdReloadHint,
     }),

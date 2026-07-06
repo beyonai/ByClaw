@@ -1,4 +1,4 @@
-import { getSessionPathBySessionId } from "./session-context.js";
+import { getSessionPathBySessionId } from "./session-path.js";
 import type { Language } from "./types.js";
 import {
     buildBaiyingCallToolResultTitle,

@@ -5,6 +5,7 @@ import { isSessionDispatchBusy } from "./session-dispatch-gate.js";
 import { clearPendingMessageToolSends } from "./pending-message-tool.js";
 import { generateRandomId } from "./utils.js";
 import { emitByaiSdkFirstResponse } from "./diagnostics.js";
+import { SESSION_FILES_ROOT, getSessionPathBySessionId } from "./session-path.js";
 import {
     deleteChannelRequestContextBySessionKey as deleteSharedChannelRequestContextBySessionKey,
     resolveChannelRequestContextBySessionKey as resolveSharedChannelRequestContextBySessionKey,
@@ -18,11 +19,7 @@ const STORE_KEY = "__OPENCLAW_BYAI_CHANNEL_SESSION_CONTEXT_STORE__";
 const MAX_CHAT_CONTEXT_MESSAGES_PER_SESSION = 80;
 const MAX_CHAT_CONTEXT_TEXT_CHARS = 12000;
 
-export const SESSION_FILES_ROOT = "/by/.sessions";
-
-export function getSessionPathBySessionId(sessionId: string) {
-    return path.posix.join(SESSION_FILES_ROOT, sessionId.trim());
-}
+export { SESSION_FILES_ROOT, getSessionPathBySessionId };
 
 export function resolveSdkLocalFilePath(rawPath: string, sessionId: string): string {
     const sessionRoot = getSessionPathBySessionId(sessionId);

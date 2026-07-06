@@ -9,22 +9,6 @@ export const BYCLAW_CHAT_CONTEXT_TOOL_NAME = "byclaw_chat_context";
 
 type ToolContext = Record<string, unknown> | undefined;
 
-export function buildByclawChatContextToolPrompt(language?: string): string {
-  const isEnglish = typeof language === "string" && language.toLowerCase().startsWith("en");
-  if (isEnglish) {
-    return [
-      "ByClaw chat handoff context is available through the `byclaw_chat_context` tool.",
-      "When the user asks you to continue, take over, review a previous agent's work, or refer to another @agent in the same ByClaw chat, call `byclaw_chat_context` first and use its visible messages instead of assuming access to private OpenClaw transcripts.",
-      "For parallel @agent requests, keep your answer scoped to your own lane. The tool defaults to the current lane; only set `current_lane_only=false` when the user explicitly asks for cross-agent handoff or review.",
-    ].join("\n");
-  }
-  return [
-    "ByClaw 聊天室接力上下文需要通过 `byclaw_chat_context` 工具获取。",
-    "当用户要求“继续/承接/接力/复核上条/参考同一聊天室里的其他 @agent 输出”时，先调用 `byclaw_chat_context`，基于工具返回的可见消息承接，不要假设能读取其他 OpenClaw agent 的私有 transcript。",
-    "并行 @多个 agent 派活时，只回答自己 lane 的任务；工具默认只返回当前 lane，只有用户明确要求跨 agent 接力/复核时才设置 `current_lane_only=false`。",
-  ].join("\n");
-}
-
 function normalizeText(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -43,6 +27,25 @@ function normalizeCurrentLaneOnly(value: unknown): boolean {
 function normalizeLimit(value: unknown): number {
   const parsed = typeof value === "number" ? value : Number.parseInt(String(value ?? ""), 10);
   return Number.isFinite(parsed) ? Math.min(Math.max(Math.trunc(parsed), 1), 40) : 12;
+}
+
+function normalizeTextList(value: unknown): string[] {
+  const rawValues = Array.isArray(value) ? value : typeof value === "string" ? value.split(",") : [];
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const item of rawValues) {
+    const text = normalizeText(item);
+    if (!text) {
+      continue;
+    }
+    const key = text.toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    result.push(text);
+  }
+  return result;
 }
 
 function resolveRequesterSessionKey(ctx: ToolContext): string {
@@ -127,6 +130,21 @@ export function createByclawChatContextTool(ctx: ToolContext) {
           type: "boolean",
           description: "When true, only return messages from the current OpenClaw lane/sessionKey. Default true; set false only for explicit cross-agent handoff/review.",
         },
+        agent_ids: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional agent ids to include when current_lane_only=false. Prefer this over querying every lane.",
+        },
+        agent_names: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional agent names or roles to include when current_lane_only=false. Prefer this over querying every lane.",
+        },
+        lane_ids: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional lane ids to include when current_lane_only=false.",
+        },
       },
     },
     async execute(_toolCallId: string, input: Record<string, unknown> = {}) {
@@ -137,6 +155,9 @@ export function createByclawChatContextTool(ctx: ToolContext) {
         limit: normalizeLimit(input.limit),
         includeCurrentLaneOnly: normalizeCurrentLaneOnly(input.current_lane_only),
         requesterSessionKey,
+        agentIds: normalizeTextList(input.agent_ids),
+        agentNames: normalizeTextList(input.agent_names),
+        laneIds: normalizeTextList(input.lane_ids),
       });
       return {
         content: [

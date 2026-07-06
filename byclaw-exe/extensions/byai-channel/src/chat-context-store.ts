@@ -108,6 +108,46 @@ function copyChatContextMessage(message: ByclawChatContextMessage): ByclawChatCo
     return { ...message };
 }
 
+function normalizeFilterValues(values: string[] | undefined): Set<string> | undefined {
+    const normalized = (values ?? [])
+        .map((value) => normalizeAlias(value)?.toLowerCase())
+        .filter((value): value is string => Boolean(value));
+    return normalized.length ? new Set(normalized) : undefined;
+}
+
+function filterMatches(value: string | undefined, filters: Set<string> | undefined, partial = false): boolean {
+    if (!filters) {
+        return false;
+    }
+    const normalized = normalizeAlias(value)?.toLowerCase();
+    if (!normalized) {
+        return false;
+    }
+    if (filters.has(normalized)) {
+        return true;
+    }
+    return partial && Array.from(filters).some((filter) => normalized.includes(filter) || filter.includes(normalized));
+}
+
+function messageMatchesFilters(
+    message: ByclawChatContextMessage,
+    filters: {
+        agentIds?: Set<string>;
+        agentNames?: Set<string>;
+        laneIds?: Set<string>;
+    },
+): boolean {
+    const hasFilters = Boolean(filters.agentIds || filters.agentNames || filters.laneIds);
+    if (!hasFilters) {
+        return true;
+    }
+    return (
+        filterMatches(message.agentId, filters.agentIds) ||
+        filterMatches(message.agentName, filters.agentNames, true) ||
+        filterMatches(message.laneId, filters.laneIds)
+    );
+}
+
 export function recordByclawChatContextMessage(params: {
     id?: string;
     role: ByclawChatContextRole;
@@ -201,20 +241,28 @@ export function resolveByclawChatContext(params: {
     limit?: number;
     includeCurrentLaneOnly?: boolean;
     requesterSessionKey?: string;
+    agentIds?: string[];
+    agentNames?: string[];
+    laneIds?: string[];
 }): ByclawChatContextSnapshot {
     const sessionId = normalizeAlias(params.sessionId) ?? "";
     const rawLimit = typeof params.limit === "number" && Number.isFinite(params.limit)
         ? params.limit
         : 12;
     const limit = Math.min(Math.max(Math.trunc(rawLimit), 1), 40);
+    const filters = {
+        agentIds: normalizeFilterValues(params.agentIds),
+        agentNames: normalizeFilterValues(params.agentNames),
+        laneIds: normalizeFilterValues(params.laneIds),
+    };
     const allMessages = Array.from(
         getByclawChatContextStore().chatContextBySessionId.get(sessionId)?.values() ?? [],
     )
         .filter((message) => {
-            if (!params.includeCurrentLaneOnly) {
-                return true;
+            if (params.includeCurrentLaneOnly) {
+                return Boolean(params.requesterSessionKey) && message.sessionKey === params.requesterSessionKey;
             }
-            return Boolean(params.requesterSessionKey) && message.sessionKey === params.requesterSessionKey;
+            return messageMatchesFilters(message, filters);
         })
         .sort((a, b) => a.createdAt - b.createdAt || a.updatedAt - b.updatedAt);
     const messages = allMessages.slice(-limit).map(copyChatContextMessage);

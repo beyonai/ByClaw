@@ -96,6 +96,51 @@ describe("byclaw_chat_context tool", () => {
     expect(result.content[0].text).not.toContain("coder 私有任务");
   });
 
+  it("filters cross-agent context to requested agents", async () => {
+    recordByclawChatContextMessage({
+      id: "coder",
+      role: "assistant",
+      sessionId: "s-1",
+      sessionKey: "agent:baiying-agent-10002971:direct:s-1:lane:coder",
+      text: "coder 交接单",
+      laneMetadata: {
+        laneId: "coder",
+        agentId: "10002971",
+        agentName: "ByClaw coder",
+      },
+    });
+    recordByclawChatContextMessage({
+      id: "tester",
+      role: "assistant",
+      sessionId: "s-1",
+      sessionKey: "agent:baiying-agent-10002977:direct:s-1:lane:tester",
+      text: "tester 验证记录",
+      laneMetadata: {
+        laneId: "tester",
+        agentId: "10002977",
+        agentName: "ByClaw tester",
+      },
+    });
+    upsertChannelRequestContextBySessionKey({
+      sessionKey: "agent:baiying-agent-10002974:direct:s-1:lane:reviewer",
+      accountId: "default",
+      fields: {
+        sessionId: "s-1",
+      },
+    });
+
+    const tool = createByclawChatContextTool({
+      sessionKey: "agent:baiying-agent-10002974:direct:s-1:lane:reviewer",
+    });
+    const result = await tool.execute("call-1", {
+      current_lane_only: false,
+      agent_names: ["coder"],
+    });
+
+    expect(result.details.messages.map((message) => message.text)).toEqual(["coder 交接单"]);
+    expect(result.content[0].text).not.toContain("tester 验证记录");
+  });
+
   it("can scope context to only the current lane", () => {
     recordByclawChatContextMessage({
       id: "coder",

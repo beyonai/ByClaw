@@ -46,4 +46,41 @@ describe("prompt-injection-snapshot", () => {
     clearPromptInjectionSnapshot(request.sessionKey);
     expect(takePromptInjectionSnapshot(request.sessionKey)).toBeUndefined();
   });
+
+  it("injects a stronger chat context tool hint for cross-agent handoff tasks", () => {
+    const request = mockRequest({
+      laneMetadata: {
+        laneId: "reviewer",
+        agentName: "ByClaw reviewer",
+      },
+    });
+    const snapshot = buildPromptInjectionSnapshot({
+      request,
+      currentUserText: "请承接上条 coder 交接单，并给出 reviewer 结论",
+    });
+
+    expect(snapshot.appendSystemContext).toContain("本轮任务很可能需要跨 agent 聊天室上下文");
+    expect(snapshot.appendSystemContext).toContain("current_lane_only=false");
+    expect(snapshot.appendSystemContext).toContain("agent_names");
+    expect(snapshot.appendSystemContext).toContain("coder");
+    expect(snapshot.appendSystemContext).not.toContain("优先用过滤参数查询这些 agent/角色相关的历史：reviewer");
+  });
+
+  it("keeps the base chat context hint for independent lane tasks", () => {
+    const request = mockRequest({
+      laneMetadata: {
+        laneId: "assistant",
+        agentName: "陈舵主的个人助理",
+      },
+    });
+    const snapshot = buildPromptInjectionSnapshot({
+      request,
+      currentUserText: "帮我查询钉钉通讯录",
+    });
+
+    expect(snapshot.appendSystemContext).toContain("ByClaw 聊天室接力上下文需要通过");
+    expect(snapshot.appendSystemContext).toContain("默认只返回当前调用工具的 agent/lane 的聊天室记录");
+    expect(snapshot.appendSystemContext).not.toContain("本轮任务很可能需要跨 agent 聊天室上下文");
+    expect(snapshot.appendSystemContext).not.toContain("优先用过滤参数查询这些 agent/角色相关的历史");
+  });
 });

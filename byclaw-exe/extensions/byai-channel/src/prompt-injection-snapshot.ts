@@ -7,7 +7,10 @@ import {
   buildSessionFilesPrompt,
   buildUserMdReloadPrompt,
 } from "./i18n.js";
-import { buildByclawChatContextToolPrompt } from "./chat-context-tool.js";
+import {
+  buildByclawChatContextToolPrompt,
+  detectByclawChatContextCrossAgentHint,
+} from "./chat-context-prompt.js";
 
 export type PromptInjectionSnapshot = {
   appendSystemContext: string;
@@ -33,6 +36,7 @@ function normalizeSessionKey(sessionKey: string | undefined): string | null {
 
 export function buildPromptInjectionSnapshot(params: {
   request: ActiveSdkRequest;
+  currentUserText?: string;
   workspaceDir?: string;
   includeUserMdReloadHint?: boolean;
 }): PromptInjectionSnapshot {
@@ -43,7 +47,12 @@ export function buildPromptInjectionSnapshot(params: {
   }
   if (params.request.sessionId) {
     sections.push(buildSessionFilesPrompt(params.request.sessionId, params.request.language));
-    sections.push(buildByclawChatContextToolPrompt(params.request.language));
+    sections.push(buildByclawChatContextToolPrompt(params.request.language, {
+      crossAgentHint: detectByclawChatContextCrossAgentHint({
+        text: params.currentUserText,
+        laneMetadata: params.request.laneMetadata,
+      }),
+    }));
   }
   if (params.request.languageProvided) {
     sections.push(buildLanguagePrompt(params.request.language));

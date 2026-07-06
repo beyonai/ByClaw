@@ -32,7 +32,7 @@ import {
 import { getByaiRuntime } from "./runtime.js";
 import { resolveAgentIdFromSessionKey } from "openclaw/plugin-sdk/routing";
 import { takePromptInjectionSnapshot } from "./prompt-injection-snapshot.js";
-import { buildByclawChatContextToolPrompt } from "./chat-context-tool.js";
+import { buildByclawChatContextToolPrompt } from "./chat-context-prompt.js";
 import {
   consumeWorkspaceReloadHint,
   markWorkspaceReloadHint,
