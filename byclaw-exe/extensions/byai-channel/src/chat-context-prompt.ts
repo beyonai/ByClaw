@@ -9,6 +9,12 @@ export interface ByclawChatContextToolPromptOptions {
   crossAgentHint?: ByclawChatContextCrossAgentHint;
 }
 
+export interface DetectByclawChatContextCrossAgentHintParams {
+  text?: string;
+  laneMetadata?: ByaiLaneMetadata;
+  knownAgentRefs?: string[];
+}
+
 function uniqueNormalized(values: string[]): string[] {
   const seen = new Set<string>();
   const result: string[] = [];
@@ -27,45 +33,14 @@ function uniqueNormalized(values: string[]): string[] {
   return result;
 }
 
-function extractMentionedAgents(text: string): string[] {
+function extractAtMentionedAgents(text: string): string[] {
   const mentions: string[] = [];
   const atMentionRegex = /@([^\s@，,。；;：:\n\r]+(?:\s+[^\s@，,。；;：:\n\r]+)?)/gu;
   let match: RegExpExecArray | null;
   while ((match = atMentionRegex.exec(text)) !== null) {
     mentions.push(match[1]);
   }
-
-  const roleRegex =
-    /\b(?:ByClaw\s+)?(?:coder|reviewer|tester|issue[-_\s]?triage|req[-_\s]?analyst|orchestrator|team[-_\s]?lead|specialist[-_\s]?teammate)\b/giu;
-  while ((match = roleRegex.exec(text)) !== null) {
-    mentions.push(match[0]);
-  }
-
-  for (const keyword of ["个人助理", "陈舵主", "测试", "评审", "代码", "需求", "问题分诊"]) {
-    if (text.includes(keyword)) {
-      mentions.push(keyword);
-    }
-  }
-
   return uniqueNormalized(mentions);
-}
-
-function hasCrossAgentAction(text: string): boolean {
-  return [
-    /跨\s*agent/iu,
-    /其他\s*@?\s*agent/iu,
-    /别的\s*@?\s*agent/iu,
-    /某些?\s*@?\s*agent/iu,
-    /同一聊天室|这个聊天室|聊天室内/iu,
-    /之前都聊了什么|历史(?:消息|上下文|记录)?/iu,
-    /承接|接力|继续|复核|评审|参考|基于|根据|汇总|总结|整合|对比/iu,
-    /上条|上一轮|前面|之前|刚才|交接单|输出|结论|结果/iu,
-    /\b(?:handoff|take over|continue|review|refer|previous|prior|earlier|other agent|another agent)\b/iu,
-  ].some((pattern) => pattern.test(text));
-}
-
-function hasAgentReference(text: string, mentionedAgents: string[]): boolean {
-  return mentionedAgents.length > 0 || /@|agent|智能体|助理|员工|同事|角色/iu.test(text);
 }
 
 function isSameAgentReference(agent: string, current: string): boolean {
@@ -78,25 +53,36 @@ function isSameAgentReference(agent: string, current: string): boolean {
   );
 }
 
-export function detectByclawChatContextCrossAgentHint(params: {
-  text?: string;
-  laneMetadata?: ByaiLaneMetadata;
-}): ByclawChatContextCrossAgentHint {
+function textIncludesReference(text: string, ref: string): boolean {
+  const normalizedText = text.toLowerCase();
+  const normalizedRef = ref.trim().toLowerCase();
+  return Boolean(normalizedRef) && normalizedText.includes(normalizedRef);
+}
+
+function currentLaneRefs(laneMetadata: ByaiLaneMetadata | undefined): string[] {
+  return uniqueNormalized([
+    laneMetadata?.agentName ?? "",
+    laneMetadata?.agentCode ?? "",
+    laneMetadata?.laneId ?? "",
+    laneMetadata?.agentId ?? "",
+  ]);
+}
+
+export function detectByclawChatContextCrossAgentHint(
+  params: DetectByclawChatContextCrossAgentHintParams,
+): ByclawChatContextCrossAgentHint {
   const text = typeof params.text === "string" ? params.text.trim() : "";
   if (!text) {
     return { required: false, mentionedAgents: [] };
   }
-  const mentionedAgents = extractMentionedAgents(text).filter((agent) => {
-    const currentAgentName = params.laneMetadata?.agentName?.trim();
-    const currentAgentCode = params.laneMetadata?.agentCode?.trim();
-    const currentLaneId = params.laneMetadata?.laneId?.trim();
-    return ![currentAgentName, currentAgentCode, currentLaneId]
-      .filter(Boolean)
-      .some((current) => current && isSameAgentReference(agent, current));
-  });
-  const required = hasCrossAgentAction(text) && hasAgentReference(text, mentionedAgents);
+  const currentRefs = currentLaneRefs(params.laneMetadata);
+  const mentionedAgents = uniqueNormalized([
+    ...extractAtMentionedAgents(text),
+    ...(params.knownAgentRefs ?? []).filter((ref) => textIncludesReference(text, ref)),
+  ]).filter((agent) => !currentRefs.some((current) => isSameAgentReference(agent, current)));
+
   return {
-    required,
+    required: mentionedAgents.length > 0,
     mentionedAgents,
   };
 }

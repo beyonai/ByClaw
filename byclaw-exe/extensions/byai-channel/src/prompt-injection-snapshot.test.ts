@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import {
   buildPromptInjectionSnapshot,
   clearPromptInjectionSnapshot,
@@ -6,6 +6,10 @@ import {
   setPromptInjectionSnapshot,
   takePromptInjectionSnapshot,
 } from "./prompt-injection-snapshot.js";
+import {
+  recordByclawChatContextMessage,
+  resetByclawChatContextForTest,
+} from "./chat-context-store.js";
 import type { ActiveSdkRequest } from "./session-context.js";
 
 function mockRequest(overrides: Partial<ActiveSdkRequest> = {}): ActiveSdkRequest {
@@ -32,8 +36,12 @@ function mockRequest(overrides: Partial<ActiveSdkRequest> = {}): ActiveSdkReques
 }
 
 describe("prompt-injection-snapshot", () => {
-  it("stores and returns appendSystemContext for before_prompt_build", () => {
+  beforeEach(() => {
     resetPromptInjectionSnapshotsForTest();
+    resetByclawChatContextForTest();
+  });
+
+  it("stores and returns appendSystemContext for before_prompt_build", () => {
     const request = mockRequest();
     const snapshot = buildPromptInjectionSnapshot({ request });
     setPromptInjectionSnapshot(request.sessionKey, snapshot);
@@ -48,34 +56,45 @@ describe("prompt-injection-snapshot", () => {
   });
 
   it("injects a stronger chat context tool hint for cross-agent handoff tasks", () => {
+    recordByclawChatContextMessage({
+      id: "agent-alpha-message",
+      role: "assistant",
+      sessionId: "100",
+      sessionKey: "agent:alpha:direct:100:lane:alpha",
+      text: "handoff bundle",
+      laneMetadata: {
+        laneId: "lane-alpha",
+        agentName: "Agent Alpha",
+      },
+    });
     const request = mockRequest({
       laneMetadata: {
-        laneId: "reviewer",
-        agentName: "ByClaw reviewer",
+        laneId: "lane-beta",
+        agentName: "Agent Beta",
       },
     });
     const snapshot = buildPromptInjectionSnapshot({
       request,
-      currentUserText: "请承接上条 coder 交接单，并给出 reviewer 结论",
+      currentUserText: "请承接 Agent Alpha 的交接单，并给出结论",
     });
 
     expect(snapshot.appendSystemContext).toContain("本轮任务很可能需要跨 agent 聊天室上下文");
     expect(snapshot.appendSystemContext).toContain("current_lane_only=false");
     expect(snapshot.appendSystemContext).toContain("agent_names");
-    expect(snapshot.appendSystemContext).toContain("coder");
-    expect(snapshot.appendSystemContext).not.toContain("优先用过滤参数查询这些 agent/角色相关的历史：reviewer");
+    expect(snapshot.appendSystemContext).toContain("Agent Alpha");
+    expect(snapshot.appendSystemContext).not.toContain("优先用过滤参数查询这些 agent/角色相关的历史：Agent Beta");
   });
 
   it("keeps the base chat context hint for independent lane tasks", () => {
     const request = mockRequest({
       laneMetadata: {
-        laneId: "assistant",
-        agentName: "陈舵主的个人助理",
+        laneId: "lane-current",
+        agentName: "Current Agent",
       },
     });
     const snapshot = buildPromptInjectionSnapshot({
       request,
-      currentUserText: "帮我查询钉钉通讯录",
+      currentUserText: "处理当前 lane 的独立任务",
     });
 
     expect(snapshot.appendSystemContext).toContain("ByClaw 聊天室接力上下文需要通过");

@@ -11,6 +11,7 @@ import {
   buildByclawChatContextToolPrompt,
   detectByclawChatContextCrossAgentHint,
 } from "./chat-context-prompt.js";
+import { resolveByclawChatContext } from "./chat-context-store.js";
 
 export type PromptInjectionSnapshot = {
   appendSystemContext: string;
@@ -34,6 +35,24 @@ function normalizeSessionKey(sessionKey: string | undefined): string | null {
   return trimmed ? trimmed : null;
 }
 
+function collectKnownAgentRefs(sessionId: string): string[] {
+  const refs = new Set<string>();
+  const snapshot = resolveByclawChatContext({
+    sessionId,
+    limit: 1,
+    includeCurrentLaneOnly: false,
+  });
+  for (const lane of snapshot.lanes) {
+    for (const value of [lane.agentName, lane.agentId, lane.laneId]) {
+      const normalized = value?.trim();
+      if (normalized) {
+        refs.add(normalized);
+      }
+    }
+  }
+  return Array.from(refs);
+}
+
 export function buildPromptInjectionSnapshot(params: {
   request: ActiveSdkRequest;
   currentUserText?: string;
@@ -51,6 +70,7 @@ export function buildPromptInjectionSnapshot(params: {
       crossAgentHint: detectByclawChatContextCrossAgentHint({
         text: params.currentUserText,
         laneMetadata: params.request.laneMetadata,
+        knownAgentRefs: collectKnownAgentRefs(params.request.sessionId),
       }),
     }));
   }
