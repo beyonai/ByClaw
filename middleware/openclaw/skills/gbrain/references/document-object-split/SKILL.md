@@ -95,6 +95,16 @@ openclaw 资源列表（OBJECT）→ Redis 对象 schema → object_types[]
 > **剥掉 `objects/`** 层。接口新增类型时 **`page_prefix` 必填**（复数、kebab-case，
 > 如 `customers`、`contracts`）。
 
+## 🚀 调用脚本
+
+在 skill 根目录执行；**禁止**使用裸 `python`（避免 `python not found`）：
+
+```bash
+/usr/local/bin/python3 scripts/<script>.py '<JSON>'
+```
+
+> JSON 作为第一个命令行参数传入；也支持 stdin 管道。所有脚本 stdout 为 JSON。
+
 ---
 
 ## 0. 对象类型来源与拆分原则
@@ -128,7 +138,7 @@ PRD 含 5 条需求 + 2 条 Bug + 1 个产品定义
 ## 0.1 对象 schema：`get_object_detail.py`
 
 对象类型的 **名称、字段 schema、文档分类依据** 一律来自脚本
-`skills/document-object-split/scripts/get_object_detail.py`（**Redis 直读，不调 HTTP 详情接口**）。**禁止** 手写字段列表或凭空猜测对象结构。
+`scripts/get_object_detail.py`（**Redis 直读，不调 HTTP 详情接口**）。**禁止** 手写字段列表或凭空猜测对象结构。
 
 **数据链路：**
 
@@ -147,18 +157,17 @@ PRD 含 5 条需求 + 2 条 Bug + 1 个产品定义
 
 ### 0b. 调用脚本（按 resource_id 读 Redis）
 
+在 skill 根目录执行：
+
 ```bash
 # 单个类型 schema
-echo '{"resource_id":"10042459"}' \
-  | python skills/document-object-split/scripts/get_object_detail.py
+/usr/local/bin/python3 scripts/get_object_detail.py '{"resource_id":"10042459"}'
 
 # 批量（推荐 Phase 1：一次加载全部类型）
-echo '{"resource_ids":["10042459","10042460","10042461"]}' \
-  | python skills/document-object-split/scripts/get_object_detail.py
+/usr/local/bin/python3 scripts/get_object_detail.py '{"resource_ids":["10042459","10042460","10042461"]}'
 
 # 或直接传 Redis key
-echo '{"key":"OBJECT_10042459"}' \
-  | python skills/document-object-split/scripts/get_object_detail.py
+/usr/local/bin/python3 scripts/get_object_detail.py '{"key":"OBJECT_10042459"}'
 ```
 
 | stdin 字段 | 必填 | 说明 |
@@ -312,7 +321,7 @@ FOR EACH type IN object_types[]:
 
 ```text
 1. openclaw 资源列表 → 筛 OBJECT → resource_ids[]
-2. echo '{"resource_ids":[...]}' | python .../get_object_detail.py
+2. /usr/local/bin/python3 scripts/get_object_detail.py '{"resource_ids":[...]}'
 3. 校验 ok=true 且 objects[] 非空
 4. 合并 page_prefix_map → object_types[]（每种类型含 display_name、properties、page_prefix）
 5. 缓存到本次 run（hub 写 object_codes_snapshot + object_names_snapshot）
@@ -367,8 +376,7 @@ This skill guarantees:
 ```bash
 # 1) 从 openclaw 拿到 OBJECT 资源的 resource_ids[]（运行环境提供）
 # 2) 批量读 Redis schema
-echo '{"resource_ids":["10042459","10042460","10042461"]}' \
-  | python skills/document-object-split/scripts/get_object_detail.py > /tmp/object_types.json
+/usr/local/bin/python3 scripts/get_object_detail.py '{"resource_ids":["10042459","10042460","10042461"]}' > /tmp/object_types.json
 ```
 
 校验：

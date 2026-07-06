@@ -1,9 +1,12 @@
 #!/usr/local/bin/python3
 """从 Redis 查询 Ontology 对象详情（含属性字段定义）。
 
-I/O 协议：stdin JSON → stdout JSON
+I/O 协议：命令行 JSON 参数（推荐）或 stdin JSON → stdout JSON
 
-入参（stdin JSON）:
+调用方式（在 skill 根目录执行）:
+    /usr/local/bin/python3 scripts/get_object_detail.py '<JSON>'
+
+入参（JSON）:
     # 传 resource_id，自动拼接 Redis key：OBJECT_{resource_id}
     {"resource_id": "10042459"}
 
