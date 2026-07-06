@@ -1763,7 +1763,7 @@ class DataCloudWorker(GatewayWorker):
                     except Exception:
                         pass
                 return result
-            except Exception:
+            except Exception as _exc:
                 # 有异常时写 no_error=0
                 _lf_handle_err = _early_lf_trace_ctx.get()
                 if _lf_handle_err is not None:
@@ -1778,12 +1778,23 @@ class DataCloudWorker(GatewayWorker):
                         _lf_e.flush()
                     except Exception:
                         pass
+                _exc_tb = traceback.format_exc(limit=3)
+                logger.exception(
+                    "process_command ERROR: session=%s command_type=%s error=%s",
+                    context.session_id,
+                    type(command).__name__,
+                    _exc,
+                )
                 _update_early_langfuse_trace(
                     _early_lf_trace_ctx.get(),
                     status="error",
-                    error=traceback.format_exc(limit=3),
+                    error=_exc_tb,
                 )
-                raise
+                return {
+                    "status": "done",
+                    "conclusion": f"[ERROR] {_exc}",
+                    "lf_tool_spans": [],
+                }
 
     async def _process_command_inner(
         self, command: GatewayCommand, context: ByclawDataClarification, request_id: str
