@@ -47,7 +47,6 @@ def _init_enterprise_base_and_scene() -> None:
             OntologyBaseEntry(
                 base_id=enterprise_id,
                 display_name="企业本体库",
-                owner_type="enterprise",
                 source_type="LOCAL",
                 backend_config={
                     "ontology": {
@@ -58,53 +57,7 @@ def _init_enterprise_base_and_scene() -> None:
             )
         )
 
-    # ── 2. 创建 CRM 场景（幂等）──
-    scene_code = "crm"
-    # create_scene 自动生成 snowflake scene_id，需要从返回值获取真实 ID
-    try:
-        created = p.create_scene(
-            enterprise_id,
-            {
-                "scene_name": "CRM客户管理",
-                "scene_code": scene_code,
-                "scene_desc": "CRM场景，包含OWL导入的全部本体",
-            },
-        )
-        scene_id = created["scene_id"]
-    except ValueError:
-        # scene already exists — find it by scene_code
-        scenes = p.list_scenes(enterprise_id)
-        scene_id = ""
-        for s in scenes:
-            if isinstance(s, dict) and s.get("scene_code") == scene_code:
-                scene_id = s["scene_id"]
-                break
-        if not scene_id:
-            raise RuntimeError(f"Scene with scene_code={scene_code!r} not found after create failed")
-
-    # ── 3. 将所有 OWL 对象和视图挂到 CRM 场景下（幂等，adapter 层去重）──
-    p.add_scene_members(
-        enterprise_id,
-        scene_id,
-        object_codes=[
-            "by_customer",
-            "by_opp_task",
-            "by_opportunity",
-            "by_project",
-            "by_project_task",
-            "by_rd_task",
-            "po_organization",
-            "po_users",
-        ],
-        view_codes=[
-            "scene_crm_comprehensive_analysis",
-            "scene_project_management",
-            "scene_rd_management",
-            "scene_sales_management",
-        ],
-    )
-
-    # ── 4. 确保默认场景存在（幂等）──
+    # ── 2. 确保默认场景存在（幂等）──
     _ = p._ensure_default_scene(enterprise_id)
 
 
