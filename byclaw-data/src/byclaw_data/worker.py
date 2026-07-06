@@ -10,7 +10,7 @@ import logging
 import os
 import re
 import sys
-import time
+
 import traceback
 import uuid
 from collections import OrderedDict
@@ -324,11 +324,13 @@ _SCOPE_VALID_TYPES = frozenset({"ONTOLOGY_BASE", "SCENE", "OBJECT", "VIEW"})
 def _build_scope_entries(
     rel_resource_list: list[dict[str, Any]],
     mounted_objects: list[str] | None = None,
+    config_extra: dict | None = None,
 ) -> "list[Any]":
     """解析 rel_resource_list → list[ScopeEntry]。
 
     当 rel_resource_list 非空时以其为准；为空时从 mounted_objects 降级为 OBJECT 类型
-    ScopeEntry（兼容旧格式）。
+    ScopeEntry（兼容旧格式）；仍为空时从 config_extra.mounted_objects（AgentConfig 挂载
+    对象）回退填充，确保 search_ontology 范围受 Agent 自身 mounted_objects 限制。
     """
     try:
         from datacloud_analysis.tools.request_tool_context import ScopeEntry
@@ -354,6 +356,28 @@ def _build_scope_entries(
             result.append(ScopeEntry(code=code, scope_type=biz_type, base_id=base_id))
         return result
 
+    # 降级：从 config_extra.rel_resource_list 回退（保留 SCENE/OBJECT 类型 + base_id）
+    if config_extra:
+        rel_rl = config_extra.get("rel_resource_list", [])
+        if rel_rl:
+            result = []
+            for item in rel_rl:
+                if not isinstance(item, dict):
+                    continue
+                biz_type = str(item.get("resourceBizType") or "")
+                if biz_type not in _SCOPE_VALID_TYPES:
+                    continue
+                code = str(item.get("resourceCode") or "").strip()
+                if not code:
+                    continue
+                base_code = str(item.get("ontologyBaseCode") or "").strip()
+                if biz_type == "ONTOLOGY_BASE":
+                    base_id = code
+                else:
+                    base_id = base_code
+                result.append(ScopeEntry(code=code, scope_type=biz_type, base_id=base_id))
+            return result
+
     # 降级：从 mounted_objects 生成 OBJECT 类型 ScopeEntry
     if mounted_objects:
         return [
@@ -361,6 +385,7 @@ def _build_scope_entries(
             for c in mounted_objects
             if isinstance(c, str) and c.strip()
         ]
+
     return []
 
 
@@ -1024,6 +1049,7 @@ async def _consume_agent_events(
     dyn_object_ids: list[str] | None = None,
     dyn_view_ids: list[str] | None = None,
     header_metadata: dict = {},
+    ontology_resources: list[Any] | None = None,
 ) -> dict[str, Any]:
     """消费 OntologyAgent 事件流，翻译为 Gateway SSE。"""
     logger.info(
@@ -1141,6 +1167,7 @@ async def _consume_agent_events(
             "is_dynamic_agent": True,
             "call_object_ids": dyn_object_ids or [],
             "call_view_ids": dyn_view_ids or [],
+            "ontology_resources": ontology_resources or [],
         }
         await context.complex_ask_user(
             event=AskUserEvent(
@@ -1171,6 +1198,7 @@ async def _consume_agent_events(
             "is_dynamic_agent": True,
             "call_object_ids": dyn_object_ids or [],
             "call_view_ids": dyn_view_ids or [],
+            "ontology_resources": ontology_resources or [],
         }
         await context.complex_ask_user(
             event=AskUserEvent(
@@ -1191,6 +1219,7 @@ async def _consume_agent_events(
                     "is_dynamic_agent": True,
                     "call_object_ids": dyn_object_ids or [],
                     "call_view_ids": dyn_view_ids or [],
+                    "ontology_resources": ontology_resources or [],
                 },
             )
         )
@@ -1260,7 +1289,8 @@ class DataCloudWorker(GatewayWorker):
         self._resume_result_cache: OrderedDict[str, dict[str, Any]] = OrderedDict()
         self._resume_inflight: dict[str, asyncio.Future[dict[str, Any]]] = {}
         self.command_plugin_manager = CommandPluginManager.from_defaults()
-        self._shared_loader: Any | None = None
+        self._runtime_manager: Any | None = None
+        self._loader_snapshot: Any | None = None
         self._resource_path: str = os.environ.get("DATACLOUD_ONTOLOGY_PATH", "")
         self._ontology_agent: Any | None = None
         self._model_config_sig: str = ""
@@ -1494,7 +1524,7 @@ class DataCloudWorker(GatewayWorker):
 
         Three-level fallback:
         1. First AgentConfig with a non-None extra["loader"].
-        2. self._shared_loader cached at start_heartbeat time.
+        2. self._loader_snapshot.loader cached at start_heartbeat time.
         3. None — OntologyToolLoader will skip OWL injection gracefully.
         """
         for cfg in self.plugin_registry.agent_configs if self.plugin_registry else []:
@@ -1502,8 +1532,8 @@ class DataCloudWorker(GatewayWorker):
             loader = extra.get("loader")
             if loader is not None:
                 return loader
-        if self._shared_loader is not None:
-            return self._shared_loader
+        if self._loader_snapshot is not None:
+            return self._loader_snapshot.loader
         logger.warning(
             "DataCloudWorker._extract_shared_loader: no OntologyLoader found in any "
             "AgentConfig; dynamic agent will proceed with loader=None (OWL injection skipped)"
@@ -1512,7 +1542,6 @@ class DataCloudWorker(GatewayWorker):
 
     async def start_heartbeat(self, **kwargs: Any) -> None:
         setup_logging(extra_namespaces=("byclaw_data",))
-        await super().start_heartbeat(**kwargs)
 
         init_plugin = self.plugin_registry.get_plugin("datacloud_init_agent_conf")
         loaded_agent_ids = (
@@ -1555,6 +1584,7 @@ class DataCloudWorker(GatewayWorker):
                     result_file_storage=build_result_file_storage(
                         settings=get_settings()
                     ),
+                    base_id="default",
                 )
             )
             logger.info(
@@ -1567,28 +1597,50 @@ class DataCloudWorker(GatewayWorker):
                 "OntologyAgent skipped. Dynamic agent path will fail on first request."
             )
 
-        # 动态路径：从首个已加载 AgentConfig 取 loader 并缓存至 worker 级别
-        self._shared_loader = self._extract_shared_loader()
+        # 动态路径：通过 LoaderRuntimeManager 获取 loader，收口到 platform 层
+        from datacloud_platform.loader_runtime import (  # noqa: PLC0415
+            LoaderRuntimeManager,
+        )
+        from datacloud_platform import get_platform  # noqa: PLC0415
+        from datacloud_platform.config import get_settings  # noqa: PLC0415
+
+        # 在 get_platform() 初始化单例之前注入 ByclawResultFileStorage。
+        # loader_runtime._configure_runtime_services() 在 platform 初始化时执行
+        # `from datacloud_platform.platform_file_storage import build_result_file_storage`，
+        # 必须在此之前完成 monkey-patch，否则拿到的是默认的 LocalResultFileStorage。
+        import datacloud_platform.platform_file_storage as _pf_storage  # noqa: PLC0415
+        from byclaw_data.platform.result_file_storage import (  # noqa: PLC0415
+            build_result_file_storage as _byclaw_build_result_file_storage,
+        )
+        _pf_storage.build_result_file_storage = _byclaw_build_result_file_storage
+
+        self._runtime_manager = LoaderRuntimeManager(
+            platform=get_platform(),
+            settings=get_settings(),
+        )
+        self._loader_snapshot = self._runtime_manager.get_loader("default")
         logger.info(
-            "DataCloudWorker: _shared_loader=%s",
+            "DataCloudWorker: _loader_snapshot=%s",
             "ready"
-            if self._shared_loader is not None
+            if self._loader_snapshot is not None
             else "None (dynamic agents will skip OWL inject)",
         )
+
+        # 将 runtime_manager 传递给 init_agent_conf plugin
+        if init_plugin is not None and hasattr(init_plugin, "set_runtime_manager"):
+            init_plugin.set_runtime_manager(self._runtime_manager)
 
         # 扩展本体池：从所有 AgentConfig 的 mounted_objects 收集全量对象，
         # 加载到 TOOL_POOL（全部 LOCKED）。
         # 不再依赖 extResourceList（已废弃），统一由 relResourceList 声明对象。
         # 超过 TOOL_POOL_THRESHOLD 时启用锚点驱动模式（is_anchor_mode()==True）。
-        if self._resource_path and self._shared_loader is not None:
-            _all_object_codes: list[str] = list(
-                dict.fromkeys(
-                    code
-                    for cfg in self.plugin_registry.get_agent_configs_snapshot().configs
-                    for code in (cfg.extra.get("mounted_objects") or [])
-                    if isinstance(code, str)
-                )
-            )
+        if self._resource_path and self._loader_snapshot is not None:
+            _all_object_codes: list[str] = list(dict.fromkeys(
+                code
+                for cfg in self.plugin_registry.get_agent_configs_snapshot().configs
+                for code in (cfg.extra.get("mounted_objects") or [])
+                if isinstance(code, str)
+            ))
             if _all_object_codes:
                 try:
                     from datacloud_analysis.tools.tool_pool import (  # noqa: PLC0415
@@ -1597,7 +1649,7 @@ class DataCloudWorker(GatewayWorker):
 
                     _init_ext_tool_pool(
                         resource_path=self._resource_path,
-                        loader=self._shared_loader,
+                        loader=self._loader_snapshot.loader,
                         ext_codes=_all_object_codes,
                     )
                     logger.info(
@@ -1612,6 +1664,8 @@ class DataCloudWorker(GatewayWorker):
                 logger.info(
                     "DataCloudWorker: no mounted_objects found, TOOL_POOL init skipped"
                 )
+
+        await super().start_heartbeat(**kwargs)
 
     async def _resolve_agent_configs_snapshot(
         self,
@@ -1869,6 +1923,7 @@ class DataCloudWorker(GatewayWorker):
                                     result_file_storage=build_result_file_storage(
                                         settings=get_settings()
                                     ),
+                                    base_id="default",
                                 )
                             )
                             logger.info(
@@ -1993,10 +2048,32 @@ class DataCloudWorker(GatewayWorker):
         _resource_list_for_extract: list[Any] = (
             _resource_list_raw if isinstance(_resource_list_raw, list) else []
         )
-        _rel_resource_list_raw = extra_payload.get("rel_resource_list")
+        _rel_resource_list_raw = extra_payload.get("rel_resource_list") or extra_payload.get("ontology_resources")
         _rel_resource_list: list[Any] = (
             _rel_resource_list_raw if isinstance(_rel_resource_list_raw, list) else []
         )
+        # 从 rel_resource_list 中提取 OBJECT / VIEW 资源码，注入 _dyn_object_ids / _dyn_view_ids，
+        # 使 _is_dynamic_agent 和下游图构建能感知 rel_resource_list 指定的资源范围。
+        # 兼容 camelCase（resourceCode/ontologyBaseCode/resourceBizType）和
+        # snake_case（resource_code/ontology_base_code/resource_biz_type）两种格式。
+        for _item in _rel_resource_list:
+            if not isinstance(_item, dict):
+                continue
+            _biz_type = str(
+                _item.get("resourceBizType") or _item.get("resource_biz_type") or ""
+            ).strip().upper()
+            _code = str(
+                _item.get("resourceCode") or _item.get("resource_code") or ""
+            ).strip()
+            _base_code = str(
+                _item.get("ontologyBaseCode") or _item.get("ontology_base_code") or ""
+            ).strip()
+            if not _code:
+                continue
+            if _biz_type == "OBJECT" and _code not in _dyn_object_ids:
+                _dyn_object_ids.append(_code)
+            elif _biz_type == "VIEW" and _code not in _dyn_view_ids:
+                _dyn_view_ids.append(_code)
         _res_object_codes, _res_view_codes = _extract_tool_resource_codes(
             _resource_list_for_extract
         )
@@ -2041,6 +2118,38 @@ class DataCloudWorker(GatewayWorker):
                     _dyn_view_ids,
                     "humanInput.metadata" if _human_input_meta else "header_metadata",
                 )
+            # 恢复 ontology_resources（对象列表/视图列表/库）
+            if not _rel_resource_list:
+                _resume_ontology_resources_raw = _resume_meta.get("ontology_resources")
+                if isinstance(_resume_ontology_resources_raw, list) and _resume_ontology_resources_raw:
+                    _resumed_items = [
+                        item for item in _resume_ontology_resources_raw if isinstance(item, dict)
+                    ]
+                    if _resumed_items:
+                        _rel_resource_list = _resumed_items
+                        logger.info(
+                            "ontology_resources restored from resume metadata: session=%s "
+                            "count=%d source=%s",
+                            context.session_id,
+                            len(_rel_resource_list),
+                            "humanInput.metadata" if _human_input_meta else "header_metadata",
+                        )
+                        # 同步将恢复的 ontology_resources 转换为 _dyn_object_ids / _dyn_view_ids
+                        for _item in _rel_resource_list:
+                            if not isinstance(_item, dict):
+                                continue
+                            _biz_type = str(
+                                _item.get("resourceBizType") or _item.get("resource_biz_type") or ""
+                            ).strip().upper()
+                            _code = str(
+                                _item.get("resourceCode") or _item.get("resource_code") or ""
+                            ).strip()
+                            if not _code:
+                                continue
+                            if _biz_type == "OBJECT" and _code not in _dyn_object_ids:
+                                _dyn_object_ids.append(_code)
+                            elif _biz_type == "VIEW" and _code not in _dyn_view_ids:
+                                _dyn_view_ids.append(_code)
         if _res_object_codes or _res_view_codes:
             logger.info(
                 "resource_list tool whitelist activated: session=%s "
@@ -2050,7 +2159,7 @@ class DataCloudWorker(GatewayWorker):
                 _res_view_codes,
             )
 
-        _is_dynamic_agent: bool = bool(_dyn_object_ids or _dyn_view_ids)
+        _is_dynamic_agent: bool = bool(_dyn_object_ids or _dyn_view_ids or _rel_resource_list)
         if _is_dynamic_agent:
             logger.info(
                 "DataCloudWorker: dynamic agent path activated "
@@ -2141,6 +2250,10 @@ class DataCloudWorker(GatewayWorker):
             by_agent_name,
             runtime_agent_key,
         )
+
+        # 传统路径 tool_context 桥接变量
+        # _is_dynamic_agent=False 时在 else 块内构建，注入外层 config 中
+        _tool_context_for_config: Any = None
 
         if not _is_dynamic_agent:
             target_agent_id_for_load = str(
@@ -2378,6 +2491,7 @@ class DataCloudWorker(GatewayWorker):
                 "user_code": _dyn_user_code,
                 "beyond_token": _dyn_beyond_token,
                 "skill_workspace_dir": _dyn_skill_ws,
+                "rel_resource_list": _rel_resource_list,
             }
             if _dyn_skill_task_prompt:
                 _dyn_task_prompt, _dyn_first_dir, _dyn_catalog = _dyn_skill_task_prompt
@@ -2403,18 +2517,37 @@ class DataCloudWorker(GatewayWorker):
                     RequestToolContext,
                 )
 
+                # 当 _rel_resource_list 和动态 mounted_objects 均为空时，
+                # 回退到 AgentConfig.extra.mounted_objects，限制 search_ontology 范围
+                _agent_config_extra: dict[str, Any] | None = None
+                try:
+                    _agent_configs = context.list_agent_configs()
+                    _cfg = next(
+                        (
+                            c
+                            for c in _agent_configs
+                            if str(c.agent_id) == str(by_agent_id)
+                        ),
+                        None,
+                    )
+                    if _cfg is not None:
+                        _agent_config_extra = getattr(_cfg, "extra", None) or {}
+                except Exception:
+                    _agent_config_extra = None
+
                 _scope_entries = _build_scope_entries(
                     _rel_resource_list,
                     mounted_objects=list(_dyn_object_ids) + list(_dyn_view_ids),
+                    config_extra=_agent_config_extra,
                 )
-                if _scope_entries and self._shared_loader is not None:
+                if _scope_entries and self._loader_snapshot is not None:
                     from datacloud_analysis.tools.tool_pool import (
                         OntologyToolLoader,
                     )
 
                     tool_context = RequestToolContext.build(
                         allowed_scope=_scope_entries,
-                        loader=self._shared_loader,
+                        loader=self._loader_snapshot.loader,
                         tool_loader_cls=OntologyToolLoader,
                     )
                     logger.info(
@@ -2483,6 +2616,7 @@ class DataCloudWorker(GatewayWorker):
                 dyn_object_ids=_dyn_object_ids,
                 dyn_view_ids=_dyn_view_ids,
                 header_metadata=header_metadata,
+                ontology_resources=_rel_resource_list,
             )
             logger.info(
                 "DataCloudWorker: _consume_agent_events DONE session=%s thread=%s result_status=%s",
@@ -2626,13 +2760,13 @@ class DataCloudWorker(GatewayWorker):
             )
 
             # 🆕 从 extra 中提取 mounted_objects（优先），或从 tool_metadata 中提取（兼容旧逻辑）
-            mounted_objects = []
+            _raw_mounted_objects: list[str] = []
             if "mounted_objects" in config_extra:
-                mounted_objects = config_extra.get("mounted_objects", [])
+                _raw_mounted_objects = list(config_extra.get("mounted_objects") or [])
                 logger.info(
                     "Agent config: agent_id=%s mounted_objects=%s (from extra)",
                     by_agent_id,
-                    mounted_objects,
+                    _raw_mounted_objects,
                 )
             else:
                 # 兼容旧逻辑：从 tool_metadata 中提取
@@ -2640,12 +2774,72 @@ class DataCloudWorker(GatewayWorker):
                     resource_biz_type = metadata.get("resource_biz_type")
                     resource_code = metadata.get("resource_code")
                     if resource_biz_type in {"OBJECT", "VIEW"} and resource_code:
-                        mounted_objects.append(resource_code)
+                        _raw_mounted_objects.append(resource_code)
                 logger.info(
                     "Agent config: agent_id=%s mounted_objects=%s (from tool_metadata)",
                     by_agent_id,
-                    mounted_objects,
+                    _raw_mounted_objects,
                 )
+
+            # 统一通过 _build_scope_entries 构建作用域条目，支持 rel_resource_list
+            # 优先级 + AgentConfig.extra.mounted_objects 第三级回退
+            _scope_entries = _build_scope_entries(
+                _rel_resource_list,
+                mounted_objects=_raw_mounted_objects if _raw_mounted_objects else None,
+                config_extra=config_extra,
+            )
+            if _scope_entries:
+                mounted_objects = [
+                    entry.code
+                    for entry in _scope_entries
+                    if getattr(entry, "scope_type", "OBJECT") in ("OBJECT", "VIEW")
+                ]
+            else:
+                mounted_objects = _raw_mounted_objects
+
+            # 🆕 传统路径：将 _scope_entries 构建为 RequestToolContext 注入外层 config
+            # 解决 _is_dynamic_agent=False 时 configurable.tool_context 缺失导致
+            # search_ontology 无 allowed_scope 限制、搜穿全库的问题
+            _dc_logger.info(
+                "DataCloudWorker: _scope_entries=%s loader_snapshot=%s session=%s",
+                [(getattr(e, "code", "?"), getattr(e, "scope_type", "?"), getattr(e, "base_id", "?"))
+                 for e in _scope_entries] if _scope_entries else "EMPTY",
+                "ready" if self._loader_snapshot is not None else "None",
+                context.session_id,
+            )
+            if _scope_entries and self._loader_snapshot is not None:
+                _dc_logger.info(
+                    "DataCloudWorker: entering tool_context build, scope=%d session=%s",
+                    len(_scope_entries), context.session_id,
+                )
+                try:
+                    from datacloud_analysis.tools.request_tool_context import (
+                        RequestToolContext,
+                    )
+                    from datacloud_analysis.tools.ontology_tool_loader import (
+                        OntologyToolLoader,
+                    )
+
+                    _tool_context_for_config = RequestToolContext.build(
+                        allowed_scope=_scope_entries,
+                        loader=self._loader_snapshot.loader,
+                        tool_loader_cls=OntologyToolLoader,
+                    )
+                    _dc_logger.info(
+                        "DataCloudWorker: tool_context BUILT anchor_mode=%s session=%s",
+                        _tool_context_for_config.anchor_mode, context.session_id,
+                    )
+                    logger.info(
+                        "DataCloudWorker: tool_context built scope_len=%d "
+                        "anchor_mode=%s session=%s (traditional path)",
+                        len(_scope_entries),
+                        _tool_context_for_config.anchor_mode,
+                        context.session_id,
+                    )
+                except Exception as _tc_err:
+                    _dc_logger.warning(
+                        "DataCloudWorker: tool_context build FAILED: %s", _tc_err, exc_info=True,
+                    )
             # 改动4: SkillsMiddleware 在运行时自动处理技能发现，无需在 worker 中手动加载
             logger.info(
                 "Agent runtime tools: agent_id=%s tool_keys=%s",
@@ -2821,6 +3015,10 @@ class DataCloudWorker(GatewayWorker):
                 ),
                 # per-agent LLM 配置（非 None 时覆盖环境变量）
                 **({"llm_config": _agent_llm_config} if _agent_llm_config else {}),
+                # 传统路径注入 tool_context，限制 search_ontology 搜索范围
+                **({"tool_context": _tool_context_for_config}
+                    if _tool_context_for_config is not None
+                    else {}),
             },
             "recursion_limit": 100,
         }
