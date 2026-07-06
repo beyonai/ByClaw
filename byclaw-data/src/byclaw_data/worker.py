@@ -1049,6 +1049,7 @@ async def _consume_agent_events(
     dyn_object_ids: list[str] | None = None,
     dyn_view_ids: list[str] | None = None,
     header_metadata: dict = {},
+    ontology_resources: list[Any] | None = None,
 ) -> dict[str, Any]:
     """消费 OntologyAgent 事件流，翻译为 Gateway SSE。"""
     logger.info(
@@ -1166,6 +1167,7 @@ async def _consume_agent_events(
             "is_dynamic_agent": True,
             "call_object_ids": dyn_object_ids or [],
             "call_view_ids": dyn_view_ids or [],
+            "ontology_resources": ontology_resources or [],
         }
         await context.complex_ask_user(
             event=AskUserEvent(
@@ -1196,6 +1198,7 @@ async def _consume_agent_events(
             "is_dynamic_agent": True,
             "call_object_ids": dyn_object_ids or [],
             "call_view_ids": dyn_view_ids or [],
+            "ontology_resources": ontology_resources or [],
         }
         await context.complex_ask_user(
             event=AskUserEvent(
@@ -1216,6 +1219,7 @@ async def _consume_agent_events(
                     "is_dynamic_agent": True,
                     "call_object_ids": dyn_object_ids or [],
                     "call_view_ids": dyn_view_ids or [],
+                    "ontology_resources": ontology_resources or [],
                 },
             )
         )
@@ -2114,6 +2118,38 @@ class DataCloudWorker(GatewayWorker):
                     _dyn_view_ids,
                     "humanInput.metadata" if _human_input_meta else "header_metadata",
                 )
+            # 恢复 ontology_resources（对象列表/视图列表/库）
+            if not _rel_resource_list:
+                _resume_ontology_resources_raw = _resume_meta.get("ontology_resources")
+                if isinstance(_resume_ontology_resources_raw, list) and _resume_ontology_resources_raw:
+                    _resumed_items = [
+                        item for item in _resume_ontology_resources_raw if isinstance(item, dict)
+                    ]
+                    if _resumed_items:
+                        _rel_resource_list = _resumed_items
+                        logger.info(
+                            "ontology_resources restored from resume metadata: session=%s "
+                            "count=%d source=%s",
+                            context.session_id,
+                            len(_rel_resource_list),
+                            "humanInput.metadata" if _human_input_meta else "header_metadata",
+                        )
+                        # 同步将恢复的 ontology_resources 转换为 _dyn_object_ids / _dyn_view_ids
+                        for _item in _rel_resource_list:
+                            if not isinstance(_item, dict):
+                                continue
+                            _biz_type = str(
+                                _item.get("resourceBizType") or _item.get("resource_biz_type") or ""
+                            ).strip().upper()
+                            _code = str(
+                                _item.get("resourceCode") or _item.get("resource_code") or ""
+                            ).strip()
+                            if not _code:
+                                continue
+                            if _biz_type == "OBJECT" and _code not in _dyn_object_ids:
+                                _dyn_object_ids.append(_code)
+                            elif _biz_type == "VIEW" and _code not in _dyn_view_ids:
+                                _dyn_view_ids.append(_code)
         if _res_object_codes or _res_view_codes:
             logger.info(
                 "resource_list tool whitelist activated: session=%s "
@@ -2580,6 +2616,7 @@ class DataCloudWorker(GatewayWorker):
                 dyn_object_ids=_dyn_object_ids,
                 dyn_view_ids=_dyn_view_ids,
                 header_metadata=header_metadata,
+                ontology_resources=_rel_resource_list,
             )
             logger.info(
                 "DataCloudWorker: _consume_agent_events DONE session=%s thread=%s result_status=%s",
