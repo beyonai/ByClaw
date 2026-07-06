@@ -15,13 +15,13 @@ export function buildByclawChatContextToolPrompt(language?: string): string {
     return [
       "ByClaw chat handoff context is available through the `byclaw_chat_context` tool.",
       "When the user asks you to continue, take over, review a previous agent's work, or refer to another @agent in the same ByClaw chat, call `byclaw_chat_context` first and use its visible messages instead of assuming access to private OpenClaw transcripts.",
-      "For parallel @agent requests, keep your answer scoped to your own lane and do not impersonate other agents.",
+      "For parallel @agent requests, keep your answer scoped to your own lane. The tool defaults to the current lane; only set `current_lane_only=false` when the user explicitly asks for cross-agent handoff or review.",
     ].join("\n");
   }
   return [
     "ByClaw 聊天室接力上下文需要通过 `byclaw_chat_context` 工具获取。",
     "当用户要求“继续/承接/接力/复核上条/参考同一聊天室里的其他 @agent 输出”时，先调用 `byclaw_chat_context`，基于工具返回的可见消息承接，不要假设能读取其他 OpenClaw agent 的私有 transcript。",
-    "并行 @多个 agent 派活时，只回答自己 lane 的任务，不要代替其他 agent 输出。",
+    "并行 @多个 agent 派活时，只回答自己 lane 的任务；工具默认只返回当前 lane，只有用户明确要求跨 agent 接力/复核时才设置 `current_lane_only=false`。",
   ].join("\n");
 }
 
@@ -31,6 +31,13 @@ function normalizeText(value: unknown): string {
 
 function normalizeBoolean(value: unknown): boolean {
   return value === true || value === "true";
+}
+
+function normalizeCurrentLaneOnly(value: unknown): boolean {
+  if (value === undefined || value === null || value === "") {
+    return true;
+  }
+  return normalizeBoolean(value);
 }
 
 function normalizeLimit(value: unknown): number {
@@ -118,7 +125,7 @@ export function createByclawChatContextTool(ctx: ToolContext) {
         },
         current_lane_only: {
           type: "boolean",
-          description: "When true, only return messages from the current OpenClaw lane/sessionKey. Default false for handoff.",
+          description: "When true, only return messages from the current OpenClaw lane/sessionKey. Default true; set false only for explicit cross-agent handoff/review.",
         },
       },
     },
@@ -128,7 +135,7 @@ export function createByclawChatContextTool(ctx: ToolContext) {
       const snapshot = resolveByclawChatContext({
         sessionId,
         limit: normalizeLimit(input.limit),
-        includeCurrentLaneOnly: normalizeBoolean(input.current_lane_only),
+        includeCurrentLaneOnly: normalizeCurrentLaneOnly(input.current_lane_only),
         requesterSessionKey,
       });
       return {

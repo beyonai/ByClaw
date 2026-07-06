@@ -14,7 +14,7 @@ describe("byclaw_chat_context tool", () => {
     resetByclawChatContextForTest();
   });
 
-  it("returns visible messages across agents in the same ByClaw business session", async () => {
+  it("returns visible messages across agents when explicitly requested", async () => {
     recordByclawChatContextMessage({
       id: "q1",
       role: "user",
@@ -48,12 +48,52 @@ describe("byclaw_chat_context tool", () => {
     const tool = createByclawChatContextTool({
       sessionKey: "agent:baiying-agent-10002974:direct:s-1",
     });
-    const result = await tool.execute("call-1", {});
+    const result = await tool.execute("call-1", { current_lane_only: false });
 
     expect(result.details.sessionId).toBe("s-1");
     expect(result.details.messages).toHaveLength(2);
     expect(result.content[0].text).toContain("HANDOFF_BUNDLE H-1");
     expect(result.content[0].text).toContain("ByClaw coder");
+  });
+
+  it("defaults tool context to the current lane only", async () => {
+    recordByclawChatContextMessage({
+      id: "coder",
+      role: "user",
+      sessionId: "s-1",
+      sessionKey: "agent:baiying-agent-10002971:direct:s-1:lane:coder",
+      text: "coder 私有任务",
+      laneMetadata: {
+        laneId: "coder",
+        agentId: "10002971",
+      },
+    });
+    recordByclawChatContextMessage({
+      id: "reviewer",
+      role: "user",
+      sessionId: "s-1",
+      sessionKey: "agent:baiying-agent-10002974:direct:s-1:lane:reviewer",
+      text: "reviewer 私有任务",
+      laneMetadata: {
+        laneId: "reviewer",
+        agentId: "10002974",
+      },
+    });
+    upsertChannelRequestContextBySessionKey({
+      sessionKey: "agent:baiying-agent-10002974:direct:s-1:lane:reviewer",
+      accountId: "default",
+      fields: {
+        sessionId: "s-1",
+      },
+    });
+
+    const tool = createByclawChatContextTool({
+      sessionKey: "agent:baiying-agent-10002974:direct:s-1:lane:reviewer",
+    });
+    const result = await tool.execute("call-1", {});
+
+    expect(result.details.messages.map((message) => message.text)).toEqual(["reviewer 私有任务"]);
+    expect(result.content[0].text).not.toContain("coder 私有任务");
   });
 
   it("can scope context to only the current lane", () => {

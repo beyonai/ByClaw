@@ -43,6 +43,7 @@ export interface ByaiLaneMetadata {
   clientRequestId?: string;
   answerMessageId?: string;
   queryMessageId?: string;
+  taskText?: string;
 }
 
 /** SDK 模式入站消息（来自 Redis） */
