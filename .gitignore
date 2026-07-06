@@ -112,3 +112,5 @@ byclaw-data/scene_detail_demo.py
 byclaw-data/search_ontology_demo.py
 byclaw-data/check_trace_prompt.py
 byclaw-data/verify_core_persona_fix.py
+byclaw-data/test_load_skills.py
+byclaw-data/test_skill_parse.py
