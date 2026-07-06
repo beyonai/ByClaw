@@ -15,6 +15,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Consumer;
+import java.util.function.LongSupplier;
 
 /**
  * 兼容 ByteArrayOutputStream 的增量输出流。
@@ -64,6 +65,7 @@ public class DingtalkCardStreamingOutputStream extends ByteArrayOutputStream {
     private static final String FILE_PREVIEW_PATH = "/byaiService/commonFile/view";
     private static final String FILE_PREVIEW_URL_SUFFIX = FILE_PREVIEW_PATH + "?filePath=";
     private static final String WEB_BASE_URL_PARAM_CODE = Constants.WEB_BASE_URL;
+    private static final long DEFAULT_MIN_STREAM_UPDATE_INTERVAL_MILLIS = 300L;
 
     private final ObjectMapper objectMapper;
     private final DingtalkCardService dingtalkCardService;
@@ -71,6 +73,8 @@ public class DingtalkCardStreamingOutputStream extends ByteArrayOutputStream {
     private final Consumer<String> onContentUpdate;
     /** 当前会话用户编码，用于生成文件预览 URL 的 bucketName（byclaw-{userCode}）。 */
     private final String userCode;
+    private final LongSupplier currentTimeMillis;
+    private final long minStreamUpdateIntervalMillis;
     private String filePreviewBaseUrl;
     /**
      * 暂存尚未拼成完整 JSON 对象的输出片段。
@@ -98,6 +102,8 @@ public class DingtalkCardStreamingOutputStream extends ByteArrayOutputStream {
      */
     private String lastReasoningContentType;
     private String lastReasoningOrderId;
+    private boolean cardUpdated;
+    private long lastCardUpdateAtMillis;
     /**
      * 标记卡片 streamingUpdate 是否已经失败。
      * 一旦失败，后续只保留答案文本，不再继续尝试更新卡片，避免连续报错。
@@ -128,11 +134,33 @@ public class DingtalkCardStreamingOutputStream extends ByteArrayOutputStream {
             Consumer<String> onContentUpdate,
             String userCode
     ) {
+        this(
+                objectMapper,
+                dingtalkCardService,
+                session,
+                onContentUpdate,
+                userCode,
+                System::currentTimeMillis,
+                DEFAULT_MIN_STREAM_UPDATE_INTERVAL_MILLIS
+        );
+    }
+
+    DingtalkCardStreamingOutputStream(
+            ObjectMapper objectMapper,
+            DingtalkCardService dingtalkCardService,
+            DingtalkCardStreamSession session,
+            Consumer<String> onContentUpdate,
+            String userCode,
+            LongSupplier currentTimeMillis,
+            long minStreamUpdateIntervalMillis
+    ) {
         this.objectMapper = objectMapper;
         this.dingtalkCardService = dingtalkCardService;
         this.session = session;
         this.onContentUpdate = onContentUpdate;
         this.userCode = userCode;
+        this.currentTimeMillis = currentTimeMillis == null ? System::currentTimeMillis : currentTimeMillis;
+        this.minStreamUpdateIntervalMillis = Math.max(0L, minStreamUpdateIntervalMillis);
     }
 
     @Override
@@ -165,7 +193,7 @@ public class DingtalkCardStreamingOutputStream extends ByteArrayOutputStream {
         flushReasoningTextBuffer();
         updateCopyContent();
         if (!session.isFinalized()) {
-            dingtalkCardService.streamingUpdateAssistantReply(session, buildDisplayContent(), true);
+            flushStreamingContent(buildDisplayContent(), true);
         }
     }
 
@@ -346,8 +374,27 @@ public class DingtalkCardStreamingOutputStream extends ByteArrayOutputStream {
         if (dingtalkCardService == null || session == null) {
             return;
         }
+        if (shouldThrottleCardUpdate()) {
+            return;
+        }
+        flushStreamingContent(displayContent, false);
+    }
+
+    private boolean shouldThrottleCardUpdate() {
+        if (!cardUpdated || minStreamUpdateIntervalMillis <= 0L) {
+            return false;
+        }
+        return currentTimeMillis.getAsLong() - lastCardUpdateAtMillis < minStreamUpdateIntervalMillis;
+    }
+
+    private void flushStreamingContent(String displayContent, boolean isFinalize) {
+        if (dingtalkCardService == null || session == null || session.isFinalized()) {
+            return;
+        }
         try {
-            dingtalkCardService.streamingUpdateAssistantReply(session, displayContent, false);
+            dingtalkCardService.streamingUpdateAssistantReply(session, displayContent, isFinalize);
+            cardUpdated = true;
+            lastCardUpdateAtMillis = currentTimeMillis.getAsLong();
         } catch (Exception e) {
             streamingFailed = true;
             logger.warn("Streaming update failed during chat output, stop card streaming. outTrackId={}",
