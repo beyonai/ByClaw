@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import com.iwhalecloud.byai.manager.domain.aimodel.enums.ModelSourceType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -111,7 +112,7 @@ public class TokenQuotaService {
             if ("PUBLIC".equals(model.getOwnerType())) {
                 return true;
             }
-            if ("TOKEN_SAVER".equals(model.getSourceType())) {
+            if (ModelSourceType.TOKEN_SAVER.equals(model.getSourceType())) {
                 return true;
             }
             return false;
@@ -184,7 +185,7 @@ public class TokenQuotaService {
         if (userId != null) {
             LambdaQueryWrapper<ByaiAimodel> tsQuery = new LambdaQueryWrapper<>();
             tsQuery.eq(ByaiAimodel::getCreateBy, userId)
-                   .eq(ByaiAimodel::getSourceType, "TOKEN_SAVER")
+                   .eq(ByaiAimodel::getSourceType, ModelSourceType.TOKEN_SAVER)
                    .select(ByaiAimodel::getModelNo);
             List<ByaiAimodel> tsModels = byaiAimodelMapper.selectList(tsQuery);
             for (ByaiAimodel m : tsModels) {

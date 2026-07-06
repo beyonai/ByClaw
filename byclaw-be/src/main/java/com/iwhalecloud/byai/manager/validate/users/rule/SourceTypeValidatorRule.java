@@ -16,13 +16,15 @@ import com.iwhalecloud.byai.common.constants.users.SourceType;
 public class SourceTypeValidatorRule implements ConstraintValidator<SourceTypeValidator, Integer> {
 
     /***
-     * @param sourceType 来源类型:0-本系统用户；1-钉钉；2-企业微信
+     * @param sourceType 来源类型:0-本系统用户；1-钉钉；2-企业微信；3-飞书
      * @param constraintValidatorContext 校验
      * @return boolean 校验结果
      */
     @Override
     public boolean isValid(Integer sourceType, ConstraintValidatorContext constraintValidatorContext) {
         // 校验外系统类型
-        return SourceType.DING_TALK.equals(sourceType) || SourceType.WE_CHAT.equals(sourceType);
+        return SourceType.DING_TALK.equals(sourceType)
+                || SourceType.WE_CHAT.equals(sourceType)
+                || SourceType.FEISHU.equals(sourceType);
     }
 }

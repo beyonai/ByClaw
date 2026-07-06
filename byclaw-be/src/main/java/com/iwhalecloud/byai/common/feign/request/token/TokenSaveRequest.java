@@ -6,7 +6,9 @@ import lombok.Setter;
 
 /**
  * 新增/修改令牌请求体（POST / PUT 均为 /api/token/）。
- * <p>无 id 时新增，有 id 时修改。</p>
+ * <p>
+ * 无 id 时新增，有 id 时修改。
+ * </p>
  */
 @Getter
 @Setter
@@ -14,21 +16,19 @@ public class TokenSaveRequest {
 
     private Integer id;
 
-    private Integer status;
-
     private String name;
 
     @JsonProperty("expired_time")
-    private Long expiredTime;
+    private Long expiredTime = -1L;
 
     @JsonProperty("remain_quota")
-    private Integer remainQuota;
+    private int remainQuota;
 
     @JsonProperty("unlimited_quota")
-    private Boolean unlimitedQuota;
+    private boolean unlimitedQuota = true;
 
     @JsonProperty("model_limits_enabled")
-    private Boolean modelLimitsEnabled;
+    private boolean modelLimitsEnabled = false;
 
     @JsonProperty("model_limits")
     private String modelLimits;
@@ -39,5 +39,5 @@ public class TokenSaveRequest {
     private String group;
 
     @JsonProperty("cross_group_retry")
-    private Boolean crossGroupRetry;
+    private boolean crossGroupRetry;
 }

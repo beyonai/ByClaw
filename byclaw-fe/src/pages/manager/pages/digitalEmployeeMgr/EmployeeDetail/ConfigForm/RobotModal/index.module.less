@@ -1,4 +1,20 @@
 // 配置机器人：渠道卡片内表单
+.robotModal {
+  :global(.@{antPrefix}-modal-content) {
+    // 飞书表单字段较多，限制弹窗整体高度，避免内容把页面撑出视口。
+    max-height: 78vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  :global(.@{antPrefix}-modal-body) {
+    // 只让弹窗内容区滚动，标题和底部按钮保持在可见区域。
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+  }
+}
+
 .robotCardHeader {
   display: flex;
   justify-content: space-between;
