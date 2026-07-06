@@ -24,7 +24,7 @@ const showdown = require('./showdown');
 
 // 自定义图片组件，用React.memo包装，避免不必要的重新渲染
 const ImgComponent = React.memo(({ src, alt }: { src: string; alt: string }) => {
-  return <img src={src} alt={alt} />;
+  return <img src={src} alt={alt} key={src} />;
 });
 
 const targetBlankExtension = {

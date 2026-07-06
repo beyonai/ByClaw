@@ -47,7 +47,7 @@ export const tabItems: any[] = [
   {
     key: 'model',
     icon: 'icon-a-Braindanao',
-    activeIcon: 'icon-a-Braindanao',
+    activeIcon: 'icon-brain-filled',
     label: 'common.model',
     ChildComponent: ModelSiderPanel,
     navigatePath: '/models',

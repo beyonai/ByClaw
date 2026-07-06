@@ -115,6 +115,7 @@ export default function useLocateMsg(params: {
       locateTokenRef.current = locateToken;
       removeLazyListener();
       scheduleLocate(params, locateToken);
+      if (!params.targetMessageId) return;
       onLazyCompLoadedCbRef.current = debounceByIdleCallback(() => {
         scrollToMsgOnSessionChanged(params, locateToken);
         removeLazyListener();

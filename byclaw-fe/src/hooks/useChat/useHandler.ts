@@ -332,6 +332,21 @@ function useHandler(props: IProps) {
     return onionsProps;
   }, []);
 
+  const answerCompletedHandler = useCallback(
+    (onionsProps: IOnionsProps) => {
+      const { sseMsg, newAnswerMsg } = onionsProps;
+      // appStreamResponse 是一次问答的最终事件，借此通知文件/知识库等模块仅刷新一次
+      if (sseMsg?.event === 'appStreamResponse') {
+        EventEmitter.emit('chat-answer-completed', {
+          sessionId: newAnswerMsg?.sessionId,
+          messageId: newAnswerMsg?.messageId,
+        });
+      }
+      return onionsProps;
+    },
+    [EventEmitter]
+  );
+
   const browserHandler = useCallback(
     (onionsProps: IOnionsProps) => {
       const { sseRes, newAnswerMsg } = onionsProps;
@@ -387,6 +402,7 @@ function useHandler(props: IProps) {
     textHandler,
     rewriteQuestionHandler,
     browserHandler,
+    answerCompletedHandler,
   };
 }
 

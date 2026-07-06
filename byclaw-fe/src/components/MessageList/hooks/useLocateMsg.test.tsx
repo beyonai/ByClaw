@@ -173,7 +173,35 @@ describe('useLocateMsg', () => {
     expect(infiniteScrollRef.current.scrollByControl).not.toHaveBeenCalled();
   });
 
-  it('uses lazy component loaded event as a locate retry', () => {
+  it('uses lazy component loaded event as a target-message locate retry', () => {
+    const scroller = document.getElementById('scroll-message')!;
+    setScrollMetrics(scroller, {
+      clientHeight: 200,
+      scrollHeight: 800,
+      scrollTop: 100,
+    });
+
+    renderUseLocateMsg();
+
+    act(() => {
+      eventHandlers.scrollToMsgOnSessionChanged({ sessionId: 's1', targetMessageId: 'target' });
+    });
+
+    const lazyListener = mockAddLazyCompLoadedListener.mock.calls[0][0];
+    const target = document.createElement('div');
+    target.id = 'wrapper_target';
+    target.scrollIntoView = jest.fn();
+    document.body.appendChild(target);
+
+    act(() => {
+      lazyListener();
+    });
+
+    expect(target.scrollIntoView).toHaveBeenCalledWith({ block: 'start' });
+    expect(mockRemoveLazyCompLoadedListener).toHaveBeenCalledWith(lazyListener);
+  });
+
+  it('does not keep lazy locate retry after normal session open without target message', () => {
     const scroller = document.getElementById('scroll-message')!;
     setScrollMetrics(scroller, {
       clientHeight: 200,
@@ -187,14 +215,7 @@ describe('useLocateMsg', () => {
       eventHandlers.scrollToMsgOnSessionChanged({ sessionId: 's1' });
     });
 
-    const lazyListener = mockAddLazyCompLoadedListener.mock.calls[0][0];
-
-    act(() => {
-      lazyListener();
-    });
-
-    expect(infiniteScrollRef.current.scrollToBottom).toHaveBeenCalledTimes(2);
-    expect(mockRemoveLazyCompLoadedListener).toHaveBeenCalledWith(lazyListener);
+    expect(mockAddLazyCompLoadedListener).not.toHaveBeenCalled();
   });
 
   it('ignores stale lazy locate callbacks after cleanup', () => {
@@ -208,7 +229,7 @@ describe('useLocateMsg', () => {
     const { unmount } = renderUseLocateMsg();
 
     act(() => {
-      eventHandlers.scrollToMsgOnSessionChanged({ sessionId: 's1' });
+      eventHandlers.scrollToMsgOnSessionChanged({ sessionId: 's1', targetMessageId: 'target' });
     });
 
     const lazyListener = mockAddLazyCompLoadedListener.mock.calls[0][0];

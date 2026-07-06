@@ -59,7 +59,7 @@ public class SystemConfigService {
         if (paramId == null) {
             return null;
         }
-        return dcSystemConfigMapper.selectById(paramId);
+        return dcSystemConfigMapper.selectOneByParamId(paramId);
     }
 
     /***
@@ -115,7 +115,7 @@ public class SystemConfigService {
         if (paramId == null) {
             return;
         }
-        dcSystemConfigMapper.deleteById(paramId);
+        dcSystemConfigMapper.deleteOneByParamId(paramId);
     }
 
     /**
@@ -179,6 +179,7 @@ public class SystemConfigService {
         }
         LambdaQueryWrapper<ByaiSystemConfig> queryWrapper = new LambdaQueryWrapper<>();
         queryWrapper.eq(ByaiSystemConfig::getParamCode, paramCode);
+        queryWrapper.last("LIMIT 1");
         return dcSystemConfigMapper.selectOne(queryWrapper);
     }
 

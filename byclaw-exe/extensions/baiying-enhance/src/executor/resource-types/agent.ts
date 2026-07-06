@@ -634,6 +634,7 @@ You MUST:
       id: crypto.randomUUID(),
       sessionId,
       traceId,
+      orderId: crypto.randomUUID(),
       parentMessageId: parameters.tool_call_id as string,
     },
   );
@@ -788,6 +789,7 @@ function createSerializedByFrameworkStreamSender(emitter: GatewayDataEmitter, pa
   id: string;
   sessionId: string;
   traceId: string;
+  orderId: string;
   parentMessageId?: string;
 }) {
   let previousEmit = Promise.resolve();
@@ -812,6 +814,7 @@ async function sendSseStreamDataViaByFramework(data: Dict, emitter: GatewayDataE
   id: string;
   sessionId: string;
   traceId: string;
+  orderId: string;
   parentMessageId?: string;
 }) {
   await emitter.emitEvent({
@@ -824,7 +827,7 @@ async function sendSseStreamDataViaByFramework(data: Dict, emitter: GatewayDataE
       created: Math.floor(Date.now() / 1000),
       model: "",
       object: "",
-      orderId: null,
+      orderId: params.orderId,
       parentOrderId: params.parentMessageId,
     },
     eventType: EventType.REASONING_LOG_DELTA,

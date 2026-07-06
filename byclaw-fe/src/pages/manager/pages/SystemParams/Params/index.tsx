@@ -58,9 +58,12 @@ const SystemParams = () => {
   const [valueViewerRecord, setValueViewerRecord] = React.useState<SystemParamsItem | null>(null);
 
   const curParam = React.useRef<{ pageIndex?: number; pageSize?: number; keyword?: string }>({});
+  const requestSeqRef = React.useRef(0);
 
   const mySelectSystemConfigByQo = React.useCallback(
     (myPageInfo: { pageIndex: number; pageSize: number }, keyword?: string) => {
+      const requestSeq = requestSeqRef.current + 1;
+      requestSeqRef.current = requestSeq;
       setIsLoading(true);
 
       const p = {
@@ -73,19 +76,28 @@ const SystemParams = () => {
 
       return selectSystemConfigByQo(p)
         .then((data: any) => {
-          const { list, ...restPageInfo } = data || {};
+          if (requestSeq !== requestSeqRef.current) {
+            return;
+          }
+          const pageData = data?.data || data || {};
+          const { list: nextList, pageNum, totalPages, ...restPageInfo } = pageData;
 
-          setList(list);
+          setList(Array.isArray(nextList) ? nextList : []);
 
           setPageInfo((prevState) => {
             return {
               ...prevState,
               ...restPageInfo,
+              pageIndex: pageData.pageIndex || pageNum || myPageInfo.pageIndex,
+              pageSize: pageData.pageSize || myPageInfo.pageSize,
+              totalPage: pageData.totalPage || totalPages || prevState.totalPage,
             };
           });
         })
         .finally(() => {
-          setIsLoading(false);
+          if (requestSeq === requestSeqRef.current) {
+            setIsLoading(false);
+          }
         });
     },
     []
@@ -268,8 +280,13 @@ const SystemParams = () => {
                           curParam.current?.keyword
                         );
                       } else {
-                        message.error(res?.msg);
+                        message.error(res?.msg || intl.formatMessage({ id: 'SystemParams.common.operationFail' }));
                       }
+                    })
+                    .catch((error: any) => {
+                      message.error(
+                        error?.message || error?.msg || intl.formatMessage({ id: 'SystemParams.common.operationFail' })
+                      );
                     })
                     .finally(() => {
                       setIsLoading(false);
@@ -413,7 +430,7 @@ const SystemParams = () => {
         </div>
         <div className={classNames('ub-f1', styles.tableScroll)}>
           <Table<SystemParamsItem>
-            rowKey="paramId"
+            rowKey={(record, index) => `${record.paramId || record.paramCode || 'system-param'}-${index}`}
             columns={columns}
             dataSource={list}
             pagination={{
@@ -491,7 +508,8 @@ const SystemParams = () => {
               type="primary"
               icon={<CopyOutlined />}
               onClick={() => {
-                const text = valueViewerRecord.paramValue;
+                const text = valueViewerRecord?.paramValue || '';
+                if (!text) return;
                 copy(text);
                 message.success(intl.formatMessage({ id: 'SystemParams.statics.copySuccess' }));
               }}

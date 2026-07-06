@@ -41,3 +41,13 @@ export interface EmployeeResourceDrillState {
   breadcrumb: EmployeeResourceDrillBreadcrumb[];
   list: ResourceItem[];
 }
+
+export interface EmployeeResourceGroup {
+  key: 'current' | 'personal' | 'enterprise';
+  title: string;
+  description?: string;
+  list: any[];
+  quoteDisabled?: boolean;
+}
+
+export type KnowledgeResourceGroup = EmployeeResourceGroup;

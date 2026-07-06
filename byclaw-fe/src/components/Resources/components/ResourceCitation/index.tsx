@@ -5,6 +5,9 @@ import { debounce, trim } from 'lodash';
 import classnames from 'classnames';
 import AntdIcon from '@/components/AntdIcon';
 import withDrag, { DragType } from '@/components/QueryInput/withDrag';
+import { ResourceTypeMap } from '@/constants/resource';
+import { getResourceImageUrl } from '@/layout/sider/components/ResourceSiderPanel/ResourceSiderListItem';
+import { getFileUrl } from '@/utils/file';
 import styles from './index.module.less';
 import employeeStyles from '@/layout/sider/components/EmployeeList/index.module.less';
 // import Empty from '@/components/Empty';
@@ -14,9 +17,11 @@ import {
   queryDigEmployeeRelResourceAuth,
   queryResourceMembers,
   qryByClawFileByUserCode,
+  queryWorkspaceSkillList,
   readFile,
   downloadSkillZip,
 } from '@/pages/manager/service/resources';
+import { mapWorkspaceSkillRows, isWorkspaceSkill } from '@/components/Resources/workspaceSkill/utils';
 import useGlobal from '@/hooks/useGlobal';
 
 const Draggable = withDrag(DragType.tool);
@@ -99,6 +104,7 @@ const ResourceList = (props: Props) => {
   const [relatedObjectLoading, setRelatedObjectLoading] = useState(false);
   const [downloadingSkill, setDownloadingSkill] = useState<string | null>(null);
   const [deletingSkill, setDeletingSkill] = useState<string | null>(null);
+  const [failedResourceImageUrls, setFailedResourceImageUrls] = useState<Set<string>>(() => new Set());
 
   const intl = useIntl();
   const { userInfo } = useSelector((state: any) => state.user);
@@ -204,6 +210,28 @@ const ResourceList = (props: Props) => {
             Array.isArray(currentResourceBizTypeList) && currentResourceBizTypeList.length
               ? allRows.filter((item: any) => currentResourceBizTypeList.includes(item.resourceBizType))
               : allRows;
+          // 与左侧“技能中心”同口径：技能 tab 首屏在“已绑定技能”之外，合并“用户开发（工作空间未绑定）”技能。
+          if (myResourceType === 'SKILL' && reset) {
+            try {
+              const workspaceSkillResponse: any = await queryWorkspaceSkillList({
+                resourceId: normalizedAgentId,
+                userCode: userInfo?.userCode,
+                keyword: searchValue.current.trim(),
+              });
+              const workspaceRaw = Array.isArray(workspaceSkillResponse)
+                ? workspaceSkillResponse
+                : Array.isArray(workspaceSkillResponse?.data)
+                  ? workspaceSkillResponse.data
+                  : Array.isArray(workspaceSkillResponse?.rows)
+                    ? workspaceSkillResponse.rows
+                    : Array.isArray(workspaceSkillResponse?.list)
+                      ? workspaceSkillResponse.list
+                      : [];
+              rows = [...rows, ...mapWorkspaceSkillRows(workspaceRaw)];
+            } catch (error) {
+              console.warn('query workspace skills failed', error);
+            }
+          }
         } else {
           const response = await listResourceUseAuth({
             pageSize,
@@ -389,24 +417,71 @@ const ResourceList = (props: Props) => {
     }
   };
 
+  const renderCompactAvatar = (item: IResourceItem) => {
+    const resourceImage = getResourceImageUrl(item);
+    const resourceImageUrl = resourceImage ? getFileUrl(resourceImage) : '';
+    const imageLoadFailed = resourceImageUrl ? failedResourceImageUrls.has(resourceImageUrl) : false;
+
+    if (resourceType === 'SKILL' && resourceImageUrl && !imageLoadFailed) {
+      return (
+        <img
+          key={resourceImageUrl}
+          className={styles.compactAvatarImage}
+          src={resourceImageUrl}
+          alt=""
+          fetchPriority="low"
+          onError={() => {
+            setFailedResourceImageUrls((prev) => {
+              if (prev.has(resourceImageUrl)) {
+                return prev;
+              }
+              const next = new Set(prev);
+              next.add(resourceImageUrl);
+              return next;
+            });
+          }}
+        />
+      );
+    }
+
+    if (resourceType === 'SKILL' && (item.resourceBizType === ResourceTypeMap.SKILL || imageLoadFailed)) {
+      return (
+        <span className={styles.skillDefaultAvatar}>
+          <span className={styles.skillDefaultAvatarOrb} />
+        </span>
+      );
+    }
+
+    return <AntdIcon type={getResourceIcon(item.resourceName)} className={styles.defaultLogoIcon} />;
+  };
+
   // 处理技能下载（带防抖）
   const handleDownloadSkill = useMemo(() => {
     const download = async (item: IResourceItem) => {
-      const skillPath = item.skillUrl || item.skillPath;
-      if (!skillPath) {
+      // 资源化（已绑定）技能与用户开发（工作空间未绑定）技能的存储路径命名空间不同：
+      // - 资源化技能：按 skillId 走资源包下载；
+      // - 工作空间技能：按 skillPath 打包 /.openclaw/workspace-baiying-agent-{resourceId}/skills 下的目录。
+      // 不能都塞进 skillPath，否则工作空间技能会命中资源下载校验而报错。
+      const workspace = isWorkspaceSkill(item as any);
+      if (workspace ? !item.skillPath : !item.resourceId) {
         message.error(intl.formatMessage({ id: 'resource.skillDownload.noSkillPath' }));
         return;
       }
-      setDownloadingSkill(skillPath);
+      setDownloadingSkill(`${workspace ? item.skillPath : item.resourceId}`);
 
       try {
-        const params: { skillPath: string; resourceId?: string | number; userCode?: string } = { skillPath };
-        if (normalizedAgentId) {
-          params.resourceId = normalizedAgentId;
-        }
-        if (userInfo?.userCode) {
-          params.userCode = userInfo.userCode;
-        }
+        const params: {
+          skillPath?: string;
+          skillId?: string | number;
+          resourceId?: string | number;
+          userCode?: string;
+        } = workspace
+          ? {
+            skillPath: item.skillPath as string,
+            ...(normalizedAgentId ? { resourceId: normalizedAgentId } : {}),
+            ...(userInfo?.userCode ? { userCode: userInfo.userCode } : {}),
+          }
+          : { skillId: item.resourceId };
 
         const response = await downloadSkillZip(params);
 
@@ -842,14 +917,9 @@ const ResourceList = (props: Props) => {
                 <List.Item
                   className={classnames(styles.compactListItem, { [styles.disabledCard]: disableClick })}
                   onClick={disableClick ? undefined : () => onSelect?.({ ...item, isFromResourceModule: true })}
-                  actions={[renderActionDropdown(item, 'list')].filter(Boolean) as React.ReactNode[]}
                 >
                   <List.Item.Meta
-                    avatar={
-                      <span className={styles.compactAvatar}>
-                        <AntdIcon type={getResourceIcon(item.resourceName)} className={styles.defaultLogoIcon} />
-                      </span>
-                    }
+                    avatar={<span className={styles.compactAvatar}>{renderCompactAvatar(item)}</span>}
                     title={
                       <span className={styles.compactTitleRow}>
                         <span className={styles.nameText}>{item.resourceName}</span>
@@ -860,6 +930,7 @@ const ResourceList = (props: Props) => {
                       item.resourceDesc ? <span className={styles.compactDesc}>{item.resourceDesc}</span> : null
                     }
                   />
+                  <span className={styles.compactActionWrapper}>{renderActionDropdown(item, 'list')}</span>
                 </List.Item>
               </Draggable>
             )}

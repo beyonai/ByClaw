@@ -27,36 +27,39 @@
 }
 
 .skillPosterCard {
-  height: auto;
+  height: 112px;
   min-height: 0;
-  display: inline-flex;
+  display: flex;
   border: none;
-  border-radius: 22px;
+  border-radius: 32px;
   background: #fff;
-  box-shadow: 0 10px 26px rgba(20, 22, 26, 0.05);
+  box-shadow: 0 6px 18px rgba(20, 22, 26, 0.04);
   overflow: hidden;
 
   &:hover {
-    box-shadow: 0 18px 42px rgba(20, 22, 26, 0.12);
+    box-shadow: 0 10px 28px rgba(20, 22, 26, 0.09);
     transform: translateY(-2px);
   }
 }
 
 .skillPosterContent {
+  position: relative;
   width: 100%;
-  padding: 12px 12px 16px;
+  height: 100%;
+  padding: 14px 22px 14px 18px;
   display: flex;
-  flex-direction: column;
-  gap: 10px;
+  align-items: center;
+  gap: 20px;
 }
 
 .skillPosterImageWrap {
   position: relative;
-  width: 100%;
-  aspect-ratio: var(--skill-poster-aspect, 4 / 3);
-  border-radius: 20px;
+  width: 74px;
+  height: 74px;
+  flex-shrink: 0;
+  border-radius: 14px;
   overflow: hidden;
-  background: linear-gradient(135deg, #eaf6ff 0%, #fff0db 100%);
+  background: linear-gradient(135deg, #edf7ff 0%, #fff3df 100%);
   box-shadow: inset 0 0 0 1px rgba(20, 22, 26, 0.04);
 }
 
@@ -71,7 +74,7 @@
   width: 100%;
   height: 100%;
   position: relative;
-  padding: 22px;
+  padding: 9px;
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
@@ -82,39 +85,60 @@
 
 .skillPosterOrb {
   position: absolute;
-  top: 18%;
-  right: 16%;
-  width: 42%;
-  aspect-ratio: 1;
+  top: 12px;
+  right: 10px;
+  width: 30px;
+  height: 30px;
   border-radius: 999px;
   background: linear-gradient(135deg, rgba(255, 255, 255, 0.95), rgba(255, 172, 116, 0.5));
-  box-shadow: 0 18px 60px rgba(217, 103, 61, 0.22);
+  box-shadow: 0 10px 24px rgba(217, 103, 61, 0.18);
 }
 
 .skillPosterPlaceholderSub {
   position: relative;
   width: fit-content;
-  padding: 5px 10px;
+  padding: 2px 6px;
   border-radius: 999px;
   color: rgba(20, 22, 26, 0.66);
   background: rgba(255, 255, 255, 0.72);
-  font-size: 14px;
+  font-size: 10px;
   font-weight: 700;
   backdrop-filter: blur(8px);
 }
 
+.skillPosterBody {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.skillPosterHeader {
+  position: relative;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .skillPosterTag {
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  max-width: calc(100% - 24px);
-  padding: 4px 8px;
+  flex-shrink: 0;
+  max-width: 72px;
+  padding: 2px 6px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.88);
-  backdrop-filter: blur(8px);
-  box-shadow: 0 6px 16px rgba(20, 22, 26, 0.08);
-  font-size: 12px;
+  color: #6a4af5;
+  background: rgba(106, 74, 245, 0.1);
+  font-size: 11px;
   font-weight: 700;
+
+  .tagText {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 }
 
 .skillPosterAction {
@@ -127,8 +151,24 @@
 
 .skillPosterActionBtn {
   border: none;
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 6px 18px rgba(20, 22, 26, 0.12);
+  color: #14161a;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 6px 18px rgba(20, 22, 26, 0.1);
+
+  .cardActionBtnIcon {
+    color: inherit;
+  }
+
+  &:hover,
+  &:focus,
+  &:active {
+    color: #14161a;
+    background: rgba(255, 255, 255, 0.96);
+
+    .cardActionBtnIcon {
+      color: inherit;
+    }
+  }
 }
 
 .skillPosterCard:hover .skillPosterAction {
@@ -136,53 +176,76 @@
 }
 
 .skillPosterTitle {
-  margin: 8px 8px 0 !important;
+  flex: 1;
+  min-width: 0;
+  margin: 0 !important;
   color: #14161a;
-  font-size: 20px;
-  line-height: 27px;
-  font-weight: 800;
+  font-size: 15px;
+  line-height: 21px;
+  font-weight: 700;
 }
 
 .skillPosterDesc {
-  margin: 0 8px !important;
-  color: #737b88;
-  font-size: 14px;
-  line-height: 22px;
+  margin: 4px 0 0 !important;
+  color: #8f98a6;
+  font-size: 12px;
+  line-height: 18px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .skillPosterFooter {
-  margin: 2px 8px 0;
+  margin-top: 8px;
   display: flex;
   align-items: center;
-  gap: 10px;
-  color: #a0a7b2;
+  gap: 8px;
+  color: #a3abb7;
 }
 
-.skillPosterCreator {
-  flex: 1;
+.skillPosterSource {
+  max-width: 55%;
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
 }
 
-.skillPosterCreatorAvatar {
+.skillPosterSourceIcon {
+  width: 15px;
+  height: 15px;
   flex-shrink: 0;
-  background: linear-gradient(135deg, #e8f4ff, #fff1da);
-  color: #456078;
-  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: #7f8b99;
+  background: #f0f3f7;
+  font-size: 10px;
 }
 
 .skillPosterCreatorName {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 13px;
+  font-size: 12px;
+}
+
+.skillPosterDivider {
+  width: 1px;
+  height: 12px;
+  flex-shrink: 0;
+  background: #d8dde5;
 }
 
 .skillPosterUseCount {
+  min-width: 0;
   flex-shrink: 0;
-  font-size: 13px;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tag {
@@ -207,6 +270,43 @@
     background-clip: text;
     -webkit-text-fill-color: transparent;
     color: #088cff;
+  }
+}
+
+.digitalEmployeeTag {
+  line-height: 100%;
+  padding: 3px 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+
+  .tagText {
+    font-size: 14px;
+  }
+}
+
+.digitalEmployeeDefaultTag {
+  .digitalEmployeeTag;
+
+  padding: 4px 6px;
+  background: linear-gradient(90deg, #315dff 0%, #bf5cff 100%);
+
+  .tagText {
+    background: none;
+    -webkit-text-fill-color: #fff;
+    color: #fff;
+  }
+}
+
+.digitalEmployeePersonalTag {
+  .digitalEmployeeTag;
+
+  background: linear-gradient(90deg, #088cff 0%, #00cdd5 100%);
+
+  .tagText {
+    background: none;
+    -webkit-text-fill-color: #fff;
+    color: #fff;
   }
 }
 
@@ -327,9 +427,9 @@
 
 .cardActionBtn {
   display: none;
-  &:hover {
-    color: #165dff;
-  }
+  // &:hover {
+  //   color: #165dff;
+  // }
 }
 
 .resourceCard:hover .cardActionBtn {
@@ -343,6 +443,7 @@
   margin-bottom: 0 !important;
   display: -webkit-box;
   -webkit-line-clamp: 2;
+  line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -452,9 +553,9 @@
   right: 14px;
   display: none;
 
-  &:hover {
-    color: #165dff;
-  }
+  // &:hover {
+  //   color: #165dff;
+  // }
 }
 
 .resourceCard:hover .cardActionBtn {
