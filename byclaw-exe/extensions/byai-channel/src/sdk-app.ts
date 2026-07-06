@@ -49,6 +49,20 @@ export interface ByaiSdkAppOptions {
 
 type ByaiSdkLogger = NonNullable<ByaiSdkAppOptions["log"]>;
 
+function buildLaneAssignmentLogItem(message: ByaiSdkInboundMessage, index: number) {
+  const lane = message.laneMetadata;
+  return {
+    index,
+    laneId: lane?.laneId ?? "",
+    agentId: lane?.agentId ?? "",
+    agentCode: lane?.agentCode ?? "",
+    agentName: lane?.agentName ?? "",
+    traceId: message.traceId,
+    messageId: message.messageId,
+    query: message.text,
+  };
+}
+
 async function getInboundMessageFromByFramework(data: AskAgentCommand) {
   let questionText = "";
   let files: SdkInboundFile[] | undefined;
@@ -430,6 +444,13 @@ export class ByaiSdkApp {
             .map((item) => item.laneMetadata?.laneId ?? item.laneMetadata?.agentName ?? item.traceId)
             .join(",")}`,
         );
+        inboundMessages.forEach((message, index) => {
+          info?.(
+            `[${this.account.accountId}] byai-channel multi-agent lane assignment: sessionId=${sessionId}, assignment=${JSON.stringify(
+              buildLaneAssignmentLogItem(message, index),
+            )}`,
+          );
+        });
       }
 
       // 写 sessionId 到文件，供 executor.py 读取并注入 X-Session-Id header
