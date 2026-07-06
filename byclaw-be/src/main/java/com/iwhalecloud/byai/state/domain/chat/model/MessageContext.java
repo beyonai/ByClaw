@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.state.domain.chat.model;
 
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
 import java.util.Set;
 
@@ -102,6 +103,11 @@ public class MessageContext {
     private Boolean complete = false;
 
     /**
+     * 当前消息第一次产生可见响应的时间。multi-agent 场景下每个 lane 使用独立 MessageContext 记录。
+     */
+    private Date firstResponseTime;
+
+    /**
      * 记录任务的调用情况
      */
     private String callLogs;
@@ -179,6 +185,12 @@ public class MessageContext {
         this.type = inputType;
         this.messageId = messageId;
         this.taskId = taskId;
+    }
+
+    public synchronized void markFirstResponseTimeIfAbsent(Date responseTime) {
+        if (firstResponseTime == null && responseTime != null) {
+            firstResponseTime = responseTime;
+        }
     }
 
     /**

@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.state.domain.chat.model;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.util.Date;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
@@ -45,6 +46,18 @@ class MessageContextTest {
         MessageContext inferContext = new MessageContext();
         inferContext.recordInferLog(answerDelta("visible thought", "thought-order"));
         assertThat(inferContext.hasPersistableContent()).isTrue();
+    }
+
+    @Test
+    void markFirstResponseTimeIfAbsent_keepsEarliestResponseTime() {
+        MessageContext context = new MessageContext();
+        Date firstResponseTime = new Date(1000L);
+        Date laterResponseTime = new Date(2000L);
+
+        context.markFirstResponseTimeIfAbsent(firstResponseTime);
+        context.markFirstResponseTimeIfAbsent(laterResponseTime);
+
+        assertThat(context.getFirstResponseTime()).isEqualTo(firstResponseTime);
     }
 
     private static String answerDelta(String content, String orderId) {

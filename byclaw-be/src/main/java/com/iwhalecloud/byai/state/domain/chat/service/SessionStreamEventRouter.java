@@ -127,7 +127,7 @@ public class SessionStreamEventRouter {
         MessageContext messageContext = ctx.resolveMessageContext(receivedTraceId);
         pythonSseService.getContentFromPythonStreamV3(lineJson.toJSONString(), ctx.res,
             messageContext, ctx.getAgentIds(), ctx);
-        runningChatSnapshotService.save(ctx);
+        runningChatSnapshotService.save(ctx, receivedTraceId, messageContext);
 
         if (SseResponseEventEnum.appStreamResponse.equals(eventType)) {
             if (messageContext != null) {
