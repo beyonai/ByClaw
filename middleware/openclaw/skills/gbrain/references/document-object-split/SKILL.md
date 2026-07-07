@@ -10,6 +10,18 @@ description: |
   字段取值结合文档内容适当抽取填写。完成后输出 page 清单并询问是否导出。
   再次拆分时按 external_id 匹配已有 page 更新。
 triggers:
+  - "整理文档"
+  - "拆分文档"
+  - "文档整理"
+  - "文档拆分"
+  - "帮我整理文档"
+  - "帮我拆分文档"
+  - "整理一下文档"
+  - "拆分一下文档"
+  - "按文档整理"
+  - "按文档拆分"
+  - "organize document"
+  - "split document"
   - "document object split"
   - "文档对象拆分"
   - "文档内容拆分"
@@ -712,6 +724,17 @@ Document object split complete:
 用户确认导出后，写入 **当前 Agent 工作目录**（Cursor 会话 workspace / `$PWD`），
 **不要** 写到 `~/.gbrain` 或 brain repo 根目录。
 
+> **Iron rule（导出写入）：** 每个 page **必须直接落盘为文件**，禁止把 `gbrain get` / `get_page`
+> 的完整 markdown **打印到对话里**再人工整理、复制或二次排版。
+>
+> ✅ 正确：`gbrain get requirements/baiying-ai-skill-dispatch > requirements/baiying-ai-skill-dispatch.md`
+>
+> ❌ 错误：先执行 `gbrain get requirements/baiying-ai-skill-dispatch` 把 stdout 展示给用户，
+> 再在对话中重组内容后写入 md。
+>
+> CLI 用 shell 重定向（`>`）；MCP 用 `get_page` 取内容后 **直接 write 到**
+> `{EXPORT_ROOT}/{slug}.md`，**不要** 在回复中贴出整页 markdown 正文。
+
 **8a. 输出目录**
 
 ```bash
@@ -738,11 +761,13 @@ mkdir -p "$EXPORT_ROOT"
 SLUG="requirements/baiying-ai-skill-dispatch"
 mkdir -p "$(dirname "$EXPORT_ROOT/$SLUG.md")"
 gbrain get "$SLUG" > "$EXPORT_ROOT/$SLUG.md"
+# 等价于在项目根：gbrain get requirements/baiying-ai-skill-dispatch > requirements/baiying-ai-skill-dispatch.md
 ```
 
 - 完整路径：`{EXPORT_ROOT}/{slug}.md`（slug 含 `/` 时保留目录层级）
+- **一条 slug 一条 shell 重定向**（或一次 MCP 写文件）；stdout **只进文件**，不进入 Agent 回复
 - 使用 `gbrain get` 输出完整 markdown（frontmatter + body + timeline）
-- MCP 环境用 `get_page` 写入同一路径 `{EXPORT_ROOT}/{slug}.md`
+- MCP 环境：`get_page(slug)` → 将返回的 markdown **原样写入** `{EXPORT_ROOT}/{slug}.md`，禁止在对话中输出后再整理
 
 **8c. 导出关系**
 
@@ -843,6 +868,7 @@ gbrain search "external_id REQ-001"
 - Properties 表行数/键名与 Redis schema 不一致（必须一一对应 `property_code`）
 - 拆分完成后不列出 touched page 清单
 - 不询问用户、自动导出到工作空间（须 Phase 7 确认）
+- **导出时用 `gbrain get` / `get_page` 把整页 markdown 打印到对话再整理**（须 shell `>` 或 MCP 直接写 `{slug}.md`）
 - 导出时不用 `{slug}.md` 命名（如改用 title.md、REQ-001.md）
 - 导出时合并多个 page 到一个 md
 - 导出关系时包含本次未导出的 foreign page（应过滤）
@@ -867,7 +893,7 @@ gbrain search "external_id REQ-001"
 |------|------|
 | `get_object_detail.py` | **Phase 1 必调** — 按 `resource_id` 从 Redis 读各对象类型 schema |
 | `get_page` | 加载 hub / 匹配已有对象页 |
-| `get_page` / `gbrain get` | 导出单页 markdown |
+| `gbrain get` / `get_page` | **Phase 8 导出**：重定向或写文件到 `{EXPORT_ROOT}/{slug}.md`；**禁止**在对话中输出全文再整理 |
 | `get_links` / `get_backlinks` / `traverse_graph` / `gbrain graph-query` | 收集导出集合内的关系边 |
 | `search` / `query` | external_id 与语义 dedup |
 | `put_page` | 每个对象实例一次；更新 hub Index |

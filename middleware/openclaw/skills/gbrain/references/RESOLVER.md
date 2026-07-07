@@ -28,6 +28,7 @@ This is the dispatcher. Skills are the implementation. **Read the skill file bef
 | "Research", "track", "extract from email", "investor updates", "donations" | `references/data-research/SKILL.md` |
 | Share a brain page as a link | `references/publish/SKILL.md` |
 | "validate frontmatter", "check frontmatter", "fix frontmatter", "frontmatter audit", "brain lint" | `references/frontmatter-guard/SKILL.md` |
+| "整理文档", "拆分文档", "文档整理", "文档拆分", "帮我整理/拆分文档", "整理一下文档", "拆分一下文档", "按文档整理", "按文档拆分", "文档对象拆分", "文档内容拆分", "按对象拆分", "数字员工对象", "拆分需求/业务对象", "拆需求", "拆 bug", "从会议/PRD/PDF 提需求", "extract requirements and bugs", "PRD 提需求", "document object split", "organize document", "split document" | `references/document-object-split/SKILL.md` |
 | "what search mode", "is my cache hot", "tune my retrieval", "compare search modes", "clear search overrides" | `gbrain search modes/stats/tune` directly. See `references/conventions/search-modes.md` |
 | "eval results", "search benchmark", "haters-immune methodology", "regression check on retrieval" | `gbrain eval run-all` / `gbrain eval compare`. See `docs/eval/SEARCH_MODE_METHODOLOGY.md` |
 
@@ -39,7 +40,7 @@ This is the dispatcher. Skills are the implementation. **Read the skill file bef
 | User shares a link, article, tweet, or idea | `references/idea-ingest/SKILL.md` |
 | "watch this video", "process this YouTube link", "ingest this PDF", "save this podcast", "process this book", "summarize this book", "PDF book", "ingest it into my brain", "what's in this screenshot", "check out this repo" | `references/media-ingest/SKILL.md` |
 | Meeting transcript received | `references/meeting-ingestion/SKILL.md` |
-| "文档对象拆分", "文档内容拆分", "按对象拆分", "数字员工对象", "拆分需求/业务对象", "拆需求", "拆 bug", "从会议/PRD/PDF 提需求", "extract requirements and bugs", "PRD 提需求", "document object split" | `skills/document-object-split/SKILL.md` |
+| "整理文档", "拆分文档", "文档整理", "文档拆分", "帮我整理/拆分文档", "整理一下文档", "拆分一下文档", "按文档整理", "按文档拆分", "文档对象拆分", "文档内容拆分", "按对象拆分", "数字员工对象", "拆分需求/业务对象", "拆需求", "拆 bug", "从会议/PRD/PDF 提需求", "extract requirements and bugs", "PRD 提需求", "document object split", "organize document", "split document" | `references/document-object-split/SKILL.md` |
 | Generic "ingest this" (auto-routes to above) | `references/ingest/SKILL.md` |
 
 ## Thinking skills (from GStack)
@@ -107,8 +108,9 @@ When multiple skills could match:
 1. Prefer the most specific skill (meeting-ingestion over ingest)
 2. If the user mentions a URL, route by content type (link → idea-ingest, video → media-ingest)
 3. If the user mentions a person/company, check if enrich or query fits better
-4. Chaining is explicit in each skill's Phases section
-5. When in doubt, ask the user (see `references/ask-user/SKILL.md` for the choice-gate pattern)
+4. **「整理文档」「拆分文档」及 Ontology 对象拆分意图** → `document-object-split`（不是 `eiirp` 通用归档，也不是 generic `ingest`）
+5. Chaining is explicit in each skill's Phases section
+6. When in doubt, ask the user (see `references/ask-user/SKILL.md` for the choice-gate pattern)
 
 ## Conventions (cross-cutting)
 
