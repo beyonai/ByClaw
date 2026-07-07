@@ -424,6 +424,7 @@ const ConfigForm = (props) => {
   const [robotModalOpen, setRobotModalOpen] = useState(false);
   const [modelPopoverOpen, setModelPopoverOpen] = useState(false);
   const [robotItem, setRobotItem] = useState<RobotConfig>({ channel: '' });
+  const [robotEditingIndex, setRobotEditingIndex] = useState<number | null>(null);
   const [templateData, setTemplateData] = useState([]);
   const [promptTextMaxLength, setPromptTextMaxLength] = useState(PROMPT_TEXT_FIELD_DEFAULT_MAX_LENGTH);
   const [configurableTabs, setConfigurableTabs] = useState<
@@ -696,20 +697,37 @@ const ConfigForm = (props) => {
     };
   }, []);
 
-  const handleRobotModalOk = useCallback((item) => {
-    setRobotModalOpen(false);
-    setRobotConfigs((prev) => {
-      const nextKey = getRobotConfigKey(item);
-      if (nextKey) {
-        const target = prev.find((it) => getRobotConfigKey(it) === nextKey);
-        if (target) {
-          return prev.map((it) => (getRobotConfigKey(it) === nextKey ? item : it));
+  const handleRobotModalOk = useCallback(
+    (item) => {
+      setRobotModalOpen(false);
+      setRobotConfigs((prev) => {
+        // appId/clientId 等身份字段允许编辑，不能用它们判断“当前编辑的是哪一条”。
+        // 编辑入口会记录数组下标，保存时优先按下标替换原配置，避免修改 appId 后被当成新增机器人。
+        if (robotEditingIndex !== null && robotEditingIndex >= 0 && robotEditingIndex < prev.length) {
+          return prev.map((it, index) => (index === robotEditingIndex ? item : it));
         }
-        return [...prev, item];
-      }
 
-      return [...prev, item];
-    });
+        const nextKey = getRobotConfigKey(item);
+        if (nextKey) {
+          const target = prev.find((it) => getRobotConfigKey(it) === nextKey);
+          if (target) {
+            return prev.map((it) => (getRobotConfigKey(it) === nextKey ? item : it));
+          }
+          return [...prev, item];
+        }
+
+        return [...prev, item];
+      });
+      setRobotEditingIndex(null);
+    },
+    [robotEditingIndex, setRobotConfigs]
+  );
+
+  const handleRobotModalOpenChange = useCallback((nextOpen) => {
+    setRobotModalOpen(nextOpen);
+    if (!nextOpen) {
+      setRobotEditingIndex(null);
+    }
   }, []);
 
   const normalizeSkillType = useCallback((type) => {
@@ -2396,6 +2414,7 @@ const ConfigForm = (props) => {
                         size="small"
                         disabled={isReadOnly}
                         onClick={() => {
+                          setRobotEditingIndex(null);
                           setRobotItem({});
                           setRobotModalOpen(true);
                         }}
@@ -2404,11 +2423,14 @@ const ConfigForm = (props) => {
                       </Button>
                     )}
                   </div>
-                  {robotConfigs.map((item) => {
+                  {robotConfigs.map((item, index) => {
                     const robotConfigKey = getRobotConfigKey(item);
                     const channelLabel = getRobotChannelLabel(item.channel);
                     return (
-                      <Card key={robotConfigKey} className={classnames(styles.configCard, styles.skillCard)}>
+                      <Card
+                        key={`${robotConfigKey || 'robot'}-${index}`}
+                        className={classnames(styles.configCard, styles.skillCard)}
+                      >
                         <div className={classnames(styles.skillContent, 'ub gap12 ub-ac')}>
                           {renderRobotChannelIcon(item)}
                           <div className={styles.skillInfo}>
@@ -2425,6 +2447,7 @@ const ConfigForm = (props) => {
                             {isReadOnly ? (
                               <EyeOutlined
                                 onClick={() => {
+                                  setRobotEditingIndex(index);
                                   setRobotItem(item);
                                   setRobotModalOpen(true);
                                 }}
@@ -2433,6 +2456,7 @@ const ConfigForm = (props) => {
                               <Space>
                                 <FormOutlined
                                   onClick={() => {
+                                    setRobotEditingIndex(index);
                                     setRobotItem(item);
                                     setRobotModalOpen(true);
                                   }}
@@ -2440,8 +2464,8 @@ const ConfigForm = (props) => {
                                 <AntdIcon
                                   type="icon-a-Deleteshanchu"
                                   onClick={() => {
-                                    setRobotConfigs(
-                                      robotConfigs.filter((it) => getRobotConfigKey(it) !== robotConfigKey)
+                                    setRobotConfigs((prev) =>
+                                      prev.filter((it, currentIndex) => currentIndex !== index)
                                     );
                                   }}
                                 />
@@ -3070,7 +3094,7 @@ const ConfigForm = (props) => {
       />
       <RobotModal
         open={robotModalOpen}
-        setOpen={setRobotModalOpen}
+        setOpen={handleRobotModalOpenChange}
         onOk={handleRobotModalOk}
         robotChannelLabelMap={robotChannelLabelMap}
         item={robotItem}

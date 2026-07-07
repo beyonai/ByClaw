@@ -14,8 +14,8 @@ import org.slf4j.LoggerFactory;
  * 飞书文本回复使用的聊天输出流。
  *
  * <p>AssistantChatService 对 ByteArrayOutputStream 会写出连续 JSON 事件。
- * 钉钉通过卡片流式消费这些事件；飞书 MVP 先不做卡片流式，而是实时解析并累计最终展示文本，
- * 等 chat() 完成后由调用方一次性回复飞书。</p>
+ * 钉钉通过卡片流式消费这些事件；飞书文本通道复用这份解析逻辑累计最终展示文本。
+ * 子类可以通过 {@link #onDisplayContentChanged(String)} 在内容变化时触发消息更新。</p>
  */
 public class FeishuBufferedOutputStream extends ByteArrayOutputStream {
 
@@ -154,6 +154,7 @@ public class FeishuBufferedOutputStream extends ByteArrayOutputStream {
             return;
         }
         answerBuffer.append(deltaContent);
+        notifyDisplayContentChanged();
     }
 
     private void handleReasonDelta(JsonNode root, String event) {
@@ -180,6 +181,15 @@ public class FeishuBufferedOutputStream extends ByteArrayOutputStream {
         reasoningBuffer.append(deltaContent);
         lastReasoningContentType = currentContentType;
         lastReasoningOrderId = orderId;
+        notifyDisplayContentChanged();
+    }
+
+    private void notifyDisplayContentChanged() {
+        onDisplayContentChanged(getDisplayContent());
+    }
+
+    protected void onDisplayContentChanged(String displayContent) {
+        // 默认只累计内容；流式子类会覆写这里，把累计内容同步到飞书消息。
     }
 
     private String extractContentType(JsonNode root) {

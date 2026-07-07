@@ -33,6 +33,7 @@ import com.iwhalecloud.byai.gateway.channels.service.feishu.model.FeishuCallback
 import com.iwhalecloud.byai.gateway.channels.service.feishu.model.FeishuMsgType;
 import com.iwhalecloud.byai.gateway.channels.service.feishu.support.FeishuBufferedOutputStream;
 import com.iwhalecloud.byai.gateway.channels.service.feishu.support.FeishuCallbackMessageParser;
+import com.iwhalecloud.byai.gateway.channels.service.feishu.support.FeishuStreamingOutputStream;
 import com.iwhalecloud.byai.manager.qo.index.MyAuthEmployQo;
 import com.iwhalecloud.byai.manager.vo.index.AuthDigitEmployVo;
 import com.iwhalecloud.byai.state.common.exception.BdpRuntimeException;
@@ -59,6 +60,7 @@ public class FeishuBotEventHandler {
     private static final String MESSAGE_RECEIVE_EVENT = "im.message.receive_v1";
     private static final String DEFAULT_FALLBACK_REPLY = "抱歉，遇到了点问题，请稍后再试";
     private static final String UNSUPPORTED_MESSAGE_REPLY = "暂不支持该类型消息";
+    private static final String THINKING_REPLY = "正在思考...";
     private static final String MESSAGE_DEDUP_KEY_PREFIX = "feishu:event:msg:";
     private static final long MESSAGE_DEDUP_TTL_SECONDS = 30 * 60L;
 
@@ -248,11 +250,37 @@ public class FeishuBotEventHandler {
             return;
         }
 
-        FeishuBufferedOutputStream outputStream = new FeishuBufferedOutputStream(objectMapper);
+        String tenantAccessToken = feishuTokenService.getTenantAccessToken(message.getAppId());
+        String cardTitle = digitEmployVo == null ? "" : digitEmployVo.getName();
+        String streamMessageId = feishuReplyDispatcher.replyCardMessage(
+                tenantAccessToken,
+                message.getMessageId(),
+                cardTitle,
+                THINKING_REPLY
+        );
+
+        FeishuBufferedOutputStream outputStream = StringUtils.hasText(streamMessageId)
+                ? new FeishuStreamingOutputStream(
+                        objectMapper,
+                        feishuReplyDispatcher,
+                        tenantAccessToken,
+                        streamMessageId,
+                        cardTitle
+                )
+                : new FeishuBufferedOutputStream(objectMapper);
+
         channelService.chat(assistantChatDto, outputStream);
         String replyContent = outputStream.getDisplayContent();
         logger.info("Feishu assistant reply generated. agentId={}, messageId={}, contentLength={}",
                 digitEmployVo.getId(), message.getMessageId(), replyContent == null ? 0 : replyContent.length());
+        if (outputStream instanceof FeishuStreamingOutputStream streamingOutputStream) {
+            streamingOutputStream.finish();
+            if (streamingOutputStream.hasUpdateFailed()) {
+                replyText(message, StringUtils.hasText(replyContent) ? replyContent : DEFAULT_FALLBACK_REPLY);
+            }
+            return;
+        }
+
         replyText(message, StringUtils.hasText(replyContent) ? replyContent : DEFAULT_FALLBACK_REPLY);
     }
 
