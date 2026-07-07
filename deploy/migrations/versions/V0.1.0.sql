@@ -474,9 +474,9 @@ UPDATE "byai"."sandbox_service_spec" SET "spec_json" = '{
     "plugins": {
         "load": {
             "paths": [
-                "/app/dist-runtime/extensions/baiying-enhance",
-                "/app/dist-runtime/extensions/byai-channel",
-                "/app/dist-runtime/extensions/byclaw-sqlite"
+                "/app/extensions/baiying-enhance",
+                "/app/extensions/byai-channel",
+                "/app/extensions/byclaw-sqlite"
             ]
         },
         "allow": [
