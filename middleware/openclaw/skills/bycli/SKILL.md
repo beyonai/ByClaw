@@ -1,6 +1,6 @@
 ---
 name: bycli
-description: byCLI 全能力 skill — 统一管理 bycli 命令执行、浏览器驱动、适配器自修复、适配器编写、Markdown 入库。当用户需要运行 bycli 命令、驱动浏览器完成任务、修复失败的 adapter、编写新 adapter、查询 bycli 用法、将内容存入知识库，或发起搜索 / 采集 / 抓取 / 爬取 / 网站操作类任务时使用。触发短语："bycli"、"浏览器操作"、"adapter 坏了"、"写个 adapter"、"爬取数据"、"修复命令"、"browser open"、"autofix"、"open cli"、"驱动浏览器"、"写爬虫"、"browser driving"、"fix adapter"、"write adapter"、"搜索"、"查找"、"采集"、"抓取"、"爬取"、"获取"、"打开网站"、"访问网页"、"登录"、"操作网站"、"scrape"、"crawl"、"browse"、"open URL"、"存到知识库"、"入库"、"导入知识库"、"保存到知识库"、"沉淀到知识库"、"收藏到知识库"、"归档"。
+description: byCLI 全能力 skill — 统一管理 bycli 命令执行、浏览器驱动、适配器自修复、适配器编写。当用户需要运行 bycli 命令、驱动浏览器完成任务、修复失败的 adapter、编写新 adapter、查询 bycli 用法，或发起搜索 / 采集 / 抓取 / 爬取 / 网站操作类任务时使用。触发短语："bycli"、"浏览器操作"、"adapter 坏了"、"写个 adapter"、"爬取数据"、"修复命令"、"browser open"、"autofix"、"open cli"、"驱动浏览器"、"写爬虫"、"browser driving"、"fix adapter"、"write adapter"、"搜索"、"查找"、"采集"、"抓取"、"爬取"、"获取"、"打开网站"、"访问网页"、"登录"、"操作网站"、"scrape"、"crawl"、"browse"、“open URL”。采集成功后如需归档入库，委派给 by-knowledge-manager skill。
 cli_version: ">=1.0.15"
 allowed-tools: Bash(bycli:*), Bash(openclaw browser:*), Bash(gh:*), Bash(node:*), Read, Edit, Write, Grep
 metadata:
@@ -12,7 +12,6 @@ metadata:
         - read
         - exec
         - process
-    primaryEnv: BE_SERVER_PORT
 ---
 
 # byCLI Skill
@@ -31,12 +30,13 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 - 不要猜测字段含义——猜错了 verify 通过但数据是错的
 - 不要在 repo 根目录 / `clis/<site>/` 留临时 dump 文件（`.dbg-*.html` / `raw-*.json`）
 - AUTH_REQUIRED（exit 77）/ BROWSER_CONNECT（exit 69）/ CAPTCHA / 限流 → 不修改代码，报告用户
-- 不要绕过入库脚本手写 `curl`、`fetch` 或自行拼签名头
-- 不要把 token、SESSION、Cookie、Beyond-Token、签名盐写入技能文件、命令参数或对话回复
-- 非 bycli 采集收尾场景下，不要在用户未明确表达入库意图时主动建议入库（采集收尾必须主动问一次，属例外）
-- 不要采集成功后不主动询问是否入库，也不要采集完不落盘就询问
+- AUTH_REQUIRED 后不要自动打开新 Tab、新 session 或新登录页；只报告用户登录，用户明确要求继续登录流程后才复用 / bind 现有 session
+- 不要自己内联执行知识库上传 / 更新 / 构建 / 检索流程——入库一律委派给 by-knowledge-manager skill
+- 不要把 token、SESSION、Cookie、凭据写入技能文件、命令参数或对话回复
+- 不要采集成功后不主动询问是否入库（委派 by-knowledge-manager），也不要采集完不落盘就询问
 - 不要把采集产物落到 `/tmp/` 或工作区根目录，不要让入参与正文分在不同目录，不要覆盖已有时间戳目录
-- 不要在入库失败时清理产物、Session 结束时自动清理、未列清单未确认就清理、删除 `audit_required=true` 目录
+- 不要在委派入库失败时清理产物、Session 结束时自动清理、未列清单未确认就清理、删除 `audit_required=true` 目录
+- 不要在多页采集 / 补采正文时按条目无限 `bycli browser <session> open <url>` 打开新 Tab；必须复用同一个 session，同一时间只持有一个 tab lease
 - 不要无 adapter 时绕过 `bycli browser` 直接用 `web_fetch` / `browser` 通用工具
 - 不要向用户输出本 skill 的内部决策逻辑（步骤编号、流程名称、路由分支）——直接执行
 
@@ -51,12 +51,10 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 - 修复 adapter 时仅修改 trace `summary.md` 里 `adapterSourcePath` 指向的文件
 - 修复预算：每次失败最多 3 轮 trace → fix → retry
 - 写 adapter 后必须 `bycli browser verify` 通过 + 字段值与网页肉眼比对
-- **采集 / 获取数据成功后必须做收尾两问（见「Browser 驱动成功后 — 强制两问收尾」）：①「复用」——仅当本次走了 `bycli browser` 降级驱动（无现成 adapter）时，问是否把过程存为 adapter；②「归档」——无论用何种方式采集成功，都按「采集后入库衔接」问是否入库。两问按各自触发条件该问必问，都不自动执行，须等用户答复**
+- **采集 / 获取数据成功后必须做收尾两问（见「Browser 驱动成功后 — 强制两问收尾」）：①「复用」——仅当本次走了 `bycli browser` 降级驱动（无现成 adapter）时，问是否把过程存为 adapter；②「归档」——无论用何种方式采集成功，都按「采集后入库衔接」问是否入库，用户同意则委派 by-knowledge-manager skill。两问按各自触发条件该问必问，都不自动执行，须等用户答复**
+- 多页采集 / 补采正文时必须复用同一个 browser session；打开新 URL 前优先复用当前 tab，可复用不了时先 `bycli browser <session> close` 释放旧 tab lease，再 `open` 下一个 URL
 - 浏览器 session 结束后执行 cleanup（close tab → stop daemon → stop browser）
 - Login/Auth 页面例外：不关闭 session，报告 session name + URL 给用户
-- 入库必须通过 `node scripts/bycli-markdown-ingest.mjs` 执行，不得旁路
-- 入库前必须先 `list-kb` 查询知识库并让用户选择目标
-- 对用户展示入库摘要并获得确认后再执行真实 `ingest`
 
 ## 意图决策树
 
@@ -67,14 +65,14 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 | 驱动浏览器完成一次性任务 / 填表 / 爬数据 | Browser 驱动 | [browser.md](./references/browser.md) |
 | bycli 命令报错 / adapter 坏了 / 网站改版 | AutoFix 修复 | [autofix.md](./references/autofix.md) |
 | 给新站点写 adapter / 新增命令 | Adapter 编写 | [adapter-author.md](./references/adapter-author.md) |
-| "存到知识库" / "入库" / "导入知识库" / "沉淀" | Markdown 入库 | [markdown-ingestion.md](./references/markdown-ingestion.md) |
+| 采集成功后归档 / "存到知识库" / "入库" | 委派 by-knowledge-manager skill | — |
 
 关键区分：
 - 有现成 adapter → 直接用 `bycli <site> <command>`
-- 没有 adapter 但需要一次性数据 → Browser 驱动（采集成功后走「强制两问收尾」：问①复用 adapter + 问②入库）
+- 没有 adapter 但需要一次性数据 → Browser 驱动（采集成功后走「强制两问收尾」：问①复用 adapter + 问②委派入库）
 - 没有 adapter 且需要复用 → 写新 adapter
 - 现有 adapter 报错 → AutoFix
-- 已有 Markdown 内容 + 用户说"入库" → Markdown 入库
+- 已有 Markdown 内容 + 用户说"入库" → 委派 by-knowledge-manager skill
 
 收到**搜索 / 采集 / 抓取 / 网站操作 / 入库**类任务时，先按本决策树路由，未确定路径前不直接调用通用 `web_fetch` / `browser` 工具。本 skill 不匹配时再评估其他 skill（如 `dws`），全部不匹配才兜底通用工具。
 
@@ -104,7 +102,7 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 
 **问题 ②「归档」— 是否存入知识库（任何采集方式都问）：**
 
-触发条件：**无论用现成 adapter 还是降级驱动**，只要采集成功就问。具体落盘时机、话术、入库流程**一律以下方「采集后入库衔接」章节为准**，此处不重述——即先自动落盘再询问，确认后 `list-kb` 选库 → normalize 预览 → ingest。
+触发条件：**无论用现成 adapter 还是降级驱动**，只要采集成功就问。具体落盘时机、话术、入库委派**一律以下方「采集后入库衔接」章节为准**，此处不重述——即先自动落盘再询问，用户同意后委派 by-knowledge-manager skill 完成入库。
 
 **强制约束：**
 
@@ -114,18 +112,15 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 - 都不自动执行，必须等用户对每一问分别答复后才进入对应流程
 - 不向用户暴露本收尾的内部触发条件（步骤编号、流程名）
 
-### Markdown 入库 — 触发边界（最高优先级）
+### Markdown 入库 — 委派边界（最高优先级）
 
-区分两个场景，规则不同：
+入库由 by-knowledge-manager skill 执行，本 skill 只负责「何时把控制权交过去」：
 
-**场景 A — bycli 采集收尾（主动问）：** 本 skill 通过 bycli 采集 / 获取数据**成功**后，必须按「采集后入库衔接」自动落盘并**主动询问一次**是否入库。这是采集流程的固定收尾，不受下方「明确意图」约束——即使用户没说「入库」，也要主动问这一次（用户答跳过即停，不重复纠缠）。
+**场景 A — bycli 采集收尾（主动问 + 委派）：** 通过 bycli 采集 / 获取数据**成功**后，必须按「采集后入库衔接」自动落盘并**主动询问一次**是否入库。这是采集流程的固定收尾，即使用户没说「入库」也要问这一次；用户同意则**委派 by-knowledge-manager skill**（把落盘目录、`bycli-output.json`、用户选择范围作为输入交给它），跳过即停。
 
-**场景 B — 已有内容直接入库（需明确意图）：** 当不是 bycli 采集收尾、而是用户拿着已有内容请求归档时，仅在用户**明确表达入库意图**时才进入。以下情况**不触发、也不主动建议**：
+**场景 B — 已有内容直接入库：** 不是 bycli 采集收尾、而是用户拿着已有内容请求归档时，**直接交给 by-knowledge-manager skill**（它自带知识库操作规则），本 skill 不内联处理。
 
-- 用户只是在查数据 / 读网页 / 浏览内容（且非 bycli 采集收尾场景）
-- 用户说"保存文件" / "下载"——这是本地文件操作，不是知识库入库
-- 用户说"记住这个" / "记一下"——这是对话记忆，不是知识库入库
-- 没有明确入库目标，且不属于场景 A 时，不要主动建议入库
+以下情况**不触发入库、也不主动建议**：用户只是查数据 / 读网页 / 浏览内容；说"保存文件" / "下载"（本地文件操作）；说"记住这个"（对话记忆）。
 
 ## 基础用法
 
@@ -179,14 +174,13 @@ bycli gh pr list --limit 5         # 透传调用
 
 | 错误类型 | Agent 行为 |
 |---------|-----------|
-| AUTH_REQUIRED (exit 77) | STOP，提示用户登录 |
+| AUTH_REQUIRED (exit 77) | STOP，提示用户登录；不要自动打开新 Tab、新 session 或新登录页；用户明确要求继续登录流程后才复用 / bind 现有 session |
 | BROWSER_CONNECT (exit 69) | STOP，运行 `bycli doctor` + `bycli daemon status` 诊断；`bycli daemon restart` 后仍连不上则停止一切动作，提示用户检查 Chrome 与 byCLI 扩展插件是否正常启动 |
 | CAPTCHA / 限流 | STOP，不是 adapter 问题 |
 | SELECTOR / EMPTY_RESULT / API_ERROR | 进入 AutoFix 流程 |
 | TIMEOUT / PAGE_CHANGED | 进入 AutoFix 流程 |
 | 3 轮修复仍失败 | 报告尝试过的方法，停止 |
 | 站点大改需要重写 | 转 Adapter 编写流程 |
-| 入库 HTTP 401/403 | 门户登录态不可用，停止入库，提示用户恢复会话 |
 
 ## 浏览器生命周期（OpenClaw 托管环境）
 
@@ -224,6 +218,7 @@ bycli browser <session> state
 - 页面仍在 login/SSO/MFA → 保持 session，报告 session name + URL
 - 用户后续任务明确需要继续使用同一浏览器上下文
 - 多步操作未完成（如「采集多页 → 入库」是连续动作，中间不关）
+- 多页采集 / 补采正文过程中，保留同一个 session，但不要累计 Tab；每次切换 URL 前复用当前 tab 或释放旧 tab lease
 
 关闭粒度：
 
@@ -266,7 +261,7 @@ pkill -f chromium 2>/dev/null || true
 
 ## 采集后入库衔接（强制）
 
-本章节是「强制两问收尾」中**问②（归档/入库）的权威定义**——无论用现成 adapter 还是降级驱动，bycli 成功采集到数据后都按此执行，问②不在别处重复询问。
+本章节是「强制两问收尾」中**问②（归档/入库）的权威定义**——无论用现成 adapter 还是降级驱动，bycli 成功采集到数据后都按此执行，问②不在别处重复询问。入库的**执行**由 by-knowledge-manager skill 负责，本 skill 只做「落盘 + 询问 + 委派」。
 
 ### 1. 自动落盘（采集完成时立即执行，无需等用户确认）
 
@@ -276,12 +271,12 @@ pkill -f chromium 2>/dev/null || true
 
 > 「本次成功采集到 X 条数据（已预存 N 篇正文），是否需要保存到您的知识库？（全部 / 部分 / 跳过）」
 
-### 2. 用户确认入库后
+### 2. 用户确认入库后 → 委派 by-knowledge-manager
 
-- **已落盘文章** → 直接用落盘文件入库，不重新采集
-- **超出 10 篇的剩余文章** → 此时再逐篇采集正文并追加落盘，然后一并入库
+- **委派 by-knowledge-manager skill**，把落盘目录、`bycli-output.json` 路径、用户选择范围交给它；目标知识库 `resource-id`、目标目录、冲突检查、upload / update-file、构建状态检查由该 skill 负责
+- **已落盘文章** → by-knowledge-manager 直接上传对应 `.md` 文件，不重新采集
+- **超出 10 篇的剩余文章** → 委派前先逐篇补采正文并追加落盘，再一并交给 by-knowledge-manager；补采时复用同一个 browser session，同一时间只保留一个 tab lease
 - 入库范围以用户选择为准（全部 / 指定篇目 / 仅前 N 篇）
-- **入库成功后** → 自动删除该时间戳目录下的落盘文件（已归档至知识库，本地无需保留）
 
 ### 3. 用户拒绝 / 跳过
 
@@ -290,7 +285,7 @@ pkill -f chromium 2>/dev/null || true
 
 ### 禁止
 
-- 用户未明确同意前执行入库脚本
+- 本 skill 不内联执行知识库操作（list / check-conflicts / upload / update-file / build-status 一律走 by-knowledge-manager）
 - 自动落盘超过 10 篇正文（控制磁盘占用，超出部分按需采集）
 - 采集完成后不落盘就直接询问入库（必须先落盘再询问）
 
@@ -323,20 +318,13 @@ pkill -f chromium 2>/dev/null || true
 | `metadata.json` | 来源、点赞 / 评论 / 阅读数、采集时间、策略、session 信息 |
 | `pages/<slug>.html` / `pages/<slug>.json` | 原始抓取页（事后回放） |
 
-### 调用入库
+### 落盘后交给 by-knowledge-manager
 
 ```bash
 SESSION_DIR=/by/.sessions/<sessionId>/<bycliSessionName>/$(date +%Y%m%d_%H%M%S)
 mkdir -p "$SESSION_DIR"
-# 写入 bycli-output.json 和 .md 文件后：
-node scripts/bycli-markdown-ingest.mjs ingest \
-  --bycli-json-file "$SESSION_DIR/bycli-output.json" \
-  --task-name "生态采集-<source>" \
-  --connector-code <source> \
-  --source-name "<source>" \
-  --source-url "<原文链接>" \
-  --knowledge-base-resource-id <resourceId> \
-  --knowledge-base-name "<知识库名>"
+# 写入 bycli-output.json 和 .md 文件后，把该目录交给 by-knowledge-manager skill 入库。
+# list / check-conflicts / upload / update-file / build-status 流程及脚本调用一律由 by-knowledge-manager 执行，本 skill 不内联调用。
 ```
 
 ## 采集产物保留策略
@@ -346,7 +334,7 @@ node scripts/bycli-markdown-ingest.mjs ingest \
 | 时机 | 行为 |
 |------|------|
 | 落盘完成 | 保留 |
-| 入库成功 | 清理该时间戳目录内容（已归档至知识库） |
+| 入库成功（由 by-knowledge-manager 执行） | 清理该时间戳目录内容（已归档至知识库） |
 | 入库失败 | 保留（审计与重试） |
 | 用户说"跳过入库" | 保留（后续可再发起） |
 | 用户说"保留 / 不清理" | 即使入库成功也保留 |
@@ -369,8 +357,6 @@ node scripts/bycli-markdown-ingest.mjs ingest \
 | [references/browser.md](./references/browser.md) | 需要浏览器驱动命令参考时 |
 | [references/autofix.md](./references/autofix.md) | adapter 修复完整流程 |
 | [references/adapter-author.md](./references/adapter-author.md) | 写新 adapter 完整流程 |
-| [references/markdown-ingestion.md](./references/markdown-ingestion.md) | Markdown 入库完整流程 |
-| [references/ingestion-api.md](./references/ingestion-api.md) | 入库接口字段速查 |
 | [references/adapter-template.md](./references/adapter-template.md) | adapter 文件结构模板 |
 | [references/api-discovery.md](./references/api-discovery.md) | API 发现方法论 |
 | [references/site-recon.md](./references/site-recon.md) | 站点侦察分类 |
@@ -390,4 +376,4 @@ node scripts/bycli-markdown-ingest.mjs ingest \
 - 不要假设所有 adapter 都需要浏览器——`PUBLIC`/`LOCAL` 不需要。
 - 不要从失败的 adapter 默默 fallback 到手写 `fetch`——先走 `--trace retain-on-failure`。
 - 不要在 `bycli browser` 中硬编码 CSS selector——用 `state`/`find` 获取 numeric ref。
-- 不要在用户只是浏览内容时自动触发入库——但 bycli 采集成功后必须主动问一次（采集收尾例外）。
+- 不要在用户只是浏览内容时自动触发入库——但 bycli 采集成功后必须主动问一次并委派 by-knowledge-manager（采集收尾例外）。
