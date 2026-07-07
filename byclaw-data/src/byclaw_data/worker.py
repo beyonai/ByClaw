@@ -1119,7 +1119,7 @@ async def _consume_agent_events(
                 event_type=EventType.ANSWER_DELTA.value,
                 content_type=SseMessageType.text.value,
             )
-            return {"status": "done"}
+            return {"status": "done", "content": event.message}
 
     if interrupt_ev is None:
         return {"status": "done"}
@@ -1791,9 +1791,8 @@ class DataCloudWorker(GatewayWorker):
                     error=_exc_tb,
                 )
                 return {
-                    "status": "done",
-                    "conclusion": f"[ERROR] {_exc}",
-                    "lf_tool_spans": [],
+                    "status": "COMPLETED",
+                    "content": f"[ERROR] {_exc}",
                 }
 
     async def _process_command_inner(
