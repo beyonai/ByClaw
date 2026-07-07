@@ -548,6 +548,40 @@ function clientInstructionFileName(clientType: string): string {
   return `${safePathPart(clientType)}${BUNDLE.clientInstructionFileExtension}`;
 }
 
+function canonicalClientType(value: string | undefined): string | undefined {
+  if (typeof value !== "string" || !value.trim()) {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  const normalized = trimmed.toLowerCase().replace(/[\s_-]+/gu, "");
+  if (normalized === "claude" || normalized === "claudecode") {
+    return ACP_CLIENT_TYPES.claudeCode;
+  }
+  if (normalized === ACP_CLIENT_TYPES.codex) {
+    return ACP_CLIENT_TYPES.codex;
+  }
+  return trimmed;
+}
+
+function isClaudeAcpAgentId(agentId: string | undefined): boolean {
+  return typeof agentId === "string" && agentId.toLowerCase().includes("claude");
+}
+
+function resolveAcpClientType(params: {
+  config: ResolvedByclawAcpAdapterConfig;
+  requestedClientType?: string;
+  acpAgentId?: string;
+}): string {
+  if (isClaudeAcpAgentId(params.acpAgentId)) {
+    return ACP_CLIENT_TYPES.claudeCode;
+  }
+  return (
+    canonicalClientType(params.requestedClientType) ||
+    canonicalClientType(params.config.defaultAcpClientType) ||
+    ACP_CLIENT_TYPES.claudeCode
+  );
+}
+
 function clientSharedDirName(clientType: string): string {
   if (clientType === ACP_CLIENT_TYPES.claudeCode) {
     return BUNDLE.clientDirNames.claudeCode;
@@ -905,6 +939,32 @@ function materializePlanBundle(params: {
   };
 }
 
+function cleanAcpAgentId(value: string | undefined): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function resolveAcpAgentId(params: {
+  config: ResolvedByclawAcpAdapterConfig;
+  requestedAcpAgentId?: string;
+  targetAcpAgentId?: string;
+}): string {
+  const configuredDefault = cleanAcpAgentId(params.config.defaultAcpAgentId) || DEFAULTS.acpAgentId;
+  const candidates = [
+    cleanAcpAgentId(params.requestedAcpAgentId),
+    cleanAcpAgentId(params.targetAcpAgentId),
+  ];
+  for (const candidate of candidates) {
+    if (!candidate) {
+      continue;
+    }
+    if (configuredDefault !== DEFAULTS.acpAgentId && candidate === DEFAULTS.acpAgentId) {
+      continue;
+    }
+    return candidate;
+  }
+  return configuredDefault;
+}
+
 function buildPlan(params: {
   config: ResolvedByclawAcpAdapterConfig;
   kind: ByclawAcpPlan["kind"];
@@ -915,11 +975,16 @@ function buildPlan(params: {
   agentModels?: JsonRecord;
   bundle?: JsonRecord;
   responseLanguage: ResponseLanguagePolicy;
+  targetAcpAgentId?: string;
   request: ByclawAcpPlanRequest;
   metadata: JsonRecord;
   task: string;
 }): ByclawAcpPlan {
-  const acpAgentId = params.request.acpAgentId || params.config.defaultAcpAgentId;
+  const acpAgentId = resolveAcpAgentId({
+    config: params.config,
+    requestedAcpAgentId: params.request.acpAgentId,
+    targetAcpAgentId: params.targetAcpAgentId,
+  });
   const cwd = params.request.cwd || params.config.defaultCwd;
   const model = params.model;
   return {
@@ -966,12 +1031,21 @@ export function createByclawAcpPlan(params: {
     : request;
   const kind = effectiveRequest.kind || inferPlanKind(snapshot, effectiveRequest.id);
   const cwd = request.cwd || config.defaultCwd;
-  const clientType = request.acpClientType || config.defaultAcpClientType;
   const sessionId = request.sessionId;
   const responseLanguage = resolveResponseLanguage(request);
 
   if (kind === "agent") {
     const agent = findAgent(snapshot, effectiveRequest.id);
+    const acpAgentId = resolveAcpAgentId({
+      config,
+      requestedAcpAgentId: request.acpAgentId,
+      targetAcpAgentId: agent.acpAgentId,
+    });
+    const clientType = resolveAcpClientType({
+      config,
+      requestedClientType: request.acpClientType,
+      acpAgentId,
+    });
     const materialized = materializeClaudeCodeAgents({ cwd, members: [agent] });
     const claudeTeam = buildClaudeTeamMetadata({ materialized });
     const agentModels = buildAgentModelsMetadata([agent], cwd);
@@ -1016,7 +1090,8 @@ export function createByclawAcpPlan(params: {
       agentModels,
       bundle,
       responseLanguage,
-      request: { ...effectiveRequest, acpAgentId: request.acpAgentId || agent.acpAgentId },
+      targetAcpAgentId: agent.acpAgentId,
+      request: effectiveRequest,
       metadata: {
         ...(agent as unknown as JsonRecord),
         [METADATA_KEYS.claudeTeam]: claudeTeam,
@@ -1033,6 +1108,16 @@ export function createByclawAcpPlan(params: {
     const team = findTeam(snapshot, effectiveRequest.id);
     const members = team.memberAgentIds.map((id) => agentById(snapshot, id)).filter(Boolean) as NormalizedByclawAgent[];
     const coordinator = team.coordinatorAgentId ? agentById(snapshot, team.coordinatorAgentId) : members[0];
+    const acpAgentId = resolveAcpAgentId({
+      config,
+      requestedAcpAgentId: request.acpAgentId,
+      targetAcpAgentId: coordinator?.acpAgentId,
+    });
+    const clientType = resolveAcpClientType({
+      config,
+      requestedClientType: request.acpClientType,
+      acpAgentId,
+    });
     const materialized = materializeClaudeCodeAgents({ cwd, members });
     const claudeTeam = buildClaudeTeamMetadata({ materialized, team });
     const agentModels = buildAgentModelsMetadata(members, cwd);
@@ -1078,7 +1163,8 @@ export function createByclawAcpPlan(params: {
       agentModels,
       bundle,
       responseLanguage,
-      request: { ...effectiveRequest, acpAgentId: request.acpAgentId || coordinator?.acpAgentId },
+      targetAcpAgentId: coordinator?.acpAgentId,
+      request: effectiveRequest,
       metadata: {
         ...(team as unknown as JsonRecord),
         [METADATA_KEYS.byclawTeam]: team,
@@ -1099,6 +1185,16 @@ export function createByclawAcpPlan(params: {
       .map((id) => agentById(snapshot, id))
       .filter(Boolean) as NormalizedByclawAgent[];
     const coordinator = members[0];
+    const acpAgentId = resolveAcpAgentId({
+      config,
+      requestedAcpAgentId: request.acpAgentId,
+      targetAcpAgentId: coordinator?.acpAgentId,
+    });
+    const clientType = resolveAcpClientType({
+      config,
+      requestedClientType: request.acpClientType,
+      acpAgentId,
+    });
     const materialized = materializeClaudeCodeAgents({ cwd, members });
     const claudeTeam = buildClaudeTeamMetadata({ materialized, team, workflow });
     const agentModels = buildAgentModelsMetadata(members, cwd);
@@ -1146,7 +1242,8 @@ export function createByclawAcpPlan(params: {
       agentModels,
       bundle,
       responseLanguage,
-      request: { ...effectiveRequest, acpAgentId: request.acpAgentId || coordinator?.acpAgentId },
+      targetAcpAgentId: coordinator?.acpAgentId,
+      request: effectiveRequest,
       metadata: {
         ...(workflow as unknown as JsonRecord),
         [METADATA_KEYS.byclawTeam]: team,
@@ -1168,6 +1265,16 @@ export function createByclawAcpPlan(params: {
     .map((id) => agentById(snapshot, id))
     .filter(Boolean) as NormalizedByclawAgent[];
   const coordinator = members[0];
+  const acpAgentId = resolveAcpAgentId({
+    config,
+    requestedAcpAgentId: request.acpAgentId,
+    targetAcpAgentId: coordinator?.acpAgentId,
+  });
+  const clientType = resolveAcpClientType({
+    config,
+    requestedClientType: request.acpClientType,
+    acpAgentId,
+  });
   const materialized = materializeClaudeCodeAgents({ cwd, members });
   const claudeTeam = buildClaudeTeamMetadata({ materialized, team, workflow, loop });
   const agentModels = buildAgentModelsMetadata(members, cwd);
@@ -1217,7 +1324,8 @@ export function createByclawAcpPlan(params: {
     agentModels,
     bundle,
     responseLanguage,
-    request: { ...effectiveRequest, acpAgentId: request.acpAgentId || coordinator?.acpAgentId },
+    targetAcpAgentId: coordinator?.acpAgentId,
+    request: effectiveRequest,
     metadata: {
       ...(loop as unknown as JsonRecord),
       [METADATA_KEYS.byclawTeam]: team,
