@@ -4,6 +4,7 @@ import type { ByaiInboundMessage, ByaiLaneMetadata, Language } from "./types.js"
 import { isSessionDispatchBusy } from "./session-dispatch-gate.js";
 import { clearPendingMessageToolSends } from "./pending-message-tool.js";
 import { generateRandomId } from "./utils.js";
+import { resolveInboundLanguage } from "./i18n.js";
 import { emitByaiSdkFirstResponse } from "./diagnostics.js";
 import { SESSION_FILES_ROOT, getSessionPathBySessionId } from "./session-path.js";
 import {
@@ -11,6 +12,7 @@ import {
     resolveChannelRequestContextBySessionKey as resolveSharedChannelRequestContextBySessionKey,
     upsertChannelRequestContextBySessionKey as upsertSharedChannelRequestContextBySessionKey,
 } from "./channel-request-context.js";
+import { resolveAgentIdFromSessionKey } from "openclaw/plugin-sdk/routing";
 
 const CHANNEL_ID = "byai-channel" as const;
 const DEFAULT_ACCOUNT_KEY = "default";
@@ -115,6 +117,14 @@ export interface ActiveSdkRequest {
   firstVisibleResponseAt?: number;
   boundRunIds: Set<string>;
   pendingChildSessionKeys: Set<string>;
+  /**
+   * 本 request 派出、尚未回灌结果的委派工作（RemoteAgent 异步任务）tool_call_id 集合。
+   * 由 baiying_call 返回 status=DELEGATED_TASK_STATUS 时登记（见 agent-event.handleToolEvent），
+   * 由 dispatchRemoteTaskFollowup 成功回灌后消除。非空表示「任务尚未结束，等待所有委派任务完成」，
+   * 完成门据此挂住，避免委派结果回来前前端流被提前收尾。与 pendingChildSessionKeys（原生 subagent）
+   * 正交：那是 openclaw subagent，这是 redis 驱动的外部委派。
+   */
+  delegatedWorkToolCallIds: Set<string>;
   pendingOutboundCount: number;
   awaitingFollowup: boolean;
   /**
@@ -555,6 +565,22 @@ export function resolveSdkEmitter(accountId: string): GatewayDataEmitter | undef
     return sdkEmitters.get(normalizeAccountId(accountId));
 }
 
+/**
+ * 解析一个「能发前端流」的 account：优先用给定 accountId；否则当仅有唯一已注册 emitter 时
+ * 用它（单账号部署的常见情形）；都不满足返回 undefined。用于重启后恢复 request——解析不到
+ * emitter 的 account 就不该重建 request（否则造出发不出流的孤儿）。
+ */
+export function resolveEmitterAccountId(accountId?: string): string | undefined {
+    const normalized = normalizeAlias(accountId);
+    if (normalized && sdkEmitters.has(normalizeAccountId(normalized))) {
+        return normalizeAccountId(normalized);
+    }
+    if (sdkEmitters.size === 1) {
+        return [...sdkEmitters.keys()][0];
+    }
+    return undefined;
+}
+
 export function getLastSdkEmitChunk(runId: string) {
     return sdkEmitterLastChunks.get(runId);
 }
@@ -720,6 +746,7 @@ export function registerActiveSdkRequest(params: {
         createdAt: params.createdAt ?? Date.now(),
         boundRunIds: new Set<string>(),
         pendingChildSessionKeys: new Set<string>(),
+        delegatedWorkToolCallIds: new Set<string>(),
         pendingOutboundCount: 0,
         awaitingFollowup: false,
         deferredForFollowup: false,
@@ -1043,6 +1070,8 @@ export function shouldCompleteActiveSdkRequest(request: ActiveSdkRequest): boole
   return Boolean(
     runFinished &&
       request.pendingChildSessionKeys.size === 0 &&
+      // 还有委派工作未回灌结果 ⇒ 任务尚未结束，挂住完成门等待所有委派任务完成。
+      request.delegatedWorkToolCallIds.size === 0 &&
       request.pendingOutboundCount === 0 &&
       !awaitingBlocks &&
       !request.followupRunStarted &&
@@ -1166,6 +1195,130 @@ export function markActiveSdkRequestSubagentEnded(
     request.lastReasoningText = "";
     request.lastReasoningMessageId = "";
   }
+  return request;
+}
+
+/**
+ * 登记一件委派工作（RemoteAgent 异步任务）到 sessionKey 解析到的 request。sessionKey 为委派
+ * tool call 所在会话（resolve 内部同时查 root 与 child 映射），命中即把 toolCallId 加入
+ * delegatedWorkToolCallIds，挂住完成门。找不到 request 或 toolCallId 为空则不操作。
+ */
+export function addActiveSdkDelegatedWork(
+  sessionKey: string | undefined,
+  toolCallId: string | undefined,
+): ActiveSdkRequest | undefined {
+  const normalizedToolCallId = normalizeAlias(toolCallId);
+  if (!sessionKey || !normalizedToolCallId) {
+    return undefined;
+  }
+  const request = resolveActiveSdkRequestBySessionKey(sessionKey);
+  if (!request) {
+    return undefined;
+  }
+  request.delegatedWorkToolCallIds.add(normalizedToolCallId);
+  return request;
+}
+
+/**
+ * 按 requesterSessionKey 定位委派所属 request，未命中且给了 parentSessionKey（requesterSessionKey
+ * 为 subagent key 的场景）则回退用 parentSessionKey 再试。两者都用于定位同一条 request。
+ */
+function locateActiveSdkRequestForDelegated(params: {
+  requesterSessionKey?: string;
+  parentSessionKey?: string;
+}): ActiveSdkRequest | undefined {
+  const requesterKey = normalizeAlias(params.requesterSessionKey);
+  const parentKey = normalizeAlias(params.parentSessionKey);
+  return (
+    (requesterKey ? resolveActiveSdkRequestBySessionKey(requesterKey) : undefined) ??
+    (parentKey ? resolveActiveSdkRequestBySessionKey(parentKey) : undefined)
+  );
+}
+
+/**
+ * 保证委派结果回灌时有一条可用的 ActiveSdkRequest：先按 requester/parent 定位；命中直接返回。
+ * 未命中（大概率 openclaw 重启后内存态丢失）时，仅当能解析到「能发前端流」的 emitter account
+ * 才重建一条最小 request 接管前端 SSE 收尾——否则返回 undefined 退化为纯 subagent.run 续跑
+ * （orchestration 唤醒链不依赖前端流，不能因缺 emitter 造出发不出流、还会卡完成门的孤儿）。
+ * 重建的 request 以 requesterSessionKey 为主键；sessionId 缺省回退用 sessionKey，保证 emitter
+ * emitChunk 有一个稳定的 sessionId。
+ */
+export function ensureActiveSdkRequestForDelegatedFollowup(params: {
+  requesterSessionKey: string | undefined;
+  parentSessionKey?: string;
+  sessionId?: string;
+  traceId?: string;
+  accountId?: string;
+  language?: Language;
+}): ActiveSdkRequest | undefined {
+  const existing = locateActiveSdkRequestForDelegated(params);
+  if (existing) {
+    return existing;
+  }
+  const sessionKey = normalizeAlias(params.requesterSessionKey);
+  if (!sessionKey) {
+    return undefined;
+  }
+  const emitterAccountId = resolveEmitterAccountId(params.accountId);
+  if (!emitterAccountId) {
+    return undefined;
+  }
+  const sessionId = normalizeAlias(params.sessionId) ?? sessionKey;
+  const traceId = normalizeAlias(params.traceId) ?? "";
+  const { language, languageProvided } = resolveInboundLanguage(params.language);
+  const agentId = resolveAgentIdFromSessionKey(sessionKey);
+  return registerActiveSdkRequest({
+    accountId: emitterAccountId,
+    sessionKey,
+    to: `${agentId}:${sessionId}`,
+    sessionId,
+    traceId,
+    language,
+    languageProvided,
+  });
+}
+
+/**
+ * follow-up run 投递前置「等待续跑」态：把完成门的持有从 delegatedWorkToolCallIds 平滑转移到
+ * awaitingFollowup，覆盖「回灌成功清空委派集合 → follow-up run 的 lifecycle start 尚未经
+ * onAgentEvent 入账」这段窗口——否则 settle 轮询会在此刻看到集合已空、又读到上一轮 yield 残留的
+ * rootLifecyclePhase="end"，误判完成、提前收尾前端流。start 事件到达时 markActiveSdkRootLifecycleStarted
+ * 会把 awaitingFollowup 转成 followupRunStarted（挂到该 run 的 end，无超时），与原生 subagent
+ * 唤醒共用同一状态机；follow-up run 若再派委派，其 end 时 delegatedWorkToolCallIds 已非空继续挡门。
+ * 必须在 removeActiveSdkDelegatedWork / dispatch 之前调用，保证门的持有不出现空档。定位同 requester→parent 回退。
+ */
+export function markActiveSdkAwaitingDelegatedFollowup(params: {
+  requesterSessionKey: string | undefined;
+  parentSessionKey?: string;
+}): ActiveSdkRequest | undefined {
+  const request = locateActiveSdkRequestForDelegated(params);
+  if (!request) {
+    return undefined;
+  }
+  request.awaitingFollowup = true;
+  request.awaitingFollowupSince = Date.now();
+  request.followupRunStarted = false;
+  return request;
+}
+
+/**
+ * 委派工作结果回灌成功后消除对应 toolCallId。定位同 locateActiveSdkRequestForDelegated。
+ * 返回被消除的 request（若命中），供调用方决定是否触发一次完成检查。
+ */
+export function removeActiveSdkDelegatedWork(params: {
+  requesterSessionKey: string | undefined;
+  parentSessionKey?: string;
+  toolCallId: string | undefined;
+}): ActiveSdkRequest | undefined {
+  const normalizedToolCallId = normalizeAlias(params.toolCallId);
+  if (!normalizedToolCallId) {
+    return undefined;
+  }
+  const request = locateActiveSdkRequestForDelegated(params);
+  if (!request) {
+    return undefined;
+  }
+  request.delegatedWorkToolCallIds.delete(normalizedToolCallId);
   return request;
 }
 

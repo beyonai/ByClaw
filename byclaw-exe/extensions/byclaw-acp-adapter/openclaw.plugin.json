@@ -10,7 +10,8 @@
   "contracts": {
     "tools": [
       "byclawAcpPlan",
-      "byclawAcpRun"
+      "byclawAcpRun",
+      "call_acp_agent"
     ],
     "gatewayMethods": [
       "byclaw.acp.registry",

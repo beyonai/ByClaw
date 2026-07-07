@@ -1,6 +1,7 @@
 import { EmitOptions, EventType, SseReasonMessageType } from "@byclaw/by-framework";
 import {
   ActiveSdkRequest,
+  addActiveSdkDelegatedWork,
   bindActiveSdkRequestRunId,
   emitSdkChunkTracked,
   getLastSdkEmitChunk,
@@ -38,6 +39,7 @@ import {
   buildToolResultTitle as buildLocalizedToolResultTitle,
   buildToolStartTitle as buildLocalizedToolStartTitle,
 } from "./i18n.js";
+import { DELEGATED_TASK_STATUS } from "../../shared/src/delegated-tool-details.js"; 
 
 type AgentStreamState = {
   seq: number;
@@ -138,6 +140,7 @@ function stringValue(value: unknown): string {
 async function handleToolEvent(
   request: ActiveSdkRequest,
   event: AgentEvent,
+  resolvedSessionKey: string | undefined,
 ) {
   const sdkEmitter = resolveSdkEmitter(request.accountId);
   if (!sdkEmitter) {
@@ -204,6 +207,18 @@ async function handleToolEvent(
       eventType: EventType.REASONING_LOG_DELTA,
       contentType: SseReasonMessageType.json_block,
     });
+    // 委派工作登记：baiying_call 返回 DELEGATED_TASK_STATUS 表示已把任务派给外部
+    // RemoteAgent（redis 驱动，非原生 subagent），随后本 agent 会 sessions_yield。登记该
+    // tool_call_id 到 request 挂住完成门，等委派结果经 dispatchRemoteTaskFollowup 回灌后消除。
+    // 仅在「委派 tool call 所在会话不是 subagent key」时登记——避免把 subagent 内部再派生的
+    // 委派也算进外层完成门（那层由 subagent 自己的 request / 原生 subagent 机制处理）。
+    if (
+      data.result?.details?.status === DELEGATED_TASK_STATUS &&
+      toolCallId &&
+      !isSubagentSessionKey(resolvedSessionKey)
+    ) {
+      addActiveSdkDelegatedWork(resolvedSessionKey ?? request.sessionKey, toolCallId);
+    }
     if (data.name === "baiying_call") {
       setToBeEmittedChunkViaBaiyingCallTool(data.result);
     } else if (data.name === "sessions_spawn" && data.result?.details && !data.isError) {
@@ -503,7 +518,7 @@ export default async function handleAgentEvent(api: OpenClawPluginApi, event: Ag
   }
   lastAgentAssistantEvent.stream = currentStream;
   if (event.stream === 'tool') {
-    await handleToolEvent(request, event);
+    await handleToolEvent(request, event, resolvedSessionKey);
   } else if (event.stream === 'assistant') {
     if (currentStream === "assistant" && previousStream !== "assistant" && toBeEmittedChunkAfterBaiyingCallTool) {
       // 无论是主agent还是subagent，开始输出正文前，先把baiying_call工具缓存起来的chunk emit出来

@@ -54,9 +54,35 @@ Files rules: downstream ACP clients must resolve `/object/...`, `/view/...`,
 and `/qa/...` paths against `/by/.sessions/{byai-channel_session_id}` before
 reading, citing, or returning file links.
 
+## Remote delegation mode (`byclawCallAcpAgent`)
+
+`byclawAcpPlan` / `byclawAcpRun` produce a `sessionsSpawn` payload that the
+upstream Claude session forwards to the generic `sessions_spawn` tool, which
+runs a **local** ACP sub-session.
+
+`byclawCallAcpAgent` is an alternative that does **not** go through
+`sessions_spawn`. It runs the same planner (materializing the shared-context
+bundle: agent roster, linkedSkills, model config, `query.md` / `metadata.md` /
+`plan-bundle.json`) and then delegates the task to a **remote** ACP agent
+(`BYCLAW_CODE_<USER_CODE>`) asynchronously via the shared `executeViaCallAgent`
+helper. The plan's task text — which embeds the user query and the on-disk
+shared-context file paths — is the delegation prompt; structured bundle data is
+read by the remote agent from the filesystem, not sent inline.
+
+On dispatch the tool records a `task_started` event to the shared
+`baiying-remote-tasks/tasks.jsonl` log (consumed by `byai-channel`'s
+remote-task watcher for result回灌) and returns a `waiting_for_delegated_agent`
+result that instructs the upstream session to call `sessions_yield`. Requires
+`USER_CODE` and an active byai-channel session context.
+
+The shared remote-agent delegation closure (`executeViaCallAgent`, channel
+session resolve, langfuse observation, remote-task log, delegated-tool details)
+lives in `../shared/src` and is imported by both this adapter and
+`baiying-enhance`.
+
 ## What It Registers
 
-- Tools: `byclawAcpPlan`, `byclawAcpRun`
+- Tools: `byclawAcpPlan`, `byclawAcpRun`, `byclawCallAcpAgent`
 - Gateway methods: `byclaw.acp.registry`, `byclaw.acp.plan`, `byclaw.acp.run`, `byclaw.acp.runs.list`, `byclaw.acp.runs.show`
 - HTTP routes: `/plugins/byclaw-acp-adapter/registry`, `/plugins/byclaw-acp-adapter/plan`, `/plugins/byclaw-acp-adapter/run`
 - SQLite tables:

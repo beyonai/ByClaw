@@ -10,7 +10,10 @@ export type RedisConnectionConfig = {
   connectTimeoutMs: number;
 };
 
+export type ByclawAcpMode = "callAgent" | "acp";
+
 export type ResolvedByclawAcpAdapterConfig = {
+  acpMode: ByclawAcpMode;
   defaultAcpAgentId: string;
   defaultAcpClientType: string;
   defaultCwd: string;
@@ -20,6 +23,7 @@ export type ResolvedByclawAcpAdapterConfig = {
   toolNames: {
     plan: string;
     run: string;
+    callAcpAgent: string;
   };
 };
 

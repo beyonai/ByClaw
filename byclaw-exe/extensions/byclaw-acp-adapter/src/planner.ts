@@ -948,6 +948,17 @@ function buildPlan(params: {
   };
 }
 
+/**
+ * Build the natural-language `content` handed to a remote ACP agent via
+ * `executeViaCallAgent`. The plan's `task` already embeds the user query, the
+ * on-disk shared-context file paths (query.md / metadata.md / plan-bundle.json)
+ * and the read-then-execute ordering, so the remote agent reads the structured
+ * bundle from the filesystem rather than receiving it inline in the prompt.
+ */
+export function buildCallAgentContentFromPlan(plan: ByclawAcpPlan): string {
+  return plan.task;
+}
+
 export function createByclawAcpPlan(params: {
   config: ResolvedByclawAcpAdapterConfig;
   snapshot: ByclawRegistrySnapshot;

@@ -40,6 +40,23 @@ export const DEFAULTS = {
 export const TOOL_NAMES = {
   plan: "byclawAcpPlan",
   run: "byclawAcpRun",
+  callAcpAgent: "call_acp_agent",
+} as const;
+
+export const ACP_MODE = {
+  callAgent: "callAgent",
+  acp: "acp",
+  default: "callAgent",
+} as const;
+
+export const CALL_ACP_AGENT = {
+  targetAgentTypePrefix: "BYCLAW_CODE_",
+  responseType: "code_agent",
+  asyncParentMessageId: "-1",
+  defaultRequesterSessionKey: "agent:main:main",
+  defaultAgentId: "main",
+  langfuseParentObservationAttempts: 20,
+  langfuseParentObservationDelayMs: 50,
 } as const;
 
 export const HTTP = {

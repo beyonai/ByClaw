@@ -7,7 +7,6 @@ import {
   compactText,
   runBaiyingExecutor,
 } from "./resource-metadata.js";
-import { docAsyncState, type DocAsyncTaskRecord } from "./doc-async-state.js";
 import type { BaiyingAssociatedResource } from "./types.js";
 import { MANAGED_AGENT_PREFIX } from "./types.js";
 import { resolveChannelSessionIdForTool } from "./channel-session-resolve.js";
@@ -29,7 +28,9 @@ import {
   logChannelDebug,
   type BaiyingEnhanceLogger,
 } from "./executor/debug-channel.js";
+import { appendBaiyingRemoteTaskStartedEvent } from "./remote-task-log.js";
 import type { ResourceContext } from "./executor/types.js";
+import { getDelegatedTaskToolDetails } from "../../shared/src/delegated-tool-details.js";
 
 function normalizeResourceType(resource: BaiyingAssociatedResource | undefined): string {
   return resource?.resourceBizType || resource?.resourceType || "UNKNOWN";
@@ -493,116 +494,6 @@ export function createBaiyingCallToolFactory(params: {
           langfuse_parent_observation_id: langfuseParentObservationId,
           channel_session_source: channelResolve.source,
         });
-        if (
-          actionName === "get_doc_async_result" ||
-          actionName === "get_doc_async_readable" ||
-          actionName === "compose_doc_async_answer"
-        ) {
-          const explicitTaskId =
-            normalizeText(structuredArguments?.task_id) ||
-            normalizeText(structuredArguments?.message_id);
-          const sessionId = normalizeText(structuredArguments?.session_id);
-          const queryLikeInput = normalizeText(toolParams.query);
-          const queryLooksLikeTaskId =
-            queryLikeInput.startsWith("msg-") || queryLikeInput.startsWith("doc-");
-          const lookupWarning =
-            queryLikeInput && !queryLooksLikeTaskId
-              ? "query 是自然语言问题，不会作为任务ID用于异步结果定位；请在 arguments 中提供 message_id/session_id/task_id。"
-              : undefined;
-
-          const lookupTaskId = explicitTaskId || (queryLooksLikeTaskId ? queryLikeInput : "");
-          let resolvedLookupBy = "none";
-          let task = lookupTaskId ? docAsyncState.getByTaskId(lookupTaskId) : undefined;
-          if (task) {
-            resolvedLookupBy = "task_id";
-          } else if (sessionId) {
-            task = docAsyncState.getBySessionId(sessionId);
-            if (task) {
-              resolvedLookupBy = "session_id";
-            }
-          }
-          if (!task) {
-            const latest = docAsyncState.getLatestByAgentResource(agent.agentId, normalizeText(toolParams.resource_id));
-            if (latest) {
-              task = latest;
-              resolvedLookupBy = "latest_by_agent_resource";
-            }
-          }
-          if (!task) {
-            traceLog("doc_async.lookup_miss", {
-              agent_id: agent.agentId,
-              action: actionName,
-              lookup_task_id: lookupTaskId || undefined,
-              session_id: sessionId || undefined,
-              query_ignored_as_task_id: queryLikeInput && !queryLooksLikeTaskId ? queryLikeInput : undefined,
-            });
-            return {
-              success: false,
-              error_code: "DOC_ASYNC_TASK_NOT_FOUND",
-              error: "DOC async task not found",
-              target: {
-                task_id: lookupTaskId || undefined,
-                session_id: sessionId || undefined,
-                query_ignored_as_task_id: queryLikeInput && !queryLooksLikeTaskId ? queryLikeInput : undefined,
-              },
-              warning: lookupWarning,
-            };
-          }
-          if (actionName === "compose_doc_async_answer") {
-            const question =
-              normalizeText(structuredArguments?.user_question) ||
-              normalizeText(structuredArguments?.question) ||
-              normalizeText(toolParams.query) ||
-              task.query;
-            const drafted = composeDocAnswerDraft({
-              question,
-              taskQuery: task.query,
-              taskStatus: task.status,
-              taskResult: task.result,
-              taskError: task.error,
-            });
-            traceLog("doc_async.compose", {
-              agent_id: agent.agentId,
-              task_id: task.taskId,
-              status: task.status,
-              resolved_lookup_by: resolvedLookupBy,
-              evidence_count: drafted.evidence_snippets.length,
-              uncertainty_count: drafted.uncertainty_flags.length,
-            });
-            return {
-              success: true,
-              type: "doc_async_answer_draft",
-              data: {
-                task_id: task.taskId,
-                status: task.status,
-                question,
-                resolved_lookup_by: resolvedLookupBy,
-                warning: lookupWarning,
-                ...drafted,
-                next_action:
-                  "请基于 evidence_snippets 与用户原问题组织最终回答；若 response_policy.must_include_boundary_notice 为 true，答复中必须声明边界；若 response_policy.should_request_followup 为 true，需主动建议补充检索。",
-              },
-            };
-          }
-          return {
-            success: true,
-            type: actionName === "get_doc_async_readable" ? "doc_async_readable" : "doc_async_result",
-            data: {
-              task_id: task.taskId,
-              status: task.status,
-              readable_message: task.readableMessage,
-              result: task.result,
-              error: task.error,
-              completion_reason: task.completionReason,
-              session_id: task.sessionId,
-              trace_id: task.traceId,
-              message_id: task.messageId,
-              updated_at_ms: task.updatedAt,
-              resolved_lookup_by: resolvedLookupBy,
-              warning: lookupWarning,
-            },
-          };
-        }
         if (!channelResolve.sessionId) {
           traceLog("request.reject_missing_channel_session", {
             agent_id: agent.agentId,
@@ -815,30 +706,47 @@ export function createBaiyingCallToolFactory(params: {
               },
             };
           }
-          if (isPlainRecord(result) && result.type === "doc_async" && result.status === "running") {
+          if (isPlainRecord(result) && result.backend === "call_agent_sdk" && result.status === "running") {
             const ack = isPlainRecord(result.data) ? result.data : {};
             const taskId = normalizeText(ack.message_id);
             const sessionId = normalizeText(ack.session_id);
             const traceId = normalizeText(ack.trace_id);
             if (taskId && sessionId) {
               const target = isPlainRecord(result.target) ? result.target : {};
-              const record: DocAsyncTaskRecord = {
+              const createdAt = Date.now();
+              const record = {
                 taskId,
                 messageId: taskId,
                 requesterSessionKey,
+                parentSessionKey: channelResolve.parentSessionKey,
                 traceId,
                 sessionId,
+                streamName: ack.stream_name || `byai_gateway:session:${sessionId}:data_stream`,
+                toolCallId: _toolCallId,
                 targetWorkerId: normalizeText(ack.target_worker_id) || normalizeText(target.target_worker_id),
                 targetAgentType: normalizeText(ack.target_agent_type) || normalizeText(target.target_agent_type),
                 tenantId: normalizeText(ack.tenant_id),
                 resourceId: normalizeText(target.resource_id) || resourceId,
                 agentId: agent.agentId,
                 query,
-                createdAt: Date.now(),
-                updatedAt: Date.now(),
+                createdAt,
+                updatedAt: createdAt,
                 status: "pending",
+                accountId: channelResolve.accountId,
+                language: channelResolve.language,
               };
-              docAsyncState.upsert(record);
+              await appendBaiyingRemoteTaskStartedEvent(record).catch((err) => {
+                traceLog("doc_async.track_failed", {
+                  agent_id: agent.agentId,
+                  task_id: taskId,
+                  doc_session_id: sessionId,
+                  error: err instanceof Error ? err.message : String(err),
+                });
+                logBaiyingRequest(params.logger, "doc_async.track_failed", {
+                  task: record,
+                  error: err instanceof Error ? err.message : String(err),
+                });
+              });
               traceLog("doc_async.tracked", {
                 agent_id: agent.agentId,
                 task_id: taskId,
@@ -857,8 +765,9 @@ export function createBaiyingCallToolFactory(params: {
             }
             return {
               ...result,
-              guidance:
-                "DOC 异步任务已投递。建议主智能体调用 sessions_yield 挂起；唤醒后用 action=get_doc_async_result，并优先在 arguments 里传 message_id/session_id，避免把 query 误用为任务ID；随后再用 action=compose_doc_async_answer 生成草稿与证据。",
+              details: getDelegatedTaskToolDetails(),
+              // guidance:
+              //   "DOC 异步任务已投递。建议主智能体调用 sessions_yield 挂起；唤醒后用 action=get_doc_async_result，并优先在 arguments 里传 message_id/session_id，避免把 query 误用为任务ID；随后再用 action=compose_doc_async_answer 生成草稿与证据。",
             };
           }
           traceLog("executor.result_json", {

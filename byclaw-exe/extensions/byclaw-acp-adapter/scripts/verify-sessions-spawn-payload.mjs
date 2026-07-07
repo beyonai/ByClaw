@@ -318,7 +318,12 @@ async function main() {
   );
 
   const selected = selectedKinds();
-  const { createByclawAcpPlan } = await loadPlanner();
+  const { createByclawAcpPlan, buildCallAgentContentFromPlan } = await loadPlanner();
+  assert.equal(
+    typeof buildCallAgentContentFromPlan,
+    "function",
+    "planner should export buildCallAgentContentFromPlan for the byclawCallAcpAgent tool",
+  );
   const snapshot = jsonClone(fixture.snapshot);
   const cases = fixture.requestCases.filter((item) => !selected || selected.has(item.name));
 
@@ -347,6 +352,28 @@ async function main() {
       request,
     });
     assertSessionsSpawnPayload({ plan, testCase: effectiveTestCase, snapshot });
+
+    // byclawCallAcpAgent delegation content: reuses plan.task, which embeds the
+    // user query plus the on-disk shared-context file paths that the remote ACP
+    // agent reads. Structured bundle data travels via files, not inline.
+    const callAgentContent = buildCallAgentContentFromPlan(plan);
+    assert.equal(
+      callAgentContent,
+      plan.task,
+      `${testCase.name} call-agent content should equal plan.task`,
+    );
+    assert.match(callAgentContent, /query\.md/u, `${testCase.name} call-agent content should point to query.md`);
+    assert.match(
+      callAgentContent,
+      /metadata\.md/u,
+      `${testCase.name} call-agent content should point to metadata.md`,
+    );
+    assert.match(
+      callAgentContent,
+      /plan-bundle\.json/u,
+      `${testCase.name} call-agent content should point to plan-bundle.json`,
+    );
+
     summaries.push({
       kind: testCase.name,
       id: plan.id,

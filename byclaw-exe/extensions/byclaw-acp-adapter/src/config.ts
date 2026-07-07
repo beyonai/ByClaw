@@ -1,11 +1,16 @@
 import path from "node:path";
-import { ACP_CLIENT_TYPES, DEFAULTS, ENV, HTTP, PATHS, PLUGIN, SQLITE, TOOL_NAMES } from "./constants.js";
-import type { ResolvedByclawAcpAdapterConfig, RedisConnectionConfig } from "./types.js";
+import { ACP_CLIENT_TYPES, ACP_MODE, DEFAULTS, ENV, HTTP, PATHS, PLUGIN, SQLITE, TOOL_NAMES } from "./constants.js";
+import type { ByclawAcpMode, ResolvedByclawAcpAdapterConfig, RedisConnectionConfig } from "./types.js";
 
 export const byclawAcpAdapterConfigSchema = {
   type: "object",
   additionalProperties: true,
   properties: {
+    acpMode: {
+      type: "string",
+      enum: [ACP_MODE.callAgent, ACP_MODE.acp],
+      default: ACP_MODE.default,
+    },
     defaultAcpAgentId: { type: "string", default: DEFAULTS.acpAgentId },
     defaultAcpClientType: { type: "string", default: ACP_CLIENT_TYPES.claudeCode },
     defaultCwd: { type: "string" },
@@ -30,6 +35,7 @@ export const byclawAcpAdapterConfigSchema = {
       properties: {
         plan: { type: "string", default: TOOL_NAMES.plan },
         run: { type: "string", default: TOOL_NAMES.run },
+        callAcpAgent: { type: "string", default: TOOL_NAMES.callAcpAgent },
       },
     },
   },
@@ -54,6 +60,10 @@ function readInteger(value: unknown, fallback: number): number {
     }
   }
   return fallback;
+}
+
+function resolveAcpMode(value: unknown): ByclawAcpMode {
+  return value === ACP_MODE.acp ? ACP_MODE.acp : ACP_MODE.callAgent;
 }
 
 function defaultStateDir(): string {
@@ -97,6 +107,7 @@ export function resolveByclawAcpAdapterConfig(raw: unknown): ResolvedByclawAcpAd
   );
   const defaultCwd = process.env[ENV.byclawAcpDefaultCwd] || process.cwd();
   return {
+    acpMode: resolveAcpMode(config.acpMode),
     defaultAcpAgentId: readString(config.defaultAcpAgentId, DEFAULTS.acpAgentId),
     defaultAcpClientType: readString(config.defaultAcpClientType, ACP_CLIENT_TYPES.claudeCode),
     defaultCwd: resolvePath(config.defaultCwd, defaultCwd),
@@ -106,6 +117,7 @@ export function resolveByclawAcpAdapterConfig(raw: unknown): ResolvedByclawAcpAd
     toolNames: {
       plan: readString(toolNames.plan, TOOL_NAMES.plan),
       run: readString(toolNames.run, TOOL_NAMES.run),
+      callAcpAgent: readString(toolNames.callAcpAgent, TOOL_NAMES.callAcpAgent),
     },
   };
 }

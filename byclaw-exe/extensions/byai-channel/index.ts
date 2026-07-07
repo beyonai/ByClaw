@@ -12,6 +12,7 @@ import {
 import { registerByaiHooks } from "./src/hooks.js";
 import { registerContextSnapshotHook } from "./src/context-snapshot.js";
 import { registerByaiSessionStatusRoute } from "./src/session-status-route.js";
+import { registerRemoteTaskWatchService } from "./src/remote-task-watch.js";
 import { setByaiRuntime } from "./src/runtime.js";
 import {
   markActiveSdkRequestSubagentEnded,
@@ -68,6 +69,7 @@ function registerFull(api: OpenClawPluginApi) {
 
   registerContextSnapshotHook(api);
   registerByaiSessionStatusRoute(api);
+  registerRemoteTaskWatchService(api);
 
   api.on("subagent_spawned", async (event: {
     runId: string;
@@ -127,6 +129,13 @@ export default defineBundledChannelEntry({
 // 重新导出 channel 插件对象
 export { byaiChannelPlugin };
 export { setByaiRuntime };
+export {
+  buildRemoteTaskFollowupIdempotencyKey,
+  buildRemoteTaskResultMessage,
+  classifyRemoteTaskFollowupError,
+  dispatchRemoteTaskFollowup,
+  RemoteTaskFollowupSessionMissingError,
+} from "./src/remote-followup.js";
 
 // 重新导出类型
 export type {
@@ -136,3 +145,9 @@ export type {
   ByaiSdkInboundMessage,
   ByaiProbe,
 } from "./src/types.js";
+export type {
+  RemoteTaskFollowup,
+  RemoteTaskFollowupDeliveryClass,
+  RemoteTaskFollowupDispatchResult,
+  RemoteTaskFollowupStatus,
+} from "./src/remote-followup.js";
