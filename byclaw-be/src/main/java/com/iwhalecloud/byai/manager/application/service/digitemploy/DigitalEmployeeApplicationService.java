@@ -765,6 +765,7 @@ public class DigitalEmployeeApplicationService {
         // this.syncDigEmployeeSkillsToRedisQuietly(digitalEmployeeId);
         this.synOpenClawWorkSpace(digitalEmployeeId);
         operationLogService.recordOperationLog(ssResource, OperationTypeEnum.UPDATE);
+        this.notifyDigitalEmployeeRuntimeChanged(digitalEmployeeId);
 
         EmployeeIdDTO employeeIdDTO = new EmployeeIdDTO();
         employeeIdDTO.setResourceId(digitalEmployeeId);
@@ -807,6 +808,7 @@ public class DigitalEmployeeApplicationService {
         this.rebuildAndSaveDigitalEmployeeRelSkills(digitalEmployeeId);
         this.synOpenClawWorkSpace(digitalEmployeeId);
         operationLogService.recordOperationLog(ssResource, OperationTypeEnum.UPDATE);
+        this.notifyDigitalEmployeeRuntimeChanged(digitalEmployeeId);
 
         EmployeeIdDTO employeeIdDTO = new EmployeeIdDTO();
         employeeIdDTO.setResourceId(digitalEmployeeId);
@@ -834,6 +836,13 @@ public class DigitalEmployeeApplicationService {
         this.rebuildAndSaveDigitalEmployeeRelSkills(digitalEmployeeId);
         this.synOpenClawWorkSpace(digitalEmployeeId);
         operationLogService.recordOperationLog(ssResource, OperationTypeEnum.UPDATE);
+        this.notifyDigitalEmployeeRuntimeChanged(digitalEmployeeId);
+    }
+
+    private void notifyDigitalEmployeeRuntimeChanged(Long digitalEmployeeId) {
+        robotChannelRegistryCoordinator.refreshForResource(digitalEmployeeId);
+        digEmployeeChangeEventPublisher.publishAfterCommitOrNow(DigEmployeeChangeEventType.DIG_EMPLOYEE_UPDATED,
+            digitalEmployeeId);
     }
 
     private List<SsResource> findInstallRelResources(List<Long> installRelIds) {
