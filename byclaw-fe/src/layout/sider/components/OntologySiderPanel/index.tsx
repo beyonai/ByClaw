@@ -435,8 +435,15 @@ const OntologySiderPanel: React.FC = () => {
         <div
           key={node.key}
           className={styles.nodeRow}
+          tabIndex={0}
           onClick={() => handleNodeClick(node.leaf)}
           onDoubleClick={() => handleNodeDoubleClick(node.leaf)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              openLeafDetail(node.leaf);
+            }
+          }}
         >
           <span className={styles.nodeIcon}>
             <AntdIcon type={NODE_ICON[node.nodeType] || NODE_ICON.object} />
@@ -465,6 +472,7 @@ const OntologySiderPanel: React.FC = () => {
           >
             <EllipsisOutlined
               className={classnames(commonStyles.treeActionIcon, styles.nodeAction)}
+              aria-label={intl.formatMessage({ id: 'ontologySider.unbind' })}
               onClick={(event) => event.stopPropagation()}
               onMouseDown={(event) => event.stopPropagation()}
             />

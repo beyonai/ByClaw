@@ -141,7 +141,9 @@ public class DigitalEmployeeApplicationService {
 
     private static final String DEFAULT_SUPER_ASSISTANT_RESOURCE_CODE_SUFFIX = "_main";
 
-    private static final int DIG_EMPLOYEE_TEXT_FIELD_MAX_LENGTH = 4000;
+    private static final String TEMPLATE_DIGITAL_EMPLOYEE_PARAM_CODE = "TEMPLATE_DIGITAL_EMPLOYEE";
+
+    private static final int DIG_EMPLOYEE_TEXT_FIELD_MAX_LENGTH = 10000;
 
     @Autowired
     private SequenceService sequenceService;
@@ -372,30 +374,205 @@ public class DigitalEmployeeApplicationService {
         if (digitalEmployeeDTO == null) {
             return;
         }
-        validateDigitalEmployeeTextFieldLength("digemployee.field.ability", digitalEmployeeDTO.getAbility());
-        validateDigitalEmployeeTextFieldLength("digemployee.field.constraints", digitalEmployeeDTO.getConstraints());
-        validateDigitalEmployeeTextFieldLength("digemployee.field.faqs", digitalEmployeeDTO.getFaqs());
-        validateDigitalEmployeeTextFieldLength("digemployee.field.roleAttributes", digitalEmployeeDTO.getRoleAttributes());
-        validateDigitalEmployeeTextFieldLength("digemployee.field.processingFlow", digitalEmployeeDTO.getProcessingFlow());
+        int maxLength = resolveDigitalEmployeeTextFieldMaxLength(digitalEmployeeDTO);
+        validateDigitalEmployeeTextFieldLength("digemployee.field.ability", digitalEmployeeDTO.getAbility(), maxLength);
+        validateDigitalEmployeeTextFieldLength("digemployee.field.constraints", digitalEmployeeDTO.getConstraints(), maxLength);
+        validateDigitalEmployeeTextFieldLength("digemployee.field.faqs", digitalEmployeeDTO.getFaqs(), maxLength);
+        validateDigitalEmployeeTextFieldLength("digemployee.field.roleAttributes", digitalEmployeeDTO.getRoleAttributes(),
+            maxLength);
+        validateDigitalEmployeeTextFieldLength("digemployee.field.processingFlow", digitalEmployeeDTO.getProcessingFlow(),
+            maxLength);
         validateDigitalEmployeeTextFieldLength("digemployee.field.personalityDimensions",
-            digitalEmployeeDTO.getPersonalityDimensions());
-        validateDigitalEmployeeTextFieldLength("digemployee.field.wordPreferences", digitalEmployeeDTO.getWordPreferences());
-        validateDigitalEmployeeTextFieldLength("digemployee.field.sentenceAndTone", digitalEmployeeDTO.getSentenceAndTone());
-        validateDigitalEmployeeTextFieldLength("digemployee.field.corePersonaDefinition",
-            digitalEmployeeDTO.getCorePersonaDefinition());
-        validateDigitalEmployeeTextFieldLength("digemployee.field.coreCompetencies", digitalEmployeeDTO.getCoreCompetencies());
-        validateDigitalEmployeeTextFieldLength("digemployee.field.advancedSettings", digitalEmployeeDTO.getAdvancedSettings());
+            digitalEmployeeDTO.getPersonalityDimensions(), maxLength);
+        validateDigitalEmployeeTextFieldLength("digemployee.field.wordPreferences",
+            digitalEmployeeDTO.getWordPreferences(), maxLength);
+        validateDigitalEmployeeTextFieldLength("digemployee.field.sentenceAndTone",
+            digitalEmployeeDTO.getSentenceAndTone(), maxLength);
+        validateDigitalEmployeePromptFieldsLength(digitalEmployeeDTO.getCorePersonaDefinition(), maxLength);
+        validateDigitalEmployeeTextFieldLength("digemployee.field.coreCompetencies", digitalEmployeeDTO.getCoreCompetencies(),
+            maxLength);
+        validateDigitalEmployeeTextFieldLength("digemployee.field.advancedSettings", digitalEmployeeDTO.getAdvancedSettings(),
+            maxLength);
     }
 
-    private void validateDigitalEmployeeTextFieldLength(String fieldLabelKey, String value) {
+    private void validateDigitalEmployeeTextFieldLength(String fieldLabelKey, String value, int maxLength) {
         if (StringUtils.isEmpty(value)) {
             return;
         }
         int length = value.codePointCount(0, value.length());
-        if (length > DIG_EMPLOYEE_TEXT_FIELD_MAX_LENGTH) {
+        if (length > maxLength) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
                 I18nUtil.get("digemployee.field.length.exceed", I18nUtil.get(fieldLabelKey),
-                    DIG_EMPLOYEE_TEXT_FIELD_MAX_LENGTH, length));
+                    maxLength, length));
+        }
+    }
+
+    private void validateDigitalEmployeePromptFieldsLength(String corePersonaDefinition, int maxLength) {
+        if (StringUtils.isEmpty(corePersonaDefinition)) {
+            return;
+        }
+
+        try {
+            Object parsed = parseJsonRecursively(corePersonaDefinition, 5);
+            if (parsed instanceof com.alibaba.fastjson2.JSONArray promptList) {
+                for (Object itemObj : promptList) {
+                    if (!(itemObj instanceof com.alibaba.fastjson2.JSONObject item)) {
+                        continue;
+                    }
+
+                    String value = item.getString("value");
+                    if (StringUtils.isEmpty(value)) {
+                        continue;
+                    }
+
+                    int length = value.codePointCount(0, value.length());
+                    if (length > maxLength) {
+                        String fieldLabel = StringUtils.defaultIfBlank(item.getString("name"),
+                            I18nUtil.get("digemployee.field.corePersonaDefinition"));
+                        throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
+                            I18nUtil.get("digemployee.field.length.exceed", fieldLabel,
+                                maxLength, length));
+                    }
+                }
+                return;
+            }
+        }
+        catch (BaseException e) {
+            throw e;
+        }
+        catch (Exception e) {
+            logger.warn("parse corePersonaDefinition for length validation failed", e);
+        }
+
+        validateDigitalEmployeeTextFieldLength("digemployee.field.corePersonaDefinition", corePersonaDefinition, maxLength);
+    }
+
+    private Object parseJsonRecursively(String value, int maxDepth) {
+        if (maxDepth <= 0 || value == null) {
+            return value;
+        }
+        Object parsed = JSON.parse(value);
+        if (parsed instanceof String parsedString) {
+            return parseJsonRecursively(parsedString, maxDepth - 1);
+        }
+        return parsed;
+    }
+
+    private int resolveDigitalEmployeeTextFieldMaxLength(DigitalEmployeeDTO digitalEmployeeDTO) {
+        String ownerType = resolveDigitalEmployeeOwnerType(digitalEmployeeDTO);
+        String agentType = resolveDigitalEmployeeAgentType(digitalEmployeeDTO);
+        String paramValue = systemConfigService.getStringParamValueByCode(TEMPLATE_DIGITAL_EMPLOYEE_PARAM_CODE);
+        if (StringUtils.isBlank(paramValue)) {
+            return DIG_EMPLOYEE_TEXT_FIELD_MAX_LENGTH;
+        }
+
+        try {
+            List<TemplateDigitalEmployeeConfig> configs = parseTemplateDigitalEmployeeConfigs(paramValue);
+            TemplateDigitalEmployeeConfig matchedConfig = findTemplateDigitalEmployeeConfig(configs, ownerType, agentType);
+            Integer maxLength = matchedConfig == null ? null : matchedConfig.getMaxLength();
+            return maxLength == null || maxLength <= 0 ? DIG_EMPLOYEE_TEXT_FIELD_MAX_LENGTH : maxLength;
+        }
+        catch (RuntimeException e) {
+            logger.warn("parse digital employee template maxLength failed, paramCode={}",
+                TEMPLATE_DIGITAL_EMPLOYEE_PARAM_CODE, e);
+            return DIG_EMPLOYEE_TEXT_FIELD_MAX_LENGTH;
+        }
+    }
+
+    private List<TemplateDigitalEmployeeConfig> parseTemplateDigitalEmployeeConfigs(String paramValue) {
+        Object parsed = JSON.parse(paramValue);
+        if (parsed instanceof com.alibaba.fastjson2.JSONArray) {
+            List<TemplateDigitalEmployeeConfig> configs =
+                JSON.parseArray(paramValue, TemplateDigitalEmployeeConfig.class);
+            return configs == null ? Collections.emptyList() : configs;
+        }
+        if (parsed instanceof com.alibaba.fastjson2.JSONObject) {
+            TemplateDigitalEmployeeConfig config = JSON.parseObject(paramValue, TemplateDigitalEmployeeConfig.class);
+            return config == null ? Collections.emptyList() : Collections.singletonList(config);
+        }
+        return Collections.emptyList();
+    }
+
+    private TemplateDigitalEmployeeConfig findTemplateDigitalEmployeeConfig(
+        List<TemplateDigitalEmployeeConfig> configs, String ownerType, String agentType) {
+        if (CollectionUtils.isEmpty(configs)) {
+            return null;
+        }
+        String effectiveOwnerType = StringUtils.equalsIgnoreCase(ownerType, "personal") ? "personal" : "enterprise";
+        String effectiveAgentType = StringUtils.trimToEmpty(agentType);
+        return configs.stream()
+            .filter(config -> config != null)
+            .filter(config -> StringUtils.equalsIgnoreCase(
+                StringUtils.trimToEmpty(config.getOwnerType()), effectiveOwnerType))
+            .filter(config -> StringUtils.equals(StringUtils.trimToEmpty(config.getAgentType()), effectiveAgentType))
+            .findFirst()
+            .orElse(null);
+    }
+
+    private String resolveDigitalEmployeeOwnerType(DigitalEmployeeDTO digitalEmployeeDTO) {
+        String ownerType = digitalEmployeeDTO == null ? null : digitalEmployeeDTO.getOwnerType();
+        if (StringUtils.isNotBlank(ownerType) || digitalEmployeeDTO == null || digitalEmployeeDTO.getResourceId() == null) {
+            return ownerType;
+        }
+        SsResource resource = ssResourceService.findById(digitalEmployeeDTO.getResourceId());
+        return resource == null ? null : resource.getOwnerType();
+    }
+
+    private String resolveDigitalEmployeeAgentType(DigitalEmployeeDTO digitalEmployeeDTO) {
+        String agentType = digitalEmployeeDTO == null ? null : digitalEmployeeDTO.getAgentType();
+        if (digitalEmployeeDTO == null || digitalEmployeeDTO.getResourceId() == null) {
+            return agentType;
+        }
+        SsResource resource = ssResourceService.findById(digitalEmployeeDTO.getResourceId());
+        if (isDefaultPersonalResource(resource)) {
+            return DigitalEmployType.AGENT_TYPE_ASSISTANT.getCode();
+        }
+        if (StringUtils.isNotBlank(agentType)) {
+            return agentType;
+        }
+        SsResExtDigEmployee ext = ssResExtDigEmployeeService.findById(digitalEmployeeDTO.getResourceId());
+        return ext == null ? null : ext.getAgentType();
+    }
+
+    public static class TemplateDigitalEmployeeConfig {
+        private String ownerType;
+
+        private String agentType;
+
+        private String key;
+
+        private Integer maxLength;
+
+        public String getOwnerType() {
+            return ownerType;
+        }
+
+        public void setOwnerType(String ownerType) {
+            this.ownerType = ownerType;
+        }
+
+        public String getAgentType() {
+            return agentType;
+        }
+
+        public void setAgentType(String agentType) {
+            this.agentType = agentType;
+        }
+
+        public String getKey() {
+            return key;
+        }
+
+        public void setKey(String key) {
+            this.key = key;
+        }
+
+        public Integer getMaxLength() {
+            return maxLength;
+        }
+
+        public void setMaxLength(Integer maxLength) {
+            this.maxLength = maxLength;
         }
     }
 
@@ -765,6 +942,7 @@ public class DigitalEmployeeApplicationService {
         // this.syncDigEmployeeSkillsToRedisQuietly(digitalEmployeeId);
         this.synOpenClawWorkSpace(digitalEmployeeId);
         operationLogService.recordOperationLog(ssResource, OperationTypeEnum.UPDATE);
+        this.notifyDigitalEmployeeRuntimeChanged(digitalEmployeeId);
 
         EmployeeIdDTO employeeIdDTO = new EmployeeIdDTO();
         employeeIdDTO.setResourceId(digitalEmployeeId);
@@ -807,6 +985,7 @@ public class DigitalEmployeeApplicationService {
         this.rebuildAndSaveDigitalEmployeeRelSkills(digitalEmployeeId);
         this.synOpenClawWorkSpace(digitalEmployeeId);
         operationLogService.recordOperationLog(ssResource, OperationTypeEnum.UPDATE);
+        this.notifyDigitalEmployeeRuntimeChanged(digitalEmployeeId);
 
         EmployeeIdDTO employeeIdDTO = new EmployeeIdDTO();
         employeeIdDTO.setResourceId(digitalEmployeeId);
@@ -834,6 +1013,13 @@ public class DigitalEmployeeApplicationService {
         this.rebuildAndSaveDigitalEmployeeRelSkills(digitalEmployeeId);
         this.synOpenClawWorkSpace(digitalEmployeeId);
         operationLogService.recordOperationLog(ssResource, OperationTypeEnum.UPDATE);
+        this.notifyDigitalEmployeeRuntimeChanged(digitalEmployeeId);
+    }
+
+    private void notifyDigitalEmployeeRuntimeChanged(Long digitalEmployeeId) {
+        robotChannelRegistryCoordinator.refreshForResource(digitalEmployeeId);
+        digEmployeeChangeEventPublisher.publishAfterCommitOrNow(DigEmployeeChangeEventType.DIG_EMPLOYEE_UPDATED,
+            digitalEmployeeId);
     }
 
     private List<SsResource> findInstallRelResources(List<Long> installRelIds) {

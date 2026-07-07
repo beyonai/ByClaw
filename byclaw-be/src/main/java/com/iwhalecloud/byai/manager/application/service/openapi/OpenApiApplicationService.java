@@ -1,18 +1,12 @@
 package com.iwhalecloud.byai.manager.application.service.openapi;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.iwhalecloud.byai.common.cache.ShareBfmUser;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.log.exception.BaseRuntimeException;
-import com.iwhalecloud.byai.gateway.channels.service.robot.RobotChannelRegistryCoordinator;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeApplicationService;
-import com.iwhalecloud.byai.manager.application.service.digitemploy.event.DigEmployeeChangeEventPublisher;
-import com.iwhalecloud.byai.manager.application.service.digitemploy.event.DigEmployeeChangeEventType;
 import com.iwhalecloud.byai.manager.application.service.ontology.OntologyBaseService;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceBizTypeEnum;
-import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus;
-import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceRelDetailService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeInstallResourceDTO;
 import com.iwhalecloud.byai.manager.dto.men.NoticeDetail;
@@ -22,13 +16,11 @@ import com.iwhalecloud.byai.manager.dto.openapi.OpenPermissionCheckDto;
 import com.iwhalecloud.byai.manager.dto.openapi.OpenPermissionCheckResultDto;
 import com.iwhalecloud.byai.manager.entity.notification.ByaiNotification;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
-import com.iwhalecloud.byai.manager.entity.resource.SsResourceRelDetail;
 import com.iwhalecloud.byai.manager.infrastructure.cache.ShareCacheUtil;
 import com.iwhalecloud.byai.state.domain.notification.service.NotificationService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Comparator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -64,15 +56,6 @@ public class OpenApiApplicationService {
 
     @Autowired
     private SsResourceService ssResourceService;
-
-    @Autowired
-    private SsResourceRelDetailService ssResourceRelDetailService;
-
-    @Autowired
-    private RobotChannelRegistryCoordinator robotChannelRegistryCoordinator;
-
-    @Autowired
-    private DigEmployeeChangeEventPublisher digEmployeeChangeEventPublisher;
 
     @Autowired
     private AuthApplicationService authApplicationService;
@@ -202,21 +185,12 @@ public class OpenApiApplicationService {
         if (relSsResource == null) {
             return;
         }
-        if (!authApplicationService.hasResourceManagePermission(agentResource)) {
-            throw new BaseRuntimeException(I18nUtil.get("openapi.mount.agent.no.manage.permission",
-                agentResource.getResourceName()));
-        }
+        validateMountableResourceType(relSsResource);
 
-        // 删除挂载的资源
-        LambdaQueryWrapper<SsResourceRelDetail> queryWrapper = new LambdaQueryWrapper<>();
-        queryWrapper.eq(SsResourceRelDetail::getResourceId, agentResource.getResourceId());
-        queryWrapper.eq(SsResourceRelDetail::getRelResourceId, relSsResource.getResourceId());
-        ssResourceRelDetailService.remove(queryWrapper);
-
-        robotChannelRegistryCoordinator.refreshForResource(agentResource.getResourceId());
-
-        digEmployeeChangeEventPublisher.publishAfterCommitOrNow(DigEmployeeChangeEventType.DIG_EMPLOYEE_UPDATED,
-            agentResource.getResourceId());
+        DigitalEmployeeInstallResourceDTO uninstallResourceDTO = new DigitalEmployeeInstallResourceDTO();
+        uninstallResourceDTO.setDigitalEmployeeId(agentResource.getResourceId());
+        uninstallResourceDTO.setRelIds(List.of(relSsResource.getResourceId()));
+        digitalEmployeeApplicationService.uninstallDigitalEmployeeRelResources(uninstallResourceDTO);
     }
 
     private SsResource loadAndValidateMountAgent(MountResourceDto mountResourceDto) {
@@ -261,17 +235,30 @@ public class OpenApiApplicationService {
         }
 
         validateCodeQueryParams(relResourceCode, relResourceBizType, ontologyBaseCode);
-        List<SsResource> resources = ssResourceService.findByCodeAndBizTypeAndOntologyBaseCode(relResourceCode,
-            relResourceBizType, ontologyBaseCode);
+        List<SsResource> resources = findResourceCandidates(relResourceCode, relResourceBizType, ontologyBaseCode);
         if (CollectionUtils.isEmpty(resources)) {
-            SsResource ontologyChildResource = ensureMountOntologyChildResource(relResourceBizType, ontologyBaseCode,
-                relResourceCode);
-            if (ontologyChildResource != null) {
-                return ontologyChildResource;
+            if (StringUtils.isNotBlank(relResourceBizType) && StringUtils.isNotBlank(ontologyBaseCode)) {
+                SsResource ontologyChildResource = ensureMountOntologyChildResource(relResourceBizType, ontologyBaseCode,
+                    relResourceCode);
+                if (ontologyChildResource != null) {
+                    return ontologyChildResource;
+                }
             }
             return null;
         }
         return resolveUniqueMountResource(resources, relResourceCode, relResourceBizType, ontologyBaseCode);
+    }
+
+    private List<SsResource> findResourceCandidates(String resourceCode, String resourceBizType,
+        String ontologyBaseCode) {
+        if (StringUtils.isNotBlank(ontologyBaseCode) && StringUtils.isNotBlank(resourceBizType)) {
+            return ssResourceService.findByCodeAndBizTypeAndOntologyBaseCode(resourceCode, resourceBizType,
+                ontologyBaseCode);
+        }
+        if (StringUtils.isNotBlank(resourceBizType)) {
+            return ssResourceService.findByCodeAndBizType(resourceCode, resourceBizType);
+        }
+        return ssResourceService.findByCode(resourceCode);
     }
 
     private SsResource resolveUniqueMountResource(List<SsResource> resources, String resourceCode,
@@ -282,27 +269,10 @@ public class OpenApiApplicationService {
         if (resources.size() == 1) {
             return resources.get(0);
         }
-        List<SsResource> permittedResources = resources.stream()
-            .filter(authApplicationService::hasResourceUsePermission)
-            .sorted(preferredResourceComparator())
-            .toList();
-        if (CollectionUtils.isNotEmpty(permittedResources)) {
-            SsResource selected = permittedResources.get(0);
-            logger.warn(
-                "OpenAPI挂载资源编码匹配到多条有效资源，已按使用权限和更新时间择优选择。resourceCode={}, resourceBizType={}, ontologyBaseCode={}, selectedResourceId={}, matchedResourceIds={}",
-                resourceCode, resourceBizType, ontologyBaseCode, selected.getResourceId(),
-                resources.stream().map(SsResource::getResourceId).toList());
-            return selected;
-        }
+        logger.warn(
+            "OpenAPI挂载资源编码匹配到多条有效资源，请改传resourceId。resourceCode={}, resourceBizType={}, ontologyBaseCode={}, matchedResourceIds={}",
+            resourceCode, resourceBizType, ontologyBaseCode, resources.stream().map(SsResource::getResourceId).toList());
         throw new BaseRuntimeException(I18nUtil.get("openapi.resource.code.not.unique"));
-    }
-
-    private Comparator<SsResource> preferredResourceComparator() {
-        return Comparator
-            .comparing((SsResource resource) -> !ResourceStatus.LIST.getNum().equals(resource.getResourceStatus()))
-            .thenComparing(SsResource::getUpdateTime, Comparator.nullsLast(Comparator.reverseOrder()))
-            .thenComparing(SsResource::getCreateTime, Comparator.nullsLast(Comparator.reverseOrder()))
-            .thenComparing(SsResource::getResourceId, Comparator.nullsLast(Comparator.reverseOrder()));
     }
 
     private SsResource ensureMountOntologyChildResource(String resourceBizType, String ontologyBaseCode,
@@ -369,8 +339,7 @@ public class OpenApiApplicationService {
                 continue;
             }
 
-            List<SsResource> resources = ssResourceService.findByCodeAndBizTypeAndOntologyBaseCode(resourceCode,
-                resourceBizType, ontologyBaseCode);
+            List<SsResource> resources = findResourceCandidates(resourceCode, resourceBizType, ontologyBaseCode);
             if (CollectionUtils.isEmpty(resources)) {
                 if (findAccessibleOntologyBaseResource(resourceBizType, ontologyBaseCode) != null) {
                     items.add(buildVirtualOntologyChildPermissionItem(resourceCode, resourceBizType, ontologyBaseCode));
@@ -506,12 +475,6 @@ public class OpenApiApplicationService {
     private String getCodeQueryInvalidMessage(String resourceCode, String resourceBizType, String ontologyBaseCode) {
         if (StringUtils.isBlank(resourceCode)) {
             return I18nUtil.get("openapi.resource.code.not.empty");
-        }
-        if (StringUtils.isBlank(resourceBizType)) {
-            return I18nUtil.get("openapi.resource.biz.type.not.empty");
-        }
-        if (isOntologyMountBizType(resourceBizType) && StringUtils.isBlank(ontologyBaseCode)) {
-            return I18nUtil.get("openapi.resource.ontology.base.code.required");
         }
         return null;
     }

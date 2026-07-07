@@ -205,6 +205,38 @@ public class SsResourceService {
     }
 
     /**
+     * 按资源编码查询资源。
+     *
+     * @param resourceCode 资源编码
+     * @return 匹配资源列表
+     */
+    public List<SsResource> findByCode(String resourceCode) {
+        if (StringUtil.isEmpty(resourceCode)) {
+            return Collections.emptyList();
+        }
+        LambdaQueryWrapper<SsResource> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.eq(SsResource::getResourceCode, resourceCode);
+        return ssResourceMapper.selectList(queryWrapper);
+    }
+
+    /**
+     * 按资源编码和资源类型查询资源。
+     *
+     * @param resourceCode 资源编码
+     * @param resourceBizType 资源业务类型
+     * @return 匹配资源列表
+     */
+    public List<SsResource> findByCodeAndBizType(String resourceCode, String resourceBizType) {
+        if (StringUtil.isEmpty(resourceCode) || StringUtil.isEmpty(resourceBizType)) {
+            return Collections.emptyList();
+        }
+        LambdaQueryWrapper<SsResource> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.eq(SsResource::getResourceCode, resourceCode);
+        queryWrapper.eq(SsResource::getResourceBizType, resourceBizType);
+        return ssResourceMapper.selectList(queryWrapper);
+    }
+
+    /**
      * 按资源编码、资源类型、本体库编码查询资源。
      *
      * <p>本体类子资源（SCENE/VIEW/OBJECT）的编码只在所属本体库内唯一，调用方应传

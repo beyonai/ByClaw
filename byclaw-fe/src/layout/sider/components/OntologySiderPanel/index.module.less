@@ -25,6 +25,7 @@
 }
 
 .nodeRow {
+  position: relative;
   display: flex;
   align-items: center;
   min-width: 0;
@@ -39,9 +40,17 @@
     background: rgba(22, 93, 255, 0.06);
   }
 
+  &:focus {
+    outline: none;
+    background: rgba(22, 93, 255, 0.08);
+  }
+
   &:hover .nodeAction,
+  &:focus .nodeAction,
   &:focus-within .nodeAction {
+    visibility: visible;
     opacity: 1;
+    pointer-events: auto;
   }
 }
 
@@ -85,6 +94,11 @@
 }
 
 .nodeAction {
+  position: static;
+  flex: none;
+  transform: none;
+  visibility: hidden;
   opacity: 0;
+  pointer-events: none;
   transition: opacity 0.16s ease;
 }
