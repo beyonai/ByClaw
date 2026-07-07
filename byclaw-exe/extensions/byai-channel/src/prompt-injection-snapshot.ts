@@ -2,6 +2,7 @@ import path from "node:path";
 import type { Language } from "./types.js";
 import type { ActiveSdkRequest } from "./session-context.js";
 import {
+  buildByclawAcpLanguagePrompt,
   buildChannelExtensionPrompt,
   buildLanguagePrompt,
   buildSessionFilesPrompt,
@@ -247,6 +248,7 @@ export function buildPromptInjectionSnapshot(params: {
   if (params.request.languageProvided) {
     sections.push(buildLanguagePrompt(params.request.language));
   }
+  sections.push(buildByclawAcpLanguagePrompt(params.request.language, params.request.languageProvided));
   const channelExtensionForPrompt = buildEnhancedChannelExtension(
     params.request.channelExtension,
     params.request,

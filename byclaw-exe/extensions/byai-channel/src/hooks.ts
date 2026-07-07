@@ -20,6 +20,7 @@ import type { Language, PluginHookAgentContext, PluginHookAgentEndEvent } from "
 import {
   BYAI_USER_MD_SECTION_END,
   BYAI_USER_MD_SECTION_START,
+  buildByclawAcpLanguagePrompt,
   buildChannelExtensionPrompt,
   buildCompactionNoticeText,
   buildLanguagePrompt,
@@ -642,6 +643,9 @@ export function registerByaiHooks(api: OpenClawPluginApi): void {
       }
       if (request?.languageProvided) {
         sections.push(buildLanguagePrompt(request.language));
+      }
+      if (request) {
+        sections.push(buildByclawAcpLanguagePrompt(request.language, request.languageProvided));
       }
       const channelExtPrompt = buildChannelExtensionPrompt(
         request?.channelExtension,

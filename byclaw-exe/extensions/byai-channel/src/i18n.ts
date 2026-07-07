@@ -26,6 +26,11 @@ const ALWAYS_USE_ENGLISH_SYSTEM_PROMPT = [
   "- **Sole exception**: Switch output language **only** if the user **explicitly** instructs you to use a specific other language (e.g. \"Please reply in Chinese from now on\" / \"Switch to Japanese\"). If they do not, **stay in English with no exceptions**.",
 ].join("\n");
 
+const BYCLAW_ACP_TOOL_NAMES = ["byclawAcpPlan", "byclawAcpRun"] as const;
+const BYCLAW_ACP_REPLY_LANGUAGE_FIELD = "replyLanguage";
+const BYCLAW_ACP_LANGUAGE_FIELD = "language";
+const BYCLAW_ACP_LANGUAGE_PROVIDED_FIELD = "languageProvided";
+
 /** Normalize gateway locale to `zh_CN` | `en_US`. Unknown non-empty values default to `zh_CN`. */
 export function resolveLanguage(language?: string): Language {
     const t = typeof language === "string" ? language.trim() : "";
@@ -155,6 +160,30 @@ export function buildLanguagePrompt(language?: string): string {
     return isEnglishLanguage(language)
         ? ALWAYS_USE_ENGLISH_SYSTEM_PROMPT
         : ALWAYS_USE_CHINESE_SYSTEM_PROMPT;
+}
+
+export function buildByclawAcpLanguagePrompt(
+    language?: string,
+    languageProvided = false,
+): string {
+    const resolvedLanguage = resolveLanguage(language);
+    const tools = BYCLAW_ACP_TOOL_NAMES.map((toolName) => `\`${toolName}\``).join(" / ");
+    const languageJson = JSON.stringify(resolvedLanguage);
+    const providedJson = JSON.stringify(languageProvided);
+    if (isEnglishLanguage(resolvedLanguage)) {
+        return [
+            "## ByClaw ACP downstream language metadata",
+            "",
+            `When calling ${tools}, pass the current byai-channel reply language metadata as tool arguments: \`${BYCLAW_ACP_LANGUAGE_FIELD}: ${languageJson}\`, \`${BYCLAW_ACP_REPLY_LANGUAGE_FIELD}: ${languageJson}\`, and \`${BYCLAW_ACP_LANGUAGE_PROVIDED_FIELD}: ${providedJson}\`.`,
+            "Do not remove the responseLanguage policy from the returned sessions_spawn task, metadata.md, or plan-bundle.json; downstream ACP clients must answer in that language unless the user explicitly requests a different language in the current query.",
+        ].join("\n");
+    }
+    return [
+        "## ByClaw ACP 下游语言元数据",
+        "",
+        `调用 ${tools} 时，必须把当前 byai-channel 回复语言元数据透传到工具入参：\`${BYCLAW_ACP_LANGUAGE_FIELD}: ${languageJson}\`、\`${BYCLAW_ACP_REPLY_LANGUAGE_FIELD}: ${languageJson}\`、\`${BYCLAW_ACP_LANGUAGE_PROVIDED_FIELD}: ${providedJson}\`。`,
+        "不要删除工具返回的 sessions_spawn task、metadata.md 或 plan-bundle.json 里的 responseLanguage 策略；下游 ACP client 必须按该语言响应，除非用户在当前 query 中明确要求其它语言。",
+    ].join("\n");
 }
 
 /** USER.md was refreshed on disk; inject so the model re-reads it (hook). Language matches channel/LANG. */

@@ -50,6 +50,8 @@ describe("prompt-injection-snapshot", () => {
     expect(taken?.appendSystemContext).toContain("Session Root");
     expect(taken?.appendSystemContext).toContain("channelType");
     expect(taken?.appendSystemContext).toContain("渠道语言");
+    expect(taken?.appendSystemContext).toContain("ByClaw ACP 下游语言元数据");
+    expect(taken?.appendSystemContext).toContain("replyLanguage: \"zh_CN\"");
 
     clearPromptInjectionSnapshot(request.sessionKey);
     expect(takePromptInjectionSnapshot(request.sessionKey)).toBeUndefined();
