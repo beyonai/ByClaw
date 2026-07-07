@@ -3,7 +3,8 @@ FROM node:22-slim AS ext-builder
 
 WORKDIR /build
 
-COPY byclaw-exe/extensions/ ./src/
+COPY byclaw-exe/extensions/baiying-enhance/ ./src/baiying-enhance/
+COPY byclaw-exe/extensions/byai-channel/ ./src/byai-channel/
 
 RUN npm config set registry https://registry.npmmirror.com --global
 
@@ -37,7 +38,7 @@ RUN set -eux; \
     echo ">>> built extensions:"; ls -la /build/out/
 
 ## ── stage 2: final image ─────────────────────────────────────────
-FROM ghcr.io/openclaw/openclaw:2026.4.21
+FROM ghcr.io/openclaw/openclaw:2026.6.1
 
 USER root
 
@@ -66,27 +67,4 @@ COPY --from=ext-builder /build/out/ /app/extensions/
 
 COPY middleware/openclaw/skills/iwhalehub/ /app/skills/iwhalehub/
 
-COPY middleware/openclaw/linux-amd64-filebrowser/filebrowser /usr/local/bin/filebrowser
-COPY middleware/openclaw/filebrowser-ui/ /usr/local/share/openclaw/filebrowser-ui/
-COPY middleware/openclaw/filebrowser-ui-proxy.py /usr/local/bin/openclaw-filebrowser-ui-proxy
-
-# startAll 启动链：startAll.sh 会按需拉起 start-filebrowser.sh 等，最后 exec start-openclaw.sh 起网关。
-COPY middleware/openclaw/runtime-bootstrap.sh /usr/local/bin/openclaw-runtime-bootstrap
-COPY middleware/openclaw/startAll.sh \
-     middleware/openclaw/start-filebrowser.sh \
-     middleware/openclaw/start-openclaw.sh \
-     /usr/local/bin/
-
-RUN chmod a+x \
-    /usr/local/bin/filebrowser \
-    /usr/local/bin/openclaw-filebrowser-ui-proxy \
-    /usr/local/bin/openclaw-runtime-bootstrap \
-    /usr/local/bin/startAll.sh \
-    /usr/local/bin/start-filebrowser.sh \
-    /usr/local/bin/start-openclaw.sh
-
-# openclaw 网关（start-openclaw.sh 默认 8080）与 filebrowser UI（start-filebrowser.sh 默认 8082）
-EXPOSE 8080 8082
-
-ENTRYPOINT ["/usr/local/bin/startAll.sh"]
-
+EXPOSE 8080
