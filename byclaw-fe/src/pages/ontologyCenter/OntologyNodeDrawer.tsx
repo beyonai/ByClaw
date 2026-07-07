@@ -4,7 +4,12 @@ import { Button, Drawer, Empty, Spin, Table, Tag } from 'antd';
 import { CloseOutlined, PaperClipOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import useGlobal from '@/hooks/useGlobal';
-import { getOntologySceneDetails, listOntologyScenes } from '@/service/ontology';
+import {
+  getOntologyObjectDetail,
+  getOntologySceneDetails,
+  getOntologyViewDetail,
+  listOntologyScenes,
+} from '@/service/ontology';
 import styles from './OntologyDetailDrawer.module.less';
 
 const getData = (res: any) => res?.data ?? res ?? [];
@@ -53,8 +58,32 @@ const OntologyNodeDrawer = ({
   const sceneId = node?.sceneId;
 
   useEffect(() => {
-    if (!open || !node || !baseId) return;
+    if (!open || !node) return;
     setLoading(true);
+    if ((level === 'OBJECT_IN_SCENE' || level === 'OBJECT_IN_VIEW') && node?.objectCode) {
+      getOntologyObjectDetail({ objectCode: node.objectCode })
+        .then((res) => {
+          const d = getData(res);
+          setDetail(d && typeof d === 'object' && !Array.isArray(d) ? { objects: [d] } : {});
+        })
+        .catch(() => setDetail({}))
+        .finally(() => setLoading(false));
+      return;
+    }
+    if (level === 'VIEW' && node?.viewCode) {
+      getOntologyViewDetail({ viewCode: node.viewCode })
+        .then((res) => {
+          const d = getData(res);
+          setDetail(d && typeof d === 'object' && !Array.isArray(d) ? { views: [d] } : {});
+        })
+        .catch(() => setDetail({}))
+        .finally(() => setLoading(false));
+      return;
+    }
+    if (!baseId) {
+      setLoading(false);
+      return;
+    }
     if (level === 'BASE') {
       listOntologyScenes({ ownerType, baseId })
         .then((res) => setSceneCount((getData(res) as any[])?.length || 0))
@@ -138,6 +167,22 @@ const OntologyNodeDrawer = ({
             </span>
           ),
         },
+      ]}
+    />
+  );
+
+  const actionTable = (actions: any[] = []) => (
+    <Table
+      size="small"
+      tableLayout="fixed"
+      rowKey={(r: any, i) => `${r.actionCode || ''}-${i}`}
+      dataSource={actions}
+      pagination={false}
+      locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
+      columns={[
+        { title: t('ontologyCenter.detail.action.name'), dataIndex: 'actionName', ellipsis: true },
+        { title: t('ontologyCenter.detail.col.code'), dataIndex: 'actionCode', ellipsis: true },
+        { title: t('common.desc'), dataIndex: 'actionDesc', ellipsis: true },
       ]}
     />
   );
@@ -240,6 +285,8 @@ const OntologyNodeDrawer = ({
         {obj.objectDesc && <div className={styles.desc}>{obj.objectDesc}</div>}
         <div className={styles.sectionTitle}>{t('ontologyCenter.detail.attributes')}</div>
         {propertyTable(obj.properties)}
+        <div className={styles.sectionTitle}>{t('ontologyCenter.detail.actions')}</div>
+        {actionTable(obj.actions)}
       </>
     );
   };

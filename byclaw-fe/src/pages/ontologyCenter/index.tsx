@@ -30,8 +30,18 @@ import ResourceFilter, {
 import { SiderContentContext } from '@/layout/sider/siderContentContext';
 import { useActiveSiderAgent } from '@/layout/sider/components/ActiveSiderAgentBar';
 import { findDetailsById, installDigitalEmployeeRelResources } from '@/pages/manager/service/DigitalEmployeeMgr';
+import AuthListDrawer from '@/pages/manager/components/AuthListDrawer';
+import UseApplyAuditDrawer from '@/pages/manager/components/UseApplyAuditDrawer';
+import { applyResourceUse } from '@/pages/manager/service/resources';
+import { checkEnterpriseAdminPermission } from '@/service/auth';
 import { queryCatalogTree } from '@/service/digitalEmployees';
-import { pageOntologyResources, syncOntologyResources } from '@/service/ontology';
+import {
+  getOntologyObjectDetail,
+  listOntologyObjectsByView,
+  listOntologyRelationsByObject,
+  pageOntologyResources,
+  syncOntologyResources,
+} from '@/service/ontology';
 import { normalizeCatalogTree } from '@/utils/catalog';
 import OntologyNodeDrawer from './OntologyNodeDrawer';
 import styles from './index.module.less';
@@ -548,6 +558,20 @@ const parseMaybeArray = (value: any) => {
   return [value];
 };
 
+const parseMaybeObject = (value: any) => {
+  if (!value) return {};
+  if (typeof value === 'object' && !Array.isArray(value)) return value;
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value || '{}');
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+  return {};
+};
+
 const getEntryBizType = (entry: any) => {
   if (entry?.resourceBizType) return entry.resourceBizType;
   if (entry?.objectCode || entry?.object_code) return 'OBJECT';
@@ -595,52 +619,54 @@ const normalizePermission = (row: any) => {
 };
 
 const normalizeOntologyResource = (row: any, ownerType: OwnerTab) => {
-  const bizType = `${row?.resourceBizType || ''}`.toUpperCase();
+  const meta = parseMaybeObject(row?.targetContent);
+  const source = { ...meta, ...row };
+  const bizType = `${source?.resourceBizType || ''}`.toUpperCase();
   const resourceCode =
-    row?.resourceCode ||
-    row?.resource_code ||
-    row?.viewCode ||
-    row?.view_code ||
-    row?.objectCode ||
-    row?.object_code ||
-    row?.code ||
+    source?.resourceCode ||
+    source?.resource_code ||
+    source?.viewCode ||
+    source?.view_code ||
+    source?.objectCode ||
+    source?.object_code ||
+    source?.code ||
     '';
   const resourceName =
-    row?.resourceName ||
-    row?.resource_name ||
-    row?.viewName ||
-    row?.view_name ||
-    row?.objectName ||
-    row?.object_name ||
-    row?.name ||
+    source?.resourceName ||
+    source?.resource_name ||
+    source?.viewName ||
+    source?.view_name ||
+    source?.objectName ||
+    source?.object_name ||
+    source?.name ||
     resourceCode;
-  const baseId = row?.ontologyBaseCode || row?.baseId || row?.pid || row?.baseCode || '';
+  const baseId = source?.ontologyBaseCode || source?.baseId || source?.pid || source?.baseCode || '';
   return {
-    ...row,
-    ownerType: row?.ownerType || ownerType,
+    ...source,
+    ownerType: source?.ownerType || ownerType,
     resourceBizType: bizType,
-    resourceId: row?.resourceId || `${ownerType}-${bizType}-${resourceCode}`,
+    resourceId: source?.resourceId || `${ownerType}-${bizType}-${resourceCode}`,
     resourceCode,
     resourceName,
-    resourceDesc: row?.resourceDesc || row?.resource_desc || row?.description || row?.desc || '',
-    resourceStatus: normalizeResourceStatus(row?.resourceStatus),
-    permission: normalizePermission(row),
-    catalogId: row?.catalogId || '',
-    catalogName: row?.catalogName || '',
-    creator: row?.createUserName || row?.creator || row?.createBy || '',
+    resourceDesc: source?.resourceDesc || source?.resource_desc || source?.description || source?.desc || '',
+    resourceStatus: normalizeResourceStatus(source?.resourceStatus),
+    permission: normalizePermission(source),
+    catalogId: source?.catalogId || '',
+    catalogName: source?.catalogName || '',
+    creator: source?.createUserName || source?.creator || source?.createBy || '',
     baseId,
-    baseName: row?.ontologyBaseName || row?.baseName || '',
-    sceneId: row?.sceneId || row?.sceneCode || '',
-    sceneName: row?.sceneName || '',
-    viewCode: bizType === 'VIEW' ? resourceCode : row?.viewCode || row?.view_code,
-    viewName: bizType === 'VIEW' ? resourceName : row?.viewName || row?.view_name,
-    objectCode: bizType === 'OBJECT' ? resourceCode : row?.objectCode || row?.object_code,
-    objectName: bizType === 'OBJECT' ? resourceName : row?.objectName || row?.object_name,
-    objectCodes: parseMaybeArray(row?.objectCodes || row?.objects).map(
+    baseName: source?.ontologyBaseName || source?.baseName || '',
+    sceneId: source?.sceneId || source?.sceneCode || '',
+    sceneName: source?.sceneName || '',
+    viewCode: bizType === 'VIEW' ? resourceCode : source?.viewCode || source?.view_code,
+    viewName: bizType === 'VIEW' ? resourceName : source?.viewName || source?.view_name,
+    objectCode: bizType === 'OBJECT' ? resourceCode : source?.objectCode || source?.object_code,
+    objectName: bizType === 'OBJECT' ? resourceName : source?.objectName || source?.object_name,
+    objectCodes: parseMaybeArray(source?.objectCodes || source?.objects).map(
       (item: any) => item?.objectCode || item?.code || item
     ),
-    actions: parseMaybeArray(row?.actions),
-    relations: parseMaybeArray(row?.relations),
+    actions: parseMaybeArray(source?.actions),
+    relations: parseMaybeArray(source?.relations),
   };
 };
 
@@ -693,6 +719,11 @@ const OntologyCenter: React.FC = () => {
   const [syncSummary, setSyncSummary] = useState({ created: 0, updated: 0, synced: 0, totalPages: 0 });
   const [installedKeys, setInstalledKeys] = useState<Set<string>>(new Set());
   const [installingKeys, setInstallingKeys] = useState<Set<string>>(new Set());
+  const [canRefreshEnterprise, setCanRefreshEnterprise] = useState(false);
+  const [authDrawerOpen, setAuthDrawerOpen] = useState(false);
+  const [authType, setAuthType] = useState<'useAuth' | 'mgrAuth'>('useAuth');
+  const [selectedResource, setSelectedResource] = useState<any>(null);
+  const [useApplyAuditOpen, setUseApplyAuditOpen] = useState(false);
 
   const catalogTabs = useMemo(() => {
     const tabs = getDisplayCatalogs(catalogList);
@@ -729,6 +760,12 @@ const OntologyCenter: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    checkEnterpriseAdminPermission()
+      .then((res: any) => setCanRefreshEnterprise(getData(res) === true))
+      .catch(() => setCanRefreshEnterprise(false));
+  }, []);
+
+  useEffect(() => {
     loadInstalledKeys();
   }, [loadInstalledKeys]);
 
@@ -745,6 +782,7 @@ const OntologyCenter: React.FC = () => {
         keyword,
         catalogId,
         statusList: statusFilter === 'all' ? [0, 1, 2, 3, 4, 5] : statusFilter === 'offline' ? [3] : [2],
+        permission: toResourceFilterPermission(permissionFilter),
         pageNum: 1,
         pageSize: 100,
       });
@@ -759,7 +797,7 @@ const OntologyCenter: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [activeTab, catalogId, keyword, statusFilter]);
+  }, [activeTab, catalogId, keyword, permissionFilter, statusFilter]);
 
   useEffect(() => {
     loadResources();
@@ -808,6 +846,7 @@ const OntologyCenter: React.FC = () => {
 
   const syncDoneCount = syncBatches.filter((item) => item.status === 'done').length;
   const syncProgress = syncBatches.length ? Math.round((syncDoneCount / syncBatches.length) * 100) : 0;
+  const showRefreshButton = activeTab === 'personal' || (activeTab === 'enterprise' && canRefreshEnterprise);
 
   const updateSyncBatch = (pageNum: number, patch: Partial<SyncBatch>) => {
     setSyncBatches((prev) => {
@@ -850,6 +889,10 @@ const OntologyCenter: React.FC = () => {
   const handleRefresh = async () => {
     if (activeTab === 'enterpriseTerm') {
       message.info('企业术语正在建设中');
+      return;
+    }
+    if (activeTab === 'enterprise' && !canRefreshEnterprise) {
+      message.warning('只有管理员可以刷新企业本体资源');
       return;
     }
 
@@ -924,12 +967,28 @@ const OntologyCenter: React.FC = () => {
     });
   };
 
-  const simulateAuth = (resource: any, type: 'manage' | 'use') => {
-    message.info(
-      type === 'manage'
-        ? `${t('common.manageAuthorization')}：${resource.resourceName}`
-        : `${t('common.useAuthorization')}：${resource.resourceName}`
-    );
+  const handleAuth = (resource: any, type: 'useAuth' | 'mgrAuth') => {
+    setSelectedResource(resource);
+    setAuthType(type);
+    setAuthDrawerOpen(true);
+  };
+
+  const handleApplyUse = (resource: any) => {
+    Modal.confirm({
+      title: t('digitalEmployees.applyConfirm'),
+      okText: t('common.confirm'),
+      cancelText: t('common.cancel'),
+      onOk: async () => {
+        await applyResourceUse({ resourceId: resource.resourceId });
+        message.success(t('resource.applyUseSuccess'));
+        await loadResources();
+      },
+    });
+  };
+
+  const handleAuditUse = (resource: any) => {
+    setSelectedResource(resource);
+    setUseApplyAuditOpen(true);
   };
 
   const installResource = async (resource: any) => {
@@ -1009,75 +1068,113 @@ const OntologyCenter: React.FC = () => {
   );
 
   const showViewObjects = useCallback(
-    (view: any) => {
-      openTablePanel({
-        title: `${view.resourceName} / ${t('common.resourceType.object')}`,
-        rowKey: (row: any) => row.objectCode,
-        rows: view.objectCodes.map((code: string) => {
-          const target =
-            resourceList.find(
-              (item) => item.resourceBizType === 'OBJECT' && item.sceneId === view.sceneId && item.objectCode === code
-            ) || {};
-          return {
-            objectCode: code,
-            objectName: target.objectName || target.resourceName || code,
-            sceneName: view.sceneName,
-            resourceDesc: target.resourceDesc,
-          };
-        }),
-        columns: [
-          { title: t('common.resourceType.object'), dataIndex: 'objectName', ellipsis: true },
-          { title: t('ontologyCenter.detail.col.code'), dataIndex: 'objectCode', ellipsis: true },
-          { title: t('common.desc'), dataIndex: 'resourceDesc', ellipsis: true },
-        ],
-      });
-    },
-    [openTablePanel, resourceList, t]
-  );
-
-  const getObjectRelations = useCallback(
-    (object: any) =>
-      resourceList
-        .filter((item) => item.resourceBizType === 'VIEW' && item.sceneId === object.sceneId)
-        .flatMap((item) => item.relations || [])
-        .filter(
-          (relation: any) =>
-            relation.sourceObjectCode === object.objectCode || relation.targetObjectCode === object.objectCode
-        ),
-    [resourceList]
-  );
-
-  const showObjectActions = useCallback(
-    (object: any) => {
-      openTablePanel({
-        title: `${object.resourceName} / ${t('ontologyCenter.detail.actions')}`,
-        rowKey: (row: any) => row.actionCode,
-        rows: object.actions || [],
-        columns: [
-          { title: t('ontologyCenter.detail.action.name'), dataIndex: 'actionName', ellipsis: true },
-          { title: t('ontologyCenter.detail.col.code'), dataIndex: 'actionCode', ellipsis: true },
-          { title: t('common.desc'), dataIndex: 'actionDesc', ellipsis: true },
-        ],
-      });
+    async (view: any) => {
+      const viewCode = view?.viewCode || view?.resourceCode;
+      if (!viewCode) {
+        message.error('当前视图缺少视图编码，无法查询对象列表');
+        return;
+      }
+      const hideLoading = message.loading('对象列表加载中...', 0);
+      try {
+        const res: any = await listOntologyObjectsByView({ viewCode });
+        const rows = findResourceRows(res).map((item: any) => ({
+          ...item,
+          objectCode: item.objectCode || item.object_code || item.resourceCode || item.code,
+          objectName: item.objectName || item.object_name || item.resourceName || item.name,
+          objectDesc: item.objectDesc || item.object_desc || item.resourceDesc || item.description || item.desc,
+        }));
+        openTablePanel({
+          title: `${view.resourceName} / ${t('common.resourceType.object')}`,
+          rowKey: (row: any) => row.objectCode,
+          rows,
+          columns: [
+            { title: t('common.resourceType.object'), dataIndex: 'objectName', ellipsis: true },
+            { title: t('ontologyCenter.detail.col.code'), dataIndex: 'objectCode', ellipsis: true },
+            { title: t('common.desc'), dataIndex: 'objectDesc', ellipsis: true },
+          ],
+        });
+      } catch (error: any) {
+        message.error(error?.msg || error?.message || '对象列表查询失败');
+      } finally {
+        hideLoading();
+      }
     },
     [openTablePanel, t]
   );
 
-  const showObjectRelations = useCallback(
-    (object: any) => {
-      openTablePanel({
-        title: `${object.resourceName} / ${t('employeeDetail.ontology.relation')}`,
-        rowKey: (row: any) => row.relationCode,
-        rows: getObjectRelations(object),
-        columns: [
-          { title: t('ontologyCenter.detail.rel.name'), dataIndex: 'relationName', ellipsis: true },
-          { title: t('ontologyCenter.detail.rel.source'), dataIndex: 'sourceObjectName', ellipsis: true },
-          { title: t('ontologyCenter.detail.rel.target'), dataIndex: 'targetObjectName', ellipsis: true },
-          { title: t('ontologyCenter.detail.rel.cardinality'), dataIndex: 'relationCardinality', width: 90 },
-        ],
-      });
+  const showObjectActions = useCallback(
+    async (object: any) => {
+      const objectCode = object?.objectCode || object?.resourceCode;
+      if (!objectCode) {
+        message.error('当前对象缺少对象编码，无法查询动作列表');
+        return;
+      }
+      const hideLoading = message.loading('动作列表加载中...', 0);
+      try {
+        const res: any = await getOntologyObjectDetail({ objectCode });
+        const detail = getData(res);
+        const rows = parseMaybeArray(detail?.actions).map((item: any) => ({
+          ...item,
+          actionCode: item.actionCode || item.action_code || item.code,
+          actionName: item.actionName || item.action_name || item.name,
+          actionDesc: item.actionDesc || item.action_desc || item.description || item.desc,
+        }));
+        openTablePanel({
+          title: `${object.resourceName} / ${t('ontologyCenter.detail.actions')}`,
+          rowKey: (row: any) => row.actionCode,
+          rows,
+          columns: [
+            { title: t('ontologyCenter.detail.action.name'), dataIndex: 'actionName', ellipsis: true },
+            { title: t('ontologyCenter.detail.col.code'), dataIndex: 'actionCode', ellipsis: true },
+            { title: t('common.desc'), dataIndex: 'actionDesc', ellipsis: true },
+          ],
+        });
+      } catch (error: any) {
+        message.error(error?.msg || error?.message || '动作列表查询失败');
+      } finally {
+        hideLoading();
+      }
     },
-    [getObjectRelations, openTablePanel, t]
+    [activeTab, openTablePanel, t]
+  );
+
+  const showObjectRelations = useCallback(
+    async (object: any) => {
+      const objectCode = object?.objectCode || object?.resourceCode;
+      if (!objectCode) {
+        message.error('当前对象缺少对象编码，无法查询关系列表');
+        return;
+      }
+      const hideLoading = message.loading('关系列表加载中...', 0);
+      try {
+        const res: any = await listOntologyRelationsByObject({ objectCode });
+        const rows = findResourceRows(res).map((item: any) => ({
+          ...item,
+          relationCode: item.relationCode || item.relation_code || item.code,
+          relationName: item.relationName || item.relation_name || item.name,
+          sourceObjectName: item.sourceObjectName || item.source_object_name,
+          targetObjectName: item.targetObjectName || item.target_object_name,
+          relationCardinality: item.relationCardinality || item.relation_cardinality,
+          relationDesc: item.relationDesc || item.relation_desc || item.description || item.desc,
+        }));
+        openTablePanel({
+          title: `${object.resourceName} / ${t('employeeDetail.ontology.relation')}`,
+          rowKey: (row: any) => row.relationCode,
+          rows,
+          columns: [
+            { title: t('ontologyCenter.detail.rel.name'), dataIndex: 'relationName', ellipsis: true },
+            { title: t('ontologyCenter.detail.rel.source'), dataIndex: 'sourceObjectName', ellipsis: true },
+            { title: t('ontologyCenter.detail.rel.target'), dataIndex: 'targetObjectName', ellipsis: true },
+            { title: t('ontologyCenter.detail.rel.cardinality'), dataIndex: 'relationCardinality', width: 90 },
+          ],
+        });
+      } catch (error: any) {
+        message.error(error?.msg || error?.message || '关系列表查询失败');
+      } finally {
+        hideLoading();
+      }
+    },
+    [openTablePanel, t]
   );
 
   const renderSyncBatchStatus = (batch: SyncBatch) => {
@@ -1088,21 +1185,28 @@ const OntologyCenter: React.FC = () => {
   };
 
   const renderCardMenu = (resource: any) => {
-    const items: any[] = [
-      { key: 'applyUse', label: t('resource.applyUse'), icon: <DatabaseOutlined /> },
-      { key: 'manageAuth', label: t('common.manageAuthorization'), icon: <LinkOutlined /> },
-      { key: 'useAuth', label: t('common.useAuthorization'), icon: <EyeOutlined /> },
-      { key: 'auditUse', label: t('resource.auditUse'), icon: <ApiOutlined /> },
-    ];
+    const items: any[] = [];
+    if (resource?.canApplyUse) {
+      items.push({ key: 'applyUse', label: t('resource.applyUse'), icon: <DatabaseOutlined /> });
+    }
+    if (resource?.canManageAuth) {
+      items.push({ key: 'manageAuth', label: t('common.manageAuthorization'), icon: <LinkOutlined /> });
+    }
+    if (resource?.canUseAuth) {
+      items.push({ key: 'useAuth', label: t('common.useAuthorization'), icon: <EyeOutlined /> });
+    }
+    if (resource?.canAuditUse) {
+      items.push({ key: 'auditUse', label: t('resource.auditUse'), icon: <ApiOutlined /> });
+    }
 
     return {
       items,
       onClick: ({ key, domEvent }: any) => {
         domEvent?.stopPropagation?.();
-        if (key === 'applyUse') message.success(t('resource.applyUseSuccess'));
-        if (key === 'manageAuth') simulateAuth(resource, 'manage');
-        if (key === 'useAuth') simulateAuth(resource, 'use');
-        if (key === 'auditUse') message.info(`${t('resource.auditUse')}：${resource.resourceName}`);
+        if (key === 'applyUse') handleApplyUse(resource);
+        if (key === 'manageAuth') handleAuth(resource, 'mgrAuth');
+        if (key === 'useAuth') handleAuth(resource, 'useAuth');
+        if (key === 'auditUse') handleAuditUse(resource);
       },
     };
   };
@@ -1203,14 +1307,16 @@ const OntologyCenter: React.FC = () => {
                     </Button>
                   ))}
                 </div>
-                <Dropdown trigger={['click']} menu={renderCardMenu(resource)}>
-                  <Button
-                    type="text"
-                    className={styles.cardMenu}
-                    icon={<EllipsisOutlined />}
-                    onClick={(event) => event.stopPropagation()}
-                  />
-                </Dropdown>
+                {renderCardMenu(resource).items.length ? (
+                  <Dropdown trigger={['click']} menu={renderCardMenu(resource)}>
+                    <Button
+                      type="text"
+                      className={styles.cardMenu}
+                      icon={<EllipsisOutlined />}
+                      onClick={(event) => event.stopPropagation()}
+                    />
+                  </Dropdown>
+                ) : null}
               </div>
             </div>
           );
@@ -1245,9 +1351,11 @@ const OntologyCenter: React.FC = () => {
               allowClear
               placeholder={t('common.inputKeyword')}
             />
-            <Button type="primary" icon={<ReloadOutlined />} loading={loading || syncing} onClick={handleRefresh}>
-              {t('common.refresh')}
-            </Button>
+            {showRefreshButton && (
+              <Button type="primary" icon={<ReloadOutlined />} loading={loading || syncing} onClick={handleRefresh}>
+                {t('common.refresh')}
+              </Button>
+            )}
             <Button type="primary" icon={<SwapOutlined />} onClick={() => setProviderOpen(true)}>
               {t('ontologyCenter.provider.switch')}
             </Button>
@@ -1334,6 +1442,44 @@ const OntologyCenter: React.FC = () => {
           </div>
         </div>
       </Modal>
+
+      {authDrawerOpen && (
+        <AuthListDrawer
+          authType={authType}
+          record={selectedResource}
+          onCancel={() => {
+            setAuthDrawerOpen(false);
+            setSelectedResource(null);
+          }}
+          onSuccess={loadResources}
+          authApiPath={`/byaiService/auth/privilegeGrant/${
+            authType === 'useAuth' ? 'setResourceUsers' : 'setResourceManagers'
+          }`}
+          headerInfo={{
+            title: selectedResource?.resourceName,
+            content: selectedResource?.resourceDesc,
+            icon: (
+              <div
+                className={classnames(
+                  styles.cardIcon,
+                  selectedResource?.resourceBizType === 'VIEW' ? styles.viewIcon : styles.objectIcon
+                )}
+              >
+                <AntdIcon type={selectedResource?.resourceBizType === 'VIEW' ? 'icon-a-yemian-line' : 'icon-tongxun'} />
+              </div>
+            ),
+          }}
+        />
+      )}
+      <UseApplyAuditDrawer
+        open={useApplyAuditOpen}
+        record={selectedResource}
+        onCancel={() => {
+          setUseApplyAuditOpen(false);
+          setSelectedResource(null);
+        }}
+        onSuccess={loadResources}
+      />
     </div>
   );
 };

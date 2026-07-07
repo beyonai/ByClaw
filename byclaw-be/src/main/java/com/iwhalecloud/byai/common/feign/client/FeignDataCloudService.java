@@ -401,10 +401,11 @@ public class FeignDataCloudService {
 
     /** 场景下本体分页查询（GET /api/v1/ontologyBases/scenes/{sceneCode}/ontologies）。 */
     public JSONObject queryOntologiesBySceneCode(String sceneCode, String ownerType, String type, String keyword,
-        Integer page, Integer pageSize) {
+        Integer page, Integer pageSize, String userCode) {
         String path = String.format("%s/scenes/%s/ontologies", ONTOLOGY_BASE_PATH, pathValue(sceneCode));
         return getOntologyData(path,
-            queryOf("ownerType", ownerType, "type", type, "keyword", keyword, "page", page, "pageSize", pageSize),
+            queryOf("ownerType", ownerType, "type", type, "keyword", keyword, "page", page, "pageSize", pageSize,
+                "userCode", userCode),
             new TypeReference<DataCloudResponse<JSONObject>>() {
             });
     }
@@ -436,6 +437,13 @@ public class FeignDataCloudService {
         });
     }
 
+    /** 根据视图编码查询对象列表（GET /api/v1/ontologyBases/views/{viewCode}/objects）。 */
+    public JSONArray listObjectsByViewCode(String viewCode) {
+        String path = String.format("%s/views/%s/objects", ONTOLOGY_BASE_PATH, pathValue(viewCode));
+        return getOntologyData(path, null, new TypeReference<DataCloudResponse<JSONArray>>() {
+        });
+    }
+
     /** 创建对象（POST /api/v1/ontologyBases/{baseId}/objects）。 */
     public JSONObject createObject(String baseId, Map<String, Object> body) {
         String path = String.format("%s/%s/objects", ONTOLOGY_BASE_PATH, pathValue(baseId));
@@ -443,14 +451,10 @@ public class FeignDataCloudService {
         });
     }
 
-    /** 获取对象详情（GET /api/v1/ontologyBases/{baseId}/objects/{code}）。 */
-    public JSONObject getObjectDetail(String ownerType, String baseId, String objectCode) {
-        return getObjectDetailByCode(baseId, objectCode, null);
-    }
-
-    public JSONObject getObjectDetailByCode(String baseId, String objectCode, String cacheMode) {
-        String path = String.format("%s/%s/objects/%s", ONTOLOGY_BASE_PATH, pathValue(baseId), pathValue(objectCode));
-        return getOntologyData(path, queryOf("cache_mode", cacheMode), new TypeReference<DataCloudResponse<JSONObject>>() {
+    /** 获取对象类型详情（GET /api/v1/ontologyBases/objects/{objectCode}）。 */
+    public JSONObject getObjectDetailByObjectCode(String objectCode) {
+        String path = String.format("%s/objects/%s", ONTOLOGY_BASE_PATH, pathValue(objectCode));
+        return getOntologyData(path, null, new TypeReference<DataCloudResponse<JSONObject>>() {
         });
     }
 
@@ -486,10 +490,10 @@ public class FeignDataCloudService {
         });
     }
 
-    /** 查询视图详情（GET /api/v1/ontologyBases/{baseId}/views/{code}）。 */
-    public JSONObject getViewDetail(String baseId, String viewCode, String cacheMode) {
-        String path = String.format("%s/%s/views/%s", ONTOLOGY_BASE_PATH, pathValue(baseId), pathValue(viewCode));
-        return getOntologyData(path, queryOf("cache_mode", cacheMode), new TypeReference<DataCloudResponse<JSONObject>>() {
+    /** 获取视图详情（GET /api/v1/ontologyBases/views/{code}）。 */
+    public JSONObject getViewDetailByViewCode(String viewCode) {
+        String path = String.format("%s/views/%s", ONTOLOGY_BASE_PATH, pathValue(viewCode));
+        return getOntologyData(path, null, new TypeReference<DataCloudResponse<JSONObject>>() {
         });
     }
 
@@ -515,6 +519,13 @@ public class FeignDataCloudService {
     public JSONArray listRelationsByBase(String baseId, String cacheMode) {
         String path = String.format("%s/%s/relations", ONTOLOGY_BASE_PATH, pathValue(baseId));
         return getOntologyData(path, queryOf("cache_mode", cacheMode), new TypeReference<DataCloudResponse<JSONArray>>() {
+        });
+    }
+
+    /** 根据对象编码查询关系列表（GET /api/v1/ontologyBases/objects/{objectCode}/relations）。 */
+    public JSONArray listRelationsByObjectCode(String objectCode) {
+        String path = String.format("%s/objects/%s/relations", ONTOLOGY_BASE_PATH, pathValue(objectCode));
+        return getOntologyData(path, null, new TypeReference<DataCloudResponse<JSONArray>>() {
         });
     }
 
