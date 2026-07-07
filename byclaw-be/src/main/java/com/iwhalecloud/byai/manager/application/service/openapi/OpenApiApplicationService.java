@@ -6,7 +6,7 @@ import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.log.exception.BaseRuntimeException;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.util.ListUtil;
-import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.DingtalkRobotRegistryService;
+import com.iwhalecloud.byai.gateway.channels.service.robot.RobotChannelRegistryCoordinator;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.event.DigEmployeeChangeEventPublisher;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.event.DigEmployeeChangeEventType;
@@ -66,7 +66,7 @@ public class OpenApiApplicationService {
     private SsResourceRelDetailService ssResourceRelDetailService;
 
     @Autowired
-    private DingtalkRobotRegistryService dingtalkRobotRegistryService;
+    private RobotChannelRegistryCoordinator robotChannelRegistryCoordinator;
 
     @Autowired
     private DigEmployeeChangeEventPublisher digEmployeeChangeEventPublisher;
@@ -195,12 +195,7 @@ public class OpenApiApplicationService {
         ssResourceRelDetail.setComAcctId(CurrentUserHolder.getEnterpriseId());
         ssResourceRelDetailService.save(ssResourceRelDetail);
 
-        try {
-            dingtalkRobotRegistryService.refreshRobotClientsForResource(agentId);
-        }
-        catch (Exception e) {
-            logger.warn("Refresh DingTalk robot clients after update failed. resourceId={}", agentId, e);
-        }
+        robotChannelRegistryCoordinator.refreshForResource(agentId);
 
         digEmployeeChangeEventPublisher.publishAfterCommitOrNow(DigEmployeeChangeEventType.DIG_EMPLOYEE_UPDATED,
             agentId);
@@ -232,13 +227,7 @@ public class OpenApiApplicationService {
         queryWrapper.eq(SsResourceRelDetail::getRelResourceId, relSsResource.getResourceId());
         ssResourceRelDetailService.remove(queryWrapper);
 
-        try {
-            dingtalkRobotRegistryService.refreshRobotClientsForResource(agentResource.getResourceId());
-        }
-        catch (Exception e) {
-            logger.warn("Refresh DingTalk robot clients after update failed. resourceId={}", agentResource.getResourceId(),
-                e);
-        }
+        robotChannelRegistryCoordinator.refreshForResource(agentResource.getResourceId());
 
         digEmployeeChangeEventPublisher.publishAfterCommitOrNow(DigEmployeeChangeEventType.DIG_EMPLOYEE_UPDATED,
             agentResource.getResourceId());

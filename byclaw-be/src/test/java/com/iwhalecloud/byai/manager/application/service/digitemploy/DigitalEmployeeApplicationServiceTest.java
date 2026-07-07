@@ -8,7 +8,7 @@ import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.common.page.PageInfo;
-import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.DingtalkRobotRegistryService;
+import com.iwhalecloud.byai.gateway.channels.service.robot.RobotChannelRegistryCoordinator;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.event.DigEmployeeChangeEventPublisher;
 import com.iwhalecloud.byai.manager.application.service.ontology.OntologyResourceValidityService;
@@ -78,7 +78,7 @@ class DigitalEmployeeApplicationServiceTest {
     private AiModelService aiModelService;
     private TemplateRuleInfoApplicationService templateRuleInfoApplicationService;
     private ResourceAuthContextService resourceAuthContextService;
-    private DingtalkRobotRegistryService dingtalkRobotRegistryService;
+    private RobotChannelRegistryCoordinator robotChannelRegistryCoordinator;
     private DigEmployeeChangeEventPublisher digEmployeeChangeEventPublisher;
     private OntologyResourceValidityService ontologyResourceValidityService;
     private DigitalEmployeeApplicationService service;
@@ -97,7 +97,7 @@ class DigitalEmployeeApplicationServiceTest {
         aiModelService = mock(AiModelService.class);
         templateRuleInfoApplicationService = mock(TemplateRuleInfoApplicationService.class);
         resourceAuthContextService = mock(ResourceAuthContextService.class);
-        dingtalkRobotRegistryService = mock(DingtalkRobotRegistryService.class);
+        robotChannelRegistryCoordinator = mock(RobotChannelRegistryCoordinator.class);
         digEmployeeChangeEventPublisher = mock(DigEmployeeChangeEventPublisher.class);
         ontologyResourceValidityService = mock(OntologyResourceValidityService.class);
         when(ontologyResourceValidityService.filterValidOntologyResources(any()))
@@ -122,7 +122,7 @@ class DigitalEmployeeApplicationServiceTest {
         ReflectionTestUtils.setField(service, "aiModelService", aiModelService);
         ReflectionTestUtils.setField(service, "templateRuleInfoApplicationService", templateRuleInfoApplicationService);
         ReflectionTestUtils.setField(service, "resourceAuthContextService", resourceAuthContextService);
-        ReflectionTestUtils.setField(service, "dingtalkRobotRegistryService", dingtalkRobotRegistryService);
+        ReflectionTestUtils.setField(service, "robotChannelRegistryCoordinator", robotChannelRegistryCoordinator);
         ReflectionTestUtils.setField(service, "digEmployeeChangeEventPublisher", digEmployeeChangeEventPublisher);
         ReflectionTestUtils.setField(service, "ontologyResourceValidityService", ontologyResourceValidityService);
 

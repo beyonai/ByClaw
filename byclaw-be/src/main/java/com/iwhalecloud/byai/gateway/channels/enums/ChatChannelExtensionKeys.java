@@ -13,6 +13,12 @@ public final class ChatChannelExtensionKeys {
     public static final String DINGTALK_CONVERSATION_ID = "dingtalk.conversationId";
     public static final String DINGTALK_SENDER_STAFF_ID = "dingtalk.senderStaffId";
 
+    public static final String FEISHU_CHAT_ID = "feishu.chatId";
+    public static final String FEISHU_CHAT_TYPE = "feishu.chatType";
+    public static final String FEISHU_MESSAGE_ID = "feishu.messageId";
+    public static final String FEISHU_SENDER_OPEN_ID = "feishu.senderOpenId";
+    public static final String FEISHU_SENDER_UNION_ID = "feishu.senderUnionId";
+
     private ChatChannelExtensionKeys() {
     }
 }

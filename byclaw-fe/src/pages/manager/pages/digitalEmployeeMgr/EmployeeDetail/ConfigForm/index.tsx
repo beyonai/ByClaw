@@ -28,6 +28,7 @@ import {
   Popconfirm,
 } from 'antd';
 import {
+  RobotOutlined,
   FormOutlined,
   QuestionCircleOutlined,
   EyeOutlined,
@@ -70,6 +71,41 @@ const { TextArea } = Input;
 const nanoid = customAlphabet('abcdefghijklmnopqrstuvwxyz1234567890', 6);
 const PROMPT_TEXT_FIELD_DEFAULT_MAX_LENGTH = 10000;
 const getPromptTextLength = (value: any) => Array.from(`${value ?? ''}`).length;
+
+const DEFAULT_ROBOT_CHANNEL_OPTIONS = [
+  { value: 'DingTalk', labelZh: '钉钉', labelEn: 'DingTalk' },
+  { value: 'Feishu', labelZh: '飞书', labelEn: 'Feishu' },
+];
+
+const normalizeRobotChannelValue = (channel = '') => `${channel || ''}`.trim().toLowerCase();
+
+const getRobotConfigKey = (item = {}) => {
+  const channel = normalizeRobotChannelValue(item.channel);
+  const identity = item.appId || item.clientId || item.robotCode || '';
+  return identity ? `${channel}:${identity}` : '';
+};
+
+const isFeishuRobotConfig = (item = {}) => normalizeRobotChannelValue(item.channel) === 'feishu';
+const isDingtalkRobotConfig = (item = {}) => normalizeRobotChannelValue(item.channel) === 'dingtalk';
+
+const getRobotConfigIdentityText = (item = {}) => {
+  if (isFeishuRobotConfig(item)) {
+    return `appId: ${item.appId || '-'}`;
+  }
+  return `clientId: ${item.clientId || '-'}`;
+};
+
+const renderRobotChannelIcon = (item = {}) => {
+  if (isFeishuRobotConfig(item)) {
+    return <AntdIcon type="icon-feishu" className={classnames(styles.robotChannelIcon, styles.feishuRobotIcon)} />;
+  }
+
+  if (isDingtalkRobotConfig(item)) {
+    return <DingtalkCircleFilled className={classnames(styles.robotChannelIcon, styles.fontSize32PrimaryColor)} />;
+  }
+
+  return <RobotOutlined className={classnames(styles.robotChannelIcon, styles.fontSize32PrimaryColor)} />;
+};
 
 // 能力图标选项
 const abilityIcons = [
@@ -534,6 +570,11 @@ const ConfigForm = (props) => {
     let mounted = true;
 
     const fetchRobotChannels = async () => {
+      const fallbackOptions = DEFAULT_ROBOT_CHANNEL_OPTIONS.map((item) => ({
+        value: item.value,
+        label: isEN ? item.labelEn : item.labelZh,
+      }));
+
       try {
         const res = await getByParamGroupCode({
           paramGroupCode: 'DIG_EMPLOYEE_MACHINE_CHANNEL',
@@ -544,8 +585,8 @@ const ConfigForm = (props) => {
           setRobotChannelOptions(
             list
               .map((item) => ({
-                value: item?.paramValue,
-                label: isEN ? item?.paramEnName : item?.paramName,
+                value: `${item?.paramValue || ''}`.trim(),
+                label: (isEN ? item?.paramEnName : item?.paramName) || item?.paramDesc || item?.paramValue || '',
                 seq: Number(item?.paramSeq) || 0,
               }))
               .filter((item) => item.value)
@@ -554,10 +595,10 @@ const ConfigForm = (props) => {
           );
           return;
         }
-        setRobotChannelOptions([]);
+        setRobotChannelOptions(fallbackOptions);
       } catch {
         if (mounted) {
-          setRobotChannelOptions([]);
+          setRobotChannelOptions(fallbackOptions);
         }
       }
     };
@@ -714,6 +755,16 @@ const ConfigForm = (props) => {
     [robotChannelOptions]
   );
 
+  const getRobotChannelLabel = useCallback(
+    (channel) => {
+      const matchedOption = robotChannelOptions.find(
+        (item) => normalizeRobotChannelValue(item.value) === normalizeRobotChannelValue(channel)
+      );
+      return matchedOption?.label || channel || '-';
+    },
+    [robotChannelOptions]
+  );
+
   const knowledgeTypeLabelMap = {
     KG_DOC: intl.formatMessage({ id: 'employeeDetail.knowledgeType.doc' }),
     KG_QA: intl.formatMessage({ id: 'employeeDetail.knowledgeType.qa' }),
@@ -775,10 +826,11 @@ const ConfigForm = (props) => {
   const handleRobotModalOk = useCallback((item) => {
     setRobotModalOpen(false);
     setRobotConfigs((prev) => {
-      if (item.clientId) {
-        const target = prev.find((it) => it.clientId === item.clientId);
+      const nextKey = getRobotConfigKey(item);
+      if (nextKey) {
+        const target = prev.find((it) => getRobotConfigKey(it) === nextKey);
         if (target) {
-          return prev.map((it) => (it.clientId === item.clientId ? item : it));
+          return prev.map((it) => (getRobotConfigKey(it) === nextKey ? item : it));
         }
         return [...prev, item];
       }
@@ -2591,18 +2643,20 @@ const ConfigForm = (props) => {
                     )}
                   </div>
                   {robotConfigs.map((item) => {
+                    const robotConfigKey = getRobotConfigKey(item);
+                    const channelLabel = getRobotChannelLabel(item.channel);
                     return (
-                      <Card key={item.clientId} className={classnames(styles.configCard, styles.skillCard)}>
+                      <Card key={robotConfigKey} className={classnames(styles.configCard, styles.skillCard)}>
                         <div className={classnames(styles.skillContent, 'ub gap12 ub-ac')}>
-                          <DingtalkCircleFilled className={styles.fontSize32PrimaryColor} />
+                          {renderRobotChannelIcon(item)}
                           <div className={styles.skillInfo}>
                             <div className={styles.skillHeader}>
                               <span className={styles.skillName}>
-                                {intl.formatMessage({ id: 'digitalEmployeeMgr.robotName' })}
+                                {channelLabel} {intl.formatMessage({ id: 'digitalEmployeeMgr.robotName' })}
                               </span>
                             </div>
                             <div className={classnames(styles.skillDescription, styles.textTertiaryColor)}>
-                              clientId: <span>{item.clientId}</span>
+                              <span>{getRobotConfigIdentityText(item)}</span>
                             </div>
                           </div>
                           <div className={classnames(styles.skillActions, styles.marginLeftAuto)}>
@@ -2624,7 +2678,9 @@ const ConfigForm = (props) => {
                                 <AntdIcon
                                   type="icon-a-Deleteshanchu"
                                   onClick={() => {
-                                    setRobotConfigs(robotConfigs.filter((it) => it.clientId !== item.clientId));
+                                    setRobotConfigs(
+                                      robotConfigs.filter((it) => getRobotConfigKey(it) !== robotConfigKey)
+                                    );
                                   }}
                                 />
                               </Space>
