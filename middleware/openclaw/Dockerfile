@@ -45,6 +45,7 @@ RUN --mount=type=cache,target=/root/.npm \
     done; \
     for pid in $pids; do wait "$pid"; done
 
+COPY byclaw-exe/extensions/shared/ ./src/shared/
 COPY byclaw-exe/extensions/baiying-enhance/ ./src/baiying-enhance/
 COPY byclaw-exe/extensions/byai-channel/ ./src/byai-channel/
 COPY byclaw-exe/extensions/byai_diagnostics-otel/ ./src/byai_diagnostics-otel/
