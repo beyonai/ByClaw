@@ -399,6 +399,16 @@ public class FeignDataCloudService {
             });
     }
 
+    /** 场景下本体分页查询（GET /api/v1/ontologyBases/scenes/{sceneCode}/ontologies）。 */
+    public JSONObject queryOntologiesBySceneCode(String sceneCode, String ownerType, String type, String keyword,
+        Integer page, Integer pageSize) {
+        String path = String.format("%s/scenes/%s/ontologies", ONTOLOGY_BASE_PATH, pathValue(sceneCode));
+        return getOntologyData(path,
+            queryOf("ownerType", ownerType, "type", type, "keyword", keyword, "page", page, "pageSize", pageSize),
+            new TypeReference<DataCloudResponse<JSONObject>>() {
+            });
+    }
+
     /** 添加场景成员（POST /api/v1/ontologyBases/{baseId}/scenes/{sceneId}/members）。 */
     public JSONObject addSceneMembers(String baseId, String sceneId, Map<String, Object> body) {
         String path = String.format("%s/%s/scenes/%s/members", ONTOLOGY_BASE_PATH, pathValue(baseId),

@@ -222,6 +222,25 @@ const Sidebar = () => {
   }, [EventEmitter, setSiderCollapsed]);
 
   React.useEffect(() => {
+    const handleOntologyBindSaved = (event: Event) => {
+      const detail = (event as CustomEvent)?.detail || {};
+      if (!detail.openSider) return;
+      const refreshDetail = { ...detail, receivedAt: Date.now() };
+      (window as any).__latestOntologyBindSaved = refreshDetail;
+      setActiveKey('ontology');
+      setManualSiderOpenKey('ontology');
+      setSiderCollapsed(false);
+      setSiderContentWidth(DEFAULT_SIDER_CONTENT_WIDTH);
+      window.setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('ontologySiderRefresh', { detail: refreshDetail }));
+      }, 0);
+    };
+
+    window.addEventListener('ontologyBindSaved', handleOntologyBindSaved);
+    return () => window.removeEventListener('ontologyBindSaved', handleOntologyBindSaved);
+  }, [setSiderCollapsed]);
+
+  React.useEffect(() => {
     setSiderContentWidth(shouldHideSiderContent ? 0 : DEFAULT_SIDER_CONTENT_WIDTH);
     clearDetailPanel?.();
   }, [activeKey, shouldHideSiderContent]);

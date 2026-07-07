@@ -1,23 +1,25 @@
 // @ts-nocheck
 import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Empty, Input, message, Segmented, Select, Spin, Table, Tabs, Tag, Tooltip } from 'antd';
+import { Button, Empty, Input, message, Modal, Segmented, Spin, Table, Tabs, Tag, Tooltip, Tree } from 'antd';
 import {
   CloseOutlined,
   DatabaseOutlined,
   DownloadOutlined,
-  FolderOutlined,
+  HolderOutlined,
   InfoCircleOutlined,
   LeftOutlined,
   SearchOutlined,
-  TableOutlined,
   ZoomInOutlined,
   ZoomOutOutlined,
 } from '@ant-design/icons';
 import classnames from 'classnames';
 // @ts-ignore
 import { useIntl, useLocation, useNavigate, useSearchParams } from '@umijs/max';
+import AntdIcon from '@/components/AntdIcon';
 import { DragType } from '@/components/QueryInput/withDrag';
 import useGlobal from '@/hooks/useGlobal';
+import commonTreeStyles from '@/layout/sider/components/Knowledge/components/common.module.less';
+import fileTreeStyles from '@/layout/sider/components/FileSiderPanel/index.module.less';
 import { SiderContentContext } from '@/layout/sider/siderContentContext';
 import { getOntologySceneDetails, listOntologyScenes } from '@/service/ontology';
 import OntologyNodeDrawer from '@/pages/ontologyCenter/OntologyNodeDrawer';
@@ -643,6 +645,123 @@ const RelationPanel = ({
   );
 };
 
+const BrowseRelationPanel = ({
+  relations = [],
+  objects = [],
+  columns,
+  t,
+}: {
+  relations: any[];
+  objects?: any[];
+  columns: any[];
+  t: (id: string, values?: any) => string;
+}) => {
+  const [mode, setMode] = useState<'list' | 'graph'>('list');
+  const [graphScale, setGraphScale] = useState(1);
+  const graphSvgRef = useRef<SVGSVGElement>(null);
+
+  const changeGraphScale = (delta: number) => {
+    setGraphScale((value) => Math.min(1.8, Math.max(0.6, Number((value + delta).toFixed(1)))));
+  };
+
+  const downloadGraph = () => {
+    const svg = graphSvgRef.current;
+    if (!svg) return;
+    const source = new XMLSerializer().serializeToString(svg);
+    const blob = new Blob([source], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'ontology-relation-graph.svg';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <div className={styles.relationPanel}>
+      <div className={styles.relationPanelToolbar}>
+        {mode === 'graph' ? (
+          <div className={styles.relationGraphTools}>
+            <Tooltip title={t('ontologyBaseDetail.graphZoomOut')}>
+              <Button
+                type="text"
+                size="small"
+                icon={<ZoomOutOutlined />}
+                disabled={graphScale <= 0.6}
+                onClick={() => changeGraphScale(-0.1)}
+              />
+            </Tooltip>
+            <Tooltip title={t('ontologyBaseDetail.graphZoomIn')}>
+              <Button
+                type="text"
+                size="small"
+                icon={<ZoomInOutlined />}
+                disabled={graphScale >= 1.8}
+                onClick={() => changeGraphScale(0.1)}
+              />
+            </Tooltip>
+            <Tooltip title={t('common.download')}>
+              <Button
+                type="text"
+                size="small"
+                icon={<DownloadOutlined />}
+                disabled={!relations.length}
+                onClick={downloadGraph}
+              />
+            </Tooltip>
+          </div>
+        ) : (
+          <span />
+        )}
+        <Segmented
+          size="small"
+          value={mode}
+          onChange={(value) => setMode(value as 'list' | 'graph')}
+          options={[
+            { label: t('ontologyCenter.detail.relList'), value: 'list' },
+            { label: t('ontologyCenter.detail.relGraph'), value: 'graph' },
+          ]}
+        />
+      </div>
+      {mode === 'list' ? (
+        <Table
+          size="small"
+          tableLayout="fixed"
+          rowKey={(row: any, index) => `${row.sceneId || ''}:${row.relationCode || index}`}
+          dataSource={relations}
+          pagination={false}
+          columns={columns}
+          scroll={{ x: 680 }}
+          locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
+        />
+      ) : (
+        <RelationGraph relations={relations} objects={objects} scale={graphScale} svgRef={graphSvgRef} />
+      )}
+    </div>
+  );
+};
+
+const decorateDirectoryTree = (nodes: any[], expandedKeys: React.Key[]) => {
+  const expandedKeySet = new Set(expandedKeys.map(String));
+  const walk = (list: any[]): any[] =>
+    list.map((node) => {
+      const expanded = expandedKeySet.has(String(node.key));
+      return {
+        ...node,
+        className: classnames(node.className, expanded ? fileTreeStyles.treeNodeExpanded : undefined),
+        children: node.children ? walk(node.children) : node.children,
+      };
+    });
+  return walk(nodes);
+};
+
+const clampResourceDirectoryWidth = (width: number, containerWidth = 0) => {
+  const maxWidth = containerWidth ? Math.max(220, Math.min(480, containerWidth - 420)) : 480;
+  return Math.min(maxWidth, Math.max(200, width));
+};
+
 const OntologyBaseDetail: React.FC = () => {
   const intl = useIntl();
   const t = (id: string, values?: any) => intl.formatMessage({ id }, values);
@@ -679,12 +798,27 @@ const OntologyBaseDetail: React.FC = () => {
     type: '',
     context: {},
   });
+  const [activeResourceTab, setActiveResourceTab] = useState<'view' | 'object' | 'term'>('view');
+  const [selectedDirectoryKey, setSelectedDirectoryKey] = useState<string>();
+  const [directoryExpandedKeys, setDirectoryExpandedKeys] = useState<React.Key[]>([]);
+  const [relationModal, setRelationModal] = useState<any>(null);
+  const [actionModal, setActionModal] = useState<any>(null);
+  const [resourceDirectoryWidth, setResourceDirectoryWidth] = useState(260);
+  const [resizingResourcePane, setResizingResourcePane] = useState(false);
+  const [resourceDetailHidden, setResourceDetailHidden] = useState(false);
+  const resourceDirectoryRef = useRef<HTMLElement | null>(null);
+  const resourceExplorerBodyRef = useRef<HTMLDivElement | null>(null);
+  const resourceResizeRef = useRef({ startX: 0, startWidth: 260, containerWidth: 0 });
 
   useEffect(() => {
     setFocusType(['base', 'scene', 'view'].includes(queryFocusType) ? queryFocusType : 'base');
     setSelectedSceneId(querySceneId);
     setSelectedViewCode(queryViewCode);
   }, [queryFocusType, querySceneId, queryViewCode]);
+
+  useEffect(() => {
+    setResourceDetailHidden(false);
+  }, [baseId]);
 
   useEffect(() => {
     if (focusType === 'base') setActiveDetailTab('scene');
@@ -855,6 +989,25 @@ const OntologyBaseDetail: React.FC = () => {
       ),
     [sceneRows]
   );
+  const allTerms = useMemo(
+    () =>
+      sceneRows.flatMap((scene: any) =>
+        scene.detail.objects.flatMap((object: any) =>
+          toArray(object.properties)
+            .filter((property: any) => property.terminology || property.isTerminology || property.termCode)
+            .map((property: any) => ({
+              ...property,
+              sceneId: scene.sceneId,
+              sceneName: scene.sceneName || scene.sceneId,
+              objectCode: object.objectCode,
+              objectName: object.objectName || object.objectCode,
+            }))
+        )
+      ),
+    [sceneRows]
+  );
+  const unboundViews = allViews;
+  const unboundObjects = allObjects;
 
   const objectByCode = useMemo(() => {
     const map: Record<string, any> = {};
@@ -863,6 +1016,187 @@ const OntologyBaseDetail: React.FC = () => {
     });
     return map;
   }, [selectedObjects]);
+  const objectBySceneCode = useMemo(() => {
+    const map: Record<string, any> = {};
+    sceneRows.forEach((scene: any) => {
+      scene.detail.objects.forEach((object: any) => {
+        if (object.objectCode) map[`${scene.sceneId}:${object.objectCode}`] = object;
+      });
+    });
+    return map;
+  }, [sceneRows]);
+
+  const directoryTreeData = useMemo(() => {
+    if (activeResourceTab === 'view') {
+      return sceneRows.map((scene: any) => ({
+        key: `scene:${scene.sceneId}`,
+        title: scene.sceneName || scene.sceneId,
+        nodeType: 'scene',
+        scene,
+        isLeaf: false,
+        children: [],
+      }));
+    }
+    if (activeResourceTab === 'object') {
+      return sceneRows.map((scene: any) => ({
+        key: `scene:${scene.sceneId}`,
+        title: scene.sceneName || scene.sceneId,
+        nodeType: 'scene',
+        scene,
+        children: scene.detail.views.map((view: any) => ({
+          key: `view:${scene.sceneId}:${view.viewCode}`,
+          title: view.viewName || view.viewCode,
+          nodeType: 'view',
+          scene,
+          view,
+        })),
+      }));
+    }
+    return sceneRows.map((scene: any) => ({
+      key: `scene:${scene.sceneId}`,
+      title: scene.sceneName || scene.sceneId,
+      nodeType: 'scene',
+      scene,
+      children: scene.detail.views.map((view: any) => ({
+        key: `view:${scene.sceneId}:${view.viewCode}`,
+        title: view.viewName || view.viewCode,
+        nodeType: 'view',
+        scene,
+        view,
+      })),
+    }));
+  }, [activeResourceTab, sceneRows]);
+
+  const flatDirectoryNodes = useMemo(() => {
+    const output: any[] = [];
+    const walk = (nodes: any[]) => {
+      nodes.forEach((node) => {
+        output.push(node);
+        if (node.children) walk(node.children);
+      });
+    };
+    walk(directoryTreeData);
+    return output;
+  }, [directoryTreeData]);
+
+  const selectedDirectoryNode = useMemo(
+    () => flatDirectoryNodes.find((node) => node.key === selectedDirectoryKey) || flatDirectoryNodes[0],
+    [flatDirectoryNodes, selectedDirectoryKey]
+  );
+
+  useEffect(() => {
+    if (!flatDirectoryNodes.length) {
+      setSelectedDirectoryKey(undefined);
+      setDirectoryExpandedKeys([]);
+      return;
+    }
+    const existing = flatDirectoryNodes.some((node) => node.key === selectedDirectoryKey);
+    if (!existing) setSelectedDirectoryKey(flatDirectoryNodes[0].key);
+    setDirectoryExpandedKeys(
+      directoryTreeData.filter((node: any) => node.children?.length).map((node: any) => node.key)
+    );
+  }, [activeResourceTab, directoryTreeData, flatDirectoryNodes, selectedDirectoryKey]);
+
+  useEffect(() => {
+    if (!selectedDirectoryKey) return;
+    const directory = resourceDirectoryRef.current;
+    if (!directory) return;
+    window.requestAnimationFrame(() => {
+      const currentNode = directory.querySelector(`.${fileTreeStyles.treeTitleContentCurrent}`);
+      currentNode?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    });
+  }, [activeResourceTab, selectedDirectoryKey, directoryTreeData]);
+
+  useEffect(() => {
+    const onResize = () => {
+      const containerWidth = resourceExplorerBodyRef.current?.getBoundingClientRect().width || 0;
+      setResourceDirectoryWidth((width) => clampResourceDirectoryWidth(width, containerWidth));
+    };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  useEffect(() => {
+    if (!resizingResourcePane) return;
+    const prevCursor = document.body.style.cursor;
+    const prevUserSelect = document.body.style.userSelect;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+
+    const handlePointerMove = (event: PointerEvent) => {
+      const { startX, startWidth, containerWidth } = resourceResizeRef.current;
+      setResourceDirectoryWidth(clampResourceDirectoryWidth(startWidth + event.clientX - startX, containerWidth));
+    };
+    const handlePointerUp = () => setResizingResourcePane(false);
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+    window.addEventListener('pointercancel', handlePointerUp);
+    return () => {
+      document.body.style.cursor = prevCursor;
+      document.body.style.userSelect = prevUserSelect;
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+      window.removeEventListener('pointercancel', handlePointerUp);
+    };
+  }, [resizingResourcePane]);
+
+  const handleResourceResizePointerDown = useCallback(
+    (event: React.PointerEvent<HTMLButtonElement>) => {
+      if (event.button !== 0) return;
+      const containerWidth = resourceExplorerBodyRef.current?.getBoundingClientRect().width || 0;
+      resourceResizeRef.current = {
+        startX: event.clientX,
+        startWidth: resourceDirectoryWidth,
+        containerWidth,
+      };
+      setResizingResourcePane(true);
+      event.preventDefault();
+    },
+    [resourceDirectoryWidth]
+  );
+
+  const handleResourceResizeKeyDown = useCallback((event: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+    event.preventDefault();
+    const delta = event.key === 'ArrowLeft' ? -16 : 16;
+    const containerWidth = resourceExplorerBodyRef.current?.getBoundingClientRect().width || 0;
+    setResourceDirectoryWidth((width) => clampResourceDirectoryWidth(width + delta, containerWidth));
+  }, []);
+
+  const hideResourceDetailOnScroll = useCallback(() => {
+    setResourceDetailHidden(true);
+  }, []);
+
+  const resourceRows = useMemo(() => {
+    const node = selectedDirectoryNode;
+    if (!node) return [];
+    if (activeResourceTab === 'view') {
+      return unboundViews.filter((view: any) => view.sceneId === node.scene?.sceneId);
+    }
+    if (activeResourceTab === 'object') {
+      if (node.nodeType === 'view') {
+        return toArray(node.view?.objectCodes)
+          .map((code: string) => objectBySceneCode[`${node.scene.sceneId}:${code}`] || { objectCode: code })
+          .map((object: any) => ({
+            ...object,
+            sceneId: node.scene.sceneId,
+            sceneName: node.scene.sceneName || node.scene.sceneId,
+            viewCode: node.view.viewCode,
+            viewName: node.view.viewName || node.view.viewCode,
+          }))
+          .filter(Boolean);
+      }
+      return unboundObjects
+        .filter((object: any) => object.sceneId === node.scene?.sceneId)
+        .map((object: any) => ({ ...object, viewCode: undefined, viewName: undefined }));
+    }
+    if (node.nodeType === 'view') {
+      const objectCodes = new Set(toArray(node.view?.objectCodes));
+      return allTerms.filter((term: any) => term.sceneId === node.scene?.sceneId && objectCodes.has(term.objectCode));
+    }
+    return allTerms.filter((term: any) => term.sceneId === node.scene?.sceneId);
+  }, [activeResourceTab, allTerms, objectBySceneCode, selectedDirectoryNode, unboundObjects, unboundViews]);
 
   const kw = keyword.trim().toLowerCase();
   const matchKeyword = (...values: any[]) => !kw || values.some((value) => `${value || ''}`.toLowerCase().includes(kw));
@@ -999,9 +1333,14 @@ const OntologyBaseDetail: React.FC = () => {
     });
   }, []);
 
+  const closeRightDetailPanel = useCallback(() => {
+    clearDetailPanel?.();
+  }, [clearDetailPanel]);
+
   const openObjectDetail = useCallback(
     (object: any, scene?: any, view?: any) => {
       if (!object?.objectCode) return;
+      closeRightDetailPanel();
       const sceneMeta = scene || selectedScene;
       const viewMeta = view || null;
       const node = getReferenceMeta(object, 'object', { scene: sceneMeta, view: viewMeta });
@@ -1012,13 +1351,87 @@ const OntologyBaseDetail: React.FC = () => {
           node={node}
           baseId={baseId}
           ownerType={ownerType}
+          showReference={false}
           onReference={() => quoteRowsToChat([object], 'object', { scene: sceneMeta, view: viewMeta })}
           onClose={() => clearDetailPanel?.()}
         />,
         { width: 350 }
       );
     },
-    [baseId, clearDetailPanel, getReferenceMeta, ownerType, quoteRowsToChat, selectedScene, setDetailPanel]
+    [
+      baseId,
+      clearDetailPanel,
+      closeRightDetailPanel,
+      getReferenceMeta,
+      ownerType,
+      quoteRowsToChat,
+      selectedScene,
+      setDetailPanel,
+    ]
+  );
+
+  const openViewPanelDetail = useCallback(
+    (view: any) => {
+      if (!view?.viewCode) return;
+      closeRightDetailPanel();
+      const sceneMeta = sceneRows.find((scene: any) => scene.sceneId === view.sceneId) || selectedScene;
+      const node = getReferenceMeta(view, 'view', { scene: sceneMeta, view });
+      setDetailPanel?.(
+        <OntologyNodeDrawer
+          open
+          panel
+          node={node}
+          baseId={baseId}
+          ownerType={ownerType}
+          showReference={false}
+          onReference={() => quoteRowsToChat([view], 'view', { scene: sceneMeta, view })}
+          onClose={() => clearDetailPanel?.()}
+        />,
+        { width: 380 }
+      );
+    },
+    [
+      baseId,
+      clearDetailPanel,
+      closeRightDetailPanel,
+      getReferenceMeta,
+      ownerType,
+      quoteRowsToChat,
+      sceneRows,
+      selectedScene,
+      setDetailPanel,
+    ]
+  );
+
+  const jumpToViewObjects = useCallback(
+    (view: any) => {
+      closeRightDetailPanel();
+      if (!view?.sceneId || !view?.viewCode) return;
+      setActiveResourceTab('object');
+      setSelectedDirectoryKey(`view:${view.sceneId}:${view.viewCode}`);
+    },
+    [closeRightDetailPanel]
+  );
+
+  const getViewRelations = useCallback(
+    (view: any) => {
+      const objectCodes = toArray(view?.objectCodes);
+      return allRelations.filter(
+        (relation: any) =>
+          relation.sceneId === view.sceneId &&
+          (objectCodes.includes(relation.sourceObjectCode) || objectCodes.includes(relation.targetObjectCode))
+      );
+    },
+    [allRelations]
+  );
+
+  const getObjectActions = useCallback(
+    (object: any) =>
+      allActions.filter(
+        (action: any) =>
+          action.sceneId === object.sceneId && (action.belongObjectCode || action.objectCode) === object.objectCode
+      ),
+    [allActions]
   );
 
   const referenceButton = (row: any, type: string, context: any = {}) => (
@@ -1279,6 +1692,341 @@ const OntologyBaseDetail: React.FC = () => {
     }),
   ];
 
+  const browseRelationColumns = relationColumns.filter((column: any) => column.title !== t('common.operation'));
+  const browseActionColumns = actionColumns.filter((column: any) => column.title !== t('common.operation'));
+
+  const viewResourceColumns = [
+    {
+      title: t('common.resourceType.view'),
+      ellipsis: true,
+      render: (_: any, row: any) => (
+        <div>
+          <div className={styles.tableName}>{row.viewName || row.viewCode}</div>
+          <div className={styles.mono}>{row.viewCode}</div>
+        </div>
+      ),
+    },
+    {
+      title: t('ontologyBaseDetail.scene'),
+      dataIndex: 'sceneName',
+      width: 160,
+      ellipsis: true,
+    },
+    {
+      title: t('common.resourceType.object'),
+      width: 110,
+      render: (_: any, row: any) => toArray(row.objectCodes).length,
+    },
+    {
+      title: t('ontologyCenter.detail.attributes'),
+      width: 110,
+      render: (_: any, row: any) => toArray(row.properties).length,
+    },
+    {
+      title: t('ontologyCenter.detail.relList'),
+      width: 100,
+      render: (_: any, row: any) => getViewRelations(row).length,
+    },
+    {
+      title: t('common.operation'),
+      width: 160,
+      render: (_: any, row: any) => {
+        return (
+          <div className={styles.operationActions}>
+            <Button type="link" size="small" onClick={() => openViewPanelDetail(row)}>
+              {t('ontologyCenter.detail.detail')}
+            </Button>
+            <Button type="link" size="small" onClick={() => jumpToViewObjects(row)}>
+              {t('common.resourceType.object')}
+            </Button>
+            <Button
+              type="link"
+              size="small"
+              onClick={() => {
+                closeRightDetailPanel();
+                setRelationModal({
+                  title: row.viewName || row.viewCode,
+                  relations: getViewRelations(row),
+                  objects: toArray(row.objectCodes).map(
+                    (code: string) => objectBySceneCode[`${row.sceneId}:${code}`] || { objectCode: code }
+                  ),
+                });
+              }}
+            >
+              {t('employeeDetail.ontology.relation')}
+            </Button>
+          </div>
+        );
+      },
+    },
+  ];
+
+  const objectResourceColumns = [
+    {
+      title: t('common.resourceType.object'),
+      ellipsis: true,
+      render: (_: any, row: any) => (
+        <div>
+          <div className={styles.tableName}>{row.objectName || row.objectCode}</div>
+          <div className={styles.mono}>{row.objectCode}</div>
+        </div>
+      ),
+    },
+    {
+      title: t('ontologyBaseDetail.scene'),
+      dataIndex: 'sceneName',
+      width: 150,
+      ellipsis: true,
+    },
+    {
+      title: t('common.resourceType.view'),
+      width: 150,
+      ellipsis: true,
+      render: (_: any, row: any) => row.viewName || row.viewCode || '-',
+    },
+    {
+      title: t('ontologyBaseDetail.objectSourceLabel'),
+      width: 140,
+      ellipsis: true,
+      render: (_: any, row: any) => row.objectSource || '-',
+    },
+    {
+      title: t('ontologyCenter.detail.attributes'),
+      width: 100,
+      render: (_: any, row: any) => toArray(row.properties).length,
+    },
+    {
+      title: t('ontologyCenter.detail.actions'),
+      width: 90,
+      render: (_: any, row: any) => getObjectActions(row).length,
+    },
+    {
+      title: t('common.operation'),
+      width: 120,
+      render: (_: any, row: any) => {
+        const sceneMeta = sceneRows.find((scene: any) => scene.sceneId === row.sceneId) || selectedScene;
+        const viewMeta = row.viewCode ? { viewCode: row.viewCode, viewName: row.viewName } : null;
+        return (
+          <div className={styles.operationActions}>
+            <Button type="link" size="small" onClick={() => openObjectDetail(row, sceneMeta, viewMeta)}>
+              {t('ontologyCenter.detail.detail')}
+            </Button>
+            <Button
+              type="link"
+              size="small"
+              onClick={() => {
+                closeRightDetailPanel();
+                setActionModal({
+                  title: row.objectName || row.objectCode,
+                  actions: getObjectActions(row),
+                });
+              }}
+            >
+              {t('ontologyBaseDetail.action.actions')}
+            </Button>
+          </div>
+        );
+      },
+    },
+  ];
+
+  const termResourceColumns = [
+    {
+      title: t('common.resourceType.term'),
+      ellipsis: true,
+      render: (_: any, row: any) => (
+        <div>
+          <div className={styles.tableName}>{row.termName || row.propertyName || row.propertyCode}</div>
+          <div className={styles.mono}>{row.termCode || row.propertyCode}</div>
+        </div>
+      ),
+    },
+    {
+      title: t('ontologyBaseDetail.scene'),
+      dataIndex: 'sceneName',
+      width: 150,
+      ellipsis: true,
+    },
+    {
+      title: t('common.resourceType.object'),
+      width: 160,
+      ellipsis: true,
+      render: (_: any, row: any) => row.objectName || row.objectCode || '-',
+    },
+    {
+      title: t('ontologyCenter.detail.col.type'),
+      dataIndex: 'dataType',
+      width: 110,
+      render: (value: string) => (value ? <Tag color={DATA_TYPE_COLOR[value] || 'default'}>{value}</Tag> : '-'),
+    },
+  ];
+
+  const renderDirectoryTitle = (node: any) => {
+    const nodeKey = node.key ?? node.eventKey;
+    const selected = selectedDirectoryKey === nodeKey;
+    const expanded = directoryExpandedKeys.includes(nodeKey);
+    return (
+      <span
+        className={classnames(
+          fileTreeStyles.treeTitleContent,
+          expanded ? fileTreeStyles.treeTitleContentExpanded : undefined,
+          selected ? fileTreeStyles.treeTitleContentCurrent : undefined
+        )}
+      >
+        <Tooltip title={node.title} placement="right">
+          <span className={fileTreeStyles.treeTitleName}>
+            <span className={fileTreeStyles.treeTitleText}>{node.title}</span>
+          </span>
+        </Tooltip>
+      </span>
+    );
+  };
+
+  const renderDirectoryIcon = (node: any) => {
+    const nodeKey = node.key ?? node.eventKey;
+    const expanded = directoryExpandedKeys.includes(nodeKey);
+    const iconType = expanded ? 'a-Folder-openwenjianjia-kai' : 'wenjianjialanse';
+    return (
+      <Tooltip title={node.title} placement="right">
+        <span>
+          <AntdIcon type={`icon-${iconType}`} />
+        </span>
+      </Tooltip>
+    );
+  };
+
+  const resourceTabConfig = {
+    view: {
+      label: t('common.resourceType.view'),
+      columns: viewResourceColumns,
+      rowKey: (row: any) => `${row.sceneId}:${row.viewCode}`,
+    },
+    object: {
+      label: t('common.resourceType.object'),
+      columns: objectResourceColumns,
+      rowKey: (row: any) => `${row.sceneId}:${row.viewCode || ''}:${row.objectCode}`,
+    },
+    term: {
+      label: t('common.resourceType.term'),
+      columns: termResourceColumns,
+      rowKey: (row: any, index: number) => `${row.sceneId}:${row.objectCode}:${row.propertyCode || index}`,
+    },
+  };
+
+  const renderResourceExplorer = () => {
+    const currentConfig = resourceTabConfig[activeResourceTab];
+    const decoratedTreeData = decorateDirectoryTree(directoryTreeData, directoryExpandedKeys);
+    return (
+      <ResourceSection
+        title={t('ontologyBaseDetail.section.resourceContent')}
+        extra={
+          resourceDetailHidden ? (
+            <Button size="small" className={styles.resourceDetailToggle} onClick={() => setResourceDetailHidden(false)}>
+              {t('ontologyBaseDetail.showBaseDetail')}
+            </Button>
+          ) : null
+        }
+      >
+        <div className={styles.resourceExplorer}>
+          <Tabs
+            className={styles.resourceTabs}
+            activeKey={activeResourceTab}
+            onChange={(key) => {
+              setActiveResourceTab(key as 'view' | 'object' | 'term');
+              setKeyword('');
+            }}
+            items={[
+              { key: 'view', label: t('common.resourceType.view') },
+              { key: 'object', label: t('common.resourceType.object') },
+              { key: 'term', label: t('common.resourceType.term') },
+            ].map((item) => ({ ...item, children: null }))}
+          />
+          <div
+            ref={resourceExplorerBodyRef}
+            className={styles.resourceExplorerBody}
+            style={{ '--resource-directory-width': `${resourceDirectoryWidth}px` }}
+          >
+            <aside
+              ref={resourceDirectoryRef}
+              className={styles.resourceDirectory}
+              onScroll={hideResourceDetailOnScroll}
+            >
+              {decoratedTreeData.length ? (
+                <Tree.DirectoryTree
+                  blockNode
+                  showIcon
+                  selectable={false}
+                  treeData={decoratedTreeData}
+                  expandedKeys={directoryExpandedKeys}
+                  selectedKeys={selectedDirectoryKey ? [selectedDirectoryKey] : []}
+                  onExpand={(keys) => setDirectoryExpandedKeys(keys)}
+                  onClick={(_, node: any) => setSelectedDirectoryKey(node.key)}
+                  icon={renderDirectoryIcon}
+                  titleRender={renderDirectoryTitle}
+                  className={classnames(commonTreeStyles.tree, fileTreeStyles.fileTree)}
+                />
+              ) : (
+                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} />
+              )}
+            </aside>
+            <Tooltip title={t('ontologyBaseDetail.resizePane')}>
+              <button
+                type="button"
+                className={classnames(styles.resourceResizeHandle, {
+                  [styles.resourceResizeHandleActive]: resizingResourcePane,
+                })}
+                aria-label={t('ontologyBaseDetail.resizePane')}
+                onPointerDown={handleResourceResizePointerDown}
+                onKeyDown={handleResourceResizeKeyDown}
+              >
+                <HolderOutlined />
+              </button>
+            </Tooltip>
+            <main className={styles.resourceListPane} onScroll={hideResourceDetailOnScroll}>
+              <div className={styles.resourceListHeader}>
+                <div>
+                  <span className={styles.resourceListTitle}>{currentConfig.label}</span>
+                  {selectedDirectoryNode && (
+                    <span className={styles.resourceListSubtitle}> / {selectedDirectoryNode.title}</span>
+                  )}
+                </div>
+                <Input
+                  className={styles.searchInput}
+                  value={keyword}
+                  onChange={(event) => setKeyword(event.target.value)}
+                  suffix={<SearchOutlined />}
+                  placeholder={t('ontologyBaseDetail.searchPlaceholder')}
+                  allowClear
+                />
+              </div>
+              <Table
+                size="small"
+                tableLayout="fixed"
+                rowKey={currentConfig.rowKey}
+                dataSource={resourceRows.filter((row: any) =>
+                  matchKeyword(
+                    row.viewName,
+                    row.viewCode,
+                    row.objectName,
+                    row.objectCode,
+                    row.propertyName,
+                    row.propertyCode,
+                    row.termName,
+                    row.termCode
+                  )
+                )}
+                columns={currentConfig.columns as any}
+                pagination={false}
+                scroll={{ x: activeResourceTab === 'term' ? 720 : 920 }}
+                locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
+              />
+            </main>
+          </div>
+        </div>
+      </ResourceSection>
+    );
+  };
+
   const openDistributionDrill = (distribution: any, bucket: any) => {
     setDistributionDrill({
       key: `${distribution.key}:${bucket.name}`,
@@ -1343,109 +2091,28 @@ const OntologyBaseDetail: React.FC = () => {
     );
   };
 
-  const renderFocusSelectors = () => {
-    if (focusType === 'base') return null;
-    return (
-      <div className={styles.headerSelectors}>
-        <Select
-          className={styles.headerSelect}
-          value={selectedScene?.sceneId}
-          options={sceneRows.map((scene: any) => ({
-            value: scene.sceneId,
-            label: scene.sceneName || scene.sceneId,
-          }))}
-          onChange={(value) => {
-            setSelectedSceneId(value);
-            setSelectedViewCode(undefined);
-            setKeyword('');
-          }}
-        />
-        {focusType === 'view' && (
-          <Select
-            className={styles.headerSelect}
-            value={selectedView?.viewCode}
-            options={selectedViews.map((view: any) => ({
-              value: view.viewCode,
-              label: view.viewName || view.viewCode,
-            }))}
-            onChange={(value) => {
-              setSelectedViewCode(value);
-              setKeyword('');
-            }}
-          />
-        )}
-      </div>
-    );
-  };
-
   const renderHeader = () => {
-    const focusLabel = {
-      base: t('ontologyNode.title.base'),
-      scene: t('ontologyNode.title.scene'),
-      view: t('ontologyNode.title.view'),
-    }[focusType];
-    let title = resourceName || baseId;
-    let code = resourceCode || baseId;
-    if (focusType === 'scene') {
-      title = selectedScene?.sceneName || selectedScene?.sceneId || resourceName;
-      code = selectedScene?.sceneId || baseId;
-    }
-    if (focusType === 'view') {
-      title = selectedView?.viewName || selectedView?.viewCode || resourceName;
-      code = selectedView?.viewCode || baseId;
-    }
-
     return (
       <>
         <div className={styles.back} onClick={() => navigate(backPath)}>
           <LeftOutlined /> {t('layout.back')}
         </div>
-        <ResourceSection title={t('ontologyBaseDetail.section.resource')}>
-          <div className={styles.header}>
-            <div className={styles.headerIcon}>
-              {focusType === 'view' ? (
-                <TableOutlined style={{ fontSize: 26 }} />
-              ) : focusType === 'scene' ? (
-                <FolderOutlined style={{ fontSize: 26 }} />
-              ) : (
+        {!resourceDetailHidden && (
+          <ResourceSection title={t('ontologyBaseDetail.section.resource')}>
+            <div className={styles.header}>
+              <div className={styles.headerIcon}>
                 <DatabaseOutlined style={{ fontSize: 26 }} />
-              )}
-            </div>
-            {renderFocusSelectors()}
-            <div className={styles.headerMain}>
-              <div className={styles.headerNameRow}>
-                <span className={styles.headerName}>{title}</span>
-                <Tag color="blue">{focusLabel}</Tag>
               </div>
-              <div className={styles.headerCode}>{code}</div>
+              <div className={styles.headerMain}>
+                <div className={styles.headerNameRow}>
+                  <span className={styles.headerName}>{resourceName || baseId}</span>
+                  <Tag color="blue">{t('ontologyNode.title.base')}</Tag>
+                </div>
+                <div className={styles.headerCode}>{resourceCode || baseId}</div>
+              </div>
             </div>
-            <div className={styles.headerActions}>
-              <Button
-                size="small"
-                type={focusType === 'base' ? 'primary' : 'default'}
-                onClick={() => setFocusType('base')}
-              >
-                {t('common.resourceType.ontology')}
-              </Button>
-              <Button
-                size="small"
-                type={focusType === 'scene' ? 'primary' : 'default'}
-                disabled={!selectedScene}
-                onClick={() => setFocusType('scene')}
-              >
-                {t('common.resourceType.scene')}
-              </Button>
-              <Button
-                size="small"
-                type={focusType === 'view' ? 'primary' : 'default'}
-                disabled={!selectedView}
-                onClick={() => setFocusType('view')}
-              >
-                {t('common.resourceType.view')}
-              </Button>
-            </div>
-          </div>
-        </ResourceSection>
+          </ResourceSection>
+        )}
       </>
     );
   };
@@ -2194,22 +2861,52 @@ const OntologyBaseDetail: React.FC = () => {
     );
   };
 
+  void renderBaseDetail;
+  void renderSceneDetail;
+  void renderViewDetail;
+
   return (
     <div className={styles.container}>
       {renderHeader()}
       <Spin spinning={loading} wrapperClassName={styles.spinFill}>
         <div className={classnames(styles.detailBody, { [styles.detailBodyLoading]: loading })}>
-          {!baseId ? (
-            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} />
-          ) : focusType === 'scene' ? (
-            renderSceneDetail()
-          ) : focusType === 'view' ? (
-            renderViewDetail()
-          ) : (
-            renderBaseDetail()
-          )}
+          {!baseId ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} /> : renderResourceExplorer()}
         </div>
       </Spin>
+      <Modal
+        open={Boolean(relationModal)}
+        title={relationModal?.title || t('employeeDetail.ontology.relation')}
+        footer={null}
+        width={880}
+        onCancel={() => setRelationModal(null)}
+        destroyOnClose
+      >
+        <BrowseRelationPanel
+          relations={relationModal?.relations || []}
+          objects={relationModal?.objects || []}
+          columns={browseRelationColumns}
+          t={t}
+        />
+      </Modal>
+      <Modal
+        open={Boolean(actionModal)}
+        title={actionModal?.title || t('ontologyCenter.detail.actions')}
+        footer={null}
+        width={760}
+        onCancel={() => setActionModal(null)}
+        destroyOnClose
+      >
+        <Table
+          size="small"
+          tableLayout="fixed"
+          rowKey={(row: any, index) => row.actionCode || row.code || index}
+          dataSource={actionModal?.actions || []}
+          columns={browseActionColumns}
+          pagination={false}
+          scroll={{ x: 680 }}
+          locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
+        />
+      </Modal>
     </div>
   );
 };

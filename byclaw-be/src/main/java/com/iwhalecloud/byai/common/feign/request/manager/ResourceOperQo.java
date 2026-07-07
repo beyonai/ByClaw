@@ -27,6 +27,11 @@ public class ResourceOperQo {
     private String resourceName;
 
     /**
+     * 资源名称/编码关键字
+     */
+    private String keyword;
+
+    /**
      * 资源类型
      */
     private String resourceBizType;
@@ -66,6 +71,11 @@ public class ResourceOperQo {
     private Long enterpriseId;
 
     private Long catalogId;
+
+    /**
+     * 资源归属类型：personal / enterprise
+     */
+    private String ownerType;
 
     private boolean isFilterCreate;
 

@@ -2466,15 +2466,17 @@ const ConfigForm = (props) => {
                       id: 'employeeDetail.configureOntology',
                     })}
                   </span>
-                  <Button
-                    type="link"
-                    size="small"
-                    icon={<PlusOutlined />}
-                    onClick={onOpenOntologyDrawer}
-                    disabled={isReadOnly}
-                  >
-                    {intl.formatMessage({ id: 'employeeDetail.ontology.addOntology' })}
-                  </Button>
+                  {onOpenOntologyDrawer && (
+                    <Button
+                      type="link"
+                      size="small"
+                      icon={<PlusOutlined />}
+                      onClick={onOpenOntologyDrawer}
+                      disabled={isReadOnly}
+                    >
+                      {intl.formatMessage({ id: 'employeeDetail.ontology.addOntology' })}
+                    </Button>
+                  )}
                 </div>
                 <Card
                   className={classnames(styles.configCard, styles.ontologyConfigCard, {

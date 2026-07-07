@@ -11,8 +11,6 @@ import com.iwhalecloud.byai.manager.dto.ontology.OntologyBindRequest;
 import com.iwhalecloud.byai.manager.dto.ontology.OntologyRefreshResult;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
-import com.iwhalecloud.byai.manager.vo.auth.ResourceAuthVo;
-import com.iwhalecloud.byai.common.page.PageInfo;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import jakarta.validation.Valid;
@@ -41,24 +39,12 @@ public class OntologyBaseController {
     @Autowired
     private OntologyBindService ontologyBindService;
 
-    @ApiOperation("绑定本体到数字员工（覆盖式：以本次选中为准）")
-    @PostMapping("/bind/save")
-    @ManageLogAnnotation(name = "绑定本体", description = "把本体库下选中的节点覆盖式绑定到数字员工")
-    public ResponseUtil<Boolean> bind(@RequestBody OntologyBindRequest request) {
-        ontologyBindService.bindOntology(request);
+    @ApiOperation("解绑单个本体资源（视图/对象/场景/库）与数字员工的绑定关系")
+    @PostMapping("/bind/unbind")
+    @ManageLogAnnotation(name = "解绑本体", description = "解除单个本体资源与数字员工的绑定关系")
+    public ResponseUtil<Boolean> unbind(@RequestBody OntologyBindRequest request) {
+        ontologyBindService.unbindResource(request.getDigitalEmployeeId(), request.getRelResourceId());
         return ResponseUtil.successRes(Boolean.TRUE);
-    }
-
-    @ApiOperation("查询数字员工已绑定的本体库列表")
-    @PostMapping("/bind/bases")
-    public ResponseUtil<java.util.List<SsResource>> boundBases(@RequestBody OntologyBindRequest request) {
-        return ResponseUtil.successRes(ontologyBindService.boundBases(request.getDigitalEmployeeId()));
-    }
-
-    @ApiOperation("查询数字员工配置页可绑定的本体库列表")
-    @PostMapping("/bind/candidateBases")
-    public ResponseUtil<PageInfo<ResourceAuthVo>> candidateBases(@RequestBody OntologyBaseQueryRequest request) {
-        return ResponseUtil.successRes(ontologyBindService.candidateBases(request));
     }
 
     @ApiOperation("本体库列表")
@@ -167,6 +153,18 @@ public class OntologyBaseController {
     @PostMapping("/view/list")
     public ResponseUtil<JSONArray> listViews(@RequestBody JSONObject request) {
         return ResponseUtil.successRes(ontologyBaseService.listViews(request));
+    }
+
+    @ApiOperation("本体资源分页列表（视图/对象，查询资源表）")
+    @PostMapping("/resource/page")
+    public ResponseUtil<JSONObject> pageResources(@RequestBody JSONObject request) {
+        return ResponseUtil.successRes(ontologyBaseService.pageResources(request));
+    }
+
+    @ApiOperation("同步本体资源分页列表（视图/对象，从 datacloud 同步到资源表）")
+    @PostMapping("/resource/sync")
+    public ResponseUtil<JSONObject> syncResources(@RequestBody JSONObject request) {
+        return ResponseUtil.successRes(ontologyBaseService.syncResources(request));
     }
 
     @ApiOperation("视图详情")

@@ -116,6 +116,7 @@ export default {
   'employeeDetail.ontology.searchScene': '搜索场景',
   'employeeDetail.ontology.relation': '关系',
   'employeeDetail.ontology.bound': '已绑定',
+  'employeeDetail.ontology.unbound': '未绑定',
   'employeeDetail.ontology.configureTip': '选择有权限使用的本体库、场景、视图和对象，保存数字员工后同步绑定。',
   'employeeDetail.ontology.emptyTitle': '暂未绑定本体资源',
   'employeeDetail.ontology.emptyDesc': '可绑定有权限使用的本体库、场景、视图和对象，保存数字员工后生效。',

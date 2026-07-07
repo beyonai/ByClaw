@@ -15,7 +15,6 @@ import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationServ
 import com.iwhalecloud.byai.manager.application.service.digitemploy.event.DigEmployeeChangeEventPublisher;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.event.DigEmployeeChangeEventType;
 import com.iwhalecloud.byai.manager.application.service.memory.MemoryLibraryApplicationService;
-import com.iwhalecloud.byai.manager.application.service.ontology.OntologyResourceValidityService;
 import com.iwhalecloud.byai.manager.application.service.template.TemplateRuleInfoApplicationService;
 import com.iwhalecloud.byai.manager.domain.aimodel.service.AIService;
 import com.iwhalecloud.byai.manager.domain.aimodel.service.AiModelService;
@@ -149,9 +148,6 @@ public class DigitalEmployeeApplicationService {
 
     @Autowired
     private SsResourceService ssResourceService;
-
-    @Autowired
-    private OntologyResourceValidityService ontologyResourceValidityService;
 
     @Autowired
     private ResourceRuntimeInfoResolver resourceRuntimeInfoResolver;
@@ -1792,7 +1788,6 @@ public class DigitalEmployeeApplicationService {
 
         // 关联资源表
         List<SsResourceDTO> relResourceList = ssResourceService.findRelResource(resourceId);
-        relResourceList = ontologyResourceValidityService.filterValidOntologyResources(relResourceList);
 
         List<Long> relIds = new ArrayList<>(10);
         if (CollectionUtils.isNotEmpty(relResourceList)) {
@@ -1893,8 +1888,11 @@ public class DigitalEmployeeApplicationService {
             if (StringUtils.isBlank(baseCode) && "ONTOLOGY_BASE".equals(dto.getResourceBizType())) {
                 baseCode = dto.getResourceCode();
             }
-            dto.setOntologyBaseCode(baseCode);
             SsResource baseResource = findOntologyBaseResource(dto, baseCode, byId);
+            if (StringUtils.isBlank(baseCode) && baseResource != null) {
+                baseCode = baseResource.getResourceCode();
+            }
+            dto.setOntologyBaseCode(baseCode);
 
             JSONObject entry = new JSONObject();
             entry.put("resourceId", dto.getResourceId());

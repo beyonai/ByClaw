@@ -209,15 +209,21 @@ public class SsResourceService {
      *
      * <p>本体类子资源（SCENE/VIEW/OBJECT）的编码只在所属本体库内唯一，调用方应传
      * ontologyBaseCode，经各自扩展表 target_content.ontologyBaseCode 缩小范围后再匹配 ss_resource。
+     * 本体子资源不允许跨库按编码模糊命中，ontologyBaseCode 为空时直接返回空列表。
      *
      * @param resourceCode 资源编码
      * @param resourceBizType 资源业务类型
-     * @param ontologyBaseCode 所属本体库编码，可空
+     * @param ontologyBaseCode 所属本体库编码，本体子资源必填
      * @return 匹配资源列表
      */
     public List<SsResource> findByCodeAndBizTypeAndOntologyBaseCode(String resourceCode, String resourceBizType,
         String ontologyBaseCode) {
         if (StringUtil.isEmpty(resourceCode) || StringUtil.isEmpty(resourceBizType)) {
+            return Collections.emptyList();
+        }
+        boolean ontologyChildBizType = "SCENE".equals(resourceBizType) || "VIEW".equals(resourceBizType)
+            || "OBJECT".equals(resourceBizType);
+        if (ontologyChildBizType && StringUtils.isBlank(ontologyBaseCode)) {
             return Collections.emptyList();
         }
 

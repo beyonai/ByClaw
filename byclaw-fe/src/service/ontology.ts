@@ -164,42 +164,9 @@ export function registerOntologyBase(body: OntologyBaseRegister) {
   return POST<any>('/byaiService/ontology/base/register', body, ontologyRequestConfig);
 }
 
-/** 绑定本体到数字员工（覆盖式：以本次选中为准）。 */
-export interface OntologyBindNode {
-  level: 'BASE' | 'SCENE' | 'VIEW' | 'OBJECT_IN_SCENE' | 'OBJECT_IN_VIEW';
-  sceneId?: string;
-  sceneName?: string;
-  sceneDesc?: string;
-  viewCode?: string;
-  viewName?: string;
-  viewDesc?: string;
-  objectCode?: string;
-  objectName?: string;
-  objectDesc?: string;
-}
-export function bindOntologySave(body: {
-  digitalEmployeeId: string | number;
-  ownerType?: string;
-  baseId: string;
-  baseName?: string;
-  nodes: OntologyBindNode[];
-  confirmClear?: boolean;
-}) {
-  return POST<any>('/byaiService/ontology/bind/save', body, ontologyRequestConfig);
-}
-
-/** 查询数字员工已绑定的本体库列表（由已绑定叶子的 ontologyBaseCode 反查库）。 */
-export function getBoundOntologyBases(params: { digitalEmployeeId: string | number }) {
-  return POST<any>(
-    '/byaiService/ontology/bind/bases',
-    { digitalEmployeeId: params.digitalEmployeeId },
-    ontologyRequestConfig
-  );
-}
-
-/** 查询数字员工配置页可绑定的本体库候选列表（仅返回当前用户已具备使用/管理权限的本体库）。 */
-export function listBindableOntologyBases(params: { ownerType?: string; queryKeyword?: string } = {}) {
-  return POST<any>('/byaiService/ontology/bind/candidateBases', params, ontologyRequestConfig);
+/** 解绑单个本体资源（视图/对象/场景/库）与数字员工的绑定关系。 */
+export function unbindOntologyResource(body: { digitalEmployeeId: string | number; relResourceId: string | number }) {
+  return POST<any>('/byaiService/ontology/bind/unbind', body, ontologyRequestConfig);
 }
 
 /** 单条刷新明细。 */
@@ -242,6 +209,54 @@ export function deleteOntologyBase(params: { ownerType?: string; baseId: string 
 type OntologyPayload = Record<string, any>;
 
 const ontologyPost = <T = any>(url: string, body: OntologyPayload) => POST<T>(url, body, ontologyRequestConfig);
+
+/** 本体资源分页查询（开放资源分页接口，后端封装 datacloud/资源库查询）。 */
+export function pageOntologyResources(params: {
+  ownerType?: string;
+  resourceBizType?: 'OBJECT' | 'VIEW' | string;
+  resourceBizTypeList?: string[];
+  keyword?: string;
+  catalogId?: string | number;
+  statusList?: number[];
+  pageNum?: number;
+  pageSize?: number;
+}) {
+  const keyword = params.keyword?.trim();
+  return ontologyPost('/byaiService/ontology/resource/page', {
+    ownerType: normalizeOwnerType(params.ownerType),
+    resourceBizType: params.resourceBizType,
+    resourceBizTypeList: params.resourceBizTypeList,
+    keyword,
+    resourceName: keyword,
+    ...(params.catalogId === undefined || params.catalogId === '' ? {} : { catalogId: params.catalogId }),
+    statusList: params.statusList,
+    pageNum: params.pageNum || 1,
+    pageSize: params.pageSize || 20,
+  });
+}
+
+/** 从 datacloud 分页同步本体资源到资源表。 */
+export function syncOntologyResources(params: {
+  ownerType?: string;
+  resourceBizType?: 'OBJECT' | 'VIEW' | string;
+  resourceBizTypeList?: string[];
+  keyword?: string;
+  catalogId?: string | number;
+  pageNum?: number;
+  pageSize?: number;
+}) {
+  const keyword = params.keyword?.trim();
+  return ontologyPost('/byaiService/ontology/resource/sync', {
+    ownerType: normalizeOwnerType(params.ownerType),
+    resourceBizType: params.resourceBizType,
+    resourceBizTypeList: params.resourceBizTypeList,
+    keyword,
+    resourceName: keyword,
+    ...(params.catalogId === undefined || params.catalogId === '' ? {} : { catalogId: params.catalogId }),
+    pageNum: params.pageNum || 1,
+    pageSize: params.pageSize || 100,
+  });
+}
 
 /** 创建本体库（直通 datacloud 新接口；如需同步 ss_resource，仍使用 registerOntologyBase）。 */
 export function createOntologyBase(body: OntologyPayload) {

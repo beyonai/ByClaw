@@ -11,7 +11,6 @@ import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.gateway.channels.service.robot.RobotChannelRegistryCoordinator;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.event.DigEmployeeChangeEventPublisher;
-import com.iwhalecloud.byai.manager.application.service.ontology.OntologyResourceValidityService;
 import com.iwhalecloud.byai.manager.application.service.template.TemplateRuleInfoApplicationService;
 import com.iwhalecloud.byai.manager.domain.aimodel.service.AiModelService;
 import com.iwhalecloud.byai.manager.domain.resource.enums.OperationTypeEnum;
@@ -80,7 +79,6 @@ class DigitalEmployeeApplicationServiceTest {
     private ResourceAuthContextService resourceAuthContextService;
     private RobotChannelRegistryCoordinator robotChannelRegistryCoordinator;
     private DigEmployeeChangeEventPublisher digEmployeeChangeEventPublisher;
-    private OntologyResourceValidityService ontologyResourceValidityService;
     private DigitalEmployeeApplicationService service;
 
     @BeforeEach
@@ -99,9 +97,6 @@ class DigitalEmployeeApplicationServiceTest {
         resourceAuthContextService = mock(ResourceAuthContextService.class);
         robotChannelRegistryCoordinator = mock(RobotChannelRegistryCoordinator.class);
         digEmployeeChangeEventPublisher = mock(DigEmployeeChangeEventPublisher.class);
-        ontologyResourceValidityService = mock(OntologyResourceValidityService.class);
-        when(ontologyResourceValidityService.filterValidOntologyResources(any()))
-            .thenAnswer(invocation -> invocation.getArgument(0));
 
         MessageSource mockMessageSource = mock(MessageSource.class);
         when(mockMessageSource.getMessage(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(java.util.Locale.class)))
@@ -124,7 +119,6 @@ class DigitalEmployeeApplicationServiceTest {
         ReflectionTestUtils.setField(service, "resourceAuthContextService", resourceAuthContextService);
         ReflectionTestUtils.setField(service, "robotChannelRegistryCoordinator", robotChannelRegistryCoordinator);
         ReflectionTestUtils.setField(service, "digEmployeeChangeEventPublisher", digEmployeeChangeEventPublisher);
-        ReflectionTestUtils.setField(service, "ontologyResourceValidityService", ontologyResourceValidityService);
 
         LoginInfo loginInfo = new LoginInfo();
         loginInfo.setUserId(1L);

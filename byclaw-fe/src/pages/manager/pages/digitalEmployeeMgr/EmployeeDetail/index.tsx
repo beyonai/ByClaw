@@ -14,7 +14,7 @@ import { showAuditConfirm } from '@/pages/manager/utils/auditConfirm';
 import { getIframeUrl, getValidValue } from '@/pages/manager/utils/managerUtils';
 import { agentHomeUrlHandler } from '@/pages/manager/utils/agent';
 import { ArrowLeftOutlined, ArrowRightOutlined, EllipsisOutlined, ExclamationCircleOutlined } from '@ant-design/icons';
-import { Button, Divider, Form, message, Modal, Space, Spin, Tooltip } from 'antd';
+import { Button, Divider, Form, message, Space, Spin, Tooltip } from 'antd';
 import classnames from 'classnames';
 import dayjs from 'dayjs';
 import { debounce, isEmpty, set, noop, isString, omit } from 'lodash';
@@ -32,9 +32,6 @@ import styles from './index.module.less';
 import Log from './Log';
 import Manage from './Manage';
 import Operation from './Operation';
-import EmployeeOntologyDrawer from './EmployeeOntologyDrawer';
-import { bindOntologySave } from '@/service/ontology';
-import { findDetailsById } from '@/pages/manager/service/DigitalEmployeeMgr';
 
 const PREVIEW_HOST = `${window.location.origin}${window.routerBase === '/' ? '/' : window.routerBase}`;
 const DIGITAL_EMPLOYEE_TEXT_FIELD_MAX_LENGTH = 5000;
@@ -308,8 +305,6 @@ const parseMaybeArray = (value) => {
   return [];
 };
 
-const getResponseData = (value) => value?.data ?? value;
-
 const getDigitalEmployeeTemplate = (templates, ownerType, agentType) => {
   const effectiveOwnerType = ownerType === 'personal' ? 'personal' : 'enterprise';
   const findTemplate = (list) =>
@@ -518,8 +513,6 @@ const EmployeeDetail = ({ loading }) => {
   const [issues, setIssues] = useState([]);
 
   const [selectedTools, setSelectedTools] = useState([]);
-  const [ontologyDrawerOpen, setOntologyDrawerOpen] = useState(false);
-  const [ontologyBindingMap, setOntologyBindingMap] = useState<Record<string, any>>({});
   const [savedRelOntology, setSavedRelOntology] = useState([]);
   const [coreCompetenciesState, setCoreCompetenciesState] = useState([]);
   const [memoryRules, setMemoryRules] = useState([]);
@@ -1138,97 +1131,6 @@ const EmployeeDetail = ({ loading }) => {
     }
   }, [agentType, effectiveAgentType, ownerType, form]);
 
-  const handleOntologyConfirm = useCallback((binding) => {
-    if (!binding?.key) return;
-    if (!binding.dirty) {
-      setOntologyBindingMap((prev) => {
-        const next = { ...prev };
-        delete next[binding.key];
-        return next;
-      });
-      return;
-    }
-    setOntologyBindingMap((prev) => ({
-      ...prev,
-      [binding.key]: {
-        ...binding,
-        dirty: true,
-      },
-    }));
-    setIsConfigChanged(true);
-  }, []);
-
-  const confirmClearOntologyBinding = useCallback(
-    () =>
-      new Promise((resolve) => {
-        Modal.confirm({
-          title: intl.formatMessage({ id: 'common.confirm' }),
-          content: `当前本体资源树选中节点数为 0，将清空该本体在当前数字员工【${
-            agentName || oldResourseName || ''
-          }】上的绑定，请确认`,
-          okText: intl.formatMessage({ id: 'common.confirm' }),
-          cancelText: intl.formatMessage({ id: 'common.cancel' }),
-          onOk: () => resolve(true),
-          onCancel: () => resolve(false),
-        });
-      }),
-    [agentName, intl, oldResourseName]
-  );
-
-  const savePendingOntologyBindings = useCallback(
-    async (digitalEmployeeId) => {
-      const dirtyBindings = Object.values(ontologyBindingMap).filter((item: any) => item?.dirty);
-      if (!digitalEmployeeId || dirtyBindings.length === 0) {
-        return true;
-      }
-
-      for (const binding of dirtyBindings) {
-        try {
-          let confirmClear = Boolean(binding.confirmClear);
-          if (binding.isClearing && !confirmClear) {
-            confirmClear = await confirmClearOntologyBinding(binding);
-            if (!confirmClear) {
-              return false;
-            }
-          }
-          const res: any = await bindOntologySave({
-            digitalEmployeeId,
-            ownerType: binding.ownerType,
-            baseId: binding.baseId,
-            baseName: binding.baseName,
-            nodes: binding.nodes || [],
-            confirmClear,
-          });
-          if (res && res.code !== undefined && res.code !== 0 && res.code !== 200) {
-            throw new Error(res.msg || res.message || intl.formatMessage({ id: 'common.operationFailed' }));
-          }
-        } catch (error: any) {
-          message.error(error?.message || error || intl.formatMessage({ id: 'employeeDetail.ontology.saveFailed' }));
-          return false;
-        }
-      }
-
-      try {
-        const detailRes: any = await findDetailsById({ resourceId: String(digitalEmployeeId) });
-        setSavedRelOntology(parseMaybeArray(getResponseData(detailRes)?.relOntology));
-      } catch (error) {
-        console.warn('reload relOntology after bind failed', error);
-      }
-      setOntologyBindingMap((prev) => {
-        const next = {};
-        Object.keys(prev).forEach((key) => {
-          if (!prev[key]?.dirty) {
-            next[key] = prev[key];
-          }
-        });
-        return next;
-      });
-      window.dispatchEvent(new CustomEvent('ontologyBindSaved'));
-      return true;
-    },
-    [confirmClearOntologyBinding, intl, ontologyBindingMap]
-  );
-
   useEffect(() => {
     let cancelled = false;
 
@@ -1562,14 +1464,9 @@ const EmployeeDetail = ({ loading }) => {
             EventEmitter?.emit('digitalEmployees-refresh-list', { refresh: true });
             // history.back();
 
-            let ontologySaved = true;
-            if (savedResourceId) {
-              ontologySaved = await savePendingOntologyBindings(savedResourceId);
-            }
-
             setSubmitLoading(false);
             setAuditLoading(false);
-            setIsConfigChanged(!ontologySaved);
+            setIsConfigChanged(false);
 
             setUpdateTime(dayjs().format('HH:mm:ss'));
 
@@ -1644,7 +1541,6 @@ const EmployeeDetail = ({ loading }) => {
       isFrontAccess,
       auditErrors,
       promptFieldMaxLength,
-      savePendingOntologyBindings,
     ]
   );
 
@@ -1935,8 +1831,6 @@ const EmployeeDetail = ({ loading }) => {
                 initialCoreCompetencies={coreCompetenciesState}
                 ownerType={ownerType}
                 savedRelOntology={savedRelOntology}
-                ontologyBindingMap={ontologyBindingMap}
-                onOpenOntologyDrawer={() => setOntologyDrawerOpen(true)}
               />
             </div>
 
@@ -2106,13 +2000,6 @@ const EmployeeDetail = ({ loading }) => {
           }}
         />
       )}
-      <EmployeeOntologyDrawer
-        open={ontologyDrawerOpen}
-        digitalEmployeeId={agentId}
-        pendingBindings={ontologyBindingMap}
-        onClose={() => setOntologyDrawerOpen(false)}
-        onConfirm={handleOntologyConfirm}
-      />
       <RefineModal
         visible={refineModalOpen}
         form={form}

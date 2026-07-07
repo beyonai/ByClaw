@@ -4,17 +4,21 @@ import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.iwhalecloud.byai.common.constants.resource.OwnerType;
 import com.iwhalecloud.byai.common.constants.resource.ResourceBizType;
 import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.feign.client.FeignDataCloudService;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
+import com.iwhalecloud.byai.common.vo.SortField;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import com.iwhalecloud.byai.manager.domain.auth.enums.GrantType;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.dto.ontology.OntologyBaseRegisterRequest;
 import com.iwhalecloud.byai.manager.dto.ontology.OntologyRefreshResult;
+import com.iwhalecloud.byai.manager.dto.resource.ResourcePageDto;
+import com.iwhalecloud.byai.manager.dto.resource.ResourceQueryRequest;
 import com.iwhalecloud.byai.manager.entity.ontology.SsResExtOntology;
 import com.iwhalecloud.byai.manager.entity.resource.SsResExtObject;
 import com.iwhalecloud.byai.manager.entity.resource.SsResExtScene;
@@ -25,6 +29,7 @@ import com.iwhalecloud.byai.manager.mapper.resource.SsResExtObjectMapper;
 import com.iwhalecloud.byai.manager.mapper.resource.SsResExtSceneMapper;
 import com.iwhalecloud.byai.manager.mapper.resource.SsResExtViewMapper;
 import com.iwhalecloud.byai.manager.mapper.resource.SsResourceMapper;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -75,9 +80,6 @@ public class OntologyBaseService {
 
     @Autowired
     private AuthApplicationService authApplicationService;
-
-    @Autowired
-    private OntologyResourceValidityService ontologyResourceValidityService;
 
     @Autowired
     private SsResExtSceneMapper ssResExtSceneMapper;
@@ -173,6 +175,249 @@ public class OntologyBaseService {
 
     public JSONArray listViews(JSONObject request) {
         return feignDataCloudService.listViewsByBase(requiredString(request, "baseId"), cacheMode(request));
+    }
+
+    public JSONObject pageResources(JSONObject request) {
+        return pageLocalResources(request);
+    }
+
+    public JSONObject syncResources(JSONObject request) {
+        String ownerType = normalizeOwnerType(request.getString("ownerType"));
+        String keyword = keyword(request);
+        Integer pageNum = defaultNumber(request.getInteger("pageNum"), request.getInteger("page"), 1);
+        Integer pageSize = defaultNumber(request.getInteger("pageSize"), request.getInteger("size"), 20);
+        Set<String> bizTypes = resourceBizTypes(request);
+        String sceneCode = request.getString("catalogId");
+        if (StringUtils.isBlank(sceneCode)) {
+            throw new BaseException("catalogId 不能为空");
+        }
+
+        String type = datacloudOntologyType(bizTypes);
+        JSONObject page = feignDataCloudService.queryOntologiesBySceneCode(sceneCode, ownerType, type, keyword,
+            pageNum, pageSize);
+        JSONObject normalizedPage = normalizeSceneOntologyPage(page, ownerType, sceneCode, type, pageNum, pageSize);
+        JSONArray rows = normalizedPage.getJSONArray("rows");
+        int created = 0;
+        int updated = 0;
+        if (rows != null) {
+            for (Object item : rows) {
+                JSONObject row = toJson(item);
+                String action = upsertSyncedResource(row, ownerType, sceneCode);
+                if ("created".equals(action)) {
+                    created++;
+                }
+                else if ("updated".equals(action)) {
+                    updated++;
+                }
+            }
+        }
+
+        JSONObject pageInfo = normalizedPage.getJSONObject("pageInfo");
+        int total = pageInfo == null ? rows == null ? 0 : rows.size() : pageInfo.getIntValue("total");
+        int totalPages = pageInfo == null ? 0 : pageInfo.getIntValue("totalPages");
+        int rowCount = rows == null ? 0 : rows.size();
+        boolean hasMore = totalPages > pageNum || (totalPages <= 1 && rowCount >= Math.max(pageSize, 1));
+
+        JSONObject result = new JSONObject();
+        result.put("pageNum", pageNum);
+        result.put("pageSize", pageSize);
+        result.put("total", total);
+        result.put("totalPages", totalPages);
+        result.put("batchTotal", totalPages);
+        result.put("batchNo", pageNum);
+        result.put("batchSize", rowCount);
+        result.put("created", created);
+        result.put("updated", updated);
+        result.put("synced", created + updated);
+        result.put("hasMore", hasMore);
+        result.put("rows", rows == null ? new JSONArray() : rows);
+        return result;
+    }
+
+    private JSONObject pageLocalResources(JSONObject request) {
+        Integer pageNum = defaultNumber(request.getInteger("pageNum"), request.getInteger("page"), 1);
+        Integer pageSize = defaultNumber(request.getInteger("pageSize"), request.getInteger("size"), 20);
+        Page<ResourcePageDto> page = new Page<>(Math.max(pageNum == null ? 1 : pageNum, 1),
+            Math.max(pageSize == null ? 20 : pageSize, 1));
+
+        ResourceQueryRequest query = new ResourceQueryRequest();
+        query.setOwnerType(normalizeOwnerType(request.getString("ownerType")));
+        query.setKeyword(keyword(request));
+        query.setResourceBizType(request.getString("resourceBizType"));
+        query.setResourceBizTypeList(new ArrayList<>(resourceBizTypes(request)));
+        query.setStatusList(statusList(request));
+        query.setCatalogId(catalogIdAsLong(request.get("catalogId")));
+        query.setOwnershipType(3);
+        query.setSortFields(List.of(createSortField("updateTime", "desc", 1), createSortField("createTime", "desc",
+            2)));
+
+        List<ResourcePageDto> rows = ssResourceMapper.getResourceListByPage(page, query);
+
+        JSONObject pageInfo = new JSONObject();
+        pageInfo.put("pageNum", page.getCurrent());
+        pageInfo.put("pageSize", page.getSize());
+        pageInfo.put("total", page.getTotal());
+        pageInfo.put("totalPages", page.getPages());
+
+        JSONObject result = new JSONObject();
+        result.put("rows", rows);
+        result.put("list", rows);
+        result.put("pageInfo", pageInfo);
+        result.put("total", page.getTotal());
+        return result;
+    }
+
+    private String upsertSyncedResource(JSONObject row, String ownerType, String sceneCode) {
+        String bizType = normalizeOntologyBizType(row.getString("resourceBizType"), row);
+        String resourceCode = ResourceBizType.VIEW.name().equals(bizType)
+            ? firstNonBlank(row, "viewCode", "view_code", "resourceCode", "resource_code", "code", "id")
+            : firstNonBlank(row, "objectCode", "object_code", "resourceCode", "resource_code", "code", "id");
+        String resourceName = ResourceBizType.VIEW.name().equals(bizType)
+            ? firstNonBlank(row, "viewName", "view_name", "resourceName", "resource_name", "name", "displayName")
+            : firstNonBlank(row, "objectName", "object_name", "resourceName", "resource_name", "name", "displayName");
+        if (StringUtils.isBlank(resourceCode) || StringUtils.isBlank(resourceName)) {
+            return "skipped";
+        }
+
+        SsResource existing = findSyncedResource(resourceCode, bizType);
+        if (existing == null) {
+            SsResource created = new SsResource();
+            fillSyncedResource(created, row, ownerType, sceneCode, bizType, resourceCode, resourceName);
+            ssResourceService.saveResource(created);
+            return "created";
+        }
+
+        fillSyncedResource(existing, row, ownerType, sceneCode, bizType, resourceCode, resourceName);
+        ssResourceService.updateResourceEntity(existing);
+        return "updated";
+    }
+
+    private SsResource findSyncedResource(String resourceCode, String bizType) {
+        List<SsResource> resources = ssResourceMapper.selectList(new LambdaQueryWrapper<SsResource>()
+            .eq(SsResource::getResourceCode, resourceCode)
+            .eq(SsResource::getResourceBizType, bizType)
+            .orderByDesc(SsResource::getUpdateTime)
+            .orderByDesc(SsResource::getCreateTime));
+        return resources.isEmpty() ? null : resources.get(0);
+    }
+
+    private void fillSyncedResource(SsResource resource, JSONObject row, String ownerType, String sceneCode,
+        String bizType, String resourceCode, String resourceName) {
+        resource.setResourceBizType(bizType);
+        resource.setResourceCode(resourceCode);
+        resource.setResourceName(resourceName);
+        resource.setResourceDesc(firstNonBlank(row, "resourceDesc", "resource_desc", "description", "desc",
+            "viewDesc", "view_desc", "objectDesc", "object_desc"));
+        resource.setResourceType(RESOURCE_TYPE_ATOM);
+        resource.setSystemCode(SYSTEM_CODE_DATACLOUD);
+        resource.setOwnerType(StringUtils.defaultIfBlank(row.getString("ownerType"), ownerType));
+        resource.setResourceStatus(ResourceStatus.LIST.getNum());
+        resource.setResourceVersionId("1.0");
+        resource.setParentResourceId(ROOT_PARENT_ID);
+        resource.setHostType("local");
+        resource.setImplType("ASK_AGENT");
+        resource.setWorkerAgentType("BYCLAW_DATA");
+        Long catalog = catalogIdAsLong(row.get("catalogId"));
+        if (catalog == null) {
+            catalog = catalogIdAsLong(sceneCode);
+        }
+        if (catalog != null) {
+            resource.setCatalogId(catalog);
+        }
+    }
+
+    private SortField createSortField(String field, String order, int priority) {
+        SortField sortField = new SortField();
+        sortField.setField(field);
+        sortField.setOrder(order);
+        sortField.setPriority(priority);
+        return sortField;
+    }
+
+    private List<Integer> statusList(JSONObject request) {
+        JSONArray statusList = request.getJSONArray("statusList");
+        if (statusList == null || statusList.isEmpty()) {
+            return List.of(ResourceStatus.LIST.getNum());
+        }
+        List<Integer> values = new ArrayList<>();
+        for (Object item : statusList) {
+            if (item != null) {
+                values.add(Integer.valueOf(String.valueOf(item)));
+            }
+        }
+        return values.isEmpty() ? List.of(ResourceStatus.LIST.getNum()) : values;
+    }
+
+    private Long catalogIdAsLong(Object catalogId) {
+        if (catalogId == null || StringUtils.isBlank(String.valueOf(catalogId))) {
+            return null;
+        }
+        try {
+            return Long.valueOf(String.valueOf(catalogId));
+        }
+        catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private JSONObject normalizeSceneOntologyPage(JSONObject page, String ownerType, String sceneCode, String type,
+        Integer pageNum, Integer pageSize) {
+        JSONObject source = page == null ? new JSONObject() : page;
+        JSONObject pageSource = pagePayload(source);
+        JSONArray rows = sceneOntologyRows(pageSource, type);
+        JSONArray normalizedRows = new JSONArray();
+        if (rows != null) {
+            for (Object item : rows) {
+                JSONObject row = toJson(item);
+                String rowType = StringUtils.defaultIfBlank(type, firstNonBlank(row, "resourceBizType", "type"));
+                String bizType = normalizeOntologyBizType(rowType, row);
+                String resourceCode = ResourceBizType.VIEW.name().equals(bizType)
+                    ? firstNonBlank(row, "viewCode", "view_code", "resourceCode", "resource_code", "code", "id")
+                    : firstNonBlank(row, "objectCode", "object_code", "resourceCode", "resource_code", "code", "id");
+                String resourceName = ResourceBizType.VIEW.name().equals(bizType)
+                    ? firstNonBlank(row, "viewName", "view_name", "resourceName", "resource_name", "name",
+                        "displayName")
+                    : firstNonBlank(row, "objectName", "object_name", "resourceName", "resource_name", "name",
+                        "displayName");
+
+                row.put("ownerType", ownerType);
+                row.put("catalogId", sceneCode);
+                row.put("sceneId", StringUtils.defaultIfBlank(row.getString("sceneId"), sceneCode));
+                row.put("sceneCode", StringUtils.defaultIfBlank(row.getString("sceneCode"), sceneCode));
+                row.put("resourceBizType", bizType);
+                row.put("resourceCode", resourceCode);
+                row.put("resourceName", resourceName);
+                row.put("resourceDesc", firstNonBlank(row, "resourceDesc", "description", "desc", "viewDesc",
+                    "objectDesc"));
+                if (ResourceBizType.VIEW.name().equals(bizType)) {
+                    row.put("viewCode", resourceCode);
+                    row.put("viewName", resourceName);
+                }
+                else {
+                    row.put("objectCode", resourceCode);
+                    row.put("objectName", resourceName);
+                }
+                normalizedRows.add(row);
+            }
+        }
+
+        int total = firstInt(pageSource, normalizedRows.size(), "total", "totalCount", "count");
+        int safePageNum = Math.max(pageNum == null ? firstInt(pageSource, 1, "pageNum", "page") : pageNum, 1);
+        int safePageSize = Math.max(pageSize == null ? firstInt(pageSource, 20, "pageSize", "size") : pageSize, 1);
+
+        JSONObject pageInfo = new JSONObject();
+        pageInfo.put("pageNum", safePageNum);
+        pageInfo.put("pageSize", safePageSize);
+        pageInfo.put("total", total);
+        pageInfo.put("totalPages", firstInt(pageSource, (total + safePageSize - 1) / safePageSize, "totalPages",
+            "pages"));
+
+        JSONObject result = new JSONObject();
+        result.put("rows", normalizedRows);
+        result.put("list", normalizedRows);
+        result.put("pageInfo", pageInfo);
+        result.put("total", total);
+        return result;
     }
 
     public JSONObject viewDetail(JSONObject request) {
@@ -271,7 +516,6 @@ public class OntologyBaseService {
             return java.util.Collections.emptyList();
         }
         List<SsResource> rows = ssResourceMapper.selectBatchIds(ids);
-        rows = ontologyResourceValidityService.filterValidOntologyResources(rows);
         rows.sort(java.util.Comparator.comparing(SsResource::getParentResourceId,
             java.util.Comparator.nullsFirst(java.util.Comparator.naturalOrder())));
         return rows;
@@ -874,6 +1118,256 @@ public class OntologyBaseService {
 
     private String normalizeOwnerType(String ownerType) {
         return StringUtils.isBlank(ownerType) ? "personal" : ownerType;
+    }
+
+    private JSONArray listViewsByBaseQuietly(String baseId) {
+        try {
+            return feignDataCloudService.listViewsByBase(baseId, null);
+        }
+        catch (Exception e) {
+            logger.warn("list datacloud views failed, baseId={}", baseId, e);
+            return new JSONArray();
+        }
+    }
+
+    private JSONArray listObjectsByBaseQuietly(String baseId) {
+        try {
+            return feignDataCloudService.listObjects(baseId, null);
+        }
+        catch (Exception e) {
+            logger.warn("list datacloud objects failed, baseId={}", baseId, e);
+            return new JSONArray();
+        }
+    }
+
+    private String datacloudOntologyType(Set<String> bizTypes) {
+        if (bizTypes == null || bizTypes.size() != 1) {
+            return null;
+        }
+        String bizType = bizTypes.iterator().next();
+        if (ResourceBizType.OBJECT.name().equalsIgnoreCase(bizType)) {
+            return "object";
+        }
+        if (ResourceBizType.VIEW.name().equalsIgnoreCase(bizType)) {
+            return "view";
+        }
+        return null;
+    }
+
+    private String normalizeOntologyBizType(String type, JSONObject row) {
+        String rawType = StringUtils.defaultIfBlank(type, "");
+        if (StringUtils.equalsAnyIgnoreCase(rawType, "view", ResourceBizType.VIEW.name())) {
+            return ResourceBizType.VIEW.name();
+        }
+        if (StringUtils.equalsAnyIgnoreCase(rawType, "object", ResourceBizType.OBJECT.name())) {
+            return ResourceBizType.OBJECT.name();
+        }
+        if (StringUtils.isNotBlank(firstNonBlank(row, "viewCode", "view_code", "viewName", "view_name"))) {
+            return ResourceBizType.VIEW.name();
+        }
+        return ResourceBizType.OBJECT.name();
+    }
+
+    private JSONArray firstArray(JSONObject source, String... keys) {
+        if (source == null) {
+            return new JSONArray();
+        }
+        for (String key : keys) {
+            Object value = source.get(key);
+            if (value instanceof JSONArray) {
+                return (JSONArray) value;
+            }
+        }
+        return new JSONArray();
+    }
+
+    private JSONArray sceneOntologyRows(JSONObject source, String type) {
+        JSONArray rows = firstArray(source, "rows", "list", "records", "items", "content", "data");
+        if (!rows.isEmpty()) {
+            return rows;
+        }
+
+        JSONArray mergedRows = new JSONArray();
+        if (!StringUtils.equalsIgnoreCase(type, "view")) {
+            appendSceneOntologyRows(mergedRows, firstArray(source, "objects"), ResourceBizType.OBJECT.name());
+        }
+        if (!StringUtils.equalsIgnoreCase(type, "object")) {
+            appendSceneOntologyRows(mergedRows, firstArray(source, "views"), ResourceBizType.VIEW.name());
+        }
+        return mergedRows;
+    }
+
+    private void appendSceneOntologyRows(JSONArray target, JSONArray source, String resourceBizType) {
+        if (source == null || source.isEmpty()) {
+            return;
+        }
+        for (Object item : source) {
+            JSONObject row = toJson(item);
+            row.put("resourceBizType", resourceBizType);
+            target.add(row);
+        }
+    }
+
+    private JSONObject pagePayload(JSONObject source) {
+        return pagePayload(source, 0);
+    }
+
+    private JSONObject pagePayload(JSONObject source, int depth) {
+        if (source == null) {
+            return new JSONObject();
+        }
+        if (depth > 4 || !firstArray(source, "rows", "list", "records", "items", "content", "data", "objects",
+            "views").isEmpty()) {
+            return source;
+        }
+        for (String key : new String[] { "data", "result", "resultObject", "page", "pageData" }) {
+            Object value = source.get(key);
+            if (value instanceof JSONObject) {
+                JSONObject nested = pagePayload((JSONObject) value, depth + 1);
+                if (!firstArray(nested, "rows", "list", "records", "items", "content", "data", "objects",
+                    "views").isEmpty()) {
+                    return nested;
+                }
+            }
+        }
+        return source;
+    }
+
+    private int firstInt(JSONObject source, int defaultValue, String... keys) {
+        if (source == null) {
+            return defaultValue;
+        }
+        for (String key : keys) {
+            Integer value = source.getInteger(key);
+            if (value != null) {
+                return value;
+            }
+        }
+        return defaultValue;
+    }
+
+    private void appendDatacloudResources(JSONArray rows, JSONArray resources, JSONObject base, String ownerType,
+        String resourceBizType) {
+        if (resources == null || resources.isEmpty()) {
+            return;
+        }
+        for (Object item : resources) {
+            JSONObject resource = toJson(item);
+            JSONObject row = new JSONObject();
+            String baseId = firstNonBlank(base, "baseId", "ontologyBaseCode", "baseCode", "resourceCode", "code",
+                "id");
+            String baseName = firstNonBlank(base, "baseName", "ontologyBaseName", "resourceName", "name",
+                "displayName");
+            String resourceCode = ResourceBizType.VIEW.name().equals(resourceBizType)
+                ? firstNonBlank(resource, "viewCode", "resourceCode", "code", "id")
+                : firstNonBlank(resource, "objectCode", "resourceCode", "code", "id");
+            String resourceName = ResourceBizType.VIEW.name().equals(resourceBizType)
+                ? firstNonBlank(resource, "viewName", "resourceName", "name", "displayName")
+                : firstNonBlank(resource, "objectName", "resourceName", "name", "displayName");
+            String resourceDesc = firstNonBlank(resource, "resourceDesc", "description", "desc", "viewDesc",
+                "objectDesc");
+
+            row.putAll(resource);
+            row.put("ownerType", ownerType);
+            row.put("resourceBizType", resourceBizType);
+            row.put("resourceId", firstNonBlank(resource, "resourceId", "id"));
+            row.put("resourceCode", resourceCode);
+            row.put("resourceName", resourceName);
+            row.put("resourceDesc", resourceDesc);
+            row.put("resourceStatus", firstNonBlank(resource, "resourceStatus", "status"));
+            row.put("permission", "apply");
+            row.put("baseId", baseId);
+            row.put("baseName", baseName);
+            row.put("ontologyBaseCode", baseId);
+            row.put("ontologyBaseName", baseName);
+            row.put("catalogId", StringUtils.defaultIfBlank(firstNonBlank(resource, "catalogId"),
+                firstNonBlank(base, "catalogId")));
+            row.put("catalogName", StringUtils.defaultIfBlank(firstNonBlank(resource, "catalogName"),
+                firstNonBlank(base, "catalogName")));
+            if (ResourceBizType.VIEW.name().equals(resourceBizType)) {
+                row.put("viewCode", resourceCode);
+                row.put("viewName", resourceName);
+            }
+            else {
+                row.put("objectCode", resourceCode);
+                row.put("objectName", resourceName);
+            }
+            rows.add(row);
+        }
+    }
+
+    private JSONArray filterOntologyResources(JSONArray rows, String keyword, String catalogId) {
+        JSONArray filteredRows = new JSONArray();
+        String keywordValue = StringUtils.trimToEmpty(keyword).toLowerCase();
+        for (Object item : rows) {
+            JSONObject row = toJson(item);
+            if (StringUtils.isNotBlank(keywordValue) && !matchesKeyword(row, keywordValue)) {
+                continue;
+            }
+            String rowCatalogId = row.getString("catalogId");
+            if (StringUtils.isNotBlank(catalogId) && StringUtils.isNotBlank(rowCatalogId)
+                && !StringUtils.equals(catalogId, rowCatalogId)) {
+                continue;
+            }
+            filteredRows.add(row);
+        }
+        return filteredRows;
+    }
+
+    private boolean matchesKeyword(JSONObject row, String keyword) {
+        List<String> values = new ArrayList<>();
+        values.add(row.getString("resourceName"));
+        values.add(row.getString("resourceCode"));
+        values.add(row.getString("viewName"));
+        values.add(row.getString("viewCode"));
+        values.add(row.getString("objectName"));
+        values.add(row.getString("objectCode"));
+        return values.stream().filter(StringUtils::isNotBlank).map(String::toLowerCase)
+            .anyMatch(value -> value.contains(keyword));
+    }
+
+    private Set<String> resourceBizTypes(JSONObject request) {
+        Set<String> bizTypes = new HashSet<>();
+        JSONArray bizTypeList = request.getJSONArray("resourceBizTypeList");
+        if (bizTypeList != null) {
+            for (Object item : bizTypeList) {
+                if (item != null && StringUtils.isNotBlank(String.valueOf(item))) {
+                    bizTypes.add(String.valueOf(item).toUpperCase());
+                }
+            }
+        }
+        String resourceBizType = request.getString("resourceBizType");
+        if (StringUtils.isNotBlank(resourceBizType)) {
+            bizTypes.add(resourceBizType.toUpperCase());
+        }
+        if (bizTypes.isEmpty()) {
+            bizTypes.add(ResourceBizType.VIEW.name());
+            bizTypes.add(ResourceBizType.OBJECT.name());
+        }
+        return bizTypes;
+    }
+
+    private Integer defaultNumber(Integer first, Integer second, Integer defaultValue) {
+        if (first != null) {
+            return first;
+        }
+        if (second != null) {
+            return second;
+        }
+        return defaultValue;
+    }
+
+    @SuppressWarnings("unchecked")
+    private JSONObject toJson(Object value) {
+        if (value instanceof JSONObject) {
+            return (JSONObject) value;
+        }
+        if (value instanceof Map) {
+            JSONObject json = new JSONObject();
+            json.putAll((Map<String, Object>) value);
+            return json;
+        }
+        return JSON.parseObject(JSON.toJSONString(value));
     }
 
     /**
