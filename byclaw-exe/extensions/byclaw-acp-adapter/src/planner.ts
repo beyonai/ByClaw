@@ -30,6 +30,7 @@ import {
   PATHS,
   REDIS_KEYS,
   RESPONSE_LANGUAGE,
+  SESSION_FILES,
 } from "./constants.js";
 import { compactByclawSkill } from "./skill-paths.js";
 
@@ -41,6 +42,15 @@ type ResponseLanguagePolicy = {
   languageProvided: boolean;
   source: string;
   instruction: string;
+};
+
+type FixedWorkSpecs = {
+  sessionFiles: {
+    source: string;
+    byaiChannelSessionId: string;
+    sessionRoot: string;
+    policyMarkdown: string;
+  };
 };
 
 function stringify(value: unknown): string {
@@ -73,6 +83,79 @@ function resolveResponseLanguage(request: ByclawAcpPlanRequest): ResponseLanguag
     languageProvided: request.languageProvided ?? Boolean(rawLanguage),
     source: RESPONSE_LANGUAGE.source,
     instruction: responseLanguageInstruction(language),
+  };
+}
+
+function nonEmptyString(value: unknown): string {
+  return typeof value === "string" && value.trim() ? value.trim() : "";
+}
+
+function isEnglishResponseLanguage(language: string): boolean {
+  return language === RESPONSE_LANGUAGE.enUs;
+}
+
+function byaiSessionRoot(sessionId: string): string {
+  return path.posix.join(SESSION_FILES.root, sessionId.trim());
+}
+
+function renderSessionFilesPolicyMarkdown(params: {
+  byaiChannelSessionId: string;
+  responseLanguage: ResponseLanguagePolicy;
+}): string {
+  const sessionRoot = byaiSessionRoot(params.byaiChannelSessionId);
+  if (isEnglishResponseLanguage(params.responseLanguage.language)) {
+    return [
+      "## Session files (mandatory)",
+      "**Precedence**: These path rules override vague workspace paths or assumptions about the process cwd.",
+      `- **ByAI Channel Session ID**: \`${params.byaiChannelSessionId}\`.`,
+      `- **Session Root** (all persisted files for this session): \`${sessionRoot}\`.`,
+      "- **MUST** join tool-returned paths with Session Root into a **full absolute path** before any read, citation, or display. Using `/object/...`, `/view/...`, or `/qa/...` **without** Session Root is **incorrect**; do not claim you read a file if you did not use the joined path.",
+      "- Typical sources: `view` / `object` -> `data.file_url`, `data.overflow_notice`; `doc` (KG_DOC / KG_DB / KG_QA) terminal text may be English (`Report saved to: /qa/xxx.md`) or another locale; the path after the colon is still relative to Session Root.",
+      "- Examples:",
+      `  - \`/object/abc/123.json\` -> \`${sessionRoot}/object/abc/123.json\``,
+      `  - \`/view/abc/overflow.md\` -> \`${sessionRoot}/view/abc/overflow.md\``,
+      `  - \`/qa/report.md\` -> \`${sessionRoot}/qa/report.md\``,
+      "- After correct joining, if read still fails, retry per policy (~1-2 s apart, >=3 tries) before stating the file is missing or drawing conclusions from unread content.",
+      "## Response file address (on demand)",
+      "When you need to provide a generated file link to the user, always use Markdown format: `[file_name]({{file_preview_prefix}}/file_path)`.",
+      `You MUST use the placeholder \`${SESSION_FILES.previewPrefixPlaceholder}\` as the path prefix.`,
+      "Example:",
+      `If the actual file path is \`${sessionRoot}/hello.html\`, output:`,
+      `[hello.html](${SESSION_FILES.previewPrefixPlaceholder}${sessionRoot}/hello.html)`,
+    ].join("\n");
+  }
+  return [
+    "## Session Files（强制 · 会话落盘路径）",
+    "**优先级**：以下路径规则优先于对工作区、进程目录的模糊猜测。",
+    `- **ByAI Channel Session ID**：\`${params.byaiChannelSessionId}\`。`,
+    `- **Session Root**（本会话唯一落盘根目录）：\`${sessionRoot}\`。`,
+    "- **必须**先将工具返回路径与 Session Root 拼成**完整绝对路径**，再读取、引用或展示。单独使用 `/object/...`、`/view/...`、`/qa/...` 而不带 Session Root 属于**错误用法**；若未用拼接后的路径实际读取，**不得**声称已读该文件。",
+    "- 常见来源：`view` / `object` 的 `file_url`、`overflow_notice`；`doc`（KG_DOC / KG_DB / KG_QA）终态可能是中文提示（如「报告已保存到：/qa/xxx.md」）或英文（如 `Report saved to: /qa/xxx.md`），**冒号后的路径**仍相对于 Session Root。",
+    "- 示例：",
+    `  - \`/object/abc/123.json\` -> \`${sessionRoot}/object/abc/123.json\``,
+    `  - \`/view/abc/overflow.md\` -> \`${sessionRoot}/view/abc/overflow.md\``,
+    `  - \`/qa/report.md\` -> \`${sessionRoot}/qa/report.md\``,
+    "- 拼接正确仍失败时，按规范重试（约 1-2 秒间隔、至少 3 次）；**禁止**在未读到内容时编造结论或断言文件不存在。",
+    "## Response file address（按需）",
+    "当你在回复中需要提供生成的文件链接给用户时，请使用 Markdown 格式展示，格式为 `[文件名]({{file_preview_prefix}}/文件路径)`。",
+    `务必使用占位符 \`${SESSION_FILES.previewPrefixPlaceholder}\` 作为路径前缀。`,
+    "示例：",
+    `文件实际路径为 \`${sessionRoot}/hello.html\`，则输出：`,
+    `[hello.html](${SESSION_FILES.previewPrefixPlaceholder}${sessionRoot}/hello.html)`,
+  ].join("\n");
+}
+
+function buildFixedWorkSpecs(params: {
+  byaiChannelSessionId: string;
+  responseLanguage: ResponseLanguagePolicy;
+}): FixedWorkSpecs {
+  return {
+    sessionFiles: {
+      source: RESPONSE_LANGUAGE.source,
+      byaiChannelSessionId: params.byaiChannelSessionId,
+      sessionRoot: byaiSessionRoot(params.byaiChannelSessionId),
+      policyMarkdown: renderSessionFilesPolicyMarkdown(params),
+    },
   };
 }
 
@@ -517,6 +600,7 @@ function renderMetadataMarkdown(params: {
   clientType: string;
   cwd: string;
   responseLanguage: ResponseLanguagePolicy;
+  fixedWorkSpecs: FixedWorkSpecs;
   agentModels: JsonRecord;
   claudeTeam: JsonRecord;
   members: NormalizedByclawAgent[];
@@ -543,6 +627,16 @@ function renderMetadataMarkdown(params: {
     "## Response Language",
     "",
     markdownJson(params.responseLanguage),
+    "",
+    "## Fixed Work Specs",
+    "",
+    "The downstream ACP client must follow these fixed working rules before reading, citing, or producing files.",
+    "",
+    params.fixedWorkSpecs.sessionFiles.policyMarkdown,
+    "",
+    "### Fixed Work Specs JSON",
+    "",
+    markdownJson(params.fixedWorkSpecs),
     "",
     "## Agent Roster",
     "",
@@ -571,6 +665,7 @@ function renderMetadataMarkdown(params: {
 function renderClientInstructions(params: {
   clientType: string;
   responseLanguage: ResponseLanguagePolicy;
+  fixedWorkSpecs: FixedWorkSpecs;
 }): string {
   const common = [
     "# ACP Client Instructions",
@@ -586,6 +681,11 @@ function renderClientInstructions(params: {
     "4. Do not invent agents or skills that are absent from metadata.",
     "5. Follow the responseLanguage policy from `metadata.md` for all user-visible output.",
     "6. Preserve proof: list which roster member handled each work item and cite evidence paths or command output.",
+    "7. Follow the Fixed Work Specs below; they are mandatory for all downstream agents and subagents.",
+    "",
+    "## Fixed Work Specs",
+    "",
+    params.fixedWorkSpecs.sessionFiles.policyMarkdown,
   ];
   if (params.clientType === ACP_CLIENT_TYPES.codex) {
     return [
@@ -619,6 +719,7 @@ function buildTask(params: {
   bundlePath: string;
   clientType: string;
   responseLanguage: ResponseLanguagePolicy;
+  fixedWorkSpecs: FixedWorkSpecs;
   sharedDir: string;
   queryPath: string;
   metadataPath: string;
@@ -642,13 +743,16 @@ function buildTask(params: {
     `- metadata: ${params.metadataPath}`,
     `- clientInstructions: ${params.clientInstructionsPath}`,
     `- machineBundle: ${params.bundlePath}`,
+    `- byaiChannelSessionId: ${params.fixedWorkSpecs.sessionFiles.byaiChannelSessionId}`,
+    `- sessionFilesRoot: ${params.fixedWorkSpecs.sessionFiles.sessionRoot}`,
     "",
     "执行顺序:",
     "1. 先读取 query.md，确认用户原始请求。",
     "2. 再读取 metadata.md，按其中 agent roster、linkedSkills、workflow/loop 和模型配置驱动主 agent。",
     "3. 遵守 metadata.md 中的 responseLanguage；所有用户可见输出必须符合该语言策略。",
-    "4. 按 clientInstructions 中当前 client 类型的规则派生或调用子 agent。",
-    "5. 完成后输出 summary、proof/evidence、risks、verdict、next_action。",
+    "4. 遵守 metadata.md 和 clientInstructions 中的 Fixed Work Specs，尤其是 Session Files 路径拼接规则。",
+    "5. 按 clientInstructions 中当前 client 类型的规则派生或调用子 agent。",
+    "6. 完成后输出 summary、proof/evidence、risks、verdict、next_action。",
   ].join("\n");
 }
 
@@ -676,7 +780,8 @@ function materializePlanBundle(params: {
     String(Date.now()),
     Math.random().toString(BUNDLE.randomRadix).slice(BUNDLE.randomSliceStart, BUNDLE.randomSliceEnd),
   ].join("-");
-  const sessionId = safePathPart(params.sessionId || generatedSessionId);
+  const byaiChannelSessionId = nonEmptyString(params.sessionId) || generatedSessionId;
+  const sessionId = safePathPart(byaiChannelSessionId);
   const sharedDir = path.join(
     resolveSharedRootDir(params.cwd),
     PATHS.byclawDir,
@@ -693,6 +798,10 @@ function materializePlanBundle(params: {
     clientInstructionFileName(params.clientType),
   );
   const linkedSkills = collectLinkedSkills(params.members, params.cwd);
+  const fixedWorkSpecs = buildFixedWorkSpecs({
+    byaiChannelSessionId,
+    responseLanguage: params.responseLanguage,
+  });
   const bundle = {
     version: BUNDLE.version,
     generatedAt: new Date().toISOString(),
@@ -702,7 +811,9 @@ function materializePlanBundle(params: {
     cwd: params.cwd,
     clientType: params.clientType,
     sessionId,
+    byaiChannelSessionId,
     responseLanguage: params.responseLanguage,
+    fixedWorkSpecs,
     model: params.model,
     modelConfig: compactModelConfig(params.modelConfig),
     input: params.input ?? {},
@@ -713,10 +824,12 @@ function materializePlanBundle(params: {
     sharedContext: {
       sharedDir,
       sessionId,
+      byaiChannelSessionId,
       queryPath,
       metadataPath,
       clientInstructionsPath,
       bundlePath,
+      sessionFilesRoot: fixedWorkSpecs.sessionFiles.sessionRoot,
     },
     ...(params.team ? { byclawTeam: params.team } : {}),
     ...(params.workflow ? { byclawWorkflow: compactWorkflow(params.workflow) } : {}),
@@ -758,6 +871,7 @@ function materializePlanBundle(params: {
       clientType: params.clientType,
       cwd: params.cwd,
       responseLanguage: params.responseLanguage,
+      fixedWorkSpecs,
       agentModels: params.agentModels,
       claudeTeam: params.claudeTeam,
       members: params.members,
@@ -772,6 +886,7 @@ function materializePlanBundle(params: {
     renderClientInstructions({
       clientType: params.clientType,
       responseLanguage: params.responseLanguage,
+      fixedWorkSpecs,
     }),
   );
   atomicWriteJson(bundlePath, bundle);
@@ -784,6 +899,7 @@ function materializePlanBundle(params: {
     clientInstructionsPath,
     clientType: params.clientType,
     responseLanguage: params.responseLanguage,
+    fixedWorkSpecs,
     bytes: Buffer.byteLength(JSON.stringify(bundle)),
     sha256Hint: `${params.kind}:${params.id}`,
   };
@@ -882,6 +998,7 @@ export function createByclawAcpPlan(params: {
       bundlePath: String(bundle.path),
       clientType,
       responseLanguage,
+      fixedWorkSpecs: bundle.fixedWorkSpecs,
       sharedDir: String(bundle.sharedDir),
       queryPath: String(bundle.queryPath),
       metadataPath: String(bundle.metadataPath),
@@ -905,6 +1022,7 @@ export function createByclawAcpPlan(params: {
         [METADATA_KEYS.claudeTeam]: claudeTeam,
         [METADATA_KEYS.agentModels]: agentModels,
         [METADATA_KEYS.responseLanguage]: responseLanguage,
+        [METADATA_KEYS.fixedWorkSpecs]: bundle.fixedWorkSpecs,
         [METADATA_KEYS.bundle]: bundle,
       },
       task,
@@ -942,6 +1060,7 @@ export function createByclawAcpPlan(params: {
       bundlePath: String(bundle.path),
       clientType,
       responseLanguage,
+      fixedWorkSpecs: bundle.fixedWorkSpecs,
       sharedDir: String(bundle.sharedDir),
       queryPath: String(bundle.queryPath),
       metadataPath: String(bundle.metadataPath),
@@ -966,6 +1085,7 @@ export function createByclawAcpPlan(params: {
         [METADATA_KEYS.claudeTeam]: claudeTeam,
         [METADATA_KEYS.agentModels]: agentModels,
         [METADATA_KEYS.responseLanguage]: responseLanguage,
+        [METADATA_KEYS.fixedWorkSpecs]: bundle.fixedWorkSpecs,
         [METADATA_KEYS.bundle]: bundle,
       },
       task,
@@ -1007,6 +1127,7 @@ export function createByclawAcpPlan(params: {
       bundlePath: String(bundle.path),
       clientType,
       responseLanguage,
+      fixedWorkSpecs: bundle.fixedWorkSpecs,
       sharedDir: String(bundle.sharedDir),
       queryPath: String(bundle.queryPath),
       metadataPath: String(bundle.metadataPath),
@@ -1033,6 +1154,7 @@ export function createByclawAcpPlan(params: {
         [METADATA_KEYS.claudeTeam]: claudeTeam,
         [METADATA_KEYS.agentModels]: agentModels,
         [METADATA_KEYS.responseLanguage]: responseLanguage,
+        [METADATA_KEYS.fixedWorkSpecs]: bundle.fixedWorkSpecs,
         [METADATA_KEYS.bundle]: bundle,
       },
       task,
@@ -1075,6 +1197,7 @@ export function createByclawAcpPlan(params: {
     bundlePath: String(bundle.path),
     clientType,
     responseLanguage,
+    fixedWorkSpecs: bundle.fixedWorkSpecs,
     sharedDir: String(bundle.sharedDir),
     queryPath: String(bundle.queryPath),
     metadataPath: String(bundle.metadataPath),
@@ -1103,6 +1226,7 @@ export function createByclawAcpPlan(params: {
       [METADATA_KEYS.claudeTeam]: claudeTeam,
       [METADATA_KEYS.agentModels]: agentModels,
       [METADATA_KEYS.responseLanguage]: responseLanguage,
+      [METADATA_KEYS.fixedWorkSpecs]: bundle.fixedWorkSpecs,
       [METADATA_KEYS.bundle]: bundle,
     },
     task,

@@ -42,7 +42,8 @@ const planParameters = {
     },
     sessionId: {
       type: "string",
-      description: "Optional ACP session id used as the shared task directory name.",
+      description:
+        "Real byai-channel session_id. Used as the shared task directory name under .byclaw/acp-runs/{ACP_CLIENT_TYPE}/{sessionId}; do not pass agent id, run id, or a generated id.",
     },
     language: {
       type: "string",

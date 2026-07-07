@@ -35,6 +35,25 @@ the generated named subagents, such as `byclaw-coder`, `byclaw-reviewer`, and
 Sensitive provider headers from Redis metadata are redacted before registry
 responses, Claude agent files, and SQLite run ledger rows are written.
 
+## Shared Run Directory
+
+ACP task files are written under the OpenClaw/byai-channel shared root:
+
+```text
+${STATE_DIR}/.byclaw/acp-runs/{ACP_CLIENT_TYPE}/{byai-channel_session_id}
+```
+
+`sessionId` passed to `byclawAcpPlan` / `byclawAcpRun` must be the real
+byai-channel `session_id`. Do not pass a digital-employee id, agent id, run id,
+or generated id. The adapter records this value as `byaiChannelSessionId` and
+uses it for the shared directory name when it is path-safe.
+
+The adapter also writes byai-channel fixed work specs into `metadata.md`,
+`clients/{client}.md`, and `plan-bundle.json`. These specs include the Session
+Files rules: downstream ACP clients must resolve `/object/...`, `/view/...`,
+and `/qa/...` paths against `/by/.sessions/{byai-channel_session_id}` before
+reading, citing, or returning file links.
+
 ## What It Registers
 
 - Tools: `byclawAcpPlan`, `byclawAcpRun`

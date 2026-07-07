@@ -184,6 +184,7 @@ export const METADATA_KEYS = {
   claudeTeam: "claudeTeam",
   agentModels: "agentModels",
   responseLanguage: "responseLanguage",
+  fixedWorkSpecs: "fixedWorkSpecs",
   bundle: "bundle",
 } as const;
 
@@ -214,6 +215,11 @@ export const BUNDLE = {
     claudeCode: "claudeCode",
     codex: "codex",
   },
+} as const;
+
+export const SESSION_FILES = {
+  root: "/by/.sessions",
+  previewPrefixPlaceholder: "{{file_preview_prefix}}",
 } as const;
 
 export const SKILL_PATHS = {
