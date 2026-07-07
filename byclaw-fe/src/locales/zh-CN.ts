@@ -564,6 +564,7 @@ export default {
   'messageList.troubleshoot': '运维',
   'messageList.troubleshootTooltip': '调用百应运维数字员工排查问题',
   'messageList.troubleshootPrompt': '需要排查的trace_id={traceId}，\n',
+  'messageList.mentionDigitalEmployee': '点击 @ {name}',
 
   'citeRender.title': '引用消息',
   'citeRender.deleteConfirm': '确定删除该引用吗？',

@@ -679,7 +679,7 @@ function useChat(props: IProps) {
     const digitalEmployeeResources = getDigitalEmployeeResources(resourceList);
     const singleInlineAgent =
       digitalEmployeeResources.length === 1 ? getAgentLaneIdentity(digitalEmployeeResources[0]) : null;
-    if (!get(restPayload, 'agentId') && singleInlineAgent?.agentKey) {
+    if (singleInlineAgent?.agentKey) {
       _agentId = singleInlineAgent.agentKey;
     }
 
@@ -717,6 +717,7 @@ function useChat(props: IProps) {
             agentId: agentKey,
             sessionId,
             agentType: _agentType,
+            resourceList: [resource],
             metadata: JSON.stringify({
               agentId: agentKey,
               agentCode,
@@ -771,6 +772,7 @@ function useChat(props: IProps) {
               agentType: _agentType,
               agentCode: singleInlineAgent?.agentCode || undefined,
               agentName: singleInlineAgent?.agentName || undefined,
+              resourceList: singleInlineAgent ? digitalEmployeeResources : undefined,
               metadata: _agentId
                 ? JSON.stringify({
                   agentId: _agentId,
