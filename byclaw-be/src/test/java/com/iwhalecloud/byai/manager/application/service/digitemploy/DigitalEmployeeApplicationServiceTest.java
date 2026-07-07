@@ -22,6 +22,7 @@ import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtDigEmployeeS
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtSkillService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceRelDetailService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
+import com.iwhalecloud.byai.manager.domain.staticdata.service.SystemConfigService;
 import com.iwhalecloud.byai.manager.domain.superassist.service.SuasSuperassistService;
 import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeDTO;
 import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeDetailsDTO;
@@ -75,6 +76,7 @@ class DigitalEmployeeApplicationServiceTest {
     private SequenceService sequenceService;
     private ResourceEventService resourceEventService;
     private AiModelService aiModelService;
+    private SystemConfigService systemConfigService;
     private TemplateRuleInfoApplicationService templateRuleInfoApplicationService;
     private ResourceAuthContextService resourceAuthContextService;
     private RobotChannelRegistryCoordinator robotChannelRegistryCoordinator;
@@ -93,6 +95,7 @@ class DigitalEmployeeApplicationServiceTest {
         sequenceService = mock(SequenceService.class);
         resourceEventService = mock(ResourceEventService.class);
         aiModelService = mock(AiModelService.class);
+        systemConfigService = mock(SystemConfigService.class);
         templateRuleInfoApplicationService = mock(TemplateRuleInfoApplicationService.class);
         resourceAuthContextService = mock(ResourceAuthContextService.class);
         robotChannelRegistryCoordinator = mock(RobotChannelRegistryCoordinator.class);
@@ -115,6 +118,7 @@ class DigitalEmployeeApplicationServiceTest {
         ReflectionTestUtils.setField(service, "authApplicationService", authApplicationService);
         ReflectionTestUtils.setField(service, "resourceEventService", resourceEventService);
         ReflectionTestUtils.setField(service, "aiModelService", aiModelService);
+        ReflectionTestUtils.setField(service, "systemConfigService", systemConfigService);
         ReflectionTestUtils.setField(service, "templateRuleInfoApplicationService", templateRuleInfoApplicationService);
         ReflectionTestUtils.setField(service, "resourceAuthContextService", resourceAuthContextService);
         ReflectionTestUtils.setField(service, "robotChannelRegistryCoordinator", robotChannelRegistryCoordinator);
