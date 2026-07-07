@@ -284,4 +284,102 @@ public class SftpStorageService extends AbstractFileIngressStorageService<Sessio
         return true;
     }
 
+    /**
+     * Object-storage style put for StorageLocation.
+     * Writes the InputStream to the resolved path on SFTP.
+     *
+     * @param location StorageLocation containing bucketOrRoot and path
+     * @param inputStream File content stream
+     * @param size Content size
+     * @param contentType MIME type
+     * @return FileMetadata
+     */
+    @Override
+    public com.iwhalecloud.byai.common.storage.model.FileMetadata put(
+        com.iwhalecloud.byai.common.storage.model.StorageLocation location,
+        InputStream inputStream,
+        long size,
+        String contentType) {
+
+        ChannelSftp channelSftp = null;
+        Session session = null;
+
+        try {
+            session = this.getClient();
+            Channel channel = session.openChannel("sftp");
+            channel.connect();
+            channelSftp = (ChannelSftp) channel;
+
+            // For SFTP, bucketOrRoot is treated as a subdirectory under ftpConfig.getPath()
+            // path is the file's relative path within that subdirectory
+            String ftpBasePath = StringUtils.defaultIfBlank(ftpConfig.getPath(), "/");
+            String bucketSubdir = StringUtils.defaultString(location.getBucketOrRoot());
+            String filePath = StringUtils.defaultString(location.getPath());
+
+            // Build full absolute path: ftpBasePath/bucketSubdir/filePath
+            String fullPath = buildFullSftpPath(ftpBasePath, bucketSubdir, filePath);
+
+            // Create parent directory if needed
+            int lastSlash = fullPath.lastIndexOf('/');
+            if (lastSlash > 0) {
+                String parentDir = fullPath.substring(0, lastSlash);
+                ensureSftpAbsolutePathExists(channelSftp, parentDir);
+                channelSftp.cd(parentDir);
+            }
+
+            String filename = lastSlash >= 0 ? fullPath.substring(lastSlash + 1) : fullPath;
+            channelSftp.put(inputStream, filename);
+
+            // Build metadata
+            com.iwhalecloud.byai.common.storage.model.FileMetadata metadata =
+                new com.iwhalecloud.byai.common.storage.model.FileMetadata();
+            metadata.setBucketName(location.getBucketOrRoot());
+            metadata.setFileName(filename);
+            metadata.setFileUrl(location.getPath());
+            metadata.setFileSize(size);
+            metadata.setContentType(contentType);
+            metadata.setFileType(org.apache.commons.io.FilenameUtils.getExtension(filename));
+            metadata.setStorageType(getStorageType());
+
+            logger.info("SFTP put success: {}", fullPath);
+            return metadata;
+        }
+        catch (Exception e) {
+            logger.error("SFTP put failed for location {}: {}", location.getPath(), e.getMessage(), e);
+            throw new BaseException("SFTP put failed: " + e.getMessage(), e);
+        }
+        finally {
+            this.closeSftp(session, channelSftp);
+        }
+    }
+
+    /**
+     * Build full SFTP absolute path from base, bucket subdirectory, and file path.
+     * Normalizes slashes and removes duplicate slashes.
+     */
+    private String buildFullSftpPath(String ftpBasePath, String bucketSubdir, String filePath) {
+        StringBuilder sb = new StringBuilder();
+
+        // Start with base path (should be absolute, e.g., /data/nfs/byclaw-storage)
+        String base = stripTrailingSlashes(ftpBasePath);
+        if (!base.startsWith("/")) {
+            base = "/" + base;
+        }
+        sb.append(base);
+
+        // Add bucket subdirectory if present
+        String bucket = normalizeRelativeSubdir(bucketSubdir);
+        if (!bucket.isEmpty()) {
+            sb.append("/").append(bucket);
+        }
+
+        // Add file path
+        String file = normalizeRelativeSubdir(filePath);
+        if (!file.isEmpty()) {
+            sb.append("/").append(file);
+        }
+
+        return sb.toString();
+    }
+
 }
