@@ -270,6 +270,12 @@ function EmployeeRelatedToMe(props: IProps, ref: any) {
     (employee: IAgentCache) => {
       if (employee.agentId && canJumpAgent(employee)) {
         trackerEmployeeClick(employee, 'marketAgentRedirect');
+        dispatch({
+          type: 'employees/updateEmployee',
+          payload: {
+            employee,
+          },
+        });
         setAgentId?.(`${employee.agentId}`);
         setSessionId?.('');
         const nextSearchParams = new URLSearchParams({
@@ -283,7 +289,7 @@ function EmployeeRelatedToMe(props: IProps, ref: any) {
       message.destroy();
       message.error(intl.formatMessage({ id: 'digitalEmployees.noPermission' }));
     },
-    [curActiveLink, intl, navigate, setAgentId, setSessionId, trackerEmployeeClick]
+    [curActiveLink, dispatch, intl, navigate, setAgentId, setSessionId, trackerEmployeeClick]
   );
 
   const onEditEmployee = React.useCallback(
