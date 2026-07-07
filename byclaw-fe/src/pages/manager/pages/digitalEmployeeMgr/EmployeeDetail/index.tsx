@@ -34,7 +34,7 @@ import Manage from './Manage';
 import Operation from './Operation';
 
 const PREVIEW_HOST = `${window.location.origin}${window.routerBase === '/' ? '/' : window.routerBase}`;
-const DIGITAL_EMPLOYEE_TEXT_FIELD_MAX_LENGTH = 5000;
+const DIGITAL_EMPLOYEE_TEXT_FIELD_MAX_LENGTH = 10000;
 const DIGITAL_EMPLOYEE_TEXT_FIELD_CONFIG = [
   { key: 'resourceDesc', labelId: 'employeeDetail.digitalEmployeeDesc' },
   { key: 'ability', labelId: 'employeeDetail.coreAbility' },
@@ -101,7 +101,7 @@ const getOverLengthDigitalEmployeeField = (payload, isEN, promptMaxLength = DIGI
     .map((item) => ({
       ...item,
       length: getTextLength(payload?.[item.key]),
-      maxLength: item.maxLength || DIGITAL_EMPLOYEE_TEXT_FIELD_MAX_LENGTH,
+      maxLength: item.maxLength || promptMaxLength || DIGITAL_EMPLOYEE_TEXT_FIELD_MAX_LENGTH,
     }))
     .find((item) => item.length > item.maxLength);
 };
@@ -213,6 +213,30 @@ const normalizePromptConfigKey = (key, item = {}) => {
   return key;
 };
 
+const getPromptDefinitionWithFormValues = (corePersonaDefinition, form) => {
+  if (!corePersonaDefinition) return '';
+
+  try {
+    const parsedData = parseJsonRecursively(corePersonaDefinition);
+    const promptList = typeof parsedData === 'string' ? JSON.parse(parsedData) : parsedData;
+    if (!Array.isArray(promptList)) return corePersonaDefinition;
+
+    return JSON.stringify(
+      promptList.map((item) => {
+        const key = normalizePromptConfigKey(item?.key, item);
+        const formValue = form.getFieldValue(key);
+        return {
+          ...item,
+          key,
+          value: formValue === undefined ? item?.value || '' : formValue || '',
+        };
+      })
+    );
+  } catch {
+    return corePersonaDefinition;
+  }
+};
+
 const extractPromptFieldsFromCorePersonaDefinition = (value) => {
   const systemFieldValues = {};
   const customPromptTabs = [];
@@ -316,16 +340,16 @@ const getDigitalEmployeeTemplate = (templates, ownerType, agentType) => {
 
 const getDigitalEmployeeTemplateMaxLength = (templates, ownerType, agentType) => {
   const list = Array.isArray(templates) ? templates : [];
-  const effectiveOwnerType = ownerType === 'personal' ? 'personal' : 'enterprise';
-  const ownerTemplates = list.filter((item) => item?.ownerType === effectiveOwnerType);
-  const matchedTemplate =
-    effectiveOwnerType === 'personal'
-      ? ownerTemplates.find((item) => item?.key === 'BYCLAW_ASSISTANT') ||
-        ownerTemplates.find((item) => item?.agentType === '001') ||
-        ownerTemplates[0]
-      : ownerTemplates.find((item) => item?.agentType === agentType);
+  const effectiveOwnerType = String(ownerType || '').trim().toLowerCase() === 'personal' ? 'personal' : 'enterprise';
+  const effectiveAgentType = agentType === undefined || agentType === null ? '' : String(agentType).trim();
+  const matchedTemplate = list.find(
+    (item) =>
+      String(item?.ownerType || '').trim().toLowerCase() === effectiveOwnerType &&
+      String(item?.agentType ?? '').trim() === effectiveAgentType
+  );
 
-  return Number(matchedTemplate?.maxLength) || DIGITAL_EMPLOYEE_TEXT_FIELD_MAX_LENGTH;
+  const maxLength = Number(matchedTemplate?.maxLength);
+  return Number.isFinite(maxLength) && maxLength > 0 ? maxLength : DIGITAL_EMPLOYEE_TEXT_FIELD_MAX_LENGTH;
 };
 
 const EmployeeDetail = ({ loading }) => {
@@ -402,13 +426,15 @@ const EmployeeDetail = ({ loading }) => {
     form.setFieldsValue({
       ownerType,
       catalogId: queryCatalogId ? Number(queryCatalogId) || queryCatalogId : undefined,
+      agentType,
     });
-  }, [agentId, ownerType, queryCatalogId, form]);
+  }, [agentId, ownerType, queryCatalogId, agentType, form]);
   const agentName = Form.useWatch('resourceName', form);
   const ask = Form.useWatch('descText', form);
-  const watchedOwnerType = Form.useWatch('ownerType', form, { form, preserve: true });
-  const homeType = Form.useWatch('homeType', form, { form, preserve: true });
-  const agentHomeUrl = Form.useWatch('agentHomeUrl', form, { form, preserve: true });
+  const watchedOwnerType = Form.useWatch('ownerType', { form, preserve: true });
+  const effectiveOwnerType = watchedOwnerType || ownerType;
+  const homeType = Form.useWatch('homeType', { form, preserve: true });
+  const agentHomeUrl = Form.useWatch('agentHomeUrl', { form, preserve: true });
 
   const [log, setLog] = useState();
   const [questionList, setQuestionList] = useState([]);
@@ -867,6 +893,7 @@ const EmployeeDetail = ({ loading }) => {
               terminal: terminal || undefined,
               catalogId: catalogId === -1 ? undefined : catalogId,
               ownerType: detailOwnerType || ownerType,
+              agentType: detailAgentType || routeAgentType || agentType,
               advancedSettings: advancedSettingsParsed,
               // 为受控的必填项提供初始值以回显
               coreAbility: res?.ability || '',
@@ -1085,8 +1112,12 @@ const EmployeeDetail = ({ loading }) => {
 
   const fetchDefaultTemplate = useCallback(async () => {
     const applyTemplate = (templates = []) => {
-      const templateConfig = getDigitalEmployeeTemplate(templates, ownerType, effectiveAgentType || agentType);
-      const nextMaxLength = getDigitalEmployeeTemplateMaxLength(templates, ownerType, effectiveAgentType || agentType);
+      const templateConfig = getDigitalEmployeeTemplate(templates, effectiveOwnerType, effectiveAgentType || agentType);
+      const nextMaxLength = getDigitalEmployeeTemplateMaxLength(
+        templates,
+        effectiveOwnerType,
+        effectiveAgentType || agentType
+      );
       setPromptFieldMaxLength(nextMaxLength);
       const relSkills = Array.isArray(templateConfig?.relSkills) ? templateConfig.relSkills : [];
       const relTools = Array.isArray(templateConfig?.relTools) ? templateConfig.relTools : [];
@@ -1129,7 +1160,7 @@ const EmployeeDetail = ({ loading }) => {
       console.error('fetchDefaultTemplate error', error);
       applyTemplate();
     }
-  }, [agentType, effectiveAgentType, ownerType, form]);
+  }, [agentType, effectiveAgentType, effectiveOwnerType, form]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1141,7 +1172,7 @@ const EmployeeDetail = ({ loading }) => {
         const templates = parseDigitalEmployeeTemplates(res?.paramValue || res);
         const nextMaxLength = getDigitalEmployeeTemplateMaxLength(
           templates,
-          watchedOwnerType || ownerType,
+          effectiveOwnerType,
           effectiveAgentType || agentType
         );
         setPromptFieldMaxLength(nextMaxLength);
@@ -1156,7 +1187,7 @@ const EmployeeDetail = ({ loading }) => {
     return () => {
       cancelled = true;
     };
-  }, [agentType, effectiveAgentType, ownerType, watchedOwnerType]);
+  }, [agentType, effectiveAgentType, effectiveOwnerType]);
 
   useEffect(() => {
     if (agentId) {
@@ -1332,6 +1363,19 @@ const EmployeeDetail = ({ loading }) => {
         try {
           roleJson = JSON.parse(form.getFieldValue('role') || '{}');
         } catch {}
+        const currentCorePersonaDefinition = getPromptDefinitionWithFormValues(
+          form.getFieldValue('corePersonaDefinition') ||
+            roleJson.corePersonaDefinition ||
+            roleJson.personalityDefinition ||
+            '',
+          form
+        );
+        roleJson.corePersonaDefinition = currentCorePersonaDefinition;
+        roleJson.personalityDefinition = currentCorePersonaDefinition;
+        form.setFieldsValue({
+          role: JSON.stringify(roleJson),
+          corePersonaDefinition: currentCorePersonaDefinition,
+        });
 
         // 从表单中读取核心能力列表（结构化）
         const coreCompetencies = form.getFieldValue('coreCompetencies') || [];
@@ -1376,7 +1420,7 @@ const EmployeeDetail = ({ loading }) => {
           // 数字员工目录分类，对应员工市场分类 tab
           catalogId: catalogId ?? undefined,
           // 归属类型
-          ownerType: formOwnerType || ownerType,
+          ownerType: formOwnerType || effectiveOwnerType,
           // 高级配置（数组 JSON 字符串）
           advancedSettings: JSON.stringify(Array.isArray(advancedSettings) ? advancedSettings : []),
           // 配置记忆列表
@@ -1829,7 +1873,7 @@ const EmployeeDetail = ({ loading }) => {
                 auditErrors={auditErrors}
                 terminalTypeList={terminalTypeList}
                 initialCoreCompetencies={coreCompetenciesState}
-                ownerType={ownerType}
+                ownerType={effectiveOwnerType}
                 savedRelOntology={savedRelOntology}
               />
             </div>
