@@ -1,21 +1,47 @@
-## ── stage 1: build byclaw extensions ──────────────────────────────
 FROM node:22-slim AS ext-builder
 
 WORKDIR /build
 
+RUN npm config set registry https://registry.npmmirror.com --global \
+    && npm config set fund false --global \
+    && npm config set audit false --global \
+    && npm config set prefer-offline true --global
+
+RUN --mount=type=cache,target=/root/.npm \
+    npm install --prefix /build/toolchain --no-package-lock --omit=dev esbuild@0.25.12
+
+ENV PATH="/build/toolchain/node_modules/.bin:${PATH}"
+
+COPY byclaw-exe/extensions/baiying-enhance/package.json \
+     byclaw-exe/extensions/baiying-enhance/package-lock.json \
+     ./src/baiying-enhance/
+COPY byclaw-exe/extensions/byai-channel/package.json \
+     byclaw-exe/extensions/byai-channel/package-lock.json \
+     ./src/byai-channel/
+COPY byclaw-exe/extensions/byclaw-sqlite/package.json \
+     byclaw-exe/extensions/byclaw-sqlite/package-lock.json \
+     ./src/byclaw-sqlite/
+
+RUN --mount=type=cache,target=/root/.npm \
+    set -eux; \
+    pids=""; \
+    for dir in src/*/; do \
+        [ -f "$dir/package.json" ] || continue; \
+        name=$(basename "$dir"); \
+        echo ">>> npm ci --omit=dev: $name"; \
+        (cd "$dir" && npm ci --omit=dev --prefer-offline) & \
+        pids="$pids $!"; \
+    done; \
+    for pid in $pids; do wait "$pid"; done
+
 COPY byclaw-exe/extensions/baiying-enhance/ ./src/baiying-enhance/
 COPY byclaw-exe/extensions/byai-channel/ ./src/byai-channel/
 
-RUN npm config set registry https://registry.npmmirror.com --global
-
-# install, build, prune, then assemble clean output into /build/out/
 RUN set -eux; \
     mkdir -p /build/out; \
     for dir in src/*/; do \
         [ -f "$dir/package.json" ] || continue; \
         name=$(basename "$dir"); \
-        echo ">>> npm install: $name"; \
-        (cd "$dir" && npm install); \
         if node --input-type=module -e ' \
             import { readFileSync } from "fs"; \
             const pkg = JSON.parse(readFileSync(process.argv[1] + "package.json", "utf8")); \
@@ -37,15 +63,14 @@ RUN set -eux; \
     done; \
     echo ">>> built extensions:"; ls -la /build/out/
 
-## ── stage 2: final image ─────────────────────────────────────────
 FROM ghcr.io/openclaw/openclaw:2026.6.1
 
 USER root
 
 RUN chown root:root /app
 
-ENV PIP_BREAK_SYSTEM_PACKAGES=1 \
-    PIP_ROOT_USER_ACTION=ignore
+ENV OPENCLAW_BUNDLED_PLUGINS_DIR=/app/dist/extensions \
+    OPENCLAW_STATE_DIR=/root/.openclaw
 
 RUN set -eux; \
     if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
@@ -57,14 +82,21 @@ RUN set -eux; \
     fi; \
     printf 'Acquire::Retries "5";\n' > /etc/apt/apt.conf.d/80-retries; \
     apt-get update; \
-    apt-get install -y --no-install-recommends \
-        ca-certificates \
-        unzip \
-        zip; \
+    apt-get install -y --no-install-recommends ca-certificates; \
     rm -rf /var/lib/apt/lists/*
 
-COPY --from=ext-builder /build/out/ /app/extensions/
+COPY --from=ext-builder /build/out/ /app/dist-runtime/extensions/
 
-COPY middleware/openclaw/skills/iwhalehub/ /app/skills/iwhalehub/
+RUN ln -s /app /app/node_modules/openclaw
+
+COPY middleware/openclaw/skills/ /app/skills/
+
+COPY middleware/openclaw/runtime-bootstrap.sh /usr/local/bin/openclaw-runtime-bootstrap
+COPY middleware/openclaw/start-openclaw.sh /usr/local/bin/start-openclaw.sh
+RUN chmod +x \
+    /usr/local/bin/openclaw-runtime-bootstrap \
+    /usr/local/bin/start-openclaw.sh
 
 EXPOSE 8080
+
+ENTRYPOINT ["/usr/local/bin/start-openclaw.sh"]
