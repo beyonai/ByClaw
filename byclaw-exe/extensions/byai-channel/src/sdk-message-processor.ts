@@ -50,7 +50,6 @@ import {
 } from "./session-key.js";
 import { waitForManagedBaiyingAgentConfig } from "./managed-agent-config-wait.js";
 import {
-  appendByaiLaneToSessionKey,
   appendByaiLaneToTarget,
   parseByaiLaneMetadata,
 } from "./multi-agent.js";
@@ -341,7 +340,7 @@ export async function deliverReplyToAgentViaSdk(deps: SdkProcessorDeps): Promise
     userId: message.userId,
     perSessionId: account.config.sessionKeyPerSessionId ?? false,
   });
-  const sessionKey = appendByaiLaneToSessionKey(baseSessionKey, laneMetadata);
+  const sessionKey = baseSessionKey;
 
   const { meta } = await runSessionDispatchExclusive(sessionKey, async () => {
     return await deliverReplyToAgentViaSdkUnderGate({
