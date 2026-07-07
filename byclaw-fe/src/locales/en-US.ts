@@ -587,6 +587,16 @@ export default {
   'messageList.troubleshoot': 'Troubleshoot',
   'messageList.troubleshootTooltip': 'Call the Baiying operations digital employee to troubleshoot the issue',
   'messageList.troubleshootPrompt': 'The traceId of the current message is {traceId}. Please help me troubleshoot it.',
+  'messageList.viewTrace': 'Trace',
+  'messageList.viewTraceTooltip': 'View the full call chain for this answer',
+
+  'traceDetail.title': 'Trace Details',
+  'traceDetail.input': 'User Input',
+  'traceDetail.defaultAgentName': 'Model Reply',
+  'traceDetail.empty': 'No trace data available',
+  'traceDetail.openInLangfuse': 'Open in Langfuse',
+  'traceDetail.openInLangfuseTooltip': 'Jump to Langfuse to view the full trace',
+  'traceDetail.externalUrlMissing': 'Langfuse URL is not configured; cannot redirect',
 
   'citeRender.title': 'Referenced Messages',
   'citeRender.deleteConfirm': 'Are you sure to delete this reference?',

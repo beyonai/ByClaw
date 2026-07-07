@@ -54,6 +54,10 @@ public class LangfuseService {
         return ApplicationContextUtil.getEnvProperty(EnvConfigKey.LANGFUSE_ENV);
     }
 
+    public String getLangfuseProjectId() {
+        return ApplicationContextUtil.getEnvProperty(EnvConfigKey.LANGFUSE_PROJECT_ID);
+    }
+
     /**
      * 创建HTTP头
      */
