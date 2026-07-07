@@ -1,7 +1,12 @@
 const mockGetToken = jest.fn();
+const mockGetLocale = jest.fn();
 
 jest.mock('../auth', () => ({
   getToken: (...args: any[]) => mockGetToken(...args),
+}));
+
+jest.mock('@umijs/max', () => ({
+  getLocale: (...args: any[]) => mockGetLocale(...args),
 }));
 
 describe('utils/websocket', () => {
@@ -16,6 +21,7 @@ describe('utils/websocket', () => {
     jest.resetModules();
     jest.clearAllMocks();
     jest.useFakeTimers();
+    mockGetLocale.mockReturnValue('zh-CN');
     const previousManager = (globalThis as any).__BYCLAW_WEBSOCKET_MANAGER__;
     previousManager?.dispose?.();
     delete (globalThis as any).__BYCLAW_WEBSOCKET_MANAGER__;
@@ -84,7 +90,7 @@ describe('utils/websocket', () => {
     ws.disconnect();
     ws.init();
 
-    expect(WebSocketMock).toHaveBeenCalledWith('ws://example.com/byaiService/ws?beyond-token=token-1');
+    expect(WebSocketMock).toHaveBeenCalledWith('ws://example.com/byaiService/ws?beyond-token=token-1&language=zh-CN');
     expect(ws.getConnectionStatus()).toBe('connected');
   });
 
@@ -97,7 +103,28 @@ describe('utils/websocket', () => {
     socketInstance.onopen();
 
     jest.advanceTimersByTime(6000);
-    expect(socketInstance.send).toHaveBeenCalledWith(JSON.stringify({ type: 'NOTIFICATION' }));
+    expect(socketInstance.send).toHaveBeenCalledWith(JSON.stringify({ language: 'zh-CN', type: 'NOTIFICATION' }));
+  });
+
+  it('adds current language to outgoing messages unless explicitly provided', () => {
+    mockGetToken.mockReturnValue('token-1');
+    const ws = require('../websocket').default;
+
+    ws.disconnect();
+    ws.init();
+    socketInstance.onopen();
+
+    ws.sendMessage({ type: 'LLM_MESSAGE', chatContent: 'hello' });
+    ws.sendMessage({ type: 'LLM_MESSAGE', language: 'en-US', chatContent: 'hello' });
+
+    expect(socketInstance.send).toHaveBeenNthCalledWith(
+      1,
+      JSON.stringify({ language: 'zh-CN', type: 'LLM_MESSAGE', chatContent: 'hello' })
+    );
+    expect(socketInstance.send).toHaveBeenNthCalledWith(
+      2,
+      JSON.stringify({ language: 'en-US', type: 'LLM_MESSAGE', chatContent: 'hello' })
+    );
   });
 
   it('dispatches incoming messages to registered handlers', () => {

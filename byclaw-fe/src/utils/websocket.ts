@@ -2,6 +2,7 @@
  * WebSocket 管理工具类 - 全局单例模式
  */
 
+import { getLocale } from '@umijs/max';
 import { getToken } from './auth';
 
 interface WebSocketMessage {
@@ -101,6 +102,13 @@ class WebSocketManager {
     return `${protocol}//${hostname}${port}/${path}`;
   }
 
+  private withCurrentLanguage(message: WebSocketMessage): WebSocketMessage {
+    return {
+      language: getLocale(),
+      ...message,
+    };
+  }
+
   /**
    * 初始化 WebSocket 连接
    */
@@ -120,7 +128,11 @@ class WebSocketManager {
 
     try {
       // 创建 WebSocket 连接
-      const wsUrl = this.getWebSocketUrl(`byaiService/ws?beyond-token=${token}`);
+      const params = new URLSearchParams({
+        'beyond-token': token,
+        language: getLocale(),
+      });
+      const wsUrl = this.getWebSocketUrl(`byaiService/ws?${params.toString()}`);
       const connectionId = this.connectionSeq + 1;
       this.connectionSeq = connectionId;
       this.activeConnectionId = connectionId;
@@ -232,7 +244,7 @@ class WebSocketManager {
   public sendMessage(message: WebSocketMessage): void {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       try {
-        this.ws.send(JSON.stringify(message));
+        this.ws.send(JSON.stringify(this.withCurrentLanguage(message)));
       } catch (error) {
         console.error('WebSocket 消息发送失败:', error);
       }

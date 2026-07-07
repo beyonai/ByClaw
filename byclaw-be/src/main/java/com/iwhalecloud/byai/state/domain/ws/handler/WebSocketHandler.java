@@ -13,7 +13,9 @@ import com.iwhalecloud.byai.manager.dto.ecosystem.EcosystemAgentHeartbeatRequest
 import com.iwhalecloud.byai.state.domain.notification.service.NotificationService;
 import com.iwhalecloud.byai.common.log.util.RequestContextUtil;
 import com.iwhalecloud.byai.common.log.util.SnowFlake;
+import com.iwhalecloud.byai.state.domain.ws.service.WebSocketI18nSupport;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.stereotype.Component;
 import com.alibaba.fastjson.JSON;
 import com.iwhalecloud.byai.state.domain.chat.enums.MessageType;
@@ -88,7 +90,9 @@ public class WebSocketHandler extends SimpleChannelInboundHandler<TextWebSocketF
                 CurrentUserHolder.setLoginInfo(userInfo);
             }
             try {
+                WebSocketI18nSupport.applyLocale(userInfo);
                 ChatMessage chatMessage = JSON.parseObject(message, ChatMessage.class);
+                WebSocketI18nSupport.applyLocale(chatMessage.getLanguage(), userInfo);
                 chatMessage.setSenderId(userInfo.getUserId());
                 chatMessage.setSenderName(userInfo.getUserName());
                 log.debug("websocket user message :{}", chatMessage);
@@ -117,6 +121,7 @@ public class WebSocketHandler extends SimpleChannelInboundHandler<TextWebSocketF
         }
         finally {
             // 消息处理完成后清理上下文，防止线程池复用时数据污染
+            LocaleContextHolder.resetLocaleContext();
             RequestContextUtil.clear();
             log.debug("WebSocket 消息处理结束，清理上下文");
         }
