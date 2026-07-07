@@ -146,12 +146,12 @@ public class AuthController {
     }
 
     /**
-     * 校验当前用户是否有权限在企业 tab 下创建工具类资源。 满足以下任一条件即可： 1. 当前企业管理员（业务管理）； 2. 当前组织管理员； 3. 平台管理员； 4. userCode 为 adminvip。
+     * 校验当前用户是否有权限在企业 tab 下创建工具类资源。 满足以下任一条件即可： 1. 当前企业管理员（业务管理）； 2. 当前组织管理员； 3. 平台管理员/运维； 4. userCode 为 adminvip。
      */
     @RequestMapping(value = "/checkEnterpriseToolCreatePermission", method = RequestMethod.GET)
     public ResponseUtil<Boolean> checkEnterpriseToolCreatePermission() {
         boolean hasPermission = CurrentUserHolder.isBusinessAdmin() || CurrentUserHolder.isOrganizationAdmin()
-            || CurrentUserHolder.isPlatformManager()
+            || CurrentUserHolder.isPlatformAdminOrOperator()
             || ADMIN_VIP_USER_CODE.equalsIgnoreCase(CurrentUserHolder.getCurrentUserCode());
         logger.info("校验企业tab工具类创建权限, userId={}, userCode={}, hasPermission={}", CurrentUserHolder.getCurrentUserId(),
             CurrentUserHolder.getCurrentUserCode(), hasPermission);

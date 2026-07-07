@@ -16,6 +16,7 @@ import io.swagger.annotations.ApiOperation;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -163,6 +164,12 @@ public class OntologyBaseController {
     @PostMapping("/resource/page")
     public ResponseUtil<JSONObject> pageResources(@RequestBody JSONObject request) {
         return ResponseUtil.successRes(ontologyBaseService.pageResources(request));
+    }
+
+    @ApiOperation("查询当前用户是否可同步企业本体资源")
+    @GetMapping("/resource/sync/permission")
+    public ResponseUtil<Boolean> canSyncEnterpriseResources() {
+        return ResponseUtil.successRes(ontologyBaseService.canSyncEnterpriseResources());
     }
 
     @ApiOperation("同步本体资源分页列表（视图/对象，从 datacloud 同步到资源表）")

@@ -190,6 +190,10 @@ public class OntologyBaseService {
         return pageLocalResources(request);
     }
 
+    public boolean canSyncEnterpriseResources() {
+        return isAdminVipUser();
+    }
+
     public JSONObject syncResources(JSONObject request) {
         String ownerType = normalizeOwnerType(request.getString("ownerType"));
         String userCode = resolveSyncUserCode(ownerType, request.getString("userCode"));
@@ -285,12 +289,13 @@ public class OntologyBaseService {
     }
 
     private void ensureEnterpriseOntologyRefreshPermission() {
-        boolean hasPermission = CurrentUserHolder.isBusinessAdmin() || CurrentUserHolder.isOrganizationAdmin()
-            || CurrentUserHolder.isPlatformManager()
-            || ADMIN_VIP_USER_CODE.equalsIgnoreCase(CurrentUserHolder.getCurrentUserCode());
-        if (!hasPermission) {
-            throw new BaseException("只有管理员可以刷新企业本体资源");
+        if (!isAdminVipUser()) {
+            throw new BaseException("只有 adminvip 可以刷新企业本体资源");
         }
+    }
+
+    private boolean isAdminVipUser() {
+        return ADMIN_VIP_USER_CODE.equalsIgnoreCase(CurrentUserHolder.getCurrentUserCode());
     }
 
     private JSONObject pageLocalResources(JSONObject request) {
@@ -312,7 +317,7 @@ public class OntologyBaseService {
 
         PageInfo<ResourceAuthVo> page = resourceAuthApplicationService.listResourceAuth(query);
         List<ResourceAuthVo> rows = page.getList() == null ? new ArrayList<>() : page.getList();
-        rows.forEach(this::fillOperationPermissions);
+        fillOperationPermissions(rows);
         enrichOntologyTargetContent(rows);
 
         JSONObject pageInfo = new JSONObject();
@@ -329,18 +334,32 @@ public class OntologyBaseService {
         return result;
     }
 
-    private void fillOperationPermissions(ResourceAuthVo row) {
-        if (row == null || row.getResourceId() == null) {
+    private void fillOperationPermissions(List<ResourceAuthVo> rows) {
+        if (rows == null || rows.isEmpty()) {
             return;
         }
-        ResourceOperationPermissionsVo permissions =
-            authApplicationService.queryResourceOperationPermissions(row.getResourceId());
-        row.setCanEdit(permissions.getCanEdit());
-        row.setCanManageAuth(permissions.getCanManageAuth());
-        row.setCanUseAuth(permissions.getCanUseAuth());
-        row.setCanDelete(permissions.getCanDelete());
-        row.setCanApplyUse(permissions.getCanApplyUse());
-        row.setCanAuditUse(permissions.getCanAuditUse());
+        List<Long> resourceIds = rows.stream()
+            .filter(row -> row != null && row.getResourceId() != null)
+            .map(ResourceAuthVo::getResourceId)
+            .distinct()
+            .collect(Collectors.toList());
+        Map<Long, ResourceOperationPermissionsVo> permissionMap =
+            authApplicationService.queryResourceOperationPermissionsBatch(resourceIds);
+        rows.forEach(row -> {
+            if (row == null || row.getResourceId() == null) {
+                return;
+            }
+            ResourceOperationPermissionsVo permissions = permissionMap.get(row.getResourceId());
+            if (permissions == null) {
+                return;
+            }
+            row.setCanEdit(permissions.getCanEdit());
+            row.setCanManageAuth(permissions.getCanManageAuth());
+            row.setCanUseAuth(permissions.getCanUseAuth());
+            row.setCanDelete(permissions.getCanDelete());
+            row.setCanApplyUse(permissions.getCanApplyUse());
+            row.setCanAuditUse(permissions.getCanAuditUse());
+        });
     }
 
     private String upsertSyncedResource(JSONObject row, String ownerType, String sceneCode) {
@@ -368,6 +387,7 @@ public class OntologyBaseService {
             return "created";
         }
 
+        ensureCanUpdateExistingResource(existing, resourceCode);
         fillSyncedResource(existing, row, ownerType, sceneCode, bizType, resourceCode, resourceName);
         ssResourceService.updateResourceEntity(existing);
         replaceSyncedExt(existing.getResourceId(), bizType,
@@ -378,41 +398,16 @@ public class OntologyBaseService {
 
     private SsResource findSyncedResource(String resourceCode, String bizType, String ownerType, String baseCode,
         String sceneCode) {
-        LambdaQueryWrapper<SsResource> query = new LambdaQueryWrapper<SsResource>()
-            .eq(SsResource::getResourceCode, resourceCode)
-            .eq(SsResource::getResourceBizType, bizType)
-            .eq(StringUtils.isNotBlank(ownerType), SsResource::getOwnerType, ownerType);
-        if (OwnerType.PERSONAL.equals(ownerType)) {
-            Long currentUserId = CurrentUserHolder.getCurrentUserId();
-            if (currentUserId == null) {
-                throw new BaseException("当前登录用户ID不能为空");
-            }
-            query.eq(SsResource::getCreateBy, currentUserId);
+        return ssResourceService.findUniqueBySystemCodeAndBizTypeAndResourceCode(SYSTEM_CODE_DATACLOUD, bizType,
+            resourceCode);
+    }
+
+    private void ensureCanUpdateExistingResource(SsResource existing, String resourceCode) {
+        if (existing == null || authApplicationService.hasResourceManagePermission(existing)) {
+            return;
         }
-        List<SsResource> resources = ssResourceMapper.selectList(query
-            .orderByDesc(SsResource::getUpdateTime)
-            .orderByDesc(SsResource::getCreateTime));
-        if (resources.isEmpty()) {
-            return null;
-        }
-        if (StringUtils.isBlank(baseCode)) {
-            return resources.get(0);
-        }
-        List<SsResource> emptyMetaResources = new ArrayList<>();
-        for (SsResource resource : resources) {
-            JSONObject meta = ontologyTargetContent(resource);
-            if (meta.isEmpty()) {
-                emptyMetaResources.add(resource);
-                continue;
-            }
-            String metaBaseCode = firstNonBlank(meta, "ontologyBaseCode", "baseId", "baseCode", "pid");
-            String metaSceneCode = firstNonBlank(meta, "sceneCode", "sceneId", "catalogId");
-            if (StringUtils.equals(baseCode, metaBaseCode)
-                && (StringUtils.isBlank(sceneCode) || StringUtils.equals(sceneCode, metaSceneCode))) {
-                return resource;
-            }
-        }
-        return emptyMetaResources.size() == 1 ? emptyMetaResources.get(0) : null;
+        throw new BaseException("当前用户对资源【" + StringUtils.defaultIfBlank(existing.getResourceName(), resourceCode)
+            + "】没有管理权限，不能更新该资源");
     }
 
     private void fillSyncedResource(SsResource resource, JSONObject row, String ownerType, String sceneCode,
@@ -1575,11 +1570,11 @@ public class OntologyBaseService {
     }
 
     /**
-     * 校验刷新企业本体库的权限：仅平台/业务/组织管理员或超管(adminvip)可操作，与「企业 tab 创建资源」同一角色集。
+     * 校验刷新企业本体库的权限：仅平台管理/运维、业务/组织管理员或超管(adminvip)可操作，与「企业 tab 创建资源」同一角色集。
      */
     private void assertEnterpriseAdmin() {
         boolean allowed = CurrentUserHolder.isBusinessAdmin() || CurrentUserHolder.isOrganizationAdmin()
-            || CurrentUserHolder.isPlatformManager()
+            || CurrentUserHolder.isPlatformAdminOrOperator()
             || ADMIN_VIP_USER_CODE.equalsIgnoreCase(CurrentUserHolder.getCurrentUserCode());
         if (!allowed) {
             throw new BaseException("无权限：仅管理员可刷新企业本体库");

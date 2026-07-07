@@ -225,6 +225,16 @@ public class OntologyOpenService {
             resource.setComAcctId(enterpriseId);
         }
 
+        if (StringUtils.isNoneBlank(resource.getSystemCode(), resource.getResourceBizType(), resource.getResourceCode())) {
+            Long sameCodeCount = ssResourceMapper.selectCount(new LambdaQueryWrapper<SsResource>()
+                .eq(SsResource::getSystemCode, resource.getSystemCode())
+                .eq(SsResource::getResourceBizType, resource.getResourceBizType())
+                .eq(SsResource::getResourceCode, resource.getResourceCode()));
+            if (sameCodeCount != null && sameCodeCount > 0) {
+                throw new BaseException("资源已存在：" + resource.getSystemCode() + "/" + resource.getResourceBizType()
+                    + "/" + resource.getResourceCode());
+            }
+        }
         ssResourceMapper.insert(resource);
     }
 

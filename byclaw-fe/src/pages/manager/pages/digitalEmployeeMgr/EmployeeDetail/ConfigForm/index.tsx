@@ -190,112 +190,53 @@ const parseMaybeArray = (value: any) => {
   return [];
 };
 
-const addUniqueName = (list: string[], value: any) => {
-  const text = `${value || ''}`.trim();
-  if (text && !list.includes(text)) {
-    list.push(text);
+const getOntologyResourceType = (row: any) =>
+  `${row?.grantResourceType || row?.resourceBizType || row?.level || ''}`.toUpperCase();
+
+const getOntologyResourceKey = (row: any) => {
+  const resourceId = row?.resourceId ?? row?.relResourceId ?? row?.id;
+  if (resourceId !== undefined && resourceId !== null && resourceId !== '') {
+    return `${resourceId}`;
   }
+  return `${getOntologyResourceType(row)}:${row?.resourceCode || row?.viewCode || row?.objectCode || ''}`;
 };
 
-const ontologyBaseIdentity = (baseId: any, baseName?: any) => `${baseId || baseName || ''}`;
-
-const createOntologySummaryGroup = (baseId: any, baseName: any, ownerType?: string) => ({
-  key: ontologyBaseIdentity(baseId, baseName),
-  identity: ontologyBaseIdentity(baseId, baseName),
-  baseId,
-  baseName: baseName || baseId || '',
-  ownerType,
-  scenes: new Set<string>(),
-  views: new Set<string>(),
-  objects: new Set<string>(),
-  previewNames: [] as string[],
-  dirty: false,
-  clearing: false,
-});
-
-const buildOntologyGroupFromBinding = (binding: any) => {
-  const group = createOntologySummaryGroup(binding?.baseId, binding?.baseName, binding?.ownerType);
-  group.dirty = Boolean(binding?.dirty);
-  group.clearing = Boolean(binding?.isClearing) || (binding?.dirty && (binding?.nodes || []).length === 0);
-  (binding?.nodes || []).forEach((node: any) => {
-    const level = `${node?.level || ''}`.toUpperCase();
-    if (level === 'SCENE') {
-      group.scenes.add(`${node?.sceneId || node?.sceneName || ''}`);
-      addUniqueName(group.previewNames, node?.sceneName || node?.sceneId);
-    }
-    if (level === 'VIEW') {
-      group.views.add(`${node?.sceneId || ''}:${node?.viewCode || node?.viewName || ''}`);
-      addUniqueName(group.previewNames, node?.viewName || node?.viewCode);
-    }
-    if (level.includes('OBJECT')) {
-      group.objects.add(`${node?.objectCode || node?.objectName || ''}`);
-      addUniqueName(group.previewNames, node?.objectName || node?.objectCode);
-    }
-  });
-  return group;
+const normalizeOntologySummaryResource = (row: any = {}) => {
+  const resourceBizType = getOntologyResourceType(row);
+  const resourceCode = row?.resourceCode || row?.viewCode || row?.objectCode || row?.code || '';
+  const resourceName = row?.resourceName || row?.viewName || row?.objectName || row?.name || resourceCode;
+  return {
+    ...row,
+    key: getOntologyResourceKey(row),
+    resourceBizType,
+    resourceCode,
+    resourceName,
+    description: row?.description ?? row?.resourceDesc ?? row?.viewDesc ?? row?.objectDesc ?? row?.remark ?? '',
+  };
 };
 
-const buildOntologyGroupFromSavedRows = (rows: any[]) => {
-  const groups = new Map<string, any>();
-  rows.forEach((row: any) => {
-    const baseId = row?.ontologyBaseCode || row?.baseId || row?.baseCode || row?.resourceCode;
-    const baseName =
-      row?.ontologyBaseName ||
-      row?.baseName ||
-      (row?.resourceBizType === 'ONTOLOGY_BASE' ? row?.resourceName : '') ||
-      baseId;
-    if (!baseId && !baseName) return;
-    const key = ontologyBaseIdentity(baseId, baseName);
-    if (!groups.has(key)) {
-      groups.set(key, createOntologySummaryGroup(baseId, baseName, row?.ownerType));
-    }
-    const group = groups.get(key);
-    group.baseId = group.baseId || baseId;
-    group.baseName = group.baseName === group.baseId && baseName ? baseName : group.baseName || baseName;
-    group.ownerType = group.ownerType || row?.ownerType;
-    const bizType = `${row?.resourceBizType || row?.level || ''}`.toUpperCase();
-    if (bizType === 'SCENE' || row?.sceneId) {
-      group.scenes.add(`${row?.sceneId || row?.sceneName || row?.resourceCode || ''}`);
-      addUniqueName(group.previewNames, row?.sceneName || (bizType === 'SCENE' ? row?.resourceName : ''));
-    }
-    if (bizType === 'VIEW' || row?.viewCode) {
-      group.views.add(`${row?.sceneId || ''}:${row?.viewCode || row?.resourceCode || row?.viewName || ''}`);
-      addUniqueName(group.previewNames, row?.viewName || (bizType === 'VIEW' ? row?.resourceName : ''));
-    }
-    if (bizType === 'OBJECT' || row?.objectCode) {
-      group.objects.add(`${row?.objectCode || row?.resourceCode || row?.objectName || ''}`);
-      addUniqueName(group.previewNames, row?.objectName || (bizType === 'OBJECT' ? row?.resourceName : ''));
-    }
-  });
-  return groups;
-};
-
-const buildOntologyConfigSummary = (savedRelOntology: any, ontologyBindingMap: any) => {
-  const savedGroups = buildOntologyGroupFromSavedRows(parseMaybeArray(savedRelOntology));
-  Object.values(ontologyBindingMap || {})
-    .filter((binding: any) => binding?.dirty)
-    .forEach((binding: any) => {
-      if (!binding?.baseId && !binding?.baseName) return;
-      const group = buildOntologyGroupFromBinding(binding);
-      savedGroups.set(group.key, group);
+const buildOntologyConfigSummary = (savedRelOntology: any, ontologyResourcesDirty?: boolean) => {
+  const resourceMap = new Map<string, any>();
+  parseMaybeArray(savedRelOntology)
+    .map(normalizeOntologySummaryResource)
+    .filter((row: any) => ['VIEW', 'OBJECT'].includes(row.resourceBizType))
+    .forEach((row: any) => {
+      resourceMap.set(row.key, row);
     });
-  const allGroups = Array.from(savedGroups.values());
-  const activeGroups = allGroups.filter((group) => !group.clearing);
-  const totals = activeGroups.reduce(
-    (acc, group) => ({
-      bases: acc.bases + 1,
-      scenes: acc.scenes + group.scenes.size,
-      views: acc.views + group.views.size,
-      objects: acc.objects + group.objects.size,
+  const resources = Array.from(resourceMap.values());
+  const totals = resources.reduce(
+    (acc, row) => ({
+      views: acc.views + (row.resourceBizType === 'VIEW' ? 1 : 0),
+      objects: acc.objects + (row.resourceBizType === 'OBJECT' ? 1 : 0),
     }),
-    { bases: 0, scenes: 0, views: 0, objects: 0 }
+    { views: 0, objects: 0 }
   );
   return {
-    groups: activeGroups,
+    resources,
     totals,
-    hasBinding: activeGroups.length > 0,
-    hasPending: allGroups.some((group) => group.dirty),
-    isCleared: allGroups.length > 0 && activeGroups.length === 0,
+    hasBinding: resources.length > 0,
+    hasPending: Boolean(ontologyResourcesDirty),
+    isCleared: Boolean(ontologyResourcesDirty) && resources.length === 0,
   };
 };
 
@@ -539,7 +480,7 @@ const ConfigForm = (props) => {
     agentType,
     onOpenOntologyDrawer,
     savedRelOntology = [],
-    ontologyBindingMap = {},
+    ontologyResourcesDirty = false,
   } = props;
 
   const intl = useIntl();
@@ -561,8 +502,8 @@ const ConfigForm = (props) => {
   const [bundledSkillOptions, setBundledSkillOptions] = useState([]);
   const [bundledSkillLoading, setBundledSkillLoading] = useState(false);
   const ontologySummary = useMemo(
-    () => buildOntologyConfigSummary(savedRelOntology, ontologyBindingMap),
-    [savedRelOntology, ontologyBindingMap]
+    () => buildOntologyConfigSummary(savedRelOntology, ontologyResourcesDirty),
+    [savedRelOntology, ontologyResourcesDirty]
   );
   const [bundledSkillModalOpen, setBundledSkillModalOpen] = useState(false);
   const [bundledSkillSearchName, setBundledSkillSearchName] = useState('');
@@ -2515,8 +2456,6 @@ const ConfigForm = (props) => {
                           ? intl.formatMessage(
                               { id: 'employeeDetail.ontology.boundSummary' },
                               {
-                                baseCount: ontologySummary.totals.bases,
-                                sceneCount: ontologySummary.totals.scenes,
                                 viewCount: ontologySummary.totals.views,
                                 objectCount: ontologySummary.totals.objects,
                               }
@@ -2538,56 +2477,30 @@ const ConfigForm = (props) => {
                           : intl.formatMessage({ id: 'employeeDetail.ontology.emptyDesc' })}
                       </div>
                       <Space size={6} wrap className={styles.ontologyTypeTags}>
-                        <Tag>{intl.formatMessage({ id: 'employeeDetail.ontology.base' })}</Tag>
-                        <Tag>{intl.formatMessage({ id: 'employeeDetail.ontology.scene' })}</Tag>
                         <Tag>{intl.formatMessage({ id: 'employeeDetail.ontology.view' })}</Tag>
                         <Tag>{intl.formatMessage({ id: 'employeeDetail.ontology.object' })}</Tag>
                       </Space>
                     </div>
                   </div>
                   {ontologySummary.hasBinding && (
-                    <div className={styles.ontologyBaseList}>
-                      {ontologySummary.groups.slice(0, 3).map((group) => (
-                        <div className={styles.ontologyBaseItem} key={group.key}>
-                          <div className={styles.ontologyBaseMeta}>
-                            <div className={styles.ontologyBaseTitle}>
-                              <span>{group.baseName}</span>
-                              <Tag className={styles.ontologyInlineTag}>
-                                {intl.formatMessage({ id: 'employeeDetail.ontology.base' })}
-                              </Tag>
-                              {group.dirty && (
-                                <Tag className={styles.ontologyStatusTag} color="orange">
-                                  {intl.formatMessage({ id: 'employeeDetail.ontology.pendingSave' })}
-                                </Tag>
-                              )}
-                            </div>
-                            <div className={styles.ontologyBaseDesc}>
-                              {group.previewNames.slice(0, 4).join('、') ||
-                                intl.formatMessage({ id: 'employeeDetail.ontology.configureTip' })}
-                            </div>
-                          </div>
-                          <Space size={6} wrap className={styles.ontologyCountTags}>
-                            <Tag>
-                              {intl.formatMessage(
-                                { id: 'employeeDetail.ontology.sceneCount' },
-                                { count: group.scenes.size }
-                              )}
-                            </Tag>
-                            <Tag>
-                              {intl.formatMessage(
-                                { id: 'employeeDetail.ontology.viewCount' },
-                                { count: group.views.size }
-                              )}
-                            </Tag>
-                            <Tag>
-                              {intl.formatMessage(
-                                { id: 'employeeDetail.ontology.objectCount' },
-                                { count: group.objects.size }
-                              )}
-                            </Tag>
-                          </Space>
-                        </div>
+                    <div className={styles.ontologyPreviewList}>
+                      {ontologySummary.resources.slice(0, 3).map((resource) => (
+                        <Tooltip
+                          key={resource.key}
+                          title={`${resource.resourceName}${
+                            resource.resourceCode ? `（${resource.resourceCode}）` : ''
+                          }`}
+                        >
+                          <Tag className={styles.ontologyResourcePreviewTag}>
+                            <span>{resource.resourceName}</span>
+                          </Tag>
+                        </Tooltip>
                       ))}
+                      {ontologySummary.resources.length > 3 && (
+                        <Tag className={styles.ontologyResourcePreviewMore}>
+                          +{ontologySummary.resources.length - 3}
+                        </Tag>
+                      )}
                     </div>
                   )}
                 </Card>

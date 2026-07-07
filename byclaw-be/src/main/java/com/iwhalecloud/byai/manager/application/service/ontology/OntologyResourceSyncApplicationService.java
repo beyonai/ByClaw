@@ -107,6 +107,7 @@ public class OntologyResourceSyncApplicationService {
             return result("created", created, baseCode);
         }
 
+        ensureCanUpdateExistingResource(existing, resourceCode);
         updateResource(existing, request, bizType, resourceCode, baseCode, parent);
         ssResourceService.updateResourceEntity(existing);
         authApplicationService.ensureCreatorDefaultPrivileges(existing);
@@ -277,23 +278,23 @@ public class OntologyResourceSyncApplicationService {
 
     private SsResource resolveUniqueResource(String systemCode, String bizType, String resourceCode, String baseCode,
         SsResource parent) {
-        List<SsResource> resources = ssResourceService.findByCodeAndBizTypeAndOntologyBaseCode(resourceCode, bizType,
-            baseCode);
-        resources = resources.stream()
-            .filter(resource -> StringUtils.equals(resource.getSystemCode(), StringUtils.trim(systemCode)))
-            .collect(Collectors.toList());
-        if (parent != null) {
-            resources = resources.stream()
-                .filter(resource -> Objects.equals(resource.getParentResourceId(), parent.getResourceId()))
-                .collect(Collectors.toList());
-        }
-        if (CollectionUtils.isEmpty(resources)) {
+        SsResource resource =
+            ssResourceService.findUniqueBySystemCodeAndBizTypeAndResourceCode(systemCode, bizType, resourceCode);
+        if (resource == null) {
             return null;
         }
-        if (resources.size() > 1) {
-            throw new BaseException("本体资源匹配到多条，请传入 parentResourceBizType / parentResourceCode 消歧");
+        if (parent != null && !Objects.equals(resource.getParentResourceId(), parent.getResourceId())) {
+            throw new BaseException("资源编码已被其他父资源占用：" + resourceCode);
         }
-        return resources.get(0);
+        return resource;
+    }
+
+    private void ensureCanUpdateExistingResource(SsResource existing, String resourceCode) {
+        if (existing == null || authApplicationService.hasResourceManagePermission(existing)) {
+            return;
+        }
+        throw new BaseException("当前用户对资源【" + StringUtils.defaultIfBlank(existing.getResourceName(), resourceCode)
+            + "】没有管理权限，不能更新该资源");
     }
 
     private List<SsResource> resolveDeleteTargets(OntologyResourceDeleteRequest request, String systemCode,

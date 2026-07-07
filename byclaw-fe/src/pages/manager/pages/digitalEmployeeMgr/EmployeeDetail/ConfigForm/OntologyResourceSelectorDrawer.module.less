@@ -1,0 +1,153 @@
+.drawerBody {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.toolbar {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.toolbarSearch {
+  flex: 1;
+}
+
+.categoryBar {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.categoryBtn {
+  flex: 0 0 auto;
+  height: 34px;
+  padding: 0 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  color: #4b5563;
+  background: #fff;
+  cursor: pointer;
+}
+
+.categoryBtnActive {
+  color: #fff;
+  border-color: #111827;
+  background: #111827;
+}
+
+.listWrap {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.resourceList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.resourceItem {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.resourceItem:hover {
+  border-color: #2f6bff;
+  box-shadow: 0 6px 18px rgba(31, 64, 147, 0.08);
+}
+
+.resourceItemSelected {
+  border-color: #2f6bff;
+  background: #f7faff;
+}
+
+.resourceIcon {
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #1d5cff;
+  background: #edf3ff;
+  font-size: 18px;
+}
+
+.resourceMain {
+  flex: 1;
+  min-width: 0;
+}
+
+.resourceTitleRow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.resourceName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  color: #111827;
+  font-size: 15px;
+}
+
+.typeTag {
+  flex: 0 0 auto;
+  margin-inline-end: 0;
+  border-color: #b9d4ff;
+  color: #1260ff;
+  background: #f3f8ff;
+}
+
+.resourceCode {
+  margin-top: 4px;
+  color: #8a94a6;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+  font-size: 12px;
+}
+
+.resourceDesc {
+  margin-top: 8px;
+  color: #536176;
+  line-height: 20px;
+}
+
+.resourceMeta {
+  margin-top: 10px;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 12px;
+  border-top: 1px solid #edf0f5;
+}
+
+.selectedText {
+  color: #536176;
+}
+
+.selectedText strong {
+  color: #1d5cff;
+  padding: 0 4px;
+}

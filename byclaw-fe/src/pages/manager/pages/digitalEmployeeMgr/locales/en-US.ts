@@ -125,12 +125,11 @@ export default {
   'employeeDetail.ontology.bound': 'Bound',
   'employeeDetail.ontology.unbound': 'Unbound',
   'employeeDetail.ontology.configureTip':
-    'Select ontology bases, scenes, views, and objects that you can use. They will be bound after the digital employee is saved.',
+    'Select views and objects that you can use. They will be bound after the digital employee is saved.',
   'employeeDetail.ontology.emptyTitle': 'No ontology resources bound',
   'employeeDetail.ontology.emptyDesc':
-    'Bind ontology bases, scenes, views, and objects you can use. Changes take effect after saving the digital employee.',
-  'employeeDetail.ontology.boundSummary':
-    '{baseCount} bases, {sceneCount} scenes, {viewCount} views, and {objectCount} objects bound',
+    'Bind views and objects you can use. Changes take effect after saving the digital employee.',
+  'employeeDetail.ontology.boundSummary': '{viewCount} views and {objectCount} objects configured',
   'employeeDetail.ontology.boundTip':
     'Ontology resources will sync to dialogue reference capability after the digital employee is saved.',
   'employeeDetail.ontology.pendingSave': 'Pending save',

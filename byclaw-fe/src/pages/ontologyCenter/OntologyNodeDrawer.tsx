@@ -135,22 +135,6 @@ const OntologyNodeDrawer = ({
     />
   );
 
-  const actionTable = (actions: any[] = []) => (
-    <Table
-      size="small"
-      tableLayout="fixed"
-      rowKey={(r: any, i) => `${r.actionCode || ''}-${i}`}
-      dataSource={actions}
-      pagination={false}
-      locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
-      columns={[
-        { title: t('ontologyCenter.detail.action.name'), dataIndex: 'actionName', ellipsis: true },
-        { title: t('ontologyCenter.detail.col.code'), dataIndex: 'actionCode', ellipsis: true },
-        { title: t('common.desc'), dataIndex: 'actionDesc', ellipsis: true },
-      ]}
-    />
-  );
-
   // ============ 各类型内容 ============
   const renderBody = () => {
     if (!node) return null;
@@ -206,8 +190,6 @@ const OntologyNodeDrawer = ({
         {obj.objectDesc && <div className={styles.desc}>{obj.objectDesc}</div>}
         <div className={styles.sectionTitle}>{t('ontologyCenter.detail.attributes')}</div>
         {propertyTable(obj.properties)}
-        <div className={styles.sectionTitle}>{t('ontologyCenter.detail.actions')}</div>
-        {actionTable(obj.actions)}
       </>
     );
   };

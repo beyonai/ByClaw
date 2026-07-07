@@ -33,9 +33,9 @@ import { findDetailsById, installDigitalEmployeeRelResources } from '@/pages/man
 import AuthListDrawer from '@/pages/manager/components/AuthListDrawer';
 import UseApplyAuditDrawer from '@/pages/manager/components/UseApplyAuditDrawer';
 import { applyResourceUse } from '@/pages/manager/service/resources';
-import { checkEnterpriseAdminPermission } from '@/service/auth';
 import { queryCatalogTree } from '@/service/digitalEmployees';
 import {
+  checkOntologyEnterpriseResourceSyncPermission,
   getOntologyObjectDetail,
   listOntologyObjectsByView,
   listOntologyRelationsByObject,
@@ -404,7 +404,7 @@ const OntologyCenter: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    checkEnterpriseAdminPermission()
+    checkOntologyEnterpriseResourceSyncPermission()
       .then((res: any) => setCanRefreshEnterprise(getData(res) === true))
       .catch(() => setCanRefreshEnterprise(false));
   }, []);
@@ -428,7 +428,7 @@ const OntologyCenter: React.FC = () => {
         statusList: statusFilter === 'all' ? [0, 1, 2, 3, 4, 5] : statusFilter === 'offline' ? [3] : [2],
         permission: toResourceFilterPermission(permissionFilter),
         pageNum: 1,
-        pageSize: 100,
+        pageSize: 30,
       });
       const rows = getResourceRows(res);
       setResourceList(
@@ -537,7 +537,7 @@ const OntologyCenter: React.FC = () => {
       return;
     }
     if (activeTab === 'enterprise' && !canRefreshEnterprise) {
-      message.warning('只有管理员可以刷新企业本体资源');
+      message.warning('只有 adminvip 可以刷新企业本体资源');
       return;
     }
 

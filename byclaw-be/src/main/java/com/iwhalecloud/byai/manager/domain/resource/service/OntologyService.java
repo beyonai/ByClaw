@@ -1155,10 +1155,11 @@ public class OntologyService {
             actionInfo.setResourceId(newResourceId);
         }
 
+        if (codes.isEmpty()) {
+            return;
+        }
         LambdaQueryWrapper<SsResource> queryWrapper = new LambdaQueryWrapper<>();
         queryWrapper.in(SsResource::getResourceCode, codes);
-        queryWrapper.eq(SsResource::getCreateBy, currentUserId);
-        queryWrapper.eq(SsResource::getResourceBizType, ResourceBizType.ACTION.getCode());
         List<SsResource> existingResources = ssResourceMapper.selectList(queryWrapper);
         if (!existingResources.isEmpty()) {
             List<String> codeList = existingResources.stream().filter(item -> item.getResourceCode() != null)
@@ -1349,11 +1350,49 @@ public class OntologyService {
             }
             // 插入actions
             if (!resourceList.isEmpty()) {
+                assertResourceCodesAvailable(resourceList);
                 ssResourceMapper.insertBatch(resourceList);
                 // 增加关联关系
                 addRelInfo(resourceList, resourceId);
             }
 
+        }
+    }
+
+    private void assertResourceCodesAvailable(List<SsResource> resources) {
+        if (CollectionUtils.isEmpty(resources)) {
+            return;
+        }
+        List<String> codes = resources.stream()
+            .map(SsResource::getResourceCode)
+            .filter(StringUtils::isNotBlank)
+            .distinct()
+            .collect(Collectors.toList());
+        if (CollectionUtils.isEmpty(codes)) {
+            return;
+        }
+        LambdaQueryWrapper<SsResource> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.in(SsResource::getResourceCode, codes);
+        List<SsResource> existingResources = ssResourceMapper.selectList(queryWrapper);
+        if (CollectionUtils.isEmpty(existingResources)) {
+            return;
+        }
+        List<String> existingKeys = existingResources.stream()
+            .filter(existing -> resources.stream()
+                .anyMatch(resource -> StringUtils.equals(existing.getSystemCode(), resource.getSystemCode())
+                    && StringUtils.equals(existing.getResourceBizType(), resource.getResourceBizType())
+                    && StringUtils.equals(existing.getResourceCode(), resource.getResourceCode())))
+            .map(existing -> existing.getSystemCode() + "/" + existing.getResourceBizType() + "/"
+                + existing.getResourceCode())
+            .filter(StringUtils::isNotBlank)
+            .distinct()
+            .collect(Collectors.toList());
+        if (CollectionUtils.isNotEmpty(existingKeys)) {
+            String codeStr = existingKeys.stream()
+                .filter(StringUtils::isNotBlank)
+                .distinct()
+                .collect(Collectors.joining(","));
+            throw new BaseException("资源已存在：" + codeStr);
         }
     }
 

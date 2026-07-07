@@ -1,4 +1,4 @@
-import { POST } from '@/service/common/request';
+import { GET, POST } from '@/service/common/request';
 
 /**
  * 本体服务前端调用层。
@@ -233,6 +233,11 @@ export function pageOntologyResources(params: {
     pageNum: params.pageNum || 1,
     pageSize: params.pageSize || 20,
   });
+}
+
+/** 当前用户是否可同步企业本体资源（仅 adminvip）。 */
+export function checkOntologyEnterpriseResourceSyncPermission() {
+  return GET<any>('/byaiService/ontology/resource/sync/permission', {}, ontologyRequestConfig);
 }
 
 /** 从 datacloud 分页同步本体资源到资源表。 */
