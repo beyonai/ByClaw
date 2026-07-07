@@ -598,10 +598,10 @@ public class SuasSuperassistApplicationService {
         TokenSaver tokenSaver = modelQuota.getTokenSaver();
 
         ByaiAimodel byaiAimodel = null;
-
         if (tokenSaver != null && tokenSaver.getEnabled()) {
             FindAiModelQo findAiModelQo = new FindAiModelQo();
             findAiModelQo.setModelType(Constants.DEFAULT_MODEL_TYPE_LLM);
+            findAiModelQo.setModelProtocol(modelProtocol);
             findAiModelQo.setCreateBy(CurrentUserHolder.getCurrentUserId());
             findAiModelQo.setOwnerType(ModelOwnerType.PERSONAL);
             findAiModelQo.setSourceType(ModelSourceType.TOKEN_SAVER);
@@ -612,7 +612,7 @@ public class SuasSuperassistApplicationService {
                 byaiAimodel = tokenSaverModels.getFirst();
             }
             else {
-                byaiAimodel = this.createTokenSaverModel(tokenSaver);
+                byaiAimodel = this.createTokenSaverModel(tokenSaver, modelProtocol);
             }
         }
         else if (ModelProtocol.ANTHROPIC.equalsIgnoreCase(modelProtocol)) {
@@ -650,9 +650,13 @@ public class SuasSuperassistApplicationService {
      *
      * @return ByaiAimodel
      */
-    private ByaiAimodel createTokenSaverModel(TokenSaver tokenSaver) {
+    private ByaiAimodel createTokenSaverModel(TokenSaver tokenSaver, String modelProtocol) {
 
         String tokenName = "ByClaw_".concat(CurrentUserHolder.getCurrentUserCode());
+
+        if (ModelProtocol.ANTHROPIC.equalsIgnoreCase(modelProtocol)) {
+            tokenName = tokenName + "_" + modelProtocol;
+        }
 
         // 创建tokenSaver
         TokenSaveRequest tokenSaveRequest = new TokenSaveRequest();
@@ -677,33 +681,47 @@ public class SuasSuperassistApplicationService {
         // 创建对应的模型
         ByaiAimodel newByaiAimodel = new ByaiAimodel();
         newByaiAimodel.setModelName(tokenName);
-        newByaiAimodel.setModelProtocol(ModelProtocol.OPEN_AI);
+        if (ModelProtocol.ANTHROPIC.equalsIgnoreCase(modelProtocol)) {
+            newByaiAimodel.setUrl(tokenSaver.getAnthropicApiUrl());
+        }
+        else {
+            newByaiAimodel.setUrl(tokenSaver.getApiUrl());
+        }
+        newByaiAimodel.setModelProtocol(modelProtocol);
         newByaiAimodel.setOwnerType(ModelOwnerType.PERSONAL);
         newByaiAimodel.setSourceType(ModelSourceType.TOKEN_SAVER);
         newByaiAimodel.setModelType(Constants.DEFAULT_MODEL_TYPE_LLM);
         newByaiAimodel.setModelNo(tokenSaver.getModelCode());
-        newByaiAimodel.setUrl(tokenSaver.getApiUrl());
         newByaiAimodel.setAuthToken(Sm4Util.encrypt(data.getKey()));
         newByaiAimodel.setCreateTime(new Date());
         newByaiAimodel.setCreateBy(CurrentUserHolder.getCurrentUserId());
         newByaiAimodel.setStatus("OOA");
         newByaiAimodel.setMaxContentToken(200000);
-        newByaiAimodel.setInParams(this.buildInParams());
+        newByaiAimodel.setInParams(this.buildInParams(modelProtocol, data.getKey()));
         byaiAimodelService.upsert(newByaiAimodel);
         return newByaiAimodel;
     }
 
     /**
-     * 构建模型参数
+     * 模型内置参数
      *
-     * @return 模型内置参数
+     * @param modelProtocol 模型端点
+     * @param apiKey 密钥
+     * @return String
      */
-    private String buildInParams() {
+    private String buildInParams(String modelProtocol, String apiKey) {
         Map<String, Object> inParams = new HashMap<>();
         // 基础字段
+        if (ModelProtocol.ANTHROPIC.equalsIgnoreCase(modelProtocol)) {
+            Map<String, String> keyMap = Map.of("key", "x-api-key", "value", apiKey);
+            Map<String, String> contentTypeMap = Map.of("key", "Content-Type", "value", "application/json");
+            inParams.put("headers", List.of(keyMap, contentTypeMap));
+        }
+        else {
+            inParams.put("headers", List.of(Map.of("key", "", "value", "")));
+        }
         inParams.put("connectTimeoutSec", 32);
-        inParams.put("headers", List.of(Map.of("value", "", "key", "")));
-        inParams.put("modelProtocol", "OpenAI");
+        inParams.put("modelProtocol", modelProtocol);
         inParams.put("readTimeoutSec", 60);
         inParams.put("topP", 0.9);
         inParams.put("abilities", List.of("3"));
