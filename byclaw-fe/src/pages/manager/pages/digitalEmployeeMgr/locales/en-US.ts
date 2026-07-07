@@ -113,6 +113,7 @@ export default {
   'employeeDetail.ontology.searchScene': 'Search scene',
   'employeeDetail.ontology.relation': 'Relation',
   'employeeDetail.ontology.bound': 'Bound',
+  'employeeDetail.ontology.unbound': 'Unbound',
   'employeeDetail.ontology.configureTip':
     'Select ontology bases, scenes, views, and objects that you can use. They will be bound after the digital employee is saved.',
   'employeeDetail.ontology.emptyTitle': 'No ontology resources bound',

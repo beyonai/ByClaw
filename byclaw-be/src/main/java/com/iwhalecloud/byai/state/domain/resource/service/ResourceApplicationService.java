@@ -198,36 +198,34 @@ public class ResourceApplicationService {
         List<SortField> sortFields = new ArrayList<>(List.of(createSortField("createTime", "desc", 1)));
 
         ResourceQueryRequest request = new ResourceQueryRequest();
+        if (resourceQo != null) {
+            BeanUtils.copyProperties(resourceQo, request);
+            String keyword = StringUtils.defaultIfBlank(resourceQo.getKeyword(), resourceQo.getSearchName());
+            request.setKeyword(keyword);
+            if (StringUtils.isBlank(request.getResourceName())) {
+                request.setResourceName(resourceQo.getSearchName());
+            }
+        }
         request.setSortFields(sortFields);
-        request.setOwnershipType(3);
-        // 已上架的
-        request.setStatusList(List.of(2));
+        if (request.getOwnershipType() == null) {
+            request.setOwnershipType(3);
+        }
+        if (CollectionUtils.isEmpty(request.getStatusList())) {
+            // 已上架的
+            request.setStatusList(List.of(2));
+        }
 
         KnowledgeResponse response = resManagementService.getResourceListByPage(request);
         if (!Constants.RESPONSE_SUCCESS.equals(response.getResultCode())) {
             throw new KnowledgeRuntimeExcepion(response.getResultMsg());
         }
         Map<String, Object> data = (Map<String, Object>) response.getResultObject();
-        List<Map<String, Object>> rows = (List<Map<String, Object>>) MapUtils.getObject(data, "rows");
+        List<?> rows = (List<?>) MapUtils.getObject(data, "rows");
+        if (rows == null) {
+            rows = (List<?>) MapUtils.getObject(data, "list", List.of());
+        }
 
-        List<Long> objIdList = new ArrayList<>();
-        // // 根据objIdList查询授权数量
-        List<SsResource> res = rows.stream().map(item -> {
-            SsResource ssResource = new SsResource();
-            ssResource.setResourceId(Long.valueOf(MapUtils.getString(item, "resourceId")));
-            ssResource.setResourceDesc(MapUtils.getString(item, "resourceDesc"));
-            ssResource.setCreateTime(setDate(MapUtils.getString(item, "createTime")));
-            ssResource.setResourceName(MapUtils.getString(item, "resourceName"));
-            ssResource.setUpdateTime(setDate(MapUtils.getString(item, "updateTime")));
-            ssResource.setResourceBizType(MapUtils.getString(item, "resourceBizType"));
-            ssResource.setResourceSourcePkId(MapUtils.getLong(item, "resourceSourcePkId"));
-            ssResource.setResourceStatus(MapUtils.getInteger(item, "resourceStatus"));
-            ssResource.setResourceCode(MapUtils.getString(item, "resourceCode"));
-            objIdList.add(ssResource.getResourceId());
-            return ssResource;
-        }).collect(Collectors.toList());
-
-        return buildResMap(data, res);
+        return buildResMap(data, rows);
 
     }
 
@@ -242,16 +240,16 @@ public class ResourceApplicationService {
     /**
      * 优化：使用更高效的Map构建方式，减少MapUtils调用开销
      */
-    private Map<String, Object> buildResMap(Map<String, Object> map, List<SsResource> data) {
+    private Map<String, Object> buildResMap(Map<String, Object> map, List<?> data) {
         // 优化：预先计算容量，避免HashMap扩容
         Map<String, Object> resMap = new HashMap<>(4);
         resMap.put("rows", data);
 
         // 优化：直接从map中获取值，减少MapUtils的反射开销
-        Object pageIndex = map.get("pageIndex");
+        Object pageIndex = map.get("pageIndex") != null ? map.get("pageIndex") : map.get("pageNum");
         Object pageSize = map.get("pageSize");
         Object total = map.get("total");
-        Object totalPage = map.get("totalPage");
+        Object totalPage = map.get("totalPage") != null ? map.get("totalPage") : map.get("pages");
 
         // 优化：使用Map.of创建不可变map，性能更好
         Map<String, Object> pageInfo = Map.of("pageNum", pageIndex != null ? pageIndex : 0L, "pageSize",

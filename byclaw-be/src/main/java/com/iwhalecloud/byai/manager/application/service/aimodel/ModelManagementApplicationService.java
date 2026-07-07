@@ -162,6 +162,11 @@ public class ModelManagementApplicationService {
             entity.setModelId(modelId);
             entity.setCreateBy(existing.getCreateBy());
             entity.setCreateTime(existing.getCreateTime());
+            entity.setSourceType(existing.getSourceType());
+            entity.setOwnerType(existing.getOwnerType());
+
+            // 更新TokenSaver模型名称
+            this.updateTokenSaverModelName(existing);
         }
         else {
             entity = requestToEntity(request, currentUserId);
@@ -174,33 +179,44 @@ public class ModelManagementApplicationService {
         }
         ensureDefaultModelForTypeIfMissing(modelId);
 
+        Map<String, String> data = new HashMap<>(1);
+        data.put("id", String.valueOf(modelId));
+        return data;
+    }
+
+    /**
+     * 根据旧的名称去TokenSaver系统更新
+     *
+     * @param existing 存在
+     */
+    private void updateTokenSaverModelName(ByaiAimodel existing) {
+
         // 看看自定义tokenSaver模型是否开启
         String modelQuotaJson = byaiSystemConfigService.findByParamCode("MODEL_QUOTA");
         ModelQuota modelQuota = JSON.parseObject(modelQuotaJson, ModelQuota.class);
         TokenSaver tokenSaver = modelQuota.getTokenSaver();
-        if (tokenSaver != null && tokenSaver.getEnabled()
-            && ModelSourceType.TOKEN_SAVER.equals(entity.getSourceType())) {
 
+        if (tokenSaver != null && tokenSaver.getEnabled()
+            && ModelSourceType.TOKEN_SAVER.equals(existing.getSourceType())) {
             // 获取tokenSaver标识
             TokenApiResponse<TokenPageResult> tokenApiResponse = feignTokenSaverService
-                .searchTokens(entity.getModelName(), null, 1, 1);
+                .searchTokens(existing.getModelName(), null, 1, 1);
             TokenPageResult tokenPageResult = tokenApiResponse.getData();
             logger.info("获取模型标识tokenPageResult:{}", JSON.toJSONString(tokenPageResult));
 
             List<TokenDto> items = tokenPageResult.getItems();
-            if (ListUtil.isNotEmpty(items)) {
-                TokenDto tokenDto = items.getFirst();
-                TokenSaveRequest tokenSaveRequest = new TokenSaveRequest();
-                tokenSaveRequest.setId(tokenDto.getId());
-                tokenSaveRequest.setName(entity.getModelName());
-                TokenApiResponse<TokenDto> updateApiResponse = feignTokenSaverService.updateToken(tokenSaveRequest);
-                logger.info("更新apiKey结果:{}", JSON.toJSONString(updateApiResponse));
+            if (ListUtil.isEmpty(items)) {
+                return;
             }
+
+            TokenDto tokenDto = items.getFirst();
+            TokenSaveRequest tokenSaveRequest = new TokenSaveRequest();
+            tokenSaveRequest.setId(tokenDto.getId());
+            tokenSaveRequest.setName(existing.getModelName());
+            TokenApiResponse<TokenDto> updateApiResponse = feignTokenSaverService.updateToken(tokenSaveRequest);
+            logger.info("更新apiKey结果:{}", JSON.toJSONString(updateApiResponse));
         }
 
-        Map<String, String> data = new HashMap<>(1);
-        data.put("id", String.valueOf(modelId));
-        return data;
     }
 
     /**

@@ -28,6 +28,7 @@ const OntologyNodeDrawer = ({
   baseId,
   ownerType = 'personal',
   panel = false,
+  showReference = true,
   onReference,
   onClose,
 }: {
@@ -36,6 +37,7 @@ const OntologyNodeDrawer = ({
   baseId?: string;
   ownerType?: string;
   panel?: boolean;
+  showReference?: boolean;
   onReference?: () => void;
   onClose: () => void;
 }) => {
@@ -145,7 +147,6 @@ const OntologyNodeDrawer = ({
     if (!node) return null;
     const objects = detail?.objects || [];
     const views = detail?.views || [];
-    const actions = detail?.actions || [];
 
     if (level === 'BASE') {
       return (
@@ -196,9 +197,6 @@ const OntologyNodeDrawer = ({
 
     if (level === 'VIEW') {
       const view = views.find((v: any) => v.viewCode === node.viewCode) || {};
-      const objByCode: Record<string, any> = {};
-      objects.forEach((o: any) => (objByCode[o.objectCode] = o));
-      const memberObjects = (view.objectCodes || []).map((c: string) => objByCode[c] || { objectCode: c });
       return (
         <>
           <div className={styles.sectionTitle}>{t('ontologyCenter.detail.viewProperties')}</div>
@@ -223,30 +221,12 @@ const OntologyNodeDrawer = ({
               },
             ]}
           />
-          <div className={styles.sectionTitle}>
-            {t('ontologyCenter.detail.objectList')} ({memberObjects.length})
-          </div>
-          <div className={styles.entityList}>
-            {memberObjects.length ? (
-              memberObjects.map((o: any) => (
-                <div key={o.objectCode} className={styles.actionRow}>
-                  <span className={styles.actionName}>{o.objectName || o.objectCode}</span>
-                  <span className={styles.mono} style={{ marginLeft: 'auto', color: '#999' }}>
-                    {o.objectCode}
-                  </span>
-                </div>
-              ))
-            ) : (
-              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} />
-            )}
-          </div>
         </>
       );
     }
 
     // OBJECT
     const obj = objects.find((o: any) => o.objectCode === node.objectCode) || {};
-    const objActions = actions.filter((a: any) => a.belongObjectCode === node.objectCode);
     return (
       <>
         <div className={styles.panelTags}>
@@ -260,30 +240,17 @@ const OntologyNodeDrawer = ({
         {obj.objectDesc && <div className={styles.desc}>{obj.objectDesc}</div>}
         <div className={styles.sectionTitle}>{t('ontologyCenter.detail.attributes')}</div>
         {propertyTable(obj.properties)}
-        {objActions.length > 0 && (
-          <>
-            <div className={styles.sectionTitle}>{t('ontologyCenter.detail.actions')}</div>
-            <div className={styles.entityList}>
-              {objActions.map((a: any) => (
-                <div key={a.actionCode} className={styles.actionRow}>
-                  <Tag color={a.actionType === 'query' ? 'blue' : 'volcano'}>{a.actionType || 'action'}</Tag>
-                  <span className={styles.actionName}>{a.actionName || a.actionCode}</span>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
       </>
     );
   };
 
-  const footer = (
+  const footer = showReference ? (
     <div className={styles.nodeFooter}>
       <Button icon={<PaperClipOutlined />} onClick={insertToChat}>
         {t('ontologyNode.action.reference')}
       </Button>
     </div>
-  );
+  ) : null;
 
   const content = (
     <>
@@ -304,7 +271,7 @@ const OntologyNodeDrawer = ({
           <Button type="text" size="small" icon={<CloseOutlined />} onClick={onClose} />
         </div>
         <div className={styles.nodePanelBody}>{content}</div>
-        <div className={styles.nodePanelFooter}>{footer}</div>
+        {footer && <div className={styles.nodePanelFooter}>{footer}</div>}
       </div>
     );
   }
@@ -315,7 +282,7 @@ const OntologyNodeDrawer = ({
       open={open}
       onClose={onClose}
       title={titleByLevel[level] || t('ontologyCenter.detail.title')}
-      footer={footer}
+      footer={footer || undefined}
     >
       {content}
     </Drawer>

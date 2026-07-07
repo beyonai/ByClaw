@@ -6,7 +6,7 @@ I/O 协议：stdin JSON → stdout JSON
 入参（stdin JSON）:
     {
         "agent_id": 10004452,              # 必填，数字员工或个人助理的 ID
-        "resource_biz_type": "OBJECT",     # 资源业务类型，默认 "OBJECT"
+        "resource_biz_type": "OBJECT",     # 资源业务类型(OBJECT/VIEW)，默认 "OBJECT"
         "resource_code": "by_my_device"    # 必填，本体编码
     }
 
@@ -34,7 +34,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).parent))
 sys.path.insert(0, str(Path(__file__).parent / "lib"))
 
-from _common import get_default_base_id, post_json
+from _common import post_json
 
 
 def main() -> None:
@@ -67,7 +67,6 @@ def main() -> None:
                 "agentId": agent_id,
                 "relResourceCode": resource_code,
                 "relResourceBizType": resource_biz_type,
-                "ontologyBaseCode": get_default_base_id(),
             },
         )
         print(json.dumps({"ok": True, "data": result}, ensure_ascii=False), flush=True)

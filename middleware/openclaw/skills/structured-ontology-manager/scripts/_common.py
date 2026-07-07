@@ -64,24 +64,6 @@ async def _post_via_discovery(
         return body["data"]
     return body
 
-    body: dict[str, Any] = response.data if isinstance(response.data, dict) else {}
-    if not response.is_success or body.get("code", 0) != 0:
-        raise ValueError(
-            f"HTTP {response.status_code} {service_name}{path}: {body.get('msg', body)}"
-        )
-    if body and "data" in body:
-        return body["data"]
-    return body
-
-    body: dict[str, Any] = response.data if isinstance(response.data, dict) else {}
-    if not response.is_success or body.get("code", 0) != 0:
-        raise ValueError(
-            f"HTTP {response.status_code} {service_name}{path}: {body.get('msg', body)}"
-        )
-    if body and "data" in body:
-        return body["data"]
-    return body
-
 
 def post_json(path: str, payload: dict[str, Any], service_env: str = "BE_DOMAINNAME") -> Any:
     """通过服务发现调用指定服务的 POST 接口。
@@ -103,53 +85,15 @@ def post_json(path: str, payload: dict[str, Any], service_env: str = "BE_DOMAINN
     return _run_async_in_thread(_post_via_discovery(service_name, path, payload, headers))
 
 
-_base_id_cache: list[str] = []
-
-
-def get_default_base_id() -> str:
-    """静默获取用户第一个个人本体库 ID，结果缓存。
-
-    调用门户服务 /byaiService/ontology/base/list，
-    取返回列表第一项的 baseId。失败时返回空字符串，
-    此时平台将回落至 _default_base_id()。
-    """
-    if _base_id_cache:
-        return _base_id_cache[0]
-
-    try:
-        data = post_json(
-            path="/byaiService/ontology/base/list",
-            payload={"ownerType": "personal", "queryKeyword": ""},
-        )
-        items: list[dict] = []
-        if isinstance(data, list):
-            items = data
-        elif isinstance(data, dict):
-            items = data.get("list", data.get("data", []))
-        if items:
-            base_id = str(items[0].get("baseId", "") or items[0].get("id", ""))
-            if base_id:
-                _base_id_cache.append(base_id)
-    except Exception:
-        logger.warning("获取本体库列表失败，将使用平台默认库", exc_info=True)
-
-    return _base_id_cache[0] if _base_id_cache else ""
-
-
 def post_ontology_api(path: str, payload: dict[str, Any]) -> Any:
     """调用 datacloud_platform 的 ontology-manager API。
 
     通过 DATACLOUD_SERVICE_NAME 环境变量指定服务发现名，默认 byclaw-datacloud。
-    自动注入 base_id（静默从门户服务获取第一个个人本体库 ID）。
 
     Args:
         path: API 路径，如 "/object/collect"
         payload: 请求体
     """
-    # 自动注入 base_id
-    if "base_id" not in payload:
-        payload["base_id"] = get_default_base_id()
-
     service_name = os.environ.get("DATACLOUD_DOMAINNAME", _DEFAULT_ONTOLOGY_SERVICE).strip()
 
     token = os.environ.get("BEYOND_TOKEN", "").strip()

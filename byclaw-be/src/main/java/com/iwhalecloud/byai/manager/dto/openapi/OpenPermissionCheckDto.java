@@ -40,7 +40,7 @@ public class OpenPermissionCheckDto {
     private String resourceBizType;
 
     /**
-     * 所属本体库编码。resourceBizType 为 OBJECT、VIEW、SCENE 时必填。
+     * 所属本体库编码。resourceBizType 为 OBJECT、VIEW 时必填。
      */
     private String ontologyBaseCode;
 
@@ -59,7 +59,7 @@ public class OpenPermissionCheckDto {
         private String resourceCode;
 
         /**
-         * 所属本体库编码。resourceBizType 为 OBJECT、VIEW、SCENE 时必填。
+         * 所属本体库编码。resourceBizType 为 OBJECT、VIEW 时必填。
          */
         private String ontologyBaseCode;
     }

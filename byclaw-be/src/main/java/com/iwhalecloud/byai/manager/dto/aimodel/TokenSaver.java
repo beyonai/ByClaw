@@ -16,6 +16,8 @@ public class TokenSaver {
 
     private String apiUrl;
 
+    private String anthropicApiUrl;
+
     private String modelCode;
 
     private String accessToken;

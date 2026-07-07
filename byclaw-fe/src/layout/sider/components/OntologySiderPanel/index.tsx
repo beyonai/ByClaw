@@ -1,215 +1,349 @@
 // @ts-nocheck
 import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { Breadcrumb, Button, Checkbox, Dropdown, Empty, Input, List, message, Spin, Tooltip, Typography } from 'antd';
-import { MoreOutlined, SearchOutlined, SaveOutlined } from '@ant-design/icons';
+import { App, Dropdown, Empty, Input, Select, Spin, Tooltip } from 'antd';
+import { EllipsisOutlined, SearchOutlined } from '@ant-design/icons';
+import classnames from 'classnames';
 import { useIntl, useLocation, useNavigate } from '@umijs/max';
 import { trim } from 'lodash';
 import AntdIcon from '@/components/AntdIcon';
 import { DragType } from '@/components/QueryInput/withDrag';
 import ActiveSiderAgentBar, { useActiveSiderAgent } from '@/layout/sider/components/ActiveSiderAgentBar';
 import { SiderContentContext } from '@/layout/sider/siderContentContext';
-import { getBoundOntologyBases } from '@/service/ontology';
-import { useOntologyBindTree } from '@/pages/ontologyCenter/useOntologyBindTree';
+import { findDetailsById } from '@/pages/manager/service/DigitalEmployeeMgr';
+import { unbindOntologyResource } from '@/service/ontology';
 import OntologyNodeDrawer from '@/pages/ontologyCenter/OntologyNodeDrawer';
 import useGlobal from '@/hooks/useGlobal';
-import employeeStyles from '@/layout/sider/components/EmployeeList/index.module.less';
-import styles from '@/layout/sider/components/ResourceSiderPanel/index.module.less';
+import commonStyles from '@/layout/sider/components/Knowledge/components/common.module.less';
+import chromeStyles from '@/layout/sider/components/ResourceSiderPanel/index.module.less';
+import styles from './index.module.less';
 
-const getArrayData = (response: any) => {
-  if (Array.isArray(response)) return response;
-  if (Array.isArray(response?.data)) return response.data;
-  if (Array.isArray(response?.rows)) return response.rows;
-  if (Array.isArray(response?.list)) return response.list;
-  return [];
+const getData = (res: any) => res?.data ?? res ?? {};
+const parseMaybeArray = (value: any) => {
+  if (Array.isArray(value)) return value;
+  if (!value) return [];
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value || '[]');
+      return Array.isArray(parsed) ? parsed : parsed ? [parsed] : [];
+    } catch {
+      return [];
+    }
+  }
+  return [value];
+};
+
+type OntologyTab = 'view' | 'object';
+type OntologyFilterType = 'all' | OntologyTab;
+
+const TAB_BIZ_TYPE: Record<OntologyTab, string> = { view: 'VIEW', object: 'OBJECT' };
+
+const NODE_ICON: Record<string, string> = {
+  base: 'icon-a-Boxhezioutline',
+  scene: 'icon-a-Folder-openwenjianjia-kai',
+  view: 'icon-a-yemian-line',
+  object: 'icon-tongxun',
+};
+
+const getEntryBizType = (entry: any) => {
+  if (entry?.resourceBizType || entry?.resource_biz_type) {
+    return `${entry.resourceBizType || entry.resource_biz_type}`.toUpperCase();
+  }
+  if (entry?.objectCode || entry?.object_code) return 'OBJECT';
+  if (entry?.viewCode || entry?.view_code) return 'VIEW';
+  return '';
+};
+
+const normalizeEntry = (entry: any = {}) => {
+  const bizType = getEntryBizType(entry);
+  const resourceId = entry.resourceId || entry.relResourceId;
+  const resourceCode =
+    entry.resourceCode ||
+    entry.resource_code ||
+    entry.viewCode ||
+    entry.view_code ||
+    entry.objectCode ||
+    entry.object_code ||
+    entry.code ||
+    '';
+  const resourceName =
+    entry.resourceName ||
+    entry.resource_name ||
+    entry.viewName ||
+    entry.view_name ||
+    entry.objectName ||
+    entry.object_name ||
+    entry.name ||
+    resourceCode;
+  const baseId = entry.ontologyBaseCode || entry.baseId || entry.baseCode || '';
+  return {
+    ...entry,
+    resourceId,
+    resourceBizType: bizType,
+    resourceCode,
+    resourceName,
+    name: entry.name || resourceName,
+    code: entry.code || resourceCode,
+    ontologyBaseCode: baseId,
+    baseId,
+    ontologyBaseName: entry.ontologyBaseName || entry.baseName,
+    sceneId: entry.sceneId || entry.sceneCode,
+    viewCode: bizType === 'VIEW' ? resourceCode : entry.viewCode || entry.view_code,
+    viewName: bizType === 'VIEW' ? resourceName : entry.viewName || entry.view_name,
+    objectCode: bizType === 'OBJECT' ? resourceCode : entry.objectCode || entry.object_code,
+    objectName: bizType === 'OBJECT' ? resourceName : entry.objectName || entry.object_name,
+  };
+};
+
+const entryIdentity = (entry: any) => {
+  const normalized = normalizeEntry(entry);
+  if (normalized.resourceId) return `ID:${normalized.resourceId}`;
+  return [
+    normalized.resourceBizType,
+    normalized.ontologyBaseCode,
+    normalized.sceneId,
+    normalized.viewCode,
+    normalized.objectCode,
+    normalized.resourceCode,
+  ]
+    .filter((item) => item !== undefined && item !== null && item !== '')
+    .join(':');
+};
+
+const mergeEntries = (baseEntries: any[] = [], extraEntries: any[] = []) => {
+  const map = new Map<string, any>();
+  [...baseEntries, ...extraEntries].map(normalizeEntry).forEach((entry) => {
+    const key = entryIdentity(entry);
+    if (key) map.set(key, { ...map.get(key), ...entry });
+  });
+  return Array.from(map.values());
+};
+
+const getResourceKey = (entry: any) => {
+  const normalized = normalizeEntry(entry);
+  if (normalized.resourceId) return `ID:${normalized.resourceId}`;
+  const bizType = getEntryBizType(normalized);
+  if (bizType === 'OBJECT') {
+    return `OBJECT:${normalized.ontologyBaseCode || normalized.baseId || ''}:${normalized.sceneId || ''}:${
+      normalized.viewCode || ''
+    }:${normalized.objectCode || normalized.resourceCode || ''}`;
+  }
+  if (bizType === 'VIEW') {
+    return `VIEW:${normalized.ontologyBaseCode || normalized.baseId || ''}:${normalized.sceneId || ''}:${
+      normalized.viewCode || normalized.resourceCode || ''
+    }`;
+  }
+  const fallback = entryIdentity(normalized) || normalized.resourceCode || '';
+  return bizType || fallback ? `${bizType || 'RESOURCE'}:${fallback}` : '';
+};
+
+const getResourceKeys = (entry: any) => {
+  const normalized = normalizeEntry(entry);
+  const keys = new Set<string>();
+  const key = getResourceKey(normalized);
+  if (key) keys.add(key);
+  if (normalized.resourceId) keys.add(`ID:${normalized.resourceId}`);
+  return Array.from(keys);
+};
+
+const buildBoundEntries = (detail: any, optimisticEntries: any[] = []) => {
+  const ontologyPathById = new Map<string, any>();
+  parseMaybeArray(detail?.relOntology)
+    .map(normalizeEntry)
+    .forEach((entry) => {
+      if (entry.resourceId) ontologyPathById.set(`${entry.resourceId}`, entry);
+    });
+  const relResources = parseMaybeArray(detail?.relResourceList)
+    .map(normalizeEntry)
+    .filter((entry) => ['VIEW', 'OBJECT'].includes(getEntryBizType(entry)))
+    .map((entry) => {
+      const path = ontologyPathById.get(`${entry.resourceId}`);
+      if (!path) return entry;
+      return normalizeEntry({
+        ...entry,
+        ontologyBaseCode: path.ontologyBaseCode || entry.ontologyBaseCode,
+        ontologyBaseName: path.ontologyBaseName || entry.ontologyBaseName,
+        ownerType: path.ownerType || entry.ownerType,
+        sceneId: path.sceneId || entry.sceneId,
+        sceneName: path.sceneName || entry.sceneName,
+        viewCode: path.viewCode || entry.viewCode,
+        viewName: path.viewName || entry.viewName,
+        objectCode: path.objectCode || entry.objectCode,
+        objectName: path.objectName || entry.objectName,
+      });
+    });
+  const optimistic = optimisticEntries.map(normalizeEntry);
+  return mergeEntries(relResources, optimistic).filter((entry) => ['VIEW', 'OBJECT'].includes(getEntryBizType(entry)));
 };
 
 /**
- * 本体 sider 面板：展示当前激活数字员工已绑定的本体库；进入某库后显示「整库」可勾选树
- * （已绑定节点默认勾选）。修改后本体名后出现保存按钮，保存即覆盖式重写该库的 relOntology。
+ * 本体 sider 面板：直接展示当前数字员工已安装的视图 / 对象节点。
+ * 单击节点名看详情、双击引用到对话，三点菜单支持详情/卸载。
  */
 const OntologySiderPanel: React.FC = () => {
   const intl = useIntl();
   const navigate = useNavigate();
   const { pathname } = useLocation();
+  const { modal, message } = App.useApp();
   const { EventEmitter, setAgentId, setSessionId } = useGlobal();
   const { setDetailPanel, clearDetailPanel } = useContext(SiderContentContext);
   const activeSiderAgent = useActiveSiderAgent();
   const isOntologyCenterPage = pathname.startsWith('/ontologyCenter');
-  const nodeClickTimerRef = useRef<number | null>(null);
+  const clickTimerRef = useRef<number | null>(null);
 
-  const [level, setLevel] = useState<'base' | 'tree'>('base');
-  const [boundRows, setBoundRows] = useState<any[]>([]);
-  const [selectedBase, setSelectedBase] = useState<any>(null);
+  const [filterType, setFilterType] = useState<OntologyFilterType>('all');
+  const [entries, setEntries] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchValue, setSearchValue] = useState('');
-  const [currentNodeKey, setCurrentNodeKey] = useState('base');
 
-  const loadBound = useCallback(async () => {
-    if (!activeSiderAgent.resourceId) {
-      setBoundRows([]);
-      return;
-    }
-    setLoading(true);
-    try {
-      // 已绑定的本体库：由后端从已绑定叶子的 ontologyBaseCode 反查库返回
-      const response = await getBoundOntologyBases({ digitalEmployeeId: activeSiderAgent.resourceId });
-      setBoundRows(getArrayData(response));
-    } catch {
-      setBoundRows([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [activeSiderAgent.resourceId]);
+  const deId = activeSiderAgent?.resourceId;
+
+  // 拉取当前数字员工详情，relResourceList 给真实资源，relOntology 补充本体路径元数据。
+  const loadBound = useCallback(
+    async (optimisticEntries: any[] = []) => {
+      if (!deId) {
+        setEntries([]);
+        return;
+      }
+      setLoading(true);
+      try {
+        const res: any = await findDetailsById({ resourceId: String(deId) });
+        const detail = getData(res) || {};
+        setEntries(buildBoundEntries(detail, optimisticEntries));
+      } catch {
+        setEntries((prev) => (optimisticEntries.length ? mergeEntries(prev, optimisticEntries) : []));
+      } finally {
+        setLoading(false);
+      }
+    },
+    [deId]
+  );
 
   useEffect(() => {
-    setLevel('base');
-    setSelectedBase(null);
     setSearchValue('');
     loadBound();
   }, [loadBound]);
 
-  // 绑定抽屉 / 其它处保存本体绑定后，刷新左侧已绑定本体列表
+  // 其它处（绑定抽屉/配置页）保存后，刷新本面板
   useEffect(() => {
-    const onBindSaved = () => {
-      setLevel('base');
-      setSelectedBase(null);
-      loadBound();
+    const refreshBound = (event: Event) => {
+      const detail = (event as CustomEvent)?.detail || {};
+      const optimisticEntries = parseMaybeArray(detail.entries || detail.entry).map(normalizeEntry);
+      if (optimisticEntries.length) {
+        setEntries((prev) => mergeEntries(prev, optimisticEntries));
+      }
+      loadBound(optimisticEntries);
+      window.setTimeout(() => loadBound(optimisticEntries), 800);
     };
-    window.addEventListener('ontologyBindSaved', onBindSaved);
-    return () => window.removeEventListener('ontologyBindSaved', onBindSaved);
+
+    const pendingDetail = (window as any).__latestOntologyBindSaved;
+    if (pendingDetail?.openSider && Date.now() - Number(pendingDetail.receivedAt || 0) < 10000) {
+      refreshBound(new CustomEvent('ontologySiderRefresh', { detail: pendingDetail }));
+    }
+
+    const reloadBound = () => loadBound();
+
+    window.addEventListener('ontologyBindSaved', refreshBound);
+    window.addEventListener('ontologySiderRefresh', refreshBound);
+    window.addEventListener('digitalEmployeeResourceInstalled', reloadBound);
+    return () => {
+      window.removeEventListener('ontologyBindSaved', refreshBound);
+      window.removeEventListener('ontologySiderRefresh', refreshBound);
+      window.removeEventListener('digitalEmployeeResourceInstalled', reloadBound);
+    };
   }, [loadBound]);
 
-  const bases = useMemo(() => boundRows.filter((r) => r.resourceBizType === 'ONTOLOGY_BASE'), [boundRows]);
-
-  const filteredBases = useMemo(() => {
-    const kw = trim(searchValue).toLowerCase();
-    if (!kw) return bases;
-    return bases.filter((b) =>
-      [b.resourceName, b.resourceCode, b.resourceDesc].some((t) => `${t || ''}`.toLowerCase().includes(kw))
-    );
-  }, [bases, searchValue]);
-
-  const selectedBaseId = selectedBase
-    ? selectedBase.pid || selectedBase.ontologyBaseCode || selectedBase.resourceCode
-    : undefined;
-
-  const {
-    loading: treeLoading,
-    saving,
-    treeData,
-    checkedKeys,
-    onCheck,
-    dirty,
-    save,
-    nodeMap,
-  } = useOntologyBindTree({
-    enabled: level === 'tree',
-    baseId: selectedBaseId,
-    ownerType: selectedBase?.ownerType || 'personal',
-    baseName: selectedBase?.resourceName,
-    digitalEmployeeId: activeSiderAgent?.resourceId,
-  });
-
-  const enterBase = useCallback((base: any) => {
-    setSelectedBase(base);
-    setCurrentNodeKey('base');
-    setLevel('tree');
+  useEffect(() => {
+    const onResourceUninstalled = (event: Event) => {
+      const detail = (event as CustomEvent)?.detail || {};
+      const keys = new Set(
+        [detail.key, ...parseMaybeArray(detail.keys), ...getResourceKeys(detail.entry)].filter(Boolean)
+      );
+      if (!keys.size) return;
+      setEntries((prev) => prev.filter((entry) => !getResourceKeys(entry).some((key) => keys.has(key))));
+    };
+    window.addEventListener('ontologyResourceUninstalled', onResourceUninstalled);
+    return () => window.removeEventListener('ontologyResourceUninstalled', onResourceUninstalled);
   }, []);
 
-  const handleReset = () => {
-    setLevel('base');
-    setSelectedBase(null);
-    setCurrentNodeKey('base');
-    clearDetailPanel?.();
-  };
-
-  const handleSave = async () => {
-    const ok = await save();
-    if (ok) loadBound();
-  };
-
-  const clearNodeClickTimer = useCallback(() => {
-    if (nodeClickTimerRef.current !== null) {
-      window.clearTimeout(nodeClickTimerRef.current);
-      nodeClickTimerRef.current = null;
+  const clearClickTimer = useCallback(() => {
+    if (clickTimerRef.current !== null) {
+      window.clearTimeout(clickTimerRef.current);
+      clickTimerRef.current = null;
     }
   }, []);
+  useEffect(() => () => clearClickTimer(), [clearClickTimer]);
 
-  useEffect(() => () => clearNodeClickTimer(), [clearNodeClickTimer]);
+  const typeLabel = useCallback((tab: OntologyTab) => intl.formatMessage({ id: `common.resourceType.${tab}` }), [intl]);
 
-  const getNodeName = useCallback(
-    (node: any) => {
-      if (!node) return '';
-      if (node.level === 'BASE') return node.baseName || selectedBase?.resourceName || selectedBaseId;
-      if (node.level === 'SCENE') return node.sceneName || node.sceneId;
-      if (node.level === 'VIEW') return node.viewName || node.viewCode;
-      return node.objectName || node.objectCode;
-    },
-    [selectedBase?.resourceName, selectedBaseId]
-  );
+  // ============ 扁平列表：已安装视图 / 对象 ============
+  const flatNodes = useMemo(() => {
+    const kw = trim(searchValue).toLowerCase();
 
-  const getNodeCode = useCallback(
-    (node: any) => {
-      if (!node) return '';
-      if (node.level === 'BASE') return node.baseId || selectedBaseId;
-      if (node.level === 'SCENE') return node.sceneId;
-      if (node.level === 'VIEW') return node.viewCode;
-      return node.objectCode;
-    },
-    [selectedBaseId]
-  );
+    return entries
+      .map(normalizeEntry)
+      .filter((e) => ['VIEW', 'OBJECT'].includes(getEntryBizType(e)))
+      .filter((e) => filterType === 'all' || getEntryBizType(e) === TAB_BIZ_TYPE[filterType])
+      .filter((e) => {
+        const isView = getEntryBizType(e) === 'VIEW';
+        const name = isView ? e.viewName || e.viewCode : e.objectName || e.objectCode;
+        const code = isView ? e.viewCode : e.objectCode;
+        return !kw || [name, code].some((t) => `${t || ''}`.toLowerCase().includes(kw));
+      })
+      .map((e) => {
+        const isView = getEntryBizType(e) === 'VIEW';
+        const name = isView ? e.viewName || e.viewCode : e.objectName || e.objectCode;
+        const code = isView ? e.viewCode : e.objectCode;
+        return {
+          key: getResourceKey(e),
+          title: name,
+          nodeType: isView ? 'view' : 'object',
+          leaf: {
+            ...e,
+            name,
+            code,
+            baseId: e.ontologyBaseCode || e.baseId,
+            ownerType: e.ownerType || 'personal',
+            level: isView ? 'VIEW' : e.viewCode ? 'OBJECT_IN_VIEW' : 'OBJECT_IN_SCENE',
+          },
+        };
+      });
+  }, [entries, filterType, searchValue]);
 
-  const getNodeBizType = (node: any) => {
-    if (node?.level === 'BASE') return 'ONTOLOGY_BASE';
-    if (node?.level === 'SCENE') return 'SCENE';
-    if (node?.level === 'VIEW') return 'VIEW';
-    return 'OBJECT';
-  };
+  const leafToDrawerNode = (leaf: any) => ({
+    level: leaf.level,
+    baseName: leaf.ontologyBaseName,
+    sceneId: leaf.sceneId,
+    sceneName: leaf.sceneName,
+    viewCode: leaf.viewCode,
+    viewName: leaf.viewName,
+    objectCode: leaf.objectCode,
+    objectName: leaf.objectName,
+  });
 
-  const getNodeTypeLabel = (node: any) => {
-    if (node?.level === 'BASE') return intl.formatMessage({ id: 'common.resourceType.ontology' });
-    if (node?.level === 'SCENE') return intl.formatMessage({ id: 'common.resourceType.scene' });
-    if (node?.level === 'VIEW') return intl.formatMessage({ id: 'common.resourceType.view' });
-    return intl.formatMessage({ id: 'common.resourceType.object' });
-  };
-
-  const getNodeIcon = (node: any) => {
-    if (node?.level === 'BASE') return 'icon-a-Boxhezioutline';
-    if (node?.level === 'SCENE') return 'icon-a-Boxhezioutline';
-    if (node?.level === 'VIEW') return 'icon-a-yemian-line';
-    return 'icon-tongxun';
-  };
-
-  const quoteNodeToChat = useCallback(
-    (node: any) => {
-      if (!node) return;
-      const resourceName = getNodeName(node);
-      const resourceCode = getNodeCode(node);
-      const nodeBaseId = node.baseId || selectedBaseId;
+  const quoteLeafToChat = useCallback(
+    (leaf: any) => {
+      if (!leaf) return;
       const quotePayload = {
         item: {
-          ...node,
+          ...leaf,
           isFromResourceModule: true,
           showQuotePrefix: true,
-          ontologyBaseCode: nodeBaseId,
-          resourceId: `${nodeBaseId || ''}:${node.key}`,
-          resourceName,
-          resourceCode,
-          resourceBizType: getNodeBizType(node),
+          ontologyBaseCode: leaf.baseId,
+          resourceId: `${leaf.baseId || ''}:${leaf.resourceId}`,
+          resourceName: leaf.name,
+          resourceCode: leaf.code,
+          resourceBizType: getEntryBizType(leaf),
         },
         type: DragType.OBJECT,
       };
       const emitQuote = (waitForListeners = false) => {
         EventEmitter?.emit(
           'queryInput-insert-item',
-          {
-            ...quotePayload,
-          },
+          { ...quotePayload },
           waitForListeners ? { waitForListeners: true } : undefined
         );
         message.success(intl.formatMessage({ id: 'search.referenceSuccess' }));
       };
-
       if (pathname !== '/chat') {
         setAgentId?.('');
         setSessionId?.('');
@@ -219,215 +353,133 @@ const OntologySiderPanel: React.FC = () => {
       }
       emitQuote();
     },
-    [EventEmitter, getNodeCode, getNodeName, intl, navigate, pathname, selectedBaseId, setAgentId, setSessionId]
+    [EventEmitter, intl, message, navigate, pathname, setAgentId, setSessionId]
   );
 
-  const openNodeDetail = useCallback(
-    (node: any) => {
-      if (!node) return;
-      const nodeBaseId = node.baseId || selectedBaseId;
-      if (node.level !== 'OBJECT_IN_SCENE' && node.level !== 'OBJECT_IN_VIEW') {
-        const query = new URLSearchParams();
-        query.set('baseId', nodeBaseId || '');
-        query.set('ownerType', node.ownerType || selectedBase?.ownerType || 'personal');
-        query.set('resourceName', node.baseName || selectedBase?.resourceName || nodeBaseId || '');
-        query.set('resourceCode', selectedBase?.resourceCode || nodeBaseId || '');
-        if (node.level === 'BASE') {
-          query.set('focusType', 'base');
-        }
-        if (node.level === 'SCENE') {
-          query.set('focusType', 'scene');
-          query.set('sceneId', node.sceneId || '');
-          query.set('sceneName', node.sceneName || '');
-        }
-        if (node.level === 'VIEW') {
-          query.set('focusType', 'view');
-          query.set('sceneId', node.sceneId || '');
-          query.set('sceneName', node.sceneName || '');
-          query.set('viewCode', node.viewCode || '');
-          query.set('viewName', node.viewName || '');
-        }
-        clearDetailPanel?.();
-        navigate(`/ontologyBaseDetail?${query.toString()}`);
-        return;
-      }
+  const openLeafDetail = useCallback(
+    (leaf: any) => {
+      if (!leaf) return;
       setDetailPanel?.(
         <OntologyNodeDrawer
           open
           panel
-          node={node}
-          baseId={nodeBaseId}
-          ownerType={node.ownerType || selectedBase?.ownerType || 'personal'}
-          onReference={() => quoteNodeToChat(node)}
+          node={leafToDrawerNode(leaf)}
+          baseId={leaf.baseId}
+          ownerType={leaf.ownerType}
+          onReference={() => quoteLeafToChat(leaf)}
           onClose={() => clearDetailPanel?.()}
         />,
         { width: 350 }
       );
     },
-    [
-      clearDetailPanel,
-      navigate,
-      quoteNodeToChat,
-      selectedBase?.ownerType,
-      selectedBase?.resourceCode,
-      selectedBase?.resourceName,
-      selectedBaseId,
-      setDetailPanel,
-    ]
+    [clearDetailPanel, quoteLeafToChat, setDetailPanel]
   );
 
-  const toBaseNode = useCallback((base: any) => {
-    const baseId = base?.pid || base?.ontologyBaseCode || base?.resourceCode || base?.baseId;
-    return {
-      ...base,
-      key: `base:${baseId}`,
-      level: 'BASE',
-      childKeys: [],
-      baseId,
-      baseName: base?.resourceName || baseId,
-      ownerType: base?.ownerType || 'personal',
-    };
-  }, []);
-
-  const handleBaseClick = useCallback(
-    (base: any) => {
-      clearNodeClickTimer();
-      nodeClickTimerRef.current = window.setTimeout(() => {
-        nodeClickTimerRef.current = null;
-        enterBase(base);
-      }, 220);
+  const handleUnbind = useCallback(
+    (leaf: any) => {
+      if (!leaf) return;
+      modal.confirm({
+        title: intl.formatMessage({ id: 'ontologySider.unbindConfirm' }, { name: leaf.name }),
+        onOk: async () => {
+          try {
+            const relResourceId = leaf.resourceId || leaf.relResourceId;
+            if (!deId || !relResourceId) {
+              message.error('当前资源缺少真实绑定关系，无法卸载');
+              return;
+            }
+            const res: any = await unbindOntologyResource({ digitalEmployeeId: deId, relResourceId });
+            if (res && res.code !== undefined && res.code !== 0 && res.code !== 200) {
+              message.error(res.msg || res.message || intl.formatMessage({ id: 'common.operationFailed' }));
+              return;
+            }
+            message.success(intl.formatMessage({ id: 'ontologySider.unbindSuccess' }));
+            clearDetailPanel?.();
+            const key = getResourceKey(leaf);
+            const keys = getResourceKeys(leaf);
+            setEntries((prev) => prev.filter((entry) => !getResourceKeys(entry).some((item) => keys.includes(item))));
+            window.dispatchEvent(
+              new CustomEvent('ontologyResourceUninstalled', { detail: { key, keys, entry: leaf } })
+            );
+            await loadBound();
+          } catch (error: any) {
+            message.error(error?.message || error || intl.formatMessage({ id: 'common.operationFailed' }));
+          }
+        },
+      });
     },
-    [clearNodeClickTimer, enterBase]
-  );
-
-  const handleBaseDoubleClick = useCallback(
-    (base: any) => {
-      clearNodeClickTimer();
-      quoteNodeToChat(toBaseNode(base));
-    },
-    [clearNodeClickTimer, quoteNodeToChat, toBaseNode]
+    [clearDetailPanel, deId, intl, loadBound, message, modal]
   );
 
   const handleNodeClick = useCallback(
-    (node: any) => {
-      clearNodeClickTimer();
-      nodeClickTimerRef.current = window.setTimeout(() => {
-        nodeClickTimerRef.current = null;
-        if ((node?.childKeys || []).length > 0) {
-          setCurrentNodeKey(node.key);
-          return;
-        }
-        openNodeDetail(node);
+    (leaf: any) => {
+      clearClickTimer();
+      clickTimerRef.current = window.setTimeout(() => {
+        clickTimerRef.current = null;
+        openLeafDetail(leaf);
       }, 220);
     },
-    [clearNodeClickTimer, openNodeDetail]
+    [clearClickTimer, openLeafDetail]
   );
 
   const handleNodeDoubleClick = useCallback(
-    (node: any) => {
-      clearNodeClickTimer();
-      quoteNodeToChat(node);
+    (leaf: any) => {
+      clearClickTimer();
+      quoteLeafToChat(leaf);
     },
-    [clearNodeClickTimer, quoteNodeToChat]
+    [clearClickTimer, quoteLeafToChat]
   );
 
-  const currentNode = nodeMap?.[currentNodeKey] || nodeMap?.base;
-  const currentChildren = useMemo(
-    () => (currentNode?.childKeys || []).map((key: string) => nodeMap?.[key]).filter(Boolean),
-    [currentNode?.childKeys, nodeMap]
-  );
-  const drillPath = useMemo(() => {
-    if (!currentNode) return [];
-    const path: any[] = [];
-    let cursor = currentNode;
-    while (cursor) {
-      path.unshift(cursor);
-      cursor = cursor.parentKey ? nodeMap?.[cursor.parentKey] : null;
-    }
-    return path;
-  }, [currentNode, nodeMap]);
-
-  const renderNodeMenu = (node: any) => (
-    <Dropdown
-      trigger={['hover']}
-      overlayClassName={employeeStyles.mydropdown}
-      menu={{
-        items: [
-          {
-            key: 'detail',
-            label: <div className={employeeStyles.dropdownMenuItem}>{intl.formatMessage({ id: 'common.detail' })}</div>,
-          },
-        ],
-        onClick: ({ domEvent }) => {
-          domEvent.preventDefault();
-          domEvent.stopPropagation();
-          openNodeDetail(node);
-        },
-      }}
-    >
-      <Button
-        type="text"
-        size="small"
-        className={styles.ontologyNodeMore}
-        icon={<MoreOutlined />}
-        onClick={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-        }}
-      />
-    </Dropdown>
-  );
-
-  const renderOntologyNode = (node: any) => {
-    const hasChildren = (node.childKeys || []).length > 0;
-    const checked = checkedKeys.includes(node.key);
-    const name = getNodeName(node);
-    const code = getNodeCode(node);
-    return (
-      <div
-        key={node.key}
-        className={styles.ontologyNodeRow}
-        onClick={() => handleNodeClick(node)}
-        onDoubleClick={() => handleNodeDoubleClick(node)}
-      >
+  const renderNode = useCallback(
+    (node: any) => {
+      return (
         <div
-          className={styles.ontologyNodeCheck}
-          onClick={(event) => {
-            event.stopPropagation();
-          }}
+          key={node.key}
+          className={styles.nodeRow}
+          onClick={() => handleNodeClick(node.leaf)}
+          onDoubleClick={() => handleNodeDoubleClick(node.leaf)}
         >
-          <Checkbox
-            checked={checked}
-            onChange={(event) => onCheck(null, { node: { key: node.key }, checked: event.target.checked })}
-          />
-        </div>
-        <div className={styles.ontologyNodeMain}>
-          <span className={styles.ontologyNodeIcon}>
-            {hasChildren && <AntdIcon type="icon-a-xiangyou" className={styles.drillIcon} />}
-            <AntdIcon type={getNodeIcon(node)} />
+          <span className={styles.nodeIcon}>
+            <AntdIcon type={NODE_ICON[node.nodeType] || NODE_ICON.object} />
           </span>
-          <div className={styles.ontologyNodeText}>
-            <div className={styles.ontologyNodeNameRow}>
-              <Tooltip title={name}>
-                <span className={styles.ontologyNodeName}>{name}</span>
-              </Tooltip>
-              <span className={styles.ontologyTypeTag}>
-                <span className={styles.ontologyTypeTagText}>{getNodeTypeLabel(node)}</span>
-              </span>
-            </div>
-            {code && <span className={styles.ontologyNodeCode}>{code}</span>}
-          </div>
+          <span className={styles.leafTitle}>
+            <Tooltip title={node.leaf?.code ? `${node.title}（${node.leaf.code}）` : node.title}>
+              <span className={styles.leafName}>{node.title}</span>
+            </Tooltip>
+            <span className={styles.typeTag}>
+              <span className={styles.typeTagText}>{typeLabel(node.nodeType)}</span>
+            </span>
+          </span>
+          <Dropdown
+            trigger={['hover']}
+            menu={{
+              items: [
+                { key: 'detail', label: intl.formatMessage({ id: 'common.detail' }) },
+                { key: 'unbind', label: intl.formatMessage({ id: 'ontologySider.unbind' }) },
+              ],
+              onClick: ({ key, domEvent }) => {
+                domEvent.stopPropagation();
+                if (key === 'detail') openLeafDetail(node.leaf);
+                else handleUnbind(node.leaf);
+              },
+            }}
+          >
+            <EllipsisOutlined
+              className={classnames(commonStyles.treeActionIcon, styles.nodeAction)}
+              onClick={(event) => event.stopPropagation()}
+              onMouseDown={(event) => event.stopPropagation()}
+            />
+          </Dropdown>
         </div>
-        {renderNodeMenu(node)}
-      </div>
-    );
-  };
+      );
+    },
+    [handleNodeClick, handleNodeDoubleClick, handleUnbind, intl, openLeafDetail, typeLabel]
+  );
 
   return (
-    <div className={`${styles.container} ${styles.ontologySiderContainer}`}>
+    <div className={`${chromeStyles.container} ${chromeStyles.ontologySiderContainer}`}>
       <ActiveSiderAgentBar agent={activeSiderAgent} />
       <div
-        className={styles.router}
+        className={chromeStyles.router}
         onClick={() =>
           navigate(
             isOntologyCenterPage ? { pathname: '/chat' } : '/ontologyCenter',
@@ -436,123 +488,43 @@ const OntologySiderPanel: React.FC = () => {
         }
       >
         <AntdIcon type="icon-a-Boxhezioutline" />
-        <span className={styles.middle}>{intl.formatMessage({ id: 'sider.ontologyCenter' })}</span>
-        <AntdIcon type={isOntologyCenterPage ? 'icon-a-Leftzuo' : 'icon-a-Rightyou'} className={styles.routerIcon} />
+        <span className={chromeStyles.middle}>{intl.formatMessage({ id: 'sider.ontologyCenter' })}</span>
+        <AntdIcon
+          type={isOntologyCenterPage ? 'icon-a-Leftzuo' : 'icon-a-Rightyou'}
+          className={chromeStyles.routerIcon}
+        />
       </div>
 
-      {level === 'tree' && (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-          <Breadcrumb className={styles.breadcrumb}>
-            <Breadcrumb.Item>
-              <span onClick={handleReset}>
-                <AntdIcon type="icon-a-Leftzuo" className={styles.breadcrumbBackIcon} />
-                {intl.formatMessage({ id: 'dialogueRecord.all' })}
-              </span>
-            </Breadcrumb.Item>
-            {drillPath.map((node, index) => {
-              const isLast = index === drillPath.length - 1;
-              return (
-                <Breadcrumb.Item key={node.key}>
-                  <span
-                    className={isLast ? styles.breadcrumbUnclickable : styles.breadcrumbClickable}
-                    onClick={isLast ? undefined : () => setCurrentNodeKey(node.key)}
-                  >
-                    {getNodeName(node)}
-                  </span>
-                </Breadcrumb.Item>
-              );
-            })}
-          </Breadcrumb>
-          {dirty && (
-            <Tooltip title={intl.formatMessage({ id: 'common.save' })}>
-              <Button
-                type="link"
-                size="small"
-                loading={saving}
-                onClick={handleSave}
-                style={{ padding: 0 }}
-                icon={<SaveOutlined />}
-                aria-label={intl.formatMessage({ id: 'common.save' })}
-              />
-            </Tooltip>
+      <Input
+        className={styles.search}
+        value={searchValue}
+        allowClear
+        addonBefore={
+          <Select
+            className={styles.searchTypeSelect}
+            value={filterType}
+            options={[
+              { value: 'all', label: intl.formatMessage({ id: 'common.all' }) },
+              { value: 'view', label: typeLabel('view') },
+              { value: 'object', label: typeLabel('object') },
+            ]}
+            onChange={(value) => setFilterType(value)}
+          />
+        }
+        suffix={<SearchOutlined />}
+        placeholder={intl.formatMessage({ id: 'ontologySider.searchPlaceholder' })}
+        onChange={(e) => setSearchValue(e.target.value)}
+      />
+
+      <Spin spinning={loading} wrapperClassName={classnames(commonStyles.listSpinner, styles.treeSpin)}>
+        <div className={styles.treeRegion}>
+          {!loading && flatNodes.length === 0 ? (
+            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={intl.formatMessage({ id: 'common.noData' })} />
+          ) : (
+            <div className={styles.nodeList}>{flatNodes.map(renderNode)}</div>
           )}
         </div>
-      )}
-
-      {level === 'base' && (
-        <div className={styles.searchActionRow}>
-          <Input
-            className={styles.searchInput}
-            value={searchValue}
-            suffix={<SearchOutlined />}
-            placeholder={intl.formatMessage({ id: 'employeeDetail.ontology.searchBase' })}
-            onChange={(e) => setSearchValue(e.target.value)}
-          />
-        </div>
-      )}
-
-      <div className={styles.ontologyScrollRegion}>
-        <Spin className={styles.ontologyScrollSpin} spinning={level === 'base' ? loading : treeLoading}>
-          <div className={styles.ontologyScrollContent}>
-            {level === 'base' ? (
-              <List
-                className={employeeStyles.employeesList}
-                dataSource={filteredBases}
-                locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
-                renderItem={(item: any) => (
-                  <List.Item
-                    className={styles.resourceItem}
-                    onClick={() => handleBaseClick(item)}
-                    onDoubleClick={() => handleBaseDoubleClick(item)}
-                    actions={[renderNodeMenu(toBaseNode(item))]}
-                  >
-                    <List.Item.Meta
-                      avatar={
-                        <span className={styles.resourceAvatar}>
-                          <AntdIcon type="icon-a-xiangyou" className={styles.drillIcon} />
-                          <AntdIcon type="icon-a-Boxhezioutline" />
-                        </span>
-                      }
-                      title={
-                        <Typography.Title className={employeeStyles.name}>
-                          <div className={styles.ontologyNodeNameRow}>
-                            <Tooltip title={item.resourceName}>
-                              <span className={styles.ontologyNodeName}>{item.resourceName}</span>
-                            </Tooltip>
-                            <span className={styles.ontologyTypeTag}>
-                              <span className={styles.ontologyTypeTagText}>{getNodeTypeLabel(toBaseNode(item))}</span>
-                            </span>
-                          </div>
-                        </Typography.Title>
-                      }
-                      description={
-                        item.resourceDesc && (
-                          <Typography.Paragraph
-                            className={employeeStyles.description}
-                            ellipsis={{ tooltip: item.resourceDesc }}
-                          >
-                            {item.resourceDesc}
-                          </Typography.Paragraph>
-                        )
-                      }
-                    />
-                  </List.Item>
-                )}
-              />
-            ) : treeData.length ? (
-              <div className={styles.ontologyNodeList}>
-                {currentChildren.length ? (
-                  currentChildren.map(renderOntologyNode)
-                ) : (
-                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} />
-                )}
-              </div>
-            ) : (
-              !treeLoading && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} />
-            )}
-          </div>
-        </Spin>
-      </div>
+      </Spin>
     </div>
   );
 };
