@@ -645,7 +645,7 @@ export function registerByaiHooks(api: OpenClawPluginApi): void {
         sections.push(buildLanguagePrompt(request.language));
       }
       if (request) {
-        sections.push(buildByclawAcpLanguagePrompt(request.language, request.languageProvided));
+        sections.push(buildByclawAcpLanguagePrompt(request.language, request.languageProvided, request.sessionId));
       }
       const channelExtPrompt = buildChannelExtensionPrompt(
         request?.channelExtension,

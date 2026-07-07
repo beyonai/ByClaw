@@ -52,6 +52,8 @@ describe("prompt-injection-snapshot", () => {
     expect(taken?.appendSystemContext).toContain("渠道语言");
     expect(taken?.appendSystemContext).toContain("ByClaw ACP 下游语言元数据");
     expect(taken?.appendSystemContext).toContain("replyLanguage: \"zh_CN\"");
+    expect(taken?.appendSystemContext).toContain("sessionId: \"100\"");
+    expect(taken?.appendSystemContext).toContain(".byclaw/acp-runs/{ACP_CLIENT_TYPE}/100");
 
     clearPromptInjectionSnapshot(request.sessionKey);
     expect(takePromptInjectionSnapshot(request.sessionKey)).toBeUndefined();

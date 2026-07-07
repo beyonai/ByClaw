@@ -13,6 +13,7 @@ const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const bundleDir = path.join(rootDir, ".tmp", "test-bundles");
 const workspaceRoot = path.join(os.tmpdir(), "byclaw-acp-adapter-sessions-spawn-payload");
 const FIXTURE_LINKED_SKILL_ID = "910001";
+const SESSION_FILES_ROOT = "/by/.sessions";
 
 function selectedKinds() {
   const explicit = process.argv.find((arg) => arg.startsWith("--kinds="));
@@ -135,6 +136,8 @@ function assertSessionsSpawnPayload(params) {
   const agentModels = bundle.agentModels;
   const sharedContext = bundle.sharedContext;
   const expectedReplyLanguage = testCase.request.replyLanguage ?? testCase.request.language ?? "zh_CN";
+  const expectedByaiSessionId = testCase.request.sessionId;
+  const expectedSessionRoot = `${SESSION_FILES_ROOT}/${expectedByaiSessionId}`;
 
   assert.equal(payload.runtime, ACP.runtime, `${testCase.name} sessionsSpawn.runtime mismatch`);
   assert.equal(payload.agentId, coordinator.acpAgentId, `${testCase.name} sessionsSpawn.agentId mismatch`);
@@ -162,13 +165,45 @@ function assertSessionsSpawnPayload(params) {
     expectedReplyLanguage,
     `${testCase.name} bundle.responseLanguage.language mismatch`,
   );
+  assert.equal(bundle.sessionId, expectedByaiSessionId, `${testCase.name} bundle.sessionId mismatch`);
+  assert.equal(
+    bundle.byaiChannelSessionId,
+    expectedByaiSessionId,
+    `${testCase.name} bundle.byaiChannelSessionId mismatch`,
+  );
+  assert.equal(
+    bundle.fixedWorkSpecs?.sessionFiles?.byaiChannelSessionId,
+    expectedByaiSessionId,
+    `${testCase.name} fixedWorkSpecs byaiChannelSessionId mismatch`,
+  );
+  assert.equal(
+    bundle.fixedWorkSpecs?.sessionFiles?.sessionRoot,
+    expectedSessionRoot,
+    `${testCase.name} fixedWorkSpecs sessionRoot mismatch`,
+  );
   assert.equal(
     plan.metadata.responseLanguage?.language,
     expectedReplyLanguage,
     `${testCase.name} metadata.responseLanguage.language mismatch`,
   );
+  assert.equal(
+    plan.metadata.fixedWorkSpecs?.sessionFiles?.sessionRoot,
+    expectedSessionRoot,
+    `${testCase.name} metadata fixedWorkSpecs sessionRoot mismatch`,
+  );
   assert.ok(sharedContext, `${testCase.name} bundle.sharedContext is missing`);
   assert.equal(bundle.clientType, fixture.config.defaultAcpClientType, `${testCase.name} clientType mismatch`);
+  assert.equal(sharedContext.sessionId, expectedByaiSessionId, `${testCase.name} sharedContext.sessionId mismatch`);
+  assert.equal(
+    sharedContext.byaiChannelSessionId,
+    expectedByaiSessionId,
+    `${testCase.name} sharedContext.byaiChannelSessionId mismatch`,
+  );
+  assert.equal(
+    sharedContext.sessionFilesRoot,
+    expectedSessionRoot,
+    `${testCase.name} sharedContext.sessionFilesRoot mismatch`,
+  );
   assert.ok(fs.existsSync(sharedContext.queryPath), `${testCase.name} query.md is missing`);
   assert.ok(fs.existsSync(sharedContext.metadataPath), `${testCase.name} metadata.md is missing`);
   assert.ok(
@@ -182,19 +217,52 @@ function assertSessionsSpawnPayload(params) {
     ),
     `${testCase.name} shared directory should use .byclaw/acp-runs/claudeCode`,
   );
+  assert.ok(
+    sharedContext.sharedDir.endsWith(
+      path.join(PATHS.byclawDir, PATHS.acpRunsDir, PATHS.clientDirNames.claudeCode, expectedByaiSessionId),
+    ),
+    `${testCase.name} shared directory should end with the byai-channel session id`,
+  );
   assert.match(payload.task, /query\.md/u, `${testCase.name} task should point to query.md`);
   assert.match(payload.task, /metadata\.md/u, `${testCase.name} task should point to metadata.md`);
   assert.match(payload.task, /clientInstructions/u, `${testCase.name} task should point to client instructions`);
   assert.match(payload.task, /回复语言: zh_CN/u, `${testCase.name} task should include reply language`);
+  assert.match(
+    payload.task,
+    new RegExp(`byaiChannelSessionId: ${expectedByaiSessionId}`, "u"),
+    `${testCase.name} task should include byai-channel session id`,
+  );
+  assert.match(
+    payload.task,
+    new RegExp(expectedSessionRoot.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"),
+    `${testCase.name} task should include session files root`,
+  );
   const metadata = fs.readFileSync(sharedContext.metadataPath, "utf8");
   const query = fs.readFileSync(sharedContext.queryPath, "utf8");
   const clientInstructions = fs.readFileSync(sharedContext.clientInstructionsPath, "utf8");
   assert.match(query, /Reply language: zh_CN/u, `${testCase.name} query should include reply language`);
   assert.match(metadata, /responseLanguage/u, `${testCase.name} metadata should include responseLanguage`);
+  assert.match(metadata, /Fixed Work Specs/u, `${testCase.name} metadata should include fixed work specs`);
+  assert.match(metadata, /Session Files/u, `${testCase.name} metadata should include Session Files policy`);
+  assert.match(
+    metadata,
+    new RegExp(expectedSessionRoot.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"),
+    `${testCase.name} metadata should include session files root`,
+  );
   assert.match(
     clientInstructions,
     /Reply language: zh_CN/u,
     `${testCase.name} client instructions should include reply language`,
+  );
+  assert.match(
+    clientInstructions,
+    /Fixed Work Specs/u,
+    `${testCase.name} client instructions should include fixed work specs`,
+  );
+  assert.match(
+    clientInstructions,
+    new RegExp(expectedSessionRoot.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"),
+    `${testCase.name} client instructions should include session files root`,
   );
   assert.match(metadata, /linkedSkills/u, `${testCase.name} metadata should include mounted linkedSkills`);
   assert.match(metadata, /skillDocPath/u, `${testCase.name} metadata should include absolute skillDocPath`);
@@ -259,6 +327,14 @@ async function main() {
 
   const summaries = [];
   for (const testCase of cases) {
+    const request = {
+      ...testCase.request,
+      sessionId: testCase.request.sessionId || `byai-session-${testCase.name}`,
+    };
+    const effectiveTestCase = {
+      ...testCase,
+      request,
+    };
     const cwd = path.join(workspaceRoot, testCase.name);
     const config = {
       ...jsonClone(fixture.config),
@@ -268,9 +344,9 @@ async function main() {
     const plan = createByclawAcpPlan({
       config,
       snapshot,
-      request: testCase.request,
+      request,
     });
-    assertSessionsSpawnPayload({ plan, testCase, snapshot });
+    assertSessionsSpawnPayload({ plan, testCase: effectiveTestCase, snapshot });
     summaries.push({
       kind: testCase.name,
       id: plan.id,

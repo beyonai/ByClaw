@@ -253,4 +253,65 @@ describe('hooks/useChat/index', () => {
     expect(updatedMessages.filter((msg) => !msg.fromBeyond)).toHaveLength(1);
     expect(updatedMessages.filter((msg) => msg.fromBeyond).map((msg) => msg.agentId)).toEqual(['101', '102']);
   });
+
+  it('uses the single inline mentioned digital employee for the answer placeholder even when payload has an agentId', async () => {
+    const { result } = renderHook(() =>
+      useChat({
+        sessionId: 's1',
+        addSession: jest.fn(),
+      } as any)
+    );
+
+    await act(async () => {
+      await result.current.sendQuery({
+        queryQuestion: '@Agent B hello',
+        payload: {
+          agentId: 'default-agent',
+          agentType: 'agent',
+        },
+        resourceList: [
+          {
+            id: 'DIG_EMPLOYEE_102',
+            resourceType: 'DIG_EMPLOYEE',
+            resourceId: '102',
+            resourceName: 'Agent B',
+            resourceCode: 'agent-b',
+          },
+        ],
+      } as any);
+    });
+
+    expect(mockSend).toHaveBeenCalledTimes(1);
+    const payload = mockSend.mock.calls[0]?.[1] as any;
+    expect(payload.agentId).toBe('102');
+    expect(payload.agentCode).toBeNull();
+    expect(payload.resourceList).toEqual([
+      {
+        id: 'DIG_EMPLOYEE_102',
+        resourceType: 'DIG_EMPLOYEE',
+        resourceId: '102',
+        resourceName: 'Agent B',
+        resourceCode: 'agent-b',
+      },
+    ]);
+
+    const answerMessage = mockUpdateMessage.mock.calls.map(([msg]) => msg).find((msg) => msg.fromBeyond);
+    expect(answerMessage.agentId).toBe('102');
+    expect(answerMessage.agentCode).toBe('agent-b');
+    expect(answerMessage.agentName).toBe('Agent B');
+    expect(answerMessage.resourceList).toEqual([
+      {
+        id: 'DIG_EMPLOYEE_102',
+        resourceType: 'DIG_EMPLOYEE',
+        resourceId: '102',
+        resourceName: 'Agent B',
+        resourceCode: 'agent-b',
+      },
+    ]);
+    expect(JSON.parse(answerMessage.metadata)).toMatchObject({
+      agentId: '102',
+      agentCode: 'agent-b',
+      agentName: 'Agent B',
+    });
+  });
 });

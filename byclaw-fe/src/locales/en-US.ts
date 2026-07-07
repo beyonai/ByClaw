@@ -579,6 +579,7 @@ export default {
   'messageList.troubleshoot': 'Troubleshoot',
   'messageList.troubleshootTooltip': 'Call the Baiying operations digital employee to troubleshoot the issue',
   'messageList.troubleshootPrompt': 'The traceId of the current message is {traceId}. Please help me troubleshoot it.',
+  'messageList.mentionDigitalEmployee': 'Click to @ {name}',
 
   'citeRender.title': 'Referenced Messages',
   'citeRender.deleteConfirm': 'Are you sure to delete this reference?',

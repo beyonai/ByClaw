@@ -27,6 +27,7 @@ const ALWAYS_USE_ENGLISH_SYSTEM_PROMPT = [
 ].join("\n");
 
 const BYCLAW_ACP_TOOL_NAMES = ["byclawAcpPlan", "byclawAcpRun"] as const;
+const BYCLAW_ACP_SESSION_ID_FIELD = "sessionId";
 const BYCLAW_ACP_REPLY_LANGUAGE_FIELD = "replyLanguage";
 const BYCLAW_ACP_LANGUAGE_FIELD = "language";
 const BYCLAW_ACP_LANGUAGE_PROVIDED_FIELD = "languageProvided";
@@ -165,23 +166,34 @@ export function buildLanguagePrompt(language?: string): string {
 export function buildByclawAcpLanguagePrompt(
     language?: string,
     languageProvided = false,
+    sessionId?: string,
 ): string {
     const resolvedLanguage = resolveLanguage(language);
     const tools = BYCLAW_ACP_TOOL_NAMES.map((toolName) => `\`${toolName}\``).join(" / ");
     const languageJson = JSON.stringify(resolvedLanguage);
     const providedJson = JSON.stringify(languageProvided);
+    const normalizedSessionId = typeof sessionId === "string" ? sessionId.trim() : "";
+    const sessionIdJson = JSON.stringify(normalizedSessionId);
+    const sessionLine = normalizedSessionId
+        ? `Also pass the real byai-channel session id as \`${BYCLAW_ACP_SESSION_ID_FIELD}: ${sessionIdJson}\`; ACP run files must be written under \`.byclaw/acp-runs/{ACP_CLIENT_TYPE}/${normalizedSessionId}\`, not under an agent id or generated id.`
+        : `If the current byai-channel request has a real session id, pass it as \`${BYCLAW_ACP_SESSION_ID_FIELD}\`; do not substitute an agent id, run id, or generated id.`;
     if (isEnglishLanguage(resolvedLanguage)) {
         return [
             "## ByClaw ACP downstream language metadata",
             "",
             `When calling ${tools}, pass the current byai-channel reply language metadata as tool arguments: \`${BYCLAW_ACP_LANGUAGE_FIELD}: ${languageJson}\`, \`${BYCLAW_ACP_REPLY_LANGUAGE_FIELD}: ${languageJson}\`, and \`${BYCLAW_ACP_LANGUAGE_PROVIDED_FIELD}: ${providedJson}\`.`,
+            sessionLine,
             "Do not remove the responseLanguage policy from the returned sessions_spawn task, metadata.md, or plan-bundle.json; downstream ACP clients must answer in that language unless the user explicitly requests a different language in the current query.",
         ].join("\n");
     }
+    const chineseSessionLine = normalizedSessionId
+        ? `同时必须把真实 byai-channel session_id 作为 \`${BYCLAW_ACP_SESSION_ID_FIELD}: ${sessionIdJson}\` 传入；ACP run 文件必须写到 \`.byclaw/acp-runs/{ACP_CLIENT_TYPE}/${normalizedSessionId}\`，不能使用 agent id 或生成 id。`
+        : `如果当前 byai-channel 请求存在真实 session_id，必须作为 \`${BYCLAW_ACP_SESSION_ID_FIELD}\` 传入；不要用 agent id、run id 或生成 id 代替。`;
     return [
         "## ByClaw ACP 下游语言元数据",
         "",
         `调用 ${tools} 时，必须把当前 byai-channel 回复语言元数据透传到工具入参：\`${BYCLAW_ACP_LANGUAGE_FIELD}: ${languageJson}\`、\`${BYCLAW_ACP_REPLY_LANGUAGE_FIELD}: ${languageJson}\`、\`${BYCLAW_ACP_LANGUAGE_PROVIDED_FIELD}: ${providedJson}\`。`,
+        chineseSessionLine,
         "不要删除工具返回的 sessions_spawn task、metadata.md 或 plan-bundle.json 里的 responseLanguage 策略；下游 ACP client 必须按该语言响应，除非用户在当前 query 中明确要求其它语言。",
     ].join("\n");
 }
