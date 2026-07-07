@@ -48,6 +48,23 @@ describe('models/useMessageStore', () => {
     expect(result.list[1].isHistoryMsg).toBe(true);
   });
 
+  it('fetchMessage sorts history by createTime before messageId', async () => {
+    mockGetMessages.mockResolvedValue({
+      list: [
+        { messageId: 10007074, createTime: '2026-07-07 14:51:00', fromBeyond: false },
+        { messageId: 2666782070, createTime: '2026-07-07 14:45:43', fromBeyond: true },
+        { messageId: 10007067, createTime: '2026-07-07 14:45:41', fromBeyond: false },
+      ],
+      pageNum: 1,
+      pageSize: 20,
+      total: 3,
+    } as any);
+
+    const result = await fetchMessage({ sessionId: 's1' });
+
+    expect(result.list.map((item) => item.messageId)).toEqual([10007067, 2666782070, 10007074]);
+  });
+
   it('setSessionMessage stores message info by session id', () => {
     const map = new Map();
     const state = { sessionListMap: map };

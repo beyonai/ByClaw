@@ -324,17 +324,6 @@ export function resolveByaiLaneKey(laneMetadata: ByaiLaneMetadata | undefined): 
   );
 }
 
-export function appendByaiLaneToSessionKey(
-  sessionKey: string,
-  laneMetadata: ByaiLaneMetadata | undefined,
-): string {
-  const laneKey = resolveByaiLaneKey(laneMetadata);
-  if (!laneKey) {
-    return sessionKey;
-  }
-  return `${sessionKey}:lane:${encodeURIComponent(laneKey)}`;
-}
-
 export function appendByaiLaneToTarget(
   target: string,
   laneMetadata: ByaiLaneMetadata | undefined,

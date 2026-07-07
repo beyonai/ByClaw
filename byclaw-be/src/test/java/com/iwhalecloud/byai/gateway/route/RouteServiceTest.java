@@ -340,6 +340,7 @@ class RouteServiceTest {
         lanes.add(lane("lane-b", 102L, "agent-b", "Agent B", "client-b", 12L, 22L, 2));
         multiAgent.put("lanes", lanes);
         ctx.getAssistantChatDto().getExtParams().put("multiAgent", multiAgent);
+        when(sequenceService.nextVal()).thenReturn(1001L, 1002L);
 
         when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(),
                 anyString(), anyString(), anyString(), anyString(), any(), any()))
@@ -398,9 +399,9 @@ class RouteServiceTest {
         org.assertj.core.api.Assertions.assertThat(ctx.getMultiAgentMessageContextsByTraceId())
                 .containsKeys(laneATraceId, laneBTraceId);
         org.assertj.core.api.Assertions.assertThat(ctx.getMultiAgentMessageContextsByTraceId().get(laneATraceId)
-                .getMessageId()).isEqualTo(21L);
+                .getMessageId()).isEqualTo(1001L);
         org.assertj.core.api.Assertions.assertThat(ctx.getMultiAgentMessageContextsByTraceId().get(laneBTraceId)
-                .getMessageId()).isEqualTo(22L);
+                .getMessageId()).isEqualTo(1002L);
     }
 
     @Test

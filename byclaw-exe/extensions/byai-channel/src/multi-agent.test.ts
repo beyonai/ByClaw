@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  appendByaiLaneToSessionKey,
   appendByaiLaneToTarget,
   buildByaiMultiAgentLaneMessages,
   parseByaiLaneMetadata,
@@ -71,17 +70,11 @@ describe("multi-agent lane metadata", () => {
         multi_agent: { turnId: "turn-1", mode: "parallel", lanes: [] },
       }),
     ).toBeUndefined();
-    expect(appendByaiLaneToSessionKey("agent:a:direct:s1", undefined)).toBe(
-      "agent:a:direct:s1",
-    );
     expect(appendByaiLaneToTarget("agent-a:s1", undefined)).toBe("agent-a:s1");
   });
 
-  it("appends an encoded lane key to session and target keys", () => {
+  it("appends an encoded lane key to target keys", () => {
     const laneMetadata = { laneId: "lane/a b" };
-    expect(appendByaiLaneToSessionKey("agent:a:direct:s1", laneMetadata)).toBe(
-      "agent:a:direct:s1:lane:lane%2Fa%20b",
-    );
     expect(appendByaiLaneToTarget("agent-a:s1", laneMetadata)).toBe(
       "agent-a:s1:lane:lane%2Fa%20b",
     );

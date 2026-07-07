@@ -441,10 +441,9 @@ public class RouteService {
             if (StringUtils.isNotBlank(laneRoute.traceId)) {
                 ctx.getMultiAgentTraceIds().add(laneRoute.traceId);
                 ctx.getMultiAgentLaneMetadataByTraceId().put(laneRoute.traceId, laneRoute.laneMetadata);
-                Long answerMessageId = parseLong(laneRoute.answerMessageId);
-                if (answerMessageId != null && ctx.getMessageContext() != null) {
+                if (ctx.getMessageContext() != null) {
                     ctx.getMultiAgentMessageContextsByTraceId().put(laneRoute.traceId,
-                        new MessageContext(ctx.getMessageContext().getType(), answerMessageId,
+                        new MessageContext(ctx.getMessageContext().getType(), sequenceService.nextVal(),
                             ctx.getMessageContext().getTaskId()));
                 }
             }
