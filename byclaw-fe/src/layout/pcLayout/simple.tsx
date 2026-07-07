@@ -28,11 +28,34 @@ const PCAgentId = 'pcAgentId';
 
 const myEventEmitter = new EventEmitter$Cls();
 
+if (process.env.NODE_ENV === 'development' && typeof window !== 'undefined') {
+  (window as any).__BYCLAW_E2E_EVENT_EMITTER__ = myEventEmitter;
+  (window as any).__BYCLAW_E2E__ = {
+    EventEmitter: myEventEmitter,
+  };
+}
+
 const SimpleLayout = () => {
   const [isClose, setIsClose] = useState(false);
 
   const [sessionId, setSessionId] = useState<string>('');
   const [agentId, setAgentId] = useState<string>('');
+
+  useEffect(() => {
+    if (process.env.NODE_ENV !== 'development' || typeof window === 'undefined') return;
+    (window as any).__BYCLAW_E2E__ = {
+      ...((window as any).__BYCLAW_E2E__ || {}),
+      EventEmitter: myEventEmitter,
+      resetChat: () => {
+        setSessionId('');
+        setAgentId('');
+      },
+      getState: () => ({
+        sessionId,
+        agentId,
+      }),
+    };
+  }, [agentId, sessionId]);
 
   const { userInfo } = useSelector(({ user }) => ({ userInfo: user.userInfo }));
 

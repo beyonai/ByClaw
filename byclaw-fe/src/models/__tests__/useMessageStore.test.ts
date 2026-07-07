@@ -10,6 +10,7 @@ jest.mock('@/utils/messgae', () => ({
     transformed: true,
     resComIds: value.resComIds ? JSON.parse(value.resComIds) : undefined,
   })),
+  hasVisibleMessageContent: jest.fn(() => true),
 }));
 
 import { getMessages, getMessageState } from '@/service/message';

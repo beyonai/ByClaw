@@ -123,19 +123,11 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
       return false;
     }
     if (chatMode === chatModeMap.expert) {
-      const text = Editor.string(editor, []);
-      const atNodes = Editor.nodes(editor, {
-        at: [],
-        mode: 'lowest',
-        match: (ele) => Element.isElement(ele) && ele.type === ELEMENT_MENTION,
-      });
-      // 专家模式只允许@一次
-      if (!atNodes.next().done) return false;
       if (isInputting) {
-        // 输入中，必须有输入个@在前面
-        return !!text && text.startsWith('@');
+        return true;
       }
       // drop进来的，必须是没有内容
+      const text = Editor.string(editor, []);
       return !text;
     }
 
@@ -269,27 +261,34 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
   const checkIsDefaultAgent = useCallback(
     (data: any, strict?: boolean) => {
       const currentText = Editor.string(editor, []);
+      const hasMentionNode = !Editor.nodes(editor, {
+        at: [],
+        mode: 'lowest',
+        match: (ele) => Element.isElement(ele) && ele.type === ELEMENT_MENTION,
+      }).next().done;
       // 专家模式下第一个@的智能体
       return (
         chatMode === chatModeMap.expert &&
         !!data.agentType &&
+        !agentId &&
+        !hasMentionNode &&
         (!currentText || (strict ? currentText === '@' : currentText.startsWith('@')))
       );
     },
-    [editor, chatMode]
+    [agentId, editor, chatMode]
   );
 
   // 插入popover节点
   const insertItem = (item: any, type: IResourceType) => {
     let node = getElementData(type, item);
 
-    // 如果选择的是数字员工类型，那就用一个map来缓存。这样，专家模式时，就可以直接利用这个map来渲染输入框最前面默认的agent了
     if (type === ResourceType.digitalEmployee) {
+      // 手动 @ 选择的数字员工始终作为正文 mention 插入；切换默认 agent 只由路由/schema 驱动。
       setAgentCache(node);
       node = {
         ...node,
         // @ts-ignore
-        isDefaultAgent: checkIsDefaultAgent(item),
+        isDefaultAgent: false,
       };
     } else if (type === ResourceType.agentTool) {
       if (chatMode === chatModeMap.expert && !agentId) {

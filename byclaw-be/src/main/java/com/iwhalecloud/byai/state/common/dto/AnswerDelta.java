@@ -52,4 +52,20 @@ public class AnswerDelta {
     private String status;
 
     private String traceId;
+
+    private String laneId;
+
+    private String turnId;
+
+    private String mode;
+
+    private String clientRequestId;
+
+    private String queryMessageId;
+
+    private String answerMessageId;
+
+    private String agentCode;
+
+    private String agentName;
 }

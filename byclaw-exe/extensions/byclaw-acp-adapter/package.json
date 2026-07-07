@@ -1,0 +1,39 @@
+{
+  "name": "@openclaw/byclaw-acp-adapter",
+  "version": "2026.6.29",
+  "private": true,
+  "description": "OpenClaw plugin that adapts ByClaw digital employees from Redis into ACP Claude Code agent/team/workflow/loop plans.",
+  "type": "module",
+  "scripts": {
+    "build": "esbuild index.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/index.js --sourcemap --packages=external --external:openclaw",
+    "build:fast": "esbuild index.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/index.js --packages=external --external:openclaw",
+    "test": "npm run test:unit",
+    "test:unit": "node scripts/verify-sessions-spawn-payload.mjs",
+    "test:integration": "npm run prepare:test-config && npm run smoke",
+    "test:integration:execute-claude": "npm run prepare:test-config && npm run smoke -- --execute-claude",
+    "verify:sessions-spawn-payload": "npm run test:unit",
+    "pack:openclaw": "npm run build:fast && node scripts/install-openclaw-extension.mjs",
+    "deploy:openclaw": "npm run pack:openclaw",
+    "mock:redis": "node scripts/mock-redis-metadata.mjs",
+    "sync:204-agents": "node scripts/sync-204-digital-employees.mjs",
+    "prepare:test-config": "node scripts/prepare-openclaw-test-config.mjs",
+    "smoke": "node scripts/smoke-openclaw-gateway.mjs"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "esbuild": "0.25.12"
+  },
+  "openclaw": {
+    "extensions": [
+      "./dist/index.js"
+    ],
+    "compat": {
+      "pluginApi": ">=2026.4.16",
+      "minGatewayVersion": ">=2026.4.16"
+    },
+    "build": {
+      "openclawVersion": "2026.4.16",
+      "pluginSdkVersion": "2026.4.16"
+    }
+  }
+}

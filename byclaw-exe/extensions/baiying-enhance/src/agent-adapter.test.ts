@@ -408,7 +408,7 @@ describe("adaptAgentJson", () => {
             return;
         }
         expect(res.listEntry.tools).toEqual({
-            allow: ["*", "read", "write", "baiying_call"],
+            allow: ["*", "read", "write", "baiying_call", "byclaw_chat_context"],
         });
         expect(res.listEntry.experimental).toEqual({ localModelLean: false });
     });
@@ -429,7 +429,7 @@ describe("adaptAgentJson", () => {
             return;
         }
         expect(res.listEntry.tools).toEqual({
-            alsoAllow: ["baiying_call", "code_to_wiki"],
+            alsoAllow: ["baiying_call", "byclaw_chat_context", "code_to_wiki"],
         });
     });
 
@@ -450,7 +450,7 @@ describe("adaptAgentJson", () => {
             return;
         }
         expect(res.listEntry.tools).toEqual({
-            allow: ["read", "baiying_call", "code_to_wiki"],
+            allow: ["read", "baiying_call", "byclaw_chat_context", "code_to_wiki"],
         });
     });
 

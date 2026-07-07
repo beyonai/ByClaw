@@ -10,6 +10,7 @@ import AntdIcon from '@/components/AntdIcon';
 import CarouselFile from '@/components/MessageList/components/CarouselFile';
 import QueryInputBase, { IProps as pIProps, IState as pIState } from '@/components/QueryInput/queryInputBase';
 import { chatModeMap } from '@/constants/query';
+import { ResourceTypeMap } from '@/constants/resource';
 
 import UploadFile from '../components/UploadFile';
 import FileBrowserEntry from '../components/FileBrowserEntry';
@@ -97,7 +98,10 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
 
   // @ts-ignore
   getSendPayload = () => {
-    const { inputValue, fileList, deepThink, chatSettings, connectNet } = this.state;
+    const currentInputPayload = this.getCurrentInputPayload();
+    const { fileList, deepThink, chatSettings, connectNet } = this.state;
+    const inputValue = currentInputPayload?.text ?? this.state.inputValue;
+    const resourceList = currentInputPayload?.resourceList ?? this.state.resourceList;
     const { userInfo, chatMode, myAgentType } = this.props;
     const { agentId } = this.props.globalContext;
 
@@ -105,9 +109,12 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
     if (!sendVal) return null;
 
     const enterpriseInformation = !!get(chatSettings, 'dataCloud.internalKnowledgeBase'); // 原本的企业资料
+    const hasInlineDigitalEmployee = (resourceList || []).some(
+      (item) => `${item.resourceType}` === ResourceTypeMap.digitalEmployee
+    );
 
     let mode = chatMode;
-    if (chatMode === chatModeMap.expert && !agentId) {
+    if (chatMode === chatModeMap.expert && !agentId && !hasInlineDigitalEmployee) {
       // 如果是专家模式，但没有引用数字员工，改成base
       mode = chatModeMap.base;
     }
@@ -133,7 +140,7 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
           fileList: [],
         },
       },
-      resourceList: this.state.resourceList,
+      resourceList,
     };
 
     try {
@@ -305,7 +312,7 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
           <FileBrowserEntry />
           <MentionPopover
             type="@"
-            chatMode={chatMode}
+            chatMode={chatModeMap.expert}
             agentId={agentId}
             sessionId={sessionId}
             onSelect={this.onSelectMentionPopoverItem}

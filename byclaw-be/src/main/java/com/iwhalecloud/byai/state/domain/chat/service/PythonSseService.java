@@ -5,6 +5,7 @@ import org.slf4j.LoggerFactory;
 import java.io.BufferedReader;
 import java.io.OutputStream;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -108,6 +109,7 @@ public class PythonSseService {
         String key = jsonObject.getString("event");
         String value = jsonObject.getString("data");
         value = handleDigitExecSessionId(key, value);
+        markFirstVisibleResponseTime(key, messageContext);
 
         if (SseResponseEventEnum.answerDelta.equals(key)) {
             // 记录首词响应结束时间（仅记录第一次）
@@ -172,6 +174,16 @@ public class PythonSseService {
 
     }
 
+    private void markFirstVisibleResponseTime(String eventType, MessageContext messageContext) {
+        if (messageContext == null) {
+            return;
+        }
+        if (SseResponseEventEnum.answerDelta.equals(eventType)
+            || SseResponseEventEnum.reasoningLogDelta.equals(eventType)) {
+            messageContext.markFirstResponseTimeIfAbsent(new Date());
+        }
+    }
+
     /**
      * 仅积累事件数据到 MessageContext，不写 OutputStream。 用于处理非当前 traceId 的历史消息：需要入库但不推送给客户端。
      */
@@ -179,6 +191,7 @@ public class PythonSseService {
         JSONObject jsonObject = JSON.parseObject(line);
         String key = jsonObject.getString("event");
         String value = jsonObject.getString("data");
+        markFirstVisibleResponseTime(key, messageContext);
 
         if (SseResponseEventEnum.answerDelta.equals(key)) {
             messageContext.recordAnswerText(value);

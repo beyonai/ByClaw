@@ -18,6 +18,7 @@ import com.iwhalecloud.byai.common.util.MapParamUtil;
 import com.iwhalecloud.byai.common.web.ApplicationContextUtil;
 import com.iwhalecloud.byai.state.common.enums.AgentTypeEnum;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
+import com.iwhalecloud.byai.state.domain.chat.dto.MultiAgentMetadata;
 import com.iwhalecloud.byai.state.domain.chat.model.MessageContext;
 import com.iwhalecloud.byai.state.domain.message.dto.ByaiMessageHotDtoDto;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
@@ -48,7 +49,7 @@ public class GatewayStreamEventProcessor {
         if (StringUtils.isBlank(receivedTraceId)) {
             return true;
         }
-        if (receivedTraceId.equals(ctx.traceId)) {
+        if (ctx.isCurrentTrace(receivedTraceId)) {
             return false;
         }
         if (!TraceIdCodec.canDecode(receivedTraceId)) {
@@ -106,6 +107,7 @@ public class GatewayStreamEventProcessor {
             if (metadata != null && !metadata.isEmpty()) {
                 eventPayload.put("metadata", metadata.toJSONString());
             }
+            enrichLaneMetadata(ctx, dataJson, metadata, eventPayload);
             return eventPayload.toJSONString();
         }
         try {
@@ -118,6 +120,7 @@ public class GatewayStreamEventProcessor {
                 if (metadata != null && !metadata.isEmpty()) {
                     dataObj.put("metadata", metadata.toJSONString());
                 }
+                enrichLaneMetadata(ctx, dataJson, metadata, dataObj);
                 if (StringUtils.isNotBlank(dataObj.getString("parentOrderId"))
                     && dataObj.getString("parentOrderId").equals(userMessageId)) {
                     dataObj.put("parentOrderId", "-1");
@@ -134,10 +137,7 @@ public class GatewayStreamEventProcessor {
     public String normalizeEventType(ChatProcessContext ctx, JSONObject dataJson) {
         String eventType = dataJson.getString("event_type");
         String sourceAgentType = dataJson.getString("source_agent_type");
-        String targetAgentType = StringUtils.defaultIfBlank(ctx.targetAgentType,
-            MapParamUtil.getStringValue(ctx.getParams(), "worker_agent_type"));
-        if (StringUtils.isNotBlank(sourceAgentType) && StringUtils.isNotBlank(targetAgentType)
-            && !sourceAgentType.equals(targetAgentType) && SseResponseEventEnum.answerDelta.equals(eventType)) {
+        if (!isTargetAgentType(ctx, sourceAgentType) && SseResponseEventEnum.answerDelta.equals(eventType)) {
             return SseResponseEventEnum.reasoningLogDelta;
         }
         return eventType;
@@ -145,10 +145,100 @@ public class GatewayStreamEventProcessor {
 
     public boolean shouldIgnoreEvent(ChatProcessContext ctx, String eventType, JSONObject dataJson) {
         String sourceAgentType = dataJson.getString("source_agent_type");
-        String targetAgentType = StringUtils.defaultIfBlank(ctx.targetAgentType,
+        return !isTargetAgentType(ctx, sourceAgentType) && SseResponseEventEnum.appStreamResponse.equals(eventType);
+    }
+
+    public void enrichLaneMetadata(ChatProcessContext ctx, JSONObject dataJson, JSONObject metadata, JSONObject payload) {
+        if (payload == null) {
+            return;
+        }
+        JSONObject laneMetadata = resolveLaneMetadata(ctx, dataJson, metadata, payload);
+        if (laneMetadata == null || laneMetadata.isEmpty()) {
+            return;
+        }
+        copyField(payload, laneMetadata, "laneId", "laneId", "lane_id");
+        copyField(payload, laneMetadata, "turnId", "turnId", "turn_id");
+        copyField(payload, laneMetadata, "mode", "mode");
+        copyField(payload, laneMetadata, "clientRequestId", "clientRequestId", "client_request_id");
+        copyField(payload, laneMetadata, "queryMessageId", "queryMessageId", "query_message_id");
+        copyField(payload, laneMetadata, "answerMessageId", "answerMessageId", "answer_message_id");
+        copyField(payload, laneMetadata, "agentId", "agentId", "agent_id");
+        copyField(payload, laneMetadata, "agentCode", "agentCode", "agent_code");
+        copyField(payload, laneMetadata, "agentName", "agentName", "agent_name");
+        copyField(payload, laneMetadata, "order", "order");
+        copyField(payload, laneMetadata, "dependsOn", "dependsOn", "depends_on");
+        copyField(payload, laneMetadata, "traceId", "traceId", "trace_id");
+    }
+
+    private JSONObject resolveLaneMetadata(ChatProcessContext ctx, JSONObject dataJson, JSONObject metadata,
+        JSONObject payload) {
+        JSONObject laneMetadata = new JSONObject();
+        String traceId = dataJson == null ? null : dataJson.getString("trace_id");
+        mergeLaneFields(laneMetadata, ctx == null ? null : ctx.getMultiAgentLaneMetadata(traceId));
+        mergeLaneFields(laneMetadata, getNestedObject(metadata));
+        mergeLaneFields(laneMetadata, getNestedObject(dataJson));
+        mergeLaneFields(laneMetadata, getNestedObject(payload));
+        mergeLaneFields(laneMetadata, metadata);
+        mergeLaneFields(laneMetadata, dataJson);
+        mergeLaneFields(laneMetadata, payload);
+        if (StringUtils.isNotBlank(traceId) && StringUtils.isBlank(laneMetadata.getString("traceId"))) {
+            laneMetadata.put("traceId", traceId);
+        }
+        return laneMetadata;
+    }
+
+    private JSONObject getNestedObject(JSONObject jsonObject) {
+        if (jsonObject == null) {
+            return null;
+        }
+        Object raw = jsonObject.get(MultiAgentMetadata.EXT_KEY_SNAKE);
+        if (raw == null) {
+            raw = jsonObject.get(MultiAgentMetadata.EXT_KEY_CAMEL);
+        }
+        return MultiAgentMetadata.toJSONObject(raw);
+    }
+
+    private void mergeLaneFields(JSONObject target, JSONObject source) {
+        if (target == null || source == null || source.isEmpty()) {
+            return;
+        }
+        copyField(target, source, "laneId", "laneId", "lane_id");
+        copyField(target, source, "turnId", "turnId", "turn_id");
+        copyField(target, source, "mode", "mode");
+        copyField(target, source, "clientRequestId", "clientRequestId", "client_request_id");
+        copyField(target, source, "queryMessageId", "queryMessageId", "query_message_id");
+        copyField(target, source, "answerMessageId", "answerMessageId", "answer_message_id");
+        copyField(target, source, "agentId", "agentId", "agent_id");
+        copyField(target, source, "agentCode", "agentCode", "agent_code");
+        copyField(target, source, "agentName", "agentName", "agent_name");
+        copyField(target, source, "order", "order");
+        copyField(target, source, "dependsOn", "dependsOn", "depends_on");
+        copyField(target, source, "traceId", "traceId", "trace_id");
+    }
+
+    private void copyField(JSONObject target, JSONObject source, String outputKey, String... inputKeys) {
+        if (target == null || source == null || inputKeys == null) {
+            return;
+        }
+        for (String inputKey : inputKeys) {
+            Object value = source.get(inputKey);
+            if (value != null) {
+                target.put(outputKey, value);
+                return;
+            }
+        }
+    }
+
+    private boolean isTargetAgentType(ChatProcessContext ctx, String sourceAgentType) {
+        if (ctx == null || StringUtils.isBlank(sourceAgentType)) {
+            return true;
+        }
+        if (!ctx.getTargetAgentTypes().isEmpty()) {
+            return ctx.getTargetAgentTypes().contains(sourceAgentType);
+        }
+        String targetAgentType = StringUtils.defaultIfBlank(ctx.getTargetAgentType(),
             MapParamUtil.getStringValue(ctx.getParams(), "worker_agent_type"));
-        return StringUtils.isNotBlank(sourceAgentType) && StringUtils.isNotBlank(targetAgentType)
-            && !sourceAgentType.equals(targetAgentType) && SseResponseEventEnum.appStreamResponse.equals(eventType);
+        return StringUtils.isBlank(targetAgentType) || sourceAgentType.equals(targetAgentType);
     }
 
     private HistoryBatch createHistoryBatch(ChatProcessContext ctx, String traceId) {

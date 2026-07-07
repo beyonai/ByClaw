@@ -8,6 +8,7 @@ import com.iwhalecloud.byai.state.domain.chat.dto.StopChatDto;
 import com.iwhalecloud.byai.state.domain.chat.service.RunningChatSnapshotService;
 import com.iwhalecloud.byai.state.domain.chat.service.RunningOutputStreamRegistry;
 import com.iwhalecloud.byai.state.domain.chat.service.TargetAgentResolver;
+import com.iwhalecloud.byai.state.domain.chat.service.TraceIdCodec;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -68,5 +69,23 @@ class AssistantChatApplicationServiceTest {
             eq("u1"), eq("force"));
         verify(runningOutputStreamRegistry).release(10L, 20L);
         verify(runningChatSnapshotService).delete(10L, 20L);
+    }
+
+    @Test
+    void stopChat_prefersTraceIdAsCancelExecutionId() {
+        String traceId = TraceIdCodec.encode(11L, 21L);
+        StopChatDto stopChatDto = new StopChatDto();
+        stopChatDto.setAgentId(30L);
+        stopChatDto.setSessionId(10L);
+        stopChatDto.setTraceId(traceId);
+        stopChatDto.setLaneId("lane-a");
+        when(ssResourceService.findById(30L)).thenReturn(null);
+
+        assistantChatApplicationService.stopChat(stopChatDto);
+
+        verify(gatewayClient).cancelTask(eq(traceId), eq("10"), eq("user cancel task"), eq("BYCLAW_EXE_u1"),
+            eq("u1"), eq("force"));
+        verify(runningOutputStreamRegistry).release(10L, 21L);
+        verify(runningChatSnapshotService).delete(10L, 21L);
     }
 }

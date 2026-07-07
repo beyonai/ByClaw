@@ -11,6 +11,7 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 
 import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.state.domain.chat.dto.RunningChatSnapshotResponse;
 import com.iwhalecloud.byai.state.domain.chat.enums.ChatUseageEnum;
 import com.iwhalecloud.byai.state.domain.chat.model.MessageContext;
@@ -31,18 +32,27 @@ public class RunningChatSnapshotService {
     private RedisTemplate<String, Object> redisTemplate;
 
     public void save(ChatProcessContext ctx) {
-        if (ctx == null || ctx.sessionId == null || ctx.messageContext == null || ctx.modelAnswerMessageId == null
-            || StringUtils.isBlank(ctx.traceId)) {
+        save(ctx, ctx == null ? null : ctx.traceId, ctx == null ? null : ctx.messageContext);
+    }
+
+    public void save(ChatProcessContext ctx, String traceId, MessageContext messageContext) {
+        if (ctx == null || ctx.sessionId == null || messageContext == null) {
+            return;
+        }
+        String snapshotTraceId = StringUtils.defaultIfBlank(traceId, ctx.traceId);
+        Long modelAnswerMessageId = resolveSnapshotMessageId(ctx, snapshotTraceId, messageContext);
+        if (modelAnswerMessageId == null || StringUtils.isBlank(snapshotTraceId)) {
             return;
         }
 
         try {
-            RunningChatSnapshotResponse snapshot = buildSnapshot(ctx);
-            redisTemplate.opsForValue().set(buildKey(ctx.sessionId, ctx.traceId, ctx.modelAnswerMessageId),
+            RunningChatSnapshotResponse snapshot = buildSnapshot(ctx, snapshotTraceId, messageContext,
+                modelAnswerMessageId, resolveSnapshotClientRequestId(ctx, snapshotTraceId));
+            redisTemplate.opsForValue().set(buildKey(ctx.sessionId, snapshotTraceId, modelAnswerMessageId),
                 JSON.toJSONString(snapshot), SNAPSHOT_TTL_SECONDS, TimeUnit.SECONDS);
         }
         catch (Exception e) {
-            log.warn("保存运行中会话快照失败, sessionId: {}, traceId: {}", ctx.sessionId, ctx.traceId, e);
+            log.warn("保存运行中会话快照失败, sessionId: {}, traceId: {}", ctx.sessionId, snapshotTraceId, e);
         }
     }
 
@@ -181,20 +191,25 @@ public class RunningChatSnapshotService {
     }
 
     private RunningChatSnapshotResponse buildSnapshot(ChatProcessContext ctx) {
-        MessageContext messageContext = ctx.messageContext;
+        return buildSnapshot(ctx, ctx.traceId, ctx.messageContext, ctx.modelAnswerMessageId, ctx.clientRequestId);
+    }
+
+    private RunningChatSnapshotResponse buildSnapshot(ChatProcessContext ctx, String traceId,
+        MessageContext messageContext, Long modelAnswerMessageId, String clientRequestId) {
         RunningChatSnapshotResponse snapshot = new RunningChatSnapshotResponse();
         snapshot.setRunning(true);
-        snapshot.setTraceId(ctx.traceId);
-        snapshot.setClientRequestId(ctx.clientRequestId);
-        snapshot.setModelAnswerMessageId(ctx.modelAnswerMessageId);
+        snapshot.setTraceId(traceId);
+        snapshot.setClientRequestId(clientRequestId);
+        snapshot.setModelAnswerMessageId(modelAnswerMessageId);
         snapshot.setSnapshotStreamId(ctx.currentStreamId);
-        snapshot.setMessageId(ctx.modelAnswerMessageId);
+        snapshot.setMessageId(modelAnswerMessageId);
         snapshot.setSessionId(ctx.sessionId);
         snapshot.setTaskId(ctx.taskId);
         snapshot.setUsage(ChatUseageEnum.SYSTEM_RESPONSE.getCode());
         snapshot.setCreatorId(ctx.userId);
         snapshot.setMetadata(ctx.assistantChatDto == null ? null : ctx.assistantChatDto.getMetadata());
-        snapshot.setCreateTime(new Date());
+        snapshot.setCreateTime(
+            messageContext.getFirstResponseTime() == null ? new Date() : messageContext.getFirstResponseTime());
         snapshot.setMessageContent(messageContext.returnAnswerText());
         snapshot.setResComIds(messageContext.getResComIds());
         snapshot.setMsgStatus(MsgStatus.APPEND.getCode());
@@ -211,6 +226,34 @@ public class RunningChatSnapshotService {
         messageResourceDto.setResources(messageContext.getChatRelatedResource());
         snapshot.setRelatedResources(JSON.toJSONString(messageResourceDto));
         return snapshot;
+    }
+
+    private Long resolveSnapshotMessageId(ChatProcessContext ctx, String traceId, MessageContext messageContext) {
+        if (StringUtils.isNotBlank(traceId)) {
+            try {
+                return TraceIdCodec.decode(traceId).getModelAnswerMessageId();
+            }
+            catch (Exception ignored) {
+                // 非 TraceIdCodec 编码的历史 traceId，继续使用上下文兜底。
+            }
+        }
+        if (messageContext != null && messageContext.getMessageId() != null) {
+            return messageContext.getMessageId();
+        }
+        return ctx == null ? null : ctx.modelAnswerMessageId;
+    }
+
+    private String resolveSnapshotClientRequestId(ChatProcessContext ctx, String traceId) {
+        if (ctx != null && StringUtils.isNotBlank(traceId)) {
+            JSONObject laneMetadata = ctx.getMultiAgentLaneMetadata(traceId);
+            if (laneMetadata != null) {
+                String laneClientRequestId = laneMetadata.getString("clientRequestId");
+                if (StringUtils.isNotBlank(laneClientRequestId)) {
+                    return laneClientRequestId;
+                }
+            }
+        }
+        return ctx == null ? null : ctx.clientRequestId;
     }
 
     private String findBySession(Long sessionId) {

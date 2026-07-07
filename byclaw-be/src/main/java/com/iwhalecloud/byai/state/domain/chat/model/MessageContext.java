@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.state.domain.chat.model;
 
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
 import java.util.Set;
 
@@ -11,6 +12,7 @@ import com.alibaba.fastjson.JSONObject;
 import com.google.common.collect.Lists;
 import com.iwhalecloud.byai.state.infrastructure.utils.CompletionsUtils;
 import com.iwhalecloud.byai.state.common.dto.AnswerDelta;
+import com.iwhalecloud.byai.state.common.enums.MessageContentTypeEnum;
 import com.iwhalecloud.byai.state.common.enums.AgentTypeEnum;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -101,6 +103,11 @@ public class MessageContext {
     private Boolean complete = false;
 
     /**
+     * 当前消息第一次产生可见响应的时间。multi-agent 场景下每个 lane 使用独立 MessageContext 记录。
+     */
+    private Date firstResponseTime;
+
+    /**
      * 记录任务的调用情况
      */
     private String callLogs;
@@ -178,6 +185,12 @@ public class MessageContext {
         this.type = inputType;
         this.messageId = messageId;
         this.taskId = taskId;
+    }
+
+    public synchronized void markFirstResponseTimeIfAbsent(Date responseTime) {
+        if (firstResponseTime == null && responseTime != null) {
+            firstResponseTime = responseTime;
+        }
     }
 
     /**
@@ -332,6 +345,34 @@ public class MessageContext {
      */
     public String returnStreamAnswerText() {
         return streamAnswerText.toString();
+    }
+
+    public boolean hasPersistableContent() {
+        return StringUtils.isNotBlank(returnAnswerText())
+            || hasPersistableMessage(answerMessageList)
+            || hasPersistableMessage(reasonMessageList)
+            || CollectionUtils.isNotEmpty(chatRelatedResource)
+            || StringUtils.isNotBlank(callLogs)
+            || StringUtils.isNotBlank(resComIds);
+    }
+
+    private boolean hasPersistableMessage(List<AnswerDelta> messageList) {
+        if (CollectionUtils.isEmpty(messageList)) {
+            return false;
+        }
+        return messageList.stream().anyMatch(this::hasPersistableMessage);
+    }
+
+    private boolean hasPersistableMessage(AnswerDelta answerDelta) {
+        if (answerDelta == null || CollectionUtils.isEmpty(answerDelta.getChoices())) {
+            return false;
+        }
+        if (MessageContentTypeEnum.THINK_TITLE.getCode().equals(answerDelta.getContentType())) {
+            return false;
+        }
+        return answerDelta.getChoices().stream()
+            .anyMatch(choice -> choice != null && choice.getDelta() != null
+                && StringUtils.isNotBlank(choice.getDelta().getContent()));
     }
 
 }
