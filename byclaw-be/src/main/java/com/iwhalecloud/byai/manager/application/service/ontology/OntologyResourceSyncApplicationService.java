@@ -5,6 +5,7 @@ import com.alibaba.fastjson.JSONObject;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.iwhalecloud.byai.common.constants.resource.ResourceBizType;
 import com.iwhalecloud.byai.common.exception.BaseException;
+import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeApplicationService;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceRelDetailService;
@@ -73,6 +74,9 @@ public class OntologyResourceSyncApplicationService {
     @Autowired
     private DigitalEmployeeApplicationService digitalEmployeeApplicationService;
 
+    @Autowired
+    private AuthApplicationService authApplicationService;
+
     @Transactional(rollbackFor = Exception.class)
     public OntologyResourceSyncResultDto createOntologyResource(OntologyResourceSyncRequest request) {
         return upsertOntologyResource(request);
@@ -97,6 +101,7 @@ public class OntologyResourceSyncApplicationService {
         if (existing == null) {
             SsResource created = buildResource(request, bizType, resourceCode, baseCode, parent);
             ssResourceService.saveResource(created);
+            authApplicationService.ensureCreatorDefaultPrivileges(created);
             replaceExt(created.getResourceId(), bizType, resourceCode, baseCode, request.getSourceContent(),
                 targetContent);
             return result("created", created, baseCode);
@@ -104,6 +109,7 @@ public class OntologyResourceSyncApplicationService {
 
         updateResource(existing, request, bizType, resourceCode, baseCode, parent);
         ssResourceService.updateResourceEntity(existing);
+        authApplicationService.ensureCreatorDefaultPrivileges(existing);
         replaceExt(existing.getResourceId(), bizType, resourceCode, baseCode, request.getSourceContent(),
             targetContent);
         return result("updated", existing, baseCode);

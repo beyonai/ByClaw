@@ -206,7 +206,8 @@ public class OntologyBaseService {
         JSONObject page = feignDataCloudService.queryOntologiesBySceneCode(sceneCode, ownerType, type, keyword,
             pageNum, pageSize, userCode);
         JSONObject normalizedPage = normalizeSceneOntologyPage(page, ownerType, sceneCode, type, pageNum, pageSize);
-        JSONArray rows = normalizedPage.getJSONArray("rows");
+        JSONArray rows = filterPersonalRowsByUserCode(normalizedPage.getJSONArray("rows"), ownerType, userCode);
+        normalizedPage.put("rows", rows);
         int created = 0;
         int updated = 0;
         if (rows != null) {
@@ -242,6 +243,30 @@ public class OntologyBaseService {
         result.put("hasMore", hasMore);
         result.put("rows", rows == null ? new JSONArray() : rows);
         return result;
+    }
+
+    private JSONArray filterPersonalRowsByUserCode(JSONArray rows, String ownerType, String currentUserCode) {
+        if (!OwnerType.PERSONAL.equals(ownerType) || rows == null || rows.isEmpty()) {
+            return rows == null ? new JSONArray() : rows;
+        }
+        JSONArray filteredRows = new JSONArray();
+        int skipped = 0;
+        for (Object item : rows) {
+            JSONObject row = toJson(item);
+            String rowUserCode = datacloudUserCode(row);
+            if (StringUtils.equals(rowUserCode, currentUserCode)) {
+                filteredRows.add(row);
+                continue;
+            }
+            skipped++;
+            logger.info("skip personal datacloud ontology row, currentUserCode={}, rowUserCode={}, resourceCode={}",
+                currentUserCode, rowUserCode, firstNonBlank(row, "resourceCode", "viewCode", "objectCode", "code"));
+        }
+        if (skipped > 0) {
+            logger.info("filtered personal datacloud ontology rows, currentUserCode={}, kept={}, skipped={}",
+                currentUserCode, filteredRows.size(), skipped);
+        }
+        return filteredRows;
     }
 
     private String resolveSyncUserCode(String ownerType, String requestUserCode) {
@@ -1630,6 +1655,12 @@ public class OntologyBaseService {
     private String sceneName(JSONObject row) {
         return firstNonBlankDeep(row, new String[] { "scene", "sceneInfo", "catalog" },
             "sceneName", "scene_name", "catalogName", "catalog_name", "name", "displayName", "display_name");
+    }
+
+    private String datacloudUserCode(JSONObject row) {
+        return firstNonBlankDeep(row, new String[] { "user", "userInfo", "owner", "creator", "createUser" },
+            "userCode", "user_code", "ownerUserCode", "owner_user_code", "creatorCode", "creator_code",
+            "createUserCode", "create_user_code");
     }
 
     private String firstNonBlankDeep(JSONObject obj, String[] nestedKeys, String... keys) {

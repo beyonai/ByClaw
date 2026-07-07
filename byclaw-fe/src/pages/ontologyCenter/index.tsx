@@ -120,18 +120,6 @@ const StaticTablePanel = ({
   </div>
 );
 
-const FALLBACK_CATALOGS = [
-  { catalogId: 'platform', catalogName: '平台能力' },
-  { catalogId: 'marketing', catalogName: '市场营销' },
-  { catalogId: 'sales', catalogName: '销售领域' },
-  { catalogId: 'rd', catalogName: '研发领域' },
-  { catalogId: 'delivery', catalogName: '交付领域' },
-  { catalogId: 'hr', catalogName: '人力资源' },
-  { catalogId: 'finance', catalogName: '财务领域' },
-  { catalogId: 'office', catalogName: '行政办公' },
-  { catalogId: 'other', catalogName: '其他领域' },
-];
-
 const getCatalogParentId = (item: any) =>
   item?.pcatalogId ?? item?.pCatalogId ?? item?.parentCatalogId ?? item?.parentDirId;
 
@@ -144,7 +132,7 @@ const getCatalogTabKey = (item: any) => {
 };
 
 const getDisplayCatalogs = (list: any[] = []) => {
-  if (!Array.isArray(list) || !list.length) return FALLBACK_CATALOGS;
+  if (!Array.isArray(list) || !list.length) return [];
   if (list.some((item) => Array.isArray(item?.children) && item.children.length > 0)) {
     return list;
   }
@@ -164,349 +152,6 @@ const getDisplayCatalogs = (list: any[] = []) => {
 
   return roots;
 };
-
-const MOCK_RESOURCES = [
-  {
-    resourceId: 'mock-personal-view-customer360',
-    ownerType: 'personal',
-    resourceBizType: 'VIEW',
-    resourceName: '客户360视图',
-    resourceCode: 'personal_customer_360_view',
-    resourceDesc: '面向客户旅程分析的个人视图。',
-    resourceStatus: 'valid',
-    permission: 'manage',
-    catalogId: 'platform',
-    catalogName: '平台能力',
-    creator: '黄药师',
-    baseId: 'personal_demo_base',
-    baseName: '个人演示本体库',
-    sceneId: 'customer_operation',
-    sceneName: '客户运营',
-    viewCode: 'personal_customer_360_view',
-    viewName: '客户360视图',
-    objectCodes: ['customer_profile', 'customer_order'],
-    relations: [
-      {
-        relationCode: 'customer_has_order',
-        relationName: '客户下单',
-        relationCardinality: '1:N',
-        sourceObjectCode: 'customer_profile',
-        sourceObjectName: '客户档案',
-        targetObjectCode: 'customer_order',
-        targetObjectName: '客户订单',
-      },
-    ],
-  },
-  {
-    resourceId: 'mock-personal-object-customer',
-    ownerType: 'personal',
-    resourceBizType: 'OBJECT',
-    resourceName: '客户档案对象',
-    resourceCode: 'customer_profile',
-    resourceDesc: '沉淀客户基础资料、等级和触达偏好。',
-    resourceStatus: 'valid',
-    permission: 'use',
-    catalogId: 'marketing',
-    catalogName: '市场营销',
-    creator: '黄药师',
-    baseId: 'personal_demo_base',
-    baseName: '个人演示本体库',
-    sceneId: 'customer_operation',
-    sceneName: '客户运营',
-    objectCode: 'customer_profile',
-    objectName: '客户档案对象',
-    properties: [
-      { propertyName: '客户名称', propertyCode: 'customer_name', dataType: 'STRING' },
-      { propertyName: '客户等级', propertyCode: 'customer_level', dataType: 'STRING' },
-    ],
-    actions: [
-      { actionCode: 'sync_customer_profile', actionName: '同步客户档案', actionDesc: '从客户系统同步最新档案。' },
-      { actionCode: 'score_customer_value', actionName: '客户价值评分', actionDesc: '计算客户价值分层。' },
-    ],
-  },
-  {
-    resourceId: 'mock-personal-view-sales',
-    ownerType: 'personal',
-    resourceBizType: 'VIEW',
-    resourceName: '销售机会跟进视图',
-    resourceCode: 'sales_opportunity_view',
-    resourceDesc: '跟踪销售机会阶段、预计金额和下一步动作。',
-    resourceStatus: 'valid',
-    permission: 'manage',
-    catalogId: 'sales',
-    catalogName: '销售领域',
-    creator: '黄药师',
-    baseId: 'personal_demo_base',
-    baseName: '个人演示本体库',
-    sceneId: 'sales_followup',
-    sceneName: '销售跟进',
-    viewCode: 'sales_opportunity_view',
-    viewName: '销售机会跟进视图',
-    objectCodes: ['sales_opportunity', 'customer_profile'],
-    relations: [
-      {
-        relationCode: 'customer_has_opportunity',
-        relationName: '客户关联商机',
-        relationCardinality: '1:N',
-        sourceObjectCode: 'customer_profile',
-        sourceObjectName: '客户档案',
-        targetObjectCode: 'sales_opportunity',
-        targetObjectName: '销售机会',
-      },
-    ],
-  },
-  {
-    resourceId: 'mock-personal-object-opportunity',
-    ownerType: 'personal',
-    resourceBizType: 'OBJECT',
-    resourceName: '销售机会对象',
-    resourceCode: 'sales_opportunity',
-    resourceDesc: '记录商机阶段、预计成交时间和负责人。',
-    resourceStatus: 'valid',
-    permission: 'use',
-    catalogId: 'sales',
-    catalogName: '销售领域',
-    creator: '黄药师',
-    baseId: 'personal_demo_base',
-    baseName: '个人演示本体库',
-    sceneId: 'sales_followup',
-    sceneName: '销售跟进',
-    objectCode: 'sales_opportunity',
-    objectName: '销售机会对象',
-    properties: [
-      { propertyName: '商机名称', propertyCode: 'opportunity_name', dataType: 'STRING' },
-      { propertyName: '预计金额', propertyCode: 'estimated_amount', dataType: 'DECIMAL' },
-    ],
-    actions: [{ actionCode: 'advance_stage', actionName: '推进商机阶段', actionDesc: '更新商机当前阶段。' }],
-  },
-  {
-    resourceId: 'mock-personal-view-task',
-    ownerType: 'personal',
-    resourceBizType: 'VIEW',
-    resourceName: '待办任务视图',
-    resourceCode: 'todo_task_view',
-    resourceDesc: '汇总个人待办、负责人、截止时间和完成状态。',
-    resourceStatus: 'offline',
-    permission: 'apply',
-    catalogId: 'office',
-    catalogName: '行政办公',
-    creator: '黄药师',
-    baseId: 'personal_demo_base',
-    baseName: '个人演示本体库',
-    sceneId: 'office_task',
-    sceneName: '办公协同',
-    viewCode: 'todo_task_view',
-    viewName: '待办任务视图',
-    objectCodes: ['todo_task'],
-    relations: [],
-  },
-  {
-    resourceId: 'mock-personal-object-task',
-    ownerType: 'personal',
-    resourceBizType: 'OBJECT',
-    resourceName: '待办任务对象',
-    resourceCode: 'todo_task',
-    resourceDesc: '个人任务的状态、优先级与截止时间。',
-    resourceStatus: 'valid',
-    permission: 'manage',
-    catalogId: 'office',
-    catalogName: '行政办公',
-    creator: '黄药师',
-    baseId: 'personal_demo_base',
-    baseName: '个人演示本体库',
-    sceneId: 'office_task',
-    sceneName: '办公协同',
-    objectCode: 'todo_task',
-    objectName: '待办任务对象',
-    properties: [
-      { propertyName: '任务标题', propertyCode: 'task_title', dataType: 'STRING' },
-      { propertyName: '截止时间', propertyCode: 'deadline', dataType: 'DATETIME' },
-    ],
-    actions: [{ actionCode: 'complete_task', actionName: '完成任务', actionDesc: '将任务标记为完成。' }],
-  },
-  {
-    resourceId: 'mock-enterprise-view-order',
-    ownerType: 'enterprise',
-    resourceBizType: 'VIEW',
-    resourceName: '订单履约全景视图',
-    resourceCode: 'order_fulfillment_view',
-    resourceDesc: '聚合订单、合同、交付节点和回款状态。',
-    resourceStatus: 'valid',
-    permission: 'use',
-    catalogId: 'delivery',
-    catalogName: '交付领域',
-    creator: '企业本体中心',
-    baseId: 'enterprise_demo_base',
-    baseName: '企业演示本体库',
-    sceneId: 'order_delivery',
-    sceneName: '订单履约',
-    viewCode: 'order_fulfillment_view',
-    viewName: '订单履约全景视图',
-    objectCodes: ['sales_order', 'delivery_task'],
-    relations: [
-      {
-        relationCode: 'order_create_task',
-        relationName: '订单生成交付任务',
-        relationCardinality: '1:N',
-        sourceObjectCode: 'sales_order',
-        sourceObjectName: '销售订单',
-        targetObjectCode: 'delivery_task',
-        targetObjectName: '交付任务',
-      },
-    ],
-  },
-  {
-    resourceId: 'mock-enterprise-object-order',
-    ownerType: 'enterprise',
-    resourceBizType: 'OBJECT',
-    resourceName: '销售订单对象',
-    resourceCode: 'sales_order',
-    resourceDesc: '企业订单主数据对象，包含金额、状态和客户信息。',
-    resourceStatus: 'valid',
-    permission: 'manage',
-    catalogId: 'sales',
-    catalogName: '销售领域',
-    creator: '企业本体中心',
-    baseId: 'enterprise_demo_base',
-    baseName: '企业演示本体库',
-    sceneId: 'order_delivery',
-    sceneName: '订单履约',
-    objectCode: 'sales_order',
-    objectName: '销售订单对象',
-    properties: [
-      { propertyName: '订单编号', propertyCode: 'order_no', dataType: 'STRING' },
-      { propertyName: '订单金额', propertyCode: 'order_amount', dataType: 'DECIMAL' },
-    ],
-    actions: [
-      { actionCode: 'create_delivery_task', actionName: '创建交付任务', actionDesc: '基于订单创建履约任务。' },
-      { actionCode: 'query_payment_status', actionName: '查询回款状态', actionDesc: '拉取订单回款状态。' },
-    ],
-  },
-  {
-    resourceId: 'mock-enterprise-view-contract',
-    ownerType: 'enterprise',
-    resourceBizType: 'VIEW',
-    resourceName: '合同风险视图',
-    resourceCode: 'contract_risk_view',
-    resourceDesc: '汇总合同条款、履约节点和风险等级。',
-    resourceStatus: 'valid',
-    permission: 'manage',
-    catalogId: 'delivery',
-    catalogName: '交付领域',
-    creator: '企业本体中心',
-    baseId: 'enterprise_demo_base',
-    baseName: '企业演示本体库',
-    sceneId: 'contract_manage',
-    sceneName: '合同管理',
-    viewCode: 'contract_risk_view',
-    viewName: '合同风险视图',
-    objectCodes: ['contract_record', 'sales_order'],
-    relations: [
-      {
-        relationCode: 'order_sign_contract',
-        relationName: '订单签订合同',
-        relationCardinality: '1:1',
-        sourceObjectCode: 'sales_order',
-        sourceObjectName: '销售订单',
-        targetObjectCode: 'contract_record',
-        targetObjectName: '合同记录',
-      },
-    ],
-  },
-  {
-    resourceId: 'mock-enterprise-object-contract',
-    ownerType: 'enterprise',
-    resourceBizType: 'OBJECT',
-    resourceName: '合同记录对象',
-    resourceCode: 'contract_record',
-    resourceDesc: '企业合同主数据，包含合同金额、期限和风险状态。',
-    resourceStatus: 'valid',
-    permission: 'use',
-    catalogId: 'delivery',
-    catalogName: '交付领域',
-    creator: '企业本体中心',
-    baseId: 'enterprise_demo_base',
-    baseName: '企业演示本体库',
-    sceneId: 'contract_manage',
-    sceneName: '合同管理',
-    objectCode: 'contract_record',
-    objectName: '合同记录对象',
-    properties: [
-      { propertyName: '合同编号', propertyCode: 'contract_no', dataType: 'STRING' },
-      { propertyName: '风险等级', propertyCode: 'risk_level', dataType: 'STRING' },
-    ],
-    actions: [{ actionCode: 'evaluate_contract_risk', actionName: '评估合同风险', actionDesc: '计算合同风险等级。' }],
-  },
-  {
-    resourceId: 'mock-enterprise-view-finance',
-    ownerType: 'enterprise',
-    resourceBizType: 'VIEW',
-    resourceName: '现金流分析视图',
-    resourceCode: 'cash_flow_view',
-    resourceDesc: '按客户、合同和回款周期分析现金流。',
-    resourceStatus: 'offline',
-    permission: 'apply',
-    catalogId: 'finance',
-    catalogName: '财务领域',
-    creator: '企业本体中心',
-    baseId: 'enterprise_demo_base',
-    baseName: '企业演示本体库',
-    sceneId: 'finance_analysis',
-    sceneName: '财务分析',
-    viewCode: 'cash_flow_view',
-    viewName: '现金流分析视图',
-    objectCodes: ['invoice_record', 'sales_order'],
-    relations: [],
-  },
-  {
-    resourceId: 'mock-enterprise-object-invoice',
-    ownerType: 'enterprise',
-    resourceBizType: 'OBJECT',
-    resourceName: '发票记录对象',
-    resourceCode: 'invoice_record',
-    resourceDesc: '记录开票金额、税率、状态和关联订单。',
-    resourceStatus: 'valid',
-    permission: 'use',
-    catalogId: 'finance',
-    catalogName: '财务领域',
-    creator: '企业本体中心',
-    baseId: 'enterprise_demo_base',
-    baseName: '企业演示本体库',
-    sceneId: 'finance_analysis',
-    sceneName: '财务分析',
-    objectCode: 'invoice_record',
-    objectName: '发票记录对象',
-    properties: [
-      { propertyName: '发票号', propertyCode: 'invoice_no', dataType: 'STRING' },
-      { propertyName: '开票金额', propertyCode: 'invoice_amount', dataType: 'DECIMAL' },
-    ],
-    actions: [{ actionCode: 'sync_invoice_status', actionName: '同步发票状态', actionDesc: '同步发票最新状态。' }],
-  },
-  {
-    resourceId: 'mock-enterprise-object-employee',
-    ownerType: 'enterprise',
-    resourceBizType: 'OBJECT',
-    resourceName: '员工主数据对象',
-    resourceCode: 'employee_master',
-    resourceDesc: '组织、岗位、员工状态等基础人力数据。',
-    resourceStatus: 'valid',
-    permission: 'manage',
-    catalogId: 'hr',
-    catalogName: '人力资源',
-    creator: '企业本体中心',
-    baseId: 'enterprise_demo_base',
-    baseName: '企业演示本体库',
-    sceneId: 'employee_operation',
-    sceneName: '员工运营',
-    objectCode: 'employee_master',
-    objectName: '员工主数据对象',
-    properties: [
-      { propertyName: '员工姓名', propertyCode: 'employee_name', dataType: 'STRING' },
-      { propertyName: '所属部门', propertyCode: 'department_name', dataType: 'STRING' },
-    ],
-    actions: [{ actionCode: 'query_employee_status', actionName: '查询在职状态', actionDesc: '查询员工当前状态。' }],
-  },
-];
 
 const getData = (res: any) => res?.data ?? res ?? {};
 
@@ -580,7 +225,7 @@ const getEntryBizType = (entry: any) => {
 };
 
 const getResourceKey = (resource: any) => {
-  if (resource?.resourceId && !`${resource.resourceId}`.startsWith('mock-')) {
+  if (resource?.resourceId) {
     return `ID:${resource.resourceId}`;
   }
   const bizType = getEntryBizType(resource);
@@ -709,7 +354,7 @@ const OntologyCenter: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('valid');
   const [permissionFilter, setPermissionFilter] = useState<PermissionFilter>('all');
   const [catalogId, setCatalogId] = useState(ALL_CATEGORY_ID);
-  const [catalogList, setCatalogList] = useState<any[]>(FALLBACK_CATALOGS);
+  const [catalogList, setCatalogList] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [resourceList, setResourceList] = useState<any[]>([]);
   const [providerOpen, setProviderOpen] = useState(false);
@@ -726,8 +371,7 @@ const OntologyCenter: React.FC = () => {
   const [useApplyAuditOpen, setUseApplyAuditOpen] = useState(false);
 
   const catalogTabs = useMemo(() => {
-    const tabs = getDisplayCatalogs(catalogList);
-    return tabs.length ? tabs : FALLBACK_CATALOGS;
+    return getDisplayCatalogs(catalogList);
   }, [catalogList]);
 
   const loadInstalledKeys = useCallback(async () => {
@@ -753,10 +397,10 @@ const OntologyCenter: React.FC = () => {
       .then((res: any) => {
         const treeData = Array.isArray(res) ? res : Array.isArray(res?.data) ? res.data : [];
         const normalized = normalizeCatalogTree(treeData);
-        setCatalogList(normalized.length ? normalized : FALLBACK_CATALOGS);
+        setCatalogList(normalized);
         setCatalogId((prev) => prev || ALL_CATEGORY_ID);
       })
-      .catch(() => setCatalogList(FALLBACK_CATALOGS));
+      .catch(() => setCatalogList([]));
   }, []);
 
   useEffect(() => {
@@ -792,8 +436,9 @@ const OntologyCenter: React.FC = () => {
           .map((row) => normalizeOntologyResource(row, activeTab))
           .filter((item) => item.resourceBizType === 'VIEW' || item.resourceBizType === 'OBJECT')
       );
-    } catch {
-      setResourceList(MOCK_RESOURCES.filter((item) => item.ownerType === activeTab));
+    } catch (error: any) {
+      setResourceList([]);
+      message.error(error?.msg || error?.message || '本体资源查询失败');
     } finally {
       setLoading(false);
     }
@@ -996,7 +641,7 @@ const OntologyCenter: React.FC = () => {
       message.error(t('resource.noDefaultDigitalEmployee'));
       return;
     }
-    if (!resource?.resourceId || `${resource.resourceId}`.startsWith('mock-')) {
+    if (!resource?.resourceId) {
       message.error('当前资源还没有真实资源ID，请先刷新同步后再安装');
       return;
     }
