@@ -29,6 +29,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
@@ -47,6 +49,8 @@ public class FeignDataCloudService {
 
     private RetryConfig RETRY_CONFIG = RetryConfig.builder().maxAttempts(3).retryOnStatusCodes(Set.of(502, 503, 504))
         .build();
+
+    private static final DateTimeFormatter LOG_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS");
 
     @Value("${spring.application.datacloudName:byclaw-datacloud}")
     private String serviceName;
@@ -77,19 +81,25 @@ public class FeignDataCloudService {
      */
     public DataCloudResponse<TermsOptionsResp> termsOptions(TermsOptionsReq termsOptionsReq) {
 
+        String path = "/api/v1/datacloud/terms/options";
+        String url = buildDisplayUrl(path, null);
+        long startNanos = System.nanoTime();
+        String startTime = nowForLog();
+        logDatacloudStart("POST", url, startTime, termsOptionsReq);
         try {
 
             HttpResponse response = discoveryHttpClient
-                .post(serviceName, "/api/v1/datacloud/terms/options", buildHeaders(), termsOptionsReq, null)
+                .post(serviceName, path, buildHeaders(), termsOptionsReq, null)
                 .get(this.gatewaySecondTimeOut, TimeUnit.SECONDS);
 
             String body = JSON.toJSONString(response.getData());
+            logDatacloudEnd("POST", url, startTime, startNanos, body, body);
 
             return JSON.parseObject(body, new TypeReference<DataCloudResponse<TermsOptionsResp>>() {
             });
         }
         catch (Exception e) {
-            logger.error(e.getMessage(), e);
+            logDatacloudError("POST", url, startTime, startNanos, termsOptionsReq, e);
             return null;
         }
     }
@@ -104,16 +114,17 @@ public class FeignDataCloudService {
     private <T> T getOntologyData(String path, Map<String, Object> queryParams,
         TypeReference<DataCloudResponse<T>> typeRef) {
         Map<String, Object> query = queryParams == null ? new HashMap<>() : queryParams;
+        String url = buildDisplayUrl(path, query);
+        long startNanos = System.nanoTime();
+        String startTime = nowForLog();
+        logDatacloudStart("GET", url, startTime, query);
         try {
-            logger.info("datacloud ontology GET, serviceName={}, path={}, query={}", serviceName, path,
-                toJsonString(query));
             HttpResponse response = discoveryHttpClient.get(serviceName, path, buildHeaders(), query)
                 .get(this.gatewaySecondTimeOut, TimeUnit.SECONDS);
-            return parseAndNormalize(path, response, typeRef);
+            return parseAndNormalize("GET", url, startTime, startNanos, response, typeRef);
         }
         catch (Exception e) {
-            logger.error("datacloud ontology GET failed, serviceName={}, path={}, query={}", serviceName, path,
-                toJsonString(query), e);
+            logDatacloudError("GET", url, startTime, startNanos, query, e);
             return null;
         }
     }
@@ -121,16 +132,17 @@ public class FeignDataCloudService {
     /** POST 转发：请求参数走 body。 */
     private <T> T postOntologyData(String path, Object body, TypeReference<DataCloudResponse<T>> typeRef) {
         Object requestBody = body == null ? new HashMap<>() : body;
+        String url = buildDisplayUrl(path, null);
+        long startNanos = System.nanoTime();
+        String startTime = nowForLog();
+        logDatacloudStart("POST", url, startTime, requestBody);
         try {
-            logger.info("datacloud ontology POST, serviceName={}, path={}, body={}", serviceName, path,
-                toJsonString(requestBody));
             HttpResponse response = discoveryHttpClient.post(serviceName, path, buildHeaders(), requestBody, null)
                 .get(this.gatewaySecondTimeOut, TimeUnit.SECONDS);
-            return parseAndNormalize(path, response, typeRef);
+            return parseAndNormalize("POST", url, startTime, startNanos, response, typeRef);
         }
         catch (Exception e) {
-            logger.error("datacloud ontology POST failed, serviceName={}, path={}, body={}", serviceName, path,
-                toJsonString(requestBody), e);
+            logDatacloudError("POST", url, startTime, startNanos, requestBody, e);
             return null;
         }
     }
@@ -138,16 +150,17 @@ public class FeignDataCloudService {
     /** PUT 转发：请求参数走 body。 */
     private <T> T putOntologyData(String path, Object body, TypeReference<DataCloudResponse<T>> typeRef) {
         Object requestBody = body == null ? new HashMap<>() : body;
+        String url = buildDisplayUrl(path, null);
+        long startNanos = System.nanoTime();
+        String startTime = nowForLog();
+        logDatacloudStart("PUT", url, startTime, requestBody);
         try {
-            logger.info("datacloud ontology PUT, serviceName={}, path={}, body={}", serviceName, path,
-                toJsonString(requestBody));
             HttpResponse response = discoveryHttpClient.put(serviceName, path, buildHeaders(), requestBody, null)
                 .get(this.gatewaySecondTimeOut, TimeUnit.SECONDS);
-            return parseAndNormalize(path, response, typeRef);
+            return parseAndNormalize("PUT", url, startTime, startNanos, response, typeRef);
         }
         catch (Exception e) {
-            logger.error("datacloud ontology PUT failed, serviceName={}, path={}, body={}", serviceName, path,
-                toJsonString(requestBody), e);
+            logDatacloudError("PUT", url, startTime, startNanos, requestBody, e);
             return null;
         }
     }
@@ -156,16 +169,17 @@ public class FeignDataCloudService {
     private <T> T deleteOntologyData(String path, Map<String, Object> queryParams,
         TypeReference<DataCloudResponse<T>> typeRef) {
         Map<String, Object> query = queryParams == null ? new HashMap<>() : queryParams;
+        String url = buildDisplayUrl(path, query);
+        long startNanos = System.nanoTime();
+        String startTime = nowForLog();
+        logDatacloudStart("DELETE", url, startTime, query);
         try {
-            logger.info("datacloud ontology DELETE, serviceName={}, path={}, query={}", serviceName, path,
-                toJsonString(query));
             HttpResponse response = discoveryHttpClient.delete(serviceName, path, buildHeaders(), query)
                 .get(this.gatewaySecondTimeOut, TimeUnit.SECONDS);
-            return parseAndNormalize(path, response, typeRef);
+            return parseAndNormalize("DELETE", url, startTime, startNanos, response, typeRef);
         }
         catch (Exception e) {
-            logger.error("datacloud ontology DELETE failed, serviceName={}, path={}, query={}", serviceName, path,
-                toJsonString(query), e);
+            logDatacloudError("DELETE", url, startTime, startNanos, query, e);
             return null;
         }
     }
@@ -173,15 +187,16 @@ public class FeignDataCloudService {
     /** DELETE 转发：少数 datacloud 接口（如场景成员删除）按 OpenAPI 要求使用 DELETE body。 */
     private <T> T deleteOntologyDataWithBody(String path, Object body, TypeReference<DataCloudResponse<T>> typeRef) {
         Object requestBody = body == null ? new HashMap<>() : body;
+        String url = buildDisplayUrl(path, null);
+        long startNanos = System.nanoTime();
+        String startTime = nowForLog();
+        logDatacloudStart("DELETE", url, startTime, requestBody);
         try {
-            logger.info("datacloud ontology DELETE_BODY, serviceName={}, path={}, body={}", serviceName, path,
-                toJsonString(requestBody));
             HttpResponse response = requestWithBody("DELETE", path, requestBody, null);
-            return parseAndNormalize(path, response, typeRef);
+            return parseAndNormalize("DELETE", url, startTime, startNanos, response, typeRef);
         }
         catch (Exception e) {
-            logger.error("datacloud ontology DELETE_BODY failed, serviceName={}, path={}, body={}", serviceName, path,
-                toJsonString(requestBody), e);
+            logDatacloudError("DELETE", url, startTime, startNanos, requestBody, e);
             return null;
         }
     }
@@ -206,17 +221,86 @@ public class FeignDataCloudService {
 
     /** 解析 DataCloudResponse 并对业务 data 做 snake→camel 键名归一化。 */
     @SuppressWarnings("unchecked")
-    private <T> T parseAndNormalize(String path, HttpResponse response, TypeReference<DataCloudResponse<T>> typeRef) {
+    private <T> T parseAndNormalize(String method, String url, String startTime, long startNanos, HttpResponse response,
+        TypeReference<DataCloudResponse<T>> typeRef) {
         String resBody = JSON.toJSONString(response.getData());
-        logger.info("datacloud ontology raw response, serviceName={}, path={}, response={}", serviceName, path, resBody);
         DataCloudResponse<T> parsed = JSON.parseObject(resBody, typeRef);
         T data = parsed == null ? null : parsed.getData();
         if (data instanceof JSONObject || data instanceof JSONArray) {
             data = (T) normalizeKeys(data);
         }
-        logger.info("datacloud ontology response data, serviceName={}, path={}, data={}", serviceName, path,
-            toJsonString(data));
+        logDatacloudEnd(method, url, startTime, startNanos, resBody, data);
         return data;
+    }
+
+    private void logDatacloudStart(String method, String url, String startTime, Object request) {
+        logger.info("datacloud call start, serviceName={}, method={}, url={}, startTime={}, request={}", serviceName,
+            method, url, startTime, toJsonString(request));
+    }
+
+    private void logDatacloudEnd(String method, String url, String startTime, long startNanos, Object response,
+        Object data) {
+        logger.info(
+            "datacloud call end, serviceName={}, method={}, url={}, startTime={}, endTime={}, costMs={}, response={}, data={}",
+            serviceName, method, url, startTime, nowForLog(), elapsedMs(startNanos), toJsonString(response),
+            toJsonString(data));
+    }
+
+    private void logDatacloudError(String method, String url, String startTime, long startNanos, Object request,
+        Exception e) {
+        logger.error(
+            "datacloud call failed, serviceName={}, method={}, url={}, startTime={}, endTime={}, costMs={}, request={}",
+            serviceName, method, url, startTime, nowForLog(), elapsedMs(startNanos), toJsonString(request), e);
+    }
+
+    private String buildDisplayUrl(String path, Map<String, Object> queryParams) {
+        String baseUrl = "datacloud://" + serviceName;
+        try {
+            if (discoveryClient != null) {
+                Optional<ServiceInstance> instance = discoveryClient.discover(serviceName);
+                if (instance.isPresent()) {
+                    ServiceInstance serviceInstance = instance.get();
+                    String protocol = serviceInstance.getProtocol() == null ? "http" : serviceInstance.getProtocol();
+                    String pathPrefix = StringUtils.defaultString(serviceInstance.getPathPrefix());
+                    baseUrl = protocol + "://" + serviceInstance.getHost() + ":" + serviceInstance.getPort()
+                        + pathPrefix;
+                }
+            }
+        }
+        catch (Exception e) {
+            logger.debug("resolve datacloud service url failed, serviceName={}", serviceName, e);
+        }
+        return baseUrl + appendQuery(path, queryParams);
+    }
+
+    private static String appendQuery(String path, Map<String, Object> queryParams) {
+        if (queryParams == null || queryParams.isEmpty()) {
+            return path;
+        }
+        StringBuilder url = new StringBuilder(path);
+        boolean first = true;
+        for (Map.Entry<String, Object> entry : queryParams.entrySet()) {
+            Object value = entry.getValue();
+            if (value == null || StringUtils.isBlank(String.valueOf(value))) {
+                continue;
+            }
+            url.append(first ? '?' : '&');
+            url.append(encodeQueryValue(entry.getKey())).append('=').append(encodeQueryValue(String.valueOf(value)));
+            first = false;
+        }
+        return url.toString();
+    }
+
+    private static String encodeQueryValue(String value) {
+        return URLEncoder.encode(StringUtils.defaultString(value), StandardCharsets.UTF_8);
+    }
+
+    private static String nowForLog() {
+        return LocalDateTime.now().format(LOG_TIME_FORMATTER);
+    }
+
+    private static long elapsedMs(long startNanos) {
+        return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNanos);
     }
 
     /** 递归把 JSON 的 snake_case 键名转成 camelCase，兼容 datacloud 实跑返回 snake_case。 */
@@ -264,6 +348,9 @@ public class FeignDataCloudService {
     }
 
     private String toJsonString(Object value) {
+        if (value instanceof String) {
+            return (String) value;
+        }
         try {
             return JSON.toJSONString(value);
         }
