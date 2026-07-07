@@ -46,7 +46,7 @@ Claude Code worker. Register a custom acpx agent whose command is the bridge:
         "config": {
           "agents": {
             "byclaw-remote-claude": {
-              "command": "node /path/to/ByClaw/byclaw-exe/extensions/byclaw-acp-adapter/scripts/byclaw-remote-claude-acp.mjs"
+              "command": "node /path/to/ByClaw/byclaw-exe/extensions/byclaw-acp-adapter/dist/remote-claude-acp.js"
             }
           }
         }
@@ -66,7 +66,7 @@ Flow:
 
 ```text
 OpenClaw sessions_spawn(agentId=byclaw-remote-claude)
-  -> acpx starts byclaw-remote-claude-acp.mjs over ACP stdio
+  -> acpx starts dist/remote-claude-acp.js over ACP stdio
   -> bridge sends By-Framework AskAgent to BYCLAW_CODE_${USER_CODE}
   -> remote Claude Code writes to byai_gateway:session:${byai-channel_session_id}:data_stream
   -> BE websocket broadcaster consumes that Redis session queue and streams to FE
@@ -95,7 +95,7 @@ Useful bridge overrides:
 - `BYCLAW_REMOTE_CLAUDE_FRAMEWORK_ENTRY`: path to `@byclaw/by-framework/dist/index.js` when the bridge cannot auto-discover it.
 - `BYCLAW_REMOTE_CLAUDE_LANGUAGE`: language metadata sent to the remote worker, default `zh-CN`.
 
-`byclaw-remote-claude-acp.mjs` extracts `byaiChannelSessionId` from the ACP prompt
+`dist/remote-claude-acp.js` extracts `byaiChannelSessionId` from the ACP prompt
 and uses it as the remote worker session id. This keeps generated files aligned
 with the Session Files rules in `metadata.md`.
 

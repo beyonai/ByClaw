@@ -24,6 +24,9 @@ COPY byclaw-exe/extensions/byai_diagnostics-otel/package.json \
 COPY byclaw-exe/extensions/byclaw-sqlite/package.json \
      byclaw-exe/extensions/byclaw-sqlite/package-lock.json \
      ./src/byclaw-sqlite/
+COPY byclaw-exe/extensions/byclaw-acp-adapter/package.json \
+     byclaw-exe/extensions/byclaw-acp-adapter/package-lock.json \
+     ./src/byclaw-acp-adapter/
 COPY byclaw-exe/extensions/byclaw-wiki/package.json \
      ./src/byclaw-wiki/
 
@@ -49,6 +52,7 @@ COPY byclaw-exe/extensions/baiying-enhance/ ./src/baiying-enhance/
 COPY byclaw-exe/extensions/byai-channel/ ./src/byai-channel/
 COPY byclaw-exe/extensions/byai_diagnostics-otel/ ./src/byai_diagnostics-otel/
 COPY byclaw-exe/extensions/byclaw-sqlite/ ./src/byclaw-sqlite/
+COPY byclaw-exe/extensions/byclaw-acp-adapter/ ./src/byclaw-acp-adapter/
 COPY byclaw-exe/extensions/byclaw-wiki/ ./src/byclaw-wiki/
 
 RUN set -eux; \

@@ -100,7 +100,7 @@ export const PATHS = {
   wrapperRelativePath:
     "byclaw-exe/extensions/byclaw-acp-adapter/scripts/claude-agent-acp-baiying-wrapper.mjs",
   remoteClaudeBridgeRelativePath:
-    "byclaw-exe/extensions/byclaw-acp-adapter/scripts/byclaw-remote-claude-acp.mjs",
+    "byclaw-exe/extensions/byclaw-acp-adapter/dist/remote-claude-acp.js",
   extensions: {
     baiyingEnhance: "byclaw-exe/extensions/baiying-enhance",
     byaiChannel: "byclaw-exe/extensions/byai-channel",

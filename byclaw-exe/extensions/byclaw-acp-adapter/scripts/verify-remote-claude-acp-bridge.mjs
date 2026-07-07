@@ -9,7 +9,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
-const bridgePath = path.join(scriptDir, "byclaw-remote-claude-acp.mjs");
+const bridgePath = path.join(scriptDir, "..", "dist", "remote-claude-acp.js");
 const timeoutMs = 5_000;
 
 function writeMockFramework(tempDir) {
