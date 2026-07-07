@@ -99,7 +99,7 @@ const parseFieldsFromStreamText = (value: string) => {
     const parsed = JSON.parse(extractJsonObjectText(value));
     return normalizeGeneratedFieldMap(parsed);
   } catch (e) {
-    console.error('parse meta prompt full stream text error', e);
+    console.warn('parse meta prompt full stream text fallback failed', e);
     return {};
   }
 };
@@ -176,6 +176,77 @@ const isWorkPrompt = (item: any) =>
   item?.key === WORK_PROMPT_KEY ||
   item?.name === '工作规范' ||
   item?.nameEn === 'Work Standard';
+
+const isToolPrompt = (item: any) =>
+  item?.normalizedKey === TOOL_PROMPT_KEY ||
+  item?.key === TOOL_PROMPT_KEY ||
+  item?.name === '工具规范' ||
+  item?.nameEn === 'Tool Standard';
+
+const isMemoryPrompt = (item: any) =>
+  item?.normalizedKey === 'memory' ||
+  item?.key === 'memory' ||
+  item?.name === '记忆规范' ||
+  item?.nameEn === 'Memory Standard';
+
+const getPromptTextByMatcher = (value: any, matcher: (item: any) => boolean) => {
+  const promptList = parsePromptConfigList(value);
+  const item = promptList.find(matcher);
+  return item ? getPromptItemText(item) : '';
+};
+
+const buildPromptItem = (name: string, key: string, value: string, nameEn?: string) => ({
+  name,
+  nameEn,
+  key,
+  normalizedKey: normalizePromptKey(key, { name, nameEn }),
+  value,
+});
+
+const mergePromptTextFields = (
+  promptConfigs: any[],
+  values: {
+    personaText?: string;
+    workStandardText?: string;
+    toolStandardText?: string;
+    memoryStandardText?: string;
+  },
+  intl: any
+) => {
+  const ensuredConfigs = [...promptConfigs];
+  const ensureItem = (matcher: (item: any) => boolean, item: any) => {
+    if (!ensuredConfigs.some(matcher) && item.value) {
+      ensuredConfigs.push(item);
+    }
+  };
+
+  ensureItem(
+    isPersonaPrompt,
+    buildPromptItem(
+      intl.formatMessage({ id: 'employeeDetail.personalityDefinition', defaultMessage: '人格定义' }),
+      PERSONA_PROMPT_KEY,
+      values.personaText || '',
+      'Persona'
+    )
+  );
+  ensureItem(
+    isWorkPrompt,
+    buildPromptItem('工作规范', WORK_PROMPT_KEY, values.workStandardText || '', 'Work Standard')
+  );
+  ensureItem(
+    isToolPrompt,
+    buildPromptItem('工具规范', TOOL_PROMPT_KEY, values.toolStandardText || '', 'Tool Standard')
+  );
+  ensureItem(isMemoryPrompt, buildPromptItem('记忆规范', 'memory', values.memoryStandardText || '', 'Memory Standard'));
+
+  return ensuredConfigs.map((item) => {
+    if (isPersonaPrompt(item)) return { ...item, value: values.personaText || '' };
+    if (isWorkPrompt(item)) return { ...item, value: values.workStandardText || '' };
+    if (isToolPrompt(item)) return { ...item, value: values.toolStandardText || '' };
+    if (isMemoryPrompt(item)) return { ...item, value: values.memoryStandardText || '' };
+    return item;
+  });
+};
 
 const stripListMarker = (value: any) =>
   String(value || '')
@@ -279,7 +350,7 @@ const RefineModal = ({
   const [selectedSections, setSelectedSections] = useState(new Set(ALL_SECTIONS));
   const [generatedPromptConfigs, setGeneratedPromptConfigs] = useState<any[]>([]);
   const [streamingFields, setStreamingFields] = useState<Record<string, string>>({});
-  const [streamingText, setStreamingText] = useState('');
+  const [streamingTextLength, setStreamingTextLength] = useState(0);
   // 避免卸载后继续 setState
   const mountedRef = useRef(false);
   const timerRef = useRef(null);
@@ -313,23 +384,24 @@ const RefineModal = ({
       const currentPromptConfigs = parsePromptConfigList(form.getFieldValue('corePersonaDefinition'));
       const promptConfigs = mergePromptConfigs(currentPromptConfigs, generatedPromptConfigs);
       const personaText = values?.corePersonaDefinition || '';
+      const workStandardText = values?.workStandard || '';
+      const toolStandardText = values?.toolStandard || '';
+      const memoryStandardText = values?.memoryStandard || '';
+      let nextPromptConfigs = promptConfigs;
 
       if (has('desc')) result.resourceDesc = values.resourceDesc;
       if (has('persona')) {
-        if (promptConfigs.length) {
-          const nextPromptConfigs = promptConfigs.map((item) => ({
-            ...item,
-            value: isPersonaPrompt(item) ? personaText : getPromptItemText(item),
-          }));
-          const hasPersonaPrompt = nextPromptConfigs.some(isPersonaPrompt);
-          if (!hasPersonaPrompt) {
-            nextPromptConfigs.push({
-              name: intl.formatMessage({ id: 'employeeDetail.personalityDefinition', defaultMessage: '人格定义' }),
-              key: PERSONA_PROMPT_KEY,
-              normalizedKey: PERSONA_PROMPT_KEY,
-              value: personaText,
-            });
-          }
+        nextPromptConfigs = mergePromptTextFields(
+          promptConfigs,
+          {
+            personaText,
+            workStandardText,
+            toolStandardText,
+            memoryStandardText,
+          },
+          intl
+        );
+        if (nextPromptConfigs.length) {
           result.corePersonaDefinition = JSON.stringify(nextPromptConfigs.map(toPersistPromptItem));
           nextPromptConfigs.forEach((item) => {
             if (item?.key) {
@@ -343,6 +415,10 @@ const RefineModal = ({
           }
           if (toolPrompt) {
             result.toolStandard = getPromptItemText(toolPrompt);
+          }
+          const memoryPrompt = nextPromptConfigs.find(isMemoryPrompt);
+          if (memoryPrompt) {
+            result.memoryStandard = getPromptItemText(memoryPrompt);
           }
         } else {
           result.corePersonaDefinition = personaText;
@@ -385,24 +461,30 @@ const RefineModal = ({
         personalityDefinition:
           result.corePersonaDefinition || form.getFieldValue('corePersonaDefinition') || personaText,
       });
-      if (promptConfigs.length) {
-        promptConfigs.forEach((item) => {
+      if (nextPromptConfigs.length) {
+        nextPromptConfigs.forEach((item) => {
           if (item?.key) {
-            roleObj[item.key] =
-              has('persona') && isPersonaPrompt(item) ? personaText : result[item.key] || getPromptItemText(item);
+            roleObj[item.key] = result[item.key] || getPromptItemText(item);
           }
         });
       }
-      if (promptConfigs.length && has('persona')) {
+      if (nextPromptConfigs.length && has('persona')) {
         roleObj[PERSONA_PROMPT_KEY] = personaText;
+        roleObj[WORK_PROMPT_KEY] = workStandardText;
+        roleObj[TOOL_PROMPT_KEY] = toolStandardText;
+        roleObj.memory = memoryStandardText;
       }
-      const workPrompt = promptConfigs.find((item) => (item.normalizedKey || item.key) === WORK_PROMPT_KEY);
-      const toolPrompt = promptConfigs.find((item) => (item.normalizedKey || item.key) === TOOL_PROMPT_KEY);
+      const workPrompt = nextPromptConfigs.find(isWorkPrompt);
+      const toolPrompt = nextPromptConfigs.find(isToolPrompt);
+      const memoryPrompt = nextPromptConfigs.find(isMemoryPrompt);
       if (workPrompt) {
-        roleObj.workStandard = roleObj[workPrompt.key] || roleObj.workStandard || '';
+        roleObj.workStandard = roleObj[workPrompt.key] || workStandardText || roleObj.workStandard || '';
       }
       if (toolPrompt) {
-        roleObj.toolStandard = roleObj[toolPrompt.key] || roleObj.toolStandard || '';
+        roleObj.toolStandard = roleObj[toolPrompt.key] || toolStandardText || roleObj.toolStandard || '';
+      }
+      if (memoryPrompt) {
+        roleObj.memoryStandard = roleObj[memoryPrompt.key] || memoryStandardText || roleObj.memoryStandard || '';
       }
       result.role = JSON.stringify(roleObj);
 
@@ -503,6 +585,9 @@ const RefineModal = ({
       resourceDesc: agentDescription,
       role: characterDescription,
       corePersonaDefinition: extractPersonaDefinitionText(corePersonaDefinition),
+      workStandard: getPromptTextByMatcher(corePersonaDefinition, isWorkPrompt),
+      toolStandard: getPromptTextByMatcher(corePersonaDefinition, isToolPrompt),
+      memoryStandard: getPromptTextByMatcher(corePersonaDefinition, isMemoryPrompt),
       descText: openingRemark,
       tags: tagList?.map((it) => it.value),
       roleAttributes: normalizeText(roleAttributes),
@@ -540,7 +625,7 @@ const RefineModal = ({
     setIsLoading(true);
     setGeneratedPromptConfigs([]);
     setStreamingFields({});
-    setStreamingText('');
+    setStreamingTextLength(0);
 
     const outerFormValues = form.getFieldsValue();
     const {
@@ -639,7 +724,7 @@ const RefineModal = ({
             if (value) {
               streamTextBuffer += value;
               if (mountedRef.current) {
-                setStreamingText((prev) => `${prev}${value}`);
+                setStreamingTextLength(streamTextBuffer.length);
               }
             }
           } catch (e) {
@@ -742,7 +827,7 @@ const RefineModal = ({
       streamAbortRef.current?.abort();
       streamAbortRef.current = null;
       setStreamingFields({});
-      setStreamingText('');
+      setStreamingTextLength(0);
       setIsLoading(false);
       return;
     }
@@ -801,8 +886,17 @@ const RefineModal = ({
             <div className={styles.loadingHint}>
               {intl.formatMessage({ id: 'refineModal.generating', defaultMessage: '正在生成配置...' })}
             </div>
+            <div className={styles.streamProgress}>
+              {intl.formatMessage(
+                {
+                  id: 'refineModal.streamProgress',
+                  defaultMessage: '已接收 {count} 字符，正在分析字段',
+                },
+                { count: streamingTextLength }
+              )}
+            </div>
             <div className={styles.streamResultList}>
-              {!streamingText && Object.entries(streamingFields).length === 0 && (
+              {!streamingTextLength && Object.entries(streamingFields).length === 0 && (
                 <div className={styles.streamWaiting}>
                   {intl.formatMessage({
                     id: 'refineModal.waitingStream',
@@ -810,7 +904,6 @@ const RefineModal = ({
                   })}
                 </div>
               )}
-              {!!streamingText && <div className={styles.streamTextOutput}>{streamingText}</div>}
               {Object.entries(streamingFields).map(([field, value]) => (
                 <div className={styles.streamResultItem} key={field}>
                   <div className={styles.streamResultTitle}>{STREAM_FIELD_LABELS[field] || field}</div>

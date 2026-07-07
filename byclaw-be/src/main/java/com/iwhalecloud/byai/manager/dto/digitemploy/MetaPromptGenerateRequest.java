@@ -59,6 +59,7 @@ public class MetaPromptGenerateRequest {
         appendField(sb, "性格维度", personalityDimensions);
         appendField(sb, "用词偏好", wordPreferences);
         appendField(sb, "句式语气", sentenceAndTone);
+        appendField(sb, "已有核心人格定义", corePersonaDefinition);
         return sb.length() > 0 ? sb.toString() : agentName != null ? agentName : "";
     }
 

@@ -89,6 +89,8 @@ export default {
 
   'search.referenceSuccess': 'Referenced successfully',
 
+  'search.referenceSuccess': 'Referenced successfully',
+
   'resource.belongField': 'Business Field',
   'resource.belongFieldPlaceholder': 'Please select a business field',
   'resource.knowledge': 'Knowledge',

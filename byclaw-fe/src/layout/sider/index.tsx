@@ -32,7 +32,7 @@ import { SiderContentContext, DEFAULT_SIDER_CONTENT_WIDTH } from './siderContent
 
 export const DEF_SIDER = 'sessions';
 
-const CENTER_TAB_KEYS = new Set(['agent', 'knowledge', 'tool', 'view', 'object', 'ontology', 'skill', 'file', 'model']);
+const CENTER_TAB_KEYS = new Set(['agent', 'model', 'knowledge', 'tool', 'view', 'object', 'ontology', 'skill', 'file']);
 
 const SIDER_ACTIVE_TAB_BY_PATH: Partial<Record<string, (typeof tabItems)[number]['key']>> = {
   '/dialogueRecord': 'sessions',

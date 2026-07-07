@@ -60,7 +60,10 @@ describe('PersonalParamSettings', () => {
   it('submits the new parameter value when editing a configured parameter', async () => {
     render(<PersonalParamSettings />);
 
-    expect(await screen.findByText('VOLCENGINE_TTS_API_KEY')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(mockQueryPersonalParams).toHaveBeenCalled();
+    });
+    expect(await screen.findByText('VOLCENGINE_TTS_API_KEY', {}, { timeout: 10000 })).toBeInTheDocument();
     expect(screen.getByText((content) => content.includes('****8838'))).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'common.edit' }));

@@ -88,6 +88,8 @@ export default {
 
   'search.referenceSuccess': '引用成功',
 
+  'search.referenceSuccess': '引用成功',
+
   'resource.belongField': '所属领域',
   'resource.belongFieldPlaceholder': '请选择',
   'resource.knowledge': '知识',
