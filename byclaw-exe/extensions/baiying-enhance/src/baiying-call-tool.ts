@@ -287,7 +287,7 @@ export function buildBaiyingCallDescription(params: { agent: AdaptedManagedAgent
     "For DOC resources (`KG_DOC`/`KG_DB`/`KG_QA`), `agent_id` is required by executor. This plugin auto-populates `agent_id` from agent.json `resourceId` (current agent sourceKey) and forwards it in the top-level payload.",
   );
   descParts.push(
-    "Pass structured backend parameters in `arguments`; OBJECT and VIEW resources are dispatched to `BYCLAW_DATA` with the selected resource code in `call_object_ids` or `call_view_ids`.",
+    "Pass structured backend parameters in `arguments`; OBJECT and VIEW resources are dispatched to `BYCLAW_DATA` with the selected resource code in `call_object_ids` or `call_view_ids`, plus the selected resource id in `resource_ids`.",
   );
   descParts.push(
     "For OBJECT/VIEW calls with large payloads, backend may return `file_url` in response data; `file_url` is a local file path. Treat this local path as the authoritative payload reference and read it to process the full business data before producing final conclusions.",
