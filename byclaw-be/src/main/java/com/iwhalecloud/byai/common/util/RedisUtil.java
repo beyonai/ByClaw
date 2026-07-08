@@ -254,6 +254,22 @@ public class RedisUtil {
     }
 
     /**
+     * 续租分布式锁（CAS）：仅当锁仍归当前持有者（value 匹配）时才刷新过期时间。
+     *
+     * @param key 锁的键名
+     * @param value 锁的值（持有者唯一标识 / fencing token）
+     * @param lockExpireTime 新的过期时间（秒）
+     * @return true 表示续租成功，false 表示锁已不属于当前持有者
+     */
+    public static Boolean renewLock(String key, String value, long lockExpireTime) {
+        String script = "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('pexpire', KEYS[1], ARGV[2]) else return 0 end";
+        RedisScript<Long> redisScript = new DefaultRedisScript<>(script, Long.class);
+        Long result = (Long) instance.stringRedisTemplate.execute(
+                redisScript, Collections.singletonList(key), value, String.valueOf(lockExpireTime * 1000L));
+        return RELEASE_SUCCESS.equals(result);
+    }
+
+    /**
      * 批量获取字符串值（兼容单机和集群模式）
      *
      * @param keys 键列表

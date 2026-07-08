@@ -288,6 +288,46 @@ class DingtalkCardServiceTest {
     }
 
     @Test
+    void shouldHideReasoningByDefault() throws Exception {
+        AtomicReference<String> latestContent = new AtomicReference<>("");
+        AtomicBoolean finalized = new AtomicBoolean(false);
+
+        DingtalkCardService recordingService = new DingtalkCardService(objectMapper, tokenService, robotConfigService) {
+            @Override
+            public void streamingUpdateAssistantReply(DingtalkCardStreamSession session, String content, boolean isFinalize) {
+                latestContent.set(content);
+                finalized.set(isFinalize);
+                if (isFinalize) {
+                    session.setFinalized(true);
+                }
+            }
+
+            @Override
+            public void updateCopyContent(DingtalkCardStreamSession session, String copyContent) {
+                // no-op for this unit test
+            }
+        };
+
+        DingtalkCardStreamingOutputStream outputStream = new DingtalkCardStreamingOutputStream(
+                objectMapper,
+                recordingService,
+                new DingtalkCardStreamSession(null, "", "track-hide-reasoning"),
+                null,
+                null
+        );
+
+        outputStream.write("""
+                {"event":"reasoningLogDelta","contentType":"1002","choices":[{"delta":{"content":"思考过程"}}]}
+                {"event":"answerDelta","contentType":"1002","choices":[{"delta":{"content":"答案"}}]}
+                """.getBytes());
+        outputStream.finish();
+
+        assertThat(latestContent.get()).isEqualTo("答案");
+        assertThat(latestContent.get()).doesNotContain("思考过程");
+        assertThat(finalized.get()).isTrue();
+    }
+
+    @Test
     void shouldInsertMarkdownLineBreakWhenReasonContentTypeChanges() throws Exception {
         List<String> streamedContents = new ArrayList<>();
         AtomicReference<String> latestContent = new AtomicReference<>("");
@@ -610,7 +650,8 @@ class DingtalkCardServiceTest {
                 null,
                 null,
                 System::currentTimeMillis,
-                0L
+                0L,
+                true
         );
     }
 }

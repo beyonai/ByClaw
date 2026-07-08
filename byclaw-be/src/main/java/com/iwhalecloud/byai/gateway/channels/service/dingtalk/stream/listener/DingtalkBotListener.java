@@ -27,6 +27,7 @@ import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.DingtalkUse
 import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.cards.DingtalkCardService;
 import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.cards.DingtalkCardStreamSession;
 import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.cards.DingtalkCardStreamingOutputStream;
+import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.config.DingtalkStreamProperties;
 import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.model.DingtalkCallbackMessage;
 import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.model.DingtalkMsgType;
 import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.support.DingtalkCallbackMessageParser;
@@ -65,6 +66,7 @@ public class DingtalkBotListener implements OpenDingTalkCallbackListener<Map<Str
     private final DingtalkCardService dingtalkCardService;
     private final DingtalkCallbackMessageParser dingtalkCallbackMessageParser;
     private final DingtalkSessionService dingtalkSessionService;
+    private final DingtalkStreamProperties streamProperties;
     private final ExecutorService messageExecutor = new ThreadPoolExecutor(
             8,
             32,
@@ -85,7 +87,8 @@ public class DingtalkBotListener implements OpenDingTalkCallbackListener<Map<Str
             DingtalkReplyDispatcher dingtalkReplyDispatcher,
             DingtalkCardService dingtalkCardService,
             DingtalkCallbackMessageParser dingtalkCallbackMessageParser,
-            DingtalkSessionService dingtalkSessionService
+            DingtalkSessionService dingtalkSessionService,
+            DingtalkStreamProperties streamProperties
     ) {
         this.objectMapper = objectMapper;
         this.dingtalkUserService = dingtalkUserService;
@@ -94,6 +97,7 @@ public class DingtalkBotListener implements OpenDingTalkCallbackListener<Map<Str
         this.dingtalkCardService = dingtalkCardService;
         this.dingtalkCallbackMessageParser = dingtalkCallbackMessageParser;
         this.dingtalkSessionService = dingtalkSessionService;
+        this.streamProperties = streamProperties;
     }
 
     @Override
@@ -310,7 +314,7 @@ public class DingtalkBotListener implements OpenDingTalkCallbackListener<Map<Str
 
         DingtalkCardStreamingOutputStream outputStream =
                 new DingtalkCardStreamingOutputStream(objectMapper, dingtalkCardService, cardSession,
-                        null, CurrentUserHolder.getCurrentUserCode());
+                        null, CurrentUserHolder.getCurrentUserCode(), streamProperties.isShowReasoning());
         try {
             channelService.chat(assistantChatDto, outputStream);
             outputStream.finish();

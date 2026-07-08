@@ -4,6 +4,13 @@ import { QuestionCircleOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 
 import styles from './index.module.less';
+import {
+  getReusableRobotConfigValues,
+  getRobotConfigIdentityValue,
+  isWeComChannel,
+  normalizeRobotConfig,
+  RobotConfig,
+} from '../robotConfig';
 
 const LabelWithTooltip = ({ label, tooltip }: { label: string; tooltip: string }) => (
   <span>
@@ -13,18 +20,6 @@ const LabelWithTooltip = ({ label, tooltip }: { label: string; tooltip: string }
     </Tooltip>
   </span>
 );
-
-type RobotConfig = {
-  channel?: string;
-  clientId?: string;
-  clientSecret?: string;
-  robotCode?: string;
-  AICardId?: string;
-  appId?: string;
-  appSecret?: string;
-  verificationToken?: string;
-  encryptKey?: string;
-};
 
 type IProps = {
   open: boolean;
@@ -36,12 +31,12 @@ type IProps = {
   isReadOnly: boolean;
 };
 
-const normalizeRobotChannelValue = (channel = '') => `${channel || ''}`.trim().toLowerCase();
+const normalizeRobotChannelValue = (channel = '') => `${channel || ''}`.replace(/[\s_-]/g, '').toLowerCase();
 
 function RobotModal(props: IProps) {
   const { open, setOpen, onOk, robotChannelLabelMap, item, isReadOnly } = props;
   const intl = useIntl();
-  const hasIdentity = Boolean(item.clientId || item.appId);
+  const hasIdentity = Boolean(getRobotConfigIdentityValue(item) || item.appId);
   const [form] = Form.useForm<RobotConfig>();
   const channelTabs = useMemo(() => {
     return Object.entries(robotChannelLabelMap).map(([key, label]) => ({
@@ -51,6 +46,7 @@ function RobotModal(props: IProps) {
   }, [robotChannelLabelMap]);
   const [activeChannel, setActiveChannel] = useState(item.channel || '');
   const [channelFormCache, setChannelFormCache] = useState<Record<string, Partial<RobotConfig>>>({});
+  const isWeCom = isWeComChannel(activeChannel);
 
   const resolveChannelKey = useCallback(
     (channel?: string) => {
@@ -66,61 +62,38 @@ function RobotModal(props: IProps) {
     if (!open) return;
 
     const nextChannel = resolveChannelKey(item.channel);
+    const nextValues = getReusableRobotConfigValues({
+      ...item,
+      channel: nextChannel,
+    });
     setActiveChannel(nextChannel);
     setChannelFormCache({
-      [nextChannel]: {
-        channel: nextChannel,
-        clientId: item.clientId,
-        clientSecret: item.clientSecret,
-        robotCode: item.robotCode,
-        AICardId: item.AICardId,
-        appId: item.appId,
-        appSecret: item.appSecret,
-        verificationToken: item.verificationToken,
-        encryptKey: item.encryptKey,
-      },
+      [nextChannel]: nextValues,
     });
 
-    form.setFieldsValue({
-      channel: nextChannel,
-      clientId: item.clientId,
-      clientSecret: item.clientSecret,
-      robotCode: item.robotCode,
-      AICardId: item.AICardId,
-      appId: item.appId,
-      appSecret: item.appSecret,
-      verificationToken: item.verificationToken,
-      encryptKey: item.encryptKey,
-    });
+    form.setFieldsValue(nextValues);
   }, [form, item, open, resolveChannelKey]);
 
   const handleTabChange = (nextChannel: string) => {
     const currentValues = form.getFieldsValue();
+    const nextCache = {
+      ...channelFormCache,
+      [activeChannel]: {
+        channel: activeChannel,
+        ...channelFormCache[activeChannel],
+        ...currentValues,
+      },
+    };
 
-    setChannelFormCache((prev) => {
-      return {
-        ...prev,
-        [activeChannel]: {
-          channel: activeChannel,
-          ...prev[activeChannel],
-          ...currentValues,
-        },
-      };
-    });
+    setChannelFormCache(nextCache);
 
-    const nextValues = channelFormCache[nextChannel] || {};
-    setActiveChannel(nextChannel);
-    form.setFieldsValue({
+    const nextValues = getReusableRobotConfigValues({
+      ...currentValues,
+      ...nextCache[nextChannel],
       channel: nextChannel,
-      clientId: nextValues.clientId || '',
-      clientSecret: nextValues.clientSecret || '',
-      robotCode: nextValues.robotCode || '',
-      AICardId: nextValues.AICardId || '',
-      appId: nextValues.appId || '',
-      appSecret: nextValues.appSecret || '',
-      verificationToken: nextValues.verificationToken || '',
-      encryptKey: nextValues.encryptKey || '',
     });
+    setActiveChannel(nextChannel);
+    form.setFieldsValue(nextValues);
   };
 
   const normalizedActiveChannel = normalizeRobotChannelValue(activeChannel);
@@ -130,23 +103,41 @@ function RobotModal(props: IProps) {
     const values = await form.validateFields();
 
     if (isFeishuChannel) {
-      onOk({
-        channel: activeChannel,
-        appId: values.appId,
-        appSecret: values.appSecret,
-        verificationToken: values.verificationToken,
-        encryptKey: values.encryptKey,
-      });
+      onOk(
+        normalizeRobotConfig({
+          channel: activeChannel,
+          appId: values.appId,
+          appSecret: values.appSecret,
+          verificationToken: values.verificationToken,
+          encryptKey: values.encryptKey,
+        })
+      );
       return;
     }
 
-    onOk({
-      channel: activeChannel,
-      clientId: values.clientId,
-      clientSecret: values.clientSecret,
-      robotCode: values.robotCode,
-      AICardId: values.AICardId,
-    });
+    if (isWeCom) {
+      onOk(
+        normalizeRobotConfig({
+          channel: activeChannel,
+          botId: values.botId,
+          secret: values.secret,
+          agentId: values.agentId,
+          corpId: values.corpId,
+          corpSecret: values.corpSecret,
+        })
+      );
+      return;
+    }
+
+    onOk(
+      normalizeRobotConfig({
+        channel: activeChannel,
+        clientId: values.clientId,
+        clientSecret: values.clientSecret,
+        robotCode: values.robotCode,
+        AICardId: values.AICardId,
+      })
+    );
   };
 
   const renderDingtalkFields = () => (
@@ -268,7 +259,81 @@ function RobotModal(props: IProps) {
     </>
   );
 
+  const renderWeComFields = () => (
+    <>
+      <Form.Item
+        label={
+          <LabelWithTooltip
+            label={intl.formatMessage({ id: 'digitalEmployeeMgr.wecomBotIdLabel' })}
+            tooltip={intl.formatMessage({ id: 'digitalEmployeeMgr.wecomBotIdTooltip' })}
+          />
+        }
+        name="botId"
+        rules={[{ required: true, message: intl.formatMessage({ id: 'digitalEmployeeMgr.wecomBotIdRequired' }) }]}
+      >
+        <Input className={styles.robotFieldControl} placeholder="" />
+      </Form.Item>
+      <Form.Item
+        label={
+          <LabelWithTooltip
+            label={intl.formatMessage({ id: 'digitalEmployeeMgr.wecomSecretLabel' })}
+            tooltip={intl.formatMessage({ id: 'digitalEmployeeMgr.wecomSecretTooltip' })}
+          />
+        }
+        name="secret"
+        rules={[{ required: true, message: intl.formatMessage({ id: 'digitalEmployeeMgr.wecomSecretRequired' }) }]}
+      >
+        <Input.TextArea className={styles.robotFieldControl} rows={2} placeholder="" />
+      </Form.Item>
+      <Form.Item
+        label={
+          <LabelWithTooltip
+            label={intl.formatMessage({ id: 'digitalEmployeeMgr.wecomAgentIdLabel' })}
+            tooltip={intl.formatMessage({ id: 'digitalEmployeeMgr.wecomAgentIdTooltip' })}
+          />
+        }
+        name="agentId"
+        rules={[{ required: true, message: intl.formatMessage({ id: 'digitalEmployeeMgr.wecomAgentIdRequired' }) }]}
+      >
+        <Input className={styles.robotFieldControl} placeholder="" />
+      </Form.Item>
+      <Form.Item
+        label={
+          <LabelWithTooltip
+            label={intl.formatMessage({ id: 'digitalEmployeeMgr.wecomCorpIdLabel' })}
+            tooltip={intl.formatMessage({ id: 'digitalEmployeeMgr.wecomCorpIdTooltip' })}
+          />
+        }
+        name="corpId"
+        rules={[{ required: true, message: intl.formatMessage({ id: 'digitalEmployeeMgr.wecomCorpIdRequired' }) }]}
+      >
+        <Input className={styles.robotFieldControl} placeholder="" />
+      </Form.Item>
+      <Form.Item
+        label={
+          <LabelWithTooltip
+            label={intl.formatMessage({ id: 'digitalEmployeeMgr.wecomCorpSecretLabel' })}
+            tooltip={intl.formatMessage({ id: 'digitalEmployeeMgr.wecomCorpSecretTooltip' })}
+          />
+        }
+        name="corpSecret"
+        rules={[
+          {
+            required: true,
+            message: intl.formatMessage({ id: 'digitalEmployeeMgr.wecomCorpSecretRequired' }),
+          },
+        ]}
+      >
+        <Input.TextArea className={styles.robotFieldControl} rows={2} placeholder="" />
+      </Form.Item>
+    </>
+  );
+
   const renderChannelFields = () => {
+    if (isWeCom) {
+      return renderWeComFields();
+    }
+
     if (isFeishuChannel) {
       return renderFeishuFields();
     }

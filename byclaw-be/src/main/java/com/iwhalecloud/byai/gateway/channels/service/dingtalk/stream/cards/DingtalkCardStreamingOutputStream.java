@@ -75,6 +75,7 @@ public class DingtalkCardStreamingOutputStream extends ByteArrayOutputStream {
     private final String userCode;
     private final LongSupplier currentTimeMillis;
     private final long minStreamUpdateIntervalMillis;
+    private final boolean showReasoning;
     private String filePreviewBaseUrl;
     /**
      * 暂存尚未拼成完整 JSON 对象的输出片段。
@@ -134,6 +135,17 @@ public class DingtalkCardStreamingOutputStream extends ByteArrayOutputStream {
             Consumer<String> onContentUpdate,
             String userCode
     ) {
+        this(objectMapper, dingtalkCardService, session, onContentUpdate, userCode, false);
+    }
+
+    public DingtalkCardStreamingOutputStream(
+            ObjectMapper objectMapper,
+            DingtalkCardService dingtalkCardService,
+            DingtalkCardStreamSession session,
+            Consumer<String> onContentUpdate,
+            String userCode,
+            boolean showReasoning
+    ) {
         this(
                 objectMapper,
                 dingtalkCardService,
@@ -141,7 +153,8 @@ public class DingtalkCardStreamingOutputStream extends ByteArrayOutputStream {
                 onContentUpdate,
                 userCode,
                 System::currentTimeMillis,
-                DEFAULT_MIN_STREAM_UPDATE_INTERVAL_MILLIS
+                DEFAULT_MIN_STREAM_UPDATE_INTERVAL_MILLIS,
+                showReasoning
         );
     }
 
@@ -154,6 +167,28 @@ public class DingtalkCardStreamingOutputStream extends ByteArrayOutputStream {
             LongSupplier currentTimeMillis,
             long minStreamUpdateIntervalMillis
     ) {
+        this(
+                objectMapper,
+                dingtalkCardService,
+                session,
+                onContentUpdate,
+                userCode,
+                currentTimeMillis,
+                minStreamUpdateIntervalMillis,
+                false
+        );
+    }
+
+    DingtalkCardStreamingOutputStream(
+            ObjectMapper objectMapper,
+            DingtalkCardService dingtalkCardService,
+            DingtalkCardStreamSession session,
+            Consumer<String> onContentUpdate,
+            String userCode,
+            LongSupplier currentTimeMillis,
+            long minStreamUpdateIntervalMillis,
+            boolean showReasoning
+    ) {
         this.objectMapper = objectMapper;
         this.dingtalkCardService = dingtalkCardService;
         this.session = session;
@@ -161,6 +196,7 @@ public class DingtalkCardStreamingOutputStream extends ByteArrayOutputStream {
         this.userCode = userCode;
         this.currentTimeMillis = currentTimeMillis == null ? System::currentTimeMillis : currentTimeMillis;
         this.minStreamUpdateIntervalMillis = Math.max(0L, minStreamUpdateIntervalMillis);
+        this.showReasoning = showReasoning;
     }
 
     @Override
@@ -290,7 +326,11 @@ public class DingtalkCardStreamingOutputStream extends ByteArrayOutputStream {
             logger.info("Received event: {}, root: {}", event, root);
             switch (event) {
                 case EVENT_ANSWER_START, EVENT_ANSWER_DELTA, EVENT_ANSWER_END -> handleAnswerDelta(root);
-                case EVENT_REASON_START, EVENT_REASON_DELTA, EVENT_REASON_END -> handleReasonDelta(root, event);
+                case EVENT_REASON_START, EVENT_REASON_DELTA, EVENT_REASON_END -> {
+                    if (showReasoning) {
+                        handleReasonDelta(root, event);
+                    }
+                }
                 default -> {
                     // ignore
                 }

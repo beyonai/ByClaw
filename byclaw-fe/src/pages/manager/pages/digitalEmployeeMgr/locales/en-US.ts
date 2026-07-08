@@ -80,11 +80,7 @@ export default {
   'refineModal.step.workflow': 'Workflow',
   'refineModal.step.style': 'Communication',
   'refineModal.progress': 'Completed {done} / {total} items',
-  'refineModal.generating': 'Generating configuration...',
-  'refineModal.waitingStream': 'Connecting to the model and preparing results',
   'refineModal.streamProgress': 'Received {count} characters, analyzing fields',
-  'refineModal.generateFailed': 'Generation failed. Please try again later.',
-  'refineModal.generateIncomplete': 'The generated result is incomplete. Please regenerate.',
 
   // Employee Detail
   'employeeDetail.refine': 'Auto-Complete',
@@ -400,6 +396,21 @@ export default {
   'digitalEmployeeMgr.feishuEncryptKeyLabel': 'Encrypt Key',
   'digitalEmployeeMgr.feishuEncryptKeyTooltip':
     'Feishu Open Platform -> Event Subscription -> Encryption Strategy -> Encrypt Key',
+  'digitalEmployeeMgr.wecomBotIdRequired': 'Please enter botId',
+  'digitalEmployeeMgr.wecomSecretRequired': 'Please enter secret',
+  'digitalEmployeeMgr.wecomBotIdLabel': 'botId',
+  'digitalEmployeeMgr.wecomBotIdTooltip': 'WeCom robot BotId',
+  'digitalEmployeeMgr.wecomSecretLabel': 'secret',
+  'digitalEmployeeMgr.wecomSecretTooltip': 'WeCom robot Secret',
+  'digitalEmployeeMgr.wecomAgentIdRequired': 'Please enter agentId',
+  'digitalEmployeeMgr.wecomAgentIdLabel': 'agentId',
+  'digitalEmployeeMgr.wecomAgentIdTooltip': 'WeCom self-built app ID used to scope contact access_token cache',
+  'digitalEmployeeMgr.wecomCorpIdRequired': 'Please enter corpId',
+  'digitalEmployeeMgr.wecomCorpSecretRequired': 'Please enter corpSecret',
+  'digitalEmployeeMgr.wecomCorpIdLabel': 'corpId',
+  'digitalEmployeeMgr.wecomCorpIdTooltip': 'WeCom enterprise CorpID for contact API access_token',
+  'digitalEmployeeMgr.wecomCorpSecretLabel': 'corpSecret',
+  'digitalEmployeeMgr.wecomCorpSecretTooltip': 'WeCom self-built app or contact Secret for reading member profiles',
 
   // Operation (Digital Employee Operations)
   'operation.basicInfo': 'Basic Information',

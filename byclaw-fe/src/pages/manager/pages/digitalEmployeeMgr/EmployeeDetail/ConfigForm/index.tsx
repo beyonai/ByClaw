@@ -64,6 +64,7 @@ import { normalizeCatalogTree } from '@/utils/catalog';
 import { DEFAULT_AGENT_TYPE_OPTIONS, DEFAULT_TEMPLATE_DATA } from '../../constants';
 import Ellipsis from '@/pages/manager/components/Ellipsis';
 import { DEFAULT_DIGITAL_EMPLOYEE_TEMPLATES } from '@/pages/manager/constants/digitalResource';
+import { normalizeRobotConfig } from './robotConfig';
 
 const { TextArea } = Input;
 
@@ -76,20 +77,24 @@ const DEFAULT_ROBOT_CHANNEL_OPTIONS = [
   { value: 'Feishu', labelZh: '飞书', labelEn: 'Feishu' },
 ];
 
-const normalizeRobotChannelValue = (channel = '') => `${channel || ''}`.trim().toLowerCase();
+const normalizeRobotChannelValue = (channel = '') => `${channel || ''}`.replace(/[\s_-]/g, '').toLowerCase();
 
 const getRobotConfigKey = (item = {}) => {
   const channel = normalizeRobotChannelValue(item.channel);
-  const identity = item.appId || item.clientId || item.robotCode || '';
+  const identity = item.appId || item.clientId || item.botId || item.robotCode || '';
   return identity ? `${channel}:${identity}` : '';
 };
 
 const isFeishuRobotConfig = (item = {}) => normalizeRobotChannelValue(item.channel) === 'feishu';
 const isDingtalkRobotConfig = (item = {}) => normalizeRobotChannelValue(item.channel) === 'dingtalk';
+const isWecomRobotConfig = (item = {}) => normalizeRobotChannelValue(item.channel) === 'wecom';
 
 const getRobotConfigIdentityText = (item = {}) => {
   if (isFeishuRobotConfig(item)) {
     return `appId: ${item.appId || '-'}`;
+  }
+  if (isWecomRobotConfig(item)) {
+    return `botId: ${item.botId || item.robotCode || '-'}`;
   }
   return `clientId: ${item.clientId || '-'}`;
 };
@@ -700,23 +705,24 @@ const ConfigForm = (props) => {
   const handleRobotModalOk = useCallback(
     (item) => {
       setRobotModalOpen(false);
+      const nextItem = normalizeRobotConfig(item);
       setRobotConfigs((prev) => {
         // appId/clientId 等身份字段允许编辑，不能用它们判断“当前编辑的是哪一条”。
         // 编辑入口会记录数组下标，保存时优先按下标替换原配置，避免修改 appId 后被当成新增机器人。
         if (robotEditingIndex !== null && robotEditingIndex >= 0 && robotEditingIndex < prev.length) {
-          return prev.map((it, index) => (index === robotEditingIndex ? item : it));
+          return prev.map((it, index) => (index === robotEditingIndex ? nextItem : it));
         }
 
-        const nextKey = getRobotConfigKey(item);
+        const nextKey = getRobotConfigKey(nextItem);
         if (nextKey) {
           const target = prev.find((it) => getRobotConfigKey(it) === nextKey);
           if (target) {
-            return prev.map((it) => (getRobotConfigKey(it) === nextKey ? item : it));
+            return prev.map((it) => (getRobotConfigKey(it) === nextKey ? nextItem : it));
           }
-          return [...prev, item];
+          return [...prev, nextItem];
         }
 
-        return [...prev, item];
+        return [...prev, nextItem];
       });
       setRobotEditingIndex(null);
     },
