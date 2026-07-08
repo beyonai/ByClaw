@@ -8,6 +8,12 @@ RUN npm config set registry https://registry.npmmirror.com --global \
     && npm config set audit false --global \
     && npm config set prefer-offline true --global
 
+# install shared build toolchain (esbuild) once, expose via PATH
+RUN --mount=type=cache,target=/root/.npm \
+    npm install --prefix /build/toolchain --no-package-lock --omit=dev esbuild@0.25.12
+
+ENV PATH="/build/toolchain/node_modules/.bin:${PATH}"
+
 # install deps first (cache-friendly layer)
 COPY byclaw-exe/extensions/baiying-enhance/package.json \
      byclaw-exe/extensions/baiying-enhance/package-lock.json \
@@ -95,14 +101,18 @@ RUN set -eux; \
         zip; \
     rm -rf /var/lib/apt/lists/*
 
-# copy built extensions and re-map diagnostics-otel to openclaw's expected id
+# copy built extensions and install into OPENCLAW_BUNDLED_PLUGINS_DIR.
+# diagnostics-otel is renamed to the id openclaw expects; the other two keep
+# their source directory names.
 COPY --from=ext-builder /build/out/ /app/dist-runtime/extensions/
 
 RUN set -eux; \
     rm -rf /app/dist/extensions/diagnostics-otel; \
     mkdir -p /app/dist/extensions; \
+    cp -a /app/dist-runtime/extensions/baiying-enhance       /app/dist/extensions/baiying-enhance; \
+    cp -a /app/dist-runtime/extensions/byai-channel          /app/dist/extensions/byai-channel; \
     cp -a /app/dist-runtime/extensions/byai_diagnostics-otel /app/dist/extensions/diagnostics-otel; \
-    rm -rf /app/dist-runtime/extensions/byai_diagnostics-otel; \
+    rm -rf /app/dist-runtime; \
     test -f /app/dist/extensions/diagnostics-otel/dist/index.js; \
     node --input-type=module -e ' \
       import { readFileSync } from "node:fs"; \
@@ -113,3 +123,14 @@ RUN set -eux; \
     '
 
 RUN ln -s /app /app/node_modules/openclaw
+
+# slim runtime bootstrap + entrypoint (state persisted under /by)
+COPY middleware/openclaw/runtime-bootstrap.simple.sh /usr/local/bin/openclaw-runtime-bootstrap
+COPY middleware/openclaw/start-openclaw.simple.sh    /usr/local/bin/start-openclaw.sh
+RUN chmod +x \
+    /usr/local/bin/openclaw-runtime-bootstrap \
+    /usr/local/bin/start-openclaw.sh
+
+EXPOSE 8080
+
+ENTRYPOINT ["/usr/local/bin/start-openclaw.sh"]
