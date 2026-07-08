@@ -8,6 +8,8 @@ import {
   tokenMarks,
   DEFAULT_CONTEXT_TOKENS,
   CONTEXT_TOKENS_CONFIG,
+  MIN_CONTEXT_TOKENS,
+  MIN_MAX_TOKENS,
   MODEL_PROTOCOL_OPTIONS,
   THINKING_CAPABILITY_OPTIONS,
   THINKING_COMPAT_FORMAT_OPTIONS,
@@ -325,6 +327,14 @@ const ModelFormFields: React.FC<Props> = ({
                 noStyle
                 rules={[
                   { required: true, message: intl.formatMessage({ id: 'modelMgr.modal.contextTokensPlaceholder' }) },
+                  {
+                    type: 'number',
+                    min: MIN_CONTEXT_TOKENS,
+                    message: intl.formatMessage(
+                      { id: 'modelMgr.modal.contextTokensMin' },
+                      { min: MIN_CONTEXT_TOKENS.toLocaleString() }
+                    ),
+                  },
                 ]}
               >
                 <InputNumber {...CONTEXT_TOKENS_CONFIG} className={styles.tokenInput} />
@@ -358,8 +368,21 @@ const ModelFormFields: React.FC<Props> = ({
             <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.topP' })} name="topP">
               <InputNumber className={styles.fullWidth} min={0} max={1} step={0.05} />
             </Form.Item>
-            <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.maxTokens' })} name="maxTokens">
-              <InputNumber className={styles.fullWidth} min={1} />
+            <Form.Item
+              label={intl.formatMessage({ id: 'modelMgr.modal.maxTokens' })}
+              name="maxTokens"
+              rules={[
+                {
+                  type: 'number',
+                  min: MIN_MAX_TOKENS,
+                  message: intl.formatMessage(
+                    { id: 'modelMgr.modal.maxTokensMin' },
+                    { min: MIN_MAX_TOKENS.toLocaleString() }
+                  ),
+                },
+              ]}
+            >
+              <InputNumber className={styles.fullWidth} min={MIN_MAX_TOKENS} />
             </Form.Item>
             <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.frequencyPenalty' })} name="frequencyPenalty">
               <InputNumber className={styles.fullWidth} min={-2} max={2} step={0.1} />
@@ -387,7 +410,7 @@ const ModelFormFields: React.FC<Props> = ({
             </Form.Item>
             {isLlmModel ? (
               <>
-                <div className={styles.hintBlock} style={{ gridColumn: 'span 3' }}>
+                <div className={`${styles.hintBlock} ${styles.gridColSpan3}`}>
                   <div className={styles.hintTitle}>{intl.formatMessage({ id: 'modelMgr.modal.reasoningTitle' })}</div>
                   <div className={styles.hint}>{intl.formatMessage({ id: 'modelMgr.modal.reasoningDesc' })}</div>
                 </div>
@@ -453,7 +476,7 @@ const ModelFormFields: React.FC<Props> = ({
                 <Form.Item
                   label={intl.formatMessage({ id: 'modelMgr.modal.reasoningEffortMap' })}
                   name="reasoningEffortMapText"
-                  style={{ gridColumn: 'span 3' }}
+                  className={styles.gridColSpan3}
                 >
                   <TextArea
                     disabled={!reasoningEnabled}
@@ -464,19 +487,19 @@ const ModelFormFields: React.FC<Props> = ({
                 {reasoningCapability === 'budget' ? (
                   <>
                     <Form.Item label="minimal budget" name={['reasoningConfig', 'budgets', 'minimal']}>
-                      <InputNumber disabled={!reasoningEnabled} style={{ width: '100%' }} min={1} />
+                      <InputNumber disabled={!reasoningEnabled} className={styles.fullWidth} min={1} />
                     </Form.Item>
                     <Form.Item label="low budget" name={['reasoningConfig', 'budgets', 'low']}>
-                      <InputNumber disabled={!reasoningEnabled} style={{ width: '100%' }} min={1} />
+                      <InputNumber disabled={!reasoningEnabled} className={styles.fullWidth} min={1} />
                     </Form.Item>
                     <Form.Item label="medium budget" name={['reasoningConfig', 'budgets', 'medium']}>
-                      <InputNumber disabled={!reasoningEnabled} style={{ width: '100%' }} min={1} />
+                      <InputNumber disabled={!reasoningEnabled} className={styles.fullWidth} min={1} />
                     </Form.Item>
                     <Form.Item label="high budget" name={['reasoningConfig', 'budgets', 'high']}>
-                      <InputNumber disabled={!reasoningEnabled} style={{ width: '100%' }} min={1} />
+                      <InputNumber disabled={!reasoningEnabled} className={styles.fullWidth} min={1} />
                     </Form.Item>
                     <Form.Item label="max budget" name={['reasoningConfig', 'budgets', 'max']}>
-                      <InputNumber disabled={!reasoningEnabled} style={{ width: '100%' }} min={1} />
+                      <InputNumber disabled={!reasoningEnabled} className={styles.fullWidth} min={1} />
                     </Form.Item>
                   </>
                 ) : null}

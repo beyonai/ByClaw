@@ -13,4 +13,6 @@ public class ModelRequest {
     private String status;
 
     private String modelType;
+
+    private String ownerType;
 }

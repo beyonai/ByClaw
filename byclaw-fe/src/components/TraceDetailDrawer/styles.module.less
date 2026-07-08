@@ -1,0 +1,82 @@
+.titleBar {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.drawer {
+  :global {
+    .@{antPrefix}-drawer-body {
+      .@{antPrefix}-spin-nested-loading {
+        height: 100%;
+
+        .@{antPrefix}-spin-container {
+          height: 100%;
+        }
+      }
+    }
+  }
+}
+
+.main {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  height: 100%;
+  padding: 24px;
+  overflow-y: auto;
+}
+
+.block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.blockTitle {
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 22px;
+  color: #40454d;
+}
+
+.bubble {
+  max-width: 100%;
+  padding: 12px 16px;
+  border-radius: 12px;
+  background: #1f25330a;
+  word-break: break-word;
+}
+
+.meta {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 16px;
+  border-top: 1px dashed #e8e8e8;
+  font-size: 12px;
+  line-height: 18px;
+  color: #7a8799;
+}
+
+.metaLabel {
+  flex-shrink: 0;
+
+  &::after {
+    content: ':';
+    margin-left: 0;
+    margin-right: 4px;
+  }
+}
+
+.metaValue {
+  flex: 1 1 0%;
+  min-width: 0;
+  word-break: break-all;
+  color: #40454d;
+  font-family: SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
+}

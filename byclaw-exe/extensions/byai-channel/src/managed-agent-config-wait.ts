@@ -3,7 +3,7 @@ import type { OpenClawConfig } from "openclaw/plugin-sdk";
 export const MANAGED_BAIYING_AGENT_PREFIX = "baiying-agent-" as const;
 export const MAIN_AGENT_ID = "main" as const;
 
-const DEFAULT_WAIT_MS = 15_000;
+const DEFAULT_WAIT_MS = 60_000;
 const DEFAULT_POLL_MS = 100;
 
 type RuntimeConfigReader = {

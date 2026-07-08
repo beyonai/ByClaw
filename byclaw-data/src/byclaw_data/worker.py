@@ -1822,6 +1822,7 @@ class DataCloudWorker(GatewayWorker):
             getattr(_cmd_header, "session_id", "") or context.session_id or ""
         )
         _cmd_user_code = str(getattr(_cmd_header, "user_code", "") or "")
+        _cmd_user_name = str(getattr(_cmd_header, "user_name", "") or "")
         _cmd_message_id = str(getattr(_cmd_header, "message_id", "") or "")
         _cmd_agent_id = str(
             (getattr(_cmd_header, "metadata", None) or {}).get("agentId", "") or ""
@@ -1995,6 +1996,7 @@ class DataCloudWorker(GatewayWorker):
         # 先用 user_code 查 SHARE_BFM_USER_CODE_{user_code} 得到 user_id，
         # 再用 user:{user_id}:login:auth 读取 token hash。
         _auth_user_id = _cmd_user_code
+        _auth_user_name = _cmd_user_name
         if _auth_user_id:
             try:
                 _uid_key = f"SHARE_BFM_USER_CODE_{_auth_user_id}"
@@ -2013,8 +2015,11 @@ class DataCloudWorker(GatewayWorker):
                     _whale_token = _redis_auth_data.get("WHALE_AGENT_AUTHORIZATION", "")
                     _sso_token = _redis_auth_data.get("Sso-Token", "")
                     _beyond_token = _redis_auth_data.get("Beyond-Token", "")
+                    _auth_user_name = _redis_auth_data.get("userName")
                     # 写入 context 属性
                     try:
+                        if _auth_user_name:
+                            context.user_name = _auth_user_name
                         if _whale_token:
                             context.whale_agent_authorization = _whale_token
                         if _sso_token:
@@ -2032,6 +2037,8 @@ class DataCloudWorker(GatewayWorker):
                         header_metadata["Sso-Token"] = _sso_token
                     if _beyond_token and not header_metadata.get("Beyond-Token"):
                         header_metadata["Beyond-Token"] = _beyond_token
+                    if _auth_user_name and not header_metadata.get("userName"):
+                        header_metadata["userName"] = _auth_user_name
                     logger.info(
                         "[user-auth] loaded tokens from redis: key=%s session=%s"
                         " whale=%s sso=%s beyond=%s",
@@ -2515,6 +2522,7 @@ class DataCloudWorker(GatewayWorker):
             )
             _dyn_extras: dict[str, Any] = {
                 "user_code": _dyn_user_code,
+                "user_name": _auth_user_name,
                 "beyond_token": _dyn_beyond_token,
                 "skill_workspace_dir": _dyn_skill_ws,
                 "rel_resource_list": _rel_resource_list,

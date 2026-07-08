@@ -1,21 +1,25 @@
 package com.iwhalecloud.byai.state.domain.ws.handler;
 
-import cn.hutool.core.util.IdUtil;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.i18n.LocaleContextHolder;
+import org.springframework.stereotype.Component;
+
+import com.alibaba.fastjson.JSON;
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+import com.iwhalecloud.byai.common.log.util.RequestContextUtil;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
-import com.iwhalecloud.byai.state.domain.notification.service.NotificationService;
-import com.iwhalecloud.byai.common.log.util.RequestContextUtil;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Component;
-import com.alibaba.fastjson.JSON;
 import com.iwhalecloud.byai.state.domain.chat.enums.MessageType;
+import com.iwhalecloud.byai.state.domain.notification.service.NotificationService;
 import com.iwhalecloud.byai.state.domain.ws.constant.Constant;
 import com.iwhalecloud.byai.state.domain.ws.model.ChatMessage;
 import com.iwhalecloud.byai.state.domain.ws.service.ChatService;
+import com.iwhalecloud.byai.state.domain.ws.service.WebSocketI18nSupport;
 import com.iwhalecloud.byai.state.infrastructure.utils.CloseUtil;
 import com.iwhalecloud.byai.state.infrastructure.utils.NettyResponse;
 import com.iwhalecloud.byai.state.infrastructure.utils.PushUtil;
+import cn.hutool.core.util.IdUtil;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
@@ -23,7 +27,6 @@ import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
 import io.netty.handler.timeout.IdleState;
 import io.netty.handler.timeout.IdleStateEvent;
 import lombok.extern.slf4j.Slf4j;
-import com.iwhalecloud.byai.common.i18n.I18nUtil;
 
 @Slf4j
 @ChannelHandler.Sharable
@@ -78,7 +81,9 @@ public class WebSocketHandler extends SimpleChannelInboundHandler<TextWebSocketF
                 CurrentUserHolder.setLoginInfo(userInfo);
             }
             try {
+                WebSocketI18nSupport.applyLocale(userInfo);
                 ChatMessage chatMessage = JSON.parseObject(message, ChatMessage.class);
+                WebSocketI18nSupport.applyLocale(chatMessage.getLanguage(), userInfo);
                 chatMessage.setSenderId(userInfo.getUserId());
                 chatMessage.setSenderName(userInfo.getUserName());
                 log.debug("websocket user message :{}", chatMessage);
@@ -106,6 +111,7 @@ public class WebSocketHandler extends SimpleChannelInboundHandler<TextWebSocketF
         }
         finally {
             // 消息处理完成后清理上下文，防止线程池复用时数据污染
+            LocaleContextHolder.resetLocaleContext();
             RequestContextUtil.clear();
             log.debug("WebSocket 消息处理结束，清理上下文");
         }
@@ -125,13 +131,6 @@ public class WebSocketHandler extends SimpleChannelInboundHandler<TextWebSocketF
         heartbeatResponse.setType(MessageType.HEARTBEAT);
         PushUtil.sendMessageToChannel(ctx.channel(), new TextWebSocketFrame(JSON.toJSONString(heartbeatResponse)));
         log.debug("Heartbeat response sent to: {}", ctx.channel().remoteAddress());
-    }
-
-    private void sendError(ChannelHandlerContext ctx, String errorMessage) {
-        ChatMessage error = new ChatMessage();
-        error.setType(MessageType.ERROR);
-        error.setChatContent(errorMessage);
-        PushUtil.sendMessageToChannel(ctx.channel(), new TextWebSocketFrame(JSON.toJSONString(error)));
     }
 
     @Override

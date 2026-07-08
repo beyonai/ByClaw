@@ -5,7 +5,7 @@ import com.alibaba.fastjson.JSONObject;
 import com.alibaba.fastjson2.JSON;
 import com.iwhalecloud.byai.common.constants.resource.*;
 import com.iwhalecloud.byai.common.message.qo.MessageHotDelQo;
-import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.DingtalkRobotRegistryService;
+import com.iwhalecloud.byai.gateway.channels.service.robot.RobotChannelRegistryCoordinator;
 import com.iwhalecloud.byai.common.constants.auth.GrantToObjType;
 import com.iwhalecloud.byai.common.constants.auth.GrantType;
 import com.iwhalecloud.byai.common.message.entity.ByaiMessage;
@@ -141,7 +141,9 @@ public class DigitalEmployeeApplicationService {
 
     private static final String DEFAULT_SUPER_ASSISTANT_RESOURCE_CODE_SUFFIX = "_main";
 
-    private static final int DIG_EMPLOYEE_TEXT_FIELD_MAX_LENGTH = 4000;
+    private static final String TEMPLATE_DIGITAL_EMPLOYEE_PARAM_CODE = "TEMPLATE_DIGITAL_EMPLOYEE";
+
+    private static final int DIG_EMPLOYEE_TEXT_FIELD_MAX_LENGTH = 10000;
 
     @Autowired
     private SequenceService sequenceService;
@@ -249,7 +251,7 @@ public class DigitalEmployeeApplicationService {
     private UserService userService;
 
     @Autowired
-    private DingtalkRobotRegistryService dingtalkRobotRegistryService;
+    private RobotChannelRegistryCoordinator robotChannelRegistryCoordinator;
 
     @Autowired
     private DigEmployeeChangeEventPublisher digEmployeeChangeEventPublisher;
@@ -372,30 +374,205 @@ public class DigitalEmployeeApplicationService {
         if (digitalEmployeeDTO == null) {
             return;
         }
-        validateDigitalEmployeeTextFieldLength("digemployee.field.ability", digitalEmployeeDTO.getAbility());
-        validateDigitalEmployeeTextFieldLength("digemployee.field.constraints", digitalEmployeeDTO.getConstraints());
-        validateDigitalEmployeeTextFieldLength("digemployee.field.faqs", digitalEmployeeDTO.getFaqs());
-        validateDigitalEmployeeTextFieldLength("digemployee.field.roleAttributes", digitalEmployeeDTO.getRoleAttributes());
-        validateDigitalEmployeeTextFieldLength("digemployee.field.processingFlow", digitalEmployeeDTO.getProcessingFlow());
+        int maxLength = resolveDigitalEmployeeTextFieldMaxLength(digitalEmployeeDTO);
+        validateDigitalEmployeeTextFieldLength("digemployee.field.ability", digitalEmployeeDTO.getAbility(), maxLength);
+        validateDigitalEmployeeTextFieldLength("digemployee.field.constraints", digitalEmployeeDTO.getConstraints(), maxLength);
+        validateDigitalEmployeeTextFieldLength("digemployee.field.faqs", digitalEmployeeDTO.getFaqs(), maxLength);
+        validateDigitalEmployeeTextFieldLength("digemployee.field.roleAttributes", digitalEmployeeDTO.getRoleAttributes(),
+            maxLength);
+        validateDigitalEmployeeTextFieldLength("digemployee.field.processingFlow", digitalEmployeeDTO.getProcessingFlow(),
+            maxLength);
         validateDigitalEmployeeTextFieldLength("digemployee.field.personalityDimensions",
-            digitalEmployeeDTO.getPersonalityDimensions());
-        validateDigitalEmployeeTextFieldLength("digemployee.field.wordPreferences", digitalEmployeeDTO.getWordPreferences());
-        validateDigitalEmployeeTextFieldLength("digemployee.field.sentenceAndTone", digitalEmployeeDTO.getSentenceAndTone());
-        validateDigitalEmployeeTextFieldLength("digemployee.field.corePersonaDefinition",
-            digitalEmployeeDTO.getCorePersonaDefinition());
-        validateDigitalEmployeeTextFieldLength("digemployee.field.coreCompetencies", digitalEmployeeDTO.getCoreCompetencies());
-        validateDigitalEmployeeTextFieldLength("digemployee.field.advancedSettings", digitalEmployeeDTO.getAdvancedSettings());
+            digitalEmployeeDTO.getPersonalityDimensions(), maxLength);
+        validateDigitalEmployeeTextFieldLength("digemployee.field.wordPreferences",
+            digitalEmployeeDTO.getWordPreferences(), maxLength);
+        validateDigitalEmployeeTextFieldLength("digemployee.field.sentenceAndTone",
+            digitalEmployeeDTO.getSentenceAndTone(), maxLength);
+        validateDigitalEmployeePromptFieldsLength(digitalEmployeeDTO.getCorePersonaDefinition(), maxLength);
+        validateDigitalEmployeeTextFieldLength("digemployee.field.coreCompetencies", digitalEmployeeDTO.getCoreCompetencies(),
+            maxLength);
+        validateDigitalEmployeeTextFieldLength("digemployee.field.advancedSettings", digitalEmployeeDTO.getAdvancedSettings(),
+            maxLength);
     }
 
-    private void validateDigitalEmployeeTextFieldLength(String fieldLabelKey, String value) {
+    private void validateDigitalEmployeeTextFieldLength(String fieldLabelKey, String value, int maxLength) {
         if (StringUtils.isEmpty(value)) {
             return;
         }
         int length = value.codePointCount(0, value.length());
-        if (length > DIG_EMPLOYEE_TEXT_FIELD_MAX_LENGTH) {
+        if (length > maxLength) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
                 I18nUtil.get("digemployee.field.length.exceed", I18nUtil.get(fieldLabelKey),
-                    DIG_EMPLOYEE_TEXT_FIELD_MAX_LENGTH, length));
+                    maxLength, length));
+        }
+    }
+
+    private void validateDigitalEmployeePromptFieldsLength(String corePersonaDefinition, int maxLength) {
+        if (StringUtils.isEmpty(corePersonaDefinition)) {
+            return;
+        }
+
+        try {
+            Object parsed = parseJsonRecursively(corePersonaDefinition, 5);
+            if (parsed instanceof com.alibaba.fastjson2.JSONArray promptList) {
+                for (Object itemObj : promptList) {
+                    if (!(itemObj instanceof com.alibaba.fastjson2.JSONObject item)) {
+                        continue;
+                    }
+
+                    String value = item.getString("value");
+                    if (StringUtils.isEmpty(value)) {
+                        continue;
+                    }
+
+                    int length = value.codePointCount(0, value.length());
+                    if (length > maxLength) {
+                        String fieldLabel = StringUtils.defaultIfBlank(item.getString("name"),
+                            I18nUtil.get("digemployee.field.corePersonaDefinition"));
+                        throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
+                            I18nUtil.get("digemployee.field.length.exceed", fieldLabel,
+                                maxLength, length));
+                    }
+                }
+                return;
+            }
+        }
+        catch (BaseException e) {
+            throw e;
+        }
+        catch (Exception e) {
+            logger.warn("parse corePersonaDefinition for length validation failed", e);
+        }
+
+        validateDigitalEmployeeTextFieldLength("digemployee.field.corePersonaDefinition", corePersonaDefinition, maxLength);
+    }
+
+    private Object parseJsonRecursively(String value, int maxDepth) {
+        if (maxDepth <= 0 || value == null) {
+            return value;
+        }
+        Object parsed = JSON.parse(value);
+        if (parsed instanceof String parsedString) {
+            return parseJsonRecursively(parsedString, maxDepth - 1);
+        }
+        return parsed;
+    }
+
+    private int resolveDigitalEmployeeTextFieldMaxLength(DigitalEmployeeDTO digitalEmployeeDTO) {
+        String ownerType = resolveDigitalEmployeeOwnerType(digitalEmployeeDTO);
+        String agentType = resolveDigitalEmployeeAgentType(digitalEmployeeDTO);
+        String paramValue = systemConfigService.getStringParamValueByCode(TEMPLATE_DIGITAL_EMPLOYEE_PARAM_CODE);
+        if (StringUtils.isBlank(paramValue)) {
+            return DIG_EMPLOYEE_TEXT_FIELD_MAX_LENGTH;
+        }
+
+        try {
+            List<TemplateDigitalEmployeeConfig> configs = parseTemplateDigitalEmployeeConfigs(paramValue);
+            TemplateDigitalEmployeeConfig matchedConfig = findTemplateDigitalEmployeeConfig(configs, ownerType, agentType);
+            Integer maxLength = matchedConfig == null ? null : matchedConfig.getMaxLength();
+            return maxLength == null || maxLength <= 0 ? DIG_EMPLOYEE_TEXT_FIELD_MAX_LENGTH : maxLength;
+        }
+        catch (RuntimeException e) {
+            logger.warn("parse digital employee template maxLength failed, paramCode={}",
+                TEMPLATE_DIGITAL_EMPLOYEE_PARAM_CODE, e);
+            return DIG_EMPLOYEE_TEXT_FIELD_MAX_LENGTH;
+        }
+    }
+
+    private List<TemplateDigitalEmployeeConfig> parseTemplateDigitalEmployeeConfigs(String paramValue) {
+        Object parsed = JSON.parse(paramValue);
+        if (parsed instanceof com.alibaba.fastjson2.JSONArray) {
+            List<TemplateDigitalEmployeeConfig> configs =
+                JSON.parseArray(paramValue, TemplateDigitalEmployeeConfig.class);
+            return configs == null ? Collections.emptyList() : configs;
+        }
+        if (parsed instanceof com.alibaba.fastjson2.JSONObject) {
+            TemplateDigitalEmployeeConfig config = JSON.parseObject(paramValue, TemplateDigitalEmployeeConfig.class);
+            return config == null ? Collections.emptyList() : Collections.singletonList(config);
+        }
+        return Collections.emptyList();
+    }
+
+    private TemplateDigitalEmployeeConfig findTemplateDigitalEmployeeConfig(
+        List<TemplateDigitalEmployeeConfig> configs, String ownerType, String agentType) {
+        if (CollectionUtils.isEmpty(configs)) {
+            return null;
+        }
+        String effectiveOwnerType = StringUtils.equalsIgnoreCase(ownerType, "personal") ? "personal" : "enterprise";
+        String effectiveAgentType = StringUtils.trimToEmpty(agentType);
+        return configs.stream()
+            .filter(config -> config != null)
+            .filter(config -> StringUtils.equalsIgnoreCase(
+                StringUtils.trimToEmpty(config.getOwnerType()), effectiveOwnerType))
+            .filter(config -> StringUtils.equals(StringUtils.trimToEmpty(config.getAgentType()), effectiveAgentType))
+            .findFirst()
+            .orElse(null);
+    }
+
+    private String resolveDigitalEmployeeOwnerType(DigitalEmployeeDTO digitalEmployeeDTO) {
+        String ownerType = digitalEmployeeDTO == null ? null : digitalEmployeeDTO.getOwnerType();
+        if (StringUtils.isNotBlank(ownerType) || digitalEmployeeDTO == null || digitalEmployeeDTO.getResourceId() == null) {
+            return ownerType;
+        }
+        SsResource resource = ssResourceService.findById(digitalEmployeeDTO.getResourceId());
+        return resource == null ? null : resource.getOwnerType();
+    }
+
+    private String resolveDigitalEmployeeAgentType(DigitalEmployeeDTO digitalEmployeeDTO) {
+        String agentType = digitalEmployeeDTO == null ? null : digitalEmployeeDTO.getAgentType();
+        if (digitalEmployeeDTO == null || digitalEmployeeDTO.getResourceId() == null) {
+            return agentType;
+        }
+        SsResource resource = ssResourceService.findById(digitalEmployeeDTO.getResourceId());
+        if (isDefaultPersonalResource(resource)) {
+            return DigitalEmployType.AGENT_TYPE_ASSISTANT.getCode();
+        }
+        if (StringUtils.isNotBlank(agentType)) {
+            return agentType;
+        }
+        SsResExtDigEmployee ext = ssResExtDigEmployeeService.findById(digitalEmployeeDTO.getResourceId());
+        return ext == null ? null : ext.getAgentType();
+    }
+
+    public static class TemplateDigitalEmployeeConfig {
+        private String ownerType;
+
+        private String agentType;
+
+        private String key;
+
+        private Integer maxLength;
+
+        public String getOwnerType() {
+            return ownerType;
+        }
+
+        public void setOwnerType(String ownerType) {
+            this.ownerType = ownerType;
+        }
+
+        public String getAgentType() {
+            return agentType;
+        }
+
+        public void setAgentType(String agentType) {
+            this.agentType = agentType;
+        }
+
+        public String getKey() {
+            return key;
+        }
+
+        public void setKey(String key) {
+            this.key = key;
+        }
+
+        public Integer getMaxLength() {
+            return maxLength;
+        }
+
+        public void setMaxLength(Integer maxLength) {
+            this.maxLength = maxLength;
         }
     }
 
@@ -496,13 +673,7 @@ public class DigitalEmployeeApplicationService {
                 memoryConfigList, currentUserId, memoryLibraryId);
         }
 
-        try {
-            dingtalkRobotRegistryService.registerRobotClientsForResource(ssResource.getResourceId());
-        }
-        catch (Exception e) {
-            logger.warn("Register DingTalk robot clients after save failed. resourceId={}", ssResource.getResourceId(),
-                e);
-        }
+        robotChannelRegistryCoordinator.registerForResource(ssResource.getResourceId());
 
         digEmployeeChangeEventPublisher.publishAfterCommitOrNow(DigEmployeeChangeEventType.DIG_EMPLOYEE_CREATED,
             ssResource.getResourceId());
@@ -724,12 +895,7 @@ public class DigitalEmployeeApplicationService {
                 currentUserId, memoryLibraryId);
         }
 
-        try {
-            dingtalkRobotRegistryService.refreshRobotClientsForResource(resourceId);
-        }
-        catch (Exception e) {
-            logger.warn("Refresh DingTalk robot clients after update failed. resourceId={}", resourceId, e);
-        }
+        robotChannelRegistryCoordinator.refreshForResource(resourceId);
 
         digEmployeeChangeEventPublisher.publishAfterCommitOrNow(DigEmployeeChangeEventType.DIG_EMPLOYEE_UPDATED,
             resourceId);
@@ -776,6 +942,7 @@ public class DigitalEmployeeApplicationService {
         // this.syncDigEmployeeSkillsToRedisQuietly(digitalEmployeeId);
         this.synOpenClawWorkSpace(digitalEmployeeId);
         operationLogService.recordOperationLog(ssResource, OperationTypeEnum.UPDATE);
+        this.notifyDigitalEmployeeRuntimeChanged(digitalEmployeeId);
 
         EmployeeIdDTO employeeIdDTO = new EmployeeIdDTO();
         employeeIdDTO.setResourceId(digitalEmployeeId);
@@ -818,10 +985,41 @@ public class DigitalEmployeeApplicationService {
         this.rebuildAndSaveDigitalEmployeeRelSkills(digitalEmployeeId);
         this.synOpenClawWorkSpace(digitalEmployeeId);
         operationLogService.recordOperationLog(ssResource, OperationTypeEnum.UPDATE);
+        this.notifyDigitalEmployeeRuntimeChanged(digitalEmployeeId);
 
         EmployeeIdDTO employeeIdDTO = new EmployeeIdDTO();
         employeeIdDTO.setResourceId(digitalEmployeeId);
         return this.findDetailsById(employeeIdDTO);
+    }
+
+    /**
+     * 以给定的全量目标 relIds 覆盖式同步数字员工的关联资源明细，并触发运行期重同步。
+     * 供本体绑定等场景复用：调用方自行计算好目标集合（多退少补），本方法只做落库 + 同步。
+     *
+     * @param digitalEmployeeId 数字员工资源 ID
+     * @param targetRelIds 目标全量关联资源 ID（为空表示清空全部关联）
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void syncRelResourcesByTargetIds(Long digitalEmployeeId, List<Long> targetRelIds) {
+        if (digitalEmployeeId == null) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
+                I18nUtil.get("digemployee.processor.param.notnull"));
+        }
+        SsResource ssResource = ssResourceService.findById(digitalEmployeeId);
+        List<SsResourceRelDetail> resourceRelDetails = ssResourceRelDetailService.findByResourceId(digitalEmployeeId);
+        List<Long> safeTarget = targetRelIds == null ? Collections.emptyList()
+            : targetRelIds.stream().filter(Objects::nonNull).distinct().collect(Collectors.toList());
+        this.compareSsResourceRelDetail(ssResource, safeTarget, resourceRelDetails, null);
+        this.rebuildAndSaveDigitalEmployeeRelSkills(digitalEmployeeId);
+        this.synOpenClawWorkSpace(digitalEmployeeId);
+        operationLogService.recordOperationLog(ssResource, OperationTypeEnum.UPDATE);
+        this.notifyDigitalEmployeeRuntimeChanged(digitalEmployeeId);
+    }
+
+    private void notifyDigitalEmployeeRuntimeChanged(Long digitalEmployeeId) {
+        robotChannelRegistryCoordinator.refreshForResource(digitalEmployeeId);
+        digEmployeeChangeEventPublisher.publishAfterCommitOrNow(DigEmployeeChangeEventType.DIG_EMPLOYEE_UPDATED,
+            digitalEmployeeId);
     }
 
     private List<SsResource> findInstallRelResources(List<Long> installRelIds) {
@@ -850,14 +1048,27 @@ public class DigitalEmployeeApplicationService {
         // 技能安装目标是前端当前选中的数字员工：显式 @ 的数字员工优先，没有 @ 时才回退默认数字员工。
         // 因此这里按目标数字员工的管理权限校验，不再强制要求它必须等于 defaultDigEmployeeId。
         if (!authApplicationService.hasResourceManagePermission(digitalEmployee)) {
-            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("user.permission.nopermission"));
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
+                I18nUtil.get("digemployee.skill.install.no.manage.permission", digitalEmployee.getResourceName()));
         }
         for (SsResource resource : installRelResources) {
             if (resource != null && StringUtils.equals(RESOURCE_BIZ_TYPE_SKILL, resource.getResourceBizType())
                 && !authApplicationService.hasResourceUsePermission(resource)) {
-                throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("user.permission.nopermission"));
+                throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
+                    I18nUtil.get("digemployee.skill.install.no.use.permission", resource.getResourceName()));
             }
         }
+    }
+
+    /**
+     * 校验当前用户对指定数字员工是否有管理权限（删除/卸载工作空间技能前置校验）。
+     * 与绑定技能卸载使用同一套校验，避免漂移。
+     *
+     * @param digitalEmployeeId 数字员工资源 ID
+     */
+    public void assertSkillUninstallPermission(Long digitalEmployeeId) {
+        SsResource digitalEmployee = ssResourceService.findById(digitalEmployeeId);
+        validateSkillUninstallPermission(digitalEmployee);
     }
 
     private void validateSkillUninstallPermission(SsResource digitalEmployee) {
@@ -866,7 +1077,8 @@ public class DigitalEmployeeApplicationService {
         }
         // 技能卸载同安装一样，按请求里的当前数字员工校验管理权限。
         if (!authApplicationService.hasResourceManagePermission(digitalEmployee)) {
-            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("user.permission.nopermission"));
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
+                I18nUtil.get("digemployee.skill.uninstall.no.manage.permission", digitalEmployee.getResourceName()));
         }
     }
 
@@ -941,12 +1153,7 @@ public class DigitalEmployeeApplicationService {
         digEmployeeChangeEventPublisher.publishAfterCommitOrNow(DigEmployeeChangeEventType.DIG_EMPLOYEE_DELETED,
             resourceId);
 
-        try {
-            dingtalkRobotRegistryService.unregisterRobotClientsForResource(resourceId);
-        }
-        catch (Exception e) {
-            logger.warn("Unregister DingTalk robot clients after delete failed. resourceId={}", resourceId, e);
-        }
+        robotChannelRegistryCoordinator.unregisterForResource(resourceId);
     }
 
     private void validateDigitalEmployeeManagePermission(SsResource ssResource) {
@@ -1781,6 +1988,9 @@ public class DigitalEmployeeApplicationService {
             }
         }
 
+        // 本体类关联资源：注入 ontologyBaseCode，并重建 relOntology 明细
+        enrichOntologyRelResources(relResourceList, digitalEmployeeDetailsDTO);
+
         digitalEmployeeDetailsDTO.setRelIds(relIds);
         digitalEmployeeDetailsDTO.setRelResourceList(relResourceList);
         List<Map<String, Object>> relSkills = buildRelSkillsFromRelations(resourceId);
@@ -1806,6 +2016,141 @@ public class DigitalEmployeeApplicationService {
         digitalEmployeeDetailsDTO.setTargetContent(null);
 
         return digitalEmployeeDetailsDTO;
+    }
+
+    /**
+     * 为本体类关联资源(ONTOLOGY_BASE/SCENE/VIEW/OBJECT)注入 ontologyBaseCode，并重建 relOntology 扁平明细。
+     * ontologyBaseCode 取自各自扩展表；relOntology 的路径(sceneId/viewCode/objectCode 等)
+     * 由资源树本身重建：resource_code 即各级编码、resource_name 即名称、parent_resource_id 即层级，
+     * 不依赖 ext.target_content 格式（快照对象的 ext 为 datacloud 原始格式，缺 sceneId，会导致回显对不上）。
+     */
+    private void enrichOntologyRelResources(List<SsResourceDTO> relResourceList, DigitalEmployeeDetailsDTO details) {
+        if (CollectionUtils.isEmpty(relResourceList)) {
+            return;
+        }
+        Set<String> ontologyBizTypes = Set.of("ONTOLOGY_BASE", "SCENE", "VIEW", "OBJECT");
+        List<SsResourceDTO> ontologyResources = relResourceList.stream()
+            .filter(r -> r != null && ontologyBizTypes.contains(r.getResourceBizType())).collect(Collectors.toList());
+        if (CollectionUtils.isEmpty(ontologyResources)) {
+            return;
+        }
+        // ontologyBaseCode 注入（Part B）
+        List<Long> ids = ontologyResources.stream().map(SsResource::getResourceId).filter(Objects::nonNull)
+            .collect(Collectors.toList());
+        Map<Long, String> pidMap = ssResourceService.findOntologyBaseCodeMap(ids);
+
+        // 构建 id->资源 映射用于回溯父链：先放入关联资源，再补齐缺失的祖先
+        Map<Long, SsResource> byId = new HashMap<>();
+        for (SsResourceDTO r : relResourceList) {
+            if (r != null && r.getResourceId() != null) {
+                byId.put(r.getResourceId(), r);
+            }
+        }
+        boolean added = true;
+        while (added) {
+            added = false;
+            List<Long> missing = new ArrayList<>();
+            for (SsResource r : new ArrayList<>(byId.values())) {
+                Long p = r.getParentResourceId();
+                if (p != null && p > 0 && !byId.containsKey(p)) {
+                    missing.add(p);
+                }
+            }
+            if (!missing.isEmpty()) {
+                List<SsResource> loaded = ssResourceService
+                    .findByIdList(missing.stream().distinct().collect(Collectors.toList()));
+                for (SsResource s : loaded) {
+                    if (s != null && !byId.containsKey(s.getResourceId())) {
+                        byId.put(s.getResourceId(), s);
+                        added = true;
+                    }
+                }
+            }
+        }
+
+        List<JSONObject> relOntology = new ArrayList<>();
+        for (SsResourceDTO dto : ontologyResources) {
+            String baseCode = pidMap.get(dto.getResourceId());
+            if (StringUtils.isBlank(baseCode) && "ONTOLOGY_BASE".equals(dto.getResourceBizType())) {
+                baseCode = dto.getResourceCode();
+            }
+            SsResource baseResource = findOntologyBaseResource(dto, baseCode, byId);
+            if (StringUtils.isBlank(baseCode) && baseResource != null) {
+                baseCode = baseResource.getResourceCode();
+            }
+            dto.setOntologyBaseCode(baseCode);
+
+            JSONObject entry = new JSONObject();
+            entry.put("resourceId", dto.getResourceId());
+            entry.put("resourceBizType", dto.getResourceBizType());
+            entry.put("ontologyBaseCode", baseCode);
+            if (baseResource != null) {
+                entry.put("ontologyBaseName", baseResource.getResourceName());
+                entry.put("ownerType", baseResource.getOwnerType());
+            }
+            entry.put("resourceName", dto.getResourceName());
+
+            String biz = dto.getResourceBizType();
+            if ("SCENE".equals(biz)) {
+                entry.put("sceneId", dto.getResourceCode());
+                entry.put("sceneName", dto.getResourceName());
+            }
+            else if ("VIEW".equals(biz)) {
+                entry.put("viewCode", dto.getResourceCode());
+                entry.put("viewName", dto.getResourceName());
+                SsResource scene = byId.get(dto.getParentResourceId());
+                if (scene != null) {
+                    entry.put("sceneId", scene.getResourceCode());
+                    entry.put("sceneName", scene.getResourceName());
+                }
+            }
+            else if ("OBJECT".equals(biz)) {
+                entry.put("objectCode", dto.getResourceCode());
+                entry.put("objectName", dto.getResourceName());
+                SsResource parent = byId.get(dto.getParentResourceId());
+                if (parent != null && "VIEW".equals(parent.getResourceBizType())) {
+                    entry.put("viewCode", parent.getResourceCode());
+                    entry.put("viewName", parent.getResourceName());
+                    SsResource scene = byId.get(parent.getParentResourceId());
+                    if (scene != null) {
+                        entry.put("sceneId", scene.getResourceCode());
+                        entry.put("sceneName", scene.getResourceName());
+                    }
+                }
+                else if (parent != null && "SCENE".equals(parent.getResourceBizType())) {
+                    entry.put("sceneId", parent.getResourceCode());
+                    entry.put("sceneName", parent.getResourceName());
+                }
+            }
+            relOntology.add(entry);
+        }
+        details.setRelOntology(relOntology);
+    }
+
+    private SsResource findOntologyBaseResource(SsResource resource, String baseCode, Map<Long, SsResource> byId) {
+        if (resource == null) {
+            return null;
+        }
+        if ("ONTOLOGY_BASE".equals(resource.getResourceBizType())) {
+            return resource;
+        }
+        Long cur = resource.getParentResourceId();
+        while (cur != null && cur > 0) {
+            SsResource parent = byId.get(cur);
+            if (parent == null) {
+                break;
+            }
+            if ("ONTOLOGY_BASE".equals(parent.getResourceBizType())) {
+                if (StringUtils.isBlank(baseCode) || StringUtils.equals(baseCode, parent.getResourceCode())) {
+                    return parent;
+                }
+            }
+            cur = parent.getParentResourceId();
+        }
+        return byId.values().stream()
+            .filter(r -> r != null && "ONTOLOGY_BASE".equals(r.getResourceBizType()))
+            .filter(r -> StringUtils.isBlank(baseCode) || StringUtils.equals(baseCode, r.getResourceCode())).findFirst()
+            .orElse(null);
     }
 
     /**

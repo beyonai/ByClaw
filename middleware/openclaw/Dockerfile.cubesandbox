@@ -72,8 +72,10 @@ RUN set -eux; \
     apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
+        libreoffice \
         unzip \
         zip; \
+    libreoffice --version; \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=cubesandbox-base /usr/bin/envd /usr/bin/envd

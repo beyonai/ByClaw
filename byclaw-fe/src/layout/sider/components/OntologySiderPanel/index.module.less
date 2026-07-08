@@ -1,0 +1,140 @@
+.search {
+  width: 100%;
+  flex: none;
+}
+
+.searchTypeSelect {
+  width: 76px;
+}
+
+.treeRegion {
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+  padding-top: 8px;
+}
+
+.treeSpin {
+  min-height: 0;
+}
+
+.nodeList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.nodeRow {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 8px;
+  height: 34px;
+  padding: 0 6px;
+  border-radius: 8px;
+  cursor: pointer;
+  color: #1d2129;
+
+  &:hover {
+    background: rgba(22, 93, 255, 0.06);
+  }
+
+  &:focus {
+    outline: none;
+    background: rgba(22, 93, 255, 0.08);
+  }
+
+  &:hover .nodeAction,
+  &:focus .nodeAction,
+  &:focus-within .nodeAction {
+    visibility: visible;
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+.leafTitle {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  gap: 6px;
+  flex: 1;
+}
+
+.leafName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.typeTag {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background-color: rgba(22, 93, 255, 0.1);
+  line-height: 1;
+}
+
+.typeTagText {
+  background: linear-gradient(90deg, #088cff 0%, #00cdd5 100%);
+  background-clip: text;
+  color: transparent;
+  font-size: 11px;
+  font-weight: 600;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.nodeIcon {
+  flex: none;
+}
+
+.nodeAction {
+  position: static;
+  flex: none;
+  transform: none;
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.16s ease;
+}
+
+.sidePanel {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+}
+
+.sidePanelHeader {
+  flex: 0 0 auto;
+  height: 48px;
+  padding: 0 12px 0 16px;
+  border-bottom: 1px solid #f2f3f5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #1d2129;
+  font-size: 15px;
+  font-weight: 600;
+
+  > span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.sidePanelBody {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 14px;
+}

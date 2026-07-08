@@ -256,6 +256,166 @@
   }
 }
 
+.ontologyConfigCard {
+  background: linear-gradient(180deg, #fff 0%, #fbfdff 100%);
+
+  :global {
+    .@{antPrefix}-card-body {
+      padding: 18px 20px;
+    }
+  }
+}
+
+.ontologyEmptyCard {
+  border-style: dashed;
+  background: #fff;
+}
+
+.ontologyConfigHeader {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.ontologyIconBox {
+  flex: 0 0 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  background: #eef5ff;
+  color: #2468f2;
+  font-size: 24px;
+}
+
+.ontologyConfigMain {
+  min-width: 0;
+  flex: 1;
+}
+
+.ontologyConfigTitle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  color: #14161a;
+  font-weight: 600;
+  font-size: 15px;
+  line-height: 24px;
+}
+
+.ontologyConfigDesc {
+  margin-top: 4px;
+  color: #6b7280;
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.ontologyTypeTags,
+.ontologyCountTags {
+  margin-top: 10px;
+
+  :global(.@{antPrefix}-tag) {
+    margin-inline-end: 0;
+    border: 1px solid #dbeafe;
+    background: #eff6ff;
+    color: #2563eb;
+  }
+}
+
+.ontologyStatusTag {
+  margin-inline-end: 0;
+}
+
+.ontologyBaseList {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ontologyBaseItem {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px;
+  border: 1px solid #eef1f5;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.ontologyBaseMeta {
+  min-width: 0;
+  flex: 1;
+}
+
+.ontologyBaseTitle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #14161a;
+  font-weight: 500;
+  font-size: 14px;
+  line-height: 22px;
+
+  > span:first-child {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.ontologyInlineTag {
+  margin-inline-end: 0;
+  border-color: #c7ddff;
+  background: #eef5ff;
+  color: #1d64f2;
+}
+
+.ontologyBaseDesc {
+  margin-top: 2px;
+  overflow: hidden;
+  color: #8b95a1;
+  font-size: 12px;
+  line-height: 18px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ontologyPreviewList {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  margin-top: 10px;
+  overflow: hidden;
+}
+
+.ontologyResourcePreviewTag,
+.ontologyResourcePreviewMore {
+  flex: 0 1 auto;
+  max-width: 160px;
+  margin-inline-end: 0;
+  border: 1px solid #dbeafe;
+  background: #eff6ff;
+  color: #2563eb;
+
+  span {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.ontologyResourcePreviewMore {
+  flex: 0 0 auto;
+  max-width: none;
+}
+
 // 配置区域
 .skillsSection,
 .knowledgeSection,
@@ -1245,6 +1405,18 @@
 .fontSize36MarginRight12 {
   font-size: 36px;
   margin-right: 12px;
+}
+
+.robotChannelIcon {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  font-size: 32px;
+  line-height: 1;
+}
+
+.feishuRobotIcon {
+  color: #3370ff;
 }
 
 .fontSize32PrimaryColor {

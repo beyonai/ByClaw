@@ -198,9 +198,25 @@
         ) t2 ON t1.resource_id = t2.resource_id AND t1.task_id = t2.max_task_id
         ) t ON t.resource_id = r.resource_id
         <where>
-                and r.parent_resource_id =-1 and resource_status !=6
+            <if test="!(
+                query.resourceBizType == 'OBJECT'
+                or query.resourceBizType == 'VIEW'
+                or (query.resourceBizTypeList != null and (query.resourceBizTypeList.contains('OBJECT') or query.resourceBizTypeList.contains('VIEW')))
+            )">
+                and r.parent_resource_id = -1
+            </if>
+                and resource_status !=6
             <if test="query.resourceName != null and query.resourceName != ''">
                 and r.resource_name like concat('%', concat(#{query.resourceName}, '%'))
+            </if>
+            <if test="query.keyword != null and query.keyword != ''">
+                and (
+                    r.resource_name like concat('%', concat(#{query.keyword}, '%'))
+                    or r.resource_code like concat('%', concat(#{query.keyword}, '%'))
+                )
+            </if>
+            <if test="query.ownerType != null and query.ownerType != ''">
+                and r.owner_type = #{query.ownerType}
             </if>
             <if test="query.pid != null and query.pid != ''">
                 AND ont.pid = #{query.pid}
@@ -251,8 +267,14 @@
                     #{item}
                 </foreach>
             </if>
-            <!-- 仅当resourceTypeList为空时才检查resourceBizType -->
-            <if test="(query.resourceTypeList == null or query.resourceTypeList.size() == 0) and query.resourceBizType != null and query.resourceBizType != ''">
+            <if test="(query.resourceTypeList == null or query.resourceTypeList.size() == 0) and query.resourceBizTypeList != null and query.resourceBizTypeList.size() > 0">
+                and r.resource_biz_type in
+                <foreach collection="query.resourceBizTypeList" item="item" open="(" close=")" separator=",">
+                    #{item}
+                </foreach>
+            </if>
+            <!-- 仅当resourceTypeList/resourceBizTypeList为空时才检查resourceBizType -->
+            <if test="(query.resourceTypeList == null or query.resourceTypeList.size() == 0) and (query.resourceBizTypeList == null or query.resourceBizTypeList.size() == 0) and query.resourceBizType != null and query.resourceBizType != ''">
                 and r.resource_biz_type = #{query.resourceBizType}
             </if>
             <if test="query.statusList != null and query.statusList.size() >0 ">

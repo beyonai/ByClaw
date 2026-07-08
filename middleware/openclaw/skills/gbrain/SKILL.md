@@ -109,6 +109,7 @@ gbrain sources current --json              # 查看当前解析到哪一层
 | 保存想法 | `gbrain capture "..."` | — | — | 不要只写聊天 |
 | 写/改页面 | `gbrain put <slug>` + sync | — | — | 不要乱路径 |
 | 会议/链接/媒体入库 | 读 ingest 类 skill（§7） | — | — | — |
+| 整理/拆分文档（Ontology 对象页） | 读 `document-object-split` skill（§7） | — | — | — |
 | 核验论文 | 读 academic-verify skill | — | — | — |
 | 健康/维护 | `gbrain doctor` / `gbrain dream` | — | — | — |
 
@@ -323,6 +324,7 @@ Agent **自己**不要优先 `gbrain serve`；应直接调子命令。
 | remember this / 保存 | `capture` | `gbrain capture` |
 | ingest / 入库 | `ingest` | `gbrain sync` + skill 流程 |
 | 会议 transcript | `meeting-ingestion` | `put` + `extract` + sync |
+| 整理/拆分文档（Ontology 对象） | `document-object-split` | `get_object_detail.py` + `put` + 可选导出 |
 | 链接/文章 | `idea-ingest` | skill 流程 |
 | 视频/PDF | `media-ingest` | skill 流程 |
 | enrich 人物公司 | `enrich` | `gbrain enrich <slug>` |
@@ -462,6 +464,7 @@ gbrain sources current --json
 | `references/idea-ingest/SKILL.md` | 链接、文章、推文 |
 | `references/media-ingest/SKILL.md` | 视频、PDF、播客 |
 | `references/meeting-ingestion/SKILL.md` | 会议 transcript |
+| `references/document-object-split/SKILL.md` | 整理文档 / 拆分文档 / 按 Ontology 对象类型拆 PRD·会议·PDF |
 | `references/voice-note-ingest/SKILL.md` | 语音笔记 |
 | `references/enrich/SKILL.md` | 人物/公司页 enrichment |
 | `references/brain-taxonomist/SKILL.md` | 写入前归档路径 |

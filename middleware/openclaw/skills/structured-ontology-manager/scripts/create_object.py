@@ -44,7 +44,7 @@ I/O 协议：stdin JSON → stdout JSON
     {"ok": true, "resource_id": "..."}
     {"ok": false, "missing": [...], "error": "..."}
 
-所有业务逻辑由 datacloud_data_service 的 ontology-manager API 提供服务。
+所有业务逻辑由 datacloud_platform 的 ontology-manager API 提供服务。
 """
 
 from __future__ import annotations
@@ -86,8 +86,6 @@ def main() -> None:
                 "fields": params.get("fields"),
             },
         )
-        if result and "entity_code" in result:
-            result["entity_code"] = entity_code
         print(json.dumps(result, ensure_ascii=False), flush=True)
 
     elif action == "submit":

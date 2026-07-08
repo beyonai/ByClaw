@@ -20,6 +20,7 @@ type InfiniteScrollTableProps = {
     type: 'checkbox' | 'radio';
     onChange?: (selectedRowKeys: React.Key[], selectedRows: any[]) => void;
     selectedRowKeys?: React.Key[];
+    getCheckboxProps?: (record: any) => { disabled?: boolean };
   };
   emptyLocale?: any;
   scrollDivId: string;
@@ -65,6 +66,17 @@ const InfiniteScrollTable = (props: InfiniteScrollTableProps) => {
     renderEndMessage = <div className="ub ub-ac ub-pc">{intl.formatMessage({ id: 'common.endMessage2' })}</div>;
   }
 
+  const getItemKey = (item: any) => {
+    if (!item) return undefined;
+    return typeof rowKey === 'function' ? rowKey(item) : item?.[rowKey];
+  };
+  const selectableDataSource = rowSelection?.getCheckboxProps
+    ? dataSource.filter((item) => !rowSelection.getCheckboxProps?.(item)?.disabled)
+    : dataSource;
+  const selectableRowKeys = selectableDataSource.map(getItemKey);
+  const selectedSelectableRowKeys = (rowSelection?.selectedRowKeys || []).filter((key) =>
+    selectableRowKeys.includes(key)
+  );
   return (
     <div className={classNames(styles.infiniteScrollTable)}>
       <div className={styles.tableHeader}>
@@ -72,12 +84,16 @@ const InfiniteScrollTable = (props: InfiniteScrollTableProps) => {
           <div className={styles.tableSelect}>
             {rowSelection?.type === 'checkbox' && (
               <Checkbox
-                checked={rowSelection?.selectedRowKeys?.length === dataSource.length}
+                checked={selectableRowKeys.length > 0 && selectedSelectableRowKeys.length === selectableRowKeys.length}
                 indeterminate={
-                  size(rowSelection?.selectedRowKeys) > 0 && size(rowSelection?.selectedRowKeys) < dataSource.length
+                  size(selectedSelectableRowKeys) > 0 && size(selectedSelectableRowKeys) < selectableRowKeys.length
                 }
+                disabled={selectableRowKeys.length === 0}
                 onChange={(e) => {
-                  rowSelection?.onChange?.(e.target.checked ? dataSource.map((item) => item[rowKey]) : [], dataSource);
+                  rowSelection?.onChange?.(
+                    e.target.checked ? selectableRowKeys : [],
+                    e.target.checked ? selectableDataSource : []
+                  );
                 }}
               />
             )}
@@ -85,7 +101,7 @@ const InfiniteScrollTable = (props: InfiniteScrollTableProps) => {
               <Radio
                 checked={rowSelection?.selectedRowKeys?.length === 1}
                 onChange={(e) => {
-                  rowSelection?.onChange?.(e.target.checked ? [dataSource[0][rowKey]] : [], [dataSource[0]]);
+                  rowSelection?.onChange?.(e.target.checked ? [getItemKey(dataSource[0])] : [], [dataSource[0]]);
                 }}
               />
             )}
@@ -132,27 +148,25 @@ const InfiniteScrollTable = (props: InfiniteScrollTableProps) => {
                     <div className={styles.tableSelect}>
                       {rowSelection?.type === 'checkbox' && (
                         <Checkbox
-                          checked={rowSelection?.selectedRowKeys?.includes(item[rowKey])}
+                          checked={rowSelection?.selectedRowKeys?.includes(getItemKey(item))}
+                          disabled={rowSelection.getCheckboxProps?.(item)?.disabled}
                           onChange={(e) => {
+                            const itemKey = getItemKey(item);
+                            const nextSelectedRowKeys = e.target.checked
+                              ? [...(rowSelection?.selectedRowKeys || []), itemKey]
+                              : rowSelection?.selectedRowKeys?.filter((i) => i !== itemKey) || [];
                             rowSelection?.onChange?.(
-                              e.target.checked
-                                ? [...(rowSelection?.selectedRowKeys || []), item[rowKey]]
-                                : rowSelection?.selectedRowKeys?.filter((i) => i !== item[rowKey]) || [],
-                              [
-                                ...(rowSelection?.selectedRowKeys?.map((i) =>
-                                  dataSource.find((j) => j[rowKey] === i)
-                                ) || []),
-                                item,
-                              ]
+                              nextSelectedRowKeys,
+                              dataSource.filter((row) => nextSelectedRowKeys.includes(getItemKey(row)))
                             );
                           }}
                         />
                       )}
                       {rowSelection?.type === 'radio' && (
                         <Radio
-                          checked={rowSelection?.selectedRowKeys?.includes(item[rowKey])}
+                          checked={rowSelection?.selectedRowKeys?.includes(getItemKey(item))}
                           onChange={(e) => {
-                            rowSelection?.onChange?.(e.target.checked ? [item[rowKey]] : [], [item]);
+                            rowSelection?.onChange?.(e.target.checked ? [getItemKey(item)] : [], [item]);
                           }}
                         />
                       )}

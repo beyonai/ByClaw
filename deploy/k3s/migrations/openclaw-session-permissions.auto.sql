@@ -11,7 +11,7 @@ SET spec_json = jsonb_set(
     '{startup,entrypoint}',
     '[
       "/bin/sh",
-      "-lc",
+      "-c",
       "umask 0000; mkdir -p /by/.sessions /by/.openclaw; chmod a+rwx /by /by/.sessions /by/.openclaw 2>/dev/null || true; chmod -R a+rwX /by/.sessions /by/.openclaw 2>/dev/null || true; exec /usr/local/bin/startAll.sh"
     ]'::jsonb,
     true

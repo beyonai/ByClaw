@@ -75,10 +75,18 @@ export default function useContextUsed(params: { sessionId?: string; agentId?: s
   }, []);
 
   const qryContextUsed = useCallback(() => {
-    GET<ContextUsedEventData>('/byaiService/chat/sessionStatus', {
-      agentId,
-      sessionId,
-    }).then((res) => {
+    GET<ContextUsedEventData>(
+      '/byaiService/chat/sessionStatus',
+      {
+        agentId,
+        sessionId,
+      },
+      {
+        responseCfg: {
+          hideErrorTips: true,
+        },
+      }
+    ).then((res) => {
       resolveContextUsed(res);
     });
   }, [sessionId, agentId]);

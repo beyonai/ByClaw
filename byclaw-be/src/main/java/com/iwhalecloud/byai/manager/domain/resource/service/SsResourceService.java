@@ -3,19 +3,30 @@ package com.iwhalecloud.byai.manager.domain.resource.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONObject;
 import com.github.pagehelper.Page;
 import com.github.pagehelper.PageHelper;
 import com.iwhalecloud.byai.common.constants.resource.ImplType;
 import com.iwhalecloud.byai.common.constants.resource.SystemCode;
 import com.iwhalecloud.byai.common.constants.resource.WorkerAgentType;
+import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceBizTypeEnum;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus;
 import com.iwhalecloud.byai.manager.dto.digitemploy.SsResourceDTO;
 import com.iwhalecloud.byai.manager.dto.resource.ResourceQueryRequest;
+import com.iwhalecloud.byai.manager.entity.ontology.SsResExtOntology;
 import com.iwhalecloud.byai.manager.entity.resource.SsResExtDigEmployee;
+import com.iwhalecloud.byai.manager.entity.resource.SsResExtObject;
+import com.iwhalecloud.byai.manager.entity.resource.SsResExtScene;
+import com.iwhalecloud.byai.manager.entity.resource.SsResExtView;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
+import com.iwhalecloud.byai.manager.mapper.ontology.SsResExtOntologyMapper;
 import com.iwhalecloud.byai.manager.mapper.resource.SsResExtDigEmployeeMapper;
+import com.iwhalecloud.byai.manager.mapper.resource.SsResExtObjectMapper;
+import com.iwhalecloud.byai.manager.mapper.resource.SsResExtSceneMapper;
+import com.iwhalecloud.byai.manager.mapper.resource.SsResExtViewMapper;
 import com.iwhalecloud.byai.manager.mapper.resource.SsResourceMapper;
 import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.common.util.ListUtil;
@@ -23,8 +34,12 @@ import com.iwhalecloud.byai.common.util.StringUtil;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Date;
+import java.util.HashSet;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 import com.iwhalecloud.byai.manager.qo.resource.DirAndFileQo;
 import com.iwhalecloud.byai.manager.qo.resource.ResourceQo;
 import com.iwhalecloud.byai.manager.vo.resource.DirAndFileVo;
@@ -34,6 +49,7 @@ import com.iwhalecloud.byai.state.domain.resource.vo.DatasetVo;
 import com.iwhalecloud.byai.common.util.PageHelperUtil;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import org.apache.commons.collections.MapUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -56,6 +72,19 @@ public class SsResourceService {
     /** 数字员工扩展表 Mapper */
     @Autowired
     private SsResExtDigEmployeeMapper ssResExtDigEmployeeMapper;
+
+    /** 本体资源扩展表 Mapper */
+    @Autowired
+    private SsResExtOntologyMapper ssResExtOntologyMapper;
+
+    @Autowired
+    private SsResExtSceneMapper ssResExtSceneMapper;
+
+    @Autowired
+    private SsResExtViewMapper ssResExtViewMapper;
+
+    @Autowired
+    private SsResExtObjectMapper ssResExtObjectMapper;
 
     /**
      * 按条件分页查询文档库（数据集）列表
@@ -81,6 +110,7 @@ public class SsResourceService {
     public void save(SsResource ssResource) {
         ssResource.setImplType(ssResource.getImplType());
         ssResource.setWorkerAgentType(ssResource.getWorkerAgentType());
+        assertResourceCodeAvailableForCreate(ssResource);
         ssResourceMapper.insert(ssResource);
     }
 
@@ -103,6 +133,7 @@ public class SsResourceService {
      */
     public SsResource saveResource(SsResource ssResource) {
         fillCreateDefaults(ssResource);
+        assertResourceCodeAvailableForCreate(ssResource);
         ssResourceMapper.insert(ssResource);
         return ssResource;
     }
@@ -174,6 +205,226 @@ public class SsResourceService {
             queryWrapper.eq(SsResource::getResourceCode, resourceCode);
         }
         return ssResourceMapper.selectOne(queryWrapper);
+    }
+
+    /**
+     * 按资源编码查询资源。
+     *
+     * @param resourceCode 资源编码
+     * @return 匹配资源列表
+     */
+    public List<SsResource> findByCode(String resourceCode) {
+        if (StringUtil.isEmpty(resourceCode)) {
+            return Collections.emptyList();
+        }
+        LambdaQueryWrapper<SsResource> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.eq(SsResource::getResourceCode, resourceCode);
+        return ssResourceMapper.selectList(queryWrapper);
+    }
+
+    /**
+     * 按全局资源编码查询唯一资源。保留给历史调用；新资源幂等优先使用 systemCode + resourceBizType + resourceCode。
+     */
+    public SsResource findUniqueByResourceCode(String resourceCode) {
+        List<SsResource> resources = findByCode(resourceCode);
+        if (ListUtil.isEmpty(resources)) {
+            return null;
+        }
+        if (resources.size() > 1) {
+            throw new BaseException("资源编码不唯一：" + resourceCode);
+        }
+        return resources.get(0);
+    }
+
+    /**
+     * 按 systemCode + resourceBizType + resourceCode 查询唯一资源。
+     */
+    public SsResource findUniqueBySystemCodeAndBizTypeAndResourceCode(String systemCode, String resourceBizType,
+        String resourceCode) {
+        if (StringUtil.isEmpty(systemCode) || StringUtil.isEmpty(resourceBizType) || StringUtil.isEmpty(resourceCode)) {
+            return null;
+        }
+        LambdaQueryWrapper<SsResource> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.eq(SsResource::getSystemCode, systemCode);
+        queryWrapper.eq(SsResource::getResourceBizType, resourceBizType);
+        queryWrapper.eq(SsResource::getResourceCode, resourceCode);
+        List<SsResource> resources = ssResourceMapper.selectList(queryWrapper);
+        if (ListUtil.isEmpty(resources)) {
+            return null;
+        }
+        if (resources.size() > 1) {
+            throw new BaseException("资源自然键不唯一：" + systemCode + "/" + resourceBizType + "/" + resourceCode);
+        }
+        return resources.get(0);
+    }
+
+    /**
+     * 新增资源前校验 systemCode + resourceBizType + resourceCode 未被占用。更新已有资源请走 updateResourceEntity。
+     */
+    private void assertResourceCodeAvailableForCreate(SsResource ssResource) {
+        if (ssResource == null || StringUtil.isEmpty(ssResource.getSystemCode())
+            || StringUtil.isEmpty(ssResource.getResourceBizType()) || StringUtil.isEmpty(ssResource.getResourceCode())) {
+            return;
+        }
+        SsResource existing = findUniqueBySystemCodeAndBizTypeAndResourceCode(ssResource.getSystemCode(),
+            ssResource.getResourceBizType(), ssResource.getResourceCode());
+        if (existing != null) {
+            throw new BaseException("资源已存在：" + ssResource.getSystemCode() + "/" + ssResource.getResourceBizType()
+                + "/" + ssResource.getResourceCode());
+        }
+    }
+
+    /**
+     * 按资源编码和资源类型查询资源。
+     *
+     * @param resourceCode 资源编码
+     * @param resourceBizType 资源业务类型
+     * @return 匹配资源列表
+     */
+    public List<SsResource> findByCodeAndBizType(String resourceCode, String resourceBizType) {
+        if (StringUtil.isEmpty(resourceCode) || StringUtil.isEmpty(resourceBizType)) {
+            return Collections.emptyList();
+        }
+        LambdaQueryWrapper<SsResource> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.eq(SsResource::getResourceCode, resourceCode);
+        queryWrapper.eq(SsResource::getResourceBizType, resourceBizType);
+        return ssResourceMapper.selectList(queryWrapper);
+    }
+
+    /**
+     * 按资源编码、资源类型、本体库编码查询资源。
+     *
+     * <p>本体类子资源（SCENE/VIEW/OBJECT）的编码只在所属本体库内唯一，调用方应传
+     * ontologyBaseCode，经各自扩展表 target_content.ontologyBaseCode 缩小范围后再匹配 ss_resource。
+     * 本体子资源不允许跨库按编码模糊命中，ontologyBaseCode 为空时直接返回空列表。
+     *
+     * @param resourceCode 资源编码
+     * @param resourceBizType 资源业务类型
+     * @param ontologyBaseCode 所属本体库编码，本体子资源必填
+     * @return 匹配资源列表
+     */
+    public List<SsResource> findByCodeAndBizTypeAndOntologyBaseCode(String resourceCode, String resourceBizType,
+        String ontologyBaseCode) {
+        if (StringUtil.isEmpty(resourceCode) || StringUtil.isEmpty(resourceBizType)) {
+            return Collections.emptyList();
+        }
+        boolean ontologyChildBizType = "SCENE".equals(resourceBizType) || "VIEW".equals(resourceBizType)
+            || "OBJECT".equals(resourceBizType);
+        if (ontologyChildBizType && StringUtils.isBlank(ontologyBaseCode)) {
+            return Collections.emptyList();
+        }
+
+        LambdaQueryWrapper<SsResource> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.eq(SsResource::getResourceCode, resourceCode);
+        queryWrapper.eq(SsResource::getResourceBizType, resourceBizType);
+
+        if (StringUtils.isNotBlank(ontologyBaseCode)) {
+            List<Long> resourceIds = findOntologyResourceIdsByBaseCode(ontologyBaseCode);
+            if (ListUtil.isEmpty(resourceIds)) {
+                return Collections.emptyList();
+            }
+            queryWrapper.in(SsResource::getResourceId, resourceIds);
+        }
+
+        return ssResourceMapper.selectList(queryWrapper);
+    }
+
+    /**
+     * 查询本体库下所有资源ID：本体库自身走 ss_res_ext_ontology.pid，
+     * 场景/视图/对象分别走各自扩展表 target_content 中的 ontologyBaseCode。
+     */
+    public List<Long> findOntologyResourceIdsByBaseCode(String ontologyBaseCode) {
+        if (StringUtils.isBlank(ontologyBaseCode)) {
+            return Collections.emptyList();
+        }
+        Set<Long> ids = new HashSet<>();
+        List<SsResExtOntology> ontologyExts = ssResExtOntologyMapper.selectByPid(ontologyBaseCode);
+        if (ListUtil.isNotEmpty(ontologyExts)) {
+            ids.addAll(ontologyExts.stream().map(SsResExtOntology::getResourceId).collect(Collectors.toSet()));
+        }
+        String baseCodePattern = ontologyBaseCodePattern(ontologyBaseCode);
+        LambdaQueryWrapper<SsResExtScene> sceneWrapper = new LambdaQueryWrapper<>();
+        sceneWrapper.like(SsResExtScene::getTargetContent, baseCodePattern);
+        List<SsResExtScene> sceneExts = ssResExtSceneMapper.selectList(sceneWrapper);
+        if (ListUtil.isNotEmpty(sceneExts)) {
+            ids.addAll(sceneExts.stream().map(SsResExtScene::getResourceId).collect(Collectors.toSet()));
+        }
+        LambdaQueryWrapper<SsResExtView> viewWrapper = new LambdaQueryWrapper<>();
+        viewWrapper.like(SsResExtView::getTargetContent, baseCodePattern);
+        List<SsResExtView> viewExts = ssResExtViewMapper.selectList(viewWrapper);
+        if (ListUtil.isNotEmpty(viewExts)) {
+            ids.addAll(viewExts.stream().map(SsResExtView::getResourceId).collect(Collectors.toSet()));
+        }
+        LambdaQueryWrapper<SsResExtObject> objectWrapper = new LambdaQueryWrapper<>();
+        objectWrapper.like(SsResExtObject::getTargetContent, baseCodePattern);
+        List<SsResExtObject> objectExts = ssResExtObjectMapper.selectList(objectWrapper);
+        if (ListUtil.isNotEmpty(objectExts)) {
+            ids.addAll(objectExts.stream().map(SsResExtObject::getResourceId).collect(Collectors.toSet()));
+        }
+        return ids.stream().collect(Collectors.toList());
+    }
+
+    /**
+     * 查询本体类资源ID对应的本体库编码。
+     */
+    public Map<Long, String> findOntologyBaseCodeMap(Collection<Long> resourceIds) {
+        Map<Long, String> result = new HashMap<>();
+        if (ListUtil.isEmpty(resourceIds)) {
+            return result;
+        }
+        List<SsResExtOntology> ontologyExts = ssResExtOntologyMapper.selectByResourceIds(resourceIds);
+        if (ListUtil.isNotEmpty(ontologyExts)) {
+            for (SsResExtOntology ext : ontologyExts) {
+                if (ext != null && ext.getResourceId() != null && StringUtils.isNotBlank(ext.getPid())) {
+                    result.put(ext.getResourceId(), ext.getPid());
+                }
+            }
+        }
+        LambdaQueryWrapper<SsResExtScene> sceneWrapper = new LambdaQueryWrapper<>();
+        sceneWrapper.in(SsResExtScene::getResourceId, resourceIds);
+        List<SsResExtScene> sceneExts = ssResExtSceneMapper.selectList(sceneWrapper);
+        if (ListUtil.isNotEmpty(sceneExts)) {
+            for (SsResExtScene ext : sceneExts) {
+                putOntologyBaseCode(result, ext.getResourceId(), ext.getTargetContent());
+            }
+        }
+        LambdaQueryWrapper<SsResExtView> viewWrapper = new LambdaQueryWrapper<>();
+        viewWrapper.in(SsResExtView::getResourceId, resourceIds);
+        List<SsResExtView> viewExts = ssResExtViewMapper.selectList(viewWrapper);
+        if (ListUtil.isNotEmpty(viewExts)) {
+            for (SsResExtView ext : viewExts) {
+                putOntologyBaseCode(result, ext.getResourceId(), ext.getTargetContent());
+            }
+        }
+        LambdaQueryWrapper<SsResExtObject> objectWrapper = new LambdaQueryWrapper<>();
+        objectWrapper.in(SsResExtObject::getResourceId, resourceIds);
+        List<SsResExtObject> objectExts = ssResExtObjectMapper.selectList(objectWrapper);
+        if (ListUtil.isNotEmpty(objectExts)) {
+            for (SsResExtObject ext : objectExts) {
+                putOntologyBaseCode(result, ext.getResourceId(), ext.getTargetContent());
+            }
+        }
+        return result;
+    }
+
+    private void putOntologyBaseCode(Map<Long, String> target, Long resourceId, String targetContent) {
+        if (resourceId == null || StringUtils.isBlank(targetContent)) {
+            return;
+        }
+        try {
+            JSONObject json = JSON.parseObject(targetContent);
+            String ontologyBaseCode = json.getString("ontologyBaseCode");
+            if (StringUtils.isNotBlank(ontologyBaseCode)) {
+                target.put(resourceId, ontologyBaseCode);
+            }
+        }
+        catch (Exception ignored) {
+            // 历史脏数据不影响主查询，缺失时由调用方按资源树兜底。
+        }
+    }
+
+    private String ontologyBaseCodePattern(String ontologyBaseCode) {
+        return "\"ontologyBaseCode\":\"" + ontologyBaseCode + "\"";
     }
 
     /**

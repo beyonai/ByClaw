@@ -1,0 +1,896 @@
+.container {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 16px 24px;
+  overflow: hidden;
+}
+
+.back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  color: #4e5969;
+  cursor: pointer;
+  margin-bottom: 12px;
+  width: fit-content;
+
+  &:hover {
+    color: #378add;
+  }
+}
+
+// 顶部本体库信息
+.header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 0.5px solid rgba(0, 0, 0, 0.1);
+  border-radius: 12px;
+
+  .headerIcon {
+    width: 48px;
+    height: 48px;
+    border-radius: 12px;
+    background: rgba(55, 138, 221, 0.1);
+    color: #378add;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .headerMain {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .headerSelectors {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+
+  .headerSelect {
+    width: 180px;
+    flex: 0 1 180px;
+  }
+
+  .headerName {
+    font-size: 16px;
+    font-weight: 500;
+    color: #1d2129;
+  }
+
+  .headerCode {
+    font-size: 12px;
+    color: #999;
+    font-family: 'SFMono-Regular', Consolas, Menlo, monospace;
+    margin-top: 2px;
+  }
+
+  .headerActions {
+    display: flex;
+    gap: 8px;
+  }
+
+  .headerActionBtn {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #86909c;
+    cursor: pointer;
+
+    &:hover {
+      background: rgba(0, 0, 0, 0.04);
+      color: #f53f3f;
+    }
+  }
+}
+
+// 主体两栏
+.body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 12px;
+}
+
+.left {
+  width: 240px;
+  flex-shrink: 0;
+  border: 0.5px solid rgba(0, 0, 0, 0.1);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+
+  .leftHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 14px;
+    font-size: 14px;
+    font-weight: 500;
+    border-bottom: 0.5px solid rgba(0, 0, 0, 0.08);
+
+    .leftHeaderAdd {
+      color: #378add;
+      cursor: pointer;
+    }
+  }
+
+  .treeWrap {
+    flex: 1;
+    overflow: auto;
+    padding: 6px 8px;
+
+    .sceneIcon {
+      color: #f7ba1e;
+      flex-shrink: 0;
+      margin-right: 6px;
+    }
+  }
+
+  // 场景节点标题（父）
+  .treeScene {
+    display: flex;
+    align-items: center;
+    font-size: 13px;
+    color: #1d2129;
+
+    .treeSceneName {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .treeSceneActions {
+      display: none;
+      align-items: center;
+      gap: 8px;
+      color: #86909c;
+
+      :global(.anticon):hover {
+        color: #378add;
+      }
+
+      :global(.anticon):last-child:hover {
+        color: #f53f3f;
+      }
+    }
+
+    &:hover .treeSceneActions {
+      display: inline-flex;
+    }
+  }
+
+  // 类目节点标题（子：视图/对象/术语）
+  .treeCat {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: #4e5969;
+
+    .leafIconObject {
+      color: #185fa5;
+    }
+
+    .leafIconView {
+      color: #0f6e56;
+    }
+
+    .leafIconTerm {
+      color: #854f0b;
+    }
+  }
+
+  .treeCatActive {
+    color: #185fa5;
+    font-weight: 500;
+  }
+}
+
+.right {
+  flex: 1;
+  min-width: 0;
+  border: 0.5px solid rgba(0, 0, 0, 0.1);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+
+  .rightToolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 12px 14px 0;
+
+    .rightTitle {
+      font-size: 14px;
+      font-weight: 500;
+    }
+
+    .rightScene {
+      color: #86909c;
+      font-weight: 400;
+    }
+
+    .rightTools {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .searchInput {
+      width: 200px;
+    }
+  }
+
+  .spinFill {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+
+    :global(.beyond-spin-container) {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+  }
+
+  .listWrap {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: 8px 14px 14px;
+  }
+}
+
+// 叶子列表
+.leafList {
+  display: flex;
+  flex-direction: column;
+}
+
+.leafRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 6px;
+  border-bottom: 0.5px solid rgba(0, 0, 0, 0.06);
+
+  .leafIconObject {
+    font-size: 18px;
+    color: #185fa5;
+  }
+
+  .leafIconView {
+    font-size: 18px;
+    color: #0f6e56;
+  }
+
+  .leafMain {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .leafName {
+    font-size: 14px;
+    color: #1d2129;
+  }
+
+  .leafCode {
+    font-size: 12px;
+    color: #999;
+    font-family: 'SFMono-Regular', Consolas, Menlo, monospace;
+    margin-top: 2px;
+  }
+
+  .leafActions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .actLink {
+    font-size: 13px;
+    color: #378add;
+    cursor: pointer;
+
+    &:hover {
+      text-decoration: underline;
+    }
+  }
+
+  .actDanger {
+    font-size: 13px;
+    color: #f53f3f;
+    cursor: pointer;
+
+    &:hover {
+      text-decoration: underline;
+    }
+  }
+}
+
+.buildingTag {
+  font-size: 11px;
+  color: #a0a0a0;
+  margin-left: 4px;
+}
+
+.termEmpty {
+  padding: 24px 0;
+  text-align: center;
+}
+
+.buildingText {
+  font-size: 13px;
+  color: #999;
+  margin-top: 8px;
+}
+
+.headerNameRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.spinFill {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+
+  :global(.beyond-spin-container) {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+}
+
+.detailBody {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding-bottom: 4px;
+}
+
+.detailBodyLoading {
+  min-height: 240px;
+}
+
+.resourceSection {
+  margin-bottom: 14px;
+}
+
+.detailBody > .resourceSection {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.resourceSectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.resourceSectionTitle {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 15px;
+  font-weight: 600;
+  color: #1d2129;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.resourceDetailToggle {
+  flex: 0 0 auto;
+}
+
+.sectionMoreButton {
+  padding: 0;
+  height: auto;
+  font-size: 13px;
+}
+
+.resourceContentTabs {
+  :global {
+    .@{antPrefix}-tabs-nav {
+      margin-bottom: 12px;
+    }
+
+    .@{antPrefix}-tabs-tab {
+      font-size: 18px;
+    }
+
+    .@{antPrefix}-tabs-content-holder {
+      padding: 14px;
+      border: 0.5px solid rgba(0, 0, 0, 0.08);
+      border-radius: 12px;
+      background: #fff;
+    }
+  }
+}
+
+.distributionToolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+
+.insightGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.insightPanel {
+  min-width: 0;
+  padding: 14px;
+  border: 0.5px solid rgba(0, 0, 0, 0.08);
+  border-radius: 12px;
+  background: #fff;
+}
+
+.sectionTitle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #1d2129;
+}
+
+.sectionInfoIcon {
+  color: #86909c;
+  font-size: 15px;
+  cursor: help;
+  flex: 0 0 auto;
+
+  &:hover {
+    color: #1d6df2;
+  }
+}
+
+.distributionList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.distributionRow {
+  min-width: 0;
+  border-radius: 8px;
+  padding: 4px 0;
+}
+
+.distributionRowClickable {
+  cursor: pointer;
+  transition: background 0.16s ease, padding 0.16s ease;
+
+  &:hover,
+  &:focus {
+    background: rgba(29, 109, 242, 0.06);
+    outline: none;
+    padding-right: 8px;
+    padding-left: 8px;
+  }
+}
+
+.distributionMeta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+.distributionName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #4e5969;
+  font-size: 13px;
+}
+
+.distributionValue {
+  flex: 0 0 auto;
+  color: #1d2129;
+  font-weight: 500;
+  font-size: 13px;
+}
+
+.distributionTrack {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(29, 109, 242, 0.08);
+}
+
+.distributionBar {
+  height: 100%;
+  border-radius: inherit;
+  background: #1d6df2;
+}
+
+.detailTabs {
+  padding: 2px 14px 14px;
+  border: 0.5px solid rgba(0, 0, 0, 0.08);
+  border-radius: 12px;
+  background: #fff;
+
+  :global {
+    .@{antPrefix}-tabs-extra-content {
+      display: flex;
+      align-items: center;
+      margin-left: 12px;
+    }
+  }
+}
+
+.detailTabsEmbedded {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.drillPanel {
+  padding: 14px;
+  border: 0.5px solid rgba(29, 109, 242, 0.14);
+  border-radius: 12px;
+  background: #fff;
+}
+
+.drillHeaderActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.drillSummary {
+  margin-bottom: 10px;
+  color: #4e5969;
+  font-size: 13px;
+}
+
+.searchInput {
+  width: 240px;
+}
+
+.detailTabTools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tableName {
+  min-width: 0;
+  color: #1d2129;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mono {
+  font-family: 'SFMono-Regular', Consolas, Menlo, monospace;
+  color: #86909c;
+  font-size: 12px;
+}
+
+.cardinalityTag {
+  max-width: 108px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+}
+
+.operationActions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.referenceTableWrap {
+  min-width: 0;
+}
+
+.relationPanel {
+  min-width: 0;
+}
+
+.relationPanelToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.relationGraphTools {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 24px;
+}
+
+.relationGraphWrap {
+  width: 100%;
+  max-height: 560px;
+  overflow: auto;
+  border-radius: 18px;
+  border: 0.5px solid rgba(29, 109, 242, 0.14);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(242, 247, 255, 0.96));
+}
+
+.relationGraph {
+  display: block;
+  max-width: none;
+}
+
+.relationGraphBg {
+  fill: #f8fbff;
+}
+
+.relationGraphGrid {
+  fill: none;
+  stroke: rgba(29, 109, 242, 0.07);
+  stroke-width: 1;
+}
+
+.relationGraphLine {
+  fill: none;
+  stroke: url('#relationLineGradient');
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  opacity: 0.9;
+}
+
+.relationGraphArrowHead {
+  fill: #8b5cf6;
+}
+
+.relationGraphDot {
+  fill: #fff;
+  stroke: #1d6df2;
+  stroke-width: 2;
+}
+
+.graphNodeCard {
+  fill: rgba(255, 255, 255, 0.94);
+  stroke: rgba(29, 109, 242, 0.22);
+  stroke-width: 1;
+}
+
+.graphNodeName {
+  font-size: 14px;
+  font-weight: 600;
+  fill: #1d2129;
+}
+
+.graphNodeCode {
+  font-size: 11px;
+  fill: #6b7280;
+  font-family: 'SFMono-Regular', Consolas, Menlo, monospace;
+}
+
+.graphRelationCard {
+  fill: url('#relationCardGradient');
+}
+
+.graphRelationName {
+  font-size: 14px;
+  font-weight: 700;
+  fill: #fff;
+}
+
+.graphCardinality {
+  fill: rgba(255, 255, 255, 0.22);
+  stroke: rgba(255, 255, 255, 0.35);
+}
+
+.graphCardinalityText {
+  font-size: 11px;
+  font-weight: 600;
+  fill: #fff;
+  letter-spacing: 0;
+}
+
+.resourceExplorer {
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  border: 0.5px solid rgba(0, 0, 0, 0.08);
+  border-radius: 12px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.resourceTabs {
+  padding: 0 14px;
+  flex: none;
+
+  :global {
+    .@{antPrefix}-tabs-nav {
+      margin: 0;
+    }
+
+    .@{antPrefix}-tabs-content-holder {
+      display: none;
+    }
+  }
+}
+
+.resourceExplorerBody {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: var(--resource-directory-width, 260px) 14px minmax(0, 1fr);
+  border-top: 0.5px solid rgba(0, 0, 0, 0.08);
+}
+
+.resourceDirectory {
+  min-width: 0;
+  min-height: 0;
+  padding: 10px 8px;
+  border-right: 0.5px solid rgba(0, 0, 0, 0.08);
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+
+  &::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    border-radius: 6px;
+    background: rgba(20, 22, 26, 0.22);
+  }
+
+  &::-webkit-scrollbar-thumb:hover {
+    background: rgba(20, 22, 26, 0.36);
+  }
+}
+
+.resourceResizeHandle {
+  position: relative;
+  z-index: 1;
+  width: 14px;
+  min-width: 14px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-right: 0.5px solid rgba(0, 0, 0, 0.06);
+  border-left: 0.5px solid rgba(0, 0, 0, 0.04);
+  background: #fbfcff;
+  color: #86909c;
+  cursor: col-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.16s ease, color 0.16s ease, border-color 0.16s ease;
+
+  :global(.anticon) {
+    font-size: 12px;
+    transform: rotate(90deg);
+    pointer-events: none;
+  }
+
+  &:hover,
+  &:focus-visible {
+    outline: none;
+    border-color: rgba(29, 109, 242, 0.22);
+    background: rgba(29, 109, 242, 0.06);
+    color: #1d6df2;
+  }
+}
+
+.resourceResizeHandleActive {
+  border-color: rgba(29, 109, 242, 0.28);
+  background: rgba(29, 109, 242, 0.08);
+  color: #1d6df2;
+}
+
+.resourceListPane {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+}
+
+.resourceListHeader {
+  flex: none;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 0.5px solid rgba(0, 0, 0, 0.06);
+}
+
+.resourceListTitle {
+  color: #1d2129;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.resourceListSubtitle {
+  color: #86909c;
+  font-size: 13px;
+}
+
+@media (max-width: 960px) {
+  .insightGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .resourceExplorerBody {
+    grid-template-columns: 1fr;
+  }
+
+  .resourceResizeHandle {
+    display: none;
+  }
+
+  .resourceDirectory {
+    max-height: 240px;
+    border-right: 0;
+    border-bottom: 0.5px solid rgba(0, 0, 0, 0.08);
+  }
+
+  .searchInput {
+    width: 100%;
+  }
+
+  .header {
+    align-items: flex-start;
+    flex-wrap: wrap;
+
+    .headerSelectors {
+      order: 3;
+      width: 100%;
+    }
+
+    .headerSelect {
+      flex: 1;
+      min-width: 0;
+    }
+  }
+}

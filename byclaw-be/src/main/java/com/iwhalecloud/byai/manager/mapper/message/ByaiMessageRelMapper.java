@@ -80,6 +80,14 @@ public interface ByaiMessageRelMapper extends BaseMapper<ByaiMessageRel> {
     List<ByaiMessageRel> selectByQo(@Param("qo") MessageRelObjQo qo);
 
     /**
+     * 根据消息ID查询关联记录：res_msg_id = messageId 或 ask_msg_id = messageId。
+     *
+     * @param messageId 消息ID
+     * @return 记录列表
+     */
+    List<ByaiMessageRel> selectByAskOrResMsgId(@Param("messageId") Long messageId);
+
+    /**
      * 消息关联检索 - 统计总数
      *
      * @param req 检索请求

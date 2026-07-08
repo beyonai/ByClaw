@@ -80,8 +80,9 @@ class SandboxControllerTest {
     void listRecords_returnsOpenclawEndpointForJsonStorage() {
         SandboxController controller = new SandboxController();
         SsSandboxRecordMapper sandboxRecordMapper = mock(SsSandboxRecordMapper.class);
+        ByaiSystemConfigService byaiSystemConfigService = mock(ByaiSystemConfigService.class);
         ReflectionTestUtils.setField(controller, "sandboxRecordMapper", sandboxRecordMapper);
-        ReflectionTestUtils.setField(controller, "byaiSystemConfigService", mock(ByaiSystemConfigService.class));
+        ReflectionTestUtils.setField(controller, "byaiSystemConfigService", byaiSystemConfigService);
 
         SsSandboxRecord record = new SsSandboxRecord();
         record.setId(1L);
@@ -90,6 +91,7 @@ class SandboxControllerTest {
         record.setCreateTime(new Date());
         when(sandboxRecordMapper.selectByPage(null, null, 0, 20)).thenReturn(List.of(record));
         when(sandboxRecordMapper.countByCondition(null, null)).thenReturn(1);
+        when(byaiSystemConfigService.getDcSystemConfigValueByCode("WEB_BASE_URL")).thenReturn("");
 
         ResponseUtil response = controller.listRecords(Map.of());
 

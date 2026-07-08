@@ -631,14 +631,20 @@ class AuthApplicationServiceTest {
         PrivilegeGrantMapper privilegeGrantMapper = mock(PrivilegeGrantMapper.class);
         UserService userService = mock(UserService.class);
         OrganizationService organizationService = mock(OrganizationService.class);
+        SsResourceService ssResourceService = mock(SsResourceService.class);
         ReflectionTestUtils.setField(service, "privilegeGrantMapper", privilegeGrantMapper);
         ReflectionTestUtils.setField(service, "userService", userService);
         ReflectionTestUtils.setField(service, "organizationService", organizationService);
+        ReflectionTestUtils.setField(service, "ssResourceService", ssResourceService);
 
         Users user = new Users();
         user.setUserId(1001L);
         user.setUserName("tester");
         when(userService.findById(1001L)).thenReturn(user);
+        SsResource resource = new SsResource();
+        resource.setResourceId(501L);
+        resource.setCreateBy(1001L);
+        when(ssResourceService.findById(501L)).thenReturn(resource);
         Organization organization = new Organization();
         organization.setOrgId(2001L);
         organization.setOrgName("test-org");
@@ -690,6 +696,44 @@ class AuthApplicationServiceTest {
         assertThat(blackList).hasSize(1);
         assertThat(blackList.get(0).getGrantToObjType()).isEqualTo(GrantToObjType.ORG);
         assertThat(blackList.get(0).getGrantToObjId()).isEqualTo(2001L);
+    }
+
+    @Test
+    void listAuthDetail_appendsCreatorWhenDefaultPrivilegeNotPersisted() {
+        AuthApplicationService service = new AuthApplicationService();
+        PrivilegeGrantMapper privilegeGrantMapper = mock(PrivilegeGrantMapper.class);
+        UserService userService = mock(UserService.class);
+        SsResourceService ssResourceService = mock(SsResourceService.class);
+        ReflectionTestUtils.setField(service, "privilegeGrantMapper", privilegeGrantMapper);
+        ReflectionTestUtils.setField(service, "userService", userService);
+        ReflectionTestUtils.setField(service, "ssResourceService", ssResourceService);
+
+        Users user = new Users();
+        user.setUserId(1001L);
+        user.setUserName("creator");
+        when(userService.findById(1001L)).thenReturn(user);
+        SsResource resource = new SsResource();
+        resource.setResourceId(501L);
+        resource.setCreateBy(1001L);
+        when(ssResourceService.findById(501L)).thenReturn(resource);
+        when(privilegeGrantMapper.selectList(any())).thenReturn(List.of());
+
+        AuthDetailQo qo = new AuthDetailQo();
+        qo.setGrantType(GrantType.FORCE_USE);
+        qo.setGrantObjType(ResourceBizTypeEnum.ONTOLOGY_BASE.name());
+        qo.setGrantObjId(501L);
+
+        ResponseUtil response = service.listAuthDetail(qo);
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> data = (Map<String, Object>) response.getData();
+        @SuppressWarnings("unchecked")
+        List<AuthDTO> redList = (List<AuthDTO>) data.get("redList");
+
+        assertThat(redList).hasSize(1);
+        assertThat(redList.get(0).getGrantToObjType()).isEqualTo(GrantToObjType.USER);
+        assertThat(redList.get(0).getGrantToObjId()).isEqualTo(1001L);
+        assertThat(redList.get(0).getGrantToObjName()).isEqualTo("creator");
     }
 
     @Test

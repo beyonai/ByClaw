@@ -21,8 +21,13 @@ export function buildBroadcastSessionKey(
   return baseSessionKey;
 }
 
-export function normalizeByaiAgentId(rawAgentId: string): string {
-  const trimmed = rawAgentId.trim();
+export function normalizeByaiAgentId(rawAgentId: unknown): string {
+  const trimmed =
+    typeof rawAgentId === "string"
+      ? rawAgentId.trim()
+      : typeof rawAgentId === "number" && Number.isFinite(rawAgentId)
+        ? String(rawAgentId)
+        : "";
   if (/^\d+$/.test(trimmed)) {
     return `baiying-agent-${trimmed}`;
   }
@@ -32,15 +37,16 @@ export function normalizeByaiAgentId(rawAgentId: string): string {
 export function resolveSdkTargetAgentId(
   routingAgentId: string,
   extraPayload: {
-    agent_id?: string;
-    agent_code?: string;
+    agent_id?: unknown;
+    agent_code?: unknown;
   },
 ): string {
-  if (extraPayload.agent_id) {
-    return normalizeByaiAgentId(extraPayload.agent_id);
+  const agentId = normalizeByaiAgentId(extraPayload.agent_id);
+  if (agentId) {
+    return agentId;
   }
-  if (extraPayload.agent_code) {
-    return extraPayload.agent_code;
+  if (typeof extraPayload.agent_code === "string" && extraPayload.agent_code.trim()) {
+    return extraPayload.agent_code.trim();
   }
   return routingAgentId;
 }

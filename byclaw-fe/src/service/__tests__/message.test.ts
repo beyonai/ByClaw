@@ -9,6 +9,7 @@ import {
   addMessage,
   getMessageState,
   getChatRunningSnapshot,
+  qryTroubleshootSession,
 } from '../message';
 
 // Mock the request module
@@ -63,6 +64,16 @@ describe('Message Service', () => {
           customHandle: true,
         },
       });
+    });
+  });
+
+  describe('qryTroubleshootSession', () => {
+    it('should call POST with messageId payload', () => {
+      const payload = { messageId: 'msg123' };
+
+      qryTroubleshootSession(payload);
+
+      expect(mockPOST).toHaveBeenCalledWith('/byaiService/assiman/qryTroubleshootSession', payload);
     });
   });
 

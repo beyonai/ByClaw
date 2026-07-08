@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.dto.digitemploy;
 
+import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.manager.dto.template.MemoryConfigDTO;
 import lombok.Getter;
 import lombok.Setter;
@@ -36,4 +37,12 @@ public class DigitalEmployeeDetailsDTO extends DigitalEmployeeDTO {
      */
     private List<MemoryConfigDTO> memoryConfigList;
 
+    /**
+     * 已绑定的本体明细：数组每项为一个「选中叶子」的扁平路径描述
+     * （resourceId、ontologyBaseCode、resourceName [+ sceneId/sceneName][+ viewCode/viewName][+ objectCode/objectName]）。
+     * 由已绑定的本体类资源与 ss_res_ext_ontology 元数据重建，随 relIds 派生刷新。
+     */
+    private List<JSONObject> relOntology;
+
 }
+

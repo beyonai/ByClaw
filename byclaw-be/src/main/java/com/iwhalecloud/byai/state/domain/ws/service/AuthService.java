@@ -40,35 +40,28 @@ public class AuthService {
 
     public void auth(ChannelHandlerContext ctx, FullHttpRequest request) {
         try {
-            String jwtToken = null;
+            String uri = request.uri();
+            Map<String, String> urlParamMap = parseUrl(uri);
+            if (MapUtils.isNotEmpty(urlParamMap)) {
+                log.info("ws urlParamMap: {}", JSON.toJSONString(urlParamMap));
+                for (Map.Entry<String, String> entry : urlParamMap.entrySet()) {
+                    String key = entry.getKey();
+                    String value = entry.getValue();
+                    if (!request.headers().contains(key)) {
+                        request.headers().add(key, value);
+                    }
+                }
+            }
 
             // 首先从 header 中获取 token
-            jwtToken = request.headers().get("beyond-token");
+            String jwtToken = request.headers().get("beyond-token");
 
             // 如果 header 中没有，则从请求参数中获取
             if (StringUtils.isBlank(jwtToken)) {
-                String uri = request.uri();
-                if (uri.contains("beyond-token=")) {
-                    jwtToken = uri.substring(uri.indexOf("beyond-token=") + "beyond-token=".length());
-                    // 如果有其他参数，需要截取到 & 之前
-                    int andIndex = jwtToken.indexOf('&');
-                    if (andIndex != -1) {
-                        jwtToken = jwtToken.substring(0, andIndex);
-                    }
-                }
+                jwtToken = urlParamMap.get("beyond-token");
                 // header补充beyond-token
                 if (StringUtils.isNotBlank(jwtToken)) {
                     request.headers().add("beyond-token", jwtToken);
-                }
-
-                Map<String, String> urlParamMap = parseUrl(uri);
-                if (MapUtils.isNotEmpty(urlParamMap)) {
-                    log.info("ws urlParamMap: {}", JSON.toJSONString(urlParamMap));
-                    for (Map.Entry<String, String> entry : urlParamMap.entrySet()) {
-                        String key = entry.getKey();
-                        String value = entry.getValue();
-                        request.headers().add(key, value);
-                    }
                 }
             }
 
@@ -82,6 +75,9 @@ public class AuthService {
             if (loginInfo == null) {
                 throw new RuntimeException(I18nUtil.get("ws.auth.signature.null"));
             }
+            // 补充后端生成的sso-token给bot使用
+            request.headers().set("sso-token", baseTokenFilter.createSsoToken(loginInfo.getUserCode()));
+
             Iterator<Map.Entry<String, String>> entryIterator = headers.iteratorAsString();
             Map<String, String> map = new HashMap<>();
             while (entryIterator.hasNext()) {
@@ -93,6 +89,7 @@ public class AuthService {
             ctx.channel().attr(Constant.ATT_USER_INFO).set(loginInfo);
             ctx.channel().attr(Constant.ATT_HEADER).set(map);
             channelManager.addChannel(loginInfo.getUserId(), ctx.channel());
+            WebSocketI18nSupport.applyLocale(loginInfo);
             log.info("WebSocket handshake completed for user {}", loginInfo);
 
             // 补充后端生成的sso-token给bot使用
@@ -118,6 +115,9 @@ public class AuthService {
                 String[] pairs = query.split("&");
                 for (String pair : pairs) {
                     int idx = pair.indexOf("=");
+                    if (idx <= 0) {
+                        continue;
+                    }
                     String key = URLDecoder.decode(pair.substring(0, idx), StandardCharsets.UTF_8.name());
                     String value = URLDecoder.decode(pair.substring(idx + 1), StandardCharsets.UTF_8.name());
                     params.put(key, value);
@@ -127,5 +127,22 @@ public class AuthService {
             log.error(e.getMessage(), e);
         }
         return params;
+    }
+
+    private static Map<String, String> maskSensitiveParams(Map<String, String> params) {
+        Map<String, String> maskedParams = new HashMap<>(params);
+        maskedParams.computeIfPresent("beyond-token", (key, value) -> maskToken(value));
+        maskedParams.computeIfPresent("sso-token", (key, value) -> maskToken(value));
+        return maskedParams;
+    }
+
+    private static String maskToken(String token) {
+        if (StringUtils.isBlank(token)) {
+            return token;
+        }
+        if (token.length() <= 12) {
+            return "***";
+        }
+        return token.substring(0, 6) + "***" + token.substring(token.length() - 6);
     }
 }

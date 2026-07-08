@@ -4,7 +4,7 @@ import { TooltipRef } from 'antd/es/tooltip';
 import classNames from 'classnames';
 import React, { useEffect, useRef, useCallback, useMemo, useState } from 'react';
 import styles from './index.module.less';
-import ResourceTabs from './resourceTabs';
+import ResourceTabs from './resourceTabsCompact';
 import { ResourceType } from '../utils/constants';
 import { IResourceType } from '../types';
 import EmployeeList from '@/layout/sider/components/EmployeeList';

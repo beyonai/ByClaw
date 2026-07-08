@@ -1,7 +1,7 @@
 @font-face {
   font-family: 'iconfont'; /* Project id 4864832 */
-  src: url('iconfont.woff2?t=1776754034500') format('woff2'), url('iconfont.woff?t=1776754034500') format('woff'),
-    url('iconfont.ttf?t=1776754034500') format('truetype');
+  src: url('iconfont.woff2?t=1783319217734') format('woff2'), url('iconfont.woff?t=1783319217734') format('woff'),
+    url('iconfont.ttf?t=1783319217734') format('truetype');
 }
 
 .iconfont {
@@ -10,6 +10,14 @@
   font-style: normal;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+.icon-feishu:before {
+  content: '\e612';
+}
+
+.icon-brain-filled:before {
+  content: '\eb02';
 }
 
 .icon-goujian:before {

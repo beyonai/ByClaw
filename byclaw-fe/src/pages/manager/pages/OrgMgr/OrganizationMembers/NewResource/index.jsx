@@ -84,7 +84,7 @@ const NewResource = (props, ref) => {
           keyword: searchValue,
           grantToObjType: 'ORG',
           authType: selectValue,
-          resourceBizTypeList,
+          grantResourceTypeList: resourceBizTypeList,
           systemCodes: sourceValue,
           catalogIds: fieldValue,
           ...params,

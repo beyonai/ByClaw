@@ -23,4 +23,6 @@ public class ChatMessage extends AssistantChatDto {
 
     private Long messageId;
 
+    private String language;
+
 }

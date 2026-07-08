@@ -274,3 +274,69 @@ CREATE INDEX IF NOT EXISTS idx_sandbox_health_watermark_scope
     ON byai.sandbox_health_watermark_model (service_type, profile_key, enabled, priority DESC);
 
 alter table byai.ss_res_ext_dig_employee alter column tag_name type varchar(255);
+
+-- 模型表新增 owner_type 字段: 区分个人模型 (PERSONAL) 和公共模型 (PUBLIC)
+ALTER TABLE byai.byai_aimodel ADD COLUMN owner_type VARCHAR(20) DEFAULT 'PUBLIC';
+COMMENT ON COLUMN byai.byai_aimodel.owner_type IS '模型归属: PUBLIC(公共) / PERSONAL(个人)';
+
+-- 模型表新增 source_type 字段: 区分模型来源
+ALTER TABLE byai.byai_aimodel ADD COLUMN source_type VARCHAR(32) DEFAULT NULL;
+COMMENT ON COLUMN byai.byai_aimodel.source_type IS '模型来源: null(用户创建) / TOKEN_SAVER(系统分配)';
+
+-- 用户 Token 额度配置表（管理员可为每位用户分配独立额度）
+CREATE TABLE IF NOT EXISTS byai.po_user_token_quota (
+    quota_id BIGINT PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    monthly_quota_limit BIGINT NOT NULL,
+    remark VARCHAR(512),
+    create_by BIGINT,
+    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    update_by BIGINT,
+    update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    delete_flag CHAR(1) NOT NULL DEFAULT '0'
+);
+
+COMMENT ON TABLE byai.po_user_token_quota IS '用户Token额度配置表';
+COMMENT ON COLUMN byai.po_user_token_quota.quota_id IS '主键ID';
+COMMENT ON COLUMN byai.po_user_token_quota.user_id IS '用户ID（关联po_users.user_id）';
+COMMENT ON COLUMN byai.po_user_token_quota.monthly_quota_limit IS '月度Token限额';
+COMMENT ON COLUMN byai.po_user_token_quota.remark IS '备注';
+COMMENT ON COLUMN byai.po_user_token_quota.create_by IS '创建人ID';
+COMMENT ON COLUMN byai.po_user_token_quota.create_time IS '创建时间';
+COMMENT ON COLUMN byai.po_user_token_quota.update_by IS '更新人ID';
+COMMENT ON COLUMN byai.po_user_token_quota.update_time IS '更新时间';
+COMMENT ON COLUMN byai.po_user_token_quota.delete_flag IS '逻辑删除标识，0未删除，1已删除';
+
+CREATE UNIQUE INDEX IF NOT EXISTS uk_po_user_token_quota_user
+    ON byai.po_user_token_quota (user_id) WHERE delete_flag = '0';
+
+-- ========== 本体（Ontology）资源化改造 ==========
+-- 本体库/场景/对象/视图统一登记为 ss_resource；本体库、场景、对象、视图分别写各自扩展表。
+-- 本体库编码存 ss_res_ext_ontology.pid；场景/对象/视图的所属本体库编码存各自扩展表 target_content.ontologyBaseCode。
+-- 1. 添加 source_content 列
+ALTER TABLE byai.ss_res_ext_ontology ADD source_content text;
+-- 2. 添加 target_content 列
+ALTER TABLE byai.ss_res_ext_ontology ADD target_content text;
+-- 3. 为 source_content 添加注释
+COMMENT ON COLUMN byai.ss_res_ext_ontology.source_content IS '来源内容：预留给后续本体导入（OWL/批量导入）的原始内容';
+-- 4. 为 target_content 添加注释
+COMMENT ON COLUMN byai.ss_res_ext_ontology.target_content IS '目标内容：本体实体元数据明细 JSON 镜像，冗余 ownerType/baseId/sceneId/code 供 Worker 运行期消费';
+-- 5. 修改已有列 pid 的注释
+COMMENT ON COLUMN byai.ss_res_ext_ontology.pid IS '本体库编码：ONTOLOGY_BASE 资源专用；场景/对象/视图使用各自扩展表';
+-- 6. 创建索引
+CREATE INDEX IF NOT EXISTS idx_ss_res_ext_ontology_pid
+    ON byai.ss_res_ext_ontology (pid);
+
+
+
+-- ========== 本体的场景扩展表 ==========
+CREATE TABLE byai.ss_res_ext_scene (
+    resource_id int8 NULL,
+    scene_code varchar2(32),
+    source_content text NULL,
+    target_content text NULL,
+    CONSTRAINT pk_ss_res_ext_scene PRIMARY KEY (resource_id)
+);
+COMMENT ON COLUMN byai.ss_res_ext_scene.scene_code IS '场景编码';
+COMMENT ON COLUMN byai.ss_res_ext_scene.source_content IS '来源内容：预留给后续本体场景导入（OWL/批量导入）的原始内容';
+COMMENT ON COLUMN byai.ss_res_ext_scene.target_content IS '目标内容';

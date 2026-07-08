@@ -67,12 +67,15 @@ class RouteServiceTest {
         messageSource = new StaticMessageSource();
         messageSource.addMessage("sandbox.launch.progress.start", Locale.SIMPLIFIED_CHINESE, "个人助理正在启动中，请等待");
         messageSource.addMessage("sandbox.launch.progress.waiting", Locale.SIMPLIFIED_CHINESE, "个人助理仍在启动中，请稍等");
+        messageSource.addMessage("sandbox.launch.progress.ready", Locale.SIMPLIFIED_CHINESE, "个人助理已启动，正在处理请求");
         messageSource.addMessage("sandbox.launch.progress.failed", Locale.SIMPLIFIED_CHINESE, "沙箱启动失败，请联系管理员");
         messageSource.addMessage("sandbox.launch.model.config.required", Locale.SIMPLIFIED_CHINESE,
                 "沙箱启动失败，模型参数配置不完整，请联系管理员");
         messageSource.addMessage("sandbox.launch.progress.start", Locale.US, "Your personal assistant is starting up, please wait.");
         messageSource.addMessage("sandbox.launch.progress.waiting", Locale.US,
                 "Your personal assistant is still starting up, please wait a moment.");
+        messageSource.addMessage("sandbox.launch.progress.ready", Locale.US,
+                "Your personal assistant is ready and processing your request.");
         messageSource.addMessage("sandbox.launch.progress.failed", Locale.US,
                 "Sandbox startup failed, please contact the administrator.");
         messageSource.addMessage("sandbox.launch.model.config.required", Locale.US,
@@ -141,7 +144,9 @@ class RouteServiceTest {
                 .containsEntry("Beyond-Token", "test-beyond-token");
         org.assertj.core.api.Assertions.assertThat(output(ctx))
                 .contains("reasoningLogStart")
-                .contains("个人助理正在启动中，请等待");
+                .contains("reasoningLogEnd")
+                .contains("个人助理正在启动中，请等待")
+                .contains("个人助理已启动，正在处理请求");
     }
 
     @Test
@@ -272,7 +277,34 @@ class RouteServiceTest {
         ArgumentCaptor<Object> contentCaptor = ArgumentCaptor.forClass(Object.class);
         verify(gatewayClient).sendMessage(anyString(), anyString(), contentCaptor.capture(), anyString(), any(),
                 anyString(), anyString(), anyString(), anyString(), any(), any());
-        org.assertj.core.api.Assertions.assertThat(contentCaptor.getValue()).isEqualTo("@liu0518#persona-cfo22");
+        org.assertj.core.api.Assertions.assertThat(contentCaptor.getValue()).isEqualTo("@liu0518#persona-cfo 22");
+    }
+
+    @Test
+    void route_prefixesNonMentionPlaceholderBeforeSendingToGateway() throws Exception {
+        ChatProcessContext ctx = buildContext();
+        ctx.getAssistantChatDto().setChatContent(
+                "{{SKILL_/.openclaw/workspace-baiying-agent-10000998/skills/persona-cfo}}22");
+
+        ResourceVo skill = new ResourceVo();
+        skill.setResourceType(AgentMetaEnum.SKILL);
+        skill.setResourceId("/.openclaw/workspace-baiying-agent-10000998/skills/persona-cfo");
+        skill.setResourceName("persona-cfo");
+        ctx.getAssistantChatDto().setResourceList(Arrays.asList(skill));
+
+        when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(), any(), any()))
+                .thenAnswer(invocation -> {
+                    ctx.gatewayEventQueue.offer(currentTraceDoneEvent(ctx));
+                    return successResponse();
+                });
+
+        routeService.route(ctx);
+
+        ArgumentCaptor<Object> contentCaptor = ArgumentCaptor.forClass(Object.class);
+        verify(gatewayClient).sendMessage(anyString(), anyString(), contentCaptor.capture(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(), any(), any());
+        org.assertj.core.api.Assertions.assertThat(contentCaptor.getValue()).isEqualTo("#persona-cfo 22");
     }
 
     private ChatProcessContext buildContext() {

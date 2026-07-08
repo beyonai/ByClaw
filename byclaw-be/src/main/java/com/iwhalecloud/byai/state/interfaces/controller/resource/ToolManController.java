@@ -944,6 +944,42 @@ public class ToolManController {
     }
 
     /**
+     * 查询当前数字员工工作空间下、尚未进入个人技能资源列表的目录技能。供首页右侧“个人技能” tab 合并展示。
+     * 与 {@link #qryWorkspaceSkillList} 的区别：去重口径为“个人 tab 已资源化技能”，而非“绑定到当前数字员工”。
+     */
+    @PostMapping("/qryWorkspacePersonalSkillList")
+    public ResponseUtil<List<ByClawSkillDto>> qryWorkspacePersonalSkillList(
+        @RequestBody QrySkillListByUserCodeQo request) {
+        try {
+            if (request == null) {
+                return ResponseUtil.fail(I18nUtil.get("param.cannot.be.null"));
+            }
+            String requestUserCode = request.getUserCode();
+            String resolvedUserCode = StringUtils.isNotBlank(requestUserCode) ? requestUserCode
+                : CurrentUserHolder.getCurrentUserCode();
+            Long resolvedResourceId = request.getResourceId() == null
+                ? suasSuperassistApplicationService.resolveCurrentUserDefaultDigitalEmployeeId()
+                : request.getResourceId();
+            List<ByClawSkillDto> data = byClawSkillQueryApplicationService.qryWorkspacePersonalUnboundSkillList(
+                resolvedUserCode, resolvedResourceId, request.getKeyword());
+            return ResponseUtil.successResponse(I18nUtil.get("byclaw.workspace.skill.list.query.success"), data);
+        }
+        catch (IllegalArgumentException e) {
+            return ResponseUtil.fail(e.getMessage());
+        }
+        catch (BdpRuntimeException e) {
+            return ResponseUtil.fail(e.getMessage());
+        }
+        catch (Exception e) {
+            logger.error("qryWorkspacePersonalSkillList failed, userCode={}, resourceId={}, keyword={}",
+                request == null ? null : request.getUserCode(), request == null ? null : request.getResourceId(),
+                request == null ? null : request.getKeyword(), e);
+            return ResponseUtil.fail(e.getMessage() != null ? e.getMessage()
+                : I18nUtil.get("byclaw.workspace.skill.list.query.failed"));
+        }
+    }
+
+    /**
      * 按工作空间 skillPath 查询目录技能详情。
      */
     @PostMapping("/getWorkspaceSkillDetail")
@@ -1247,6 +1283,8 @@ public class ToolManController {
             }
             String resolvedUserCode = StringUtils.isNotBlank(request.getUserCode()) ? request.getUserCode()
                 : CurrentUserHolder.getCurrentUserCode();
+            // 删除工作空间技能前，校验当前用户对目标数字员工的管理权限（与绑定技能卸载一致），必须前置于文件删除。
+            byClawSkillResourceApplicationService.assertWorkspaceSkillManagePermission(request.getResourceId());
             ByClawSkillDto data = byClawSkillDeleteApplicationService.deleteSkill(resolvedUserCode,
                 request.getResourceId(), request.getSkillPath());
             byClawSkillResourceApplicationService.unlinkWorkspaceSkill(resolvedUserCode, request.getResourceId(),

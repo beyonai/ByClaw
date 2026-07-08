@@ -158,9 +158,24 @@ export default [
             component: './files',
           },
           {
+            path: '/models',
+            name: 'models',
+            component: './models',
+          },
+          {
             path: '/objectCenter',
             name: 'objectCenter',
             component: './objectCenter',
+          },
+          {
+            path: '/ontologyCenter',
+            name: 'ontologyCenter',
+            component: './ontologyCenter',
+          },
+          {
+            path: '/ontologyBaseDetail',
+            name: 'ontologyBaseDetail',
+            component: './ontologyBaseDetail',
           },
           {
             path: '/skillCenter',

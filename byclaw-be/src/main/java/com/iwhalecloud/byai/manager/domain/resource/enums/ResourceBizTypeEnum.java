@@ -43,6 +43,16 @@ public enum ResourceBizTypeEnum {
     OBJECT,
 
     /**
+     * 本体库
+     */
+    ONTOLOGY_BASE,
+
+    /**
+     * 场景
+     */
+    SCENE,
+
+    /**
      * 视图
      */
     VIEW,

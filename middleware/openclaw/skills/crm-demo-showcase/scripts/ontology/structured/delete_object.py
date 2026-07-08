@@ -3,7 +3,7 @@
 
 I/O 协议：stdin JSON → stdout JSON
 
-所有业务逻辑由 datacloud_data_service 的 ontology-manager API 提供服务。
+所有业务逻辑由 datacloud_platform 的 ontology-manager API 提供服务。
 """
 
 from __future__ import annotations

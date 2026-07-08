@@ -27,7 +27,14 @@ import {
   message,
   Popconfirm,
 } from 'antd';
-import { FormOutlined, QuestionCircleOutlined, EyeOutlined, ExclamationCircleOutlined } from '@ant-design/icons';
+import {
+  RobotOutlined,
+  FormOutlined,
+  QuestionCircleOutlined,
+  EyeOutlined,
+  ExclamationCircleOutlined,
+  PlusOutlined,
+} from '@ant-design/icons';
 import classnames from 'classnames';
 import { compact, set, trim } from 'lodash';
 import { customAlphabet } from 'nanoid';
@@ -62,6 +69,43 @@ import { DEFAULT_DIGITAL_EMPLOYEE_TEMPLATES } from '@/pages/manager/constants/di
 const { TextArea } = Input;
 
 const nanoid = customAlphabet('abcdefghijklmnopqrstuvwxyz1234567890', 6);
+const PROMPT_TEXT_FIELD_DEFAULT_MAX_LENGTH = 10000;
+const getPromptTextLength = (value: any) => Array.from(`${value ?? ''}`).length;
+
+const DEFAULT_ROBOT_CHANNEL_OPTIONS = [
+  { value: 'DingTalk', labelZh: '钉钉', labelEn: 'DingTalk' },
+  { value: 'Feishu', labelZh: '飞书', labelEn: 'Feishu' },
+];
+
+const normalizeRobotChannelValue = (channel = '') => `${channel || ''}`.trim().toLowerCase();
+
+const getRobotConfigKey = (item = {}) => {
+  const channel = normalizeRobotChannelValue(item.channel);
+  const identity = item.appId || item.clientId || item.robotCode || '';
+  return identity ? `${channel}:${identity}` : '';
+};
+
+const isFeishuRobotConfig = (item = {}) => normalizeRobotChannelValue(item.channel) === 'feishu';
+const isDingtalkRobotConfig = (item = {}) => normalizeRobotChannelValue(item.channel) === 'dingtalk';
+
+const getRobotConfigIdentityText = (item = {}) => {
+  if (isFeishuRobotConfig(item)) {
+    return `appId: ${item.appId || '-'}`;
+  }
+  return `clientId: ${item.clientId || '-'}`;
+};
+
+const renderRobotChannelIcon = (item = {}) => {
+  if (isFeishuRobotConfig(item)) {
+    return <AntdIcon type="icon-feishu" className={classnames(styles.robotChannelIcon, styles.feishuRobotIcon)} />;
+  }
+
+  if (isDingtalkRobotConfig(item)) {
+    return <DingtalkCircleFilled className={classnames(styles.robotChannelIcon, styles.fontSize32PrimaryColor)} />;
+  }
+
+  return <RobotOutlined className={classnames(styles.robotChannelIcon, styles.fontSize32PrimaryColor)} />;
+};
 
 // 能力图标选项
 const abilityIcons = [
@@ -132,6 +176,70 @@ const parseDigitalEmployeeTemplates = (value: any) => {
   return [value];
 };
 
+const parseMaybeArray = (value: any) => {
+  if (Array.isArray(value)) return value;
+  if (!value) return [];
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value || '[]');
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+};
+
+const getOntologyResourceType = (row: any) =>
+  `${row?.grantResourceType || row?.resourceBizType || row?.level || ''}`.toUpperCase();
+
+const getOntologyResourceKey = (row: any) => {
+  const resourceId = row?.resourceId ?? row?.relResourceId ?? row?.id;
+  if (resourceId !== undefined && resourceId !== null && resourceId !== '') {
+    return `${resourceId}`;
+  }
+  return `${getOntologyResourceType(row)}:${row?.resourceCode || row?.viewCode || row?.objectCode || ''}`;
+};
+
+const normalizeOntologySummaryResource = (row: any = {}) => {
+  const resourceBizType = getOntologyResourceType(row);
+  const resourceCode = row?.resourceCode || row?.viewCode || row?.objectCode || row?.code || '';
+  const resourceName = row?.resourceName || row?.viewName || row?.objectName || row?.name || resourceCode;
+  return {
+    ...row,
+    key: getOntologyResourceKey(row),
+    resourceBizType,
+    resourceCode,
+    resourceName,
+    description: row?.description ?? row?.resourceDesc ?? row?.viewDesc ?? row?.objectDesc ?? row?.remark ?? '',
+  };
+};
+
+const buildOntologyConfigSummary = (savedRelOntology: any, ontologyResourcesDirty?: boolean) => {
+  const resourceMap = new Map<string, any>();
+  parseMaybeArray(savedRelOntology)
+    .map(normalizeOntologySummaryResource)
+    .filter((row: any) => ['VIEW', 'OBJECT'].includes(row.resourceBizType))
+    .forEach((row: any) => {
+      resourceMap.set(row.key, row);
+    });
+  const resources = Array.from(resourceMap.values());
+  const totals = resources.reduce(
+    (acc, row) => ({
+      views: acc.views + (row.resourceBizType === 'VIEW' ? 1 : 0),
+      objects: acc.objects + (row.resourceBizType === 'OBJECT' ? 1 : 0),
+    }),
+    { views: 0, objects: 0 }
+  );
+  return {
+    resources,
+    totals,
+    hasBinding: resources.length > 0,
+    hasPending: Boolean(ontologyResourcesDirty),
+    isCleared: Boolean(ontologyResourcesDirty) && resources.length === 0,
+  };
+};
+
 const getDigitalEmployeeTemplate = (templates: any[] = [], ownerType?: string, agentType?: string) => {
   const effectiveOwnerType = ownerType === 'personal' ? 'personal' : 'enterprise';
   const findTemplate = (list: any[] = []) =>
@@ -139,6 +247,25 @@ const getDigitalEmployeeTemplate = (templates: any[] = [], ownerType?: string, a
     list.find((item) => item?.ownerType === effectiveOwnerType);
 
   return findTemplate(templates) || {};
+};
+
+const getDigitalEmployeeTemplateMaxLength = (templates: any[] = [], ownerType?: string, agentType?: string) => {
+  const effectiveOwnerType =
+    String(ownerType || '')
+      .trim()
+      .toLowerCase() === 'personal'
+      ? 'personal'
+      : 'enterprise';
+  const effectiveAgentType = agentType === undefined || agentType === null ? '' : String(agentType).trim();
+  const matchedTemplate = (Array.isArray(templates) ? templates : []).find(
+    (item) =>
+      String(item?.ownerType || '')
+        .trim()
+        .toLowerCase() === effectiveOwnerType && String(item?.agentType ?? '').trim() === effectiveAgentType
+  );
+
+  const maxLength = Number(matchedTemplate?.maxLength);
+  return Number.isFinite(maxLength) && maxLength > 0 ? maxLength : PROMPT_TEXT_FIELD_DEFAULT_MAX_LENGTH;
 };
 
 const getBundledSkillCode = (item: any) => {
@@ -351,6 +478,9 @@ const ConfigForm = (props) => {
     initialCoreCompetencies = [],
     ownerType,
     agentType,
+    onOpenOntologyDrawer,
+    savedRelOntology = [],
+    ontologyResourcesDirty = false,
   } = props;
 
   const intl = useIntl();
@@ -360,17 +490,24 @@ const ConfigForm = (props) => {
   const [catalogList, setCatalogList] = useState([]);
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [robotModalOpen, setRobotModalOpen] = useState(false);
+  const [modelPopoverOpen, setModelPopoverOpen] = useState(false);
   const [robotItem, setRobotItem] = useState<RobotConfig>({ channel: '' });
+  const [robotEditingIndex, setRobotEditingIndex] = useState<number | null>(null);
   const [templateData, setTemplateData] = useState([]);
+  const [promptTextMaxLength, setPromptTextMaxLength] = useState(PROMPT_TEXT_FIELD_DEFAULT_MAX_LENGTH);
   const [configurableTabs, setConfigurableTabs] = useState<
     Array<{ key: string; name: string; isSystem: boolean; tip?: string }>
   >([]);
   const [agentTypeOptions, setAgentTypeOptions] = useState([]);
   const [bundledSkillOptions, setBundledSkillOptions] = useState([]);
   const [bundledSkillLoading, setBundledSkillLoading] = useState(false);
+  const ontologySummary = useMemo(
+    () => buildOntologyConfigSummary(savedRelOntology, ontologyResourcesDirty),
+    [savedRelOntology, ontologyResourcesDirty]
+  );
   const [bundledSkillModalOpen, setBundledSkillModalOpen] = useState(false);
   const [bundledSkillSearchName, setBundledSkillSearchName] = useState('');
-  const formOwnerType = Form.useWatch('ownerType', form, { form, preserve: true });
+  const formOwnerType = Form.useWatch('ownerType', { form, preserve: true });
   const effectiveOwnerType = formOwnerType || ownerType;
   const selectedSkills = Form.useWatch('bundledSkills', { form, preserve: true }) || [];
   const selectedSkillCodes = useMemo(() => normalizeBundledSkillCodes(selectedSkills), [selectedSkills]);
@@ -379,6 +516,11 @@ const ConfigForm = (props) => {
     let mounted = true;
 
     const fetchRobotChannels = async () => {
+      const fallbackOptions = DEFAULT_ROBOT_CHANNEL_OPTIONS.map((item) => ({
+        value: item.value,
+        label: isEN ? item.labelEn : item.labelZh,
+      }));
+
       try {
         const res = await getByParamGroupCode({
           paramGroupCode: 'DIG_EMPLOYEE_MACHINE_CHANNEL',
@@ -389,8 +531,8 @@ const ConfigForm = (props) => {
           setRobotChannelOptions(
             list
               .map((item) => ({
-                value: item?.paramValue,
-                label: isEN ? item?.paramEnName : item?.paramName,
+                value: `${item?.paramValue || ''}`.trim(),
+                label: (isEN ? item?.paramEnName : item?.paramName) || item?.paramDesc || item?.paramValue || '',
                 seq: Number(item?.paramSeq) || 0,
               }))
               .filter((item) => item.value)
@@ -399,10 +541,10 @@ const ConfigForm = (props) => {
           );
           return;
         }
-        setRobotChannelOptions([]);
+        setRobotChannelOptions(fallbackOptions);
       } catch {
         if (mounted) {
-          setRobotChannelOptions([]);
+          setRobotChannelOptions(fallbackOptions);
         }
       }
     };
@@ -559,6 +701,16 @@ const ConfigForm = (props) => {
     [robotChannelOptions]
   );
 
+  const getRobotChannelLabel = useCallback(
+    (channel) => {
+      const matchedOption = robotChannelOptions.find(
+        (item) => normalizeRobotChannelValue(item.value) === normalizeRobotChannelValue(channel)
+      );
+      return matchedOption?.label || channel || '-';
+    },
+    [robotChannelOptions]
+  );
+
   const knowledgeTypeLabelMap = {
     KG_DOC: intl.formatMessage({ id: 'employeeDetail.knowledgeType.doc' }),
     KG_QA: intl.formatMessage({ id: 'employeeDetail.knowledgeType.qa' }),
@@ -617,19 +769,37 @@ const ConfigForm = (props) => {
     };
   }, []);
 
-  const handleRobotModalOk = useCallback((item) => {
-    setRobotModalOpen(false);
-    setRobotConfigs((prev) => {
-      if (item.clientId) {
-        const target = prev.find((it) => it.clientId === item.clientId);
-        if (target) {
-          return prev.map((it) => (it.clientId === item.clientId ? item : it));
+  const handleRobotModalOk = useCallback(
+    (item) => {
+      setRobotModalOpen(false);
+      setRobotConfigs((prev) => {
+        // appId/clientId 等身份字段允许编辑，不能用它们判断“当前编辑的是哪一条”。
+        // 编辑入口会记录数组下标，保存时优先按下标替换原配置，避免修改 appId 后被当成新增机器人。
+        if (robotEditingIndex !== null && robotEditingIndex >= 0 && robotEditingIndex < prev.length) {
+          return prev.map((it, index) => (index === robotEditingIndex ? item : it));
         }
-        return [...prev, item];
-      }
 
-      return [...prev, item];
-    });
+        const nextKey = getRobotConfigKey(item);
+        if (nextKey) {
+          const target = prev.find((it) => getRobotConfigKey(it) === nextKey);
+          if (target) {
+            return prev.map((it) => (getRobotConfigKey(it) === nextKey ? item : it));
+          }
+          return [...prev, item];
+        }
+
+        return [...prev, item];
+      });
+      setRobotEditingIndex(null);
+    },
+    [robotEditingIndex, setRobotConfigs]
+  );
+
+  const handleRobotModalOpenChange = useCallback((nextOpen) => {
+    setRobotModalOpen(nextOpen);
+    if (!nextOpen) {
+      setRobotEditingIndex(null);
+    }
   }, []);
 
   const normalizeSkillType = useCallback((type) => {
@@ -709,6 +879,8 @@ const ConfigForm = (props) => {
     const fetchTemplateData = async () => {
       const applyTemplateData = (templates: any[] = []) => {
         const template = getDigitalEmployeeTemplate(templates, effectiveOwnerType, agentType);
+        const nextMaxLength = getDigitalEmployeeTemplateMaxLength(templates, effectiveOwnerType, agentType);
+        setPromptTextMaxLength(nextMaxLength);
         const templatePrompts =
           Array.isArray(template?.prompts) && template.prompts.length > 0
             ? template.prompts
@@ -770,20 +942,18 @@ const ConfigForm = (props) => {
 
   useEffect(() => {
     if (!agentId) return;
-    if (!Array.isArray(templateData) || templateData.length === 0) return;
 
     const parsedConfig = parseCorePersonaDefinition(corePersonaDefinitionValue, isEN);
-    const templateKeys = templateData.map((item) => getPromptConfigKey(item)).filter(Boolean);
-    const templateTipMap = templateData.reduce((result, item) => {
+    const templateTipMap = (Array.isArray(templateData) ? templateData : []).reduce((result, item) => {
       const key = getPromptConfigKey(item);
       if (key && item.tip) {
         result[key] = item.tip;
       }
       return result;
     }, {});
-    const matchesCurrentTemplate = templateKeys.some((key) => parsedConfig.tabs.some((tab) => tab.key === key));
 
-    if (parsedConfig.isArray && parsedConfig.tabs.length > 0 && matchesCurrentTemplate) {
+    // In edit mode, prefer the saved corePersonaDefinition payload over template defaults.
+    if (parsedConfig.isArray && parsedConfig.tabs.length > 0) {
       const parsedTabs = parsedConfig.tabs.map((tab) => ({
         ...tab,
         tip: tab.tip || templateTipMap[tab.key] || '',
@@ -798,6 +968,8 @@ const ConfigForm = (props) => {
       internalSyncRef.current = false;
       return;
     }
+
+    if (!Array.isArray(templateData) || templateData.length === 0) return;
 
     const { tabs, fieldValues, corePersonaDefinitionJson } = buildTemplatePromptConfig(templateData, isEN);
     let roleObj = {};
@@ -1093,14 +1265,106 @@ const ConfigForm = (props) => {
     });
   }, [bundledSkillOptions, bundledSkillSearchName]);
 
+  const handlePromptTextAreaChange = useCallback(
+    (fieldLabel, value) => {
+      const currentLength = getPromptTextLength(value);
+      if (currentLength <= promptTextMaxLength) {
+        return;
+      }
+
+      message.warning(
+        intl.formatMessage(
+          { id: 'employeeDetail.fieldMaxLength' },
+          {
+            field: fieldLabel,
+            max: promptTextMaxLength,
+            current: currentLength,
+          }
+        )
+      );
+    },
+    [intl, promptTextMaxLength]
+  );
+
+  const showPromptOverLimitWarning = useCallback(
+    (fieldLabel, currentLength) => {
+      message.warning(
+        intl.formatMessage(
+          { id: 'employeeDetail.fieldMaxLength' },
+          {
+            field: fieldLabel,
+            max: promptTextMaxLength,
+            current: currentLength,
+          }
+        )
+      );
+    },
+    [intl, promptTextMaxLength]
+  );
+
+  const getNextPromptTextLength = useCallback((target, nextText) => {
+    const value = target?.value || '';
+    const selectionStart = target?.selectionStart ?? value.length;
+    const selectionEnd = target?.selectionEnd ?? selectionStart;
+    const selectedLength = getPromptTextLength(value.slice(selectionStart, selectionEnd));
+    return getPromptTextLength(value) - selectedLength + getPromptTextLength(nextText);
+  }, []);
+
   const renderPromptTextArea = useCallback(
-    (name, placeholder) => (
+    (name, placeholder, fieldLabel) => (
       <Form.Item name={name} className={styles.marginBottomNone}>
         <TextArea
           className={styles.personalityDefinitionTextArea}
           autoSize={{ minRows: 5, maxRows: 10 }}
           placeholder={placeholder}
           disabled={isReadOnly}
+          maxLength={promptTextMaxLength}
+          showCount={{
+            formatter: ({ value }) => `${getPromptTextLength(value)}/${promptTextMaxLength}`,
+          }}
+          onBeforeInput={(e) => {
+            const inputType = e?.nativeEvent?.inputType || '';
+            if (inputType === 'insertFromPaste') return;
+            const nextText = e?.data || '';
+            if (!nextText) return;
+            const nextLength = getNextPromptTextLength(e.currentTarget, nextText);
+            if (nextLength > promptTextMaxLength) {
+              e.preventDefault();
+              showPromptOverLimitWarning(fieldLabel, nextLength);
+            }
+          }}
+          onChange={(e) => handlePromptTextAreaChange(fieldLabel, e.target.value)}
+          onPaste={(e) => {
+            const pastedText = e.clipboardData?.getData('text') || '';
+            const target = e.currentTarget;
+            const value = target?.value || '';
+            const selectionStart = target?.selectionStart ?? value.length;
+            const selectionEnd = target?.selectionEnd ?? selectionStart;
+            const selectedText = value.slice(selectionStart, selectionEnd);
+            const baseLength = getPromptTextLength(value) - getPromptTextLength(selectedText);
+            const remainingLength = promptTextMaxLength - baseLength;
+            const nextLength = baseLength + getPromptTextLength(pastedText);
+
+            if (nextLength <= promptTextMaxLength) {
+              return;
+            }
+
+            e.preventDefault();
+            showPromptOverLimitWarning(fieldLabel, nextLength);
+
+            if (remainingLength <= 0) {
+              return;
+            }
+
+            const allowedText = Array.from(pastedText).slice(0, remainingLength).join('');
+            const nextValue = `${value.slice(0, selectionStart)}${allowedText}${value.slice(selectionEnd)}`;
+            form.setFieldsValue({ [name]: nextValue });
+            syncRoleToForm({ [name]: nextValue }).then(updateResource);
+            window.setTimeout(() => {
+              const nextCursor = selectionStart + allowedText.length;
+              target?.setSelectionRange?.(nextCursor, nextCursor);
+            });
+          }}
           onBlur={() => {
             if (!compositionRef.current) {
               updateResource();
@@ -1113,7 +1377,17 @@ const ConfigForm = (props) => {
         />
       </Form.Item>
     ),
-    [isReadOnly, updateResource, handleCompositionEnd]
+    [
+      form,
+      getNextPromptTextLength,
+      handlePromptTextAreaChange,
+      isReadOnly,
+      promptTextMaxLength,
+      showPromptOverLimitWarning,
+      syncRoleToForm,
+      updateResource,
+      handleCompositionEnd,
+    ]
   );
 
   const handleAddCustomPromptTab = useCallback(async () => {
@@ -1210,7 +1484,8 @@ const ConfigForm = (props) => {
       ),
       children: renderPromptTextArea(
         item.key,
-        intl.formatMessage({ id: 'employeeDetail.promptField.customPlaceholder' }, { name: item.name })
+        intl.formatMessage({ id: 'employeeDetail.promptField.customPlaceholder' }, { name: item.name }),
+        item.name
       ),
     }));
 
@@ -1737,8 +2012,11 @@ const ConfigForm = (props) => {
                       resultDataRef={resultDataRef}
                       prologueRef={prologueRef}
                       setModelName={setModelName}
+                      onClose={() => setModelPopoverOpen(false)}
                     />
                   }
+                  open={modelPopoverOpen}
+                  onOpenChange={setModelPopoverOpen}
                   trigger={!isReadOnly ? ['click'] : []}
                   placement="bottomRight"
                   arrow={false}
@@ -2053,7 +2331,7 @@ const ConfigForm = (props) => {
               )}
 
               {/* 配置工具 */}
-              {employeeType !== '006' && (
+              {employeeType !== '006' && employeeType !== '005' && (
                 <div className={styles.skillsSection}>
                   <div className={styles.sectionHeader}>
                     <span className={styles.sectionTitle}>
@@ -2143,6 +2421,91 @@ const ConfigForm = (props) => {
                 </div>
               )}
 
+              {/* 配置本体 */}
+              <div className={styles.skillsSection}>
+                <div className={styles.sectionHeader}>
+                  <span className={styles.sectionTitle}>
+                    {intl.formatMessage({
+                      id: 'employeeDetail.configureOntology',
+                    })}
+                  </span>
+                  {onOpenOntologyDrawer && (
+                    <Button
+                      type="link"
+                      size="small"
+                      icon={<PlusOutlined />}
+                      onClick={onOpenOntologyDrawer}
+                      disabled={isReadOnly}
+                    >
+                      {intl.formatMessage({ id: 'employeeDetail.ontology.addOntology' })}
+                    </Button>
+                  )}
+                </div>
+                <Card
+                  className={classnames(styles.configCard, styles.ontologyConfigCard, {
+                    [styles.ontologyEmptyCard]: !ontologySummary.hasBinding,
+                  })}
+                >
+                  <div className={styles.ontologyConfigHeader}>
+                    <div className={styles.ontologyIconBox}>
+                      <AntdIcon type="icon-a-Application-oneyingyong3" />
+                    </div>
+                    <div className={styles.ontologyConfigMain}>
+                      <div className={styles.ontologyConfigTitle}>
+                        {ontologySummary.hasBinding
+                          ? intl.formatMessage(
+                              { id: 'employeeDetail.ontology.boundSummary' },
+                              {
+                                viewCount: ontologySummary.totals.views,
+                                objectCount: ontologySummary.totals.objects,
+                              }
+                            )
+                          : ontologySummary.isCleared
+                          ? intl.formatMessage({ id: 'employeeDetail.ontology.clearedTitle' })
+                          : intl.formatMessage({ id: 'employeeDetail.ontology.emptyTitle' })}
+                        {ontologySummary.hasPending && (
+                          <Tag className={styles.ontologyStatusTag} color="orange">
+                            {intl.formatMessage({ id: 'employeeDetail.ontology.pendingSave' })}
+                          </Tag>
+                        )}
+                      </div>
+                      <div className={styles.ontologyConfigDesc}>
+                        {ontologySummary.hasBinding
+                          ? intl.formatMessage({ id: 'employeeDetail.ontology.boundTip' })
+                          : ontologySummary.isCleared
+                          ? intl.formatMessage({ id: 'employeeDetail.ontology.clearedDesc' })
+                          : intl.formatMessage({ id: 'employeeDetail.ontology.emptyDesc' })}
+                      </div>
+                      <Space size={6} wrap className={styles.ontologyTypeTags}>
+                        <Tag>{intl.formatMessage({ id: 'employeeDetail.ontology.view' })}</Tag>
+                        <Tag>{intl.formatMessage({ id: 'employeeDetail.ontology.object' })}</Tag>
+                      </Space>
+                    </div>
+                  </div>
+                  {ontologySummary.hasBinding && (
+                    <div className={styles.ontologyPreviewList}>
+                      {ontologySummary.resources.slice(0, 3).map((resource) => (
+                        <Tooltip
+                          key={resource.key}
+                          title={`${resource.resourceName}${
+                            resource.resourceCode ? `（${resource.resourceCode}）` : ''
+                          }`}
+                        >
+                          <Tag className={styles.ontologyResourcePreviewTag}>
+                            <span>{resource.resourceName}</span>
+                          </Tag>
+                        </Tooltip>
+                      ))}
+                      {ontologySummary.resources.length > 3 && (
+                        <Tag className={styles.ontologyResourcePreviewMore}>
+                          +{ontologySummary.resources.length - 3}
+                        </Tag>
+                      )}
+                    </div>
+                  )}
+                </Card>
+              </div>
+
               {/* 配置技能 */}
               <div className={styles.skillsSection}>
                 <div className={styles.sectionHeader}>
@@ -2208,6 +2571,7 @@ const ConfigForm = (props) => {
                         size="small"
                         disabled={isReadOnly}
                         onClick={() => {
+                          setRobotEditingIndex(null);
                           setRobotItem({});
                           setRobotModalOpen(true);
                         }}
@@ -2216,25 +2580,31 @@ const ConfigForm = (props) => {
                       </Button>
                     )}
                   </div>
-                  {robotConfigs.map((item) => {
+                  {robotConfigs.map((item, index) => {
+                    const robotConfigKey = getRobotConfigKey(item);
+                    const channelLabel = getRobotChannelLabel(item.channel);
                     return (
-                      <Card key={item.clientId} className={classnames(styles.configCard, styles.skillCard)}>
+                      <Card
+                        key={`${robotConfigKey || 'robot'}-${index}`}
+                        className={classnames(styles.configCard, styles.skillCard)}
+                      >
                         <div className={classnames(styles.skillContent, 'ub gap12 ub-ac')}>
-                          <DingtalkCircleFilled className={styles.fontSize32PrimaryColor} />
+                          {renderRobotChannelIcon(item)}
                           <div className={styles.skillInfo}>
                             <div className={styles.skillHeader}>
                               <span className={styles.skillName}>
-                                {intl.formatMessage({ id: 'digitalEmployeeMgr.robotName' })}
+                                {channelLabel} {intl.formatMessage({ id: 'digitalEmployeeMgr.robotName' })}
                               </span>
                             </div>
                             <div className={classnames(styles.skillDescription, styles.textTertiaryColor)}>
-                              clientId: <span>{item.clientId}</span>
+                              <span>{getRobotConfigIdentityText(item)}</span>
                             </div>
                           </div>
                           <div className={classnames(styles.skillActions, styles.marginLeftAuto)}>
                             {isReadOnly ? (
                               <EyeOutlined
                                 onClick={() => {
+                                  setRobotEditingIndex(index);
                                   setRobotItem(item);
                                   setRobotModalOpen(true);
                                 }}
@@ -2243,6 +2613,7 @@ const ConfigForm = (props) => {
                               <Space>
                                 <FormOutlined
                                   onClick={() => {
+                                    setRobotEditingIndex(index);
                                     setRobotItem(item);
                                     setRobotModalOpen(true);
                                   }}
@@ -2250,7 +2621,9 @@ const ConfigForm = (props) => {
                                 <AntdIcon
                                   type="icon-a-Deleteshanchu"
                                   onClick={() => {
-                                    setRobotConfigs(robotConfigs.filter((it) => it.clientId !== item.clientId));
+                                    setRobotConfigs((prev) =>
+                                      prev.filter((it, currentIndex) => currentIndex !== index)
+                                    );
                                   }}
                                 />
                               </Space>
@@ -2878,7 +3251,7 @@ const ConfigForm = (props) => {
       />
       <RobotModal
         open={robotModalOpen}
-        setOpen={setRobotModalOpen}
+        setOpen={handleRobotModalOpenChange}
         onOk={handleRobotModalOk}
         robotChannelLabelMap={robotChannelLabelMap}
         item={robotItem}

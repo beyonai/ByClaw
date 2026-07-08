@@ -29,14 +29,18 @@ import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbDirectoryDelete;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbDirectoryUpdate;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileDownload;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileImport;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileRead;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileToMarkdownIndex;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeSearch;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeCreate;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeDelete;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeUpdate;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileDelete;
 import com.iwhalecloud.byai.common.feign.response.PythonBuildResponse;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbFileReadResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbImportResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeBaseInfo;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeSearchResult;
 import com.iwhalecloud.byai.common.jwt.JwtService;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
@@ -246,6 +250,30 @@ public class FeignPythonBuildService {
     public PythonBuildResponse<Void> deleteKnowledgeItem(KbFileDelete temDelete) {
         return post(KnowledgeServiceOperation.DELETE_FILE, temDelete, new TypeReference<PythonBuildResponse<Void>>() {
         });
+    }
+
+    /**
+     * 读取知识库文件 Markdown 内容。
+     *
+     * @param kbFileRead 读取条件
+     * @return 文件内容
+     */
+    public PythonBuildResponse<KbFileReadResult> readFile(KbFileRead kbFileRead) {
+        return post(KnowledgeServiceOperation.READ_FILE, kbFileRead,
+            new TypeReference<PythonBuildResponse<KbFileReadResult>>() {
+            });
+    }
+
+    /**
+     * 执行知识库 chunk 检索。
+     *
+     * @param kbKnowledgeSearch 检索条件
+     * @return 检索结果
+     */
+    public PythonBuildResponse<KnowledgeSearchResult> searchKnowledgeItems(KbKnowledgeSearch kbKnowledgeSearch) {
+        return post(KnowledgeServiceOperation.KNOWLEDGE_SEARCH, kbKnowledgeSearch,
+            new TypeReference<PythonBuildResponse<KnowledgeSearchResult>>() {
+            });
     }
 
     /**

@@ -220,6 +220,17 @@ public class RouteService {
                     throw new BdpRuntimeException("Gateway 响应超时");
                 }
 
+                // 用户停止会话：stopChat 向队列投递的停止哨兵。退出事件循环，
+                // 由 execute() 继续调用 storeMessage/afterProcess 将已堆积内容按正常完成落库。
+                if (ChatProcessContext.STOP_SENTINEL_EVENT.equals(dataJson.getString("event_type"))) {
+                    if (ctx.messageContext != null) {
+                        ctx.messageContext.setComplete(true);
+                    }
+                    log.info("收到停止哨兵，退出事件循环并落库已堆积消息, sessionId: {}", sessionId);
+                    chatStreamRuntimeCoordinator.stopIfStarted(sessionId, runtimeStarted);
+                    break;
+                }
+
                 String eventType = dataJson.getString("event_type");
 
                 JSONObject metadata = dataJson.getJSONObject("metadata");
@@ -279,7 +290,7 @@ public class RouteService {
     /**
      * 替换内容中的资源占位符
      * 将 {{resourceType_resourceId}} 格式替换为对应的资源名称
-     * 如果资源类型为 DIG_EMPLOYEE，则在名称前添加 @ 符号
+     * 如果资源类型为 DIG_EMPLOYEE，则在名称前添加 @ 符号，并在替换内容后添加空格
      *
      * @param content 原始内容
      * @param resourceList 资源列表
@@ -301,6 +312,8 @@ public class RouteService {
                 // 构建ID格式：resourceType_resourceId，如 DIG_EMPLOYEE_10812779
                 String resourceKey = resource.getResourceType().getCode() + "_" + resource.getResourceId();
                 resourceMap.put(resourceKey, resource);
+            } else if (StringUtils.isNotBlank(resource.getId())) {
+                resourceMap.put(resource.getId(), resource);
             }
         }
 
@@ -310,13 +323,21 @@ public class RouteService {
             String replacement = resolveResourcePlaceholder(placeholder, resourceMap);
 
             if (replacement != null) {
-                matcher.appendReplacement(result, java.util.regex.Matcher.quoteReplacement(replacement));
+                replacement = prefixResourcePlaceholder(replacement);
+                matcher.appendReplacement(result, java.util.regex.Matcher.quoteReplacement(replacement + " "));
             }
             // 如果找不到对应的资源，保留原占位符
         }
         matcher.appendTail(result);
 
         return result.toString();
+    }
+
+    private String prefixResourcePlaceholder(String replacement) {
+        if (replacement.startsWith("@")) {
+            return replacement;
+        }
+        return "#" + replacement;
     }
 
     private String resolveResourcePlaceholder(String placeholder, Map<String, ResourceVo> resourceMap) {
@@ -457,6 +478,8 @@ public class RouteService {
 
         for (int round = 1; round <= SANDBOX_STARTUP_WAIT_ROUNDS; round++) {
             if (sandboxService.waitWorkerReadySync(targetAgentType, WORKER_READY_TIMEOUT_MS)) {
+                sendSandboxProgressMessage(ctx, SseResponseEventEnum.reasoningLogEnd,
+                    I18nUtil.get("sandbox.launch.progress.ready"));
                 return;
             }
             if (round < SANDBOX_STARTUP_WAIT_ROUNDS) {

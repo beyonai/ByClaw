@@ -57,6 +57,10 @@ import org.springframework.stereotype.Service;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.state.application.service.session.SessionApplicationService;
+import com.iwhalecloud.byai.state.domain.session.service.SessionExtService;
+import com.iwhalecloud.byai.state.domain.session.service.SessionService;
+import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
+import com.iwhalecloud.byai.manager.entity.session.ByaiSessionExt;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
 import com.iwhalecloud.byai.state.domain.chat.dto.ContentVo;
 import com.iwhalecloud.byai.state.domain.chat.dto.ExternalMessageVo;
@@ -115,6 +119,12 @@ public class MessageService {
 
     @Autowired
     private ByaiMessageRelObjService byaiMessageRelObjService;
+
+    @Autowired
+    private SessionExtService sessionExtService;
+
+    @Autowired
+    private SessionService sessionService;
 
     /**
      * 转发历史记录
@@ -982,5 +992,20 @@ public class MessageService {
         return getChatHistory(messageQo.getMessageIds());
     }
 
+    /**
+     * 根据 troubleshoot_message_id 查询关联会话。 先查询 byai_session_ext 中 ext_param_code="troubleshoot_message_id" 且
+     * ext_param_value=messageId 的记录，若存在则按 sessionId 关联查询 byai_session 数据；不存在时返回 null。 当扩展记录大于一条时，只取第一条。
+     *
+     * @param messageId troubleshoot 消息ID
+     * @return 关联的会话信息，不存在时返回 null
+     */
+    public ByaiSession qryTroubleshootSession(String messageId) {
+        List<ByaiSessionExt> sessionExts = sessionExtService.selectListByParamCodeAndValue("troubleshoot_message_id",
+            messageId);
+        if (CollectionUtils.isEmpty(sessionExts)) {
+            return null;
+        }
+        return sessionService.findById(sessionExts.get(0).getSessionId());
+    }
 
 }

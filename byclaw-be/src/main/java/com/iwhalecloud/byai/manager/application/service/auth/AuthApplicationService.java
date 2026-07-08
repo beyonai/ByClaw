@@ -347,6 +347,7 @@ public class AuthApplicationService {
         SsResource ssResource = getRequiredResource(qo.getResourceId());
 
         ResourceMemberQueryResultVo result = new ResourceMemberQueryResultVo();
+        result.setResourceName(ssResource.getResourceName());
         result.setResourceBizType(ssResource.getResourceBizType());
         result.setExtInfo(buildResourceExtInfo(ssResource));
 
@@ -1717,6 +1718,38 @@ public class AuthApplicationService {
     }
 
     /**
+     * 为指定用户追加一条资源授权，不覆盖该资源已有授权名单。
+     */
+    public void ensureUserDirectPrivilege(SsResource ssResource, Long userId, String grantType) {
+        if (ssResource == null || ssResource.getResourceId() == null || userId == null
+            || StringUtils.isBlank(grantType)) {
+            return;
+        }
+        List<String> sameFamilyGrantTypes = resolveSameFamilyGrantTypes(grantType);
+        if (CollectionUtils.isNotEmpty(sameFamilyGrantTypes)
+            && hasSameDimensionPermissionFamily(ssResource.getResourceBizType(), ssResource.getResourceId(),
+                GrantToObjType.USER, userId, sameFamilyGrantTypes)) {
+            return;
+        }
+
+        PrivilegeGrant privilegeGrant = new PrivilegeGrant();
+        privilegeGrant.setGrantType(grantType);
+        privilegeGrant.setGrantObjId(ssResource.getResourceId());
+        privilegeGrant.setGrantObjType(ssResource.getResourceBizType());
+        privilegeGrant.setGrantToObjType(GrantToObjType.USER);
+        privilegeGrant.setGrantToObjId(userId);
+        privilegeGrant.setOperType(OperType.READ);
+        privilegeGrant.setGrantToType(Color.RED);
+        privilegeGrant.setAllowUnsubscribe(Constants.NOT_ALLOW_UNSUBSCRIBE);
+        privilegeGrant.setStatusCd("A");
+        privilegeGrantService.save(privilegeGrant);
+
+        String redisKey = buildPrivilegeGrantKey(privilegeGrant);
+        String redisValue = buildPrivilegeGrantValue(privilegeGrant);
+        writeRedis(grantType, redisKey, redisValue);
+    }
+
+    /**
      * 判断创建人在同一授权维度下是否已经持有指定权限族。
      */
     private boolean hasCreatorSameDimensionGrant(SsResource ssResource, Long creatorUserId, List<String> grantTypes) {
@@ -2268,6 +2301,7 @@ public class AuthApplicationService {
                 blackMap.putIfAbsent(grantTargetKey, authDTO);
             }
         }
+        appendCreatorAuthDetail(authDetailQo, redMap);
 
         // 返回授权信息
         Map<String, Object> resultMap = new HashMap<>(5);
@@ -2275,6 +2309,33 @@ public class AuthApplicationService {
         resultMap.put("redList", new ArrayList<>(redMap.values()));
         resultMap.put("blackList", new ArrayList<>(blackMap.values()));
         return ResponseUtil.successResponse(I18nUtil.get("auth.detail.query.success"), resultMap);
+    }
+
+    /**
+     * 资源创建人天然拥有资源管理/使用语义。老授权抽屉只查显式授权记录，
+     * 这里补齐展示口径，避免历史资源或未落默认授权的资源显示为空。
+     */
+    private void appendCreatorAuthDetail(AuthDetailQo authDetailQo, Map<String, AuthDTO> redMap) {
+        if (authDetailQo == null || redMap == null || !isCreatorDefaultPrivilegeGrantType(authDetailQo.getGrantType())) {
+            return;
+        }
+        SsResource ssResource = ssResourceService.findById(authDetailQo.getGrantObjId());
+        if (ssResource == null || ssResource.getCreateBy() == null) {
+            return;
+        }
+        AuthDTO creatorAuth = new AuthDTO();
+        creatorAuth.setGrantToObjId(ssResource.getCreateBy());
+        creatorAuth.setGrantToObjType(GrantToObjType.USER);
+        creatorAuth.setGrantToObjName(getName(GrantToObjType.USER, ssResource.getCreateBy()));
+        creatorAuth.setGrantType(authDetailQo.getGrantType());
+        String creatorKey = buildGrantTargetKey(Color.RED, GrantToObjType.USER, ssResource.getCreateBy());
+        redMap.putIfAbsent(creatorKey, creatorAuth);
+    }
+
+    private boolean isCreatorDefaultPrivilegeGrantType(String grantType) {
+        return GrantType.ALLOW_MANAGE.equals(grantType)
+            || GrantType.FORCE_USE.equals(grantType)
+            || GrantType.AVAILABLE_USE.equals(grantType);
     }
 
     private String buildGrantTargetKey(String grantToType, String grantToObjType, Long grantToObjId) {
@@ -2668,6 +2729,195 @@ public class AuthApplicationService {
 
     public boolean hasPriv(Long resourceId) {
         return privilegeGrantService.hasForePriv(resourceId);
+    }
+
+    /**
+     * 批量查询当前登录用户对资源的操作权限。用于列表场景，避免每条资源重复查询资源表与授权红黑名单。
+     */
+    public Map<Long, ResourceOperationPermissionsVo> queryResourceOperationPermissionsBatch(Collection<Long> resourceIds) {
+        if (CollectionUtils.isEmpty(resourceIds)) {
+            return Collections.emptyMap();
+        }
+        List<Long> distinctResourceIds = resourceIds.stream()
+            .filter(Objects::nonNull)
+            .distinct()
+            .collect(Collectors.toList());
+        if (CollectionUtils.isEmpty(distinctResourceIds)) {
+            return Collections.emptyMap();
+        }
+
+        List<SsResource> resources = ssResourceMapper.selectBatchIds(distinctResourceIds);
+        if (CollectionUtils.isEmpty(resources)) {
+            return Collections.emptyMap();
+        }
+
+        Set<Long> existingResourceIds = resources.stream()
+            .map(SsResource::getResourceId)
+            .filter(Objects::nonNull)
+            .collect(Collectors.toCollection(LinkedHashSet::new));
+        Set<String> resourceBizTypes = resources.stream()
+            .map(SsResource::getResourceBizType)
+            .filter(StringUtils::isNotBlank)
+            .collect(Collectors.toSet());
+        Long currentUserId = CurrentUserHolder.getCurrentUserId();
+
+        Set<Long> managePrivilegeIds =
+            queryCurrentUserAllowManageResourceIds(existingResourceIds, resourceBizTypes, currentUserId);
+        Set<Long> useBlacklistedIds = queryCurrentUserUseBlacklistedResourceIds(existingResourceIds, resourceBizTypes);
+        Set<Long> usePermittedIds = queryCurrentUserUsePermittedResourceIds(existingResourceIds, resourceBizTypes);
+        Set<Long> pendingUseApplyIds = queryCurrentUserPendingUseApplyResourceIds(existingResourceIds, resourceBizTypes);
+        Map<Long, Boolean> organizationManageCache = new HashMap<>();
+
+        Map<Long, ResourceOperationPermissionsVo> result = new LinkedHashMap<>();
+        resources.forEach(resource -> {
+            if (resource == null || resource.getResourceId() == null) {
+                return;
+            }
+            result.put(resource.getResourceId(), buildResourceOperationPermissions(resource, currentUserId,
+                managePrivilegeIds, useBlacklistedIds, usePermittedIds, pendingUseApplyIds, organizationManageCache));
+        });
+        return result;
+    }
+
+    private ResourceOperationPermissionsVo buildResourceOperationPermissions(SsResource ssResource,
+        Long currentUserId, Set<Long> managePrivilegeIds, Set<Long> useBlacklistedIds, Set<Long> usePermittedIds,
+        Set<Long> pendingUseApplyIds, Map<Long, Boolean> organizationManageCache) {
+        ResourceOperationPermissionsVo vo = new ResourceOperationPermissionsVo();
+        Long resourceId = ssResource.getResourceId();
+        vo.setResourceId(resourceId);
+        vo.setOwnerType(ssResource.getOwnerType());
+        vo.setResourceBizType(ssResource.getResourceBizType());
+
+        boolean isResourceRemoved = Objects.equals(ssResource.getResourceStatus(), ResourceStatus.REMOVED.getNum());
+        boolean canManage =
+            hasResourceMemberSettingPermission(ssResource, currentUserId, managePrivilegeIds, organizationManageCache);
+        boolean hasUsePermission =
+            hasResourceUsePermission(ssResource, currentUserId, useBlacklistedIds, usePermittedIds);
+        vo.setHasManagePermission(canManage);
+        vo.setHasUsePermission(hasUsePermission);
+        vo.setCanViewDetail(!isResourceRemoved && (canManage || hasUsePermission));
+
+        if (isResourceRemoved) {
+            vo.setCanEdit(false);
+            vo.setCanManageAuth(false);
+            vo.setCanUseAuth(false);
+            vo.setCanDelete(false);
+            vo.setCanAuditUse(false);
+            vo.setCanApplyUse(false);
+            vo.setCanSetDefault(false);
+            vo.setCanRestore(canManage);
+            return vo;
+        }
+
+        boolean canSetUse = canManage || isCurrentUserBoundDefaultPersonalResource(ssResource);
+        boolean isDefaultResource = isDefaultPersonalResource(ssResource);
+        boolean isDefaultSuperAssistantResource = isDefaultSuperAssistantResource(ssResource);
+        boolean isBoundDefaultDigEmployee = isCurrentUserBoundDefaultDigitalEmployeeResource(ssResource);
+        boolean isDigitalEmployee = ResourceBizTypeEnum.DIG_EMPLOYEE.name().equals(ssResource.getResourceBizType());
+        boolean isPersonalAssistantResource = isPersonalAssistantResource(ssResource);
+        boolean isPersonalResourceUseApplyUnsupported = isPersonalResourceUseApplyUnsupported(ssResource);
+        boolean isWhaleAgentExternalKnowledgeOrToolResource = isWhaleAgentExternalKnowledgeOrToolResource(ssResource);
+        boolean isInnerSkillResource = isInnerSkillResource(ssResource);
+
+        boolean canEdit = isDigitalEmployee
+            ? (canManage || isBoundDefaultDigEmployee)
+            : (canManage && !isDefaultResource);
+        vo.setCanEdit(canEdit && !isWhaleAgentExternalKnowledgeOrToolResource && !isInnerSkillResource);
+        vo.setCanManageAuth(canManage && !isDefaultResource && !isPersonalAssistantResource);
+        vo.setCanUseAuth(canSetUse);
+        vo.setCanDelete(canManage && !isDefaultResource && !isDefaultSuperAssistantResource
+            && !isWhaleAgentExternalKnowledgeOrToolResource && !isInnerSkillResource);
+        vo.setCanAuditUse(canSetUse && !isPersonalResourceUseApplyUnsupported);
+        vo.setCanApplyUse(!isPersonalResourceUseApplyUnsupported
+            && checkCanApplyUse(ssResource, currentUserId, useBlacklistedIds, usePermittedIds, pendingUseApplyIds));
+        vo.setCanSetDefault(false);
+        return vo;
+    }
+
+    private boolean hasResourceMemberSettingPermission(SsResource ssResource, Long currentUserId,
+        Set<Long> managePrivilegeIds, Map<Long, Boolean> organizationManageCache) {
+        if (ssResource == null) {
+            return false;
+        }
+        if (CurrentUserHolder.isPlatformManager()) {
+            return true;
+        }
+        if (currentUserId != null && currentUserId.equals(ssResource.getCreateBy())) {
+            return true;
+        }
+        if (ssResource.getManOrgId() != null) {
+            Boolean isOrganizationManager = organizationManageCache.computeIfAbsent(ssResource.getManOrgId(),
+                organizationService::isOrganizationManManager);
+            if (Boolean.TRUE.equals(isOrganizationManager)) {
+                return true;
+            }
+        }
+        return managePrivilegeIds != null && managePrivilegeIds.contains(ssResource.getResourceId());
+    }
+
+    private boolean hasResourceUsePermission(SsResource ssResource, Long currentUserId, Set<Long> useBlacklistedIds,
+        Set<Long> usePermittedIds) {
+        if (ssResource == null || ssResource.getResourceId() == null
+            || StringUtils.isBlank(ssResource.getResourceBizType())
+            || Objects.equals(ssResource.getResourceStatus(), ResourceStatus.REMOVED.getNum())
+            || currentUserId == null) {
+            return false;
+        }
+        Long resourceId = ssResource.getResourceId();
+        if (currentUserId.equals(ssResource.getCreateBy()) || isCurrentUserBoundDefaultPersonalResource(ssResource)) {
+            return true;
+        }
+        if (useBlacklistedIds != null && useBlacklistedIds.contains(resourceId)) {
+            return false;
+        }
+        return usePermittedIds != null && usePermittedIds.contains(resourceId);
+    }
+
+    private Set<Long> queryCurrentUserAllowManageResourceIds(Collection<Long> resourceIds,
+        Collection<String> resourceBizTypes, Long currentUserId) {
+        if (CollectionUtils.isEmpty(resourceIds) || CollectionUtils.isEmpty(resourceBizTypes) || currentUserId == null) {
+            return Collections.emptySet();
+        }
+        List<PrivilegeGrant> privilegeGrants = listAuthPrivilegeGrant(GrantType.ALLOW_MANAGE,
+            new ArrayList<>(resourceBizTypes), GrantToObjType.USER, currentUserId, null);
+        if (CollectionUtils.isEmpty(privilegeGrants)) {
+            return Collections.emptySet();
+        }
+        Set<Long> resourceIdSet = new HashSet<>(resourceIds);
+        Map<Long, List<PrivilegeGrant>> grantsByResourceId = privilegeGrants.stream()
+            .filter(item -> item.getGrantObjId() != null && resourceIdSet.contains(item.getGrantObjId()))
+            .collect(Collectors.groupingBy(PrivilegeGrant::getGrantObjId));
+        return grantsByResourceId.entrySet().stream()
+            .filter(entry -> {
+                boolean hasRedGrant = entry.getValue().stream().anyMatch(item ->
+                    Color.RED.equalsIgnoreCase(item.getGrantToType()) && "A".equalsIgnoreCase(item.getStatusCd()));
+                boolean hasBlackGrant = entry.getValue().stream().anyMatch(item ->
+                    Color.BLACK.equalsIgnoreCase(item.getGrantToType()) && "A".equalsIgnoreCase(item.getStatusCd()));
+                return hasRedGrant && !hasBlackGrant;
+            })
+            .map(Map.Entry::getKey)
+            .collect(Collectors.toSet());
+    }
+
+    private boolean checkCanApplyUse(SsResource ssResource, Long currentUserId, Set<Long> useBlacklistedIds,
+        Set<Long> usePermittedIds, Set<Long> pendingUseApplyIds) {
+        if (ssResource == null || currentUserId == null) {
+            return false;
+        }
+        if (ssResource.getPublishPortal() != null && ssResource.getPublishPortal() == 0) {
+            return false;
+        }
+        if (currentUserId.equals(ssResource.getCreateBy()) || ssResource.getResourceId() == null) {
+            return false;
+        }
+        Long resourceId = ssResource.getResourceId();
+        if (useBlacklistedIds != null && useBlacklistedIds.contains(resourceId)) {
+            return false;
+        }
+        if (usePermittedIds != null && usePermittedIds.contains(resourceId)) {
+            return false;
+        }
+        return pendingUseApplyIds == null || !pendingUseApplyIds.contains(resourceId);
     }
 
     /**

@@ -1,28 +1,14 @@
 .popoverConfig {
   width: 360px;
 
-  .leftItem {
-    display: flex;
-    flex-direction: row;
-    margin-bottom: 8px;
-  }
-
-  .rightItem {
-    display: flex;
-    flex-direction: row;
-    justify-content: flex-end;
-    width: 100%;
-  }
-
   .headerTitle {
     display: flex;
     align-content: center;
     align-items: center;
+    margin-bottom: 12px;
     color: #1f2533;
     font-weight: 500;
     font-size: 14px;
-    font-family: 'PingFang SC';
-    font-style: normal;
 
     &::before {
       display: inline-block;
@@ -32,5 +18,44 @@
       background-color: #165dff;
       content: ' ';
     }
+  }
+
+  .modelList {
+    max-height: 300px;
+    overflow-y: auto;
+  }
+
+  .modelItem {
+    padding: 8px 4px;
+    border-bottom: 1px solid #f0f0f0;
+
+    &:last-child {
+      border-bottom: none;
+    }
+  }
+
+  .modelName {
+    font-weight: 500;
+    font-size: 13px;
+  }
+
+  .modelCode {
+    margin-left: 8px;
+    color: #8c8c8c;
+    font-size: 12px;
+  }
+
+  .emptyTip {
+    padding: 16px 0;
+    color: #8c8c8c;
+    font-size: 13px;
+    text-align: center;
+  }
+
+  .footer {
+    display: flex;
+    justify-content: flex-end;
+    padding-top: 12px;
+    border-top: 1px solid #f0f0f0;
   }
 }

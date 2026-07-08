@@ -5,6 +5,8 @@ import lombok.Data;
 
 @Data
 public class ResourceVo {
+    // 由前端拼接的，resourceType_resourceId 格式，用于唯一标识资源
+    private String id;
 
     private String resourceId;
 
@@ -16,4 +18,10 @@ public class ResourceVo {
     private AgentMetaEnum resourceType;
 
     private String resourceCode;
+
+    /**
+     * 不同 resourceType 的补充数据（JSON 字符串）。
+     * 例如 SKILL 类型存储 skillType、skillUrl、version 等扩展信息。
+     */
+    private String extData;
 }

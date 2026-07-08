@@ -298,7 +298,7 @@ wheels = [
 
 [[package]]
 name = "by-qa"
-version = "0.1.15"
+version = "0.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -306,9 +306,9 @@ dependencies = [
     { name = "pydantic-settings" },
     { name = "python-dotenv" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/69/02/91a972e89ce6b119f799166a36c63f6c769dd76a6ab92e6f5d2b1577ceec/by_qa-0.1.15.tar.gz", hash = "sha256:9f36a13b99d5ad8bf09f34638b318d4d015781eec922cf6ec3a2e6dc1a343b00", size = 352141, upload-time = "2026-06-18T07:37:41.193Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/72/89/9fc9f65ae368c0154c30ff983601bc066dbeee13c324aa23bcd971c30daa/by_qa-0.2.0.tar.gz", hash = "sha256:a6b4bf709710042929abc9804956084487c473f2ac9a0e6e6c08cdb69ab1e3e3", size = 353566, upload-time = "2026-07-02T01:47:20.322Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f9/fd/d624f15354d1417a4570087951cbcc44faabaf4fcfc266e30d34a6a46607/by_qa-0.1.15-py3-none-any.whl", hash = "sha256:279c81fda64d3d58448f9ce90d425b2d26e0c14144ef5f6781342aac3341a4b3", size = 192721, upload-time = "2026-06-18T07:37:39.783Z" },
+    { url = "https://files.pythonhosted.org/packages/0a/5c/3fc9b14a15b2da38938f03c1d27bc3e7eee1fe1770fc4d051c37d4e2b5ef/by_qa-0.2.0-py3-none-any.whl", hash = "sha256:d4129e0c509de22ea34ae1f3a0fc30a8c3d44f0952252c56cd17c2b05593511b", size = 192321, upload-time = "2026-07-02T01:47:18.741Z" },
 ]
 
 [package.optional-dependencies]
@@ -336,6 +336,7 @@ all = [
     { name = "python-pptx" },
     { name = "urllib3" },
     { name = "uvicorn", extra = ["standard"] },
+    { name = "xlrd" },
 ]
 
 [[package]]
@@ -361,7 +362,7 @@ requires-dist = [
     { name = "by-framework", specifier = "==0.2.2.dev5" },
     { name = "by-framework-langgraph", specifier = "==0.0.3.dev2" },
     { name = "by-framework-trace-langfuse", specifier = "==0.0.3.dev2" },
-    { name = "by-qa", extras = ["all"], specifier = "==0.1.15" },
+    { name = "by-qa", extras = ["all"], specifier = "==0.2.0" },
     { name = "langfuse", specifier = "==4.3.1" },
 ]
 
@@ -2434,6 +2435,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/79/d9/7cfd5a312760ac4dd8bf0184a6ee9e43c33e47f3dadc303032ce012b8fa3/wrapt-1.17.3-cp314-cp314t-win_amd64.whl", hash = "sha256:73d496de46cd2cdbdbcce4ae4bcdb4afb6a11234a1df9c085249d55166b95116", size = 41334, upload-time = "2025-08-12T05:53:14.178Z" },
     { url = "https://files.pythonhosted.org/packages/46/78/10ad9781128ed2f99dbc474f43283b13fea8ba58723e98844367531c18e9/wrapt-1.17.3-cp314-cp314t-win_arm64.whl", hash = "sha256:f38e60678850c42461d4202739f9bf1e3a737c7ad283638251e79cc49effb6b6", size = 38471, upload-time = "2025-08-12T05:52:57.784Z" },
     { url = "https://files.pythonhosted.org/packages/1f/f6/a933bd70f98e9cf3e08167fc5cd7aaaca49147e48411c0bd5ae701bb2194/wrapt-1.17.3-py3-none-any.whl", hash = "sha256:7171ae35d2c33d326ac19dd8facb1e82e5fd04ef8c6c0e394d7af55a55051c22", size = 23591, upload-time = "2025-08-12T05:53:20.674Z" },
+]
+
+[[package]]
+name = "xlrd"
+version = "2.0.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/07/5a/377161c2d3538d1990d7af382c79f3b2372e880b65de21b01b1a2b78691e/xlrd-2.0.2.tar.gz", hash = "sha256:08b5e25de58f21ce71dc7db3b3b8106c1fa776f3024c54e45b45b374e89234c9", size = 100167, upload-time = "2025-06-14T08:46:39.039Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/1a/62/c8d562e7766786ba6587d09c5a8ba9f718ed3fa8af7f4553e8f91c36f302/xlrd-2.0.2-py2.py3-none-any.whl", hash = "sha256:ea762c3d29f4cca48d82df517b6d89fbce4db3107f9d78713e48cd321d5c9aa9", size = 96555, upload-time = "2025-06-14T08:46:37.766Z" },
 ]
 
 [[package]]

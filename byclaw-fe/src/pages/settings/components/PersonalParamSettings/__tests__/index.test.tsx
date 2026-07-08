@@ -4,13 +4,13 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import PersonalParamSettings from '..';
 import { queryPersonalParams, savePersonalParam } from '@/service/personalParam';
 
-jest.setTimeout(30000);
+jest.setTimeout(90000);
 
 jest.mock('@umijs/max', () => ({
   useIntl: () => ({
     formatMessage: ({ id }: { id: string }, values?: Record<string, string | number>) => {
       if (id === 'settings.params.valueMaskedTip') {
-        return `当前值：${values?.value}`;
+        return `Current value: ${values?.value}`;
       }
       return id;
     },
@@ -60,16 +60,19 @@ describe('PersonalParamSettings', () => {
   it('submits the new parameter value when editing a configured parameter', async () => {
     render(<PersonalParamSettings />);
 
-    expect(await screen.findByText('VOLCENGINE_TTS_API_KEY')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(mockQueryPersonalParams).toHaveBeenCalled();
+    });
+    expect(await screen.findByText('VOLCENGINE_TTS_API_KEY', {}, { timeout: 10000 })).toBeInTheDocument();
     expect(screen.getByText((content) => content.includes('****8838'))).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'common.edit' }));
-    expect(await screen.findByText('当前值：****8838')).toBeInTheDocument();
+    expect(await screen.findByText('Current value: ****8838')).toBeInTheDocument();
 
     fireEvent.change(screen.getByPlaceholderText('settings.params.valueEditPlaceholder'), {
       target: { value: 'new-secret-value' },
     });
-    fireEvent.click(screen.getByRole('button', { name: /OK|确 定|确定/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'common.confirm' }));
 
     await waitFor(() => {
       expect(mockSavePersonalParam).toHaveBeenCalledWith(

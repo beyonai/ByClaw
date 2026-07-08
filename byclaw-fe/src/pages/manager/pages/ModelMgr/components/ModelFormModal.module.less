@@ -1,4 +1,4 @@
-/* 弹窗整体高度 80vh、居中展示，内容区在弹窗内滚动（spec：编辑/调试弹窗） */
+/* Modal content is constrained and scrolls within the edit/debug dialog. */
 .modelFormModalWrap {
   :global(.@{antPrefix}-modal-content) {
     max-height: 84vh;
@@ -203,6 +203,14 @@
   line-height: 18px;
 }
 
+.sectionContentOpen {
+  display: block;
+}
+
+.sectionContentClosed {
+  display: none;
+}
+
 .subsectionTitle {
   margin: 4px 0 12px;
   color: #1d2129;
@@ -321,7 +329,12 @@
   }
 }
 
-/* 运行中 loading：后端未响应前在输出框显示 */
+.codeAreaRelative {
+  .codeArea();
+  position: relative;
+}
+
+/* Show loading over the output area while waiting for the backend response. */
 .outputLoading {
   position: absolute;
   top: 0;

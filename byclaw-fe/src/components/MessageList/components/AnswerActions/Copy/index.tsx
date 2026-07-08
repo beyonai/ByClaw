@@ -1,4 +1,4 @@
-import { message, Button } from 'antd';
+import { Button, message, Tooltip } from 'antd';
 import copy from 'copy-to-clipboard';
 // tslint:disable:ordered-imports
 import React, { useCallback, useState } from 'react';
@@ -10,7 +10,7 @@ import AntdIcon from '@/components/AntdIcon';
 import btnStyles from '@/components/MessageList/index.module.less';
 import useQryResourceList from '@/components/QueryInput/components/ResourceQuestion/useQryResourceList';
 
-function Copy({ text, richText }: { text?: string; richText?: string }) {
+function Copy({ text, richText, showText = false }: { text?: string; richText?: string; showText?: boolean }) {
   const intl = useIntl();
   const [loading, setLoading] = useState(false);
   const qryResourceList = useQryResourceList();
@@ -65,21 +65,22 @@ function Copy({ text, richText }: { text?: string; richText?: string }) {
 
   if (!text && !richText) return null;
 
+  const title = intl.formatMessage({ id: 'messageList.copyMessage' });
+
   return (
-    <Button
-      type="text"
-      size="small"
-      loading={loading}
-      icon={
-        <AntdIcon
-          title={intl.formatMessage({ id: 'common.copy' })}
-          type="icon-a-Copyfuzhi"
-          className={btnStyles.actionsBarItem}
-          style={{ fontSize: '16px' }}
-        />
-      }
-      onClick={handleCopy}
-    />
+    <Tooltip title={title}>
+      <Button
+        type="text"
+        size="small"
+        loading={loading}
+        icon={<AntdIcon type="icon-a-Copyfuzhi" className={btnStyles.copyIcon} />}
+        onClick={handleCopy}
+      >
+        {showText ? (
+          <span className={btnStyles.actionsBarText}>{intl.formatMessage({ id: 'common.copy' })}</span>
+        ) : null}
+      </Button>
+    </Tooltip>
   );
 }
 

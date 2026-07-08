@@ -23,6 +23,11 @@ public enum ChannelType {
     DINGTALK("dingtalk", "钉钉渠道"),
 
     /**
+     * 飞书渠道
+     */
+    FEISHU("feishu", "飞书渠道"),
+
+    /**
      * Web 渠道
      */
     WEB("web", "Web渠道");

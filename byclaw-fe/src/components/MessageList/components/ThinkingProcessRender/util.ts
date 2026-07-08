@@ -50,11 +50,12 @@ export const transformList = (flatList: IMessageListItem[], isStreamEnd: boolean
   let currentParent: TreeNode | null = null;
 
   const groupNodes = new Map<string, TreeNode>();
+
   sortContentType(flatList).forEach((item, messageIdx) => {
     const newNode: TreeNode = {
       messageIdx,
       ...item,
-      isCollapsed: false,
+      isCollapsed: true,
       messageLoadingStatus: 2, // 进行中 - 2(默认); 已完成 - 1
       children: [], // 显式初始化 children 为 TreeNode[] 类型
     };
@@ -130,15 +131,17 @@ export const transformList = (flatList: IMessageListItem[], isStreamEnd: boolean
       }
 
       default: {
+        let myShouldOpen = false;
+
         if (currentParent) {
           if (item?.objectType === 'function_response' && !currentParent.shouldOpen) {
             // 工具类回答主动折叠
             currentParent.isCollapsed = true;
           }
 
-          let myShouldOpen = true;
           switch (`${newNode.contentType}`) {
             case `${SSEMessageType.text}`:
+            case `${SSEMessageType.thinkText}`:
             case `${SSEMessageType.slientHandler}`:
             case `${SSEMessageType.thinkTitle}`:
             case `${SSEMessageType.thinkSubTitle}`:
@@ -159,20 +162,15 @@ export const transformList = (flatList: IMessageListItem[], isStreamEnd: boolean
               }
               break;
             }
-            default:
-              myShouldOpen = true;
+            case `${SSEMessageType.approvalForm}`: {
+              const substance = get(newNode, 'content.substance') || [];
+              const hasNotconfirmed = substance.find((item: { confirmed?: boolean }) => !item.confirmed);
+              myShouldOpen = hasNotconfirmed;
               break;
-          }
-
-          if (myShouldOpen) {
-            if (currentRoot && !currentRoot.shouldOpen) {
-              currentRoot.shouldOpen = true;
-              currentRoot.isCollapsed = false;
             }
-            if (currentParent && !currentParent.shouldOpen) {
-              currentParent.shouldOpen = true;
-              currentParent.isCollapsed = false;
-            }
+            default:
+              myShouldOpen = false;
+              break;
           }
         }
 
@@ -190,9 +188,21 @@ export const transformList = (flatList: IMessageListItem[], isStreamEnd: boolean
         if (targetParent) {
           targetParent.children = targetParent.children || [];
           targetParent.children.push(newNode);
+
+          if (myShouldOpen) {
+            if (currentRoot && !currentRoot.shouldOpen) {
+              currentRoot.shouldOpen = true;
+              currentRoot.isCollapsed = false;
+            }
+            if (targetParent && !targetParent.shouldOpen) {
+              targetParent.shouldOpen = true;
+              targetParent.isCollapsed = false;
+            }
+          }
         } else {
           result.push(newNode);
         }
+
         break;
       }
     }
@@ -210,5 +220,6 @@ export const transformList = (flatList: IMessageListItem[], isStreamEnd: boolean
   }
 
   groupNodes.clear();
+  console.log(JSON.parse(JSON.stringify(result)));
   return result;
 };

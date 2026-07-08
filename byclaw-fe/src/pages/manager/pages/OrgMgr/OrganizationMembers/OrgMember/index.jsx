@@ -23,6 +23,8 @@ import Layout from '@/pages/manager/components/ausong/Layout';
 import ResizeTable from '@/pages/manager/components/ResizeTable';
 import { getFilterParams } from '@/pages/manager/utils/managerUtils';
 import { FilterOutlined } from '@ant-design/icons';
+import { getDcSystemConfig } from '@/pages/manager/service/session';
+import TokenQuotaModal from '../../components/TokenQuotaModal';
 import styles from './index.module.less';
 
 const { confirm } = Modal;
@@ -159,10 +161,27 @@ const OrgMember = (props, ref) => {
       return m;
     }, {})
   );
+  const [tokenQuotaVisible, setTokenQuotaVisible] = useState(false);
+  const [tokenQuotaRecord, setTokenQuotaRecord] = useState(null);
+  const [isCommercial, setIsCommercial] = useState(false);
+
+  useEffect(() => {
+    getDcSystemConfig({ paramCode: 'BYAI_BRAND_VERSION' })
+      .then((res) => {
+        const val = res?.paramValue || res?.data?.paramValue;
+        setIsCommercial(val === 'commercial');
+      })
+      .catch(() => setIsCommercial(false));
+  }, []);
 
   renderCountRef.current += 1;
 
   const filterRef = useRef(filter);
+  const canOperateMember = (record) => {
+    const isPlatformManager = userInfo.userType === 'PLAT_MAN' || userInfo.userType === 'PLAT_DEVOPS';
+    const managedOrgIds = (userInfo.orgIds || []).map((orgId) => `${orgId}`);
+    return canEdit || isPlatformManager || managedOrgIds.includes(`${record?.orgId}`);
+  };
 
   const getUsersByOrgId = (params) => {
     const requestId = ++requestSeqRef.current;
@@ -315,9 +334,7 @@ const OrgMember = (props, ref) => {
       width: 180,
       render: (_, record) => (
         <>
-          {userInfo.userType === 'PLAT_MAN' ||
-          userInfo.userType === 'PLAT_DEVOPS' ||
-          (userInfo.orgIds && userInfo.orgIds.includes(record.orgId)) ? (
+          {canOperateMember(record) ? (
             <div>
               <Button
                 type="link"
@@ -425,6 +442,14 @@ const OrgMember = (props, ref) => {
                     //   key: '3',
                     //   label: '设置角色',
                     // },
+                    ...(!isCommercial
+                      ? [
+                          {
+                            key: '4',
+                            label: intl.formatMessage({ id: 'orgMgr.members.assignTokenQuota' }),
+                          },
+                        ]
+                      : []),
                     {
                       key: '3',
                       label: (
@@ -439,6 +464,11 @@ const OrgMember = (props, ref) => {
                   onClick: ({ key }) => {
                     setInfo(record);
                     if (key === '2') {
+                      return;
+                    }
+                    if (key === '4') {
+                      setTokenQuotaRecord(record);
+                      setTokenQuotaVisible(true);
                       return;
                     }
                     if (key === '3') {
@@ -621,6 +651,12 @@ const OrgMember = (props, ref) => {
           <div />
         </Layout>
       </div>
+      <TokenQuotaModal
+        visible={tokenQuotaVisible}
+        record={tokenQuotaRecord}
+        onCancel={() => setTokenQuotaVisible(false)}
+        onOk={() => setTokenQuotaVisible(false)}
+      />
     </>
   );
 };

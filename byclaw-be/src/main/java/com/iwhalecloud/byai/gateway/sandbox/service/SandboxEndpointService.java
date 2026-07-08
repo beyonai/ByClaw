@@ -30,19 +30,18 @@ public class SandboxEndpointService {
   }
 
   public String resolveSandboxHttpUrl(String userCode, Long resourceId, String routePath, Map<String, ?> searchQuery) {
-    // SandboxLaunchRouting routing = sandboxLaunchContextFactory.resolveRouting(resourceId, userCode);
-    // SsSandboxRecord existingRecord = sandboxRecordMapper.selectActiveByUserAndResource(userCode,
-    //     routing.getSandboxType(), routing.getEffectiveResourceId());
-    // if (existingRecord == null) {
-    //   return null;
-    // }
-    // String endpoint = existingRecord.getEndpoint();
-    // if (StringUtils.isBlank(endpoint)) {
-    //   return null;
-    // }
-    // String rawEndpoint = SandboxEndpointRecordSupport.resolveInstanceEndpoint(endpoint,
-    //     SandboxEndpointRecordSupport.OPENCLAW_INSTANCE);
-    String rawEndpoint = "http://localhost:18789/chat?token=bb9c876d63b55a2b7657f81668d4a6d5a998d037808a2b36";
+    SandboxLaunchRouting routing = sandboxLaunchContextFactory.resolveRouting(resourceId, userCode);
+    SsSandboxRecord existingRecord = sandboxRecordMapper.selectActiveByUserAndResource(userCode,
+        routing.getSandboxType(), routing.getEffectiveResourceId());
+    if (existingRecord == null) {
+      return null;
+    }
+    String endpoint = existingRecord.getEndpoint();
+    if (StringUtils.isBlank(endpoint)) {
+      return null;
+    }
+    String rawEndpoint = SandboxEndpointRecordSupport.resolveInstanceEndpoint(endpoint,
+        SandboxEndpointRecordSupport.OPENCLAW_INSTANCE);
     if (StringUtils.isBlank(rawEndpoint)) {
       return null;
     }

@@ -1,5 +1,5 @@
 import React, { useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { Breadcrumb, Button, Dropdown, Empty, Input, List, message, Modal, Tag, Tooltip, Typography } from 'antd';
+import { Breadcrumb, Button, Dropdown, Empty, Input, message, Modal } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
 import { useIntl, useLocation, useNavigate, useSelector } from '@umijs/max';
 import { trim } from 'lodash';
@@ -10,17 +10,22 @@ import PropertyDetail from '@/components/Resources/components/PropertyDetail';
 import InfiniteScrollAntdList from '@/layout/sider/components/InfiniteScrollAntdList';
 import employeeStyles from '@/layout/sider/components/EmployeeList/index.module.less';
 import {
-  checkWorkspaceSkillShareConflicts,
   deleteSkill,
   queryDigEmployeeRelResourceAuth,
   queryResourceMembers,
-  queryWorkspaceSkillDetail,
   queryWorkspaceSkillList,
-  resourceizeWorkspaceSkill,
   uploadSkillZip,
 } from '@/pages/manager/service/resources';
 import SkillDetailDrawer from '@/pages/manager/components/SkillDetailDrawer/SkillDetailDrawer';
 import AddAuthModal from '@/pages/manager/components/AuthListDrawer/AddAuthModal';
+import {
+  isWorkspaceSkill,
+  mapWorkspaceSkillRows,
+  SKILL_DISPLAY_SOURCE_USER_DEVELOPED,
+  type WorkspaceSkillItem,
+} from '@/components/Resources/workspaceSkill/utils';
+import { useWorkspaceSkillActions } from '@/components/Resources/workspaceSkill/useWorkspaceSkillActions';
+import { useDigitalEmployeeManagePermission } from '@/components/Resources/workspaceSkill/useDigitalEmployeeManagePermission';
 import { batchHandleAuth, listAuthDetail } from '@/pages/manager/service/DigitalResourceMgr';
 import { uninstallDigitalEmployeeRelResources } from '@/pages/manager/service/DigitalEmployeeMgr';
 import { ResourceTypeMap } from '@/constants/resource';
@@ -31,46 +36,14 @@ import { SiderContentContext } from '@/layout/sider/siderContentContext';
 import { getManagerMenuConfig, normalizeMenuUrl } from '@/pages/manager/layout/sider/menuConfig';
 import { getRuntimeActualUrl } from '@/utils';
 import { getToken } from '@/utils/auth';
-import { getFileUrl } from '@/utils/file';
+import ResourceSiderListItem, {
+  getResourceImageUrl,
+  PROPERTY_RESOURCE_TYPE,
+  type ResourceItem,
+  type ResourceSiderType,
+} from './ResourceSiderListItem';
 import styles from './index.module.less';
-
-const { Title, Paragraph } = Typography;
-
-type ResourceSiderType = 'TOOL' | 'VIEW' | 'OBJECT' | 'SKILL';
 const PAGE_SIZE = 30;
-
-interface ResourceItem {
-  resourceId: string | number;
-  resourceCode?: string;
-  resourceName: string;
-  description?: string;
-  resourceDesc?: string;
-  resourceLogoUrl?: string;
-  avatar?: string;
-  logoUrl?: string;
-  resourceImageUrl?: string;
-  resourceImage?: string;
-  coverUrl?: string;
-  coverImageUrl?: string;
-  resourceBizType?: string;
-  resourceSourcePkId?: string;
-  createTime?: number | string;
-  createUserName?: string;
-  extInfo?: any;
-  isTop?: string | number;
-  propertyName?: string;
-  propertyCode?: string;
-  propertyGroup?: string;
-  dataType?: string;
-  sourceType?: string;
-  displaySourceType?: string;
-  resourceBacked?: boolean;
-  skillPath?: string;
-  skillDocObjectKey?: string;
-  useStartTime?: string;
-  objectKey?: string;
-  targetContent?: string;
-}
 
 interface Props {
   resourceType: ResourceSiderType;
@@ -121,12 +94,9 @@ const resourceConfigMap: Record<
   },
 };
 
-const PROPERTY_RESOURCE_TYPE = 'PROPERTY';
 const SHARE_GRANT_TYPE = 'FORCE_USE';
 const UI_SKILL_MENU_CODE = 'menu_ui_agent';
 const UI_SKILL_MENU_NAME = '界面技能';
-const SKILL_DISPLAY_SOURCE_USER_DEVELOPED = 'USER_DEVELOPED';
-const WORKSPACE_SKILL_ID_PREFIX = 'WORKSPACE_SKILL:';
 
 const getArrayData = (response: any) => {
   if (Array.isArray(response)) return response;
@@ -156,46 +126,6 @@ const dedupeResourceList = (items: ResourceItem[]) => {
   });
 };
 
-const isWorkspaceSkill = (item?: ResourceItem) =>
-  item?.resourceBizType === ResourceTypeMap.SKILL &&
-  (item?.resourceBacked === false || String(item?.resourceId || '').startsWith(WORKSPACE_SKILL_ID_PREFIX));
-
-const parseResourceTargetContent = (item?: ResourceItem) => {
-  const targetContent = item?.extInfo?.targetContent || item?.targetContent;
-  if (!targetContent || typeof targetContent !== 'string') {
-    return null;
-  }
-  try {
-    return JSON.parse(targetContent);
-  } catch {
-    return null;
-  }
-};
-
-const getResourceImageUrl = (item?: ResourceItem) => {
-  const targetContent = parseResourceTargetContent(item);
-  return (
-    item?.resourceLogoUrl ||
-    item?.avatar ||
-    item?.logoUrl ||
-    item?.resourceImageUrl ||
-    item?.resourceImage ||
-    item?.coverUrl ||
-    item?.coverImageUrl ||
-    targetContent?.resourceLogoUrl ||
-    targetContent?.avatar ||
-    targetContent?.logoUrl ||
-    targetContent?.resourceImageUrl ||
-    targetContent?.resourceImage ||
-    targetContent?.coverUrl ||
-    targetContent?.coverImageUrl ||
-    ''
-  );
-};
-
-const getCurrentUserDisplayName = (userInfo?: any) =>
-  userInfo?.userName || userInfo?.name || userInfo?.nickName || userInfo?.userCode || userInfo?.userId || '';
-
 const mapBoundSkillRows = (rows: ResourceItem[], resourceType: ResourceSiderType) => {
   if (resourceType !== 'SKILL') {
     return rows;
@@ -206,20 +136,6 @@ const mapBoundSkillRows = (rows: ResourceItem[], resourceType: ResourceSiderType
     resourceBacked: true,
   }));
 };
-
-const mapWorkspaceSkillRows = (rows: any[]): ResourceItem[] =>
-  rows.map((item) => ({
-    resourceId: `${WORKSPACE_SKILL_ID_PREFIX}${item.skillPath || item.skillName}`,
-    resourceCode: item.skillName,
-    resourceName: item.skillName,
-    resourceDesc: item.skillDesc,
-    resourceBizType: ResourceTypeMap.SKILL,
-    displaySourceType: item.displaySourceType || SKILL_DISPLAY_SOURCE_USER_DEVELOPED,
-    resourceBacked: false,
-    skillPath: item.skillPath,
-    skillDocObjectKey: item.skillDocObjectKey,
-    useStartTime: item.useStartTime,
-  }));
 
 const getGrantItem = (item: any) => ({
   ...item,
@@ -429,6 +345,20 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
     async (options?: { reset?: boolean; queryKeyword?: string }) => {
       if (listFetchRef.current) return;
       const { reset = false, queryKeyword = keywordRef.current } = options || {};
+      if (!activeSiderAgent.resourceId) {
+        if (reset) {
+          resourceListRef.current = [];
+          setResourceList([]);
+          paginationRef.current = {
+            pageNum: 0,
+            total: 0,
+            loadedCount: 0,
+          };
+        }
+        setHasMore(false);
+        setLoading(false);
+        return;
+      }
       const pageNum = reset ? 1 : paginationRef.current.pageNum + 1;
       listFetchRef.current = true;
       setLoading(true);
@@ -449,7 +379,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
               resourceId: activeSiderAgent.resourceId,
               userCode: userInfo?.userCode,
             });
-            workspaceSkillRows = mapWorkspaceSkillRows(getArrayData(workspaceSkillResponse));
+            workspaceSkillRows = mapWorkspaceSkillRows(getArrayData(workspaceSkillResponse)) as ResourceItem[];
           } catch (error) {
             console.warn('query workspace skills failed', error);
           }
@@ -579,6 +509,34 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
     };
   }, [EventEmitter, loadResources, resourceType, breadcrumb.length]);
 
+  useEffect(() => {
+    const handleSiderMenuRefresh = (payload?: { key?: string }) => {
+      if (payload?.key !== config.siderKey) {
+        return;
+      }
+
+      if (breadcrumbRef.current.length > 0) {
+        breadcrumbRef.current = [];
+        setBreadcrumb([]);
+        setCurrentLevelOriginalList([]);
+      }
+      paginationRef.current = {
+        pageNum: 0,
+        total: 0,
+        loadedCount: 0,
+      };
+      resourceListRef.current = [];
+      setResourceList([]);
+      setHasMore(false);
+      loadResources({ reset: true, queryKeyword: keywordRef.current });
+    };
+
+    EventEmitter.on('sider-menu-tab-click-refresh', handleSiderMenuRefresh);
+    return () => {
+      EventEmitter.off('sider-menu-tab-click-refresh', handleSiderMenuRefresh);
+    };
+  }, [EventEmitter, config.siderKey, loadResources]);
+
   const handleSearch = () => {
     const nextKeyword = trim(searchValue);
     keywordRef.current = nextKeyword;
@@ -700,11 +658,6 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
     }
   };
 
-  const getResourceIcon = () => {
-    if (resourceType === 'TOOL' || resourceType === 'SKILL') return 'icon-chajiantubiao';
-    return 'icon-chuangjianfangshi-shujuku';
-  };
-
   const getResourceName = (resourceBizType?: string) => {
     if (resourceBizType === ResourceTypeMap.TOOL || resourceBizType === resourceBizTypeMap.TOOL) {
       return intl.formatMessage({ id: 'resource.tool' });
@@ -728,11 +681,57 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
     }
 
     return (
-      <Tag className={styles.skillSourceTag} color="gold">
-        {intl.formatMessage({ id: 'resource.skillSource.userDeveloped' })}
-      </Tag>
+      <span className={styles.skillSourceTag}>
+        <span className={styles.skillSourceTagText}>
+          {intl.formatMessage({ id: 'resource.skillSource.userDeveloped' })}
+        </span>
+      </span>
     );
   };
+
+  const openShareAuthModal = async (item: ResourceItem) => {
+    if (!item.resourceId || !item.resourceBizType) return;
+    try {
+      const detail = (await listAuthDetail({
+        grantType: SHARE_GRANT_TYPE,
+        grantObjType: item.resourceBizType,
+        grantObjId: item.resourceId,
+      })) as unknown as AuthDetailResponse;
+
+      if (detail && detail.code === 0) {
+        setShareRecord(item);
+        setShareAuthList(detail.data?.redList?.map(getGrantItem) || []);
+        setShareBlackList(detail.data?.blackList?.map(getGrantItem) || []);
+        setShareModalOpen(true);
+        return;
+      }
+
+      message.error(detail?.msg || intl.formatMessage({ id: 'common.operationFailed' }));
+    } catch (error: any) {
+      message.error(error?.message || intl.formatMessage({ id: 'common.operationFailed' }));
+    }
+  };
+
+  // 当前用户对该数字员工是否有管理权限，无则隐藏技能卸载入口（后端同样校验）。
+  const canManageActiveAgent = useDigitalEmployeeManagePermission(
+    resourceType === 'SKILL' ? activeSiderAgent.resourceId : undefined
+  );
+
+  // 工作空间(用户开发)技能的详情 / 分享(资源化) 复用公共 hook，保证与右侧个人技能 tab 行为一致。
+  // 卸载仍走本地 handleUninstallSkill（左侧按数字员工维度，文案为“卸载”）。
+  const workspaceActions = useWorkspaceSkillActions({
+    resourceId: activeSiderAgent.resourceId,
+    agentName: activeSiderAgent.name,
+    setDetailPanel,
+    clearDetailPanel,
+    onShareAuth: (resourceItem) => openShareAuthModal(resourceItem as ResourceItem),
+    onChanged: () => {
+      EventEmitter.emit('beyond-resourceList-resourceType-reload', 'SKILL');
+      if (!isInDrillDown()) {
+        loadResources({ reset: true });
+      }
+    },
+  });
 
   const handleDetail = async (item: ResourceItem) => {
     const { resourceBizType, resourceId } = item;
@@ -745,61 +744,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
 
     if (resourceBizType === ResourceTypeMap.SKILL) {
       if (isWorkspaceSkill(item)) {
-        if (!item.skillPath) {
-          message.error(intl.formatMessage({ id: 'resource.skillDownload.noSkillPath' }));
-          return;
-        }
-        try {
-          const detail = await queryWorkspaceSkillDetail({
-            skillPath: item.skillPath,
-            resourceId: activeSiderAgent.resourceId,
-            userCode: userInfo?.userCode,
-          });
-          const detailData = (detail as any)?.data || detail;
-          const currentDigitalEmployeeName =
-            activeSiderAgent.name || intl.formatMessage({ id: 'resource.currentDigitalEmployee' });
-          const usedDigitalEmployees = [];
-          if (activeSiderAgent.resourceId) {
-            usedDigitalEmployees.push({
-              resourceId: activeSiderAgent.resourceId,
-              resourceName: currentDigitalEmployeeName,
-              useStartTime: detailData?.useStartTime || item.useStartTime,
-            });
-          }
-          const detailItem = {
-            ...item,
-            resourceName: detailData?.skillName || item.resourceName,
-            resourceCode: detailData?.skillName || item.resourceCode,
-            resourceDesc: detailData?.skillDesc || item.resourceDesc,
-            description: detailData?.skillDesc || item.description,
-            useList: [
-              {
-                grantToObjId: userInfo?.userId || userInfo?.id || userInfo?.userCode,
-                grantToObjName: getCurrentUserDisplayName(userInfo),
-              },
-            ],
-            managerList: [
-              {
-                grantToObjId: userInfo?.userId || userInfo?.id || userInfo?.userCode,
-                grantToObjName: getCurrentUserDisplayName(userInfo),
-              },
-            ],
-            usedDigitalEmployees,
-          };
-          setDetailPanel?.(
-            <ResourceDetail
-              visible
-              panel
-              item={detailItem}
-              resourceName={intl.formatMessage({ id: 'common.skill' })}
-              onCancel={closeDetailPanel}
-              onEdit={() => {}}
-            />,
-            { width: 350 }
-          );
-        } catch (error: any) {
-          message.error(error?.message || intl.formatMessage({ id: 'common.operationFailed' }));
-        }
+        await workspaceActions.openDetail(item as WorkspaceSkillItem);
         return;
       }
       if (resourceId) {
@@ -863,112 +808,13 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
     );
   };
 
-  const buildImportRangeText = (items: any[] = []) =>
-    items
-      .map((item) => {
-        const catalogSuffix = item.catalogName ? `（${item.catalogName}）` : '';
-        return `${item.resourceCode || ''}：${item.resourceName || ''}${catalogSuffix}`;
-      })
-      .join('、');
-
-  const confirmSkillOverwrite = (updatedItems: any[] = []) => {
-    return new Promise<boolean>((resolve) => {
-      Modal.confirm({
-        title: intl.formatMessage({ id: 'resource.import.skillOverwriteConfirmTitle' }),
-        content: (
-          <div>
-            <div>{intl.formatMessage({ id: 'resource.import.skillOverwriteConfirmDesc' })}</div>
-            <div>{buildImportRangeText(updatedItems)}</div>
-          </div>
-        ),
-        okText: intl.formatMessage({ id: 'common.confirm' }),
-        cancelText: intl.formatMessage({ id: 'common.cancel' }),
-        onOk: () => resolve(true),
-        onCancel: () => resolve(false),
-      });
-    });
-  };
-
-  const openShareAuthModal = async (item: ResourceItem) => {
-    if (!item.resourceId || !item.resourceBizType) return;
-    try {
-      const detail = (await listAuthDetail({
-        grantType: SHARE_GRANT_TYPE,
-        grantObjType: item.resourceBizType,
-        grantObjId: item.resourceId,
-      })) as unknown as AuthDetailResponse;
-
-      if (detail && detail.code === 0) {
-        setShareRecord(item);
-        setShareAuthList(detail.data?.redList?.map(getGrantItem) || []);
-        setShareBlackList(detail.data?.blackList?.map(getGrantItem) || []);
-        setShareModalOpen(true);
-        return;
-      }
-
-      message.error(detail?.msg || intl.formatMessage({ id: 'common.operationFailed' }));
-    } catch (error: any) {
-      message.error(error?.message || intl.formatMessage({ id: 'common.operationFailed' }));
-    }
-  };
-
-  const firstImportSuccessItem = (result: any) => {
-    const data = result?.data || result;
-    return (data?.items || []).find((item: any) => item?.success && item?.resourceId);
-  };
-
   const handleShare = async (item: ResourceItem) => {
     if (!isWorkspaceSkill(item)) {
       await openShareAuthModal(item);
       return;
     }
-    if (!item.skillPath) {
-      message.error(intl.formatMessage({ id: 'resource.skillDownload.noSkillPath' }));
-      return;
-    }
-    try {
-      const baseParams = {
-        skillPath: item.skillPath,
-        resourceId: activeSiderAgent.resourceId,
-        userCode: userInfo?.userCode,
-      };
-      const conflictResult = await checkWorkspaceSkillShareConflicts(baseParams);
-      const conflictData = (conflictResult as any)?.data || conflictResult;
-      const updatedItems = conflictData?.updatedItems || [];
-      let overwriteConfirmed = false;
-      if (updatedItems.length) {
-        overwriteConfirmed = await confirmSkillOverwrite(updatedItems);
-        if (!overwriteConfirmed) {
-          return;
-        }
-      }
-      const importResult = await resourceizeWorkspaceSkill({
-        ...baseParams,
-        overwriteConfirmed,
-      });
-      const successItem = firstImportSuccessItem(importResult);
-      if (!successItem?.resourceId) {
-        message.error(intl.formatMessage({ id: 'common.operationFailed' }));
-        return;
-      }
-      const resourceItem: ResourceItem = {
-        ...item,
-        resourceId: successItem.resourceId,
-        resourceCode: successItem.resourceCode || item.resourceCode,
-        resourceName: successItem.resourceName || item.resourceName,
-        resourceDesc: successItem.resourceDesc || item.resourceDesc,
-        resourceBizType: ResourceTypeMap.SKILL,
-        displaySourceType: undefined,
-        resourceBacked: true,
-      };
-      EventEmitter.emit('beyond-resourceList-resourceType-reload', 'SKILL');
-      if (!isInDrillDown()) {
-        loadResources({ reset: true });
-      }
-      await openShareAuthModal(resourceItem);
-    } catch (error: any) {
-      message.error(error?.message || intl.formatMessage({ id: 'common.operationFailed' }));
-    }
+    // 工作空间技能：资源化 + 冲突确认走公共 hook，资源化成功后由 onShareAuth 回调打开使用授权弹窗。
+    await workspaceActions.shareSkill(item as WorkspaceSkillItem);
   };
 
   const handleShareCancel = () => {
@@ -1048,10 +894,15 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
               userCode: userInfo?.userCode,
             });
           } else {
-            await uninstallDigitalEmployeeRelResources({
+            // uninstallRelResources 走 customHandle，业务失败（如无管理权限 code!==0）也会 resolve，必须显式校验 code。
+            const res: any = await uninstallDigitalEmployeeRelResources({
               digitalEmployeeId: activeSiderAgent.resourceId!,
               relIds: [item.resourceId],
             });
+            if (res && res.code !== 0) {
+              message.error(res.msg || intl.formatMessage({ id: 'common.operationFailed' }));
+              return;
+            }
           }
           message.success(intl.formatMessage({ id: 'resource.uninstallSuccess' }));
           if (!isInDrillDown()) {
@@ -1080,7 +931,7 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
         label: <div className={employeeStyles.dropdownMenuItem}>{intl.formatMessage({ id: 'common.share' })}</div>,
       });
     }
-    if (resourceType === 'SKILL' && item.resourceBizType === ResourceTypeMap.SKILL) {
+    if (resourceType === 'SKILL' && item.resourceBizType === ResourceTypeMap.SKILL && canManageActiveAgent) {
       menuItems.push({
         key: 'uninstall',
         label: (
@@ -1267,59 +1118,18 @@ const ResourceSiderPanel: React.FC<Props> = ({ resourceType }) => {
           renderEmpty={<Empty image={Empty.PRESENTED_IMAGE_SIMPLE} />}
           renderItem={(item: ResourceItem) => {
             const drillable = canDrillDown(item);
-            const resourceImage = getResourceImageUrl(item);
 
             return (
-              <List.Item
+              <ResourceSiderListItem
                 key={item.resourceId}
-                className={styles.resourceItem}
-                onClick={() => handleResourceItemClick(item, drillable)}
-                onDoubleClick={() => handleResourceItemDoubleClick(item)}
+                item={item}
+                resourceType={resourceType}
+                drillable={drillable}
                 actions={[renderDetailDropdown(item)]}
-              >
-                <List.Item.Meta
-                  avatar={
-                    <span className={styles.resourceAvatar}>
-                      {drillable && <AntdIcon type="icon-a-xiangyou" className={styles.drillIcon} />}
-                      {resourceType === 'SKILL' && resourceImage ? (
-                        <img className={styles.resourceAvatarImage} src={getFileUrl(resourceImage)} alt="" />
-                      ) : resourceType === 'SKILL' && item.resourceBizType === ResourceTypeMap.SKILL ? (
-                        <span className={styles.skillDefaultAvatar}>
-                          <span className={styles.skillDefaultAvatarOrb} />
-                        </span>
-                      ) : (
-                        <AntdIcon
-                          type={
-                            item.resourceBizType === PROPERTY_RESOURCE_TYPE || String(item.resourceId).includes('-')
-                              ? 'icon-a-Database-networkshujukuwangluo'
-                              : getResourceIcon()
-                          }
-                        />
-                      )}
-                    </span>
-                  }
-                  title={
-                    <Title className={employeeStyles.name}>
-                      <Tooltip title={item.resourceName}>
-                        <span className={employeeStyles.nameRow}>
-                          <span className={employeeStyles.nameText}>{item.resourceName}</span>
-                          {renderSkillSourceTag(item)}
-                        </span>
-                      </Tooltip>
-                    </Title>
-                  }
-                  description={
-                    item.resourceDesc && (
-                      <Paragraph
-                        className={employeeStyles.description}
-                        ellipsis={{ tooltip: { title: item.resourceDesc, placement: 'right' } }}
-                      >
-                        {item.resourceDesc}
-                      </Paragraph>
-                    )
-                  }
-                />
-              </List.Item>
+                renderSkillSourceTag={renderSkillSourceTag}
+                onClick={handleResourceItemClick}
+                onDoubleClick={handleResourceItemDoubleClick}
+              />
             );
           }}
         />

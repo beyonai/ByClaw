@@ -12,6 +12,7 @@ export interface IKnowledgeBaseItem {
   resourceStatus: string;
   isTop: string;
   ownerType?: string;
+  quoteDisabled?: boolean;
 }
 
 // 知识库文档类型定义
@@ -33,4 +34,5 @@ export interface IKnowledgeDetailTreeItem extends IKnowledgeCollectionItem {
   directoryPath?: string;
   children?: IKnowledgeDetailTreeItem[];
   isLeaf?: boolean;
+  resourceCode?: string;
 }

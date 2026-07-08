@@ -1,0 +1,59 @@
+.container {
+  height: 100%;
+  padding: 24px;
+  overflow: auto;
+}
+
+.headerBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.tabs {
+  flex-shrink: 0;
+
+  :global(.ant-tabs-nav),
+  :global(.beyond-tabs-nav) {
+    margin-bottom: 0;
+  }
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  min-width: 0;
+}
+
+.searchInput {
+  width: 260px;
+}
+
+@media (max-width: 760px) {
+  .headerBar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .toolbar {
+    justify-content: flex-start;
+  }
+
+  .searchInput {
+    width: 100%;
+  }
+}
+
+.grid {
+  margin-bottom: 20px;
+}
+
+.pagination {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
+}

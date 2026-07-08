@@ -743,7 +743,9 @@
         WHERE a.resource_biz_type = 'DIG_EMPLOYEE'
           AND a.resource_status = 2
         <if test="machineChannel != null and machineChannel != ''">
-          AND b.machine_channel like concat('%', #{machineChannel}, '%')
+          <!-- machine_channel 是 JSON 文本，渠道值历史上出现过 Feishu/FeiShu 大小写差异；
+               启动扫描必须大小写不敏感，否则服务重启后飞书 encryptKey 无法加载进缓存。 -->
+          AND lower(b.machine_channel) like concat('%', lower(#{machineChannel}), '%')
         </if>
         ORDER BY a.resource_id
     </select>

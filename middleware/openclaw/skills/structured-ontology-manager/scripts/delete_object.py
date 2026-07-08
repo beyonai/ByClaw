@@ -18,7 +18,7 @@ I/O 协议：stdin JSON → stdout JSON
     2. drop_table(entity_code) — 删建表（需要通过 user_code 定位服务）
     3. deleteResourceByCode(entity_code) — 下架本体（门户服务）
 
-所有业务逻辑由 datacloud_data_service 的 ontology-manager API 提供服务。
+所有业务逻辑由 datacloud_platform 的 ontology-manager API 提供服务。
 """
 
 from __future__ import annotations
