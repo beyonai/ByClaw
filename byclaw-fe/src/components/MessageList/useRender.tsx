@@ -33,6 +33,7 @@ import { agentTypeMap } from '@/constants/agent';
 import { getPublicPath } from '@/utils';
 
 import { getAgentChatAvatar } from '@/utils/agent';
+import { ResourceType } from '@/components/QueryInput/RichInput/utils/constants';
 
 import { IMessageState, SSEMessageType } from '@/constants/message';
 
@@ -45,7 +46,7 @@ import styles from './index.module.less';
 import getDisplayQuestion from '../QueryInput/getDisplayQuestion';
 import getDisplayAnswer from '../QueryInput/getDisplayAnswer';
 import { getDisplayUserNameInChat } from '@/utils/chat';
-import { getDisplayDateTime, getResponseAgentInfo } from './utils';
+import { getDigitalEmployeeMentionItem, getDisplayDateTime, getResponseAgentInfoByMessage } from './utils';
 import { getSystemConfigByStorage } from '@/utils/system';
 import AntdIcon from '../AntdIcon';
 
@@ -75,6 +76,20 @@ export default function useRender({
   const { canRefrence } = useCanRefrence();
 
   const { userId } = userInfo || {};
+
+  const insertAgentMention = useCallback(
+    (agentInfo: ReturnType<typeof getResponseAgentInfoByMessage>) => {
+      const mentionItem = getDigitalEmployeeMentionItem(agentInfo);
+      if (!mentionItem) return;
+
+      EventEmitter.emit('queryInput-insert-item', {
+        item: mentionItem,
+        type: ResourceType.digitalEmployee,
+      });
+    },
+    [EventEmitter]
+  );
+
   const userQueryActions = useCallback(
     (msg: IMessage) => {
       const { text, resourceList, msgId } = msg;
@@ -331,7 +346,7 @@ export default function useRender({
       } = msg;
 
       const { showRelatedQuestions = false, hideAction } = param || {};
-      const agentInfo = getResponseAgentInfo({ employeesList, agentList }, msg.metadata);
+      const agentInfo = getResponseAgentInfoByMessage({ employeesList, agentList }, msg);
       const isLeftSide = fromBeyond || fromOtherUser;
       const isSuperAssistant = fromBeyond && !!agentInfo?.isSuperAssistant;
 
@@ -376,6 +391,29 @@ export default function useRender({
         displayCreateTime = getDisplayDateTime(createTime);
       }
 
+      const canMentionLeftAgent = isLeftSide && !!agentInfo?.agentId;
+      const mentionLeftAgentTitle = canMentionLeftAgent
+        ? intl.formatMessage({ id: 'messageList.mentionDigitalEmployee' }, { name: leftName })
+        : '';
+      const leftNameNode = canMentionLeftAgent ? (
+        <Tooltip title={mentionLeftAgentTitle}>
+          <button
+            type="button"
+            className={styles.agentMentionTrigger}
+            aria-label={mentionLeftAgentTitle}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              insertAgentMention(agentInfo);
+            }}
+          >
+            {leftName}
+          </button>
+        </Tooltip>
+      ) : (
+        leftName
+      );
+
       return (
         <div
           key={msgId}
@@ -388,7 +426,7 @@ export default function useRender({
           {isLeftSide && leftSideLogo}
           {isLeftSide && (
             <div className={styles.name}>
-              {leftName}
+              {leftNameNode}
               {isSuperAssistant && (
                 <div className={styles.assistantMark}>
                   <span>{intl.formatMessage({ id: 'common.digitalClone' })}</span>
@@ -465,7 +503,19 @@ export default function useRender({
         </div>
       );
     },
-    [agentList, userId, employeesList, attachmentListRender, citeMsgRender, updateMessage, beyondAnswerActions]
+    [
+      agentList,
+      userId,
+      employeesList,
+      intl,
+      attachmentListRender,
+      citeMsgRender,
+      updateMessage,
+      beyondAnswerActions,
+      userQueryActions,
+      insertAgentMention,
+      relatedQuestionsRender,
+    ]
   );
 
   const extendsRender = <>{ModalNode}</>;

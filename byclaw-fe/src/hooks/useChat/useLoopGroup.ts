@@ -1,8 +1,8 @@
 import React from 'react';
 import { useDispatch } from '@umijs/max';
-import { get, last, uniqBy, orderBy, isEmpty } from 'lodash';
+import { get, last, uniqBy, isEmpty } from 'lodash';
 
-import { fetchMessage } from '@/models/useMessageStore';
+import { fetchMessage, sortMessagesByTimeline } from '@/models/useMessageStore';
 
 import type { IMessage } from '@/typescript/message';
 
@@ -32,7 +32,7 @@ function useLoopGroup(props: IProps) {
 
         const msgList = getMessageList();
 
-        const newList = orderBy(uniqBy([...res.list, ...msgList], 'messageId'), ['messageId'], ['asc']);
+        const newList = sortMessagesByTimeline(uniqBy([...res.list, ...msgList], 'messageId'));
 
         const cache = {
           ...res,

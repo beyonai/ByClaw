@@ -1,5 +1,19 @@
-import { describe, expect, it } from "vitest";
-import { normalizeByaiAgentId, resolveSdkTargetAgentId } from "./session-key.js";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("openclaw/plugin-sdk/routing", () => ({
+  buildAgentSessionKey: (params: {
+    agentId: string;
+    channel: string;
+    peer: { kind: string; id: string };
+  }) => `agent:${params.agentId}:${params.channel}:${params.peer.kind}:${params.peer.id}`,
+  resolveAgentIdFromSessionKey: (sessionKey: string) => sessionKey.split(":")[1] ?? "",
+}));
+
+import {
+  normalizeByaiAgentId,
+  resolveByaiSessionKey,
+  resolveSdkTargetAgentId,
+} from "./session-key.js";
 
 describe("normalizeByaiAgentId", () => {
   it("normalizes numeric Baiying agent ids from strings and numbers", () => {
@@ -26,5 +40,26 @@ describe("resolveSdkTargetAgentId", () => {
       "custom-agent",
     );
     expect(resolveSdkTargetAgentId("main", {})).toBe("main");
+  });
+});
+
+describe("resolveByaiSessionKey", () => {
+  it("keeps the channel session key unchanged for same-agent routing", () => {
+    const sessionKey = resolveByaiSessionKey({
+      routing: {
+        sessionKey: "agent:baiying-agent-10002971:byai-channel:direct:10007058",
+        agentId: "baiying-agent-10002971",
+        channel: "byai-channel",
+        accountId: "default",
+      },
+      targetAgentId: "baiying-agent-10002971",
+      sessionId: "10007058",
+      perSessionId: false,
+    });
+
+    expect(sessionKey).toBe(
+      "agent:baiying-agent-10002971:byai-channel:direct:10007058",
+    );
+    expect(sessionKey).not.toContain(":lane:");
   });
 });

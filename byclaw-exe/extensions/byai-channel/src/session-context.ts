@@ -1,21 +1,25 @@
 import path from "node:path";
 import { EmitOptions, EventType, type GatewayDataEmitter } from "@byclaw/by-framework";
-import type { ByaiInboundMessage, Language } from "./types.js";
+import type { ByaiInboundMessage, ByaiLaneMetadata, Language } from "./types.js";
 import { isSessionDispatchBusy } from "./session-dispatch-gate.js";
 import { clearPendingMessageToolSends } from "./pending-message-tool.js";
 import { generateRandomId } from "./utils.js";
 import { emitByaiSdkFirstResponse } from "./diagnostics.js";
+import { SESSION_FILES_ROOT, getSessionPathBySessionId } from "./session-path.js";
+import {
+    deleteChannelRequestContextBySessionKey as deleteSharedChannelRequestContextBySessionKey,
+    resolveChannelRequestContextBySessionKey as resolveSharedChannelRequestContextBySessionKey,
+    upsertChannelRequestContextBySessionKey as upsertSharedChannelRequestContextBySessionKey,
+} from "./channel-request-context.js";
 
 const CHANNEL_ID = "byai-channel" as const;
 const DEFAULT_ACCOUNT_KEY = "default";
 /** Must match `baiying-enhance/src/channel-session-resolve.ts` (read-only access to this store). */
 const STORE_KEY = "__OPENCLAW_BYAI_CHANNEL_SESSION_CONTEXT_STORE__";
+const MAX_CHAT_CONTEXT_MESSAGES_PER_SESSION = 80;
+const MAX_CHAT_CONTEXT_TEXT_CHARS = 12000;
 
-export const SESSION_FILES_ROOT = "/by/.sessions";
-
-export function getSessionPathBySessionId(sessionId: string) {
-    return path.posix.join(SESSION_FILES_ROOT, sessionId.trim());
-}
+export { SESSION_FILES_ROOT, getSessionPathBySessionId };
 
 export function resolveSdkLocalFilePath(rawPath: string, sessionId: string): string {
     const sessionRoot = getSessionPathBySessionId(sessionId);
@@ -62,6 +66,44 @@ export interface SharedChannelRequestContext {
     fields: Record<string, unknown>;
 }
 
+export type ByclawChatContextRole = "user" | "assistant";
+
+export interface ByclawChatContextMessage {
+    id: string;
+    role: ByclawChatContextRole;
+    sessionId: string;
+    sessionKey?: string;
+    traceId?: string;
+    agentId?: string;
+    agentName?: string;
+    laneId?: string;
+    turnId?: string;
+    clientRequestId?: string;
+    queryMessageId?: string;
+    answerMessageId?: string;
+    text: string;
+    createdAt: number;
+    updatedAt: number;
+}
+
+export interface ByclawChatContextLaneSummary {
+    laneId?: string;
+    turnId?: string;
+    agentId?: string;
+    agentName?: string;
+    sessionKey?: string;
+    messageCount: number;
+    lastUpdatedAt: number;
+}
+
+export interface ByclawChatContextSnapshot {
+    sessionId: string;
+    messages: ByclawChatContextMessage[];
+    lanes: ByclawChatContextLaneSummary[];
+    totalMessages: number;
+    truncated: boolean;
+}
+
 export interface ActiveSdkRequest {
   accountId: string;
   sessionKey: string;
@@ -102,6 +144,7 @@ export interface ActiveSdkRequest {
   channelExtension?: Record<string, unknown> | string;
   abortController?: AbortController;
   beyondToken?: string;
+  laneMetadata?: ByaiLaneMetadata;
   agentEndHooks?: Map<string, Promise<{
     success?: boolean;
     error?: string;
@@ -127,6 +170,7 @@ interface SessionContextStore {
     activeSdkRequestsBySession: Map<string, ActiveSdkRequest>;
     activeSdkRequestsByChild: Map<string, ActiveSdkRequest>;
     activeSdkRequestsByRun: Map<string, ActiveSdkRunBinding>;
+    chatContextBySessionId: Map<string, Map<string, ByclawChatContextMessage>>;
     agentEndResultByRun: Map<string, {
         resolve: (result: AgentEndResult) => void;
         reject: (reason?: unknown) => void;
@@ -149,6 +193,7 @@ function getSessionContextStore(): SessionContextStore {
             activeSdkRequestsBySession: new Map<string, ActiveSdkRequest>(),
             activeSdkRequestsByChild: new Map<string, ActiveSdkRequest>(),
             activeSdkRequestsByRun: new Map<string, ActiveSdkRunBinding>(),
+            chatContextBySessionId: new Map(),
             agentEndResultByRun: new Map(),
         };
     }
@@ -165,6 +210,7 @@ const {
     activeSdkRequestsBySession,
     activeSdkRequestsByChild,
     activeSdkRequestsByRun,
+    chatContextBySessionId,
     agentEndResultByRun,
 } = getSessionContextStore();
 
@@ -177,21 +223,6 @@ function normalizeAlias(value: string | undefined | null): string | null {
 
 function normalizeAccountId(value: string | undefined | null): string {
     return normalizeAlias(value) ?? DEFAULT_ACCOUNT_KEY;
-}
-
-function sanitizeSharedChannelFields(
-    fields: Record<string, unknown> | undefined,
-): Record<string, unknown> {
-    const next: Record<string, unknown> = {};
-    if (!fields) {
-        return next;
-    }
-    for (const [key, value] of Object.entries(fields)) {
-        if (value !== undefined) {
-            next[key] = value;
-        }
-    }
-    return next;
 }
 
 function buildContextAliases(params: {
@@ -226,13 +257,266 @@ function buildActiveSdkTargetKey(accountId: string, to: string): string {
     return `${normalizeAccountId(accountId)}::${to}`;
 }
 
+function setMetadataField(
+    metadata: Record<string, any>,
+    key: string,
+    value: string | undefined,
+): void {
+    if (value !== undefined && value !== "") {
+        metadata[key] = value;
+    }
+}
+
+function normalizeChatText(value: unknown): string {
+    if (typeof value !== "string") {
+        return "";
+    }
+    const normalized = value.replace(/\r\n/g, "\n");
+    return normalized.length > MAX_CHAT_CONTEXT_TEXT_CHARS
+        ? normalized.slice(-MAX_CHAT_CONTEXT_TEXT_CHARS)
+        : normalized;
+}
+
+function normalizeChatContextId(value: string | undefined, fallback: string): string {
+    return normalizeAlias(value) ?? fallback;
+}
+
+function pruneChatContextSession(messages: Map<string, ByclawChatContextMessage>): void {
+    while (messages.size > MAX_CHAT_CONTEXT_MESSAGES_PER_SESSION) {
+        const firstKey = messages.keys().next().value as string | undefined;
+        if (!firstKey) {
+            break;
+        }
+        messages.delete(firstKey);
+    }
+}
+
+function laneKeyOf(message: ByclawChatContextMessage): string {
+    return [
+        message.turnId ?? "",
+        message.laneId ?? "",
+        message.agentId ?? "",
+        message.agentName ?? "",
+        message.sessionKey ?? "",
+    ].join("|");
+}
+
+function copyChatContextMessage(message: ByclawChatContextMessage): ByclawChatContextMessage {
+    return { ...message };
+}
+
+export function recordByclawChatContextMessage(params: {
+    id?: string;
+    role: ByclawChatContextRole;
+    sessionId: string;
+    text: string;
+    append?: boolean;
+    sessionKey?: string;
+    traceId?: string;
+    laneMetadata?: ByaiLaneMetadata;
+    agentId?: string;
+    agentName?: string;
+    createdAt?: number;
+}): ByclawChatContextMessage | undefined {
+    const sessionId = normalizeAlias(params.sessionId);
+    if (!sessionId) {
+        return undefined;
+    }
+    const text = normalizeChatText(params.text);
+    if (!text) {
+        return undefined;
+    }
+    const now = Date.now();
+    const lane = params.laneMetadata;
+    const id = normalizeChatContextId(
+        params.id,
+        [
+            params.role,
+            lane?.answerMessageId,
+            lane?.queryMessageId,
+            lane?.clientRequestId,
+            lane?.laneId,
+            params.traceId,
+            now,
+        ].filter(Boolean).join(":"),
+    );
+    let messages = chatContextBySessionId.get(sessionId);
+    if (!messages) {
+        messages = new Map();
+        chatContextBySessionId.set(sessionId, messages);
+    }
+    const existing = messages.get(id);
+    const nextText = params.append && existing
+        ? normalizeChatText(`${existing.text}${text}`)
+        : text;
+    const message: ByclawChatContextMessage = {
+        id,
+        role: params.role,
+        sessionId,
+        sessionKey: normalizeAlias(params.sessionKey) ?? existing?.sessionKey,
+        traceId: normalizeAlias(params.traceId) ?? existing?.traceId,
+        agentId: normalizeAlias(lane?.agentId ?? params.agentId) ?? existing?.agentId,
+        agentName: normalizeAlias(lane?.agentName ?? params.agentName) ?? existing?.agentName,
+        laneId: normalizeAlias(lane?.laneId) ?? existing?.laneId,
+        turnId: normalizeAlias(lane?.turnId) ?? existing?.turnId,
+        clientRequestId: normalizeAlias(lane?.clientRequestId) ?? existing?.clientRequestId,
+        queryMessageId: normalizeAlias(lane?.queryMessageId) ?? existing?.queryMessageId,
+        answerMessageId: normalizeAlias(lane?.answerMessageId) ?? existing?.answerMessageId,
+        text: nextText,
+        createdAt: existing?.createdAt ?? params.createdAt ?? now,
+        updatedAt: now,
+    };
+    messages.set(id, message);
+    pruneChatContextSession(messages);
+    return copyChatContextMessage(message);
+}
+
+export function appendByclawAssistantContextDelta(params: {
+    request: ActiveSdkRequest;
+    id: string;
+    text: string;
+    agentId?: string;
+    agentName?: string;
+}): ByclawChatContextMessage | undefined {
+    return recordByclawChatContextMessage({
+        id: params.id,
+        role: "assistant",
+        sessionId: params.request.sessionId,
+        sessionKey: params.request.sessionKey,
+        traceId: params.request.traceId,
+        laneMetadata: params.request.laneMetadata,
+        agentId: params.agentId,
+        agentName: params.agentName,
+        text: params.text,
+        append: true,
+    });
+}
+
+export function resolveByclawChatContext(params: {
+    sessionId: string;
+    limit?: number;
+    includeCurrentLaneOnly?: boolean;
+    requesterSessionKey?: string;
+}): ByclawChatContextSnapshot {
+    const sessionId = normalizeAlias(params.sessionId) ?? "";
+    const rawLimit = Number.isFinite(params.limit) ? Number(params.limit) : 12;
+    const limit = Math.min(Math.max(Math.trunc(rawLimit), 1), 40);
+    const allMessages = Array.from(chatContextBySessionId.get(sessionId)?.values() ?? [])
+        .filter((message) => {
+            if (!params.includeCurrentLaneOnly) {
+                return true;
+            }
+            return Boolean(params.requesterSessionKey) && message.sessionKey === params.requesterSessionKey;
+        })
+        .sort((a, b) => a.createdAt - b.createdAt || a.updatedAt - b.updatedAt);
+    const messages = allMessages.slice(-limit).map(copyChatContextMessage);
+    const laneMap = new Map<string, ByclawChatContextLaneSummary>();
+    for (const message of allMessages) {
+        if (!message.laneId && !message.agentId && !message.agentName) {
+            continue;
+        }
+        const key = laneKeyOf(message);
+        const existing = laneMap.get(key);
+        laneMap.set(key, {
+            laneId: message.laneId,
+            turnId: message.turnId,
+            agentId: message.agentId,
+            agentName: message.agentName,
+            sessionKey: message.sessionKey,
+            messageCount: (existing?.messageCount ?? 0) + 1,
+            lastUpdatedAt: Math.max(existing?.lastUpdatedAt ?? 0, message.updatedAt),
+        });
+    }
+    return {
+        sessionId,
+        messages,
+        lanes: Array.from(laneMap.values()).sort((a, b) => a.lastUpdatedAt - b.lastUpdatedAt),
+        totalMessages: allMessages.length,
+        truncated: allMessages.length > messages.length,
+    };
+}
+
+/** @internal test helper */
+export function resetByclawChatContextForTest(): void {
+    chatContextBySessionId.clear();
+}
+
+export function buildSdkEmitMetadata(params: {
+    laneMetadata?: ByaiLaneMetadata;
+    traceId?: string;
+    agentId?: string;
+    agentName?: string;
+}): Record<string, any> {
+    const metadata: Record<string, any> = {};
+    const lane = params.laneMetadata;
+    setMetadataField(metadata, "laneId", lane?.laneId);
+    setMetadataField(metadata, "turnId", lane?.turnId);
+    setMetadataField(metadata, "mode", lane?.mode);
+    setMetadataField(metadata, "agentId", lane?.agentId ?? params.agentId);
+    setMetadataField(metadata, "agentCode", lane?.agentCode);
+    setMetadataField(metadata, "agentName", lane?.agentName ?? params.agentName);
+    setMetadataField(metadata, "clientRequestId", lane?.clientRequestId);
+    setMetadataField(metadata, "queryMessageId", lane?.queryMessageId);
+    setMetadataField(metadata, "answerMessageId", lane?.answerMessageId);
+    setMetadataField(metadata, "traceId", params.traceId);
+    return metadata;
+}
+
+export function withSdkEmitMetadata(
+    options: EmitOptions | undefined,
+    params: {
+        laneMetadata?: ByaiLaneMetadata;
+        traceId?: string;
+        agentId?: string;
+        agentName?: string;
+    },
+): EmitOptions {
+    const laneMetadata = buildSdkEmitMetadata(params);
+    if (Object.keys(laneMetadata).length === 0) {
+        return options ?? {};
+    }
+    return {
+        ...(options ?? {}),
+        metadata: {
+            ...(options?.metadata ?? {}),
+            ...laneMetadata,
+        },
+    };
+}
+
+export function withActiveSdkRequestEmitMetadata(
+    request: ActiveSdkRequest,
+    options?: EmitOptions,
+): EmitOptions {
+    return withSdkEmitMetadata(options, {
+        laneMetadata: request.laneMetadata,
+        traceId: request.traceId,
+    });
+}
+
+export function buildSdkChunkEvent(
+    text: string,
+    options?: EmitOptions,
+): string | { content: string; metadata: Record<string, any> } {
+    return options?.metadata ? { content: text, metadata: options.metadata } : text;
+}
+
+export function buildSdkStateEvent(
+    state: string,
+    options?: EmitOptions,
+): string | { state: string; metadata: Record<string, any> } {
+    return options?.metadata ? { state, metadata: options.metadata } : state;
+}
+
 export function clearActiveSdkRequestRecord(request: ActiveSdkRequest): void {
   activeSdkRequestsByTarget.delete(buildActiveSdkTargetKey(request.accountId, request.to));
   activeSdkRequestsByTraceId.delete(request.traceId);
   channelRequestContextsBySessionKey.delete(request.sessionKey);
+  deleteSharedChannelRequestContextBySessionKey(request.sessionKey);
   activeSdkRequestsBySession.delete(request.sessionKey);
   for (const childSessionKey of request.pendingChildSessionKeys) {
     channelRequestContextsBySessionKey.delete(childSessionKey);
+    deleteSharedChannelRequestContextBySessionKey(childSessionKey);
     activeSdkRequestsByChild.delete(childSessionKey);
   }
   for (const runId of request.boundRunIds) {
@@ -285,19 +569,25 @@ export async function emitSdkChunkTracked(sessionKey: string, params: {
     if (!params.emitter) {
         return;
     }
+    const request = resolveActiveSdkRequestBySessionKey(sessionKey);
+    const options = request
+        ? withActiveSdkRequestEmitMetadata(request, params.options)
+        : withSdkEmitMetadata(params.options, {
+            traceId: params.traceId,
+        });
     await params.emitter.emitChunk(
         params.sessionId,
         params.traceId || "",
-        params.text,
-        params.options || {},
+        buildSdkChunkEvent(params.text, options),
+        options,
     );
-    recordFirstSdkResponse(sessionKey, params);
+    recordFirstSdkResponse(sessionKey, { ...params, options });
     sdkEmitterLastChunks.set(sessionKey, {
         traceId: params.traceId || "",
-        messageId: params.options?.messageId,
-        parentMessageId: params.options?.parentMessageId,
-        eventType: params.options?.eventType,
-        contentType: params.options?.contentType,
+        messageId: options.messageId,
+        parentMessageId: options.parentMessageId,
+        eventType: options.eventType,
+        contentType: options.contentType,
     });
 }
 
@@ -365,22 +655,10 @@ export function upsertChannelRequestContextBySessionKey(params: {
     fields?: Record<string, unknown>;
     createdAt?: number;
 }): SharedChannelRequestContext | undefined {
-    const normalizedSessionKey = normalizeAlias(params.sessionKey);
-    if (!normalizedSessionKey) {
-        return undefined;
+    const context = upsertSharedChannelRequestContextBySessionKey(params);
+    if (context) {
+        channelRequestContextsBySessionKey.set(context.sessionKey, context);
     }
-    const existing = channelRequestContextsBySessionKey.get(normalizedSessionKey);
-    const context: SharedChannelRequestContext = {
-        traceId: normalizeAlias(params.traceId) ?? existing?.traceId ?? "",
-        sessionKey: normalizedSessionKey,
-        accountId: normalizeAccountId(params.accountId || existing?.accountId),
-        createdAt: existing?.createdAt ?? params.createdAt ?? Date.now(),
-        fields: {
-            ...(existing?.fields ?? {}),
-            ...sanitizeSharedChannelFields(params.fields),
-        },
-    };
-    channelRequestContextsBySessionKey.set(normalizedSessionKey, context);
     return context;
 }
 
@@ -391,7 +669,12 @@ export function resolveChannelRequestContextBySessionKey(
     if (!normalizedSessionKey) {
         return undefined;
     }
-    return channelRequestContextsBySessionKey.get(normalizedSessionKey);
+    const context = resolveSharedChannelRequestContextBySessionKey(normalizedSessionKey)
+        ?? channelRequestContextsBySessionKey.get(normalizedSessionKey);
+    if (context) {
+        channelRequestContextsBySessionKey.set(normalizedSessionKey, context);
+    }
+    return context;
 }
 
 export function registerActiveSdkRequest(params: {
@@ -406,6 +689,7 @@ export function registerActiveSdkRequest(params: {
     channelExtension?: Record<string, unknown> | string;
     abortController?: AbortController;
     beyondToken?: string;
+    laneMetadata?: ByaiLaneMetadata;
 }): ActiveSdkRequest {
     pruneStaleActiveSdkRequests();
     const existingByTarget = activeSdkRequestsByTarget.get(
@@ -452,6 +736,7 @@ export function registerActiveSdkRequest(params: {
         channelExtension: params.channelExtension,
         abortController: params.abortController,
         beyondToken: params.beyondToken,
+        laneMetadata: params.laneMetadata,
     };
 
     activeSdkRequestsByTarget.set(
@@ -471,6 +756,11 @@ export function registerActiveSdkRequest(params: {
             languageProvided: request.languageProvided,
             channelExtension: request.channelExtension,
             beyondToken: params.beyondToken,
+            laneMetadata: request.laneMetadata,
+            ...buildSdkEmitMetadata({
+                laneMetadata: request.laneMetadata,
+                traceId: request.traceId,
+            }),
         },
     });
 
@@ -788,27 +1078,29 @@ export async function completeActiveSdkRequest(
                 }, 10000)),
             ]);
             if (result?.error) {
-                await sdkEmitter.emitChunk(
-                    latest.sessionId,
-                    latest.traceId || "",
-                    result.error,
-                    {
+                await emitSdkChunkTracked(latest.sessionKey, {
+                    emitter: sdkEmitter,
+                    sessionId: latest.sessionId,
+                    traceId: latest.traceId,
+                    text: result.error,
+                    options: {
                         eventType: EventType.ANSWER_DELTA,
                         messageId: generateRandomId(),
                     },
-                );
+                });
             }
         } catch (error) {
             console.error("Error waiting for agent end result:", error);
         }
     }
+    const stateOptions = withActiveSdkRequestEmitMetadata(latest, {
+        eventType: EventType.APP_STREAM_RESPONSE,
+    });
     await sdkEmitter.emitState(
         latest.sessionId,
         latest.traceId || "",
-        "",
-        {
-            eventType: EventType.APP_STREAM_RESPONSE,
-        },
+        buildSdkStateEvent("", stateOptions),
+        stateOptions,
     );
     clearActiveSdkRequestRecord(latest);
     return true;
@@ -842,7 +1134,7 @@ export async function markActiveSdkRequestSubagentSpawned(
     accountId: request.accountId,
     createdAt: request.createdAt,
     fields: {
-      ...(channelRequestContextsBySessionKey.get(request.sessionKey)?.fields ?? {}),
+      ...(resolveChannelRequestContextBySessionKey(request.sessionKey)?.fields ?? {}),
       requesterSessionKey,
     },
   });
@@ -864,6 +1156,7 @@ export function markActiveSdkRequestSubagentEnded(
   }
   request.pendingChildSessionKeys.delete(childSessionKey);
   channelRequestContextsBySessionKey.delete(childSessionKey);
+  deleteSharedChannelRequestContextBySessionKey(childSessionKey);
   activeSdkRequestsByChild.delete(childSessionKey);
   // 仅当所有子 session 都结束才进入"等 main 续跑"状态：还有兄弟子 agent 在跑时，
   if (request.pendingChildSessionKeys.size === 0) {

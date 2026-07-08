@@ -1,3 +1,4 @@
+ARG OPENCLAW_VERSION=2026.6.6
 FROM node:24-slim AS ext-builder
 
 WORKDIR /build
@@ -24,6 +25,9 @@ COPY byclaw-exe/extensions/byai_diagnostics-otel/package.json \
 COPY byclaw-exe/extensions/byclaw-sqlite/package.json \
      byclaw-exe/extensions/byclaw-sqlite/package-lock.json \
      ./src/byclaw-sqlite/
+COPY byclaw-exe/extensions/byclaw-acp-adapter/package.json \
+     byclaw-exe/extensions/byclaw-acp-adapter/package-lock.json \
+     ./src/byclaw-acp-adapter/
 COPY byclaw-exe/extensions/byclaw-wiki/package.json \
      ./src/byclaw-wiki/
 
@@ -49,6 +53,7 @@ COPY byclaw-exe/extensions/baiying-enhance/ ./src/baiying-enhance/
 COPY byclaw-exe/extensions/byai-channel/ ./src/byai-channel/
 COPY byclaw-exe/extensions/byai_diagnostics-otel/ ./src/byai_diagnostics-otel/
 COPY byclaw-exe/extensions/byclaw-sqlite/ ./src/byclaw-sqlite/
+COPY byclaw-exe/extensions/byclaw-acp-adapter/ ./src/byclaw-acp-adapter/
 COPY byclaw-exe/extensions/byclaw-wiki/ ./src/byclaw-wiki/
 
 RUN set -eux; \
@@ -79,10 +84,11 @@ RUN set -eux; \
 
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS python312
 
-FROM ghcr.io/openclaw/openclaw:2026.6.6
+FROM ghcr.io/openclaw/openclaw:${OPENCLAW_VERSION}
 
 USER root
 
+ARG OPENCLAW_VERSION
 ARG OPENCLI_VERSION=1.8.0
 ARG OPENCLI_EXTENSION_VERSION=1.0.15
 ARG ZREAD_CLI_VERSION=0.2.13
@@ -199,6 +205,30 @@ RUN set -eux; \
 
 COPY --from=ext-builder /build/out/ /app/dist-runtime/extensions/
 
+RUN --mount=type=cache,target=/root/.npm \
+    set -eux; \
+    npm config set registry https://registry.npmmirror.com --global; \
+    npm config set fund false --global; \
+    npm config set audit false --global; \
+    npm config set prefer-offline true --global; \
+    rm -rf /tmp/openclaw-acpx-plugin /app/dist/extensions/acpx; \
+    npm install --prefix /tmp/openclaw-acpx-plugin --omit=dev --ignore-scripts --no-package-lock --prefer-offline "@openclaw/acpx@${OPENCLAW_VERSION}"; \
+    mkdir -p /app/dist/extensions/acpx; \
+    cp -a /tmp/openclaw-acpx-plugin/node_modules/@openclaw/acpx/. /app/dist/extensions/acpx/; \
+    cp -a /tmp/openclaw-acpx-plugin/node_modules /app/dist/extensions/acpx/node_modules; \
+    rm -rf /app/dist/extensions/acpx/node_modules/@openclaw/acpx /tmp/openclaw-acpx-plugin; \
+    test -f /app/dist/extensions/acpx/dist/index.js; \
+    test -f /app/dist/extensions/acpx/openclaw.plugin.json; \
+    node --input-type=module -e ' \
+      import { readFileSync } from "node:fs"; \
+      const expectedVersion = process.argv[1]; \
+      const manifest = JSON.parse(readFileSync("/app/dist/extensions/acpx/openclaw.plugin.json", "utf8")); \
+      const pkg = JSON.parse(readFileSync("/app/dist/extensions/acpx/package.json", "utf8")); \
+      if (manifest.id !== "acpx") throw new Error(`unexpected acpx plugin id: ${manifest.id}`); \
+      if (pkg.name !== "@openclaw/acpx") throw new Error(`unexpected acpx package name: ${pkg.name}`); \
+      if (pkg.version !== expectedVersion) throw new Error(`unexpected acpx version: ${pkg.version}`); \
+    ' "$OPENCLAW_VERSION"
+
 RUN set -eux; \
     rm -rf /app/dist/extensions/diagnostics-otel; \
     mkdir -p /app/dist/extensions; \
@@ -248,7 +278,7 @@ RUN chmod +x \
     /usr/local/bin/start-openclaw.sh \
     /usr/local/bin/start-gbrain.sh
 
-RUN curl -fsSL https://raw.githubusercontent.com/DingTalk-Real-AI/dingtalk-workspace-cli/main/scripts/install.sh | sh
+RUN export DWS_VERSION=v1.0.47 && curl -fsSL https://raw.githubusercontent.com/DingTalk-Real-AI/dingtalk-workspace-cli/main/scripts/install.sh | sh
 
 # 安装 Bun 运行环境（gbrain 必需）— 从官方镜像拷贝二进制，避免 curl 下载超时
 COPY --from=oven/bun:1-debian /usr/local/bin/bun /usr/local/bin/bun

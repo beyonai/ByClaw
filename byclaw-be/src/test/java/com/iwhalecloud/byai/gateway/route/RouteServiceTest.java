@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.gateway.route;
 
 import com.alibaba.fastjson.JSONObject;
+import com.alibaba.fastjson.JSONArray;
 import com.iwhaleai.byai.framework.client.GatewayClient;
 import com.iwhaleai.byai.framework.core.protocol.ExecutionStatus;
 import com.iwhalecloud.byai.common.constants.resource.WorkerAgentType;
@@ -9,9 +10,11 @@ import com.iwhalecloud.byai.common.jwt.JwtService;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
+import com.iwhalecloud.byai.state.common.enums.AgentTypeEnum;
 import com.iwhalecloud.byai.state.common.exception.BdpRuntimeException;
 import com.iwhalecloud.byai.state.domain.agent.enums.AgentMetaEnum;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
+import com.iwhalecloud.byai.state.domain.chat.model.MessageContext;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatStreamRuntimeCoordinator;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatProcessContext;
 import com.iwhalecloud.byai.state.domain.chat.service.GatewayStreamEventProcessor;
@@ -34,6 +37,7 @@ import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.Map;
 import java.util.Locale;
 import java.util.concurrent.LinkedBlockingQueue;
 
@@ -302,6 +306,152 @@ class RouteServiceTest {
         org.assertj.core.api.Assertions.assertThat(contentCaptor.getValue()).isEqualTo("#persona-cfo 22");
     }
 
+    @Test
+    void route_sendsSingleAgentHandoffRequestWithoutBackendContextInjection() throws Exception {
+        ChatProcessContext ctx = buildContext();
+        ctx.getAssistantChatDto().setChatContent("请承接上条 coder 交接单，并给出 reviewer 结论");
+        when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(), any(), any()))
+                .thenAnswer(invocation -> {
+                    ctx.gatewayEventQueue.offer(currentTraceDoneEvent(ctx));
+                    return successResponse();
+                });
+
+        routeService.route(ctx);
+
+        ArgumentCaptor<Object> contentCaptor = ArgumentCaptor.forClass(Object.class);
+        verify(gatewayClient).sendMessage(anyString(), anyString(), contentCaptor.capture(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(), any(), any());
+
+        org.assertj.core.api.Assertions.assertThat(contentCaptor.getValue().toString())
+                .isEqualTo("请承接上条 coder 交接单，并给出 reviewer 结论")
+                .doesNotContain("[ByClaw handoff context]");
+    }
+
+    @Test
+    void route_sendsSingleGatewayMessageWithMultiAgentLaneBatchPayload() throws Exception {
+        ChatProcessContext ctx = buildContext();
+        ctx.getAssistantChatDto().setChatContent("请承接任务并分别回答");
+        JSONObject multiAgent = new JSONObject();
+        multiAgent.put("turnId", "turn-1");
+        multiAgent.put("mode", "parallel");
+        JSONArray lanes = new JSONArray();
+        lanes.add(lane("lane-a", 101L, "agent-a", "Agent A", "client-a", 11L, 21L, 1));
+        lanes.add(lane("lane-b", 102L, "agent-b", "Agent B", "client-b", 12L, 22L, 2));
+        multiAgent.put("lanes", lanes);
+        ctx.getAssistantChatDto().getExtParams().put("multiAgent", multiAgent);
+        when(sequenceService.nextVal()).thenReturn(1001L, 1002L);
+
+        when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(), any(), any()))
+                .thenAnswer(invocation -> {
+                    ctx.gatewayEventQueue.offer(doneEvent(TraceIdCodec.encode(11L, 21L)));
+                    ctx.gatewayEventQueue.offer(doneEvent(TraceIdCodec.encode(12L, 22L)));
+                    return successResponse();
+                });
+
+        routeService.route(ctx);
+
+        ArgumentCaptor<String> answerMessageIdCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> traceIdCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object> contentCaptor = ArgumentCaptor.forClass(Object.class);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> paramsCaptor = (ArgumentCaptor) ArgumentCaptor.forClass(Map.class);
+        verify(gatewayClient).sendMessage(anyString(), anyString(), contentCaptor.capture(), anyString(), any(),
+                anyString(), anyString(), answerMessageIdCaptor.capture(), traceIdCaptor.capture(),
+                paramsCaptor.capture(), any());
+
+        String laneATraceId = TraceIdCodec.encode(11L, 21L);
+        String laneBTraceId = TraceIdCodec.encode(12L, 22L);
+        org.assertj.core.api.Assertions.assertThat(contentCaptor.getValue()).isEqualTo("请承接任务并分别回答");
+        org.assertj.core.api.Assertions.assertThat(answerMessageIdCaptor.getValue()).isEqualTo("2");
+        org.assertj.core.api.Assertions.assertThat(traceIdCaptor.getValue())
+                .isEqualTo(TraceIdCodec.encode(ctx.getUserMessageId(), ctx.getModelAnswerMessageId()));
+        Map<String, Object> params = paramsCaptor.getValue();
+        JSONObject batchPayload = (JSONObject) params.get("multi_agent");
+        org.assertj.core.api.Assertions.assertThat(batchPayload)
+                .containsEntry("turnId", "turn-1")
+                .containsEntry("mode", "parallel");
+        JSONArray batchLanes = batchPayload.getJSONArray("lanes");
+        org.assertj.core.api.Assertions.assertThat(batchLanes).hasSize(2);
+        JSONObject laneAPayload = batchLanes.stream()
+                .map(JSONObject.class::cast)
+                .filter(payload -> "lane-a".equals(payload.getString("laneId")))
+                .findFirst()
+                .orElseThrow();
+        org.assertj.core.api.Assertions.assertThat(laneAPayload)
+                .containsEntry("laneId", "lane-a")
+                .containsEntry("clientRequestId", "client-a")
+                .containsEntry("queryMessageId", "11")
+                .containsEntry("answerMessageId", "21")
+                .containsEntry("traceId", laneATraceId);
+        JSONObject laneBPayload = batchLanes.stream()
+                .map(JSONObject.class::cast)
+                .filter(payload -> "lane-b".equals(payload.getString("laneId")))
+                .findFirst()
+                .orElseThrow();
+        org.assertj.core.api.Assertions.assertThat(laneBPayload)
+                .containsEntry("laneId", "lane-b")
+                .containsEntry("clientRequestId", "client-b")
+                .containsEntry("queryMessageId", "12")
+                .containsEntry("answerMessageId", "22")
+                .containsEntry("traceId", laneBTraceId);
+        org.assertj.core.api.Assertions.assertThat(ctx.getMultiAgentMessageContextsByTraceId())
+                .containsKeys(laneATraceId, laneBTraceId);
+        org.assertj.core.api.Assertions.assertThat(ctx.getMultiAgentMessageContextsByTraceId().get(laneATraceId)
+                .getMessageId()).isEqualTo(1001L);
+        org.assertj.core.api.Assertions.assertThat(ctx.getMultiAgentMessageContextsByTraceId().get(laneBTraceId)
+                .getMessageId()).isEqualTo(1002L);
+    }
+
+    @Test
+    void route_derivesUniqueTraceIdsForMultiAgentLanesWhenMessageIdsAreMissing() throws Exception {
+        ChatProcessContext ctx = buildContext();
+        JSONObject multiAgent = new JSONObject();
+        multiAgent.put("turnId", "turn-1");
+        multiAgent.put("mode", "parallel");
+        JSONArray lanes = new JSONArray();
+        lanes.add(lane("lane-a", 101L, "agent-a", "Agent A", "client-a", null, null, 1));
+        lanes.add(lane("lane-b", 102L, "agent-b", "Agent B", "client-b", null, null, 2));
+        multiAgent.put("lanes", lanes);
+        ctx.getAssistantChatDto().getExtParams().put("multiAgent", multiAgent);
+
+        String laneATraceId = ctx.getTraceId() + ":lane:client-a";
+        String laneBTraceId = ctx.getTraceId() + ":lane:client-b";
+        when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(), any(), any()))
+                .thenAnswer(invocation -> {
+                    ctx.gatewayEventQueue.offer(doneEvent(laneATraceId));
+                    ctx.gatewayEventQueue.offer(doneEvent(laneBTraceId));
+                    return successResponse();
+                });
+
+        routeService.route(ctx);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> paramsCaptor = (ArgumentCaptor) ArgumentCaptor.forClass(Map.class);
+        verify(gatewayClient).sendMessage(anyString(), anyString(), any(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(), paramsCaptor.capture(), any());
+
+        JSONObject batchPayload = (JSONObject) paramsCaptor.getValue().get("multi_agent");
+        JSONArray batchLanes = batchPayload.getJSONArray("lanes");
+        JSONObject laneAPayload = batchLanes.stream()
+                .map(JSONObject.class::cast)
+                .filter(payload -> "lane-a".equals(payload.getString("laneId")))
+                .findFirst()
+                .orElseThrow();
+        JSONObject laneBPayload = batchLanes.stream()
+                .map(JSONObject.class::cast)
+                .filter(payload -> "lane-b".equals(payload.getString("laneId")))
+                .findFirst()
+                .orElseThrow();
+
+        org.assertj.core.api.Assertions.assertThat(laneAPayload.getString("traceId")).isEqualTo(laneATraceId);
+        org.assertj.core.api.Assertions.assertThat(laneBPayload.getString("traceId")).isEqualTo(laneBTraceId);
+        org.assertj.core.api.Assertions.assertThat(ctx.getMultiAgentTraceIds())
+                .containsExactlyInAnyOrder(laneATraceId, laneBTraceId);
+    }
+
     private ChatProcessContext buildContext() {
         return buildContext(WorkerAgentType.BYCLAW_EXE.getCode(), null);
     }
@@ -316,6 +466,7 @@ class RouteServiceTest {
         ctx.setUserMessageId(1L);
         ctx.setModelAnswerMessageId(2L);
         ctx.setTraceId(TraceIdCodec.encode(ctx.getUserMessageId(), ctx.getModelAnswerMessageId()));
+        ctx.setMessageContext(new MessageContext(AgentTypeEnum.AGENT, ctx.getModelAnswerMessageId()));
         ctx.setParams(new HashMap<>());
         ctx.getParams().put("worker_agent_type", workerAgentType);
         ctx.gatewayEventQueue = new LinkedBlockingQueue<>();
@@ -324,11 +475,33 @@ class RouteServiceTest {
     }
 
     private JSONObject currentTraceDoneEvent(ChatProcessContext ctx) {
+        return doneEvent(TraceIdCodec.encode(ctx.getUserMessageId(), ctx.getModelAnswerMessageId()));
+    }
+
+    private JSONObject doneEvent(String traceId) {
         JSONObject event = new JSONObject();
         event.put("event_type", SseResponseEventEnum.appStreamResponse);
-        event.put("trace_id", TraceIdCodec.encode(ctx.getUserMessageId(), ctx.getModelAnswerMessageId()));
+        event.put("trace_id", traceId);
         event.put("data", "{}");
         return event;
+    }
+
+    private JSONObject lane(String laneId, Long agentId, String agentCode, String agentName, String clientRequestId,
+        Long queryMessageId, Long answerMessageId, Integer order) {
+        JSONObject lane = new JSONObject();
+        lane.put("laneId", laneId);
+        lane.put("agentId", agentId);
+        lane.put("agentCode", agentCode);
+        lane.put("agentName", agentName);
+        lane.put("clientRequestId", clientRequestId);
+        if (queryMessageId != null) {
+            lane.put("queryMessageId", String.valueOf(queryMessageId));
+        }
+        if (answerMessageId != null) {
+            lane.put("answerMessageId", String.valueOf(answerMessageId));
+        }
+        lane.put("order", order);
+        return lane;
     }
 
     private GatewayClient.SendResponse successResponse() {

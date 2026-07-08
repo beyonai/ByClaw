@@ -13,8 +13,9 @@ import type { SetStateAction } from 'react';
 
 import type { IMessageInfo } from '@/models/useMessageStore';
 import type { IMessage } from '@/typescript/message';
-import { getMsgId } from '@/utils/messgae';
+import { getMsgId, hasVisibleMessageContent } from '@/utils/messgae';
 import { getSessionObjectTypeMap } from '@/utils/session';
+import { IMessageState } from '@/constants/message';
 import useGlobal from '../useGlobal';
 
 // 记录当前会话ID的引用，用于跟踪会话变化
@@ -24,6 +25,14 @@ const curSessionId = {
 
 export const DRAFT_SESSION_ID = '__message_store_draft_session__';
 export const EMPTY_ARRAY = [];
+
+const shouldDropCompletedEmptyAnswer = (message: IMessage) =>
+  Boolean(
+    message.fromBeyond &&
+      message.messageState !== undefined &&
+      ![IMessageState.Query, IMessageState.Answer].includes(message.messageState as IMessageState) &&
+      !hasVisibleMessageContent(message)
+  );
 
 /**
  * 消息管理Hook
@@ -92,9 +101,15 @@ export default function useMessage({ sessionId }: { sessionId?: string }) {
                 newMessage = merge({}, targetMsg, msg);
               }
               newMessage.updateKey = getMsgId();
-              list[targetIndex] = newMessage;
+              if (shouldDropCompletedEmptyAnswer(newMessage)) {
+                list.splice(targetIndex, 1);
+              } else {
+                list[targetIndex] = newMessage;
+              }
             } else {
-              list = [...list, newMessage];
+              if (!shouldDropCompletedEmptyAnswer(newMessage)) {
+                list = [...list, newMessage];
+              }
             }
 
             if (`${targetSessionId}` === `${curSessionId.current}` || `${targetSessionId}` === `${activeSessionId}`) {

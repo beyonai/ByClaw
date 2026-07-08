@@ -13,9 +13,12 @@ import type { ResolvedByaiAccount, ByaiProbe } from "./types.js";
 import { sendReplyCallback } from "./webhook-handler.js";
 import type { ByaiSdkApp } from "./sdk-app.js";
 import {
+  buildSdkStateEvent,
+  emitSdkChunkTracked,
   resolveActiveSdkRequestByTarget,
   resolveSdkEmitter,
   resolveWebhookContext,
+  withActiveSdkRequestEmitMetadata,
 } from "./session-context.js";
 import { consumePendingMessageToolSend } from "./pending-message-tool.js";
 import { parseSessionIdFromTo } from "./outbound-dedup.js";
@@ -49,20 +52,21 @@ async function emitSdkText(params: {
     `[byai-channel] outbound sdk emit: accountId=${params.accountId || "default"} to=${params.to} sessionId=${request.sessionId} traceId=${request.traceId || ""} textLength=${params.text.length}`,
   );
   if (params.text) {
-    await sdkEmitter.emitChunk(
-      request.sessionId,
-      request.traceId || "",
-      params.text,
-      {},
-    );
+    await emitSdkChunkTracked(request.sessionKey, {
+      emitter: sdkEmitter,
+      sessionId: request.sessionId,
+      traceId: request.traceId,
+      text: params.text,
+    });
   }
+  const stateOptions = withActiveSdkRequestEmitMetadata(request, {
+    eventType: EventType.APP_STREAM_RESPONSE,
+  });
   await sdkEmitter.emitState(
     request.sessionId,
     request.traceId || "",
-    "",
-    {
-      eventType: EventType.APP_STREAM_RESPONSE,
-    },
+    buildSdkStateEvent("", stateOptions),
+    stateOptions,
   );
 }
 
@@ -257,9 +261,15 @@ export const byaiChannelPlugin: ChannelPlugin<ResolvedByaiAccount, ByaiProbe> = 
 
     sendText: async (ctx: ChannelOutboundContext) => {
       console.log("=======================sendText==========================");
-      console.log(ctx);
+      console.log({
+        to: ctx.to,
+        accountId: ctx.accountId,
+        replyToId: ctx.replyToId,
+        textLength: ctx.text?.length ?? 0,
+      });
 
-      const { to, text, accountId, replyToId } = ctx;
+      const { to, accountId, replyToId } = ctx;
+      const text = ctx.text ?? "";
       const okResult = {
         channel: CHANNEL_ID,
         messageId: replyToId ?? `byai-${Date.now()}`,
@@ -288,12 +298,13 @@ export const byaiChannelPlugin: ChannelPlugin<ResolvedByaiAccount, ByaiProbe> = 
       }
       const sdkEmitter = resolveSdkEmitter(resolvedAccountId);
       if (sdkEmitter) {
-        await sdkEmitter.emitChunk(
-          request.sessionId,
-          request.traceId || "",
+        await emitSdkChunkTracked(request.sessionKey, {
+          emitter: sdkEmitter,
+          sessionId: request.sessionId,
+          traceId: request.traceId,
           text,
-          { eventType: EventType.ANSWER_DELTA },
-        );
+          options: { eventType: EventType.ANSWER_DELTA },
+        });
       }
       return okResult;
     },
