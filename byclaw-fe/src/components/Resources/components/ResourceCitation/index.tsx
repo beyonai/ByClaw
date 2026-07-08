@@ -17,11 +17,14 @@ import {
   queryDigEmployeeRelResourceAuth,
   queryResourceMembers,
   qryByClawFileByUserCode,
-  queryWorkspaceSkillList,
   readFile,
   downloadSkillZip,
 } from '@/pages/manager/service/resources';
-import { mapWorkspaceSkillRows, isWorkspaceSkill } from '@/components/Resources/workspaceSkill/utils';
+import {
+  isWorkspaceSkill,
+  SKILL_DISPLAY_SOURCE_USER_DEVELOPED,
+} from '@/components/Resources/workspaceSkill/utils';
+import { queryDigitalEmployeeSkillResources } from '@/components/Resources/workspaceSkill/queryDigitalEmployeeSkillResources';
 import useGlobal from '@/hooks/useGlobal';
 
 const Draggable = withDrag(DragType.tool);
@@ -44,6 +47,8 @@ interface IResourceItem {
   isFromResourceModule?: boolean;
   skillPath?: string;
   skillUrl?: string;
+  displaySourceType?: string;
+  resourceBacked?: boolean;
 }
 
 interface Props {
@@ -156,7 +161,13 @@ const ResourceList = (props: Props) => {
   }, [defaultResources, keyword, resourceType, resources]);
 
   const pageSize = 100;
-  const loadResources = async (reset = false, myResourceType: string = resourceType) => {
+  const getReloadResourceType = (payload?: string | { resourceType?: string }) =>
+    typeof payload === 'string' ? payload : payload?.resourceType;
+
+  const loadResources = async (
+    reset = false,
+    resourceTypePayload?: string | { resourceType?: string }
+  ) => {
     if (resources) {
       return;
     }
@@ -167,6 +178,7 @@ const ResourceList = (props: Props) => {
 
     try {
       let rows: any[] = [];
+      const myResourceType = getReloadResourceType(resourceTypePayload) || resourceType;
       const currentResourceBizTypeList =
         Array.isArray(resourceBizTypeList) && resourceBizTypeList.length
           ? resourceBizTypeList
@@ -194,43 +206,33 @@ const ResourceList = (props: Props) => {
       } else {
         const currentPage = reset ? 1 : pageIndex;
         if (normalizedAgentId) {
-          const response = await queryDigEmployeeRelResourceAuth({
-            resourceId: normalizedAgentId,
-            pageSize,
-            pageNum: currentPage,
-            keyword: searchValue.current.trim(),
-            resourceBizTypeList: currentResourceBizTypeList,
-          });
-          const allRows = Array.isArray(response?.rows)
-            ? response.rows
-            : Array.isArray(response?.list)
-              ? response.list
-              : [];
-          rows =
-            Array.isArray(currentResourceBizTypeList) && currentResourceBizTypeList.length
-              ? allRows.filter((item: any) => currentResourceBizTypeList.includes(item.resourceBizType))
-              : allRows;
-          // 与左侧“技能中心”同口径：技能 tab 首屏在“已绑定技能”之外，合并“用户开发（工作空间未绑定）”技能。
-          if (myResourceType === 'SKILL' && reset) {
-            try {
-              const workspaceSkillResponse: any = await queryWorkspaceSkillList({
-                resourceId: normalizedAgentId,
-                userCode: userInfo?.userCode,
-                keyword: searchValue.current.trim(),
-              });
-              const workspaceRaw = Array.isArray(workspaceSkillResponse)
-                ? workspaceSkillResponse
-                : Array.isArray(workspaceSkillResponse?.data)
-                  ? workspaceSkillResponse.data
-                  : Array.isArray(workspaceSkillResponse?.rows)
-                    ? workspaceSkillResponse.rows
-                    : Array.isArray(workspaceSkillResponse?.list)
-                      ? workspaceSkillResponse.list
-                      : [];
-              rows = [...rows, ...mapWorkspaceSkillRows(workspaceRaw)];
-            } catch (error) {
-              console.warn('query workspace skills failed', error);
-            }
+          if (myResourceType === 'SKILL') {
+            const skillResult = await queryDigitalEmployeeSkillResources({
+              resourceId: normalizedAgentId,
+              pageSize,
+              pageNum: currentPage,
+              keyword: searchValue.current.trim(),
+              userCode: userInfo?.userCode,
+              includeWorkspace: reset,
+            });
+            rows = skillResult.rows;
+          } else {
+            const response = await queryDigEmployeeRelResourceAuth({
+              resourceId: normalizedAgentId,
+              pageSize,
+              pageNum: currentPage,
+              keyword: searchValue.current.trim(),
+              resourceBizTypeList: currentResourceBizTypeList,
+            });
+            const allRows = Array.isArray(response?.rows)
+              ? response.rows
+              : Array.isArray(response?.list)
+                ? response.list
+                : [];
+            rows =
+              Array.isArray(currentResourceBizTypeList) && currentResourceBizTypeList.length
+                ? allRows.filter((item: any) => currentResourceBizTypeList.includes(item.resourceBizType))
+                : allRows;
           }
         } else {
           const response = await listResourceUseAuth({
@@ -250,7 +252,7 @@ const ResourceList = (props: Props) => {
       } else {
         setResourceList((prev) => [...defaultResources, ...prev, ...rows]);
       }
-      setPageIndex(pageIndex + 1);
+      setPageIndex((reset ? 1 : pageIndex) + 1);
     } catch (error) {
       console.error('Failed to load resources:', error);
     } finally {
@@ -777,6 +779,19 @@ const ResourceList = (props: Props) => {
     );
   };
 
+  const renderSkillSourceTag = (item: IResourceItem): React.ReactNode => {
+    if (resourceType !== 'SKILL' || item.displaySourceType !== SKILL_DISPLAY_SOURCE_USER_DEVELOPED) {
+      return null;
+    }
+    return (
+      <span className={styles.compactSkillSourceTag}>
+        <span className={styles.compactSkillSourceTagText}>
+          {intl.formatMessage({ id: 'resource.skillSource.userDeveloped' })}
+        </span>
+      </span>
+    );
+  };
+
   // 渲染卡片/列表项的操作下拉菜单（详情 / 下载 / 删除）
   const renderActionDropdown = (item: IResourceItem, variant: 'grid' | 'list' = 'grid'): React.ReactNode => {
     if (resourceType !== 'OBJECT' && resourceType !== 'VIEW' && resourceType !== 'SPACE' && resourceType !== 'SKILL') {
@@ -885,8 +900,12 @@ const ResourceList = (props: Props) => {
   };
 
   useEffect(() => {
-    const reload = (resourceType: string) => {
-      loadResources(true, resourceType);
+    const reload = (payload?: string | { resourceType?: string }) => {
+      const nextResourceType = getReloadResourceType(payload);
+      if (nextResourceType !== resourceType) {
+        return;
+      }
+      loadResources(true, nextResourceType);
     };
 
     EventEmitter.on('beyond-resourceList-resourceType-reload', reload);
@@ -923,6 +942,7 @@ const ResourceList = (props: Props) => {
                     title={
                       <span className={styles.compactTitleRow}>
                         <span className={styles.nameText}>{item.resourceName}</span>
+                        {renderSkillSourceTag(item)}
                         {renderResourceBizTypeTag(item.resourceBizType)}
                       </span>
                     }
