@@ -11,6 +11,7 @@ import com.iwhalecloud.byai.gateway.channels.service.feishu.model.FeishuRobotCha
 import com.iwhalecloud.byai.gateway.channels.service.feishu.support.FeishuEventDecryptor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.ResponseEntity;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -27,6 +28,7 @@ import org.springframework.web.bind.annotation.RestController;
  */
 @RestController
 @RequestMapping("/feishu/bot")
+@ConditionalOnProperty(name = "channel.stream.enabled", havingValue = "true")
 public class FeishuBotEventController {
 
     private static final Logger logger = LoggerFactory.getLogger(FeishuBotEventController.class);

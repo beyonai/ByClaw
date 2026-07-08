@@ -41,7 +41,18 @@ public class FeishuStreamingOutputStream extends FeishuBufferedOutputStream {
             String streamMessageId,
             String cardTitle
     ) {
-        super(objectMapper);
+        this(objectMapper, feishuReplyDispatcher, tenantAccessToken, streamMessageId, cardTitle, true);
+    }
+
+    public FeishuStreamingOutputStream(
+            ObjectMapper objectMapper,
+            FeishuReplyDispatcher feishuReplyDispatcher,
+            String tenantAccessToken,
+            String streamMessageId,
+            String cardTitle,
+            boolean showReasoning
+    ) {
+        super(objectMapper, showReasoning);
         this.feishuReplyDispatcher = feishuReplyDispatcher;
         this.tenantAccessToken = tenantAccessToken;
         this.streamMessageId = streamMessageId;

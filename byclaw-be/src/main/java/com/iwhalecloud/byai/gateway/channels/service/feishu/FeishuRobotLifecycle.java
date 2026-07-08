@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.gateway.channels.service.feishu;
 
+import com.iwhalecloud.byai.gateway.channels.service.feishu.config.FeishuStreamProperties;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -13,14 +14,23 @@ public class FeishuRobotLifecycle {
 
     private static final Logger logger = LoggerFactory.getLogger(FeishuRobotLifecycle.class);
 
+    private final FeishuStreamProperties properties;
     private final FeishuRobotRegistryService feishuRobotRegistryService;
 
-    public FeishuRobotLifecycle(FeishuRobotRegistryService feishuRobotRegistryService) {
+    public FeishuRobotLifecycle(
+            FeishuStreamProperties properties,
+            FeishuRobotRegistryService feishuRobotRegistryService
+    ) {
+        this.properties = properties;
         this.feishuRobotRegistryService = feishuRobotRegistryService;
     }
 
     @PostConstruct
     public void init() {
+        if (!properties.isEnabled()) {
+            logger.info("Feishu bot is disabled. Set channel.stream.enabled=true to enable it.");
+            return;
+        }
         try {
             feishuRobotRegistryService.initializeRobotConfigs();
         } catch (Exception e) {
