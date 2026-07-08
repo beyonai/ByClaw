@@ -213,6 +213,8 @@ RUN --mount=type=cache,target=/root/.npm \
     cp -a /tmp/openclaw-acpx-plugin/node_modules/@openclaw/acpx/. /app/dist/extensions/acpx/; \
     cp -a /tmp/openclaw-acpx-plugin/node_modules /app/dist/extensions/acpx/node_modules; \
     rm -rf /app/dist/extensions/acpx/node_modules/@openclaw/acpx /tmp/openclaw-acpx-plugin; \
+    chown -R root:root /app/dist/extensions/acpx; \
+    chmod -R go-w /app/dist/extensions/acpx; \
     test -f /app/dist/extensions/acpx/dist/index.js; \
     test -f /app/dist/extensions/acpx/openclaw.plugin.json; \
     node --input-type=module -e ' \
