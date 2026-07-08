@@ -4,6 +4,24 @@ vi.mock("openclaw/plugin-sdk/session-store-runtime", () => ({
   getSessionEntry: () => undefined,
 }));
 
+// session-context.ts → remote-followup.ts → diagnostics.ts imports this external
+// subpath, absent in the plugin test env; stub it as a passthrough so the module
+// graph loads. The state-projection internals under test never invoke it.
+vi.mock("openclaw/plugin-sdk/diagnostic-runtime", () => ({
+  createDiagnosticTraceContext: (init: unknown) => init ?? {},
+  freezeDiagnosticTraceContext: (trace: unknown) => trace,
+  emitTrustedDiagnosticEvent: () => {},
+  isValidDiagnosticTraceId: () => true,
+}));
+
+// session-context.ts imports routing helpers from this external subpath (absent
+// in the plugin test env). The state-projection internals under test never call
+// them, so trivial stubs keep the module graph loadable.
+vi.mock("openclaw/plugin-sdk/routing", () => ({
+  resolveAgentIdFromSessionKey: (sessionKey: string) => sessionKey,
+  isSubagentSessionKey: () => false,
+}));
+
 vi.mock("./utils.js", () => ({
   createRedisInstance: () => null,
 }));
@@ -20,7 +38,7 @@ const started = {
   sessionId: "doc-session",
   traceId: "trace-1",
   toolCallId: "call-1",
-  workAgentSessionKey: "agent:main:subagent:work",
+  requesterSessionKey: "agent:main:subagent:work",
   createdAt: 1_100,
 };
 

@@ -25,6 +25,12 @@ export type BaiyingRemoteTaskStartedEvent = {
   /** byai-channel account + language of the originating SDK request; lets the follow-up watcher rebuild the ActiveSdkRequest after an openclaw restart. */
   accountId?: string;
   language?: string;
+  /**
+   * Beyond-Token snapshot of the originating SDK request. sessionId/traceId already carry the
+   * channel session/trace (same values, different names), but beyondToken is not otherwise
+   * recoverable after a restart — persist it so the rebuilt request lets tools re-resolve it.
+   */
+  beyondToken?: string;
 };
 
 export type BaiyingRemoteTaskLogEvent = BaiyingRemoteTaskStartedEvent;

@@ -734,6 +734,7 @@ export function createBaiyingCallToolFactory(params: {
                 status: "pending",
                 accountId: channelResolve.accountId,
                 language: channelResolve.language,
+                beyondToken: channelResolve.beyondToken,
               };
               await appendBaiyingRemoteTaskStartedEvent(record).catch((err) => {
                 traceLog("doc_async.track_failed", {

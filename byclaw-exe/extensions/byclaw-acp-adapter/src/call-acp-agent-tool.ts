@@ -107,6 +107,7 @@ async function trackDelegatedTask(params: {
   logger?: BaiyingEnhanceLogger;
   accountId?: string;
   language?: string;
+  beyondToken?: string;
 }): Promise<void> {
   const result = params.result;
   if (!(isPlainRecord(result) && result.backend === "call_agent_sdk" && result.status === "running")) {
@@ -141,6 +142,7 @@ async function trackDelegatedTask(params: {
     status: "pending",
     accountId: params.accountId,
     language: params.language,
+    beyondToken: params.beyondToken,
   };
   await appendBaiyingRemoteTaskStartedEvent(record).catch((err) => {
     logBaiyingRequest(params.logger, "byclaw_call_acp_agent.track_failed", {
@@ -320,6 +322,7 @@ export function createByclawCallAcpAgentTool(params: CreateByclawCallAcpAgentToo
         logger,
         accountId: channelResolve.accountId,
         language: channelResolve.language,
+        beyondToken: channelResolve.beyondToken,
       });
       return withDelegatedAgentYieldDetails(result);
     },

@@ -39,6 +39,12 @@ type RemoteTaskStartedEvent = {
    */
   accountId?: string;
   language?: string;
+  /**
+   * 发起委派的 SDK 请求的 Beyond-Token 快照。sessionId/traceId 已分别对应 channelSessionId/
+   * channelTraceId（同值不同名），恢复时够用；但 beyondToken 重启后无从再取，写入端填上后
+   * 恢复重建 request 才能让续跑里的 tool 重新解析到它。
+   */
+  beyondToken?: string;
 };
 
 type RemoteTaskStatus = "pending" | "result_ready" | "delivered" | "retry" | "failed";
@@ -396,6 +402,7 @@ async function deliverReadyTask(
       traceId: task.traceId,
       accountId: task.accountId,
       language: task.language === "en_US" ? "en_US" : task.language === "zh_CN" ? "zh_CN" : undefined,
+      beyondToken: task.beyondToken,
     });
     // dispatch 前先置「等待续跑」态：把完成门的持有从 delegatedWorkToolCallIds 平滑转移到
     // awaitingFollowup，堵住「回灌成功清空委派集合 → follow-up run 的 lifecycle start 尚未经

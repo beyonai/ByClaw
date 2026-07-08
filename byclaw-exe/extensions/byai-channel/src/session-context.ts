@@ -1250,6 +1250,7 @@ export function ensureActiveSdkRequestForDelegatedFollowup(params: {
   traceId?: string;
   accountId?: string;
   language?: Language;
+  beyondToken?: string;
 }): ActiveSdkRequest | undefined {
   const existing = locateActiveSdkRequestForDelegated(params);
   if (existing) {
@@ -1275,6 +1276,7 @@ export function ensureActiveSdkRequestForDelegatedFollowup(params: {
     traceId,
     language,
     languageProvided,
+    beyondToken: normalizeAlias(params.beyondToken) ?? undefined,
   });
 }
 
