@@ -1,4 +1,9 @@
-import Redis from "ioredis";
+import {
+  RedisCompatKeys,
+  closeRedisCompatClient,
+  createByFrameworkRedisClient,
+  resolveRedisCompatConfig,
+} from "./redis-compat.js";
 
 type LoggerLike = {
   warn?: (message: string) => void;
@@ -54,7 +59,7 @@ function normalizeWeight(value: unknown): number {
 }
 
 export function backendServiceDiscoveryKey(domainName = process.env.BE_DOMAINNAME?.trim() || "ByaiService"): string {
-  return `byai_gateway:sd:instances:${domainName || "ByaiService"}`;
+  return RedisCompatKeys.serviceDiscoveryInstances(domainName || "ByaiService");
 }
 
 export function parseBackendServiceInstance(raw: string): BackendServiceInstance | null {
@@ -105,20 +110,13 @@ export async function discoverBackendBaseUrl(params: { logger?: LoggerLike } = {
     return explicit.replace(/\/+$/g, "");
   }
 
-  const host = process.env.REDIS_HOST?.trim();
-  const port = Number.parseInt(process.env.REDIS_PORT?.trim() || "", 10);
-  const db = Number.parseInt(process.env.REDIS_DATABASE?.trim() || "", 10);
-  if (!host || Number.isNaN(port) || Number.isNaN(db)) {
+  const redisConfig = resolveRedisCompatConfig();
+  if (!redisConfig) {
     return "";
   }
 
   const key = backendServiceDiscoveryKey();
-  const redis = new Redis({
-    host,
-    port,
-    db,
-    username: process.env.REDIS_USERNAME?.trim() || undefined,
-    password: process.env.REDIS_PASSWORD?.trim() || undefined,
+  const redis = createByFrameworkRedisClient({
     lazyConnect: true,
     enableOfflineQueue: false,
     connectTimeout: Math.max(
@@ -141,6 +139,6 @@ export async function discoverBackendBaseUrl(params: { logger?: LoggerLike } = {
     );
     return "";
   } finally {
-    await redis.quit().catch(() => undefined);
+    await closeRedisCompatClient(redis);
   }
 }

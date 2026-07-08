@@ -5,14 +5,13 @@
  * cross-backend primitives (types, parameter helpers, polling, diagnosis).
  *
  * Everything here is specific to the hand-rolled implementation:
- *   - `createRedisClient` — a plain `new Redis(...)` factory
+ *   - `createRedisClient` — a Redis standalone / Cluster compatible factory
  *   - `sendDocAsyncMessage` — hand-rolls the ASK_AGENT command JSON and
- *     `xadd`s it to `byai_gateway:ctrl:*` streams with no SDK dependency
+ *     `xadd`s it to by-framework-compatible CTRL streams with no SDK dependency
  *
  * If you are adding a new cross-backend helper, put it in `doc-shared.ts`.
  */
 
-import Redis from "ioredis";
 import { randomBytes, randomUUID } from "node:crypto";
 import type { ExecutorFailure } from "./types.js";
 import { makeError } from "./errors.js";
@@ -22,6 +21,11 @@ import {
   type DocAsyncSendParams,
   type RedisConfig,
 } from "./doc-shared.js";
+import {
+  RedisCompatKeys,
+  createRedisCompatClient,
+  type RedisCompatClient,
+} from "../redis-compat.js";
 
 function safeUuid(): string {
   try {
@@ -31,13 +35,9 @@ function safeUuid(): string {
   }
 }
 
-export function createRedisClient(config: RedisConfig = readRedisConfig()): Redis {
-  return new Redis({
-    host: config.host,
-    port: config.port,
-    username: config.username,
-    password: config.password,
-    db: config.db,
+export function createRedisClient(config: RedisConfig = readRedisConfig()): RedisCompatClient {
+  void config;
+  return createRedisCompatClient({
     lazyConnect: true,
     enableOfflineQueue: false,
     maxRetriesPerRequest: 2,
@@ -47,13 +47,13 @@ export function createRedisClient(config: RedisConfig = readRedisConfig()): Redi
 
 /**
  * Raw-backend dispatcher. Builds the ASK_AGENT command JSON by hand and
- * writes it directly to `byai_gateway:ctrl:*` via `xadd`.
+ * writes it directly to by-framework-compatible CTRL streams via `xadd`.
  *
  * The SDK path uses `sendDocAsyncMessageViaSdk` in `doc-gateway.ts` instead;
  * the two are intentionally parallel, not layered on top of each other.
  */
 export async function sendDocAsyncMessage(
-  client: Redis,
+  client: RedisCompatClient,
   params: DocAsyncSendParams,
 ): Promise<{ ack: DocAsyncAck | null; error: ExecutorFailure | null }> {
   const messageId = `msg-${safeUuid().slice(0, 12)}`;
@@ -80,11 +80,11 @@ export async function sendDocAsyncMessage(
   };
   let streamName: string;
   if (params.routeMode === "agent_type") {
-    streamName = `byai_gateway:ctrl:agent_type:${params.targetAgentType}`;
+    streamName = RedisCompatKeys.ctrlStream(params.targetAgentType);
   } else if (params.routeMode === "worker") {
-    streamName = `byai_gateway:ctrl:worker:${params.targetWorkerId}`;
+    streamName = RedisCompatKeys.workerCtrlStream(params.targetWorkerId);
   } else {
-    streamName = `byai_gateway:ctrl:capability:${params.targetWorkerId}`;
+    streamName = RedisCompatKeys.capabilityCtrlStream(params.targetWorkerId);
   }
   try {
     const redisMsgId = await client.xadd(streamName, "*", "data", JSON.stringify(command));

@@ -25,7 +25,10 @@ import { logBaiyingRequest, type BaiyingEnhanceLogger } from "../debug-channel.j
 // place that should reference `doc-redis.ts`, and only when the caller has
 // explicitly opted into `BAIYING_DOC_BACKEND=raw`.
 import { createRedisClient, sendDocAsyncMessage } from "../doc-redis.js";
-import type Redis from "ioredis";
+import {
+  closeRedisCompatClient,
+  type RedisCompatClient,
+} from "../../redis-compat.js";
 
 /** Which backend sends + polls the DOC ASK_AGENT command. */
 export type DocBackend = "raw" | "sdk";
@@ -68,7 +71,7 @@ export async function executeDoc(params: {
   /** Override the backend selection; if omitted, `resolveDocBackend` is used. */
   backend?: DocBackend;
   /** Testing hook for the raw backend: injects a custom ioredis client factory. */
-  redisClientFactory?: () => Redis;
+  redisClientFactory?: () => RedisCompatClient;
   /**
    * Progressive streaming hook. Forwarded to both SDK and raw backends;
    * invoked for every `answerDelta` event in sync call mode.
@@ -402,7 +405,7 @@ type ExecuteDocViaRawInput = {
   sendParams: DocAsyncSendParams;
   syncTimeoutSec: number;
   syncIntervalSec: number;
-  redisClientFactory?: () => Redis;
+  redisClientFactory?: () => RedisCompatClient;
   onDelta?: DocDeltaCallback;
   signal?: AbortSignal;
 };
@@ -469,7 +472,7 @@ async function executeDocViaRaw(input: ExecuteDocViaRawInput): Promise<ExecutorR
       target: buildTarget(input),
     };
   } finally {
-    await client.quit().catch(() => undefined);
+    await closeRedisCompatClient(client);
   }
 }
 

@@ -25,22 +25,19 @@
  * What this module contributes:
  * - ASK_AGENT dispatch uses `GatewayClient.sendMessage(...)` / `sendCommand(...)`
  *   with typed `AskAgentCommand` + `MessageHeader`.
- * - Session stream polling pins the stream name to
- *   `QueueNames.session_data_stream(sessionId)` so it tracks the SDK's key
- *   naming; reuses the SDK-built Redis connection.
+ * - Session stream polling pins the stream name to the local Redis compat key
+ *   factory so it tracks v1 / v2 by-framework key naming; reuses the SDK-built
+ *   Redis connection.
  * - `executeDocViaSdk` is the single entry point for both `sync` and `async`
  *   call modes.
  */
 
-import type { Redis } from "ioredis";
 import {
   ActionType,
   AskAgentCommand,
   ByaiGatewayClient,
   type DataMessage,
   MessageHeader,
-  QueueNames,
-  createRedis,
 } from "@byclaw/by-framework";
 import type { Capability, Dict, ExecutorFailure, ExecutorResponse } from "./types.js";
 import { makeError } from "./errors.js";
@@ -54,9 +51,15 @@ import {
   type DocPollResult,
   type RedisConfig,
 } from "./doc-shared.js";
+import {
+  RedisCompatKeys,
+  closeRedisCompatClient,
+  createByFrameworkRedisClient,
+  type RedisCompatClient,
+} from "../redis-compat.js";
 
 export type SdkGatewayContext = {
-  redis: Redis;
+  redis: RedisCompatClient;
   client: ByaiGatewayClient;
 };
 
@@ -68,13 +71,8 @@ export type SdkGatewayContext = {
 export function createSdkGatewayClient(
   config: RedisConfig = readRedisConfig(),
 ): SdkGatewayContext {
-  const redis = createRedis({
-    host: config.host,
-    port: config.port,
-    db: config.db,
-    username: config.username,
-    password: config.password,
-  });
+  void config;
+  const redis = createByFrameworkRedisClient();
   const client = new ByaiGatewayClient([], undefined, redis);
   return { redis, client };
 }
@@ -87,11 +85,11 @@ export function createSdkGatewayClient(
  * Send an ASK_AGENT command via the @byclaw/by-framework.
  *
  * Route-mode mapping to SDK constructs:
- * - `agent_type` → `sendMessage({ targetAgentType })` → xadd on `QueueNames.ctrl_stream(agentType)`
- * - `worker`     → `sendMessage({ targetWorkerId })` → xadd on `QueueNames.worker_ctrl_stream(workerId)`
+ * - `agent_type` → `sendMessage({ targetAgentType })` → xadd on compat ctrl stream
+ * - `worker`     → `sendMessage({ targetWorkerId })` → xadd on compat worker ctrl stream
  * - `capability` → SDK has no first-class capability stream; we build the
  *   `AskAgentCommand` manually and dispatch on
- *   `byai_gateway:ctrl:capability:<workerId>` via `client.sendCommand(cmd, streamName)`.
+ *   the compat capability ctrl stream via `client.sendCommand(cmd, streamName)`.
  */
 export async function sendDocAsyncMessageViaSdk(
   ctx: SdkGatewayContext,
@@ -134,7 +132,7 @@ export async function sendDocAsyncMessageViaSdk(
           messageId: res.message_id,
           traceId: res.trace_id,
           targetWorkerId: res.target_worker_id,
-          streamName: QueueNames.ctrl_stream(params.targetAgentType),
+          streamName: RedisCompatKeys.ctrlStream(params.targetAgentType),
         }),
         error: null,
       };
@@ -169,7 +167,7 @@ export async function sendDocAsyncMessageViaSdk(
           messageId: res.message_id,
           traceId: res.trace_id,
           targetWorkerId: res.target_worker_id || params.targetWorkerId,
-          streamName: QueueNames.worker_ctrl_stream(params.targetWorkerId),
+          streamName: RedisCompatKeys.workerCtrlStream(params.targetWorkerId),
         }),
         error: null,
       };
@@ -188,7 +186,7 @@ export async function sendDocAsyncMessageViaSdk(
       /* waitForReply */ false,
       params.extraPayload,
     );
-    const streamName = `byai_gateway:ctrl:capability:${params.targetWorkerId}`;
+    const streamName = RedisCompatKeys.capabilityCtrlStream(params.targetWorkerId);
     const res = await client.sendCommand(command, streamName);
     if (!res.success) {
       return {
@@ -258,8 +256,7 @@ function randomHex(length: number): string {
 /**
  * Poll the session data stream for a terminal event. Delegates to the
  * backend-neutral `pollDocResult` in `doc-shared.ts`, pinning the stream
- * name to `QueueNames.session_data_stream(sessionId)` — so if the SDK ever
- * changes its key naming this path follows automatically.
+ * name to the local Redis compat key factory so v1 / v2 naming stays aligned.
  *
  * Reuses the Redis connection that the SDK client already holds to avoid
  * opening a second pool.
@@ -285,7 +282,7 @@ export async function pollDocResultViaSdk(
     timeoutSec: params.timeoutSec,
     intervalSec: params.intervalSec,
     sinceMs: params.sinceMs,
-    streamName: QueueNames.session_data_stream(params.sessionId),
+    streamName: RedisCompatKeys.sessionDataStream(params.sessionId),
     onDelta: params.onDelta,
     signal: params.signal,
   });
@@ -397,7 +394,7 @@ export async function executeDocViaSdk(
       target: buildTarget(input, input.sendParams),
     };
   } finally {
-    await ctx.redis.quit().catch(() => undefined);
+    await closeRedisCompatClient(ctx.redis);
   }
 }
 
