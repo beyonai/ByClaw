@@ -20,6 +20,7 @@ const mockSend = jest.fn((_text?: string, _payload?: any) => ({
   cancel: jest.fn(),
 }));
 const mockUpdateMessage = jest.fn((msg: any) => msg);
+const mockWaitForSessionMessageLoaded = jest.fn(() => Promise.resolve());
 
 jest.mock('../usePersistFn', () => ({
   __esModule: true,
@@ -45,6 +46,7 @@ jest.mock('../useChat/useMessage', () => ({
     setMessageList: jest.fn(),
     updateMessage: mockUpdateMessage,
     reloadLatestMessageList: jest.fn(),
+    waitForSessionMessageLoaded: mockWaitForSessionMessageLoaded,
   })),
 }));
 
@@ -82,6 +84,7 @@ jest.mock('@/service/message', () => ({
 import { act, renderHook } from '@testing-library/react';
 import { useDispatch, useSelector } from '@umijs/max';
 import useAppStore from '@/models/common/useAppStore';
+import { getChatRunningSnapshot, getChatRunningStatus } from '@/service/message';
 import { chatSessionRuntimeManager } from '@/utils/chatSessionRuntimeManager';
 import { clearChatRuntime } from '../useChat/chatRuntime';
 
@@ -90,6 +93,8 @@ import useChat from '../useChat';
 const mockUseDispatch = useDispatch as jest.Mock;
 const mockUseSelector = useSelector as jest.Mock;
 const mockUseAppStore = useAppStore as unknown as jest.Mock;
+const mockGetChatRunningStatus = getChatRunningStatus as jest.MockedFunction<typeof getChatRunningStatus>;
+const mockGetChatRunningSnapshot = getChatRunningSnapshot as jest.MockedFunction<typeof getChatRunningSnapshot>;
 
 describe('hooks/useChat/index', () => {
   beforeEach(() => {
@@ -101,6 +106,9 @@ describe('hooks/useChat/index', () => {
       cancel: jest.fn(),
     });
     mockUpdateMessage.mockImplementation((msg: any) => msg);
+    mockWaitForSessionMessageLoaded.mockResolvedValue(undefined);
+    mockGetChatRunningStatus.mockResolvedValue([]);
+    mockGetChatRunningSnapshot.mockResolvedValue(null);
     mockUseDispatch.mockReturnValue(jest.fn());
     mockUseSelector.mockImplementation((selector: any) =>
       selector({
@@ -123,6 +131,56 @@ describe('hooks/useChat/index', () => {
       setUserCollectModalOpen: jest.fn(),
       setLoginModalOpen: jest.fn(),
     });
+  });
+
+  it('waits for session messages before restoring running messages', async () => {
+    let resolveSessionMessages!: () => void;
+    const sessionMessagesPromise = new Promise<void>((resolve) => {
+      resolveSessionMessages = resolve;
+    });
+    mockWaitForSessionMessageLoaded.mockReturnValue(sessionMessagesPromise);
+    mockGetChatRunningStatus.mockResolvedValue([
+      {
+        sessionId: 's1',
+        running: true,
+        traceId: 'trace-1',
+        clientRequestId: 'client-1',
+        modelAnswerMessageId: 'answer-1',
+        userMessageId: 'query-1',
+        chatContent: 'hello',
+      },
+    ] as any);
+
+    renderHook(() =>
+      useChat({
+        sessionId: 's1',
+        addSession: jest.fn(),
+      } as any)
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(mockWaitForSessionMessageLoaded).toHaveBeenCalledWith('s1');
+    expect(mockGetChatRunningStatus).not.toHaveBeenCalled();
+    expect(mockUpdateMessage).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveSessionMessages();
+      await sessionMessagesPromise;
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mockGetChatRunningStatus).toHaveBeenCalledWith({ sessionIds: ['s1'] });
+    expect(mockUpdateMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messageId: 'answer-1',
+        sessionId: 's1',
+      }),
+      { isAssign: true }
+    );
   });
 
   it('opens the login modal and aborts when user is not logged in', async () => {

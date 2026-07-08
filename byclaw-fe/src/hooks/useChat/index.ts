@@ -207,6 +207,7 @@ function useChat(props: IProps) {
     setMessageList,
     updateMessage,
     reloadLatestMessageList,
+    waitForSessionMessageLoaded = () => Promise.resolve(),
   } = useMessage({
     sessionId,
   });
@@ -448,23 +449,28 @@ function useChat(props: IProps) {
   });
 
   useEffect(() => {
+    let disposed = false;
     const handler = (message: any) => {
       const data = get(message, 'data') || message;
       const messageSessionId = get(data, 'sessionId') || get(message, 'sessionId');
       if (!messageSessionId || `${messageSessionId}` !== `${sessionId}`) return;
 
-      const answerMsg = fetchMessageHandler({
-        ...data,
-        sessionId: messageSessionId,
+      waitForSessionMessageLoaded(messageSessionId).then(() => {
+        if (disposed || `${messageSessionId}` !== `${sessionId}`) return;
+        const answerMsg = fetchMessageHandler({
+          ...data,
+          sessionId: messageSessionId,
+        });
+        updateMessage(answerMsg, { allowCreateSession: false });
       });
-      updateMessage(answerMsg, { allowCreateSession: false });
     };
 
     webSocketManager.onMessage('NEW_MESSAGE', handler);
     return () => {
+      disposed = true;
       webSocketManager.offMessage('NEW_MESSAGE', handler);
     };
-  }, [sessionId, updateMessage]);
+  }, [sessionId, updateMessage, waitForSessionMessageLoaded]);
 
   useEffect(() => {
     if (!sessionId) {
@@ -473,7 +479,11 @@ function useChat(props: IProps) {
     let disposed = false;
     const restoreKeys: string[] = [];
 
-    getChatRunningStatus({ sessionIds: [sessionId] })
+    waitForSessionMessageLoaded(sessionId)
+      .then(() => {
+        if (disposed) return [];
+        return getChatRunningStatus({ sessionIds: [sessionId] });
+      })
       .then(async (list: RunningChatInfo[] = []) => {
         if (disposed) return;
         const sessionRunningInfoList = list.filter((item) => `${item.sessionId}` === `${sessionId}`);
@@ -587,7 +597,7 @@ function useChat(props: IProps) {
         flushRestoredChatStreamBuffer(restoreKey);
       });
     };
-  }, [sessionId]);
+  }, [sessionId, waitForSessionMessageLoaded]);
 
   /**
    * 发送查询函数

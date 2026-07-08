@@ -47,6 +47,7 @@ export default function useMessage({ sessionId }: { sessionId?: string }) {
 
   const [optimisticSessionId, setOptimisticSessionId] = useState('');
   const pendingDraftCleanupRef = useRef(false);
+  const sessionMessageLoadPromiseRef = useRef<Record<string, Promise<IMessageInfo | undefined>>>({});
 
   const activeSessionId = String(sessionId || optimisticSessionId || DRAFT_SESSION_ID);
   const messageInfo = sessionListMap.get(activeSessionId) as (IMessageInfo & { hasMore?: boolean }) | undefined;
@@ -235,6 +236,19 @@ export default function useMessage({ sessionId }: { sessionId?: string }) {
     });
   }, [dispatch]);
 
+  const waitForSessionMessageLoaded = useCallback(
+    (targetSessionId = activeSessionId) => {
+      const loadPromise = sessionMessageLoadPromiseRef.current[`${targetSessionId}`];
+      if (!loadPromise) return Promise.resolve();
+
+      return loadPromise.then(
+        () => undefined,
+        () => undefined
+      );
+    },
+    [activeSessionId]
+  );
+
   useEffect(() => {
     curSessionId.current = activeSessionId;
   }, [activeSessionId]);
@@ -264,14 +278,16 @@ export default function useMessage({ sessionId }: { sessionId?: string }) {
     }
 
     // 从存储中获取会话消息并更新状态
-    dispatch({
-      type: 'messageStore/getSessionMessage',
-      payload: {
-        sessionId,
-      },
-    }).then((listInfo: IMessageInfo) => {
+    const loadPromise = Promise.resolve(
+      dispatch({
+        type: 'messageStore/getSessionMessage',
+        payload: {
+          sessionId,
+        },
+      })
+    ).then((listInfo: IMessageInfo) => {
       // 只接受最新的session的数据
-      if (`${sessionId}` !== `${curSessionId.current}`) return;
+      if (`${sessionId}` !== `${curSessionId.current}`) return listInfo;
       const { list, targetMessageId } = listInfo || {};
 
       dispatch({
@@ -297,7 +313,22 @@ export default function useMessage({ sessionId }: { sessionId?: string }) {
         sessionId,
         targetMessageId,
       });
+
+      return listInfo;
     });
+    sessionMessageLoadPromiseRef.current[`${sessionId}`] = loadPromise;
+    loadPromise.then(
+      () => {
+        if (sessionMessageLoadPromiseRef.current[`${sessionId}`] === loadPromise) {
+          delete sessionMessageLoadPromiseRef.current[`${sessionId}`];
+        }
+      },
+      () => {
+        if (sessionMessageLoadPromiseRef.current[`${sessionId}`] === loadPromise) {
+          delete sessionMessageLoadPromiseRef.current[`${sessionId}`];
+        }
+      }
+    );
   }, [optimisticSessionId, sessionId, dispatch, EventEmitter]);
 
   useEffect(() => {
@@ -363,6 +394,7 @@ export default function useMessage({ sessionId }: { sessionId?: string }) {
     deleteMessage, // 删除单条消息的方法
     getMoreSessionMessage,
     reloadLatestMessageList,
+    waitForSessionMessageLoaded,
     updateMessage, // 更新单条消息的方法
   };
 }
