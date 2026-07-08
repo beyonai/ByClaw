@@ -194,6 +194,11 @@ _OPENCLAW_RESOURCE_LIST_PATH = os.getenv(
     "/byaiService/digitalEmployee/resource/list",
 )
 
+_OBJECT_DETAIL_PATH = os.getenv(
+    "OPENCLAW_OBJECT_DETAIL_PATH",
+    "/byaiService/ontology/object/detail",
+)
+
 
 def fetch_employee_resources(employee_id: str = "") -> list[dict[str, Any]]:
     """从 openclaw 获取当前数字员工的资源列表（原始 dict 数组）。"""
@@ -242,6 +247,28 @@ def object_code_from_item(item: dict[str, Any]) -> str:
     return ""
 
 
+def fetch_employee_object_entries(employee_id: str = "") -> list[dict[str, Any]]:
+    """从 openclaw 获取当前数字员工挂载的 OBJECT 资源条目（含 objectCode）。
+
+    详情接口仅支持按 objectCode 单条查询；调用方应遍历返回列表逐条调接口。
+    """
+    resources = fetch_employee_resources(employee_id)
+    entries: list[dict[str, Any]] = []
+    seen_codes: set[str] = set()
+    for item in filter_object_resources(resources):
+        object_code = object_code_from_item(item)
+        if not object_code or object_code in seen_codes:
+            continue
+        seen_codes.add(object_code)
+        entry: dict[str, Any] = {"object_code": object_code}
+        try:
+            entry["resource_id"] = resource_id_from_item(item)
+        except ValueError:
+            pass
+        entries.append(entry)
+    return entries
+
+
 def fetch_object_detail_from_redis(resource_id: str | int) -> dict[str, Any]:
     """按 OBJECT_{resourceId} 从 Redis 读取对象详情 JSON。"""
     key = object_redis_key(resource_id)
@@ -251,6 +278,58 @@ def fetch_object_detail_from_redis(resource_id: str | int) -> dict[str, Any]:
     data = json.loads(raw)
     if not isinstance(data, dict):
         raise ValueError(f"Redis {key} 内容非 JSON 对象: {data!r}")
+    return data
+
+
+def build_resource_object_code_map(resources: list[dict[str, Any]] | None = None) -> dict[str, str]:
+    """构建 resourceId → objectCode 映射（仅 OBJECT 类型资源）。"""
+    items = resources if resources is not None else fetch_employee_resources()
+    mapping: dict[str, str] = {}
+    for item in filter_object_resources(items):
+        try:
+            resource_id = resource_id_from_item(item)
+        except ValueError:
+            continue
+        object_code = object_code_from_item(item)
+        if object_code:
+            mapping[resource_id] = object_code
+    return mapping
+
+
+def resolve_object_code(
+    resource_id: str,
+    mapping: dict[str, str] | None = None,
+) -> str:
+    """从 openclaw 资源列表按 resourceId 解析 objectCode。"""
+    rid = str(resource_id).strip()
+    if not rid:
+        raise ValueError("resource_id 不能为空")
+    code_map = mapping if mapping is not None else build_resource_object_code_map()
+    object_code = code_map.get(rid, "").strip()
+    if not object_code:
+        raise ValueError(f"未找到 resource_id={rid} 对应的 objectCode")
+    return object_code
+
+
+def fetch_object_detail_api(
+    object_code: str,
+    base_id: str | None = None,
+) -> dict[str, Any]:
+    """调用 byaiService POST /ontology/object/detail 获取对象详情。
+
+    请求体 objectCode 为必传；baseId 可选（默认 null）。每次仅查询单个对象。
+    """
+    code = str(object_code).strip()
+    if not code:
+        raise ValueError("objectCode 为必传参数，不能为空")
+
+    payload: dict[str, Any] = {
+        "baseId": base_id if base_id is not None else None,
+        "objectCode": code,
+    }
+    data = post_byai_api(_OBJECT_DETAIL_PATH, payload)
+    if not isinstance(data, dict):
+        raise ValueError(f"对象详情响应非 JSON 对象: {data!r}")
     return data
 
 

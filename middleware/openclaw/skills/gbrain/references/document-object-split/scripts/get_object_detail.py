@@ -1,5 +1,9 @@
 #!/usr/local/bin/python3
-"""从 Redis 查询 Ontology 对象详情（含属性字段定义）。
+"""查询 Ontology 对象详情（含属性字段定义）。
+
+通过 byaiService POST /ontology/object/detail 获取（**仅支持 objectCode 单条查询**）。
+
+默认从 openclaw 读取当前数字员工挂载的 OBJECT 资源，提取 objectCode 后逐条调接口。
 
 I/O 协议：命令行 JSON 参数（推荐）或 stdin JSON → stdout JSON
 
@@ -7,22 +11,22 @@ I/O 协议：命令行 JSON 参数（推荐）或 stdin JSON → stdout JSON
     /usr/local/bin/python3 scripts/get_object_detail.py '<JSON>'
 
 入参（JSON）:
-    # 传 resource_id，自动拼接 Redis key：OBJECT_{resource_id}
-    {"resource_id": "10042459"}
+    # 默认：从 openclaw 获取当前数字员工全部 OBJECT 的 objectCode，逐条查详情
+    {}
 
-    # 或直接传完整 Redis key
-    {"key": "OBJECT_10042459"}
+    # 单个 objectCode（接口仅支持单条）
+    {"object_code": "p_bug_0027024630_5406b7"}
 
-    # 批量查询
-    {"resource_ids": ["10042459", "10042460"]}
-    {"keys": ["OBJECT_10042459", "OBJECT_10042460"]}
+    # 可选 baseId（默认 null）
+    {"object_code": "p_order_0027024630_d73e14", "base_id": null}
+
+    # 子集：先从 openclaw 取挂载列表，再只查指定 objectCode（仍逐条调接口）
+    {"object_codes": ["p_bug_0027024630_5406b7", "p_order_0027024630_d73e14"]}
 
 出参（stdout JSON）:
     # 单个
     {
         "ok": true,
-        "key": "OBJECT_10042459",
-        "resource_id": "10042459",
         "object_code": "p_bug_0027024630_5406b7",
         "object_name": "Bug",
         "object_source": "KNOWLEDGE_BASE",
@@ -33,15 +37,17 @@ I/O 协议：命令行 JSON 参数（推荐）或 stdin JSON → stdout JSON
         "fields": ["handler", "deadline", "title"]
     }
 
-    # 批量
+    # 多个（脚本内循环单条接口，聚合输出）
     {
         "ok": true,
-        "objects": [ { ... 同上 ... }, ... ]
+        "objects": [ { ... 同上 ... }, ... ],
+        "object_codes": ["p_bug_...", "p_order_..."]
     }
 
-Redis 示例:
-    GET OBJECT_10042459
-    → {"objectCode":"p_bug_...","objectName":"Bug","resourceBizType":"OBJECT",...}
+接口约束:
+    POST /byaiService/ontology/object/detail
+    {"baseId": null, "objectCode": "p_bug_0027024630_5406b7"}
+    — objectCode **必传**；baseId 可选；不支持 resourceId；不支持批量（脚本内逐条循环）。
 """
 
 from __future__ import annotations
@@ -53,7 +59,12 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from _common import object_redis_key, redis_get, stdout_json
+from _common import (
+    fetch_employee_object_entries,
+    fetch_object_detail_api,
+    resolve_employee_id,
+    stdout_json,
+)
 
 
 def _normalize_property(prop: dict[str, Any]) -> dict[str, Any]:
@@ -69,100 +80,149 @@ def _normalize_property(prop: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _resolve_redis_key(params: dict[str, Any]) -> str:
-    key = str(params.get("key", "")).strip()
-    if key:
-        return key
-
-    resource_id = str(params.get("resource_id", "")).strip()
-    if resource_id:
-        return object_redis_key(resource_id)
-
-    return ""
-
-
-def _resolve_redis_keys(params: dict[str, Any]) -> list[str]:
-    keys_raw = params.get("keys")
-    if isinstance(keys_raw, list):
-        keys = [str(k).strip() for k in keys_raw if str(k).strip()]
-        if keys:
-            return keys
-
-    resource_ids = params.get("resource_ids")
-    if isinstance(resource_ids, list):
-        ids = [str(rid).strip() for rid in resource_ids if str(rid).strip()]
-        if ids:
-            return [object_redis_key(rid) for rid in ids]
-
-    single = _resolve_redis_key(params)
-    return [single] if single else []
+def _parse_base_id(params: dict[str, Any]) -> str | None:
+    if "base_id" in params:
+        value = params.get("base_id")
+        if value is None:
+            return None
+        text = str(value).strip()
+        return text or None
+    if "baseId" in params:
+        value = params.get("baseId")
+        if value is None:
+            return None
+        text = str(value).strip()
+        return text or None
+    return None
 
 
-def _resource_id_from_key(key: str) -> str:
-    prefix = "OBJECT_"
-    if key.startswith(prefix):
-        return key[len(prefix) :]
-    return ""
+def _resolve_detail_requests(params: dict[str, Any]) -> list[dict[str, Any]]:
+    """解析为 [{object_code, resource_id?, base_id?}, ...]。"""
+    base_id = _parse_base_id(params)
+    employee_id = str(
+        params.get("employee_id") or params.get("employeeId") or resolve_employee_id()
+    ).strip()
+
+    object_code = str(params.get("object_code") or params.get("objectCode") or "").strip()
+    if object_code:
+        return [{"object_code": object_code, "base_id": base_id}]
+
+    entries = fetch_employee_object_entries(employee_id)
+    if not entries:
+        raise ValueError(
+            "当前数字员工未挂载 OBJECT 资源，或 openclaw 资源列表中缺少 objectCode"
+        )
+
+    filter_codes = params.get("object_codes") or params.get("objectCodes")
+    if isinstance(filter_codes, list):
+        allowed = {str(code).strip() for code in filter_codes if str(code).strip()}
+        if not allowed:
+            raise ValueError("object_codes 不能为空列表")
+        entries = [entry for entry in entries if entry["object_code"] in allowed]
+        if not entries:
+            raise ValueError(
+                f"openclaw 挂载列表中未找到指定 objectCode: {sorted(allowed)}"
+            )
+
+    requests: list[dict[str, Any]] = []
+    for entry in entries:
+        code = str(entry.get("object_code", "")).strip()
+        if not code:
+            continue
+        requests.append(
+            {
+                "object_code": code,
+                "resource_id": entry.get("resource_id", ""),
+                "base_id": base_id,
+            }
+        )
+    if not requests:
+        raise ValueError("openclaw 挂载的 OBJECT 资源均缺少 objectCode，无法调详情接口")
+    return requests
 
 
-def _fetch_from_redis(key: str) -> dict[str, Any]:
-    raw = redis_get(key)
-    if not raw:
-        raise ValueError(f"Redis 未找到 key: {key}")
-    data = json.loads(raw)
-    if not isinstance(data, dict):
-        raise ValueError(f"Redis {key} 内容非 JSON 对象: {data!r}")
-    return data
-
-
-def _build_response(key: str, data: dict[str, Any]) -> dict[str, Any]:
+def _build_response(
+    data: dict[str, Any],
+    *,
+    object_code: str = "",
+    resource_id: str = "",
+) -> dict[str, Any]:
     properties_raw = data.get("properties") or []
     properties = [_normalize_property(p) for p in properties_raw if isinstance(p, dict)]
     fields = [p["property_code"] for p in properties if p["property_code"]]
 
+    resolved_code = str(
+        data.get("objectCode", data.get("object_code", object_code))
+    ).strip()
+
     result: dict[str, Any] = {
         "ok": True,
-        "key": key,
-        "object_code": data.get("objectCode", data.get("object_code", "")),
-        "object_name": data.get("objectName", data.get("object_name", data.get("resourceName", ""))),
+        "object_code": resolved_code,
+        "object_name": data.get(
+            "objectName",
+            data.get("object_name", data.get("resourceName", "")),
+        ),
         "object_source": data.get("objectSource", data.get("object_source", "")),
-        "object_desc": data.get("objectDesc", data.get("object_desc", data.get("resourceDesc", ""))),
+        "object_desc": data.get(
+            "objectDesc",
+            data.get("object_desc", data.get("resourceDesc", "")),
+        ),
         "base_id": data.get("baseId", data.get("base_id", "")),
         "actions": data.get("actions") or [],
         "properties": properties,
         "fields": fields,
     }
-    resource_id = _resource_id_from_key(key)
     if resource_id:
         result["resource_id"] = resource_id
     return result
 
 
+def _fetch_object_detail(req: dict[str, Any]) -> dict[str, Any]:
+    object_code = str(req.get("object_code", "")).strip()
+    if not object_code:
+        raise ValueError("objectCode 为必传参数，不能为空")
+    data = fetch_object_detail_api(
+        object_code,
+        base_id=req.get("base_id"),
+    )
+    return _build_response(
+        data,
+        object_code=object_code,
+        resource_id=str(req.get("resource_id", "")).strip(),
+    )
+
+
 def main() -> None:
     raw = sys.argv[1] if len(sys.argv) > 1 else sys.stdin.read().strip()
-    if not raw:
-        stdout_json({"ok": False, "error": "缺少入参，需要 key 或 resource_id"})
+    params: dict[str, Any] = json.loads(raw) if raw else {}
+
+    try:
+        requests = _resolve_detail_requests(params)
+    except ValueError as exc:
+        stdout_json({"ok": False, "error": str(exc)})
         sys.exit(1)
 
-    params: dict[str, Any] = json.loads(raw)
-    keys = _resolve_redis_keys(params)
-    if not keys:
-        stdout_json({"ok": False, "error": "缺少入参，需要 key、resource_id、keys 或 resource_ids"})
+    if not requests:
+        stdout_json(
+            {
+                "ok": False,
+                "error": "未解析到可查询的 objectCode；请传 object_code 或确保 openclaw 已挂载 OBJECT 资源",
+            }
+        )
         sys.exit(1)
 
-    if len(keys) == 1:
-        data = _fetch_from_redis(keys[0])
-        stdout_json(_build_response(keys[0], data))
+    if len(requests) == 1:
+        stdout_json(_fetch_object_detail(requests[0]))
         return
 
     objects: list[dict[str, Any]] = []
     errors: list[str] = []
-    for key in keys:
+    for req in requests:
+        code = req["object_code"]
         try:
-            data = _fetch_from_redis(key)
-            objects.append(_build_response(key, data))
-        except (ValueError, json.JSONDecodeError) as exc:
-            errors.append(f"{key}: {exc}")
+            objects.append(_fetch_object_detail(req))
+        except ValueError as exc:
+            errors.append(f"{code}: {exc}")
 
     if not objects:
         stdout_json({"ok": False, "error": "; ".join(errors) if errors else "未查询到任何对象"})

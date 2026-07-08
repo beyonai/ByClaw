@@ -82,7 +82,7 @@
     {
       "name": "document-object-split",
       "path": "document-object-split/SKILL.md",
-      "description": "Split documents using get_object_detail.py for Ontology types; classify, extract, one page per instance, optional workspace export."
+      "description": "Split documents using get_object_detail.py (POST /ontology/object/detail) for Ontology types; classify, extract, one page per instance, optional workspace export."
     },
     {
       "name": "citation-fixer",

@@ -464,7 +464,7 @@ gbrain sources current --json
 | `references/idea-ingest/SKILL.md` | 链接、文章、推文 |
 | `references/media-ingest/SKILL.md` | 视频、PDF、播客 |
 | `references/meeting-ingestion/SKILL.md` | 会议 transcript |
-| `references/document-object-split/SKILL.md` | 整理文档 / 拆分文档 / 按 Ontology 对象类型拆 PRD·会议·PDF |
+| `references/document-object-split/SKILL.md` | 整理文档 / 拆分文档 / 按 Ontology 对象类型拆 PRD·会议·PDF（`get_object_detail.py` 调接口取 schema） |
 | `references/voice-note-ingest/SKILL.md` | 语音笔记 |
 | `references/enrich/SKILL.md` | 人物/公司页 enrichment |
 | `references/brain-taxonomist/SKILL.md` | 写入前归档路径 |
