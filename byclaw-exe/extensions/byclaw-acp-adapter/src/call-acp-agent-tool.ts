@@ -288,7 +288,10 @@ export function createByclawCallAcpAgentTool(params: CreateByclawCallAcpAgentToo
       const agentId = normalizeText(contextRecord.agentId) || CALL_ACP_AGENT.defaultAgentId;
       const result = await executor({
         capability: {} as Capability,
-        payload: {} as Dict,
+        payload: {
+          cwd: plan.cwd,
+          modelConfig: plan.sessionsSpawn?.modelConfig,
+        },
         target: {} as Dict,
         content,
         sessionId: channelResolve.sessionId,
