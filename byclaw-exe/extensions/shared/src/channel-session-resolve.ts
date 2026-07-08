@@ -9,8 +9,6 @@
 
 const STORE_KEY = "__OPENCLAW_BYAI_CHANNEL_SESSION_CONTEXT_STORE__";
 
-const ACTIVE_SDK_REQUEST_TTL_MS = 15 * 60 * 1000;
-
 export type ChannelSessionSource =
   | "ctx_channel_session_id"
   | "ctx_to"
@@ -56,16 +54,6 @@ function getOptionalStore(): SessionStoreLike | undefined {
   return g[STORE_KEY];
 }
 
-function isFresh(request: ActiveSdkRequestLike | undefined, now: number): boolean {
-  if (!request) {
-    return false;
-  }
-  if (typeof request.createdAt !== "number") {
-    return true;
-  }
-  return now - request.createdAt <= ACTIVE_SDK_REQUEST_TTL_MS;
-}
-
 /** Parse `<agentId>:<sessionId>` from channel-style addressing. */
 export function parseUserPrefixedSessionId(value: unknown): string | undefined {
   if (typeof value !== "string") {
@@ -100,9 +88,6 @@ export function resolveChannelRequestContextBySessionKey(
   }
   const store = getOptionalStore();
   const context = store?.channelRequestContextsBySessionKey?.get(normalizedSessionKey);
-  if (!isFresh(context, Date.now())) {
-    return undefined;
-  }
   return context;
 }
 
@@ -143,7 +128,7 @@ function resolveFromGlobalStore(sessionKey: string): ChannelSessionResolveResult
   }
   const now = Date.now();
   const bySession = store.activeSdkRequestsBySession.get(key);
-  if (bySession && isFresh(bySession, now)) {
+  if (bySession) {
     const sid = typeof bySession.sessionId === "string" ? bySession.sessionId.trim() : "";
     if (sid) {
       const commonFields = extractCommonFieldsFromSessionKey(bySession.sessionKey || key);
@@ -157,7 +142,7 @@ function resolveFromGlobalStore(sessionKey: string): ChannelSessionResolveResult
     }
   }
   const byChild = store.activeSdkRequestsByChild?.get(key);
-  if (byChild && isFresh(byChild, now)) {
+  if (byChild) {
     const sid = typeof byChild.sessionId === "string" ? byChild.sessionId.trim() : "";
     if (sid) {
       const commonFields = extractCommonFieldsFromSessionKey(key);
