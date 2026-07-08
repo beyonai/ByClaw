@@ -133,7 +133,7 @@ export default {
   'employeeDetail.ontology.boundSummary': '已配置 {viewCount} 个视图、{objectCount} 个对象',
   'employeeDetail.ontology.boundTip': '本体资源将在保存数字员工后同步到对话引用能力中。',
   'employeeDetail.ontology.pendingSave': '待保存',
-  'employeeDetail.ontology.addOntology': '添加本体',
+  'employeeDetail.ontology.addOntology': '添加',
   'employeeDetail.ontology.manage': '管理',
   'employeeDetail.ontology.reselect': '重新选择',
   'employeeDetail.ontology.clearedTitle': '已清空本体绑定',

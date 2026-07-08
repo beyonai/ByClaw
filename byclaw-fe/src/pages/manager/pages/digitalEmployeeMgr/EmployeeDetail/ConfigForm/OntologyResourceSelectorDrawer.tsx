@@ -2,14 +2,15 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { pageOntologyResources } from '@/service/ontology';
 import { queryCatalogTree } from '@/service/digitalEmployees';
-import { AppstoreOutlined, ApartmentOutlined, DatabaseOutlined, EyeOutlined, SearchOutlined } from '@ant-design/icons';
-import { Button, Checkbox, Drawer, Empty, Input, Select, Space, Spin, Tabs, Tag, message } from 'antd';
+import { CloseOutlined, DatabaseOutlined, EyeOutlined, PlusOutlined, SearchOutlined } from '@ant-design/icons';
+import { Button, Checkbox, Drawer, Empty, Input, Select, Space, Spin, Tabs, Tag, Tooltip, message } from 'antd';
 import classnames from 'classnames';
 import styles from './OntologyResourceSelectorDrawer.module.less';
 
 const ALL_CATALOG_ID = '-1';
 const ALL_RESOURCE_TYPE = 'ALL';
 const ONTOLOGY_RESOURCE_TYPES = ['VIEW', 'OBJECT'];
+const RESOURCE_PAGE_SIZE = 30;
 
 const OWNER_TABS = [
   { key: 'personal', label: '个人本体' },
@@ -28,6 +29,37 @@ const extractList = (res: any) => {
   if (Array.isArray(data?.data?.records)) return data.data.records;
   if (Array.isArray(data?.data?.list)) return data.data.list;
   return [];
+};
+
+const findPageMeta = (source: any, depth = 0): any => {
+  if (!source || depth > 4 || Array.isArray(source)) return {};
+  if (source.pageInfo && typeof source.pageInfo === 'object') return source.pageInfo;
+  if (
+    source.total !== undefined ||
+    source.totalPages !== undefined ||
+    source.pages !== undefined ||
+    source.hasMore !== undefined
+  ) {
+    return source;
+  }
+
+  const nestedKeys = ['data', 'result', 'resultObject', 'page', 'pageData'];
+  for (const key of nestedKeys) {
+    const meta = findPageMeta(source?.[key], depth + 1);
+    if (Object.keys(meta || {}).length) return meta;
+  }
+  return {};
+};
+
+const getPageHasMore = (res: any, pageNum: number, pageSize: number, rowCount: number) => {
+  const data = getResponseData(res);
+  const meta = findPageMeta(data);
+  if (typeof meta.hasMore === 'boolean') return meta.hasMore;
+  const total = Number(meta.total ?? data?.total ?? 0);
+  const totalPages = Number(meta.totalPages ?? meta.pages ?? meta.pageCount ?? 0);
+  if (totalPages > 0) return pageNum < totalPages;
+  if (total > 0) return pageNum * pageSize < total;
+  return rowCount >= pageSize;
 };
 
 const getCatalogParentId = (item: any) =>
@@ -94,6 +126,17 @@ const getResourceKey = (item: any) => {
   return `${getResourceType(item)}:${item?.resourceCode || item?.viewCode || item?.objectCode || ''}`;
 };
 
+const mergeResources = (prev: any[], next: any[]) => {
+  const merged = new Map<string, any>();
+  [...prev, ...next].forEach((item) => {
+    const key = getResourceKey(item);
+    if (key) {
+      merged.set(key, item);
+    }
+  });
+  return Array.from(merged.values());
+};
+
 const getResourceTypeLabel = (type: string) => (type === 'VIEW' ? '视图' : type === 'OBJECT' ? '对象' : '本体资源');
 
 const OntologyResourceSelectorDrawer = ({
@@ -110,6 +153,10 @@ const OntologyResourceSelectorDrawer = ({
   const [catalogs, setCatalogs] = useState<any[]>([]);
   const [resources, setResources] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [resourcePageNum, setResourcePageNum] = useState(1);
+  const [resourceHasMore, setResourceHasMore] = useState(false);
+  const [initialSelectedMap, setInitialSelectedMap] = useState<Record<string, any>>({});
   const [selectedMap, setSelectedMap] = useState<Record<string, any>>({});
 
   useEffect(() => {
@@ -119,6 +166,7 @@ const OntologyResourceSelectorDrawer = ({
       acc[getResourceKey(normalized)] = normalized;
       return acc;
     }, {});
+    setInitialSelectedMap(initialMap);
     setSelectedMap(initialMap);
     setActiveOwnerType(ownerType === 'enterprise' ? 'enterprise' : 'personal');
   }, [open, ownerType, selectedResources]);
@@ -134,38 +182,91 @@ const OntologyResourceSelectorDrawer = ({
       });
   }, [open]);
 
-  const fetchResources = useCallback(async () => {
-    if (!open) return;
-    setLoading(true);
-    try {
-      const list = extractList(
-        await pageOntologyResources({
+  const fetchResources = useCallback(
+    async (nextPageNum = 1, append = false) => {
+      if (!open) return;
+      if (append) {
+        setLoadingMore(true);
+      } else {
+        setLoading(true);
+      }
+      try {
+        const res = await pageOntologyResources({
           ownerType: activeOwnerType,
           resourceBizTypeList: resourceType === ALL_RESOURCE_TYPE ? ONTOLOGY_RESOURCE_TYPES : [resourceType],
           keyword,
           catalogId,
           statusList: [2],
           permission: 'all',
-          pageNum: 1,
-          pageSize: 30,
-        })
-      )
-        .map((item) => normalizeOntologyResource(item, activeOwnerType))
-        .filter((item) => ONTOLOGY_RESOURCE_TYPES.includes(item.resourceBizType));
-      setResources(list);
-    } catch (error) {
-      setResources([]);
-      message.error('本体资源查询失败');
-    } finally {
-      setLoading(false);
-    }
-  }, [activeOwnerType, catalogId, keyword, open, resourceType]);
+          pageNum: nextPageNum,
+          pageSize: RESOURCE_PAGE_SIZE,
+        });
+        const list = extractList(res)
+          .map((item) => normalizeOntologyResource(item, activeOwnerType))
+          .filter((item) => ONTOLOGY_RESOURCE_TYPES.includes(item.resourceBizType));
+        setResources((prev) => (append ? mergeResources(prev, list) : list));
+        setResourcePageNum(nextPageNum);
+        setResourceHasMore(getPageHasMore(res, nextPageNum, RESOURCE_PAGE_SIZE, list.length));
+      } catch (error) {
+        if (!append) {
+          setResources([]);
+          setResourcePageNum(1);
+          setResourceHasMore(false);
+        }
+        message.error('本体资源查询失败');
+      } finally {
+        if (append) {
+          setLoadingMore(false);
+        } else {
+          setLoading(false);
+        }
+      }
+    },
+    [activeOwnerType, catalogId, keyword, open, resourceType]
+  );
 
   useEffect(() => {
     fetchResources();
   }, [fetchResources]);
 
+  const loadMoreResources = useCallback(() => {
+    if (loading || loadingMore || !resourceHasMore) return;
+    fetchResources(resourcePageNum + 1, true);
+  }, [fetchResources, loading, loadingMore, resourceHasMore, resourcePageNum]);
+
+  const handleResourceListScroll = useCallback(
+    (event: React.UIEvent<HTMLDivElement>) => {
+      const target = event.currentTarget;
+      if (target.scrollHeight - target.scrollTop - target.clientHeight <= 120) {
+        loadMoreResources();
+      }
+    },
+    [loadMoreResources]
+  );
+
   const selectedList = useMemo(() => Object.values(selectedMap), [selectedMap]);
+  const initialSelectedList = useMemo(() => Object.values(initialSelectedMap), [initialSelectedMap]);
+  const selectedKeys = useMemo(() => new Set(Object.keys(selectedMap)), [selectedMap]);
+  const addedCount = useMemo(
+    () => Object.keys(selectedMap).filter((key) => !initialSelectedMap[key]).length,
+    [initialSelectedMap, selectedMap]
+  );
+  const removedCount = useMemo(
+    () => Object.keys(initialSelectedMap).filter((key) => !selectedMap[key]).length,
+    [initialSelectedMap, selectedMap]
+  );
+  const selectedTotals = useMemo(
+    () =>
+      selectedList.reduce(
+        (acc, item: any) => ({
+          views: acc.views + (item.resourceBizType === 'VIEW' ? 1 : 0),
+          objects: acc.objects + (item.resourceBizType === 'OBJECT' ? 1 : 0),
+        }),
+        { views: 0, objects: 0 }
+      ),
+    [selectedList]
+  );
+  const initialCount = initialSelectedList.length;
 
   const toggleResource = (item: any, checked: boolean) => {
     const key = getResourceKey(item);
@@ -180,20 +281,32 @@ const OntologyResourceSelectorDrawer = ({
     });
   };
 
+  const renderResourceTypeTag = (type: string) => <Tag className={styles.typeTag}>{getResourceTypeLabel(type)}</Tag>;
+
+  const catalogOptions = useMemo(
+    () => [
+      { value: ALL_CATALOG_ID, label: '全部分类' },
+      ...catalogs.map((catalog) => ({ value: catalog.catalogId, label: catalog.catalogName })),
+    ],
+    [catalogs]
+  );
+
   return (
     <Drawer
       open={open}
-      title="添加本体资源"
-      width={760}
+      title="为数字员工添加本体资源"
+      width={1040}
       destroyOnClose
       onClose={onCancel}
       footer={
         <div className={styles.footer}>
-          <span className={styles.selectedText}>
-            已选择
-            <strong>{selectedList.length}</strong>
-            个本体资源
-          </span>
+          <div className={styles.changeSummary}>
+            <span>
+              已选 <strong>{selectedList.length}</strong> 个
+            </span>
+            <span>新增 {addedCount} 个</span>
+            <span>移除 {removedCount} 个</span>
+          </div>
           <Space>
             <Button onClick={onCancel}>取消</Button>
             <Button type="primary" onClick={() => onOk?.(selectedList)}>
@@ -208,7 +321,7 @@ const OntologyResourceSelectorDrawer = ({
         <div className={styles.toolbar}>
           <Select
             value={resourceType}
-            style={{ width: 126 }}
+            style={{ width: 118 }}
             onChange={setResourceType}
             options={[
               { value: ALL_RESOURCE_TYPE, label: '全部类型' },
@@ -216,6 +329,7 @@ const OntologyResourceSelectorDrawer = ({
               { value: 'OBJECT', label: '对象' },
             ]}
           />
+          <Select value={catalogId} className={styles.catalogSelect} onChange={setCatalogId} options={catalogOptions} />
           <Input
             allowClear
             className={styles.toolbarSearch}
@@ -225,72 +339,117 @@ const OntologyResourceSelectorDrawer = ({
             onChange={(event) => setKeyword(event.target.value)}
             onPressEnter={fetchResources}
           />
-          <Button type="primary" onClick={fetchResources}>
-            查询
-          </Button>
+          <Button type="primary" icon={<SearchOutlined />} onClick={fetchResources} />
         </div>
-        <div className={styles.categoryBar}>
-          <button
-            type="button"
-            className={classnames(styles.categoryBtn, {
-              [styles.categoryBtnActive]: catalogId === ALL_CATALOG_ID,
-            })}
-            onClick={() => setCatalogId(ALL_CATALOG_ID)}
-          >
-            全部分类
-          </button>
-          {catalogs.map((catalog) => (
-            <button
-              type="button"
-              key={catalog.catalogId}
-              className={classnames(styles.categoryBtn, {
-                [styles.categoryBtnActive]: catalogId === catalog.catalogId,
-              })}
-              onClick={() => setCatalogId(catalog.catalogId)}
-            >
-              {catalog.catalogName}
-            </button>
-          ))}
-        </div>
-        <div className={styles.listWrap}>
-          <Spin spinning={loading}>
-            {resources.length === 0 ? (
-              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无可选本体资源" />
-            ) : (
-              <div className={styles.resourceList}>
-                {resources.map((item) => {
+        <div className={styles.contentGrid}>
+          <section className={styles.panel}>
+            <div className={styles.panelHeader}>
+              <div>
+                <div className={styles.panelTitle}>可添加资源</div>
+                <div className={styles.panelHint}>筛选并勾选要新增到数字员工的视图或对象</div>
+              </div>
+              <Tag className={styles.countTag}>{resources.length} 个结果</Tag>
+            </div>
+            <div className={styles.listWrap} onScroll={handleResourceListScroll}>
+              <Spin spinning={loading}>
+                {resources.length === 0 ? (
+                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无可选本体资源" />
+                ) : (
+                  <div className={styles.resourceList}>
+                    {resources.map((item) => {
+                      const key = getResourceKey(item);
+                      const checked = selectedKeys.has(key);
+                      const isView = item.resourceBizType === 'VIEW';
+                      return (
+                        <div
+                          className={classnames(styles.resourceItem, { [styles.resourceItemSelected]: checked })}
+                          key={key}
+                          onDoubleClick={() => toggleResource(item, !checked)}
+                        >
+                          <Checkbox
+                            checked={checked}
+                            onChange={(event) => toggleResource(item, event.target.checked)}
+                          />
+                          <div className={styles.resourceIcon}>{isView ? <EyeOutlined /> : <DatabaseOutlined />}</div>
+                          <div className={styles.resourceMain}>
+                            <div className={styles.resourceTitleRow}>
+                              <span className={styles.resourceName} title={item.resourceName}>
+                                {item.resourceName}
+                              </span>
+                              {renderResourceTypeTag(item.resourceBizType)}
+                              {checked && <Tag className={styles.boundTag}>已选</Tag>}
+                            </div>
+                            <div className={styles.resourceCode}>{item.resourceCode}</div>
+                            {item.description && <div className={styles.resourceDesc}>{item.description}</div>}
+                            {item.catalogName && (
+                              <div className={styles.resourceMeta}>
+                                <Tag>{item.catalogName}</Tag>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                    <div className={styles.loadMoreStatus}>
+                      {loadingMore ? <Spin size="small" /> : resourceHasMore ? '下拉加载更多' : '已加载全部'}
+                    </div>
+                  </div>
+                )}
+              </Spin>
+            </div>
+          </section>
+          <aside className={styles.boundPanel}>
+            <div className={styles.panelHeader}>
+              <div>
+                <div className={styles.panelTitle}>已绑定资源</div>
+                <div className={styles.panelHint}>
+                  视图 {selectedTotals.views} / 对象 {selectedTotals.objects}
+                </div>
+              </div>
+              <Tag className={styles.countTag}>{selectedList.length} 个</Tag>
+            </div>
+            <div className={styles.boundList}>
+              {selectedList.length === 0 ? (
+                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂未选择本体资源" />
+              ) : (
+                selectedList.map((item: any) => {
                   const key = getResourceKey(item);
-                  const checked = Boolean(selectedMap[key]);
+                  const isNew = !initialSelectedMap[key];
                   const isView = item.resourceBizType === 'VIEW';
                   return (
-                    <div
-                      className={classnames(styles.resourceItem, { [styles.resourceItemSelected]: checked })}
-                      key={key}
-                    >
-                      <Checkbox checked={checked} onChange={(event) => toggleResource(item, event.target.checked)} />
-                      <div className={styles.resourceIcon}>{isView ? <EyeOutlined /> : <DatabaseOutlined />}</div>
-                      <div className={styles.resourceMain}>
-                        <div className={styles.resourceTitleRow}>
-                          <span className={styles.resourceName} title={item.resourceName}>
+                    <div className={styles.boundItem} key={key}>
+                      <div className={styles.boundIcon}>{isView ? <EyeOutlined /> : <DatabaseOutlined />}</div>
+                      <div className={styles.boundMain}>
+                        <div className={styles.boundTitleRow}>
+                          <span className={styles.boundName} title={item.resourceName}>
                             {item.resourceName}
                           </span>
-                          <Tag className={styles.typeTag}>{getResourceTypeLabel(item.resourceBizType)}</Tag>
+                          {renderResourceTypeTag(item.resourceBizType)}
+                          {isNew && <Tag className={styles.newTag}>新增</Tag>}
                         </div>
-                        <div className={styles.resourceCode}>{item.resourceCode}</div>
-                        {item.description && <div className={styles.resourceDesc}>{item.description}</div>}
-                        <div className={styles.resourceMeta}>
-                          <Tag icon={<ApartmentOutlined />}>
-                            {item.ownerType === 'enterprise' ? '企业本体' : '个人本体'}
-                          </Tag>
-                          {item.catalogName && <Tag icon={<AppstoreOutlined />}>{item.catalogName}</Tag>}
-                        </div>
+                        <div className={styles.boundCode}>{item.resourceCode}</div>
                       </div>
+                      <Tooltip title={isNew ? '取消选择' : '本次移除'}>
+                        <Button
+                          className={styles.removeBtn}
+                          type="text"
+                          size="small"
+                          icon={<CloseOutlined />}
+                          onClick={() => toggleResource(item, false)}
+                        />
+                      </Tooltip>
                     </div>
                   );
-                })}
+                })
+              )}
+            </div>
+            {initialCount > 0 && (
+              <div className={styles.boundFootnote}>
+                <PlusOutlined />
+                原已绑定 {initialCount} 个，本次保存后按右侧列表生效
               </div>
             )}
-          </Spin>
+          </aside>
         </div>
       </div>
     </Drawer>

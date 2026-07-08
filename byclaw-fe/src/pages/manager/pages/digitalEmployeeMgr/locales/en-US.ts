@@ -133,7 +133,7 @@ export default {
   'employeeDetail.ontology.boundTip':
     'Ontology resources will sync to dialogue reference capability after the digital employee is saved.',
   'employeeDetail.ontology.pendingSave': 'Pending save',
-  'employeeDetail.ontology.addOntology': 'Add ontology',
+  'employeeDetail.ontology.addOntology': 'Add',
   'employeeDetail.ontology.manage': 'Manage',
   'employeeDetail.ontology.reselect': 'Select again',
   'employeeDetail.ontology.clearedTitle': 'Ontology binding cleared',

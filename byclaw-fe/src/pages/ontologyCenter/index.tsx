@@ -61,6 +61,7 @@ type SyncBatch = {
 };
 
 const ALL_CATEGORY_ID = '-1';
+const RESOURCE_PAGE_SIZE = 30;
 
 const toResourceFilterStatus = (statusFilter: StatusFilter) => {
   if (statusFilter === 'all') return STATUS_ALL_VALUE;
@@ -184,6 +185,37 @@ const getResourceRows = (res: any) => {
   return findResourceRows(data);
 };
 
+const findPageMeta = (source: any, depth = 0): any => {
+  if (!source || depth > 4 || Array.isArray(source)) return {};
+  if (source.pageInfo && typeof source.pageInfo === 'object') return source.pageInfo;
+  if (
+    source.total !== undefined ||
+    source.totalPages !== undefined ||
+    source.pages !== undefined ||
+    source.hasMore !== undefined
+  ) {
+    return source;
+  }
+
+  const nestedKeys = ['data', 'result', 'resultObject', 'page', 'pageData'];
+  for (const key of nestedKeys) {
+    const meta = findPageMeta(source?.[key], depth + 1);
+    if (Object.keys(meta || {}).length) return meta;
+  }
+  return {};
+};
+
+const getPageHasMore = (res: any, pageNum: number, pageSize: number, rowCount: number) => {
+  const data = getData(res);
+  const meta = findPageMeta(data);
+  if (typeof meta.hasMore === 'boolean') return meta.hasMore;
+  const total = Number(meta.total ?? data?.total ?? 0);
+  const totalPages = Number(meta.totalPages ?? meta.pages ?? meta.pageCount ?? 0);
+  if (totalPages > 0) return pageNum < totalPages;
+  if (total > 0) return pageNum * pageSize < total;
+  return rowCount >= pageSize;
+};
+
 const getSyncData = (res: any) => {
   const data = getData(res);
   return data?.resultObject || data?.data || data || {};
@@ -249,6 +281,17 @@ const getResourceKeys = (resource: any) => {
   if (key) keys.add(key);
   if (resource?.resourceId) keys.add(`ID:${resource.resourceId}`);
   return Array.from(keys);
+};
+
+const mergeResourceRows = (prev: any[], next: any[]) => {
+  const merged = new Map<string, any>();
+  [...prev, ...next].forEach((item) => {
+    const key = getResourceKey(item) || `${item.resourceBizType || ''}:${item.resourceCode || item.resourceId || ''}`;
+    if (key) {
+      merged.set(key, item);
+    }
+  });
+  return Array.from(merged.values());
 };
 
 const normalizeResourceStatus = (status: any) => {
@@ -356,6 +399,9 @@ const OntologyCenter: React.FC = () => {
   const [catalogId, setCatalogId] = useState(ALL_CATEGORY_ID);
   const [catalogList, setCatalogList] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [resourcePageNum, setResourcePageNum] = useState(1);
+  const [resourceHasMore, setResourceHasMore] = useState(false);
   const [resourceList, setResourceList] = useState<any[]>([]);
   const [providerOpen, setProviderOpen] = useState(false);
   const [syncOpen, setSyncOpen] = useState(false);
@@ -413,40 +459,73 @@ const OntologyCenter: React.FC = () => {
     loadInstalledKeys();
   }, [loadInstalledKeys]);
 
-  const loadResources = useCallback(async () => {
-    if (activeTab === 'enterpriseTerm') {
-      setResourceList([]);
-      return;
-    }
-    setLoading(true);
-    try {
-      const res: any = await pageOntologyResources({
-        ownerType: activeTab,
-        resourceBizTypeList: ['VIEW', 'OBJECT'],
-        keyword,
-        catalogId,
-        statusList: statusFilter === 'all' ? [0, 1, 2, 3, 4, 5] : statusFilter === 'offline' ? [3] : [2],
-        permission: toResourceFilterPermission(permissionFilter),
-        pageNum: 1,
-        pageSize: 30,
-      });
-      const rows = getResourceRows(res);
-      setResourceList(
-        parseMaybeArray(rows)
+  const loadResources = useCallback(
+    async (nextPageNum = 1, append = false) => {
+      if (activeTab === 'enterpriseTerm') {
+        setResourceList([]);
+        setResourcePageNum(1);
+        setResourceHasMore(false);
+        return;
+      }
+      if (append) {
+        setLoadingMore(true);
+      } else {
+        setLoading(true);
+      }
+      try {
+        const res: any = await pageOntologyResources({
+          ownerType: activeTab,
+          resourceBizTypeList: ['VIEW', 'OBJECT'],
+          keyword,
+          catalogId,
+          statusList: statusFilter === 'all' ? [0, 1, 2, 3, 4, 5] : statusFilter === 'offline' ? [3] : [2],
+          permission: toResourceFilterPermission(permissionFilter),
+          pageNum: nextPageNum,
+          pageSize: RESOURCE_PAGE_SIZE,
+        });
+        const rows = getResourceRows(res);
+        const nextRows = parseMaybeArray(rows)
           .map((row) => normalizeOntologyResource(row, activeTab))
-          .filter((item) => item.resourceBizType === 'VIEW' || item.resourceBizType === 'OBJECT')
-      );
-    } catch (error: any) {
-      setResourceList([]);
-      message.error(error?.msg || error?.message || '本体资源查询失败');
-    } finally {
-      setLoading(false);
-    }
-  }, [activeTab, catalogId, keyword, permissionFilter, statusFilter]);
+          .filter((item) => item.resourceBizType === 'VIEW' || item.resourceBizType === 'OBJECT');
+        setResourceList((prev) => (append ? mergeResourceRows(prev, nextRows) : nextRows));
+        setResourcePageNum(nextPageNum);
+        setResourceHasMore(getPageHasMore(res, nextPageNum, RESOURCE_PAGE_SIZE, nextRows.length));
+      } catch (error: any) {
+        if (!append) {
+          setResourceList([]);
+          setResourcePageNum(1);
+          setResourceHasMore(false);
+        }
+        message.error(error?.msg || error?.message || '本体资源查询失败');
+      } finally {
+        if (append) {
+          setLoadingMore(false);
+        } else {
+          setLoading(false);
+        }
+      }
+    },
+    [activeTab, catalogId, keyword, permissionFilter, statusFilter]
+  );
 
   useEffect(() => {
     loadResources();
   }, [loadResources]);
+
+  const loadMoreResources = useCallback(() => {
+    if (loading || loadingMore || !resourceHasMore || activeTab === 'enterpriseTerm') return;
+    loadResources(resourcePageNum + 1, true);
+  }, [activeTab, loadResources, loading, loadingMore, resourceHasMore, resourcePageNum]);
+
+  const handleContainerScroll = useCallback(
+    (event: React.UIEvent<HTMLDivElement>) => {
+      const target = event.currentTarget;
+      if (target.scrollHeight - target.scrollTop - target.clientHeight <= 180) {
+        loadMoreResources();
+      }
+    },
+    [loadMoreResources]
+  );
 
   useEffect(() => {
     const onInstalled = (event: Event) => {
@@ -911,67 +990,74 @@ const OntologyCenter: React.FC = () => {
       );
     }
     return (
-      <div className={styles.resourceCardGrid}>
-        {visibleResources.map((resource) => {
-          const isView = resource.resourceBizType === 'VIEW';
-          return (
-            <div key={resource.resourceId} className={styles.resourceCard}>
-              <div className={styles.cardHeader}>
-                <div className={classnames(styles.cardIcon, isView ? styles.viewIcon : styles.objectIcon)}>
-                  <AntdIcon type={isView ? 'icon-a-yemian-line' : 'icon-tongxun'} />
-                </div>
-                <div className={styles.cardMain}>
-                  <div className={styles.cardNameRow}>
-                    <Tooltip title={resource.resourceName}>
-                      <button type="button" className={styles.cardName} onClick={() => openDetail(resource)}>
-                        {resource.resourceName}
-                      </button>
-                    </Tooltip>
-                    <span className={styles.cardTypeTag}>
-                      <span className={styles.cardTypeTagText}>
-                        {isView ? t('common.resourceType.view') : t('common.resourceType.object')}
-                      </span>
-                    </span>
+      <>
+        <div className={styles.resourceCardGrid}>
+          {visibleResources.map((resource) => {
+            const isView = resource.resourceBizType === 'VIEW';
+            return (
+              <div key={resource.resourceId} className={styles.resourceCard}>
+                <div className={styles.cardHeader}>
+                  <div className={classnames(styles.cardIcon, isView ? styles.viewIcon : styles.objectIcon)}>
+                    <AntdIcon type={isView ? 'icon-a-yemian-line' : 'icon-tongxun'} />
                   </div>
-                  <div className={styles.cardCode}>{resource.resourceCode}</div>
+                  <div className={styles.cardMain}>
+                    <div className={styles.cardNameRow}>
+                      <Tooltip title={resource.resourceName}>
+                        <button type="button" className={styles.cardName} onClick={() => openDetail(resource)}>
+                          {resource.resourceName}
+                        </button>
+                      </Tooltip>
+                      <span className={styles.cardTypeTag}>
+                        <span className={styles.cardTypeTagText}>
+                          {isView ? t('common.resourceType.view') : t('common.resourceType.object')}
+                        </span>
+                      </span>
+                    </div>
+                    <div className={styles.cardCode}>{resource.resourceCode}</div>
+                  </div>
+                </div>
+                <div className={styles.cardDesc}>{resource.resourceDesc}</div>
+                <div className={styles.cardFooter}>
+                  <div className={styles.cardBottomActions}>
+                    {renderCardBottomActions(resource).map((action) => (
+                      <Button
+                        key={action.key}
+                        type="link"
+                        size="small"
+                        loading={action.loading}
+                        disabled={action.disabled}
+                        onClick={action.onClick}
+                      >
+                        {action.label}
+                      </Button>
+                    ))}
+                  </div>
+                  {renderCardMenu(resource).items.length ? (
+                    <Dropdown trigger={['click']} menu={renderCardMenu(resource)}>
+                      <Button
+                        type="text"
+                        className={styles.cardMenu}
+                        icon={<EllipsisOutlined />}
+                        onClick={(event) => event.stopPropagation()}
+                      />
+                    </Dropdown>
+                  ) : null}
                 </div>
               </div>
-              <div className={styles.cardDesc}>{resource.resourceDesc}</div>
-              <div className={styles.cardFooter}>
-                <div className={styles.cardBottomActions}>
-                  {renderCardBottomActions(resource).map((action) => (
-                    <Button
-                      key={action.key}
-                      type="link"
-                      size="small"
-                      loading={action.loading}
-                      disabled={action.disabled}
-                      onClick={action.onClick}
-                    >
-                      {action.label}
-                    </Button>
-                  ))}
-                </div>
-                {renderCardMenu(resource).items.length ? (
-                  <Dropdown trigger={['click']} menu={renderCardMenu(resource)}>
-                    <Button
-                      type="text"
-                      className={styles.cardMenu}
-                      icon={<EllipsisOutlined />}
-                      onClick={(event) => event.stopPropagation()}
-                    />
-                  </Dropdown>
-                ) : null}
-              </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+        {visibleResources.length > 0 && (
+          <div className={styles.loadMoreStatus}>
+            {loadingMore ? <Spin size="small" /> : resourceHasMore ? '下拉加载更多' : '已加载全部'}
+          </div>
+        )}
+      </>
     );
   };
 
   return (
-    <div className={styles.container}>
+    <div className={styles.container} onScroll={handleContainerScroll}>
       <CommonTabs
         activeKey={activeTab}
         onChange={(key) => {

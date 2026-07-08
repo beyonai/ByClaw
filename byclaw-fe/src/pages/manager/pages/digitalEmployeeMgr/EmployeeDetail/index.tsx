@@ -1541,6 +1541,12 @@ const EmployeeDetail = ({ loading }) => {
             setSubmitLoading(false);
             setAuditLoading(false);
             setIsConfigChanged(false);
+            const savedOntologyResources = selectedOntologyResources
+              .map((item) => normalizeOntologyResourceForEdit(item, effectiveOwnerType))
+              .filter(isOntologyResource);
+            setSelectedOntologyResources(savedOntologyResources);
+            setSavedRelOntology(savedOntologyResources);
+            setOntologyResourcesDirty(false);
 
             setUpdateTime(dayjs().format('HH:mm:ss'));
 
@@ -1609,6 +1615,7 @@ const EmployeeDetail = ({ loading }) => {
       uuid,
       effectiveDigitalType,
       effectiveAgentType,
+      effectiveOwnerType,
       systemCode,
       ownerType,
       EventEmitter,
