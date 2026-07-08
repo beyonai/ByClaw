@@ -1571,7 +1571,7 @@ class DataCloudWorker(GatewayWorker):
                 OntologyAgentConfig,
             )  # noqa: PLC0415
             from datacloud_platform.config import get_settings  # noqa: PLC0415
-
+            from datacloud_platform.constants import DEFAULT_BASE_ID
             from byclaw_data.platform.result_file_storage import (
                 build_result_file_storage,  # noqa: PLC0415
             )
