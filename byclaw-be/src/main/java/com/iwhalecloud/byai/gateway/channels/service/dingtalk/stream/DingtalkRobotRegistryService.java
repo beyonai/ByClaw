@@ -49,6 +49,7 @@ public class DingtalkRobotRegistryService {
     private final Map<String, DingtalkRobotChannelConfig> activeRobotConfigs = new ConcurrentHashMap<>();
     private final Set<String> startingRobotCodes = ConcurrentHashMap.newKeySet();
 
+    @org.springframework.beans.factory.annotation.Autowired
     public DingtalkRobotRegistryService(
             DingtalkStreamProperties properties,
             DingtalkBotListener dingtalkBotListener,

@@ -30,7 +30,12 @@ public enum ChannelType {
     /**
      * Web 渠道
      */
-    WEB("web", "Web渠道");
+    WEB("web", "Web渠道"),
+
+    /**
+     * 企业微信渠道
+     */
+    WECOM("wecom", "企业微信渠道");
 
     private final String code;
     private final String desc;

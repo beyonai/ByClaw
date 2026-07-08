@@ -233,6 +233,24 @@ public class UserService {
     }
 
     /**
+     * 根据邮箱查找用户信息，多个匹配时返回 null 避免自动绑定到错误用户。
+     *
+     * @param email 邮箱
+     * @return 用户信息
+     */
+    public Users findByEmail(String email) {
+        LambdaQueryWrapper<Users> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.eq(Users::getEmail, email);
+        queryWrapper.eq(Users::getState, UserState.ACTIVE);
+        List<Users> users = usersMapper.selectList(queryWrapper);
+        if (CollectionUtils.isEmpty(users) || users.size() > 1) {
+            logger.info("当前邮箱查询用户为空或者多个");
+            return null;
+        }
+        return users.get(0);
+    }
+
+    /**
      * 查询用户列表
      *
      * @param userIds 用户标识

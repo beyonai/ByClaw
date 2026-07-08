@@ -87,11 +87,7 @@ export default {
   'refineModal.step.workflow': '工作规范',
   'refineModal.step.style': '沟通风格',
   'refineModal.progress': '已完成 {done} / {total} 项',
-  'refineModal.generating': '正在生成配置...',
-  'refineModal.waitingStream': '正在连接模型并准备生成结果',
   'refineModal.streamProgress': '已接收 {count} 字符，正在分析字段',
-  'refineModal.generateFailed': '生成失败，请稍后重试',
-  'refineModal.generateIncomplete': '生成结果不完整，请重新生成',
 
   // 员工详情
   'employeeDetail.refine': '一键完善',
@@ -426,6 +422,21 @@ export default {
   'digitalEmployeeMgr.feishuVerificationTokenTooltip': '飞书开放平台 -> 事件与回调 -> 加密策略 -> Verification Token',
   'digitalEmployeeMgr.feishuEncryptKeyLabel': 'encryptKey',
   'digitalEmployeeMgr.feishuEncryptKeyTooltip': '飞书开放平台 -> 事件与回调 -> 加密策略 -> Encrypt Key',
+  'digitalEmployeeMgr.wecomBotIdRequired': '请输入 botId',
+  'digitalEmployeeMgr.wecomSecretRequired': '请输入 secret',
+  'digitalEmployeeMgr.wecomBotIdLabel': 'botId',
+  'digitalEmployeeMgr.wecomBotIdTooltip': '企业微信机器人 BotId',
+  'digitalEmployeeMgr.wecomSecretLabel': 'secret',
+  'digitalEmployeeMgr.wecomSecretTooltip': '企业微信机器人 Secret',
+  'digitalEmployeeMgr.wecomAgentIdRequired': '请输入 agentId',
+  'digitalEmployeeMgr.wecomAgentIdLabel': 'agentId',
+  'digitalEmployeeMgr.wecomAgentIdTooltip': '企业微信自建应用 ID，用于区分通讯录 access_token 缓存',
+  'digitalEmployeeMgr.wecomCorpIdRequired': '请输入 corpId',
+  'digitalEmployeeMgr.wecomCorpSecretRequired': '请输入 corpSecret',
+  'digitalEmployeeMgr.wecomCorpIdLabel': 'corpId',
+  'digitalEmployeeMgr.wecomCorpIdTooltip': '企业微信企业 ID，用于通讯录接口获取 access_token',
+  'digitalEmployeeMgr.wecomCorpSecretLabel': 'corpSecret',
+  'digitalEmployeeMgr.wecomCorpSecretTooltip': '企业微信自建应用或通讯录 Secret，用于读取成员信息',
 
   // Operation (数字员工运营)
   'operation.basicInfo': '基本信息',

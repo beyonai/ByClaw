@@ -28,6 +28,7 @@ import RefineModal from '../components/RefineModal';
 import LogInfoDrawer from './components/LogInfoDrawer';
 import ConfigForm from './ConfigForm';
 import OntologyResourceSelectorDrawer, { normalizeOntologyResource } from './ConfigForm/OntologyResourceSelectorDrawer';
+import { normalizeRobotConfig } from './ConfigForm/robotConfig';
 import { DEFAULT_PERSONALITY_DEFINITION } from './personalityDefinitionDefault';
 import styles from './index.module.less';
 import Log from './Log';
@@ -1005,6 +1006,11 @@ const EmployeeDetail = ({ loading }) => {
                     Object.prototype.hasOwnProperty.call(parsed, 'appSecret') ||
                     Object.prototype.hasOwnProperty.call(parsed, 'verificationToken') ||
                     Object.prototype.hasOwnProperty.call(parsed, 'encryptKey') ||
+                    Object.prototype.hasOwnProperty.call(parsed, 'botId') ||
+                    Object.prototype.hasOwnProperty.call(parsed, 'secret') ||
+                    Object.prototype.hasOwnProperty.call(parsed, 'agentId') ||
+                    Object.prototype.hasOwnProperty.call(parsed, 'corpId') ||
+                    Object.prototype.hasOwnProperty.call(parsed, 'corpSecret') ||
                     false;
 
                   if (hasMachineChannelKeys) {
@@ -1019,6 +1025,11 @@ const EmployeeDetail = ({ loading }) => {
                         appSecret: parsed?.appSecret ?? '',
                         verificationToken: parsed?.verificationToken ?? '',
                         encryptKey: parsed?.encryptKey ?? '',
+                        botId: parsed?.botId ?? '',
+                        secret: parsed?.secret ?? '',
+                        agentId: parsed?.agentId ?? '',
+                        corpId: parsed?.corpId ?? '',
+                        corpSecret: parsed?.corpSecret ?? '',
                       },
                     ];
                   }
@@ -1036,6 +1047,11 @@ const EmployeeDetail = ({ loading }) => {
                     Object.prototype.hasOwnProperty.call(machineChannelRaw, 'appSecret') ||
                     Object.prototype.hasOwnProperty.call(machineChannelRaw, 'verificationToken') ||
                     Object.prototype.hasOwnProperty.call(machineChannelRaw, 'encryptKey') ||
+                    Object.prototype.hasOwnProperty.call(machineChannelRaw, 'botId') ||
+                    Object.prototype.hasOwnProperty.call(machineChannelRaw, 'secret') ||
+                    Object.prototype.hasOwnProperty.call(machineChannelRaw, 'agentId') ||
+                    Object.prototype.hasOwnProperty.call(machineChannelRaw, 'corpId') ||
+                    Object.prototype.hasOwnProperty.call(machineChannelRaw, 'corpSecret') ||
                     false;
 
                   if (hasMachineChannelKeys) {
@@ -1050,6 +1066,11 @@ const EmployeeDetail = ({ loading }) => {
                         appSecret: machineChannelRaw?.appSecret ?? '',
                         verificationToken: machineChannelRaw?.verificationToken ?? '',
                         encryptKey: machineChannelRaw?.encryptKey ?? '',
+                        botId: machineChannelRaw?.botId ?? '',
+                        secret: machineChannelRaw?.secret ?? '',
+                        agentId: machineChannelRaw?.agentId ?? '',
+                        corpId: machineChannelRaw?.corpId ?? '',
+                        corpSecret: machineChannelRaw?.corpSecret ?? '',
                       },
                     ];
                   }
@@ -1058,21 +1079,7 @@ const EmployeeDetail = ({ loading }) => {
 
               // 新格式要求必须有渠道（channel），不再兼容 robotChannelConfigList 旧字段
               if (Array.isArray(robotList) && robotList.length > 0) {
-                setRobotConfigs(
-                  robotList
-                    .map((item) => ({
-                      channel: item.channel || '',
-                      clientId: item.clientId ?? '',
-                      clientSecret: item.clientSecret ?? '',
-                      robotCode: item.robotCode ?? '',
-                      AICardId: item.AICardId ?? '',
-                      appId: item.appId ?? '',
-                      appSecret: item.appSecret ?? '',
-                      verificationToken: item.verificationToken ?? '',
-                      encryptKey: item.encryptKey ?? '',
-                    }))
-                    .filter((it) => it.channel)
-                );
+                setRobotConfigs(robotList.map((item) => normalizeRobotConfig(item)).filter((it) => it.channel));
               } else {
                 setRobotConfigs([]);
               }
