@@ -3,18 +3,49 @@ FROM node:22-slim AS ext-builder
 
 WORKDIR /build
 
-COPY byclaw-exe/extensions/ ./src/
+RUN npm config set registry https://registry.npmmirror.com --global \
+    && npm config set fund false --global \
+    && npm config set audit false --global \
+    && npm config set prefer-offline true --global
 
-RUN npm config set registry https://registry.npmmirror.com --global
+# install deps first (cache-friendly layer)
+COPY byclaw-exe/extensions/baiying-enhance/package.json \
+     byclaw-exe/extensions/baiying-enhance/package-lock.json \
+     ./src/baiying-enhance/
+COPY byclaw-exe/extensions/byai-channel/package.json \
+     byclaw-exe/extensions/byai-channel/package-lock.json \
+     ./src/byai-channel/
+COPY byclaw-exe/extensions/byai_diagnostics-otel/package.json \
+     byclaw-exe/extensions/byai_diagnostics-otel/package-lock.json \
+     ./src/byai_diagnostics-otel/
 
-# install, build, prune, then assemble clean output into /build/out/
+RUN --mount=type=cache,target=/root/.npm \
+    set -eux; \
+    pids=""; \
+    for dir in src/*/; do \
+        [ -f "$dir/package.json" ] || continue; \
+        name=$(basename "$dir"); \
+        if [ -f "$dir/package-lock.json" ]; then \
+            echo ">>> npm ci --omit=dev: $name"; \
+            (cd "$dir" && npm ci --omit=dev --prefer-offline) & \
+        else \
+            echo ">>> npm install --omit=dev --no-package-lock: $name"; \
+            (cd "$dir" && npm install --omit=dev --no-package-lock --prefer-offline) & \
+        fi; \
+        pids="$pids $!"; \
+    done; \
+    for pid in $pids; do wait "$pid"; done
+
+# copy full source and build
+COPY byclaw-exe/extensions/baiying-enhance/ ./src/baiying-enhance/
+COPY byclaw-exe/extensions/byai-channel/ ./src/byai-channel/
+COPY byclaw-exe/extensions/byai_diagnostics-otel/ ./src/byai_diagnostics-otel/
+
 RUN set -eux; \
     mkdir -p /build/out; \
     for dir in src/*/; do \
         [ -f "$dir/package.json" ] || continue; \
         name=$(basename "$dir"); \
-        echo ">>> npm install: $name"; \
-        (cd "$dir" && npm install); \
         if node --input-type=module -e ' \
             import { readFileSync } from "fs"; \
             const pkg = JSON.parse(readFileSync(process.argv[1] + "package.json", "utf8")); \
@@ -37,14 +68,16 @@ RUN set -eux; \
     echo ">>> built extensions:"; ls -la /build/out/
 
 ## ── stage 2: final image ─────────────────────────────────────────
-FROM ghcr.io/openclaw/openclaw:2026.4.21
+FROM ghcr.io/openclaw/openclaw:2026.6.6
 
 USER root
 
 RUN chown root:root /app
 
 ENV PIP_BREAK_SYSTEM_PACKAGES=1 \
-    PIP_ROOT_USER_ACTION=ignore
+    PIP_ROOT_USER_ACTION=ignore \
+    OPENCLAW_BUNDLED_PLUGINS_DIR=/app/dist/extensions \
+    OPENCLAW_STATE_DIR=/root/.openclaw
 
 RUN set -eux; \
     if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
@@ -62,10 +95,21 @@ RUN set -eux; \
         zip; \
     rm -rf /var/lib/apt/lists/*
 
-COPY --from=ext-builder /build/out/ /app/extensions/
+# copy built extensions and re-map diagnostics-otel to openclaw's expected id
+COPY --from=ext-builder /build/out/ /app/dist-runtime/extensions/
 
-COPY middleware/openclaw/skills/iwhalehub/ /app/skills/iwhalehub/
+RUN set -eux; \
+    rm -rf /app/dist/extensions/diagnostics-otel; \
+    mkdir -p /app/dist/extensions; \
+    cp -a /app/dist-runtime/extensions/byai_diagnostics-otel /app/dist/extensions/diagnostics-otel; \
+    rm -rf /app/dist-runtime/extensions/byai_diagnostics-otel; \
+    test -f /app/dist/extensions/diagnostics-otel/dist/index.js; \
+    node --input-type=module -e ' \
+      import { readFileSync } from "node:fs"; \
+      const manifest = JSON.parse(readFileSync("/app/dist/extensions/diagnostics-otel/openclaw.plugin.json", "utf8")); \
+      const pkg = JSON.parse(readFileSync("/app/dist/extensions/diagnostics-otel/package.json", "utf8")); \
+      if (manifest.id !== "diagnostics-otel") throw new Error(`unexpected diagnostics plugin id: ${manifest.id}`); \
+      if (pkg.name !== "@openclaw/diagnostics-otel") throw new Error(`unexpected diagnostics package name: ${pkg.name}`); \
+    '
 
-COPY middleware/openclaw/linux-amd64-filebrowser/filebrowser /usr/local/bin/filebrowser
-RUN chmod a+x /usr/local/bin/filebrowser
-
+RUN ln -s /app /app/node_modules/openclaw
