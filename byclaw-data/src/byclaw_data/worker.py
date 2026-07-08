@@ -1665,6 +1665,22 @@ class DataCloudWorker(GatewayWorker):
                     "DataCloudWorker: no mounted_objects found, TOOL_POOL init skipped"
                 )
 
+        # 启动术语同步后台 Worker（消费 DYNAMIC_TABLE 写入事件，通过 TermMixin 写入术语库）
+        # platform 实现了 TermSyncHandler 协议（via TermMixin），直接注入即可
+        try:
+            from datacloud_knowledge.sync import term_sync_worker  # noqa: PLC0415
+            from datacloud_platform import get_platform  # noqa: PLC0415
+
+            asyncio.create_task(
+                term_sync_worker(handler=get_platform()),
+                name="term_sync_worker",
+            )
+            logger.info("DataCloudWorker: term_sync_worker started with platform handler")
+        except ImportError:
+            logger.debug("DataCloudWorker: datacloud_knowledge.sync not available, term sync disabled")
+        except Exception:
+            logger.warning("DataCloudWorker: term_sync_worker 启动失败", exc_info=True)
+
         await super().start_heartbeat(**kwargs)
 
     async def _resolve_agent_configs_snapshot(
