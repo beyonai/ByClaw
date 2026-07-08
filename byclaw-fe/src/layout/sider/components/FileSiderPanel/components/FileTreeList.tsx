@@ -85,7 +85,14 @@ const FileTreeList: React.FC<FileTreeListProps> = ({
               selectable={false}
               treeData={treeData}
               expandedKeys={expandedKeys}
-              onExpand={(keys) => onExpand(keys)}
+              onExpand={(keys, info) => {
+                onExpand(keys);
+                const item = info.node as unknown as FileTreeItem;
+                const directoryPath = ensureDirectoryPath(normalizeFileBrowserPath(item.path));
+                if (info.expanded && isDirectory(item) && childrenByPath[directoryPath]) {
+                  void onLoadData(item);
+                }
+              }}
               loadData={(node) => onLoadData(node as unknown as FileTreeItem)}
               icon={(node) => {
                 const item = node as unknown as FileTreeItem;
