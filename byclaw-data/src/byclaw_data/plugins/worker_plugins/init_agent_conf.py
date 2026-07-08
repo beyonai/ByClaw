@@ -21,6 +21,7 @@ from by_framework import (
     StreamChunkEvent,
 )
 from by_framework.core.protocol.content_type import SseMessageType
+from datacloud_platform.constants import DEFAULT_BASE_ID
 from dotenv import load_dotenv
 
 from byclaw_data.runtime import (
@@ -660,7 +661,7 @@ class InitDataCloudDigitalEmployeePlugin(Plugin):
 
         shared_loader: Any = None
         if mounted_objects and self._runtime_manager is not None:
-            snapshot = self._runtime_manager.get_loader("default")
+            snapshot = self._runtime_manager.get_loader(DEFAULT_BASE_ID)
             shared_loader = snapshot.loader
 
         # SCENE 工具注册（本地/远程统一，platform 自动路由）
