@@ -403,7 +403,7 @@ public class ModelManagementApplicationService {
 
     /** 填充 ModelVO 基础字段（id、displayName、modelCode、status、token 等） */
     private void fillModelVOBasic(ModelVO vo, ByaiAimodel entity, boolean forList) {
-        vo.setId(entity.getModelId() != null ? String.valueOf(entity.getModelId()) : null);
+        vo.setId(entity.getModelId());
         vo.setDisplayName(entity.getModelName());
         /// 先设置为model_name
         vo.setModelCode(entity.getModelNo());
