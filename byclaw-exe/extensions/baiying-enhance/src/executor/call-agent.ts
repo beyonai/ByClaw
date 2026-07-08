@@ -1,16 +1,20 @@
-import { QueueNames, WorkerRegistry, createRedis } from "@byclaw/by-framework";
+import { WorkerRegistry } from "@byclaw/by-framework";
 import { callAgent, createRedisCallAgentDeps } from "@byclaw/by-framework";
-import type { Redis } from "ioredis";
 import type { Capability, Dict, ExecutorFailure, ExecutorResponse } from "./types.js";
 import { asString } from "./types.js";
 import { makeError } from "./errors.js";
 import {
   diagnoseTraceInSessionStreams,
   pollDocResult,
-  readRedisConfig,
   type DocDeltaCallback,
 } from "./doc-shared.js";
 import { logBaiyingRequest, type BaiyingEnhanceLogger } from "./debug-channel.js";
+import {
+  RedisCompatKeys,
+  closeRedisCompatClient,
+  createByFrameworkRedisClient,
+  type RedisCompatClient,
+} from "../redis-compat.js";
 
 export type CallAgentMode = "sync" | "async";
 
@@ -54,7 +58,7 @@ export type ExecuteViaCallAgentInput = {
 export async function executeViaCallAgent(
   input: ExecuteViaCallAgentInput,
 ): Promise<ExecutorResponse> {
-  let ctx: { redis: Redis; registry: WorkerRegistry };
+  let ctx: { redis: RedisCompatClient; registry: WorkerRegistry };
   try {
     ctx = createCallAgentContext();
   } catch (err) {
@@ -164,7 +168,7 @@ export async function executeViaCallAgent(
       trace_id: input.traceId,
       session_id: input.sessionId,
       target_agent_type: result.targetAgentType,
-      stream_name: QueueNames.ctrl_stream(input.targetAgentType),
+      stream_name: RedisCompatKeys.ctrlStream(input.targetAgentType),
       accepted_at_ms: startedAt,
       runtime_hint: result.runtimeHint,
     };
@@ -188,7 +192,7 @@ export async function executeViaCallAgent(
       timeoutSec: input.syncTimeoutSec,
       intervalSec: input.syncIntervalSec,
       sinceMs: startedAt,
-      streamName: QueueNames.session_data_stream(input.sessionId),
+      streamName: RedisCompatKeys.sessionDataStream(input.sessionId),
       onDelta: input.onDelta,
       signal: input.signal,
       toolCallId: input.toolCallId,
@@ -227,19 +231,12 @@ export async function executeViaCallAgent(
     );
     return failure;
   } finally {
-    await ctx.redis.quit().catch(() => undefined);
+    await closeRedisCompatClient(ctx.redis);
   }
 }
 
-function createCallAgentContext(): { redis: Redis; registry: WorkerRegistry } {
-  const config = readRedisConfig();
-  const redis = createRedis({
-    host: config.host,
-    port: config.port,
-    db: config.db,
-    username: config.username,
-    password: config.password,
-  }) as Redis;
+function createCallAgentContext(): { redis: RedisCompatClient; registry: WorkerRegistry } {
+  const redis = createByFrameworkRedisClient();
   return {
     redis,
     registry: new WorkerRegistry(redis),

@@ -7,17 +7,21 @@
  *   - Parameter parsing helpers (call mode, route mode, timeouts, session id)
  *   - Redis env-var config + polling + diagnosis (works against any `Redis`
  *     client the caller supplies — the SDK passes its SDK-built client, the
- *     raw fallback passes its own `new Redis(...)`)
+ *     raw fallback passes the local Redis compat client)
  *
  * By moving these out of `doc-redis.ts` we make the canonical default path
  * (`doc-gateway.ts`) completely independent of the raw fallback.
  */
 
-import type { Redis } from "ioredis";
 import type { Dict, ResourceContext } from "./types.js";
 import { asString, isRecord } from "./types.js";
 import { extractOpenclawMcpForwardHeaders } from "./capability-builder.js";
 import { resolveChannelRequestContextBySessionKey } from "../channel-session-resolve.js";
+import {
+  RedisCompatKeys,
+  resolveRedisCompatConfig,
+  type RedisCompatClient,
+} from "../redis-compat.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -58,11 +62,13 @@ export type DocAsyncDefaults = {
 
 /** Options read from env only; unset keys are omitted (library defaults apply). */
 export type RedisConfig = {
+  mode?: "standalone" | "cluster";
   host?: string;
   port?: number;
   username?: string;
   password?: string;
   db?: number;
+  clusterNodes?: Array<{ host: string; port: number }>;
 };
 
 /**
@@ -195,31 +201,19 @@ export function resolveDocChannelTraceId(requestPayload: Dict): string {
 
 
 export function readRedisConfig(): RedisConfig {
-  const config: RedisConfig = {};
-  const host = (process.env.REDIS_HOST ?? "").trim();
-  if (host) config.host = host;
-
-  const portRaw = (process.env.REDIS_PORT ?? "").trim();
-  if (portRaw) {
-    const n = Number.parseInt(portRaw, 10);
-    if (Number.isFinite(n)) config.port = n;
+  const redis = resolveRedisCompatConfig();
+  if (!redis) {
+    return {};
   }
-
-  const username = (process.env.REDIS_USERNAME ?? "").trim();
-  if (username) config.username = username;
-
-  const password = process.env.REDIS_PASSWORD;
-  if (password !== undefined && password !== "") {
-    config.password = password;
-  }
-
-  const dbRaw = (process.env.REDIS_DATABASE ?? "").trim();
-  if (dbRaw) {
-    const n = Number.parseInt(dbRaw, 10);
-    if (Number.isFinite(n)) config.db = n;
-  }
-
-  return config;
+  return {
+    mode: redis.mode,
+    host: redis.mode === "cluster" ? redis.clusterNodes[0]?.host ?? redis.host : redis.host,
+    port: redis.mode === "cluster" ? redis.clusterNodes[0]?.port ?? redis.port : redis.port,
+    username: redis.username,
+    password: redis.password,
+    db: redis.db,
+    clusterNodes: redis.clusterNodes,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -331,7 +325,7 @@ function isDocFinalEvent(eventType: string, stateMsg = ""): { isFinal: boolean; 
  * same session.
  */
 export async function pollDocResult(params: {
-  redis: Redis;
+  redis: RedisCompatClient;
   sessionId: string;
   traceId: string;
   messageId: string;
@@ -345,8 +339,8 @@ export async function pollDocResult(params: {
   sinceMs?: number;
   /**
    * Override the stream name. Defaults to `byai_gateway:session:<sid>:data_stream`.
-   * The SDK-backed path passes `QueueNames.session_data_stream(sid)` to keep
-   * its key names in sync with the gateway SDK constants.
+   * The SDK-backed path passes the Redis compat key factory output to keep
+   * v1 / v2 key names in sync with the gateway SDK contract.
    */
   streamName?: string;
   /**
@@ -368,7 +362,7 @@ export async function pollDocResult(params: {
   toolCallId?: string;
 }): Promise<DocPollResult> {
   const start = Date.now();
-  const streamName = params.streamName ?? `byai_gateway:session:${params.sessionId}:data_stream`;
+  const streamName = params.streamName ?? RedisCompatKeys.sessionDataStream(params.sessionId);
   // Redis XREAD lower bound is EXCLUSIVE. Start just before sinceMs so events
   // emitted at the same millisecond as our ack are still observed.
   let lastId = `${Math.max(0, (params.sinceMs ?? 0) - 1)}-0`;
@@ -509,7 +503,7 @@ export async function pollDocResult(params: {
 
 /** Mirror of `_diagnose_trace_in_session_streams`. */
 export async function diagnoseTraceInSessionStreams(params: {
-  redis: Redis;
+  redis: RedisCompatClient;
   traceId: string;
   limitStreams?: number;
   eachStreamRows?: number;
@@ -525,42 +519,32 @@ export async function diagnoseTraceInSessionStreams(params: {
   const eachStreamRows = params.eachStreamRows ?? 20;
   const matched: Array<{ stream_name: string; stream_id: string }> = [];
   let scanned = 0;
-  let cursor = "0";
+  const scanPattern = RedisCompatKeys.sessionDataStreamScanPattern();
   try {
-    do {
-      const scan = (await params.redis.scan(
-        cursor,
-        "MATCH",
-        "byai_gateway:session:*:data_stream",
-        "COUNT",
-        "300",
-      )) as [string, string[]];
-      cursor = String(scan?.[0] ?? "0");
-      const keys = Array.isArray(scan?.[1]) ? (scan[1] as string[]) : [];
-      for (const key of keys) {
-        scanned += 1;
-        if (scanned > limitStreams) break;
-        let rows: Array<[string, string[]]> = [];
-        try {
-          rows = (await params.redis.xrevrange(key, "+", "-", "COUNT", eachStreamRows)) as Array<
-            [string, string[]]
-          >;
-        } catch {
-          continue;
-        }
-        for (const [streamId, fields] of rows) {
-          const fieldRecord = fieldsToRecord(fields);
-          const rawData = fieldRecord.data ?? "";
-          if (!rawData) continue;
-          const msg = extractDocDataMessage(rawData);
-          if (!msg) continue;
-          if (asString(msg.trace_id) === params.traceId) {
-            matched.push({ stream_name: key, stream_id: String(streamId) });
-            break;
-          }
+    await scanKeys(params.redis, scanPattern, async (key) => {
+      scanned += 1;
+      if (scanned > limitStreams) return false;
+      let rows: Array<[string, string[]]> = [];
+      try {
+        rows = (await params.redis.xrevrange(key, "+", "-", "COUNT", eachStreamRows)) as Array<
+          [string, string[]]
+        >;
+      } catch {
+        return true;
+      }
+      for (const [streamId, fields] of rows) {
+        const fieldRecord = fieldsToRecord(fields);
+        const rawData = fieldRecord.data ?? "";
+        if (!rawData) continue;
+        const msg = extractDocDataMessage(rawData);
+        if (!msg) continue;
+        if (asString(msg.trace_id) === params.traceId) {
+          matched.push({ stream_name: key, stream_id: String(streamId) });
+          break;
         }
       }
-    } while (cursor !== "0" && scanned <= limitStreams);
+      return true;
+    });
   } catch (e) {
     return {
       matched: false,
@@ -573,6 +557,29 @@ export async function diagnoseTraceInSessionStreams(params: {
     scanned_stream_count: scanned,
     matched_streams: matched,
   };
+}
+
+async function scanKeys(
+  redis: RedisCompatClient,
+  pattern: string,
+  onKey: (key: string) => Promise<boolean>,
+): Promise<void> {
+  const clusterNodes = (redis as unknown as { nodes?: (role: "master") => RedisCompatClient[] }).nodes?.("master");
+  const clients = clusterNodes && clusterNodes.length > 0 ? clusterNodes : [redis];
+  for (const client of clients) {
+    let cursor = "0";
+    do {
+      const scan = (await client.scan(cursor, "MATCH", pattern, "COUNT", "300")) as [string, string[]];
+      cursor = String(scan?.[0] ?? "0");
+      const keys = Array.isArray(scan?.[1]) ? scan[1] : [];
+      for (const key of keys) {
+        const shouldContinue = await onKey(String(key));
+        if (!shouldContinue) {
+          return;
+        }
+      }
+    } while (cursor !== "0");
+  }
 }
 
 export function getCommonGatewayMetadata(parameters: Dict): Dict {

@@ -1,7 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import {
-  createRedis,
   WorkerRegistry,
   WorkerRunner,
   GatewayDataEmitter,
@@ -25,6 +24,11 @@ import {
 } from "./session-context.js";
 import type { ResolvedByaiAccount, ByaiSdkInboundMessage, SdkInboundFile } from "./types.js";
 import { getRedisInfo, getUserCode } from "./utils.js";
+import {
+  closeRedisCompatClient,
+  createByFrameworkRedisClient,
+  type RedisCompatClient,
+} from "./redis-compat.js";
 
 export interface ByaiSdkAppOptions {
   account: ResolvedByaiAccount;
@@ -197,7 +201,7 @@ export class ByaiSdkApp {
 
   private runner: WorkerRunner | null = null;
   private stopSubscription: (() => void) | null = null;
-  private redis: import("ioredis").Redis | null = null;
+  private redis: RedisCompatClient | null = null;
   private workerHeartbeat: WorkerHeartbeat | null = null;
 
   constructor(opts: ByaiSdkAppOptions) {
@@ -233,7 +237,7 @@ export class ByaiSdkApp {
 
     debug?.(`[${this.account.accountId}] byai-channel redisInfo: ${JSON.stringify(redisInfo)}`);
 
-    const redis = createRedis(redisInfo);
+    const redis = createByFrameworkRedisClient();
     this.redis = redis;
 
     const userCode = getUserCode();
@@ -253,7 +257,7 @@ export class ByaiSdkApp {
     const runner = new WorkerRunner(
       { workerId, agentTypes, registry },
       {
-        redisClient: createRedis(redisInfo),
+        redisClient: createByFrameworkRedisClient(),
       },
     );
     installNoGroupRecovery({
@@ -486,7 +490,7 @@ export class ByaiSdkApp {
     }
 
     try {
-      await this.redis?.quit();
+      await closeRedisCompatClient(this.redis);
     } catch (err) {
       error?.(
         `[${this.account.accountId}] byai-channel failed to close Redis connection: ${String(err)}`,

@@ -6,9 +6,9 @@
  *
  * - OBJECT and VIEW resources served by the `datacloud-data-service` do NOT
  *   have a fixed `mcpServerUrl` field in their baiying metadata. The actual
- *   MCP endpoint is registered in Redis service-discovery under the key
- *   `byai_gateway:sd:instances:byclaw-datacloud`, with each hash field being
- *   a JSON doc carrying `{host, port, ...}`.
+ *   MCP endpoint is registered in Redis service-discovery (v1/v2 key names are
+ *   resolved by `RedisCompatKeys.serviceDiscoveryInstances`), with each hash
+ *   field being a JSON doc carrying `{host, port, ...}`.
  * - The canonical URL layout is `http://<host>:<port>/api/v1/mcp/` — the
  *   datacloud service mounts its MCP handler at `/api/v1/mcp` and accepts
  *   `X-Object-Id` / `X-View-Id` headers (see
@@ -20,11 +20,15 @@
  * built by `buildOntologyMcpHeaders` in `ontology-headers.ts`.
  */
 
-import { createRedis } from "@byclaw/by-framework";
 import { isRecord } from "./types.js";
-import { readRedisConfig } from "./doc-shared.js";
+import {
+  RedisCompatKeys,
+  closeRedisCompatClient,
+  createByFrameworkRedisClient,
+  type RedisCompatClient,
+} from "../redis-compat.js";
 
-const DATACLOUD_REDIS_KEY = "byai_gateway:sd:instances:byclaw-datacloud";
+const DATACLOUD_SERVICE_NAME = "byclaw-datacloud";
 
 /**
  * TTL for the in-process cache, in milliseconds. Keeps Redis traffic sane
@@ -90,19 +94,12 @@ export async function resolveDatacloudMcpServerUrl(options?: {
     return cachedUrl;
   }
 
-  const cfg = readRedisConfig();
-  let redis: ReturnType<typeof createRedis>;
+  let redis: RedisCompatClient;
   try {
     // `createRedis` only forwards a subset of ioredis options; for timeout /
     // retry tuning we rely on the node default TCP timeout and wrap the
     // single HGETALL in `Promise.race` below.
-    redis = createRedis({
-      host: cfg.host,
-      port: cfg.port,
-      db: cfg.db,
-      username: cfg.username,
-      password: cfg.password,
-    });
+    redis = createByFrameworkRedisClient();
   } catch {
     return "";
   }
@@ -111,8 +108,9 @@ export async function resolveDatacloudMcpServerUrl(options?: {
   const bound = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 5_000;
 
   try {
+    const redisKey = RedisCompatKeys.serviceDiscoveryInstances(DATACLOUD_SERVICE_NAME);
     const hash = await Promise.race<Record<string, string>>([
-      redis.hgetall(DATACLOUD_REDIS_KEY) as Promise<Record<string, string>>,
+      redis.hgetall(redisKey) as Promise<Record<string, string>>,
       new Promise<Record<string, string>>((_, reject) =>
         setTimeout(() => reject(new Error("datacloud SD lookup timed out")), bound),
       ),
@@ -126,7 +124,7 @@ export async function resolveDatacloudMcpServerUrl(options?: {
   } catch {
     return "";
   } finally {
-    await redis.quit().catch(() => undefined);
+    await closeRedisCompatClient(redis);
   }
 }
 

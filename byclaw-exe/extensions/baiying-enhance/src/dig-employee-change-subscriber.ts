@@ -1,5 +1,10 @@
-import Redis from "ioredis";
 import type { AgentFlushNowOptions } from "./agent-watchdog.js";
+import {
+  closeRedisCompatClient,
+  createRedisCompatClient,
+  resolveRedisCompatConfig,
+  type RedisCompatClient,
+} from "./redis-compat.js";
 
 type LoggerLike = {
   info: (message: string) => void;
@@ -138,9 +143,15 @@ export function hasDigEmployeePubSubRedisConfig(params: {
   host?: string;
   port: number;
   db: number;
+  clusterHost?: string;
   channel: string;
 }): boolean {
-  return !!params.host?.trim() && !Number.isNaN(params.port) && !Number.isNaN(params.db) && !!params.channel.trim();
+  return (
+    (!!params.clusterHost?.trim() || !!params.host?.trim()) &&
+    !Number.isNaN(params.port) &&
+    !Number.isNaN(params.db) &&
+    !!params.channel.trim()
+  );
 }
 
 export function createDigEmployeeChangeSubscriber(params: {
@@ -152,15 +163,17 @@ export function createDigEmployeeChangeSubscriber(params: {
   getAuthorizedIds: () => Set<string> | undefined;
   flushNow: (opts?: AgentFlushNowOptions) => Promise<void>;
 }): DigEmployeeChangeSubscriber {
-  const host = process.env.REDIS_HOST?.trim();
-  const port = Number.parseInt(process.env.REDIS_PORT?.trim() || "", 10);
-  const db = Number.parseInt(process.env.REDIS_DATABASE?.trim() || "", 10);
+  const redisConfig = resolveRedisCompatConfig();
+  const host = redisConfig?.host;
+  const port = redisConfig?.port ?? Number.NaN;
+  const db = redisConfig?.db ?? Number.NaN;
+  const clusterHost = process.env.REDIS_CLUSTER_HOST?.trim();
   const connectTimeout = Math.max(
     500,
     Number.parseInt(process.env.BAIYING_DIG_CHANGE_REDIS_CONNECT_TIMEOUT_MS || "3000", 10),
   );
 
-  let subscriber: Redis | null = null;
+  let subscriber: RedisCompatClient | null = null;
   let stopped = false;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let strictAuthWarned = false;
@@ -294,18 +307,13 @@ export function createDigEmployeeChangeSubscriber(params: {
     if (subscriber || stopped) {
       return;
     }
-    if (!hasDigEmployeePubSubRedisConfig({ host, port, db, channel: params.channel })) {
+    if (!hasDigEmployeePubSubRedisConfig({ host, port, db, clusterHost, channel: params.channel })) {
       params.logger.warn(
         "baiying-enhance: dig-employee Pub/Sub subscriber disabled (REDIS_HOST/REDIS_PORT/REDIS_DATABASE/channel missing)",
       );
       return;
     }
-    subscriber = new Redis({
-      host,
-      port,
-      db,
-      username: process.env.REDIS_USERNAME?.trim() || undefined,
-      password: process.env.REDIS_PASSWORD?.trim() || undefined,
+    subscriber = createRedisCompatClient({
       lazyConnect: true,
       enableOfflineQueue: false,
       connectTimeout,
@@ -335,7 +343,7 @@ export function createDigEmployeeChangeSubscriber(params: {
       params.logger.warn(
         `baiying-enhance: dig-employee SUBSCRIBE failed: ${err instanceof Error ? err.message : String(err)}`,
       );
-      await subscriber.quit().catch(() => undefined);
+      await closeRedisCompatClient(subscriber);
       subscriber = null;
       scheduleReconnect();
       return;
@@ -361,7 +369,7 @@ export function createDigEmployeeChangeSubscriber(params: {
         debounceTimer = null;
       }
       pendingQueue.length = 0;
-      await subscriber?.quit().catch(() => undefined);
+      await closeRedisCompatClient(subscriber);
       subscriber = null;
     },
   };

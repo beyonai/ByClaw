@@ -18,6 +18,15 @@ describe("backend service discovery", () => {
     expect(backendServiceDiscoveryKey()).toBe("byai_gateway:sd:instances:CustomByaiService");
   });
 
+  it("uses v2 service discovery keys when REDIS_KEY_SCHEMA_VERSION=v2", () => {
+    vi.stubEnv("REDIS_KEY_SCHEMA_VERSION", "v2");
+    vi.stubEnv("BE_DOMAINNAME", "CustomByaiService");
+
+    expect(backendServiceDiscoveryKey()).toBe(
+      "byai_gateway:v2:sd:{CustomByaiService}:instances",
+    );
+  });
+
   it("parses backend registration JSON and builds base URL with path_prefix", () => {
     const instance = parseBackendServiceInstance(
       JSON.stringify({

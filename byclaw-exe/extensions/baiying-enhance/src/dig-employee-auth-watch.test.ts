@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { isRedisKeyspaceNotificationsEnabled, parseAuthorizedIds } from "./dig-employee-auth-watch.js";
+import {
+  isRedisKeyspaceNotificationsEnabled,
+  parseAuthorizedIds,
+  shouldUseDigEmployeeAuthKeyspaceNotifications,
+} from "./dig-employee-auth-watch.js";
 
 describe("parseAuthorizedIds", () => {
   it("parses hash fields shaped as resourceId -> DIG_EMPLOYEE", () => {
@@ -37,5 +41,10 @@ describe("isRedisKeyspaceNotificationsEnabled", () => {
   it("returns true when hash or generic key events are enabled", () => {
     expect(isRedisKeyspaceNotificationsEnabled("Kh")).toBe(true);
     expect(isRedisKeyspaceNotificationsEnabled("AKE$")).toBe(true);
+  });
+
+  it("forces poll-only auth watch in Redis Cluster mode", () => {
+    expect(shouldUseDigEmployeeAuthKeyspaceNotifications("cluster", "Kh")).toBe(false);
+    expect(shouldUseDigEmployeeAuthKeyspaceNotifications("standalone", "Kh")).toBe(true);
   });
 });
