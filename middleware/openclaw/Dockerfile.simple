@@ -124,9 +124,11 @@ RUN set -eux; \
 
 RUN ln -s /app /app/node_modules/openclaw
 
-# slim runtime bootstrap + entrypoint (state persisted under /by)
+# slim runtime bootstrap + upstream entrypoint (state persisted under /by).
+# The slim bootstrap keeps the same install path as the full image, so
+# start-openclaw.sh can be reused without changes.
 COPY middleware/openclaw/runtime-bootstrap.simple.sh /usr/local/bin/openclaw-runtime-bootstrap
-COPY middleware/openclaw/start-openclaw.simple.sh    /usr/local/bin/start-openclaw.sh
+COPY middleware/openclaw/start-openclaw.sh          /usr/local/bin/start-openclaw.sh
 RUN chmod +x \
     /usr/local/bin/openclaw-runtime-bootstrap \
     /usr/local/bin/start-openclaw.sh
