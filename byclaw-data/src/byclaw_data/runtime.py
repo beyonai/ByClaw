@@ -48,7 +48,7 @@ def _init_enterprise_base_and_scene() -> None:
             OntologyBaseEntry(
                 base_id=enterprise_id,
                 display_name="企业本体库",
-                source_type="LOCAL",
+                source_type="OPENGAUSS",
                 backend_config={
                     "ontology": {
                         "base_path": os.environ.get("DATACLOUD_ONTOLOGY_PATH", ""),
