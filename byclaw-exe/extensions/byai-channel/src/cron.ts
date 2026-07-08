@@ -1,10 +1,15 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { createRedis, GatewayDataEmitter } from "@byclaw/by-framework";
+import { GatewayDataEmitter } from "@byclaw/by-framework";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/core";
 import { getOptionalByaiRuntime } from "./runtime";
 import { getRedisInfo, getUserCode } from "./utils";
+import {
+  closeRedisCompatClient,
+  createByFrameworkRedisClient,
+  type RedisCompatClient,
+} from "./redis-compat.js";
 
 type PluginHookGatewayCronRunStatus = "ok" | "error" | "skipped";
 
@@ -254,7 +259,7 @@ async function resolveNearestCronNextRunTime(): Promise<string | number | ""> {
 }
 
 async function upsertCronNextRunTimeField(params: {
-  redis: ReturnType<typeof createRedis>;
+  redis: RedisCompatClient;
   userCode: string;
   nextRunTime: string | number | "";
 }) {
@@ -270,7 +275,7 @@ export async function updateCronNextRunTimeRedis(api?: Pick<OpenClawPluginApi, "
   if (!userCode) {
     return;
   }
-  const redis = createRedis(redisInfo);
+  const redis = createByFrameworkRedisClient();
   try {
     const nextRunTime = await resolveNearestCronNextRunTime();
     await upsertCronNextRunTimeField({ redis, userCode, nextRunTime });
@@ -280,7 +285,7 @@ export async function updateCronNextRunTimeRedis(api?: Pick<OpenClawPluginApi, "
   } catch (err) {
     api?.logger.warn(`[byai-channel] cron nextRunTime sync failed: ${String(err)}`);
   } finally {
-    await redis.quit().catch(() => undefined);
+    await closeRedisCompatClient(redis);
   }
 }
 
@@ -310,7 +315,7 @@ export function startCronNextRunTimeRedisSync(api?: Pick<OpenClawPluginApi, "log
   cronNextRunTimer.unref?.();
 }
 
-async function getUserId(userCode: string, redis: ReturnType<typeof createRedis>) {
+async function getUserId(userCode: string, redis: RedisCompatClient) {
   if (!userCode || !redis) {
     return "";
   }
@@ -330,22 +335,25 @@ async function emitOnce(params: {
   if (!userCode) {
     return;
   }
-  const redis = createRedis(redisInfo);
-  const userId = await getUserId(userCode, redis);
-  const emitter = new GatewayDataEmitter(redis, {
-    dataStreamName: "byai_gateway:session_event:data_stream",
-  });
-  await emitter.emitEvent({
-    data: {
-      ...params.data,
-      userId,
-      userCode,
-    },
-    sessionId: params.sessionId || "",
-    traceId: crypto.randomUUID(),
-    eventType: "cron_changed",
-  });
-  redis.quit();
+  const redis = createByFrameworkRedisClient();
+  try {
+    const userId = await getUserId(userCode, redis);
+    const emitter = new GatewayDataEmitter(redis, {
+      dataStreamName: "byai_gateway:session_event:data_stream",
+    });
+    await emitter.emitEvent({
+      data: {
+        ...params.data,
+        userId,
+        userCode,
+      },
+      sessionId: params.sessionId || "",
+      traceId: crypto.randomUUID(),
+      eventType: "cron_changed",
+    });
+  } finally {
+    await closeRedisCompatClient(redis);
+  }
 }
 
 export async function handleCronChangedEvent(

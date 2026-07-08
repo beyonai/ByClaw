@@ -1,5 +1,4 @@
 import { EventType, SseReasonMessageType } from "@byclaw/by-framework";
-import { createRedis } from "@byclaw/by-framework";
 import { enqueueAfterAgentEvents } from "./agent-event-serial.js";
 import {
   emitSdkChunkTracked,
@@ -34,6 +33,11 @@ import {
 } from "./workspace-reload-hints.js";
 import path from "node:path";
 import fs from "node:fs/promises";
+import {
+  closeRedisCompatClient,
+  createByFrameworkRedisClient,
+  resolveRedisCompatConfig,
+} from "./redis-compat.js";
 
 type BeforeMessageWriteEvent = {
   message?: unknown;
@@ -78,22 +82,16 @@ type ByaiUserInfo = {
 };
 
 function getRedisInfo(): RedisInfo | null {
-  const {
-    REDIS_USERNAME,
-    REDIS_PASSWORD,
-    REDIS_HOST,
-    REDIS_PORT,
-    REDIS_DATABASE,
-  } = process.env;
-  if (!REDIS_HOST || !REDIS_PORT) {
+  const config = resolveRedisCompatConfig();
+  if (!config) {
     return null;
   }
   return {
-    username: REDIS_USERNAME,
-    password: REDIS_PASSWORD,
-    host: REDIS_HOST,
-    port: parseInt(REDIS_PORT, 10),
-    db: parseInt(REDIS_DATABASE || "0", 10),
+    username: config.username,
+    password: config.password,
+    host: config.mode === "cluster" ? config.clusterNodes[0]?.host ?? config.host : config.host,
+    port: config.mode === "cluster" ? config.clusterNodes[0]?.port ?? config.port : config.port,
+    db: config.db,
   };
 }
 
@@ -138,7 +136,7 @@ async function readByaiUserInfoFromRedis(): Promise<ByaiUserInfo | null> {
     return null;
   }
 
-  const redis = createRedis(redisInfo);
+  const redis = createByFrameworkRedisClient();
   try {
     const userIdRaw = await redis.get(`SHARE_BFM_USER_CODE_${userCode}`);
     const userId = userIdRaw?.trim();
@@ -166,7 +164,7 @@ async function readByaiUserInfoFromRedis(): Promise<ByaiUserInfo | null> {
       sourceSystem: typeof parsed.sourceSystem === "string" ? parsed.sourceSystem : undefined,
     };
   } finally {
-    await redis.quit().catch(() => undefined);
+    await closeRedisCompatClient(redis);
   }
 }
 

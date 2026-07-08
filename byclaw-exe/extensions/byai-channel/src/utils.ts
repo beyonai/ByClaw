@@ -1,5 +1,6 @@
 
 import { getByaiRuntime } from "./runtime";
+import { resolveRedisCompatConfig } from "./redis-compat.js";
 
 let prevEmitIncrementKey = '';
 // 用于累积流式内容的缓冲区
@@ -105,15 +106,17 @@ export function getUserCode(): string | null {
 }
 
 export function getRedisInfo() {
-  const { REDIS_USERNAME, REDIS_PASSWORD, REDIS_HOST, REDIS_PORT, REDIS_DATABASE } = process.env;
-  if (!REDIS_HOST || !REDIS_PORT) {
+  const config = resolveRedisCompatConfig();
+  if (!config) {
     return null;
   }
   return {
-    username: REDIS_USERNAME,
-    password: REDIS_PASSWORD,
-    host: REDIS_HOST,
-    port: parseInt(REDIS_PORT, 10),
-    db: parseInt(REDIS_DATABASE || "0", 10),
+    username: config.username,
+    password: config.password,
+    host: config.mode === "cluster" ? config.clusterNodes[0]?.host ?? config.host : config.host,
+    port: config.mode === "cluster" ? config.clusterNodes[0]?.port ?? config.port : config.port,
+    db: config.db,
+    mode: config.mode,
+    clusterNodes: config.clusterNodes,
   };
 }

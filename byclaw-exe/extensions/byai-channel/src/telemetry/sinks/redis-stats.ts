@@ -1,6 +1,11 @@
-import Redis from "ioredis";
 import type { TelemetrySink } from "../reporter.js";
 import type { TelemetryBusyLogLine } from "../types.js";
+import {
+  closeRedisCompatClient,
+  createRedisCompatClient,
+  resolveRedisCompatConfig,
+  type RedisCompatClient,
+} from "../../redis-compat.js";
 
 type LoggerLike = {
   info?: (message: string) => void;
@@ -8,9 +13,11 @@ type LoggerLike = {
 };
 
 export type TelemetryRedisPublishConfig = {
+  mode: "standalone" | "cluster";
   host: string;
   port: number;
   db: number;
+  clusterNodes?: Array<{ host: string; port: number }>;
   username?: string;
   password?: string;
   userCode: string;
@@ -34,7 +41,7 @@ const TELEMETRY_AGENT_TYPE = "BYCLAW_EXE";
 
 export class RedisTelemetrySink implements TelemetrySink {
   readonly id = "redis-pubsub";
-  private readonly client: Redis;
+  private readonly client: RedisCompatClient;
   private queue: Promise<void> = Promise.resolve();
   private warnedPublishFailure = false;
 
@@ -42,15 +49,11 @@ export class RedisTelemetrySink implements TelemetrySink {
     private readonly config: TelemetryRedisPublishConfig,
     private readonly logger?: LoggerLike,
   ) {
-    this.client = new Redis({
-      host: config.host,
-      port: config.port,
-      db: config.db,
-      username: config.username,
-      password: config.password,
+    this.client = createRedisCompatClient({
       connectTimeout: config.connectTimeoutMs,
       maxRetriesPerRequest: 1,
       lazyConnect: true,
+      enableOfflineQueue: true,
     });
   }
 
@@ -79,7 +82,7 @@ export class RedisTelemetrySink implements TelemetrySink {
 
   async close(): Promise<void> {
     await this.flush();
-    await this.client.quit().catch(() => undefined);
+    await closeRedisCompatClient(this.client);
   }
 }
 
@@ -100,24 +103,21 @@ export function createRedisTelemetrySinkFromEnv(params: {
 export function resolveTelemetryRedisPublishConfig(
   env: NodeJS.ProcessEnv,
 ): TelemetryRedisPublishConfig | null {
-  const host = env.REDIS_HOST?.trim();
-  const port = Number.parseInt(env.REDIS_PORT?.trim() || "", 10);
-  const db = Number.parseInt(env.REDIS_DATABASE?.trim() || "0", 10);
-  const username = env.REDIS_USERNAME?.trim() || undefined;
-  const password =
-    env.REDIS_PASSWORD !== undefined && env.REDIS_PASSWORD !== "" ? env.REDIS_PASSWORD : undefined;
+  const redis = resolveRedisCompatConfig(env);
   const userCode = env.USER_CODE?.trim();
 
-  if (!host || !Number.isFinite(port) || !Number.isFinite(db) || !userCode) {
+  if (!redis || !userCode) {
     return null;
   }
 
   return {
-    host,
-    port,
-    db,
-    username,
-    password,
+    mode: redis.mode,
+    host: redis.mode === "cluster" ? redis.clusterNodes[0]?.host ?? redis.host : redis.host,
+    port: redis.mode === "cluster" ? redis.clusterNodes[0]?.port ?? redis.port : redis.port,
+    db: redis.db,
+    clusterNodes: redis.clusterNodes,
+    username: redis.username,
+    password: redis.password,
     userCode,
     agentType: TELEMETRY_AGENT_TYPE,
     topic: TELEMETRY_REDIS_STATS_TOPIC,
