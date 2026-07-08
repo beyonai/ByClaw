@@ -32,6 +32,73 @@ Inside that Claude Code session, the task instructs the main Claude session to u
 the generated named subagents, such as `byclaw-coder`, `byclaw-reviewer`, and
 `byclaw-tester`, instead of simulating the team in a normal answer.
 
+## Remote Claude Code Bridge
+
+The adapter can keep the same `sessions_spawn` contract while targeting a remote
+Claude Code worker. Register a custom acpx agent whose command is the bridge:
+
+```json
+{
+  "plugins": {
+    "entries": {
+      "acpx": {
+        "enabled": true,
+        "config": {
+          "agents": {
+            "byclaw-remote-claude": {
+              "command": "node /path/to/ByClaw/byclaw-exe/extensions/byclaw-acp-adapter/dist/remote-claude-acp.js"
+            }
+          }
+        }
+      },
+      "byclaw-acp-adapter": {
+        "enabled": true,
+        "config": {
+          "defaultAcpAgentId": "byclaw-remote-claude"
+        }
+      }
+    }
+  }
+}
+```
+
+Flow:
+
+```text
+OpenClaw sessions_spawn(agentId=byclaw-remote-claude)
+  -> acpx starts dist/remote-claude-acp.js over ACP stdio
+  -> bridge sends By-Framework AskAgent to BYCLAW_CODE_${USER_CODE}
+  -> remote Claude Code writes to byai_gateway:session:${byai-channel_session_id}:data_stream
+  -> BE websocket broadcaster consumes that Redis session queue and streams to FE
+```
+
+The bridge returns the ACP prompt turn after the remote worker ACKs the task. It
+does not consume `byai_gateway:session:*:data_stream` and does not mirror remote
+output back through ACP `session/update`; the Redis session queue remains owned
+by the existing BE websocket broadcast path.
+
+Required env for the bridge:
+
+```bash
+export REDIS_DATABASE=0
+export REDIS_HOST=<redis-host>
+export REDIS_PORT=6379
+export REDIS_USERNAME=<redis-username>
+export REDIS_PASSWORD=...
+export USER_CODE=<user-code>
+```
+
+Useful bridge overrides:
+
+- `BYCLAW_REMOTE_CLAUDE_TARGET_AGENT_TYPE`: explicit remote worker agent type.
+- `BYCLAW_REMOTE_CLAUDE_TARGET_AGENT_TYPE_PREFIX`: default is `BYCLAW_CODE_`.
+- `BYCLAW_REMOTE_CLAUDE_FRAMEWORK_ENTRY`: path to `@byclaw/by-framework/dist/index.js` when the bridge cannot auto-discover it.
+- `BYCLAW_REMOTE_CLAUDE_LANGUAGE`: language metadata sent to the remote worker, default `zh-CN`.
+
+`dist/remote-claude-acp.js` extracts `byaiChannelSessionId` from the ACP prompt
+and uses it as the remote worker session id. This keeps generated files aligned
+with the Session Files rules in `metadata.md`.
+
 Sensitive provider headers from Redis metadata are redacted before registry
 responses, Claude agent files, and SQLite run ledger rows are written.
 
@@ -109,12 +176,15 @@ export USER_CODE=0027024710
 
 npm run mock:redis
 npm run prepare:test-config
+# Optional: generate a local OpenClaw config that uses byclaw-remote-claude.
+BYCLAW_ACP_USE_REMOTE_CLAUDE=1 npm run prepare:test-config
 npm run smoke
 ```
 
 `npm run test:unit` is offline and verifies that `sessionsSpawn.modelConfig`
 and every `sessionsSpawn.agentModels.*.modelConfig` entry are passed through for
-agent/team/workflow/loop plans.
+agent/team/workflow/loop plans. It also verifies the remote Claude bridge ACP
+stdio lifecycle with a mock By-Framework worker.
 
 Use the integration flow when Redis and the local OpenClaw checkout are ready:
 

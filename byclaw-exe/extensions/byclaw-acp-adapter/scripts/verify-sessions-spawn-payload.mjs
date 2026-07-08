@@ -123,6 +123,7 @@ function assertSessionsSpawnPayload(params) {
   const { plan, testCase, snapshot } = params;
   const payload = plan.sessionsSpawn;
   const coordinator = findAgent(snapshot, testCase.expectedCoordinatorId);
+  const expectedAcpAgentId = testCase.expectedAcpAgentId ?? coordinator.acpAgentId;
   const bundlePath = payload.bundle?.path;
   assert.equal(
     plan.kind,
@@ -140,7 +141,7 @@ function assertSessionsSpawnPayload(params) {
   const expectedSessionRoot = `${SESSION_FILES_ROOT}/${expectedByaiSessionId}`;
 
   assert.equal(payload.runtime, ACP.runtime, `${testCase.name} sessionsSpawn.runtime mismatch`);
-  assert.equal(payload.agentId, coordinator.acpAgentId, `${testCase.name} sessionsSpawn.agentId mismatch`);
+  assert.equal(payload.agentId, expectedAcpAgentId, `${testCase.name} sessionsSpawn.agentId mismatch`);
   assert.equal(payload.streamTo, ACP.streamTo, `${testCase.name} sessionsSpawn.streamTo mismatch`);
   assert.equal(payload.mode, ACP.mode, `${testCase.name} sessionsSpawn.mode mismatch`);
   assert.equal(payload.model, coordinator.model, `${testCase.name} sessionsSpawn.model mismatch`);
@@ -343,6 +344,7 @@ async function main() {
     const cwd = path.join(workspaceRoot, testCase.name);
     const config = {
       ...jsonClone(fixture.config),
+      ...(testCase.config ? jsonClone(testCase.config) : {}),
       defaultCwd: cwd,
       sqlitePath: path.join(cwd, "state.sqlite"),
     };

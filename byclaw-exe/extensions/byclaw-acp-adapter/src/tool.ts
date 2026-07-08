@@ -34,7 +34,8 @@ const planParameters = {
     },
     acpAgentId: {
       type: "string",
-      description: `Optional ACP harness agent id. Defaults to ${DEFAULTS.acpAgentId}.`,
+      description:
+        "Optional ACP harness agent id override. Normally omit this so the adapter runtime config selects the local or remote ACP client.",
     },
     acpClientType: {
       type: "string",
@@ -74,6 +75,24 @@ function summarizePlanForDetails(plan: ReturnType<typeof createByclawAcpPlan>) {
   };
 }
 
+function stringField(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function buildSessionsSpawnToolArgs(plan: ReturnType<typeof createByclawAcpPlan>) {
+  const payload = plan.sessionsSpawn;
+  return {
+    task: stringField(payload.task),
+    ...(stringField(payload.label) ? { label: stringField(payload.label) } : {}),
+    runtime: stringField(payload.runtime),
+    agentId: stringField(payload.agentId),
+    streamTo: stringField(payload.streamTo),
+    mode: stringField(payload.mode),
+    cwd: stringField(payload.cwd),
+    model: stringField(payload.model),
+  };
+}
+
 function renderSessionsSpawnMirror(plan: ReturnType<typeof createByclawAcpPlan>) {
   const agentModels = plan.metadata[METADATA_KEYS.agentModels];
   const agentModelCount =
@@ -85,13 +104,13 @@ function renderSessionsSpawnMirror(plan: ReturnType<typeof createByclawAcpPlan>)
       ? (plan.sessionsSpawn[METADATA_KEYS.bundle] as Record<string, unknown>)
       : undefined;
   const bundlePath = typeof bundle?.path === "string" ? bundle.path : "";
-  const sessionsSpawnJson = JSON.stringify(plan.sessionsSpawn, null, JSON_INDENT_SPACES);
+  const sessionsSpawnJson = JSON.stringify(buildSessionsSpawnToolArgs(plan), null, JSON_INDENT_SPACES);
   return [
     `ByClaw ACP ${plan.kind} plan ${plan.id} is ready.`,
     `Call the generic ${ACP.nextType} tool with exactly the JSON object below.`,
-    "Do not add context=fork, do not replace task with a short summary, and do not remove modelConfig or bundle.",
-    "Do not recreate or simplify the payload from this markdown. Preserve every field, especially modelConfig and bundle.",
-    "Full agentModels, team/workflow metadata, and per-agent model configuration are stored in the shared filesystem bundle referenced by details.sessionsSpawn.bundle.path.",
+    "Do not add attachments, context=fork, bundle, modelConfig, or a short task summary.",
+    "The task text already includes shared filesystem paths for query.md, metadata.md, client instructions, and plan-bundle.json.",
+    "Full agentModels, team/workflow metadata, and per-agent model configuration are stored in the shared filesystem bundle referenced inside the task text.",
     `Response language: ${plan.replyLanguage}. The downstream ACP client must follow the responseLanguage policy in metadata.md and plan-bundle.json.`,
     `Summary: runtime=${plan.sessionsSpawn.runtime}; agentId=${plan.sessionsSpawn.agentId}; model=${plan.sessionsSpawn.model}; modelConfig=${plan.sessionsSpawn.modelConfig ? "present" : "missing"}; bundle=${bundlePath || "missing"}; agentModelsInBundle=${agentModelCount}.`,
     `${ACP.nextType} arguments:`,

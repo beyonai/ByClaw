@@ -248,6 +248,26 @@ export const fixture = {
       expectedCoordinatorId: "900002"
     },
     {
+      name: "remote-default-overrides-legacy-claude",
+      config: {
+        defaultAcpAgentId: "byclaw-remote-claude"
+      },
+      request: {
+        kind: "agent",
+        id: "900002",
+        acpAgentId: DEFAULTS.acpAgentId,
+        acpClientType: "codex",
+        input: {
+          title: "remote bridge should use configured default ACP agent"
+        }
+      },
+      expectedKind: "agent",
+      expectedId: "900002",
+      expectedAgentIds: ["900002"],
+      expectedCoordinatorId: "900002",
+      expectedAcpAgentId: "byclaw-remote-claude"
+    },
+    {
       name: "agent-mounted-skill-fallback",
       request: {
         kind: "workflow",

@@ -22,6 +22,9 @@ export const ENV = {
   byclawAcpKeepAnthropicApiKey: "BYCLAW_ACP_KEEP_ANTHROPIC_API_KEY",
   byclawAcpStrongModel: "BYCLAW_ACP_CLAUDE_STRONG_MODEL",
   byclawAcpAgentId: "BYCLAW_ACP_AGENT_ID",
+  byclawAcpUseRemoteClaude: "BYCLAW_ACP_USE_REMOTE_CLAUDE",
+  byclawAcpRemoteClaudeAgentId: "BYCLAW_ACP_REMOTE_CLAUDE_AGENT_ID",
+  byclawAcpRemoteClaudeCommand: "BYCLAW_ACP_REMOTE_CLAUDE_COMMAND",
   byclawDigEmployeeOwnerType: "BYCLAW_DIG_EMPLOYEE_OWNER_TYPE",
   byclawDigEmployeeAgentType: "BYCLAW_DIG_EMPLOYEE_AGENT_TYPE",
   byclawDigEmployeeFrontAccess: "BYCLAW_DIG_EMPLOYEE_FRONT_ACCESS",
@@ -41,6 +44,7 @@ export const DEFAULTS = {
   gatewayPort: 18789,
   gatewayToken: "byclaw-acp-test-token",
   acpAgentId: "claude",
+  remoteClaudeAgentId: "byclaw-remote-claude",
   claudeModel: "anthropic/sonnet",
   syncRuntimeModel: "MiniMax-M3",
   syncApiBaseUrl: "http://10.10.168.204:8080",
@@ -95,6 +99,8 @@ export const PATHS = {
   },
   wrapperRelativePath:
     "byclaw-exe/extensions/byclaw-acp-adapter/scripts/claude-agent-acp-baiying-wrapper.mjs",
+  remoteClaudeBridgeRelativePath:
+    "byclaw-exe/extensions/byclaw-acp-adapter/dist/remote-claude-acp.js",
   extensions: {
     baiyingEnhance: "byclaw-exe/extensions/baiying-enhance",
     byaiChannel: "byclaw-exe/extensions/byai-channel",

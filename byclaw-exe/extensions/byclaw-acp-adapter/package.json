@@ -5,10 +5,10 @@
   "description": "OpenClaw plugin that adapts ByClaw digital employees from Redis into ACP Claude Code agent/team/workflow/loop plans.",
   "type": "module",
   "scripts": {
-    "build": "esbuild index.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/index.js --sourcemap --packages=external --external:openclaw",
-    "build:fast": "esbuild index.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/index.js --packages=external --external:openclaw",
+    "build": "esbuild index.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/index.js --sourcemap --packages=external --external:openclaw && esbuild src/remote-claude-acp.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/remote-claude-acp.js --sourcemap --packages=external",
+    "build:fast": "esbuild index.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/index.js --packages=external --external:openclaw && esbuild src/remote-claude-acp.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/remote-claude-acp.js --packages=external",
     "test": "npm run test:unit",
-    "test:unit": "node scripts/verify-sessions-spawn-payload.mjs",
+    "test:unit": "npm run build:fast && node scripts/verify-sessions-spawn-payload.mjs && node scripts/verify-remote-claude-acp-bridge.mjs",
     "test:integration": "npm run prepare:test-config && npm run smoke",
     "test:integration:execute-claude": "npm run prepare:test-config && npm run smoke -- --execute-claude",
     "verify:sessions-spawn-payload": "npm run test:unit",

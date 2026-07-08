@@ -41,20 +41,46 @@ function resolveAcpxAgentsConfig() {
     byclawRoot,
     PATHS.wrapperRelativePath,
   );
+  const defaultRemoteBridge = path.join(
+    byclawRoot,
+    PATHS.remoteClaudeBridgeRelativePath,
+  );
   const claudeAdapterCommand =
     process.env.CLAUDE_AGENT_ACP_COMMAND?.trim() ||
     (fs.existsSync(defaultWrapper) ? `${process.execPath} ${defaultWrapper}` : "");
-  if (!claudeAdapterCommand) {
-    return undefined;
-  }
-  return {
-    [DEFAULTS.acpAgentId]: {
+  const remoteClaudeCommand =
+    process.env[ENV.byclawAcpRemoteClaudeCommand]?.trim() ||
+    (fs.existsSync(defaultRemoteBridge) ? `${process.execPath} ${defaultRemoteBridge}` : "");
+  const remoteClaudeAgentId =
+    process.env[ENV.byclawAcpRemoteClaudeAgentId]?.trim() || DEFAULTS.remoteClaudeAgentId;
+  const agents = {};
+  if (claudeAdapterCommand) {
+    agents[DEFAULTS.acpAgentId] = {
       command: claudeAdapterCommand
-    }
-  };
+    };
+  }
+  if (remoteClaudeCommand) {
+    agents[remoteClaudeAgentId] = {
+      command: remoteClaudeCommand
+    };
+  }
+  return Object.keys(agents).length ? agents : undefined;
+}
+
+function resolveDefaultAcpAgentId() {
+  const explicit = process.env[ENV.byclawAcpAgentId]?.trim();
+  if (explicit) {
+    return explicit;
+  }
+  if (process.env[ENV.byclawAcpUseRemoteClaude] === "1") {
+    return process.env[ENV.byclawAcpRemoteClaudeAgentId]?.trim() || DEFAULTS.remoteClaudeAgentId;
+  }
+  return DEFAULTS.acpAgentId;
 }
 
 const config = JSON.parse(fs.readFileSync(templatePath, "utf8"));
+const defaultAcpAgentId = resolveDefaultAcpAgentId();
+const acpxAgentsConfig = resolveAcpxAgentsConfig();
 config.browser = { ...(config.browser || {}), enabled: false };
 config.logging = {
   ...(config.logging || {}),
@@ -93,7 +119,7 @@ config.agents = {
           runtime: {
             type: ACP.runtime,
             acp: {
-              agent: DEFAULTS.acpAgentId,
+              agent: defaultAcpAgentId,
               cwd: byclawRoot
             }
           },
@@ -138,18 +164,18 @@ config.plugins = {
       config: {
         cwd: byclawRoot,
         stateDir: path.join(stateDir, PATHS.acpxStateDir),
-        probeAgent: DEFAULTS.acpAgentId,
+        probeAgent: defaultAcpAgentId,
         permissionMode: "approve-reads",
         nonInteractivePermissions: "fail",
         pluginToolsMcpBridge: true,
         openClawToolsMcpBridge: true,
-        ...(resolveAcpxAgentsConfig() ? { agents: resolveAcpxAgentsConfig() } : {})
+        ...(acpxAgentsConfig ? { agents: acpxAgentsConfig } : {})
       }
     },
     [OPENCLAW_PLUGINS.byclawAcpAdapter]: {
       enabled: true,
       config: {
-        defaultAcpAgentId: DEFAULTS.acpAgentId,
+        defaultAcpAgentId,
         defaultCwd: byclawRoot,
         sqlitePath: path.join(stateDir, PATHS.pluginStateDir, PATHS.pluginSqliteFileName),
         httpPathPrefix: `/plugins/${PACKAGE.pluginId}`,
@@ -187,8 +213,8 @@ config.acp = {
   ...(config.acp || {}),
   enabled: true,
   backend: GATEWAY.backend,
-  allowedAgents: unique([...(config.acp?.allowedAgents || []), DEFAULTS.acpAgentId]),
-  defaultAgent: config.acp?.defaultAgent || DEFAULTS.acpAgentId
+  allowedAgents: unique([...(config.acp?.allowedAgents || []), defaultAcpAgentId]),
+  defaultAgent: defaultAcpAgentId
 };
 
 fs.mkdirSync(path.dirname(outPath), { recursive: true });
