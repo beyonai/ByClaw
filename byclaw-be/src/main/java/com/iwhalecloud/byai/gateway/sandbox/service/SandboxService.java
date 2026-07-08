@@ -1833,7 +1833,7 @@ public class SandboxService {
             }
             jedis.del(instancesKey);
             jedis.del(activeKey);
-            jedis.srem(Constants.RegistryKeys.SD_SERVICES, serviceName);
+            jedis.srem(Constants.RegistryKeys.sdServices(), serviceName);
         }
     }
 
