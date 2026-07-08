@@ -29,6 +29,7 @@ import com.iwhalecloud.byai.gateway.channels.service.feishu.FeishuReplyDispatche
 import com.iwhalecloud.byai.gateway.channels.service.feishu.FeishuSessionService;
 import com.iwhalecloud.byai.gateway.channels.service.feishu.FeishuTokenService;
 import com.iwhalecloud.byai.gateway.channels.service.feishu.FeishuUserService;
+import com.iwhalecloud.byai.gateway.channels.service.feishu.config.FeishuStreamProperties;
 import com.iwhalecloud.byai.gateway.channels.service.feishu.model.FeishuCallbackMessage;
 import com.iwhalecloud.byai.gateway.channels.service.feishu.model.FeishuMsgType;
 import com.iwhalecloud.byai.gateway.channels.service.feishu.support.FeishuBufferedOutputStream;
@@ -81,6 +82,7 @@ public class FeishuBotEventHandler {
     private final FeishuReplyDispatcher feishuReplyDispatcher;
     private final FeishuSessionService feishuSessionService;
     private final IndexService indexService;
+    private final FeishuStreamProperties streamProperties;
 
     public FeishuBotEventHandler(
             ObjectMapper objectMapper,
@@ -89,7 +91,8 @@ public class FeishuBotEventHandler {
             FeishuTokenService feishuTokenService,
             FeishuReplyDispatcher feishuReplyDispatcher,
             FeishuSessionService feishuSessionService,
-            IndexService indexService
+            IndexService indexService,
+            FeishuStreamProperties streamProperties
     ) {
         this.objectMapper = objectMapper;
         this.feishuCallbackMessageParser = feishuCallbackMessageParser;
@@ -98,9 +101,14 @@ public class FeishuBotEventHandler {
         this.feishuReplyDispatcher = feishuReplyDispatcher;
         this.feishuSessionService = feishuSessionService;
         this.indexService = indexService;
+        this.streamProperties = streamProperties;
     }
 
     public void handleEvent(JsonNode root) {
+        if (!isStreamEnabled()) {
+            logger.info("Feishu bot is disabled. Set channel.stream.enabled=true to enable it.");
+            return;
+        }
         String eventType = root.path("header").path("event_type").asText("");
         if (!MESSAGE_RECEIVE_EVENT.equals(eventType)) {
             logger.debug("Ignore unsupported Feishu event. eventType={}", eventType);
@@ -241,6 +249,11 @@ public class FeishuBotEventHandler {
             AssistantChatDto assistantChatDto,
             FeishuCallbackMessage message
     ) throws IOException {
+        if (!isStreamEnabled()) {
+            logger.info("Skip Feishu assistant reply because channel.stream.enabled is false. messageId={}",
+                    message.getMessageId());
+            return;
+        }
         ChannelService channelService = ChannelServiceFactory.getService(ChannelType.FEISHU.getCode());
         if (!channelService.validateRequest(assistantChatDto)) {
             throw new BdpRuntimeException(I18nUtil.get("assistant.chat.request.invalid"));
@@ -258,16 +271,16 @@ public class FeishuBotEventHandler {
                 cardTitle,
                 THINKING_REPLY
         );
-
         FeishuBufferedOutputStream outputStream = StringUtils.hasText(streamMessageId)
                 ? new FeishuStreamingOutputStream(
                         objectMapper,
                         feishuReplyDispatcher,
                         tenantAccessToken,
                         streamMessageId,
-                        cardTitle
+                        cardTitle,
+                        isShowReasoning()
                 )
-                : new FeishuBufferedOutputStream(objectMapper);
+                : new FeishuBufferedOutputStream(objectMapper, isShowReasoning());
 
         channelService.chat(assistantChatDto, outputStream);
         String replyContent = outputStream.getDisplayContent();
@@ -282,6 +295,14 @@ public class FeishuBotEventHandler {
         }
 
         replyText(message, StringUtils.hasText(replyContent) ? replyContent : DEFAULT_FALLBACK_REPLY);
+    }
+
+    private boolean isStreamEnabled() {
+        return streamProperties != null && streamProperties.isEnabled();
+    }
+
+    private boolean isShowReasoning() {
+        return streamProperties != null && streamProperties.isShowReasoning();
     }
 
     private void replyText(FeishuCallbackMessage message, String content) throws IOException {

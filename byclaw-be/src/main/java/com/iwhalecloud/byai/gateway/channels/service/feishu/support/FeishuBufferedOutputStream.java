@@ -36,11 +36,17 @@ public class FeishuBufferedOutputStream extends ByteArrayOutputStream {
     private final StringBuilder pendingPayload = new StringBuilder();
     private final StringBuilder reasoningBuffer = new StringBuilder();
     private final StringBuilder answerBuffer = new StringBuilder();
+    private final boolean showReasoning;
     private String lastReasoningContentType;
     private String lastReasoningOrderId;
 
     public FeishuBufferedOutputStream(ObjectMapper objectMapper) {
+        this(objectMapper, true);
+    }
+
+    public FeishuBufferedOutputStream(ObjectMapper objectMapper, boolean showReasoning) {
         this.objectMapper = objectMapper;
+        this.showReasoning = showReasoning;
     }
 
     @Override
@@ -158,6 +164,9 @@ public class FeishuBufferedOutputStream extends ByteArrayOutputStream {
     }
 
     private void handleReasonDelta(JsonNode root, String event) {
+        if (!showReasoning) {
+            return;
+        }
         if (!SUPPORTED_REASONING_CONTENT_TYPES.contains(extractContentType(root))) {
             return;
         }
