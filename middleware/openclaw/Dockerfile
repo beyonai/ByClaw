@@ -245,7 +245,7 @@ RUN chmod +x \
     /usr/local/bin/start-openclaw.sh \
     /usr/local/bin/start-gbrain.sh
 
-RUN curl -fsSL https://raw.githubusercontent.com/DingTalk-Real-AI/dingtalk-workspace-cli/main/scripts/install.sh | sh
+RUN export DWS_VERSION=v1.0.47 && curl -fsSL https://raw.githubusercontent.com/DingTalk-Real-AI/dingtalk-workspace-cli/main/scripts/install.sh | sh
 
 # 安装 Bun 运行环境（gbrain 必需）— 从官方镜像拷贝二进制，避免 curl 下载超时
 COPY --from=oven/bun:1-debian /usr/local/bin/bun /usr/local/bin/bun
