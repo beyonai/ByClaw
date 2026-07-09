@@ -1,4 +1,4 @@
-package com.iwhalecloud.byai.gateway.channels.service.wecom.stream;
+package com.iwhalecloud.byai.gateway.channels.service.wecom.stream.user;
 
 import com.iwhalecloud.byai.common.constants.users.SourceType;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
