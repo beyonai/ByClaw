@@ -3,10 +3,13 @@ package com.iwhalecloud.byai.manager.application.runner;
 import com.iwhalecloud.byai.common.util.RedisUtil;
 import com.iwhalecloud.byai.common.util.RedisUtil.RedisKVPair;
 import com.iwhalecloud.byai.manager.application.runner.digemployeestartup.DigEmployeeStartupSyncProperties;
+import com.iwhalecloud.byai.manager.application.runner.digemployeestartup.StartupSyncLockGuard;
+import com.iwhalecloud.byai.manager.application.runner.digemployeestartup.StartupSyncLockRenewer;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.DigEmployeeRedisSyncProperties;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeApplicationService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
+import jakarta.annotation.PreDestroy;
 import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
@@ -28,6 +31,7 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -56,6 +60,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 @Component
 @Order(Ordered.LOWEST_PRECEDENCE)
 public class InitDigEmployeeRedisRunner implements ApplicationRunner {
+
+    /** 启动期分布式锁 key（PR-2 约定） */
+    public static final String STARTUP_LOCK_KEY = "byai:dig-employee:startup-sync";
 
     private static final Logger logger = LoggerFactory.getLogger(InitDigEmployeeRedisRunner.class);
 
@@ -91,6 +98,22 @@ public class InitDigEmployeeRedisRunner implements ApplicationRunner {
     @Autowired(required = false)
     @Qualifier("digEmployeeStartupSyncExecutor")
     private ThreadPoolTaskExecutor digEmployeeStartupSyncExecutor;
+
+    // ====== PR-2: 分布式锁相关字段 ======
+    @Autowired
+    private StartupSyncLockRenewer startupSyncLockRenewer;
+
+    @Autowired
+    private StartupSyncLockGuard startupSyncLockGuard;
+
+    /** 本 Pod 的锁标识（{@code POD_NAME@POD_IP}，未设置时回退 hostname@local-ip） */
+    private final String podId = resolvePodId();
+    /** 当前是否由本 Pod 持有分布式锁 */
+    private volatile boolean lockHeld = false;
+    /** renewLock 心跳调度器（由 {@link #tryAcquireStartupLock} 启动） */
+    private volatile ScheduledExecutorService lockRenewerScheduler;
+    /** JVM shutdown hook 注册标记（避免重复注册） */
+    private final AtomicBoolean shutdownHookRegistered = new AtomicBoolean(false);
 
     @Override
     public void run(ApplicationArguments args) {
@@ -138,9 +161,197 @@ public class InitDigEmployeeRedisRunner implements ApplicationRunner {
             }
         }
 
+        // PR-2: 优化路径需要先抢分布式锁
+        boolean optimizedPath = newPropsExplicitlyConfigured && newEnabledValue;
+        if (optimizedPath) {
+            // PR-2-fix Major-2: Redis 异常时降级为无锁继续执行（不阻塞 Spring Boot 启动）；
+            // 启动期 Redis 不可用属于可恢复故障（Redis 抖动 / 重启），降级策略：
+            // - lockEnabled=true + Redis 异常 → 降级为无锁（不进入多 Pod 互斥模式）
+            // - lockEnabled=false → 本来就不抢锁
+            //   两种情况下 lockHeld=false，后续 releaseStartupLockIfHeld 会安全跳过
+            boolean lockAcquired;
+            try {
+                lockAcquired = tryAcquireStartupLock();
+            }
+            catch (Exception e) {
+                logger.warn("Redis 异常，启动期分布式锁获取失败，降级为无锁执行（多 Pod 场景下可能重复同步）: lockKey={}, podId={}, reason={}",
+                    STARTUP_LOCK_KEY, podId, e.getMessage(), e);
+                lockAcquired = false;
+            }
+            if (!lockAcquired) {
+                // 锁已被其他 Pod 持有 OR 降级为无锁：均直接 return（不进入 doFullInit）
+                return;
+            }
+        }
+
         // 顶层异步任务使用 commonPool（避免与内部分片并行任务争用独立 Executor）
         CompletableFuture.runAsync(this::doFullInit);
         logger.debug("数字员工及其关联资源Redis全量初始化已提交异步执行");
+    }
+
+    // ============================================================
+    // PR-2: 启动期分布式锁相关方法
+    // ============================================================
+
+    /**
+     * 解析本 Pod 唯一标识：{@code POD_NAME@POD_IP}，未设置时回退 {@code <hostname>@<local-ip>}。
+     * <p>
+     * K8s 部署场景下，{@code POD_NAME} 与 {@code POD_IP} 由 downward API 注入；
+     * 物理机/VM 部署场景下回退到 hostname。
+     */
+    static String resolvePodId() {
+        String podName = System.getenv("POD_NAME");
+        String podIp = System.getenv("POD_IP");
+        if (StringUtils.isNotEmpty(podName) && StringUtils.isNotEmpty(podIp)) {
+            return podName + "@" + podIp;
+        }
+        try {
+            String host = java.net.InetAddress.getLocalHost().getHostName();
+            String ip = java.net.InetAddress.getLocalHost().getHostAddress();
+            return StringUtils.defaultIfEmpty(host, "unknown") + "@" + StringUtils.defaultIfEmpty(ip, "local");
+        }
+        catch (Exception e) {
+            return "unknown@local";
+        }
+    }
+
+    /**
+     * 尝试抢启动期分布式锁。成功则启动 renewer + 注册 shutdown hook；失败则返回 false。
+     * <p>
+     * 锁状态由 {@link #lockHeld} 字段承载；后续 doFullInit 通过 {@link #releaseStartupLockIfHeld}
+     * 在 finally 中显式释放。
+     */
+    private boolean tryAcquireStartupLock() {
+        boolean lockEnabled = startupSyncProperties != null && startupSyncProperties.isLockEnabled();
+        if (!lockEnabled) {
+            logger.info("byai.dig-employee.startup-sync.lock-enabled=false 跳过分布式锁（多 Pod 并发同步）");
+            return true;
+        }
+        int expireSeconds = effectiveLockExpireSeconds();
+        int renewInterval = effectiveLockRenewInterval();
+        String lockKey = STARTUP_LOCK_KEY;
+
+        boolean acquired = Boolean.TRUE.equals(RedisUtil.lock(lockKey, podId, expireSeconds));
+        if (!acquired) {
+            String currentHolder = safeReadLockHolder(lockKey);
+            logger.info("分布式锁已被其他 Pod 持有，本 Pod 跳过启动期同步: lockKey={}, currentHolder={}, podId={}",
+                lockKey, currentHolder, podId);
+            return false;
+        }
+        lockHeld = true;
+        // 启动 renewer 心跳
+        lockRenewerScheduler = startupSyncLockRenewer.startRenewal(lockKey, podId, renewInterval, expireSeconds);
+        // 注册 JVM shutdown hook
+        registerShutdownHook();
+        logger.info("分布式锁获取成功: lockKey={}, podId={}, expireSeconds={}, renewIntervalSeconds={}",
+            lockKey, podId, expireSeconds, renewInterval);
+        return true;
+    }
+
+    /**
+     * 在 doFullInit 完成后（或异常路径）调用，释放锁 + 停 renewer。
+     */
+    private void releaseStartupLockIfHeld() {
+        if (!lockHeld) {
+            return;
+        }
+        // fence 全局停止信号
+        startupSyncLockGuard.requestStop();
+        // 停 renewer
+        try {
+            if (lockRenewerScheduler != null) {
+                startupSyncLockRenewer.stopRenewal(lockRenewerScheduler);
+            }
+        }
+        catch (Exception e) {
+            logger.warn("stopRenewal 异常, reason={}", e.getMessage(), e);
+        }
+        // 释放锁（CAS 校验 podId 防止误删）
+        try {
+            Boolean released = RedisUtil.releaseLock(STARTUP_LOCK_KEY, podId);
+            if (Boolean.TRUE.equals(released)) {
+                logger.info("分布式锁已释放: lockKey={}, podId={}", STARTUP_LOCK_KEY, podId);
+            }
+            else {
+                logger.warn("分布式锁 releaseLock 返回 false: lockKey={}, podId={} —— 可能已被其他 Pod 接管或已过期",
+                    STARTUP_LOCK_KEY, podId);
+            }
+        }
+        catch (Exception e) {
+            logger.warn("releaseLock 异常, reason={}", e.getMessage(), e);
+        }
+        finally {
+            lockHeld = false;
+            lockRenewerScheduler = null;
+        }
+    }
+
+    /**
+     * 在 doFullInitOptimized 每个 page 处理前校验锁仍由本 Pod 持有。
+     * 不持有时返回 false，doFullInit 应停止后续处理。
+     */
+    private boolean verifyLockStillHeld() {
+        if (startupSyncProperties == null || !startupSyncProperties.isLockEnabled()) {
+            // 锁关闭时跳过 fence 检查
+            return true;
+        }
+        return startupSyncLockGuard.mayProceed(STARTUP_LOCK_KEY, podId);
+    }
+
+    private void registerShutdownHook() {
+        if (!shutdownHookRegistered.compareAndSet(false, true)) {
+            return;
+        }
+        try {
+            Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                try {
+                    releaseStartupLockIfHeld();
+                }
+                catch (Throwable t) {
+                    logger.warn("shutdown hook 释放锁异常: {}", t.getMessage(), t);
+                }
+            }, "startup-sync-shutdown-hook"));
+        }
+        catch (Exception e) {
+            logger.warn("registerShutdownHook 失败, reason={}", e.getMessage(), e);
+        }
+    }
+
+    @PreDestroy
+    public void onShutdown() {
+        // Spring 容器销毁时也确保锁释放
+        releaseStartupLockIfHeld();
+    }
+
+    private String safeReadLockHolder(String lockKey) {
+        try {
+            return RedisUtil.getString(lockKey);
+        }
+        catch (Exception e) {
+            return "<read-failed:" + e.getMessage() + ">";
+        }
+    }
+
+    /**
+     * 锁租约（秒）：优先取 properties，缺省 600s。
+     */
+    private int effectiveLockExpireSeconds() {
+        int configured = startupSyncProperties == null ? 600 : startupSyncProperties.getLockExpireSeconds();
+        if (configured < 30) {
+            return 30; // 下限保护，防止配置错误导致锁瞬间过期
+        }
+        return Math.min(configured, 3600);
+    }
+
+    /**
+     * 续租间隔（秒）：优先取 properties，缺省 30s。
+     */
+    private int effectiveLockRenewInterval() {
+        int configured = startupSyncProperties == null ? 30 : startupSyncProperties.getLockRenewIntervalSeconds();
+        if (configured < 1) {
+            return 1;
+        }
+        return Math.min(configured, 300);
     }
 
     /**
@@ -167,6 +378,12 @@ public class InitDigEmployeeRedisRunner implements ApplicationRunner {
         catch (Exception e) {
             logger.error("数字员工及其关联资源Redis全量初始化失败：{}", e.getMessage(), e);
         }
+        finally {
+            // PR-2: 释放锁 + 停 renewer（若持有）
+            if (lockHeld) {
+                releaseStartupLockIfHeld();
+            }
+        }
 
         long costTime = (System.currentTimeMillis() - startTime) / 1000;
         logger.info("数字员工及其关联资源Redis全量初始化完成，耗时{}秒", costTime);
@@ -190,6 +407,13 @@ public class InitDigEmployeeRedisRunner implements ApplicationRunner {
         int pageIndex = 1;
 
         while (true) {
+            // PR-2: 每个 page 前用 fencing token 校验锁
+            if (!verifyLockStillHeld()) {
+                logger.warn("fencing 检测到锁已不属于本 Pod，提前退出 doFullInitOptimized at page={}",
+                    pageIndex);
+                break;
+            }
+
             List<SsResource> resources = ssResourceService.pageActiveDigitalEmployees(pageIndex, batchSize);
             if (CollectionUtils.isEmpty(resources)) {
                 break;
@@ -283,6 +507,14 @@ public class InitDigEmployeeRedisRunner implements ApplicationRunner {
      * 不影响其他 chunk 的执行。
      */
     private ChunkStats processChunk(List<SsResource> chunk, int pipelineBatchSize) {
+        // PR-2-fix Major-1: chunk 起始处 fencing 校验（PR-1 实现的分页内并行场景下，
+        // 4 个 chunk 并行执行期间锁被其他 Pod 接管时本 chunk 仍会完整写完；
+        // 在 chunk 入口前置 fence 可避免 silent data loss）。
+        if (!verifyLockStillHeld()) {
+            logger.warn("[fencing] chunk 起始处检测到锁已丢失，跳过本 chunk ({} 条)",
+                chunk == null ? 0 : chunk.size());
+            return ChunkStats.empty();
+        }
         int total = 0;
         int kvWrites = 0;
         int kvFailures = 0;
