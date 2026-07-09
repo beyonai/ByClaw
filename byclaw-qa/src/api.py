@@ -38,27 +38,12 @@ from by_qa.main import (
     resolve_knowledge_item_ingestion_service,
     resolve_knowledge_item_search_service,
 )
-import os
-
-import redis.asyncio as aioredis
 
 from redis_agent_config import get_kg_doc_from_redis
+from redis_runtime import init_shared_redis_from_env
 
 
-def _require_env(name: str) -> str:
-    value = os.getenv(name)
-    if not value:
-        raise RuntimeError(f"Missing required environment variable: {name}")
-    return value
-
-
-_redis = aioredis.Redis(
-    host=_require_env("BYAI_REDIS_HOST"),
-    port=int(_require_env("BYAI_REDIS_PORT")),
-    db=int(os.getenv("BYAI_REDIS_DB", "0")),
-    username=os.getenv("BYAI_REDIS_USERNAME") or None,
-    password=os.getenv("BYAI_REDIS_PASSWORD") or None,
-)
+_redis = init_shared_redis_from_env()
 
 
 def _success(result_object: dict[str, Any] | None = None) -> JSONResponse:

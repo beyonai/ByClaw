@@ -246,7 +246,7 @@ wheels = [
 
 [[package]]
 name = "by-framework"
-version = "0.1.13"
+version = "0.2.2.dev9"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "dill" },
@@ -254,14 +254,14 @@ dependencies = [
     { name = "redis" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/df/6c/30391ea97832756b1409d340a3e53b004c2ea5f6a5cadf4d3c6a4a0d9fba/by_framework-0.1.13.tar.gz", hash = "sha256:9ae061021188d7db26c9ba1be803ae79ff54c4d5db618a230077d8d4fd3d1dcc", size = 853897, upload-time = "2026-04-27T13:08:14.698Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ac/0e/0c77ed1addda14129d72af555bf84ccc90f7ed29632b09667ee379fd8cf3/by_framework-0.2.2.dev9.tar.gz", hash = "sha256:b432640091b18be9dc6a1413e00d96b4cb5a2614d5ca8fbca267a11ee8119cce", size = 1261356, upload-time = "2026-07-08T09:38:29.198Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/23/5c/4e0fe1c4843102c1bd76a2fd6147216005a88ffaeb829229ccf94ef54a6b/by_framework-0.1.13-py3-none-any.whl", hash = "sha256:a02065813dda6d658dcf29f86b4d5e351f085b15ad2d8c701d43febb64ecd8a1", size = 127277, upload-time = "2026-04-27T13:08:13.007Z" },
+    { url = "https://files.pythonhosted.org/packages/72/4f/c5170c49723e04a9c0d11fd709566106f8cd4e6a22982127d8a11371e45d/by_framework-0.2.2.dev9-py3-none-any.whl", hash = "sha256:2e80a349930752570db778d02d7f9b8b3ad8b57a267d92f7e6069c05aba031f4", size = 217818, upload-time = "2026-07-08T09:38:27.854Z" },
 ]
 
 [[package]]
 name = "by-qa"
-version = "0.1.12"
+version = "0.1.12.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -269,9 +269,9 @@ dependencies = [
     { name = "pydantic-settings" },
     { name = "python-dotenv" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f1/d7/db8757b1b6768b940c173a0bc20bac2939a487973f1fdc7ba58d71bd6ce4/by_qa-0.1.12.tar.gz", hash = "sha256:d77e594cd579076830e73c0409bb77e8216f5c25fa62fc274d8c70119d355db5", size = 348458, upload-time = "2026-06-01T08:03:28.622Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c1/42/3e65b41e290383fb21826015ad3b85a228461d261af09214305925dab760/by_qa-0.1.12.1.tar.gz", hash = "sha256:17c8a7dcd7e294c5d9931b3cb1a73cd16a9fc8fec0f31a1ef082de6f854f4301", size = 348677, upload-time = "2026-07-09T06:08:06.095Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/48/08/7c77e09d2597e6557aac55f43f58b6b33e7df4dd6ae250432bf97c583ea4/by_qa-0.1.12-py3-none-any.whl", hash = "sha256:638ff7e0a4ba7dcec60687ce8a838e0c7bab237efdcb6f766f9f433551190bb2", size = 187858, upload-time = "2026-06-01T08:03:26.949Z" },
+    { url = "https://files.pythonhosted.org/packages/eb/e6/359005743a263d793719867e3bf5524404291cc468638a3e689c0ae6409c/by_qa-0.1.12.1-py3-none-any.whl", hash = "sha256:4b410cf0a644b8712222e2cbc93f2de9cb6ebe2dc51b2e819ead39c5e75f47e4", size = 188082, upload-time = "2026-07-09T06:08:04.687Z" },
 ]
 
 [package.optional-dependencies]
@@ -318,8 +318,8 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "by-framework", specifier = ">=0.1.13" },
-    { name = "by-qa", extras = ["all"], specifier = "==0.1.12" },
+    { name = "by-framework", specifier = "==0.2.2.dev9" },
+    { name = "by-qa", extras = ["all"], specifier = "==0.1.12.1" },
 ]
 
 [package.metadata.requires-dev]

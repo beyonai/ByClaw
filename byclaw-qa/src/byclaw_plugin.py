@@ -5,13 +5,13 @@ from typing import Any
 from enum import Enum
 from urllib.parse import urlparse
 
-from by_framework.common.redis_client import init_redis
 from by_framework.core.discovery import DiscoveryClient
 from by_framework.core.extensions import AgentConfig, Plugin, PluginBuildContext, PluginManifest
 from by_framework.util.discovery_http_client import DiscoveryHttpClient
 from by_framework.util.http_client import RetryConfig
 
 from by_qa.core import logger
+from redis_runtime import init_shared_redis_from_env
 # from by_qa.qa.common.models import RetrievalOperationType
 
 
@@ -44,19 +44,7 @@ class ByPlugin(Plugin):
 
     @staticmethod
     def _init_discovery_redis() -> None:
-        redis_host = os.getenv("REDIS_HOST", "localhost")
-        redis_port = int(os.getenv("REDIS_PORT", 6379))
-        redis_db = int(os.getenv("REDIS_DATABASE", os.getenv("REDIS_DB", 0)))
-        redis_password = os.getenv("REDIS_PASSWORD")
-        redis_username = os.getenv("REDIS_USERNAME")
-
-        init_redis(
-            host=redis_host,
-            port=redis_port,
-            db=redis_db,
-            password=redis_password or None,
-            username=redis_username or None,
-        )
+        init_shared_redis_from_env()
 
     @classmethod
     async def _post_via_discovery(
