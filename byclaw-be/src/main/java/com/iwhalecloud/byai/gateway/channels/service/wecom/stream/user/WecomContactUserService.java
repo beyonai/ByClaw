@@ -1,4 +1,4 @@
-package com.iwhalecloud.byai.gateway.channels.service.wecom.stream;
+package com.iwhalecloud.byai.gateway.channels.service.wecom.stream.user;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;

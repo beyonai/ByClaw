@@ -1,8 +1,9 @@
-package com.iwhalecloud.byai.gateway.channels.service.wecom.stream;
+package com.iwhalecloud.byai.gateway.channels.service.wecom.stream.user;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.gateway.channels.service.wecom.sdk.config.WecomStreamProperties;
 import com.iwhalecloud.byai.gateway.channels.service.wecom.sdk.model.WecomRobotChannelConfig;
+import com.iwhalecloud.byai.gateway.channels.service.wecom.stream.config.WecomRobotConfigService;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;

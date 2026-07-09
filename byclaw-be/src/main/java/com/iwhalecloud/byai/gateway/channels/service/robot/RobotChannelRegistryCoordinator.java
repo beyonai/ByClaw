@@ -2,7 +2,7 @@ package com.iwhalecloud.byai.gateway.channels.service.robot;
 
 import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.DingtalkRobotRegistryService;
 import com.iwhalecloud.byai.gateway.channels.service.feishu.FeishuRobotRegistryService;
-import com.iwhalecloud.byai.gateway.channels.service.wecom.stream.WecomRobotRegistryService;
+import com.iwhalecloud.byai.gateway.channels.service.wecom.stream.lifecycle.WecomRobotRegistryService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;

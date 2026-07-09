@@ -2,7 +2,7 @@ package com.iwhalecloud.byai.gateway.channels.service.robot;
 
 import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.DingtalkRobotRegistryService;
 import com.iwhalecloud.byai.gateway.channels.service.feishu.FeishuRobotRegistryService;
-import com.iwhalecloud.byai.gateway.channels.service.wecom.stream.WecomRobotRegistryService;
+import com.iwhalecloud.byai.gateway.channels.service.wecom.stream.lifecycle.WecomRobotRegistryService;
 import org.junit.jupiter.api.Test;
 
 import static org.mockito.Mockito.mock;

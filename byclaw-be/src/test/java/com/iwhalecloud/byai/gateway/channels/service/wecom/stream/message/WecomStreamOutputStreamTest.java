@@ -1,4 +1,4 @@
-package com.iwhalecloud.byai.gateway.channels.service.wecom.stream;
+package com.iwhalecloud.byai.gateway.channels.service.wecom.stream.message;
 import com.iwhalecloud.byai.gateway.channels.service.wecom.sdk.WecomReplyQueue;
 import com.iwhalecloud.byai.gateway.channels.service.wecom.sdk.WecomReplyDispatcher;
 
