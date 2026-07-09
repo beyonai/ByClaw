@@ -85,6 +85,9 @@ USER root
 
 ARG OPENCLI_VERSION=1.8.0
 ARG OPENCLI_EXTENSION_VERSION=1.0.15
+ARG DWS_VERSION=v1.0.47
+ARG WECOM_CLI_VERSION=0.1.9
+ARG LARKSUITE_CLI_VERSION=1.0.67
 ARG INSTALL_BROWSER_STACK=true
 
 RUN chown root:root /app
@@ -245,7 +248,12 @@ RUN chmod +x \
     /usr/local/bin/start-openclaw.sh \
     /usr/local/bin/start-gbrain.sh
 
-RUN curl -fsSL https://raw.githubusercontent.com/DingTalk-Real-AI/dingtalk-workspace-cli/main/scripts/install.sh | sh
+RUN set -eux; \
+    export DWS_VERSION="${DWS_VERSION}"; \
+    curl -fsSL https://raw.githubusercontent.com/DingTalk-Real-AI/dingtalk-workspace-cli/main/scripts/install.sh | sh; \
+    npm install -g "@wecom/cli@${WECOM_CLI_VERSION}" "@larksuite/cli@${LARKSUITE_CLI_VERSION}"; \
+    wecom-cli --version; \
+    command -v lark-cli
 
 # 安装 Bun 运行环境（gbrain 必需）— 从官方镜像拷贝二进制，避免 curl 下载超时
 COPY --from=oven/bun:1-debian /usr/local/bin/bun /usr/local/bin/bun
