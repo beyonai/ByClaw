@@ -144,18 +144,16 @@ const getDigitalEmployeeTemplate = (templates: any[] = [], ownerType?: string, a
 };
 
 const getDigitalEmployeeTemplateMaxLength = (templates: any[] = [], ownerType?: string, agentType?: string) => {
-  const effectiveOwnerType = ownerType === 'personal' ? 'personal' : 'enterprise';
-  const ownerTemplates = (Array.isArray(templates) ? templates : []).filter(
-    (item) => item?.ownerType === effectiveOwnerType
+  const effectiveOwnerType = String(ownerType || '').trim().toLowerCase() === 'personal' ? 'personal' : 'enterprise';
+  const effectiveAgentType = agentType === undefined || agentType === null ? '' : String(agentType).trim();
+  const matchedTemplate = (Array.isArray(templates) ? templates : []).find(
+    (item) =>
+      String(item?.ownerType || '').trim().toLowerCase() === effectiveOwnerType &&
+      String(item?.agentType ?? '').trim() === effectiveAgentType
   );
-  const matchedTemplate =
-    effectiveOwnerType === 'personal'
-      ? ownerTemplates.find((item) => item?.key === 'BYCLAW_ASSISTANT') ||
-        ownerTemplates.find((item) => item?.agentType === '001') ||
-        ownerTemplates[0]
-      : ownerTemplates.find((item) => item?.agentType === agentType);
 
-  return Number(matchedTemplate?.maxLength) || PROMPT_TEXT_FIELD_DEFAULT_MAX_LENGTH;
+  const maxLength = Number(matchedTemplate?.maxLength);
+  return Number.isFinite(maxLength) && maxLength > 0 ? maxLength : PROMPT_TEXT_FIELD_DEFAULT_MAX_LENGTH;
 };
 
 const getBundledSkillCode = (item: any) => {
@@ -389,7 +387,7 @@ const ConfigForm = (props) => {
   const [bundledSkillLoading, setBundledSkillLoading] = useState(false);
   const [bundledSkillModalOpen, setBundledSkillModalOpen] = useState(false);
   const [bundledSkillSearchName, setBundledSkillSearchName] = useState('');
-  const formOwnerType = Form.useWatch('ownerType', form, { form, preserve: true });
+  const formOwnerType = Form.useWatch('ownerType', { form, preserve: true });
   const effectiveOwnerType = formOwnerType || ownerType;
   const selectedSkills = Form.useWatch('bundledSkills', { form, preserve: true }) || [];
   const selectedSkillCodes = useMemo(() => normalizeBundledSkillCodes(selectedSkills), [selectedSkills]);
@@ -1169,7 +1167,7 @@ const ConfigForm = (props) => {
           disabled={isReadOnly}
           maxLength={promptTextMaxLength}
           showCount={{
-            formatter: ({ count }) => `${count}/${promptTextMaxLength}`,
+            formatter: ({ value }) => `${getPromptTextLength(value)}/${promptTextMaxLength}`,
           }}
           onBeforeInput={(e) => {
             const inputType = e?.nativeEvent?.inputType || '';
