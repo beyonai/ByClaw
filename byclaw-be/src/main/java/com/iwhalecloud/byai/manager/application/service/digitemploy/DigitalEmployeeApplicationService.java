@@ -1799,70 +1799,112 @@ public class DigitalEmployeeApplicationService {
             return Collections.emptyMap();
         }
         Map<Long, String> result = new HashMap<>(idList.size());
-        try {
-            // TODO(PR-3 follow-up): 各 ext service mapper 加 findByIds(Collection<Long>) 批量方法,
-            //      将本 for 循环替换为单 SQL 调用(IN 子句).
-            //      当前为统一 N+1 的临时实现:循环 findById 但单次方法调用完成所有读取,调用方拿到完整 Map 一次写入 Redis.
-            if (StringUtils.equals(bizType, ResourceBizTypeEnum.TOOLKIT.name())) {
-                for (Long id : idList) {
+        // TODO(PR-3 follow-up): 各 ext service mapper 加 findByIds(Collection<Long>) 批量方法,
+        //      将本 for 循环替换为单 SQL 调用(IN 子句).
+        //      当前为统一 N+1 的临时实现:循环 findById 但单次方法调用完成所有读取,调用方拿到完整 Map 一次写入 Redis.
+        // PR-fix Major-1: per-id try/catch（单个 id 失败不影响同 bizType 其他 id,
+        //      也不影响其他 bizType 的 6 个分支).
+        if (StringUtils.equals(bizType, ResourceBizTypeEnum.TOOLKIT.name())) {
+            for (Long id : idList) {
+                try {
                     SsResExtToolKit ext = ssResExtToolKitService.findById(id);
                     if (ext != null && StringUtils.isNotBlank(ext.getTargetContent())) {
                         result.put(id, ext.getTargetContent());
                     }
                 }
+                catch (Exception e) {
+                    logger.warn("batchLoadTargetContent 单 id 失败: bizType=TOOLKIT, id={}, reason={}",
+                        id, e.getMessage(), e);
+                }
             }
-            else if (StringUtils.equals(bizType, ResourceBizTypeEnum.MCP.name())) {
-                for (Long id : idList) {
+        }
+        else if (StringUtils.equals(bizType, ResourceBizTypeEnum.MCP.name())) {
+            for (Long id : idList) {
+                try {
                     SsResExtMcp ext = ssResExtMcpService.findById(id);
                     if (ext != null && StringUtils.isNotBlank(ext.getTargetContent())) {
                         result.put(id, ext.getTargetContent());
                     }
                 }
+                catch (Exception e) {
+                    logger.warn("batchLoadTargetContent 单 id 失败: bizType=MCP, id={}, reason={}",
+                        id, e.getMessage(), e);
+                }
             }
-            else if (StringUtils.equals(bizType, ResourceBizTypeEnum.AGENT.name())) {
-                for (Long id : idList) {
+        }
+        else if (StringUtils.equals(bizType, ResourceBizTypeEnum.AGENT.name())) {
+            for (Long id : idList) {
+                try {
                     SsResExtAgent ext = ssResExtAgentService.findById(id);
                     if (ext != null && StringUtils.isNotBlank(ext.getTargetContent())) {
                         result.put(id, ext.getTargetContent());
                     }
                 }
+                catch (Exception e) {
+                    logger.warn("batchLoadTargetContent 单 id 失败: bizType=AGENT, id={}, reason={}",
+                        id, e.getMessage(), e);
+                }
             }
-            else if (StringUtils.startsWithIgnoreCase(bizType, "KG_")) {
-                for (Long id : idList) {
+        }
+        else if (StringUtils.startsWithIgnoreCase(bizType, "KG_")) {
+            for (Long id : idList) {
+                try {
                     SsResExtDoc ext = ssResExtDocService.findById(id);
                     if (ext != null && StringUtils.isNotBlank(ext.getTargetContent())) {
                         result.put(id, ext.getTargetContent());
                     }
                 }
+                catch (Exception e) {
+                    logger.warn("batchLoadTargetContent 单 id 失败: bizType=KG_*, id={}, reason={}",
+                        id, e.getMessage(), e);
+                }
             }
-            else if (StringUtils.equals(bizType, ResourceBizTypeEnum.VIEW.name())) {
-                for (Long id : idList) {
+        }
+        else if (StringUtils.equals(bizType, ResourceBizTypeEnum.VIEW.name())) {
+            for (Long id : idList) {
+                try {
                     SsResExtView ext = ssResExtViewService.findById(id);
                     if (ext != null && StringUtils.isNotBlank(ext.getTargetContent())) {
                         result.put(id, ext.getTargetContent());
                     }
                 }
+                catch (Exception e) {
+                    logger.warn("batchLoadTargetContent 单 id 失败: bizType=VIEW, id={}, reason={}",
+                        id, e.getMessage(), e);
+                }
             }
-            else if (StringUtils.equals(bizType, ResourceBizTypeEnum.OBJECT.name())) {
-                for (Long id : idList) {
+        }
+        else if (StringUtils.equals(bizType, ResourceBizTypeEnum.OBJECT.name())) {
+            for (Long id : idList) {
+                try {
                     SsResExtObject ext = ssResExtObjectService.findById(id);
                     if (ext != null && StringUtils.isNotBlank(ext.getTargetContent())) {
                         result.put(id, ext.getTargetContent());
                     }
                 }
+                catch (Exception e) {
+                    logger.warn("batchLoadTargetContent 单 id 失败: bizType=OBJECT, id={}, reason={}",
+                        id, e.getMessage(), e);
+                }
             }
-            else if (StringUtils.equals(bizType, ResourceBizTypeEnum.SKILL.name())) {
-                for (Long id : idList) {
+        }
+        else if (StringUtils.equals(bizType, ResourceBizTypeEnum.SKILL.name())) {
+            for (Long id : idList) {
+                try {
                     SsResExtSkill ext = ssResExtSkillService.findById(id);
                     if (ext != null && StringUtils.isNotBlank(ext.getTargetContent())) {
                         result.put(id, ext.getTargetContent());
                     }
                 }
+                catch (Exception e) {
+                    logger.warn("batchLoadTargetContent 单 id 失败: bizType=SKILL, id={}, reason={}",
+                        id, e.getMessage(), e);
+                }
             }
         }
-        catch (Exception e) {
-            logger.warn("batchLoadTargetContent 异常: bizType={}, idCount={}, 已加载={}, reason={}",
-                bizType, idList.size(), result.size(), e.getMessage(), e);
+        else {
+            // 不支持的 bizType（理论上不会发生,因为顶部 isSupportedRelatedResourceBizType 已过滤）
+            logger.warn("batchLoadTargetContent 收到不支持的 bizType={}, 已忽略", bizType);
         }
         return result;
     }
@@ -1941,27 +1983,22 @@ public class DigitalEmployeeApplicationService {
                 || !digEmployeeRedisSyncProperties.isJsonRedisSyncEnabled()) {
             return result;
         }
-        // 主资源:直接使用预取 target_content(避免 ssResExtDigEmployeeService.findById)
-        if (StringUtils.isNotBlank(prefetchedMainTargetContent)) {
+        // PR-fix Major-2: 删掉原 else 分支内的 return result; —— 让控制流继续到关联资源处理,
+        // 保持与原 collectDigEmployeeSyncEntries 的行为一致(fallback 路径也要写关联资源).
+        // 主资源:命中预取直接用;未命中(prefetch 异常/空)回退到原 resolveDigEmployeeJsonForRedisSync
+        String mainJson = prefetchedMainTargetContent;
+        if (StringUtils.isBlank(mainJson)) {
+            // target_content 预取未取到(空 / 异常):回退到原逐资源解析(保留原行为)
+            // 若 skipBlankTargetContent=true,resolveDigEmployeeJsonForRedisSync 内部会记 warn 并 return null
+            mainJson = resolveDigEmployeeJsonForRedisSync(digEmployeeId);
+        }
+        if (StringUtils.isNotBlank(mainJson)) {
             result.put(
                 DigEmployeeRedisKeys.resourceConfigJsonKey(
                     ResourceBizTypeEnum.DIG_EMPLOYEE.name(), digEmployeeId),
-                prefetchedMainTargetContent);
+                mainJson);
         }
-        else {
-            // target_content 预取未取到(空 / 异常):回退到原逐资源解析(保留原行为)
-            // 若 skipBlankTargetContent=true,resolveDigEmployeeJsonForRedisSync 内部会记 warn 并 return null
-            String mainJson = resolveDigEmployeeJsonForRedisSync(digEmployeeId);
-            if (StringUtils.isNotBlank(mainJson)) {
-                result.put(
-                    DigEmployeeRedisKeys.resourceConfigJsonKey(
-                        ResourceBizTypeEnum.DIG_EMPLOYEE.name(), digEmployeeId),
-                    mainJson);
-            }
-            // 主资源回退路径下,不再尝试关联资源(避免一次同步里混用两种策略)
-            return result;
-        }
-        // 关联资源:复用 batchLoadTargetContent(pr-3 内为 per-id 循环;pr-3-follow-up 优化为单 SQL)
+        // 关联资源:无论 prefetch 命中与否,都尝试加载(保持与原方法行为一致;pr-3 内为 per-id 循环;pr-3-follow-up 优化为单 SQL)
         try {
             List<SsResourceRelDetail> relDetails = ssResourceRelDetailService.findByResourceId(digEmployeeId);
             if (CollectionUtils.isEmpty(relDetails)) {
