@@ -340,6 +340,19 @@ def _build_scope_entries(
 
     if rel_resource_list:
         result = []
+        # 先收集 ONTOLOGY_BASE，用于 SCENE 继承 base_id
+        _base_map: dict[str, str] = {}
+        for item in rel_resource_list:
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("resourceBizType") or "") == "ONTOLOGY_BASE":
+                _rid = str(item.get("resourceId") or "").strip()
+                _code = str(item.get("resourceCode") or "").strip()
+                _sys = str(
+                    item.get("ontologyBaseCode") or item.get("systemCode") or ""
+                ).strip()
+                if _rid:
+                    _base_map[_rid] = _sys or _code
         for item in rel_resource_list:
             if not isinstance(item, dict):
                 continue
@@ -351,7 +364,12 @@ def _build_scope_entries(
                 continue
             base_code = str(item.get("ontologyBaseCode") or item.get("systemCode") or "").strip()
             if biz_type == "ONTOLOGY_BASE":
-                base_id = code
+                # 优先用 systemCode（注册的 base_id），resourceCode 可能是 "default" 等占位值
+                base_id = base_code or code
+            elif biz_type == "SCENE":
+                # SCENE 的 base_id 应继承父 ONTOLOGY_BASE
+                _parent_rid = str(item.get("parentResourceId") or "").strip()
+                base_id = _base_map.get(_parent_rid) or base_code
             else:
                 base_id = base_code
             result.append(ScopeEntry(code=code, scope_type=biz_type, base_id=base_id))
@@ -362,6 +380,19 @@ def _build_scope_entries(
         rel_rl = config_extra.get("rel_resource_list", [])
         if rel_rl:
             result = []
+            # 先收集 ONTOLOGY_BASE，用于 SCENE 继承 base_id
+            _base_map_cfg: dict[str, str] = {}
+            for item in rel_rl:
+                if not isinstance(item, dict):
+                    continue
+                if str(item.get("resourceBizType") or "") == "ONTOLOGY_BASE":
+                    _rid = str(item.get("resourceId") or "").strip()
+                    _code = str(item.get("resourceCode") or "").strip()
+                    _sys = str(
+                        item.get("ontologyBaseCode") or item.get("systemCode") or ""
+                    ).strip()
+                    if _rid:
+                        _base_map_cfg[_rid] = _sys or _code
             for item in rel_rl:
                 if not isinstance(item, dict):
                     continue
@@ -373,7 +404,10 @@ def _build_scope_entries(
                     continue
                 base_code = str(item.get("ontologyBaseCode") or item.get("systemCode") or "").strip()
                 if biz_type == "ONTOLOGY_BASE":
-                    base_id = code
+                    base_id = base_code or code
+                elif biz_type == "SCENE":
+                    _parent_rid = str(item.get("parentResourceId") or "").strip()
+                    base_id = _base_map_cfg.get(_parent_rid) or base_code
                 else:
                     base_id = base_code
                 result.append(ScopeEntry(code=code, scope_type=biz_type, base_id=base_id))
@@ -388,6 +422,68 @@ def _build_scope_entries(
         ]
 
     return []
+
+
+async def _load_resources_by_ids(
+    redis_client: Any,
+    resource_ids: list[str],
+    object_count: int,
+) -> list[dict[str, Any]]:
+    """从 Redis OBJECT_{id} / VIEW_{id} 直接加载资源信息，构建 relResourceList。
+
+    当 _agent_for_redis 为空（baiying-call OBJECT/VIEW 路径未传 agent_id）时降级使用。
+    resource_ids 前 object_count 个视为 OBJECT，之后视为 VIEW。
+    """
+    import json
+    import logging
+    _log = logging.getLogger(__name__)
+
+    result: list[dict[str, Any]] = []
+    for i, rid in enumerate(resource_ids):
+        if not isinstance(rid, str) or not rid.strip():
+            continue
+        biz_type = "OBJECT" if i < object_count else "VIEW"
+        key = f"{biz_type}_{rid.strip()}"
+        try:
+            raw = await redis_client.get(key)
+        except Exception:
+            _log.warning("Redis GET failed: key=%s", key, exc_info=True)
+            continue
+        if raw is None:
+            continue
+        # 复用 redis_agent_config 的 JSON 解码逻辑
+        if isinstance(raw, bytes):
+            raw = raw.decode("utf-8")
+        if isinstance(raw, str):
+            try:
+                data = json.loads(raw)
+            except (json.JSONDecodeError, TypeError):
+                try:
+                    data = json.loads(raw.replace('\\\\"', '\\"'))
+                except (json.JSONDecodeError, TypeError):
+                    continue
+        else:
+            continue
+        if not isinstance(data, dict):
+            continue
+        item = dict(data)
+        item.setdefault("resourceBizType", biz_type)
+        # 确保 _build_scope_entries 兼容：systemCode → ontologyBaseCode
+        # 过滤无效占位值（如 "default"），避免下游 OntologyBase 查找报错
+        _INVALID_CODES = frozenset({"default", ""})
+        if not item.get("ontologyBaseCode"):
+            system_code = item.get("systemCode")
+            if system_code and system_code not in _INVALID_CODES:
+                item["ontologyBaseCode"] = system_code
+        result.append(item)
+
+    if result:
+        _log.info(
+            "Loaded %d resource(s) from Redis by resource_ids: ids=%s",
+            len(result),
+            resource_ids,
+        )
+    return result
 
 
 def _extract_tool_resource_codes(
@@ -2068,6 +2164,15 @@ class DataCloudWorker(GatewayWorker):
             _rel_resource_list = await load_data_rel_resources_from_redis(
                 context.redis, _agent_for_redis,
             )
+
+        # 降级：baiying-call OBJECT/VIEW 路径未传 agent_id，从 resource_ids
+        # 直接查 Redis OBJECT_{id} / VIEW_{id} 获取资源信息（含 systemCode）
+        if not _rel_resource_list and context.redis is not None:
+            _resource_ids = extra_payload.get("resource_ids") or []
+            if _resource_ids:
+                _rel_resource_list = await _load_resources_by_ids(
+                    context.redis, _resource_ids, len(_dyn_object_ids),
+                )
 
         # caller 显式传入的 rel_resource_list 优先级更高（覆盖 Redis 结果）
         _callers_rel_raw = extra_payload.get("rel_resource_list") or extra_payload.get("ontology_resources")
