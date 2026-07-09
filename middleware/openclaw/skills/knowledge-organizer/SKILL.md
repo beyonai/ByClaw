@@ -45,7 +45,7 @@ triggers:
 调用 `skills/gbrain/references/document-object-split/scripts/get_object_detail.py`，从 openclaw 实时获取当前数字员工挂载的所有 OBJECT 类型。
 
 ```bash
-/usr/local/bin/python3 /app/skills/gbrain/references/document-object-split/scripts/get_object_detail.py '{}'
+/usr/local/bin/python3 /app/skills/gbrain/references/document-object-split/scripts/get_object_detail.py '{"objectCode": "待查询对象的ID"}'
 ```
 
 **关键约束：**
