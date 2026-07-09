@@ -22,7 +22,6 @@ export function compactText(value: unknown, maxLen = 140): string | undefined {
 export function buildExecutorResourceContext(params: {
   agent: AdaptedManagedAgent;
   resource?: BaiyingAssociatedResource;
-  resources?: BaiyingAssociatedResource[];
   sessionKey?: string;
   /** Gateway/channel session id for MCP X-Session-Id (per-request isolation). */
   channelSessionId?: string;
@@ -51,30 +50,28 @@ export function buildExecutorResourceContext(params: {
     rootAgent.agentHomeUrl = params.agent.agentHomeUrl;
   }
 
-  const serializeResourceItem = (item: BaiyingAssociatedResource): Record<string, unknown> => ({
-    resourceId: item.resourceId,
-    resourceName: item.resourceName,
-    resourceType: item.resourceType,
-    ...(item.resourceBizType ? { resourceBizType: item.resourceBizType } : {}),
-    ...(item.resourceCode ? { resourceCode: item.resourceCode } : {}),
-    ...(item.ontologyBaseCode ? { ontologyBaseCode: item.ontologyBaseCode } : {}),
-    ...(item.resourceDesc ? { resourceDesc: item.resourceDesc } : {}),
-    ...(item.resourceSourcePkId ? { resourceSourcePkId: item.resourceSourcePkId } : {}),
-    ...(item.systemCode ? { systemCode: item.systemCode } : {}),
-    ...(item.implType ? { implType: item.implType } : {}),
-    ...(item.hostType ? { hostType: item.hostType } : {}),
-    ...(item.parentResourceId ? { parentResourceId: item.parentResourceId } : {}),
-    ...(item.raw ? item.raw : {}),
-  });
   const resource = params.resource
-    ? serializeResourceItem(params.resource)
+    ? {
+        resourceId: params.resource.resourceId,
+        resourceName: params.resource.resourceName,
+        resourceType: params.resource.resourceType,
+        ...(params.resource.resourceBizType
+          ? { resourceBizType: params.resource.resourceBizType }
+          : {}),
+        ...(params.resource.resourceCode ? { resourceCode: params.resource.resourceCode } : {}),
+        ...(params.resource.resourceDesc ? { resourceDesc: params.resource.resourceDesc } : {}),
+        ...(params.resource.resourceSourcePkId
+          ? { resourceSourcePkId: params.resource.resourceSourcePkId }
+          : {}),
+        ...(params.resource.systemCode ? { systemCode: params.resource.systemCode } : {}),
+        ...(params.resource.implType ? { implType: params.resource.implType } : {}),
+        ...(params.resource.hostType ? { hostType: params.resource.hostType } : {}),
+        ...(params.resource.parentResourceId
+          ? { parentResourceId: params.resource.parentResourceId }
+          : {}),
+        ...(params.resource.raw ? params.resource.raw : {}),
+      }
     : null;
-  const selectedResources = Array.isArray(params.resources) && params.resources.length > 0
-    ? params.resources.map(serializeResourceItem)
-    : resource
-      ? [resource]
-      : [];
-  const availableResources = (params.agent.associatedResources ?? []).map(serializeResourceItem);
 
   const channelSid = nonEmpty(params.channelSessionId);
   const channelTraceId = nonEmpty(params.channelTraceId);
@@ -84,8 +81,6 @@ export function buildExecutorResourceContext(params: {
   const out: Record<string, unknown> = {
     root_agent: rootAgent,
     selected_resource: resource,
-    selected_resources: selectedResources,
-    available_resources: availableResources,
     session_key: sessionKey,
     requester_session_key: sessionKey,
     parent_session_key: params.parentSessionKey,

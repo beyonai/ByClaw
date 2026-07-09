@@ -4,21 +4,20 @@ import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.common.constants.resource.OwnerType;
 import com.iwhalecloud.byai.common.constants.resource.ResourceBizType;
 import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.feign.client.FeignDataCloudService;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
-import com.iwhalecloud.byai.common.vo.SortField;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import com.iwhalecloud.byai.manager.domain.auth.enums.GrantType;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus;
+import com.iwhalecloud.byai.manager.domain.resource.request.ResourceUseAuthQo;
+import com.iwhalecloud.byai.manager.domain.resource.service.ResourceAuthApplicationService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.dto.ontology.OntologyBaseRegisterRequest;
 import com.iwhalecloud.byai.manager.dto.ontology.OntologyRefreshResult;
-import com.iwhalecloud.byai.manager.dto.resource.ResourcePageDto;
-import com.iwhalecloud.byai.manager.dto.resource.ResourceQueryRequest;
 import com.iwhalecloud.byai.manager.entity.ontology.SsResExtOntology;
 import com.iwhalecloud.byai.manager.entity.resource.SsResExtObject;
 import com.iwhalecloud.byai.manager.entity.resource.SsResExtScene;
@@ -29,6 +28,8 @@ import com.iwhalecloud.byai.manager.mapper.resource.SsResExtObjectMapper;
 import com.iwhalecloud.byai.manager.mapper.resource.SsResExtSceneMapper;
 import com.iwhalecloud.byai.manager.mapper.resource.SsResExtViewMapper;
 import com.iwhalecloud.byai.manager.mapper.resource.SsResourceMapper;
+import com.iwhalecloud.byai.manager.vo.auth.ResourceAuthVo;
+import com.iwhalecloud.byai.manager.vo.auth.ResourceOperationPermissionsVo;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -82,6 +83,9 @@ public class OntologyBaseService {
     private AuthApplicationService authApplicationService;
 
     @Autowired
+    private ResourceAuthApplicationService resourceAuthApplicationService;
+
+    @Autowired
     private SsResExtSceneMapper ssResExtSceneMapper;
 
     @Autowired
@@ -114,8 +118,9 @@ public class OntologyBaseService {
     }
 
     /** 对象详情：属性 + 动作（转发 datacloud）。 */
-    public JSONObject objectDetail(String ownerType, String baseId, String objectCode) {
-        return feignDataCloudService.getObjectDetail(normalizeOwnerType(ownerType), baseId, objectCode);
+    public JSONObject objectDetail(JSONObject request) {
+        return feignDataCloudService.getObjectDetailByObjectCode(requiredString(request, "objectCode", "object_code",
+            "code"));
     }
 
     public JSONObject createBase(JSONObject request) {
@@ -159,6 +164,10 @@ public class OntologyBaseService {
         return feignDataCloudService.listObjects(requiredString(request, "baseId"), cacheMode(request));
     }
 
+    public JSONArray listObjectsByViewCode(JSONObject request) {
+        return feignDataCloudService.listObjectsByViewCode(requiredString(request, "viewCode", "view_code", "code"));
+    }
+
     public JSONObject createObject(JSONObject request) {
         return feignDataCloudService.createObject(requiredString(request, "baseId"), payload(request));
     }
@@ -181,8 +190,13 @@ public class OntologyBaseService {
         return pageLocalResources(request);
     }
 
+    public boolean canSyncEnterpriseResources() {
+        return isAdminVipUser();
+    }
+
     public JSONObject syncResources(JSONObject request) {
         String ownerType = normalizeOwnerType(request.getString("ownerType"));
+        String userCode = resolveSyncUserCode(ownerType, request.getString("userCode"));
         String keyword = keyword(request);
         Integer pageNum = defaultNumber(request.getInteger("pageNum"), request.getInteger("page"), 1);
         Integer pageSize = defaultNumber(request.getInteger("pageSize"), request.getInteger("size"), 20);
@@ -194,9 +208,10 @@ public class OntologyBaseService {
 
         String type = datacloudOntologyType(bizTypes);
         JSONObject page = feignDataCloudService.queryOntologiesBySceneCode(sceneCode, ownerType, type, keyword,
-            pageNum, pageSize);
+            pageNum, pageSize, userCode);
         JSONObject normalizedPage = normalizeSceneOntologyPage(page, ownerType, sceneCode, type, pageNum, pageSize);
-        JSONArray rows = normalizedPage.getJSONArray("rows");
+        JSONArray rows = filterPersonalRowsByUserCode(normalizedPage.getJSONArray("rows"), ownerType, userCode);
+        normalizedPage.put("rows", rows);
         int created = 0;
         int updated = 0;
         if (rows != null) {
@@ -234,30 +249,82 @@ public class OntologyBaseService {
         return result;
     }
 
+    private JSONArray filterPersonalRowsByUserCode(JSONArray rows, String ownerType, String currentUserCode) {
+        if (!OwnerType.PERSONAL.equals(ownerType) || rows == null || rows.isEmpty()) {
+            return rows == null ? new JSONArray() : rows;
+        }
+        JSONArray filteredRows = new JSONArray();
+        int skipped = 0;
+        for (Object item : rows) {
+            JSONObject row = toJson(item);
+            String rowUserCode = datacloudUserCode(row);
+            if (StringUtils.equals(rowUserCode, currentUserCode)) {
+                filteredRows.add(row);
+                continue;
+            }
+            skipped++;
+            logger.info("skip personal datacloud ontology row, currentUserCode={}, rowUserCode={}, resourceCode={}",
+                currentUserCode, rowUserCode, firstNonBlank(row, "resourceCode", "viewCode", "objectCode", "code"));
+        }
+        if (skipped > 0) {
+            logger.info("filtered personal datacloud ontology rows, currentUserCode={}, kept={}, skipped={}",
+                currentUserCode, filteredRows.size(), skipped);
+        }
+        return filteredRows;
+    }
+
+    private String resolveSyncUserCode(String ownerType, String requestUserCode) {
+        if (OwnerType.ENTERPRISE.equals(ownerType)) {
+            ensureEnterpriseOntologyRefreshPermission();
+            return null;
+        }
+        if (!OwnerType.PERSONAL.equals(ownerType)) {
+            return StringUtils.defaultIfBlank(requestUserCode, CurrentUserHolder.getCurrentUserCode());
+        }
+        String currentUserCode = CurrentUserHolder.getCurrentUserCode();
+        if (StringUtils.isBlank(currentUserCode)) {
+            throw new BaseException("当前登录用户编码不能为空");
+        }
+        return currentUserCode;
+    }
+
+    private void ensureEnterpriseOntologyRefreshPermission() {
+        if (!isAdminVipUser()) {
+            throw new BaseException("只有 adminvip 可以刷新企业本体资源");
+        }
+    }
+
+    private boolean isAdminVipUser() {
+        return ADMIN_VIP_USER_CODE.equalsIgnoreCase(CurrentUserHolder.getCurrentUserCode());
+    }
+
     private JSONObject pageLocalResources(JSONObject request) {
         Integer pageNum = defaultNumber(request.getInteger("pageNum"), request.getInteger("page"), 1);
         Integer pageSize = defaultNumber(request.getInteger("pageSize"), request.getInteger("size"), 20);
-        Page<ResourcePageDto> page = new Page<>(Math.max(pageNum == null ? 1 : pageNum, 1),
-            Math.max(pageSize == null ? 20 : pageSize, 1));
 
-        ResourceQueryRequest query = new ResourceQueryRequest();
+        ResourceUseAuthQo query = new ResourceUseAuthQo();
         query.setOwnerType(normalizeOwnerType(request.getString("ownerType")));
         query.setKeyword(keyword(request));
-        query.setResourceBizType(request.getString("resourceBizType"));
         query.setResourceBizTypeList(new ArrayList<>(resourceBizTypes(request)));
-        query.setStatusList(statusList(request));
+        query.setResourceStatus(resourceStatus(request));
+        query.setPermission(request.getString("permission"));
         query.setCatalogId(catalogIdAsLong(request.get("catalogId")));
-        query.setOwnershipType(3);
-        query.setSortFields(List.of(createSortField("updateTime", "desc", 1), createSortField("createTime", "desc",
-            2)));
+        query.setPageNum(Math.max(pageNum == null ? 1 : pageNum, 1));
+        query.setPageSize(Math.max(pageSize == null ? 20 : pageSize, 1));
+        if (OwnerType.ENTERPRISE.equals(query.getOwnerType())) {
+            query.setIncludeAllEnterpriseOwnerType(true);
+        }
 
-        List<ResourcePageDto> rows = ssResourceMapper.getResourceListByPage(page, query);
+        PageInfo<ResourceAuthVo> page = resourceAuthApplicationService.listResourceAuth(query);
+        List<ResourceAuthVo> rows = page.getList() == null ? new ArrayList<>() : page.getList();
+        fillOperationPermissions(rows);
+        enrichOntologyTargetContent(rows);
 
         JSONObject pageInfo = new JSONObject();
-        pageInfo.put("pageNum", page.getCurrent());
-        pageInfo.put("pageSize", page.getSize());
+        pageInfo.put("pageNum", page.getPageNum());
+        pageInfo.put("pageSize", page.getPageSize());
         pageInfo.put("total", page.getTotal());
-        pageInfo.put("totalPages", page.getPages());
+        pageInfo.put("totalPages", page.getTotalPages());
 
         JSONObject result = new JSONObject();
         result.put("rows", rows);
@@ -265,6 +332,34 @@ public class OntologyBaseService {
         result.put("pageInfo", pageInfo);
         result.put("total", page.getTotal());
         return result;
+    }
+
+    private void fillOperationPermissions(List<ResourceAuthVo> rows) {
+        if (rows == null || rows.isEmpty()) {
+            return;
+        }
+        List<Long> resourceIds = rows.stream()
+            .filter(row -> row != null && row.getResourceId() != null)
+            .map(ResourceAuthVo::getResourceId)
+            .distinct()
+            .collect(Collectors.toList());
+        Map<Long, ResourceOperationPermissionsVo> permissionMap =
+            authApplicationService.queryResourceOperationPermissionsBatch(resourceIds);
+        rows.forEach(row -> {
+            if (row == null || row.getResourceId() == null) {
+                return;
+            }
+            ResourceOperationPermissionsVo permissions = permissionMap.get(row.getResourceId());
+            if (permissions == null) {
+                return;
+            }
+            row.setCanEdit(permissions.getCanEdit());
+            row.setCanManageAuth(permissions.getCanManageAuth());
+            row.setCanUseAuth(permissions.getCanUseAuth());
+            row.setCanDelete(permissions.getCanDelete());
+            row.setCanApplyUse(permissions.getCanApplyUse());
+            row.setCanAuditUse(permissions.getCanAuditUse());
+        });
     }
 
     private String upsertSyncedResource(JSONObject row, String ownerType, String sceneCode) {
@@ -275,30 +370,44 @@ public class OntologyBaseService {
         String resourceName = ResourceBizType.VIEW.name().equals(bizType)
             ? firstNonBlank(row, "viewName", "view_name", "resourceName", "resource_name", "name", "displayName")
             : firstNonBlank(row, "objectName", "object_name", "resourceName", "resource_name", "name", "displayName");
+        String baseCode = ontologyBaseCode(row);
+        String rowSceneCode = sceneCode(row, sceneCode);
         if (StringUtils.isBlank(resourceCode) || StringUtils.isBlank(resourceName)) {
             return "skipped";
         }
 
-        SsResource existing = findSyncedResource(resourceCode, bizType);
+        SsResource existing = findSyncedResource(resourceCode, bizType, ownerType, baseCode, rowSceneCode);
         if (existing == null) {
             SsResource created = new SsResource();
             fillSyncedResource(created, row, ownerType, sceneCode, bizType, resourceCode, resourceName);
-            ssResourceService.saveResource(created);
+            SsResource saved = ssResourceService.saveResource(created);
+            replaceSyncedExt(saved.getResourceId(), bizType,
+                buildOntologyMeta(bizType, baseCode, resourceCode, resourceName, saved.getResourceDesc(), ownerType,
+                    row));
             return "created";
         }
 
+        ensureCanUpdateExistingResource(existing, resourceCode);
         fillSyncedResource(existing, row, ownerType, sceneCode, bizType, resourceCode, resourceName);
         ssResourceService.updateResourceEntity(existing);
+        replaceSyncedExt(existing.getResourceId(), bizType,
+            buildOntologyMeta(bizType, baseCode, resourceCode, resourceName, existing.getResourceDesc(), ownerType,
+                row));
         return "updated";
     }
 
-    private SsResource findSyncedResource(String resourceCode, String bizType) {
-        List<SsResource> resources = ssResourceMapper.selectList(new LambdaQueryWrapper<SsResource>()
-            .eq(SsResource::getResourceCode, resourceCode)
-            .eq(SsResource::getResourceBizType, bizType)
-            .orderByDesc(SsResource::getUpdateTime)
-            .orderByDesc(SsResource::getCreateTime));
-        return resources.isEmpty() ? null : resources.get(0);
+    private SsResource findSyncedResource(String resourceCode, String bizType, String ownerType, String baseCode,
+        String sceneCode) {
+        return ssResourceService.findUniqueBySystemCodeAndBizTypeAndResourceCode(SYSTEM_CODE_DATACLOUD, bizType,
+            resourceCode);
+    }
+
+    private void ensureCanUpdateExistingResource(SsResource existing, String resourceCode) {
+        if (existing == null || authApplicationService.hasResourceManagePermission(existing)) {
+            return;
+        }
+        throw new BaseException("当前用户对资源【" + StringUtils.defaultIfBlank(existing.getResourceName(), resourceCode)
+            + "】没有管理权限，不能更新该资源");
     }
 
     private void fillSyncedResource(SsResource resource, JSONObject row, String ownerType, String sceneCode,
@@ -326,18 +435,10 @@ public class OntologyBaseService {
         }
     }
 
-    private SortField createSortField(String field, String order, int priority) {
-        SortField sortField = new SortField();
-        sortField.setField(field);
-        sortField.setOrder(order);
-        sortField.setPriority(priority);
-        return sortField;
-    }
-
-    private List<Integer> statusList(JSONObject request) {
+    private String resourceStatus(JSONObject request) {
         JSONArray statusList = request.getJSONArray("statusList");
         if (statusList == null || statusList.isEmpty()) {
-            return List.of(ResourceStatus.LIST.getNum());
+            return String.valueOf(ResourceStatus.LIST.getNum());
         }
         List<Integer> values = new ArrayList<>();
         for (Object item : statusList) {
@@ -345,7 +446,10 @@ public class OntologyBaseService {
                 values.add(Integer.valueOf(String.valueOf(item)));
             }
         }
-        return values.isEmpty() ? List.of(ResourceStatus.LIST.getNum()) : values;
+        if (values.isEmpty()) {
+            return String.valueOf(ResourceStatus.LIST.getNum());
+        }
+        return values.size() == 1 ? String.valueOf(values.get(0)) : "";
     }
 
     private Long catalogIdAsLong(Object catalogId) {
@@ -357,6 +461,88 @@ public class OntologyBaseService {
         }
         catch (NumberFormatException e) {
             return null;
+        }
+    }
+
+    private void enrichOntologyTargetContent(List<ResourceAuthVo> rows) {
+        if (rows == null || rows.isEmpty()) {
+            return;
+        }
+        for (ResourceAuthVo row : rows) {
+            if (row == null || row.getResourceId() == null || !isOntologyChildBizType(row.getResourceBizType())) {
+                continue;
+            }
+            JSONObject meta = ontologyTargetContent(row.getResourceId(), row.getResourceBizType());
+            if (!meta.isEmpty()) {
+                row.setTargetContent(JSON.toJSONString(meta));
+            }
+        }
+    }
+
+    private JSONObject ontologyTargetContent(SsResource resource) {
+        if (resource == null || resource.getResourceId() == null) {
+            return new JSONObject();
+        }
+        return ontologyTargetContent(resource.getResourceId(), resource.getResourceBizType());
+    }
+
+    private JSONObject ontologyTargetContent(Long resourceId, String bizType) {
+        if (resourceId == null) {
+            return new JSONObject();
+        }
+        String targetContent = null;
+        if (ResourceBizType.VIEW.getCode().equals(bizType)) {
+            SsResExtView ext = ssResExtViewMapper.selectById(resourceId);
+            targetContent = ext == null ? null : ext.getTargetContent();
+        }
+        else if (ResourceBizType.OBJECT.getCode().equals(bizType)) {
+            SsResExtObject ext = ssResExtObjectMapper.selectById(resourceId);
+            targetContent = ext == null ? null : ext.getTargetContent();
+        }
+        else if (ResourceBizType.SCENE.getCode().equals(bizType)) {
+            SsResExtScene ext = ssResExtSceneMapper.selectById(resourceId);
+            targetContent = ext == null ? null : ext.getTargetContent();
+        }
+        if (StringUtils.isBlank(targetContent)) {
+            return new JSONObject();
+        }
+        try {
+            return JSON.parseObject(targetContent);
+        }
+        catch (Exception ignored) {
+            return new JSONObject();
+        }
+    }
+
+    private void replaceSyncedExt(Long resourceId, String bizType, JSONObject targetContent) {
+        if (resourceId == null || targetContent == null) {
+            return;
+        }
+        String targetJson = JSON.toJSONString(targetContent);
+        if (ResourceBizType.VIEW.getCode().equals(bizType)) {
+            SsResExtView ext = ssResExtViewMapper.selectById(resourceId);
+            if (ext == null) {
+                ext = new SsResExtView();
+                ext.setResourceId(resourceId);
+                ext.setTargetContent(targetJson);
+                ssResExtViewMapper.insert(ext);
+                return;
+            }
+            ext.setTargetContent(targetJson);
+            ssResExtViewMapper.updateById(ext);
+            return;
+        }
+        if (ResourceBizType.OBJECT.getCode().equals(bizType)) {
+            SsResExtObject ext = ssResExtObjectMapper.selectById(resourceId);
+            if (ext == null) {
+                ext = new SsResExtObject();
+                ext.setResourceId(resourceId);
+                ext.setTargetContent(targetJson);
+                ssResExtObjectMapper.insert(ext);
+                return;
+            }
+            ext.setTargetContent(targetJson);
+            ssResExtObjectMapper.updateById(ext);
         }
     }
 
@@ -379,11 +565,20 @@ public class OntologyBaseService {
                         "displayName")
                     : firstNonBlank(row, "objectName", "object_name", "resourceName", "resource_name", "name",
                         "displayName");
+                String baseCode = ontologyBaseCode(row);
+                String baseName = ontologyBaseName(row);
+                String rowSceneCode = sceneCode(row, sceneCode);
+                String rowSceneName = sceneName(row);
 
                 row.put("ownerType", ownerType);
                 row.put("catalogId", sceneCode);
-                row.put("sceneId", StringUtils.defaultIfBlank(row.getString("sceneId"), sceneCode));
-                row.put("sceneCode", StringUtils.defaultIfBlank(row.getString("sceneCode"), sceneCode));
+                row.put("baseId", baseCode);
+                row.put("baseName", baseName);
+                row.put("ontologyBaseCode", baseCode);
+                row.put("ontologyBaseName", baseName);
+                row.put("sceneId", rowSceneCode);
+                row.put("sceneCode", rowSceneCode);
+                row.put("sceneName", rowSceneName);
                 row.put("resourceBizType", bizType);
                 row.put("resourceCode", resourceCode);
                 row.put("resourceName", resourceName);
@@ -421,8 +616,7 @@ public class OntologyBaseService {
     }
 
     public JSONObject viewDetail(JSONObject request) {
-        return feignDataCloudService.getViewDetail(requiredString(request, "baseId"),
-            requiredString(request, "viewCode", "code"), cacheMode(request));
+        return feignDataCloudService.getViewDetailByViewCode(requiredString(request, "viewCode", "view_code", "code"));
     }
 
     public JSONObject createView(JSONObject request) {
@@ -442,6 +636,11 @@ public class OntologyBaseService {
     public JSONArray listRelations(JSONObject request) {
         return feignDataCloudService.listRelationsByBase(requiredString(request, "baseId"),
             cacheMode(request));
+    }
+
+    public JSONArray listRelationsByObjectCode(JSONObject request) {
+        return feignDataCloudService.listRelationsByObjectCode(requiredString(request, "objectCode", "object_code",
+            "code"));
     }
 
     public JSONObject relationDetail(JSONObject request) {
@@ -583,8 +782,8 @@ public class OntologyBaseService {
                 ? new String[] {"objectCode", "object_code"}
                 : new String[] {"viewCode", "view_code"});
         JSONObject detail = ResourceBizType.OBJECT.getCode().equals(bizType)
-            ? safeObjectDetail(ownerType, baseId, code)
-            : safeViewDetail(baseId, code);
+            ? safeObjectDetail(code)
+            : safeViewDetail(code);
         JSONObject meta = mergeDetails(context == null ? null : context.child, detail);
         if (meta.isEmpty()) {
             return null;
@@ -919,22 +1118,22 @@ public class OntologyBaseService {
         }
     }
 
-    private JSONObject safeObjectDetail(String ownerType, String baseId, String objectCode) {
+    private JSONObject safeObjectDetail(String objectCode) {
         try {
-            return feignDataCloudService.getObjectDetail(ownerType, baseId, objectCode);
+            return feignDataCloudService.getObjectDetailByObjectCode(objectCode);
         }
         catch (Exception e) {
-            logger.warn("query datacloud object detail failed, baseId={}, objectCode={}", baseId, objectCode, e);
+            logger.warn("query datacloud object detail failed, objectCode={}", objectCode, e);
             return null;
         }
     }
 
-    private JSONObject safeViewDetail(String baseId, String viewCode) {
+    private JSONObject safeViewDetail(String viewCode) {
         try {
-            return feignDataCloudService.getViewDetail(baseId, viewCode, null);
+            return feignDataCloudService.getViewDetailByViewCode(viewCode);
         }
         catch (Exception e) {
-            logger.warn("query datacloud view detail failed, baseId={}, viewCode={}", baseId, viewCode, e);
+            logger.warn("query datacloud view detail failed, viewCode={}", viewCode, e);
             return null;
         }
     }
@@ -1371,11 +1570,11 @@ public class OntologyBaseService {
     }
 
     /**
-     * 校验刷新企业本体库的权限：仅平台/业务/组织管理员或超管(adminvip)可操作，与「企业 tab 创建资源」同一角色集。
+     * 校验刷新企业本体库的权限：仅平台管理/运维、业务/组织管理员或超管(adminvip)可操作，与「企业 tab 创建资源」同一角色集。
      */
     private void assertEnterpriseAdmin() {
         boolean allowed = CurrentUserHolder.isBusinessAdmin() || CurrentUserHolder.isOrganizationAdmin()
-            || CurrentUserHolder.isPlatformManager()
+            || CurrentUserHolder.isPlatformAdminOrOperator()
             || ADMIN_VIP_USER_CODE.equalsIgnoreCase(CurrentUserHolder.getCurrentUserCode());
         if (!allowed) {
             throw new BaseException("无权限：仅管理员可刷新企业本体库");
@@ -1426,6 +1625,59 @@ public class OntologyBaseService {
         body.remove("pageSize");
         body.remove("payload");
         return body;
+    }
+
+    private String ontologyBaseCode(JSONObject row) {
+        return firstNonBlankDeep(row, new String[] { "base", "ontologyBase", "baseInfo", "ontologyBaseInfo" },
+            "ontologyBaseCode", "ontology_base_code", "baseId", "base_id", "baseCode", "base_code",
+            "ontologyBaseId", "ontology_base_id", "pid");
+    }
+
+    private String ontologyBaseName(JSONObject row) {
+        return firstNonBlankDeep(row, new String[] { "base", "ontologyBase", "baseInfo", "ontologyBaseInfo" },
+            "ontologyBaseName", "ontology_base_name", "baseName", "base_name", "resourceName", "resource_name",
+            "name", "displayName", "display_name");
+    }
+
+    private String sceneCode(JSONObject row, String fallback) {
+        return StringUtils.defaultIfBlank(
+            firstNonBlankDeep(row, new String[] { "scene", "sceneInfo", "catalog" },
+                "sceneId", "scene_id", "sceneCode", "scene_code", "catalogId", "catalog_id", "catalogCode",
+                "catalog_code"),
+            fallback);
+    }
+
+    private String sceneName(JSONObject row) {
+        return firstNonBlankDeep(row, new String[] { "scene", "sceneInfo", "catalog" },
+            "sceneName", "scene_name", "catalogName", "catalog_name", "name", "displayName", "display_name");
+    }
+
+    private String datacloudUserCode(JSONObject row) {
+        return firstNonBlankDeep(row, new String[] { "user", "userInfo", "owner", "creator", "createUser" },
+            "userCode", "user_code", "ownerUserCode", "owner_user_code", "creatorCode", "creator_code",
+            "createUserCode", "create_user_code");
+    }
+
+    private String firstNonBlankDeep(JSONObject obj, String[] nestedKeys, String... keys) {
+        String direct = firstNonBlank(obj, keys);
+        if (StringUtils.isNotBlank(direct)) {
+            return direct;
+        }
+        if (obj == null || nestedKeys == null) {
+            return null;
+        }
+        for (String nestedKey : nestedKeys) {
+            Object nestedValue = obj.get(nestedKey);
+            if (!(nestedValue instanceof JSONObject) && !(nestedValue instanceof Map)) {
+                continue;
+            }
+            JSONObject nested = toJson(nestedValue);
+            String value = firstNonBlank(nested, keys);
+            if (StringUtils.isNotBlank(value)) {
+                return value;
+            }
+        }
+        return null;
     }
 
     /** 取首个非空字段值，兼容 datacloud 响应的 snake_case 与 camelCase 两种键名。 */

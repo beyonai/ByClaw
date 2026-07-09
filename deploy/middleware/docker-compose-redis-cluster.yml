@@ -1,0 +1,97 @@
+services:
+  redis-node-1:
+    image: ${IMAGE_REDIS:-ghcr.io/beyonai/byclaw/byclaw-redis:main}
+    container_name: byclaw-redis-node-1-${CONTAINER_SUFFIX:-middleware}
+    command: redis-server --port 6379 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes --requirepass ${REDIS_PASSWORD} --masterauth ${REDIS_PASSWORD}
+    ports:
+      - "${REDIS_CLUSTER_PORT_1:-6371}:6379"
+      - "${REDIS_CLUSTER_BUS_PORT_1:-16371}:16379"
+    networks:
+      - byclaw-network
+    restart: unless-stopped
+
+  redis-node-2:
+    image: ${IMAGE_REDIS:-ghcr.io/beyonai/byclaw/byclaw-redis:main}
+    container_name: byclaw-redis-node-2-${CONTAINER_SUFFIX:-middleware}
+    command: redis-server --port 6379 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes --requirepass ${REDIS_PASSWORD} --masterauth ${REDIS_PASSWORD}
+    ports:
+      - "${REDIS_CLUSTER_PORT_2:-6372}:6379"
+      - "${REDIS_CLUSTER_BUS_PORT_2:-16372}:16379"
+    networks:
+      - byclaw-network
+    restart: unless-stopped
+
+  redis-node-3:
+    image: ${IMAGE_REDIS:-ghcr.io/beyonai/byclaw/byclaw-redis:main}
+    container_name: byclaw-redis-node-3-${CONTAINER_SUFFIX:-middleware}
+    command: redis-server --port 6379 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes --requirepass ${REDIS_PASSWORD} --masterauth ${REDIS_PASSWORD}
+    ports:
+      - "${REDIS_CLUSTER_PORT_3:-6373}:6379"
+      - "${REDIS_CLUSTER_BUS_PORT_3:-16373}:16379"
+    networks:
+      - byclaw-network
+    restart: unless-stopped
+
+  redis-node-4:
+    image: ${IMAGE_REDIS:-ghcr.io/beyonai/byclaw/byclaw-redis:main}
+    container_name: byclaw-redis-node-4-${CONTAINER_SUFFIX:-middleware}
+    command: redis-server --port 6379 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes --requirepass ${REDIS_PASSWORD} --masterauth ${REDIS_PASSWORD}
+    ports:
+      - "${REDIS_CLUSTER_PORT_4:-6374}:6379"
+      - "${REDIS_CLUSTER_BUS_PORT_4:-16374}:16379"
+    networks:
+      - byclaw-network
+    restart: unless-stopped
+
+  redis-node-5:
+    image: ${IMAGE_REDIS:-ghcr.io/beyonai/byclaw/byclaw-redis:main}
+    container_name: byclaw-redis-node-5-${CONTAINER_SUFFIX:-middleware}
+    command: redis-server --port 6379 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes --requirepass ${REDIS_PASSWORD} --masterauth ${REDIS_PASSWORD}
+    ports:
+      - "${REDIS_CLUSTER_PORT_5:-6375}:6379"
+      - "${REDIS_CLUSTER_BUS_PORT_5:-16375}:16379"
+    networks:
+      - byclaw-network
+    restart: unless-stopped
+
+  redis-node-6:
+    image: ${IMAGE_REDIS:-ghcr.io/beyonai/byclaw/byclaw-redis:main}
+    container_name: byclaw-redis-node-6-${CONTAINER_SUFFIX:-middleware}
+    command: redis-server --port 6379 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes --requirepass ${REDIS_PASSWORD} --masterauth ${REDIS_PASSWORD}
+    ports:
+      - "${REDIS_CLUSTER_PORT_6:-6376}:6379"
+      - "${REDIS_CLUSTER_BUS_PORT_6:-16376}:16379"
+    networks:
+      - byclaw-network
+    restart: unless-stopped
+
+  redis-cluster-init:
+    image: ${IMAGE_REDIS:-ghcr.io/beyonai/byclaw/byclaw-redis:main}
+    container_name: byclaw-redis-cluster-init-${CONTAINER_SUFFIX:-middleware}
+    depends_on:
+      - redis-node-1
+      - redis-node-2
+      - redis-node-3
+      - redis-node-4
+      - redis-node-5
+      - redis-node-6
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        echo "Waiting for Redis nodes to start..."
+        sleep 5
+        echo "Creating Redis cluster..."
+        redis-cli -a ${REDIS_PASSWORD} --cluster create \
+          redis-node-1:6379 redis-node-2:6379 redis-node-3:6379 \
+          redis-node-4:6379 redis-node-5:6379 redis-node-6:6379 \
+          --cluster-replicas 1 --cluster-yes
+        echo "Redis cluster created."
+    networks:
+      - byclaw-network
+    restart: "no"
+
+networks:
+  byclaw-network:
+    name: byclaw-network-${CONTAINER_SUFFIX:-default}
+    driver: bridge

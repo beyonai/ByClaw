@@ -89,6 +89,12 @@ public class TransactionAdviceConfig {
         txMap.put("prewarmDueCronSandboxes", notSurpportedTx);
         txMap.put("callAsUser", notSurpportedTx);
         txMap.put("runAsUser", notSurpportedTx);
+        // 元提示词生成链路只读取上下文并调用外部大模型。大模型调用失败会在业务层降级处理，
+        // 因此不要加入事务，避免内部异常被捕获后仍把外层事务标记为 rollback-only。
+        txMap.put("generateV3", notSurpportedTx);
+        txMap.put("generateV3Stream", notSurpportedTx);
+        txMap.put("generateText", notSurpportedTx);
+        txMap.put("generateTextStream", notSurpportedTx);
         txMap.put("*", requiredTx);
 
         /* 事务管理规则，声明具备事务管理的方法名 **/

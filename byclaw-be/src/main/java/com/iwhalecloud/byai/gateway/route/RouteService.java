@@ -478,6 +478,8 @@ public class RouteService {
 
         for (int round = 1; round <= SANDBOX_STARTUP_WAIT_ROUNDS; round++) {
             if (sandboxService.waitWorkerReadySync(targetAgentType, WORKER_READY_TIMEOUT_MS)) {
+                sendSandboxProgressMessage(ctx, SseResponseEventEnum.reasoningLogEnd,
+                    I18nUtil.get("sandbox.launch.progress.ready"));
                 return;
             }
             if (round < SANDBOX_STARTUP_WAIT_ROUNDS) {

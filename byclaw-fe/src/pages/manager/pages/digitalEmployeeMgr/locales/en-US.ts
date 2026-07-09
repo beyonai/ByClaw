@@ -74,11 +74,17 @@ export default {
   'refineModal.abilityNamePlaceholder': 'Ability {index} name',
   'refineModal.abilityDescPlaceholder': 'Please enter the ability description',
   'refineModal.workStandard': 'Work Guidelines',
+  'refineModal.workStandardPlaceholder': 'Enter work guidelines',
+  'refineModal.toolStandard': 'Tool Guidelines',
+  'refineModal.toolStandardPlaceholder': 'Enter tool guidelines',
+  'refineModal.memoryStandard': 'Memory Guidelines',
+  'refineModal.memoryStandardPlaceholder': 'Enter memory guidelines',
   'refineModal.step.basic': 'Basic Info',
   'refineModal.step.persona': 'Role & Persona',
   'refineModal.step.workflow': 'Workflow',
   'refineModal.step.style': 'Communication',
   'refineModal.progress': 'Completed {done} / {total} items',
+  'refineModal.streamProgress': 'Received {count} characters, analyzing fields',
 
   // Employee Detail
   'employeeDetail.refine': 'Auto-Complete',
@@ -115,16 +121,15 @@ export default {
   'employeeDetail.ontology.bound': 'Bound',
   'employeeDetail.ontology.unbound': 'Unbound',
   'employeeDetail.ontology.configureTip':
-    'Select ontology bases, scenes, views, and objects that you can use. They will be bound after the digital employee is saved.',
+    'Select views and objects that you can use. They will be bound after the digital employee is saved.',
   'employeeDetail.ontology.emptyTitle': 'No ontology resources bound',
   'employeeDetail.ontology.emptyDesc':
-    'Bind ontology bases, scenes, views, and objects you can use. Changes take effect after saving the digital employee.',
-  'employeeDetail.ontology.boundSummary':
-    '{baseCount} bases, {sceneCount} scenes, {viewCount} views, and {objectCount} objects bound',
+    'Bind views and objects you can use. Changes take effect after saving the digital employee.',
+  'employeeDetail.ontology.boundSummary': '{viewCount} views and {objectCount} objects configured',
   'employeeDetail.ontology.boundTip':
     'Ontology resources will sync to dialogue reference capability after the digital employee is saved.',
   'employeeDetail.ontology.pendingSave': 'Pending save',
-  'employeeDetail.ontology.addOntology': 'Add ontology',
+  'employeeDetail.ontology.addOntology': 'Add',
   'employeeDetail.ontology.manage': 'Manage',
   'employeeDetail.ontology.reselect': 'Select again',
   'employeeDetail.ontology.clearedTitle': 'Ontology binding cleared',
@@ -426,6 +431,21 @@ export default {
   'digitalEmployeeMgr.feishuEncryptKeyLabel': 'Encrypt Key',
   'digitalEmployeeMgr.feishuEncryptKeyTooltip':
     'Feishu Open Platform -> Event Subscription -> Encryption Strategy -> Encrypt Key',
+  'digitalEmployeeMgr.wecomBotIdRequired': 'Please enter botId',
+  'digitalEmployeeMgr.wecomSecretRequired': 'Please enter secret',
+  'digitalEmployeeMgr.wecomBotIdLabel': 'botId',
+  'digitalEmployeeMgr.wecomBotIdTooltip': 'WeCom robot BotId',
+  'digitalEmployeeMgr.wecomSecretLabel': 'secret',
+  'digitalEmployeeMgr.wecomSecretTooltip': 'WeCom robot Secret',
+  'digitalEmployeeMgr.wecomAgentIdRequired': 'Please enter agentId',
+  'digitalEmployeeMgr.wecomAgentIdLabel': 'agentId',
+  'digitalEmployeeMgr.wecomAgentIdTooltip': 'WeCom self-built app ID used to scope contact access_token cache',
+  'digitalEmployeeMgr.wecomCorpIdRequired': 'Please enter corpId',
+  'digitalEmployeeMgr.wecomCorpSecretRequired': 'Please enter corpSecret',
+  'digitalEmployeeMgr.wecomCorpIdLabel': 'corpId',
+  'digitalEmployeeMgr.wecomCorpIdTooltip': 'WeCom enterprise CorpID for contact API access_token',
+  'digitalEmployeeMgr.wecomCorpSecretLabel': 'corpSecret',
+  'digitalEmployeeMgr.wecomCorpSecretTooltip': 'WeCom self-built app or contact Secret for reading member profiles',
 
   // Operation (Digital Employee Operations)
   'operation.basicInfo': 'Basic Information',

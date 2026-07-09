@@ -1,7 +1,7 @@
 // @ts-nocheck
 import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { App, Dropdown, Empty, Input, Select, Spin, Tooltip } from 'antd';
-import { EllipsisOutlined, SearchOutlined } from '@ant-design/icons';
+import { App, Button, Dropdown, Empty, Input, Select, Spin, Table, Tooltip } from 'antd';
+import { CloseOutlined, EllipsisOutlined, SearchOutlined } from '@ant-design/icons';
 import classnames from 'classnames';
 import { useIntl, useLocation, useNavigate } from '@umijs/max';
 import { trim } from 'lodash';
@@ -10,7 +10,12 @@ import { DragType } from '@/components/QueryInput/withDrag';
 import ActiveSiderAgentBar, { useActiveSiderAgent } from '@/layout/sider/components/ActiveSiderAgentBar';
 import { SiderContentContext } from '@/layout/sider/siderContentContext';
 import { findDetailsById } from '@/pages/manager/service/DigitalEmployeeMgr';
-import { unbindOntologyResource } from '@/service/ontology';
+import {
+  getOntologyObjectDetail,
+  listOntologyObjectsByView,
+  listOntologyRelationsByObject,
+  unbindOntologyResource,
+} from '@/service/ontology';
 import OntologyNodeDrawer from '@/pages/ontologyCenter/OntologyNodeDrawer';
 import useGlobal from '@/hooks/useGlobal';
 import commonStyles from '@/layout/sider/components/Knowledge/components/common.module.less';
@@ -18,6 +23,18 @@ import chromeStyles from '@/layout/sider/components/ResourceSiderPanel/index.mod
 import styles from './index.module.less';
 
 const getData = (res: any) => res?.data ?? res ?? {};
+const findRows = (source: any, depth = 0): any[] => {
+  if (!source || depth > 4) return [];
+  if (Array.isArray(source)) return source;
+  for (const key of ['rows', 'list', 'records', 'items', 'content']) {
+    if (Array.isArray(source?.[key])) return source[key];
+  }
+  for (const key of ['data', 'result', 'resultObject', 'page', 'pageData']) {
+    const rows = findRows(source?.[key], depth + 1);
+    if (rows.length) return rows;
+  }
+  return [];
+};
 const parseMaybeArray = (value: any) => {
   if (Array.isArray(value)) return value;
   if (!value) return [];
@@ -174,6 +191,38 @@ const buildBoundEntries = (detail: any, optimisticEntries: any[] = []) => {
   const optimistic = optimisticEntries.map(normalizeEntry);
   return mergeEntries(relResources, optimistic).filter((entry) => ['VIEW', 'OBJECT'].includes(getEntryBizType(entry)));
 };
+
+const StaticTablePanel = ({
+  title,
+  rows,
+  columns,
+  rowKey,
+  onClose,
+}: {
+  title: React.ReactNode;
+  rows: any[];
+  columns: any[];
+  rowKey: any;
+  onClose: () => void;
+}) => (
+  <div className={styles.sidePanel}>
+    <div className={styles.sidePanelHeader}>
+      <span>{title}</span>
+      <Button type="text" size="small" icon={<CloseOutlined />} onClick={onClose} />
+    </div>
+    <div className={styles.sidePanelBody}>
+      <Table
+        size="small"
+        tableLayout="fixed"
+        rowKey={rowKey}
+        dataSource={rows || []}
+        columns={columns}
+        pagination={false}
+        locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
+      />
+    </div>
+  </div>
+);
 
 /**
  * 本体 sider 面板：直接展示当前数字员工已安装的视图 / 对象节点。
@@ -375,6 +424,170 @@ const OntologySiderPanel: React.FC = () => {
     [clearDetailPanel, quoteLeafToChat, setDetailPanel]
   );
 
+  const openTablePanel = useCallback(
+    ({ title, rows, columns, rowKey, width = 520 }: any) => {
+      setDetailPanel?.(
+        <StaticTablePanel
+          title={title}
+          rows={rows}
+          columns={columns}
+          rowKey={rowKey}
+          onClose={() => clearDetailPanel?.()}
+        />,
+        { width }
+      );
+    },
+    [clearDetailPanel, setDetailPanel]
+  );
+
+  const showViewObjects = useCallback(
+    async (leaf: any) => {
+      const viewCode = leaf?.viewCode || leaf?.resourceCode || leaf?.code;
+      if (!viewCode) {
+        message.error('当前视图缺少视图编码，无法查询对象列表');
+        return;
+      }
+      const hideLoading = message.loading('对象列表加载中...', 0);
+      try {
+        const res: any = await listOntologyObjectsByView({ viewCode });
+        const rows = findRows(getData(res)).map((item: any) => ({
+          ...item,
+          objectCode: item.objectCode || item.object_code || item.resourceCode || item.code,
+          objectName: item.objectName || item.object_name || item.resourceName || item.name,
+          objectDesc: item.objectDesc || item.object_desc || item.resourceDesc || item.description || item.desc,
+        }));
+        openTablePanel({
+          title: `${leaf.name || leaf.resourceName || viewCode} / ${intl.formatMessage({
+            id: 'common.resourceType.object',
+          })}`,
+          rowKey: (row: any) => row.objectCode,
+          rows,
+          columns: [
+            {
+              title: intl.formatMessage({ id: 'common.resourceType.object' }),
+              dataIndex: 'objectName',
+              ellipsis: true,
+            },
+            {
+              title: intl.formatMessage({ id: 'ontologyCenter.detail.col.code' }),
+              dataIndex: 'objectCode',
+              ellipsis: true,
+            },
+            { title: intl.formatMessage({ id: 'common.desc' }), dataIndex: 'objectDesc', ellipsis: true },
+          ],
+        });
+      } catch (error: any) {
+        message.error(error?.msg || error?.message || '对象列表查询失败');
+      } finally {
+        hideLoading();
+      }
+    },
+    [intl, message, openTablePanel]
+  );
+
+  const showObjectActions = useCallback(
+    async (leaf: any) => {
+      const objectCode = leaf?.objectCode || leaf?.resourceCode || leaf?.code;
+      if (!objectCode) {
+        message.error('当前对象缺少对象编码，无法查询动作列表');
+        return;
+      }
+      const hideLoading = message.loading('动作列表加载中...', 0);
+      try {
+        const res: any = await getOntologyObjectDetail({ objectCode });
+        const detail = getData(res);
+        const rows = parseMaybeArray(detail?.actions).map((item: any) => ({
+          ...item,
+          actionCode: item.actionCode || item.action_code || item.code,
+          actionName: item.actionName || item.action_name || item.name,
+          actionDesc: item.actionDesc || item.action_desc || item.description || item.desc,
+        }));
+        openTablePanel({
+          title: `${leaf.name || leaf.resourceName || objectCode} / ${intl.formatMessage({
+            id: 'ontologyCenter.detail.actions',
+          })}`,
+          rowKey: (row: any, index: number) => row.actionCode || `${index}`,
+          rows,
+          columns: [
+            {
+              title: intl.formatMessage({ id: 'ontologyCenter.detail.action.name' }),
+              dataIndex: 'actionName',
+              ellipsis: true,
+            },
+            {
+              title: intl.formatMessage({ id: 'ontologyCenter.detail.col.code' }),
+              dataIndex: 'actionCode',
+              ellipsis: true,
+            },
+            { title: intl.formatMessage({ id: 'common.desc' }), dataIndex: 'actionDesc', ellipsis: true },
+          ],
+        });
+      } catch (error: any) {
+        message.error(error?.msg || error?.message || '动作列表查询失败');
+      } finally {
+        hideLoading();
+      }
+    },
+    [intl, message, openTablePanel]
+  );
+
+  const showObjectRelations = useCallback(
+    async (leaf: any) => {
+      const objectCode = leaf?.objectCode || leaf?.resourceCode || leaf?.code;
+      if (!objectCode) {
+        message.error('当前对象缺少对象编码，无法查询关系列表');
+        return;
+      }
+      const hideLoading = message.loading('关系列表加载中...', 0);
+      try {
+        const res: any = await listOntologyRelationsByObject({ objectCode });
+        const rows = findRows(getData(res)).map((item: any) => ({
+          ...item,
+          relationCode: item.relationCode || item.relation_code || item.code,
+          relationName: item.relationName || item.relation_name || item.name,
+          sourceObjectName: item.sourceObjectName || item.source_object_name,
+          targetObjectName: item.targetObjectName || item.target_object_name,
+          relationCardinality: item.relationCardinality || item.relation_cardinality,
+        }));
+        openTablePanel({
+          title: `${leaf.name || leaf.resourceName || objectCode} / ${intl.formatMessage({
+            id: 'employeeDetail.ontology.relation',
+          })}`,
+          rowKey: (row: any, index: number) =>
+            row.relationCode || `${row.sourceObjectName || ''}-${row.targetObjectName || ''}-${index}`,
+          rows,
+          columns: [
+            {
+              title: intl.formatMessage({ id: 'ontologyCenter.detail.rel.name' }),
+              dataIndex: 'relationName',
+              ellipsis: true,
+            },
+            {
+              title: intl.formatMessage({ id: 'ontologyCenter.detail.rel.source' }),
+              dataIndex: 'sourceObjectName',
+              ellipsis: true,
+            },
+            {
+              title: intl.formatMessage({ id: 'ontologyCenter.detail.rel.target' }),
+              dataIndex: 'targetObjectName',
+              ellipsis: true,
+            },
+            {
+              title: intl.formatMessage({ id: 'ontologyCenter.detail.rel.cardinality' }),
+              dataIndex: 'relationCardinality',
+              width: 90,
+            },
+          ],
+        });
+      } catch (error: any) {
+        message.error(error?.msg || error?.message || '关系列表查询失败');
+      } finally {
+        hideLoading();
+      }
+    },
+    [intl, message, openTablePanel]
+  );
+
   const handleUnbind = useCallback(
     (leaf: any) => {
       if (!leaf) return;
@@ -431,6 +644,16 @@ const OntologySiderPanel: React.FC = () => {
 
   const renderNode = useCallback(
     (node: any) => {
+      const menuItems = [
+        { key: 'detail', label: intl.formatMessage({ id: 'common.detail' }) },
+        ...(node.nodeType === 'view'
+          ? [{ key: 'objects', label: intl.formatMessage({ id: 'ontologyCenter.action.viewObjects' }) }]
+          : [
+            { key: 'actions', label: intl.formatMessage({ id: 'ontologyCenter.action.viewActions' }) },
+            { key: 'relations', label: intl.formatMessage({ id: 'ontologyCenter.action.viewRelations' }) },
+          ]),
+        { key: 'unbind', label: intl.formatMessage({ id: 'ontologySider.unbind' }) },
+      ];
       return (
         <div
           key={node.key}
@@ -459,14 +682,14 @@ const OntologySiderPanel: React.FC = () => {
           <Dropdown
             trigger={['hover']}
             menu={{
-              items: [
-                { key: 'detail', label: intl.formatMessage({ id: 'common.detail' }) },
-                { key: 'unbind', label: intl.formatMessage({ id: 'ontologySider.unbind' }) },
-              ],
+              items: menuItems,
               onClick: ({ key, domEvent }) => {
                 domEvent.stopPropagation();
                 if (key === 'detail') openLeafDetail(node.leaf);
-                else handleUnbind(node.leaf);
+                if (key === 'objects') showViewObjects(node.leaf);
+                if (key === 'actions') showObjectActions(node.leaf);
+                if (key === 'relations') showObjectRelations(node.leaf);
+                if (key === 'unbind') handleUnbind(node.leaf);
               },
             }}
           >
@@ -480,7 +703,17 @@ const OntologySiderPanel: React.FC = () => {
         </div>
       );
     },
-    [handleNodeClick, handleNodeDoubleClick, handleUnbind, intl, openLeafDetail, typeLabel]
+    [
+      handleNodeClick,
+      handleNodeDoubleClick,
+      handleUnbind,
+      intl,
+      openLeafDetail,
+      showObjectActions,
+      showObjectRelations,
+      showViewObjects,
+      typeLabel,
+    ]
   );
 
   return (

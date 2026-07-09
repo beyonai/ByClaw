@@ -60,7 +60,9 @@ const ResourceTabsCompact: React.FC<Props> = ({
   const [sharedLoading, setSharedLoading] = useState(false);
   const [brandVersion, setBrandVersion] = useState<'commercial' | 'openSource' | null>(null);
   const [brandVersionLoaded, setBrandVersionLoaded] = useState(false);
+  const [openRefreshKey, setOpenRefreshKey] = useState(0);
   const sharedQueryKeyRef = useRef('');
+  const sharedRequestSeqRef = useRef(0);
   const debounceTimer = useRef<NodeJS.Timeout | null>(null);
 
   const [fileList, setFileList] = useState<any[]>([]);
@@ -76,6 +78,7 @@ const ResourceTabsCompact: React.FC<Props> = ({
 
   const { agentType } = agentInfo || {};
   const isOpenSource = brandVersionLoaded && brandVersion !== 'commercial';
+  const isPanelOpen = open !== false;
 
   const { message } = App.useApp();
 
@@ -222,10 +225,10 @@ const ResourceTabsCompact: React.FC<Props> = ({
   );
 
   useEffect(() => {
-    if (activeTab === 'file') {
+    if (isPanelOpen && activeTab === 'file') {
       fetchFileList(currentPath);
     }
-  }, [activeTab, currentPath, fetchFileList]);
+  }, [activeTab, currentPath, fetchFileList, isPanelOpen, openRefreshKey]);
 
   const [skillUploading, setSkillUploading] = useState(false);
 
@@ -318,6 +321,16 @@ const ResourceTabsCompact: React.FC<Props> = ({
   }, [searchValue, queryKeyword]);
 
   useEffect(() => {
+    if (!isPanelOpen) {
+      return;
+    }
+    setOpenRefreshKey((prev) => prev + 1);
+    sharedQueryKeyRef.current = '';
+    sharedRequestSeqRef.current += 1;
+    setSharedResources([]);
+  }, [isPanelOpen, normalizedAgentId]);
+
+  useEffect(() => {
     return () => {
       if (downloadTimerRef.current) {
         clearTimeout(downloadTimerRef.current);
@@ -330,10 +343,8 @@ const ResourceTabsCompact: React.FC<Props> = ({
 
   const fetchSharedResources = useCallback(
     async (keywordValue: string, force = false) => {
-      if (activeTab === 'space' || activeTab === 'skill') {
-        return;
-      }
       if (!shouldUseSharedResourceQuery) {
+        sharedRequestSeqRef.current += 1;
         setSharedResources([]);
         setSharedLoading(false);
         sharedQueryKeyRef.current = '';
@@ -343,6 +354,8 @@ const ResourceTabsCompact: React.FC<Props> = ({
       if (!force && sharedQueryKeyRef.current === currentQueryKey) {
         return;
       }
+      const requestSeq = sharedRequestSeqRef.current + 1;
+      sharedRequestSeqRef.current = requestSeq;
       setSharedResources([]);
       setSharedLoading(true);
       try {
@@ -353,25 +366,33 @@ const ResourceTabsCompact: React.FC<Props> = ({
           pageSize: 100,
         });
         const rows = Array.isArray(response?.rows) ? response.rows : Array.isArray(response?.list) ? response.list : [];
+        if (sharedRequestSeqRef.current !== requestSeq) {
+          return;
+        }
         sharedQueryKeyRef.current = currentQueryKey;
         setSharedResources(rows);
       } catch (error) {
+        if (sharedRequestSeqRef.current !== requestSeq) {
+          return;
+        }
         setSharedResources([]);
         sharedQueryKeyRef.current = '';
         console.error('Failed to load digital employee related resources:', error);
       } finally {
-        setSharedLoading(false);
+        if (sharedRequestSeqRef.current === requestSeq) {
+          setSharedLoading(false);
+        }
       }
     },
     [normalizedAgentId, shouldUseSharedResourceQuery]
   );
 
   useEffect(() => {
-    if (!open) {
+    if (!isPanelOpen) {
       return;
     }
     fetchSharedResources(initialKeyword, true);
-  }, [open, fetchSharedResources, initialKeyword]);
+  }, [isPanelOpen, fetchSharedResources, initialKeyword]);
 
   useEffect(() => {
     if (!activeTab) {
@@ -412,6 +433,7 @@ const ResourceTabsCompact: React.FC<Props> = ({
       children: (
         <div className={styles.listContainer}>
           <ResourceCitation
+            key={`space-${openRefreshKey}`}
             resourceType="SPACE"
             layout="list"
             onSelect={onSelectObject}
@@ -428,6 +450,7 @@ const ResourceTabsCompact: React.FC<Props> = ({
       children: (
         <div className={styles.listContainer}>
           <ResourceCitation
+            key={`knowledge-${openRefreshKey}`}
             resourceType="KNOWLEDGE"
             layout="list"
             onSelect={onSelectObject}
@@ -447,6 +470,7 @@ const ResourceTabsCompact: React.FC<Props> = ({
       children: (
         <div className={styles.listContainer}>
           <ResourceCitation
+            key={`object-${openRefreshKey}`}
             resourceType="OBJECT"
             layout="list"
             onSelect={onSelectObject}
@@ -466,10 +490,11 @@ const ResourceTabsCompact: React.FC<Props> = ({
       children: (
         <div className={styles.listContainer}>
           <ResourceCitation
+            key={`tool-${openRefreshKey}`}
             resourceType="TOOL"
             layout="list"
             onSelect={onSelectTool}
-            disableClick={true}
+            // disableClick={true}
             keyword={queryKeyword}
             agentId={agentId}
             agentIds={agentIds}
@@ -486,6 +511,7 @@ const ResourceTabsCompact: React.FC<Props> = ({
       children: (
         <div className={styles.listContainer}>
           <ResourceCitation
+            key={`view-${openRefreshKey}`}
             resourceType="VIEW"
             layout="list"
             onSelect={onSelectObject}
@@ -506,6 +532,7 @@ const ResourceTabsCompact: React.FC<Props> = ({
         children: (
           <div className={styles.listContainer}>
             <ResourceCitation
+              key={`skill-${openRefreshKey}`}
               resourceType="SKILL"
               layout="list"
               onSelect={onSelectSkill}
@@ -595,6 +622,7 @@ const ResourceTabsCompact: React.FC<Props> = ({
     showKnowledgeTab,
     showSkillTab,
     shouldUseSharedResourceQuery,
+    openRefreshKey,
     sharedLoading,
     getSharedTabResources,
     resolvedSessionId,

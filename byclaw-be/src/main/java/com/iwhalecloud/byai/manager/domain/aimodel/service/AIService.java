@@ -116,7 +116,7 @@ public class AIService {
         String apiUrl = defaultModel.getUrl() + "/chat/completions";
         String apiKey = defaultModel.getAuthToken();
         String model = defaultModel.getModelCode();
-        if (StringUtils.isBlank(modelCode)) {
+        if (StringUtils.isNotBlank(modelCode)) {
             model = modelCode;
         }
         try {
@@ -191,7 +191,10 @@ public class AIService {
 
             boolean completed = doneLatch.await(10, TimeUnit.MINUTES);
             if (!completed) {
-                eventSourceRef.get().cancel();
+                EventSource source = eventSourceRef.get();
+                if (source != null) {
+                    source.cancel();
+                }
                 throw new BaseException(I18nUtil.get("ai.openai.api.call.failed", "stream timeout"));
             }
             Throwable error = errorRef.get();

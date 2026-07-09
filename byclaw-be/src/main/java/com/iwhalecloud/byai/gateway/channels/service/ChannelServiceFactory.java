@@ -6,6 +6,7 @@ import com.iwhalecloud.byai.gateway.channels.service.app.AppChannelService;
 import com.iwhalecloud.byai.gateway.channels.service.dingtalk.DingtalkChannelService;
 import com.iwhalecloud.byai.gateway.channels.service.feishu.FeishuChannelService;
 import com.iwhalecloud.byai.gateway.channels.service.web.WebChannelService;
+import com.iwhalecloud.byai.gateway.channels.service.wecom.WecomChannelService;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.state.common.exception.BdpRuntimeException;
 import jakarta.annotation.PostConstruct;
@@ -40,6 +41,9 @@ public class ChannelServiceFactory {
     @Autowired
     private WebChannelService webChannelService;
 
+    @Autowired
+    private WecomChannelService wecomChannelService;
+
     /**
      * 初始化工厂，注册所有渠道服务
      */
@@ -49,6 +53,7 @@ public class ChannelServiceFactory {
         register(dingtalkChannelService);
         register(feishuChannelService);
         register(webChannelService);
+        register(wecomChannelService);
         log.info("渠道服务工厂初始化完成，共注册 {} 个渠道服务", CHANNEL_SERVICE_MAP.size());
     }
 

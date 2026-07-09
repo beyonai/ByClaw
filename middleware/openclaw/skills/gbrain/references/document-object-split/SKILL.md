@@ -4,12 +4,24 @@ version: 1.0.0
 description: |
   根据数字员工当前挂载的 Ontology 对象类型（Bug、需求管理、产品、订单等），
   对文档内容进行结构化拆分：先从 openclaw 资源列表筛出 OBJECT 类型，再经
-  get_object_detail.py 从 Redis 读取各类型的 schema（object_name、properties），
+  get_object_detail.py 调用 byaiService /ontology/object/detail 获取各类型的 schema（object_name、properties），
   据此对文档分类并抽取独立实例——每个可拆分实例在对应 page_prefix 下形成
-  一个独立 gbrain page（N 实例 = N page）；page 字段结构由 Redis properties 定义，
+  一个独立 gbrain page（N 实例 = N page）；page 字段结构由接口返回的 properties 定义，
   字段取值结合文档内容适当抽取填写。完成后输出 page 清单并询问是否导出。
   再次拆分时按 external_id 匹配已有 page 更新。
 triggers:
+  - "整理文档"
+  - "拆分文档"
+  - "文档整理"
+  - "文档拆分"
+  - "帮我整理文档"
+  - "帮我拆分文档"
+  - "整理一下文档"
+  - "拆分一下文档"
+  - "按文档整理"
+  - "按文档拆分"
+  - "organize document"
+  - "split document"
   - "document object split"
   - "文档对象拆分"
   - "文档内容拆分"
@@ -52,13 +64,13 @@ writes_to:
 **核心流程：** 当前对象类型定义「能拆什么」→ 文档提供「拆什么内容」→ brain 落地「拆成多少页」。
 
 ```text
-openclaw 资源列表（OBJECT）→ Redis 对象 schema → object_types[]
+openclaw 资源列表（OBJECT）→ 接口对象 schema → object_types[]
   → 按 object_name 对文档分类（Bug / 需求 / 产品 / …）
   → 每类抽出原子实例
   → 每个实例 → 一个独立 page（slug = {page_prefix}/{kebab-slug}）
 ```
 
-1. **加载对象类型** — openclaw 筛 `resourceBizType: OBJECT` → 对每个 `resourceId` 调 `get_object_detail.py` 读 Redis，得到 Bug、需求管理、产品等类型的 schema
+1. **加载对象类型** — openclaw 筛 `resourceBizType: OBJECT` 取 `objectCode[]` → `get_object_detail.py` 逐条调详情接口，得到 Bug、需求管理、产品等类型的 schema
 2. **读文档** — 会议记录、PRD、PDF、Word、已 import 的 markdown → 建 hub 页
 3. **按类型拆分** — 仅处理 `object_types[]` 中有的类型；用各类型的 `object_name` / `object_desc` / `properties` 分类并抽取
 4. **每实例一页** — 一条 Bug、一条需求、一条产品记录各建 **独立** page，禁止合并
@@ -111,7 +123,7 @@ openclaw 资源列表（OBJECT）→ Redis 对象 schema → object_types[]
 
 ### 0.0 按返回类型拆分（总纲）
 
-本 skill 的拆分 **不以固定「需求/Bug」硬编码为准**，而以 **当前数字员工挂载、且 Redis 能读到的对象类型** 为准。典型一次 run 可能同时包含：
+本 skill 的拆分 **不以固定「需求/Bug」硬编码为准**，而以 **当前数字员工挂载、且接口能返回详情的对象类型** 为准。典型一次 run 可能同时包含：
 
 | `object_name`（脚本返回） | 文档中识别信号 | `page_prefix` | 拆分结果 |
 |---------------------------|----------------|---------------|----------|
@@ -138,47 +150,51 @@ PRD 含 5 条需求 + 2 条 Bug + 1 个产品定义
 ## 0.1 对象 schema：`get_object_detail.py`
 
 对象类型的 **名称、字段 schema、文档分类依据** 一律来自脚本
-`scripts/get_object_detail.py`（**Redis 直读，不调 HTTP 详情接口**）。**禁止** 手写字段列表或凭空猜测对象结构。
+`scripts/get_object_detail.py`（**POST `/byaiService/ontology/object/detail`**）。接口请求体 **`objectCode` 必传**（单条查询）；`baseId` 可选。脚本先从 openclaw 获取当前数字员工挂载的 `objectCode`，再**逐条**带 `objectCode` 调接口取完整 `properties[]`。**禁止** 手写字段列表或凭空猜测对象结构；**禁止** 用 `resourceId` 作为详情接口入参；**禁止** 不带 `objectCode` 调详情接口。
 
 **数据链路：**
 
 ```text
-1. openclaw 数字员工资源列表 → 筛选 resourceBizType == OBJECT → 得到 resourceId[]
-2. 对每个 resourceId：get_object_detail.py {"resource_id":"..."} → Redis GET OBJECT_{id}
+1. openclaw 数字员工资源列表 → 筛选 resourceBizType == OBJECT → 提取 objectCode[]
+2. 对每个 objectCode（必传）：POST /byaiService/ontology/object/detail
+   {"baseId": null, "objectCode": "p_bug_..."}
+   （脚本内循环单条请求；接口本身不支持批量、不支持 resourceId、objectCode 不可省略）
 3. 合并为 object_types[]（Bug、需求、产品…）→ 驱动 Phase 3 分类与建页
 ```
 
-### 0a. 获取 `resource_id` 列表（openclaw）
+### 0a. 获取 `object_code` 列表（openclaw）
 
-从 openclaw 读取当前数字员工资源列表，筛选 `resourceBizType: OBJECT`，收集 `resourceId`。
-（资源列表获取方式由运行环境提供；脚本层只负责用 `resource_id` 读 Redis。）
+从 openclaw 读取**当前数字员工**资源列表，筛选 `resourceBizType: OBJECT`，收集 `objectCode`（或 `resourceCode`）。
+**详情接口只认 `objectCode`（必传），不认 `resourceId`**——`resourceId` 仅保留在 openclaw 资源列表中供参考，不传给详情接口。openclaw 资源若缺少 `objectCode`，不得调详情接口。
 
-配置或用户消息可提供 `resource_ids[]` 子集；未提供时用 openclaw 返回的全部 OBJECT 资源。
+配置或用户消息可提供 `object_codes[]` 子集；未提供时脚本默认查询 openclaw 返回的全部 OBJECT `objectCode`。
 
-### 0b. 调用脚本（按 resource_id 读 Redis）
+### 0b. 调用脚本（openclaw 取码 + 逐条调接口）
 
 在 skill 根目录执行：
 
 ```bash
-# 单个类型 schema
-/usr/local/bin/python3 scripts/get_object_detail.py '{"resource_id":"10042459"}'
+# 默认（推荐 Phase 1）：从 openclaw 取当前数字员工全部 OBJECT objectCode，逐条查详情
+/usr/local/bin/python3 scripts/get_object_detail.py '{}'
 
-# 批量（推荐 Phase 1：一次加载全部类型）
-/usr/local/bin/python3 scripts/get_object_detail.py '{"resource_ids":["10042459","10042460","10042461"]}'
+# 单个 objectCode
+/usr/local/bin/python3 scripts/get_object_detail.py '{"object_code":"p_bug_0027024630_5406b7"}'
 
-# 或直接传 Redis key
-/usr/local/bin/python3 scripts/get_object_detail.py '{"key":"OBJECT_10042459"}'
+# 子集：openclaw 挂载列表中只查指定 objectCode（仍逐条调接口）
+/usr/local/bin/python3 scripts/get_object_detail.py '{"object_codes":["p_bug_0027024630_5406b7","p_order_0027024630_d73e14"]}'
 ```
 
-| stdin 字段 | 必填 | 说明 |
-|------------|------|------|
-| `resource_id` | 否* | 自动拼 key `OBJECT_{resource_id}` |
-| `key` | 否* | 完整 Redis key |
-| `resource_ids` / `keys` | 否* | 批量加载多种对象类型 |
+| 入参字段 | 必填 | 说明 |
+|----------|------|------|
+| （空 `{}`） | 否 | **默认**：openclaw 取当前数字员工全部 OBJECT `objectCode`，逐条调详情接口 |
+| `object_code` / `objectCode` | 否* | 只查单个 objectCode |
+| `object_codes` / `objectCodes` | 否* | 在 openclaw 挂载列表中筛选子集，逐条调接口 |
+| `base_id` / `baseId` | 否 | 传给详情接口，默认 `null` |
+| `employee_id` / `employeeId` | 否 | 指定数字员工；默认读环境变量 |
 
-\* 四者至少提供一个。
+\* 不传任何 objectCode 相关字段时，走 openclaw 全量挂载列表。
 
-**环境变量：** `REDIS_*` 或 `DATACLOUD_GATEWAY_REDIS_*`（经 `_common.py` 连接 Redis）。
+**环境变量：** `BEYOND_TOKEN`、`USER_CODE`（认证）；`DIGITAL_EMPLOYEE_ID` / `EMPLOYEE_ID`（数字员工）；`OPENCLAW_DOMAINNAME` / `BYAI_DOMAINNAME` / `BE_DOMAINNAME`（服务发现）。
 
 **批量 stdout 示例（驱动拆分）：**
 
@@ -193,7 +209,6 @@ PRD 含 5 条需求 + 2 条 Bug + 1 个产品定义
   "objects": [
     {
       "ok": true,
-      "resource_id": "10042459",
       "object_code": "p_bug_0027024630_5406b7",
       "object_name": "Bug",
       "object_desc": "…",
@@ -203,13 +218,11 @@ PRD 含 5 条需求 + 2 条 Bug + 1 个产品定义
       "fields": ["handler", "deadline", "title"]
     },
     {
-      "resource_id": "10042460",
       "object_code": "p_requirement_0027024630_abc",
       "object_name": "需求管理对象",
       "fields": ["title", "priority", "description"]
     },
     {
-      "resource_id": "10042461",
       "object_code": "p_product_0027024630_xyz",
       "object_name": "产品对象",
       "fields": ["title", "sku", "version"]
@@ -254,26 +267,26 @@ FOR EACH type IN object_types[]:
 - 不同类型实例 → **不同 `page_prefix` 目录**（需求不进 `bugs/`）
 - 每次 `put_page` **只写一个实例**
 
-**实例字段填充：** page 内容 = **Redis 对象 schema（结构）** + **文档抽取（取值）**，二者结合、适当设置：
+**实例字段填充：** page 内容 = **接口返回的对象 schema（结构）** + **文档抽取（取值）**，二者结合、适当设置：
 
 | 来源 | 决定什么 | 规则 |
 |------|----------|------|
-| Redis `properties[]` | page **有哪些字段**、frontmatter 键名、Properties 表行 | 只使用 schema 中声明的 `property_code`；**禁止** 自造 schema 外字段 |
-| Redis `property_name` / `data_type` | 如何从文档中 **识别并映射** 取值 | 用中文/英文标签在原文中定位对应信息；`DATE` 规范为日期，`STRING` 保留原文要点 |
-| Redis `is_name: true` | page **标题**（`title` + H1） | 优先取文档中该实例的名称行 |
-| Redis `is_required: true` | 必填校验 | 文档无对应信息 → 填 `[待补充]`，不得留空 |
-| Redis `business_key: true` | `external_id` / upsert 键 | 从文档提取稳定业务编号；无则用语义 slug |
+| 接口 `properties[]` | page **有哪些字段**、frontmatter 键名、Properties 表行 | 只使用 schema 中声明的 `property_code`；**禁止** 自造 schema 外字段 |
+| `property_name` / `data_type` | 如何从文档中 **识别并映射** 取值 | 用中文/英文标签在原文中定位对应信息；`DATE` 规范为日期，`STRING` 保留原文要点 |
+| `is_name: true` | page **标题**（`title` + H1） | 优先取文档中该实例的名称行 |
+| `is_required: true` | 必填校验 | 文档无对应信息 → 填 `[待补充]`，不得留空 |
+| `business_key: true` | `external_id` / upsert 键 | 从文档提取稳定业务编号；无则用语义 slug |
 | 文档 `source_quote` | **Source** 区块 | 保留该实例在原文中的关键摘录（非整篇文档） |
 | 文档正文片段 | **Description / 长文本 property** | 可适度归纳，但须忠于 `source_quote`，不臆造 |
 
 **适当设置（禁止过度）：**
 
-- ✅ 文档写了「处理人：张三」→ `handler: 张三`（property_code 来自 Redis）
+- ✅ 文档写了「处理人：张三」→ `handler: 张三`（property_code 来自接口 schema）
 - ✅ 文档一段需求描述 → 填入 `description` 或等价 property，并可写简短 **## 摘要** 段落
 - ✅ 文档未写截止时间 → `deadline: [待补充]`（`is_required` 时）
 - ❌ 把整篇 PRD 粘贴进每个对象 page
 - ❌ 文档没提的字段填「无」或猜测值（应用 `[待补充]` 或省略非必填项）
-- ❌ 在 page 中增加 Redis `properties` 未声明的自定义列
+- ❌ 在 page 中增加接口 `properties` 未声明的自定义列
 
 **Page 内容三层（每个实例 page）：**
 
@@ -293,7 +306,7 @@ FOR EACH type IN object_types[]:
 
 ```json
 {
-  "resource_ids": ["10042459", "10042460", "10042461"],
+  "object_codes": ["p_bug_0027024630_5406b7", "p_requirement_0027024630_abc"],
   "page_prefix_map": {
     "p_requirement_0027011322_abc": "requirements",
     "p_bug_0027011322_def": "bugs",
@@ -320,8 +333,9 @@ FOR EACH type IN object_types[]:
 ### 0e. 完整加载流程（Phase 1 实现）
 
 ```text
-1. openclaw 资源列表 → 筛 OBJECT → resource_ids[]
-2. /usr/local/bin/python3 scripts/get_object_detail.py '{"resource_ids":[...]}'
+1. openclaw 资源列表 → 筛 OBJECT → objectCode[]
+2. /usr/local/bin/python3 scripts/get_object_detail.py '{}'
+   或子集：'{"object_codes":["p_bug_...","p_order_..."]}'
 3. 校验 ok=true 且 objects[] 非空
 4. 合并 page_prefix_map → object_types[]（每种类型含 display_name、properties、page_prefix）
 5. 缓存到本次 run（hub 写 object_codes_snapshot + object_names_snapshot）
@@ -357,7 +371,7 @@ customers/baiying-ai-acme-corp            # page_prefix 来自 page_prefix_map
 
 This skill guarantees:
 
-- **Phase 0:** openclaw 筛 OBJECT → `get_object_detail.py` 批量读 Redis → 构建 `object_types[]`
+- **Phase 0:** openclaw 筛 OBJECT → `get_object_detail.py` 批量调接口 → 构建 `object_types[]`
 - **Phase 1:** 源文档入 brain（hub 页 `sources/…` 或 `meetings/…`）
 - **Phase 2:** 按 `object_types[]` **逐类型**对文档分类，**每类型内**独立抽取原子实例
 - **Phase 3:** **每个实例一个 page**（Bug→`bugs/`，需求→`requirements/`，产品→`products/`，…）
@@ -374,9 +388,9 @@ This skill guarantees:
 ### Phase 1: 加载对象类型（必须先做）
 
 ```bash
-# 1) 从 openclaw 拿到 OBJECT 资源的 resource_ids[]（运行环境提供）
-# 2) 批量读 Redis schema
-/usr/local/bin/python3 scripts/get_object_detail.py '{"resource_ids":["10042459","10042460","10042461"]}' > /tmp/object_types.json
+# 1) openclaw 提供当前数字员工 OBJECT 的 objectCode[]（脚本内自动获取）
+# 2) 默认一次加载全部挂载类型 schema（脚本内逐条调详情接口）
+/usr/local/bin/python3 scripts/get_object_detail.py '{}' > /tmp/object_types.json
 ```
 
 校验：
@@ -431,7 +445,7 @@ Hub 预留 **每种已加载类型** 的 Index 节（Phase 6 回填），标题 
 1. **分类** — 用该类型的 `object_name`、`object_desc`、`match_hints` 在 hub 全文中圈定属于此 `object_code` 的段落/章节
 2. **抽取原子实例** — 在该类型范围内识别 **可独立成页** 的一条记录（一条 Bug、一条需求、一个 SKU…）
 3. **一实例一页** — 每抽出一条 → 立即生成 slug → `put_page`（禁止攒批后合并写入）
-4. **填字段 & 组装 page 内容** — **结构跟 Redis schema，取值跟文档**：
+4. **填字段 & 组装 page 内容** — **结构跟接口 schema，取值跟文档**：
    - 遍历该类型 `properties[]`，逐项从实例对应文档片段中抽取或归纳
    - `property_code` → frontmatter 键 + Properties 表行
    - `property_name` → 表格 Field 列展示名（便于人读）
@@ -440,13 +454,13 @@ Hub 预留 **每种已加载类型** 的 Index 节（Phase 6 回填），标题 
 
 | 字段 | 来源 | 说明 |
 |------|------|------|
-| `object_code` | Redis | Ontology 对象编码 |
-| `display_name` | Redis `object_name` | 类型标签 |
-| `business_key` / `external_id` | 文档 + Redis `business_key_field` | 稳定业务键 |
-| `title` | 文档 + Redis | `is_name: true` 的 property 优先；否则 title 类 property 或首行摘要 |
+| `object_code` | 接口 | Ontology 对象编码 |
+| `display_name` | 接口 `object_name` | 类型标签 |
+| `business_key` / `external_id` | 文档 + 接口 `business_key_field` | 稳定业务键 |
+| `title` | 文档 + 接口 schema | `is_name: true` 的 property 优先；否则 title 类 property 或首行摘要 |
 | `source_quote` | 文档 | 该实例原文摘录 |
 | `source_section` | 文档 | 章节/页码 |
-| `{property_code}` | **文档 → Redis schema** | 按 `property_name`/`data_type` 映射抽取 |
+| `{property_code}` | **文档 → 接口 schema** | 按 `property_name`/`data_type` 映射抽取 |
 
 **Bug 对象示例**（`object_name: Bug`，`page_prefix: bugs`）：
 
@@ -557,21 +571,21 @@ contracts/baiying-ai-sla-2026
 
 ### Phase 5: 写入对象 page（每实例一页 — schema + 文档）
 
-> **内容原则：** page 的 **字段清单** 由 Redis `properties[]` 决定；**字段取值** 从文档该实例片段抽取；二者结合后写入 frontmatter、Properties 表与正文。
+> **内容原则：** page 的 **字段清单** 由接口 `properties[]` 决定；**字段取值** 从文档该实例片段抽取；二者结合后写入 frontmatter、Properties 表与正文。
 
-**需求管理对象 page 模板**（`properties` 来自 Redis，值来自文档）：
+**需求管理对象 page 模板**（`properties` 来自接口，值来自文档）：
 
 ```markdown
 ---
 title: "百应 AI Skill 分发能力"          # 文档抽取；对齐 is_name/title property
 type: note
 object_code: p_requirement_0027011322_abc
-object_type_label: 需求管理对象          # Redis object_name
+object_type_label: 需求管理对象          # 接口 object_name
 external_id: REQ-001                     # 文档 business_key
 employee_id: de-001
 source_document: sources/prd-v2
 source_section: "3.2 Skill 模块"
-# ↓ 以下键名 = Redis properties[].property_code，值 = 文档适当抽取
+# ↓ 以下键名 = 接口 properties[].property_code，值 = 文档适当抽取
 title: 百应 AI Skill 分发能力
 priority: P1
 description: 须支持按意图将用户请求分发至对应 Skill…
@@ -588,7 +602,7 @@ tags: ['object-split']
 
 ## Properties
 
-> 表格 **动态生成**：行数 = 该类型 Redis `properties[]` 长度；Field 用 `property_name`，Value 用文档抽取值。
+> 表格 **动态生成**：行数 = 该类型接口 `properties[]` 长度；Field 用 `property_name`，Value 用文档抽取值。
 
 | Field | Value |
 |-------|-------|
@@ -611,7 +625,7 @@ From [{hub title}](sources/prd-v2).
 - [Source document](sources/prd-v2)
 ```
 
-**Bug page 示例**（Redis 返回 `handler`、`deadline`、`title` 时）：
+**Bug page 示例**（接口返回 `handler`、`deadline`、`title` 时）：
 
 | Field (property_name) | Value（文档抽取） |
 |---------------------|-----------------|
@@ -619,7 +633,7 @@ From [{hub title}](sources/prd-v2).
 | 处理人 (handler) | alice-example |
 | 截止时间 (deadline) | 2026-06-15 |
 
-Bug / 产品 / 其他类型 **结构相同**：Properties 表 **严格按该类型 Redis `properties[]` 生成**；正文描述取自文档对应段落，适当归纳，不臆造。
+Bug / 产品 / 其他类型 **结构相同**：Properties 表 **严格按该类型接口 `properties[]` 生成**；正文描述取自文档对应段落，适当归纳，不臆造。
 
 每次 `put_page` **只写一个对象**；批量 N 条则调用 N 次。
 
@@ -712,6 +726,17 @@ Document object split complete:
 用户确认导出后，写入 **当前 Agent 工作目录**（Cursor 会话 workspace / `$PWD`），
 **不要** 写到 `~/.gbrain` 或 brain repo 根目录。
 
+> **Iron rule（导出写入）：** 每个 page **必须直接落盘为文件**，禁止把 `gbrain get` / `get_page`
+> 的完整 markdown **打印到对话里**再人工整理、复制或二次排版。
+>
+> ✅ 正确：`gbrain get requirements/baiying-ai-skill-dispatch > requirements/baiying-ai-skill-dispatch.md`
+>
+> ❌ 错误：先执行 `gbrain get requirements/baiying-ai-skill-dispatch` 把 stdout 展示给用户，
+> 再在对话中重组内容后写入 md。
+>
+> CLI 用 shell 重定向（`>`）；MCP 用 `get_page` 取内容后 **直接 write 到**
+> `{EXPORT_ROOT}/{slug}.md`，**不要** 在回复中贴出整页 markdown 正文。
+
 **8a. 输出目录**
 
 ```bash
@@ -738,11 +763,13 @@ mkdir -p "$EXPORT_ROOT"
 SLUG="requirements/baiying-ai-skill-dispatch"
 mkdir -p "$(dirname "$EXPORT_ROOT/$SLUG.md")"
 gbrain get "$SLUG" > "$EXPORT_ROOT/$SLUG.md"
+# 等价于在项目根：gbrain get requirements/baiying-ai-skill-dispatch > requirements/baiying-ai-skill-dispatch.md
 ```
 
 - 完整路径：`{EXPORT_ROOT}/{slug}.md`（slug 含 `/` 时保留目录层级）
+- **一条 slug 一条 shell 重定向**（或一次 MCP 写文件）；stdout **只进文件**，不进入 Agent 回复
 - 使用 `gbrain get` 输出完整 markdown（frontmatter + body + timeline）
-- MCP 环境用 `get_page` 写入同一路径 `{EXPORT_ROOT}/{slug}.md`
+- MCP 环境：`get_page(slug)` → 将返回的 markdown **原样写入** `{EXPORT_ROOT}/{slug}.md`，禁止在对话中输出后再整理
 
 **8c. 导出关系**
 
@@ -830,19 +857,21 @@ gbrain search "external_id REQ-001"
 ## Anti-Patterns
 
 - **多条实例塞进一个 page**（违反 N 实例 = N page；含「需求列表页」「Bug 汇总页」）
-- 未在 `object_types[]` 中的类型仍建 page（如 Redis 未返回产品类型却建 `products/` 页）
+- 未在 `object_types[]` 中的类型仍建 page（如接口未返回产品类型却建 `products/` 页）
 - 把需求实例写入 `bugs/` 或反之（类型与 `page_prefix` 必须对齐脚本返回的 `object_code`）
 - `page_prefix_map` 缺少某 object_code 仍继续拆分
-- 跳过 `get_object_detail.py`，手写 object_types / fields
+- 用 `resourceId` 调详情接口，或不带 `objectCode` 调详情接口（`objectCode` 必传）
+- 跳过 openclaw 取 `objectCode`、手写 object_types / fields
 - 跳过 business_key / slug 匹配，重复拆分产生 duplicate page
 - 把不同对象类型写进同一目录（如需求进 `bugs/` 或统一 `objects/`）
 - 使用 `objects/requirements/…` 嵌套路径（应直接用 `requirements/…`）
 - PDF 二进制走 `gbrain capture`
 - 把整篇 PDF/PRD 原文 paste 进每个对象 page（只保留该实例内容 + `source_quote`）
-- 填写 Redis `properties` 未声明的字段，或对文档未提及的非必填项臆造具体值
-- Properties 表行数/键名与 Redis schema 不一致（必须一一对应 `property_code`）
+- 填写接口 `properties` 未声明的字段，或对文档未提及的非必填项臆造具体值
+- Properties 表行数/键名与接口 schema 不一致（必须一一对应 `property_code`）
 - 拆分完成后不列出 touched page 清单
 - 不询问用户、自动导出到工作空间（须 Phase 7 确认）
+- **导出时用 `gbrain get` / `get_page` 把整页 markdown 打印到对话再整理**（须 shell `>` 或 MCP 直接写 `{slug}.md`）
 - 导出时不用 `{slug}.md` 命名（如改用 title.md、REQ-001.md）
 - 导出时合并多个 page 到一个 md
 - 导出关系时包含本次未导出的 foreign page（应过滤）
@@ -865,9 +894,9 @@ gbrain search "external_id REQ-001"
 
 | Tool | 用途 |
 |------|------|
-| `get_object_detail.py` | **Phase 1 必调** — 按 `resource_id` 从 Redis 读各对象类型 schema |
+| `get_object_detail.py` | **Phase 1 必调** — openclaw 取 `objectCode` → 逐条 POST `/ontology/object/detail` 获取 schema |
 | `get_page` | 加载 hub / 匹配已有对象页 |
-| `get_page` / `gbrain get` | 导出单页 markdown |
+| `gbrain get` / `get_page` | **Phase 8 导出**：重定向或写文件到 `{EXPORT_ROOT}/{slug}.md`；**禁止**在对话中输出全文再整理 |
 | `get_links` / `get_backlinks` / `traverse_graph` / `gbrain graph-query` | 收集导出集合内的关系边 |
 | `search` / `query` | external_id 与语义 dedup |
 | `put_page` | 每个对象实例一次；更新 hub Index |

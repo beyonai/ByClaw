@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Badge, Card, Descriptions, List, Progress, Spin, Tag } from 'antd';
+import { Card, Descriptions, List, Progress, Spin, Tag } from 'antd';
 import { useIntl, useLocation, useNavigate, useSelector } from '@umijs/max';
 import AntdIcon from '@/components/AntdIcon';
 import ActiveSiderAgentBar, { useActiveSiderAgent } from '@/layout/sider/components/ActiveSiderAgentBar';
@@ -25,11 +25,32 @@ function safeJsonParse(value: any) {
   }
 }
 
-const MODEL_TYPE_COLOR: Record<string, string> = {
-  LLM: 'blue',
-  RERANK: 'orange',
-  EMBEDDING: 'green',
-};
+function normalizeModelValue(value: any) {
+  return `${value ?? ''}`.trim();
+}
+
+function isCurrentModel(record: any, currentModelInfo?: any) {
+  if (!record || !currentModelInfo) return false;
+  const currentModelId = normalizeModelValue(currentModelInfo.modelId);
+  if (currentModelId && normalizeModelValue(record.id) === currentModelId) return true;
+
+  const currentValues = [currentModelInfo.modelCode, currentModelInfo.modelNo, currentModelInfo.model]
+    .map(normalizeModelValue)
+    .filter(Boolean);
+  if (!currentValues.length) return false;
+
+  return [record.modelCode, record.modelNo, record.displayName, record.modelName]
+    .map(normalizeModelValue)
+    .some((value) => value && currentValues.includes(value));
+}
+
+function sortModelList(list: any[], currentModelInfo?: any) {
+  return [...list].sort((prev, next) => {
+    const prevWeight = isCurrentModel(prev, currentModelInfo) ? 0 : prev?.status === 'ENABLED' ? 1 : 2;
+    const nextWeight = isCurrentModel(next, currentModelInfo) ? 0 : next?.status === 'ENABLED' ? 1 : 2;
+    return prevWeight - nextWeight;
+  });
+}
 
 const ModelSiderPanel: React.FC = () => {
   const intl = useIntl();
@@ -68,6 +89,25 @@ const ModelSiderPanel: React.FC = () => {
   const [modelDetail, setModelDetail] = useState<any>(null);
 
   const modelInfo = useMemo(() => safeJsonParse(agentDetail?.prologue)?.modelInfo || {}, [agentDetail?.prologue]);
+  const sortedModels = useMemo(() => sortModelList(models, modelInfo), [models, modelInfo]);
+
+  const openModelEdit = useCallback(
+    (model: any) => {
+      if (!model?.id) {
+        navigate('/models');
+        return;
+      }
+
+      navigate('/models', {
+        state: {
+          keepSiderActiveKey: 'model',
+          editModelId: model?.id,
+          editModelRequestId: Date.now(),
+        },
+      });
+    },
+    [navigate]
+  );
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -161,9 +201,9 @@ const ModelSiderPanel: React.FC = () => {
                     modelDetail?.modelName ||
                     intl.formatMessage({ id: 'fileBrowserEntry.model.notConfigured' })}
                 </div>
-                <Tag color={modelInfo?.modelId ? 'green' : 'default'}>
+                <Tag className={modelInfo?.modelId ? styles.currentModelTag : undefined} color="default">
                   {modelInfo?.modelId
-                    ? intl.formatMessage({ id: 'fileBrowserEntry.model.configured' })
+                    ? intl.formatMessage({ id: 'fileBrowserEntry.debug.currentModel' })
                     : intl.formatMessage({ id: 'fileBrowserEntry.model.notConfiguredShort' })}
                 </Tag>
               </div>
@@ -210,22 +250,32 @@ const ModelSiderPanel: React.FC = () => {
           )}
 
           <List
-            dataSource={models}
+            dataSource={sortedModels}
             locale={{ emptyText: intl.formatMessage({ id: 'personalModel.empty' }) }}
-            renderItem={(item: any) => (
-              <div className={styles.modelItem} onClick={() => navigate('/models')}>
-                <div className={styles.modelName}>{item.displayName}</div>
-                <div className={styles.modelMeta}>
-                  <Tag color={MODEL_TYPE_COLOR[item.modelType] || 'default'}>{item.modelType}</Tag>
-                  <Badge
-                    status={item.status === 'ENABLED' ? 'success' : 'default'}
-                    text={intl.formatMessage({
-                      id: item.status === 'ENABLED' ? 'personalModel.status.enabled' : 'personalModel.status.disabled',
-                    })}
-                  />
+            renderItem={(item: any) => {
+              const current = isCurrentModel(item, modelInfo);
+              return (
+                <div className={styles.modelItem} onClick={() => openModelEdit(item)}>
+                  <div className={styles.modelHeader}>
+                    <div className={styles.modelTitleLine}>
+                      <div className={styles.modelName}>{item.displayName}</div>
+                      <span className={styles.modelTypeTag}>{item.modelType || 'LLM'}</span>
+                    </div>
+                    <Tag className={current || item.status === 'ENABLED' ? styles.currentModelTag : undefined}>
+                      {current
+                        ? intl.formatMessage({ id: 'fileBrowserEntry.debug.currentModel' })
+                        : intl.formatMessage({
+                            id:
+                              item.status === 'ENABLED'
+                                ? 'personalModel.action.enable'
+                                : 'personalModel.action.disable',
+                          })}
+                    </Tag>
+                  </div>
+                  <div className={styles.modelCode}>{item.modelCode || '-'}</div>
                 </div>
-              </div>
-            )}
+              );
+            }}
           />
         </Spin>
       </div>

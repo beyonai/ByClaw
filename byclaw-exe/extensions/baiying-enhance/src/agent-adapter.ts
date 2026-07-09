@@ -407,9 +407,6 @@ function adaptRawBaiyingDetail(params: {
                 ? { resourceBizType: nonEmpty(r.resourceBizType) }
                 : {}),
             ...(nonEmpty(r.resourceCode) ? { resourceCode: nonEmpty(r.resourceCode) } : {}),
-            ...(nonEmpty(r.ontologyBaseCode)
-                ? { ontologyBaseCode: nonEmpty(r.ontologyBaseCode) }
-                : {}),
             ...(nonEmpty(r.resourceDesc) ? { resourceDesc: nonEmpty(r.resourceDesc) } : {}),
             ...(r.resourceSourcePkId != null
                 ? { resourceSourcePkId: String(r.resourceSourcePkId) }

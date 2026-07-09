@@ -10,6 +10,7 @@ import com.github.pagehelper.PageHelper;
 import com.iwhalecloud.byai.common.constants.resource.ImplType;
 import com.iwhalecloud.byai.common.constants.resource.SystemCode;
 import com.iwhalecloud.byai.common.constants.resource.WorkerAgentType;
+import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceBizTypeEnum;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus;
@@ -109,6 +110,7 @@ public class SsResourceService {
     public void save(SsResource ssResource) {
         ssResource.setImplType(ssResource.getImplType());
         ssResource.setWorkerAgentType(ssResource.getWorkerAgentType());
+        assertResourceCodeAvailableForCreate(ssResource);
         ssResourceMapper.insert(ssResource);
     }
 
@@ -131,6 +133,7 @@ public class SsResourceService {
      */
     public SsResource saveResource(SsResource ssResource) {
         fillCreateDefaults(ssResource);
+        assertResourceCodeAvailableForCreate(ssResource);
         ssResourceMapper.insert(ssResource);
         return ssResource;
     }
@@ -217,6 +220,58 @@ public class SsResourceService {
         LambdaQueryWrapper<SsResource> queryWrapper = new LambdaQueryWrapper<>();
         queryWrapper.eq(SsResource::getResourceCode, resourceCode);
         return ssResourceMapper.selectList(queryWrapper);
+    }
+
+    /**
+     * 按全局资源编码查询唯一资源。保留给历史调用；新资源幂等优先使用 systemCode + resourceBizType + resourceCode。
+     */
+    public SsResource findUniqueByResourceCode(String resourceCode) {
+        List<SsResource> resources = findByCode(resourceCode);
+        if (ListUtil.isEmpty(resources)) {
+            return null;
+        }
+        if (resources.size() > 1) {
+            throw new BaseException("资源编码不唯一：" + resourceCode);
+        }
+        return resources.get(0);
+    }
+
+    /**
+     * 按 systemCode + resourceBizType + resourceCode 查询唯一资源。
+     */
+    public SsResource findUniqueBySystemCodeAndBizTypeAndResourceCode(String systemCode, String resourceBizType,
+        String resourceCode) {
+        if (StringUtil.isEmpty(systemCode) || StringUtil.isEmpty(resourceBizType) || StringUtil.isEmpty(resourceCode)) {
+            return null;
+        }
+        LambdaQueryWrapper<SsResource> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.eq(SsResource::getSystemCode, systemCode);
+        queryWrapper.eq(SsResource::getResourceBizType, resourceBizType);
+        queryWrapper.eq(SsResource::getResourceCode, resourceCode);
+        List<SsResource> resources = ssResourceMapper.selectList(queryWrapper);
+        if (ListUtil.isEmpty(resources)) {
+            return null;
+        }
+        if (resources.size() > 1) {
+            throw new BaseException("资源自然键不唯一：" + systemCode + "/" + resourceBizType + "/" + resourceCode);
+        }
+        return resources.get(0);
+    }
+
+    /**
+     * 新增资源前校验 systemCode + resourceBizType + resourceCode 未被占用。更新已有资源请走 updateResourceEntity。
+     */
+    private void assertResourceCodeAvailableForCreate(SsResource ssResource) {
+        if (ssResource == null || StringUtil.isEmpty(ssResource.getSystemCode())
+            || StringUtil.isEmpty(ssResource.getResourceBizType()) || StringUtil.isEmpty(ssResource.getResourceCode())) {
+            return;
+        }
+        SsResource existing = findUniqueBySystemCodeAndBizTypeAndResourceCode(ssResource.getSystemCode(),
+            ssResource.getResourceBizType(), ssResource.getResourceCode());
+        if (existing != null) {
+            throw new BaseException("资源已存在：" + ssResource.getSystemCode() + "/" + ssResource.getResourceBizType()
+                + "/" + ssResource.getResourceCode());
+        }
     }
 
     /**

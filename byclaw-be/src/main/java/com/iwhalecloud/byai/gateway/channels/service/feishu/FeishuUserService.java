@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
+import java.util.Objects;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -75,17 +76,22 @@ public class FeishuUserService {
     }
 
     public LoginInfo resolveLoginInfo(FeishuCallbackMessage message) throws IOException {
-        String externalId = resolveExternalUnionId(message, null);
-        Users matchedUser = findMatchedUserFromExternalSystem(externalId);
+        String eventExternalId = resolveExternalUnionId(message, null);
+        Users matchedUser = findMatchedUserFromExternalSystem(eventExternalId);
         if (matchedUser != null) {
             logger.info("Matched Feishu user from po_user_external_system. externalId={}, userId={}",
-                    externalId, matchedUser.getUserId());
+                    eventExternalId, matchedUser.getUserId());
             return buildLoginInfo(matchedUser);
         }
 
         FeishuUserDetail userDetail = fetchUserDetail(message);
-        externalId = resolveExternalUnionId(message, userDetail);
+        String externalId = resolveExternalUnionId(message, userDetail);
         matchedUser = findMatchedUserFromExternalSystem(externalId);
+        if (matchedUser == null && !Objects.equals(externalId, eventExternalId)) {
+            // 历史版本可能用事件里的 open_id 建过绑定；通讯录详情可用后会优先取 union_id。
+            // 这里额外查一次旧 id，避免已有绑定因为外部 id 升级而失效。
+            matchedUser = findMatchedUserFromExternalSystem(eventExternalId);
+        }
         if (matchedUser != null) {
             saveUserExternalSystem(externalId, matchedUser.getUserId(), userDetail);
             return buildLoginInfo(matchedUser);

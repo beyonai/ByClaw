@@ -1393,6 +1393,7 @@
 
     <select id="findDatasetDetailById" resultMap="DatasetDetailVoResultMap">
         select a.resource_id,
+               a.resource_code,
                a.system_code,
                a.resource_source_pk_id,
                a.resource_biz_type,

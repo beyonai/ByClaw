@@ -1,0 +1,4 @@
+interface:
+  display_name: "飞书工作套件"
+  short_description: "通过官方 lark-cli 操作飞书消息、通讯录、日历、Base、文档、邮箱、审批等能力"
+  default_prompt: "使用 fws 技能通过 lark-cli 完成一个飞书消息、通讯录、日历、Base、文档、邮箱或审批相关任务"

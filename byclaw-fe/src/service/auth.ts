@@ -2,7 +2,7 @@ import { GET, POST } from '@/service/common/request';
 
 /** 校验当前用户是否具备企业管理员能力（平台/业务/组织管理员 + 超管 adminvip）。 */
 export const checkEnterpriseAdminPermission = () =>
-  GET<boolean>('/byaiService/auth/checkEnterpriseToolCreatePermission');
+  GET<boolean>('/byaiService/auth/privilegeGrant/checkEnterpriseToolCreatePermission');
 
 export const loginBySso = (payload: any = {}) =>
   GET<any>('/byaiService/system/session/loginBySso', {

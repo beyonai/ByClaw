@@ -30,8 +30,18 @@ import ResourceFilter, {
 import { SiderContentContext } from '@/layout/sider/siderContentContext';
 import { useActiveSiderAgent } from '@/layout/sider/components/ActiveSiderAgentBar';
 import { findDetailsById, installDigitalEmployeeRelResources } from '@/pages/manager/service/DigitalEmployeeMgr';
+import AuthListDrawer from '@/pages/manager/components/AuthListDrawer';
+import UseApplyAuditDrawer from '@/pages/manager/components/UseApplyAuditDrawer';
+import { applyResourceUse } from '@/pages/manager/service/resources';
 import { queryCatalogTree } from '@/service/digitalEmployees';
-import { pageOntologyResources, syncOntologyResources } from '@/service/ontology';
+import {
+  checkOntologyEnterpriseResourceSyncPermission,
+  getOntologyObjectDetail,
+  listOntologyObjectsByView,
+  listOntologyRelationsByObject,
+  pageOntologyResources,
+  syncOntologyResources,
+} from '@/service/ontology';
 import { normalizeCatalogTree } from '@/utils/catalog';
 import OntologyNodeDrawer from './OntologyNodeDrawer';
 import styles from './index.module.less';
@@ -51,6 +61,7 @@ type SyncBatch = {
 };
 
 const ALL_CATEGORY_ID = '-1';
+const RESOURCE_PAGE_SIZE = 30;
 
 const toResourceFilterStatus = (statusFilter: StatusFilter) => {
   if (statusFilter === 'all') return STATUS_ALL_VALUE;
@@ -110,18 +121,6 @@ const StaticTablePanel = ({
   </div>
 );
 
-const FALLBACK_CATALOGS = [
-  { catalogId: 'platform', catalogName: '平台能力' },
-  { catalogId: 'marketing', catalogName: '市场营销' },
-  { catalogId: 'sales', catalogName: '销售领域' },
-  { catalogId: 'rd', catalogName: '研发领域' },
-  { catalogId: 'delivery', catalogName: '交付领域' },
-  { catalogId: 'hr', catalogName: '人力资源' },
-  { catalogId: 'finance', catalogName: '财务领域' },
-  { catalogId: 'office', catalogName: '行政办公' },
-  { catalogId: 'other', catalogName: '其他领域' },
-];
-
 const getCatalogParentId = (item: any) =>
   item?.pcatalogId ?? item?.pCatalogId ?? item?.parentCatalogId ?? item?.parentDirId;
 
@@ -134,7 +133,7 @@ const getCatalogTabKey = (item: any) => {
 };
 
 const getDisplayCatalogs = (list: any[] = []) => {
-  if (!Array.isArray(list) || !list.length) return FALLBACK_CATALOGS;
+  if (!Array.isArray(list) || !list.length) return [];
   if (list.some((item) => Array.isArray(item?.children) && item.children.length > 0)) {
     return list;
   }
@@ -154,349 +153,6 @@ const getDisplayCatalogs = (list: any[] = []) => {
 
   return roots;
 };
-
-const MOCK_RESOURCES = [
-  {
-    resourceId: 'mock-personal-view-customer360',
-    ownerType: 'personal',
-    resourceBizType: 'VIEW',
-    resourceName: '客户360视图',
-    resourceCode: 'personal_customer_360_view',
-    resourceDesc: '面向客户旅程分析的个人视图。',
-    resourceStatus: 'valid',
-    permission: 'manage',
-    catalogId: 'platform',
-    catalogName: '平台能力',
-    creator: '黄药师',
-    baseId: 'personal_demo_base',
-    baseName: '个人演示本体库',
-    sceneId: 'customer_operation',
-    sceneName: '客户运营',
-    viewCode: 'personal_customer_360_view',
-    viewName: '客户360视图',
-    objectCodes: ['customer_profile', 'customer_order'],
-    relations: [
-      {
-        relationCode: 'customer_has_order',
-        relationName: '客户下单',
-        relationCardinality: '1:N',
-        sourceObjectCode: 'customer_profile',
-        sourceObjectName: '客户档案',
-        targetObjectCode: 'customer_order',
-        targetObjectName: '客户订单',
-      },
-    ],
-  },
-  {
-    resourceId: 'mock-personal-object-customer',
-    ownerType: 'personal',
-    resourceBizType: 'OBJECT',
-    resourceName: '客户档案对象',
-    resourceCode: 'customer_profile',
-    resourceDesc: '沉淀客户基础资料、等级和触达偏好。',
-    resourceStatus: 'valid',
-    permission: 'use',
-    catalogId: 'marketing',
-    catalogName: '市场营销',
-    creator: '黄药师',
-    baseId: 'personal_demo_base',
-    baseName: '个人演示本体库',
-    sceneId: 'customer_operation',
-    sceneName: '客户运营',
-    objectCode: 'customer_profile',
-    objectName: '客户档案对象',
-    properties: [
-      { propertyName: '客户名称', propertyCode: 'customer_name', dataType: 'STRING' },
-      { propertyName: '客户等级', propertyCode: 'customer_level', dataType: 'STRING' },
-    ],
-    actions: [
-      { actionCode: 'sync_customer_profile', actionName: '同步客户档案', actionDesc: '从客户系统同步最新档案。' },
-      { actionCode: 'score_customer_value', actionName: '客户价值评分', actionDesc: '计算客户价值分层。' },
-    ],
-  },
-  {
-    resourceId: 'mock-personal-view-sales',
-    ownerType: 'personal',
-    resourceBizType: 'VIEW',
-    resourceName: '销售机会跟进视图',
-    resourceCode: 'sales_opportunity_view',
-    resourceDesc: '跟踪销售机会阶段、预计金额和下一步动作。',
-    resourceStatus: 'valid',
-    permission: 'manage',
-    catalogId: 'sales',
-    catalogName: '销售领域',
-    creator: '黄药师',
-    baseId: 'personal_demo_base',
-    baseName: '个人演示本体库',
-    sceneId: 'sales_followup',
-    sceneName: '销售跟进',
-    viewCode: 'sales_opportunity_view',
-    viewName: '销售机会跟进视图',
-    objectCodes: ['sales_opportunity', 'customer_profile'],
-    relations: [
-      {
-        relationCode: 'customer_has_opportunity',
-        relationName: '客户关联商机',
-        relationCardinality: '1:N',
-        sourceObjectCode: 'customer_profile',
-        sourceObjectName: '客户档案',
-        targetObjectCode: 'sales_opportunity',
-        targetObjectName: '销售机会',
-      },
-    ],
-  },
-  {
-    resourceId: 'mock-personal-object-opportunity',
-    ownerType: 'personal',
-    resourceBizType: 'OBJECT',
-    resourceName: '销售机会对象',
-    resourceCode: 'sales_opportunity',
-    resourceDesc: '记录商机阶段、预计成交时间和负责人。',
-    resourceStatus: 'valid',
-    permission: 'use',
-    catalogId: 'sales',
-    catalogName: '销售领域',
-    creator: '黄药师',
-    baseId: 'personal_demo_base',
-    baseName: '个人演示本体库',
-    sceneId: 'sales_followup',
-    sceneName: '销售跟进',
-    objectCode: 'sales_opportunity',
-    objectName: '销售机会对象',
-    properties: [
-      { propertyName: '商机名称', propertyCode: 'opportunity_name', dataType: 'STRING' },
-      { propertyName: '预计金额', propertyCode: 'estimated_amount', dataType: 'DECIMAL' },
-    ],
-    actions: [{ actionCode: 'advance_stage', actionName: '推进商机阶段', actionDesc: '更新商机当前阶段。' }],
-  },
-  {
-    resourceId: 'mock-personal-view-task',
-    ownerType: 'personal',
-    resourceBizType: 'VIEW',
-    resourceName: '待办任务视图',
-    resourceCode: 'todo_task_view',
-    resourceDesc: '汇总个人待办、负责人、截止时间和完成状态。',
-    resourceStatus: 'offline',
-    permission: 'apply',
-    catalogId: 'office',
-    catalogName: '行政办公',
-    creator: '黄药师',
-    baseId: 'personal_demo_base',
-    baseName: '个人演示本体库',
-    sceneId: 'office_task',
-    sceneName: '办公协同',
-    viewCode: 'todo_task_view',
-    viewName: '待办任务视图',
-    objectCodes: ['todo_task'],
-    relations: [],
-  },
-  {
-    resourceId: 'mock-personal-object-task',
-    ownerType: 'personal',
-    resourceBizType: 'OBJECT',
-    resourceName: '待办任务对象',
-    resourceCode: 'todo_task',
-    resourceDesc: '个人任务的状态、优先级与截止时间。',
-    resourceStatus: 'valid',
-    permission: 'manage',
-    catalogId: 'office',
-    catalogName: '行政办公',
-    creator: '黄药师',
-    baseId: 'personal_demo_base',
-    baseName: '个人演示本体库',
-    sceneId: 'office_task',
-    sceneName: '办公协同',
-    objectCode: 'todo_task',
-    objectName: '待办任务对象',
-    properties: [
-      { propertyName: '任务标题', propertyCode: 'task_title', dataType: 'STRING' },
-      { propertyName: '截止时间', propertyCode: 'deadline', dataType: 'DATETIME' },
-    ],
-    actions: [{ actionCode: 'complete_task', actionName: '完成任务', actionDesc: '将任务标记为完成。' }],
-  },
-  {
-    resourceId: 'mock-enterprise-view-order',
-    ownerType: 'enterprise',
-    resourceBizType: 'VIEW',
-    resourceName: '订单履约全景视图',
-    resourceCode: 'order_fulfillment_view',
-    resourceDesc: '聚合订单、合同、交付节点和回款状态。',
-    resourceStatus: 'valid',
-    permission: 'use',
-    catalogId: 'delivery',
-    catalogName: '交付领域',
-    creator: '企业本体中心',
-    baseId: 'enterprise_demo_base',
-    baseName: '企业演示本体库',
-    sceneId: 'order_delivery',
-    sceneName: '订单履约',
-    viewCode: 'order_fulfillment_view',
-    viewName: '订单履约全景视图',
-    objectCodes: ['sales_order', 'delivery_task'],
-    relations: [
-      {
-        relationCode: 'order_create_task',
-        relationName: '订单生成交付任务',
-        relationCardinality: '1:N',
-        sourceObjectCode: 'sales_order',
-        sourceObjectName: '销售订单',
-        targetObjectCode: 'delivery_task',
-        targetObjectName: '交付任务',
-      },
-    ],
-  },
-  {
-    resourceId: 'mock-enterprise-object-order',
-    ownerType: 'enterprise',
-    resourceBizType: 'OBJECT',
-    resourceName: '销售订单对象',
-    resourceCode: 'sales_order',
-    resourceDesc: '企业订单主数据对象，包含金额、状态和客户信息。',
-    resourceStatus: 'valid',
-    permission: 'manage',
-    catalogId: 'sales',
-    catalogName: '销售领域',
-    creator: '企业本体中心',
-    baseId: 'enterprise_demo_base',
-    baseName: '企业演示本体库',
-    sceneId: 'order_delivery',
-    sceneName: '订单履约',
-    objectCode: 'sales_order',
-    objectName: '销售订单对象',
-    properties: [
-      { propertyName: '订单编号', propertyCode: 'order_no', dataType: 'STRING' },
-      { propertyName: '订单金额', propertyCode: 'order_amount', dataType: 'DECIMAL' },
-    ],
-    actions: [
-      { actionCode: 'create_delivery_task', actionName: '创建交付任务', actionDesc: '基于订单创建履约任务。' },
-      { actionCode: 'query_payment_status', actionName: '查询回款状态', actionDesc: '拉取订单回款状态。' },
-    ],
-  },
-  {
-    resourceId: 'mock-enterprise-view-contract',
-    ownerType: 'enterprise',
-    resourceBizType: 'VIEW',
-    resourceName: '合同风险视图',
-    resourceCode: 'contract_risk_view',
-    resourceDesc: '汇总合同条款、履约节点和风险等级。',
-    resourceStatus: 'valid',
-    permission: 'manage',
-    catalogId: 'delivery',
-    catalogName: '交付领域',
-    creator: '企业本体中心',
-    baseId: 'enterprise_demo_base',
-    baseName: '企业演示本体库',
-    sceneId: 'contract_manage',
-    sceneName: '合同管理',
-    viewCode: 'contract_risk_view',
-    viewName: '合同风险视图',
-    objectCodes: ['contract_record', 'sales_order'],
-    relations: [
-      {
-        relationCode: 'order_sign_contract',
-        relationName: '订单签订合同',
-        relationCardinality: '1:1',
-        sourceObjectCode: 'sales_order',
-        sourceObjectName: '销售订单',
-        targetObjectCode: 'contract_record',
-        targetObjectName: '合同记录',
-      },
-    ],
-  },
-  {
-    resourceId: 'mock-enterprise-object-contract',
-    ownerType: 'enterprise',
-    resourceBizType: 'OBJECT',
-    resourceName: '合同记录对象',
-    resourceCode: 'contract_record',
-    resourceDesc: '企业合同主数据，包含合同金额、期限和风险状态。',
-    resourceStatus: 'valid',
-    permission: 'use',
-    catalogId: 'delivery',
-    catalogName: '交付领域',
-    creator: '企业本体中心',
-    baseId: 'enterprise_demo_base',
-    baseName: '企业演示本体库',
-    sceneId: 'contract_manage',
-    sceneName: '合同管理',
-    objectCode: 'contract_record',
-    objectName: '合同记录对象',
-    properties: [
-      { propertyName: '合同编号', propertyCode: 'contract_no', dataType: 'STRING' },
-      { propertyName: '风险等级', propertyCode: 'risk_level', dataType: 'STRING' },
-    ],
-    actions: [{ actionCode: 'evaluate_contract_risk', actionName: '评估合同风险', actionDesc: '计算合同风险等级。' }],
-  },
-  {
-    resourceId: 'mock-enterprise-view-finance',
-    ownerType: 'enterprise',
-    resourceBizType: 'VIEW',
-    resourceName: '现金流分析视图',
-    resourceCode: 'cash_flow_view',
-    resourceDesc: '按客户、合同和回款周期分析现金流。',
-    resourceStatus: 'offline',
-    permission: 'apply',
-    catalogId: 'finance',
-    catalogName: '财务领域',
-    creator: '企业本体中心',
-    baseId: 'enterprise_demo_base',
-    baseName: '企业演示本体库',
-    sceneId: 'finance_analysis',
-    sceneName: '财务分析',
-    viewCode: 'cash_flow_view',
-    viewName: '现金流分析视图',
-    objectCodes: ['invoice_record', 'sales_order'],
-    relations: [],
-  },
-  {
-    resourceId: 'mock-enterprise-object-invoice',
-    ownerType: 'enterprise',
-    resourceBizType: 'OBJECT',
-    resourceName: '发票记录对象',
-    resourceCode: 'invoice_record',
-    resourceDesc: '记录开票金额、税率、状态和关联订单。',
-    resourceStatus: 'valid',
-    permission: 'use',
-    catalogId: 'finance',
-    catalogName: '财务领域',
-    creator: '企业本体中心',
-    baseId: 'enterprise_demo_base',
-    baseName: '企业演示本体库',
-    sceneId: 'finance_analysis',
-    sceneName: '财务分析',
-    objectCode: 'invoice_record',
-    objectName: '发票记录对象',
-    properties: [
-      { propertyName: '发票号', propertyCode: 'invoice_no', dataType: 'STRING' },
-      { propertyName: '开票金额', propertyCode: 'invoice_amount', dataType: 'DECIMAL' },
-    ],
-    actions: [{ actionCode: 'sync_invoice_status', actionName: '同步发票状态', actionDesc: '同步发票最新状态。' }],
-  },
-  {
-    resourceId: 'mock-enterprise-object-employee',
-    ownerType: 'enterprise',
-    resourceBizType: 'OBJECT',
-    resourceName: '员工主数据对象',
-    resourceCode: 'employee_master',
-    resourceDesc: '组织、岗位、员工状态等基础人力数据。',
-    resourceStatus: 'valid',
-    permission: 'manage',
-    catalogId: 'hr',
-    catalogName: '人力资源',
-    creator: '企业本体中心',
-    baseId: 'enterprise_demo_base',
-    baseName: '企业演示本体库',
-    sceneId: 'employee_operation',
-    sceneName: '员工运营',
-    objectCode: 'employee_master',
-    objectName: '员工主数据对象',
-    properties: [
-      { propertyName: '员工姓名', propertyCode: 'employee_name', dataType: 'STRING' },
-      { propertyName: '所属部门', propertyCode: 'department_name', dataType: 'STRING' },
-    ],
-    actions: [{ actionCode: 'query_employee_status', actionName: '查询在职状态', actionDesc: '查询员工当前状态。' }],
-  },
-];
 
 const getData = (res: any) => res?.data ?? res ?? {};
 
@@ -529,6 +185,37 @@ const getResourceRows = (res: any) => {
   return findResourceRows(data);
 };
 
+const findPageMeta = (source: any, depth = 0): any => {
+  if (!source || depth > 4 || Array.isArray(source)) return {};
+  if (source.pageInfo && typeof source.pageInfo === 'object') return source.pageInfo;
+  if (
+    source.total !== undefined ||
+    source.totalPages !== undefined ||
+    source.pages !== undefined ||
+    source.hasMore !== undefined
+  ) {
+    return source;
+  }
+
+  const nestedKeys = ['data', 'result', 'resultObject', 'page', 'pageData'];
+  for (const key of nestedKeys) {
+    const meta = findPageMeta(source?.[key], depth + 1);
+    if (Object.keys(meta || {}).length) return meta;
+  }
+  return {};
+};
+
+const getPageHasMore = (res: any, pageNum: number, pageSize: number, rowCount: number) => {
+  const data = getData(res);
+  const meta = findPageMeta(data);
+  if (typeof meta.hasMore === 'boolean') return meta.hasMore;
+  const total = Number(meta.total ?? data?.total ?? 0);
+  const totalPages = Number(meta.totalPages ?? meta.pages ?? meta.pageCount ?? 0);
+  if (totalPages > 0) return pageNum < totalPages;
+  if (total > 0) return pageNum * pageSize < total;
+  return rowCount >= pageSize;
+};
+
 const getSyncData = (res: any) => {
   const data = getData(res);
   return data?.resultObject || data?.data || data || {};
@@ -548,6 +235,20 @@ const parseMaybeArray = (value: any) => {
   return [value];
 };
 
+const parseMaybeObject = (value: any) => {
+  if (!value) return {};
+  if (typeof value === 'object' && !Array.isArray(value)) return value;
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value || '{}');
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+  return {};
+};
+
 const getEntryBizType = (entry: any) => {
   if (entry?.resourceBizType) return entry.resourceBizType;
   if (entry?.objectCode || entry?.object_code) return 'OBJECT';
@@ -556,7 +257,7 @@ const getEntryBizType = (entry: any) => {
 };
 
 const getResourceKey = (resource: any) => {
-  if (resource?.resourceId && !`${resource.resourceId}`.startsWith('mock-')) {
+  if (resource?.resourceId) {
     return `ID:${resource.resourceId}`;
   }
   const bizType = getEntryBizType(resource);
@@ -582,6 +283,17 @@ const getResourceKeys = (resource: any) => {
   return Array.from(keys);
 };
 
+const mergeResourceRows = (prev: any[], next: any[]) => {
+  const merged = new Map<string, any>();
+  [...prev, ...next].forEach((item) => {
+    const key = getResourceKey(item) || `${item.resourceBizType || ''}:${item.resourceCode || item.resourceId || ''}`;
+    if (key) {
+      merged.set(key, item);
+    }
+  });
+  return Array.from(merged.values());
+};
+
 const normalizeResourceStatus = (status: any) => {
   if (status === 'offline' || status === 3 || status === 6 || status === '3' || status === '6') return 'offline';
   return 'valid';
@@ -595,52 +307,54 @@ const normalizePermission = (row: any) => {
 };
 
 const normalizeOntologyResource = (row: any, ownerType: OwnerTab) => {
-  const bizType = `${row?.resourceBizType || ''}`.toUpperCase();
+  const meta = parseMaybeObject(row?.targetContent);
+  const source = { ...meta, ...row };
+  const bizType = `${source?.resourceBizType || ''}`.toUpperCase();
   const resourceCode =
-    row?.resourceCode ||
-    row?.resource_code ||
-    row?.viewCode ||
-    row?.view_code ||
-    row?.objectCode ||
-    row?.object_code ||
-    row?.code ||
+    source?.resourceCode ||
+    source?.resource_code ||
+    source?.viewCode ||
+    source?.view_code ||
+    source?.objectCode ||
+    source?.object_code ||
+    source?.code ||
     '';
   const resourceName =
-    row?.resourceName ||
-    row?.resource_name ||
-    row?.viewName ||
-    row?.view_name ||
-    row?.objectName ||
-    row?.object_name ||
-    row?.name ||
+    source?.resourceName ||
+    source?.resource_name ||
+    source?.viewName ||
+    source?.view_name ||
+    source?.objectName ||
+    source?.object_name ||
+    source?.name ||
     resourceCode;
-  const baseId = row?.ontologyBaseCode || row?.baseId || row?.pid || row?.baseCode || '';
+  const baseId = source?.ontologyBaseCode || source?.baseId || source?.pid || source?.baseCode || '';
   return {
-    ...row,
-    ownerType: row?.ownerType || ownerType,
+    ...source,
+    ownerType: source?.ownerType || ownerType,
     resourceBizType: bizType,
-    resourceId: row?.resourceId || `${ownerType}-${bizType}-${resourceCode}`,
+    resourceId: source?.resourceId || `${ownerType}-${bizType}-${resourceCode}`,
     resourceCode,
     resourceName,
-    resourceDesc: row?.resourceDesc || row?.resource_desc || row?.description || row?.desc || '',
-    resourceStatus: normalizeResourceStatus(row?.resourceStatus),
-    permission: normalizePermission(row),
-    catalogId: row?.catalogId || '',
-    catalogName: row?.catalogName || '',
-    creator: row?.createUserName || row?.creator || row?.createBy || '',
+    resourceDesc: source?.resourceDesc || source?.resource_desc || source?.description || source?.desc || '',
+    resourceStatus: normalizeResourceStatus(source?.resourceStatus),
+    permission: normalizePermission(source),
+    catalogId: source?.catalogId || '',
+    catalogName: source?.catalogName || '',
+    creator: source?.createUserName || source?.creator || source?.createBy || '',
     baseId,
-    baseName: row?.ontologyBaseName || row?.baseName || '',
-    sceneId: row?.sceneId || row?.sceneCode || '',
-    sceneName: row?.sceneName || '',
-    viewCode: bizType === 'VIEW' ? resourceCode : row?.viewCode || row?.view_code,
-    viewName: bizType === 'VIEW' ? resourceName : row?.viewName || row?.view_name,
-    objectCode: bizType === 'OBJECT' ? resourceCode : row?.objectCode || row?.object_code,
-    objectName: bizType === 'OBJECT' ? resourceName : row?.objectName || row?.object_name,
-    objectCodes: parseMaybeArray(row?.objectCodes || row?.objects).map(
+    baseName: source?.ontologyBaseName || source?.baseName || '',
+    sceneId: source?.sceneId || source?.sceneCode || '',
+    sceneName: source?.sceneName || '',
+    viewCode: bizType === 'VIEW' ? resourceCode : source?.viewCode || source?.view_code,
+    viewName: bizType === 'VIEW' ? resourceName : source?.viewName || source?.view_name,
+    objectCode: bizType === 'OBJECT' ? resourceCode : source?.objectCode || source?.object_code,
+    objectName: bizType === 'OBJECT' ? resourceName : source?.objectName || source?.object_name,
+    objectCodes: parseMaybeArray(source?.objectCodes || source?.objects).map(
       (item: any) => item?.objectCode || item?.code || item
     ),
-    actions: parseMaybeArray(row?.actions),
-    relations: parseMaybeArray(row?.relations),
+    actions: parseMaybeArray(source?.actions),
+    relations: parseMaybeArray(source?.relations),
   };
 };
 
@@ -683,8 +397,11 @@ const OntologyCenter: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('valid');
   const [permissionFilter, setPermissionFilter] = useState<PermissionFilter>('all');
   const [catalogId, setCatalogId] = useState(ALL_CATEGORY_ID);
-  const [catalogList, setCatalogList] = useState<any[]>(FALLBACK_CATALOGS);
+  const [catalogList, setCatalogList] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [resourcePageNum, setResourcePageNum] = useState(1);
+  const [resourceHasMore, setResourceHasMore] = useState(false);
   const [resourceList, setResourceList] = useState<any[]>([]);
   const [providerOpen, setProviderOpen] = useState(false);
   const [syncOpen, setSyncOpen] = useState(false);
@@ -693,10 +410,14 @@ const OntologyCenter: React.FC = () => {
   const [syncSummary, setSyncSummary] = useState({ created: 0, updated: 0, synced: 0, totalPages: 0 });
   const [installedKeys, setInstalledKeys] = useState<Set<string>>(new Set());
   const [installingKeys, setInstallingKeys] = useState<Set<string>>(new Set());
+  const [canRefreshEnterprise, setCanRefreshEnterprise] = useState(false);
+  const [authDrawerOpen, setAuthDrawerOpen] = useState(false);
+  const [authType, setAuthType] = useState<'useAuth' | 'mgrAuth'>('useAuth');
+  const [selectedResource, setSelectedResource] = useState<any>(null);
+  const [useApplyAuditOpen, setUseApplyAuditOpen] = useState(false);
 
   const catalogTabs = useMemo(() => {
-    const tabs = getDisplayCatalogs(catalogList);
-    return tabs.length ? tabs : FALLBACK_CATALOGS;
+    return getDisplayCatalogs(catalogList);
   }, [catalogList]);
 
   const loadInstalledKeys = useCallback(async () => {
@@ -722,48 +443,89 @@ const OntologyCenter: React.FC = () => {
       .then((res: any) => {
         const treeData = Array.isArray(res) ? res : Array.isArray(res?.data) ? res.data : [];
         const normalized = normalizeCatalogTree(treeData);
-        setCatalogList(normalized.length ? normalized : FALLBACK_CATALOGS);
+        setCatalogList(normalized);
         setCatalogId((prev) => prev || ALL_CATEGORY_ID);
       })
-      .catch(() => setCatalogList(FALLBACK_CATALOGS));
+      .catch(() => setCatalogList([]));
+  }, []);
+
+  useEffect(() => {
+    checkOntologyEnterpriseResourceSyncPermission()
+      .then((res: any) => setCanRefreshEnterprise(getData(res) === true))
+      .catch(() => setCanRefreshEnterprise(false));
   }, []);
 
   useEffect(() => {
     loadInstalledKeys();
   }, [loadInstalledKeys]);
 
-  const loadResources = useCallback(async () => {
-    if (activeTab === 'enterpriseTerm') {
-      setResourceList([]);
-      return;
-    }
-    setLoading(true);
-    try {
-      const res: any = await pageOntologyResources({
-        ownerType: activeTab,
-        resourceBizTypeList: ['VIEW', 'OBJECT'],
-        keyword,
-        catalogId,
-        statusList: statusFilter === 'all' ? [0, 1, 2, 3, 4, 5] : statusFilter === 'offline' ? [3] : [2],
-        pageNum: 1,
-        pageSize: 100,
-      });
-      const rows = getResourceRows(res);
-      setResourceList(
-        parseMaybeArray(rows)
+  const loadResources = useCallback(
+    async (nextPageNum = 1, append = false) => {
+      if (activeTab === 'enterpriseTerm') {
+        setResourceList([]);
+        setResourcePageNum(1);
+        setResourceHasMore(false);
+        return;
+      }
+      if (append) {
+        setLoadingMore(true);
+      } else {
+        setLoading(true);
+      }
+      try {
+        const res: any = await pageOntologyResources({
+          ownerType: activeTab,
+          resourceBizTypeList: ['VIEW', 'OBJECT'],
+          keyword,
+          catalogId,
+          statusList: statusFilter === 'all' ? [0, 1, 2, 3, 4, 5] : statusFilter === 'offline' ? [3] : [2],
+          permission: toResourceFilterPermission(permissionFilter),
+          pageNum: nextPageNum,
+          pageSize: RESOURCE_PAGE_SIZE,
+        });
+        const rows = getResourceRows(res);
+        const nextRows = parseMaybeArray(rows)
           .map((row) => normalizeOntologyResource(row, activeTab))
-          .filter((item) => item.resourceBizType === 'VIEW' || item.resourceBizType === 'OBJECT')
-      );
-    } catch {
-      setResourceList(MOCK_RESOURCES.filter((item) => item.ownerType === activeTab));
-    } finally {
-      setLoading(false);
-    }
-  }, [activeTab, catalogId, keyword, statusFilter]);
+          .filter((item) => item.resourceBizType === 'VIEW' || item.resourceBizType === 'OBJECT');
+        setResourceList((prev) => (append ? mergeResourceRows(prev, nextRows) : nextRows));
+        setResourcePageNum(nextPageNum);
+        setResourceHasMore(getPageHasMore(res, nextPageNum, RESOURCE_PAGE_SIZE, nextRows.length));
+      } catch (error: any) {
+        if (!append) {
+          setResourceList([]);
+          setResourcePageNum(1);
+          setResourceHasMore(false);
+        }
+        message.error(error?.msg || error?.message || '本体资源查询失败');
+      } finally {
+        if (append) {
+          setLoadingMore(false);
+        } else {
+          setLoading(false);
+        }
+      }
+    },
+    [activeTab, catalogId, keyword, permissionFilter, statusFilter]
+  );
 
   useEffect(() => {
     loadResources();
   }, [loadResources]);
+
+  const loadMoreResources = useCallback(() => {
+    if (loading || loadingMore || !resourceHasMore || activeTab === 'enterpriseTerm') return;
+    loadResources(resourcePageNum + 1, true);
+  }, [activeTab, loadResources, loading, loadingMore, resourceHasMore, resourcePageNum]);
+
+  const handleContainerScroll = useCallback(
+    (event: React.UIEvent<HTMLDivElement>) => {
+      const target = event.currentTarget;
+      if (target.scrollHeight - target.scrollTop - target.clientHeight <= 180) {
+        loadMoreResources();
+      }
+    },
+    [loadMoreResources]
+  );
 
   useEffect(() => {
     const onInstalled = (event: Event) => {
@@ -808,6 +570,7 @@ const OntologyCenter: React.FC = () => {
 
   const syncDoneCount = syncBatches.filter((item) => item.status === 'done').length;
   const syncProgress = syncBatches.length ? Math.round((syncDoneCount / syncBatches.length) * 100) : 0;
+  const showRefreshButton = activeTab === 'personal' || (activeTab === 'enterprise' && canRefreshEnterprise);
 
   const updateSyncBatch = (pageNum: number, patch: Partial<SyncBatch>) => {
     setSyncBatches((prev) => {
@@ -850,6 +613,10 @@ const OntologyCenter: React.FC = () => {
   const handleRefresh = async () => {
     if (activeTab === 'enterpriseTerm') {
       message.info('企业术语正在建设中');
+      return;
+    }
+    if (activeTab === 'enterprise' && !canRefreshEnterprise) {
+      message.warning('只有 adminvip 可以刷新企业本体资源');
       return;
     }
 
@@ -924,12 +691,28 @@ const OntologyCenter: React.FC = () => {
     });
   };
 
-  const simulateAuth = (resource: any, type: 'manage' | 'use') => {
-    message.info(
-      type === 'manage'
-        ? `${t('common.manageAuthorization')}：${resource.resourceName}`
-        : `${t('common.useAuthorization')}：${resource.resourceName}`
-    );
+  const handleAuth = (resource: any, type: 'useAuth' | 'mgrAuth') => {
+    setSelectedResource(resource);
+    setAuthType(type);
+    setAuthDrawerOpen(true);
+  };
+
+  const handleApplyUse = (resource: any) => {
+    Modal.confirm({
+      title: t('digitalEmployees.applyConfirm'),
+      okText: t('common.confirm'),
+      cancelText: t('common.cancel'),
+      onOk: async () => {
+        await applyResourceUse({ resourceId: resource.resourceId });
+        message.success(t('resource.applyUseSuccess'));
+        await loadResources();
+      },
+    });
+  };
+
+  const handleAuditUse = (resource: any) => {
+    setSelectedResource(resource);
+    setUseApplyAuditOpen(true);
   };
 
   const installResource = async (resource: any) => {
@@ -937,7 +720,7 @@ const OntologyCenter: React.FC = () => {
       message.error(t('resource.noDefaultDigitalEmployee'));
       return;
     }
-    if (!resource?.resourceId || `${resource.resourceId}`.startsWith('mock-')) {
+    if (!resource?.resourceId) {
       message.error('当前资源还没有真实资源ID，请先刷新同步后再安装');
       return;
     }
@@ -1009,75 +792,113 @@ const OntologyCenter: React.FC = () => {
   );
 
   const showViewObjects = useCallback(
-    (view: any) => {
-      openTablePanel({
-        title: `${view.resourceName} / ${t('common.resourceType.object')}`,
-        rowKey: (row: any) => row.objectCode,
-        rows: view.objectCodes.map((code: string) => {
-          const target =
-            resourceList.find(
-              (item) => item.resourceBizType === 'OBJECT' && item.sceneId === view.sceneId && item.objectCode === code
-            ) || {};
-          return {
-            objectCode: code,
-            objectName: target.objectName || target.resourceName || code,
-            sceneName: view.sceneName,
-            resourceDesc: target.resourceDesc,
-          };
-        }),
-        columns: [
-          { title: t('common.resourceType.object'), dataIndex: 'objectName', ellipsis: true },
-          { title: t('ontologyCenter.detail.col.code'), dataIndex: 'objectCode', ellipsis: true },
-          { title: t('common.desc'), dataIndex: 'resourceDesc', ellipsis: true },
-        ],
-      });
-    },
-    [openTablePanel, resourceList, t]
-  );
-
-  const getObjectRelations = useCallback(
-    (object: any) =>
-      resourceList
-        .filter((item) => item.resourceBizType === 'VIEW' && item.sceneId === object.sceneId)
-        .flatMap((item) => item.relations || [])
-        .filter(
-          (relation: any) =>
-            relation.sourceObjectCode === object.objectCode || relation.targetObjectCode === object.objectCode
-        ),
-    [resourceList]
-  );
-
-  const showObjectActions = useCallback(
-    (object: any) => {
-      openTablePanel({
-        title: `${object.resourceName} / ${t('ontologyCenter.detail.actions')}`,
-        rowKey: (row: any) => row.actionCode,
-        rows: object.actions || [],
-        columns: [
-          { title: t('ontologyCenter.detail.action.name'), dataIndex: 'actionName', ellipsis: true },
-          { title: t('ontologyCenter.detail.col.code'), dataIndex: 'actionCode', ellipsis: true },
-          { title: t('common.desc'), dataIndex: 'actionDesc', ellipsis: true },
-        ],
-      });
+    async (view: any) => {
+      const viewCode = view?.viewCode || view?.resourceCode;
+      if (!viewCode) {
+        message.error('当前视图缺少视图编码，无法查询对象列表');
+        return;
+      }
+      const hideLoading = message.loading('对象列表加载中...', 0);
+      try {
+        const res: any = await listOntologyObjectsByView({ viewCode });
+        const rows = findResourceRows(res).map((item: any) => ({
+          ...item,
+          objectCode: item.objectCode || item.object_code || item.resourceCode || item.code,
+          objectName: item.objectName || item.object_name || item.resourceName || item.name,
+          objectDesc: item.objectDesc || item.object_desc || item.resourceDesc || item.description || item.desc,
+        }));
+        openTablePanel({
+          title: `${view.resourceName} / ${t('common.resourceType.object')}`,
+          rowKey: (row: any) => row.objectCode,
+          rows,
+          columns: [
+            { title: t('common.resourceType.object'), dataIndex: 'objectName', ellipsis: true },
+            { title: t('ontologyCenter.detail.col.code'), dataIndex: 'objectCode', ellipsis: true },
+            { title: t('common.desc'), dataIndex: 'objectDesc', ellipsis: true },
+          ],
+        });
+      } catch (error: any) {
+        message.error(error?.msg || error?.message || '对象列表查询失败');
+      } finally {
+        hideLoading();
+      }
     },
     [openTablePanel, t]
   );
 
-  const showObjectRelations = useCallback(
-    (object: any) => {
-      openTablePanel({
-        title: `${object.resourceName} / ${t('employeeDetail.ontology.relation')}`,
-        rowKey: (row: any) => row.relationCode,
-        rows: getObjectRelations(object),
-        columns: [
-          { title: t('ontologyCenter.detail.rel.name'), dataIndex: 'relationName', ellipsis: true },
-          { title: t('ontologyCenter.detail.rel.source'), dataIndex: 'sourceObjectName', ellipsis: true },
-          { title: t('ontologyCenter.detail.rel.target'), dataIndex: 'targetObjectName', ellipsis: true },
-          { title: t('ontologyCenter.detail.rel.cardinality'), dataIndex: 'relationCardinality', width: 90 },
-        ],
-      });
+  const showObjectActions = useCallback(
+    async (object: any) => {
+      const objectCode = object?.objectCode || object?.resourceCode;
+      if (!objectCode) {
+        message.error('当前对象缺少对象编码，无法查询动作列表');
+        return;
+      }
+      const hideLoading = message.loading('动作列表加载中...', 0);
+      try {
+        const res: any = await getOntologyObjectDetail({ objectCode });
+        const detail = getData(res);
+        const rows = parseMaybeArray(detail?.actions).map((item: any) => ({
+          ...item,
+          actionCode: item.actionCode || item.action_code || item.code,
+          actionName: item.actionName || item.action_name || item.name,
+          actionDesc: item.actionDesc || item.action_desc || item.description || item.desc,
+        }));
+        openTablePanel({
+          title: `${object.resourceName} / ${t('ontologyCenter.detail.actions')}`,
+          rowKey: (row: any) => row.actionCode,
+          rows,
+          columns: [
+            { title: t('ontologyCenter.detail.action.name'), dataIndex: 'actionName', ellipsis: true },
+            { title: t('ontologyCenter.detail.col.code'), dataIndex: 'actionCode', ellipsis: true },
+            { title: t('common.desc'), dataIndex: 'actionDesc', ellipsis: true },
+          ],
+        });
+      } catch (error: any) {
+        message.error(error?.msg || error?.message || '动作列表查询失败');
+      } finally {
+        hideLoading();
+      }
     },
-    [getObjectRelations, openTablePanel, t]
+    [activeTab, openTablePanel, t]
+  );
+
+  const showObjectRelations = useCallback(
+    async (object: any) => {
+      const objectCode = object?.objectCode || object?.resourceCode;
+      if (!objectCode) {
+        message.error('当前对象缺少对象编码，无法查询关系列表');
+        return;
+      }
+      const hideLoading = message.loading('关系列表加载中...', 0);
+      try {
+        const res: any = await listOntologyRelationsByObject({ objectCode });
+        const rows = findResourceRows(res).map((item: any) => ({
+          ...item,
+          relationCode: item.relationCode || item.relation_code || item.code,
+          relationName: item.relationName || item.relation_name || item.name,
+          sourceObjectName: item.sourceObjectName || item.source_object_name,
+          targetObjectName: item.targetObjectName || item.target_object_name,
+          relationCardinality: item.relationCardinality || item.relation_cardinality,
+          relationDesc: item.relationDesc || item.relation_desc || item.description || item.desc,
+        }));
+        openTablePanel({
+          title: `${object.resourceName} / ${t('employeeDetail.ontology.relation')}`,
+          rowKey: (row: any) => row.relationCode,
+          rows,
+          columns: [
+            { title: t('ontologyCenter.detail.rel.name'), dataIndex: 'relationName', ellipsis: true },
+            { title: t('ontologyCenter.detail.rel.source'), dataIndex: 'sourceObjectName', ellipsis: true },
+            { title: t('ontologyCenter.detail.rel.target'), dataIndex: 'targetObjectName', ellipsis: true },
+            { title: t('ontologyCenter.detail.rel.cardinality'), dataIndex: 'relationCardinality', width: 90 },
+          ],
+        });
+      } catch (error: any) {
+        message.error(error?.msg || error?.message || '关系列表查询失败');
+      } finally {
+        hideLoading();
+      }
+    },
+    [openTablePanel, t]
   );
 
   const renderSyncBatchStatus = (batch: SyncBatch) => {
@@ -1088,21 +909,28 @@ const OntologyCenter: React.FC = () => {
   };
 
   const renderCardMenu = (resource: any) => {
-    const items: any[] = [
-      { key: 'applyUse', label: t('resource.applyUse'), icon: <DatabaseOutlined /> },
-      { key: 'manageAuth', label: t('common.manageAuthorization'), icon: <LinkOutlined /> },
-      { key: 'useAuth', label: t('common.useAuthorization'), icon: <EyeOutlined /> },
-      { key: 'auditUse', label: t('resource.auditUse'), icon: <ApiOutlined /> },
-    ];
+    const items: any[] = [];
+    if (resource?.canApplyUse) {
+      items.push({ key: 'applyUse', label: t('resource.applyUse'), icon: <DatabaseOutlined /> });
+    }
+    if (resource?.canManageAuth) {
+      items.push({ key: 'manageAuth', label: t('common.manageAuthorization'), icon: <LinkOutlined /> });
+    }
+    if (resource?.canUseAuth) {
+      items.push({ key: 'useAuth', label: t('common.useAuthorization'), icon: <EyeOutlined /> });
+    }
+    if (resource?.canAuditUse) {
+      items.push({ key: 'auditUse', label: t('resource.auditUse'), icon: <ApiOutlined /> });
+    }
 
     return {
       items,
       onClick: ({ key, domEvent }: any) => {
         domEvent?.stopPropagation?.();
-        if (key === 'applyUse') message.success(t('resource.applyUseSuccess'));
-        if (key === 'manageAuth') simulateAuth(resource, 'manage');
-        if (key === 'useAuth') simulateAuth(resource, 'use');
-        if (key === 'auditUse') message.info(`${t('resource.auditUse')}：${resource.resourceName}`);
+        if (key === 'applyUse') handleApplyUse(resource);
+        if (key === 'manageAuth') handleAuth(resource, 'mgrAuth');
+        if (key === 'useAuth') handleAuth(resource, 'useAuth');
+        if (key === 'auditUse') handleAuditUse(resource);
       },
     };
   };
@@ -1162,65 +990,74 @@ const OntologyCenter: React.FC = () => {
       );
     }
     return (
-      <div className={styles.resourceCardGrid}>
-        {visibleResources.map((resource) => {
-          const isView = resource.resourceBizType === 'VIEW';
-          return (
-            <div key={resource.resourceId} className={styles.resourceCard}>
-              <div className={styles.cardHeader}>
-                <div className={classnames(styles.cardIcon, isView ? styles.viewIcon : styles.objectIcon)}>
-                  <AntdIcon type={isView ? 'icon-a-yemian-line' : 'icon-tongxun'} />
-                </div>
-                <div className={styles.cardMain}>
-                  <div className={styles.cardNameRow}>
-                    <Tooltip title={resource.resourceName}>
-                      <button type="button" className={styles.cardName} onClick={() => openDetail(resource)}>
-                        {resource.resourceName}
-                      </button>
-                    </Tooltip>
-                    <span className={styles.cardTypeTag}>
-                      <span className={styles.cardTypeTagText}>
-                        {isView ? t('common.resourceType.view') : t('common.resourceType.object')}
-                      </span>
-                    </span>
+      <>
+        <div className={styles.resourceCardGrid}>
+          {visibleResources.map((resource) => {
+            const isView = resource.resourceBizType === 'VIEW';
+            return (
+              <div key={resource.resourceId} className={styles.resourceCard}>
+                <div className={styles.cardHeader}>
+                  <div className={classnames(styles.cardIcon, isView ? styles.viewIcon : styles.objectIcon)}>
+                    <AntdIcon type={isView ? 'icon-a-yemian-line' : 'icon-tongxun'} />
                   </div>
-                  <div className={styles.cardCode}>{resource.resourceCode}</div>
+                  <div className={styles.cardMain}>
+                    <div className={styles.cardNameRow}>
+                      <Tooltip title={resource.resourceName}>
+                        <button type="button" className={styles.cardName} onClick={() => openDetail(resource)}>
+                          {resource.resourceName}
+                        </button>
+                      </Tooltip>
+                      <span className={styles.cardTypeTag}>
+                        <span className={styles.cardTypeTagText}>
+                          {isView ? t('common.resourceType.view') : t('common.resourceType.object')}
+                        </span>
+                      </span>
+                    </div>
+                    <div className={styles.cardCode}>{resource.resourceCode}</div>
+                  </div>
+                </div>
+                <div className={styles.cardDesc}>{resource.resourceDesc}</div>
+                <div className={styles.cardFooter}>
+                  <div className={styles.cardBottomActions}>
+                    {renderCardBottomActions(resource).map((action) => (
+                      <Button
+                        key={action.key}
+                        type="link"
+                        size="small"
+                        loading={action.loading}
+                        disabled={action.disabled}
+                        onClick={action.onClick}
+                      >
+                        {action.label}
+                      </Button>
+                    ))}
+                  </div>
+                  {renderCardMenu(resource).items.length ? (
+                    <Dropdown trigger={['click']} menu={renderCardMenu(resource)}>
+                      <Button
+                        type="text"
+                        className={styles.cardMenu}
+                        icon={<EllipsisOutlined />}
+                        onClick={(event) => event.stopPropagation()}
+                      />
+                    </Dropdown>
+                  ) : null}
                 </div>
               </div>
-              <div className={styles.cardDesc}>{resource.resourceDesc}</div>
-              <div className={styles.cardFooter}>
-                <div className={styles.cardBottomActions}>
-                  {renderCardBottomActions(resource).map((action) => (
-                    <Button
-                      key={action.key}
-                      type="link"
-                      size="small"
-                      loading={action.loading}
-                      disabled={action.disabled}
-                      onClick={action.onClick}
-                    >
-                      {action.label}
-                    </Button>
-                  ))}
-                </div>
-                <Dropdown trigger={['click']} menu={renderCardMenu(resource)}>
-                  <Button
-                    type="text"
-                    className={styles.cardMenu}
-                    icon={<EllipsisOutlined />}
-                    onClick={(event) => event.stopPropagation()}
-                  />
-                </Dropdown>
-              </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+        {visibleResources.length > 0 && (
+          <div className={styles.loadMoreStatus}>
+            {loadingMore ? <Spin size="small" /> : resourceHasMore ? '下拉加载更多' : '已加载全部'}
+          </div>
+        )}
+      </>
     );
   };
 
   return (
-    <div className={styles.container}>
+    <div className={styles.container} onScroll={handleContainerScroll}>
       <CommonTabs
         activeKey={activeTab}
         onChange={(key) => {
@@ -1245,9 +1082,11 @@ const OntologyCenter: React.FC = () => {
               allowClear
               placeholder={t('common.inputKeyword')}
             />
-            <Button type="primary" icon={<ReloadOutlined />} loading={loading || syncing} onClick={handleRefresh}>
-              {t('common.refresh')}
-            </Button>
+            {showRefreshButton && (
+              <Button type="primary" icon={<ReloadOutlined />} loading={loading || syncing} onClick={handleRefresh}>
+                {t('common.refresh')}
+              </Button>
+            )}
             <Button type="primary" icon={<SwapOutlined />} onClick={() => setProviderOpen(true)}>
               {t('ontologyCenter.provider.switch')}
             </Button>
@@ -1334,6 +1173,44 @@ const OntologyCenter: React.FC = () => {
           </div>
         </div>
       </Modal>
+
+      {authDrawerOpen && (
+        <AuthListDrawer
+          authType={authType}
+          record={selectedResource}
+          onCancel={() => {
+            setAuthDrawerOpen(false);
+            setSelectedResource(null);
+          }}
+          onSuccess={loadResources}
+          authApiPath={`/byaiService/auth/privilegeGrant/${
+            authType === 'useAuth' ? 'setResourceUsers' : 'setResourceManagers'
+          }`}
+          headerInfo={{
+            title: selectedResource?.resourceName,
+            content: selectedResource?.resourceDesc,
+            icon: (
+              <div
+                className={classnames(
+                  styles.cardIcon,
+                  selectedResource?.resourceBizType === 'VIEW' ? styles.viewIcon : styles.objectIcon
+                )}
+              >
+                <AntdIcon type={selectedResource?.resourceBizType === 'VIEW' ? 'icon-a-yemian-line' : 'icon-tongxun'} />
+              </div>
+            ),
+          }}
+        />
+      )}
+      <UseApplyAuditDrawer
+        open={useApplyAuditOpen}
+        record={selectedResource}
+        onCancel={() => {
+          setUseApplyAuditOpen(false);
+          setSelectedResource(null);
+        }}
+        onSuccess={loadResources}
+      />
     </div>
   );
 };

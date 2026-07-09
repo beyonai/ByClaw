@@ -5,6 +5,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import com.iwhalecloud.byai.gateway.channels.service.feishu.config.FeishuStreamProperties;
 import com.iwhalecloud.byai.gateway.channels.service.feishu.model.FeishuRobotChannelConfig;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtDigEmployeeService;
 import com.iwhalecloud.byai.manager.dto.resource.ResourceExtDigEmployeeDto;
@@ -25,16 +26,19 @@ public class FeishuRobotRegistryService {
     private static final Logger logger = LoggerFactory.getLogger(FeishuRobotRegistryService.class);
     private static final String FEISHU_CHANNEL = "Feishu";
 
+    private final FeishuStreamProperties properties;
     private final SsResExtDigEmployeeService ssResExtDigEmployeeService;
     private final FeishuRobotConfigService feishuRobotConfigService;
     private final FeishuTokenService feishuTokenService;
     private final Object refreshLock = new Object();
 
     public FeishuRobotRegistryService(
+            FeishuStreamProperties properties,
             SsResExtDigEmployeeService ssResExtDigEmployeeService,
             FeishuRobotConfigService feishuRobotConfigService,
             FeishuTokenService feishuTokenService
     ) {
+        this.properties = properties;
         this.ssResExtDigEmployeeService = ssResExtDigEmployeeService;
         this.feishuRobotConfigService = feishuRobotConfigService;
         this.feishuTokenService = feishuTokenService;
@@ -63,7 +67,7 @@ public class FeishuRobotRegistryService {
 
     public void refreshRobotClientsForResource(Long resourceId) {
         synchronized (refreshLock) {
-            if (resourceId == null) {
+            if (!properties.isEnabled() || resourceId == null) {
                 return;
             }
             doRefreshRobotConfigsForResource(resourceId);

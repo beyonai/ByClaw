@@ -1,4 +1,4 @@
-import { POST } from '@/service/common/request';
+import { GET, POST } from '@/service/common/request';
 
 /**
  * 本体服务前端调用层。
@@ -142,12 +142,10 @@ export function getOntologySceneDetails(params: {
 }
 
 /** 获取对象详情（属性 + 动作）。 */
-export function getOntologyObjectDetail(params: { ownerType?: string; baseId: string; objectCode: string }) {
+export function getOntologyObjectDetail(params: { objectCode: string }) {
   return POST<any>(
     '/byaiService/ontology/object/detail',
     {
-      ownerType: normalizeOwnerType(params.ownerType),
-      baseId: params.baseId,
       objectCode: params.objectCode,
     },
     ontologyRequestConfig
@@ -218,6 +216,7 @@ export function pageOntologyResources(params: {
   keyword?: string;
   catalogId?: string | number;
   statusList?: number[];
+  permission?: string;
   pageNum?: number;
   pageSize?: number;
 }) {
@@ -230,9 +229,15 @@ export function pageOntologyResources(params: {
     resourceName: keyword,
     ...(params.catalogId === undefined || params.catalogId === '' ? {} : { catalogId: params.catalogId }),
     statusList: params.statusList,
+    permission: params.permission,
     pageNum: params.pageNum || 1,
     pageSize: params.pageSize || 20,
   });
+}
+
+/** 当前用户是否可同步企业本体资源（仅 adminvip）。 */
+export function checkOntologyEnterpriseResourceSyncPermission() {
+  return GET<any>('/byaiService/ontology/resource/sync/permission', {}, ontologyRequestConfig);
 }
 
 /** 从 datacloud 分页同步本体资源到资源表。 */
@@ -339,8 +344,15 @@ export function listOntologyViews(params: { baseId: string; cacheMode?: string }
 }
 
 /** 视图详情。 */
-export function getOntologyViewDetail(params: { baseId: string; viewCode: string; cacheMode?: string }) {
-  return ontologyPost('/byaiService/ontology/view/detail', params);
+export function getOntologyViewDetail(params: { viewCode: string }) {
+  return ontologyPost('/byaiService/ontology/view/detail', {
+    viewCode: params.viewCode,
+  });
+}
+
+/** 根据视图编码查询对象列表。 */
+export function listOntologyObjectsByView(params: { viewCode: string }) {
+  return ontologyPost('/byaiService/ontology/view/objects', params);
 }
 
 /** 创建视图。 */
@@ -363,6 +375,11 @@ export function deleteOntologyView(params: { baseId: string; viewCode: string })
 /** 关系列表。 */
 export function listOntologyRelations(params: { baseId: string; cacheMode?: string }) {
   return ontologyPost('/byaiService/ontology/relation/list', params);
+}
+
+/** 根据对象编码查询关系详情列表。 */
+export function listOntologyRelationsByObject(params: { objectCode: string }) {
+  return ontologyPost('/byaiService/ontology/object/relations', params);
 }
 
 /** 关系详情。 */

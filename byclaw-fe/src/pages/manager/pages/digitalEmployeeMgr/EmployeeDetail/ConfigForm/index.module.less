@@ -385,6 +385,37 @@
   text-overflow: ellipsis;
 }
 
+.ontologyPreviewList {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  margin-top: 10px;
+  overflow: hidden;
+}
+
+.ontologyResourcePreviewTag,
+.ontologyResourcePreviewMore {
+  flex: 0 1 auto;
+  max-width: 160px;
+  margin-inline-end: 0;
+  border: 1px solid #dbeafe;
+  background: #eff6ff;
+  color: #2563eb;
+
+  span {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.ontologyResourcePreviewMore {
+  flex: 0 0 auto;
+  max-width: none;
+}
+
 // 配置区域
 .skillsSection,
 .knowledgeSection,

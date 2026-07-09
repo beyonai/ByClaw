@@ -569,9 +569,8 @@ public class SuasSuperassistApplicationService {
         }
 
         AgentPrologueDto agentPrologueDto = JSON.parseObject(prologue, AgentPrologueDto.class);
-
+        agentPrologueDto.setModelId(modelInfo.getModelId());
         agentPrologueDto.setModelInfo(modelInfo);
-
         // 添加默认知识库
         if (defaultDatasetId != null) {
             AgentPrologueDto.DatasetSearchConfig datasetSearchConfig = new AgentPrologueDto.DatasetSearchConfig();
@@ -640,7 +639,7 @@ public class SuasSuperassistApplicationService {
         AgentPrologueDto.ModelInfo modelInfo = new AgentPrologueDto.ModelInfo();
         modelInfo.setMaxToken(byaiAimodel.getMaxContentToken());
         modelInfo.setModelId(byaiAimodel.getModelId());
-        modelInfo.setModel(byaiAimodel.getModelNo());
+        modelInfo.setModel(byaiAimodel.getModelName());
         modelInfo.setHistory(6);
         return modelInfo;
     }

@@ -16,6 +16,7 @@ import io.swagger.annotations.ApiOperation;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -125,10 +126,8 @@ public class OntologyBaseController {
 
     @ApiOperation("对象详情：属性/动作")
     @PostMapping("/object/detail")
-    public ResponseUtil<JSONObject> objectDetail(@RequestBody OntologyBaseQueryRequest request) {
-        return ResponseUtil
-            .successRes(ontologyBaseService.objectDetail(request.getOwnerType(), request.getBaseId(),
-                request.getObjectCode()));
+    public ResponseUtil<JSONObject> objectDetail(@RequestBody JSONObject request) {
+        return ResponseUtil.successRes(ontologyBaseService.objectDetail(request));
     }
 
     @ApiOperation("创建对象")
@@ -155,10 +154,22 @@ public class OntologyBaseController {
         return ResponseUtil.successRes(ontologyBaseService.listViews(request));
     }
 
+    @ApiOperation("根据视图编码查询对象列表")
+    @PostMapping("/view/objects")
+    public ResponseUtil<JSONArray> listObjectsByViewCode(@RequestBody JSONObject request) {
+        return ResponseUtil.successRes(ontologyBaseService.listObjectsByViewCode(request));
+    }
+
     @ApiOperation("本体资源分页列表（视图/对象，查询资源表）")
     @PostMapping("/resource/page")
     public ResponseUtil<JSONObject> pageResources(@RequestBody JSONObject request) {
         return ResponseUtil.successRes(ontologyBaseService.pageResources(request));
+    }
+
+    @ApiOperation("查询当前用户是否可同步企业本体资源")
+    @GetMapping("/resource/sync/permission")
+    public ResponseUtil<Boolean> canSyncEnterpriseResources() {
+        return ResponseUtil.successRes(ontologyBaseService.canSyncEnterpriseResources());
     }
 
     @ApiOperation("同步本体资源分页列表（视图/对象，从 datacloud 同步到资源表）")
@@ -195,6 +206,12 @@ public class OntologyBaseController {
     @PostMapping("/relation/list")
     public ResponseUtil<JSONArray> listRelations(@RequestBody JSONObject request) {
         return ResponseUtil.successRes(ontologyBaseService.listRelations(request));
+    }
+
+    @ApiOperation("根据对象编码查询关系详情列表")
+    @PostMapping("/object/relations")
+    public ResponseUtil<JSONArray> listRelationsByObjectCode(@RequestBody JSONObject request) {
+        return ResponseUtil.successRes(ontologyBaseService.listRelationsByObjectCode(request));
     }
 
     @ApiOperation("关系详情")

@@ -376,8 +376,8 @@ const RenderContent = (props: ResourceCardProps) => {
     resource?.createUserName ||
     resource?.memberName ||
     intl.formatMessage({ id: 'common.none' });
-
-  const useCount = Number(resource?.useCount || resource?.focusCount || 0);
+  const rawUseCount = Number(resource?.useCount || resource?.focusCount || 0);
+  const useCount = Number.isFinite(rawUseCount) ? rawUseCount : 0;
   const normalizedSkillSourceType = `${resource?.displaySourceType || resource?.sourceType || ''}`
     .replace(/[-\s]/g, '_')
     .toUpperCase();

@@ -48,6 +48,7 @@ from by_framework.core.protocol.results import AgentTaskResult, normalize_proces
 from by_framework.worker.sandbox.hook_sandbox import active_workspace
 
 from datacloud_analysis.agent import create_agent
+from datacloud_platform.constants import DEFAULT_BASE_ID
 from datacloud_analysis.command_plugins import CommandPluginManager
 from datacloud_analysis.logging_setup import setup_logging
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -1570,7 +1571,7 @@ class DataCloudWorker(GatewayWorker):
                 OntologyAgentConfig,
             )  # noqa: PLC0415
             from datacloud_platform.config import get_settings  # noqa: PLC0415
-
+            from datacloud_platform.constants import DEFAULT_BASE_ID
             from byclaw_data.platform.result_file_storage import (
                 build_result_file_storage,  # noqa: PLC0415
             )
@@ -1584,7 +1585,7 @@ class DataCloudWorker(GatewayWorker):
                     result_file_storage=build_result_file_storage(
                         settings=get_settings()
                     ),
-                    base_id="default",
+                    base_id=DEFAULT_BASE_ID,
                 )
             )
             logger.info(
@@ -1603,6 +1604,7 @@ class DataCloudWorker(GatewayWorker):
         )
         from datacloud_platform import get_platform  # noqa: PLC0415
         from datacloud_platform.config import get_settings  # noqa: PLC0415
+        from datacloud_platform.constants import DEFAULT_BASE_ID
 
         # 在 get_platform() 初始化单例之前注入 ByclawResultFileStorage。
         # loader_runtime._configure_runtime_services() 在 platform 初始化时执行
@@ -1618,7 +1620,7 @@ class DataCloudWorker(GatewayWorker):
             platform=get_platform(),
             settings=get_settings(),
         )
-        self._loader_snapshot = self._runtime_manager.get_loader("default")
+        self._loader_snapshot = self._runtime_manager.get_loader(DEFAULT_BASE_ID)
         logger.info(
             "DataCloudWorker: _loader_snapshot=%s",
             "ready"
@@ -1664,6 +1666,22 @@ class DataCloudWorker(GatewayWorker):
                 logger.info(
                     "DataCloudWorker: no mounted_objects found, TOOL_POOL init skipped"
                 )
+
+        # 启动术语同步后台 Worker（消费 DYNAMIC_TABLE 写入事件，通过 TermMixin 写入术语库）
+        # platform 实现了 TermSyncHandler 协议（via TermMixin），直接注入即可
+        try:
+            from datacloud_knowledge.sync import term_sync_worker  # noqa: PLC0415
+            from datacloud_platform import get_platform  # noqa: PLC0415
+
+            asyncio.create_task(
+                term_sync_worker(handler=get_platform()),
+                name="term_sync_worker",
+            )
+            logger.info("DataCloudWorker: term_sync_worker started with platform handler")
+        except ImportError:
+            logger.debug("DataCloudWorker: datacloud_knowledge.sync not available, term sync disabled")
+        except Exception:
+            logger.warning("DataCloudWorker: term_sync_worker 启动失败", exc_info=True)
 
         await super().start_heartbeat(**kwargs)
 
@@ -1934,7 +1952,7 @@ class DataCloudWorker(GatewayWorker):
                                     result_file_storage=build_result_file_storage(
                                         settings=get_settings()
                                     ),
-                                    base_id="default",
+                                    base_id=DEFAULT_BASE_ID,
                                 )
                             )
                             logger.info(

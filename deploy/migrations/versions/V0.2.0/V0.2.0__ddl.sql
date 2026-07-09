@@ -274,6 +274,7 @@ CREATE INDEX IF NOT EXISTS idx_sandbox_health_watermark_scope
     ON byai.sandbox_health_watermark_model (service_type, profile_key, enabled, priority DESC);
 
 alter table byai.ss_res_ext_dig_employee alter column tag_name type varchar(255);
+alter table byai.ss_res_ext_dig_employee alter column machine_channel type text;
 
 -- 模型表新增 owner_type 字段: 区分个人模型 (PERSONAL) 和公共模型 (PUBLIC)
 ALTER TABLE byai.byai_aimodel ADD COLUMN owner_type VARCHAR(20) DEFAULT 'PUBLIC';

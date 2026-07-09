@@ -33,15 +33,6 @@ export function rootAgentContext(rc: ResourceContext | undefined | null): Dict {
   return isRecord(rc?.root_agent) ? (rc!.root_agent as Dict) : {};
 }
 
-function ontologyBaseCodeFrom(...sources: Array<Dict | undefined | null>): string {
-  for (const source of sources) {
-    if (!source) continue;
-    const code = asString(source.ontologyBaseCode) || asString(source.ontology_base_code);
-    if (code) return code;
-  }
-  return "";
-}
-
 export function getResourceContext(payload: Dict | undefined | null): ResourceContext {
   if (!isRecord(payload)) return {};
   const rc = payload.resource_context;
@@ -241,12 +232,7 @@ export function mergeResourceContextIntoCapability(
     }
     capability.agent = agentInfo;
   }
-  if (
-    normalizedType === "mcp" ||
-    normalizedType === "scene" ||
-    normalizedType === "object" ||
-    normalizedType === "view"
-  ) {
+  if (normalizedType === "mcp" || normalizedType === "object" || normalizedType === "view") {
     const mcpInfo = (capability.mcp ?? ({} as Capability["mcp"])) as NonNullable<Capability["mcp"]>;
     if (!mcpInfo.server_url && selected.mcpServerUrl) {
       mcpInfo.server_url = selected.mcpServerUrl;
@@ -256,10 +242,6 @@ export function mergeResourceContextIntoCapability(
     }
     if (!mcpInfo.resource_code && selected.resourceCode) {
       mcpInfo.resource_code = selected.resourceCode;
-    }
-    const ontologyBaseCode = ontologyBaseCodeFrom(selected);
-    if (ontologyBaseCode && !asString(capability.metadata.ontology_base_code)) {
-      capability.metadata.ontology_base_code = ontologyBaseCode;
     }
     const merged = normalizeCustomHeaders(selected.mcpHeader ?? selected.mcpHeaders);
     if (Object.keys(merged).length > 0) {
@@ -345,14 +327,11 @@ export function buildCapabilityFromDetail(params: BuildFromDetailParams): Capabi
   });
   const resolvedDomainUrl =
     asString(detail.domainURL) || extractKnowledgeServiceBaseUrlFromDocDetail(detail);
-  const selected = params.resourceContext ? selectedResourceContext(params.resourceContext) : null;
-  const ontologyBaseCode = ontologyBaseCodeFrom(detail, selected);
   Object.assign(capability.metadata, {
     system_code: detail.systemCode,
     catalog_name: detail.catalogName,
     owner: detail.manUserName,
     created_at: detail.createTime,
-    ...(ontologyBaseCode ? { ontology_base_code: ontologyBaseCode } : {}),
     ...(resolvedDomainUrl ? { domain_url: resolvedDomainUrl } : {}),
   });
   const detailHeaders = normalizeCustomHeaders(detail.headers);
@@ -577,12 +556,7 @@ export function buildCapabilityFromDetail(params: BuildFromDetailParams): Capabi
     if (detail.prologue) {
       capability.metadata.prologue = detail.prologue;
     }
-  } else if (
-    resourceBizType === "MCP" ||
-    resourceBizType === "SCENE" ||
-    resourceBizType === "OBJECT" ||
-    resourceBizType === "VIEW"
-  ) {
+  } else if (resourceBizType === "MCP" || resourceBizType === "OBJECT" || resourceBizType === "VIEW") {
     const tools: CapabilityTool[] = [];
     const paramTools = Array.isArray(param.tools) ? (param.tools as unknown[]) : [];
     for (const tool of paramTools) {
@@ -674,11 +648,11 @@ export function buildCapabilityFromResourceContext(
       }
       return capability;
     }
-    if (normalizedType === "scene" || normalizedType === "view") {
+    if (normalizedType === "view") {
       const capability = baseCapability({
         resourceId,
         resourceName: String(selected.resourceName ?? resourceId),
-        resourceType: normalizedType === "scene" ? "SCENE" : "VIEW",
+        resourceType: "VIEW",
         description: String(selected.resourceDesc ?? selected.resourceName ?? resourceId),
         discoverySource: "resource_context",
       });
@@ -791,20 +765,15 @@ export function buildDirectCapabilityStub(params: {
     }
   }
 
-  if (normalizedType === "scene" || normalizedType === "object" || normalizedType === "view") {
+  if (normalizedType === "object" || normalizedType === "view") {
     const selected = selectedResourceContext(params.resourceContext);
     const capability = baseCapability({
       resourceId,
       resourceName: resourceId,
-      resourceType:
-        normalizedType === "object" ? "OBJECT" : normalizedType === "scene" ? "SCENE" : "VIEW",
+      resourceType: normalizedType === "object" ? "OBJECT" : "VIEW",
       description: resourceId,
       discoverySource: "direct_stub",
     });
-    const ontologyBaseCode = ontologyBaseCodeFrom(selected);
-    if (ontologyBaseCode) {
-      capability.metadata.ontology_base_code = ontologyBaseCode;
-    }
     capability.mcp = {
       server_url: selected.mcpServerUrl,
       transfer_type: selected.mcpTransferType,
