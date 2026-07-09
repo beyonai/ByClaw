@@ -300,7 +300,7 @@ ENV SAU_BASE_DIR=/by/sau \
 COPY middleware/openclaw/sau/social_auto_upload-${SAU_VERSION}-py3-none-any.whl /tmp/
 RUN set -eux; \
     mkdir -p /by/sau/cookies; \
-    python3 -m pip install --no-cache-dir /tmp/social_auto_upload-${SAU_VERSION}-py3-none-any.whl; \
+    python3 -m pip install /tmp/social_auto_upload-${SAU_VERSION}-py3-none-any.whl; \
     patchright install chromium; \
     rm -f /tmp/social_auto_upload-${SAU_VERSION}-py3-none-any.whl; \
     sau --help >/dev/null; \
