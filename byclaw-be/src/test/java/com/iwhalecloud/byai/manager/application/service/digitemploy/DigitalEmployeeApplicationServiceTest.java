@@ -22,6 +22,7 @@ import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtDigEmployeeS
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtSkillService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceRelDetailService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
+import com.iwhalecloud.byai.manager.domain.staticdata.service.SystemConfigService;
 import com.iwhalecloud.byai.manager.domain.superassist.service.SuasSuperassistService;
 import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeDTO;
 import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeDetailsDTO;
@@ -79,6 +80,7 @@ class DigitalEmployeeApplicationServiceTest {
     private ResourceAuthContextService resourceAuthContextService;
     private DingtalkRobotRegistryService dingtalkRobotRegistryService;
     private DigEmployeeChangeEventPublisher digEmployeeChangeEventPublisher;
+    private SystemConfigService systemConfigService;
     private DigitalEmployeeApplicationService service;
 
     @BeforeEach
@@ -97,6 +99,8 @@ class DigitalEmployeeApplicationServiceTest {
         resourceAuthContextService = mock(ResourceAuthContextService.class);
         dingtalkRobotRegistryService = mock(DingtalkRobotRegistryService.class);
         digEmployeeChangeEventPublisher = mock(DigEmployeeChangeEventPublisher.class);
+        systemConfigService = mock(SystemConfigService.class);
+        when(systemConfigService.getStringParamValueByCode(any())).thenReturn("");
 
         MessageSource mockMessageSource = mock(MessageSource.class);
         when(mockMessageSource.getMessage(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(java.util.Locale.class)))
@@ -119,6 +123,7 @@ class DigitalEmployeeApplicationServiceTest {
         ReflectionTestUtils.setField(service, "resourceAuthContextService", resourceAuthContextService);
         ReflectionTestUtils.setField(service, "dingtalkRobotRegistryService", dingtalkRobotRegistryService);
         ReflectionTestUtils.setField(service, "digEmployeeChangeEventPublisher", digEmployeeChangeEventPublisher);
+        ReflectionTestUtils.setField(service, "systemConfigService", systemConfigService);
 
         LoginInfo loginInfo = new LoginInfo();
         loginInfo.setUserId(1L);

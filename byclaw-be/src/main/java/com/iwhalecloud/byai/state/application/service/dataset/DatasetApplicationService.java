@@ -901,10 +901,25 @@ public class DatasetApplicationService {
             return new ArrayList<>();
         }
 
+        String normalizedDirectoryPath = normalizeKnowledgeDirectoryPath(directoryPath);
         KbListDir kbListDir = new KbListDir();
         kbListDir.setKnCode(ssResource.getResourceCode());
-        kbListDir.setDirectoryPath(normalizeKnowledgeDirectoryPath(directoryPath));
-        PythonBuildResponse<Data> response = feignPythonBuildService.listDir(kbListDir);
+        kbListDir.setDirectoryPath(normalizedDirectoryPath);
+        PythonBuildResponse<Data> response;
+        try {
+            response = feignPythonBuildService.listDir(kbListDir);
+        }
+        catch (BaseException e) {
+            if (isKnowledgeDirectoryNotFound(e)) {
+                logger.info("检查知识库同名文件时目录不存在，按无冲突处理 directoryPath={}", normalizedDirectoryPath);
+                return new ArrayList<>();
+            }
+            throw e;
+        }
+        if (isKnowledgeDirectoryNotFound(response)) {
+            logger.info("检查知识库同名文件时目录不存在，按无冲突处理 directoryPath={}", normalizedDirectoryPath);
+            return new ArrayList<>();
+        }
         assertPythonBuildSuccess(response, "检查知识库同名文件");
 
         List<String> existingFilePaths = new ArrayList<>();
@@ -925,6 +940,23 @@ public class DatasetApplicationService {
             }
         }
         return existingFilePaths;
+    }
+
+    private boolean isKnowledgeDirectoryNotFound(PythonBuildResponse<?> response) {
+        if (response == null
+            || PythonBuildResponse.RESPONSE_SUCCESS.equalsIgnoreCase(StringUtils.trimToEmpty(response.getResultCode()))) {
+            return false;
+        }
+        return isKnowledgeDirectoryNotFound(response.getResultMsg());
+    }
+
+    private boolean isKnowledgeDirectoryNotFound(Throwable throwable) {
+        return throwable != null && isKnowledgeDirectoryNotFound(throwable.getMessage());
+    }
+
+    private boolean isKnowledgeDirectoryNotFound(String message) {
+        String resultMsg = StringUtils.defaultString(message).toLowerCase();
+        return resultMsg.contains("directory not found") || resultMsg.contains("目录不存在");
     }
 
     /**

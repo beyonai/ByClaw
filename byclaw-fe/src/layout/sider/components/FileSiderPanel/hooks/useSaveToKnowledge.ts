@@ -1,19 +1,16 @@
 import { useCallback, useState } from 'react';
 import { message } from 'antd';
 import { useIntl } from '@umijs/max';
-import { getMimeType } from '@/components/QueryInput/components/FileBrowserEntry/components/FileBrowserPanel/constants';
 import type { UploadConfirmFile } from '@/components/UploadConfirmModal';
 import type { IKnowledgeBaseItem } from '@/layout/sider/components/Knowledge/components/KnowledgeBase/types';
 import { queryDigEmployeeManageKnowledgeResourceAuth } from '@/pages/manager/service/resources';
 import {
   checkUploadFileConflicts,
-  createFolder as createKnowledgeFolder,
   queryDirAndFileByLevel,
-  uploadFiles as uploadKnowledgeFiles,
   type QueryDirAndFileByLevelItem,
 } from '@/service/knowledgeCenter';
-import { downloadFile, listFiles, type FileBrowserItem } from '@/service/fileBrowser';
-import { ensureDirectoryPath, getRawBlob, isDirectory, joinKnowledgeDirectoryPath, unwrapListResponse } from '../utils';
+import { listFiles, saveToKnowledge as saveFileBrowserToKnowledge, type FileBrowserItem } from '@/service/fileBrowser';
+import { ensureDirectoryPath, isDirectory, joinKnowledgeDirectoryPath, unwrapListResponse } from '../utils';
 
 interface PendingKnowledgeUpload extends UploadConfirmFile {
   source: FileBrowserItem;
@@ -24,6 +21,17 @@ interface UseSaveToKnowledgeOptions {
   resourceId: string;
   clearClickTimer: () => void;
 }
+
+const getErrorMessage = (error: any, fallback: string) => {
+  if (typeof error === 'string' && error.trim()) {
+    return error;
+  }
+  return error?.message || error?.msg || fallback;
+};
+
+const isKnowledgeDirectoryNotFoundError = (error: any) =>
+  getErrorMessage(error, '').toLowerCase().includes('directory not found') ||
+  getErrorMessage(error, '').includes('目录不存在');
 
 export default function useSaveToKnowledge({ resourceId, clearClickTimer }: UseSaveToKnowledgeOptions) {
   const intl = useIntl();
@@ -59,7 +67,7 @@ export default function useSaveToKnowledge({ resourceId, clearClickTimer }: UseS
           message.warning(intl.formatMessage({ id: 'fileSider.saveToKnowledge.noManagePermission' }));
         }
       } catch (error: any) {
-        message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.error.loadFailed' }));
+        message.error(getErrorMessage(error, intl.formatMessage({ id: 'fileBrowser.error.loadFailed' })));
       } finally {
         setKnowledgeLoading(false);
       }
@@ -82,7 +90,7 @@ export default function useSaveToKnowledge({ resourceId, clearClickTimer }: UseS
         setKnowledgeDirectoryPath(directoryPath);
         return folders;
       } catch (error: any) {
-        message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.error.loadFailed' }));
+        message.error(getErrorMessage(error, intl.formatMessage({ id: 'fileBrowser.error.loadFailed' })));
         return [];
       } finally {
         setKnowledgeFolderLoading(false);
@@ -100,7 +108,7 @@ export default function useSaveToKnowledge({ resourceId, clearClickTimer }: UseS
         });
         return unwrapListResponse<QueryDirAndFileByLevelItem>(response).filter((item) => item.type === 'directory');
       } catch (error: any) {
-        message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.error.loadFailed' }));
+        message.error(getErrorMessage(error, intl.formatMessage({ id: 'fileBrowser.error.loadFailed' })));
         return [];
       }
     },
@@ -127,76 +135,6 @@ export default function useSaveToKnowledge({ resourceId, clearClickTimer }: UseS
       void loadKnowledgeFolders(kb, '/');
     },
     [loadKnowledgeFolders]
-  );
-
-  const uploadFileToKnowledge = useCallback(
-    async (
-      item: FileBrowserItem,
-      kb: IKnowledgeBaseItem,
-      directoryPath: string,
-      options: { processFrontMatter?: boolean; overwrite?: boolean } = {}
-    ) => {
-      const res: any = await downloadFile(resourceId, item.path);
-      const rawBlob = getRawBlob(res);
-      const mimeType = rawBlob.type || getMimeType(item.name) || undefined;
-      const file = new File([rawBlob], item.name, mimeType ? { type: mimeType } : undefined);
-      const formData = new FormData();
-      formData.append('resourceId', String(kb.resourceId));
-      formData.append('directoryPath', directoryPath);
-      formData.append('files', file);
-      formData.append('processFrontMatter', String(Boolean(options.processFrontMatter)));
-      formData.append('overwrite', String(Boolean(options.overwrite)));
-      await uploadKnowledgeFiles(formData);
-    },
-    [resourceId]
-  );
-
-  const ensureKnowledgeFolder = useCallback(
-    async (kb: IKnowledgeBaseItem, parentDirectoryPath: string, folderName: string) => {
-      try {
-        await createKnowledgeFolder({
-          resourceId: Number(kb.resourceId),
-          directoryName: folderName,
-          directoryPath: parentDirectoryPath,
-          directoryDescription: '',
-        });
-      } catch (error) {
-        const response = await queryDirAndFileByLevel({
-          resourceId: Number(kb.resourceId),
-          directoryPath: parentDirectoryPath,
-        });
-        const existed = unwrapListResponse<QueryDirAndFileByLevelItem>(response).some(
-          (item) => item.type === 'directory' && item.name === folderName
-        );
-        if (!existed) {
-          throw error;
-        }
-      }
-    },
-    []
-  );
-
-  const copyFileBrowserDirectoryToKnowledge = useCallback(
-    async function copyDirectory(
-      item: FileBrowserItem,
-      kb: IKnowledgeBaseItem,
-      parentDirectoryPath: string,
-      options: { processFrontMatter?: boolean; overwrite?: boolean } = {}
-    ): Promise<void> {
-      const targetDirectoryPath = joinKnowledgeDirectoryPath(parentDirectoryPath, item.name);
-      await ensureKnowledgeFolder(kb, parentDirectoryPath, item.name);
-
-      const response = await listFiles({ resourceId, path: ensureDirectoryPath(item.path) });
-      const children = unwrapListResponse<FileBrowserItem>(response);
-      for (const child of children) {
-        if (isDirectory(child)) {
-          await copyDirectory(child, kb, targetDirectoryPath, options);
-        } else {
-          await uploadFileToKnowledge(child, kb, targetDirectoryPath, options);
-        }
-      }
-    },
-    [ensureKnowledgeFolder, resourceId, uploadFileToKnowledge]
   );
 
   const collectKnowledgeUploads = useCallback(
@@ -240,12 +178,26 @@ export default function useSaveToKnowledge({ resourceId, clearClickTimer }: UseS
 
       const conflicts: string[] = [];
       for (const [directoryPath, fileNames] of Object.entries(groups)) {
-        const response = await checkUploadFileConflicts({
-          resourceId: kb.resourceId,
-          directoryPath,
-          fileNames,
-        });
-        conflicts.push(...(response?.overwritePaths || []));
+        try {
+          const response = await checkUploadFileConflicts(
+            {
+              resourceId: kb.resourceId,
+              directoryPath,
+              fileNames,
+            },
+            {
+              responseCfg: {
+                hideErrorTips: true,
+              },
+            }
+          );
+          conflicts.push(...(response?.overwritePaths || []));
+        } catch (error: any) {
+          if (isKnowledgeDirectoryNotFoundError(error)) {
+            continue;
+          }
+          throw error;
+        }
       }
       return conflicts;
     },
@@ -270,7 +222,7 @@ export default function useSaveToKnowledge({ resourceId, clearClickTimer }: UseS
       setSaveModalOpen(false);
       setKnowledgeUploadConfirmOpen(true);
     } catch (error: any) {
-      message.error(error?.message || intl.formatMessage({ id: 'fileSider.saveToKnowledge.failed' }));
+      message.error(getErrorMessage(error, intl.formatMessage({ id: 'fileSider.saveToKnowledge.failed' })));
     } finally {
       setSavingToKnowledge(false);
     }
@@ -289,17 +241,15 @@ export default function useSaveToKnowledge({ resourceId, clearClickTimer }: UseS
       const overwrite = pendingKnowledgeConflicts.length > 0;
       setSavingToKnowledge(true);
       try {
-        if (isDirectory(saveTarget)) {
-          await copyFileBrowserDirectoryToKnowledge(saveTarget, pendingKnowledgeBase, pendingKnowledgeDirectoryPath, {
-            processFrontMatter,
-            overwrite,
-          });
-        } else {
-          await uploadFileToKnowledge(saveTarget, pendingKnowledgeBase, pendingKnowledgeDirectoryPath, {
-            processFrontMatter,
-            overwrite,
-          });
-        }
+        await saveFileBrowserToKnowledge({
+          resourceId,
+          sourcePath: saveTarget.path,
+          sourceDir: isDirectory(saveTarget),
+          targetResourceId: pendingKnowledgeBase.resourceId,
+          targetDirectoryPath: pendingKnowledgeDirectoryPath,
+          processFrontMatter,
+          overwrite,
+        });
         message.success(intl.formatMessage({ id: 'multiChoices.saveToKnowledge.success' }));
         setKnowledgeUploadConfirmOpen(false);
         setPendingKnowledgeUploads([]);
@@ -309,19 +259,18 @@ export default function useSaveToKnowledge({ resourceId, clearClickTimer }: UseS
         setSaveModalOpen(false);
         setSaveTarget(null);
       } catch (error: any) {
-        message.error(error?.message || intl.formatMessage({ id: 'fileSider.saveToKnowledge.failed' }));
+        message.error(getErrorMessage(error, intl.formatMessage({ id: 'fileSider.saveToKnowledge.failed' })));
       } finally {
         setSavingToKnowledge(false);
       }
     },
     [
-      copyFileBrowserDirectoryToKnowledge,
       intl,
       pendingKnowledgeBase,
       pendingKnowledgeConflicts.length,
       pendingKnowledgeDirectoryPath,
+      resourceId,
       saveTarget,
-      uploadFileToKnowledge,
     ]
   );
 
