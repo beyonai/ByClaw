@@ -43,6 +43,7 @@ const KnowledgeDetail: React.FC = () => {
   const [baseInfo, setBaseInfo] = useState<any>({});
   const [uploadLoading, setUploadLoading] = useState(false);
   const [selectedBuildCount, setSelectedBuildCount] = useState(0);
+  const [selectedCount, setSelectedCount] = useState(0);
   const [knowledgeCapability, setKnowledgeCapability] = useState<KnowledgeCapability | null>(null);
   const [operationPermissions, setOperationPermissions] = useState<ResourceOperationPermissions | null>(null);
 
@@ -152,6 +153,7 @@ const KnowledgeDetail: React.FC = () => {
           folderPath={folderPath}
           setFolderPath={setFolderPath}
           onBuildSelectionChange={setSelectedBuildCount}
+          onSelectionCountChange={setSelectedCount}
         />
       ),
     },
@@ -248,6 +250,29 @@ const KnowledgeDetail: React.FC = () => {
                           { id: 'directoryManage.batchBuildWithCount' },
                           { count: selectedBuildCount }
                         )}
+                      </Button>
+                    )}
+                    {canManageKnowledge && (
+                      <Button
+                        icon={<span className="iconfont icon-a-Dragtuozhuai" />}
+                        disabled={selectedCount === 0}
+                        onClick={() => {
+                          directoryRef.current?.moveSelected();
+                        }}
+                      >
+                        {intl.formatMessage({ id: 'directoryManage.batchMoveWithCount' }, { count: selectedCount })}
+                      </Button>
+                    )}
+                    {canManageKnowledge && (
+                      <Button
+                        danger
+                        icon={<span className="iconfont icon-a-Deleteshanchu" />}
+                        disabled={selectedCount === 0}
+                        onClick={() => {
+                          directoryRef.current?.deleteSelected();
+                        }}
+                      >
+                        {intl.formatMessage({ id: 'directoryManage.batchDeleteWithCount' }, { count: selectedCount })}
                       </Button>
                     )}
                     {canManageKnowledge && (

@@ -28,7 +28,6 @@ import {
   buildDataset,
   deleteFolder,
   getFileBuildStatus,
-  queryDirAndFileByLevel as queryDirAndFileByLevelService,
   removeFile,
   searchDirAndFile,
   type BuildDatasetPayload,
@@ -51,6 +50,8 @@ const PreViewFile = lazy(() =>
 export interface DirectoryManageRef {
   getDirectoryList: (params: Record<string, any>) => void;
   buildSelectedFiles: () => void;
+  deleteSelected: () => void;
+  moveSelected: () => void;
 }
 
 interface IProps {
@@ -64,6 +65,7 @@ interface IProps {
   folderPath: { id: string; title: string }[];
   setFolderPath: React.Dispatch<React.SetStateAction<IProps['folderPath']>>;
   onBuildSelectionChange?: (count: number) => void;
+  onSelectionCountChange?: (count: number) => void;
 }
 
 type ActionItem = {
@@ -307,6 +309,7 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
     uploadLoading,
     setUploadLoading,
     onBuildSelectionChange,
+    onSelectionCountChange,
   } = props;
 
   const { folderPath, setFolderPath } = props;
@@ -326,7 +329,7 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
   const [queryingBuildStatusIds, setQueryingBuildStatusIds] = useState<string[]>([]);
   const [pollingFileIds, setPollingFileIds] = useState<string[]>([]);
   const [visibleFileIds, setVisibleFileIds] = useState<string[]>([]);
-  const [selectedBuildRowKeys, setSelectedBuildRowKeys] = useState<React.Key[]>([]);
+  const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const fileRefs = useRef<Record<string, HTMLTableRowElement | null>>({});
   const queryingFileIdsRef = useRef<Set<string>>(new Set());
@@ -502,19 +505,29 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
     [buildingFileIds, fileRecords, getFileRowKey]
   );
 
-  const selectedBuildFileRecords = useMemo(
-    () => buildableFileRecords.filter((record: any) => selectedBuildRowKeys.includes(getFileRowKey(record))),
-    [buildableFileRecords, getFileRowKey, selectedBuildRowKeys]
+  const selectedRecords = useMemo(
+    () => displayDirectoryList.filter((record: any) => selectedRowKeys.includes(getFileRowKey(record))),
+    [displayDirectoryList, getFileRowKey, selectedRowKeys]
   );
 
+  const selectedBuildFileRecords = useMemo(
+    () => buildableFileRecords.filter((record: any) => selectedRowKeys.includes(getFileRowKey(record))),
+    [buildableFileRecords, getFileRowKey, selectedRowKeys]
+  );
+
+  // 列表变化后剔除已不存在的选中行（目录 + 文件通用，不再局限于可构建文件）
   useEffect(() => {
-    const buildableRowKeys = buildableFileRecords.map((record: any) => getFileRowKey(record));
-    setSelectedBuildRowKeys((prev) => prev.filter((key) => buildableRowKeys.includes(`${key}`)));
-  }, [buildableFileRecords, getFileRowKey]);
+    const allRowKeys = displayDirectoryList.map((record: any) => getFileRowKey(record));
+    setSelectedRowKeys((prev) => prev.filter((key) => allRowKeys.includes(`${key}`)));
+  }, [displayDirectoryList, getFileRowKey]);
 
   useEffect(() => {
     onBuildSelectionChange?.(selectedBuildFileRecords.length);
   }, [onBuildSelectionChange, selectedBuildFileRecords.length]);
+
+  useEffect(() => {
+    onSelectionCountChange?.(selectedRecords.length);
+  }, [onSelectionCountChange, selectedRecords.length]);
 
   const pollingFileIdsKey = useMemo(() => pollingFileIds.map((item) => `${item}`).join(','), [pollingFileIds]);
 
@@ -929,13 +942,67 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
     });
   }, [intl, message, selectedBuildFileRecords, submitBuildTasks]);
 
+  const deleteSelected = useCallback(() => {
+    if (selectedRecords.length === 0) {
+      message.warning(intl.formatMessage({ id: 'directoryManage.selectItemsToDelete' }));
+      return;
+    }
+    const rid = baseInfo?.resourceId;
+    if (rid === null || rid === undefined || rid === '') {
+      message.error(intl.formatMessage({ id: 'directoryManage.missingKnowledgeBaseInfo' }));
+      return;
+    }
+    // 若同时选中父目录与其子项，子项会被父目录递归删除，这里先剔除被包含的子项，避免重复删除报错。
+    const selectedDirPaths = selectedRecords
+      .filter((record: any) => record?.type === 'directory')
+      .map((record: any) => normalizeDirectoryPath(getBuildDirectoryPath(record)));
+    const isUnderSelectedDir = (path: string) =>
+      selectedDirPaths.some((dir) => dir !== path && (path === dir || path.startsWith(`${dir}/`)));
+    const targets = selectedRecords.filter(
+      (record: any) => !isUnderSelectedDir(normalizeDirectoryPath(getBuildDirectoryPath(record)))
+    );
+
+    Modal.confirm({
+      title: intl.formatMessage({ id: 'common.deleteTips' }),
+      content: intl.formatMessage({ id: 'directoryManage.batchDeleteConfirm' }, { count: selectedRecords.length }),
+      onOk: async () => {
+        const results = await Promise.allSettled(
+          targets.map((record: any) => {
+            const directoryPath = getBuildDirectoryPath(record);
+            if (record?.type === 'directory') {
+              return deleteFolder({ resourceId: Number(rid), directoryPath });
+            }
+            return removeFile({ directoryPath, resourceId: String(rid) });
+          })
+        );
+        let success = 0;
+        let failed = 0;
+        results.forEach((result) => {
+          if (result.status === 'fulfilled' && result.value?.success !== false) success += 1;
+          else failed += 1;
+        });
+        const notify = failed ? message.warning : message.success;
+        notify(intl.formatMessage({ id: 'directoryManage.batchDeleteResult' }, { success, failed }));
+        setSelectedRowKeys([]);
+        getDirectoryList({ pageIndex: 1 });
+      },
+    });
+  }, [baseInfo?.resourceId, getBuildDirectoryPath, getDirectoryList, intl, message, selectedRecords]);
+
+  // 移动功能建设中：单个 / 批量移动统一提示，后续接入 MOVE 接口后再替换。
+  const moveSelected = useCallback(() => {
+    message.info(intl.formatMessage({ id: 'directoryManage.moveUnderConstruction' }));
+  }, [intl, message]);
+
   useImperativeHandle(
     ref,
     () => ({
       getDirectoryList,
       buildSelectedFiles: handleBatchBuild,
+      deleteSelected,
+      moveSelected,
     }),
-    [getDirectoryList, handleBatchBuild]
+    [getDirectoryList, handleBatchBuild, deleteSelected, moveSelected]
   );
 
   const renderPreviewPanel = useCallback(
@@ -987,20 +1054,12 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
     },
     [baseInfo?.resourceId, clearDetailPanel, getBuildDirectoryPath, intl, message, renderPreviewPanel]
   );
-  const checkDirectoryHasChildren = useCallback(async (resourceId: number, directoryPath: string) => {
-    const res = await queryDirAndFileByLevelService({
-      resourceId,
-      directoryPath,
-    });
-    return Array.isArray(res) && res.length > 0;
-  }, []);
-
   const handleAction = (key: string, record: any) => {
     switch (key) {
       case 'top':
         break;
       case 'move':
-        setMoveModalVisible(true);
+        message.info(intl.formatMessage({ id: 'directoryManage.moveUnderConstruction' }));
         break;
       case 'rename':
         modalAction.handleShow('edit', record);
@@ -1039,10 +1098,16 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
       case 'delete':
         Modal.confirm({
           title: intl.formatMessage({ id: 'common.deleteTips' }),
-          content: intl.formatMessage(
-            { id: 'common.deleteConfirm2' },
-            { content: record?.collectionName ?? record?.name }
-          ),
+          content:
+            record?.type === 'directory'
+              ? intl.formatMessage(
+                { id: 'directoryManage.deleteFolderRecursiveConfirm' },
+                { name: record?.collectionName ?? record?.name }
+              )
+              : intl.formatMessage(
+                { id: 'common.deleteConfirm2' },
+                { content: record?.collectionName ?? record?.name }
+              ),
           onOk: async () => {
             let promise: Promise<any>;
             if (record?.type === 'directory') {
@@ -1051,11 +1116,6 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
               if (!directoryPath || rid === null || rid === undefined || rid === '') {
                 message.error(intl.formatMessage({ id: 'directoryManage.deleteFolderMissingParams' }));
                 return Promise.reject(new Error('invalid delete folder params'));
-              }
-              const hasChildren = await checkDirectoryHasChildren(Number(rid), directoryPath);
-              if (hasChildren) {
-                message.warning(intl.formatMessage({ id: 'directoryManage.deleteFolderNotEmpty' }));
-                return;
               }
               promise = deleteFolder({ resourceId: Number(rid), directoryPath });
             } else {
@@ -1127,6 +1187,15 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
       let actionList: ActionItem[] = [];
 
       if (canManage) {
+        actionList.push({
+          label: intl.formatMessage({ id: 'directoryManage.move' }),
+          key: 'move',
+          icon: (
+            <Tooltip title={intl.formatMessage({ id: 'directoryManage.move' })}>
+              <span className="iconfont icon-a-Dragtuozhuai" />
+            </Tooltip>
+          ),
+        });
         actionList.push({
           label: intl.formatMessage({ id: 'common.delete' }),
           key: 'delete',
@@ -1355,21 +1424,22 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
     ]
   );
 
-  const buildRowSelection = useMemo(
+  const rowSelection = useMemo(
     () =>
       canManage
         ? {
           type: 'checkbox' as const,
-          selectedRowKeys: selectedBuildRowKeys,
-          onChange: (selectedRowKeys: React.Key[]) => {
-            setSelectedBuildRowKeys(selectedRowKeys);
+          selectedRowKeys,
+          onChange: (keys: React.Key[]) => {
+            setSelectedRowKeys(keys);
           },
+          // 目录与文件都可勾选（用于批量移动/删除）；仅搜索态下的合成父目录节点不可选。
           getCheckboxProps: (record: any) => ({
-            disabled: record?.type !== 'file' || buildingFileIds.includes(getFileRowKey(record)),
+            disabled: Boolean(record?.__synthetic),
           }),
         }
         : undefined,
-    [buildingFileIds, canManage, getFileRowKey, selectedBuildRowKeys]
+    [canManage, selectedRowKeys]
   );
 
   const handleBreadcrumbClick = (index: number) => {
@@ -1388,7 +1458,7 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
           dataSource={displayDirectoryList}
           columns={columns}
           rowKey={getFileRowKey}
-          rowSelection={buildRowSelection}
+          rowSelection={rowSelection}
           emptyLocale={{
             emptyText: (
               <DirectoryEmpty

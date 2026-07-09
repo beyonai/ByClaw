@@ -720,6 +720,16 @@ export default {
   'directoryManage.deleteFolderMissingParams': 'Unable to delete: missing folder path or knowledge base information',
   'directoryManage.deleteFileMissingParams': 'Unable to delete: missing file path or knowledge base information',
   'directoryManage.deleteFolderNotEmpty': 'The folder contains subfolders or files and cannot be deleted',
+  'directoryManage.move': 'Move',
+  'directoryManage.moveUnderConstruction': 'Move is under construction',
+  'directoryManage.batchDeleteWithCount': 'Delete ({count})',
+  'directoryManage.batchMoveWithCount': 'Move ({count})',
+  'directoryManage.selectItemsToDelete': 'Select items to delete first',
+  'directoryManage.deleteFolderRecursiveConfirm':
+    'Folder "{name}" contains subfolders/files that will also be removed. Continue?',
+  'directoryManage.batchDeleteConfirm':
+    'Delete the {count} selected item(s)? Folders and their contents will be removed together.',
+  'directoryManage.batchDeleteResult': 'Delete finished: {success} succeeded, {failed} failed',
   'permissionManage.member': 'Member',
   'permissionManage.addedBy': 'Added By',
   'permissionManage.permission': 'Permission',
