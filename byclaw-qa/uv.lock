@@ -255,7 +255,7 @@ wheels = [
 
 [[package]]
 name = "by-framework"
-version = "0.2.2.dev5"
+version = "0.2.2.dev9"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "dill" },
@@ -263,9 +263,9 @@ dependencies = [
     { name = "redis" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/53/d6/fa6399190bd6cd158a61c915dbbd12a088cfd78e390a7dbd994ec70f9092/by_framework-0.2.2.dev5.tar.gz", hash = "sha256:b5f7ee569722852af7461017cb6a893788b1bf1effd3597120ce5b859d82c07d", size = 1162628, upload-time = "2026-06-13T04:10:26.835Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ac/0e/0c77ed1addda14129d72af555bf84ccc90f7ed29632b09667ee379fd8cf3/by_framework-0.2.2.dev9.tar.gz", hash = "sha256:b432640091b18be9dc6a1413e00d96b4cb5a2614d5ca8fbca267a11ee8119cce", size = 1261356, upload-time = "2026-07-08T09:38:29.198Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e1/e6/3c7573e677cc95b1377b4c5796c2124b534fd77ca6791351525c1bd0f197/by_framework-0.2.2.dev5-py3-none-any.whl", hash = "sha256:abf3cb913f910c6567af04f14fde04bd2937e27ebfe5725c6ca88ad6dce9f362", size = 189370, upload-time = "2026-06-13T04:10:25.478Z" },
+    { url = "https://files.pythonhosted.org/packages/72/4f/c5170c49723e04a9c0d11fd709566106f8cd4e6a22982127d8a11371e45d/by_framework-0.2.2.dev9-py3-none-any.whl", hash = "sha256:2e80a349930752570db778d02d7f9b8b3ad8b57a267d92f7e6069c05aba031f4", size = 217818, upload-time = "2026-07-08T09:38:27.854Z" },
 ]
 
 [[package]]
@@ -359,7 +359,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "by-framework", specifier = "==0.2.2.dev5" },
+    { name = "by-framework", specifier = "==0.2.2.dev9" },
     { name = "by-framework-langgraph", specifier = "==0.0.3.dev2" },
     { name = "by-framework-trace-langfuse", specifier = "==0.0.3.dev2" },
     { name = "by-qa", extras = ["all"], specifier = "==0.2.0" },

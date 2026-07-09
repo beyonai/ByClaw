@@ -19,6 +19,8 @@ def _write_fake_uv(fake_bin: Path, exec_log: Path, env_log: Path) -> None:
             printf 'MINIO_ACCESS_KEY=%s\\n' "${{MINIO_ACCESS_KEY-}}" >> {env_log}
             printf 'MINIO_SECRET_KEY=%s\\n' "${{MINIO_SECRET_KEY-}}" >> {env_log}
             printf 'MINIO_SECURE=%s\\n' "${{MINIO_SECURE-}}" >> {env_log}
+            printf 'REDIS_CLUSTER_HOST=%s\\n' "${{REDIS_CLUSTER_HOST-}}" >> {env_log}
+            printf 'REDIS_KEY_SCHEMA_VERSION=%s\\n' "${{REDIS_KEY_SCHEMA_VERSION-}}" >> {env_log}
             exit 0
             """
         )
@@ -48,6 +50,24 @@ def _complete_source_env() -> dict[str, str]:
         "BYCLAW_QA_KB_MINIO_BUCKET": "knowledge-base",
         "BYCLAW_QA_KB_MINIO_MARKDOWN_BUCKET": "knowledge-base-markdown",
         "BYCLAW_QA_BYAI_WORKER_ID": "instant-search-worker-1",
+    }
+
+
+def _custom_storage_provider_source_env() -> dict[str, str]:
+    return {
+        "QA_DOMAINNAME": "byclaw-qa-manager",
+        "HOST": "localhost",
+        "DB_USER": "postgres",
+        "DB_PASS": "postgres",
+        "REDIS_HOST": "localhost",
+        "REDIS_PORT": "6379",
+        "REDIS_DATABASE": "0",
+        "BYCLAW_QA_PORT": "8000",
+        "BYCLAW_QA_AGENT_DATA_PATH": "agent_data",
+        "BYCLAW_QA_KB_FETCH_CACHE_TTL_SECONDS": "86400",
+        "BYCLAW_QA_KB_FETCH_CACHE_CLEANUP_INTERVAL_SECONDS": "600",
+        "BYCLAW_QA_BYAI_WORKER_ID": "instant-search-worker-1",
+        "BY_QA_STORAGE_PROVIDER": "byclaw_userfs_storage:build_byclaw_userfs_storage_provider",
     }
 
 
@@ -84,26 +104,9 @@ def test_start_maps_file_storage_minio_source_env(tmp_path: Path) -> None:
         "MINIO_ACCESS_KEY=minioadmin",
         "MINIO_SECRET_KEY=minioadmin",
         "MINIO_SECURE=false",
+        "REDIS_CLUSTER_HOST=",
+        "REDIS_KEY_SCHEMA_VERSION=",
     ]
-
-
-def _custom_storage_provider_source_env() -> dict[str, str]:
-    """Source env with BY_QA_STORAGE_PROVIDER, without MinIO vars."""
-    return {
-        "QA_DOMAINNAME": "byclaw-qa-manager",
-        "HOST": "localhost",
-        "DB_USER": "postgres",
-        "DB_PASS": "postgres",
-        "REDIS_HOST": "localhost",
-        "REDIS_PORT": "6379",
-        "REDIS_DATABASE": "0",
-        "BYCLAW_QA_PORT": "8000",
-        "BYCLAW_QA_AGENT_DATA_PATH": "agent_data",
-        "BYCLAW_QA_KB_FETCH_CACHE_TTL_SECONDS": "86400",
-        "BYCLAW_QA_KB_FETCH_CACHE_CLEANUP_INTERVAL_SECONDS": "600",
-        "BYCLAW_QA_BYAI_WORKER_ID": "instant-search-worker-1",
-        "BY_QA_STORAGE_PROVIDER": "byclaw_userfs_storage:build_byclaw_userfs_storage_provider",
-    }
 
 
 def test_start_skips_minio_validation_when_custom_storage_provider(tmp_path: Path) -> None:
@@ -130,3 +133,110 @@ def test_start_skips_minio_validation_when_custom_storage_provider(tmp_path: Pat
 
     assert result.returncode == 0, result.stderr
     assert exec_log.read_text().strip() == "run uvicorn api:app --host 0.0.0.0 --port 8000"
+
+
+def test_start_accepts_redis_cluster_source_env(tmp_path: Path) -> None:
+    qa_dir = tmp_path / "byclaw-qa"
+    qa_dir.mkdir()
+    shutil.copy2(Path(__file__).resolve().parents[1] / "start.sh", qa_dir / "start.sh")
+
+    values = _complete_source_env()
+    values.pop("REDIS_HOST")
+    values.pop("REDIS_PORT")
+    values["REDIS_CLUSTER_HOST"] = "10.0.0.1:6379,10.0.0.2:6379"
+    values["REDIS_KEY_SCHEMA_VERSION"] = "v2"
+    _write_env(qa_dir / ".env", values)
+
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    exec_log = tmp_path / "exec.log"
+    env_log = tmp_path / "env.log"
+    _write_fake_uv(fake_bin, exec_log, env_log)
+
+    result = subprocess.run(
+        ["bash", str(qa_dir / "start.sh"), "api"],
+        cwd=qa_dir,
+        env={"PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}"},
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert exec_log.read_text().strip() == "run uvicorn api:app --host 0.0.0.0 --port 8000"
+    assert env_log.read_text().splitlines() == [
+        "MINIO_ENDPOINT=10.10.168.204:9009",
+        "MINIO_ACCESS_KEY=minioadmin",
+        "MINIO_SECRET_KEY=minioadmin",
+        "MINIO_SECURE=false",
+        "REDIS_CLUSTER_HOST=10.0.0.1:6379,10.0.0.2:6379",
+        "REDIS_KEY_SCHEMA_VERSION=v2",
+    ]
+
+
+def test_start_accepts_redis_cluster_source_env_without_redis_database(tmp_path: Path) -> None:
+    qa_dir = tmp_path / "byclaw-qa"
+    qa_dir.mkdir()
+    shutil.copy2(Path(__file__).resolve().parents[1] / "start.sh", qa_dir / "start.sh")
+
+    values = _complete_source_env()
+    values.pop("REDIS_HOST")
+    values.pop("REDIS_PORT")
+    values.pop("REDIS_DATABASE")
+    values["REDIS_CLUSTER_HOST"] = "10.0.0.1:6379,10.0.0.2:6379"
+    values["REDIS_KEY_SCHEMA_VERSION"] = "v2"
+    _write_env(qa_dir / ".env", values)
+
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    exec_log = tmp_path / "exec.log"
+    env_log = tmp_path / "env.log"
+    _write_fake_uv(fake_bin, exec_log, env_log)
+
+    result = subprocess.run(
+        ["bash", str(qa_dir / "start.sh"), "api"],
+        cwd=qa_dir,
+        env={"PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}"},
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert exec_log.read_text().strip() == "run uvicorn api:app --host 0.0.0.0 --port 8000"
+    assert env_log.read_text().splitlines() == [
+        "MINIO_ENDPOINT=10.10.168.204:9009",
+        "MINIO_ACCESS_KEY=minioadmin",
+        "MINIO_SECRET_KEY=minioadmin",
+        "MINIO_SECURE=false",
+        "REDIS_CLUSTER_HOST=10.0.0.1:6379,10.0.0.2:6379",
+        "REDIS_KEY_SCHEMA_VERSION=v2",
+    ]
+
+
+def test_start_rejects_redis_cluster_without_v2_key_schema(tmp_path: Path) -> None:
+    qa_dir = tmp_path / "byclaw-qa"
+    qa_dir.mkdir()
+    shutil.copy2(Path(__file__).resolve().parents[1] / "start.sh", qa_dir / "start.sh")
+
+    values = _complete_source_env()
+    values.pop("REDIS_HOST")
+    values.pop("REDIS_PORT")
+    values["REDIS_CLUSTER_HOST"] = "10.0.0.1:6379"
+    values["REDIS_KEY_SCHEMA_VERSION"] = "v1"
+    _write_env(qa_dir / ".env", values)
+
+    result = subprocess.run(
+        ["bash", str(qa_dir / "start.sh"), "api"],
+        cwd=qa_dir,
+        env={"PATH": os.environ.get("PATH", "")},
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "REDIS_KEY_SCHEMA_VERSION must be v2" in result.stderr
