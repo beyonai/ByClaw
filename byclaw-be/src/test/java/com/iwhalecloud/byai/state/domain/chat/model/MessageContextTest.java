@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.state.domain.chat.model;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.util.Date;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
@@ -28,9 +29,44 @@ class MessageContextTest {
             .isEqualTo(" MODEL_API_KEY environment variable. This");
     }
 
+    @Test
+    void hasPersistableContent_detectsEmptyAndNonEmptyResponses() {
+        MessageContext emptyContext = new MessageContext();
+        assertThat(emptyContext.hasPersistableContent()).isFalse();
+
+        MessageContext titleOnlyContext = new MessageContext();
+        titleOnlyContext.recordAnswerStruct(answerDelta("ByClaw coder 智能体已就绪", "ready-order", "3003"));
+        assertThat(titleOnlyContext.hasPersistableContent()).isFalse();
+
+        MessageContext answerContext = new MessageContext();
+        answerContext.recordAnswerText(answerDelta("visible answer", "answer-order"));
+        answerContext.recordAnswerStruct(answerDelta("visible answer", "answer-order"));
+        assertThat(answerContext.hasPersistableContent()).isTrue();
+
+        MessageContext inferContext = new MessageContext();
+        inferContext.recordInferLog(answerDelta("visible thought", "thought-order"));
+        assertThat(inferContext.hasPersistableContent()).isTrue();
+    }
+
+    @Test
+    void markFirstResponseTimeIfAbsent_keepsEarliestResponseTime() {
+        MessageContext context = new MessageContext();
+        Date firstResponseTime = new Date(1000L);
+        Date laterResponseTime = new Date(2000L);
+
+        context.markFirstResponseTimeIfAbsent(firstResponseTime);
+        context.markFirstResponseTimeIfAbsent(laterResponseTime);
+
+        assertThat(context.getFirstResponseTime()).isEqualTo(firstResponseTime);
+    }
+
     private static String answerDelta(String content, String orderId) {
+        return answerDelta(content, orderId, "1002");
+    }
+
+    private static String answerDelta(String content, String orderId, String contentType) {
         AnswerDelta answerDelta = new AnswerDelta();
-        answerDelta.setContentType("1002");
+        answerDelta.setContentType(contentType);
         answerDelta.setOrderId(orderId);
 
         ChoiceDto choice = new ChoiceDto();

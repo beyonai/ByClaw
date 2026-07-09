@@ -1,12 +1,45 @@
 import { orderBy, size, uniqBy, isEmpty, get, isNil } from 'lodash';
 
-import { createMessage, fetchMessageHandler } from '@/utils/messgae';
+import { createMessage, fetchMessageHandler, hasVisibleMessageContent } from '@/utils/messgae';
 
 import { getMessages, getMessageState } from '@/service/message';
 
 import { IMessage } from '@/typescript/message';
 
 const _INIT_PAGESIZE_ = 20;
+
+const getMessageCreateTimeValue = (message: any) => {
+  const createTime = get(message, 'createTime');
+  if (isNil(createTime) || createTime === '') {
+    return Number.MAX_SAFE_INTEGER;
+  }
+
+  if (typeof createTime === 'number') {
+    return createTime;
+  }
+
+  const numericTime = Number(createTime);
+  if (Number.isFinite(numericTime)) {
+    return numericTime;
+  }
+
+  const timestamp = Date.parse(`${createTime}`);
+  if (Number.isFinite(timestamp)) {
+    return timestamp;
+  }
+
+  const normalizedTimestamp = Date.parse(`${createTime}`.replace(/-/g, '/'));
+  return Number.isFinite(normalizedTimestamp) ? normalizedTimestamp : Number.MAX_SAFE_INTEGER;
+};
+
+const getMessageIdValue = (message: any) => {
+  const messageId = get(message, 'messageId');
+  const numericMessageId = Number(messageId);
+  return Number.isFinite(numericMessageId) ? numericMessageId : Number.MAX_SAFE_INTEGER;
+};
+
+export const sortMessagesByTimeline = <T extends { createTime?: any; messageId?: any }>(list: T[] = []) =>
+  orderBy(list, [getMessageCreateTimeValue, getMessageIdValue], ['asc', 'asc']);
 
 const getInitMessageInfo = () => {
   return {
@@ -29,12 +62,13 @@ export const fetchMessage = async (param: {
 
   let cacheList: any[] = [];
   if (Array.isArray(list)) {
-    // 后端同学说messageId时自增长的
-    cacheList = orderBy(list, ['messageId'], ['asc']).map((item) => {
-      const myMessage = fetchMessageHandler(item);
+    cacheList = sortMessagesByTimeline(list)
+      .map((item) => {
+        const myMessage = fetchMessageHandler(item);
 
-      return createMessage(myMessage);
-    });
+        return createMessage(myMessage);
+      })
+      .filter(hasVisibleMessageContent);
   }
 
   const resComIdsAll: string[] = [];
@@ -204,9 +238,8 @@ export default {
         cache = {
           ...res,
           hasMore: isPrev ? undefined : size(res.list) >= cache.pageSize,
-          list: uniqBy(
-            isPrev ? orderBy([...cache.list, ...res.list], ['messageId'], ['asc']) : [...res.list, ...cache.list],
-            'messageId'
+          list: sortMessagesByTimeline(
+            uniqBy(isPrev ? [...cache.list, ...res.list] : [...res.list, ...cache.list], 'messageId')
           ),
           pageRange: [Math.max(pageRange[0] || 1, pageNum), Math.min(pageRange[1] || 1, pageNum)],
         };
