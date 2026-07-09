@@ -5,6 +5,7 @@ import {
   buildChannelExtensionPrompt,
   buildLanguagePrompt,
   buildSessionFilesPrompt,
+  buildSkillInstallPrompt,
   buildUserMdReloadPrompt,
 } from "./i18n.js";
 
@@ -43,6 +44,7 @@ export function buildPromptInjectionSnapshot(params: {
   if (params.request.sessionId) {
     sections.push(buildSessionFilesPrompt(params.request.sessionId, params.request.language));
   }
+  sections.push(buildSkillInstallPrompt(normalizedWorkspace, params.request.language));
   if (params.request.languageProvided) {
     sections.push(buildLanguagePrompt(params.request.language));
   }

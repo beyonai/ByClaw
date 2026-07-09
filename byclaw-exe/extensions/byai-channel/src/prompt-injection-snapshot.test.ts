@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   buildPromptInjectionSnapshot,
   clearPromptInjectionSnapshot,
@@ -7,6 +7,10 @@ import {
   takePromptInjectionSnapshot,
 } from "./prompt-injection-snapshot.js";
 import type { ActiveSdkRequest } from "./session-context.js";
+
+vi.mock("./session-context.js", () => ({
+  getSessionPathBySessionId: (sessionId: string) => `/tmp/${sessionId}`,
+}));
 
 function mockRequest(overrides: Partial<ActiveSdkRequest> = {}): ActiveSdkRequest {
   return {
@@ -35,11 +39,17 @@ describe("prompt-injection-snapshot", () => {
   it("stores and returns appendSystemContext for before_prompt_build", () => {
     resetPromptInjectionSnapshotsForTest();
     const request = mockRequest();
-    const snapshot = buildPromptInjectionSnapshot({ request });
+    const snapshot = buildPromptInjectionSnapshot({
+      request,
+      workspaceDir: "/tmp/agent-main",
+    });
     setPromptInjectionSnapshot(request.sessionKey, snapshot);
 
     const taken = takePromptInjectionSnapshot(request.sessionKey);
     expect(taken?.appendSystemContext).toContain("Session Root");
+    expect(taken?.appendSystemContext).toContain("Skill 安装工作规范");
+    expect(taken?.appendSystemContext).toContain("/tmp/agent-main/skills");
+    expect(taken?.appendSystemContext).toContain("OpenClaw Workshop");
     expect(taken?.appendSystemContext).toContain("channelType");
     expect(taken?.appendSystemContext).toContain("渠道语言");
 
