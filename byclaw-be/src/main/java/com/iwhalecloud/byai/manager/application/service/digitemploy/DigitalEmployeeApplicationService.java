@@ -1763,17 +1763,18 @@ public class DigitalEmployeeApplicationService {
     }
 
     /**
-     * PR-3 批量加载 target_content(替换 PR-1 之前的 N+1 循环).
+     * PR-3 (#150) 批量加载 target_content(替换 PR-1 之前的 N+1 循环).
      * <p>
      * 核心改进:单 bizType 下一次性查多个 resourceId,避免每资源一次 SQL.
      * <p>
-     * <strong>当前实现</strong>:因 7 个 ext service(MCP / TOOLKIT / AGENT / DOC / VIEW / OBJECT / SKILL)
-     * 暂无 {@code findByIds} 批量接口,本方法内部循环 {@code findById}(TODO: 各 ext mapper 加批量 IN 查询),
-     * 仍优于 PR-1 之前的"在 for 循环里调用 + 同步走 Redis SET"--本方法至少**统一错误处理 + 一致字段读取**.
+     * <strong>当前实现</strong>:7 个 ext service 的 mapper 全部补了 {@code findByIds(Collection<Long>)}
+     * 批量接口(底层委托 MyBatis-Plus {@code selectBatchIds} 单 SQL IN 子句). 本方法按 bizType 分支
+     * 调用对应 service 的 {@code findByIds},结果按 resourceId 索引写入 result Map,仅保留
+     * target_content 非空记录.
      * <p>
      * 调用方契约:
      * <ul>
-     *     <li>idList 为空时返回空 Map</li>
+     *     <li>idList 为空/null 时返回空 Map(Mapper 层 default 实现保护)</li>
      *     <li>bizType 不在支持列表(TOOLKIT/MCP/AGENT/KG_xxx / VIEW / OBJECT / SKILL)时返回空 Map</li>
      *     <li>部分资源查不到对应 ext 记录时,Map 中不包含该 key(不抛错)</li>
      *     <li>整体异常被 catch,仅记 warn 日志,返回已成功查询到的部分 Map</li>
@@ -1799,107 +1800,127 @@ public class DigitalEmployeeApplicationService {
             return Collections.emptyMap();
         }
         Map<Long, String> result = new HashMap<>(idList.size());
-        // TODO(PR-3 follow-up): 各 ext service mapper 加 findByIds(Collection<Long>) 批量方法,
-        //      将本 for 循环替换为单 SQL 调用(IN 子句).
-        //      当前为统一 N+1 的临时实现:循环 findById 但单次方法调用完成所有读取,调用方拿到完整 Map 一次写入 Redis.
-        // PR-fix Major-1: per-id try/catch（单个 id 失败不影响同 bizType 其他 id,
-        //      也不影响其他 bizType 的 6 个分支).
+        // PR-3 (#150) 重构:每个 bizType 分支改为单次批量 SQL (IN 子句),
+        //      替代 PR-1 之前的循环 findById 触发的 N+1.
+        // PR-fix Major-1: per-bizType try/catch(单 bizType 失败不影响其他 6 个分支).
+        // 注:7 个 ext 实体类无公共父接口,故每个分支内联处理 resourceId/targetContent 索引.
         if (StringUtils.equals(bizType, ResourceBizTypeEnum.TOOLKIT.name())) {
-            for (Long id : idList) {
-                try {
-                    SsResExtToolKit ext = ssResExtToolKitService.findById(id);
-                    if (ext != null && StringUtils.isNotBlank(ext.getTargetContent())) {
-                        result.put(id, ext.getTargetContent());
+            try {
+                List<SsResExtToolKit> extList = ssResExtToolKitService.findByIds(idList);
+                if (extList != null) {
+                    for (SsResExtToolKit ext : extList) {
+                        if (ext != null && ext.getResourceId() != null
+                            && StringUtils.isNotBlank(ext.getTargetContent())) {
+                            result.put(ext.getResourceId(), ext.getTargetContent());
+                        }
                     }
                 }
-                catch (Exception e) {
-                    logger.warn("batchLoadTargetContent 单 id 失败: bizType=TOOLKIT, id={}, reason={}",
-                        id, e.getMessage(), e);
-                }
+            }
+            catch (Exception e) {
+                logger.warn("batchLoadTargetContent 批量失败: bizType=TOOLKIT, idCount={}, reason={}",
+                    idList.size(), e.getMessage(), e);
             }
         }
         else if (StringUtils.equals(bizType, ResourceBizTypeEnum.MCP.name())) {
-            for (Long id : idList) {
-                try {
-                    SsResExtMcp ext = ssResExtMcpService.findById(id);
-                    if (ext != null && StringUtils.isNotBlank(ext.getTargetContent())) {
-                        result.put(id, ext.getTargetContent());
+            try {
+                List<SsResExtMcp> extList = ssResExtMcpService.findByIds(idList);
+                if (extList != null) {
+                    for (SsResExtMcp ext : extList) {
+                        if (ext != null && ext.getResourceId() != null
+                            && StringUtils.isNotBlank(ext.getTargetContent())) {
+                            result.put(ext.getResourceId(), ext.getTargetContent());
+                        }
                     }
                 }
-                catch (Exception e) {
-                    logger.warn("batchLoadTargetContent 单 id 失败: bizType=MCP, id={}, reason={}",
-                        id, e.getMessage(), e);
-                }
+            }
+            catch (Exception e) {
+                logger.warn("batchLoadTargetContent 批量失败: bizType=MCP, idCount={}, reason={}",
+                    idList.size(), e.getMessage(), e);
             }
         }
         else if (StringUtils.equals(bizType, ResourceBizTypeEnum.AGENT.name())) {
-            for (Long id : idList) {
-                try {
-                    SsResExtAgent ext = ssResExtAgentService.findById(id);
-                    if (ext != null && StringUtils.isNotBlank(ext.getTargetContent())) {
-                        result.put(id, ext.getTargetContent());
+            try {
+                List<SsResExtAgent> extList = ssResExtAgentService.findByIds(idList);
+                if (extList != null) {
+                    for (SsResExtAgent ext : extList) {
+                        if (ext != null && ext.getResourceId() != null
+                            && StringUtils.isNotBlank(ext.getTargetContent())) {
+                            result.put(ext.getResourceId(), ext.getTargetContent());
+                        }
                     }
                 }
-                catch (Exception e) {
-                    logger.warn("batchLoadTargetContent 单 id 失败: bizType=AGENT, id={}, reason={}",
-                        id, e.getMessage(), e);
-                }
+            }
+            catch (Exception e) {
+                logger.warn("batchLoadTargetContent 批量失败: bizType=AGENT, idCount={}, reason={}",
+                    idList.size(), e.getMessage(), e);
             }
         }
         else if (StringUtils.startsWithIgnoreCase(bizType, "KG_")) {
-            for (Long id : idList) {
-                try {
-                    SsResExtDoc ext = ssResExtDocService.findById(id);
-                    if (ext != null && StringUtils.isNotBlank(ext.getTargetContent())) {
-                        result.put(id, ext.getTargetContent());
+            try {
+                List<SsResExtDoc> extList = ssResExtDocService.findByIds(idList);
+                if (extList != null) {
+                    for (SsResExtDoc ext : extList) {
+                        if (ext != null && ext.getResourceId() != null
+                            && StringUtils.isNotBlank(ext.getTargetContent())) {
+                            result.put(ext.getResourceId(), ext.getTargetContent());
+                        }
                     }
                 }
-                catch (Exception e) {
-                    logger.warn("batchLoadTargetContent 单 id 失败: bizType=KG_*, id={}, reason={}",
-                        id, e.getMessage(), e);
-                }
+            }
+            catch (Exception e) {
+                logger.warn("batchLoadTargetContent 批量失败: bizType=KG_*, idCount={}, reason={}",
+                    idList.size(), e.getMessage(), e);
             }
         }
         else if (StringUtils.equals(bizType, ResourceBizTypeEnum.VIEW.name())) {
-            for (Long id : idList) {
-                try {
-                    SsResExtView ext = ssResExtViewService.findById(id);
-                    if (ext != null && StringUtils.isNotBlank(ext.getTargetContent())) {
-                        result.put(id, ext.getTargetContent());
+            try {
+                List<SsResExtView> extList = ssResExtViewService.findByIds(idList);
+                if (extList != null) {
+                    for (SsResExtView ext : extList) {
+                        if (ext != null && ext.getResourceId() != null
+                            && StringUtils.isNotBlank(ext.getTargetContent())) {
+                            result.put(ext.getResourceId(), ext.getTargetContent());
+                        }
                     }
                 }
-                catch (Exception e) {
-                    logger.warn("batchLoadTargetContent 单 id 失败: bizType=VIEW, id={}, reason={}",
-                        id, e.getMessage(), e);
-                }
+            }
+            catch (Exception e) {
+                logger.warn("batchLoadTargetContent 批量失败: bizType=VIEW, idCount={}, reason={}",
+                    idList.size(), e.getMessage(), e);
             }
         }
         else if (StringUtils.equals(bizType, ResourceBizTypeEnum.OBJECT.name())) {
-            for (Long id : idList) {
-                try {
-                    SsResExtObject ext = ssResExtObjectService.findById(id);
-                    if (ext != null && StringUtils.isNotBlank(ext.getTargetContent())) {
-                        result.put(id, ext.getTargetContent());
+            try {
+                List<SsResExtObject> extList = ssResExtObjectService.findByIds(idList);
+                if (extList != null) {
+                    for (SsResExtObject ext : extList) {
+                        if (ext != null && ext.getResourceId() != null
+                            && StringUtils.isNotBlank(ext.getTargetContent())) {
+                            result.put(ext.getResourceId(), ext.getTargetContent());
+                        }
                     }
                 }
-                catch (Exception e) {
-                    logger.warn("batchLoadTargetContent 单 id 失败: bizType=OBJECT, id={}, reason={}",
-                        id, e.getMessage(), e);
-                }
+            }
+            catch (Exception e) {
+                logger.warn("batchLoadTargetContent 批量失败: bizType=OBJECT, idCount={}, reason={}",
+                    idList.size(), e.getMessage(), e);
             }
         }
         else if (StringUtils.equals(bizType, ResourceBizTypeEnum.SKILL.name())) {
-            for (Long id : idList) {
-                try {
-                    SsResExtSkill ext = ssResExtSkillService.findById(id);
-                    if (ext != null && StringUtils.isNotBlank(ext.getTargetContent())) {
-                        result.put(id, ext.getTargetContent());
+            try {
+                List<SsResExtSkill> extList = ssResExtSkillService.findByIds(idList);
+                if (extList != null) {
+                    for (SsResExtSkill ext : extList) {
+                        if (ext != null && ext.getResourceId() != null
+                            && StringUtils.isNotBlank(ext.getTargetContent())) {
+                            result.put(ext.getResourceId(), ext.getTargetContent());
+                        }
                     }
                 }
-                catch (Exception e) {
-                    logger.warn("batchLoadTargetContent 单 id 失败: bizType=SKILL, id={}, reason={}",
-                        id, e.getMessage(), e);
-                }
+            }
+            catch (Exception e) {
+                logger.warn("batchLoadTargetContent 批量失败: bizType=SKILL, idCount={}, reason={}",
+                    idList.size(), e.getMessage(), e);
             }
         }
         else {
