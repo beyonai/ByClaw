@@ -39,6 +39,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Answers.CALLS_REAL_METHODS;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -265,7 +266,7 @@ class DigitalEmployeeBatchFindByIdsTest {
         SsResExtToolKit e3 = new SsResExtToolKit();
         e3.setResourceId(103L);
         // target_content 为空的资源不应进入返回 Map
-        when(toolKitMapper.findByIds(ids)).thenReturn(Arrays.asList(e1, e2, e3));
+        doReturn(Arrays.asList(e1, e2, e3)).when(toolKitMapper).findByIds(ids);
 
         Map<Long, String> result = appService.batchLoadTargetContent("TOOLKIT", ids);
 
@@ -286,7 +287,7 @@ class DigitalEmployeeBatchFindByIdsTest {
         SsResExtDoc d2 = new SsResExtDoc();
         d2.setResourceId(202L);
         d2.setTargetContent("{\"kg\":\"doc2\"}");
-        when(docMapper.findByIds(ids)).thenReturn(Arrays.asList(d1, d2));
+        doReturn(Arrays.asList(d1, d2)).when(docMapper).findByIds(ids);
 
         Map<Long, String> result = appService.batchLoadTargetContent("KG_DOC", ids);
 
@@ -320,7 +321,7 @@ class DigitalEmployeeBatchFindByIdsTest {
         SsResExtAgent a1 = new SsResExtAgent();
         a1.setResourceId(301L);
         a1.setTargetContent("{\"agent\":1}");
-        when(agentMapper.findByIds(anyCollection())).thenReturn(Collections.singletonList(a1));
+        doReturn(Collections.singletonList(a1)).when(agentMapper).findByIds(anyCollection());
 
         Map<Long, String> result = appService.batchLoadTargetContent("AGENT", input);
 
@@ -336,7 +337,7 @@ class DigitalEmployeeBatchFindByIdsTest {
     @DisplayName("batchLoadTargetContent(TOOLKIT, mapper 抛异常) → 整体异常被 catch，返回空 Map 不影响调用方")
     void batchLoadTargetContent_toolkitMapperThrows_returnsEmptyMapAndLogsWarn() {
         List<Long> ids = Arrays.asList(401L, 402L);
-        when(toolKitMapper.findByIds(ids)).thenThrow(new RuntimeException("simulated DB failure"));
+        doThrow(new RuntimeException("simulated DB failure")).when(toolKitMapper).findByIds(ids);
 
         Map<Long, String> result = appService.batchLoadTargetContent("TOOLKIT", ids);
 
@@ -348,7 +349,7 @@ class DigitalEmployeeBatchFindByIdsTest {
     @DisplayName("batchLoadTargetContent(VIEW, mapper 返回空) → 返回空 Map")
     void batchLoadTargetContent_viewEmptyResult_returnsEmptyMap() {
         List<Long> ids = Arrays.asList(501L, 502L);
-        when(viewMapper.findByIds(ids)).thenReturn(Collections.emptyList());
+        doReturn(Collections.emptyList()).when(viewMapper).findByIds(ids);
 
         Map<Long, String> result = appService.batchLoadTargetContent("VIEW", ids);
 
@@ -364,7 +365,7 @@ class DigitalEmployeeBatchFindByIdsTest {
         SsResExtObject o = new SsResExtObject();
         o.setResourceId(601L);
         o.setTargetContent("{\"object\":1}");
-        when(objectMapper.findByIds(ids)).thenReturn(Collections.singletonList(o));
+        doReturn(Collections.singletonList(o)).when(objectMapper).findByIds(ids);
 
         Map<Long, String> result = appService.batchLoadTargetContent("OBJECT", ids);
 
@@ -380,7 +381,7 @@ class DigitalEmployeeBatchFindByIdsTest {
         SsResExtSkill s = new SsResExtSkill();
         s.setResourceId(702L);
         s.setTargetContent("{\"skill\":2}");
-        when(skillMapper.findByIds(ids)).thenReturn(Collections.singletonList(s));
+        doReturn(Collections.singletonList(s)).when(skillMapper).findByIds(ids);
 
         Map<Long, String> result = appService.batchLoadTargetContent("SKILL", ids);
 
@@ -396,7 +397,7 @@ class DigitalEmployeeBatchFindByIdsTest {
         SsResExtMcp m = new SsResExtMcp();
         m.setResourceId(801L);
         m.setTargetContent("{\"mcp\":1}");
-        when(mcpMapper.findByIds(ids)).thenReturn(Collections.singletonList(m));
+        doReturn(Collections.singletonList(m)).when(mcpMapper).findByIds(ids);
 
         Map<Long, String> result = appService.batchLoadTargetContent("MCP", ids);
 

@@ -1,12 +1,14 @@
 package com.iwhalecloud.byai.state.interfaces.controller.dataset;
 
 import java.nio.charset.StandardCharsets;
+import java.net.URLEncoder;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbDirectoryCreate;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbDirectoryUpdate;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.FileToMarkdownResult;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.feign.request.knowledge.FolderDelete;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.ProcessStatus;
@@ -47,6 +49,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.state.application.service.dataset.DatasetApplicationService;
 import com.iwhalecloud.byai.state.application.service.dataset.OpenClawKnowledgeDocumentService;
@@ -257,6 +260,30 @@ public class DatasetController {
     }
 
     /**
+     * 原始文件同步转换为 Markdown 文件流。只执行转换，不落知识库、不创建构建任务、不切片、不向量化。
+     *
+     * @param fileContent 原始文件二进制内容
+     * @return Markdown 文件流
+     */
+    @PostMapping(value = "/fileToMarkdown", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<StreamingResponseBody> fileToMarkdown(@RequestPart("fileContent") MultipartFile fileContent) {
+        try {
+            FileToMarkdownResult result = datasetApplicationService.fileToMarkdown(fileContent);
+            StreamingResponseBody responseBody = outputStream -> outputStream.write(result.getContent());
+            return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(result.getContentType()))
+                .header("Content-Disposition", buildContentDisposition(result.getFileName()))
+                .body(responseBody);
+        }
+        catch (Exception e) {
+            logger.error("文件转Markdown失败", e);
+            String errorMessage = e.getMessage() == null ? "文件转Markdown失败" : e.getMessage();
+            return ResponseEntity.badRequest().contentType(MediaType.parseMediaType("text/plain; charset=UTF-8"))
+                .body(outputStream -> outputStream.write(errorMessage.getBytes(StandardCharsets.UTF_8)));
+        }
+    }
+
+    /**
      * 接收 OpenClaw 生成的 Markdown 文档，上传到知识库并立即触发构建。
      *
      * @param resourceId 知识库资源标识
@@ -421,6 +448,12 @@ public class DatasetController {
         result.setUpdatedCount(updatedItems.size());
         result.setCreatedItems(new ArrayList<>(createdItems));
         result.setUpdatedItems(new ArrayList<>(updatedItems));
+    }
+
+    private String buildContentDisposition(String fileName) {
+        String resolvedFileName = fileName == null || fileName.isBlank() ? "converted.md" : fileName;
+        String encoded = URLEncoder.encode(resolvedFileName, StandardCharsets.UTF_8).replace("+", "%20");
+        return "attachment; filename=\"" + encoded + "\"; filename*=UTF-8''" + encoded;
     }
 
     /**
