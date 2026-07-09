@@ -403,11 +403,24 @@ public class InitDigEmployeeRedisRunner implements ApplicationRunner {
     }
 
     /**
-     * 优化路径（PR-1 + PR-3）。每页拆 parallelism 个 chunk，每个 chunk 独立 Pipeline 写入；
-     * chunk 失败不影响其他 chunk；与 PR-#2/4 无关，本函数仅实现 PR-1+3 范围。
+     * 优化路径（PR-1 + PR-3 + PR-4）。每页拆 parallelism 个 chunk，每个 chunk 独立 Pipeline 写入；
+     * chunk 失败不影响其他 chunk。
      * <p>
      * PR-3 关键改进：每页开始时一次性批量预取所有数字员工的 {@code target_content}
      * （单 SQL IN 子句，避免每资源一次 findById），各 chunk 通过预取 map 引用。
+     * <p>
+     * <strong>PR-4 时长保护说明</strong>:
+     * <ul>
+     *   <li><b>总时长保护</b>：主 while 循环每轮检查累计 elapsed 与 {@code timeoutSeconds};
+     *       超时主动 break,不再进入下一 page。</li>
+     *   <li><b>per-page 超时保护</b>：通过 {@code allOf.get(perPageTimeoutSeconds, NANOSECONDS)} 强制超时,
+     *       超时后取消未完成 chunk。但 <b>超时 ≠ 立即停止 chunk 线程</b>(PR-fix Major-3):
+     *       {@code Future.cancel(true)} 仅设置中断标志 + {@code Thread.interrupt()},
+     *       而 PostgreSQL JDBC driver 阻塞 socket I/O 不会响应 interrupt。
+     *       实际语义是"逻辑取消": 已发起但未完成的 chunk 结果丢弃(通过 isCancelled 过滤),
+     *       已完成的部分保留。物理终止需要后续 PR 调小 JDBC socketTimeout(建议 5-10s)
+     *       配合 cancel 才能实现真正的硬超时。当前以软超时方式保证主流程不阻塞。</li>
+     * </ul>
      */
     private void doFullInitOptimized() {
         int pipelineBatchSize = effectivePipelineBatchSize();
