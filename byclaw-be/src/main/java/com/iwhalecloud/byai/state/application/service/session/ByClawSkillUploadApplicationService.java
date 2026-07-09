@@ -27,7 +27,8 @@ import com.iwhalecloud.byai.state.domain.session.dto.ByClawSkillDto;
  *
  * 校验范围（明确仅这两条，其它问题用静默忽略而不是抛错）：
  * 1. 压缩包文件大小 ≤ 50MB；
- * 2. 压缩包最外层 skill 目录下必须有且仅有一个 SKILL.md（文件名忽略大小写），子目录中的 SKILL.md 不参与唯一性校验。
+ * 2. 压缩包根级必须有且仅有一个 SKILL.md（文件名忽略大小写），子目录（含顶级子目录、任意深度子目录）中的 SKILL.md
+ *    一律忽略——不参与校验、不参与排序、不影响判定。
  *
  * 落盘规则（与 {@link ByClawSkillQueryApplicationService} 完全对齐）：
  * - bucket = byclaw-{userCode}（由 UserFS / UserBucketNameResolver 统一生成）；
@@ -218,46 +219,38 @@ public class ByClawSkillUploadApplicationService {
     }
 
     /**
-     * 找出最外层 skill 目录直接下的 SKILL.md（文件名忽略大小写）。
-     * 子目录中的 SKILL.md 可能是 nano skill，不参与当前单 skill zip 的唯一性校验。
+     * 在压缩包 entry 列表中找到唯一合法的 SKILL.md。
+     *
+     * 唯一合法的 SKILL.md 必须在 ZIP 根级（segments.length == 1）；子目录（含顶级子目录、任意深度子目录）中的
+     * SKILL.md 一律忽略——不参与校验、不参与排序、不影响判定。
+     *
+     * 判定：
+     * - 根级 SKILL.md 数量 == 1：返回该 entry；
+     * - 根级 SKILL.md 数量 == 0 或 > 1：视为缺文档，抛 byclaw.skill.zip.missing.doc。
+     *
+     * 实现：单次 O(n) 线性扫描，发现第二份根级 SKILL.md 时立即 break；不引入额外 Map / Set。
      */
     private ParsedEntry findUniqueSkillDoc(List<ParsedEntry> entries) {
-        List<ParsedEntry> docs = new ArrayList<>();
-        Set<String> topLevelDirs = new java.util.HashSet<>();
+        ParsedEntry rootDoc = null;
+        int rootDocCount = 0;
         for (ParsedEntry entry : entries) {
             String[] segments = splitEntryName(entry.entryName);
-            if (segments.length == 0) {
+            // 仅识别根级 SKILL.md（segments.length == 1 且文件名忽略大小写为 SKILL.md）；
+            // 子目录里的 SKILL.md 一律跳过，不参与校验、不参与排序、不影响判定。
+            if (segments.length != 1 || !CANONICAL_SKILL_DOC_NAME.equalsIgnoreCase(segments[0])) {
                 continue;
             }
-            if (segments.length == 1 && CANONICAL_SKILL_DOC_NAME.equalsIgnoreCase(segments[0])) {
-                docs.add(entry);
-            }
-            else if (segments.length > 1) {
-                topLevelDirs.add(segments[0]);
+            rootDoc = entry;
+            rootDocCount++;
+            if (rootDocCount > 1) {
+                // 已确认根级多份 SKILL.md，提前退出避免浪费扫描。
+                break;
             }
         }
-        if (!docs.isEmpty()) {
-            if (docs.size() != 1) {
-                throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.missing.doc"));
-            }
-            return docs.get(0);
-        }
-
-        if (topLevelDirs.size() != 1) {
+        if (rootDocCount != 1) {
             throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.missing.doc"));
         }
-        String topLevelDir = topLevelDirs.iterator().next();
-        for (ParsedEntry entry : entries) {
-            String[] segments = splitEntryName(entry.entryName);
-            if (segments.length == 2 && topLevelDir.equals(segments[0])
-                && CANONICAL_SKILL_DOC_NAME.equalsIgnoreCase(segments[1])) {
-                docs.add(entry);
-            }
-        }
-        if (docs.size() != 1) {
-            throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.missing.doc"));
-        }
-        return docs.get(0);
+        return rootDoc;
     }
 
     /**

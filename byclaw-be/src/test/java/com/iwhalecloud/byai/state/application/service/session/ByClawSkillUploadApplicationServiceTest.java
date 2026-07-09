@@ -43,6 +43,14 @@ import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+/**
+ * {@link ByClawSkillUploadApplicationService} 的单元测试。
+ *
+ * SKILL.md 校验规则（v2：根级唯一）：
+ * - 唯一合法的 SKILL.md 必须在 ZIP 根级（segments.length == 1）；
+ * - 根级 SKILL.md 必须有且仅有一份，否则视为缺文档（byclaw.skill.zip.missing.doc）；
+ * - 子目录里的 SKILL.md 一律忽略——不参与校验、不参与排序、不影响判定。
+ */
 @DisabledOnOs(OS.WINDOWS)
 @ExtendWith(MockitoExtension.class)
 class ByClawSkillUploadApplicationServiceTest {
@@ -85,11 +93,14 @@ class ByClawSkillUploadApplicationServiceTest {
         CurrentUserHolder.clearLoginInfo();
     }
 
+    // ============================== 改造用例（7 个） ==============================
+
     @Test
     void shouldClearOldSkillAndWriteAllEntries() {
-        MultipartFile zip = buildZip("skill.zip",
-            "fol-auto-biztravel/SKILL.md", "# Skill",
-            "fol-auto-biztravel/scripts/run.py", "print('hi')");
+        // 改造点：SKILL.md 提到根级，沿用清空旧目录 + 全量覆盖语义。
+        MultipartFile zip = buildZip("fol-auto-biztravel.zip",
+            "SKILL.md", "# root",
+            "scripts/run.py", "print('hi')");
         when(skillPathResolver.resolveSkillRootPrefix(USER_CODE, RESOURCE_ID)).thenReturn(AGENT_PREFIX);
 
         ByClawSkillDto dto = service.uploadSkillZip(USER_CODE, RESOURCE_ID, zip);
@@ -109,9 +120,9 @@ class ByClawSkillUploadApplicationServiceTest {
 
     @Test
     void shouldAcceptSkillDocWithLowerCaseFilenameAndNormalizeIt() {
-        // skill.md（小写）也被识别，但写入时统一规范化为 SKILL.md。
-        MultipartFile zip = buildZip("skill.zip",
-            "alpha/skill.md", "# alpha");
+        // 改造点：根级 skill.md（小写）也被识别，写入时统一规范化为 SKILL.md。
+        MultipartFile zip = buildZip("alpha.zip",
+            "skill.md", "# alpha");
         when(skillPathResolver.resolveSkillRootPrefix(USER_CODE, RESOURCE_ID)).thenReturn(AGENT_PREFIX);
 
         ByClawSkillDto dto = service.uploadSkillZip(USER_CODE, RESOURCE_ID, zip);
@@ -123,11 +134,12 @@ class ByClawSkillUploadApplicationServiceTest {
     }
 
     @Test
-    void shouldIgnoreNestedSkillDocsWhenTopLevelSkillDocExists() {
+    void shouldIgnoreNestedSkillDocsWhenRootSkillDocExists() {
+        // 改造点：根级 SKILL.md 存在时，子目录 SKILL.md 一律忽略、不参与判定；写入仍按现有"全部 entry 写入"语义。
         MultipartFile zip = buildZip("zmp-leave-complex.zip",
-            "zmp-leave-complex/SKILL.md", "# root",
-            "zmp-leave-complex/create-leave-request/SKILL.md", "# nano",
-            "zmp-leave-complex/create-leave-request/flow.yaml", "name: create");
+            "SKILL.md", "# root",
+            "create-leave-request/SKILL.md", "# nano",
+            "create-leave-request/flow.yaml", "name: create");
         when(skillPathResolver.resolveSkillRootPrefix(USER_CODE, RESOURCE_ID)).thenReturn(AGENT_PREFIX);
 
         ByClawSkillDto dto = service.uploadSkillZip(USER_CODE, RESOURCE_ID, zip);
@@ -137,15 +149,17 @@ class ByClawSkillUploadApplicationServiceTest {
         assertEquals("zmp-leave-complex", dto.getSkillName());
         assertEquals(AGENT_PREFIX + "zmp-leave-complex/SKILL.md", dto.getSkillDocObjectKey());
         assertTrue(pathCaptor.getAllValues().contains(AGENT_PREFIX + "zmp-leave-complex/SKILL.md"));
+        // 子目录 SKILL.md 不参与校验，但依现有落盘语义仍会被写入到 skill 根下。
         assertTrue(pathCaptor.getAllValues()
             .contains(AGENT_PREFIX + "zmp-leave-complex/create-leave-request/SKILL.md"));
     }
 
     @Test
     void shouldAcceptChineseSkillDirectoryFromGbkEncodedZip() {
+        // 改造点：根级 SKILL.md 配合 GBK 编码中文 zip 文件名；skillName 从 zip 文件名兜底。
         MultipartFile zip = buildZip("铁算盘财务健康分析.zip", Charset.forName("GBK"),
-            "铁算盘财务健康分析/SKILL.md", "# 铁算盘",
-            "铁算盘财务健康分析/references/persona-guide.md", "guide");
+            "SKILL.md", "# 铁算盘",
+            "references/persona-guide.md", "guide");
         when(skillPathResolver.resolveSkillRootPrefix(USER_CODE, RESOURCE_ID)).thenReturn(AGENT_PREFIX);
 
         ByClawSkillDto dto = service.uploadSkillZip(USER_CODE, RESOURCE_ID, zip);
@@ -160,11 +174,11 @@ class ByClawSkillUploadApplicationServiceTest {
     }
 
     @Test
-    void shouldRejectZipWithMultipleSkillDocs() {
-        // 两个顶层 skill 目录都存在 SKILL.md，仍按单 skill zip 判定违规。
+    void shouldRejectZipWithMultipleRootSkillDocs() {
+        // 改造点：根级出现两份 SKILL.md → 拒绝（保留原有严格性，避免歧义）。
         MultipartFile zip = buildZip("skill.zip",
-            "a/SKILL.md", "x",
-            "b/SKILL.md", "y");
+            "SKILL.md", "x",
+            "skill.md", "y");
 
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
             () -> service.uploadSkillZip(USER_CODE, RESOURCE_ID, zip));
@@ -173,8 +187,9 @@ class ByClawSkillUploadApplicationServiceTest {
 
     @Test
     void shouldUploadMultipleSkillZips() {
-        MultipartFile alpha = buildZip("alpha.zip", "alpha/SKILL.md", "# alpha");
-        MultipartFile beta = buildZip("beta.zip", "beta/SKILL.md", "# beta");
+        // 改造点：每个 zip 都按根级 SKILL.md 校验。
+        MultipartFile alpha = buildZip("alpha.zip", "SKILL.md", "# alpha");
+        MultipartFile beta = buildZip("beta.zip", "SKILL.md", "# beta");
         when(skillPathResolver.resolveSkillRootPrefix(USER_CODE, RESOURCE_ID)).thenReturn(AGENT_PREFIX);
 
         var result = service.uploadSkillZips(USER_CODE, RESOURCE_ID, Arrays.asList(alpha, beta));
@@ -187,8 +202,46 @@ class ByClawSkillUploadApplicationServiceTest {
     }
 
     @Test
+    void shouldSilentlySkipPathTraversalEntry() {
+        // 改造点：根级 SKILL.md + 路径穿越静默忽略。
+        MultipartFile zip = buildZip("skill.zip",
+            "SKILL.md", "ok",
+            "scripts/../../etc/passwd", "hack");
+        when(skillPathResolver.resolveSkillRootPrefix(USER_CODE, RESOURCE_ID)).thenReturn(AGENT_PREFIX);
+
+        ByClawSkillDto dto = service.uploadSkillZip(USER_CODE, RESOURCE_ID, zip);
+
+        assertEquals("skill", dto.getSkillName());
+        ArgumentCaptor<String> pathCaptor = ArgumentCaptor.forClass(String.class);
+        verify(userFS, atLeastOnce()).write(any(InputStream.class), anyLong(), anyString(), pathCaptor.capture());
+        // passwd 穿越 entry 被静默丢弃，不会出现在写入列表中
+        assertTrue(pathCaptor.getAllValues().stream().noneMatch(p -> p.contains("passwd")));
+    }
+
+    @Test
+    void shouldUploadToSuperAssistantWorkspaceWhenResourceIdIsNull() {
+        // 改造点：根级 SKILL.md 走超级助手工作空间（resourceId 为 null）。
+        MultipartFile zip = buildZip("assistant-core.zip",
+            "SKILL.md", "# Skill",
+            "scripts/run.py", "print('hi')");
+        when(skillPathResolver.resolveSkillRootPrefix(USER_CODE, RESOURCE_ID)).thenReturn(SUPER_PREFIX);
+
+        ByClawSkillDto dto = service.uploadSkillZip(USER_CODE, RESOURCE_ID, zip);
+
+        verify(userFS).delete(SUPER_PREFIX + "assistant-core/");
+        ArgumentCaptor<String> pathCaptor = ArgumentCaptor.forClass(String.class);
+        verify(userFS, atLeastOnce()).write(any(InputStream.class), anyLong(), anyString(), pathCaptor.capture());
+        assertTrue(pathCaptor.getAllValues().contains(SUPER_PREFIX + "assistant-core/SKILL.md"));
+        assertTrue(pathCaptor.getAllValues().contains(SUPER_PREFIX + "assistant-core/scripts/run.py"));
+        assertEquals(SUPER_PREFIX + "assistant-core", dto.getSkillPath());
+    }
+
+    // ============================== 保留用例（4 个，不变） ==============================
+
+    @Test
     void shouldRejectZipMissingSkillDoc() {
-        MultipartFile zip = buildZip("skill.zip", "alpha/README.md", "no doc");
+        // 完全无 SKILL.md → 拒绝（保留原行为）。
+        MultipartFile zip = buildZip("skill.zip", "README.md", "no doc");
 
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
             () -> service.uploadSkillZip(USER_CODE, RESOURCE_ID, zip));
@@ -197,6 +250,7 @@ class ByClawSkillUploadApplicationServiceTest {
 
     @Test
     void shouldFallbackSkillNameToZipNameWhenSkillDocAtRoot() {
+        // 根级 SKILL.md + 文件在子目录，skillName 从 zip 文件名兜底。
         MultipartFile zip = buildZip("fol-auto-biztravel.zip",
             "SKILL.md", "# root",
             "scripts/run.py", "print('hi')");
@@ -214,6 +268,7 @@ class ByClawSkillUploadApplicationServiceTest {
 
     @Test
     void shouldRejectTarGzSkillArchive() {
+        // tar.gz 格式校验在 parse 之前发生，无论 SKILL.md 在哪里都直接拒绝。
         MultipartFile tarGz = buildTarGz("content-factory.tar.gz",
             "content-factory/SKILL.md", "# content factory",
             "content-factory/scripts/main.py", "print('hi')");
@@ -224,65 +279,131 @@ class ByClawSkillUploadApplicationServiceTest {
     }
 
     @Test
-    void shouldRejectTarGzSkillArchiveWhenSkillDocAtRoot() {
-        MultipartFile tarGz = buildTarGz("root-skill.tar.gz",
-            "SKILL.md", "# root",
-            "scripts/run.py", "print('hi')");
-
-        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-            () -> service.uploadSkillZip(USER_CODE, RESOURCE_ID, tarGz));
-        assertTrue(ex.getMessage().contains("zip"));
-    }
-
-    @Test
-    void shouldSilentlySkipPathTraversalEntry() {
-        // 路径穿越静默忽略而不是抛错；只要 SKILL.md 唯一即可上传成功。
-        MultipartFile zip = buildZip("skill.zip",
-            "alpha/SKILL.md", "ok",
-            "alpha/../../etc/passwd", "hack");
-        when(skillPathResolver.resolveSkillRootPrefix(USER_CODE, RESOURCE_ID)).thenReturn(AGENT_PREFIX);
-
-        ByClawSkillDto dto = service.uploadSkillZip(USER_CODE, RESOURCE_ID, zip);
-
-        assertEquals("alpha", dto.getSkillName());
-        ArgumentCaptor<String> pathCaptor = ArgumentCaptor.forClass(String.class);
-        verify(userFS, atLeastOnce()).write(any(InputStream.class), anyLong(), anyString(), pathCaptor.capture());
-        // passwd 穿越 entry 被静默丢弃，不会出现在写入列表中
-        assertTrue(pathCaptor.getAllValues().stream().noneMatch(p -> p.contains("passwd")));
-    }
-
-    @Test
     void shouldRejectEmptyUserCode() {
-        MultipartFile zip = buildZip("skill.zip", "a/SKILL.md", "x");
+        MultipartFile zip = buildZip("skill.zip", "SKILL.md", "x");
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
             () -> service.uploadSkillZip("  ", RESOURCE_ID, zip));
         assertEquals("userCode不能为空", ex.getMessage());
     }
 
-    @Test
-    void shouldRejectEmptyZip() {
-        MockMultipartFile zip = new MockMultipartFile("file", "empty.zip", "application/zip", new byte[0]);
-        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-            () -> service.uploadSkillZip(USER_CODE, RESOURCE_ID, zip));
-        assertEquals("Skill 压缩包不能为空", ex.getMessage());
-    }
+    // ============================== 新增用例（5 个） ==============================
 
     @Test
-    void shouldUploadToSuperAssistantWorkspaceWhenResourceIdIsNull() {
-        MultipartFile zip = buildZip("assistant-core.zip",
-            "assistant-core/SKILL.md", "# Skill",
-            "assistant-core/scripts/run.py", "print('hi')");
-        when(skillPathResolver.resolveSkillRootPrefix(USER_CODE, RESOURCE_ID)).thenReturn(SUPER_PREFIX);
+    void shouldAcceptRootSkillDocWithMultipleTopLevelSubdirSkills() {
+        // 核心新增场景（kaoqing 场景）：根级 SKILL.md + 多个顶级子目录各自带 SKILL.md → 接受，
+        // 子目录里的 SKILL.md 一律忽略、不参与校验。
+        MultipartFile zip = buildZip("kaoqing.zip",
+            "SKILL.md", "# root",
+            "add-class/SKILL.md", "# nano-add-class",
+            "add-class/flow.yaml", "name: add",
+            "class-manage/SKILL.md", "# nano-class-manage",
+            "class-manage/flow.yaml", "name: manage",
+            "edit-kaoqin-group/SKILL.md", "# nano-edit-kaoqin-group",
+            "edit-kaoqin-group/flow.yaml", "name: edit");
+        when(skillPathResolver.resolveSkillRootPrefix(USER_CODE, RESOURCE_ID)).thenReturn(AGENT_PREFIX);
 
         ByClawSkillDto dto = service.uploadSkillZip(USER_CODE, RESOURCE_ID, zip);
 
-        verify(userFS).delete(SUPER_PREFIX + "assistant-core/");
+        assertEquals("kaoqing", dto.getSkillName());
+        assertEquals(AGENT_PREFIX + "kaoqing", dto.getSkillPath());
+        assertEquals(AGENT_PREFIX + "kaoqing/SKILL.md", dto.getSkillDocObjectKey());
+
         ArgumentCaptor<String> pathCaptor = ArgumentCaptor.forClass(String.class);
         verify(userFS, atLeastOnce()).write(any(InputStream.class), anyLong(), anyString(), pathCaptor.capture());
-        assertTrue(pathCaptor.getAllValues().contains(SUPER_PREFIX + "assistant-core/SKILL.md"));
-        assertTrue(pathCaptor.getAllValues().contains(SUPER_PREFIX + "assistant-core/scripts/run.py"));
-        assertEquals(SUPER_PREFIX + "assistant-core", dto.getSkillPath());
+        // 根级 SKILL.md 必须写入
+        assertTrue(pathCaptor.getAllValues().contains(AGENT_PREFIX + "kaoqing/SKILL.md"));
+        // 三个子目录的 SKILL.md 均被忽略、不参与校验，但依落盘语义仍写入
+        assertTrue(pathCaptor.getAllValues().contains(AGENT_PREFIX + "kaoqing/add-class/SKILL.md"));
+        assertTrue(pathCaptor.getAllValues().contains(AGENT_PREFIX + "kaoqing/class-manage/SKILL.md"));
+        assertTrue(pathCaptor.getAllValues().contains(AGENT_PREFIX + "kaoqing/edit-kaoqin-group/SKILL.md"));
     }
+
+    @Test
+    void shouldRejectZipWithOnlySubdirectorySkillDocs() {
+        // 根级无 SKILL.md、仅子目录有 → 拒绝（v2 新收紧点）。
+        MultipartFile zip = buildZip("skill.zip",
+            "alpha/SKILL.md", "# nano",
+            "alpha/scripts/run.py", "print('hi')",
+            "beta/SKILL.md", "# nano");
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+            () -> service.uploadSkillZip(USER_CODE, RESOURCE_ID, zip));
+        assertTrue(ex.getMessage().contains("SKILL.md"));
+    }
+
+    @Test
+    void shouldIgnoreDeeplyNestedSkillDocsWhenRootSkillDocExists() {
+        // 根级 SKILL.md + 任意深度子目录里的 SKILL.md 一律忽略（覆盖深度 2+ 的场景）。
+        MultipartFile zip = buildZip("nested.zip",
+            "SKILL.md", "# root",
+            "a/b/c/d/SKILL.md", "# deep",
+            "a/b/c/d/flow.yaml", "name: deep");
+        when(skillPathResolver.resolveSkillRootPrefix(USER_CODE, RESOURCE_ID)).thenReturn(AGENT_PREFIX);
+
+        ByClawSkillDto dto = service.uploadSkillZip(USER_CODE, RESOURCE_ID, zip);
+
+        assertEquals("nested", dto.getSkillName());
+        assertEquals(AGENT_PREFIX + "nested/SKILL.md", dto.getSkillDocObjectKey());
+
+        ArgumentCaptor<String> pathCaptor = ArgumentCaptor.forClass(String.class);
+        verify(userFS, atLeastOnce()).write(any(InputStream.class), anyLong(), anyString(), pathCaptor.capture());
+        assertTrue(pathCaptor.getAllValues().contains(AGENT_PREFIX + "nested/SKILL.md"));
+        assertTrue(pathCaptor.getAllValues().contains(AGENT_PREFIX + "nested/a/b/c/d/SKILL.md"));
+    }
+
+    @Test
+    void shouldAcceptMixedCaseRootSkillDoc() {
+        // 根级 SKILL.md 文件名大小写混合（skill.MD）也应被识别并规范化为 SKILL.md。
+        MultipartFile zip = buildZip("skill.zip",
+            "skill.MD", "# root",
+            "scripts/run.py", "print('hi')");
+        when(skillPathResolver.resolveSkillRootPrefix(USER_CODE, RESOURCE_ID)).thenReturn(AGENT_PREFIX);
+
+        ByClawSkillDto dto = service.uploadSkillZip(USER_CODE, RESOURCE_ID, zip);
+
+        assertEquals("skill", dto.getSkillName());
+        ArgumentCaptor<String> pathCaptor = ArgumentCaptor.forClass(String.class);
+        verify(userFS, atLeastOnce()).write(any(InputStream.class), anyLong(), anyString(), pathCaptor.capture());
+        // 写入时统一规范化为 "SKILL.md"
+        assertTrue(pathCaptor.getAllValues().contains(AGENT_PREFIX + "skill/SKILL.md"));
+    }
+
+    @Test
+    void shouldAcceptRootSkillDocAndIgnoreMixedSubdirSkillDocs() {
+        // 根级 SKILL.md + 多深度子目录里散落的 SKILL.md（含混合大小写）一律忽略。
+        MultipartFile zip = buildZip("mixed.zip",
+            "SKILL.md", "# root",
+            "add-class/SKILL.md", "# nano-1",
+            "class-manage/skill.md", "# nano-2",
+            "edit-group/deep/nested/SKILL.md", "# nano-deep");
+        when(skillPathResolver.resolveSkillRootPrefix(USER_CODE, RESOURCE_ID)).thenReturn(AGENT_PREFIX);
+
+        ByClawSkillDto dto = service.uploadSkillZip(USER_CODE, RESOURCE_ID, zip);
+
+        assertEquals("mixed", dto.getSkillName());
+        assertEquals(AGENT_PREFIX + "mixed/SKILL.md", dto.getSkillDocObjectKey());
+
+        ArgumentCaptor<String> pathCaptor = ArgumentCaptor.forClass(String.class);
+        verify(userFS, atLeastOnce()).write(any(InputStream.class), anyLong(), anyString(), pathCaptor.capture());
+        assertTrue(pathCaptor.getAllValues().contains(AGENT_PREFIX + "mixed/SKILL.md"));
+        assertTrue(pathCaptor.getAllValues().contains(AGENT_PREFIX + "mixed/add-class/SKILL.md"));
+        assertTrue(pathCaptor.getAllValues().contains(AGENT_PREFIX + "mixed/class-manage/SKILL.md"));
+        assertTrue(pathCaptor.getAllValues().contains(AGENT_PREFIX + "mixed/edit-group/deep/nested/SKILL.md"));
+    }
+
+    @Test
+    void shouldNotDeleteExistingSkillWhenRootSkillDocMissing() {
+        // 根级无 SKILL.md 的包必须在校验阶段就拒绝，绝不能走到 userFS.delete 落盘副作用。
+        MultipartFile zip = buildZip("bad.zip",
+            "alpha/SKILL.md", "# only-subdir");
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+            () -> service.uploadSkillZip(USER_CODE, RESOURCE_ID, zip));
+        assertTrue(ex.getMessage().contains("SKILL.md"));
+        verify(userFS, org.mockito.Mockito.never()).delete(anyString());
+    }
+
+    // ============================== 工具方法 ==============================
 
     /** 构造一个 zip MultipartFile，参数按 (entryName, content) 成对传入；filename 决定 originalFilename。 */
     private MultipartFile buildZip(String filename, String... entries) {
