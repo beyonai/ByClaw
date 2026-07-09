@@ -3,6 +3,8 @@ package com.iwhalecloud.byai.manager.application.runner;
 import com.iwhalecloud.byai.common.util.RedisUtil;
 import com.iwhalecloud.byai.common.util.RedisUtil.RedisKVPair;
 import com.iwhalecloud.byai.manager.application.runner.digemployeestartup.DigEmployeeStartupSyncProperties;
+import com.iwhalecloud.byai.manager.application.runner.digemployeestartup.StartupSyncDlqRecorder;
+import com.iwhalecloud.byai.manager.application.runner.digemployeestartup.StartupSyncMetrics;
 import com.iwhalecloud.byai.manager.application.runner.digemployeestartup.StartupSyncLockGuard;
 import com.iwhalecloud.byai.manager.application.runner.digemployeestartup.StartupSyncLockRenewer;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.DigEmployeeRedisSyncProperties;
@@ -34,6 +36,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -100,6 +104,13 @@ public class InitDigEmployeeRedisRunner implements ApplicationRunner {
     @Autowired(required = false)
     @Qualifier("digEmployeeStartupSyncExecutor")
     private ThreadPoolTaskExecutor digEmployeeStartupSyncExecutor;
+
+    // ====== PR-4: DLQ + Metrics 依赖 ======
+    @Autowired
+    private StartupSyncDlqRecorder startupSyncDlqRecorder;
+
+    @Autowired
+    private StartupSyncMetrics startupSyncMetrics;
 
     // ====== PR-2: 分布式锁相关字段 ======
     @Autowired
@@ -401,6 +412,9 @@ public class InitDigEmployeeRedisRunner implements ApplicationRunner {
     private void doFullInitOptimized() {
         int pipelineBatchSize = effectivePipelineBatchSize();
         int parallelism = effectiveParallelism();
+        long totalTimeoutNanos = effectiveTimeoutNanos();
+        long perPageTimeoutNanos = effectivePerPageTimeoutNanos();
+        long startupStartNanos = System.nanoTime();
         ExecutorService exec = digEmployeeStartupSyncExecutor != null
             ? digEmployeeStartupSyncExecutor.getThreadPoolExecutor()
             : ForkJoinPool.commonPool();
@@ -409,13 +423,31 @@ public class InitDigEmployeeRedisRunner implements ApplicationRunner {
         int totalKvWrites = 0;
         int totalKvFailures = 0;
         int totalSkippedBlank = 0;
+        int totalChunkTimeouts = 0;
         int pageIndex = 1;
 
         while (true) {
+            // PR-4: 总时长保护 (累积 elapsed time)
+            if (totalTimeoutNanos > 0) {
+                long elapsed = System.nanoTime() - startupStartNanos;
+                if (elapsed >= totalTimeoutNanos) {
+                    logger.warn("[PR-4 总时长保护] 启动期同步已超过 timeoutSeconds={}, 累计耗时={}ms, page={}, 主动 break 退出循环",
+                        totalTimeoutNanos / 1_000_000_000L, elapsed / 1_000_000L, pageIndex);
+                    if (startupSyncMetrics != null) {
+                        startupSyncMetrics.recordTimeout();
+                        startupSyncMetrics.recordFailure("TOTAL_TIMEOUT");
+                    }
+                    break;
+                }
+            }
+
             // PR-2: 每个 page 前用 fencing token 校验锁
             if (!verifyLockStillHeld()) {
                 logger.warn("fencing 检测到锁已不属于本 Pod，提前退出 doFullInitOptimized at page={}",
                     pageIndex);
+                if (startupSyncMetrics != null) {
+                    startupSyncMetrics.recordFailure("FENCING_TOKEN_LOST");
+                }
                 break;
             }
 
@@ -424,7 +456,7 @@ public class InitDigEmployeeRedisRunner implements ApplicationRunner {
                 break;
             }
 
-            // PR-3: 整页预取 target_content（单 SQL IN 子句；避免每资源 findById）
+            // PR-3: 整页预取 target_content(单 SQL IN 子句;避免每资源 findById)
             List<Long> pageResourceIds = resources.stream()
                 .map(SsResource::getResourceId)
                 .filter(Objects::nonNull)
@@ -449,23 +481,80 @@ public class InitDigEmployeeRedisRunner implements ApplicationRunner {
                     () -> processChunk(chunk, pipelineBatchSize, prefetchedTargetContents),
                     exec));
             }
-            // 3) wait all
-            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+            // 3) wait all (PR-4: per-page 超时保护,超时的 chunk 视为 timeout 计入 DLQ)
+            int pageTimeoutCount = 0;
+            try {
+                if (perPageTimeoutNanos > 0) {
+                    CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+                        .get(perPageTimeoutNanos, TimeUnit.NANOSECONDS);
+                }
+                else {
+                    CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+                }
+            }
+            catch (TimeoutException te) {
+                // Per-page 超时: 取消所有未完成的 chunk, 记录 DLQ
+                pageTimeoutCount = (int) futures.stream()
+                    .filter(f -> !f.isDone())
+                    .count();
+                for (CompletableFuture<ChunkStats> f : futures) {
+                    if (!f.isDone()) {
+                        f.cancel(true);
+                    }
+                }
+                logger.warn("[PR-4 单 page 超时] page={}, perPageTimeout={}ms, 取消 {} 个未完成 chunk, 资源进入 DLQ",
+                    pageIndex, perPageTimeoutNanos / 1_000_000L, pageTimeoutCount);
+                for (SsResource r : resources) {
+                    if (startupSyncDlqRecorder != null) {
+                        startupSyncDlqRecorder.recordFailure(
+                            r.getResourceId(), "DIG_EMPLOYEE", "PER_PAGE_TIMEOUT");
+                    }
+                }
+                if (startupSyncMetrics != null) {
+                    startupSyncMetrics.recordTimeout();
+                    startupSyncMetrics.recordFailure("PER_PAGE_TIMEOUT");
+                }
+            }
+            catch (Exception e) {
+                logger.error("[PR-4] page={} allOf 等待异常: {}", pageIndex, e.getMessage(), e);
+                if (startupSyncMetrics != null) {
+                    startupSyncMetrics.recordFailure("ALL_OF_INTERRUPTED");
+                }
+            }
+            totalChunkTimeouts += pageTimeoutCount;
+
             // 4) aggregate
             for (CompletableFuture<ChunkStats> f : futures) {
-                ChunkStats st = f.getNow(ChunkStats.empty());
+                if (f.isCancelled() || f.isCompletedExceptionally()) {
+                    // 已被取消或异常完成: 视作失败, 资源已通过 DLQ 处理
+                    continue;
+                }
+                ChunkStats st;
+                try {
+                    st = f.getNow(ChunkStats.empty());
+                }
+                catch (Exception e) {
+                    continue;
+                }
+                if (st.kvFailures > 0) {
+                    // chunk 内有 kv 写入失败 -> 记录 metrics
+                    if (startupSyncMetrics != null) {
+                        startupSyncMetrics.recordFailure("CHUNK_KV_FAILURE");
+                    }
+                }
                 totalEmployees += st.total;
                 totalKvWrites += st.kvWrites;
                 totalKvFailures += st.kvFailures;
                 totalSkippedBlank += st.skippedBlank;
             }
 
-            logger.debug("数字员工Redis全量初始化进度：page={}, 本页资源={}, 预取成功={}, 空白={}, chunks={}, "
-                    + "本批写入成功={}, 失败={}, 跳过target_content空白={}",
+            logger.debug("数字员工Redis全量初始化进度:page={}, 本页资源={}, 预取成功={}, 空白={}, chunks={}, "
+                    + "本批写入成功={}, 失败={}, 跳过target_content空白={}, page超时取消={}",
                 pageIndex, resources.size(), prefetchedCount, blankCount, chunks.size(),
                 futures.stream().mapToInt(f -> f.getNow(ChunkStats.empty()).kvWrites).sum(),
                 futures.stream().mapToInt(f -> f.getNow(ChunkStats.empty()).kvFailures).sum(),
-                futures.stream().mapToInt(f -> f.getNow(ChunkStats.empty()).skippedBlank).sum());
+                futures.stream().mapToInt(f -> f.getNow(ChunkStats.empty()).skippedBlank).sum(),
+                pageTimeoutCount);
 
             if (resources.size() < batchSize) {
                 break;
@@ -473,10 +562,26 @@ public class InitDigEmployeeRedisRunner implements ApplicationRunner {
             pageIndex++;
         }
 
-        logger.info("数字员工及其关联资源Redis全量初始化（优化路径）完成：资源{}个，写入{}个 key/value 对，"
-                + "kv失败{}个，跳过target_content空白{}个，分片并行度={}，pipeline批内大小={}",
-            totalEmployees, totalKvWrites, totalKvFailures, totalSkippedBlank,
-            parallelism, pipelineBatchSize);
+        long totalCostMs = (System.nanoTime() - startupStartNanos) / 1_000_000L;
+
+        // PR-4: 上报 metrics
+        if (startupSyncMetrics != null) {
+            startupSyncMetrics.recordTotal(totalEmployees);
+            startupSyncMetrics.recordSuccess(totalKvWrites);
+            startupSyncMetrics.recordDuration(System.nanoTime() - startupStartNanos);
+            // 同步 DLQ size gauge
+            try {
+                if (startupSyncDlqRecorder != null) {
+                    startupSyncMetrics.updateDlqSize(startupSyncDlqRecorder.getDlqSize());
+                }
+            }
+            catch (Exception ignored) { }
+        }
+
+        logger.info("数字员工及其关联资源Redis全量初始化(优化路径)完成:资源{}个, 写入{}个 key/value 对, "
+                + "kv失败{}个, 跳过target_content空白{}个, page超时取消{}个 chunk, 分片并行度={}, pipeline批内大小={}, 总耗时={}ms",
+            totalEmployees, totalKvWrites, totalKvFailures, totalSkippedBlank, totalChunkTimeouts,
+            parallelism, pipelineBatchSize, totalCostMs);
     }
 
     /**
@@ -671,6 +776,34 @@ public class InitDigEmployeeRedisRunner implements ApplicationRunner {
             return 1;
         }
         return Math.max(1, Math.min(configured, 8));
+    }
+
+    /**
+     * 解析有效总时长纳秒（PR-4）。未配置或 0 → 0（不启用总时长保护）。
+     */
+    private long effectiveTimeoutNanos() {
+        if (startupSyncProperties == null) {
+            return 0L;
+        }
+        Long sec = startupSyncProperties.getTimeoutSeconds();
+        if (sec == null || sec <= 0) {
+            return 0L;
+        }
+        return sec * 1_000_000_000L;
+    }
+
+    /**
+     * 解析有效单 page 时长纳秒（PR-4）。未配置或 0 → 0（不启用 per-page 超时）。
+     */
+    private long effectivePerPageTimeoutNanos() {
+        if (startupSyncProperties == null) {
+            return 0L;
+        }
+        Long sec = startupSyncProperties.getPerPageTimeoutSeconds();
+        if (sec == null || sec <= 0) {
+            return 0L;
+        }
+        return sec * 1_000_000_000L;
     }
 
     /**

@@ -172,4 +172,63 @@ public class DigEmployeeStartupSyncProperties {
     public void setLockRenewIntervalSeconds(int lockRenewIntervalSeconds) {
         this.lockRenewIntervalSeconds = lockRenewIntervalSeconds;
     }
+
+    // ============================================================
+    // PR-4 时长保护 + DLQ 配置
+    // ============================================================
+
+    /**
+     * 启动期总时长保护（秒）。doFullInitOptimized 累计运行时间超过此值时主动 break 退出循环。
+     * <p>
+     * Reviewer 设计：默认 1800s (30 分钟) — D=100k 数据量级足够；
+     * 超过此值说明同步进度异常(DB hang / 死锁 / 网络问题)，主动退出避免 Spring Boot 启动阻塞过久。
+     * <p>
+     * 默认值 1800s。
+     */
+    private Long timeoutSeconds = 1800L;
+
+    /**
+     * 启动期单 page 时长保护(秒)。单个 page 的 chunk parallel 执行总耗时超过此值时
+     * 视为该 page 卡死,触发 fencing 退出 + 写入 DLQ。
+     * <p>
+     * Reviewer 设计:默认 120s (2 分钟) — 单 page 包含 ~1000 数字员工 + ~5000 kv 写入,
+     * 正常应在 5-30s 内完成;超过 2 分钟说明有 chunk hang。
+     * <p>
+     * 默认值 120s。
+     */
+    private Long perPageTimeoutSeconds = 120L;
+
+    /**
+     * 是否启用 DLQ(启动期同步失败记录)。失败时记录到 Redis List
+     * {@code byai:dig-employee:startup-sync:dlq},运维巡检可用 LPOP 取出。
+     * <p>
+     * 默认 true。关闭后失败仅记 warn 日志(不阻塞同步)。
+     */
+    private Boolean dlqEnabled = true;
+
+    // -------- PR-4 时长保护 + DLQ getter/setter --------
+
+    public Long getTimeoutSeconds() {
+        return timeoutSeconds;
+    }
+
+    public void setTimeoutSeconds(Long timeoutSeconds) {
+        this.timeoutSeconds = timeoutSeconds;
+    }
+
+    public Long getPerPageTimeoutSeconds() {
+        return perPageTimeoutSeconds;
+    }
+
+    public void setPerPageTimeoutSeconds(Long perPageTimeoutSeconds) {
+        this.perPageTimeoutSeconds = perPageTimeoutSeconds;
+    }
+
+    public Boolean getDlqEnabled() {
+        return dlqEnabled;
+    }
+
+    public void setDlqEnabled(Boolean dlqEnabled) {
+        this.dlqEnabled = dlqEnabled;
+    }
 }
