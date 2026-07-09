@@ -16,7 +16,7 @@ import { getDelegatedTaskToolDetails } from "../../shared/src/delegated-tool-det
 import type { BaiyingEnhanceLogger } from "../../shared/src/debug-channel.js";
 import { logBaiyingRequest } from "../../shared/src/debug-channel.js";
 import type { Capability, Dict, ExecutorResponse } from "../../shared/src/executor-types.js";
-import { ACP, CALL_ACP_AGENT, DEFAULTS } from "./constants.js";
+import { CALL_ACP_AGENT, DEFAULTS } from "./constants.js";
 import { buildCallAgentContentFromPlan, createByclawAcpPlan } from "./planner.js";
 import type { ByclawRegistry } from "./registry.js";
 import type { ByclawAcpPlanRequest, ResolvedByclawAcpAdapterConfig } from "./types.js";
@@ -42,7 +42,7 @@ const callAcpAgentParameters = {
     },
     cwd: {
       type: "string",
-      description: `Optional working directory override for the remote ${ACP.nextType} plan.`,
+      description: `Optional working directory override for the remote agent plan.`,
     },
     acpAgentId: {
       type: "string",
