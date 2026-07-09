@@ -81,6 +81,8 @@ const parseBannerList = (value: any) => {
   }
 };
 
+const SHOW_ECOSYSTEM_COLLECTION_ENTRY = false;
+
 const Resources: React.FC<Props> = ({ resourceType }) => {
   const intl = useIntl();
 
@@ -391,7 +393,7 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
         }}
       />
 
-      {resourceType === 'KG_DOC' && (
+      {SHOW_ECOSYSTEM_COLLECTION_ENTRY && resourceType === 'KG_DOC' && (
         <Tooltip
           title={
             activeTab === 'enterprise' && !canImportCurrentEnterpriseResource ? noPermissionDisabledTip : undefined
