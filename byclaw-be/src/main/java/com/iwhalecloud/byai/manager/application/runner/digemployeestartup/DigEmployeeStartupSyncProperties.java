@@ -21,8 +21,18 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @ConfigurationProperties(prefix = "byai.dig-employee.startup-sync")
 public class DigEmployeeStartupSyncProperties {
 
-    /** 总开关 */
-    private boolean enabled = true;
+    /**
+     * 总开关（nullable）：
+     * <ul>
+     *     <li>{@code null}（默认）→ 用户未显式配置，调用方应回退旧 flag {@code INIT_DIG_EMPLOYEE_REDIS_ENABLED}</li>
+     *     <li>{@code true} → 显式启用新逻辑（Pipeline + 并行 + 跳过开关）</li>
+     *     <li>{@code false} → 显式禁用同步</li>
+     * </ul>
+     * 此处默认 {@code null}（而非 {@code false}）是为了严格保留与既有
+     * {@code INIT_DIG_EMPLOYEE_REDIS_ENABLED} 的行为兼容：未配置新属性的环境
+     * 完全保留旧行为。
+     */
+    private Boolean enabled = null;
 
     /** 是否启用 Redis Pipeline 批量写入 */
     private boolean pipelineEnabled = true;
@@ -42,11 +52,31 @@ public class DigEmployeeStartupSyncProperties {
      */
     private boolean skipBlankTargetContent = false;
 
-    public boolean isEnabled() {
+    /**
+     * 返回{@link #enabled}的原始配置值，可为 {@code null}（未显式配置）。
+     * <p>
+     * 调用方在判定"是否走新路径"时必须使用此方法：
+     * <ul>
+     *     <li>{@code null} → 走旧路径（Runner 回退到 {@code INIT_DIG_EMPLOYEE_REDIS_ENABLED} 旧 flag）</li>
+     *     <li>{@code Boolean.TRUE.equals(getEnabledRaw())} → 走新路径</li>
+     *     <li>{@code Boolean.FALSE.equals(getEnabledRaw())} → 显式禁用</li>
+     * </ul>
+     */
+    public Boolean getEnabledRaw() {
         return enabled;
     }
 
-    public void setEnabled(boolean enabled) {
+    /**
+     * 等价于 {@code Boolean.TRUE.equals(enabled)}；用于兼容既有用法。
+     */
+    public boolean isEnabled() {
+        return Boolean.TRUE.equals(this.enabled);
+    }
+
+    /**
+     * Spring Boot 配置绑定 setter；接受 {@code null} 以表示"未配置"。
+     */
+    public void setEnabled(Boolean enabled) {
         this.enabled = enabled;
     }
 
