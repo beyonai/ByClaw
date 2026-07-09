@@ -52,6 +52,41 @@ public class DigEmployeeStartupSyncProperties {
      */
     private boolean skipBlankTargetContent = false;
 
+    // ============================================================
+    // PR-2 分布式锁配置
+    // ============================================================
+
+    /**
+     * 是否启用启动期分布式锁（PR-2 引入）。
+     * <p>
+     * 多 Pod 滚动发布期间，多实例会同时进入启动期同步，触发 silent data loss 与
+     * 资源线性放大。本开关为 {@code true} 时，只有抢到 {@code byai:dig-employee:startup-sync}
+     * 锁的 Pod 才执行同步，其它 Pod 跳过。
+     * <p>
+     * 默认 {@code true}；关闭则退化为多 Pod 并发同步（与 PR-1 行为一致）。
+     */
+    private boolean lockEnabled = true;
+
+    /**
+     * 启动期分布式锁的租约（秒）。
+     * <p>
+     * Reviewer 建议将 PR 初版 3600s 缩短为 600s（10 分钟）；renewLock 周期默认 30s，
+     * 故正常同步期间租约不会过期；只有 Pod GC pause 超过 600s 时锁才会被 Redis 释放。
+     * <p>
+     * 默认 600s。
+     */
+    private int lockExpireSeconds = 600;
+
+    /**
+     * renewLock 心跳周期（秒）。
+     * <p>
+     * 通过 {@code scheduleAtFixedRate} 周期续租；异常时主动 releaseLock 并 throw，
+     * 触发 doFullInit 的 fencing 退出逻辑。
+     * <p>
+     * 默认 30s。
+     */
+    private int lockRenewIntervalSeconds = 30;
+
     /**
      * 返回{@link #enabled}的原始配置值，可为 {@code null}（未显式配置）。
      * <p>
@@ -110,5 +145,31 @@ public class DigEmployeeStartupSyncProperties {
 
     public void setSkipBlankTargetContent(boolean skipBlankTargetContent) {
         this.skipBlankTargetContent = skipBlankTargetContent;
+    }
+
+    // -------- PR-2 分布式锁 getter/setter --------
+
+    public boolean isLockEnabled() {
+        return lockEnabled;
+    }
+
+    public void setLockEnabled(boolean lockEnabled) {
+        this.lockEnabled = lockEnabled;
+    }
+
+    public int getLockExpireSeconds() {
+        return lockExpireSeconds;
+    }
+
+    public void setLockExpireSeconds(int lockExpireSeconds) {
+        this.lockExpireSeconds = lockExpireSeconds;
+    }
+
+    public int getLockRenewIntervalSeconds() {
+        return lockRenewIntervalSeconds;
+    }
+
+    public void setLockRenewIntervalSeconds(int lockRenewIntervalSeconds) {
+        this.lockRenewIntervalSeconds = lockRenewIntervalSeconds;
     }
 }
