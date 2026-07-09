@@ -1,6 +1,6 @@
-package com.iwhalecloud.byai.gateway.channels.service.wecom.stream.listener;
+package com.iwhalecloud.byai.gateway.channels.service.wecom.stream.lifecycle;
 
-import com.iwhalecloud.byai.gateway.channels.service.wecom.stream.WecomRobotRegistryService;
+import com.iwhalecloud.byai.gateway.channels.service.wecom.stream.lifecycle.WecomRobotRegistryService;
 import com.iwhalecloud.byai.gateway.channels.service.wecom.sdk.config.WecomStreamProperties;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;

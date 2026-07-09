@@ -1,4 +1,4 @@
-package com.iwhalecloud.byai.gateway.channels.service.wecom.stream;
+package com.iwhalecloud.byai.gateway.channels.service.wecom.stream.message;
 import com.iwhalecloud.byai.gateway.channels.service.wecom.sdk.WecomReplyDispatcher;
 import com.iwhalecloud.byai.gateway.channels.service.wecom.sdk.WecomMessageParser;
 
@@ -16,6 +16,8 @@ import com.iwhalecloud.byai.gateway.channels.service.wecom.sdk.model.WecomEventM
 import com.iwhalecloud.byai.gateway.channels.service.wecom.sdk.model.WecomMsgType;
 import com.iwhalecloud.byai.gateway.channels.service.wecom.sdk.model.WecomWsFrame;
 import com.iwhalecloud.byai.gateway.channels.service.wecom.sdk.config.WecomStreamProperties;
+import com.iwhalecloud.byai.gateway.channels.service.wecom.stream.file.WecomFileService;
+import com.iwhalecloud.byai.gateway.channels.service.wecom.stream.user.WecomUserService;
 import com.iwhalecloud.byai.state.domain.agent.enums.AgentMetaEnum;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
 import com.iwhalecloud.byai.state.domain.chat.model.MessageFileDto;
@@ -178,22 +180,14 @@ public class WecomMessageListener {
                 // Wait for appStreamResponse to finalize the WeCom stream.
                 // The timeout is an idle timeout: every outputStream.write(...)
                 // from chat resets the 60s window.
-                logger.info("WeCom chat returned, waiting final stream event. msgId={}, reqId={}, contentLength={}, content={}",
-                        message.getMsgId(), reqId, out.getAccumulatedContent().length(), out.getAccumulatedContent());
                 boolean finalOk = awaitStreamCompletion(out);
-                logger.info("WeCom final stream frame completed. msgId={}, reqId={}, finalOk={}, streamingFailed={}",
-                        message.getMsgId(), reqId, finalOk, out.hasStreamingFailed());
+
                 if (!finalOk || out.hasStreamingFailed()) {
                     dispatcher.replyText(reqId, FALLBACK_REPLY);
                 }
             } catch (Exception e) {
                 logger.error("WeCom chat failed. msgId={}", message.getMsgId(), e);
-                logger.info("WeCom chat failed, sending final stream frame before fallback. msgId={}, reqId={}, contentLength={}, content={}",
-                        message.getMsgId(), reqId, out.getAccumulatedContent().length(), out.getAccumulatedContent());
-                boolean finalOk = awaitFinalFrame(out.finish());
-                logger.info("WeCom final stream frame after chat failure completed. msgId={}, reqId={}, finalOk={}, streamingFailed={}",
-                        message.getMsgId(), reqId, finalOk, out.hasStreamingFailed());
-                dispatcher.replyText(reqId, FALLBACK_REPLY);
+                dispatcher.replyText(reqId, chatFailureReply(e));
             }
         } catch (Exception e) {
             logger.error("WeCom message handling failed. msgId={}", message.getMsgId(), e);
@@ -232,6 +226,29 @@ public class WecomMessageListener {
         } catch (Exception e) {
             return false;
         }
+    }
+
+    static String chatFailureReply(Exception e) {
+        String detail = deepestNonBlankMessage(e);
+        if (detail == null) {
+            detail = FALLBACK_REPLY;
+        }
+
+        return detail;
+    }
+
+    private static String deepestNonBlankMessage(Throwable e) {
+        String message = null;
+        Throwable cursor = e;
+        int guard = 0;
+        while (cursor != null && guard++ < 16) {
+            String current = cursor.getMessage();
+            if (current != null && !current.isBlank()) {
+                message = current.trim().replace('\r', ' ').replace('\n', ' ');
+            }
+            cursor = cursor.getCause();
+        }
+        return message;
     }
 
     private AuthDigitEmployVo findAuthorizedDigitEmploy(Long userId, String botId) {

@@ -1,4 +1,4 @@
-package com.iwhalecloud.byai.gateway.channels.service.wecom.stream;
+package com.iwhalecloud.byai.gateway.channels.service.wecom.stream.lifecycle;
 
 import com.iwhalecloud.byai.common.util.RedisUtil;
 import org.slf4j.Logger;

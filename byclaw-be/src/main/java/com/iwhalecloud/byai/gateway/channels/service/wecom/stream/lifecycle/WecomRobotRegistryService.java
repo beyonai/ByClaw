@@ -1,4 +1,4 @@
-package com.iwhalecloud.byai.gateway.channels.service.wecom.stream;
+package com.iwhalecloud.byai.gateway.channels.service.wecom.stream.lifecycle;
 import com.iwhalecloud.byai.gateway.channels.service.wecom.sdk.WecomWsClient;
 import com.iwhalecloud.byai.gateway.channels.service.wecom.sdk.WecomWsClientFactory;
 import com.iwhalecloud.byai.gateway.channels.service.wecom.sdk.WecomWsClientListener;
@@ -9,6 +9,8 @@ import com.iwhalecloud.byai.gateway.channels.service.wecom.sdk.WecomReplyDispatc
 import com.iwhalecloud.byai.gateway.channels.service.wecom.sdk.config.WecomStreamProperties;
 import com.iwhalecloud.byai.gateway.channels.service.wecom.sdk.model.WecomRobotChannelConfig;
 import com.iwhalecloud.byai.gateway.channels.service.wecom.sdk.model.WecomWsFrame;
+import com.iwhalecloud.byai.gateway.channels.service.wecom.stream.config.WecomRobotConfigService;
+import com.iwhalecloud.byai.gateway.channels.service.wecom.stream.message.WecomMessageListener;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtDigEmployeeService;
 import com.iwhalecloud.byai.manager.dto.resource.ResourceExtDigEmployeeDto;
 import com.fasterxml.jackson.databind.ObjectMapper;
