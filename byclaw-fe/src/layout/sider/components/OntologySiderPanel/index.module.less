@@ -75,12 +75,10 @@
   align-items: center;
   padding: 1px 5px;
   border-radius: 4px;
-  background-color: rgba(22, 93, 255, 0.1);
   line-height: 1;
 }
 
 .typeTagText {
-  background: linear-gradient(90deg, #088cff 0%, #00cdd5 100%);
   background-clip: text;
   color: transparent;
   font-size: 11px;
@@ -91,6 +89,30 @@
 
 .nodeIcon {
   flex: none;
+}
+
+.viewTypeTag {
+  background-color: rgba(22, 93, 255, 0.1);
+
+  .typeTagText {
+    background-image: linear-gradient(90deg, #088cff 0%, #00cdd5 100%);
+  }
+}
+
+.objectTypeTag {
+  background-color: rgba(0, 168, 112, 0.12);
+
+  .typeTagText {
+    background-image: linear-gradient(90deg, #00a870 0%, #4ac28f 100%);
+  }
+}
+
+.viewResourceIcon {
+  color: #165dff;
+}
+
+.objectResourceIcon {
+  color: #00a870;
 }
 
 .nodeAction {

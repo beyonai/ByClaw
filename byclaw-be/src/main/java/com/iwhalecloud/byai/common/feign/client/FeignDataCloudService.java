@@ -108,6 +108,8 @@ public class FeignDataCloudService {
     // 路径参数（ownerType/baseId/sceneId/...）拼进 URL；GET 的过滤参数放 queryParams，POST 放 body。
     // 响应出口统一把 snake_case 键名归一化为 camelCase（datacloud 实跑返回 snake_case，前端/本端按 camelCase 消费）。
     private static final String ONTOLOGY_BASE_PATH = "/api/v1/ontologyBases";
+    private static final String ONTOLOGY_RPC_PATH = "/api/v1/rpc";
+    private static final String DEFAULT_ONTOLOGY_SYSTEM_CODE = "BYCLAW_DATACLOUD";
 
     /** GET 转发：查询参数走 query string，无 body。 */
     private <T> T getOntologyData(String path, Map<String, Object> queryParams,
@@ -376,6 +378,25 @@ public class FeignDataCloudService {
         return query;
     }
 
+    private static JSONObject rpcBody(Object... keyValues) {
+        JSONObject params = new JSONObject();
+        if (keyValues != null) {
+            for (int i = 0; i + 1 < keyValues.length; i += 2) {
+                Object value = keyValues[i + 1];
+                if (value != null && StringUtils.isNotBlank(String.valueOf(value))) {
+                    params.put(String.valueOf(keyValues[i]), value);
+                }
+            }
+        }
+        JSONObject body = new JSONObject();
+        body.put("params", params);
+        return body;
+    }
+
+    private static String ontologySystemCode(String systemCode) {
+        return StringUtils.defaultIfBlank(systemCode, DEFAULT_ONTOLOGY_SYSTEM_CODE);
+    }
+
     /** 列出全部本体库（GET /api/v1/ontologyBases?keyword=）。 */
     public JSONArray listOntologyBases() {
         return listOntologyBases(null);
@@ -401,19 +422,6 @@ public class FeignDataCloudService {
             return listOntologyBases(keyword);
         }
         return listOntologyBasesByOwner(ownerType, keyword);
-    }
-
-    /** 创建/注册本体库（POST /api/v1/ontologyBases）。 */
-    public JSONObject createOntologyBase(Map<String, Object> body) {
-        return postOntologyData(ONTOLOGY_BASE_PATH, body, new TypeReference<DataCloudResponse<JSONObject>>() {
-        });
-    }
-
-    /** 更新本体库（PUT /api/v1/ontologyBases/{baseId}）。 */
-    public JSONObject updateOntologyBase(String baseId, Map<String, Object> body) {
-        return putOntologyData(ONTOLOGY_BASE_PATH + "/" + pathValue(baseId), body,
-            new TypeReference<DataCloudResponse<JSONObject>>() {
-            });
     }
 
     /** 删除/注销本体库（DELETE /api/v1/ontologyBases/{baseId}）。 */
@@ -485,13 +493,19 @@ public class FeignDataCloudService {
             });
     }
 
-    /** 场景下本体分页查询（GET /api/v1/ontologyBases/scenes/{sceneCode}/ontologies）。 */
+    /** 场景下本体分页查询（POST /api/v1/rpc/scene/queryOntologiesByCode）。 */
     public JSONObject queryOntologiesBySceneCode(String sceneCode, String ownerType, String type, String keyword,
         Integer page, Integer pageSize, String userCode) {
-        String path = String.format("%s/scenes/%s/ontologies", ONTOLOGY_BASE_PATH, pathValue(sceneCode));
-        return getOntologyData(path,
-            queryOf("ownerType", ownerType, "type", type, "keyword", keyword, "page", page, "pageSize", pageSize,
-                "userCode", userCode),
+        return queryOntologiesBySceneCode(DEFAULT_ONTOLOGY_SYSTEM_CODE, sceneCode, ownerType, type, keyword, page,
+            pageSize, userCode);
+    }
+
+    public JSONObject queryOntologiesBySceneCode(String systemCode, String sceneCode, String ownerType, String type,
+        String keyword, Integer page, Integer pageSize, String userCode) {
+        String path = ONTOLOGY_RPC_PATH + "/scene/queryOntologiesByCode";
+        return postOntologyData(path,
+            rpcBody("system_code", ontologySystemCode(systemCode), "scene_code", sceneCode, "owner_type", ownerType,
+                "type", type, "keyword", keyword, "page", page, "page_size", pageSize, "user_code", userCode),
             new TypeReference<DataCloudResponse<JSONObject>>() {
             });
     }
@@ -523,10 +537,16 @@ public class FeignDataCloudService {
         });
     }
 
-    /** 根据视图编码查询对象列表（GET /api/v1/ontologyBases/views/{viewCode}/objects）。 */
+    /** 根据视图编码查询对象列表（POST /api/v1/rpc/view/getObjects）。 */
     public JSONArray listObjectsByViewCode(String viewCode) {
-        String path = String.format("%s/views/%s/objects", ONTOLOGY_BASE_PATH, pathValue(viewCode));
-        return getOntologyData(path, null, new TypeReference<DataCloudResponse<JSONArray>>() {
+        return listObjectsByViewCode(DEFAULT_ONTOLOGY_SYSTEM_CODE, viewCode);
+    }
+
+    public JSONArray listObjectsByViewCode(String systemCode, String viewCode) {
+        String path = ONTOLOGY_RPC_PATH + "/view/getObjects";
+        return postOntologyData(path,
+            rpcBody("system_code", ontologySystemCode(systemCode), "view_code", viewCode),
+            new TypeReference<DataCloudResponse<JSONArray>>() {
         });
     }
 
@@ -537,10 +557,16 @@ public class FeignDataCloudService {
         });
     }
 
-    /** 获取对象类型详情（GET /api/v1/ontologyBases/objects/{objectCode}）。 */
+    /** 获取对象类型详情（POST /api/v1/rpc/objectType/getObject）。 */
     public JSONObject getObjectDetailByObjectCode(String objectCode) {
-        String path = String.format("%s/objects/%s", ONTOLOGY_BASE_PATH, pathValue(objectCode));
-        return getOntologyData(path, null, new TypeReference<DataCloudResponse<JSONObject>>() {
+        return getObjectDetailByObjectCode(DEFAULT_ONTOLOGY_SYSTEM_CODE, objectCode);
+    }
+
+    public JSONObject getObjectDetailByObjectCode(String systemCode, String objectCode) {
+        String path = ONTOLOGY_RPC_PATH + "/objectType/getObject";
+        return postOntologyData(path,
+            rpcBody("system_code", ontologySystemCode(systemCode), "code", objectCode),
+            new TypeReference<DataCloudResponse<JSONObject>>() {
         });
     }
 
@@ -576,10 +602,16 @@ public class FeignDataCloudService {
         });
     }
 
-    /** 获取视图详情（GET /api/v1/ontologyBases/views/{code}）。 */
+    /** 获取视图详情（POST /api/v1/rpc/view/getView）。 */
     public JSONObject getViewDetailByViewCode(String viewCode) {
-        String path = String.format("%s/views/%s", ONTOLOGY_BASE_PATH, pathValue(viewCode));
-        return getOntologyData(path, null, new TypeReference<DataCloudResponse<JSONObject>>() {
+        return getViewDetailByViewCode(DEFAULT_ONTOLOGY_SYSTEM_CODE, viewCode);
+    }
+
+    public JSONObject getViewDetailByViewCode(String systemCode, String viewCode) {
+        String path = ONTOLOGY_RPC_PATH + "/view/getView";
+        return postOntologyData(path,
+            rpcBody("system_code", ontologySystemCode(systemCode), "code", viewCode),
+            new TypeReference<DataCloudResponse<JSONObject>>() {
         });
     }
 
@@ -608,10 +640,16 @@ public class FeignDataCloudService {
         });
     }
 
-    /** 根据对象编码查询关系列表（GET /api/v1/ontologyBases/objects/{objectCode}/relations）。 */
+    /** 根据对象编码查询关系列表（POST /api/v1/rpc/objectType/getRelations）。 */
     public JSONArray listRelationsByObjectCode(String objectCode) {
-        String path = String.format("%s/objects/%s/relations", ONTOLOGY_BASE_PATH, pathValue(objectCode));
-        return getOntologyData(path, null, new TypeReference<DataCloudResponse<JSONArray>>() {
+        return listRelationsByObjectCode(DEFAULT_ONTOLOGY_SYSTEM_CODE, objectCode);
+    }
+
+    public JSONArray listRelationsByObjectCode(String systemCode, String objectCode) {
+        String path = ONTOLOGY_RPC_PATH + "/objectType/getRelations";
+        return postOntologyData(path,
+            rpcBody("system_code", ontologySystemCode(systemCode), "object_code", objectCode),
+            new TypeReference<DataCloudResponse<JSONArray>>() {
         });
     }
 

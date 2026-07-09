@@ -6,14 +6,12 @@ import com.iwhalecloud.byai.common.annotation.ManageLogAnnotation;
 import com.iwhalecloud.byai.manager.application.service.ontology.OntologyBaseService;
 import com.iwhalecloud.byai.manager.application.service.ontology.OntologyBindService;
 import com.iwhalecloud.byai.manager.dto.ontology.OntologyBaseQueryRequest;
-import com.iwhalecloud.byai.manager.dto.ontology.OntologyBaseRegisterRequest;
 import com.iwhalecloud.byai.manager.dto.ontology.OntologyBindRequest;
 import com.iwhalecloud.byai.manager.dto.ontology.OntologyRefreshResult;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
-import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -52,18 +50,6 @@ public class OntologyBaseController {
     @PostMapping("/base/list")
     public ResponseUtil<JSONArray> listBases(@RequestBody OntologyBaseQueryRequest request) {
         return ResponseUtil.successRes(ontologyBaseService.listBases(request.getOwnerType(), request.getQueryKeyword()));
-    }
-
-    @ApiOperation("创建本体库")
-    @PostMapping("/base/create")
-    public ResponseUtil<JSONObject> createBase(@RequestBody JSONObject request) {
-        return ResponseUtil.successRes(ontologyBaseService.createBase(request));
-    }
-
-    @ApiOperation("更新本体库")
-    @PostMapping("/base/update")
-    public ResponseUtil<JSONObject> updateBase(@RequestBody JSONObject request) {
-        return ResponseUtil.successRes(ontologyBaseService.updateBase(request));
     }
 
     @ApiOperation("场景列表")
@@ -296,13 +282,6 @@ public class OntologyBaseController {
     @PostMapping("/base/tree")
     public ResponseUtil<java.util.List<SsResource>> tree(@RequestBody OntologyBaseQueryRequest request) {
         return ResponseUtil.successRes(ontologyBaseService.tree(request.getBaseId()));
-    }
-
-    @ApiOperation("注册本体库")
-    @PostMapping("/base/register")
-    @ManageLogAnnotation(name = "注册本体库", description = "注册/创建本体库并快照进 ss_resource")
-    public ResponseUtil<SsResource> registerBase(@Valid @RequestBody OntologyBaseRegisterRequest request) {
-        return ResponseUtil.successRes(ontologyBaseService.registerBase(request));
     }
 
     @ApiOperation("刷新本体库：从本体管理门户拉取最新本体库并 upsert 进 ss_resource")

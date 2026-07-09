@@ -13,7 +13,10 @@ const ontologyRequestConfig = {
   },
 };
 
+export const DEFAULT_ONTOLOGY_SYSTEM_CODE = 'BYCLAW_DATACLOUD';
+
 const normalizeOwnerType = (ownerType?: string) => ownerType || 'personal';
+const normalizeSystemCode = (systemCode?: string) => systemCode || DEFAULT_ONTOLOGY_SYSTEM_CODE;
 
 export interface OntologyBase {
   baseId: string;
@@ -85,19 +88,6 @@ export interface OntologySceneDetails {
   datasources?: any[];
 }
 
-/** 本体库注册入参（不填 sourceUrl=LOCAL，填了=REMOTE）。 */
-export interface OntologyBaseRegister {
-  displayName: string;
-  description: string;
-  baseId?: string;
-  ownerType?: string;
-  catalogId?: number | string;
-  sourceUrl?: string;
-  authType?: 'none' | 'api_key' | 'bearer' | 'oauth2' | string;
-  authConfig?: Record<string, any>;
-  timeoutSec?: number;
-}
-
 /** 列出本体库（个人/企业 tab 与 sider 用；后端读 ss_resource ONTOLOGY_BASE）。 */
 export function listOntologyBases(params: { ownerType?: string; queryKeyword?: string } = {}) {
   return POST<any>(
@@ -142,11 +132,12 @@ export function getOntologySceneDetails(params: {
 }
 
 /** 获取对象详情（属性 + 动作）。 */
-export function getOntologyObjectDetail(params: { objectCode: string }) {
+export function getOntologyObjectDetail(params: { objectCode: string; systemCode?: string }) {
   return POST<any>(
     '/byaiService/ontology/object/detail',
     {
       objectCode: params.objectCode,
+      systemCode: normalizeSystemCode(params.systemCode),
     },
     ontologyRequestConfig
   );
@@ -155,11 +146,6 @@ export function getOntologyObjectDetail(params: { objectCode: string }) {
 /** 本体库 ss_resource 子树（库/场景/对象/视图），供按粒度安装选择器使用。 */
 export function getOntologyBaseTree(params: { baseId: string }) {
   return POST<any>('/byaiService/ontology/base/tree', { baseId: params.baseId }, ontologyRequestConfig);
-}
-
-/** 注册/创建本体库（LOCAL 自建 / REMOTE 注册）。 */
-export function registerOntologyBase(body: OntologyBaseRegister) {
-  return POST<any>('/byaiService/ontology/base/register', body, ontologyRequestConfig);
 }
 
 /** 解绑单个本体资源（视图/对象/场景/库）与数字员工的绑定关系。 */
@@ -213,6 +199,7 @@ export function pageOntologyResources(params: {
   ownerType?: string;
   resourceBizType?: 'OBJECT' | 'VIEW' | string;
   resourceBizTypeList?: string[];
+  systemCode?: string;
   keyword?: string;
   catalogId?: string | number;
   statusList?: number[];
@@ -225,6 +212,7 @@ export function pageOntologyResources(params: {
     ownerType: normalizeOwnerType(params.ownerType),
     resourceBizType: params.resourceBizType,
     resourceBizTypeList: params.resourceBizTypeList,
+    systemCode: normalizeSystemCode(params.systemCode),
     keyword,
     resourceName: keyword,
     ...(params.catalogId === undefined || params.catalogId === '' ? {} : { catalogId: params.catalogId }),
@@ -245,6 +233,7 @@ export function syncOntologyResources(params: {
   ownerType?: string;
   resourceBizType?: 'OBJECT' | 'VIEW' | string;
   resourceBizTypeList?: string[];
+  systemCode?: string;
   keyword?: string;
   catalogId?: string | number;
   pageNum?: number;
@@ -255,22 +244,13 @@ export function syncOntologyResources(params: {
     ownerType: normalizeOwnerType(params.ownerType),
     resourceBizType: params.resourceBizType,
     resourceBizTypeList: params.resourceBizTypeList,
+    systemCode: normalizeSystemCode(params.systemCode),
     keyword,
     resourceName: keyword,
     ...(params.catalogId === undefined || params.catalogId === '' ? {} : { catalogId: params.catalogId }),
     pageNum: params.pageNum || 1,
     pageSize: params.pageSize || 100,
   });
-}
-
-/** 创建本体库（直通 datacloud 新接口；如需同步 ss_resource，仍使用 registerOntologyBase）。 */
-export function createOntologyBase(body: OntologyPayload) {
-  return ontologyPost('/byaiService/ontology/base/create', body);
-}
-
-/** 更新本体库。 */
-export function updateOntologyBase(params: { baseId: string; payload?: OntologyPayload } & OntologyPayload) {
-  return ontologyPost('/byaiService/ontology/base/update', params);
 }
 
 /** 创建场景。 */
@@ -344,15 +324,19 @@ export function listOntologyViews(params: { baseId: string; cacheMode?: string }
 }
 
 /** 视图详情。 */
-export function getOntologyViewDetail(params: { viewCode: string }) {
+export function getOntologyViewDetail(params: { viewCode: string; systemCode?: string }) {
   return ontologyPost('/byaiService/ontology/view/detail', {
     viewCode: params.viewCode,
+    systemCode: normalizeSystemCode(params.systemCode),
   });
 }
 
 /** 根据视图编码查询对象列表。 */
-export function listOntologyObjectsByView(params: { viewCode: string }) {
-  return ontologyPost('/byaiService/ontology/view/objects', params);
+export function listOntologyObjectsByView(params: { viewCode: string; systemCode?: string }) {
+  return ontologyPost('/byaiService/ontology/view/objects', {
+    viewCode: params.viewCode,
+    systemCode: normalizeSystemCode(params.systemCode),
+  });
 }
 
 /** 创建视图。 */
@@ -378,8 +362,11 @@ export function listOntologyRelations(params: { baseId: string; cacheMode?: stri
 }
 
 /** 根据对象编码查询关系详情列表。 */
-export function listOntologyRelationsByObject(params: { objectCode: string }) {
-  return ontologyPost('/byaiService/ontology/object/relations', params);
+export function listOntologyRelationsByObject(params: { objectCode: string; systemCode?: string }) {
+  return ontologyPost('/byaiService/ontology/object/relations', {
+    objectCode: params.objectCode,
+    systemCode: normalizeSystemCode(params.systemCode),
+  });
 }
 
 /** 关系详情。 */

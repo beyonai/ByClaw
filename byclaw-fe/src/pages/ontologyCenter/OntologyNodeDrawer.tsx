@@ -28,11 +28,13 @@ const OntologyNodeDrawer = ({
   showReference = true,
   onReference,
   onClose,
+  systemCode,
 }: {
   open: boolean;
   node: any;
   baseId?: string;
   ownerType?: string;
+  systemCode?: string;
   panel?: boolean;
   showReference?: boolean;
   onReference?: () => void;
@@ -51,7 +53,7 @@ const OntologyNodeDrawer = ({
     if (!open || !node) return;
     setLoading(true);
     if ((level === 'OBJECT_IN_SCENE' || level === 'OBJECT_IN_VIEW') && node?.objectCode) {
-      getOntologyObjectDetail({ objectCode: node.objectCode })
+      getOntologyObjectDetail({ objectCode: node.objectCode, systemCode: systemCode || node.systemCode })
         .then((res) => {
           const d = getData(res);
           setDetail(d && typeof d === 'object' && !Array.isArray(d) ? { objects: [d] } : {});
@@ -61,7 +63,7 @@ const OntologyNodeDrawer = ({
       return;
     }
     if (level === 'VIEW' && node?.viewCode) {
-      getOntologyViewDetail({ viewCode: node.viewCode })
+      getOntologyViewDetail({ viewCode: node.viewCode, systemCode: systemCode || node.systemCode })
         .then((res) => {
           const d = getData(res);
           setDetail(d && typeof d === 'object' && !Array.isArray(d) ? { views: [d] } : {});
@@ -72,7 +74,7 @@ const OntologyNodeDrawer = ({
     }
     setDetail({});
     setLoading(false);
-  }, [open, level, node?.viewCode, node?.objectCode]);
+  }, [open, level, node?.viewCode, node?.objectCode, node?.systemCode, systemCode]);
 
   const nodeName = useMemo(() => {
     if (!node) return '';

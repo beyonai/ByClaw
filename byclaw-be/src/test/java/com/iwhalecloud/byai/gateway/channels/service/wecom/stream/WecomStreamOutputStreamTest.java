@@ -193,6 +193,7 @@ class WecomStreamOutputStreamTest {
         out.write(answerDeltaBlock("有什么企业微信使用问题需要帮您解答吗？"));
 
         out.write(appStreamResponseBlock());
+        out.completionFuture().get(2, java.util.concurrent.TimeUnit.SECONDS);
 
         assertThat(out.getAccumulatedContent()).isEqualTo("您好！请问有什么企业微信使用问题需要帮您解答吗？");
         assertThat(sentContents).isNotEmpty();
@@ -255,6 +256,7 @@ class WecomStreamOutputStreamTest {
         out.write(reasoningDeltaBlock("企业微信 智能体已就绪", "3003"));
         out.write(answerDeltaBlock("您好"));
         out.write(appStreamResponseBlock());
+        out.completionFuture().get(2, java.util.concurrent.TimeUnit.SECONDS);
 
         assertThat(out.getAccumulatedContent()).isEqualTo("您好");
         assertThat(sentContents.get(sentContents.size() - 1)).isEqualTo("您好");
@@ -267,6 +269,7 @@ class WecomStreamOutputStreamTest {
         out.write(reasoningDeltaBlock("企业微信 智能体已就绪", "3003"));
         out.write(answerDeltaBlock("您好"));
         out.write(appStreamResponseBlock());
+        out.completionFuture().get(2, java.util.concurrent.TimeUnit.SECONDS);
 
         assertThat(out.getAccumulatedContent()).isEqualTo("您好");
         assertThat(sentContents.get(sentContents.size() - 1))

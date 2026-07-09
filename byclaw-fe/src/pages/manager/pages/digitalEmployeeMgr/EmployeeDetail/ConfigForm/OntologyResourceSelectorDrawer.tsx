@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { pageOntologyResources } from '@/service/ontology';
+import { DEFAULT_ONTOLOGY_SYSTEM_CODE, pageOntologyResources } from '@/service/ontology';
 import { queryCatalogTree } from '@/service/digitalEmployees';
 import { CloseOutlined, DatabaseOutlined, EyeOutlined, PlusOutlined, SearchOutlined } from '@ant-design/icons';
 import { Button, Checkbox, Drawer, Empty, Input, Select, Space, Spin, Tabs, Tag, Tooltip, message } from 'antd';
@@ -15,6 +15,10 @@ const RESOURCE_PAGE_SIZE = 30;
 const OWNER_TABS = [
   { key: 'personal', label: '个人本体' },
   { key: 'enterprise', label: '企业本体' },
+];
+const ONTOLOGY_SYSTEM_OPTIONS = [
+  { label: '百应内置本体库', value: 'BYCLAW_DATACLOUD' },
+  { label: '智能体本体库', value: 'WHALE_AGENT' },
 ];
 
 const getResponseData = (res: any) => res?.data ?? res;
@@ -138,6 +142,7 @@ const mergeResources = (prev: any[], next: any[]) => {
 };
 
 const getResourceTypeLabel = (type: string) => (type === 'VIEW' ? '视图' : type === 'OBJECT' ? '对象' : '本体资源');
+const isViewResource = (type: string) => type === 'VIEW';
 
 const OntologyResourceSelectorDrawer = ({
   open,
@@ -150,6 +155,7 @@ const OntologyResourceSelectorDrawer = ({
   const [resourceType, setResourceType] = useState(ALL_RESOURCE_TYPE);
   const [keyword, setKeyword] = useState('');
   const [catalogId, setCatalogId] = useState(ALL_CATALOG_ID);
+  const [ontologySystemCode, setOntologySystemCode] = useState(DEFAULT_ONTOLOGY_SYSTEM_CODE);
   const [catalogs, setCatalogs] = useState<any[]>([]);
   const [resources, setResources] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -169,6 +175,7 @@ const OntologyResourceSelectorDrawer = ({
     setInitialSelectedMap(initialMap);
     setSelectedMap(initialMap);
     setActiveOwnerType(ownerType === 'enterprise' ? 'enterprise' : 'personal');
+    setOntologySystemCode(DEFAULT_ONTOLOGY_SYSTEM_CODE);
   }, [open, ownerType, selectedResources]);
 
   useEffect(() => {
@@ -194,6 +201,7 @@ const OntologyResourceSelectorDrawer = ({
         const res = await pageOntologyResources({
           ownerType: activeOwnerType,
           resourceBizTypeList: resourceType === ALL_RESOURCE_TYPE ? ONTOLOGY_RESOURCE_TYPES : [resourceType],
+          systemCode: ontologySystemCode,
           keyword,
           catalogId,
           statusList: [2],
@@ -222,7 +230,7 @@ const OntologyResourceSelectorDrawer = ({
         }
       }
     },
-    [activeOwnerType, catalogId, keyword, open, resourceType]
+    [activeOwnerType, catalogId, keyword, ontologySystemCode, open, resourceType]
   );
 
   useEffect(() => {
@@ -281,7 +289,11 @@ const OntologyResourceSelectorDrawer = ({
     });
   };
 
-  const renderResourceTypeTag = (type: string) => <Tag className={styles.typeTag}>{getResourceTypeLabel(type)}</Tag>;
+  const renderResourceTypeTag = (type: string) => (
+    <Tag className={classnames(styles.typeTag, isViewResource(type) ? styles.viewTypeTag : styles.objectTypeTag)}>
+      {getResourceTypeLabel(type)}
+    </Tag>
+  );
 
   const catalogOptions = useMemo(
     () => [
@@ -330,6 +342,12 @@ const OntologyResourceSelectorDrawer = ({
             ]}
           />
           <Select value={catalogId} className={styles.catalogSelect} onChange={setCatalogId} options={catalogOptions} />
+          <Select
+            value={ontologySystemCode}
+            className={styles.providerSelect}
+            onChange={setOntologySystemCode}
+            options={ONTOLOGY_SYSTEM_OPTIONS}
+          />
           <Input
             allowClear
             className={styles.toolbarSearch}
@@ -370,7 +388,14 @@ const OntologyResourceSelectorDrawer = ({
                             checked={checked}
                             onChange={(event) => toggleResource(item, event.target.checked)}
                           />
-                          <div className={styles.resourceIcon}>{isView ? <EyeOutlined /> : <DatabaseOutlined />}</div>
+                          <div
+                            className={classnames(
+                              styles.resourceIcon,
+                              isView ? styles.viewResourceIcon : styles.objectResourceIcon
+                            )}
+                          >
+                            {isView ? <EyeOutlined /> : <DatabaseOutlined />}
+                          </div>
                           <div className={styles.resourceMain}>
                             <div className={styles.resourceTitleRow}>
                               <span className={styles.resourceName} title={item.resourceName}>
@@ -418,7 +443,14 @@ const OntologyResourceSelectorDrawer = ({
                   const isView = item.resourceBizType === 'VIEW';
                   return (
                     <div className={styles.boundItem} key={key}>
-                      <div className={styles.boundIcon}>{isView ? <EyeOutlined /> : <DatabaseOutlined />}</div>
+                      <div
+                        className={classnames(
+                          styles.boundIcon,
+                          isView ? styles.viewResourceIcon : styles.objectResourceIcon
+                        )}
+                      >
+                        {isView ? <EyeOutlined /> : <DatabaseOutlined />}
+                      </div>
                       <div className={styles.boundMain}>
                         <div className={styles.boundTitleRow}>
                           <span className={styles.boundName} title={item.resourceName}>
