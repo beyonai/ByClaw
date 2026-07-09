@@ -59,6 +59,16 @@ public class SsResExtAgentService {
     }
 
     /**
+     * PR-3 (#150) 批量查询智能体扩展数据. 单 SQL IN 子句,替代循环 findById.
+     *
+     * @param resourceIds 资源ID集合(空集合/null 时返回空 List,不触发 SQL)
+     * @return 智能体扩展列表
+     */
+    public List<SsResExtAgent> findByIds(Collection<Long> resourceIds) {
+        return ssResExtAgentMapper.findByIds(resourceIds);
+    }
+
+    /**
      * 查询智能体信息
      *
      * @param resourceIds 资源标识

@@ -88,6 +88,16 @@ public class SsResExtDocService {
     }
 
     /**
+     * PR-3 (#150) 批量查询文档库扩展数据. 单 SQL IN 子句,替代循环 findById.
+     *
+     * @param resourceIds 资源ID集合(空集合/null 时返回空 List,不触发 SQL)
+     * @return 文档库扩展列表
+     */
+    public List<SsResExtDoc> findByIds(Collection<Long> resourceIds) {
+        return ssResExtDocMapper.findByIds(resourceIds);
+    }
+
+    /**
      * 查询文档库信息
      *
      * @param resourceIds 资源标识
