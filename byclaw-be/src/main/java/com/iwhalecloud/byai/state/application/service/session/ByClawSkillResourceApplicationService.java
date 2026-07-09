@@ -733,14 +733,41 @@ public class ByClawSkillResourceApplicationService {
         return entries;
     }
 
+    /**
+     * 在压缩包 entry 列表中找到唯一合法的 SKILL.md。
+     *
+     * 唯一合法的 SKILL.md 必须在 ZIP 根级（路径中不包含 "/" 且文件名 equalsIgnoreCase SKILL.md）；
+     * 子目录（含顶级子目录、任意深度子目录）中的 SKILL.md 一律忽略——不参与校验、不参与排序、不影响判定。
+     *
+     * 判定：
+     * - 根级 SKILL.md 数量 == 1：返回该 entry；
+     * - 根级 SKILL.md 数量 == 0 或 > 1：视为缺文档，抛 byclaw.skill.zip.missing.doc。
+     *
+     * 实现：单次 O(n) 线性扫描，发现第二份根级 SKILL.md 时立即跳出；不引入额外 Map / Set。
+     * 规则与 ByClawSkillUploadApplicationService.findUniqueSkillDoc（v2，commit 5d456956）保持完全一致，
+     * 避免同一调用链里两条入口对"kaoqing 类"复合包（根级 1 份 + 多个纳米子目录各 1 份 SKILL.md）行为不一致。
+     */
     private ZipEntryInfo findSkillDoc(List<ZipEntryInfo> entries) {
-        List<ZipEntryInfo> docs = entries.stream()
-            .filter(item -> SKILL_DOC_FILE_NAME.equalsIgnoreCase(lastPathSegment(item.name())))
-            .collect(Collectors.toList());
-        if (docs.size() != 1) {
+        ZipEntryInfo rootDoc = null;
+        int rootDocCount = 0;
+        for (ZipEntryInfo entry : entries) {
+            String name = entry.name();
+            // 仅识别根级 SKILL.md：路径里不能出现 "/"（说明不在子目录），且文件名忽略大小写匹配 SKILL.md。
+            // 子目录里的 SKILL.md 一律跳过，不参与校验、不参与排序、不影响判定。
+            if (name.indexOf('/') >= 0 || !SKILL_DOC_FILE_NAME.equalsIgnoreCase(lastPathSegment(name))) {
+                continue;
+            }
+            rootDoc = entry;
+            rootDocCount++;
+            if (rootDocCount > 1) {
+                // 已确认根级多份 SKILL.md，提前跳出避免浪费扫描。
+                break;
+            }
+        }
+        if (rootDocCount != 1) {
             throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.missing.doc"));
         }
-        return docs.get(0);
+        return rootDoc;
     }
 
     private String normalizeZipEntryName(String rawName) {

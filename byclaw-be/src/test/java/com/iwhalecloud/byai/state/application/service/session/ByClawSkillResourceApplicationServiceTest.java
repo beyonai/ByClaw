@@ -268,6 +268,36 @@ class ByClawSkillResourceApplicationServiceTest {
     }
 
     @Test
+    void inspectSkillPackage_acceptsKaoqingStyleZipWithMultipleSubdirectorySkillDocs() {
+        // Issue #155 续修核心场景：kaoqing 类复合包（根级 SKILL.md + 3 个顶级子目录各自带 SKILL.md +
+        // 子目录里的 flow.yaml / fingers.json / page.yaml）。旧 findSkillDoc 会因
+        // "全包 SKILL.md 数量 == 4 != 1" 抛 byclaw.skill.zip.missing.doc；v2 应被接受，
+        // 且 metadata.skillCode 由 zip 文件名兜底为 "kaoqing"。
+        MockMultipartFile uploadFile = new MockMultipartFile("files", "kaoqing.zip", "application/zip",
+            kaoqingStyleSkillZipBytes());
+
+        ByClawSkillResourceApplicationService.SkillPackageMetadata metadata = service.inspectSkillPackage(uploadFile);
+
+        assertThat(metadata).isNotNull();
+        assertThat(metadata.skillCode()).isEqualTo("kaoqing");
+        assertThat(metadata.skillName()).isEqualTo("kaoqing");
+        assertThat(metadata.originalFilename()).isEqualTo("kaoqing.zip");
+        assertThat(metadata.size()).isPositive();
+        assertThat(metadata.skillDesc()).isNotBlank();
+    }
+
+    @Test
+    void inspectSkillPackage_rejectsZipWithoutRootLevelSkillDoc() {
+        // v2 收紧点：根级无 SKILL.md、仅子目录有 → 必须抛 IllegalArgumentException(byclaw.skill.zip.missing.doc)，
+        // 严禁"找一个子目录 SKILL.md 凑数"回退到旧规则。本测试套件的 I18n mock 把 i18n key 原样作为 message 返回，
+        // 所以此处仅断言异常类型，与同文件其它"拒绝路径"测试风格一致。
+        MockMultipartFile uploadFile = new MockMultipartFile("files", "skill.zip", "application/zip",
+            subdirOnlySkillZipBytes());
+
+        assertThatThrownBy(() -> service.inspectSkillPackage(uploadFile)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     void refreshSkillBasicInfo_incrementsVersionAndRefreshesTargetContent() {
         SsResource resource = new SsResource();
         resource.setResourceId(7201L);
@@ -309,8 +339,70 @@ class ByClawSkillResourceApplicationServiceTest {
         try {
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             try (ZipOutputStream zip = new ZipOutputStream(out)) {
-                zip.putNextEntry(new ZipEntry(skillName + "/SKILL.md"));
+                // v2 契约（与 ByClawSkillUploadApplicationService.findUniqueSkillDoc / commit 5d456956 一致）：
+                // 唯一合法的 SKILL.md 必须位于 ZIP 根级；子目录里的 SKILL.md 一律忽略、不参与校验。
+                // 这里只写根级 SKILL.md；skillName 由 inspectSkillPackage 通过 stripZipExtension(filename) 兜底。
+                zip.putNextEntry(new ZipEntry("SKILL.md"));
                 zip.write(("## " + skillName + "\n用于测试的技能描述").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                zip.closeEntry();
+            }
+            return out.toByteArray();
+        }
+        catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /**
+     * 构造一个 kaoqing 风格的复合包：根级 SKILL.md + 多个顶级子目录各自带 SKILL.md + 各子目录下的
+     * flow.yaml / fingers.json / page.yaml。Issue #155 续修的关键场景：旧 findSkillDoc 会因为
+     * "全包 SKILL.md 数量 == 4 != 1" 抛 byclaw.skill.zip.missing.doc；v2 应被接受。
+     */
+    private byte[] kaoqingStyleSkillZipBytes() {
+        try {
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            try (ZipOutputStream zip = new ZipOutputStream(out)) {
+                zip.putNextEntry(new ZipEntry("SKILL.md"));
+                zip.write(("## kaoqing\n考勤场景根技能").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                zip.closeEntry();
+                String[] subs = {"add-class", "class-manage", "edit-kaoqin-group"};
+                for (String sub : subs) {
+                    zip.putNextEntry(new ZipEntry(sub + "/SKILL.md"));
+                    zip.write(("## " + sub + "\n纳米子技能").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                    zip.closeEntry();
+                    zip.putNextEntry(new ZipEntry(sub + "/flow.yaml"));
+                    zip.write(("name: " + sub).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                    zip.closeEntry();
+                    zip.putNextEntry(new ZipEntry(sub + "/fingers.json"));
+                    zip.write("{}".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                    zip.closeEntry();
+                    zip.putNextEntry(new ZipEntry(sub + "/page.yaml"));
+                    zip.write(("page: " + sub).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                    zip.closeEntry();
+                }
+            }
+            return out.toByteArray();
+        }
+        catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /**
+     * 构造一个只有子目录 SKILL.md、根级没有 SKILL.md 的 zip。v2 收紧点必须覆盖：应抛 missing.doc。
+     */
+    private byte[] subdirOnlySkillZipBytes() {
+        try {
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            try (ZipOutputStream zip = new ZipOutputStream(out)) {
+                zip.putNextEntry(new ZipEntry("alpha/SKILL.md"));
+                zip.write("## alpha".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                zip.closeEntry();
+                zip.putNextEntry(new ZipEntry("alpha/flow.yaml"));
+                zip.write("name: alpha".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                zip.closeEntry();
+                zip.putNextEntry(new ZipEntry("beta/SKILL.md"));
+                zip.write("## beta".getBytes(java.nio.charset.StandardCharsets.UTF_8));
                 zip.closeEntry();
             }
             return out.toByteArray();
