@@ -51,6 +51,10 @@ describe('robotConfig helpers', () => {
       agentId: '1000002',
       corpId: 'ww-corp',
       corpSecret: 'contact-secret',
+      appId: '',
+      appSecret: '',
+      verificationToken: '',
+      encryptKey: '',
     });
   });
 
@@ -73,6 +77,10 @@ describe('robotConfig helpers', () => {
       AICardId: '',
       botId: 'ding-robot',
       secret: 'ding-secret',
+      appId: '',
+      appSecret: '',
+      verificationToken: '',
+      encryptKey: '',
     });
   });
 
@@ -94,6 +102,10 @@ describe('robotConfig helpers', () => {
       AICardId: '',
       botId: 'wecom-bot',
       secret: 'wecom-secret',
+      appId: '',
+      appSecret: '',
+      verificationToken: '',
+      encryptKey: '',
     });
   });
 });

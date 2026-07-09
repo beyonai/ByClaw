@@ -294,9 +294,13 @@ async function executeOntologyResourceViaCallAgent(input: {
     asString(input.parameters.content) ||
     asString(input.parameters.message) ||
     "执行数据资源调用";
-  const payload = buildOntologyCallAgentPayload(input.parameters);
   const callKey = resourceType === "OBJECT" ? "call_object_ids" : "call_view_ids";
-  payload[callKey] = [resourceCode];
+  const resourceIds = resourceId ? [resourceId] : [];
+  const payload = buildOntologyCallAgentPayload(input.parameters, {
+    resourceType,
+    resourceCode,
+    resourceId,
+  });
   const metadata = getCommonGatewayMetadata(input.parameters);
   if (metadata["channel-trace-id"]) {
     payload["channel-trace-id"] = metadata["channel-trace-id"];
@@ -329,6 +333,7 @@ async function executeOntologyResourceViaCallAgent(input: {
       resource_code: resourceCode,
       target_agent_type: targetAgentType,
       [callKey]: [resourceCode],
+      resource_ids: resourceIds,
     },
     metadata,
     langfuseParentObservationId,
@@ -338,7 +343,16 @@ async function executeOntologyResourceViaCallAgent(input: {
   });
 }
 
-function buildOntologyCallAgentPayload(parameters: Dict): Dict {
+type OntologyCallAgentResource = {
+  resourceType: string;
+  resourceCode: string;
+  resourceId: string;
+};
+
+export function buildOntologyCallAgentPayload(
+  parameters: Dict,
+  resource?: OntologyCallAgentResource,
+): Dict {
   const nested = isRecord(parameters.parameters)
     ? parameters.parameters
     : isRecord(parameters.arguments)
@@ -362,6 +376,19 @@ function buildOntologyCallAgentPayload(parameters: Dict): Dict {
   for (const [key, value] of Object.entries(parameters)) {
     if (!excluded.has(key) && value !== undefined) {
       payload[key] = value;
+    }
+  }
+  if (resource) {
+    const normalizedType = String(resource.resourceType ?? "").trim().toUpperCase();
+    const callKey =
+      normalizedType === "OBJECT"
+        ? "call_object_ids"
+        : normalizedType === "VIEW"
+          ? "call_view_ids"
+          : "";
+    if (callKey) {
+      payload[callKey] = [resource.resourceCode];
+      payload.resource_ids = resource.resourceId ? [resource.resourceId] : [];
     }
   }
   return payload;

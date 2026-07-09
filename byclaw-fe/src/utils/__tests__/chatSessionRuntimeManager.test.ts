@@ -75,4 +75,34 @@ describe('utils/chatSessionRuntimeManager', () => {
 
     expect(chatSessionRuntimeManager.getBySession('s1')?.lastAppliedStreamId).toBe('1710000000000-1');
   });
+
+  it('keeps multiple active lanes in the same session independent', () => {
+    chatSessionRuntimeManager.register({
+      clientRequestId: 'q1_a1',
+      sessionId: 's1',
+      laneId: 'lane-a',
+      traceId: 'trace-a',
+    });
+    chatSessionRuntimeManager.register({
+      clientRequestId: 'q1_a2',
+      sessionId: 's1',
+      laneId: 'lane-b',
+      traceId: 'trace-b',
+    });
+
+    expect(chatSessionRuntimeManager.isSessionRunning('s1')).toBe(true);
+    expect(chatSessionRuntimeManager.getAllBySession('s1')).toHaveLength(2);
+    expect(chatSessionRuntimeManager.getByLane('s1', 'lane-b')?.clientRequestId).toBe('q1_a2');
+    expect(chatSessionRuntimeManager.getByTrace('s1', 'trace-a')?.clientRequestId).toBe('q1_a1');
+
+    chatSessionRuntimeManager.complete('q1_a1');
+
+    expect(chatSessionRuntimeManager.isSessionRunning('s1')).toBe(true);
+    expect(chatSessionRuntimeManager.getAllBySession('s1')).toHaveLength(1);
+    expect(chatSessionRuntimeManager.getByLane('s1', 'lane-b')?.clientRequestId).toBe('q1_a2');
+
+    chatSessionRuntimeManager.complete('q1_a2');
+
+    expect(chatSessionRuntimeManager.isSessionRunning('s1')).toBe(false);
+  });
 });

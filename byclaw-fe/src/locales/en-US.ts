@@ -597,6 +597,7 @@ export default {
   'traceDetail.openInLangfuse': 'Open in Langfuse',
   'traceDetail.openInLangfuseTooltip': 'Jump to Langfuse to view the full trace',
   'traceDetail.externalUrlMissing': 'Langfuse URL is not configured; cannot redirect',
+  'messageList.mentionDigitalEmployee': 'Click to @ {name}',
 
   'citeRender.title': 'Referenced Messages',
   'citeRender.deleteConfirm': 'Are you sure to delete this reference?',

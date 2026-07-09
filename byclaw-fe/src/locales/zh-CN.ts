@@ -605,6 +605,7 @@ export default {
   'traceDetail.openInLangfuse': '在 Langfuse 中打开',
   'traceDetail.openInLangfuseTooltip': '跳转到 Langfuse 查看完整 trace',
   'traceDetail.externalUrlMissing': '暂未配置 Langfuse 地址，无法跳转',
+  'messageList.mentionDigitalEmployee': '点击 @ {name}',
 
   'citeRender.title': '引用消息',
   'citeRender.deleteConfirm': '确定删除该引用吗？',

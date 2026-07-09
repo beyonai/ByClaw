@@ -8,6 +8,7 @@ import {
   type AskAgentCommand,
   WorkerHeartbeat,
   ActionType,
+  QueueNames,
 } from "@byclaw/by-framework";
 import type { OpenClawConfig } from "openclaw/plugin-sdk";
 import { resolveInboundLanguage } from "./i18n.js";
@@ -18,6 +19,9 @@ import {
   registerSdkEmitter,
   clearActiveSdkRequestRecord,
   resolveSdkLocalFilePath,
+  buildSdkChunkEvent,
+  buildSdkStateEvent,
+  withSdkEmitMetadata,
 } from "./session-context.js";
 import type { ResolvedByaiAccount, ByaiSdkInboundMessage, SdkInboundFile } from "./types.js";
 import { getRedisInfo, getUserCode } from "./utils.js";
@@ -26,6 +30,11 @@ import {
   waitForBaiyingEnhanceColdStartReady,
 } from "./baiying-enhance-readiness.js";
 import { normalizeByaiAgentId } from "./session-key.js";
+import {
+  buildByaiMultiAgentLaneMessages,
+  parseByaiLaneMetadata,
+  parseByaiMultiAgentBatchMetadata,
+} from "./multi-agent.js";
 
 export interface ByaiSdkAppOptions {
   account: ResolvedByaiAccount;
@@ -39,6 +48,20 @@ export interface ByaiSdkAppOptions {
 }
 
 type ByaiSdkLogger = NonNullable<ByaiSdkAppOptions["log"]>;
+
+function buildLaneAssignmentLogItem(message: ByaiSdkInboundMessage, index: number) {
+  const lane = message.laneMetadata;
+  return {
+    index,
+    laneId: lane?.laneId ?? "",
+    agentId: lane?.agentId ?? "",
+    agentCode: lane?.agentCode ?? "",
+    agentName: lane?.agentName ?? "",
+    traceId: message.traceId,
+    messageId: message.messageId,
+    query: message.text,
+  };
+}
 
 async function getInboundMessageFromByFramework(data: AskAgentCommand) {
   let questionText = "";
@@ -195,11 +218,13 @@ function isRedisNoGroupError(err: unknown): boolean {
 function installNoGroupRecovery(params: {
   runner: WorkerRunner;
   registry: WorkerRegistry;
+  redis: import("ioredis").Redis;
   workerId: string;
   agentTypes: string[];
+  runnerGroupName?: string;
   log?: ByaiSdkLogger;
 }): void {
-  const { runner, registry, workerId, agentTypes, log } = params;
+  const { runner, registry, redis, workerId, agentTypes, runnerGroupName, log } = params;
   const originalPoll = runner.poll.bind(runner);
   const originalRunControlOnce = runner.runControlOnce.bind(runner);
   let recoveryPromise: Promise<void> | null = null;
@@ -213,6 +238,7 @@ function installNoGroupRecovery(params: {
         await registry.registerWorkerMembership(workerId, agentTypes);
         await registry.heartbeatWorker(workerId);
         await runner.setupStreams();
+        await setRunnerAgentTypeStreamsToLatest({ redis, agentTypes, runnerGroupName, log });
         await runner.setupControlStreams();
         log?.info?.(`[${workerId}] byai-channel Redis stream consumer groups recovered`);
       })().finally(() => {
@@ -245,6 +271,33 @@ function installNoGroupRecovery(params: {
       return originalRunControlOnce(block);
     }
   };
+}
+
+async function setRunnerAgentTypeStreamsToLatest(params: {
+  redis: import("ioredis").Redis;
+  agentTypes: string[];
+  runnerGroupName?: string;
+  log?: ByaiSdkLogger;
+}): Promise<void> {
+  const { redis, agentTypes, runnerGroupName, log } = params;
+  if (!runnerGroupName) {
+    return;
+  }
+  for (const agentType of agentTypes) {
+    const streamName = QueueNames.ctrl_stream(agentType);
+    try {
+      await redis.xgroup("SETID", streamName, runnerGroupName, "$");
+      log?.info?.(
+        `byai-channel custom consumer group starts at latest: group=${runnerGroupName}, stream=${streamName}`,
+      );
+    } catch (err) {
+      log?.warn?.(
+        `failed to set byai-channel custom consumer group to latest: group=${runnerGroupName}, stream=${streamName}, err=${String(
+          err,
+        )}`,
+      );
+    }
+  }
 }
 
 export class ByaiSdkApp {
@@ -298,17 +351,24 @@ export class ByaiSdkApp {
 
     // 为 Runner 提供独立的 Redis 连接，避免轮询时的 BLOCK 指令阻塞其他操作（如 emitChunk）
     // 关键：轮询必须拥有自己的独占连接
+    const consumerGroupSuffix = process.env.BYAI_CHANNEL_CONSUMER_GROUP_SUFFIX?.trim();
+    const runnerGroupName = consumerGroupSuffix
+      ? `agent_engines:${agentTypes.join(",")}:${consumerGroupSuffix}`
+      : undefined;
     const runner = new WorkerRunner(
       { workerId, agentTypes, registry },
       {
         redisClient: createRedis(redisInfo),
+        ...(runnerGroupName ? { groupName: runnerGroupName } : {}),
       },
     );
     installNoGroupRecovery({
       runner,
       registry,
+      redis,
       workerId,
       agentTypes,
+      runnerGroupName,
       log: this.log,
     });
     const emitter = new GatewayDataEmitter(redis, {
@@ -317,6 +377,7 @@ export class ByaiSdkApp {
 
     // 1. 初始化消费组等环境（内部会执行 claimWorkerId 获取独占锁）
     await runner.initialize();
+    await setRunnerAgentTypeStreamsToLatest({ redis, agentTypes, runnerGroupName, log: this.log });
 
     // 2. 启动心跳维持组件 (Standalone Heartbeat)
     // 必须传入同一个 registry 实例，以便复用 runner 刚刚获取的 lock token
@@ -383,6 +444,8 @@ export class ByaiSdkApp {
       const metadataLanguage =
         typeof metadata?.language === "string" ? metadata.language : undefined;
       const { language, languageProvided } = resolveInboundLanguage(metadataLanguage);
+      const batchMetadata = parseByaiMultiAgentBatchMetadata(gatewayMsg.extraPayload);
+      const laneMetadata = batchMetadata ? undefined : parseByaiLaneMetadata(gatewayMsg.extraPayload);
       const inbound: ByaiSdkInboundMessage = {
         files,
         text,
@@ -401,7 +464,23 @@ export class ByaiSdkApp {
           | undefined,
         beyondToken:
           metadata?.["Beyond-Token"] ?? metadata?.request_headers?.["Beyond-Token"] ?? "",
+        laneMetadata,
       };
+      const inboundMessages = buildByaiMultiAgentLaneMessages(inbound, batchMetadata);
+      if (batchMetadata && inboundMessages.length > 1) {
+        info?.(
+          `[${this.account.accountId}] byai-channel fan-out multi-agent turn: sessionId=${sessionId}, lanes=${inboundMessages
+            .map((item) => item.laneMetadata?.laneId ?? item.laneMetadata?.agentName ?? item.traceId)
+            .join(",")}`,
+        );
+        inboundMessages.forEach((message, index) => {
+          info?.(
+            `[${this.account.accountId}] byai-channel multi-agent lane assignment: sessionId=${sessionId}, assignment=${JSON.stringify(
+              buildLaneAssignmentLogItem(message, index),
+            )}`,
+          );
+        });
+      }
 
       // 写 sessionId 到文件，供 executor.py 读取并注入 X-Session-Id header
       try {
@@ -416,21 +495,69 @@ export class ByaiSdkApp {
         debug?.(`[${this.account.accountId}] failed to write session id file: ${String(err)}`);
       }
 
-      const abortController = new AbortController();
-      try {
-        await deliverReplyToAgentViaSdk({
-          message: inbound,
-          account: this.account,
-          cfg: getRuntimeConfig(),
-          abortController,
-          log: this.log,
-          onReply: async (text, options) => {
-            if (!text) {
-              return;
-            }
-            await emitter.emitChunk(sessionId, traceId, text, options || {});
+      let emittedLaneError = false;
+      const emitSdkError = async (currentInbound: ByaiSdkInboundMessage, err: unknown) => {
+        emittedLaneError = true;
+        const currentLaneMetadata = currentInbound.laneMetadata;
+        const errorOptions = withSdkEmitMetadata(
+          {
+            eventType: "error",
+            metadata: { error: String(err) },
           },
-        });
+          {
+            laneMetadata: currentLaneMetadata,
+            traceId: currentInbound.traceId,
+          },
+        );
+        await emitter.emitState(
+          currentInbound.sessionId,
+          currentInbound.traceId || "",
+          buildSdkStateEvent("", errorOptions),
+          errorOptions,
+        );
+      };
+
+      const handleInbound = async (currentInbound: ByaiSdkInboundMessage) => {
+        const abortController = new AbortController();
+        try {
+          await deliverReplyToAgentViaSdk({
+            message: currentInbound,
+            account: this.account,
+            cfg: getRuntimeConfig(),
+            abortController,
+            log: this.log,
+            onReply: async (text, options) => {
+              if (!text) {
+                return;
+              }
+              const emitOptions = withSdkEmitMetadata(options, {
+                laneMetadata: currentInbound.laneMetadata,
+                traceId: currentInbound.traceId,
+              });
+              await emitter.emitChunk(
+                currentInbound.sessionId,
+                currentInbound.traceId,
+                buildSdkChunkEvent(text, emitOptions),
+                emitOptions,
+              );
+            },
+          });
+        } catch (err) {
+          await emitSdkError(currentInbound, err);
+          throw err;
+        }
+      };
+
+      try {
+        const results = await Promise.allSettled(
+          inboundMessages.map((currentInbound) => handleInbound(currentInbound)),
+        );
+        const rejected = results.find(
+          (result): result is PromiseRejectedResult => result.status === "rejected",
+        );
+        if (rejected) {
+          throw rejected.reason;
+        }
 
         await runner.ack(streamName, msgId);
       } catch (err) {
@@ -440,10 +567,9 @@ export class ByaiSdkApp {
           )}`,
         );
         try {
-          await emitter.emitState(sessionId, traceId || "", "", {
-            eventType: "error",
-            metadata: { error: String(err) },
-          });
+          if (!emittedLaneError) {
+            await emitSdkError(inbound, err);
+          }
         } catch {
           // ignore
         }

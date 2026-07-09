@@ -8,6 +8,12 @@ import { IMessage, IMessageListItem } from '@/typescript/message';
 import { IMessageState, SSEMessageType, SSEEventStatus } from '@/constants/message';
 import { ResourceTypeMap } from '@/constants/resource';
 
+const hasSubstance = (value: unknown) => {
+  if (Array.isArray(value)) return value.length > 0;
+  if (value && typeof value === 'object') return Object.keys(value as Record<string, unknown>).length > 0;
+  return `${value ?? ''}`.trim().length > 0;
+};
+
 export function getMsgId() {
   const crypto = window.crypto || window.webkitCrypto || window.mozCrypto || window.oCrypto || window.msCrypto;
   if (crypto) {
@@ -22,6 +28,27 @@ export function getMsgId() {
 export const isTextContentType = (contentType?: SSEMessageType | string) => {
   if (!contentType) return false;
   return [`${SSEMessageType.text}`, `${SSEMessageType.thinkText}`].includes(`${contentType}`);
+};
+
+export const hasVisibleMessageListItem = (item?: Partial<IMessageListItem>) => {
+  if (!item?.contentType) return false;
+  if (`${item.contentType}` === `${SSEMessageType.thinkTitle}`) return false;
+  return hasSubstance(get(item, 'content.substance'));
+};
+
+export const hasVisibleMessageContent = (message?: Partial<IMessage>) => {
+  if (!message) return false;
+  if (!message.fromBeyond) {
+    return hasSubstance(message.text) || Boolean(message.fileList?.length || message.imageList?.length);
+  }
+  return (
+    hasSubstance(message.text) ||
+    Boolean(message.messageList?.some(hasVisibleMessageListItem)) ||
+    Boolean(message.thinkList?.some(hasVisibleMessageListItem)) ||
+    Boolean(message.fileList?.length || message.imageList?.length || message.resourceFrom?.length) ||
+    Boolean(message.resComIds?.length || message.relatedQuestions?.length) ||
+    hasSubstance(message.messageTip)
+  );
 };
 
 export const createMessage = (

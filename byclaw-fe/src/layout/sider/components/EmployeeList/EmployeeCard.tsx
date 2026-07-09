@@ -219,17 +219,17 @@ const EmployeeCard: React.FC<EmployeeCardProps> = ({
         pointer: true,
       })}
       onClick={() => {
+        if (isInput) {
+          onSelect?.(employee);
+          return;
+        }
+
         if (isOpenClawAgent(employee)) {
           onClickEmployee(employee);
           return;
         }
         if (employee?.integrationType === 'PAGE') {
           onClickEmployee(employee);
-          return;
-        }
-
-        if (isInput) {
-          onSelect?.(employee);
           return;
         }
 

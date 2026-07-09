@@ -50,6 +50,7 @@ import com.iwhalecloud.byai.state.domain.session.service.SessionService;
 import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 import com.iwhalecloud.byai.state.domain.template.enums.DebugModeEnum;
 import com.iwhalecloud.byai.state.domain.chat.service.TargetAgentResolver;
+import com.iwhalecloud.byai.state.domain.chat.service.TraceIdCodec;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -182,11 +183,36 @@ public class AssistantChatApplicationService {
         String targetAgentType = targetAgentResolver.resolveAgentType(workerAgentType, stopChatDto.getAgentId(), null,
             CurrentUserHolder.getCurrentUserCode());
 
-        gatewayClient.cancelTask(String.valueOf(stopChatDto.getMessageId()), String.valueOf(stopChatDto.getSessionId()),
+        String executionId = resolveStopExecutionId(stopChatDto);
+        Long cleanupMessageId = resolveStopCleanupMessageId(stopChatDto);
+
+        gatewayClient.cancelTask(executionId, String.valueOf(stopChatDto.getSessionId()),
             "user cancel task", targetAgentType, CurrentUserHolder.getCurrentUserCode(), "force");
 
-        runningOutputStreamRegistry.release(stopChatDto.getSessionId(), stopChatDto.getMessageId());
-        runningChatSnapshotService.delete(stopChatDto.getSessionId(), stopChatDto.getMessageId());
+        runningOutputStreamRegistry.release(stopChatDto.getSessionId(), cleanupMessageId);
+        runningChatSnapshotService.delete(stopChatDto.getSessionId(), cleanupMessageId);
+    }
+
+    private String resolveStopExecutionId(StopChatDto stopChatDto) {
+        if (StringUtils.isNotBlank(stopChatDto.getTraceId())) {
+            return stopChatDto.getTraceId();
+        }
+        return stopChatDto.getMessageId() == null ? null : String.valueOf(stopChatDto.getMessageId());
+    }
+
+    private Long resolveStopCleanupMessageId(StopChatDto stopChatDto) {
+        if (stopChatDto.getMessageId() != null) {
+            return stopChatDto.getMessageId();
+        }
+        if (StringUtils.isBlank(stopChatDto.getTraceId())) {
+            return null;
+        }
+        try {
+            return TraceIdCodec.decode(stopChatDto.getTraceId()).getModelAnswerMessageId();
+        }
+        catch (Exception e) {
+            return null;
+        }
     }
 
     /**
@@ -208,6 +234,7 @@ public class AssistantChatApplicationService {
         if (sessionId == null) {
             return;
         }
+        Long cleanupMessageId = resolveStopCleanupMessageId(stopChatDto);
         try {
             ChatProcessContext ctx = outputStreamManager.getContext(String.valueOf(sessionId));
             if (ctx != null) {
@@ -225,15 +252,15 @@ public class AssistantChatApplicationService {
                 return;
             }
             // 跨 pod：本 pod 无上下文，从 Redis 快照落库。
-            boolean flushed = scriptService.flushFromSnapshot(sessionId, stopChatDto.getMessageId());
+            boolean flushed = scriptService.flushFromSnapshot(sessionId, cleanupMessageId);
             if (!flushed) {
                 log.info("stopChat 无可落库内容（本 pod 无上下文且无快照）, sessionId: {}, messageId: {}", sessionId,
-                    stopChatDto.getMessageId());
+                    cleanupMessageId);
             }
         }
         catch (Exception e) {
             log.error("stopChat 落库已堆积消息失败, sessionId: {}, messageId: {}", sessionId,
-                stopChatDto.getMessageId(), e);
+                cleanupMessageId, e);
         }
     }
 

@@ -61,7 +61,9 @@ public class ByaiMessageHotService {
             if (byaiMessage.getMessageId() == null) {
                 byaiMessage.setMessageId(sequenceService.nextVal());
             }
-            byaiMessage.setCreateTime(new Date());
+            if (byaiMessage.getCreateTime() == null) {
+                byaiMessage.setCreateTime(new Date());
+            }
             messages.add(byaiMessage);
         }
         // mapper插入
