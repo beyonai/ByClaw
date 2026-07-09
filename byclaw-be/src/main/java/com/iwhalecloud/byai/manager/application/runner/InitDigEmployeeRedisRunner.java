@@ -164,8 +164,22 @@ public class InitDigEmployeeRedisRunner implements ApplicationRunner {
         // PR-2: 优化路径需要先抢分布式锁
         boolean optimizedPath = newPropsExplicitlyConfigured && newEnabledValue;
         if (optimizedPath) {
-            if (!tryAcquireStartupLock()) {
-                // 未抢到锁：debug 日志后直接 return（不进入 doFullInit）
+            // PR-2-fix Major-2: Redis 异常时降级为无锁继续执行（不阻塞 Spring Boot 启动）；
+            // 启动期 Redis 不可用属于可恢复故障（Redis 抖动 / 重启），降级策略：
+            // - lockEnabled=true + Redis 异常 → 降级为无锁（不进入多 Pod 互斥模式）
+            // - lockEnabled=false → 本来就不抢锁
+            //   两种情况下 lockHeld=false，后续 releaseStartupLockIfHeld 会安全跳过
+            boolean lockAcquired;
+            try {
+                lockAcquired = tryAcquireStartupLock();
+            }
+            catch (Exception e) {
+                logger.warn("Redis 异常，启动期分布式锁获取失败，降级为无锁执行（多 Pod 场景下可能重复同步）: lockKey={}, podId={}, reason={}",
+                    STARTUP_LOCK_KEY, podId, e.getMessage(), e);
+                lockAcquired = false;
+            }
+            if (!lockAcquired) {
+                // 锁已被其他 Pod 持有 OR 降级为无锁：均直接 return（不进入 doFullInit）
                 return;
             }
         }
@@ -493,6 +507,14 @@ public class InitDigEmployeeRedisRunner implements ApplicationRunner {
      * 不影响其他 chunk 的执行。
      */
     private ChunkStats processChunk(List<SsResource> chunk, int pipelineBatchSize) {
+        // PR-2-fix Major-1: chunk 起始处 fencing 校验（PR-1 实现的分页内并行场景下，
+        // 4 个 chunk 并行执行期间锁被其他 Pod 接管时本 chunk 仍会完整写完；
+        // 在 chunk 入口前置 fence 可避免 silent data loss）。
+        if (!verifyLockStillHeld()) {
+            logger.warn("[fencing] chunk 起始处检测到锁已丢失，跳过本 chunk ({} 条)",
+                chunk == null ? 0 : chunk.size());
+            return ChunkStats.empty();
+        }
         int total = 0;
         int kvWrites = 0;
         int kvFailures = 0;
