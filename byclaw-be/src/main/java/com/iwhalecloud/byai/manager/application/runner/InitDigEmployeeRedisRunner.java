@@ -28,6 +28,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ForkJoinPool;
@@ -390,8 +392,11 @@ public class InitDigEmployeeRedisRunner implements ApplicationRunner {
     }
 
     /**
-     * 优化路径（PR-1）。每页拆 parallelism 个 chunk，每个 chunk 独立 Pipeline 写入；
-     * chunk 失败不影响其他 chunk；与 PR-#2/3/4 无关，本函数仅实现 PR-1 范围。
+     * 优化路径（PR-1 + PR-3）。每页拆 parallelism 个 chunk，每个 chunk 独立 Pipeline 写入；
+     * chunk 失败不影响其他 chunk；与 PR-#2/4 无关，本函数仅实现 PR-1+3 范围。
+     * <p>
+     * PR-3 关键改进：每页开始时一次性批量预取所有数字员工的 {@code target_content}
+     * （单 SQL IN 子句，避免每资源一次 findById），各 chunk 通过预取 map 引用。
      */
     private void doFullInitOptimized() {
         int pipelineBatchSize = effectivePipelineBatchSize();
@@ -419,13 +424,29 @@ public class InitDigEmployeeRedisRunner implements ApplicationRunner {
                 break;
             }
 
+            // PR-3: 整页预取 target_content（单 SQL IN 子句；避免每资源 findById）
+            List<Long> pageResourceIds = resources.stream()
+                .map(SsResource::getResourceId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
+            Map<Long, String> prefetchedTargetContents =
+                digitalEmployeeApplicationService.prefetchDigEmployeeTargetContents(pageResourceIds);
+            int prefetchedCount = prefetchedTargetContents.size();
+            int blankCount = pageResourceIds.size() - prefetchedCount;
+            if (blankCount > 0) {
+                logger.info("[PR-3] 本页 target_content 空白率: {}/{} ({}%); 这些资源由"
+                    + " collectDigEmployeeSyncEntriesWithPrefetch 回退路径处理",
+                    blankCount, pageResourceIds.size(),
+                    pageResourceIds.isEmpty() ? 0 : (100 * blankCount / pageResourceIds.size()));
+            }
+
             // 1) split page into chunks
             List<List<SsResource>> chunks = chunkSplit(resources, parallelism);
             // 2) submit each chunk in parallel
             List<CompletableFuture<ChunkStats>> futures = new ArrayList<>(chunks.size());
             for (List<SsResource> chunk : chunks) {
                 futures.add(CompletableFuture.supplyAsync(
-                    () -> processChunk(chunk, pipelineBatchSize),
+                    () -> processChunk(chunk, pipelineBatchSize, prefetchedTargetContents),
                     exec));
             }
             // 3) wait all
@@ -439,9 +460,9 @@ public class InitDigEmployeeRedisRunner implements ApplicationRunner {
                 totalSkippedBlank += st.skippedBlank;
             }
 
-            logger.debug("数字员工Redis全量初始化进度：page={}, 本页资源={}, chunks={}, "
+            logger.debug("数字员工Redis全量初始化进度：page={}, 本页资源={}, 预取成功={}, 空白={}, chunks={}, "
                     + "本批写入成功={}, 失败={}, 跳过target_content空白={}",
-                pageIndex, resources.size(), chunks.size(),
+                pageIndex, resources.size(), prefetchedCount, blankCount, chunks.size(),
                 futures.stream().mapToInt(f -> f.getNow(ChunkStats.empty()).kvWrites).sum(),
                 futures.stream().mapToInt(f -> f.getNow(ChunkStats.empty()).kvFailures).sum(),
                 futures.stream().mapToInt(f -> f.getNow(ChunkStats.empty()).skippedBlank).sum());
@@ -506,7 +527,8 @@ public class InitDigEmployeeRedisRunner implements ApplicationRunner {
      * 单 chunk 失败（collect 异常 / Pipeline 异常）被 try/catch 隔离，记录日志后返回；
      * 不影响其他 chunk 的执行。
      */
-    private ChunkStats processChunk(List<SsResource> chunk, int pipelineBatchSize) {
+    private ChunkStats processChunk(List<SsResource> chunk, int pipelineBatchSize,
+                                    Map<Long, String> prefetchedTargetContents) {
         // PR-2-fix Major-1: chunk 起始处 fencing 校验（PR-1 实现的分页内并行场景下，
         // 4 个 chunk 并行执行期间锁被其他 Pod 接管时本 chunk 仍会完整写完；
         // 在 chunk 入口前置 fence 可避免 silent data loss）。
@@ -526,14 +548,29 @@ public class InitDigEmployeeRedisRunner implements ApplicationRunner {
                     continue;
                 }
                 total++;
+                Long resourceId = resource.getResourceId();
                 Map<String, String> entries;
                 try {
-                    entries = digitalEmployeeApplicationService
-                        .collectDigEmployeeSyncEntries(resource.getResourceId());
+                    // PR-3: 优先使用整页预取的 target_content（避免 per-resource findById）
+                    String prefetched = prefetchedTargetContents == null
+                        ? null
+                        : prefetchedTargetContents.get(resourceId);
+                    if (prefetched != null) {
+                        // 整页预取命中：使用 WithPrefetch 变体
+                        entries = digitalEmployeeApplicationService
+                            .collectDigEmployeeSyncEntriesWithPrefetch(resourceId, prefetched);
+                    }
+                    else {
+                        // 整页预取未命中（target_content 空 或 异常）：
+                        // 回退到原 collectDigEmployeeSyncEntries（包含 findDetailsById 7-10 SQL）
+                        entries = digitalEmployeeApplicationService
+                            .collectDigEmployeeSyncEntries(resourceId);
+                        skippedBlank++;
+                    }
                 }
                 catch (Exception e) {
                     logger.error("收集数字员工Redis同步条目失败, resourceId={}, reason={}",
-                        resource.getResourceId(), e.getMessage(), e);
+                        resourceId, e.getMessage(), e);
                     continue;
                 }
                 if (entries == null || entries.isEmpty()) {
