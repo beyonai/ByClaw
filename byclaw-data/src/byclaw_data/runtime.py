@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+from datacloud_platform.constants import DEFAULT_BASE_ID
 from dotenv import load_dotenv
 
 _BY_DATACLOUD_DIRNAME = "by-datacloud"
@@ -37,7 +38,7 @@ def _init_enterprise_base_and_scene() -> None:
     from datacloud_platform import get_platform
 
     p = get_platform()
-    enterprise_id = "default"
+    enterprise_id = DEFAULT_BASE_ID
 
     # ── 1. 创建企业本体库（幂等）──
     if not p.base_exists(enterprise_id):
@@ -47,7 +48,7 @@ def _init_enterprise_base_and_scene() -> None:
             OntologyBaseEntry(
                 base_id=enterprise_id,
                 display_name="企业本体库",
-                source_type="LOCAL",
+                source_type="OPENGAUSS",
                 backend_config={
                     "ontology": {
                         "base_path": os.environ.get("DATACLOUD_ONTOLOGY_PATH", ""),

@@ -48,6 +48,7 @@ from by_framework.core.protocol.results import AgentTaskResult, normalize_proces
 from by_framework.worker.sandbox.hook_sandbox import active_workspace
 
 from datacloud_analysis.agent import create_agent
+from datacloud_platform.constants import DEFAULT_BASE_ID
 from datacloud_analysis.command_plugins import CommandPluginManager
 from datacloud_analysis.logging_setup import setup_logging
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -1570,7 +1571,7 @@ class DataCloudWorker(GatewayWorker):
                 OntologyAgentConfig,
             )  # noqa: PLC0415
             from datacloud_platform.config import get_settings  # noqa: PLC0415
-
+            from datacloud_platform.constants import DEFAULT_BASE_ID
             from byclaw_data.platform.result_file_storage import (
                 build_result_file_storage,  # noqa: PLC0415
             )
@@ -1584,7 +1585,7 @@ class DataCloudWorker(GatewayWorker):
                     result_file_storage=build_result_file_storage(
                         settings=get_settings()
                     ),
-                    base_id="default",
+                    base_id=DEFAULT_BASE_ID,
                 )
             )
             logger.info(
@@ -1603,6 +1604,7 @@ class DataCloudWorker(GatewayWorker):
         )
         from datacloud_platform import get_platform  # noqa: PLC0415
         from datacloud_platform.config import get_settings  # noqa: PLC0415
+        from datacloud_platform.constants import DEFAULT_BASE_ID
 
         # 在 get_platform() 初始化单例之前注入 ByclawResultFileStorage。
         # loader_runtime._configure_runtime_services() 在 platform 初始化时执行
@@ -1618,7 +1620,7 @@ class DataCloudWorker(GatewayWorker):
             platform=get_platform(),
             settings=get_settings(),
         )
-        self._loader_snapshot = self._runtime_manager.get_loader("default")
+        self._loader_snapshot = self._runtime_manager.get_loader(DEFAULT_BASE_ID)
         logger.info(
             "DataCloudWorker: _loader_snapshot=%s",
             "ready"
@@ -1950,7 +1952,7 @@ class DataCloudWorker(GatewayWorker):
                                     result_file_storage=build_result_file_storage(
                                         settings=get_settings()
                                     ),
-                                    base_id="default",
+                                    base_id=DEFAULT_BASE_ID,
                                 )
                             )
                             logger.info(
