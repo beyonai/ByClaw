@@ -14,6 +14,7 @@ import com.iwhalecloud.byai.common.message.service.ByaiMessageHotService;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.event.DigEmployeeChangeEventPublisher;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.event.DigEmployeeChangeEventType;
+import com.iwhalecloud.byai.manager.application.runner.digemployeestartup.DigEmployeeStartupSyncProperties;
 import com.iwhalecloud.byai.manager.application.service.memory.MemoryLibraryApplicationService;
 import com.iwhalecloud.byai.manager.application.service.template.TemplateRuleInfoApplicationService;
 import com.iwhalecloud.byai.manager.domain.aimodel.service.AIService;
@@ -84,6 +85,7 @@ import com.iwhalecloud.byai.common.feign.request.conversation.AgentPrologueDto;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.util.ListUtil;
 import com.iwhalecloud.byai.common.util.MapParamUtil;
+import com.iwhalecloud.byai.common.util.RedisUtil.RedisKVPair;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.common.page.PageInfo;
@@ -258,6 +260,13 @@ public class DigitalEmployeeApplicationService {
 
     @Autowired
     private DigEmployeeRedisSyncProperties digEmployeeRedisSyncProperties;
+
+    /**
+     * PR-1 启动期同步优化属性。详见 {@link DigEmployeeStartupSyncProperties}。
+     * 注入后可读取 {@code skipBlankTargetContent} 等开关，行为兼容旧版本（默认 false 时无副作用）。
+     */
+    @Autowired
+    private DigEmployeeStartupSyncProperties digEmployeeStartupSyncProperties;
 
     /**
      * 查询列表
@@ -1396,6 +1405,78 @@ public class DigitalEmployeeApplicationService {
         }
     }
 
+    /**
+     * PR-1: 收集一个数字员工及其关联资源（TOOLKIT / MCP / AGENT / KG_* / VIEW / OBJECT / SKILL）
+     * 所有应写入 Redis 的 (key, jsonContent) 对，但实际写入由调用方（Runner 层）通过 Pipeline
+     * 一次性提交。本方法不写 Redis，仅收集。
+     * <p>
+     * 调用方契约：
+     * <ul>
+     *     <li>返回 Map 顺序与原有 {@link #syncExistingDigEmployeeConfigToRedis} 一致：先主数字员工 JSON，再关联资源 JSON</li>
+     *     <li>{@code target_content} 空白且 {@code skipBlankTargetContent=true} 时返回空 Map（warn 已记在 {@link #resolveDigEmployeeJsonForRedisSync}）</li>
+     *     <li>key 形如 {@code DIG_EMPLOYEE_{id}}、{@code TOOLKIT_{id}} 等，与既有键空间一致</li>
+     * </ul>
+     *
+     * @param resourceId 数字员工资源 ID
+     * @return 收集到的所有 (redisKey → jsonContent) 映射；空 Map 表示无任何可写内容
+     */
+    public Map<String, String> collectDigEmployeeSyncEntries(Long resourceId) {
+        Map<String, String> result = new LinkedHashMap<>();
+        if (resourceId == null) {
+            return result;
+        }
+        if (digEmployeeRedisSyncProperties == null
+                || !digEmployeeRedisSyncProperties.isJsonRedisSyncEnabled()) {
+            return result;
+        }
+        // 主数字员工
+        String mainJson = resolveDigEmployeeJsonForRedisSync(resourceId);
+        if (StringUtils.isNotBlank(mainJson)) {
+            result.put(
+                DigEmployeeRedisKeys.resourceConfigJsonKey(ResourceBizTypeEnum.DIG_EMPLOYEE.name(), resourceId),
+                mainJson);
+        }
+        // 关联资源（与 syncRelatedResourceConfigJsonsToRedisQuietly 完全同语义，但不写 Redis）
+        try {
+            List<SsResourceRelDetail> relDetails = ssResourceRelDetailService.findByResourceId(resourceId);
+            if (CollectionUtils.isEmpty(relDetails)) {
+                return result;
+            }
+            List<Long> relIds = relDetails.stream()
+                .map(SsResourceRelDetail::getRelResourceId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
+            if (CollectionUtils.isEmpty(relIds)) {
+                return result;
+            }
+            List<SsResource> relResources = ssResourceService.findByIdList(relIds);
+            if (CollectionUtils.isEmpty(relResources)) {
+                return result;
+            }
+            for (SsResource rel : relResources) {
+                if (rel == null || rel.getResourceId() == null) {
+                    continue;
+                }
+                String bizType = StringUtils.trimToEmpty(rel.getResourceBizType());
+                if (!isSupportedRelatedResourceBizType(bizType)) {
+                    continue;
+                }
+                String targetContent = loadRelatedResourceTargetContent(bizType, rel.getResourceId());
+                if (StringUtils.isBlank(targetContent)) {
+                    continue;
+                }
+                result.put(DigEmployeeRedisKeys.resourceConfigJsonKey(bizType, rel.getResourceId()),
+                    targetContent);
+            }
+        }
+        catch (Exception e) {
+            logger.warn("收集数字员工关联资源同步条目失败, resourceId={}, reason={}",
+                resourceId, e.getMessage(), e);
+        }
+        return result;
+    }
+
     private void syncExistingDigEmployeeConfigToRedis(Long resourceId) {
         if (resourceId == null || digEmployeeRedisSyncProperties == null
             || !digEmployeeRedisSyncProperties.isJsonRedisSyncEnabled()) {
@@ -1412,6 +1493,14 @@ public class DigitalEmployeeApplicationService {
         SsResExtDigEmployee ext = ssResExtDigEmployeeService.findById(resourceId);
         if (ext != null && StringUtils.isNotBlank(ext.getTargetContent())) {
             return ext.getTargetContent();
+        }
+        // PR-1：target_content 空白时，若开关开启则直接跳过（避免回退到 findDetailsById
+        // 的 7-10 SQL）。要求：必须先跑 StartupTargetContentPreloader 补齐 target_content。
+        if (digEmployeeStartupSyncProperties != null
+                && digEmployeeStartupSyncProperties.isSkipBlankTargetContent()) {
+            logger.warn("targetContent 空白，跳过该条记录 resourceId={}，请在数据修复后下次启动时同步",
+                resourceId);
+            return null;
         }
         EmployeeIdDTO employeeIdDTO = new EmployeeIdDTO();
         employeeIdDTO.setResourceId(resourceId);
@@ -2198,6 +2287,34 @@ public class DigitalEmployeeApplicationService {
         }
         catch (Exception e) {
             logger.warn("写入 target_content 异常, resourceId={}, ignored. err={}", resourceId, e.getMessage());
+        }
+    }
+
+    /**
+     * PR-1: 公开包级访问包装，供 {@code StartupTargetContentPreloader}（c-4 离线预生成）使用。
+     * 行为与私有 {@link #persistTargetContent} 一致；返回 boolean 便于预生成脚本统计。
+     *
+     * @param resourceId 数字员工资源 ID
+     * @param jsonContent 标准 JSON 内容
+     * @return true 表示成功写入；false 表示被跳过或失败（已在日志记录）
+     */
+    public boolean persistDigEmployeeTargetContent(Long resourceId, String jsonContent) {
+        if (resourceId == null || StringUtils.isBlank(jsonContent)) {
+            return false;
+        }
+        try {
+            SsResExtDigEmployee ssResExtDigEmployee = ssResExtDigEmployeeService.findById(resourceId);
+            if (ssResExtDigEmployee == null) {
+                logger.warn("写入 target_content 失败：扩展表记录不存在, resourceId={}", resourceId);
+                return false;
+            }
+            ssResExtDigEmployee.setTargetContent(jsonContent);
+            ssResExtDigEmployeeService.update(ssResExtDigEmployee);
+            return true;
+        }
+        catch (Exception e) {
+            logger.warn("写入 target_content 异常, resourceId={}, ignored. err={}", resourceId, e.getMessage());
+            return false;
         }
     }
 
