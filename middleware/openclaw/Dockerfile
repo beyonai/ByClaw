@@ -293,7 +293,7 @@ RUN rm -fr /root/.agents/skills
 
 # === sau (social-auto-upload) CLI integration ===
 # 本地构建 wheel 的方法见 middleware/openclaw/sau/README.md
-ARG SAU_VERSION=0.1.0
+ARG SAU_VERSION=0.1.1
 ENV SAU_BASE_DIR=/by/sau \
     PLAYWRIGHT_BROWSERS_PATH=/opt/playwright \
     LOCAL_CHROME_PATH=/usr/bin/chromium
