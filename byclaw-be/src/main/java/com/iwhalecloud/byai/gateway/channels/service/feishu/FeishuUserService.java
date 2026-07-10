@@ -145,7 +145,9 @@ public class FeishuUserService {
                 throw new IllegalStateException("Get Feishu user detail failed, code="
                         + root.path("code").asInt() + ", msg=" + root.path("msg").asText(""));
             }
-            FeishuUserDetail detail = toUserDetail(root.path("data").path("user"));
+            JsonNode userNode = root.path("data").path("user");
+            logger.info("Fetched Feishu user raw detail. openId={}, user={}", openId, userNode);
+            FeishuUserDetail detail = toUserDetail(userNode);
             logger.info("Fetched Feishu user detail. openId={}, unionId={}, userId={}, name={}, mobile={}, employeeNo={}",
                     detail.getOpenId(), detail.getUnionId(), detail.getUserId(),
                     detail.getName(), detail.getMobile(), detail.getEmployeeNo());
@@ -242,34 +244,113 @@ public class FeishuUserService {
     }
 
     private List<Users> findUsersByUserDetail(FeishuUserDetail userDetail) {
-        List<Users> users = new ArrayList<>();
-
-        String employeeNo = userDetail == null ? null : userDetail.getEmployeeNo();
-        if (StringUtils.hasText(employeeNo)) {
-            Users matchedByUserCode = userService.findByUserCode(employeeNo);
-            if (matchedByUserCode != null) {
-                users.add(matchedByUserCode);
-            }
-        }
-
+        // 匹配顺序必须稳定：先按工号，再按手机号，最后按姓名。
+        List<Users> users = findUsersByEmployeeNo(userDetail);
         if (!users.isEmpty()) {
+            logger.info("Matched Feishu user by employeeNo. employeeNoCandidates={}, matchedCount={}",
+                    resolveEmployeeNoCandidates(userDetail), users.size());
             return users;
         }
 
-        String mobile = userDetail == null ? null : userDetail.getMobile();
-        if (StringUtils.hasText(mobile)) {
-            Users matchedByMobile = userService.findByUserPhone(mobile);
-            if (matchedByMobile != null) {
+        users = findUsersByMobile(userDetail == null ? null : userDetail.getMobile());
+        if (!users.isEmpty()) {
+            logger.info("Matched Feishu user by mobile. mobileCandidates={}, matchedCount={}",
+                    resolveMobileCandidates(userDetail == null ? null : userDetail.getMobile()), users.size());
+            return users;
+        }
+
+        List<Users> matchedByName = findUsersByName(userDetail == null ? null : userDetail.getName());
+        if (matchedByName == null || matchedByName.isEmpty()) {
+            logger.info("No local user matched Feishu detail. name={}, mobile={}, employeeNo={}, userId={}, employeeNoCandidates={}, mobileCandidates={}",
+                    userDetail == null ? null : userDetail.getName(),
+                    userDetail == null ? null : userDetail.getMobile(),
+                    userDetail == null ? null : userDetail.getEmployeeNo(),
+                    userDetail == null ? null : userDetail.getUserId(),
+                    resolveEmployeeNoCandidates(userDetail),
+                    resolveMobileCandidates(userDetail == null ? null : userDetail.getMobile()));
+        } else {
+            logger.info("Matched Feishu user by name. name={}, matchedCount={}",
+                    userDetail == null ? null : userDetail.getName(), matchedByName.size());
+        }
+        return matchedByName;
+    }
+
+    private List<Users> findUsersByEmployeeNo(FeishuUserDetail userDetail) {
+        List<Users> users = new ArrayList<>();
+        for (String employeeNoCandidate : resolveEmployeeNoCandidates(userDetail)) {
+            Users matchedByEmployeeNo = userService.findByUserCode(employeeNoCandidate);
+            if (matchedByEmployeeNo != null && !containsUser(users, matchedByEmployeeNo.getUserId())) {
+                users.add(matchedByEmployeeNo);
+            }
+        }
+        return users;
+    }
+
+    /**
+     * 本系统的 user_code 一般对应企业通讯录工号；部分飞书租户会把同一个值放在 user_id。
+     * 因此这里同时尝试 employeeNo 和 userId，避免飞书权限/字段差异导致无法匹配本地账号。
+     */
+    private List<String> resolveEmployeeNoCandidates(FeishuUserDetail userDetail) {
+        Set<String> candidates = new LinkedHashSet<>();
+        if (userDetail == null) {
+            return new ArrayList<>(candidates);
+        }
+        addExternalId(candidates, userDetail.getEmployeeNo());
+        addExternalId(candidates, userDetail.getUserId());
+        return new ArrayList<>(candidates);
+    }
+
+    private List<Users> findUsersByMobile(String mobile) {
+        List<Users> users = new ArrayList<>();
+        for (String mobileCandidate : resolveMobileCandidates(mobile)) {
+            Users matchedByMobile = userService.findByUserPhone(mobileCandidate);
+            if (matchedByMobile != null && !containsUser(users, matchedByMobile.getUserId())) {
                 users.add(matchedByMobile);
             }
         }
+        return users;
+    }
 
-        if (!users.isEmpty()) {
-            return users;
+    private List<Users> findUsersByName(String name) {
+        if (!StringUtils.hasText(name)) {
+            return new ArrayList<>();
+        }
+        List<Users> users = userService.findByUserName(name);
+        return users == null ? new ArrayList<>() : users;
+    }
+
+    /**
+     * 飞书通讯录 mobile 常返回 +86 前缀，系统用户表通常只存 11 位手机号。
+     * 这里保留原始值，同时补充去国家码后的候选值，避免因为展示格式不同导致无法匹配。
+     */
+    private List<String> resolveMobileCandidates(String mobile) {
+        Set<String> candidates = new LinkedHashSet<>();
+        if (!StringUtils.hasText(mobile)) {
+            return new ArrayList<>(candidates);
         }
 
-        String name = userDetail == null ? null : userDetail.getName();
-        return StringUtils.hasText(name) ? userService.findByUserName(name) : users;
+        String trimmedMobile = mobile.trim();
+        addExternalId(candidates, trimmedMobile);
+
+        String compactMobile = trimmedMobile.replaceAll("[\\s\\-()]", "");
+        addExternalId(candidates, compactMobile);
+
+        String digitsOnly = compactMobile.replaceAll("\\D", "");
+        addExternalId(candidates, digitsOnly);
+        if (digitsOnly.startsWith("0086") && digitsOnly.length() == 15) {
+            addExternalId(candidates, digitsOnly.substring(4));
+        }
+        if (digitsOnly.startsWith("86") && digitsOnly.length() == 13) {
+            addExternalId(candidates, digitsOnly.substring(2));
+        }
+        return new ArrayList<>(candidates);
+    }
+
+    private boolean containsUser(List<Users> users, Long userId) {
+        if (users == null || userId == null) {
+            return false;
+        }
+        return users.stream().anyMatch(user -> userId.equals(user.getUserId()));
     }
 
     private List<Users> filterUsersBySelectedUserCode(List<Users> users, String selectedUserCode) {
