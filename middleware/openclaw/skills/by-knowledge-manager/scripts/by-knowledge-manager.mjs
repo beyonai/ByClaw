@@ -4,12 +4,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
-import net from "node:net";
+import { initRedis, getRedis, closeRedis, DiscoveryClient, RegistryKeys } from "@byclaw/by-framework";
 
 const DEFAULT_CONTEXT_PATH = "/byaiService";
 const DEFAULT_SIGNATURE_SALT = "{#@*A12^c0+}";
 const DEFAULT_BACKEND_SERVICE_NAME = "ByaiService";
-const SERVICE_DISCOVERY_INSTANCE_PREFIX = "byai_gateway:sd:instances:";
 const SUPPORTED_UPLOAD_EXTENSIONS = new Set([
   ".md",
   ".markdown",
@@ -152,197 +151,61 @@ function composeHostBackendBaseUrl() {
   return normalizeBaseUrl(`${protocol}://${host}${portPart}`);
 }
 
-function encodeRedisCommand(args) {
-  return `*${args.length}\r\n${args.map((arg) => {
-    const text = String(arg ?? "");
-    return `$${Buffer.byteLength(text)}\r\n${text}\r\n`;
-  }).join("")}`;
+let discoveryClient;
+
+function discoveryTimeoutMs() {
+  return Math.max(500, Number.parseInt(firstNonEmpty(process.env.BYCLAW_REDIS_DISCOVERY_TIMEOUT_MS, "3000"), 10));
 }
 
-function parseResp(buffer, offset = 0) {
-  if (offset >= buffer.length) {
-    return null;
-  }
-  const type = buffer[offset];
-  const lineEnd = buffer.indexOf("\r\n", offset);
-  if (lineEnd === -1) {
-    return null;
-  }
-  const line = buffer.slice(offset + 1, lineEnd).toString("utf8");
-  const next = lineEnd + 2;
-  if (type === 43) {
-    return { value: line, offset: next };
-  }
-  if (type === 45) {
-    throw new Error(line);
-  }
-  if (type === 58) {
-    return { value: Number.parseInt(line, 10), offset: next };
-  }
-  if (type === 36) {
-    const length = Number.parseInt(line, 10);
-    if (length === -1) {
-      return { value: null, offset: next };
-    }
-    const end = next + length;
-    if (buffer.length < end + 2) {
-      return null;
-    }
-    return { value: buffer.slice(next, end).toString("utf8"), offset: end + 2 };
-  }
-  if (type === 42) {
-    const length = Number.parseInt(line, 10);
-    if (length === -1) {
-      return { value: null, offset: next };
-    }
-    const values = [];
-    let cursor = next;
-    for (let index = 0; index < length; index += 1) {
-      const parsed = parseResp(buffer, cursor);
-      if (!parsed) {
-        return null;
-      }
-      values.push(parsed.value);
-      cursor = parsed.offset;
-    }
-    return { value: values, offset: cursor };
-  }
-  throw new Error(`不支持的 Redis 响应类型: ${String.fromCharCode(type)}`);
-}
-
-function redisCommand(socket, args, timeoutMs) {
-  return new Promise((resolve, reject) => {
-    let buffer = Buffer.alloc(0);
-    const timer = setTimeout(() => {
-      cleanup();
-      reject(new Error(`Redis 命令超时: ${args[0]}`));
-    }, timeoutMs);
-    function cleanup() {
-      clearTimeout(timer);
-      socket.off("data", onData);
-      socket.off("error", onError);
-    }
-    function onError(error) {
-      cleanup();
-      reject(error);
-    }
-    function onData(chunk) {
-      buffer = Buffer.concat([buffer, chunk]);
-      try {
-        const parsed = parseResp(buffer);
-        if (!parsed) {
-          return;
-        }
-        cleanup();
-        resolve(parsed.value);
-      } catch (error) {
-        cleanup();
-        reject(error);
-      }
-    }
-    socket.on("data", onData);
-    socket.once("error", onError);
-    socket.write(encodeRedisCommand(args));
-  });
-}
-
-function connectRedis(host, port, timeoutMs) {
-  return new Promise((resolve, reject) => {
-    const socket = net.createConnection({ host, port });
-    const timer = setTimeout(() => {
-      socket.destroy();
-      reject(new Error(`Redis 连接超时: ${host}:${port}`));
-    }, timeoutMs);
-    socket.once("connect", () => {
-      clearTimeout(timer);
-      resolve(socket);
+function getDiscoveryClient() {
+  if (!discoveryClient) {
+    initRedis({
+      connectTimeout: discoveryTimeoutMs(),
+      maxRetriesPerRequest: 1,
+      retryStrategy: () => null,
     });
-    socket.once("error", (error) => {
-      clearTimeout(timer);
-      reject(error);
-    });
-  });
+    discoveryClient = new DiscoveryClient(getRedis(), 30);
+  }
+  return discoveryClient;
 }
 
-async function readRedisHash(key) {
-  const host = firstNonEmpty(process.env.REDIS_HOST);
-  const port = Number.parseInt(firstNonEmpty(process.env.REDIS_PORT, "6379"), 10);
-  const db = Number.parseInt(firstNonEmpty(process.env.REDIS_DATABASE, "0"), 10);
-  if (!host || !Number.isFinite(port)) {
-    return {};
-  }
-  const timeoutMs = Math.max(500, Number.parseInt(firstNonEmpty(process.env.BYCLAW_REDIS_DISCOVERY_TIMEOUT_MS, "3000"), 10));
-  const socket = await connectRedis(host, port, timeoutMs);
+async function closeDiscovery() {
   try {
-    const username = firstNonEmpty(process.env.REDIS_USERNAME);
-    const password = firstNonEmpty(process.env.REDIS_PASSWORD);
-    if (password) {
-      await redisCommand(socket, username ? ["AUTH", username, password] : ["AUTH", password], timeoutMs);
-    }
-    if (Number.isFinite(db) && db > 0) {
-      await redisCommand(socket, ["SELECT", db], timeoutMs);
-    }
-    const values = await redisCommand(socket, ["HGETALL", key], timeoutMs);
-    if (!Array.isArray(values)) {
-      return {};
-    }
-    const result = {};
-    for (let index = 0; index < values.length; index += 2) {
-      result[String(values[index])] = values[index + 1];
-    }
-    return result;
-  } finally {
-    socket.end();
-  }
-}
-
-function parseServiceInstance(raw) {
-  if (!raw) {
-    return undefined;
-  }
+    discoveryClient?.close();
+  } catch {}
+  discoveryClient = undefined;
   try {
-    const parsed = JSON.parse(raw);
-    const host = firstNonEmpty(parsed.host);
-    const port = Number.parseInt(firstNonEmpty(parsed.port), 10);
-    if (!host || !Number.isFinite(port)) {
-      return undefined;
-    }
-    return {
-      protocol: firstNonEmpty(parsed.protocol, "http"),
-      host,
-      port,
-      pathPrefix: firstNonEmpty(parsed.path_prefix, parsed.pathPrefix, DEFAULT_CONTEXT_PATH),
-      weight: Number.parseFloat(firstNonEmpty(parsed.weight, "1")) || 1,
-      id: firstNonEmpty(parsed.id),
-    };
-  } catch {
-    return undefined;
-  }
+    await closeRedis();
+  } catch {}
 }
 
 function backendInstanceBaseUrl(instance) {
-  const pathPrefix = firstNonEmpty(instance.pathPrefix, DEFAULT_CONTEXT_PATH).replace(/^\/+|\/+$/g, "");
+  const pathPrefix = firstNonEmpty(instance?.pathPrefix, DEFAULT_CONTEXT_PATH).replace(/^\/+|\/+$/g, "");
   const prefix = pathPrefix ? `/${pathPrefix}` : "";
-  return `${instance.protocol}://${instance.host}:${instance.port}${prefix}`.replace(/\/+$/g, "");
+  return `${instance.protocol || "http"}://${instance.host}:${instance.port}${prefix}`.replace(/\/+$/g, "");
 }
 
 async function discoverBackendBaseUrl() {
   const serviceName = firstNonEmpty(process.env.BE_DOMAINNAME, DEFAULT_BACKEND_SERVICE_NAME);
-  const key = `${SERVICE_DISCOVERY_INSTANCE_PREFIX}${serviceName}`;
-  const values = await readRedisHash(key);
-  const instances = Object.values(values)
-    .map(parseServiceInstance)
-    .filter(Boolean)
-    .sort((left, right) => right.weight - left.weight || firstNonEmpty(left.id).localeCompare(firstNonEmpty(right.id)));
-  if (!instances.length) {
-    return { baseUrl: "", source: "redis", serviceName, redisKey: key };
+  const redisKey = RegistryKeys.sd_instance_details(serviceName);
+  if (!firstNonEmpty(process.env.REDIS_HOST)) {
+    return { baseUrl: "", source: "redis", serviceName, redisKey };
+  }
+  const client = getDiscoveryClient();
+  const instance = await client.discover(serviceName, "round-robin");
+  if (!instance) {
+    return { baseUrl: "", source: "redis", serviceName, redisKey };
   }
   return {
-    baseUrl: backendInstanceBaseUrl(instances[0]),
+    baseUrl: backendInstanceBaseUrl({
+      host: instance.host,
+      port: instance.port,
+      pathPrefix: instance.metadata?.path_prefix,
+    }),
     source: "redis",
     serviceName,
-    redisKey: key,
-    instanceId: instances[0].id,
+    redisKey,
+    instanceId: instance.id,
   };
 }
 
@@ -735,7 +598,7 @@ function helpManual() {
     ok: true,
     name: "by-knowledge-manager",
     description: "知识库内容管理 CLI：管理知识库目录、文件上传/更新/构建/下载/删除。",
-    usage: "node /app/scripts/by-knowledge-manager.mjs <command> [options]",
+    usage: "node ./scripts/by-knowledge-manager.mjs <command> [options]",
     commands: {
       list: {
         description: "查询指定目录下的文件和子目录",
@@ -1180,10 +1043,13 @@ async function main() {
   render(result);
 }
 
-main().catch((error) => {
-  render({
-    ok: false,
-    error: error.message,
+main()
+  .then(() => closeDiscovery())
+  .catch(async (error) => {
+    await closeDiscovery().catch(() => {});
+    render({
+      ok: false,
+      error: error.message,
+    });
+    process.exitCode = 1;
   });
-  process.exitCode = 1;
-});
