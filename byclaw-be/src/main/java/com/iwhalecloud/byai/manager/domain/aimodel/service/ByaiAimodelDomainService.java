@@ -53,6 +53,16 @@ public class ByaiAimodelDomainService {
     private ByaiTagRelationService byaiTagRelationService;
 
     /**
+     * 查找模型标识
+     *
+     * @param modelId 模型
+     * @return ByaiAimodel
+     */
+    public ByaiAimodel findById(Long modelId) {
+        return byaiAimodelMapper.selectById(modelId);
+    }
+
+    /**
      * 按条件分页查询（使用 PageHelper 实现分页，与项目现有分页方式一致）
      *
      * @param request 列表请求（pageNum、pageSize、status、ability、system、modelId、modelName、keyword）
