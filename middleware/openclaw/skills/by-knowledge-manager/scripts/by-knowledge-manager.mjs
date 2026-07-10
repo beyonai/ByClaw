@@ -4,13 +4,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
-import net from "node:net";
 import { initRedis, getRedis, closeRedis, DiscoveryClient, RegistryKeys } from "@byclaw/by-framework";
 
 const DEFAULT_CONTEXT_PATH = "/byaiService";
 const DEFAULT_SIGNATURE_SALT = "{#@*A12^c0+}";
 const DEFAULT_BACKEND_SERVICE_NAME = "ByaiService";
-const SERVICE_DISCOVERY_INSTANCE_PREFIX = "byai_gateway:sd:instances:";
 const SUPPORTED_UPLOAD_EXTENSIONS = new Set([
   ".md",
   ".markdown",
@@ -151,150 +149,6 @@ function composeHostBackendBaseUrl() {
   const hasPort = /:\d+$/.test(host);
   const portPart = port && !hasPort ? `:${port}` : "";
   return normalizeBaseUrl(`${protocol}://${host}${portPart}`);
-}
-
-function encodeRedisCommand(args) {
-  return `*${args.length}\r\n${args.map((arg) => {
-    const text = String(arg ?? "");
-    return `$${Buffer.byteLength(text)}\r\n${text}\r\n`;
-  }).join("")}`;
-}
-
-function parseResp(buffer, offset = 0) {
-  if (offset >= buffer.length) {
-    return null;
-  }
-  const type = buffer[offset];
-  const lineEnd = buffer.indexOf("\r\n", offset);
-  if (lineEnd === -1) {
-    return null;
-  }
-  const line = buffer.slice(offset + 1, lineEnd).toString("utf8");
-  const next = lineEnd + 2;
-  if (type === 43) {
-    return { value: line, offset: next };
-  }
-  if (type === 45) {
-    throw new Error(line);
-  }
-  if (type === 58) {
-    return { value: Number.parseInt(line, 10), offset: next };
-  }
-  if (type === 36) {
-    const length = Number.parseInt(line, 10);
-    if (length === -1) {
-      return { value: null, offset: next };
-    }
-    const end = next + length;
-    if (buffer.length < end + 2) {
-      return null;
-    }
-    return { value: buffer.slice(next, end).toString("utf8"), offset: end + 2 };
-  }
-  if (type === 42) {
-    const length = Number.parseInt(line, 10);
-    if (length === -1) {
-      return { value: null, offset: next };
-    }
-    const values = [];
-    let cursor = next;
-    for (let index = 0; index < length; index += 1) {
-      const parsed = parseResp(buffer, cursor);
-      if (!parsed) {
-        return null;
-      }
-      values.push(parsed.value);
-      cursor = parsed.offset;
-    }
-    return { value: values, offset: cursor };
-  }
-  throw new Error(`不支持的 Redis 响应类型: ${String.fromCharCode(type)}`);
-}
-
-function redisCommand(socket, args, timeoutMs) {
-  return new Promise((resolve, reject) => {
-    let buffer = Buffer.alloc(0);
-    const timer = setTimeout(() => {
-      cleanup();
-      reject(new Error(`Redis 命令超时: ${args[0]}`));
-    }, timeoutMs);
-    function cleanup() {
-      clearTimeout(timer);
-      socket.off("data", onData);
-      socket.off("error", onError);
-    }
-    function onError(error) {
-      cleanup();
-      reject(error);
-    }
-    function onData(chunk) {
-      buffer = Buffer.concat([buffer, chunk]);
-      try {
-        const parsed = parseResp(buffer);
-        if (!parsed) {
-          return;
-        }
-        cleanup();
-        resolve(parsed.value);
-      } catch (error) {
-        cleanup();
-        reject(error);
-      }
-    }
-    socket.on("data", onData);
-    socket.once("error", onError);
-    socket.write(encodeRedisCommand(args));
-  });
-}
-
-function connectRedis(host, port, timeoutMs) {
-  return new Promise((resolve, reject) => {
-    const socket = net.createConnection({ host, port });
-    const timer = setTimeout(() => {
-      socket.destroy();
-      reject(new Error(`Redis 连接超时: ${host}:${port}`));
-    }, timeoutMs);
-    socket.once("connect", () => {
-      clearTimeout(timer);
-      resolve(socket);
-    });
-    socket.once("error", (error) => {
-      clearTimeout(timer);
-      reject(error);
-    });
-  });
-}
-
-async function readRedisHash(key) {
-  const host = firstNonEmpty(process.env.REDIS_HOST);
-  const port = Number.parseInt(firstNonEmpty(process.env.REDIS_PORT, "6379"), 10);
-  const db = Number.parseInt(firstNonEmpty(process.env.REDIS_DATABASE, "0"), 10);
-  if (!host || !Number.isFinite(port)) {
-    return {};
-  }
-  const timeoutMs = Math.max(500, Number.parseInt(firstNonEmpty(process.env.BYCLAW_REDIS_DISCOVERY_TIMEOUT_MS, "3000"), 10));
-  const socket = await connectRedis(host, port, timeoutMs);
-  try {
-    const username = firstNonEmpty(process.env.REDIS_USERNAME);
-    const password = firstNonEmpty(process.env.REDIS_PASSWORD);
-    if (password) {
-      await redisCommand(socket, username ? ["AUTH", username, password] : ["AUTH", password], timeoutMs);
-    }
-    if (Number.isFinite(db) && db > 0) {
-      await redisCommand(socket, ["SELECT", db], timeoutMs);
-    }
-    const values = await redisCommand(socket, ["HGETALL", key], timeoutMs);
-    if (!Array.isArray(values)) {
-      return {};
-    }
-    const result = {};
-    for (let index = 0; index < values.length; index += 2) {
-      result[String(values[index])] = values[index + 1];
-    }
-    return result;
-  } finally {
-    socket.end();
-  }
 }
 
 let discoveryClient;
