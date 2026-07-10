@@ -15,11 +15,11 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import org.apache.commons.lang3.StringEscapeUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
 
@@ -41,6 +41,8 @@ import jakarta.servlet.http.HttpSession;
 public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
 
     private static final Logger logger = LoggerFactory.getLogger(AccessTokenVerifyInterceptor.class);
+
+    private static final String FEISHU_BOT_EVENT_CALLBACK_PATH = "/feishu/bot/events";
 
     @Value("${byai.access.urlpatterns:}")
     private String urlPattenrs;
@@ -139,6 +141,11 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
 
             // 例外的地址
             String url = request.getRequestURL().toString();
+            // 飞书开放平台回调从外部匿名推送，不会携带系统登录态。
+            // 这里使用 servlet 原始路径做后缀判断，兼容 /byaiService 等 context-path/代理前缀。
+            if (this.isFeishuBotEventCallback(request)) {
+                return true;
+            }
             if (this.checkUrlByRegex(url)) {
                 return true;
             }
@@ -219,19 +226,40 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
     private void setLoginError(HttpServletResponse response, String errMsg) {
         response.setStatus(HttpStatus.UNAUTHORIZED.value());
         response.setCharacterEncoding("utf-8");
-        response.setContentType("text/html; charset=utf-8");
+        response.setContentType(MediaType.APPLICATION_JSON_VALUE + ";charset=UTF-8");
         Map<String, Object> resultObject = new HashMap<String, Object>();
         resultObject.put("resultCode", HttpStatus.UNAUTHORIZED.value());
         resultObject.put("resultMsg", errMsg);
         resultObject.put("type", 1);
         String jsonString = JSONObject.toJSONString(resultObject);
         try {
-            String escapeHtml4 = StringEscapeUtils.escapeHtml4(jsonString);
-            response.getWriter().write(escapeHtml4);
+            response.getWriter().write(jsonString);
         }
         catch (IOException e) {
             logger.error(e.getMessage(), e);
         }
+    }
+
+    /**
+     * 飞书事件回调必须允许匿名访问，鉴权由 {@code FeishuBotEventController} 内部基于
+     * verificationToken / encryptKey 完成。这里同时检查 requestURI、servletPath 和 pathInfo，
+     * 避免本地、ngrok、网关 context-path（如 /byaiService）不一致时误入系统登录鉴权。
+     *
+     * @param request HTTP 请求
+     * @return 是否为飞书机器人事件回调
+     */
+    private boolean isFeishuBotEventCallback(HttpServletRequest request) {
+        return endsWithFeishuBotEventPath(request.getRequestURI())
+            || endsWithFeishuBotEventPath(request.getServletPath())
+            || endsWithFeishuBotEventPath(request.getPathInfo());
+    }
+
+    private boolean endsWithFeishuBotEventPath(String path) {
+        if (StringUtils.isBlank(path)) {
+            return false;
+        }
+        String normalizedPath = path.endsWith("/") ? path.substring(0, path.length() - 1) : path;
+        return normalizedPath.endsWith(FEISHU_BOT_EVENT_CALLBACK_PATH);
     }
 
     /**
