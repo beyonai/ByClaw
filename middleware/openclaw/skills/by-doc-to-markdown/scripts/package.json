@@ -1,0 +1,9 @@
+{
+  "name": "by-doc-to-markdown-scripts",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@byclaw/by-framework": "1.5.0"
+  }
+}

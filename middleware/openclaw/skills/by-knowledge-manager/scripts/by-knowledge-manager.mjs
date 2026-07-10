@@ -598,7 +598,7 @@ function helpManual() {
     ok: true,
     name: "by-knowledge-manager",
     description: "知识库内容管理 CLI：管理知识库目录、文件上传/更新/构建/下载/删除。",
-    usage: "node /app/scripts/by-knowledge-manager.mjs <command> [options]",
+    usage: "node ./scripts/by-knowledge-manager.mjs <command> [options]",
     commands: {
       list: {
         description: "查询指定目录下的文件和子目录",
