@@ -27,6 +27,7 @@ import PublishModal from '../components/PublishModal';
 import RefineModal from '../components/RefineModal';
 import LogInfoDrawer from './components/LogInfoDrawer';
 import ConfigForm from './ConfigForm';
+import { normalizeRobotConfig } from './ConfigForm/robotConfig';
 import { DEFAULT_PERSONALITY_DEFINITION } from './personalityDefinitionDefault';
 import styles from './index.module.less';
 import Log from './Log';
