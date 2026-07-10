@@ -295,17 +295,16 @@ RUN rm -fr /root/.agents/skills
 # 本地构建 wheel 的方法见 middleware/openclaw/sau/README.md
 ARG SAU_VERSION=0.1.1
 ENV SAU_BASE_DIR=/by/sau \
-    PLAYWRIGHT_BROWSERS_PATH=/opt/playwright \
-    LOCAL_CHROME_PATH=/usr/bin/chromium
+    PLAYWRIGHT_BROWSERS_PATH=/opt/playwright
 COPY middleware/openclaw/sau/social_auto_upload-${SAU_VERSION}-py3-none-any.whl /tmp/
 RUN set -eux; \
     mkdir -p /by/sau/cookies; \
-    python3 -m pip install /tmp/social_auto_upload-${SAU_VERSION}-py3-none-any.whl; \
+    python3 -m pip install --no-cache-dir /tmp/social_auto_upload-${SAU_VERSION}-py3-none-any.whl; \
     patchright install chromium; \
     rm -f /tmp/social_auto_upload-${SAU_VERSION}-py3-none-any.whl; \
     sau --help >/dev/null; \
-    python3 -c 'from conf import LOCAL_CHROME_PATH; assert LOCAL_CHROME_PATH == "/usr/bin/chromium", LOCAL_CHROME_PATH'; \
-    test -x "${LOCAL_CHROME_PATH}"; \
+    python3 -c 'from conf import LOCAL_CHROME_PATH; assert LOCAL_CHROME_PATH == "", LOCAL_CHROME_PATH'; \
+    python3 -c 'from utils.browser_launch import _patchright_chromium_available; assert _patchright_chromium_available()'; \
     python3 -c 'from utils.browser_launch import chromium_launch_kwargs; kwargs = chromium_launch_kwargs(headless=True); assert kwargs.get("channel") == "chromium", kwargs'; \
     test -f "$(python3 -c 'from utils.base_social_media import stealth_js_path; print(stealth_js_path())')"; \
     echo "sau installed: $(sau --version 2>/dev/null || echo 'version n/a')"
