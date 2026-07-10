@@ -504,8 +504,21 @@
 .bundledSkillContent {
   display: flex;
   align-items: center;
+  gap: 18px;
   width: 100%;
   overflow: hidden;
+}
+
+.selectedBundledSkillContent {
+  gap: 12px;
+}
+
+.selectedBundledSkillCard {
+  :global {
+    .@{antPrefix}-card-body {
+      padding: 12px 16px;
+    }
+  }
 }
 
 .bundledSkillInfo {
@@ -513,11 +526,119 @@
   min-width: 0;
 }
 
+.bundledSkillPosterImageWrap {
+  position: relative;
+  flex-shrink: 0;
+  width: 74px;
+  height: 74px;
+  overflow: hidden;
+  background: linear-gradient(135deg, #edf7ff 0%, #fff3df 100%);
+  border-radius: 14px;
+  box-shadow: inset 0 0 0 1px rgba(20, 22, 26, 0.04);
+}
+
+.bundledSkillPosterImage {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.bundledSkillPosterPlaceholder {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  width: 100%;
+  height: 100%;
+  padding: 9px;
+  color: rgba(20, 22, 26, 0.66);
+  background: radial-gradient(circle at 78% 18%, rgba(255, 255, 255, 0.86) 0, rgba(255, 255, 255, 0) 28%),
+    linear-gradient(145deg, #fce4c8 0%, #f7f0ff 48%, #d8f5e8 100%);
+
+  span {
+    position: relative;
+    z-index: 1;
+    width: fit-content;
+    padding: 2px 6px;
+    color: rgba(20, 22, 26, 0.66);
+    font-weight: 700;
+    font-size: 10px;
+    background: rgba(255, 255, 255, 0.72);
+    border-radius: 999px;
+    backdrop-filter: blur(8px);
+  }
+}
+
+.bundledSkillPosterOrb {
+  position: absolute;
+  top: 12px;
+  right: 10px;
+  width: 30px;
+  height: 30px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.95), rgba(255, 172, 116, 0.5));
+  border-radius: 999px;
+  box-shadow: 0 10px 24px rgba(217, 103, 61, 0.18);
+}
+
+.selectedBundledSkillPosterImageWrap {
+  width: 48px;
+  height: 48px;
+  border-radius: 10px;
+
+  .bundledSkillPosterPlaceholder {
+    padding: 6px;
+
+    span {
+      padding: 1px 5px;
+      font-size: 9px;
+    }
+  }
+
+  .bundledSkillPosterOrb {
+    top: 7px;
+    right: 7px;
+    width: 18px;
+    height: 18px;
+  }
+}
+
+.selectedBundledSkillDesc {
+  display: -webkit-box;
+  max-height: 36px !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.bundledSkillModalWrap {
+  overflow: hidden !important;
+
+  :global {
+    .@{antPrefix}-modal {
+      max-height: calc(100vh - 64px);
+      padding-bottom: 0;
+    }
+  }
+}
+
 .bundledSkillModal {
+  padding-bottom: 0;
+
   :global {
     .@{antPrefix}-modal-content {
       border: none !important;
       box-shadow: none !important;
+    }
+
+    .@{antPrefix}-modal-body {
+      max-height: calc(100vh - 64px);
+      padding: 0;
+      overflow: hidden;
     }
 
     .beyond-modal-content {
@@ -528,24 +649,26 @@
   .modalContent {
     display: flex;
     flex-direction: column;
+    box-sizing: border-box;
     width: 100%;
-    height: 640px;
-    padding: 16px;
+    height: min(760px, calc(100vh - 64px));
+    padding: 24px;
     overflow: hidden;
 
     .modalHeader {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      height: 28px;
-      margin-bottom: 12px;
+      height: 40px;
+      margin-bottom: 22px;
       color: #707680;
       font-size: 14px;
 
       .modalTitle {
         color: #14161a;
-        font-weight: 500;
-        font-size: 16px;
+        font-weight: 600;
+        font-size: 20px;
+        line-height: 28px;
       }
 
       .headerRight {
@@ -555,7 +678,7 @@
       }
 
       .searchInput {
-        width: 220px;
+        width: 260px;
       }
 
       .modalCloseIcon {
@@ -566,6 +689,7 @@
 
     .bundledSkillCardListWrap {
       flex: 1;
+      min-height: 0;
       width: 100%;
       overflow: hidden;
 
@@ -573,20 +697,52 @@
         .@{antPrefix}-spin-nested-loading,
         .@{antPrefix}-spin-container {
           height: 100%;
+          min-height: 0;
         }
       }
     }
 
     .bundledSkillCardList {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 20px;
+      align-content: start;
+      min-height: 0;
       height: 100%;
       overflow: auto;
+      padding: 2px 10px 2px 2px;
+    }
+
+    @media (max-width: 1100px) {
+      .bundledSkillCardList {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 760px) {
+      .bundledSkillCardList {
+        grid-template-columns: 1fr;
+      }
     }
 
     .bundledSkillModalCard {
-      border-radius: 4px;
+      position: relative;
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      min-width: 0;
+      height: 112px;
+      padding: 14px 18px;
+      overflow: hidden;
+      background: #fff;
+      border: 1px solid transparent;
+      border-radius: 24px;
+      box-shadow: 0 6px 18px rgba(20, 22, 26, 0.04);
+      transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
 
       &:hover {
-        background-color: #f7fafc;
+        transform: translateY(-2px);
+        box-shadow: 0 10px 28px rgba(20, 22, 26, 0.09);
       }
 
       :global {
@@ -599,39 +755,119 @@
       }
     }
 
-    .bundledSkillModalCardInner {
-      display: flex;
-      align-items: center;
-      min-height: 100px;
-      padding: 8px;
-      color: #707680;
-      font-weight: 400;
-      font-size: 12px;
-      border-bottom: 1px solid #f0f0f0;
+    .selectedBundledSkillModalCard {
+      border-color: rgba(22, 93, 255, 0.28);
+      box-shadow: 0 10px 28px rgba(22, 93, 255, 0.12);
     }
 
-    .bundledSkillModalCardInfo {
+    .bundledSkillPosterBody {
       flex: 1;
+      min-width: 0;
+      padding-right: 42px;
+    }
+
+    .bundledSkillPosterHeader {
+      display: flex;
+      align-items: center;
+      gap: 6px;
       min-width: 0;
     }
 
     .bundledSkillModalCardTitle {
-      display: flex;
-      align-items: center;
-      gap: 8px;
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
       color: #14161a;
-      font-weight: 500;
-      font-size: 14px;
+      font-weight: 700;
+      font-size: 15px;
+      line-height: 21px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .bundledSkillPosterTag {
+      flex-shrink: 0;
+      max-width: 72px;
+      padding: 2px 6px;
+      color: #6a4af5;
+      font-weight: 700;
+      font-size: 11px;
+      background: rgba(106, 74, 245, 0.1);
+      border-radius: 999px;
+
+      span {
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
     }
 
     .bundledSkillModalCardDesc {
       display: -webkit-box;
       overflow: hidden;
-      color: #707680;
+      margin-top: 4px;
+      color: #8f98a6;
       font-size: 12px;
+      line-height: 18px;
       -webkit-line-clamp: 2;
+      line-clamp: 2;
       -webkit-box-orient: vertical;
       text-overflow: ellipsis;
+    }
+
+    .bundledSkillPosterFooter {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      margin-top: 8px;
+      color: #a3abb7;
+      font-size: 12px;
+      line-height: 18px;
+    }
+
+    .bundledSkillPosterSource {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      max-width: 55%;
+      min-width: 0;
+    }
+
+    .bundledSkillPosterSourceIcon {
+      display: inline-flex;
+      flex-shrink: 0;
+      align-items: center;
+      justify-content: center;
+      width: 15px;
+      height: 15px;
+      color: #fff;
+      font-size: 10px;
+      background: #35cc4b;
+      border-radius: 50%;
+    }
+
+    .bundledSkillPosterSourceText {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .bundledSkillPosterDivider {
+      flex-shrink: 0;
+      width: 1px;
+      height: 12px;
+      background: #d8dde5;
+    }
+
+    .bundledSkillPosterUseCount {
+      flex-shrink: 0;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
     .bundledSkillModalTooltip {
@@ -639,7 +875,10 @@
     }
 
     .actionButton {
-      width: 68px;
+      position: absolute;
+      right: 18px;
+      bottom: 14px;
+      width: 56px;
       height: 28px;
       border-radius: 4px;
 

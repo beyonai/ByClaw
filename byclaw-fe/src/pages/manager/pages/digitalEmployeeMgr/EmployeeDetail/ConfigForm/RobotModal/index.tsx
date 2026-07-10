@@ -232,7 +232,6 @@ function RobotModal(props: IProps) {
           />
         }
         name="encryptKey"
-        rules={[{ required: true, message: intl.formatMessage({ id: 'digitalEmployeeMgr.feishuEncryptKeyRequired' }) }]}
       >
         <Input
           className={styles.robotFieldControl}
@@ -247,9 +246,6 @@ function RobotModal(props: IProps) {
           />
         }
         name="verificationToken"
-        rules={[
-          { required: true, message: intl.formatMessage({ id: 'digitalEmployeeMgr.feishuVerificationTokenRequired' }) },
-        ]}
       >
         <Input
           className={styles.robotFieldControl}

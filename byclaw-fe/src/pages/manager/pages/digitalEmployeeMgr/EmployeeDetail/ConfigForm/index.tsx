@@ -55,6 +55,7 @@ import ToolSelectorModal from './ToolSelectorModal';
 import { compressImgFileAndUpload } from '@/pages/manager/utils/file';
 import { Image } from '@/pages/manager/components/Image';
 import { getAvatarUrl } from '@/pages/manager/utils/agent';
+import { getFileUrl } from '@/utils/file';
 // import UploadFileConfig from './UploadFileConfig';
 import styles from './index.module.less';
 import pStyles from '../index.module.less';
@@ -71,6 +72,22 @@ const { TextArea } = Input;
 const nanoid = customAlphabet('abcdefghijklmnopqrstuvwxyz1234567890', 6);
 const PROMPT_TEXT_FIELD_DEFAULT_MAX_LENGTH = 10000;
 const getPromptTextLength = (value: any) => Array.from(`${value ?? ''}`).length;
+const formatSkillAddedCount = (count: number, locale: string) => {
+  if (locale?.startsWith('zh')) {
+    if (count >= 10000) {
+      const wanCount = count / 10000;
+      return wanCount >= 10 ? `${Math.floor(wanCount)}万` : `${Number(wanCount.toFixed(1))}万`;
+    }
+    return `${count}`;
+  }
+  if (count >= 1000000) {
+    return `${Number((count / 1000000).toFixed(1))}M`;
+  }
+  if (count >= 1000) {
+    return `${Number((count / 1000).toFixed(1))}K`;
+  }
+  return `${count}`;
+};
 
 const DEFAULT_ROBOT_CHANNEL_OPTIONS = [
   { value: 'DingTalk', labelZh: '钉钉', labelEn: 'DingTalk' },
@@ -550,6 +567,15 @@ const ConfigForm = (props) => {
               value: item.skillCode || item.resourceCode || item.code || item.itemCode,
               label: item.itemName || item.name || item.resourceName || item.resourceCode || '-',
               description: item.resourceDesc || item.description || item.pluginDesc || item.desc || '',
+              resourceName: item.resourceName || item.itemName || item.name,
+              resourceDesc: item.resourceDesc || item.description || item.pluginDesc || item.desc || '',
+              resourceLogoUrl: item.resourceLogoUrl || item.avatar,
+              avatar: item.avatar,
+              creatorName: item.creatorName || item.createUserName || item.memberName,
+              createUserName: item.createUserName,
+              useCount: item.useCount || item.focusCount || 0,
+              displaySourceType: item.displaySourceType || item.sourceType,
+              sourceType: item.sourceType || item.displaySourceType,
               skillCode: item.skillCode || item.resourceCode || item.code || item.itemCode,
               skillType: item.skillType || 'hub',
               skillUrl: item.skillUrl || '',
@@ -1198,6 +1224,67 @@ const ConfigForm = (props) => {
       );
     });
   }, [bundledSkillOptions, bundledSkillSearchName]);
+
+  const getBundledSkillSourceName = useCallback(
+    (item: any = {}) => {
+      const normalizedSourceType = `${item.displaySourceType || item.sourceType || ''}`
+        .replace(/[-\s]/g, '_')
+        .toUpperCase();
+      const sourceLabelMap: Record<string, string> = {
+        ASSISTANT_BOUND: 'resource.skillSource.assistantBound',
+        LOBSTER_INSTALLED: 'resource.skillSource.lobsterInstalled',
+        USER_DEVELOPED: 'resource.skillSource.userDeveloped',
+      };
+      return sourceLabelMap[normalizedSourceType]
+        ? intl.formatMessage({ id: sourceLabelMap[normalizedSourceType] })
+        : item.creatorName || item.createUserName || intl.formatMessage({ id: 'common.none' });
+    },
+    [intl]
+  );
+
+  const getBundledSkillTag = useCallback(
+    (item: any = {}) => {
+      if (item.tagName) {
+        return item.tagName;
+      }
+      if (`${item.skillType || ''}`.toLowerCase() === 'inner') {
+        return intl.formatMessage({ id: 'resource.systemBuiltin' });
+      }
+      if (
+        `${item.displaySourceType || item.sourceType || ''}`.replace(/[-\s]/g, '_').toUpperCase() === 'USER_DEVELOPED'
+      ) {
+        return intl.formatMessage({ id: 'resource.skillSource.userDeveloped' });
+      }
+      return '';
+    },
+    [intl]
+  );
+
+  const renderBundledSkillPoster = useCallback(
+    (item: any = {}, className?: string) => {
+      const imageUrl = item.resourceLogoUrl || item.avatar ? getFileUrl(item.resourceLogoUrl || item.avatar) : '';
+
+      return (
+        <div className={classnames(styles.bundledSkillPosterImageWrap, className)}>
+          <div className={styles.bundledSkillPosterPlaceholder}>
+            <div className={styles.bundledSkillPosterOrb} />
+            <span>{intl.formatMessage({ id: 'common.skill' })}</span>
+          </div>
+          {imageUrl && (
+            <img
+              className={styles.bundledSkillPosterImage}
+              src={imageUrl}
+              alt={item.label || item.resourceName || item.skillCode || ''}
+              onError={(event) => {
+                event.currentTarget.style.display = 'none';
+              }}
+            />
+          )}
+        </div>
+      );
+    },
+    [intl]
+  );
 
   const handlePromptTextAreaChange = useCallback(
     (fieldLabel, value) => {
@@ -2379,14 +2466,25 @@ const ConfigForm = (props) => {
                       .map((code) => bundledSkillOptions.find((item) => item.value === code))
                       .filter(Boolean)
                       .map((item) => (
-                        <Card key={item.value} className={classnames(styles.configCard, styles.skillCard)}>
-                          <div className={styles.skillContent}>
-                            <AntdIcon type="icon-chajiantubiao" className={styles.fontSize36MarginRight12} />
-                            <div className={styles.skillInfo}>
+                        <Card
+                          key={item.value}
+                          className={classnames(styles.configCard, styles.skillCard, styles.selectedBundledSkillCard)}
+                        >
+                          <div
+                            className={classnames(
+                              styles.skillContent,
+                              styles.bundledSkillContent,
+                              styles.selectedBundledSkillContent
+                            )}
+                          >
+                            {renderBundledSkillPoster(item, styles.selectedBundledSkillPosterImageWrap)}
+                            <div className={classnames(styles.skillInfo, styles.bundledSkillInfo)}>
                               <div className={styles.skillHeader}>
                                 <span className={styles.skillName}>{item.label}</span>
                               </div>
-                              <div className={styles.skillDescription}>{item.description}</div>
+                              <div className={classnames(styles.skillDescription, styles.selectedBundledSkillDesc)}>
+                                {item.description}
+                              </div>
                             </div>
                             <div className={styles.skillActions}>
                               {!isReadOnly && (
@@ -3008,8 +3106,10 @@ const ConfigForm = (props) => {
       />
       <Modal
         className={styles.bundledSkillModal}
+        wrapClassName={styles.bundledSkillModalWrap}
         open={bundledSkillModalOpen}
-        width={900}
+        width="min(1180px, calc(100vw - 64px))"
+        style={{ top: 32, paddingBottom: 0 }}
         onCancel={() => setBundledSkillModalOpen(false)}
         destroyOnHidden
         closable={false}
@@ -3042,46 +3142,75 @@ const ConfigForm = (props) => {
                 <div className={styles.bundledSkillCardList}>
                   {filteredBundledSkillOptions.map((item) => {
                     const isSelected = selectedSkillCodes.includes(item.value);
+                    const tagText = getBundledSkillTag(item);
+                    const rawUseCount = Number(item.useCount || item.focusCount || 0);
+                    const useCount = Number.isFinite(rawUseCount) ? rawUseCount : 0;
+                    const sourceName = getBundledSkillSourceName(item);
 
                     return (
-                      <div key={item.value} className={styles.bundledSkillModalCard}>
-                        <div className={styles.bundledSkillModalCardInner}>
-                          <AntdIcon type="icon-chajiantubiao" className={styles.fontSize36MarginRight12} />
-                          <div className={styles.bundledSkillModalCardInfo}>
-                            <div className={styles.bundledSkillModalCardTitle}>
-                              {item.label}
-                              {/* <Tag>{item.value}</Tag> */}
-                            </div>
-                            <Ellipsis
-                              lines={1}
-                              tooltip
-                              tooltipProps={{
-                                overlayStyle: { maxWidth: 500, overflowWrap: 'break-word', wordWrap: 'break-word' },
-                              }}
-                            >
-                              {item.description || '-'}
-                            </Ellipsis>
+                      <div
+                        key={item.value}
+                        className={classnames(styles.bundledSkillModalCard, {
+                          [styles.selectedBundledSkillModalCard]: isSelected,
+                        })}
+                      >
+                        {renderBundledSkillPoster(item)}
+                        <div className={styles.bundledSkillPosterBody}>
+                          <div className={styles.bundledSkillPosterHeader}>
+                            <div className={styles.bundledSkillModalCardTitle}>{item.label}</div>
+                            {tagText && (
+                              <span className={styles.bundledSkillPosterTag}>
+                                <span>{tagText}</span>
+                              </span>
+                            )}
                           </div>
-                          <Button
-                            className={classnames(styles.actionButton, {
-                              [styles.isAdd]: isSelected,
-                              [styles.notAdd]: !isSelected,
-                            })}
-                            danger={isSelected}
-                            size="small"
-                            onClick={() => {
-                              if (isSelected) {
-                                updateBundledSkills(selectedSkillCodes.filter((code) => code !== item.value));
-                                return;
-                              }
-                              updateBundledSkills([...selectedSkillCodes, item.value]);
+                          <Ellipsis
+                            className={styles.bundledSkillModalCardDesc}
+                            lines={1}
+                            tooltip
+                            tooltipProps={{
+                              overlayStyle: { maxWidth: 500, overflowWrap: 'break-word', wordWrap: 'break-word' },
                             }}
                           >
-                            {isSelected
-                              ? intl.formatMessage({ id: 'itemCard.remove' })
-                              : intl.formatMessage({ id: 'common.add' })}
-                          </Button>
+                            {item.description || '-'}
+                          </Ellipsis>
+                          <div className={styles.bundledSkillPosterFooter}>
+                            <span className={styles.bundledSkillPosterSource} title={sourceName}>
+                              <span className={styles.bundledSkillPosterSourceIcon}>
+                                <AntdIcon type="icon-chajiantubiao" />
+                              </span>
+                              <span className={styles.bundledSkillPosterSourceText}>{sourceName}</span>
+                            </span>
+                            <span className={styles.bundledSkillPosterDivider} />
+                            <span className={styles.bundledSkillPosterUseCount}>
+                              {intl.formatMessage(
+                                { id: 'resource.skillAddedCount' },
+                                {
+                                  count: formatSkillAddedCount(useCount, getLocale()),
+                                }
+                              )}
+                            </span>
+                          </div>
                         </div>
+                        <Button
+                          className={classnames(styles.actionButton, {
+                            [styles.isAdd]: isSelected,
+                            [styles.notAdd]: !isSelected,
+                          })}
+                          danger={isSelected}
+                          size="small"
+                          onClick={() => {
+                            if (isSelected) {
+                              updateBundledSkills(selectedSkillCodes.filter((code) => code !== item.value));
+                              return;
+                            }
+                            updateBundledSkills([...selectedSkillCodes, item.value]);
+                          }}
+                        >
+                          {isSelected
+                            ? intl.formatMessage({ id: 'itemCard.remove' })
+                            : intl.formatMessage({ id: 'common.add' })}
+                        </Button>
                       </div>
                     );
                   })}
