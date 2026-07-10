@@ -45,7 +45,7 @@ public class WhaleAgentStorageService extends AbstractFileIngressStorageService<
 
     private static final Logger logger = LoggerFactory.getLogger(WhaleAgentStorageService.class);
     public static final String SHARE_TYPE_PUBLIC = "public";
-    private static final String SHARE_TYPE_PRIVATE = "private";
+    public static final String SHARE_TYPE_PRIVATE = "private";
     private static final String UPLOAD_FAILED_KEY = "storage.whaleagent.upload.failed";
     private static final String DOWNLOAD_FAILED_KEY = "storage.whaleagent.download.failed";
     private static final String LIST_FAILED_KEY = "storage.whaleagent.list.failed";

@@ -3,6 +3,7 @@ package com.iwhalecloud.byai.manager.domain.file.service;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 
+import com.iwhalecloud.byai.common.storage.model.FileMetadata;
 import org.springframework.stereotype.Service;
 
 import com.iwhalecloud.byai.common.storage.ObjectStorage;
@@ -20,9 +21,9 @@ public class CommonFileStorage {
         this.objectStorage = objectStorage;
     }
 
-    public void write(StorageLocation location, byte[] bytes, String contentType) {
+    public FileMetadata write(StorageLocation location, byte[] bytes, String contentType) {
         byte[] safeBytes = bytes == null ? new byte[0] : bytes;
-        objectStorage.put(location, new ByteArrayInputStream(safeBytes), safeBytes.length, contentType);
+        return objectStorage.put(location, new ByteArrayInputStream(safeBytes), safeBytes.length, contentType);
     }
 
     public InputStream read(StorageLocation location) {
