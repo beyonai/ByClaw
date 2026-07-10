@@ -1,6 +1,5 @@
 package com.iwhalecloud.byai.state.domain.chat.service;
 
-import java.net.InetAddress;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
@@ -27,10 +26,18 @@ public class RunningOutputStreamRegistry {
 
     private static final long RUNNING_TTL_SECONDS = 30 * 60L;
 
-    private final String instanceId = buildInstanceId();
-
     @Autowired
     private RedisTemplate<String, Object> redisTemplate;
+
+    @Autowired
+    private ChatRuntimeInstance chatRuntimeInstance;
+
+    @Autowired
+    private ChatRuntimeStateService chatRuntimeStateService;
+
+    public String getInstanceId() {
+        return chatRuntimeInstance == null ? "unknown" : chatRuntimeInstance.getInstanceId();
+    }
 
     public void markRunning(ChatProcessContext ctx) {
         if (ctx == null || ctx.sessionId == null || ctx.modelAnswerMessageId == null) {
@@ -41,7 +48,7 @@ public class RunningOutputStreamRegistry {
         }
 
         JSONObject value = new JSONObject();
-        value.put("instanceId", instanceId);
+        value.put("instanceId", getInstanceId());
         value.put("token", ctx.runningOutputStreamToken);
         value.put("sessionId", ctx.sessionId);
         value.put("userMessageId", ctx.userMessageId);
@@ -51,6 +58,7 @@ public class RunningOutputStreamRegistry {
         value.put("clientRequestId", ctx.clientRequestId);
         value.put("transport", ctx.transport == null ? null : ctx.transport.name());
         value.put("startedAt", System.currentTimeMillis());
+        value.put("lastHeartbeatAt", System.currentTimeMillis());
         if (ctx.assistantChatDto != null) {
             value.put("agentId", ctx.assistantChatDto.getAgentId());
             value.put("agentCode", ctx.assistantChatDto.getAgentCode());
@@ -59,6 +67,9 @@ public class RunningOutputStreamRegistry {
         }
         redisTemplate.opsForValue().set(buildKey(ctx.sessionId), value.toJSONString(), RUNNING_TTL_SECONDS,
             TimeUnit.SECONDS);
+        if (chatRuntimeStateService != null) {
+            chatRuntimeStateService.save(ctx, ctx.runningOutputStreamToken);
+        }
     }
 
     public void touchRunning(ChatProcessContext ctx) {
@@ -74,7 +85,13 @@ public class RunningOutputStreamRegistry {
         try {
             JSONObject running = JSON.parseObject(value);
             if (ctx.runningOutputStreamToken.equals(running.getString("token"))) {
+                running.put("lastHeartbeatAt", System.currentTimeMillis());
+                running.put("instanceId", getInstanceId());
+                redisTemplate.opsForValue().set(key, running.toJSONString(), RUNNING_TTL_SECONDS, TimeUnit.SECONDS);
                 redisTemplate.expire(key, RUNNING_TTL_SECONDS, TimeUnit.SECONDS);
+                if (chatRuntimeStateService != null) {
+                    chatRuntimeStateService.touch(ctx);
+                }
             }
         }
         catch (Exception e) {
@@ -96,6 +113,9 @@ public class RunningOutputStreamRegistry {
             JSONObject running = JSON.parseObject(value);
             if (ctx.runningOutputStreamToken.equals(running.getString("token"))) {
                 redisTemplate.delete(key);
+                if (chatRuntimeStateService != null) {
+                    chatRuntimeStateService.delete(ctx);
+                }
             }
         }
         catch (Exception e) {
@@ -110,6 +130,9 @@ public class RunningOutputStreamRegistry {
         String key = buildKey(sessionId);
         if (modelAnswerMessageId == null) {
             redisTemplate.delete(key);
+            if (chatRuntimeStateService != null) {
+                chatRuntimeStateService.delete(sessionId);
+            }
             return;
         }
 
@@ -122,6 +145,9 @@ public class RunningOutputStreamRegistry {
             JSONObject running = JSON.parseObject(value);
             if (modelAnswerMessageId.equals(running.getLong("modelAnswerMessageId"))) {
                 redisTemplate.delete(key);
+                if (chatRuntimeStateService != null) {
+                    chatRuntimeStateService.delete(sessionId);
+                }
             }
         }
         catch (Exception e) {
@@ -198,14 +224,5 @@ public class RunningOutputStreamRegistry {
 
     private String buildKey(Long sessionId) {
         return KEY_PREFIX + sessionId;
-    }
-
-    private String buildInstanceId() {
-        try {
-            return InetAddress.getLocalHost().getHostName() + ":" + UUID.randomUUID();
-        }
-        catch (Exception e) {
-            return UUID.randomUUID().toString();
-        }
     }
 }

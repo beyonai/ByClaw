@@ -62,13 +62,16 @@ public class SessionStreamEventRouter {
     @Autowired
     private CronService cronService;
 
+    @Autowired
+    private ChatContextRecoveryService chatContextRecoveryService;
+
     /**
      * Redis Stream 统一入口。HTTP SSE 投递到请求线程队列，WebSocket 直接推送到已登记的 Channel。
      */
-    public void dispatch(JSONObject dataJson) {
+    public StreamDispatchResult dispatch(JSONObject dataJson) {
         String sessionId = dataJson == null ? null : dataJson.getString("session_id");
         if (StringUtils.isBlank(sessionId)) {
-            return;
+            return StreamDispatchResult.INTENTIONALLY_IGNORED;
         }
         if (isBackgroundAnswerMessageEvent(dataJson.getString("event_type"))) {
             try {
@@ -76,13 +79,17 @@ public class SessionStreamEventRouter {
             }
             catch (Exception e) {
                 log.warn("处理后台会话 answer 事件失败, sessionId: {}, dataJson: {}", sessionId, dataJson, e);
+                return StreamDispatchResult.ERROR;
             }
-            return;
+            return StreamDispatchResult.HANDLED;
         }
 
         ChatProcessContext ctx = outputStreamManager.getContext(sessionId);
         if (ctx == null) {
-            return;
+            ctx = chatContextRecoveryService.recoverIfNecessary(dataJson);
+        }
+        if (ctx == null) {
+            return StreamDispatchResult.MISSING_CONTEXT;
         }
         ctx.currentStreamId = dataJson.getString("stream_id");
 
@@ -91,12 +98,13 @@ public class SessionStreamEventRouter {
             if (ctx.gatewayEventQueue != null) {
                 ctx.gatewayEventQueue.offer(dataJson);
             }
-            return;
+            return StreamDispatchResult.HANDLED;
         }
 
         if (routeWebSocketEvent(ctx, dataJson)) {
             broadcastToOtherDevices(ctx, dataJson);
         }
+        return StreamDispatchResult.HANDLED;
     }
 
     private boolean routeWebSocketEvent(ChatProcessContext ctx, JSONObject dataJson) {
@@ -125,9 +133,25 @@ public class SessionStreamEventRouter {
 
         String receivedTraceId = dataJson.getString("trace_id");
         MessageContext messageContext = ctx.resolveMessageContext(receivedTraceId);
-        pythonSseService.getContentFromPythonStreamV3(lineJson.toJSONString(), ctx.res,
-            messageContext, ctx.getAgentIds(), ctx);
-        runningChatSnapshotService.save(ctx, receivedTraceId, messageContext);
+        if (ctx.recoveryOnly) {
+            boolean alreadyHydrated = StreamIdUtil.isProcessedByWatermark(ctx.currentStreamId, ctx.hydratedStreamId);
+            if (!alreadyHydrated) {
+                pythonSseService.accumulateEvent(lineJson.toJSONString(), ctx.messageContext);
+            }
+            else {
+                log.info("恢复事件已计入快照，跳过续聚合, sessionId: {}, traceId: {}, streamId: {}", ctx.sessionId,
+                    ctx.traceId, ctx.currentStreamId);
+            }
+            // 推进内存水位线，保证单调不退：避免重新投递的旧 pending 把快照水位线拉低，
+            // 导致下次重启时已聚合区间被重复 append。
+            ctx.hydratedStreamId = StreamIdUtil.max(ctx.hydratedStreamId, ctx.currentStreamId, ctx.hydratedStreamId);
+            runningChatSnapshotService.save(ctx, receivedTraceId, messageContext);
+        }
+        else {
+            pythonSseService.getContentFromPythonStreamV3(lineJson.toJSONString(), ctx.res,
+                messageContext, ctx.getAgentIds(), ctx);
+            runningChatSnapshotService.save(ctx, receivedTraceId, messageContext);
+        }
 
         if (SseResponseEventEnum.appStreamResponse.equals(eventType)) {
             if (messageContext != null) {
@@ -146,6 +170,12 @@ public class SessionStreamEventRouter {
 
     private void handleWebSocketError(ChatProcessContext ctx, JSONObject dataJson, JSONObject metadata) {
         String errorMsg = metadata != null ? metadata.getString("error") : "unknown gateway error";
+        if (ctx.recoveryOnly) {
+            ctx.gatewayError = true;
+            scriptService.completeAsyncGatewayContext(ctx);
+            runningChatSnapshotService.delete(ctx);
+            return;
+        }
         JSONObject errorPayload = new JSONObject();
         errorPayload.put("message", errorMsg);
         errorPayload.put("traceback", errorMsg);

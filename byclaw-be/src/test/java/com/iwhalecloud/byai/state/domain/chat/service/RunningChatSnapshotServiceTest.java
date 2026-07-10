@@ -1,10 +1,17 @@
 package com.iwhalecloud.byai.state.domain.chat.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
+import java.util.Collections;
 import java.util.Date;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import com.alibaba.fastjson.JSONObject;
@@ -71,5 +78,23 @@ class RunningChatSnapshotServiceTest {
         assertThat(snapshot.getMessageId()).isEqualTo(22L);
         assertThat(snapshot.getCreateTime()).isEqualTo(laneResponseTime);
         assertThat(snapshot.getMessageContent()).isEqualTo("lane answer");
+    }
+
+    @Test
+    void get_doesNotFallbackToArbitrarySessionSnapshotWhenTraceMisses() {
+        RedisTemplate<String, Object> redisTemplate = mock(RedisTemplate.class);
+        ValueOperations<String, Object> valueOperations = mock(ValueOperations.class);
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(valueOperations.get("byai:chat:running:snapshot:3:trace-missing")).thenReturn(null);
+        when(redisTemplate.keys("byai:chat:running:snapshot:3:*"))
+            .thenReturn(Collections.singleton("byai:chat:running:snapshot:3:trace-other"));
+
+        RunningChatSnapshotService service = new RunningChatSnapshotService();
+        ReflectionTestUtils.setField(service, "redisTemplate", redisTemplate);
+
+        RunningChatSnapshotResponse snapshot = service.get(3L, "trace-missing", null);
+
+        assertThat(snapshot).isNull();
+        verify(redisTemplate, never()).keys("byai:chat:running:snapshot:3:*");
     }
 }

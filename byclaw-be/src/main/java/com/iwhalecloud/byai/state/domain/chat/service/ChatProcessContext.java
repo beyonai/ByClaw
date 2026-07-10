@@ -147,6 +147,17 @@ public class ChatProcessContext {
     public boolean asyncResponse = false;
 
     /**
+     * 后台恢复模式：只聚合 Redis Stream 并最终入库，不向当前 OutputStream 或 WebSocket Channel 写出。
+     */
+    public boolean recoveryOnly = false;
+
+    /**
+     * 恢复 / 历史批次续聚合时的水位线：快照已聚合到的最后一条 Stream 消息 ID。
+     * stream_id &lt;= 该值的事件已计入快照，续聚合时应跳过，避免重复拼接。
+     */
+    public String hydratedStreamId;
+
+    /**
      * 消息发往 gateway 的targetAgentType
      */
     public String targetAgentType;

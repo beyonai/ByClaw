@@ -386,6 +386,9 @@ public class ScriptService extends AbstractChatProcess {
             // Gateway error 事件已由 Redis 监听器写入前端，此处仅持久化消息，不再写流
             resolveMemory(ctx, ctx.assistantChatDto, ctx.sessionId, ctx.messageContext, ctx.resMsg);
         }
+        else if (ctx.recoveryOnly || ctx.res == null) {
+            ctx.chatResponse = resolveMemory(ctx, ctx.assistantChatDto, ctx.sessionId, ctx.messageContext, ctx.resMsg);
+        }
         else {
             // 原始路径：持久化 + 向前端写 appStreamResponse
             ctx.chatResponse = resolveMemory(ctx, ctx.assistantChatDto, ctx.sessionId, ctx.messageContext, ctx.resMsg);

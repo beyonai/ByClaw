@@ -13,6 +13,7 @@ import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.state.domain.chat.service.SessionStreamManager;
 import com.iwhalecloud.byai.state.domain.chat.service.SessionStreamEventRouter;
+import com.iwhalecloud.byai.state.domain.chat.service.StreamDispatchResult;
 
 /**
  * Redis Stream 数据流消息监听器。
@@ -76,8 +77,14 @@ public class RedisStreamMessageListener implements StreamListener<String, MapRec
 
         dataJson.put("stream_id", message.getId().getValue());
 
-        sessionStreamEventRouter.dispatch(dataJson);
-        acknowledge(message);
+        StreamDispatchResult result = sessionStreamEventRouter.dispatch(dataJson);
+        if (result.shouldAcknowledge()) {
+            acknowledge(message);
+        }
+        else {
+            logger.warn("Redis Stream 消息暂不 ACK, result: {}, stream: {}, messageId: {}, sessionId: {}",
+                result, message.getStream(), message.getId(), sessionId);
+        }
     }
 
     private void acknowledge(MapRecord<String, String, String> message) {

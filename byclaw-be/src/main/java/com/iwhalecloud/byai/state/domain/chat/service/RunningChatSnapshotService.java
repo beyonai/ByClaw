@@ -3,6 +3,7 @@ package com.iwhalecloud.byai.state.domain.chat.service;
 import java.util.Date;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.List;
 
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
@@ -12,6 +13,11 @@ import org.springframework.stereotype.Service;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
+import com.alibaba.fastjson.TypeReference;
+import com.google.common.collect.Lists;
+import com.iwhalecloud.byai.state.common.dto.AnswerDelta;
+import com.iwhalecloud.byai.state.common.enums.AgentTypeEnum;
+import com.iwhalecloud.byai.state.domain.chat.dto.ChatRuntimeState;
 import com.iwhalecloud.byai.state.domain.chat.dto.RunningChatSnapshotResponse;
 import com.iwhalecloud.byai.state.domain.chat.enums.ChatUseageEnum;
 import com.iwhalecloud.byai.state.domain.chat.model.MessageContext;
@@ -64,9 +70,12 @@ public class RunningChatSnapshotService {
         String value = null;
         if (StringUtils.isNotBlank(traceId) || modelAnswerMessageId != null) {
             value = (String) redisTemplate.opsForValue().get(buildKey(sessionId, traceId, modelAnswerMessageId));
+            if (StringUtils.isBlank(value) && modelAnswerMessageId != null) {
+                String key = findKeyByMessageId(modelAnswerMessageId);
+                value = key == null ? null : (String) redisTemplate.opsForValue().get(key);
+            }
         }
-
-        if (StringUtils.isBlank(value)) {
+        else {
             value = findBySession(sessionId);
         }
         if (StringUtils.isBlank(value)) {
@@ -78,6 +87,69 @@ public class RunningChatSnapshotService {
         }
         catch (Exception e) {
             log.warn("解析运行中会话快照失败, sessionId: {}, traceId: {}", sessionId, traceId, e);
+            return null;
+        }
+    }
+
+    public MessageContext hydrateMessageContext(ChatRuntimeState state) {
+        return hydrateMessageContext(state, null);
+    }
+
+    /**
+     * 从快照重建 {@link MessageContext}。
+     *
+     * @param watermarkHolder 非空时，将快照已聚合到的最后一条 Stream 消息 ID（水位线）写入其 index 0，
+     *                        供续聚合时跳过已计入的事件，避免重复拼接。
+     */
+    public MessageContext hydrateMessageContext(ChatRuntimeState state, String[] watermarkHolder) {
+        if (state == null || state.getSessionId() == null) {
+            return null;
+        }
+        try {
+            RunningChatSnapshotResponse snapshot = get(state.getSessionId(), state.getTraceId(),
+                state.getModelAnswerMessageId());
+            if (snapshot == null) {
+                return null;
+            }
+            if (watermarkHolder != null && watermarkHolder.length > 0) {
+                watermarkHolder[0] = snapshot.getSnapshotStreamId();
+            }
+            MessageContext messageContext = new MessageContext(
+                AgentTypeEnum.getNameCode(
+                    state.getAssistantChatDto() == null ? null : state.getAssistantChatDto().getAgentType()),
+                state.getModelAnswerMessageId(),
+                snapshot.getTaskId() == null ? state.getTaskId() : snapshot.getTaskId());
+            messageContext.setAnswerText(new StringBuilder(StringUtils.defaultString(snapshot.getMessageContent())));
+            messageContext.setResComIds(snapshot.getResComIds());
+            messageContext.setMsgStatus(snapshot.getMsgStatus());
+            if (StringUtils.isNotBlank(snapshot.getMessageStruct())) {
+                messageContext.setAnswerMessageList(JSON.parseArray(snapshot.getMessageStruct(), AnswerDelta.class));
+                if (CollectionUtils.isNotEmpty(messageContext.getAnswerMessageList())) {
+                    List<StringBuilder> textList = Lists.newArrayList();
+                    messageContext.getAnswerMessageList().forEach(message -> textList.add(new StringBuilder(message.getChoices().get(0).getDelta().getContent())));
+                    messageContext.setAnswerList(textList);
+                }
+            }
+            if (StringUtils.isNotBlank(snapshot.getInferLog())) {
+                messageContext.setReasonMessageList(JSON.parseArray(snapshot.getInferLog(), AnswerDelta.class));
+                if (CollectionUtils.isNotEmpty(messageContext.getReasonMessageList())) {
+                    List<StringBuilder> textList = Lists.newArrayList();
+                    messageContext.getReasonMessageList().forEach(message -> textList.add(new StringBuilder(message.getChoices().get(0).getDelta().getContent())));
+                    messageContext.setReasonList(textList);
+                }
+            }
+            if (StringUtils.isNotBlank(snapshot.getRelatedResources())) {
+                MessageResourceDto resourceDto = JSON.parseObject(snapshot.getRelatedResources(),
+                    new TypeReference<MessageResourceDto>() {});
+                if (resourceDto != null && resourceDto.getResources() != null) {
+                    messageContext.setChatRelatedResource(resourceDto.getResources());
+                }
+            }
+            return messageContext;
+        }
+        catch (Exception e) {
+            log.warn("恢复运行中 MessageContext 失败, sessionId: {}, traceId: {}", state.getSessionId(),
+                state.getTraceId(), e);
             return null;
         }
     }
@@ -201,7 +273,9 @@ public class RunningChatSnapshotService {
         snapshot.setTraceId(traceId);
         snapshot.setClientRequestId(clientRequestId);
         snapshot.setModelAnswerMessageId(modelAnswerMessageId);
-        snapshot.setSnapshotStreamId(ctx.currentStreamId);
+        // 持久化水位线取 max，保证单调不退：recovery 重投递旧 pending 时不会把水位线拉低，
+        // 避免下次重启后已聚合区间被重复 append。
+        snapshot.setSnapshotStreamId(StreamIdUtil.max(ctx.currentStreamId, ctx.hydratedStreamId, ctx.currentStreamId));
         snapshot.setMessageId(modelAnswerMessageId);
         snapshot.setSessionId(ctx.sessionId);
         snapshot.setTaskId(ctx.taskId);

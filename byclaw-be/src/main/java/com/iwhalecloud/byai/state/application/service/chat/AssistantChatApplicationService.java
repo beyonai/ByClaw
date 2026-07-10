@@ -35,6 +35,7 @@ import com.iwhalecloud.byai.state.common.dto.MessageStructDto;
 import com.iwhalecloud.byai.state.common.exception.BdpRuntimeException;
 import com.iwhalecloud.byai.state.domain.chat.dto.FileUploadDto;
 import com.iwhalecloud.byai.state.domain.chat.dto.PrologueDto;
+import com.iwhalecloud.byai.state.domain.chat.dto.RunningChatInfo;
 import com.iwhalecloud.byai.state.domain.chat.dto.RunningChatSnapshotResponse;
 import com.iwhalecloud.byai.state.domain.chat.dto.StopChatDto;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatProcessContext;
@@ -43,6 +44,8 @@ import com.iwhalecloud.byai.state.domain.chat.service.RunningChatSnapshotService
 import com.iwhalecloud.byai.state.domain.chat.service.RunningOutputStreamRegistry;
 import com.iwhalecloud.byai.state.domain.chat.service.ScriptService;
 import com.iwhalecloud.byai.state.domain.chat.service.SessionStreamManager;
+import com.iwhalecloud.byai.state.domain.chat.service.ChatRuntimeStateService;
+import com.iwhalecloud.byai.state.domain.chat.dto.ChatRuntimeState;
 import com.iwhalecloud.byai.state.domain.file.service.ConversationFileStorage;
 import com.iwhalecloud.byai.state.domain.file.service.ConversationStoragePathResolver;
 import com.iwhalecloud.byai.state.domain.session.enums.SessionType;
@@ -124,6 +127,12 @@ public class AssistantChatApplicationService {
     private ScriptService scriptService;
 
     @Autowired
+    private SessionStreamManager sessionStreamManager;
+
+    @Autowired
+    private ChatRuntimeStateService chatRuntimeStateService;
+
+    @Autowired
     private RedisTemplate<String, Object> redisTemplate;
 
     AssistantChatApplicationService(GatewayClient<?> gatewayClient) {
@@ -170,6 +179,21 @@ public class AssistantChatApplicationService {
     public void stopChat(StopChatDto stopChatDto) {
         // 停止前将已堆积的消息落库，避免本轮回答内容丢失。
         flushAccumulatedMessage(stopChatDto);
+
+        if (stopChatDto == null || stopChatDto.getSessionId() == null) {
+            return;
+        }
+        RunningChatInfo runningInfo = runningOutputStreamRegistry.getRunning(stopChatDto.getSessionId());
+        Long runningMessageId = runningInfo == null ? null : runningInfo.getModelAnswerMessageId();
+        if (runningMessageId == null && chatRuntimeStateService != null) {
+            ChatRuntimeState runtimeState = chatRuntimeStateService.get(stopChatDto.getSessionId());
+            if (runtimeState != null) {
+                runningMessageId = runtimeState.getModelAnswerMessageId();
+            }
+        }
+        if (stopChatDto.getMessageId() == null) {
+            stopChatDto.setMessageId(runningMessageId);
+        }
 
         SsResource ssResource = ssResourceService.findById(stopChatDto.getAgentId());
         String workerAgentType = null;
@@ -261,6 +285,9 @@ public class AssistantChatApplicationService {
         catch (Exception e) {
             log.error("stopChat 落库已堆积消息失败, sessionId: {}, messageId: {}", sessionId,
                 cleanupMessageId, e);
+        }
+        if (sessionStreamManager != null) {
+            sessionStreamManager.stopSessionListener(String.valueOf(stopChatDto.getSessionId()));
         }
     }
 
