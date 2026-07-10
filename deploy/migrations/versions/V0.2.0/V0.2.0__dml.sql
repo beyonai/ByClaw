@@ -881,7 +881,62 @@ UPDATE byai.byai_aimodel SET owner_type = 'PUBLIC' WHERE owner_type IS NULL;
 
 -- Token 月度限额 & tokenSaver 配置（合并为单个 JSON key）
 DELETE FROM byai.byai_system_config WHERE param_code IN ('MODEL_QUOTA');
-INSERT INTO byai.byai_system_config (param_id, param_type, param_code, param_name, param_en_name, param_value, param_desc)
-VALUES (nextval('byai.seq_any_table'), 'json', 'MODEL_QUOTA', '模型额度与tokenSaver配置', 'MODEL_QUOTA',
-'{"monthlyQuotaLimit":30000000,"tokenSaver":{"enabled":false,"apiUrl":"","modelCode":""}}',
-'monthlyQuotaLimit: 每用户每月公共模型Token上限; tokenSaver: 登录时自动分配模型配置');
+INSERT INTO byai.byai_system_config (param_id, param_type, param_code, param_name, param_en_name, param_value, param_desc) VALUES (nextval('byai.seq_any_table'), 'json', 'MODEL_QUOTA', '模型额度与tokenSaver配置', 'MODEL_QUOTA', '{
+	"monthlyQuotaLimit": 300000000,
+	"tokenSaver": {
+		"enabled": true,
+		"apiUrl": "https://www.tokensaver.net/v1",
+        "anthropicApiUrl": "https://www.tokensaver.net",
+		"accessToken": "",
+		"newApiUser": "403",
+		"modelCode": "claude-haiku-4-5-20251001",
+		"feignUrl": "https://www.tokensaver.net"
+	}
+}', 'monthlyQuotaLimit: 每用户每月公共模型Token上限; tokenSaver: 登录时自动分配模型配置');
+
+delete from byai.ss_resource where resource_code in('fws','wecomcli');
+INSERT INTO byai.ss_resource (resource_id, system_code, resource_source_pk_id, resource_biz_type, resource_type, resource_name, resource_desc, avatar, sample, tags, resource_version_id, host_type, catalog_id, man_org_id, man_user_id, index_list, create_by, create_time, update_by, update_time, com_acct_id, resource_status, resource_d_verid, resource_r_verid, resource_code, publish_time, shelf_time, unshelf_time, auth_status, publish_portal, parent_resource_id, publish_type, owner_type, impl_type, worker_agent_type) VALUES (20, 'BYAI', null, 'SKILL', 'ATOM', '飞书企业连接器', '管理飞书/Lark 产品能力（IM消息/群聊/机器人/卡片、通讯录、日历、Base多维表格、云文档、云空间、电子表格、任务、邮箱、审批、考勤、会议纪要/妙记、知识库、开放平台原生接口等）。当用户需要通过官方 lark-cli 查询、创建、修改、删除或发送飞书资源，处理飞书权限/身份，或实现飞书连接器自动化时使用。', null, null, null, '1.0', 'hosted', 10, -1, '10001', null, 10001, '2026-06-29 08:38:43.079632', 10001, '2026-06-29 08:38:43.079632', 1, 2, -1, -1, 'fws', '2026-06-29 08:38:43.079632', null, null, 'passed', 1, -1, 'publish', 'enterprise', 'SKILL', 'NONE');
+INSERT INTO byai.ss_resource (resource_id, system_code, resource_source_pk_id, resource_biz_type, resource_type, resource_name, resource_desc, avatar, sample, tags, resource_version_id, host_type, catalog_id, man_org_id, man_user_id, index_list, create_by, create_time, update_by, update_time, com_acct_id, resource_status, resource_d_verid, resource_r_verid, resource_code, publish_time, shelf_time, unshelf_time, auth_status, publish_portal, parent_resource_id, publish_type, owner_type, impl_type, worker_agent_type) VALUES (21, 'BYAI', null, 'SKILL', 'ATOM', '企业微信', '用户需要通过 wecom-cli 操作企业微信或 WeCom，包括通讯录、消息、会议、日程、待办、企微文档、在线表格、智能表格、智能文档/智能主页；遇到 doc.weixin.qq.com 链接时也使用。', null, null, null, '1.0', 'hosted', 10, -1, '10001', null, 10001, '2026-06-29 08:38:43.079632', 10001, '2026-06-29 08:38:43.079632', 1, 2, -1, -1, 'wecomcli', '2026-06-29 08:38:43.079632', null, null, 'passed', 1, -1, 'publish', 'enterprise', 'SKILL', 'NONE');
+
+delete from byai.ss_res_ext_skill where skill_type = 'inner' and  resource_id in(select resource_id from byai.ss_resource where resource_biz_type ='SKILL' and resource_code in('fws','wecomcli'));
+INSERT INTO byai.ss_res_ext_skill (resource_id, skill_type, source_type, version, skill_url, skill_package_format, skill_original_filename, skill_package_size, skill_package_hash, target_content, sync_status, sync_error, last_sync_time) VALUES (20, 'inner', 'SYSTEM_BUILTIN', 'v0.1', null, 'zip', null, null, null, null, 'SUCCESS', null, '2026-07-10 03:06:12.037313');
+INSERT INTO byai.ss_res_ext_skill (resource_id, skill_type, source_type, version, skill_url, skill_package_format, skill_original_filename, skill_package_size, skill_package_hash, target_content, sync_status, sync_error, last_sync_time) VALUES (21, 'inner', 'SYSTEM_BUILTIN', 'v0.1', null, 'zip', null, null, null, null, 'SUCCESS', null, '2026-07-10 03:06:12.037313');
+
+UPDATE byai.ss_res_ext_skill e
+SET
+    skill_type = 'inner',
+    source_type = 'SYSTEM_BUILTIN',
+    version = COALESCE(NULLIF(e.version, ''), 'v0.1'),
+    skill_url = '',
+    skill_package_format = 'zip',
+    skill_original_filename = NULL,
+    skill_package_size = NULL,
+    skill_package_hash = NULL,
+    target_content = json_build_object(
+        'resourceId', r.resource_id,
+        'resourceCode', r.resource_code,
+        'resourceName', r.resource_name,
+        'resourceDesc', r.resource_desc,
+        'resourceBizType', r.resource_biz_type,
+        'resourceType', r.resource_type,
+        'ownerType', r.owner_type,
+        'sourceType', 'SYSTEM_BUILTIN',
+        'skillType', 'inner',
+        'skillUrl', '',
+        'version', COALESCE(NULLIF(e.version, ''), 'v0.1'),
+        'skillPackageFormat', 'zip',
+        'skillOriginalFilename', NULL,
+        'skillPackageSize', NULL,
+        'skillPackageHash', NULL,
+        'syncStatus', 'SUCCESS',
+        'syncError', NULL,
+        'lastSyncTime', to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')
+                     )::text,
+    sync_status = 'SUCCESS',
+    sync_error = NULL,
+    last_sync_time = CURRENT_TIMESTAMP
+FROM byai.ss_resource r
+WHERE e.resource_id = r.resource_id
+  AND r.resource_biz_type = 'SKILL'
+  AND r.owner_type = 'enterprise'
+  AND r.resource_code IN ('fws','wecomcli');
