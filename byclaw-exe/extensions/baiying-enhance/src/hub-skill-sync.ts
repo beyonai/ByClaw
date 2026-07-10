@@ -440,7 +440,7 @@ export async function syncHubSkillsForManagedAgents(params: {
     const targetDir = path.join(skillsRoot, ref.skillCode);
     const local = await readLocalMetadata(targetDir);
     const localSkillDocExists = await hasSkillDoc(targetDir);
-    if (local?.version === version.version && localSkillDocExists) {
+    if (local?.skillUrl === downloadUrl && local?.version === version.version && localSkillDocExists) {
       skipped.push(ref.skillCode);
       continue;
     }
