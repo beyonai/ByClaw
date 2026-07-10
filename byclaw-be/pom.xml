@@ -187,6 +187,7 @@
         <postgresql.version>42.7.11</postgresql.version>
         <kotlin.version>1.9.25</kotlin.version>
         <okio.version>3.4.0</okio.version>
+        <larksuite-oapi.version>2.8.4</larksuite-oapi.version>
         <springfox-swagger2.version>3.0.0</springfox-swagger2.version>
         <opengauss.version>5.0.0</opengauss.version>
         <spring-cloud-netflix.version>4.1.2</spring-cloud-netflix.version>
@@ -1287,6 +1288,13 @@
             <groupId>com.dingtalk.open</groupId>
             <artifactId>app-stream-client</artifactId>
             <version>1.0.5</version>
+        </dependency>
+
+        <!-- Feishu / Lark official SDK: used by bot long-connection event receiving. -->
+        <dependency>
+            <groupId>com.larksuite.oapi</groupId>
+            <artifactId>oapi-sdk</artifactId>
+            <version>${larksuite-oapi.version}</version>
         </dependency>
 
         <!-- MCP（0.7.0 为单一 JAR；1.0.0 为 BOM 需 mcp-core 等，易缺本地 JAR 导致符号无法解析） -->

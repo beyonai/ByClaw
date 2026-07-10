@@ -10,7 +10,7 @@ import org.junit.jupiter.api.Test;
 class FeishuRobotLifecycleTest {
 
     @Test
-    void init_skipsRobotConfigInitializationWhenStreamDisabled() {
+    void init_skipsRobotClientInitializationWhenStreamDisabled() {
         FeishuStreamProperties properties = new FeishuStreamProperties();
         properties.setEnabled(false);
         FeishuRobotRegistryService registryService = mock(FeishuRobotRegistryService.class);
@@ -19,6 +19,6 @@ class FeishuRobotLifecycleTest {
 
         lifecycle.init();
 
-        verify(registryService, never()).initializeRobotConfigs();
+        verify(registryService, never()).initializeRobotClients();
     }
 }

@@ -3,8 +3,9 @@ package com.iwhalecloud.byai.gateway.channels.service.feishu;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Objects;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -76,22 +77,25 @@ public class FeishuUserService {
     }
 
     public LoginInfo resolveLoginInfo(FeishuCallbackMessage message) throws IOException {
-        String eventExternalId = resolveExternalUnionId(message, null);
-        Users matchedUser = findMatchedUserFromExternalSystem(eventExternalId);
+        List<String> eventExternalIds = resolveEventExternalIds(message);
+        Users matchedUser = findMatchedUserFromExternalSystem(eventExternalIds);
         if (matchedUser != null) {
-            logger.info("Matched Feishu user from po_user_external_system. externalId={}, userId={}",
-                    eventExternalId, matchedUser.getUserId());
+            logger.info("Matched Feishu user from po_user_external_system by event ids. externalIds={}, userId={}",
+                    eventExternalIds, matchedUser.getUserId());
             return buildLoginInfo(matchedUser);
         }
 
-        FeishuUserDetail userDetail = fetchUserDetail(message);
-        String externalId = resolveExternalUnionId(message, userDetail);
-        matchedUser = findMatchedUserFromExternalSystem(externalId);
-        if (matchedUser == null && !Objects.equals(externalId, eventExternalId)) {
-            // 历史版本可能用事件里的 open_id 建过绑定；通讯录详情可用后会优先取 union_id。
-            // 这里额外查一次旧 id，避免已有绑定因为外部 id 升级而失效。
-            matchedUser = findMatchedUserFromExternalSystem(eventExternalId);
+        FeishuUserDetail userDetail;
+        try {
+            userDetail = fetchUserDetail(message);
+        } catch (IllegalStateException e) {
+            handleUserDetailUnavailable(message, eventExternalIds, e);
+            return null;
         }
+
+        List<String> detailExternalIds = resolveDetailExternalIds(message, userDetail);
+        String externalId = detailExternalIds.isEmpty() ? null : detailExternalIds.get(0);
+        matchedUser = findMatchedUserFromExternalSystem(detailExternalIds);
         if (matchedUser != null) {
             saveUserExternalSystem(externalId, matchedUser.getUserId(), userDetail);
             return buildLoginInfo(matchedUser);
@@ -102,6 +106,19 @@ public class FeishuUserService {
             saveUserExternalSystem(externalId, userInfo.getUserId(), userDetail);
         }
         return userInfo;
+    }
+
+    private void handleUserDetailUnavailable(
+            FeishuCallbackMessage message,
+            List<String> eventExternalIds,
+            IllegalStateException cause
+    ) throws IOException {
+        logger.warn("Unable to fetch Feishu user detail. appId={}, messageId={}, eventExternalIds={}",
+                message.getAppId(), message.getMessageId(), eventExternalIds, cause);
+        sendTextReply(message,
+                "无法获取您的飞书用户信息，请联系管理员确认应用已开通通讯录用户信息权限，"
+                        + "且您在应用可用范围/通讯录权限范围内。"
+                        + "如果您是外部成员，需要先维护飞书账号与系统账号的绑定。");
     }
 
     private FeishuUserDetail fetchUserDetail(FeishuCallbackMessage message) {
@@ -177,6 +194,19 @@ public class FeishuUserService {
                     externalId, externalSystem.getUserId());
         }
         return matchedUser;
+    }
+
+    private Users findMatchedUserFromExternalSystem(List<String> externalIds) {
+        if (externalIds == null || externalIds.isEmpty()) {
+            return null;
+        }
+        for (String externalId : externalIds) {
+            Users matchedUser = findMatchedUserFromExternalSystem(externalId);
+            if (matchedUser != null) {
+                return matchedUser;
+            }
+        }
+        return null;
     }
 
     private LoginInfo resolveLoginInfoFromUserDetail(
@@ -265,14 +295,42 @@ public class FeishuUserService {
         return userInfo;
     }
 
-    private String resolveExternalUnionId(FeishuCallbackMessage message, FeishuUserDetail userDetail) {
-        if (userDetail != null && StringUtils.hasText(userDetail.getUnionId())) {
-            return userDetail.getUnionId();
+    private List<String> resolveEventExternalIds(FeishuCallbackMessage message) {
+        List<String> externalIds = new ArrayList<>();
+        if (message == null) {
+            return externalIds;
         }
-        if (StringUtils.hasText(message.getSenderUnionId())) {
-            return message.getSenderUnionId();
+        addExternalId(externalIds, message.getSenderUnionId());
+        addExternalId(externalIds, message.getSenderOpenId());
+        addExternalId(externalIds, message.getSenderUserId());
+        return externalIds;
+    }
+
+    private List<String> resolveDetailExternalIds(FeishuCallbackMessage message, FeishuUserDetail userDetail) {
+        Set<String> externalIds = new LinkedHashSet<>();
+        if (userDetail != null) {
+            addExternalId(externalIds, userDetail.getUnionId());
+            addExternalId(externalIds, userDetail.getOpenId());
+            addExternalId(externalIds, userDetail.getUserId());
         }
-        return message.getSenderOpenId();
+        if (message != null) {
+            addExternalId(externalIds, message.getSenderUnionId());
+            addExternalId(externalIds, message.getSenderOpenId());
+            addExternalId(externalIds, message.getSenderUserId());
+        }
+        return new ArrayList<>(externalIds);
+    }
+
+    private void addExternalId(List<String> externalIds, String externalId) {
+        if (StringUtils.hasText(externalId) && !externalIds.contains(externalId)) {
+            externalIds.add(externalId);
+        }
+    }
+
+    private void addExternalId(Set<String> externalIds, String externalId) {
+        if (StringUtils.hasText(externalId)) {
+            externalIds.add(externalId);
+        }
     }
 
     private void saveUserExternalSystem(String externalId, Long userId, FeishuUserDetail userDetail) {

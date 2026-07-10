@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.gateway.channels.service.feishu.model;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -25,5 +26,13 @@ public class FeishuCallbackMessage {
     private String senderUnionId;
     private String senderUserId;
     private String senderType;
+    /**
+     * 飞书群聊消息中的 @ 列表。单聊通常为空。
+     */
+    private JsonNode mentions;
+    /**
+     * 群聊消息是否明确 @ 了当前机器人。
+     */
+    private boolean mentionedBot;
     private Object rawEvent;
 }

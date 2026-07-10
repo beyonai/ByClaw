@@ -35,7 +35,7 @@ public class RobotChannelRegistryCoordinator {
     public void registerForResource(Long resourceId) {
         runQuietly("register DingTalk robot clients", resourceId,
                 () -> dingtalkRobotRegistryService.registerRobotClientsForResource(resourceId));
-        runQuietly("register Feishu robot configs", resourceId,
+        runQuietly("register Feishu robot clients", resourceId,
                 () -> feishuRobotRegistryService.registerRobotClientsForResource(resourceId));
         runQuietly("register WeCom robot clients", resourceId,
                 () -> wecomRobotRegistryService.registerRobotClientsForResource(resourceId));
@@ -44,7 +44,7 @@ public class RobotChannelRegistryCoordinator {
     public void refreshForResource(Long resourceId) {
         runQuietly("refresh DingTalk robot clients", resourceId,
                 () -> dingtalkRobotRegistryService.refreshRobotClientsForResource(resourceId));
-        runQuietly("refresh Feishu robot configs", resourceId,
+        runQuietly("refresh Feishu robot clients", resourceId,
                 () -> feishuRobotRegistryService.refreshRobotClientsForResource(resourceId));
         runQuietly("refresh WeCom robot clients", resourceId,
                 () -> wecomRobotRegistryService.refreshRobotClientsForResource(resourceId));
@@ -53,7 +53,7 @@ public class RobotChannelRegistryCoordinator {
     public void unregisterForResource(Long resourceId) {
         runQuietly("unregister DingTalk robot clients", resourceId,
                 () -> dingtalkRobotRegistryService.unregisterRobotClientsForResource(resourceId));
-        runQuietly("unregister Feishu robot configs", resourceId,
+        runQuietly("unregister Feishu robot clients", resourceId,
                 () -> feishuRobotRegistryService.unregisterRobotClientsForResource(resourceId));
         runQuietly("unregister WeCom robot clients", resourceId,
                 () -> wecomRobotRegistryService.unregisterRobotClientsForResource(resourceId));
