@@ -21,10 +21,10 @@ async def get_dig_employee_from_redis(
 ) -> dict[str, Any] | None:
     """Read DIG_EMPLOYEE_{agent_id} JSON from local resource path first, then Redis."""
     key = f"DIG_EMPLOYEE_{agent_id}"
-    if resource_path:
-        local_employee = _load_dig_employee_from_local(resource_path, key)
-        if local_employee is not None:
-            return local_employee
+    # if resource_path:
+    #     local_employee = _load_dig_employee_from_local(resource_path, key)
+    #     if local_employee is not None:
+    #         return local_employee
 
     try:
         raw = await redis_client.get(key)
