@@ -20,7 +20,7 @@ import ResourceCard from '@/components/Resources/components/ResourceCard';
 import { IAgentCache, IAgent } from '@/typescript/agent';
 import styles from './index.module.less';
 import useGlobal from '@/hooks/useGlobal';
-import { canJumpAgent, getAgentChatAvatar, getAgentPath } from '@/utils/agent';
+import { getAgentChatAvatar, getAgentPath } from '@/utils/agent';
 import useTracker from '@/hooks/useTracker';
 import AuthListDrawer from '@/pages/manager/components/AuthListDrawer';
 import UseApplyAuditDrawer from '@/pages/manager/components/UseApplyAuditDrawer';
@@ -315,9 +315,19 @@ function AllDigitalEmployees(
     };
   }, [EventEmitter, curActiveLink, dropdownParam, getSearch, searchName]);
 
+  const showNoUsePermissionWarning = React.useCallback(() => {
+    message.destroy();
+    message.warning(intl.formatMessage({ id: 'digitalEmployees.noUsePermissionApplyFirst' }));
+  }, [intl]);
+
   const onClickEmployee = React.useCallback(
     (employee: IAgentCache) => {
-      if (employee.agentId && canJumpAgent(employee)) {
+      if (employee.canApplyUse) {
+        showNoUsePermissionWarning();
+        return;
+      }
+
+      if (employee.agentId) {
         trackerEmployeeClick(employee, 'marketAgentRedirect');
         dispatch({
           type: 'employees/updateEmployee',
@@ -338,7 +348,16 @@ function AllDigitalEmployees(
       message.destroy();
       message.error(intl.formatMessage({ id: 'digitalEmployees.noPermission' }));
     },
-    [curActiveLink, dispatch, intl, navigate, setAgentId, setSessionId, trackerEmployeeClick]
+    [
+      curActiveLink,
+      dispatch,
+      intl,
+      navigate,
+      setAgentId,
+      setSessionId,
+      showNoUsePermissionWarning,
+      trackerEmployeeClick,
+    ]
   );
 
   const onEditEmployee = React.useCallback(
@@ -489,7 +508,9 @@ function AllDigitalEmployees(
                         avatarNode={
                           <div className={styles.employeeAvatar}>{getAgentChatAvatar(employee.chatAvatar)}</div>
                         }
-                        onCardClick={() => onClickEmployee(employee)}
+                        onCardClick={(resource) => onClickEmployee((resource as IAgentCache) || employee)}
+                        cardClickDisabled={(resource) => !!resource.canApplyUse}
+                        onCardClickDisabled={showNoUsePermissionWarning}
                         actionConfig={{
                           scene: 'enterprise',
                           onEdit: () => onEditEmployee(employee),
