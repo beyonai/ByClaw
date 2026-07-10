@@ -32,7 +32,6 @@ type Props = {
   statusOptions: Option[];
   tokenVisible: boolean;
   setTokenVisible: React.Dispatch<React.SetStateAction<boolean>>;
-  isDebugOnly: boolean;
   isSectionOpen: (key: string) => boolean;
   toggleSection: (key: string) => void;
   onValuesChange: (changedValues: any, allValues: any) => void;
@@ -94,7 +93,6 @@ const ModelFormFields: React.FC<Props> = ({
   statusOptions,
   tokenVisible,
   setTokenVisible,
-  isDebugOnly,
   isSectionOpen,
   toggleSection,
   onValuesChange,
@@ -378,38 +376,36 @@ const ModelFormFields: React.FC<Props> = ({
           </div>
         </ModelFormSection>
 
-        {!isDebugOnly ? (
-          <ModelFormSection
-            title={intl.formatMessage({ id: 'modelMgr.modal.tagConfig' })}
-            desc={intl.formatMessage({ id: 'modelMgr.modal.tagConfigDesc' })}
-            open={isSectionOpen('tags')}
-            onToggle={() => toggleSection('tags')}
-          >
-            <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.systemTags' })} name="systems">
+        <ModelFormSection
+          title={intl.formatMessage({ id: 'modelMgr.modal.tagConfig' })}
+          desc={intl.formatMessage({ id: 'modelMgr.modal.tagConfigDesc' })}
+          open={isSectionOpen('tags')}
+          onToggle={() => toggleSection('tags')}
+        >
+          <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.systemTags' })} name="systems">
+            <Select
+              mode="tags"
+              allowClear
+              placeholder={intl.formatMessage({ id: 'modelMgr.modal.systemTagsPlaceholder' })}
+              options={systemOptions}
+              tokenSeparators={[',']}
+            />
+          </Form.Item>
+
+          <div className={styles.grid2}>
+            <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.ability' })} name="abilities">
               <Select
-                mode="tags"
+                mode="multiple"
                 allowClear
-                placeholder={intl.formatMessage({ id: 'modelMgr.modal.systemTagsPlaceholder' })}
-                options={systemOptions}
-                tokenSeparators={[',']}
+                placeholder={intl.formatMessage({ id: 'modelMgr.modal.abilityPlaceholder' })}
+                options={abilityOptions.filter((item) => item.value !== '1')}
               />
             </Form.Item>
-
-            <div className={styles.grid2}>
-              <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.ability' })} name="abilities">
-                <Select
-                  mode="multiple"
-                  allowClear
-                  placeholder={intl.formatMessage({ id: 'modelMgr.modal.abilityPlaceholder' })}
-                  options={abilityOptions.filter((item) => item.value !== '1')}
-                />
-              </Form.Item>
-              <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.status' })} name="status">
-                <Select options={statusOptions} />
-              </Form.Item>
-            </div>
-          </ModelFormSection>
-        ) : null}
+            <Form.Item label={intl.formatMessage({ id: 'modelMgr.modal.status' })} name="status">
+              <Select options={statusOptions} />
+            </Form.Item>
+          </div>
+        </ModelFormSection>
       </Form>
     </div>
   );

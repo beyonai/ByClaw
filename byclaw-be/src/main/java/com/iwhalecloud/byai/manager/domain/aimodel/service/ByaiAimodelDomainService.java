@@ -27,8 +27,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 /**
- * 模型定义领域服务（byai_aimodel）
- * 负责分页查询、按 ID 查询、新增/更新、删除、设置状态及与 Redis 联动
+ * 模型定义领域服务（byai_aimodel） 负责分页查询、按 ID 查询、新增/更新、删除、设置状态及与 Redis 联动
  *
  * @author system
  */
@@ -41,6 +40,16 @@ public class ByaiAimodelDomainService {
 
     @Autowired
     private SequenceService SequenceService;
+
+    /**
+     * 查找模型标识
+     *
+     * @param modelId 模型
+     * @return ByaiAimodel
+     */
+    public ByaiAimodel findById(Long modelId) {
+        return byaiAimodelMapper.selectById(modelId);
+    }
 
     /**
      * 按条件分页查询（使用 PageHelper 实现分页，与项目现有分页方式一致）
@@ -57,15 +66,15 @@ public class ByaiAimodelDomainService {
         if (StringUtil.isNotEmpty(request.getModelId())) {
             try {
                 modelIdLong = Long.parseLong(request.getModelId());
-            } catch (NumberFormatException e) {
+            }
+            catch (NumberFormatException e) {
                 log.warn("modelId parse fail, modelId={}", request.getModelId());
             }
         }
 
         PageHelper.startPage(pageNum, pageSize);
-        List<ByaiAimodel> list = byaiAimodelMapper.selectByCondition(
-            statusDb, request.getAbility(), request.getSystem(),
-            modelIdLong, request.getModelName(), request.getKeyword());
+        List<ByaiAimodel> list = byaiAimodelMapper.selectByCondition(statusDb, request.getAbility(),
+            request.getSystem(), modelIdLong, request.getModelName(), request.getKeyword());
         com.github.pagehelper.PageInfo<ByaiAimodel> phPageInfo = new com.github.pagehelper.PageInfo<>(list);
         return PageHelperUtil.toPageInfo(phPageInfo);
     }
@@ -73,7 +82,7 @@ public class ByaiAimodelDomainService {
     /**
      * 判断模型名称是否已被占用：新增时 excludeModelId 传 null（存在同名即占用）；修改时传当前 id（存在其他记录同名即占用）
      *
-     * @param modelName      模型名称（displayName 对应 model_name），建议调用方先 trim
+     * @param modelName 模型名称（displayName 对应 model_name），建议调用方先 trim
      * @param excludeModelId 排除的模型 ID，为 null 时统计所有同名
      * @return true 表示名称已被占用，不允许保存
      */
@@ -98,8 +107,7 @@ public class ByaiAimodelDomainService {
     }
 
     /**
-     * 新增或更新（由调用方保证 id 为空为新增、有值为更新）
-     * 启用状态（OOA）时同步写入 Redis
+     * 新增或更新（由调用方保证 id 为空为新增、有值为更新） 启用状态（OOA）时同步写入 Redis
      *
      * @param entity 实体（新增时 modelId 由本方法填充）
      * @return 主键 ID
@@ -108,12 +116,14 @@ public class ByaiAimodelDomainService {
         if (entity.getModelId() == null) {
             entity.setModelId(SequenceService.nextVal());
             byaiAimodelMapper.insert(entity);
-        } else {
+        }
+        else {
             byaiAimodelMapper.updateById(entity);
         }
         if (ModelStatusEnum.isEnabledDb(entity.getStatus())) {
             syncToRedis(entity);
-        } else {
+        }
+        else {
             removeFromRedis(entity.getModelId());
         }
         return entity.getModelId();
@@ -135,7 +145,7 @@ public class ByaiAimodelDomainService {
     /**
      * 设置状态；启用时写入 Redis，停用时从 Redis 移除
      *
-     * @param modelId   模型 ID
+     * @param modelId 模型 ID
      * @param apiStatus API 状态（ENABLED/DISABLED/TESTING）
      */
     public void setStatus(Long modelId, String apiStatus) {
@@ -154,7 +164,8 @@ public class ByaiAimodelDomainService {
         byaiAimodelMapper.updateById(entity);
         if (ModelStatusEnum.isEnabledDb(dbCode)) {
             syncToRedis(entity);
-        } else {
+        }
+        else {
             removeFromRedis(modelId);
         }
     }
@@ -209,7 +220,8 @@ public class ByaiAimodelDomainService {
                 }
                 RedisUtil.hmPutAll(RedisConfig.AI_MODEL_TYPE_KEY, entries);
             }
-        } catch (Exception e) {
+        }
+        catch (Exception e) {
             log.error("rebuildTypeList fail", e);
         }
     }
@@ -226,13 +238,15 @@ public class ByaiAimodelDomainService {
         dto.setModelName(entity.getModelName());
         dto.setModelType(entity.getModelType());
         dto.setIsDefault(entity.getIsDefault() != null ? entity.getIsDefault() : 0);
-        dto.setMaxContentToken(entity.getMaxContentToken() != null ? String.valueOf(entity.getMaxContentToken()) : null);
+        dto.setMaxContentToken(
+            entity.getMaxContentToken() != null ? String.valueOf(entity.getMaxContentToken()) : null);
         dto.setStatus("OOA".equals(entity.getStatus()) ? 1 : 0);
         if (StringUtil.isNotEmpty(entity.getInParams())) {
             try {
                 JSONObject jo = JSONObject.parseObject(entity.getInParams());
                 dto.setInstanceParam(jo != null ? jo : new HashMap<>());
-            } catch (Exception e) {
+            }
+            catch (Exception e) {
                 log.debug("inParams parse to map fail, inParams={}", entity.getInParams());
                 dto.setInstanceParam(new HashMap<>());
             }
@@ -249,7 +263,8 @@ public class ByaiAimodelDomainService {
         }
         try {
             return Sm4Util.decrypt(encrypted);
-        } catch (Exception e) {
+        }
+        catch (Exception e) {
             log.debug("aimodel token decrypt fail, use original");
             return encrypted;
         }

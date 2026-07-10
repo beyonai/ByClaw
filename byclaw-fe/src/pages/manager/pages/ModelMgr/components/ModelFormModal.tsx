@@ -49,7 +49,6 @@ const ModelFormModal: React.FC<Props> = (props) => {
 
   /** 上一轮同步右侧 url 时使用的 apiEndpoint，用于判断用户是否缩短了 endpoint，避免删除时出现 …/5/6/7 */
   const lastApiEndpointForSyncRef = useRef<string | undefined>(undefined);
-  const isDebugOnly = type === 'debug';
   const currentModelType = Form.useWatch('modelType', form);
   const currentDisplayName = Form.useWatch('displayName', form);
   const currentProviderName = Form.useWatch('providerName', form);
@@ -75,7 +74,7 @@ const ModelFormModal: React.FC<Props> = (props) => {
 
   useEffect(() => {
     if (!open) return;
-    setActiveSections(type === 'debug' ? ['basic', 'connection', 'params'] : ['basic', 'connection', 'params', 'tags']);
+    setActiveSections(['basic', 'connection', 'params', 'tags']);
 
     // 模型类型动态下发：paramGroupCode=SYSTEM_MODEL_TYPE
     getByParamGroupCode({ paramGroupCode: 'SYSTEM_MODEL_TYPE' })
@@ -474,7 +473,6 @@ const ModelFormModal: React.FC<Props> = (props) => {
           statusOptions={statusOptions}
           tokenVisible={tokenVisible}
           setTokenVisible={setTokenVisible}
-          isDebugOnly={isDebugOnly}
           isSectionOpen={isSectionOpen}
           toggleSection={toggleSection}
           onValuesChange={handleValuesChange}
