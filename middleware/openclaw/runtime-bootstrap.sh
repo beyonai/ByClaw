@@ -17,6 +17,8 @@ fi
 : "${OPENCLI_CONFIG_DIR:=${OPENCLAW_HOME}/.opencli}"
 : "${OPENCLI_CACHE_DIR:=${OPENCLI_CONFIG_DIR}/cache}"
 : "${OPENCLI_EXTENSION_DIR:=/opt/opencli/extension}"
+: "${OPENCLAW_FIX_ACPX_NPM_PERMISSIONS:=true}"
+: "${OPENCLAW_ACPX_NPM_PROJECT_PREFIX:=openclaw-acpx-}"
 : "${DISPLAY:=:99}"
 
 export OPENCLAW_STATE_DIR
@@ -35,6 +37,34 @@ mkdir -p \
   "${OPENCLAW_BROWSER_USER_DATA_DIR}" \
   "${OPENCLI_CONFIG_DIR}" \
   "${OPENCLI_CACHE_DIR}"
+
+sanitize_acpx_npm_plugin_candidates() {
+  case "${OPENCLAW_FIX_ACPX_NPM_PERMISSIONS}" in
+    true|1|yes|on) ;;
+    *) return 0 ;;
+  esac
+
+  npm_projects_dir="${OPENCLAW_STATE_DIR}/npm/projects"
+  [ -d "${npm_projects_dir}" ] || return 0
+
+  fixed=0
+  for project_dir in "${npm_projects_dir}/${OPENCLAW_ACPX_NPM_PROJECT_PREFIX}"*; do
+    [ -e "${project_dir}" ] || continue
+    if find "${project_dir}" -perm -0002 -print -quit 2>/dev/null | grep -q .; then
+      if find "${project_dir}" -perm -0002 -exec chmod go-w {} + 2>/dev/null; then
+        fixed=1
+      else
+        printf '[runtime-bootstrap] warning: failed to sanitize acpx plugin permissions under %s\n' "${project_dir}" >&2
+      fi
+    fi
+  done
+
+  if [ "${fixed}" = "1" ]; then
+    printf '[runtime-bootstrap] sanitized acpx npm plugin candidate permissions under %s\n' "${npm_projects_dir}"
+  fi
+}
+
+sanitize_acpx_npm_plugin_candidates
 
 if [ ! -f "${OPENCLAW_CONFIG_FILE}" ] && [ -f /usr/local/share/openclaw/openclaw.json ]; then
   cp /usr/local/share/openclaw/openclaw.json "${OPENCLAW_CONFIG_FILE}"

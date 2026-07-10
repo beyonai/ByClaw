@@ -10,6 +10,8 @@ import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
 import com.iwhalecloud.byai.state.domain.chat.dto.SuggestionQuestionVo;
 import com.iwhalecloud.byai.state.domain.chat.model.ChatResponse;
 import com.iwhalecloud.byai.state.domain.chat.model.MessageContext;
+import org.apache.commons.lang3.StringUtils;
+
 import java.io.OutputStream;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -145,9 +147,25 @@ public class ChatProcessContext {
     public boolean asyncResponse = false;
 
     /**
+     * 后台恢复模式：只聚合 Redis Stream 并最终入库，不向当前 OutputStream 或 WebSocket Channel 写出。
+     */
+    public boolean recoveryOnly = false;
+
+    /**
+     * 恢复 / 历史批次续聚合时的水位线：快照已聚合到的最后一条 Stream 消息 ID。
+     * stream_id &lt;= 该值的事件已计入快照，续聚合时应跳过，避免重复拼接。
+     */
+    public String hydratedStreamId;
+
+    /**
      * 消息发往 gateway 的targetAgentType
      */
     public String targetAgentType;
+
+    /**
+     * 多泳道请求中允许作为主回答的 targetAgentType 集合。
+     */
+    public Set<String> targetAgentTypes = new HashSet<>();
 
     /**
      * 当前聊天入口的传输方式。
@@ -163,6 +181,26 @@ public class ChatProcessContext {
      * 当前正在处理的 Redis Stream 事件 ID，用于前端恢复运行中会话时按版本合并快照和实时流。
      */
     public String currentStreamId;
+
+    /**
+     * 多智能体泳道请求中，每个 traceId 对应的泳道元数据。
+     */
+    public Map<String, JSONObject> multiAgentLaneMetadataByTraceId = new HashMap<>();
+
+    /**
+     * 多智能体泳道请求中，每个 traceId 独立聚合自己的回答内容。
+     */
+    public Map<String, MessageContext> multiAgentMessageContextsByTraceId = new HashMap<>();
+
+    /**
+     * 多智能体泳道请求中本次请求等待的所有 traceId。
+     */
+    public Set<String> multiAgentTraceIds = new HashSet<>();
+
+    /**
+     * 多智能体泳道请求中已经收到结束事件的 traceId。
+     */
+    public Set<String> completedMultiAgentTraceIds = new HashSet<>();
 
     /**
      * 当前请求写入 Redis 运行态标记时使用的所有者 token，用于结束时只清理自己创建的标记。
@@ -214,5 +252,53 @@ public class ChatProcessContext {
      */
     public boolean tryBeginPersist() {
         return messagePersisted.compareAndSet(false, true);
+    }
+
+    public boolean isCurrentTrace(String receivedTraceId) {
+        if (StringUtils.isBlank(receivedTraceId)) {
+            return false;
+        }
+        return receivedTraceId.equals(traceId) || multiAgentTraceIds.contains(receivedTraceId);
+    }
+
+    public JSONObject getMultiAgentLaneMetadata(String receivedTraceId) {
+        if (StringUtils.isBlank(receivedTraceId)) {
+            return null;
+        }
+        return multiAgentLaneMetadataByTraceId.get(receivedTraceId);
+    }
+
+    public MessageContext resolveMessageContext(String receivedTraceId) {
+        if (StringUtils.isNotBlank(receivedTraceId)) {
+            MessageContext laneContext = multiAgentMessageContextsByTraceId.get(receivedTraceId);
+            if (laneContext != null) {
+                return laneContext;
+            }
+        }
+        return messageContext;
+    }
+
+    public boolean isMultiAgentRequest() {
+        return !multiAgentTraceIds.isEmpty();
+    }
+
+    public boolean markTraceComplete(String receivedTraceId) {
+        if (!isMultiAgentRequest()) {
+            return true;
+        }
+        if (StringUtils.isNotBlank(receivedTraceId) && multiAgentTraceIds.contains(receivedTraceId)) {
+            completedMultiAgentTraceIds.add(receivedTraceId);
+        }
+        return completedMultiAgentTraceIds.containsAll(multiAgentTraceIds);
+    }
+
+    public boolean isTargetAgentType(String sourceAgentType) {
+        if (StringUtils.isBlank(sourceAgentType)) {
+            return true;
+        }
+        if (!targetAgentTypes.isEmpty()) {
+            return targetAgentTypes.contains(sourceAgentType);
+        }
+        return StringUtils.isBlank(targetAgentType) || sourceAgentType.equals(targetAgentType);
     }
 }

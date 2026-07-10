@@ -3,8 +3,8 @@ name: document-object-split
 version: 1.0.0
 description: |
   根据数字员工当前挂载的 Ontology 对象类型（Bug、需求管理、产品、订单等），
-  对文档内容进行结构化拆分：先从 openclaw 资源列表筛出 OBJECT 类型，再经
-  get_object_detail.py 调用 byaiService /ontology/object/detail 获取各类型的 schema（object_name、properties），
+  对文档内容进行结构化拆分：OpenClaw 从当前数字员工上下文取得 Ontology 对象编码（objectCode），
+  再经 get_object_detail.py 调用 byaiService /ontology/object/detail 获取各类型的 schema（object_name、properties），
   据此对文档分类并抽取独立实例——每个可拆分实例在对应 page_prefix 下形成
   一个独立 gbrain page（N 实例 = N page）；page 字段结构由接口返回的 properties 定义，
   字段取值结合文档内容适当抽取填写。完成后输出 page 清单并询问是否导出。
@@ -64,13 +64,13 @@ writes_to:
 **核心流程：** 当前对象类型定义「能拆什么」→ 文档提供「拆什么内容」→ brain 落地「拆成多少页」。
 
 ```text
-openclaw 资源列表（OBJECT）→ 接口对象 schema → object_types[]
+当前数字员工 objectCode[] → 接口对象 schema → object_types[]
   → 按 object_name 对文档分类（Bug / 需求 / 产品 / …）
   → 每类抽出原子实例
   → 每个实例 → 一个独立 page（slug = {page_prefix}/{kebab-slug}）
 ```
 
-1. **加载对象类型** — openclaw 筛 `resourceBizType: OBJECT` 取 `objectCode[]` → `get_object_detail.py` 逐条调详情接口，得到 Bug、需求管理、产品等类型的 schema
+1. **加载对象类型** — OpenClaw 从当前数字员工取得 `objectCode[]` → **每个 objectCode 调用一次** `get_object_detail.py`，得到 Bug、需求管理、产品等类型的 schema
 2. **读文档** — 会议记录、PRD、PDF、Word、已 import 的 markdown → 建 hub 页
 3. **按类型拆分** — 仅处理 `object_types[]` 中有的类型；用各类型的 `object_name` / `object_desc` / `properties` 分类并抽取
 4. **每实例一页** — 一条 Bug、一条需求、一条产品记录各建 **独立** page，禁止合并
@@ -150,88 +150,56 @@ PRD 含 5 条需求 + 2 条 Bug + 1 个产品定义
 ## 0.1 对象 schema：`get_object_detail.py`
 
 对象类型的 **名称、字段 schema、文档分类依据** 一律来自脚本
-`scripts/get_object_detail.py`（**POST `/byaiService/ontology/object/detail`**）。接口请求体 **`objectCode` 必传**（单条查询）；`baseId` 可选。脚本先从 openclaw 获取当前数字员工挂载的 `objectCode`，再**逐条**带 `objectCode` 调接口取完整 `properties[]`。**禁止** 手写字段列表或凭空猜测对象结构；**禁止** 用 `resourceId` 作为详情接口入参；**禁止** 不带 `objectCode` 调详情接口。
+`scripts/get_object_detail.py`（**POST `/byaiService/ontology/object/detail`**）。接口请求体 **`objectCode` 必传**，**每次只查一条**；`baseId` 可选。**objectCode 须由 OpenClaw Agent 从当前数字员工上下文取得后作为脚本入参传入**；脚本一次调用 = 一次详情接口。**禁止** 手写字段列表或凭空猜测对象结构；**禁止** 用 `resourceId` 作为详情接口入参；**禁止** 脚本内调用 `digitalEmployee/resource/list`；**禁止** 传 `object_codes` 或脚本内批量循环。
 
 **数据链路：**
 
 ```text
-1. openclaw 数字员工资源列表 → 筛选 resourceBizType == OBJECT → 提取 objectCode[]
-2. 对每个 objectCode（必传）：POST /byaiService/ontology/object/detail
+1. OpenClaw 从当前数字员工上下文 → 得到 objectCode[]（Agent 侧，非本脚本）
+2. 对每个 objectCode 单独调用一次 get_object_detail.py（= 一次 POST /ontology/object/detail）
    {"baseId": null, "objectCode": "p_bug_..."}
-   （脚本内循环单条请求；接口本身不支持批量、不支持 resourceId、objectCode 不可省略）
-3. 合并为 object_types[]（Bug、需求、产品…）→ 驱动 Phase 3 分类与建页
+3. Agent 在内存合并多次脚本输出 → object_types[] → 驱动 Phase 3 分类与建页
 ```
 
-### 0a. 获取 `object_code` 列表（openclaw）
+### 0a. 获取 `object_code` 列表（OpenClaw Agent）
 
-从 openclaw 读取**当前数字员工**资源列表，筛选 `resourceBizType: OBJECT`，收集 `objectCode`（或 `resourceCode`）。
-**详情接口只认 `objectCode`（必传），不认 `resourceId`**——`resourceId` 仅保留在 openclaw 资源列表中供参考，不传给详情接口。openclaw 资源若缺少 `objectCode`，不得调详情接口。
+由 **OpenClaw 从当前数字员工上下文** 解析挂载的 Ontology 对象，收集 `objectCode`。
+**详情接口只认 `objectCode`（必传），不认 `resourceId`**。取得编码后传入 `get_object_detail.py`；**本 skill 脚本不调用资源列表 API**。
 
-配置或用户消息可提供 `object_codes[]` 子集；未提供时脚本默认查询 openclaw 返回的全部 OBJECT `objectCode`。
+### 0b. 调用脚本（每次一个 objectCode）
 
-### 0b. 调用脚本（openclaw 取码 + 逐条调接口）
-
-在 skill 根目录执行：
+在 skill 根目录执行；**N 个 objectCode = N 次调用**：
 
 ```bash
-# 默认（推荐 Phase 1）：从 openclaw 取当前数字员工全部 OBJECT objectCode，逐条查详情
-/usr/local/bin/python3 scripts/get_object_detail.py '{}'
-
-# 单个 objectCode
 /usr/local/bin/python3 scripts/get_object_detail.py '{"object_code":"p_bug_0027024630_5406b7"}'
-
-# 子集：openclaw 挂载列表中只查指定 objectCode（仍逐条调接口）
-/usr/local/bin/python3 scripts/get_object_detail.py '{"object_codes":["p_bug_0027024630_5406b7","p_order_0027024630_d73e14"]}'
+/usr/local/bin/python3 scripts/get_object_detail.py '{"object_code":"p_order_0027024630_d73e14"}'
 ```
 
 | 入参字段 | 必填 | 说明 |
 |----------|------|------|
-| （空 `{}`） | 否 | **默认**：openclaw 取当前数字员工全部 OBJECT `objectCode`，逐条调详情接口 |
-| `object_code` / `objectCode` | 否* | 只查单个 objectCode |
-| `object_codes` / `objectCodes` | 否* | 在 openclaw 挂载列表中筛选子集，逐条调接口 |
+| `object_code` / `objectCode` | **是** | 单个 objectCode |
 | `base_id` / `baseId` | 否 | 传给详情接口，默认 `null` |
-| `employee_id` / `employeeId` | 否 | 指定数字员工；默认读环境变量 |
 
-\* 不传任何 objectCode 相关字段时，走 openclaw 全量挂载列表。
+**禁止** 传 `object_codes` / `objectCodes` 数组。
 
-**环境变量：** `BEYOND_TOKEN`、`USER_CODE`（认证）；`DIGITAL_EMPLOYEE_ID` / `EMPLOYEE_ID`（数字员工）；`OPENCLAW_DOMAINNAME` / `BYAI_DOMAINNAME` / `BE_DOMAINNAME`（服务发现）。
+**环境变量：** `BEYOND_TOKEN`、`USER_CODE`（认证）；`OPENCLAW_DOMAINNAME` / `BYAI_DOMAINNAME` / `BE_DOMAINNAME`（服务发现）。
 
-**批量 stdout 示例（驱动拆分）：**
+**单次 stdout 示例（Agent 多次调用后合并为 object_types[]）：**
 
 ```json
 {
   "ok": true,
-  "object_codes": [
-    "p_bug_0027024630_5406b7",
-    "p_requirement_0027024630_abc",
-    "p_product_0027024630_xyz"
+  "object_code": "p_bug_0027024630_5406b7",
+  "object_name": "Bug",
+  "object_desc": "…",
+  "properties": [
+    {"property_code": "title", "property_name": "任务标题", "data_type": "STRING"}
   ],
-  "objects": [
-    {
-      "ok": true,
-      "object_code": "p_bug_0027024630_5406b7",
-      "object_name": "Bug",
-      "object_desc": "…",
-      "properties": [
-        {"property_code": "title", "property_name": "任务标题", "data_type": "STRING"}
-      ],
-      "fields": ["handler", "deadline", "title"]
-    },
-    {
-      "object_code": "p_requirement_0027024630_abc",
-      "object_name": "需求管理对象",
-      "fields": ["title", "priority", "description"]
-    },
-    {
-      "object_code": "p_product_0027024630_xyz",
-      "object_name": "产品对象",
-      "fields": ["title", "sku", "version"]
-    }
-  ]
+  "fields": ["handler", "deadline", "title"]
 }
 ```
 
-上例 → `object_types[]` 含 3 种类型 → Phase 3 对同一 hub 分别拆 Bug、需求、产品，**每实例各建一页**。
+对每种 objectCode 各调用一次，在 Agent 内存合并 → `object_types[]` 含 Bug、需求、产品等 → Phase 3 **每实例各建一页**。
 
 `ok: false` 时中止拆分，向用户报告 `error`。
 
@@ -333,10 +301,10 @@ FOR EACH type IN object_types[]:
 ### 0e. 完整加载流程（Phase 1 实现）
 
 ```text
-1. openclaw 资源列表 → 筛 OBJECT → objectCode[]
-2. /usr/local/bin/python3 scripts/get_object_detail.py '{}'
-   或子集：'{"object_codes":["p_bug_...","p_order_..."]}'
-3. 校验 ok=true 且 objects[] 非空
+1. OpenClaw 从当前数字员工上下文 → objectCode[]
+2. 对每个 objectCode 单独执行：
+   /usr/local/bin/python3 scripts/get_object_detail.py '{"object_code":"p_bug_..."}'
+3. 校验每次 ok=true，Agent 合并为 object_types[]
 4. 合并 page_prefix_map → object_types[]（每种类型含 display_name、properties、page_prefix）
 5. 缓存到本次 run（hub 写 object_codes_snapshot + object_names_snapshot）
 6. Phase 3 按 object_types[] 逐类型拆分，每实例独立建页
@@ -371,7 +339,7 @@ customers/baiying-ai-acme-corp            # page_prefix 来自 page_prefix_map
 
 This skill guarantees:
 
-- **Phase 0:** openclaw 筛 OBJECT → `get_object_detail.py` 批量调接口 → 构建 `object_types[]`
+- **Phase 0:** OpenClaw 取得 objectCode[] → **每个 objectCode 调用一次** `get_object_detail.py` → 构建 `object_types[]`
 - **Phase 1:** 源文档入 brain（hub 页 `sources/…` 或 `meetings/…`）
 - **Phase 2:** 按 `object_types[]` **逐类型**对文档分类，**每类型内**独立抽取原子实例
 - **Phase 3:** **每个实例一个 page**（Bug→`bugs/`，需求→`requirements/`，产品→`products/`，…）
@@ -388,14 +356,15 @@ This skill guarantees:
 ### Phase 1: 加载对象类型（必须先做）
 
 ```bash
-# 1) openclaw 提供当前数字员工 OBJECT 的 objectCode[]（脚本内自动获取）
-# 2) 默认一次加载全部挂载类型 schema（脚本内逐条调详情接口）
-/usr/local/bin/python3 scripts/get_object_detail.py '{}' > /tmp/object_types.json
+# 1) OpenClaw 从当前数字员工上下文取得 objectCode[]
+# 2) 每个 objectCode 单独调用一次（示例）
+/usr/local/bin/python3 scripts/get_object_detail.py '{"object_code":"p_bug_..."}' > /tmp/object_bug.json
+/usr/local/bin/python3 scripts/get_object_detail.py '{"object_code":"p_order_..."}' > /tmp/object_order.json
 ```
 
 校验：
 
-- 响应 `ok === true` 且 `objects[]` 非空
+- 每次响应 `ok === true` 且含 `object_code`、`properties`
 - 每个 `object_code` 在 `page_prefix_map` 中有对应 `page_prefix`
 - `object_types[]` 非空（至少一种可拆分类型）
 
@@ -894,7 +863,7 @@ gbrain search "external_id REQ-001"
 
 | Tool | 用途 |
 |------|------|
-| `get_object_detail.py` | **Phase 1 必调** — openclaw 取 `objectCode` → 逐条 POST `/ontology/object/detail` 获取 schema |
+| `get_object_detail.py` | **Phase 1 必调** — 每次传入一个 `objectCode`，POST `/ontology/object/detail` 获取 schema |
 | `get_page` | 加载 hub / 匹配已有对象页 |
 | `gbrain get` / `get_page` | **Phase 8 导出**：重定向或写文件到 `{EXPORT_ROOT}/{slug}.md`；**禁止**在对话中输出全文再整理 |
 | `get_links` / `get_backlinks` / `traverse_graph` / `gbrain graph-query` | 收集导出集合内的关系边 |

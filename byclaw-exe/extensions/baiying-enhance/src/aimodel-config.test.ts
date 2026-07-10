@@ -5,11 +5,13 @@ import {
   DEFAULT_AIMODEL_SECRET_PROVIDER_NAME,
   parseBaiyingAimodelProviderBundle,
   providerKeyForBaiyingModelId,
+  readAuthTokenFromAimodelPayload,
   readAuthTokenFromAimodelTypeListPayload,
   resolveAimodelModelInputFromAbilities,
   resolveAimodelProviderApiFromInstanceParam,
   resolveDefaultBaiyingAimodelProviderBundle,
 } from "./aimodel-config.js";
+import { BAIYING_AIMODEL_AUTH_TOKEN_SM4_KEY_HEX_ENV } from "./aimodel-token-crypto.js";
 import { MANAGED_AGENT_PREFIX } from "./types.js";
 
 function createAimodelPayload() {
@@ -634,5 +636,29 @@ describe("Baiying AI model config", () => {
     expect(readAuthTokenFromAimodelTypeListPayload(createAimodelTypeListPayload(), "10004014")).toBe(
       "default-secret-token",
     );
+  });
+
+  it("decrypts backend SM4/Base64 authToken values while preserving plaintext compatibility", () => {
+    const previousKey = process.env[BAIYING_AIMODEL_AUTH_TOKEN_SM4_KEY_HEX_ENV];
+    process.env[BAIYING_AIMODEL_AUTH_TOKEN_SM4_KEY_HEX_ENV] =
+      "00112233445566778899aabbccddeeff";
+    expect(readAuthTokenFromAimodelPayload(createAimodelPayload())).toBe("secret-token");
+    try {
+      expect(
+        readAuthTokenFromAimodelPayload({
+          ...createAimodelPayload(),
+          raw: {
+            ...createAimodelPayload().raw,
+            authToken: "EgPL44ILxzG36CXPVwwJwA==",
+          },
+        }),
+      ).toBe("secret-token");
+    } finally {
+      if (previousKey === undefined) {
+        delete process.env[BAIYING_AIMODEL_AUTH_TOKEN_SM4_KEY_HEX_ENV];
+      } else {
+        process.env[BAIYING_AIMODEL_AUTH_TOKEN_SM4_KEY_HEX_ENV] = previousKey;
+      }
+    }
   });
 });

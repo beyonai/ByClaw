@@ -24,6 +24,7 @@ import type { Language, PluginHookAgentContext, PluginHookAgentEndEvent } from "
 import {
   BYAI_USER_MD_SECTION_END,
   BYAI_USER_MD_SECTION_START,
+  buildByclawAcpLanguagePrompt,
   buildChannelExtensionPrompt,
   buildCompactionNoticeText,
   buildLanguagePrompt,
@@ -37,6 +38,7 @@ import { isContextPressureLength } from "./overflow-length.js";
 import { getByaiRuntime } from "./runtime.js";
 import { resolveAgentIdFromSessionKey } from "openclaw/plugin-sdk/routing";
 import { takePromptInjectionSnapshot } from "./prompt-injection-snapshot.js";
+import { buildByclawChatContextToolPrompt } from "./chat-context-prompt.js";
 import {
   consumeWorkspaceReloadHint,
   markWorkspaceReloadHint,
@@ -642,9 +644,13 @@ export function registerByaiHooks(api: OpenClawPluginApi): void {
       const request = resolveActiveSdkRequestBySessionKey(ctx.sessionKey);
       if (request?.sessionId) {
         sections.push(buildSessionFilesPrompt(request.sessionId, request.language));
+        sections.push(buildByclawChatContextToolPrompt(request.language));
       }
       if (request?.languageProvided) {
         sections.push(buildLanguagePrompt(request.language));
+      }
+      if (request) {
+        sections.push(buildByclawAcpLanguagePrompt(request.language, request.languageProvided, request.sessionId));
       }
       const channelExtPrompt = buildChannelExtensionPrompt(
         request?.channelExtension,

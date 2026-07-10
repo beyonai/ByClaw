@@ -189,84 +189,10 @@ def resolve_employee_id(explicit: str = "") -> str:
     return ""
 
 
-_OPENCLAW_RESOURCE_LIST_PATH = os.getenv(
-    "OPENCLAW_RESOURCE_LIST_PATH",
-    "/byaiService/digitalEmployee/resource/list",
-)
-
 _OBJECT_DETAIL_PATH = os.getenv(
     "OPENCLAW_OBJECT_DETAIL_PATH",
     "/byaiService/ontology/object/detail",
 )
-
-
-def fetch_employee_resources(employee_id: str = "") -> list[dict[str, Any]]:
-    """从 openclaw 获取当前数字员工的资源列表（原始 dict 数组）。"""
-    resolved_id = resolve_employee_id(employee_id)
-    payload: dict[str, Any] = {}
-    if resolved_id:
-        payload["employeeId"] = resolved_id
-
-    data = post_byai_api(_OPENCLAW_RESOURCE_LIST_PATH, payload)
-    if isinstance(data, list):
-        return [item for item in data if isinstance(item, dict)]
-    if isinstance(data, dict):
-        for key in ("resources", "resourceList", "list", "rows", "data"):
-            nested = data.get(key)
-            if isinstance(nested, list):
-                return [item for item in nested if isinstance(item, dict)]
-        return [data]
-    return []
-
-
-def filter_object_resources(resources: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """筛选 resourceBizType == OBJECT 的资源。"""
-    objects: list[dict[str, Any]] = []
-    for item in resources:
-        biz_type = str(item.get("resourceBizType") or item.get("resource_biz_type") or "").upper()
-        if biz_type == "OBJECT":
-            objects.append(item)
-    return objects
-
-
-def resource_id_from_item(item: dict[str, Any]) -> str:
-    """从资源条目提取 resourceId。"""
-    for key in ("resourceId", "resource_id", "id"):
-        value = item.get(key)
-        if value is not None and str(value).strip():
-            return str(value).strip()
-    raise ValueError(f"资源条目缺少 resourceId: {item!r}")
-
-
-def object_code_from_item(item: dict[str, Any]) -> str:
-    """从资源条目提取 objectCode（用于与 object_code 入参匹配）。"""
-    for key in ("objectCode", "object_code", "resourceCode", "resource_code"):
-        value = item.get(key)
-        if value is not None and str(value).strip():
-            return str(value).strip()
-    return ""
-
-
-def fetch_employee_object_entries(employee_id: str = "") -> list[dict[str, Any]]:
-    """从 openclaw 获取当前数字员工挂载的 OBJECT 资源条目（含 objectCode）。
-
-    详情接口仅支持按 objectCode 单条查询；调用方应遍历返回列表逐条调接口。
-    """
-    resources = fetch_employee_resources(employee_id)
-    entries: list[dict[str, Any]] = []
-    seen_codes: set[str] = set()
-    for item in filter_object_resources(resources):
-        object_code = object_code_from_item(item)
-        if not object_code or object_code in seen_codes:
-            continue
-        seen_codes.add(object_code)
-        entry: dict[str, Any] = {"object_code": object_code}
-        try:
-            entry["resource_id"] = resource_id_from_item(item)
-        except ValueError:
-            pass
-        entries.append(entry)
-    return entries
 
 
 def fetch_object_detail_from_redis(resource_id: str | int) -> dict[str, Any]:
@@ -279,36 +205,6 @@ def fetch_object_detail_from_redis(resource_id: str | int) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ValueError(f"Redis {key} 内容非 JSON 对象: {data!r}")
     return data
-
-
-def build_resource_object_code_map(resources: list[dict[str, Any]] | None = None) -> dict[str, str]:
-    """构建 resourceId → objectCode 映射（仅 OBJECT 类型资源）。"""
-    items = resources if resources is not None else fetch_employee_resources()
-    mapping: dict[str, str] = {}
-    for item in filter_object_resources(items):
-        try:
-            resource_id = resource_id_from_item(item)
-        except ValueError:
-            continue
-        object_code = object_code_from_item(item)
-        if object_code:
-            mapping[resource_id] = object_code
-    return mapping
-
-
-def resolve_object_code(
-    resource_id: str,
-    mapping: dict[str, str] | None = None,
-) -> str:
-    """从 openclaw 资源列表按 resourceId 解析 objectCode。"""
-    rid = str(resource_id).strip()
-    if not rid:
-        raise ValueError("resource_id 不能为空")
-    code_map = mapping if mapping is not None else build_resource_object_code_map()
-    object_code = code_map.get(rid, "").strip()
-    if not object_code:
-        raise ValueError(f"未找到 resource_id={rid} 对应的 objectCode")
-    return object_code
 
 
 def fetch_object_detail_api(

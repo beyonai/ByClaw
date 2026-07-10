@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { resolveAimodelSecretRequest } from "./aimodel-secret-resolver.js";
+import { BAIYING_AIMODEL_AUTH_TOKEN_SM4_KEY_HEX_ENV } from "./aimodel-token-crypto.js";
 import type { BaiyingRedisJsonStore, RedisJsonPayload } from "./redis-json-store.js";
 
 function payload(raw: unknown, key = "byai:aimodel:config:-2000"): RedisJsonPayload {
@@ -96,6 +97,44 @@ describe("AI model exec SecretRef resolver", () => {
             protocolVersion: 1,
             values: {
                 "model:10004014": "default-secret-token",
+            },
+        });
+    });
+
+    it("decrypts backend SM4/Base64 authToken values before resolving SecretRefs", async () => {
+        const previousKey = process.env[BAIYING_AIMODEL_AUTH_TOKEN_SM4_KEY_HEX_ENV];
+        process.env[BAIYING_AIMODEL_AUTH_TOKEN_SM4_KEY_HEX_ENV] =
+            "00112233445566778899aabbccddeeff";
+        let response;
+        try {
+            response = await resolveAimodelSecretRequest({
+                request: JSON.stringify({ protocolVersion: 1, ids: ["model:-2000"] }),
+                redisJsonStore: store(
+                    new Map([
+                        [
+                            "byai:aimodel:config:-2000",
+                            payload({
+                                authToken: "EgPL44ILxzG36CXPVwwJwA==",
+                                modelCode: "glm-5-turbo",
+                                status: 1,
+                                url: "https://lab.iwhalecloud.com/gpt-proxy/v1",
+                            }),
+                        ],
+                    ]),
+                ),
+            });
+        } finally {
+            if (previousKey === undefined) {
+                delete process.env[BAIYING_AIMODEL_AUTH_TOKEN_SM4_KEY_HEX_ENV];
+            } else {
+                process.env[BAIYING_AIMODEL_AUTH_TOKEN_SM4_KEY_HEX_ENV] = previousKey;
+            }
+        }
+
+        expect(response).toEqual({
+            protocolVersion: 1,
+            values: {
+                "model:-2000": "secret-token",
             },
         });
     });

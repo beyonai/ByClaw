@@ -140,7 +140,8 @@ public class MemoryMessageService {
         else {
             byaiMessageHotDto.setMetadata(assistantChatDto.getMetadata());
         }
-        byaiMessageHotDto.setCreateTime(new Date());
+        byaiMessageHotDto.setCreateTime(
+            messageStruct.getFirstResponseTime() == null ? new Date() : messageStruct.getFirstResponseTime());
         byaiMessageHotDto.setCreatorId(CurrentUserHolder.getCurrentUserId());
         MessageResourceDto messageResourceDto = new MessageResourceDto();
         // 用户输入的记录用户输入的文件和扩展参数

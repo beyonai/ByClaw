@@ -341,3 +341,7 @@ CREATE TABLE byai.ss_res_ext_scene (
 COMMENT ON COLUMN byai.ss_res_ext_scene.scene_code IS '场景编码';
 COMMENT ON COLUMN byai.ss_res_ext_scene.source_content IS '来源内容：预留给后续本体场景导入（OWL/批量导入）的原始内容';
 COMMENT ON COLUMN byai.ss_res_ext_scene.target_content IS '目标内容';
+
+
+ALTER TABLE byai.byai_session ALTER COLUMN session_content TYPE TEXT;
+COMMENT ON COLUMN byai.byai_session.session_content IS '会话内容';

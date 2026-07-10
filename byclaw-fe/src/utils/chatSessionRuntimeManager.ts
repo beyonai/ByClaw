@@ -2,9 +2,12 @@ type RuntimeInfo = {
   clientRequestId: string;
   sessionId?: string;
   traceId?: string;
+  laneId?: string;
+  turnId?: string;
   answerMessageId?: string;
   agentId?: string | number | null;
   agentCode?: string | null;
+  agentName?: string | null;
   agentType?: string;
   restored?: boolean;
   lastAppliedStreamId?: string;
@@ -15,11 +18,14 @@ export type RunningChatInfo = {
   sessionId?: string;
   running?: boolean;
   traceId?: string;
+  laneId?: string;
+  turnId?: string;
   clientRequestId: string;
   userMessageId?: string | number;
   modelAnswerMessageId?: string | number;
   agentId?: string | number | null;
   agentCode?: string | null;
+  agentName?: string | null;
   agentType?: string;
   chatContent?: string;
 };
@@ -29,19 +35,34 @@ type Listener = () => void;
 class ChatSessionRuntimeManager {
   private activeByClientRequestId = new Map<string, RuntimeInfo>();
 
-  private activeClientRequestIdBySessionId = new Map<string, string>();
+  private activeClientRequestIdsBySessionId = new Map<string, Set<string>>();
+
+  private activeClientRequestIdByTraceKey = new Map<string, string>();
+
+  private activeClientRequestIdByLaneKey = new Map<string, string>();
 
   private listeners = new Set<Listener>();
 
   register(info: RuntimeInfo): void {
-    const oldInfo = this.activeByClientRequestId.get(info.clientRequestId);
-    this.activeByClientRequestId.set(info.clientRequestId, {
+    const clientRequestId = `${info.clientRequestId}`;
+    const oldInfo = this.activeByClientRequestId.get(clientRequestId);
+    if (oldInfo) {
+      this.removeIndexes(oldInfo);
+    }
+
+    const nextInfo = {
       ...(oldInfo || {}),
       ...info,
-    });
-    if (info.sessionId) {
-      this.activeClientRequestIdBySessionId.set(`${info.sessionId}`, info.clientRequestId);
-    }
+      clientRequestId,
+      sessionId: info.sessionId ? `${info.sessionId}` : oldInfo?.sessionId,
+      traceId: info.traceId ? `${info.traceId}` : oldInfo?.traceId,
+      laneId: info.laneId ? `${info.laneId}` : oldInfo?.laneId,
+      turnId: info.turnId ? `${info.turnId}` : oldInfo?.turnId,
+      answerMessageId: info.answerMessageId ? `${info.answerMessageId}` : oldInfo?.answerMessageId,
+    };
+
+    this.activeByClientRequestId.set(clientRequestId, nextInfo);
+    this.addIndexes(nextInfo);
     this.emitChange();
   }
 
@@ -55,19 +76,22 @@ class ChatSessionRuntimeManager {
     const { clientRequestId } = info;
     const answerMessageId = info.modelAnswerMessageId ? `${info.modelAnswerMessageId}` : undefined;
     const sessionId = `${info.sessionId}`;
-    const activeClientRequestId = this.activeClientRequestIdBySessionId.get(sessionId);
-    const activeInfo = activeClientRequestId
-      ? this.activeByClientRequestId.get(activeClientRequestId)
-      : this.activeByClientRequestId.get(clientRequestId ?? '');
+    const activeInfo =
+      this.getByClientRequest(clientRequestId) ||
+      this.getByLane(sessionId, info.laneId) ||
+      this.getByTrace(sessionId, info.traceId);
 
     if (activeInfo && !activeInfo.restored) {
       this.register({
         clientRequestId: activeInfo.clientRequestId,
         sessionId,
         traceId: info.traceId || activeInfo.traceId,
+        laneId: info.laneId || activeInfo.laneId,
+        turnId: info.turnId || activeInfo.turnId,
         answerMessageId: answerMessageId || activeInfo.answerMessageId,
         agentId: info.agentId ?? activeInfo.agentId,
         agentCode: info.agentCode ?? activeInfo.agentCode,
+        agentName: info.agentName ?? activeInfo.agentName,
         agentType: info.agentType || activeInfo.agentType,
         restored: false,
         lastAppliedStreamId: activeInfo.lastAppliedStreamId,
@@ -80,9 +104,12 @@ class ChatSessionRuntimeManager {
       clientRequestId,
       sessionId,
       traceId: info.traceId,
+      laneId: info.laneId,
+      turnId: info.turnId,
       answerMessageId,
       agentId: info.agentId,
       agentCode: info.agentCode,
+      agentName: info.agentName,
       agentType: info.agentType,
       restored: true,
       cancel,
@@ -97,46 +124,55 @@ class ChatSessionRuntimeManager {
     this.emitChange();
   }
 
+  updateTrace(clientRequestId?: string, traceId?: string): void {
+    if (!clientRequestId || !traceId) return;
+    this.register({
+      clientRequestId: `${clientRequestId}`,
+      traceId: `${traceId}`,
+    });
+  }
+
   bindSession(clientRequestId: string, sessionId?: string): void {
     if (!sessionId) return;
-    const info = this.activeByClientRequestId.get(clientRequestId);
+    const info = this.activeByClientRequestId.get(`${clientRequestId}`);
     if (!info) return;
-    if (info.sessionId) {
-      this.activeClientRequestIdBySessionId.delete(`${info.sessionId}`);
-    }
-    info.sessionId = `${sessionId}`;
-    this.activeClientRequestIdBySessionId.set(`${sessionId}`, clientRequestId);
-    this.emitChange();
+    this.register({
+      clientRequestId: info.clientRequestId,
+      sessionId: `${sessionId}`,
+    });
   }
 
   complete(clientRequestId: string): void {
-    const info = this.activeByClientRequestId.get(clientRequestId);
+    const info = this.activeByClientRequestId.get(`${clientRequestId}`);
     if (!info) return;
-    this.activeByClientRequestId.delete(clientRequestId);
-    if (info.sessionId) {
-      this.activeClientRequestIdBySessionId.delete(`${info.sessionId}`);
-    }
+    this.removeIndexes(info);
+    this.activeByClientRequestId.delete(`${clientRequestId}`);
     this.emitChange();
   }
 
   completeBySession(sessionId?: string | number): void {
     if (!sessionId) return;
-    const clientRequestId = this.activeClientRequestIdBySessionId.get(`${sessionId}`);
-    if (clientRequestId) {
-      this.complete(clientRequestId);
-    }
+    const clientRequestIds = Array.from(this.activeClientRequestIdsBySessionId.get(`${sessionId}`) || []);
+    clientRequestIds.forEach((clientRequestId) => this.complete(clientRequestId));
   }
 
   isSessionRunning(sessionId?: string): boolean {
     if (!sessionId) return false;
-    return this.activeClientRequestIdBySessionId.has(`${sessionId}`);
+    return Boolean(this.activeClientRequestIdsBySessionId.get(`${sessionId}`)?.size);
   }
 
   getBySession(sessionId?: string): RuntimeInfo | undefined {
     if (!sessionId) return undefined;
-    const clientRequestId = this.activeClientRequestIdBySessionId.get(`${sessionId}`);
+    const clientRequestId = this.activeClientRequestIdsBySessionId.get(`${sessionId}`)?.values().next().value;
     if (!clientRequestId) return undefined;
     return this.activeByClientRequestId.get(clientRequestId);
+  }
+
+  getAllBySession(sessionId?: string | number): RuntimeInfo[] {
+    if (!sessionId) return [];
+    return Array.from(this.activeClientRequestIdsBySessionId.get(`${sessionId}`) || [])
+      .map((clientRequestId) => this.activeByClientRequestId.get(clientRequestId))
+      .filter(Boolean) as RuntimeInfo[];
   }
 
   getByClientRequest(clientRequestId?: string): RuntimeInfo | undefined {
@@ -146,14 +182,31 @@ class ChatSessionRuntimeManager {
 
   getByTrace(sessionId?: string | number, traceId?: string): RuntimeInfo | undefined {
     if (!sessionId || !traceId) return undefined;
-    const runtime = this.getBySession(`${sessionId}`);
-    if (!runtime || runtime.traceId !== traceId) return undefined;
-    return runtime;
+    const clientRequestId = this.activeClientRequestIdByTraceKey.get(this.getScopedKey(sessionId, traceId));
+    if (clientRequestId) {
+      return this.activeByClientRequestId.get(clientRequestId);
+    }
+    return this.getAllBySession(sessionId).find((runtime) => `${runtime.traceId}` === `${traceId}`);
+  }
+
+  getByLane(sessionId?: string | number, laneId?: string | number): RuntimeInfo | undefined {
+    if (!laneId) return undefined;
+    const scopedClientRequestId = sessionId
+      ? this.activeClientRequestIdByLaneKey.get(this.getScopedKey(sessionId, laneId))
+      : undefined;
+    const clientRequestId = scopedClientRequestId || this.activeClientRequestIdByLaneKey.get(`${laneId}`);
+    if (clientRequestId) {
+      return this.activeByClientRequestId.get(clientRequestId);
+    }
+    const candidates = sessionId ? this.getAllBySession(sessionId) : Array.from(this.activeByClientRequestId.values());
+    return candidates.find((runtime) => `${runtime.laneId}` === `${laneId}`);
   }
 
   clear(): void {
     this.activeByClientRequestId.clear();
-    this.activeClientRequestIdBySessionId.clear();
+    this.activeClientRequestIdsBySessionId.clear();
+    this.activeClientRequestIdByTraceKey.clear();
+    this.activeClientRequestIdByLaneKey.clear();
     this.emitChange();
   }
 
@@ -166,6 +219,46 @@ class ChatSessionRuntimeManager {
 
   private emitChange(): void {
     this.listeners.forEach((listener) => listener());
+  }
+
+  private getScopedKey(sessionId?: string | number, value?: string | number): string {
+    return `${sessionId || ''}:${value || ''}`;
+  }
+
+  private addIndexes(info: RuntimeInfo): void {
+    const clientRequestId = info.clientRequestId;
+    if (info.sessionId) {
+      const sessionId = `${info.sessionId}`;
+      const ids = this.activeClientRequestIdsBySessionId.get(sessionId) || new Set<string>();
+      ids.add(clientRequestId);
+      this.activeClientRequestIdsBySessionId.set(sessionId, ids);
+    }
+    if (info.traceId) {
+      this.activeClientRequestIdByTraceKey.set(this.getScopedKey(info.sessionId, info.traceId), clientRequestId);
+    }
+    if (info.laneId) {
+      this.activeClientRequestIdByLaneKey.set(`${info.laneId}`, clientRequestId);
+      this.activeClientRequestIdByLaneKey.set(this.getScopedKey(info.sessionId, info.laneId), clientRequestId);
+    }
+  }
+
+  private removeIndexes(info: RuntimeInfo): void {
+    const clientRequestId = info.clientRequestId;
+    if (info.sessionId) {
+      const sessionId = `${info.sessionId}`;
+      const ids = this.activeClientRequestIdsBySessionId.get(sessionId);
+      ids?.delete(clientRequestId);
+      if (!ids?.size) {
+        this.activeClientRequestIdsBySessionId.delete(sessionId);
+      }
+    }
+    if (info.traceId) {
+      this.activeClientRequestIdByTraceKey.delete(this.getScopedKey(info.sessionId, info.traceId));
+    }
+    if (info.laneId) {
+      this.activeClientRequestIdByLaneKey.delete(`${info.laneId}`);
+      this.activeClientRequestIdByLaneKey.delete(this.getScopedKey(info.sessionId, info.laneId));
+    }
   }
 }
 

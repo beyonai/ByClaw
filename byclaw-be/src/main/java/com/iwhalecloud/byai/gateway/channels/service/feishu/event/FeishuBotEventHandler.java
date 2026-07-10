@@ -126,6 +126,12 @@ public class FeishuBotEventHandler {
             return;
         }
 
+        if (isGroupMessageWithoutBotMention(message)) {
+            logger.info("Skip Feishu group message because bot is not mentioned. eventId={}, messageId={}, chatId={}",
+                    message.getEventId(), message.getMessageId(), message.getChatId());
+            return;
+        }
+
         if (isDuplicateMessage(resolveDedupId(message))) {
             logger.info("Skip duplicate Feishu bot message. eventId={}, messageId={}",
                     message.getEventId(), message.getMessageId());
@@ -138,6 +144,12 @@ public class FeishuBotEventHandler {
         }
 
         messageExecutor.execute(() -> handleMessageAsync(message));
+    }
+
+    private boolean isGroupMessageWithoutBotMention(FeishuCallbackMessage message) {
+        return message != null
+                && "group".equalsIgnoreCase(message.getChatType())
+                && !message.isMentionedBot();
     }
 
     private void handleMessageAsync(FeishuCallbackMessage message) {

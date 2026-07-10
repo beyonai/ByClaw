@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.manager.application.service.digitemploy.event;
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import com.iwhalecloud.byai.manager.application.runner.digemployeestartup.DigEmployeeStartupSyncProperties;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.DigEmployeeRedisSyncProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -10,7 +11,11 @@ import org.springframework.context.annotation.Configuration;
  * 数字员工变更 Stream 配置与默认 Bean。
  */
 @Configuration
-@EnableConfigurationProperties({ DigEmployeeChangeNotifyProperties.class, DigEmployeeRedisSyncProperties.class })
+@EnableConfigurationProperties({
+    DigEmployeeChangeNotifyProperties.class,
+    DigEmployeeRedisSyncProperties.class,
+    DigEmployeeStartupSyncProperties.class
+})
 public class DigEmployeeChangeConfiguration {
 
     @Bean

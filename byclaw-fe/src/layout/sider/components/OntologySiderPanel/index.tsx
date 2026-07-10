@@ -108,6 +108,7 @@ const normalizeEntry = (entry: any = {}) => {
     viewName: bizType === 'VIEW' ? resourceName : entry.viewName || entry.view_name,
     objectCode: bizType === 'OBJECT' ? resourceCode : entry.objectCode || entry.object_code,
     objectName: bizType === 'OBJECT' ? resourceName : entry.objectName || entry.object_name,
+    systemCode: entry.systemCode || entry.system_code,
   };
 };
 
@@ -415,6 +416,7 @@ const OntologySiderPanel: React.FC = () => {
           node={leafToDrawerNode(leaf)}
           baseId={leaf.baseId}
           ownerType={leaf.ownerType}
+          systemCode={leaf.systemCode}
           onReference={() => quoteLeafToChat(leaf)}
           onClose={() => clearDetailPanel?.()}
         />,
@@ -449,7 +451,7 @@ const OntologySiderPanel: React.FC = () => {
       }
       const hideLoading = message.loading('对象列表加载中...', 0);
       try {
-        const res: any = await listOntologyObjectsByView({ viewCode });
+        const res: any = await listOntologyObjectsByView({ viewCode, systemCode: leaf?.systemCode });
         const rows = findRows(getData(res)).map((item: any) => ({
           ...item,
           objectCode: item.objectCode || item.object_code || item.resourceCode || item.code,
@@ -494,7 +496,7 @@ const OntologySiderPanel: React.FC = () => {
       }
       const hideLoading = message.loading('动作列表加载中...', 0);
       try {
-        const res: any = await getOntologyObjectDetail({ objectCode });
+        const res: any = await getOntologyObjectDetail({ objectCode, systemCode: leaf?.systemCode });
         const detail = getData(res);
         const rows = parseMaybeArray(detail?.actions).map((item: any) => ({
           ...item,
@@ -540,7 +542,7 @@ const OntologySiderPanel: React.FC = () => {
       }
       const hideLoading = message.loading('关系列表加载中...', 0);
       try {
-        const res: any = await listOntologyRelationsByObject({ objectCode });
+        const res: any = await listOntologyRelationsByObject({ objectCode, systemCode: leaf?.systemCode });
         const rows = findRows(getData(res)).map((item: any) => ({
           ...item,
           relationCode: item.relationCode || item.relation_code || item.code,
@@ -644,14 +646,18 @@ const OntologySiderPanel: React.FC = () => {
 
   const renderNode = useCallback(
     (node: any) => {
+      const bizItems = [];
+      if (node.nodeType === 'view') {
+        bizItems.push({ key: 'objects', label: intl.formatMessage({ id: 'ontologyCenter.action.viewObjects' }) });
+      } else {
+        bizItems.push(
+          { key: 'actions', label: intl.formatMessage({ id: 'ontologyCenter.action.viewActions' }) },
+          { key: 'relations', label: intl.formatMessage({ id: 'ontologyCenter.action.viewRelations' }) }
+        );
+      }
       const menuItems = [
         { key: 'detail', label: intl.formatMessage({ id: 'common.detail' }) },
-        ...(node.nodeType === 'view'
-          ? [{ key: 'objects', label: intl.formatMessage({ id: 'ontologyCenter.action.viewObjects' }) }]
-          : [
-            { key: 'actions', label: intl.formatMessage({ id: 'ontologyCenter.action.viewActions' }) },
-            { key: 'relations', label: intl.formatMessage({ id: 'ontologyCenter.action.viewRelations' }) },
-          ]),
+        ...bizItems,
         { key: 'unbind', label: intl.formatMessage({ id: 'ontologySider.unbind' }) },
       ];
       return (
@@ -668,14 +674,24 @@ const OntologySiderPanel: React.FC = () => {
             }
           }}
         >
-          <span className={styles.nodeIcon}>
+          <span
+            className={classnames(
+              styles.nodeIcon,
+              node.nodeType === 'view' ? styles.viewResourceIcon : styles.objectResourceIcon
+            )}
+          >
             <AntdIcon type={NODE_ICON[node.nodeType] || NODE_ICON.object} />
           </span>
           <span className={styles.leafTitle}>
             <Tooltip title={node.leaf?.code ? `${node.title}（${node.leaf.code}）` : node.title}>
               <span className={styles.leafName}>{node.title}</span>
             </Tooltip>
-            <span className={styles.typeTag}>
+            <span
+              className={classnames(
+                styles.typeTag,
+                node.nodeType === 'view' ? styles.viewTypeTag : styles.objectTypeTag
+              )}
+            >
               <span className={styles.typeTagText}>{typeLabel(node.nodeType)}</span>
             </span>
           </span>

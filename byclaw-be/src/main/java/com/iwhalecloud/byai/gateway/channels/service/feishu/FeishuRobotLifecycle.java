@@ -7,7 +7,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /**
- * 应用启动时加载飞书机器人配置缓存。
+ * 应用启动时注册飞书机器人长连接。
  */
 @Component
 public class FeishuRobotLifecycle {
@@ -28,13 +28,13 @@ public class FeishuRobotLifecycle {
     @PostConstruct
     public void init() {
         if (!properties.isEnabled()) {
-            logger.info("Feishu bot is disabled. Set channel.stream.enabled=true to enable it.");
+            logger.info("Feishu long-connection bot is disabled. Set channel.stream.enabled=true to enable it.");
             return;
         }
         try {
-            feishuRobotRegistryService.initializeRobotConfigs();
+            feishuRobotRegistryService.initializeRobotClients();
         } catch (Exception e) {
-            logger.warn("Initialize Feishu robot configs failed", e);
+            logger.warn("Initialize Feishu long-connection robot clients failed", e);
         }
     }
 }

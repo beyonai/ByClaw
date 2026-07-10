@@ -30,6 +30,7 @@ import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileToMarkdownInd
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeSearch;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeUpdate;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileDelete;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.FileToMarkdownResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbFileReadResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeSearchItem;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeSearchResult;
@@ -597,6 +598,16 @@ public class DatasetApplicationService {
         logger.info("构建结果是:{}", JSON.toJSONString(buildRet));
         assertPythonBuildSuccess(buildRet, "构建知识库文件");
 
+    }
+
+    /**
+     * 原始文件同步转换为 Markdown 文件流，不落知识库、不触发构建。
+     *
+     * @param fileContent 原始文件
+     * @return Markdown 文件流结果
+     */
+    public FileToMarkdownResult fileToMarkdown(MultipartFile fileContent) {
+        return feignPythonBuildService.fileToMarkdown(fileContent);
     }
 
     /**

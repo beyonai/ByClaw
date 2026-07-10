@@ -398,6 +398,12 @@
                     #{bizType}
                 </foreach>
             </if>
+            <if test="systemCodes != null and systemCodes.size() > 0">
+                and a.system_code in
+                <foreach collection="systemCodes" item="systemCode" open="(" separator="," close=")">
+                    #{systemCode}
+                </foreach>
+            </if>
             <if test="catalogIds != null and catalogIds.size() > 0">
                 and a.catalog_id in
                 <foreach collection="catalogIds" item="catalogIdItem" open="(" separator="," close=")">

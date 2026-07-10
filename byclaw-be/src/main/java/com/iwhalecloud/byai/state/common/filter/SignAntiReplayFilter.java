@@ -37,6 +37,8 @@ public class SignAntiReplayFilter extends OncePerRequestFilter {
 
     private static final String KEY_SEPERATOR = ":";
 
+    private static final String FEISHU_BOT_EVENT_CALLBACK_PATH = "/feishu/bot/events";
+
 
     public static final String HEADER_SIGNATURE = "x-signature-value";
 
@@ -58,6 +60,13 @@ public class SignAntiReplayFilter extends OncePerRequestFilter {
             filterChain.doFilter(request, response);
             return;
         }
+        // 飞书开放平台回调由 Controller 内部校验 verificationToken/encryptKey，
+        // 外部平台不会携带系统签名头，必须在签名防重放过滤器中直接放行。
+        if (this.isFeishuBotEventCallback(request)) {
+            filterChain.doFilter(request, response);
+            return;
+        }
+
         // 例外的地址，免登录的个别地址也得配置在这里一起噢。不然可能获取不到用户code
         String servletPath = request.getServletPath();
         if (this.matches(servletPath, signProperties.getExcludeUrlList())) {
@@ -119,6 +128,20 @@ public class SignAntiReplayFilter extends OncePerRequestFilter {
             }
         }
         return false;
+    }
+
+    private boolean isFeishuBotEventCallback(HttpServletRequest request) {
+        return endsWithFeishuBotEventPath(request.getRequestURI())
+            || endsWithFeishuBotEventPath(request.getServletPath())
+            || endsWithFeishuBotEventPath(request.getPathInfo());
+    }
+
+    private boolean endsWithFeishuBotEventPath(String path) {
+        if (StringUtils.isBlank(path)) {
+            return false;
+        }
+        String normalizedPath = path.endsWith("/") ? path.substring(0, path.length() - 1) : path;
+        return normalizedPath.endsWith(FEISHU_BOT_EVENT_CALLBACK_PATH);
     }
 
     /**

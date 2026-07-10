@@ -280,6 +280,10 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
         return STREAM_KEY_PREFIX + sessionId + STREAM_KEY_SUFFIX;
     }
 
+    public String buildConsumerName(String sessionId) {
+        return CONSUMER_NAME_PREFIX + sessionId;
+    }
+
     /**
      * 构建 Session 状态 Key。
      *

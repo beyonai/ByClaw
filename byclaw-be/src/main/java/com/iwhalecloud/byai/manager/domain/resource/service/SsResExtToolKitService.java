@@ -59,6 +59,16 @@ public class SsResExtToolKitService {
     }
 
     /**
+     * PR-3 (#150) 批量查询工具集扩展数据. 单 SQL IN 子句,替代循环 findById.
+     *
+     * @param resourceIds 资源ID集合(空集合/null 时返回空 List,不触发 SQL)
+     * @return 工具集扩展列表
+     */
+    public List<SsResExtToolKit> findByIds(Collection<Long> resourceIds) {
+        return ssResExtToolKitMapper.findByIds(resourceIds);
+    }
+
+    /**
      * 查询工具集信息（包含关联的工具列表）
      *
      * @param resourceIds 资源标识

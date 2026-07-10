@@ -1,9 +1,12 @@
 package com.iwhalecloud.byai.common.feign.client;
 
 import java.io.InputStream;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -12,6 +15,7 @@ import com.alibaba.fastjson.JSONObject;
 import com.alibaba.fastjson.TypeReference;
 import com.iwhaleai.byai.framework.common.RedisClient;
 import com.iwhaleai.byai.framework.core.discovery.DiscoveryClient;
+import com.iwhaleai.byai.framework.core.discovery.ServiceInstance;
 import com.iwhaleai.byai.framework.util.http.ByHttpClient;
 import com.iwhaleai.byai.framework.util.http.DiscoveryHttpClient;
 import com.iwhaleai.byai.framework.util.http.HttpResponse;
@@ -22,6 +26,7 @@ import com.iwhalecloud.byai.common.feign.request.pythonbuild.FileBuildStatus;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbListDir;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.Data;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.DirOrFile;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.FileToMarkdownResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.ProcessStatus;
 import com.iwhalecloud.byai.common.util.OkHttpUtil;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbDirectoryCreate;
@@ -274,6 +279,28 @@ public class FeignPythonBuildService {
         return post(KnowledgeServiceOperation.KNOWLEDGE_SEARCH, kbKnowledgeSearch,
             new TypeReference<PythonBuildResponse<KnowledgeSearchResult>>() {
             });
+    }
+
+    /**
+     * 上传原始文件并同步转换为 Markdown 文件流。
+     *
+     * @param multipartFile 原始文件
+     * @return Markdown 文件流结果
+     */
+    public FileToMarkdownResult fileToMarkdown(MultipartFile multipartFile) {
+        try {
+            String requestPath = resolvePath(null, KnowledgeServiceOperation.FILE_TO_MARKDOWN);
+            KnowledgeServiceEndpoint endpoint = resolveRoute(null);
+            String baseUrl = endpoint.isDirectUrl() ? endpoint.getBaseUrl() : resolveDiscoveryBaseUrl(endpoint.getServiceName());
+            return uploadFileToMarkdown(baseUrl, requestPath, multipartFile);
+        }
+        catch (BaseException e) {
+            throw e;
+        }
+        catch (Exception e) {
+            logger.error(e.getMessage(), e);
+            throw new BaseException("调用 Python 构建服务文件转Markdown接口失败", e);
+        }
     }
 
     /**
@@ -564,6 +591,126 @@ public class FeignPythonBuildService {
         catch (IOException e) {
             throw new BaseException("调用第三方知识库下载接口失败", e);
         }
+    }
+
+    private FileToMarkdownResult uploadFileToMarkdown(String baseUrl, String path, MultipartFile multipartFile) {
+        if (multipartFile == null || multipartFile.isEmpty()) {
+            throw new BaseException("待转换文件不能为空");
+        }
+        String requestUrl = concatUrl(baseUrl, path);
+        String originalFilename = multipartFile.getOriginalFilename();
+        String contentType = StringUtil.isEmpty(multipartFile.getContentType()) ? "application/octet-stream"
+            : multipartFile.getContentType();
+        MultipartBody.Builder bodyBuilder = new MultipartBody.Builder().setType(MultipartBody.FORM);
+        try {
+            bodyBuilder.addFormDataPart("fileContent", originalFilename,
+                RequestBody.create(multipartFile.getBytes(), MediaType.parse(contentType)));
+        }
+        catch (IOException e) {
+            throw new BaseException("读取待转换文件失败", e);
+        }
+
+        Request.Builder builder = new Request.Builder().url(requestUrl).post(bodyBuilder.build());
+        buildAuthHeaders().forEach(builder::addHeader);
+        try (Response response = OkHttpUtil.getHttpClient().newCall(builder.build()).execute()) {
+            ResponseBody body = response.body();
+            byte[] bytes = body == null ? new byte[0] : body.bytes();
+            if (!response.isSuccessful()) {
+                String errorBody = new String(bytes, StandardCharsets.UTF_8);
+                throw new BaseException(
+                    String.format("调用 Python 构建服务文件转Markdown接口失败: %s, status=%s, body=%s", path,
+                        response.code(), errorBody));
+            }
+            if (bytes.length == 0) {
+                throw new BaseException("调用 Python 构建服务文件转Markdown接口失败，响应体为空: " + path);
+            }
+            String markdownFileName = resolveMarkdownFileName(response.header("Content-Disposition"), originalFilename);
+            String responseContentType = StringUtil.isEmpty(response.header("Content-Type"))
+                ? "application/octet-stream"
+                : response.header("Content-Type");
+            return new FileToMarkdownResult(markdownFileName, responseContentType, bytes);
+        }
+        catch (IOException e) {
+            throw new BaseException("调用 Python 构建服务文件转Markdown接口失败", e);
+        }
+    }
+
+    private String resolveDiscoveryBaseUrl(String serviceName) {
+        Optional<ServiceInstance> instance = discoveryClient.discover(serviceName);
+        if (instance.isEmpty()) {
+            throw new BaseException("未找到 Python 构建服务实例: " + serviceName);
+        }
+        ServiceInstance serviceInstance = instance.get();
+        String protocol = serviceInstance.getProtocol() == null ? "http" : serviceInstance.getProtocol();
+        String pathPrefix = StringUtil.isEmpty(serviceInstance.getPathPrefix()) ? "" : serviceInstance.getPathPrefix();
+        return protocol + "://" + serviceInstance.getHost() + ":" + serviceInstance.getPort() + pathPrefix;
+    }
+
+    private String resolveMarkdownFileName(String contentDisposition, String originalFilename) {
+        String filename = extractFilenameFromContentDisposition(contentDisposition);
+        if (!StringUtil.isEmpty(filename)) {
+            return filename;
+        }
+        return buildMarkdownFileName(originalFilename);
+    }
+
+    private String extractFilenameFromContentDisposition(String contentDisposition) {
+        if (StringUtil.isEmpty(contentDisposition)) {
+            return null;
+        }
+        String[] parts = contentDisposition.split(";");
+        for (String part : parts) {
+            String trimmed = part == null ? "" : part.trim();
+            if (trimmed.startsWith("filename*=")) {
+                String value = trimmed.substring("filename*=".length()).trim();
+                int charsetPrefixIndex = value.indexOf("''");
+                if (charsetPrefixIndex >= 0) {
+                    value = value.substring(charsetPrefixIndex + 2);
+                }
+                return decodeHeaderFilename(stripQuotes(value));
+            }
+        }
+        for (String part : parts) {
+            String trimmed = part == null ? "" : part.trim();
+            if (trimmed.startsWith("filename=")) {
+                return decodeHeaderFilename(stripQuotes(trimmed.substring("filename=".length()).trim()));
+            }
+        }
+        return null;
+    }
+
+    private String decodeHeaderFilename(String value) {
+        if (StringUtil.isEmpty(value)) {
+            return null;
+        }
+        return URLDecoder.decode(value, StandardCharsets.UTF_8);
+    }
+
+    private String stripQuotes(String value) {
+        if (value == null || value.length() < 2) {
+            return value;
+        }
+        if ((value.startsWith("\"") && value.endsWith("\"")) || (value.startsWith("'") && value.endsWith("'"))) {
+            return value.substring(1, value.length() - 1);
+        }
+        return value;
+    }
+
+    private String buildMarkdownFileName(String originalFilename) {
+        String fileName = StringUtil.isEmpty(originalFilename) ? "converted" : originalFilename;
+        fileName = fileName.replace('\\', '/');
+        int slashIndex = fileName.lastIndexOf('/');
+        if (slashIndex >= 0) {
+            fileName = fileName.substring(slashIndex + 1);
+        }
+        int dotIndex = fileName.lastIndexOf('.');
+        if (dotIndex > 0) {
+            fileName = fileName.substring(0, dotIndex);
+        }
+        if (StringUtil.isEmpty(fileName)) {
+            fileName = "converted";
+        }
+        return fileName + ".md";
     }
 
     /**

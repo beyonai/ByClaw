@@ -14,6 +14,7 @@ import com.iwhalecloud.byai.common.message.service.ByaiMessageHotService;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.event.DigEmployeeChangeEventPublisher;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.event.DigEmployeeChangeEventType;
+import com.iwhalecloud.byai.manager.application.runner.digemployeestartup.DigEmployeeStartupSyncProperties;
 import com.iwhalecloud.byai.manager.application.service.memory.MemoryLibraryApplicationService;
 import com.iwhalecloud.byai.manager.application.service.template.TemplateRuleInfoApplicationService;
 import com.iwhalecloud.byai.manager.domain.aimodel.service.AIService;
@@ -84,6 +85,7 @@ import com.iwhalecloud.byai.common.feign.request.conversation.AgentPrologueDto;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.util.ListUtil;
 import com.iwhalecloud.byai.common.util.MapParamUtil;
+import com.iwhalecloud.byai.common.util.RedisUtil.RedisKVPair;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.common.page.PageInfo;
@@ -94,6 +96,7 @@ import com.iwhalecloud.byai.common.constants.Constants;
 import com.iwhalecloud.byai.common.util.RedisUtil;
 import jakarta.servlet.http.HttpSession;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
@@ -236,7 +239,7 @@ public class DigitalEmployeeApplicationService {
     private String storageType;
 
     /**
-     * 知识库/数字员工系统来源配置；配置为 WHALE_AGENT 时表示接入老智能体商业版本， 部分数字员工类型不允许在本系统创建。
+     * 知识库/数字员工系统来源配置;配置为 WHALE_AGENT 时表示接入老智能体商业版本, 部分数字员工类型不允许在本系统创建.
      */
     @Value("${dataset.system:}")
     private String datasetSystem;
@@ -260,6 +263,13 @@ public class DigitalEmployeeApplicationService {
     private DigEmployeeRedisSyncProperties digEmployeeRedisSyncProperties;
 
     /**
+     * PR-1 启动期同步优化属性.详见 {@link DigEmployeeStartupSyncProperties}.
+     * 注入后可读取 {@code skipBlankTargetContent} 等开关,行为兼容旧版本(默认 false 时无副作用).
+     */
+    @Autowired
+    private DigEmployeeStartupSyncProperties digEmployeeStartupSyncProperties;
+
+    /**
      * 查询列表
      *
      * @param digitalEmployeeQo 查询对象
@@ -277,9 +287,9 @@ public class DigitalEmployeeApplicationService {
     }
 
     /**
-     * 给知识前端使用的通用数字员工列表查询。 规则说明： 1. 不限定 ownerType，也不限定 owner/authorize/manager 视角，默认按“全部”查询； 2. 若前端未传 publishType，则默认查询
-     * publish； 3. 若前端未传 publishStatus，则默认查询有效状态 2（LIST）； 4. 当前数字员工列表仍使用 ss_resource.resource_status 做状态过滤，因此
-     * publishStatus 会收口到 resourceStatus。
+     * 给知识前端使用的通用数字员工列表查询. 规则说明: 1. 不限定 ownerType,也不限定 owner/authorize/manager 视角,默认按“全部”查询; 2. 若前端未传 publishType,则默认查询
+     * publish; 3. 若前端未传 publishStatus,则默认查询有效状态 2(LIST); 4. 当前数字员工列表仍使用 ss_resource.resource_status 做状态过滤,因此
+     * publishStatus 会收口到 resourceStatus.
      */
     public PageInfo<DigitalEmployeeVo> queryAllDigitalEmployeeList(DigitalEmployeeQo digitalEmployeeQo) {
         if (digitalEmployeeQo == null) {
@@ -295,11 +305,11 @@ public class DigitalEmployeeApplicationService {
         if (!includeAllResourceStatus && digitalEmployeeQo.getResourceStatus() == null) {
             digitalEmployeeQo.setResourceStatus(Long.valueOf(digitalEmployeeQo.getPublishStatus()));
         }
-        // 填充当前用户上下文，仅用于黑名单、权限筛选和待审核/申请中状态判断，不收窄企业全量查询范围。
+        // 填充当前用户上下文,仅用于黑名单、权限筛选和待审核/申请中状态判断,不收窄企业全量查询范围.
         resourceAuthContextService.setCurrentUserAuthQo(digitalEmployeeQo);
         fillPublishOrgIds(digitalEmployeeQo);
         fillCatalogIds(digitalEmployeeQo);
-        // 显式清空旧版视角类型，确保这里始终以企业资源全量为基础。
+        // 显式清空旧版视角类型,确保这里始终以企业资源全量为基础.
         digitalEmployeeQo.setType(null);
         PageInfo<DigitalEmployeeVo> pageInfo = ssResExtDigEmployeeService
             .selectAllDigitalEmployeeByQo(digitalEmployeeQo);
@@ -308,14 +318,14 @@ public class DigitalEmployeeApplicationService {
     }
 
     /**
-     * 查询个人归属数字员工列表。 规则说明： 1. 仅查询 ownerType = personal； 2. 查询范围覆盖我创建、我管理、我使用； 3. 若前端未传 publishType，则默认查询 publish； 4.
-     * 若前端未传 publishStatus，则默认查询有效状态 2（LIST）； 5. 关键字支持匹配数字员工名称、数字员工描述。
+     * 查询个人归属数字员工列表. 规则说明: 1. 仅查询 ownerType = personal; 2. 查询范围覆盖我创建、我管理、我使用; 3. 若前端未传 publishType,则默认查询 publish; 4.
+     * 若前端未传 publishStatus,则默认查询有效状态 2(LIST); 5. 关键字支持匹配数字员工名称、数字员工描述.
      */
     public PageInfo<DigitalEmployeeVo> queryPersonalDigitalEmployeeList(DigitalEmployeeQo digitalEmployeeQo) {
         resourceAuthContextService.setCurrentUserAuthQo(digitalEmployeeQo);
         digitalEmployeeQo.setDefaultDigEmployeeId(CurrentUserHolder.getDefaultDigEmployeeId());
-        // 默认超级助手在被其它个人助理替换为当前默认后，仍保持 personal_default，
-        // 个人助理列表需要继续按稳定 resourceCode={userCode}_main 展示它。
+        // 默认超级助手在被其它个人助理替换为当前默认后,仍保持 personal_default,
+        // 个人助理列表需要继续按稳定 resourceCode={userCode}_main 展示它.
         digitalEmployeeQo.setDefaultSuperAssistantResourceCode(buildDefaultSuperAssistantResourceCode(
             CurrentUserHolder.getCurrentUserCode(), CurrentUserHolder.getCurrentUserId()));
         fillCatalogIds(digitalEmployeeQo);
@@ -326,8 +336,8 @@ public class DigitalEmployeeApplicationService {
     }
 
     /**
-     * 数字员工标签不再依赖 ss_res_ext_dig_employee.tag_name 落库值，列表返回前按当前资源归属实时计算： personal + resourceCode 后缀 _main 为超级助手，其他
-     * personal 为个人助理，enterprise 按 agentType 显示类型。
+     * 数字员工标签不再依赖 ss_res_ext_dig_employee.tag_name 落库值,列表返回前按当前资源归属实时计算: personal + resourceCode 后缀 _main 为超级助手,其他
+     * personal 为个人助理,enterprise 按 agentType 显示类型.
      */
     private void fillRuntimeDigitalEmployeeTags(PageInfo<DigitalEmployeeVo> pageInfo) {
         if (pageInfo == null || CollectionUtils.isEmpty(pageInfo.getList())) {
@@ -588,7 +598,7 @@ public class DigitalEmployeeApplicationService {
         boolean isFrontAccess = digitalEmployeeDTO.isFrontAccess();
         normalizeRelSkillsForSave(digitalEmployeeDTO);
         validateDigitalEmployeeTextFieldLengths(digitalEmployeeDTO);
-        // 商业版本（dataset.system=WHALE_AGENT）下，企业 tab 不允许创建编码型（011）/ 调试型（010）数字员工
+        // 商业版本(dataset.system=WHALE_AGENT)下,企业 tab 不允许创建编码型(011)/ 调试型(010)数字员工
         validateCommercialEditionDigitalEmployeeCreation(digitalEmployeeDTO);
         String resourceName = digitalEmployeeDTO.getResourceName();
         long count = ssResourceService.countResource(resourceName, ResourceBizTypeEnum.DIG_EMPLOYEE.name(), null);
@@ -618,7 +628,7 @@ public class DigitalEmployeeApplicationService {
         Set<Long> userOrgIds = CurrentUserHolder.getUserOrgIds();
         ssResource.setManOrgId(CollectionUtils.isEmpty(userOrgIds) ? null : userOrgIds.iterator().next());
         ssResource.setManUserId(String.valueOf(CurrentUserHolder.getCurrentUserId()));
-        // 数字员工 personal / enterprise 归属口径统一落到资源主表，供个人视角查询等场景直接过滤使用。
+        // 数字员工 personal / enterprise 归属口径统一落到资源主表,供个人视角查询等场景直接过滤使用.
         ssResource.setOwnerType(StringUtils.trimToNull(digitalEmployeeDTO.getOwnerType()));
         ssResource.setResourceDVerid(1L);
         ssResource.setResourceRVerid(0L);
@@ -640,7 +650,7 @@ public class DigitalEmployeeApplicationService {
             digitalEmployeeDTO.getRelResourceInfoList());
         this.rebuildAndSaveDigitalEmployeeRelSkills(ssResource.getResourceId());
 
-        // 暂停生成 RESOURCE_DIG_EMPLOYEE_{resourceId} 旧技能缓存，当前运行时改读 DIG_EMPLOYEE_{resourceId}。
+        // 暂停生成 RESOURCE_DIG_EMPLOYEE_{resourceId} 旧技能缓存,当前运行时改读 DIG_EMPLOYEE_{resourceId}.
         // this.syncDigEmployeeSkillsToRedisQuietly(ssResource.getResourceId());
 
         // 前台的直接上架给予使用权限
@@ -652,7 +662,7 @@ public class DigitalEmployeeApplicationService {
 
         // 记录操作日志
         operationLogService.recordOperationLog(ssResource, OperationTypeEnum.CREATE);
-        // 保存模版关联关系（记忆配置）
+        // 保存模版关联关系(记忆配置)
         // 优先使用 memoryConfigList
         List<MemoryConfigDTO> memoryConfigList = digitalEmployeeDTO.getMemoryConfigList();
         Long currentUserId = CurrentUserHolder.getCurrentUserId();
@@ -666,9 +676,9 @@ public class DigitalEmployeeApplicationService {
             }
             catch (Exception e) {
                 // 记录日志但不影响主流程
-                logger.error("创建数字员工记忆库失败，resourceId: {}, error: {}", ssResource.getResourceId(), e.getMessage(), e);
+                logger.error("创建数字员工记忆库失败,resourceId: {}, error: {}", ssResource.getResourceId(), e.getMessage(), e);
             }
-            // 使用新的 memoryConfigList 方式保存（带用户ID条件删除）
+            // 使用新的 memoryConfigList 方式保存(带用户ID条件删除)
             templateRuleInfoApplicationService.saveResourceTemplateRelationsByMemoryConfig(ssResource.getResourceId(),
                 memoryConfigList, currentUserId, memoryLibraryId);
         }
@@ -682,8 +692,8 @@ public class DigitalEmployeeApplicationService {
     }
 
     /**
-     * 创建用户默认超级助手，资源保存仍复用 saveDigitalEmployee 主链路。 默认超级助手本质上仍是真实 DIG_EMPLOYEE 资源，固定 resourceCode={userCode}_main，
-     * 前后端都按数字员工处理，避免再出现 HUMAN_ASSISTANT / DIG_EMPLOYEE 两套表达。
+     * 创建用户默认超级助手,资源保存仍复用 saveDigitalEmployee 主链路. 默认超级助手本质上仍是真实 DIG_EMPLOYEE 资源,固定 resourceCode={userCode}_main,
+     * 前后端都按数字员工处理,避免再出现 HUMAN_ASSISTANT / DIG_EMPLOYEE 两套表达.
      *
      * @author qin.guoquan
      * @date 2026-05-09 150800
@@ -725,7 +735,7 @@ public class DigitalEmployeeApplicationService {
     }
 
     /**
-     * 生成默认超级助手资源编码。
+     * 生成默认超级助手资源编码.
      *
      * @author qin.guoquan
      * @date 2026-05-09 150800
@@ -739,7 +749,7 @@ public class DigitalEmployeeApplicationService {
     }
 
     /**
-     * 数字员工展示标签统一运行时生成，不再写入扩展表 tag_name。
+     * 数字员工展示标签统一运行时生成,不再写入扩展表 tag_name.
      */
     private String buildDigitalEmployeeTagName(String ownerType, String resourceCode, String agentType) {
         if (OwnerType.PERSONAL.equals(ownerType) || OwnerType.PERSONAL_DEFAULT.equals(ownerType)) {
@@ -789,7 +799,7 @@ public class DigitalEmployeeApplicationService {
     private AgentPrologueDto.ModelInfo buildDefaultModelInfo() {
         ModelDto modelDto = aiModelService.getDefaultChatModel();
         if (modelDto == null) {
-            logger.error("当前默认模型不存在，默认个人助理将使用空模型配置初始化");
+            logger.error("当前默认模型不存在,默认个人助理将使用空模型配置初始化");
             return null;
         }
 
@@ -803,7 +813,7 @@ public class DigitalEmployeeApplicationService {
     }
 
     /**
-     * 根据数字员工类型回填 ss_resource 的实现方式与 Worker 注册类型。
+     * 根据数字员工类型回填 ss_resource 的实现方式与 Worker 注册类型.
      *
      * @author qin.guoquan
      * @date 2026-04-25 15:42:00
@@ -837,14 +847,14 @@ public class DigitalEmployeeApplicationService {
         SsResource ssResource = ssResourceService.findById(resourceId);
         validateDigitalEmployeeUpdatePermission(ssResource);
         if (isDefaultPersonalResource(ssResource)) {
-            // 默认个人助理始终按助手型运行，避免前端旧参数把 worker_agent_type 覆盖成编码型等其他类型。
+            // 默认个人助理始终按助手型运行,避免前端旧参数把 worker_agent_type 覆盖成编码型等其他类型.
             digitalEmployeeDTO.setAgentType(DigitalEmployType.AGENT_TYPE_ASSISTANT.getCode());
         }
         BeanUtil.copyProperties(digitalEmployeeDTO, ssResource);
         ssResource.setUpdateBy(CurrentUserHolder.getCurrentUserId());
         ssResource.setUpdateTime(new Date());
         ssResource.setResourceStatus(ResourceStatus.LIST.getNum());
-        // 更新时允许前端同步调整资源归属类型，避免个人资源仍保留旧的 owner_type。
+        // 更新时允许前端同步调整资源归属类型,避免个人资源仍保留旧的 owner_type.
         ssResource.setOwnerType(StringUtils.trimToNull(digitalEmployeeDTO.getOwnerType()));
         fillDigitalEmployeeImplInfo(ssResource, digitalEmployeeDTO.getAgentType());
         ssResourceService.updateResourceEntity(ssResource);
@@ -855,7 +865,7 @@ public class DigitalEmployeeApplicationService {
         ssResExtDigEmployee.setAgentSseUrl(ssResExtDigEmployee.getAgentSseUrlOri());
         ssResExtDigEmployee.setAgentWebUrl(ssResExtDigEmployee.getAgentWebUrlOri());
         ssResExtDigEmployee.setAgentAdminUrlList(ssResExtDigEmployee.getAgentAdminUrlOriList());
-        // tagName 统一由查询接口运行时计算，避免前端回传旧标签又写回扩展表。
+        // tagName 统一由查询接口运行时计算,避免前端回传旧标签又写回扩展表.
         ssResExtDigEmployee.setTagName(null);
         ssResExtDigEmployeeService.update(ssResExtDigEmployee);
 
@@ -865,7 +875,7 @@ public class DigitalEmployeeApplicationService {
         this.compareSsResourceRelDetail(ssResource, relIds, resourceRelDetails,
             digitalEmployeeDTO.getRelResourceInfoList());
         this.rebuildAndSaveDigitalEmployeeRelSkills(resourceId);
-        // 暂停生成 RESOURCE_DIG_EMPLOYEE_{resourceId} 旧技能缓存，当前运行时改读 DIG_EMPLOYEE_{resourceId}。
+        // 暂停生成 RESOURCE_DIG_EMPLOYEE_{resourceId} 旧技能缓存,当前运行时改读 DIG_EMPLOYEE_{resourceId}.
         // this.syncDigEmployeeSkillsToRedisQuietly(resourceId);
 
         // 前台的直接上架
@@ -875,7 +885,7 @@ public class DigitalEmployeeApplicationService {
 
         // 记录操作日志
         operationLogService.recordOperationLog(ssResource, OperationTypeEnum.UPDATE);
-        // 保存模版关联关系（记忆配置）
+        // 保存模版关联关系(记忆配置)
         List<MemoryConfigDTO> memoryConfigList = digitalEmployeeDTO.getMemoryConfigList();
         Long currentUserId = CurrentUserHolder.getCurrentUserId();
         Long memoryLibraryId = null;
@@ -888,9 +898,9 @@ public class DigitalEmployeeApplicationService {
             }
             catch (Exception e) {
                 // 记录日志但不影响主流程
-                logger.error("创建数字员工记忆库失败，resourceId: {}, error: {}", resourceId, e.getMessage(), e);
+                logger.error("创建数字员工记忆库失败,resourceId: {}, error: {}", resourceId, e.getMessage(), e);
             }
-            // 使用新的 memoryConfigList 方式保存（带用户ID条件删除）
+            // 使用新的 memoryConfigList 方式保存(带用户ID条件删除)
             templateRuleInfoApplicationService.saveResourceTemplateRelationsByMemoryConfig(resourceId, memoryConfigList,
                 currentUserId, memoryLibraryId);
         }
@@ -904,7 +914,7 @@ public class DigitalEmployeeApplicationService {
     }
 
     /**
-     * 增量安装知识或资源到数字员工，保留已有关联关系。
+     * 增量安装知识或资源到数字员工,保留已有关联关系.
      *
      * @param installResourceDTO 安装入参
      * @return 数字员工详情
@@ -938,7 +948,7 @@ public class DigitalEmployeeApplicationService {
 
         this.compareSsResourceRelDetail(ssResource, new ArrayList<>(mergedRelIds), resourceRelDetails, null);
         this.rebuildAndSaveDigitalEmployeeRelSkills(digitalEmployeeId);
-        // 暂停生成 RESOURCE_DIG_EMPLOYEE_{resourceId} 旧技能缓存，当前运行时改读 DIG_EMPLOYEE_{resourceId}。
+        // 暂停生成 RESOURCE_DIG_EMPLOYEE_{resourceId} 旧技能缓存,当前运行时改读 DIG_EMPLOYEE_{resourceId}.
         // this.syncDigEmployeeSkillsToRedisQuietly(digitalEmployeeId);
         this.synOpenClawWorkSpace(digitalEmployeeId);
         operationLogService.recordOperationLog(ssResource, OperationTypeEnum.UPDATE);
@@ -950,7 +960,7 @@ public class DigitalEmployeeApplicationService {
     }
 
     /**
-     * 从数字员工卸载知识或资源，仅解除关联关系，不删除资源本身。
+     * 从数字员工卸载知识或资源,仅解除关联关系,不删除资源本身.
      *
      * @param uninstallResourceDTO 卸载入参
      * @return 数字员工详情
@@ -993,11 +1003,11 @@ public class DigitalEmployeeApplicationService {
     }
 
     /**
-     * 以给定的全量目标 relIds 覆盖式同步数字员工的关联资源明细，并触发运行期重同步。
-     * 供本体绑定等场景复用：调用方自行计算好目标集合（多退少补），本方法只做落库 + 同步。
+     * 以给定的全量目标 relIds 覆盖式同步数字员工的关联资源明细,并触发运行期重同步.
+     * 供本体绑定等场景复用:调用方自行计算好目标集合(多退少补),本方法只做落库 + 同步.
      *
      * @param digitalEmployeeId 数字员工资源 ID
-     * @param targetRelIds 目标全量关联资源 ID（为空表示清空全部关联）
+     * @param targetRelIds 目标全量关联资源 ID(为空表示清空全部关联)
      */
     @Transactional(rollbackFor = Exception.class)
     public void syncRelResourcesByTargetIds(Long digitalEmployeeId, List<Long> targetRelIds) {
@@ -1045,8 +1055,8 @@ public class DigitalEmployeeApplicationService {
         if (digitalEmployee == null) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("resource.not.found"));
         }
-        // 技能安装目标是前端当前选中的数字员工：显式 @ 的数字员工优先，没有 @ 时才回退默认数字员工。
-        // 因此这里按目标数字员工的管理权限校验，不再强制要求它必须等于 defaultDigEmployeeId。
+        // 技能安装目标是前端当前选中的数字员工:显式 @ 的数字员工优先,没有 @ 时才回退默认数字员工.
+        // 因此这里按目标数字员工的管理权限校验,不再强制要求它必须等于 defaultDigEmployeeId.
         if (!authApplicationService.hasResourceManagePermission(digitalEmployee)) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
                 I18nUtil.get("digemployee.skill.install.no.manage.permission", digitalEmployee.getResourceName()));
@@ -1061,8 +1071,8 @@ public class DigitalEmployeeApplicationService {
     }
 
     /**
-     * 校验当前用户对指定数字员工是否有管理权限（删除/卸载工作空间技能前置校验）。
-     * 与绑定技能卸载使用同一套校验，避免漂移。
+     * 校验当前用户对指定数字员工是否有管理权限(删除/卸载工作空间技能前置校验).
+     * 与绑定技能卸载使用同一套校验,避免漂移.
      *
      * @param digitalEmployeeId 数字员工资源 ID
      */
@@ -1075,7 +1085,7 @@ public class DigitalEmployeeApplicationService {
         if (digitalEmployee == null) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("resource.not.found"));
         }
-        // 技能卸载同安装一样，按请求里的当前数字员工校验管理权限。
+        // 技能卸载同安装一样,按请求里的当前数字员工校验管理权限.
         if (!authApplicationService.hasResourceManagePermission(digitalEmployee)) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
                 I18nUtil.get("digemployee.skill.uninstall.no.manage.permission", digitalEmployee.getResourceName()));
@@ -1083,8 +1093,8 @@ public class DigitalEmployeeApplicationService {
     }
 
     /**
-     * 设置当前用户默认数字员工。 默认关系只维护在 suas_superassist.default_dig_employee_id 上，不再修改资源 owner_type 或扩展表 tag_name。
-     * 这样超级助手、个人助理、企业数字员工都保持自身资源归属，默认身份只作为当前用户会话兜底 @ 对象。
+     * 设置当前用户默认数字员工. 默认关系只维护在 suas_superassist.default_dig_employee_id 上,不再修改资源 owner_type 或扩展表 tag_name.
+     * 这样超级助手、个人助理、企业数字员工都保持自身资源归属,默认身份只作为当前用户会话兜底 @ 对象.
      *
      * @param dto 请求参数
      * @return 默认数字员工切换结果
@@ -1136,17 +1146,17 @@ public class DigitalEmployeeApplicationService {
         Long resourceId = employeeIdDTO.getResourceId();
         SsResource ssResource = ssResourceService.findById(resourceId);
         validateDigitalEmployeeManagePermission(ssResource);
-        // 软删除：把 ss_resource.resource_status 置为 REMOVED(3)，保留主表与扩展表数据，
-        // 让前端"已注销"筛选项可以查询到这些记录；运行期副作用（缓存/注册等）继续清理。
+        // 软删除:把 ss_resource.resource_status 置为 REMOVED(3),保留主表与扩展表数据,
+        // 让前端"已注销"筛选项可以查询到这些记录;运行期副作用(缓存/注册等)继续清理.
         ssResource.setResourceStatus(ResourceStatus.REMOVED.getNum());
         ssResource.setUpdateBy(CurrentUserHolder.getCurrentUserId());
         ssResource.setUpdateTime(new Date());
         ssResourceService.updateResourceEntity(ssResource);
 
-        // 该数字员工若被其它用户设为默认助理，回退他们的默认助理为自己的超级助手，避免出现“默认指向已注销资源”。
+        // 该数字员工若被其它用户设为默认助理,回退他们的默认助理为自己的超级助手,避免出现“默认指向已注销资源”.
         resetDefaultForAffectedUsers(resourceId);
 
-        // 注销后不再可被会话调用：清理技能缓存/产物/外部注册
+        // 注销后不再可被会话调用:清理技能缓存/产物/外部注册
         removeDigEmployeeFromRedisQuietly(resourceId);
         removeDigEmployeeJsonFromResourceStorageQuietly(resourceId);
 
@@ -1170,8 +1180,8 @@ public class DigitalEmployeeApplicationService {
     }
 
     /**
-     * 数字员工注销/删除后，把所有把它设为默认助理的用户回退到各自的超级助手；找不到超级助手时清空。 同时若当前登录用户在受影响列表里，需要刷新 session 中的 defaultDigEmployeeId。 暴露为 public
-     * 以便其他注销链路（如 ToolManService.deleteManagedResource）复用。
+     * 数字员工注销/删除后,把所有把它设为默认助理的用户回退到各自的超级助手;找不到超级助手时清空. 同时若当前登录用户在受影响列表里,需要刷新 session 中的 defaultDigEmployeeId. 暴露为 public
+     * 以便其他注销链路(如 ToolManService.deleteManagedResource)复用.
      */
     public void resetDefaultForAffectedUsers(Long resourceId) {
         if (resourceId == null) {
@@ -1190,7 +1200,7 @@ public class DigitalEmployeeApplicationService {
                 suasSuperassistService.updateById(suasSuperassist);
             }
             catch (Exception e) {
-                logger.warn("回退默认数字员工失败，userId={}, fallback={}", userId, fallbackResourceId, e);
+                logger.warn("回退默认数字员工失败,userId={}, fallback={}", userId, fallbackResourceId, e);
                 continue;
             }
             if (Objects.equals(userId, currentUserId)) {
@@ -1200,7 +1210,7 @@ public class DigitalEmployeeApplicationService {
     }
 
     /**
-     * 按 resource_code={userCode}_main 反查指定用户的超级助手资源ID，找不到返回 null。
+     * 按 resource_code={userCode}_main 反查指定用户的超级助手资源ID,找不到返回 null.
      */
     private Long resolveSuperAssistantResourceId(Long userId) {
         if (userId == null) {
@@ -1238,8 +1248,8 @@ public class DigitalEmployeeApplicationService {
     }
 
     /**
-     * 当前用户自己的超级助手资源使用稳定编码 {userCode}_main；即使用户把其他个人助理设为默认数字员工，
-     * 也应允许用户继续编辑自己的超级助手配置。
+     * 当前用户自己的超级助手资源使用稳定编码 {userCode}_main;即使用户把其他个人助理设为默认数字员工,
+     * 也应允许用户继续编辑自己的超级助手配置.
      */
     private boolean isCurrentUserOwnDefaultSuperAssistantResource(SsResource ssResource) {
         Long currentUserId = CurrentUserHolder.getCurrentUserId();
@@ -1296,7 +1306,7 @@ public class DigitalEmployeeApplicationService {
     }
 
     /**
-     * 左侧“全部列表项”中可见的数字员工才允许设为默认： 我创建的、我有使用授权的、或我有 ALLOW_MANAGE 管理授权的资源均可。
+     * 左侧“全部列表项”中可见的数字员工才允许设为默认: 我创建的、我有使用授权的、或我有 ALLOW_MANAGE 管理授权的资源均可.
      */
     private boolean canCurrentUserSetAsDefault(SsResource resource, Long currentUserId) {
         if (resource == null || currentUserId == null) {
@@ -1369,31 +1379,103 @@ public class DigitalEmployeeApplicationService {
     }
 
     /**
-     * 同步数字员工到 openClaw（带原始入参版本）。 之所以单独承接 inputDto，是因为 relTools 不入 DB，重新 findDetailsById 拿不回， 需要从前端原始入参直接透传到 JSON 与
-     * target_content。
+     * 同步数字员工到 openClaw(带原始入参版本). 之所以单独承接 inputDto,是因为 relTools 不入 DB,重新 findDetailsById 拿不回, 需要从前端原始入参直接透传到 JSON 与
+     * target_content.
      *
      * @param resourceId 标识
-     * @param inputDto 前端 save/update 时传入的原始 DTO；为 null 时退化为纯 DB 拼装
+     * @param inputDto 前端 save/update 时传入的原始 DTO;为 null 时退化为纯 DB 拼装
      */
     public void synOpenClawWorkSpace(Long resourceId, DigitalEmployeeDTO inputDto) {
         try {
             doSyncOpenClawWorkSpace(resourceId, inputDto);
         }
         catch (Exception e) {
-            logger.error("同步数字员工资源文件失败，resourceId: {}, error: {}", resourceId, e.getMessage(), e);
+            logger.error("同步数字员工资源文件失败,resourceId: {}, error: {}", resourceId, e.getMessage(), e);
         }
     }
 
     /**
-     * 将已有数字员工及其关联资源的标准 JSON 同步至 Redis（供启动全量初始化等场景调用）。 优先使用扩展表 {@code target_content}，缺失时再组装详情 JSON。
+     * 将已有数字员工及其关联资源的标准 JSON 同步至 Redis(供启动全量初始化等场景调用). 优先使用扩展表 {@code target_content},缺失时再组装详情 JSON.
      */
     public void syncExistingDigEmployeeConfigToRedisQuietly(Long resourceId) {
         try {
             syncExistingDigEmployeeConfigToRedis(resourceId);
         }
         catch (Exception e) {
-            logger.error("同步已有数字员工配置到Redis失败，resourceId: {}, error: {}", resourceId, e.getMessage(), e);
+            logger.error("同步已有数字员工配置到Redis失败,resourceId: {}, error: {}", resourceId, e.getMessage(), e);
         }
+    }
+
+    /**
+     * PR-1: 收集一个数字员工及其关联资源(TOOLKIT / MCP / AGENT / KG_* / VIEW / OBJECT / SKILL)
+     * 所有应写入 Redis 的 (key, jsonContent) 对,但实际写入由调用方(Runner 层)通过 Pipeline
+     * 一次性提交.本方法不写 Redis,仅收集.
+     * <p>
+     * 调用方契约:
+     * <ul>
+     *     <li>返回 Map 顺序与原有 {@link #syncExistingDigEmployeeConfigToRedis} 一致:先主数字员工 JSON,再关联资源 JSON</li>
+     *     <li>{@code target_content} 空白且 {@code skipBlankTargetContent=true} 时返回空 Map(warn 已记在 {@link #resolveDigEmployeeJsonForRedisSync})</li>
+     *     <li>key 形如 {@code DIG_EMPLOYEE_{id}}、{@code TOOLKIT_{id}} 等,与既有键空间一致</li>
+     * </ul>
+     *
+     * @param resourceId 数字员工资源 ID
+     * @return 收集到的所有 (redisKey -> jsonContent) 映射;空 Map 表示无任何可写内容
+     */
+    public Map<String, String> collectDigEmployeeSyncEntries(Long resourceId) {
+        Map<String, String> result = new LinkedHashMap<>();
+        if (resourceId == null) {
+            return result;
+        }
+        if (digEmployeeRedisSyncProperties == null
+                || !digEmployeeRedisSyncProperties.isJsonRedisSyncEnabled()) {
+            return result;
+        }
+        // 主数字员工
+        String mainJson = resolveDigEmployeeJsonForRedisSync(resourceId);
+        if (StringUtils.isNotBlank(mainJson)) {
+            result.put(
+                DigEmployeeRedisKeys.resourceConfigJsonKey(ResourceBizTypeEnum.DIG_EMPLOYEE.name(), resourceId),
+                mainJson);
+        }
+        // 关联资源(与 syncRelatedResourceConfigJsonsToRedisQuietly 完全同语义,但不写 Redis)
+        try {
+            List<SsResourceRelDetail> relDetails = ssResourceRelDetailService.findByResourceId(resourceId);
+            if (CollectionUtils.isEmpty(relDetails)) {
+                return result;
+            }
+            List<Long> relIds = relDetails.stream()
+                .map(SsResourceRelDetail::getRelResourceId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
+            if (CollectionUtils.isEmpty(relIds)) {
+                return result;
+            }
+            List<SsResource> relResources = ssResourceService.findByIdList(relIds);
+            if (CollectionUtils.isEmpty(relResources)) {
+                return result;
+            }
+            for (SsResource rel : relResources) {
+                if (rel == null || rel.getResourceId() == null) {
+                    continue;
+                }
+                String bizType = StringUtils.trimToEmpty(rel.getResourceBizType());
+                if (!isSupportedRelatedResourceBizType(bizType)) {
+                    continue;
+                }
+                String targetContent = loadRelatedResourceTargetContent(bizType, rel.getResourceId());
+                if (StringUtils.isBlank(targetContent)) {
+                    continue;
+                }
+                result.put(DigEmployeeRedisKeys.resourceConfigJsonKey(bizType, rel.getResourceId()),
+                    targetContent);
+            }
+        }
+        catch (Exception e) {
+            logger.warn("收集数字员工关联资源同步条目失败, resourceId={}, reason={}",
+                resourceId, e.getMessage(), e);
+        }
+        return result;
     }
 
     private void syncExistingDigEmployeeConfigToRedis(Long resourceId) {
@@ -1413,15 +1495,23 @@ public class DigitalEmployeeApplicationService {
         if (ext != null && StringUtils.isNotBlank(ext.getTargetContent())) {
             return ext.getTargetContent();
         }
+        // PR-1:target_content 空白时,若开关开启则直接跳过(避免回退到 findDetailsById
+        // 的 7-10 SQL).要求:必须先跑 StartupTargetContentPreloader 补齐 target_content.
+        if (digEmployeeStartupSyncProperties != null
+                && digEmployeeStartupSyncProperties.isSkipBlankTargetContent()) {
+            logger.warn("targetContent 空白,跳过该条记录 resourceId={},请在数据修复后下次启动时同步",
+                resourceId);
+            return null;
+        }
         EmployeeIdDTO employeeIdDTO = new EmployeeIdDTO();
         employeeIdDTO.setResourceId(resourceId);
         DigitalEmployeeDetailsDTO details = findDetailsById(employeeIdDTO);
         if (details == null) {
-            logger.warn("数字员工详情不存在，无法组装Redis配置JSON, resourceId={}", resourceId);
+            logger.warn("数字员工详情不存在,无法组装Redis配置JSON, resourceId={}", resourceId);
             return null;
         }
         fillDigitalEmployeeSyncRuntimeFields(details, resourceId);
-        // target_content 只是上一次同步快照，不能再作为当前标准 JSON 的一个字段递归写回。
+        // target_content 只是上一次同步快照,不能再作为当前标准 JSON 的一个字段递归写回.
         details.setTargetContent(null);
         return com.alibaba.fastjson.JSON.toJSONString(details);
     }
@@ -1431,11 +1521,11 @@ public class DigitalEmployeeApplicationService {
         employeeIdDTO.setResourceId(resourceId);
         DigitalEmployeeDetailsDTO details = this.findDetailsById(employeeIdDTO);
         fillDigitalEmployeeSyncRuntimeFields(details, resourceId);
-        // 用前端原始入参覆盖运行期字段：
-        // - relTools 不入库，必须从入参直接透传，否则首次保存的 JSON 中 relTools 会丢；
-        // - relPrompt 与 corePersonaDefinition 同源，入参更"新"则优先用入参，避免编辑场景被旧库值覆盖。
+        // 用前端原始入参覆盖运行期字段:
+        // - relTools 不入库,必须从入参直接透传,否则首次保存的 JSON 中 relTools 会丢;
+        // - relPrompt 与 corePersonaDefinition 同源,入参更"新"则优先用入参,避免编辑场景被旧库值覆盖.
         applyInputRuntimeFields(details, inputDto);
-        // target_content 只是镜像快照，不能参与本次 JSON 序列化，否则会出现 JSON 套 JSON 的递归膨胀。
+        // target_content 只是镜像快照,不能参与本次 JSON 序列化,否则会出现 JSON 套 JSON 的递归膨胀.
         details.setTargetContent(null);
 
         String jsonContent = com.alibaba.fastjson.JSON.toJSONString(details);
@@ -1446,9 +1536,9 @@ public class DigitalEmployeeApplicationService {
         logger.info("数字员工同步开始, storageType={}, resourceId={}, resourcePath={}/{}", effectiveStorageType, resourceId,
             resourceDir, fileName);
 
-        // 先把同步到 MinIO 的 JSON 串镜像写入 ss_res_ext_dig_employee.target_content。
-        // 这样：1) 即便后续 MinIO 推送失败，DB 也保留了上一次成功生成的 JSON；
-        // 2) 前端编辑回显时（findDetailsById）可以从这里反序列化 relTools 等不入库的运行期字段。
+        // 先把同步到 MinIO 的 JSON 串镜像写入 ss_res_ext_dig_employee.target_content.
+        // 这样:1) 即便后续 MinIO 推送失败,DB 也保留了上一次成功生成的 JSON;
+        // 2) 前端编辑回显时(findDetailsById)可以从这里反序列化 relTools 等不入库的运行期字段.
         persistTargetContent(resourceId, jsonContent);
 
         resourceArtifactStorageService.syncResourceJsonByBizType(jsonContent, ResourceBizTypeEnum.DIG_EMPLOYEE.name(),
@@ -1458,9 +1548,9 @@ public class DigitalEmployeeApplicationService {
 
         syncDigEmployeeConfigJsonToRedisQuietly(resourceId, jsonContent);
 
-        // 数字员工自己的 JSON 同步完成后，再检查并补齐其关联资源的标准 JSON 产物。
-        // 这样可以确保前端保存/更新数字员工后，关联的 toolkit / mcp / agent / kg_* / view / object
-        // 也都能在开放资源目录中按标准命名被下游读取到。
+        // 数字员工自己的 JSON 同步完成后,再检查并补齐其关联资源的标准 JSON 产物.
+        // 这样可以确保前端保存/更新数字员工后,关联的 toolkit / mcp / agent / kg_* / view / object
+        // 也都能在开放资源目录中按标准命名被下游读取到.
         syncMissingRelatedResourceJsons(resourceId);
         syncRelatedResourceConfigJsonsToRedisQuietly(resourceId);
 
@@ -1469,7 +1559,7 @@ public class DigitalEmployeeApplicationService {
     }
 
     /**
-     * 数字员工同步到开放资源目录前，统一补齐实现方式与 Worker 注册类型。
+     * 数字员工同步到开放资源目录前,统一补齐实现方式与 Worker 注册类型.
      *
      * @author qin.guoquan
      * @date 2026-04-26 11:30:00
@@ -1487,8 +1577,8 @@ public class DigitalEmployeeApplicationService {
     }
 
     /**
-     * 检查数字员工关联资源对应的标准 JSON 是否存在；若缺失，则按原 targetContent 补发回开放资源目录。 设计说明： 1. 不重新走资源导入流程，而是直接复用各扩展表中已经生成好的 targetContent；
-     * 2. 只处理下游明确依赖的资源类型：TOOLKIT / MCP / AGENT / KG_* / VIEW / OBJECT； 3. 某个关联资源补发失败时，仅记录日志，不影响数字员工自身同步主流程。
+     * 检查数字员工关联资源对应的标准 JSON 是否存在;若缺失,则按原 targetContent 补发回开放资源目录. 设计说明: 1. 不重新走资源导入流程,而是直接复用各扩展表中已经生成好的 targetContent;
+     * 2. 只处理下游明确依赖的资源类型:TOOLKIT / MCP / AGENT / KG_* / VIEW / OBJECT; 3. 某个关联资源补发失败时,仅记录日志,不影响数字员工自身同步主流程.
      */
     private void syncMissingRelatedResourceJsons(Long digEmployeeResourceId) {
         if (digEmployeeResourceId == null) {
@@ -1496,20 +1586,20 @@ public class DigitalEmployeeApplicationService {
         }
         List<SsResourceRelDetail> relDetails = ssResourceRelDetailService.findByResourceId(digEmployeeResourceId);
         if (CollectionUtils.isEmpty(relDetails)) {
-            logger.debug("数字员工无关联资源，无需补齐资源JSON, digEmployeeResourceId={}", digEmployeeResourceId);
+            logger.debug("数字员工无关联资源,无需补齐资源JSON, digEmployeeResourceId={}", digEmployeeResourceId);
             return;
         }
 
         List<Long> relResourceIds = relDetails.stream().map(SsResourceRelDetail::getRelResourceId)
             .filter(java.util.Objects::nonNull).distinct().collect(Collectors.toList());
         if (CollectionUtils.isEmpty(relResourceIds)) {
-            logger.debug("数字员工关联资源ID为空，无需补齐资源JSON, digEmployeeResourceId={}", digEmployeeResourceId);
+            logger.debug("数字员工关联资源ID为空,无需补齐资源JSON, digEmployeeResourceId={}", digEmployeeResourceId);
             return;
         }
 
         List<SsResource> relResources = ssResourceService.findByIdList(relResourceIds);
         if (CollectionUtils.isEmpty(relResources)) {
-            logger.debug("数字员工关联资源不存在，无需补齐资源JSON, digEmployeeResourceId={}, relResourceIds={}", digEmployeeResourceId,
+            logger.debug("数字员工关联资源不存在,无需补齐资源JSON, digEmployeeResourceId={}, relResourceIds={}", digEmployeeResourceId,
                 relResourceIds);
             return;
         }
@@ -1522,7 +1612,7 @@ public class DigitalEmployeeApplicationService {
     }
 
     /**
-     * 将数字员工关联资源的标准 JSON 同步至 Redis（与 MinIO 产物同内容，键名为 {@code {BIZTYPE}_{resourceId}}）。 每次数字员工开放目录同步后执行，不依赖 MinIO 是否缺失。
+     * 将数字员工关联资源的标准 JSON 同步至 Redis(与 MinIO 产物同内容,键名为 {@code {BIZTYPE}_{resourceId}}). 每次数字员工开放目录同步后执行,不依赖 MinIO 是否缺失.
      */
     public void syncRelatedResourceConfigJsonsToRedisQuietly(Long digEmployeeResourceId) {
         if (digEmployeeResourceId == null) {
@@ -1554,7 +1644,7 @@ public class DigitalEmployeeApplicationService {
         }
         catch (Exception e) {
             logger.error(
-                "同步数字员工关联资源配置到Redis失败，不影响主流程, digEmployeeResourceId={}, relResourceId={}, resourceBizType={}, reason={}",
+                "同步数字员工关联资源配置到Redis失败,不影响主流程, digEmployeeResourceId={}, relResourceId={}, resourceBizType={}, reason={}",
                 digEmployeeResourceId, relResource == null ? null : relResource.getResourceId(),
                 relResource == null ? null : relResource.getResourceBizType(), e.getMessage(), e);
         }
@@ -1572,7 +1662,7 @@ public class DigitalEmployeeApplicationService {
         String targetContent = loadRelatedResourceTargetContent(resourceBizType, relResourceId);
         if (StringUtils.isBlank(targetContent)) {
             logger.warn(
-                "数字员工关联资源targetContent为空，跳过Redis同步, digEmployeeResourceId={}, relResourceId={}, resourceCode={}, resourceBizType={}",
+                "数字员工关联资源targetContent为空,跳过Redis同步, digEmployeeResourceId={}, relResourceId={}, resourceCode={}, resourceBizType={}",
                 digEmployeeResourceId, relResourceId, relResource.getResourceCode(), resourceBizType);
             return;
         }
@@ -1589,7 +1679,7 @@ public class DigitalEmployeeApplicationService {
         }
         String resourceBizType = StringUtils.trimToEmpty(relResource.getResourceBizType());
         if (!isSupportedRelatedResourceBizType(resourceBizType)) {
-            logger.debug("数字员工关联资源类型不在补齐范围内，跳过, digEmployeeResourceId={}, relResourceId={}, resourceBizType={}",
+            logger.debug("数字员工关联资源类型不在补齐范围内,跳过, digEmployeeResourceId={}, relResourceId={}, resourceBizType={}",
                 digEmployeeResourceId, relResource.getResourceId(), resourceBizType);
             return;
         }
@@ -1601,7 +1691,7 @@ public class DigitalEmployeeApplicationService {
             digEmployeeResourceId, relResourceId, relResource.getResourceCode(), resourceBizType, exists);
         if (exists) {
             logger.debug(
-                "数字员工关联资源JSON已存在，跳过补发, digEmployeeResourceId={}, relResourceId={}, resourceCode={}, resourceBizType={}",
+                "数字员工关联资源JSON已存在,跳过补发, digEmployeeResourceId={}, relResourceId={}, resourceCode={}, resourceBizType={}",
                 digEmployeeResourceId, relResourceId, relResource.getResourceCode(), resourceBizType);
             return;
         }
@@ -1609,14 +1699,14 @@ public class DigitalEmployeeApplicationService {
         String targetContent = loadRelatedResourceTargetContent(resourceBizType, relResourceId);
         if (StringUtils.isBlank(targetContent)) {
             logger.warn(
-                "数字员工关联资源targetContent为空，无法补发JSON, digEmployeeResourceId={}, relResourceId={}, resourceCode={}, resourceBizType={}",
+                "数字员工关联资源targetContent为空,无法补发JSON, digEmployeeResourceId={}, relResourceId={}, resourceCode={}, resourceBizType={}",
                 digEmployeeResourceId, relResourceId, relResource.getResourceCode(), resourceBizType);
             return;
         }
 
         try {
             logger.debug(
-                "数字员工关联资源JSON缺失，开始补发, digEmployeeResourceId={}, relResourceId={}, resourceCode={}, resourceBizType={}",
+                "数字员工关联资源JSON缺失,开始补发, digEmployeeResourceId={}, relResourceId={}, resourceCode={}, resourceBizType={}",
                 digEmployeeResourceId, relResourceId, relResource.getResourceCode(), resourceBizType);
             resourceArtifactStorageService.syncResourceJsonByBizType(targetContent, resourceBizType, relResourceId);
             ssResourceArtifactService.upsertStandardJsonArtifact(relResourceId, resourceBizType,
@@ -1627,7 +1717,7 @@ public class DigitalEmployeeApplicationService {
         }
         catch (Exception e) {
             logger.error(
-                "数字员工关联资源JSON补发失败，不影响主流程, digEmployeeResourceId={}, relResourceId={}, resourceCode={}, resourceBizType={}, reason={}",
+                "数字员工关联资源JSON补发失败,不影响主流程, digEmployeeResourceId={}, relResourceId={}, resourceCode={}, resourceBizType={}, reason={}",
                 digEmployeeResourceId, relResourceId, relResource.getResourceCode(), resourceBizType, e.getMessage(),
                 e);
         }
@@ -1672,19 +1762,321 @@ public class DigitalEmployeeApplicationService {
         return null;
     }
 
+    /**
+     * PR-3 (#150) 批量加载 target_content(替换 PR-1 之前的 N+1 循环).
+     * <p>
+     * 核心改进:单 bizType 下一次性查多个 resourceId,避免每资源一次 SQL.
+     * <p>
+     * <strong>当前实现</strong>:7 个 ext service 的 mapper 全部补了 {@code findByIds(Collection<Long>)}
+     * 批量接口(底层委托 MyBatis-Plus {@code selectBatchIds} 单 SQL IN 子句). 本方法按 bizType 分支
+     * 调用对应 service 的 {@code findByIds},结果按 resourceId 索引写入 result Map,仅保留
+     * target_content 非空记录.
+     * <p>
+     * 调用方契约:
+     * <ul>
+     *     <li>idList 为空/null 时返回空 Map(Mapper 层 default 实现保护)</li>
+     *     <li>bizType 不在支持列表(TOOLKIT/MCP/AGENT/KG_xxx / VIEW / OBJECT / SKILL)时返回空 Map</li>
+     *     <li>部分资源查不到对应 ext 记录时,Map 中不包含该 key(不抛错)</li>
+     *     <li>整体异常被 catch,仅记 warn 日志,返回已成功查询到的部分 Map</li>
+     * </ul>
+     *
+     * @param resourceBizType 资源业务类型
+     * @param resourceIds 资源 ID 集合
+     * @return (resourceId -> targetContent) 映射;targetContent 为空字符串的资源不会进入返回 Map
+     */
+    public Map<Long, String> batchLoadTargetContent(String resourceBizType, Collection<Long> resourceIds) {
+        if (resourceIds == null || resourceIds.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        String bizType = StringUtils.trimToEmpty(resourceBizType);
+        if (!isSupportedRelatedResourceBizType(bizType)) {
+            return Collections.emptyMap();
+        }
+        List<Long> idList = resourceIds.stream()
+            .filter(java.util.Objects::nonNull)
+            .distinct()
+            .collect(Collectors.toList());
+        if (idList.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        Map<Long, String> result = new HashMap<>(idList.size());
+        // PR-3 (#150) 重构:每个 bizType 分支改为单次批量 SQL (IN 子句),
+        //      替代 PR-1 之前的循环 findById 触发的 N+1.
+        // PR-fix Major-1: per-bizType try/catch(单 bizType 失败不影响其他 6 个分支).
+        // 注:7 个 ext 实体类无公共父接口,故每个分支内联处理 resourceId/targetContent 索引.
+        if (StringUtils.equals(bizType, ResourceBizTypeEnum.TOOLKIT.name())) {
+            try {
+                List<SsResExtToolKit> extList = ssResExtToolKitService.findByIds(idList);
+                if (extList != null) {
+                    for (SsResExtToolKit ext : extList) {
+                        if (ext != null && ext.getResourceId() != null
+                            && StringUtils.isNotBlank(ext.getTargetContent())) {
+                            result.put(ext.getResourceId(), ext.getTargetContent());
+                        }
+                    }
+                }
+            }
+            catch (Exception e) {
+                logger.warn("batchLoadTargetContent 批量失败: bizType=TOOLKIT, idCount={}, reason={}",
+                    idList.size(), e.getMessage(), e);
+            }
+        }
+        else if (StringUtils.equals(bizType, ResourceBizTypeEnum.MCP.name())) {
+            try {
+                List<SsResExtMcp> extList = ssResExtMcpService.findByIds(idList);
+                if (extList != null) {
+                    for (SsResExtMcp ext : extList) {
+                        if (ext != null && ext.getResourceId() != null
+                            && StringUtils.isNotBlank(ext.getTargetContent())) {
+                            result.put(ext.getResourceId(), ext.getTargetContent());
+                        }
+                    }
+                }
+            }
+            catch (Exception e) {
+                logger.warn("batchLoadTargetContent 批量失败: bizType=MCP, idCount={}, reason={}",
+                    idList.size(), e.getMessage(), e);
+            }
+        }
+        else if (StringUtils.equals(bizType, ResourceBizTypeEnum.AGENT.name())) {
+            try {
+                List<SsResExtAgent> extList = ssResExtAgentService.findByIds(idList);
+                if (extList != null) {
+                    for (SsResExtAgent ext : extList) {
+                        if (ext != null && ext.getResourceId() != null
+                            && StringUtils.isNotBlank(ext.getTargetContent())) {
+                            result.put(ext.getResourceId(), ext.getTargetContent());
+                        }
+                    }
+                }
+            }
+            catch (Exception e) {
+                logger.warn("batchLoadTargetContent 批量失败: bizType=AGENT, idCount={}, reason={}",
+                    idList.size(), e.getMessage(), e);
+            }
+        }
+        else if (StringUtils.startsWithIgnoreCase(bizType, "KG_")) {
+            try {
+                List<SsResExtDoc> extList = ssResExtDocService.findByIds(idList);
+                if (extList != null) {
+                    for (SsResExtDoc ext : extList) {
+                        if (ext != null && ext.getResourceId() != null
+                            && StringUtils.isNotBlank(ext.getTargetContent())) {
+                            result.put(ext.getResourceId(), ext.getTargetContent());
+                        }
+                    }
+                }
+            }
+            catch (Exception e) {
+                logger.warn("batchLoadTargetContent 批量失败: bizType=KG_*, idCount={}, reason={}",
+                    idList.size(), e.getMessage(), e);
+            }
+        }
+        else if (StringUtils.equals(bizType, ResourceBizTypeEnum.VIEW.name())) {
+            try {
+                List<SsResExtView> extList = ssResExtViewService.findByIds(idList);
+                if (extList != null) {
+                    for (SsResExtView ext : extList) {
+                        if (ext != null && ext.getResourceId() != null
+                            && StringUtils.isNotBlank(ext.getTargetContent())) {
+                            result.put(ext.getResourceId(), ext.getTargetContent());
+                        }
+                    }
+                }
+            }
+            catch (Exception e) {
+                logger.warn("batchLoadTargetContent 批量失败: bizType=VIEW, idCount={}, reason={}",
+                    idList.size(), e.getMessage(), e);
+            }
+        }
+        else if (StringUtils.equals(bizType, ResourceBizTypeEnum.OBJECT.name())) {
+            try {
+                List<SsResExtObject> extList = ssResExtObjectService.findByIds(idList);
+                if (extList != null) {
+                    for (SsResExtObject ext : extList) {
+                        if (ext != null && ext.getResourceId() != null
+                            && StringUtils.isNotBlank(ext.getTargetContent())) {
+                            result.put(ext.getResourceId(), ext.getTargetContent());
+                        }
+                    }
+                }
+            }
+            catch (Exception e) {
+                logger.warn("batchLoadTargetContent 批量失败: bizType=OBJECT, idCount={}, reason={}",
+                    idList.size(), e.getMessage(), e);
+            }
+        }
+        else if (StringUtils.equals(bizType, ResourceBizTypeEnum.SKILL.name())) {
+            try {
+                List<SsResExtSkill> extList = ssResExtSkillService.findByIds(idList);
+                if (extList != null) {
+                    for (SsResExtSkill ext : extList) {
+                        if (ext != null && ext.getResourceId() != null
+                            && StringUtils.isNotBlank(ext.getTargetContent())) {
+                            result.put(ext.getResourceId(), ext.getTargetContent());
+                        }
+                    }
+                }
+            }
+            catch (Exception e) {
+                logger.warn("batchLoadTargetContent 批量失败: bizType=SKILL, idCount={}, reason={}",
+                    idList.size(), e.getMessage(), e);
+            }
+        }
+        else {
+            // 不支持的 bizType（理论上不会发生,因为顶部 isSupportedRelatedResourceBizType 已过滤）
+            logger.warn("batchLoadTargetContent 收到不支持的 bizType={}, 已忽略", bizType);
+        }
+        return result;
+    }
+
+    /**
+     * PR-3 整页预取:批量获取页内所有数字员工的 {@code target_content}.
+     * <p>
+     * 复用已有 {@code ssResExtDigEmployeeService.findExtDigEmployeeByIds} 单 SQL 批量接口
+     * (MyBatis IN 子句),单次查询拉满整页数据;调用方后续按 {@code resourceId} 索引.
+     * <p>
+     * 调用方契约:
+     * <ul>
+     *     <li>idList 为空时返回空 Map</li>
+     *     <li>整体异常被 catch,返回空 Map 并记 warn(不阻塞调用方)</li>
+     *     <li>仅含 {@code target_content} 非空的资源(避免后续判空分支)</li>
+     * </ul>
+     *
+     * @param resourceIds 页内所有数字员工 resourceId
+     * @return (resourceId -> targetContent) 映射
+     */
+    public Map<Long, String> prefetchDigEmployeeTargetContents(Collection<Long> resourceIds) {
+        if (resourceIds == null || resourceIds.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        List<Long> idList = resourceIds.stream()
+            .filter(java.util.Objects::nonNull)
+            .distinct()
+            .collect(Collectors.toList());
+        if (idList.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        Map<Long, String> result = new HashMap<>(idList.size());
+        try {
+            List<com.iwhalecloud.byai.manager.dto.resource.ResourceExtDigEmployeeDto> dtos =
+                ssResExtDigEmployeeService.findExtDigEmployeeByIds(idList);
+            if (dtos == null) {
+                return result;
+            }
+            for (com.iwhalecloud.byai.manager.dto.resource.ResourceExtDigEmployeeDto dto : dtos) {
+                if (dto == null) {
+                    continue;
+                }
+                com.iwhalecloud.byai.manager.entity.resource.SsResExtDigEmployee ext = dto.getSsResExtDigEmployee();
+                if (ext == null) {
+                    continue;
+                }
+                String targetContent = ext.getTargetContent();
+                if (StringUtils.isNotBlank(targetContent)) {
+                    result.put(dto.getResourceId(), targetContent);
+                }
+            }
+        }
+        catch (Exception e) {
+            logger.warn("prefetchDigEmployeeTargetContents 异常: idCount={}, reason={}",
+                idList.size(), e.getMessage(), e);
+        }
+        return result;
+    }
+
+    /**
+     * PR-3 带预取的 {@code collectDigEmployeeSyncEntries} 变体:
+     * 主资源 target_content 直接使用预取 Map,<strong>避免每资源一次 findById</strong>.
+     * <p>
+     * 关联资源仍走 {@link #batchLoadTargetContent}(内部循环 findById,TODO 待 PR-3 follow-up 优化).
+     *
+     * @param digEmployeeId 数字员工 resourceId
+     * @param prefetchedMainTargetContent 主资源 target_content(可为 null 表示未预取到)
+     * @return 收集到的所有 (redisKey -> jsonContent) 映射
+     */
+    public Map<String, String> collectDigEmployeeSyncEntriesWithPrefetch(Long digEmployeeId, String prefetchedMainTargetContent) {
+        Map<String, String> result = new LinkedHashMap<>();
+        if (digEmployeeId == null) {
+            return result;
+        }
+        if (digEmployeeRedisSyncProperties == null
+                || !digEmployeeRedisSyncProperties.isJsonRedisSyncEnabled()) {
+            return result;
+        }
+        // PR-fix Major-2: 删掉原 else 分支内的 return result; —— 让控制流继续到关联资源处理,
+        // 保持与原 collectDigEmployeeSyncEntries 的行为一致(fallback 路径也要写关联资源).
+        // 主资源:命中预取直接用;未命中(prefetch 异常/空)回退到原 resolveDigEmployeeJsonForRedisSync
+        String mainJson = prefetchedMainTargetContent;
+        if (StringUtils.isBlank(mainJson)) {
+            // target_content 预取未取到(空 / 异常):回退到原逐资源解析(保留原行为)
+            // 若 skipBlankTargetContent=true,resolveDigEmployeeJsonForRedisSync 内部会记 warn 并 return null
+            mainJson = resolveDigEmployeeJsonForRedisSync(digEmployeeId);
+        }
+        if (StringUtils.isNotBlank(mainJson)) {
+            result.put(
+                DigEmployeeRedisKeys.resourceConfigJsonKey(
+                    ResourceBizTypeEnum.DIG_EMPLOYEE.name(), digEmployeeId),
+                mainJson);
+        }
+        // 关联资源:无论 prefetch 命中与否,都尝试加载(保持与原方法行为一致;pr-3 内为 per-id 循环;pr-3-follow-up 优化为单 SQL)
+        try {
+            List<SsResourceRelDetail> relDetails = ssResourceRelDetailService.findByResourceId(digEmployeeId);
+            if (CollectionUtils.isEmpty(relDetails)) {
+                return result;
+            }
+            List<Long> relIds = relDetails.stream()
+                .map(SsResourceRelDetail::getRelResourceId)
+                .filter(java.util.Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
+            if (CollectionUtils.isEmpty(relIds)) {
+                return result;
+            }
+            List<SsResource> relResources = ssResourceService.findByIdList(relIds);
+            if (CollectionUtils.isEmpty(relResources)) {
+                return result;
+            }
+            // PR-3: 按 bizType 分桶后批量加载
+            Map<String, List<Long>> bizTypeToIds = relResources.stream()
+                .filter(r -> r != null && r.getResourceId() != null)
+                .collect(Collectors.groupingBy(
+                    r -> StringUtils.trimToEmpty(r.getResourceBizType()),
+                    Collectors.mapping(SsResource::getResourceId, Collectors.toList())));
+            for (Map.Entry<String, List<Long>> entry : bizTypeToIds.entrySet()) {
+                String bizType = entry.getKey();
+                List<Long> ids = entry.getValue();
+                if (ids == null || ids.isEmpty()) {
+                    continue;
+                }
+                Map<Long, String> batchTarget = batchLoadTargetContent(bizType, ids);
+                for (Map.Entry<Long, String> kv : batchTarget.entrySet()) {
+                    result.put(
+                        DigEmployeeRedisKeys.resourceConfigJsonKey(bizType, kv.getKey()),
+                        kv.getValue());
+                }
+            }
+        }
+        catch (Exception e) {
+            logger.warn("收集数字员工关联资源同步条目失败 (prefetch path), resourceId={}, reason={}",
+                digEmployeeId, e.getMessage(), e);
+        }
+        return result;
+    }
+
     private void syncDigEmployeeSkillsToRedisQuietly(Long resourceId) {
-        // RESOURCE_DIG_EMPLOYEE_{resourceId} 为历史技能列表缓存，当前下游已切到 DIG_EMPLOYEE_{resourceId}
-        // + KG_DOC_{resourceId} 读取完整配置，先屏蔽写 Redis，避免继续产出旧口径缓存。
+        // RESOURCE_DIG_EMPLOYEE_{resourceId} 为历史技能列表缓存,当前下游已切到 DIG_EMPLOYEE_{resourceId}
+        // + KG_DOC_{resourceId} 读取完整配置,先屏蔽写 Redis,避免继续产出旧口径缓存.
         // try {
         //     syncDigEmployeeSkillsToRedis(resourceId);
         // }
         // catch (Exception e) {
-        //     logger.error("同步数字员工技能信息到Redis失败，resourceId: {}, error: {}", resourceId, e.getMessage(), e);
+        //     logger.error("同步数字员工技能信息到Redis失败,resourceId: {}, error: {}", resourceId, e.getMessage(), e);
         // }
     }
 
     private void syncDigEmployeeSkillsToRedis(Long resourceId) {
-        // RESOURCE_DIG_EMPLOYEE_{resourceId} 旧技能缓存写入已暂停；保留原逻辑注释便于需要时回滚。
+        // RESOURCE_DIG_EMPLOYEE_{resourceId} 旧技能缓存写入已暂停;保留原逻辑注释便于需要时回滚.
         // if (resourceId == null) {
         //     return;
         // }
@@ -1694,10 +2086,10 @@ public class DigitalEmployeeApplicationService {
     }
 
     /**
-     * 按数字员工当前资源关联关系重建技能运行时配置，并写回 ss_res_ext_dig_employee.skills。
+     * 按数字员工当前资源关联关系重建技能运行时配置,并写回 ss_res_ext_dig_employee.skills.
      *
-     * 安装技能、对话框 #技能 上传/解绑都以 ss_resource_rel_detail 作为事实来源；这里统一补齐 relSkills 的
-     * skillType、skillUrl、versionUrl 等运行时字段，避免授权/安装和数字员工 JSON 之间出现口径漂移。
+     * 安装技能、对话框 #技能 上传/解绑都以 ss_resource_rel_detail 作为事实来源;这里统一补齐 relSkills 的
+     * skillType、skillUrl、versionUrl 等运行时字段,避免授权/安装和数字员工 JSON 之间出现口径漂移.
      */
     public void rebuildAndSaveDigitalEmployeeRelSkills(Long resourceId) {
         if (resourceId == null) {
@@ -1705,7 +2097,7 @@ public class DigitalEmployeeApplicationService {
         }
         SsResExtDigEmployee extDigEmployee = ssResExtDigEmployeeService.findById(resourceId);
         if (extDigEmployee == null) {
-            logger.warn("重建数字员工技能列表失败：扩展表记录不存在, resourceId={}", resourceId);
+            logger.warn("重建数字员工技能列表失败:扩展表记录不存在, resourceId={}", resourceId);
             return;
         }
 
@@ -1778,7 +2170,7 @@ public class DigitalEmployeeApplicationService {
             syncDigEmployeeConfigJsonToRedis(resourceId, jsonContent);
         }
         catch (Exception e) {
-            logger.error("同步数字员工完整配置到Redis失败，resourceId: {}, error: {}", resourceId, e.getMessage(), e);
+            logger.error("同步数字员工完整配置到Redis失败,resourceId: {}, error: {}", resourceId, e.getMessage(), e);
         }
     }
 
@@ -1792,7 +2184,7 @@ public class DigitalEmployeeApplicationService {
             return;
         }
         if (StringUtils.isBlank(jsonContent)) {
-            logger.warn("资源完整配置JSON为空，跳过Redis同步, resourceBizType={}, resourceId={}", resourceBizType, resourceId);
+            logger.warn("资源完整配置JSON为空,跳过Redis同步, resourceBizType={}, resourceId={}", resourceBizType, resourceId);
             return;
         }
         String redisKey = DigEmployeeRedisKeys.resourceConfigJsonKey(resourceBizType, resourceId);
@@ -1806,7 +2198,7 @@ public class DigitalEmployeeApplicationService {
             removeDigEmployeeFromRedis(resourceId);
         }
         catch (Exception e) {
-            logger.error("删除数字员工技能Redis缓存失败，resourceId: {}, error: {}", resourceId, e.getMessage(), e);
+            logger.error("删除数字员工技能Redis缓存失败,resourceId: {}, error: {}", resourceId, e.getMessage(), e);
         }
     }
 
@@ -1814,7 +2206,7 @@ public class DigitalEmployeeApplicationService {
         if (resourceId == null) {
             return;
         }
-        // RESOURCE_DIG_EMPLOYEE_{resourceId} 旧技能缓存已暂停维护，这里不再主动触碰该 key。
+        // RESOURCE_DIG_EMPLOYEE_{resourceId} 旧技能缓存已暂停维护,这里不再主动触碰该 key.
         // RedisUtil.removeKey(DigEmployeeRedisKeys.skillCacheKey(resourceId));
         removeDigEmployeeConfigJsonFromRedis(resourceId);
     }
@@ -1832,7 +2224,7 @@ public class DigitalEmployeeApplicationService {
             removeDigEmployeeJsonFromResourceStorage(resourceId);
         }
         catch (Exception e) {
-            logger.error("删除数字员工开放资源目录文件失败，resourceId: {}, error: {}", resourceId, e.getMessage(), e);
+            logger.error("删除数字员工开放资源目录文件失败,resourceId: {}, error: {}", resourceId, e.getMessage(), e);
         }
     }
 
@@ -1855,7 +2247,7 @@ public class DigitalEmployeeApplicationService {
     }
 
     /**
-     * 当前关联资源和已关联资源对象进行对比，决定修改或者删除
+     * 当前关联资源和已关联资源对象进行对比,决定修改或者删除
      *
      * @param ssResource 资源对象
      * @param relIds 当前最新关联资源标识
@@ -1866,7 +2258,7 @@ public class DigitalEmployeeApplicationService {
         Map<String, List<String>> relResourceInfoListMap = new HashMap<>(10);
         if (CollectionUtils.isNotEmpty(relResourceInfoList)) {
             relResourceInfoListMap = relResourceInfoList.stream().collect(
-                Collectors.toMap(RelResourceInfo::getRelId, RelResourceInfo::getActiveResourceIds, (v1, v2) -> v2 // 键重复时的合并规则：覆盖
+                Collectors.toMap(RelResourceInfo::getRelId, RelResourceInfo::getActiveResourceIds, (v1, v2) -> v2 // 键重复时的合并规则:覆盖
                 ));
         }
 
@@ -1877,17 +2269,17 @@ public class DigitalEmployeeApplicationService {
             resourceRelDetailMap.put(ssResourceRelDetail.getRelResourceId(), ssResourceRelDetail);
         }
 
-        // 对比，存在的修改，不存在的新增
+        // 对比,存在的修改,不存在的新增
         for (int i = 0; relIds != null && i < relIds.size(); i++) {
             Long relResourceId = relIds.get(i);
-            // 关联子资源的信息（可用状态）
+            // 关联子资源的信息(可用状态)
             List<String> relActiveChildResourceIds = relResourceInfoListMap.get(String.valueOf(relResourceId));
             SsResourceRelDetail ssResourceRelDetail = resourceRelDetailMap.remove(relResourceId);
 
             if (ssResourceRelDetail != null) {
                 ssResourceRelDetail.setUpdateBy(CurrentUserHolder.getCurrentUserId());
                 ssResourceRelDetail.setUpdateTime(new Date());
-                // 关联子资源的信息（可用状态）
+                // 关联子资源的信息(可用状态)
                 if (CollectionUtils.isNotEmpty(relActiveChildResourceIds)) {
                     RelResourceInfo relResourceInfo = new RelResourceInfo();
                     relResourceInfo.setRelId(String.valueOf(relResourceId));
@@ -1898,7 +2290,7 @@ public class DigitalEmployeeApplicationService {
             }
             else {
                 ssResourceRelDetail = new SsResourceRelDetail();
-                // 关联子资源的信息（可用状态）
+                // 关联子资源的信息(可用状态)
                 if (CollectionUtils.isNotEmpty(relActiveChildResourceIds)) {
                     RelResourceInfo relResourceInfo = new RelResourceInfo();
                     relResourceInfo.setRelId(String.valueOf(relResourceId));
@@ -1928,7 +2320,7 @@ public class DigitalEmployeeApplicationService {
      */
     public List<EmployeeAuditResult> checkEmployeeAudit(DigitalEmployeeDTO digitalEmployeeDTO) {
 
-        // 如果开了开关，就不检查
+        // 如果开了开关,就不检查
         String isCheckEmployeeAudit = systemConfigService.getStringParamValueByCode("IS_CHECK_EMPLOYEE_AUDIT");
         if (Constants.NO_VALUE_FALSE.equalsIgnoreCase(isCheckEmployeeAudit)) {
             return Collections.emptyList();
@@ -1988,7 +2380,7 @@ public class DigitalEmployeeApplicationService {
             }
         }
 
-        // 本体类关联资源：注入 ontologyBaseCode，并重建 relOntology 明细
+        // 本体类关联资源:注入 ontologyBaseCode,并重建 relOntology 明细
         enrichOntologyRelResources(relResourceList, digitalEmployeeDetailsDTO);
 
         digitalEmployeeDetailsDTO.setRelIds(relIds);
@@ -1996,33 +2388,33 @@ public class DigitalEmployeeApplicationService {
         List<Map<String, Object>> relSkills = buildRelSkillsFromRelations(resourceId);
         digitalEmployeeDetailsDTO.setSkills(JSON.toJSONString(relSkills));
         digitalEmployeeDetailsDTO.setRelSkills(toRelSkillObjects(relSkills));
-        // relTools 不入库，直接从最近一次 sync 写入的 target_content 镜像里反序列化回填，保证编辑回显不丢数据。
+        // relTools 不入库,直接从最近一次 sync 写入的 target_content 镜像里反序列化回填,保证编辑回显不丢数据.
         digitalEmployeeDetailsDTO
             .setRelTools(parseRelToolsFromTargetContent(digitalEmployeeDetailsDTO.getTargetContent()));
-        // relPrompt 优先取保存时写入 target_content 的运行期值；
-        // 历史数据若没有该字段，再兜底到 corePersonaDefinition，兼容旧数据。
+        // relPrompt 优先取保存时写入 target_content 的运行期值;
+        // 历史数据若没有该字段,再兜底到 corePersonaDefinition,兼容旧数据.
         String relPrompt = parseRelPromptFromTargetContent(digitalEmployeeDetailsDTO.getTargetContent());
         if (StringUtils.isBlank(relPrompt)) {
             relPrompt = digitalEmployeeDetailsDTO.getCorePersonaDefinition();
         }
         digitalEmployeeDetailsDTO.setRelPrompt(relPrompt);
 
-        // 查询记忆配置列表（根据数字员工ID和用户ID查询）
+        // 查询记忆配置列表(根据数字员工ID和用户ID查询)
         Long userId = CurrentUserHolder.getCurrentUserId();
         List<MemoryConfigDTO> memoryConfigList = templateRuleInfoApplicationService
             .findMemoryConfigsByResourceIdAndUserId(resourceId, userId);
         digitalEmployeeDetailsDTO.setMemoryConfigList(memoryConfigList);
-        // target_content 仅供后端内部回填运行期字段使用，不对前端详情接口暴露。
+        // target_content 仅供后端内部回填运行期字段使用,不对前端详情接口暴露.
         digitalEmployeeDetailsDTO.setTargetContent(null);
 
         return digitalEmployeeDetailsDTO;
     }
 
     /**
-     * 为本体类关联资源(ONTOLOGY_BASE/SCENE/VIEW/OBJECT)注入 ontologyBaseCode，并重建 relOntology 扁平明细。
-     * ontologyBaseCode 取自各自扩展表；relOntology 的路径(sceneId/viewCode/objectCode 等)
-     * 由资源树本身重建：resource_code 即各级编码、resource_name 即名称、parent_resource_id 即层级，
-     * 不依赖 ext.target_content 格式（快照对象的 ext 为 datacloud 原始格式，缺 sceneId，会导致回显对不上）。
+     * 为本体类关联资源(ONTOLOGY_BASE/SCENE/VIEW/OBJECT)注入 ontologyBaseCode,并重建 relOntology 扁平明细.
+     * ontologyBaseCode 取自各自扩展表;relOntology 的路径(sceneId/viewCode/objectCode 等)
+     * 由资源树本身重建:resource_code 即各级编码、resource_name 即名称、parent_resource_id 即层级,
+     * 不依赖 ext.target_content 格式(快照对象的 ext 为 datacloud 原始格式,缺 sceneId,会导致回显对不上).
      */
     private void enrichOntologyRelResources(List<SsResourceDTO> relResourceList, DigitalEmployeeDetailsDTO details) {
         if (CollectionUtils.isEmpty(relResourceList)) {
@@ -2034,12 +2426,12 @@ public class DigitalEmployeeApplicationService {
         if (CollectionUtils.isEmpty(ontologyResources)) {
             return;
         }
-        // ontologyBaseCode 注入（Part B）
+        // ontologyBaseCode 注入(Part B)
         List<Long> ids = ontologyResources.stream().map(SsResource::getResourceId).filter(Objects::nonNull)
             .collect(Collectors.toList());
         Map<Long, String> pidMap = ssResourceService.findOntologyBaseCodeMap(ids);
 
-        // 构建 id->资源 映射用于回溯父链：先放入关联资源，再补齐缺失的祖先
+        // 构建 id->资源 映射用于回溯父链:先放入关联资源,再补齐缺失的祖先
         Map<Long, SsResource> byId = new HashMap<>();
         for (SsResourceDTO r : relResourceList) {
             if (r != null && r.getResourceId() != null) {
@@ -2154,7 +2546,7 @@ public class DigitalEmployeeApplicationService {
     }
 
     /**
-     * 用前端原始入参覆盖 details 上的运行期字段。 仅处理"不入 DB" 或"前端入参更新"的字段（relTools / relPrompt），其它字段以 DB 现状为准。
+     * 用前端原始入参覆盖 details 上的运行期字段. 仅处理"不入 DB" 或"前端入参更新"的字段(relTools / relPrompt),其它字段以 DB 现状为准.
      */
     private void applyInputRuntimeFields(DigitalEmployeeDetailsDTO details, DigitalEmployeeDTO inputDto) {
         if (details == null || inputDto == null) {
@@ -2163,10 +2555,10 @@ public class DigitalEmployeeApplicationService {
         if (inputDto.getRelTools() != null) {
             details.setRelTools(inputDto.getRelTools());
         }
-        // relPrompt 以本次提交为准：
-        // - 显式传 relPrompt：直接使用，允许空串表达"清空"；
-        // - 否则若传了 corePersonaDefinition：按同源字段同步，允许空串覆盖；
-        // - 两者都未传：保持 findDetailsById 查出的值不变。
+        // relPrompt 以本次提交为准:
+        // - 显式传 relPrompt:直接使用,允许空串表达"清空";
+        // - 否则若传了 corePersonaDefinition:按同源字段同步,允许空串覆盖;
+        // - 两者都未传:保持 findDetailsById 查出的值不变.
         if (inputDto.getRelPrompt() != null) {
             details.setRelPrompt(inputDto.getRelPrompt());
         }
@@ -2175,13 +2567,13 @@ public class DigitalEmployeeApplicationService {
         }
     }
 
-    /** 更新/保存接口返回详情时，用本次入参兜底覆盖运行期字段，避免响应仍回显旧值。 */
+    /** 更新/保存接口返回详情时,用本次入参兜底覆盖运行期字段,避免响应仍回显旧值. */
     public void applyInputRuntimeFieldsForResponse(DigitalEmployeeDetailsDTO details, DigitalEmployeeDTO inputDto) {
         applyInputRuntimeFields(details, inputDto);
     }
 
     /**
-     * 把刚刚生成的标准 JSON 串镜像写入 ss_res_ext_dig_employee.target_content。 失败仅记日志，不阻断后续 MinIO 同步——target_content 是辅助快照，缺失不影响主流程。
+     * 把刚刚生成的标准 JSON 串镜像写入 ss_res_ext_dig_employee.target_content. 失败仅记日志,不阻断后续 MinIO 同步--target_content 是辅助快照,缺失不影响主流程.
      */
     private void persistTargetContent(Long resourceId, String jsonContent) {
         if (resourceId == null || StringUtils.isBlank(jsonContent)) {
@@ -2190,7 +2582,7 @@ public class DigitalEmployeeApplicationService {
         try {
             SsResExtDigEmployee ssResExtDigEmployee = ssResExtDigEmployeeService.findById(resourceId);
             if (ssResExtDigEmployee == null) {
-                logger.warn("写入 target_content 失败：扩展表记录不存在, resourceId={}", resourceId);
+                logger.warn("写入 target_content 失败:扩展表记录不存在, resourceId={}", resourceId);
                 return;
             }
             ssResExtDigEmployee.setTargetContent(jsonContent);
@@ -2198,6 +2590,34 @@ public class DigitalEmployeeApplicationService {
         }
         catch (Exception e) {
             logger.warn("写入 target_content 异常, resourceId={}, ignored. err={}", resourceId, e.getMessage());
+        }
+    }
+
+    /**
+     * PR-1: 公开包级访问包装,供 {@code StartupTargetContentPreloader}(c-4 离线预生成)使用.
+     * 行为与私有 {@link #persistTargetContent} 一致;返回 boolean 便于预生成脚本统计.
+     *
+     * @param resourceId 数字员工资源 ID
+     * @param jsonContent 标准 JSON 内容
+     * @return true 表示成功写入;false 表示被跳过或失败(已在日志记录)
+     */
+    public boolean persistDigEmployeeTargetContent(Long resourceId, String jsonContent) {
+        if (resourceId == null || StringUtils.isBlank(jsonContent)) {
+            return false;
+        }
+        try {
+            SsResExtDigEmployee ssResExtDigEmployee = ssResExtDigEmployeeService.findById(resourceId);
+            if (ssResExtDigEmployee == null) {
+                logger.warn("写入 target_content 失败:扩展表记录不存在, resourceId={}", resourceId);
+                return false;
+            }
+            ssResExtDigEmployee.setTargetContent(jsonContent);
+            ssResExtDigEmployeeService.update(ssResExtDigEmployee);
+            return true;
+        }
+        catch (Exception e) {
+            logger.warn("写入 target_content 异常, resourceId={}, ignored. err={}", resourceId, e.getMessage());
+            return false;
         }
     }
 
@@ -2409,7 +2829,7 @@ public class DigitalEmployeeApplicationService {
         return null;
     }
 
-    /** 反序列化 target_content 里的 relTools 数组；不存在或解析失败返回 null。 */
+    /** 反序列化 target_content 里的 relTools 数组;不存在或解析失败返回 null. */
     private List<String> parseRelToolsFromTargetContent(String targetContent) {
         com.alibaba.fastjson2.JSONObject obj = parseTargetContentSafely(targetContent);
         if (obj == null) {
@@ -2419,7 +2839,7 @@ public class DigitalEmployeeApplicationService {
         return arr == null ? null : arr.toJavaList(String.class);
     }
 
-    /** 反序列化 target_content 里的 relPrompt 字符串；不存在或解析失败返回 null。 */
+    /** 反序列化 target_content 里的 relPrompt 字符串;不存在或解析失败返回 null. */
     private String parseRelPromptFromTargetContent(String targetContent) {
         com.alibaba.fastjson2.JSONObject obj = parseTargetContentSafely(targetContent);
         if (obj == null) {
@@ -2428,7 +2848,7 @@ public class DigitalEmployeeApplicationService {
         return obj.getString("relPrompt");
     }
 
-    /** 通用：把 target_content 解析为 JSONObject，失败返回 null 并记 warn。 */
+    /** 通用:把 target_content 解析为 JSONObject,失败返回 null 并记 warn. */
     private com.alibaba.fastjson2.JSONObject parseTargetContentSafely(String targetContent) {
         if (StringUtils.isBlank(targetContent)) {
             return null;
@@ -2491,10 +2911,10 @@ public class DigitalEmployeeApplicationService {
     }
 
     /**
-     * 生成智能体提示词 根据输入的提示词参数，调用AI服务生成智能体所需的各类提示词内容
+     * 生成智能体提示词 根据输入的提示词参数,调用AI服务生成智能体所需的各类提示词内容
      *
-     * @param promptInputMap 提示词输入参数，包含lang（语言）、promptGroupCode（提示词分组编码）等
-     * @return 生成的提示词Map，key为提示词字段编码，value为生成的提示词内容
+     * @param promptInputMap 提示词输入参数,包含lang(语言)、promptGroupCode(提示词分组编码)等
+     * @return 生成的提示词Map,key为提示词字段编码,value为生成的提示词内容
      */
     public Map<String, Object> generate(Map<String, Object> promptInputMap) {
 
@@ -2523,11 +2943,11 @@ public class DigitalEmployeeApplicationService {
     }
 
     /**
-     * 构建智能体信息描述：将输入参数和提示词模板组合，构建用于AI生成的智能体描述信息
+     * 构建智能体信息描述:将输入参数和提示词模板组合,构建用于AI生成的智能体描述信息
      *
      * @param paramsInput 输入的参数Map
      * @param aiPrompts 提示词模板列表
-     * @param lang 语言类型（zh：中文，en：英文）
+     * @param lang 语言类型(zh:中文,en:英文)
      * @return 格式化后的智能体信息描述字符串
      */
     private String buildAgentInfo(Map<String, Object> paramsInput, List<AiPrompt> aiPrompts, String lang) {
@@ -2597,7 +3017,7 @@ public class DigitalEmployeeApplicationService {
         // 管理员设�?
         setQuery(request);
 
-        // 我管理的，不仅仅是查man_user_id，还要给有管理权限的人授
+        // 我管理的,不仅仅是查man_user_id,还要给有管理权限的人授
         Map<Integer, Long> statusNumMap = new HashMap<>();
         // TODO:
         // 或者将此方法也移至ResourceAuthApplicationService
@@ -2607,10 +3027,10 @@ public class DigitalEmployeeApplicationService {
         // 用于存储各状态的总和
         Map<String, Long> statusNumStatics = new HashMap<>();
 
-        // 遍历列表中的每个Map，累加各状态的�?
+        // 遍历列表中的每个Map,累加各状态的�?
         for (Map<Integer, Long> statusMap : statusNumList) {
             // 累加每个Map中的所有值到总数
-            // 累加各状态的值（使用getOrDefault避免NullPointerException�?
+            // 累加各状态的值(使用getOrDefault避免NullPointerException�?
             statusNumMap.put(org.apache.commons.collections.MapUtils.getInteger(statusMap, "resourceStatus"),
                 org.apache.commons.collections.MapUtils.getLong(statusMap, "num"));
         }
@@ -2642,11 +3062,11 @@ public class DigitalEmployeeApplicationService {
             // 1. 首先得到所有有管理权限的资源id
             Set<Long> managedResourceIds = getAuthListByResourceTypeAndGrantType(request.getResourceTypeList(),
                 List.of(GrantType.ALLOW_MANAGE));
-            // 如果没有管理权限的资源，只查我创建的
+            // 如果没有管理权限的资源,只查我创建的
             if (managedResourceIds != null && !managedResourceIds.isEmpty()) {
                 // 有管理权限的资源列表
                 request.setResourceIdList(managedResourceIds);
-                // 需要在SQL中实现：resource_id IN (managedResourceIds) OR create_by = currentUserId
+                // 需要在SQL中实现:resource_id IN (managedResourceIds) OR create_by = currentUserId
             }
             else {
                 request.setResourceIdList(Set.of(Long.MIN_VALUE));
@@ -2673,8 +3093,8 @@ public class DigitalEmployeeApplicationService {
     /**
      * 过滤权限列表中的黑名单资�?
      *
-     * @param authList 权限授权列表，包含资源授权信�?
-     * @return 过滤后的有效资源ID集合，不包含黑名单资�?
+     * @param authList 权限授权列表,包含资源授权信�?
+     * @return 过滤后的有效资源ID集合,不包含黑名单资�?
      */
     public Set<Long> filterBackList(List<PrivilegeGrant> authList) {
         if (authList == null || authList.isEmpty()) {
@@ -2694,7 +3114,7 @@ public class DigitalEmployeeApplicationService {
             // 检查是否有黑名单权�?
             boolean hasBlackAuth = resourceAuths.stream().anyMatch(auth -> Color.BLACK.equals(auth.getGrantToType()));
 
-            // 黑名单优先级更高：有红名单且无黑名单才有�?
+            // 黑名单优先级更高:有红名单且无黑名单才有�?
             return hasRedAuth && !hasBlackAuth;
         }).map(Map.Entry::getKey).collect(Collectors.toSet());
     }
@@ -2702,8 +3122,8 @@ public class DigitalEmployeeApplicationService {
     /**
      * 根据会话ID清理调试消息接口
      *
-     * @param sessionId 数字员工ID，用于标识需要清理调试消息的会话
-     * @return 返回清理调试消息的结果响应）
+     * @param sessionId 数字员工ID,用于标识需要清理调试消息的会话
+     * @return 返回清理调试消息的结果响应)
      */
     public DebugSessionCleanupVo cleanupDebugMessages(Long sessionId) {
 
@@ -2724,7 +3144,7 @@ public class DigitalEmployeeApplicationService {
     }
 
     /**
-     * 商业版本（dataset.system=WHALE_AGENT）下，企业 tab 不允许创建编码型/调试型数字员工。 个人 tab 不受限；非商业版本（datasetSystem 为空或其它值）也不受限。
+     * 商业版本(dataset.system=WHALE_AGENT)下,企业 tab 不允许创建编码型/调试型数字员工. 个人 tab 不受限;非商业版本(datasetSystem 为空或其它值)也不受限.
      *
      * @author qin.guoquan
      * @date 2026-05-07

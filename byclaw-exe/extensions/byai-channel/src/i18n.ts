@@ -1,4 +1,4 @@
-import { getSessionPathBySessionId } from "./session-context.js";
+import { getSessionPathBySessionId } from "./session-path.js";
 import type { Language } from "./types.js";
 import {
     buildBaiyingCallToolResultTitle,
@@ -25,6 +25,12 @@ const ALWAYS_USE_ENGLISH_SYSTEM_PROMPT = [
   "- **Forbidden**: Long reasoning or answers primarily in Chinese or any non-English language; paraphrase tool output in English instead of pasting large non-English blocks as your reasoning.",
   "- **Sole exception**: Switch output language **only** if the user **explicitly** instructs you to use a specific other language (e.g. \"Please reply in Chinese from now on\" / \"Switch to Japanese\"). If they do not, **stay in English with no exceptions**.",
 ].join("\n");
+
+const BYCLAW_ACP_TOOL_NAMES = ["byclawAcpPlan", "byclawAcpRun"] as const;
+const BYCLAW_ACP_SESSION_ID_FIELD = "sessionId";
+const BYCLAW_ACP_REPLY_LANGUAGE_FIELD = "replyLanguage";
+const BYCLAW_ACP_LANGUAGE_FIELD = "language";
+const BYCLAW_ACP_LANGUAGE_PROVIDED_FIELD = "languageProvided";
 
 /** Normalize gateway locale to `zh_CN` | `en_US`. Unknown non-empty values default to `zh_CN`. */
 export function resolveLanguage(language?: string): Language {
@@ -155,6 +161,41 @@ export function buildLanguagePrompt(language?: string): string {
     return isEnglishLanguage(language)
         ? ALWAYS_USE_ENGLISH_SYSTEM_PROMPT
         : ALWAYS_USE_CHINESE_SYSTEM_PROMPT;
+}
+
+export function buildByclawAcpLanguagePrompt(
+    language?: string,
+    languageProvided = false,
+    sessionId?: string,
+): string {
+    const resolvedLanguage = resolveLanguage(language);
+    const tools = BYCLAW_ACP_TOOL_NAMES.map((toolName) => `\`${toolName}\``).join(" / ");
+    const languageJson = JSON.stringify(resolvedLanguage);
+    const providedJson = JSON.stringify(languageProvided);
+    const normalizedSessionId = typeof sessionId === "string" ? sessionId.trim() : "";
+    const sessionIdJson = JSON.stringify(normalizedSessionId);
+    const sessionLine = normalizedSessionId
+        ? `Also pass the real byai-channel session id as \`${BYCLAW_ACP_SESSION_ID_FIELD}: ${sessionIdJson}\`; ACP run files must be written under \`.byclaw/acp-runs/{ACP_CLIENT_TYPE}/${normalizedSessionId}\`, not under an agent id or generated id.`
+        : `If the current byai-channel request has a real session id, pass it as \`${BYCLAW_ACP_SESSION_ID_FIELD}\`; do not substitute an agent id, run id, or generated id.`;
+    if (isEnglishLanguage(resolvedLanguage)) {
+        return [
+            "## ByClaw ACP downstream language metadata",
+            "",
+            `When calling ${tools}, pass the current byai-channel reply language metadata as tool arguments: \`${BYCLAW_ACP_LANGUAGE_FIELD}: ${languageJson}\`, \`${BYCLAW_ACP_REPLY_LANGUAGE_FIELD}: ${languageJson}\`, and \`${BYCLAW_ACP_LANGUAGE_PROVIDED_FIELD}: ${providedJson}\`.`,
+            sessionLine,
+            "Do not remove the responseLanguage policy from the returned sessions_spawn task, metadata.md, or plan-bundle.json; downstream ACP clients must answer in that language unless the user explicitly requests a different language in the current query.",
+        ].join("\n");
+    }
+    const chineseSessionLine = normalizedSessionId
+        ? `同时必须把真实 byai-channel session_id 作为 \`${BYCLAW_ACP_SESSION_ID_FIELD}: ${sessionIdJson}\` 传入；ACP run 文件必须写到 \`.byclaw/acp-runs/{ACP_CLIENT_TYPE}/${normalizedSessionId}\`，不能使用 agent id 或生成 id。`
+        : `如果当前 byai-channel 请求存在真实 session_id，必须作为 \`${BYCLAW_ACP_SESSION_ID_FIELD}\` 传入；不要用 agent id、run id 或生成 id 代替。`;
+    return [
+        "## ByClaw ACP 下游语言元数据",
+        "",
+        `调用 ${tools} 时，必须把当前 byai-channel 回复语言元数据透传到工具入参：\`${BYCLAW_ACP_LANGUAGE_FIELD}: ${languageJson}\`、\`${BYCLAW_ACP_REPLY_LANGUAGE_FIELD}: ${languageJson}\`、\`${BYCLAW_ACP_LANGUAGE_PROVIDED_FIELD}: ${providedJson}\`。`,
+        chineseSessionLine,
+        "不要删除工具返回的 sessions_spawn task、metadata.md 或 plan-bundle.json 里的 responseLanguage 策略；下游 ACP client 必须按该语言响应，除非用户在当前 query 中明确要求其它语言。",
+    ].join("\n");
 }
 
 /** USER.md was refreshed on disk; inject so the model re-reads it (hook). Language matches channel/LANG. */

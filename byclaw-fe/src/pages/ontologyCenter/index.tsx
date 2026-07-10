@@ -1,6 +1,6 @@
 // @ts-nocheck
 import React, { useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { Button, Dropdown, Empty, Form, Input, Modal, Progress, Spin, Table, Tabs, Tooltip, message } from 'antd';
+import { Button, Dropdown, Empty, Input, Modal, Progress, Select, Spin, Table, Tabs, Tooltip, message } from 'antd';
 import {
   ApiOutlined,
   CloseOutlined,
@@ -10,7 +10,6 @@ import {
   LinkOutlined,
   ReloadOutlined,
   SearchOutlined,
-  SwapOutlined,
 } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import classnames from 'classnames';
@@ -36,6 +35,7 @@ import { applyResourceUse } from '@/pages/manager/service/resources';
 import { queryCatalogTree } from '@/service/digitalEmployees';
 import {
   checkOntologyEnterpriseResourceSyncPermission,
+  DEFAULT_ONTOLOGY_SYSTEM_CODE,
   getOntologyObjectDetail,
   listOntologyObjectsByView,
   listOntologyRelationsByObject,
@@ -62,6 +62,10 @@ type SyncBatch = {
 
 const ALL_CATEGORY_ID = '-1';
 const RESOURCE_PAGE_SIZE = 30;
+const ONTOLOGY_SYSTEM_OPTIONS = [
+  { label: '百应内置本体库', value: 'BYCLAW_DATACLOUD' },
+  { label: '智能体本体库', value: 'WHALE_AGENT' },
+];
 
 const toResourceFilterStatus = (statusFilter: StatusFilter) => {
   if (statusFilter === 'all') return STATUS_ALL_VALUE;
@@ -390,9 +394,9 @@ const OntologyCenter: React.FC = () => {
   const t = (id: string, values?: any) => intl.formatMessage({ id }, values);
   const { setDetailPanel, clearDetailPanel } = useContext(SiderContentContext);
   const activeSiderAgent = useActiveSiderAgent();
-  const [providerForm] = Form.useForm();
 
   const [activeTab, setActiveTab] = useState<OwnerTab>('personal');
+  const [ontologySystemCode, setOntologySystemCode] = useState(DEFAULT_ONTOLOGY_SYSTEM_CODE);
   const [keyword, setKeyword] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('valid');
   const [permissionFilter, setPermissionFilter] = useState<PermissionFilter>('all');
@@ -403,7 +407,6 @@ const OntologyCenter: React.FC = () => {
   const [resourcePageNum, setResourcePageNum] = useState(1);
   const [resourceHasMore, setResourceHasMore] = useState(false);
   const [resourceList, setResourceList] = useState<any[]>([]);
-  const [providerOpen, setProviderOpen] = useState(false);
   const [syncOpen, setSyncOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncBatches, setSyncBatches] = useState<SyncBatch[]>([]);
@@ -476,6 +479,7 @@ const OntologyCenter: React.FC = () => {
         const res: any = await pageOntologyResources({
           ownerType: activeTab,
           resourceBizTypeList: ['VIEW', 'OBJECT'],
+          systemCode: ontologySystemCode,
           keyword,
           catalogId,
           statusList: statusFilter === 'all' ? [0, 1, 2, 3, 4, 5] : statusFilter === 'offline' ? [3] : [2],
@@ -505,7 +509,7 @@ const OntologyCenter: React.FC = () => {
         }
       }
     },
-    [activeTab, catalogId, keyword, permissionFilter, statusFilter]
+    [activeTab, catalogId, keyword, ontologySystemCode, permissionFilter, statusFilter]
   );
 
   useEffect(() => {
@@ -598,16 +602,18 @@ const OntologyCenter: React.FC = () => {
             viewName: resource.viewName,
             objectCode: resource.objectCode,
             objectName: resource.objectName,
+            systemCode: resource.systemCode || ontologySystemCode,
           }}
           baseId={resource.baseId}
           ownerType={resource.ownerType}
+          systemCode={resource.systemCode || ontologySystemCode}
           showReference={false}
           onClose={() => clearDetailPanel?.()}
         />,
         { width: isView ? 380 : 350 }
       );
     },
-    [clearDetailPanel, setDetailPanel]
+    [clearDetailPanel, ontologySystemCode, setDetailPanel]
   );
 
   const handleRefresh = async () => {
@@ -639,6 +645,7 @@ const OntologyCenter: React.FC = () => {
         const res: any = await syncOntologyResources({
           ownerType: activeTab,
           resourceBizTypeList: ['VIEW', 'OBJECT'],
+          systemCode: ontologySystemCode,
           keyword,
           catalogId,
           pageNum,
@@ -673,22 +680,6 @@ const OntologyCenter: React.FC = () => {
     } finally {
       setSyncing(false);
     }
-  };
-
-  const handleProviderSubmit = async () => {
-    const values = await providerForm.validateFields();
-    Modal.confirm({
-      title: t('ontologyCenter.provider.confirmTitle'),
-      content: '将切换本体资源信息的服务提供商，请谨慎操作！',
-      okText: t('common.confirm'),
-      cancelText: t('common.cancel'),
-      onOk: () => {
-        setProviderOpen(false);
-        message.success(t('common.operationSuccess'));
-        providerForm.resetFields();
-        return values;
-      },
-    });
   };
 
   const handleAuth = (resource: any, type: 'useAuth' | 'mgrAuth') => {
@@ -800,7 +791,10 @@ const OntologyCenter: React.FC = () => {
       }
       const hideLoading = message.loading('对象列表加载中...', 0);
       try {
-        const res: any = await listOntologyObjectsByView({ viewCode });
+        const res: any = await listOntologyObjectsByView({
+          viewCode,
+          systemCode: view?.systemCode || ontologySystemCode,
+        });
         const rows = findResourceRows(res).map((item: any) => ({
           ...item,
           objectCode: item.objectCode || item.object_code || item.resourceCode || item.code,
@@ -823,7 +817,7 @@ const OntologyCenter: React.FC = () => {
         hideLoading();
       }
     },
-    [openTablePanel, t]
+    [ontologySystemCode, openTablePanel, t]
   );
 
   const showObjectActions = useCallback(
@@ -835,7 +829,10 @@ const OntologyCenter: React.FC = () => {
       }
       const hideLoading = message.loading('动作列表加载中...', 0);
       try {
-        const res: any = await getOntologyObjectDetail({ objectCode });
+        const res: any = await getOntologyObjectDetail({
+          objectCode,
+          systemCode: object?.systemCode || ontologySystemCode,
+        });
         const detail = getData(res);
         const rows = parseMaybeArray(detail?.actions).map((item: any) => ({
           ...item,
@@ -859,7 +856,7 @@ const OntologyCenter: React.FC = () => {
         hideLoading();
       }
     },
-    [activeTab, openTablePanel, t]
+    [ontologySystemCode, openTablePanel, t]
   );
 
   const showObjectRelations = useCallback(
@@ -871,7 +868,10 @@ const OntologyCenter: React.FC = () => {
       }
       const hideLoading = message.loading('关系列表加载中...', 0);
       try {
-        const res: any = await listOntologyRelationsByObject({ objectCode });
+        const res: any = await listOntologyRelationsByObject({
+          objectCode,
+          systemCode: object?.systemCode || ontologySystemCode,
+        });
         const rows = findResourceRows(res).map((item: any) => ({
           ...item,
           relationCode: item.relationCode || item.relation_code || item.code,
@@ -898,7 +898,7 @@ const OntologyCenter: React.FC = () => {
         hideLoading();
       }
     },
-    [openTablePanel, t]
+    [ontologySystemCode, openTablePanel, t]
   );
 
   const renderSyncBatchStatus = (batch: SyncBatch) => {
@@ -1007,7 +1007,9 @@ const OntologyCenter: React.FC = () => {
                           {resource.resourceName}
                         </button>
                       </Tooltip>
-                      <span className={styles.cardTypeTag}>
+                      <span
+                        className={classnames(styles.cardTypeTag, isView ? styles.viewTypeTag : styles.objectTypeTag)}
+                      >
                         <span className={styles.cardTypeTagText}>
                           {isView ? t('common.resourceType.view') : t('common.resourceType.object')}
                         </span>
@@ -1087,9 +1089,17 @@ const OntologyCenter: React.FC = () => {
                 {t('common.refresh')}
               </Button>
             )}
-            <Button type="primary" icon={<SwapOutlined />} onClick={() => setProviderOpen(true)}>
-              {t('ontologyCenter.provider.switch')}
-            </Button>
+            <Select
+              className={styles.providerSelect}
+              value={ontologySystemCode}
+              options={ONTOLOGY_SYSTEM_OPTIONS}
+              onChange={(value) => {
+                setOntologySystemCode(value);
+                setResourceList([]);
+                setResourcePageNum(1);
+                setResourceHasMore(false);
+              }}
+            />
           </div>
         }
         items={[
@@ -1113,33 +1123,6 @@ const OntologyCenter: React.FC = () => {
         </div>
         <Spin spinning={loading}>{renderCards()}</Spin>
       </div>
-
-      <Modal
-        open={providerOpen}
-        title={t('ontologyCenter.provider.switch')}
-        okText={t('common.confirm')}
-        cancelText={t('common.cancel')}
-        onOk={handleProviderSubmit}
-        onCancel={() => setProviderOpen(false)}
-        destroyOnClose
-      >
-        <Form form={providerForm} layout="vertical" preserve={false}>
-          <Form.Item
-            name="providerCode"
-            label={t('ontologyCenter.provider.code')}
-            rules={[{ required: true, message: t('ontologyCenter.provider.codePlaceholder') }]}
-          >
-            <Input placeholder={t('ontologyCenter.provider.codePlaceholder')} />
-          </Form.Item>
-          <Form.Item
-            name="providerUrl"
-            label={t('ontologyCenter.provider.url')}
-            rules={[{ required: true, message: t('ontologyCenter.provider.urlPlaceholder') }]}
-          >
-            <Input placeholder={t('ontologyCenter.provider.urlPlaceholder')} />
-          </Form.Item>
-        </Form>
-      </Modal>
 
       <Modal
         open={syncOpen}

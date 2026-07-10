@@ -9,6 +9,9 @@ jest.mock('@/service/message', () => ({
 
 jest.mock('@/utils/messgae', () => ({
   getMsgId: jest.fn(() => 'new-msg-id'),
+  hasVisibleMessageContent: jest.fn((message: any) =>
+    Boolean(message?.text || message?.messageList?.length || message?.messageTip)
+  ),
 }));
 
 jest.mock('../useGlobal', () => ({
@@ -25,6 +28,7 @@ import { useDispatch, useSelector } from '@umijs/max';
 import { delMessage } from '@/service/message';
 import useGlobal from '../useGlobal';
 import { getSessionObjectTypeMap } from '@/utils/session';
+import { IMessageState } from '@/constants/message';
 import useMessage from '../useChat/useMessage';
 
 const mockUseDispatch = useDispatch as jest.Mock;
@@ -235,6 +239,29 @@ describe('hooks/useChat/useMessage', () => {
     rerender({ sessionId: 's1' });
 
     expect(result.current.messageList.map((item) => item.msgId)).toEqual(['m1', 'm2', 'm3', 'm4']);
+  });
+
+  it('updateMessage removes completed empty answer messages', async () => {
+    const { result, rerender } = renderHook(({ sessionId }) => useMessage({ sessionId }), {
+      initialProps: { sessionId: 's1' },
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    rerender({ sessionId: 's1' });
+
+    act(() => {
+      result.current.updateMessage({
+        msgId: 'empty-answer',
+        fromBeyond: true,
+        messageState: IMessageState.Done,
+        messageList: [],
+      } as any);
+    });
+    rerender({ sessionId: 's1' });
+
+    expect(result.current.messageList.map((item) => item.msgId)).toEqual(['m1', 'm2']);
   });
 
   it('deleteMessage removes local message and calls delMessage for persisted ids', async () => {
