@@ -775,11 +775,45 @@
   -webkit-box-orient: vertical;
 }
 
+.bundledSkillModalWrap {
+  overflow: hidden !important;
+
+  :global {
+    .@{antPrefix}-modal {
+      max-width: calc(100vw - 32px);
+      max-height: calc(100vh - 96px);
+      padding-bottom: 0;
+    }
+  }
+}
+
+@media (max-width: 760px) {
+  .bundledSkillModalWrap {
+    :global {
+      .@{antPrefix}-modal {
+        max-width: calc(100vw - 24px);
+        max-height: calc(100vh - 48px);
+      }
+    }
+  }
+}
+
 .bundledSkillModal {
+  padding-bottom: 0;
+
   :global {
     .@{antPrefix}-modal-content {
+      height: calc(100vh - 96px);
       border: none !important;
+      border-radius: 16px;
       box-shadow: none !important;
+    }
+
+    .@{antPrefix}-modal-body {
+      height: calc(100vh - 96px);
+      max-height: calc(100vh - 96px);
+      padding: 0;
+      overflow: hidden;
     }
 
     .beyond-modal-content {
@@ -790,24 +824,26 @@
   .modalContent {
     display: flex;
     flex-direction: column;
+    box-sizing: border-box;
     width: 100%;
-    height: 640px;
-    padding: 16px;
+    height: calc(100vh - 96px);
+    padding: 28px 40px 32px;
     overflow: hidden;
 
     .modalHeader {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      height: 28px;
-      margin-bottom: 12px;
+      height: 40px;
+      margin-bottom: 22px;
       color: #707680;
       font-size: 14px;
 
       .modalTitle {
         color: #14161a;
-        font-weight: 500;
-        font-size: 16px;
+        font-weight: 600;
+        font-size: 20px;
+        line-height: 28px;
       }
 
       .headerRight {
@@ -817,7 +853,7 @@
       }
 
       .searchInput {
-        width: 220px;
+        width: 260px;
       }
 
       .modalCloseIcon {
@@ -828,6 +864,7 @@
 
     .bundledSkillCardListWrap {
       flex: 1;
+      min-height: 0;
       width: 100%;
       overflow: hidden;
 
@@ -835,35 +872,33 @@
         .@{antPrefix}-spin-nested-loading,
         .@{antPrefix}-spin-container {
           height: 100%;
+          min-height: 0;
         }
       }
     }
 
     .bundledSkillCardList {
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
       gap: 20px;
       align-content: start;
+      // 限制网格最大宽度，宽屏时最多展示 5 列，窄屏时按卡片最小宽度自动降列。
       // height: 100% 配合内边距时需要 border-box，否则滚动条自身会被父容器裁掉一截。
       box-sizing: border-box;
+      width: 100%;
+      max-width: 1600px;
       min-height: 0;
       height: 100%;
+      margin: 0 auto;
       overflow: auto;
       // 触底加载模式下给底部留出空间，避免最后一行被弹窗圆角和滚动条末端遮住。
       padding: 2px 18px 28px 2px;
       scrollbar-gutter: stable;
     }
 
-    @media (max-width: 1100px) {
-      .bundledSkillCardList {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-      }
-    }
-
     @media (max-width: 760px) {
-      .bundledSkillCardList {
-        grid-template-columns: 1fr;
-      }
+      height: calc(100vh - 48px);
+      padding: 20px 16px 24px;
     }
 
     .bundledSkillModalCard {
@@ -871,7 +906,7 @@
       display: flex;
       align-items: center;
       gap: 18px;
-      min-width: 0;
+      min-width: 300px;
       height: 112px;
       padding: 14px 18px;
       overflow: hidden;
@@ -904,13 +939,21 @@
     .bundledSkillPosterBody {
       flex: 1;
       min-width: 0;
-      padding-right: 42px;
+      padding-right: 0;
+    }
+
+    .hasBundledSkillPosterTag {
+      .bundledSkillPosterHeader {
+        // 只有右上角有标签时标题行才预留空间，避免无标签卡片名称被按钮区域提前挤出省略号。
+        padding-right: 66px;
+      }
     }
 
     .bundledSkillPosterHeader {
       display: flex;
       align-items: center;
       gap: 6px;
+      box-sizing: border-box;
       min-width: 0;
     }
 
@@ -927,7 +970,9 @@
     }
 
     .bundledSkillPosterTag {
-      flex-shrink: 0;
+      position: absolute;
+      top: 14px;
+      right: 18px;
       max-width: 72px;
       padding: 2px 6px;
       color: #6a4af5;
@@ -961,8 +1006,10 @@
       display: flex;
       align-items: center;
       gap: 8px;
+      box-sizing: border-box;
       min-width: 0;
       margin-top: 8px;
+      padding-right: 74px;
       color: #a3abb7;
       font-size: 12px;
       line-height: 18px;
@@ -1031,6 +1078,18 @@
       &.isAdd {
         color: #707680;
         border: 1px solid #0000000f;
+      }
+    }
+  }
+}
+
+@media (max-width: 760px) {
+  .bundledSkillModal {
+    :global {
+      .@{antPrefix}-modal-content,
+      .@{antPrefix}-modal-body {
+        height: calc(100vh - 48px);
+        max-height: calc(100vh - 48px);
       }
     }
   }
