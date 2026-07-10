@@ -220,6 +220,5 @@ export const transformList = (flatList: IMessageListItem[], isStreamEnd: boolean
   }
 
   groupNodes.clear();
-  console.log(JSON.parse(JSON.stringify(result)));
   return result;
 };

@@ -115,6 +115,8 @@ export const fetchMessage = async (param: {
     pageNum: Number(pageNum),
     pageSize: Number(pageSize),
     total: Number(total),
+    // ⚠️ 需要用接口查询出来的list长度来判断，因为cacheList经过了filter
+    hasMore: size(list) >= Number(pageSize),
   };
 };
 
@@ -125,6 +127,7 @@ export type IMessageInfo = {
   total: number;
   targetMessageId?: string;
   pageRange: [number, number];
+  hasMore?: boolean;
 };
 
 export type MessageListUpdater = IMessage[] | ((messageList: IMessage[]) => IMessage[]);
@@ -355,6 +358,7 @@ export default {
           pageNum: oldMessageInfo.pageNum,
           total: oldMessageInfo.total + (size(messageList) - size(oldMessageInfo.list)),
           pageRange: oldMessageInfo.pageRange,
+          hasMore: oldMessageInfo.hasMore,
         });
       } else if (allowCreateSession) {
         newSessionListMap.set(`${sessionId}`, {
@@ -363,6 +367,7 @@ export default {
           pageSize: _INIT_PAGESIZE_,
           total: size(messageList),
           pageRange: [1, 1],
+          hasMore: size(messageList) >= _INIT_PAGESIZE_,
         });
       }
 
