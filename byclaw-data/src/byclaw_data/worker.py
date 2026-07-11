@@ -1188,19 +1188,19 @@ async def _consume_agent_events(
                     content_type=SseMessageType.text.value,
                 )
             await context.flush_to_history()
-            if emit_done:
-                await context.emit_chunk(
-                    StreamChunkEvent(
-                        content="回答完成",
-                        metadata={
-                            "relatedResources": _related_resources_from_reco_task(
-                                reco_task
-                            )
-                        },
-                    ),
-                    event_type=EventType.APP_STREAM_RESPONSE.value,
-                    content_type=SseMessageType.text.value,
-                )
+            # if emit_done:
+            #     await context.emit_chunk(
+            #         StreamChunkEvent(
+            #             content="回答完成",
+            #             metadata={
+            #                 "relatedResources": _related_resources_from_reco_task(
+            #                     reco_task
+            #                 )
+            #             },
+            #         ),
+            #         event_type=EventType.APP_STREAM_RESPONSE.value,
+            #         content_type=SseMessageType.text.value,
+            #     )
             return {"status": "done", "content": "".join(_answer_parts)}
         elif isinstance(event, InterruptEvent):
             interrupt_ev = event
@@ -1226,26 +1226,26 @@ async def _consume_agent_events(
             "_consume_agent_events: delegate wait interrupt thread_id=%s",
             interrupt_ev.thread_id,
         )
-        await context.emit_chunk(
-            StreamChunkEvent(
-                content="回答完成",
-                metadata={
-                    "relatedResources": _related_resources_from_reco_task(reco_task)
-                },
-            ),
-            event_type=EventType.APP_STREAM_RESPONSE.value,
-            content_type=SseMessageType.text.value,
-        )
+        # await context.emit_chunk(
+        #     StreamChunkEvent(
+        #         content="回答完成",
+        #         metadata={
+        #             "relatedResources": _related_resources_from_reco_task(reco_task)
+        #         },
+        #     ),
+        #     event_type=EventType.APP_STREAM_RESPONSE.value,
+        #     content_type=SseMessageType.text.value,
+        # )
         return {"status": "waiting"}
 
-    await context.emit_chunk(
-        StreamChunkEvent(
-            content="回答完成",
-            metadata={"relatedResources": _related_resources_from_reco_task(reco_task)},
-        ),
-        event_type=EventType.APP_STREAM_RESPONSE.value,
-        content_type=SseMessageType.text.value,
-    )
+    # await context.emit_chunk(
+    #     StreamChunkEvent(
+    #         content="回答完成",
+    #         metadata={"relatedResources": _related_resources_from_reco_task(reco_task)},
+    #     ),
+    #     event_type=EventType.APP_STREAM_RESPONSE.value,
+    #     content_type=SseMessageType.text.value,
+    # )
 
     operation_form = _operation_form_to_dict(
         getattr(interrupt_ev, "operation_form", None)
@@ -2162,7 +2162,7 @@ class DataCloudWorker(GatewayWorker):
         if _agent_for_redis and context.redis is not None:
             from byclaw_data.redis_agent_config import load_data_rel_resources_from_redis
             _rel_resource_list = await load_data_rel_resources_from_redis(
-                context.redis, _agent_for_redis,
+                context.redis, _agent_for_redis, self._resource_path,
             )
 
         # 降级：baiying-call OBJECT/VIEW 路径未传 agent_id，从 resource_ids
@@ -2495,11 +2495,11 @@ class DataCloudWorker(GatewayWorker):
                 if payload is not None:
                     await self._emit_6001(context, payload)
                 if not bool(ext_params.get("silent")):
-                    await context.emit_chunk(
-                        StreamChunkEvent(content="回答完成"),
-                        event_type=EventType.APP_STREAM_RESPONSE.value,
-                        content_type=SseMessageType.text.value,
-                    )
+                    # await context.emit_chunk(
+                    #     StreamChunkEvent(content="回答完成"),
+                    #     event_type=EventType.APP_STREAM_RESPONSE.value,
+                    #     content_type=SseMessageType.text.value,
+                    # )
                     await context.flush_to_history()
                 return {"status": "done", "metadata": all_metadata}
 
@@ -2532,11 +2532,11 @@ class DataCloudWorker(GatewayWorker):
                     event_type=EventType.ANSWER_DELTA.value,
                     content_type=SseMessageType.text.value,
                 )
-                await context.emit_chunk(
-                    StreamChunkEvent(content="回答完成"),
-                    event_type=EventType.APP_STREAM_RESPONSE.value,
-                    content_type=SseMessageType.text.value,
-                )
+                # await context.emit_chunk(
+                #     StreamChunkEvent(content="回答完成"),
+                #     event_type=EventType.APP_STREAM_RESPONSE.value,
+                #     content_type=SseMessageType.text.value,
+                # )
                 await context.flush_to_history()
                 return {"status": "done", "metadata": all_metadata}
         else:

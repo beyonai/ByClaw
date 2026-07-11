@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -16,10 +17,15 @@ DATA_RESOURCE_TYPES = frozenset({"OBJECT", "VIEW", "SCENE", "ONTOLOGY_BASE"})
 
 
 async def get_dig_employee_from_redis(
-    redis_client: Any, agent_id: str
+    redis_client: Any, agent_id: str, resource_path: str | None = None
 ) -> dict[str, Any] | None:
-    """Read DIG_EMPLOYEE_{agent_id} JSON from Redis."""
+    """Read DIG_EMPLOYEE_{agent_id} JSON from local resource path first, then Redis."""
     key = f"DIG_EMPLOYEE_{agent_id}"
+    # if resource_path:
+    #     local_employee = _load_dig_employee_from_local(resource_path, key)
+    #     if local_employee is not None:
+    #         return local_employee
+
     try:
         raw = await redis_client.get(key)
     except Exception:
@@ -28,6 +34,19 @@ async def get_dig_employee_from_redis(
     if raw is None:
         return None
     return _decode_redis_json(raw)
+
+
+def _load_dig_employee_from_local(
+    resource_path: str, key: str
+) -> dict[str, Any] | None:
+    file_path = Path(resource_path) / "dig_employee" / f"{key}.json"
+    if not file_path.is_file():
+        return None
+    try:
+        return _decode_redis_json(file_path.read_text(encoding="utf-8"))
+    except Exception:
+        logger.warning("Failed to read local DIG employee file %s", file_path, exc_info=True)
+        return None
 
 
 def _decode_redis_json(value: Any) -> dict[str, Any] | None:
@@ -50,6 +69,7 @@ def _decode_redis_json(value: Any) -> dict[str, Any] | None:
 async def load_data_rel_resources_from_redis(
     redis_client: Any,
     agent_id: str,
+    resource_path: str | None = None,
 ) -> list[dict[str, Any]]:
     """Load OBJECT/VIEW/SCENE/ONTOLOGY_BASE resources from Redis.
 
@@ -59,7 +79,7 @@ async def load_data_rel_resources_from_redis(
     Mirrors QA's load_agent_config_from_redis, filtering for Data resource types
     instead of KG_DOC.
     """
-    employee = await get_dig_employee_from_redis(redis_client, agent_id)
+    employee = await get_dig_employee_from_redis(redis_client, agent_id, resource_path)
     if not employee:
         return []
 
