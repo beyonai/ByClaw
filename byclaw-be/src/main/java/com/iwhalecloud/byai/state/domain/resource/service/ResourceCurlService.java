@@ -347,16 +347,16 @@ public class ResourceCurlService {
             JSONObject root = JSON.parseObject(trimmed, Feature.OrderedField);
             JSONObject openApi = resolveOpenApiNode(root, preferReadOnlyOperation);
             if (openApi != null && !openApi.isEmpty()) {
-                String baseUrl = resolveOpenApiBaseUrl(openApi);
+                String baseUrl = resolveOpenApiBaseUrl(openApi, root);
                 JSONObject paths = openApi.getJSONObject("paths");
+                String preferredOperationId = root == null ? null : root.getString("resourceCode");
                 OpenApiOperation selectedOperation = paths == null ? null
-                    : resolveFirstOrReadOnlyOperation(paths, preferReadOnlyOperation);
+                    : resolveFirstOrReadOnlyOperation(paths, preferReadOnlyOperation, preferredOperationId);
                 if (StringUtils.isNotBlank(baseUrl) && selectedOperation != null) {
                     JSONObject operation = selectedOperation.operation();
                     String requestBody = buildCurlRequestBody(operation);
 
-                    Map<String, Object> headers = new HashMap<>();
-                    headers.put("Content-Type", "application/json");
+                    Map<String, Object> headers = buildOpenApiHeaders(root, StringUtils.isNotBlank(requestBody));
                     return this.buildCurlScript(selectedOperation.method(), joinUrl(baseUrl, selectedOperation.path()),
                         headers, requestBody);
                 }
@@ -607,7 +607,20 @@ public class ResourceCurlService {
         return URLEncoder.encode(StringUtils.defaultString(value), StandardCharsets.UTF_8);
     }
 
+    private Map<String, Object> buildOpenApiHeaders(JSONObject root, boolean hasRequestBody) {
+        Map<String, Object> headers = new LinkedHashMap<>();
+        appendHeaderObject(headers, root == null ? null : root.getJSONObject("headers"));
+        if (hasRequestBody && !containsHeader(headers, "Content-Type")) {
+            headers.put("Content-Type", "application/json");
+        }
+        return headers;
+    }
+
     private String resolveOpenApiBaseUrl(JSONObject openApi) {
+        return resolveOpenApiBaseUrl(openApi, null);
+    }
+
+    private String resolveOpenApiBaseUrl(JSONObject openApi, JSONObject root) {
         JSONArray servers = openApi.getJSONArray("servers");
         if (servers != null && !servers.isEmpty()) {
             JSONObject server = servers.getJSONObject(0);
@@ -616,15 +629,46 @@ public class ResourceCurlService {
                 return url;
             }
         }
+        if (root != null) {
+            String rootDomainUrl = StringUtils.defaultIfBlank(root.getString("domainURL"), root.getString("domainUrl"));
+            if (StringUtils.isNotBlank(rootDomainUrl)) {
+                return rootDomainUrl;
+            }
+        }
         return StringUtils.defaultIfBlank(openApi.getString("domainURL"), openApi.getString("domainUrl"));
+    }
+
+    private static final List<String> HTTP_METHODS = List.of("get", "post", "put", "patch", "delete");
+
+    private JSONObject getPathItemOperation(JSONObject pathItem, String method) {
+        if (pathItem == null || StringUtils.isBlank(method)) {
+            return null;
+        }
+        JSONObject operation = pathItem.getJSONObject(method);
+        if (operation != null) {
+            return operation;
+        }
+        for (String key : pathItem.keySet()) {
+            if (HTTP_METHODS.stream().noneMatch(httpMethod -> StringUtils.equalsIgnoreCase(httpMethod, key))) {
+                continue;
+            }
+            if (StringUtils.equalsIgnoreCase(key, method)) {
+                return pathItem.getJSONObject(key);
+            }
+        }
+        return null;
+    }
+
+    private boolean pathItemHasMethod(JSONObject pathItem, String method) {
+        return getPathItemOperation(pathItem, method) != null;
     }
 
     private String resolveFirstHttpMethod(JSONObject pathItem) {
         if (pathItem == null) {
             return null;
         }
-        for (String method : List.of("get", "post", "put", "patch", "delete")) {
-            if (pathItem.containsKey(method)) {
+        for (String method : HTTP_METHODS) {
+            if (pathItemHasMethod(pathItem, method)) {
                 return method.toUpperCase(Locale.ROOT);
             }
         }
@@ -632,17 +676,31 @@ public class ResourceCurlService {
     }
 
     private OpenApiOperation resolveFirstOrReadOnlyOperation(JSONObject paths, boolean preferReadOnlyOperation) {
+        return resolveFirstOrReadOnlyOperation(paths, preferReadOnlyOperation, null);
+    }
+
+    private OpenApiOperation resolveFirstOrReadOnlyOperation(JSONObject paths, boolean preferReadOnlyOperation,
+        String preferredOperationId) {
+        if (StringUtils.isNotBlank(preferredOperationId)) {
+            OpenApiOperation matched = findOpenApiOperation(paths, preferredOperationId);
+            if (matched != null) {
+                if (!preferReadOnlyOperation || isReadOnlyOperation(matched.path(),
+                    StringUtils.lowerCase(matched.method()), matched.operation())) {
+                    return matched;
+                }
+            }
+        }
         OpenApiOperation fallback = null;
         for (String path : paths.keySet()) {
             JSONObject pathItem = paths.getJSONObject(path);
             if (pathItem == null || pathItem.isEmpty()) {
                 continue;
             }
-            for (String method : List.of("get", "post", "put", "patch", "delete")) {
-                if (!pathItem.containsKey(method)) {
+            for (String method : HTTP_METHODS) {
+                if (!pathItemHasMethod(pathItem, method)) {
                     continue;
                 }
-                JSONObject operation = pathItem.getJSONObject(method);
+                JSONObject operation = getPathItemOperation(pathItem, method);
                 OpenApiOperation current = new OpenApiOperation(path, method.toUpperCase(Locale.ROOT), operation);
                 if (fallback == null) {
                     fallback = current;
@@ -654,6 +712,29 @@ public class ResourceCurlService {
             }
         }
         return preferReadOnlyOperation ? null : fallback;
+    }
+
+    private OpenApiOperation findOpenApiOperation(JSONObject paths, String preferredOperationId) {
+        if (paths == null || paths.isEmpty() || StringUtils.isBlank(preferredOperationId)) {
+            return null;
+        }
+        for (String path : paths.keySet()) {
+            JSONObject pathItem = paths.getJSONObject(path);
+            if (pathItem == null || pathItem.isEmpty()) {
+                continue;
+            }
+            for (String method : HTTP_METHODS) {
+                if (!pathItemHasMethod(pathItem, method)) {
+                    continue;
+                }
+                JSONObject operation = getPathItemOperation(pathItem, method);
+                String operationId = operation == null ? null : operation.getString("operationId");
+                if (StringUtils.equalsIgnoreCase(preferredOperationId, operationId)) {
+                    return new OpenApiOperation(path, method.toUpperCase(Locale.ROOT), operation);
+                }
+            }
+        }
+        return null;
     }
 
     private boolean containsTemplatePlaceholder(String value) {
@@ -831,11 +912,11 @@ public class ResourceCurlService {
             if (pathItem == null || pathItem.isEmpty()) {
                 continue;
             }
-            for (String method : List.of("get", "post", "put", "patch", "delete")) {
-                if (!pathItem.containsKey(method)) {
+            for (String method : HTTP_METHODS) {
+                if (!pathItemHasMethod(pathItem, method)) {
                     continue;
                 }
-                JSONObject operation = pathItem.getJSONObject(method);
+                JSONObject operation = getPathItemOperation(pathItem, method);
                 OpenApiOperation current = new OpenApiOperation(path, method.toUpperCase(Locale.ROOT), operation);
                 if (firstOperation == null) {
                     firstOperation = current;
