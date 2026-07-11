@@ -736,11 +736,26 @@ public class ModelManagementApplicationService {
         if (modelDefault == null || modelDefault.getModelId() == null) {
             throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40001, "aimodel.modelId.required");
         }
+
+        Long tagId = modelDefault.getTagId();
         Long modelId = modelDefault.getModelId();
-        ByaiAimodel target = byaiAimodelDomainService.getById(modelId);
+        // 设置redis中默认模型信息
+        ByaiAimodel target = byaiAimodelDomainService.findById(modelId);
         if (target == null) {
             throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40004, "aimodel.not.found");
         }
+        else {
+            target.setIsDefault(1);
+            byaiAimodelDomainService.syncToRedis(target);
+        }
+
+        // 查询关联标签
+        List<ByaiTagRelation> aiModels = byaiTagRelationService.findTagRelation(Constants.OBJ_TYPE_AIMODEL, tagId);
+        Map<Long, ByaiTagRelation> byaiTagRelationMap = new HashMap<>(aiModels.size());
+        for (ByaiTagRelation byaiTagRelation : aiModels) {
+            byaiTagRelationMap.put(byaiTagRelation.getObjId(), byaiTagRelation);
+        }
+
         String targetModelType = normalizeModelType(target.getModelType(), DEFAULT_MODEL_TYPE_LLM);
         String modelType = normalizeModelType(modelDefault.getModelType(), targetModelType);
         if (!modelType.equals(targetModelType)) {
@@ -749,6 +764,29 @@ public class ModelManagementApplicationService {
         validateDefaultModelType(modelType);
         if (!ModelStatusEnum.isEnabledDb(target.getStatus())) {
             throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40001, "aimodel.default_model.enabled.required");
+        }
+
+        // 删除其他模型的默认对话标签
+        for (ByaiTagRelation tempTagRelation : byaiTagRelationMap.values()) {
+
+            Long objId = tempTagRelation.getObjId();
+            Long relationId = tempTagRelation.getRelationId();
+            byaiTagRelationService.removeById(relationId);
+
+            // 获取模型信息
+            ByaiAimodel byaiAimodel = byaiAimodelDomainService.findById(objId);
+            if (byaiAimodel == null) {
+                continue;
+            }
+
+            // 同步更新redis中的状态
+            if (ModelStatusEnum.isEnabledDb(byaiAimodel.getStatus())) {
+                byaiAimodel.setIsDefault(0);
+                byaiAimodelDomainService.syncToRedis(byaiAimodel);
+            }
+            else {
+                byaiAimodelDomainService.removeFromRedis(modelId);
+            }
         }
         assignDefaultModelForType(target, modelType);
     }

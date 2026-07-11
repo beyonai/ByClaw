@@ -1165,21 +1165,49 @@ async def _consume_agent_events(
 
     interrupt_ev: Any = None
     _answer_parts: list[str] = []
+    _phase_respond_emitted = False
 
     async for event in event_iter:
         if isinstance(event, ThinkingEvent):
             await context.emit_chunk(
                 StreamChunkEvent(content=event.content),
-                event_type=EventType.REASONING_LOG_START.value,
+                event_type=EventType.REASONING_LOG_DELTA.value,
                 content_type=SseReasonMessageType.think_text.value,
             )
         elif isinstance(event, StepEvent):
+            ev_type = getattr(event, "event_type", "") or EventType.REASONING_LOG_DELTA.value
+            # dc_stream_chunk 的 answerDelta 事件由 AnswerEvent 统一处理，避免重复
+            if ev_type == "answerDelta":
+                continue
+            ct = getattr(event, "content_type", "") or SseReasonMessageType.think_text.value
+            msg_id = getattr(event, "message_id", "") or ""
+            p_msg_id = getattr(event, "parent_message_id", "") or ""
+
+            emit_kwargs: dict[str, Any] = {
+                "event_type": ev_type,
+                "content_type": ct,
+            }
+            if msg_id:
+                emit_kwargs["message_id"] = msg_id
+            if p_msg_id:
+                emit_kwargs["parent_message_id"] = p_msg_id
+
             await context.emit_chunk(
                 StreamChunkEvent(content=event.title),
-                event_type=EventType.REASONING_LOG_START.value,
-                content_type=SseReasonMessageType.think_text.value,
+                **emit_kwargs,
             )
         elif isinstance(event, AnswerEvent):
+            if not _phase_respond_emitted:
+                _phase_respond_emitted = True
+                _phase_msg_id = getattr(context, "generate_message_id", None)
+                _phase_mid = _phase_msg_id() if callable(_phase_msg_id) else f"phase-{uuid.uuid4().hex[:8]}"
+                await context.emit_chunk(
+                    StreamChunkEvent(content="正在整理结果，即将完成回答"),
+                    event_type=EventType.REASONING_LOG_START.value,
+                    content_type=SseReasonMessageType.think_text.value,
+                    message_id=_phase_mid,
+                    parent_message_id="-1",
+                )
             if event.content:
                 _answer_parts.append(event.content)
                 await context.emit_chunk(
