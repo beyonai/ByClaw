@@ -8,6 +8,7 @@ import {
   readAuthTokenFromAimodelTypeListPayload,
   resolveAimodelModelInputFromAbilities,
   resolveAimodelProviderApiFromInstanceParam,
+  resolveAimodelTimeoutSeconds,
   resolveDefaultBaiyingAimodelProviderBundle,
 } from "./aimodel-config.js";
 import { MANAGED_AGENT_PREFIX } from "./types.js";
@@ -81,6 +82,7 @@ describe("Baiying AI model config", () => {
         id: "model:-2000",
       },
       api: "openai-completions",
+      timeoutSeconds: 600,
       modelId: "glm-5-turbo",
       modelName: "glm-5-turbo",
       contextWindow: 128000,
@@ -89,6 +91,33 @@ describe("Baiying AI model config", () => {
       reasoning: false,
     });
     expect(JSON.stringify(provider)).not.toContain("secret-token");
+  });
+
+  it("uses the default model timeout and a non-empty environment override", () => {
+    const previous = process.env.BYCLAW_LLM_IDLE_TIME;
+    try {
+      delete process.env.BYCLAW_LLM_IDLE_TIME;
+      expect(resolveAimodelTimeoutSeconds()).toBe(600);
+
+      process.env.BYCLAW_LLM_IDLE_TIME = "1800";
+      expect(resolveAimodelTimeoutSeconds()).toBe(1800);
+      expect(
+        parseBaiyingAimodelProviderBundle({
+          payload: createAimodelPayload(),
+          modelId: "-2000",
+          secretProviderName: DEFAULT_AIMODEL_SECRET_PROVIDER_NAME,
+        })?.timeoutSeconds,
+      ).toBe(1800);
+
+      process.env.BYCLAW_LLM_IDLE_TIME = "  ";
+      expect(resolveAimodelTimeoutSeconds()).toBe(600);
+    } finally {
+      if (previous === undefined) {
+        delete process.env.BYCLAW_LLM_IDLE_TIME;
+      } else {
+        process.env.BYCLAW_LLM_IDLE_TIME = previous;
+      }
+    }
   });
 
   it("maps providerName OpenAI and Anthropic to OpenClaw provider APIs", () => {
@@ -376,6 +405,7 @@ describe("Baiying AI model config", () => {
       expect.objectContaining({
       baseUrl: "https://lab.iwhalecloud.com/gpt-proxy/v1",
       api: "openai-completions",
+      timeoutSeconds: 600,
       apiKey: {
         source: "exec",
         provider: "baiying-aimodel-redis",

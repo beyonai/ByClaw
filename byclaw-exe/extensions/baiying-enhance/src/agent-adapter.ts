@@ -70,6 +70,8 @@ export type ProviderBundle = {
     baseUrl: string;
     apiKey: unknown;
     api: AimodelProviderApi;
+    /** OpenClaw provider request/LLM idle timeout in seconds. */
+    timeoutSeconds?: number;
     modelId: string;
     modelName?: string;
     contextWindow?: number;
