@@ -191,6 +191,23 @@ function createContext() {
         privateData,
       );
     },
+    emitInternal(
+      event: Omit<DiagnosticEventPayload, "seq" | "ts"> & { ts?: number },
+      privateData: Record<string, unknown> = {},
+    ) {
+      if (!listener) {
+        throw new Error("diagnostic listener not registered");
+      }
+      listener(
+        {
+          seq: 1,
+          ts: event.ts ?? Date.now(),
+          ...event,
+        } as DiagnosticEventPayload,
+        { trusted: false, internal: true } as DiagnosticEventMetadata,
+        privateData,
+      );
+    },
   };
 }
 
@@ -629,7 +646,7 @@ describe("BYAI diagnostics OTel correlation", () => {
       includeLangfuseSessionAttributes: true,
       inboundChannels: { channels: ["webchat"] },
     });
-    const { ctx, emitTrusted } = createContext();
+    const { ctx, emitInternal } = createContext();
     await service.start(ctx as never);
 
     const sessionKey = "webchat:session-native";
@@ -643,7 +660,7 @@ describe("BYAI diagnostics OTel correlation", () => {
       spanId: "22221111bbbb1111",
       traceFlags: "01",
     };
-    emitTrusted({
+    emitInternal({
       type: "message.received",
       channel: "webchat",
       sessionId: "session-native",
@@ -652,7 +669,7 @@ describe("BYAI diagnostics OTel correlation", () => {
       trace: inboundTrace,
       ts: 100,
     } as never);
-    emitTrusted({
+    emitInternal({
       type: "message.dispatch.started",
       channel: "webchat",
       sessionId: "session-native",
@@ -660,7 +677,7 @@ describe("BYAI diagnostics OTel correlation", () => {
       trace: dispatchTrace,
       ts: 110,
     } as never);
-    emitTrusted({
+    emitInternal({
       type: "model.usage",
       sessionId: "session-native",
       sessionKey,
@@ -671,7 +688,7 @@ describe("BYAI diagnostics OTel correlation", () => {
       trace: dispatchTrace,
       ts: 200,
     } as never);
-    emitTrusted({
+    emitInternal({
       type: "message.dispatch.completed",
       channel: "webchat",
       sessionId: "session-native",
