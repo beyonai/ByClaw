@@ -168,9 +168,11 @@ const ResourceDetail: React.FC<ResourceDetailProps> = ({
     if (!employees.length) {
       return null;
     }
+    // 标题展示关联数字员工数量，便于用户一眼判断当前技能被多少员工使用。
+    const usedEmployeeTitle = `${intl.formatMessage({ id: 'skillDetail.usedDigitalEmployees' })}（${employees.length}）`;
 
     return renderDetailField(
-      intl.formatMessage({ id: 'skillDetail.usedDigitalEmployees' }),
+      usedEmployeeTitle,
       <Table
         size="small"
         pagination={false}

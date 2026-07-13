@@ -146,9 +146,11 @@ const formatMemberNames = (members?: ResourceMemberItem[], fallback?: string) =>
 
 const buildSkillUsedDigitalEmployeeItem = (employees: SkillUsedDigitalEmployee[]): RenderItem => {
   const intl = getIntl();
+  // 标题展示关联数字员工数量，便于用户一眼判断当前技能被多少员工使用。
+  const usedEmployeeTitle = `${intl.formatMessage({ id: 'skillDetail.usedDigitalEmployees' })}（${employees.length}）`;
   return {
     type: 'table',
-    label: intl.formatMessage({ id: 'skillDetail.usedDigitalEmployees' }),
+    label: usedEmployeeTitle,
     columns: [
       {
         dataIndex: 'resourceName',

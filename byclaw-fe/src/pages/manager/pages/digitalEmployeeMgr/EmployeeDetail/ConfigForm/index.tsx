@@ -44,7 +44,7 @@ import { DingtalkCircleFilled } from '@ant-design/icons';
 import { getByParamGroupCode } from '@/pages/manager/service/System';
 import { getCatalogOnResource, getDcSystemConfigListByStandType } from '@/pages/manager/service/DigitalEmployeeMgr';
 import { getDcSystemConfig } from '@/pages/manager/service/session';
-import { listResourceUseAuth } from '@/pages/manager/service/resources';
+import { listResourceUseAuth, queryResourceDetailListByIds } from '@/pages/manager/service/resources';
 import ExampleModal from './ExampleModal';
 import MemoryConfigModal from './MemoryConfigModal';
 import AbilityBoundaryModal from './AbilityBoundaryModal';
@@ -351,11 +351,122 @@ const findBundledSkillOption = (item: any, options: any[] = []) => {
 const getBundledSkillPrimaryKey = (item: any) =>
   getBundledSkillIdKeys(item)[0] || getBundledSkillCodeKeys(item)[0] || getBundledSkillCode(item);
 
+const normalizeBundledSkillOption = (item: any = {}) => {
+  const resourceId = item.resourceId || item.grantResourceId || item.id;
+  const resourceCode = item.resourceCode || item.skillCode || item.code || item.itemCode;
+  const resourceName = item.resourceName || item.name || item.label || resourceCode || `${resourceId || ''}` || '-';
+  const resourceDesc = item.resourceDesc || item.description || item.pluginDesc || item.desc || '';
+
+  return {
+    ...item,
+    // 弹窗卡片 key/value 使用 resourceId，保证选中态和接口唯一资源标识一致。
+    value: resourceId,
+    label: resourceName,
+    description: resourceDesc,
+    resourceId,
+    resourceName,
+    resourceDesc,
+    resourceLogoUrl: item.resourceLogoUrl || item.avatar,
+    avatar: item.avatar,
+    creatorName: item.creatorName || item.createUserName || item.memberName,
+    createUserName: item.createUserName,
+    useCount: item.useCount || item.focusCount || 0,
+    displaySourceType: item.displaySourceType || item.sourceType,
+    sourceType: item.sourceType || item.displaySourceType,
+    skillCode: resourceCode,
+    skillType: item.skillType || 'hub',
+    skillUrl: item.skillUrl || '',
+    versionUrl: item.versionUrl || (resourceId ? `/byaiService/tool/getSkillVersion?skillId=${resourceId}` : ''),
+  };
+};
+
+const getBundledSkillHydrationId = (item: any) => {
+  if (!item || typeof item === 'string') {
+    return /^\d+$/.test(`${item || ''}`.trim()) ? `${item}`.trim() : '';
+  }
+  const rawValue = item.resourceId || item.skillId || item.id || item.grantResourceId || item.value;
+  const value = normalizeBundledSkillIdentity(rawValue);
+  return /^\d+$/.test(value) ? value : '';
+};
+
+const getBundledSkillHydrationCode = (item: any) => {
+  if (!item) {
+    return '';
+  }
+  if (typeof item === 'string') {
+    return normalizeBundledSkillIdentity(item);
+  }
+  const value = normalizeBundledSkillIdentity(item.value);
+  return (
+    normalizeBundledSkillIdentity(item.skillCode || item.resourceCode || item.code || item.itemCode) ||
+    (/^\d+$/.test(value) ? '' : value)
+  );
+};
+
+const getBundledSkillHydrationKey = (item: any) => {
+  const resourceId = getBundledSkillHydrationId(item);
+  if (resourceId) {
+    return `id:${resourceId}`;
+  }
+  const resourceCode = getBundledSkillHydrationCode(item);
+  return resourceCode ? `code:${resourceCode}` : '';
+};
+
+const needHydrateBundledSkill = (item: any) => {
+  if (!item) {
+    return false;
+  }
+  if (typeof item === 'string') {
+    return !!normalizeBundledSkillIdentity(item);
+  }
+  // 默认技能只有 ID/code 时先补齐名称、描述和图标，避免新建页已选卡片显示为“-”。
+  return !(
+    item.label ||
+    item.resourceName ||
+    item.description ||
+    item.resourceDesc ||
+    item.resourceLogoUrl ||
+    item.avatar
+  );
+};
+
+const getListFromResponse = (res: any) => {
+  const data = res?.data || res || {};
+  if (Array.isArray(data)) {
+    return data;
+  }
+  return data.list || data.rows || [];
+};
+
+const findBundledSkillOptionForNormalize = (item: any, options: any[] = []) => {
+  const matchedByResourceId = findBundledSkillOption(item, options);
+  if (matchedByResourceId) {
+    return matchedByResourceId;
+  }
+  const hydrationId = getBundledSkillHydrationId(item);
+  const matchedByHydrationId = hydrationId
+    ? options.find((skill) => getBundledSkillIdKeys(skill).includes(hydrationId))
+    : undefined;
+  if (matchedByHydrationId) {
+    // 兼容模板把默认技能写成纯数字字符串的历史配置，补全展示时可按 resourceId 回填。
+    return matchedByHydrationId;
+  }
+  if (getBundledSkillIdKeys(item).length) {
+    return undefined;
+  }
+  const codeKeys = getBundledSkillCodeKeys(item);
+  // 默认模板里的老数据可能只有 skillCode，补全展示时才允许按 code 精确匹配，弹窗选中态仍只按 resourceId。
+  return codeKeys.length
+    ? options.find((skill) => hasSameBundledSkillKey(codeKeys, getBundledSkillCodeKeys(skill)))
+    : undefined;
+};
+
 const normalizeBundledSkillItems = (skills: any[] = [], options: any[] = []) =>
   compact(
     skills.map((item) => {
       const rawCode = `${getBundledSkillCode(item) || ''}`.trim();
-      const option = findBundledSkillOption(item, options) || (typeof item === 'object' && item !== null ? item : null);
+      const option =
+        findBundledSkillOptionForNormalize(item, options) || (typeof item === 'object' && item !== null ? item : null);
 
       const resourceId = option?.resourceId;
       // value 已经改为 resourceId，保存技能编码时只使用 resourceCode/skillCode 等编码字段。
@@ -550,6 +661,7 @@ const ConfigForm = (props) => {
   const isEN = getLocale().includes('en');
   const bundledSkillListRef = useRef<HTMLDivElement | null>(null);
   const bundledSkillLoadMoreLockRef = useRef(false);
+  const hydratedBundledSkillKeysRef = useRef<Set<string>>(new Set());
   const [robotChannelOptions, setRobotChannelOptions] = useState([]);
   const [catalogList, setCatalogList] = useState([]);
   const [catalogLoading, setCatalogLoading] = useState(false);
@@ -696,27 +808,7 @@ const ConfigForm = (props) => {
       const pageInfo = res?.data || res || {};
       const list = pageInfo?.list || pageInfo?.rows || [];
       const nextOptions = list
-        .map((item) => ({
-          ...item,
-          // 弹窗卡片 key/value 使用 resourceId，保证选中态和接口唯一资源标识一致。
-          value: item.resourceId,
-          label: item.resourceName || item.resourceCode || '-',
-          description: item.resourceDesc || item.description || item.pluginDesc || item.desc || '',
-          resourceName: item.resourceName,
-          resourceDesc: item.resourceDesc || item.description || item.pluginDesc || item.desc || '',
-          resourceLogoUrl: item.resourceLogoUrl || item.avatar,
-          avatar: item.avatar,
-          creatorName: item.creatorName || item.createUserName || item.memberName,
-          createUserName: item.createUserName,
-          useCount: item.useCount || item.focusCount || 0,
-          displaySourceType: item.displaySourceType || item.sourceType,
-          sourceType: item.sourceType || item.displaySourceType,
-          skillCode: item.resourceCode || item.skillCode || item.code || item.itemCode,
-          skillType: item.skillType || 'hub',
-          skillUrl: item.skillUrl || '',
-          versionUrl:
-            item.versionUrl || (item.resourceId ? `/byaiService/tool/getSkillVersion?skillId=${item.resourceId}` : ''),
-        }))
+        .map(normalizeBundledSkillOption)
         .filter((item) => item.value);
       setBundledSkillOptions((prevOptions) => {
         if (!append) return nextOptions;
@@ -1373,6 +1465,103 @@ const ConfigForm = (props) => {
     form.setFieldsValue({ bundledSkills: normalizedSkills });
     syncRoleToForm({ bundledSkills: normalizedSkills });
   }, [bundledSkillOptions, form, syncRoleToForm]);
+
+  useEffect(() => {
+    const currentSkills = Array.isArray(selectedSkills) ? selectedSkills : [];
+    const pendingSkills = currentSkills.filter((skill) => {
+      if (!needHydrateBundledSkill(skill)) {
+        return false;
+      }
+      const key = getBundledSkillHydrationKey(skill);
+      return key && !hydratedBundledSkillKeysRef.current.has(key);
+    });
+    if (!pendingSkills.length) {
+      return;
+    }
+
+    let cancelled = false;
+    let completed = false;
+    const pendingKeys = pendingSkills.map(getBundledSkillHydrationKey).filter(Boolean);
+
+    const mergeBundledSkillOptions = (options: any[] = []) => {
+      const seenKeys = new Set();
+      return compact(options).filter((item) => {
+        const primaryKey = getBundledSkillPrimaryKey(item);
+        if (!primaryKey || seenKeys.has(primaryKey)) {
+          return false;
+        }
+        seenKeys.add(primaryKey);
+        return true;
+      });
+    };
+
+    const hydrateSelectedBundledSkills = async () => {
+      pendingKeys.forEach((key) => hydratedBundledSkillKeysRef.current.add(key));
+      const resourceIds = Array.from(new Set(pendingSkills.map(getBundledSkillHydrationId).filter(Boolean)));
+      const resourceCodes = Array.from(new Set(pendingSkills.map(getBundledSkillHydrationCode).filter(Boolean)));
+      const fetchedOptions: any[] = [];
+
+      if (resourceIds.length) {
+        try {
+          const res = await queryResourceDetailListByIds({ resourceIds });
+          fetchedOptions.push(...getListFromResponse(res).map(normalizeBundledSkillOption));
+        } catch (error) {
+          console.error('hydrate bundled skills by ids failed', error);
+        }
+      }
+
+      if (resourceCodes.length) {
+        const codeMatchedOptions = await Promise.all(
+          resourceCodes.map(async (resourceCode) => {
+            try {
+              const res = await listResourceUseAuth({
+                resourceBizTypeList: ['SKILL'],
+                pageNum: 1,
+                pageSize: BUNDLED_SKILL_PAGE_SIZE,
+                // 默认配置按 resourceCode 精确补全；接口仍使用 keyword 查询候选，再由前端做精确过滤。
+                keyword: resourceCode,
+              });
+              const list = getListFromResponse(res);
+              const matched = list.find((item) => getBundledSkillCodeKeys(item).includes(resourceCode));
+              return matched ? normalizeBundledSkillOption(matched) : null;
+            } catch (error) {
+              console.error('hydrate bundled skills by code failed', error);
+              return null;
+            }
+          })
+        );
+        fetchedOptions.push(...compact(codeMatchedOptions));
+      }
+
+      if (cancelled) {
+        return;
+      }
+
+      const nextOptions = mergeBundledSkillOptions([...bundledSkillOptions, ...fetchedOptions]);
+      if (fetchedOptions.length) {
+        setBundledSkillOptions(nextOptions);
+      }
+
+      const latestSkills = form.getFieldValue('bundledSkills') || currentSkills;
+      const normalizedSkills = normalizeBundledSkillItems(latestSkills, nextOptions);
+      if (JSON.stringify(latestSkills) === JSON.stringify(normalizedSkills)) {
+        completed = true;
+        return;
+      }
+      form.setFieldsValue({ bundledSkills: normalizedSkills });
+      syncRoleToForm({ bundledSkills: normalizedSkills });
+      completed = true;
+    };
+
+    hydrateSelectedBundledSkills();
+
+    return () => {
+      cancelled = true;
+      if (!completed) {
+        pendingKeys.forEach((key) => hydratedBundledSkillKeysRef.current.delete(key));
+      }
+    };
+  }, [bundledSkillOptions, form, selectedSkills, syncRoleToForm]);
 
   // 配置技能搜索已改为后端搜索，弹窗只渲染接口当前页返回的数据。
   const filteredBundledSkillOptions = bundledSkillOptions;
