@@ -1,4 +1,4 @@
-import { Button, Popconfirm } from 'antd';
+import { Button, Popconfirm, Tag } from 'antd';
 import classNames from 'classnames';
 import dayjs from 'dayjs';
 import React from 'react';
@@ -95,7 +95,13 @@ const ModelCardItem: React.FC<Props> = ({
             </span>
           </div>
         </div>
-        <div>{recordStatus ? renderStatusTag(intl, recordStatus) : null}</div>
+        <div className={styles.headTags}>
+          {/* 默认对话模型在右上角额外展示短标签，避免只在能力标签区才能识别默认状态。 */}
+          {isDefaultModel ? (
+            <Tag className={styles.defaultTag}>{intl.formatMessage({ id: 'modelMgr.default' })}</Tag>
+          ) : null}
+          {recordStatus ? renderStatusTag(intl, recordStatus) : null}
+        </div>
       </div>
 
       <div className={styles.content}>
