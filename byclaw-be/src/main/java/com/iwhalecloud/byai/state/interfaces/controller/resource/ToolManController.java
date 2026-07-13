@@ -1134,6 +1134,7 @@ public class ToolManController {
             String resolvedUserCode = StringUtils.isNotBlank(userCode) ? userCode
                 : CurrentUserHolder.getCurrentUserCode();
             List<MultipartFile> uploadFiles = resolveSkillUploadFiles(file, files);
+            byClawSkillResourceApplicationService.validateChatUploadedSkillImportPermission(resourceId, uploadFiles);
             List<ByClawSkillDto> data = byClawSkillUploadApplicationService.uploadSkillZips(resolvedUserCode,
                 resourceId, uploadFiles);
             byClawSkillResourceApplicationService.registerChatUploadedSkills(resolvedUserCode, resourceId, uploadFiles,
