@@ -317,6 +317,8 @@ public class ModelManagementApplicationService {
         if (StringUtil.isNotEmpty(entity.getInParams())) {
             fillModelVOFromInParams(vo, entity.getInParams());
         }
+        // 统一在最终响应阶段合成默认对话模型能力，兼容老数据 in_params 中没有 abilities 的情况。
+        vo.setAbilities(buildResponseAbilities(vo, vo.getAbilities()));
         return vo;
     }
 
@@ -365,7 +367,7 @@ public class ModelManagementApplicationService {
             vo.setModelProtocol(String.valueOf(inParams.get("modelProtocol")));
         }
         if (inParams.get("abilities") != null) {
-            vo.setAbilities(buildResponseAbilities(vo, inParams.get("abilities")));
+            vo.setAbilities(JSON.parseArray(JSON.toJSONString(inParams.get("abilities")), String.class));
         }
         if (inParams.get("systems") != null) {
             vo.setSystems(JSON.parseArray(JSON.toJSONString(inParams.get("systems")), String.class));
@@ -386,17 +388,22 @@ public class ModelManagementApplicationService {
             JSON.parseObject(JSON.toJSONString(inParams.get("reasoningConfig")), ModelReasoningConfig.class));
     }
 
-    /**
-     * abilities 来源仍是 in_params；默认对话模型标签来源于 byai_tag_relation，列表返回时动态合成，避免静态 JSON 与关系表状态不一致。
-     */
+    /** abilities 来源仍是 in_params；默认对话模型标签来源于 byai_tag_relation，列表返回时动态合成。 */
     private List<String> buildResponseAbilities(ModelVO vo, Object abilitiesValue) {
-        List<String> abilities = JSON.parseArray(JSON.toJSONString(abilitiesValue), String.class);
+        List<String> abilities = abilitiesValue == null ? null
+            : JSON.parseArray(JSON.toJSONString(abilitiesValue), String.class);
         List<String> responseAbilities = abilities == null ? new ArrayList<>() : new ArrayList<>(abilities);
         responseAbilities.removeIf(DEFAULT_CHAT_MODEL_TAG_ID::equals);
-        if (vo.getIsDefault() != null && vo.getIsDefault() == 1) {
+        if (isDefaultDialogModel(vo)) {
             responseAbilities.add(DEFAULT_CHAT_MODEL_TAG_ID);
         }
         return responseAbilities;
+    }
+
+    /** tag_id=1 还承载 EMBEDDING 默认模型关系，只有 LLM 默认模型才展示为“默认对话模型”能力。 */
+    private boolean isDefaultDialogModel(ModelVO vo) {
+        return vo != null && vo.getIsDefault() != null && vo.getIsDefault() == 1
+            && DEFAULT_MODEL_TYPE_LLM.equals(normalizeModelType(vo.getModelType(), DEFAULT_MODEL_TYPE_LLM));
     }
 
     /** 从 inParams 填充数值类字段：超时、重试、采样参数等 */

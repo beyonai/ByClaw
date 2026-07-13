@@ -10,12 +10,14 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -219,11 +221,15 @@ class WecomStreamOutputStreamTest {
 
     @Test
     void completionIdleTimeoutResetsOnEachWrite() throws Exception {
-        WecomStreamOutputStream out = new WecomStreamOutputStream(mapper, dispatcher, "cb-idle");
+        AtomicLong nowMillis = new AtomicLong(1_000L);
+        WecomStreamOutputStream out = new WecomStreamOutputStream(mapper, dispatcher, "cb-idle", "stream-idle", 0L,
+                nowMillis::get);
         ExecutorService waiter = Executors.newSingleThreadExecutor();
+        CountDownLatch waiterStarted = new CountDownLatch(1);
         try {
             Future<Boolean> completed = waiter.submit(() -> {
                 try {
+                    waiterStarted.countDown();
                     out.awaitCompletionAfterIdle(250, TimeUnit.MILLISECONDS);
                     return true;
                 } catch (java.util.concurrent.TimeoutException e) {
@@ -231,9 +237,11 @@ class WecomStreamOutputStreamTest {
                 }
             });
 
-            Thread.sleep(150);
+            assertThat(waiterStarted.await(1, TimeUnit.SECONDS)).isTrue();
+            // 使用可控时钟推进空闲时间，避免 Thread.sleep 受机器调度影响导致测试偶发提前超时。
+            nowMillis.addAndGet(200L);
             out.write(answerDeltaBlock("慢"));
-            Thread.sleep(150);
+            nowMillis.addAndGet(200L);
 
             assertThat(completed).isNotDone();
 

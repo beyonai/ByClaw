@@ -252,6 +252,7 @@ flowchart TD
 - **插件配置**：见 [`openclaw.plugin.json`](../openclaw.plugin.json) 中 `properties`（如 `agentConfigDir`、`digEmployeeChangeSubscribe`、`digEmployeeChangeChannel`、`mainAgentsMdMode` 等）。
 - **Redis / 身份**：`DigEmployeeAuthWatch` 使用 `USER_CODE`、`REDIS_HOST`、`REDIS_PORT`、`REDIS_DATABASE` 等（详见 `src/dig-employee-auth-watch.ts`）。
 - **Pub/Sub 开关**：配置项 `digEmployeeChangeSubscribe` 或环境变量 `BAIYING_DIG_EMPLOYEE_CHANGE_SUBSCRIBE=true`。
+- **模型请求超时**：动态写入的 `models.providers.baiying-m-*` 默认使用 `timeoutSeconds: 600`；非空环境变量 `BYCLAW_LLM_IDLE_TIME` 可用正整数秒覆盖该默认值。该值不控制 Agent Run 总时长。
 
 完整 JSON 示例与安装说明见根目录 [README.md](../README.md)。
 

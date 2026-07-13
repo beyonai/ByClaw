@@ -30,7 +30,7 @@
         create_by, owner_type, create_time
     </sql>
 
-    <!-- 分页列表用：byai_aimodel 别名 a，与 byai_tag_relation（tag_id=3）左关联以产出 is_default -->
+    <!-- 分页列表用：byai_aimodel 别名 a，与 byai_tag_relation（tag_id=1）左关联以产出 is_default -->
     <sql id="Condition_Where_WithTag">
         <where>
             <if test="status != null and status != ''">
@@ -57,6 +57,8 @@
                       AND ability_rel.obj_id = a.model_id
                       AND ability_rel.tag_id = #{ability}
                 )
+                <!-- tag_id=1 在关系表里也用于 EMBEDDING 默认模型；默认对话模型筛选只应匹配 LLM。 -->
+                AND (CAST(#{ability} AS varchar) != '1' OR a.model_type = 'LLM')
             </if>
             <if test="system != null and system != ''">
                 <bind name="systemPattern" value="'%' + system + '%'"/>
