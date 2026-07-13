@@ -167,18 +167,32 @@ class ByclawResultFileStorage(ResultFileStorage):
 
     @staticmethod
     def _create_discovery_redis() -> Redis:
-        redis_host = os.getenv("DATACLOUD_GATEWAY_REDIS_HOST", "localhost")
-        redis_port = int(os.getenv("DATACLOUD_GATEWAY_REDIS_PORT", 6379))
-        redis_db = int(os.getenv("DATACLOUD_GATEWAY_REDIS_DB", 0))
-        redis_password = os.getenv("DATACLOUD_GATEWAY_REDIS_PASSWORD")
-        redis_username = os.getenv("DATACLOUD_GATEWAY_REDIS_USERNAME")
+        cluster_hosts = (
+            os.getenv("DATACLOUD_GATEWAY_REDIS_CLUSTER_HOST", "").strip()
+            or os.getenv("REDIS_CLUSTER_HOST", "").strip()
+        )
+        if cluster_hosts:
+            from redis.asyncio.cluster import ClusterNode
+            from redis.asyncio.cluster import RedisCluster
+
+            nodes = [
+                ClusterNode(host, int(port) if port else 6379)
+                for node in cluster_hosts.split(",")
+                if node.strip()
+                for host, _, port in (node.strip().rpartition(":"),)
+            ]
+            return RedisCluster(  # type: ignore[return-value]
+                startup_nodes=nodes,
+                password=os.getenv("DATACLOUD_GATEWAY_REDIS_PASSWORD") or None,
+                decode_responses=True,
+            )
 
         return Redis(
-            host=redis_host,
-            port=redis_port,
-            db=redis_db,
-            password=redis_password or None,
-            username=redis_username or None,
+            host=os.getenv("DATACLOUD_GATEWAY_REDIS_HOST", "localhost"),
+            port=int(os.getenv("DATACLOUD_GATEWAY_REDIS_PORT", 6379)),
+            db=int(os.getenv("DATACLOUD_GATEWAY_REDIS_DB", 0)),
+            password=os.getenv("DATACLOUD_GATEWAY_REDIS_PASSWORD") or None,
+            username=os.getenv("DATACLOUD_GATEWAY_REDIS_USERNAME") or None,
             decode_responses=True,
         )
 

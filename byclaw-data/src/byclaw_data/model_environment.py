@@ -31,6 +31,26 @@ def _as_int(key: str, default: int) -> int:
 def build_redis_client():
     if redis is None:
         raise RuntimeError("redis package is not installed")
+
+    cluster_hosts = (
+        os.environ.get("DATACLOUD_GATEWAY_REDIS_CLUSTER_HOST", "").strip()
+        or os.environ.get("REDIS_CLUSTER_HOST", "").strip()
+    )
+    if cluster_hosts:
+        from redis.cluster import RedisCluster, ClusterNode
+        startup_nodes = []
+        for node in cluster_hosts.split(","):
+            node = node.strip()
+            if not node:
+                continue
+            host, _, port = node.rpartition(":")
+            startup_nodes.append(ClusterNode(host, int(port) if port else 6379))
+        return RedisCluster(
+            startup_nodes=startup_nodes,
+            password=os.environ.get("DATACLOUD_GATEWAY_REDIS_PASSWORD", "") or None,
+            decode_responses=True,
+        )
+
     return redis.Redis(
         host=os.environ.get("DATACLOUD_GATEWAY_REDIS_HOST", ""),
         port=_as_int("DATACLOUD_GATEWAY_REDIS_PORT", 6379),

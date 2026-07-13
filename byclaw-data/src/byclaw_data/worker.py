@@ -1240,9 +1240,9 @@ class DataCloudWorker(GatewayWorker):
         )
         return None
 
-    async def start_heartbeat(self) -> None:
+    async def start_heartbeat(self, **kwargs: Any) -> None:
         setup_logging(extra_namespaces=("byclaw_data",))
-        await super().start_heartbeat()
+        await super().start_heartbeat(**kwargs)
 
         init_plugin = self.plugin_registry.get_plugin("datacloud_init_agent_conf")
         loaded_agent_ids = (

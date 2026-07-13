@@ -322,7 +322,7 @@ wheels = [
 
 [[package]]
 name = "by-framework"
-version = "0.2.1"
+version = "0.2.2.dev9"
 source = { registry = "https://pypi.org/simple/" }
 dependencies = [
     { name = "dill" },
@@ -330,9 +330,9 @@ dependencies = [
     { name = "redis" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a9/b4/725bc1469c7e38ac25921be24e9bc34ac99213dbcfdcff85a089fdc39d06/by_framework-0.2.1.tar.gz", hash = "sha256:ef23e18759cd33dee5553b02a0900fc1164c75e3514c24542c04de13e71c82d8", size = 946814, upload-time = "2026-05-18T10:24:24.043Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ac/0e/0c77ed1addda14129d72af555bf84ccc90f7ed29632b09667ee379fd8cf3/by_framework-0.2.2.dev9.tar.gz", hash = "sha256:b432640091b18be9dc6a1413e00d96b4cb5a2614d5ca8fbca267a11ee8119cce", size = 1261356, upload-time = "2026-07-08T09:38:29.198Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b2/74/9d67e4ea9cc131f06a10fee978e4e0415f0202a18c0bb3ddd71827dd9d7a/by_framework-0.2.1-py3-none-any.whl", hash = "sha256:e4b25636eea60b4f0dcb220655d95bd2d52f050f459c98165b5195bee879019d", size = 137484, upload-time = "2026-05-18T10:24:22.544Z" },
+    { url = "https://files.pythonhosted.org/packages/72/4f/c5170c49723e04a9c0d11fd709566106f8cd4e6a22982127d8a11371e45d/by_framework-0.2.2.dev9-py3-none-any.whl", hash = "sha256:2e80a349930752570db778d02d7f9b8b3ad8b57a267d92f7e6069c05aba031f4", size = 217818, upload-time = "2026-07-08T09:38:27.854Z" },
 ]
 
 [[package]]
@@ -370,7 +370,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "by-datacloud", specifier = ">=0.1.41" },
-    { name = "by-framework", specifier = ">=0.2.0", index = "https://pypi.org/simple/" },
+    { name = "by-framework", specifier = "==0.2.2.dev9", index = "https://pypi.org/simple/" },
     { name = "by-framework-history-byclaw", specifier = ">=0.0.3" },
     { name = "langchain-openai", specifier = ">=1.1.11" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
