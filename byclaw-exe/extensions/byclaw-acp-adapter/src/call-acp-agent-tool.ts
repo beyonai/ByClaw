@@ -16,6 +16,7 @@ import { getDelegatedTaskToolDetails } from "../../shared/src/delegated-tool-det
 import type { BaiyingEnhanceLogger } from "../../shared/src/debug-channel.js";
 import { logBaiyingRequest } from "../../shared/src/debug-channel.js";
 import type { Capability, Dict, ExecutorResponse } from "../../shared/src/executor-types.js";
+import { byFrameworkRedisKeys } from "../../shared/src/redis-compat.js";
 import { CALL_ACP_AGENT, DEFAULTS } from "./constants.js";
 import { buildCallAgentContentFromPlan, createByclawAcpPlan } from "./planner.js";
 import type { ByclawRegistry } from "./registry.js";
@@ -129,7 +130,7 @@ async function trackDelegatedTask(params: {
     parentSessionKey: params.parentSessionKey,
     traceId,
     sessionId,
-    streamName: String(ack.stream_name || `byai_gateway:session:${sessionId}:data_stream`),
+    streamName: String(ack.stream_name || byFrameworkRedisKeys.sessionDataStream(sessionId)),
     toolCallId: params.toolCallId,
     targetWorkerId: normalizeText(ack.target_worker_id) || normalizeText(target.target_worker_id),
     targetAgentType: normalizeText(ack.target_agent_type) || normalizeText(target.target_agent_type),

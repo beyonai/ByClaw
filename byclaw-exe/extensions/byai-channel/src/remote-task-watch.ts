@@ -13,7 +13,7 @@ import {
   markActiveSdkAwaitingDelegatedFollowup,
   removeActiveSdkDelegatedWork,
 } from "./session-context.js";
-import { QueueNames } from "@byclaw/by-framework";
+import { byFrameworkRedisKeys } from "../../shared/src/redis-compat.js";
 
 type RedisClient = NonNullable<ReturnType<typeof createRedisInstance>>;
 
@@ -326,7 +326,7 @@ async function pollRemoteTaskResult(params: {
   task: RemoteTaskRecord;
   blockMs: number;
 }): Promise<DocStreamPollResult> {
-  const streamName = QueueNames.session_data_stream(params.task.sessionId);
+  const streamName = byFrameworkRedisKeys.sessionDataStream(params.task.sessionId);
   let cursor = params.task.pollCursor || `${Math.max(0, (params.task.createdAt ?? params.task.eventAt ?? 0) - 1)}-0`;
   const reply = await (params.redis as unknown as {
     xread(...args: Array<string | number>): Promise<unknown>;

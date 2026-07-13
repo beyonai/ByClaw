@@ -12,6 +12,7 @@ export * from "./errors.js";
 export * from "./debug-channel.js";
 export * from "./call-agent-doc.js";
 export * from "./call-agent.js";
+export * from "./redis-compat.js";
 export * from "./channel-session-resolve.js";
 export * from "./remote-task-log.js";
 export * from "./delegated-tool-details.js";

@@ -1,4 +1,4 @@
-import net from "node:net";
+import IORedis from "ioredis";
 import { ACP, DEFAULTS, ENV, HTTP, REDIS_KEYS } from "./constants.mjs";
 
 function envString(name, fallback = "") {
@@ -14,6 +14,42 @@ function envBoolean(name, fallback = false) {
   const value = envString(name, "");
   if (!value) return fallback;
   return ["1", "true", "yes", "y", "on"].includes(value.toLowerCase());
+}
+
+function parseClusterNodes(value) {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => {
+      const [host, rawPort] = item.split(":");
+      const port = Number(rawPort);
+      if (!host || !Number.isInteger(port) || port <= 0) {
+        throw new Error(`Invalid Redis cluster node: ${item}`);
+      }
+      return { host, port };
+    });
+}
+
+function readRedisConfig() {
+  const clusterNodesValue =
+    envString("REDIS_CLUSTER_HOST", "") ||
+    envString("REDIS_CLUSTER_NODES", "") ||
+    envString("spring.data.redis.cluster.nodes", "") ||
+    envString("spring.redis.cluster.nodes", "");
+  const clusterNodes = clusterNodesValue ? parseClusterNodes(clusterNodesValue) : [];
+  return {
+    host: envString(ENV.redisHost, envString("spring.data.redis.host", envString("spring.redis.host", DEFAULTS.redisHost))),
+    port: envNumber(ENV.redisPort, envNumber("spring.data.redis.port", envNumber("spring.redis.port", DEFAULTS.redisPort))),
+    username: envString(ENV.redisUsername, envString("spring.data.redis.username", envString("spring.redis.username", ""))),
+    password: envString(ENV.redisPassword, envString("spring.data.redis.password", envString("spring.redis.password", ""))),
+    database: envNumber(
+      ENV.redisDatabase,
+      envNumber("REDIS_DB", envNumber("spring.data.redis.database", envNumber("spring.redis.database", DEFAULTS.redisDatabase)))
+    ),
+    clusterNodes,
+    mode: clusterNodes.length > 0 ? "cluster" : "standalone",
+  };
 }
 
 function parseJson(value, fallback) {
@@ -33,106 +69,58 @@ function parseArgs(argv) {
   };
 }
 
-function encodeCommand(parts) {
-  const chunks = [`*${parts.length}\r\n`];
-  for (const part of parts) {
-    const value = String(part);
-    chunks.push(`$${Buffer.byteLength(value)}\r\n${value}\r\n`);
-  }
-  return Buffer.from(chunks.join(""), "utf8");
-}
-
-class RespParser {
-  buffer = Buffer.alloc(0);
-
-  append(chunk) {
-    this.buffer = Buffer.concat([this.buffer, chunk]);
-  }
-
-  read() {
-    const parsed = this.parseAt(0);
-    if (!parsed) return undefined;
-    this.buffer = this.buffer.subarray(parsed.offset);
-    return parsed.value;
-  }
-
-  parseAt(offset) {
-    if (offset >= this.buffer.length) return undefined;
-    const prefix = String.fromCharCode(this.buffer[offset]);
-    const lineEnd = this.buffer.indexOf("\r\n", offset);
-    if (lineEnd < 0) return undefined;
-    const line = this.buffer.subarray(offset + 1, lineEnd).toString("utf8");
-    const next = lineEnd + 2;
-    if (prefix === "+") return { value: line, offset: next };
-    if (prefix === "-") throw new Error(`Redis error: ${line}`);
-    if (prefix === ":") return { value: Number(line), offset: next };
-    if (prefix === "$") {
-      const length = Number(line);
-      if (length < 0) return { value: null, offset: next };
-      const end = next + length;
-      if (this.buffer.length < end + 2) return undefined;
-      return { value: this.buffer.subarray(next, end).toString("utf8"), offset: end + 2 };
-    }
-    if (prefix === "*") {
-      const length = Number(line);
-      if (length < 0) return { value: null, offset: next };
-      const items = [];
-      let cursor = next;
-      for (let index = 0; index < length; index += 1) {
-        const parsed = this.parseAt(cursor);
-        if (!parsed) return undefined;
-        items.push(parsed.value);
-        cursor = parsed.offset;
-      }
-      return { value: items, offset: cursor };
-    }
-    throw new Error(`Unsupported Redis RESP prefix: ${prefix}`);
-  }
-}
-
 class Redis {
   constructor(config) {
     this.config = config;
-    this.parser = new RespParser();
-    this.waiters = [];
   }
 
   async connect() {
-    this.socket = net.createConnection({ host: this.config.host, port: this.config.port });
-    this.socket.setTimeout(DEFAULTS.redisConnectTimeoutMs);
-    this.socket.on("data", (chunk) => {
-      this.parser.append(chunk);
-      for (;;) {
-        const reply = this.parser.read();
-        if (reply === undefined) break;
-        const waiter = this.waiters.shift();
-        waiter?.resolve(reply);
-      }
-    });
-    this.socket.on("error", (error) => this.rejectPending(error));
-    this.socket.on("timeout", () => this.socket.destroy(new Error("Redis connection timed out.")));
-    this.socket.on("close", () => this.rejectPending(new Error("Redis connection closed.")));
-    await new Promise((resolve, reject) => {
-      this.socket.once("connect", resolve);
-      this.socket.once("error", reject);
-    });
-    if (this.config.password) {
-      if (this.config.username) {
-        await this.command("AUTH", this.config.username, this.config.password);
-      } else {
-        await this.command("AUTH", this.config.password);
-      }
+    const redisOptions = {
+      username: this.config.username || undefined,
+      password: this.config.password || undefined,
+      connectTimeout: DEFAULTS.redisConnectTimeoutMs,
+      lazyConnect: true,
+      enableOfflineQueue: false,
+      maxRetriesPerRequest: 2,
+    };
+    if (this.config.mode === "cluster") {
+      this.client = new IORedis.Cluster(this.config.clusterNodes, {
+        redisOptions,
+        lazyConnect: true,
+        enableOfflineQueue: false,
+        scaleReads: "master",
+        slotsRefreshTimeout: DEFAULTS.redisConnectTimeoutMs,
+      });
+    } else {
+      this.client = new IORedis({
+        ...redisOptions,
+        host: this.config.host,
+        port: this.config.port,
+        db: this.config.database,
+      });
     }
-    if (this.config.database > 0) {
-      await this.command("SELECT", this.config.database);
-    }
+    await this.client.connect();
   }
 
   async command(...parts) {
-    return await new Promise((resolve, reject) => {
-      this.waiters.push({ resolve, reject });
-      this.socket.write(encodeCommand(parts));
-    });
+    const [command, ...args] = parts;
+    const upper = String(command).toUpperCase();
+    if (upper === "KEYS") return await this.keys(String(args[0] ?? "*"));
+    if (this.config.mode === "cluster" && upper === "MGET") {
+      return await Promise.all(args.map((key) => this.client.get(String(key))));
+    }
+    if (this.config.mode === "cluster" && upper === "DEL" && args.length > 1) {
+      const counts = await Promise.all(args.map((key) => this.client.del(String(key))));
+      return counts.reduce((sum, count) => sum + count, 0);
+    }
+    return await this.client.call(upper, ...args);
+  }
+
+  async keys(pattern) {
+    if (this.config.mode !== "cluster") return await this.client.keys(pattern);
+    const masters = this.client.nodes("master");
+    const keySets = await Promise.all(masters.map((node) => scanNodeKeys(node, pattern)));
+    return [...new Set(keySets.flat())];
   }
 
   async setJson(key, value) {
@@ -153,13 +141,19 @@ class Redis {
   }
 
   close() {
-    this.socket?.destroy();
+    this.client?.disconnect();
   }
+}
 
-  rejectPending(error) {
-    const pending = this.waiters.splice(0);
-    for (const waiter of pending) waiter.reject(error);
-  }
+async function scanNodeKeys(node, pattern) {
+  const keys = [];
+  let cursor = "0";
+  do {
+    const [nextCursor, batch] = await node.scan(cursor, "MATCH", pattern, "COUNT", "500");
+    cursor = String(nextCursor);
+    keys.push(...batch);
+  } while (cursor !== "0");
+  return keys;
 }
 
 const userCode = envString("USER_CODE", DEFAULTS.syncUserCode);
@@ -610,13 +604,7 @@ async function findExistingEmployee(api, role) {
 }
 
 async function findExistingEmployeeInRedis(targetCode, targetName) {
-  const redis = new Redis({
-    host: envString(ENV.redisHost, DEFAULTS.redisHost),
-    port: envNumber(ENV.redisPort, DEFAULTS.redisPort),
-    username: envString(ENV.redisUsername, ""),
-    password: envString(ENV.redisPassword, ""),
-    database: envNumber(ENV.redisDatabase, DEFAULTS.redisDatabase)
-  });
+  const redis = new Redis(readRedisConfig());
   try {
     await redis.connect();
     const keys = await redis.command("KEYS", REDIS_KEYS.digitalEmployeePattern);
@@ -761,13 +749,7 @@ function buildModelConfigs() {
 }
 
 async function writeRedis(upserted, options) {
-  const redis = new Redis({
-    host: envString(ENV.redisHost, DEFAULTS.redisHost),
-    port: envNumber(ENV.redisPort, DEFAULTS.redisPort),
-    username: envString(ENV.redisUsername, ""),
-    password: envString(ENV.redisPassword, ""),
-    database: envNumber(ENV.redisDatabase, DEFAULTS.redisDatabase)
-  });
+  const redis = new Redis(readRedisConfig());
   await redis.connect();
 
   if (options.deleteOldMock) {

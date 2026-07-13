@@ -1,15 +1,14 @@
 import {
   QueueNames,
+  RegistryKeys,
   WorkerRegistry,
   buildAskAgentPublishArtifacts,
-  createRedis,
   createRedisCallAgentDeps,
   publishWithExecutionRecord,
   resolveCallAgentPublishIds,
   type CallAgentPublishInput,
   type CallAgentPublishResult,
 } from "@byclaw/by-framework";
-import type { Redis } from "ioredis";
 import type { Capability, Dict, ExecutorFailure, ExecutorResponse } from "./executor-types.js";
 import { asString } from "./executor-types.js";
 import { makeError } from "./errors.js";
@@ -20,6 +19,11 @@ import {
   type DocDeltaCallback,
 } from "./call-agent-doc.js";
 import { logBaiyingRequest, type BaiyingEnhanceLogger } from "./debug-channel.js";
+import {
+  applyByFrameworkRedisKeyPatch,
+  createRedisClient,
+  type RedisClient,
+} from "./redis-compat.js";
 
 export type CallAgentMode = "sync" | "async";
 
@@ -65,7 +69,7 @@ export type ExecuteViaCallAgentInput = {
 export async function executeViaCallAgent(
   input: ExecuteViaCallAgentInput,
 ): Promise<ExecutorResponse> {
-  let ctx: { redis: Redis; registry: WorkerRegistry };
+  let ctx: { redis: RedisClient; registry: WorkerRegistry };
   try {
     ctx = createCallAgentContext();
   } catch (err) {
@@ -78,7 +82,7 @@ export async function executeViaCallAgent(
   try {
     const startedAt = Date.now();
     const deps = createRedisCallAgentDeps({
-      redis: ctx.redis,
+      redis: ctx.redis as never,
       registry: ctx.registry,
     });
     const sourceAgentType =
@@ -425,16 +429,11 @@ function isRecord(value: unknown): value is Dict {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
-function createCallAgentContext(): { redis: Redis; registry: WorkerRegistry } {
+function createCallAgentContext(): { redis: RedisClient; registry: WorkerRegistry } {
   const config = readRedisConfig();
-  const redis = createRedis({
-    host: config.host,
-    port: config.port,
-    db: config.db,
-    username: config.username,
-    password: config.password,
-  });
-  return { redis, registry: new WorkerRegistry(redis) };
+  applyByFrameworkRedisKeyPatch({ QueueNames, RegistryKeys }, config);
+  const redis = createRedisClient(config);
+  return { redis, registry: new WorkerRegistry(redis as never) };
 }
 
 function nonEmptyEnv(name: string): string | undefined {

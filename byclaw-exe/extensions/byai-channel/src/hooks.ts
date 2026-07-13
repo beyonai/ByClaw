@@ -1,4 +1,4 @@
-import { createRedis, EventType, SseReasonMessageType } from "@byclaw/by-framework";
+import { EventType, SseReasonMessageType } from "@byclaw/by-framework";
 import { enqueueAfterAgentEvents } from "./agent-event-serial.js";
 import {
   emitSdkChunkTracked,
@@ -38,6 +38,12 @@ import {
   consumeWorkspaceReloadHint,
   markWorkspaceReloadHint,
 } from "./workspace-reload-hints.js";
+import {
+  createRedisClient,
+  hasRedisConnectionConfig,
+  readRedisConfig,
+  type RedisConnectionConfig,
+} from "../../shared/src/redis-compat.js";
 import {
   resolveByaiAgentIdFromSessionKey,
   resolveByaiSessionIdFromSessionKey,
@@ -130,13 +136,7 @@ type LlmOutputHookContext = PluginHookAgentContext & {
   contextWindowReferenceTokens?: number;
 };
 
-type RedisInfo = {
-  username?: string;
-  password?: string;
-  host: string;
-  port: number;
-  db: number;
-};
+type RedisInfo = RedisConnectionConfig;
 
 type ByaiUserInfo = {
   userId: string;
@@ -399,23 +399,11 @@ async function refreshRunStartSessionStatusRedis(sessionKey: string | undefined)
 }
 
 function getRedisInfo(): RedisInfo | null {
-  const {
-    REDIS_USERNAME,
-    REDIS_PASSWORD,
-    REDIS_HOST,
-    REDIS_PORT,
-    REDIS_DATABASE,
-  } = process.env;
-  if (!REDIS_HOST || !REDIS_PORT) {
+  const config = readRedisConfig();
+  if (!hasRedisConnectionConfig(config)) {
     return null;
   }
-  return {
-    username: REDIS_USERNAME,
-    password: REDIS_PASSWORD,
-    host: REDIS_HOST,
-    port: parseInt(REDIS_PORT, 10),
-    db: parseInt(REDIS_DATABASE || "0", 10),
-  };
+  return config;
 }
 
 async function getCurrentUserCode(): Promise<string | null> {
@@ -459,7 +447,7 @@ async function readByaiUserInfoFromRedis(): Promise<ByaiUserInfo | null> {
     return null;
   }
 
-  const redis = createRedis(redisInfo);
+  const redis = createRedisClient(redisInfo);
   try {
     const userIdRaw = await redis.get(`SHARE_BFM_USER_CODE_${userCode}`);
     const userId = userIdRaw?.trim();

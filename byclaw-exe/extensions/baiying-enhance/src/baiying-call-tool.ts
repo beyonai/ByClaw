@@ -31,6 +31,7 @@ import {
 import { appendBaiyingRemoteTaskStartedEvent } from "./remote-task-log.js";
 import type { ResourceContext } from "./executor/types.js";
 import { getDelegatedTaskToolDetails } from "../../shared/src/delegated-tool-details.js";
+import { byFrameworkRedisKeys } from "../../shared/src/redis-compat.js";
 
 function normalizeResourceType(resource: BaiyingAssociatedResource | undefined): string {
   return resource?.resourceBizType || resource?.resourceType || "UNKNOWN";
@@ -721,7 +722,7 @@ export function createBaiyingCallToolFactory(params: {
                 parentSessionKey: channelResolve.parentSessionKey,
                 traceId,
                 sessionId,
-                streamName: ack.stream_name || `byai_gateway:session:${sessionId}:data_stream`,
+                streamName: ack.stream_name || byFrameworkRedisKeys.sessionDataStream(sessionId),
                 toolCallId: _toolCallId,
                 targetWorkerId: normalizeText(ack.target_worker_id) || normalizeText(target.target_worker_id),
                 targetAgentType: normalizeText(ack.target_agent_type) || normalizeText(target.target_agent_type),

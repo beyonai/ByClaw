@@ -1,6 +1,12 @@
 import path from "node:path";
 import { ACP_CLIENT_TYPES, ACP_MODE, DEFAULTS, ENV, HTTP, PATHS, PLUGIN, SQLITE, TOOL_NAMES } from "./constants.js";
 import type { ByclawAcpMode, ResolvedByclawAcpAdapterConfig, RedisConnectionConfig } from "./types.js";
+import {
+  readRedisConfig,
+  type RedisClusterNode,
+  type RedisKeySchemaVersion,
+  type RedisMode,
+} from "../../shared/src/redis-compat.js";
 
 export const byclawAcpAdapterConfigSchema = {
   type: "object",
@@ -25,6 +31,9 @@ export const byclawAcpAdapterConfigSchema = {
         username: { type: "string" },
         password: { type: "string" },
         database: { type: "number" },
+        mode: { type: "string", enum: ["standalone", "cluster"] },
+        clusterNodes: { type: "array" },
+        keySchemaVersion: { type: "string", enum: ["v1", "v2"] },
         keyPrefix: { type: "string" },
         connectTimeoutMs: { type: "number" },
       },
@@ -66,6 +75,35 @@ function resolveAcpMode(value: unknown): ByclawAcpMode {
   return value === ACP_MODE.acp ? ACP_MODE.acp : ACP_MODE.callAgent;
 }
 
+function readRedisMode(value: unknown, fallback: RedisMode): RedisMode {
+  return value === "cluster" || value === "standalone" ? value : fallback;
+}
+
+function readRedisKeySchemaVersion(
+  value: unknown,
+  fallback: RedisKeySchemaVersion,
+): RedisKeySchemaVersion {
+  return value === "v1" || value === "v2" ? value : fallback;
+}
+
+function readClusterNodes(value: unknown, fallback: RedisClusterNode[]): RedisClusterNode[] {
+  if (!Array.isArray(value)) {
+    return fallback;
+  }
+  const out: RedisClusterNode[] = [];
+  for (const item of value) {
+    if (!isRecord(item)) {
+      continue;
+    }
+    const host = readString(item.host, "");
+    const port = readInteger(item.port, Number.NaN);
+    if (host && Number.isFinite(port)) {
+      out.push({ host, port });
+    }
+  }
+  return out.length > 0 ? out : fallback;
+}
+
 function defaultStateDir(): string {
   return process.env[ENV.openclawStateDir] || path.join(process.cwd(), PATHS.openclawStateDir);
 }
@@ -77,15 +115,25 @@ function resolvePath(value: unknown, fallback: string): string {
 
 function resolveRedisConfig(value: unknown): RedisConnectionConfig {
   const redis = isRecord(value) ? value : {};
+  const envRedis = readRedisConfig();
+  const mode = readRedisMode(redis.mode, envRedis.mode);
+  const keySchemaVersion = readRedisKeySchemaVersion(
+    redis.keySchemaVersion,
+    mode === "cluster" ? "v2" : envRedis.keySchemaVersion,
+  );
   return {
-    host: readString(redis.host, process.env[ENV.redisHost] || DEFAULTS.redisHost),
-    port: readInteger(redis.port, readInteger(process.env[ENV.redisPort], DEFAULTS.redisPort)),
-    username: readString(redis.username, process.env[ENV.redisUsername] || ""),
-    password: readString(redis.password, process.env[ENV.redisPassword] || ""),
+    host: readString(redis.host, envRedis.host || process.env[ENV.redisHost] || DEFAULTS.redisHost),
+    port: readInteger(redis.port, envRedis.port ?? readInteger(process.env[ENV.redisPort], DEFAULTS.redisPort)),
+    username: readString(redis.username, envRedis.username || process.env[ENV.redisUsername] || ""),
+    password: readString(redis.password, envRedis.password || process.env[ENV.redisPassword] || ""),
+    db: readInteger(redis.database, envRedis.db ?? DEFAULTS.redisDatabase),
     database: readInteger(
       redis.database,
-      readInteger(process.env[ENV.redisDatabase], DEFAULTS.redisDatabase),
+      envRedis.db ?? readInteger(process.env[ENV.redisDatabase], DEFAULTS.redisDatabase),
     ),
+    mode,
+    clusterNodes: readClusterNodes(redis.clusterNodes, envRedis.clusterNodes),
+    keySchemaVersion,
     keyPrefix: readString(redis.keyPrefix, ""),
     connectTimeoutMs: Math.max(
       DEFAULTS.minRedisConnectTimeoutMs,
