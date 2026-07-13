@@ -24,6 +24,7 @@ import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceRelDetailS
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.domain.staticdata.service.SystemConfigService;
 import com.iwhalecloud.byai.manager.domain.superassist.service.SuasSuperassistService;
+import com.iwhalecloud.byai.manager.domain.users.service.UserService;
 import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeDTO;
 import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeDetailsDTO;
 import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeInstallResourceDTO;
@@ -34,12 +35,15 @@ import com.iwhalecloud.byai.manager.entity.resource.SsResExtSkill;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.entity.resource.SsResourceRelDetail;
 import com.iwhalecloud.byai.manager.entity.superassist.SuasSuperassist;
+import com.iwhalecloud.byai.manager.entity.users.Users;
 import com.iwhalecloud.byai.manager.qo.resource.DigitalEmployeeQo;
 import com.iwhalecloud.byai.manager.vo.digitemploy.SetDefaultDigitalEmployeeResultVo;
 import com.iwhalecloud.byai.manager.vo.resource.DigitalEmployeePageVo;
 import com.iwhalecloud.byai.manager.vo.resource.DigitalEmployeeVo;
 import com.iwhalecloud.byai.state.domain.resource.service.ResourceAuthContextService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
+import com.iwhalecloud.byai.state.application.service.session.ByClawSkillDeleteApplicationService;
+import com.iwhalecloud.byai.state.application.service.session.ByClawSkillPathResolver;
 import org.mockito.ArgumentCaptor;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -81,6 +85,9 @@ class DigitalEmployeeApplicationServiceTest {
     private ResourceAuthContextService resourceAuthContextService;
     private RobotChannelRegistryCoordinator robotChannelRegistryCoordinator;
     private DigEmployeeChangeEventPublisher digEmployeeChangeEventPublisher;
+    private UserService userService;
+    private ByClawSkillDeleteApplicationService byClawSkillDeleteApplicationService;
+    private ByClawSkillPathResolver byClawSkillPathResolver;
     private DigitalEmployeeApplicationService service;
 
     @BeforeEach
@@ -100,6 +107,9 @@ class DigitalEmployeeApplicationServiceTest {
         resourceAuthContextService = mock(ResourceAuthContextService.class);
         robotChannelRegistryCoordinator = mock(RobotChannelRegistryCoordinator.class);
         digEmployeeChangeEventPublisher = mock(DigEmployeeChangeEventPublisher.class);
+        userService = mock(UserService.class);
+        byClawSkillDeleteApplicationService = mock(ByClawSkillDeleteApplicationService.class);
+        byClawSkillPathResolver = mock(ByClawSkillPathResolver.class);
 
         MessageSource mockMessageSource = mock(MessageSource.class);
         when(mockMessageSource.getMessage(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(java.util.Locale.class)))
@@ -123,6 +133,9 @@ class DigitalEmployeeApplicationServiceTest {
         ReflectionTestUtils.setField(service, "resourceAuthContextService", resourceAuthContextService);
         ReflectionTestUtils.setField(service, "robotChannelRegistryCoordinator", robotChannelRegistryCoordinator);
         ReflectionTestUtils.setField(service, "digEmployeeChangeEventPublisher", digEmployeeChangeEventPublisher);
+        ReflectionTestUtils.setField(service, "userService", userService);
+        ReflectionTestUtils.setField(service, "byClawSkillDeleteApplicationService", byClawSkillDeleteApplicationService);
+        ReflectionTestUtils.setField(service, "byClawSkillPathResolver", byClawSkillPathResolver);
 
         LoginInfo loginInfo = new LoginInfo();
         loginInfo.setUserId(1L);
@@ -534,6 +547,50 @@ class DigitalEmployeeApplicationServiceTest {
         verify(operationLogService).recordOperationLog(eq(currentDefaultResource), eq(OperationTypeEnum.UPDATE));
         List<Map> relSkills = JSON.parseArray(result.getSkills(), Map.class);
         assertThat(relSkills).isEmpty();
+    }
+
+    @Test
+    void uninstallDigitalEmployeeRelResources_deletesLegacyChatUploadWorkspaceCopy() {
+        DigitalEmployeeInstallResourceDTO dto = new DigitalEmployeeInstallResourceDTO();
+        dto.setDigitalEmployeeId(100L);
+        dto.setRelIds(List.of(300L));
+
+        SsResource digitalEmployee = buildDigitalEmployee(100L, OwnerType.PERSONAL, 1L);
+        SsResource skillResource = buildSkillResource(300L, 1L);
+        SsResourceRelDetail skillRel = new SsResourceRelDetail();
+        skillRel.setResourceRelDetailId(900L);
+        skillRel.setResourceId(100L);
+        skillRel.setRelResourceId(300L);
+        SsResExtSkill extSkill = new SsResExtSkill();
+        extSkill.setResourceId(300L);
+        extSkill.setSourceType("CHAT_UPLOAD");
+        extSkill.setTargetContent("{\"skillPath\":\"/.openclaw/workspace-baiying-agent-100/skills/dws\"}");
+        Users creator = new Users();
+        creator.setUserCode("zhangsan");
+        SsResExtDigEmployee extDigEmployee = buildDigitalEmployeeExt(100L, "默认个人助理");
+        DigitalEmployeeDetailsDTO detailsDTO = new DigitalEmployeeDetailsDTO();
+        detailsDTO.setResourceId(100L);
+        detailsDTO.setPrologue("{}");
+
+        when(ssResourceService.findById(100L)).thenReturn(digitalEmployee);
+        when(ssResourceService.findByIdList(List.of(300L))).thenReturn(List.of(skillResource));
+        when(authApplicationService.hasResourceManagePermission(digitalEmployee)).thenReturn(true);
+        when(ssResExtSkillService.findById(300L)).thenReturn(extSkill);
+        when(userService.findById(1L)).thenReturn(creator);
+        when(byClawSkillPathResolver.resolveSkillRootPrefix("zhangsan", 100L))
+            .thenReturn("/.openclaw/workspace-baiying-agent-100/skills/");
+        when(ssResourceRelDetailService.findByResourceId(100L)).thenReturn(List.of(skillRel)).thenReturn(List.of())
+            .thenReturn(List.of()).thenReturn(List.of());
+        when(ssResExtDigEmployeeService.findById(100L)).thenReturn(extDigEmployee);
+        when(ssResExtDigEmployeeService.findDetailsById(100L)).thenReturn(detailsDTO);
+        when(ssResourceService.findRelResource(100L)).thenReturn(List.of());
+        when(templateRuleInfoApplicationService.findMemoryConfigsByResourceIdAndUserId(100L, 1L)).thenReturn(List.of());
+
+        service.uninstallDigitalEmployeeRelResources(dto);
+
+        verify(byClawSkillDeleteApplicationService).deleteSkillIfExists("zhangsan", 100L,
+            "/.openclaw/workspace-baiying-agent-100/skills/dws");
+        verify(ssResourceRelDetailService).removeById(900L);
     }
 
     @Test
