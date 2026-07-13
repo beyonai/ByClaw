@@ -16,6 +16,7 @@ import com.iwhalecloud.byai.manager.dto.resource.DatasetBuild;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetDto;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetIdDto;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeReadFileRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileSearchRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeSearchRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeUploadConflictCheckRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeUploadConflictCheckResponse;
@@ -32,6 +33,7 @@ import com.iwhalecloud.byai.state.domain.resource.vo.DatasetDetailVo;
 import com.iwhalecloud.byai.state.domain.resource.vo.DatasetVo;
 import com.iwhalecloud.byai.state.domain.resource.vo.KnowledgeCapabilityVo;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbFileReadResult;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileSearchResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeSearchResult;
 import com.iwhalecloud.byai.common.feign.request.knowledge.Folder;
 import jakarta.servlet.http.HttpServletResponse;
@@ -343,6 +345,16 @@ public class DatasetController {
     public ResponseUtil<KnowledgeSearchResult> searchKnowledgeItems(@RequestBody KnowledgeSearchRequest request) {
         return ResponseUtil.successResponse(I18nUtil.get("dataset.dir.file.query.success"),
             datasetApplicationService.searchKnowledgeItems(request));
+    }
+
+    /**
+     * Agent DSL 文件级语义检索，按当前用户可访问的知识库资源范围执行。
+     */
+    @PostMapping(value = "/knowledgeItems/searchFile")
+    public ResponseUtil<KnowledgeFileSearchResult> searchKnowledgeFiles(
+        @RequestBody @Valid KnowledgeFileSearchRequest request) {
+        return ResponseUtil.successResponse(I18nUtil.get("dataset.file.search.success"),
+            datasetApplicationService.searchKnowledgeFiles(request));
     }
 
     /**

@@ -3,13 +3,19 @@ package com.iwhalecloud.byai.state.application.service.dataset;
 import com.iwhalecloud.byai.common.constants.resource.OwnerType;
 import com.iwhalecloud.byai.common.feign.client.FeignPythonBuildService;
 import com.iwhalecloud.byai.common.feign.request.knowledge.Folder;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeFileSearch;
 import com.iwhalecloud.byai.common.feign.response.PythonBuildResponse;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileSearchItem;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileSearchResult;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.web.ApplicationContextUtil;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileSearchRequest;
+import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -95,6 +101,44 @@ class DatasetApplicationServiceTest {
 
         verify(authApplicationService, never()).hasResourceManagePermission(any());
         verify(feignPythonBuildService, never()).deleteKnowledgeBase(any());
+    }
+
+    @Test
+    void searchKnowledgeFiles_mapsResourceIdsToKnCodesAndBack() {
+        SsResource resource = defaultPersonalDataset();
+        when(ssResourceService.findById(100L)).thenReturn(resource);
+        when(authApplicationService.hasResourceAccessPermission(resource)).thenReturn(true);
+
+        KnowledgeFileSearchItem item = new KnowledgeFileSearchItem();
+        item.setKnCode("personal-kb");
+        item.setFilePath("/hr/renewal.md");
+        item.setScore(94.2D);
+        item.setMetadata(Map.of("status", Map.of("valueType", "string", "value", "active")));
+        KnowledgeFileSearchResult qaResult = new KnowledgeFileSearchResult();
+        qaResult.setData(List.of(item));
+        PythonBuildResponse<KnowledgeFileSearchResult> response = new PythonBuildResponse<>();
+        response.setResultCode(PythonBuildResponse.RESPONSE_SUCCESS);
+        response.setResultObject(qaResult);
+        when(feignPythonBuildService.searchKnowledgeFiles(any())).thenReturn(response);
+
+        KnowledgeFileSearchRequest request = new KnowledgeFileSearchRequest();
+        request.setResourceIdList(List.of(100L));
+        request.setQuery("续签流程");
+        request.setWhere(Map.of("eq", Map.of("fieldName", "status", "value", "active")));
+        request.setMetadataFieldList(List.of("status", "tags"));
+        request.setTopK(10);
+        request.setSearchMode("mixedRecall");
+
+        KnowledgeFileSearchResult result = service.searchKnowledgeFiles(request);
+
+        ArgumentCaptor<KbKnowledgeFileSearch> captor = ArgumentCaptor.forClass(KbKnowledgeFileSearch.class);
+        verify(feignPythonBuildService).searchKnowledgeFiles(captor.capture());
+        assertThat(captor.getValue().getKnCodeList()).containsExactly("personal-kb");
+        assertThat(captor.getValue().getWhere()).isEqualTo(request.getWhere());
+        assertThat(captor.getValue().getMetadataFieldList()).containsExactly("status", "tags");
+        assertThat(result.getData()).hasSize(1);
+        assertThat(result.getData().get(0).getKnCode()).isEqualTo("100");
+        assertThat(result.getData().get(0).getFilePath()).isEqualTo("/hr/renewal.md");
     }
 
     private SsResource defaultPersonalDataset() {

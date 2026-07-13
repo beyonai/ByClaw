@@ -27,12 +27,15 @@ import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbDirectoryUpdate;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileDownload;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileRead;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileToMarkdownIndex;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeFileSearch;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeSearch;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeUpdate;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileDelete;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.FileToMarkdownResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbFileReadResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeSearchItem;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileSearchItem;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileSearchResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeSearchResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.ProcessStatus;
 import com.iwhalecloud.byai.common.util.JsonUtil;
@@ -48,6 +51,7 @@ import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationServ
 import com.iwhalecloud.byai.manager.dto.resource.DatasetBuild;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetDto;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeReadFileRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileSearchRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeSearchRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeUploadConflictCheckRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeUploadConflictCheckResponse;
@@ -1294,6 +1298,57 @@ public class DatasetApplicationService {
         }
         if (result.getData() != null) {
             for (KnowledgeSearchItem item : result.getData()) {
+                if (item == null) {
+                    continue;
+                }
+                String resourceId = codeToResourceId.get(item.getKnCode());
+                if (resourceId != null) {
+                    item.setKnCode(resourceId);
+                }
+            }
+        }
+        return result;
+    }
+
+    /**
+     * 执行知识库 Agent DSL 文件级语义检索。门户使用 resourceIdList，内部转换为 QA knCodeList，
+     * 避免客户端绕过知识库访问权限直接传入 QA 知识库编码。
+     */
+    public KnowledgeFileSearchResult searchKnowledgeFiles(KnowledgeFileSearchRequest request) {
+        if (request == null || request.getResourceIdList() == null || request.getResourceIdList().isEmpty()) {
+            throw new BaseException("知识库资源标识列表不能为空");
+        }
+
+        List<String> knCodeList = new ArrayList<>();
+        Map<String, String> codeToResourceId = new HashMap<>();
+        for (Long resourceId : request.getResourceIdList()) {
+            if (resourceId == null) {
+                throw new BaseException("知识库资源标识不能为空");
+            }
+            SsResource ssResource = loadDatasetResource(resourceId);
+            validateDatasetReadablePermission(ssResource);
+            knCodeList.add(ssResource.getResourceCode());
+            codeToResourceId.put(ssResource.getResourceCode(), String.valueOf(resourceId));
+        }
+
+        KbKnowledgeFileSearch kbKnowledgeFileSearch = new KbKnowledgeFileSearch();
+        kbKnowledgeFileSearch.setQuery(request.getQuery());
+        kbKnowledgeFileSearch.setKnCodeList(knCodeList);
+        kbKnowledgeFileSearch.setWhere(request.getWhere());
+        kbKnowledgeFileSearch.setSearchMode(request.getSearchMode());
+        kbKnowledgeFileSearch.setMetadataFieldList(request.getMetadataFieldList());
+        kbKnowledgeFileSearch.setTopK(request.getTopK());
+
+        PythonBuildResponse<KnowledgeFileSearchResult> ret = feignPythonBuildService
+            .searchKnowledgeFiles(kbKnowledgeFileSearch);
+        assertPythonBuildSuccess(ret, "检索知识库文件");
+
+        KnowledgeFileSearchResult result = ret.getResultObject();
+        if (result == null) {
+            return new KnowledgeFileSearchResult();
+        }
+        if (result.getData() != null) {
+            for (KnowledgeFileSearchItem item : result.getData()) {
                 if (item == null) {
                     continue;
                 }

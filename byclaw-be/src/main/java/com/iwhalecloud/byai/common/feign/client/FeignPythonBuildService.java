@@ -36,6 +36,7 @@ import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileDownload;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileImport;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileRead;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileToMarkdownIndex;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeFileSearch;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeSearch;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeCreate;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeDelete;
@@ -45,6 +46,7 @@ import com.iwhalecloud.byai.common.feign.response.PythonBuildResponse;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbFileReadResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbImportResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeBaseInfo;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileSearchResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeSearchResult;
 import com.iwhalecloud.byai.common.jwt.JwtService;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
@@ -278,6 +280,19 @@ public class FeignPythonBuildService {
     public PythonBuildResponse<KnowledgeSearchResult> searchKnowledgeItems(KbKnowledgeSearch kbKnowledgeSearch) {
         return post(KnowledgeServiceOperation.KNOWLEDGE_SEARCH, kbKnowledgeSearch,
             new TypeReference<PythonBuildResponse<KnowledgeSearchResult>>() {
+            });
+    }
+
+    /**
+     * 执行知识库 Agent DSL 文件级语义检索。
+     *
+     * @param kbKnowledgeFileSearch 检索条件
+     * @return 文件级检索结果
+     */
+    public PythonBuildResponse<KnowledgeFileSearchResult> searchKnowledgeFiles(
+        KbKnowledgeFileSearch kbKnowledgeFileSearch) {
+        return post(KnowledgeServiceOperation.KNOWLEDGE_FILE_SEARCH, kbKnowledgeFileSearch,
+            new TypeReference<PythonBuildResponse<KnowledgeFileSearchResult>>() {
             });
     }
 
