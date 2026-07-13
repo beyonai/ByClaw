@@ -95,6 +95,7 @@ const ModelCardItem: React.FC<Props> = ({
           </div>
         </div>
         <div className={styles.cardStatusGroup}>
+          {/* 默认模型在右上角额外展示短标签，避免只在能力标签区才能识别默认状态。 */}
           {isDefaultModel ? (
             <span className={styles.defaultBadge}>{intl.formatMessage({ id: 'modelMgr.defaultModel' })}</span>
           ) : null}
