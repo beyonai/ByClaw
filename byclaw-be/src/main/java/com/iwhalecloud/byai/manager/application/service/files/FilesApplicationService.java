@@ -1,6 +1,9 @@
 package com.iwhalecloud.byai.manager.application.service.files;
 
+import com.alibaba.fastjson.JSON;
 import com.iwhalecloud.byai.common.storage.constants.StorageType;
+import com.iwhalecloud.byai.common.storage.impl.WhaleAgentStorageService;
+import com.iwhalecloud.byai.common.storage.model.StorageLocation;
 import com.iwhalecloud.byai.common.util.DateUtils;
 import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.manager.application.service.user.UserBucketNamingService;
@@ -369,7 +372,9 @@ public class FilesApplicationService {
         String filePath = "/" + userCode + "/" + DateUtils.formatDate(new Date(), DateUtils.COMPACT_DATE_TIME_FORMAT)
             + "/" + fileName;
 
-        commonFileStorage.write(commonFilePathResolver.icon(filePath), multipartFile.getBytes(), contentType);
+        FileMetadata metadata = commonFileStorage.write(commonFilePathResolver.icon(filePath), multipartFile.getBytes(),
+            contentType);
+        logger.info("当前上传文件:{}", JSON.toJSONString(metadata));
 
         // 替换请求地址
         String fileUrl = "/commonFile/preview?style=minio&bucketName={bucketName}&filePath={filePath}";
@@ -550,8 +555,10 @@ public class FilesApplicationService {
         String bucketName = UriComponentsBuilder.fromUriString(fileUrl).build().getQueryParams().getFirst("bucketName");
         String filePath = UriComponentsBuilder.fromUriString(fileUrl).build().getQueryParams().getFirst("filePath");
 
-        try (
-            InputStream inputStream = commonFileStorage.read(commonFilePathResolver.arbitrary(bucketName, filePath));) {
+        StorageLocation arbitrary = commonFilePathResolver.arbitrary(bucketName, filePath,
+            WhaleAgentStorageService.SHARE_TYPE_PUBLIC);
+
+        try (InputStream inputStream = commonFileStorage.read(arbitrary);) {
 
             // 设置ContentType，响应内容为二进制数据流，编码为utf-8，此处设定的编码是文件内容的编码
             response.setContentType(MediaType.APPLICATION_OCTET_STREAM_VALUE);

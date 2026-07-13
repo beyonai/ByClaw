@@ -10,6 +10,9 @@ function IconRender(props: { fileType: string; style?: React.CSSProperties }) {
   const fileTypeIcon = useMemo(() => {
     if (!fileType) return 'icon-jishiben';
 
+    if (['html'].includes(fileType)) {
+      return 'icon-html';
+    }
     if (['xls', 'xlsx'].includes(fileType)) {
       return 'icon-Excel';
     }

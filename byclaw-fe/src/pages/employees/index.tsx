@@ -14,7 +14,7 @@ import { agentTypeMap } from '@/constants/agent';
 import useGlobal from '@/hooks/useGlobal';
 import { queryResourceDetail } from '@/pages/manager/service/DigitalResourceMgr';
 import { IAgentCache } from '@/typescript/agent';
-import { getAgentChatAvatar, agentHandler, isSandboxAgent, canJumpAgent } from '@/utils/agent';
+import { getAgentChatAvatar, agentHandler, isSandboxAgent } from '@/utils/agent';
 import { AgentInfo } from '@/pages/digitalEmployees/components/AllDigitalEmployees/components/AvatarCardItem';
 // import useAppStore from '@/models/common/useAppStore';
 import { getAllDigitalEmployeesV2 } from '@/service/digitalEmployees';
@@ -102,10 +102,10 @@ const Employees = () => {
     return payload;
   }, [appInfo]);
 
-  const canChat = useMemo(() => {
-    if (isBottom) return true;
-    return canJumpAgent(agentInfo);
-  }, [agentInfo, isBottom]);
+  // const canChat = useMemo(() => {
+  //   if (isBottom) return true;
+  //   return canJumpAgent(agentInfo);
+  // }, [agentInfo, isBottom]);
 
   const disableActionList = React.useMemo(() => {
     const list: ('delete' | 'apply' | 'unapply')[] = [];
@@ -321,20 +321,20 @@ const Employees = () => {
             </div>
           )}
 
-          {canChat && (
-            <div className={classnames({ 'ub-f1': isBottom })}>
-              <ChatLayoutComp
-                sessionId={sessionId || ''}
-                getContainer={() => document.getElementById('employees_wrapper')}
-                agentType={agentTypeMap.agent}
-                queryInputProps={{
-                  placeholder: '',
-                }}
-                isBottom={isBottom}
-                setIsBottom={setIsBottom}
-              />
-            </div>
-          )}
+          {/* {canChat && ( */}
+          <div className={classnames({ 'ub-f1': isBottom })}>
+            <ChatLayoutComp
+              sessionId={sessionId || ''}
+              getContainer={() => document.getElementById('employees_wrapper')}
+              agentType={agentTypeMap.agent}
+              queryInputProps={{
+                placeholder: '',
+              }}
+              isBottom={isBottom}
+              setIsBottom={setIsBottom}
+            />
+          </div>
+          {/* )} */}
         </div>
       </div>
 

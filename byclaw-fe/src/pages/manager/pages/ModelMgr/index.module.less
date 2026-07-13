@@ -191,6 +191,28 @@
     padding: 18px 18px 0;
   }
 
+  .headTags {
+    // 右上角可能同时出现“默认”和状态标签，统一右对齐并允许窄卡片换行。
+    display: flex;
+    flex: 0 0 auto;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 6px;
+    max-width: 112px;
+
+    :global {
+      .@{antPrefix}-tag {
+        margin-right: 0;
+      }
+    }
+  }
+
+  .defaultTag {
+    background: #e8f3ff;
+    border-color: #bedaff;
+    color: var(--brand-blue);
+  }
+
   .titleBlock {
     flex: 1;
     min-width: 0;
@@ -282,15 +304,18 @@
   }
 
   .tagRow {
+    // 窄屏卡片需要完整展示全部标签，标签换行后不再裁剪第 5 个标签。
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 6px;
     min-height: 28px;
-    max-height: 48px;
-    overflow: hidden;
 
     :global {
       .@{antPrefix}-tag {
-        margin-right: 6px;
-        margin-bottom: 6px;
-        padding: 2px 10px;
+        margin-right: 0;
+        margin-bottom: 0;
+        padding: 2px 8px;
         border-radius: 999px;
       }
     }

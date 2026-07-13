@@ -342,6 +342,7 @@ export default {
   'modelMgr.confirmDelete': 'Confirm to delete this model?',
   'modelMgr.confirmSetDefault':
     'Set this model as the default conversation model? After that, other default conversation models will be set to non-default.',
+  'modelMgr.default': 'Default',
   'modelMgr.setDefault': 'Set as default',
   'modelMgr.operationSuccess': 'Operation succeeded',
   'modelMgr.debug': 'Debug',

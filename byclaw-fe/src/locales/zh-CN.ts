@@ -909,6 +909,7 @@ export default {
   'digitalEmployees.deleteConfirmDesc': '注销后，该数字员工将立即下架且不可恢复。',
   'digitalEmployees.deleteSuccess': '注销成功',
   'digitalEmployees.noPermission': '暂无打开权限',
+  'digitalEmployees.noUsePermissionApplyFirst': '暂无使用权限，请先申请使用',
   'digitalEmployees.popular': '热门',
   'digitalEmployees.sort.mostSubscribed': '最多订阅',
   'digitalEmployees.sort.mostUsed': '最多使用',

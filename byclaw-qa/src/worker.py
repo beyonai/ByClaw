@@ -37,6 +37,7 @@ from exceptions import (
     ModelNotFoundError,
     StorageError,
 )
+from redis_runtime import load_redis_config_from_env
 
 dotenv.load_dotenv()
 
@@ -666,14 +667,11 @@ class InstantSearchWorker(worker_mod.GatewayWorker):
 
 
 def main() -> None:
+    redis_config = load_redis_config_from_env()
     worker_mod.run_worker(
         InstantSearchWorker,
         worker_id=os.getenv("BYAI_WORKER_ID", "instant-search-worker-1"),
-        redis_host=os.getenv("BYAI_REDIS_HOST", "10.10.168.204"),
-        redis_port=int(os.getenv("BYAI_REDIS_PORT", 6379)),
-        redis_db=int(os.getenv("BYAI_REDIS_DB", 0)),
-        redis_username=os.getenv("BYAI_REDIS_USERNAME"),
-        redis_password=os.getenv("BYAI_REDIS_PASSWORD") or None,
+        redis_mode=redis_config.mode,
     )
 
 

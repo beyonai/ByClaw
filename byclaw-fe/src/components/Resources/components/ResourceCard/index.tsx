@@ -75,7 +75,9 @@ type ResourceCardActionConfig = {
 export type ResourceCardProps = {
   resource: IResourceCardItem;
   resourceType?: string;
-  onCardClick?: () => void;
+  onCardClick?: (resource?: IResourceCardItem) => void;
+  cardClickDisabled?: boolean | ((resource: IResourceCardItem) => boolean);
+  onCardClickDisabled?: (resource?: IResourceCardItem) => void;
   actionConfig?: ResourceCardActionConfig;
   avatarNode?: React.ReactNode;
   title?: React.ReactNode;
@@ -173,7 +175,18 @@ const ConfirmMenuLabel = ({
 };
 
 const RenderContent = (props: ResourceCardProps) => {
-  const { resource, onCardClick, actionConfig, avatarNode, description, headerExtra, hoverExtra, resourceType } = props;
+  const {
+    resource,
+    onCardClick,
+    cardClickDisabled,
+    onCardClickDisabled,
+    actionConfig,
+    avatarNode,
+    description,
+    headerExtra,
+    hoverExtra,
+    resourceType,
+  } = props;
   const { ownerType } = resource || {};
   const {
     scene,
@@ -245,6 +258,9 @@ const RenderContent = (props: ResourceCardProps) => {
   const displayTopRightTag = getDisplayTopRightTag();
   const isCancelledResource = `${resource?.resourceStatus ?? ''}` === '3';
   const topRightTag = isCancelledResource ? intl.formatMessage({ id: 'resource.statusCancelled' }) : displayTopRightTag;
+  const isCardClickDisabled =
+    typeof cardClickDisabled === 'function' ? cardClickDisabled(resource) : !!cardClickDisabled;
+  const isClickableCard = !!onCardClick && !isCancelledResource && !isCardClickDisabled;
 
   const menuItems = useMemo<MenuProps['items']>(() => {
     const { canEdit, canManageAuth, canUseAuth, canApplyUse, canAuditUse, canDelete, canRestore } = resource || {};
@@ -417,12 +433,17 @@ const RenderContent = (props: ResourceCardProps) => {
   return (
     <div
       className={classnames(styles.renderContent, 'full-width full-height', {
-        pointer: !!onCardClick && !isCancelledResource,
+        pointer: isClickableCard,
         [styles.cancelledContent]: isCancelledResource,
+        [styles.disabledClickContent]: isCardClickDisabled,
       })}
       onClick={() => {
         if (isCancelledResource) return;
-        onCardClick?.();
+        if (isCardClickDisabled) {
+          onCardClickDisabled?.(resource);
+          return;
+        }
+        onCardClick?.(resource);
       }}
     >
       <div className={classnames('ub ub-ver full-width full-height')}>
@@ -580,12 +601,18 @@ function ResourceCard(props: ResourceCardProps) {
 
   const displayResource = resourceWithPermissions || resource;
   const isCancelledResource = `${displayResource?.resourceStatus ?? ''}` === '3';
+  const isCardClickDisabled =
+    typeof props.cardClickDisabled === 'function'
+      ? props.cardClickDisabled(displayResource)
+      : !!props.cardClickDisabled;
+  const isClickableCard = !!props.onCardClick && !isCancelledResource && !isCardClickDisabled;
 
   return (
     <div
       key={resource.resourceId}
       className={classnames(styles.resourceCard, props.className, {
-        pointer: !!props.onCardClick && !isCancelledResource,
+        pointer: isClickableCard,
+        [styles.disabledClickCard]: isCardClickDisabled,
       })}
       ref={resourceCardRef}
     >

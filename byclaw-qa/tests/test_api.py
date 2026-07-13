@@ -1,8 +1,6 @@
 """Tests for api.py — the three ByResourceId endpoints."""
 
-import json
 import os
-import io
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 
@@ -13,14 +11,13 @@ os.environ.setdefault("FILE_STORAGE_MINIO_BUCKET_NAME", "test-bucket")
 
 from httpx import AsyncClient, ASGITransport
 
-from api import app, _minio
+from api import app
 
 
 @pytest.fixture
-def _patch_minio():
-    """Patch the module-level _minio client methods."""
-    with patch.object(_minio, "get_kg_doc_config", new_callable=AsyncMock) as mock_cfg:
-        yield mock_cfg
+def _patch_kg_doc_lookup():
+    with patch("api.get_kg_doc_from_redis", new_callable=AsyncMock) as mock_lookup:
+        yield mock_lookup
 
 
 @pytest.fixture
@@ -47,8 +44,8 @@ class TestImportByResourceId:
         assert "resourceId" in body["resultMsg"]
 
     @pytest.mark.asyncio
-    async def test_unresolvable_resource_id(self, client, _patch_minio):
-        _patch_minio.return_value = None
+    async def test_unresolvable_resource_id(self, client, _patch_kg_doc_lookup):
+        _patch_kg_doc_lookup.return_value = None
         resp = await client.post(
             "/api/v1/knowledgeItems/importByResourceId",
             data={"resourceId": "999"},
@@ -58,8 +55,8 @@ class TestImportByResourceId:
         assert "cannot resolve" in body["resultMsg"]
 
     @pytest.mark.asyncio
-    async def test_config_missing_resource_code(self, client, _patch_minio):
-        _patch_minio.return_value = {"resourceId": 999}
+    async def test_config_missing_resource_code(self, client, _patch_kg_doc_lookup):
+        _patch_kg_doc_lookup.return_value = {"resourceId": 999}
         resp = await client.post(
             "/api/v1/knowledgeItems/importByResourceId",
             data={"resourceId": "999"},
@@ -69,8 +66,8 @@ class TestImportByResourceId:
         assert "cannot resolve" in body["resultMsg"]
 
     @pytest.mark.asyncio
-    async def test_success_delegates_to_service(self, client, _patch_minio):
-        _patch_minio.return_value = {"resourceId": 100, "resourceCode": "1"}
+    async def test_success_delegates_to_service(self, client, _patch_kg_doc_lookup):
+        _patch_kg_doc_lookup.return_value = {"resourceId": 100, "resourceCode": "1"}
         mock_service = AsyncMock()
         with patch("api.resolve_knowledge_item_ingestion_service", return_value=mock_service):
             resp = await client.post(
@@ -106,8 +103,8 @@ class TestFileToMarkdownIndexByResourceId:
         assert "resourceId" in body["resultMsg"]
 
     @pytest.mark.asyncio
-    async def test_unresolvable_resource_id(self, client, _patch_minio):
-        _patch_minio.return_value = None
+    async def test_unresolvable_resource_id(self, client, _patch_kg_doc_lookup):
+        _patch_kg_doc_lookup.return_value = None
         resp = await client.post(
             "/api/v1/fileToMarkdownIndexByResourceId",
             json={"resourceId": "999", "filePath": "/test.pdf"},
@@ -117,8 +114,8 @@ class TestFileToMarkdownIndexByResourceId:
         assert "cannot resolve" in body["resultMsg"]
 
     @pytest.mark.asyncio
-    async def test_success(self, client, _patch_minio):
-        _patch_minio.return_value = {"resourceId": 100, "resourceCode": "5"}
+    async def test_success(self, client, _patch_kg_doc_lookup):
+        _patch_kg_doc_lookup.return_value = {"resourceId": 100, "resourceCode": "5"}
         mock_service = AsyncMock()
         mock_service.create_file_to_markdown_index_task.return_value = "task-1"
         with (
@@ -161,8 +158,8 @@ class TestSearchByResourceId:
         assert body["resultCode"] == "-1"
 
     @pytest.mark.asyncio
-    async def test_unresolvable_resource_id(self, client, _patch_minio):
-        _patch_minio.return_value = None
+    async def test_unresolvable_resource_id(self, client, _patch_kg_doc_lookup):
+        _patch_kg_doc_lookup.return_value = None
         resp = await client.post(
             "/api/v1/knowledgeItems/searchByResourceId",
             json={
@@ -177,8 +174,8 @@ class TestSearchByResourceId:
         assert "cannot resolve" in body["resultMsg"]
 
     @pytest.mark.asyncio
-    async def test_success_with_reverse_mapping(self, client, _patch_minio):
-        _patch_minio.return_value = {"resourceId": 100, "resourceCode": "1"}
+    async def test_success_with_reverse_mapping(self, client, _patch_kg_doc_lookup):
+        _patch_kg_doc_lookup.return_value = {"resourceId": 100, "resourceCode": "1"}
 
         mock_item = MagicMock()
         mock_item.model_dump.return_value = {
@@ -188,7 +185,7 @@ class TestSearchByResourceId:
             "score": 90,
         }
         mock_service = AsyncMock()
-        mock_service.search_v2.return_value = [mock_item]
+        mock_service.search.return_value = [mock_item]
 
         with patch("api.resolve_knowledge_item_search_service", return_value=mock_service):
             resp = await client.post(
@@ -207,19 +204,19 @@ class TestSearchByResourceId:
         assert data[0]["knCode"] == "100"
 
     @pytest.mark.asyncio
-    async def test_multiple_resource_ids(self, client, _patch_minio):
+    async def test_multiple_resource_ids(self, client, _patch_kg_doc_lookup):
         configs = {
             "100": {"resourceId": 100, "resourceCode": "1"},
             "200": {"resourceId": 200, "resourceCode": "2"},
         }
-        _patch_minio.side_effect = lambda rid: configs.get(rid)
+        _patch_kg_doc_lookup.side_effect = lambda _redis, rid: configs.get(rid)
 
         mock_item_1 = MagicMock()
         mock_item_1.model_dump.return_value = {"knCode": "1", "chunkText": "a", "score": 90}
         mock_item_2 = MagicMock()
         mock_item_2.model_dump.return_value = {"knCode": "2", "chunkText": "b", "score": 80}
         mock_service = AsyncMock()
-        mock_service.search_v2.return_value = [mock_item_1, mock_item_2]
+        mock_service.search.return_value = [mock_item_1, mock_item_2]
 
         with patch("api.resolve_knowledge_item_search_service", return_value=mock_service):
             resp = await client.post(

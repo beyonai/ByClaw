@@ -8,6 +8,7 @@ from redis_model_config import (
     AI_MODEL_TYPE_REDIS_KEY,
     AI_MODEL_CONFIG_REDIS_KEY,
     RedisModelConfigProvider,
+    _create_redis_client_from_env,
     request_prologue_model_id,
     _decode_redis_json,
     _decode_model_type_hash,
@@ -153,6 +154,19 @@ def test_parse_positive_int_negative_returns_none():
 def test_parse_positive_int_non_numeric_returns_none():
     assert _parse_positive_int("abc") is None
     assert _parse_positive_int(None) is None
+
+
+def test_create_redis_client_from_env_uses_shared_runtime_helper():
+    sentinel = object()
+
+    with patch(
+        "redis_model_config.init_shared_redis_from_env",
+        return_value=sentinel,
+    ) as helper:
+        result = _create_redis_client_from_env()
+
+    assert result is sentinel
+    helper.assert_called_once_with()
 
 
 # --- RedisModelConfigProvider (async) ---
