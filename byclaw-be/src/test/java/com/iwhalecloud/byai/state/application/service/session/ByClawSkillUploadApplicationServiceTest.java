@@ -142,6 +142,25 @@ class ByClawSkillUploadApplicationServiceTest {
     }
 
     @Test
+    void shouldOnlyValidateSkillRootDocAndIgnoreChildDirectoryWithoutSkillDoc() {
+        MultipartFile zip = buildZip("add-class.zip",
+            "add-class/SKILL.md", "# add class",
+            "add-class/flow.yaml", "name: add-class",
+            "add-class/ceshi/data.txt", "child content",
+            "__MACOSX/add-class/._.DS_Store", "mac metadata");
+        when(skillPathResolver.resolveSkillRootPrefix(USER_CODE, RESOURCE_ID)).thenReturn(AGENT_PREFIX);
+
+        ByClawSkillDto dto = service.uploadSkillZip(USER_CODE, RESOURCE_ID, zip);
+
+        ArgumentCaptor<String> pathCaptor = ArgumentCaptor.forClass(String.class);
+        verify(userFS, atLeastOnce()).write(any(InputStream.class), anyLong(), anyString(), pathCaptor.capture());
+        assertEquals("add-class", dto.getSkillName());
+        assertEquals(AGENT_PREFIX + "add-class/SKILL.md", dto.getSkillDocObjectKey());
+        assertTrue(pathCaptor.getAllValues().contains(AGENT_PREFIX + "add-class/ceshi/data.txt"));
+        assertTrue(pathCaptor.getAllValues().stream().noneMatch(path -> path.contains("__MACOSX")));
+    }
+
+    @Test
     void shouldAcceptChineseSkillDirectoryFromGbkEncodedZip() {
         MultipartFile zip = buildZip("铁算盘财务健康分析.zip", Charset.forName("GBK"),
             "铁算盘财务健康分析/SKILL.md", "# 铁算盘",

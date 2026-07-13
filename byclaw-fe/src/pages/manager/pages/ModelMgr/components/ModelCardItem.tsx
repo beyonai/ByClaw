@@ -1,4 +1,4 @@
-import { Button, Popconfirm } from 'antd';
+import { Button, Popconfirm, Tag } from 'antd';
 import classNames from 'classnames';
 import dayjs from 'dayjs';
 import React from 'react';
@@ -6,6 +6,12 @@ import styles from '../index.module.less';
 import { renderAbilityTags, renderStatusTag, renderSystemTags, type ModelStatus } from './modelMgrViewUtils';
 
 const DEFAULT_MODEL_TYPES = new Set(['LLM', 'EMBEDDING']);
+const DEFAULT_DIALOG_MODEL_ABILITY_CODE = '1';
+const DEFAULT_DIALOG_MODEL_ABILITY_LABELS = new Set([
+  '默认对话模型',
+  'Default Conversation Model',
+  'Default Dialog Model',
+]);
 
 type Props = {
   intl: any;
@@ -42,12 +48,23 @@ const ModelCardItem: React.FC<Props> = ({
     updatedAt,
     isDefault,
   } = record || {};
-  const isDefaultModel =
-    isDefault === 1 ||
-    isDefault === true ||
-    (Array.isArray(abilitiesArr) && abilitiesArr.some((item) => `${item}` === '1'));
+  const isBackendDefaultModel = isDefault === 1 || isDefault === true;
+  const hasDefaultDialogAbility =
+    Array.isArray(abilitiesArr) &&
+    abilitiesArr.some((item) => {
+      const abilityValue = `${item ?? ''}`.trim();
+      const abilityLabel = `${abilityLabelMap?.[abilityValue] ?? abilityValue}`.trim();
+      // 右上角“默认”标签只跟“默认对话模型”能力联动，避免 embedding 默认模型误显示。
+      return (
+        abilityValue === DEFAULT_DIALOG_MODEL_ABILITY_CODE || DEFAULT_DIALOG_MODEL_ABILITY_LABELS.has(abilityLabel)
+      );
+    });
   const normalizedModelType = `${modelType || 'LLM'}`.toUpperCase();
-  const canSetDefault = recordStatus === 'ENABLED' && !isDefaultModel && DEFAULT_MODEL_TYPES.has(normalizedModelType);
+  const canSetDefault =
+    recordStatus === 'ENABLED' &&
+    !isBackendDefaultModel &&
+    !hasDefaultDialogAbility &&
+    DEFAULT_MODEL_TYPES.has(normalizedModelType);
 
   let statusActions: Array<{
     status: Extract<ModelStatus, 'ENABLED' | 'DISABLED'>;
@@ -95,8 +112,9 @@ const ModelCardItem: React.FC<Props> = ({
           </div>
         </div>
         <div className={styles.cardStatusGroup}>
-          {isDefaultModel ? (
-            <span className={styles.defaultBadge}>{intl.formatMessage({ id: 'modelMgr.defaultModel' })}</span>
+          {/* 仅能力中存在“默认对话模型”时展示右上角默认标签。 */}
+          {hasDefaultDialogAbility ? (
+            <Tag className={styles.defaultBadge}>{intl.formatMessage({ id: 'modelMgr.defaultModel' })}</Tag>
           ) : null}
           {recordStatus ? renderStatusTag(intl, recordStatus) : null}
         </div>

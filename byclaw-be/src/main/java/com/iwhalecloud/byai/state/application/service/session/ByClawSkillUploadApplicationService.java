@@ -222,42 +222,30 @@ public class ByClawSkillUploadApplicationService {
      * 子目录中的 SKILL.md 可能是 nano skill，不参与当前单 skill zip 的唯一性校验。
      */
     private ParsedEntry findUniqueSkillDoc(List<ParsedEntry> entries) {
-        List<ParsedEntry> docs = new ArrayList<>();
-        Set<String> topLevelDirs = new java.util.HashSet<>();
+        List<ParsedEntry> rootDocs = new ArrayList<>();
+        List<ParsedEntry> directSkillDirDocs = new ArrayList<>();
         for (ParsedEntry entry : entries) {
             String[] segments = splitEntryName(entry.entryName);
             if (segments.length == 0) {
                 continue;
             }
             if (segments.length == 1 && CANONICAL_SKILL_DOC_NAME.equalsIgnoreCase(segments[0])) {
-                docs.add(entry);
+                rootDocs.add(entry);
             }
-            else if (segments.length > 1) {
-                topLevelDirs.add(segments[0]);
+            else if (segments.length == 2 && CANONICAL_SKILL_DOC_NAME.equalsIgnoreCase(segments[1])) {
+                directSkillDirDocs.add(entry);
             }
         }
-        if (!docs.isEmpty()) {
-            if (docs.size() != 1) {
+        if (!rootDocs.isEmpty()) {
+            if (rootDocs.size() != 1) {
                 throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.missing.doc"));
             }
-            return docs.get(0);
+            return rootDocs.get(0);
         }
-
-        if (topLevelDirs.size() != 1) {
+        if (directSkillDirDocs.size() != 1) {
             throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.missing.doc"));
         }
-        String topLevelDir = topLevelDirs.iterator().next();
-        for (ParsedEntry entry : entries) {
-            String[] segments = splitEntryName(entry.entryName);
-            if (segments.length == 2 && topLevelDir.equals(segments[0])
-                && CANONICAL_SKILL_DOC_NAME.equalsIgnoreCase(segments[1])) {
-                docs.add(entry);
-            }
-        }
-        if (docs.size() != 1) {
-            throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.missing.doc"));
-        }
-        return docs.get(0);
+        return directSkillDirDocs.get(0);
     }
 
     /**
