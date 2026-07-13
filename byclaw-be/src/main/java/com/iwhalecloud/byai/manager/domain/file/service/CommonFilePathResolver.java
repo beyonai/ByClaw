@@ -25,4 +25,8 @@ public class CommonFilePathResolver {
     public StorageLocation arbitrary(String bucketName, String path) {
         return StorageLocation.of(NAMESPACE, bucketName, path);
     }
+
+    public StorageLocation arbitrary(String bucketName, String path, String shareType) {
+        return StorageLocation.of(NAMESPACE, bucketName, path, shareType);
+    }
 }

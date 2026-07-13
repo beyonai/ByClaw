@@ -4798,7 +4798,15 @@ UPDATE byai.byai_aimodel SET owner_type = 'PUBLIC' WHERE owner_type IS NULL;
 
 -- Token 月度限额 & tokenSaver 配置（合并为单个 JSON key）
 DELETE FROM byai.byai_system_config WHERE param_code IN ('MODEL_QUOTA');
-INSERT INTO byai.byai_system_config (param_id, param_type, param_code, param_name, param_en_name, param_value, param_desc)
-VALUES (nextval('byai.seq_any_table'), 'json', 'MODEL_QUOTA', '模型额度与tokenSaver配置', 'MODEL_QUOTA',
-'{"monthlyQuotaLimit":30000000,"tokenSaver":{"enabled":false,"apiUrl":"","modelCode":""}}',
-'monthlyQuotaLimit: 每用户每月公共模型Token上限; tokenSaver: 登录时自动分配模型配置');
+INSERT INTO byai.byai_system_config (param_id, param_type, param_code, param_name, param_en_name, param_value, param_desc) VALUES (nextval('byai.seq_any_table'), 'json', 'MODEL_QUOTA', '模型额度与tokenSaver配置', 'MODEL_QUOTA', '{
+	"monthlyQuotaLimit": 300000000,
+	"tokenSaver": {
+		"enabled": false,
+		"apiUrl": "https://www.tokensaver.net/v1",
+        "anthropicApiUrl": "https://www.tokensaver.net",
+		"accessToken": "",
+		"newApiUser": "403",
+		"modelCode": "claude-haiku-4-5-20251001",
+		"feignUrl": "https://www.tokensaver.net"
+	}
+}', 'monthlyQuotaLimit: 每用户每月公共模型Token上限; tokenSaver: 登录时自动分配模型配置');

@@ -93,7 +93,6 @@ const SharedModelFormModal: React.FC<Props> = ({
   const debugDefaults = useMemo(() => buildDebugDefaults(intl), [intl]);
   const local = getLocale();
   const isEN = useMemo(() => local.includes('en'), [local]);
-  const hideTagSection = type === 'debug' || !showTags;
 
   const existingModelId =
     data?.id === null || data?.id === undefined || `${data?.id}`.trim() === '' ? undefined : data?.id;
@@ -134,13 +133,7 @@ const SharedModelFormModal: React.FC<Props> = ({
 
   useEffect(() => {
     if (!open) return;
-    setActiveSections(
-      type === 'debug'
-        ? ['basic', 'connection', 'params']
-        : showTags
-          ? ['basic', 'connection', 'params', 'tags']
-          : ['basic', 'connection', 'params']
-    );
+    setActiveSections(showTags ? ['basic', 'connection', 'params', 'tags'] : ['basic', 'connection', 'params']);
 
     getByParamGroupCode({ paramGroupCode: 'SYSTEM_MODEL_TYPE' })
       .then((res: any) => {
@@ -447,7 +440,6 @@ const SharedModelFormModal: React.FC<Props> = ({
           statusOptions={statusOptions}
           tokenVisible={tokenVisible}
           setTokenVisible={setTokenVisible}
-          isDebugOnly={hideTagSection}
           isSectionOpen={isSectionOpen}
           toggleSection={toggleSection}
           onValuesChange={handleValuesChange}

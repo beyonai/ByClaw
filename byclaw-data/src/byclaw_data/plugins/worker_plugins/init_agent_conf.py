@@ -158,8 +158,8 @@ class InitDataCloudDigitalEmployeePlugin(Plugin):
         self._runtime_manager = runtime_manager
 
     async def on_worker_startup(self, worker: Any) -> None:
-        if self._watch_task is None:
-            self._watch_task = asyncio.create_task(self._watch_agent_files(worker))
+        # 文件加载已废弃，统一从 Redis 加载（对标 QA worker）
+        pass
 
     async def on_worker_shutdown(self, worker: Any) -> None:
         _ = worker
@@ -343,15 +343,11 @@ class InitDataCloudDigitalEmployeePlugin(Plugin):
         return data
 
     async def register_agent_configs(self, agent_context: Any) -> list[AgentConfig]:
-        """Load digital-employee configs during plugin initialization."""
-        result = await self.reload_agents(
-            registry=None,
-            current_configs=agent_context.list_agent_configs(),
-            reason="startup_register",
-            target_agent_id=None,
-            strict=False,
-        )
-        return result.agent_configs
+        """文件加载已废弃，统一从 Redis 加载（对标 QA worker）。
+
+        返回空列表，不再从本地 JSON 文件加载 AgentConfig。
+        """
+        return []
 
     async def reload_agents(
         self,
@@ -362,23 +358,12 @@ class InitDataCloudDigitalEmployeePlugin(Plugin):
         target_agent_id: str | None = None,
         strict: bool = False,
     ) -> AgentReloadResult:
-        """Reload all or part of the digital employee config set."""
-
-        async with self._reload_lock:
-            baseline_configs = (
-                list(current_configs)
-                if current_configs is not None
-                else list(getattr(registry, "agent_configs", []) or [])
-            )
-            result = self._build_reload_result(
-                baseline_configs=baseline_configs,
-                reason=reason,
-                target_agent_id=target_agent_id,
-                strict=strict,
-            )
-            if registry is not None:
-                registry._agent_configs = list(result.agent_configs)
-            return result
+        """文件加载已废弃，统一从 Redis 加载（对标 QA worker）。"""
+        _ = reason, target_agent_id, strict
+        return AgentReloadResult(
+            agent_configs=current_configs or [],
+            loaded_agent_ids=[],
+        )
 
     def _build_reload_result(
         self,
