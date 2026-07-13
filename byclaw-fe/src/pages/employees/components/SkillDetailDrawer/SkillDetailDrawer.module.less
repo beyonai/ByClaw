@@ -40,7 +40,8 @@
   .header {
     display: flex;
     padding: 12px;
-    align-items: center;
+    // 技能图标与右侧标题顶部对齐，避免长描述时被整块内容拉到垂直居中。
+    align-items: flex-start;
     gap: 12px;
     align-self: stretch;
     border: 1px solid var(--skill-detail-border);
@@ -52,7 +53,7 @@
     }
 
     .avatar {
-      margin: 0;
+      margin: 2px 0 0;
       line-height: 0;
       flex-shrink: 0;
       width: 56px;

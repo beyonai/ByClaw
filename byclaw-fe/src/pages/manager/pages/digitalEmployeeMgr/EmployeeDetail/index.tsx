@@ -1202,7 +1202,11 @@ const EmployeeDetail = ({ loading }) => {
         effectiveAgentType || agentType
       );
       setPromptFieldMaxLength(nextMaxLength);
-      const relSkills = Array.isArray(templateConfig?.relSkills) ? templateConfig.relSkills : [];
+      // 默认模板里的技能可能配置为数组、逗号字符串或 JSON 字符串，这里统一解析后交给配置表单补全展示。
+      const relSkillsConfig = [templateConfig?.relSkills, templateConfig?.skills, templateConfig?.bundledSkills].find(
+        (value) => (Array.isArray(value) ? value.length > 0 : !!value)
+      );
+      const relSkills = parseBundledSkills(relSkillsConfig);
       const relTools = Array.isArray(templateConfig?.relTools) ? templateConfig.relTools : [];
 
       if (relSkills.length > 0) {
