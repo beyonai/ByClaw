@@ -5,11 +5,14 @@ import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
 import net from "node:net";
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 const DEFAULT_CONTEXT_PATH = "/byaiService";
 const DEFAULT_SIGNATURE_SALT = "{#@*A12^c0+}";
 const DEFAULT_BACKEND_SERVICE_NAME = "ByaiService";
 const SERVICE_DISCOVERY_INSTANCE_PREFIX = "byai_gateway:sd:instances:";
+const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 
 function parseArgs(argv) {
   const args = { _: [] };
@@ -689,6 +692,8 @@ function slugFromUrl(url) {
 }
 
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".ico", ".bmp", ".avif"]);
+const VIDEO_EXTENSIONS = new Set([".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi", ".wmv", ".flv", ".mpeg", ".mpg", ".3gp", ".ts"]);
+const AUDIO_EXTENSIONS = new Set([".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".oga", ".opus", ".wma", ".amr", ".aiff", ".mid"]);
 
 function extensionOf(value) {
   const text = String(value || "").split("?")[0].split("#")[0];
@@ -718,6 +723,30 @@ function guessContentType(fileName) {
     ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     ".ppt": "application/vnd.ms-powerpoint",
     ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ".mp4": "video/mp4",
+    ".mov": "video/quicktime",
+    ".m4v": "video/x-m4v",
+    ".webm": "video/webm",
+    ".mkv": "video/x-matroska",
+    ".avi": "video/x-msvideo",
+    ".wmv": "video/x-ms-wmv",
+    ".flv": "video/x-flv",
+    ".mpeg": "video/mpeg",
+    ".mpg": "video/mpeg",
+    ".3gp": "video/3gpp",
+    ".ts": "video/mp2t",
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+    ".m4a": "audio/mp4",
+    ".aac": "audio/aac",
+    ".flac": "audio/flac",
+    ".ogg": "audio/ogg",
+    ".oga": "audio/ogg",
+    ".opus": "audio/opus",
+    ".wma": "audio/x-ms-wma",
+    ".amr": "audio/amr",
+    ".aiff": "audio/aiff",
+    ".mid": "audio/midi",
   };
   return map[ext] || "application/octet-stream";
 }
@@ -766,11 +795,15 @@ function normalizeResourceCandidate(raw, args, index) {
     source,
   );
   const contentType = firstNonEmpty(typeof raw === "object" ? raw.contentType || raw.mimeType : "", guessContentType(fileName));
+  const ext = extensionOf(fileName);
+  const isImage = contentType.startsWith("image/") || IMAGE_EXTENSIONS.has(ext);
+  const isVideo = contentType.startsWith("video/") || VIDEO_EXTENSIONS.has(ext);
+  const isAudio = contentType.startsWith("audio/") || AUDIO_EXTENSIONS.has(ext);
   return {
     source,
     fileName,
     contentType,
-    kind: contentType.startsWith("image/") || IMAGE_EXTENSIONS.has(extensionOf(fileName)) ? "image" : "file",
+    kind: isImage ? "image" : isVideo ? "video" : isAudio ? "audio" : "file",
   };
 }
 
@@ -799,7 +832,22 @@ function collectResourceCandidatesFromValue(value, args) {
   return direct ? [direct, ...nested] : nested;
 }
 
+function assertLocalPathArgsExist(args) {
+  // 显式命令行路径参数（--file-path/--image-path/--resource-path）必须真实存在；
+  // 不存在时抛明确错误，避免被 isResourceCandidateValue 静默丢弃后报“未找到候选”自相矛盾。
+  // HTTP(S) URL 不做 existsSync 预检。
+  for (const value of asArray(firstPresent(args, ["resource-path", "file-path", "image-path"]))) {
+    if (!value || value === true || looksLikeHttpUrl(value)) {
+      continue;
+    }
+    if (!fs.existsSync(expandHome(String(value)))) {
+      throw new Error(`文件不存在: ${value}`);
+    }
+  }
+}
+
 function buildResourceCandidates(args, stdinValue) {
+  assertLocalPathArgsExist(args);
   const directValues = [
     ...asArray(firstPresent(args, ["resource-url", "file-url", "image-url", "icon-url", "download-url"])),
     ...asArray(firstPresent(args, ["resource-path", "file-path", "image-path"])),
@@ -853,6 +901,97 @@ async function uploadResources(candidates, args) {
   }
   const formData = await buildUploadFormData(candidates, args);
   return requestMultipart(uploadUrl, formData);
+}
+
+// 文件直传知识库支持的类型（后端 byclaw-qa 解析能力：pdf/docx/pptx/xlsx/csv/txt/md）。
+const DOC_INGEST_EXTENSIONS = new Set([".pdf", ".docx", ".pptx", ".xlsx", ".csv", ".txt", ".md", ".markdown"]);
+// 白名单外但仍有正文、需先提取为 Markdown 的文件类型（doc/xls/ppt/html 等老格式）。
+const EXTRACTABLE_DOC_EXTENSIONS = new Set([".doc", ".xls", ".ppt", ".htm", ".html", ".rtf", ".odt", ".ods", ".odp"]);
+
+// 给 ingest 兜底用：检测输入里被丢弃的文档类候选，区分“可直传 7 种”与“需提取的有正文类型”，
+// 把分流引导固化进错误信息（H1/M1）。
+function classifyDiscardedDocCandidates(args, stdinValue) {
+  const uploadable = new Set();
+  const extractable = new Set();
+  for (const candidate of buildResourceCandidates(args, stdinValue)) {
+    const ext = extensionOf(candidate.fileName);
+    if (DOC_INGEST_EXTENSIONS.has(ext)) {
+      uploadable.add(candidate.fileName);
+    } else if (EXTRACTABLE_DOC_EXTENSIONS.has(ext)) {
+      extractable.add(candidate.fileName);
+    }
+  }
+  return { uploadable: [...uploadable], extractable: [...extractable] };
+}
+
+function buildDocCandidates(args, stdinValue) {
+  const docs = [];
+  const rejected = [];
+  for (const candidate of buildResourceCandidates(args, stdinValue)) {
+    const ext = extensionOf(candidate.fileName);
+    if (DOC_INGEST_EXTENSIONS.has(ext)) {
+      docs.push(candidate);
+    } else {
+      rejected.push({ fileName: candidate.fileName, ext: ext || "(none)" });
+    }
+  }
+  return { docs, rejected };
+}
+
+// 文件直传：POST /datasetController/uploadFiles(multipart) → 逐个 POST /datasetController/build。
+// 后端把原始文件交给 QA 服务解析成 Markdown 再切片/向量化，跳过本地提取。
+async function uploadDocsToDataset(candidates, args) {
+  const resourceId = toNumber(firstPresent(args, ["knowledge-base-resource-id", "resource-id"]));
+  if (!resourceId) {
+    throw new Error("文件直传入库必须提供 --knowledge-base-resource-id(知识库资源 ID)；可先用 list-kb 查询并让用户选择");
+  }
+  const directoryPath = firstNonEmpty(pick(args, "directory-path"), "/");
+  const uploadUrl = await endpoint("/datasetController/uploadFiles");
+  const buildUrl = await endpoint("/datasetController/build");
+  if (args["dry-run"]) {
+    return {
+      dryRun: true,
+      endpoints: { upload: uploadUrl, build: buildUrl },
+      resourceId,
+      directoryPath,
+      files: candidates.map((candidate) => candidate.fileName),
+    };
+  }
+  const formData = new FormData();
+  for (const candidate of candidates) {
+    const resolved = await resolveResourceBytes(candidate);
+    formData.append("files", new Blob([resolved.bytes], { type: resolved.contentType }), candidate.fileName);
+  }
+  formData.append("resourceId", String(resourceId));
+  formData.append("directoryPath", directoryPath);
+  const fileDescription = pick(args, "file-description");
+  if (fileDescription) {
+    formData.append("fileDescription", String(fileDescription));
+  }
+  if (args.overwrite) {
+    formData.append("overwrite", "true");
+  }
+  const uploaded = await requestMultipart(uploadUrl, formData);
+  const uploadItems = asArray(uploaded?.uploadItems ?? uploaded?.items);
+  // 上传返回空 uploadItems：文件没真正落地，后续无从 build；直接当失败抛错，避免“上传了却没建索引”却报 ok（M6）。
+  if (!uploadItems.length) {
+    throw new Error("文件直传未返回任何 uploadItems，上传可能未成功；请检查文件类型与知识库资源 ID");
+  }
+  const builds = [];
+  for (const item of uploadItems) {
+    const filePath = firstNonEmpty(item?.filePath, item?.path, item?.fileUrl);
+    if (!filePath) {
+      continue;
+    }
+    // directoryPath 在 build 接口的语义其实是“单个文件的 filePath”（来自上一步 uploadItems[].filePath），逐个文件触发解析。
+    const built = await requestJson("POST", buildUrl, { resourceId, directoryPath: filePath });
+    builds.push({ filePath, built });
+  }
+  // uploadItems 非空但无一可 build（都缺 filePath）：等于没建任何索引，反映为失败（M6）。
+  if (!builds.length) {
+    throw new Error("文件已上传但未触发 build（uploadItems 缺少 filePath），知识库未建索引；请检查后端返回");
+  }
+  return { resourceId, directoryPath, uploaded, builds };
 }
 
 function normalizeItem(rawItem, args, index) {
@@ -941,16 +1080,30 @@ function markdownItemsFromFiles(args) {
   const files = [...asArray(args["markdown-file"])];
   for (const dir of asArray(args["markdown-dir"])) {
     const resolvedDir = expandHome(dir);
-    for (const entry of fs.readdirSync(resolvedDir).sort()) {
+    let entries;
+    try {
+      entries = fs.readdirSync(resolvedDir).sort();
+    } catch (error) {
+      throw new Error(`Markdown 目录读取失败: ${dir}: ${error.message}`);
+    }
+    for (const entry of entries) {
       if (entry.toLowerCase().endsWith(".md")) {
         files.push(path.join(resolvedDir, entry));
       }
     }
   }
   return files.map((filePath, index) => {
-    const markdown = readTextFile(filePath);
+    let markdown;
+    try {
+      markdown = readTextFile(filePath);
+    } catch (error) {
+      throw new Error(`Markdown 文件读取失败: ${filePath}: ${error.message}`);
+    }
     const fileName = sanitizeFileName(path.basename(filePath), `bycli-output-${index + 1}`);
-    return normalizeItem({ markdown, fileName, title: titleFromMarkdown(markdown), sourceUrl: pick(args, "source-url") }, args, index);
+    return {
+      ...normalizeItem({ markdown, fileName, title: titleFromMarkdown(markdown), sourceUrl: pick(args, "source-url") }, args, index),
+      localPath: expandHome(filePath),
+    };
   }).filter(Boolean);
 }
 
@@ -986,6 +1139,13 @@ function buildCollectionResult(args, stdinValue) {
   }
   collectionResult.items = [...(collectionResult.items || []), ...fileItems];
   if (!collectionResult.items.length) {
+    const { uploadable, extractable } = classifyDiscardedDocCandidates(args, stdinValue);
+    if (uploadable.length) {
+      throw new Error(`检测到 pdf/docx 等文档（${uploadable.join("、")}），请改用 upload-doc 直传入库（后端 QA 解析，免提取）`);
+    }
+    if (extractable.length) {
+      throw new Error(`检测到 ${extractable.join("、")}（白名单外的有正文文档），请先提取为 Markdown 再用 --markdown-file 入库`);
+    }
     throw new Error("未找到可入库的 Markdown。请传 --bycli-json-file、--collection-result-file、--markdown-file、--markdown-dir 或 stdin");
   }
   collectionResult.items = collectionResult.items.map((item, index) => ({
@@ -1019,6 +1179,7 @@ function buildTargetConfig(args, stdinJson, task) {
     knowledgeBaseResourceId: toNumber(pick(args, "knowledge-base-resource-id", targetConfigJson.knowledgeBaseResourceId || task.knowledgeBaseResourceId)),
     knowledgeBaseId: pick(args, "knowledge-base-id", targetConfigJson.knowledgeBaseId || task.knowledgeBaseId),
     knowledgeBaseName: pick(args, "knowledge-base-name", targetConfigJson.knowledgeBaseName || task.knowledgeBaseName),
+    directoryPath: firstNonEmpty(pick(args, "directory-path"), targetConfigJson.directoryPath, "/"),
   });
 }
 
@@ -1026,6 +1187,7 @@ function toMarkdownFiles(collectionResult) {
   return collectionResult.items.map((item) => ({
     fileName: item.fileName,
     markdown: item.markdown,
+    localPath: item.localPath,
     size: Buffer.byteLength(item.markdown || "", "utf8"),
   }));
 }
@@ -1038,6 +1200,193 @@ function assertImportReady(targetConfig) {
 
 function hasImportTarget(targetConfig) {
   return Boolean(targetConfig?.knowledgeBaseResourceId || targetConfig?.knowledgeBaseId);
+}
+
+function resolveKnowledgeManagerScript(args) {
+  const explicit = firstNonEmpty(
+    pick(args, "knowledge-manager-script"),
+    process.env.BY_KNOWLEDGE_MANAGER_SCRIPT,
+  );
+  const candidates = explicit
+    ? [explicit]
+    : [
+      path.resolve(SCRIPT_DIR, "../../知识库管理/scripts/by-knowledge-manager.mjs"),
+      path.resolve(process.cwd(), "知识库管理/scripts/by-knowledge-manager.mjs"),
+    ];
+  for (const candidate of candidates) {
+    const resolved = expandHome(candidate);
+    if (fs.existsSync(resolved)) {
+      return resolved;
+    }
+  }
+  throw new Error(`找不到 by-knowledge-manager 脚本。请设置 BY_KNOWLEDGE_MANAGER_SCRIPT 或 --knowledge-manager-script。已尝试: ${candidates.join(", ")}`);
+}
+
+function candidateSessionDirs(args, payloads) {
+  const dirs = [
+    ...asArray(args["session-dir"]),
+    pick(args, "output-dir"),
+    payloads.collectionResult?.outputDir,
+  ];
+  for (const key of ["bycli-json-file", "collection-result-file"]) {
+    const filePath = pick(args, key);
+    if (filePath && filePath !== true) {
+      dirs.push(path.dirname(expandHome(filePath)));
+    }
+  }
+  const seen = new Set();
+  return dirs
+    .map((dir) => firstNonEmpty(dir))
+    .filter(Boolean)
+    .map((dir) => path.resolve(expandHome(dir)))
+    .filter((dir) => {
+      if (seen.has(dir)) {
+        return false;
+      }
+      seen.add(dir);
+      return fs.existsSync(dir);
+    });
+}
+
+function existingMarkdownPath(item, sessionDirs) {
+  const direct = firstNonEmpty(item.localPath);
+  if (direct && fs.existsSync(expandHome(direct))) {
+    return expandHome(direct);
+  }
+  const fileName = firstNonEmpty(item.fileName);
+  if (!fileName) {
+    return "";
+  }
+  if (path.isAbsolute(fileName) && fs.existsSync(fileName)) {
+    return fileName;
+  }
+  for (const dir of sessionDirs) {
+    const candidates = [
+      path.resolve(dir, fileName),
+      path.resolve(dir, path.basename(fileName)),
+    ];
+    for (const candidate of candidates) {
+      if (fs.existsSync(candidate)) {
+        return candidate;
+      }
+    }
+  }
+  return "";
+}
+
+function prepareMarkdownUploadFiles(args, payloads) {
+  const sessionDirs = candidateSessionDirs(args, payloads);
+  const filePaths = [];
+  const reusedFiles = [];
+  const generatedFiles = [];
+  let tempDir = "";
+
+  for (const [index, item] of payloads.markdownFiles.entries()) {
+    const existingPath = existingMarkdownPath(item, sessionDirs);
+    if (existingPath) {
+      filePaths.push(existingPath);
+      reusedFiles.push(existingPath);
+      continue;
+    }
+
+    if (!tempDir) {
+      tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "bycli-knowledge-ingest-"));
+    }
+    const fileName = sanitizeFileName(item.fileName, `bycli-output-${index + 1}.md`);
+    let filePath = path.join(tempDir, fileName);
+    if (fs.existsSync(filePath)) {
+      filePath = path.join(tempDir, `${index + 1}-${fileName}`);
+    }
+    fs.writeFileSync(filePath, item.markdown || "", "utf8");
+    filePaths.push(filePath);
+    generatedFiles.push(filePath);
+  }
+
+  return { tempDir, filePaths, reusedFiles, generatedFiles, sessionDirs };
+}
+
+function runNodeJson(scriptPath, args, options = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [scriptPath, ...args], {
+      cwd: options.cwd || process.cwd(),
+      env: { ...process.env, ...(options.env || {}) },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (data) => { stdout += data; });
+    child.stderr.on("data", (data) => { stderr += data; });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      let json;
+      try {
+        json = JSON.parse(stdout);
+      } catch {
+        json = undefined;
+      }
+      if (code !== 0 || json?.ok === false) {
+        const detail = json?.error || stderr || stdout || `exit ${code}`;
+        reject(new Error(`by-knowledge-manager upload 失败: ${detail}`));
+        return;
+      }
+      resolve({ code, stdout, stderr, json });
+    });
+  });
+}
+
+async function uploadMarkdownWithKnowledgeManager(args, payloads) {
+  const resourceId = toNumber(payloads.targetConfig.knowledgeBaseResourceId || payloads.targetConfig.knowledgeBaseId);
+  if (!resourceId) {
+    throw new Error("导入知识库必须提供 --knowledge-base-resource-id 或 --knowledge-base-id");
+  }
+  const directoryPath = firstNonEmpty(payloads.targetConfig.directoryPath, "/");
+  const managerScript = resolveKnowledgeManagerScript(args);
+  if (args["dry-run"]) {
+    const sessionDirs = candidateSessionDirs(args, payloads);
+    return {
+      dryRun: true,
+      managerScript,
+      command: "upload",
+      resourceId,
+      directoryPath,
+      sessionDirs,
+      files: payloads.markdownFiles.map((item) => ({
+        fileName: item.fileName,
+        existingPath: existingMarkdownPath(item, sessionDirs) || undefined,
+      })),
+    };
+  }
+
+  const { tempDir, filePaths, reusedFiles, generatedFiles, sessionDirs } = prepareMarkdownUploadFiles(args, payloads);
+  try {
+    const managerArgs = [
+      "upload",
+      "--resource-id", String(resourceId),
+      "--directory-path", directoryPath,
+    ];
+    if (args["check-conflicts"]) {
+      managerArgs.push("--check-conflicts");
+    }
+    for (const filePath of filePaths) {
+      managerArgs.push("--file-path", filePath);
+    }
+    const result = await runNodeJson(managerScript, managerArgs);
+    return {
+      managerScript,
+      resourceId,
+      directoryPath,
+      tempDir,
+      filePaths,
+      reusedFiles,
+      generatedFiles,
+      sessionDirs,
+      manager: result.json,
+    };
+  } finally {
+    if (tempDir && !args["keep-temp"]) {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  }
 }
 
 function buildListKnowledgeBasePayload(args, stdinJson = {}) {
@@ -1129,10 +1478,9 @@ async function printHelp() {
     commands: {
       "list-kb": "调用 /spaceDir/listPersonalKb 查询可入库个人知识库",
       normalize: "规范化 byCLI Markdown 输出，不请求后端",
-      "upload-resource": "上传 byCLI 返回的图片或文件地址到 /chat/uploadFiles",
-      store: "调用 /ecosystemCollection/ingestion/artifacts/store",
-      import: "调用 /ecosystemCollection/ingestion/knowledge/import",
-      ingest: "先 store 再 import，推荐使用",
+      "upload-resource": "上传图片/音频/视频到 /chat/uploadFiles（会话文件，不进知识库）",
+      "upload-doc": "文件直传知识库：/datasetController/uploadFiles + build，后端解析 pdf/docx/pptx/xlsx/csv/txt/md",
+      ingest: "归一化 Markdown 后调用 by-knowledge-manager upload/build",
     },
     inputs: [
       "--bycli-json-file <file>",
@@ -1147,6 +1495,7 @@ async function printHelp() {
     examples: [
       "node bycli-markdown-ingest.mjs normalize --bycli-json-file /tmp/bycli-output.json --knowledge-base-resource-id 90001",
       "node bycli-markdown-ingest.mjs ingest --markdown-file article.md --source-url https://example.com --knowledge-base-resource-id 90001",
+      "node bycli-markdown-ingest.mjs upload-doc --file-path report.pdf --knowledge-base-resource-id 90001 --directory-path /imports",
     ],
     backend: await resolveBackendBaseUrl(),
     auth: authSummary(),
@@ -1172,17 +1521,34 @@ async function main() {
     return;
   }
 
-  const resourceCandidates = buildResourceCandidates(args, stdinValue);
-  if (command === "upload-resource" || (command === "ingest" && resourceCandidates.length)) {
-    if (!resourceCandidates.length) {
-      throw new Error("未找到可上传的图片或文件地址。请传 --file-url、--image-url、--resource-url、--file-path，或在 stdin 中提供 fileUrl/imageUrl/downloadUrl/path");
+  if (command === "upload-doc") {
+    const { docs, rejected } = buildDocCandidates(args, stdinValue);
+    if (!docs.length) {
+      throw new Error(
+        `未找到可直传的文档文件。支持 ${[...DOC_INGEST_EXTENSIONS].join("/")}；请用 --file-path 或 --file-url 指定。`
+        + (rejected.length ? ` 已忽略不支持类型：${rejected.map((item) => item.fileName).join("、")}` : ""),
+      );
     }
-    const uploaded = await uploadResources(resourceCandidates, args);
+    const result = await uploadDocsToDataset(docs, args);
+    render({ ok: true, action: "upload-doc", rejected, ...result });
+    return;
+  }
+
+  const resourceCandidates = buildResourceCandidates(args, stdinValue);
+  // 分流：图片 / 音频 / 视频走 /chat/uploadFiles；其余文件类型继续走下方 Markdown 入库流程。
+  // upload-resource 是显式上传命令，接受任意资源；ingest 自动分流只挑图片 / 音频 / 视频，非媒体文件交给 Markdown 流程。
+  const mediaCandidates = resourceCandidates.filter((candidate) => candidate.kind === "image" || candidate.kind === "video" || candidate.kind === "audio");
+  const candidatesToUpload = command === "upload-resource" ? resourceCandidates : mediaCandidates;
+  if (command === "upload-resource" || (command === "ingest" && candidatesToUpload.length)) {
+    if (!candidatesToUpload.length) {
+      throw new Error("未找到可上传的图片/音频/视频地址。请传 --image-url、指向图片/音频/视频的 --file-url、--file-path，或在 stdin 中提供 fileUrl/imageUrl/downloadUrl/path");
+    }
+    const uploaded = await uploadResources(candidatesToUpload, args);
     render({
       ok: true,
       action: "upload-resource",
       sessionType: "AGENT",
-      resources: resourceCandidates,
+      resources: candidatesToUpload,
       uploaded,
     });
     return;
@@ -1195,30 +1561,8 @@ async function main() {
     return;
   }
 
-  if (command === "store") {
-    const storeUrl = await endpoint("/ecosystemCollection/ingestion/artifacts/store");
-    if (args["dry-run"]) {
-      render({ ok: true, action: "store", dryRun: true, endpoint: storeUrl, summary: summarizePayloads(payloads), payload: payloads.storePayload });
-      return;
-    }
-    const stored = await requestJson("POST", storeUrl, payloads.storePayload);
-    render({ ok: true, action: "store", summary: summarizePayloads(payloads), stored });
-    return;
-  }
-
-  if (command === "import") {
-    if (!hasImportTarget(payloads.targetConfig)) {
-      const listed = await listKnowledgeBases(args, stdinJson);
-      render({ ok: true, action: "select-knowledge-base", needsKnowledgeBaseSelection: true, summary: summarizePayloads(payloads), ...listed });
-      return;
-    }
-    const importUrl = await endpoint("/ecosystemCollection/ingestion/knowledge/import");
-    if (args["dry-run"]) {
-      render({ ok: true, action: "import", dryRun: true, endpoint: importUrl, summary: summarizePayloads(payloads), payload: payloads.importPayload });
-      return;
-    }
-    const imported = await requestJson("POST", importUrl, payloads.importPayload);
-    render({ ok: true, action: "import", summary: summarizePayloads(payloads), imported });
+  if (command === "store" || command === "import") {
+    throw new Error("store/import 命令已废弃；请使用 ingest，由 bycli 内部入库编排调用 by-knowledge-manager upload/build");
     return;
   }
 
@@ -1228,31 +1572,19 @@ async function main() {
       render({ ok: true, action: "select-knowledge-base", needsKnowledgeBaseSelection: true, summary: summarizePayloads(payloads), ...listed });
       return;
     }
-    const storeUrl = await endpoint("/ecosystemCollection/ingestion/artifacts/store");
-    const importUrl = await endpoint("/ecosystemCollection/ingestion/knowledge/import");
     if (args["dry-run"]) {
+      const uploaded = await uploadMarkdownWithKnowledgeManager(args, payloads);
       render({
         ok: true,
         action: "ingest",
         dryRun: true,
-        endpoints: { store: storeUrl, import: importUrl },
         summary: summarizePayloads(payloads),
-        storePayload: payloads.storePayload,
-        importPayload: payloads.importPayload,
+        upload: uploaded,
       });
       return;
     }
-    const stored = await requestJson("POST", storeUrl, payloads.storePayload);
-    const markdownFiles = Array.isArray(stored?.markdownFiles) && stored.markdownFiles.length
-      ? stored.markdownFiles
-      : payloads.markdownFiles;
-    const importPayload = compactObject({
-      task: payloads.task,
-      targetConfig: payloads.targetConfig,
-      markdownFiles,
-    });
-    const imported = await requestJson("POST", importUrl, importPayload);
-    render({ ok: true, action: "ingest", summary: summarizePayloads(payloads), stored, imported });
+    const uploaded = await uploadMarkdownWithKnowledgeManager(args, payloads);
+    render({ ok: true, action: "ingest", summary: summarizePayloads(payloads), uploaded });
     return;
   }
 
