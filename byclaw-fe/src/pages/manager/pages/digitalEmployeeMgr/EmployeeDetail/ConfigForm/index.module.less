@@ -707,10 +707,14 @@
       grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 20px;
       align-content: start;
+      // height: 100% 配合内边距时需要 border-box，否则滚动条自身会被父容器裁掉一截。
+      box-sizing: border-box;
       min-height: 0;
       height: 100%;
       overflow: auto;
-      padding: 2px 10px 2px 2px;
+      // 触底加载模式下给底部留出空间，避免最后一行被弹窗圆角和滚动条末端遮住。
+      padding: 2px 18px 28px 2px;
+      scrollbar-gutter: stable;
     }
 
     @media (max-width: 1100px) {

@@ -733,14 +733,31 @@ public class ByClawSkillResourceApplicationService {
         return entries;
     }
 
+    /**
+     * 只校验当前 skill 根目录下的 SKILL.md，子目录中的 SKILL.md 可能是内嵌 skill，不参与唯一性校验。
+     */
     private ZipEntryInfo findSkillDoc(List<ZipEntryInfo> entries) {
-        List<ZipEntryInfo> docs = entries.stream()
-            .filter(item -> SKILL_DOC_FILE_NAME.equalsIgnoreCase(lastPathSegment(item.name())))
-            .collect(Collectors.toList());
-        if (docs.size() != 1) {
+        List<ZipEntryInfo> rootDocs = new ArrayList<>();
+        List<ZipEntryInfo> directSkillDirDocs = new ArrayList<>();
+        for (ZipEntryInfo entry : entries) {
+            String[] segments = splitPath(entry.name());
+            if (segments.length == 1 && SKILL_DOC_FILE_NAME.equalsIgnoreCase(segments[0])) {
+                rootDocs.add(entry);
+            }
+            else if (segments.length == 2 && SKILL_DOC_FILE_NAME.equalsIgnoreCase(segments[1])) {
+                directSkillDirDocs.add(entry);
+            }
+        }
+        if (!rootDocs.isEmpty()) {
+            if (rootDocs.size() != 1) {
+                throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.missing.doc"));
+            }
+            return rootDocs.get(0);
+        }
+        if (directSkillDirDocs.size() != 1) {
             throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.missing.doc"));
         }
-        return docs.get(0);
+        return directSkillDirDocs.get(0);
     }
 
     private String normalizeZipEntryName(String rawName) {
@@ -758,6 +775,10 @@ public class ByClawSkillResourceApplicationService {
             return null;
         }
         return normalized;
+    }
+
+    private String[] splitPath(String path) {
+        return StringUtils.isBlank(path) ? new String[0] : path.split("/");
     }
 
     private String extractSkillDesc(byte[] skillDocContent) {

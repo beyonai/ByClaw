@@ -70,7 +70,7 @@ public class ByClawSkillQueryApplicationService {
      * 查询指定用户在其工作空间下的 skill 列表。
      * 1. resourceId 有值时查询数字员工路径 /.openclaw/workspace-baiying-agent-{resourceId}/skills/；
      * 2. resourceId 为空时查询超级助手路径 /.openclaw/workspace/skills/；
-     * 3. 识别 skills/** /SKILL.md，允许更深层级目录；
+     * 3. 仅识别 skills/{skillName}/SKILL.md，子目录中的 SKILL.md 不作为独立技能；
      * 4. keyword 只按一层 skillFileName 目录名匹配；5. 若桶或目录不存在，返回空列表。
      */
     public List<ByClawSkillDto> qrySkillListByUserCode(String userCode, Long resourceId, String keyword) {
@@ -179,7 +179,8 @@ public class ByClawSkillQueryApplicationService {
         }
         String relativePath = objectKey.substring(skillRootPrefix.length());
         String[] segments = StringUtils.split(relativePath, '/');
-        if (segments == null || segments.length < 2
+        // 只识别技能根目录下的 SKILL.md，避免把子目录里的 SKILL.md 展示成额外技能。
+        if (segments == null || segments.length != 2
             || !StringUtils.equals(segments[segments.length - 1], ByClawUserWorkspacePaths.SKILL_DOC_FILE_NAME)) {
             return;
         }

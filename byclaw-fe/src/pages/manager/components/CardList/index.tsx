@@ -45,6 +45,8 @@ interface CardListProps {
   paginationBorderBox?: string;
   lessPageSize?: boolean;
   itemBoxClass?: string;
+  // 默认保留组件内部滚动，个别页面可关闭后交给页面容器滚动。
+  contentScrollable?: boolean;
 }
 
 const CardList = (props: CardListProps) => {
@@ -73,6 +75,7 @@ const CardList = (props: CardListProps) => {
     paginationBorderBox,
     lessPageSize = false,
     itemBoxClass = '',
+    contentScrollable = true,
   } = props;
 
   const [rowCount, setRowCount] = useState(0);
@@ -196,10 +199,20 @@ const CardList = (props: CardListProps) => {
     setCheckKeysList([]);
   }, [dataSource]);
   return (
-    <div className={classnames('fullHeight', styles.cardList)}>
-      <Spin spinning={loading} wrapperClassName={showFooter ? styles.cutPage : 'fullHeight'}>
+    <div
+      className={classnames(styles.cardList, {
+        fullHeight: contentScrollable,
+        [styles.cardListAutoHeight]: !contentScrollable,
+      })}
+    >
+      <Spin
+        spinning={loading}
+        wrapperClassName={contentScrollable ? (showFooter ? styles.cutPage : 'fullHeight') : styles.cardListAutoContent}
+      >
         <div
-          className={styles.tab}
+          className={classnames(styles.tab, {
+            [styles.tabAutoHeight]: !contentScrollable,
+          })}
           ref={cardListRef}
           style={{
             flex: 1,

@@ -148,6 +148,12 @@ const parseBundledSkills = (value) => {
         const normalized = {
           resourceId,
           skillCode: `${skillCode || ''}`.trim(),
+          label: item?.label || item?.resourceName || item?.name,
+          resourceName: item?.resourceName || item?.label || item?.name,
+          description: item?.description || item?.resourceDesc || item?.remark,
+          resourceDesc: item?.resourceDesc || item?.description || item?.remark,
+          resourceLogoUrl: item?.resourceLogoUrl,
+          avatar: item?.avatar,
           skillType: item?.skillType,
           skillUrl: item?.skillUrl,
           versionUrl: item?.versionUrl,
@@ -173,6 +179,77 @@ const parseBundledSkills = (value) => {
   } catch {
     return normalizeBundledSkillItems(value.split(','));
   }
+};
+
+const normalizeBundledSkillFromRelResource = (item = {}) => {
+  const resourceType = item.grantResourceType || item.resourceBizType;
+  if (resourceType !== 'SKILL') {
+    return null;
+  }
+  const resourceId = item.resourceId || item.grantResourceId || item.id;
+  if (!resourceId) {
+    return null;
+  }
+  const resourceCode = item.resourceCode || item.skillCode || item.code || item.itemCode || '';
+  // 详情接口的 relIds 只带 ID，完整名称和描述在 relResourceList，这里合并给已选技能回显使用。
+  return {
+    resourceId,
+    skillCode: resourceCode,
+    label: item.resourceName || resourceCode || `${resourceId}`,
+    resourceName: item.resourceName || resourceCode || `${resourceId}`,
+    description: item.resourceDesc || item.description || item.remark || '',
+    resourceDesc: item.resourceDesc || item.description || item.remark || '',
+    resourceLogoUrl: item.resourceLogoUrl || item.avatar,
+    avatar: item.avatar,
+    skillType: item.skillType,
+    skillUrl: item.skillUrl,
+    versionUrl: item.versionUrl || (resourceId ? `/byaiService/tool/getSkillVersion?skillId=${resourceId}` : ''),
+  };
+};
+
+const normalizeRelIdList = (value) => {
+  if (Array.isArray(value)) {
+    return value.map((item) => `${item ?? ''}`.trim()).filter(Boolean);
+  }
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) {
+        return parsed.map((item) => `${item ?? ''}`.trim()).filter(Boolean);
+      }
+    } catch {
+      return value
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean);
+    }
+  }
+  return [];
+};
+
+const mergeBundledSkillsWithRelResources = (skills = [], relResourceList = [], relIds = []) => {
+  const skillInfoMap = new Map();
+  (Array.isArray(relResourceList) ? relResourceList : []).forEach((item) => {
+    const normalized = normalizeBundledSkillFromRelResource(item);
+    if (normalized?.resourceId) {
+      skillInfoMap.set(`${normalized.resourceId}`, normalized);
+    }
+  });
+
+  const mergedSkills = parseBundledSkills(skills).map((skill) => {
+    const relSkill = skillInfoMap.get(`${skill.resourceId || skill.skillId || skill.id}`);
+    return relSkill ? { ...relSkill, ...skill } : skill;
+  });
+  const existingIds = new Set(mergedSkills.map((skill) => `${skill.resourceId || skill.skillId || skill.id}`));
+  // 旧数据可能只在 relIds 里保存技能 ID，完整信息在 relResourceList，需要从 relIds 补齐已选技能。
+  normalizeRelIdList(relIds).forEach((relId) => {
+    const relSkill = skillInfoMap.get(relId);
+    if (relSkill && !existingIds.has(relId)) {
+      mergedSkills.push(relSkill);
+      existingIds.add(relId);
+    }
+  });
+  return mergedSkills;
 };
 
 const parseDigitalEmployeeTemplates = (value) => {
@@ -697,6 +774,7 @@ const EmployeeDetail = ({ loading }) => {
             robotChannelConfigList: robotChannelConfigListRaw,
             catalogId,
             relTools,
+            relIds: detailRelIds,
           } = res || {};
 
           // debugger;
@@ -799,13 +877,18 @@ const EmployeeDetail = ({ loading }) => {
             } = extractPromptFieldsFromCorePersonaDefinition(corePersonaDefinitionValue);
             const promptWorkStandard = promptFieldValuesFromCore.agent || promptFieldValuesFromCore.workStandard || '';
             const effectiveWorkStandard = promptWorkStandard || res?.workStandard || res?.roleAttributes || '';
+            const bundledSkillsFromDetail = mergeBundledSkillsWithRelResources(
+              res?.skills || res?.bundledSkills || prologueRoleJson?.bundledSkills,
+              relResourceList,
+              detailRelIds
+            );
 
             const roleJson = JSON.stringify({
               processingFlow: res?.processingFlow || '',
               personalityDimensions: res?.personalityDimensions || '',
               wordPreferences: res?.wordPreferences || '',
               sentenceAndTone: res?.sentenceAndTone || '',
-              bundledSkills: parseBundledSkills(res?.skills || res?.bundledSkills || prologueRoleJson?.bundledSkills),
+              bundledSkills: bundledSkillsFromDetail,
               agent: promptFieldValuesFromCore.agent || effectiveWorkStandard,
               soul: promptFieldValuesFromCore.soul || '',
               tools: res?.toolStandard || promptFieldValuesFromCore.tools || '',
@@ -894,7 +977,7 @@ const EmployeeDetail = ({ loading }) => {
               personalityDimensions: res?.personalityDimensions || '',
               wordPreferences: res?.wordPreferences || '',
               sentenceAndTone: res?.sentenceAndTone || '',
-              bundledSkills: parseBundledSkills(res?.skills || res?.bundledSkills || prologueRoleJson?.bundledSkills),
+              bundledSkills: bundledSkillsFromDetail,
               agent: promptFieldValuesFromCore.agent || effectiveWorkStandard,
               soul: promptFieldValuesFromCore.soul || '',
               tools: res?.toolStandard || promptFieldValuesFromCore.tools || '',

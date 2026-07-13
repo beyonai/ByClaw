@@ -55,21 +55,64 @@
       margin: 0;
       line-height: 0;
       flex-shrink: 0;
-      width: 40px;
-      height: 40px;
+      width: 56px;
+      height: 56px;
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      border-radius: 8px;
+      overflow: hidden;
+      border-radius: 14px;
       background: rgba(22, 93, 255, 0.08);
 
       :global(img) {
-        border-radius: 8px;
+        border-radius: 14px;
       }
 
       &:empty {
         background-color: #f5f5f5;
       }
+    }
+
+    .avatarImage {
+      display: block;
+      width: 100%;
+      height: 100%;
+      border-radius: 14px;
+      object-fit: cover;
+    }
+
+    .skillDefaultAvatar {
+      position: relative;
+      display: flex;
+      width: 100%;
+      height: 100%;
+      align-items: flex-end;
+      overflow: hidden;
+      padding: 7px;
+      border-radius: 14px;
+      color: rgba(20, 22, 26, 0.7);
+      // 与技能列表默认照片保持同一套渐变和内阴影。
+      background: radial-gradient(circle at 74% 22%, rgba(255, 255, 255, 0.78) 0, rgba(255, 255, 255, 0) 34%),
+        linear-gradient(145deg, #fce4c8 0%, #f7f0ff 48%, #d8f5e8 100%);
+      box-shadow: inset 0 0 0 1px rgba(20, 22, 26, 0.04);
+    }
+
+    .skillDefaultAvatarOrb {
+      position: absolute;
+      top: 9px;
+      right: 7px;
+      width: 24px;
+      height: 24px;
+      border-radius: 999px;
+      background: linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(255, 172, 116, 0.42));
+    }
+
+    .skillDefaultAvatarText {
+      position: relative;
+      z-index: 1;
+      font-size: 11px;
+      line-height: 14px;
+      font-weight: 700;
     }
 
     .headerContent {
@@ -156,6 +199,8 @@
     .detailItem {
       position: relative;
       display: flex;
+      // 详情项内容可能较长，禁止在纵向 flex 容器中被压缩裁剪，交给外层滚动区展示完整内容。
+      flex-shrink: 0;
       min-width: 0;
       flex-direction: column;
       gap: 8px;
@@ -195,6 +240,7 @@
       font-size: 14px;
       line-height: 22px;
       color: var(--skill-detail-ink);
+      overflow-wrap: anywhere;
       word-break: break-word;
       white-space: pre-wrap;
     }
@@ -230,6 +276,7 @@
       width: 100%;
       max-width: 100%;
       overflow-x: auto;
+      overflow-y: hidden;
       border: 1px solid #edf0f5;
       border-radius: 8px;
       background: #fff;
@@ -241,14 +288,26 @@
 
         .@{antPrefix}-table-container {
           border-radius: 8px;
+          overflow: hidden;
         }
 
         .@{antPrefix}-table-thead .@{antPrefix}-table-cell {
           padding: 8px 12px !important;
-          background: #f7fafc !important;
-          color: var(--skill-detail-muted);
+          // 表头使用独立浅蓝灰底和底部分隔线，避免和外层详情卡片背景混在一起。
+          background: #eef4ff !important;
+          color: #4e5969;
           font-size: 12px;
-          font-weight: 400;
+          font-weight: 500;
+          box-shadow: inset 0 -1px 0 #dbe6f5;
+        }
+
+        // 表头背景贴齐表格外框圆角，避免圆角处露出白色底色。
+        .@{antPrefix}-table-thead .@{antPrefix}-table-cell:first-child {
+          border-start-start-radius: 8px;
+        }
+
+        .@{antPrefix}-table-thead .@{antPrefix}-table-cell:last-child {
+          border-start-end-radius: 8px;
         }
 
         .@{antPrefix}-table-tbody .@{antPrefix}-table-cell {
