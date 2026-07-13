@@ -1810,6 +1810,10 @@ export function createDiagnosticsOtelService(
       ) =>
         isInboundChannelDiagnosticEvent(evt) &&
         (metadata.trusted || isConfiguredNativeChannelEvent(evt));
+      const passesCorrelatedSpanGate = (
+        evt: { channel?: string; source?: string },
+        metadata: DiagnosticEventMetadata,
+      ) => metadata.trusted || isConfiguredNativeChannelEvent(evt);
       const langfuseUserContext: LangfuseUserContext = {
         defaultUserId: resolveDefaultLangfuseUserId(options),
         sessionUserIdsBySessionKey: new Map<string, string>(),
@@ -2263,11 +2267,15 @@ export function createDiagnosticsOtelService(
         evt: DiagnosticEventPayload,
         metadata: DiagnosticEventMetadata,
       ) => (metadata.trusted ? normalizeTraceContext(evt.trace) : undefined);
+      const correlatedTraceContext = (
+        evt: DiagnosticEventPayload,
+        metadata: DiagnosticEventMetadata,
+      ) => (passesCorrelatedSpanGate(evt, metadata) ? normalizeTraceContext(evt.trace) : undefined);
       const activeTrustedParentContext = (
         evt: DiagnosticEventPayload,
         metadata: DiagnosticEventMetadata,
       ) => {
-        const parentSpanId = trustedTraceContext(evt, metadata)?.parentSpanId;
+        const parentSpanId = correlatedTraceContext(evt, metadata)?.parentSpanId;
         if (!parentSpanId) {
           return undefined;
         }
@@ -2283,7 +2291,7 @@ export function createDiagnosticsOtelService(
         metadata: DiagnosticEventMetadata,
         span: ReturnType<typeof tracer.startSpan>,
       ) => {
-        const spanId = trustedTraceContext(evt, metadata)?.spanId;
+        const spanId = correlatedTraceContext(evt, metadata)?.spanId;
         if (spanId) {
           activeTrustedSpans.set(spanId, span);
         }
@@ -2354,7 +2362,7 @@ export function createDiagnosticsOtelService(
         evt: DiagnosticEventPayload,
         metadata: DiagnosticEventMetadata,
       ) => {
-        const spanId = trustedTraceContext(evt, metadata)?.spanId;
+        const spanId = correlatedTraceContext(evt, metadata)?.spanId;
         if (!spanId) {
           return undefined;
         }
@@ -2788,7 +2796,7 @@ export function createDiagnosticsOtelService(
         if (!tracesEnabled || !passesInboundTrustGate(evt, metadata)) {
           return;
         }
-        const traceContext = trustedTraceContext(evt, metadata);
+        const traceContext = correlatedTraceContext(evt, metadata);
         if (!traceContext?.spanId || activeTrustedSpans.has(traceContext.spanId)) {
           return;
         }
@@ -2867,7 +2875,7 @@ export function createDiagnosticsOtelService(
         const byaiInboundSpan = sessionKey
           ? activeByaiInboundSpansBySessionKey.get(sessionKey)
           : undefined;
-        const trustedTrace = trustedTraceContext(evt, metadata);
+        const trustedTrace = correlatedTraceContext(evt, metadata);
         const trackedSpan = trustedTrace?.spanId
           ? activeTrustedSpans.get(trustedTrace.spanId)
           : undefined;
@@ -2958,7 +2966,7 @@ export function createDiagnosticsOtelService(
         evt: Extract<DiagnosticEventPayload, { type: "run.started" }>,
         metadata: DiagnosticEventMetadata,
       ) => {
-        if (!tracesEnabled || !passesInboundTrustGate(evt, metadata)) {
+        if (!tracesEnabled || !passesCorrelatedSpanGate(evt, metadata)) {
           return;
         }
         const byaiInboundSpan = activeByaiInboundSpanForRun(evt);
@@ -2976,7 +2984,7 @@ export function createDiagnosticsOtelService(
             startTimeMs: evt.ts,
           }),
         );
-        const parentSpanId = trustedTraceContext(evt, metadata)?.parentSpanId;
+        const parentSpanId = correlatedTraceContext(evt, metadata)?.parentSpanId;
         if (parentSpanId && !activeTrustedSpans.has(parentSpanId)) {
           activeTrustedSpanAliases.set(parentSpanId, span);
         }
@@ -3082,7 +3090,7 @@ export function createDiagnosticsOtelService(
       });
 
       const recordTalkEvent = (evt: TalkDiagnosticEvent, metadata: DiagnosticEventMetadata) => {
-        if (!passesInboundTrustGate(evt, metadata)) {
+        if (!passesCorrelatedSpanGate(evt, metadata)) {
           return;
         }
         const attrs = talkEventAttrs(evt);
@@ -3285,7 +3293,7 @@ export function createDiagnosticsOtelService(
         if (byaiInboundSpan) {
           spanAttrs["byai.inbound.linked"] = true;
         }
-        const trustedTrace = trustedTraceContext(evt, metadata);
+        const trustedTrace = correlatedTraceContext(evt, metadata);
         const trackedSpan = trustedTrace?.spanId
           ? activeTrustedSpans.get(trustedTrace.spanId)
           : undefined;
@@ -3357,7 +3365,7 @@ export function createDiagnosticsOtelService(
         evt: Extract<DiagnosticEventPayload, { type: "harness.run.started" }>,
         metadata: DiagnosticEventMetadata,
       ) => {
-        if (!tracesEnabled || !passesInboundTrustGate(evt, metadata)) {
+        if (!tracesEnabled || !passesCorrelatedSpanGate(evt, metadata)) {
           return;
         }
         const spanAttrs: Record<string, string | number | boolean> = harnessRunMetricAttrs(evt);
@@ -3568,7 +3576,7 @@ export function createDiagnosticsOtelService(
         evt: Extract<DiagnosticEventPayload, { type: "model.call.started" }>,
         metadata: DiagnosticEventMetadata,
       ) => {
-        if (!tracesEnabled || !passesInboundTrustGate(evt, metadata)) {
+        if (!tracesEnabled || !passesCorrelatedSpanGate(evt, metadata)) {
           return;
         }
         const spanAttrs: Record<string, string | number | boolean> = {
@@ -3754,7 +3762,7 @@ export function createDiagnosticsOtelService(
         metadata: DiagnosticEventMetadata,
         privateData?: Record<string, unknown>,
       ) => {
-        if (!tracesEnabled || !passesInboundTrustGate(evt, metadata)) {
+        if (!tracesEnabled || !passesCorrelatedSpanGate(evt, metadata)) {
           return;
         }
         const spanAttrs = toolExecutionBaseAttrs(evt);
