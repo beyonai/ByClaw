@@ -884,7 +884,7 @@ DELETE FROM byai.byai_system_config WHERE param_code IN ('MODEL_QUOTA');
 INSERT INTO byai.byai_system_config (param_id, param_type, param_code, param_name, param_en_name, param_value, param_desc) VALUES (nextval('byai.seq_any_table'), 'json', 'MODEL_QUOTA', '模型额度与tokenSaver配置', 'MODEL_QUOTA', '{
 	"monthlyQuotaLimit": 300000000,
 	"tokenSaver": {
-		"enabled": true,
+		"enabled": false,
 		"apiUrl": "https://www.tokensaver.net/v1",
         "anthropicApiUrl": "https://www.tokensaver.net",
 		"accessToken": "",
