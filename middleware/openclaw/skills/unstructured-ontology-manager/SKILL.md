@@ -53,18 +53,18 @@ allowed-tools: execute, read_file
 
 每条意图对应一条 Bash 命令，**直接执行，不得改写**：
 
-| 用户表达 | Bash 命令（在 skill 根目录执行） |
-|----------|--------------------------------|
-| 查看/列出 + 对象 | `/usr/local/bin/python3 scripts/list_resources.py '{}'` |
-| 查看知识库列表 | `/usr/local/bin/python3 scripts/list_knowledge_bases.py '{}'` |
-| 查看知识库目录 | `/usr/local/bin/python3 scripts/list_kb_directories.py '{"kb_id":"<kb_id>"}'` |
-| 创建/新建 + 对象（收集阶段） | `/usr/local/bin/python3 scripts/create_object.py '{"action":"collect","entity_code":"<code>","entity_name":"<name>","kb_id":"<resourceCode>","kb_directory":"<dir>","fields":[]},"session_id":"<sid>"'` |
-| 确认提交 | `/usr/local/bin/python3 scripts/create_object.py '{"action":"submit","entity_code":"<code>","session_id":"<sid>"}'` |
-| 删除 + 对象 | `/usr/local/bin/python3 scripts/delete_object.py '{"entity_code":"<code>"}'` |
-| 挂载/添加到助理/数字员工 | `/usr/local/bin/python3 scripts/mount_resource.py '{"agent_id":<id>,"resource_code":"<code>"}'` |
-| 查看术语类型 | `/usr/local/bin/python3 scripts/list_term_types.py '{}'` |
-| 创建目录/文件夹 | `/usr/local/bin/python3 scripts/create_directory.py '{"resource_id":"<resourceId>","directory_name":"<name>"}'` |
-| 查看术语值 | `/usr/local/bin/python3 scripts/get_term_type_values.py '{"term_type_code":"<code>"}'` |
+| 用户表达 | Bash 命令（在 skill 根目录执行）                                                                                                                                                                                                       |
+|----------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 查看/列出 + 对象 | `/usr/local/bin/python3 scripts/list_resources.py '{}'`                                                                                                                                                                      |
+| 查看知识库列表 | `/usr/local/bin/python3 scripts/list_knowledge_bases.py '{}'`                                                                                                                                                                |
+| 查看知识库目录 | `/usr/local/bin/python3 scripts/list_kb_directories.py '{"kb_id":"<kb_id>"}'`                                                                                                                                                |
+| 创建/新建 + 对象（收集阶段） | `/usr/local/bin/python3 scripts/create_object.py '{"action":"collect","entity_code":"<code>","entity_name":"<name>", "entity_desc":"<entity_desc>", "kb_id":"<resourceCode>","kb_directory":"<dir>","fields":[]},"session_id":"<sid>"'` |
+| 确认提交 | `/usr/local/bin/python3 scripts/create_object.py '{"action":"submit","entity_code":"<code>","session_id":"<sid>"}'`                                                                                                          |
+| 删除 + 对象 | `/usr/local/bin/python3 scripts/delete_object.py '{"entity_code":"<code>"}'`                                                                                                                                                 |
+| 挂载/添加到助理/数字员工 | `/usr/local/bin/python3 scripts/mount_resource.py '{"agent_id":<id>,"resource_code":"<code>"}'`                                                                                                                              |
+| 查看术语类型 | `/usr/local/bin/python3 scripts/list_term_types.py '{}'`                                                                                                                                                                     |
+| 创建目录/文件夹 | `/usr/local/bin/python3 scripts/create_directory.py '{"resource_id":"<resourceId>","directory_name":"<name>"}'`                                                                                                              |
+| 查看术语值 | `/usr/local/bin/python3 scripts/get_term_type_values.py '{"term_type_code":"<code>"}'`                                                                                                                                       |
 
 **输出处理规则**：
 - `{"ok": true, ...}` → 操作成功，向用户展示 `data` 中的关键信息
