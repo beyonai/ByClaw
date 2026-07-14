@@ -886,7 +886,7 @@
       // height: 100% 配合内边距时需要 border-box，否则滚动条自身会被父容器裁掉一截。
       box-sizing: border-box;
       width: 100%;
-      max-width: 1600px;
+      max-width: calc(300px * 5 + 20px * 4 + 20px);
       min-height: 0;
       height: 100%;
       margin: 0 auto;
@@ -944,7 +944,7 @@
 
     .hasBundledSkillPosterTag {
       .bundledSkillPosterHeader {
-        // 只有右上角有标签时标题行才预留空间，避免无标签卡片名称被按钮区域提前挤出省略号。
+        // 只有右上角有标签时，标题行才预留标签空间，避免无标签卡片名称过早省略。
         padding-right: 66px;
       }
     }

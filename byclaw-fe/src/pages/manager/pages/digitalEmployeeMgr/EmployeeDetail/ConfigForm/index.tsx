@@ -807,9 +807,7 @@ const ConfigForm = (props) => {
 
       const pageInfo = res?.data || res || {};
       const list = pageInfo?.list || pageInfo?.rows || [];
-      const nextOptions = list
-        .map(normalizeBundledSkillOption)
-        .filter((item) => item.value);
+      const nextOptions = list.map(normalizeBundledSkillOption).filter((item) => item.value);
       setBundledSkillOptions((prevOptions) => {
         if (!append) return nextOptions;
         const seenResourceIds = new Set();
@@ -1630,17 +1628,12 @@ const ConfigForm = (props) => {
 
   const getBundledSkillTag = useCallback(
     (item: any = {}) => {
-      const tagName = `${item.tagName || ''}`.trim();
-      if (tagName) {
-        // 接口直接返回系统内置标签时，也按配置技能弹窗设计缩短展示文案。
-        if (['系统内置', 'System built-in', 'system builtin', 'system built-in'].includes(tagName)) {
-          return isEN ? 'Built-in' : '内置';
-        }
-        return tagName;
+      if (item.tagName) {
+        return item.tagName;
       }
       if (`${item.skillType || ''}`.toLowerCase() === 'inner') {
-        // 配置技能弹窗标签文案按设计缩短，避免 300px 卡片右上角标签过宽。
-        return isEN ? 'Built-in' : '内置';
+        // 配置技能弹窗卡片右上角空间有限，系统内置技能使用短标签展示。
+        return getLocale().includes('en') ? 'Built-in' : '内置';
       }
       if (
         `${item.displaySourceType || item.sourceType || ''}`.replace(/[-\s]/g, '_').toUpperCase() === 'USER_DEVELOPED'
@@ -1649,7 +1642,7 @@ const ConfigForm = (props) => {
       }
       return '';
     },
-    [intl, isEN]
+    [intl]
   );
 
   const renderBundledSkillPoster = useCallback(
