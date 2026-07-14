@@ -136,7 +136,8 @@ const ResourceSiderListItem: React.FC<ResourceSiderListItemProps> = ({
                 className={styles.resourceAvatarImage}
                 src={resourceImageUrl}
                 alt=""
-                fetchPriority="low"
+                // React 18 不识别 camelCase fetchPriority，透传小写属性避免控制台告警。
+                {...{ fetchpriority: 'low' }}
                 onError={() => setImageLoadFailed(true)}
               />
             ) : resourceType === 'SKILL' && (item.resourceBizType === ResourceTypeMap.SKILL || imageLoadFailed) ? (

@@ -20,10 +20,7 @@ import {
   readFile,
   downloadSkillZip,
 } from '@/pages/manager/service/resources';
-import {
-  isWorkspaceSkill,
-  SKILL_DISPLAY_SOURCE_USER_DEVELOPED,
-} from '@/components/Resources/workspaceSkill/utils';
+import { isWorkspaceSkill, SKILL_DISPLAY_SOURCE_USER_DEVELOPED } from '@/components/Resources/workspaceSkill/utils';
 import { queryDigitalEmployeeSkillResources } from '@/components/Resources/workspaceSkill/queryDigitalEmployeeSkillResources';
 import useGlobal from '@/hooks/useGlobal';
 
@@ -164,10 +161,7 @@ const ResourceList = (props: Props) => {
   const getReloadResourceType = (payload?: string | { resourceType?: string }) =>
     typeof payload === 'string' ? payload : payload?.resourceType;
 
-  const loadResources = async (
-    reset = false,
-    resourceTypePayload?: string | { resourceType?: string }
-  ) => {
+  const loadResources = async (reset = false, resourceTypePayload?: string | { resourceType?: string }) => {
     if (resources) {
       return;
     }
@@ -431,7 +425,8 @@ const ResourceList = (props: Props) => {
           className={styles.compactAvatarImage}
           src={resourceImageUrl}
           alt=""
-          fetchPriority="low"
+          // React 18 不识别 camelCase fetchPriority，透传小写属性避免控制台告警。
+          {...{ fetchpriority: 'low' }}
           onError={() => {
             setFailedResourceImageUrls((prev) => {
               if (prev.has(resourceImageUrl)) {

@@ -71,7 +71,7 @@ const { TextArea } = Input;
 
 const nanoid = customAlphabet('abcdefghijklmnopqrstuvwxyz1234567890', 6);
 const PROMPT_TEXT_FIELD_DEFAULT_MAX_LENGTH = 10000;
-const BUNDLED_SKILL_PAGE_SIZE = 20;
+const BUNDLED_SKILL_PAGE_SIZE = 30;
 const getPromptTextLength = (value: any) => Array.from(`${value ?? ''}`).length;
 const formatSkillAddedCount = (count: number, locale: string) => {
   if (locale?.startsWith('zh')) {
@@ -1508,7 +1508,7 @@ const ConfigForm = (props) => {
     if (bundledSkillLoading || bundledSkillLoadMoreLockRef.current) return;
     if (!bundledSkillPagination.total || bundledSkillOptions.length >= bundledSkillPagination.total) return;
     bundledSkillLoadMoreLockRef.current = true;
-    // 配置技能弹窗触底后继续请求下一页，每页仍固定 20 条。
+    // 配置技能弹窗触底后继续请求下一页，每页仍固定 30 条。
     fetchBundledSkills({
       pageNum: bundledSkillPagination.pageNum + 1,
       pageSize: bundledSkillPagination.pageSize || BUNDLED_SKILL_PAGE_SIZE,
@@ -1536,6 +1536,29 @@ const ConfigForm = (props) => {
     },
     [loadMoreBundledSkills]
   );
+
+  useEffect(() => {
+    if (!bundledSkillModalOpen || bundledSkillLoading) return;
+    if (!bundledSkillPagination.total || bundledSkillOptions.length >= bundledSkillPagination.total) return;
+
+    const checkScrollableAndLoadMore = () => {
+      const list = bundledSkillListRef.current;
+      if (!list) return;
+      // 首屏 20 条刚好铺满但没有出现滚动条时，主动补拉下一页，否则用户无法触发 onScroll。
+      if (list.scrollHeight <= list.clientHeight + 8) {
+        loadMoreBundledSkills();
+      }
+    };
+
+    const rafId = requestAnimationFrame(checkScrollableAndLoadMore);
+    return () => cancelAnimationFrame(rafId);
+  }, [
+    bundledSkillLoading,
+    bundledSkillModalOpen,
+    bundledSkillOptions.length,
+    bundledSkillPagination.total,
+    loadMoreBundledSkills,
+  ]);
 
   const getBundledSkillSourceName = useCallback(
     (item: any = {}) => {
@@ -3543,7 +3566,9 @@ const ConfigForm = (props) => {
                   })}
                 </div>
               ) : (
-                <Empty />
+                <div className={styles.bundledSkillEmpty}>
+                  <Empty />
+                </div>
               )}
             </Spin>
           </div>
