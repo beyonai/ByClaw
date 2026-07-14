@@ -735,9 +735,7 @@ const ConfigForm = (props) => {
 
       const pageInfo = res?.data || res || {};
       const list = pageInfo?.list || pageInfo?.rows || [];
-      const nextOptions = list
-        .map(normalizeBundledSkillOption)
-        .filter((item) => item.value);
+      const nextOptions = list.map(normalizeBundledSkillOption).filter((item) => item.value);
       setBundledSkillOptions((prevOptions) => {
         if (!append) return nextOptions;
         const seenResourceIds = new Set();
@@ -1562,7 +1560,8 @@ const ConfigForm = (props) => {
         return item.tagName;
       }
       if (`${item.skillType || ''}`.toLowerCase() === 'inner') {
-        return intl.formatMessage({ id: 'resource.systemBuiltin' });
+        // 配置技能弹窗卡片右上角空间有限，系统内置技能使用短标签展示。
+        return getLocale().includes('en') ? 'Built-in' : '内置';
       }
       if (
         `${item.displaySourceType || item.sourceType || ''}`.replace(/[-\s]/g, '_').toUpperCase() === 'USER_DEVELOPED'
@@ -3424,8 +3423,8 @@ const ConfigForm = (props) => {
         className={styles.bundledSkillModal}
         wrapClassName={styles.bundledSkillModalWrap}
         open={bundledSkillModalOpen}
-        width="min(1180px, calc(100vw - 64px))"
-        style={{ top: 32, paddingBottom: 0 }}
+        width="min(1840px, calc(100vw - 96px))"
+        style={{ top: 48, paddingBottom: 0 }}
         onCancel={() => setBundledSkillModalOpen(false)}
         destroyOnHidden
         closable={false}
@@ -3479,17 +3478,18 @@ const ConfigForm = (props) => {
                         key={item.value}
                         className={classnames(styles.bundledSkillModalCard, {
                           [styles.selectedBundledSkillModalCard]: isSelected,
+                          [styles.hasBundledSkillPosterTag]: !!tagText,
                         })}
                       >
+                        {tagText && (
+                          <span className={styles.bundledSkillPosterTag}>
+                            <span>{tagText}</span>
+                          </span>
+                        )}
                         {renderBundledSkillPoster(item)}
                         <div className={styles.bundledSkillPosterBody}>
                           <div className={styles.bundledSkillPosterHeader}>
                             <div className={styles.bundledSkillModalCardTitle}>{item.label}</div>
-                            {tagText && (
-                              <span className={styles.bundledSkillPosterTag}>
-                                <span>{tagText}</span>
-                              </span>
-                            )}
                           </div>
                           <Ellipsis
                             className={styles.bundledSkillModalCardDesc}
