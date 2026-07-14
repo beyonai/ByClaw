@@ -1,5 +1,5 @@
 import React from 'react';
-import { Button, Tooltip, Upload } from 'antd';
+import { Button, message, Tooltip, Upload } from 'antd';
 import { CopyOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import AntdIcon from '@/components/AntdIcon';
@@ -45,6 +45,18 @@ const FileCategoryHeader: React.FC<FileCategoryHeaderProps> = ({
   const uploadTitle = intl.formatMessage({ id: 'fileBrowser.toolbar.upload' });
   const createTitle = intl.formatMessage({ id: 'fileBrowser.toolbar.newFolder' });
   const refreshTitle = intl.formatMessage({ id: 'fileBrowser.toolbar.refresh' });
+  const handleUnavailableUpload = (event: React.MouseEvent<HTMLElement>) => {
+    event.stopPropagation();
+    message.info(intl.formatMessage({ id: 'fileBrowser.upload.underConstruction' }));
+  };
+  const uploadButton = (
+    <Button
+      icon={<AntdIcon type="icon-a-Uploadshangchuan" className={styles.categoryActionIcon} />}
+      size="small"
+      className={styles.categoryActionButton}
+      onClick={category.uploadUnderConstruction ? handleUnavailableUpload : undefined}
+    />
+  );
 
   const pathContent = pathSegments.length ? (
     <>
@@ -89,20 +101,20 @@ const FileCategoryHeader: React.FC<FileCategoryHeaderProps> = ({
         <span className={styles.categoryActions} onClick={(event) => event.stopPropagation()}>
           {canManageCategory && (
             <Tooltip title={uploadTitle}>
-              <Upload
-                showUploadList={false}
-                multiple
-                beforeUpload={(_, fileList) => {
-                  onUploadSelect(category, fileList as unknown as File[]);
-                  return false;
-                }}
-              >
-                <Button
-                  icon={<AntdIcon type="icon-a-Uploadshangchuan" className={styles.categoryActionIcon} />}
-                  size="small"
-                  className={styles.categoryActionButton}
-                />
-              </Upload>
+              {category.uploadUnderConstruction ? (
+                uploadButton
+              ) : (
+                <Upload
+                  showUploadList={false}
+                  multiple
+                  beforeUpload={(_, fileList) => {
+                    onUploadSelect(category, fileList as unknown as File[]);
+                    return false;
+                  }}
+                >
+                  {uploadButton}
+                </Upload>
+              )}
             </Tooltip>
           )}
           {canManageCategory && (

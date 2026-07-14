@@ -7,6 +7,7 @@ import {
   BYKC_FILE_PATH,
   DISPLAY_FILE_PATH_PREFIX,
   LOG_FILE_PATH,
+  PROJECT_FILE_PATH,
   PROTECTED_ROOT_DIRECTORY_PATHS,
   ROOT_FILE_PATH,
   SESSION_FILE_PATH,
@@ -145,6 +146,7 @@ export function isPathIn(path: string, rootPath: string) {
 export function getCategoryRootPath(categoryKey: FileCategoryKey | undefined) {
   if (categoryKey === 'session') return SESSION_FILE_PATH;
   if (categoryKey === 'shared') return SHARED_FILE_PATH;
+  if (categoryKey === 'project') return PROJECT_FILE_PATH;
   if (categoryKey === 'log') return LOG_FILE_PATH;
   return ROOT_FILE_PATH;
 }
@@ -157,6 +159,7 @@ export function getFileActionScope(activeKey: FileCategoryKey | undefined, item:
   if (isPathIn(itemPath, BYKC_FILE_PATH)) return 'bykc';
   if (isPathIn(itemPath, SESSION_FILE_PATH)) return 'session';
   if (isPathIn(itemPath, SHARED_FILE_PATH)) return 'shared';
+  if (isPathIn(itemPath, PROJECT_FILE_PATH)) return 'project';
   if (isPathIn(itemPath, LOG_FILE_PATH)) return 'log';
   return 'root';
 }
@@ -165,6 +168,7 @@ export function getFileCategoryKeyByPath(path: string): FileCategoryKey {
   const itemPath = normalizeFileBrowserPath(path);
   if (isPathIn(itemPath, SESSION_FILE_PATH)) return 'session';
   if (isPathIn(itemPath, SHARED_FILE_PATH)) return 'shared';
+  if (isPathIn(itemPath, PROJECT_FILE_PATH)) return 'project';
   if (isPathIn(itemPath, LOG_FILE_PATH)) return 'log';
   return 'root';
 }
