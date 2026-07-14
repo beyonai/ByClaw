@@ -129,7 +129,6 @@ public class MultiDeviceBroadcastService {
 
     /**
      * 向指定用户的所有在线 WebSocket 通道推送原始 JSON 消息。
-     * 用于生态采集 Browser Bridge 任务下发，普通聊天端收到未知 type 后会自然忽略。
      *
      * @param userId 用户ID
      * @param message 原始消息

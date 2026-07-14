@@ -9,7 +9,6 @@ import java.util.Locale;
 
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
-import com.iwhalecloud.byai.manager.application.service.ecosystem.EcosystemCollectionApplicationService;
 import com.iwhalecloud.byai.state.domain.notification.service.NotificationService;
 import com.iwhalecloud.byai.state.domain.ws.constant.Constant;
 import com.iwhalecloud.byai.state.domain.ws.service.ChatService;
@@ -39,8 +38,6 @@ class WebSocketHandlerI18nTest {
         ReflectionTestUtils.setField(handler, "chatService", mock(ChatService.class));
         ReflectionTestUtils.setField(handler, "notificationService", mock(NotificationService.class));
         ReflectionTestUtils.setField(handler, "sandboxService", sandboxService);
-        ReflectionTestUtils.setField(handler, "ecosystemCollectionApplicationService",
-            mock(EcosystemCollectionApplicationService.class));
 
         LoginInfo loginInfo = new LoginInfo();
         loginInfo.setUserId(1L);
