@@ -1,0 +1,140 @@
+.titleBar {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.drawer {
+  :global {
+    .@{antPrefix}-drawer-body {
+      .@{antPrefix}-spin-nested-loading {
+        height: 100%;
+
+        .@{antPrefix}-spin-container {
+          height: 100%;
+        }
+      }
+    }
+  }
+}
+
+.main {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  height: 100%;
+  padding: 24px;
+  overflow-y: auto;
+}
+
+.block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.blockTitle {
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 22px;
+  color: #40454d;
+}
+
+.bubble {
+  max-width: 100%;
+  padding: 12px 16px;
+  border-radius: 12px;
+  background: #1f25330a;
+  word-break: break-word;
+}
+
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.timelineNode {
+  position: relative;
+  padding: 10px 12px;
+  border: 1px solid #edf0f5;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.timelineHeader {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.timelineName {
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 22px;
+  color: #1f2533;
+  word-break: break-word;
+}
+
+.timelineMeta {
+  font-size: 12px;
+  line-height: 18px;
+  color: #7a8799;
+}
+
+.timelinePreview {
+  max-height: 140px;
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  overflow: auto;
+  border-radius: 6px;
+  background: #f7f8fa;
+  color: #40454d;
+  font-size: 12px;
+  line-height: 18px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.timelineChildren {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.meta {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 16px;
+  border-top: 1px dashed #e8e8e8;
+  font-size: 12px;
+  line-height: 18px;
+  color: #7a8799;
+}
+
+.metaLabel {
+  flex-shrink: 0;
+
+  &::after {
+    content: ':';
+    margin-left: 0;
+    margin-right: 4px;
+  }
+}
+
+.metaValue {
+  flex: 1 1 0%;
+  min-width: 0;
+  word-break: break-all;
+  color: #40454d;
+  font-family: SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
+}
