@@ -147,8 +147,7 @@ while IFS= read -r line || [ -n "$line" ]; do
 done < "$ENV_FILE"
 
 if [ "$MODE" = "encrypt" ]; then
-    cp "$ENV_FILE" "${ENV_FILE}.plaintext"
-    echo "备份明文: ${ENV_FILE}.plaintext"
+    :
 else
     cp "$ENV_FILE" "${ENV_FILE}.encrypted.bak"
 fi
