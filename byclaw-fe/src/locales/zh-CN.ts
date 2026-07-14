@@ -445,6 +445,8 @@ export default {
   'knowledgeDetail.uploadFile': '上传文件',
   'knowledgeDetail.sameNameFileOverwriteTip': '相同文件名将覆盖更新',
   'knowledgeDetail.uploadSuccess': '上传成功',
+  'knowledgeDetail.uploadPartial': '上传完成：成功 {succeeded} 个，失败 {failed} 个',
+  'knowledgeDetail.uploadPostProcessWarning': '文件已上传，但有 {count} 个引用后处理任务失败',
   'knowledgeDetail.uploadConfirmTitle': '确认上传文件',
   'knowledgeDetail.uploadConfirmFiles': '已选择 {count} 个文件',
   'knowledgeDetail.uploadConfirmMoreFiles': '等 {count} 个文件',

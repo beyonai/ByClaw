@@ -15,6 +15,8 @@ import {
   getDataList,
   queryDirAndFileByLevel,
   moveKnowledgeItems,
+  queryKnowledgeItemReferences,
+  globKnowledgeItems,
 } from '../knowledgeCenter';
 import { callDomainServiceByMultipart } from '../file';
 import { GET, POST } from '@/service/common/request';
@@ -285,6 +287,28 @@ describe('Knowledge Center Service', () => {
           hideErrorTips: true,
         },
       });
+    });
+  });
+
+  describe('latest QA knowledge item APIs', () => {
+    it('should query markdown references through the dataset proxy', () => {
+      const data = {
+        resourceId: 10014248,
+        filePath: '/制度/请假.md',
+        direction: 'all' as const,
+      };
+
+      queryKnowledgeItemReferences(data);
+
+      expect(mockPOST).toHaveBeenCalledWith('/byaiService/datasetController/knowledgeItems/references', data);
+    });
+
+    it('should execute glob matching through the dataset proxy', () => {
+      const data = { resourceId: 10014248, pathRule: '/制度/*/*.pdf' };
+
+      globKnowledgeItems(data);
+
+      expect(mockPOST).toHaveBeenCalledWith('/byaiService/datasetController/glob', data);
     });
   });
 });

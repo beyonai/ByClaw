@@ -245,7 +245,7 @@
           }
         ],
         "paths": {
-          "/api/v1/knowledge-items/import": {
+          "/api/v1/knowledgeItems/import": {
             "post": {
               "operationId": "uploadFile",
               "summary": "上传文档",
@@ -268,16 +268,21 @@
                         },
                         "filePath": {
                           "type": "string",
-                          "description": "上传到知识库后的文件全路径（以\"/\"开头，不包括知识库名称）"
+                          "description": "单文件上传时为目标文件全路径；zip 上传时为目标目录路径（以\"/\"开头，不包括知识库名称）"
                         },
                         "fileDescription": {
                           "type": "string",
                           "description": "文件描述"
                         },
+                        "processFrontMatter": {
+                          "type": "boolean",
+                          "default": true,
+                          "description": "是否解析 YAML front matter 并自动录入元数据，默认 true"
+                        },
                         "fileContent": {
                           "type": "string",
                           "format": "binary",
-                          "description": "文件二进制内容"
+                          "description": "文件二进制内容；文件名以 .zip 结尾且为合法 zip 时触发批量上传"
                         }
                       }
                     }
@@ -299,6 +304,49 @@
                           "resultMsg": {
                             "type": "string",
                             "description": "接口返回说明"
+                          },
+                          "resultObject": {
+                            "type": "object",
+                            "properties": {
+                              "data": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "filePath": {
+                                      "type": "string"
+                                    },
+                                    "success": {
+                                      "type": "boolean"
+                                    },
+                                    "error": {
+                                      "type": "string",
+                                      "nullable": true
+                                    }
+                                  }
+                                }
+                              },
+                              "summary": {
+                                "type": "object",
+                                "properties": {
+                                  "total": {
+                                    "type": "integer"
+                                  },
+                                  "succeeded": {
+                                    "type": "integer"
+                                  },
+                                  "failed": {
+                                    "type": "integer"
+                                  }
+                                }
+                              },
+                              "postProcessErrors": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              }
+                            }
                           }
                         }
                       }
@@ -325,7 +373,7 @@
           }
         ],
         "paths": {
-          "/api/v1/knowledge-items/delete": {
+          "/api/v1/knowledgeItems/delete": {
             "post": {
               "operationId": "deleteFile",
               "summary": "删除文档",
@@ -369,6 +417,263 @@
                           "resultMsg": {
                             "type": "string",
                             "description": "接口返回说明"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "openapiSchema": {
+        "openapi": "3.0.1",
+        "info": {
+          "title": "移动文件或目录",
+          "description": "移动指定知识库下的一个或多个文件、目录",
+          "version": "1.0.0"
+        },
+        "servers": [
+          {
+            "url": "http://10.10.196.92:19900/knowledge/knowledgeService/"
+          }
+        ],
+        "paths": {
+          "/api/v1/knowledgeItems/move": {
+            "post": {
+              "operationId": "moveKnowledgeItems",
+              "summary": "移动文件或目录",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "required": [
+                        "knCode",
+                        "sourcePath"
+                      ],
+                      "properties": {
+                        "knCode": {
+                          "type": "string"
+                        },
+                        "sourcePath": {
+                          "type": "array",
+                          "minItems": 1,
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "targetDirectoryPath": {
+                          "type": "string",
+                          "description": "目标目录路径，与 targetFilePath 二选一"
+                        },
+                        "targetFilePath": {
+                          "type": "string",
+                          "description": "单文件目标路径，与 targetDirectoryPath 二选一"
+                        },
+                        "overwrite": {
+                          "type": "boolean",
+                          "default": false
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "批量移动结果",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "object",
+                        "properties": {
+                          "resultCode": {
+                            "type": "string"
+                          },
+                          "resultMsg": {
+                            "type": "string"
+                          },
+                          "resultObject": {
+                            "type": "object",
+                            "properties": {
+                              "data": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "sourcePath": {
+                                      "type": "string"
+                                    },
+                                    "targetPath": {
+                                      "type": "string",
+                                      "nullable": true
+                                    },
+                                    "success": {
+                                      "type": "boolean"
+                                    },
+                                    "error": {
+                                      "type": "string",
+                                      "nullable": true
+                                    }
+                                  }
+                                }
+                              },
+                              "summary": {
+                                "type": "object",
+                                "properties": {
+                                  "total": {
+                                    "type": "integer"
+                                  },
+                                  "succeeded": {
+                                    "type": "integer"
+                                  },
+                                  "failed": {
+                                    "type": "integer"
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "openapiSchema": {
+        "openapi": "3.0.1",
+        "info": {
+          "title": "查询文件引用关系",
+          "description": "查询指定文件的 Markdown 入站、出站引用关系",
+          "version": "1.0.0"
+        },
+        "servers": [
+          {
+            "url": "http://10.10.196.92:19900/knowledge/knowledgeService/"
+          }
+        ],
+        "paths": {
+          "/api/v1/knowledgeItems/references": {
+            "post": {
+              "operationId": "knowledgeItemReferences",
+              "summary": "查询文件引用关系",
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "required": [
+                        "knCode",
+                        "filePath"
+                      ],
+                      "properties": {
+                        "knCode": {
+                          "type": "string"
+                        },
+                        "filePath": {
+                          "type": "string"
+                        },
+                        "direction": {
+                          "type": "string",
+                          "default": "inbound",
+                          "enum": [
+                            "inbound",
+                            "outbound",
+                            "all"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "引用关系查询结果",
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "type": "object",
+                        "properties": {
+                          "resultCode": {
+                            "type": "string"
+                          },
+                          "resultMsg": {
+                            "type": "string"
+                          },
+                          "resultObject": {
+                            "type": "object",
+                            "properties": {
+                              "inbound": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "sourcePath": {
+                                      "type": "string"
+                                    },
+                                    "originalTarget": {
+                                      "type": "string"
+                                    },
+                                    "targetSuffix": {
+                                      "type": "string"
+                                    },
+                                    "targetPath": {
+                                      "type": "string"
+                                    },
+                                    "status": {
+                                      "type": "string",
+                                      "enum": [
+                                        "resolved",
+                                        "unresolved",
+                                        "broken"
+                                      ]
+                                    }
+                                  }
+                                }
+                              },
+                              "outbound": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "sourcePath": {
+                                      "type": "string"
+                                    },
+                                    "originalTarget": {
+                                      "type": "string"
+                                    },
+                                    "targetSuffix": {
+                                      "type": "string"
+                                    },
+                                    "targetPath": {
+                                      "type": "string"
+                                    },
+                                    "status": {
+                                      "type": "string",
+                                      "enum": [
+                                        "resolved",
+                                        "unresolved",
+                                        "broken"
+                                      ]
+                                    }
+                                  }
+                                }
+                              }
+                            }
                           }
                         }
                       }
@@ -521,7 +826,7 @@
                         },
                         "pathRule": {
                           "type": "string",
-                          "description": "匹配模式规则，支持通配符匹配多层级文件全路径/目录路径（以\"/\"开头，不包括知识库名称）"
+                          "description": "匹配模式规则，以\"/\"开头，不包括知识库名称；* 仅匹配单层路径段，不支持 **"
                         }
                       }
                     }
@@ -862,7 +1167,7 @@
           }
         ],
         "paths": {
-          "/api/v1/knowledge-items/search": {
+          "/api/v1/knowledgeItems/search": {
             "post": {
               "operationId": "knowledgeSearch",
               "summary": "知识检索",
@@ -895,6 +1200,17 @@
                           "type": "integer",
                           "minimum": 1,
                           "description": "最终返回条数，必须大于0"
+                        },
+                        "where": {
+                          "type": "object",
+                          "description": "Agent DSL 过滤 AST"
+                        },
+                        "metadataFieldList": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "description": "需要返回的元数据字段"
                         },
                         "fileTypeList": {
                           "type": "array",
@@ -1010,7 +1326,7 @@
         "paths": {
           "/api/v1/fileBuildStatus": {
             "post": {
-              "operationId": "buildStatusQuery",
+              "operationId": "fileBuildStatus",
               "summary": "构建状态查询",
               "description": "查询文档的构建状态，包括状态，当前环节的描述",
               "requestBody": {

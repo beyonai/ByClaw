@@ -672,8 +672,25 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       formData.append('processFrontMatter', String(processFrontMatter));
       formData.append('overwrite', String(Boolean(options.overwrite)));
 
-      await uploadKnowledgeFiles(formData);
-      message.success(intl.formatMessage({ id: 'fileBrowser.upload.knowledgeBuildSuccess' }));
+      const result = await uploadKnowledgeFiles(formData);
+      const succeeded = Number(result?.summary?.succeeded || 0);
+      const failed = Number(result?.summary?.failed || 0);
+      const postProcessErrorCount = result?.postProcessErrors?.length || 0;
+      if (failed > 0) {
+        const content = intl.formatMessage({ id: 'knowledgeDetail.uploadPartial' }, { succeeded, failed });
+        if (succeeded === 0) {
+          message.error(content);
+        } else {
+          message.warning(content);
+        }
+      } else if (postProcessErrorCount > 0) {
+        message.warning(
+          intl.formatMessage({ id: 'knowledgeDetail.uploadPostProcessWarning' }, { count: postProcessErrorCount })
+        );
+      } else {
+        message.success(intl.formatMessage({ id: 'fileBrowser.upload.knowledgeBuildSuccess' }));
+      }
+      if (succeeded === 0 && failed > 0) return;
       setUploadConfirmOpen(false);
       setPendingUploadFiles([]);
       setPendingUploadPath('');

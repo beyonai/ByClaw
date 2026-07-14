@@ -435,6 +435,8 @@ export default {
   'knowledgeDetail.uploadFile': 'Upload File',
   'knowledgeDetail.sameNameFileOverwriteTip': 'Same name files will be overwritten',
   'knowledgeDetail.uploadSuccess': 'Upload successful',
+  'knowledgeDetail.uploadPartial': 'Upload completed: {succeeded} succeeded, {failed} failed',
+  'knowledgeDetail.uploadPostProcessWarning': 'Files uploaded, but {count} reference post-processing task(s) failed',
   'knowledgeDetail.uploadConfirmTitle': 'Confirm Upload',
   'knowledgeDetail.uploadConfirmFiles': '{count} file(s) selected',
   'knowledgeDetail.uploadConfirmMoreFiles': 'and {count} more file(s)',

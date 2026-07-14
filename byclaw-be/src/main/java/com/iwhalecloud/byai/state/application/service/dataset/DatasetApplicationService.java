@@ -21,6 +21,7 @@ import com.iwhalecloud.byai.common.feign.response.pythonbuild.Data;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.DirOrFile;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.FileBuildStatus;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbGlob;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbDirectoryCreate;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbDirectoryDelete;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbDirectoryUpdate;
@@ -28,6 +29,7 @@ import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileDownload;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileRead;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileToMarkdownIndex;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeFileSearch;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeItemReferences;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeSearch;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeItemsMove;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeUpdate;
@@ -37,6 +39,7 @@ import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbFileReadResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeSearchItem;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileSearchItem;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileSearchResult;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeItemReferencesResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeSearchResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeItemsMoveResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.ProcessStatus;
@@ -53,6 +56,8 @@ import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationServ
 import com.iwhalecloud.byai.manager.dto.resource.DatasetBuild;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetDto;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeReadFileRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeGlobRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeItemReferencesRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeItemsMoveRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileSearchRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeSearchRequest;
@@ -499,7 +504,7 @@ public class DatasetApplicationService {
      */
     public UploadResult uploadFiles(MultipartFile[] files, Long resourceId, String directoryPath,
         String fileDescription) throws IOException {
-        return uploadFiles(files, resourceId, directoryPath, fileDescription, Boolean.FALSE);
+        return uploadFiles(files, resourceId, directoryPath, fileDescription, null);
     }
 
     public UploadResult uploadFiles(MultipartFile[] files, Long resourceId, String directoryPath,
@@ -550,7 +555,8 @@ public class DatasetApplicationService {
         uploadResult.setResourceCode(ssResource.getResourceCode());
         uploadResult.setResourceName(ssResource.getResourceName());
 
-        List<String> uploadFileNames = Arrays.stream(files).map(MultipartFile::getOriginalFilename).toList();
+        List<String> uploadFileNames = Arrays.stream(files).filter(file -> !isZipUpload(file))
+            .map(MultipartFile::getOriginalFilename).toList();
         Set<String> existingFilePaths = Boolean.TRUE.equals(overwrite)
             ? new HashSet<>(findExistingKnowledgeFilePaths(ssResource, directoryPath, uploadFileNames))
             : new HashSet<>();
@@ -561,28 +567,82 @@ public class DatasetApplicationService {
             KbFileImport kbFileImport = new KbFileImport();
             kbFileImport.setKnCode(ssResource.getResourceCode());
 
-            String filePath = buildKnowledgeFilePath(directoryPath, multipartFile.getOriginalFilename());
-            if (existingFilePaths.contains(filePath)) {
+            boolean zipUpload = isZipUpload(multipartFile);
+            String filePath = zipUpload ? normalizeKnowledgeDirectoryPath(directoryPath)
+                : buildKnowledgeFilePath(directoryPath, multipartFile.getOriginalFilename());
+            if (!zipUpload && existingFilePaths.contains(filePath)) {
                 // QA 暂不支持原子覆盖，BE 只能在用户确认 overwrite=true 后先删旧文件再导入新文件。
                 deleteKnowledgeFile(ssResource, filePath, "覆盖上传前删除知识库旧文件");
             }
             kbFileImport.setFilePath(filePath);
             kbFileImport
                 .setFileDescription(fileDescription != null ? fileDescription : multipartFile.getOriginalFilename());
-            // 是否解析 YAML front matter 由用户上传确认弹窗决定，后端只负责透传给 QA。
-            kbFileImport.setProcessFrontMatter(Boolean.TRUE.equals(processFrontMatter));
+            // 为空时不发送该表单字段，由 QA 按最新接口默认值 true 处理。
+            kbFileImport.setProcessFrontMatter(processFrontMatter);
             kbFileImport.setMultipartFile(multipartFile);
             PythonBuildResponse<KbImportResult> importRet = feignPythonBuildService.importKnowledgeItem(kbFileImport);
             logger.info("导入文件:{}", JSON.toJSONString(importRet));
             assertPythonBuildSuccess(importRet, "上传知识库文件");
 
-            UploadItem uploadItem = new UploadItem();
-            uploadItem.setFileName(multipartFile.getOriginalFilename());
-            uploadItem.setFilePath(kbFileImport.getFilePath());
-            uploadResult.getUploadItems().add(uploadItem);
+            appendImportResult(uploadResult, importRet.getResultObject(), multipartFile, kbFileImport.getFilePath());
         }
 
         return uploadResult;
+    }
+
+    private boolean isZipUpload(MultipartFile multipartFile) {
+        return multipartFile != null && StringUtils.endsWithIgnoreCase(multipartFile.getOriginalFilename(), ".zip");
+    }
+
+    private void appendImportResult(UploadResult uploadResult, KbImportResult importResult,
+        MultipartFile multipartFile, String fallbackPath) {
+        if (importResult != null && importResult.getPostProcessErrors() != null) {
+            uploadResult.getPostProcessErrors().addAll(importResult.getPostProcessErrors());
+        }
+        List<KbImportResult.Item> resultItems = importResult == null ? null : importResult.getData();
+        if (resultItems == null || resultItems.isEmpty()) {
+            UploadItem uploadItem = createUploadItem(fallbackPath, multipartFile.getOriginalFilename(), true, null);
+            uploadResult.getUploadItems().add(uploadItem);
+            incrementUploadSummary(uploadResult, true);
+            return;
+        }
+
+        for (KbImportResult.Item resultItem : resultItems) {
+            if (resultItem == null) {
+                continue;
+            }
+            String filePath = StringUtils.defaultIfBlank(resultItem.getFilePath(), fallbackPath);
+            boolean success = Boolean.TRUE.equals(resultItem.getSuccess());
+            UploadItem uploadItem = createUploadItem(filePath, getLastSplitName(filePath), success,
+                resultItem.getError());
+            if (success) {
+                uploadResult.getUploadItems().add(uploadItem);
+            }
+            else {
+                uploadResult.getFailedItems().add(uploadItem);
+            }
+            incrementUploadSummary(uploadResult, success);
+        }
+    }
+
+    private UploadItem createUploadItem(String filePath, String fileName, boolean success, String error) {
+        UploadItem uploadItem = new UploadItem();
+        uploadItem.setFileName(fileName);
+        uploadItem.setFilePath(filePath);
+        uploadItem.setSuccess(success);
+        uploadItem.setError(error);
+        return uploadItem;
+    }
+
+    private void incrementUploadSummary(UploadResult uploadResult, boolean success) {
+        UploadResult.Summary summary = uploadResult.getSummary();
+        summary.setTotal(summary.getTotal() + 1);
+        if (success) {
+            summary.setSucceeded(summary.getSucceeded() + 1);
+        }
+        else {
+            summary.setFailed(summary.getFailed() + 1);
+        }
     }
 
     /**
@@ -640,9 +700,9 @@ public class DatasetApplicationService {
         // 提取参数
         KbFileDownload kbFileDownload = new KbFileDownload();
         kbFileDownload.setKnCode(ssResource.getResourceCode());
-        kbFileDownload.setFilePath(directoryPath);
+        kbFileDownload.setFilePath(normalizeKnowledgeFilePath(directoryPath));
 
-        String fileName = this.getLastSplitName(directoryPath);
+        String fileName = this.getLastSplitName(kbFileDownload.getFilePath());
         // 下载文件
         try (InputStream inputStream = feignPythonBuildService.fileDownload(kbFileDownload)) {
             // 设置ContentType，响应内容为二进制数据流，编码为utf-8，此处设定的编码是文件内容的编码
@@ -652,8 +712,8 @@ public class DatasetApplicationService {
             response.setHeader("Content-Disposition", contentDisposition);
             IOUtils.copy(inputStream, response.getOutputStream());
         }
-        catch (Exception e) {
-            logger.error(e.getMessage(), e);
+        catch (IOException e) {
+            throw new BaseException("下载知识库文件失败：" + e.getMessage(), e);
         }
     }
 
@@ -675,8 +735,8 @@ public class DatasetApplicationService {
             ZipOutputStream zipOutputStream = new ZipOutputStream(response.getOutputStream(), StandardCharsets.UTF_8)) {
             addKnowledgeDirectoryToZip(ssResource.getResourceCode(), normalizedDirectoryPath, "", zipOutputStream);
         }
-        catch (Exception e) {
-            logger.error("下载知识库目录失败 directoryPath={}", directoryPath, e);
+        catch (IOException e) {
+            throw new BaseException("下载知识库目录失败：" + e.getMessage(), e);
         }
     }
 
@@ -840,6 +900,40 @@ public class DatasetApplicationService {
     }
 
     /**
+     * 查询 Markdown 文件引用关系。门户使用 resourceId，转发 QA 前转换为 knCode。
+     */
+    public KnowledgeItemReferencesResult knowledgeItemReferences(KnowledgeItemReferencesRequest request) {
+        SsResource ssResource = loadDatasetResource(request.getResourceId());
+        validateDatasetReadablePermission(ssResource);
+
+        KbKnowledgeItemReferences qaRequest = new KbKnowledgeItemReferences();
+        qaRequest.setKnCode(ssResource.getResourceCode());
+        qaRequest.setFilePath(normalizeKnowledgeFilePath(request.getFilePath()));
+        qaRequest.setDirection(StringUtils.defaultIfBlank(request.getDirection(), "inbound"));
+
+        PythonBuildResponse<KnowledgeItemReferencesResult> response = feignPythonBuildService
+            .knowledgeItemReferences(qaRequest);
+        assertPythonBuildSuccess(response, "查询知识库文件引用关系");
+        return response.getResultObject() == null ? new KnowledgeItemReferencesResult() : response.getResultObject();
+    }
+
+    /**
+     * 按 QA glob 单层通配规则匹配知识库文件或目录。
+     */
+    public List<DirAndFileVo> globKnowledgeItems(KnowledgeGlobRequest request) {
+        SsResource ssResource = loadDatasetResource(request.getResourceId());
+        validateDatasetReadablePermission(ssResource);
+
+        KbGlob qaRequest = new KbGlob();
+        qaRequest.setKnCode(ssResource.getResourceCode());
+        qaRequest.setPathRule(normalizeKnowledgeGlobRule(request.getPathRule()));
+
+        PythonBuildResponse<Data> response = feignPythonBuildService.glob(qaRequest);
+        assertPythonBuildSuccess(response, "按路径匹配知识库文件或目录");
+        return mapKnowledgeDirItems(response.getResultObject());
+    }
+
+    /**
      * 查询文件等级
      *
      * @param dirAndFileQo 查询入参
@@ -915,13 +1009,18 @@ public class DatasetApplicationService {
         kbListDir.setDirectoryPath(normalizeKnowledgeDirectoryPath(directoryPath));
         PythonBuildResponse<Data> response = feignPythonBuildService.listDir(kbListDir);
         assertPythonBuildSuccess(response, "查询知识库目录");
-        Data resultObject = response.getResultObject();
+        return mapKnowledgeDirItems(response.getResultObject());
+    }
 
+    private List<DirAndFileVo> mapKnowledgeDirItems(Data resultObject) {
         List<DirAndFileVo> resultList = new ArrayList<>();
         if (resultObject == null || resultObject.getData() == null) {
             return resultList;
         }
         for (DirOrFile dirOrFile : resultObject.getData()) {
+            if (dirOrFile == null) {
+                continue;
+            }
             DirAndFileVo dirAndFileVo = new DirAndFileVo();
             String type = dirOrFile.getType();
             String name = dirOrFile.getName();
@@ -931,6 +1030,7 @@ public class DatasetApplicationService {
             }
             dirAndFileVo.setName(this.getLastSplitName(name));
             dirAndFileVo.setDirectoryPath(name);
+            dirAndFileVo.setSize(dirOrFile.getSize());
             resultList.add(dirAndFileVo);
         }
 
@@ -1318,6 +1418,8 @@ public class DatasetApplicationService {
         kbKnowledgeSearch.setQuery(request.getQuery());
         kbKnowledgeSearch.setKnCodeList(knCodeList);
         kbKnowledgeSearch.setTopK(request.getTopK());
+        kbKnowledgeSearch.setWhere(request.getWhere());
+        kbKnowledgeSearch.setMetadataFieldList(request.getMetadataFieldList());
         kbKnowledgeSearch.setFileTypeList(request.getFileTypeList());
         kbKnowledgeSearch.setSearchMode(request.getSearchMode());
 
@@ -1417,7 +1519,20 @@ public class DatasetApplicationService {
         if (!normalizedPath.startsWith("/")) {
             normalizedPath = "/" + normalizedPath;
         }
+        for (String pathPart : normalizedPath.split("/")) {
+            if ("..".equals(pathPart)) {
+                throw new BaseException("知识库文件路径不合法");
+            }
+        }
         return normalizedPath;
+    }
+
+    private String normalizeKnowledgeGlobRule(String pathRule) {
+        String normalizedRule = normalizeKnowledgeFilePath(pathRule);
+        if (normalizedRule.contains("**")) {
+            throw new BaseException("知识库路径匹配暂不支持 ** 多层通配符");
+        }
+        return normalizedRule;
     }
 
     /**

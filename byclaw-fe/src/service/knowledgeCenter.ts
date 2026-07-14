@@ -82,6 +82,7 @@ export interface QueryDirAndFileByLevelItem {
 
   /** 后端若返回则与构建、下载等接口的路径语义一致 */
   directoryPath?: string;
+  size?: number;
 }
 
 /** datasetController/build 请求体 */
@@ -160,6 +161,36 @@ export const moveKnowledgeItems = (data: KnowledgeItemsMovePayload) =>
     },
   });
 
+export interface KnowledgeItemReferencesPayload {
+  resourceId: number;
+  filePath: string;
+  direction?: 'inbound' | 'outbound' | 'all';
+}
+
+export interface KnowledgeItemReference {
+  sourcePath: string;
+  originalTarget: string;
+  targetSuffix: string;
+  targetPath: string;
+  status: 'resolved' | 'unresolved' | 'broken';
+}
+
+export interface KnowledgeItemReferencesResult {
+  inbound: KnowledgeItemReference[];
+  outbound: KnowledgeItemReference[];
+}
+
+export const queryKnowledgeItemReferences = (data: KnowledgeItemReferencesPayload) =>
+  POST<KnowledgeItemReferencesResult>('/byaiService/datasetController/knowledgeItems/references', data);
+
+export interface KnowledgeGlobPayload {
+  resourceId: number;
+  pathRule: string;
+}
+
+export const globKnowledgeItems = (data: KnowledgeGlobPayload) =>
+  POST<QueryDirAndFileByLevelItem[]>('/byaiService/datasetController/glob', data);
+
 // 获取目录树
 export const catalogTree = (data: any) => POST<any>('/byaiService/datasetController/catalogTree', data);
 
@@ -188,9 +219,30 @@ export interface FileBuildStatusParams {
 export const getFileBuildStatus = (data: FileBuildStatusParams) =>
   GET<any>('/byaiService/datasetController/fileBuildStatus', data);
 
+export interface KnowledgeUploadItem {
+  fileName?: string;
+  filePath?: string;
+  success?: boolean;
+  error?: string;
+}
+
+export interface KnowledgeUploadResult {
+  resourceId?: string | number;
+  resourceCode?: string;
+  resourceName?: string;
+  uploadItems?: KnowledgeUploadItem[];
+  failedItems?: KnowledgeUploadItem[];
+  summary?: {
+    total?: number;
+    succeeded?: number;
+    failed?: number;
+  };
+  postProcessErrors?: string[];
+}
+
 // 上传文件
 export const uploadFiles = (data: FormData) =>
-  POST<any>('/byaiService/datasetController/uploadFiles', data, {
+  POST<KnowledgeUploadResult>('/byaiService/datasetController/uploadFiles', data, {
     timeout: 8 * 60 * 1000,
     headers: {
       'Content-Type': 'multipart/form-data; charset=utf-8',

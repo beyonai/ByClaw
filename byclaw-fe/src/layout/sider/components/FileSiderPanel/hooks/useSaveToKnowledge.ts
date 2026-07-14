@@ -146,9 +146,20 @@ export default function useSaveToKnowledge({ resourceId, clearClickTimer }: UseS
       formData.append('files', file);
       formData.append('processFrontMatter', String(Boolean(options.processFrontMatter)));
       formData.append('overwrite', String(Boolean(options.overwrite)));
-      await uploadKnowledgeFiles(formData);
+      const result = await uploadKnowledgeFiles(formData);
+      if (Number(result?.summary?.failed || 0) > 0) {
+        throw new Error(result?.failedItems?.[0]?.error || intl.formatMessage({ id: 'fileBrowser.upload.failed' }));
+      }
+      if (result?.postProcessErrors?.length) {
+        message.warning(
+          intl.formatMessage(
+            { id: 'knowledgeDetail.uploadPostProcessWarning' },
+            { count: result.postProcessErrors.length }
+          )
+        );
+      }
     },
-    [resourceId]
+    [intl, resourceId]
   );
 
   const ensureKnowledgeFolder = useCallback(

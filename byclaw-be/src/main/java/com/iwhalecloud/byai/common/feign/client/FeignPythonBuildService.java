@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.common.feign.client;
 
 import java.io.InputStream;
+import java.io.SequenceInputStream;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
@@ -23,6 +24,7 @@ import com.iwhaleai.byai.framework.util.http.RetryConfig;
 import com.iwhalecloud.byai.common.constants.resource.SystemCode;
 import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.FileBuildStatus;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbGlob;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbListDir;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.Data;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.DirOrFile;
@@ -37,6 +39,7 @@ import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileImport;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileRead;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileToMarkdownIndex;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeFileSearch;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeItemReferences;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeSearch;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeItemsMove;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeCreate;
@@ -48,6 +51,7 @@ import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbFileReadResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbImportResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeBaseInfo;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileSearchResult;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeItemReferencesResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeSearchResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeItemsMoveResult;
 import com.iwhalecloud.byai.common.jwt.JwtService;
@@ -82,6 +86,8 @@ public class FeignPythonBuildService {
 
     private static final RetryConfig RETRY_CONFIG = RetryConfig.builder().maxAttempts(3)
         .retryOnStatusCodes(Set.of(502, 503, 504)).build();
+
+    private static final int MAX_DOWNLOAD_ERROR_BODY_BYTES = 64 * 1024;
 
     @Value("${spring.application.qADomainName:byclaw-qa-manager}")
     private String serviceName;
@@ -208,6 +214,14 @@ public class FeignPythonBuildService {
     }
 
     /**
+     * 按 QA glob 规则匹配知识库文件或目录。
+     */
+    public PythonBuildResponse<Data> glob(KbGlob request) {
+        return post(KnowledgeServiceOperation.GLOB, request, new TypeReference<PythonBuildResponse<Data>>() {
+        });
+    }
+
+    /**
      * 导入文件到知识库（multipart/form-data）。
      *
      * @param kbFileImport 导入参数
@@ -226,9 +240,12 @@ public class FeignPythonBuildService {
             Map<String, String> formFields = new HashMap<>();
             formFields.put("knCode", kbFileImport.getKnCode());
             formFields.put("filePath", kbFileImport.getFilePath());
-            formFields.put("fileDescription", kbFileImport.getFileDescription());
-            formFields.put("processFrontMatter", String.valueOf(Boolean.TRUE.equals(
-                kbFileImport.getProcessFrontMatter())));
+            if (kbFileImport.getFileDescription() != null) {
+                formFields.put("fileDescription", kbFileImport.getFileDescription());
+            }
+            if (kbFileImport.getProcessFrontMatter() != null) {
+                formFields.put("processFrontMatter", String.valueOf(kbFileImport.getProcessFrontMatter()));
+            }
 
             String requestPath = resolvePath(kbFileImport, KnowledgeServiceOperation.UPLOAD_FILE);
             KnowledgeServiceEndpoint endpoint = resolveRoute(kbFileImport);
@@ -242,6 +259,9 @@ public class FeignPythonBuildService {
 
             return this.parseResponse(httpResponse, new TypeReference<PythonBuildResponse<KbImportResult>>() {
             }, requestPath);
+        }
+        catch (BaseException e) {
+            throw e;
         }
         catch (Exception e) {
             logger.error(e.getMessage(), e);
@@ -282,6 +302,16 @@ public class FeignPythonBuildService {
     public PythonBuildResponse<KnowledgeItemsMoveResult> moveKnowledgeItems(KbKnowledgeItemsMove request) {
         return post(KnowledgeServiceOperation.MOVE_KNOWLEDGE_ITEMS, request,
             new TypeReference<PythonBuildResponse<KnowledgeItemsMoveResult>>() {
+            });
+    }
+
+    /**
+     * 查询 Markdown 文件的入站、出站引用关系。
+     */
+    public PythonBuildResponse<KnowledgeItemReferencesResult> knowledgeItemReferences(
+        KbKnowledgeItemReferences request) {
+        return post(KnowledgeServiceOperation.KNOWLEDGE_ITEM_REFERENCES, request,
+            new TypeReference<PythonBuildResponse<KnowledgeItemReferencesResult>>() {
             });
     }
 
@@ -357,13 +387,14 @@ public class FeignPythonBuildService {
             String requestPath = resolvePath(kbFileDownload, KnowledgeServiceOperation.DOWNLOAD_FILE);
             KnowledgeServiceEndpoint endpoint = resolveRoute(kbFileDownload);
             if (endpoint.isDirectUrl()) {
-                return directDownload(endpoint.getBaseUrl(), requestPath, kbFileDownload);
+                return validateDownloadResponse(directDownload(endpoint.getBaseUrl(), requestPath, kbFileDownload),
+                    requestPath);
             }
 
             CompletableFuture<InputStream> completableFuture = discoveryHttpClient.download("POST",
                 endpoint.getServiceName(), requestPath, this.buildHeaders(), null, kbFileDownload, null);
             // 提取文件流
-            return completableFuture.get();
+            return validateDownloadResponse(completableFuture.get(), requestPath);
         }
         catch (BaseException e) {
             throw e;
@@ -371,6 +402,53 @@ public class FeignPythonBuildService {
         catch (Exception e) {
             logger.error(e.getMessage(), e);
             throw new BaseException("调用 Python 构建服务下载接口失败", e);
+        }
+    }
+
+    /**
+     * QA 下载失败时可能返回统一 JSON 信封。小响应先完整检查，避免将错误 JSON 当作文件流输出；
+     * 大文件只缓存固定前缀后继续流式转发。
+     */
+    private InputStream validateDownloadResponse(InputStream inputStream, String requestPath) {
+        if (inputStream == null) {
+            throw new BaseException("调用 Python 构建服务下载接口失败，响应体为空: " + requestPath);
+        }
+        try {
+            byte[] prefix = inputStream.readNBytes(MAX_DOWNLOAD_ERROR_BODY_BYTES + 1);
+            if (prefix.length <= MAX_DOWNLOAD_ERROR_BODY_BYTES) {
+                String body = new String(prefix, StandardCharsets.UTF_8).trim();
+                if (body.startsWith("{") && body.endsWith("}")) {
+                    JSONObject responseJson = null;
+                    try {
+                        responseJson = JSON.parseObject(body);
+                    }
+                    catch (RuntimeException parseException) {
+                        logger.debug("知识库下载内容不是统一 JSON 响应: {}", requestPath, parseException);
+                    }
+                    String resultCode = responseJson == null ? null : responseJson.getString("resultCode");
+                    if (resultCode != null && !PythonBuildResponse.RESPONSE_SUCCESS.equals(resultCode)) {
+                        inputStream.close();
+                        String resultMsg = responseJson.getString("resultMsg");
+                        throw new BaseException(StringUtil.isEmpty(resultMsg)
+                            ? "调用 Python 构建服务下载接口失败: " + requestPath : resultMsg);
+                    }
+                }
+                inputStream.close();
+                return new ByteArrayInputStream(prefix);
+            }
+            return new SequenceInputStream(new ByteArrayInputStream(prefix), inputStream);
+        }
+        catch (BaseException e) {
+            throw e;
+        }
+        catch (Exception e) {
+            try {
+                inputStream.close();
+            }
+            catch (IOException closeException) {
+                logger.debug("关闭知识库下载流失败: {}", requestPath, closeException);
+            }
+            throw new BaseException("校验 Python 构建服务下载响应失败: " + requestPath, e);
         }
     }
 
@@ -609,7 +687,11 @@ public class FeignPythonBuildService {
         buildHeaders().forEach(builder::addHeader);
         try (Response response = OkHttpUtil.getHttpClient().newCall(builder.build()).execute()) {
             if (!response.isSuccessful()) {
-                throw new BaseException("调用第三方知识库下载接口失败: " + path + ", status=" + response.code());
+                ResponseBody errorBody = response.body();
+                String errorText = errorBody == null ? null : errorBody.string();
+                String resultMsg = extractQaResultMessage(errorText);
+                throw new BaseException(StringUtil.isEmpty(resultMsg)
+                    ? "调用第三方知识库下载接口失败: " + path + ", status=" + response.code() : resultMsg);
             }
             ResponseBody body = response.body();
             if (body == null) {
@@ -619,6 +701,19 @@ public class FeignPythonBuildService {
         }
         catch (IOException e) {
             throw new BaseException("调用第三方知识库下载接口失败", e);
+        }
+    }
+
+    private String extractQaResultMessage(String responseBody) {
+        if (StringUtil.isEmpty(responseBody)) {
+            return null;
+        }
+        try {
+            JSONObject responseJson = JSON.parseObject(responseBody);
+            return responseJson == null ? null : responseJson.getString("resultMsg");
+        }
+        catch (RuntimeException e) {
+            return null;
         }
     }
 

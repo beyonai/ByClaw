@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.common.feign.request.pythonbuild;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import lombok.Getter;
 import lombok.Setter;
@@ -30,6 +31,16 @@ public class KbKnowledgeSearch {
      * 最终返回条数。
      */
     private Integer topK;
+
+    /**
+     * Agent DSL 过滤 AST。
+     */
+    private Map<String, Object> where;
+
+    /**
+     * 需要随检索结果返回的元数据字段。
+     */
+    private List<String> metadataFieldList = new ArrayList<>();
 
     /**
      * 文件类型过滤。

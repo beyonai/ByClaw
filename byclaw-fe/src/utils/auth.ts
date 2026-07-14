@@ -101,11 +101,9 @@ const normalizeAdminVipParamValue = (value: any): string[] => {
     try {
       // paramValue 可能是 JSON 数组，也可能是普通逗号字符串；只在看起来像 JSON 时解析。
       return normalizeAdminVipParamValue(JSON.parse(text));
-    } catch {
-      return text
-        .split(',')
-        .map((item) => item.trim())
-        .filter(Boolean);
+    } catch (error) {
+      console.error('解析 AdminVip 配置失败:', error instanceof Error ? error.message : error ?? 'unknown');
+      return [];
     }
   }
 
