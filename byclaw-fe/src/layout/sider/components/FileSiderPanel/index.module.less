@@ -276,7 +276,15 @@
   line-height: 22px;
 
   :global {
+    .@{antPrefix}-tree-treenode {
+      width: 100%;
+    }
+
     .@{antPrefix}-tree-title {
+      display: block;
+      flex: 1;
+      min-width: 0;
+      width: 100%;
       color: inherit;
       font-size: inherit;
       font-weight: inherit;
@@ -294,6 +302,8 @@
     .@{antPrefix}-tree-node-content-wrapper {
       min-width: 0;
       flex: 1;
+      // 文件树操作按钮由本组件固定在行尾，右侧间距交给标题内容自身预留。
+      padding-right: 0;
       transition: background 0.18s ease, box-shadow 0.18s ease, color 0.18s ease;
     }
   }
@@ -333,11 +343,27 @@
 }
 
 .treeTitleContent {
+  position: relative;
   display: inline-flex;
   align-items: center;
+  gap: 4px;
   min-width: 0;
   width: 100%;
   max-width: 100%;
+  box-sizing: border-box;
+  padding-right: 24px;
+
+  &:hover {
+    .treeActionTrigger {
+      opacity: 1;
+    }
+  }
+}
+
+.treeTitleContentActionVisible {
+  .treeActionTrigger {
+    opacity: 1;
+  }
 }
 
 .treeTitleContentExpanded {
@@ -352,7 +378,7 @@
 }
 
 .treeTitleContentCurrent {
-  padding: 0 8px;
+  padding: 0 28px 0 8px;
   border-radius: 10px;
   background: #f5f6f8;
   box-shadow: inset 0 0 0 1px rgba(31, 37, 51, 0.04);
@@ -370,8 +396,11 @@
 .treeTitleName {
   display: inline-flex;
   flex-direction: column;
+  // 让 Tooltip 触发节点占满文件名区域，鼠标经过文件名文本和省略号区域都能显示完整名称。
+  flex: 1 1 auto;
   min-width: 0;
   max-width: 100%;
+  overflow: hidden;
 }
 
 .previewableTreeTitle {
@@ -379,8 +408,10 @@
 }
 
 .treeTitleText {
-  display: inline-block;
-  max-width: 100%;
+  display: block;
+  position: relative;
+  z-index: 1;
+  width: 100%;
   color: #4a5058;
   font-size: 14px;
   font-weight: 400;
@@ -549,12 +580,26 @@
 }
 
 .treeActionTrigger {
+  // 文件树操作按钮固定在当前行最右侧，避免跟随文件名长度移动。
+  position: absolute;
+  top: 50%;
+  right: 2px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 18px;
   height: 18px;
+  transform: translateY(-50%);
+  opacity: 0;
+  z-index: 2;
+  transition: opacity 0.12s ease, background 0.12s ease, color 0.12s ease;
   cursor: pointer;
+
+  &:hover,
+  &:global(.ant-dropdown-open),
+  &:global(.@{antPrefix}-dropdown-open) {
+    opacity: 1;
+  }
 }
 
 .fileItem {
