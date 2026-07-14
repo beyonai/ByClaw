@@ -593,6 +593,18 @@ function sanitizeSearchItem(item) {
   });
 }
 
+function sanitizeFileSearchItem(item) {
+  if (!item || typeof item !== "object") {
+    return item;
+  }
+  return compactObject({
+    resourceId: toNumber(item.knCode),
+    filePath: item.filePath,
+    score: item.score,
+    metadata: item.metadata,
+  });
+}
+
 function helpManual() {
   return {
     ok: true,
@@ -671,6 +683,12 @@ function helpManual() {
         required: ["--resource-id", "--query"],
         optional: ["可重复传 --resource-id", "--top-k"],
         example: "search --resource-id 10037121 --query 员工请假流程是什么 --top-k 5",
+      },
+      "search-file": {
+        description: "检索知识库相关文件",
+        required: ["--resource-id", "--query"],
+        optional: ["可重复传 --resource-id", "--top-k"],
+        example: "search-file --resource-id 10037121 --query 故障 --top-k 10",
       },
       "remove-file": {
         description: "删除知识库文件",
@@ -996,6 +1014,22 @@ async function searchCommand(args) {
   return { ok: true, action: "search", resourceIds, query, topK, items };
 }
 
+async function searchFileCommand(args) {
+  const resourceIds = resourceIdsFromArgs(args);
+  const query = requireStringArg(args, "query");
+  const topK = optionalNumberArg(args, "top-k") || 5;
+  const payload = {
+    resourceIdList: resourceIds,
+    query,
+    topK,
+    searchMode: "mixedRecall",
+  };
+  const url = await endpoint("/datasetController/knowledgeItems/searchFile");
+  const raw = await requestJson("POST", url, payload);
+  const items = asArray(raw?.data).map(sanitizeFileSearchItem);
+  return { ok: true, action: "search-file", resourceIds, query, topK, items };
+}
+
 async function removeFileCommand(args) {
   const payload = filePayload(args);
   const url = await endpoint("/datasetController/removeFile");
@@ -1035,6 +1069,8 @@ async function main() {
     result = await readFileCommand(args);
   } else if (command === "search") {
     result = await searchCommand(args);
+  } else if (command === "search-file") {
+    result = await searchFileCommand(args);
   } else if (command === "remove-file") {
     result = await removeFileCommand(args);
   } else {
