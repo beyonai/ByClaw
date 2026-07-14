@@ -29,6 +29,7 @@ import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileRead;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileToMarkdownIndex;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeFileSearch;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeSearch;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeItemsMove;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeUpdate;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileDelete;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.FileToMarkdownResult;
@@ -37,6 +38,7 @@ import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeSearchIte
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileSearchItem;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileSearchResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeSearchResult;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeItemsMoveResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.ProcessStatus;
 import com.iwhalecloud.byai.common.util.JsonUtil;
 import com.iwhalecloud.byai.common.util.StringUtil;
@@ -51,6 +53,7 @@ import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationServ
 import com.iwhalecloud.byai.manager.dto.resource.DatasetBuild;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetDto;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeReadFileRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeItemsMoveRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileSearchRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeSearchRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeUploadConflictCheckRequest;
@@ -805,6 +808,35 @@ public class DatasetApplicationService {
         logger.info("删除目录:{}", JsonUtil.toJSONString(ret));
         assertPythonBuildSuccess(ret, "删除知识库目录");
 
+    }
+
+    /**
+     * 批量移动知识库文件或目录。门户使用 resourceId，转发 QA 前转换为 knCode。
+     */
+    public KnowledgeItemsMoveResult moveKnowledgeItems(KnowledgeItemsMoveRequest request) {
+        SsResource ssResource = loadDatasetResource(request.getResourceId());
+        validateDatasetManagePermission(ssResource);
+
+        boolean hasTargetDirectory = StringUtils.isNotBlank(request.getTargetDirectoryPath());
+        boolean hasTargetFile = StringUtils.isNotBlank(request.getTargetFilePath());
+        if (hasTargetDirectory == hasTargetFile) {
+            throw new BaseException("目标目录路径和目标文件路径必须且只能填写一个");
+        }
+        if (Boolean.TRUE.equals(request.getOverwrite())) {
+            throw new BaseException("当前版本暂不支持覆盖已存在的目标路径");
+        }
+
+        KbKnowledgeItemsMove qaRequest = new KbKnowledgeItemsMove();
+        qaRequest.setKnCode(ssResource.getResourceCode());
+        qaRequest.setSourcePath(new ArrayList<>(request.getSourcePath()));
+        qaRequest.setTargetDirectoryPath(request.getTargetDirectoryPath());
+        qaRequest.setTargetFilePath(request.getTargetFilePath());
+        qaRequest.setOverwrite(Boolean.FALSE);
+
+        PythonBuildResponse<KnowledgeItemsMoveResult> response = feignPythonBuildService.moveKnowledgeItems(qaRequest);
+        logger.info("移动知识库文件或目录:{}", JsonUtil.toJSONString(response));
+        assertPythonBuildSuccess(response, "移动知识库文件或目录");
+        return response.getResultObject() == null ? new KnowledgeItemsMoveResult() : response.getResultObject();
     }
 
     /**

@@ -26,6 +26,7 @@ public enum KnowledgeServiceOperation {
     UPLOAD_FILE("uploadFile", "/api/v1/knowledge-items/import"),
     DELETE_FILE("deleteFile", "/api/v1/knowledge-items/delete"),
     READ_FILE("readFile", "/api/v1/readFile"),
+    MOVE_KNOWLEDGE_ITEMS("moveKnowledgeItems", "/api/v1/knowledgeItems/move"),
     KNOWLEDGE_SEARCH("knowledgeSearch", "/api/v1/knowledgeItems/search"),
     KNOWLEDGE_FILE_SEARCH("knowledgeFileSearch", "/api/v1/knowledgeItems/searchFile"),
     FILE_TO_MARKDOWN("fileToMarkdown", "/api/v1/fileToMarkdown"),

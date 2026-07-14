@@ -127,6 +127,39 @@ export interface DeleteFolderPayload {
 export const deleteFolder = (data: DeleteFolderPayload) =>
   POST<any>('/byaiService/datasetController/deleteFolder', data, { languageConf: false });
 
+export interface KnowledgeItemsMovePayload {
+  resourceId: number;
+  sourcePath: string[];
+  targetDirectoryPath?: string;
+  targetFilePath?: string;
+  overwrite?: boolean;
+}
+
+export interface KnowledgeItemsMoveItem {
+  sourcePath: string;
+  targetPath: string | null;
+  success: boolean;
+  error: string | null;
+}
+
+export interface KnowledgeItemsMoveResult {
+  data: KnowledgeItemsMoveItem[];
+  summary: {
+    total: number;
+    succeeded: number;
+    failed: number;
+  };
+}
+
+// 批量移动知识库文件或目录；targetDirectoryPath 与 targetFilePath 二选一
+export const moveKnowledgeItems = (data: KnowledgeItemsMovePayload) =>
+  POST<KnowledgeItemsMoveResult>('/byaiService/datasetController/moveKnowledgeItems', data, {
+    languageConf: false,
+    responseCfg: {
+      hideErrorTips: true,
+    },
+  });
+
 // 获取目录树
 export const catalogTree = (data: any) => POST<any>('/byaiService/datasetController/catalogTree', data);
 

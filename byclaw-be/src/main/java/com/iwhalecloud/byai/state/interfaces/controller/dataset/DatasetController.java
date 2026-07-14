@@ -17,6 +17,7 @@ import com.iwhalecloud.byai.manager.dto.resource.DatasetDto;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetIdDto;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeReadFileRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileSearchRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeItemsMoveRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeSearchRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeUploadConflictCheckRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeUploadConflictCheckResponse;
@@ -35,6 +36,7 @@ import com.iwhalecloud.byai.state.domain.resource.vo.KnowledgeCapabilityVo;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbFileReadResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileSearchResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeSearchResult;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeItemsMoveResult;
 import com.iwhalecloud.byai.common.feign.request.knowledge.Folder;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
@@ -183,6 +185,16 @@ public class DatasetController {
     public ResponseUtil<SsResource> deleteFolder(@RequestBody FolderDelete folderDelete) {
         datasetApplicationService.deleteFolder(folderDelete);
         return ResponseUtil.success(I18nUtil.get("dataset.folder.delete.success"));
+    }
+
+    /**
+     * 批量移动知识库文件或目录。
+     */
+    @PostMapping("/moveKnowledgeItems")
+    public ResponseUtil<KnowledgeItemsMoveResult> moveKnowledgeItems(
+        @Valid @RequestBody KnowledgeItemsMoveRequest request) {
+        return ResponseUtil.successResponse(I18nUtil.get("dataset.items.move.success"),
+            datasetApplicationService.moveKnowledgeItems(request));
     }
 
     /**

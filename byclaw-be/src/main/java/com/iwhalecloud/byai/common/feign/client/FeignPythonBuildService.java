@@ -38,6 +38,7 @@ import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileRead;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileToMarkdownIndex;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeFileSearch;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeSearch;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeItemsMove;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeCreate;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeDelete;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeUpdate;
@@ -48,6 +49,7 @@ import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbImportResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeBaseInfo;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileSearchResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeSearchResult;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeItemsMoveResult;
 import com.iwhalecloud.byai.common.jwt.JwtService;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
@@ -268,6 +270,18 @@ public class FeignPythonBuildService {
     public PythonBuildResponse<KbFileReadResult> readFile(KbFileRead kbFileRead) {
         return post(KnowledgeServiceOperation.READ_FILE, kbFileRead,
             new TypeReference<PythonBuildResponse<KbFileReadResult>>() {
+            });
+    }
+
+    /**
+     * 批量移动知识库文件或目录。
+     *
+     * @param request 移动条件
+     * @return 各源路径的移动结果与汇总
+     */
+    public PythonBuildResponse<KnowledgeItemsMoveResult> moveKnowledgeItems(KbKnowledgeItemsMove request) {
+        return post(KnowledgeServiceOperation.MOVE_KNOWLEDGE_ITEMS, request,
+            new TypeReference<PythonBuildResponse<KnowledgeItemsMoveResult>>() {
             });
     }
 
