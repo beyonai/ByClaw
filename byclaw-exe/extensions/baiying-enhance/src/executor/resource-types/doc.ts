@@ -220,13 +220,13 @@ async function executeDatasetDocViaCallAgent(input: {
   signal?: AbortSignal;
   logger?: BaiyingEnhanceLogger;
 }): Promise<ExecutorResponse> {
+  const resourceContext = isRecord(input.parameters.resource_context)
+    ? (input.parameters.resource_context as ResourceContext)
+    : {};
   const sessionId = resolveDocSessionId(input.parameters, input.datasetId);
   const channelTraceId = resolveDocChannelTraceId(input.parameters);
   let langfuseParentObservationId = resolvePayloadLangfuseParentObservationId(input.parameters);
   if (!langfuseParentObservationId) {
-    const resourceContext = isRecord(input.parameters.resource_context)
-      ? (input.parameters.resource_context as Dict)
-      : {};
     langfuseParentObservationId = await resolveLangfuseParentObservationIdWithRetry(
       {
         ...input.parameters,
@@ -299,6 +299,8 @@ async function executeDatasetDocViaCallAgent(input: {
     signal: input.signal,
     logger: input.logger,
     parentMessageId: input.parameters.tool_call_id as string,
+    toolCallId: input.parameters.tool_call_id as string,
+    resourceContext,
   });
 }
 

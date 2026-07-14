@@ -34,6 +34,7 @@ export function buildExecutorResourceContext(params: {
   language?: string;
   beyondToken?: string;
   parentSessionKey?: string;
+  accountId?: string;
 }): Record<string, unknown> {
   const rootAgent: Record<string, unknown> = {
     resourceId: params.agent.sourceKey,
@@ -86,6 +87,7 @@ export function buildExecutorResourceContext(params: {
     parent_session_key: params.parentSessionKey,
     language: params.language,
     beyondToken: params.beyondToken,
+    accountId: params.accountId,
   };
   if (channelSid || channelTraceId) {
     if (channelSid) {

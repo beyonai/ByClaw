@@ -9,7 +9,15 @@ import {
   type CallAgentPublishInput,
   type CallAgentPublishResult,
 } from "@byclaw/by-framework";
-import type { Capability, Dict, ExecutorFailure, ExecutorResponse } from "./executor-types.js";
+import type { Redis } from "ioredis";
+import { isSubagentSessionKey } from "openclaw/plugin-sdk/routing";
+import type {
+  Capability,
+  Dict,
+  ExecutorFailure,
+  ExecutorResponse,
+  ResourceContext,
+} from "./executor-types.js";
 import { asString } from "./executor-types.js";
 import { makeError } from "./errors.js";
 import {
@@ -21,9 +29,17 @@ import {
 import { logBaiyingRequest, type BaiyingEnhanceLogger } from "./debug-channel.js";
 import {
   applyByFrameworkRedisKeyPatch,
+  byFrameworkRedisKeys,
   createRedisClient,
   type RedisClient,
 } from "./redis-compat.js";
+import { getCallAgentAsyncModeResult } from "./delegated-tool-details.ts";
+import {
+  appendBaiyingRemoteTaskDeletedEvent,
+  appendBaiyingRemoteTaskStartedEvent,
+} from "./remote-task-log.js";
+
+const DEFAULT_TRACKED_SYNC_TIMEOUT_SEC = 30 * 60;
 
 export type CallAgentMode = "sync" | "async";
 
@@ -64,6 +80,36 @@ export type ExecuteViaCallAgentInput = {
   toolCallId?: string;
   langfuseParentObservationId?: string;
   langfuseTraceId?: string;
+  resourceContext: ResourceContext;
+};
+
+function shouldTrackCallAgentRemoteTask(
+  callMode: CallAgentMode,
+  resourceContext: ResourceContext,
+): boolean {
+  return (
+    callMode === "async" ||
+    (callMode === "sync" && !isSubagentSessionKey(asString(resourceContext.session_key)))
+  );
+}
+
+function resolveCallAgentSyncTimeoutSec(params: {
+  callMode: CallAgentMode;
+  shouldTrackRemoteTask: boolean;
+  syncTimeoutSec?: number;
+}): number | undefined {
+  // 同步调用的情况下，暂时只处理非subagent。
+  // 通过 sessions_spawn 启动的subagent，sessions_yield 后，父agent仍然会启动一个announce run总结。等待openclaw源码修复后再处理（目前已经提交PR处理:fix(agents): preserve yielded subagent continuations #106364)
+  if (params.callMode === "sync" && params.shouldTrackRemoteTask) {
+    return params.syncTimeoutSec ?? DEFAULT_TRACKED_SYNC_TIMEOUT_SEC;
+  }
+  return params.syncTimeoutSec;
+}
+
+export const __callAgentTestInternals = {
+  DEFAULT_TRACKED_SYNC_TIMEOUT_SEC,
+  resolveCallAgentSyncTimeoutSec,
+  shouldTrackCallAgentRemoteTask,
 };
 
 export async function executeViaCallAgent(
@@ -81,6 +127,16 @@ export async function executeViaCallAgent(
   }
   try {
     const startedAt = Date.now();
+    const callMode = input.callMode ?? "sync";
+    const requesterSessionKey = asString(
+      input.resourceContext.requester_session_key ?? input.resourceContext.session_key,
+    );
+    const shouldTrackRemoteTask = shouldTrackCallAgentRemoteTask(callMode, input.resourceContext);
+    const syncTimeoutSec = resolveCallAgentSyncTimeoutSec({
+      callMode,
+      shouldTrackRemoteTask,
+      syncTimeoutSec: input.syncTimeoutSec,
+    });
     const deps = createRedisCallAgentDeps({
       redis: ctx.redis as never,
       registry: ctx.registry,
@@ -94,7 +150,7 @@ export async function executeViaCallAgent(
       input.defaultParentMessageId ||
       asString(input.metadata?.parent_message_id) ||
       `parent-${input.traceId || startedAt}`;
-    if (input.callMode === "async") {
+    if (callMode === "async") {
       // 异步调用的话，parent_message_id 为 "-1"，否则call agent的输出会渲染到工具调用下面。但是异步调用的话，工具调用马上就会结束，折叠起来，用户看不到
       defaultParentMessageId = "-1";
     }
@@ -241,15 +297,43 @@ export async function executeViaCallAgent(
       runtime_hint: result.runtimeHint,
     };
 
-    if ((input.callMode ?? "sync") === "async") {
-      return {
-        success: true,
-        type: `${input.responseType}_async`,
-        status: "running",
-        backend: "call_agent_sdk",
-        data: ack,
-        target: input.target,
+    if (shouldTrackRemoteTask) {
+      const selectedResource = input.resourceContext.selected_resource;
+      const createdAt = Date.now();
+      const record = {
+        taskId: ack.message_id,
+        messageId: ack.message_id,
+        requesterSessionKey,
+        parentSessionKey: asString(input.resourceContext.parent_session_key),
+        traceId: ack.trace_id,
+        sessionId: ack.session_id,
+        streamName: byFrameworkRedisKeys.sessionDataStream(ack.session_id),
+        toolCallId: asString(input.toolCallId),
+        targetWorkerId: asString(input.target.target_worker_id),
+        targetAgentType: ack.target_agent_type || asString(input.target.target_agent_type),
+        tenantId: asString(input.target.tenant_id),
+        resourceId:
+          asString(input.target.resource_id) || asString(selectedResource?.resourceId),
+        query: input.content,
+        createdAt,
+        pollAfter:
+          callMode === "sync" && syncTimeoutSec !== undefined
+            ? createdAt + syncTimeoutSec * 1000
+            : undefined,
+        accountId: asString(input.resourceContext.accountId),
+        language: asString(input.resourceContext.language),
+        beyondToken: asString(input.resourceContext.beyondToken),
       };
+      await appendBaiyingRemoteTaskStartedEvent(record).catch((err) => {
+        logBaiyingRequest(input.logger, "call_agent.track_failed", {
+          task: record,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+    }
+
+    if (callMode === "async") {
+      return getCallAgentAsyncModeResult(ack, input);
     }
 
     const poll = await pollDocResult({
@@ -257,16 +341,20 @@ export async function executeViaCallAgent(
       sessionId: input.sessionId,
       traceId: dispatchTraceId,
       messageId: result.messageId,
-      timeoutSec: input.syncTimeoutSec,
+      timeoutSec: syncTimeoutSec,
       intervalSec: input.syncIntervalSec,
       sinceMs: startedAt,
-      streamName: QueueNames.session_data_stream(input.sessionId),
+      streamName: byFrameworkRedisKeys.sessionDataStream(input.sessionId),
       onDelta: input.onDelta,
       signal: input.signal,
       toolCallId: input.toolCallId,
     });
 
     if (!poll.success) {
+      // poll 超时后，自动切换到 async 模式 -> 记录任务，通过 remote-task-watch 拉取结果
+      if (poll.event_type === "timeout" && shouldTrackRemoteTask) {
+        return getCallAgentAsyncModeResult(ack, input);
+      }
       let diagnosis: unknown;
       if (poll.event_type === "timeout") {
         diagnosis = await diagnoseTraceInSessionStreams({
@@ -280,6 +368,15 @@ export async function executeViaCallAgent(
         backend: "call_agent_sdk",
         data: { ack, poll: diagnosis !== undefined ? { ...poll, diagnosis } : poll },
         target: input.target,
+      });
+    }
+
+    if (shouldTrackRemoteTask) {
+      await appendBaiyingRemoteTaskDeletedEvent(asString(input.toolCallId)).catch((err) => {
+        logBaiyingRequest(input.logger, "call_agent.track_delete_failed", {
+          tool_call_id: input.toolCallId,
+          error: err instanceof Error ? err.message : String(err),
+        });
       });
     }
 
