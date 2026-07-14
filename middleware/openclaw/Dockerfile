@@ -85,8 +85,8 @@ FROM ghcr.io/openclaw/openclaw:${OPENCLAW_VERSION}
 USER root
 
 ARG OPENCLAW_VERSION
-ARG OPENCLI_VERSION=1.8.0
-ARG OPENCLI_EXTENSION_VERSION=1.0.15
+ARG OPENCLI_VERSION=2.0.0
+ARG OPENCLI_EXTENSION_VERSION=2.0.0
 ARG DWS_VERSION=v1.0.47
 ARG WECOM_CLI_VERSION=0.1.9
 ARG LARKSUITE_CLI_VERSION=1.0.67
@@ -171,7 +171,7 @@ RUN set -eux; \
         npm install -g "@sovovs/bycli@${OPENCLI_VERSION}"; \
         mkdir -p /opt/opencli/extension; \
         curl -fsSL -o /tmp/opencli-extension.zip \
-            "https://github.com/jackwener/OpenCLI/releases/download/v${OPENCLI_VERSION}/opencli-extension-v${OPENCLI_EXTENSION_VERSION}.zip"; \
+            "https://github.com/sovovs/byCLI/releases/download/v${OPENCLI_VERSION}/bycli-extension-v${OPENCLI_EXTENSION_VERSION}.zip"; \
         unzip -q /tmp/opencli-extension.zip -d /opt/opencli/extension; \
         rm -f /tmp/opencli-extension.zip; \
         chromium --version; \
@@ -279,7 +279,7 @@ RUN chmod +x \
 RUN set -eux; \
     export DWS_VERSION="${DWS_VERSION}"; \
     curl -fsSL https://raw.githubusercontent.com/DingTalk-Real-AI/dingtalk-workspace-cli/main/scripts/install.sh | sh; \
-    npm install -g "@wecom/cli@${WECOM_CLI_VERSION}" "@larksuite/cli@${LARKSUITE_CLI_VERSION}"; \
+    npm install -g "@wecom/cli@${WECOM_CLI_VERSION}" "@larksuite/cli@${LARKSUITE_CLI_VERSION}" "@sovovs/wechat-article-crawler@1.0.0"; \
     wecom-cli --version; \
     command -v lark-cli
 

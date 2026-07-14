@@ -4,15 +4,18 @@ import com.iwhalecloud.byai.common.constants.resource.OwnerType;
 import com.iwhalecloud.byai.common.feign.client.FeignPythonBuildService;
 import com.iwhalecloud.byai.common.feign.request.knowledge.Folder;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeFileSearch;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeItemsMove;
 import com.iwhalecloud.byai.common.feign.response.PythonBuildResponse;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileSearchItem;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileSearchResult;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeItemsMoveResult;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.web.ApplicationContextUtil;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileSearchRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeItemsMoveRequest;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -139,6 +142,41 @@ class DatasetApplicationServiceTest {
         assertThat(result.getData()).hasSize(1);
         assertThat(result.getData().get(0).getKnCode()).isEqualTo("100");
         assertThat(result.getData().get(0).getFilePath()).isEqualTo("/hr/renewal.md");
+    }
+
+    @Test
+    void moveKnowledgeItems_mapsResourceIdToKnCodeAndReturnsBatchResult() {
+        SsResource resource = defaultPersonalDataset();
+        when(ssResourceService.findById(100L)).thenReturn(resource);
+        when(authApplicationService.hasResourceManagePermission(resource)).thenReturn(true);
+
+        KnowledgeItemsMoveResult qaResult = new KnowledgeItemsMoveResult();
+        KnowledgeItemsMoveResult.Summary summary = new KnowledgeItemsMoveResult.Summary();
+        summary.setTotal(2);
+        summary.setSucceeded(1);
+        summary.setFailed(1);
+        qaResult.setSummary(summary);
+        PythonBuildResponse<KnowledgeItemsMoveResult> response = new PythonBuildResponse<>();
+        response.setResultCode(PythonBuildResponse.RESPONSE_SUCCESS);
+        response.setResultObject(qaResult);
+        when(feignPythonBuildService.moveKnowledgeItems(any())).thenReturn(response);
+
+        KnowledgeItemsMoveRequest request = new KnowledgeItemsMoveRequest();
+        request.setResourceId(100L);
+        request.setSourcePath(List.of("/制度/考勤.pdf", "/制度/图片"));
+        request.setTargetDirectoryPath("/归档/人事");
+
+        KnowledgeItemsMoveResult result = service.moveKnowledgeItems(request);
+
+        ArgumentCaptor<KbKnowledgeItemsMove> captor = ArgumentCaptor.forClass(KbKnowledgeItemsMove.class);
+        verify(feignPythonBuildService).moveKnowledgeItems(captor.capture());
+        assertThat(captor.getValue().getKnCode()).isEqualTo("personal-kb");
+        assertThat(captor.getValue().getSourcePath()).containsExactly("/制度/考勤.pdf", "/制度/图片");
+        assertThat(captor.getValue().getTargetDirectoryPath()).isEqualTo("/归档/人事");
+        assertThat(captor.getValue().getTargetFilePath()).isNull();
+        assertThat(captor.getValue().getOverwrite()).isFalse();
+        assertThat(result.getSummary().getSucceeded()).isEqualTo(1);
+        assertThat(result.getSummary().getFailed()).isEqualTo(1);
     }
 
     private SsResource defaultPersonalDataset() {

@@ -61,6 +61,7 @@
 | `POST` | `/api/v1/directories/delete` | 删除目录 |
 | `POST` | `/api/v1/knowledgeItems/import` | 上传文档 |
 | `POST` | `/api/v1/knowledgeItems/delete` | 删除文档 |
+| `POST` | `/api/v1/knowledgeItems/move` | 移动文件或目录 |
 | `POST` | `/api/v1/listDir` | 获取目录内容 |
 | `POST` | `/api/v1/glob` | 按路径模式匹配 |
 | `POST` | `/api/v1/readFile` | 读取文件内容 |
@@ -321,6 +322,68 @@
 ```
 
 ## 文档管理
+
+### `POST /api/v1/knowledgeItems/move`
+
+移动指定知识库下的一个或多个文件、目录。`targetDirectoryPath` 与 `targetFilePath` 必须且只能填写一个。
+
+请求体：`application/json`
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `knCode` | string | 是 | 知识库编码 |
+| `sourcePath` | array[string] | 是 | 源路径列表；每项以 `/` 开头，不包含知识库名称 |
+| `targetDirectoryPath` | string | 否 | 目标目录；不存在时自动创建，每个源保留原名称 |
+| `targetFilePath` | string | 否 | 单个文件的目标路径，可用于移动并重命名；父目录不存在时自动创建 |
+| `overwrite` | boolean | 否 | 是否覆盖目标，默认 `false`；当前版本仅支持 `false` |
+
+使用 `targetDirectoryPath` 时支持单源、多源、文件和目录。使用 `targetFilePath` 时，仅允许一个文件源。目录移动会连同所有子目录和文件一起移动；单个源失败不影响同批次其他源，失败原因返回在 `data[].error`。
+
+请求示例：
+
+```json
+{
+  "knCode": "1",
+  "sourcePath": [
+    "/制度/人事/考勤制度.pdf",
+    "/制度/人事/图片"
+  ],
+  "targetDirectoryPath": "/归档/人事",
+  "overwrite": false
+}
+```
+
+成功或部分成功响应：
+
+```json
+{
+  "resultCode": "0",
+  "resultMsg": "success",
+  "resultObject": {
+    "data": [
+      {
+        "sourcePath": "/制度/人事/考勤制度.pdf",
+        "targetPath": "/归档/人事/考勤制度.pdf",
+        "success": true,
+        "error": null
+      },
+      {
+        "sourcePath": "/制度/人事/不存在.pdf",
+        "targetPath": null,
+        "success": false,
+        "error": "source path not found: /制度/人事/不存在.pdf"
+      }
+    ],
+    "summary": {
+      "total": 2,
+      "succeeded": 1,
+      "failed": 1
+    }
+  }
+}
+```
+
+以下结构性错误会导致整请求失败：空源列表、非法或跨界路径、移动根目录、源路径重复、目标字段同时填写或同时缺失、目录移动到自身或子目录，以及将 `targetFilePath` 用于多源或目录源。目标已存在时对应移动项失败，不执行覆盖。
 
 ### `POST /api/v1/knowledgeItems/import`
 
