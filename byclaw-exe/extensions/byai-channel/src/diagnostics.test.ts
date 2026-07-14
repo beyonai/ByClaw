@@ -3,9 +3,9 @@ import { describe, expect, it, vi } from "vitest";
 const diagnosticRuntimeMock = vi.hoisted(() => ({
   emitTrustedDiagnosticEvent: vi.fn(),
   createDiagnosticTraceContext: vi.fn(
-    (input: { traceId?: string } = {}) => ({
+    (input: { traceId?: string; spanId?: string } = {}) => ({
       traceId: input.traceId ?? "99999999999999999999999999999999",
-      spanId: "1111111111111111",
+      spanId: input.spanId ?? "1111111111111111",
       traceFlags: "01",
     }),
   ),
@@ -14,6 +14,12 @@ const diagnosticRuntimeMock = vi.hoisted(() => ({
     (value: unknown) =>
       typeof value === "string" &&
       /^[0-9a-f]{32}$/.test(value) &&
+      !/^0+$/.test(value),
+  ),
+  isValidDiagnosticSpanId: vi.fn(
+    (value: unknown) =>
+      typeof value === "string" &&
+      /^[0-9a-f]{16}$/.test(value) &&
       !/^0+$/.test(value),
   ),
 }));
@@ -38,6 +44,30 @@ describe("byai SDK diagnostics", () => {
     expect(diagnosticRuntimeMock.createDiagnosticTraceContext).toHaveBeenCalledWith({
       traceId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     });
+  });
+
+  it("uses propagated Langfuse parent observation as the diagnostic parent span", () => {
+    const trace = createByaiSdkDiagnosticTrace({
+      traceId: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      traceParentSpanId: "0123456789abcdef",
+      langfuseParentObservationId: "FEDCBA9876543210",
+    });
+
+    expect(trace.trace.traceId).toBe("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    expect(trace.trace.spanId).toBe("fedcba9876543210");
+    expect(diagnosticRuntimeMock.createDiagnosticTraceContext).toHaveBeenCalledWith({
+      traceId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    });
+  });
+
+  it("falls back to trace parent span when Langfuse parent is invalid", () => {
+    const trace = createByaiSdkDiagnosticTrace({
+      traceId: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      traceParentSpanId: "0123456789abcdef",
+      langfuseParentObservationId: "not-a-span",
+    });
+
+    expect(trace.trace.spanId).toBe("0123456789abcdef");
   });
 
   it("keeps invalid BYAI trace ids as attributes instead of faking W3C ids", () => {

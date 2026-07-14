@@ -364,7 +364,11 @@ async function deliverReplyToAgentViaSdkUnderGate(
     deps;
 
   const rt = getByaiRuntime();
-  const diagnosticTrace = createByaiSdkDiagnosticTrace(message.traceId);
+  const diagnosticTrace = createByaiSdkDiagnosticTrace({
+    traceId: message.traceId,
+    traceParentSpanId: message.traceParentSpanId,
+    langfuseParentObservationId: message.langfuseParentObservationId,
+  });
   const diagnosticRef = {
     sessionId: message.sessionId,
     sessionKey,

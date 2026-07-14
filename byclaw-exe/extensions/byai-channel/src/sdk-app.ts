@@ -40,6 +40,11 @@ export interface ByaiSdkAppOptions {
 
 type ByaiSdkLogger = NonNullable<ByaiSdkAppOptions["log"]>;
 
+function metadataString(metadata: Record<string, unknown> | undefined, key: string): string {
+  const value = metadata?.[key];
+  return typeof value === "string" ? value.trim() : "";
+}
+
 async function getInboundMessageFromByFramework(data: AskAgentCommand) {
   let questionText = "";
   let files: SdkInboundFile[] | undefined;
@@ -362,6 +367,11 @@ export class ByaiSdkApp {
       }
       const gatewayMsg = data as AskAgentCommand;
       const { sessionId, messageId, traceId, metadata } = gatewayMsg.header;
+      const traceParentSpanId =
+        gatewayMsg.header.traceParentSpanId || metadataString(metadata, "trace_parent_span_id");
+      const langfuseParentObservationId =
+        gatewayMsg.header.langfuseParentObservationId ||
+        metadataString(metadata, "langfuse_parent_observation_id");
       if (!gatewayMsg.content || !sessionId || !messageId) {
         await runner.ack(streamName, msgId);
         return;
@@ -391,6 +401,8 @@ export class ByaiSdkApp {
         userId: userCode,
         timestamp: Date.now(),
         traceId: traceId || "",
+        traceParentSpanId,
+        langfuseParentObservationId,
         accountId: this.account.accountId,
         extraPayload: gatewayMsg.extraPayload,
         language,

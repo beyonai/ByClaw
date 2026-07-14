@@ -40,6 +40,8 @@ export interface ByaiSdkInboundMessage {
   text: string;
   timestamp: number;
   traceId: string;
+  traceParentSpanId?: string;
+  langfuseParentObservationId?: string;
   files?: SdkInboundFile[];
   extraPayload?: Record<string, unknown>;
   accountId: string;

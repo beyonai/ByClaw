@@ -41,13 +41,15 @@ public final class EnvConfigKey {
     /**
      * langfuse相关配置
      */
-    public static final String LANGFUSE_SECRET_KEY = "sys.langfuse_secret_key";
+    public static final String LANGFUSE_SECRET_KEY = "langfuse.secret-key";
 
-    public static final String LANGFUSE_PUBLIC_KEY = "sys.langfuse_public_key";
+    public static final String LANGFUSE_PUBLIC_KEY = "langfuse.public-key";
 
-    public static final String LANGFUSE_HOST = "sys.langfuse_host";
+    public static final String LANGFUSE_HOST = "langfuse.base-url";
 
-    public static final String LANGFUSE_ENV = "sys.langfuse_env";
+    public static final String LANGFUSE_ENV = "langfuse.environment";
+
+    public static final String LANGFUSE_PROJECT_ID = "langfuse.project-id";
 
     public static final String DIGIT_NUM_LIMIT = "sys.digit_num_limit";
 
