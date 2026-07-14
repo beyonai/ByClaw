@@ -21,3 +21,6 @@ else
 fi
 
 echo "Standalone services stopped."
+
+# 清理解密后的临时环境文件
+rm -f "../../.env.runtime"
