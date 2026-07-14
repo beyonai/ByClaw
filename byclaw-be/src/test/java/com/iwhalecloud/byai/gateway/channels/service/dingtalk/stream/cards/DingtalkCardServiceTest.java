@@ -17,6 +17,10 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -235,6 +239,85 @@ class DingtalkCardServiceTest {
 
         assertThat(latestContent.get()).isEqualTo("你好");
         assertThat(finalized.get()).isTrue();
+    }
+
+    @Test
+    void appStreamResponseShouldFinalizeCardAndCompleteStream() throws Exception {
+        AtomicReference<String> latestContent = new AtomicReference<>("");
+        AtomicBoolean finalized = new AtomicBoolean(false);
+        DingtalkCardService recordingService = new DingtalkCardService(objectMapper, tokenService, robotConfigService) {
+            @Override
+            public void streamingUpdateAssistantReply(DingtalkCardStreamSession session, String content, boolean isFinalize) {
+                latestContent.set(content);
+                finalized.set(isFinalize);
+                if (isFinalize) {
+                    session.setFinalized(true);
+                }
+            }
+
+            @Override
+            public void updateCopyContent(DingtalkCardStreamSession session, String copyContent) {
+                // no-op for this unit test
+            }
+        };
+        DingtalkCardStreamingOutputStream outputStream = newUnthrottledOutputStream(recordingService, "track-app-end");
+
+        outputStream.write("""
+                {"event":"answerDelta","contentType":"1002","choices":[{"delta":{"content":"异步回答"}}]}
+                """.getBytes());
+
+        assertThat(outputStream.completionFuture()).isNotDone();
+        outputStream.write("""
+                {"event":"appStreamResponse"}
+                """.getBytes());
+        outputStream.completionFuture().get(2, TimeUnit.SECONDS);
+
+        assertThat(latestContent.get()).isEqualTo("异步回答");
+        assertThat(finalized.get()).isTrue();
+    }
+
+    @Test
+    void completionIdleTimeoutShouldResetAfterEachWrite() throws Exception {
+        DingtalkCardService recordingService = new DingtalkCardService(objectMapper, tokenService, robotConfigService) {
+            @Override
+            public void streamingUpdateAssistantReply(DingtalkCardStreamSession session, String content, boolean isFinalize) {
+                if (isFinalize) {
+                    session.setFinalized(true);
+                }
+            }
+
+            @Override
+            public void updateCopyContent(DingtalkCardStreamSession session, String copyContent) {
+                // no-op for this unit test
+            }
+        };
+        DingtalkCardStreamingOutputStream outputStream = newUnthrottledOutputStream(recordingService, "track-idle");
+        ExecutorService waiter = Executors.newSingleThreadExecutor();
+        try {
+            Future<Boolean> completed = waiter.submit(() -> {
+                try {
+                    outputStream.awaitCompletionAfterIdle(250, TimeUnit.MILLISECONDS);
+                    return true;
+                } catch (java.util.concurrent.TimeoutException e) {
+                    return false;
+                }
+            });
+
+            Thread.sleep(150);
+            outputStream.write("""
+                    {"event":"answerDelta","contentType":"1002","choices":[{"delta":{"content":"慢"}}]}
+                    """.getBytes());
+            Thread.sleep(150);
+
+            assertThat(completed).isNotDone();
+
+            outputStream.write("""
+                    {"event":"appStreamResponse"}
+                    """.getBytes());
+            assertThat(completed.get(2, TimeUnit.SECONDS)).isTrue();
+        } finally {
+            waiter.shutdownNow();
+        }
     }
 
     @Test
