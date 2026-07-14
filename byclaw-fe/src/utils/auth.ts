@@ -85,6 +85,36 @@ export const setUserToken = (userTokens: any) => {
 let adminVipListCache: string[] | null = null;
 let isLoadingAdminVipList = false;
 
+const normalizeAdminVipParamValue = (value: any): string[] => {
+  if (isNil(value)) return [];
+  if (Array.isArray(value)) {
+    return value.flatMap(normalizeAdminVipParamValue);
+  }
+  if (typeof value === 'object') {
+    return Object.values(value).flatMap(normalizeAdminVipParamValue);
+  }
+
+  const text = `${value}`.trim();
+  if (!text) return [];
+
+  if (text.startsWith('[') || text.startsWith('{') || (text.startsWith('"') && text.endsWith('"'))) {
+    try {
+      // paramValue 可能是 JSON 数组，也可能是普通逗号字符串；只在看起来像 JSON 时解析。
+      return normalizeAdminVipParamValue(JSON.parse(text));
+    } catch {
+      return text
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean);
+    }
+  }
+
+  return text
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+};
+
 /**
  * 初始化 AdminVip 用户列表
  * 从接口获取配置并更新缓存
@@ -105,20 +135,10 @@ export const initAdminVipList = async () => {
       const userCodeConfig = response.find((item: any) => item.paramCode === 'USERCODE_CONFIG');
 
       if (!isNil(userCodeConfig?.paramValue)) {
-        let paramValueArray = userCodeConfig?.paramValue;
-
-        try {
-          // paramValue 是 JSON 字符串，需要解析
-          paramValueArray = JSON.parse(userCodeConfig.paramValue);
-        } catch (e) {
-          console.error('解析 paramValue 失败:', e);
-        }
-
         // 将 'adminvip' 和配置的值合并
-        adminVipListCache = [
-          'adminvip',
-          ...(Array.isArray(paramValueArray) ? paramValueArray : paramValueArray.split(',')),
-        ];
+        adminVipListCache = Array.from(
+          new Set(['adminvip', ...normalizeAdminVipParamValue(userCodeConfig.paramValue)])
+        );
       } else {
         // 没有配置值时使用默认值
         adminVipListCache = ['adminvip'];

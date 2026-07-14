@@ -896,6 +896,16 @@
       scrollbar-gutter: stable;
     }
 
+    .bundledSkillEmpty {
+      // 搜索无结果时占满列表区，让“暂无数据”在弹窗内容区域上下居中。
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      height: 100%;
+      min-height: 0;
+    }
+
     @media (max-width: 760px) {
       height: calc(100vh - 48px);
       padding: 20px 16px 24px;
