@@ -221,6 +221,26 @@ function createServer(options = {}) {
         return;
       }
 
+      if (req.url === "/byaiService/datasetController/knowledgeItems/searchFile") {
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify({
+          code: 0,
+          msg: "知识库文件语义检索成功",
+          data: {
+            data: [
+              {
+                knCode: "10023355",
+                filePath: "/docs/guide.md",
+                score: 0.78,
+                metadata: { title: "Guide" },
+              },
+            ],
+          },
+          success: true,
+        }));
+        return;
+      }
+
       if (req.url === "/byaiService/datasetController/removeFile") {
         res.setHeader("content-type", "application/json");
         res.end(JSON.stringify({ code: 0, msg: "删除知识库文件成功", data: null, success: true }));
@@ -810,6 +830,38 @@ async function testSearchMissingQueryFails() {
   });
 }
 
+async function testSearchFileSuccessFixesSearchModeMixedRecall() {
+  await withServer(async (server, port) => {
+    const result = await runCli(["search-file", "--resource-id", "10023355", "--query", "故障", "--top-k", "10"], port);
+    assert.equal(result.code, 0, result.stderr || result.stdout);
+    assertPublicOutput(result.json, "search-file");
+    assert.equal(result.json.action, "search-file");
+    assert.deepEqual(result.json.resourceIds, [10023355]);
+    assert.equal(result.json.query, "故障");
+    assert.equal(result.json.topK, 10);
+    assert.equal(result.json.items[0].resourceId, 10023355);
+    assert.equal(result.json.items[0].filePath, "/docs/guide.md");
+    assert.equal(result.json.items[0].score, 0.78);
+    assert.deepEqual(result.json.items[0].metadata, { title: "Guide" });
+    const request = server.requests.find((item) => item.url === "/byaiService/datasetController/knowledgeItems/searchFile");
+    assert.deepEqual(parseJsonRequest(request), {
+      resourceIdList: [10023355],
+      query: "故障",
+      topK: 10,
+      searchMode: "mixedRecall",
+    });
+  });
+}
+
+async function testSearchFileMissingQueryFails() {
+  await withServer(async (_server, port) => {
+    const result = await runCli(["search-file", "--resource-id", "10023355"], port);
+    assert.equal(result.code, 1);
+    assertPublicOutput(result.json, "search-file failure");
+    assert.match(result.json.error, /query/);
+  });
+}
+
 async function testRemoveFileSuccess() {
   await withServer(async (server, port) => {
     const result = await runCli(["remove-file", "--resource-id", "10023355", "--file-path", "/docs/guide.md"], port);
@@ -846,7 +898,7 @@ async function testHelpIsUsefulManualWithoutRuntimeInternals() {
     assertPublicOutput(result.json, "help");
     assert.equal(result.json.ok, true);
     assert.equal(result.json.name, "by-knowledge-manager");
-    assert.equal(result.json.usage, "node /app/scripts/by-knowledge-manager.mjs <command> [options]");
+    assert.equal(result.json.usage, "node ./scripts/by-knowledge-manager.mjs <command> [options]");
     assert.equal(result.json.commands.mkdir.description, "创建知识库目录");
     assert.deepEqual(result.json.commands.mkdir.required, ["--resource-id", "--directory-path", "--directory-name"]);
     assert.equal(result.json.commands.upload.description, "上传文件到知识库目录，成功后自动触发构建");
@@ -859,6 +911,8 @@ async function testHelpIsUsefulManualWithoutRuntimeInternals() {
     assert.deepEqual(result.json.commands["read-file"].required, ["--resource-id", "--file-path"]);
     assert.equal(result.json.commands.search.description, "检索知识库内容");
     assert.deepEqual(result.json.commands.search.required, ["--resource-id", "--query"]);
+    assert.equal(result.json.commands["search-file"].description, "检索知识库相关文件");
+    assert.deepEqual(result.json.commands["search-file"].required, ["--resource-id", "--query"]);
     assert.deepEqual(result.json.commands["remove-file"].required, ["--resource-id", "--file-path"]);
     assert.equal(JSON.stringify(result.json).includes("searchMode"), false);
     assert.equal(JSON.stringify(result.json).includes("--dry-run"), false);
@@ -904,6 +958,8 @@ const tests = [
   testReadFileMissingFilePathFails,
   testSearchSuccessFixesSearchModeMixedRecall,
   testSearchMissingQueryFails,
+  testSearchFileSuccessFixesSearchModeMixedRecall,
+  testSearchFileMissingQueryFails,
   testRemoveFileSuccess,
   testRemoveFileFailure,
   testRemoveFileMissingFilePathFails,
