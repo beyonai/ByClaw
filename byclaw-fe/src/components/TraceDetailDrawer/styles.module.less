@@ -50,6 +50,64 @@
   word-break: break-word;
 }
 
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.timelineNode {
+  position: relative;
+  padding: 10px 12px;
+  border: 1px solid #edf0f5;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.timelineHeader {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.timelineName {
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 22px;
+  color: #1f2533;
+  word-break: break-word;
+}
+
+.timelineMeta {
+  font-size: 12px;
+  line-height: 18px;
+  color: #7a8799;
+}
+
+.timelinePreview {
+  max-height: 140px;
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  overflow: auto;
+  border-radius: 6px;
+  background: #f7f8fa;
+  color: #40454d;
+  font-size: 12px;
+  line-height: 18px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.timelineChildren {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+}
+
 .meta {
   display: flex;
   flex-direction: row;
