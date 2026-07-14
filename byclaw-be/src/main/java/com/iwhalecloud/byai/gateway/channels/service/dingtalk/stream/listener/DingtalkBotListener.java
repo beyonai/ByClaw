@@ -317,8 +317,11 @@ public class DingtalkBotListener implements OpenDingTalkCallbackListener<Map<Str
                         null, CurrentUserHolder.getCurrentUserCode(), streamProperties.isShowReasoning());
         try {
             channelService.chat(assistantChatDto, outputStream);
-            outputStream.finish();
-            if (outputStream.hasStreamingFailed()) {
+            // Gateway mode returns after dispatching the request. The actual
+            // answer deltas and appStreamResponse arrive asynchronously, so
+            // appStreamResponse (or an idle timeout) owns finalization.
+            boolean finalOk = awaitStreamCompletion(outputStream);
+            if (!finalOk || outputStream.hasStreamingFailed()) {
                 dingtalkReplyDispatcher.sendTextMessage(sessionWebhook, DEFAULT_FALLBACK_REPLY);
             }
             return true;
@@ -331,6 +334,25 @@ public class DingtalkBotListener implements OpenDingTalkCallbackListener<Map<Str
             }
 
             throw new RuntimeException(e);
+        }
+    }
+
+    static boolean awaitStreamCompletion(DingtalkCardStreamingOutputStream outputStream) {
+        try {
+            outputStream.awaitCompletionAfterIdle(60, TimeUnit.SECONDS);
+            return true;
+        } catch (java.util.concurrent.TimeoutException e) {
+            logger.warn("Wait DingTalk appStreamResponse idle timeout, finalize current card content.");
+            try {
+                outputStream.finish();
+                return !outputStream.hasStreamingFailed();
+            } catch (Exception finishException) {
+                logger.warn("Finalize DingTalk card after idle timeout failed.", finishException);
+                return false;
+            }
+        } catch (Exception e) {
+            logger.warn("Wait DingTalk appStreamResponse failed.", e);
+            return false;
         }
     }
 

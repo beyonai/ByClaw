@@ -14,6 +14,10 @@ import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
 import java.util.function.LongSupplier;
 
@@ -37,6 +41,7 @@ public class DingtalkCardStreamingOutputStream extends ByteArrayOutputStream {
     private static final String EVENT_REASON_START = "reasoningLogStart";
     private static final String EVENT_REASON_DELTA = "reasoningLogDelta";
     private static final String EVENT_REASON_END = "reasoningLogEnd";
+    private static final String EVENT_APP_STREAM_RESPONSE = "appStreamResponse";
     private static final String ROOT_PARENT_ORDER_ID = "-1";
     private static final String MARKDOWN_LINE_BREAK = "\n\n";
     private static final String MARKDOWN_SECTION_SEPARATOR = "\n\n---\n\n";
@@ -110,6 +115,9 @@ public class DingtalkCardStreamingOutputStream extends ByteArrayOutputStream {
      * 一旦失败，后续只保留答案文本，不再继续尝试更新卡片，避免连续报错。
      */
     private boolean streamingFailed;
+    private final Object activityMonitor = new Object();
+    private final CompletableFuture<Void> completionFuture = new CompletableFuture<>();
+    private long lastWriteActivityAtMillis;
 
     public DingtalkCardStreamingOutputStream(
             ObjectMapper objectMapper,
@@ -197,6 +205,7 @@ public class DingtalkCardStreamingOutputStream extends ByteArrayOutputStream {
         this.currentTimeMillis = currentTimeMillis == null ? System::currentTimeMillis : currentTimeMillis;
         this.minStreamUpdateIntervalMillis = Math.max(0L, minStreamUpdateIntervalMillis);
         this.showReasoning = showReasoning;
+        this.lastWriteActivityAtMillis = this.currentTimeMillis.getAsLong();
     }
 
     @Override
@@ -204,6 +213,7 @@ public class DingtalkCardStreamingOutputStream extends ByteArrayOutputStream {
         // super.write(...) 保留原始输出内容，便于后续仍可整体读取完整 chat 结果。
         super.write(b, off, len);
         pendingPayload.append(new String(b, off, len, StandardCharsets.UTF_8));
+        markWriteActivity();
         processPendingPayload();
     }
 
@@ -212,6 +222,7 @@ public class DingtalkCardStreamingOutputStream extends ByteArrayOutputStream {
         // 兼容逐字节写入场景，逻辑与 write(byte[], off, len) 保持一致。
         super.write(b);
         pendingPayload.append((char) b);
+        markWriteActivity();
         processPendingPayload();
     }
 
@@ -223,13 +234,77 @@ public class DingtalkCardStreamingOutputStream extends ByteArrayOutputStream {
      * 如果实时 streaming 过程中已经失败，或者卡片本身已 finalize，则直接跳过。
      */
     public synchronized void finish() throws Exception {
-        if (streamingFailed || session == null || dingtalkCardService == null || session.isFinalized()) {
+        if (completionFuture.isDone()) {
             return;
         }
-        flushReasoningTextBuffer();
-        updateCopyContent();
-        if (!session.isFinalized()) {
-            flushStreamingContent(buildDisplayContent(), true);
+        try {
+            if (streamingFailed) {
+                throw new IllegalStateException("DingTalk card streaming failed");
+            }
+            if (session == null || dingtalkCardService == null || session.isFinalized()) {
+                completionFuture.complete(null);
+                notifyActivityWaiters();
+                return;
+            }
+            flushReasoningTextBuffer();
+            updateCopyContent();
+            if (!session.isFinalized()) {
+                flushStreamingContent(buildDisplayContent(), true);
+            }
+            if (streamingFailed) {
+                throw new IllegalStateException("DingTalk card finalization failed");
+            }
+            completionFuture.complete(null);
+            notifyActivityWaiters();
+        } catch (Exception e) {
+            completionFuture.completeExceptionally(e);
+            notifyActivityWaiters();
+            throw e;
+        }
+    }
+
+    public CompletableFuture<Void> completionFuture() {
+        return completionFuture;
+    }
+
+    public void awaitCompletionAfterIdle(long idleTimeout, TimeUnit unit)
+            throws InterruptedException, ExecutionException, TimeoutException {
+        long timeoutMillis = Math.max(1L, unit.toMillis(idleTimeout));
+        resetIdleTimeout();
+        while (true) {
+            if (completionFuture.isDone()) {
+                completionFuture.get();
+                return;
+            }
+            synchronized (activityMonitor) {
+                if (completionFuture.isDone()) {
+                    completionFuture.get();
+                    return;
+                }
+                long idleMillis = currentTimeMillis.getAsLong() - lastWriteActivityAtMillis;
+                long waitMillis = timeoutMillis - idleMillis;
+                if (waitMillis <= 0L) {
+                    throw new TimeoutException("No DingTalk stream output for " + timeoutMillis + "ms");
+                }
+                activityMonitor.wait(waitMillis);
+            }
+        }
+    }
+
+    private void resetIdleTimeout() {
+        synchronized (activityMonitor) {
+            lastWriteActivityAtMillis = currentTimeMillis.getAsLong();
+            activityMonitor.notifyAll();
+        }
+    }
+
+    private void markWriteActivity() {
+        resetIdleTimeout();
+    }
+
+    private void notifyActivityWaiters() {
+        synchronized (activityMonitor) {
+            activityMonitor.notifyAll();
         }
     }
 
@@ -331,6 +406,7 @@ public class DingtalkCardStreamingOutputStream extends ByteArrayOutputStream {
                         handleReasonDelta(root, event);
                     }
                 }
+                case EVENT_APP_STREAM_RESPONSE -> finish();
                 default -> {
                     // ignore
                 }
