@@ -89,8 +89,6 @@ export default {
 
   'search.referenceSuccess': 'Referenced successfully',
 
-  'search.referenceSuccess': 'Referenced successfully',
-
   'resource.belongField': 'Business Field',
   'resource.belongFieldPlaceholder': 'Please select a business field',
   'resource.knowledge': 'Knowledge',
@@ -592,6 +590,7 @@ export default {
 
   'traceDetail.title': 'Trace Details',
   'traceDetail.input': 'User Input',
+  'traceDetail.timeline': 'Trace',
   'traceDetail.defaultAgentName': 'Model Reply',
   'traceDetail.empty': 'No trace data available',
   'traceDetail.openInLangfuse': 'Open in Langfuse',

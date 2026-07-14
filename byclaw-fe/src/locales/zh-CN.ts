@@ -88,8 +88,6 @@ export default {
 
   'search.referenceSuccess': '引用成功',
 
-  'search.referenceSuccess': '引用成功',
-
   'resource.belongField': '所属领域',
   'resource.belongFieldPlaceholder': '请选择',
   'resource.knowledge': '知识',
@@ -600,6 +598,7 @@ export default {
 
   'traceDetail.title': '调用链详情',
   'traceDetail.input': '用户输入',
+  'traceDetail.timeline': '调用链',
   'traceDetail.defaultAgentName': '模型回复',
   'traceDetail.empty': '暂无调用链数据',
   'traceDetail.openInLangfuse': '在 Langfuse 中打开',
