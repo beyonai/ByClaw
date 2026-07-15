@@ -8,6 +8,7 @@ import commonStyles from '@/layout/sider/components/common-list.module.less';
 // @ts-ignore
 import { useDispatch, useSelector, useIntl } from '@umijs/max';
 import { size } from 'lodash';
+import { localizeNotification } from '@/utils/notificationI18n';
 
 const UnreadNoticeList = () => {
   const intl = useIntl();
@@ -68,17 +69,20 @@ const UnreadNoticeList = () => {
             dataSource={unreadNoticeList}
             split={false}
             renderItem={(item: any) => {
+              const localizedItem = localizeNotification(item, intl);
               return (
-                <List.Item className={classnames('pointer')} onClick={() => handleReadNotice(item)}>
+                <List.Item className={classnames('pointer')} onClick={() => handleReadNotice(localizedItem)}>
                   <div className={classnames('ub gap8 ub-ac')}>
                     <span className={classnames(styles.titleIcon, 'ub ub-ac ub-pc')}>
                       <AntdIcon type="icon-tongzhi-fill" className={styles.noticeIcon} />
                     </span>
-                    <span className={classnames('bold')}>{intl.formatMessage({ id: 'notice.title' })}</span>
-                    <span>{item.createTime}</span>
-                    {item.isRead === '0' && <span className={styles.unReadTag} />}
+                    <span className={classnames('bold')}>
+                      {localizedItem.title || intl.formatMessage({ id: 'notice.title' })}
+                    </span>
+                    <span>{localizedItem.createTime}</span>
+                    {localizedItem.isRead === '0' && <span className={styles.unReadTag} />}
                   </div>
-                  <div className={classnames('mt-8')}>{item.content}</div>
+                  <div className={classnames('mt-8')}>{localizedItem.content}</div>
                 </List.Item>
               );
             }}

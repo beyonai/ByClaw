@@ -45,7 +45,7 @@ describe('models/notice', () => {
       records: [{ id: 1 }],
       total: 10,
       current: 1,
-      totalPages: 1,
+      pages: 1,
     };
     expect(iterator.next(response).value).toEqual({
       type: 'select',

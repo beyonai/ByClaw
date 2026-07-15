@@ -26,6 +26,7 @@ import useGlobal from '@/hooks/useGlobal';
 import { clearEasyConfirmInputDraft } from '@/components/ChatLayoutComp/components/EasyConfirm';
 import { EMPLOYEE_RESOURCE_TAB_KEYS } from './employeeResourceTabs';
 import { useActiveSiderAgent } from './components/ActiveSiderAgentBar';
+import NoticeList from './components/NoticeList';
 
 import type { IState as IEmployeesState } from '@/models/useEmployees';
 import { SiderContentContext, DEFAULT_SIDER_CONTENT_WIDTH } from './siderContentContext';
@@ -333,6 +334,11 @@ const Sidebar = () => {
           className={classnames(styles.smallIconWrap)}
           style={{ background: 'transparent', marginTop: 'auto' }}
         />
+        <Tooltip placement="right" title={intl.formatMessage({ id: 'notice.title' })}>
+          <div className={classnames(styles.smallIconWrap, 'ub ub-ac ub-pc')}>
+            <NoticeList />
+          </div>
+        </Tooltip>
         <SelectLang placement="right" style={{ fontSize: 16 }} className={styles.smallIconWrap} />
         <Dropdown
           menu={{ items: userDropdownItems, onClick: onUserDropdownClick }}

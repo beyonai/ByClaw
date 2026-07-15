@@ -18,6 +18,7 @@ export interface INoticeItem {
   senderId: string;
   targetId: string;
   title: string;
+  extraInfo?: string | Record<string, any>;
 }
 interface IState {
   allNoticeList: INoticeItem[];
@@ -47,7 +48,8 @@ export default {
           pageNum,
           pageSize: PAGE_SIZE,
         });
-        const { records = [], total, current: newPageNum, totalPages } = res || {};
+        const { records = [], total, current: newPageNum, totalPages, pages } = res || {};
+        const pageCount = Number(totalPages ?? pages ?? 0);
 
         const { allNoticeList: prevList } = yield select((state: any) => state.notice);
         const { unreadNoticeList: unreadPrevList } = yield select((state: any) => state.notice);
@@ -60,7 +62,7 @@ export default {
                 unreadNoticeList: [...records],
                 unreadNoticePagination: {
                   pageIndex: Number(newPageNum),
-                  pageCount: totalPages,
+                  pageCount,
                   total,
                 },
               },
@@ -72,7 +74,7 @@ export default {
                 allNoticeList: [...records],
                 allNoticePagination: {
                   pageIndex: Number(newPageNum),
-                  pageCount: totalPages,
+                  pageCount,
                   total,
                 },
               },
@@ -86,7 +88,7 @@ export default {
               unreadNoticePagination: {
                 ...unreadNoticePagination,
                 pageIndex: Number(newPageNum),
-                pageCount: totalPages,
+                pageCount,
                 total,
               },
             },
@@ -99,7 +101,7 @@ export default {
               allNoticePagination: {
                 ...allNoticePagination,
                 pageIndex: Number(newPageNum),
-                pageCount: totalPages,
+                pageCount,
                 total,
               },
             },

@@ -6,12 +6,13 @@ import classnames from 'classnames';
 import { isEmpty } from 'lodash';
 import { CloseCircleFilled } from '@ant-design/icons';
 // @ts-ignore
-import { useDispatch, useSelector, useIntl, getIntl } from '@umijs/max';
+import { useDispatch, useSelector, useIntl } from '@umijs/max';
 
 import AllNoticeList from './components/AllNoticeList';
 import UnreadNoticeList from './components/UnreadNoticeList';
 
 import type { INoticeItem } from '@/models/notice';
+import { localizeNotification } from '@/utils/notificationI18n';
 
 import styles from './index.module.less';
 
@@ -23,20 +24,22 @@ interface NoticeListProps {
 const AllTabValue = 'all';
 const UnreadTabValue = 'unread';
 
-const NoticeListOptions = [
-  {
-    label: getIntl().formatMessage({ id: 'notice.all' }),
-    value: AllTabValue,
-  },
-  {
-    label: getIntl().formatMessage({ id: 'notice.unread' }),
-    value: UnreadTabValue,
-  },
-];
-
 const NoticeList: React.FC<NoticeListProps> = ({ style }) => {
   const intl = useIntl();
   const dispatch = useDispatch();
+  const noticeListOptions = React.useMemo(
+    () => [
+      {
+        label: intl.formatMessage({ id: 'notice.all' }),
+        value: AllTabValue,
+      },
+      {
+        label: intl.formatMessage({ id: 'notice.unread' }),
+        value: UnreadTabValue,
+      },
+    ],
+    [intl]
+  );
 
   const { unreadNoticeList } = useSelector(({ notice }) => ({
     unreadNoticeList: notice.unreadNoticeList || [],
@@ -51,8 +54,9 @@ const NoticeList: React.FC<NoticeListProps> = ({ style }) => {
   const [proactivePage] = useState<number>(0);
 
   const currentProactiveItem = React.useMemo(() => {
-    return proactiveList[proactivePage];
-  }, [proactiveList, proactivePage]);
+    const item = proactiveList[proactivePage];
+    return item ? localizeNotification(item, intl) : item;
+  }, [intl, proactiveList, proactivePage]);
 
   const handleReadAllNotice = () => {
     dispatch({ type: 'notice/batchReadNotice', payload: { read: 'ALL' } });
@@ -62,7 +66,7 @@ const NoticeList: React.FC<NoticeListProps> = ({ style }) => {
     <div className={styles.noticeListContent}>
       {/* 头部 */}
       <div className={classnames(styles.header, 'ub ub-pj ub-ac')}>
-        <Segmented options={NoticeListOptions} value={activeTab} onChange={(value) => setActiveTab(value)} />
+        <Segmented options={noticeListOptions} value={activeTab} onChange={(value) => setActiveTab(value)} />
         <Button
           size="small"
           iconPosition="start"
@@ -118,7 +122,12 @@ const NoticeList: React.FC<NoticeListProps> = ({ style }) => {
   }, []);
 
   return (
-    <div className={classnames(styles.noticeListWrap, 'pointer')} style={style}>
+    <div
+      aria-label={intl.formatMessage({ id: 'notice.title' })}
+      className={classnames(styles.noticeListWrap, 'pointer')}
+      role="button"
+      style={style}
+    >
       <Popover
         arrow
         content={contentRender}
