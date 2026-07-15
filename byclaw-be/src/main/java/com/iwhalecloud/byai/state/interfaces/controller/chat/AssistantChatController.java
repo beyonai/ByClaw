@@ -15,6 +15,7 @@ import com.iwhalecloud.byai.common.feign.response.DataCloudResponse;
 import com.iwhalecloud.byai.common.feign.response.datacloud.TermsOptionsResp;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.message.entity.ByaiMessage;
+import com.iwhalecloud.byai.common.storage.exception.StorageQuotaExceededException;
 import com.iwhalecloud.byai.manager.domain.aimodel.service.AiModelService;
 import com.iwhalecloud.byai.common.message.entity.ByaiMessageHotDto;
 import com.iwhalecloud.byai.common.message.service.ByaiMessageHotService;
@@ -306,6 +307,9 @@ public class AssistantChatController {
             UploadResult uploadResult = assistantChatApplicationService.uploadFiles(files, sessionId, sessionType,
                 agentId);
             return ResponseUtil.success(uploadResult);
+        }
+        catch (StorageQuotaExceededException e) {
+            throw e;
         }
         catch (Exception e) {
             logger.error(e.getMessage(), e);

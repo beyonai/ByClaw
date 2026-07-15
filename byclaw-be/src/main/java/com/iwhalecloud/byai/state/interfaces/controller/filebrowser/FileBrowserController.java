@@ -21,6 +21,7 @@ import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
+import com.iwhalecloud.byai.common.storage.exception.StorageQuotaExceededException;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.state.application.service.filebrowser.FileBrowserApplicationService;
 import com.iwhalecloud.byai.state.application.service.filebrowser.FileBrowserKnowledgeTransferApplicationService;
@@ -117,6 +118,8 @@ public class FileBrowserController {
         try {
             fileBrowserService.upload(userCode, resourceId, path, files);
             return ResponseUtil.successResponse();
+        } catch (StorageQuotaExceededException e) {
+            throw e;
         } catch (Exception e) {
             return ResponseUtil.fail("上传失败: " + e.getMessage());
         }

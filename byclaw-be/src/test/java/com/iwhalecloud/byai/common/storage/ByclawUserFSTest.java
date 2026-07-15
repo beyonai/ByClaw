@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.common.storage;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
@@ -26,6 +27,7 @@ import com.iwhalecloud.byai.common.storage.model.FileMetadata;
 import com.iwhalecloud.byai.common.storage.model.StorageLocation;
 import com.iwhalecloud.byai.common.storage.model.StorageObject;
 import com.iwhalecloud.byai.common.storage.model.StoragePrefix;
+import com.iwhalecloud.byai.manager.application.service.storage.UserStorageQuotaApplicationService;
 
 @ExtendWith(MockitoExtension.class)
 public class ByclawUserFSTest {
@@ -36,6 +38,9 @@ public class ByclawUserFSTest {
 
     @Mock
     private ObjectStorage objectStorage;
+
+    @Mock
+    private UserStorageQuotaApplicationService storageQuotaService;
 
     @BeforeEach
     void setUp() {
@@ -100,6 +105,38 @@ public class ByclawUserFSTest {
     }
 
     @Test
+    void successfulWriteCommitsReservedBytes() {
+        CurrentUserHolder.setLoginInfo(loginInfo("user001"));
+        ByclawUserFS byclawUserFS = new ByclawUserFS(objectStorage, storageQuotaService);
+        MockMultipartFile multipartFile = new MockMultipartFile("file", "quota.txt", "text/plain",
+            "quota".getBytes());
+        when(objectStorage.put(any(), any(), anyLong(), any())).thenReturn(new FileMetadata());
+
+        byclawUserFS.write(multipartFile, "/quota/");
+
+        verify(storageQuotaService).reserveWrite(7L, multipartFile.getSize());
+        verify(storageQuotaService).commitWrite(7L, multipartFile.getSize());
+        verify(storageQuotaService, never()).releaseWrite(any(), anyLong());
+    }
+
+    @Test
+    void failedWriteReleasesReservedBytes() {
+        CurrentUserHolder.setLoginInfo(loginInfo("user001"));
+        ByclawUserFS byclawUserFS = new ByclawUserFS(objectStorage, storageQuotaService);
+        MockMultipartFile multipartFile = new MockMultipartFile("file", "quota.txt", "text/plain",
+            "quota".getBytes());
+        when(objectStorage.put(any(), any(), anyLong(), any())).thenThrow(new IllegalStateException("write failed"));
+
+        assertThatThrownBy(() -> byclawUserFS.write(multipartFile, "/quota/"))
+            .isInstanceOf(IllegalStateException.class)
+            .hasMessageContaining("write failed");
+
+        verify(storageQuotaService).reserveWrite(7L, multipartFile.getSize());
+        verify(storageQuotaService).releaseWrite(7L, multipartFile.getSize());
+        verify(storageQuotaService, never()).commitWrite(any(), anyLong());
+    }
+
+    @Test
     void list_usesCurrentUserBucket() {
         CurrentUserHolder.setLoginInfo(loginInfo("user001"));
         ByclawUserFS byclawUserFS = new ByclawUserFS(objectStorage);
@@ -118,6 +155,7 @@ public class ByclawUserFSTest {
 
     private LoginInfo loginInfo(String userCode) {
         LoginInfo loginInfo = new LoginInfo();
+        loginInfo.setUserId(7L);
         loginInfo.setUserCode(userCode);
         return loginInfo;
     }

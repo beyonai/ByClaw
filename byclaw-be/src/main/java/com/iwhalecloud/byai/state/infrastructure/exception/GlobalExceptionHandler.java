@@ -14,6 +14,7 @@ import org.springframework.context.support.DefaultMessageSourceResolvable;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Controller;
 import org.springframework.validation.BindException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -27,6 +28,7 @@ import com.alibaba.fastjson.JSON;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.log.exception.BaseRuntimeException;
+import com.iwhalecloud.byai.common.storage.exception.StorageQuotaExceededException;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -46,6 +48,18 @@ public class GlobalExceptionHandler {
 
     @Value("${exception.log.sysCode:}")
     private String sysCode;
+
+    @ExceptionHandler(StorageQuotaExceededException.class)
+    public ResponseEntity<ResponseUtil<Object>> handleStorageQuotaExceeded(StorageQuotaExceededException exception) {
+        logger.warn("Storage quota rejected write: {}", exception.getMessage());
+        return new ResponseEntity<>(ResponseUtil.fail(exception.getMessage()), HttpStatus.INSUFFICIENT_STORAGE);
+    }
+
+    @ExceptionHandler(AccessDeniedException.class)
+    public ResponseEntity<ResponseUtil<Object>> handleAccessDenied(AccessDeniedException exception) {
+        logger.warn("Access denied: {}", exception.getMessage());
+        return new ResponseEntity<>(ResponseUtil.fail(exception.getMessage()), HttpStatus.FORBIDDEN);
+    }
 
     @ExceptionHandler(value = BaseRuntimeException.class)
     public void baseExceptionHandler(HttpServletResponse response, BaseRuntimeException baseRuntimeException)

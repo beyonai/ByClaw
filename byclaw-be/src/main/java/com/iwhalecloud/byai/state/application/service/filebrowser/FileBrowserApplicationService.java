@@ -4,13 +4,17 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
+import com.iwhalecloud.byai.manager.application.service.storage.UserStorageQuotaApplicationService;
+import com.iwhalecloud.byai.manager.entity.storage.UserStorageQuota;
 import com.iwhalecloud.byai.state.application.service.session.ByClawSkillResourceApplicationService;
 import com.iwhalecloud.byai.state.domain.filebrowser.vo.FileBrowserItemVo;
 
@@ -25,10 +29,14 @@ public class FileBrowserApplicationService {
 
     private final ByClawSkillResourceApplicationService byClawSkillResourceApplicationService;
 
+    private final UserStorageQuotaApplicationService storageQuotaService;
+
     public FileBrowserApplicationService(FileBrowserProviderFactory providerFactory,
-        ByClawSkillResourceApplicationService byClawSkillResourceApplicationService) {
+        ByClawSkillResourceApplicationService byClawSkillResourceApplicationService,
+        UserStorageQuotaApplicationService storageQuotaService) {
         this.providerFactory = providerFactory;
         this.byClawSkillResourceApplicationService = byClawSkillResourceApplicationService;
+        this.storageQuotaService = storageQuotaService;
     }
 
     public String getDefaultPath(Long resourceId) {
@@ -40,9 +48,42 @@ public class FileBrowserApplicationService {
     }
 
     public void upload(String userCode, Long resourceId, String relativePath, MultipartFile[] files) throws Exception {
-        providerFactory.getProvider().upload(userCode, resourceId, relativePath, files);
-        byClawSkillResourceApplicationService.registerFileManagedSkills(userCode, resourceId, relativePath,
-            files == null ? java.util.Collections.emptyList() : java.util.Arrays.asList(files));
+        if (files == null || files.length == 0) {
+            return;
+        }
+        UserStorageQuota quota = storageQuotaService.ensureQuotaByUserCode(userCode);
+        FileBrowserProvider provider = providerFactory.getProvider();
+        List<MultipartFile> uploadFiles = new ArrayList<>();
+        long reservedBytes = 0L;
+        for (MultipartFile file : files) {
+            if (file == null || file.isEmpty()) {
+                continue;
+            }
+            uploadFiles.add(file);
+            reservedBytes = Math.addExact(reservedBytes, file.getSize());
+        }
+        if (uploadFiles.isEmpty()) {
+            return;
+        }
+
+        // Reserve the whole batch before the first write so quota rejection cannot leave a partial upload.
+        storageQuotaService.reserveWrite(quota.getUserId(), reservedBytes);
+        long unsettledBytes = reservedBytes;
+        try {
+            for (MultipartFile file : uploadFiles) {
+                long bytes = file.getSize();
+                provider.upload(userCode, resourceId, relativePath, new MultipartFile[] {file});
+                storageQuotaService.commitWrite(quota.getUserId(), bytes);
+                unsettledBytes -= bytes;
+                byClawSkillResourceApplicationService.registerFileManagedSkills(userCode, resourceId, relativePath,
+                    List.of(file));
+            }
+        }
+        finally {
+            if (unsettledBytes > 0L) {
+                storageQuotaService.releaseWrite(quota.getUserId(), unsettledBytes);
+            }
+        }
     }
 
     public InputStream download(String userCode, Long resourceId, String relativePath) {
@@ -51,7 +92,14 @@ public class FileBrowserApplicationService {
 
     public void delete(String userCode, Long resourceId, List<String> relativePaths) {
         assertNotResourceManagedPath(relativePaths);
-        providerFactory.getProvider().delete(userCode, resourceId, relativePaths);
+        if (relativePaths == null || relativePaths.isEmpty()) {
+            return;
+        }
+        UserStorageQuota quota = storageQuotaService.ensureQuotaByUserCode(userCode);
+        FileBrowserProvider provider = providerFactory.getProvider();
+        long deletedBytes = calculateDeletedBytes(provider, userCode, resourceId, relativePaths);
+        provider.delete(userCode, resourceId, relativePaths);
+        storageQuotaService.commitDelete(quota.getUserId(), deletedBytes);
     }
 
     public void rename(String userCode, Long resourceId, String sourcePath, String newName) {
@@ -120,6 +168,66 @@ public class FileBrowserApplicationService {
         String folderName) {
         return provider.list(userCode, resourceId, parentPath).stream()
             .anyMatch(item -> item.isDir() && folderName.equals(item.getName()));
+    }
+
+    private long calculateDeletedBytes(FileBrowserProvider provider, String userCode, Long resourceId,
+        List<String> relativePaths) {
+        Set<String> measuredFiles = new HashSet<>();
+        Set<String> visitedDirectories = new HashSet<>();
+        long total = 0L;
+        for (String relativePath : relativePaths) {
+            if (StringUtils.isBlank(relativePath)) {
+                continue;
+            }
+            total = Math.addExact(total, calculatePathBytes(provider, userCode, resourceId, relativePath,
+                measuredFiles, visitedDirectories));
+        }
+        return total;
+    }
+
+    private long calculatePathBytes(FileBrowserProvider provider, String userCode, Long resourceId,
+        String relativePath, Set<String> measuredFiles, Set<String> visitedDirectories) {
+        if (relativePath.endsWith("/")) {
+            String directoryPath = normalizeDirPath(relativePath);
+            if (!visitedDirectories.add(directoryPath)) {
+                return 0L;
+            }
+            long total = 0L;
+            for (FileBrowserItemVo item : provider.list(userCode, resourceId, directoryPath)) {
+                if (item == null) {
+                    continue;
+                }
+                String itemPath = StringUtils.defaultIfBlank(item.getPath(), directoryPath + item.getName());
+                if (item.isDir()) {
+                    total = Math.addExact(total, calculatePathBytes(provider, userCode, resourceId,
+                        normalizeDirPath(itemPath), measuredFiles, visitedDirectories));
+                }
+                else {
+                    String normalizedFilePath = normalizePath(itemPath);
+                    if (measuredFiles.add(normalizedFilePath)) {
+                        total = Math.addExact(total, normalizedItemSize(item));
+                    }
+                }
+            }
+            return total;
+        }
+
+        String normalizedFilePath = normalizePath(relativePath);
+        if (!measuredFiles.add(normalizedFilePath)) {
+            return 0L;
+        }
+        int lastSlash = normalizedFilePath.lastIndexOf('/');
+        String parentPath = lastSlash <= 0 ? "/" : normalizedFilePath.substring(0, lastSlash + 1);
+        for (FileBrowserItemVo item : provider.list(userCode, resourceId, parentPath)) {
+            if (item != null && !item.isDir() && normalizedFilePath.equals(normalizePath(item.getPath()))) {
+                return normalizedItemSize(item);
+            }
+        }
+        return 0L;
+    }
+
+    private long normalizedItemSize(FileBrowserItemVo item) {
+        return item.getSize() == null ? 0L : Math.max(0L, item.getSize());
     }
 
     private List<String> splitPath(String path) {

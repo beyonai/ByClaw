@@ -77,12 +77,19 @@ public abstract class ByclawFS {
             throw new IllegalArgumentException(I18nUtil.get("byclaw.fs.multipart.file.cannot.be.empty"));
         }
         String targetPath = resolveWritePath(filePath, multipartFile.getOriginalFilename());
+        Object reservation = beforeWrite(multipartFile.getSize());
+        boolean success = false;
         try {
-            return objectStorage.put(buildLocation(targetPath), multipartFile.getInputStream(),
+            FileMetadata metadata = objectStorage.put(buildLocation(targetPath), multipartFile.getInputStream(),
                 multipartFile.getSize(), multipartFile.getContentType());
+            success = true;
+            return metadata;
         }
         catch (IOException e) {
             throw new IllegalStateException(I18nUtil.get("byclaw.fs.write.file.failed", targetPath), e);
+        }
+        finally {
+            afterWrite(reservation, success);
         }
     }
 
@@ -102,7 +109,25 @@ public abstract class ByclawFS {
             throw new IllegalArgumentException(I18nUtil.get("byclaw.fs.write.directory.original.filename.cannot.be.empty"));
         }
         String resolvedContentType = StringUtils.defaultIfBlank(contentType, "application/octet-stream");
-        return objectStorage.put(buildLocation(normalized), inputStream, size, resolvedContentType);
+        Object reservation = beforeWrite(size);
+        boolean success = false;
+        try {
+            FileMetadata metadata = objectStorage.put(buildLocation(normalized), inputStream, size, resolvedContentType);
+            success = true;
+            return metadata;
+        }
+        finally {
+            afterWrite(reservation, success);
+        }
+    }
+
+    /** Hook for scoped write policies such as the current user's storage quota. */
+    protected Object beforeWrite(long size) {
+        return null;
+    }
+
+    /** Hook invoked after a scoped write attempt, including failed writes. */
+    protected void afterWrite(Object reservation, boolean success) {
     }
 
     public abstract String getBucketOrRoot();

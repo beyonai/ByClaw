@@ -137,6 +137,7 @@ public class OpenClawFileBrowserProvider implements FileBrowserProvider {
                 LOGGER.info("OpenClaw文件删除成功: path={}", path);
             } catch (Exception e) {
                 LOGGER.warn("OpenClaw文件删除失败: userCode={}, path={}, error={}", userCode, relativePath, e.getMessage());
+                throw new RuntimeException("文件删除失败：沙箱环境不可用", e);
             }
         }
     }
