@@ -31,6 +31,37 @@ def _init_discovery_redis() -> None:
     )
 
 
+async def _get_via_discovery(
+    service_name: str,
+    path: str,
+    headers: dict[str, str],
+) -> Any:
+    """通过服务发现调用指定服务的 GET 接口。"""
+    from by_framework.core.discovery import DiscoveryClient  # type: ignore[import-untyped]
+    from by_framework.util.discovery_http_client import (
+        DiscoveryHttpClient,  # type: ignore[import-untyped]
+    )
+    from by_framework.util.http_client import RetryConfig  # type: ignore[import-untyped]
+
+    _init_discovery_redis()
+    discovery_client = DiscoveryClient(cache_interval=5)
+    retry_config = RetryConfig(max_attempts=3, retry_on_status_codes={502, 503, 504})
+    try:
+        async with DiscoveryHttpClient(
+            discovery_client, retry_config=retry_config, health_threshold_ms=-1
+        ) as client:
+            response = await client.get(service_name, path, headers=headers)
+    finally:
+        await discovery_client.close()
+
+    body: dict[str, Any] = response.data if isinstance(response.data, dict) else {}
+    if not response.is_success or body.get("code") != 200:
+        raise ValueError(
+            f"HTTP {response.status_code} {service_name}{path}: {body.get('message', body)}"
+        )
+    return body.get("data")
+
+
 async def _post_via_discovery(
     service_name: str,
     path: str,
@@ -55,6 +86,8 @@ async def _post_via_discovery(
     finally:
         await discovery_client.close()
 
+    if isinstance(response.data, str):
+        return response.data
     body: dict[str, Any] = response.data if isinstance(response.data, dict) else {}
     if not response.is_success or body.get("code", 0) != 0:
         raise ValueError(
@@ -105,6 +138,81 @@ def post_ontology_api(path: str, payload: dict[str, Any]) -> Any:
         headers["X-User-Code"] = user_code
 
     api_path = f"/api/v1/ontology-manager{path}"
+    return _run_async_in_thread(_post_via_discovery(service_name, api_path, payload, headers))
+
+
+def get_kb_resource_from_redis(kb_resource_id: str) -> dict[str, Any]:
+    """从 Redis 读取知识库资源信息，key 为 KG_DOC_{kb_resource_id}。
+
+    Args:
+        kb_resource_id: 知识库资源 ID，如 "10000003"
+
+    Returns:
+        资源信息字典，包含 resourceCode、resourceName 等字段
+
+    Raises:
+        ValueError: key 不存在或数据格式异常时
+    """
+    import redis as _redis
+
+    client = _redis.Redis(
+        host=os.getenv("DATACLOUD_GATEWAY_REDIS_HOST", os.getenv("REDIS_HOST", "localhost")),
+        port=int(os.getenv("DATACLOUD_GATEWAY_REDIS_PORT", os.getenv("REDIS_PORT", "6379"))),
+        db=int(os.getenv("DATACLOUD_GATEWAY_REDIS_DATABASE", os.getenv("REDIS_DATABASE", "0"))),
+        password=os.getenv("DATACLOUD_GATEWAY_REDIS_PASSWORD", os.getenv("REDIS_PASSWORD")) or None,
+        username=os.getenv("DATACLOUD_GATEWAY_REDIS_USERNAME", os.getenv("REDIS_USERNAME")) or None,
+        decode_responses=True,
+    )
+
+    key = f"KG_DOC_{kb_resource_id}"
+    raw = client.get(key)
+    if not raw:
+        raise ValueError(f"Redis 中未找到知识库资源: {key}")
+
+    data = json.loads(raw)
+    if not isinstance(data, dict):
+        raise ValueError(f"Redis key {key} 数据格式异常，期望 dict，实际: {type(data).__name__}")
+    return data
+
+
+def get_ontology_base(path: str) -> Any:
+    """GET /api/v1/ontologyBases/{path}。
+
+    Args:
+        path: 不含前缀的路径，如 "objects/my_code"
+    """
+    service_name = os.environ.get("DATACLOUD_DOMAINNAME", _DEFAULT_ONTOLOGY_SERVICE).strip()
+
+    token = os.environ.get("BEYOND_TOKEN", "").strip()
+    user_code = os.environ.get("USER_CODE", "").strip()
+    headers: dict[str, str] = {"Content-Type": "application/json"}
+    if token:
+        headers["Beyond-Token"] = token
+    if user_code:
+        headers["X-User-Code"] = user_code
+
+    api_path = f"/api/v1/ontologyBases/{path.lstrip('/')}"
+    return _run_async_in_thread(_get_via_discovery(service_name, api_path, headers))
+
+
+def post_rpc(path: str, payload: dict[str, Any]) -> Any:
+    """POST /api/v1/rpc/{path}。
+
+    Args:
+        path: 不含前缀的路径，如 "term/list"
+        payload: 请求体
+    """
+    service_name = os.environ.get("DATACLOUD_DOMAINNAME", _DEFAULT_ONTOLOGY_SERVICE).strip()
+
+    token = os.environ.get("BEYOND_TOKEN", "").strip()
+    user_code = os.environ.get("USER_CODE", "").strip()
+    headers: dict[str, str] = {"Content-Type": "application/json"}
+    if token:
+        headers["Beyond-Token"] = token
+    if user_code:
+        headers["X-User-Code"] = user_code
+
+    api_path = f"/api/v1/rpc/{path.lstrip('/')}"
     return _run_async_in_thread(_post_via_discovery(service_name, api_path, payload, headers))
 
 
@@ -204,3 +312,8 @@ def load_embedding_model_from_redis() -> bool:
     except Exception:
         logger.warning("从 Redis 加载 Embedding 模型失败，向量回填将跳过", exc_info=True)
         return False
+
+
+def stdout_json(data: Any) -> None:
+    """向 stdout 输出 JSON 并 flush。"""
+    print(json.dumps(data, ensure_ascii=False), flush=True)
