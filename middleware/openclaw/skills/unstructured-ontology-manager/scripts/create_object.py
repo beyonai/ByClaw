@@ -26,10 +26,10 @@ I/O 协议：stdin JSON → stdout JSON
             {
                 "relation_code": "has_participant",    // 关系编码（英文下划线）
                 "relation_name": "参会人",              // 关系名称
-                "target_entity_code": "by_employee",   // 目标对象编码（对方对象必须已存在）
+                "target_class": "by_employee",   // 目标对象编码（对方对象必须已存在）
                 "relation_type": "MANY_TO_ONE",        // 关系类型：ONE_TO_ONE / ONE_TO_MANY / MANY_TO_ONE / MANY_TO_MANY
                 "join_keys": [                         // 连接键：本对象哪个字段 → 目标对象哪个字段
-                    {"from_field": "employee_code", "to_field": "code"}
+                    {"sourceField": "employee_code", "targetField": "code"}
                 ]
             }
         ],
@@ -41,8 +41,8 @@ I/O 协议：stdin JSON → stdout JSON
     - kb_resource_id 必填，脚本通过 Redis key KG_DOC_{kb_resource_id} 自动解析 kb_id（resourceCode）；
     - relations 为可选数组，描述本对象与其他已有本体对象之间的语义关联；
       每条关系包含 relation_code（关系编码）、relation_name（关系名称）、
-      target_entity_code（目标对象编码）、relation_type（关系基数）四个字段；
-      target_entity_code 引用的对象必须已在本体库中存在，否则 API 侧会报错；
+      target_class（目标对象编码）、relation_type（关系基数）四个字段；
+      target_class 引用的对象必须已在本体库中存在，否则 API 侧会报错；
     - template_file_path / rules_file_path 为可选文件路径；
     - 若路径不为空，脚本会通过外部接口读取文件内容，分别以 template / rules 为键写入 ext_property 字典后传给 ontology API；
     - 若路径不为空但读取内容为空，直接报错，不会继续调用 ontology API。
@@ -209,6 +209,7 @@ def main() -> None:
                 "kb_resource_id": kb_resource_id,
                 "kb_id": kb_id,
                 "kb_directory": params.get("kb_directory", ""),
+                "object_relations": params.get("relations") or [],
             },
         )
         print(json.dumps(result, ensure_ascii=False), flush=True)

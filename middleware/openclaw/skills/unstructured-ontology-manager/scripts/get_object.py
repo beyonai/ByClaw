@@ -79,6 +79,8 @@ def main() -> None:
     ext_property = obj_data.get("extProperty", {})
     template = ext_property.get("template", "")
     rules = ext_property.get("rules", {})
+    kd_dir = ext_property.get("kb_directory", "")
+    kd_resource_id = ext_property.get("kb_resource_id", "")
     stdout_json(
         {
             "ok": True,
@@ -91,7 +93,9 @@ def main() -> None:
                 "userCode": obj_data.get("userCode", ""),
                 "properties": properties,
                 "template": template,
-                "rules": rules
+                "rules": rules,
+                f"<{obj_data.get("objectName", "")}>对应的知识库id": kd_resource_id,
+                f"<{obj_data.get("objectName", "")}>对应的知识库目录": kd_dir
             },
         }
     )

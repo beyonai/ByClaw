@@ -67,15 +67,15 @@ allowed-tools: execute, read_file
    - 若是，向用户收集每条关系的以下信息，允许添加多条：
      - `relation_code`：关系编码（英文下划线，如 `has_participant`）
      - `relation_name`：关系名称（如 `参会人`）
-     - `target_entity_code`：目标对象编码（目标对象必须已在本体库中存在，可先通过"查看本体对象列表"确认）
+     - `target_class`：目标对象编码（目标对象必须已在本体库中存在，可先通过"查看本体对象列表"确认）
      - `relation_type`：关系基数，从以下选项中选择：
        - `ONE_TO_ONE`：一对一
        - `ONE_TO_MANY`：一对多
        - `MANY_TO_ONE`：多对一
        - `MANY_TO_MANY`：多对多
      - `join_keys`：连接键，指定本对象的哪个属性与目标对象的哪个属性关联，格式为：
-       `[{"from_field": "<本对象属性编码>", "to_field": "<目标对象属性编码>"}]`
-       例：本对象有 `employee_code` 字段，目标对象 `by_employee` 有 `code` 字段，则填 `[{"from_field": "employee_code", "to_field": "code"}]`
+       `[{"sourceField": "<本对象属性编码>", "targetField": "<目标对象属性编码>"}]`
+       例：本对象有 `employee_code` 字段，目标对象 `by_employee` 有 `code` 字段，则填 `[{"sourceField": "employee_code", "targetField": "code"}]`
    - 若否，`relations` 传空数组 `[]`
 
 确认以上信息无误后，再执行收集阶段脚本。
@@ -84,21 +84,21 @@ allowed-tools: execute, read_file
 
 每条意图对应一条 Bash 命令，**直接执行，不得改写**：
 
-| 用户表达 | Bash 命令（在 skill 根目录执行）                                                                                                                                                                                                                                                                                                                            |
-|----------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| 查询对象详情 / 查看对象有哪些属性 | `/usr/local/bin/python3 scripts/get_object.py '{"object_code":"<对象编码>"}'`                                                                                                                                                                                                                                                                         |
-| 查某属性绑定了哪些术语 | `/usr/local/bin/python3 scripts/search_property_terms.py '{"object_code":"<对象编码>","property_code":"<属性编码>"}'`                                                                                                                                                                                                                                     |
-| 在某属性的术语中搜索关键字 | `/usr/local/bin/python3 scripts/search_property_terms.py '{"object_code":"<对象编码>","property_code":"<属性编码>","keyword":"<关键字>"}'`                                                                                                                                                                                                                   |
-| 查看/列出 + 对象 | `/usr/local/bin/python3 scripts/list_resources.py '{}'`                                                                                                                                                                                                                                                                                           |
-| 查看知识库列表 | `/usr/local/bin/python3 scripts/list_knowledge_bases.py '{}'`                                                                                                                                                                                                                                                                                     |
-| 查看知识库目录 | `/usr/local/bin/python3 scripts/list_kb_directories.py '{"kb_id":"<kb_id>"}'`                                                                                                                                                                                                                                                                     |
-| 创建/新建 + 对象（收集阶段） | `/usr/local/bin/python3 scripts/create_object.py '{"action":"collect","entity_code":"<code>","entity_name":"<name>","entity_desc":"<entity_desc>","kb_resource_id":"<resourceId>","kb_id": "<resourceCode>", "kb_directory":"<dir>","fields":[],"relations":[{"relation_code":"<rel_code>","relation_name":"<rel_name>","target_entity_code":"<target_code>","relation_type":"<ONE_TO_ONE|ONE_TO_MANY|MANY_TO_ONE|MANY_TO_MANY>"}],"session_id":"<sid>","template_file_path":"<path_or_empty>","rules_file_path":"<path_or_empty>"}'` |
-| 确认提交 | `/usr/local/bin/python3 scripts/create_object.py '{"action":"submit","entity_code":"<code>","session_id":"<sid>"}'`                                                                                                                                                                                                                               |
-| 删除 + 对象 | `/usr/local/bin/python3 scripts/delete_object.py '{"entity_code":"<code>"}'`                                                                                                                                                                                                                                                                      |
-| 挂载/添加到助理/数字员工 | `/usr/local/bin/python3 scripts/mount_resource.py '{"agent_id":<id>,"resource_code":"<code>"}'`                                                                                                                                                                                                                                                   |
-| 查看术语类型 | `/usr/local/bin/python3 scripts/list_term_types.py '{}'`                                                                                                                                                                                                                                                                                          |
-| 创建目录/文件夹 | `/usr/local/bin/python3 scripts/create_directory.py '{"resource_id":"<resourceId>","directory_name":"<name>"}'`                                                                                                                                                                                                                                   |
-| 查看术语值 | `/usr/local/bin/python3 scripts/get_term_type_values.py '{"term_type_code":"<code>"}'`                                                                                                                                                                                                                                                            |
+| 用户表达 | Bash 命令（在 skill 根目录执行）                                                                                                                                                                                                                                                                                                                                                              |
+|----------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 查询对象详情 / 查看对象有哪些属性 | `/usr/local/bin/python3 scripts/get_object.py '{"object_code":"<对象编码>"}'`                                                                                                                                                                                                                                                                                                           |
+| 查某属性绑定了哪些术语 | `/usr/local/bin/python3 scripts/search_property_terms.py '{"object_code":"<对象编码>","property_code":"<属性编码>"}'`                                                                                                                                                                                                                                                                       |
+| 在某属性的术语中搜索关键字 | `/usr/local/bin/python3 scripts/search_property_terms.py '{"object_code":"<对象编码>","property_code":"<属性编码>","keyword":"<关键字>"}'`                                                                                                                                                                                                                                                     |
+| 查看/列出 + 对象 | `/usr/local/bin/python3 scripts/list_resources.py '{}'`                                                                                                                                                                                                                                                                                                                             |
+| 查看知识库列表 | `/usr/local/bin/python3 scripts/list_knowledge_bases.py '{}'`                                                                                                                                                                                                                                                                                                                       |
+| 查看知识库目录 | `/usr/local/bin/python3 scripts/list_kb_directories.py '{"kb_id":"<kb_id>"}'`                                                                                                                                                                                                                                                                                                       |
+| 创建/新建 + 对象（收集阶段） | `/usr/local/bin/python3 scripts/create_object.py '{"action":"collect","entity_code":"<code>","entity_name":"<name>","entity_desc":"<entity_desc>","kb_resource_id":"<resourceId>","kb_id":"<resourceCode>","kb_directory":"<dir>","fields":[],"relations":[{"relation_code":"<rel_code>","relation_name":"<rel_name>","target_class":"<target_code>","relation_type":"<ONE_TO_ONE|ONE_TO_MANY|MANY_TO_ONE|MANY_TO_MANY>","join_keys":[{"sourceField":"<本对象属性编码>","targetField":"<目标对象属性编码>"}]}],"session_id":"<sid>","template_file_path":"<path_or_empty>","rules_file_path":"<path_or_empty>"}'` |
+| 确认提交 | `/usr/local/bin/python3 scripts/create_object.py '{"action":"submit","entity_code":"<code>","session_id":"<sid>"}'`                                                                                                                                                                                                                                                                 |
+| 删除 + 对象 | `/usr/local/bin/python3 scripts/delete_object.py '{"entity_code":"<code>"}'`                                                                                                                                                                                                                                                                                                        |
+| 挂载/添加到助理/数字员工 | `/usr/local/bin/python3 scripts/mount_resource.py '{"agent_id":<id>,"resource_code":"<code>"}'`                                                                                                                                                                                                                                                                                     |
+| 查看术语类型 | `/usr/local/bin/python3 scripts/list_term_types.py '{}'`                                                                                                                                                                                                                                                                                                                            |
+| 创建目录/文件夹 | `/usr/local/bin/python3 scripts/create_directory.py '{"resource_id":"<resourceId>","directory_name":"<name>"}'`                                                                                                                                                                                                                                                                     |
+| 查看术语值 | `/usr/local/bin/python3 scripts/get_term_type_values.py '{"term_type_code":"<code>"}'`                                                                                                                                                                                                                                                                                              |
 
 **输出处理规则**：
 - `{"ok": true, ...}` → 操作成功，向用户展示 `data` 中的关键信息
@@ -119,9 +119,9 @@ allowed-tools: execute, read_file
 - `relations`：可选，对象间关联关系数组；每条关系包含以下五个字段：
   - `relation_code`：关系编码（英文下划线，如 `has_participant`）
   - `relation_name`：关系名称（如 `参会人`）
-  - `target_entity_code`：目标对象编码，**目标对象必须已在本体库中存在**，可先通过查看对象列表确认
+  - `target_class`：目标对象编码，**目标对象必须已在本体库中存在**，可先通过查看对象列表确认
   - `relation_type`：关系基数，可选值 `ONE_TO_ONE` / `ONE_TO_MANY` / `MANY_TO_ONE` / `MANY_TO_MANY`
-  - `join_keys`：连接键数组，指定本对象与目标对象通过哪对属性关联，格式 `[{"from_field": "<本对象属性编码>", "to_field": "<目标对象属性编码>"}]`
+  - `join_keys`：连接键数组，指定本对象与目标对象通过哪对属性关联，格式 `[{"sourceField": "<本对象属性编码>", "targetField": "<目标对象属性编码>"}]`
 
 ## 认证与环境变量
 
