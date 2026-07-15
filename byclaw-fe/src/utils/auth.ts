@@ -98,15 +98,8 @@ const normalizeAdminVipParamValue = (value: any): string[] => {
   if (!text) return [];
 
   if (text.startsWith('[') || text.startsWith('{') || (text.startsWith('"') && text.endsWith('"'))) {
-    try {
-      // paramValue 可能是 JSON 数组，也可能是普通逗号字符串；只在看起来像 JSON 时解析。
-      return normalizeAdminVipParamValue(JSON.parse(text));
-    } catch {
-      return text
-        .split(',')
-        .map((item) => item.trim())
-        .filter(Boolean);
-    }
+    // 看起来像 JSON 的配置解析失败时交给外层兜底，避免把 "{invalid}" 当成合法用户编码。
+    return normalizeAdminVipParamValue(JSON.parse(text));
   }
 
   return text
