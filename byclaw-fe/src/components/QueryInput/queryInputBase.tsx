@@ -7,6 +7,7 @@ import classNames from 'classnames';
 import { agentTypeMap } from '@/constants/agent';
 import { IMessageState } from '@/constants/message';
 import { chatModeMap, IChatModeType } from '@/constants/query';
+import { ResourceTypeMap } from '@/constants/resource';
 import type { ISendProps } from '@/hooks/useChat';
 import type { IAgentCache, IAgentType } from '@/typescript/agent';
 import type { IFile } from '@/typescript/file';
@@ -206,6 +207,35 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
 
   getCurrentInputPayload = () => {
     return this.richInputRef.current?.getPayload?.();
+  };
+
+  // # 引用只能按唯一员工 ID 查询；多 @ 员工时返回多个 ID，用于隐藏 # 入口。
+  getCurrentResourceList = () => {
+    return this.getCurrentInputPayload()?.resourceList || this.state.resourceList || [];
+  };
+
+  getInlineDigitalEmployeeList = () => {
+    return this.getCurrentResourceList().filter(
+      (item) => `${item.resourceType}` === ResourceTypeMap.digitalEmployee && item.resourceId
+    );
+  };
+
+  getQuoteAgentIds = (): string[] => {
+    const inlineAgentIds = this.getInlineDigitalEmployeeList()
+      .map((item) => `${item.resourceId}`)
+      .filter(Boolean);
+    const uniqueInlineAgentIds = Array.from(new Set(inlineAgentIds));
+    if (uniqueInlineAgentIds.length) {
+      return uniqueInlineAgentIds;
+    }
+
+    const { agentId } = this.props.globalContext;
+    return agentId ? [`${agentId}`] : [];
+  };
+
+  getQuoteAgentId = (): string | undefined => {
+    const agentIds = this.getQuoteAgentIds();
+    return agentIds.length === 1 ? agentIds[0] : undefined;
   };
 
   autoSend = () => {
@@ -538,18 +568,26 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
 
   checkCanQuote = () => {
     const { employeesList } = this.props;
-    const { agentId } = this.props.globalContext;
+    const quoteAgentId = this.getQuoteAgentId();
 
-    if (!agentId || !employeesList) return false;
+    if (!quoteAgentId || !employeesList) return false;
     // 页面集成类型的数字员工，不允许#技能
-    const integrationType = employeesList?.find((item) => `${item.agentId}` === `${agentId}`)?.integrationType;
+    const integrationType = employeesList?.find(
+      (item) =>
+        `${item.agentId}` === `${quoteAgentId}` ||
+        `${item.id}` === `${quoteAgentId}` ||
+        `${item.resourceId}` === `${quoteAgentId}` ||
+        `${item.resourceCode}` === `${quoteAgentId}`
+    )?.integrationType;
     if (integrationType === 'PAGE') return false;
     return true;
   };
 
   chechCannotAt = () => this.props.cannotAt;
 
-  getResourceAgentIds = (): string | undefined => undefined;
+  getResourceAgentIds = (): string | undefined => {
+    return this.getQuoteAgentId();
+  };
 
   renderInput() {
     const { cannotAt, myAgentType, setMyAgentType, chatMode, isBottom, placeholder } = this.props;

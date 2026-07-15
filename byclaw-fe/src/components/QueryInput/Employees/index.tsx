@@ -206,12 +206,14 @@ class EmployeesInputChat extends QueryInputBase<IProps, IState> {
     const { showMentionPopoverType } = this.state;
 
     const canQuote = this.checkCanQuote();
+    const quoteAgentId = this.getQuoteAgentId();
     const mentionDigitalEmployeeTip = getIntl().formatMessage({ id: 'queryInput.tooltip.mentionDigitalEmployee' });
 
     return (
       <>
         <Space size="large" className={styles.bottomRight}>
           <FileBrowserEntry />
+          {/* 多员工模式下 @ 入口始终保留，用于继续追加数字员工。 */}
           <MentionPopover
             type="@"
             chatMode={chatModeMap.expert}
@@ -242,8 +244,9 @@ class EmployeesInputChat extends QueryInputBase<IProps, IState> {
             <MentionPopover
               type="#"
               chatMode={chatMode}
-              agentId={agentId}
+              agentId={quoteAgentId}
               sessionId={sessionId}
+              resourceAgentIds={this.getResourceAgentIds()}
               onSelect={this.onSelectMentionPopoverItem}
               popoverPos={showMentionPopoverType === '#' ? staticEmptyObject : undefined}
               onClose={() => this.setState((prev) => ({ ...prev, showMentionPopoverType: '' }))}
