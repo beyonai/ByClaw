@@ -6,7 +6,6 @@ import com.iwhalecloud.byai.manager.entity.devloop.ScanLogItem;
 import com.iwhalecloud.byai.manager.entity.devloop.ScanSource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.io.BufferedReader;
@@ -29,8 +28,7 @@ public class DingtalkScanService {
     private static final DateTimeFormatter ISO_FMT =
         DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss'+08:00'");
 
-    @Value("${devloop.dws.bin:dws}")
-    private String dwsBin;
+    private static final String DWS_BIN = "dws";
 
     @Autowired
     private ScanLogService scanLogService;
@@ -66,7 +64,7 @@ public class DingtalkScanService {
             String endStr = end.format(ISO_FMT);
 
             List<String> cmd = new ArrayList<>();
-            cmd.add(dwsBin);
+            cmd.add(DWS_BIN);
             cmd.add("chat");
             cmd.add("message");
             cmd.add("search");

@@ -320,7 +320,7 @@ public class DevloopApplicationService {
     @Transactional(rollbackFor = Exception.class)
     public ResponseUtil<Void> saveGitHubPat(String pat) {
         Long userId = CurrentUserHolder.getCurrentUserId();
-        String paramKey = "github_pat";
+        String paramKey = "GH_TOKEN";
 
         LambdaQueryWrapper<com.iwhalecloud.byai.manager.entity.users.UserPrivateParam> wrapper =
             new LambdaQueryWrapper<>();
@@ -356,7 +356,7 @@ public class DevloopApplicationService {
     /** 检查当前用户是否已配置GitHub PAT */
     public ResponseUtil<Map<String, Object>> checkGitHubPat() {
         Long userId = CurrentUserHolder.getCurrentUserId();
-        String paramKey = "github_pat";
+        String paramKey = "GH_TOKEN";
 
         LambdaQueryWrapper<com.iwhalecloud.byai.manager.entity.users.UserPrivateParam> wrapper =
             new LambdaQueryWrapper<>();
@@ -373,15 +373,14 @@ public class DevloopApplicationService {
         return ResponseUtil.successResponse(result);
     }
 
-    @org.springframework.beans.factory.annotation.Value("${devloop.dws.bin:dws}")
-    private String dwsBin;
+    private static final String DWS_BIN = "dws";
 
     /** 通过DWS CLI搜索钉钉群 */
     public ResponseUtil<List<Map<String, Object>>> searchDingtalkGroups(String query) {
         List<Map<String, Object>> groups = new ArrayList<>();
         try {
             List<String> cmd = new ArrayList<>();
-            cmd.add(dwsBin);
+            cmd.add(DWS_BIN);
             cmd.add("chat");
             cmd.add("search");
             cmd.add("--query");

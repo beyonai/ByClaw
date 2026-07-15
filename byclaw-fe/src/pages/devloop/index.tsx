@@ -622,14 +622,16 @@ const NeedCollect: React.FC = () => {
       )}
       {addForm.type === 'github_issue' && (
         <>
-          <div className={styles.formField}>
-            <label>GitHub PAT {hasPatSaved && <Tag color="green">已保存</Tag>}</label>
-            <Input.Password
-              placeholder={hasPatSaved ? '已保存，留空使用已有 PAT' : '输入 Personal Access Token'}
-              value={addForm.pat}
-              onChange={(e) => setAddForm({ ...addForm, pat: e.target.value })}
-            />
-          </div>
+          {!hasPatSaved && (
+            <div className={styles.formField}>
+              <label>GitHub PAT</label>
+              <Input.Password
+                placeholder="输入 Personal Access Token"
+                value={addForm.pat}
+                onChange={(e) => setAddForm({ ...addForm, pat: e.target.value })}
+              />
+            </div>
+          )}
           <div className={styles.formField}>
             <label>仓库</label>
             <Input
@@ -804,7 +806,6 @@ const NeedCollect: React.FC = () => {
       <div className={styles.tabSummary}>
         <span>{requirements.length} 个需求</span>
         <span>{tasks.length} 个研发任务</span>
-        <span>0 个我的会话</span>
       </div>
 
       {activeTab === 'requirements' && (
