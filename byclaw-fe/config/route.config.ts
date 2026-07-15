@@ -81,6 +81,11 @@ export default [
             name: 'managerNotification',
             component: './manager/pages/NotificationMgr',
           },
+          {
+            path: '/manager/storageQuota',
+            name: 'managerStorageQuota',
+            component: './manager/pages/StorageQuotaMgr',
+          },
         ],
       },
       {

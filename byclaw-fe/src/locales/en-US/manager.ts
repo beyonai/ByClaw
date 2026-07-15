@@ -1,11 +1,13 @@
 import dashboardLocale from '@/pages/manager/pages/dashboard/locales/en-US';
 import digitalEmployeeMgrLocale from '@/pages/manager/pages/digitalEmployeeMgr/locales/en-US';
 import sandboxMgrLocale from '@/pages/manager/pages/SandboxMgr/locales/en-US';
+import storageQuotaMgrLocale from '@/pages/manager/pages/StorageQuotaMgr/locales/en-US';
 
 export default {
   ...dashboardLocale,
   ...digitalEmployeeMgrLocale,
   ...sandboxMgrLocale,
+  ...storageQuotaMgrLocale,
   // Menu
   'menu.business': 'Management',
   'menu.business.field': 'Asset Directory',
@@ -22,6 +24,7 @@ export default {
   'menu.systemParams.system': 'Parameter Configuration',
   'menu.systemParams.modal': 'Model Configuration',
   'menu.systemParams.sandbox': 'Sandbox',
+  'menu.storageQuota': 'Storage Quota Management',
   'menu.business.notification': 'Notification',
   'common.add': 'Add',
   'common.edit': 'Edit',

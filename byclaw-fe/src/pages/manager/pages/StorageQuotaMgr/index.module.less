@@ -1,0 +1,259 @@
+.card {
+  container-name: storage-quota-card;
+  container-type: inline-size;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.actionToolbar {
+  flex: 0 0 auto;
+  margin-bottom: 12px;
+}
+
+.queryForm {
+  flex: 0 0 auto;
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  border: 1px solid #f0f0f0;
+  border-radius: 6px;
+  background: #fafafa;
+}
+
+.queryGrid {
+  display: grid;
+  grid-template-columns: 180px 180px 220px minmax(280px, 1fr) minmax(280px, 1fr) auto;
+  gap: 12px 16px;
+  align-items: end;
+}
+
+.queryCompact,
+.queryDate {
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+.queryActions {
+  display: flex;
+  align-self: end;
+  justify-content: flex-end;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.tableViewport {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.paginationFixed {
+  flex: 0 0 auto;
+}
+
+.packageManagerPanel {
+  min-width: 0;
+}
+
+.packageManagerToolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+
+.packageGrantQuery {
+  display: grid;
+  grid-template-columns: minmax(180px, 220px) minmax(220px, 260px) auto;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 12px;
+
+  :global(.ant-form-item) {
+    margin: 0;
+  }
+
+  :global(.ant-input),
+  :global(.ant-select) {
+    width: 100%;
+  }
+}
+
+.packageGrantActions {
+  justify-self: start;
+}
+
+.packageGrantTable {
+  min-width: 0;
+}
+
+.packagePagination {
+  margin-top: 8px;
+}
+
+.cancelModalContent {
+  width: 100%;
+}
+
+.recycleQueryForm {
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+  background: #fafafa;
+}
+
+.recycleQueryGrid {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.75fr) minmax(300px, 1.5fr) minmax(300px, 1.5fr) auto;
+  gap: 12px 16px;
+  align-items: end;
+}
+
+.recycleQueryStatus,
+.recycleQueryDate {
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+.recycleQueryActions {
+  display: flex;
+  align-self: end;
+  justify-content: flex-end;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.recycleTable {
+  min-height: 190px;
+  overflow: auto;
+}
+
+.recyclePagination {
+  margin-top: 8px;
+}
+
+@media (max-width: 1750px) {
+  .queryGrid {
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+  }
+
+  .queryCompact {
+    grid-column: span 4;
+  }
+
+  .queryDate {
+    grid-column: span 5;
+  }
+
+  .queryActions {
+    grid-column: span 2;
+  }
+}
+
+@media (max-width: 900px) {
+  .queryGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .queryCompact {
+    grid-column: span 1;
+  }
+
+  .queryDate {
+    grid-column: span 2;
+  }
+
+  .queryActions {
+    grid-column: 1 / -1;
+  }
+
+  .packageGrantQuery {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .packageGrantActions {
+    grid-column: 1 / -1;
+  }
+
+  .recycleQueryGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .recycleQueryStatus {
+    grid-column: span 1;
+  }
+
+  .recycleQueryDate {
+    grid-column: span 2;
+  }
+
+  .recycleQueryActions {
+    grid-column: 1 / -1;
+  }
+}
+
+@container storage-quota-card (max-width: 1450px) {
+  .queryGrid {
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+  }
+
+  .queryCompact {
+    grid-column: span 4;
+  }
+
+  .queryDate {
+    grid-column: span 5;
+  }
+
+  .queryActions {
+    grid-column: span 2;
+  }
+}
+
+@container storage-quota-card (max-width: 820px) {
+  .queryGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .queryCompact {
+    grid-column: span 1;
+  }
+
+  .queryDate {
+    grid-column: span 2;
+  }
+
+  .queryActions {
+    grid-column: 1 / -1;
+  }
+}
+
+@container storage-quota-card (max-width: 520px) {
+  .queryGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .queryCompact,
+  .queryDate,
+  .queryActions {
+    grid-column: span 1;
+  }
+}
+
+@media (max-width: 600px) {
+  .queryGrid,
+  .packageGrantQuery,
+  .recycleQueryGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .queryCompact,
+  .queryDate,
+  .queryActions,
+  .packageGrantActions,
+  .recycleQueryStatus,
+  .recycleQueryDate,
+  .recycleQueryActions {
+    grid-column: span 1;
+  }
+}

@@ -1,11 +1,13 @@
 import dashboardLocale from '@/pages/manager/pages/dashboard/locales/zh-CN';
 import digitalEmployeeMgrLocale from '@/pages/manager/pages/digitalEmployeeMgr/locales/zh-CN';
 import sandboxMgrLocale from '@/pages/manager/pages/SandboxMgr/locales/zh-CN';
+import storageQuotaMgrLocale from '@/pages/manager/pages/StorageQuotaMgr/locales/zh-CN';
 
 export default {
   ...dashboardLocale,
   ...digitalEmployeeMgrLocale,
   ...sandboxMgrLocale,
+  ...storageQuotaMgrLocale,
 
   // Menu
   'menu.business': '资产',
@@ -23,6 +25,7 @@ export default {
   'menu.systemParams.system': '参数配置管理',
   'menu.systemParams.modal': '模型配置管理',
   'menu.systemParams.sandbox': '沙箱配置管理',
+  'menu.storageQuota': '存储配额管理',
   'menu.business.notification': '通知管理',
   'common.add': '新增',
   'common.edit': '编辑',

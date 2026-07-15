@@ -38,6 +38,36 @@ describe('manager/layout/sider/menuConfig', () => {
         routePath: '/manager/org/orgMgr',
         name: '组织结构管理',
       },
+      {
+        path: '/manager/storageQuota',
+        routePath: '/manager/storageQuota',
+        name: '存储配额管理',
+        adminVipOnly: true,
+      },
     ]);
+  });
+
+  it('does not duplicate the required storage quota menu when remote config already contains it', async () => {
+    mockGetDcSystemConfig.mockResolvedValue({
+      data: {
+        paramValue: JSON.stringify([
+          {
+            path: '/manager/storageQuota',
+            menuCode: 'menu_storage_quota',
+            menuNameCn: '存储配额管理',
+            menuOrder: 8,
+            adminVipOnly: true,
+          },
+        ]),
+      },
+    });
+
+    const menus = await getManagerMenuConfig();
+
+    expect(menus).toHaveLength(1);
+    expect(menus[0]).toMatchObject({
+      routePath: '/manager/storageQuota',
+      adminVipOnly: true,
+    });
   });
 });

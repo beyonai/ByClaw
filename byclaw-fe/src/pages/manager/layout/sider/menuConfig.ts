@@ -9,6 +9,7 @@ import {
   SafetyCertificateOutlined,
   TeamOutlined,
   RadarChartOutlined,
+  DatabaseOutlined,
 } from '@ant-design/icons';
 import { getDcSystemConfig } from '@/pages/manager/service/session';
 
@@ -25,6 +26,7 @@ const iconByMenuCode: Record<string, any> = {
   menu_model_config: ExperimentOutlined,
   menu_sandbox_config: CodeSandboxOutlined,
   menu_ui_agent: RadarChartOutlined,
+  menu_storage_quota: DatabaseOutlined,
 };
 
 const localeIdByPath: Record<string, string> = {
@@ -36,6 +38,7 @@ const localeIdByPath: Record<string, string> = {
   '/manager/systemParams/modal': 'menu.systemParams.modal',
   '/manager/systemParams/sandbox': 'menu.systemParams.sandbox',
   '/manager/notification': 'menu.business.notification',
+  '/manager/storageQuota': 'menu.storageQuota',
 };
 
 export const fallbackMenuConfig = [
@@ -89,7 +92,24 @@ export const fallbackMenuConfig = [
     icon: ExperimentOutlined,
     adminVipOnly: true,
   },
+  {
+    path: '/manager/storageQuota',
+    name: '存储配额管理',
+    localeId: 'menu.storageQuota',
+    icon: DatabaseOutlined,
+    adminVipOnly: true,
+  },
 ];
+
+const REQUIRED_MANAGER_MENU_PATHS = new Set(['/manager/storageQuota']);
+
+const mergeRequiredManagerMenus = (menus: any[]) => {
+  const existingPaths = new Set(menus.map((item) => item.routePath || item.path));
+  const requiredMenus = fallbackMenuConfig
+    .filter((item) => REQUIRED_MANAGER_MENU_PATHS.has(item.path) && !existingPaths.has(item.path))
+    .map((item) => ({ ...item, key: item.path, routePath: item.path }));
+  return [...menus, ...requiredMenus];
+};
 
 const parseConfigList = (value: any) => {
   if (Array.isArray(value)) {
@@ -160,7 +180,8 @@ export const getManagerMenuConfig = async (options?: { refresh?: boolean }) => {
       .then((res) => {
         const response: any = res;
         const list = parseConfigList(response?.paramValue || response?.data?.paramValue || response?.data || response);
-        const menus = normalizeManagerMenuConfig(list);
+        const remoteMenus = normalizeManagerMenuConfig(list);
+        const menus = remoteMenus.length > 0 ? mergeRequiredManagerMenus(remoteMenus) : [];
 
         if (menus.length > 0) {
           managerMenuConfigCache = menus;
