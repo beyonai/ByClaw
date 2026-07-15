@@ -126,3 +126,72 @@ CREATE INDEX IF NOT EXISTS idx_scan_source_project ON byai.byai_scan_source(proj
 CREATE INDEX IF NOT EXISTS idx_scan_log_source ON byai.byai_scan_log(source_id);
 CREATE INDEX IF NOT EXISTS idx_scan_log_item_log ON byai.byai_scan_log_item(log_id);
 CREATE INDEX IF NOT EXISTS idx_project_repo_project ON byai.byai_project_repo(project_id);
+
+-- 研发任务表
+CREATE TABLE IF NOT EXISTS byai.byai_task (
+    task_id         BIGINT          NOT NULL,
+    project_id      BIGINT          NOT NULL,
+    source_item_id  BIGINT,
+    title           TEXT            NOT NULL,
+    status          VARCHAR(32)     NOT NULL DEFAULT '待开始',
+    phase           VARCHAR(32)     DEFAULT '分诊',
+    current_round   INT             DEFAULT 0,
+    total_rounds    INT             DEFAULT 0,
+    score           INT             DEFAULT 0,
+    assignee        VARCHAR(128),
+    agent_name      VARCHAR(128)    DEFAULT 'Code Agent',
+    branch_name     VARCHAR(256),
+    warning_tag     VARCHAR(256),
+    session_id      BIGINT,
+    create_time     TIMESTAMP       DEFAULT CURRENT_TIMESTAMP,
+    update_time     TIMESTAMP,
+    delete_flag     CHAR(1)         DEFAULT '0',
+    CONSTRAINT pk_byai_task PRIMARY KEY (task_id)
+);
+
+COMMENT ON TABLE byai.byai_task IS '研发任务表';
+COMMENT ON COLUMN byai.byai_task.task_id IS '任务ID';
+COMMENT ON COLUMN byai.byai_task.project_id IS '所属项目ID';
+COMMENT ON COLUMN byai.byai_task.source_item_id IS '关联扫描条目ID';
+COMMENT ON COLUMN byai.byai_task.title IS '任务标题';
+COMMENT ON COLUMN byai.byai_task.status IS '状态: 待开始/进行中/暂停/完成';
+COMMENT ON COLUMN byai.byai_task.phase IS '阶段: 分诊/设计/编码/测试/审批/发布';
+COMMENT ON COLUMN byai.byai_task.current_round IS '当前轮次';
+COMMENT ON COLUMN byai.byai_task.total_rounds IS '总轮次';
+COMMENT ON COLUMN byai.byai_task.score IS '评分';
+COMMENT ON COLUMN byai.byai_task.assignee IS '负责人';
+COMMENT ON COLUMN byai.byai_task.agent_name IS 'Agent名称';
+COMMENT ON COLUMN byai.byai_task.branch_name IS '关联分支';
+COMMENT ON COLUMN byai.byai_task.warning_tag IS '告警标签';
+COMMENT ON COLUMN byai.byai_task.create_time IS '创建时间';
+COMMENT ON COLUMN byai.byai_task.update_time IS '更新时间';
+COMMENT ON COLUMN byai.byai_task.delete_flag IS '删除标记 0正常 1删除';
+
+CREATE INDEX IF NOT EXISTS idx_task_project ON byai.byai_task(project_id);
+CREATE INDEX IF NOT EXISTS idx_task_status ON byai.byai_task(status);
+
+-- 项目成员表
+CREATE TABLE IF NOT EXISTS byai.byai_project_member (
+    member_id       BIGINT          NOT NULL,
+    project_id      BIGINT          NOT NULL,
+    user_id         VARCHAR(64)     NOT NULL,
+    user_code       VARCHAR(64),
+    user_name       VARCHAR(128),
+    role            VARCHAR(32)     DEFAULT 'member',
+    agent_id        BIGINT,
+    create_time     TIMESTAMP       DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT pk_byai_project_member PRIMARY KEY (member_id)
+);
+
+COMMENT ON TABLE byai.byai_project_member IS '项目成员表';
+COMMENT ON COLUMN byai.byai_project_member.member_id IS '记录ID';
+COMMENT ON COLUMN byai.byai_project_member.project_id IS '项目ID';
+COMMENT ON COLUMN byai.byai_project_member.user_id IS '用户ID';
+COMMENT ON COLUMN byai.byai_project_member.user_code IS '工号';
+COMMENT ON COLUMN byai.byai_project_member.user_name IS '用户名称';
+COMMENT ON COLUMN byai.byai_project_member.role IS '角色: owner/member';
+COMMENT ON COLUMN byai.byai_project_member.agent_id IS '关联的默认数字员工ID';
+COMMENT ON COLUMN byai.byai_project_member.create_time IS '加入时间';
+
+CREATE INDEX IF NOT EXISTS idx_project_member_project ON byai.byai_project_member(project_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_project_member_unique ON byai.byai_project_member(project_id, user_id);

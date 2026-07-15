@@ -7,6 +7,8 @@ import com.iwhalecloud.byai.manager.domain.devloop.service.DingtalkScanService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.GitHubIssueScanService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ScanLogService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ScanSourceService;
+import com.iwhalecloud.byai.manager.domain.devloop.service.DevloopTaskService;
+import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectMemberService;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectRepoDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ScanSourceDTO;
@@ -14,6 +16,11 @@ import com.iwhalecloud.byai.manager.entity.devloop.*;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.mapper.devloop.ProjectMapper;
 import com.iwhalecloud.byai.manager.mapper.devloop.ProjectRepoMapper;
+import com.iwhalecloud.byai.manager.mapper.devloop.ScanLogItemMapper;
+import com.iwhalecloud.byai.manager.mapper.resource.SsResourceMapper;
+import com.iwhalecloud.byai.manager.entity.resource.SsResource;
+import com.iwhalecloud.byai.common.feign.response.sandbox.SandboxLaunchData;
+import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -37,6 +44,12 @@ public class DevloopApplicationService {
     private ProjectRepoMapper projectRepoMapper;
 
     @Autowired
+    private ScanLogItemMapper scanLogItemMapper;
+
+    @Autowired
+    private SsResourceMapper ssResourceMapper;
+
+    @Autowired
     private ScanSourceService scanSourceService;
 
     @Autowired
@@ -50,6 +63,15 @@ public class DevloopApplicationService {
 
     @Autowired
     private DevloopPatService patService;
+
+    @Autowired
+    private DevloopTaskService taskService;
+
+    @Autowired
+    private ProjectMemberService projectMemberService;
+
+    @Autowired
+    private SandboxService sandboxService;
 
     @Autowired
     private SequenceService sequenceService;
@@ -81,6 +103,15 @@ public class DevloopApplicationService {
                 projectRepoMapper.insert(repo);
             }
         }
+
+        // 创建者自动加为 owner 成员
+        projectMemberService.addMember(
+            project.getProjectId(),
+            String.valueOf(CurrentUserHolder.getCurrentUserId()),
+            CurrentUserHolder.getCurrentUserCode(),
+            CurrentUserHolder.getCurrentUserName(),
+            "owner"
+        );
 
         Map<String, Object> result = new HashMap<>();
         result.put("projectId", project.getProjectId());
@@ -393,5 +424,208 @@ public class DevloopApplicationService {
             return ResponseUtil.failRes("搜索失败: " + e.getMessage());
         }
         return ResponseUtil.successResponse(groups);
+    }
+
+    // ========== 研发任务 ==========
+
+    /** 从需求创建任务 */
+    @Transactional(rollbackFor = Exception.class)
+    public ResponseUtil<Map<String, Object>> createTask(Map<String, Object> params) {
+        Long projectId = Long.valueOf(params.get("projectId").toString());
+        Long sourceItemId = params.containsKey("sourceItemId")
+            ? Long.valueOf(params.get("sourceItemId").toString()) : null;
+        String title = params.containsKey("title") && params.get("title") != null
+            ? params.get("title").toString() : null;
+
+        // 防止重复启动：如果该需求已有未完成的任务，拒绝创建
+        if (sourceItemId != null) {
+            Task existing = taskService.findActiveBySourceItemId(sourceItemId);
+            if (existing != null) {
+                return ResponseUtil.failRes("该需求已有进行中的任务，无法重复启动");
+            }
+        }
+
+        // 校验当前用户是否绑定了数字员工
+        String currentUserId = String.valueOf(CurrentUserHolder.getCurrentUserId());
+        ProjectMember member = projectMemberService.findByProjectAndUser(projectId, currentUserId);
+        if (member == null) {
+            return ResponseUtil.failRes("您不是该项目成员，无法创建任务");
+        }
+        if (member.getAgentId() == null) {
+            return ResponseUtil.failRes("请先在成员管理中绑定数字员工");
+        }
+        Long agentId = member.getAgentId();
+
+        if (sourceItemId != null && (title == null || title.isEmpty())) {
+            ScanLogItem item = scanLogItemMapper.selectById(sourceItemId);
+            if (item != null) title = item.getTitle();
+        }
+        if (title == null || title.isEmpty()) {
+            return ResponseUtil.failRes("任务标题不能为空");
+        }
+
+        Task task = new Task();
+        task.setProjectId(projectId);
+        task.setSourceItemId(sourceItemId);
+        task.setTitle(title);
+        taskService.create(task);
+
+        if (sourceItemId != null) {
+            ScanLogItem item = new ScanLogItem();
+            item.setItemId(sourceItemId);
+            item.setTaskId(task.getTaskId());
+            scanLogItemMapper.updateById(item);
+        }
+
+        // 拉取沙箱
+        String userCode = member.getUserCode();
+        String sandboxEndpoint = null;
+        String sandboxId = null;
+        if (userCode != null) {
+            try {
+                SandboxLaunchData launchData = sandboxService.launchSandboxWithServiceKey(userCode, null);
+                if (launchData != null) {
+                    sandboxEndpoint = launchData.getEndpoint();
+                    sandboxId = launchData.getSandboxId();
+                }
+            } catch (Exception e) {
+                log.warn("拉取沙箱失败，任务仍创建: {}", e.getMessage());
+            }
+        }
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("taskId", task.getTaskId());
+        result.put("agentId", agentId);
+        result.put("userCode", userCode);
+        result.put("title", title);
+        result.put("sandboxEndpoint", sandboxEndpoint);
+        result.put("sandboxId", sandboxId);
+        return ResponseUtil.successResponse(result);
+    }
+
+    /** 查询项目任务列表 */
+    public ResponseUtil<List<Map<String, Object>>> listTasks(Long projectId) {
+        List<Task> tasks = taskService.listByProjectId(projectId);
+        List<Map<String, Object>> list = new ArrayList<>();
+        for (Task t : tasks) {
+            Map<String, Object> map = new HashMap<>();
+            map.put("taskId", t.getTaskId());
+            map.put("projectId", t.getProjectId());
+            map.put("sourceItemId", t.getSourceItemId());
+            map.put("title", t.getTitle());
+            map.put("status", t.getStatus());
+            map.put("phase", t.getPhase());
+            map.put("currentRound", t.getCurrentRound());
+            map.put("totalRounds", t.getTotalRounds());
+            map.put("score", t.getScore());
+            map.put("assignee", t.getAssignee());
+            map.put("agentName", t.getAgentName());
+            map.put("branchName", t.getBranchName());
+            map.put("warningTag", t.getWarningTag());
+            map.put("createTime", t.getCreateTime());
+            list.add(map);
+        }
+        return ResponseUtil.successResponse(list);
+    }
+
+    /** 更新任务字段 */
+    public ResponseUtil<Void> updateTask(Map<String, Object> params) {
+        Long taskId = Long.valueOf(params.get("taskId").toString());
+        Task task = taskService.getById(taskId);
+        if (task == null) return ResponseUtil.failRes("任务不存在");
+
+        if (params.containsKey("status")) task.setStatus(params.get("status").toString());
+        if (params.containsKey("phase")) task.setPhase(params.get("phase").toString());
+        if (params.containsKey("currentRound")) task.setCurrentRound(Integer.valueOf(params.get("currentRound").toString()));
+        if (params.containsKey("totalRounds")) task.setTotalRounds(Integer.valueOf(params.get("totalRounds").toString()));
+        if (params.containsKey("score")) task.setScore(Integer.valueOf(params.get("score").toString()));
+        if (params.containsKey("assignee")) task.setAssignee(params.get("assignee").toString());
+        if (params.containsKey("branchName")) task.setBranchName(params.get("branchName").toString());
+        if (params.containsKey("warningTag")) task.setWarningTag(params.get("warningTag").toString());
+        if (params.containsKey("sessionId")) task.setSessionId(Long.valueOf(params.get("sessionId").toString()));
+        taskService.update(task);
+        return ResponseUtil.successResponse(null);
+    }
+
+    /** 查询单个任务详情 */
+    public ResponseUtil<Map<String, Object>> getTaskDetail(Long taskId) {
+        Task t = taskService.getById(taskId);
+        if (t == null) return ResponseUtil.failRes("任务不存在");
+        Map<String, Object> map = new HashMap<>();
+        map.put("taskId", t.getTaskId());
+        map.put("projectId", t.getProjectId());
+        map.put("sourceItemId", t.getSourceItemId());
+        map.put("title", t.getTitle());
+        map.put("status", t.getStatus());
+        map.put("phase", t.getPhase());
+        map.put("currentRound", t.getCurrentRound());
+        map.put("totalRounds", t.getTotalRounds());
+        map.put("score", t.getScore());
+        map.put("assignee", t.getAssignee());
+        map.put("agentName", t.getAgentName());
+        map.put("branchName", t.getBranchName());
+        map.put("warningTag", t.getWarningTag());
+        map.put("createTime", t.getCreateTime());
+        return ResponseUtil.successResponse(map);
+    }
+
+    // ========== 项目成员 ==========
+
+    /** 添加项目成员 */
+    public ResponseUtil<Void> addProjectMember(Map<String, Object> params) {
+        Long projectId = Long.valueOf(params.get("projectId").toString());
+        String userId = params.get("userId").toString();
+        String userCode = params.containsKey("userCode") ? params.get("userCode").toString() : null;
+        String userName = params.containsKey("userName") ? params.get("userName").toString() : null;
+
+        if (projectMemberService.isMember(projectId, userId)) {
+            return ResponseUtil.failRes("该用户已是项目成员");
+        }
+        projectMemberService.addMember(projectId, userId, userCode, userName, "member");
+        return ResponseUtil.successResponse(null);
+    }
+
+    /** 查询项目成员列表 */
+    public ResponseUtil<List<Map<String, Object>>> listProjectMembers(Long projectId) {
+        List<ProjectMember> members = projectMemberService.listByProjectId(projectId);
+        List<Map<String, Object>> list = new ArrayList<>();
+        for (ProjectMember m : members) {
+            Map<String, Object> map = new HashMap<>();
+            map.put("memberId", m.getMemberId());
+            map.put("projectId", m.getProjectId());
+            map.put("userId", m.getUserId());
+            map.put("userCode", m.getUserCode());
+            map.put("userName", m.getUserName());
+            map.put("role", m.getRole());
+            map.put("agentId", m.getAgentId());
+            if (m.getAgentId() != null) {
+                SsResource resource = ssResourceMapper.selectById(m.getAgentId());
+                map.put("agentName", resource != null ? resource.getResourceName() : null);
+            }
+            map.put("createTime", m.getCreateTime());
+            list.add(map);
+        }
+        return ResponseUtil.successResponse(list);
+    }
+
+    /** 移除项目成员 */
+    public ResponseUtil<Void> removeProjectMember(Long memberId) {
+        ProjectMember member = projectMemberService.getById(memberId);
+        if (member != null) {
+            Project project = projectMapper.selectById(member.getProjectId());
+            if (project != null && member.getUserId().equals(project.getCreateBy())) {
+                return ResponseUtil.failRes("项目创建者不能被移除");
+            }
+        }
+        projectMemberService.removeMember(memberId);
+        return ResponseUtil.successResponse(null);
+    }
+
+    /** 绑定数字员工到成员 */
+    public ResponseUtil<Void> bindMemberAgent(Map<String, Object> params) {
+        Long memberId = Long.valueOf(params.get("memberId").toString());
+        Long agentId = Long.valueOf(params.get("agentId").toString());
+        projectMemberService.bindAgent(memberId, agentId);
+        return ResponseUtil.successResponse(null);
     }
 }

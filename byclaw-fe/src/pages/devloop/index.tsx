@@ -1,30 +1,17 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { Card, Switch, Tag, Button, Select, Tabs, Modal, Input, message, Empty, Spin, Space, List, Drawer } from 'antd';
 import {
-  Card,
-  Switch,
-  Tag,
-  Button,
-  Select,
-  Timeline,
-  Modal,
-  Input,
-  message,
-  Empty,
-  Spin,
-  Space,
-  List,
-  Typography,
-} from 'antd';
-import {
-  DingdingOutlined,
-  GithubOutlined,
-  ClockCircleOutlined,
   PlusOutlined,
-  ReloadOutlined,
-  ProjectOutlined,
   ArrowLeftOutlined,
   EditOutlined,
   DeleteOutlined,
+  ProjectOutlined,
+  SettingOutlined,
+  ReloadOutlined,
+  ClockCircleOutlined,
+  DingdingOutlined,
+  GithubOutlined,
+  FileTextOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import {
@@ -43,10 +30,16 @@ import {
   deleteProject,
   updateScanSource,
   deleteScanSource,
+  createTask,
+  listTasks,
+  updateTask,
 } from '@/service/devloop';
+import { getToken, getssoToken, tokenKey, ssotokenKey } from '@/utils/auth';
+import { fetchEventSource } from '@fortaine/fetch-event-source';
+import { generateSignature } from '@/utils/signature';
 import styles from './index.module.less';
-
-const { Text } = Typography;
+import TaskList from './TaskList';
+import MemberList from './MemberList';
 
 type SourceType = 'dingtalk' | 'github_issue';
 
@@ -75,24 +68,19 @@ interface ScanLogEntry {
   status: string;
 }
 
-interface ScanLogDetailItem {
+interface RequirementItem {
   itemId: number;
   title: string;
   originId: string;
   originUrl: string;
   action: string;
+  createTime: string;
+  sourceType?: string;
+  sourceName?: string;
+  taskId?: number;
 }
 
-const sourceIcon: Record<string, React.ReactNode> = {
-  dingtalk: <DingdingOutlined style={{ color: '#1890ff' }} />,
-  github_issue: <GithubOutlined />,
-};
-
-const actionTag: Record<string, { label: string; color: string }> = {
-  created: { label: '新建任务', color: 'green' },
-  duplicate: { label: '重复跳过', color: 'default' },
-  deferred: { label: '放入待办池', color: 'orange' },
-};
+const SCORE_COLORS = ['#52c41a', '#73d13d', '#95de64', '#faad14', '#ffc53d'];
 
 const cronPresets = [
   { value: '*/15 * * * *', label: '每15分钟' },
@@ -103,18 +91,18 @@ const cronPresets = [
 ];
 
 const NeedCollect: React.FC = () => {
-  // 页面视图: 'list' 项目列表 | 'detail' 项目详情
   const [view, setView] = useState<'list' | 'detail'>('list');
   const [projects, setProjects] = useState<ProjectItem[]>([]);
   const [currentProject, setCurrentProject] = useState<ProjectItem | null>(null);
   const [projectLoading, setProjectLoading] = useState(false);
 
-  // 项目详情状态
   const [sources, setSources] = useState<ScanSourceItem[]>([]);
   const [sourcesLoading, setSourcesLoading] = useState(false);
-  const [logs, setLogs] = useState<ScanLogEntry[]>([]);
-  const [logItems, setLogItems] = useState<Record<number, ScanLogDetailItem[]>>({});
+  const [requirements, setRequirements] = useState<RequirementItem[]>([]);
+  const [lastLog, setLastLog] = useState<ScanLogEntry | null>(null);
   const [scanningId, setScanningId] = useState<number | null>(null);
+  const [activeTab, setActiveTab] = useState('requirements');
+  const [tasks, setTasks] = useState<any[]>([]);
 
   // 弹窗
   const [showProjectModal, setShowProjectModal] = useState(false);
@@ -136,10 +124,14 @@ const NeedCollect: React.FC = () => {
     cron: '*/30 * * * *',
   });
 
-  // PAT & 钉钉群
   const [hasPatSaved, setHasPatSaved] = useState(false);
   const [groupOptions, setGroupOptions] = useState<{ value: string; label: string }[]>([]);
   const [groupSearching, setGroupSearching] = useState(false);
+
+  const [showLogModal, setShowLogModal] = useState(false);
+  const [logModalSource, setLogModalSource] = useState<ScanSourceItem | null>(null);
+  const [logList, setLogList] = useState<any[]>([]);
+  const [logLoading, setLogLoading] = useState(false);
 
   // --- 数据加载 ---
   const fetchProjects = useCallback(async () => {
@@ -163,15 +155,59 @@ const NeedCollect: React.FC = () => {
     }
   }, [currentProject]);
 
+  const fetchRequirements = useCallback(async () => {
+    if (!currentProject) return;
+    const sourceRes = await listScanSources(currentProject.projectId);
+    if (!sourceRes || sourceRes.length === 0) return;
+
+    const allItems: RequirementItem[] = [];
+    let latestLog: ScanLogEntry | null = null;
+
+    for (const source of sourceRes) {
+      const logs = await listScanLogs(source.sourceId, 10);
+      if (logs && logs.length > 0) {
+        for (const log of logs) {
+          if (!latestLog || new Date(log.scanTime) > new Date(latestLog.scanTime)) {
+            latestLog = log;
+          }
+          const items = await listScanLogItems(log.logId);
+          if (items) {
+            items
+              .filter((it: any) => it.action === 'created')
+              .forEach((it: any) => {
+                allItems.push({
+                  ...it,
+                  sourceType: source.sourceType,
+                  sourceName: source.sourceName,
+                });
+              });
+          }
+        }
+      }
+    }
+    setRequirements(allItems);
+    setLastLog(latestLog);
+  }, [currentProject]);
+
+  const fetchTasks = useCallback(async () => {
+    if (!currentProject) return;
+    const res = await listTasks(currentProject.projectId);
+    if (res) setTasks(res);
+  }, [currentProject]);
+
   useEffect(() => {
     fetchProjects();
   }, []);
   useEffect(() => {
-    if (view === 'detail') fetchSources();
+    if (view === 'detail') {
+      fetchSources();
+      fetchRequirements();
+      fetchTasks();
+    }
   }, [currentProject, view]);
   useEffect(() => {
     checkGitHubPat()
-      .then((res) => {
+      .then((res: any) => {
         if (res?.hasPat) setHasPatSaved(true);
       })
       .catch(() => {});
@@ -181,8 +217,8 @@ const NeedCollect: React.FC = () => {
   const handleSelectProject = (project: ProjectItem) => {
     setCurrentProject(project);
     setSources([]);
-    setLogs([]);
-    setLogItems({});
+    setRequirements([]);
+    setLastLog(null);
     setView('detail');
   };
 
@@ -221,13 +257,12 @@ const NeedCollect: React.FC = () => {
           setShowProjectModal(false);
           setProjectForm({ name: '', description: '' });
           await fetchProjects();
-          const newProject: ProjectItem = {
+          handleSelectProject({
             projectId: res.projectId,
             projectName: projectForm.name.trim(),
             description: projectForm.description.trim(),
             createTime: new Date().toISOString(),
-          };
-          handleSelectProject(newProject);
+          });
         }
       }
     } catch {
@@ -237,18 +272,11 @@ const NeedCollect: React.FC = () => {
     }
   };
 
-  const handleEditProject = (project: ProjectItem, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setEditingProject(project);
-    setProjectForm({ name: project.projectName, description: project.description || '' });
-    setShowProjectModal(true);
-  };
-
   const handleDeleteProject = (project: ProjectItem, e: React.MouseEvent) => {
     e.stopPropagation();
     Modal.confirm({
       title: '确认删除',
-      content: `确定要删除项目「${project.projectName}」吗？删除后不可恢复。`,
+      content: `确定要删除项目「${project.projectName}」吗？`,
       okText: '删除',
       okButtonProps: { danger: true },
       onOk: async () => {
@@ -262,58 +290,14 @@ const NeedCollect: React.FC = () => {
       },
     });
   };
+
   // --- 扫描源操作 ---
-  const handleToggle = async (sourceId: number, checked: boolean) => {
-    await toggleScanSource(sourceId, checked ? '1' : '0');
-    message.success(checked ? '已启用' : '已暂停');
-    fetchSources();
-  };
-
-  const handleTriggerScan = async (sourceId: number) => {
-    setScanningId(sourceId);
-    try {
-      const res = await triggerScan(sourceId);
-      message.success(`扫描完成，新建 ${res?.createdCount || 0} 条`);
-      fetchSources();
-    } catch {
-      message.error('扫描失败');
-    } finally {
-      setScanningId(null);
-    }
-  };
-
-  const handleViewLog = async (sourceId: number) => {
-    try {
-      const res = await listScanLogs(sourceId, 10);
-      if (res) setLogs(res);
-    } catch {
-
-      /* ignore */
-    }
-  };
-
-  const loadLogItems = async (logId: number) => {
-    if (logItems[logId]) return;
-    try {
-      const res = await listScanLogItems(logId);
-      if (res) setLogItems((prev) => ({ ...prev, [logId]: res }));
-    } catch {
-
-      /* ignore */
-    }
-  };
-
-  // --- 添加扫描源 ---
   const handleSaveSource = async () => {
     if (!addForm.name.trim()) {
       message.error('请填写名称');
       return;
     }
-    if (!currentProject) {
-      message.error('请先选择项目');
-      return;
-    }
-
+    if (!currentProject) return;
     let config = '';
     if (addForm.type === 'dingtalk') {
       if (!addForm.chatId) {
@@ -331,12 +315,11 @@ const NeedCollect: React.FC = () => {
         return;
       }
       if (!hasPatSaved && !addForm.pat.trim()) {
-        message.error('请填写 GitHub Personal Access Token');
+        message.error('请填写 GitHub PAT');
         return;
       }
       config = JSON.stringify({ repo: addForm.repo.trim(), labels: addForm.labels, state: 'open' });
     }
-
     try {
       if (addForm.type === 'github_issue' && addForm.pat.trim()) {
         await saveGitHubPat(addForm.pat.trim());
@@ -364,6 +347,7 @@ const NeedCollect: React.FC = () => {
       setShowAddSourceModal(false);
       setEditingSource(null);
       fetchSources();
+      fetchRequirements();
     } catch {
       message.error(editingSource ? '更新失败' : '添加失败');
     }
@@ -381,7 +365,7 @@ const NeedCollect: React.FC = () => {
       chatId: cfg.groupId || '',
       keywords: cfg.keyword || '',
       lookbackHours: cfg.lookbackHours ? String(cfg.lookbackHours) : '24',
-      repo: cfg.repo || 'beyonai/byclaw-test',
+      repo: cfg.repo || '',
       labels: cfg.labels || '',
       pat: '',
       cron: source.cronExpr || '*/30 * * * *',
@@ -397,10 +381,95 @@ const NeedCollect: React.FC = () => {
       okButtonProps: { danger: true },
       onOk: async () => {
         await deleteScanSource(source.sourceId);
-        message.success('收集源已删除');
+        message.success('已删除');
         fetchSources();
+        fetchRequirements();
       },
     });
+  };
+
+  const handleTriggerScan = async (sourceId: number) => {
+    setScanningId(sourceId);
+    try {
+      const res = await triggerScan(sourceId);
+      message.success(`扫描完成，新建 ${res?.createdCount || 0} 条`);
+      fetchSources();
+      fetchRequirements();
+    } catch {
+      message.error('扫描失败');
+    } finally {
+      setScanningId(null);
+    }
+  };
+
+  const handleToggle = async (sourceId: number, checked: boolean) => {
+    await toggleScanSource(sourceId, checked ? '1' : '0');
+    message.success(checked ? '已启用' : '已暂停');
+    fetchSources();
+  };
+
+  const handleViewLogs = async (source: ScanSourceItem) => {
+    setLogModalSource(source);
+    setShowLogModal(true);
+    setLogLoading(true);
+    try {
+      const logs = await listScanLogs(source.sourceId, 10);
+      setLogList(logs || []);
+    } finally {
+      setLogLoading(false);
+    }
+  };
+
+  const handleStartTask = async (req: RequirementItem) => {
+    if (!currentProject) return;
+    try {
+      const res = await createTask({ projectId: currentProject.projectId, sourceItemId: req.itemId, title: req.title });
+      if (!res) {
+        message.error('创建任务失败');
+        return;
+      }
+      const { taskId, agentId, title: taskTitle } = res;
+      message.success('任务已创建，正在发起会话...');
+      fetchTasks();
+      setActiveTab('tasks');
+
+      // 发起 SSE 聊天创建会话
+      const chatBody = {
+        agentId,
+        agentType: '001',
+        chatContent: `请处理以下研发任务：${taskTitle || req.title}`,
+        sessionId: null,
+        accessTerminal: 'Web',
+      };
+      const signatureHeaders = generateSignature('POST', chatBody);
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        [tokenKey]: getToken() || '',
+        [ssotokenKey]: getssoToken() || '',
+        ...signatureHeaders,
+      };
+
+      fetchEventSource('/byaiService/chat/superAgentChat', {
+        method: 'POST',
+        body: JSON.stringify(chatBody),
+        headers,
+        openWhenHidden: true,
+        onmessage: (ev) => {
+          if (ev.event === 'createSession' && ev.data) {
+            try {
+              const sessionData = JSON.parse(ev.data);
+              const sessionId = sessionData.sessionId;
+              if (sessionId && taskId) {
+                updateTask({ taskId, sessionId });
+              }
+            } catch {}
+          }
+        },
+        onerror: () => {},
+      });
+    } catch {
+      message.error('创建任务失败');
+    }
   };
 
   // --- 钉钉群搜索 ---
@@ -417,10 +486,7 @@ const NeedCollect: React.FC = () => {
         const res = await searchDingtalkGroups(value);
         if (res) {
           setGroupOptions(
-            res.map((g: any) => ({
-              value: g.openConversationId,
-              label: g.name || g.openConversationId,
-            }))
+            res.map((g: any) => ({ value: g.openConversationId, label: g.name || g.openConversationId }))
           );
         }
       } catch {
@@ -430,18 +496,8 @@ const NeedCollect: React.FC = () => {
       }
     }, 500);
   };
-  // --- 辅助函数 ---
-  const formatConfig = (type: string, configStr: string) => {
-    try {
-      const cfg = JSON.parse(configStr);
-      if (type === 'dingtalk') return `群: ${cfg.groupId || '-'} · 关键词: ${cfg.keyword || '需求'}`;
-      if (type === 'github_issue') return `仓库: ${cfg.repo || '-'} · 标签: ${cfg.labels || '全部'}`;
-      return configStr;
-    } catch {
-      return configStr;
-    }
-  };
 
+  // --- 渲染弹窗 ---
   const renderProjectModal = () => (
     <Modal
       title={editingProject ? '编辑项目' : '新建项目'}
@@ -485,6 +541,23 @@ const NeedCollect: React.FC = () => {
       }}
       okText={editingSource ? '保存' : '添加'}
       width={520}
+      footer={(_, { OkBtn, CancelBtn }) => (
+        <Space>
+          {editingSource && (
+            <Button
+              danger
+              onClick={() => {
+                setShowAddSourceModal(false);
+                handleDeleteSource(editingSource);
+              }}
+            >
+              删除
+            </Button>
+          )}
+          <CancelBtn />
+          <OkBtn />
+        </Space>
+      )}
     >
       <div className={styles.formField}>
         <label>类型</label>
@@ -506,7 +579,6 @@ const NeedCollect: React.FC = () => {
           onChange={(e) => setAddForm({ ...addForm, name: e.target.value })}
         />
       </div>
-
       {addForm.type === 'dingtalk' && (
         <>
           <div className={styles.formField}>
@@ -548,7 +620,6 @@ const NeedCollect: React.FC = () => {
           </div>
         </>
       )}
-
       {addForm.type === 'github_issue' && (
         <>
           <div className={styles.formField}>
@@ -577,7 +648,6 @@ const NeedCollect: React.FC = () => {
           </div>
         </>
       )}
-
       <div className={styles.formField}>
         <label>扫描频率</label>
         <Select value={addForm.cron} onChange={(v) => setAddForm({ ...addForm, cron: v })} options={cronPresets} />
@@ -585,14 +655,25 @@ const NeedCollect: React.FC = () => {
     </Modal>
   );
 
+  const formatConfig = (type: string, config: string) => {
+    try {
+      const c = JSON.parse(config);
+      if (type === 'dingtalk') return c.chatName || c.chatId || '-';
+      if (type === 'github') return c.repo || '-';
+      return '-';
+    } catch {
+      return '-';
+    }
+  };
+
   // ========== 项目列表视图 ==========
   if (view === 'list') {
     return (
       <div className={styles.container}>
         <div className={styles.header}>
           <div>
-            <h2>需求收集</h2>
-            <p className={styles.subtitle}>选择一个项目，管理其需求收集源。</p>
+            <h2>研发闭环</h2>
+            <p className={styles.subtitle}>选择一个项目，管理需求收集与研发任务</p>
           </div>
           <Button
             type="primary"
@@ -606,10 +687,9 @@ const NeedCollect: React.FC = () => {
             新建项目
           </Button>
         </div>
-
         <Spin spinning={projectLoading}>
           {projects.length === 0 ? (
-            <Empty description="暂无项目，请先创建一个项目">
+            <Empty description="暂无项目，请先创建">
               <Button
                 type="primary"
                 onClick={() => {
@@ -632,7 +712,15 @@ const NeedCollect: React.FC = () => {
                     className={styles.projectCard}
                     onClick={() => handleSelectProject(item)}
                     actions={[
-                      <EditOutlined key="edit" onClick={(e) => handleEditProject(item, e)} />,
+                      <EditOutlined
+                        key="edit"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setEditingProject(item);
+                          setProjectForm({ name: item.projectName, description: item.description || '' });
+                          setShowProjectModal(true);
+                        }}
+                      />,
                       <DeleteOutlined key="delete" onClick={(e) => handleDeleteProject(item, e)} />,
                     ]}
                   >
@@ -648,7 +736,6 @@ const NeedCollect: React.FC = () => {
             />
           )}
         </Spin>
-
         {renderProjectModal()}
       </div>
     );
@@ -657,136 +744,232 @@ const NeedCollect: React.FC = () => {
   // ========== 项目详情视图 ==========
   return (
     <div className={styles.container}>
-      <div className={styles.header}>
-        <Space>
-          <Button icon={<ArrowLeftOutlined />} type="text" onClick={() => setView('list')} />
-          <div>
-            <h2 style={{ margin: 0 }}>{currentProject?.projectName}</h2>
-            <Text type="secondary" style={{ fontSize: 12 }}>
-              {currentProject?.description || '管理该项目的需求收集源'}
-            </Text>
+      {/* Header */}
+      <div className={styles.detailHeader}>
+        <div className={styles.detailHeaderLeft}>
+          <Button icon={<ArrowLeftOutlined />} type="text" shape="circle" onClick={() => setView('list')} />
+          <div className={styles.detailTitle}>
+            <h2>{currentProject?.projectName}</h2>
+            <p>研发项目详情</p>
           </div>
+        </div>
+        <Space>
+          <Button
+            icon={<SettingOutlined />}
+            type="text"
+            onClick={() => {
+              setEditingProject(currentProject);
+              setProjectForm({
+                name: currentProject?.projectName || '',
+                description: currentProject?.description || '',
+              });
+              setShowProjectModal(true);
+            }}
+          />
+          <Button
+            icon={<PlusOutlined />}
+            type="text"
+            onClick={() => {
+              setEditingSource(null);
+              setAddForm({
+                type: 'dingtalk',
+                name: '',
+                chatId: '',
+                keywords: '',
+                lookbackHours: '24',
+                repo: '',
+                labels: '',
+                pat: '',
+                cron: '*/30 * * * *',
+              });
+              setShowAddSourceModal(true);
+            }}
+          />
         </Space>
-        <Button
-          type="primary"
-          icon={<PlusOutlined />}
-          onClick={() => {
-            setEditingSource(null);
-            setAddForm({
-              type: 'dingtalk',
-              name: '',
-              chatId: '',
-              keywords: '',
-              lookbackHours: '24',
-              repo: 'beyonai/byclaw-test',
-              labels: '',
-              pat: '',
-              cron: '*/30 * * * *',
-            });
-            setShowAddSourceModal(true);
-          }}
-        >
-          添加收集源
-        </Button>
       </div>
 
-      <Spin spinning={sourcesLoading}>
-        {sources.length === 0 ? (
-          <Empty description="暂无收集源，点击右上角添加" />
-        ) : (
-          <div className={styles.sourceList}>
-            {sources.map((source) => (
-              <Card key={source.sourceId} size="small" className={styles.sourceCard}>
-                <div className={styles.cardHeader}>
-                  <span className={styles.cardIcon}>{sourceIcon[source.sourceType]}</span>
-                  <span className={styles.cardName}>{source.sourceName}</span>
-                  <Switch
-                    size="small"
-                    checked={source.enabled === '1'}
-                    onChange={(v) => handleToggle(source.sourceId, v)}
-                  />
-                </div>
-                <div className={styles.cardConfig}>{formatConfig(source.sourceType, source.config)}</div>
-                <div className={styles.cardMeta}>
-                  <Tag icon={<ClockCircleOutlined />} bordered={false}>
-                    {source.cronExpr || '手动'}
-                  </Tag>
-                  {source.lastScanTime && (
-                    <span className={styles.lastScan}>上次: {dayjs(source.lastScanTime).format('MM-DD HH:mm')}</span>
-                  )}
-                  <Button
-                    type="link"
-                    size="small"
-                    icon={<ReloadOutlined spin={scanningId === source.sourceId} />}
-                    loading={scanningId === source.sourceId}
-                    onClick={() => handleTriggerScan(source.sourceId)}
-                  >
-                    扫描
-                  </Button>
-                  <Button type="link" size="small" onClick={() => handleViewLog(source.sourceId)}>
-                    日志
-                  </Button>
-                  <Button type="link" size="small" icon={<EditOutlined />} onClick={() => handleEditSource(source)}>
-                    编辑
-                  </Button>
-                  <Button
-                    type="link"
-                    size="small"
-                    danger
-                    icon={<DeleteOutlined />}
-                    onClick={() => handleDeleteSource(source)}
-                  >
-                    删除
-                  </Button>
-                </div>
-              </Card>
-            ))}
-          </div>
-        )}
-      </Spin>
+      {/* Tabs */}
+      <Tabs
+        activeKey={activeTab}
+        onChange={setActiveTab}
+        items={[
+          { key: 'requirements', label: '需求' },
+          { key: 'tasks', label: '任务' },
+          { key: 'resources', label: '资源', disabled: true },
+          { key: 'members', label: '成员' },
+        ]}
+      />
 
-      {logs.length > 0 && (
-        <div className={styles.logSection}>
-          <h4>扫描日志</h4>
-          <Timeline
-            items={logs.map((log) => ({
-              color: log.status === 'success' ? (log.createdCount > 0 ? 'green' : 'gray') : 'red',
-              children: (
-                <div className={styles.logItem} onClick={() => loadLogItems(log.logId)}>
-                  <div className={styles.logHeader}>
-                    <span className={styles.logTime}>{dayjs(log.scanTime).format('MM-DD HH:mm')}</span>
-                    <Tag bordered={false}>
-                      发现 {log.foundCount} · 新建 {log.createdCount}
-                    </Tag>
-                    {log.status === 'failed' && <Tag color="red">失败</Tag>}
-                  </div>
-                  {logItems[log.logId] && (
-                    <div className={styles.logDetails}>
-                      {logItems[log.logId].map((item) => (
-                        <div key={item.itemId} className={styles.logDetailLine}>
-                          <Tag color={actionTag[item.action]?.color || 'default'} bordered={false}>
-                            {actionTag[item.action]?.label || item.action}
-                          </Tag>
-                          {item.originUrl ? (
-                            <a href={item.originUrl} target="_blank" rel="noreferrer">
-                              {item.title}
-                            </a>
-                          ) : (
-                            <span>{item.title}</span>
-                          )}
-                        </div>
-                      ))}
+      {/* 统计行 */}
+      <div className={styles.tabSummary}>
+        <span>{requirements.length} 个需求</span>
+        <span>{tasks.length} 个研发任务</span>
+        <span>0 个我的会话</span>
+      </div>
+
+      {activeTab === 'requirements' && (
+        <>
+          {/* 收集源列表 */}
+          <Spin spinning={sourcesLoading}>
+            {sources.length === 0 ? (
+              <Empty description="暂无收集源，点击右上角 + 添加" />
+            ) : (
+              <div className={styles.sourceList}>
+                {sources.map((source) => (
+                  <Card key={source.sourceId} size="small" className={styles.sourceCard}>
+                    <div className={styles.cardHeader}>
+                      <span className={styles.cardIcon}>
+                        {source.sourceType === 'dingtalk' ? <DingdingOutlined /> : <GithubOutlined />}
+                      </span>
+                      <span className={styles.cardName}>{source.sourceName}</span>
+                      <Switch
+                        size="small"
+                        checked={source.enabled === '1'}
+                        onChange={(v) => handleToggle(source.sourceId, v)}
+                      />
                     </div>
-                  )}
+                    <div className={styles.cardConfig}>{formatConfig(source.sourceType, source.config)}</div>
+                    <div className={styles.cardMeta}>
+                      <Tag icon={<ClockCircleOutlined />} bordered={false}>
+                        {source.cronExpr || '手动'}
+                      </Tag>
+                      {source.lastScanTime && (
+                        <span className={styles.lastScan}>
+                          上次: {dayjs(source.lastScanTime).format('MM-DD HH:mm')}
+                        </span>
+                      )}
+                      <Button
+                        type="link"
+                        size="small"
+                        icon={<ReloadOutlined spin={scanningId === source.sourceId} />}
+                        loading={scanningId === source.sourceId}
+                        onClick={() => handleTriggerScan(source.sourceId)}
+                      >
+                        扫描
+                      </Button>
+                      <Button
+                        type="link"
+                        size="small"
+                        icon={<FileTextOutlined />}
+                        onClick={() => handleViewLogs(source)}
+                      >
+                        日志
+                      </Button>
+                      <Button type="link" size="small" icon={<EditOutlined />} onClick={() => handleEditSource(source)}>
+                        编辑
+                      </Button>
+                      <Button
+                        type="link"
+                        size="small"
+                        danger
+                        icon={<DeleteOutlined />}
+                        onClick={() => handleDeleteSource(source)}
+                      >
+                        删除
+                      </Button>
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </Spin>
+
+          {lastLog && (
+            <div className={styles.aiCardStatus}>
+              <span className={styles.statusDot} />
+              <span>
+                上次扫描完成，共归并 {lastLog.foundCount} 条候选，新增 {lastLog.createdCount} 条需求
+              </span>
+              <span className={styles.statusTime}>完成于 {dayjs(lastLog.scanTime).format('HH:mm')}</span>
+            </div>
+          )}
+
+          <div className={styles.reqHeader}>
+            <span className={styles.reqCount}>{requirements.length} 个需求</span>
+            <Button type="default" icon={<PlusOutlined />}>
+              人工新增
+            </Button>
+          </div>
+
+          <div className={styles.reqList}>
+            {requirements.map((req, idx) => {
+              const score = 50 + Math.floor(Math.abs(Math.sin(req.itemId)) * 50);
+              const colorIdx = idx % SCORE_COLORS.length;
+              const sourceLabel = req.sourceType === 'dingtalk' ? '钉钉' : 'GitHub Issues';
+              return (
+                <div key={req.itemId} className={styles.reqCard}>
+                  <div className={styles.scoreCircle} style={{ background: SCORE_COLORS[colorIdx] }}>
+                    {score}
+                  </div>
+                  <div className={styles.reqContent}>
+                    <p className={styles.reqTitle}>{req.title}</p>
+                    <span className={styles.reqMeta}>
+                      {sourceLabel} · {req.sourceName} ·{' '}
+                      {req.createTime ? dayjs(req.createTime).format('MM-DD HH:mm') : ''}
+                    </span>
+                  </div>
+                  <div className={styles.reqRight}>
+                    {req.taskId ? (
+                      <Button size="small" disabled>
+                        已启动
+                      </Button>
+                    ) : (
+                      <Button type="primary" size="small" onClick={() => handleStartTask(req)}>
+                        启动任务
+                      </Button>
+                    )}
+                  </div>
                 </div>
-              ),
-            }))}
-          />
-        </div>
+              );
+            })}
+            {requirements.length === 0 && !sourcesLoading && <Empty description={'暂无需求，点击「扫描」收集'} />}
+          </div>
+        </>
       )}
+
+      {activeTab === 'tasks' && <TaskList tasks={tasks} onRefresh={fetchTasks} projectId={currentProject?.projectId} />}
+
+      {activeTab === 'members' && <MemberList projectId={currentProject?.projectId} />}
 
       {renderAddSourceModal()}
       {renderProjectModal()}
+
+      {/* 扫描日志抽屉 */}
+      <Drawer
+        title={`扫描日志 - ${logModalSource?.sourceName || ''}`}
+        open={showLogModal}
+        onClose={() => setShowLogModal(false)}
+        width={520}
+      >
+        <Spin spinning={logLoading}>
+          {logList.length === 0 ? (
+            <Empty description="暂无扫描记录" />
+          ) : (
+            <List
+              dataSource={logList}
+              renderItem={(log: any) => (
+                <List.Item>
+                  <List.Item.Meta
+                    title={
+                      <span>
+                        {dayjs(log.scanTime).format('YYYY-MM-DD HH:mm:ss')}{' '}
+                        <Tag color={log.status === 'success' ? 'green' : log.status === 'failed' ? 'red' : 'blue'}>
+                          {log.status === 'success' ? '成功' : log.status === 'failed' ? '失败' : '运行中'}
+                        </Tag>
+                      </span>
+                    }
+                    description={
+                      log.status === 'success'
+                        ? `发现 ${log.foundCount} 条，新增 ${log.createdCount} 条`
+                        : log.errorMsg || ''
+                    }
+                  />
+                </List.Item>
+              )}
+            />
+          )}
+        </Spin>
+      </Drawer>
     </div>
   );
 };

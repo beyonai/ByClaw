@@ -140,4 +140,60 @@ public class DevloopController {
         }
         return applicationService.searchDingtalkGroups(query);
     }
+
+    // ========== 研发任务 ==========
+
+    /** 从需求创建任务 */
+    @PostMapping("/task/create")
+    public ResponseUtil<Map<String, Object>> createTask(@RequestBody Map<String, Object> params) {
+        return applicationService.createTask(params);
+    }
+
+    /** 查询项目任务列表 */
+    @PostMapping("/task/list")
+    public ResponseUtil<List<Map<String, Object>>> listTasks(@RequestBody Map<String, Object> params) {
+        Long projectId = Long.valueOf(params.get("projectId").toString());
+        return applicationService.listTasks(projectId);
+    }
+
+    /** 更新任务 */
+    @PostMapping("/task/update")
+    public ResponseUtil<Void> updateTask(@RequestBody Map<String, Object> params) {
+        return applicationService.updateTask(params);
+    }
+
+    /** 获取任务详情 */
+    @PostMapping("/task/detail")
+    public ResponseUtil<Map<String, Object>> getTaskDetail(@RequestBody Map<String, Object> params) {
+        Long taskId = Long.valueOf(params.get("taskId").toString());
+        return applicationService.getTaskDetail(taskId);
+    }
+
+    // ========== 项目成员 ==========
+
+    /** 添加项目成员 */
+    @PostMapping("/member/add")
+    public ResponseUtil<Void> addProjectMember(@RequestBody Map<String, Object> params) {
+        return applicationService.addProjectMember(params);
+    }
+
+    /** 查询项目成员列表 */
+    @PostMapping("/member/list")
+    public ResponseUtil<List<Map<String, Object>>> listProjectMembers(@RequestBody Map<String, Object> params) {
+        Long projectId = Long.valueOf(params.get("projectId").toString());
+        return applicationService.listProjectMembers(projectId);
+    }
+
+    /** 移除项目成员 */
+    @PostMapping("/member/remove")
+    public ResponseUtil<Void> removeProjectMember(@RequestBody Map<String, Object> params) {
+        Long memberId = Long.valueOf(params.get("memberId").toString());
+        return applicationService.removeProjectMember(memberId);
+    }
+
+    /** 绑定数字员工到成员 */
+    @PostMapping("/member/bindAgent")
+    public ResponseUtil<Void> bindMemberAgent(@RequestBody Map<String, Object> params) {
+        return applicationService.bindMemberAgent(params);
+    }
 }

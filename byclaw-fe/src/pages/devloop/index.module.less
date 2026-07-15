@@ -38,16 +38,266 @@
   color: #bfbfbf;
 }
 
-.sourceList {
-  margin-bottom: 32px;
+.formField {
+  margin-bottom: 16px;
+
+  label {
+    display: block;
+    margin-bottom: 6px;
+    font-size: 13px;
+    color: #333;
+  }
 }
 
-.sourceCard {
+/* ========== 项目详情视图 ========== */
+
+.detailHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+
+.detailHeaderLeft {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.detailTitle {
+  h2 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 600;
+  }
+  p {
+    margin: 0;
+    font-size: 12px;
+    color: #8c8c8c;
+  }
+}
+
+.tabSummary {
+  display: flex;
+  gap: 24px;
+  padding: 8px 0 16px;
+  font-size: 13px;
+  color: #595959;
+}
+
+/* AI 摘要卡 */
+.aiCard {
+  background: #fff;
+  border: 1px solid #f0f0f0;
+  border-radius: 12px;
+  padding: 16px 20px;
+  margin-bottom: 24px;
+}
+
+.aiCardHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   margin-bottom: 12px;
+}
+
+.aiCardLeft {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.aiIcon {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: #1a1a2e;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.aiCardTitle {
+  font-size: 15px;
+  font-weight: 500;
+  margin: 0;
+}
+
+.aiCardSub {
+  font-size: 12px;
+  color: #8c8c8c;
+  margin: 0;
+}
+
+.aiCardStatus {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #333;
+  margin-bottom: 12px;
+  padding-left: 4px;
+}
+
+.statusDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #52c41a;
+  flex-shrink: 0;
+}
+
+.statusTime {
+  font-size: 12px;
+  color: #8c8c8c;
+}
+
+/* 源标签横向滚动 */
+.sourceTagList {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+
+  &::-webkit-scrollbar {
+    height: 4px;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: #d9d9d9;
+    border-radius: 2px;
+  }
+}
+
+.sourceTag {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid #f0f0f0;
   border-radius: 8px;
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: border-color 0.2s;
+
+  &:hover {
+    border-color: #1677ff;
+  }
+}
+
+.sourceTagIcon {
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.sourceTagStatus {
+  font-size: 11px;
+  color: #52c41a;
+  font-weight: 500;
+}
+
+.sourceTagDisabled {
+  color: #bfbfbf;
+}
+
+/* 需求列表 */
+.reqHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.reqCount {
+  font-size: 14px;
+  color: #595959;
+}
+
+.reqList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.reqCard {
+  display: flex;
+  align-items: center;
+  padding: 14px 16px;
+  border: 1px solid #f0f0f0;
+  border-radius: 10px;
+  gap: 14px;
+  transition: box-shadow 0.2s;
 
   &:hover {
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  }
+}
+
+.scoreCircle {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.reqContent {
+  flex: 1;
+  min-width: 0;
+}
+
+.reqTitle {
+  font-size: 14px;
+  font-weight: 500;
+  margin: 0 0 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reqMeta {
+  font-size: 12px;
+  color: #8c8c8c;
+}
+
+.reqRight {
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.reqPriority {
+  font-size: 13px;
+  font-weight: 600;
+  color: #333;
+}
+
+.reqStatus {
+  font-size: 12px;
+  color: #8c8c8c;
+  margin-top: 2px;
+}
+
+/* ========== 收集源卡片列表 ========== */
+
+.sourceList {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.sourceCard {
+  border-radius: 10px;
+  .ant-card-body {
+    padding: 14px 16px;
   }
 }
 
@@ -59,83 +309,206 @@
 }
 
 .cardIcon {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: #f5f5f5;
+  color: #1677ff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   font-size: 16px;
+  flex-shrink: 0;
 }
 
 .cardName {
   flex: 1;
+  font-size: 14px;
   font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .cardConfig {
-  color: #595959;
   font-size: 12px;
+  color: #8c8c8c;
   margin-bottom: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .cardMeta {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
   flex-wrap: wrap;
 }
 
 .lastScan {
-  font-size: 11px;
-  color: #8c8c8c;
+  font-size: 12px;
+  color: #bfbfbf;
+  margin-left: 4px;
 }
 
-.logSection {
-  margin-top: 16px;
+/* ========== 任务列表 ========== */
 
-  h4 {
-    margin-bottom: 16px;
-    font-size: 15px;
+.taskHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  font-size: 14px;
+  color: #595959;
+}
+
+.taskList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.taskCard {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border: 1px solid #f0f0f0;
+  border-left: 3px solid #faad14;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: box-shadow 0.2s;
+
+  &:hover {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
   }
 }
 
-.logItem {
-  cursor: pointer;
+.taskCardMain {
+  flex: 1;
+  min-width: 0;
 }
 
-.logHeader {
+.taskTitle {
+  font-size: 15px;
+  font-weight: 500;
+  margin: 0 0 6px;
+  color: #1677ff;
+}
+
+.taskMeta {
   display: flex;
   align-items: center;
   gap: 8px;
-}
-
-.logTime {
   font-size: 12px;
   color: #8c8c8c;
 }
 
-.logDetails {
-  margin-top: 8px;
-  padding-left: 4px;
+.taskAgent {
+  color: #595959;
 }
 
-.logDetailLine {
+.taskBranch {
+  color: #8c8c8c;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.taskWarning {
+  margin-top: 6px;
+}
+
+.taskCardRight {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-bottom: 4px;
-  font-size: 13px;
+  gap: 8px;
+  flex-shrink: 0;
+}
 
-  a {
-    color: #1677ff;
-    &:hover {
-      text-decoration: underline;
-    }
+.taskAssigneeName {
+  font-size: 12px;
+  color: #595959;
+}
+
+.taskProgress {
+  font-size: 14px;
+  font-weight: 600;
+  color: #333;
+}
+
+/* ========== 看板视图 ========== */
+
+.kanbanBoard {
+  display: flex;
+  gap: 16px;
+  padding: 20px;
+  min-height: 100%;
+  overflow-x: auto;
+}
+
+.kanbanColumn {
+  flex: 1;
+  min-width: 260px;
+  max-width: 320px;
+  background: #fafafa;
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.kanbanColHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.kanbanColTitle {
+  color: #333;
+}
+
+.kanbanColCount {
+  color: #8c8c8c;
+  font-weight: 400;
+}
+
+.kanbanCard {
+  background: #fff;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 10px;
+  cursor: pointer;
+  transition: box-shadow 0.2s;
+
+  &:hover {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
   }
 }
 
-.formField {
-  margin-bottom: 16px;
+.kanbanCardTitle {
+  font-size: 14px;
+  font-weight: 500;
+  margin: 0 0 6px;
+}
 
-  label {
-    display: block;
-    margin-bottom: 6px;
-    font-size: 13px;
-    color: #333;
-  }
+.kanbanCardMeta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: #595959;
+}
+
+.kanbanCardFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+  font-size: 12px;
+  color: #8c8c8c;
 }

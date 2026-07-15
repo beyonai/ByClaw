@@ -53,3 +53,32 @@ export const checkGitHubPat = () => POST<any>('/byaiService/devloop/pat/github/c
 // 钉钉群搜索
 export const searchDingtalkGroups = (query: string) =>
   POST<any>('/byaiService/devloop/dingtalk/groups/search', { query });
+
+// 研发任务
+export const createTask = (data: { projectId: number; sourceItemId?: number; title?: string }) =>
+  POST<any>('/byaiService/devloop/task/create', data);
+
+export const listTasks = (projectId: number) => POST<any>('/byaiService/devloop/task/list', { projectId });
+
+export const updateTask = (data: {
+  taskId: number;
+  status?: string;
+  phase?: string;
+  currentRound?: number;
+  score?: number;
+  warningTag?: string;
+  sessionId?: number;
+}) => POST<any>('/byaiService/devloop/task/update', data);
+
+export const getTaskDetail = (taskId: number) => POST<any>('/byaiService/devloop/task/detail', { taskId });
+
+// 项目成员
+export const addProjectMember = (data: { projectId: number; userId: string; userCode?: string; userName?: string }) =>
+  POST<any>('/byaiService/devloop/member/add', data);
+
+export const listProjectMembers = (projectId: number) => POST<any>('/byaiService/devloop/member/list', { projectId });
+
+export const removeProjectMember = (memberId: number) => POST<any>('/byaiService/devloop/member/remove', { memberId });
+
+export const bindMemberAgent = (data: { memberId: number; agentId: number }) =>
+  POST<any>('/byaiService/devloop/member/bindAgent', data);
