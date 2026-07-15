@@ -4,16 +4,16 @@ package com.iwhalecloud.byai.common.ecrypt;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import java.io.UnsupportedEncodingException;
-import java.security.Key;
-import java.security.Security;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
-import javax.crypto.Cipher;
-import javax.crypto.spec.SecretKeySpec;
 import com.alibaba.fastjson.JSON;
 import com.iwhalecloud.byai.common.exception.BaseException;
-import org.bouncycastle.jce.provider.BouncyCastleProvider;
+import org.bouncycastle.crypto.engines.SM4Engine;
+import org.bouncycastle.crypto.paddings.PKCS7Padding;
+import org.bouncycastle.crypto.paddings.PaddedBufferedBlockCipher;
+import org.bouncycastle.crypto.params.KeyParameter;
 import org.bouncycastle.util.encoders.Hex;
 
 /**
@@ -26,10 +26,6 @@ public class Sm4Util {
 
     private static final Logger logger = LoggerFactory.getLogger(Sm4Util.class);
 
-
-    static {
-        Security.addProvider(new BouncyCastleProvider());
-    }
 
     private static final String DEFAULT_ENCODING = "UTF-8";
 
@@ -89,13 +85,7 @@ public class Sm4Util {
     }
 
     public static byte[] encryptEcbPadding(byte[] key, byte[] data) {
-        Cipher cipher = generateEcbCipher(ALGORITHM_NAME_ECB_PADDING, Cipher.ENCRYPT_MODE, key);
-        try {
-            return cipher.doFinal(data);
-        }
-        catch (Exception e) {
-            throw new BaseException(500, e.getMessage());
-        }
+        return processEcbPadding(true, key, data);
     }
 
     /**
@@ -151,33 +141,28 @@ public class Sm4Util {
      * 解密
      */
     public static byte[] decryptEcbPadding(byte[] key, byte[] cipherText) {
-        Cipher cipher = generateEcbCipher(ALGORITHM_NAME_ECB_PADDING, Cipher.DECRYPT_MODE, key);
-        try {
-            return cipher.doFinal(cipherText);
-        }
-        catch (Exception e) {
-            throw new BaseException(500, e.getMessage());
-        }
+        return processEcbPadding(false, key, cipherText);
     }
 
     /**
-     * 生成ECB暗号
+     * 使用 Bouncy Castle 轻量级 API 处理 SM4/ECB/PKCS7Padding。
      *
-     * @param algorithmName
-     * @param mode
-     * @param key
+     * 避免在 Spring Boot 可执行包的嵌套 jar 中通过 JCE 加载已签名 BC Provider，
+     * 否则 JDK 21 会拒绝验证 Provider，导致前端 SM4 密文无法解密。
      */
-    private static Cipher generateEcbCipher(String algorithmName, int mode, byte[] key) {
+    private static byte[] processEcbPadding(boolean forEncryption, byte[] key, byte[] input) {
+        PaddedBufferedBlockCipher cipher =
+            new PaddedBufferedBlockCipher(new SM4Engine(), new PKCS7Padding());
         try {
-            Cipher cipher = Cipher.getInstance(algorithmName, BouncyCastleProvider.PROVIDER_NAME);
-            Key sm4Key = new SecretKeySpec(key, ALGORITHM_NAME);
-            cipher.init(mode, sm4Key);
-            return cipher;
+            cipher.init(forEncryption, new KeyParameter(key));
+            byte[] output = new byte[cipher.getOutputSize(input.length)];
+            int outputLength = cipher.processBytes(input, 0, input.length, output, 0);
+            outputLength += cipher.doFinal(output, outputLength);
+            return Arrays.copyOf(output, outputLength);
         }
         catch (Exception e) {
             throw new BaseException(500, e.getMessage());
         }
-
     }
 
     public static String decryptByEnData(String encryptData) {
