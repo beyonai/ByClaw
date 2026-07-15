@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Button, Empty, Input, message, Modal, Tooltip, Upload } from 'antd';
+import React, { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { Button, Empty, Input, message, Modal, Spin, Tooltip, Upload } from 'antd';
 import { CaretUpOutlined, CaretDownOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons';
 // @ts-ignore
 import { useIntl } from '@umijs/max';
@@ -27,9 +27,22 @@ import RenameModal from './RenameModal';
 import MoveModal from './MoveModal';
 import styles from './index.module.less';
 
-interface FileBrowserPanelProps {
+const PreViewFile = React.lazy(() =>
+  import('@/components/Preview/Twins').then((module) => ({ default: module.PreViewFile }))
+);
+
+export interface FileBrowserPanelProps {
   resourceId: string;
   mode?: 'full' | 'preview';
+  uploadDisabled?: boolean;
+  uploadRemainingBytes?: number;
+  onUploadSuccess?: () => void;
+  initialPath?: string;
+  listProvider?: (path: string) => Promise<any>;
+  downloadProvider?: (path: string) => Promise<any>;
+  searchProvider?: (path: string, keyword: string) => Promise<any>;
+  showSearch?: boolean;
+  showDownloadAction?: boolean;
 }
 
 function getFileType(name: string): string {
@@ -47,7 +60,19 @@ function canPreviewFile(record: FileBrowserItem) {
 type SortField = 'name' | 'size' | 'lastModified';
 type SortOrder = 'asc' | 'desc' | 'none';
 
-const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId, mode = 'full' }) => {
+const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({
+  resourceId,
+  mode = 'full',
+  uploadDisabled = false,
+  uploadRemainingBytes,
+  onUploadSuccess,
+  initialPath,
+  listProvider,
+  downloadProvider,
+  searchProvider,
+  showSearch = true,
+  showDownloadAction = true,
+}) => {
   const intl = useIntl();
   const t = useCallback((id: string, values?: Record<string, any>) => intl.formatMessage({ id }, values), [intl]);
   const isPreviewMode = mode === 'preview';
@@ -75,12 +100,17 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId, mode = 
   const [inputKeyword, setInputKeyword] = useState('');
   const [searchKeyword, setSearchKeyword] = useState('');
   const [isSearching, setIsSearching] = useState(false);
+  const [localPreview, setLocalPreview] = useState<{
+    item: FileBrowserItem;
+    blob: Blob | null;
+    loading: boolean;
+  } | null>(null);
 
   const fetchList = useCallback(
     async (path: string) => {
       setLoading(true);
       try {
-        const res: any = await listFiles({ resourceId, path });
+        const res: any = listProvider ? await listProvider(path) : await listFiles({ resourceId, path });
         const data = res?.data ?? res ?? [];
         setItems(Array.isArray(data) ? data : []);
       } catch (e: any) {
@@ -89,11 +119,16 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId, mode = 
         setLoading(false);
       }
     },
-    [resourceId, t]
+    [resourceId, t, listProvider]
   );
 
   useEffect(() => {
     if (!resourceId) return;
+    if (initialPath) {
+      setCurrentPath(initialPath);
+      setPathInitialized(true);
+      return;
+    }
     getDefaultPath(resourceId)
       .then((res: any) => {
         const defaultPath = res?.data ?? res ?? '/';
@@ -104,7 +139,7 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId, mode = 
         setCurrentPath('/');
         setPathInitialized(true);
       });
-  }, [resourceId]);
+  }, [resourceId, initialPath]);
 
   useEffect(() => {
     if (resourceId && pathInitialized && currentPath) fetchList(currentPath);
@@ -232,7 +267,9 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId, mode = 
       setIsSearching(true);
       setLoading(true);
       try {
-        const res: any = await searchFiles({ resourceId, path: currentPath, keyword: keyword.trim() });
+        const res: any = searchProvider
+          ? await searchProvider(currentPath, keyword.trim())
+          : await searchFiles({ resourceId, path: currentPath, keyword: keyword.trim() });
         const data = res?.data ?? res ?? [];
         setItems(Array.isArray(data) ? data : []);
       } catch (e: any) {
@@ -241,21 +278,32 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId, mode = 
         setLoading(false);
       }
     },
-    [resourceId, currentPath, t, fetchList]
+    [resourceId, currentPath, t, fetchList, searchProvider]
   );
 
   const handleUpload = useCallback(
     async (fileList: File[]) => {
-      if (!fileList.length) return;
+      if (!fileList.length || uploadDisabled) return;
+      const selectedBytes = fileList.reduce((total, file) => total + Math.max(0, file.size || 0), 0);
+      if (uploadRemainingBytes !== undefined && selectedBytes > Math.max(0, uploadRemainingBytes)) {
+        message.error(
+          t('storageQuota.upload.insufficient', {
+            selected: formatFileSize(selectedBytes),
+            remaining: formatFileSize(uploadRemainingBytes),
+          })
+        );
+        return;
+      }
       try {
         await uploadFiles(resourceId, currentPath, fileList);
         message.success(t('fileBrowser.upload.success'));
+        onUploadSuccess?.();
         handleRefresh();
       } catch (e: any) {
         message.error(e?.message || t('fileBrowser.upload.failed'));
       }
     },
-    [resourceId, currentPath, t, handleRefresh]
+    [resourceId, currentPath, t, handleRefresh, onUploadSuccess, uploadDisabled, uploadRemainingBytes]
   );
 
   const handleDownload = useCallback(
@@ -264,7 +312,9 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId, mode = 
       setDownloadingPaths((prev) => new Set(prev).add(item.path));
       try {
         message.loading({ content: t('fileBrowser.download.folderDownloading'), key: 'fileDownload', duration: 0 });
-        const res: any = await downloadFile(resourceId, item.path);
+        const res: any = downloadProvider
+          ? await downloadProvider(item.path)
+          : await downloadFile(resourceId, item.path);
         const blob = res?.file instanceof Blob ? res.file : new Blob([res?.file || res]);
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -286,7 +336,7 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId, mode = 
         });
       }
     },
-    [resourceId, t, downloadingPaths]
+    [resourceId, t, downloadingPaths, downloadProvider]
   );
 
   const handleDownloadFolder = useCallback(
@@ -372,6 +422,11 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId, mode = 
 
   const renderPreviewPanel = useCallback(
     (item: FileBrowserItem, options: { blob?: Blob | null; loading: boolean }) => {
+      if (!(EventEmitter as any)?.emit) {
+        setLocalPreview({ item, blob: options.blob ?? null, loading: options.loading });
+        return;
+      }
+
       if (options.loading) {
         EventEmitter.emit('beyond-main-driver-open-type', {
           title: item.name,
@@ -399,16 +454,21 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId, mode = 
 
       renderPreviewPanel(item, { loading: true });
       try {
-        const res: any = await downloadFile(resourceId, item.path);
+        const res: any = downloadProvider
+          ? await downloadProvider(item.path)
+          : await downloadFile(resourceId, item.path);
         const rawBlob = res?.file instanceof Blob ? res.file : new Blob([res?.file || res]);
         const mimeType = getMimeType(item.name);
         const blob = mimeType ? new Blob([rawBlob], { type: mimeType }) : rawBlob;
         renderPreviewPanel(item, { blob, loading: false });
       } catch (e: any) {
+        if (!(EventEmitter as any)?.emit) {
+          setLocalPreview(null);
+        }
         message.error(e?.message || t('fileBrowser.preview.failed'));
       }
     },
-    [renderPreviewPanel, resourceId, t]
+    [renderPreviewPanel, resourceId, t, downloadProvider]
   );
 
   const handleCreateFolder = useCallback(async () => {
@@ -525,16 +585,18 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId, mode = 
         });
       }
 
-      actions.push({
-        label: t('fileBrowser.action.download'),
-        key: 'download',
-        disabled: downloadingPaths.has(record.path),
-        icon: (
-          <Tooltip title={t('fileBrowser.action.download')}>
-            <span className="iconfont icon-a-Downloadxiazai" />
-          </Tooltip>
-        ),
-      });
+      if (showDownloadAction) {
+        actions.push({
+          label: t('fileBrowser.action.download'),
+          key: 'download',
+          disabled: downloadingPaths.has(record.path),
+          icon: (
+            <Tooltip title={t('fileBrowser.action.download')}>
+              <span className="iconfont icon-a-Downloadxiazai" />
+            </Tooltip>
+          ),
+        });
+      }
 
       if (!isPreviewMode) {
         actions.push({
@@ -570,7 +632,7 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId, mode = 
 
       return actions;
     },
-    [t, isSearching, downloadingPaths, isPreviewMode]
+    [t, isSearching, downloadingPaths, isPreviewMode, showDownloadAction]
   );
 
   const columns = useMemo(() => {
@@ -587,11 +649,12 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId, mode = 
         const canPreview = canPreviewFile(record);
         const iconType = getFileIconType(v, { isDirectory: isDir });
         const clickable = isDir || canPreview;
-        const onClick = isDir
-          ? () => handleEnterDir(record)
-          : canPreview
-            ? () => handlePreview(record)
-            : () => message.warning(t('fileBrowser.preview.unavailable'));
+        let onClick = () => message.warning(t('fileBrowser.preview.unavailable'));
+        if (isDir) {
+          onClick = () => handleEnterDir(record);
+        } else if (canPreview) {
+          onClick = () => handlePreview(record);
+        }
 
         return (
           <div
@@ -664,16 +727,27 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId, mode = 
         {!isPreviewMode && (
           <>
             <Upload
+              disabled={uploadDisabled}
               showUploadList={false}
               multiple
-              beforeUpload={(_, fileList) => {
-                handleUpload(fileList as unknown as File[]);
-                return false;
+              beforeUpload={(file, fileList) => {
+                if (file.uid === fileList[0]?.uid) {
+                  void handleUpload(fileList as unknown as File[]);
+                }
+                return Upload.LIST_IGNORE;
               }}
             >
-              <Button icon={<AntdIcon type="icon-a-Uploadshangchuan" className={styles.toolbarIcon} />} size="small">
-                {t('fileBrowser.toolbar.upload')}
-              </Button>
+              <Tooltip title={uploadDisabled ? t('storageQuota.upload.blocked') : undefined}>
+                <span>
+                  <Button
+                    disabled={uploadDisabled}
+                    icon={<AntdIcon type="icon-a-Uploadshangchuan" className={styles.toolbarIcon} />}
+                    size="small"
+                  >
+                    {t('fileBrowser.toolbar.upload')}
+                  </Button>
+                </span>
+              </Tooltip>
             </Upload>
             <Button
               icon={<AntdIcon type="icon-a-Folder-pluswenjianjia-tianjia" className={styles.toolbarIcon} />}
@@ -688,22 +762,24 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId, mode = 
           </>
         )}
         <div className={styles.toolbarRight}>
-          <Input
-            className={styles.searchInput}
-            allowClear
-            value={inputKeyword}
-            suffix={<SearchOutlined onClick={() => handleSearch(inputKeyword)} />}
-            placeholder={t('fileBrowser.toolbar.search')}
-            onChange={(event) => {
-              const nextValue = event.target.value;
-              setInputKeyword(nextValue);
-              if (!nextValue.trim() && isSearching) {
-                handleExitSearch();
-              }
-            }}
-            onPressEnter={() => handleSearch(inputKeyword)}
-            size="small"
-          />
+          {showSearch ? (
+            <Input
+              className={styles.searchInput}
+              allowClear
+              value={inputKeyword}
+              suffix={<SearchOutlined onClick={() => handleSearch(inputKeyword)} />}
+              placeholder={t('fileBrowser.toolbar.search')}
+              onChange={(event) => {
+                const nextValue = event.target.value;
+                setInputKeyword(nextValue);
+                if (!nextValue.trim() && isSearching) {
+                  handleExitSearch();
+                }
+              }}
+              onPressEnter={() => handleSearch(inputKeyword)}
+              size="small"
+            />
+          ) : null}
           {!isPreviewMode && <Button icon={<ReloadOutlined />} size="small" onClick={handleRefresh} />}
         </div>
       </div>
@@ -786,6 +862,29 @@ const FileBrowserPanel: React.FC<FileBrowserPanelProps> = ({ resourceId, mode = 
           onPressEnter={handleCreateFolder}
           autoFocus
         />
+      </Modal>
+      <Modal
+        title={localPreview?.item.name}
+        open={!!localPreview}
+        footer={null}
+        width={900}
+        onCancel={() => setLocalPreview(null)}
+        destroyOnHidden
+      >
+        <div className={styles.localPreviewBody}>
+          <Spin spinning={!!localPreview?.loading} wrapperClassName={styles.previewSpin}>
+            {localPreview?.blob ? (
+              <Suspense fallback={<Spin />}>
+                <PreViewFile
+                  data={localPreview.blob}
+                  type={getFileType(localPreview.item.name)}
+                  title={localPreview.item.name}
+                  className={styles.previewContent}
+                />
+              </Suspense>
+            ) : null}
+          </Spin>
+        </div>
       </Modal>
     </div>
   );

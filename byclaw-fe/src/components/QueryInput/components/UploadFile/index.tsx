@@ -8,6 +8,7 @@ import { customAlphabet } from 'nanoid';
 
 import AntdIcon from '@/components/AntdIcon';
 import styles from '@/components/QueryInput/Chat/index.module.less';
+import useStorageQuotaGuard from '@/hooks/useStorageQuotaGuard';
 import { uploadFiles } from '@/service/file';
 import { IFile, IQueryFile } from '@/typescript/file';
 import { validateAccept } from '@/utils/file';
@@ -47,19 +48,29 @@ const UploadFile = forwardRef<UploadFileRef, IProps>((props, ref) => {
   } = props;
   const { message } = App.useApp();
   const intl = useIntl();
+  const {
+    uploadDisabled: quotaUploadDisabled,
+    checkUpload: checkQuotaBeforeUpload,
+    refreshQuota,
+  } = useStorageQuotaGuard();
+  const effectiveDisabled = disabled || quotaUploadDisabled;
   const getNanoid = React.useRef<(size?: number) => string>(customAlphabet('abcdefghijklmnopqrstuvwxyz1234567890', 10));
   const lastInvalidFileListKeyRef = React.useRef('');
   const scheduledFileListKeyRef = React.useRef('');
   const uploadBatchTimerRef = React.useRef<number | null>(null);
-  const uploadFileTip = intl.formatMessage({ id: 'queryInput.tooltip.uploadFile' });
+  const uploadFileTip = intl.formatMessage({
+    id: quotaUploadDisabled ? 'storageQuota.upload.blocked' : 'queryInput.tooltip.uploadFile',
+  });
 
   const getFileListKey = (files: File[]) => {
     return files.map((file) => `${file.name}-${file.size}-${file.lastModified}`).join('|');
   };
 
   const onUpload = async (files: File[]) => {
+    if (disabled) return;
     const validFiles = files.filter((file) => validateAccept(file, accept));
     if (!validFiles.length) return;
+    if (!checkQuotaBeforeUpload(validFiles)) return;
 
     const uploadItems = validFiles
       .map((file) => {
@@ -113,10 +124,12 @@ const UploadFile = forwardRef<UploadFileRef, IProps>((props, ref) => {
           });
         });
       }
+      void refreshQuota();
     } catch (e: any) {
       uploadItems.forEach(({ payload }) => {
         onRemove({ ...payload });
       });
+      message.error(e?.message || `${e}` || intl.formatMessage({ id: 'fileBrowser.upload.failed' }));
     }
   };
 
@@ -172,7 +185,7 @@ const UploadFile = forwardRef<UploadFileRef, IProps>((props, ref) => {
 
   return (
     <Upload
-      disabled={disabled}
+      disabled={effectiveDisabled}
       multiple
       accept={accept}
       className={props.className}
@@ -189,11 +202,12 @@ const UploadFile = forwardRef<UploadFileRef, IProps>((props, ref) => {
         <Tooltip title={uploadFileTip}>
           <span
             aria-label={uploadFileTip}
-            className={classnames(styles.attachment, { disabled })}
+            aria-disabled={effectiveDisabled}
+            className={classnames(styles.attachment, { disabled: effectiveDisabled })}
             role="button"
-            tabIndex={disabled ? -1 : 0}
+            tabIndex={effectiveDisabled ? -1 : 0}
             onKeyDown={(event) => {
-              if (disabled || (event.key !== 'Enter' && event.key !== ' ')) return;
+              if (effectiveDisabled || (event.key !== 'Enter' && event.key !== ' ')) return;
               event.preventDefault();
               event.currentTarget.click();
             }}

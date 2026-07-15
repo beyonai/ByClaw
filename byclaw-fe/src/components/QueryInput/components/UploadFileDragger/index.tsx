@@ -2,13 +2,14 @@ import React, { forwardRef, useImperativeHandle } from 'react';
 
 // @ts-ignore
 import { useIntl } from '@umijs/max';
-import { Upload, message, theme } from 'antd';
+import { App, Upload, theme } from 'antd';
 import { head, isEmpty } from 'lodash';
 import { customAlphabet } from 'nanoid';
 
 import AntdIcon from '@/components/AntdIcon';
+import useStorageQuotaGuard from '@/hooks/useStorageQuotaGuard';
 import { uploadFiles } from '@/service/file';
-import type { IFile } from '@/typescript/file';
+import type { IFile, IQueryFile } from '@/typescript/file';
 import { validateAccept } from '@/utils/file';
 
 import styles from './index.module.less';
@@ -31,11 +32,19 @@ export default forwardRef<UploadFileRef, IProps>((props, ref) => {
   const { extendsPayload = {}, onCreate, onUpdate, onRemove, setSessionId, disabled = false, accept } = props;
 
   const intl = useIntl();
+  const { message } = App.useApp();
   const { token } = theme.useToken();
+  const {
+    uploadDisabled: quotaUploadDisabled,
+    checkUpload: checkQuotaBeforeUpload,
+    refreshQuota,
+  } = useStorageQuotaGuard();
+  const effectiveDisabled = disabled || quotaUploadDisabled;
 
   const getNanoid = React.useRef<(size?: number) => string>(customAlphabet('abcdefghijklmnopqrstuvwxyz1234567890', 10));
 
   const onUpload = async (file: File) => {
+    if (disabled || !checkQuotaBeforeUpload([file])) return;
     const blobUrl = URL.createObjectURL(file as File);
 
     const payload: any = {
@@ -82,6 +91,7 @@ export default forwardRef<UploadFileRef, IProps>((props, ref) => {
           status: 'done',
         });
       }
+      void refreshQuota();
     } catch (e: any) {
       message.error(e.toString());
       onRemove({ ...payload });
@@ -99,7 +109,7 @@ export default forwardRef<UploadFileRef, IProps>((props, ref) => {
 
   return (
     <Dragger
-      disabled={disabled}
+      disabled={effectiveDisabled}
       className={styles.draggerWrap}
       accept={accept}
       multiple={false}
