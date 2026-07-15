@@ -54,6 +54,7 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 - 写 adapter 后必须 `bycli browser verify` 通过 + 字段值与网页肉眼比对
 - **采集任务成功后必须按「Browser 驱动成功后 — 收尾两问」处理；问②的落盘、话术、二选一与执行规则以「采集后处理衔接」为唯一权威定义**
 - 钉钉相关采集任务必须读取 [dingtalk-dws-bridge.md](./references/dingtalk-dws-bridge.md)，并通过 dws skill 获取数据；仍按 bycli 的落盘与采集后处理收尾规则处理
+- 微信公众平台 `weixin accounts/articles/save-articles`、`--auth-source`、`WECHAT_TOKEN` / `WECHAT_COOKIE` / `WECHAT_FINGERPRINT` 或 `mp.weixin.qq.com` 认证失败任务，必须读取 [references/weixin/SKILL.md](./references/weixin/SKILL.md)
 - 浏览器 session 结束后执行 cleanup（close tab → stop daemon → stop browser）
 - Login/Auth 页面例外：不关闭 session，报告 session name + URL 给用户
 
@@ -63,6 +64,7 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 |---------|--------|---------|
 | "bycli 有什么命令" / 不知道怎么用 | 基础用法（见下方内联） | — |
 | 运行 bycli 命令 / 单次查数据 / 执行操作 | 基础用法 | — |
+| 微信公众平台账号搜索、历史文章、批量保存或认证失败 | weixin 认证与凭据 | [references/weixin/SKILL.md](./references/weixin/SKILL.md) |
 | 钉钉听记 / 钉钉文档 / 在线表格 / 云盘 / `shanji.dingtalk.com` / `alidocs.dingtalk.com` 采集 | dws 桥接采集 | [dingtalk-dws-bridge.md](./references/dingtalk-dws-bridge.md) |
 | 驱动浏览器完成一次性任务 / 填表 / 爬数据 | Browser 驱动 | [browser.md](./references/browser.md) |
 | bycli 命令报错 / adapter 坏了 / 网站改版 | AutoFix 修复 | [autofix.md](./references/autofix.md) |
@@ -386,6 +388,7 @@ mkdir -p "$SESSION_DIR"
 |------|---------|
 | [references/browser.md](./references/browser.md) | 需要浏览器驱动命令参考时 |
 | [references/dingtalk-dws-bridge.md](./references/dingtalk-dws-bridge.md) | 钉钉域名或钉钉产品数据采集，需要通过 dws 并按 bycli 流程落盘时 |
+| [references/weixin/SKILL.md](./references/weixin/SKILL.md) | 运行 `weixin accounts/articles/save-articles`、选择 `--auth-source`、处理微信 token/Cookie/fingerprint 或 `AUTH_REQUIRED` 时 |
 | [references/knowledge-ingest.md](./references/knowledge-ingest.md) | 采集后用户选择"入库"，或已有 bycli 采集产物请求入库时 |
 | [references/autofix.md](./references/autofix.md) | adapter 修复完整流程 |
 | [references/adapter-author.md](./references/adapter-author.md) | 写新 adapter 完整流程 |
