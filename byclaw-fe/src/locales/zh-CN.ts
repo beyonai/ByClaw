@@ -88,8 +88,6 @@ export default {
 
   'search.referenceSuccess': '引用成功',
 
-  'search.referenceSuccess': '引用成功',
-
   'resource.belongField': '所属领域',
   'resource.belongFieldPlaceholder': '请选择',
   'resource.knowledge': '知识',
@@ -447,6 +445,8 @@ export default {
   'knowledgeDetail.uploadFile': '上传文件',
   'knowledgeDetail.sameNameFileOverwriteTip': '相同文件名将覆盖更新',
   'knowledgeDetail.uploadSuccess': '上传成功',
+  'knowledgeDetail.uploadPartial': '上传完成：成功 {succeeded} 个，失败 {failed} 个',
+  'knowledgeDetail.uploadPostProcessWarning': '文件已上传，但有 {count} 个引用后处理任务失败',
   'knowledgeDetail.uploadConfirmTitle': '确认上传文件',
   'knowledgeDetail.uploadConfirmFiles': '已选择 {count} 个文件',
   'knowledgeDetail.uploadConfirmMoreFiles': '等 {count} 个文件',
@@ -600,6 +600,7 @@ export default {
 
   'traceDetail.title': '调用链详情',
   'traceDetail.input': '用户输入',
+  'traceDetail.timeline': '调用链',
   'traceDetail.defaultAgentName': '模型回复',
   'traceDetail.empty': '暂无调用链数据',
   'traceDetail.openInLangfuse': '在 Langfuse 中打开',
@@ -727,7 +728,12 @@ export default {
   'directoryManage.deleteFileMissingParams': '无法删除：缺少文件路径或文档库信息',
   'directoryManage.deleteFolderNotEmpty': '文件夹下存在子文件夹或文件，不允许删除',
   'directoryManage.move': '移动',
-  'directoryManage.moveUnderConstruction': '移动功能正在建设中',
+  'directoryManage.selectItemsToMove': '请先选择要移动的项',
+  'directoryManage.loadMoveDirectoriesFailed': '加载目标目录失败',
+  'directoryManage.moveSuccess': '成功移动 {count} 项',
+  'directoryManage.moveResult': '移动完成：成功 {success} 项，失败 {failed} 项',
+  'directoryManage.movePartialTitle': '部分文件或目录移动失败',
+  'directoryManage.moveFailed': '移动失败',
   'directoryManage.batchDeleteWithCount': '删除({count})',
   'directoryManage.batchMoveWithCount': '移动({count})',
   'directoryManage.selectItemsToDelete': '请先选择要删除的项',

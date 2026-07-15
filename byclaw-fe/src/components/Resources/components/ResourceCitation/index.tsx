@@ -64,6 +64,11 @@ interface Props {
   layout?: 'grid' | 'list';
 }
 
+type ResourceReloadPayload = string | { resourceType?: string };
+
+const getReloadResourceType = (payload?: ResourceReloadPayload) =>
+  typeof payload === 'string' ? payload : payload?.resourceType;
+
 const ResourceList = (props: Props) => {
   const {
     resourceType,
@@ -156,7 +161,7 @@ const ResourceList = (props: Props) => {
   }, [defaultResources, keyword, resourceType, resources]);
 
   const pageSize = 100;
-  const loadResources = async (reset = false, myResourceType: string = resourceType) => {
+  const loadResources = async (reset = false, resourceTypePayload?: ResourceReloadPayload) => {
     if (resources) {
       return;
     }
@@ -167,6 +172,8 @@ const ResourceList = (props: Props) => {
 
     try {
       let rows: any[] = [];
+      // 兼容刷新事件传字符串或对象，避免对象 payload 被当作资源类型直接使用。
+      const myResourceType = getReloadResourceType(resourceTypePayload) || resourceType;
       const currentResourceBizTypeList =
         Array.isArray(resourceBizTypeList) && resourceBizTypeList.length
           ? resourceBizTypeList
@@ -250,7 +257,7 @@ const ResourceList = (props: Props) => {
       } else {
         setResourceList((prev) => [...defaultResources, ...prev, ...rows]);
       }
-      setPageIndex(pageIndex + 1);
+      setPageIndex((reset ? 1 : pageIndex) + 1);
     } catch (error) {
       console.error('Failed to load resources:', error);
     } finally {
@@ -429,7 +436,8 @@ const ResourceList = (props: Props) => {
           className={styles.compactAvatarImage}
           src={resourceImageUrl}
           alt=""
-          fetchPriority="low"
+          // React 18 不识别 camelCase fetchPriority，透传小写属性避免控制台告警。
+          {...{ fetchpriority: 'low' }}
           onError={() => {
             setFailedResourceImageUrls((prev) => {
               if (prev.has(resourceImageUrl)) {
@@ -885,8 +893,12 @@ const ResourceList = (props: Props) => {
   };
 
   useEffect(() => {
-    const reload = (resourceType: string) => {
-      loadResources(true, resourceType);
+    const reload = (payload?: ResourceReloadPayload) => {
+      const nextResourceType = getReloadResourceType(payload);
+      if (nextResourceType !== resourceType) {
+        return;
+      }
+      loadResources(true, nextResourceType);
     };
 
     EventEmitter.on('beyond-resourceList-resourceType-reload', reload);
@@ -894,7 +906,7 @@ const ResourceList = (props: Props) => {
     return () => {
       EventEmitter.off('beyond-resourceList-resourceType-reload', reload);
     };
-  }, [EventEmitter, loadResources]);
+  }, [EventEmitter, loadResources, resourceType]);
 
   return (
     <div className={styles.container} style={style}>

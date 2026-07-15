@@ -89,8 +89,6 @@ export default {
 
   'search.referenceSuccess': 'Referenced successfully',
 
-  'search.referenceSuccess': 'Referenced successfully',
-
   'resource.belongField': 'Business Field',
   'resource.belongFieldPlaceholder': 'Please select a business field',
   'resource.knowledge': 'Knowledge',
@@ -437,6 +435,8 @@ export default {
   'knowledgeDetail.uploadFile': 'Upload File',
   'knowledgeDetail.sameNameFileOverwriteTip': 'Same name files will be overwritten',
   'knowledgeDetail.uploadSuccess': 'Upload successful',
+  'knowledgeDetail.uploadPartial': 'Upload completed: {succeeded} succeeded, {failed} failed',
+  'knowledgeDetail.uploadPostProcessWarning': 'Files uploaded, but {count} reference post-processing task(s) failed',
   'knowledgeDetail.uploadConfirmTitle': 'Confirm Upload',
   'knowledgeDetail.uploadConfirmFiles': '{count} file(s) selected',
   'knowledgeDetail.uploadConfirmMoreFiles': 'and {count} more file(s)',
@@ -592,6 +592,7 @@ export default {
 
   'traceDetail.title': 'Trace Details',
   'traceDetail.input': 'User Input',
+  'traceDetail.timeline': 'Trace',
   'traceDetail.defaultAgentName': 'Model Reply',
   'traceDetail.empty': 'No trace data available',
   'traceDetail.openInLangfuse': 'Open in Langfuse',
@@ -721,7 +722,12 @@ export default {
   'directoryManage.deleteFileMissingParams': 'Unable to delete: missing file path or knowledge base information',
   'directoryManage.deleteFolderNotEmpty': 'The folder contains subfolders or files and cannot be deleted',
   'directoryManage.move': 'Move',
-  'directoryManage.moveUnderConstruction': 'Move is under construction',
+  'directoryManage.selectItemsToMove': 'Select items to move first',
+  'directoryManage.loadMoveDirectoriesFailed': 'Failed to load target directories',
+  'directoryManage.moveSuccess': 'Moved {count} items successfully',
+  'directoryManage.moveResult': 'Move finished: {success} succeeded, {failed} failed',
+  'directoryManage.movePartialTitle': 'Some files or folders failed to move',
+  'directoryManage.moveFailed': 'Move failed',
   'directoryManage.batchDeleteWithCount': 'Delete ({count})',
   'directoryManage.batchMoveWithCount': 'Move ({count})',
   'directoryManage.selectItemsToDelete': 'Select items to delete first',

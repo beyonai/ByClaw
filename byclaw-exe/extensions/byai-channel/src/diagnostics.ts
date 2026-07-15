@@ -3,6 +3,7 @@ import {
   createDiagnosticTraceContext,
   emitTrustedDiagnosticEvent,
   freezeDiagnosticTraceContext,
+  isValidDiagnosticSpanId,
   isValidDiagnosticTraceId,
   type DiagnosticTraceContext,
 } from "openclaw/plugin-sdk/diagnostic-runtime";
@@ -14,6 +15,12 @@ const DIAGNOSTIC_TRACE_SCOPE_STATE_KEY = Symbol.for("openclaw.diagnosticTraceSco
 type ByaiDiagnosticTrace = {
   trace: DiagnosticTraceContext;
   byaiTraceId?: string;
+};
+
+type ByaiDiagnosticTraceInput = {
+  traceId?: string;
+  traceParentSpanId?: string;
+  langfuseParentObservationId?: string;
 };
 
 type ByaiSdkDiagnosticRef = {
@@ -64,12 +71,32 @@ function normalizeByaiTraceId(traceId: string | undefined): string | undefined {
   return normalized && isValidDiagnosticTraceId(normalized) ? normalized : undefined;
 }
 
-export function createByaiSdkDiagnosticTrace(traceId: string | undefined): ByaiDiagnosticTrace {
+function normalizeDiagnosticSpanId(spanId: string | undefined): string | undefined {
+  const normalized = spanId?.trim().toLowerCase();
+  return normalized && isValidDiagnosticSpanId(normalized) ? normalized : undefined;
+}
+
+function normalizeDiagnosticTraceInput(
+  input: string | ByaiDiagnosticTraceInput | undefined,
+): ByaiDiagnosticTraceInput {
+  return typeof input === "string" || input === undefined ? { traceId: input } : input;
+}
+
+export function createByaiSdkDiagnosticTrace(
+  input: string | ByaiDiagnosticTraceInput | undefined,
+): ByaiDiagnosticTrace {
+  const { traceId, traceParentSpanId, langfuseParentObservationId } =
+    normalizeDiagnosticTraceInput(input);
   const normalizedTraceId = normalizeByaiTraceId(traceId);
+  const parentSpanId = normalizedTraceId
+    ? normalizeDiagnosticSpanId(langfuseParentObservationId) ??
+      normalizeDiagnosticSpanId(traceParentSpanId)
+    : undefined;
+  const trace = createDiagnosticTraceContext(
+    normalizedTraceId ? { traceId: normalizedTraceId } : {},
+  );
   return {
-    trace: createDiagnosticTraceContext(
-      normalizedTraceId ? { traceId: normalizedTraceId } : {},
-    ),
+    trace: parentSpanId ? { ...trace, spanId: parentSpanId } : trace,
     ...(traceId?.trim() ? { byaiTraceId: traceId.trim() } : {}),
   };
 }
