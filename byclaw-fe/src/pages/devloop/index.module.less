@@ -1,0 +1,141 @@
+.container {
+  padding: 24px;
+  max-width: 900px;
+  margin: 0 auto;
+  height: 100%;
+  overflow-y: auto;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 24px;
+
+  h2 {
+    margin: 0 0 4px;
+    font-size: 20px;
+  }
+}
+
+.subtitle {
+  color: #8c8c8c;
+  font-size: 13px;
+  margin: 0;
+}
+
+.projectCard {
+  border-radius: 8px;
+  .ant-card-meta-description {
+    font-size: 13px;
+    color: #8c8c8c;
+  }
+}
+
+.projectTime {
+  margin-top: 12px;
+  font-size: 12px;
+  color: #bfbfbf;
+}
+
+.sourceList {
+  margin-bottom: 32px;
+}
+
+.sourceCard {
+  margin-bottom: 12px;
+  border-radius: 8px;
+
+  &:hover {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  }
+}
+
+.cardHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.cardIcon {
+  font-size: 16px;
+}
+
+.cardName {
+  flex: 1;
+  font-weight: 500;
+}
+
+.cardConfig {
+  color: #595959;
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.cardMeta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.lastScan {
+  font-size: 11px;
+  color: #8c8c8c;
+}
+
+.logSection {
+  margin-top: 16px;
+
+  h4 {
+    margin-bottom: 16px;
+    font-size: 15px;
+  }
+}
+
+.logItem {
+  cursor: pointer;
+}
+
+.logHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.logTime {
+  font-size: 12px;
+  color: #8c8c8c;
+}
+
+.logDetails {
+  margin-top: 8px;
+  padding-left: 4px;
+}
+
+.logDetailLine {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+  font-size: 13px;
+
+  a {
+    color: #1677ff;
+    &:hover {
+      text-decoration: underline;
+    }
+  }
+}
+
+.formField {
+  margin-bottom: 16px;
+
+  label {
+    display: block;
+    margin-bottom: 6px;
+    font-size: 13px;
+    color: #333;
+  }
+}
