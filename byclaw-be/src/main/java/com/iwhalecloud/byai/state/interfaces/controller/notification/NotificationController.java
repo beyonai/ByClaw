@@ -33,6 +33,25 @@ public class NotificationController {
     private NotificationService notificationService;
 
     /**
+     * 当前用户分页查询站内通知。
+     *
+     * <p>接收者始终取登录上下文，忽略客户端传入的 targetId，避免越权读取其他用户通知。</p>
+     */
+    @PostMapping("/getNotificationListByPage")
+    public ResponseUtil<Page<NotificationVO>> getNotificationListByPage(
+        @RequestBody(required = false) NotificationQueryDto queryDto) {
+        try {
+            NotificationQueryDto safeQuery = queryDto == null ? new NotificationQueryDto() : queryDto;
+            safeQuery.setTargetId(CurrentUserHolder.getCurrentUserId());
+            return ResponseUtil.successResponse(notificationService.queryManagePage(safeQuery));
+        }
+        catch (Exception e) {
+            logger.error("分页查询当前用户通知失败", e);
+            return ResponseUtil.fail("Failed to query notification page!" + e.getMessage());
+        }
+    }
+
+    /**
      * 管理端分页查询通知
      */
     @PostMapping("/manage/page")

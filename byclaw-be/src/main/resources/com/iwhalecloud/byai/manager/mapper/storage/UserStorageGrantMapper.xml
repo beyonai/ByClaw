@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.storage.UserStorageGrantMapper">
+
+    <resultMap id="ActiveGrantAdminResultMap"
+        type="com.iwhalecloud.byai.manager.vo.storage.UserStorageGrantAdminVO">
+        <id column="grant_id" property="grantId" />
+        <result column="user_id" property="userId" />
+        <result column="user_code" property="userCode" />
+        <result column="package_id" property="packageId" />
+        <result column="package_code" property="packageCode" />
+        <result column="package_name" property="packageName" />
+        <result column="granted_bytes" property="grantedBytes" />
+        <result column="grant_status" property="grantStatus" />
+        <result column="grant_source" property="grantSource" />
+        <result column="granted_by" property="grantedBy" />
+        <result column="granted_by_code" property="grantedByCode" />
+        <result column="granted_time" property="grantedTime" />
+        <result column="remark" property="remark" />
+    </resultMap>
+
+    <select id="selectActiveAdminPage" resultMap="ActiveGrantAdminResultMap">
+        SELECT
+            grant_record.grant_id,
+            grant_record.user_id,
+            quota.user_code,
+            grant_record.package_id,
+            storage_package.package_code,
+            storage_package.package_name,
+            grant_record.granted_bytes,
+            grant_record.grant_status,
+            grant_record.grant_source,
+            grant_record.granted_by,
+            grant_operator.user_code AS granted_by_code,
+            grant_record.granted_time,
+            grant_record.remark
+        FROM byai.po_user_storage_grant grant_record
+        INNER JOIN byai.po_user_storage_quota quota
+            ON quota.user_id = grant_record.user_id
+            AND quota.delete_flag = '0'
+        LEFT JOIN byai.po_storage_package storage_package
+            ON storage_package.package_id = grant_record.package_id
+        LEFT JOIN byai.po_users grant_operator
+            ON grant_operator.user_id = grant_record.granted_by
+        <where>
+            grant_record.grant_status = 'ACTIVE'
+            <if test="query.userCode != null and query.userCode != ''">
+                AND quota.user_code LIKE CONCAT('%', #{query.userCode}, '%')
+            </if>
+            <if test="query.packageId != null">
+                AND grant_record.package_id = #{query.packageId}
+            </if>
+        </where>
+        ORDER BY grant_record.granted_time DESC NULLS LAST, grant_record.grant_id DESC
+    </select>
+
+    <select id="selectUserActiveGrants" resultMap="ActiveGrantAdminResultMap">
+        SELECT
+            grant_record.grant_id,
+            grant_record.user_id,
+            quota.user_code,
+            grant_record.package_id,
+            storage_package.package_code,
+            storage_package.package_name,
+            grant_record.granted_bytes,
+            grant_record.grant_status,
+            grant_record.grant_source,
+            grant_record.granted_by,
+            grant_operator.user_code AS granted_by_code,
+            grant_record.granted_time,
+            grant_record.remark
+        FROM byai.po_user_storage_grant grant_record
+        INNER JOIN byai.po_user_storage_quota quota
+            ON quota.user_id = grant_record.user_id
+            AND quota.delete_flag = '0'
+        LEFT JOIN byai.po_storage_package storage_package
+            ON storage_package.package_id = grant_record.package_id
+        LEFT JOIN byai.po_users grant_operator
+            ON grant_operator.user_id = grant_record.granted_by
+        WHERE grant_record.user_id = #{userId}
+            AND grant_record.grant_status = 'ACTIVE'
+        ORDER BY grant_record.granted_time DESC NULLS LAST, grant_record.grant_id DESC
+    </select>
+</mapper>

@@ -1,0 +1,166 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.storage.UserStorageQuotaMapper">
+
+    <resultMap id="AdminQuotaResultMap"
+        type="com.iwhalecloud.byai.manager.vo.storage.UserStorageQuotaAdminVO">
+        <id column="storage_quota_id" property="storageQuotaId" />
+        <result column="user_id" property="userId" />
+        <result column="user_code" property="userCode" />
+        <result column="bucket_name" property="bucketName" />
+        <result column="storage_type" property="storageType" />
+        <result column="base_quota_bytes" property="baseQuotaBytes" />
+        <result column="addon_quota_bytes" property="addonQuotaBytes" />
+        <result column="total_quota_bytes" property="totalQuotaBytes" />
+        <result column="used_bytes" property="usedBytes" />
+        <result column="reserved_bytes" property="reservedBytes" />
+        <result column="usage_status" property="usageStatus" />
+        <result column="provision_status" property="provisionStatus" />
+        <result column="quota_sync_status" property="quotaSyncStatus" />
+        <result column="create_time" property="createTime" />
+        <result column="update_time" property="updateTime" />
+        <result column="latest_recycle_id" property="latestRecycleId" />
+        <result column="latest_recycle_status" property="latestRecycleStatus" />
+        <result column="recycle_created_time" property="recycleCreatedTime" />
+        <result column="recycle_expired_time" property="recycleExpiredTime" />
+        <result column="has_grant_history" property="hasGrantHistory" />
+        <result column="first_quota_limit" property="firstQuotaLimit" />
+        <result column="valid_recycle_count" property="validRecycleCount" />
+    </resultMap>
+
+    <select id="selectAdminPage" resultMap="AdminQuotaResultMap">
+        SELECT
+            quota.storage_quota_id,
+            quota.user_id,
+            quota.user_code,
+            quota.bucket_name,
+            quota.storage_type,
+            quota.base_quota_bytes,
+            quota.addon_quota_bytes,
+            quota.total_quota_bytes,
+            quota.used_bytes,
+            quota.reserved_bytes,
+            quota.usage_status,
+            quota.provision_status,
+            quota.quota_sync_status,
+            quota.create_time,
+            quota.update_time,
+            latest_recycle.recycle_id AS latest_recycle_id,
+            latest_recycle.recycle_status AS latest_recycle_status,
+            latest_recycle.started_time AS recycle_created_time,
+            latest_recycle.retention_until AS recycle_expired_time,
+            COALESCE(valid_recycle.valid_recycle_count, 0) AS valid_recycle_count,
+            EXISTS (
+                SELECT 1
+                FROM byai.po_user_storage_grant history_grant
+                WHERE history_grant.user_id = quota.user_id
+            ) AS has_grant_history,
+            (
+                quota.usage_status = 'EXCEEDED'
+                AND NOT EXISTS (
+                    SELECT 1
+                    FROM byai.po_user_storage_grant first_grant
+                    WHERE first_grant.user_id = quota.user_id
+                )
+            ) AS first_quota_limit
+        FROM byai.po_user_storage_quota quota
+        LEFT JOIN (
+            SELECT ranked.recycle_id,
+                ranked.user_id,
+                ranked.recycle_status,
+                ranked.started_time,
+                ranked.retention_until
+            FROM (
+                SELECT recycle.recycle_id,
+                    recycle.user_id,
+                    recycle.recycle_status,
+                    recycle.started_time,
+                    recycle.retention_until,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY recycle.user_id
+                        ORDER BY recycle.started_time DESC NULLS LAST, recycle.recycle_id DESC
+                    ) AS row_number
+                FROM byai.po_user_storage_recycle recycle
+            ) ranked
+            WHERE ranked.row_number = 1
+        ) latest_recycle ON latest_recycle.user_id = quota.user_id
+        LEFT JOIN (
+            SELECT recycle.user_id,
+                COUNT(*) AS valid_recycle_count
+            FROM byai.po_user_storage_recycle recycle
+            WHERE recycle.recycle_status = 'AVAILABLE'
+                AND recycle.retention_until &gt; CURRENT_TIMESTAMP
+            GROUP BY recycle.user_id
+        ) valid_recycle ON valid_recycle.user_id = quota.user_id
+        <where>
+            quota.delete_flag = '0'
+            <if test="query.userCode != null and query.userCode != ''">
+                AND quota.user_code LIKE CONCAT('%', #{query.userCode}, '%')
+            </if>
+            <if test="query.keyword != null and query.keyword != ''">
+                AND (
+                    quota.user_code LIKE CONCAT('%', #{query.keyword}, '%')
+                    OR quota.bucket_name LIKE CONCAT('%', #{query.keyword}, '%')
+                )
+            </if>
+            <if test="query.usageStatus != null and query.usageStatus != ''">
+                AND quota.usage_status = #{query.usageStatus}
+            </if>
+            <if test="query.packageId != null">
+                AND EXISTS (
+                    SELECT 1
+                    FROM byai.po_user_storage_grant active_grant
+                    WHERE active_grant.user_id = quota.user_id
+                        AND active_grant.package_id = #{query.packageId}
+                        AND active_grant.grant_status = 'ACTIVE'
+                )
+            </if>
+            <if test="query.hasValidRecycle != null and query.hasValidRecycle">
+                AND valid_recycle.valid_recycle_count &gt; 0
+            </if>
+            <if test="query.recycleCreatedStart != null">
+                AND latest_recycle.started_time &gt;= #{query.recycleCreatedStart}
+            </if>
+            <if test="query.recycleCreatedEnd != null">
+                AND latest_recycle.started_time &lt;= #{query.recycleCreatedEnd}
+            </if>
+            <if test="query.recycleExpiredStart != null">
+                AND latest_recycle.retention_until &gt;= #{query.recycleExpiredStart}
+            </if>
+            <if test="query.recycleExpiredEnd != null">
+                AND latest_recycle.retention_until &lt;= #{query.recycleExpiredEnd}
+            </if>
+        </where>
+        ORDER BY
+        <choose>
+            <when test="query.sortField == 'usedBytes'">
+                quota.used_bytes
+            </when>
+            <when test="query.sortField == 'usageStatus'">
+                CASE quota.usage_status
+                    WHEN 'NORMAL' THEN 1
+                    WHEN 'WARNING' THEN 2
+                    WHEN 'EXCEEDED' THEN 3
+                    WHEN 'RESETTING' THEN 4
+                    WHEN 'RESTORING' THEN 5
+                    ELSE 99
+                END
+            </when>
+            <when test="query.sortField == 'recycleCreatedTime'">
+                latest_recycle.started_time
+            </when>
+            <when test="query.sortField == 'recycleExpiredTime'">
+                latest_recycle.retention_until
+            </when>
+            <otherwise>
+                quota.update_time
+            </otherwise>
+        </choose>
+        <choose>
+            <when test="query.sortOrder == 'asc'">ASC</when>
+            <otherwise>DESC</otherwise>
+        </choose>
+        NULLS LAST,
+        quota.storage_quota_id DESC
+    </select>
+</mapper>

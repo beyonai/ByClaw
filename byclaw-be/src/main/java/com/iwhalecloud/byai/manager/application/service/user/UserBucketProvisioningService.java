@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 
 import com.iwhalecloud.byai.common.storage.ObjectStorage;
 import com.iwhalecloud.byai.common.storage.constants.StorageType;
+import com.iwhalecloud.byai.manager.application.service.storage.UserStorageQuotaApplicationService;
 
 /**
  * 用户默认桶初始化服务。
@@ -30,6 +31,9 @@ public class UserBucketProvisioningService {
     @Autowired
     private FileStorageUserSpaceProvisioner fileStorageUserSpaceProvisioner;
 
+    @Autowired
+    private UserStorageQuotaApplicationService storageQuotaService;
+
     @Value("${file.storage.type:minio}")
     private String storageType;
 
@@ -41,6 +45,7 @@ public class UserBucketProvisioningService {
         try {
             ensureUserBucket(userCode);
         } catch (Exception e) {
+            storageQuotaService.markProvisionFailed(userCode, e);
             LOGGER.error("初始化用户默认存储空间失败, userCode={}, storageType={}", userCode, storageType, e);
         }
     }
@@ -50,21 +55,31 @@ public class UserBucketProvisioningService {
      */
     public void ensureUserBucket(String userCode) {
         String bucketName = userBucketNamingService.buildUserBucketName(userCode);
-        if (isMinioStorage()) {
-            LOGGER.info("开始初始化用户默认MinIO桶, userCode={}, bucketName={}", userCode, bucketName);
-            objectStorage.init(bucketName);
-            LOGGER.info("用户默认MinIO桶初始化完成, userCode={}, bucketName={}", userCode, bucketName);
-            return;
-        }
+        storageQuotaService.ensureQuotaByUserCode(userCode);
+        try {
+            if (isMinioStorage()) {
+                LOGGER.info("开始初始化用户默认MinIO桶, userCode={}, bucketName={}", userCode, bucketName);
+                objectStorage.init(bucketName);
+                LOGGER.info("用户默认MinIO桶初始化完成, userCode={}, bucketName={}", userCode, bucketName);
+                storageQuotaService.markProvisionReady(userCode);
+                return;
+            }
 
-        if (StorageType.isLocalFilesystem(storageType)) {
-            LOGGER.info("开始初始化用户文件型存储空间, userCode={}, bucketOrRoot={}", userCode, bucketName);
-            fileStorageUserSpaceProvisioner.ensureUserSpace(bucketName);
-            LOGGER.info("用户文件型存储空间初始化完成, userCode={}, bucketOrRoot={}", userCode, bucketName);
-            return;
-        }
+            if (StorageType.isLocalFilesystem(storageType)) {
+                LOGGER.info("开始初始化用户文件型存储空间, userCode={}, bucketOrRoot={}", userCode, bucketName);
+                fileStorageUserSpaceProvisioner.ensureUserSpace(bucketName);
+                LOGGER.info("用户文件型存储空间初始化完成, userCode={}, bucketOrRoot={}", userCode, bucketName);
+                storageQuotaService.markProvisionReady(userCode);
+                return;
+            }
 
-        LOGGER.info("当前文件存储类型不需要初始化用户默认空间, storageType={}, userCode={}", storageType, userCode);
+            LOGGER.info("当前文件存储类型不需要初始化用户默认空间, storageType={}, userCode={}", storageType, userCode);
+            storageQuotaService.markProvisionReady(userCode);
+        }
+        catch (Exception e) {
+            storageQuotaService.markProvisionFailed(userCode, e);
+            throw e;
+        }
     }
 
     private boolean isMinioStorage() {

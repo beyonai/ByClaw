@@ -9,8 +9,11 @@ import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import com.iwhalecloud.byai.common.storage.ObjectStorage;
+import com.iwhalecloud.byai.manager.application.service.storage.UserStorageQuotaApplicationService;
 
 class UserBucketProvisioningServiceTest {
+
+    private final UserStorageQuotaApplicationService storageQuotaService = mock(UserStorageQuotaApplicationService.class);
 
     @Test
     void ensureUserBucket_minioInitializesUserBucket() {
@@ -22,6 +25,7 @@ class UserBucketProvisioningServiceTest {
 
         verify(objectStorage).init("byclaw-user001");
         verify(fileProvisioner, never()).ensureUserSpace("byclaw-user001");
+        verify(storageQuotaService).markProvisionReady("user001");
     }
 
     @Test
@@ -69,6 +73,7 @@ class UserBucketProvisioningServiceTest {
         ReflectionTestUtils.setField(service, "objectStorage", objectStorage);
         ReflectionTestUtils.setField(service, "userBucketNamingService", namingService);
         ReflectionTestUtils.setField(service, "fileStorageUserSpaceProvisioner", fileProvisioner);
+        ReflectionTestUtils.setField(service, "storageQuotaService", storageQuotaService);
         return service;
     }
 }

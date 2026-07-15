@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.storage.UserStorageDowngradeMapper">
+
+    <resultMap id="DowngradeAdminResultMap"
+        type="com.iwhalecloud.byai.manager.vo.storage.UserStorageDowngradeAdminVO">
+        <id column="downgrade_id" property="downgradeId" />
+        <result column="request_id" property="requestId" />
+        <result column="user_id" property="userId" />
+        <result column="user_code" property="userCode" />
+        <result column="grant_id" property="grantId" />
+        <result column="grant_ids" property="grantIds" />
+        <result column="package_id" property="packageId" />
+        <result column="package_code" property="packageCode" />
+        <result column="package_name" property="packageName" />
+        <result column="package_names" property="packageNames" />
+        <result column="change_bytes" property="changeBytes" />
+        <result column="request_source" property="requestSource" />
+        <result column="request_type" property="requestType" />
+        <result column="downgrade_status" property="downgradeStatus" />
+        <result column="grant_source" property="grantSource" />
+        <result column="before_quota_bytes" property="beforeQuotaBytes" />
+        <result column="target_quota_bytes" property="targetQuotaBytes" />
+        <result column="used_bytes_snapshot" property="usedBytesSnapshot" />
+        <result column="reserved_bytes_snapshot" property="reservedBytesSnapshot" />
+        <result column="overage_bytes" property="overageBytes" />
+        <result column="reason" property="reason" />
+        <result column="review_remark" property="reviewRemark" />
+        <result column="grace_deadline" property="graceDeadline" />
+        <result column="related_recycle_id" property="relatedRecycleId" />
+        <result column="requested_by_code" property="requestedByCode" />
+        <result column="reviewed_by_code" property="reviewedByCode" />
+        <result column="requested_time" property="requestedTime" />
+        <result column="reviewed_time" property="reviewedTime" />
+        <result column="completed_time" property="completedTime" />
+        <result column="error_message" property="errorMessage" />
+    </resultMap>
+
+    <sql id="DowngradeAdminColumns">
+        downgrade.downgrade_id,
+        downgrade.request_id,
+        downgrade.user_id,
+        quota.user_code,
+        downgrade.grant_id,
+        downgrade.grant_ids,
+        downgrade.package_id,
+        storage_package.package_code,
+        COALESCE(downgrade.package_names, storage_package.package_name) AS package_name,
+        downgrade.package_names,
+        downgrade.change_bytes,
+        downgrade.request_source,
+        downgrade.request_type,
+        downgrade.downgrade_status,
+        downgrade.grant_source,
+        downgrade.before_quota_bytes,
+        downgrade.target_quota_bytes,
+        downgrade.used_bytes_snapshot,
+        downgrade.reserved_bytes_snapshot,
+        downgrade.overage_bytes,
+        downgrade.reason,
+        downgrade.review_remark,
+        downgrade.grace_deadline,
+        downgrade.related_recycle_id,
+        requester.user_code AS requested_by_code,
+        reviewer.user_code AS reviewed_by_code,
+        downgrade.requested_time,
+        downgrade.reviewed_time,
+        downgrade.completed_time,
+        downgrade.error_message
+    </sql>
+
+    <sql id="DowngradeAdminJoins">
+        FROM byai.po_user_storage_downgrade downgrade
+        INNER JOIN byai.po_user_storage_quota quota
+            ON quota.user_id = downgrade.user_id
+            AND quota.delete_flag = '0'
+        LEFT JOIN byai.po_storage_package storage_package
+            ON storage_package.package_id = downgrade.package_id
+        LEFT JOIN byai.po_users requester
+            ON requester.user_id = downgrade.requested_by
+        LEFT JOIN byai.po_users reviewer
+            ON reviewer.user_id = downgrade.reviewed_by
+    </sql>
+
+    <select id="selectAdminPage" resultMap="DowngradeAdminResultMap">
+        SELECT <include refid="DowngradeAdminColumns" />
+        <include refid="DowngradeAdminJoins" />
+        <where>
+            <if test="query.userCode != null and query.userCode != ''">
+                quota.user_code LIKE CONCAT('%', #{query.userCode}, '%')
+            </if>
+            <if test="query.downgradeStatus != null and query.downgradeStatus != ''">
+                AND downgrade.downgrade_status = #{query.downgradeStatus}
+            </if>
+            <if test="query.requestType != null and query.requestType != ''">
+                AND downgrade.request_type = #{query.requestType}
+            </if>
+        </where>
+        ORDER BY downgrade.requested_time DESC NULLS LAST, downgrade.downgrade_id DESC
+    </select>
+
+    <select id="selectUserHistory" resultMap="DowngradeAdminResultMap">
+        SELECT <include refid="DowngradeAdminColumns" />
+        <include refid="DowngradeAdminJoins" />
+        WHERE downgrade.user_id = #{userId}
+        ORDER BY downgrade.requested_time DESC NULLS LAST, downgrade.downgrade_id DESC
+        LIMIT 100
+    </select>
+
+    <select id="selectUserPage" resultMap="DowngradeAdminResultMap">
+        SELECT <include refid="DowngradeAdminColumns" />
+        <include refid="DowngradeAdminJoins" />
+        WHERE downgrade.user_id = #{userId}
+        <if test="query.downgradeStatus != null and query.downgradeStatus != ''">
+            AND downgrade.downgrade_status = #{query.downgradeStatus}
+        </if>
+        <if test="query.requestType != null and query.requestType != ''">
+            AND downgrade.request_type = #{query.requestType}
+        </if>
+        ORDER BY downgrade.requested_time DESC NULLS LAST, downgrade.downgrade_id DESC
+    </select>
+</mapper>

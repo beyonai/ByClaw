@@ -321,10 +321,18 @@ public class MinioStorageService extends AbstractFileIngressStorageService<Minio
 
     @Override
     public void copy(StorageLocation source, StorageLocation target) {
-        if (!StringUtils.equals(source.getBucketOrRoot(), target.getBucketOrRoot())) {
-            throw new BaseException("MinIO跨桶复制暂未支持: " + source.getBucketOrRoot() + " -> " + target.getBucketOrRoot());
+        try {
+            createBucketIfAbsent(target.getBucketOrRoot());
+            CopySource copySource = CopySource.builder().bucket(source.getBucketOrRoot())
+                .object(normalizeObjectKey(source.getPath())).build();
+            CopyObjectArgs copyObjectArgs = CopyObjectArgs.builder().bucket(target.getBucketOrRoot())
+                .object(normalizeObjectKey(target.getPath())).source(copySource).build();
+            getClient().copyObject(copyObjectArgs);
         }
-        copyObject(source.getBucketOrRoot(), source.getPath(), target.getPath());
+        catch (Exception e) {
+            throw new BaseException("复制MinIO对象失败: " + source.getBucketOrRoot() + "/" + source.getPath()
+                + " -> " + target.getBucketOrRoot() + "/" + target.getPath(), e);
+        }
     }
 
     /**

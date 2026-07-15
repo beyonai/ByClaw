@@ -10,6 +10,7 @@ import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationSe
 import com.iwhalecloud.byai.manager.application.service.superassist.SuasSuperassistApplicationService;
 import com.iwhalecloud.byai.manager.domain.superassist.service.SuasSuperassistService;
 import com.iwhalecloud.byai.manager.application.service.user.UserApplicationService;
+import com.iwhalecloud.byai.manager.application.service.storage.UserStorageQuotaApplicationService;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
 import com.iwhalecloud.byai.common.storage.UserFS;
 import com.iwhalecloud.byai.manager.domain.staticdata.service.SystemConfigService;
@@ -89,6 +90,9 @@ public class MultAuthenticationSuccessHandler implements AuthenticationSuccessHa
 
     @Autowired
     private UserFS userFS;
+
+    @Autowired
+    private UserStorageQuotaApplicationService storageQuotaService;
 
     @Autowired
     private LoginApplicationService loginApplicationService;
@@ -246,9 +250,17 @@ public class MultAuthenticationSuccessHandler implements AuthenticationSuccessHa
 
     private void mountUserBucket(String userCode) {
         try {
+            storageQuotaService.ensureQuota(CurrentUserHolder.getCurrentUserId(), userCode);
             userFS.mount();
+            storageQuotaService.markProvisionReady(userCode);
         }
         catch (Exception e) {
+            try {
+                storageQuotaService.markProvisionFailed(userCode, e);
+            }
+            catch (Exception statusException) {
+                logger.warn("记录用户bucket挂载失败状态异常, userCode={}", userCode, statusException);
+            }
             logger.error("登录后挂载用户bucket失败，系统继续登录流程, userCode={}", userCode, e);
         }
     }
