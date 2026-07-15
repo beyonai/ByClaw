@@ -1,0 +1,1498 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:,">
+  <title>ByClaw SaaS 存储配额解决方案与全链路测试报告</title>
+  <style>
+    :root {
+      --bg: #f4f7fb;
+      --surface: #ffffff;
+      --surface-soft: #f8fafc;
+      --ink: #172033;
+      --muted: #64748b;
+      --line: #dbe3ef;
+      --blue: #2563eb;
+      --blue-soft: #eaf1ff;
+      --cyan: #0891b2;
+      --cyan-soft: #e7f8fc;
+      --green: #15803d;
+      --green-soft: #eaf8ef;
+      --amber: #b45309;
+      --amber-soft: #fff7e7;
+      --red: #b42318;
+      --red-soft: #fff0ef;
+      --purple: #7c3aed;
+      --purple-soft: #f3efff;
+      --nav-width: 286px;
+      --radius: 18px;
+      --shadow: 0 16px 40px rgba(40, 61, 96, 0.08);
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      line-height: 1.68;
+    }
+    a { color: var(--blue); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .sidebar {
+      position: fixed;
+      inset: 0 auto 0 0;
+      z-index: 20;
+      width: var(--nav-width);
+      overflow-y: auto;
+      padding: 26px 20px 32px;
+      color: #dce8ff;
+      background:
+        radial-gradient(circle at 15% 8%, rgba(59, 130, 246, 0.28), transparent 30%),
+        linear-gradient(165deg, #101c36 0%, #142747 52%, #0e1a31 100%);
+      box-shadow: 8px 0 34px rgba(18, 34, 63, 0.16);
+    }
+    .brand { padding: 2px 8px 22px; border-bottom: 1px solid rgba(255,255,255,.14); }
+    .brand-mark {
+      display: inline-flex;
+      width: 38px;
+      height: 38px;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 12px;
+      border-radius: 12px;
+      color: #fff;
+      background: linear-gradient(135deg, #3b82f6, #22d3ee);
+      font-weight: 800;
+      letter-spacing: .5px;
+    }
+    .brand h1 { margin: 0; color: #fff; font-size: 18px; line-height: 1.35; }
+    .brand p { margin: 8px 0 0; color: #9db1d2; font-size: 12px; }
+    .nav-caption {
+      margin: 22px 10px 8px;
+      color: #7691bb;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1.6px;
+      text-transform: uppercase;
+    }
+    .toc { display: grid; gap: 3px; }
+    .toc a {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      padding: 8px 10px;
+      border-radius: 9px;
+      color: #bfd0ea;
+      font-size: 13px;
+      transition: .18s ease;
+    }
+    .toc a:hover, .toc a.active {
+      color: #fff;
+      background: rgba(96, 165, 250, .18);
+      text-decoration: none;
+    }
+    .toc a.sub { padding-left: 35px; color: #94a9ca; font-size: 12px; }
+    .toc .num { width: 18px; color: #73b7ff; font-variant-numeric: tabular-nums; }
+    .sidebar-foot {
+      margin: 24px 8px 0;
+      padding-top: 16px;
+      border-top: 1px solid rgba(255,255,255,.12);
+      color: #8399ba;
+      font-size: 11px;
+    }
+
+    main { margin-left: var(--nav-width); padding: 34px clamp(24px, 4vw, 68px) 80px; }
+    .content { max-width: 1380px; margin: 0 auto; }
+    section { scroll-margin-top: 26px; }
+    .paper {
+      margin-bottom: 24px;
+      padding: clamp(22px, 3.2vw, 42px);
+      border: 1px solid rgba(210, 220, 235, .8);
+      border-radius: var(--radius);
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+    .hero {
+      position: relative;
+      overflow: hidden;
+      min-height: 390px;
+      padding: clamp(34px, 5vw, 68px);
+      color: #fff;
+      border: 0;
+      background:
+        radial-gradient(circle at 85% 16%, rgba(34, 211, 238, .34), transparent 24%),
+        radial-gradient(circle at 70% 85%, rgba(124, 58, 237, .28), transparent 30%),
+        linear-gradient(135deg, #12264b 0%, #17458a 55%, #146d8e 100%);
+    }
+    .hero::after {
+      content: "";
+      position: absolute;
+      right: -110px;
+      bottom: -170px;
+      width: 430px;
+      height: 430px;
+      border: 1px solid rgba(255,255,255,.18);
+      border-radius: 50%;
+      box-shadow: 0 0 0 48px rgba(255,255,255,.035), 0 0 0 96px rgba(255,255,255,.025);
+    }
+    .eyebrow { margin: 0 0 12px; color: #8ce7ff; font-size: 13px; font-weight: 700; letter-spacing: 2px; }
+    .hero h2 { position: relative; z-index: 1; max-width: 920px; margin: 0; font-size: clamp(34px, 5vw, 62px); line-height: 1.14; letter-spacing: -1.5px; }
+    .hero .lead { position: relative; z-index: 1; max-width: 880px; margin: 22px 0 28px; color: #d9e9ff; font-size: 17px; }
+    .hero-meta { position: relative; z-index: 1; display: flex; flex-wrap: wrap; gap: 10px; }
+    .hero-meta span { padding: 7px 12px; border: 1px solid rgba(255,255,255,.22); border-radius: 999px; background: rgba(255,255,255,.09); font-size: 12px; }
+    .decision-banner {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      max-width: 900px;
+      gap: 14px;
+      align-items: flex-start;
+      margin-top: 30px;
+      padding: 16px 18px;
+      border: 1px solid rgba(255,255,255,.2);
+      border-radius: 14px;
+      background: rgba(9, 25, 51, .38);
+      backdrop-filter: blur(8px);
+    }
+    .decision-banner strong { color: #9af5c0; white-space: nowrap; }
+    .decision-banner span { color: #e4eeff; font-size: 13px; }
+
+    .section-kicker { margin: 0 0 7px; color: var(--blue); font-size: 12px; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase; }
+    h2.section-title { margin: 0 0 10px; font-size: clamp(25px, 3vw, 35px); line-height: 1.25; }
+    .section-desc { max-width: 980px; margin: 0 0 28px; color: var(--muted); }
+    h3 { margin: 34px 0 12px; font-size: 21px; line-height: 1.4; }
+    h4 { margin: 22px 0 8px; font-size: 16px; }
+    p { margin: 10px 0; }
+    .muted { color: var(--muted); }
+    .small { font-size: 12px; }
+
+    .metric-grid, .card-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+    .metric, .info-card {
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--surface-soft);
+    }
+    .metric .label { color: var(--muted); font-size: 12px; }
+    .metric .value { margin-top: 4px; font-size: 27px; font-weight: 800; line-height: 1.25; }
+    .metric .note { margin-top: 5px; color: var(--muted); font-size: 11px; }
+    .info-card h4 { margin-top: 0; color: #1e3a66; }
+    .info-card p { margin-bottom: 0; color: var(--muted); font-size: 13px; }
+    .accent-blue { border-top: 4px solid var(--blue); }
+    .accent-green { border-top: 4px solid var(--green); }
+    .accent-cyan { border-top: 4px solid var(--cyan); }
+    .accent-purple { border-top: 4px solid var(--purple); }
+
+    .callout { margin: 20px 0; padding: 16px 18px; border-left: 4px solid var(--blue); border-radius: 0 12px 12px 0; background: var(--blue-soft); }
+    .callout.warn { border-color: var(--amber); background: var(--amber-soft); }
+    .callout.ok { border-color: var(--green); background: var(--green-soft); }
+    .callout.danger { border-color: var(--red); background: var(--red-soft); }
+    .callout strong { display: block; margin-bottom: 4px; }
+
+    .tag, .status {
+      display: inline-flex;
+      align-items: center;
+      padding: 3px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .pass { color: var(--green); background: var(--green-soft); }
+    .conditional { color: var(--amber); background: var(--amber-soft); }
+    .fixed { color: var(--blue); background: var(--blue-soft); }
+    .baseline { color: var(--purple); background: var(--purple-soft); }
+    .blocked { color: var(--red); background: var(--red-soft); }
+
+    .table-wrap { overflow-x: auto; margin: 16px 0 24px; border: 1px solid var(--line); border-radius: 14px; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { padding: 12px 13px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { color: #334155; background: #f2f6fb; font-size: 12px; white-space: nowrap; }
+    tr:last-child td { border-bottom: 0; }
+    tbody tr:hover { background: #fbfdff; }
+    code { padding: 2px 6px; border-radius: 5px; color: #334155; background: #eef2f7; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .nowrap { white-space: nowrap; }
+
+    .architecture {
+      display: grid;
+      gap: 9px;
+      margin: 22px 0 30px;
+      padding: 22px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: linear-gradient(180deg, #fbfdff, #f7faff);
+    }
+    .arch-band { display: grid; grid-template-columns: 120px 1fr; gap: 12px; align-items: stretch; }
+    .arch-label { display: flex; align-items: center; justify-content: center; padding: 10px; border-right: 3px solid #cbd8e9; color: var(--muted); font-size: 12px; font-weight: 800; text-align: center; }
+    .arch-nodes { display: grid; grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); gap: 8px; }
+    .arch-node { display: flex; min-height: 58px; align-items: center; justify-content: center; padding: 11px; border-radius: 10px; color: #183153; background: var(--blue-soft); font-size: 12px; font-weight: 700; text-align: center; }
+    .arch-band:nth-of-type(3) .arch-node { background: var(--cyan-soft); }
+    .arch-band:nth-of-type(5) .arch-node { background: var(--green-soft); }
+    .arch-band:nth-of-type(7) .arch-node { background: var(--purple-soft); }
+    .arch-band:nth-of-type(9) .arch-node { background: var(--amber-soft); }
+    .arch-arrow { color: #90a4c2; text-align: center; line-height: 1; }
+
+    .flow-board { display: grid; gap: 18px; margin: 22px 0 30px; }
+    .flow-lane { display: grid; grid-template-columns: 105px 1fr; gap: 15px; align-items: center; }
+    .flow-name { color: #334155; font-size: 13px; font-weight: 800; text-align: right; }
+    .flow-steps { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 22px; }
+    .flow-step { position: relative; display: flex; min-height: 82px; align-items: center; justify-content: center; padding: 11px; border-radius: 11px; color: #1e3a5f; background: var(--blue-soft); font-size: 12px; font-weight: 700; text-align: center; }
+    .flow-lane:nth-child(2) .flow-step { background: var(--green-soft); }
+    .flow-lane:nth-child(3) .flow-step { background: var(--purple-soft); }
+    .flow-step:not(:last-child)::after { content: "→"; position: absolute; right: -18px; top: 50%; color: #94a3b8; font-size: 18px; transform: translateY(-50%); }
+    .flow-step.decision { box-shadow: inset 0 0 0 2px rgba(180, 83, 9, .35); }
+    .flow-step em { display: block; margin-top: 4px; color: var(--muted); font-size: 10px; font-style: normal; font-weight: 500; }
+
+    .lifecycle-frame {
+      display: block;
+      width: 100%;
+      height: 540px;
+      margin: 22px 0 28px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: #f8fafc;
+    }
+    .lifecycle-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin: 18px 0 28px; }
+    .lifecycle-card { padding: 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface-soft); }
+    .lifecycle-card h4 { margin-top: 0; color: #1e3a66; }
+    .lifecycle-card p, .lifecycle-card li { color: var(--muted); font-size: 13px; }
+    .lifecycle-card ul { margin: 8px 0 0; padding-left: 18px; }
+    .state-path { font-weight: 750; color: #1e3a66; }
+
+    .branch-chapter { margin: 28px 0 36px; }
+    .branch-chapter + .branch-chapter { padding-top: 28px; border-top: 1px solid var(--line); }
+    .branch-heading { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 8px; }
+    .branch-heading h4 { margin: 0; font-size: 18px; }
+    .branch-intro { max-width: 1080px; margin: 0 0 20px; color: var(--muted); font-size: 13px; }
+    .process-figure { margin: 18px 0 22px; }
+    .process-flow { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 22px; align-items: stretch; }
+    .process-flow.steps-8 { grid-template-columns: repeat(8, minmax(0, 1fr)); }
+    .process-node {
+      position: relative;
+      display: flex;
+      min-height: 104px;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 12px 9px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      color: #1e3a5f;
+      background: var(--blue-soft);
+      text-align: center;
+    }
+    .process-node:not(:last-child)::after { content: "→"; position: absolute; z-index: 2; top: 50%; right: -18px; color: #94a3b8; font-size: 18px; transform: translateY(-50%); }
+    .process-node strong { display: block; font-size: 12px; line-height: 1.45; }
+    .process-node span { display: block; margin-top: 5px; color: var(--muted); font-size: 10px; line-height: 1.4; }
+    .process-node.actor-user { background: var(--blue-soft); }
+    .process-node.actor-admin { background: var(--purple-soft); }
+    .process-node.actor-system { background: var(--cyan-soft); }
+    .process-node.actor-storage { background: var(--green-soft); }
+    .process-node.decision { background: var(--amber-soft); box-shadow: inset 0 0 0 1px rgba(180, 83, 9, .28); }
+    .process-node.terminal { color: #166534; background: var(--green-soft); }
+    .process-figure figcaption { margin-top: 10px; color: var(--muted); font-size: 11px; text-align: center; }
+    .process-lanes { display: grid; gap: 18px; }
+    .process-lane { display: grid; grid-template-columns: 112px 1fr; gap: 14px; align-items: center; }
+    .process-lane-name { color: #334155; font-size: 12px; font-weight: 800; text-align: right; }
+    .process-lane .process-flow { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+
+    .formula { display: grid; grid-template-columns: 1fr auto 1fr auto 1fr; gap: 12px; align-items: center; margin: 18px 0; padding: 20px; border-radius: 14px; color: #163256; background: #edf4ff; text-align: center; }
+    .formula .term { padding: 12px; border-radius: 10px; background: #fff; font-weight: 800; }
+    .formula .op { color: var(--muted); font-size: 22px; font-weight: 800; }
+
+    .evidence-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+    .evidence {
+      scroll-margin-top: 24px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: #fff;
+      box-shadow: 0 8px 24px rgba(46, 65, 99, .07);
+    }
+    .evidence a { display: block; background: #e9eef6; }
+    .evidence img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: contain; background: #edf2f8; }
+    .evidence figcaption { padding: 13px 15px 15px; color: #334155; font-size: 12px; }
+    .evidence figcaption b { display: block; margin-bottom: 3px; color: var(--ink); }
+
+    .risk-matrix { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 20px 0; }
+    .risk-item { padding: 16px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface-soft); }
+    .risk-item strong { display: block; margin-bottom: 6px; }
+    .risk-item p { margin: 5px 0 0; color: var(--muted); font-size: 12px; }
+
+    .roadmap { position: relative; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin: 24px 0; }
+    .roadmap::before { content: ""; position: absolute; z-index: 0; top: 26px; right: 8%; left: 8%; height: 2px; background: #cad6e7; }
+    .phase { position: relative; z-index: 1; padding: 54px 17px 18px; border: 1px solid var(--line); border-radius: 14px; background: #fff; }
+    .phase::before { content: attr(data-step); position: absolute; top: 10px; left: calc(50% - 18px); display: flex; width: 36px; height: 36px; align-items: center; justify-content: center; border: 4px solid #fff; border-radius: 50%; color: #fff; background: var(--blue); font-size: 12px; font-weight: 800; box-shadow: 0 0 0 1px #b9c9df; }
+    .phase h4 { margin: 0 0 6px; text-align: center; }
+    .phase .time { display: block; margin-bottom: 10px; color: var(--blue); font-size: 11px; font-weight: 700; text-align: center; }
+    .phase ul { margin: 8px 0 0; padding-left: 18px; color: var(--muted); font-size: 12px; }
+    .phase li { margin: 4px 0; }
+
+    .checklist { display: grid; gap: 8px; margin: 16px 0; padding: 0; list-style: none; }
+    .checklist li { position: relative; padding: 11px 14px 11px 42px; border: 1px solid var(--line); border-radius: 10px; background: #fbfdff; }
+    .checklist li::before { content: "✓"; position: absolute; top: 10px; left: 14px; display: flex; width: 20px; height: 20px; align-items: center; justify-content: center; border-radius: 50%; color: #fff; background: var(--green); font-size: 12px; font-weight: 900; }
+    .checklist.pending li::before { content: "!"; background: var(--amber); }
+
+    .final-verdict { display: grid; grid-template-columns: 210px 1fr; gap: 26px; align-items: center; padding: 26px; border: 1px solid #d8e5d9; border-radius: 16px; background: linear-gradient(135deg, #f1fbf5, #f8fbff); }
+    .verdict-mark { padding: 25px 12px; border-radius: 14px; color: #fff; background: linear-gradient(135deg, #15803d, #0f9f7a); font-size: 25px; font-weight: 900; text-align: center; }
+    .final-verdict h3 { margin: 0 0 8px; }
+    .final-verdict p { margin: 6px 0; color: #46566d; }
+
+    .footer { padding: 20px 8px 0; color: var(--muted); font-size: 12px; text-align: center; }
+    .back-top { display: inline-block; margin-top: 10px; }
+
+    @media (max-width: 1120px) {
+      .metric-grid, .card-grid, .risk-matrix { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .lifecycle-grid { grid-template-columns: 1fr; }
+      .lifecycle-frame { height: 1470px; }
+      .process-flow, .process-flow.steps-8, .process-lane .process-flow { grid-template-columns: 1fr; gap: 20px; }
+      .process-node { min-height: 76px; }
+      .process-node:not(:last-child)::after { content: "↓"; top: auto; right: 50%; bottom: -19px; transform: translateX(50%); }
+      .roadmap { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .roadmap::before { display: none; }
+      .flow-steps { grid-template-columns: 1fr; gap: 20px; }
+      .flow-step:not(:last-child)::after { content: "↓"; top: auto; right: 50%; bottom: -19px; transform: translateX(50%); }
+    }
+
+    @media (max-width: 820px) {
+      .sidebar { position: relative; width: 100%; max-height: none; }
+      .toc { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .toc a.sub { display: none; }
+      main { margin-left: 0; padding: 20px 14px 50px; }
+      .hero { min-height: 0; }
+      .hero h2 { font-size: 36px; }
+      .arch-band, .flow-lane { grid-template-columns: 1fr; }
+      .arch-label { justify-content: flex-start; border-right: 0; border-bottom: 2px solid #d7e1ef; text-align: left; }
+      .flow-name { text-align: left; }
+      .process-lane { grid-template-columns: 1fr; }
+      .process-lane-name { text-align: left; }
+      .evidence-grid { grid-template-columns: 1fr; }
+      .final-verdict { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 560px) {
+      .paper { padding: 20px 16px; border-radius: 13px; }
+      .hero { padding: 30px 22px; }
+      .hero h2 { font-size: 30px; }
+      .decision-banner { flex-direction: column; }
+      .metric-grid, .card-grid, .risk-matrix, .roadmap { grid-template-columns: 1fr; }
+      .formula { grid-template-columns: 1fr; }
+      .formula .op { transform: rotate(90deg); }
+      .toc { grid-template-columns: 1fr; }
+    }
+
+    @media print {
+      @page { size: A4 landscape; margin: 12mm; }
+      body { background: #fff; }
+      .sidebar { display: none; }
+      main { margin: 0; padding: 0; }
+      .paper { break-inside: avoid; border: 0; box-shadow: none; }
+      .hero { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .evidence { break-inside: avoid; }
+      a { color: inherit; }
+    }
+  </style>
+</head>
+<body id="top" data-report-date="2026-07-15">
+  <aside class="sidebar" aria-label="报告章节导航">
+    <div class="brand">
+      <div class="brand-mark">BQ</div>
+      <h1>ByClaw SaaS<br>存储配额解决方案</h1>
+      <p>解决方案 · 全链路测试 · 上线评估</p>
+    </div>
+    <div class="nav-caption">章节导航</div>
+    <nav class="toc">
+      <a href="#summary"><span class="num">01</span>执行摘要</a>
+      <a href="#background"><span class="num">02</span>需求背景与必要性</a>
+      <a href="#scope"><span class="num">03</span>需求范围与验收</a>
+      <a href="#solution"><span class="num">04</span>详细解决方案</a>
+      <a class="sub" href="#architecture">业务架构图</a>
+      <a class="sub" href="#business-flow">业务流程图</a>
+      <a class="sub" href="#technical-design">技术与安全设计</a>
+      <a href="#lifecycle"><span class="num">05</span>完整业务生命周期</a>
+      <a class="sub" href="#quota-branches">触顶后的三条分支</a>
+      <a class="sub" href="#branch-user-addon">用户申请增值</a>
+      <a class="sub" href="#branch-admin-grant">管理员直接授予</a>
+      <a class="sub" href="#branch-release-space">用户释放空间</a>
+      <a class="sub" href="#change-lifecycle">统一增值变更</a>
+      <a class="sub" href="#cancellation-lifecycle">取消增值包与降级</a>
+      <a class="sub" href="#recycle-lifecycle">临时回收站生命周期</a>
+      <a href="#testing"><span class="num">06</span>全链路测试</a>
+      <a class="sub" href="#test-cases">测试用例</a>
+      <a class="sub" href="#evidence">操作截图</a>
+      <a class="sub" href="#cancellation-evidence">取消与降级实测</a>
+      <a class="sub" href="#addon-change-evidence">叠加与统一增值记录</a>
+      <a href="#defects"><span class="num">07</span>缺陷与修复</a>
+      <a href="#release"><span class="num">08</span>上线多维评估</a>
+      <a href="#roadmap"><span class="num">09</span>SaaS 商业化计划</a>
+      <a href="#conclusion"><span class="num">10</span>结论与准入条件</a>
+    </nav>
+    <div class="sidebar-foot">
+      报告日期：2026-07-15<br>
+      测试模式：LocalFile（NFS 等价路径）<br>
+      敏感信息：已脱敏，不包含口令
+    </div>
+  </aside>
+
+  <main>
+    <div class="content">
+      <section class="paper hero" aria-labelledby="report-title">
+        <p class="eyebrow">FULL-CHAIN DELIVERY REPORT · 2026-07-15</p>
+        <h2 id="report-title">SaaS 存储配额<br>解决方案与全链路测试报告</h2>
+        <p class="lead">覆盖配额账本、增值包授予与取消、超额降级宽限、临时回收站、管理员运营台、站内信国际化，以及网盘与会话附件两条上传链路。报告以真实 BE/FE、真实双角色账号和 LocalFile 数据路径完成端到端验证。</p>
+        <div class="hero-meta">
+          <span>JDK 21.0.9</span>
+          <span>OpenGauss · byai schema</span>
+          <span>LocalFile → NFS 部署形态</span>
+          <span>117 张操作证据</span>
+          <span>用户与管理员双角色</span>
+        </div>
+        <div class="decision-banner">
+          <strong>结论：有条件 GO</strong>
+          <span>本功能范围内阻断级缺陷均已修复，取消增值包、超额降级与回收恢复已形成闭环；建议在解决/豁免仓库既有回归失败、验证目标环境制品启动并完成迁移备份演练后灰度上线。</span>
+        </div>
+      </section>
+
+      <section id="summary" class="paper">
+        <p class="section-kicker">01 · Executive Summary</p>
+        <h2 class="section-title">执行摘要</h2>
+        <p class="section-desc">本次交付不是单一管理页面，而是一套从“额度商品化”到“用户申请新增/取消、管理员审批、权益叠加、上传强制控制、超额降级、回收恢复、用户触达”的 SaaS 存储治理闭环。当前版本没有支付，业务动作统一称为“取消增值包”；退款仅是未来支付接入后可能挂接的交易子流程。</p>
+
+        <div class="metric-grid">
+          <div class="metric accent-green">
+            <div class="label">业务操作证据</div>
+            <div class="value">117 张</div>
+            <div class="note">双角色、双上传、同/异等级叠加、多选取消、降级与回收恢复全覆盖</div>
+          </div>
+          <div class="metric accent-blue">
+            <div class="label">本轮增值变更专项</div>
+            <div class="value">38 / 38</div>
+            <div class="note">后端叠加/取消/写入策略 23 + 前端双角色界面 15</div>
+          </div>
+          <div class="metric accent-cyan">
+            <div class="label">前端全量 Jest</div>
+            <div class="value">1,115</div>
+            <div class="note">180 suites 通过；另有 47 项按项目配置跳过</div>
+          </div>
+          <div class="metric accent-purple">
+            <div class="label">功能缺陷闭环</div>
+            <div class="value">22 / 22</div>
+            <div class="note">链路发现项均完成修复与复测</div>
+          </div>
+        </div>
+
+        <div class="callout ok">
+          <strong>交付结果</strong>
+          普通用户达到配额后，网盘与会话附件均被前端友好拦截，同时后端以 HTTP 507 作为不可绕过的最终控制。用户可以申请同一或不同等级的增值包并叠加生效，也可精确选择一项或多项具体权益申请取消；新增和取消都由管理员确认/驳回，统一进入“增值记录”并全程发送国际化站内信。取消后超额时进入只读清理宽限并可转临时回收站。
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>检查面</th><th>结果</th><th>说明</th></tr></thead>
+            <tbody>
+              <tr><td>真实运行环境</td><td><span class="status pass">通过</span></td><td>确认加载指定 204 环境文件；BE/FE 真实启动，存储类型为 <code>file</code>。</td></tr>
+              <tr><td>核心业务链路</td><td><span class="status pass">通过</span></td><td>增值包 CRUD、用户申请新增、同/异等级叠加、多项具体权益取消、统一增值记录、状态过滤、服务端分页、申请/撤回、确认/驳回、管理员直接授予/取消、超额宽限、归档、只读预览、恢复、通知和两类上传均已验证。</td></tr>
+              <tr><td>安全与一致性</td><td><span class="status pass">通过</span></td><td>服务端最终拦截、原子预留、失败释放、物理删除扣量、预览路径隔离、普通用户 403、管理员 RBAC。</td></tr>
+              <tr><td>仓库全量回归</td><td><span class="status conditional">条件通过</span></td><td>前端 1,115 项全量测试与生产构建通过；后端 611 项中 609 通过，仍只有 2 项既有 Gateway lane 元数据测试失败；全库 Lint 另有既有 ModelSiderPanel 两处缩进错误，均与本功能无调用关系。</td></tr>
+              <tr><td>上线决策</td><td><span class="status conditional">有条件 GO</span></td><td>满足第 10 章三项准入条件后，建议先小租户灰度，再逐步放量。</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="background" class="paper">
+        <p class="section-kicker">02 · Background</p>
+        <h2 class="section-title">需求背景与 SaaS 化必要性</h2>
+        <p class="section-desc">网盘存储从“内部资源”演进为 SaaS 产品能力后，必须同时解决资源公平、成本边界、商业转化和数据生命周期治理。只有页面展示用量、没有统一账本和服务端控制，无法形成真正可售卖的增值服务。</p>
+
+        <div class="card-grid">
+          <article class="info-card accent-blue">
+            <h4>租户公平与隔离</h4>
+            <p>防止单一用户持续占满共享 NFS，保障不同租户之间的可用性与资源公平，降低“邻居噪声”风险。</p>
+          </article>
+          <article class="info-card accent-green">
+            <h4>成本可测与可控</h4>
+            <p>将物理存储成本映射为用户额度、使用量和预留量，形成容量规划、成本归集和毛利核算的数据基础。</p>
+          </article>
+          <article class="info-card accent-cyan">
+            <h4>增值服务可销售</h4>
+            <p>把增量空间从人工运维动作抽象为标准增值包，为后续 SKU、订单、订阅、支付与续费接入保留稳定权益模型。</p>
+          </article>
+          <article class="info-card accent-purple">
+            <h4>生命周期可治理</h4>
+            <p>超额后不直接删除用户数据，通过临时回收站、差异化到期时间、恢复与审计降低误操作和合规风险。</p>
+          </article>
+        </div>
+
+        <h3>从功能到 SaaS 能力的关键变化</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>传统文件能力</th><th>SaaS 存储能力</th><th>本次落地</th></tr></thead>
+            <tbody>
+              <tr><td>有空间即可写入</td><td>每用户可计量、可限制、可追溯</td><td>配额账本 + 原子预留 + HTTP 507</td></tr>
+              <tr><td>人工扩容目录</td><td>标准化权益包与授权记录</td><td>套餐定义、授权快照、首次标识、可重复授权</td></tr>
+              <tr><td>超额直接清理</td><td>可恢复的数据生命周期</td><td>临时回收站、独立创建/过期时间、恢复/到期任务</td></tr>
+              <tr><td>单入口控制</td><td>所有消费入口一致执行</td><td>网盘上传与会话附件共用配额服务</td></tr>
+              <tr><td>无运营触达</td><td>额度变化驱动转化与留存</td><td>国际化站内信，为付费转化埋下触点</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="scope" class="paper">
+        <p class="section-kicker">03 · Scope &amp; Acceptance</p>
+        <h2 class="section-title">需求范围与验收映射</h2>
+        <p class="section-desc">以下二十六项验收点全部进入实现和真实链路测试，分页组件与文件预览均复用 FE 现有能力，未引入第二套交互规范。</p>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>ID</th><th>需求</th><th>实现摘要</th><th>验收状态</th></tr></thead>
+            <tbody>
+              <tr><td>R-01</td><td>按用户编码模糊查询</td><td>管理列表后端模糊条件 + 前端查询表单</td><td><span class="status pass">通过</span></td></tr>
+              <tr><td>R-02</td><td>状态过滤并国际化回显</td><td>状态枚举筛选；中英文文案统一映射</td><td><span class="status pass">通过</span></td></tr>
+              <tr><td>R-03</td><td>通用授予增值包，首次达到上限需标记</td><td>操作文案统一为“授予增值包”；首次场景展示提示，不限制重复授权</td><td><span class="status pass">通过</span></td></tr>
+              <tr><td>R-04</td><td>展示并过滤网盘增值包等级</td><td>聚合生效授权，展示等级/次数并支持过滤</td><td><span class="status pass">通过</span></td></tr>
+              <tr><td>R-05</td><td>回收站创建、过期时间与区间查询</td><td>以每条回收任务真实时间回显；创建/到期区间独立过滤</td><td><span class="status pass">通过</span></td></tr>
+              <tr><td>R-06</td><td>授权后站内信通知并国际化</td><td>后端写入目标用户通知；前端按通知业务类型本地化标题和内容</td><td><span class="status pass">通过</span></td></tr>
+              <tr><td>R-07</td><td>使用量、状态、创建、过期时间排序</td><td>表头排序映射到受控白名单字段</td><td><span class="status pass">通过</span></td></tr>
+              <tr><td>R-08</td><td>分页组件保持统一</td><td>复用 FE 现有公共分页组件及 MyBatis 分页字段</td><td><span class="status pass">通过</span></td></tr>
+              <tr><td>R-09</td><td>达到上限禁止网盘新增上传</td><td>前端剩余额度/批次预检 + 后端原子预留最终拦截</td><td><span class="status pass">通过</span></td></tr>
+              <tr><td>R-10</td><td>会话框文件上传同步兼容</td><td>普通上传、拖拽上传和后端会话上传均接入统一配额控制</td><td><span class="status pass">通过</span></td></tr>
+              <tr><td>R-11</td><td>管理员只读预览临时回收站资源</td><td>复用 FileBrowser 列表与预览能力；限定回收任务归档根路径，普通用户请求返回 403</td><td><span class="status pass">通过</span></td></tr>
+              <tr><td>R-12</td><td>仅看有效回收并显示有效记录数</td><td>统一按 AVAILABLE + 有效期条件查询；按钮角标显示数量，恢复后即时消失</td><td><span class="status pass">通过</span></td></tr>
+              <tr><td>R-13</td><td>增值包配置增删改查与使用中保护</td><td>仅当前存在 ACTIVE 用户权益时禁止修改/删除，历史失效授权不再锁定</td><td><span class="status pass">通过</span></td></tr>
+              <tr><td>R-14</td><td>查看当前生效增值包</td><td>独立页签支持用户编码、增值包筛选及 FE 公共分页</td><td><span class="status pass">通过</span></td></tr>
+              <tr><td>R-15</td><td>管理页面与弹窗自适应布局</td><td>查询区网格响应式重排；表格按内容收缩，常用 1024/1365 宽度无无意义滚动</td><td><span class="status pass">通过</span></td></tr>
+              <tr><td>R-16</td><td>用户申请取消增值包并可撤回</td><td>取消前展示目标配额/预计超额；待审核阶段可撤回，状态与上传能力即时刷新</td><td><span class="status pass">通过</span></td></tr>
+              <tr><td>R-17</td><td>管理员确认、驳回或直接取消</td><td>统一增值记录页签；确认/驳回复用统一状态机；生效权益支持管理员直接取消</td><td><span class="status pass">通过</span></td></tr>
+              <tr><td>R-18</td><td>降级后超额进入清理宽限</td><td>取消后按目标额度判断；不超额立即完成，超额进入 GRACE，只读可删且禁止新增写入</td><td><span class="status pass">通过</span></td></tr>
+              <tr><td>R-19</td><td>宽限期立即归档或到期归档</td><td>用户可主动把在线资源转临时回收站；定时任务处理宽限到期仍超额记录</td><td><span class="status pass">通过</span></td></tr>
+              <tr><td>R-20</td><td>取消全状态通知与国际化</td><td>申请、撤回、驳回、完成、宽限、归档均使用业务类型和中英文模板通知</td><td><span class="status pass">通过</span></td></tr>
+              <tr><td>R-21</td><td>当前无支付时不使用退款语义</td><td>页面、接口、状态与文档统一为“取消增值包”；退款仅列入未来支付接入规划</td><td><span class="status pass">通过</span></td></tr>
+              <tr><td>R-22</td><td>用户申请现有启用增值包并支持叠加</td><td>同一套餐可重复申请，不同等级可同时 ACTIVE；每次审批生成独立权益快照</td><td><span class="status pass">通过</span></td></tr>
+              <tr><td>R-23</td><td>取消一个或多个具体增值权益</td><td>按 grant ID 多选；同等级叠加和混合等级均能精确取消，未选权益保持不变</td><td><span class="status pass">通过</span></td></tr>
+              <tr><td>R-24</td><td>取消记录升级为统一增值记录</td><td>统一记录 ADD/CANCEL，支持变更类型、状态、用户编码查询；默认创建时间倒序并复用公共服务端分页</td><td><span class="status pass">通过</span></td></tr>
+              <tr><td>R-25</td><td>新增与取消均需管理员审批并通知</td><td>管理员确认/驳回；申请、通过、驳回、撤回及降级结果均向目标用户发送国际化站内信</td><td><span class="status pass">通过</span></td></tr>
+              <tr><td>R-26</td><td>待审核写入策略按变更类型区分</td><td>新增申请待审核不冻结上传；取消申请待审核冻结网盘与会话新增写入，撤回/驳回后即时恢复</td><td><span class="status pass">通过</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="solution" class="paper">
+        <p class="section-kicker">04 · Solution</p>
+        <h2 class="section-title">详细解决方案</h2>
+        <p class="section-desc">方案采用“数据库账本为事实源、存储扫描做校准、前端预检优化体验、后端原子预留兜底”的组合。LocalFile 对应目标纯 NFS 部署：生产只需将本地根目录指向 NFS 挂载点，业务逻辑不依赖 MinIO 特性。</p>
+
+        <h3 id="architecture">4.1 业务架构图</h3>
+        <div class="architecture" role="img" aria-label="SaaS 存储配额业务架构：角色入口、体验管控、应用服务、领域能力、数据基础设施五层">
+          <div class="arch-band">
+            <div class="arch-label">角色与入口</div>
+            <div class="arch-nodes">
+              <div class="arch-node">普通用户</div>
+              <div class="arch-node">平台管理员</div>
+              <div class="arch-node">网盘文件页</div>
+              <div class="arch-node">会话附件</div>
+              <div class="arch-node">配额管理台</div>
+            </div>
+          </div>
+          <div class="arch-arrow">↓</div>
+          <div class="arch-band">
+            <div class="arch-label">体验与管控</div>
+            <div class="arch-nodes">
+              <div class="arch-node">统一配额 Hook</div>
+              <div class="arch-node">批量大小预检</div>
+              <div class="arch-node">国际化状态/通知</div>
+              <div class="arch-node">筛选 · 排序 · 公共分页</div>
+            </div>
+          </div>
+          <div class="arch-arrow">↓</div>
+          <div class="arch-band">
+            <div class="arch-label">应用服务</div>
+            <div class="arch-nodes">
+              <div class="arch-node">认证与管理员 RBAC</div>
+              <div class="arch-node">FileBrowser 上传</div>
+              <div class="arch-node">AssistantChat 上传</div>
+              <div class="arch-node">StorageQuota 管理</div>
+              <div class="arch-node">Notification 站内信</div>
+            </div>
+          </div>
+          <div class="arch-arrow">↓</div>
+          <div class="arch-band">
+            <div class="arch-label">领域能力</div>
+            <div class="arch-nodes">
+              <div class="arch-node">原子预留 / 提交 / 释放</div>
+              <div class="arch-node">套餐 / 叠加权益 / 变更审批 / 降级</div>
+              <div class="arch-node">回收 / 只读预览 / 恢复 / 到期</div>
+              <div class="arch-node">幂等请求 / 操作审计</div>
+            </div>
+          </div>
+          <div class="arch-arrow">↓</div>
+          <div class="arch-band">
+            <div class="arch-label">数据与基础设施</div>
+            <div class="arch-nodes">
+              <div class="arch-node">OpenGauss 配额账本</div>
+              <div class="arch-node">LocalFile → NFS 挂载</div>
+              <div class="arch-node">扫描 / 回收定时任务</div>
+              <div class="arch-node">监控 · 告警 · 对账</div>
+            </div>
+          </div>
+        </div>
+
+        <h3 id="business-flow">4.2 核心业务流程图</h3>
+        <div class="flow-board" role="img" aria-label="上传控制、增值授权、增值取消降级和超额回收四条业务流程">
+          <div class="flow-lane">
+            <div class="flow-name">上传控制</div>
+            <div class="flow-steps">
+              <div class="flow-step">选择文件或批次</div>
+              <div class="flow-step">前端汇总大小预检</div>
+              <div class="flow-step decision">后端原子预留<em>不足 → HTTP 507，无落盘</em></div>
+              <div class="flow-step">写入 LocalFile / NFS</div>
+              <div class="flow-step">提交用量并释放预留</div>
+            </div>
+          </div>
+          <div class="flow-lane">
+            <div class="flow-name">申请新增与叠加</div>
+            <div class="flow-steps">
+              <div class="flow-step">用户选择已启用增值包</div>
+              <div class="flow-step">提交申请<em>待审核期间保持可写</em></div>
+              <div class="flow-step decision">管理员确认 / 驳回<em>支持同等级重复叠加</em></div>
+              <div class="flow-step">新增独立权益快照</div>
+              <div class="flow-step">重算总额度和状态</div>
+              <div class="flow-step">国际化站内信 → 恢复上传</div>
+            </div>
+          </div>
+          <div class="flow-lane">
+            <div class="flow-name">增值取消与降级</div>
+            <div class="flow-steps">
+              <div class="flow-step">多选具体权益并预览 / 管理员直接取消</div>
+              <div class="flow-step">用户申请待审核<em>可撤回；双上传暂停新增</em></div>
+              <div class="flow-step decision">管理员确认或驳回<em>驳回：权益保留并恢复写入</em></div>
+              <div class="flow-step decision">重算目标额度<em>未超额：完成；超额：进入清理宽限</em></div>
+              <div class="flow-step">清理达标 / 立即归档 / 到期归档</div>
+            </div>
+          </div>
+          <div class="flow-lane">
+            <div class="flow-name">超额回收</div>
+            <div class="flow-steps">
+              <div class="flow-step">配额触顶 / 用户确认清空</div>
+              <div class="flow-step">用户立即归档 / 管理员初始化 / 到期任务</div>
+              <div class="flow-step">记录独立创建/到期时间</div>
+              <div class="flow-step decision">管理员只读预览<em>恢复或等待到期</em></div>
+              <div class="flow-step">原路径恢复 / 到期清除 + 审计</div>
+            </div>
+          </div>
+        </div>
+
+        <h3 id="technical-design">4.3 配额账本与并发一致性</h3>
+        <p><code>po_user_storage_quota</code> 是用户当前配额事实源，基础额度、增值额度、已用量、预留量和状态集中维护。读取“剩余空间”时必须扣除正在进行但尚未落盘结算的预留量：</p>
+        <div class="formula" aria-label="剩余额度等于总额度减已用量减预留量">
+          <div class="term">剩余额度</div><div class="op">=</div><div class="term">总额度 − 已用量</div><div class="op">−</div><div class="term">预留量</div>
+        </div>
+        <p>写入前使用数据库条件更新增加 <code>reserved_bytes</code>，条件为 <code>used + reserved + writeBytes ≤ total</code>。成功写入后将对应预留原子转入已用量；异常时释放尚未结算部分。并发请求无法通过“同时读取到相同剩余额度”绕过限制。</p>
+        <p>删除采用反向事务语义：先在受信任存储侧递归测量文件/目录实际大小并去重重叠选择，物理删除成功后再通过条件更新原子扣减 <code>used_bytes</code>；Provider 删除失败必须抛错且不改账。定时扫描仍保留为外部 NFS 变更和历史偏差的最终校准，而不是正常删除的延迟记账手段。</p>
+
+        <h3>4.4 两条上传链路的统一控制</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>层次</th><th>网盘文件上传</th><th>会话附件上传</th><th>共同约束</th></tr></thead>
+            <tbody>
+              <tr><td>前端</td><td>显示配额卡；批量文件总大小预检；超额禁用入口</td><td>按钮/拖拽统一 Guard；超额提示；成功后刷新额度</td><td>前端仅做体验优化，不作为安全边界</td></tr>
+              <tr><td>后端</td><td>首个文件写入前预留整个批次，防止部分成功</td><td>会话 Controller 保留配额异常并返回 507</td><td>统一调用配额应用服务，失败不创建有效落盘结果</td></tr>
+              <tr><td>结果</td><td>额度不足：整批拒绝；成功：逐文件结算；物理删除后即时扣量</td><td>额度不足：HTTP 507；恢复额度后正常上传</td><td>预留最终归零，账本与物理文件一致</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>4.5 增值包与管理员运营台</h3>
+        <ul>
+          <li>套餐定义存入 <code>po_storage_package</code>，授权时将容量作为不可变快照写入 <code>po_user_storage_grant</code>，避免以后改套餐定义反向改变历史权益。</li>
+          <li>“授予首个增值包”改为通用“授予增值包”；首次达到基础上限保留提示标记。用户可以从启用套餐中申请新增，相同套餐重复申请和不同等级组合都会形成独立 ACTIVE 权益并累加容量。</li>
+          <li>用户取消时按具体 <code>grant_id</code> 选择一项或多项权益；同等级叠加与不同等级组合均可精确多选，预览按选中容量计算目标配额，审批通过后只撤销所选权益。</li>
+          <li>“增值包管理”包含配置、生效增值包和增值记录三个页签：配置页支持新增、查询、修改、删除；生效页只展示 <code>grant_status = ACTIVE</code> 的用户权益；记录页统一展示 ADD/CANCEL 申请和管理员直接操作。</li>
+          <li>配置页的“生效用户数”与生效页使用完全相同的 ACTIVE 条件。仅当该计数大于 0 时，前端禁用且后端拒绝修改/删除；历史授权撤销或失效后恢复可操作，避免状态语义分裂。</li>
+          <li>弹窗移除固定内容高度和固定纵向滚动，列宽压缩到常用视口可容纳范围；内容少时自然收缩，内容多或窄屏时才由表格/弹窗按需滚动。</li>
+          <li>用户编码、状态、套餐等级、回收站创建时间和过期时间均支持组合查询；使用量、状态和两个时间字段支持服务端排序。</li>
+          <li>主列表、生效权益、回收记录和统一增值记录分页均复用 FE 既有组件；增值记录支持变更类型、状态、用户编码查询，默认按申请时间和记录 ID 倒序。</li>
+        </ul>
+
+        <h3>4.6 超额临时回收站与只读预览</h3>
+        <p>用户确认清空后，当前管理流程由管理员执行初始化还原，将在线 <code>by</code> 目录归档到不挂载的回收路径。每个用户/任务独立记录 <code>started_time</code> 和 <code>retention_until</code>，因此创建时间与到期时间不会被错误地套用同一个全局值。保留期内可只读预览或恢复，逾期由任务彻底清理，所有动作落操作审计并以 <code>request_id</code> 保证幂等。</p>
+        <ul>
+          <li>管理员在“临时回收站”中点击预览，直接复用现有 <code>FileBrowserPanel</code> 的目录导航、文件类型识别和 Markdown/文本等预览能力，不允许上传、删除或改名。</li>
+          <li>后端先验证管理员权限、回收记录归属及 <code>AVAILABLE</code> 状态，再把所有相对路径约束在该任务的归档根路径内；拒绝 <code>..</code>、反斜线和 NUL 等路径逃逸输入。</li>
+          <li>管理布局不存在普通用户页面的全局预览驱动，因此组件自动使用局部预览弹窗；该兼容修复保证管理端真正展示文件内容，而不是只打开列表。</li>
+          <li>回收记录由服务端分页，默认按创建时间与记录 ID 倒序稳定排列；状态、创建时间段和过期时间段均由后端过滤，弹窗复用 FE 公共分页组件。</li>
+          <li>主列表仅在存在有效 AVAILABLE 记录时显示“临时回收站”角标及数量；“仅看有效回收”复用同一有效性条件，恢复完成后角标和筛选结果同步刷新。</li>
+        </ul>
+
+        <h3>4.7 LocalFile 与纯 NFS 适配</h3>
+        <div class="callout">
+          <strong>部署映射</strong>
+          本次环境设置 <code>FILE_STORAGE_TYPE=file</code> 并使用 LocalFile 路径验证。纯 NFS 环境只需把该根路径配置为 NFS 挂载目录；用户“桶”映射为隔离子目录，配额账本、回收和恢复逻辑保持不变，不依赖对象存储 API。
+        </div>
+
+        <h3>4.8 站内信、国际化与权限边界</h3>
+        <ul>
+          <li>用户申请新增/取消、主动撤回，以及管理员确认/驳回、取消进入宽限或归档时均创建目标用户站内信。通知携带稳定业务类型和资源 ID；中文/英文由前端本地化映射，避免持久化语言耦合。</li>
+          <li>补齐普通用户通知分页路由，并强制以当前登录用户覆盖查询目标 ID，防止构造参数读取其他用户通知。</li>
+          <li>配额管理接口使用管理员授权；普通用户调用返回 403。上传限制由后端执行，禁用按钮不能被视为权限控制。</li>
+          <li>SM4 登录兼容改为轻量 Bouncy Castle API，解决 JDK 21 运行时签名 Provider 限制，不降低密码传输和认证要求。</li>
+        </ul>
+
+        <h3>4.9 数据模型与接口</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>对象 / 接口</th><th>职责</th><th>关键特性</th></tr></thead>
+            <tbody>
+              <tr><td><code>po_user_storage_quota</code></td><td>用户当前配额事实表</td><td>基础/增值/总额/已用/预留/状态/版本</td></tr>
+              <tr><td><code>po_storage_package</code></td><td>可运营的增值包定义</td><td>编码、名称、容量、价格、状态、排序</td></tr>
+              <tr><td><code>po_user_storage_grant</code></td><td>用户权益授权快照</td><td>容量快照、来源、授权/撤销人和时间</td></tr>
+              <tr><td><code>po_user_storage_downgrade</code></td><td>兼容表名下的统一增值变更记录</td><td>ADD/CANCEL、单套餐/多 grant IDs、变更容量、审核、降级与回收关联</td></tr>
+              <tr><td><code>po_user_storage_recycle</code></td><td>临时回收任务状态机</td><td>归档路径、字节数、独立到期时间、幂等请求</td></tr>
+              <tr><td><code>po_user_storage_operation</code></td><td>管理操作审计</td><td>前后额度/用量、结果、错误、关联回收任务</td></tr>
+              <tr><td><code>GET /storage/quota</code></td><td>当前用户配额</td><td>返回剩余、状态和授权摘要</td></tr>
+              <tr><td><code>/storage/changes/*</code></td><td>用户新增/取消申请、撤回、记录分页</td><td>同/异等级叠加、多选取消、默认倒序、变更类型/状态查询</td></tr>
+              <tr><td><code>/storage/admin/changes/*</code></td><td>管理员统一记录与审批</td><td>ADD/CANCEL 确认/驳回、服务端分页、国际化站内信</td></tr>
+              <tr><td><code>/storage/admin/*</code></td><td>套餐、设置、列表、授权、回收/恢复</td><td>管理员 RBAC、分页筛选排序、请求幂等</td></tr>
+              <tr><td><code>POST /storage/admin/users/recycles/preview/list</code></td><td>列出指定回收任务内的目录/文件</td><td>只允许 AVAILABLE；路径规范化并限制在归档根目录</td></tr>
+              <tr><td><code>GET /storage/admin/users/recycles/preview/download</code></td><td>以内联响应读取预览文件</td><td>管理员 RBAC、任务归属校验、普通用户 403、无写操作</td></tr>
+              <tr><td><code>/fileBrowser/upload</code> / <code>delete</code></td><td>网盘批量上传与物理删除</td><td>整批预留、逐文件结算、507 拒绝；删除成功后原子扣量</td></tr>
+              <tr><td>会话附件上传接口</td><td>聊天文件入会话</td><td>复用同一账本，配额异常不被通用异常吞没</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="lifecycle" class="paper">
+        <p class="section-kicker">05 · Complete Business Lifecycle</p>
+        <h2 class="section-title">网盘、配额、增值权益与资源完整生命周期</h2>
+        <p class="section-desc">网盘并非只有“达到上限后清空”一条路径。完整模型从用户开通、日常使用和计量开始，在告警/触顶处形成扩容、主动释放和临时回收三条分支，最终还要覆盖权益续期/到期、恢复/彻底清理以及异常对账。下图把各条生命周期放在同一业务视图中。</p>
+
+        <div class="callout warn">
+          <strong>当前能力与目标能力边界</strong>
+          当前版本已经交付用户申请新增并叠加、管理员确认/驳回、管理员直接授予、用户多选具体权益取消/撤回、管理员确认/驳回/直接取消、统一增值记录、超额清理宽限、用户立即归档、宽限到期自动归档，以及管理员恢复/只读预览。当前尚未接入订单和支付，因此现阶段不存在“退款审核”；退款只可作为未来取消增值包流程中的交易子流程。
+        </div>
+
+        <iframe class="lifecycle-frame" title="网盘与存储配额完整生命周期图" loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/storage-quota-lifecycle-families.html"></iframe>
+
+        <h3>5.1 从开通到日常使用：所有分支共同的主干</h3>
+        <div class="lifecycle-grid">
+          <article class="lifecycle-card">
+            <h4>开通与初始化生命周期</h4>
+            <p class="state-path">用户建立 → 存储桶/目录初始化 → 基础配额建立 → 首次扫描 → READY</p>
+            <ul>
+              <li>登录成功后以幂等方式确保用户存储目录和基础配额存在。</li>
+              <li>已有用户由回填任务补齐账本；初始化失败保持可重试，不发放虚假可用额度。</li>
+              <li>扫描把历史物理文件用量校准进账本，防止“新账本、旧文件”造成少计。</li>
+            </ul>
+          </article>
+          <article class="lifecycle-card">
+            <h4>日常使用与删除生命周期</h4>
+            <p class="state-path">选择文件 → 原子预留 → NFS 写入 → 提交用量 → 下载/预览 → 删除 → 扣减用量</p>
+            <ul>
+              <li>网盘与会话附件共用同一配额账本，写入失败释放预留。</li>
+              <li>文件/目录删除前递归测量可信物理大小、去重重叠路径，删除成功后才原子扣量。</li>
+              <li>删除失败不扣账；周期扫描用于修复外部 NFS 操作或历史数据形成的偏差。</li>
+            </ul>
+          </article>
+          <article class="lifecycle-card">
+            <h4>状态与告警生命周期</h4>
+            <p class="state-path">NORMAL → WARNING → EXCEEDED → 扩容或释放 → NORMAL</p>
+            <ul>
+              <li>告警阈值按策略计算，状态和使用量由服务端统一重算。</li>
+              <li>达到上限后保留读取、预览、下载和删除能力，禁止新增写入。</li>
+              <li>额度增加或数据释放后即时重算；满足条件即恢复两条上传链路。</li>
+            </ul>
+          </article>
+        </div>
+
+        <h3 id="quota-branches">5.2 配额触顶后的三条完整业务分支</h3>
+        <p class="section-desc">三条分支解决的是不同业务诉求：用户申请新增解决自助扩容并为商业转化预留入口，管理员直接授予解决运营处置，主动释放空间解决不付费用户的数据治理。三条链路最终都回到同一个配额账本和状态重算点。</p>
+
+        <article id="branch-user-addon" class="branch-chapter">
+          <div class="branch-heading">
+            <h4>5.2.1 分支 A：用户申请新增增值包</h4>
+            <span class="status pass">本次已交付并实测</span>
+          </div>
+          <p class="branch-intro">适用于用户希望保留全部在线文件并主动扩容的场景。当前版本由用户选择现有启用套餐并提交申请，管理员确认或驳回；相同套餐可重复叠加，不同等级也可组合生效。订单支付是后续商业化接入项。</p>
+          <figure class="process-figure" role="img" aria-label="用户申请新增增值包流程：配额触顶、选择启用套餐、提交申请、管理员审批、权益快照、叠加生效、配额重算、站内信">
+            <div class="process-flow steps-8">
+              <div class="process-node actor-system"><strong>配额触顶</strong><span>EXCEEDED<br>保留读与删</span></div>
+              <div class="process-node actor-user"><strong>选择启用套餐</strong><span>同套餐可再次选择</span></div>
+              <div class="process-node actor-user"><strong>提交新增申请</strong><span>REQUESTED；现有写入不冻结</span></div>
+              <div class="process-node decision"><strong>管理员确认 / 驳回</strong><span>驳回：额度和现有权益不变</span></div>
+              <div class="process-node actor-system"><strong>保存独立权益快照</strong><span>以申请号幂等</span></div>
+              <div class="process-node actor-system"><strong>权益叠加 ACTIVE</strong><span>同/异等级累加容量</span></div>
+              <div class="process-node actor-system"><strong>重算配额状态</strong><span>基础额度 + 生效增值额度</span></div>
+              <div class="process-node terminal"><strong>通知并恢复上传</strong><span>站内信触达，双上传入口可写</span></div>
+            </div>
+            <figcaption>新增申请、审核通过/驳回和撤回均进入统一增值记录并发送国际化站内信；待审核新增不会误冻结当前网盘与会话附件上传。</figcaption>
+          </figure>
+          <p><strong>权益后续生命周期：</strong><span class="state-path">ACTIVE → 续授/升级 → 用户申请取消或管理员直接取消 → 配额重算 → COMPLETED / GRACE → ARCHIVED</span>。当前取消只改变对应权益，不涉及资金处理。未来接入支付后，可在交易侧完成退款，再以幂等事件触发同一取消状态机；若额度回落后实际用量仍超限，用户进入清理宽限，只读、可下载、可删除，但不会直接丢失文件。</p>
+        </article>
+
+        <article id="branch-admin-grant" class="branch-chapter">
+          <div class="branch-heading">
+            <h4>5.2.2 分支 B：管理员直接授予增值包</h4>
+            <span class="status pass">本次已交付并实测</span>
+          </div>
+          <p class="branch-intro">适用于客服补偿、试用运营、线下成交或紧急恢复业务。动作统一为“授予增值包”，首次触顶只作为提示，不限制已有权益用户再次授权。</p>
+          <figure class="process-figure" role="img" aria-label="管理员直接授予增值包流程：查询用户、选择套餐、确认首次或再次授权、幂等提交、权益快照、配额重算、站内信、恢复上传">
+            <div class="process-flow steps-8">
+              <div class="process-node actor-system"><strong>用户处于触顶状态</strong><span>管理列表显示 EXCEEDED</span></div>
+              <div class="process-node actor-admin"><strong>管理员定位用户</strong><span>编码、状态、等级组合查询</span></div>
+              <div class="process-node actor-admin"><strong>选择通用增值包</strong><span>查看容量、等级与状态</span></div>
+              <div class="process-node decision"><strong>确认首次 / 再次授予</strong><span>首次标记；重复授权允许叠加</span></div>
+              <div class="process-node actor-system"><strong>幂等写入授权</strong><span>请求键防止重复提交</span></div>
+              <div class="process-node actor-system"><strong>保存权益快照</strong><span>历史容量不受套餐修改影响</span></div>
+              <div class="process-node actor-system"><strong>重算并发送站内信</strong><span>等级/次数聚合，文案国际化</span></div>
+              <div class="process-node terminal"><strong>用户恢复可写</strong><span>网盘与会话附件同时生效</span></div>
+            </div>
+            <figcaption>管理员授权、再次授权、等级聚合、国际化通知及恢复上传均已在 204 LocalFile 环境完成真实双角色验证。</figcaption>
+          </figure>
+          <p>管理员可在“生效增值包”中预览取消影响并直接取消某一授权，系统复用用户申请取消的同一降级状态机。取消后仍有足够容量则立即完成；否则进入清理宽限，由用户删除、立即归档或等待到期归档。</p>
+        </article>
+
+        <article id="branch-release-space" class="branch-chapter">
+          <div class="branch-heading">
+            <h4>5.2.3 分支 C：用户主动释放空间</h4>
+            <span class="status pass">局部删除、用户归档与管理端回收已交付</span>
+          </div>
+          <p class="branch-intro">适用于用户不购买增值包、希望通过整理数据恢复可写额度的场景。根据释放范围分为“局部删除”和“整盘清空进入临时回收站”两条子链路。</p>
+          <figure class="process-figure" role="img" aria-label="用户主动释放空间流程，包含局部删除和整盘清空两条子链路">
+            <div class="process-lanes">
+              <div class="process-lane">
+                <div class="process-lane-name">局部删除链</div>
+                <div class="process-flow">
+                  <div class="process-node actor-system"><strong>配额触顶</strong><span>新增写入被拦截</span></div>
+                  <div class="process-node actor-user"><strong>选择文件 / 目录</strong><span>保留其他在线资源</span></div>
+                  <div class="process-node actor-storage"><strong>删除前可信计量</strong><span>递归统计并去重重叠路径</span></div>
+                  <div class="process-node actor-storage"><strong>物理删除成功</strong><span>失败则不修改账本</span></div>
+                  <div class="process-node actor-system"><strong>原子扣减已用量</strong><span>即时更新 used_bytes</span></div>
+                  <div class="process-node terminal"><strong>状态重算</strong><span>低于阈值后恢复 NORMAL / WARNING</span></div>
+                </div>
+              </div>
+              <div class="process-lane">
+                <div class="process-lane-name">整盘清空链</div>
+                <div class="process-flow">
+                  <div class="process-node actor-user"><strong>确认整盘清空</strong><span>明确保留期和不可逆到期清理</span></div>
+                  <div class="process-node actor-user"><strong>用户立即归档</strong><span>取消超额宽限内主动执行；也可等待到期任务</span></div>
+                  <div class="process-node actor-storage"><strong>ARCHIVING → AVAILABLE</strong><span>在线目录进入隔离回收区</span></div>
+                  <div class="process-node actor-admin"><strong>管理员只读预览</strong><span>核验目录和文件内容</span></div>
+                  <div class="process-node decision"><strong>保留期内决策</strong><span>恢复原路径，或等待到期</span></div>
+                  <div class="process-node terminal"><strong>RESTORED / PURGED</strong><span>恢复继续使用，或彻底释放 NFS</span></div>
+                </div>
+              </div>
+            </div>
+            <figcaption>局部删除同步释放配额；整盘清空先归档再治理，管理员预览不修改资源、不延长保留期，到期任务才执行永久清理。</figcaption>
+          </figure>
+        </article>
+
+        <h4>5.2.4 三条分支结果对照</h4>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>分支</th><th>用户数据结果</th><th>配额结果</th><th>当前交付边界</th></tr></thead>
+            <tbody>
+              <tr><td>用户申请新增</td><td>在线文件保持原位，无需清理</td><td>管理员通过后新增独立 ACTIVE 权益，同/异等级均可叠加</td><td><span class="status pass">申请审批已交付</span> 商品、订单、支付与订阅待后续接入</td></tr>
+              <tr><td>管理员直接授予</td><td>在线文件保持原位，无需清理</td><td>授权快照即时生效，可重复叠加</td><td><span class="status pass">已交付并实测</span></td></tr>
+              <tr><td>用户主动释放空间</td><td>局部删除立即消失；取消超额时可把整盘先转入可恢复临时回收区</td><td>删除/归档后降低已用量，满足条件即恢复可写</td><td><span class="status pass">局部删除、立即归档、自动归档和管理端恢复均已交付</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 id="change-lifecycle">5.3 “申请新增 / 申请取消 → 管理员审批 → 统一增值记录”的生命周期</h3>
+        <figure class="process-figure" role="img" aria-label="统一增值变更生命周期，包含新增和取消两条审批链路">
+          <div class="process-lanes">
+            <div class="process-lane">
+              <div class="process-lane-name">新增增值链</div>
+              <div class="process-flow">
+                <div class="process-node actor-user"><strong>选择启用套餐</strong><span>允许同等级重复申请</span></div>
+                <div class="process-node actor-user"><strong>提交 ADD_PACKAGE</strong><span>REQUESTED；不冻结写入</span></div>
+                <div class="process-node decision"><strong>管理员审批</strong><span>确认 / 驳回</span></div>
+                <div class="process-node actor-system"><strong>新增权益快照</strong><span>独立 grant ID，容量叠加</span></div>
+                <div class="process-node terminal"><strong>COMPLETED / REJECTED</strong><span>重算配额并发送站内信</span></div>
+              </div>
+            </div>
+            <div class="process-lane">
+              <div class="process-lane-name">取消增值链</div>
+              <div class="process-flow">
+                <div class="process-node actor-user"><strong>多选具体权益</strong><span>同等级或混合等级</span></div>
+                <div class="process-node actor-user"><strong>提交 CANCEL_PACKAGE</strong><span>REQUESTED；冻结新增写入</span></div>
+                <div class="process-node decision"><strong>撤回 / 审批</strong><span>撤回、确认或驳回</span></div>
+                <div class="process-node actor-system"><strong>仅撤销选中 grant IDs</strong><span>未选权益保持 ACTIVE</span></div>
+                <div class="process-node terminal"><strong>COMPLETED / GRACE</strong><span>不超额完成；超额进入治理</span></div>
+              </div>
+            </div>
+          </div>
+          <figcaption>两个变更类型共用请求号、审批、状态、通知和分页查询框架；用户端与管理员端统一称为“增值记录”，默认创建时间降序，支持变更类型、状态和用户编码筛选。</figcaption>
+        </figure>
+
+        <h3 id="cancellation-lifecycle">5.4 “取消增值包 → 容量降级”的完整生命周期</h3>
+        <div class="callout ok">
+          <strong>当前业务定义（无支付）</strong>
+          当前闭环是“用户提交取消增值包申请 → 管理员确认取消或驳回”，不是“用户提交退款申请 → 管理员确认外部退款”。管理员也可直接取消已授予权益。未来接入支付后，退款作为交易侧子流程与取消结果编排，但不能直接改配额或文件。
+        </div>
+        <figure class="process-figure" role="img" aria-label="取消增值包完整业务流程：影响预览、申请或管理员直接取消、审核、权益取消、额度重算、不超额完成或超额进入宽限、用户清理或归档、回收恢复或到期清理">
+          <div class="process-flow steps-8">
+            <div class="process-node actor-user"><strong>多选具体权益并预览</strong><span>同/异等级；目标配额、当前用量、预计超额</span></div>
+            <div class="process-node actor-user"><strong>用户申请取消</strong><span>REQUESTED；审核前可撤回</span></div>
+            <div class="process-node decision"><strong>管理员处理</strong><span>确认 / 驳回；也可直接取消生效权益</span></div>
+            <div class="process-node actor-system"><strong>取消所选权益</strong><span>按 grant IDs 幂等撤销与审计</span></div>
+            <div class="process-node decision"><strong>重算目标额度</strong><span>used ≤ target？</span></div>
+            <div class="process-node terminal"><strong>未超额：COMPLETED</strong><span>配额降级完成，保持正常使用</span></div>
+            <div class="process-node actor-system"><strong>超额：GRACE</strong><span>只读可删；双上传服务端强制拦截</span></div>
+            <div class="process-node terminal"><strong>清理达标 / ARCHIVED</strong><span>删除达标直接完成；立即/到期归档进入临时回收</span></div>
+          </div>
+          <figcaption>驳回后权益和可写状态保持；用户撤回后立即恢复。进入宽限期的资源不会直接删除，而是允许用户清理，或进入可预览、可恢复、到期才彻底清理的临时回收站。</figcaption>
+        </figure>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>状态</th><th>触发</th><th>用户能力</th><th>下一步</th></tr></thead>
+            <tbody>
+              <tr><td><code>REQUESTED</code></td><td>用户提交取消申请</td><td>可读、可下载、可删除；暂停网盘与会话附件新增写入；可撤回</td><td>管理员确认或驳回</td></tr>
+              <tr><td><code>CANCELLED</code></td><td>用户在审核前撤回</td><td>原权益继续生效，配额卡和上传入口即时恢复</td><td>终态，可重新申请</td></tr>
+              <tr><td><code>REJECTED</code></td><td>管理员驳回</td><td>原权益继续生效并收到国际化站内信</td><td>终态，可重新申请</td></tr>
+              <tr><td><code>COMPLETED</code></td><td>确认/直接取消后实际用量不超过目标额度，或宽限内删除达标</td><td>按降级后额度正常使用</td><td>终态</td></tr>
+              <tr><td><code>GRACE</code></td><td>确认/直接取消后实际用量超过目标额度</td><td>只读、下载、删除；禁止两条新增上传；可立即归档</td><td>清理达标、立即归档或宽限到期归档</td></tr>
+              <tr><td><code>ARCHIVED</code></td><td>在线资源已转临时回收站</td><td>在线空间释放；管理员可只读预览/恢复</td><td>RESTORED 或到期 PURGED</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 id="recycle-lifecycle">5.5 “清空网盘 → 临时回收站”的资源生命周期</h3>
+        <div class="callout">
+          <strong>用户可理解的完整路径</strong>
+          配额触顶或取消后降级超额 → 用户选择立即清空，或管理员执行初始化还原，或宽限到期任务触发 → 在线目录进入 ARCHIVING → 归档完成进入 AVAILABLE → 管理员只读预览；随后选择恢复则进入 RESTORING → RESTORED，未恢复则到期进入 PURGING → PURGED。
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>状态/阶段</th><th>在线资源与配额</th><th>允许操作</th><th>安全与时间语义</th></tr></thead>
+            <tbody>
+              <tr><td><code>ARCHIVING</code></td><td>在线目录迁移到隔离归档路径；账本进入重置保护</td><td>等待任务完成，不允许并发恢复</td><td>请求 ID 幂等；失败保留错误和审计，可安全重试/人工处置</td></tr>
+              <tr><td><code>AVAILABLE</code></td><td>文件只存在于临时回收区；在线空间已释放</td><td>管理员只读目录浏览、文件预览或发起恢复</td><td>每条记录单独保存创建时间和到期时间；预览不延长保留期、不修改文件</td></tr>
+              <tr><td><code>RESTORING</code></td><td>归档内容正返回原在线路径</td><td>等待恢复，不允许重复恢复/清理</td><td>恢复前校验状态；任务失败保留可诊断信息，避免半状态被视为成功</td></tr>
+              <tr><td><code>RESTORED</code></td><td>资源回到原路径，扫描/账本恢复真实已用量</td><td>用户继续读取、删除；额度充足时可继续上传</td><td>记录转终态，预览/恢复按钮撤销；归档副本按恢复语义处理</td></tr>
+              <tr><td><code>PURGING</code> → <code>PURGED</code></td><td>到期任务永久删除归档资源，释放 NFS 容量</td><td>不可恢复</td><td>仅处理已到期 AVAILABLE 记录；成功后保留元数据/审计，不保留文件内容</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="muted small">创建时间取实际归档任务建立时间；到期时间按该任务创建时间加保留策略计算。因此不同用户、不同批次均有不同到期点，查询和排序不能用一个全局日期替代。只读预览请求同时校验管理员角色、用户与回收任务归属、AVAILABLE 状态及归档根路径，普通用户直调返回 403。</p>
+
+        <h3>5.6 异常补偿、定时对账与运营闭环</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>生命周期</th><th>触发条件</th><th>补偿/闭环动作</th><th>需要监控</th></tr></thead>
+            <tbody>
+              <tr><td>上传事务补偿</td><td>NFS 写入或元数据保存失败</td><td>释放未结算预留，清理失败文件；用户可重试</td><td>预留超时、写入错误率、507 比例</td></tr>
+              <tr><td>删除计量补偿</td><td>外部脚本修改 NFS、历史删除未记账</td><td>周期扫描以物理可信大小校准 <code>used_bytes</code> 和状态</td><td>账本/物理偏差、扫描耗时与失败用户数</td></tr>
+              <tr><td>回收任务补偿</td><td>归档、恢复或到期清理中断</td><td>依靠状态机和幂等请求继续执行；失败记录保留审计，禁止误判终态</td><td>长时间中间态、失败率、到期积压、恢复 SLA</td></tr>
+              <tr><td>取消与交易对账</td><td>当前取消状态机异常；未来支付回调重复/丢失或退款结果不一致</td><td>当前按请求 ID 幂等补偿取消；未来订单、退款与权益按业务键对账，再统一重算配额</td><td>取消中间态积压、支付成功到权益生效延迟、交易/权益差异</td></tr>
+              <tr><td>容量与商业运营</td><td>80% 告警、100% 触顶、权益即将到期</td><td>站内信/购买入口触达，跟踪申请、购买、续费和释放空间转化</td><td>告警转化率、ARPU、续费率、每 GiB 成本、回收释放容量</td></tr>
+              <tr><td>账户注销/租户退订</td><td>用户注销、企业退租或合规停用</td><td>冻结新增写入 → 提供导出宽限期 → 按数据保留策略归档 → 到期物理清理 → 保留不可变审计；法律保全时暂停清理</td><td><span class="status conditional">后续治理能力</span> 待定义导出 SLA、保留期、legal hold 和销毁证明</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="testing" class="paper">
+        <p class="section-kicker">06 · Full-chain Testing</p>
+        <h2 class="section-title">业务全链路测试</h2>
+        <p class="section-desc">测试以浏览器真实操作为主，辅以接口状态码、数据库账本和 LocalFile 物理文件四层证据，避免仅凭页面提示判定成功。</p>
+
+        <h3>6.1 环境与数据策略</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>项目</th><th>实际配置</th><th>验证方式</th></tr></thead>
+            <tbody>
+              <tr><td>Java</td><td><code>JDK 21（测试机本地安装）</code></td><td>BE 使用 JDK 21 启动并执行 Maven 测试</td></tr>
+              <tr><td>环境文件</td><td><code>204 环境配置文件（不纳入版本控制）</code></td><td>启动连接信息与 204 环境一致；未使用其他 env</td></tr>
+              <tr><td>存储</td><td><code>file</code> / LocalFile</td><td>物理路径写入、回收、恢复均在本地目录验证，等价映射纯 NFS 挂载</td></tr>
+              <tr><td>角色</td><td>普通用户 + 平台管理员</td><td>使用已提供的两组账号真实登录；报告不记录口令</td></tr>
+              <tr><td>前后端</td><td>FE 8001 / BE 8086，Context Path <code>/byaiService</code></td><td>浏览器请求、响应和服务器日志联合确认</td></tr>
+              <tr><td>数据库</td><td>OpenGauss，<code>byai</code> schema</td><td>检查配额、预留、授权、回收、审计和通知记录</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="muted small">测试结束后已删除临时上传样本和临时 512 MiB 套餐，并恢复全部归档与增值权益；普通用户最终为基础 2 GiB、增值 0、已用 4,272 B、预留 0、NORMAL，无 ACTIVE 授权、无待处理增值申请、无 AVAILABLE 回收记录，原有 OpenClaw 文件完整恢复。增值变更、授权和回收历史记录作为审计证据保留；原有 1 GiB 增值包定义保留且生效用户数为 0。</p>
+
+        <h3 id="test-cases">6.2 业务测试用例</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>用例</th><th>操作与预期</th><th>实际结果</th><th>证据</th></tr></thead>
+            <tbody>
+              <tr><td>TC-ADM-001</td><td>管理员进入配额列表，显示统一分页</td><td><span class="status pass">通过</span> 列表与分页正常</td><td><a href="#shot-01">图 01</a></td></tr>
+              <tr><td>TC-PKG-001</td><td>创建 1 GiB 测试增值包</td><td><span class="status pass">通过</span> 套餐可选</td><td><a href="#shot-02">图 02</a></td></tr>
+              <tr><td>TC-PKG-002</td><td>历史授权已失效、当前无 ACTIVE 权益时修改增值包并恢复原值</td><td><span class="status pass">通过</span> 生效用户数为 0，真实修改成功且编辑/删除持续可用</td><td><a href="#shot-46">图 46</a></td></tr>
+              <tr><td>TC-PKG-003</td><td>存在 ACTIVE 用户权益时修改或删除增值包</td><td><span class="status pass">通过</span> 前端禁用且后端强制拒绝</td><td>真实操作 + 自动化</td></tr>
+              <tr><td>TC-PKG-004</td><td>查看当前生效权益，无 ACTIVE 数据时保持配置计数一致</td><td><span class="status pass">通过</span> 生效页 0 条且无固定大块空白</td><td><a href="#shot-42">图 42</a></td></tr>
+              <tr><td>TC-UI-001</td><td>在 1365 与 1024 宽度打开增值包弹窗</td><td><span class="status pass">通过</span> 表格无非必要横向溢出，内容高度自适应</td><td><a href="#shot-43">图 43</a></td></tr>
+              <tr><td>TC-QRY-001</td><td>用户编码模糊查询 + 状态过滤</td><td><span class="status pass">通过</span> 组合条件生效</td><td><a href="#shot-03">图 03</a></td></tr>
+              <tr><td>TC-GRT-001</td><td>首次上限场景展示提示，动作仍为通用授予</td><td><span class="status pass">通过</span> 文案与标记正确</td><td><a href="#shot-04">图 04</a></td></tr>
+              <tr><td>TC-GRT-002</td><td>授予后列表展示增值包等级</td><td><span class="status pass">通过</span> 权益即时聚合</td><td><a href="#shot-05">图 05</a></td></tr>
+              <tr><td>TC-QRY-002</td><td>按增值包等级过滤</td><td><span class="status pass">通过</span> 精确返回目标用户</td><td><a href="#shot-06">图 06</a></td></tr>
+              <tr><td>TC-GRT-003</td><td>已有权益用户再次授予</td><td><span class="status pass">通过</span> 未被“首次”限制</td><td><a href="#shot-07">图 07</a></td></tr>
+              <tr><td>TC-GRT-004</td><td>重复授予后等级/次数聚合</td><td><span class="status pass">通过</span> 聚合展示正确</td><td><a href="#shot-08">图 08</a></td></tr>
+              <tr><td>TC-QUO-001</td><td>构造 2 GiB 已用量，状态达到上限</td><td><span class="status pass">通过</span> EXCEEDED 可见</td><td><a href="#shot-09">图 09</a></td></tr>
+              <tr><td>TC-RCY-001</td><td>管理员初始化还原前展示回收策略确认</td><td><span class="status pass">通过</span> 风险提示完整</td><td><a href="#shot-10">图 10</a></td></tr>
+              <tr><td>TC-RCY-002</td><td>回收记录显示各自创建/过期时间</td><td><span class="status pass">通过</span> 时间按任务回显</td><td><a href="#shot-11">图 11</a></td></tr>
+              <tr><td>TC-QRY-003</td><td>创建、过期时间区间查询</td><td><span class="status pass">通过</span> 两组范围独立生效</td><td><a href="#shot-12">图 12</a></td></tr>
+              <tr><td>TC-RCY-010</td><td>用户存在有效回收记录时检查主列表按钮</td><td><span class="status pass">通过</span> 右上角准确显示有效记录数 1</td><td><a href="#shot-35">图 35</a></td></tr>
+              <tr><td>TC-RCY-011</td><td>打开回收记录分页并核对默认顺序</td><td><span class="status pass">通过</span> 公共分页生效，最新创建记录在前</td><td><a href="#shot-36">图 36</a></td></tr>
+              <tr><td>TC-QRY-004</td><td>按 AVAILABLE 状态过滤回收记录</td><td><span class="status pass">通过</span> 仅返回当前可恢复记录</td><td><a href="#shot-37">图 37</a></td></tr>
+              <tr><td>TC-QRY-005</td><td>按精确创建时间段和过期时间段分别查询</td><td><span class="status pass">通过</span> 两组服务端时间条件独立生效</td><td><a href="#shot-38">图 38–39</a></td></tr>
+              <tr><td>TC-RCY-003</td><td>LocalFile 模式查看临时回收记录</td><td><span class="status pass">通过</span> 归档字节/状态正确</td><td><a href="#shot-13">图 13</a></td></tr>
+              <tr><td>TC-RCY-004</td><td>恢复前二次确认</td><td><span class="status pass">通过</span> 防误操作提示正常</td><td><a href="#shot-14">图 14</a></td></tr>
+              <tr><td>TC-RCY-005</td><td>恢复回收数据到 LocalFile 原路径</td><td><span class="status pass">通过</span> 状态 RESTORED 且文件存在</td><td><a href="#shot-15">图 15</a></td></tr>
+              <tr><td>TC-UPL-001</td><td>满额时会话附件入口禁用并提示</td><td><span class="status pass">通过</span> UI 拦截；直连接口 507</td><td><a href="#shot-16">图 16</a></td></tr>
+              <tr><td>TC-UPL-002</td><td>满额时网盘上传入口禁用</td><td><span class="status pass">通过</span> UI 拦截；直连接口 507</td><td><a href="#shot-17">图 17</a></td></tr>
+              <tr><td>TC-GRT-005</td><td>管理员授予 1 GiB 后恢复可写</td><td><span class="status pass">通过</span> 总额变为 3 GiB / NORMAL</td><td><a href="#shot-18">图 18</a></td></tr>
+              <tr><td>TC-NOT-001</td><td>普通用户收到增值授权站内信</td><td><span class="status pass">通过</span> 标题/内容国际化</td><td><a href="#shot-19">图 19</a></td></tr>
+              <tr><td>TC-UPL-003</td><td>剩余 1 GiB 时选择 1.5 GiB 批次</td><td><span class="status pass">通过</span> 前端汇总预检，无上传请求</td><td><a href="#shot-20">图 20</a></td></tr>
+              <tr><td>TC-UPL-004</td><td>恢复额度后上传网盘小文件</td><td><span class="status pass">通过</span> HTTP 200 且物理文件落盘</td><td><a href="#shot-21">图 21</a></td></tr>
+              <tr><td>TC-UPL-005</td><td>恢复额度后上传会话附件</td><td><span class="status pass">通过</span> HTTP 200、会话和文件均建立</td><td><a href="#shot-22">图 22</a></td></tr>
+              <tr><td>TC-RCY-006</td><td>普通用户上传根目录及嵌套测试资源，再进入回收流程</td><td><span class="status pass">通过</span> 归档前在线资源真实可见</td><td><a href="#shot-23">图 23</a></td></tr>
+              <tr><td>TC-RCY-007</td><td>管理员确认清空生命周期与保留策略</td><td><span class="status pass">通过</span> 确认文案和归档动作正确</td><td><a href="#shot-24">图 24</a></td></tr>
+              <tr><td>TC-PRV-001</td><td>AVAILABLE 回收记录提供“预览”入口</td><td><span class="status pass">通过</span> 仅可预览记录显示操作</td><td><a href="#shot-25">图 25</a></td></tr>
+              <tr><td>TC-PRV-002</td><td>管理员浏览回收根目录、工作区和嵌套目录</td><td><span class="status pass">通过</span> FileBrowser 导航与文件类型正常</td><td><a href="#shot-26">图 26–28</a></td></tr>
+              <tr><td>TC-PRV-003</td><td>打开回收区 Markdown 文件并渲染实际内容</td><td><span class="status pass">通过</span> 管理布局使用局部只读预览弹窗</td><td><a href="#shot-29">图 29</a></td></tr>
+              <tr><td>TC-PRV-004</td><td>普通用户直接调用回收预览下载接口</td><td><span class="status pass">通过</span> HTTP 403；无法越权读取</td><td>网络响应</td></tr>
+              <tr><td>TC-RCY-008</td><td>预览后执行恢复并检查终态</td><td><span class="status pass">通过</span> RESTORED 后预览/恢复动作撤销</td><td><a href="#shot-30">图 30–31</a></td></tr>
+              <tr><td>TC-RCY-009</td><td>普通用户检查根目录与嵌套资源回到原路径</td><td><span class="status pass">通过</span> 文件及目录内容完整</td><td><a href="#shot-32">图 32</a></td></tr>
+              <tr><td>TC-PRV-005</td><td>分页/过滤改造后再次打开 AVAILABLE 记录只读预览</td><td><span class="status pass">通过</span> FileBrowser 根目录和只读约束保持正常</td><td><a href="#shot-40">图 40</a></td></tr>
+              <tr><td>TC-RCY-012</td><td>恢复最新 AVAILABLE 记录后检查角标和有效筛选</td><td><span class="status pass">通过</span> 角标消失，“仅看有效回收”返回 0 条</td><td><a href="#shot-44">图 44–45</a></td></tr>
+              <tr><td>TC-DEL-001</td><td>物理删除网盘文件后立即核对配额</td><td><span class="status pass">通过</span> 已用量由 4.57 KB 回到基线 4.25 KB</td><td><a href="#shot-33">图 33–34</a></td></tr>
+              <tr><td>TC-CAN-001</td><td>用户查看当前权益并预览取消影响</td><td><span class="status pass">通过</span> 准确展示取消后额度、当前使用量和预计超额</td><td><a href="#shot-55">图 55</a></td></tr>
+              <tr><td>TC-CAN-002</td><td>用户提交取消后，在待审核阶段尝试网盘与会话附件上传</td><td><span class="status pass">通过</span> 状态 REQUESTED，双入口暂停新增且后端不可绕过</td><td><a href="#shot-56">图 56–58</a></td></tr>
+              <tr><td>TC-CAN-003</td><td>管理员驳回取消申请</td><td><span class="status pass">通过</span> 权益保持、双上传恢复、用户收到驳回站内信</td><td><a href="#shot-59">图 59–61</a></td></tr>
+              <tr><td>TC-CAN-004</td><td>管理员确认不超额的取消申请</td><td><span class="status pass">通过</span> 状态 COMPLETED、额度 3 GiB → 2 GiB、用户收到取消完成通知</td><td><a href="#shot-62">图 62–64</a></td></tr>
+              <tr><td>TC-CAN-005</td><td>用户在管理员处理前撤回取消申请</td><td><span class="status pass">通过</span> 状态 CANCELLED，配额卡与上传入口无需刷新页面即时恢复</td><td><a href="#shot-65">图 65–66</a></td></tr>
+              <tr><td>TC-CAN-006</td><td>管理员从生效权益直接取消</td><td><span class="status pass">通过</span> 先预览影响，再复用统一取消/降级状态机完成</td><td><a href="#shot-67">图 67–68</a></td></tr>
+              <tr><td>TC-DWG-001</td><td>LocalFile 存在真实文件时，把基础额度降至 1 KiB并确认取消</td><td><span class="status pass">通过</span> 预计超额正确，确认后进入 GRACE；网盘与会话附件均拒绝新增</td><td><a href="#shot-69">图 69–76</a></td></tr>
+              <tr><td>TC-DWG-002</td><td>宽限期用户选择立即转入临时回收站</td><td><span class="status pass">通过</span> 状态 ARCHIVED、在线文件树即时清空、有效角标/筛选/只读预览均正确</td><td><a href="#shot-77">图 77–81</a></td></tr>
+              <tr><td>TC-DWG-003</td><td>恢复归档并恢复基础 2 GiB</td><td><span class="status pass">通过</span> 角标清除、文件回原路径、上传恢复；二次即时刷新缺陷回归通过</td><td><a href="#shot-82">图 82–85</a></td></tr>
+              <tr><td>TC-PKG-005</td><td>最后一个 ACTIVE 用户取消后检查套餐保护</td><td><span class="status pass">通过</span> 生效用户数归零，编辑/删除重新启用</td><td><a href="#shot-86">图 86</a></td></tr>
+              <tr><td>TC-ADD-001</td><td>用户提交新增申请待审核时上传真实 LocalFile 文件</td><td><span class="status pass">通过</span> 待审核 ADD 不冻结写入，上传成功并正确计量</td><td><a href="#shot-110">图 110–111</a></td></tr>
+              <tr><td>TC-ADD-002</td><td>连续申请两份相同 1 GiB 增值包并由管理员通过</td><td><span class="status pass">通过</span> 两个独立 ACTIVE grant 叠加，总额度 2 → 3 → 4 GiB</td><td><a href="#shot-114">图 114、116–117、87</a></td></tr>
+              <tr><td>TC-ADD-003</td><td>在两份 1 GiB 基础上再申请 512 MiB 不同等级套餐</td><td><span class="status pass">通过</span> 混合等级共同生效，总额度 4.5 GiB</td><td><a href="#shot-88">图 88–91</a></td></tr>
+              <tr><td>TC-CAN-007</td><td>从叠加权益中选择一份 1 GiB 和一份 512 MiB 申请取消</td><td><span class="status pass">通过</span> 仅选中两项撤销，剩余一份 1 GiB 保持 ACTIVE，总额度精确回落到 3 GiB</td><td><a href="#shot-92">图 92–96</a></td></tr>
+              <tr><td>TC-CHG-001</td><td>用户与管理员查看统一增值记录</td><td><span class="status pass">通过</span> ADD/CANCEL 共表、默认创建时间降序、公共服务端分页可切换第 2 页</td><td><a href="#shot-94">图 94、98、101、117</a></td></tr>
+              <tr><td>TC-CHG-002</td><td>按增值状态筛选并验证撤回</td><td><span class="status pass">通过</span> CANCELLED/已撤回过滤正确，撤回后上传即时恢复</td><td><a href="#shot-98">图 98–100</a></td></tr>
+              <tr><td>TC-NOT-002</td><td>检查新增/取消的申请、通过、驳回与撤回站内信</td><td><span class="status pass">通过</span> 全环节通知目标用户，标题和内容国际化</td><td><a href="#shot-96">图 96、103、115</a></td></tr>
+              <tr><td>TC-PKG-006</td><td>同时存在有/无 ACTIVE 用户的两个套餐时检查保护</td><td><span class="status pass">通过</span> 仅当前生效用户数为 1 的套餐禁用修改/删除；计数为 0 的套餐保持可操作</td><td><a href="#shot-102">图 102</a></td></tr>
+              <tr><td>TC-CLN-001</td><td>删除测试文件、临时套餐并取消最后一份测试权益</td><td><span class="status pass">通过</span> 数据库与页面恢复 2 GiB / 4,272 B / NORMAL，活动权益和待处理请求均为 0</td><td><a href="#shot-104">图 104</a></td></tr>
+              <tr><td>TC-MIG-001</td><td>在 204 OpenGauss 执行 V0.2.1 + V0.2.2 增量迁移</td><td><span class="status pass">通过</span> 配额/回收基础结构及统一增值记录、多权益取消字段均建立成功</td><td>迁移日志 + 元数据查询</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>6.3 技术控制验证</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>控制点</th><th>验证</th><th>结果</th></tr></thead>
+            <tbody>
+              <tr><td>后端不可绕过</td><td>满额状态绕过按钮直接 POST 两类上传接口</td><td><span class="status pass">通过</span> 均返回 HTTP 507 和本地化错误</td></tr>
+              <tr><td>失败无脏数据</td><td>检查 LocalFile、文件元数据和配额预留</td><td><span class="status pass">通过</span> 无新增文件/元数据，<code>reserved_bytes=0</code></td></tr>
+              <tr><td>批次原子性</td><td>批次总大小超过剩余额度</td><td><span class="status pass">通过</span> 首文件写入前拒绝，不产生部分上传</td></tr>
+              <tr><td>通知数据隔离</td><td>普通通知接口构造其他目标参数</td><td><span class="status pass">通过</span> 服务端强制替换为当前用户 ID</td></tr>
+              <tr><td>管理员权限</td><td>普通用户请求管理接口</td><td><span class="status pass">通过</span> HTTP 403</td></tr>
+              <tr><td>预览路径隔离</td><td>校验回收任务归属、AVAILABLE 状态及归档根路径；覆盖路径逃逸输入</td><td><span class="status pass">通过</span> 只能读取该任务归档内容，普通用户 403</td></tr>
+              <tr><td>预览只读性</td><td>复用 FileBrowserPanel 时关闭上传、搜索下载动作和所有写操作</td><td><span class="status pass">通过</span> 只保留目录导航与文件内容预览</td></tr>
+              <tr><td>删除计量一致性</td><td>递归测量目录、去重重叠路径，物理删除成功后原子扣量</td><td><span class="status pass">通过</span> 最终删除测试文件后立即回到 4,272 B；失败不扣账</td></tr>
+              <tr><td>变更申请写入策略</td><td>分别在 ADD_PACKAGE/REQUESTED、CANCEL_PACKAGE/REQUESTED 与 GRACE 绕过前端请求网盘/会话上传</td><td><span class="status pass">通过</span> 待审核新增保持可写；待审核取消与 GRACE 服务端拒绝新增；撤回/驳回/完成后按状态恢复</td></tr>
+              <tr><td>取消幂等与权限</td><td>重复提交、非当前用户撤回、普通用户调用管理员审核接口</td><td><span class="status pass">通过</span> 开放状态唯一约束与 RBAC 生效</td></tr>
+              <tr><td>具体权益选择一致性</td><td>同等级重复 grant 与混合等级 grant 多选取消</td><td><span class="status pass">通过</span> 服务端按 grant ID 校验归属/ACTIVE 状态，只撤销选中项并按容量和重算</td></tr>
+              <tr><td>降级数据安全</td><td>取消后用量高于目标额度</td><td><span class="status pass">通过</span> 不直接删数据，进入清理宽限；立即/到期归档复用可恢复回收状态机</td></tr>
+              <tr><td>OpenGauss 迁移兼容</td><td>目标数据库不支持 <code>ADD COLUMN IF NOT EXISTS</code></td><td><span class="status pass">通过</span> 使用临时 PL/pgSQL 检查函数实现幂等加列，迁移实跑成功</td></tr>
+              <tr><td>清理与回滚</td><td>删除测试样本/临时套餐、恢复回收并重算真实使用量</td><td><span class="status pass">通过</span> ACTIVE 授权 0、开放增值请求 0、AVAILABLE 回收 0，配额恢复 2 GiB / 4,272 B / NORMAL</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>6.4 自动化与构建结果</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>验证项</th><th>结果</th><th>结论</th></tr></thead>
+            <tbody>
+              <tr><td>本轮后端增值变更专项</td><td>2 classes、23 / 23 通过（ADD/CANCEL、同/异等级叠加、多项 grant 取消、审批、通知、ADD 不冻结/CANCEL 冻结）</td><td><span class="status pass">通过</span></td></tr>
+              <tr><td>本轮前端增值变更专项</td><td>2 suites、15 / 15 通过（用户增值管理、管理员配额与统一增值记录）</td><td><span class="status pass">通过</span></td></tr>
+              <tr><td>前端全量 Jest</td><td>180 suites 通过、4 skipped；1,115 tests 通过、47 skipped</td><td><span class="status pass">通过</span></td></tr>
+              <tr><td>前端生产构建</td><td>构建成功，生成 StorageQuotaMgr 代码块</td><td><span class="status pass">通过</span></td></tr>
+              <tr><td>功能改动文件 ESLint</td><td>无新增错误</td><td><span class="status pass">通过</span></td></tr>
+              <tr><td>后端全量 Maven</td><td>611 项中 609 通过、2 失败</td><td><span class="status conditional">条件通过</span> 失败仍为既有 Gateway lane 元数据断言，与存储配额无关；本轮 23 项专项与编译均成功</td></tr>
+              <tr><td>仓库全量 Lint / TSC</td><td>发现既有 ModelSiderPanel 2 个缩进错误及存量类型错误</td><td><span class="status baseline">基线问题</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 id="evidence">6.5 操作截图证据</h3>
+        <p class="muted small">点击任一图片可查看原始分辨率。破坏性测试数据已恢复；原有 1 GiB 增值包保留在 LocalFile 联调环境且当前无生效用户。</p>
+        <div class="evidence-grid">
+          <figure id="shot-01" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/01-admin-quota-list-pagination.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/01-admin-quota-list-pagination.png" alt="管理员配额列表与分页"></a><figcaption><b>图 01 · 管理列表与统一分页</b>复用 FE 现有分页组件，列表展示用量、状态与操作。</figcaption></figure>
+          <figure id="shot-02" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/02-create-addon-package.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/02-create-addon-package.png" alt="创建增值包"></a><figcaption><b>图 02 · 创建增值包</b>管理员创建 1 GiB 测试套餐，进入可授权状态。</figcaption></figure>
+          <figure id="shot-03" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/03-fuzzy-search-status-filter.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/03-fuzzy-search-status-filter.png" alt="用户编码模糊查询和状态过滤"></a><figcaption><b>图 03 · 模糊查询与状态过滤</b>用户编码和国际化状态可组合查询。</figcaption></figure>
+          <figure id="shot-04" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/04-generic-grant-first-hint.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/04-generic-grant-first-hint.png" alt="通用授予增值包与首次提示"></a><figcaption><b>图 04 · 通用授予与首次提示</b>动作不再限定首次，首次达到上限仍有业务提示。</figcaption></figure>
+          <figure id="shot-05" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/05-grant-success-package-level.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/05-grant-success-package-level.png" alt="授权成功及套餐等级"></a><figcaption><b>图 05 · 授权成功与套餐等级</b>权益生效后列表即时关联展示增值包等级。</figcaption></figure>
+          <figure id="shot-06" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/06-package-level-filter.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/06-package-level-filter.png" alt="套餐等级过滤"></a><figcaption><b>图 06 · 套餐等级过滤</b>按网盘增值包等级筛选用户。</figcaption></figure>
+          <figure id="shot-07" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/07-repeat-grant-generic-action.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/07-repeat-grant-generic-action.png" alt="重复授予增值包"></a><figcaption><b>图 07 · 再次授予</b>已有权益用户仍使用同一通用授权动作。</figcaption></figure>
+          <figure id="shot-08" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/08-repeat-grant-aggregated-level.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/08-repeat-grant-aggregated-level.png" alt="重复授权聚合等级"></a><figcaption><b>图 08 · 权益聚合</b>重复授权后的等级与次数正确聚合。</figcaption></figure>
+          <figure id="shot-09" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/09-overquota-before-admin-reset.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/09-overquota-before-admin-reset.png" alt="超额状态"></a><figcaption><b>图 09 · 达到存储上限</b>构造真实 2 GiB 逻辑文件后状态进入超额。</figcaption></figure>
+          <figure id="shot-10" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/10-admin-reset-confirm-recycle-policy.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/10-admin-reset-confirm-recycle-policy.png" alt="管理员初始化还原确认"></a><figcaption><b>图 10 · 初始化还原确认</b>明确提示临时回收策略，降低误操作。</figcaption></figure>
+          <figure id="shot-11" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/11-recycle-created-expiry-columns.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/11-recycle-created-expiry-columns.png" alt="回收创建和过期时间"></a><figcaption><b>图 11 · 创建与过期时间</b>按每条回收任务真实时间回显。</figcaption></figure>
+          <figure id="shot-12" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/12-created-expiry-range-filter.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/12-created-expiry-range-filter.png" alt="回收时间范围过滤"></a><figcaption><b>图 12 · 时间区间查询</b>创建时间和到期时间可独立设置范围。</figcaption></figure>
+          <figure id="shot-13" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/13-admin-recycle-list-localfile.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/13-admin-recycle-list-localfile.png" alt="LocalFile 临时回收记录"></a><figcaption><b>图 13 · LocalFile 回收记录</b>纯文件系统模式下的归档状态与字节数。</figcaption></figure>
+          <figure id="shot-14" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/14-restore-confirm.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/14-restore-confirm.png" alt="回收站恢复确认"></a><figcaption><b>图 14 · 恢复确认</b>恢复动作二次确认，保持管理员操作安全。</figcaption></figure>
+          <figure id="shot-15" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/15-recycle-restored-localfile.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/15-recycle-restored-localfile.png" alt="LocalFile 回收恢复完成"></a><figcaption><b>图 15 · 回收恢复完成</b>状态转为 RESTORED，物理文件回到在线路径。</figcaption></figure>
+          <figure id="shot-16" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/16-chat-upload-blocked-full-quota.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/16-chat-upload-blocked-full-quota.png" alt="会话附件满额拦截"></a><figcaption><b>图 16 · 会话附件超额拦截</b>按钮禁用并显示本地化配额提示；直连后端同样 507。</figcaption></figure>
+          <figure id="shot-17" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/17-cloud-drive-upload-blocked-full-quota.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/17-cloud-drive-upload-blocked-full-quota.png" alt="网盘满额拦截"></a><figcaption><b>图 17 · 网盘上传超额拦截</b>配额卡显示满额，上传入口不可继续新增。</figcaption></figure>
+          <figure id="shot-18" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/18-admin-grant-restores-writable-quota.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/18-admin-grant-restores-writable-quota.png" alt="授权后恢复可写额度"></a><figcaption><b>图 18 · 授权恢复可写</b>增值 1 GiB 生效，总额度 3 GiB，状态回到 NORMAL。</figcaption></figure>
+          <figure id="shot-19" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/19-normal-user-station-notification-i18n.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/19-normal-user-station-notification-i18n.png" alt="普通用户国际化站内信"></a><figcaption><b>图 19 · 增值授权站内信</b>普通用户收到正确业务标题和国际化内容。</figcaption></figure>
+          <figure id="shot-20" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/20-cloud-drive-batch-precheck-over-remaining.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/20-cloud-drive-batch-precheck-over-remaining.png" alt="网盘批次超剩余额度预检"></a><figcaption><b>图 20 · 批次总大小预检</b>剩余 1 GiB 时选择 1.5 GiB，前端直接提示且未发上传请求。</figcaption></figure>
+          <figure id="shot-21" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/21-cloud-drive-upload-restored-success.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/21-cloud-drive-upload-restored-success.png" alt="网盘上传恢复成功"></a><figcaption><b>图 21 · 网盘上传恢复成功</b>授权后小文件 HTTP 200 并在 LocalFile 路径落盘。</figcaption></figure>
+          <figure id="shot-22" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/22-chat-upload-restored-success.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/22-chat-upload-restored-success.png" alt="会话附件上传恢复成功"></a><figcaption><b>图 22 · 会话附件恢复成功</b>授权后会话附件 HTTP 200，页面创建对应会话记录。</figcaption></figure>
+          <figure id="shot-23" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/23-user-upload-before-reset.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/23-user-upload-before-reset.png" alt="普通用户归档前测试资源"></a><figcaption><b>图 23 · 归档前在线资源</b>普通用户在根目录和嵌套目录上传受控测试文件，为归档、预览、恢复建立真实样本。</figcaption></figure>
+          <figure id="shot-24" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/24-admin-reset-lifecycle-confirm.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/24-admin-reset-lifecycle-confirm.png" alt="管理员清空与临时回收确认"></a><figcaption><b>图 24 · 清空生命周期确认</b>管理员确认在线数据进入独立保留期的临时回收站，而非直接永久删除。</figcaption></figure>
+          <figure id="shot-25" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/25-admin-recycle-preview-entry.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/25-admin-recycle-preview-entry.png" alt="临时回收站预览入口"></a><figcaption><b>图 25 · 回收记录预览入口</b>仅 AVAILABLE 记录提供预览与恢复，终态记录不再显示操作。</figcaption></figure>
+          <figure id="shot-26" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/26-admin-readonly-preview-root.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/26-admin-readonly-preview-root.png" alt="管理员只读预览回收根目录"></a><figcaption><b>图 26 · 回收根目录只读浏览</b>复用 FileBrowser 面板，隐藏上传、删除和改名，仅保留安全导航与预览。</figcaption></figure>
+          <figure id="shot-27" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/27-admin-preview-workspace-files.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/27-admin-preview-workspace-files.png" alt="管理员浏览回收工作区文件"></a><figcaption><b>图 27 · 工作区文件浏览</b>管理员沿归档目录进入用户工作区，文件名、类型和大小正确回显。</figcaption></figure>
+          <figure id="shot-28" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/28-admin-preview-nested-file.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/28-admin-preview-nested-file.png" alt="管理员浏览回收嵌套目录"></a><figcaption><b>图 28 · 嵌套目录预览</b>多层路径导航受归档根边界约束，嵌套测试文件可见。</figcaption></figure>
+          <figure id="shot-29" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/29-admin-file-preview-content.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/29-admin-file-preview-content.png" alt="管理员预览回收文件实际内容"></a><figcaption><b>图 29 · 文件内容实际渲染</b>管理布局使用局部预览弹窗，真实 Markdown 内容成功读取并渲染。</figcaption></figure>
+          <figure id="shot-30" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/30-admin-restore-confirm.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/30-admin-restore-confirm.png" alt="预览后的恢复确认"></a><figcaption><b>图 30 · 预览后恢复确认</b>管理员核验内容后发起恢复，仍需二次确认避免误操作。</figcaption></figure>
+          <figure id="shot-31" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/31-admin-restored-status.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/31-admin-restored-status.png" alt="临时回收记录已恢复状态"></a><figcaption><b>图 31 · RESTORED 终态</b>恢复成功后记录进入终态，预览和恢复操作均撤销。</figcaption></figure>
+          <figure id="shot-32" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/32-user-files-restored.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/32-user-files-restored.png" alt="普通用户文件恢复原路径"></a><figcaption><b>图 32 · 用户资源回到原路径</b>普通用户重新进入网盘，根目录及嵌套资源完整恢复。</figcaption></figure>
+          <figure id="shot-33" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/33-delete-accounting-before.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/33-delete-accounting-before.png" alt="网盘删除计量修复前的上传用量"></a><figcaption><b>图 33 · 删除计量验证前</b>上传受控文件后账本已用量由 4.25 KB 增至 4.57 KB。</figcaption></figure>
+          <figure id="shot-34" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/34-delete-accounting-after.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/34-delete-accounting-after.png" alt="网盘物理删除后配额立即扣减"></a><figcaption><b>图 34 · 删除后即时扣量</b>物理删除成功后同一页面已用量立即回到 4.25 KB，无需等待扫描任务。</figcaption></figure>
+          <figure id="shot-35" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/35-valid-recycle-badge.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/35-valid-recycle-badge.png" alt="临时回收站有效记录角标"></a><figcaption><b>图 35 · 有效回收角标</b>用户存在一条有效 AVAILABLE 记录时，按钮右上角显示数量 1。</figcaption></figure>
+          <figure id="shot-36" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/36-recycle-pagination-default-sort.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/36-recycle-pagination-default-sort.png" alt="回收记录公共分页与默认倒序"></a><figcaption><b>图 36 · 分页与默认倒序</b>弹窗复用 FE 公共分页，记录按创建时间从新到旧稳定排列。</figcaption></figure>
+          <figure id="shot-37" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/37-recycle-status-filter.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/37-recycle-status-filter.png" alt="回收状态筛选"></a><figcaption><b>图 37 · 回收状态筛选</b>选择可恢复状态后只返回当前 AVAILABLE 记录。</figcaption></figure>
+          <figure id="shot-38" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/38-recycle-created-time-filter.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/38-recycle-created-time-filter.png" alt="回收创建时间段筛选"></a><figcaption><b>图 38 · 创建时间段查询</b>精确到秒的创建时间范围由服务端过滤。</figcaption></figure>
+          <figure id="shot-39" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/39-recycle-expired-time-filter.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/39-recycle-expired-time-filter.png" alt="回收过期时间段筛选"></a><figcaption><b>图 39 · 过期时间段查询</b>过期时间范围独立生效，不与创建时间混用。</figcaption></figure>
+          <figure id="shot-40" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/40-recycle-readonly-preview.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/40-recycle-readonly-preview.png" alt="回收站只读预览回归"></a><figcaption><b>图 40 · 只读预览回归</b>分页与筛选改造后仍可进入 FileBrowser 只读预览，写操作保持隐藏。</figcaption></figure>
+          <figure id="shot-41" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/41-package-active-count-adaptive.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/41-package-active-count-adaptive.png" alt="增值包生效用户数与可操作状态"></a><figcaption><b>图 41 · ACTIVE 计数一致性</b>历史授权已失效后生效用户数为 0，编辑和删除恢复可用。</figcaption></figure>
+          <figure id="shot-42" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/42-active-entitlement-empty-adaptive.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/42-active-entitlement-empty-adaptive.png" alt="当前生效权益空列表自适应"></a><figcaption><b>图 42 · 当前生效权益空态</b>生效页与配置计数一致为 0，空表不再撑出大块固定空白。</figcaption></figure>
+          <figure id="shot-43" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/43-package-modal-responsive-1024.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/43-package-modal-responsive-1024.png" alt="1024 宽度增值包弹窗自适应"></a><figcaption><b>图 43 · 1024 宽度自适应</b>实测表格 clientWidth 与 scrollWidth 同为 944，无非必要横向溢出。</figcaption></figure>
+          <figure id="shot-44" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/44-recycle-restored-badge-cleared.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/44-recycle-restored-badge-cleared.png" alt="恢复后有效记录角标消失"></a><figcaption><b>图 44 · 恢复后角标清除</b>最新归档恢复后使用量回到在线空间，临时回收站按钮不再显示有效角标。</figcaption></figure>
+          <figure id="shot-45" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/45-valid-recycle-filter-after-restore.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/45-valid-recycle-filter-after-restore.png" alt="恢复后有效回收筛选为空"></a><figcaption><b>图 45 · 有效筛选同步清空</b>同一用户恢复完成后勾选“仅看有效回收”，列表返回 0 条。</figcaption></figure>
+          <figure id="shot-46" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/46-historical-entitlement-editable.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/46-historical-entitlement-editable.png" alt="仅历史权益时增值包可编辑删除"></a><figcaption><b>图 46 · 历史权益不锁定配置</b>仅存在历史失效授权时生效用户数为 0；已真实修改并恢复套餐名称，编辑与删除均保持可用。</figcaption></figure>
+        </div>
+
+        <h3 id="cancellation-evidence">6.6 取消增值包、超额降级与即时刷新实测证据</h3>
+        <p class="muted small">以下 40 张截图来自 2026-07-15 的追加真实全链路测试。当前功能没有支付，截图和状态均使用“取消增值包”语义；测试完成后基础配额和物理文件已恢复。</p>
+        <div class="evidence-grid">
+          <figure id="shot-47" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/01-user-storage-baseline.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/01-user-storage-baseline.png" alt="普通用户存储基线"></a><figcaption><b>图 47 · 用户基线</b>普通用户以基础 2 GiB 配额进入网盘，上传能力正常。</figcaption></figure>
+          <figure id="shot-48" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/02-admin-quota-list-pagination.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/02-admin-quota-list-pagination.png" alt="管理员配额分页与默认排序"></a><figcaption><b>图 48 · 管理列表</b>59 条记录使用公共分页，默认按使用量降序。</figcaption></figure>
+          <figure id="shot-49" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/03-package-created.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/03-package-created.png" alt="增值包创建成功"></a><figcaption><b>图 49 · 增值包 CRUD</b>创建测试增值包并进入可授予状态。</figcaption></figure>
+          <figure id="shot-50" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/04-first-grant-confirm.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/04-first-grant-confirm.png" alt="首次授予确认"></a><figcaption><b>图 50 · 首次授予提示</b>通用授予动作保留首次权益标识。</figcaption></figure>
+          <figure id="shot-51" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/05-grant-success-quota.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/05-grant-success-quota.png" alt="授予后配额增加"></a><figcaption><b>图 51 · 授予生效</b>总配额从 2 GiB 增加为 3 GiB。</figcaption></figure>
+          <figure id="shot-52" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/06-used-package-protected.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/06-used-package-protected.png" alt="使用中套餐保护"></a><figcaption><b>图 52 · 使用中保护</b>存在 ACTIVE 用户时编辑、删除不可用。</figcaption></figure>
+          <figure id="shot-53" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/07-active-grant-and-cancel-entry.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/07-active-grant-and-cancel-entry.png" alt="生效权益取消入口"></a><figcaption><b>图 53 · 管理员取消入口</b>生效权益列表提供通用取消入口。</figcaption></figure>
+          <figure id="shot-54" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/08-user-active-addon.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/08-user-active-addon.png" alt="用户当前增值包"></a><figcaption><b>图 54 · 用户当前权益</b>用户可查看当前生效增值包和取消操作。</figcaption></figure>
+          <figure id="shot-55" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/09-user-cancel-impact-preview.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/09-user-cancel-impact-preview.png" alt="用户取消影响预览"></a><figcaption><b>图 55 · 取消影响预览</b>提交前显示取消后额度、使用量和预计超额。</figcaption></figure>
+          <figure id="shot-56" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/10-cancel-pending-file-write-blocked.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/10-cancel-pending-file-write-blocked.png" alt="取消待审核网盘写入冻结"></a><figcaption><b>图 56 · 待审核写冻结</b>用户申请取消后网盘新增上传被暂停。</figcaption></figure>
+          <figure id="shot-57" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/11-chat-upload-blocked.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/11-chat-upload-blocked.png" alt="取消待审核会话上传冻结"></a><figcaption><b>图 57 · 会话附件同步冻结</b>会话上传使用同一取消状态控制。</figcaption></figure>
+          <figure id="shot-58" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/12-admin-cancel-request-pending.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/12-admin-cancel-request-pending.png" alt="管理员取消待审核记录"></a><figcaption><b>图 58 · 待处理记录</b>管理员统一增值记录页展示取消项的目标额度和预计超额。</figcaption></figure>
+          <figure id="shot-59" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/13-admin-cancel-rejected.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/13-admin-cancel-rejected.png" alt="管理员驳回取消"></a><figcaption><b>图 59 · 管理员驳回</b>申请进入 REJECTED，权益不发生变化。</figcaption></figure>
+          <figure id="shot-60" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/14-rejection-restores-chat-upload.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/14-rejection-restores-chat-upload.png" alt="驳回后会话上传恢复"></a><figcaption><b>图 60 · 驳回后恢复写入</b>会话附件入口恢复可用。</figcaption></figure>
+          <figure id="shot-61" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/15-cancel-rejection-notification.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/15-cancel-rejection-notification.png" alt="取消驳回通知"></a><figcaption><b>图 61 · 驳回站内信</b>目标用户收到国际化业务通知。</figcaption></figure>
+          <figure id="shot-62" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/16-admin-cancel-approved-complete.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/16-admin-cancel-approved-complete.png" alt="管理员确认取消完成"></a><figcaption><b>图 62 · 确认取消</b>不超额时状态直接进入 COMPLETED。</figcaption></figure>
+          <figure id="shot-63" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/17-user-cancel-complete-quota-restored.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/17-user-cancel-complete-quota-restored.png" alt="用户取消完成配额降级"></a><figcaption><b>图 63 · 配额正常降级</b>用户总额度从 3 GiB 回落到 2 GiB，保持 NORMAL。</figcaption></figure>
+          <figure id="shot-64" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/18-cancel-complete-notification.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/18-cancel-complete-notification.png" alt="取消完成通知"></a><figcaption><b>图 64 · 取消完成通知</b>站内信明确权益已取消及新额度。</figcaption></figure>
+          <figure id="shot-65" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/19-user-cancel-withdraw-entry.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/19-user-cancel-withdraw-entry.png" alt="取消申请撤回入口"></a><figcaption><b>图 65 · 用户撤回入口</b>管理员处理前允许用户主动撤回。</figcaption></figure>
+          <figure id="shot-66" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/20-user-cancel-withdrawn-upload-restored.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/20-user-cancel-withdrawn-upload-restored.png" alt="撤回后即时恢复"></a><figcaption><b>图 66 · 撤回即时刷新</b>无需刷新页面，状态、配额卡和上传入口同步恢复。</figcaption></figure>
+          <figure id="shot-67" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/21-admin-direct-cancel-preview.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/21-admin-direct-cancel-preview.png" alt="管理员直接取消影响预览"></a><figcaption><b>图 67 · 管理员直接取消预览</b>管理员操作前同样展示降级影响。</figcaption></figure>
+          <figure id="shot-68" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/22-admin-direct-cancel-complete.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/22-admin-direct-cancel-complete.png" alt="管理员直接取消完成"></a><figcaption><b>图 68 · 管理员直接取消</b>复用统一状态机完成权益取消。</figcaption></figure>
+          <figure id="shot-69" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/23-localfile-upload-success.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/23-localfile-upload-success.png" alt="LocalFile 测试文件上传"></a><figcaption><b>图 69 · LocalFile 实物样本</b>真实文件落盘，为超额归档建立样本。</figcaption></figure>
+          <figure id="shot-70" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/24-overquota-cancel-impact-preview.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/24-overquota-cancel-impact-preview.png" alt="超额取消影响预览"></a><figcaption><b>图 70 · 超额影响预览</b>目标额度 1 KiB，预计超额量准确回显。</figcaption></figure>
+          <figure id="shot-71" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/25-admin-overquota-cancel-pending.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/25-admin-overquota-cancel-pending.png" alt="超额取消待审核"></a><figcaption><b>图 71 · 超额申请待审核</b>管理员可识别高风险降级请求。</figcaption></figure>
+          <figure id="shot-72" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/26-admin-overquota-confirm-warning.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/26-admin-overquota-confirm-warning.png" alt="超额取消确认警告"></a><figcaption><b>图 72 · 超额确认警告</b>明确提示将进入只读清理宽限。</figcaption></figure>
+          <figure id="shot-73" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/27-overquota-grace-period-active.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/27-overquota-grace-period-active.png" alt="超额清理宽限生效"></a><figcaption><b>图 73 · 清理宽限期</b>记录进入 GRACE 并显示独立截止时间。</figcaption></figure>
+          <figure id="shot-74" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/28-overquota-file-upload-blocked.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/28-overquota-file-upload-blocked.png" alt="宽限期网盘上传拦截"></a><figcaption><b>图 74 · 宽限期网盘拦截</b>保留读删能力，新增上传不可用。</figcaption></figure>
+          <figure id="shot-75" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/29-user-grace-period-archive-action.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/29-user-grace-period-archive-action.png" alt="宽限期立即归档入口"></a><figcaption><b>图 75 · 用户立即归档</b>用户可主动结束宽限并转入临时回收站。</figcaption></figure>
+          <figure id="shot-76" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/30-overquota-chat-upload-blocked.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/30-overquota-chat-upload-blocked.png" alt="宽限期会话上传拦截"></a><figcaption><b>图 76 · 宽限期会话拦截</b>会话附件与网盘使用同一服务端控制。</figcaption></figure>
+          <figure id="shot-77" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/31-immediate-archive-complete.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/31-immediate-archive-complete.png" alt="立即归档完成"></a><figcaption><b>图 77 · 立即归档完成</b>增值记录中的取消项进入 ARCHIVED，在线空间释放。</figcaption></figure>
+          <figure id="shot-78" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/32-recycle-count-badge.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/32-recycle-count-badge.png" alt="有效回收数量角标"></a><figcaption><b>图 78 · 有效回收角标</b>主列表准确显示 1 条可恢复记录。</figcaption></figure>
+          <figure id="shot-79" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/33-only-effective-recycle-filter.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/33-only-effective-recycle-filter.png" alt="仅看有效回收筛选"></a><figcaption><b>图 79 · 仅看有效回收</b>勾选后只返回存在 AVAILABLE 记录的用户。</figcaption></figure>
+          <figure id="shot-80" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/34-recycle-list-pagination-filters.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/34-recycle-list-pagination-filters.png" alt="回收分页与过滤"></a><figcaption><b>图 80 · 回收分页过滤</b>公共分页、状态和双时间段条件完整呈现。</figcaption></figure>
+          <figure id="shot-81" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/35-admin-readonly-file-preview.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/35-admin-readonly-file-preview.png" alt="管理员只读文件预览"></a><figcaption><b>图 81 · 管理员只读预览</b>复用 FileBrowser 浏览并预览归档文件内容。</figcaption></figure>
+          <figure id="shot-82" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/36-recycle-restored-badge-cleared.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/36-recycle-restored-badge-cleared.png" alt="恢复后角标清除"></a><figcaption><b>图 82 · 恢复后角标清除</b>AVAILABLE 数量归零，主列表同步更新。</figcaption></figure>
+          <figure id="shot-83" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/37-user-restored-file-upload-enabled.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/37-user-restored-file-upload-enabled.png" alt="恢复后文件和上传可用"></a><figcaption><b>图 83 · 用户恢复完成</b>文件回到在线路径，2 GiB 配额和上传恢复。</figcaption></figure>
+          <figure id="shot-84" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/38-immediate-archive-ui-refresh-fixed.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/38-immediate-archive-ui-refresh-fixed.png" alt="立即归档界面刷新修复"></a><figcaption><b>图 84 · 归档即时刷新修复</b>配额卡、统一增值记录和 FileBrowser 同步刷新，不需手工重载页面。</figcaption></figure>
+          <figure id="shot-85" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/39-regression-data-restored.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/39-regression-data-restored.png" alt="回归数据恢复"></a><figcaption><b>图 85 · 回归数据恢复</b>二次归档恢复后两条记录均为 RESTORED，主列表无有效角标。</figcaption></figure>
+          <figure id="shot-86" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/40-unused-package-edit-delete-enabled.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/40-unused-package-edit-delete-enabled.png" alt="无生效用户时套餐可编辑删除"></a><figcaption><b>图 86 · 套餐保护解除</b>ACTIVE 用户数归零后编辑、删除按钮重新启用。</figcaption></figure>
+        </div>
+
+        <h3 id="addon-change-evidence">6.7 可叠加新增、多项取消与统一增值记录实测证据</h3>
+        <p class="muted small">以下 31 张截图来自同一 LocalFile 双角色真实会话：先完成首份新增申请和待审核上传验证，再构造两份相同 1 GiB 权益并叠加 512 MiB 混合等级，随后多选取消、驳回、撤回并验证记录分页和站内信；最后恢复 2 GiB 原始基线。</p>
+        <div class="evidence-grid">
+          <figure id="shot-87" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/54-user-two-stacked-grants-4gb.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/54-user-two-stacked-grants-4gb.png" alt="两份相同 1G 增值包叠加"></a><figcaption><b>图 87 · 同等级重复叠加</b>两份独立 1 GiB 权益同时 ACTIVE，总配额从 2 GiB 增至 4 GiB。</figcaption></figure>
+          <figure id="shot-88" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/55-admin-create-512m-package.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/55-admin-create-512m-package.png" alt="管理员新增 512M 增值包"></a><figcaption><b>图 88 · 新增混合等级套餐</b>管理员创建并启用 512 MiB 套餐，供用户新增申请选择。</figcaption></figure>
+          <figure id="shot-89" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/56-user-apply-512m-package.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/56-user-apply-512m-package.png" alt="用户申请 512M 增值包"></a><figcaption><b>图 89 · 用户申请新增</b>用户从现有启用套餐中选择 512 MiB，提交 ADD_PACKAGE 审批。</figcaption></figure>
+          <figure id="shot-90" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/57-admin-approve-512m-addition.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/57-admin-approve-512m-addition.png" alt="管理员批准 512M 新增申请"></a><figcaption><b>图 90 · 管理员确认新增</b>管理员在统一增值记录中通过申请，形成新的独立权益快照。</figcaption></figure>
+          <figure id="shot-91" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/58-user-mixed-stacked-grants-4-5gb.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/58-user-mixed-stacked-grants-4-5gb.png" alt="1G 与 512M 混合等级叠加"></a><figcaption><b>图 91 · 混合等级叠加</b>两份 1 GiB 与一份 512 MiB 同时生效，总配额为 4.5 GiB。</figcaption></figure>
+          <figure id="shot-92" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/59-user-multi-select-cancel-preview.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/59-user-multi-select-cancel-preview.png" alt="多选具体权益取消预览"></a><figcaption><b>图 92 · 多项具体权益选择</b>用户选择一份 1 GiB 与一份 512 MiB，预览总变更 -1.5 GiB 和目标 3 GiB。</figcaption></figure>
+          <figure id="shot-93" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/60-pending-cancel-upload-disabled.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/60-pending-cancel-upload-disabled.png" alt="取消待审核时上传冻结"></a><figcaption><b>图 93 · 取消待审核写冻结</b>CANCEL_PACKAGE/REQUESTED 阶段网盘上传被暂停；新增申请待审核阶段此前已真实上传成功。</figcaption></figure>
+          <figure id="shot-94" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/61-admin-unified-records-pagination-multi-cancel.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/61-admin-unified-records-pagination-multi-cancel.png" alt="管理员统一增值记录与多项取消"></a><figcaption><b>图 94 · 管理员统一增值记录</b>ADD/CANCEL 记录共表，最新多项取消准确展示名称、容量和前后配额。</figcaption></figure>
+          <figure id="shot-95" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/62-admin-approve-multi-cancel.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/62-admin-approve-multi-cancel.png" alt="管理员批准多项取消"></a><figcaption><b>图 95 · 多项取消确认</b>审批只撤销所选 grant IDs，未选中的一份 1 GiB 权益继续生效。</figcaption></figure>
+          <figure id="shot-96" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/63-user-station-messages-add-cancel-workflow.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/63-user-station-messages-add-cancel-workflow.png" alt="新增与取消流程站内信"></a><figcaption><b>图 96 · 新增/取消流程通知</b>申请提交和审批结果都以国际化业务消息触达目标用户。</figcaption></figure>
+          <figure id="shot-97" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/64-admin-reject-cancel-request.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/64-admin-reject-cancel-request.png" alt="管理员驳回取消申请"></a><figcaption><b>图 97 · 管理员驳回</b>驳回原因入记录，当前权益和总配额保持不变。</figcaption></figure>
+          <figure id="shot-98" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/65-user-unified-records-pagination-withdraw.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/65-user-unified-records-pagination-withdraw.png" alt="用户统一增值记录与分页"></a><figcaption><b>图 98 · 用户统一记录分页</b>用户端同时展示新增和取消历史，默认最新在前并复用公共分页。</figcaption></figure>
+          <figure id="shot-99" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/66-user-withdraw-cancel-confirm.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/66-user-withdraw-cancel-confirm.png" alt="用户撤回取消申请"></a><figcaption><b>图 99 · 用户撤回取消</b>审核前可撤回，状态变为已撤回并立即恢复写入。</figcaption></figure>
+          <figure id="shot-100" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/67-admin-record-status-filter-withdrawn.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/67-admin-record-status-filter-withdrawn.png" alt="管理员按已撤回状态过滤"></a><figcaption><b>图 100 · 状态查询</b>管理员选择“已撤回”后，服务端只返回对应状态记录。</figcaption></figure>
+          <figure id="shot-101" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/68-admin-records-page-2.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/68-admin-records-page-2.png" alt="管理员增值记录第二页"></a><figcaption><b>图 101 · 服务端分页第 2 页</b>记录总数超过页大小后可真实切换第二页，不是前端假分页。</figcaption></figure>
+          <figure id="shot-102" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/69-package-lock-only-active-entitlements.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/69-package-lock-only-active-entitlements.png" alt="只有当前生效权益锁定套餐"></a><figcaption><b>图 102 · 仅 ACTIVE 权益锁定</b>1 GiB 套餐生效用户数为 1，编辑/删除禁用；512 MiB 为 0，两个操作保持可用。</figcaption></figure>
+          <figure id="shot-103" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/70-user-station-messages-reject-withdraw.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/70-user-station-messages-reject-withdraw.png" alt="驳回和撤回站内信"></a><figcaption><b>图 103 · 驳回与撤回通知</b>取消驳回原因和用户撤回结果均进入站内信时间线。</figcaption></figure>
+          <figure id="shot-104" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/71-restored-baseline-2gb.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/71-restored-baseline-2gb.png" alt="测试完成恢复 2GB 基线"></a><figcaption><b>图 104 · 测试基线恢复</b>清理测试文件、临时套餐和最后一份测试权益后，用户回到 2 GiB / NORMAL，上传可用。</figcaption></figure>
+          <figure id="shot-105" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/41-user-files-baseline.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/41-user-files-baseline.png" alt="新增申请测试前用户基线"></a><figcaption><b>图 105 · 新增申请前用户基线</b>普通用户初始为 2 GiB 基础配额，网盘功能可用。</figcaption></figure>
+          <figure id="shot-106" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/42-admin-quota-baseline-pagination.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/42-admin-quota-baseline-pagination.png" alt="管理员配额列表默认使用量倒序与分页"></a><figcaption><b>图 106 · 管理列表基线</b>59 条用户记录按使用量默认降序，公共分页正常。</figcaption></figure>
+          <figure id="shot-107" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/43-user-addon-manager-empty.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/43-user-addon-manager-empty.png" alt="用户增值包管理空态"></a><figcaption><b>图 107 · 用户增值管理入口</b>当前权益与增值记录采用统一弹窗，初始空态自适应。</figcaption></figure>
+          <figure id="shot-108" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/44-user-apply-add-package.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/44-user-apply-add-package.png" alt="用户提交新增增值包申请"></a><figcaption><b>图 108 · 首份新增申请</b>用户选择现有 1 GiB 启用套餐并提交 ADD_PACKAGE。</figcaption></figure>
+          <figure id="shot-109" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/45-user-change-record-add-requested.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/45-user-change-record-add-requested.png" alt="新增申请进入统一增值记录"></a><figcaption><b>图 109 · 新增申请记录</b>用户增值记录显示“新增增值 / 待审核”，默认最新在前。</figcaption></figure>
+          <figure id="shot-110" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/46-add-request-upload-remains-enabled.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/46-add-request-upload-remains-enabled.png" alt="新增申请待审核时上传仍可用"></a><figcaption><b>图 110 · 待审核新增不冻结</b>ADD_PACKAGE/REQUESTED 不影响已有配额和上传入口。</figcaption></figure>
+          <figure id="shot-111" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/47-pending-add-real-upload-success.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/47-pending-add-real-upload-success.png" alt="新增待审核阶段真实文件上传成功"></a><figcaption><b>图 111 · 待审核新增真实上传</b>71 B 测试文件在 LocalFile 成功落盘并进入配额计量。</figcaption></figure>
+          <figure id="shot-112" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/48-admin-unified-change-records-add-review.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/48-admin-unified-change-records-add-review.png" alt="管理员审核新增增值记录"></a><figcaption><b>图 112 · 管理员审核新增</b>统一增值记录展示新增类型、容量、申请说明和审核操作。</figcaption></figure>
+          <figure id="shot-113" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/49-admin-approve-add-package.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/49-admin-approve-add-package.png" alt="管理员确认新增增值包"></a><figcaption><b>图 113 · 新增审批确认</b>审批弹窗明确用户、变更类型、套餐与变更后配额。</figcaption></figure>
+          <figure id="shot-114" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/50-user-first-addon-active-3gb.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/50-user-first-addon-active-3gb.png" alt="首份增值包生效总配额 3GB"></a><figcaption><b>图 114 · 首份申请生效</b>管理员通过后独立权益 ACTIVE，总配额从 2 GiB 增至 3 GiB。</figcaption></figure>
+          <figure id="shot-115" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/51-user-station-message-add-approved.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/51-user-station-message-add-approved.png" alt="新增增值包审批通过站内信"></a><figcaption><b>图 115 · 新增审批通知</b>普通用户收到增值包审核通过的国际化站内信。</figcaption></figure>
+          <figure id="shot-116" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/52-user-apply-same-package-again.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/52-user-apply-same-package-again.png" alt="用户再次申请相同增值包"></a><figcaption><b>图 116 · 再次申请同一套餐</b>已有权益不阻止重复申请，第二份 1 GiB 使用同一标准流程。</figcaption></figure>
+          <figure id="shot-117" class="evidence"><a href="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/53-admin-records-newest-first-second-add.png"><img loading="lazy" src="saas-storage-quota-solution-fullchain-report-assets/playwright/saas-storage-quota-20260715/53-admin-records-newest-first-second-add.png" alt="第二份新增申请默认最新在前"></a><figcaption><b>图 117 · 统一记录默认倒序</b>第二份新增申请出现在列表首行，验证创建时间降序。</figcaption></figure>
+        </div>
+      </section>
+
+      <section id="defects" class="paper">
+        <p class="section-kicker">07 · Defects &amp; Remediation</p>
+        <h2 class="section-title">缺陷清单、修复计划与闭环</h2>
+        <p class="section-desc">全链路测试不仅验证需求，也按“页面 → API → 数据库 → 物理文件”追踪异常。以下二十二项功能范围缺陷均已完成修复和复测。</p>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>缺陷</th><th>影响</th><th>根因</th><th>修复措施</th><th>状态</th></tr></thead>
+            <tbody>
+              <tr><td>D-01 通知入口未挂载</td><td>普通用户无法看到授权通知</td><td><code>NoticeList</code> 未接入当前侧栏</td><td>在现有侧栏挂载通知组件并保留原交互</td><td><span class="status fixed">已修复</span></td></tr>
+              <tr><td>D-02 用户通知分页路由缺失</td><td>前端请求 404</td><td>仅有管理通知接口</td><td>补齐用户分页路由，目标 ID 强制取当前登录用户</td><td><span class="status fixed">已修复</span></td></tr>
+              <tr><td>D-03 通知标题被“通知”覆盖</td><td>国际化业务信息不可见</td><td>列表使用固定通用标题</td><td>按业务类型映射并展示真实本地化标题/内容</td><td><span class="status fixed">已修复</span></td></tr>
+              <tr><td>D-04 登录后配额首次刷新不稳定</td><td>按钮短暂使用错误状态</td><td>Hook 初始化时机早于用户态稳定</td><td>监听用户身份并触发一次幂等刷新</td><td><span class="status fixed">已修复</span></td></tr>
+              <tr><td>D-05 会话上传吞掉配额异常</td><td>满额可能返回通用 200/业务错误</td><td>宽泛异常捕获覆盖特定异常</td><td>显式重新抛出 <code>StorageQuotaExceededException</code>，全局映射 507</td><td><span class="status fixed">已修复</span></td></tr>
+              <tr><td>D-06 批量上传存在部分成功风险</td><td>超额批次可能先写入部分文件</td><td>按单文件依次预留</td><td>在首个写入前按整个批次原子预留，逐文件结算</td><td><span class="status fixed">已修复</span></td></tr>
+              <tr><td>D-07 剩余额度忽略预留量</td><td>并发时页面显示偏大</td><td>View 只计算 total-used</td><td>统一为 total-used-reserved，并增加回归测试</td><td><span class="status fixed">已修复</span></td></tr>
+              <tr><td>D-08 Ant Upload 重复回调</td><td>批次预检可能重复提示/触发</td><td>同一文件列表在多事件阶段回调</td><td>增加批次去重和稳定聚合判断</td><td><span class="status fixed">已修复</span></td></tr>
+              <tr><td>D-09 JDK 21 登录 Provider 异常</td><td>真实账号无法完成登录测试</td><td>显式注册签名 Provider 受运行时限制</td><td>改用 BC 轻量 SM4 API，保持既有算法和密文格式</td><td><span class="status fixed">已修复</span></td></tr>
+              <tr><td>D-10 管理端文件内容无法弹出</td><td>回收目录可浏览，但点击文件无法完成预览</td><td>复用组件依赖普通用户布局的全局 EventEmitter/预览驱动，管理布局未挂载</td><td>保留原布局驱动，同时增加组件内局部只读预览弹窗回退；新增组件回归和真实 Markdown 验证</td><td><span class="status fixed">已修复</span></td></tr>
+              <tr><td>D-11 网盘删除后用量未即时减少</td><td>用户已释放 NFS 空间但仍可能被配额拦截，只能等待扫描校准</td><td>FileBrowser 删除仅操作物理文件，未提交账本扣量；Provider 还可能吞掉删除失败</td><td>删除前递归测量并去重，物理成功后原子扣量；失败显式抛出且不改账，增加文件/目录/失败三类测试</td><td><span class="status fixed">已修复</span></td></tr>
+              <tr><td>D-12 增值包编辑弹窗被遮罩</td><td>新增/编辑入口可见但无法稳定点击表单</td><td>子弹窗层级低于父弹窗遮罩</td><td>为编辑弹窗设置独立更高层级，并完成新增/编辑真实操作回归</td><td><span class="status fixed">已修复</span></td></tr>
+              <tr><td>D-13 授权后套餐使用态未刷新</td><td>刚授予的套餐仍显示 0，编辑/删除按钮短暂可用</td><td>授权成功只刷新用户列表，未刷新套餐元数据</td><td>授权后并行刷新用户页和套餐元数据，立即同步保护态</td><td><span class="status fixed">已修复</span></td></tr>
+              <tr><td>D-14 管理写请求可能误报成功</td><td>后端拒绝修改/删除时页面仍可能提示成功</td><td>写请求沿用只适合查询的自定义响应处理</td><td>写操作恢复统一错误传播，只有服务端成功响应才显示成功提示</td><td><span class="status fixed">已修复</span></td></tr>
+              <tr><td>D-15 主列表分页状态失效</td><td>翻页/切换页大小后页码或数据可能回退</td><td>异步响应竞争覆盖受控分页状态</td><td>页码立即受控更新，页大小变化回到第 1 页，并用请求序号丢弃旧响应</td><td><span class="status fixed">已修复</span></td></tr>
+              <tr><td>D-16 回收记录弹窗缺少服务端分页过滤</td><td>数据多时不可稳定翻页，状态和时间条件无法精确查询</td><td>接口仅返回整表列表，前端固定展示</td><td>增加分页 DTO、状态/双时间段过滤、稳定默认倒序并复用公共分页组件</td><td><span class="status fixed">已修复</span></td></tr>
+              <tr><td>D-17 历史授权错误锁定增值包</td><td>生效权益列表为空，但配置仍显示 1 且禁止修改/删除</td><td>计数 SQL 包含已撤销/失效的历史授权</td><td>计数和服务端保护统一增加 <code>grant_status = ACTIVE</code>；历史失效后恢复操作</td><td><span class="status fixed">已修复</span></td></tr>
+              <tr><td>D-18 增值包弹窗固定空白与滚动</td><td>空列表仍出现大块空白，宽屏也显示无意义横向滚动</td><td>固定最小高度、固定纵向高度和超出容器的列宽</td><td>移除固定高度，压缩列宽并设置视口最大高度；1024/1365 实测无非必要溢出</td><td><span class="status fixed">已修复</span></td></tr>
+              <tr><td>D-19 OpenGauss 增量迁移语法不兼容</td><td>取消/降级表可创建，但新增宽限配置列时迁移中断</td><td>目标 OpenGauss 不支持 PostgreSQL 风格 <code>ALTER TABLE ... ADD COLUMN IF NOT EXISTS</code></td><td>改为临时 PL/pgSQL 检查函数按元数据幂等加列；同步修订版本迁移和初始化 DDL，并在 204 数据库实跑成功</td><td><span class="status fixed">已修复</span></td></tr>
+              <tr><td>D-20 撤回/立即归档后父页面状态陈旧</td><td>弹窗状态已更新，但配额卡或 FileBrowser 仍短暂显示旧权益/旧文件树</td><td>父页面缺少变更类型回调，且并发配额请求可能由旧响应覆盖新状态</td><td>增加取消事件类型、配额查询防缓存时间戳与请求版本保护；ARCHIVED 时重挂 FileBrowser。撤回和二次归档真实回归均通过</td><td><span class="status fixed">已修复</span></td></tr>
+              <tr><td>D-21 新增/取消表单字段串值</td><td>两个表单复用字段名时，提交说明可能被错误合并或错误回显</td><td>同一弹窗内的 Ant Design Form 未设置独立 <code>name</code>，内部字段标识冲突</td><td>为新增与取消表单设置稳定独立名称，并补充真实提交与组件测试</td><td><span class="status fixed">已修复</span></td></tr>
+              <tr><td>D-22 待审核新增误冻结上传</td><td>用户申请扩容后反而无法继续使用当前剩余额度，网盘与会话均出现错误锁定</td><td>配额视图与原子预留只按 REQUESTED 判断，没有区分 ADD_PACKAGE 与 CANCEL_PACKAGE</td><td>开放请求锁定条件收敛为 <code>CANCEL_PACKAGE + REQUESTED</code>；新增申请保持可写，并新增后端测试与 LocalFile 真实上传回归</td><td><span class="status fixed">已修复</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>基线问题与上线前处理计划</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>发现</th><th>与本功能关系</th><th>建议计划</th><th>上线门槛</th></tr></thead>
+            <tbody>
+              <tr><td>后端 GatewayStreamEventProcessor 两项 laneId 断言失败</td><td>既有测试；不在存储配额调用链</td><td>由 Gateway 责任人修复或形成带依据的测试豁免，纳入 CI 基线</td><td><span class="status conditional">需闭环</span></td></tr>
+              <tr><td>可执行胖 JAR 本地启动存在类加载异常</td><td>开发期可用 exploded classpath 启动，功能逻辑正常</td><td>在目标制品流水线验证最终镜像/JAR；若复现，检查 Spring Boot 重打包和重复依赖</td><td><span class="status conditional">需验证</span></td></tr>
+              <tr><td>全量 Lint 有 2 个既有缩进错误、TSC 有存量错误</td><td>改动文件专项检查无新增错误</td><td>建立“本次增量零新增 + 存量按模块消减”基线，避免新功能背负全库历史问题</td><td><span class="status baseline">可豁免但需登记</span></td></tr>
+              <tr><td>开发环境 WebSocket 代理告警</td><td>核心 HTTP 上传/管理链路不受影响</td><td>在预发验证 WS 代理配置和断线重连，不以 dev server 结果替代</td><td><span class="status baseline">预发验证</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="release" class="paper">
+        <p class="section-kicker">08 · Release Assessment</p>
+        <h2 class="section-title">功能上线多维度评估</h2>
+        <p class="section-desc">上线判断同时考虑功能完整性、安全、一致性、兼容、可靠性、性能、可观测和运维准备，不因 UI 流程通过就直接给出无条件 GO。</p>
+
+        <div class="risk-matrix">
+          <div class="risk-item"><strong>功能完整性 <span class="status pass">通过</span></strong><p>二十六项需求、117 张操作证据和申请新增/叠加/多项取消/降级/回收完整生命周期全部闭环。</p></div>
+          <div class="risk-item"><strong>权限与数据隔离 <span class="status pass">通过</span></strong><p>管理员 RBAC、通知隔离、预览任务归属/根路径约束、普通用户 403。</p></div>
+          <div class="risk-item"><strong>账本一致性 <span class="status pass">通过</span></strong><p>原子预留/提交/释放/删除扣量，失败无脏数据，扫描用于校准。</p></div>
+          <div class="risk-item"><strong>NFS 兼容 <span class="status pass">通过</span></strong><p>LocalFile 真实写入、回收、恢复、删除均通过。</p></div>
+          <div class="risk-item"><strong>国际化 <span class="status pass">通过</span></strong><p>状态、错误提示及新增/取消申请、通过、驳回、撤回站内信均有中英文映射。</p></div>
+          <div class="risk-item"><strong>回归质量 <span class="status conditional">条件通过</span></strong><p>相关专项、前端全量及前后端生产构建通过；后端有 2 项无关基线失败、全库 Lint 有 2 处既有缩进错误待闭环。</p></div>
+          <div class="risk-item"><strong>制品可部署性 <span class="status conditional">待确认</span></strong><p>真实功能已运行；最终胖 JAR/镜像需在目标流水线复验。</p></div>
+          <div class="risk-item"><strong>容量与运营 <span class="status conditional">灰度</span></strong><p>建议先灰度观察预留冲突、扫描偏差和 NFS 时延。</p></div>
+        </div>
+
+        <h3>安全完整性判断</h3>
+        <ul class="checklist">
+          <li><strong>不可绕过：</strong>即使跳过前端按钮，后端仍以 507 拒绝超额写入。</li>
+          <li><strong>并发安全：</strong>容量检查和预留在数据库条件更新中原子完成。</li>
+          <li><strong>故障安全：</strong>写入失败释放未结算预留；批量不足时首文件前拒绝。</li>
+          <li><strong>权限安全：</strong>管理接口受 RBAC 保护；通知查询绑定当前用户；回收预览限定 AVAILABLE 任务和归档根路径。</li>
+          <li><strong>只读预览：</strong>管理端复用 FileBrowser 的浏览/渲染能力但不暴露上传、删除、改名；普通用户直调返回 403。</li>
+          <li><strong>数据可恢复：</strong>用户确认整盘清空后先进入临时回收站，不直接永久删除；各任务有独立到期时间。</li>
+          <li><strong>释放即生效：</strong>网盘文件/目录物理删除成功后原子扣减已用量，删除失败不改账。</li>
+          <li><strong>取消不丢数据：</strong>确认取消后先重算目标额度；超额进入清理宽限，只有用户主动或宽限到期才归档，且归档仍可恢复。</li>
+          <li><strong>精确撤权：</strong>同等级叠加和混合等级取消均按具体 grant ID 校验归属和 ACTIVE 状态，只撤销用户选中的权益。</li>
+          <li><strong>审计完整：</strong>申请新增、直接授权、申请取消、撤回、确认/驳回、直接取消、宽限、归档和恢复均进入统一持久化记录并带请求幂等键。</li>
+        </ul>
+
+        <h3>建议的灰度与回滚策略</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>阶段</th><th>范围</th><th>观察指标</th><th>退出/回滚条件</th></tr></thead>
+            <tbody>
+              <tr><td>预发演练</td><td>迁移副本 + NFS 挂载 + 最终制品</td><td>启动、DDL 耗时、扫描结果、上传/恢复</td><td>制品无法启动或账本与物理用量不一致</td></tr>
+              <tr><td>1% 小租户</td><td>内部/低风险租户</td><td>507 比例、预留超时、写入失败、扫描偏差</td><td>异常写入率上升、预留长期不归零</td></tr>
+              <tr><td>10%–30%</td><td>分批放量</td><td>NFS P95/P99、数据库锁等待、通知成功率</td><td>时延/锁等待超过容量基线或回收失败</td></tr>
+              <tr><td>全量</td><td>全部 SaaS 用户</td><td>告警→增值转化、容量增长、回收恢复 SLA</td><td>保留功能开关；停止新授权并保留读删能力</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="callout warn">
+          <strong>上线结论</strong>
+          功能安全边界和业务完整性达到灰度标准，但不建议绕过仓库回归基线和目标制品验证直接全量。三项准入条件全部完成后，可从“有条件 GO”转为“GO”。
+        </div>
+      </section>
+
+      <section id="roadmap" class="paper">
+        <p class="section-kicker">09 · SaaS Monetization Roadmap</p>
+        <h2 class="section-title">后续计划：把增值空间做成可持续付费能力</h2>
+        <p class="section-desc">本次已经建立“套餐 → 权益 → 配额 → 使用 → 取消/降级 → 通知”的最小业务闭环，当前不包含支付。下一步应把管理员人工授权逐步接入商品、订单、支付、订阅和计费；接入后仍以“取消增值包”为用户主流程，是否退款及退款金额属于其背后的交易子流程。</p>
+
+        <div class="roadmap">
+          <article class="phase" data-step="P0">
+            <h4>上线硬化</h4><span class="time">1–2 周</span>
+            <ul><li>解决/豁免回归基线</li><li>制品与迁移演练</li><li>配额/NFS/回收监控</li><li>灰度开关与值班手册</li></ul>
+          </article>
+          <article class="phase" data-step="P1">
+            <h4>商业骨架</h4><span class="time">2–4 周</span>
+            <ul><li>Product / SKU / Plan</li><li>Order / Payment / Refund</li><li>Cancellation Orchestration</li><li>支付回调幂等与权益对账</li></ul>
+          </article>
+          <article class="phase" data-step="P2">
+            <h4>自动计费</h4><span class="time">4–8 周</span>
+            <ul><li>升级降级与按比例计费</li><li>续费、欠费、催缴</li><li>发票与优惠券</li><li>用量台账与毛利分析</li></ul>
+          </article>
+          <article class="phase" data-step="P3">
+            <h4>多产品 SaaS</h4><span class="time">8–12 周+</span>
+            <ul><li>存储/席位/算力/Token SKU</li><li>企业套餐与渠道价</li><li>开放 API 和伙伴市场</li><li>实验分群与智能推荐</li></ul>
+          </article>
+        </div>
+
+        <h3>9.1 推荐的商业领域模型</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>领域</th><th>核心对象</th><th>与本次能力的连接</th></tr></thead>
+            <tbody>
+              <tr><td>商品中心</td><td>Product、SKU、Plan、Price</td><td>现有 <code>po_storage_package</code> 演进为存储 SKU 或由商品中心映射</td></tr>
+              <tr><td>交易中心</td><td>Order、Payment、Refund、Invoice</td><td>支付成功事件触发权益授予；取消增值包流程按退款政策请求交易中心退款，退款结果再驱动权益取消</td></tr>
+              <tr><td>订阅中心</td><td>Subscription、Renewal、Dunning</td><td>管理生效期、自动续费、欠费宽限与到期降级</td></tr>
+              <tr><td>权益中心</td><td>Entitlement、Grant、Policy</td><td>复用现有授权快照，成为网盘/会话/未来业务统一判断点</td></tr>
+              <tr><td>计量计费</td><td>UsageLedger、Meter、Rating</td><td>配额账本提供存储用量；未来支持阶梯价、超量计费和对账</td></tr>
+              <tr><td>增长运营</td><td>Promotion、Coupon、Experiment</td><td>额度告警/超额通知可直达购买页，形成转化漏斗</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>9.2 支付接入后的付费与取消链路建议</h3>
+        <div class="callout">
+          <strong>取消是主流程，退款是条件子流程</strong>
+          当前版本取消增值包不涉及资金。未来支付接入后，用户仍提交“取消增值包”；取消编排服务先计算配额影响，再根据订单、退款窗口和使用政策决定是否调用交易中心。退款成功（或无需退款）后发布幂等取消事件，权益中心撤销权益，配额服务重算额度。支付渠道永远不能直接修改配额表或文件状态。
+        </div>
+        <ol>
+          <li>用户收到 80%/100% 配额提醒，点击进入套餐比较页。</li>
+          <li>选择存储 SKU，创建订单并完成支付；服务端验证签名、金额和订单状态。</li>
+          <li>支付成功事件以订单号作为幂等键发放存储权益，配额即时恢复。</li>
+          <li>用户发起“取消增值包”，系统展示目标额度与预计超额；若权益关联已支付订单，再由交易中心判断可退金额并执行退款，管理员只处理取消确认/驳回，不手工录入“外部退款完成”。</li>
+          <li>退款成功或无需退款后，幂等取消事件撤销对应权益快照；若用量超过降级后额度，复用本次已交付的清理宽限与临时回收治理，不直接丢数据。</li>
+          <li>订阅到期前提醒续费；欠费同样通过权益状态和降级状态机处理，保留读取/删除与数据恢复边界。</li>
+        </ol>
+
+        <h3>9.3 商业化与运营指标</h3>
+        <div class="card-grid">
+          <article class="info-card"><h4>转化</h4><p>80% 告警点击率、告警到购买转化率、超额后 24/72 小时付费率。</p></article>
+          <article class="info-card"><h4>收入</h4><p>存储 ARPU、增值收入占比、续费率、升级率、优惠成本。</p></article>
+          <article class="info-card"><h4>成本</h4><p>每 GiB NFS 成本、冷热数据比例、租户毛利、回收释放容量。</p></article>
+          <article class="info-card"><h4>可靠性</h4><p>权益到账延迟、支付/权益对账差异、预留泄漏率、恢复 SLA。</p></article>
+        </div>
+
+        <h3>9.4 可扩展的 SaaS 增值能力</h3>
+        <p>权益中心不应只理解“存储字节”。建议把权益抽象为 <code>resourceType + limit + period + policy</code>，后续可复用到数字员工席位、模型 Token、并发任务、知识库容量、沙箱算力、API 调用次数和高级审计保留期，最终形成统一套餐与跨产品组合包。</p>
+      </section>
+
+      <section id="conclusion" class="paper">
+        <p class="section-kicker">10 · Final Decision</p>
+        <h2 class="section-title">结论与上线准入条件</h2>
+        <div class="final-verdict">
+          <div class="verdict-mark">有条件<br>GO</div>
+          <div>
+            <h3>功能范围完整，可进入受控灰度</h3>
+            <p>管理员运营、用户上传、增值包申请新增/叠加/多项取消、统一增值记录、超额降级、回收只读预览/恢复、站内信和 NFS 适配均已通过真实全链路验证；发现的二十二项功能缺陷已修复。</p>
+            <p>在以下条件完成前，不建议直接全量发布：</p>
+          </div>
+        </div>
+        <ul class="checklist pending">
+          <li><strong>回归准入：</strong>修复两项既有 Gateway 单测或由责任人完成书面豁免并固化 CI 基线。</li>
+          <li><strong>制品准入：</strong>使用生产同构 JAR/镜像在 204 或预发环境完成启动、登录、上传、回收与恢复冒烟。</li>
+          <li><strong>运维准入：</strong>完成 OpenGauss 迁移备份/回滚演练，配置 NFS 容量、预留异常、扫描偏差、回收失败监控。</li>
+        </ul>
+        <div class="callout ok">
+          <strong>完成准入后的推荐动作</strong>
+          先开放给内部及低风险租户，观察至少一个配额扫描周期和一个回收任务周期，再按 1% → 10% → 30% → 全量逐步放量。
+        </div>
+      </section>
+
+      <section class="paper">
+        <p class="section-kicker">Appendix</p>
+        <h2 class="section-title">交付物与实现索引</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>交付物</th><th>位置 / 说明</th></tr></thead>
+            <tbody>
+              <tr><td>解决方案与测试报告</td><td>当前 HTML 文件，包含固定左侧章节导航、完整生命周期图和 117 张截图</td></tr>
+              <tr><td>测试截图原件</td><td>既有 46 张证据位于报告 assets；取消/降级与新增审批证据位于 <code>output/playwright/saas-storage-quota-20260715/</code>；叠加、多项取消、分页、通知和基线恢复证据位于 <code>output/playwright/</code></td></tr>
+              <tr><td>架构说明</td><td><code>docs/architecture/saas-storage-quota.md</code></td></tr>
+              <tr><td>数据库迁移</td><td><code>deploy/migrations/versions/V0.2.1/</code> 与 <code>V0.2.2/</code>，并已合并初始化 DDL/DML</td></tr>
+              <tr><td>后端实现</td><td>storage entity/mapper/service/job/controller、回收只读预览、上传/删除计量、通知路由和异常处理</td></tr>
+              <tr><td>前端实现</td><td>StorageQuotaMgr、复用 FileBrowserPanel、storageQuota service/hook/util、网盘与会话上传 Guard、通知本地化</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <div class="footer">
+        ByClaw SaaS 存储配额解决方案与全链路测试报告 · 2026-07-15<br>
+        <a class="back-top" href="#top">返回顶部 ↑</a>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    (() => {
+      const links = Array.from(document.querySelectorAll('.toc a[href^="#"]'));
+      const sections = links
+        .map((link) => document.querySelector(link.getAttribute('href')))
+        .filter(Boolean);
+
+      const updateActive = () => {
+        const marker = window.scrollY + 130;
+        let current = sections[0];
+        sections.forEach((section) => {
+          if (section.offsetTop <= marker) current = section;
+        });
+        links.forEach((link) => {
+          link.classList.toggle('active', link.getAttribute('href') === `#${current.id}`);
+        });
+      };
+
+      window.addEventListener('scroll', updateActive, { passive: true });
+      updateActive();
+    })();
+  </script>
+</body>
+</html>
