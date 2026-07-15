@@ -7,6 +7,16 @@ description: "Manage knowledge base content through the by-knowledge-manager CLI
 
 Use this skill to manage knowledge base files and directories, and to search indexed chunks or files semantically.
 
+## Prerequisites
+
+Before running the CLI, install the script dependencies from this skill's `scripts/` directory:
+
+```bash
+cd middleware/openclaw/skills/by-knowledge-manager/scripts && npm install
+```
+
+Do this before the first run in a new environment, or any time the runtime reports missing Node dependencies.
+
 ## Command Entry Point
 
 Start by loading the live command list:
