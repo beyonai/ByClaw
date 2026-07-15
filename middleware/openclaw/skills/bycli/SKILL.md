@@ -12,7 +12,6 @@ metadata:
         - read
         - exec
         - process
-    primaryEnv: BE_SERVER_PORT
 ---
 
 # byCLI Skill
@@ -55,11 +54,9 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 - 写 adapter 后必须 `bycli browser verify` 通过 + 字段值与网页肉眼比对
 - **采集任务成功后必须按「Browser 驱动成功后 — 收尾两问」处理；问②的落盘、话术、二选一与执行规则以「采集后处理衔接」为唯一权威定义**
 - 钉钉相关采集任务必须读取 [dingtalk-dws-bridge.md](./references/dingtalk-dws-bridge.md)，并通过 dws skill 获取数据；仍按 bycli 的落盘与采集后处理收尾规则处理
+- 微信公众平台 `weixin accounts/articles/save-articles`、`--auth-source`、`WECHAT_TOKEN` / `WECHAT_COOKIE` / `WECHAT_FINGERPRINT` 或 `mp.weixin.qq.com` 认证失败任务，必须读取 [references/weixin/SKILL.md](./references/weixin/SKILL.md)
 - 浏览器 session 结束后执行 cleanup（close tab → stop daemon → stop browser）
 - Login/Auth 页面例外：不关闭 session，报告 session name + URL 给用户
-- 入库必须通过 `node scripts/bycli-markdown-ingest.mjs` 执行，不得旁路
-- 入库前必须先 `list-kb` 查询知识库并让用户选择目标
-- 对用户展示入库摘要并获得确认后再执行真实 `ingest`
 
 ## 意图决策树
 
@@ -67,6 +64,7 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 |---------|--------|---------|
 | "bycli 有什么命令" / 不知道怎么用 | 基础用法（见下方内联） | — |
 | 运行 bycli 命令 / 单次查数据 / 执行操作 | 基础用法 | — |
+| 微信公众平台账号搜索、历史文章、批量保存或认证失败 | weixin 认证与凭据 | [references/weixin/SKILL.md](./references/weixin/SKILL.md) |
 | 钉钉听记 / 钉钉文档 / 在线表格 / 云盘 / `shanji.dingtalk.com` / `alidocs.dingtalk.com` 采集 | dws 桥接采集 | [dingtalk-dws-bridge.md](./references/dingtalk-dws-bridge.md) |
 | 驱动浏览器完成一次性任务 / 填表 / 爬数据 | Browser 驱动 | [browser.md](./references/browser.md) |
 | bycli 命令报错 / adapter 坏了 / 网站改版 | AutoFix 修复 | [autofix.md](./references/autofix.md) |
@@ -201,7 +199,6 @@ bycli gh pr list --limit 5         # 透传调用
 | TIMEOUT / PAGE_CHANGED | 进入 AutoFix 流程 |
 | 3 轮修复仍失败 | 报告尝试过的方法，停止 |
 | 站点大改需要重写 | 转 Adapter 编写流程 |
-| 入库 HTTP 401/403 | 门户登录态不可用，停止入库，提示用户恢复会话 |
 
 ## 浏览器生命周期（OpenClaw 托管环境）
 
@@ -391,11 +388,10 @@ mkdir -p "$SESSION_DIR"
 |------|---------|
 | [references/browser.md](./references/browser.md) | 需要浏览器驱动命令参考时 |
 | [references/dingtalk-dws-bridge.md](./references/dingtalk-dws-bridge.md) | 钉钉域名或钉钉产品数据采集，需要通过 dws 并按 bycli 流程落盘时 |
+| [references/weixin/SKILL.md](./references/weixin/SKILL.md) | 运行 `weixin accounts/articles/save-articles`、选择 `--auth-source`、处理微信 token/Cookie/fingerprint 或 `AUTH_REQUIRED` 时 |
 | [references/knowledge-ingest.md](./references/knowledge-ingest.md) | 采集后用户选择"入库"，或已有 bycli 采集产物请求入库时 |
 | [references/autofix.md](./references/autofix.md) | adapter 修复完整流程 |
 | [references/adapter-author.md](./references/adapter-author.md) | 写新 adapter 完整流程 |
-| [references/markdown-ingestion.md](./references/markdown-ingestion.md) | Markdown 入库完整流程 |
-| [references/ingestion-api.md](./references/ingestion-api.md) | 入库接口字段速查 |
 | [references/adapter-template.md](./references/adapter-template.md) | adapter 文件结构模板 |
 | [references/api-discovery.md](./references/api-discovery.md) | API 发现方法论 |
 | [references/site-recon.md](./references/site-recon.md) | 站点侦察分类 |
