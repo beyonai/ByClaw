@@ -2876,6 +2876,17 @@ INSERT INTO byai.byai_system_config (param_id, param_type, param_code, param_nam
         "menuDisplayName": ["平台管理", "组织管理", "业务管理", "平台运维"],
         "menuOrder": 7,
         "path": "/manager/systemParams/sandbox"
+    },
+    {
+        "menuCode": "menu_storage_quota",
+        "menuNameEn": "Storage Quota",
+        "menuNameCn": "存储配额管理",
+        "menuUrl": "",
+        "menuDisplay": ["PLAT_MAN"],
+        "menuDisplayName": ["平台管理"],
+        "menuOrder": 8,
+        "path": "/manager/storageQuota",
+        "adminVipOnly": true
     }
 ]', '企业后台菜单管理');
 
@@ -4802,3 +4813,13 @@ INSERT INTO byai.byai_system_config (param_id, param_type, param_code, param_nam
 VALUES (nextval('byai.seq_any_table'), 'json', 'MODEL_QUOTA', '模型额度与tokenSaver配置', 'MODEL_QUOTA',
 '{"monthlyQuotaLimit":30000000,"tokenSaver":{"enabled":false,"apiUrl":"","modelCode":""}}',
 'monthlyQuotaLimit: 每用户每月公共模型Token上限; tokenSaver: 登录时自动分配模型配置');
+
+-- ========== V0.2.1 (merged at 2026-07-13 17:07:06) ==========
+SET search_path TO byai;
+
+INSERT INTO byai.po_storage_quota_setting
+    (setting_id, default_quota_bytes, warning_percent, recycle_retention_days)
+SELECT 1, 2147483648, 90, 7
+WHERE NOT EXISTS (
+    SELECT 1 FROM byai.po_storage_quota_setting WHERE setting_id = 1
+);
