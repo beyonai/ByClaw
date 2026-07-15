@@ -572,6 +572,91 @@ describe("BYAI diagnostics OTel correlation", () => {
     await service.stop?.(ctx as never);
   });
 
+  it("uses 128KB and 200 items as default OTEL content limits", async () => {
+    const service = createDiagnosticsOtelService({
+      forceContentCapture: {
+        inputMessages: true,
+      },
+    });
+    const { ctx, emitTrusted } = createContext();
+    await service.start(ctx as never);
+
+    const content = "x".repeat(20 * 1024);
+    emitTrusted(
+      {
+        type: "model.call.completed",
+        runId: "run-default-content-limits",
+        sessionId: "session-default-content-limits",
+        sessionKey: "agent:main:byai-channel:direct:session-default-content-limits",
+        provider: "openai",
+        model: "gpt-5.5",
+        api: "responses",
+        durationMs: 100,
+        ts: 2000,
+      } as never,
+      {
+        modelContent: {
+          inputMessages: [{ role: "user", content }],
+        },
+      },
+    );
+
+    const attrs = span("openclaw.model.call").setAttributes.mock.calls.at(-1)?.[0] as
+      | Record<string, string>
+      | undefined;
+    expect(attrs?.["input.value"]).toContain(content);
+    expect(attrs?.["input.value"]).not.toContain("truncated");
+
+    await service.stop?.(ctx as never);
+  });
+
+  it("applies configured OTEL content limits", async () => {
+    const service = createDiagnosticsOtelService({
+      forceContentCapture: {
+        inputMessages: true,
+      },
+    });
+    const { ctx, emitTrusted } = createContext();
+    (ctx.config.diagnostics.otel as Record<string, unknown>).contentLimits = {
+      maxAttributeChars: 1024,
+      maxArrayItems: 2,
+    };
+    await service.start(ctx as never);
+
+    emitTrusted(
+      {
+        type: "model.call.completed",
+        runId: "run-configured-content-limits",
+        sessionId: "session-configured-content-limits",
+        sessionKey: "agent:main:byai-channel:direct:session-configured-content-limits",
+        provider: "openai",
+        model: "gpt-5.5",
+        api: "responses",
+        durationMs: 100,
+        ts: 2000,
+      } as never,
+      {
+        modelContent: {
+          inputMessages: [
+            { role: "user", content: "first-" + "x".repeat(4000) },
+            { role: "user", content: "second" },
+            { role: "user", content: "third" },
+          ],
+        },
+      },
+    );
+
+    const attrs = span("openclaw.model.call").setAttributes.mock.calls.at(-1)?.[0] as
+      | Record<string, string>
+      | undefined;
+    expect(attrs?.["input.value"].length).toBeLessThanOrEqual(1024);
+    expect(attrs?.["input.value"]).toContain("...(truncated)");
+    expect(attrs?.["input.value"]).toContain("second");
+    expect(attrs?.["input.value"]).not.toContain("third");
+
+    await service.stop?.(ctx as never);
+  });
+
   it("publishes the active tool span id for plugin tools and clears it after completion", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "byai-otel-bridge-"));
     vi.stubEnv("BYAI_LANGFUSE_OBSERVATION_BRIDGE_FILE", path.join(dir, "bridge.json"));
