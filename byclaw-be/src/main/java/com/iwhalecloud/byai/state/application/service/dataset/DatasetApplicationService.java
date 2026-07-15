@@ -39,6 +39,7 @@ import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileSearc
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeSearchResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.ProcessStatus;
 import com.iwhalecloud.byai.common.util.JsonUtil;
+import com.iwhalecloud.byai.common.util.RedisUtil;
 import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceBizTypeEnum;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus;
@@ -48,6 +49,7 @@ import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtDocService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceArtifactService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
+import com.iwhalecloud.byai.manager.domain.resource.util.DigEmployeeRedisKeys;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetBuild;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetDto;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeReadFileRequest;
@@ -361,6 +363,10 @@ public class DatasetApplicationService {
             resourceArtifactStorageService.syncResourceJsonByBizType(targetContent, resourceBizType, resourceId);
             ssResourceArtifactService.upsertStandardJsonArtifact(resourceId, resourceBizType, scene);
             logImportedDatasetArtifactLocation(resourceBizType, resourceId);
+
+            // 同步Redis
+            String redisKey = DigEmployeeRedisKeys.resourceConfigJsonKey(resourceBizType, resourceId);
+            RedisUtil.setString(redisKey, targetContent);
         }
         catch (Exception e) {
             logger.error("页面知识库JSON同步失败但不影响主流程, scene={}, resourceBizType={}, resourceId={}", scene, resourceBizType,
@@ -1289,7 +1295,8 @@ public class DatasetApplicationService {
         kbKnowledgeSearch.setFileTypeList(request.getFileTypeList());
         kbKnowledgeSearch.setSearchMode(request.getSearchMode());
 
-        PythonBuildResponse<KnowledgeSearchResult> ret = feignPythonBuildService.searchKnowledgeItems(kbKnowledgeSearch);
+        PythonBuildResponse<KnowledgeSearchResult> ret = feignPythonBuildService
+            .searchKnowledgeItems(kbKnowledgeSearch);
         assertPythonBuildSuccess(ret, "检索知识库内容");
 
         KnowledgeSearchResult result = ret.getResultObject();
@@ -1311,8 +1318,7 @@ public class DatasetApplicationService {
     }
 
     /**
-     * 执行知识库 Agent DSL 文件级语义检索。门户使用 resourceIdList，内部转换为 QA knCodeList，
-     * 避免客户端绕过知识库访问权限直接传入 QA 知识库编码。
+     * 执行知识库 Agent DSL 文件级语义检索。门户使用 resourceIdList，内部转换为 QA knCodeList， 避免客户端绕过知识库访问权限直接传入 QA 知识库编码。
      */
     public KnowledgeFileSearchResult searchKnowledgeFiles(KnowledgeFileSearchRequest request) {
         if (request == null || request.getResourceIdList() == null || request.getResourceIdList().isEmpty()) {
