@@ -26,13 +26,22 @@ export const DEFAULT_MENU_CONFIG = [
     paramSeq: 2,
   },
   {
+    paramId: 10001674,
+    paramGroupCode: 'MENU_ICON_SHOW_TAB',
+    paramName: '项目空间',
+    paramEnName: 'Project Space',
+    paramValue: 'true',
+    paramDesc: '项目空间',
+    paramSeq: 3,
+  },
+  {
     paramId: 10001667,
     paramGroupCode: 'MENU_ICON_SHOW_TAB',
     paramName: '知识',
     paramEnName: 'Knowledge',
     paramValue: 'true',
     paramDesc: '知识',
-    paramSeq: 3,
+    paramSeq: 4,
   },
   {
     paramId: 10001668,
@@ -41,7 +50,7 @@ export const DEFAULT_MENU_CONFIG = [
     paramEnName: 'Tool',
     paramValue: 'true',
     paramDesc: '工具',
-    paramSeq: 4,
+    paramSeq: 5,
   },
   {
     paramId: 10001669,
@@ -50,7 +59,7 @@ export const DEFAULT_MENU_CONFIG = [
     paramEnName: 'View',
     paramValue: 'false',
     paramDesc: '视图',
-    paramSeq: 5,
+    paramSeq: 6,
   },
   {
     paramId: 10001670,
@@ -59,7 +68,7 @@ export const DEFAULT_MENU_CONFIG = [
     paramEnName: 'Object',
     paramValue: 'false',
     paramDesc: '对象',
-    paramSeq: 6,
+    paramSeq: 7,
   },
   {
     paramId: 10001673,
@@ -68,7 +77,7 @@ export const DEFAULT_MENU_CONFIG = [
     paramEnName: 'Ontology',
     paramValue: 'true',
     paramDesc: '本体',
-    paramSeq: 6,
+    paramSeq: 8,
   },
   {
     paramId: 10001671,
@@ -77,7 +86,7 @@ export const DEFAULT_MENU_CONFIG = [
     paramEnName: 'Skill',
     paramValue: 'true',
     paramDesc: '技能',
-    paramSeq: 7,
+    paramSeq: 9,
   },
   {
     paramId: 10001672,
@@ -86,7 +95,7 @@ export const DEFAULT_MENU_CONFIG = [
     paramEnName: 'File',
     paramValue: 'true',
     paramDesc: '文件',
-    paramSeq: 8,
+    paramSeq: 10,
   },
   {
     paramId: 10001673,
@@ -95,12 +104,14 @@ export const DEFAULT_MENU_CONFIG = [
     paramEnName: 'Model',
     paramValue: 'true',
     paramDesc: '模型',
-    paramSeq: 9,
+    paramSeq: 11,
   },
 ];
 
 export const MENU_NAME_TO_KEY_MAP: Record<string, string> = {
   会话: 'sessions',
+  项目: 'projectSpace',
+  项目空间: 'projectSpace',
   员工: 'agent',
   知识: 'knowledge',
   工具: 'tool',

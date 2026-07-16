@@ -8,7 +8,7 @@ export const createProject = (data: {
   repos?: { repoFullName: string; repoUrl?: string; defaultBranch?: string }[];
 }) => POST<any>('/byaiService/devloop/project/create', data);
 
-export const listProjects = () => POST<any>('/byaiService/devloop/project/list', {});
+export const listProjects = (data?: { keyword?: string }) => POST<any>('/byaiService/devloop/project/list', data || {});
 
 export const getProject = (projectId: number) => POST<any>('/byaiService/devloop/project/get', { projectId });
 
@@ -16,6 +16,13 @@ export const updateProject = (data: { projectId: number; projectName?: string; d
   POST<any>('/byaiService/devloop/project/update', data);
 
 export const deleteProject = (projectId: number) => POST<any>('/byaiService/devloop/project/delete', { projectId });
+
+// 项目空间按会话分组展示，创建会话后需要显式建立项目-会话关系。
+export const bindProjectSession = (data: { projectId: number; sessionId: number }) =>
+  POST<any>('/byaiService/devloop/project/session/bind', data);
+
+export const unbindProjectSession = (data: { projectId: number; sessionId: number }) =>
+  POST<any>('/byaiService/devloop/project/session/unbind', data);
 
 // 扫描源管理
 export const createScanSource = (data: {

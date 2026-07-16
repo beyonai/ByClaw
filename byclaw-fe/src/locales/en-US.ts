@@ -7,6 +7,7 @@ export default {
   ...personalModel,
   // Common Actions
   'common.add': 'Add',
+  'menu.projectSpace': 'Project Space',
   'common.create': 'Create',
   'common.edit': 'Edit',
   'common.view': 'View',
@@ -903,6 +904,7 @@ export default {
   'sider.findAgent': 'Agent',
   'sider.newChat': 'New Chat',
   'sider.session': 'Session',
+  'sider.projectSpace': 'Project',
   'sider.knowledge': 'Knowledge',
   'sider.ontology': 'Ontology',
   'sider.ontologyCenter': 'Ontology center',

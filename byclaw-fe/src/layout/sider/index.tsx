@@ -125,6 +125,14 @@ const Sidebar = () => {
         return;
       }
 
+      if (tab.key === 'projectSpace') {
+        if (!isChatPage && pathname !== tab.navigatePath) {
+          // 项目空间复用右侧聊天页，路由切换后仍保持左侧项目空间列表激活。
+          navigate(tab.navigatePath, { state: { keepSiderActiveKey: 'projectSpace' } });
+        }
+        return;
+      }
+
       // 会话面板打开时，点击资源类菜单只切换左侧栏，不打断右侧当前会话。
       if (isChatPage) {
         return;

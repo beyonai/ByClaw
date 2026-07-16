@@ -1,7 +1,7 @@
 import React, { useMemo, lazy } from 'react';
 
 // @ts-ignore
-import { useIntl, useSelector } from '@umijs/max';
+import { useIntl, useLocation, useSelector } from '@umijs/max';
 
 import ChatLayoutComp from '@/components/ChatLayoutComp';
 import TitleWriter from '@/components/TitleWriter';
@@ -14,6 +14,7 @@ const BottomContent = lazy(() => import('@/pages/chat/components/BottomContent')
 
 const Chat = () => {
   const intl = useIntl();
+  const location = useLocation();
 
   const globalContext = useGlobal();
   const { sessionId } = globalContext;
@@ -61,6 +62,23 @@ const Chat = () => {
     };
   }, []);
 
+  const projectChatExtraParams = React.useMemo(() => {
+    const locationState = (location.state || {}) as {
+      from?: string;
+      projectId?: string | number;
+      projectName?: string;
+    };
+    if (locationState.from !== 'projectSpace' || !locationState.projectId) {
+      return {};
+    }
+
+    return {
+      // 项目空间复用普通聊天页，发送时用 projectId 让后端消息和项目会话关系能对齐。
+      projectId: Number(locationState.projectId),
+      projectName: locationState.projectName,
+    };
+  }, [location.state]);
+
   return (
     <ChatPageLayout
       id="chat_wrapper"
@@ -86,6 +104,7 @@ const Chat = () => {
           isBottom={isBottom}
           setIsBottom={setIsBottom}
           queryInputProps={queryInputProps}
+          sendExtraParams={projectChatExtraParams}
         />
       }
     />
