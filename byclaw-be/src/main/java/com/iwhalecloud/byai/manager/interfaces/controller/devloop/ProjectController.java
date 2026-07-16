@@ -3,8 +3,10 @@ package com.iwhalecloud.byai.manager.interfaces.controller.devloop;
 import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.manager.application.service.devloop.DevloopApplicationService;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.ProjectListDto;
 import com.iwhalecloud.byai.manager.dto.session.ByaiSessionDto;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
+import com.iwhalecloud.byai.manager.qo.devloop.ProjectQo;
 import com.iwhalecloud.byai.manager.qo.devloop.ProjectSessionQo;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
@@ -36,13 +38,13 @@ public class ProjectController {
     /**
      * 查询项目列表
      *
-     * @return 当前用户可见的所有项目
+     * @param projectQo 查询条件（keyword / projectType / isShare，可分页）
+     * @return 项目列表
      */
     @PostMapping("/list")
-    public ResponseUtil<List<Map<String, Object>>> listProjects(
-        @RequestBody(required = false) Map<String, Object> params) {
-        String keyword = params == null || params.get("keyword") == null ? null : params.get("keyword").toString();
-        return applicationService.listProjects(keyword);
+    public ResponseUtil<List<ProjectListDto>> listProjects(@RequestBody ProjectQo projectQo) {
+        List<ProjectListDto> projectListDtos = applicationService.listProjects(projectQo);
+         return ResponseUtil.successResponse(projectListDtos);
     }
 
     /**
