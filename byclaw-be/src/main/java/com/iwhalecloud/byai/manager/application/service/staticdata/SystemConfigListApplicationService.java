@@ -160,6 +160,9 @@ public class SystemConfigListApplicationService {
      */
     public void loadAllSystemConfigListCache() {
 
+        // 删除缓存的Key
+        RedisUtil.removeKey(RedisConfig.SYSTEM_CONFIG_GROUP_CODE_KEY);
+
         List<ByaiSystemConfigList> allByaiSystemConfigList = byaiSystemConfigListService.findAll();
 
         // 按照 paramGroupCode 编码分组放到 Map 集合中
