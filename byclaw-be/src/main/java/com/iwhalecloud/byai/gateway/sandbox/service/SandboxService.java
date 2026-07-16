@@ -1989,6 +1989,19 @@ public class SandboxService {
         return sandboxType + "_" + userCode;
     }
 
+    private String buildSandboxWorkerId(String userCode, String sandboxType) {
+        if (StringUtils.isBlank(userCode) || StringUtils.isBlank(sandboxType)) {
+            return null;
+        }
+        if (SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE.equals(sandboxType)) {
+            return "openclaw-" + userCode;
+        }
+        if (SandboxLaunchRouting.BYCLAW_CODE_AGENT_SANDBOX_TYPE.equals(sandboxType)) {
+            return "byclaw-code-agent-" + userCode;
+        }
+        return sandboxType + "-" + userCode;
+    }
+
     private void cleanupSandboxRegistryKeys(String serviceName) {
         try (Jedis jedis = redisClient.getResource()) {
             String instancesKey = Constants.RegistryKeys.sdInstanceDetails(serviceName);

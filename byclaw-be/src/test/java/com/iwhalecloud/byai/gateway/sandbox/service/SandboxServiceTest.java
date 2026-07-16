@@ -580,4 +580,74 @@ class SandboxServiceTest {
         verify(sandboxService).launchSandbox("user001", SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
     }
 
+    @Test
+    void buildSandboxWorkerId_returnsOpenclawPrefixedWorkerIdForDefaultSandboxType() {
+        SandboxService sandboxService = new SandboxService();
+
+        String result = ReflectionTestUtils.invokeMethod(sandboxService, "buildSandboxWorkerId",
+            "user001", "openclaw");
+
+        assertThat(result).isEqualTo("openclaw-user001");
+    }
+
+    @Test
+    void buildSandboxWorkerId_returnsByclawCodeAgentPrefixedWorkerIdForCodeAgentType() {
+        SandboxService sandboxService = new SandboxService();
+
+        String result = ReflectionTestUtils.invokeMethod(sandboxService, "buildSandboxWorkerId",
+            "user002", "byclaw-code-agent");
+
+        assertThat(result).isEqualTo("byclaw-code-agent-user002");
+    }
+
+    @Test
+    void buildSandboxWorkerId_returnsSandboxTypeDashUserCodeForOtherTypes() {
+        SandboxService sandboxService = new SandboxService();
+
+        String result = ReflectionTestUtils.invokeMethod(sandboxService, "buildSandboxWorkerId",
+            "user003", "custom-sandbox");
+
+        assertThat(result).isEqualTo("custom-sandbox-user003");
+    }
+
+    @Test
+    void buildSandboxWorkerId_returnsNullWhenUserCodeIsNull() {
+        SandboxService sandboxService = new SandboxService();
+
+        String result = ReflectionTestUtils.invokeMethod(sandboxService, "buildSandboxWorkerId",
+            null, "openclaw");
+
+        assertThat(result).isNull();
+    }
+
+    @Test
+    void buildSandboxWorkerId_returnsNullWhenUserCodeIsBlank() {
+        SandboxService sandboxService = new SandboxService();
+
+        String result = ReflectionTestUtils.invokeMethod(sandboxService, "buildSandboxWorkerId",
+            "  ", "openclaw");
+
+        assertThat(result).isNull();
+    }
+
+    @Test
+    void buildSandboxWorkerId_returnsNullWhenSandboxTypeIsNull() {
+        SandboxService sandboxService = new SandboxService();
+
+        String result = ReflectionTestUtils.invokeMethod(sandboxService, "buildSandboxWorkerId",
+            "user001", null);
+
+        assertThat(result).isNull();
+    }
+
+    @Test
+    void buildSandboxWorkerId_returnsNullWhenSandboxTypeIsBlank() {
+        SandboxService sandboxService = new SandboxService();
+
+        String result = ReflectionTestUtils.invokeMethod(sandboxService, "buildSandboxWorkerId",
+            "user001", "");
+
+        assertThat(result).isNull();
+    }
+
 }
