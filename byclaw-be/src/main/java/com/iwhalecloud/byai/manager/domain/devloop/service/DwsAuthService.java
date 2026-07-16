@@ -187,7 +187,7 @@ public class DwsAuthService {
     }
 
     /**
-     * 获取 dws auth 状态
+     * 获取 dws auth 状态（包含完整认证信息）
      */
     public Map<String, Object> getAuthStatus() {
         try {
@@ -207,17 +207,20 @@ public class DwsAuthService {
             process.waitFor(10, TimeUnit.SECONDS);
             JsonNode node = MAPPER.readTree(output.toString());
 
-            boolean authenticated = node.path("authenticated").asBoolean(false);
-            String expiresAt = node.path("expires_at").asText("");
-
             Map<String, Object> result = new HashMap<>();
-            result.put("authenticated", authenticated);
+            result.put("authenticated", node.path("authenticated").asBoolean(false));
             result.put("tokenValid", node.path("token_valid").asBoolean(false));
-            result.put("expiresAt", expiresAt);
+            result.put("refreshTokenValid", node.path("refresh_token_valid").asBoolean(false));
+            result.put("expiresAt", node.path("expires_at").asText(""));
+            result.put("refreshExpiresAt", node.path("refresh_expires_at").asText(""));
+            result.put("corpId", node.path("corp_id").asText(""));
+            result.put("corpName", node.path("corp_name").asText(""));
+            result.put("userId", node.path("user_id").asText(""));
+            result.put("userName", node.path("user_name").asText(""));
             return result;
         } catch (Exception e) {
             log.error("[DwsAuth] getAuthStatus failed", e);
-            return Map.of("authenticated", false, "tokenValid", false, "expiresAt", "");
+            return Map.of("authenticated", false, "tokenValid", false);
         }
     }
 

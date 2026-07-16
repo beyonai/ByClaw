@@ -32,13 +32,9 @@ import {
   deleteScanSource,
   createTask,
   listTasks,
-  updateTask,
   checkDwsAuthStatus,
   startDwsDeviceAuth,
 } from '@/service/devloop';
-import { getToken, getssoToken, tokenKey, ssotokenKey } from '@/utils/auth';
-import { fetchEventSource } from '@fortaine/fetch-event-source';
-import { generateSignature } from '@/utils/signature';
 import styles from './index.module.less';
 import TaskList from './TaskList';
 import MemberList from './MemberList';
@@ -103,6 +99,7 @@ const NeedCollect: React.FC = () => {
   const [requirements, setRequirements] = useState<RequirementItem[]>([]);
   const [lastLog, setLastLog] = useState<ScanLogEntry | null>(null);
   const [scanningId, setScanningId] = useState<number | null>(null);
+  const [startingTaskItemId, setStartingTaskItemId] = useState<number | null>(null);
   const [activeTab, setActiveTab] = useState('requirements');
   const [tasks, setTasks] = useState<any[]>([]);
 
@@ -132,9 +129,13 @@ const NeedCollect: React.FC = () => {
 
   // DWS 授权
   const [dwsAuthed, setDwsAuthed] = useState(false);
+  const [dwsExpired, setDwsExpired] = useState(false);
+  const [dwsExpiresAt, setDwsExpiresAt] = useState('');
   const [dwsAuthLoading, setDwsAuthLoading] = useState(false);
   const [dwsDeviceInfo, setDwsDeviceInfo] = useState<{ userCode: string; verificationUrl: string } | null>(null);
   const [dwsAuthPolling, setDwsAuthPolling] = useState(false);
+  const [dwsAuthDetailVisible, setDwsAuthDetailVisible] = useState(false);
+  const [dwsAuthDetail, setDwsAuthDetail] = useState<any>(null);
 
   const [showLogModal, setShowLogModal] = useState(false);
   const [logModalSource, setLogModalSource] = useState<ScanSourceItem | null>(null);
@@ -223,7 +224,15 @@ const NeedCollect: React.FC = () => {
   useEffect(() => {
     checkDwsAuthStatus()
       .then((res: any) => {
-        if (res?.hasToken) setDwsAuthed(true);
+        setDwsAuthDetail(res);
+        if (res?.tokenValid) {
+          setDwsAuthed(true);
+          setDwsExpired(false);
+          if (res.expiresAt) setDwsExpiresAt(res.expiresAt);
+        } else if (res?.hasToken) {
+          setDwsAuthed(false);
+          setDwsExpired(true);
+        }
       })
       .catch(() => {});
   }, []);
@@ -436,54 +445,21 @@ const NeedCollect: React.FC = () => {
   };
 
   const handleStartTask = async (req: RequirementItem) => {
-    if (!currentProject) return;
+    if (!currentProject || startingTaskItemId) return;
+    setStartingTaskItemId(req.itemId);
     try {
       const res = await createTask({ projectId: currentProject.projectId, sourceItemId: req.itemId, title: req.title });
       if (!res) {
         message.error('创建任务失败');
         return;
       }
-      const { taskId, agentId, title: taskTitle } = res;
-      message.success('任务已创建，正在发起会话...');
+      message.success('任务已创建');
       fetchTasks();
       setActiveTab('tasks');
-
-      // 发起 SSE 聊天创建会话
-      const chatBody = {
-        agentId,
-        agentType: '001',
-        chatContent: `请处理以下研发任务：${taskTitle || req.title}`,
-        sessionId: null,
-        accessTerminal: 'Web',
-      };
-      const signatureHeaders = generateSignature('POST', chatBody);
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-        [tokenKey]: getToken() || '',
-        [ssotokenKey]: getssoToken() || '',
-        ...signatureHeaders,
-      };
-
-      fetchEventSource('/byaiService/chat/superAgentChat', {
-        method: 'POST',
-        body: JSON.stringify(chatBody),
-        headers,
-        openWhenHidden: true,
-        onmessage: (ev) => {
-          if (ev.event === 'createSession' && ev.data) {
-            try {
-              const sessionData = JSON.parse(ev.data);
-              const sessionId = sessionData.sessionId;
-              if (sessionId && taskId) {
-                updateTask({ taskId, sessionId });
-              }
-            } catch {}
-          }
-        },
-        onerror: () => {},
-      });
     } catch {
       message.error('创建任务失败');
+    } finally {
+      setStartingTaskItemId(null);
     }
   };
 
@@ -520,6 +496,9 @@ const NeedCollect: React.FC = () => {
           clearInterval(timer);
           message.success('钉钉授权成功');
           setDwsAuthed(true);
+          setDwsExpired(false);
+          setDwsAuthDetail(res);
+          if (res.expiresAt) setDwsExpiresAt(res.expiresAt);
           setDwsDeviceInfo(null);
           setDwsAuthPolling(false);
         }
@@ -925,6 +904,27 @@ const NeedCollect: React.FC = () => {
                       />
                     </div>
                     <div className={styles.cardConfig}>{formatConfig(source.sourceType, source.config)}</div>
+                    {source.sourceType === 'dingtalk' && (
+                      <div style={{ marginBottom: 4 }}>
+                        {dwsAuthed ? (
+                          <Tag
+                            color="green"
+                            style={{ cursor: 'pointer' }}
+                            onClick={() => setDwsAuthDetailVisible(true)}
+                          >
+                            DWS 已授权{dwsExpiresAt ? ` · 有效至 ${dayjs(dwsExpiresAt).format('MM-DD HH:mm')}` : ''}
+                          </Tag>
+                        ) : dwsExpired ? (
+                          <Tag color="red" style={{ cursor: 'pointer' }} onClick={handleStartDwsAuth}>
+                            DWS 授权已过期，点击重新授权
+                          </Tag>
+                        ) : (
+                          <Tag color="orange" style={{ cursor: 'pointer' }} onClick={handleStartDwsAuth}>
+                            DWS 未授权，点击授权
+                          </Tag>
+                        )}
+                      </div>
+                    )}
                     <div className={styles.cardMeta}>
                       <Tag icon={<ClockCircleOutlined />} bordered={false}>
                         {source.cronExpr || '手动'}
@@ -1010,7 +1010,13 @@ const NeedCollect: React.FC = () => {
                         已启动
                       </Button>
                     ) : (
-                      <Button type="primary" size="small" onClick={() => handleStartTask(req)}>
+                      <Button
+                        type="primary"
+                        size="small"
+                        loading={startingTaskItemId === req.itemId}
+                        disabled={startingTaskItemId !== null}
+                        onClick={() => handleStartTask(req)}
+                      >
                         启动任务
                       </Button>
                     )}
@@ -1066,6 +1072,66 @@ const NeedCollect: React.FC = () => {
           )}
         </Spin>
       </Drawer>
+
+      {/* DWS 授权详情弹窗 */}
+      <Modal
+        title="DWS 钉钉授权信息"
+        open={dwsAuthDetailVisible}
+        onCancel={() => setDwsAuthDetailVisible(false)}
+        footer={[
+          <Button
+            key="reauth"
+            type="primary"
+            danger
+            onClick={() => {
+              setDwsAuthDetailVisible(false);
+              handleStartDwsAuth();
+            }}
+          >
+            重新授权
+          </Button>,
+          <Button key="close" onClick={() => setDwsAuthDetailVisible(false)}>
+            关闭
+          </Button>,
+        ]}
+      >
+        {dwsAuthDetail ? (
+          <div style={{ lineHeight: '2.2' }}>
+            <p>
+              <strong>认证状态：</strong>
+              {dwsAuthDetail.tokenValid ? <Tag color="green">有效</Tag> : <Tag color="red">无效</Tag>}
+            </p>
+            <p>
+              <strong>组织名称：</strong>
+              {dwsAuthDetail.corpName || '-'}
+            </p>
+            <p>
+              <strong>用户名称：</strong>
+              {dwsAuthDetail.userName || '-'}
+            </p>
+            <p>
+              <strong>组织ID：</strong>
+              {dwsAuthDetail.corpId || '-'}
+            </p>
+            <p>
+              <strong>Access Token 有效至：</strong>
+              {dwsAuthDetail.expiresAt ? dayjs(dwsAuthDetail.expiresAt).format('YYYY-MM-DD HH:mm:ss') : '-'}
+            </p>
+            <p>
+              <strong>Refresh Token 状态：</strong>
+              {dwsAuthDetail.refreshTokenValid ? <Tag color="green">有效</Tag> : <Tag color="red">已过期</Tag>}
+            </p>
+            <p>
+              <strong>Refresh Token 有效至：</strong>
+              {dwsAuthDetail.refreshExpiresAt
+                ? dayjs(dwsAuthDetail.refreshExpiresAt).format('YYYY-MM-DD HH:mm:ss')
+                : '-'}
+            </p>
+          </div>
+        ) : (
+          <Empty description="暂无授权信息" />
+        )}
+      </Modal>
     </div>
   );
 };

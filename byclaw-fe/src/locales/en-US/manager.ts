@@ -349,6 +349,7 @@ export default {
   'modelMgr.confirmDelete': 'Confirm to delete this model?',
   'modelMgr.confirmSetDefault':
     'Set this model as the default model for its type? Other default models of the same type will become non-default.',
+  'modelMgr.default': 'Default',
   'modelMgr.setDefault': 'Set as default',
   'modelMgr.defaultModel': 'Default',
   'modelMgr.operationSuccess': 'Operation succeeded',

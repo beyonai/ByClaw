@@ -94,6 +94,20 @@ final class SandboxRuntimeRequestFactory {
         return Map.of("sandboxId", sandboxId);
     }
 
+    /**
+     * Build the WhaleAgent {@code /sandboxExternal/getSandboxEndpoint} payload used to
+     * re-hydrate a proxy endpoint URL for a specific port of an existing sandbox.
+     */
+    static Map<String, Object> buildWhaleAgentGetEndpointRequest(String sandboxId, String sandboxType, int port) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("sandboxId", sandboxId);
+        if (StringUtils.isNotBlank(sandboxType)) {
+            payload.put("sandboxType", sandboxType);
+        }
+        payload.put("port", port);
+        return payload;
+    }
+
     static WhaleAgentListSandboxesRequest buildWhaleAgentListSandboxesRequest(String userCode, String sandboxType) {
         Map<String, String> metadata = new LinkedHashMap<>();
         metadata.put("userCode", userCode);

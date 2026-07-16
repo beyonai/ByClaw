@@ -62,7 +62,8 @@ describe('utils/agent', () => {
     expect(isSandboxAgent({ createType: 'FROM_SANDBOX' } as any)).toBe(true);
     expect(canJumpAgent({ grantType: '1' } as any)).toBe(true);
     expect(canJumpAgent({ agentHomeUrl: 'https://home' } as any)).toBe(false);
-    expect(canJumpAgent({} as any)).toBe(true);
+    expect(canJumpAgent({ grantType: '1', agentHomeUrl: 'https://home' } as any)).toBe(true);
+    expect(canJumpAgent({} as any)).toBe(false);
   });
 
   it('builds writer editor url with expected query params', () => {

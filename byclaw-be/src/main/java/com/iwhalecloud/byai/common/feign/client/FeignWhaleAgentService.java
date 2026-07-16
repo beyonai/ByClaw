@@ -47,6 +47,17 @@ public interface FeignWhaleAgentService {
         produces = MediaType.APPLICATION_JSON_VALUE, consumes = MediaType.APPLICATION_JSON_VALUE)
     KnowledgeResponse<WhaleAgentSandboxPageResult> listSandboxes(@RequestBody WhaleAgentListSandboxesRequest request);
 
+    /**
+     * Query the current proxy endpoint URL of a running sandbox for a given port.
+     * <p>Response {@code resultObject} is the fully-qualified endpoint URL (String).
+     * Used by the WhaleAgent runtime provider to re-hydrate endpoints for sandboxes
+     * hit through {@code findReusable}, whose {@code listSandboxes} / {@code getSandboxInfo}
+     * responses do not carry the endpoint.</p>
+     */
+    @RequestMapping(value = "/sandboxExternal/getSandboxEndpoint", method = RequestMethod.POST,
+        produces = MediaType.APPLICATION_JSON_VALUE, consumes = MediaType.APPLICATION_JSON_VALUE)
+    KnowledgeResponse<String> getSandboxEndpoint(@RequestBody Map<String, Object> request);
+
     @RequestMapping(value = "/sandboxExternal/uploadFile", method = RequestMethod.POST,
         consumes = MediaType.MULTIPART_FORM_DATA_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
     KnowledgeResponse<Void> uploadFile(@RequestPart("filePath") String filePath,

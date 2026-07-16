@@ -3,17 +3,18 @@ package com.iwhalecloud.byai.manager.application.service.devloop;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
+import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.common.util.PageHelperUtil;
 import com.iwhalecloud.byai.manager.application.service.job.DevloopPatService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.DingtalkScanService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.DwsAuthService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.GitHubIssueScanService;
+import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectSessionService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ScanLogService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ScanSourceService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.DevloopTaskService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectMemberService;
-import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectSessionService;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectRepoDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ScanSourceDTO;
@@ -29,14 +30,15 @@ import com.iwhalecloud.byai.manager.mapper.resource.SsResourceMapper;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.mapper.session.ByaiSessionMapper;
 import com.iwhalecloud.byai.manager.qo.devloop.ProjectSessionQo;
-import com.iwhalecloud.byai.common.feign.response.sandbox.SandboxLaunchData;
-import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
+import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
+import com.iwhalecloud.byai.state.domain.chat.service.AssistantChatService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.io.ByteArrayOutputStream;
 import java.util.*;
 
 /**
@@ -90,16 +92,16 @@ public class DevloopApplicationService {
     private DevloopTaskService taskService;
 
     @Autowired
-    private ProjectMemberService projectMemberService;
-
-    @Autowired
     private ProjectSessionService projectSessionService;
 
     @Autowired
-    private SandboxService sandboxService;
+    private ProjectMemberService projectMemberService;
 
     @Autowired
     private SequenceService sequenceService;
+
+    @Autowired
+    private AssistantChatService assistantChatService;
 
     /** 创建项目，可同时关联代码仓库 */
     @Transactional(rollbackFor = Exception.class)
@@ -627,6 +629,34 @@ public class DevloopApplicationService {
         task.setProjectId(projectId);
         task.setSourceItemId(sourceItemId);
         task.setTitle(title);
+
+        // 构造聊天内容：优先用需求原文，fallback 用标题
+        String chatContent = title;
+        if (sourceItemId != null) {
+            ScanLogItem sourceItem = scanLogItemMapper.selectById(sourceItemId);
+            if (sourceItem != null && sourceItem.getContent() != null && !sourceItem.getContent().isEmpty()) {
+                chatContent = sourceItem.getContent();
+            }
+        }
+
+        // 同步调用 assistantChatService，sessionId=null 让 chat 服务内部创建 session
+        // chat 完成后 chatDto.getSessionId() 即为新创建的 sessionId
+        LoginInfo loginInfo = CurrentUserHolder.getLoginInfo();
+        AssistantChatDto chatDto = new AssistantChatDto();
+        chatDto.setSessionId(null);
+        chatDto.setAgentId(agentId);
+        chatDto.setChatContent(chatContent);
+        chatDto.setAccessTerminal("DevLoop");
+        try {
+            assistantChatService.chat(chatDto, new ByteArrayOutputStream(), loginInfo);
+        }
+        catch (Exception e) {
+            log.error("[DevloopTask] LLM chat failed", e);
+            return ResponseUtil.failRes("任务创建失败：LLM对话异常 - " + e.getMessage());
+        }
+
+        Long sessionId = chatDto.getSessionId();
+        task.setSessionId(sessionId);
         taskService.create(task);
 
         if (sourceItemId != null) {
@@ -636,30 +666,11 @@ public class DevloopApplicationService {
             scanLogItemMapper.updateById(item);
         }
 
-        // 拉取沙箱
-        String userCode = member.getUserCode();
-        String sandboxEndpoint = null;
-        String sandboxId = null;
-        if (userCode != null) {
-            try {
-                SandboxLaunchData launchData = sandboxService.launchSandboxWithServiceKey(userCode, null);
-                if (launchData != null) {
-                    sandboxEndpoint = launchData.getEndpoint();
-                    sandboxId = launchData.getSandboxId();
-                }
-            }
-            catch (Exception e) {
-                log.warn("拉取沙箱失败，任务仍创建: {}", e.getMessage());
-            }
-        }
-
         Map<String, Object> result = new HashMap<>();
         result.put("taskId", task.getTaskId());
         result.put("agentId", agentId);
-        result.put("userCode", userCode);
+        result.put("sessionId", sessionId);
         result.put("title", title);
-        result.put("sandboxEndpoint", sandboxEndpoint);
-        result.put("sandboxId", sandboxId);
         return ResponseUtil.successResponse(result);
     }
 
@@ -682,6 +693,7 @@ public class DevloopApplicationService {
             map.put("agentName", t.getAgentName());
             map.put("branchName", t.getBranchName());
             map.put("warningTag", t.getWarningTag());
+            map.put("sessionId", t.getSessionId());
             map.put("createTime", t.getCreateTime());
             list.add(map);
         }
@@ -820,7 +832,13 @@ public class DevloopApplicationService {
         result.put("savedAt", dbStatus.getOrDefault("savedAt", ""));
         result.put("runtimeAuthenticated", runtimeStatus.get("authenticated"));
         result.put("tokenValid", runtimeStatus.get("tokenValid"));
+        result.put("refreshTokenValid", runtimeStatus.getOrDefault("refreshTokenValid", false));
         result.put("expiresAt", runtimeStatus.getOrDefault("expiresAt", ""));
+        result.put("refreshExpiresAt", runtimeStatus.getOrDefault("refreshExpiresAt", ""));
+        result.put("corpId", runtimeStatus.getOrDefault("corpId", ""));
+        result.put("corpName", runtimeStatus.getOrDefault("corpName", ""));
+        result.put("userId", runtimeStatus.getOrDefault("userId", ""));
+        result.put("userName", runtimeStatus.getOrDefault("userName", ""));
         return ResponseUtil.successResponse(result);
     }
 

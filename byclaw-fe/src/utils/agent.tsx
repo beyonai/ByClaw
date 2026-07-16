@@ -216,13 +216,8 @@ export const getWriterMaterialUrl = (props: any) => {
   return url.toString();
 };
 
-export const canJumpAgent = (agent: IAgent) => {
-  if (agent?.grantType) return true;
-
-  if (!!agent?.agentHomeUrl) {
-    return false;
-  }
-  return true;
+export const canJumpAgent = (agent?: Pick<IAgent, 'grantType'>) => {
+  return !!agent?.grantType;
 };
 
 export const agentHomeUrlHandler = (

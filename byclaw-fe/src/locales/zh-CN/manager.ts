@@ -350,6 +350,7 @@ export default {
   'modelMgr.confirmEnable': '确认启用该模型？',
   'modelMgr.confirmDelete': '确认删除该模型？',
   'modelMgr.confirmSetDefault': '确定将该模型设置为该类型默认模型吗？设置后同类型其他默认模型将变为非默认。',
+  'modelMgr.default': '默认',
   'modelMgr.setDefault': '设为默认',
   'modelMgr.defaultModel': '默认',
   'modelMgr.operationSuccess': '操作成功',

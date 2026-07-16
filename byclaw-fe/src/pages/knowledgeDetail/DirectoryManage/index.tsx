@@ -29,6 +29,7 @@ import {
   deleteFolder,
   getFileBuildStatus,
   moveKnowledgeItems,
+  queryDirAndFileByLevel as queryDirAndFileByLevelService,
   removeFile,
   searchDirAndFile,
   type BuildDatasetPayload,
@@ -1148,6 +1149,15 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
     },
     [baseInfo?.resourceId, clearDetailPanel, getBuildDirectoryPath, intl, message, renderPreviewPanel]
   );
+
+  const checkDirectoryHasChildren = useCallback(async (resourceId: number, directoryPath: string) => {
+    const res = await queryDirAndFileByLevelService({
+      resourceId,
+      directoryPath,
+    });
+    return Array.isArray(res) && res.length > 0;
+  }, []);
+
   const handleAction = (key: string, record: any) => {
     switch (key) {
       case 'top':
@@ -1192,16 +1202,10 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
       case 'delete':
         Modal.confirm({
           title: intl.formatMessage({ id: 'common.deleteTips' }),
-          content:
-            record?.type === 'directory'
-              ? intl.formatMessage(
-                { id: 'directoryManage.deleteFolderRecursiveConfirm' },
-                { name: record?.collectionName ?? record?.name }
-              )
-              : intl.formatMessage(
-                { id: 'common.deleteConfirm2' },
-                { content: record?.collectionName ?? record?.name }
-              ),
+          content: intl.formatMessage(
+            { id: 'common.deleteConfirm2' },
+            { content: record?.collectionName ?? record?.name }
+          ),
           onOk: async () => {
             let promise: Promise<any>;
             if (record?.type === 'directory') {
@@ -1210,6 +1214,11 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
               if (!directoryPath || rid === null || rid === undefined || rid === '') {
                 message.error(intl.formatMessage({ id: 'directoryManage.deleteFolderMissingParams' }));
                 return Promise.reject(new Error('invalid delete folder params'));
+              }
+              const hasChildren = await checkDirectoryHasChildren(Number(rid), directoryPath);
+              if (hasChildren) {
+                message.warning(intl.formatMessage({ id: 'directoryManage.deleteFolderNotEmpty' }));
+                return;
               }
               promise = deleteFolder({ resourceId: Number(rid), directoryPath });
             } else {

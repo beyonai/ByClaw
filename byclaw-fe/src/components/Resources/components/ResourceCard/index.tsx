@@ -110,7 +110,9 @@ type ExtraResourceMenuItem = NonNullable<MenuProps['items']>[number] & {
 export type ResourceCardProps = {
   resource: IResourceCardItem;
   resourceType?: string;
-  onCardClick?: () => void;
+  onCardClick?: (resource?: IResourceCardItem) => void;
+  cardClickDisabled?: boolean | ((resource: IResourceCardItem) => boolean);
+  onCardClickDisabled?: (resource?: IResourceCardItem) => void;
   actionConfig?: ResourceCardActionConfig;
   avatarNode?: React.ReactNode;
   title?: React.ReactNode;
@@ -284,6 +286,8 @@ const RenderContent = (props: ResourceCardProps) => {
   const {
     resource,
     onCardClick,
+    cardClickDisabled,
+    onCardClickDisabled,
     actionConfig,
     avatarNode,
     description,
@@ -448,6 +452,8 @@ const RenderContent = (props: ResourceCardProps) => {
   const isInstalledSkill =
     isSkillResource(resource, resourceType) &&
     Boolean(resource?.resourceId && actionConfig?.installedResourceIds?.has(`${resource.resourceId}`));
+  const isCardClickDisabled =
+    typeof cardClickDisabled === 'function' ? cardClickDisabled(resource) : !!cardClickDisabled;
 
   const menuItems = useMemo<MenuProps['items']>(() => {
     const { canEdit, canManageAuth, canUseAuth, canApplyUse, canAuditUse, canDelete, canRestore } = resource || {};
@@ -677,7 +683,7 @@ const RenderContent = (props: ResourceCardProps) => {
   const effectiveTopRightTag = isWorkspaceSkillResource
     ? intl.formatMessage({ id: 'resource.skillSource.userDeveloped' })
     : topRightTag;
-  const effectiveCardClick = isWorkspaceSkillResource
+  const effectiveCardClick: ((resource?: IResourceCardItem) => void) | undefined = isWorkspaceSkillResource
     ? () => workspaceActions.openDetail(resource as WorkspaceSkillItem)
     : onCardClick;
   const workspaceShareModal =
@@ -705,12 +711,17 @@ const RenderContent = (props: ResourceCardProps) => {
     return (
       <div
         className={classnames(styles.skillPosterContent, {
-          pointer: !!effectiveCardClick && !isCancelledResource,
+          pointer: !!effectiveCardClick && !isCancelledResource && !isCardClickDisabled,
           [styles.cancelledContent]: isCancelledResource,
+          [styles.disabledClickContent]: isCardClickDisabled,
         })}
         onClick={() => {
           if (isCancelledResource) return;
-          effectiveCardClick?.();
+          if (isCardClickDisabled) {
+            onCardClickDisabled?.(resource);
+            return;
+          }
+          effectiveCardClick?.(resource);
         }}
       >
         <div className={styles.skillPosterImageWrap}>
@@ -791,12 +802,17 @@ const RenderContent = (props: ResourceCardProps) => {
   return (
     <div
       className={classnames(styles.renderContent, 'full-width full-height', {
-        pointer: !!effectiveCardClick && !isCancelledResource,
+        pointer: !!effectiveCardClick && !isCancelledResource && !isCardClickDisabled,
         [styles.cancelledContent]: isCancelledResource,
+        [styles.disabledClickContent]: isCardClickDisabled,
       })}
       onClick={() => {
         if (isCancelledResource) return;
-        effectiveCardClick?.();
+        if (isCardClickDisabled) {
+          onCardClickDisabled?.(resource);
+          return;
+        }
+        effectiveCardClick?.(resource);
       }}
     >
       {installing && <InstallingOverlay />}
@@ -975,13 +991,19 @@ function ResourceCard(props: ResourceCardProps) {
 
   const displayResource = resourceWithPermissions || resource;
   const isCancelledResource = `${displayResource?.resourceStatus ?? ''}` === '3';
+  const isCardClickDisabled =
+    typeof props.cardClickDisabled === 'function'
+      ? props.cardClickDisabled(displayResource)
+      : !!props.cardClickDisabled;
 
   return (
     <div
       key={resource.resourceId}
       className={classnames(styles.resourceCard, props.className, {
-        pointer: !!props.onCardClick && !isCancelledResource,
+        pointer:
+          (!!props.onCardClick || isWorkspaceSkill(displayResource)) && !isCancelledResource && !isCardClickDisabled,
         [styles.skillPosterCard]: variant === 'skillPoster',
+        [styles.disabledClickCard]: isCardClickDisabled,
       })}
       ref={resourceCardRef}
     >

@@ -15,7 +15,7 @@ import InfiniteScroll from '@/components/InfiniteScroll';
 import ResourceCard from '@/components/Resources/components/ResourceCard';
 import { IAgentCache } from '@/typescript/agent';
 import useGlobal from '@/hooks/useGlobal';
-import { canJumpAgent, getAgentChatAvatar, getAgentPath } from '@/utils/agent';
+import { getAgentChatAvatar, getAgentPath } from '@/utils/agent';
 import useTracker from '@/hooks/useTracker';
 import AuthListDrawer from '@/pages/manager/components/AuthListDrawer';
 import UseApplyAuditDrawer from '@/pages/manager/components/UseApplyAuditDrawer';
@@ -268,8 +268,14 @@ function EmployeeRelatedToMe(props: IProps, ref: any) {
 
   const onClickEmployee = React.useCallback(
     (employee: IAgentCache) => {
-      if (employee.agentId && canJumpAgent(employee)) {
+      if (employee.agentId) {
         trackerEmployeeClick(employee, 'marketAgentRedirect');
+        dispatch({
+          type: 'employees/updateEmployee',
+          payload: {
+            employee,
+          },
+        });
         setAgentId?.(`${employee.agentId}`);
         setSessionId?.('');
         const nextSearchParams = new URLSearchParams({
@@ -283,7 +289,7 @@ function EmployeeRelatedToMe(props: IProps, ref: any) {
       message.destroy();
       message.error(intl.formatMessage({ id: 'digitalEmployees.noPermission' }));
     },
-    [curActiveLink, intl, navigate, setAgentId, setSessionId, trackerEmployeeClick]
+    [curActiveLink, dispatch, intl, navigate, setAgentId, setSessionId, trackerEmployeeClick]
   );
 
   const onEditEmployee = React.useCallback(
@@ -418,7 +424,7 @@ function EmployeeRelatedToMe(props: IProps, ref: any) {
                         avatarNode={
                           <div className={styles.employeeAvatar}>{getAgentChatAvatar(employee.chatAvatar)}</div>
                         }
-                        onCardClick={() => onClickEmployee(employee)}
+                        onCardClick={(resource) => onClickEmployee((resource as IAgentCache) || employee)}
                         actionConfig={{
                           scene: 'personal',
                           onEdit: () => onEditEmployee(employee),
