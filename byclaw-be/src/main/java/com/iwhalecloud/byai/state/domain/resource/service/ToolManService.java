@@ -322,7 +322,8 @@ public class ToolManService {
 
         // 5. 以 systemCode + resourceBizType + resourceCode 作为幂等键：存在则更新，不存在则新增。
         SsResource existing = ssResourceService.findByImportIdentity(systemCode, resourceBizType, resourceCode);
-        ResourceImportOwnerTypeValidator.validate(existing, ownerType, resourceCode, resourceName, resourceBizType);
+        ResourceImportOwnerTypeValidator.validate(existing, ownerType, resourceCode, resourceName, resourceBizType,
+            systemCode);
         validateImportUpdatePermission(existing, resourceCode);
         boolean updated = existing != null;
         String oldTargetContent = updated ? findTargetContentByBizType(resourceBizType, existing.getResourceId())

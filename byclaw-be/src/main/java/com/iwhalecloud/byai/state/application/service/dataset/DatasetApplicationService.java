@@ -736,7 +736,7 @@ public class DatasetApplicationService {
         }
         else {
             ResourceImportOwnerTypeValidator.validate(existing, ownerType, dto.getResourceCode(), dto.getResourceName(),
-                dto.getResourceBizType());
+                dto.getResourceBizType(), dto.getSystemCode());
             validateDatasetImportUpdatePermission(existing, dto.getResourceCode());
             return updateDatasetFromImport(existing, dto, rawJson, ownerType);
         }
