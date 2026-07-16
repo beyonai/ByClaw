@@ -15,6 +15,7 @@ import org.springframework.stereotype.Service;
 
 import com.iwhalecloud.byai.common.exception.BaseException;
 import com.iwhalecloud.byai.common.storage.ResourceFS;
+import com.iwhalecloud.byai.common.storage.model.FileMetadata;
 import com.iwhalecloud.byai.common.storage.util.MultipartFileUtil;
 
 /**
@@ -69,7 +70,7 @@ public class ResourceArtifactStorageService {
         String dirName = resourceArtifactPathResolver.resolveResourceDirectory(resourceBizType);
         String fileName = resourceArtifactPathResolver.buildResourceJsonFileName(resourceBizType, resourceId);
         String relativePath = dirName + "/" + fileName;
-        return existsExactPath(buildResourceFilePath(relativePath));
+        return existsFileExactPath(buildResourceFilePath(relativePath));
     }
 
     public void uploadToSubdirectory(byte[] content, String subDirectory, String fileName, String contentType) {
@@ -107,7 +108,7 @@ public class ResourceArtifactStorageService {
      * @param relativePath 相对 /resource 的路径，例如 skill/org-hub/demo.zip
      */
     public boolean existsWithinResourceRoot(String relativePath) {
-        return existsExactPath(buildResourceFilePath(relativePath));
+        return existsFileExactPath(buildResourceFilePath(relativePath));
     }
 
     private void uploadDirectory(Path localRoot, String subDirectory) {
@@ -201,12 +202,39 @@ public class ResourceArtifactStorageService {
         }
     }
 
+    private boolean existsFileExactPath(String resourcePath) {
+        try {
+            FileMetadata metadata = resourceFS.metadata(resourcePath);
+            if (metadata != null) {
+                LOGGER.info("资源文件元数据校验成功: resourcePath={}, storageType={}, bucketName={}, fileName={}, "
+                        + "fileSize={}, contentType={}, fileTag={}, lastModified={}",
+                    resourcePath, metadata.getStorageType(), metadata.getBucketName(), metadata.getFileName(),
+                    metadata.getFileSize(), metadata.getContentType(), metadata.getFileTag(), metadata.getLastModified());
+                return true;
+            }
+            LOGGER.warn("资源文件元数据校验未返回结果，改用目录枚举兜底: resourcePath={}", resourcePath);
+        }
+        catch (Exception e) {
+            LOGGER.warn("资源文件元数据校验失败，改用目录枚举兜底: resourcePath={}, error={}", resourcePath,
+                e.getMessage());
+        }
+
+        return existsExactPath(resourcePath);
+    }
+
+    /**
+     * 目录与不支持 metadata 的存储实现使用该兜底逻辑。
+     */
     private boolean existsExactPath(String resourcePath) {
         List<String> paths = resourceFS.list(resourcePath, null);
         if (paths == null || paths.isEmpty()) {
+            LOGGER.warn("资源文件目录枚举校验失败: resourcePath={}, returnedPaths=[]", resourcePath);
             return false;
         }
-        return paths.stream().anyMatch(path -> StringUtils.equals(path, resourcePath));
+        boolean exists = paths.stream().anyMatch(path -> StringUtils.equals(path, resourcePath));
+        LOGGER.info("资源文件目录枚举校验完成: resourcePath={}, exists={}, returnedPaths={}", resourcePath, exists,
+            paths);
+        return exists;
     }
 
     private String buildResourceDirectoryPath(String subDirectory) {
