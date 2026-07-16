@@ -1011,7 +1011,13 @@ public class DevloopApplicationService {
         result.put("savedAt", dbStatus.getOrDefault("savedAt", ""));
         result.put("runtimeAuthenticated", runtimeStatus.get("authenticated"));
         result.put("tokenValid", runtimeStatus.get("tokenValid"));
+        result.put("refreshTokenValid", runtimeStatus.getOrDefault("refreshTokenValid", false));
         result.put("expiresAt", runtimeStatus.getOrDefault("expiresAt", ""));
+        result.put("refreshExpiresAt", runtimeStatus.getOrDefault("refreshExpiresAt", ""));
+        result.put("corpId", runtimeStatus.getOrDefault("corpId", ""));
+        result.put("corpName", runtimeStatus.getOrDefault("corpName", ""));
+        result.put("userId", runtimeStatus.getOrDefault("userId", ""));
+        result.put("userName", runtimeStatus.getOrDefault("userName", ""));
         return ResponseUtil.successResponse(result);
     }
 
