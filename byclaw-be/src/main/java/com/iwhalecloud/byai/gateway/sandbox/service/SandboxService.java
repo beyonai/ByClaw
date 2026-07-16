@@ -1989,6 +1989,13 @@ public class SandboxService {
         return sandboxType + "_" + userCode;
     }
 
+    private String buildSandboxWorkerId(String userCode, String serviceKey) {
+        if (StringUtils.isBlank(userCode) || StringUtils.isBlank(serviceKey)) {
+            return null;
+        }
+        return serviceKey + "-" + userCode;
+    }
+
     private void cleanupSandboxRegistryKeys(String serviceName) {
         try (Jedis jedis = redisClient.getResource()) {
             String instancesKey = Constants.RegistryKeys.sdInstanceDetails(serviceName);
