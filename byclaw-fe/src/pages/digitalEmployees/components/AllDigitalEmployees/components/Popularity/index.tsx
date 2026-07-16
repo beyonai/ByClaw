@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import classnames from 'classnames';
 import { isEmpty, noop } from 'lodash';
 // @ts-ignore
-import { useIntl, useNavigate } from '@umijs/max';
+import { useDispatch, useIntl, useNavigate } from '@umijs/max';
 import { message } from 'antd';
 import useGlobal from '@/hooks/useGlobal';
 
@@ -21,6 +21,7 @@ import styles from './index.module.less';
 
 const Popularity = ({ disableActionList }: { disableActionList?: IAvatarCardItemProps['disableActionList'] }) => {
   const intl = useIntl();
+  const dispatch = useDispatch();
   const [list, setList] = useState<IAgentCache[]>([]);
   const scrollContainerRef = React.useRef<HTMLDivElement>(null);
 
@@ -44,6 +45,12 @@ const Popularity = ({ disableActionList }: { disableActionList?: IAvatarCardItem
       const isCanJump = canJumpAgent(employee);
       if (employee.agentId && isCanJump) {
         trackerEmployeeClick(employee, 'marketAgentRedirect');
+        dispatch({
+          type: 'employees/updateEmployee',
+          payload: {
+            employee,
+          },
+        });
 
         setAgentId?.(`${employee.agentId}`);
         setSessionId?.('');
@@ -53,7 +60,7 @@ const Popularity = ({ disableActionList }: { disableActionList?: IAvatarCardItem
         message.error(intl.formatMessage({ id: 'digitalEmployees.noPermission' }));
       }
     },
-    [setAgentId, setSessionId]
+    [dispatch, intl, navigate, setAgentId, setSessionId, trackerEmployeeClick]
   );
 
   // 使用原生事件监听器处理滚轮事件，避免 passive 事件监听器的问题

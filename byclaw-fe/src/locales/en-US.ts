@@ -770,6 +770,7 @@ export default {
     'After deletion, this digital employee will be taken down immediately and cannot be recovered.',
   'digitalEmployees.deleteSuccess': 'Delete successfully',
   'digitalEmployees.noPermission': 'No permission to open it yet',
+  'digitalEmployees.noUsePermissionApplyFirst': 'No usage permission. Please apply first.',
   'digitalEmployees.popular': 'Popular',
   'digitalEmployees.sort.mostSubscribed': 'Most Subscribed',
   'digitalEmployees.sort.mostUsed': 'Most Used',
