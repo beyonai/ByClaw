@@ -21,6 +21,19 @@ I/O 协议：stdin JSON → stdout JSON
                 "property_name": "主题",
                 "data_type": "STRING",
                 "ext_property": {}
+            },
+            {
+                "property_code": "participant_code",
+                "property_name": "参会人",
+                "data_type": "STRING",
+                "term_type_code": "user_name",       // 绑定已有术语类型（与 term_values 互斥）
+                "rel_term_codeorname": "code"         // code=字段存编码；name=字段存名称
+            },
+            {
+                "property_code": "meeting_type",
+                "property_name": "会议类型",
+                "data_type": "STRING",
+                "term_values": ["周例会", "评审会", "启动会"]  // 自定义枚举字符串列表（与 term_type_code 互斥）
             }
         ],
         "relations": [                             // 可选：与其他本体对象的关联关系
