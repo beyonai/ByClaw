@@ -45,7 +45,7 @@ describe('useVisibleMenuKeys', () => {
     });
 
     await waitFor(() => {
-      expect(result.current).toEqual(['sessions', 'skill', 'file', 'model', 'ontology']);
+      expect(result.current).toEqual(['sessions', 'projectSpace', 'skill', 'file', 'model', 'ontology']);
     });
   });
 
@@ -60,7 +60,7 @@ describe('useVisibleMenuKeys', () => {
     const { result } = renderHook(() => useVisibleMenuKeys({ userId: 1 }));
 
     await waitFor(() => {
-      expect(result.current).toEqual(['sessions', 'file', 'model', 'ontology']);
+      expect(result.current).toEqual(['sessions', 'projectSpace', 'file', 'model', 'ontology']);
     });
   });
 
@@ -77,7 +77,7 @@ describe('useVisibleMenuKeys', () => {
     const { result } = renderHook(() => useVisibleMenuKeys({ userId: 1 }));
 
     await waitFor(() => {
-      expect(result.current).toEqual(['sessions', 'ontology', 'skill', 'file', 'model']);
+      expect(result.current).toEqual(['sessions', 'ontology', 'projectSpace', 'skill', 'file', 'model']);
     });
   });
 

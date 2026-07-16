@@ -74,6 +74,25 @@ COMMENT ON COLUMN byai.byai_project_repo.repo_full_name IS '仓库全名 owner/r
 COMMENT ON COLUMN byai.byai_project_repo.repo_url IS '仓库地址';
 COMMENT ON COLUMN byai.byai_project_repo.default_branch IS '默认分支';
 
+-- 项目会话关联表
+CREATE TABLE IF NOT EXISTS byai.byai_project_session (
+    relation_id     BIGINT          NOT NULL,
+    project_id      BIGINT          NOT NULL,
+    session_id      BIGINT          NOT NULL,
+    create_by       VARCHAR(64),
+    create_time     TIMESTAMP       DEFAULT CURRENT_TIMESTAMP,
+    update_by       VARCHAR(64),
+    update_time     TIMESTAMP       DEFAULT CURRENT_TIMESTAMP,
+    delete_flag     CHAR(1)         DEFAULT '0',
+    CONSTRAINT pk_byai_project_session PRIMARY KEY (relation_id)
+);
+
+COMMENT ON TABLE byai.byai_project_session IS '项目会话关联表';
+COMMENT ON COLUMN byai.byai_project_session.relation_id IS '关联记录ID';
+COMMENT ON COLUMN byai.byai_project_session.project_id IS '项目ID';
+COMMENT ON COLUMN byai.byai_project_session.session_id IS '会话ID';
+COMMENT ON COLUMN byai.byai_project_session.delete_flag IS '删除标记 0正常 1删除';
+
 -- 需求扫描源配置表
 CREATE TABLE IF NOT EXISTS byai.byai_scan_source (
     source_id       BIGINT          NOT NULL,
@@ -157,6 +176,9 @@ CREATE INDEX IF NOT EXISTS idx_scan_source_project ON byai.byai_scan_source(proj
 CREATE INDEX IF NOT EXISTS idx_scan_log_source ON byai.byai_scan_log(source_id);
 CREATE INDEX IF NOT EXISTS idx_scan_log_item_log ON byai.byai_scan_log_item(log_id);
 CREATE INDEX IF NOT EXISTS idx_project_repo_project ON byai.byai_project_repo(project_id);
+CREATE INDEX IF NOT EXISTS idx_project_session_project ON byai.byai_project_session(project_id);
+CREATE INDEX IF NOT EXISTS idx_project_session_session ON byai.byai_project_session(session_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_project_session_unique ON byai.byai_project_session(project_id, session_id);
 
 -- 研发任务表
 CREATE TABLE IF NOT EXISTS byai.byai_task (

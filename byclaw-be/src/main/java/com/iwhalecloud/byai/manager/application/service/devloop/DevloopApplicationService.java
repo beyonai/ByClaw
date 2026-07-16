@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.manager.application.service.devloop;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.application.service.job.DevloopPatService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.DingtalkScanService;
@@ -13,13 +14,17 @@ import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectMemberService;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectRepoDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ScanSourceDTO;
+import com.iwhalecloud.byai.manager.dto.session.ByaiSessionDto;
 import com.iwhalecloud.byai.manager.entity.devloop.*;
+import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.mapper.devloop.ProjectMapper;
 import com.iwhalecloud.byai.manager.mapper.devloop.ProjectRepoMapper;
+import com.iwhalecloud.byai.manager.mapper.devloop.ProjectSessionMapper;
 import com.iwhalecloud.byai.manager.mapper.devloop.ScanLogItemMapper;
 import com.iwhalecloud.byai.manager.mapper.resource.SsResourceMapper;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
+import com.iwhalecloud.byai.manager.mapper.session.ByaiSessionMapper;
 import com.iwhalecloud.byai.common.feign.response.sandbox.SandboxLaunchData;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
@@ -38,11 +43,21 @@ import java.util.*;
 @Service
 public class DevloopApplicationService {
 
+    private static final String DELETE_FLAG_NORMAL = "0";
+
+    private static final String DELETE_FLAG_DELETED = "1";
+
     @Autowired
     private ProjectMapper projectMapper;
 
     @Autowired
     private ProjectRepoMapper projectRepoMapper;
+
+    @Autowired
+    private ProjectSessionMapper projectSessionMapper;
+
+    @Autowired
+    private ByaiSessionMapper byaiSessionMapper;
 
     @Autowired
     private ScanLogItemMapper scanLogItemMapper;
@@ -92,7 +107,7 @@ public class DevloopApplicationService {
         project.setIsShare(dto.getIsShare() != null ? dto.getIsShare() : "N");
         project.setCreateBy(CurrentUserHolder.getCurrentUserId());
         project.setCreateTime(new Date());
-        project.setDeleteFlag("0");
+        project.setDeleteFlag(DELETE_FLAG_NORMAL);
         projectMapper.insert(project);
 
         if (dto.getRepos() != null) {
@@ -124,11 +139,17 @@ public class DevloopApplicationService {
         return ResponseUtil.successResponse(result);
     }
 
-    /** 查询项目列表，按创建时间倒序 */
-    public ResponseUtil<List<Map<String, Object>>> listProjects() {
+    /** 查询项目列表，按创建时间倒序；keyword 用于项目名称/描述模糊搜索。 */
+    public ResponseUtil<List<Map<String, Object>>> listProjects(String keyword) {
         LambdaQueryWrapper<Project> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(Project::getDeleteFlag, "0")
-               .orderByDesc(Project::getCreateTime);
+        wrapper.eq(Project::getDeleteFlag, DELETE_FLAG_NORMAL);
+        String searchKeyword = keyword == null ? "" : keyword.trim();
+        if (!searchKeyword.isEmpty()) {
+            wrapper.and(w -> w.like(Project::getProjectName, searchKeyword)
+                .or()
+                .like(Project::getDescription, searchKeyword));
+        }
+        wrapper.orderByDesc(Project::getCreateTime);
         List<Project> projects = projectMapper.selectList(wrapper);
 
         List<Map<String, Object>> list = new ArrayList<>();
@@ -141,6 +162,7 @@ public class DevloopApplicationService {
             map.put("projectType", p.getProjectType());
             map.put("isShare", p.getIsShare());
             map.put("createTime", p.getCreateTime());
+            map.put("sessionCount", safeCountProjectSessions(p.getProjectId()));
             list.add(map);
         }
         return ResponseUtil.successResponse(list);
@@ -150,7 +172,7 @@ public class DevloopApplicationService {
     @Transactional(rollbackFor = Exception.class)
     public ResponseUtil<Void> updateProject(ProjectDTO dto) {
         Project project = projectMapper.selectById(dto.getProjectId());
-        if (project == null || "1".equals(project.getDeleteFlag())) {
+        if (project == null || DELETE_FLAG_DELETED.equals(project.getDeleteFlag())) {
             return ResponseUtil.failRes("Project not found");
         }
         if (dto.getProjectName() != null) {
@@ -175,25 +197,26 @@ public class DevloopApplicationService {
     @Transactional(rollbackFor = Exception.class)
     public ResponseUtil<Void> deleteProject(Long projectId) {
         Project project = projectMapper.selectById(projectId);
-        if (project == null || "1".equals(project.getDeleteFlag())) {
+        if (project == null || DELETE_FLAG_DELETED.equals(project.getDeleteFlag())) {
             return ResponseUtil.failRes("Project not found");
         }
-        project.setDeleteFlag("1");
+        project.setDeleteFlag(DELETE_FLAG_DELETED);
         project.setUpdateBy(CurrentUserHolder.getCurrentUserId());
         project.setUpdateTime(new Date());
         projectMapper.updateById(project);
         return ResponseUtil.successResponse(null);
     }
 
-    /** 查询项目详情，含关联仓库列表 */
+    /** 查询项目详情，含关联仓库和会话列表 */
     public ResponseUtil<Map<String, Object>> getProject(Long projectId) {
         Project project = projectMapper.selectById(projectId);
-        if (project == null || "1".equals(project.getDeleteFlag())) {
+        if (project == null || DELETE_FLAG_DELETED.equals(project.getDeleteFlag())) {
             return ResponseUtil.failRes("Project not found");
         }
         LambdaQueryWrapper<ProjectRepo> repoWrapper = new LambdaQueryWrapper<>();
         repoWrapper.eq(ProjectRepo::getProjectId, projectId);
         List<ProjectRepo> repos = projectRepoMapper.selectList(repoWrapper);
+        List<ByaiSessionDto> sessions = safeListProjectSessions(projectId);
 
         Map<String, Object> map = new HashMap<>();
         map.put("projectId", project.getProjectId());
@@ -203,7 +226,119 @@ public class DevloopApplicationService {
         map.put("projectType", project.getProjectType());
         map.put("isShare", project.getIsShare());
         map.put("repos", repos);
+        map.put("sessions", sessions);
+        map.put("sessionCount", sessions.size());
         return ResponseUtil.successResponse(map);
+    }
+
+    private Long safeCountProjectSessions(Long projectId) {
+        try {
+            Long sessionCount = projectSessionMapper.countSessionsByProjectId(projectId);
+            return sessionCount == null ? 0L : sessionCount;
+        } catch (Exception error) {
+            if (isProjectSessionTableMissing(error)) {
+                // 兼容已执行旧版 V0.3.0 但漏建项目会话关联表的环境，避免项目列表整体不可用。
+                log.warn("Project session relation table is missing, fallback sessionCount=0, projectId={}", projectId);
+                return 0L;
+            }
+            throw error instanceof RuntimeException ? (RuntimeException) error : new IllegalStateException(error);
+        }
+    }
+
+    private List<ByaiSessionDto> safeListProjectSessions(Long projectId) {
+        try {
+            return projectSessionMapper.selectSessionsByProjectId(projectId);
+        } catch (Exception error) {
+            if (isProjectSessionTableMissing(error)) {
+                // 表缺失时详情页先展示项目基础信息，后续迁移补表后会话列表自动恢复。
+                log.warn("Project session relation table is missing, fallback sessions empty, projectId={}", projectId);
+                return Collections.emptyList();
+            }
+            throw error instanceof RuntimeException ? (RuntimeException) error : new IllegalStateException(error);
+        }
+    }
+
+    private boolean isProjectSessionTableMissing(Throwable error) {
+        Throwable current = error;
+        while (current != null) {
+            String message = current.getMessage();
+            if (message != null) {
+                String lowerMessage = message.toLowerCase(Locale.ROOT);
+                if (lowerMessage.contains("byai_project_session") && lowerMessage.contains("does not exist")) {
+                    return true;
+                }
+            }
+            current = current.getCause();
+        }
+        return false;
+    }
+
+    /** 绑定会话到项目；项目空间是一组会话分组，一个会话只保留一个有效项目归属。 */
+    @Transactional(rollbackFor = Exception.class)
+    public ResponseUtil<Void> bindProjectSession(Long projectId, Long sessionId) {
+        Project project = projectMapper.selectById(projectId);
+        if (project == null || DELETE_FLAG_DELETED.equals(project.getDeleteFlag())) {
+            return ResponseUtil.failRes("Project not found");
+        }
+        ByaiSession session = byaiSessionMapper.selectById(sessionId);
+        if (session == null) {
+            return ResponseUtil.failRes("Session not found");
+        }
+
+        String currentUserId = String.valueOf(CurrentUserHolder.getCurrentUserId());
+        Date now = new Date();
+
+        ProjectSession archivedRelation = new ProjectSession();
+        archivedRelation.setDeleteFlag(DELETE_FLAG_DELETED);
+        archivedRelation.setUpdateBy(currentUserId);
+        archivedRelation.setUpdateTime(now);
+        projectSessionMapper.update(
+            archivedRelation,
+            new LambdaUpdateWrapper<ProjectSession>()
+                .eq(ProjectSession::getSessionId, sessionId)
+                .eq(ProjectSession::getDeleteFlag, DELETE_FLAG_NORMAL)
+                .ne(ProjectSession::getProjectId, projectId)
+        );
+
+        LambdaQueryWrapper<ProjectSession> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(ProjectSession::getProjectId, projectId)
+            .eq(ProjectSession::getSessionId, sessionId);
+        List<ProjectSession> existingRelations = projectSessionMapper.selectList(wrapper);
+        if (!existingRelations.isEmpty()) {
+            ProjectSession relation = existingRelations.get(0);
+            relation.setDeleteFlag(DELETE_FLAG_NORMAL);
+            relation.setUpdateBy(currentUserId);
+            relation.setUpdateTime(now);
+            projectSessionMapper.updateById(relation);
+            return ResponseUtil.successResponse(null);
+        }
+
+        ProjectSession relation = new ProjectSession();
+        relation.setRelationId(sequenceService.nextVal());
+        relation.setProjectId(projectId);
+        relation.setSessionId(sessionId);
+        relation.setCreateBy(currentUserId);
+        relation.setCreateTime(now);
+        relation.setDeleteFlag(DELETE_FLAG_NORMAL);
+        projectSessionMapper.insert(relation);
+        return ResponseUtil.successResponse(null);
+    }
+
+    /** 取消项目和会话的有效关联，保留历史记录便于后续恢复或审计。 */
+    @Transactional(rollbackFor = Exception.class)
+    public ResponseUtil<Void> unbindProjectSession(Long projectId, Long sessionId) {
+        ProjectSession relation = new ProjectSession();
+        relation.setDeleteFlag(DELETE_FLAG_DELETED);
+        relation.setUpdateBy(String.valueOf(CurrentUserHolder.getCurrentUserId()));
+        relation.setUpdateTime(new Date());
+        projectSessionMapper.update(
+            relation,
+            new LambdaUpdateWrapper<ProjectSession>()
+                .eq(ProjectSession::getProjectId, projectId)
+                .eq(ProjectSession::getSessionId, sessionId)
+                .eq(ProjectSession::getDeleteFlag, DELETE_FLAG_NORMAL)
+        );
+        return ResponseUtil.successResponse(null);
     }
 
     /** 创建扫描源 */

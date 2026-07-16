@@ -4,22 +4,25 @@ FROM eclipse-temurin:21-jre-alpine
 # 创建应用目录
 WORKDIR /app
 
-# 安装 dws 依赖：gnome-keyring + dbus（dws 用 go-keyring 存 token）
+# 安装 dws 依赖：gcompat（glibc兼容层）+ gnome-keyring + dbus
 RUN apk add --no-cache \
     curl \
     bash \
+    gcompat \
     gnome-keyring \
     dbus \
     libsecret \
     && rm -rf /var/cache/apk/*
 
-# 安装 DWS CLI
-ARG DWS_VERSION=v1.0.47
-ARG GITHUB_MIRROR_BASE=https://github.com
+# 安装 DWS CLI（使用预下载的二进制，避免构建时网络下载）
+COPY docker/dws/dws-linux-amd64.tar.gz /tmp/dws.tar.gz
+RUN mkdir -p /root/.local/bin \
+    && tar -xzf /tmp/dws.tar.gz -C /root/.local/bin dws \
+    && chmod +x /root/.local/bin/dws \
+    && rm -f /tmp/dws.tar.gz \
+    && /root/.local/bin/dws --version
 ENV DWS_NO_SKILLS=1 \
     PATH="/root/.local/bin:${PATH}"
-RUN curl -fsSL "${GITHUB_MIRROR_BASE}/DingTalk-Real-AI/dingtalk-workspace-cli/raw/refs/heads/main/scripts/install.sh" | sh \
-    && dws --version
 
 # 清理 dws 不需要的 skills 目录
 RUN rm -rf /root/.agents/skills

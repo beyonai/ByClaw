@@ -7,6 +7,7 @@ export default {
   ...personalModel,
   // 通用操作
   'common.add': '新增',
+  'menu.projectSpace': '项目空间',
   'common.create': '新建',
   'common.edit': '编辑',
   'common.view': '查看',
@@ -904,6 +905,7 @@ export default {
   'sider.findAgent': '发现数字员工',
   'sider.newChat': '新建对话',
   'sider.session': '会话',
+  'sider.projectSpace': '项目',
   'sider.knowledge': '知识',
   'sider.ontology': '本体',
   'sider.ontologyCenter': '本体中心',

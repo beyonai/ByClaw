@@ -233,6 +233,11 @@ export default [
             component: './devloop',
           },
           {
+            path: '/projectSpace',
+            name: 'projectSpace',
+            component: './projectSpace',
+          },
+          {
             name: 'settings',
             path: '/settings',
             component: './settings',

@@ -15,6 +15,7 @@ import usePersistFn from '@/hooks/usePersistFn';
 import useSend from '@/hooks/useSseSender/useSend';
 import { compareStreamId } from '@/hooks/useSseSender/chatStream';
 import { getChatRunningSnapshot, getChatRunningStatus } from '@/service/message';
+import { bindProjectSession } from '@/service/devloop';
 
 import { UserState } from '@/models/common/user';
 import { ISessionState } from '@/models/session';
@@ -127,6 +128,18 @@ function getQueryClientMsgId(clientRequestId: string) {
   return clientRequestId.split('_')[0];
 }
 
+const getPositiveNumber = (value: unknown) => {
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) && numberValue > 0 ? numberValue : undefined;
+};
+
+const PROJECT_SESSION_BIND_RETRY_DELAYS = [0, 500, 1500];
+
+const wait = (delay: number) =>
+  new Promise((resolve) => {
+    window.setTimeout(resolve, delay);
+  });
+
 type MultiAgentLane = {
   laneId: string;
   agentId: string | null;
@@ -174,6 +187,8 @@ function useChat(props: IProps) {
   const { sessionId, agentType, addSession, onBeforeSend = noop, chatUrl } = props;
 
   const messageListRef = useRef<IMessage[]>([]);
+  const pendingProjectIdByClientRequestRef = useRef(new Map<string, string>());
+  const boundProjectSessionKeysRef = useRef(new Set<string>());
   const [runtimeVersion, setRuntimeVersion] = useState(0);
 
   const { userInfo, extParamsBySessionId } = useSelector((state: ConnectState) => ({
@@ -186,7 +201,7 @@ function useChat(props: IProps) {
   }));
   const dispatch = useDispatch();
 
-  const { agentId } = useGlobal();
+  const { agentId, EventEmitter } = useGlobal();
   const { setUserCollectModalOpen, setLoginModalOpen } = useAppStore();
 
   // 避免频繁更新组件
@@ -212,6 +227,66 @@ function useChat(props: IProps) {
     sessionId,
   });
 
+  const bindSessionToProject = usePersistFn(
+    async (projectId: unknown, targetSessionId: unknown, clientRequestId?: string) => {
+      const normalizedProjectId = getPositiveNumber(projectId);
+      const normalizedSessionId = getPositiveNumber(targetSessionId);
+      if (!normalizedProjectId || !normalizedSessionId) {
+        return;
+      }
+
+      const cacheKey = `${normalizedProjectId}:${normalizedSessionId}`;
+      if (boundProjectSessionKeysRef.current.has(cacheKey)) {
+        if (clientRequestId) {
+          pendingProjectIdByClientRequestRef.current.delete(clientRequestId);
+        }
+        return;
+      }
+
+      try {
+        // createSession 事件和会话落库在不同链路上，短暂重试避免刚返回 sessionId 时关系绑定查不到会话。
+        for (const delay of PROJECT_SESSION_BIND_RETRY_DELAYS) {
+          if (delay) {
+            await wait(delay);
+          }
+          try {
+            await bindProjectSession({
+              projectId: normalizedProjectId,
+              sessionId: normalizedSessionId,
+            });
+            break;
+          } catch (error) {
+            if (delay === PROJECT_SESSION_BIND_RETRY_DELAYS[PROJECT_SESSION_BIND_RETRY_DELAYS.length - 1]) {
+              throw error;
+            }
+          }
+        }
+        boundProjectSessionKeysRef.current.add(cacheKey);
+        // 通知项目侧栏刷新当前项目会话，避免等用户手动展开才看到新会话。
+        EventEmitter.emit('projectSpace-session-bound', {
+          projectId: `${normalizedProjectId}`,
+          sessionId: `${normalizedSessionId}`,
+        });
+      } catch (error) {
+        console.error('Failed to bind project session:', error);
+      } finally {
+        if (clientRequestId) {
+          pendingProjectIdByClientRequestRef.current.delete(clientRequestId);
+        }
+      }
+    }
+  );
+
+  const onSessionCreated = usePersistFn((params: { sessionId: string; clientRequestId?: string }) => {
+    const clientRequestId = params.clientRequestId || '';
+    const projectId = clientRequestId ? pendingProjectIdByClientRequestRef.current.get(clientRequestId) : undefined;
+    if (!projectId) {
+      return;
+    }
+
+    void bindSessionToProject(projectId, params.sessionId, clientRequestId);
+  });
+
   const {
     sessionInfoHandler,
     messageIdHandler,
@@ -222,7 +297,7 @@ function useChat(props: IProps) {
     rewriteQuestionHandler,
     browserHandler,
     answerCompletedHandler,
-  } = useHandler({ addSession, setSessionId });
+  } = useHandler({ addSession, setSessionId, onSessionCreated });
 
   const flowHandler = useMemo(
     () =>
@@ -842,6 +917,7 @@ function useChat(props: IProps) {
     const primaryEntry = laneEntries[0];
     const newAnswerMsg = primaryEntry.answerMsg;
     const clientRequestId = primaryEntry.lane.clientRequestId;
+    const projectId = getPositiveNumber(get(restPayload, 'projectId'));
     const multiAgent = isMultiAgentSend
       ? {
         turnId,
@@ -873,6 +949,10 @@ function useChat(props: IProps) {
 
     if (!isContinuingRunningTrace) {
       laneEntries.forEach((entry) => {
+        if (projectId) {
+          // 会话创建成功后用 clientRequestId 找回所属项目，再用真实 sessionId 建立关系。
+          pendingProjectIdByClientRequestRef.current.set(entry.lane.clientRequestId, `${projectId}`);
+        }
         registerPendingChatContext({
           clientRequestId: entry.lane.clientRequestId,
           laneId: isMultiAgentSend ? entry.lane.laneId : undefined,
@@ -898,6 +978,10 @@ function useChat(props: IProps) {
           cancel: () => entry.answerMsg.cancelSSE?.(),
         });
       });
+    }
+
+    if (projectId && sessionId) {
+      void bindSessionToProject(projectId, sessionId);
     }
 
     // 发送请求并处理SSE响应

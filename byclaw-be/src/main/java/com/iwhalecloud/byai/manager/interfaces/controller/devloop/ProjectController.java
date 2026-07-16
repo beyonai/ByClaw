@@ -35,8 +35,9 @@ public class ProjectController {
      * @return 当前用户可见的所有项目
      */
     @PostMapping("/list")
-    public ResponseUtil<List<Map<String, Object>>> listProjects() {
-        return applicationService.listProjects();
+    public ResponseUtil<List<Map<String, Object>>> listProjects(@RequestBody(required = false) Map<String, Object> params) {
+        String keyword = params == null || params.get("keyword") == null ? null : params.get("keyword").toString();
+        return applicationService.listProjects(keyword);
     }
 
     /**
@@ -67,5 +68,27 @@ public class ProjectController {
     public ResponseUtil<Void> deleteProject(@RequestBody Map<String, Object> params) {
         Long projectId = Long.valueOf(params.get("projectId").toString());
         return applicationService.deleteProject(projectId);
+    }
+
+    /**
+     * 绑定会话到项目，用于项目空间下新建会话后建立分组关系
+     * @param params 包含 projectId、sessionId
+     */
+    @PostMapping("/session/bind")
+    public ResponseUtil<Void> bindProjectSession(@RequestBody Map<String, Object> params) {
+        Long projectId = Long.valueOf(params.get("projectId").toString());
+        Long sessionId = Long.valueOf(params.get("sessionId").toString());
+        return applicationService.bindProjectSession(projectId, sessionId);
+    }
+
+    /**
+     * 取消项目和会话的有效关联
+     * @param params 包含 projectId、sessionId
+     */
+    @PostMapping("/session/unbind")
+    public ResponseUtil<Void> unbindProjectSession(@RequestBody Map<String, Object> params) {
+        Long projectId = Long.valueOf(params.get("projectId").toString());
+        Long sessionId = Long.valueOf(params.get("sessionId").toString());
+        return applicationService.unbindProjectSession(projectId, sessionId);
     }
 }
