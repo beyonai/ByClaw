@@ -9,6 +9,7 @@ import { useRef, useState } from 'react';
 import { useIntl, useSelector, getIntl } from '@umijs/max';
 import { App, Button } from 'antd';
 import { LayoutMode } from '@/constants/system';
+import withEasyConfirm from '@/components/MessagesComp/withEasyConfirm';
 
 import styles from './index.module.less';
 
@@ -257,4 +258,4 @@ function ThinkTaskUserInput(props: IProps) {
   );
 }
 
-export default ThinkTaskUserInput;
+export default withEasyConfirm(ThinkTaskUserInput);

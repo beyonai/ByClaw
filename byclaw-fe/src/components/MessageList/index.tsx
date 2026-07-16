@@ -32,7 +32,7 @@ type IProps = {
 
   hideAction?: boolean;
   showToBottomBtn?: boolean;
-  updateMessage: (message: IMessage) => void;
+  updateMessage: (message: IMessage) => IMessage;
   deleteMessage: (message: IMessage) => void;
 };
 

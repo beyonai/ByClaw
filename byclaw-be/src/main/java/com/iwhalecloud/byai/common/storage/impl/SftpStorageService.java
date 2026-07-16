@@ -382,4 +382,150 @@ public class SftpStorageService extends AbstractFileIngressStorageService<Sessio
         return sb.toString();
     }
 
+    /**
+     * List objects with the given prefix.
+     *
+     * @param prefix StoragePrefix containing bucketOrRoot, prefix path, and recursive flag
+     * @param maxDepth Maximum depth for recursive listing (null = unlimited)
+     * @return List of StorageObject entries
+     */
+    @Override
+    public java.util.List<com.iwhalecloud.byai.common.storage.model.StorageObject> list(
+        com.iwhalecloud.byai.common.storage.model.StoragePrefix prefix,
+        Integer maxDepth) {
+
+        java.util.List<com.iwhalecloud.byai.common.storage.model.StorageObject> result = new java.util.ArrayList<>();
+        ChannelSftp channelSftp = null;
+        Session session = null;
+
+        try {
+            session = this.getClient();
+            Channel channel = session.openChannel("sftp");
+            channel.connect();
+            channelSftp = (ChannelSftp) channel;
+
+            String bucketOrRoot = prefix.getBucketOrRoot();
+            String prefixPath = prefix.getPrefix();
+            boolean recursive = prefix.isRecursive();
+
+            // Build full SFTP path
+            String ftpBasePath = StringUtils.defaultIfBlank(ftpConfig.getPath(), "/");
+            String fullPath = buildFullSftpPath(ftpBasePath, bucketOrRoot, prefixPath);
+
+            // Check if directory exists
+            try {
+                channelSftp.stat(fullPath);
+            } catch (SftpException e) {
+                if (e.id == ChannelSftp.SSH_FX_NO_SUCH_FILE) {
+                    // Directory doesn't exist, return empty list
+                    logger.debug("SFTP directory does not exist: {}", fullPath);
+                    return result;
+                }
+                throw e;
+            }
+
+            // List files
+            if (recursive) {
+                listRecursive(channelSftp, fullPath, bucketOrRoot, prefixPath, result, 0,
+                    maxDepth != null ? maxDepth : Integer.MAX_VALUE);
+            } else {
+                listNonRecursive(channelSftp, fullPath, bucketOrRoot, prefixPath, result);
+            }
+
+            logger.info("SFTP list success: {} objects found at {}", result.size(), fullPath);
+            return result;
+        }
+        catch (Exception e) {
+            logger.error("SFTP列举对象失败: {}", prefix.getPrefix(), e);
+            throw new BaseException(e.getMessage(), e);
+        }
+        finally {
+            this.closeSftp(session, channelSftp);
+        }
+    }
+
+    /**
+     * Non-recursive listing of current directory.
+     */
+    private void listNonRecursive(ChannelSftp sftp, String currentPath, String bucketOrRoot,
+                                   String prefixPath, java.util.List<com.iwhalecloud.byai.common.storage.model.StorageObject> result)
+        throws SftpException {
+
+        @SuppressWarnings("unchecked")
+        java.util.Vector<ChannelSftp.LsEntry> entries = sftp.ls(currentPath);
+        if (entries == null) {
+            return;
+        }
+
+        for (ChannelSftp.LsEntry entry : entries) {
+            String fileName = entry.getFilename();
+            if (".".equals(fileName) || "..".equals(fileName)) {
+                continue;
+            }
+
+            // Build relative path from prefix
+            String relativePath = StringUtils.isNotBlank(prefixPath)
+                ? prefixPath + "/" + fileName
+                : fileName;
+
+            com.iwhalecloud.byai.common.storage.model.StorageObject obj =
+                com.iwhalecloud.byai.common.storage.model.StorageObject.builder()
+                    .bucketOrRoot(bucketOrRoot)
+                    .path(relativePath)
+                    .size(entry.getAttrs().getSize())
+                    .isDir(entry.getAttrs().isDir())
+                    .lastModified(String.valueOf(entry.getAttrs().getMTime()))
+                    .build();
+
+            result.add(obj);
+        }
+    }
+
+    /**
+     * Recursive directory listing with depth control.
+     */
+    private void listRecursive(ChannelSftp sftp, String currentPath, String bucketOrRoot,
+                               String prefixPath, java.util.List<com.iwhalecloud.byai.common.storage.model.StorageObject> result,
+                               int currentDepth, int maxDepth) throws SftpException {
+
+        if (currentDepth >= maxDepth) {
+            return;
+        }
+
+        @SuppressWarnings("unchecked")
+        java.util.Vector<ChannelSftp.LsEntry> entries = sftp.ls(currentPath);
+        if (entries == null) {
+            return;
+        }
+
+        for (ChannelSftp.LsEntry entry : entries) {
+            String fileName = entry.getFilename();
+            if (".".equals(fileName) || "..".equals(fileName)) {
+                continue;
+            }
+
+            // Build relative path from prefix
+            String relativePath = StringUtils.isNotBlank(prefixPath)
+                ? prefixPath + "/" + fileName
+                : fileName;
+
+            com.iwhalecloud.byai.common.storage.model.StorageObject obj =
+                com.iwhalecloud.byai.common.storage.model.StorageObject.builder()
+                    .bucketOrRoot(bucketOrRoot)
+                    .path(relativePath)
+                    .size(entry.getAttrs().getSize())
+                    .isDir(entry.getAttrs().isDir())
+                    .lastModified(String.valueOf(entry.getAttrs().getMTime()))
+                    .build();
+
+            result.add(obj);
+
+            // Recurse into subdirectories
+            if (entry.getAttrs().isDir()) {
+                String subPath = currentPath + "/" + fileName;
+                listRecursive(sftp, subPath, bucketOrRoot, relativePath, result, currentDepth + 1, maxDepth);
+            }
+        }
+    }
+
 }

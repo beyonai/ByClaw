@@ -345,4 +345,5 @@ export default {
   'fileSider.saveToKnowledge.noManagePermission':
     'You do not have management permission for knowledge bases under the current digital employee.',
   'context.used.format': '{percent}% context used, {usedTokens} / {contextTokens}',
+  'easyConfirm.pagination.title': 'Please select the operation step',
 };
