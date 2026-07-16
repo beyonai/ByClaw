@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.application.service.job.DevloopPatService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.DingtalkScanService;
+import com.iwhalecloud.byai.manager.domain.devloop.service.DwsAuthService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.GitHubIssueScanService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ScanLogService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ScanSourceService;
@@ -60,6 +61,9 @@ public class DevloopApplicationService {
 
     @Autowired
     private DingtalkScanService dingtalkScanService;
+
+    @Autowired
+    private DwsAuthService dwsAuthService;
 
     @Autowired
     private DevloopPatService patService;
@@ -281,6 +285,9 @@ public class DevloopApplicationService {
             items = gitHubIssueScanService.scan(source, pat);
         } else if ("dingtalk".equals(type)) {
             items = dingtalkScanService.scan(source);
+            if (items == null) {
+                return ResponseUtil.failRes("DWS未授权，请先在扫描源设置中完成钉钉授权");
+            }
         } else {
             return ResponseUtil.failRes("Unknown source type: " + type);
         }
@@ -638,6 +645,40 @@ public class DevloopApplicationService {
         Long memberId = Long.valueOf(params.get("memberId").toString());
         Long agentId = Long.valueOf(params.get("agentId").toString());
         projectMemberService.bindAgent(memberId, agentId);
+        return ResponseUtil.successResponse(null);
+    }
+
+    // ========== DWS 钉钉授权 ==========
+
+    /** 启动设备授权流程（异步启动dws进程，返回userCode和verificationUrl） */
+    public ResponseUtil<Map<String, Object>> startDwsDeviceAuth() {
+        Map<String, Object> result = dwsAuthService.startDeviceAuth();
+        if (Boolean.TRUE.equals(result.get("success"))) {
+            return ResponseUtil.successResponse(result);
+        }
+        return ResponseUtil.failRes((String) result.getOrDefault("message", "启动授权失败"));
+    }
+
+    /** 检查DWS授权状态（前端轮询用） */
+    public ResponseUtil<Map<String, Object>> checkDwsAuthStatus() {
+        Map<String, Object> dbStatus = dwsAuthService.checkDwsToken();
+        Map<String, Object> runtimeStatus = dwsAuthService.getAuthStatus();
+        Map<String, Object> result = new HashMap<>();
+        result.put("hasToken", dbStatus.get("hasToken"));
+        result.put("savedAt", dbStatus.getOrDefault("savedAt", ""));
+        result.put("runtimeAuthenticated", runtimeStatus.get("authenticated"));
+        result.put("tokenValid", runtimeStatus.get("tokenValid"));
+        result.put("expiresAt", runtimeStatus.getOrDefault("expiresAt", ""));
+        return ResponseUtil.successResponse(result);
+    }
+
+    /** 直接使用token授权 */
+    public ResponseUtil<Void> saveDwsToken(String token) {
+        boolean injected = dwsAuthService.injectToken(token);
+        if (!injected) {
+            return ResponseUtil.failRes("Token无效，注入失败");
+        }
+        dwsAuthService.recordAuthToDb();
         return ResponseUtil.successResponse(null);
     }
 }

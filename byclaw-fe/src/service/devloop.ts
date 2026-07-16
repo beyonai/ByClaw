@@ -82,3 +82,10 @@ export const removeProjectMember = (memberId: number) => POST<any>('/byaiService
 
 export const bindMemberAgent = (data: { memberId: number; agentId: number }) =>
   POST<any>('/byaiService/devloop/member/bindAgent', data);
+
+// DWS 钉钉授权
+export const startDwsDeviceAuth = () => POST<any>('/byaiService/devloop/dws/startDeviceAuth', {});
+
+export const checkDwsAuthStatus = () => POST<any>('/byaiService/devloop/dws/authStatus', {});
+
+export const saveDwsToken = (token: string) => POST<any>('/byaiService/devloop/dws/saveToken', { token });

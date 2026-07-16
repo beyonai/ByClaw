@@ -196,4 +196,28 @@ public class DevloopController {
     public ResponseUtil<Void> bindMemberAgent(@RequestBody Map<String, Object> params) {
         return applicationService.bindMemberAgent(params);
     }
+
+    // ========== DWS 钉钉授权 ==========
+
+    /** 启动设备授权流程（返回userCode和verificationUrl，前端打开URL让用户授权） */
+    @PostMapping("/dws/startDeviceAuth")
+    public ResponseUtil<Map<String, Object>> startDwsDeviceAuth() {
+        return applicationService.startDwsDeviceAuth();
+    }
+
+    /** 检查DWS授权状态（前端轮询，直到tokenValid=true） */
+    @PostMapping("/dws/authStatus")
+    public ResponseUtil<Map<String, Object>> checkDwsAuthStatus() {
+        return applicationService.checkDwsAuthStatus();
+    }
+
+    /** 直接使用token授权 */
+    @PostMapping("/dws/saveToken")
+    public ResponseUtil<Void> saveDwsToken(@RequestBody Map<String, Object> params) {
+        String token = params.get("token") != null ? params.get("token").toString() : "";
+        if (token.isEmpty()) {
+            return ResponseUtil.failRes("Token不能为空");
+        }
+        return applicationService.saveDwsToken(token);
+    }
 }
