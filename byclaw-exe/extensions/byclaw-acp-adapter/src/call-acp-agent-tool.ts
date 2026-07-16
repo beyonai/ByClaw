@@ -10,12 +10,15 @@ import {
   deriveLangfuseToolObservationId,
   updateLangfuseToolObservation,
 } from "../../shared/src/langfuse-tool-observation.js";
-import { appendBaiyingRemoteTaskStartedEvent } from "../../shared/src/remote-task-log.js";
 import { executeViaCallAgent } from "../../shared/src/call-agent.js";
 import { getDelegatedTaskToolDetails } from "../../shared/src/delegated-tool-details.js";
 import type { BaiyingEnhanceLogger } from "../../shared/src/debug-channel.js";
-import { logBaiyingRequest } from "../../shared/src/debug-channel.js";
-import type { Capability, Dict, ExecutorResponse } from "../../shared/src/executor-types.js";
+import type {
+  Capability,
+  Dict,
+  ExecutorResponse,
+  ResourceContext,
+} from "../../shared/src/executor-types.js";
 import { CALL_ACP_AGENT, DEFAULTS } from "./constants.js";
 import { buildCallAgentContentFromPlan, createByclawAcpPlan } from "./planner.js";
 import type { ByclawRegistry } from "./registry.js";
@@ -94,62 +97,6 @@ function withDelegatedAgentYieldDetails(result: ExecutorResponse): ExecutorRespo
     ...result,
     details: getDelegatedTaskToolDetails(),
   };
-}
-
-async function trackDelegatedTask(params: {
-  result: ExecutorResponse;
-  content: string;
-  toolCallId: string;
-  requesterSessionKey: string;
-  parentSessionKey?: string;
-  agentId: string;
-  byclawId: string;
-  logger?: BaiyingEnhanceLogger;
-  accountId?: string;
-  language?: string;
-  beyondToken?: string;
-}): Promise<void> {
-  const result = params.result;
-  if (!(isPlainRecord(result) && result.backend === "call_agent_sdk" && result.status === "running")) {
-    return;
-  }
-  const ack = isPlainRecord(result.data) ? result.data : {};
-  const taskId = normalizeText(ack.message_id);
-  const sessionId = normalizeText(ack.session_id);
-  if (!taskId || !sessionId) {
-    return;
-  }
-  const target = isPlainRecord(result.target) ? result.target : {};
-  const traceId = normalizeText(ack.trace_id);
-  const createdAt = Date.now();
-  const record = {
-    taskId,
-    messageId: taskId,
-    requesterSessionKey: params.requesterSessionKey,
-    parentSessionKey: params.parentSessionKey,
-    traceId,
-    sessionId,
-    streamName: String(ack.stream_name || `byai_gateway:session:${sessionId}:data_stream`),
-    toolCallId: params.toolCallId,
-    targetWorkerId: normalizeText(ack.target_worker_id) || normalizeText(target.target_worker_id),
-    targetAgentType: normalizeText(ack.target_agent_type) || normalizeText(target.target_agent_type),
-    tenantId: normalizeText(ack.tenant_id),
-    resourceId: params.byclawId,
-    agentId: params.agentId,
-    query: params.content,
-    createdAt,
-    updatedAt: createdAt,
-    status: "pending",
-    accountId: params.accountId,
-    language: params.language,
-    beyondToken: params.beyondToken,
-  };
-  await appendBaiyingRemoteTaskStartedEvent(record).catch((err) => {
-    logBaiyingRequest(params.logger, "byclaw_call_acp_agent.track_failed", {
-      task: record,
-      error: err instanceof Error ? err.message : String(err),
-    });
-  });
 }
 
 export type CreateByclawCallAcpAgentToolParams = {
@@ -286,6 +233,24 @@ export function createByclawCallAcpAgentTool(params: CreateByclawCallAcpAgentToo
       const content = buildCallAgentContentFromPlan(plan);
 
       const agentId = normalizeText(contextRecord.agentId) || CALL_ACP_AGENT.defaultAgentId;
+      const resourceContext: ResourceContext = {
+        root_agent: {
+          resourceId: agentId,
+        },
+        selected_resource: {
+          resourceId: plan.id,
+        },
+        session_key: requesterSessionKey,
+        requester_session_key: requesterSessionKey,
+        parent_session_key: channelResolve.parentSessionKey,
+        channel_session_id: channelResolve.sessionId,
+        channel_trace_id: channelResolve.traceId,
+        langfuse_trace_id: langfuseTraceId,
+        langfuse_parent_observation_id: langfuseParentObservationId,
+        accountId: channelResolve.accountId,
+        language: channelResolve.language,
+        beyondToken: channelResolve.beyondToken,
+      };
       const result = await executor({
         capability: {} as Capability,
         payload: {
@@ -304,6 +269,7 @@ export function createByclawCallAcpAgentTool(params: CreateByclawCallAcpAgentToo
         toolCallId,
         callMode: "async",
         responseType: CALL_ACP_AGENT.responseType,
+        resourceContext,
         signal,
         logger,
       });
@@ -314,19 +280,6 @@ export function createByclawCallAcpAgentTool(params: CreateByclawCallAcpAgentToo
           logger,
         });
       }
-      await trackDelegatedTask({
-        result,
-        content,
-        toolCallId,
-        requesterSessionKey,
-        parentSessionKey: channelResolve.parentSessionKey,
-        agentId,
-        byclawId: plan.id,
-        logger,
-        accountId: channelResolve.accountId,
-        language: channelResolve.language,
-        beyondToken: channelResolve.beyondToken,
-      });
       return withDelegatedAgentYieldDetails(result);
     },
   });

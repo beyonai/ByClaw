@@ -6,6 +6,12 @@ import process from "node:process";
 import readline from "node:readline";
 import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import {
+  applyByFrameworkRedisKeyPatch,
+  applyRedisEnvAliases,
+  createRedisClient,
+  readRedisConfig,
+} from "../../shared/src/redis-compat.js";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const requireFromScript = createRequire(import.meta.url);
@@ -191,12 +197,16 @@ async function importFramework() {
 }
 
 function readRedisInfo() {
+  applyRedisEnvAliases();
+  const config = readRedisConfig();
+  if (config.mode === "cluster") {
+    return config;
+  }
   return {
-    host: readNonEmptyEnv(ENV.redisHost) || DEFAULTS.redisHost,
-    port: readInteger(readNonEmptyEnv(ENV.redisPort), DEFAULTS.redisPort),
-    username: readNonEmptyEnv(ENV.redisUsername) || undefined,
-    password: readNonEmptyEnv(ENV.redisPassword) || undefined,
-    db: readInteger(readNonEmptyEnv(ENV.redisDatabase), DEFAULTS.redisDatabase),
+    ...config,
+    host: config.host || DEFAULTS.redisHost,
+    port: config.port ?? DEFAULTS.redisPort,
+    db: config.db ?? DEFAULTS.redisDatabase,
   };
 }
 
@@ -293,8 +303,8 @@ function buildExtraPayload(params) {
 
 async function dispatchPrompt(params) {
   const framework = await importFramework();
-  const { createRedis, GatewayClient, WorkerRegistry } = framework;
-  if (!createRedis || !GatewayClient || !WorkerRegistry) {
+  const { GatewayClient, QueueNames, RegistryKeys, WorkerRegistry } = framework;
+  if (!GatewayClient || !WorkerRegistry) {
     throw new Error("@byclaw/by-framework export shape is incompatible with the bridge");
   }
 
@@ -303,7 +313,9 @@ async function dispatchPrompt(params) {
     throw new Error(`${ENV.userCode} or ${ENV.fallbackUserCode} is required`);
   }
 
-  const redis = createRedis(readRedisInfo());
+  const redisInfo = readRedisInfo();
+  applyByFrameworkRedisKeyPatch({ QueueNames, RegistryKeys }, redisInfo);
+  const redis = createRedisClient(redisInfo);
   const registry = new WorkerRegistry(redis);
   const client = new GatewayClient(registry, redis);
   const targetAgentType = resolveTargetAgentType(userCode);

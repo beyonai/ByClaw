@@ -28,7 +28,7 @@ import { resolveLangfuseParentObservationIdWithRetry } from "../../langfuse-obse
 // place that should reference `doc-redis.ts`, and only when the caller has
 // explicitly opted into `BAIYING_DOC_BACKEND=raw`.
 import { createRedisClient, sendDocAsyncMessage } from "../doc-redis.js";
-import type Redis from "ioredis";
+import type { RedisClient } from "../../../../shared/src/redis-compat.js";
 
 /** Which backend sends + polls the DOC ASK_AGENT command. */
 export type DocBackend = "raw" | "sdk";
@@ -71,7 +71,7 @@ export async function executeDoc(params: {
   /** Override the backend selection; if omitted, `resolveDocBackend` is used. */
   backend?: DocBackend;
   /** Testing hook for the raw backend: injects a custom ioredis client factory. */
-  redisClientFactory?: () => Redis;
+  redisClientFactory?: () => RedisClient;
   /**
    * Progressive streaming hook. Forwarded to both SDK and raw backends;
    * invoked for every `answerDelta` event in sync call mode.
@@ -220,13 +220,13 @@ async function executeDatasetDocViaCallAgent(input: {
   signal?: AbortSignal;
   logger?: BaiyingEnhanceLogger;
 }): Promise<ExecutorResponse> {
+  const resourceContext = isRecord(input.parameters.resource_context)
+    ? (input.parameters.resource_context as ResourceContext)
+    : {};
   const sessionId = resolveDocSessionId(input.parameters, input.datasetId);
   const channelTraceId = resolveDocChannelTraceId(input.parameters);
   let langfuseParentObservationId = resolvePayloadLangfuseParentObservationId(input.parameters);
   if (!langfuseParentObservationId) {
-    const resourceContext = isRecord(input.parameters.resource_context)
-      ? (input.parameters.resource_context as Dict)
-      : {};
     langfuseParentObservationId = await resolveLangfuseParentObservationIdWithRetry(
       {
         ...input.parameters,
@@ -299,6 +299,8 @@ async function executeDatasetDocViaCallAgent(input: {
     signal: input.signal,
     logger: input.logger,
     parentMessageId: input.parameters.tool_call_id as string,
+    toolCallId: input.parameters.tool_call_id as string,
+    resourceContext,
   });
 }
 
@@ -435,7 +437,7 @@ type ExecuteDocViaRawInput = {
   sendParams: DocAsyncSendParams;
   syncTimeoutSec: number;
   syncIntervalSec: number;
-  redisClientFactory?: () => Redis;
+  redisClientFactory?: () => RedisClient;
   onDelta?: DocDeltaCallback;
   signal?: AbortSignal;
 };

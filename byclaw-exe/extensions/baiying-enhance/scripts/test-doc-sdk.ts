@@ -21,12 +21,16 @@
  *   pnpm tsx scripts/test-doc-sdk.ts
  */
 
-import { createRedis, QueueNames } from "@byclaw/by-framework";
+import { QueueNames, RegistryKeys } from "@byclaw/by-framework";
 import { BaiyingExecutor } from "../src/executor/executor.js";
 import type { Capability, Dict, ExecutorResponse } from "../src/executor/types.js";
 import { isRecord } from "../src/executor/types.js";
 import { executeDoc } from "../src/executor/resource-types/doc.js";
 import { readRedisConfig } from "../src/executor/doc-shared.js";
+import {
+  applyByFrameworkRedisKeyPatch,
+  createRedisClient,
+} from "../../shared/src/redis-compat.js";
 
 const AGENT_ID = "10025189";
 const SESSION_ID = "10045717";
@@ -131,13 +135,8 @@ async function xrangeSessionAfter(
   sinceMs: number,
 ): Promise<DumpedEvent[]> {
   const cfg = readRedisConfig();
-  const redis = createRedis({
-    host: cfg.host,
-    port: cfg.port,
-    db: cfg.db,
-    username: cfg.username,
-    password: cfg.password,
-  });
+  applyByFrameworkRedisKeyPatch({ QueueNames, RegistryKeys }, cfg);
+  const redis = createRedisClient(cfg);
   try {
     const streamName = QueueNames.session_data_stream(sessionId);
     // Redis stream IDs are "<msTs>-<seq>". An exclusive lower bound is "(<id>"

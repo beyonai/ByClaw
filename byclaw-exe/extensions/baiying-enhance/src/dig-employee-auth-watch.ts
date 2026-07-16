@@ -1,4 +1,9 @@
-import Redis from "ioredis";
+import {
+  createRedisClient,
+  hasRedisConnectionConfig,
+  readRedisConfig,
+  type RedisClient,
+} from "../../shared/src/redis-compat.js";
 
 type LoggerLike = {
   info: (message: string) => void;
@@ -91,9 +96,8 @@ export function createDigEmployeeAuthWatch(params: {
   onChange: (authorizedIds: Set<string>) => Promise<void> | void;
 }): DigEmployeeAuthWatch {
   const userCode = process.env.USER_CODE?.trim() || "";
-  const host = process.env.REDIS_HOST?.trim();
-  const port = Number.parseInt(process.env.REDIS_PORT?.trim() || "", 10);
-  const db = Number.parseInt(process.env.REDIS_DATABASE?.trim() || "", 10);
+  const redisConfig = readRedisConfig();
+  const db = redisConfig.db ?? 0;
   const configuredPollMs = Number.parseInt(process.env.BAIYING_DIG_AUTH_POLL_MS || "", 10);
   const connectTimeout = Math.max(
     500,
@@ -104,8 +108,8 @@ export function createDigEmployeeAuthWatch(params: {
     Number.parseInt(process.env.BAIYING_DIG_AUTH_KEY_MISSING_GRACE_MS || "15000", 10),
   );
   let pollMs = Number.isNaN(configuredPollMs) ? 5000 : Math.max(2000, configuredPollMs);
-  let redis: Redis | null = null;
-  let subscriber: Redis | null = null;
+  let redis: RedisClient | null = null;
+  let subscriber: RedisClient | null = null;
   let pollTimer: ReturnType<typeof setTimeout> | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let stopped = false;
@@ -124,20 +128,7 @@ export function createDigEmployeeAuthWatch(params: {
   const shareUserCodeKey = `SHARE_BFM_USER_CODE_${userCode}`;
   const authKeyOf = (uid: string) => `USER:RESOURCES:AUTH:${uid}`;
 
-  const redisOptions = () => ({
-    host,
-    port,
-    db,
-    username: process.env.REDIS_USERNAME?.trim() || undefined,
-    password: process.env.REDIS_PASSWORD?.trim() || undefined,
-    lazyConnect: true,
-    enableOfflineQueue: false,
-    connectTimeout,
-    retryStrategy: () => null,
-    maxRetriesPerRequest: 2,
-  });
-
-  const closeRedis = async (client: Redis | null) => {
+  const closeRedis = async (client: RedisClient | null) => {
     if (!client) {
       return;
     }
@@ -315,7 +306,7 @@ export function createDigEmployeeAuthWatch(params: {
     }
   };
 
-  const handleConnectionClosed = (client: Redis, label: string) => {
+  const handleConnectionClosed = (client: RedisClient, label: string) => {
     if (stopped || (client !== redis && client !== subscriber)) {
       return;
     }
@@ -332,9 +323,7 @@ export function createDigEmployeeAuthWatch(params: {
     }
     if (
       !userCode ||
-      !host ||
-      Number.isNaN(port) ||
-      Number.isNaN(db) ||
+      !hasRedisConnectionConfig(redisConfig) ||
       Number.isNaN(connectTimeout)
     ) {
       params.logger.warn(
@@ -343,8 +332,20 @@ export function createDigEmployeeAuthWatch(params: {
       return;
     }
     starting = true;
-    const nextRedis = new Redis(redisOptions());
-    const nextSubscriber = new Redis(redisOptions());
+    const nextRedis = createRedisClient(redisConfig, {
+      lazyConnect: true,
+      enableOfflineQueue: false,
+      connectTimeout,
+      retryStrategy: () => null,
+      maxRetriesPerRequest: 2,
+    });
+    const nextSubscriber = createRedisClient(redisConfig, {
+      lazyConnect: true,
+      enableOfflineQueue: false,
+      connectTimeout,
+      retryStrategy: () => null,
+      maxRetriesPerRequest: 2,
+    });
     nextRedis.on("error", (err) => {
       params.logger.warn(`baiying-enhance: dig-employee auth Redis error: ${err.message}`);
     });
