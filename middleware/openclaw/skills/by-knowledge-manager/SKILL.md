@@ -1,11 +1,21 @@
 ---
 name: by-knowledge-manager
-description: "Manage knowledge base content through the by-knowledge-manager CLI. Use when an agent or user needs to operate a knowledge base: list/create/rename/delete directories, check upload conflicts, upload or overwrite files, trigger or inspect builds, download files or directory archives, read file line ranges, remove files, or run semantic chunk search across one or more knowledge base resource IDs."
+description: "Manage knowledge base content through the by-knowledge-manager CLI. Use when an agent or user needs to operate a knowledge base: list/create/rename/delete directories, check upload conflicts, upload or overwrite files, trigger or inspect builds, download files or directory archives, read file line ranges, remove files, or run semantic chunk/file search across one or more knowledge base resource IDs."
 ---
 
 # BY Knowledge Manager
 
-Use this skill to manage knowledge base files and directories, and to search indexed chunks semantically.
+Use this skill to manage knowledge base files and directories, and to search indexed chunks or files semantically.
+
+## Prerequisites
+
+Before running the CLI, install the script dependencies from this skill's `scripts/` directory:
+
+```bash
+cd middleware/openclaw/skills/by-knowledge-manager/scripts && npm install
+```
+
+Do this before the first run in a new environment, or any time the runtime reports missing Node dependencies.
 
 ## Command Entry Point
 
@@ -35,9 +45,9 @@ node scripts/by-knowledge-manager.mjs upload \
 ## Operating Rules
 
 - Determine the target knowledge base before operating. If the user has not specified which knowledge base to access, ask them to provide the target `--resource-id` first.
-- For `search`, ask whether to search one knowledge base or multiple knowledge bases when the target is unclear; pass multiple IDs by repeating `--resource-id`.
+- For `search` and `search-file`, ask whether to search one knowledge base or multiple knowledge bases when the target is unclear; pass multiple IDs by repeating `--resource-id`.
 - Run `help` first when command syntax might have changed; treat the JSON help as authoritative.
-- Prefer read-only commands (`list`, `read-file`, `search`, `build-status`, `download`) while exploring.
+- Prefer read-only commands (`list`, `read-file`, `search`, `search-file`, `build-status`, `download`) while exploring.
 - Use `--dry-run` on mutating commands when validating paths or payloads before changing the knowledge base.
 - Ask before destructive or irreversible operations unless the user explicitly requested them: `delete-dir`, `remove-file`, and overwriting via `update-file`.
 - After any file or directory operation that changes knowledge base contents (`mkdir`, `rename-dir`, `delete-dir`, `upload`, `update-file`, `remove-file`), run `list` on the target parent directory to verify the expected result.
@@ -176,6 +186,22 @@ node scripts/by-knowledge-manager.mjs search --resource-id RESOURCE_ID_A --resou
 ```
 
 Interpret each search item as a chunk hit with `resourceId`, `filePath`, `chunkNo`, `chunkText`, `score`, and optional `startLine`/`endLine`/`imagePath`. Cite or summarize results by file path and line range when present. When a chunk looks relevant, run `read-file` on the same `filePath` with a slightly wider line range.
+
+### Semantic file search
+
+Use `search-file` when the user wants relevant files first instead of chunk snippets:
+
+```bash
+node scripts/by-knowledge-manager.mjs search-file --resource-id RESOURCE_ID --query "故障" --top-k 10
+```
+
+Search multiple knowledge bases by repeating `--resource-id`:
+
+```bash
+node scripts/by-knowledge-manager.mjs search-file --resource-id RESOURCE_ID_A --resource-id RESOURCE_ID_B --query "故障" --top-k 10
+```
+
+Interpret each search item as a file hit with `resourceId`, `filePath`, `score`, and optional `metadata`. When a file looks relevant, run `read-file` on the same `filePath` or `download` it for deeper inspection.
 
 ### Delete content
 

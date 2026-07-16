@@ -34,4 +34,6 @@ public class DirAndFileVo {
 
     private String directoryPath;
 
+    private Long size;
+
 }

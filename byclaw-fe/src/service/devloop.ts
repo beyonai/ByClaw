@@ -1,0 +1,98 @@
+import { POST } from '@/service/common/request';
+
+// 项目管理
+export const createProject = (data: {
+  projectName: string;
+  description?: string;
+  resourceId?: number;
+  repos?: { repoFullName: string; repoUrl?: string; defaultBranch?: string }[];
+}) => POST<any>('/byaiService/devloop/project/create', data);
+
+export const listProjects = (data?: { keyword?: string }) => POST<any>('/byaiService/devloop/project/list', data || {});
+
+export const getProject = (projectId: number) => POST<any>('/byaiService/devloop/project/get', { projectId });
+
+export const updateProject = (data: { projectId: number; projectName?: string; description?: string }) =>
+  POST<any>('/byaiService/devloop/project/update', data);
+
+export const deleteProject = (projectId: number) => POST<any>('/byaiService/devloop/project/delete', { projectId });
+
+// 项目空间按会话分组展示，创建会话后需要显式建立项目-会话关系。
+export const bindProjectSession = (data: { projectId: number; sessionId: number }) =>
+  POST<any>('/byaiService/devloop/project/session/bind', data);
+
+export const unbindProjectSession = (data: { projectId: number; sessionId: number }) =>
+  POST<any>('/byaiService/devloop/project/session/unbind', data);
+
+// 扫描源管理
+export const createScanSource = (data: {
+  projectId: number;
+  sourceName: string;
+  sourceType: string;
+  config: string;
+  cronExpr?: string;
+  enabled?: string;
+}) => POST<any>('/byaiService/devloop/source/create', data);
+
+export const updateScanSource = (data: { sourceId: number; sourceName?: string; config?: string; cronExpr?: string }) =>
+  POST<any>('/byaiService/devloop/source/update', data);
+
+export const deleteScanSource = (sourceId: number) => POST<any>('/byaiService/devloop/source/delete', { sourceId });
+
+export const listScanSources = (projectId: number) => POST<any>('/byaiService/devloop/source/list', { projectId });
+
+export const toggleScanSource = (sourceId: number, enabled: string) =>
+  POST<any>('/byaiService/devloop/source/toggle', { sourceId, enabled });
+
+export const triggerScan = (sourceId: number) => POST<any>('/byaiService/devloop/source/scan', { sourceId });
+
+// 扫描日志
+export const listScanLogs = (sourceId: number, limit = 20) =>
+  POST<any>('/byaiService/devloop/log/list', { sourceId, limit });
+
+export const listScanLogItems = (logId: number) => POST<any>('/byaiService/devloop/log/items', { logId });
+
+// PAT 管理
+export const saveGitHubPat = (pat: string) => POST<any>('/byaiService/devloop/pat/github', { pat });
+
+export const checkGitHubPat = () => POST<any>('/byaiService/devloop/pat/github/check', {});
+
+// 钉钉群搜索
+export const searchDingtalkGroups = (query: string) =>
+  POST<any>('/byaiService/devloop/dingtalk/groups/search', { query });
+
+// 研发任务
+export const createTask = (data: { projectId: number; sourceItemId?: number; title?: string }) =>
+  POST<any>('/byaiService/devloop/task/create', data);
+
+export const listTasks = (projectId: number) => POST<any>('/byaiService/devloop/task/list', { projectId });
+
+export const updateTask = (data: {
+  taskId: number;
+  status?: string;
+  phase?: string;
+  currentRound?: number;
+  score?: number;
+  warningTag?: string;
+  sessionId?: number;
+}) => POST<any>('/byaiService/devloop/task/update', data);
+
+export const getTaskDetail = (taskId: number) => POST<any>('/byaiService/devloop/task/detail', { taskId });
+
+// 项目成员
+export const addProjectMember = (data: { projectId: number; userId: string; userCode?: string; userName?: string }) =>
+  POST<any>('/byaiService/devloop/member/add', data);
+
+export const listProjectMembers = (projectId: number) => POST<any>('/byaiService/devloop/member/list', { projectId });
+
+export const removeProjectMember = (memberId: number) => POST<any>('/byaiService/devloop/member/remove', { memberId });
+
+export const bindMemberAgent = (data: { memberId: number; agentId: number }) =>
+  POST<any>('/byaiService/devloop/member/bindAgent', data);
+
+// DWS 钉钉授权
+export const startDwsDeviceAuth = () => POST<any>('/byaiService/devloop/dws/startDeviceAuth', {});
+
+export const checkDwsAuthStatus = () => POST<any>('/byaiService/devloop/dws/authStatus', {});
+
+export const saveDwsToken = (token: string) => POST<any>('/byaiService/devloop/dws/saveToken', { token });

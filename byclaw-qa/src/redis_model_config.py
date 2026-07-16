@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import inspect
 import json
-import os
 import asyncio
 from contextvars import ContextVar
 from dataclasses import fields, is_dataclass
@@ -14,6 +13,7 @@ from by_qa.config import get_settings
 from by_qa.core import logger
 from by_qa.core.model_config import LLMModelProfile, ModelConfig, ModelConfigProvider
 from exceptions import ModelConfigError, ModelNotFoundError
+from redis_runtime import init_shared_redis_from_env
 
 
 AI_MODEL_TYPE_REDIS_KEY = "byai:aimodel:typelist"
@@ -308,20 +308,7 @@ def _model_config_accepts(field_name: str) -> bool:
 
 
 def _create_redis_client_from_env() -> Any:
-    import redis.asyncio as aioredis
-
-    return aioredis.Redis(
-        host=os.getenv("BYAI_REDIS_HOST", os.getenv("REDIS_HOST", "localhost")),
-        port=int(os.getenv("BYAI_REDIS_PORT", os.getenv("REDIS_PORT", 6379))),
-        db=int(
-            os.getenv(
-                "BYAI_REDIS_DB",
-                os.getenv("REDIS_DATABASE", os.getenv("REDIS_DB", 0)),
-            )
-        ),
-        username=os.getenv("BYAI_REDIS_USERNAME", os.getenv("REDIS_USERNAME")) or None,
-        password=os.getenv("BYAI_REDIS_PASSWORD", os.getenv("REDIS_PASSWORD")) or None,
-    )
+    return init_shared_redis_from_env()
 
 
 def _get_shared_redis_client() -> Any:

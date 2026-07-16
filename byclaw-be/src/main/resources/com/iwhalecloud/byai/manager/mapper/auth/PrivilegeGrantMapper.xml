@@ -458,8 +458,16 @@
                 </when>
             </choose>
             <if test="keyword != null and keyword != ''">
-                and (a.resource_name like concat('%', #{keyword}, '%')
-                    or a.resource_desc like concat('%', #{keyword}, '%'))
+                <choose>
+                    <!-- 配置技能弹窗只按技能 resourceCode 模糊搜索，避免描述命中导致结果不直观。 -->
+                    <when test="resourceBizTypeList != null and resourceBizTypeList.size() == 1 and resourceBizTypeList.contains('SKILL')">
+                        and a.resource_code like concat('%', #{keyword}, '%')
+                    </when>
+                    <otherwise>
+                        and (a.resource_name like concat('%', #{keyword}, '%')
+                            or a.resource_desc like concat('%', #{keyword}, '%'))
+                    </otherwise>
+                </choose>
             </if>
         </where>
         order by case when a.resource_status = 3 then 1 else 0 end asc,

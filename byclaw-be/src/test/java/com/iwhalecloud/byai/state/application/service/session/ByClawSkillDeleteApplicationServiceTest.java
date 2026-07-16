@@ -126,4 +126,15 @@ class ByClawSkillDeleteApplicationServiceTest {
         assertEquals("Skill 目录不存在或已被删除", ex.getMessage());
     }
 
+    @Test
+    void shouldIgnoreMissingSkillDirectoryWhenDeleteIfExists() {
+        when(skillPathResolver.resolveSkillRootPrefix(USER_CODE, RESOURCE_ID))
+            .thenReturn("/.openclaw/workspace-baiying-agent-10000417/skills/");
+        when(userFS.list(eq(AGENT_SKILL_PATH + "/"), isNull())).thenReturn(Collections.emptyList());
+
+        boolean deleted = service.deleteSkillIfExists(USER_CODE, RESOURCE_ID, AGENT_SKILL_PATH);
+
+        assertEquals(false, deleted);
+    }
+
 }

@@ -134,6 +134,28 @@ collect_missing_minio_source_env() {
     fi
 }
 
+is_redis_cluster_mode() {
+    [[ -n "${REDIS_CLUSTER_HOST-}" || -n "${REDIS_CLUSTER_NODES-}" ]]
+}
+
+collect_missing_redis_source_env() {
+    local missing_ref="$1"
+
+    if is_redis_cluster_mode; then
+        if [[ -z "${REDIS_CLUSTER_HOST-}" && -z "${REDIS_CLUSTER_NODES-}" ]]; then
+            eval "$missing_ref+=(\"REDIS_CLUSTER_HOST\")"
+        fi
+        if [[ -z "${REDIS_KEY_SCHEMA_VERSION-}" ]]; then
+            eval "$missing_ref+=(\"REDIS_KEY_SCHEMA_VERSION\")"
+        fi
+        return
+    fi
+
+    collect_missing_env "$missing_ref" \
+        REDIS_HOST \
+        REDIS_PORT
+}
+
 print_missing_env() {
     local mode="$1"
     shift
@@ -152,14 +174,12 @@ collect_required_source_missing_env() {
         HOST \
         DB_USER \
         DB_PASS \
-        REDIS_HOST \
-        REDIS_PORT \
-        REDIS_DATABASE \
         BYCLAW_QA_PORT \
         BYCLAW_QA_AGENT_DATA_PATH \
         BYCLAW_QA_KB_FETCH_CACHE_TTL_SECONDS \
         BYCLAW_QA_KB_FETCH_CACHE_CLEANUP_INTERVAL_SECONDS \
         BYCLAW_QA_BYAI_WORKER_ID
+    collect_missing_redis_source_env "$missing_ref"
     if using_custom_storage_provider; then
         return 0
     fi
@@ -167,6 +187,17 @@ collect_required_source_missing_env() {
         BYCLAW_QA_KB_MINIO_BUCKET \
         BYCLAW_QA_KB_MINIO_MARKDOWN_BUCKET
     collect_missing_minio_source_env "$missing_ref"
+}
+
+validate_redis_source_env() {
+    if ! is_redis_cluster_mode; then
+        return 0
+    fi
+
+    if [[ "${REDIS_KEY_SCHEMA_VERSION-}" != "v2" ]]; then
+        printf 'Invalid Redis cluster configuration: REDIS_KEY_SCHEMA_VERSION must be v2 when Redis cluster mode is enabled.\n' >&2
+        return 1
+    fi
 }
 
 check_required_env() {
@@ -178,6 +209,8 @@ check_required_env() {
         print_missing_env "$mode" "${missing[@]}"
         return 1
     fi
+
+    validate_redis_source_env
 }
 
 case "$MODE" in

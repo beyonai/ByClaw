@@ -16,6 +16,10 @@ import com.iwhalecloud.byai.manager.dto.resource.DatasetBuild;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetDto;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetIdDto;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeReadFileRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeGlobRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeItemReferencesRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileSearchRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeItemsMoveRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeSearchRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeUploadConflictCheckRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeUploadConflictCheckResponse;
@@ -32,7 +36,10 @@ import com.iwhalecloud.byai.state.domain.resource.vo.DatasetDetailVo;
 import com.iwhalecloud.byai.state.domain.resource.vo.DatasetVo;
 import com.iwhalecloud.byai.state.domain.resource.vo.KnowledgeCapabilityVo;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbFileReadResult;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileSearchResult;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeItemReferencesResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeSearchResult;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeItemsMoveResult;
 import com.iwhalecloud.byai.common.feign.request.knowledge.Folder;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
@@ -184,6 +191,31 @@ public class DatasetController {
     }
 
     /**
+     * 批量移动知识库文件或目录。
+     */
+    @PostMapping("/moveKnowledgeItems")
+    public ResponseUtil<KnowledgeItemsMoveResult> moveKnowledgeItems(
+        @Valid @RequestBody KnowledgeItemsMoveRequest request) {
+        return ResponseUtil.successResponse(I18nUtil.get("dataset.items.move.success"),
+            datasetApplicationService.moveKnowledgeItems(request));
+    }
+
+    /** 查询 Markdown 文件的入站、出站引用关系。 */
+    @PostMapping("/knowledgeItems/references")
+    public ResponseUtil<KnowledgeItemReferencesResult> knowledgeItemReferences(
+        @Valid @RequestBody KnowledgeItemReferencesRequest request) {
+        return ResponseUtil.successResponse(I18nUtil.get("dataset.dir.file.query.success"),
+            datasetApplicationService.knowledgeItemReferences(request));
+    }
+
+    /** 按 QA glob 单层通配规则匹配文件或目录。 */
+    @PostMapping("/glob")
+    public ResponseUtil<List<DirAndFileVo>> globKnowledgeItems(@Valid @RequestBody KnowledgeGlobRequest request) {
+        return ResponseUtil.successResponse(I18nUtil.get("dataset.dir.file.query.success"),
+            datasetApplicationService.globKnowledgeItems(request));
+    }
+
+    /**
      * 列出文件资源
      *
      * @return ResponseUtil
@@ -238,7 +270,7 @@ public class DatasetController {
 
             directoryPath = new String(directoryPath.getBytes(StandardCharsets.ISO_8859_1), StandardCharsets.UTF_8);
             UploadResult uploadResult = datasetApplicationService.uploadFiles(files, resourceId, directoryPath,
-                fileDescription, Boolean.valueOf(processFrontMatter), Boolean.valueOf(overwrite));
+                fileDescription, parseOptionalBoolean(processFrontMatter), Boolean.valueOf(overwrite));
             return ResponseUtil.successResponse(I18nUtil.get("dataset.file.upload.success"), uploadResult);
         }
         catch (Exception e) {
@@ -340,9 +372,20 @@ public class DatasetController {
      * @return chunk 检索结果
      */
     @PostMapping(value = "/knowledgeItems/search")
-    public ResponseUtil<KnowledgeSearchResult> searchKnowledgeItems(@RequestBody KnowledgeSearchRequest request) {
+    public ResponseUtil<KnowledgeSearchResult> searchKnowledgeItems(
+        @Valid @RequestBody KnowledgeSearchRequest request) {
         return ResponseUtil.successResponse(I18nUtil.get("dataset.dir.file.query.success"),
             datasetApplicationService.searchKnowledgeItems(request));
+    }
+
+    /**
+     * Agent DSL 文件级语义检索，按当前用户可访问的知识库资源范围执行。
+     */
+    @PostMapping(value = "/knowledgeItems/searchFile")
+    public ResponseUtil<KnowledgeFileSearchResult> searchKnowledgeFiles(
+        @RequestBody @Valid KnowledgeFileSearchRequest request) {
+        return ResponseUtil.successResponse(I18nUtil.get("dataset.file.search.success"),
+            datasetApplicationService.searchKnowledgeFiles(request));
     }
 
     /**
@@ -454,6 +497,10 @@ public class DatasetController {
         String resolvedFileName = fileName == null || fileName.isBlank() ? "converted.md" : fileName;
         String encoded = URLEncoder.encode(resolvedFileName, StandardCharsets.UTF_8).replace("+", "%20");
         return "attachment; filename=\"" + encoded + "\"; filename*=UTF-8''" + encoded;
+    }
+
+    private Boolean parseOptionalBoolean(String value) {
+        return value == null || value.isBlank() ? null : Boolean.valueOf(value);
     }
 
     /**

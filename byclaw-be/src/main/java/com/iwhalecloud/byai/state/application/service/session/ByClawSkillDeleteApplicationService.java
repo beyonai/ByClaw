@@ -42,17 +42,38 @@ public class ByClawSkillDeleteApplicationService {
             throw new IllegalArgumentException(I18nUtil.get("byclaw.user.code.notempty"));
         }
         String normalizedSkillPath = normalizeSkillPath(userCode, skillPath, resourceId);
-        List<String> objectKeys = ByClawUserWorkspacePaths.withUserContext(userCode, () -> userFS.list(normalizedSkillPath + "/", null));
-        if (objectKeys == null || objectKeys.isEmpty()) {
+        if (!deleteNormalizedSkillIfExists(userCode, normalizedSkillPath)) {
             throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.delete.notfound"));
         }
+        return new ByClawSkillDto(extractSkillName(normalizedSkillPath), normalizedSkillPath, null);
+    }
 
+    /**
+     * 删除目录技能；目录已经不存在时返回 {@code false}，不视为业务异常。
+     *
+     * <p>供资源化的历史 {@code CHAT_UPLOAD} 技能解绑时清理遗留工作区副本使用。调用方已持有
+     * 资源解绑权限，本方法仍会严格校验路径必须位于对应数字员工的 skills 根目录下。</p>
+     */
+    public boolean deleteSkillIfExists(String userCode, Long resourceId, String skillPath) {
+        if (StringUtils.isBlank(userCode)) {
+            throw new IllegalArgumentException(I18nUtil.get("byclaw.user.code.notempty"));
+        }
+        String normalizedSkillPath = normalizeSkillPath(userCode, skillPath, resourceId);
+        return deleteNormalizedSkillIfExists(userCode, normalizedSkillPath);
+    }
+
+    private boolean deleteNormalizedSkillIfExists(String userCode, String normalizedSkillPath) {
+        List<String> objectKeys = ByClawUserWorkspacePaths.withUserContext(userCode,
+            () -> userFS.list(normalizedSkillPath + "/", null));
+        if (objectKeys == null || objectKeys.isEmpty()) {
+            return false;
+        }
         ByClawUserWorkspacePaths.withUserContext(userCode, () -> {
             userFS.init();
             userFS.delete(normalizedSkillPath + "/");
             return null;
         });
-        return new ByClawSkillDto(extractSkillName(normalizedSkillPath), normalizedSkillPath, null);
+        return true;
     }
 
     private String normalizeSkillPath(String userCode, String skillPath, Long resourceId) {

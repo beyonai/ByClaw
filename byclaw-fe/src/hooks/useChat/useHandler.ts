@@ -22,10 +22,11 @@ import { chatSessionRuntimeManager } from '@/utils/chatSessionRuntimeManager';
 type IProps = {
   addSession: (newSession: ISession) => void;
   setSessionId: (sessionId: string) => void;
+  onSessionCreated?: (params: { sessionId: string; clientRequestId?: string }) => void;
 };
 
 function useHandler(props: IProps) {
-  const { addSession, setSessionId } = props;
+  const { addSession, setSessionId, onSessionCreated } = props;
 
   const dispatch = useDispatch();
 
@@ -72,6 +73,14 @@ function useHandler(props: IProps) {
         sessionId: newSessionId,
       });
 
+      if (sseMsg.event === 'createSession') {
+        // 只有新建会话事件触发项目绑定，后续流式事件不重复处理项目归属。
+        onSessionCreated?.({
+          sessionId: newSessionId,
+          clientRequestId: sseMsg.clientRequestId,
+        });
+      }
+
       if (!curSessioneRef.current) {
         // 设置当前会话ID
         setSessionId(newSessionId);
@@ -88,7 +97,7 @@ function useHandler(props: IProps) {
 
       return onionsProps;
     },
-    [addSession, setSessionId, dispatch]
+    [addSession, setSessionId, dispatch, onSessionCreated]
   );
 
   const messageIdHandler = useCallback((onionsProps: IOnionsProps) => {

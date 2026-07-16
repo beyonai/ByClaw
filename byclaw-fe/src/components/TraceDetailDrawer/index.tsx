@@ -1,10 +1,6 @@
 // @ts-nocheck
-// Shared single-trace detail drawer. Used by the chat surface (MoreActions
-// "View trace") and reusable from anywhere a traceId is in hand. Renders the
-// trace's input/output (timeline basic info) plus an "Open in Langfuse"
-// external link when host + projectId are configured.
 import React, { Fragment, useEffect, useMemo, useState } from 'react';
-import { Button, Drawer, DrawerProps, Empty, Spin, Tooltip, message } from 'antd';
+import { Button, Drawer, DrawerProps, Empty, Spin, Tag, Tooltip, message } from 'antd';
 import { ExportOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 
@@ -21,27 +17,63 @@ interface TraceDetailDrawerProps extends Omit<DrawerProps, 'onClose'> {
   onClose: () => void;
 }
 
-// Response from getTraceTimelineBasicInfo can be either { traceInfo: {...} }
-// or { data: { traceInfo: {...} } } depending on request layer config; tolerate both.
-const pickTraceInfo = (raw: any) => raw?.traceInfo || raw?.data?.traceInfo || raw;
+const pickTraceData = (raw: any) => raw?.data || raw;
+
+const stringifyContent = (value: any) => {
+  if (value === undefined || value === null || value === '') return '';
+  return typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+};
+
+const formatLatency = (value: any) => {
+  if (value === undefined || value === null || value === '') return '';
+  if (typeof value === 'number') {
+    return value >= 100 ? `${Math.round(value)}ms` : `${Math.round(value * 1000)}ms`;
+  }
+  return `${value}`;
+};
+
+function TimelineNode({ node, depth = 0 }: { node: any; depth?: number }) {
+  const children = Array.isArray(node?.children) ? node.children : [];
+  const latency = formatLatency(node?.latency);
+  const preview = stringifyContent(node?.input || node?.output);
+
+  return (
+    <div className={ss.timelineNode} style={{ marginLeft: depth ? 18 : 0 }}>
+      <div className={ss.timelineHeader}>
+        <Tag color={node?.type === 'GENERATION' ? 'blue' : 'default'}>{node?.type || 'OBSERVATION'}</Tag>
+        <span className={ss.timelineName}>{node?.name || node?.id || 'unknown'}</span>
+        {node?.status ? <Tag color={node.status === 'ERROR' ? 'red' : 'green'}>{node.status}</Tag> : null}
+        {latency ? <span className={ss.timelineMeta}>{latency}</span> : null}
+      </div>
+      {node?.model ? <div className={ss.timelineMeta}>model: {node.model}</div> : null}
+      {preview ? <pre className={ss.timelinePreview}>{preview}</pre> : null}
+      {children.length > 0 ? (
+        <div className={ss.timelineChildren}>
+          {children.map((child: any, index: number) => (
+            <TimelineNode key={child?.id || `${node?.id || 'node'}-${index}`} node={child} depth={depth + 1} />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 export default function TraceDetailDrawer({ open, traceId, agentName, onClose, ...rest }: TraceDetailDrawerProps) {
   const intl = useIntl();
   const [loading, setLoading] = useState(false);
-  const [traceInfo, setTraceInfo] = useState<any>(null);
+  const [traceData, setTraceData] = useState<any>(null);
 
   const config = useLangfuseConfigStore((s) => s.config);
   const ensureConfigLoaded = useLangfuseConfigStore((s) => s.ensureLoaded);
 
   useEffect(() => {
     if (!open) return;
-    // Lazy-load /langfuse/config the first time the drawer is opened in a session.
     void ensureConfigLoaded();
   }, [open, ensureConfigLoaded]);
 
   useEffect(() => {
     if (!open || !traceId) {
-      setTraceInfo(null);
+      setTraceData(null);
       return;
     }
     let cancelled = false;
@@ -49,11 +81,11 @@ export default function TraceDetailDrawer({ open, traceId, agentName, onClose, .
     getTraceTimelineBasicInfo({ traceId })
       .then((res: any) => {
         if (cancelled) return;
-        setTraceInfo(pickTraceInfo(res));
+        setTraceData(pickTraceData(res));
       })
       .catch(() => {
         if (cancelled) return;
-        setTraceInfo(null);
+        setTraceData(null);
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -64,6 +96,8 @@ export default function TraceDetailDrawer({ open, traceId, agentName, onClose, .
   }, [open, traceId]);
 
   const externalUrl = useMemo(() => buildLangfuseTraceUrl(config?.host, config?.projectId, traceId), [config, traceId]);
+  const traceInfo = traceData?.traceInfo || traceData;
+  const timeline = Array.isArray(traceData?.timeline) ? traceData.timeline : [];
 
   const handleOpenExternal = () => {
     if (!externalUrl) {
@@ -98,35 +132,38 @@ export default function TraceDetailDrawer({ open, traceId, agentName, onClose, .
     >
       <Spin spinning={loading}>
         <section className={ss.main}>
-          {traceInfo ? (
+          {traceData ? (
             <Fragment>
-              {traceInfo.input !== null ? (
+              {traceInfo?.input !== null && traceInfo?.input !== undefined ? (
                 <div className={ss.block}>
                   <div className={ss.blockTitle}>{intl.formatMessage({ id: 'traceDetail.input' })}</div>
                   <div className={ss.bubble}>
-                    <Markdown
-                      content={
-                        typeof traceInfo.input === 'string' ? traceInfo.input : JSON.stringify(traceInfo.input, null, 2)
-                      }
-                    />
+                    <Markdown content={stringifyContent(traceInfo.input)} />
                   </div>
                 </div>
               ) : null}
-              {traceInfo.output !== null ? (
+              {timeline.length > 0 ? (
+                <div className={ss.block}>
+                  <div className={ss.blockTitle}>{intl.formatMessage({ id: 'traceDetail.timeline' })}</div>
+                  <div className={ss.timeline}>
+                    {timeline.map((node: any, index: number) => (
+                      <TimelineNode key={node?.id || `root-${index}`} node={node} />
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+              {traceInfo?.output !== null && traceInfo?.output !== undefined ? (
                 <div className={ss.block}>
                   <div className={ss.blockTitle}>
                     {agentName || intl.formatMessage({ id: 'traceDetail.defaultAgentName' })}
                   </div>
                   <div className={ss.bubble}>
-                    <Markdown
-                      content={
-                        typeof traceInfo.output === 'string'
-                          ? traceInfo.output
-                          : JSON.stringify(traceInfo.output, null, 2)
-                      }
-                    />
+                    <Markdown content={stringifyContent(traceInfo.output)} />
                   </div>
                 </div>
+              ) : null}
+              {timeline.length === 0 && (traceInfo?.output === undefined || traceInfo?.output === null) ? (
+                <Empty description={intl.formatMessage({ id: 'traceDetail.empty' })} />
               ) : null}
               {traceId ? (
                 <div className={ss.meta}>

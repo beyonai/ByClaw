@@ -288,8 +288,8 @@ const Assistant = React.memo((props: { showAssistantTips?: boolean }) => {
             releasePendingTips();
           }}
           style={{ display: videoEnded ? 'none' : 'block', width: '100%' }}
-          // eslint-disable-next-line react/no-unknown-property
-          fetchPriority="low"
+          // React 18 不识别 camelCase fetchPriority，透传小写属性避免控制台告警。
+          {...{ fetchpriority: 'low' }}
         />
         {showAssistantTips && displayTips && (
           <div className={styles.tips} onClick={handleTipsClick}>

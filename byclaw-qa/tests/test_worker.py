@@ -59,6 +59,8 @@ _worker_mod_mock.GatewayWorker = _GatewayWorker
 
 _by_framework_mock = ModuleType("by_framework")
 _by_framework_common_mock = ModuleType("by_framework.common")
+_by_framework_common_config_mock = MagicMock()
+_by_framework_common_redis_client_mock = MagicMock()
 _by_framework_core_mock = ModuleType("by_framework.core")
 _by_framework_core_protocol_mock = ModuleType("by_framework.core.protocol")
 _by_framework_worker_context_mock = ModuleType("by_framework.worker.context")
@@ -67,13 +69,17 @@ _by_framework_mock.common = _by_framework_common_mock
 _by_framework_mock.core = _by_framework_core_mock
 _by_framework_mock.worker = _worker_mod_mock
 _by_framework_common_mock.emitter = _sse_mock
+_by_framework_common_mock.config = _by_framework_common_config_mock
+_by_framework_common_mock.redis_client = _by_framework_common_redis_client_mock
 _by_framework_core_mock.protocol = _by_framework_core_protocol_mock
 _by_framework_core_protocol_mock.event_type = _event_type_mock
 
 _mocks = {
     "by_framework": _by_framework_mock,
     "by_framework.common": _by_framework_common_mock,
+    "by_framework.common.config": _by_framework_common_config_mock,
     "by_framework.common.emitter": _sse_mock,
+    "by_framework.common.redis_client": _by_framework_common_redis_client_mock,
     "by_framework.core": _by_framework_core_mock,
     "by_framework.core.protocol": _by_framework_core_protocol_mock,
     "by_framework.core.protocol.event_type": _event_type_mock,
@@ -103,7 +109,7 @@ _mocks = {
 
 with patch.dict(sys.modules, _mocks):
     import worker as worker_module
-    from worker import InstantSearchWorker, convert_node_name_to_title, parse_dataset_ids
+    from worker import InstantSearchWorker, convert_node_name_to_title, parse_dataset_ids, main
 
 # Keep worker accessible for patch("worker.ByHttpClient", ...) style patches
 sys.modules.setdefault("worker", worker_module)
@@ -137,6 +143,61 @@ def test_parse_dataset_ids_with_spaces():
 
 def test_parse_dataset_ids_trailing_comma():
     assert parse_dataset_ids("1,2,") == [1, 2]
+
+
+def test_main_uses_redis_cluster_config_when_starting_worker():
+    config = SimpleNamespace(
+        host="127.0.0.1",
+        port=6379,
+        db=4,
+        username="user",
+        password="secret",
+        max_connections=32,
+        mode="cluster",
+        cluster_nodes=[("10.0.0.1", 6379), ("10.0.0.2", 6379)],
+    )
+
+    with (
+        patch.object(worker_module, "load_redis_config_from_env", return_value=config) as load_config,
+        patch.object(worker_module.worker_mod, "run_worker") as run_worker,
+        patch.object(worker_module, "extract_ip", return_value="10.0.0.9"),
+        patch.dict(worker_module.os.environ, {"BYAI_WORKER_ID": "worker-9"}, clear=False),
+    ):
+        main()
+
+    load_config.assert_called_once_with()
+    run_worker.assert_called_once_with(
+        InstantSearchWorker,
+        worker_id="worker-9-10.0.0.9",
+        redis_mode="cluster",
+    )
+
+
+def test_main_uses_redis_standalone_config_when_starting_worker():
+    config = SimpleNamespace(
+        host="127.0.0.1",
+        port=6379,
+        db=4,
+        username="user",
+        password="secret",
+        max_connections=32,
+        mode="standalone",
+        cluster_nodes=None,
+    )
+
+    with (
+        patch.object(worker_module, "load_redis_config_from_env", return_value=config),
+        patch.object(worker_module.worker_mod, "run_worker") as run_worker,
+        patch.object(worker_module, "extract_ip", return_value="10.0.0.9"),
+        patch.dict(worker_module.os.environ, {"BYAI_WORKER_ID": "worker-9"}, clear=False),
+    ):
+        main()
+
+    run_worker.assert_called_once_with(
+        InstantSearchWorker,
+        worker_id="worker-9-10.0.0.9",
+        redis_mode="standalone",
+    )
 
 
 # --- convert_node_name_to_title ---

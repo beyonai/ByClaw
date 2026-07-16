@@ -258,7 +258,10 @@ function TreeFilter(props: IProps) {
                   style={{ cursor: 'pointer' }}
                   onClick={() => {
                     onSelect(item);
-                    onOk?.([item]);
+                    // 无子级时 onSingleSelect 已经触发 onOk；仅层级筛选的快捷项需要手动提交，避免单层筛选重复请求。
+                    if (hasChildItem) {
+                      onOk?.([item]);
+                    }
                   }}
                 >
                   {item.label}

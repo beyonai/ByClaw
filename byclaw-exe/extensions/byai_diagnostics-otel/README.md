@@ -12,6 +12,44 @@ BYAI fork of the OpenClaw diagnostics OTLP exporter. It registers as **`diagnost
 
 Use the same top-level `diagnostics.otel` config as stock `diagnostics-otel`.
 
+Content attribute limits can be configured under
+`plugins.entries.diagnostics-otel.config.contentLimits`. The exporter also reads
+`diagnostics.otel.contentLimits` for hosts whose diagnostics config schema
+allows it. When omitted, this fork follows the stock defaults: 128 KiB per
+content attribute and 200 items per content array.
+
+```json
+{
+  "plugins": {
+    "entries": {
+      "diagnostics-otel": {
+        "config": {
+          "contentLimits": {
+            "maxAttributeChars": 131072,
+            "maxArrayItems": 200
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+Alternative host-level form when accepted by the OpenClaw config schema:
+
+```json
+{
+  "diagnostics": {
+    "otel": {
+      "contentLimits": {
+        "maxAttributeChars": 131072,
+        "maxArrayItems": 200
+      }
+    }
+  }
+}
+```
+
 ## Enable inbound spans for native channels
 
 By default this build treats **`byai-channel`** and **`webchat`** as

@@ -4,7 +4,10 @@ import lombok.Getter;
 import lombok.Setter;
 
 /**
- * 创建知识库请求体（POST /api/v1/knowledge-bases/create），见 docs/api/api.md。
+ * 创建知识库请求体（POST /api/v1/knowledgeBases/create），见 docs/api/api.md。
+ *
+ * @author qin.guoquan
+ * @date 2026-07-14 19:38:38
  */
 @Getter
 @Setter

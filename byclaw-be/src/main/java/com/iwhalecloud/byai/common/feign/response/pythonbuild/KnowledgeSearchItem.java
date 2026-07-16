@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.common.feign.response.pythonbuild;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -33,4 +35,7 @@ public class KnowledgeSearchItem {
     private Integer startLine;
 
     private Integer endLine;
+
+    /** 按 metadataFieldList 返回的元数据。 */
+    private Map<String, Object> metadata = new LinkedHashMap<>();
 }

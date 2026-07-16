@@ -5,11 +5,11 @@ description = "Question answering application module for byclaw."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "by-qa[all]==0.2.0",
-    "by-framework==0.2.2.dev5",
+    "by-qa[all]==0.2.1",
+    "by-framework==0.2.2.dev9",
     "by-framework-langgraph==v0.0.3.dev2",
     "by-framework-trace-langfuse==0.0.3.dev2",
-    "langfuse==4.3.1"
+    "langfuse==4.3.1",
 ]
 
 [build-system]
@@ -20,7 +20,7 @@ build-backend = "setuptools.build_meta"
 "" = "src"
 
 [tool.setuptools]
-py-modules = ["worker", "redis_model_config", "redis_agent_config", "byclaw_plugin", "minio_client", "minio_agent_config", "api", "byclaw_userfs_storage"]
+py-modules = ["worker", "redis_model_config", "redis_agent_config", "byclaw_plugin", "minio_client", "minio_agent_config", "api", "byclaw_userfs_storage", "redis_runtime"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

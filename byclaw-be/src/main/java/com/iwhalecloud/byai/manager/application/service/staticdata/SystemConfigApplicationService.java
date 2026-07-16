@@ -141,6 +141,10 @@ public class SystemConfigApplicationService {
      * 清除全部配置缓存成功
      */
     public void loadAllSystemConfigCache() {
+
+        // 重置Redis的Key
+        RedisUtil.removeKey(RedisConfig.SYSTEM_CONFIG_CODE_KEY);
+
         List<ByaiSystemConfig> all = systemConfigService.findAll();
         for (ByaiSystemConfig byaiSystemConfig : all) {
             String paramCode = byaiSystemConfig.getParamCode();

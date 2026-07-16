@@ -7,6 +7,16 @@ description: "Convert documents to Markdown files through the by-doc-to-markdown
 
 Use this skill to convert local documents (PDF/Word/Excel/PowerPoint) into Markdown files.
 
+## Prerequisites
+
+Before running the CLI, install the script dependencies from this skill's `scripts/` directory:
+
+```bash
+cd middleware/openclaw/skills/by-doc-to-markdown/scripts && npm install
+```
+
+Do this before the first run in a new environment, or any time the runtime reports missing Node dependencies.
+
 ## Command Entry Point
 
 Start by loading the live command list:

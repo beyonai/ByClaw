@@ -1134,6 +1134,7 @@ public class ToolManController {
             String resolvedUserCode = StringUtils.isNotBlank(userCode) ? userCode
                 : CurrentUserHolder.getCurrentUserCode();
             List<MultipartFile> uploadFiles = resolveSkillUploadFiles(file, files);
+            byClawSkillResourceApplicationService.validateChatUploadedSkillImportPermission(resourceId, uploadFiles);
             List<ByClawSkillDto> data = byClawSkillUploadApplicationService.uploadSkillZips(resolvedUserCode,
                 resourceId, uploadFiles);
             byClawSkillResourceApplicationService.registerChatUploadedSkills(resolvedUserCode, resourceId, uploadFiles,
@@ -1236,7 +1237,13 @@ public class ToolManController {
         if (StringUtils.isBlank(relativePath)) {
             throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.package.path.notfound"));
         }
-        if (!resourceArtifactStorageService.existsWithinResourceRoot(relativePath)) {
+        logger.info("开始下载资源化技能包: skillId={}, skillType={}, skillUrl={}, relativePath={}, originalFilename={}",
+            skillId, extSkill.getSkillType(), extSkill.getSkillUrl(), relativePath,
+            extSkill.getSkillOriginalFilename());
+        boolean packageExists = resourceArtifactStorageService.existsWithinResourceRoot(relativePath);
+        if (!packageExists) {
+            logger.warn("资源化技能包不存在: skillId={}, skillUrl={}, relativePath={}", skillId, extSkill.getSkillUrl(),
+                relativePath);
             throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.package.file.notfound"));
         }
         String fileName = StringUtils.defaultIfBlank(extSkill.getSkillOriginalFilename(), lastPathSegment(relativePath));
@@ -1248,6 +1255,16 @@ public class ToolManController {
                     throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.package.file.notfound"));
                 }
                 in.transferTo(out);
+            }
+            catch (java.io.IOException e) {
+                logger.error("资源化技能包读取失败: skillId={}, skillUrl={}, relativePath={}", skillId,
+                    extSkill.getSkillUrl(), relativePath, e);
+                throw e;
+            }
+            catch (RuntimeException e) {
+                logger.error("资源化技能包读取失败: skillId={}, skillUrl={}, relativePath={}", skillId,
+                    extSkill.getSkillUrl(), relativePath, e);
+                throw e;
             }
         };
         return ResponseEntity.ok().contentType(MediaType.parseMediaType("application/zip"))

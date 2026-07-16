@@ -39,6 +39,7 @@ import styles from './SkillDetailDrawer.module.less';
 import { resourceBizTypeMap } from '@/constants/knowledge';
 import { useIntl, getIntl } from '@umijs/max';
 import { getRuntimeActualUrl } from '@/utils';
+import { getFileUrl } from '@/utils/file';
 import useAppStore from '@/models/common/useAppStore';
 import { getssoToken } from '@/utils/auth';
 import MCPTestPanel from './components/MCPTestPanel';
@@ -85,10 +86,10 @@ interface ResourceMemberItem {
 // 获取与列表一致的资源图标地址
 const getResourceIconUrl = (data?: any) => {
   const { avatar, resourceLogoUrl } = data || {};
-  const val = avatar || resourceLogoUrl;
+  // 列表优先展示 resourceLogoUrl，详情保持同样优先级，避免同一技能两处照片不一致。
+  const val = resourceLogoUrl || avatar;
   if (!val) return '';
-  const url = String(val);
-  return url.startsWith('http') ? url : `/byaiService${url}`;
+  return getFileUrl(String(val));
 };
 
 // 表格组件，支持树形结构展开
@@ -129,7 +130,8 @@ const getArrayData = (response: any): any[] => {
 const formatDateTime = (value?: string | number) => {
   if (!value) return '-';
   const parsed = dayjs(value);
-  return parsed.isValid() ? parsed.format('YYYY-MM-DD HH:mm:ss') : String(value);
+  // 使用开始日期只展示到分钟，避免秒级信息占用详情表格空间。
+  return parsed.isValid() ? parsed.format('YYYY-MM-DD HH:mm') : String(value);
 };
 
 const formatMemberNames = (members?: ResourceMemberItem[], fallback?: string) => {
@@ -144,9 +146,11 @@ const formatMemberNames = (members?: ResourceMemberItem[], fallback?: string) =>
 
 const buildSkillUsedDigitalEmployeeItem = (employees: SkillUsedDigitalEmployee[]): RenderItem => {
   const intl = getIntl();
+  // 标题展示关联数字员工数量，便于用户一眼判断当前技能被多少员工使用。
+  const usedEmployeeTitle = `${intl.formatMessage({ id: 'skillDetail.usedDigitalEmployees' })}（${employees.length}）`;
   return {
     type: 'table',
-    label: intl.formatMessage({ id: 'skillDetail.usedDigitalEmployees' }),
+    label: usedEmployeeTitle,
     columns: [
       {
         dataIndex: 'resourceName',
@@ -156,7 +160,8 @@ const buildSkillUsedDigitalEmployeeItem = (employees: SkillUsedDigitalEmployee[]
       {
         dataIndex: 'useStartTime',
         title: intl.formatMessage({ id: 'skillDetail.useStartTime' }),
-        width: 180,
+        // 日期只展示到分钟后收窄列宽，把更多横向空间留给数字员工名称。
+        width: 150,
         render: (text: string | number) => formatDateTime(text),
       },
     ],
@@ -426,18 +431,34 @@ const ItemRenderer = (props: { item: RenderItem; index: number }) => {
 const RenderDetailPanel = (props: { skillDetail: ISkillDetail }) => {
   const { skillDetail } = props;
   const headerMeta = compact([skillDetail?.resourceBizType, skillDetail?.systemCode, skillDetail?.version]);
+  const [avatarLoadFailed, setAvatarLoadFailed] = useState(false);
+  const isSkillResource = skillDetail?.resourceBizType === SKILL_BIZ_TYPE;
+  const avatarUrl = skillDetail?.avatar || '';
+
+  useEffect(() => {
+    setAvatarLoadFailed(false);
+  }, [avatarUrl]);
 
   return (
     <div className="ub ub-ver full-height">
       <div className={styles.header}>
         <span className={styles.headerAura} />
         <figure className={styles.avatar}>
-          <Image
-            src={skillDetail?.avatar || undefined}
-            defaultSrc={getRuntimeActualUrl('/favicon.svg')}
-            width={48}
-            height={48}
-          />
+          {avatarUrl && !avatarLoadFailed ? (
+            <img className={styles.avatarImage} src={avatarUrl} alt="" onError={() => setAvatarLoadFailed(true)} />
+          ) : isSkillResource ? (
+            <span className={styles.skillDefaultAvatar}>
+              <span className={styles.skillDefaultAvatarOrb} />
+              <span className={styles.skillDefaultAvatarText}>{getIntl().formatMessage({ id: 'common.skill' })}</span>
+            </span>
+          ) : (
+            <Image
+              src={avatarUrl || undefined}
+              defaultSrc={getRuntimeActualUrl('/favicon.svg')}
+              width="100%"
+              height="100%"
+            />
+          )}
         </figure>
         <div className={styles.headerContent}>
           <div className={styles.headerTitleRow}>

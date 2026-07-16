@@ -99,7 +99,7 @@ class ByClawSkillQueryApplicationServiceTest {
     }
 
     @Test
-    void shouldReturnSkillDocFilesInNestedDirectories() {
+    void shouldIgnoreSkillDocFilesInNestedDirectories() {
         when(skillPathResolver.resolveSkillRootPrefix(USER_CODE, RESOURCE_ID)).thenReturn(AGENT_SKILL_ROOT_PREFIX);
         when(userFS.list(eq(AGENT_SKILL_ROOT_PREFIX), isNull())).thenReturn(Arrays.asList(
             AGENT_SKILL_ROOT_PREFIX + "baiying/SKILL.md",
@@ -109,13 +109,9 @@ class ByClawSkillQueryApplicationServiceTest {
 
         List<ByClawSkillDto> result = byClawSkillQueryApplicationService.qrySkillListByUserCode(USER_CODE, RESOURCE_ID, null);
 
-        assertEquals(3, result.size());
+        assertEquals(1, result.size());
         assertEquals("baiying", result.get(0).getSkillName());
         assertEquals(AGENT_SKILL_ROOT_PREFIX + "baiying/SKILL.md", result.get(0).getSkillDocObjectKey());
-        assertEquals("path", result.get(1).getSkillName());
-        assertEquals(AGENT_SKILL_ROOT_PREFIX + "nested/path/SKILL.md", result.get(1).getSkillDocObjectKey());
-        assertEquals("resources", result.get(2).getSkillName());
-        assertEquals(AGENT_SKILL_ROOT_PREFIX + "baiying/resources/SKILL.md", result.get(2).getSkillDocObjectKey());
     }
 
     @Test

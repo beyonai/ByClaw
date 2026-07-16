@@ -51,6 +51,8 @@ import com.iwhalecloud.byai.manager.entity.auth.PrivilegeGrant;
 import com.iwhalecloud.byai.manager.vo.digitemploy.DebugSessionCleanupVo;
 import com.iwhalecloud.byai.manager.vo.resource.DigitalEmployeePageVo;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
+import com.iwhalecloud.byai.state.application.service.session.ByClawSkillDeleteApplicationService;
+import com.iwhalecloud.byai.state.application.service.session.ByClawSkillPathResolver;
 import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeDTO;
 import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeDetailsDTO;
 import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeInstallResourceDTO;
@@ -140,6 +142,9 @@ public class DigitalEmployeeApplicationService {
 
     private static final String RESOURCE_BIZ_TYPE_SKILL = "SKILL";
 
+    /** 对话框 #技能 上传曾直接写入数字员工工作区，解绑时需清理该历史副本。 */
+    private static final String SKILL_SOURCE_TYPE_CHAT_UPLOAD = "CHAT_UPLOAD";
+
     private static final String BELONG_COMPANY = "COMPANY";
 
     private static final String DEFAULT_SUPER_ASSISTANT_RESOURCE_CODE_SUFFIX = "_main";
@@ -201,6 +206,12 @@ public class DigitalEmployeeApplicationService {
 
     @Autowired
     private SsResExtSkillService ssResExtSkillService;
+
+    @Autowired
+    private ByClawSkillDeleteApplicationService byClawSkillDeleteApplicationService;
+
+    @Autowired
+    private ByClawSkillPathResolver byClawSkillPathResolver;
 
     @Autowired
     private TemplateRuleInfoApplicationService templateRuleInfoApplicationService;
@@ -984,6 +995,9 @@ public class DigitalEmployeeApplicationService {
             validateDigitalEmployeeUpdatePermission(ssResource);
         }
 
+        List<LegacyWorkspaceSkill> legacyWorkspaceSkills = findLegacyWorkspaceSkillsToDelete(ssResource,
+            uninstallRelResources);
+
         List<SsResourceRelDetail> resourceRelDetails = ssResourceRelDetailService.findByResourceId(digitalEmployeeId);
         Set<Long> uninstallRelIdSet = uninstallRelIds.stream().filter(Objects::nonNull).collect(Collectors.toSet());
         List<Long> remainingRelIds = CollectionUtils.isEmpty(resourceRelDetails) ? Collections.emptyList()
@@ -992,6 +1006,7 @@ public class DigitalEmployeeApplicationService {
                 .collect(Collectors.toList());
 
         this.compareSsResourceRelDetail(ssResource, remainingRelIds, resourceRelDetails, null);
+        deleteLegacyWorkspaceSkills(legacyWorkspaceSkills);
         this.rebuildAndSaveDigitalEmployeeRelSkills(digitalEmployeeId);
         this.synOpenClawWorkSpace(digitalEmployeeId);
         operationLogService.recordOperationLog(ssResource, OperationTypeEnum.UPDATE);
@@ -1000,6 +1015,82 @@ public class DigitalEmployeeApplicationService {
         EmployeeIdDTO employeeIdDTO = new EmployeeIdDTO();
         employeeIdDTO.setResourceId(digitalEmployeeId);
         return this.findDetailsById(employeeIdDTO);
+    }
+
+    /**
+     * 仅识别历史 #技能 上传形成的工作区副本。hub 安装技能不落 workspace，不能在解绑时删除。
+     */
+    private List<LegacyWorkspaceSkill> findLegacyWorkspaceSkillsToDelete(SsResource digitalEmployee,
+        List<SsResource> uninstallRelResources) {
+        if (digitalEmployee == null || CollectionUtils.isEmpty(uninstallRelResources)) {
+            return Collections.emptyList();
+        }
+        return uninstallRelResources.stream()
+            .filter(resource -> resource != null && StringUtils.equals(RESOURCE_BIZ_TYPE_SKILL,
+                resource.getResourceBizType()))
+            .map(resource -> resolveLegacyWorkspaceSkill(digitalEmployee, resource)).filter(Objects::nonNull)
+            .collect(Collectors.toList());
+    }
+
+    private LegacyWorkspaceSkill resolveLegacyWorkspaceSkill(SsResource digitalEmployee, SsResource skillResource) {
+        SsResExtSkill extSkill = ssResExtSkillService.findById(skillResource.getResourceId());
+        if (extSkill == null || !StringUtils.equals(SKILL_SOURCE_TYPE_CHAT_UPLOAD, extSkill.getSourceType())) {
+            return null;
+        }
+        String workspaceSkillPath = extractSkillPath(extSkill.getTargetContent());
+        String ownerUserCode = resolveResourceCreatorUserCode(skillResource);
+        if (StringUtils.isAnyBlank(workspaceSkillPath, ownerUserCode)) {
+            return null;
+        }
+        String expectedRoot = byClawSkillPathResolver.resolveSkillRootPrefix(ownerUserCode,
+            digitalEmployee.getResourceId());
+        String normalizedPath = normalizeWorkspaceSkillPath(workspaceSkillPath);
+        String normalizedRoot = normalizeWorkspaceSkillPath(expectedRoot);
+        if (StringUtils.isBlank(normalizedRoot)) {
+            return null;
+        }
+        String skillDirectory = StringUtils.removeStart(normalizedPath, normalizedRoot + "/");
+        if (!StringUtils.startsWith(normalizedPath, normalizedRoot + "/") || StringUtils.isBlank(skillDirectory)
+            || StringUtils.contains(skillDirectory, '/')) {
+            return null;
+        }
+        return new LegacyWorkspaceSkill(ownerUserCode, digitalEmployee.getResourceId(), normalizedPath);
+    }
+
+    private void deleteLegacyWorkspaceSkills(List<LegacyWorkspaceSkill> legacyWorkspaceSkills) {
+        for (LegacyWorkspaceSkill legacyWorkspaceSkill : legacyWorkspaceSkills) {
+            byClawSkillDeleteApplicationService.deleteSkillIfExists(legacyWorkspaceSkill.userCode(),
+                legacyWorkspaceSkill.digitalEmployeeId(), legacyWorkspaceSkill.skillPath());
+        }
+    }
+
+    private String extractSkillPath(String targetContent) {
+        if (StringUtils.isBlank(targetContent)) {
+            return null;
+        }
+        try {
+            return JSONObject.parseObject(targetContent).getString("skillPath");
+        }
+        catch (Exception e) {
+            logger.warn("解析技能 targetContent 中的 skillPath 失败，跳过历史工作区副本清理, targetContent={}",
+                targetContent, e);
+            return null;
+        }
+    }
+
+    private String resolveResourceCreatorUserCode(SsResource skillResource) {
+        if (skillResource == null || skillResource.getCreateBy() == null) {
+            return null;
+        }
+        Users creator = userService.findById(skillResource.getCreateBy());
+        return creator == null ? null : creator.getUserCode();
+    }
+
+    private String normalizeWorkspaceSkillPath(String path) {
+        return StringUtils.removeEnd(StringUtils.trimToEmpty(path).replace('\\', '/').replaceAll("/+", "/"), "/");
+    }
+
+    private record LegacyWorkspaceSkill(String userCode, Long digitalEmployeeId, String skillPath) {
     }
 
     /**
@@ -2104,6 +2195,24 @@ public class DigitalEmployeeApplicationService {
         List<Map<String, Object>> rawRelSkills = buildRelSkillsFromRelations(resourceId);
         extDigEmployee.setSkills(JSON.toJSONString(rawRelSkills));
         ssResExtDigEmployeeService.update(extDigEmployee);
+    }
+
+    /**
+     * 技能包版本覆盖后刷新已绑定数字员工的运行态配置。
+     * 该操作不改变资源关系，仅重新发布 relSkills 的 skillUrl/versionUrl，促使 OpenClaw 按版本重新下载 hub 技能。
+     */
+    public void refreshInstalledSkillRuntime(Long resourceId) {
+        if (resourceId == null) {
+            return;
+        }
+        SsResource digitalEmployee = ssResourceService.findById(resourceId);
+        if (digitalEmployee == null || !ResourceBizTypeEnum.DIG_EMPLOYEE.name()
+            .equals(digitalEmployee.getResourceBizType())) {
+            return;
+        }
+        rebuildAndSaveDigitalEmployeeRelSkills(resourceId);
+        synOpenClawWorkSpace(resourceId);
+        notifyDigitalEmployeeRuntimeChanged(resourceId);
     }
 
     private List<Map<String, Object>> buildRelSkillsFromRelations(Long resourceId) {

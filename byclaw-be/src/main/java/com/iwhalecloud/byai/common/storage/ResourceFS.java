@@ -25,6 +25,16 @@ public interface ResourceFS {
     InputStream read(String filePath);
 
     /**
+     * 查询单个资源文件元数据。
+     *
+     * @param filePath 完整资源文件路径
+     * @return 文件元数据；文件不存在或底层存储不支持时由实现抛出异常
+     */
+    default FileMetadata metadata(String filePath) {
+        throw new UnsupportedOperationException("metadata is not supported");
+    }
+
+    /**
      * 资源文件系统：删除
      *
      * @param filePath

@@ -47,6 +47,9 @@
 - `knCode`：知识库编码
 - `directoryPath`：目录路径，以 `/` 开头，不包含知识库名称
 - `filePath`：文件路径，以 `/` 开头，不包含知识库名称
+- `sourcePath`：移动源路径列表，以 `/` 开头，不包含知识库名称
+- `targetDirectoryPath`：移动目标目录路径，以 `/` 开头，不包含知识库名称
+- `targetFilePath`：移动目标文件路径，以 `/` 开头，不包含知识库名称
 - `name`：目录遍历或模式匹配结果中的完整路径
 
 ## 接口总览
@@ -61,13 +64,17 @@
 | `POST` | `/api/v1/directories/delete` | 删除目录 |
 | `POST` | `/api/v1/knowledgeItems/import` | 上传文档 |
 | `POST` | `/api/v1/knowledgeItems/delete` | 删除文档 |
+| `POST` | `/api/v1/knowledgeItems/move` | 移动文件或目录 |
+| `POST` | `/api/v1/knowledgeItems/references` | 查询指定文件的 Markdown 引用关系 |
 | `POST` | `/api/v1/listDir` | 获取目录内容 |
 | `POST` | `/api/v1/glob` | 按路径模式匹配 |
 | `POST` | `/api/v1/readFile` | 读取文件内容 |
-| `POST` | `/api/v1/downloadFile` | 下载原始文件 |
+| `POST` | `/api/v1/downloadFile` | 下载文件 |
+| `POST` | `/api/v1/fileToMarkdown` | 上传文件并同步转换为 Markdown 文件流 |
 | `POST` | `/api/v1/fileToMarkdownIndex` | 异步触发知识构建 |
 | `POST` | `/api/v1/fileBuildStatus` | 查询文档构建状态 |
 | `POST` | `/api/v1/knowledgeItems/search` | 知识检索 |
+| `GET` | `/health` | 探活 |
 | `POST` | `/api/v1/knowledgeItems/importByResourceId` | 按资源 ID 上传文档（Agent 工具） |
 | `POST` | `/api/v1/fileToMarkdownIndexByResourceId` | 按资源 ID 触发知识构建（Agent 工具） |
 | `POST` | `/api/v1/knowledgeItems/searchByResourceId` | 按资源 ID 知识检索（Agent 工具） |
@@ -322,18 +329,95 @@
 
 ## 文档管理
 
+### `POST /api/v1/knowledgeItems/move`
+
+移动指定知识库下的一个或多个文件、目录。`targetDirectoryPath` 与 `targetFilePath` 必须且只能填写一个。
+
+请求体：`application/json`
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `knCode` | string | 是 | 知识库编码 |
+| `sourcePath` | array[string] | 是 | 源路径列表；每项以 `/` 开头，不包含知识库名称 |
+| `targetDirectoryPath` | string | 否 | 目标目录；不存在时自动创建，每个源保留原名称 |
+| `targetFilePath` | string | 否 | 单个文件的目标路径，可用于移动并重命名；父目录不存在时自动创建 |
+| `overwrite` | boolean | 否 | 是否覆盖目标，默认 `false`；当前版本仅支持 `false` |
+
+使用 `targetDirectoryPath` 时支持单源、多源、文件和目录。使用 `targetFilePath` 时，仅允许一个文件源。目录移动会连同所有子目录和文件一起移动；单个源失败不影响同批次其他源，失败原因返回在 `data[].error`。
+
+请求示例：
+
+```json
+{
+  "knCode": "1",
+  "sourcePath": [
+    "/制度/人事/考勤制度.pdf",
+    "/制度/人事/图片"
+  ],
+  "targetDirectoryPath": "/归档/人事",
+  "overwrite": false
+}
+```
+
+成功或部分成功响应：
+
+```json
+{
+  "resultCode": "0",
+  "resultMsg": "success",
+  "resultObject": {
+    "data": [
+      {
+        "sourcePath": "/制度/人事/考勤制度.pdf",
+        "targetPath": "/归档/人事/考勤制度.pdf",
+        "success": true,
+        "error": null
+      },
+      {
+        "sourcePath": "/制度/人事/不存在.pdf",
+        "targetPath": null,
+        "success": false,
+        "error": "source path not found: /制度/人事/不存在.pdf"
+      }
+    ],
+    "summary": {
+      "total": 2,
+      "succeeded": 1,
+      "failed": 1
+    }
+  }
+}
+```
+
+以下结构性错误会导致整请求失败：空源列表、非法或跨界路径、移动根目录、源路径重复、目标字段同时填写或同时缺失、目录移动到自身或子目录，以及将 `targetFilePath` 用于多源或目录源。目标已存在时对应移动项失败，不执行覆盖。
+
+### `POST /api/v1/knowledgeItems/references`
+
+查询指定文件的 Markdown 引用关系。兼容别名 `/api/v1/knowledge-items/references`。
+
+请求体：`application/json`
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `knCode` | string | 是 | 知识库编码 |
+| `filePath` | string | 是 | 查询对象文件路径，以 `/` 开头，不包括知识库名称 |
+| `direction` | string | 否 | `inbound`、`outbound`、`all`，默认 `inbound` |
+
+响应中的 `resultObject.inbound` 和 `resultObject.outbound` 固定为数组，元素包含 `sourcePath`、`originalTarget`、`targetSuffix`、`targetPath` 和 `status`；`status` 可能为 `resolved`、`unresolved` 或 `broken`。
+
 ### `POST /api/v1/knowledgeItems/import`
 
-将文档上传到指定知识库下面。
+将文档上传到指定知识库下面。支持单文件上传与 zip 包批量上传；zip 内文件保留相对目录结构，逐文件返回成功或失败结果。
 
 请求体：`multipart/form-data`
 
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
 | `knCode` | string | 是 | 知识库编码 |
-| `filePath` | string | 是 | 上传到知识库后的文件全路径，以 `/` 开头，不包括知识库名称 |
-| `fileDescription` | string | 否 | 文件描述 |
-| `fileContent` | file | 是 | 文件二进制内容 |
+| `filePath` | string | 是 | 单文件上传时为目标文件全路径；zip 上传时为目标目录路径，以 `/` 开头，不包括知识库名称 |
+| `fileDescription` | string | 否 | 文件描述；zip 上传时对所有文件统一使用该描述 |
+| `fileContent` | file | 是 | 文件二进制内容；文件名以 `.zip` 结尾且为合法 zip 时触发批量上传 |
+| `processFrontMatter` | boolean | 否 | 是否解析 YAML front matter 并自动录入元数据，默认 `true` |
 
 表单示例：
 
@@ -345,15 +429,23 @@ curl -X POST http://localhost:8000/api/v1/knowledgeItems/import \
   -F "fileContent=@./考勤制度.pdf"
 ```
 
-成功响应示例：
+成功响应：单文件上传同样返回单元素批量结果；zip 中单个文件失败不影响其他文件，`resultCode` 仍为 `0`。
 
 ```json
 {
   "resultCode": "0",
   "resultMsg": "success",
-  "resultObject": {}
+  "resultObject": {
+    "data": [
+      { "filePath": "/制度/人事/考勤制度.pdf", "success": true, "error": null }
+    ],
+    "summary": { "total": 1, "succeeded": 1, "failed": 0 },
+    "postProcessErrors": []
+  }
 }
 ```
+
+`postProcessErrors` 为可选字段，表示文件入库后的批处理错误，不计入 `summary`。
 
 失败响应示例：
 
@@ -566,7 +658,7 @@ curl -X POST http://localhost:8000/api/v1/knowledgeItems/import \
 
 ### `POST /api/v1/downloadFile`
 
-根据文件路径下载指定知识库下的原始文件。
+根据文件路径下载指定知识库下的文件。非 Markdown 文件返回入库字节；Markdown 文件返回引用路径已解析后的 Markdown 字节流。
 
 请求体：`application/json`
 
@@ -589,7 +681,7 @@ curl -X POST http://localhost:8000/api/v1/knowledgeItems/import \
 - `200 OK`
 - `Content-Type: application/octet-stream`
 - `Content-Disposition: attachment; filename="..."` 或带 `filename*`
-- 响应体为原始文件二进制字节流
+- 响应体为文件字节流；Markdown 文件为解析后的 Markdown 字节流
 
 失败响应示例：
 
@@ -602,6 +694,18 @@ curl -X POST http://localhost:8000/api/v1/knowledgeItems/import \
 ```
 
 ## 知识构建
+
+### `POST /api/v1/fileToMarkdown`
+
+上传一个原始文件，同步执行原始文件转 Markdown，并以 Markdown 文件流返回。该接口不创建知识库文件、构建任务或索引。
+
+请求体：`multipart/form-data`
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `fileContent` | file | 是 | 需转换的原始文件二进制内容 |
+
+成功响应为 `application/octet-stream`，`Content-Disposition` 文件名使用原文件名并替换为 `.md` 扩展名。
 
 ### `POST /api/v1/fileToMarkdownIndex`
 
@@ -769,8 +873,10 @@ curl -X POST http://localhost:8000/api/v1/knowledgeItems/import \
 | `query` | string | 是 | 需要检索的内容 |
 | `knCodeList` | array[string] | 是 | 知识库编码列表 |
 | `topK` | integer | 是 | 最终返回条数，必须大于 0 |
-| `fileTypeList` | array[string] | 否 | 按照文件类型过滤 |
 | `searchMode` | string | 是 | 检索模式：`fullTextRecall`、`embedding`、`mixedRecall` |
+| `where` | object | 否 | Agent DSL 过滤 AST |
+| `metadataFieldList` | array[string] | 否 | 需要返回的元数据字段 |
+| `fileTypeList` | array[string] | 否 | 按文件类型过滤；与 `where` 同时存在时合取 |
 
 请求示例：
 
@@ -779,8 +885,8 @@ curl -X POST http://localhost:8000/api/v1/knowledgeItems/import \
   "query": "员工请假流程是什么",
   "knCodeList": ["1"],
   "topK": 5,
-  "fileTypeList": ["pdf"],
-  "searchMode": "mixedRecall"
+  "searchMode": "mixedRecall",
+  "where": {"in": {"fieldName": "fileType", "value": ["pdf"]}}
 }
 ```
 

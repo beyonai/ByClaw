@@ -89,7 +89,7 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
 
     if (defaultAgentElement?.agentType) {
       // 当前切到了慧笔｜问数，inAgentRoute为true，则展示各自的placeholder
-      return getAgentPlaceholder(intl, defaultAgentElement.agentType);
+      return getAgentPlaceholder(intl);
     }
     // 其余情况根据chatMode来显示
     if (chatMode === chatModeMap.expert) {
@@ -261,21 +261,14 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
   const checkIsDefaultAgent = useCallback(
     (data: any, strict?: boolean) => {
       const currentText = Editor.string(editor, []);
-      const hasMentionNode = !Editor.nodes(editor, {
-        at: [],
-        mode: 'lowest',
-        match: (ele) => Element.isElement(ele) && ele.type === ELEMENT_MENTION,
-      }).next().done;
       // 专家模式下第一个@的智能体
       return (
         chatMode === chatModeMap.expert &&
         !!data.agentType &&
-        !agentId &&
-        !hasMentionNode &&
         (!currentText || (strict ? currentText === '@' : currentText.startsWith('@')))
       );
     },
-    [agentId, editor, chatMode]
+    [editor, chatMode]
   );
 
   // 插入popover节点
@@ -283,7 +276,7 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
     let node = getElementData(type, item);
 
     if (type === ResourceType.digitalEmployee) {
-      // 手动 @ 选择的数字员工始终作为正文 mention 插入；切换默认 agent 只由路由/schema 驱动。
+      // 支持连续 @ 多个数字员工：手动选择的数字员工作为正文 mention，不切换默认 agent。
       setAgentCache(node);
       node = {
         ...node,

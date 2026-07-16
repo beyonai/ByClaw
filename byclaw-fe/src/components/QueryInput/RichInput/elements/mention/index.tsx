@@ -55,6 +55,8 @@ const MentionElement = ({ attributes, children, element }: RenderElementProps) =
   }, [name, chatAvatar]);
 
   const isSuperAssistant = useMemo(() => resourceType === ResourceType.superAssistant, [resourceType]);
+  // 多 @ 员工时每个数字员工都是独立 mention，需要支持点击退出。
+  const isRemovableAgent = isDefaultAgent || resourceType === ResourceType.digitalEmployee;
 
   const ele = (
     <span
@@ -62,16 +64,17 @@ const MentionElement = ({ attributes, children, element }: RenderElementProps) =
       className={classNames(styles.mention, {
         // 这个类名需要在别的地方querySelector获取，因此用global的方式
         'default-agent': isDefaultAgent,
+        [styles.removableMention]: isRemovableAgent,
       })}
     >
       <span
         contentEditable={false}
         onClick={(event) => {
-          if (isDefaultAgent) {
+          if (isRemovableAgent) {
             event.preventDefault();
             event.stopPropagation();
             try {
-              // 默认员工标签是 Slate void 节点，删除前先通过 ReactEditor 定位真实路径。
+              // mention 是 Slate void 节点，删除前先通过 ReactEditor 定位真实路径。
               const path = ReactEditor.findPath(editor, element);
               Transforms.removeNodes(editor, { at: path });
             } catch (e) {
@@ -82,7 +85,7 @@ const MentionElement = ({ attributes, children, element }: RenderElementProps) =
       >
         {prefix}
         {name}
-        {isDefaultAgent && <CloseCircleFilled className={styles.deleteIcon} />}
+        {isRemovableAgent && <CloseCircleFilled className={styles.deleteIcon} />}
         {isSuperAssistant && (
           <span className={styles.aiMark}>
             <span>{getIntl().formatMessage({ id: 'common.digitalClone' })}</span>
@@ -92,7 +95,7 @@ const MentionElement = ({ attributes, children, element }: RenderElementProps) =
       {children}
     </span>
   );
-  if (el.isDefaultAgent) {
+  if (isRemovableAgent) {
     return (
       <Tooltip title={getIntl().formatMessage({ id: 'common.clickToExit' })} placement="top">
         {ele}

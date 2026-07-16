@@ -149,6 +149,7 @@ public class FeishuRobotConfigService {
         config.setChannel(channel);
         config.setAppId(appId);
         config.setAppSecret(appSecret);
+        // 长连接模式只依赖 appId/appSecret 鉴权；以下两个字段仅为旧 HTTP 回调模式兼容保留，可为空。
         config.setVerificationToken(getText(node, "verificationToken"));
         config.setEncryptKey(getText(node, "encryptKey"));
         config.setBotId(getText(node, "botId"));

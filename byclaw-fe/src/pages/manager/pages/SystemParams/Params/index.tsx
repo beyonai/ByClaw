@@ -57,7 +57,7 @@ const SystemParams = () => {
   const [valueViewerOpen, setValueViewerOpen] = React.useState(false);
   const [valueViewerRecord, setValueViewerRecord] = React.useState<SystemParamsItem | null>(null);
 
-  const curParam = React.useRef<{ pageIndex?: number; pageSize?: number; keyword?: string }>({});
+  const curParam = React.useRef<{ pageNum?: number; pageSize?: number; keyword?: string }>({});
   const requestSeqRef = React.useRef(0);
 
   const mySelectSystemConfigByQo = React.useCallback(
@@ -67,7 +67,7 @@ const SystemParams = () => {
       setIsLoading(true);
 
       const p = {
-        pageIndex: myPageInfo.pageIndex,
+        pageNum: myPageInfo.pageIndex,
         pageSize: myPageInfo.pageSize,
         keyword,
       };
@@ -274,7 +274,7 @@ const SystemParams = () => {
                         message.success(res?.msg);
                         mySelectSystemConfigByQo(
                           {
-                            pageIndex: curParam.current?.pageIndex || pageInfo.pageIndex,
+                            pageIndex: curParam.current?.pageNum || pageInfo.pageIndex,
                             pageSize: curParam.current?.pageSize || pageInfo.pageSize,
                           },
                           curParam.current?.keyword
@@ -470,7 +470,7 @@ const SystemParams = () => {
           if (isEdit) {
             mySelectSystemConfigByQo(
               {
-                pageIndex: curParam.current?.pageIndex || pageInfo.pageIndex,
+                pageIndex: curParam.current?.pageNum || pageInfo.pageIndex,
                 pageSize: curParam.current?.pageSize || pageInfo.pageSize,
               },
               curParam.current?.keyword || keyword

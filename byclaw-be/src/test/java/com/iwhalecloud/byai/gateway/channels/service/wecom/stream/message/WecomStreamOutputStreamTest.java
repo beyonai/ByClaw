@@ -10,12 +10,14 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -193,7 +195,7 @@ class WecomStreamOutputStreamTest {
         out.write(answerDeltaBlock("有什么企业微信使用问题需要帮您解答吗？"));
 
         out.write(appStreamResponseBlock());
-        out.completionFuture().get(2, java.util.concurrent.TimeUnit.SECONDS);
+        out.completionFuture().get(2, TimeUnit.SECONDS);
 
         assertThat(out.getAccumulatedContent()).isEqualTo("您好！请问有什么企业微信使用问题需要帮您解答吗？");
         assertThat(sentContents).isNotEmpty();
@@ -220,11 +222,15 @@ class WecomStreamOutputStreamTest {
 
     @Test
     void completionIdleTimeoutResetsOnEachWrite() throws Exception {
-        WecomStreamOutputStream out = new WecomStreamOutputStream(mapper, dispatcher, "cb-idle");
+        AtomicLong nowMillis = new AtomicLong(1_000L);
+        WecomStreamOutputStream out = new WecomStreamOutputStream(mapper, dispatcher, "cb-idle", "stream-idle", 0L,
+                nowMillis::get);
         ExecutorService waiter = Executors.newSingleThreadExecutor();
+        CountDownLatch waiterStarted = new CountDownLatch(1);
         try {
             Future<Boolean> completed = waiter.submit(() -> {
                 try {
+                    waiterStarted.countDown();
                     out.awaitCompletionAfterIdle(250, TimeUnit.MILLISECONDS);
                     return true;
                 } catch (java.util.concurrent.TimeoutException e) {
@@ -232,9 +238,11 @@ class WecomStreamOutputStreamTest {
                 }
             });
 
-            Thread.sleep(150);
+            assertThat(waiterStarted.await(1, TimeUnit.SECONDS)).isTrue();
+            // 使用可控时钟推进空闲时间，避免 Thread.sleep 受机器调度影响导致测试偶发提前超时。
+            nowMillis.addAndGet(200L);
             out.write(answerDeltaBlock("慢"));
-            Thread.sleep(150);
+            nowMillis.addAndGet(200L);
 
             assertThat(completed).isNotDone();
 
@@ -256,7 +264,7 @@ class WecomStreamOutputStreamTest {
         out.write(reasoningDeltaBlock("企业微信 智能体已就绪", "3003"));
         out.write(answerDeltaBlock("您好"));
         out.write(appStreamResponseBlock());
-        out.completionFuture().get(2, java.util.concurrent.TimeUnit.SECONDS);
+        out.completionFuture().get(2, TimeUnit.SECONDS);
 
         assertThat(out.getAccumulatedContent()).isEqualTo("您好");
         assertThat(sentContents.get(sentContents.size() - 1)).isEqualTo("您好");
@@ -269,7 +277,7 @@ class WecomStreamOutputStreamTest {
         out.write(reasoningDeltaBlock("企业微信 智能体已就绪", "3003"));
         out.write(answerDeltaBlock("您好"));
         out.write(appStreamResponseBlock());
-        out.completionFuture().get(2, java.util.concurrent.TimeUnit.SECONDS);
+        out.completionFuture().get(2, TimeUnit.SECONDS);
 
         assertThat(out.getAccumulatedContent()).isEqualTo("您好");
         assertThat(sentContents.get(sentContents.size() - 1))

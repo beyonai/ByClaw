@@ -6,6 +6,7 @@ import useVisibleMenuKeys from '../../useVisibleMenuKeys';
 import styles from './index.module.less';
 
 const DialogueList = lazy(() => import('@/layout/sider/components/DialogueList'));
+const ProjectSpaceList = lazy(() => import('@/layout/sider/components/ProjectSpaceList'));
 const EmployeeList = lazy(() => import('@/layout/sider/components/EmployeeList'));
 const Knowledge = lazy(() => import('@/layout/sider/components/Knowledge'));
 const ResourceSiderPanel = lazy(() => import('@/layout/sider/components/ResourceSiderPanel'));
@@ -36,6 +37,14 @@ export const tabItems: any[] = [
     label: 'employees.title',
     ChildComponent: EmployeeList,
     navigatePath: '/digitalEmployees',
+  },
+  {
+    key: 'projectSpace',
+    icon: 'icon-cebianlan',
+    activeIcon: 'icon-cebianlan',
+    label: 'sider.projectSpace',
+    ChildComponent: ProjectSpaceList,
+    navigatePath: '/chat',
   },
   {
     key: 'searchAndQuery',

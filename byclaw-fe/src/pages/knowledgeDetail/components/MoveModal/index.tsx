@@ -1,102 +1,108 @@
-import AntdIcon from '@/components/AntdIcon';
-import useKnowledgeStore from '@/models/useKnowledgeStore';
-import { DownOutlined } from '@ant-design/icons';
-import { Button, Modal, Tree } from 'antd';
-import classNames from 'classnames';
+import React, { useCallback, useEffect, useState } from 'react';
+import { App, Modal, Spin, Tree } from 'antd';
+import { FolderOutlined } from '@ant-design/icons';
 // @ts-ignore
 import { useIntl } from '@umijs/max';
-import React, { useEffect, useMemo, useState } from 'react';
+import { queryDirAndFileByLevel } from '@/service/knowledgeCenter';
+import { isInvalidMoveTarget, normalizeMovePath } from '../../DirectoryManage/moveUtils';
 import styles from './index.module.less';
 
-type MoveModalProp = {
+interface MoveModalProps {
   visible: boolean;
+  resourceId: number;
+  sourceDirectoryPaths: string[];
+  loading?: boolean;
   onCancel: () => void;
-  onOk: () => void;
-  onAdd: (val: string) => void;
-  // info: any;
-  baseInfo?: any;
-};
+  onOk: (targetDirectoryPath: string) => void;
+}
 
-type FlatNode = {
-  id: number;
-  parentId: number | null;
-  name: string;
-};
-
-type TreeData = {
+interface MoveTreeNode {
   title: string;
-  value: number;
-  key: number;
-  children?: TreeData[];
-};
+  key: string;
+  icon: React.ReactNode;
+  children?: MoveTreeNode[];
+  isLeaf?: boolean;
+  disabled?: boolean;
+}
 
-const flatToTree = (flatList: FlatNode[]): TreeData[] => {
-  const map = new Map<number, TreeData>();
-  const result: TreeData[] = [];
-
-  // 创建所有节点的映射
-  flatList.forEach((item) => {
-    map.set(item.id, { ...item, children: [] });
-  });
-
-  // 构建树形结构
-  flatList.forEach((item) => {
-    const node = map.get(item.id);
-    if (!node) return;
-
-    if (item.parentId === null || item.parentId === 0) {
-      result.push(node);
-    } else {
-      const parent = map.get(item.parentId);
-      if (parent && !parent.children) {
-        parent.children = [node];
-      } else if (parent && parent.children) {
-        parent.children.push(node);
-      }
+function updateTreeData(list: MoveTreeNode[], key: string, children: MoveTreeNode[]): MoveTreeNode[] {
+  return list.map((node) => {
+    if (node.key === key) {
+      return { ...node, children };
     }
+    if (node.children) {
+      return { ...node, children: updateTreeData(node.children, key, children) };
+    }
+    return node;
   });
+}
 
-  return result;
-};
-
-const MoveModal: React.FC<MoveModalProp> = (props: MoveModalProp) => {
-  const { visible, onCancel, onOk, onAdd, baseInfo } = props;
-
+const MoveModal: React.FC<MoveModalProps> = ({
+  visible,
+  resourceId,
+  sourceDirectoryPaths,
+  loading,
+  onCancel,
+  onOk,
+}) => {
   const intl = useIntl();
-  const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([]);
-  const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([]);
+  const { message } = App.useApp();
+  const [treeData, setTreeData] = useState<MoveTreeNode[]>([]);
+  const [treeLoading, setTreeLoading] = useState(false);
+  const [selectedPath, setSelectedPath] = useState('/');
 
-  const { getCatalogTree, catalogTree } = useKnowledgeStore();
-
-  const treeData = useMemo(
-    () =>
-      flatToTree(
-        catalogTree.map((item) => ({
-          ...item,
-          icon: <AntdIcon type="icon-wenjianjialanse" style={{ fontSize: 24 }} />,
-          title: item.name,
-          key: item.id,
-        }))
-      ),
-    [catalogTree]
+  const loadChildren = useCallback(
+    async (directoryPath: string): Promise<MoveTreeNode[]> => {
+      const response = await queryDirAndFileByLevel({ resourceId, directoryPath });
+      const rows = Array.isArray(response) ? response : [];
+      return rows
+        .filter((item) => item?.type === 'directory')
+        .map((item) => {
+          const path = normalizeMovePath(item.directoryPath || `${directoryPath}/${item.name}`);
+          return {
+            title: item.name,
+            key: path,
+            icon: <FolderOutlined />,
+            isLeaf: false,
+            disabled: isInvalidMoveTarget(path, sourceDirectoryPaths),
+          };
+        });
+    },
+    [resourceId, sourceDirectoryPaths]
   );
 
   useEffect(() => {
-    if (baseInfo) {
-      getCatalogTree({
-        datasetId: baseInfo.resourceSourcePkId,
-      });
+    if (!visible) return;
+    setSelectedPath('/');
+    setTreeLoading(true);
+    loadChildren('/')
+      .then((children) => {
+        setTreeData([
+          {
+            title: intl.formatMessage({ id: 'directoryManage.allFiles' }),
+            key: '/',
+            icon: <FolderOutlined />,
+            children,
+          },
+        ]);
+      })
+      .catch((error) => {
+        const errorMessage = typeof error === 'string' ? error : error?.message;
+        message.error(errorMessage || intl.formatMessage({ id: 'directoryManage.loadMoveDirectoriesFailed' }));
+        setTreeData([]);
+      })
+      .finally(() => setTreeLoading(false));
+  }, [intl, loadChildren, message, visible]);
+
+  const handleLoadData = async (node: any) => {
+    if (node.children) return;
+    try {
+      const children = await loadChildren(String(node.key));
+      setTreeData((prev) => updateTreeData(prev, String(node.key), children));
+    } catch (error: any) {
+      const errorMessage = typeof error === 'string' ? error : error?.message;
+      message.error(errorMessage || intl.formatMessage({ id: 'directoryManage.loadMoveDirectoriesFailed' }));
     }
-  }, [baseInfo]);
-
-  const onSelect = (selectedKeys: React.Key[], info: any) => {
-    console.log('selected', selectedKeys, info);
-    setSelectedKeys(selectedKeys);
-  };
-
-  const onExpand = (expandedKeys: React.Key[]) => {
-    console.log('onExpand', expandedKeys);
-    setExpandedKeys(expandedKeys);
   };
 
   return (
@@ -104,41 +110,31 @@ const MoveModal: React.FC<MoveModalProp> = (props: MoveModalProp) => {
       open={visible}
       title={intl.formatMessage({ id: 'directoryManage.moveTo' })}
       onCancel={onCancel}
-      onOk={onOk}
-      width={720}
-      footer={
-        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-          <Button
-            onClick={() => {
-              onAdd(`${selectedKeys?.[0] || ''}`);
-            }}
-            type="link"
-            icon={<AntdIcon type="icon-a-Folder-pluswenjianjia-tianjia" style={{ fontSize: 18 }} />}
-          >
-            {intl.formatMessage({ id: 'directoryManage.newFolder' })}
-          </Button>
-          <div style={{ display: 'flex', gap: '10px' }}>
-            <Button onClick={onCancel}>{intl.formatMessage({ id: 'common.cancel' })}</Button>
-            <Button type="primary" onClick={onOk}>
-              {intl.formatMessage({ id: 'common.confirm' })}
-            </Button>
-          </div>
-        </div>
-      }
+      onOk={() => onOk(selectedPath)}
+      confirmLoading={loading}
+      okButtonProps={{ disabled: !selectedPath || isInvalidMoveTarget(selectedPath, sourceDirectoryPaths) }}
+      cancelButtonProps={{ disabled: loading }}
+      closable={!loading}
+      maskClosable={!loading}
+      destroyOnClose
+      width={640}
     >
-      <div className={classNames(styles.container, 'overflow-auto hideThumb')}>
-        <Tree
-          className={styles.tree}
-          treeData={treeData}
-          onSelect={onSelect}
-          selectedKeys={selectedKeys}
-          expandedKeys={expandedKeys}
-          onExpand={onExpand}
-          blockNode
-          showIcon
-          switcherIcon={<DownOutlined />}
-        />
-      </div>
+      <Spin spinning={treeLoading}>
+        <div className={styles.container}>
+          <Tree
+            className={styles.tree}
+            treeData={treeData}
+            loadData={handleLoadData}
+            selectedKeys={[selectedPath]}
+            defaultExpandedKeys={['/']}
+            onSelect={(keys) => {
+              if (keys.length) setSelectedPath(String(keys[0]));
+            }}
+            blockNode
+            showIcon
+          />
+        </div>
+      </Spin>
     </Modal>
   );
 };
