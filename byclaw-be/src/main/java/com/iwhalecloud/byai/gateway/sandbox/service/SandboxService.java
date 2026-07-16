@@ -1989,17 +1989,11 @@ public class SandboxService {
         return sandboxType + "_" + userCode;
     }
 
-    private String buildSandboxWorkerId(String userCode, String sandboxType) {
-        if (StringUtils.isBlank(userCode) || StringUtils.isBlank(sandboxType)) {
+    private String buildSandboxWorkerId(String userCode, String serviceKey) {
+        if (StringUtils.isBlank(userCode) || StringUtils.isBlank(serviceKey)) {
             return null;
         }
-        if (SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE.equals(sandboxType)) {
-            return "openclaw-" + userCode;
-        }
-        if (SandboxLaunchRouting.BYCLAW_CODE_AGENT_SANDBOX_TYPE.equals(sandboxType)) {
-            return "byclaw-code-agent-" + userCode;
-        }
-        return sandboxType + "-" + userCode;
+        return serviceKey + "-" + userCode;
     }
 
     private void cleanupSandboxRegistryKeys(String serviceName) {

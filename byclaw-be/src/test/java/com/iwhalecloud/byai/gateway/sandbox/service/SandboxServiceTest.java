@@ -581,7 +581,7 @@ class SandboxServiceTest {
     }
 
     @Test
-    void buildSandboxWorkerId_returnsOpenclawPrefixedWorkerIdForDefaultSandboxType() {
+    void buildSandboxWorkerId_returnsServiceKeyDashUserCode() {
         SandboxService sandboxService = new SandboxService();
 
         String result = ReflectionTestUtils.invokeMethod(sandboxService, "buildSandboxWorkerId",
@@ -591,7 +591,7 @@ class SandboxServiceTest {
     }
 
     @Test
-    void buildSandboxWorkerId_returnsByclawCodeAgentPrefixedWorkerIdForCodeAgentType() {
+    void buildSandboxWorkerId_worksForAnyServiceKey() {
         SandboxService sandboxService = new SandboxService();
 
         String result = ReflectionTestUtils.invokeMethod(sandboxService, "buildSandboxWorkerId",
@@ -601,13 +601,13 @@ class SandboxServiceTest {
     }
 
     @Test
-    void buildSandboxWorkerId_returnsSandboxTypeDashUserCodeForOtherTypes() {
+    void buildSandboxWorkerId_worksForCustomServiceKeys() {
         SandboxService sandboxService = new SandboxService();
 
         String result = ReflectionTestUtils.invokeMethod(sandboxService, "buildSandboxWorkerId",
-            "user003", "custom-sandbox");
+            "user003", "custom-service");
 
-        assertThat(result).isEqualTo("custom-sandbox-user003");
+        assertThat(result).isEqualTo("custom-service-user003");
     }
 
     @Test
@@ -631,7 +631,7 @@ class SandboxServiceTest {
     }
 
     @Test
-    void buildSandboxWorkerId_returnsNullWhenSandboxTypeIsNull() {
+    void buildSandboxWorkerId_returnsNullWhenServiceKeyIsNull() {
         SandboxService sandboxService = new SandboxService();
 
         String result = ReflectionTestUtils.invokeMethod(sandboxService, "buildSandboxWorkerId",
@@ -641,7 +641,7 @@ class SandboxServiceTest {
     }
 
     @Test
-    void buildSandboxWorkerId_returnsNullWhenSandboxTypeIsBlank() {
+    void buildSandboxWorkerId_returnsNullWhenServiceKeyIsBlank() {
         SandboxService sandboxService = new SandboxService();
 
         String result = ReflectionTestUtils.invokeMethod(sandboxService, "buildSandboxWorkerId",
