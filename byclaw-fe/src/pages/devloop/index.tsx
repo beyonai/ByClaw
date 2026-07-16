@@ -332,6 +332,7 @@ const NeedCollect: React.FC = () => {
         groupId: addForm.chatId,
         keyword: addForm.keywords || '需求',
         lookbackHours: parseInt(addForm.lookbackHours) || 24,
+        corpId: dwsAuthDetail?.corpId || '',
       });
     } else {
       if (!addForm.repo.trim()) {
