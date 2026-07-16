@@ -33,6 +33,8 @@ import {
   createTask,
   listTasks,
   updateTask,
+  checkDwsAuthStatus,
+  startDwsDeviceAuth,
 } from '@/service/devloop';
 import { getToken, getssoToken, tokenKey, ssotokenKey } from '@/utils/auth';
 import { fetchEventSource } from '@fortaine/fetch-event-source';
@@ -128,6 +130,12 @@ const NeedCollect: React.FC = () => {
   const [groupOptions, setGroupOptions] = useState<{ value: string; label: string }[]>([]);
   const [groupSearching, setGroupSearching] = useState(false);
 
+  // DWS 授权
+  const [dwsAuthed, setDwsAuthed] = useState(false);
+  const [dwsAuthLoading, setDwsAuthLoading] = useState(false);
+  const [dwsDeviceInfo, setDwsDeviceInfo] = useState<{ userCode: string; verificationUrl: string } | null>(null);
+  const [dwsAuthPolling, setDwsAuthPolling] = useState(false);
+
   const [showLogModal, setShowLogModal] = useState(false);
   const [logModalSource, setLogModalSource] = useState<ScanSourceItem | null>(null);
   const [logList, setLogList] = useState<any[]>([]);
@@ -209,6 +217,13 @@ const NeedCollect: React.FC = () => {
     checkGitHubPat()
       .then((res: any) => {
         if (res?.hasPat) setHasPatSaved(true);
+      })
+      .catch(() => {});
+  }, []);
+  useEffect(() => {
+    checkDwsAuthStatus()
+      .then((res: any) => {
+        if (res?.hasToken) setDwsAuthed(true);
       })
       .catch(() => {});
   }, []);
@@ -497,6 +512,54 @@ const NeedCollect: React.FC = () => {
     }, 500);
   };
 
+  const pollDwsAuthStatus = () => {
+    const timer = setInterval(async () => {
+      try {
+        const res = await checkDwsAuthStatus();
+        if (res?.tokenValid) {
+          clearInterval(timer);
+          message.success('钉钉授权成功');
+          setDwsAuthed(true);
+          setDwsDeviceInfo(null);
+          setDwsAuthPolling(false);
+        }
+      } catch {
+        // 轮询失败忽略，继续重试
+      }
+    }, 5000);
+    // 3分钟超时
+    setTimeout(() => {
+      clearInterval(timer);
+      if (!dwsAuthed) {
+        setDwsDeviceInfo(null);
+        setDwsAuthPolling(false);
+        message.warning('授权超时，请重试');
+      }
+    }, 180000);
+  };
+
+  // --- DWS 授权 ---
+  const handleStartDwsAuth = async () => {
+    setDwsAuthLoading(true);
+    try {
+      const res = await startDwsDeviceAuth();
+      if (res?.userCode && res?.verificationUrl) {
+        setDwsDeviceInfo({ userCode: res.userCode, verificationUrl: res.verificationUrl });
+        // 在浏览器打开授权链接
+        window.open(res.verificationUrl, '_blank');
+        // 开始轮询等待授权完成
+        setDwsAuthPolling(true);
+        pollDwsAuthStatus();
+      } else {
+        message.error(res?.message || '启动授权失败');
+      }
+    } catch {
+      message.error('启动授权失败');
+    } finally {
+      setDwsAuthLoading(false);
+    }
+  };
+
   // --- 渲染弹窗 ---
   const renderProjectModal = () => (
     <Modal
@@ -581,6 +644,38 @@ const NeedCollect: React.FC = () => {
       </div>
       {addForm.type === 'dingtalk' && (
         <>
+          {!dwsAuthed && (
+            <div className={styles.formField}>
+              <label>钉钉授权</label>
+              {dwsDeviceInfo ? (
+                <div>
+                  <p style={{ margin: '4px 0' }}>请在手机钉钉打开以下链接完成授权：</p>
+                  <a href={dwsDeviceInfo.verificationUrl} target="_blank" rel="noreferrer">
+                    {dwsDeviceInfo.verificationUrl}
+                  </a>
+                  <p style={{ margin: '4px 0', color: '#666' }}>
+                    设备码: <strong>{dwsDeviceInfo.userCode}</strong>
+                  </p>
+                  {dwsAuthPolling && <Spin size="small" />}
+                </div>
+              ) : (
+                <Button
+                  type="primary"
+                  icon={<DingdingOutlined />}
+                  loading={dwsAuthLoading}
+                  onClick={handleStartDwsAuth}
+                >
+                  授权钉钉扫描
+                </Button>
+              )}
+            </div>
+          )}
+          {dwsAuthed && (
+            <div className={styles.formField}>
+              <label>钉钉授权</label>
+              <Tag color="green">已授权</Tag>
+            </div>
+          )}
           <div className={styles.formField}>
             <label>钉钉群</label>
             <Select

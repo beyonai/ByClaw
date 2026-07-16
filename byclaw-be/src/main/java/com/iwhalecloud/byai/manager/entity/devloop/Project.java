@@ -22,11 +22,11 @@ public class Project {
 
     private Long resourceId;
 
-    private String createBy;
+    private Long createBy;
 
     private Date createTime;
 
-    private String updateBy;
+    private Long updateBy;
 
     private Date updateTime;
 

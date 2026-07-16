@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.application.service.job.DevloopPatService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.DingtalkScanService;
+import com.iwhalecloud.byai.manager.domain.devloop.service.DwsAuthService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.GitHubIssueScanService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ScanLogService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ScanSourceService;
@@ -77,6 +78,9 @@ public class DevloopApplicationService {
     private DingtalkScanService dingtalkScanService;
 
     @Autowired
+    private DwsAuthService dwsAuthService;
+
+    @Autowired
     private DevloopPatService patService;
 
     @Autowired
@@ -99,7 +103,7 @@ public class DevloopApplicationService {
         project.setProjectName(dto.getProjectName());
         project.setDescription(dto.getDescription());
         project.setResourceId(dto.getResourceId());
-        project.setCreateBy(String.valueOf(CurrentUserHolder.getCurrentUserId()));
+        project.setCreateBy(CurrentUserHolder.getCurrentUserId());
         project.setCreateTime(new Date());
         project.setDeleteFlag(DELETE_FLAG_NORMAL);
         projectMapper.insert(project);
@@ -122,7 +126,7 @@ public class DevloopApplicationService {
         // 创建者自动加为 owner 成员
         projectMemberService.addMember(
             project.getProjectId(),
-            String.valueOf(CurrentUserHolder.getCurrentUserId()),
+            CurrentUserHolder.getCurrentUserId(),
             CurrentUserHolder.getCurrentUserCode(),
             CurrentUserHolder.getCurrentUserName(),
             "owner"
@@ -173,7 +177,7 @@ public class DevloopApplicationService {
         if (dto.getDescription() != null) {
             project.setDescription(dto.getDescription());
         }
-        project.setUpdateBy(String.valueOf(CurrentUserHolder.getCurrentUserId()));
+        project.setUpdateBy(CurrentUserHolder.getCurrentUserId());
         project.setUpdateTime(new Date());
         projectMapper.updateById(project);
         return ResponseUtil.successResponse(null);
@@ -187,7 +191,7 @@ public class DevloopApplicationService {
             return ResponseUtil.failRes("Project not found");
         }
         project.setDeleteFlag(DELETE_FLAG_DELETED);
-        project.setUpdateBy(String.valueOf(CurrentUserHolder.getCurrentUserId()));
+        project.setUpdateBy(CurrentUserHolder.getCurrentUserId());
         project.setUpdateTime(new Date());
         projectMapper.updateById(project);
         return ResponseUtil.successResponse(null);
@@ -404,6 +408,9 @@ public class DevloopApplicationService {
             items = gitHubIssueScanService.scan(source, pat);
         } else if ("dingtalk".equals(type)) {
             items = dingtalkScanService.scan(source);
+            if (items == null) {
+                return ResponseUtil.failRes("DWS未授权，请先在扫描源设置中完成钉钉授权");
+            }
         } else {
             return ResponseUtil.failRes("Unknown source type: " + type);
         }
@@ -580,7 +587,7 @@ public class DevloopApplicationService {
         }
 
         // 校验当前用户是否绑定了数字员工
-        String currentUserId = String.valueOf(CurrentUserHolder.getCurrentUserId());
+        Long currentUserId = CurrentUserHolder.getCurrentUserId();
         ProjectMember member = projectMemberService.findByProjectAndUser(projectId, currentUserId);
         if (member == null) {
             return ResponseUtil.failRes("您不是该项目成员，无法创建任务");
@@ -708,7 +715,7 @@ public class DevloopApplicationService {
     /** 添加项目成员 */
     public ResponseUtil<Void> addProjectMember(Map<String, Object> params) {
         Long projectId = Long.valueOf(params.get("projectId").toString());
-        String userId = params.get("userId").toString();
+        Long userId = Long.valueOf(params.get("userId").toString());
         String userCode = params.containsKey("userCode") ? params.get("userCode").toString() : null;
         String userName = params.containsKey("userName") ? params.get("userName").toString() : null;
 
@@ -747,7 +754,8 @@ public class DevloopApplicationService {
         ProjectMember member = projectMemberService.getById(memberId);
         if (member != null) {
             Project project = projectMapper.selectById(member.getProjectId());
-            if (project != null && member.getUserId().equals(project.getCreateBy())) {
+            if (project != null && project.getCreateBy() != null
+                && project.getCreateBy().equals(member.getUserId())) {
                 return ResponseUtil.failRes("项目创建者不能被移除");
             }
         }
@@ -760,6 +768,40 @@ public class DevloopApplicationService {
         Long memberId = Long.valueOf(params.get("memberId").toString());
         Long agentId = Long.valueOf(params.get("agentId").toString());
         projectMemberService.bindAgent(memberId, agentId);
+        return ResponseUtil.successResponse(null);
+    }
+
+    // ========== DWS 钉钉授权 ==========
+
+    /** 启动设备授权流程（异步启动dws进程，返回userCode和verificationUrl） */
+    public ResponseUtil<Map<String, Object>> startDwsDeviceAuth() {
+        Map<String, Object> result = dwsAuthService.startDeviceAuth();
+        if (Boolean.TRUE.equals(result.get("success"))) {
+            return ResponseUtil.successResponse(result);
+        }
+        return ResponseUtil.failRes((String) result.getOrDefault("message", "启动授权失败"));
+    }
+
+    /** 检查DWS授权状态（前端轮询用） */
+    public ResponseUtil<Map<String, Object>> checkDwsAuthStatus() {
+        Map<String, Object> dbStatus = dwsAuthService.checkDwsToken();
+        Map<String, Object> runtimeStatus = dwsAuthService.getAuthStatus();
+        Map<String, Object> result = new HashMap<>();
+        result.put("hasToken", dbStatus.get("hasToken"));
+        result.put("savedAt", dbStatus.getOrDefault("savedAt", ""));
+        result.put("runtimeAuthenticated", runtimeStatus.get("authenticated"));
+        result.put("tokenValid", runtimeStatus.get("tokenValid"));
+        result.put("expiresAt", runtimeStatus.getOrDefault("expiresAt", ""));
+        return ResponseUtil.successResponse(result);
+    }
+
+    /** 直接使用token授权 */
+    public ResponseUtil<Void> saveDwsToken(String token) {
+        boolean injected = dwsAuthService.injectToken(token);
+        if (!injected) {
+            return ResponseUtil.failRes("Token无效，注入失败");
+        }
+        dwsAuthService.recordAuthToDb();
         return ResponseUtil.successResponse(null);
     }
 }

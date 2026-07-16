@@ -1,0 +1,63 @@
+# 运行阶段（JAR 由 CI 预先构建）— 含 DWS CLI 支持
+FROM eclipse-temurin:21-jre-alpine
+
+# 创建应用目录
+WORKDIR /app
+
+# 安装 dws 依赖：gnome-keyring + dbus（dws 用 go-keyring 存 token）
+RUN apk add --no-cache \
+    curl \
+    bash \
+    gnome-keyring \
+    dbus \
+    libsecret \
+    && rm -rf /var/cache/apk/*
+
+# 安装 DWS CLI
+ARG DWS_VERSION=v1.0.47
+ARG GITHUB_MIRROR_BASE=https://github.com
+ENV DWS_NO_SKILLS=1 \
+    PATH="/root/.local/bin:${PATH}"
+RUN curl -fsSL "${GITHUB_MIRROR_BASE}/DingTalk-Real-AI/dingtalk-workspace-cli/raw/refs/heads/main/scripts/install.sh" | sh \
+    && dws --version
+
+# 清理 dws 不需要的 skills 目录
+RUN rm -rf /root/.agents/skills
+
+# 初始化 gnome-keyring（创建启动脚本）
+RUN printf '#!/bin/bash\n\
+# 启动 dbus 和 gnome-keyring，让 dws go-keyring 能持久化 token\n\
+eval $(dbus-launch --sh-syntax)\n\
+export DBUS_SESSION_BUS_ADDRESS\n\
+echo "" | gnome-keyring-daemon --unlock --components=secrets\n\
+exec "$@"\n' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
+
+# 构建信息参数（由 CI/Jenkins/本地脚本通过 --build-arg 传入）
+ARG BUILD_VERSION=unknown
+ARG BUILD_BRANCH=unknown
+ARG BUILD_COMMIT=unknown
+ARG BUILD_COMMIT_FULL=unknown
+ARG BUILD_TIME=unknown
+ARG BUILD_MODULE=byclaw-be
+ARG BUILD_COMMIT_MSG=unknown
+
+RUN printf '{"version":"%s","branch":"%s","commit":"%s","commitFull":"%s","buildTime":"%s","module":"%s","commitMsg":"%s"}\n' \
+    "$BUILD_VERSION" "$BUILD_BRANCH" "$BUILD_COMMIT" "$BUILD_COMMIT_FULL" "$BUILD_TIME" "$BUILD_MODULE" "$BUILD_COMMIT_MSG" \
+    > /app/build-info.json
+
+# 复制构建好的 JAR 文件
+COPY target/*.jar app.jar
+
+# dws 需要 root 权限访问 keyring，不切换用户
+# 如需非 root 运行，需额外配置 keyring 权限
+
+# 暴露端口
+EXPOSE 8080
+
+# 健康检查
+HEALTHCHECK --interval=30s --timeout=3s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8080/actuator/health || exit 1
+
+# 启动：先初始化 keyring 环境，再启动 Java 应用
+ENTRYPOINT ["/app/entrypoint.sh"]
+CMD ["java", "-jar", "app.jar"]

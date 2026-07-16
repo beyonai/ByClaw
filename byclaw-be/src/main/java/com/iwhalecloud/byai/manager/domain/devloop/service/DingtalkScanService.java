@@ -36,12 +36,21 @@ public class DingtalkScanService {
     @Autowired
     private ScanSourceService scanSourceService;
 
-    /** 执行一次钉钉消息扫描，返回本次新增的条目列表 */
+    @Autowired
+    private DwsAuthService dwsAuthService;
+
+    /** 执行一次钉钉消息扫描，返回本次新增的条目列表；授权失败返回 null */
     public List<ScanLogItem> scan(ScanSource source) {
         List<ScanLogItem> items = new ArrayList<>();
         Long logId = null;
 
         try {
+            // 确保 dws 已认证
+            if (!dwsAuthService.ensureAuthenticated(source.getCreateBy())) {
+                log.error("[DingtalkScan] DWS未授权，无法扫描。sourceId={}", source.getSourceId());
+                return null;
+            }
+
             JsonNode configNode = MAPPER.readTree(source.getConfig());
             String groupId = configNode.path("groupId").asText();
             String keyword = configNode.path("keyword").asText();

@@ -23,7 +23,7 @@ public class ProjectMemberService {
     private SequenceService sequenceService;
 
     /** 添加成员 */
-    public ProjectMember addMember(Long projectId, String userId, String userCode, String userName, String role) {
+    public ProjectMember addMember(Long projectId, Long userId, String userCode, String userName, String role) {
         ProjectMember member = new ProjectMember();
         member.setMemberId(sequenceService.nextVal());
         member.setProjectId(projectId);
@@ -55,7 +55,7 @@ public class ProjectMemberService {
     }
 
     /** 判断用户是否已是成员 */
-    public boolean isMember(Long projectId, String userId) {
+    public boolean isMember(Long projectId, Long userId) {
         LambdaQueryWrapper<ProjectMember> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(ProjectMember::getProjectId, projectId)
                .eq(ProjectMember::getUserId, userId);
@@ -63,7 +63,7 @@ public class ProjectMemberService {
     }
 
     /** 根据项目和用户查找成员 */
-    public ProjectMember findByProjectAndUser(Long projectId, String userId) {
+    public ProjectMember findByProjectAndUser(Long projectId, Long userId) {
         LambdaQueryWrapper<ProjectMember> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(ProjectMember::getProjectId, projectId)
                .eq(ProjectMember::getUserId, userId);

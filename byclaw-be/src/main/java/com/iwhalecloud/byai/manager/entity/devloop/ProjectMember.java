@@ -18,7 +18,7 @@ public class ProjectMember {
 
     private Long projectId;
 
-    private String userId;
+    private Long userId;
 
     private String userCode;
 
