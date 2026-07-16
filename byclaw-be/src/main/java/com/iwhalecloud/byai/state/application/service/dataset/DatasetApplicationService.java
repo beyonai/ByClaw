@@ -1122,13 +1122,14 @@ public class DatasetApplicationService {
         DatasetImportDto dto = parseAndValidateDto(rawJson, ownerType);
         dto.setCatalogId(catalogId);
 
-        SsResource existing = ssResourceService.findByIdOrCode(null, dto.getResourceCode());
+        SsResource existing = ssResourceService.findByImportIdentity(dto.getSystemCode(), dto.getResourceBizType(),
+            dto.getResourceCode());
         if (existing == null) {
             return createDatasetFromImport(dto, rawJson, ownerType);
         }
         else {
             ResourceImportOwnerTypeValidator.validate(existing, ownerType, dto.getResourceCode(), dto.getResourceName(),
-                dto.getResourceBizType());
+                dto.getResourceBizType(), dto.getSystemCode());
             validateDatasetImportUpdatePermission(existing, dto.getResourceCode());
             return updateDatasetFromImport(existing, dto, rawJson, ownerType);
         }
