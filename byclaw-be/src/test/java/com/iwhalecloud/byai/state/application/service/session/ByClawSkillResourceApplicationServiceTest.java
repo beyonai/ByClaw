@@ -344,6 +344,69 @@ class ByClawSkillResourceApplicationServiceTest {
     }
 
     @Test
+    void importSkillZips_adminVipCanOverwriteEnterpriseInnerSkill() {
+        MockMultipartFile uploadFile = new MockMultipartFile("file", "enterprise-skill.zip", "application/zip",
+            skillZipBytes("enterprise-skill"));
+        SsResource existingResource = new SsResource();
+        existingResource.setResourceId(7103L);
+        existingResource.setSystemCode("BYAI");
+        existingResource.setResourceCode("enterprise-skill");
+        existingResource.setResourceName("内置技能");
+        existingResource.setResourceBizType("SKILL");
+        existingResource.setOwnerType("enterprise");
+        SsResExtSkill existingExt = new SsResExtSkill();
+        existingExt.setResourceId(7103L);
+        existingExt.setSkillType(SsResExtSkillService.INNER_SKILL_TYPE);
+        existingExt.setVersion("v0.1");
+
+        LoginInfo loginInfo = CurrentUserHolder.getLoginInfo();
+        loginInfo.setUserCode("adminvip");
+        when(ssResourceService.getResourceListByCode(List.of("enterprise-skill"))).thenReturn(List.of(existingResource));
+        when(ssResourceService.updateResourceEntity(any(SsResource.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(ssResExtSkillService.findById(7103L)).thenReturn(existingExt);
+        when(ssResExtSkillService.nextVersion("v0.1")).thenReturn("v0.2");
+
+        var result = service.importSkillZips(new org.springframework.web.multipart.MultipartFile[] {uploadFile}, 10L,
+            "enterprise");
+
+        assertThat(result.getSuccess()).isEqualTo(1);
+        assertThat(result.getUpdatedCount()).isEqualTo(1);
+        verify(ssResourceService).updateResourceEntity(existingResource);
+        verify(ssResExtSkillService).saveOrUpdate(any(SsResExtSkill.class));
+    }
+
+    @Test
+    void importSkillZips_adminVipCanOverwritePersonalInnerSkill() {
+        MockMultipartFile uploadFile = new MockMultipartFile("file", "personal-skill.zip", "application/zip",
+            skillZipBytes("personal-skill"));
+        SsResource existingResource = new SsResource();
+        existingResource.setResourceId(7104L);
+        existingResource.setSystemCode("BYAI");
+        existingResource.setResourceCode("personal-skill");
+        existingResource.setResourceName("个人内置技能");
+        existingResource.setResourceBizType("SKILL");
+        existingResource.setOwnerType("personal");
+        SsResExtSkill existingExt = new SsResExtSkill();
+        existingExt.setResourceId(7104L);
+        existingExt.setSkillType(SsResExtSkillService.INNER_SKILL_TYPE);
+        existingExt.setVersion("v0.1");
+
+        CurrentUserHolder.getLoginInfo().setUserCode("adminvip");
+        when(ssResourceService.getResourceListByCode(List.of("personal-skill"))).thenReturn(List.of(existingResource));
+        when(ssResourceService.updateResourceEntity(any(SsResource.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(ssResExtSkillService.findById(7104L)).thenReturn(existingExt);
+        when(ssResExtSkillService.nextVersion("v0.1")).thenReturn("v0.2");
+
+        var result = service.importSkillZips(new org.springframework.web.multipart.MultipartFile[] {uploadFile}, 10L,
+            "personal");
+
+        assertThat(result.getSuccess()).isEqualTo(1);
+        assertThat(result.getUpdatedCount()).isEqualTo(1);
+        verify(ssResourceService).updateResourceEntity(existingResource);
+        verify(ssResExtSkillService).saveOrUpdate(any(SsResExtSkill.class));
+    }
+
+    @Test
     void importSkillZip_rejectsOverwriteWhenCurrentUserCannotManageSkill() {
         MockMultipartFile uploadFile = new MockMultipartFile("file", "enterprise-skill.zip", "application/zip",
             skillZipBytes("enterprise-skill"));

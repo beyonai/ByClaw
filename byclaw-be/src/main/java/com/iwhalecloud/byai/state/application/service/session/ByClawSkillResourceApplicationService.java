@@ -79,6 +79,8 @@ public class ByClawSkillResourceApplicationService {
 
     private static final String SKILL_DOC_FILE_NAME = "SKILL.md";
 
+    private static final String ADMIN_VIP_USER_CODE = "adminvip";
+
     @Autowired
     private SsResourceService ssResourceService;
 
@@ -514,7 +516,12 @@ public class ByClawSkillResourceApplicationService {
         if (CollectionUtils.isEmpty(sameNaturalKeySkills)) {
             return null;
         }
-        return sameNaturalKeySkills.stream().filter(authApplicationService::hasResourceManagePermission).findFirst()
+        Optional<SsResource> manageableSkill = sameNaturalKeySkills.stream()
+            .filter(authApplicationService::hasResourceManagePermission).findFirst();
+        if (manageableSkill.isPresent()) {
+            return manageableSkill.get();
+        }
+        return sameNaturalKeySkills.stream().filter(this::isAdminVipInnerSkill).findFirst()
             .orElseThrow(() -> new IllegalArgumentException(I18nUtil.get("byclaw.skill.import.no.manage.permission",
                 sameNaturalKeySkills.get(0).getResourceName())));
     }
@@ -539,6 +546,9 @@ public class ByClawSkillResourceApplicationService {
     private void assertSkillManagePermission(SsResource skillResource) {
         SsResExtSkill extSkill = skillResource == null || skillResource.getResourceId() == null ? null
             : ssResExtSkillService.findById(skillResource.getResourceId());
+        if (isAdminVipInnerSkill(skillResource, extSkill)) {
+            return;
+        }
         if (extSkill != null && StringUtils.equalsIgnoreCase(extSkill.getSkillType(),
             SsResExtSkillService.INNER_SKILL_TYPE)) {
             throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.inner.readonly"));
@@ -547,6 +557,18 @@ public class ByClawSkillResourceApplicationService {
             throw new IllegalArgumentException(
                 I18nUtil.get("byclaw.skill.import.no.manage.permission", skillResource.getResourceName()));
         }
+    }
+
+    private boolean isAdminVipInnerSkill(SsResource skillResource) {
+        SsResExtSkill extSkill = skillResource == null || skillResource.getResourceId() == null ? null
+            : ssResExtSkillService.findById(skillResource.getResourceId());
+        return isAdminVipInnerSkill(skillResource, extSkill);
+    }
+
+    private boolean isAdminVipInnerSkill(SsResource skillResource, SsResExtSkill extSkill) {
+        return skillResource != null && extSkill != null
+            && ADMIN_VIP_USER_CODE.equalsIgnoreCase(CurrentUserHolder.getCurrentUserCode())
+            && StringUtils.equalsIgnoreCase(extSkill.getSkillType(), SsResExtSkillService.INNER_SKILL_TYPE);
     }
 
     private String findSkillExtSourceType(Long resourceId) {
