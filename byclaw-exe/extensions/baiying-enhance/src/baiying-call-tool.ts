@@ -28,9 +28,8 @@ import {
   logChannelDebug,
   type BaiyingEnhanceLogger,
 } from "./executor/debug-channel.js";
-import { appendBaiyingRemoteTaskStartedEvent } from "./remote-task-log.js";
 import type { ResourceContext } from "./executor/types.js";
-import { getDelegatedTaskToolDetails } from "../../shared/src/delegated-tool-details.js";
+import { getDelegatedTaskToolDetails, isAsyncModeResult } from "../../shared/src/delegated-tool-details.js";
 
 function normalizeResourceType(resource: BaiyingAssociatedResource | undefined): string {
   return resource?.resourceBizType || resource?.resourceType || "UNKNOWN";
@@ -558,6 +557,7 @@ export function createBaiyingCallToolFactory(params: {
           language: channelResolve.language,
           beyondToken: channelResolve.beyondToken,
           parentSessionKey: channelResolve.parentSessionKey,
+          accountId: channelResolve.accountId,
         });
         logChannelDebug(`baiying_call(${agent.agentId})`, {
           resourceContext: resourceContext as ResourceContext,
@@ -706,57 +706,7 @@ export function createBaiyingCallToolFactory(params: {
               },
             };
           }
-          if (isPlainRecord(result) && result.backend === "call_agent_sdk" && result.status === "running") {
-            const ack = isPlainRecord(result.data) ? result.data : {};
-            const taskId = normalizeText(ack.message_id);
-            const sessionId = normalizeText(ack.session_id);
-            const traceId = normalizeText(ack.trace_id);
-            if (taskId && sessionId) {
-              const target = isPlainRecord(result.target) ? result.target : {};
-              const createdAt = Date.now();
-              const record = {
-                taskId,
-                messageId: taskId,
-                requesterSessionKey,
-                parentSessionKey: channelResolve.parentSessionKey,
-                traceId,
-                sessionId,
-                streamName: ack.stream_name || `byai_gateway:session:${sessionId}:data_stream`,
-                toolCallId: _toolCallId,
-                targetWorkerId: normalizeText(ack.target_worker_id) || normalizeText(target.target_worker_id),
-                targetAgentType: normalizeText(ack.target_agent_type) || normalizeText(target.target_agent_type),
-                tenantId: normalizeText(ack.tenant_id),
-                resourceId: normalizeText(target.resource_id) || resourceId,
-                agentId: agent.agentId,
-                query,
-                createdAt,
-                updatedAt: createdAt,
-                status: "pending",
-                accountId: channelResolve.accountId,
-                language: channelResolve.language,
-                beyondToken: channelResolve.beyondToken,
-              };
-              await appendBaiyingRemoteTaskStartedEvent(record).catch((err) => {
-                traceLog("doc_async.track_failed", {
-                  agent_id: agent.agentId,
-                  task_id: taskId,
-                  doc_session_id: sessionId,
-                  error: err instanceof Error ? err.message : String(err),
-                });
-                logBaiyingRequest(params.logger, "doc_async.track_failed", {
-                  task: record,
-                  error: err instanceof Error ? err.message : String(err),
-                });
-              });
-              traceLog("doc_async.tracked", {
-                agent_id: agent.agentId,
-                task_id: taskId,
-                doc_session_id: sessionId,
-                trace_id: traceId,
-                target_worker_id: record.targetWorkerId,
-                requester_session_key: requesterSessionKey,
-              });
-            }
+          if (isAsyncModeResult(result)) {
             if (langfuseToolObservationCreated) {
               await updateLangfuseToolObservation({
                 observationId: syntheticLangfuseToolObservationId,

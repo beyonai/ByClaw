@@ -1,7 +1,7 @@
-import { createRedis } from "@byclaw/by-framework";
 import { loadCronStore, resolveCronStorePath } from "openclaw/plugin-sdk/cron-store-runtime";
 import { getOptionalByaiRuntime } from "./runtime";
 import { createRedisInstance, emitOutOfBandSdkEvent, getUserCode } from "./utils";
+import type { RedisClient } from "../../shared/src/redis-compat.js";
 
 type PluginHookGatewayCronRunStatus = "ok" | "error" | "skipped";
 
@@ -128,7 +128,7 @@ async function resolveNearestCronNextRunTime(): Promise<number | ""> {
 }
 
 async function upsertCronNextRunTimeField(params: {
-  redis: ReturnType<typeof createRedis>;
+  redis: RedisClient;
   userCode: string;
   nextRunTime: string | number | "";
 }) {

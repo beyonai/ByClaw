@@ -1,10 +1,8 @@
+import type { RedisConnectionConfig as SharedRedisConnectionConfig } from "../../shared/src/redis-compat.js";
+
 export type JsonRecord = Record<string, unknown>;
 
-export type RedisConnectionConfig = {
-  host: string;
-  port: number;
-  username?: string;
-  password?: string;
+export type RedisConnectionConfig = SharedRedisConnectionConfig & {
   database: number;
   keyPrefix: string;
   connectTimeoutMs: number;

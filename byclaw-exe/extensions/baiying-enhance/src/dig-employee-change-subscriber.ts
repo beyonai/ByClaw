@@ -1,5 +1,11 @@
-import Redis from "ioredis";
 import type { AgentFlushNowOptions } from "./agent-watchdog.js";
+import {
+  createRedisClient,
+  hasRedisConnectionConfig,
+  readRedisConfig,
+  type RedisClient,
+  type RedisClusterNode,
+} from "../../shared/src/redis-compat.js";
 
 type LoggerLike = {
   info: (message: string) => void;
@@ -138,9 +144,12 @@ export function hasDigEmployeePubSubRedisConfig(params: {
   host?: string;
   port: number;
   db: number;
+  clusterNodes?: RedisClusterNode[];
   channel: string;
 }): boolean {
-  return !!params.host?.trim() && !Number.isNaN(params.port) && !Number.isNaN(params.db) && !!params.channel.trim();
+  const hasStandalone = !!params.host?.trim() && !Number.isNaN(params.port) && !Number.isNaN(params.db);
+  const hasCluster = (params.clusterNodes?.length ?? 0) > 0;
+  return (hasStandalone || hasCluster) && !!params.channel.trim();
 }
 
 export function createDigEmployeeChangeSubscriber(params: {
@@ -152,15 +161,13 @@ export function createDigEmployeeChangeSubscriber(params: {
   getAuthorizedIds: () => Set<string> | undefined;
   flushNow: (opts?: AgentFlushNowOptions) => Promise<void>;
 }): DigEmployeeChangeSubscriber {
-  const host = process.env.REDIS_HOST?.trim();
-  const port = Number.parseInt(process.env.REDIS_PORT?.trim() || "", 10);
-  const db = Number.parseInt(process.env.REDIS_DATABASE?.trim() || "", 10);
+  const redisConfig = readRedisConfig();
   const connectTimeout = Math.max(
     500,
     Number.parseInt(process.env.BAIYING_DIG_CHANGE_REDIS_CONNECT_TIMEOUT_MS || "3000", 10),
   );
 
-  let subscriber: Redis | null = null;
+  let subscriber: RedisClient | null = null;
   let stopped = false;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let strictAuthWarned = false;
@@ -294,18 +301,22 @@ export function createDigEmployeeChangeSubscriber(params: {
     if (subscriber || stopped) {
       return;
     }
-    if (!hasDigEmployeePubSubRedisConfig({ host, port, db, channel: params.channel })) {
+    if (
+      !hasDigEmployeePubSubRedisConfig({
+        host: redisConfig.host,
+        port: redisConfig.port ?? Number.NaN,
+        db: redisConfig.db ?? 0,
+        clusterNodes: redisConfig.clusterNodes,
+        channel: params.channel,
+      }) ||
+      !hasRedisConnectionConfig(redisConfig)
+    ) {
       params.logger.warn(
-        "baiying-enhance: dig-employee Pub/Sub subscriber disabled (REDIS_HOST/REDIS_PORT/REDIS_DATABASE/channel missing)",
+        "baiying-enhance: dig-employee Pub/Sub subscriber disabled (REDIS_HOST/REDIS_PORT or REDIS_CLUSTER_HOST/channel missing)",
       );
       return;
     }
-    subscriber = new Redis({
-      host,
-      port,
-      db,
-      username: process.env.REDIS_USERNAME?.trim() || undefined,
-      password: process.env.REDIS_PASSWORD?.trim() || undefined,
+    subscriber = createRedisClient(redisConfig, {
       lazyConnect: true,
       enableOfflineQueue: false,
       connectTimeout,

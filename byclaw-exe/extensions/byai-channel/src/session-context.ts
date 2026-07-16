@@ -1417,7 +1417,6 @@ export function ensureActiveSdkRequestForDelegatedFollowup(params: {
  */
 export function markActiveSdkAwaitingDelegatedFollowup(params: {
   requesterSessionKey: string | undefined;
-  parentSessionKey?: string;
 }): ActiveSdkRequest | undefined {
   const request = locateActiveSdkRequestForDelegated(params);
   if (!request) {
@@ -1435,7 +1434,6 @@ export function markActiveSdkAwaitingDelegatedFollowup(params: {
  */
 export function removeActiveSdkDelegatedWork(params: {
   requesterSessionKey: string | undefined;
-  parentSessionKey?: string;
   toolCallId: string | undefined;
 }): ActiveSdkRequest | undefined {
   const normalizedToolCallId = normalizeAlias(params.toolCallId);

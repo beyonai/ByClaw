@@ -20,11 +20,15 @@
  * built by `buildOntologyMcpHeaders` in `ontology-headers.ts`.
  */
 
-import { createRedis } from "@byclaw/by-framework";
 import { isRecord } from "./types.js";
 import { readRedisConfig } from "./doc-shared.js";
+import {
+  byFrameworkRedisKeys,
+  createRedisClient,
+  type RedisClient,
+} from "../../../shared/src/redis-compat.js";
 
-const DATACLOUD_REDIS_KEY = "byai_gateway:sd:instances:byclaw-datacloud";
+const DATACLOUD_SERVICE_NAME = "byclaw-datacloud";
 
 /**
  * TTL for the in-process cache, in milliseconds. Keeps Redis traffic sane
@@ -91,18 +95,12 @@ export async function resolveDatacloudMcpServerUrl(options?: {
   }
 
   const cfg = readRedisConfig();
-  let redis: ReturnType<typeof createRedis>;
+  let redis: RedisClient;
   try {
-    // `createRedis` only forwards a subset of ioredis options; for timeout /
+    // The shared factory forwards deployment mode and credentials; for timeout /
     // retry tuning we rely on the node default TCP timeout and wrap the
     // single HGETALL in `Promise.race` below.
-    redis = createRedis({
-      host: cfg.host,
-      port: cfg.port,
-      db: cfg.db,
-      username: cfg.username,
-      password: cfg.password,
-    });
+    redis = createRedisClient(cfg);
   } catch {
     return "";
   }
@@ -111,8 +109,9 @@ export async function resolveDatacloudMcpServerUrl(options?: {
   const bound = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 5_000;
 
   try {
+    const redisKey = byFrameworkRedisKeys.serviceInstances(DATACLOUD_SERVICE_NAME, cfg);
     const hash = await Promise.race<Record<string, string>>([
-      redis.hgetall(DATACLOUD_REDIS_KEY) as Promise<Record<string, string>>,
+      redis.hgetall(redisKey) as Promise<Record<string, string>>,
       new Promise<Record<string, string>>((_, reject) =>
         setTimeout(() => reject(new Error("datacloud SD lookup timed out")), bound),
       ),
