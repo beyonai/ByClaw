@@ -61,6 +61,7 @@ const compMap: Record<string, React.LazyExoticComponent<any>> = {
   [`${SSEMessageType.thinkTaskUserInput}`]: lazy(
     () => import('@/components/MessagesComp/Think/ThinkTask/ThinkTaskUserInput')
   ),
+  [`${SSEMessageType.askUserQuestions}`]: lazy(() => import('@/components/MessagesComp/AskUserQuestions')),
   [`${SSEMessageType.dataCloudLogin}`]: lazy(() => import('@/components/MessagesComp/DataCloud/login')),
   [`${SSEMessageType.commonCard}`]: lazy(() => import('@/components/MessagesComp/Card')),
   [`${SSEMessageType.jsonBlock}`]: lazy(() => import('@/components/MessagesComp/JsonBlock')),

@@ -18,20 +18,20 @@ import styles from './index.module.less';
 type IProps = {
   message: IMessage;
   treeNode: TreeNode;
-  updateMessageListItemContent: (path: string, val: any) => void;
+  updateMessageListItemContent: (path: string, val: any) => IMessage;
 };
 
 interface CollapsibleSectionProps {
   children: React.ReactNode[];
   treeNode: TreeNode;
   message: IMessage;
-  updateMessageListItemNewContent: (path: string, val: any) => void;
+  updateMessageListItemNewContent: (path: string, val: any) => IMessage;
 }
 interface CollapsibleItemProps {
   item: NewIMessageListItem;
   parentTreeNode?: TreeNode;
   message: IMessage;
-  updateMessageListItemNewContent: (path: string, val: any) => void;
+  updateMessageListItemNewContent: (path: string, val: any) => IMessage;
 }
 
 const CollapsibleSection: React.FC<CollapsibleSectionProps> = React.memo(
@@ -74,7 +74,7 @@ const CollapsibleSection: React.FC<CollapsibleSectionProps> = React.memo(
             thinkListItem={treeNode}
             messageIdx={messageIdx}
             updateMessageListItem={(path: string, val: any) => {
-              updateMessageListItemNewContent(`${messageIdx}.${path}`, val);
+              return updateMessageListItemNewContent(`${messageIdx}.${path}`, val);
             }}
           />
         </Suspense>
@@ -188,7 +188,7 @@ const CollapsibleItem: React.FC<CollapsibleItemProps> = React.memo(
             message={message}
             messageIdx={item.messageIdx}
             updateMessageListItem={(path: string, val: any) => {
-              updateMessageListItemNewContent(`${item.messageIdx}.${path}`, val);
+              return updateMessageListItemNewContent(`${item.messageIdx}.${path}`, val);
             }}
           />
           {hasChildren && (
@@ -225,7 +225,7 @@ const CollapsibleItem: React.FC<CollapsibleItemProps> = React.memo(
                   message={message}
                   messageIdx={child.messageIdx}
                   updateMessageListItem={(path: string, val: any) => {
-                    updateMessageListItemNewContent(`${child.messageIdx}.${path}`, val);
+                    return updateMessageListItemNewContent(`${child.messageIdx}.${path}`, val);
                   }}
                 />
               ))}

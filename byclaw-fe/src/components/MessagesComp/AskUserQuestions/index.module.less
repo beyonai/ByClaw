@@ -1,0 +1,98 @@
+.thinkTaskUserInput {
+  position: relative;
+  line-height: 22px;
+  font-size: var(--beyond-font-size);
+  color: var(--beyond-color-text-tertiary);
+  color: var(--beyond-color-text-tertiary);
+  // border-left: 2px solid #ced3d9;
+  padding-right: 10px;
+  // margin: 12px 0;
+  margin-left: 8px;
+  min-height: 22px;
+  padding-bottom: 10px;
+}
+
+.questionForm {
+  min-width: 0;
+}
+
+.singleQuestion {
+  margin-bottom: 16px;
+}
+
+.questionTitle {
+  margin-bottom: 12px;
+  color: var(--beyond-color-text);
+  font-weight: 600;
+}
+
+.questionMarkdown {
+  :global(section) {
+    padding-bottom: 0;
+  }
+
+  :global(section > :first-child) {
+    margin-top: 0;
+  }
+
+  :global(section > :last-child) {
+    margin-bottom: 0;
+  }
+}
+
+.optionList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.optionItem {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--beyond-color-border-secondary);
+  border-radius: 6px;
+  cursor: pointer;
+
+  &:hover {
+    border-color: var(--beyond-color-primary);
+  }
+
+  :global(.ant-checkbox-wrapper),
+  :global(.ant-radio-wrapper) {
+    flex: none;
+  }
+}
+
+.optionContent {
+  flex: 1;
+  min-width: 0;
+}
+
+.optionLabel {
+  color: var(--beyond-color-text);
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.optionDescription {
+  margin-top: 2px;
+  color: var(--beyond-color-text-tertiary);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.otherOption {
+  cursor: pointer;
+}
+
+.otherInput {
+  margin-top: 8px;
+  border-color: transparent;
+}
+
+// [data-type='noLine'] .thinkTaskUserInput {
+//   border-left: none;
+// }
