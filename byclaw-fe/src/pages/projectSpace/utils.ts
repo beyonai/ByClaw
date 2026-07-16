@@ -13,7 +13,7 @@ const getObjectData = (response: any): any => {
   return response?.data && !Array.isArray(response.data) ? response.data : response;
 };
 
-const normalizeProjectSession = (item: any, projectId?: string): ProjectSession => ({
+export const normalizeProjectSession = (item: any, projectId?: string): ProjectSession => ({
   ...item,
   // 后端 Long 到前端统一转字符串，避免项目会话高亮、跳转时出现数字/字符串不匹配。
   projectId: `${item?.projectId || projectId || ''}`,

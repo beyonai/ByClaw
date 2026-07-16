@@ -3,6 +3,7 @@ export {
   createProject,
   deleteProject,
   getProject,
+  listProjectSessionsByQo,
   listProjects,
   unbindProjectSession,
   updateProject,

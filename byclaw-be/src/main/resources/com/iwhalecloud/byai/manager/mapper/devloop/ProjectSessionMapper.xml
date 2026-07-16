@@ -62,9 +62,11 @@
                a.update_by,
                a.update_time,
                a.state,
-               a.project_id
+               a.project_id,
+               r.avatar
         FROM byai_session a
                  JOIN byai_project b ON a.project_id = b.project_id
+                 LEFT JOIN ss_resource r ON a.object_id = r.resource_id
         WHERE b.project_id = #{projectId}
         <if test="keyword != null and keyword != ''">
             AND a.session_name LIKE CONCAT('%', #{keyword}, '%')

@@ -6,19 +6,33 @@ import { useDispatch, useNavigate } from '@umijs/max';
 import classNames from 'classnames';
 import { trim } from 'lodash';
 import AntdIcon from '@/components/AntdIcon';
+import ChatAvatar from '@/components/ChatAvatar';
 import useGlobal from '@/hooks/useGlobal';
 import { PROJECT_TYPE_LABEL } from '@/pages/projectSpace/constants';
 import ProjectFormModal, { ProjectFormValues } from '@/pages/projectSpace/components/ProjectFormModal';
 import { useProjectList } from '@/pages/projectSpace/hooks/useProjectList';
-import { createProject, deleteProject, getProject, updateProject } from '@/pages/projectSpace/service';
+import {
+  createProject,
+  deleteProject,
+  getProject,
+  listProjectSessionsByQo,
+  updateProject,
+} from '@/pages/projectSpace/service';
 import type { ProjectSession, ProjectSpace } from '@/pages/projectSpace/types';
-import { normalizeProjectDetail } from '@/pages/projectSpace/utils';
+import { getArrayData, normalizeProjectDetail, normalizeProjectSession } from '@/pages/projectSpace/utils';
 import { processSessionContent, formatTime } from '../DialogueList/util';
 import { SiderContentContext } from '../../siderContentContext';
 import ProjectDetailPanel from './ProjectDetailModal';
 import styles from './index.module.less';
 
 const ALL_PROJECT_SCOPE_KEY = '__all_project_scope__';
+const PROJECT_SESSION_PAGE_SIZE = 30;
+
+type ProjectSessionPageState = {
+  pageNum: number;
+  pageSize: number;
+  total: number;
+};
 
 const getSessionKeywordMatched = (session: ProjectSession, query: string) => {
   return (
@@ -41,6 +55,19 @@ const sortProjectSessions = (sessions: ProjectSession[] = []) => {
     const rightTime = new Date(right.updateTime || right.createTime || 0).getTime();
     return rightTime - leftTime;
   });
+};
+
+const mergeProjectSessions = (cachedSessions: ProjectSession[] = [], nextSessions: ProjectSession[] = []) => {
+  // 分页追加时按 sessionId 去重，避免重复加载或会话更新后列表出现两条同一会话。
+  const sessionMap = new Map<string, ProjectSession>();
+  [...cachedSessions, ...nextSessions].forEach((session, index) => {
+    const sessionKey = `${session.sessionId || `${session.projectId || 'project'}_${index}`}`;
+    sessionMap.set(sessionKey, {
+      ...(sessionMap.get(sessionKey) || {}),
+      ...session,
+    });
+  });
+  return Array.from(sessionMap.values());
 };
 
 const getProjectScene = (project: ProjectSpace) => {
@@ -104,6 +131,8 @@ const ProjectSpaceList: React.FC = () => {
   const [activeProjectId, setActiveProjectId] = useState<string>();
   const [projectDetailMap, setProjectDetailMap] = useState<Record<string, ProjectSpace>>({});
   const [detailLoadingMap, setDetailLoadingMap] = useState<Record<string, boolean>>({});
+  const [projectSessionPageMap, setProjectSessionPageMap] = useState<Record<string, ProjectSessionPageState>>({});
+  const [sessionMoreLoadingMap, setSessionMoreLoadingMap] = useState<Record<string, boolean>>({});
   const [projectModalOpen, setProjectModalOpen] = useState(false);
   const [editingProject, setEditingProject] = useState<ProjectSpace>();
   const [projectCreating, setProjectCreating] = useState(false);
@@ -112,8 +141,20 @@ const ProjectSpaceList: React.FC = () => {
   const projectSavingRef = useRef(false);
 
   const mergedProjects = useMemo(() => {
-    return projects.map((project) => projectDetailMap[project.projectId] || project);
-  }, [projectDetailMap, projects]);
+    return projects.map((project) => {
+      const cachedProject = projectDetailMap[project.projectId];
+      if (!cachedProject) return project;
+      return {
+        ...cachedProject,
+        ...project,
+        repos: cachedProject.repos,
+        shareTargets: cachedProject.shareTargets,
+        sessions: cachedProject.sessions,
+        sessionCount:
+          projectSessionPageMap[project.projectId]?.total ?? project.sessionCount ?? cachedProject.sessionCount,
+      };
+    });
+  }, [projectDetailMap, projectSessionPageMap, projects]);
 
   const visibleProjects = useMemo(() => {
     const query = keyword.trim().toLowerCase();
@@ -174,28 +215,93 @@ const ProjectSpaceList: React.FC = () => {
     };
   }, [editingProject]);
 
-  const fetchProjectDetail = useCallback(
+  const fetchProjectSessions = useCallback(
+    async (project: ProjectSpace, options: { force?: boolean; append?: boolean } = {}) => {
+      const { force = false, append = false } = options;
+      const projectId = project.projectId;
+      if (!projectId) return project;
+      if (!force && !append && projectSessionPageMap[projectId]) return projectDetailMap[projectId] || project;
+
+      const currentPage = projectSessionPageMap[projectId];
+      const nextPageNum = append ? (currentPage?.pageNum || 0) + 1 : 1;
+      const setLoadingMap = append ? setSessionMoreLoadingMap : setDetailLoadingMap;
+      setLoadingMap((prev) => ({ ...prev, [projectId]: true }));
+      try {
+        // 展开项目时只查当前项目的会话页，项目列表本身只保留 sessionCount。
+        const pageData = await listProjectSessionsByQo(
+          {
+            projectId: Number(projectId),
+            pageNum: nextPageNum,
+            pageSize: PROJECT_SESSION_PAGE_SIZE,
+          },
+          { responseCfg: { hideErrorTips: true } }
+        );
+        const nextSessions = getArrayData(pageData).map((item) => normalizeProjectSession(item, projectId));
+        const total = Number(pageData?.total ?? project.sessionCount ?? nextSessions.length);
+        const cachedProject = projectDetailMap[projectId] || project;
+        const mergedSessions = append ? mergeProjectSessions(cachedProject.sessions || [], nextSessions) : nextSessions;
+        const nextProject = {
+          ...cachedProject,
+          ...project,
+          repos: cachedProject.repos,
+          shareTargets: cachedProject.shareTargets,
+          sessions: mergedSessions,
+          sessionCount: total,
+        };
+        setProjectDetailMap((prev) => ({ ...prev, [projectId]: nextProject }));
+        setProjectSessionPageMap((prev) => ({
+          ...prev,
+          [projectId]: {
+            pageNum: Number(pageData?.pageNum || nextPageNum),
+            pageSize: Number(pageData?.pageSize || PROJECT_SESSION_PAGE_SIZE),
+            total,
+          },
+        }));
+        return nextProject;
+      } catch (error) {
+        console.error('Failed to load project sessions:', error);
+        message.error('项目会话加载失败');
+        return project;
+      } finally {
+        setLoadingMap((prev) => ({ ...prev, [projectId]: false }));
+      }
+    },
+    [projectDetailMap, projectSessionPageMap]
+  );
+
+  const fetchProjectFullDetail = useCallback(
     async (project: ProjectSpace, force = false) => {
       const projectId = project.projectId;
       if (!projectId) return project;
-      if (!force && projectDetailMap[projectId]) return projectDetailMap[projectId];
+      const cachedProject = projectDetailMap[projectId];
+      if (!force && cachedProject?.shareTargets) return cachedProject;
 
       setDetailLoadingMap((prev) => ({ ...prev, [projectId]: true }));
       try {
-        // 展开项目时按项目详情接口取最新会话，避免把所有项目会话提前混到全局会话列表里。
+        // 详情/编辑需要 shareTargets、repos 等完整字段，和左侧会话分页加载分开处理。
         const detail = await getProject(Number(projectId));
         const normalizedProject = normalizeProjectDetail(detail, project) || project;
-        setProjectDetailMap((prev) => ({ ...prev, [projectId]: normalizedProject }));
-        return normalizedProject;
+        const shouldKeepPagedSessions = Boolean(projectSessionPageMap[projectId]);
+        const cachedSessions = cachedProject?.sessions || project.sessions || [];
+        const nextProject = {
+          ...normalizedProject,
+          // 详情接口可能带出全量 sessions，左侧会话缓存始终以 session/listByQo 分页结果为准。
+          sessions: shouldKeepPagedSessions ? cachedProject?.sessions : cachedSessions,
+          sessionCount: shouldKeepPagedSessions
+            ? cachedProject?.sessionCount ?? normalizedProject.sessionCount
+            : project.sessionCount ?? normalizedProject.sessionCount,
+        };
+        setProjectDetailMap((prev) => ({ ...prev, [projectId]: nextProject }));
+        return nextProject;
       } catch (error) {
         console.error('Failed to load project detail:', error);
-        message.error('项目会话加载失败');
+        message.error('项目详情加载失败');
         return project;
       } finally {
         setDetailLoadingMap((prev) => ({ ...prev, [projectId]: false }));
       }
     },
-    [projectDetailMap]
+    [projectDetailMap, projectSessionPageMap]
   );
 
   useEffect(() => {
@@ -203,6 +309,8 @@ const ProjectSpaceList: React.FC = () => {
       setProjectScopeId(ALL_PROJECT_SCOPE_KEY);
       setActiveProjectId(undefined);
       setExpandedProjectIds([]);
+      setProjectSessionPageMap({});
+      setSessionMoreLoadingMap({});
       hasAutoSelectedRef.current = false;
       return;
     }
@@ -227,7 +335,7 @@ const ProjectSpaceList: React.FC = () => {
     setExpandedProjectIds((prev) => {
       const isExpanded = prev.includes(projectId);
       if (!isExpanded) {
-        void fetchProjectDetail(project);
+        void fetchProjectSessions(project);
         return [...prev, projectId];
       }
       return prev.filter((id) => id !== projectId);
@@ -247,7 +355,7 @@ const ProjectSpaceList: React.FC = () => {
     setActiveProjectId(key);
     setExpandedProjectIds([key]);
     // 下拉切换到单个项目时直接加载下钻会话，让切换后的内容立即对应当前项目。
-    void fetchProjectDetail(selectedProject);
+    void fetchProjectSessions(selectedProject);
   };
 
   const handleProjectSessionBound = useCallback(
@@ -262,10 +370,10 @@ const ProjectSpaceList: React.FC = () => {
 
       setActiveProjectId(projectId);
       setExpandedProjectIds((prev) => (prev.includes(projectId) ? prev : [projectId, ...prev]));
-      void fetchProjectDetail(targetProject, true);
+      void fetchProjectSessions(targetProject, { force: true });
       void fetchProjects();
     },
-    [fetchProjectDetail, fetchProjects, mergedProjects]
+    [fetchProjectSessions, fetchProjects, mergedProjects]
   );
 
   useEffect(() => {
@@ -291,7 +399,7 @@ const ProjectSpaceList: React.FC = () => {
       newChatProject.projectId,
       ...prev.filter((id) => id !== newChatProject.projectId),
     ]);
-    void fetchProjectDetail(newChatProject);
+    void fetchProjectSessions(newChatProject);
     navigate('/chat', {
       state: {
         keepSiderActiveKey: 'projectSpace',
@@ -310,7 +418,7 @@ const ProjectSpaceList: React.FC = () => {
   const handleOpenProjectDetail = (project: ProjectSpace) => {
     setDetailProject(projectDetailMap[project.projectId] || project);
     // 详情视图占用左侧小列表区域，不弹遮罩，右侧聊天页保持原状态。
-    void fetchProjectDetail(project, true).then(setDetailProject);
+    void fetchProjectFullDetail(project, true).then(setDetailProject);
   };
 
   const handleOpenEditProject = (project: ProjectSpace) => {
@@ -319,7 +427,7 @@ const ProjectSpaceList: React.FC = () => {
     setProjectModalOpen(true);
     if (!Array.isArray(cachedProject.shareTargets)) {
       // 编辑表单需要详情接口里的 shareTargets；列表接口没带时打开后再补齐，避免直接保存时误覆盖。
-      void fetchProjectDetail(project, true).then(setEditingProject);
+      void fetchProjectFullDetail(project, true).then(setEditingProject);
     }
   };
 
@@ -334,6 +442,16 @@ const ProjectSpaceList: React.FC = () => {
           await deleteProject(Number(project.projectId));
           message.success('项目已删除');
           setProjectDetailMap((prev) => {
+            const next = { ...prev };
+            delete next[project.projectId];
+            return next;
+          });
+          setProjectSessionPageMap((prev) => {
+            const next = { ...prev };
+            delete next[project.projectId];
+            return next;
+          });
+          setSessionMoreLoadingMap((prev) => {
             const next = { ...prev };
             delete next[project.projectId];
             return next;
@@ -480,9 +598,29 @@ const ProjectSpaceList: React.FC = () => {
     });
   };
 
+  const handleSessionListScroll = useCallback(
+    (project: ProjectSpace, event: React.UIEvent<HTMLDivElement>) => {
+      const projectId = project.projectId;
+      const sessionPage = projectSessionPageMap[projectId];
+      const loadedCount = projectDetailMap[projectId]?.sessions?.length ?? project.sessions?.length ?? 0;
+      const total = sessionPage?.total ?? project.sessionCount ?? 0;
+
+      if (!sessionPage || loadedCount >= total || detailLoadingMap[projectId] || sessionMoreLoadingMap[projectId]) {
+        return;
+      }
+
+      const { scrollTop, scrollHeight, clientHeight } = event.currentTarget;
+      if (scrollHeight - scrollTop - clientHeight <= 80) {
+        void fetchProjectSessions(project, { append: true });
+      }
+    },
+    [detailLoadingMap, fetchProjectSessions, projectDetailMap, projectSessionPageMap, sessionMoreLoadingMap]
+  );
+
   const renderSessionList = (project: ProjectSpace) => {
     const sessions = sortProjectSessions(project.sessions || []);
     const isLoading = detailLoadingMap[project.projectId];
+    const isLoadingMore = sessionMoreLoadingMap[project.projectId];
 
     if (isLoading) {
       return (
@@ -497,30 +635,39 @@ const ProjectSpaceList: React.FC = () => {
       return <div className={styles.sessionEmpty}>暂无会话</div>;
     }
 
-    return sessions.map((session) => {
-      const active = `${sessionId}` === `${session.sessionId}`;
-      return (
-        <button
-          type="button"
-          key={session.sessionId}
-          className={classNames(styles.sessionItem, active && styles.sessionItemActive)}
-          onClick={() => handleOpenSession(project, session)}
-        >
-          <span className={styles.sessionIcon}>
-            <AntdIcon type="icon-cebianlan-duihuajilu" />
-          </span>
-          <span className={styles.sessionMain}>
-            <Tooltip placement="top" title={session.sessionName}>
-              <span className={styles.sessionTitle}>{session.sessionName || '未命名会话'}</span>
-            </Tooltip>
-            <span className={styles.sessionDesc}>
-              {processSessionContent(session.sessionContent) || '暂无会话摘要'}
-            </span>
-          </span>
-          <span className={styles.sessionTime}>{formatTime(session.updateTime || '', session.createTime || '')}</span>
-        </button>
-      );
-    });
+    return (
+      <>
+        {sessions.map((session) => {
+          const active = `${sessionId}` === `${session.sessionId}`;
+          return (
+            <button
+              type="button"
+              key={session.sessionId}
+              className={classNames(styles.sessionItem, active && styles.sessionItemActive)}
+              onClick={() => handleOpenSession(project, session)}
+            >
+              <span className={styles.sessionAvatar}>
+                <ChatAvatar session={session as any} size={32} />
+              </span>
+              <span className={styles.sessionMain}>
+                <span className={styles.sessionTextWrap}>
+                  <Tooltip placement="top" title={session.sessionName}>
+                    <span className={styles.sessionTitle}>{session.sessionName || '未命名会话'}</span>
+                  </Tooltip>
+                  <span className={styles.sessionDesc}>
+                    {processSessionContent(session.sessionContent) || '暂无会话摘要'}
+                  </span>
+                  <span className={styles.sessionTime}>
+                    {formatTime(session.updateTime || '', session.createTime || '')}
+                  </span>
+                </span>
+              </span>
+            </button>
+          );
+        })}
+        {isLoadingMore && <div className={styles.sessionMoreLoading}>加载中...</div>}
+      </>
+    );
   };
 
   return (
@@ -577,7 +724,10 @@ const ProjectSpaceList: React.FC = () => {
                   const sessionCount = project.sessionCount ?? project.sessions?.length ?? 0;
 
                   return (
-                    <div key={project.projectId} className={styles.projectItem}>
+                    <div
+                      key={project.projectId}
+                      className={classNames(styles.projectItem, isExpanded && styles.projectItemExpanded)}
+                    >
                       <div className={styles.projectTop}>
                         <button
                           type="button"
@@ -618,7 +768,14 @@ const ProjectSpaceList: React.FC = () => {
                           </button>
                         </Dropdown>
                       </div>
-                      {isExpanded && <div className={styles.sessionList}>{renderSessionList(project)}</div>}
+                      {isExpanded && (
+                        <div
+                          className={styles.sessionList}
+                          onScroll={(event) => handleSessionListScroll(project, event)}
+                        >
+                          {renderSessionList(project)}
+                        </div>
+                      )}
                     </div>
                   );
                 })
