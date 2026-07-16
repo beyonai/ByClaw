@@ -13,6 +13,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.multipart.MultipartFile;
 
 import com.iwhalecloud.byai.common.storage.ResourceFS;
+import com.iwhalecloud.byai.common.storage.model.FileMetadata;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
@@ -43,16 +44,35 @@ class ResourceArtifactStorageServiceTest {
     }
 
     @Test
-    void existsResourceJsonByBizType_returnsExactMatchFromResourceFs() {
+    void existsResourceJsonByBizType_returnsTrueWhenResourceFsMetadataExists() {
         ResourceArtifactStorageService service = service();
         when(pathResolver.resolveResourceDirectory("toolkit")).thenReturn("toolkit");
         when(pathResolver.buildResourceJsonFileName("toolkit", 1L)).thenReturn("TOOLKIT_1.json");
         when(pathResolver.normalizeRelativePath("toolkit/TOOLKIT_1.json")).thenReturn("toolkit/TOOLKIT_1.json");
-        when(resourceFS.list("/resource/toolkit/TOOLKIT_1.json", null)).thenReturn(List.of("/resource/toolkit/TOOLKIT_1.json"));
+        FileMetadata metadata = new FileMetadata();
+        metadata.setBucketName("byclaw");
+        metadata.setFileName("TOOLKIT_1.json");
+        when(resourceFS.metadata("/resource/toolkit/TOOLKIT_1.json")).thenReturn(metadata);
 
         boolean exists = service.existsResourceJsonByBizType("toolkit", 1L);
 
         assertThat(exists).isTrue();
+        verify(resourceFS, never()).list("/resource/toolkit/TOOLKIT_1.json", null);
+    }
+
+    @Test
+    void existsWithinResourceRoot_fallsBackToExactListWhenMetadataIsUnsupported() {
+        ResourceArtifactStorageService service = service();
+        when(pathResolver.normalizeRelativePath("skill/org-hub/demo.zip")).thenReturn("skill/org-hub/demo.zip");
+        when(resourceFS.metadata("/resource/skill/org-hub/demo.zip"))
+            .thenThrow(new UnsupportedOperationException("metadata is not supported"));
+        when(resourceFS.list("/resource/skill/org-hub/demo.zip", null))
+            .thenReturn(List.of("/resource/skill/org-hub/demo.zip"));
+
+        boolean exists = service.existsWithinResourceRoot("skill/org-hub/demo.zip");
+
+        assertThat(exists).isTrue();
+        verify(resourceFS).list("/resource/skill/org-hub/demo.zip", null);
     }
 
     @Test
