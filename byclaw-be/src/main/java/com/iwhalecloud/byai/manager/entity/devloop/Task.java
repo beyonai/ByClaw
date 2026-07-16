@@ -42,6 +42,8 @@ public class Task {
 
     private Long sessionId;
 
+    private Long createBy;
+
     private Date createTime;
 
     private Date updateTime;

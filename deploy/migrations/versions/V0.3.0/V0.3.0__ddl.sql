@@ -221,6 +221,7 @@ CREATE TABLE IF NOT EXISTS byai.byai_task (
     create_time     TIMESTAMP       DEFAULT CURRENT_TIMESTAMP,
     update_time     TIMESTAMP,
     delete_flag     CHAR(1)         DEFAULT '0',
+    create_by       BIGINT,
     CONSTRAINT pk_byai_task PRIMARY KEY (task_id)
 );
 

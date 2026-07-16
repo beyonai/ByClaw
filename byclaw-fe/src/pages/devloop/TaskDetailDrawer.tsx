@@ -1,6 +1,10 @@
 import React, { useState } from 'react';
-import { Drawer, Tag, Descriptions, Select, message } from 'antd';
+import { Drawer, Tag, Descriptions, Select, Button, message } from 'antd';
+import { MessageOutlined } from '@ant-design/icons';
+import { useNavigate } from '@umijs/max';
+import { useSelector } from '@umijs/max';
 import { updateTask } from '@/service/devloop';
+import useGlobal from '@/hooks/useGlobal';
 
 interface TaskDetailDrawerProps {
   task: any;
@@ -13,6 +17,9 @@ const PHASE_OPTIONS = ['分诊', '设计', '编码', '测试', '审批', '发布
 
 const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({ task, onClose, onRefresh }) => {
   const [updating, setUpdating] = useState(false);
+  const navigate = useNavigate();
+  const { setSessionId } = useGlobal();
+  const userInfo = useSelector(({ user }: any) => user.userInfo);
 
   const handleStatusChange = async (status: string) => {
     if (!task) return;
@@ -40,6 +47,15 @@ const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({ task, onClose, onRe
     } finally {
       setUpdating(false);
     }
+  };
+
+  const isMyTask = task?.createBy && userInfo?.userId && String(task.createBy) === String(userInfo.userId);
+
+  const handleGoToChat = () => {
+    if (!task?.sessionId) return;
+    setSessionId?.(String(task.sessionId));
+    navigate('/chat');
+    onClose();
   };
 
   return (
@@ -90,6 +106,14 @@ const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({ task, onClose, onRe
               </Descriptions.Item>
             )}
           </Descriptions>
+
+          {isMyTask && task.sessionId && (
+            <div style={{ marginTop: 24, textAlign: 'center' }}>
+              <Button type="primary" icon={<MessageOutlined />} onClick={handleGoToChat}>
+                进入会话
+              </Button>
+            </div>
+          )}
         </>
       )}
     </Drawer>

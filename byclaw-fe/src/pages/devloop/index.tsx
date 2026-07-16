@@ -175,22 +175,21 @@ const NeedCollect: React.FC = () => {
     for (const source of sourceRes) {
       const logs = await listScanLogs(source.sourceId, 10);
       if (logs && logs.length > 0) {
-        for (const log of logs) {
-          if (!latestLog || new Date(log.scanTime) > new Date(latestLog.scanTime)) {
-            latestLog = log;
-          }
-          const items = await listScanLogItems(log.logId);
-          if (items) {
-            items
-              .filter((it: any) => it.action === 'created')
-              .forEach((it: any) => {
-                allItems.push({
-                  ...it,
-                  sourceType: source.sourceType,
-                  sourceName: source.sourceName,
-                });
+        if (!latestLog || new Date(logs[0].scanTime) > new Date(latestLog.scanTime)) {
+          latestLog = logs[0];
+        }
+        // 只拉最新一条 log 的 items，避免大量重复请求
+        const items = await listScanLogItems(logs[0].logId);
+        if (items) {
+          items
+            .filter((it: any) => it.action === 'created')
+            .forEach((it: any) => {
+              allItems.push({
+                ...it,
+                sourceType: source.sourceType,
+                sourceName: source.sourceName,
               });
-          }
+            });
         }
       }
     }
