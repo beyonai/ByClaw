@@ -57,7 +57,7 @@ export default function useRender({
   deleteMessage,
   sessionId,
 }: {
-  updateMessage: (message: IMessage) => void;
+  updateMessage: (message: IMessage) => IMessage;
   deleteMessage: (message: IMessage) => void;
   sessionId?: string;
 }) {

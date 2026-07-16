@@ -342,4 +342,5 @@ export default {
   'fileSider.saveToKnowledge.noManagePermission': '您对当前数字员工下的知识库，无管理权限，无法操作',
 
   'context.used.format': '上下文已使用{percent}%，{usedTokens} / {contextTokens}',
+  'easyConfirm.pagination.title': '请选择要操作的步骤',
 };

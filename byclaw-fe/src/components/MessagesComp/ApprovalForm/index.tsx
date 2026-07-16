@@ -1,5 +1,5 @@
 // tslint:disable:ordered-imports
-import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import classnames from 'classnames';
 
 import { get, keys, set, isBoolean, size } from 'lodash';
@@ -14,6 +14,7 @@ import { IMessageState } from '@/constants/message';
 import { IMessageListItem } from '@/typescript/message';
 import { updateMessageStructById } from '@/service/message';
 import useGlobal from '@/hooks/useGlobal';
+import withEasyConfirm from '@/components/MessagesComp/withEasyConfirm';
 import { IFormStatus } from '@/hooks/useSseSender/agent/typescript';
 
 import type { IMessage } from '@/typescript/message';
@@ -231,8 +232,6 @@ function ApprovalForm(props: IProps) {
 
     updateMessageListItemContent(messageListItemContent);
 
-    EventEmitter.emit('beyond-easyconfirm-set-approvalform-item', props);
-
     myUpdateMessageStructById(operationForm).then(() => {
       EventEmitter.emit('beyond-chat-on-send-msg', payload);
     });
@@ -382,17 +381,4 @@ function ApprovalForm(props: IProps) {
   );
 }
 
-const ApprovalFormWarpper = (props: IProps) => {
-  const { EventEmitter } = useGlobal();
-
-  useEffect(() => {
-    if (props.message.messageState === IMessageState.Answer) {
-      EventEmitter.emit('beyond-easyconfirm-set-approvalform-item', props);
-    }
-  }, []);
-
-  return <ApprovalForm {...props} />;
-};
-
-// export default ApprovalForm;
-export default ApprovalFormWarpper;
+export default withEasyConfirm(ApprovalForm);

@@ -43,6 +43,7 @@ export enum SSEMessageType {
   thinkRootTitle,
   thinkRewriteQuestion,
   thinkTaskUserInput,
+  askUserQuestions,
   error = 4001,
   rewriteQuestion,
   dataCloudLogin,

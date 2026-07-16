@@ -22,7 +22,8 @@ export type IMessageListItem = {
     parentOrderId?: string;
     orderId?: string;
     sourceAgentType?: string;
-  };
+    formStatus?: IFormStatus;
+   };
   contentType: SSEMessageType;
   status: SSEEventStatus;
   objectType?: 'function_response' | 'tool_call'; // 'function_response'-工具类回答
