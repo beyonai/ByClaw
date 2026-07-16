@@ -50,6 +50,17 @@
   word-break: break-word;
 }
 
+.markdown {
+  width: 100%;
+  color: #1f2533;
+  font-size: 14px;
+  line-height: 22px;
+
+  p {
+    margin: 0;
+  }
+}
+
 .timeline {
   display: flex;
   flex-direction: column;
@@ -87,11 +98,17 @@
   color: #7a8799;
 }
 
+.timelineToggle {
+  height: 22px;
+  padding: 0 4px;
+  font-size: 12px;
+  line-height: 18px;
+}
+
 .timelinePreview {
-  max-height: 140px;
   margin: 8px 0 0;
   padding: 8px 10px;
-  overflow: auto;
+  overflow: visible;
   border-radius: 6px;
   background: #f7f8fa;
   color: #40454d;

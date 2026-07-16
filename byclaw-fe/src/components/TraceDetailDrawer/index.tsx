@@ -1,7 +1,7 @@
 // @ts-nocheck
 import React, { Fragment, useEffect, useMemo, useState } from 'react';
 import { Button, Drawer, DrawerProps, Empty, Spin, Tag, Tooltip, message } from 'antd';
-import { ExportOutlined } from '@ant-design/icons';
+import { DownOutlined, ExportOutlined, RightOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 
 import Markdown from '@/components/Markdown';
@@ -24,6 +24,11 @@ const stringifyContent = (value: any) => {
   return typeof value === 'string' ? value : JSON.stringify(value, null, 2);
 };
 
+const hasRenderableContent = (value: any) => {
+  const content = stringifyContent(value);
+  return typeof content === 'string' && content.trim().length > 0;
+};
+
 const formatLatency = (value: any) => {
   if (value === undefined || value === null || value === '') return '';
   if (typeof value === 'number') {
@@ -33,9 +38,13 @@ const formatLatency = (value: any) => {
 };
 
 function TimelineNode({ node, depth = 0 }: { node: any; depth?: number }) {
+  const [contentOpen, setContentOpen] = useState(false);
   const children = Array.isArray(node?.children) ? node.children : [];
   const latency = formatLatency(node?.latency);
-  const preview = stringifyContent(node?.input || node?.output);
+  const inputPreview = stringifyContent(node?.input);
+  const outputPreview = stringifyContent(node?.output);
+  const preview = inputPreview.trim() ? inputPreview : outputPreview;
+  const hasPreview = preview.trim().length > 0;
 
   return (
     <div className={ss.timelineNode} style={{ marginLeft: depth ? 18 : 0 }}>
@@ -44,9 +53,19 @@ function TimelineNode({ node, depth = 0 }: { node: any; depth?: number }) {
         <span className={ss.timelineName}>{node?.name || node?.id || 'unknown'}</span>
         {node?.status ? <Tag color={node.status === 'ERROR' ? 'red' : 'green'}>{node.status}</Tag> : null}
         {latency ? <span className={ss.timelineMeta}>{latency}</span> : null}
+        {hasPreview ? (
+          <Button
+            type="link"
+            size="small"
+            className={ss.timelineToggle}
+            icon={contentOpen ? <DownOutlined /> : <RightOutlined />}
+            aria-label={contentOpen ? 'Collapse content' : 'Expand content'}
+            onClick={() => setContentOpen((prev) => !prev)}
+          />
+        ) : null}
       </div>
       {node?.model ? <div className={ss.timelineMeta}>model: {node.model}</div> : null}
-      {preview ? <pre className={ss.timelinePreview}>{preview}</pre> : null}
+      {hasPreview && contentOpen ? <pre className={ss.timelinePreview}>{preview}</pre> : null}
       {children.length > 0 ? (
         <div className={ss.timelineChildren}>
           {children.map((child: any, index: number) => (
@@ -98,6 +117,8 @@ export default function TraceDetailDrawer({ open, traceId, agentName, onClose, .
   const externalUrl = useMemo(() => buildLangfuseTraceUrl(config?.host, config?.projectId, traceId), [config, traceId]);
   const traceInfo = traceData?.traceInfo || traceData;
   const timeline = Array.isArray(traceData?.timeline) ? traceData.timeline : [];
+  const hasInput = hasRenderableContent(traceInfo?.input);
+  const hasOutput = hasRenderableContent(traceInfo?.output);
 
   const handleOpenExternal = () => {
     if (!externalUrl) {
@@ -134,11 +155,11 @@ export default function TraceDetailDrawer({ open, traceId, agentName, onClose, .
         <section className={ss.main}>
           {traceData ? (
             <Fragment>
-              {traceInfo?.input !== null && traceInfo?.input !== undefined ? (
+              {hasInput ? (
                 <div className={ss.block}>
                   <div className={ss.blockTitle}>{intl.formatMessage({ id: 'traceDetail.input' })}</div>
                   <div className={ss.bubble}>
-                    <Markdown content={stringifyContent(traceInfo.input)} />
+                    <Markdown text={stringifyContent(traceInfo.input)} markdownClass={ss.markdown} />
                   </div>
                 </div>
               ) : null}
@@ -152,17 +173,17 @@ export default function TraceDetailDrawer({ open, traceId, agentName, onClose, .
                   </div>
                 </div>
               ) : null}
-              {traceInfo?.output !== null && traceInfo?.output !== undefined ? (
+              {hasOutput ? (
                 <div className={ss.block}>
                   <div className={ss.blockTitle}>
                     {agentName || intl.formatMessage({ id: 'traceDetail.defaultAgentName' })}
                   </div>
                   <div className={ss.bubble}>
-                    <Markdown content={stringifyContent(traceInfo.output)} />
+                    <Markdown text={stringifyContent(traceInfo.output)} markdownClass={ss.markdown} />
                   </div>
                 </div>
               ) : null}
-              {timeline.length === 0 && (traceInfo?.output === undefined || traceInfo?.output === null) ? (
+              {timeline.length === 0 && !hasOutput ? (
                 <Empty description={intl.formatMessage({ id: 'traceDetail.empty' })} />
               ) : null}
               {traceId ? (
