@@ -12,7 +12,6 @@
  * If you are adding a new cross-backend helper, put it in `doc-shared.ts`.
  */
 
-import Redis from "ioredis";
 import { randomBytes, randomUUID } from "node:crypto";
 import type { ExecutorFailure } from "./types.js";
 import { makeError } from "./errors.js";
@@ -22,6 +21,11 @@ import {
   type DocAsyncSendParams,
   type RedisConfig,
 } from "./doc-shared.js";
+import {
+  byFrameworkRedisKeys,
+  createRedisClient as createCompatibleRedisClient,
+  type RedisClient,
+} from "../../../shared/src/redis-compat.js";
 
 function safeUuid(): string {
   try {
@@ -31,13 +35,8 @@ function safeUuid(): string {
   }
 }
 
-export function createRedisClient(config: RedisConfig = readRedisConfig()): Redis {
-  return new Redis({
-    host: config.host,
-    port: config.port,
-    username: config.username,
-    password: config.password,
-    db: config.db,
+export function createRedisClient(config: RedisConfig = readRedisConfig()): RedisClient {
+  return createCompatibleRedisClient(config, {
     lazyConnect: true,
     enableOfflineQueue: false,
     maxRetriesPerRequest: 2,
@@ -53,7 +52,7 @@ export function createRedisClient(config: RedisConfig = readRedisConfig()): Redi
  * the two are intentionally parallel, not layered on top of each other.
  */
 export async function sendDocAsyncMessage(
-  client: Redis,
+  client: RedisClient,
   params: DocAsyncSendParams,
 ): Promise<{ ack: DocAsyncAck | null; error: ExecutorFailure | null }> {
   const messageId = `msg-${safeUuid().slice(0, 12)}`;
@@ -80,11 +79,11 @@ export async function sendDocAsyncMessage(
   };
   let streamName: string;
   if (params.routeMode === "agent_type") {
-    streamName = `byai_gateway:ctrl:agent_type:${params.targetAgentType}`;
+    streamName = byFrameworkRedisKeys.ctrlStream(params.targetAgentType);
   } else if (params.routeMode === "worker") {
-    streamName = `byai_gateway:ctrl:worker:${params.targetWorkerId}`;
+    streamName = byFrameworkRedisKeys.workerCtrlStream(params.targetWorkerId);
   } else {
-    streamName = `byai_gateway:ctrl:capability:${params.targetWorkerId}`;
+    streamName = byFrameworkRedisKeys.capabilityCtrlStream(params.targetWorkerId);
   }
   try {
     const redisMsgId = await client.xadd(streamName, "*", "data", JSON.stringify(command));

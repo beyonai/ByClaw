@@ -1,6 +1,14 @@
 
-import { createRedis, GatewayDataEmitter, SseMessageType } from "@byclaw/by-framework";
+import { GatewayDataEmitter, QueueNames, RegistryKeys, SseMessageType } from "@byclaw/by-framework";
 import { getByaiRuntime } from "./runtime";
+import {
+  applyByFrameworkRedisKeyPatch,
+  byFrameworkRedisKeys,
+  createRedisClient,
+  hasRedisConnectionConfig,
+  readRedisConfig,
+  type RedisClient,
+} from "../../shared/src/redis-compat.js";
 
 export function generateRandomId() {
   return crypto.randomUUID().replace(/-/g, '');
@@ -110,24 +118,18 @@ export function getUserCode(): string | null {
 }
 
 export function getRedisInfo() {
-  const { REDIS_USERNAME, REDIS_PASSWORD, REDIS_HOST, REDIS_PORT, REDIS_DATABASE } = process.env;
-  if (!REDIS_HOST || !REDIS_PORT) {
+  const config = readRedisConfig();
+  if (!hasRedisConnectionConfig(config)) {
     return null;
   }
-  return {
-    username: REDIS_USERNAME,
-    password: REDIS_PASSWORD,
-    host: REDIS_HOST,
-    port: parseInt(REDIS_PORT, 10),
-    db: parseInt(REDIS_DATABASE || "0", 10),
-  };
+  return config;
 }
 
 function normalizeId(value: unknown): string {
   return typeof value === "string" || typeof value === "number" ? String(value).trim() : "";
 }
 
-async function getUserId(userCode: string, redis: ReturnType<typeof createRedis>) {
+async function getUserId(userCode: string, redis: RedisClient) {
   if (!userCode || !redis) {
     return "";
   }
@@ -148,10 +150,11 @@ export async function emitOutOfBandSdkEvent(params: {
   if (!userCode) {
     return;
   }
-  const redis = createRedis(redisInfo);
+  applyByFrameworkRedisKeyPatch({ QueueNames, RegistryKeys }, redisInfo);
+  const redis = createRedisClient(redisInfo);
   const userId = await getUserId(userCode, redis);
   const emitter = new GatewayDataEmitter(redis, {
-    dataStreamName: "byai_gateway:session_event:data_stream",
+    dataStreamName: byFrameworkRedisKeys.sessionEventDataStream(redisInfo),
   });
   await emitter.emitEvent({
     data: {
@@ -174,5 +177,6 @@ export function createRedisInstance() {
   if (!redisInfo) {
     return null;
   }
-  return createRedis(redisInfo);
+  applyByFrameworkRedisKeyPatch({ QueueNames, RegistryKeys }, redisInfo);
+  return createRedisClient(redisInfo);
 }
