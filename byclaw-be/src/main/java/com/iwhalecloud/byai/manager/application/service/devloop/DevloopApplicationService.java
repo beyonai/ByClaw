@@ -423,7 +423,7 @@ public class DevloopApplicationService {
         } else if ("dingtalk".equals(type)) {
             items = dingtalkScanService.scan(source);
             if (items == null) {
-                return ResponseUtil.failRes("DWS未授权，请先在扫描源设置中完成钉钉授权");
+                return ResponseUtil.failRes("钉钉扫描失败，请检查：1) DWS是否已授权 2) 当前组织是否有消息搜索权限 3) 查看扫描日志获取详细错误");
             }
         } else {
             return ResponseUtil.failRes("Unknown source type: " + type);
