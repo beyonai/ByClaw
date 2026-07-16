@@ -84,7 +84,7 @@ public class DevloopApplicationService {
         project.setProjectName(dto.getProjectName());
         project.setDescription(dto.getDescription());
         project.setResourceId(dto.getResourceId());
-        project.setCreateBy(String.valueOf(CurrentUserHolder.getCurrentUserId()));
+        project.setCreateBy(CurrentUserHolder.getCurrentUserId());
         project.setCreateTime(new Date());
         project.setDeleteFlag("0");
         projectMapper.insert(project);
@@ -107,7 +107,7 @@ public class DevloopApplicationService {
         // 创建者自动加为 owner 成员
         projectMemberService.addMember(
             project.getProjectId(),
-            String.valueOf(CurrentUserHolder.getCurrentUserId()),
+            CurrentUserHolder.getCurrentUserId(),
             CurrentUserHolder.getCurrentUserCode(),
             CurrentUserHolder.getCurrentUserName(),
             "owner"
@@ -151,7 +151,7 @@ public class DevloopApplicationService {
         if (dto.getDescription() != null) {
             project.setDescription(dto.getDescription());
         }
-        project.setUpdateBy(String.valueOf(CurrentUserHolder.getCurrentUserId()));
+        project.setUpdateBy(CurrentUserHolder.getCurrentUserId());
         project.setUpdateTime(new Date());
         projectMapper.updateById(project);
         return ResponseUtil.successResponse(null);
@@ -165,7 +165,7 @@ public class DevloopApplicationService {
             return ResponseUtil.failRes("Project not found");
         }
         project.setDeleteFlag("1");
-        project.setUpdateBy(String.valueOf(CurrentUserHolder.getCurrentUserId()));
+        project.setUpdateBy(CurrentUserHolder.getCurrentUserId());
         project.setUpdateTime(new Date());
         projectMapper.updateById(project);
         return ResponseUtil.successResponse(null);
@@ -445,7 +445,7 @@ public class DevloopApplicationService {
         }
 
         // 校验当前用户是否绑定了数字员工
-        String currentUserId = String.valueOf(CurrentUserHolder.getCurrentUserId());
+        Long currentUserId = CurrentUserHolder.getCurrentUserId();
         ProjectMember member = projectMemberService.findByProjectAndUser(projectId, currentUserId);
         if (member == null) {
             return ResponseUtil.failRes("您不是该项目成员，无法创建任务");
@@ -573,7 +573,7 @@ public class DevloopApplicationService {
     /** 添加项目成员 */
     public ResponseUtil<Void> addProjectMember(Map<String, Object> params) {
         Long projectId = Long.valueOf(params.get("projectId").toString());
-        String userId = params.get("userId").toString();
+        Long userId = Long.valueOf(params.get("userId").toString());
         String userCode = params.containsKey("userCode") ? params.get("userCode").toString() : null;
         String userName = params.containsKey("userName") ? params.get("userName").toString() : null;
 
@@ -612,7 +612,8 @@ public class DevloopApplicationService {
         ProjectMember member = projectMemberService.getById(memberId);
         if (member != null) {
             Project project = projectMapper.selectById(member.getProjectId());
-            if (project != null && member.getUserId().equals(project.getCreateBy())) {
+            if (project != null && project.getCreateBy() != null
+                && project.getCreateBy().equals(member.getUserId())) {
                 return ResponseUtil.failRes("项目创建者不能被移除");
             }
         }

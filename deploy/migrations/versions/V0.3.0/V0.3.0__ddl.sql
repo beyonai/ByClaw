@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS byai.byai_project (
     resource_id     BIGINT,
     create_by       VARCHAR(64),
     create_time     TIMESTAMP       DEFAULT CURRENT_TIMESTAMP,
-    update_by       VARCHAR(64),
+    update_by       BIGINT,
     update_time     TIMESTAMP       DEFAULT CURRENT_TIMESTAMP,
     delete_flag     CHAR(1)         DEFAULT '0',
     CONSTRAINT pk_byai_project PRIMARY KEY (project_id)
@@ -23,6 +23,33 @@ COMMENT ON COLUMN byai.byai_project.create_time IS '创建时间';
 COMMENT ON COLUMN byai.byai_project.update_by IS '更新人';
 COMMENT ON COLUMN byai.byai_project.update_time IS '更新时间';
 COMMENT ON COLUMN byai.byai_project.delete_flag IS '删除标记 0正常 1删除';
+
+-- 项目关联成员
+CREATE TABLE IF NOT EXISTS byai.byai_project_member
+(
+    member_id   BIGINT NOT NULL,
+    project_id  BIGINT NOT NULL,
+    user_id     BIGINT,
+    user_code   VARCHAR(64),
+    user_name   VARCHAR(128),
+    role        VARCHAR(32) DEFAULT 'member',
+    agent_id    BIGINT,
+    create_time TIMESTAMP   DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT pk_byai_project_member PRIMARY KEY (member_id)
+);
+
+COMMENT ON TABLE byai.byai_project_member IS '项目成员表';
+COMMENT ON COLUMN byai.byai_project_member.member_id IS '记录ID';
+COMMENT ON COLUMN byai.byai_project_member.project_id IS '项目ID';
+COMMENT ON COLUMN byai.byai_project_member.user_id IS '用户ID';
+COMMENT ON COLUMN byai.byai_project_member.user_code IS '工号';
+COMMENT ON COLUMN byai.byai_project_member.user_name IS '用户名称';
+COMMENT ON COLUMN byai.byai_project_member.role IS '角色: owner/member';
+COMMENT ON COLUMN byai.byai_project_member.agent_id IS '关联的默认数字员工ID';
+COMMENT ON COLUMN byai.byai_project_member.create_time IS '加入时间';
+
+CREATE INDEX IF NOT EXISTS idx_project_member_project ON byai.byai_project_member (project_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_project_member_unique ON byai.byai_project_member (project_id, user_id);
 
 -- 项目仓库关联表
 CREATE TABLE IF NOT EXISTS byai.byai_project_repo (
@@ -169,29 +196,3 @@ COMMENT ON COLUMN byai.byai_task.delete_flag IS '删除标记 0正常 1删除';
 
 CREATE INDEX IF NOT EXISTS idx_task_project ON byai.byai_task(project_id);
 CREATE INDEX IF NOT EXISTS idx_task_status ON byai.byai_task(status);
-
--- 项目成员表
-CREATE TABLE IF NOT EXISTS byai.byai_project_member (
-    member_id       BIGINT          NOT NULL,
-    project_id      BIGINT          NOT NULL,
-    user_id         VARCHAR(64)     NOT NULL,
-    user_code       VARCHAR(64),
-    user_name       VARCHAR(128),
-    role            VARCHAR(32)     DEFAULT 'member',
-    agent_id        BIGINT,
-    create_time     TIMESTAMP       DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT pk_byai_project_member PRIMARY KEY (member_id)
-);
-
-COMMENT ON TABLE byai.byai_project_member IS '项目成员表';
-COMMENT ON COLUMN byai.byai_project_member.member_id IS '记录ID';
-COMMENT ON COLUMN byai.byai_project_member.project_id IS '项目ID';
-COMMENT ON COLUMN byai.byai_project_member.user_id IS '用户ID';
-COMMENT ON COLUMN byai.byai_project_member.user_code IS '工号';
-COMMENT ON COLUMN byai.byai_project_member.user_name IS '用户名称';
-COMMENT ON COLUMN byai.byai_project_member.role IS '角色: owner/member';
-COMMENT ON COLUMN byai.byai_project_member.agent_id IS '关联的默认数字员工ID';
-COMMENT ON COLUMN byai.byai_project_member.create_time IS '加入时间';
-
-CREATE INDEX IF NOT EXISTS idx_project_member_project ON byai.byai_project_member(project_id);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_project_member_unique ON byai.byai_project_member(project_id, user_id);
