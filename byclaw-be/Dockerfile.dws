@@ -18,10 +18,10 @@ COPY docker/dws/dws-linux-amd64.tar.gz /tmp/dws.tar.gz
 RUN mkdir -p /root/.local/bin \
     && tar -xzf /tmp/dws.tar.gz -C /root/.local/bin dws \
     && chmod +x /root/.local/bin/dws \
-    && rm -f /tmp/dws.tar.gz
+    && rm -f /tmp/dws.tar.gz \
+    && /root/.local/bin/dws --version
 ENV DWS_NO_SKILLS=1 \
     PATH="/root/.local/bin:${PATH}"
-RUN dws --version
 
 # 清理 dws 不需要的 skills 目录
 RUN rm -rf /root/.agents/skills
