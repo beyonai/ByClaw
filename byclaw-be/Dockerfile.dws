@@ -4,10 +4,11 @@ FROM eclipse-temurin:21-jre-alpine
 # 创建应用目录
 WORKDIR /app
 
-# 安装 dws 依赖：gnome-keyring + dbus（dws 用 go-keyring 存 token）
+# 安装 dws 依赖：gcompat（glibc兼容层）+ gnome-keyring + dbus
 RUN apk add --no-cache \
     curl \
     bash \
+    gcompat \
     gnome-keyring \
     dbus \
     libsecret \
