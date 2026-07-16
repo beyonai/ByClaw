@@ -71,6 +71,9 @@ public class DwsAuthService {
 
             ProcessBuilder pb = new ProcessBuilder(cmd);
             pb.redirectErrorStream(true);
+            if (!pb.environment().containsKey("HOME")) {
+                pb.environment().put("HOME", System.getProperty("user.home"));
+            }
             Process process = pb.start();
             deviceFlowProcess.set(process);
 
@@ -162,6 +165,9 @@ public class DwsAuthService {
             List<String> cmd = List.of(DWS_BIN, "auth", "login", "--token", accessToken, "-y", "--format", "json");
             ProcessBuilder pb = new ProcessBuilder(cmd);
             pb.redirectErrorStream(true);
+            if (!pb.environment().containsKey("HOME")) {
+                pb.environment().put("HOME", System.getProperty("user.home"));
+            }
             Process process = pb.start();
 
             StringBuilder output = new StringBuilder();
@@ -194,6 +200,9 @@ public class DwsAuthService {
             List<String> cmd = List.of(DWS_BIN, "auth", "status", "--format", "json");
             ProcessBuilder pb = new ProcessBuilder(cmd);
             pb.redirectErrorStream(true);
+            if (!pb.environment().containsKey("HOME")) {
+                pb.environment().put("HOME", System.getProperty("user.home"));
+            }
             Process process = pb.start();
 
             StringBuilder output = new StringBuilder();
