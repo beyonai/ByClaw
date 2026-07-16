@@ -1,14 +1,22 @@
-export type ProjectType = 'normal' | 'development';
+export type ProjectType = 'normal' | 'develop';
+
+export type ProjectShareFlag = 'N' | 'Y';
 
 export type ProjectMemberRole = 'owner' | 'admin' | 'member';
 
 export type ProjectResourceScope = 'shared' | 'task' | 'session';
 
 export interface ProjectMember {
-  userId: string;
+  memberId?: string | number;
+  projectId?: string | number;
+  userId: string | number;
+  userCode?: string;
   userName: string;
   role: ProjectMemberRole;
+  agentId?: string | number;
+  agentName?: string;
   avatar?: string;
+  createTime?: string | number;
 }
 
 export interface ProjectSession {
@@ -30,7 +38,9 @@ export interface ProjectSpace {
   projectId: string;
   projectName: string;
   description?: string;
+  resourceId?: string | number | null;
   projectType: ProjectType;
+  isShare: ProjectShareFlag;
   sharedFlag: boolean;
   createTime?: string;
   sessionCount?: number;
@@ -38,6 +48,31 @@ export interface ProjectSpace {
   fileCount?: number;
   members?: ProjectMember[];
   sessions?: ProjectSession[];
+  repos?: ProjectRepo[];
+  shareTargets?: ProjectShareTarget[];
+}
+
+export interface ProjectRepo {
+  repoId?: string | number;
+  projectId?: string | number;
+  repoFullName: string;
+  repoUrl?: string;
+  defaultBranch?: string;
+  createBy?: string | number;
+  createTime?: string | number;
+}
+
+export interface ProjectShareTarget {
+  id: string;
+  name: string;
+  type: 'USER' | 'ORG' | string;
+  shareId?: string | number;
+  projectId?: string | number;
+  targetType?: string;
+  targetId?: string | number;
+  targetName?: string;
+  createBy?: string | number;
+  createTime?: string | number;
 }
 
 export interface ProjectTask {

@@ -22,7 +22,7 @@ const ProjectCard: React.FC<Props> = ({ project, active, onSelect }) => {
         <span className={styles.projectIcon}>
           <FolderOpenOutlined />
         </span>
-        <Tag bordered={false} color={project.projectType === 'development' ? 'purple' : 'blue'}>
+        <Tag bordered={false} color={project.projectType === 'develop' ? 'purple' : 'blue'}>
           {PROJECT_TYPE_LABEL[project.projectType]}
         </Tag>
       </div>

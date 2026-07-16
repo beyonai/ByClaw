@@ -72,6 +72,44 @@
   font-weight: 400;
 }
 
+.scopeDropdown {
+  :global {
+    .@{antPrefix}-dropdown-menu {
+      min-width: 240px;
+      padding: 8px;
+    }
+
+    .@{antPrefix}-dropdown-menu-item {
+      min-width: 0;
+    }
+
+    .@{antPrefix}-dropdown-menu-title-content {
+      min-width: 0;
+      width: 100%;
+    }
+  }
+}
+
+.scopeMenuLabel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 220px;
+  width: 100%;
+}
+
+.scopeMenuName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scopeMenuTag {
+  margin-left: auto;
+}
+
 .actionRow {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 36px;
@@ -145,18 +183,19 @@
   }
 }
 
-.projectActive {
-  background: #f5f7fc;
-}
-
 .projectTop {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 4px;
 
   &:hover {
+    .projectHeader {
+      padding-right: 28px;
+    }
+
     .projectAction {
       opacity: 1;
+      pointer-events: auto;
     }
   }
 }
@@ -166,16 +205,20 @@
   min-width: 0;
   border: 0;
   padding: 0;
+  box-sizing: border-box;
   background: transparent;
   display: flex;
   align-items: center;
   gap: 7px;
   text-align: left;
   cursor: pointer;
+  transition: padding-right 0.2s;
 }
 
 .projectAction {
-  flex: 0 0 24px;
+  position: absolute;
+  top: 50%;
+  right: 0;
   width: 24px;
   height: 24px;
   border: 0;
@@ -187,15 +230,13 @@
   background: transparent;
   cursor: pointer;
   opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%);
   transition: opacity 0.2s, background-color 0.2s;
 
   &:hover {
     background: rgba(0, 0, 0, 0.04);
   }
-}
-
-.projectActive .projectAction {
-  opacity: 1;
 }
 
 .expandIcon {
@@ -254,6 +295,10 @@
   border-radius: 6px;
   font-size: 12px;
   font-weight: 700;
+}
+
+.projectHeaderTag {
+  margin-left: auto;
 }
 
 .projectTagPersonal {
@@ -829,6 +874,16 @@
     font-size: 12px;
     line-height: 18px;
   }
+}
+
+.detailRequirementAction {
+  flex-shrink: 0;
+  min-width: 48px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 30px;
 }
 
 .detailTaskPanel {

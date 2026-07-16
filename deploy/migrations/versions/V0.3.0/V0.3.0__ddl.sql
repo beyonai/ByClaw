@@ -93,6 +93,25 @@ COMMENT ON COLUMN byai.byai_project_session.project_id IS '项目ID';
 COMMENT ON COLUMN byai.byai_project_session.session_id IS '会话ID';
 COMMENT ON COLUMN byai.byai_project_session.delete_flag IS '删除标记 0正常 1删除';
 
+-- 项目共享对象表
+CREATE TABLE IF NOT EXISTS byai.byai_project_share (
+    share_id      BIGINT       NOT NULL,
+    project_id    BIGINT       NOT NULL,
+    target_type   VARCHAR(20)  NOT NULL,
+    target_id     BIGINT       NOT NULL,
+    target_name   VARCHAR(200),
+    create_by     BIGINT,
+    create_time   TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT pk_byai_project_share PRIMARY KEY (share_id)
+);
+
+COMMENT ON TABLE byai.byai_project_share IS '项目共享对象表';
+COMMENT ON COLUMN byai.byai_project_share.share_id IS '共享记录ID';
+COMMENT ON COLUMN byai.byai_project_share.project_id IS '项目ID';
+COMMENT ON COLUMN byai.byai_project_share.target_type IS '共享对象类型：USER人员，ORG组织';
+COMMENT ON COLUMN byai.byai_project_share.target_id IS '共享对象ID';
+COMMENT ON COLUMN byai.byai_project_share.target_name IS '共享对象名称';
+
 -- 需求扫描源配置表
 CREATE TABLE IF NOT EXISTS byai.byai_scan_source (
     source_id       BIGINT          NOT NULL,
@@ -179,6 +198,9 @@ CREATE INDEX IF NOT EXISTS idx_project_repo_project ON byai.byai_project_repo(pr
 CREATE INDEX IF NOT EXISTS idx_project_session_project ON byai.byai_project_session(project_id);
 CREATE INDEX IF NOT EXISTS idx_project_session_session ON byai.byai_project_session(session_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_project_session_unique ON byai.byai_project_session(project_id, session_id);
+CREATE INDEX IF NOT EXISTS idx_project_share_project ON byai.byai_project_share(project_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_project_share_unique
+    ON byai.byai_project_share(project_id, target_type, target_id);
 
 -- 研发任务表
 CREATE TABLE IF NOT EXISTS byai.byai_task (

@@ -1,18 +1,32 @@
-import { POST } from '@/service/common/request';
+import { POST, type ConfigType } from '@/service/common/request';
 
-// 项目管理
-export const createProject = (data: {
+type DevloopProjectType = 'normal' | 'develop';
+
+type DevloopProjectShareFlag = 'N' | 'Y';
+
+type DevloopProjectShareTargetPayload = {
+  targetType: string;
+  targetId: string | number;
+  targetName?: string;
+};
+
+type DevloopProjectPayload = {
   projectName: string;
   description?: string;
-  resourceId?: number;
-  repos?: { repoFullName: string; repoUrl?: string; defaultBranch?: string }[];
-}) => POST<any>('/byaiService/devloop/project/create', data);
+  projectType?: DevloopProjectType;
+  isShare?: DevloopProjectShareFlag;
+  shareTargets?: DevloopProjectShareTargetPayload[];
+};
 
-export const listProjects = (data?: { keyword?: string }) => POST<any>('/byaiService/devloop/project/list', data || {});
+// 项目管理
+export const createProject = (data: DevloopProjectPayload) => POST<any>('/byaiService/devloop/project/create', data);
+
+export const listProjects = (data?: { keyword?: string }, config?: ConfigType) =>
+  POST<any>('/byaiService/devloop/project/list', data || {}, config);
 
 export const getProject = (projectId: number) => POST<any>('/byaiService/devloop/project/get', { projectId });
 
-export const updateProject = (data: { projectId: number; projectName?: string; description?: string }) =>
+export const updateProject = (data: Partial<DevloopProjectPayload> & { projectId: number }) =>
   POST<any>('/byaiService/devloop/project/update', data);
 
 export const deleteProject = (projectId: number) => POST<any>('/byaiService/devloop/project/delete', { projectId });
@@ -80,8 +94,12 @@ export const updateTask = (data: {
 export const getTaskDetail = (taskId: number) => POST<any>('/byaiService/devloop/task/detail', { taskId });
 
 // 项目成员
-export const addProjectMember = (data: { projectId: number; userId: string; userCode?: string; userName?: string }) =>
-  POST<any>('/byaiService/devloop/member/add', data);
+export const addProjectMember = (data: {
+  projectId: number;
+  userId: string | number;
+  userCode?: string;
+  userName?: string;
+}) => POST<any>('/byaiService/devloop/member/add', data);
 
 export const listProjectMembers = (projectId: number) => POST<any>('/byaiService/devloop/member/list', { projectId });
 

@@ -44,20 +44,53 @@ const sortProjectSessions = (sessions: ProjectSession[] = []) => {
 };
 
 const getProjectScene = (project: ProjectSpace) => {
-  if (project.sharedFlag) {
-    return { classSuffix: 'Shared', text: '共享' };
+  // 研发项目即使强制共享，列表也优先展示业务类型标签。
+  if (project.projectType === 'develop') {
+    return { classSuffix: 'Development', text: '研发' };
   }
 
-  if (project.projectType === 'development') {
-    return { classSuffix: 'Development', text: '研发' };
+  if (project.sharedFlag) {
+    return { classSuffix: 'Shared', text: '共享' };
   }
 
   return { classSuffix: 'Personal', text: '个人' };
 };
 
+const renderProjectSceneTag = (project: ProjectSpace, className?: string) => {
+  const scene = getProjectScene(project);
+  return (
+    <Tag
+      bordered={false}
+      className={classNames(styles.projectTag, styles[`projectTag${scene.classSuffix}`], className)}
+    >
+      {scene.text}
+    </Tag>
+  );
+};
+
 const getProjectIdFromSaveResponse = (response: any) => {
   // 创建接口有的环境返回 data.projectId，有的请求封装会直接返回 projectId，这里统一兜底取值。
   return `${response?.projectId || response?.id || response?.data?.projectId || response?.data?.id || ''}`;
+};
+
+const normalizeProjectName = (name?: string) => trim(name || '');
+
+const normalizeShareTargetPayload = (shareTargets: ProjectFormValues['shareTargets'] = []) => {
+  // AddAuthModal 返回 id/name/type，项目接口保存为 targetType/targetId/targetName。
+  return shareTargets
+    .map((target) => {
+      const [, idFromKey] = String(target.id || '').split('_');
+      const targetType = String(target.targetType || target.type || '').toUpperCase();
+      const rawTargetId = target.targetId ?? idFromKey;
+      const numericTargetId = Number(rawTargetId);
+      const targetId = Number.isNaN(numericTargetId) ? rawTargetId : numericTargetId;
+      return {
+        targetType,
+        targetId,
+        targetName: target.targetName || target.name,
+      };
+    })
+    .filter((target) => ['USER', 'ORG'].includes(target.targetType) && target.targetId);
 };
 
 const ProjectSpaceList: React.FC = () => {
@@ -76,6 +109,7 @@ const ProjectSpaceList: React.FC = () => {
   const [projectCreating, setProjectCreating] = useState(false);
   const [detailProject, setDetailProject] = useState<ProjectSpace>();
   const hasAutoSelectedRef = useRef(false);
+  const projectSavingRef = useRef(false);
 
   const mergedProjects = useMemo(() => {
     return projects.map((project) => projectDetailMap[project.projectId] || project);
@@ -119,7 +153,12 @@ const ProjectSpaceList: React.FC = () => {
       },
       ...mergedProjects.map((project) => ({
         key: project.projectId,
-        label: project.projectName || '未命名项目',
+        label: (
+          <span className={styles.scopeMenuLabel}>
+            <span className={styles.scopeMenuName}>{project.projectName || '未命名项目'}</span>
+            {renderProjectSceneTag(project, styles.scopeMenuTag)}
+          </span>
+        ),
       })),
     ];
   }, [mergedProjects]);
@@ -131,6 +170,7 @@ const ProjectSpaceList: React.FC = () => {
       description: editingProject.description,
       projectType: editingProject.projectType,
       sharedFlag: editingProject.sharedFlag,
+      shareTargets: editingProject.shareTargets || [],
     };
   }, [editingProject]);
 
@@ -274,8 +314,13 @@ const ProjectSpaceList: React.FC = () => {
   };
 
   const handleOpenEditProject = (project: ProjectSpace) => {
-    setEditingProject(projectDetailMap[project.projectId] || project);
+    const cachedProject = projectDetailMap[project.projectId] || project;
+    setEditingProject(cachedProject);
     setProjectModalOpen(true);
+    if (!Array.isArray(cachedProject.shareTargets)) {
+      // 编辑表单需要详情接口里的 shareTargets；列表接口没带时打开后再补齐，避免直接保存时误覆盖。
+      void fetchProjectDetail(project, true).then(setEditingProject);
+    }
   };
 
   const handleDeleteProject = (project: ProjectSpace) => {
@@ -324,28 +369,58 @@ const ProjectSpaceList: React.FC = () => {
   };
 
   const handleCreateProject = async (values: ProjectFormValues) => {
+    if (projectSavingRef.current) return;
+
+    const projectName = normalizeProjectName(values.projectName);
+    if (!projectName) {
+      message.warning('请输入项目名称');
+      return;
+    }
+
+    const duplicateProject = mergedProjects.find((project) => {
+      const isCurrentEditingProject = editingProject && project.projectId === editingProject.projectId;
+      return !isCurrentEditingProject && normalizeProjectName(project.projectName) === projectName;
+    });
+    if (duplicateProject) {
+      message.warning('项目名称已存在，请修改后再保存');
+      return;
+    }
+
+    projectSavingRef.current = true;
     setProjectCreating(true);
+    const shareTargets = normalizeShareTargetPayload(values.shareTargets);
     try {
       if (editingProject) {
-        await updateProject({
+        const updatePayload = {
           projectId: Number(editingProject.projectId),
-          projectName: values.projectName.trim(),
+          projectName,
           description: values.description?.trim(),
-        });
+          projectType: values.projectType,
+          isShare: values.sharedFlag ? 'Y' : 'N',
+          shareTargets: values.sharedFlag ? shareTargets : [],
+        };
+        await updateProject(updatePayload);
         message.success('项目已更新');
         setProjectDetailMap((prev) => ({
           ...prev,
           [editingProject.projectId]: {
             ...(prev[editingProject.projectId] || editingProject),
-            projectName: values.projectName.trim(),
+            projectName,
             description: values.description?.trim(),
+            projectType: values.projectType,
+            isShare: values.sharedFlag ? 'Y' : 'N',
+            sharedFlag: values.sharedFlag,
+            shareTargets: values.sharedFlag ? values.shareTargets || [] : [],
           },
         }));
       } else {
         const res = await createProject({
-          projectName: values.projectName.trim(),
+          projectName,
           description: values.description?.trim(),
-          // 当前项目空间入口只创建项目基础信息，项目类型/共享状态等待后端字段稳定后再透传。
+          // 新增项目空间只提交当前表单字段。
+          projectType: values.projectType,
+          isShare: values.sharedFlag ? 'Y' : 'N',
+          shareTargets: values.sharedFlag ? shareTargets : [],
         });
         const createdProjectId = getProjectIdFromSaveResponse(res);
         message.success('项目空间创建成功');
@@ -366,6 +441,7 @@ const ProjectSpaceList: React.FC = () => {
       console.error('Failed to create project:', error);
       message.error(editingProject ? '项目更新失败' : '项目空间创建失败');
     } finally {
+      projectSavingRef.current = false;
       setProjectCreating(false);
     }
   };
@@ -468,6 +544,7 @@ const ProjectSpaceList: React.FC = () => {
             </div>
             <Dropdown
               trigger={['click']}
+              overlayClassName={styles.scopeDropdown}
               menu={{
                 items: projectScopeMenuItems,
                 selectedKeys: [projectScopeId],
@@ -497,15 +574,10 @@ const ProjectSpaceList: React.FC = () => {
               {visibleProjects.length ? (
                 visibleProjects.map((project) => {
                   const isExpanded = expandedProjectIds.includes(project.projectId);
-                  const active = activeProjectId === project.projectId;
                   const sessionCount = project.sessionCount ?? project.sessions?.length ?? 0;
-                  const scene = getProjectScene(project);
 
                   return (
-                    <div
-                      key={project.projectId}
-                      className={classNames(styles.projectItem, active && styles.projectActive)}
-                    >
+                    <div key={project.projectId} className={styles.projectItem}>
                       <div className={styles.projectTop}>
                         <button
                           type="button"
@@ -518,18 +590,13 @@ const ProjectSpaceList: React.FC = () => {
                               <Tooltip placement="top" title={project.projectName}>
                                 <span className={styles.projectName}>{project.projectName || '未命名项目'}</span>
                               </Tooltip>
-                              <Tag
-                                bordered={false}
-                                className={classNames(styles.projectTag, styles[`projectTag${scene.classSuffix}`])}
-                              >
-                                {scene.text}
-                              </Tag>
                             </span>
                             <span className={styles.projectDesc}>
                               {project.description ||
                                 `${PROJECT_TYPE_LABEL[project.projectType]} · ${sessionCount} 个会话`}
                             </span>
                           </span>
+                          {renderProjectSceneTag(project, styles.projectHeaderTag)}
                         </button>
                         <Dropdown
                           trigger={['click']}

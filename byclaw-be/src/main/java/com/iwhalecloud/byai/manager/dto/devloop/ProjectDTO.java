@@ -22,4 +22,7 @@ public class ProjectDTO {
     private String isShare;
 
     private List<ProjectRepoDTO> repos;
+
+    /** 共享对象：支持 USER 人员、ORG 组织 */
+    private List<ProjectShareTargetDTO> shareTargets;
 }

@@ -14,6 +14,7 @@ import com.iwhalecloud.byai.manager.domain.devloop.service.DevloopTaskService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectMemberService;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectRepoDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareTargetDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ScanSourceDTO;
 import com.iwhalecloud.byai.manager.dto.session.ByaiSessionDto;
 import com.iwhalecloud.byai.manager.entity.devloop.*;
@@ -21,6 +22,7 @@ import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.mapper.devloop.ProjectMapper;
 import com.iwhalecloud.byai.manager.mapper.devloop.ProjectRepoMapper;
+import com.iwhalecloud.byai.manager.mapper.devloop.ProjectShareTargetMapper;
 import com.iwhalecloud.byai.manager.mapper.devloop.ProjectSessionMapper;
 import com.iwhalecloud.byai.manager.mapper.devloop.ScanLogItemMapper;
 import com.iwhalecloud.byai.manager.mapper.resource.SsResourceMapper;
@@ -54,6 +56,9 @@ public class DevloopApplicationService {
 
     @Autowired
     private ProjectRepoMapper projectRepoMapper;
+
+    @Autowired
+    private ProjectShareTargetMapper projectShareTargetMapper;
 
     @Autowired
     private ProjectSessionMapper projectSessionMapper;
@@ -100,9 +105,17 @@ public class DevloopApplicationService {
     /** 创建项目，可同时关联代码仓库 */
     @Transactional(rollbackFor = Exception.class)
     public ResponseUtil<Map<String, Object>> createProject(ProjectDTO dto) {
+        String projectName = normalizeProjectName(dto.getProjectName());
+        if (projectName.isEmpty()) {
+            return ResponseUtil.failRes("项目名称不能为空");
+        }
+        if (existsProjectName(projectName, null)) {
+            return ResponseUtil.failRes("项目名称已存在");
+        }
+
         Project project = new Project();
         project.setProjectId(sequenceService.nextVal());
-        project.setProjectName(dto.getProjectName());
+        project.setProjectName(projectName);
         project.setDescription(dto.getDescription());
         project.setResourceId(dto.getResourceId());
         project.setProjectType(dto.getProjectType() != null ? dto.getProjectType() : "normal");
@@ -112,19 +125,9 @@ public class DevloopApplicationService {
         project.setDeleteFlag(DELETE_FLAG_NORMAL);
         projectMapper.insert(project);
 
-        if (dto.getRepos() != null) {
-            for (ProjectRepoDTO repoDto : dto.getRepos()) {
-                ProjectRepo repo = new ProjectRepo();
-                repo.setRepoId(sequenceService.nextVal());
-                repo.setProjectId(project.getProjectId());
-                repo.setRepoFullName(repoDto.getRepoFullName());
-                repo.setRepoUrl(repoDto.getRepoUrl());
-                repo.setDefaultBranch(repoDto.getDefaultBranch() != null
-                    ? repoDto.getDefaultBranch() : "main");
-                repo.setCreateBy(String.valueOf(CurrentUserHolder.getCurrentUserId()));
-                repo.setCreateTime(new Date());
-                projectRepoMapper.insert(repo);
-            }
+        saveProjectRepos(project.getProjectId(), dto.getRepos());
+        if ("Y".equals(project.getIsShare())) {
+            safeSaveProjectShareTargets(project.getProjectId(), dto.getShareTargets());
         }
 
         // 创建者自动加为 owner 成员
@@ -163,6 +166,7 @@ public class DevloopApplicationService {
             map.put("resourceId", p.getResourceId());
             map.put("projectType", p.getProjectType());
             map.put("isShare", p.getIsShare());
+            map.put("shareTargets", safeListProjectShareTargets(p.getProjectId()));
             map.put("createTime", p.getCreateTime());
             map.put("sessionCount", safeCountProjectSessions(p.getProjectId()));
             list.add(map);
@@ -170,7 +174,7 @@ public class DevloopApplicationService {
         return ResponseUtil.successResponse(list);
     }
 
-    /** 修改项目名称或描述 */
+    /** 按项目管理文档修改项目基础信息，并在传入 repos 时整体替换仓库列表。 */
     @Transactional(rollbackFor = Exception.class)
     public ResponseUtil<Void> updateProject(ProjectDTO dto) {
         Project project = projectMapper.selectById(dto.getProjectId());
@@ -178,10 +182,20 @@ public class DevloopApplicationService {
             return ResponseUtil.failRes("Project not found");
         }
         if (dto.getProjectName() != null) {
-            project.setProjectName(dto.getProjectName());
+            String projectName = normalizeProjectName(dto.getProjectName());
+            if (projectName.isEmpty()) {
+                return ResponseUtil.failRes("项目名称不能为空");
+            }
+            if (existsProjectName(projectName, dto.getProjectId())) {
+                return ResponseUtil.failRes("项目名称已存在");
+            }
+            project.setProjectName(projectName);
         }
         if (dto.getDescription() != null) {
             project.setDescription(dto.getDescription());
+        }
+        if (dto.getResourceId() != null) {
+            project.setResourceId(dto.getResourceId());
         }
         if (dto.getProjectType() != null) {
             project.setProjectType(dto.getProjectType());
@@ -192,6 +206,18 @@ public class DevloopApplicationService {
         project.setUpdateBy(CurrentUserHolder.getCurrentUserId());
         project.setUpdateTime(new Date());
         projectMapper.updateById(project);
+        if (dto.getRepos() != null) {
+            // 接口文档 update 支持 repos，传入时以前端提交的仓库列表为准做整体替换。
+            projectRepoMapper.delete(new LambdaQueryWrapper<ProjectRepo>().eq(ProjectRepo::getProjectId, dto.getProjectId()));
+            saveProjectRepos(dto.getProjectId(), dto.getRepos());
+        }
+        if ("N".equals(project.getIsShare())) {
+            safeDeleteProjectShareTargets(dto.getProjectId());
+        } else if (dto.getShareTargets() != null) {
+            // 共享对象跟随编辑表单整体保存，避免旧授权对象残留。
+            safeDeleteProjectShareTargets(dto.getProjectId());
+            safeSaveProjectShareTargets(dto.getProjectId(), dto.getShareTargets());
+        }
         return ResponseUtil.successResponse(null);
     }
 
@@ -228,9 +254,26 @@ public class DevloopApplicationService {
         map.put("projectType", project.getProjectType());
         map.put("isShare", project.getIsShare());
         map.put("repos", repos);
+        map.put("shareTargets", safeListProjectShareTargets(projectId));
         map.put("sessions", sessions);
         map.put("sessionCount", sessions.size());
         return ResponseUtil.successResponse(map);
+    }
+
+    private String normalizeProjectName(String projectName) {
+        return projectName == null ? "" : projectName.trim();
+    }
+
+    private boolean existsProjectName(String projectName, Long excludeProjectId) {
+        LambdaQueryWrapper<Project> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(Project::getDeleteFlag, DELETE_FLAG_NORMAL)
+            .eq(Project::getProjectName, projectName);
+        if (excludeProjectId != null) {
+            wrapper.ne(Project::getProjectId, excludeProjectId);
+        }
+        // 新建/编辑统一以后端最终入库名称为准查重，避免并发或绕过前端导致同名项目。
+        Long count = projectMapper.selectCount(wrapper);
+        return count != null && count > 0;
     }
 
     private Long safeCountProjectSessions(Long projectId) {
@@ -261,18 +304,137 @@ public class DevloopApplicationService {
     }
 
     private boolean isProjectSessionTableMissing(Throwable error) {
+        return isTableMissing(error, "byai_project_session");
+    }
+
+    private boolean isProjectShareTableMissing(Throwable error) {
+        return isTableMissing(error, "byai_project_share");
+    }
+
+    private boolean isTableMissing(Throwable error, String tableName) {
         Throwable current = error;
         while (current != null) {
             String message = current.getMessage();
             if (message != null) {
                 String lowerMessage = message.toLowerCase(Locale.ROOT);
-                if (lowerMessage.contains("byai_project_session") && lowerMessage.contains("does not exist")) {
+                if (lowerMessage.contains(tableName) && lowerMessage.contains("does not exist")) {
                     return true;
                 }
             }
             current = current.getCause();
         }
         return false;
+    }
+
+    private void saveProjectRepos(Long projectId, List<ProjectRepoDTO> repos) {
+        if (repos == null) {
+            return;
+        }
+        for (ProjectRepoDTO repoDto : repos) {
+            if (repoDto == null || repoDto.getRepoFullName() == null || repoDto.getRepoFullName().trim().isEmpty()) {
+                continue;
+            }
+            String defaultBranch = repoDto.getDefaultBranch() != null ? repoDto.getDefaultBranch().trim() : "";
+            ProjectRepo repo = new ProjectRepo();
+            repo.setRepoId(sequenceService.nextVal());
+            repo.setProjectId(projectId);
+            repo.setRepoFullName(repoDto.getRepoFullName().trim());
+            repo.setRepoUrl(repoDto.getRepoUrl() != null ? repoDto.getRepoUrl().trim() : null);
+            repo.setDefaultBranch(defaultBranch.isEmpty() ? "main" : defaultBranch);
+            repo.setCreateBy(String.valueOf(CurrentUserHolder.getCurrentUserId()));
+            repo.setCreateTime(new Date());
+            projectRepoMapper.insert(repo);
+        }
+    }
+
+    private List<Map<String, Object>> listProjectShareTargets(Long projectId) {
+        LambdaQueryWrapper<ProjectShareTarget> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(ProjectShareTarget::getProjectId, projectId)
+            .orderByAsc(ProjectShareTarget::getCreateTime);
+        List<ProjectShareTarget> targets = projectShareTargetMapper.selectList(wrapper);
+        List<Map<String, Object>> list = new ArrayList<>();
+        for (ProjectShareTarget target : targets) {
+            Map<String, Object> map = new HashMap<>();
+            map.put("shareId", target.getShareId());
+            map.put("projectId", target.getProjectId());
+            map.put("targetType", target.getTargetType());
+            map.put("targetId", target.getTargetId());
+            map.put("targetName", target.getTargetName());
+            map.put("createBy", target.getCreateBy());
+            map.put("createTime", target.getCreateTime());
+            list.add(map);
+        }
+        return list;
+    }
+
+    private List<Map<String, Object>> safeListProjectShareTargets(Long projectId) {
+        try {
+            return listProjectShareTargets(projectId);
+        } catch (Exception error) {
+            if (isProjectShareTableMissing(error)) {
+                // 兼容已执行旧版 V0.3.0 但缺少项目共享对象表的环境，避免项目列表/详情整体不可用。
+                log.warn("Project share target table is missing, fallback shareTargets empty, projectId={}", projectId);
+                return Collections.emptyList();
+            }
+            throw error instanceof RuntimeException ? (RuntimeException) error : new IllegalStateException(error);
+        }
+    }
+
+    private void safeDeleteProjectShareTargets(Long projectId) {
+        try {
+            projectShareTargetMapper.delete(
+                new LambdaQueryWrapper<ProjectShareTarget>().eq(ProjectShareTarget::getProjectId, projectId)
+            );
+        } catch (Exception error) {
+            if (isProjectShareTableMissing(error)) {
+                // 共享对象表未部署时不阻塞项目基础信息编辑，待迁移执行后自动恢复共享对象保存。
+                log.warn("Project share target table is missing, skip deleting shareTargets, projectId={}", projectId);
+                return;
+            }
+            throw error instanceof RuntimeException ? (RuntimeException) error : new IllegalStateException(error);
+        }
+    }
+
+    private void safeSaveProjectShareTargets(Long projectId, List<ProjectShareTargetDTO> shareTargets) {
+        try {
+            saveProjectShareTargets(projectId, shareTargets);
+        } catch (Exception error) {
+            if (isProjectShareTableMissing(error)) {
+                // 共享对象表未部署时不阻塞项目创建/编辑，待迁移执行后自动恢复共享对象保存。
+                log.warn("Project share target table is missing, skip saving shareTargets, projectId={}", projectId);
+                return;
+            }
+            throw error instanceof RuntimeException ? (RuntimeException) error : new IllegalStateException(error);
+        }
+    }
+
+    private void saveProjectShareTargets(Long projectId, List<ProjectShareTargetDTO> shareTargets) {
+        if (shareTargets == null) {
+            return;
+        }
+        Set<String> savedKeys = new HashSet<>();
+        for (ProjectShareTargetDTO targetDto : shareTargets) {
+            if (targetDto == null || targetDto.getTargetId() == null || targetDto.getTargetType() == null) {
+                continue;
+            }
+            String targetType = targetDto.getTargetType().trim().toUpperCase(Locale.ROOT);
+            if (!"USER".equals(targetType) && !"ORG".equals(targetType)) {
+                continue;
+            }
+            String targetKey = targetType + ":" + targetDto.getTargetId();
+            if (!savedKeys.add(targetKey)) {
+                continue;
+            }
+            ProjectShareTarget target = new ProjectShareTarget();
+            target.setShareId(sequenceService.nextVal());
+            target.setProjectId(projectId);
+            target.setTargetType(targetType);
+            target.setTargetId(targetDto.getTargetId());
+            target.setTargetName(targetDto.getTargetName());
+            target.setCreateBy(CurrentUserHolder.getCurrentUserId());
+            target.setCreateTime(new Date());
+            projectShareTargetMapper.insert(target);
+        }
     }
 
     /** 绑定会话到项目；项目空间是一组会话分组，一个会话只保留一个有效项目归属。 */

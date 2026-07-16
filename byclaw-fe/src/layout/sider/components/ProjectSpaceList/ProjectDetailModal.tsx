@@ -163,8 +163,9 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject })
   const [tasks, setTasks] = useState<any[]>([]);
   const [members, setMembers] = useState<any[]>([]);
   const [lastLog, setLastLog] = useState<ScanLogEntry | null>(null);
-  const [loading, setLoading] = useState(false);
   const [sourcesLoading, setSourcesLoading] = useState(false);
+  const [requirementsLoading, setRequirementsLoading] = useState(false);
+  const [tasksLoading, setTasksLoading] = useState(false);
   const [scanningId, setScanningId] = useState<number | null>(null);
   const [sourceModalOpen, setSourceModalOpen] = useState(false);
   const [editingSource, setEditingSource] = useState<ScanSourceItem | null>(null);
@@ -197,38 +198,48 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject })
   const fetchRequirements = useCallback(
     async (sourceList: ScanSourceItem[] = []) => {
       if (!projectId) return;
+      setRequirementsLoading(true);
       const allItems: RequirementItem[] = [];
       let latestLog: ScanLogEntry | null = null;
 
-      // 只消费本次请求得到的收集源列表，避免 setSources 后触发 useEffect 依赖变化造成需求 tab 循环请求。
-      for (const source of sourceList) {
-        const logs = (await listScanLogs(source.sourceId, 10)) || [];
-        for (const log of logs) {
-          if (!latestLog || new Date(log.scanTime) > new Date(latestLog.scanTime)) {
-            latestLog = log;
-          }
-          const items = (await listScanLogItems(log.logId)) || [];
-          items
-            .filter((item: any) => item.action === 'created')
-            .forEach((item: any) => {
-              allItems.push({
-                ...item,
-                sourceType: source.sourceType,
-                sourceName: source.sourceName,
+      try {
+        // 只消费本次请求得到的收集源列表，避免 setSources 后触发 useEffect 依赖变化造成需求 tab 循环请求。
+        for (const source of sourceList) {
+          const logs = (await listScanLogs(source.sourceId, 10)) || [];
+          for (const log of logs) {
+            if (!latestLog || new Date(log.scanTime) > new Date(latestLog.scanTime)) {
+              latestLog = log;
+            }
+            const items = (await listScanLogItems(log.logId)) || [];
+            items
+              .filter((item: any) => item.action === 'created')
+              .forEach((item: any) => {
+                allItems.push({
+                  ...item,
+                  sourceType: source.sourceType,
+                  sourceName: source.sourceName,
+                });
               });
-            });
+          }
         }
+        setRequirements(allItems);
+        setLastLog(latestLog);
+      } finally {
+        setRequirementsLoading(false);
       }
-      setRequirements(allItems);
-      setLastLog(latestLog);
     },
     [projectId]
   );
 
   const fetchTasks = useCallback(async () => {
     if (!projectId) return;
-    const taskList = (await listTasks(projectId)) || [];
-    setTasks(taskList);
+    setTasksLoading(true);
+    try {
+      const taskList = (await listTasks(projectId)) || [];
+      setTasks(taskList);
+    } finally {
+      setTasksLoading(false);
+    }
   }, [projectId]);
 
   const fetchMembers = useCallback(async () => {
@@ -239,13 +250,8 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject })
 
   const fetchDetailData = useCallback(async () => {
     if (!projectId) return;
-    setLoading(true);
-    try {
-      const sourceList = await fetchSources();
-      await Promise.all([fetchRequirements(sourceList), fetchTasks(), fetchMembers()]);
-    } finally {
-      setLoading(false);
-    }
+    const sourceList = await fetchSources();
+    await Promise.all([fetchRequirements(sourceList), fetchTasks(), fetchMembers()]);
   }, [fetchMembers, fetchRequirements, fetchSources, fetchTasks, projectId]);
 
   useEffect(() => {
@@ -263,6 +269,10 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject })
         console.error('Failed to check GitHub PAT:', error);
       });
   }, []);
+
+  // 各 tab 只响应自己的加载状态，避免需求/日志等后台请求盖住其它 tab 已渲染的数据。
+  const detailSpinning =
+    (activeTab === 'requirements' && requirementsLoading) || (activeTab === 'tasks' && tasksLoading);
 
   const tabItems = useMemo(
     () => [
@@ -618,11 +628,16 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject })
                 </span>
               </div>
               {item.taskId ? (
-                <Button size="small" disabled>
+                <Button size="small" className={styles.detailRequirementAction} disabled>
                   已启动
                 </Button>
               ) : (
-                <Button size="small" type="primary" onClick={() => handleStartTask(item)}>
+                <Button
+                  size="small"
+                  type="primary"
+                  className={styles.detailRequirementAction}
+                  onClick={() => handleStartTask(item)}
+                >
                   启动
                 </Button>
               )}
@@ -912,7 +927,7 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject })
         <span>{tasks.length} 个研发任务</span>
         <span>{members.length} 个成员</span>
       </div>
-      <Spin spinning={loading} wrapperClassName={styles.detailSpin}>
+      <Spin spinning={detailSpinning} wrapperClassName={styles.detailSpin}>
         <div className={styles.detailBodyPanel}>{renderTabContent()}</div>
       </Spin>
       {renderAddSourceModal()}
