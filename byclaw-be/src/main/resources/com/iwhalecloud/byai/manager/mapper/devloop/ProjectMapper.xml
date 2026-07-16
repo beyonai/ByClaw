@@ -46,6 +46,8 @@
             FROM byai_project_member
             WHERE user_id = #{createBy}
         )
+        <!-- 软删除项目不再返回；历史空值按未删除兼容，避免老数据被误隐藏。 -->
+        AND (a.delete_flag IS NULL OR a.delete_flag != '1')
         <if test="keyword != null and keyword != ''">
             AND a.project_name LIKE CONCAT('%', #{keyword}, '%')
         </if>

@@ -213,8 +213,15 @@ public class DevloopApplicationService {
     @Transactional(rollbackFor = Exception.class)
     public ResponseUtil<Void> deleteProject(Long projectId) {
         Project project = projectMapper.selectById(projectId);
-        if (project == null || DELETE_FLAG_DELETED.equals(project.getDeleteFlag())) {
-            return ResponseUtil.failRes("Project not found");
+        if (project == null) {
+            // 删除操作按幂等处理，列表旧数据或重复提交时不再把已不存在项目暴露成报错。
+            log.warn("Delete project ignored because project not found, projectId={}", projectId);
+            return ResponseUtil.successResponse(null);
+        }
+        if (DELETE_FLAG_DELETED.equals(project.getDeleteFlag())) {
+            // 已经软删除的项目再次删除视为成功，前端刷新列表后会自然消失。
+            log.warn("Delete project ignored because project already deleted, projectId={}", projectId);
+            return ResponseUtil.successResponse(null);
         }
         project.setDeleteFlag(DELETE_FLAG_DELETED);
         project.setUpdateBy(CurrentUserHolder.getCurrentUserId());

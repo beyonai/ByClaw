@@ -18,6 +18,13 @@ type DevloopProjectPayload = {
   shareTargets?: DevloopProjectShareTargetPayload[];
 };
 
+type DevloopProjectSessionListPayload = {
+  projectId: number;
+  pageNum?: number;
+  pageSize?: number;
+  keyword?: string;
+};
+
 // 项目管理
 export const createProject = (data: DevloopProjectPayload) => POST<any>('/byaiService/devloop/project/create', data);
 
@@ -37,6 +44,10 @@ export const bindProjectSession = (data: { projectId: number; sessionId: number 
 
 export const unbindProjectSession = (data: { projectId: number; sessionId: number }) =>
   POST<any>('/byaiService/devloop/project/session/unbind', data);
+
+// 项目会话列表按项目懒加载，避免项目列表接口一次带出大量会话。
+export const listProjectSessionsByQo = (data: DevloopProjectSessionListPayload, config?: ConfigType) =>
+  POST<any>('/byaiService/devloop/project/session/listByQo', data, config);
 
 // 扫描源管理
 export const createScanSource = (data: {

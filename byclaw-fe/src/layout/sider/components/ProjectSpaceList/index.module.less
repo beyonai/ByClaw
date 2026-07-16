@@ -168,27 +168,43 @@
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 10px 0 12px;
+  gap: 8px;
+  padding: 8px 0 10px;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 .projectItem {
   border-radius: 10px;
-  padding: 7px 8px 7px 6px;
+  padding: 2px 4px;
   background: transparent;
+}
+
+.projectItemExpanded {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.projectTop {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  background: #fff;
+  border-radius: 10px;
+  padding: 6px 4px;
   transition: background-color 0.2s;
 
   &:hover {
     background: #f7f9fd;
-  }
-}
 
-.projectTop {
-  position: relative;
-  display: flex;
-  align-items: center;
-
-  &:hover {
     .projectHeader {
       padding-right: 28px;
     }
@@ -318,20 +334,34 @@
 
 .sessionList {
   margin-top: 6px;
-  padding-left: 49px;
+  // 项目内会话复用普通会话列表的视觉密度，不再按树节点额外缩进。
+  padding-left: 0;
+  max-height: min(520px, calc(100vh - 350px));
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+.projectItemExpanded .sessionList {
+  flex: 1;
+  max-height: none;
 }
 
 .sessionItem {
   width: 100%;
   min-width: 0;
   border: 0;
-  border-radius: 8px;
-  padding: 6px 8px;
+  border-radius: 12px;
+  padding: 8px 10px;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 8px;
   text-align: left;
   color: #1f2633;
@@ -345,47 +375,56 @@
 }
 
 .sessionItemActive {
-  background: rgba(36, 107, 254, 0.1);
+  background: rgba(0, 0, 0, 0.04);
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
 }
 
-.sessionIcon {
-  flex: 0 0 20px;
-  width: 20px;
-  height: 20px;
-  border-radius: 7px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: #246bfe;
-  background: #edf3ff;
-  font-size: 14px;
+.sessionAvatar {
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
+  line-height: 1;
+  display: flex;
 }
 
 .sessionMain {
   min-width: 0;
   flex: 1;
-  display: flex;
-  flex-direction: column;
+}
+
+.sessionTextWrap {
+  position: relative;
+  display: block;
+  min-width: 0;
+  width: 100%;
 }
 
 .sessionTitle {
+  display: block;
+  padding-right: 44px;
   color: #14161a;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 500;
-  line-height: 18px;
+  line-height: 22px;
 }
 
 .sessionDesc {
+  display: block;
+  padding-right: 44px;
   color: #707680;
   font-size: 12px;
-  line-height: 18px;
+  font-weight: 400;
+  line-height: 20px;
 }
 
 .sessionTime {
-  flex-shrink: 0;
+  position: absolute;
+  top: 0;
+  right: 0;
   color: #a4aab2;
-  font-size: 11px;
-  line-height: 18px;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 20px;
 }
 
 .sessionSkeleton {
@@ -399,6 +438,15 @@
   padding: 8px 0;
   color: #a4aab2;
   font-size: 12px;
+  text-align: center;
+}
+
+.sessionMoreLoading {
+  width: 100%;
+  height: 28px;
+  color: #a4aab2;
+  font-size: 12px;
+  line-height: 28px;
   text-align: center;
 }
 
