@@ -84,6 +84,8 @@ public class DevloopApplicationService {
         project.setProjectName(dto.getProjectName());
         project.setDescription(dto.getDescription());
         project.setResourceId(dto.getResourceId());
+        project.setProjectType(dto.getProjectType() != null ? dto.getProjectType() : "normal");
+        project.setIsShare(dto.getIsShare() != null ? dto.getIsShare() : "N");
         project.setCreateBy(CurrentUserHolder.getCurrentUserId());
         project.setCreateTime(new Date());
         project.setDeleteFlag("0");
@@ -132,6 +134,8 @@ public class DevloopApplicationService {
             map.put("projectName", p.getProjectName());
             map.put("description", p.getDescription());
             map.put("resourceId", p.getResourceId());
+            map.put("projectType", p.getProjectType());
+            map.put("isShare", p.getIsShare());
             map.put("createTime", p.getCreateTime());
             list.add(map);
         }
@@ -150,6 +154,12 @@ public class DevloopApplicationService {
         }
         if (dto.getDescription() != null) {
             project.setDescription(dto.getDescription());
+        }
+        if (dto.getProjectType() != null) {
+            project.setProjectType(dto.getProjectType());
+        }
+        if (dto.getIsShare() != null) {
+            project.setIsShare(dto.getIsShare());
         }
         project.setUpdateBy(CurrentUserHolder.getCurrentUserId());
         project.setUpdateTime(new Date());
@@ -186,6 +196,8 @@ public class DevloopApplicationService {
         map.put("projectName", project.getProjectName());
         map.put("description", project.getDescription());
         map.put("resourceId", project.getResourceId());
+        map.put("projectType", project.getProjectType());
+        map.put("isShare", project.getIsShare());
         map.put("repos", repos);
         return ResponseUtil.successResponse(map);
     }

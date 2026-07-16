@@ -5,6 +5,8 @@ CREATE TABLE IF NOT EXISTS byai.byai_project (
     project_name    VARCHAR(100)    NOT NULL,
     description     VARCHAR(500),
     resource_id     BIGINT,
+    project_type    VARCHAR(20)     NOT NULL DEFAULT 'normal',
+    is_share        VARCHAR(10)     NOT NULL DEFAULT 'N',
     create_by       VARCHAR(64),
     create_time     TIMESTAMP       DEFAULT CURRENT_TIMESTAMP,
     update_by       BIGINT,
@@ -18,6 +20,8 @@ COMMENT ON COLUMN byai.byai_project.project_id IS '项目ID';
 COMMENT ON COLUMN byai.byai_project.project_name IS '项目名称';
 COMMENT ON COLUMN byai.byai_project.description IS '项目描述';
 COMMENT ON COLUMN byai.byai_project.resource_id IS '关联Agent资源ID';
+COMMENT ON COLUMN byai.byai_project.project_type IS '项目类型：normal普通项目，develop研发项目';
+COMMENT ON COLUMN byai.byai_project.is_share IS '是否分享：N-不分享，Y-可分享';
 COMMENT ON COLUMN byai.byai_project.create_by IS '创建人';
 COMMENT ON COLUMN byai.byai_project.create_time IS '创建时间';
 COMMENT ON COLUMN byai.byai_project.update_by IS '更新人';
