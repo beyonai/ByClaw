@@ -83,7 +83,7 @@ FROM ghcr.io/openclaw/openclaw:2026.6.6
 
 USER root
 
-ARG OPENCLI_VERSION=2.1.1
+ARG OPENCLI_VERSION=2.1.2
 ARG OPENCLI_EXTENSION_VERSION=2.1.0
 ARG DWS_VERSION=v1.0.47
 ARG WECOM_CLI_VERSION=0.1.9
@@ -97,7 +97,9 @@ ENV PIP_BREAK_SYSTEM_PACKAGES=1 \
     OPENCLAW_BUNDLED_PLUGINS_DIR=/app/dist/extensions \
     OPENCLAW_STATE_DIR=/root/.openclaw \
     OPENCLAW_VNC_WEB_PORT=8081 \
-    OPENCLAW_VNC_PORT=5901
+    OPENCLAW_VNC_PORT=5901 \
+    BYCLI_CONFIG_DIR=/by/.bycli \
+    BYCLI_DAEMON_HOST=0.0.0.0
 
 RUN set -eux; \
     if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
