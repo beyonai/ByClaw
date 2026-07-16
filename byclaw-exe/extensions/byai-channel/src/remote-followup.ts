@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { PluginRuntime } from "openclaw/plugin-sdk";
 import { getSessionEntry } from "openclaw/plugin-sdk/session-store-runtime";
 import { createByaiSdkDiagnosticTrace, runWithByaiSdkDiagnosticTrace } from "./diagnostics.js";
@@ -6,17 +7,22 @@ export type RemoteTaskFollowupStatus = "ok" | "error" | "timeout";
 export type RemoteTaskFollowupDeliveryClass = "retryable" | "terminal";
 
 /**
- * 一件已完成的委派工作（delegated work）的结果回灌载荷。命名维度说明：`delegated` 是编排语义
- * （baiying_call 返回 waiting_for_delegated_agent，把工作委派出去），对应完成门侧的
+ * 同一 sessionKey 下，一批已完成委派工作（delegated work）的结果回灌载荷。命名维度说明：
+ * `delegated` 是编排语义（baiying_call 返回 waiting_for_delegated_agent，把工作委派出去），
+ * 对应完成门侧的
  * delegatedWorkToolCallIds；`Remote*` 是传输语义（任务在远端 worker 执行、结果经 Redis 远端流
  * 回来）。二者正交，指同一条链路的两端：toolCallId 把回灌结果关联回原委派 tool call。
  */
-export type RemoteTaskFollowup = {
-  requesterSessionKey: string;
+export type RemoteTaskFollowupItem = {
   toolCallId: string;
   status: RemoteTaskFollowupStatus;
-  result?: unknown;
-  error?: string;
+  resultFilePath: string;
+};
+
+export type RemoteTaskFollowup = {
+  requesterSessionKey: string;
+  tasks: RemoteTaskFollowupItem[];
+  language?: string;
   /**
    * Diagnostic trace id carried from the originating delegated-work tool call.
    * Wrapping the subagent run in this trace scope keeps the follow-up turn's
@@ -37,7 +43,6 @@ type SessionExistsCheck = (sessionKey: string) => boolean;
 
 type DispatchRemoteTaskFollowupOptions = {
   runtime?: RemoteTaskFollowupRuntime;
-  maxPayloadChars?: number;
   /** Overridable existence probe; defaults to reading the session store. */
   sessionExists?: SessionExistsCheck;
   /** Set false to skip the pre-dispatch existence guard. */
@@ -46,7 +51,6 @@ type DispatchRemoteTaskFollowupOptions = {
   lane?: string;
 };
 
-const DEFAULT_MAX_PAYLOAD_CHARS = 20_000;
 const IDEMPOTENCY_PREFIX = "byai-remote-followup";
 // Contract: matches CommandLane.Subagent ("subagent") in openclaw core. Not
 // exported through plugin-sdk, so the literal is pinned here; a continued
@@ -74,25 +78,17 @@ function normalizeOptionalString(value: string | undefined): string | undefined 
   return normalized ? normalized : undefined;
 }
 
-function truncateText(text: string, maxChars: number): string {
-  if (text.length <= maxChars) {
-    return text;
+function normalizeFollowupTasks(tasks: RemoteTaskFollowupItem[]): RemoteTaskFollowupItem[] {
+  if (!Array.isArray(tasks) || tasks.length === 0) {
+    throw new Error("tasks is required.");
   }
-  return `${text.slice(0, maxChars)}\n...[truncated ${text.length - maxChars} chars]`;
-}
-
-function serializeRemoteValue(value: unknown, maxChars: number): string | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-  if (typeof value === "string") {
-    return truncateText(value, maxChars);
-  }
-  try {
-    return truncateText(JSON.stringify(value, null, 2), maxChars);
-  } catch {
-    return truncateText(String(value), maxChars);
-  }
+  return tasks
+    .map((task) => ({
+      toolCallId: normalizeRequiredString(task.toolCallId, "toolCallId"),
+      status: task.status,
+      resultFilePath: normalizeRequiredString(task.resultFilePath, "resultFilePath"),
+    }))
+    .sort((left, right) => left.toolCallId.localeCompare(right.toolCallId));
 }
 
 async function getDefaultRemoteTaskFollowupRuntime(): Promise<RemoteTaskFollowupRuntime> {
@@ -106,39 +102,29 @@ function defaultSessionExists(sessionKey: string): boolean {
 }
 
 /**
- * Stable follow-up id. Use the same key for the redis delivery state machine
- * and the gateway agent idempotencyKey so one tool call can produce at most one
- * WorkAgent follow-up run.
+ * Stable follow-up id for one session task group. Result content and task order
+ * do not affect the key, so retries reuse the same WorkAgent follow-up run.
  */
 export function buildRemoteTaskFollowupIdempotencyKey(input: RemoteTaskFollowup): string {
-  const toolCallId = normalizeRequiredString(input.toolCallId, "toolCallId");
-  return `${IDEMPOTENCY_PREFIX}:${toolCallId}`;
+  const sessionKey = normalizeRequiredString(input.requesterSessionKey, "requesterSessionKey");
+  const toolCallIds = normalizeFollowupTasks(input.tasks).map((task) => task.toolCallId);
+  const digest = createHash("sha256")
+    .update([sessionKey, ...toolCallIds].join("\n"))
+    .digest("hex")
+    .slice(0, 32);
+  return `${IDEMPOTENCY_PREFIX}:${digest}`;
 }
 
-export function buildRemoteTaskResultMessage(
-  input: RemoteTaskFollowup,
-  options: { maxPayloadChars?: number } = {},
-): string {
-  const toolCallId = normalizeRequiredString(input.toolCallId, "toolCallId");
-  const maxPayloadChars = Math.max(1, options.maxPayloadChars ?? DEFAULT_MAX_PAYLOAD_CHARS);
-  const lines = [
-    "[Delegated Work Result]",
-    `tool_call_id: ${toolCallId}`,
-    `status: ${input.status}`,
-    "",
-  ];
-
-  const error = normalizeOptionalString(input.error);
-  if (error) {
-    lines.push("error:", truncateText(error, maxPayloadChars), "");
+export function buildRemoteTaskResultMessage(input: RemoteTaskFollowup): string {
+  const tasks = normalizeFollowupTasks(input.tasks);
+  const isEnglish = normalizeOptionalString(input.language) === "en_US";
+  const lines = isEnglish
+    ? ["[Delegated Work Results]", "Delegated work results are available in the following files:", ""]
+    : ["[委派任务结果]", "委派任务结果已写入以下文件：", ""];
+  for (const task of tasks) {
+    lines.push(`- tool_call_id: ${task.resultFilePath}`);
   }
-
-  const result = serializeRemoteValue(input.result, maxPayloadChars);
-  if (result !== undefined) {
-    lines.push("result:", result);
-  }
-
-  return lines.join("\n").trimEnd();
+  return lines.join("\n");
 }
 
 export function classifyRemoteTaskFollowupError(err: unknown): RemoteTaskFollowupDeliveryClass {
@@ -195,9 +181,7 @@ export async function dispatchRemoteTaskFollowup(
   const runFollowup = () =>
     runtime.subagent.run({
       sessionKey,
-      message: buildRemoteTaskResultMessage(input, {
-        maxPayloadChars: options.maxPayloadChars,
-      }),
+      message: buildRemoteTaskResultMessage(input),
       deliver: false,
       lane: options.lane ?? SUBAGENT_LANE,
       idempotencyKey,

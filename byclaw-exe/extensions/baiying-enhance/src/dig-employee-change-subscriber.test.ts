@@ -18,6 +18,17 @@ describe("hasDigEmployeePubSubRedisConfig", () => {
       }),
     ).toBe(true);
   });
+
+  it("accepts Redis Cluster nodes without standalone host/port", () => {
+    expect(
+      hasDigEmployeePubSubRedisConfig({
+        port: Number.NaN,
+        db: 0,
+        clusterNodes: [{ host: "redis-cluster.example.test", port: 6371 }],
+        channel: "byai:pub:dig_employee_change",
+      }),
+    ).toBe(true);
+  });
 });
 
 describe("parseDigEmployeeChangeMessage", () => {
