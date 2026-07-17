@@ -125,6 +125,7 @@ CREATE TABLE IF NOT EXISTS byai.byai_scan_source (
     config          TEXT,
     cron_expr       VARCHAR(100),
     enabled         CHAR(1)         DEFAULT '1',
+    repo_id         BIGINT,
     last_scan_time  TIMESTAMP,
     create_by       VARCHAR(64),
     create_time     TIMESTAMP       DEFAULT CURRENT_TIMESTAMP,
@@ -142,6 +143,7 @@ COMMENT ON COLUMN byai.byai_scan_source.source_type IS '扫描源类型 dingtalk
 COMMENT ON COLUMN byai.byai_scan_source.config IS '配置JSON';
 COMMENT ON COLUMN byai.byai_scan_source.cron_expr IS 'Cron表达式';
 COMMENT ON COLUMN byai.byai_scan_source.enabled IS '是否启用 1启用 0停用';
+COMMENT ON COLUMN byai.byai_scan_source.repo_id IS '关联目标仓库ID byai_project_repo.repo_id，扫来的需求据此确定开发仓库';
 COMMENT ON COLUMN byai.byai_scan_source.last_scan_time IS '最近扫描时间';
 COMMENT ON COLUMN byai.byai_scan_source.delete_flag IS '删除标记 0正常 1删除';
 

@@ -38,6 +38,16 @@ export const updateProject = (data: Partial<DevloopProjectPayload> & { projectId
 
 export const deleteProject = (projectId: number) => POST<any>('/byaiService/devloop/project/delete', { projectId });
 
+// 项目仓库维护：扫描源关联仓库时可即席新增/删除
+export const createProjectRepo = (data: {
+  projectId: number;
+  repoFullName: string;
+  repoUrl?: string;
+  defaultBranch?: string;
+}) => POST<any>('/byaiService/devloop/project/repo/create', data);
+
+export const deleteProjectRepo = (repoId: number) => POST<any>('/byaiService/devloop/project/repo/delete', { repoId });
+
 // 项目空间按会话分组展示，创建会话后需要显式建立项目-会话关系。
 export const bindProjectSession = (data: { projectId: number; sessionId: number }) =>
   POST<any>('/byaiService/devloop/project/session/bind', data);
@@ -57,10 +67,16 @@ export const createScanSource = (data: {
   config: string;
   cronExpr?: string;
   enabled?: string;
+  repoId?: number;
 }) => POST<any>('/byaiService/devloop/source/create', data);
 
-export const updateScanSource = (data: { sourceId: number; sourceName?: string; config?: string; cronExpr?: string }) =>
-  POST<any>('/byaiService/devloop/source/update', data);
+export const updateScanSource = (data: {
+  sourceId: number;
+  sourceName?: string;
+  config?: string;
+  cronExpr?: string;
+  repoId?: number;
+}) => POST<any>('/byaiService/devloop/source/update', data);
 
 export const deleteScanSource = (sourceId: number) => POST<any>('/byaiService/devloop/source/delete', { sourceId });
 

@@ -32,6 +32,8 @@ services:
       - /etc/localtime:/etc/localtime:ro
       - ../config:/app/config
       - ./logs/be:/app/logs
+      # dws 登录态（file-DEK 加密），持久化后重启无需重新钉钉授权
+      - byclaw-dws-auth:/root/.dws
       - ${BYCLAW_SANDBOX_FILE_VOLUME_ROOT:-/mnt/byclaw-file}:${BYCLAW_SANDBOX_FILE_VOLUME_ROOT:-/mnt/byclaw-file}
     networks:
       - byclaw-network
@@ -110,3 +112,8 @@ networks:
   byclaw-network:
     name: byclaw-network-${CONTAINER_SUFFIX:-default}
     driver: bridge
+
+volumes:
+  # dws 钉钉登录态持久卷（file-DEK 加密），跨容器重启保留授权
+  byclaw-dws-auth:
+    name: byclaw-dws-auth-${CONTAINER_SUFFIX:-standalone}

@@ -4,6 +4,7 @@ import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.manager.application.service.devloop.DevloopApplicationService;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectListDto;
+import com.iwhalecloud.byai.manager.dto.devloop.ProjectRepoDTO;
 import com.iwhalecloud.byai.manager.dto.session.ByaiSessionDto;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.qo.devloop.ProjectQo;
@@ -78,6 +79,28 @@ public class ProjectController {
     public ResponseUtil<Void> deleteProject(@RequestBody Map<String, Object> params) {
         Long projectId = Long.valueOf(params.get("projectId").toString());
         return applicationService.deleteProject(projectId);
+    }
+
+    /**
+     * 新增项目仓库
+     *
+     * @param dto 仓库信息（projectId、repoFullName 必填，repoUrl、defaultBranch 可选）
+     * @return 新建仓库ID及基本信息
+     */
+    @PostMapping("/repo/create")
+    public ResponseUtil<Map<String, Object>> createProjectRepo(@RequestBody ProjectRepoDTO dto) {
+        return applicationService.createProjectRepo(dto);
+    }
+
+    /**
+     * 删除项目仓库
+     *
+     * @param params 包含 repoId
+     */
+    @PostMapping("/repo/delete")
+    public ResponseUtil<Void> deleteProjectRepo(@RequestBody Map<String, Object> params) {
+        Long repoId = Long.valueOf(params.get("repoId").toString());
+        return applicationService.deleteProjectRepo(repoId);
     }
 
     /**

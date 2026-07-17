@@ -11,8 +11,12 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.scheduling.support.CronExpression;
 import org.springframework.stereotype.Component;
 
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.util.Date;
 import java.util.List;
 import java.util.UUID;
 
@@ -105,13 +109,39 @@ public class DevloopScanJob {
         }
     }
 
-    /** 判断当前源是否需要立即扫描（预留cron匹配逻辑） */
+    /**
+     * 判断当前源是否到达自身 cron 配置的下一个触发点。
+     * 以 lastScanTime 为基准算下一次应扫时间，已过则该扫。
+     * 未配置 cron、首次扫描、或 cron 解析失败时，默认扫描（避免漏扫）。
+     */
     private boolean shouldScanNow(ScanSource source) {
-        if (source.getCronExpr() == null || source.getCronExpr().isEmpty()) {
+        String cron = source.getCronExpr();
+        if (cron == null || cron.isEmpty()) {
             return true;
         }
-        // TODO: Implement cron expression matching against lastScanTime
-        // For now, always scan enabled sources
-        return true;
+        Date lastScan = source.getLastScanTime();
+        if (lastScan == null) {
+            return true;
+        }
+        try {
+            CronExpression expr = CronExpression.parse(toSpringCron(cron));
+            LocalDateTime last = LocalDateTime.ofInstant(lastScan.toInstant(), ZoneId.systemDefault());
+            LocalDateTime nextDue = expr.next(last);
+            return nextDue != null && !nextDue.isAfter(LocalDateTime.now());
+        } catch (Exception e) {
+            logger.warn("[DevloopScanJob] Invalid cron '{}' for source {}, scanning anyway",
+                cron, source.getSourceId(), e);
+            return true;
+        }
+    }
+
+    /**
+     * 前端存 5 段 Unix cron（分 时 日 月 周），Spring CronExpression 要求 6 段（含秒）。
+     * 5 段时前补 "0" 秒位；已是 6 段则原样返回。
+     */
+    private String toSpringCron(String cron) {
+        String trimmed = cron.trim();
+        String[] parts = trimmed.split("\\s+");
+        return parts.length == 5 ? "0 " + trimmed : trimmed;
     }
 }

@@ -20,4 +20,6 @@ public class ScanSourceDTO {
     private String cronExpr;
 
     private String enabled;
+
+    private Long repoId;
 }

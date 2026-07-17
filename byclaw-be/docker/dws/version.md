@@ -21,3 +21,12 @@ Docker 镜像（`Dockerfile.dws`）使用的 DWS CLI 二进制说明。
    ```
 2. 更新本文件中的版本、构建信息与 SHA256（`shasum -a 256 docker/dws/dws-linux-amd64.tar.gz`）。
 3. 保持与本地开发环境的 `dws --version` 一致，避免运行时行为漂移。
+
+## Token 持久化
+
+容器内 dws 使用 file-DEK 后端（`DWS_DISABLE_KEYCHAIN=1`，见 `Dockerfile.dws`），
+token 加密存储在 `/root/.dws`，不依赖 gnome-keyring/dbus。
+
+- standalone/docker-compose：已挂 `byclaw-dws-auth` 卷到 `/root/.dws`，重启无需重新授权。
+- k3s：`byclaw-be` 当前为多副本（replicas:2），dws 单点登录态尚未持久化，
+  见 `deploy/k3s/manifests/service/byclaw-be.yaml` 的 `TODO(dws-auth)` 说明。
