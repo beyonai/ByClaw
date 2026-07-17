@@ -5,12 +5,14 @@ jest.mock('@umijs/max', () => ({
   }),
 }));
 
+const mockEventEmitter = {
+  emit: jest.fn(),
+};
+
 jest.mock('@/hooks/useGlobal', () => ({
   __esModule: true,
   default: () => ({
-    EventEmitter: {
-      emit: jest.fn(),
-    },
+    EventEmitter: mockEventEmitter,
   }),
 }));
 
@@ -19,7 +21,7 @@ jest.mock('@/service/message', () => ({
 }));
 
 import React from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 import ApprovalForm from './index';
 
@@ -39,6 +41,7 @@ beforeAll(() => {
 beforeEach(() => {
   scrollIntoViewMock.mockClear();
   requestAnimationFrameMock.mockClear();
+  mockEventEmitter.emit.mockClear();
 });
 
 function renderApprovalForm({ firstStepRequired = false } = {}) {
@@ -151,6 +154,67 @@ function queryButton(text: string) {
 }
 
 describe('ApprovalForm', () => {
+  it('opens the latest textarea value in the Markdown preview drawer', async () => {
+    const content: OperationFormConfirmation = {
+      sourceAgentType: 'agent',
+      metadata: '{}',
+      schemaVersion: '1',
+      formId: 'approval-form',
+      title: 'Approval',
+      description: 'Please confirm',
+      substance: [
+        {
+          toolCallId: 'tool-call-1',
+          toolName: 'tool-one',
+          actionCode: 'action-one',
+          actionName: 'Action One',
+          title: 'Step One',
+          description: 'First step',
+          rule: [
+            [
+              {
+                formType: 'textarea',
+                fieldCode: 'details',
+                fieldPath: 'details',
+                fieldName: 'Details',
+                fieldType: 'string',
+                fieldValue: 'Initial details',
+              },
+            ],
+          ],
+        },
+      ],
+    };
+
+    render(<ApprovalForm {...createApprovalFormProps(content)} />);
+
+    const textarea = screen.getByLabelText('Details');
+    await waitFor(() => {
+      expect(textarea).toHaveValue('Initial details');
+    });
+
+    await act(async () => {
+      fireEvent.change(textarea, {
+        target: { value: '# Updated details' },
+      });
+    });
+    mockEventEmitter.emit.mockClear();
+    fireEvent.click(screen.getByLabelText('查看更多'));
+
+    expect(mockEventEmitter.emit).toHaveBeenNthCalledWith(1, 'beyond-main-driver-open-type', {
+      width: '50vw',
+      minWidth: '360px',
+      maxWidth: '50vw',
+      drawerType: 'preview',
+      canClose: true,
+      canFullScreen: true,
+    });
+    expect(mockEventEmitter.emit).toHaveBeenNthCalledWith(2, 'beyond-main-driver-message', {
+      data: '# Updated details',
+      type: 'md',
+    });
+  });
+
   it('keeps selected term values visible when multiple term options are not loaded', async () => {
     const selectedCustomerCode = 'custeea5e07bf20643b598b6faa60cfdc59d';
     const content: OperationFormConfirmation = {
