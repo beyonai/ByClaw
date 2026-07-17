@@ -156,17 +156,12 @@ public class DevloopController {
         return applicationService.listTasks(projectId);
     }
 
-    /** 更新任务 */
-    @PostMapping("/task/update")
-    public ResponseUtil<Void> updateTask(@RequestBody Map<String, Object> params) {
-        return applicationService.updateTask(params);
-    }
-
-    /** 获取任务详情 */
+    /** 获取任务(会话)详情 */
     @PostMapping("/task/detail")
     public ResponseUtil<Map<String, Object>> getTaskDetail(@RequestBody Map<String, Object> params) {
-        Long taskId = Long.valueOf(params.get("taskId").toString());
-        return applicationService.getTaskDetail(taskId);
+        Long sessionId = Long.valueOf(params.get("sessionId") != null ? params.get("sessionId").toString()
+            : params.get("taskId").toString());
+        return applicationService.getTaskDetail(sessionId);
     }
 
     // ========== 项目成员 ==========

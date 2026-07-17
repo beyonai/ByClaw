@@ -86,7 +86,7 @@ interface RequirementItem {
   createTime: string;
   sourceType?: string;
   sourceName?: string;
-  taskId?: number;
+  sessionId?: number;
 }
 
 const SCORE_COLORS = ['#52c41a', '#73d13d', '#95de64', '#faad14', '#ffc53d'];
@@ -1210,7 +1210,7 @@ const NeedCollect: React.FC = () => {
                     </span>
                   </div>
                   <div className={styles.reqRight}>
-                    {req.taskId ? (
+                    {req.sessionId ? (
                       <Button size="small" disabled>
                         已启动
                       </Button>
