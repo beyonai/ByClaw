@@ -40,14 +40,18 @@ import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
 import com.iwhalecloud.byai.state.domain.chat.service.AssistantChatService;
 import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
+import com.iwhalecloud.byai.common.util.threadPoolUti.ThreadPoolUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.io.ByteArrayOutputStream;
 
 import java.util.*;
+import java.util.concurrent.Executor;
 
 /**
  * 研发闭环应用服务 聚合项目管理、扫描源管理、扫描执行、日志查询、PAT管理、钉钉群搜索等业务逻辑
@@ -59,6 +63,14 @@ public class DevloopApplicationService {
     private static final String DELETE_FLAG_NORMAL = "0";
 
     private static final String DELETE_FLAG_DELETED = "1";
+
+    /**
+     * 研发任务 LLM 对话异步执行线程池。
+     * TtlExecutors 包装以透传 CurrentUserHolder 的 LoginInfo；任务创建接口据此立即返回，
+     * chat 在后台执行，避免前端等待数分钟。
+     */
+    private static final Executor TASK_CHAT_EXECUTOR =
+        ThreadPoolUtil.getThreadPool(2, 8, 100, 60, "devloop-task-chat");
 
     @Autowired
     private ProjectMapper projectMapper;
@@ -846,23 +858,18 @@ public class DevloopApplicationService {
         String projectName = project != null ? project.getProjectName() : "";
         String chatContent = buildTaskPrompt(projectName, repo, branchName, taskType, title, description);
 
-        // 同步调用 assistantChatService，sessionId=null 让 chat 服务内部创建 session
-        // chat 完成后 chatDto.getSessionId() 即为新创建的 sessionId，回写到任务上供“进入会话”跳转使用
+        // 先同步建会话拿到真实 sessionId（仅 DB 插入，毫秒级），耗时的 LLM 对话放到事务提交后异步执行。
+        // 这样接口立即返回，用户可马上“进入会话”查看数字员工的实时输出，不必等 chat 跑完数分钟。
         LoginInfo loginInfo = CurrentUserHolder.getLoginInfo();
         AssistantChatDto chatDto = new AssistantChatDto();
         chatDto.setSessionId(null);
         chatDto.setAgentId(agentId);
         chatDto.setChatContent(chatContent);
         chatDto.setAccessTerminal("DevLoop");
-        try {
-            assistantChatService.chat(chatDto, new ByteArrayOutputStream(), loginInfo);
-        } catch (Exception e) {
-            log.error("[DevloopTask] LLM chat failed", e);
-            return ResponseUtil.failRes("任务创建失败：LLM对话异常 - " + e.getMessage());
-        }
+        assistantChatService.createGroupChatSession(chatDto);
+        Long sessionId = chatDto.getSessionId();
 
         // 会话建成后回写 sessionId 和分支名
-        Long sessionId = chatDto.getSessionId();
         task.setSessionId(sessionId);
         task.setBranchName(branchName);
         taskService.update(task);
@@ -874,6 +881,9 @@ public class DevloopApplicationService {
             scanLogItemMapper.updateById(item);
         }
 
+        // 事务提交后再异步触发 chat：确保异步线程能读到本事务已建的 session，且失败不回滚已建任务。
+        submitTaskChatAfterCommit(chatDto, loginInfo, task.getTaskId());
+
         Map<String, Object> result = new HashMap<>();
         result.put("taskId", task.getTaskId());
         result.put("agentId", agentId);
@@ -881,6 +891,32 @@ public class DevloopApplicationService {
         result.put("branchName", branchName);
         result.put("title", title);
         return ResponseUtil.successResponse(result);
+    }
+
+    /**
+     * 在当前事务提交后，用 TTL 线程池异步执行 LLM 对话。
+     * sessionId 已在事务内建好并写入 chatDto，chat 走“已有会话”分支，不会重复建会话。
+     * 无事务时（理论上不会发生）直接提交，保证仍能执行。
+     */
+    private void submitTaskChatAfterCommit(AssistantChatDto chatDto, LoginInfo loginInfo, Long taskId) {
+        Runnable chatTask = () -> {
+            try {
+                assistantChatService.chat(chatDto, new ByteArrayOutputStream(), loginInfo);
+            } catch (Exception e) {
+                log.error("[DevloopTask] 异步 LLM chat 执行失败, taskId={}, sessionId={}",
+                    taskId, chatDto.getSessionId(), e);
+            }
+        };
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    TASK_CHAT_EXECUTOR.execute(chatTask);
+                }
+            });
+        } else {
+            TASK_CHAT_EXECUTOR.execute(chatTask);
+        }
     }
 
     /** 判定任务类型：需求项含 bug/缺陷 标记归为 bug，否则为需求 */
@@ -951,6 +987,10 @@ public class DevloopApplicationService {
         + "- 任务类型：${taskType}\n"
         + "- 任务标题：${title}\n\n"
         + "## 需求详情\n${description}\n\n"
+        + "## 仓库访问说明\n"
+        + "- ${repoUrl} 可能是私有仓库，GitHub 访问令牌(PAT)已配置在环境变量 GH_TOKEN 中，请直接使用它进行克隆和推送。\n"
+        + "- 克隆时用带令牌的方式拉取，例如：git clone https://$GH_TOKEN@github.com/owner/repo.git\n"
+        + "- 若提示仓库不存在，通常是私有仓库权限问题，请确认已使用环境变量 GH_TOKEN 中的令牌，不要判定为仓库不存在。\n\n"
         + "## 工作要求\n"
         + "1. 进入仓库 ${repoUrl}，基于最新代码切出并切换到分支 ${branchName}\n"
         + "2. 仔细理解上述需求详情，定位需要修改的代码\n"
