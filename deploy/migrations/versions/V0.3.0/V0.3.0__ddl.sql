@@ -180,7 +180,7 @@ CREATE TABLE IF NOT EXISTS byai.byai_scan_log_item (
     origin_id       VARCHAR(200),
     origin_url      VARCHAR(500),
     action          VARCHAR(20)     NOT NULL,
-    task_id         BIGINT,
+    session_id      BIGINT,
     create_time     TIMESTAMP       DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT pk_byai_scan_log_item PRIMARY KEY (item_id)
 );
@@ -194,7 +194,7 @@ COMMENT ON COLUMN byai.byai_scan_log_item.content IS '需求内容';
 COMMENT ON COLUMN byai.byai_scan_log_item.origin_id IS '来源原始ID(issue号/消息ID)';
 COMMENT ON COLUMN byai.byai_scan_log_item.origin_url IS '来源链接';
 COMMENT ON COLUMN byai.byai_scan_log_item.action IS '处理动作 created/duplicate/deferred';
-COMMENT ON COLUMN byai.byai_scan_log_item.task_id IS '关联任务ID';
+COMMENT ON COLUMN byai.byai_scan_log_item.session_id IS '已启动会话ID(byai_session.session_id)，标记需求已启动';
 
 -- 索引
 CREATE INDEX IF NOT EXISTS idx_scan_source_project ON byai.byai_scan_source(project_id);
@@ -208,46 +208,4 @@ CREATE INDEX IF NOT EXISTS idx_project_share_project ON byai.byai_project_share(
 CREATE UNIQUE INDEX IF NOT EXISTS idx_project_share_unique
     ON byai.byai_project_share(project_id, target_type, target_id);
 
--- 研发任务表
-CREATE TABLE IF NOT EXISTS byai.byai_task (
-    task_id         BIGINT          NOT NULL,
-    project_id      BIGINT          NOT NULL,
-    source_item_id  BIGINT,
-    title           TEXT            NOT NULL,
-    status          VARCHAR(32)     NOT NULL DEFAULT '待开始',
-    phase           VARCHAR(32)     DEFAULT '分诊',
-    current_round   INT             DEFAULT 0,
-    total_rounds    INT             DEFAULT 0,
-    score           INT             DEFAULT 0,
-    assignee        VARCHAR(128),
-    agent_name      VARCHAR(128)    DEFAULT 'Code Agent',
-    branch_name     VARCHAR(256),
-    warning_tag     VARCHAR(256),
-    session_id      BIGINT,
-    create_time     TIMESTAMP       DEFAULT CURRENT_TIMESTAMP,
-    update_time     TIMESTAMP,
-    delete_flag     CHAR(1)         DEFAULT '0',
-    create_by       BIGINT,
-    CONSTRAINT pk_byai_task PRIMARY KEY (task_id)
-);
-
-COMMENT ON TABLE byai.byai_task IS '研发任务表';
-COMMENT ON COLUMN byai.byai_task.task_id IS '任务ID';
-COMMENT ON COLUMN byai.byai_task.project_id IS '所属项目ID';
-COMMENT ON COLUMN byai.byai_task.source_item_id IS '关联扫描条目ID';
-COMMENT ON COLUMN byai.byai_task.title IS '任务标题';
-COMMENT ON COLUMN byai.byai_task.status IS '状态: 待开始/进行中/暂停/完成';
-COMMENT ON COLUMN byai.byai_task.phase IS '阶段: 分诊/设计/编码/测试/审批/发布';
-COMMENT ON COLUMN byai.byai_task.current_round IS '当前轮次';
-COMMENT ON COLUMN byai.byai_task.total_rounds IS '总轮次';
-COMMENT ON COLUMN byai.byai_task.score IS '评分';
-COMMENT ON COLUMN byai.byai_task.assignee IS '负责人';
-COMMENT ON COLUMN byai.byai_task.agent_name IS 'Agent名称';
-COMMENT ON COLUMN byai.byai_task.branch_name IS '关联分支';
-COMMENT ON COLUMN byai.byai_task.warning_tag IS '告警标签';
-COMMENT ON COLUMN byai.byai_task.create_time IS '创建时间';
-COMMENT ON COLUMN byai.byai_task.update_time IS '更新时间';
-COMMENT ON COLUMN byai.byai_task.delete_flag IS '删除标记 0正常 1删除';
-
-CREATE INDEX IF NOT EXISTS idx_task_project ON byai.byai_task(project_id);
-CREATE INDEX IF NOT EXISTS idx_task_status ON byai.byai_task(status);
+-- 研发任务由会话(byai_session)承载：创建任务即创建带 project_id 的会话，不再单独建 byai_task 表。

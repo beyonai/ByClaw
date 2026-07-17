@@ -18,6 +18,11 @@ VALUES (nextval('byai.seq_any_table'), 'txt', 'DEVLOOP_TASK_START_PROMPT', '研�
 ## 需求详情
 ${description}
 
+## 仓库访问说明
+- ${repoUrl} 可能是私有仓库，GitHub 访问令牌(PAT)已配置在环境变量 GH_TOKEN 中，请直接使用它进行克隆和推送。
+- 克隆时用带令牌的方式拉取，例如：git clone https://$GH_TOKEN@github.com/owner/repo.git
+- 若提示仓库不存在，通常是私有仓库权限问题，请确认已使用环境变量 GH_TOKEN 中的令牌，不要判定为仓库不存在。
+
 ## 工作要求
 1. 进入仓库 ${repoUrl}，基于最新代码切出并切换到分支 ${branchName}
 2. 仔细理解上述需求详情，定位需要修改的代码

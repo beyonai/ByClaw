@@ -30,7 +30,8 @@ public class ScanLogItem {
 
     private String action;
 
-    private Long taskId;
+    /** 已启动会话ID：需求启动后回写，标记“已启动”并支持跳转会话 */
+    private Long sessionId;
 
     private Date createTime;
 }
