@@ -153,13 +153,13 @@ public class ScriptService extends AbstractChatProcess {
             ctx.assistantChatDto.setLlmMessageId(getModelAnswerMessageIdByTraceId(ctx.assistantChatDto.getTraceId()));
         }
 
-        // @TODO 需要删掉这些 UPDATE FEEDBACK 的逻辑。更新消息全部统一走 continueRunningTrace。必须保证 messageId 和 traceId 的唯一性和一致性。
-
         // 判断是否更新任务
         if (ctx.continueRunningTrace) {
-            ctx.taskId = Optional.ofNullable(ctx.assistantChatDto).map(AssistantChatDto::getExtParams)
-                .filter(params -> params.containsKey("beyondTaskId"))
-                .map(params -> MapParamUtil.getLongValue(params, "beyondTaskId")).orElseGet(sequenceService::nextVal);
+            if (ctx.taskId == null) {
+                ctx.taskId = Optional.ofNullable(ctx.assistantChatDto).map(AssistantChatDto::getExtParams)
+                    .filter(params -> params.containsKey("beyondTaskId"))
+                    .map(params -> MapParamUtil.getLongValue(params, "beyondTaskId")).orElseGet(sequenceService::nextVal);
+            }
         }
         else if (TaskOperateTypeEnum.UPDATE.equals(ctx.assistantChatDto.getTaskOperateType())
             || TaskOperateTypeEnum.RERUN.equals(ctx.assistantChatDto.getTaskOperateType())
@@ -268,7 +268,8 @@ public class ScriptService extends AbstractChatProcess {
         sessionExtService.save(byaiSessionExt);
     }
 
-    private void resolveRunningTraceState(ChatProcessContext ctx) {        if (ctx == null || ctx.sessionId == null) {
+    private void resolveRunningTraceState(ChatProcessContext ctx) {
+        if (ctx == null || ctx.sessionId == null) {
             return;
         }
 
@@ -285,11 +286,15 @@ public class ScriptService extends AbstractChatProcess {
 
         ctx.sendByFrameworkMsgOnly = true;
         ctx.continueRunningTrace = true;
-        ctx.userMessageId = getUserMessageIdByTraceId(runningTraceId);
+        ctx.userMessageId = runningInfo.getUserMessageId();
         ctx.modelAnswerMessageId = runningInfo.getModelAnswerMessageId();
+        if (ctx.userMessageId == null) {
+            ctx.userMessageId = getUserMessageIdByTraceId(runningTraceId);
+        }
         if (ctx.modelAnswerMessageId == null) {
             ctx.modelAnswerMessageId = getModelAnswerMessageIdByTraceId(runningTraceId);
         }
+        ctx.taskId = runningInfo.getTaskId();
         ctx.traceId = runningTraceId;
     }
 
