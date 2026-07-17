@@ -65,6 +65,7 @@ import com.iwhalecloud.byai.state.domain.resource.qo.DownloadSkillZipQo;
 import com.iwhalecloud.byai.state.domain.resource.qo.GenerateResourceImageQo;
 import com.iwhalecloud.byai.state.domain.resource.qo.PersonalAgentArchiveQo;
 import com.iwhalecloud.byai.state.domain.resource.qo.ResourceDetailQo;
+import com.iwhalecloud.byai.state.domain.resource.qo.ThirdPartySkillInstallQo;
 import com.iwhalecloud.byai.state.domain.resource.qo.UpdateResourceBasicInfoQo;
 import com.iwhalecloud.byai.state.domain.resource.qo.WorkspaceSkillQo;
 import com.iwhalecloud.byai.state.domain.resource.service.ResourceApplicationService;
@@ -481,6 +482,29 @@ public class ToolManController {
             logger.error("importSkillZip failed", e);
             return ResponseUtil
                 .fail(e.getMessage() != null ? e.getMessage() : I18nUtil.get("byclaw.skill.upload.failed"));
+        }
+    }
+
+    /** 第三方技能超市：按下载地址安装技能到指定数字员工。 */
+    @PostMapping("/installThirdPartySkill")
+    public ResponseUtil<ObjectZipImportResult> installThirdPartySkill(@RequestBody ThirdPartySkillInstallQo request) {
+        try {
+            if (request == null) {
+                return ResponseUtil.fail(I18nUtil.get("param.cannot.be.null"));
+            }
+            ByClawSkillResourceApplicationService.SkillImportResult itemResult =
+                byClawSkillResourceApplicationService.installThirdPartySkill(request.getDigId(),
+                    request.getDownloadUrl());
+            return ResponseUtil.successResponse(I18nUtil.get("byclaw.third.party.skill.install.success"),
+                byClawSkillResourceApplicationService.buildSingleSkillImportResult(itemResult));
+        }
+        catch (IllegalArgumentException | BdpRuntimeException e) {
+            return ResponseUtil.fail(e.getMessage());
+        }
+        catch (Exception e) {
+            logger.error("installThirdPartySkill failed, digId={}", request == null ? null : request.getDigId(), e);
+            return ResponseUtil.fail(e.getMessage() != null ? e.getMessage()
+                : I18nUtil.get("byclaw.third.party.skill.install.failed"));
         }
     }
 

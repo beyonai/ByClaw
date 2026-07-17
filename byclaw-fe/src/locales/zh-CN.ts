@@ -118,6 +118,8 @@ export default {
   'resource.thirdPartyKnowledgeBaseMode': '当前为第三方知识库模式，暂不支持知识库库级操作',
   'resource.personal': '个人',
   'resource.enterprise': '企业',
+  'resource.skillMarketplace': '技能超市',
+  'resource.marketplaceFullscreen': '全屏查看技能超市',
   'resource.type': '类型',
   'resource.permission': '权限',
   'resource.selectOrgScope': '选择组织范围',

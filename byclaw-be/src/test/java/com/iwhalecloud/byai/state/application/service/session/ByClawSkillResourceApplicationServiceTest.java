@@ -19,6 +19,7 @@ import java.io.ByteArrayOutputStream;
 import java.util.List;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
+import org.apache.commons.codec.digest.DigestUtils;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -34,6 +35,8 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -599,6 +602,81 @@ class ByClawSkillResourceApplicationServiceTest {
         verify(ssResourceArtifactService).upsertArtifact(eq(7201L), eq("SKILL"),
             eq(ResourceArtifactTypeEnum.STANDARD_JSON.name()), eq("minio"), eq("skill/SKILL_7201.json"),
             eq("chat-upload-skill-json"));
+    }
+
+    @Test
+    void installThirdPartySkill_createsWhaleAgentSkillBindsEmployeeAndRefreshesRuntime() {
+        String downloadUrl = "https://market.example/market-skill.zip";
+        String resourceCode = DigestUtils.sha256Hex(downloadUrl);
+        ByClawSkillResourceApplicationService installService = spy(service);
+        doReturn(skillZipBytes("market-skill")).when(installService)
+            .downloadThirdPartySkillPackage(downloadUrl);
+        SsResource digitalEmployee = new SsResource();
+        digitalEmployee.setResourceId(9001L);
+        digitalEmployee.setResourceBizType("DIG_EMPLOYEE");
+        when(ssResourceService.findById(9001L)).thenReturn(digitalEmployee);
+        when(authApplicationService.hasResourceManagePermission(digitalEmployee)).thenReturn(true);
+        when(ssResourceService.findByImportIdentity("WHALE_AGENT", "SKILL", resourceCode)).thenReturn(null);
+        when(ssResourceService.saveResource(any(SsResource.class))).thenAnswer(invocation -> {
+            SsResource resource = invocation.getArgument(0);
+            resource.setResourceId(7301L);
+            return resource;
+        });
+        when(ssResourceRelDetailService.find(9001L, 7301L)).thenReturn(List.of());
+        when(sequenceService.nextVal()).thenReturn(8301L);
+
+        var result = installService.installThirdPartySkill(9001L, downloadUrl);
+
+        assertThat(result.updated()).isFalse();
+        ArgumentCaptor<SsResource> resourceCaptor = ArgumentCaptor.forClass(SsResource.class);
+        verify(ssResourceService).saveResource(resourceCaptor.capture());
+        assertThat(resourceCaptor.getValue().getSystemCode()).isEqualTo("WHALE_AGENT");
+        assertThat(resourceCaptor.getValue().getResourceCode()).isEqualTo(resourceCode);
+        assertThat(resourceCaptor.getValue().getResourceName()).isEqualTo("market-skill");
+        assertThat(resourceCaptor.getValue().getOwnerType()).isEqualTo("personal");
+        verify(authApplicationService).ensureCreatorDefaultPrivileges(resourceCaptor.getValue());
+        verify(ssResourceRelDetailService).save(any(SsResourceRelDetail.class));
+        verify(resourceArtifactStorageService).uploadToSubdirectory(any(byte[].class), eq("skill/user001-hub"),
+            eq("market-skill.zip"), eq("application/zip"));
+        ArgumentCaptor<SsResExtSkill> extCaptor = ArgumentCaptor.forClass(SsResExtSkill.class);
+        verify(ssResExtSkillService).saveOrUpdate(extCaptor.capture());
+        assertThat(extCaptor.getValue().getTargetContent()).contains("\"sourceDownloadUrl\":\"" + downloadUrl + "\"");
+        verify(digitalEmployeeApplicationService).refreshInstalledSkillRuntime(9001L);
+    }
+
+    @Test
+    void installThirdPartySkill_sameDownloadUrlUpdatesExistingResourceWhenPackageNameChanges() {
+        String downloadUrl = "https://market.example/stable-skill-package.zip";
+        String resourceCode = DigestUtils.sha256Hex(downloadUrl);
+        ByClawSkillResourceApplicationService installService = spy(service);
+        doReturn(skillZipBytes("renamed-skill")).when(installService).downloadThirdPartySkillPackage(downloadUrl);
+
+        SsResource digitalEmployee = new SsResource();
+        digitalEmployee.setResourceId(9001L);
+        digitalEmployee.setResourceBizType("DIG_EMPLOYEE");
+        when(ssResourceService.findById(9001L)).thenReturn(digitalEmployee);
+        when(authApplicationService.hasResourceManagePermission(digitalEmployee)).thenReturn(true);
+
+        SsResource existing = new SsResource();
+        existing.setResourceId(7302L);
+        existing.setResourceCode(resourceCode);
+        existing.setResourceName("old-skill-name");
+        existing.setOwnerType("personal");
+        when(ssResourceService.findByImportIdentity("WHALE_AGENT", "SKILL", resourceCode)).thenReturn(existing);
+        when(authApplicationService.hasResourceManagePermission(existing)).thenReturn(true);
+        when(ssResourceService.updateResourceEntity(existing)).thenReturn(existing);
+        when(ssResourceRelDetailService.find(9001L, 7302L)).thenReturn(List.of());
+        when(sequenceService.nextVal()).thenReturn(8302L);
+
+        var result = installService.installThirdPartySkill(9001L, downloadUrl);
+
+        assertThat(result.updated()).isTrue();
+        assertThat(result.resource().getResourceId()).isEqualTo(7302L);
+        assertThat(result.resource().getResourceCode()).isEqualTo(resourceCode);
+        assertThat(result.resource().getResourceName()).isEqualTo("renamed-skill");
+        verify(ssResourceService).updateResourceEntity(existing);
+        verify(ssResourceService, never()).saveResource(any(SsResource.class));
+        verify(authApplicationService, never()).ensureCreatorDefaultPrivileges(existing);
     }
 
     private byte[] skillZipBytes(String skillName) {
