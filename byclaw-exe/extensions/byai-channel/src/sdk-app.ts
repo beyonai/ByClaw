@@ -355,7 +355,8 @@ export class ByaiSdkApp {
 
     debug?.(`[${this.account.accountId}] byai-channel usercode: ${userCode}`);
 
-    const workerId = `byai-channel-worker-${userCode}-${Math.random().toString(16).slice(2, 6)}`;
+    // Use injected worker_id if available; otherwise fall back to deterministic id for backward compatibility
+    const workerId = process.env.BYAI_WORKER_ID || `byai-channel-worker-${userCode}`;
     const agentTypes = [`BYCLAW_EXE_${userCode}`];
 
     const registry = new WorkerRegistry(redis);
