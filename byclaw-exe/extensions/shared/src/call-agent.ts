@@ -1,15 +1,11 @@
 import {
+  callAgent,
   QueueNames,
   RegistryKeys,
   WorkerRegistry,
-  buildAskAgentPublishArtifacts,
   createRedisCallAgentDeps,
-  publishWithExecutionRecord,
-  resolveCallAgentPublishIds,
-  type CallAgentPublishInput,
-  type CallAgentPublishResult,
+  RoutePolicy,
 } from "@byclaw/by-framework";
-import type { Redis } from "ioredis";
 import { isSubagentSessionKey } from "openclaw/plugin-sdk/routing";
 import type {
   Capability,
@@ -72,7 +68,6 @@ export type ExecuteViaCallAgentInput = {
   userCode?: string;
   userName?: string;
   taskGroupId?: string;
-  probeAgentType?: boolean;
   onDelta?: DocDeltaCallback;
   signal?: AbortSignal;
   logger?: BaiyingEnhanceLogger;
@@ -195,18 +190,6 @@ export async function executeViaCallAgent(
 
     const langfuseSessionId = asString(input.sessionId);
 
-    const langfuseContext = withLangfuseSessionAliases(
-      withLangfuseTraceAliases(
-        withLangfuseParentObservationAliases(
-          originalTraceId ? { byclaw_original_trace_id: originalTraceId } : {},
-          input.langfuseParentObservationId,
-        ),
-        langfuseTraceId,
-      ),
-      langfuseSessionId,
-      { includePlainSessionAliases: true },
-    );
-
     const payloadLangfuseContext = withLangfuseSessionAliases(
       withLangfuseTraceAliases(
         withLangfuseParentObservationAliases(
@@ -217,11 +200,6 @@ export async function executeViaCallAgent(
       ),
       langfuseSessionId,
     );
-
-    const commandLangfuseContext = {
-      header: langfuseContext,
-      extraPayload: payloadLangfuseContext,
-    };
 
     logBaiyingRequest(input.logger, "call_agent.dispatch", {
       resource_id: input.capability.metadata?.resource_id,
@@ -235,7 +213,6 @@ export async function executeViaCallAgent(
       dispatch_trace_id: dispatchTraceId,
       default_parent_message_id: defaultParentMessageId,
       wait_for_reply: false,
-      probe_agent_type: input.probeAgentType ?? false,
       user_code: input.userCode ?? nonEmptyEnv("USER_CODE"),
       user_name: input.userName ?? nonEmptyEnv("USER_NAME"),
       task_group_id: input.taskGroupId ?? "",
@@ -250,29 +227,28 @@ export async function executeViaCallAgent(
       target: input.target,
     });
 
-    const dispatch = await publishCallAgentWithLangfuseContext({
+    const result = await callAgent(
       deps,
-      input: {
+      {
         sessionId: input.sessionId,
         traceId: dispatchTraceId,
         sourceAgentType,
         defaultParentMessageId,
         targetAgentType: input.targetAgentType,
         content: input.content,
-        payload,
+        extraPayload: {
+          ...payload,
+          ...payloadLangfuseContext,
+        },
         waitForReply: false,
         userCode: input.userCode ?? nonEmptyEnv("USER_CODE"),
         userName: input.userName ?? nonEmptyEnv("USER_NAME"),
         taskGroupId: input.taskGroupId,
         metadata,
-        probeAgentType: input.probeAgentType ?? false,
+        langfuseParentObservationId: input.langfuseParentObservationId,
+        routePolicy: RoutePolicy.WAKE_AND_WAIT,
       },
-      langfuseContext: commandLangfuseContext,
-    });
-    const result = dispatch.result;
-    if (dispatch.commandPayload) {
-      logBaiyingRequest(input.logger, "call_agent.command_payload", dispatch.commandPayload);
-    }
+    );
 
     if (result.status !== "QUEUED") {
       return makeError(
@@ -444,81 +420,6 @@ function withLangfuseTraceAliases(value: Dict, langfuseTraceId?: string): Dict {
     ...value,
     langfuseTraceId,
     langfuse_trace_id: langfuseTraceId,
-  };
-}
-
-async function publishCallAgentWithLangfuseContext(params: {
-  deps: ReturnType<typeof createRedisCallAgentDeps>;
-  input: CallAgentPublishInput;
-  langfuseContext: { header: Dict; extraPayload: Dict };
-}): Promise<{ result: CallAgentPublishResult; commandPayload?: Record<string, unknown> }> {
-  if (params.input.probeAgentType ?? true) {
-    const probe = await params.deps.probe.probeAgentTypeOnline(params.input.targetAgentType);
-    if (!probe.ok) {
-      return {
-        result: {
-          status: "FAILED",
-          messageId: "",
-          parentMessageId: params.input.parentMessageId || params.input.defaultParentMessageId,
-          targetAgentType: params.input.targetAgentType,
-          error: probe.error ?? `No alive worker found with agent type '${params.input.targetAgentType}'`,
-          error_code: probe.error_code ?? "AGENT_TYPE_NOT_FOUND",
-        },
-      };
-    }
-  }
-
-  const { messageId, parentMessageId, waitForReply } = resolveCallAgentPublishIds(params.input);
-  const artifacts = buildAskAgentPublishArtifacts(
-    params.input,
-    messageId,
-    parentMessageId,
-    waitForReply,
-    QueueNames,
-  );
-  const commandPayload = withCommandLangfuseContext(
-    artifacts.command.toDict(),
-    params.langfuseContext,
-  );
-  await publishWithExecutionRecord({
-    execution: params.deps.execution,
-    bus: params.deps.bus,
-    executionRecord: artifacts.executionRecord,
-    streamName: artifacts.ctrlStreamName,
-    serializedCommandJson: JSON.stringify(commandPayload),
-  });
-  return {
-    result: {
-      status: "QUEUED",
-      messageId,
-      parentMessageId,
-      targetAgentType: params.input.targetAgentType,
-      runtimeHint: waitForReply ? "suspend" : "transfer",
-    },
-    commandPayload,
-  };
-}
-
-function withCommandLangfuseContext(
-  commandPayload: Record<string, unknown>,
-  langfuseContext: { header: Dict; extraPayload: Dict },
-): Record<string, unknown> {
-  const header = isRecord(commandPayload.header) ? commandPayload.header : {};
-  const body = isRecord(commandPayload.body) ? commandPayload.body : {};
-  const extraPayload = isRecord(body.extra_payload) ? body.extra_payload : {};
-  return {
-    ...commandPayload,
-    header: {
-      ...header,
-      ...langfuseContext.header,
-    },
-    body: {
-      ...body,
-      extra_payload: {
-        ...extraPayload,
-        ...langfuseContext.extraPayload,
-      },
-    },
   };
 }
 

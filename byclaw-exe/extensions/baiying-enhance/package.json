@@ -9,7 +9,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@byclaw/by-framework": "1.5.0",
+    "@byclaw/by-framework": "1.5.1",
     "@opentelemetry/api": "1.9.1",
     "@sinclair/typebox": "0.34.48",
     "ioredis": "5.10.1"
