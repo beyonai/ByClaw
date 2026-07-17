@@ -463,9 +463,10 @@ public class SftpStorageService extends AbstractFileIngressStorageService<Sessio
                 continue;
             }
 
-            // Build relative path from prefix
-            String relativePath = StringUtils.isNotBlank(prefixPath)
-                ? prefixPath + "/" + fileName
+            // Build relative path from prefix (strip trailing slash to avoid double-slash)
+            String base = org.apache.commons.lang3.StringUtils.stripEnd(prefixPath, "/");
+            String relativePath = StringUtils.isNotBlank(base)
+                ? base + "/" + fileName
                 : fileName;
 
             com.iwhalecloud.byai.common.storage.model.StorageObject obj =
@@ -504,9 +505,10 @@ public class SftpStorageService extends AbstractFileIngressStorageService<Sessio
                 continue;
             }
 
-            // Build relative path from prefix
-            String relativePath = StringUtils.isNotBlank(prefixPath)
-                ? prefixPath + "/" + fileName
+            // Build relative path from prefix (strip trailing slash to avoid double-slash)
+            String base = org.apache.commons.lang3.StringUtils.stripEnd(prefixPath, "/");
+            String relativePath = StringUtils.isNotBlank(base)
+                ? base + "/" + fileName
                 : fileName;
 
             com.iwhalecloud.byai.common.storage.model.StorageObject obj =
