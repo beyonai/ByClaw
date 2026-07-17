@@ -28,7 +28,6 @@ import {
   PlusOutlined,
   ReloadOutlined,
 } from '@ant-design/icons';
-import { fetchEventSource } from '@fortaine/fetch-event-source';
 import dayjs from 'dayjs';
 import {
   checkDwsAuthStatus,
@@ -50,13 +49,10 @@ import {
   toggleScanSource,
   triggerScan,
   updateScanSource,
-  updateTask,
 } from '@/service/devloop';
 import TaskDetailDrawer from '@/pages/devloop/TaskDetailDrawer';
 import TaskKanban from '@/pages/devloop/TaskKanban';
 import type { ProjectSpace } from '@/pages/projectSpace/types';
-import { getToken, getssoToken, ssotokenKey, tokenKey } from '@/utils/auth';
-import { generateSignature } from '@/utils/signature';
 import ProjectMemberList from './ProjectMemberList';
 import styles from './index.module.less';
 
@@ -95,7 +91,7 @@ type RequirementItem = {
   createTime?: string;
   sourceType?: string;
   sourceName?: string;
-  taskId?: number;
+  sessionId?: number;
 };
 
 type SourceForm = {
@@ -585,50 +581,10 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject })
         return;
       }
 
-      const { taskId, agentId, title: taskTitle } = res;
-      message.success('任务已创建，正在发起会话...');
-      await fetchTasks();
+      // 后端 createTask 已建会话(带 projectId)并异步发起对话，前端无需再自建会话回写。
+      message.success('任务已创建');
+      await Promise.all([fetchTasks(), fetchSources().then(fetchRequirements)]);
       setActiveTab('tasks');
-
-      const chatBody = {
-        agentId,
-        agentType: '001',
-        chatContent: `请处理以下研发任务：${taskTitle || requirement.title}`,
-        sessionId: null,
-        accessTerminal: 'Web',
-        projectId,
-      };
-      const signatureHeaders = generateSignature('POST', chatBody);
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-        [tokenKey]: getToken() || '',
-        [ssotokenKey]: getssoToken() || '',
-        ...signatureHeaders,
-      };
-
-      // 与 /devloop 保持一致：启动任务后发起聊天，拿到 createSession 再回写 task.sessionId。
-      void fetchEventSource('/byaiService/chat/superAgentChat', {
-        method: 'POST',
-        body: JSON.stringify(chatBody),
-        headers,
-        openWhenHidden: true,
-        onmessage: (event) => {
-          if (event.event !== 'createSession' || !event.data) return;
-          try {
-            const sessionData = JSON.parse(event.data);
-            const sessionId = sessionData.sessionId;
-            if (sessionId && taskId) {
-              void updateTask({ taskId, sessionId }).then(fetchTasks);
-            }
-          } catch (error) {
-            // 流式事件中只有 createSession 需要回写任务，会话数据异常时不中断当前页面。
-            console.error('Failed to parse project task session event:', error);
-          }
-        },
-        onerror: (error) => {
-          console.error('Project task chat stream failed:', error);
-        },
-      });
     } catch {
       message.error('创建任务失败');
     }
@@ -839,7 +795,7 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject })
                   {item.createTime ? dayjs(item.createTime).format('MM-DD HH:mm') : '-'}
                 </span>
               </div>
-              {item.taskId ? (
+              {item.sessionId ? (
                 <Button size="small" className={styles.detailRequirementAction} disabled>
                   已启动
                 </Button>

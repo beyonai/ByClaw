@@ -108,6 +108,7 @@ export const createTask = (data: { projectId: number; sourceItemId?: number; tit
 
 export const listTasks = (projectId: number) => POST<any>('/byaiService/devloop/task/list', { projectId });
 
+// 会话即任务后，任务已无可变的 status/phase 等字段，看板拖改状态端点已下线；保留签名仅为兼容旧引用。
 export const updateTask = (data: {
   taskId: number;
   status?: string;
@@ -118,7 +119,8 @@ export const updateTask = (data: {
   sessionId?: number;
 }) => POST<any>('/byaiService/devloop/task/update', data);
 
-export const getTaskDetail = (taskId: number) => POST<any>('/byaiService/devloop/task/detail', { taskId });
+// 任务详情即会话详情，后端按 sessionId 查询（taskId 与 sessionId 同值）
+export const getTaskDetail = (sessionId: number) => POST<any>('/byaiService/devloop/task/detail', { sessionId });
 
 // 项目成员
 export const addProjectMember = (data: {
