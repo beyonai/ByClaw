@@ -117,6 +117,8 @@ export default {
     'Current is third-party knowledge base mode, knowledge base operations are temporarily not supported',
   'resource.personal': 'Personal',
   'resource.enterprise': 'Enterprise',
+  'resource.skillMarketplace': 'Skill Marketplace',
+  'resource.marketplaceFullscreen': 'View skill marketplace in fullscreen',
   'resource.type': 'Type',
   'resource.permission': 'Permission',
   'resource.selectOrgScope': 'Select organization scope',

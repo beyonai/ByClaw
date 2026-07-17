@@ -177,6 +177,22 @@ public class SsResourceService {
     }
 
     /**
+     * 按系统来源、资源类型和资源编码查询资源。
+     *
+     * @param systemCode 系统来源
+     * @param resourceBizType 资源业务类型
+     * @param resourceCode 资源编码
+     * @return 匹配的资源，不存在时返回 null
+     */
+    public SsResource findByImportIdentity(String systemCode, String resourceBizType, String resourceCode) {
+        QueryWrapper<SsResource> queryWrapper = new QueryWrapper<>();
+        queryWrapper.eq("system_code", systemCode)
+            .eq("resource_biz_type", resourceBizType)
+            .eq("resource_code", resourceCode);
+        return ssResourceMapper.selectOne(queryWrapper);
+    }
+
+    /**
      * 批量按主键查询资源列表
      *
      * @param resourceIds 资源主键集合，空集合时返回空列表
