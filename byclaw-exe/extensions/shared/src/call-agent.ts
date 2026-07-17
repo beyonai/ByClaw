@@ -246,7 +246,7 @@ export async function executeViaCallAgent(
         taskGroupId: input.taskGroupId,
         metadata,
         langfuseParentObservationId: input.langfuseParentObservationId,
-        routePolicy: RoutePolicy.WAKE_AND_WAIT,
+        routePolicy: RoutePolicy.WAKE_AND_QUEUE,
       },
     );
 

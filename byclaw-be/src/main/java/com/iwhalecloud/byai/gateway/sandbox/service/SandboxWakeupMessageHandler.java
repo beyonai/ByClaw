@@ -22,6 +22,8 @@ public class SandboxWakeupMessageHandler {
 
     static final String WAKE_AND_WAIT_POLICY = "WAKE_AND_WAIT";
 
+    static final String WAKE_AND_QUEUE_POLICY = "WAKE_AND_QUEUE";
+
     private final SandboxService sandboxService;
     private final SandboxUserContextRunner sandboxUserContextRunner;
 
@@ -39,8 +41,8 @@ public class SandboxWakeupMessageHandler {
         }
 
         String policy = message.getString("policy");
-        if (!WAKE_AND_WAIT_POLICY.equals(policy)) {
-            LOGGER.debug("忽略非 WAKE_AND_WAIT 沙箱唤醒消息，policy={}", policy);
+        if (!WAKE_AND_WAIT_POLICY.equals(policy) && !WAKE_AND_QUEUE_POLICY.equals(policy)) {
+            LOGGER.debug("忽略非 WAKE_AND_WAIT 或 WAKE_AND_QUEUE 沙箱唤醒消息，policy={}", policy);
             return false;
         }
 
