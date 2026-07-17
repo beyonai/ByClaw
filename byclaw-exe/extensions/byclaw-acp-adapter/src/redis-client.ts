@@ -4,9 +4,11 @@ import {
   type RedisClient as IoredisClient,
 } from "../../shared/src/redis-compat.js";
 import type { RedisConnectionConfig } from "./types.js";
+import { createRedisConnectGate } from "./redis-connect-gate.js";
 
 export class RedisClient {
   private readonly client: IoredisClient;
+  private readonly ensureConnected: () => Promise<void>;
 
   constructor(private readonly config: RedisConnectionConfig) {
     this.client = createRedisClient(config, {
@@ -16,13 +18,16 @@ export class RedisClient {
       retryStrategy: () => null,
       maxRetriesPerRequest: 2,
     });
+    this.ensureConnected = createRedisConnectGate({
+      isReady: () => (this.client as { status?: string }).status === "ready",
+      connect: async () => {
+        await this.client.connect();
+      },
+    });
   }
 
   async connect(): Promise<void> {
-    if ((this.client as { status?: string }).status === "ready") {
-      return;
-    }
-    await this.client.connect();
+    await this.ensureConnected();
   }
 
   async get(key: string): Promise<string | null> {
