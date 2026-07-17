@@ -632,11 +632,6 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
     openAddSourceModal();
   };
 
-  const openManualRequirementModal = () => {
-    setManualRequirementForm(getDefaultManualRequirementForm());
-    setManualRequirementOpen(true);
-  };
-
   const handleRefreshRequirements = useCallback(async () => {
     if (!showRequirementsTab) return;
     try {
@@ -1050,7 +1045,13 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
                   )}
                 </div>
               )}
-              <div className={styles.detailSourceActions}>
+              <div
+                className={
+                  options.panel
+                    ? `${styles.detailSourceActions} ${styles.detailSourceActionsPanel}`
+                    : styles.detailSourceActions
+                }
+              >
                 <Tag icon={<ClockCircleOutlined />} bordered={false}>
                   {source.cronExpr || '手动'}
                 </Tag>
@@ -1059,30 +1060,33 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
                     上次: {dayjs(source.lastScanTime).format('MM-DD HH:mm')}
                   </span>
                 )}
-                <Button
-                  type="link"
-                  size="small"
-                  icon={<ReloadOutlined spin={scanningId === source.sourceId} />}
-                  loading={scanningId === source.sourceId}
-                  onClick={() => handleTriggerScan(source.sourceId)}
-                >
-                  扫描
-                </Button>
-                <Button type="link" size="small" icon={<FileTextOutlined />} onClick={() => handleViewLogs(source)}>
-                  日志
-                </Button>
-                <Button type="link" size="small" icon={<EditOutlined />} onClick={() => handleEditSource(source)}>
-                  编辑
-                </Button>
-                <Button
-                  type="link"
-                  size="small"
-                  danger
-                  icon={<DeleteOutlined />}
-                  onClick={() => handleDeleteSource(source)}
-                >
-                  删除
-                </Button>
+                {/* 大面板内从扫描按钮开始换行，避免渠道信息和操作挤在同一行。 */}
+                <div className={styles.detailSourceButtonGroup}>
+                  <Button
+                    type="link"
+                    size="small"
+                    icon={<ReloadOutlined spin={scanningId === source.sourceId} />}
+                    loading={scanningId === source.sourceId}
+                    onClick={() => handleTriggerScan(source.sourceId)}
+                  >
+                    扫描
+                  </Button>
+                  <Button type="link" size="small" icon={<FileTextOutlined />} onClick={() => handleViewLogs(source)}>
+                    日志
+                  </Button>
+                  <Button type="link" size="small" icon={<EditOutlined />} onClick={() => handleEditSource(source)}>
+                    编辑
+                  </Button>
+                  <Button
+                    type="link"
+                    size="small"
+                    danger
+                    icon={<DeleteOutlined />}
+                    onClick={() => handleDeleteSource(source)}
+                  >
+                    删除
+                  </Button>
+                </div>
               </div>
             </div>
           ))}
@@ -1173,17 +1177,21 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
       <div className={styles.detailSectionHeader}>
         <span>{requirements.length} 个需求</span>
         <Space size={6}>
-          <Tooltip title="人工新增" placement="top">
+          {/* 人工新增需求接口未接入，等后端接口可用后再恢复入口。 */}
+          {/* <Tooltip title="人工新增" placement="top">
             <Button size="small" icon={<PlusOutlined />} onClick={openManualRequirementModal} />
-          </Tooltip>
+          </Tooltip> */}
           <Tooltip title="刷新" placement="top">
             <Button
               size="small"
+              className={styles.detailHeaderActionButton}
               icon={<ReloadOutlined />}
               loading={requirementsTabLoading}
               disabled={requirementsTabLoading}
               onClick={handleRefreshRequirements}
-            />
+            >
+              刷新
+            </Button>
           </Tooltip>
         </Space>
       </div>
@@ -1266,7 +1274,14 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
                     </div>
                     <div className={styles.detailRequirementDetailText}>
                       <em>需求内容</em>
-                      <p>{detailText}</p>
+                      {/* 展开卡片内正文会截断，鼠标经过时展示完整需求内容。 */}
+                      <Tooltip
+                        title={detailText}
+                        placement="top"
+                        overlayInnerStyle={{ maxWidth: 360, whiteSpace: 'pre-wrap' }}
+                      >
+                        <p>{detailText}</p>
+                      </Tooltip>
                     </div>
                     {(item.originId || item.originUrl || item.action) && (
                       <div className={styles.detailRequirementExtra}>
@@ -1377,8 +1392,14 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
     <div className={styles.detailTaskPanel}>
       {tasks.length > 0 && (
         <div className={styles.detailTaskHeader}>
-          <Button icon={<AppstoreOutlined />} onClick={() => setTaskKanbanOpen(true)}>
-            任务视图
+          <span>{tasks.length} 个任务</span>
+          <Button
+            size="small"
+            className={styles.detailHeaderActionButton}
+            icon={<AppstoreOutlined />}
+            onClick={() => setTaskKanbanOpen(true)}
+          >
+            视图
           </Button>
         </div>
       )}

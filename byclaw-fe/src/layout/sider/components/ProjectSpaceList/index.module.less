@@ -894,6 +894,19 @@
   }
 }
 
+.detailSourceButtonGroup {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.detailSourceActionsPanel {
+  .detailSourceButtonGroup {
+    flex-basis: 100%;
+  }
+}
+
 .detailSourceAuth {
   padding: 0 12px 8px;
 
@@ -1069,12 +1082,24 @@
 .detailSectionHeader {
   margin-top: 10px;
   margin-bottom: 10px;
+  padding-left: 4px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   color: #526075;
   font-size: 13px;
   font-weight: 400;
+}
+
+.detailHeaderActionButton {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #526075;
+  font-size: 13px;
 }
 
 .detailRequirementList {
@@ -1283,9 +1308,10 @@
 
 .detailTaskHeader {
   margin: 10px 0 12px;
+  padding-left: 4px;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
   gap: 10px;
   color: #526075;
   font-size: 13px;

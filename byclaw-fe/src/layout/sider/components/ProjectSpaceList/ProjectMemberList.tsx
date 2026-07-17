@@ -6,6 +6,7 @@ import AddAuthModal from '@/pages/manager/components/AuthListDrawer/AddAuthModal
 import { addProjectMember, bindMemberAgent, listProjectMembers, removeProjectMember } from '@/service/devloop';
 import { POST } from '@/service/common/request';
 import { getAgentChatAvatar } from '@/utils/agent';
+import styles from './index.module.less';
 
 interface ProjectMemberListProps {
   projectId?: number;
@@ -225,9 +226,14 @@ const ProjectMemberList: React.FC<ProjectMemberListProps> = ({ projectId, creato
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+      <div className={styles.detailSectionHeader}>
         <span>{members.length} 个成员</span>
-        <Button icon={<PlusOutlined />} onClick={() => setShowAuthAddModal(true)}>
+        <Button
+          size="small"
+          className={styles.detailHeaderActionButton}
+          icon={<PlusOutlined />}
+          onClick={() => setShowAuthAddModal(true)}
+        >
           添加
         </Button>
       </div>
