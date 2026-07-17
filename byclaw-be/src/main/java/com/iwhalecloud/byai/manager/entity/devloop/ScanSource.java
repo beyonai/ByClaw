@@ -28,6 +28,9 @@ public class ScanSource {
 
     private String enabled;
 
+    /** 关联目标仓库ID，扫来的需求据此确定开发仓库 */
+    private Long repoId;
+
     private Date lastScanTime;
 
     private String createBy;

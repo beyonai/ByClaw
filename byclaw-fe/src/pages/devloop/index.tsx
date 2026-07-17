@@ -16,6 +16,7 @@ import {
 import dayjs from 'dayjs';
 import {
   createProject,
+  getProject,
   listProjects,
   listScanSources,
   createScanSource,
@@ -34,6 +35,8 @@ import {
   listTasks,
   checkDwsAuthStatus,
   startDwsDeviceAuth,
+  createProjectRepo,
+  deleteProjectRepo,
 } from '@/service/devloop';
 import styles from './index.module.less';
 import TaskList from './TaskList';
@@ -55,7 +58,15 @@ interface ScanSourceItem {
   config: string;
   cronExpr: string;
   enabled: string;
+  repoId?: number | null;
   lastScanTime: string | null;
+}
+
+interface RepoOption {
+  repoId: number;
+  repoFullName: string;
+  repoUrl?: string;
+  defaultBranch?: string;
 }
 
 interface ScanLogEntry {
@@ -96,6 +107,7 @@ const NeedCollect: React.FC = () => {
 
   const [sources, setSources] = useState<ScanSourceItem[]>([]);
   const [sourcesLoading, setSourcesLoading] = useState(false);
+  const [repos, setRepos] = useState<RepoOption[]>([]);
   const [requirements, setRequirements] = useState<RequirementItem[]>([]);
   const [lastLog, setLastLog] = useState<ScanLogEntry | null>(null);
   const [scanningId, setScanningId] = useState<number | null>(null);
@@ -115,12 +127,13 @@ const NeedCollect: React.FC = () => {
     type: 'dingtalk' as SourceType,
     name: '',
     chatId: '',
+    chatName: '',
     keywords: '',
     lookbackHours: '24',
-    repo: 'beyonai/byclaw-test',
     labels: '',
     pat: '',
     cron: '*/30 * * * *',
+    repoId: undefined as number | undefined,
   });
 
   const [hasPatSaved, setHasPatSaved] = useState(false);
@@ -142,6 +155,11 @@ const NeedCollect: React.FC = () => {
   const [logList, setLogList] = useState<any[]>([]);
   const [logLoading, setLogLoading] = useState(false);
 
+  // 项目仓库维护弹窗
+  const [showRepoModal, setShowRepoModal] = useState(false);
+  const [repoForm, setRepoForm] = useState({ repoFullName: '', repoUrl: '', defaultBranch: 'main' });
+  const [repoSaving, setRepoSaving] = useState(false);
+
   // --- 数据加载 ---
   const fetchProjects = useCallback(async () => {
     setProjectLoading(true);
@@ -162,6 +180,13 @@ const NeedCollect: React.FC = () => {
     } finally {
       setSourcesLoading(false);
     }
+  }, [currentProject]);
+
+  // 加载项目仓库列表，供扫描源关联目标仓库下拉使用
+  const fetchRepos = useCallback(async () => {
+    if (!currentProject) return;
+    const res = await getProject(currentProject.projectId);
+    setRepos(res?.repos || []);
   }, [currentProject]);
 
   const fetchRequirements = useCallback(async () => {
@@ -211,6 +236,7 @@ const NeedCollect: React.FC = () => {
       fetchSources();
       fetchRequirements();
       fetchTasks();
+      fetchRepos();
     }
   }, [currentProject, view]);
   useEffect(() => {
@@ -321,28 +347,35 @@ const NeedCollect: React.FC = () => {
       return;
     }
     if (!currentProject) return;
+    // 所有源都必须关联仓库：钉钉/GitHub 扫来的需求都据此确定开发仓库
+    if (!addForm.repoId) {
+      message.error('请选择关联仓库');
+      return;
+    }
     let config = '';
     if (addForm.type === 'dingtalk') {
       if (!addForm.chatId) {
         message.error('请选择钉钉群');
         return;
       }
+      // 群名优先取当前下拉选中项，兜底用表单已存值，避免 onChange 未触发时丢失
+      const selectedGroup = groupOptions.find((g) => g.value === addForm.chatId);
+      const chatName = selectedGroup?.label || addForm.chatName || '';
       config = JSON.stringify({
         groupId: addForm.chatId,
+        // 存群名用于编辑回填与列表展示，扫描仍以 groupId 为准
+        chatName,
         keyword: addForm.keywords || '需求',
         lookbackHours: parseInt(addForm.lookbackHours) || 24,
         corpId: dwsAuthDetail?.corpId || '',
       });
     } else {
-      if (!addForm.repo.trim()) {
-        message.error('请填写仓库');
-        return;
-      }
       if (!hasPatSaved && !addForm.pat.trim()) {
         message.error('请填写 GitHub PAT');
         return;
       }
-      config = JSON.stringify({ repo: addForm.repo.trim(), labels: addForm.labels, state: 'open' });
+      // GitHub 扫描仓库改由关联仓库(repoId)决定，config 仅保留标签等过滤项
+      config = JSON.stringify({ labels: addForm.labels, state: 'open' });
     }
     try {
       if (addForm.type === 'github_issue' && addForm.pat.trim()) {
@@ -355,6 +388,7 @@ const NeedCollect: React.FC = () => {
           sourceName: addForm.name.trim(),
           config,
           cronExpr: addForm.cron,
+          repoId: addForm.repoId,
         });
         message.success('收集源已更新');
       } else {
@@ -365,6 +399,7 @@ const NeedCollect: React.FC = () => {
           config,
           cronExpr: addForm.cron,
           enabled: '1',
+          repoId: addForm.repoId,
         });
         message.success('收集源添加成功');
       }
@@ -387,13 +422,18 @@ const NeedCollect: React.FC = () => {
       type: source.sourceType as SourceType,
       name: source.sourceName,
       chatId: cfg.groupId || '',
+      chatName: cfg.chatName || '',
       keywords: cfg.keyword || '',
       lookbackHours: cfg.lookbackHours ? String(cfg.lookbackHours) : '24',
-      repo: cfg.repo || '',
       labels: cfg.labels || '',
       pat: '',
       cron: source.cronExpr || '*/30 * * * *',
+      repoId: source.repoId ?? undefined,
     });
+    // 用已存群名 seed 下拉选项，编辑时无需重新搜索即可显示群名而非 id
+    if (cfg.groupId) {
+      setGroupOptions([{ value: cfg.groupId, label: cfg.chatName || cfg.groupId }]);
+    }
     setShowAddSourceModal(true);
   };
 
@@ -408,6 +448,58 @@ const NeedCollect: React.FC = () => {
         message.success('已删除');
         fetchSources();
         fetchRequirements();
+      },
+    });
+  };
+
+  // --- 项目仓库维护 ---
+  const handleCreateRepo = async () => {
+    if (!currentProject) return;
+    if (!repoForm.repoFullName.trim()) {
+      message.error('请填写仓库全名 owner/repo');
+      return;
+    }
+    setRepoSaving(true);
+    try {
+      const res = await createProjectRepo({
+        projectId: currentProject.projectId,
+        repoFullName: repoForm.repoFullName.trim(),
+        repoUrl: repoForm.repoUrl.trim() || undefined,
+        defaultBranch: repoForm.defaultBranch.trim() || undefined,
+      });
+      if (!res?.repoId) {
+        message.error('新增仓库失败');
+        return;
+      }
+      message.success('仓库已新增');
+      setRepoForm({ repoFullName: '', repoUrl: '', defaultBranch: 'main' });
+      await fetchRepos();
+      // 新增后自动选中，省去用户再次点选
+      setAddForm((prev) => ({ ...prev, repoId: res.repoId }));
+    } catch {
+      message.error('新增仓库失败');
+    } finally {
+      setRepoSaving(false);
+    }
+  };
+
+  const handleDeleteRepo = (repo: RepoOption) => {
+    Modal.confirm({
+      title: '确认删除',
+      content: `确定删除仓库「${repo.repoFullName}」吗？`,
+      okText: '删除',
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        try {
+          await deleteProjectRepo(repo.repoId);
+          message.success('仓库已删除');
+          if (addForm.repoId === repo.repoId) {
+            setAddForm((prev) => ({ ...prev, repoId: undefined }));
+          }
+          await fetchRepos();
+        } catch (e: any) {
+          message.error(e?.message || '删除失败，可能已被扫描源关联');
+        }
       },
     });
   };
@@ -621,6 +713,32 @@ const NeedCollect: React.FC = () => {
           onChange={(e) => setAddForm({ ...addForm, name: e.target.value })}
         />
       </div>
+      <div className={styles.formField}>
+        <label>关联仓库</label>
+        <Space.Compact style={{ width: '100%' }}>
+          <Select
+            style={{ flex: 1 }}
+            value={addForm.repoId}
+            onChange={(v) => setAddForm({ ...addForm, repoId: v })}
+            placeholder="选择该源扫来的需求要开发的仓库"
+            allowClear
+            options={repos.map((r) => ({
+              value: r.repoId,
+              label: r.repoFullName || r.repoUrl || String(r.repoId),
+            }))}
+            notFoundContent={repos.length === 0 ? '项目暂无仓库，点击右侧新增' : undefined}
+          />
+          <Button
+            icon={<PlusOutlined />}
+            onClick={() => {
+              setRepoForm({ repoFullName: '', repoUrl: '', defaultBranch: 'main' });
+              setShowRepoModal(true);
+            }}
+          >
+            新增
+          </Button>
+        </Space.Compact>
+      </div>
       {addForm.type === 'dingtalk' && (
         <>
           {!dwsAuthed && (
@@ -663,7 +781,10 @@ const NeedCollect: React.FC = () => {
               placeholder="输入群名搜索"
               value={addForm.chatId || undefined}
               onSearch={handleGroupSearch}
-              onChange={(v) => setAddForm({ ...addForm, chatId: v })}
+              onChange={(v, option) => {
+                const label = Array.isArray(option) ? '' : (option?.label as string) || '';
+                setAddForm({ ...addForm, chatId: v, chatName: label });
+              }}
               options={groupOptions}
               loading={groupSearching}
               notFoundContent={groupSearching ? <Spin size="small" /> : '输入至少2个字搜索'}
@@ -707,14 +828,6 @@ const NeedCollect: React.FC = () => {
             </div>
           )}
           <div className={styles.formField}>
-            <label>仓库</label>
-            <Input
-              placeholder="owner/repo"
-              value={addForm.repo}
-              onChange={(e) => setAddForm({ ...addForm, repo: e.target.value })}
-            />
-          </div>
-          <div className={styles.formField}>
             <label>标签过滤（可选）</label>
             <Input
               placeholder="如 bug,feature"
@@ -731,15 +844,98 @@ const NeedCollect: React.FC = () => {
     </Modal>
   );
 
+  const renderRepoModal = () => (
+    <Modal
+      title="维护项目仓库"
+      open={showRepoModal}
+      onCancel={() => setShowRepoModal(false)}
+      footer={<Button onClick={() => setShowRepoModal(false)}>关闭</Button>}
+      width={560}
+    >
+      <div className={styles.formField}>
+        <label>已有仓库</label>
+        {repos.length === 0 ? (
+          <Empty description="暂无仓库" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+        ) : (
+          <List
+            size="small"
+            bordered
+            dataSource={repos}
+            renderItem={(r) => (
+              <List.Item
+                actions={[
+                  <Button
+                    key="del"
+                    type="link"
+                    danger
+                    size="small"
+                    icon={<DeleteOutlined />}
+                    onClick={() => handleDeleteRepo(r)}
+                  >
+                    删除
+                  </Button>,
+                ]}
+              >
+                <List.Item.Meta
+                  title={r.repoFullName}
+                  description={
+                    <span style={{ color: '#999' }}>
+                      {r.repoUrl || '-'}
+                      {r.defaultBranch ? ` · ${r.defaultBranch}` : ''}
+                    </span>
+                  }
+                />
+              </List.Item>
+            )}
+          />
+        )}
+      </div>
+      <div style={{ borderTop: '1px solid #f0f0f0', margin: '16px 0 12px' }} />
+      <div className={styles.formField}>
+        <label>仓库全名 owner/repo</label>
+        <Input
+          placeholder="如 beyonai/byclaw-test"
+          value={repoForm.repoFullName}
+          onChange={(e) => setRepoForm({ ...repoForm, repoFullName: e.target.value })}
+        />
+      </div>
+      <div className={styles.formField}>
+        <label>仓库地址（可选）</label>
+        <Input
+          placeholder="如 https://github.com/beyonai/byclaw-test"
+          value={repoForm.repoUrl}
+          onChange={(e) => setRepoForm({ ...repoForm, repoUrl: e.target.value })}
+        />
+      </div>
+      <div className={styles.formField}>
+        <label>默认分支</label>
+        <Input
+          placeholder="main"
+          value={repoForm.defaultBranch}
+          onChange={(e) => setRepoForm({ ...repoForm, defaultBranch: e.target.value })}
+        />
+      </div>
+      <Button type="primary" icon={<PlusOutlined />} loading={repoSaving} onClick={handleCreateRepo}>
+        新增仓库
+      </Button>
+    </Modal>
+  );
+
   const formatConfig = (type: string, config: string) => {
     try {
       const c = JSON.parse(config);
-      if (type === 'dingtalk') return c.chatName || c.chatId || '-';
-      if (type === 'github') return c.repo || '-';
+      if (type === 'dingtalk') return c.chatName || c.groupId || '-';
+      if (type === 'github_issue') return c.labels ? `标签: ${c.labels}` : '全部 Issue';
       return '-';
     } catch {
       return '-';
     }
+  };
+
+  const repoLabel = (repoId?: number | null) => {
+    if (!repoId) return null;
+    const r = repos.find((x) => x.repoId === repoId);
+    return r ? r.repoFullName || r.repoUrl || String(r.repoId) : null;
   };
 
   // ========== 项目列表视图 ==========
@@ -851,13 +1047,15 @@ const NeedCollect: React.FC = () => {
                 type: 'dingtalk',
                 name: '',
                 chatId: '',
+                chatName: '',
                 keywords: '',
                 lookbackHours: '24',
-                repo: '',
                 labels: '',
                 pat: '',
                 cron: '*/30 * * * *',
+                repoId: undefined,
               });
+              setGroupOptions([]);
               setShowAddSourceModal(true);
             }}
           />
@@ -904,6 +1102,13 @@ const NeedCollect: React.FC = () => {
                       />
                     </div>
                     <div className={styles.cardConfig}>{formatConfig(source.sourceType, source.config)}</div>
+                    {repoLabel(source.repoId) && (
+                      <div style={{ marginBottom: 4 }}>
+                        <Tag icon={<GithubOutlined />} bordered={false} color="blue">
+                          {repoLabel(source.repoId)}
+                        </Tag>
+                      </div>
+                    )}
                     {source.sourceType === 'dingtalk' && (
                       <div style={{ marginBottom: 4 }}>
                         {dwsAuthed ? (
@@ -1035,6 +1240,7 @@ const NeedCollect: React.FC = () => {
 
       {renderAddSourceModal()}
       {renderProjectModal()}
+      {renderRepoModal()}
 
       {/* 扫描日志抽屉 */}
       <Drawer

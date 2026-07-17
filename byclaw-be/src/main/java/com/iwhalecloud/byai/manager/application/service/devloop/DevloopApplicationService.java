@@ -36,10 +36,9 @@ import com.iwhalecloud.byai.manager.qo.devloop.ProjectQo;
 import com.iwhalecloud.byai.manager.qo.devloop.ProjectSessionQo;
 import com.github.pagehelper.Page;
 import com.github.pagehelper.PageHelper;
-import com.iwhalecloud.byai.common.feign.response.sandbox.SandboxLaunchData;
-import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
 import com.iwhalecloud.byai.state.domain.chat.service.AssistantChatService;
+import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -110,13 +109,13 @@ public class DevloopApplicationService {
     private ProjectSessionService projectSessionService;
 
     @Autowired
-    private SandboxService sandboxService;
-
-    @Autowired
     private SequenceService sequenceService;
 
     @Autowired
     private AssistantChatService assistantChatService;
+
+    @Autowired
+    private ByaiSystemConfigService byaiSystemConfigService;
 
     /** 创建项目，可同时关联代码仓库 */
     @Transactional(rollbackFor = Exception.class)
@@ -328,20 +327,56 @@ public class DevloopApplicationService {
             return;
         }
         for (ProjectRepoDTO repoDto : repos) {
-            if (repoDto == null || repoDto.getRepoFullName() == null || repoDto.getRepoFullName().trim().isEmpty()) {
-                continue;
-            }
-            String defaultBranch = repoDto.getDefaultBranch() != null ? repoDto.getDefaultBranch().trim() : "";
-            ProjectRepo repo = new ProjectRepo();
-            repo.setRepoId(sequenceService.nextVal());
-            repo.setProjectId(projectId);
-            repo.setRepoFullName(repoDto.getRepoFullName().trim());
-            repo.setRepoUrl(repoDto.getRepoUrl() != null ? repoDto.getRepoUrl().trim() : null);
-            repo.setDefaultBranch(defaultBranch.isEmpty() ? "main" : defaultBranch);
-            repo.setCreateBy(String.valueOf(CurrentUserHolder.getCurrentUserId()));
-            repo.setCreateTime(new Date());
-            projectRepoMapper.insert(repo);
+            insertProjectRepo(projectId, repoDto);
         }
+    }
+
+    /** 插入单条项目仓库；全名为空则跳过。供批量保存与单独新增复用。 */
+    private ProjectRepo insertProjectRepo(Long projectId, ProjectRepoDTO repoDto) {
+        if (repoDto == null || repoDto.getRepoFullName() == null || repoDto.getRepoFullName().trim().isEmpty()) {
+            return null;
+        }
+        String defaultBranch = repoDto.getDefaultBranch() != null ? repoDto.getDefaultBranch().trim() : "";
+        ProjectRepo repo = new ProjectRepo();
+        repo.setRepoId(sequenceService.nextVal());
+        repo.setProjectId(projectId);
+        repo.setRepoFullName(repoDto.getRepoFullName().trim());
+        repo.setRepoUrl(repoDto.getRepoUrl() != null ? repoDto.getRepoUrl().trim() : null);
+        repo.setDefaultBranch(defaultBranch.isEmpty() ? "main" : defaultBranch);
+        repo.setCreateBy(String.valueOf(CurrentUserHolder.getCurrentUserId()));
+        repo.setCreateTime(new Date());
+        projectRepoMapper.insert(repo);
+        return repo;
+    }
+
+    /** 新增单个项目仓库，供扫描源关联仓库时即席补充。 */
+    public ResponseUtil<Map<String, Object>> createProjectRepo(ProjectRepoDTO dto) {
+        if (dto == null || dto.getProjectId() == null) {
+            return ResponseUtil.failRes("projectId不能为空");
+        }
+        if (dto.getRepoFullName() == null || dto.getRepoFullName().trim().isEmpty()) {
+            return ResponseUtil.failRes("仓库全名不能为空");
+        }
+        ProjectRepo repo = insertProjectRepo(dto.getProjectId(), dto);
+        Map<String, Object> result = new HashMap<>();
+        result.put("repoId", repo.getRepoId());
+        result.put("repoFullName", repo.getRepoFullName());
+        result.put("repoUrl", repo.getRepoUrl());
+        result.put("defaultBranch", repo.getDefaultBranch());
+        return ResponseUtil.successResponse(result);
+    }
+
+    /** 删除项目仓库；已被扫描源关联时拒绝删除，避免任务丢失开发仓库。 */
+    public ResponseUtil<Void> deleteProjectRepo(Long repoId) {
+        if (repoId == null) {
+            return ResponseUtil.failRes("repoId不能为空");
+        }
+        Long boundCount = scanSourceService.countByRepoId(repoId);
+        if (boundCount != null && boundCount > 0) {
+            return ResponseUtil.failRes("该仓库已被 " + boundCount + " 个扫描源关联，请先解除关联再删除");
+        }
+        projectRepoMapper.deleteById(repoId);
+        return ResponseUtil.successResponse(null);
     }
 
     private List<Map<String, Object>> listProjectShareTargets(Long projectId) {
@@ -515,6 +550,7 @@ public class DevloopApplicationService {
         source.setConfig(dto.getConfig());
         source.setCronExpr(dto.getCronExpr());
         source.setEnabled(dto.getEnabled() != null ? dto.getEnabled() : "1");
+        source.setRepoId(dto.getRepoId());
         source.setCreateBy(String.valueOf(CurrentUserHolder.getCurrentUserId()));
         ScanSource created = scanSourceService.create(source);
 
@@ -530,6 +566,7 @@ public class DevloopApplicationService {
         source.setSourceName(dto.getSourceName());
         source.setConfig(dto.getConfig());
         source.setCronExpr(dto.getCronExpr());
+        source.setRepoId(dto.getRepoId());
         source.setUpdateBy(String.valueOf(CurrentUserHolder.getCurrentUserId()));
         scanSourceService.update(source);
         return ResponseUtil.successResponse(null);
@@ -553,6 +590,7 @@ public class DevloopApplicationService {
             map.put("config", s.getConfig());
             map.put("cronExpr", s.getCronExpr());
             map.put("enabled", s.getEnabled());
+            map.put("repoId", s.getRepoId());
             map.put("lastScanTime", s.getLastScanTime());
             list.add(map);
         }
@@ -783,20 +821,30 @@ public class DevloopApplicationService {
             return ResponseUtil.failRes("任务标题不能为空");
         }
 
+        // 加载需求项：提供需求详情与任务类型判定依据
+        ScanLogItem sourceItem = sourceItemId != null ? scanLogItemMapper.selectById(sourceItemId) : null;
+        String description = sourceItem != null && sourceItem.getContent() != null && !sourceItem.getContent().isEmpty()
+            ? sourceItem.getContent() : title;
+        String taskType = detectTaskType(sourceItem, title);
+
+        // 解析目标仓库：需求项 -> 扫描源.repoId -> 仓库；手动任务取项目首个仓库兜底
+        ProjectRepo repo = resolveTaskRepo(projectId, sourceItem);
+        if (repo == null) {
+            return ResponseUtil.failRes("未找到目标仓库，请为扫描源关联仓库或在项目下添加仓库");
+        }
+
+        // 先建任务拿 taskId（分支名依赖 taskId），再回填分支名
         Task task = new Task();
         task.setProjectId(projectId);
         task.setSourceItemId(sourceItemId);
         task.setTitle(title);
         task.setCreateBy(currentUserId);
+        taskService.create(task);
 
-        // 构造聊天内容：优先用需求原文，fallback 用标题
-        String chatContent = title;
-        if (sourceItemId != null) {
-            ScanLogItem sourceItem = scanLogItemMapper.selectById(sourceItemId);
-            if (sourceItem != null && sourceItem.getContent() != null && !sourceItem.getContent().isEmpty()) {
-                chatContent = sourceItem.getContent();
-            }
-        }
+        String branchName = buildBranchName(taskType, task.getTaskId());
+        Project project = projectMapper.selectById(projectId);
+        String projectName = project != null ? project.getProjectName() : "";
+        String chatContent = buildTaskPrompt(projectName, repo, branchName, taskType, title, description);
 
         // 同步调用 assistantChatService，sessionId=null 让 chat 服务内部创建 session
         // chat 完成后 chatDto.getSessionId() 即为新创建的 sessionId，回写到任务上供“进入会话”跳转使用
@@ -813,9 +861,11 @@ public class DevloopApplicationService {
             return ResponseUtil.failRes("任务创建失败：LLM对话异常 - " + e.getMessage());
         }
 
+        // 会话建成后回写 sessionId 和分支名
         Long sessionId = chatDto.getSessionId();
         task.setSessionId(sessionId);
-        taskService.create(task);
+        task.setBranchName(branchName);
+        taskService.update(task);
 
         if (sourceItemId != null) {
             ScanLogItem item = new ScanLogItem();
@@ -824,33 +874,90 @@ public class DevloopApplicationService {
             scanLogItemMapper.updateById(item);
         }
 
-        // 拉取沙箱
-        String userCode = member.getUserCode();
-        String sandboxEndpoint = null;
-        String sandboxId = null;
-        if (userCode != null) {
-            try {
-                SandboxLaunchData launchData = sandboxService.launchSandboxWithServiceKey(userCode, null);
-                if (launchData != null) {
-                    sandboxEndpoint = launchData.getEndpoint();
-                    sandboxId = launchData.getSandboxId();
-                }
-            }
-            catch (Exception e) {
-                log.warn("拉取沙箱失败，任务仍创建: {}", e.getMessage());
-            }
-        }
-
         Map<String, Object> result = new HashMap<>();
         result.put("taskId", task.getTaskId());
         result.put("agentId", agentId);
         result.put("sessionId", sessionId);
-        result.put("userCode", userCode);
+        result.put("branchName", branchName);
         result.put("title", title);
-        result.put("sandboxEndpoint", sandboxEndpoint);
-        result.put("sandboxId", sandboxId);
         return ResponseUtil.successResponse(result);
     }
+
+    /** 判定任务类型：需求项含 bug/缺陷 标记归为 bug，否则为需求 */
+    private String detectTaskType(ScanLogItem item, String title) {
+        String haystack = ((item != null && item.getTitle() != null ? item.getTitle() : "")
+            + " " + (item != null && item.getContent() != null ? item.getContent() : "")
+            + " " + (item != null && item.getAction() != null ? item.getAction() : "")
+            + " " + (title != null ? title : "")).toLowerCase();
+        if (haystack.contains("bug") || haystack.contains("缺陷") || haystack.contains("修复")) {
+            return "bug";
+        }
+        return "需求";
+    }
+
+    /** 分支名策略：bug -> fix/task-{id}，其余 -> feat/task-{id} */
+    private String buildBranchName(String taskType, Long taskId) {
+        String prefix = "bug".equals(taskType) ? "fix" : "feat";
+        return prefix + "/task-" + taskId;
+    }
+
+    /**
+     * 解析任务目标仓库：需求项 -> 扫描源.repoId -> 仓库；
+     * 手动任务或扫描源未绑定仓库时，取项目首个仓库兜底。
+     */
+    private ProjectRepo resolveTaskRepo(Long projectId, ScanLogItem item) {
+        if (item != null && item.getSourceId() != null) {
+            ScanSource source = scanSourceService.findById(item.getSourceId());
+            if (source != null && source.getRepoId() != null) {
+                ProjectRepo repo = projectRepoMapper.selectById(source.getRepoId());
+                if (repo != null) {
+                    return repo;
+                }
+            }
+        }
+        List<ProjectRepo> repos = projectRepoMapper.selectList(
+            new LambdaQueryWrapper<ProjectRepo>().eq(ProjectRepo::getProjectId, projectId));
+        return repos.isEmpty() ? null : repos.get(0);
+    }
+
+    /**
+     * 构造任务启动提示词：从 byai_system_config 取模板并填充占位符；
+     * 模板缺失时用内置兜底模板，保证任务始终可创建。
+     */
+    private String buildTaskPrompt(String projectName, ProjectRepo repo, String branchName,
+                                   String taskType, String title, String description) {
+        String template = byaiSystemConfigService.findByParamCode("DEVLOOP_TASK_START_PROMPT");
+        if (template == null || template.isEmpty()) {
+            template = DEFAULT_TASK_PROMPT_TEMPLATE;
+        }
+        String repoUrl = repo != null && repo.getRepoUrl() != null ? repo.getRepoUrl()
+            : (repo != null ? repo.getRepoFullName() : "");
+        return template
+            .replace("${projectName}", projectName != null ? projectName : "")
+            .replace("${repoUrl}", repoUrl)
+            .replace("${branchName}", branchName != null ? branchName : "")
+            .replace("${taskType}", taskType != null ? taskType : "")
+            .replace("${title}", title != null ? title : "")
+            .replace("${description}", description != null ? description : "");
+    }
+
+    /** 提示词模板兜底：DB 未配置 DEVLOOP_TASK_START_PROMPT 时使用 */
+    private static final String DEFAULT_TASK_PROMPT_TEMPLATE =
+        "你是 ByClaw 开发助手，负责在指定代码仓库中自主完成开发任务。\n\n"
+        + "## 任务信息\n"
+        + "- 项目：${projectName}\n"
+        + "- 代码仓库：${repoUrl}\n"
+        + "- 目标分支：${branchName}\n"
+        + "- 任务类型：${taskType}\n"
+        + "- 任务标题：${title}\n\n"
+        + "## 需求详情\n${description}\n\n"
+        + "## 工作要求\n"
+        + "1. 进入仓库 ${repoUrl}，基于最新代码切出并切换到分支 ${branchName}\n"
+        + "2. 仔细理解上述需求详情，定位需要修改的代码\n"
+        + "3. 完成开发后自测，确保编译通过、相关测试通过\n"
+        + "4. 提交改动到分支 ${branchName}，提交信息清晰说明本次改动\n"
+        + "5. 如需求描述不清或存在阻塞，明确说明遇到的问题\n\n"
+        + "请开始处理。";
 
     /** 查询项目任务列表 */
     public ResponseUtil<List<Map<String, Object>>> listTasks(Long projectId) {

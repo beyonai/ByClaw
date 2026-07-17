@@ -3,8 +3,10 @@ package com.iwhalecloud.byai.manager.domain.devloop.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.common.util.OkHttpUtil;
+import com.iwhalecloud.byai.manager.entity.devloop.ProjectRepo;
 import com.iwhalecloud.byai.manager.entity.devloop.ScanLogItem;
 import com.iwhalecloud.byai.manager.entity.devloop.ScanSource;
+import com.iwhalecloud.byai.manager.mapper.devloop.ProjectRepoMapper;
 import lombok.extern.slf4j.Slf4j;
 import okhttp3.Headers;
 import okhttp3.Response;
@@ -31,6 +33,9 @@ public class GitHubIssueScanService {
     @Autowired
     private ScanSourceService scanSourceService;
 
+    @Autowired
+    private ProjectRepoMapper projectRepoMapper;
+
     /** 执行一次 Issue 扫描，返回本次新增的条目列表 */
     public List<ScanLogItem> scan(ScanSource source, String pat) {
         List<ScanLogItem> items = new ArrayList<>();
@@ -38,13 +43,19 @@ public class GitHubIssueScanService {
 
         try {
             JsonNode configNode = MAPPER.readTree(source.getConfig());
-            String repo = configNode.path("repo").asText();
+            // 仓库以关联仓库(repoId)为准，config.repo 仅作历史数据兜底
+            String repo = resolveRepoFullName(source, configNode.path("repo").asText(""));
             String labels = configNode.path("labels").asText("");
             String state = configNode.path("state").asText("open");
 
             var scanLog = scanLogService.createLog(
                 source.getSourceId(), source.getProjectId());
             logId = scanLog.getLogId();
+
+            if (repo.isEmpty()) {
+                scanLogService.failLog(logId, "未关联目标仓库，无法扫描 GitHub Issue");
+                return items;
+            }
 
             String url = GITHUB_API_BASE + "/repos/" + repo + "/issues"
                 + "?state=" + state
@@ -106,5 +117,19 @@ public class GitHubIssueScanService {
             }
         }
         return items;
+    }
+
+    /**
+     * 解析扫描目标仓库全名 owner/repo。
+     * 优先取源关联仓库(repoId)的 repoFullName；缺失时回退历史 config.repo。
+     */
+    private String resolveRepoFullName(ScanSource source, String legacyRepo) {
+        if (source.getRepoId() != null) {
+            ProjectRepo repo = projectRepoMapper.selectById(source.getRepoId());
+            if (repo != null && repo.getRepoFullName() != null && !repo.getRepoFullName().trim().isEmpty()) {
+                return repo.getRepoFullName().trim();
+            }
+        }
+        return legacyRepo != null ? legacyRepo.trim() : "";
     }
 }
