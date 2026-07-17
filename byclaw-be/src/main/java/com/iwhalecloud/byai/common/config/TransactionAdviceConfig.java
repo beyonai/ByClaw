@@ -89,6 +89,9 @@ public class TransactionAdviceConfig {
         txMap.put("prewarmDueCronSandboxes", notSurpportedTx);
         txMap.put("callAsUser", notSurpportedTx);
         txMap.put("runAsUser", notSurpportedTx);
+        // 技能 ZIP 下载包含对象存储检查与 StreamingResponseBody 输出，不应占用数据库事务；
+        // 流式读取异常不能把请求事务标记为 rollback-only，避免最终提交阶段抛 UnexpectedRollbackException。
+        txMap.put("downloadSkillZip", notSurpportedTx);
         // 元提示词生成链路只读取上下文并调用外部大模型。大模型调用失败会在业务层降级处理，
         // 因此不要加入事务，避免内部异常被捕获后仍把外层事务标记为 rollback-only。
         txMap.put("generateV3", notSurpportedTx);
