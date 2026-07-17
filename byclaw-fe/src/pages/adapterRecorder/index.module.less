@@ -1,0 +1,569 @@
+// Workbench styles are scoped by the CSS Module root. AntD/beyond internals are
+// targeted with :global only below .workbench so they cannot leak to other pages.
+
+// ── 青色主题色板 ────────────────────────────────
+@cyan: #2dd4bf;
+@cyan-bright: #5eead4;
+@cyan-dim: #14b8a6;
+@glow: rgba(45, 212, 191, 0.5);
+@line: #1f3138;
+@line-cyan: rgba(45, 212, 191, 0.16);
+@bg: #080d10;
+@bg-soft: #0d1519;
+@panel: #101e23;
+@panel-2: #0b161a;
+@text: #e6f4f1;
+@text-dim: #8ba3a3;
+@text-faint: #809a96; // 调亮以满足对比度(~4.5:1),仍属 muted 次级文字
+
+// ── 全屏画布 ────────────────────────────────────
+.workbench {
+  --beyond-color-text: @text;
+  --beyond-color-text-heading: @text;
+  --beyond-color-text-secondary: @text-dim;
+  --beyond-color-text-tertiary: @text-faint;
+  --beyond-color-text-quaternary: fade(@text-faint, 70%);
+  --beyond-color-fill: rgba(45, 212, 191, 0.14);
+  --beyond-color-fill-secondary: rgba(45, 212, 191, 0.1);
+  --beyond-color-fill-tertiary: rgba(45, 212, 191, 0.07);
+  --beyond-color-fill-quaternary: rgba(45, 212, 191, 0.04);
+  --beyond-color-border: @line-cyan;
+  --beyond-color-border-secondary: rgba(45, 212, 191, 0.1);
+  --beyond-color-bg-container: @panel;
+  --beyond-color-bg-elevated: @panel;
+  --beyond-color-bg-layout: @bg;
+  height: 100%;
+  min-height: 100vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: clamp(20px, 4vw, 48px) clamp(16px, 5vw, 72px);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  color: @text;
+  background: radial-gradient(120% 60% at 50% -10%, rgba(45, 212, 191, 0.08), transparent 60%), @bg;
+
+  :global(.wb-statebar) {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  :global(.wb-chip) {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 5px 11px;
+    border: 1px solid @line;
+    border-radius: 999px;
+    background: @bg-soft;
+    font-size: 12px;
+    line-height: 1;
+    max-width: 320px;
+  }
+
+  :global(.wb-chip__k) {
+    color: @text-faint;
+  }
+
+  :global(.wb-chip__v) {
+    overflow: hidden;
+    color: @text;
+    font-family: 'Fira Code', monospace;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  :global(.wb-chip__v--muted) {
+    color: @text-faint;
+  }
+
+  :global(.wb-chip--state) {
+    border-color: @line-cyan;
+  }
+
+  :global(.wb-chip__dot) {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: @cyan;
+    box-shadow: 0 0 8px @glow;
+  }
+
+  :global(.wb-chip--err) {
+    border-color: rgba(244, 112, 103, 0.4);
+  }
+
+  :global(.wb-chip--err .wb-chip__dot) {
+    background: #f47067;
+    box-shadow: 0 0 8px rgba(244, 112, 103, 0.5);
+  }
+
+  :global(.wb-rail) {
+    display: flex;
+    margin: 0;
+    padding: 4px 0 2px;
+    list-style: none;
+  }
+
+  :global(.wb-step) {
+    position: relative;
+    display: flex;
+    flex: 1 1 0;
+    flex-direction: column;
+    align-items: center;
+    gap: 9px;
+    min-width: 0;
+  }
+
+  :global(.wb-step::before) {
+    content: '';
+    position: absolute;
+    top: 14px;
+    right: 50%;
+    z-index: 0;
+    width: 100%;
+    height: 2px;
+    background: @line;
+  }
+
+  :global(.wb-step:first-child::before) {
+    display: none;
+  }
+
+  :global(.wb-step--done::before),
+  :global(.wb-step--active::before) {
+    background: linear-gradient(90deg, @cyan-dim, @cyan);
+  }
+
+  :global(.wb-step__dot) {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    width: 30px;
+    height: 30px;
+    place-items: center;
+    border: 1.5px solid @line;
+    border-radius: 50%;
+    background: @bg-soft;
+    color: @text-faint;
+    font-size: 13px;
+    font-weight: 600;
+    transition: background 0.25s ease, border-color 0.25s ease, color 0.25s ease, box-shadow 0.25s ease;
+  }
+
+  :global(.wb-step__label) {
+    color: @text-faint;
+    font-size: 12px;
+    text-align: center;
+    transition: color 0.25s ease;
+  }
+
+  :global(.wb-step--done .wb-step__dot) {
+    border-color: @cyan;
+    background: rgba(45, 212, 191, 0.14);
+    color: @cyan-bright;
+  }
+
+  :global(.wb-step--done .wb-step__label) {
+    color: @text-dim;
+  }
+
+  :global(.wb-step--active .wb-step__dot) {
+    border-color: @cyan-bright;
+    background: linear-gradient(180deg, @cyan-bright, @cyan);
+    color: #062b27;
+    box-shadow: 0 0 0 4px rgba(45, 212, 191, 0.16), 0 0 18px -2px @glow;
+  }
+
+  :global(.wb-step--active .wb-step__label) {
+    color: @cyan-bright;
+    font-weight: 600;
+  }
+
+  :global(.wb-step--failed .wb-step__dot) {
+    border-color: #f47067;
+    background: rgba(244, 112, 103, 0.16);
+    color: #f47067;
+  }
+
+  :global(.wb-step--failed .wb-step__label) {
+    color: #f47067;
+  }
+
+  :global(.code) {
+    color: @text;
+    font-family: 'Fira Code', 'SFMono-Regular', Consolas, monospace;
+  }
+
+  :global(.ant-btn-primary:not(.ant-btn-dangerous)),
+  :global(.beyond-btn-primary:not(.beyond-btn-dangerous)) {
+    border: none;
+    background: linear-gradient(180deg, @cyan-bright, @cyan);
+    color: #062b27;
+    font-weight: 600;
+    box-shadow: 0 6px 18px -8px @glow;
+
+    &:hover {
+      background: @cyan-bright;
+      color: #052320;
+    }
+  }
+
+  :global(.ant-progress-circle .ant-progress-text),
+  :global(.beyond-progress-circle .beyond-progress-text) {
+    color: @text;
+  }
+
+  :global(:focus-visible) {
+    outline: 2px solid @cyan;
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+}
+
+.shell {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  min-height: calc(100vh - clamp(20px, 4vw, 48px) * 2);
+  max-width: 1480px;
+  margin: 0 auto;
+}
+
+// 进度轨(左) + 操作区(右)横向布局,给投屏/iframe 让出更大面积。
+.body {
+  display: flex;
+  align-items: flex-start;
+  gap: 28px;
+}
+
+.body > .stage {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+// 左侧竖排布局:固定窄列,步骤纵向排列、连接线竖向。
+.body > :global(.wb-rail) {
+  position: sticky;
+  top: 16px;
+  flex: 0 0 168px;
+  flex-direction: column;
+  gap: 4px;
+  width: 168px;
+  padding: 8px 12px;
+}
+
+.body > :global(.wb-rail .wb-step) {
+  flex: 0 0 auto;
+  flex-direction: row;
+  align-items: center;
+  gap: 11px;
+  padding: 7px 0;
+}
+
+// 竖排:连接线改成上下方向(连到上一节点)。
+.body > :global(.wb-rail .wb-step::before) {
+  top: auto;
+  right: auto;
+  bottom: 50%;
+  left: 14px;
+  width: 2px;
+  height: 100%;
+}
+
+.body > :global(.wb-rail .wb-step__label) {
+  text-align: left;
+}
+
+// ── 头部:标题 + 会话状态带 ──────────────────────
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0;
+  color: @text;
+  font-size: clamp(20px, 2.4vw, 26px);
+  font-weight: 700;
+}
+
+.title::before {
+  content: '';
+  width: 4px;
+  height: 1.1em;
+  border-radius: 2px;
+  background: linear-gradient(180deg, @cyan-bright, @cyan-dim);
+  box-shadow: 0 0 12px @glow;
+}
+
+// ── 当前步骤面板:重塑 antd/beyond Card 外观 ─────────
+.stage {
+  :global(.ant-card),
+  :global(.beyond-card) {
+    position: relative;
+    --beyond-card-actions-bg: transparent;
+    --beyond-card-extra-color: @text-dim;
+    overflow: hidden;
+    border: 1px solid @line-cyan;
+    border-radius: 16px;
+    background: linear-gradient(180deg, @panel 0%, @panel-2 100%);
+    color: @text;
+    box-shadow: 0 18px 50px -30px #000, inset 0 1px 0 rgba(255, 255, 255, 0.02);
+  }
+
+  :global(.ant-card + .ant-card),
+  :global(.beyond-card + .beyond-card),
+  > div + div {
+    margin-top: 16px;
+  }
+
+  :global(.ant-card::after),
+  :global(.beyond-card::after) {
+    content: '';
+    position: absolute;
+    inset: 0 0 auto;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, @cyan, transparent);
+    opacity: 0.45;
+  }
+
+  :global(.ant-card-head),
+  :global(.beyond-card-head) {
+    min-height: auto;
+    padding: 16px 22px;
+    border-bottom: 1px solid @line-cyan;
+    background: transparent;
+  }
+
+  :global(.ant-card-head-title),
+  :global(.beyond-card-head-title) {
+    color: @text;
+    font-size: 15px;
+    font-weight: 600;
+  }
+
+  :global(.ant-card-body),
+  :global(.beyond-card-body) {
+    padding: 22px;
+    color: @text;
+  }
+
+  :global(.ant-form-item-label > label),
+  :global(.beyond-form-item-label > label) {
+    color: @text-dim;
+  }
+
+  :global(.ant-form-item-control-input-content),
+  :global(.beyond-form-item-control-input-content) {
+    color: @text-dim;
+  }
+
+  :global(.ant-space),
+  :global(.beyond-space),
+  :global(.ant-space-item),
+  :global(.beyond-space-item) {
+    color: inherit;
+  }
+
+  :global(.ant-input),
+  :global(.beyond-input),
+  :global(.ant-input-affix-wrapper),
+  :global(.beyond-input-affix-wrapper) {
+    border-color: rgba(45, 212, 191, 0.28);
+    background: rgba(8, 13, 16, 0.88);
+    color: @text;
+  }
+
+  :global(.ant-input:hover),
+  :global(.beyond-input:hover),
+  :global(.ant-input-affix-wrapper:hover),
+  :global(.beyond-input-affix-wrapper:hover),
+  :global(.ant-input:focus),
+  :global(.beyond-input:focus),
+  :global(.ant-input-focused),
+  :global(.beyond-input-focused),
+  :global(.ant-input-affix-wrapper-focused),
+  :global(.beyond-input-affix-wrapper-focused) {
+    border-color: @cyan;
+    background: rgba(8, 13, 16, 0.95);
+    box-shadow: 0 0 0 2px rgba(45, 212, 191, 0.16);
+  }
+
+  :global(.ant-input-affix-wrapper > input.ant-input),
+  :global(.beyond-input-affix-wrapper > input.beyond-input) {
+    background: transparent;
+    color: @text;
+    box-shadow: none;
+  }
+
+  :global(.ant-input::placeholder),
+  :global(.beyond-input::placeholder) {
+    color: rgba(139, 163, 163, 0.64);
+  }
+
+  :global(.ant-input-prefix),
+  :global(.beyond-input-prefix) {
+    color: @text-dim;
+  }
+
+  :global(.ant-segmented),
+  :global(.beyond-segmented) {
+    border: 1px solid rgba(45, 212, 191, 0.18);
+    background: rgba(8, 13, 16, 0.72);
+    color: @text-dim;
+  }
+
+  :global(.ant-segmented-thumb),
+  :global(.beyond-segmented-thumb),
+  :global(.ant-segmented-item-selected),
+  :global(.beyond-segmented-item-selected) {
+    background: rgba(45, 212, 191, 0.18);
+    box-shadow: inset 0 0 0 1px rgba(94, 234, 212, 0.26);
+  }
+
+  :global(.ant-segmented-item),
+  :global(.beyond-segmented-item) {
+    color: @text-dim;
+  }
+
+  :global(.ant-segmented-item:hover:not(.ant-segmented-item-selected)),
+  :global(.beyond-segmented-item:hover:not(.beyond-segmented-item-selected)),
+  :global(.ant-segmented-item:focus-visible:not(.ant-segmented-item-selected)),
+  :global(.beyond-segmented-item:focus-visible:not(.beyond-segmented-item-selected)) {
+    background: rgba(45, 212, 191, 0.08);
+    color: @text;
+  }
+
+  :global(.ant-segmented-item:hover .ant-segmented-item-label),
+  :global(.beyond-segmented-item:hover .beyond-segmented-item-label),
+  :global(.ant-segmented-item:focus-visible .ant-segmented-item-label),
+  :global(.beyond-segmented-item:focus-visible .beyond-segmented-item-label) {
+    color: @text;
+  }
+
+  :global(.ant-segmented-item-selected),
+  :global(.beyond-segmented-item-selected),
+  :global(.ant-segmented-item-selected .ant-segmented-item-label),
+  :global(.beyond-segmented-item-selected .beyond-segmented-item-label) {
+    color: @text;
+  }
+
+  :global(.ant-alert-info),
+  :global(.beyond-alert-info) {
+    border-color: rgba(45, 212, 191, 0.24);
+    background: rgba(20, 184, 166, 0.1);
+  }
+
+  :global(.ant-alert-info .ant-alert-icon),
+  :global(.beyond-alert-info .beyond-alert-icon) {
+    color: @cyan-bright;
+  }
+
+  :global(.ant-alert-message),
+  :global(.beyond-alert-message) {
+    color: @text;
+  }
+
+  :global(.ant-alert-description),
+  :global(.beyond-alert-description) {
+    color: @text-dim;
+  }
+
+  :global(.ant-switch),
+  :global(.beyond-switch) {
+    background: rgba(139, 163, 163, 0.28);
+  }
+
+  :global(.ant-switch:hover:not(.ant-switch-disabled)),
+  :global(.beyond-switch:hover:not(.beyond-switch-disabled)) {
+    background: rgba(139, 163, 163, 0.38);
+  }
+
+  :global(.ant-switch-checked),
+  :global(.beyond-switch-checked),
+  :global(.ant-switch-checked:hover:not(.ant-switch-disabled)),
+  :global(.beyond-switch-checked:hover:not(.beyond-switch-disabled)) {
+    background: linear-gradient(180deg, @cyan-bright, @cyan);
+  }
+
+  :global(.ant-switch-handle::before),
+  :global(.beyond-switch-handle::before) {
+    background: #d7eeea;
+  }
+
+  :global(.ant-list),
+  :global(.beyond-list),
+  :global(.ant-list-item),
+  :global(.beyond-list-item),
+  :global(.ant-list-item-meta-title),
+  :global(.beyond-list-item-meta-title) {
+    color: @text;
+  }
+
+  :global(.ant-list-item-meta-description),
+  :global(.beyond-list-item-meta-description),
+  :global(.ant-badge-status-text),
+  :global(.beyond-badge-status-text) {
+    color: @text-dim;
+  }
+
+  :global(.ant-typography),
+  :global(.beyond-typography) {
+    color: inherit;
+  }
+
+  :global(.ant-typography strong),
+  :global(.beyond-typography strong),
+  strong {
+    color: @text;
+  }
+
+  :global(.ant-typography-secondary),
+  :global(.beyond-typography-secondary),
+  :global(.ant-typography.code),
+  :global(.beyond-typography.code) {
+    color: @text-dim;
+  }
+}
+
+// 窄屏回落:纵向堆叠,进度轨横排在上。
+@media (max-width: 900px) {
+  .body {
+    flex-direction: column;
+  }
+}
+
+// ── 可访问性 ───────────────────────────────────
+@media (prefers-reduced-motion: reduce) {
+  .workbench {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      scroll-behavior: auto !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+// ── 窄屏:进度轨标签收起 ─────────────────────────
+@media (max-width: 720px) {
+  .workbench {
+    :global(.wb-step__label) {
+      display: none;
+    }
+
+    :global(.wb-step__dot) {
+      width: 26px;
+      height: 26px;
+    }
+  }
+}
