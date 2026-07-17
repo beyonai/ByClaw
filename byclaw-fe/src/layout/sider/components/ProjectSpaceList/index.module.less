@@ -543,9 +543,9 @@
   h3 {
     margin: 0 0 2px;
     color: #1f2633;
-    font-size: 16px;
+    font-size: 14px;
     font-weight: 700;
-    line-height: 22px;
+    line-height: 20px;
   }
 
   p {
@@ -564,21 +564,17 @@
 
 .detailIconButton,
 .detailAddButton {
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
-}
-
-.detailIconButton {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
   border: 0;
   color: #6f7c90;
   background: transparent;
-}
 
-.detailAddButton {
-  color: #1f2633;
-  border-color: #dfe6f0;
-  background: #fff;
+  &:hover {
+    color: #246bfe;
+    background: #f2f6ff;
+  }
 }
 
 .detailTabsWrap {
@@ -710,6 +706,50 @@
     .@{antPrefix}-list-item-action > li {
       padding: 0 4px;
     }
+
+    .@{antPrefix}-list-item.project-member-row {
+      position: relative;
+      flex-direction: row;
+      align-items: flex-start;
+      padding-right: 38px;
+    }
+
+    .project-member-row .@{antPrefix}-list-item-meta {
+      width: auto;
+      flex: 1;
+    }
+
+    .project-member-avatar {
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      background-color: var(--beyond-color-primary-hover);
+      font-size: 10px;
+      line-height: 1;
+    }
+
+    .project-member-role-tag {
+      margin-left: 8px;
+    }
+
+    .project-member-more {
+      position: absolute;
+      top: 18px;
+      right: 4px;
+      width: 28px;
+      height: 28px;
+      color: #6b778c;
+      border-radius: 6px;
+
+      &:hover {
+        color: #246bfe;
+        background: #f2f6ff;
+      }
+    }
   }
 }
 
@@ -798,6 +838,16 @@
       height: 24px;
       padding: 0 2px;
       font-size: 12px;
+    }
+  }
+}
+
+.detailSourceAuth {
+  padding: 0 12px 8px;
+
+  :global {
+    .@{antPrefix}-tag {
+      margin-inline-end: 0;
     }
   }
 }
@@ -954,6 +1004,13 @@
   }
 }
 
+.detailTaskSummary {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
 .detailTaskList {
   display: flex;
   flex-direction: column;
@@ -1101,5 +1158,18 @@
     color: #526075;
     font-size: 13px;
     font-weight: 600;
+  }
+}
+
+.repoModalDivider {
+  margin: 16px 0 12px;
+  border-top: 1px solid #f0f0f0;
+}
+
+.dwsAuthDetail {
+  line-height: 2.2;
+
+  p {
+    margin: 0;
   }
 }

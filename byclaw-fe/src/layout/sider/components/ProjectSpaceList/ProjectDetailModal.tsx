@@ -27,15 +27,18 @@ import {
   LeftOutlined,
   PlusOutlined,
   ReloadOutlined,
-  SettingOutlined,
 } from '@ant-design/icons';
 import { fetchEventSource } from '@fortaine/fetch-event-source';
 import dayjs from 'dayjs';
 import {
+  checkDwsAuthStatus,
   checkGitHubPat,
+  createProjectRepo,
   createScanSource,
   createTask,
+  deleteProjectRepo,
   deleteScanSource,
+  getProject,
   listProjectMembers,
   listScanLogItems,
   listScanLogs,
@@ -43,6 +46,7 @@ import {
   listTasks,
   saveGitHubPat,
   searchDingtalkGroups,
+  startDwsDeviceAuth,
   toggleScanSource,
   triggerScan,
   updateScanSource,
@@ -50,10 +54,10 @@ import {
 } from '@/service/devloop';
 import TaskDetailDrawer from '@/pages/devloop/TaskDetailDrawer';
 import TaskKanban from '@/pages/devloop/TaskKanban';
-import MemberList from '@/pages/devloop/MemberList';
 import type { ProjectSpace } from '@/pages/projectSpace/types';
 import { getToken, getssoToken, ssotokenKey, tokenKey } from '@/utils/auth';
 import { generateSignature } from '@/utils/signature';
+import ProjectMemberList from './ProjectMemberList';
 import styles from './index.module.less';
 
 type SourceType = 'dingtalk' | 'github_issue';
@@ -65,7 +69,15 @@ type ScanSourceItem = {
   config?: string;
   cronExpr?: string;
   enabled?: string;
+  repoId?: number | null;
   lastScanTime?: string | null;
+};
+
+type RepoOption = {
+  repoId: number;
+  repoFullName: string;
+  repoUrl?: string;
+  defaultBranch?: string;
 };
 
 type ScanLogEntry = {
@@ -90,12 +102,13 @@ type SourceForm = {
   type: SourceType;
   name: string;
   chatId: string;
+  chatName: string;
   keywords: string;
   lookbackHours: string;
-  repo: string;
   labels: string;
   pat: string;
   cron: string;
+  repoId?: number;
 };
 
 type Props = {
@@ -127,19 +140,21 @@ const getDefaultSourceForm = (): SourceForm => ({
   type: 'dingtalk',
   name: '',
   chatId: '',
+  chatName: '',
   keywords: '',
   lookbackHours: '24',
-  repo: '',
   labels: '',
   pat: '',
   cron: '*/30 * * * *',
+  repoId: undefined,
 });
 
 const formatConfig = (type: string, config?: string) => {
   try {
     const parsedConfig = JSON.parse(config || '{}');
     if (type === 'dingtalk') return parsedConfig.chatName || parsedConfig.chatId || parsedConfig.groupId || '-';
-    return parsedConfig.repo || '-';
+    if (type === 'github_issue') return parsedConfig.labels ? `标签: ${parsedConfig.labels}` : '全部 Issue';
+    return '-';
   } catch {
     return '-';
   }
@@ -159,6 +174,7 @@ const getSourceLabel = (sourceType?: string) => {
 const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject }) => {
   const [activeTab, setActiveTab] = useState('requirements');
   const [sources, setSources] = useState<ScanSourceItem[]>([]);
+  const [repos, setRepos] = useState<RepoOption[]>([]);
   const [requirements, setRequirements] = useState<RequirementItem[]>([]);
   const [tasks, setTasks] = useState<any[]>([]);
   const [members, setMembers] = useState<any[]>([]);
@@ -173,13 +189,26 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject })
   const [hasPatSaved, setHasPatSaved] = useState(false);
   const [groupOptions, setGroupOptions] = useState<{ value: string; label: string }[]>([]);
   const [groupSearching, setGroupSearching] = useState(false);
+  const [dwsAuthed, setDwsAuthed] = useState(false);
+  const [dwsExpired, setDwsExpired] = useState(false);
+  const [dwsExpiresAt, setDwsExpiresAt] = useState('');
+  const [dwsAuthLoading, setDwsAuthLoading] = useState(false);
+  const [dwsDeviceInfo, setDwsDeviceInfo] = useState<{ userCode: string; verificationUrl: string } | null>(null);
+  const [dwsAuthPolling, setDwsAuthPolling] = useState(false);
+  const [dwsAuthDetailVisible, setDwsAuthDetailVisible] = useState(false);
+  const [dwsAuthDetail, setDwsAuthDetail] = useState<any>(null);
   const [logDrawerOpen, setLogDrawerOpen] = useState(false);
   const [logModalSource, setLogModalSource] = useState<ScanSourceItem | null>(null);
   const [logList, setLogList] = useState<ScanLogEntry[]>([]);
   const [logLoading, setLogLoading] = useState(false);
   const [detailTask, setDetailTask] = useState<any>(null);
   const [taskKanbanOpen, setTaskKanbanOpen] = useState(false);
+  const [repoModalOpen, setRepoModalOpen] = useState(false);
+  const [repoForm, setRepoForm] = useState({ repoFullName: '', repoUrl: '', defaultBranch: 'main' });
+  const [repoSaving, setRepoSaving] = useState(false);
   const groupSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dwsAuthTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const dwsAuthTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const projectId = Number(project?.projectId);
 
@@ -242,17 +271,25 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject })
     }
   }, [projectId]);
 
+  const fetchRepos = useCallback(async () => {
+    if (!projectId) return;
+    // 收集源编辑页的仓库下拉复用项目详情接口返回的 repos，和 /devloop 页面保持一致。
+    const detail = await getProject(projectId);
+    setRepos(detail?.repos || []);
+  }, [projectId]);
+
   const fetchMembers = useCallback(async () => {
     if (!projectId) return;
-    const memberList = (await listProjectMembers(projectId)) || [];
+    const res = await listProjectMembers(projectId);
+    const memberList = Array.isArray(res) ? res : [];
     setMembers(memberList);
   }, [projectId]);
 
   const fetchDetailData = useCallback(async () => {
     if (!projectId) return;
-    const sourceList = await fetchSources();
-    await Promise.all([fetchRequirements(sourceList), fetchTasks(), fetchMembers()]);
-  }, [fetchMembers, fetchRequirements, fetchSources, fetchTasks, projectId]);
+    // 打开详情时立即并行请求成员，避免需求 tab 的收集源/日志请求阻塞成员数量展示。
+    await Promise.all([fetchSources().then(fetchRequirements), fetchTasks(), fetchMembers(), fetchRepos()]);
+  }, [fetchMembers, fetchRepos, fetchRequirements, fetchSources, fetchTasks, projectId]);
 
   useEffect(() => {
     setActiveTab('requirements');
@@ -270,9 +307,37 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject })
       });
   }, []);
 
-  // 各 tab 只响应自己的加载状态，避免需求/日志等后台请求盖住其它 tab 已渲染的数据。
+  useEffect(() => {
+    checkDwsAuthStatus()
+      .then((res: any) => {
+        setDwsAuthDetail(res);
+        if (res?.tokenValid) {
+          setDwsAuthed(true);
+          setDwsExpired(false);
+          if (res.expiresAt) setDwsExpiresAt(res.expiresAt);
+        } else if (res?.hasToken) {
+          setDwsAuthed(false);
+          setDwsExpired(true);
+        }
+      })
+      .catch((error) => {
+        // DWS 授权状态只影响钉钉源编辑提示，查询失败不阻塞项目详情。
+        console.error('Failed to check DWS auth status:', error);
+      });
+
+    return () => {
+      if (dwsAuthTimerRef.current) clearInterval(dwsAuthTimerRef.current);
+      if (dwsAuthTimeoutRef.current) clearTimeout(dwsAuthTimeoutRef.current);
+    };
+  }, []);
+
+  const hasRequirementVisibleData = sources.length > 0 || requirements.length > 0 || !!lastLog;
+  const requirementsTabLoading = sourcesLoading || requirementsLoading;
+
+  // 各 tab 只响应自己的加载状态；需求 tab 已有可见数据时不再整块遮罩，避免“数据已出现但还在 loading”的观感。
   const detailSpinning =
-    (activeTab === 'requirements' && requirementsLoading) || (activeTab === 'tasks' && tasksLoading);
+    (activeTab === 'requirements' && requirementsTabLoading && !hasRequirementVisibleData) ||
+    (activeTab === 'tasks' && tasksLoading);
 
   const tabItems = useMemo(
     () => [
@@ -290,6 +355,7 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject })
       ...getDefaultSourceForm(),
       type,
     });
+    setGroupOptions([]);
   };
 
   const openAddSourceModal = (type: SourceType = 'dingtalk') => {
@@ -310,6 +376,10 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject })
       message.error('请填写名称');
       return;
     }
+    if (!sourceForm.repoId) {
+      message.error('请选择关联仓库');
+      return;
+    }
 
     let config = '';
     if (sourceForm.type === 'dingtalk') {
@@ -317,25 +387,23 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject })
         message.error('请选择钉钉群');
         return;
       }
+      const selectedGroup = groupOptions.find((group) => group.value === sourceForm.chatId);
+      const chatName = selectedGroup?.label || sourceForm.chatName || '';
       config = JSON.stringify({
         groupId: sourceForm.chatId,
+        // 群名用于列表展示和编辑回填，扫描仍以 groupId 为准。
+        chatName,
         keyword: sourceForm.keywords || '需求',
         lookbackHours: parseInt(sourceForm.lookbackHours, 10) || 24,
+        corpId: dwsAuthDetail?.corpId || '',
       });
     } else {
-      if (!sourceForm.repo.trim()) {
-        message.error('请填写仓库');
-        return;
-      }
       if (!hasPatSaved && !sourceForm.pat.trim()) {
         message.error('请填写 GitHub PAT');
         return;
       }
-      config = JSON.stringify({
-        repo: sourceForm.repo.trim(),
-        labels: sourceForm.labels,
-        state: 'open',
-      });
+      // GitHub 实际扫描仓库由 repoId 关联，config 只保留过滤条件。
+      config = JSON.stringify({ labels: sourceForm.labels, state: 'open' });
     }
 
     try {
@@ -350,6 +418,7 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject })
           sourceName: sourceForm.name.trim(),
           config,
           cronExpr: sourceForm.cron,
+          repoId: sourceForm.repoId,
         });
         message.success('收集源已更新');
       } else {
@@ -360,6 +429,7 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject })
           config,
           cronExpr: sourceForm.cron,
           enabled: '1',
+          repoId: sourceForm.repoId,
         });
         message.success('收集源添加成功');
       }
@@ -387,14 +457,72 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject })
       type: source.sourceType as SourceType,
       name: source.sourceName,
       chatId: config.groupId || '',
+      chatName: config.chatName || '',
       keywords: config.keyword || '',
       lookbackHours: config.lookbackHours ? String(config.lookbackHours) : '24',
-      repo: config.repo || '',
       labels: config.labels || '',
       pat: '',
       cron: source.cronExpr || '*/30 * * * *',
+      repoId: source.repoId ?? undefined,
     });
+    // 已保存的群名先放入下拉选项，编辑时不需要重新搜索也能展示正确名称。
+    if (config.groupId) {
+      setGroupOptions([{ value: config.groupId, label: config.chatName || config.groupId }]);
+    } else {
+      setGroupOptions([]);
+    }
     setSourceModalOpen(true);
+  };
+
+  const handleCreateRepo = async () => {
+    if (!projectId) return;
+    if (!repoForm.repoFullName.trim()) {
+      message.error('请填写仓库全名 owner/repo');
+      return;
+    }
+
+    setRepoSaving(true);
+    try {
+      const res = await createProjectRepo({
+        projectId,
+        repoFullName: repoForm.repoFullName.trim(),
+        repoUrl: repoForm.repoUrl.trim() || undefined,
+        defaultBranch: repoForm.defaultBranch.trim() || undefined,
+      });
+      if (!res?.repoId) {
+        message.error('新增仓库失败');
+        return;
+      }
+      message.success('仓库已新增');
+      setRepoForm({ repoFullName: '', repoUrl: '', defaultBranch: 'main' });
+      await fetchRepos();
+      setSourceForm((prev) => ({ ...prev, repoId: res.repoId }));
+    } catch {
+      message.error('新增仓库失败');
+    } finally {
+      setRepoSaving(false);
+    }
+  };
+
+  const handleDeleteRepo = (repo: RepoOption) => {
+    Modal.confirm({
+      title: '确认删除',
+      content: `确定删除仓库「${repo.repoFullName || repo.repoUrl || repo.repoId}」吗？`,
+      okText: '删除',
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        try {
+          await deleteProjectRepo(repo.repoId);
+          message.success('仓库已删除');
+          if (sourceForm.repoId === repo.repoId) {
+            setSourceForm((prev) => ({ ...prev, repoId: undefined }));
+          }
+          await fetchRepos();
+        } catch (error: any) {
+          message.error(error?.message || '删除失败，可能已被扫描源关联');
+        }
+      },
+    });
   };
 
   const handleDeleteSource = (source: ScanSourceItem) => {
@@ -534,8 +662,68 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject })
     }, 500);
   };
 
+  const pollDwsAuthStatus = () => {
+    if (dwsAuthTimerRef.current) clearInterval(dwsAuthTimerRef.current);
+    if (dwsAuthTimeoutRef.current) clearTimeout(dwsAuthTimeoutRef.current);
+
+    dwsAuthTimerRef.current = setInterval(async () => {
+      try {
+        const res = await checkDwsAuthStatus();
+        if (!res?.tokenValid) return;
+
+        if (dwsAuthTimerRef.current) clearInterval(dwsAuthTimerRef.current);
+        if (dwsAuthTimeoutRef.current) clearTimeout(dwsAuthTimeoutRef.current);
+        dwsAuthTimerRef.current = null;
+        dwsAuthTimeoutRef.current = null;
+        message.success('钉钉授权成功');
+        setDwsAuthed(true);
+        setDwsExpired(false);
+        setDwsAuthDetail(res);
+        if (res.expiresAt) setDwsExpiresAt(res.expiresAt);
+        setDwsDeviceInfo(null);
+        setDwsAuthPolling(false);
+      } catch {
+        // 授权轮询失败时继续等下一次，避免临时网络抖动中断流程。
+      }
+    }, 5000);
+
+    dwsAuthTimeoutRef.current = setTimeout(() => {
+      if (dwsAuthTimerRef.current) clearInterval(dwsAuthTimerRef.current);
+      dwsAuthTimerRef.current = null;
+      dwsAuthTimeoutRef.current = null;
+      setDwsDeviceInfo(null);
+      setDwsAuthPolling(false);
+      message.warning('授权超时，请重试');
+    }, 180000);
+  };
+
+  const handleStartDwsAuth = async () => {
+    setDwsAuthLoading(true);
+    try {
+      const res = await startDwsDeviceAuth();
+      if (res?.userCode && res?.verificationUrl) {
+        setDwsDeviceInfo({ userCode: res.userCode, verificationUrl: res.verificationUrl });
+        window.open(res.verificationUrl, '_blank');
+        setDwsAuthPolling(true);
+        pollDwsAuthStatus();
+      } else {
+        message.error(res?.message || '启动授权失败');
+      }
+    } catch {
+      message.error('启动授权失败');
+    } finally {
+      setDwsAuthLoading(false);
+    }
+  };
+
+  const repoLabel = (repoId?: number | null) => {
+    if (!repoId) return null;
+    const repo = repos.find((item) => item.repoId === repoId);
+    return repo ? repo.repoFullName || repo.repoUrl || String(repo.repoId) : null;
+  };
+
   const renderSourceList = (emptyText = '暂无收集源，点击右上角 + 添加') => (
-    <Spin spinning={sourcesLoading}>
+    <Spin spinning={sourcesLoading && !sources.length}>
       {sources.length ? (
         <div className={styles.detailSourceList}>
           {sources.map((source) => (
@@ -552,6 +740,30 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject })
                   onChange={(checked) => handleToggleSource(source.sourceId, checked)}
                 />
               </div>
+              {repoLabel(source.repoId) && (
+                <div className={styles.detailSourceAuth}>
+                  <Tag icon={<GithubOutlined />} bordered={false} color="blue">
+                    {repoLabel(source.repoId)}
+                  </Tag>
+                </div>
+              )}
+              {source.sourceType === 'dingtalk' && (
+                <div className={styles.detailSourceAuth}>
+                  {dwsAuthed ? (
+                    <Tag color="green" style={{ cursor: 'pointer' }} onClick={() => setDwsAuthDetailVisible(true)}>
+                      DWS 已授权{dwsExpiresAt ? ` · 有效至 ${dayjs(dwsExpiresAt).format('MM-DD HH:mm')}` : ''}
+                    </Tag>
+                  ) : dwsExpired ? (
+                    <Tag color="red" style={{ cursor: 'pointer' }} onClick={handleStartDwsAuth}>
+                      DWS 授权已过期，点击重新授权
+                    </Tag>
+                  ) : (
+                    <Tag color="orange" style={{ cursor: 'pointer' }} onClick={handleStartDwsAuth}>
+                      DWS 未授权，点击授权
+                    </Tag>
+                  )}
+                </div>
+              )}
               <div className={styles.detailSourceActions}>
                 <Tag icon={<ClockCircleOutlined />} bordered={false}>
                   {source.cronExpr || '手动'}
@@ -665,7 +877,10 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject })
   const renderTasks = () => (
     <div className={styles.detailTaskPanel}>
       <div className={styles.detailTaskHeader}>
-        <span>{tasks.length} 个研发任务 · 0 个与我关联</span>
+        <span className={styles.detailTaskSummary}>
+          <span>{tasks.length} 个研发任务</span>
+          <span>0 个与我关联</span>
+        </span>
         <Button icon={<AppstoreOutlined />} onClick={() => setTaskKanbanOpen(true)}>
           整体任务视图
         </Button>
@@ -696,7 +911,6 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject })
                   <Avatar size="small" style={{ background: '#f56a00' }}>
                     {(task.assignee || '我')[0]}
                   </Avatar>
-                  <span>{task.assignee || '我'}</span>
                   <strong>{progress}%</strong>
                 </div>
               </div>
@@ -726,7 +940,7 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject })
     if (activeTab === 'members') {
       return (
         <div className={styles.detailEmbeddedContent}>
-          <MemberList projectId={projectId} />
+          <ProjectMemberList projectId={projectId} onMembersChange={setMembers} />
         </div>
       );
     }
@@ -741,6 +955,7 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject })
       onCancel={() => {
         setSourceModalOpen(false);
         setEditingSource(null);
+        setGroupOptions([]);
       }}
       okText={editingSource ? '保存' : '添加'}
       width={520}
@@ -782,8 +997,66 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject })
           onChange={(event) => setSourceForm((prev) => ({ ...prev, name: event.target.value }))}
         />
       </div>
+      <div className={styles.formField}>
+        <label>关联仓库</label>
+        <Space.Compact style={{ width: '100%' }}>
+          <Select
+            style={{ flex: 1 }}
+            placeholder="选择该源扫来的需求要开发的仓库"
+            value={sourceForm.repoId}
+            allowClear
+            onChange={(repoId) => setSourceForm((prev) => ({ ...prev, repoId }))}
+            options={repos.map((repo) => ({
+              value: repo.repoId,
+              label: repo.repoFullName || repo.repoUrl || String(repo.repoId),
+            }))}
+            notFoundContent={repos.length ? undefined : '项目暂无仓库，点击右侧新增'}
+          />
+          <Button
+            icon={<PlusOutlined />}
+            onClick={() => {
+              setRepoForm({ repoFullName: '', repoUrl: '', defaultBranch: 'main' });
+              setRepoModalOpen(true);
+            }}
+          >
+            新增
+          </Button>
+        </Space.Compact>
+      </div>
       {sourceForm.type === 'dingtalk' && (
         <>
+          {!dwsAuthed && (
+            <div className={styles.formField}>
+              <label>钉钉授权</label>
+              {dwsDeviceInfo ? (
+                <div>
+                  <p style={{ margin: '4px 0' }}>请在手机钉钉打开以下链接完成授权：</p>
+                  <a href={dwsDeviceInfo.verificationUrl} target="_blank" rel="noreferrer">
+                    {dwsDeviceInfo.verificationUrl}
+                  </a>
+                  <p style={{ margin: '4px 0', color: '#666' }}>
+                    设备码: <strong>{dwsDeviceInfo.userCode}</strong>
+                  </p>
+                  {dwsAuthPolling && <Spin size="small" />}
+                </div>
+              ) : (
+                <Button
+                  type="primary"
+                  icon={<DingdingOutlined />}
+                  loading={dwsAuthLoading}
+                  onClick={handleStartDwsAuth}
+                >
+                  授权钉钉扫描
+                </Button>
+              )}
+            </div>
+          )}
+          {dwsAuthed && (
+            <div className={styles.formField}>
+              <label>钉钉授权</label>
+              <Tag color="green">已授权</Tag>
+            </div>
+          )}
           <div className={styles.formField}>
             <label>钉钉群</label>
             <Select
@@ -792,7 +1065,10 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject })
               placeholder="输入群名搜索"
               value={sourceForm.chatId || undefined}
               onSearch={handleGroupSearch}
-              onChange={(chatId) => setSourceForm((prev) => ({ ...prev, chatId }))}
+              onChange={(chatId, option) => {
+                const chatName = Array.isArray(option) ? '' : (option?.label as string) || '';
+                setSourceForm((prev) => ({ ...prev, chatId, chatName }));
+              }}
               options={groupOptions}
               loading={groupSearching}
               notFoundContent={groupSearching ? <Spin size="small" /> : '输入至少2个字搜索'}
@@ -836,14 +1112,6 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject })
             </div>
           )}
           <div className={styles.formField}>
-            <label>仓库</label>
-            <Input
-              placeholder="owner/repo"
-              value={sourceForm.repo}
-              onChange={(event) => setSourceForm((prev) => ({ ...prev, repo: event.target.value }))}
-            />
-          </div>
-          <div className={styles.formField}>
             <label>标签过滤（可选）</label>
             <Input
               placeholder="如 bug,feature"
@@ -861,6 +1129,142 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject })
           options={cronPresets}
         />
       </div>
+    </Modal>
+  );
+
+  const renderRepoModal = () => (
+    <Modal
+      title="维护项目仓库"
+      open={repoModalOpen}
+      onCancel={() => setRepoModalOpen(false)}
+      footer={<Button onClick={() => setRepoModalOpen(false)}>关闭</Button>}
+      width={560}
+    >
+      <div className={styles.formField}>
+        <label>已有仓库</label>
+        {repos.length ? (
+          <List
+            size="small"
+            bordered
+            dataSource={repos}
+            renderItem={(repo) => (
+              <List.Item
+                actions={[
+                  <Button
+                    key="delete"
+                    type="link"
+                    danger
+                    size="small"
+                    icon={<DeleteOutlined />}
+                    onClick={() => handleDeleteRepo(repo)}
+                  >
+                    删除
+                  </Button>,
+                ]}
+              >
+                <List.Item.Meta
+                  title={repo.repoFullName}
+                  description={
+                    <span style={{ color: '#999' }}>
+                      {repo.repoUrl || '-'}
+                      {repo.defaultBranch ? ` · ${repo.defaultBranch}` : ''}
+                    </span>
+                  }
+                />
+              </List.Item>
+            )}
+          />
+        ) : (
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无仓库" />
+        )}
+      </div>
+      <div className={styles.repoModalDivider} />
+      <div className={styles.formField}>
+        <label>仓库全名 owner/repo</label>
+        <Input
+          placeholder="如 beyonai/byclaw-test"
+          value={repoForm.repoFullName}
+          onChange={(event) => setRepoForm((prev) => ({ ...prev, repoFullName: event.target.value }))}
+        />
+      </div>
+      <div className={styles.formField}>
+        <label>仓库地址（可选）</label>
+        <Input
+          placeholder="如 https://github.com/beyonai/byclaw-test"
+          value={repoForm.repoUrl}
+          onChange={(event) => setRepoForm((prev) => ({ ...prev, repoUrl: event.target.value }))}
+        />
+      </div>
+      <div className={styles.formField}>
+        <label>默认分支</label>
+        <Input
+          placeholder="main"
+          value={repoForm.defaultBranch}
+          onChange={(event) => setRepoForm((prev) => ({ ...prev, defaultBranch: event.target.value }))}
+        />
+      </div>
+      <Button type="primary" icon={<PlusOutlined />} loading={repoSaving} onClick={handleCreateRepo}>
+        新增仓库
+      </Button>
+    </Modal>
+  );
+
+  const renderDwsAuthModal = () => (
+    <Modal
+      title="DWS 钉钉授权信息"
+      open={dwsAuthDetailVisible}
+      onCancel={() => setDwsAuthDetailVisible(false)}
+      footer={[
+        <Button
+          key="reauth"
+          type="primary"
+          danger
+          onClick={() => {
+            setDwsAuthDetailVisible(false);
+            handleStartDwsAuth();
+          }}
+        >
+          重新授权
+        </Button>,
+        <Button key="close" onClick={() => setDwsAuthDetailVisible(false)}>
+          关闭
+        </Button>,
+      ]}
+    >
+      {dwsAuthDetail ? (
+        <div className={styles.dwsAuthDetail}>
+          <p>
+            <strong>认证状态：</strong>
+            {dwsAuthDetail.tokenValid ? <Tag color="green">有效</Tag> : <Tag color="red">无效</Tag>}
+          </p>
+          <p>
+            <strong>组织名称：</strong>
+            {dwsAuthDetail.corpName || '-'}
+          </p>
+          <p>
+            <strong>用户名称：</strong>
+            {dwsAuthDetail.userName || '-'}
+          </p>
+          <p>
+            <strong>组织ID：</strong>
+            {dwsAuthDetail.corpId || '-'}
+          </p>
+          <p>
+            <strong>Access Token 有效至：</strong>
+            {dwsAuthDetail.expiresAt ? dayjs(dwsAuthDetail.expiresAt).format('YYYY-MM-DD HH:mm:ss') : '-'}
+          </p>
+          <p>
+            <strong>Refresh Token 状态：</strong>
+            {dwsAuthDetail.refreshTokenValid ? <Tag color="green">有效</Tag> : <Tag color="red">已过期</Tag>}
+          </p>
+          <p>
+            <strong>Refresh Token 有效至：</strong>
+            {dwsAuthDetail.refreshExpiresAt ? dayjs(dwsAuthDetail.refreshExpiresAt).format('YYYY-MM-DD HH:mm:ss') : '-'}
+          </p>
+        </div>
+      ) : (
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无授权信息" />
+      )}
     </Modal>
   );
 
@@ -905,18 +1309,24 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject })
   return (
     <div className={styles.projectDetailPanel}>
       <div className={styles.detailPanelHeader}>
-        <Button className={styles.detailBackButton} icon={<LeftOutlined />} onClick={onBack} />
+        <Tooltip title="返回" placement="top">
+          <Button className={styles.detailBackButton} icon={<LeftOutlined />} onClick={onBack} />
+        </Tooltip>
         <div className={styles.detailPanelTitle}>
           <h3>{project?.projectName || '项目详情'}</h3>
           <p>研发项目详情</p>
         </div>
         <div className={styles.detailPanelActions}>
-          <Button
-            className={styles.detailIconButton}
-            icon={<SettingOutlined />}
-            onClick={() => project && onEditProject?.(project)}
-          />
-          <Button className={styles.detailAddButton} icon={<PlusOutlined />} onClick={handleHeaderAdd} />
+          <Tooltip title="编辑项目" placement="top">
+            <Button
+              className={styles.detailIconButton}
+              icon={<EditOutlined />}
+              onClick={() => project && onEditProject?.(project)}
+            />
+          </Tooltip>
+          <Tooltip title={activeTab === 'members' ? '添加成员' : '新增需求'} placement="top">
+            <Button className={styles.detailAddButton} icon={<PlusOutlined />} onClick={handleHeaderAdd} />
+          </Tooltip>
         </div>
       </div>
       <div className={styles.detailTabsWrap}>
@@ -931,6 +1341,8 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject })
         <div className={styles.detailBodyPanel}>{renderTabContent()}</div>
       </Spin>
       {renderAddSourceModal()}
+      {renderRepoModal()}
+      {renderDwsAuthModal()}
       {renderLogDrawer()}
     </div>
   );

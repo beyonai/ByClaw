@@ -138,6 +138,15 @@ const ProjectSpaceList: React.FC = () => {
   const [projectCreating, setProjectCreating] = useState(false);
   const [detailProject, setDetailProject] = useState<ProjectSpace>();
   const hasAutoSelectedRef = useRef(false);
+  const projectClickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearProjectClickTimer = useCallback(() => {
+    if (!projectClickTimerRef.current) {
+      return;
+    }
+    clearTimeout(projectClickTimerRef.current);
+    projectClickTimerRef.current = null;
+  }, []);
   const projectSavingRef = useRef(false);
 
   const mergedProjects = useMemo(() => {
@@ -342,6 +351,15 @@ const ProjectSpaceList: React.FC = () => {
     });
   };
 
+  const handleProjectHeaderClick = (project: ProjectSpace) => {
+    clearProjectClickTimer();
+    // 区分单击和双击，避免双击详情时触发两次单击导致项目被展开后又折叠。
+    projectClickTimerRef.current = setTimeout(() => {
+      handleToggleProject(project);
+      projectClickTimerRef.current = null;
+    }, 220);
+  };
+
   const handleSelectProjectScope = ({ key }: { key: string }) => {
     setProjectScopeId(key);
     if (key === ALL_PROJECT_SCOPE_KEY) {
@@ -383,6 +401,12 @@ const ProjectSpaceList: React.FC = () => {
     };
   }, [EventEmitter, handleProjectSessionBound]);
 
+  useEffect(() => {
+    return () => {
+      clearProjectClickTimer();
+    };
+  }, [clearProjectClickTimer]);
+
   const handleNewChat = () => {
     if (!newChatProject?.projectId) {
       message.warning('请先新建或选择项目');
@@ -419,6 +443,12 @@ const ProjectSpaceList: React.FC = () => {
     setDetailProject(projectDetailMap[project.projectId] || project);
     // 详情视图占用左侧小列表区域，不弹遮罩，右侧聊天页保持原状态。
     void fetchProjectFullDetail(project, true).then(setDetailProject);
+  };
+
+  const handleProjectHeaderDoubleClick = (project: ProjectSpace) => {
+    clearProjectClickTimer();
+    setActiveProjectId(project.projectId);
+    handleOpenProjectDetail(project);
   };
 
   const handleOpenEditProject = (project: ProjectSpace) => {
@@ -732,7 +762,8 @@ const ProjectSpaceList: React.FC = () => {
                         <button
                           type="button"
                           className={styles.projectHeader}
-                          onClick={() => handleToggleProject(project)}
+                          onClick={() => handleProjectHeaderClick(project)}
+                          onDoubleClick={() => handleProjectHeaderDoubleClick(project)}
                         >
                           <span className={styles.expandIcon}>{isExpanded ? <DownOutlined /> : <RightOutlined />}</span>
                           <span className={styles.projectMain}>
