@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
@@ -122,6 +123,7 @@ public class StandardSandboxLifecycleService implements SandboxLifecycleFacade {
                 userCode, sandboxType, launchRequest.getEnvs(), launchRequest.getUserInfo(), spec);
             String idempotencyKey = buildIdempotencyKey(userCode, sandboxType, launchRequest.getMetadata());
             mergeLaunchMetadata(request, launchRequest.getMetadata());
+            mergeSystemEnvs(request, launchRequest.getEnvs());
 
             Optional<SandboxRuntimeInstance> reusable = Boolean.TRUE.equals(launchRequest.getSkipReusableSandbox())
                 ? Optional.empty()
@@ -334,6 +336,28 @@ public class StandardSandboxLifecycleService implements SandboxLifecycleFacade {
         } catch (Exception e) {
             throw new IllegalStateException("Failed to serialize SandboxInfo", e);
         }
+    }
+
+    /**
+     * Merge system-level env vars from launchEnvs into the CreateSandboxRequest.
+     * System env vars (e.g. BYAI_WORKER_ID) are injected for all containers regardless of spec declarations.
+     */
+    private static final Set<String> SYSTEM_ENV_KEYS = java.util.Set.of("BYAI_WORKER_ID");
+
+    private static void mergeSystemEnvs(CreateSandboxRequest request, Map<String, String> launchEnvs) {
+        if (request == null || launchEnvs == null || launchEnvs.isEmpty()) {
+            return;
+        }
+        Map<String, String> env = request.getEnv() != null
+            ? new LinkedHashMap<>(request.getEnv())
+            : new LinkedHashMap<>();
+        for (String key : SYSTEM_ENV_KEYS) {
+            String value = launchEnvs.get(key);
+            if (value != null && !value.isBlank()) {
+                env.put(key, value);
+            }
+        }
+        request.setEnv(env.isEmpty() ? null : env);
     }
 
     private static void mergeLaunchMetadata(CreateSandboxRequest request, Map<String, String> launchMetadata) {
