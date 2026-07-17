@@ -7,6 +7,7 @@ import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -18,6 +19,7 @@ public class RecorderBycliPathResolver {
     private final SandboxProperties sandboxProperties;
     private final Path explicitFileRoot;
 
+    @Autowired
     public RecorderBycliPathResolver(SandboxProperties sandboxProperties) {
         this.sandboxProperties = sandboxProperties;
         this.explicitFileRoot = null;

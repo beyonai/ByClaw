@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -43,6 +44,7 @@ public class RecorderDraftStore {
     private final Runnable beforeSecureWrite;
     private final Runnable beforeSecureDelete;
 
+    @Autowired
     public RecorderDraftStore(
         RecorderBycliPathResolver pathResolver,
         RecorderDirectoryProvisioner directoryProvisioner

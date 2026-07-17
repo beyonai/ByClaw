@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.state.application.service.recorder;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.iwhalecloud.byai.gateway.sandbox.config.SandboxProperties;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.autoconfigure.context.ConfigurationPropertiesAutoConfiguration;
@@ -20,6 +21,23 @@ class RecorderBrowserPortConfigurationTest {
     private final ApplicationContextRunner savePropertiesContextRunner = new ApplicationContextRunner()
         .withConfiguration(AutoConfigurations.of(ConfigurationPropertiesAutoConfiguration.class))
         .withUserConfiguration(RecorderSaveProperties.class);
+
+    private final ApplicationContextRunner draftStoreContextRunner = new ApplicationContextRunner()
+        .withBean(SandboxProperties.class, SandboxProperties::new)
+        .withUserConfiguration(
+            RecorderBycliPathResolver.class,
+            LinuxRecorderDirectoryProvisioner.class,
+            RecorderDraftStore.class
+        );
+
+    @Test
+    void recorderDraftStoreUsesProductionConstructorsInSpringContext() {
+        draftStoreContextRunner.run(context -> {
+            assertThat(context).hasNotFailed();
+            assertThat(context).hasSingleBean(RecorderBycliPathResolver.class);
+            assertThat(context).hasSingleBean(RecorderDraftStore.class);
+        });
+    }
 
     @Test
     void saveAdapterPropertiesUseSafeDisabledDefaults() {
