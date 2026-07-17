@@ -5,9 +5,11 @@ export const DEFAULT_SIDER_CONTENT_WIDTH = 280;
 export const SIDER_BAR_WIDTH = 56;
 export const HALF_MAIN_CONTENT_DETAIL_PANEL_WIDTH = 'half-main-content';
 
-export type DetailPanelOptions = {
+export interface DetailPanelOptions {
   width?: number | string;
-};
+  // 右侧详情面板支持覆盖主会话区域，项目空间渠道配置需要用到。
+  overlay?: boolean;
+}
 
 export const SiderContentContext = createContext<{
   siderContentWidth: number;

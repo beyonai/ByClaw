@@ -1,18 +1,31 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Button, Form, Input, Modal, Select, Switch, Tooltip } from 'antd';
+import { Button, Form, Input, Modal, Select, Spin, Switch, Tooltip, message } from 'antd';
 import { CloseCircleFilled, PlusOutlined } from '@ant-design/icons';
 import AddAuthModal from '@/pages/manager/components/AuthListDrawer/AddAuthModal';
-import AntdIcon from '@/components/AntdIcon';
-import { PROJECT_TYPE_OPTIONS } from '../../constants';
-import type { ProjectShareTarget, ProjectSpace } from '../../types';
+import { listProjectMembers } from '@/service/devloop';
+import { getDcSystemConfigListByStandType } from '@/service/system';
+import { DEFAULT_PROJECT_TYPE_OPTION, PROJECT_TYPE_OPTIONS, PROJECT_TYPE_STAND_TYPE } from '../../constants';
+import type { ProjectSpace } from '../../types';
 import styles from './index.module.less';
+
+export interface ProjectShareMember {
+  id: string;
+  type: 'USER';
+  userId: string | number;
+  userCode?: string;
+  userName: string;
+  name: string;
+  memberId?: string | number;
+  role?: string;
+}
 
 export interface ProjectFormValues {
   projectName: string;
   description?: string;
   projectType: ProjectSpace['projectType'];
   sharedFlag: boolean;
-  shareTargets?: ProjectShareTarget[];
+  shareMembers?: ProjectShareMember[];
+  shareMembersLoaded?: boolean;
 }
 
 interface Props {
@@ -20,25 +33,76 @@ interface Props {
   title?: string;
   loading?: boolean;
   initialValues?: Partial<ProjectFormValues>;
+  projectId?: string | number;
   onCancel: () => void;
   onSubmit: (values: ProjectFormValues) => void;
 }
 
-const getShareTargetName = (target: ProjectShareTarget) => target.name || target.targetName || '';
+type ProjectTypeOption = { label: string; value: ProjectSpace['projectType'] };
 
-const getShareTargetType = (target: ProjectShareTarget) => String(target.type || target.targetType || '').toUpperCase();
+const getMemberUserId = (member: any) => member.userId ?? String(member.id || '').replace(/^user_/, '');
+
+const getStaticConfigList = (response: any): any[] => {
+  if (Array.isArray(response)) return response;
+  if (Array.isArray(response?.data)) return response.data;
+  if (Array.isArray(response?.rows)) return response.rows;
+  if (Array.isArray(response?.list)) return response.list;
+  return [];
+};
+
+const getProjectTypeOptionsFromConfig = (response: any): ProjectTypeOption[] => {
+  const validProjectTypeSet = new Set(['normal', 'develop', 'default']);
+
+  return getStaticConfigList(response)
+    .map((item, index) => {
+      const value = `${item?.paramValue || item?.paramEnName || ''}`.trim();
+      const label = item?.paramName || item?.paramDesc || item?.paramEnName || value;
+      return {
+        label,
+        value,
+        seq: Number(item?.paramSeq ?? index),
+      };
+    })
+    .filter((item) => item.value && validProjectTypeSet.has(item.value))
+    .sort((left, right) => left.seq - right.seq)
+    .map((item) => ({
+      label: item.label,
+      value: item.value as ProjectSpace['projectType'],
+    }));
+};
+
+const normalizeShareMember = (member: any): ProjectShareMember => {
+  const userId = getMemberUserId(member);
+  const userName = member.userName || member.name || member.targetName || `${userId || ''}`;
+  return {
+    ...member,
+    id: member.id || `user_${userId}`,
+    type: 'USER',
+    userId,
+    userCode: member.userCode,
+    userName,
+    name: userName,
+    memberId: member.memberId,
+    role: member.role,
+  };
+};
 
 const ProjectFormModal: React.FC<Props> = ({
   open,
   title = '新建项目空间',
   loading,
   initialValues,
+  projectId,
   onCancel,
   onSubmit,
 }) => {
   const [form] = Form.useForm<ProjectFormValues>();
   const [authModalOpen, setAuthModalOpen] = useState(false);
-  const [selectedShareTargets, setSelectedShareTargets] = useState<ProjectShareTarget[]>([]);
+  const [selectedShareMembers, setSelectedShareMembers] = useState<ProjectShareMember[]>([]);
+  const [shareMembersLoading, setShareMembersLoading] = useState(false);
+  const [shareMembersLoaded, setShareMembersLoaded] = useState(false);
+  const [projectTypeConfigOptions, setProjectTypeConfigOptions] = useState<ProjectTypeOption[]>(PROJECT_TYPE_OPTIONS);
+  const [projectTypeLoading, setProjectTypeLoading] = useState(false);
   const projectType = Form.useWatch('projectType', form);
   const sharedFlag = Form.useWatch('sharedFlag', form);
   const isDevelopProject = projectType === 'develop';
@@ -49,37 +113,89 @@ const ProjectFormModal: React.FC<Props> = ({
       description: '',
       projectType: 'normal' as ProjectSpace['projectType'],
       sharedFlag: false,
-      shareTargets: [],
+      shareMembers: [],
       ...initialValues,
     }),
     [initialValues]
   );
+  const projectTypeOptions = useMemo(() => {
+    const configOptions = projectTypeConfigOptions.length ? projectTypeConfigOptions : PROJECT_TYPE_OPTIONS;
+    const normalOptions = configOptions.filter((option) => option.value !== 'default');
+
+    // 默认项目只用于编辑默认项目时回显，不放入新建项目和普通项目编辑的下拉选项。
+    if (formInitialValues.projectType === 'default') {
+      const defaultOption = configOptions.find((option) => option.value === 'default') || DEFAULT_PROJECT_TYPE_OPTION;
+      return [defaultOption, ...normalOptions];
+    }
+    return normalOptions;
+  }, [formInitialValues.projectType, projectTypeConfigOptions]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    setProjectTypeLoading(true);
+    getDcSystemConfigListByStandType(PROJECT_TYPE_STAND_TYPE, { responseCfg: { hideErrorTips: true } })
+      .then((response) => {
+        const nextOptions = getProjectTypeOptionsFromConfig(response);
+        // 静态参数为空时回退本地默认值，避免配置异常导致项目表单不可用。
+        setProjectTypeConfigOptions(nextOptions.length ? nextOptions : PROJECT_TYPE_OPTIONS);
+      })
+      .catch((error) => {
+        console.error('Failed to load project type config:', error);
+        setProjectTypeConfigOptions(PROJECT_TYPE_OPTIONS);
+      })
+      .finally(() => {
+        setProjectTypeLoading(false);
+      });
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
     // Antd Form 的 initialValues 只在首次挂载生效，每次打开弹窗时主动重置，避免新建项目带出上次旧值。
     form.resetFields();
     form.setFieldsValue(formInitialValues);
-    setSelectedShareTargets(formInitialValues.shareTargets || []);
-  }, [form, formInitialValues, open]);
+    setSelectedShareMembers((formInitialValues.shareMembers || []).map(normalizeShareMember));
+    setShareMembersLoaded(!projectId);
+  }, [form, formInitialValues, open, projectId]);
+
+  useEffect(() => {
+    if (!open || !projectId) return;
+
+    setShareMembersLoading(true);
+    setShareMembersLoaded(false);
+    listProjectMembers(Number(projectId))
+      .then((res) => {
+        const memberList = Array.isArray(res) ? res : [];
+        // 共享成员直接使用成员 tab 的同一份项目成员数据，避免共享配置和成员列表两套数据不一致。
+        setSelectedShareMembers(memberList.map(normalizeShareMember));
+        setShareMembersLoaded(true);
+      })
+      .catch((error) => {
+        console.error('Failed to load project members for share members:', error);
+        message.error('共享成员加载失败');
+      })
+      .finally(() => {
+        setShareMembersLoading(false);
+      });
+  }, [open, projectId]);
 
   useEffect(() => {
     if (!open || !isDevelopProject) return;
-    // 研发项目按规则必须共享，切换到研发时强制打开开关并保留已选共享对象。
+    // 研发项目按规则必须共享，切换到研发时强制打开开关并保留已选共享成员。
     form.setFieldValue('sharedFlag', true);
   }, [form, isDevelopProject, open]);
 
   const handleRemoveShareTarget = (targetId: string) => {
-    setSelectedShareTargets((prev) => prev.filter((target) => target.id !== targetId));
+    setSelectedShareMembers((prev) => prev.filter((target) => target.id !== targetId));
   };
 
   const handleModalOk = () => {
     if (loading) return;
 
-    // 后端共享对象保存/校验暂未实现，先不限制必填；实现后恢复下面这段校验。
+    // 后端共享成员保存/校验暂未实现，先不限制必填；实现后恢复下面这段校验。
     // const submitSharedFlag = form.getFieldValue('projectType') === 'develop' || form.getFieldValue('sharedFlag');
-    // if (submitSharedFlag && !selectedShareTargets.length) {
-    //   form.setFields([{ name: 'shareTargets', errors: ['请选择共享对象'] }]);
+    // if (submitSharedFlag && !selectedShareMembers.length) {
+    //   form.setFields([{ name: 'shareMembers', errors: ['请选择共享成员'] }]);
     //   return;
     // }
     form.submit();
@@ -87,11 +203,12 @@ const ProjectFormModal: React.FC<Props> = ({
 
   const handleSubmit = (values: ProjectFormValues) => {
     const submitSharedFlag = values.projectType === 'develop' || values.sharedFlag;
-    // 共享对象由授权弹窗维护本地状态，提交时合并进表单值，避免未注册字段丢失。
+    // 共享成员由成员 tab 同源数据维护，提交时合并进表单值，避免未注册字段丢失。
     onSubmit({
       ...values,
       sharedFlag: submitSharedFlag,
-      shareTargets: submitSharedFlag ? selectedShareTargets : [],
+      shareMembers: submitSharedFlag ? selectedShareMembers : [],
+      shareMembersLoaded,
     });
   };
 
@@ -115,7 +232,8 @@ const ProjectFormModal: React.FC<Props> = ({
         </Form.Item>
         <Form.Item name="projectType" label="项目类型">
           <Select
-            options={PROJECT_TYPE_OPTIONS}
+            loading={projectTypeLoading}
+            options={projectTypeOptions}
             onChange={(value: ProjectSpace['projectType']) => {
               if (value === 'develop') {
                 form.setFieldValue('sharedFlag', true);
@@ -123,8 +241,7 @@ const ProjectFormModal: React.FC<Props> = ({
               }
               // 切回普通项目时恢复默认不共享，避免沿用研发项目的强制共享状态。
               form.setFieldValue('sharedFlag', false);
-              setSelectedShareTargets([]);
-              form.setFields([{ name: 'shareTargets', errors: [] }]);
+              form.setFields([{ name: 'shareMembers', errors: [] }]);
             }}
           />
         </Form.Item>
@@ -133,53 +250,62 @@ const ProjectFormModal: React.FC<Props> = ({
             disabled={isDevelopProject}
             onChange={(checked) => {
               if (!checked) {
-                setSelectedShareTargets([]);
-                form.setFields([{ name: 'shareTargets', errors: [] }]);
+                form.setFields([{ name: 'shareMembers', errors: [] }]);
               }
             }}
           />
         </Form.Item>
         {isProjectShared && (
-          <Form.Item label="共享对象">
-            {/* 后端共享对象保存/校验暂未实现，先不展示必填态；实现后恢复 required/validateStatus/help。 */}
+          <Form.Item label="共享成员">
+            {/* 后端共享成员保存/校验暂未实现，先不展示必填态；实现后恢复 required/validateStatus/help。 */}
             <div className={styles.shareTargetField}>
-              <div className={styles.shareTargetList}>
-                {selectedShareTargets.map((target) => (
-                  <div key={target.id} className={styles.shareTargetItem}>
-                    {getShareTargetType(target) === 'USER' ? (
-                      <div className={styles.userAvatar}>{getShareTargetName(target).slice(-2)}</div>
-                    ) : (
-                      <div className={styles.orgAvatar}>
-                        <AntdIcon type="icon-a-Chart-graphguanxitu" style={{ fontSize: 14 }} />
-                      </div>
-                    )}
-                    <Tooltip title={getShareTargetName(target)} placement="top">
-                      <div className={styles.shareTargetName}>{getShareTargetName(target)}</div>
-                    </Tooltip>
-                    <CloseCircleFilled
-                      className={styles.shareTargetClose}
-                      onClick={() => handleRemoveShareTarget(target.id)}
-                    />
-                  </div>
-                ))}
-              </div>
-              <Button icon={<PlusOutlined />} onClick={() => setAuthModalOpen(true)}>
-                新增授权对象
-              </Button>
+              <Spin spinning={shareMembersLoading}>
+                <div className={styles.shareTargetList}>
+                  {selectedShareMembers.map((member) => (
+                    <div key={member.id} className={styles.shareTargetItem}>
+                      <div className={styles.userAvatar}>{member.name.slice(-2)}</div>
+                      <Tooltip title={member.name} placement="top">
+                        <div className={styles.shareTargetName}>{member.name}</div>
+                      </Tooltip>
+                      {member.role !== 'owner' && (
+                        <CloseCircleFilled
+                          className={styles.shareTargetClose}
+                          onClick={() => handleRemoveShareTarget(member.id)}
+                        />
+                      )}
+                    </div>
+                  ))}
+                  {!selectedShareMembers.length && <span className={styles.shareTargetEmpty}>暂无共享成员</span>}
+                  {/* 新增按钮跟随成员标签流式排列，避免独占一整行。 */}
+                  <Button
+                    size="small"
+                    className={styles.shareTargetAddButton}
+                    icon={<PlusOutlined />}
+                    disabled={shareMembersLoading}
+                    onClick={() => setAuthModalOpen(true)}
+                  >
+                    新增
+                  </Button>
+                </div>
+              </Spin>
             </div>
           </Form.Item>
         )}
       </Form>
       {authModalOpen && (
         <AddAuthModal
-          title="新增授权对象"
-          value={selectedShareTargets}
-          allowedTypes={['ORG', 'USER']}
+          title="新增共享成员"
+          value={selectedShareMembers}
+          onlyUser
           showPost={false}
           onCancel={() => setAuthModalOpen(false)}
-          onOk={(targets: ProjectShareTarget[]) => {
-            setSelectedShareTargets(targets);
-            form.setFields([{ name: 'shareTargets', errors: [] }]);
+          onOk={(members: any[]) => {
+            const memberMap = new Map<string, ProjectShareMember>();
+            [...selectedShareMembers, ...members.map(normalizeShareMember)].forEach((member) => {
+              memberMap.set(String(member.userId), member);
+            });
+            setSelectedShareMembers(Array.from(memberMap.values()));
+            form.setFields([{ name: 'shareMembers', errors: [] }]);
             setAuthModalOpen(false);
           }}
         />

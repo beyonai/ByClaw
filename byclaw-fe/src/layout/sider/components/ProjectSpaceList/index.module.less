@@ -168,8 +168,12 @@
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 8px 0 10px;
+  gap: 6px;
+  padding: 4px 6px 8px;
+  background: #fff;
+  // 父子滚动同时触发时隔离绘制层，避免展开会话列表透到下方项目缝隙里。
+  isolation: isolate;
+  overscroll-behavior: contain;
   scrollbar-width: none;
 
   &::-webkit-scrollbar {
@@ -178,17 +182,24 @@
 }
 
 .projectItem {
+  position: relative;
+  z-index: 1;
+  border: 1px solid transparent;
   border-radius: 10px;
-  padding: 2px 4px;
+  padding: 2px;
   background: transparent;
+  transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
 }
 
 .projectItemExpanded {
-  height: 100%;
+  z-index: 0;
   min-height: 0;
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  border-color: #dfe6f0;
+  background: #fff;
+  box-shadow: 0 8px 20px rgba(31, 45, 77, 0.08);
 }
 
 .projectTop {
@@ -198,8 +209,8 @@
   display: flex;
   align-items: center;
   background: #fff;
-  border-radius: 10px;
-  padding: 6px 4px;
+  border-radius: 8px;
+  padding: 3px 4px;
   transition: background-color 0.2s;
 
   &:hover {
@@ -216,6 +227,11 @@
   }
 }
 
+.projectItemExpanded .projectTop {
+  border-bottom: 1px solid #edf1f7;
+  border-radius: 8px 8px 0 0;
+}
+
 .projectHeader {
   width: 100%;
   min-width: 0;
@@ -225,7 +241,7 @@
   background: transparent;
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   text-align: left;
   cursor: pointer;
   transition: padding-right 0.2s;
@@ -257,7 +273,7 @@
 
 .expandIcon {
   flex: 0 0 12px;
-  height: 38px;
+  height: 28px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -293,7 +309,7 @@
   color: #1f2633;
   font-size: 13px;
   font-weight: 600;
-  line-height: 18px;
+  line-height: 17px;
 }
 
 .projectDesc {
@@ -303,11 +319,11 @@
 }
 
 .projectTag {
-  height: 20px;
-  line-height: 20px;
+  height: 18px;
+  line-height: 18px;
   flex-shrink: 0;
   margin-inline-end: 0;
-  padding: 0 6px;
+  padding: 0 5px;
   border-radius: 6px;
   font-size: 12px;
   font-weight: 700;
@@ -327,31 +343,35 @@
   background: #e9f8f0;
 }
 
+.projectTagDefault {
+  color: #5f6b7a;
+  background: #eef2f7;
+}
+
 .projectTagDevelopment {
   color: #5f6b7a;
   background: #eef2f7;
 }
 
 .sessionList {
-  margin-top: 6px;
-  // 项目内会话复用普通会话列表的视觉密度，不再按树节点额外缩进。
-  padding-left: 0;
+  position: relative;
+  z-index: 0;
+  margin-top: 0;
+  // 项目头和会话列表共用外层卡片，这里只负责卡片内部会话区域滚动。
+  padding: 6px 4px 8px;
   max-height: min(520px, calc(100vh - 350px));
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 2px;
+  background: #fff;
   overscroll-behavior: contain;
+  contain: paint;
   scrollbar-width: none;
 
   &::-webkit-scrollbar {
     display: none;
   }
-}
-
-.projectItemExpanded .sessionList {
-  flex: 1;
-  max-height: none;
 }
 
 .sessionItem {
@@ -435,10 +455,26 @@
 }
 
 .sessionEmpty {
-  padding: 8px 0;
-  color: #a4aab2;
-  font-size: 12px;
-  text-align: center;
+  min-height: 120px;
+  margin: 0;
+  padding: 24px 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+
+  :global {
+    .@{antPrefix}-empty-image {
+      height: 54px;
+      margin-bottom: 8px;
+    }
+
+    .@{antPrefix}-empty-description {
+      color: #8a96a8;
+      font-size: 14px;
+      line-height: 20px;
+    }
+  }
 }
 
 .sessionMoreLoading {
@@ -479,7 +515,7 @@
     .@{antPrefix}-tabs-nav-list {
       width: 100%;
       display: grid !important;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
+      grid-template-columns: repeat(var(--project-detail-tab-count, 4), minmax(0, 1fr));
       padding: 3px;
       border-radius: 10px;
       background: #f1f3f8;
@@ -858,29 +894,6 @@
   line-height: 22px;
 }
 
-.detailScanStatus {
-  padding: 10px 12px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: #526075;
-  font-size: 12px;
-  border-bottom: 1px solid #edf1f7;
-  background: #fafcff;
-}
-
-.detailStatusDot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  background: #31b576;
-}
-
-.detailTime {
-  color: #8a96a8;
-}
-
 .detailSourceTags {
   padding: 12px;
   display: flex;
@@ -905,6 +918,138 @@
   font-weight: 600;
 }
 
+.detailChannelEntry {
+  width: 100%;
+  min-height: 38px;
+  margin-bottom: 10px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  color: #1f2633;
+  background: #f2f6fa;
+  text-align: left;
+  cursor: pointer;
+  font-weight: 500;
+  transition: background-color 0.2s;
+
+  &:hover {
+    background: #eef3f8;
+  }
+
+  > span {
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  strong {
+    color: #1f2633;
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 20px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  :global {
+    .anticon {
+      flex-shrink: 0;
+      color: #1f2633;
+      font-size: 14px;
+
+      &:last-child {
+        margin-left: auto;
+      }
+    }
+  }
+}
+
+.detailChannelEntryIcon {
+  flex-shrink: 0;
+  font-size: 18px;
+  color: #1f2633;
+}
+
+.detailChannelPanel {
+  height: 100%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+}
+
+.detailChannelPanelHeader {
+  flex-shrink: 0;
+  min-height: 72px;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid #edf1f7;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.detailChannelPanelTitle {
+  min-width: 0;
+
+  h3,
+  p {
+    margin: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  h3 {
+    color: #1f2633;
+    font-size: 18px;
+    font-weight: 700;
+    line-height: 26px;
+  }
+
+  p {
+    color: #7c8798;
+    font-size: 13px;
+    line-height: 20px;
+  }
+}
+
+.detailChannelPanelActions {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+
+  :global {
+    .@{antPrefix}-btn {
+      height: 34px;
+      border-radius: 9px;
+    }
+  }
+}
+
+.detailChannelPanelBody {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px 24px;
+  background: #fff;
+}
+
+.detailChannelSourceList {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+
+  .detailSourceCard {
+    min-height: 178px;
+  }
+}
+
 .detailSectionHeader {
   margin-top: 10px;
   margin-bottom: 10px;
@@ -922,15 +1067,44 @@
   gap: 8px;
 }
 
+.detailRequirementMore {
+  height: 28px;
+  color: #8a96a8;
+  font-size: 12px;
+  line-height: 28px;
+  text-align: center;
+}
+
 .detailRequirementItem {
   min-height: 72px;
   padding: 10px;
   border: 1px solid #dfe6f0;
   border-radius: 10px;
   display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: #fff;
+  cursor: pointer;
+  transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+
+  &:hover {
+    border-color: rgba(36, 107, 254, 0.35);
+    background: #fbfdff;
+    box-shadow: 0 4px 12px rgba(36, 107, 254, 0.08);
+  }
+}
+
+.detailRequirementItemExpanded {
+  border-color: rgba(36, 107, 254, 0.42);
+  box-shadow: 0 6px 16px rgba(36, 107, 254, 0.1);
+}
+
+.detailRequirementSummary {
+  width: 100%;
+  min-width: 0;
+  display: flex;
   align-items: center;
   gap: 8px;
-  background: #fff;
 }
 
 .detailScore {
@@ -974,6 +1148,97 @@
   }
 }
 
+.detailRequirementExpanded {
+  width: 100%;
+  padding: 10px;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: #f7f9fc;
+}
+
+.detailRequirementMetaGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+
+  span {
+    min-width: 0;
+    padding: 6px 8px;
+    border-radius: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    background: #fff;
+  }
+
+  em {
+    color: #8a96a8;
+    font-size: 11px;
+    font-style: normal;
+    line-height: 16px;
+  }
+
+  strong {
+    min-width: 0;
+    color: #344056;
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 18px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+}
+
+.detailRequirementDetailText {
+  padding: 8px;
+  border-radius: 6px;
+  background: #fff;
+
+  em {
+    display: block;
+    margin-bottom: 4px;
+    color: #8a96a8;
+    font-size: 11px;
+    font-style: normal;
+    line-height: 16px;
+  }
+
+  p {
+    display: -webkit-box;
+    margin: 0;
+    color: #344056;
+    font-size: 12px;
+    line-height: 18px;
+    overflow: hidden;
+    -webkit-line-clamp: 4;
+    line-clamp: 4;
+    -webkit-box-orient: vertical;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+}
+
+.detailRequirementExtra {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  color: #7c8798;
+  font-size: 12px;
+  line-height: 18px;
+
+  span,
+  a {
+    max-width: 100%;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+}
+
 .detailRequirementAction {
   flex-shrink: 0;
   min-width: 48px;
@@ -984,6 +1249,18 @@
   line-height: 30px;
 }
 
+.detailRequirementStartedAction {
+  &,
+  &:disabled,
+  &[disabled] {
+    color: #2f8f63;
+    border-color: #bde7cf;
+    background: #edf9f2;
+    opacity: 1;
+    cursor: not-allowed;
+  }
+}
+
 .detailTaskPanel {
   min-width: 0;
 }
@@ -992,23 +1269,11 @@
   margin: 10px 0 12px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 10px;
   color: #526075;
   font-size: 13px;
   font-weight: 400;
-
-  > span {
-    min-width: 0;
-    line-height: 20px;
-  }
-}
-
-.detailTaskSummary {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 2px;
 }
 
 .detailTaskList {
@@ -1023,7 +1288,7 @@
   border-left: 3px solid #faad14;
   border-radius: 10px;
   display: flex;
-  align-items: flex-start;
+  flex-direction: column;
   gap: 10px;
   background: #fff;
   cursor: pointer;
@@ -1033,6 +1298,19 @@
     border-color: #cfd8e8;
     box-shadow: 0 4px 12px rgba(28, 48, 90, 0.08);
   }
+}
+
+.detailTaskCardExpanded {
+  border-color: #b8cdfd;
+  box-shadow: 0 6px 16px rgba(28, 48, 90, 0.1);
+}
+
+.detailTaskCardHeader {
+  min-width: 0;
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
 }
 
 .detailTaskMain {
@@ -1093,10 +1371,239 @@
   }
 }
 
+.detailTaskInlineDetail {
+  width: 100%;
+  padding-top: 10px;
+  border-top: 1px dashed #dfe6f0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 10px;
+
+  span {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  label {
+    color: #8a96a8;
+    font-size: 12px;
+    line-height: 16px;
+    cursor: inherit;
+  }
+
+  strong {
+    min-width: 0;
+    color: #1f2633;
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 18px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+}
+
+.detailTaskInlineWide {
+  grid-column: span 2;
+}
+
 .detailSourceGrid {
   display: grid;
   grid-template-columns: 1fr;
   gap: 8px;
+}
+
+.detailResourcePanel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.detailResourceBlock {
+  border: 1px solid #dfe6f0;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.detailResourceBlockHeader {
+  min-height: 58px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #edf1f7;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  :global {
+    .@{antPrefix}-segmented {
+      flex-shrink: 0;
+      height: 30px;
+      padding: 2px;
+      border-radius: 8px;
+      display: inline-flex;
+      align-items: center;
+      background: #eef2f7;
+    }
+
+    .@{antPrefix}-segmented-item {
+      height: 26px;
+      min-height: 26px;
+      border-radius: 7px;
+      display: inline-flex;
+      align-items: center;
+      color: #6f7c90;
+      font-size: 12px;
+      line-height: 1;
+    }
+
+    .@{antPrefix}-segmented-item-label {
+      height: 26px;
+      min-height: 0;
+      padding: 0 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 1;
+    }
+
+    .@{antPrefix}-segmented-item-selected {
+      color: #246bfe;
+      background: #fff;
+    }
+  }
+}
+
+.detailResourceBlockTitle {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+
+  strong,
+  span {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  strong {
+    color: #1f2633;
+    font-size: 14px;
+    font-weight: 700;
+    line-height: 20px;
+  }
+
+  span {
+    color: #8592a6;
+    font-size: 12px;
+    line-height: 16px;
+  }
+}
+
+.detailResourceBlockCount {
+  flex-shrink: 0;
+  min-width: 18px;
+  color: #728096;
+  font-size: 13px;
+  line-height: 18px;
+  text-align: right;
+}
+
+.detailResourceFileList {
+  min-height: 120px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.detailResourceFileItem {
+  min-width: 0;
+  height: 30px;
+  padding: 0 6px;
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #526075;
+
+  &:hover {
+    background: #f5f8fd;
+  }
+}
+
+.detailResourceFileIcon {
+  flex-shrink: 0;
+  font-size: 16px;
+}
+
+.detailResourceFileName {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.detailResourceEmpty {
+  min-height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #9aa6b8;
+  font-size: 13px;
+  text-align: center;
+}
+
+.detailSessionResourceList {
+  min-height: 160px;
+}
+
+.detailSessionResourceGroup {
+  border-top: 1px solid #edf1f7;
+
+  &:first-child {
+    border-top: 0;
+  }
+}
+
+.detailSessionResourceHeader {
+  height: 34px;
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #344056;
+  background: #f6f8fb;
+}
+
+.detailSessionResourceArrow {
+  flex-shrink: 0;
+  color: #8b98aa;
+  font-size: 10px;
+}
+
+.detailSessionResourceName {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 20px;
+}
+
+.detailSessionResourceCount {
+  flex-shrink: 0;
+  color: #8a96a8;
+  font-size: 12px;
+  line-height: 18px;
 }
 
 .detailResourceCard {
@@ -1159,6 +1666,106 @@
     font-size: 13px;
     font-weight: 600;
   }
+}
+
+.sourceModal {
+  :global {
+    .@{antPrefix}-modal-content {
+      // 收集源编辑字段较多时只滚动弹窗内容，避免撑出页面级滚动条。
+      max-height: calc(100vh - 96px);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .@{antPrefix}-modal-header,
+    .@{antPrefix}-modal-footer {
+      flex-shrink: 0;
+    }
+
+    .@{antPrefix}-modal-body {
+      min-height: 0;
+      // 收集源表单滚动区单独限高，保证底部操作按钮始终完整露出。
+      max-height: calc(100vh - 260px);
+      overflow-y: auto;
+      padding-right: 20px;
+    }
+  }
+}
+
+.sourceSelectPopup {
+  min-width: 180px;
+
+  :global {
+    .@{antPrefix}-select-item-option-content {
+      white-space: normal;
+      overflow: visible;
+      text-overflow: clip;
+      line-height: 20px;
+    }
+  }
+}
+
+.manualRequirementModal {
+  :global {
+    .@{antPrefix}-modal-content {
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    .@{antPrefix}-modal-header {
+      padding: 20px 24px 16px;
+      margin-bottom: 0;
+      border-bottom: 1px solid #edf1f7;
+    }
+
+    .@{antPrefix}-modal-body {
+      padding: 20px 24px 4px;
+    }
+
+    .@{antPrefix}-modal-footer {
+      padding: 14px 24px 20px;
+      border-top: 1px solid #edf1f7;
+    }
+
+    .@{antPrefix}-btn {
+      height: 34px;
+      border-radius: 9px;
+    }
+
+    .@{antPrefix}-input,
+    .@{antPrefix}-select-selector {
+      border-radius: 8px;
+    }
+  }
+}
+
+.manualRequirementTitle {
+  h3 {
+    margin: 0 0 6px;
+    color: #1f2633;
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 22px;
+  }
+
+  p {
+    margin: 0;
+    color: #75839a;
+    font-size: 13px;
+    line-height: 18px;
+  }
+}
+
+.manualRequirementForm {
+  .formField {
+    margin-bottom: 16px;
+  }
+}
+
+.manualRequirementRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
 }
 
 .repoModalDivider {

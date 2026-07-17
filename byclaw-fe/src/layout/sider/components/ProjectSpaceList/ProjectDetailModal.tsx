@@ -19,6 +19,7 @@ import {
 import {
   AppstoreOutlined,
   ClockCircleOutlined,
+  CloseOutlined,
   DeleteOutlined,
   DingdingOutlined,
   EditOutlined,
@@ -27,6 +28,7 @@ import {
   LeftOutlined,
   PlusOutlined,
   ReloadOutlined,
+  RightOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import {
@@ -38,6 +40,7 @@ import {
   deleteProjectRepo,
   deleteScanSource,
   getProject,
+  listProjectSessionsByQo,
   listProjectMembers,
   listScanLogItems,
   listScanLogs,
@@ -50,9 +53,25 @@ import {
   triggerScan,
   updateScanSource,
 } from '@/service/devloop';
-import TaskDetailDrawer from '@/pages/devloop/TaskDetailDrawer';
+import { listFiles, type FileBrowserItem } from '@/service/fileBrowser';
 import TaskKanban from '@/pages/devloop/TaskKanban';
 import type { ProjectSpace } from '@/pages/projectSpace/types';
+import { getArrayData, normalizeProjectSession } from '@/pages/projectSpace/utils';
+import AntdIcon from '@/components/AntdIcon';
+import useGlobal from '@/hooks/useGlobal';
+import { useActiveSiderAgent } from '@/layout/sider/components/ActiveSiderAgentBar';
+import FileSpaceBlock, {
+  getFileSpaceFileCount,
+} from '@/layout/sider/components/FileSiderPanel/components/FileSpaceBlock';
+import { SHARED_FILE_PATH, type FileTreeItem } from '@/layout/sider/components/FileSiderPanel/constants';
+import {
+  ensureDirectoryPath,
+  getSessionFilePath,
+  isDirectory,
+  sortFileBrowserItems,
+  unwrapListResponse,
+} from '@/layout/sider/components/FileSiderPanel/utils';
+import { SiderContentContext } from '@/layout/sider/siderContentContext';
 import ProjectMemberList from './ProjectMemberList';
 import styles from './index.module.less';
 
@@ -88,10 +107,18 @@ type ScanLogEntry = {
 type RequirementItem = {
   itemId: number;
   title: string;
+  originId?: string;
+  originUrl?: string;
+  action?: string;
   createTime?: string;
   sourceType?: string;
   sourceName?: string;
   sessionId?: number;
+  originalContent?: string;
+  productContent?: string;
+  content?: string;
+  description?: string;
+  summary?: string;
 };
 
 type SourceForm = {
@@ -107,13 +134,26 @@ type SourceForm = {
   repoId?: number;
 };
 
+type ManualRequirementForm = {
+  sourceType: string;
+  branch: string;
+  title: string;
+  originalContent: string;
+  productContent: string;
+};
+
+type ResourceFileScope = 'current' | 'all';
+type ProjectResourceSession = NonNullable<ProjectSpace['sessions']>[number];
+
 type Props = {
   project?: ProjectSpace;
   onBack: () => void;
   onEditProject?: (project: ProjectSpace) => void;
+  onProjectSharedChange?: (projectId: string | number) => void;
 };
 
 const SCORE_COLORS = ['#e9f8f0', '#fff3dc', '#eaf2ff'];
+const REQUIREMENT_PAGE_SIZE = 20;
 
 const PHASE_COLORS: Record<string, string> = {
   分诊: 'orange',
@@ -145,6 +185,14 @@ const getDefaultSourceForm = (): SourceForm => ({
   repoId: undefined,
 });
 
+const getDefaultManualRequirementForm = (): ManualRequirementForm => ({
+  sourceType: 'manual',
+  branch: 'develop',
+  title: '',
+  originalContent: '',
+  productContent: '',
+});
+
 const formatConfig = (type: string, config?: string) => {
   try {
     const parsedConfig = JSON.parse(config || '{}');
@@ -167,13 +215,38 @@ const getSourceLabel = (sourceType?: string) => {
   return '需求来源';
 };
 
-const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject }) => {
+const getSessionResourceName = (session: Partial<ProjectResourceSession>) => session?.sessionName || '未命名会话';
+
+const getRequirementDetailText = (requirement: RequirementItem) =>
+  requirement.productContent ||
+  requirement.originalContent ||
+  requirement.content ||
+  requirement.description ||
+  requirement.summary ||
+  requirement.title ||
+  '-';
+
+const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, onProjectSharedChange }) => {
+  const { sessionId: activeChatSessionId } = useGlobal();
+  const activeSiderAgent = useActiveSiderAgent();
+  const { setDetailPanel, clearDetailPanel } = React.useContext(SiderContentContext);
   const [activeTab, setActiveTab] = useState('requirements');
   const [sources, setSources] = useState<ScanSourceItem[]>([]);
   const [repos, setRepos] = useState<RepoOption[]>([]);
   const [requirements, setRequirements] = useState<RequirementItem[]>([]);
+  const [visibleRequirementCount, setVisibleRequirementCount] = useState(REQUIREMENT_PAGE_SIZE);
+  const [expandedRequirementId, setExpandedRequirementId] = useState<number | null>(null);
+  const [startingRequirementIds, setStartingRequirementIds] = useState<Set<number>>(() => new Set());
   const [tasks, setTasks] = useState<any[]>([]);
-  const [members, setMembers] = useState<any[]>([]);
+  const [, setMembers] = useState<any[]>([]);
+  const [resourceFileScope, setResourceFileScope] = useState<ResourceFileScope>('current');
+  const [sharedFiles, setSharedFiles] = useState<FileBrowserItem[]>([]);
+  const [sharedFilesLoading, setSharedFilesLoading] = useState(false);
+  const [resourceSessions, setResourceSessions] = useState<ProjectResourceSession[]>([]);
+  const [sessionFilesMap, setSessionFilesMap] = useState<Record<string, FileBrowserItem[]>>({});
+  const [sessionFilesLoadingMap, setSessionFilesLoadingMap] = useState<Record<string, boolean>>({});
+  const [resourceChildrenByPath, setResourceChildrenByPath] = useState<Record<string, FileBrowserItem[]>>({});
+  const [resourceExpandedKeys, setResourceExpandedKeys] = useState<React.Key[]>([]);
   const [lastLog, setLastLog] = useState<ScanLogEntry | null>(null);
   const [sourcesLoading, setSourcesLoading] = useState(false);
   const [requirementsLoading, setRequirementsLoading] = useState(false);
@@ -197,16 +270,52 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject })
   const [logModalSource, setLogModalSource] = useState<ScanSourceItem | null>(null);
   const [logList, setLogList] = useState<ScanLogEntry[]>([]);
   const [logLoading, setLogLoading] = useState(false);
-  const [detailTask, setDetailTask] = useState<any>(null);
+  const [channelPanelOpen, setChannelPanelOpen] = useState(false);
+  // 左侧小面板内直接展开任务详情，避免在窄侧栏里再叠右侧抽屉。
+  const [expandedTaskId, setExpandedTaskId] = useState<string | number | null>(null);
   const [taskKanbanOpen, setTaskKanbanOpen] = useState(false);
   const [repoModalOpen, setRepoModalOpen] = useState(false);
   const [repoForm, setRepoForm] = useState({ repoFullName: '', repoUrl: '', defaultBranch: 'main' });
   const [repoSaving, setRepoSaving] = useState(false);
+  const [manualRequirementOpen, setManualRequirementOpen] = useState(false);
+  const [manualRequirementForm, setManualRequirementForm] = useState<ManualRequirementForm>(
+    getDefaultManualRequirementForm
+  );
   const groupSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dwsAuthTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const dwsAuthTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const startingRequirementIdsRef = useRef<Set<number>>(new Set());
 
   const projectId = Number(project?.projectId);
+  // 项目类型来自后端/静态参数，先按字符串归一，避免默认项目枚举声明不同步时报比较类型错误。
+  const projectType = project?.projectType ? String(project.projectType) : undefined;
+  const isDevelopProject = projectType === 'develop';
+  const fileResourceId = activeSiderAgent.resourceId || (project?.resourceId ? `${project.resourceId}` : '');
+  // 研发项目、普通共享项目展示需求 tab；默认项目和普通未共享项目不展示。
+  const showRequirementsTab = isDevelopProject || (projectType === 'normal' && !!project?.sharedFlag);
+  // 默认项目和未共享的普通项目不展示成员配置，只有研发项目或共享项目需要成员 tab。
+  const showMembersTab = projectType !== 'default' && (isDevelopProject || !!project?.sharedFlag);
+  const projectSessions = useMemo(() => {
+    const sessionMap = new Map<string, ProjectResourceSession>();
+    [...(project?.sessions || []), ...resourceSessions].forEach((session) => {
+      if (session.sessionId) {
+        sessionMap.set(`${session.sessionId}`, session);
+      }
+    });
+    return Array.from(sessionMap.values());
+  }, [project?.sessions, resourceSessions]);
+  const currentResourceSession = useMemo(() => {
+    const activeSessionId = `${activeChatSessionId || ''}`;
+    if (activeSessionId) {
+      return (
+        projectSessions.find((session) => `${session.sessionId}` === activeSessionId) || {
+          sessionId: activeSessionId,
+          sessionName: '当前会话',
+        }
+      );
+    }
+    return projectSessions[0];
+  }, [activeChatSessionId, projectSessions]);
 
   const fetchSources = useCallback(async () => {
     if (!projectId) return [];
@@ -248,6 +357,7 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject })
           }
         }
         setRequirements(allItems);
+        setVisibleRequirementCount(REQUIREMENT_PAGE_SIZE);
         setLastLog(latestLog);
       } finally {
         setRequirementsLoading(false);
@@ -281,16 +391,162 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject })
     setMembers(memberList);
   }, [projectId]);
 
+  const handleMembersChange = useCallback(
+    (memberList: any[]) => {
+      setMembers(memberList);
+      // 成员 tab 新增成员后，父组件统一刷新项目共享状态，避免子组件额外扩展 props 类型。
+      if (memberList.length && projectId && !project?.sharedFlag) {
+        onProjectSharedChange?.(projectId);
+      }
+    },
+    [onProjectSharedChange, project?.sharedFlag, projectId]
+  );
+
+  const fetchProjectResourceSessions = useCallback(async () => {
+    if (!projectId) return;
+    try {
+      // 资源 tab 的“全部会话”按项目会话接口取分组，避免依赖左侧列表是否展开过。
+      const res = await listProjectSessionsByQo(
+        {
+          projectId,
+          pageNum: 1,
+          pageSize: 200,
+        },
+        { responseCfg: { hideErrorTips: true } }
+      );
+      setResourceSessions(getArrayData(res).map((item) => normalizeProjectSession(item, `${projectId}`)));
+    } catch (error) {
+      console.error('Failed to load project resource sessions:', error);
+      setResourceSessions([]);
+    }
+  }, [projectId]);
+
+  const fetchSharedResourceFiles = useCallback(async () => {
+    if (!fileResourceId) return;
+    setSharedFilesLoading(true);
+    try {
+      // 共享文件与文件模块“共享文件空间”同源，路径固定使用 /.shared/。
+      const res = await listFiles({ resourceId: fileResourceId, path: SHARED_FILE_PATH });
+      setSharedFiles(sortFileBrowserItems(unwrapListResponse<FileBrowserItem>(res)));
+    } catch (error) {
+      console.error('Failed to load shared project files:', error);
+      message.error('共享文件加载失败');
+      setSharedFiles([]);
+    } finally {
+      setSharedFilesLoading(false);
+    }
+  }, [fileResourceId]);
+
+  const fetchSessionResourceFiles = useCallback(
+    async (sessionId: string) => {
+      if (!fileResourceId || !sessionId) return;
+      setSessionFilesLoadingMap((prev) => ({ ...prev, [sessionId]: true }));
+      try {
+        // 会话文件与文件模块“会话空间”同源，每个会话对应 /.sessions/{sessionId}/。
+        const res = await listFiles({ resourceId: fileResourceId, path: getSessionFilePath(sessionId) });
+        setSessionFilesMap((prev) => ({
+          ...prev,
+          [sessionId]: sortFileBrowserItems(unwrapListResponse<FileBrowserItem>(res)),
+        }));
+      } catch (error) {
+        console.error('Failed to load session project files:', error);
+        setSessionFilesMap((prev) => ({ ...prev, [sessionId]: [] }));
+      } finally {
+        setSessionFilesLoadingMap((prev) => ({ ...prev, [sessionId]: false }));
+      }
+    },
+    [fileResourceId]
+  );
+
+  const loadResourceTreeNode = useCallback(
+    async (node: FileTreeItem) => {
+      if (!fileResourceId || !isDirectory(node)) return;
+      const directoryPath = ensureDirectoryPath(node.path);
+      if (resourceChildrenByPath[directoryPath]) return;
+
+      try {
+        // 资源 tab 复用文件模块目录树，下钻时按当前目录实时读取子级文件。
+        const res = await listFiles({ resourceId: fileResourceId, path: directoryPath });
+        setResourceChildrenByPath((prev) => ({
+          ...prev,
+          [directoryPath]: sortFileBrowserItems(unwrapListResponse<FileBrowserItem>(res)),
+        }));
+      } catch (error) {
+        console.error('Failed to load project resource child files:', error);
+        setResourceChildrenByPath((prev) => ({ ...prev, [directoryPath]: [] }));
+      }
+    },
+    [fileResourceId, resourceChildrenByPath]
+  );
+
   const fetchDetailData = useCallback(async () => {
     if (!projectId) return;
-    // 打开详情时立即并行请求成员，避免需求 tab 的收集源/日志请求阻塞成员数量展示。
-    await Promise.all([fetchSources().then(fetchRequirements), fetchTasks(), fetchMembers(), fetchRepos()]);
-  }, [fetchMembers, fetchRepos, fetchRequirements, fetchSources, fetchTasks, projectId]);
+    // 打开详情时并行请求当前可见 tab 需要的数据，成员 tab 隐藏时不额外查询成员。
+    const requirementPromise = showRequirementsTab ? fetchSources().then(fetchRequirements) : Promise.resolve();
+    const memberPromise = showMembersTab ? fetchMembers() : Promise.resolve();
+    await Promise.all([requirementPromise, fetchTasks(), memberPromise, fetchRepos()]);
+  }, [
+    fetchMembers,
+    fetchRepos,
+    fetchRequirements,
+    fetchSources,
+    fetchTasks,
+    projectId,
+    showMembersTab,
+    showRequirementsTab,
+  ]);
 
   useEffect(() => {
-    setActiveTab('requirements');
+    setActiveTab(showRequirementsTab ? 'requirements' : 'tasks');
+    setExpandedTaskId(null);
+    setExpandedRequirementId(null);
+    setVisibleRequirementCount(REQUIREMENT_PAGE_SIZE);
+    startingRequirementIdsRef.current.clear();
+    setStartingRequirementIds(new Set());
+    if (!showRequirementsTab) {
+      setSources([]);
+      setRequirements([]);
+      setLastLog(null);
+    }
     fetchDetailData();
-  }, [fetchDetailData]);
+  }, [fetchDetailData, showRequirementsTab]);
+
+  useEffect(() => {
+    setResourceFileScope('current');
+    setSharedFiles([]);
+    setResourceSessions([]);
+    setSessionFilesMap({});
+    setSessionFilesLoadingMap({});
+    setResourceChildrenByPath({});
+    setResourceExpandedKeys([]);
+  }, [fileResourceId, projectId]);
+
+  useEffect(() => {
+    if (activeTab !== 'resources') return;
+    void fetchProjectResourceSessions();
+  }, [activeTab, fetchProjectResourceSessions]);
+
+  useEffect(() => {
+    if (activeTab !== 'resources' || !fileResourceId) return;
+    void fetchSharedResourceFiles();
+    const sessionIds =
+      resourceFileScope === 'all'
+        ? projectSessions.map((session) => `${session.sessionId}`).filter(Boolean)
+        : currentResourceSession?.sessionId
+          ? [`${currentResourceSession.sessionId}`]
+          : [];
+    Array.from(new Set(sessionIds)).forEach((item) => {
+      void fetchSessionResourceFiles(item);
+    });
+  }, [
+    activeTab,
+    currentResourceSession?.sessionId,
+    fetchSessionResourceFiles,
+    fetchSharedResourceFiles,
+    fileResourceId,
+    projectSessions,
+    resourceFileScope,
+  ]);
 
   useEffect(() => {
     checkGitHubPat()
@@ -329,6 +585,11 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject })
 
   const hasRequirementVisibleData = sources.length > 0 || requirements.length > 0 || !!lastLog;
   const requirementsTabLoading = sourcesLoading || requirementsLoading;
+  const visibleRequirements = useMemo(
+    () => requirements.slice(0, visibleRequirementCount),
+    [requirements, visibleRequirementCount]
+  );
+  const hasMoreRequirements = visibleRequirementCount < requirements.length;
 
   // 各 tab 只响应自己的加载状态；需求 tab 已有可见数据时不再整块遮罩，避免“数据已出现但还在 loading”的观感。
   const detailSpinning =
@@ -337,12 +598,17 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject })
 
   const tabItems = useMemo(
     () => [
-      { key: 'requirements', label: '需求' },
+      ...(showRequirementsTab ? [{ key: 'requirements', label: '需求' }] : []),
       { key: 'tasks', label: '任务' },
       { key: 'resources', label: '资源' },
-      { key: 'members', label: '成员' },
+      ...(showMembersTab ? [{ key: 'members', label: '成员' }] : []),
     ],
-    []
+    [showMembersTab, showRequirementsTab]
+  );
+
+  const detailPanelStyle = useMemo(
+    () => ({ '--project-detail-tab-count': tabItems.length } as React.CSSProperties),
+    [tabItems.length]
   );
 
   const resetSourceForm = (type: SourceType = 'dingtalk') => {
@@ -360,10 +626,52 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject })
   };
 
   const handleHeaderAdd = () => {
-    if (activeTab === 'members') {
-      setActiveTab('requirements');
-    }
+    if (!showRequirementsTab) return;
     openAddSourceModal();
+  };
+
+  const openManualRequirementModal = () => {
+    setManualRequirementForm(getDefaultManualRequirementForm());
+    setManualRequirementOpen(true);
+  };
+
+  const handleRefreshRequirements = useCallback(async () => {
+    if (!showRequirementsTab) return;
+    try {
+      const sourceList = await fetchSources();
+      setExpandedRequirementId(null);
+      await fetchRequirements(sourceList);
+    } catch (error) {
+      console.error('Failed to refresh project requirements:', error);
+      message.error('需求列表刷新失败');
+    }
+  }, [fetchRequirements, fetchSources, showRequirementsTab]);
+
+  const handleDetailBodyScroll = useCallback(
+    (event: React.UIEvent<HTMLDivElement>) => {
+      if (activeTab !== 'requirements' || !showRequirementsTab || !hasMoreRequirements) return;
+
+      const { scrollTop, scrollHeight, clientHeight } = event.currentTarget;
+      if (scrollHeight - scrollTop - clientHeight > 80) return;
+
+      // 需求接口当前一次返回归并结果，左侧窄面板按 20 条递增渲染，避免一次性塞满列表。
+      setVisibleRequirementCount((prev) => Math.min(prev + REQUIREMENT_PAGE_SIZE, requirements.length));
+    },
+    [activeTab, hasMoreRequirements, requirements.length, showRequirementsTab]
+  );
+
+  const handleManualRequirementSubmit = () => {
+    if (!manualRequirementForm.title.trim()) {
+      message.warning('请填写需求名称');
+      return;
+    }
+    if (!manualRequirementForm.originalContent.trim()) {
+      message.warning('请填写原始需求');
+      return;
+    }
+
+    // 后端人工新增需求接口还未接入，先保留表单与校验，避免前端伪造需求数据导致后续状态不一致。
+    message.info('人工新增需求接口待后端接入');
   };
 
   const handleSaveSource = async () => {
@@ -570,10 +878,15 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject })
 
   const handleStartTask = async (requirement: RequirementItem) => {
     if (!projectId) return;
+    const requirementId = requirement.itemId;
+    if (requirement.sessionId || startingRequirementIdsRef.current.has(requirementId)) return;
+
+    startingRequirementIdsRef.current.add(requirementId);
+    setStartingRequirementIds((prev) => new Set(prev).add(requirementId));
     try {
       const res = await createTask({
         projectId,
-        sourceItemId: requirement.itemId,
+        sourceItemId: requirementId,
         title: requirement.title,
       });
       if (!res) {
@@ -582,11 +895,26 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject })
       }
 
       // 后端 createTask 已建会话(带 projectId)并异步发起对话，前端无需再自建会话回写。
+      setRequirements((prev) =>
+        prev.map((item) => (item.itemId === requirementId ? { ...item, sessionId: res.sessionId } : item))
+      );
       message.success('任务已创建');
       await Promise.all([fetchTasks(), fetchSources().then(fetchRequirements)]);
       setActiveTab('tasks');
-    } catch {
-      message.error('创建任务失败');
+    } catch (error: any) {
+      const errorMessage = error?.message || '创建任务失败';
+      message.error(errorMessage);
+      if (errorMessage.includes('重复启动') || errorMessage.includes('已有进行中的任务')) {
+        // 页面需求数据可能落后于后端任务状态，重复启动失败后主动刷新让按钮状态回到已启动。
+        void fetchRequirements(sources);
+      }
+    } finally {
+      startingRequirementIdsRef.current.delete(requirementId);
+      setStartingRequirementIds((prev) => {
+        const next = new Set(prev);
+        next.delete(requirementId);
+        return next;
+      });
     }
   };
 
@@ -678,10 +1006,10 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject })
     return repo ? repo.repoFullName || repo.repoUrl || String(repo.repoId) : null;
   };
 
-  const renderSourceList = (emptyText = '暂无收集源，点击右上角 + 添加') => (
+  const renderSourceList = (emptyText = '暂无收集源，点击右上角 + 添加', options: { panel?: boolean } = {}) => (
     <Spin spinning={sourcesLoading && !sources.length}>
       {sources.length ? (
-        <div className={styles.detailSourceList}>
+        <div className={options.panel ? styles.detailChannelSourceList : styles.detailSourceList}>
           {sources.map((source) => (
             <div key={source.sourceId} className={styles.detailSourceCard}>
               <div className={styles.detailSourceHeader}>
@@ -763,121 +1091,386 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject })
     </Spin>
   );
 
+  const handleCloseChannelPanel = () => {
+    setChannelPanelOpen(false);
+    clearDetailPanel?.();
+  };
+
+  const handleToggleChannelPanel = () => {
+    if (channelPanelOpen) {
+      handleCloseChannelPanel();
+      return;
+    }
+    setChannelPanelOpen(true);
+    void fetchSources();
+  };
+
+  const renderChannelPanel = () => (
+    <div className={styles.detailChannelPanel}>
+      <div className={styles.detailChannelPanelHeader}>
+        <div className={styles.detailChannelPanelTitle}>
+          <h3>渠道配置</h3>
+          <p>
+            {project?.projectName || '项目空间'} · {sources.length} 个渠道
+          </p>
+        </div>
+        <div className={styles.detailChannelPanelActions}>
+          <Tooltip title="新增渠道" placement="top">
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => openAddSourceModal()}>
+              新增渠道
+            </Button>
+          </Tooltip>
+          <Tooltip title="关闭" placement="top">
+            <Button icon={<CloseOutlined />} onClick={handleCloseChannelPanel} />
+          </Tooltip>
+        </div>
+      </div>
+      <div className={styles.detailChannelPanelBody}>
+        {renderSourceList('暂无渠道，点击右上角新增渠道', { panel: true })}
+      </div>
+    </div>
+  );
+
+  useEffect(() => {
+    if (!channelPanelOpen) return;
+    // 先声明成变量，避免对象字面量在不同分支的 DetailPanelOptions 类型上触发 excess property check。
+    const overlayDetailPanelOptions = { overlay: true } as NonNullable<
+      Parameters<NonNullable<typeof setDetailPanel>>[1]
+    > & { overlay: boolean };
+    setDetailPanel?.(renderChannelPanel(), overlayDetailPanelOptions);
+  }, [
+    channelPanelOpen,
+    dwsAuthed,
+    dwsExpired,
+    dwsExpiresAt,
+    project?.projectName,
+    repos,
+    scanningId,
+    setDetailPanel,
+    sources,
+    sourcesLoading,
+  ]);
+
+  useEffect(() => {
+    return () => {
+      if (channelPanelOpen) {
+        clearDetailPanel?.();
+      }
+    };
+  }, [channelPanelOpen, clearDetailPanel]);
+
   const renderRequirements = () => (
     <>
-      {renderSourceList()}
-      {lastLog && (
-        <div className={styles.detailScanStatus}>
-          <span className={styles.detailStatusDot} />
-          <span>
-            上次扫描完成，共归并 {lastLog.foundCount} 条候选，新增 {lastLog.createdCount} 条需求
-          </span>
-          <span className={styles.detailTime}>完成于 {dayjs(lastLog.scanTime).format('HH:mm')}</span>
-        </div>
-      )}
+      <button type="button" className={styles.detailChannelEntry} onClick={handleToggleChannelPanel}>
+        <AntdIcon type="icon-chajian" className={styles.detailChannelEntryIcon} />
+        <span>
+          <strong>渠道配置</strong>
+        </span>
+        <RightOutlined />
+      </button>
       <div className={styles.detailSectionHeader}>
         <span>{requirements.length} 个需求</span>
-        <Button size="small" icon={<PlusOutlined />} onClick={() => message.info('人工新增需求功能待后端接口接入')}>
-          人工新增
-        </Button>
+        <Space size={6}>
+          <Tooltip title="人工新增" placement="top">
+            <Button size="small" icon={<PlusOutlined />} onClick={openManualRequirementModal} />
+          </Tooltip>
+          <Tooltip title="刷新" placement="top">
+            <Button
+              size="small"
+              icon={<ReloadOutlined />}
+              loading={requirementsTabLoading}
+              disabled={requirementsTabLoading}
+              onClick={handleRefreshRequirements}
+            />
+          </Tooltip>
+        </Space>
       </div>
       {requirements.length ? (
         <div className={styles.detailRequirementList}>
-          {requirements.map((item, index) => (
-            <div key={item.itemId} className={styles.detailRequirementItem}>
-              <span className={styles.detailScore} style={{ background: SCORE_COLORS[index % SCORE_COLORS.length] }}>
-                {60 + ((item.itemId || index) % 40)}
-              </span>
-              <div className={styles.detailRequirementMain}>
-                <strong>{item.title}</strong>
-                <span>
-                  {getSourceLabel(item.sourceType)} · {item.sourceName || '-'} ·{' '}
-                  {item.createTime ? dayjs(item.createTime).format('MM-DD HH:mm') : '-'}
-                </span>
+          {visibleRequirements.map((item, index) => {
+            const isStarting = startingRequirementIds.has(item.itemId);
+            const isStarted = !!item.sessionId;
+            const expanded = expandedRequirementId === item.itemId;
+            const sourceLabel = getSourceLabel(item.sourceType);
+            const sourceName = item.sourceName || '-';
+            const createTime = item.createTime ? dayjs(item.createTime).format('MM-DD HH:mm') : '-';
+            const detailText = getRequirementDetailText(item);
+
+            return (
+              <div
+                key={item.itemId}
+                className={[styles.detailRequirementItem, expanded ? styles.detailRequirementItemExpanded : '']
+                  .filter(Boolean)
+                  .join(' ')}
+                onClick={() => setExpandedRequirementId((prev) => (prev === item.itemId ? null : item.itemId))}
+              >
+                <div className={styles.detailRequirementSummary}>
+                  <span
+                    className={styles.detailScore}
+                    style={{ background: SCORE_COLORS[index % SCORE_COLORS.length] }}
+                  >
+                    {60 + ((item.itemId || index) % 40)}
+                  </span>
+                  <div className={styles.detailRequirementMain}>
+                    <strong>{item.title}</strong>
+                    <span>
+                      {sourceLabel} · {sourceName} · {createTime}
+                    </span>
+                  </div>
+                  {isStarted ? (
+                    <Button
+                      size="small"
+                      className={`${styles.detailRequirementAction} ${styles.detailRequirementStartedAction}`}
+                      disabled
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      已启动
+                    </Button>
+                  ) : (
+                    <Button
+                      size="small"
+                      type="primary"
+                      className={styles.detailRequirementAction}
+                      loading={isStarting}
+                      disabled={isStarting}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void handleStartTask(item);
+                      }}
+                    >
+                      {isStarting ? '启动中' : '启动'}
+                    </Button>
+                  )}
+                </div>
+                {expanded && (
+                  <div className={styles.detailRequirementExpanded}>
+                    <div className={styles.detailRequirementMetaGrid}>
+                      <span>
+                        <em>需求ID</em>
+                        <strong>{item.itemId || '-'}</strong>
+                      </span>
+                      <span>
+                        <em>来源</em>
+                        <strong>{sourceLabel}</strong>
+                      </span>
+                      <span>
+                        <em>创建时间</em>
+                        <strong>{createTime}</strong>
+                      </span>
+                      <span>
+                        <em>任务状态</em>
+                        <strong>{isStarted ? '已启动' : '未启动'}</strong>
+                      </span>
+                    </div>
+                    <div className={styles.detailRequirementDetailText}>
+                      <em>需求内容</em>
+                      <p>{detailText}</p>
+                    </div>
+                    {(item.originId || item.originUrl || item.action) && (
+                      <div className={styles.detailRequirementExtra}>
+                        {item.originId && <span>原始ID：{item.originId}</span>}
+                        {item.action && <span>动作：{item.action}</span>}
+                        {item.originUrl && (
+                          <a
+                            href={item.originUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            onClick={(event) => event.stopPropagation()}
+                          >
+                            查看来源
+                          </a>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
-              {item.sessionId ? (
-                <Button size="small" className={styles.detailRequirementAction} disabled>
-                  已启动
-                </Button>
-              ) : (
-                <Button
-                  size="small"
-                  type="primary"
-                  className={styles.detailRequirementAction}
-                  onClick={() => handleStartTask(item)}
-                >
-                  启动
-                </Button>
-              )}
-            </div>
-          ))}
+            );
+          })}
+          {hasMoreRequirements && <div className={styles.detailRequirementMore}>向下滚动加载更多</div>}
         </div>
       ) : (
-        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无需求，点击「扫描」收集" />
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无需求，请去「渠道配置」点击「扫描」收集" />
       )}
     </>
   );
 
-  const renderResources = () => (
-    <>
-      <div className={styles.detailSectionHeader}>
-        <span>{sources.length} 个收集源</span>
-        <Button size="small" icon={<PlusOutlined />} onClick={() => openAddSourceModal()}>
-          添加
-        </Button>
+  const renderResources = () => {
+    const currentSessionFiles = currentResourceSession?.sessionId
+      ? sessionFilesMap[`${currentResourceSession.sessionId}`] || []
+      : [];
+    const allSessionFileCount = projectSessions.reduce(
+      (count, session) => count + getFileSpaceFileCount(sessionFilesMap[`${session.sessionId}`] || []),
+      0
+    );
+    const sessionFileCount =
+      resourceFileScope === 'all' ? allSessionFileCount : getFileSpaceFileCount(currentSessionFiles);
+    const sessionGroups =
+      resourceFileScope === 'all'
+        ? projectSessions.map((session) => {
+          const sessionResourceId = `${session.sessionId}`;
+          const files = sessionFilesMap[sessionResourceId] || [];
+          const sessionName = getSessionResourceName(session);
+          return {
+            key: sessionResourceId,
+            title: sessionName,
+            titleText: sessionName,
+            currentPath: getSessionFilePath(sessionResourceId),
+            items: files,
+            loading: !!sessionFilesLoadingMap[sessionResourceId],
+            emptyText: '该会话暂无文件',
+            count: getFileSpaceFileCount(files),
+          };
+        })
+        : currentResourceSession
+          ? [
+            {
+              key: `${currentResourceSession.sessionId}`,
+              title: getSessionResourceName(currentResourceSession),
+              titleText: getSessionResourceName(currentResourceSession),
+              currentPath: getSessionFilePath(`${currentResourceSession.sessionId}`),
+              items: currentSessionFiles,
+              loading: !!sessionFilesLoadingMap[`${currentResourceSession.sessionId}`],
+              emptyText: '该会话暂无文件',
+              count: getFileSpaceFileCount(currentSessionFiles),
+            },
+          ]
+          : [];
+
+    return (
+      <div className={styles.detailResourcePanel}>
+        <FileSpaceBlock
+          title="共享文件空间"
+          count={getFileSpaceFileCount(sharedFiles)}
+          loading={sharedFilesLoading}
+          items={sharedFiles}
+          currentPath={SHARED_FILE_PATH}
+          emptyText={fileResourceId ? '暂无共享文件' : '暂无当前数字员工，无法加载文件'}
+          childrenByPath={resourceChildrenByPath}
+          expandedKeys={resourceExpandedKeys}
+          onExpand={setResourceExpandedKeys}
+          onLoadData={loadResourceTreeNode}
+        />
+        <FileSpaceBlock
+          title="会话空间"
+          count={sessionFileCount}
+          emptyText={resourceFileScope === 'all' ? '暂无会话' : '暂无当前会话'}
+          groups={sessionGroups}
+          childrenByPath={resourceChildrenByPath}
+          expandedKeys={resourceExpandedKeys}
+          switchValue={resourceFileScope}
+          switchOptions={[
+            { label: '当前会话', value: 'current' },
+            { label: '全部会话', value: 'all' },
+          ]}
+          onSwitchChange={(value) => setResourceFileScope(value as ResourceFileScope)}
+          onExpand={setResourceExpandedKeys}
+          onLoadData={loadResourceTreeNode}
+        />
       </div>
-      {renderSourceList('暂无资源，点击右上角 + 添加收集源')}
-    </>
-  );
+    );
+  };
 
   const renderTasks = () => (
     <div className={styles.detailTaskPanel}>
-      <div className={styles.detailTaskHeader}>
-        <span className={styles.detailTaskSummary}>
-          <span>{tasks.length} 个研发任务</span>
-          <span>0 个与我关联</span>
-        </span>
-        <Button icon={<AppstoreOutlined />} onClick={() => setTaskKanbanOpen(true)}>
-          整体任务视图
-        </Button>
-      </div>
+      {tasks.length > 0 && (
+        <div className={styles.detailTaskHeader}>
+          <Button icon={<AppstoreOutlined />} onClick={() => setTaskKanbanOpen(true)}>
+            任务视图
+          </Button>
+        </div>
+      )}
 
       {tasks.length ? (
         <div className={styles.detailTaskList}>
           {tasks.map((task) => {
             const progress = task.totalRounds > 0 ? Math.round((task.currentRound / task.totalRounds) * 100) : 0;
+            const isExpanded = `${expandedTaskId || ''}` === `${task.taskId}`;
+
             return (
-              <div key={task.taskId} className={styles.detailTaskCard} onClick={() => setDetailTask(task)}>
-                <div className={styles.detailTaskMain}>
-                  <Tooltip placement="top" title={task.title}>
-                    <h4 className={styles.detailTaskTitle}>{task.title}</h4>
-                  </Tooltip>
-                  <div className={styles.detailTaskMeta}>
-                    <Tag color={PHASE_COLORS[task.phase] || 'default'}>{task.phase}</Tag>
-                    <span>{task.agentName}</span>
-                    {task.branchName && <span className={styles.detailTaskBranch}>{task.branchName}</span>}
+              <div
+                key={task.taskId}
+                className={`${styles.detailTaskCard} ${isExpanded ? styles.detailTaskCardExpanded : ''}`}
+                onClick={() => setExpandedTaskId(isExpanded ? null : task.taskId)}
+              >
+                <div className={styles.detailTaskCardHeader}>
+                  <div className={styles.detailTaskMain}>
+                    <Tooltip placement="top" title={task.title}>
+                      <h4 className={styles.detailTaskTitle}>{task.title}</h4>
+                    </Tooltip>
+                    <div className={styles.detailTaskMeta}>
+                      <Tag color={PHASE_COLORS[task.phase] || 'default'}>{task.phase}</Tag>
+                      <span>{task.agentName}</span>
+                      {task.branchName && <span className={styles.detailTaskBranch}>{task.branchName}</span>}
+                    </div>
+                    {task.warningTag && (
+                      <Tag color="warning" className={styles.detailTaskWarning}>
+                        {task.warningTag}
+                      </Tag>
+                    )}
                   </div>
-                  {task.warningTag && (
-                    <Tag color="warning" className={styles.detailTaskWarning}>
-                      {task.warningTag}
-                    </Tag>
-                  )}
+                  <div className={styles.detailTaskRight}>
+                    <Avatar size="small" style={{ background: '#f56a00' }}>
+                      {(task.assignee || '我')[0]}
+                    </Avatar>
+                    <strong>{progress}%</strong>
+                  </div>
                 </div>
-                <div className={styles.detailTaskRight}>
-                  <Avatar size="small" style={{ background: '#f56a00' }}>
-                    {(task.assignee || '我')[0]}
-                  </Avatar>
-                  <strong>{progress}%</strong>
-                </div>
+                {isExpanded && (
+                  <div className={styles.detailTaskInlineDetail}>
+                    <span>
+                      <label>状态</label>
+                      <strong>{task.status || '-'}</strong>
+                    </span>
+                    <span>
+                      <label>阶段</label>
+                      <strong>{task.phase || '-'}</strong>
+                    </span>
+                    <span>
+                      <label>轮次</label>
+                      <strong>
+                        {task.currentRound || 0}/{task.totalRounds || 0}
+                      </strong>
+                    </span>
+                    <span>
+                      <label>分数</label>
+                      <strong>{task.score ?? '-'}</strong>
+                    </span>
+                    <span>
+                      <label>数字员工</label>
+                      <strong>{task.agentName || '-'}</strong>
+                    </span>
+                    <span>
+                      <label>负责人</label>
+                      <strong>{task.assignee || '我'}</strong>
+                    </span>
+                    <span className={styles.detailTaskInlineWide}>
+                      <label>分支</label>
+                      <Tooltip placement="top" title={task.branchName || '-'}>
+                        <strong>{task.branchName || '-'}</strong>
+                      </Tooltip>
+                    </span>
+                    <span>
+                      <label>会话</label>
+                      <strong>{task.sessionId || '-'}</strong>
+                    </span>
+                    <span>
+                      <label>创建时间</label>
+                      <strong>{task.createTime ? dayjs(task.createTime).format('MM-DD HH:mm') : '-'}</strong>
+                    </span>
+                  </div>
+                )}
               </div>
             );
           })}
         </div>
       ) : (
-        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无任务，在需求 Tab 点击「启动」创建" />
+        <Empty
+          image={Empty.PRESENTED_IMAGE_SIMPLE}
+          description={isDevelopProject ? '暂无任务，在需求 Tab 点击「启动」创建' : '暂无任务'}
+        />
       )}
 
-      <TaskDetailDrawer task={detailTask} onClose={() => setDetailTask(null)} onRefresh={fetchTasks} />
       <TaskKanban
         open={taskKanbanOpen}
         onClose={() => setTaskKanbanOpen(false)}
@@ -889,16 +1482,22 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject })
   );
 
   const renderTabContent = () => {
+    if (activeTab === 'requirements' && !showRequirementsTab) {
+      return renderTasks();
+    }
     if (activeTab === 'tasks') {
       return renderTasks();
     }
     if (activeTab === 'resources') return renderResources();
     if (activeTab === 'members') {
-      return (
-        <div className={styles.detailEmbeddedContent}>
-          <ProjectMemberList projectId={projectId} onMembersChange={setMembers} />
-        </div>
-      );
+      if (showMembersTab) {
+        return (
+          <div className={styles.detailEmbeddedContent}>
+            <ProjectMemberList projectId={projectId} onMembersChange={handleMembersChange} />
+          </div>
+        );
+      }
+      return renderTasks();
     }
     return renderRequirements();
   };
@@ -915,6 +1514,7 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject })
       }}
       okText={editingSource ? '保存' : '添加'}
       width={520}
+      className={styles.sourceModal}
       footer={(_, { OkBtn, CancelBtn }) => (
         <Space>
           {editingSource && (
@@ -1043,6 +1643,7 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject })
             <Select
               value={sourceForm.lookbackHours}
               onChange={(lookbackHours) => setSourceForm((prev) => ({ ...prev, lookbackHours }))}
+              popupClassName={styles.sourceSelectPopup}
               options={[
                 { value: '6', label: '6小时' },
                 { value: '12', label: '12小时' },
@@ -1083,7 +1684,77 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject })
           value={sourceForm.cron}
           onChange={(cron) => setSourceForm((prev) => ({ ...prev, cron }))}
           options={cronPresets}
+          popupClassName={styles.sourceSelectPopup}
         />
+      </div>
+    </Modal>
+  );
+
+  const renderManualRequirementModal = () => (
+    <Modal
+      title={
+        <div className={styles.manualRequirementTitle}>
+          <h3>人工新增需求</h3>
+          <p>提交后由 AI 统一分析、评分并生成需求文档</p>
+        </div>
+      }
+      open={manualRequirementOpen}
+      onCancel={() => setManualRequirementOpen(false)}
+      onOk={handleManualRequirementSubmit}
+      okText="交给 AI 分析"
+      cancelText="取消"
+      width={720}
+      className={styles.manualRequirementModal}
+    >
+      <div className={styles.manualRequirementForm}>
+        <div className={styles.manualRequirementRow}>
+          <div className={styles.formField}>
+            <label>原始来源</label>
+            <Select
+              value={manualRequirementForm.sourceType}
+              onChange={(sourceType) => setManualRequirementForm((prev) => ({ ...prev, sourceType }))}
+              options={[
+                { value: 'manual', label: '人工录入' },
+                { value: 'customer_feedback', label: '客户反馈' },
+                { value: 'internal_proposal', label: '内部提案' },
+              ]}
+            />
+          </div>
+          <div className={styles.formField}>
+            <label>影响分支</label>
+            <Input
+              placeholder="develop"
+              value={manualRequirementForm.branch}
+              onChange={(event) => setManualRequirementForm((prev) => ({ ...prev, branch: event.target.value }))}
+            />
+          </div>
+        </div>
+        <div className={styles.formField}>
+          <label>需求名称</label>
+          <Input
+            placeholder="一句话描述期望解决的问题"
+            value={manualRequirementForm.title}
+            onChange={(event) => setManualRequirementForm((prev) => ({ ...prev, title: event.target.value }))}
+          />
+        </div>
+        <div className={styles.formField}>
+          <label>原始需求</label>
+          <Input.TextArea
+            placeholder="记录用户原话、问题背景和触发场景"
+            rows={4}
+            value={manualRequirementForm.originalContent}
+            onChange={(event) => setManualRequirementForm((prev) => ({ ...prev, originalContent: event.target.value }))}
+          />
+        </div>
+        <div className={styles.formField}>
+          <label>产品需求</label>
+          <Input.TextArea
+            placeholder="可选：为空时由 AI 自动整理目标、范围与验收标准"
+            rows={4}
+            value={manualRequirementForm.productContent}
+            onChange={(event) => setManualRequirementForm((prev) => ({ ...prev, productContent: event.target.value }))}
+          />
+        </div>
       </div>
     </Modal>
   );
@@ -1263,14 +1934,14 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject })
   );
 
   return (
-    <div className={styles.projectDetailPanel}>
+    <div className={styles.projectDetailPanel} style={detailPanelStyle}>
       <div className={styles.detailPanelHeader}>
         <Tooltip title="返回" placement="top">
           <Button className={styles.detailBackButton} icon={<LeftOutlined />} onClick={onBack} />
         </Tooltip>
         <div className={styles.detailPanelTitle}>
           <h3>{project?.projectName || '项目详情'}</h3>
-          <p>研发项目详情</p>
+          <p>{isDevelopProject ? '研发项目详情' : '普通项目详情'}</p>
         </div>
         <div className={styles.detailPanelActions}>
           <Tooltip title="编辑项目" placement="top">
@@ -1280,23 +1951,23 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject })
               onClick={() => project && onEditProject?.(project)}
             />
           </Tooltip>
-          <Tooltip title={activeTab === 'members' ? '添加成员' : '新增需求'} placement="top">
-            <Button className={styles.detailAddButton} icon={<PlusOutlined />} onClick={handleHeaderAdd} />
-          </Tooltip>
+          {showRequirementsTab && (
+            <Tooltip title="添加收集源" placement="top">
+              <Button className={styles.detailAddButton} icon={<PlusOutlined />} onClick={handleHeaderAdd} />
+            </Tooltip>
+          )}
         </div>
       </div>
       <div className={styles.detailTabsWrap}>
         <Tabs activeKey={activeTab} onChange={setActiveTab} items={tabItems} />
       </div>
-      <div className={styles.detailCountRow}>
-        <span>{requirements.length} 个需求</span>
-        <span>{tasks.length} 个研发任务</span>
-        <span>{members.length} 个成员</span>
-      </div>
       <Spin spinning={detailSpinning} wrapperClassName={styles.detailSpin}>
-        <div className={styles.detailBodyPanel}>{renderTabContent()}</div>
+        <div className={styles.detailBodyPanel} onScroll={handleDetailBodyScroll}>
+          {renderTabContent()}
+        </div>
       </Spin>
       {renderAddSourceModal()}
+      {renderManualRequirementModal()}
       {renderRepoModal()}
       {renderDwsAuthModal()}
       {renderLogDrawer()}

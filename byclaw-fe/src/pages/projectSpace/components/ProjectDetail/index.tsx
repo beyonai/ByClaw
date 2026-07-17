@@ -1,6 +1,6 @@
 import { Button, Segmented, Spin, Typography } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { PROJECT_DETAIL_SECTIONS, type ProjectDetailSection } from '../../constants';
 import { useProjectSessions } from '../../hooks/useProjectSessions';
 import type { ProjectSession, ProjectSpace } from '../../types';
@@ -21,21 +21,48 @@ interface Props {
 const ProjectDetail: React.FC<Props> = ({ project, loading, onRefresh, onOpenSession }) => {
   const [activeSection, setActiveSection] = useState<ProjectDetailSection>('sessions');
   const { sessions, total } = useProjectSessions(project);
+  const showRequirementsSection =
+    project?.projectType === 'develop' || (project?.projectType === 'normal' && !!project?.sharedFlag);
+  const showMembersSection =
+    project?.projectType !== 'default' && (project?.projectType === 'develop' || !!project?.sharedFlag);
+  const detailSections = useMemo(
+    () =>
+      PROJECT_DETAIL_SECTIONS.filter((item) => {
+        if (item.key === 'members') return showMembersSection;
+        if (item.key === 'requirements') return showRequirementsSection;
+        return true;
+      }),
+    [showMembersSection, showRequirementsSection]
+  );
+
+  useEffect(() => {
+    // 默认项目/普通未共享项目会隐藏部分 tab，若当前停留在隐藏 tab，则回到会话列表。
+    const currentTabHidden =
+      (!showMembersSection && activeSection === 'members') ||
+      (!showRequirementsSection && activeSection === 'requirements');
+    if (currentTabHidden) {
+      setActiveSection('sessions');
+    }
+  }, [activeSection, showMembersSection, showRequirementsSection]);
 
   if (!project) {
     return <div className={styles.detailEmpty}>请选择一个项目空间</div>;
   }
 
+  const renderSessionList = () => (
+    <ProjectSessionList sessions={sessions} loading={loading} onRefresh={onRefresh} onOpenSession={onOpenSession} />
+  );
+
   const renderContent = () => {
     if (activeSection === 'sessions') {
-      return (
-        <ProjectSessionList sessions={sessions} loading={loading} onRefresh={onRefresh} onOpenSession={onOpenSession} />
-      );
+      return renderSessionList();
     }
     if (activeSection === 'tasks') return <ProjectTasks />;
     if (activeSection === 'resources') return <ProjectResources />;
-    if (activeSection === 'members') return <ProjectMembers />;
-    return <ProjectRequirements />;
+    if (activeSection === 'members') {
+      return showMembersSection ? <ProjectMembers /> : renderSessionList();
+    }
+    return showRequirementsSection ? <ProjectRequirements /> : renderSessionList();
   };
 
   return (
@@ -53,7 +80,7 @@ const ProjectDetail: React.FC<Props> = ({ project, loading, onRefresh, onOpenSes
           </Button>
           <Segmented
             value={activeSection}
-            options={PROJECT_DETAIL_SECTIONS.map((item) => ({ label: item.label, value: item.key }))}
+            options={detailSections.map((item) => ({ label: item.label, value: item.key }))}
             onChange={(value) => setActiveSection(value as ProjectDetailSection)}
           />
         </div>

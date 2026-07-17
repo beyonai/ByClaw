@@ -1,4 +1,4 @@
-export type ProjectType = 'normal' | 'develop';
+export type ProjectType = 'normal' | 'develop' | 'default';
 
 export type ProjectShareFlag = 'N' | 'Y';
 
