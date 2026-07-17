@@ -542,8 +542,10 @@ public class FtpStorageService extends AbstractFileIngressStorageService<FTPClie
                 continue;
             }
 
-            String fullPath = StringUtils.isNotBlank(currentPath)
-                ? currentPath + "/" + fileName
+            // Strip trailing slash to avoid double-slash when currentPath ends with /
+            String base = StringUtils.stripEnd(currentPath, "/");
+            String fullPath = StringUtils.isNotBlank(base)
+                ? base + "/" + fileName
                 : fileName;
 
             StorageObject obj = StorageObject.builder()
@@ -580,8 +582,10 @@ public class FtpStorageService extends AbstractFileIngressStorageService<FTPClie
                 continue;
             }
 
-            String fullPath = StringUtils.isNotBlank(currentPath)
-                ? currentPath + "/" + fileName
+            // Strip trailing slash to avoid double-slash when currentPath ends with /
+            String base = StringUtils.stripEnd(currentPath, "/");
+            String fullPath = StringUtils.isNotBlank(base)
+                ? base + "/" + fileName
                 : fileName;
 
             StorageObject obj = StorageObject.builder()
