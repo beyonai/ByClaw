@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS byai.byai_project (
     resource_id     BIGINT,
     project_type    VARCHAR(20)     NOT NULL DEFAULT 'normal',
     is_share        VARCHAR(10)     NOT NULL DEFAULT 'N',
-    create_by       VARCHAR(64),
+    create_by       BIGINT,
     create_time     TIMESTAMP       DEFAULT CURRENT_TIMESTAMP,
     update_by       BIGINT,
     update_time     TIMESTAMP       DEFAULT CURRENT_TIMESTAMP,
@@ -27,6 +27,10 @@ COMMENT ON COLUMN byai.byai_project.create_time IS '创建时间';
 COMMENT ON COLUMN byai.byai_project.update_by IS '更新人';
 COMMENT ON COLUMN byai.byai_project.update_time IS '更新时间';
 COMMENT ON COLUMN byai.byai_project.delete_flag IS '删除标记 0正常 1删除';
+
+-- 项目关联会话
+ALTER TABLE byai_session ADD COLUMN project_id BIGINT NOT NULL DEFAULT -1;
+COMMENT ON COLUMN byai_session.project_id IS '项目ID,-1代表无归属项目,即默认项目';
 
 -- 项目关联成员
 CREATE TABLE IF NOT EXISTS byai.byai_project_member
@@ -79,7 +83,7 @@ CREATE TABLE IF NOT EXISTS byai.byai_project_session (
     relation_id     BIGINT          NOT NULL,
     project_id      BIGINT          NOT NULL,
     session_id      BIGINT          NOT NULL,
-    create_by       VARCHAR(64),
+    create_by       BIGINT,
     create_time     TIMESTAMP       DEFAULT CURRENT_TIMESTAMP,
     update_by       VARCHAR(64),
     update_time     TIMESTAMP       DEFAULT CURRENT_TIMESTAMP,
