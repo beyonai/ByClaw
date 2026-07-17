@@ -5,7 +5,8 @@
  */
 
 type GateEntry = {
-  running: boolean;
+  activeRuns: Set<symbol>;
+  currentRelease?: () => void;
   waiters: number;
   tail: Promise<void>;
 };
@@ -31,7 +32,7 @@ function getOrCreateEntry(store: Map<string, GateEntry>, sessionKey: string): Ga
   let entry = store.get(sessionKey);
   if (!entry) {
     entry = {
-      running: false,
+      activeRuns: new Set<symbol>(),
       waiters: 0,
       tail: Promise.resolve(),
     };
@@ -46,7 +47,7 @@ export function isSessionDispatchBusy(sessionKey: string | undefined): boolean {
     return false;
   }
   const entry = getGateStore().get(normalized);
-  return Boolean(entry && (entry.running || entry.waiters > 0));
+  return Boolean(entry && (entry.activeRuns.size > 0 || entry.waiters > 0));
 }
 
 export function sessionDispatchQueueDepth(sessionKey: string | undefined): number {
@@ -58,7 +59,24 @@ export function sessionDispatchQueueDepth(sessionKey: string | undefined): numbe
   if (!entry) {
     return 0;
   }
-  return entry.waiters + (entry.running ? 1 : 0);
+  return entry.waiters + entry.activeRuns.size;
+}
+
+/**
+ * Release the currently held gate lease after its task has been cancelled.
+ * The cancelled task may still be unwinding, so its lease remains tracked until `finally`.
+ */
+export function releaseCancelledSessionDispatch(sessionKey: string | undefined): boolean {
+  const normalized = normalizeSessionKey(sessionKey);
+  if (!normalized) {
+    return false;
+  }
+  const entry = getGateStore().get(normalized);
+  if (!entry?.currentRelease) {
+    return false;
+  }
+  entry.currentRelease();
+  return true;
 }
 
 export type SessionDispatchGateRunMeta = {
@@ -91,23 +109,32 @@ export async function runSessionDispatchExclusive<T>(
 
   const store = getGateStore();
   const entry = getOrCreateEntry(store, normalized);
-  const queueDepthBefore = entry.running ? entry.waiters + 1 : entry.waiters;
-  const queued = entry.running || entry.waiters > 0;
+  const queueDepthBefore = entry.activeRuns.size + entry.waiters;
+  const queued = queueDepthBefore > 0;
   if (queued) {
     entry.waiters += 1;
   }
 
   const waitStartedAt = Date.now();
   const previous = entry.tail;
+  const runToken = Symbol(normalized);
+  let released = false;
   let release!: () => void;
   entry.tail = new Promise<void>((resolve) => {
-    release = resolve;
+    release = () => {
+      if (released) {
+        return;
+      }
+      released = true;
+      resolve();
+    };
   });
 
   await previous;
   const waitMs = Date.now() - waitStartedAt;
 
-  entry.running = true;
+  entry.activeRuns.add(runToken);
+  entry.currentRelease = release;
   if (queued) {
     entry.waiters = Math.max(0, entry.waiters - 1);
   }
@@ -124,9 +151,12 @@ export async function runSessionDispatchExclusive<T>(
       },
     };
   } finally {
-    entry.running = false;
+    entry.activeRuns.delete(runToken);
+    if (entry.currentRelease === release) {
+      entry.currentRelease = undefined;
+    }
     release();
-    if (!entry.running && entry.waiters === 0) {
+    if (entry.activeRuns.size === 0 && entry.waiters === 0) {
       store.delete(normalized);
     }
   }
