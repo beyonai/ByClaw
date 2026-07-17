@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Form, Input, Select, Col, Dropdown, Tag, DatePicker } from 'antd';
+import { Form, Input, Select, Col, Dropdown, Tag, DatePicker, Button, Tooltip } from 'antd';
 import { isString, concat, isEqual } from 'lodash';
-import { InfoCircleOutlined } from '@ant-design/icons';
+import { FullscreenOutlined, InfoCircleOutlined } from '@ant-design/icons';
 import classnames from 'classnames';
 
 import {
@@ -15,8 +15,10 @@ import TermSelectDropdown from './TermSelectDropdown';
 
 import type { FormField } from '../index.d';
 import type { SelectProps } from 'antd';
+import type { TextAreaProps } from 'antd/es/input';
 
 import styles from '../index.module.less';
+import useGlobal from '@/hooks/useGlobal';
 
 type FormFieldsRenderProps = {
   isDisable: boolean;
@@ -33,6 +35,26 @@ type FormItemsRenderProps = {
 };
 
 const { TextArea } = Input;
+
+type PreviewTextAreaProps = TextAreaProps & {
+  onPreview: () => void;
+};
+
+const PreviewTextArea = ({ onPreview, ...textareaProps }: PreviewTextAreaProps) => (
+  <div className={styles.textareaPreview}>
+    <TextArea {...textareaProps} className={styles.textareaInput} />
+    <Tooltip title="查看更多">
+      <Button
+        aria-label="查看更多"
+        className={styles.textareaPreviewAction}
+        icon={<FullscreenOutlined />}
+        onClick={onPreview}
+        size="small"
+        type="text"
+      />
+    </Tooltip>
+  </div>
+);
 
 function getArrayFieldValues(children: Array<FormField[]>) {
   return children.flat().map((child) => {
@@ -88,6 +110,8 @@ const FormItemsRender = ({ idx, item, isDisable, renderNestedForm }: FormItemsRe
   let myDisabled = readonly || isDisable;
   let key = buildFormFieldName(fieldCode, idx);
   const [isInitialErrorVisible, setIsInitialErrorVisible] = useState(Boolean(errorTips));
+
+  const { EventEmitter } = useGlobal();
 
   useEffect(() => {
     setIsInitialErrorVisible(Boolean(errorTips));
@@ -168,7 +192,27 @@ const FormItemsRender = ({ idx, item, isDisable, renderNestedForm }: FormItemsRe
   }
 
   if (formType === 'textarea') {
-    comp = <TextArea style={{ resize: 'none', overflow: 'auto' }} rows={4} disabled={myDisabled} />;
+    comp = (
+      <PreviewTextArea
+        style={{ resize: 'none', overflow: 'auto' }}
+        rows={4}
+        disabled={myDisabled}
+        onPreview={() => {
+          EventEmitter.emit('beyond-main-driver-open-type', {
+            width: '50vw',
+            minWidth: '360px',
+            maxWidth: '50vw',
+            drawerType: 'preview',
+            canClose: true,
+            canFullScreen: true,
+          });
+          EventEmitter.emit('beyond-main-driver-message', {
+            data: name ? form.getFieldValue(name) : '',
+            type: 'md',
+          });
+        }}
+      />
+    );
   }
 
   if (formType === 'input' && isMultiple) {
