@@ -366,6 +366,7 @@ public class SandboxService {
                 incrementVersions(existingRecord, true);
                 sandboxMetadataCache.evict(existingRecord.getUserCode(), existingRecord.getSandboxType());
                 unregisterSandboxEndpoint(existingRecord.getUserCode(), existingRecord.getSandboxType());
+                cleanupWorkerRegistryForSandbox(existingRecord);
                 LOGGER.warn("远端沙箱退出，已清理远端并终结旧沙箱记录：{}", sandboxRef(existingRecord));
             }
 
@@ -609,7 +610,17 @@ public class SandboxService {
         SandboxLeasePolicy leasePolicy = resolveDefaultLeasePolicy();
         Integer autoRelease = leasePolicy == SandboxLeasePolicy.REMOTE_AUTO_EXPIRE
             ? AUTO_RELEASE_REMOTE : AUTO_RELEASE_MANUAL;
-        request.setEnvs(launchContext.getEnvs());
+        // Inject deterministic worker_id for by-framework worker registry alignment
+        String workerId = buildSandboxWorkerId(userCode, launchContext.getSandboxType());
+        Map<String, String> envs = launchContext.getEnvs() != null
+            ? new LinkedHashMap<>(launchContext.getEnvs())
+            : new LinkedHashMap<>();
+        if (StringUtils.isNotBlank(workerId)) {
+            envs.put("BYAI_WORKER_ID", workerId);
+            LOGGER.debug("Injecting BYAI_WORKER_ID for sandbox launch: userCode={}, sandboxType={}, workerId={}",
+                userCode, launchContext.getSandboxType(), workerId);
+        }
+        request.setEnvs(envs);
         request.setUserInfo(launchContext.getUserInfo());
         request.setSkipReusableSandbox(skipReusableSandbox);
         String gatewayToken = launchContext.getGatewayToken();
@@ -1816,6 +1827,7 @@ public class SandboxService {
         incrementVersions(record, true);
         sandboxMetadataCache.evict(record.getUserCode(), record.getSandboxType());
         unregisterSandboxEndpoint(record.getUserCode(), record.getSandboxType());
+        cleanupWorkerRegistryForSandbox(record);
         LOGGER.info("沙箱释放完成：{}，releaseReason：{}", sandboxRef(record), releaseReason);
     }
 
@@ -1994,6 +2006,31 @@ public class SandboxService {
             return null;
         }
         return serviceKey + "-" + userCode;
+    }
+
+    private void cleanupWorkerRegistryForSandbox(SsSandboxRecord record) {
+        if (record == null) {
+            return;
+        }
+        String workerId = buildSandboxWorkerId(record.getUserCode(), record.getSandboxType());
+        if (StringUtils.isBlank(workerId)) {
+            LOGGER.debug("Skipping worker registry cleanup: cannot build worker_id for sandbox {}", sandboxRef(record));
+            return;
+        }
+        try {
+            gatewayWorkerRegistry.markWorkerInactive(workerId);
+            LOGGER.info("Cleaned up worker_online_lease on sandbox release: workerId={}, sandbox={}", workerId, sandboxRef(record));
+        }
+        catch (Exception e) {
+            LOGGER.error("Failed to mark worker inactive on sandbox release: workerId={}, sandbox={}", workerId, sandboxRef(record), e);
+        }
+        try {
+            gatewayWorkerRegistry.unregisterWorkerMembership(workerId);
+            LOGGER.info("Cleaned up worker membership on sandbox release: workerId={}, sandbox={}", workerId, sandboxRef(record));
+        }
+        catch (Exception e) {
+            LOGGER.error("Failed to unregister worker membership on sandbox release: workerId={}, sandbox={}", workerId, sandboxRef(record), e);
+        }
     }
 
     private void cleanupSandboxRegistryKeys(String serviceName) {
