@@ -1,45 +1,41 @@
-// Workbench styles are scoped by the CSS Module root. AntD/beyond internals are
-// targeted with :global only below .workbench so they cannot leak to other pages.
+// Recorder workbench styles are scoped by the CSS Module root. The visual
+// language follows Chat: a quiet canvas, white surfaces, and one blue-purple accent.
 
-// ── 青色主题色板 ────────────────────────────────
-@cyan: #2dd4bf;
-@cyan-bright: #5eead4;
-@cyan-dim: #14b8a6;
-@glow: rgba(45, 212, 191, 0.5);
-@line: #1f3138;
-@line-cyan: rgba(45, 212, 191, 0.16);
-@bg: #080d10;
-@bg-soft: #0d1519;
-@panel: #101e23;
-@panel-2: #0b161a;
-@text: #e6f4f1;
-@text-dim: #8ba3a3;
-@text-faint: #809a96; // 调亮以满足对比度(~4.5:1),仍属 muted 次级文字
+@brand: #6d5dfc;
+@brand-strong: #5848e8;
+@brand-soft: #f0edff;
+@line: #e6ebf3;
+@line-brand: #d9d4ff;
+@canvas: #f6f8fc;
+@surface: #ffffff;
+@surface-soft: #f9fbff;
+@text: #172033;
+@text-dim: #64748b;
+@text-faint: #94a3b8;
+@danger: #e05b68;
 
-// ── 全屏画布 ────────────────────────────────────
 .workbench {
   --beyond-color-text: @text;
   --beyond-color-text-heading: @text;
   --beyond-color-text-secondary: @text-dim;
   --beyond-color-text-tertiary: @text-faint;
-  --beyond-color-text-quaternary: fade(@text-faint, 70%);
-  --beyond-color-fill: rgba(45, 212, 191, 0.14);
-  --beyond-color-fill-secondary: rgba(45, 212, 191, 0.1);
-  --beyond-color-fill-tertiary: rgba(45, 212, 191, 0.07);
-  --beyond-color-fill-quaternary: rgba(45, 212, 191, 0.04);
-  --beyond-color-border: @line-cyan;
-  --beyond-color-border-secondary: rgba(45, 212, 191, 0.1);
-  --beyond-color-bg-container: @panel;
-  --beyond-color-bg-elevated: @panel;
-  --beyond-color-bg-layout: @bg;
-  height: 100%;
+  --beyond-color-text-quaternary: fade(@text-faint, 72%);
+  --beyond-color-fill: @brand-soft;
+  --beyond-color-fill-secondary: #f6f4ff;
+  --beyond-color-fill-tertiary: #f8faff;
+  --beyond-color-fill-quaternary: #fbfcff;
+  --beyond-color-border: @line;
+  --beyond-color-border-secondary: #edf0f6;
+  --beyond-color-bg-container: @surface;
+  --beyond-color-bg-elevated: @surface;
+  --beyond-color-bg-layout: @canvas;
   min-height: 100vh;
-  overflow-y: auto;
   overflow-x: hidden;
-  padding: clamp(20px, 4vw, 48px) clamp(16px, 5vw, 72px);
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  overflow-y: auto;
+  padding: clamp(12px, 1.5vw, 20px) clamp(12px, 2.5vw, 40px);
   color: @text;
-  background: radial-gradient(120% 60% at 50% -10%, rgba(45, 212, 191, 0.08), transparent 60%), @bg;
+  background: @canvas;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 
   :global(.wb-statebar) {
     display: flex;
@@ -50,15 +46,17 @@
 
   :global(.wb-chip) {
     display: inline-flex;
+    max-width: 320px;
     align-items: center;
     gap: 7px;
-    padding: 5px 11px;
+    padding: 6px 11px;
     border: 1px solid @line;
     border-radius: 999px;
-    background: @bg-soft;
+    background: @surface;
+    color: @text;
     font-size: 12px;
     line-height: 1;
-    max-width: 320px;
+    box-shadow: 0 4px 14px rgba(50, 65, 95, 0.05);
   }
 
   :global(.wb-chip__k) {
@@ -78,61 +76,42 @@
   }
 
   :global(.wb-chip--state) {
-    border-color: @line-cyan;
+    border-color: @line-brand;
   }
 
   :global(.wb-chip__dot) {
     width: 7px;
     height: 7px;
     border-radius: 50%;
-    background: @cyan;
-    box-shadow: 0 0 8px @glow;
+    background: @brand;
   }
 
   :global(.wb-chip--err) {
-    border-color: rgba(244, 112, 103, 0.4);
+    border-color: fade(@danger, 36%);
   }
 
   :global(.wb-chip--err .wb-chip__dot) {
-    background: #f47067;
-    box-shadow: 0 0 8px rgba(244, 112, 103, 0.5);
+    background: @danger;
   }
 
   :global(.wb-rail) {
     display: flex;
     margin: 0;
-    padding: 4px 0 2px;
+    padding: 6px 0;
     list-style: none;
   }
 
   :global(.wb-step) {
     position: relative;
     display: flex;
-    flex: 1 1 0;
-    flex-direction: column;
-    align-items: center;
-    gap: 9px;
     min-width: 0;
   }
 
   :global(.wb-step::before) {
     content: '';
     position: absolute;
-    top: 14px;
-    right: 50%;
     z-index: 0;
-    width: 100%;
-    height: 2px;
     background: @line;
-  }
-
-  :global(.wb-step:first-child::before) {
-    display: none;
-  }
-
-  :global(.wb-step--done::before),
-  :global(.wb-step--active::before) {
-    background: linear-gradient(90deg, @cyan-dim, @cyan);
   }
 
   :global(.wb-step__dot) {
@@ -142,26 +121,30 @@
     width: 30px;
     height: 30px;
     place-items: center;
-    border: 1.5px solid @line;
+    border: 1px solid #dce3ef;
     border-radius: 50%;
-    background: @bg-soft;
+    background: @surface;
     color: @text-faint;
     font-size: 13px;
     font-weight: 600;
-    transition: background 0.25s ease, border-color 0.25s ease, color 0.25s ease, box-shadow 0.25s ease;
+    transition: background 160ms ease, border-color 160ms ease, color 160ms ease, box-shadow 160ms ease;
   }
 
   :global(.wb-step__label) {
     color: @text-faint;
-    font-size: 12px;
-    text-align: center;
-    transition: color 0.25s ease;
+    font-size: 13px;
+    transition: color 160ms ease;
+  }
+
+  :global(.wb-step--done::before),
+  :global(.wb-step--active::before) {
+    background: linear-gradient(180deg, @brand, #9b8fff);
   }
 
   :global(.wb-step--done .wb-step__dot) {
-    border-color: @cyan;
-    background: rgba(45, 212, 191, 0.14);
-    color: @cyan-bright;
+    border-color: #bdb5ff;
+    background: @brand-soft;
+    color: @brand;
   }
 
   :global(.wb-step--done .wb-step__label) {
@@ -169,25 +152,25 @@
   }
 
   :global(.wb-step--active .wb-step__dot) {
-    border-color: @cyan-bright;
-    background: linear-gradient(180deg, @cyan-bright, @cyan);
-    color: #062b27;
-    box-shadow: 0 0 0 4px rgba(45, 212, 191, 0.16), 0 0 18px -2px @glow;
+    border-color: @brand;
+    background: @brand;
+    color: #fff;
+    box-shadow: 0 0 0 4px @brand-soft;
   }
 
   :global(.wb-step--active .wb-step__label) {
-    color: @cyan-bright;
-    font-weight: 600;
+    color: @brand-strong;
+    font-weight: 650;
   }
 
   :global(.wb-step--failed .wb-step__dot) {
-    border-color: #f47067;
-    background: rgba(244, 112, 103, 0.16);
-    color: #f47067;
+    border-color: @danger;
+    background: #fff2f3;
+    color: @danger;
   }
 
   :global(.wb-step--failed .wb-step__label) {
-    color: #f47067;
+    color: @danger;
   }
 
   :global(.code) {
@@ -198,14 +181,14 @@
   :global(.ant-btn-primary:not(.ant-btn-dangerous)),
   :global(.beyond-btn-primary:not(.beyond-btn-dangerous)) {
     border: none;
-    background: linear-gradient(180deg, @cyan-bright, @cyan);
-    color: #062b27;
+    background: linear-gradient(135deg, @brand, #4d8fff);
+    color: #fff;
     font-weight: 600;
-    box-shadow: 0 6px 18px -8px @glow;
+    box-shadow: 0 8px 18px fade(@brand, 22%);
 
     &:hover {
-      background: @cyan-bright;
-      color: #052320;
+      background: linear-gradient(135deg, @brand-strong, #397ff1);
+      color: #fff;
     }
   }
 
@@ -215,112 +198,27 @@
   }
 
   :global(:focus-visible) {
-    outline: 2px solid @cyan;
+    outline: 2px solid @brand;
     outline-offset: 2px;
     border-radius: 4px;
   }
-}
 
-.shell {
-  display: flex;
-  flex-direction: column;
-  gap: 22px;
-  min-height: calc(100vh - clamp(20px, 4vw, 48px) * 2);
-  max-width: 1480px;
-  margin: 0 auto;
-}
-
-// 进度轨(左) + 操作区(右)横向布局,给投屏/iframe 让出更大面积。
-.body {
-  display: flex;
-  align-items: flex-start;
-  gap: 28px;
-}
-
-.body > .stage {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-// 左侧竖排布局:固定窄列,步骤纵向排列、连接线竖向。
-.body > :global(.wb-rail) {
-  position: sticky;
-  top: 16px;
-  flex: 0 0 168px;
-  flex-direction: column;
-  gap: 4px;
-  width: 168px;
-  padding: 8px 12px;
-}
-
-.body > :global(.wb-rail .wb-step) {
-  flex: 0 0 auto;
-  flex-direction: row;
-  align-items: center;
-  gap: 11px;
-  padding: 7px 0;
-}
-
-// 竖排:连接线改成上下方向(连到上一节点)。
-.body > :global(.wb-rail .wb-step::before) {
-  top: auto;
-  right: auto;
-  bottom: 50%;
-  left: 14px;
-  width: 2px;
-  height: 100%;
-}
-
-.body > :global(.wb-rail .wb-step__label) {
-  text-align: left;
-}
-
-// ── 头部:标题 + 会话状态带 ──────────────────────
-.head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-
-.title {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin: 0;
-  color: @text;
-  font-size: clamp(20px, 2.4vw, 26px);
-  font-weight: 700;
-}
-
-.title::before {
-  content: '';
-  width: 4px;
-  height: 1.1em;
-  border-radius: 2px;
-  background: linear-gradient(180deg, @cyan-bright, @cyan-dim);
-  box-shadow: 0 0 12px @glow;
-}
-
-// ── 当前步骤面板:重塑 antd/beyond Card 外观 ─────────
-.stage {
   :global(.ant-card),
   :global(.beyond-card) {
     position: relative;
     --beyond-card-actions-bg: transparent;
     --beyond-card-extra-color: @text-dim;
     overflow: hidden;
-    border: 1px solid @line-cyan;
+    border: 1px solid @line;
     border-radius: 16px;
-    background: linear-gradient(180deg, @panel 0%, @panel-2 100%);
+    background: @surface;
     color: @text;
-    box-shadow: 0 18px 50px -30px #000, inset 0 1px 0 rgba(255, 255, 255, 0.02);
+    box-shadow: 0 18px 48px -34px rgba(50, 65, 95, 0.3);
   }
 
   :global(.ant-card + .ant-card),
   :global(.beyond-card + .beyond-card),
-  > div + div {
+  .stage > div + div {
     margin-top: 16px;
   }
 
@@ -330,15 +228,15 @@
     position: absolute;
     inset: 0 0 auto;
     height: 2px;
-    background: linear-gradient(90deg, transparent, @cyan, transparent);
-    opacity: 0.45;
+    background: linear-gradient(90deg, transparent, @brand, transparent);
+    opacity: 0.28;
   }
 
   :global(.ant-card-head),
   :global(.beyond-card-head) {
     min-height: auto;
     padding: 16px 22px;
-    border-bottom: 1px solid @line-cyan;
+    border-bottom: 1px solid @line;
     background: transparent;
   }
 
@@ -346,7 +244,7 @@
   :global(.beyond-card-head-title) {
     color: @text;
     font-size: 15px;
-    font-weight: 600;
+    font-weight: 650;
   }
 
   :global(.ant-card-body),
@@ -376,8 +274,8 @@
   :global(.beyond-input),
   :global(.ant-input-affix-wrapper),
   :global(.beyond-input-affix-wrapper) {
-    border-color: rgba(45, 212, 191, 0.28);
-    background: rgba(8, 13, 16, 0.88);
+    border-color: #dfe5ef;
+    background: @surface;
     color: @text;
   }
 
@@ -391,9 +289,9 @@
   :global(.beyond-input-focused),
   :global(.ant-input-affix-wrapper-focused),
   :global(.beyond-input-affix-wrapper-focused) {
-    border-color: @cyan;
-    background: rgba(8, 13, 16, 0.95);
-    box-shadow: 0 0 0 2px rgba(45, 212, 191, 0.16);
+    border-color: @brand;
+    background: @surface;
+    box-shadow: 0 0 0 2px @brand-soft;
   }
 
   :global(.ant-input-affix-wrapper > input.ant-input),
@@ -405,7 +303,7 @@
 
   :global(.ant-input::placeholder),
   :global(.beyond-input::placeholder) {
-    color: rgba(139, 163, 163, 0.64);
+    color: @text-faint;
   }
 
   :global(.ant-input-prefix),
@@ -415,8 +313,8 @@
 
   :global(.ant-segmented),
   :global(.beyond-segmented) {
-    border: 1px solid rgba(45, 212, 191, 0.18);
-    background: rgba(8, 13, 16, 0.72);
+    border: 1px solid @line;
+    background: @surface-soft;
     color: @text-dim;
   }
 
@@ -424,8 +322,8 @@
   :global(.beyond-segmented-thumb),
   :global(.ant-segmented-item-selected),
   :global(.beyond-segmented-item-selected) {
-    background: rgba(45, 212, 191, 0.18);
-    box-shadow: inset 0 0 0 1px rgba(94, 234, 212, 0.26);
+    background: @brand-soft;
+    box-shadow: inset 0 0 0 1px @line-brand;
   }
 
   :global(.ant-segmented-item),
@@ -437,7 +335,7 @@
   :global(.beyond-segmented-item:hover:not(.beyond-segmented-item-selected)),
   :global(.ant-segmented-item:focus-visible:not(.ant-segmented-item-selected)),
   :global(.beyond-segmented-item:focus-visible:not(.beyond-segmented-item-selected)) {
-    background: rgba(45, 212, 191, 0.08);
+    background: #f4f2ff;
     color: @text;
   }
 
@@ -452,18 +350,18 @@
   :global(.beyond-segmented-item-selected),
   :global(.ant-segmented-item-selected .ant-segmented-item-label),
   :global(.beyond-segmented-item-selected .beyond-segmented-item-label) {
-    color: @text;
+    color: @brand-strong;
   }
 
   :global(.ant-alert-info),
   :global(.beyond-alert-info) {
-    border-color: rgba(45, 212, 191, 0.24);
-    background: rgba(20, 184, 166, 0.1);
+    border-color: @line-brand;
+    background: @brand-soft;
   }
 
   :global(.ant-alert-info .ant-alert-icon),
   :global(.beyond-alert-info .beyond-alert-icon) {
-    color: @cyan-bright;
+    color: @brand;
   }
 
   :global(.ant-alert-message),
@@ -478,24 +376,24 @@
 
   :global(.ant-switch),
   :global(.beyond-switch) {
-    background: rgba(139, 163, 163, 0.28);
+    background: #cbd5e1;
   }
 
   :global(.ant-switch:hover:not(.ant-switch-disabled)),
   :global(.beyond-switch:hover:not(.beyond-switch-disabled)) {
-    background: rgba(139, 163, 163, 0.38);
+    background: #aebbd0;
   }
 
   :global(.ant-switch-checked),
   :global(.beyond-switch-checked),
   :global(.ant-switch-checked:hover:not(.ant-switch-disabled)),
   :global(.beyond-switch-checked:hover:not(.beyond-switch-disabled)) {
-    background: linear-gradient(180deg, @cyan-bright, @cyan);
+    background: @brand;
   }
 
   :global(.ant-switch-handle::before),
   :global(.beyond-switch-handle::before) {
-    background: #d7eeea;
+    background: #fff;
   }
 
   :global(.ant-list),
@@ -533,14 +431,225 @@
   }
 }
 
-// 窄屏回落:纵向堆叠,进度轨横排在上。
+.shell {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-height: calc(100vh - clamp(12px, 1.5vw, 20px) * 2);
+  max-width: 1480px;
+  margin: 0 auto;
+}
+
+.head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+
+.heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 18px;
+  flex-wrap: wrap;
+  width: 100%;
+}
+
+.title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0;
+  color: @text;
+  font-size: clamp(22px, 2.4vw, 30px);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.title::before {
+  content: '';
+  width: 4px;
+  height: 1.1em;
+  border-radius: 4px;
+  background: linear-gradient(180deg, @brand, #8d7fff);
+}
+
+.subtitle {
+  margin: 0;
+  color: @text-dim;
+  font-size: 13px;
+}
+
+.body {
+  display: grid;
+  flex: 1 1 auto;
+  grid-template-columns: 220px minmax(0, 1fr);
+  align-items: stretch;
+  gap: 28px;
+  min-height: 620px;
+}
+
+.sidebar {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  padding: 18px 12px 14px;
+  border: 1px solid @line;
+  border-radius: 18px;
+  background: fade(@surface, 72%);
+}
+
+.sidebar,
+.stage {
+  box-sizing: border-box;
+  height: 100%;
+}
+
+.sidebarIntro {
+  display: grid;
+  gap: 5px;
+  padding: 0 10px 14px;
+}
+
+.sidebarEyebrow {
+  color: @brand-strong;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+.sidebarHint {
+  color: @text-dim;
+  font-size: 12px;
+}
+
+.sidebar > :global(.wb-rail) {
+  position: relative;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 10px;
+}
+
+.sidebar > :global(.wb-rail .wb-step) {
+  flex: 0 0 auto;
+  flex-direction: row;
+  align-items: center;
+  gap: 11px;
+  min-height: 48px;
+}
+
+.sidebar > :global(.wb-rail .wb-step::before) {
+  top: auto;
+  right: auto;
+  bottom: 50%;
+  left: 14px;
+  width: 2px;
+  height: 100%;
+}
+
+.sidebar > :global(.wb-rail .wb-step:first-child::before) {
+  display: none;
+}
+
+.sidebar > :global(.wb-rail .wb-step__label) {
+  text-align: left;
+}
+
+.stage {
+  min-width: 0;
+  padding: 26px;
+  border: 1px solid @line;
+  border-radius: 20px;
+  background: @surface;
+  box-shadow: 0 20px 55px -38px rgba(50, 65, 95, 0.34);
+}
+
 @media (max-width: 900px) {
   .body {
-    flex-direction: column;
+    grid-template-columns: 190px minmax(0, 1fr);
+    gap: 18px;
+  }
+
+  .stage {
+    padding: 20px;
   }
 }
 
-// ── 可访问性 ───────────────────────────────────
+@media (max-width: 767px) {
+  .workbench {
+    padding: 18px 14px 28px;
+  }
+
+  .shell {
+    gap: 18px;
+  }
+
+  .heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .body {
+    display: flex;
+    min-height: 0;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .sidebar {
+    height: auto;
+    padding: 14px 10px 10px;
+  }
+
+  .sidebarIntro {
+    padding-bottom: 8px;
+  }
+
+  .sidebar > :global(.wb-rail) {
+    flex-direction: row;
+    overflow-x: auto;
+    gap: 8px;
+    padding: 6px 4px 10px;
+    scrollbar-width: thin;
+  }
+
+  .sidebar > :global(.wb-rail .wb-step) {
+    min-width: 108px;
+    flex-direction: column;
+    justify-content: flex-start;
+    gap: 7px;
+    min-height: 68px;
+    padding: 2px 4px;
+  }
+
+  .sidebar > :global(.wb-rail .wb-step::before) {
+    top: 15px;
+    right: 50%;
+    bottom: auto;
+    left: auto;
+    width: 100%;
+    height: 2px;
+  }
+
+  .sidebar > :global(.wb-rail .wb-step:first-child::before) {
+    display: none;
+  }
+
+  .sidebar > :global(.wb-rail .wb-step__label) {
+    text-align: center;
+    white-space: nowrap;
+  }
+
+  .stage {
+    height: auto;
+    padding: 14px;
+    border-radius: 16px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .workbench {
     *,
@@ -550,20 +659,6 @@
       animation-iteration-count: 1 !important;
       scroll-behavior: auto !important;
       transition-duration: 0.01ms !important;
-    }
-  }
-}
-
-// ── 窄屏:进度轨标签收起 ─────────────────────────
-@media (max-width: 720px) {
-  .workbench {
-    :global(.wb-step__label) {
-      display: none;
-    }
-
-    :global(.wb-step__dot) {
-      width: 26px;
-      height: 26px;
     }
   }
 }

@@ -4,10 +4,11 @@
 import { useRef, useEffect } from 'react';
 import { Result, Spin, Typography } from 'antd';
 import { CheckCircleOutlined, LoadingOutlined } from '@ant-design/icons';
+import { useSelector } from '@umijs/max';
 import useRecorderSession from './models/useRecorderSession';
 import styles from './index.module.less';
 import StepRail from './components/StepRail';
-import StatePanel from './components/StatePanel';
+import UserIdentityBar from './components/UserIdentityBar';
 import ErrorRecovery from './components/ErrorRecovery';
 import AnalysisEvidencePanel from './components/AnalysisEvidencePanel';
 import HealthStep from './steps/HealthStep';
@@ -22,7 +23,8 @@ import { FLOW_STEPS, flowStepsFor, STATE_ORDER, PIPELINE_SUBSTEP_OFFSET, isFaile
 const { Text } = Typography;
 
 export default function Workbench() {
-  const { state, stateVersion, data, loading, error, actions } = useRecorderSession();
+  const userInfo = useSelector(({ user }) => user.userInfo);
+  const { state, data, loading, error, actions } = useRecorderSession();
 
   const llmOn = !!data.health?.llmSynthesis;
   const order = STATE_ORDER[state];
@@ -216,14 +218,23 @@ export default function Workbench() {
     <div className={styles.workbench}>
       <div className={styles.shell}>
         <header className={styles.head}>
-          <h1 className={styles.title}>录制工作台</h1>
-          <StatePanel state={state} stateVersion={stateVersion} sessionId={data.sessionId} targetUrl={data.targetUrl} />
+          <div className={styles.heading}>
+            <h1 className={styles.title}>录制工作台</h1>
+            <p className={styles.subtitle}>把浏览器操作整理成可复用的 OpenCLI adapter</p>
+          </div>
         </header>
 
         <div className={styles.body}>
-          <StepRail steps={railSteps} current={railCurrent} failed={failed} />
+          <aside className={styles.sidebar} aria-label="录制流程和用户信息">
+            <div className={styles.sidebarIntro}>
+              <span className={styles.sidebarEyebrow}>WORKFLOW</span>
+              <span className={styles.sidebarHint}>按步骤完成一次录制</span>
+            </div>
+            <StepRail steps={railSteps} current={railCurrent} failed={failed} />
+            <UserIdentityBar userInfo={userInfo} />
+          </aside>
 
-          <div className={styles.stage}>
+          <main className={styles.stage} data-testid="recorder-work-surface">
             {inlineError && (
               <ErrorRecovery
                 error={inlineError}
@@ -235,7 +246,7 @@ export default function Workbench() {
               />
             )}
             {renderByStage()}
-          </div>
+          </main>
         </div>
       </div>
     </div>
