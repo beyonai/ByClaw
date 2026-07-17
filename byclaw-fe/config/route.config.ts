@@ -273,6 +273,11 @@ export default [
             name: 'employee',
             component: './iframes/employee',
           },
+          {
+            path: '/iframes/adapter-recorder',
+            name: 'adapterRecorder',
+            component: './adapterRecorder',
+          },
         ],
       },
     ],

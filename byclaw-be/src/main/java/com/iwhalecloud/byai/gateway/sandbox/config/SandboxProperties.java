@@ -66,6 +66,8 @@ public class SandboxProperties {
 
         /**
          * Host path mounted on every OpenSandbox Docker node, for example /mnt/byclaw-file.
+         * This path and all of its ancestors are a deployment-controlled trust boundary and must not be
+         * replaceable with user-managed symbolic links.
          */
         private String fileRoot;
 

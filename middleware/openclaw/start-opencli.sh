@@ -17,6 +17,16 @@ fi
 : "${OPENCLI_PROFILE_WATCH:=true}"
 : "${OPENCLI_PROFILE_INIT_INTERVAL:=30}"
 : "${OPENCLI_COMMAND_TIMEOUT:=3}"
+: "${BYCLI_CONFIG_DIR:=/by/.bycli}"
+
+case "${BYCLI_CONFIG_DIR}" in
+  /*) ;;
+  *)
+    log "BYCLI_CONFIG_DIR must be an absolute path: ${BYCLI_CONFIG_DIR}"
+    exit 1
+    ;;
+esac
+export BYCLI_CONFIG_DIR
 
 case "${OPENCLAW_ENABLE_OPENCLI}" in
   false|0|no|off)
@@ -60,6 +70,20 @@ if ! command -v bycli >/dev/null 2>&1; then
   log "bycli binary not found; skip"
   exit 0
 fi
+
+# /by is mounted at sandbox runtime, after the image is built. Initialize the
+# per-user byCLI tree only after that mount is visible.
+mkdir -p \
+  "${BYCLI_CONFIG_DIR}/clis" \
+  "${BYCLI_CONFIG_DIR}/sites" \
+  "${BYCLI_CONFIG_DIR}/.recorder-drafts"
+# Backend (appuser) and sandbox (root) are separate processes sharing this
+# per-user volume, so directory ownership alone cannot provide write access.
+chmod a+rwx \
+  "${BYCLI_CONFIG_DIR}" \
+  "${BYCLI_CONFIG_DIR}/clis" \
+  "${BYCLI_CONFIG_DIR}/sites" \
+  "${BYCLI_CONFIG_DIR}/.recorder-drafts"
 
 log "starting daemon and watching profile alias: ${OPENCLI_PROFILE}"
 

@@ -86,7 +86,6 @@
         <maven.compiler.encoding>UTF-8</maven.compiler.encoding>
         <maven.build.timestamp.format>yyyy-MM-dd HH:mm:ss</maven.build.timestamp.format>
         <java.version>21</java.version>
-
         <!-- Spring Framework -->
         <spring-boot.version>3.5.14</spring-boot.version>
         <spring-cloud.version>2025.0.2</spring-cloud.version>
@@ -147,6 +146,7 @@
         <commons-fileupload.version>1.6.0</commons-fileupload.version>
         <commons-io.version>2.19.0</commons-io.version>
         <commons-compress.version>1.24.0</commons-compress.version>
+        <jna.version>5.17.0</jna.version>
         <snakeyaml.version>2.0</snakeyaml.version>
 
         <!-- Jakarta EE -->
@@ -836,6 +836,11 @@
     </dependencyManagement>
 
     <dependencies>
+        <dependency>
+            <groupId>net.java.dev.jna</groupId>
+            <artifactId>jna</artifactId>
+            <version>${jna.version}</version>
+        </dependency>
         <!-- ==================== Global Dependencies (from root pom) ==================== -->
         <dependency>
             <groupId>org.projectlombok</groupId>
