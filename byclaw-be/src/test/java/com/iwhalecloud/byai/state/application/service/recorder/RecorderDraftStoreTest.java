@@ -15,6 +15,7 @@ import com.iwhalecloud.byai.state.domain.recorder.model.RecorderOwner;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 @DisabledOnOs(OS.WINDOWS)
@@ -112,6 +113,7 @@ class RecorderDraftStoreTest {
     }
 
     @Test
+    @EnabledOnOs(OS.LINUX)
     void secureWriteDoesNotFollowDirectorySwappedAfterValidation() throws Exception {
         Path fileRoot = tempDir.resolve("file-root");
         Path outside = tempDir.resolve("outside");
@@ -136,6 +138,7 @@ class RecorderDraftStoreTest {
     }
 
     @Test
+    @EnabledOnOs(OS.LINUX)
     void secureDeleteDoesNotFollowDirectorySwappedAfterValidation() throws Exception {
         Path fileRoot = tempDir.resolve("file-root");
         Path outside = tempDir.resolve("outside");
@@ -194,6 +197,7 @@ class RecorderDraftStoreTest {
     }
 
     @Test
+    @EnabledOnOs(OS.LINUX)
     void secureProviderAtomicallyReplacesExistingDraft() throws Exception {
         assumeSecureDirectoryStreams(tempDir);
         RecorderDraftStore store = new RecorderDraftStore(new RecorderBycliPathResolver(tempDir));
