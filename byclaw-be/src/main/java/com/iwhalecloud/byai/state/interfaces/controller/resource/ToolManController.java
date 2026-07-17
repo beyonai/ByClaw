@@ -1197,6 +1197,7 @@ public class ToolManController {
         String resolvedUserCode = StringUtils.isNotBlank(finalUserCode) ? finalUserCode
             : CurrentUserHolder.getCurrentUserCode();
         try {
+            logSkillDownloadRequest(resolvedUserCode, finalResourceId, finalSkillId, finalSkillPath);
             if (finalSkillId != null) {
                 return downloadManagedSkillZip(finalSkillId);
             }
@@ -1223,6 +1224,34 @@ public class ToolManController {
             return ResponseEntity.badRequest().contentType(MediaType.parseMediaType("text/plain; charset=UTF-8"))
                 .body(out -> out.write(fallbackMsg.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
         }
+    }
+
+    private void logSkillDownloadRequest(String userCode, Long resourceId, Long skillId, String skillPath) {
+        Long digitalEmployeeId = resourceId != null ? resourceId : CurrentUserHolder.getDefaultDigEmployeeId();
+        String digitalEmployeeName = "";
+        String skillName = StringUtils.defaultIfBlank(lastPathSegment(skillPath), "未知技能");
+        String skillCode = "";
+        try {
+            if (digitalEmployeeId != null) {
+                SsResource digitalEmployee = ssResourceService.findById(digitalEmployeeId);
+                digitalEmployeeName = digitalEmployee == null ? "" : digitalEmployee.getResourceName();
+            }
+            if (skillId != null) {
+                SsResource skillResource = ssResourceService.findById(skillId);
+                if (skillResource != null) {
+                    skillName = StringUtils.defaultIfBlank(skillResource.getResourceName(), skillName);
+                    skillCode = skillResource.getResourceCode();
+                }
+            }
+        }
+        catch (Exception e) {
+            // 审计日志的补充查询失败不能阻断技能下载。
+            logger.warn("获取技能下载审计信息失败, userCode={}, digitalEmployeeId={}, skillId={}", userCode,
+                digitalEmployeeId, skillId, e);
+        }
+        logger.info("技能下载请求: userCode={}, userName={}, digitalEmployeeId={}, digitalEmployeeName={}, skillId={}, "
+                + "skillCode={}, skillName={}, skillPath={}", userCode, CurrentUserHolder.getCurrentUserName(),
+            digitalEmployeeId, digitalEmployeeName, skillId, skillCode, skillName, skillPath);
     }
 
     private ResponseEntity<StreamingResponseBody> downloadManagedSkillZip(Long skillId) {
