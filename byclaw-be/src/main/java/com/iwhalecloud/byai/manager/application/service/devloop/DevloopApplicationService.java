@@ -852,6 +852,7 @@ public class DevloopApplicationService {
         chatDto.setProjectId(projectId);
         chatDto.setChatContent(title);
         chatDto.setAccessTerminal("DevLoop");
+        chatDto.setClientRequestId(AssistantChatService.getClientRequestId());
         assistantChatService.createGroupChatSession(chatDto);
         Long sessionId = chatDto.getSessionId();
 
