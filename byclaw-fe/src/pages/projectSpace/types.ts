@@ -42,6 +42,7 @@ export interface ProjectSpace {
   projectType: ProjectType;
   isShare: ProjectShareFlag;
   sharedFlag: boolean;
+  createBy?: string | number;
   createTime?: string;
   sessionCount?: number;
   taskCount?: number;

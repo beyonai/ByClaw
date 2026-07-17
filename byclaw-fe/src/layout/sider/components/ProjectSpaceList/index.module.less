@@ -768,8 +768,24 @@
       line-height: 1;
     }
 
+    .project-member-title {
+      display: inline-flex;
+      max-width: 100%;
+      align-items: center;
+      gap: 6px;
+      vertical-align: top;
+    }
+
+    .project-member-name {
+      min-width: 0;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+
     .project-member-role-tag {
-      margin-left: 8px;
+      flex-shrink: 0;
+      margin-inline-end: 0;
     }
 
     .project-member-more {

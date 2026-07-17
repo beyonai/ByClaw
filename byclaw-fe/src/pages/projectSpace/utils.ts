@@ -45,6 +45,7 @@ export const normalizeProject = (item: any): ProjectSpace => ({
   projectType: item?.projectType === 'development' ? 'develop' : item?.projectType || 'normal',
   isShare: item?.isShare === 'Y' || item?.sharedFlag === true ? 'Y' : 'N',
   sharedFlag: item?.isShare === 'Y' || item?.sharedFlag === true,
+  createBy: item?.createBy,
   createTime: item?.createTime,
   sessionCount: item?.sessionCount ?? item?.sessions?.length ?? 0,
   taskCount: item?.taskCount ?? item?.tasks?.length ?? 0,

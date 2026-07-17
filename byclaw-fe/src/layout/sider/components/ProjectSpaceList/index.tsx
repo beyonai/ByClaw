@@ -909,6 +909,7 @@ const ProjectSpaceList: React.FC = () => {
         loading={projectCreating}
         initialValues={projectFormInitialValues}
         projectId={editingProject?.projectId}
+        creatorId={editingProject?.createBy}
         onCancel={() => {
           setProjectModalOpen(false);
           setEditingProject(undefined);

@@ -290,6 +290,8 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
   // 项目类型来自后端/静态参数，先按字符串归一，避免默认项目枚举声明不同步时报比较类型错误。
   const projectType = project?.projectType ? String(project.projectType) : undefined;
   const isDevelopProject = projectType === 'develop';
+  // 标题下方展示项目描述字段，避免继续显示固定的项目类型详情文案。
+  const projectDescription = project?.description?.trim() || '暂无描述';
   const fileResourceId = activeSiderAgent.resourceId || (project?.resourceId ? `${project.resourceId}` : '');
   // 研发项目、普通共享项目展示需求 tab；默认项目和普通未共享项目不展示。
   const showRequirementsTab = isDevelopProject || (projectType === 'normal' && !!project?.sharedFlag);
@@ -1493,7 +1495,11 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
       if (showMembersTab) {
         return (
           <div className={styles.detailEmbeddedContent}>
-            <ProjectMemberList projectId={projectId} onMembersChange={handleMembersChange} />
+            <ProjectMemberList
+              projectId={projectId}
+              creatorId={project?.createBy}
+              onMembersChange={handleMembersChange}
+            />
           </div>
         );
       }
@@ -1941,7 +1947,7 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
         </Tooltip>
         <div className={styles.detailPanelTitle}>
           <h3>{project?.projectName || '项目详情'}</h3>
-          <p>{isDevelopProject ? '研发项目详情' : '普通项目详情'}</p>
+          <p title={projectDescription}>{projectDescription}</p>
         </div>
         <div className={styles.detailPanelActions}>
           <Tooltip title="编辑项目" placement="top">

@@ -48,6 +48,7 @@ interface ProjectItem {
   projectId: number;
   projectName: string;
   description?: string;
+  createBy?: string | number;
   createTime: string;
 }
 
@@ -1236,7 +1237,9 @@ const NeedCollect: React.FC = () => {
 
       {activeTab === 'tasks' && <TaskList tasks={tasks} onRefresh={fetchTasks} projectId={currentProject?.projectId} />}
 
-      {activeTab === 'members' && <MemberList projectId={currentProject?.projectId} />}
+      {activeTab === 'members' && (
+        <MemberList projectId={currentProject?.projectId} creatorId={currentProject?.createBy} />
+      )}
 
       {renderAddSourceModal()}
       {renderProjectModal()}

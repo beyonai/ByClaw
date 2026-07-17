@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Button, Form, Input, Modal, Select, Spin, Switch, Tooltip, message } from 'antd';
 import { CloseCircleFilled, PlusOutlined } from '@ant-design/icons';
+import { useSelector } from '@umijs/max';
 import AddAuthModal from '@/pages/manager/components/AuthListDrawer/AddAuthModal';
 import { listProjectMembers } from '@/service/devloop';
 import { getDcSystemConfigListByStandType } from '@/service/system';
@@ -34,6 +35,7 @@ interface Props {
   loading?: boolean;
   initialValues?: Partial<ProjectFormValues>;
   projectId?: string | number;
+  creatorId?: string | number;
   onCancel: () => void;
   onSubmit: (values: ProjectFormValues) => void;
 }
@@ -41,6 +43,12 @@ interface Props {
 type ProjectTypeOption = { label: string; value: ProjectSpace['projectType'] };
 
 const getMemberUserId = (member: any) => member.userId ?? String(member.id || '').replace(/^user_/, '');
+
+const isProjectOwnerMember = (member: any, creatorId?: string | number) => {
+  // 新老数据都兼容：新数据有 owner role，老数据用项目创建人 ID 兜底。
+  const isOwnerRole = ['owner', 'creator'].includes(`${member?.role || ''}`.toLowerCase());
+  return isOwnerRole || (!!creatorId && `${getMemberUserId(member)}` === `${creatorId}`);
+};
 
 const getStaticConfigList = (response: any): any[] => {
   if (Array.isArray(response)) return response;
@@ -93,9 +101,11 @@ const ProjectFormModal: React.FC<Props> = ({
   loading,
   initialValues,
   projectId,
+  creatorId,
   onCancel,
   onSubmit,
 }) => {
+  const userInfo = useSelector((state: any) => state.user?.userInfo) || {};
   const [form] = Form.useForm<ProjectFormValues>();
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [selectedShareMembers, setSelectedShareMembers] = useState<ProjectShareMember[]>([]);
@@ -185,8 +195,35 @@ const ProjectFormModal: React.FC<Props> = ({
     form.setFieldValue('sharedFlag', true);
   }, [form, isDevelopProject, open]);
 
-  const handleRemoveShareTarget = (targetId: string) => {
+  const removeShareMember = (targetId: string) => {
     setSelectedShareMembers((prev) => prev.filter((target) => target.id !== targetId));
+  };
+
+  const isCurrentUserMember = (member: ProjectShareMember) => {
+    return (
+      (!!member.userId && `${member.userId}` === `${userInfo.userId || ''}`) ||
+      (!!member.userCode && `${member.userCode}` === `${userInfo.userCode || ''}`)
+    );
+  };
+
+  const handleRemoveShareTarget = (member: ProjectShareMember) => {
+    if (isProjectOwnerMember(member, creatorId)) {
+      message.warning('创建者不能被删除');
+      return;
+    }
+
+    if (isCurrentUserMember(member)) {
+      Modal.confirm({
+        title: '移除自己',
+        content: '保存后你将从该项目共享成员中移除，确定继续吗？',
+        okText: '移除',
+        okButtonProps: { danger: true },
+        onOk: () => removeShareMember(member.id),
+      });
+      return;
+    }
+
+    removeShareMember(member.id);
   };
 
   const handleModalOk = () => {
@@ -261,20 +298,41 @@ const ProjectFormModal: React.FC<Props> = ({
             <div className={styles.shareTargetField}>
               <Spin spinning={shareMembersLoading}>
                 <div className={styles.shareTargetList}>
-                  {selectedShareMembers.map((member) => (
-                    <div key={member.id} className={styles.shareTargetItem}>
-                      <div className={styles.userAvatar}>{member.name.slice(-2)}</div>
-                      <Tooltip title={member.name} placement="top">
+                  {selectedShareMembers.map((member) => {
+                    const isCreatorMember = isProjectOwnerMember(member, creatorId);
+                    const isSelfMember = isCurrentUserMember(member);
+                    const removeIcon = (
+                      <CloseCircleFilled
+                        className={styles.shareTargetClose}
+                        onClick={() => handleRemoveShareTarget(member)}
+                      />
+                    );
+                    // 共享成员默认不展示姓名 Tooltip，只对创建者和移除自己给出操作提示。
+                    const memberItem = (
+                      <div className={styles.shareTargetItem}>
+                        <div className={styles.userAvatar}>{member.name.slice(-2)}</div>
                         <div className={styles.shareTargetName}>{member.name}</div>
-                      </Tooltip>
-                      {member.role !== 'owner' && (
-                        <CloseCircleFilled
-                          className={styles.shareTargetClose}
-                          onClick={() => handleRemoveShareTarget(member.id)}
-                        />
-                      )}
-                    </div>
-                  ))}
+                        {!isCreatorMember &&
+                          (isSelfMember ? (
+                            <Tooltip title="移除自己" placement="top">
+                              {removeIcon}
+                            </Tooltip>
+                          ) : (
+                            removeIcon
+                          ))}
+                      </div>
+                    );
+
+                    if (isCreatorMember) {
+                      return (
+                        <Tooltip key={member.id} title="不允许移除创建者" placement="top">
+                          {memberItem}
+                        </Tooltip>
+                      );
+                    }
+
+                    return <React.Fragment key={member.id}>{memberItem}</React.Fragment>;
+                  })}
                   {!selectedShareMembers.length && <span className={styles.shareTargetEmpty}>暂无共享成员</span>}
                   {/* 新增按钮跟随成员标签流式排列，避免独占一整行。 */}
                   <Button
