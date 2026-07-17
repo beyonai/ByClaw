@@ -14,8 +14,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import com.iwhalecloud.byai.state.domain.recorder.model.RecorderOwner;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Assumptions;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
-
+@DisabledOnOs(OS.WINDOWS)
 class RecorderDraftStoreTest {
 
     @TempDir

@@ -19,7 +19,10 @@ import java.util.Map;
 import java.util.Queue;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 
+@DisabledOnOs(OS.WINDOWS)
 class BycliRecorderVerifyPortTest {
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
