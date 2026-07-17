@@ -120,8 +120,7 @@ export const updateTask = (data: {
 }) => POST<any>('/byaiService/devloop/task/update', data);
 
 // 任务详情即会话详情，后端按 sessionId 查询（taskId 与 sessionId 同值）
-export const getTaskDetail = (sessionId: number) =>
-  POST<any>('/byaiService/devloop/task/detail', { sessionId });
+export const getTaskDetail = (sessionId: number) => POST<any>('/byaiService/devloop/task/detail', { sessionId });
 
 // 项目成员
 export const addProjectMember = (data: {

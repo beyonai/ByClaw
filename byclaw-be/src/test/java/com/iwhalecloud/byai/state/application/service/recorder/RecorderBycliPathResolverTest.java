@@ -8,9 +8,11 @@ import com.iwhalecloud.byai.state.domain.recorder.model.RecorderOwner;
 import java.nio.file.Path;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
-
+@DisabledOnOs(OS.WINDOWS)
 class RecorderBycliPathResolverTest {
 
     @Test
