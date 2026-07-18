@@ -122,6 +122,8 @@ CREATE TABLE IF NOT EXISTS byai.byai_scan_source (
     cron_expr       VARCHAR(100),
     enabled         CHAR(1)         DEFAULT '1',
     repo_id         BIGINT,
+    confirm_mode    VARCHAR(16)     DEFAULT 'manual',
+    score_threshold INT             DEFAULT 70,
     last_scan_time  TIMESTAMP,
     create_by       VARCHAR(64),
     create_time     TIMESTAMP       DEFAULT CURRENT_TIMESTAMP,
@@ -140,6 +142,8 @@ COMMENT ON COLUMN byai.byai_scan_source.config IS '配置JSON';
 COMMENT ON COLUMN byai.byai_scan_source.cron_expr IS 'Cron表达式';
 COMMENT ON COLUMN byai.byai_scan_source.enabled IS '是否启用 1启用 0停用';
 COMMENT ON COLUMN byai.byai_scan_source.repo_id IS '关联目标仓库ID byai_project_repo.repo_id，扫来的需求据此确定开发仓库';
+COMMENT ON COLUMN byai.byai_scan_source.confirm_mode IS '需求确认规则 manual人工确认/auto全自动派生/score按分数阈值派生';
+COMMENT ON COLUMN byai.byai_scan_source.score_threshold IS 'score模式下自动派生的最低综合分，默认70';
 COMMENT ON COLUMN byai.byai_scan_source.last_scan_time IS '最近扫描时间';
 COMMENT ON COLUMN byai.byai_scan_source.delete_flag IS '删除标记 0正常 1删除';
 
@@ -177,6 +181,9 @@ CREATE TABLE IF NOT EXISTS byai.byai_scan_log_item (
     origin_url      VARCHAR(500),
     action          VARCHAR(20)     NOT NULL,
     session_id      BIGINT,
+    score           INT,
+    priority        VARCHAR(8),
+    score_detail    TEXT,
     create_time     TIMESTAMP       DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT pk_byai_scan_log_item PRIMARY KEY (item_id)
 );
@@ -191,6 +198,9 @@ COMMENT ON COLUMN byai.byai_scan_log_item.origin_id IS '来源原始ID(issue号/
 COMMENT ON COLUMN byai.byai_scan_log_item.origin_url IS '来源链接';
 COMMENT ON COLUMN byai.byai_scan_log_item.action IS '处理动作 created/duplicate/deferred';
 COMMENT ON COLUMN byai.byai_scan_log_item.session_id IS '已启动会话ID(byai_session.session_id)，标记需求已启动';
+COMMENT ON COLUMN byai.byai_scan_log_item.score IS 'AI综合评分 0-100';
+COMMENT ON COLUMN byai.byai_scan_log_item.priority IS 'AI优先级 P0/P1/P2';
+COMMENT ON COLUMN byai.byai_scan_log_item.score_detail IS 'AI评分明细JSON:各维度得分/风险/AI整理需求';
 
 -- 索引
 CREATE INDEX IF NOT EXISTS idx_scan_source_project ON byai.byai_scan_source(project_id);
@@ -203,5 +213,3 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_project_session_unique ON byai.byai_projec
 CREATE INDEX IF NOT EXISTS idx_project_share_project ON byai.byai_project_share(project_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_project_share_unique
     ON byai.byai_project_share(project_id, target_type, target_id);
-
--- 研发任务由会话(byai_session)承载：创建任务即创建带 project_id 的会话，不再单独建 byai_task 表。

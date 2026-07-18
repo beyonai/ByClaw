@@ -22,4 +22,10 @@ public class ScanSourceDTO {
     private String enabled;
 
     private Long repoId;
+
+    /** 需求确认规则 manual人工确认/auto全自动派生/score按分数阈值派生 */
+    private String confirmMode;
+
+    /** score模式下自动派生的最低综合分 */
+    private Integer scoreThreshold;
 }

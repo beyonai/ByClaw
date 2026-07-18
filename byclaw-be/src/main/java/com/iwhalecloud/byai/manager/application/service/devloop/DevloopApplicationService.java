@@ -9,13 +9,8 @@ import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.common.util.ListUtil;
 import com.iwhalecloud.byai.common.util.PageHelperUtil;
 import com.iwhalecloud.byai.manager.application.service.job.DevloopPatService;
-import com.iwhalecloud.byai.manager.domain.devloop.service.DingtalkScanService;
-import com.iwhalecloud.byai.manager.domain.devloop.service.DwsAuthService;
-import com.iwhalecloud.byai.manager.domain.devloop.service.GitHubIssueScanService;
-import com.iwhalecloud.byai.manager.domain.devloop.service.ScanLogService;
-import com.iwhalecloud.byai.manager.domain.devloop.service.ScanSourceService;
-import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectMemberService;
-import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectSessionService;
+import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService;
+import com.iwhalecloud.byai.manager.domain.devloop.service.*;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectListDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectMemberListDto;
@@ -114,6 +109,12 @@ public class DevloopApplicationService {
 
     @Autowired
     private AssistantChatService assistantChatService;
+
+    @Autowired
+    private LoginApplicationService loginApplicationService;
+
+    @Autowired
+    private DevloopScoringService scoringService;
 
     @Autowired
     private ByaiSystemConfigService byaiSystemConfigService;
@@ -525,6 +526,8 @@ public class DevloopApplicationService {
         source.setCronExpr(dto.getCronExpr());
         source.setEnabled(dto.getEnabled() != null ? dto.getEnabled() : "1");
         source.setRepoId(dto.getRepoId());
+        source.setConfirmMode(dto.getConfirmMode() != null ? dto.getConfirmMode() : "manual");
+        source.setScoreThreshold(dto.getScoreThreshold() != null ? dto.getScoreThreshold() : 70);
         source.setCreateBy(String.valueOf(CurrentUserHolder.getCurrentUserId()));
         ScanSource created = scanSourceService.create(source);
 
@@ -541,6 +544,8 @@ public class DevloopApplicationService {
         source.setConfig(dto.getConfig());
         source.setCronExpr(dto.getCronExpr());
         source.setRepoId(dto.getRepoId());
+        source.setConfirmMode(dto.getConfirmMode());
+        source.setScoreThreshold(dto.getScoreThreshold());
         source.setUpdateBy(String.valueOf(CurrentUserHolder.getCurrentUserId()));
         scanSourceService.update(source);
         return ResponseUtil.successResponse(null);
@@ -565,6 +570,8 @@ public class DevloopApplicationService {
             map.put("cronExpr", s.getCronExpr());
             map.put("enabled", s.getEnabled());
             map.put("repoId", s.getRepoId());
+            map.put("confirmMode", s.getConfirmMode());
+            map.put("scoreThreshold", s.getScoreThreshold());
             map.put("lastScanTime", s.getLastScanTime());
             list.add(map);
         }
@@ -606,6 +613,10 @@ public class DevloopApplicationService {
             return ResponseUtil.failRes("Unknown source type: " + type);
         }
 
+        // 先对本次新增需求 LLM 打分（供展示、排序、score 模式判定），再按确认规则派生
+        scoringService.scoreItems(items);
+        autoDeriveForSource(source, items);
+
         Map<String, Object> result = new HashMap<>();
         result.put("createdCount", items.size());
         return ResponseUtil.successResponse(result);
@@ -642,6 +653,9 @@ public class DevloopApplicationService {
             map.put("originUrl", item.getOriginUrl());
             map.put("action", item.getAction());
             map.put("sessionId", item.getSessionId());
+            map.put("score", item.getScore());
+            map.put("priority", item.getPriority());
+            map.put("scoreDetail", item.getScoreDetail());
             map.put("createTime", item.getCreateTime());
             list.add(map);
         }
@@ -761,7 +775,7 @@ public class DevloopApplicationService {
 
     // ========== 研发任务 ==========
 
-    /** 从需求创建任务 */
+    /** 从需求创建任务（前端手动启动入口，身份取当前登录用户） */
     @Transactional(rollbackFor = Exception.class)
     public ResponseUtil<Map<String, Object>> createTask(Map<String, Object> params) {
         Long projectId = Long.valueOf(params.get("projectId").toString());
@@ -769,7 +783,17 @@ public class DevloopApplicationService {
             : null;
         String title = params.containsKey("title") && params.get("title") != null ? params.get("title").toString()
             : null;
+        Long currentUserId = CurrentUserHolder.getCurrentUserId();
+        LoginInfo loginInfo = CurrentUserHolder.getLoginInfo();
+        return deriveTask(currentUserId, loginInfo, projectId, sourceItemId, title);
+    }
 
+    /**
+     * 从需求派生任务（会话）核心逻辑，不依赖登录 ThreadLocal 取当前用户，供手动启动与定时自动派生复用。
+     * userId 用于成员/agent 校验，loginInfo 透传给异步 chat（自动派生时由源创建者的 LoginInfo 构造）。
+     */
+    private ResponseUtil<Map<String, Object>> deriveTask(Long userId, LoginInfo loginInfo, Long projectId,
+                                                         Long sourceItemId, String title) {
         // 防止重复启动：该需求已关联会话则拒绝重复启动
         if (sourceItemId != null) {
             ScanLogItem existing = scanLogItemMapper.selectById(sourceItemId);
@@ -778,9 +802,8 @@ public class DevloopApplicationService {
             }
         }
 
-        // 校验当前用户是否绑定了数字员工
-        Long currentUserId = CurrentUserHolder.getCurrentUserId();
-        ProjectMember member = projectMemberService.findByProjectAndUser(projectId, currentUserId);
+        // 校验用户是否绑定了数字员工
+        ProjectMember member = projectMemberService.findByProjectAndUser(projectId, userId);
         if (member == null) {
             return ResponseUtil.failRes("您不是该项目成员，无法创建任务");
         }
@@ -814,7 +837,6 @@ public class DevloopApplicationService {
         // 会话即任务：同步建会话（带 projectId）拿到 sessionId，分支名依赖 sessionId，
         // 再据此生成完整提示词写回 chatDto，耗时的 LLM 对话放到事务提交后异步执行。
         // 先用 title 作会话内容让会话名可读，建成后再覆盖为完整提示词供异步 chat 使用。
-        LoginInfo loginInfo = CurrentUserHolder.getLoginInfo();
         AssistantChatDto chatDto = new AssistantChatDto();
         chatDto.setSessionId(null);
         chatDto.setAgentId(agentId);
@@ -847,6 +869,73 @@ public class DevloopApplicationService {
         result.put("branchName", branchName);
         result.put("title", title);
         return ResponseUtil.successResponse(result);
+    }
+
+    /**
+     * 定时扫描完成后，按确认规则用源创建者身份为本次新增需求自动派生任务：
+     * auto=全部派生；score=综合分达阈值(scoreThreshold，默认70)才派生；manual=不派生。
+     * 扫描线程无登录上下文，故用 source.createBy 构造 LoginInfo 并设入 CurrentUserHolder，
+     * 复用 deriveTask 后清理，避免污染线程池上下文。
+     */
+    public void autoDeriveForSource(ScanSource source, List<ScanLogItem> newItems) {
+        if (source == null || newItems == null || newItems.isEmpty()) {
+            return;
+        }
+        String mode = source.getConfirmMode();
+        boolean autoAll = "auto".equalsIgnoreCase(mode);
+        boolean byScore = "score".equalsIgnoreCase(mode);
+        if (!autoAll && !byScore) {
+            return;
+        }
+        int threshold = source.getScoreThreshold() != null ? source.getScoreThreshold() : 70;
+        if (source.getCreateBy() == null || source.getCreateBy().isEmpty()) {
+            log.warn("[DevloopAuto] 源 {} 无创建者，跳过自动派生", source.getSourceId());
+            return;
+        }
+        Long ownerUserId;
+        try {
+            ownerUserId = Long.valueOf(source.getCreateBy());
+        } catch (NumberFormatException e) {
+            log.warn("[DevloopAuto] 源 {} 创建者非法 {}，跳过自动派生", source.getSourceId(), source.getCreateBy());
+            return;
+        }
+        LoginInfo ownerLogin = loginApplicationService.getLoginInfo(ownerUserId);
+        if (ownerLogin == null) {
+            log.warn("[DevloopAuto] 无法加载源创建者 {} 的登录信息，跳过自动派生", ownerUserId);
+            return;
+        }
+        LoginInfo previous = CurrentUserHolder.getLoginInfo();
+        try {
+            CurrentUserHolder.setLoginInfo(ownerLogin);
+            // 扫描线程无外层事务，deriveTask 内每条 mapper 自动提交，单条失败不影响其余；
+            // 会话即时落库，submitTaskChatAfterCommit 因无活动事务直接异步执行 chat。
+            for (ScanLogItem item : newItems) {
+                // score 模式：仅综合分达阈值的需求自动派生，其余留待人工确认
+                if (byScore) {
+                    Integer s = item.getScore();
+                    if (s == null || s < threshold) {
+                        continue;
+                    }
+                }
+                try {
+                    ResponseUtil<Map<String, Object>> res =
+                        deriveTask(ownerUserId, ownerLogin, source.getProjectId(), item.getItemId(), item.getTitle());
+                    if (res == null || res.getCode() != ResponseUtil.SUCCESS) {
+                        log.warn("[DevloopAuto] 自动派生失败, item={}, msg={}", item.getItemId(),
+                            res != null ? res.getMsg() : "null");
+                    }
+                } catch (Exception e) {
+                    log.error("[DevloopAuto] 自动派生异常, item={}", item.getItemId(), e);
+                }
+            }
+        } finally {
+            // 还原上下文：线程池复用，避免把源创建者身份泄漏给后续任务
+            if (previous != null) {
+                CurrentUserHolder.setLoginInfo(previous);
+            } else {
+                CurrentUserHolder.clearLoginInfo();
+            }
+        }
     }
 
     /**

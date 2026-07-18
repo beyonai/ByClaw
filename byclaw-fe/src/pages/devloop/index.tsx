@@ -1,5 +1,22 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Card, Switch, Tag, Button, Select, Tabs, Modal, Input, message, Empty, Spin, Space, List, Drawer } from 'antd';
+import {
+  Card,
+  Switch,
+  Tag,
+  Button,
+  Select,
+  Tabs,
+  Modal,
+  Input,
+  message,
+  Empty,
+  Spin,
+  Space,
+  List,
+  Drawer,
+  Radio,
+  InputNumber,
+} from 'antd';
 import {
   PlusOutlined,
   ArrowLeftOutlined,
@@ -60,6 +77,8 @@ interface ScanSourceItem {
   cronExpr: string;
   enabled: string;
   repoId?: number | null;
+  confirmMode?: string;
+  scoreThreshold?: number | null;
   lastScanTime: string | null;
 }
 
@@ -85,15 +104,50 @@ interface RequirementItem {
   originUrl: string;
   action: string;
   createTime: string;
+  content?: string;
   sourceType?: string;
   sourceName?: string;
   sessionId?: number;
+  score?: number | null;
+  priority?: string | null;
+  scoreDetail?: string | null;
 }
 
-const SCORE_COLORS = ['#52c41a', '#73d13d', '#95de64', '#faad14', '#ffc53d'];
+// 评分维度展示配置：与后端 score_detail JSON 字段、满分口径对齐
+interface ScoreDetail {
+  businessValue?: number;
+  userImpact?: number;
+  urgency?: number;
+  strategyFit?: number;
+  feasibility?: number;
+  reuseValue?: number;
+  risk?: number;
+  summary?: string;
+}
+
+const SCORE_DIMENSIONS: { key: keyof ScoreDetail; label: string; max: number }[] = [
+  { key: 'businessValue', label: '业务价值', max: 30 },
+  { key: 'userImpact', label: '用户影响', max: 20 },
+  { key: 'urgency', label: '紧迫度', max: 15 },
+  { key: 'strategyFit', label: '战略匹配', max: 15 },
+  { key: 'feasibility', label: '实现可行性', max: 10 },
+  { key: 'reuseValue', label: '复用价值', max: 10 },
+];
+
+const priorityColor = (priority?: string | null) =>
+  priority === 'P0' ? 'red' : priority === 'P1' ? 'orange' : 'default';
+
+// 综合分配色：>=80 绿，>=60 蓝，<60 橙灰；无分灰色
+const scoreColor = (score?: number | null) => {
+  if (score == null) return '#d9d9d9';
+  if (score >= 80) return '#52c41a';
+  if (score >= 60) return '#1677ff';
+  return '#faad14';
+};
 
 const cronPresets = [
   { value: '*/1 * * * *', label: '每1分钟' },
+  { value: '*/5 * * * *', label: '每5分钟' },
   { value: '*/15 * * * *', label: '每15分钟' },
   { value: '*/30 * * * *', label: '每30分钟' },
   { value: '0 */1 * * *', label: '每1小时' },
@@ -140,6 +194,7 @@ const NeedCollect: React.FC = () => {
 
   const [showAddSourceModal, setShowAddSourceModal] = useState(false);
   const [editingSource, setEditingSource] = useState<ScanSourceItem | null>(null);
+  const [detailReq, setDetailReq] = useState<RequirementItem | null>(null);
   const [addForm, setAddForm] = useState({
     type: 'dingtalk' as SourceType,
     name: '',
@@ -151,6 +206,8 @@ const NeedCollect: React.FC = () => {
     pat: '',
     cron: '*/30 * * * *',
     repoId: undefined as number | undefined,
+    confirmMode: 'manual',
+    scoreThreshold: 70,
   });
 
   const [hasPatSaved, setHasPatSaved] = useState(false);
@@ -406,6 +463,8 @@ const NeedCollect: React.FC = () => {
           config,
           cronExpr: addForm.cron,
           repoId: addForm.repoId,
+          confirmMode: addForm.confirmMode,
+          scoreThreshold: addForm.scoreThreshold,
         });
         message.success('收集源已更新');
       } else {
@@ -417,6 +476,8 @@ const NeedCollect: React.FC = () => {
           cronExpr: addForm.cron,
           enabled: '1',
           repoId: addForm.repoId,
+          confirmMode: addForm.confirmMode,
+          scoreThreshold: addForm.scoreThreshold,
         });
         message.success('收集源添加成功');
       }
@@ -446,6 +507,8 @@ const NeedCollect: React.FC = () => {
       pat: '',
       cron: source.cronExpr || '*/30 * * * *',
       repoId: source.repoId ?? undefined,
+      confirmMode: source.confirmMode || 'manual',
+      scoreThreshold: source.scoreThreshold ?? 70,
     });
     // 用已存群名 seed 下拉选项，编辑时无需重新搜索即可显示群名而非 id
     if (cfg.groupId) {
@@ -691,7 +754,7 @@ const NeedCollect: React.FC = () => {
         setEditingSource(null);
       }}
       okText={editingSource ? '保存' : '添加'}
-      width={520}
+      width={640}
       footer={(_, { OkBtn, CancelBtn }) => (
         <Space>
           {editingSource && (
@@ -710,153 +773,193 @@ const NeedCollect: React.FC = () => {
         </Space>
       )}
     >
-      <div className={styles.formField}>
-        <label>类型</label>
-        <Select
-          value={addForm.type}
-          disabled={!!editingSource}
-          onChange={(v) => setAddForm({ ...addForm, type: v })}
-          options={[
-            { value: 'dingtalk', label: '钉钉群消息' },
-            { value: 'github_issue', label: 'GitHub Issue' },
-          ]}
-        />
-      </div>
-      <div className={styles.formField}>
-        <label>名称</label>
-        <Input
-          placeholder="收集源名称"
-          value={addForm.name}
-          onChange={(e) => setAddForm({ ...addForm, name: e.target.value })}
-        />
-      </div>
-      <div className={styles.formField}>
-        <label>关联仓库</label>
-        <Space.Compact style={{ width: '100%' }}>
+      <div className={styles.formGrid}>
+        <div className={styles.formField}>
+          <label>类型</label>
           <Select
-            style={{ flex: 1 }}
-            value={addForm.repoId}
-            onChange={(v) => setAddForm({ ...addForm, repoId: v })}
-            placeholder="选择该源扫来的需求要开发的仓库"
-            allowClear
-            options={repos.map((r) => ({
-              value: r.repoId,
-              label: r.repoFullName || r.repoUrl || String(r.repoId),
-            }))}
-            notFoundContent={repos.length === 0 ? '项目暂无仓库，点击右侧新增' : undefined}
+            value={addForm.type}
+            disabled={!!editingSource}
+            onChange={(v) => setAddForm({ ...addForm, type: v })}
+            options={[
+              { value: 'dingtalk', label: '钉钉群消息' },
+              { value: 'github_issue', label: 'GitHub Issue' },
+            ]}
           />
-          <Button
-            icon={<PlusOutlined />}
-            onClick={() => {
-              setRepoForm({ repoFullName: '', repoUrl: '', defaultBranch: 'main' });
-              setShowRepoModal(true);
-            }}
-          >
-            新增
-          </Button>
-        </Space.Compact>
-      </div>
-      {addForm.type === 'dingtalk' && (
-        <>
-          {!dwsAuthed && (
-            <div className={styles.formField}>
-              <label>钉钉授权</label>
-              {dwsDeviceInfo ? (
-                <div>
-                  <p style={{ margin: '4px 0' }}>请在手机钉钉打开以下链接完成授权：</p>
-                  <a href={dwsDeviceInfo.verificationUrl} target="_blank" rel="noreferrer">
-                    {dwsDeviceInfo.verificationUrl}
-                  </a>
-                  <p style={{ margin: '4px 0', color: '#666' }}>
-                    设备码: <strong>{dwsDeviceInfo.userCode}</strong>
-                  </p>
-                  {dwsAuthPolling && <Spin size="small" />}
-                </div>
-              ) : (
-                <Button
-                  type="primary"
-                  icon={<DingdingOutlined />}
-                  loading={dwsAuthLoading}
-                  onClick={handleStartDwsAuth}
-                >
-                  授权钉钉扫描
-                </Button>
-              )}
-            </div>
-          )}
-          {dwsAuthed && (
-            <div className={styles.formField}>
-              <label>钉钉授权</label>
-              <Tag color="green">已授权</Tag>
-            </div>
-          )}
-          <div className={styles.formField}>
-            <label>钉钉群</label>
+        </div>
+        <div className={styles.formField}>
+          <label>名称</label>
+          <Input
+            placeholder="收集源名称"
+            value={addForm.name}
+            onChange={(e) => setAddForm({ ...addForm, name: e.target.value })}
+          />
+        </div>
+        <div className={styles.formField}>
+          <label>关联仓库</label>
+          <Space.Compact style={{ width: '100%' }}>
             <Select
-              showSearch
-              filterOption={false}
-              placeholder="输入群名搜索"
-              value={addForm.chatId || undefined}
-              onSearch={handleGroupSearch}
-              onChange={(v, option) => {
-                const label = Array.isArray(option) ? '' : (option?.label as string) || '';
-                setAddForm({ ...addForm, chatId: v, chatName: label });
+              style={{ flex: 1 }}
+              value={addForm.repoId}
+              onChange={(v) => setAddForm({ ...addForm, repoId: v })}
+              placeholder="选择该源扫来的需求要开发的仓库"
+              allowClear
+              options={repos.map((r) => ({
+                value: r.repoId,
+                label: r.repoFullName || r.repoUrl || String(r.repoId),
+              }))}
+              notFoundContent={repos.length === 0 ? '项目暂无仓库，点击右侧新增' : undefined}
+            />
+            <Button
+              icon={<PlusOutlined />}
+              onClick={() => {
+                setRepoForm({ repoFullName: '', repoUrl: '', defaultBranch: 'main' });
+                setShowRepoModal(true);
               }}
-              options={groupOptions}
-              loading={groupSearching}
-              notFoundContent={groupSearching ? <Spin size="small" /> : '输入至少2个字搜索'}
-            />
-          </div>
+            >
+              新增
+            </Button>
+          </Space.Compact>
+        </div>
+        <div className={styles.formField}>
+          <label>扫描频率</label>
+          <Select value={addForm.cron} onChange={(v) => setAddForm({ ...addForm, cron: v })} options={cronPresets} />
+        </div>
+        <div className={styles.formFieldFull}>
           <div className={styles.formField}>
-            <label>关键词</label>
-            <Input
-              placeholder="默认: 需求"
-              value={addForm.keywords}
-              onChange={(e) => setAddForm({ ...addForm, keywords: e.target.value })}
-            />
-          </div>
-          <div className={styles.formField}>
-            <label>回溯时长（小时）</label>
-            <Select
-              value={addForm.lookbackHours}
-              onChange={(v) => setAddForm({ ...addForm, lookbackHours: v })}
+            <label>需求确认规则</label>
+            <Radio.Group
+              value={addForm.confirmMode}
+              onChange={(e) => setAddForm({ ...addForm, confirmMode: e.target.value })}
+              optionType="button"
+              buttonStyle="solid"
               options={[
-                { value: '6', label: '6小时' },
-                { value: '12', label: '12小时' },
-                { value: '24', label: '24小时（默认）' },
-                { value: '48', label: '48小时' },
-                { value: '72', label: '72小时' },
-                { value: '168', label: '7天' },
+                { value: 'manual', label: '人工确认' },
+                { value: 'auto', label: '全自动派生' },
+                { value: 'score', label: '按需求得分' },
               ]}
             />
+            {addForm.confirmMode === 'score' && (
+              <div style={{ marginTop: 8 }}>
+                得分达到
+                <InputNumber
+                  min={0}
+                  max={100}
+                  value={addForm.scoreThreshold}
+                  onChange={(v) => setAddForm({ ...addForm, scoreThreshold: v ?? 70 })}
+                  style={{ width: 80, margin: '0 8px' }}
+                />
+                分自动转任务，低于该分数需要人工干预
+              </div>
+            )}
+            <div style={{ marginTop: 6, fontSize: 12, color: '#999' }}>
+              {addForm.confirmMode === 'auto'
+                ? '扫描到的新需求将自动派生为研发任务并启动会话'
+                : addForm.confirmMode === 'score'
+                  ? '综合评分达到阈值的需求自动派生，其余进入列表等待人工确认'
+                  : '扫描到的需求进入列表，需人工点击「启动任务」'}
+            </div>
           </div>
-        </>
-      )}
-      {addForm.type === 'github_issue' && (
-        <>
-          {!hasPatSaved && (
+        </div>
+        {addForm.type === 'dingtalk' && (
+          <>
+            {!dwsAuthed && (
+              <div className={styles.formFieldFull}>
+                <div className={styles.formField}>
+                  <label>钉钉授权</label>
+                  {dwsDeviceInfo ? (
+                    <div>
+                      <p style={{ margin: '4px 0' }}>请在手机钉钉打开以下链接完成授权：</p>
+                      <a href={dwsDeviceInfo.verificationUrl} target="_blank" rel="noreferrer">
+                        {dwsDeviceInfo.verificationUrl}
+                      </a>
+                      <p style={{ margin: '4px 0', color: '#666' }}>
+                        设备码: <strong>{dwsDeviceInfo.userCode}</strong>
+                      </p>
+                      {dwsAuthPolling && <Spin size="small" />}
+                    </div>
+                  ) : (
+                    <Button
+                      type="primary"
+                      icon={<DingdingOutlined />}
+                      loading={dwsAuthLoading}
+                      onClick={handleStartDwsAuth}
+                    >
+                      授权钉钉扫描
+                    </Button>
+                  )}
+                </div>
+              </div>
+            )}
+            {dwsAuthed && (
+              <div className={styles.formField}>
+                <label>钉钉授权</label>
+                <Tag color="green">已授权</Tag>
+              </div>
+            )}
             <div className={styles.formField}>
-              <label>GitHub PAT</label>
-              <Input.Password
-                placeholder="输入 Personal Access Token"
-                value={addForm.pat}
-                onChange={(e) => setAddForm({ ...addForm, pat: e.target.value })}
+              <label>钉钉群</label>
+              <Select
+                showSearch
+                filterOption={false}
+                placeholder="输入群名搜索"
+                value={addForm.chatId || undefined}
+                onSearch={handleGroupSearch}
+                onChange={(v, option) => {
+                  const label = Array.isArray(option) ? '' : (option?.label as string) || '';
+                  setAddForm({ ...addForm, chatId: v, chatName: label });
+                }}
+                options={groupOptions}
+                loading={groupSearching}
+                notFoundContent={groupSearching ? <Spin size="small" /> : '输入至少2个字搜索'}
               />
             </div>
-          )}
-          <div className={styles.formField}>
-            <label>标签过滤（可选）</label>
-            <Input
-              placeholder="如 bug,feature"
-              value={addForm.labels}
-              onChange={(e) => setAddForm({ ...addForm, labels: e.target.value })}
-            />
-          </div>
-        </>
-      )}
-      <div className={styles.formField}>
-        <label>扫描频率</label>
-        <Select value={addForm.cron} onChange={(v) => setAddForm({ ...addForm, cron: v })} options={cronPresets} />
+            <div className={styles.formField}>
+              <label>关键词</label>
+              <Input
+                placeholder="默认: 需求"
+                value={addForm.keywords}
+                onChange={(e) => setAddForm({ ...addForm, keywords: e.target.value })}
+              />
+            </div>
+            <div className={styles.formField}>
+              <label>回溯时长（小时）</label>
+              <Select
+                value={addForm.lookbackHours}
+                onChange={(v) => setAddForm({ ...addForm, lookbackHours: v })}
+                options={[
+                  { value: '6', label: '6小时' },
+                  { value: '12', label: '12小时' },
+                  { value: '24', label: '24小时（默认）' },
+                  { value: '48', label: '48小时' },
+                  { value: '72', label: '72小时' },
+                  { value: '168', label: '7天' },
+                ]}
+              />
+            </div>
+          </>
+        )}
+        {addForm.type === 'github_issue' && (
+          <>
+            {!hasPatSaved && (
+              <div className={styles.formField}>
+                <label>GitHub PAT</label>
+                <Input.Password
+                  placeholder="输入 Personal Access Token"
+                  value={addForm.pat}
+                  onChange={(e) => setAddForm({ ...addForm, pat: e.target.value })}
+                />
+              </div>
+            )}
+            <div className={styles.formField}>
+              <label>标签过滤（可选）</label>
+              <Input
+                placeholder="如 bug,feature"
+                value={addForm.labels}
+                onChange={(e) => setAddForm({ ...addForm, labels: e.target.value })}
+              />
+            </div>
+          </>
+        )}
       </div>
     </Modal>
   );
@@ -937,6 +1040,82 @@ const NeedCollect: React.FC = () => {
       </Button>
     </Modal>
   );
+
+  const renderRequirementDetailModal = () => {
+    if (!detailReq) return null;
+    let detail: ScoreDetail = {};
+    try {
+      detail = detailReq.scoreDetail ? JSON.parse(detailReq.scoreDetail) : {};
+    } catch {
+      detail = {};
+    }
+    const sourceLabel = detailReq.sourceType === 'dingtalk' ? '钉钉' : 'GitHub Issues';
+    return (
+      <Modal
+        title={detailReq.title}
+        open={!!detailReq}
+        onCancel={() => setDetailReq(null)}
+        footer={<Button onClick={() => setDetailReq(null)}>关闭</Button>}
+        width={720}
+      >
+        <div className={styles.scoreSummary}>
+          <div className={styles.scoreSummaryCircle} style={{ color: scoreColor(detailReq.score) }}>
+            {detailReq.score ?? '—'}
+          </div>
+          <div>
+            <div className={styles.scoreSummaryLabel}>AI 综合评分</div>
+            <div className={styles.scoreSummaryPriority}>
+              {detailReq.priority || '—'}
+              {detailReq.sessionId ? ' · 研发中' : ''}
+            </div>
+            <div className={styles.scoreSummaryHint}>
+              {detailReq.sessionId ? '已满足自动派生研发任务规则' : '尚未启动研发任务'}
+            </div>
+          </div>
+        </div>
+
+        {detail.summary && (
+          <div className={styles.formField} style={{ marginTop: 16 }}>
+            <label>AI 整理的产品需求</label>
+            <div>{detail.summary}</div>
+          </div>
+        )}
+        <div className={styles.formField}>
+          <label>原始需求</label>
+          <div style={{ whiteSpace: 'pre-wrap', color: '#555' }}>{detailReq.content || detailReq.title}</div>
+        </div>
+        <div className={styles.formField}>
+          <label>来源</label>
+          <div>
+            {sourceLabel} · {detailReq.sourceName || '-'} ·{' '}
+            {detailReq.createTime ? dayjs(detailReq.createTime).format('YYYY-MM-DD HH:mm') : '-'}
+          </div>
+        </div>
+
+        {detailReq.score != null && (
+          <div className={styles.formField}>
+            <label>评分维度</label>
+            <div className={styles.scoreDimGrid}>
+              {SCORE_DIMENSIONS.map((d) => (
+                <div key={d.key} className={styles.scoreDimItem}>
+                  <span>{d.label}</span>
+                  <strong>
+                    +{detail[d.key] ?? 0} / {d.max}
+                  </strong>
+                </div>
+              ))}
+              {detail.risk != null && detail.risk !== 0 && (
+                <div className={styles.scoreDimItem}>
+                  <span>风险与冲突</span>
+                  <strong style={{ color: '#cf1322' }}>{detail.risk}</strong>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </Modal>
+    );
+  };
 
   const formatConfig = (type: string, config: string) => {
     try {
@@ -1071,6 +1250,8 @@ const NeedCollect: React.FC = () => {
                 pat: '',
                 cron: '*/30 * * * *',
                 repoId: undefined,
+                confirmMode: 'manual',
+                scoreThreshold: 70,
               });
               setGroupOptions([]);
               setShowAddSourceModal(true);
@@ -1210,23 +1391,30 @@ const NeedCollect: React.FC = () => {
           </div>
 
           <div className={styles.reqList}>
-            {requirements.map((req, idx) => {
-              const score = 50 + Math.floor(Math.abs(Math.sin(req.itemId)) * 50);
-              const colorIdx = idx % SCORE_COLORS.length;
+            {requirements.map((req) => {
+              const scored = req.score != null;
               const sourceLabel = req.sourceType === 'dingtalk' ? '钉钉' : 'GitHub Issues';
               return (
-                <div key={req.itemId} className={styles.reqCard}>
-                  <div className={styles.scoreCircle} style={{ background: SCORE_COLORS[colorIdx] }}>
-                    {score}
+                <div
+                  key={req.itemId}
+                  className={styles.reqCard}
+                  onClick={() => setDetailReq(req)}
+                  style={{ cursor: 'pointer' }}
+                >
+                  <div className={styles.scoreCircle} style={{ background: scoreColor(req.score) }}>
+                    {scored ? req.score : '—'}
                   </div>
                   <div className={styles.reqContent}>
-                    <p className={styles.reqTitle}>{req.title}</p>
+                    <p className={styles.reqTitle}>
+                      {req.priority ? <Tag color={priorityColor(req.priority)}>{req.priority}</Tag> : null}
+                      {req.title}
+                    </p>
                     <span className={styles.reqMeta}>
                       {sourceLabel} · {req.sourceName} ·{' '}
                       {req.createTime ? dayjs(req.createTime).format('MM-DD HH:mm') : ''}
                     </span>
                   </div>
-                  <div className={styles.reqRight}>
+                  <div className={styles.reqRight} onClick={(e) => e.stopPropagation()}>
                     {req.sessionId ? (
                       <Button size="small" disabled>
                         已启动
@@ -1260,6 +1448,7 @@ const NeedCollect: React.FC = () => {
       {renderAddSourceModal()}
       {renderProjectModal()}
       {renderRepoModal()}
+      {renderRequirementDetailModal()}
 
       {/* 扫描日志抽屉 */}
       <Drawer

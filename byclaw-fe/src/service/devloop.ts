@@ -69,6 +69,8 @@ export const createScanSource = (data: {
   cronExpr?: string;
   enabled?: string;
   repoId?: number;
+  confirmMode?: string;
+  scoreThreshold?: number;
 }) => POST<any>('/byaiService/devloop/source/create', data);
 
 export const updateScanSource = (data: {
@@ -77,6 +79,8 @@ export const updateScanSource = (data: {
   config?: string;
   cronExpr?: string;
   repoId?: number;
+  confirmMode?: string;
+  scoreThreshold?: number;
 }) => POST<any>('/byaiService/devloop/source/update', data);
 
 export const deleteScanSource = (sourceId: number) => POST<any>('/byaiService/devloop/source/delete', { sourceId });

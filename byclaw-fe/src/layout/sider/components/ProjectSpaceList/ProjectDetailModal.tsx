@@ -5,8 +5,10 @@ import {
   Drawer,
   Empty,
   Input,
+  InputNumber,
   List,
   Modal,
+  Radio,
   Select,
   Space,
   Spin,
@@ -87,6 +89,8 @@ type ScanSourceItem = {
   cronExpr?: string;
   enabled?: string;
   repoId?: number | null;
+  confirmMode?: string;
+  scoreThreshold?: number | null;
   lastScanTime?: string | null;
 };
 
@@ -134,6 +138,8 @@ type SourceForm = {
   pat: string;
   cron: string;
   repoId?: number;
+  confirmMode: string;
+  scoreThreshold: number;
 };
 
 type ManualRequirementForm = {
@@ -168,6 +174,7 @@ const PHASE_COLORS: Record<string, string> = {
 
 const cronPresets = [
   { value: '*/1 * * * *', label: '每1分钟' },
+  { value: '*/5 * * * *', label: '每5分钟' },
   { value: '*/15 * * * *', label: '每15分钟' },
   { value: '*/30 * * * *', label: '每30分钟' },
   { value: '0 */1 * * *', label: '每1小时' },
@@ -201,6 +208,8 @@ const getDefaultSourceForm = (): SourceForm => ({
   pat: '',
   cron: '*/30 * * * *',
   repoId: undefined,
+  confirmMode: 'manual',
+  scoreThreshold: 70,
 });
 
 const getDefaultManualRequirementForm = (): ManualRequirementForm => ({
@@ -758,6 +767,8 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
           config,
           cronExpr: sourceForm.cron,
           repoId: sourceForm.repoId,
+          confirmMode: sourceForm.confirmMode,
+          scoreThreshold: sourceForm.scoreThreshold,
         });
         message.success('收集源已更新');
       } else {
@@ -769,6 +780,8 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
           cronExpr: sourceForm.cron,
           enabled: '1',
           repoId: sourceForm.repoId,
+          confirmMode: sourceForm.confirmMode,
+          scoreThreshold: sourceForm.scoreThreshold,
         });
         message.success('收集源添加成功');
       }
@@ -803,6 +816,8 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
       pat: '',
       cron: source.cronExpr || '*/30 * * * *',
       repoId: source.repoId ?? undefined,
+      confirmMode: source.confirmMode || 'manual',
+      scoreThreshold: source.scoreThreshold ?? 70,
     });
     // 已保存的群名先放入下拉选项，编辑时不需要重新搜索也能展示正确名称。
     if (config.groupId) {
@@ -1608,7 +1623,7 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
         setGroupOptions([]);
       }}
       okText={editingSource ? '保存' : '添加'}
-      width={520}
+      width={640}
       className={styles.sourceModal}
       footer={(_, { OkBtn, CancelBtn }) => (
         <Space>
@@ -1628,159 +1643,199 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
         </Space>
       )}
     >
-      <div className={styles.formField}>
-        <label>类型</label>
-        <Select
-          value={sourceForm.type}
-          disabled={!!editingSource}
-          onChange={(type) => setSourceForm((prev) => ({ ...prev, type }))}
-          options={[
-            { value: 'dingtalk', label: '钉钉群消息' },
-            { value: 'github_issue', label: 'GitHub Issue' },
-          ]}
-        />
-      </div>
-      <div className={styles.formField}>
-        <label>名称</label>
-        <Input
-          placeholder="收集源名称"
-          value={sourceForm.name}
-          onChange={(event) => setSourceForm((prev) => ({ ...prev, name: event.target.value }))}
-        />
-      </div>
-      <div className={styles.formField}>
-        <label>关联仓库</label>
-        <Space.Compact style={{ width: '100%' }}>
+      <div className={styles.formGrid}>
+        <div className={styles.formField}>
+          <label>类型</label>
           <Select
-            style={{ flex: 1 }}
-            placeholder="选择该源扫来的需求要开发的仓库"
-            value={sourceForm.repoId}
-            allowClear
-            onChange={(repoId) => setSourceForm((prev) => ({ ...prev, repoId }))}
-            options={repos.map((repo) => ({
-              value: repo.repoId,
-              label: repo.repoFullName || repo.repoUrl || String(repo.repoId),
-            }))}
-            notFoundContent={repos.length ? undefined : '项目暂无仓库，点击右侧新增'}
+            value={sourceForm.type}
+            disabled={!!editingSource}
+            onChange={(type) => setSourceForm((prev) => ({ ...prev, type }))}
+            options={[
+              { value: 'dingtalk', label: '钉钉群消息' },
+              { value: 'github_issue', label: 'GitHub Issue' },
+            ]}
           />
-          <Button
-            icon={<PlusOutlined />}
-            onClick={() => {
-              setRepoForm({ repoFullName: '', repoUrl: '', defaultBranch: 'main' });
-              setRepoModalOpen(true);
-            }}
-          >
-            新增
-          </Button>
-        </Space.Compact>
-      </div>
-      {sourceForm.type === 'dingtalk' && (
-        <>
-          {!dwsAuthed && (
-            <div className={styles.formField}>
-              <label>钉钉授权</label>
-              {dwsDeviceInfo ? (
-                <div>
-                  <p style={{ margin: '4px 0' }}>请在手机钉钉打开以下链接完成授权：</p>
-                  <a href={dwsDeviceInfo.verificationUrl} target="_blank" rel="noreferrer">
-                    {dwsDeviceInfo.verificationUrl}
-                  </a>
-                  <p style={{ margin: '4px 0', color: '#666' }}>
-                    设备码: <strong>{dwsDeviceInfo.userCode}</strong>
-                  </p>
-                  {dwsAuthPolling && <Spin size="small" />}
-                </div>
-              ) : (
-                <Button
-                  type="primary"
-                  icon={<DingdingOutlined />}
-                  loading={dwsAuthLoading}
-                  onClick={handleStartDwsAuth}
-                >
-                  授权钉钉扫描
-                </Button>
-              )}
-            </div>
-          )}
-          {dwsAuthed && (
-            <div className={styles.formField}>
-              <label>钉钉授权</label>
-              <Tag color="green">已授权</Tag>
-            </div>
-          )}
-          <div className={styles.formField}>
-            <label>钉钉群</label>
+        </div>
+        <div className={styles.formField}>
+          <label>名称</label>
+          <Input
+            placeholder="收集源名称"
+            value={sourceForm.name}
+            onChange={(event) => setSourceForm((prev) => ({ ...prev, name: event.target.value }))}
+          />
+        </div>
+        <div className={styles.formField}>
+          <label>关联仓库</label>
+          <Space.Compact style={{ width: '100%' }}>
             <Select
-              showSearch
-              filterOption={false}
-              placeholder="输入群名搜索"
-              value={sourceForm.chatId || undefined}
-              onSearch={handleGroupSearch}
-              onChange={(chatId, option) => {
-                const chatName = Array.isArray(option) ? '' : (option?.label as string) || '';
-                setSourceForm((prev) => ({ ...prev, chatId, chatName }));
+              style={{ flex: 1 }}
+              placeholder="选择该源扫来的需求要开发的仓库"
+              value={sourceForm.repoId}
+              allowClear
+              onChange={(repoId) => setSourceForm((prev) => ({ ...prev, repoId }))}
+              options={repos.map((repo) => ({
+                value: repo.repoId,
+                label: repo.repoFullName || repo.repoUrl || String(repo.repoId),
+              }))}
+              notFoundContent={repos.length ? undefined : '项目暂无仓库，点击右侧新增'}
+            />
+            <Button
+              icon={<PlusOutlined />}
+              onClick={() => {
+                setRepoForm({ repoFullName: '', repoUrl: '', defaultBranch: 'main' });
+                setRepoModalOpen(true);
               }}
-              options={groupOptions}
-              loading={groupSearching}
-              notFoundContent={groupSearching ? <Spin size="small" /> : '输入至少2个字搜索'}
-            />
-          </div>
+            >
+              新增
+            </Button>
+          </Space.Compact>
+        </div>
+        <div className={styles.formField}>
+          <label>扫描频率</label>
+          <Select
+            value={sourceForm.cron}
+            onChange={(cron) => setSourceForm((prev) => ({ ...prev, cron }))}
+            options={cronPresets}
+            popupClassName={styles.sourceSelectPopup}
+          />
+        </div>
+        <div className={styles.formFieldFull}>
           <div className={styles.formField}>
-            <label>关键词</label>
-            <Input
-              placeholder="默认: 需求"
-              value={sourceForm.keywords}
-              onChange={(event) => setSourceForm((prev) => ({ ...prev, keywords: event.target.value }))}
-            />
-          </div>
-          <div className={styles.formField}>
-            <label>回溯时长（小时）</label>
-            <Select
-              value={sourceForm.lookbackHours}
-              onChange={(lookbackHours) => setSourceForm((prev) => ({ ...prev, lookbackHours }))}
-              popupClassName={styles.sourceSelectPopup}
+            <label>需求确认规则</label>
+            <Radio.Group
+              value={sourceForm.confirmMode}
+              onChange={(event) => setSourceForm((prev) => ({ ...prev, confirmMode: event.target.value }))}
+              optionType="button"
+              buttonStyle="solid"
               options={[
-                { value: '6', label: '6小时' },
-                { value: '12', label: '12小时' },
-                { value: '24', label: '24小时（默认）' },
-                { value: '48', label: '48小时' },
-                { value: '72', label: '72小时' },
-                { value: '168', label: '7天' },
+                { value: 'manual', label: '人工确认' },
+                { value: 'auto', label: '全自动派生' },
+                { value: 'score', label: '按需求得分' },
               ]}
             />
+            {sourceForm.confirmMode === 'score' && (
+              <div style={{ marginTop: 8 }}>
+                得分达到
+                <InputNumber
+                  min={0}
+                  max={100}
+                  value={sourceForm.scoreThreshold}
+                  onChange={(value) => setSourceForm((prev) => ({ ...prev, scoreThreshold: value ?? 70 }))}
+                  style={{ width: 80, margin: '0 8px' }}
+                />
+                分自动转任务，低于该分数需要人工干预
+              </div>
+            )}
+            <div style={{ marginTop: 6, fontSize: 12, color: '#999' }}>
+              {sourceForm.confirmMode === 'auto'
+                ? '扫描到的新需求将自动派生为研发任务并启动会话'
+                : sourceForm.confirmMode === 'score'
+                  ? '综合评分达到阈值的需求自动派生，其余进入列表等待人工确认'
+                  : '扫描到的需求进入列表，需人工点击「启动任务」'}
+            </div>
           </div>
-        </>
-      )}
-      {sourceForm.type === 'github_issue' && (
-        <>
-          {!hasPatSaved && (
+        </div>
+        {sourceForm.type === 'dingtalk' && (
+          <>
+            {!dwsAuthed && (
+              <div className={styles.formFieldFull}>
+                <div className={styles.formField}>
+                  <label>钉钉授权</label>
+                  {dwsDeviceInfo ? (
+                    <div>
+                      <p style={{ margin: '4px 0' }}>请在手机钉钉打开以下链接完成授权：</p>
+                      <a href={dwsDeviceInfo.verificationUrl} target="_blank" rel="noreferrer">
+                        {dwsDeviceInfo.verificationUrl}
+                      </a>
+                      <p style={{ margin: '4px 0', color: '#666' }}>
+                        设备码: <strong>{dwsDeviceInfo.userCode}</strong>
+                      </p>
+                      {dwsAuthPolling && <Spin size="small" />}
+                    </div>
+                  ) : (
+                    <Button
+                      type="primary"
+                      icon={<DingdingOutlined />}
+                      loading={dwsAuthLoading}
+                      onClick={handleStartDwsAuth}
+                    >
+                      授权钉钉扫描
+                    </Button>
+                  )}
+                </div>
+              </div>
+            )}
+            {dwsAuthed && (
+              <div className={styles.formField}>
+                <label>钉钉授权</label>
+                <Tag color="green">已授权</Tag>
+              </div>
+            )}
             <div className={styles.formField}>
-              <label>GitHub PAT</label>
-              <Input.Password
-                placeholder="输入 Personal Access Token"
-                value={sourceForm.pat}
-                onChange={(event) => setSourceForm((prev) => ({ ...prev, pat: event.target.value }))}
+              <label>钉钉群</label>
+              <Select
+                showSearch
+                filterOption={false}
+                placeholder="输入群名搜索"
+                value={sourceForm.chatId || undefined}
+                onSearch={handleGroupSearch}
+                onChange={(chatId, option) => {
+                  const chatName = Array.isArray(option) ? '' : (option?.label as string) || '';
+                  setSourceForm((prev) => ({ ...prev, chatId, chatName }));
+                }}
+                options={groupOptions}
+                loading={groupSearching}
+                notFoundContent={groupSearching ? <Spin size="small" /> : '输入至少2个字搜索'}
               />
             </div>
-          )}
-          <div className={styles.formField}>
-            <label>标签过滤（可选）</label>
-            <Input
-              placeholder="如 bug,feature"
-              value={sourceForm.labels}
-              onChange={(event) => setSourceForm((prev) => ({ ...prev, labels: event.target.value }))}
-            />
-          </div>
-        </>
-      )}
-      <div className={styles.formField}>
-        <label>扫描频率</label>
-        <Select
-          value={sourceForm.cron}
-          onChange={(cron) => setSourceForm((prev) => ({ ...prev, cron }))}
-          options={cronPresets}
-          popupClassName={styles.sourceSelectPopup}
-        />
+            <div className={styles.formField}>
+              <label>关键词</label>
+              <Input
+                placeholder="默认: 需求"
+                value={sourceForm.keywords}
+                onChange={(event) => setSourceForm((prev) => ({ ...prev, keywords: event.target.value }))}
+              />
+            </div>
+            <div className={styles.formField}>
+              <label>回溯时长（小时）</label>
+              <Select
+                value={sourceForm.lookbackHours}
+                onChange={(lookbackHours) => setSourceForm((prev) => ({ ...prev, lookbackHours }))}
+                popupClassName={styles.sourceSelectPopup}
+                options={[
+                  { value: '6', label: '6小时' },
+                  { value: '12', label: '12小时' },
+                  { value: '24', label: '24小时（默认）' },
+                  { value: '48', label: '48小时' },
+                  { value: '72', label: '72小时' },
+                  { value: '168', label: '7天' },
+                ]}
+              />
+            </div>
+          </>
+        )}
+        {sourceForm.type === 'github_issue' && (
+          <>
+            {!hasPatSaved && (
+              <div className={styles.formField}>
+                <label>GitHub PAT</label>
+                <Input.Password
+                  placeholder="输入 Personal Access Token"
+                  value={sourceForm.pat}
+                  onChange={(event) => setSourceForm((prev) => ({ ...prev, pat: event.target.value }))}
+                />
+              </div>
+            )}
+            <div className={styles.formField}>
+              <label>标签过滤（可选）</label>
+              <Input
+                placeholder="如 bug,feature"
+                value={sourceForm.labels}
+                onChange={(event) => setSourceForm((prev) => ({ ...prev, labels: event.target.value }))}
+              />
+            </div>
+          </>
+        )}
       </div>
     </Modal>
   );

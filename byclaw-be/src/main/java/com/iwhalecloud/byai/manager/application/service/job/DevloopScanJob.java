@@ -29,7 +29,7 @@ import java.util.UUID;
     prefix = "devloop.scan",
     name = "enabled",
     havingValue = "true",
-    matchIfMissing = false)
+    matchIfMissing = true)
 public class DevloopScanJob {
 
     private static final Logger logger =
@@ -53,8 +53,17 @@ public class DevloopScanJob {
     @Autowired
     private DevloopPatService patService;
 
-    /** 定时扫描入口，获取分布式锁后遍历所有启用源执行扫描 */
-    @Scheduled(cron = "${devloop.scan.cron:0 */10 * * * ?}")
+    @Autowired
+    private com.iwhalecloud.byai.manager.application.service.devloop.DevloopApplicationService devloopApplicationService;
+
+    @Autowired
+    private com.iwhalecloud.byai.manager.domain.devloop.service.DevloopScoringService scoringService;
+
+    /**
+     * 定时扫描入口，获取分布式锁后遍历所有启用源执行扫描。
+     * job 每分钟醒一次做「检查」，真正是否扫由各源 cronExpr 决定；这也是源扫描频率的精度上限（最低每分钟）。
+     */
+    @Scheduled(cron = "${devloop.scan.cron:0 * * * * ?}")
     public void executeScan() {
         String lockKey = "devloop:scan:lock";
         String lockValue = UUID.randomUUID().toString();
@@ -88,9 +97,10 @@ public class DevloopScanJob {
         }
     }
 
-    /** 根据源类型分派到对应扫描服务 */
+    /** 根据源类型分派到对应扫描服务，扫描后按确认规则自动派生任务 */
     private void doScan(ScanSource source) {
         String type = source.getSourceType();
+        List<com.iwhalecloud.byai.manager.entity.devloop.ScanLogItem> newItems;
         switch (type) {
             case SOURCE_TYPE_GITHUB_ISSUE:
                 String pat = patService.getGitHubPat(source.getCreateBy());
@@ -99,14 +109,18 @@ public class DevloopScanJob {
                         source.getCreateBy());
                     return;
                 }
-                gitHubIssueScanService.scan(source, pat);
+                newItems = gitHubIssueScanService.scan(source, pat);
                 break;
             case SOURCE_TYPE_DINGTALK:
-                dingtalkScanService.scan(source);
+                newItems = dingtalkScanService.scan(source);
                 break;
             default:
                 logger.warn("[DevloopScanJob] Unknown source type: {}", type);
+                return;
         }
+        // 先 LLM 打分（供展示/排序/score 模式判定），再按确认规则自动派生
+        scoringService.scoreItems(newItems);
+        devloopApplicationService.autoDeriveForSource(source, newItems);
     }
 
     /**

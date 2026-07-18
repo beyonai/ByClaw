@@ -1767,13 +1767,25 @@
 .formField {
   margin-bottom: 14px;
 
-  label {
+  // 仅字段标题用 block，避免波及内部 antd 组件的 label（如 Radio.Button 的 .ant-radio-button-wrapper）导致竖排
+  > label {
     display: block;
     margin-bottom: 6px;
     color: #526075;
     font-size: 13px;
     font-weight: 600;
   }
+}
+
+/* 收集源表单双列布局：两列等宽，跨列项用 .formFieldFull */
+.formGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  column-gap: 16px;
+}
+
+.formFieldFull {
+  grid-column: 1 / -1;
 }
 
 .sourceModal {
