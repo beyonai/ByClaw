@@ -31,3 +31,9 @@ ${description}
 5. 如需求描述不清或存在阻塞，明确说明遇到的问题
 
 请开始处理。', '研发闭环任务启动提示词模板，占位符 ${projectName} ${repoUrl} ${branchName} ${taskType} ${title} ${description}');
+
+
+delete from byai.byai_system_config_list where param_group_code in('PROJECT_TYPE');
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'PROJECT_TYPE', '项目类型', '普通项目', 'normal', 'normal', '普通项目', 1);
+INSERT INTO byai.byai_system_config_list (param_id, param_group_code, param_group_name, param_name, param_en_name, param_value, param_desc, param_seq) VALUES (nextval('byai.seq_any_table'), 'PROJECT_TYPE', '项目类型', '研发项目', 'develop', 'develop', '研发项目', 2);
+

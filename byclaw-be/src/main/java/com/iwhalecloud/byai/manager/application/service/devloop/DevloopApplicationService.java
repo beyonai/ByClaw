@@ -18,6 +18,7 @@ import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectMemberService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectSessionService;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectListDto;
+import com.iwhalecloud.byai.manager.dto.devloop.ProjectMemberListDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectRepoDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareTargetDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ScanSourceDTO;
@@ -30,8 +31,6 @@ import com.iwhalecloud.byai.manager.mapper.devloop.ProjectRepoMapper;
 import com.iwhalecloud.byai.manager.mapper.devloop.ProjectShareTargetMapper;
 import com.iwhalecloud.byai.manager.mapper.devloop.ProjectSessionMapper;
 import com.iwhalecloud.byai.manager.mapper.devloop.ScanLogItemMapper;
-import com.iwhalecloud.byai.manager.mapper.resource.SsResourceMapper;
-import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.mapper.session.ByaiSessionMapper;
 import com.iwhalecloud.byai.manager.qo.devloop.ProjectQo;
 import com.iwhalecloud.byai.manager.qo.devloop.ProjectSessionQo;
@@ -87,9 +86,6 @@ public class DevloopApplicationService {
 
     @Autowired
     private ScanLogItemMapper scanLogItemMapper;
-
-    @Autowired
-    private SsResourceMapper ssResourceMapper;
 
     @Autowired
     private ScanSourceService scanSourceService;
@@ -153,8 +149,7 @@ public class DevloopApplicationService {
         }
 
         // 创建者自动加为 owner 成员
-        projectMemberService.addMember(project.getProjectId(), CurrentUserHolder.getCurrentUserId(),
-            CurrentUserHolder.getCurrentUserCode(), CurrentUserHolder.getCurrentUserName(), "owner");
+        projectMemberService.addMember(project.getProjectId(), CurrentUserHolder.getCurrentUserId(), "owner");
 
         Map<String, Object> result = new HashMap<>();
         result.put("projectId", project.getProjectId());
@@ -242,7 +237,7 @@ public class DevloopApplicationService {
                 continue;
             }
             else {
-                projectMemberService.addMember(projectId, userId, null, null, "member");
+                projectMemberService.addMember(projectId, userId, "member");
             }
         }
     }
@@ -944,10 +939,8 @@ public class DevloopApplicationService {
 
     /** 查询项目任务列表：会话即任务，返回项目下的会话映射成任务形状（看板专属字段无来源，置空） */
     public ResponseUtil<List<Map<String, Object>>> listTasks(Long projectId) {
-        List<ByaiSession> sessions = byaiSessionMapper.selectList(
-            new LambdaQueryWrapper<ByaiSession>()
-                .eq(ByaiSession::getProjectId, projectId)
-                .orderByDesc(ByaiSession::getCreateTime));
+        List<ByaiSession> sessions = byaiSessionMapper.selectList(new LambdaQueryWrapper<ByaiSession>()
+            .eq(ByaiSession::getProjectId, projectId).orderByDesc(ByaiSession::getCreateTime));
         List<Map<String, Object>> list = new ArrayList<>();
         for (ByaiSession s : sessions) {
             list.add(sessionAsTask(s));
@@ -964,8 +957,8 @@ public class DevloopApplicationService {
     }
 
     /**
-     * 会话映射为前端任务形状：taskId 复用 sessionId 保证前端按 taskId 取值与跳转不变；
-     * status/phase/score/branchName/warningTag/round 等为任务专属字段，会话无来源，置空。
+     * 会话映射为前端任务形状：taskId 复用 sessionId 保证前端按 taskId 取值与跳转不变； status/phase/score/branchName/warningTag/round
+     * 等为任务专属字段，会话无来源，置空。
      */
     private Map<String, Object> sessionAsTask(ByaiSession s) {
         Map<String, Object> map = new HashMap<>();
@@ -994,37 +987,17 @@ public class DevloopApplicationService {
     public ResponseUtil<Void> addProjectMember(Map<String, Object> params) {
         Long projectId = Long.valueOf(params.get("projectId").toString());
         Long userId = Long.valueOf(params.get("userId").toString());
-        String userCode = params.containsKey("userCode") ? params.get("userCode").toString() : null;
-        String userName = params.containsKey("userName") ? params.get("userName").toString() : null;
 
         if (projectMemberService.isMember(projectId, userId)) {
             return ResponseUtil.failRes("该用户已是项目成员");
         }
-        projectMemberService.addMember(projectId, userId, userCode, userName, "member");
+        projectMemberService.addMember(projectId, userId, "member");
         return ResponseUtil.successResponse(null);
     }
 
     /** 查询项目成员列表 */
-    public ResponseUtil<List<Map<String, Object>>> listProjectMembers(Long projectId) {
-        List<ProjectMember> members = projectMemberService.listByProjectId(projectId);
-        List<Map<String, Object>> list = new ArrayList<>();
-        for (ProjectMember m : members) {
-            Map<String, Object> map = new HashMap<>();
-            map.put("memberId", m.getMemberId());
-            map.put("projectId", m.getProjectId());
-            map.put("userId", m.getUserId());
-            map.put("userCode", m.getUserCode());
-            map.put("userName", m.getUserName());
-            map.put("role", m.getRole());
-            map.put("agentId", m.getAgentId());
-            if (m.getAgentId() != null) {
-                SsResource resource = ssResourceMapper.selectById(m.getAgentId());
-                map.put("agentName", resource != null ? resource.getResourceName() : null);
-            }
-            map.put("createTime", m.getCreateTime());
-            list.add(map);
-        }
-        return ResponseUtil.successResponse(list);
+    public ResponseUtil<List<ProjectMemberListDto>> listProjectMembers(Long projectId) {
+        return ResponseUtil.successResponse(projectMemberService.listProjectMembers(projectId));
     }
 
     /** 移除项目成员 */

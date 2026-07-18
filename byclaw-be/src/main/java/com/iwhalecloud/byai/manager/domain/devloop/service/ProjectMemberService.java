@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.devloop.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.iwhalecloud.byai.manager.dto.devloop.ProjectMemberListDto;
 import com.iwhalecloud.byai.manager.entity.devloop.ProjectMember;
 import com.iwhalecloud.byai.manager.mapper.devloop.ProjectMemberMapper;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
@@ -33,18 +34,14 @@ public class ProjectMemberService {
      *
      * @param projectId 项目ID
      * @param userId 用户ID
-     * @param userCode 用户工号
-     * @param userName 用户名称
      * @param role 成员角色（如 owner / member），可空
      * @return 已落库的成员记录
      */
-    public ProjectMember addMember(Long projectId, Long userId, String userCode, String userName, String role) {
+    public ProjectMember addMember(Long projectId, Long userId, String role) {
         ProjectMember member = new ProjectMember();
         member.setMemberId(sequenceService.nextVal());
         member.setProjectId(projectId);
         member.setUserId(userId);
-        member.setUserCode(userCode);
-        member.setUserName(userName);
         member.setRole(role != null ? role : "member");
         member.setCreateTime(new Date());
         memberMapper.insert(member);
@@ -61,6 +58,16 @@ public class ProjectMemberService {
         LambdaQueryWrapper<ProjectMember> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(ProjectMember::getProjectId, projectId).orderByAsc(ProjectMember::getCreateTime);
         return memberMapper.selectList(wrapper);
+    }
+
+    /**
+     * 按项目ID联查成员列表，补充用户工号/名称及绑定数字员工名称。
+     *
+     * @param projectId 项目ID
+     * @return 成员列表 DTO；无成员时返回空列表
+     */
+    public List<ProjectMemberListDto> listProjectMembers(Long projectId) {
+        return memberMapper.listProjectMembers(projectId);
     }
 
     /**

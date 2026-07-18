@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.manager.interfaces.controller.devloop;
 
 import com.iwhalecloud.byai.manager.application.service.devloop.DevloopApplicationService;
+import com.iwhalecloud.byai.manager.dto.devloop.ProjectMemberListDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ScanSourceDTO;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -174,7 +175,7 @@ public class DevloopController {
 
     /** 查询项目成员列表 */
     @PostMapping("/member/list")
-    public ResponseUtil<List<Map<String, Object>>> listProjectMembers(@RequestBody Map<String, Object> params) {
+    public ResponseUtil<List<ProjectMemberListDto>> listProjectMembers(@RequestBody Map<String, Object> params) {
         Long projectId = Long.valueOf(params.get("projectId").toString());
         return applicationService.listProjectMembers(projectId);
     }

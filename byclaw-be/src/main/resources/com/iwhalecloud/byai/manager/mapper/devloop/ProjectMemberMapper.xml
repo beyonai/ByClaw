@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.devloop.ProjectMemberMapper">
+
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.devloop.ProjectMember">
+        <id column="member_id" property="memberId"/>
+        <result column="project_id" property="projectId"/>
+        <result column="user_id" property="userId"/>
+        <result column="role" property="role"/>
+        <result column="agent_id" property="agentId"/>
+        <result column="create_time" property="createTime"/>
+    </resultMap>
+
+    <resultMap id="ProjectMemberListDtoResultMap"
+               type="com.iwhalecloud.byai.manager.dto.devloop.ProjectMemberListDto"
+               extends="BaseResultMap">
+        <result column="user_code" property="userCode"/>
+        <result column="user_name" property="userName"/>
+        <result column="resource_name" property="agentName"/>
+    </resultMap>
+
+    <select id="listProjectMembers" resultMap="ProjectMemberListDtoResultMap">
+        SELECT a.member_id,
+               a.project_id,
+               a.user_id,
+               a.role,
+               a.agent_id,
+               a.create_time,
+               b.user_code,
+               b.user_name,
+               c.resource_name
+        FROM byai_project_member a
+                 LEFT JOIN po_users b ON a.user_id = b.user_id
+                 LEFT JOIN ss_resource c ON a.agent_id = c.resource_id
+        WHERE a.project_id = #{projectId}
+        ORDER BY a.create_time ASC
+    </select>
+
+</mapper>
