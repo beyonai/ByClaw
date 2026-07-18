@@ -694,7 +694,7 @@
   min-height: 0;
   flex: 1;
   overflow-y: auto;
-  padding: 12px 8px 20px;
+  padding: 8px 8px 20px;
   background: #fff;
 }
 
@@ -862,34 +862,42 @@
 
   strong {
     color: #1f2633;
-    font-size: 13px;
-    line-height: 18px;
+    font-size: 14px;
+    line-height: 20px;
   }
 
   span {
     color: #7c8798;
-    font-size: 12px;
-    line-height: 18px;
+    font-size: 13px;
+    line-height: 20px;
   }
 }
 
 .detailSourceActions {
-  padding: 10px 12px;
+  padding: 6px 12px 10px;
   display: flex;
   align-items: center;
   gap: 6px;
   flex-wrap: wrap;
-  background: #fafcff;
 
   :global {
     .@{antPrefix}-tag {
       margin-inline-end: 0;
+      font-size: 13px;
     }
 
     .@{antPrefix}-btn-link {
-      height: 24px;
-      padding: 0 2px;
-      font-size: 12px;
+      height: 28px;
+      padding: 0 8px;
+      border: 1px solid #dfe6f0;
+      border-radius: 7px;
+      background: #fff;
+      font-size: 13px;
+
+      &:hover {
+        border-color: rgba(36, 107, 254, 0.35);
+        background: #f2f6ff;
+      }
     }
   }
 }
@@ -897,7 +905,7 @@
 .detailSourceButtonGroup {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 10px;
   flex-wrap: wrap;
 }
 
@@ -908,19 +916,36 @@
 }
 
 .detailSourceAuth {
-  padding: 0 12px 8px;
+  padding: 14px 12px 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
 
   :global {
     .@{antPrefix}-tag {
       margin-inline-end: 0;
+      font-size: 13px;
+      line-height: 22px;
+      padding: 0 8px;
     }
   }
 }
 
+.detailSourceFrequencyTag {
+  color: #7c8798;
+  border-color: transparent;
+  background: transparent;
+}
+
+.detailSourceDwsTag {
+  font-size: 12px !important;
+}
+
 .detailSourceTime {
-  color: #8a96a8;
-  font-size: 12px;
-  line-height: 22px;
+  color: #7c8798;
+  font-size: 13px;
+  line-height: 24px;
 }
 
 .detailSourceTags {
@@ -1035,9 +1060,9 @@
 
   h3 {
     color: #1f2633;
-    font-size: 18px;
+    font-size: 15px;
     font-weight: 700;
-    line-height: 26px;
+    line-height: 22px;
   }
 
   p {
@@ -1065,7 +1090,7 @@
   min-height: 0;
   flex: 1;
   overflow-y: auto;
-  padding: 16px 20px 24px;
+  padding: 16px 12px 24px;
   background: #fff;
 }
 
@@ -1105,7 +1130,7 @@
 .detailRequirementList {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
 .detailRequirementMore {
@@ -1118,11 +1143,12 @@
 
 .detailRequirementItem {
   min-height: 72px;
-  padding: 10px;
+  padding: 16px 10px;
   border: 1px solid #dfe6f0;
   border-radius: 10px;
   display: flex;
   flex-direction: column;
+  justify-content: flex-start;
   gap: 10px;
   background: #fff;
   cursor: pointer;
@@ -1136,6 +1162,8 @@
 }
 
 .detailRequirementItemExpanded {
+  // 展开前后共用同一顶部留白，避免展开详情时标题区突然贴近卡片上边缘。
+  justify-content: flex-start;
   border-color: rgba(36, 107, 254, 0.42);
   box-shadow: 0 6px 16px rgba(36, 107, 254, 0.1);
 }
@@ -1290,13 +1318,28 @@
   line-height: 30px;
 }
 
+.detailRequirementStartAction {
+  // 启动按钮使用浅蓝标签态，和“已启动”保持同一视觉规格但用色区分可点击状态。
+  color: #246bfe;
+  border-color: #b9ccff;
+  background: #eef4ff;
+
+  &:hover,
+  &:focus {
+    color: #1557d9;
+    border-color: #8fb0ff;
+    background: #e4edff;
+  }
+}
+
 .detailRequirementStartedAction {
+  // 已启动代表不能重复操作，使用浅灰禁用态弱化可点击感。
   &,
   &:disabled,
   &[disabled] {
-    color: #2f8f63;
-    border-color: #bde7cf;
-    background: #edf9f2;
+    color: #8a96a8;
+    border-color: #d8dee8;
+    background: #f4f6f9;
     opacity: 1;
     cursor: not-allowed;
   }
@@ -1325,12 +1368,14 @@
 }
 
 .detailTaskCard {
-  padding: 12px 12px 10px;
+  min-height: 50px;
+  padding: 12px;
   border: 1px solid #dfe6f0;
   border-left: 3px solid #faad14;
   border-radius: 10px;
   display: flex;
   flex-direction: column;
+  justify-content: center;
   gap: 10px;
   background: #fff;
   cursor: pointer;
@@ -1343,6 +1388,8 @@
 }
 
 .detailTaskCardExpanded {
+  // 展开详情后内容高度增加，恢复顶部排布，避免详情区域被居中压缩。
+  justify-content: flex-start;
   border-color: #b8cdfd;
   box-shadow: 0 6px 16px rgba(28, 48, 90, 0.1);
 }
@@ -1351,7 +1398,7 @@
   min-width: 0;
   width: 100%;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 10px;
 }
 
@@ -1361,7 +1408,7 @@
 }
 
 .detailTaskTitle {
-  margin: 0 0 8px;
+  margin: 0;
   color: #1677ff;
   font-size: 14px;
   font-weight: 500;
@@ -1376,6 +1423,7 @@
 
 .detailTaskMeta {
   min-width: 0;
+  margin-top: 8px;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1449,6 +1497,24 @@
 
 .detailTaskInlineWide {
   grid-column: span 2;
+}
+
+// 任务展开详情里的会话入口独占一行，避免挤压上方字段。
+.detailTaskInlineActions {
+  grid-column: span 2;
+  display: flex;
+  justify-content: center;
+  padding-top: 2px;
+}
+
+.detailTaskChatButton {
+  padding: 0;
+  background: transparent;
+
+  &:hover,
+  &:focus {
+    background: transparent;
+  }
 }
 
 .detailSourceGrid {

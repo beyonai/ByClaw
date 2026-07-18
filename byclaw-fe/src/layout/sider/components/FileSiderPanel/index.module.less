@@ -636,12 +636,26 @@
   gap: 8px;
   color: #344056;
   background: #f6f8fb;
+  cursor: pointer;
+  user-select: none;
+
+  &:hover {
+    background: #eef3fb;
+  }
 }
 
 .fileSpaceGroupArrow {
   flex-shrink: 0;
   color: #8b98aa;
   font-size: 10px;
+  transition: transform 0.16s ease;
+}
+
+.fileSpaceGroupCollapsed {
+  // 折叠会话分组时保留标题行，箭头转向右侧提示可以再次展开。
+  .fileSpaceGroupArrow {
+    transform: rotate(-90deg);
+  }
 }
 
 .fileSpaceGroupTitle {

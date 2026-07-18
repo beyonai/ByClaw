@@ -1,4 +1,4 @@
-import React, { useCallback, type Key } from 'react';
+import React, { useCallback, useEffect, useState, type Key } from 'react';
 import { Segmented, Tooltip } from 'antd';
 import type { FileBrowserItem } from '@/service/fileBrowser';
 import type { FileTreeItem } from '../constants';
@@ -29,6 +29,8 @@ interface FileSpaceBlockProps {
   expandedKeys: Key[];
   switchOptions?: { label: React.ReactNode; value: string }[];
   switchValue?: string;
+  defaultGroupsCollapsed?: boolean;
+  groupCollapseResetKey?: Key;
   onSwitchChange?: (value: string) => void;
   onExpand: (keys: Key[]) => void;
   onLoadData: (node: FileTreeItem) => Promise<void>;
@@ -50,14 +52,47 @@ const FileSpaceBlock: React.FC<FileSpaceBlockProps> = ({
   expandedKeys,
   switchOptions,
   switchValue,
+  defaultGroupsCollapsed = false,
+  groupCollapseResetKey,
   onSwitchChange,
   onExpand,
   onLoadData,
 }) => {
+  const [collapsedGroupKeys, setCollapsedGroupKeys] = useState<Set<string>>(() => new Set());
+  const groupKeySignature = (groups || []).map((group) => `${group.key}`).join('\n');
   const noopActionItems = useCallback(() => [], []);
   const noopAction = useCallback(() => undefined, []);
   const noopNodeClick = useCallback(() => undefined, []);
   const noopNodeDoubleClick = useCallback(() => undefined, []);
+
+  useEffect(() => {
+    // 切换会话范围或分组数据变化时，按调用方指定的默认状态重置折叠状态。
+    const groupKeys = groupKeySignature ? groupKeySignature.split('\n') : [];
+    setCollapsedGroupKeys(defaultGroupsCollapsed ? new Set(groupKeys) : new Set());
+  }, [defaultGroupsCollapsed, groupCollapseResetKey, groupKeySignature]);
+
+  // 会话分组没有后端折叠状态，前端记录折叠 key，让整条标题行都能展开/收起。
+  const toggleGroup = useCallback((groupKey: Key) => {
+    const normalizedKey = `${groupKey}`;
+    setCollapsedGroupKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(normalizedKey)) {
+        next.delete(normalizedKey);
+      } else {
+        next.add(normalizedKey);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleGroupKeyDown = useCallback(
+    (groupKey: Key, event: React.KeyboardEvent<HTMLDivElement>) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      toggleGroup(groupKey);
+    },
+    [toggleGroup]
+  );
 
   const renderTree = (
     treeItems: FileBrowserItem[],
@@ -102,20 +137,33 @@ const FileSpaceBlock: React.FC<FileSpaceBlockProps> = ({
       {groups ? (
         groups.length ? (
           <div className={styles.fileSpaceGroupList}>
-            {groups.map((group) => (
-              <div key={group.key} className={styles.fileSpaceGroup}>
-                <div className={styles.fileSpaceGroupHeader}>
-                  <span className={styles.fileSpaceGroupArrow}>▾</span>
-                  <Tooltip placement="top" title={group.titleText || group.title}>
-                    <span className={styles.fileSpaceGroupTitle}>{group.title}</span>
-                  </Tooltip>
-                  {typeof group.count === 'number' && (
-                    <span className={styles.fileSpaceGroupCount}>{group.count} 个文件</span>
-                  )}
+            {groups.map((group) => {
+              const isCollapsed = collapsedGroupKeys.has(`${group.key}`);
+
+              return (
+                <div
+                  key={group.key}
+                  className={`${styles.fileSpaceGroup} ${isCollapsed ? styles.fileSpaceGroupCollapsed : ''}`}
+                >
+                  <div
+                    className={styles.fileSpaceGroupHeader}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => toggleGroup(group.key)}
+                    onKeyDown={(event) => handleGroupKeyDown(group.key, event)}
+                  >
+                    <span className={styles.fileSpaceGroupArrow}>▾</span>
+                    <Tooltip placement="top" title={group.titleText || group.title}>
+                      <span className={styles.fileSpaceGroupTitle}>{group.title}</span>
+                    </Tooltip>
+                    {typeof group.count === 'number' && (
+                      <span className={styles.fileSpaceGroupCount}>{group.count} 个文件</span>
+                    )}
+                  </div>
+                  {!isCollapsed && renderTree(group.items, group.currentPath, !!group.loading, group.emptyText)}
                 </div>
-                {renderTree(group.items, group.currentPath, !!group.loading, group.emptyText)}
-              </div>
-            ))}
+              );
+            })}
           </div>
         ) : (
           <div className={styles.fileSpaceEmpty}>{emptyText}</div>
