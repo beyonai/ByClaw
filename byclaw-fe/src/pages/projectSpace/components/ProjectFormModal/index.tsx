@@ -116,18 +116,24 @@ const ProjectFormModal: React.FC<Props> = ({
   const projectType = Form.useWatch('projectType', form);
   const sharedFlag = Form.useWatch('sharedFlag', form);
   const isDevelopProject = projectType === 'develop';
-  const isProjectShared = isDevelopProject || !!sharedFlag;
-  const formInitialValues = useMemo(
-    () => ({
+  const formInitialValues = useMemo(() => {
+    const values = {
       projectName: '',
       description: '',
       projectType: 'normal' as ProjectSpace['projectType'],
       sharedFlag: false,
       shareMembers: [],
       ...initialValues,
-    }),
-    [initialValues]
-  );
+    };
+    if (values.projectType === 'default') {
+      // 默认项目固定为不共享，编辑弹窗回显时也不使用接口里的共享值。
+      values.sharedFlag = false;
+    }
+    return values;
+  }, [initialValues]);
+  const isEditingDefaultProject = !!projectId && formInitialValues.projectType === 'default';
+  const isDefaultProject = projectType === 'default' || isEditingDefaultProject;
+  const isProjectShared = !isDefaultProject && (isDevelopProject || !!sharedFlag);
   const projectTypeOptions = useMemo(() => {
     const configOptions = projectTypeConfigOptions.length ? projectTypeConfigOptions : PROJECT_TYPE_OPTIONS;
     const normalOptions = configOptions.filter((option) => option.value !== 'default');
@@ -195,6 +201,13 @@ const ProjectFormModal: React.FC<Props> = ({
     form.setFieldValue('sharedFlag', true);
   }, [form, isDevelopProject, open]);
 
+  useEffect(() => {
+    if (!open || !isDefaultProject) return;
+    // 默认项目不参与共享成员维护，是否共享固定为否。
+    form.setFieldValue('sharedFlag', false);
+    form.setFields([{ name: 'shareMembers', errors: [] }]);
+  }, [form, isDefaultProject, open]);
+
   const removeShareMember = (targetId: string) => {
     setSelectedShareMembers((prev) => prev.filter((target) => target.id !== targetId));
   };
@@ -239,7 +252,8 @@ const ProjectFormModal: React.FC<Props> = ({
   };
 
   const handleSubmit = (values: ProjectFormValues) => {
-    const submitSharedFlag = values.projectType === 'develop' || values.sharedFlag;
+    const submitSharedFlag =
+      values.projectType === 'default' ? false : values.projectType === 'develop' || values.sharedFlag;
     // 共享成员由成员 tab 同源数据维护，提交时合并进表单值，避免未注册字段丢失。
     onSubmit({
       ...values,
@@ -269,6 +283,7 @@ const ProjectFormModal: React.FC<Props> = ({
         </Form.Item>
         <Form.Item name="projectType" label="项目类型">
           <Select
+            disabled={isEditingDefaultProject}
             loading={projectTypeLoading}
             options={projectTypeOptions}
             onChange={(value: ProjectSpace['projectType']) => {
@@ -284,7 +299,7 @@ const ProjectFormModal: React.FC<Props> = ({
         </Form.Item>
         <Form.Item name="sharedFlag" label="是否共享" valuePropName="checked">
           <Switch
-            disabled={isDevelopProject}
+            disabled={isDevelopProject || isDefaultProject}
             onChange={(checked) => {
               if (!checked) {
                 form.setFields([{ name: 'shareMembers', errors: [] }]);
@@ -334,7 +349,7 @@ const ProjectFormModal: React.FC<Props> = ({
                     return <React.Fragment key={member.id}>{memberItem}</React.Fragment>;
                   })}
                   {!selectedShareMembers.length && <span className={styles.shareTargetEmpty}>暂无共享成员</span>}
-                  {/* 新增按钮跟随成员标签流式排列，避免独占一整行。 */}
+                  {/* 添加按钮跟随成员标签流式排列，避免独占一整行。 */}
                   <Button
                     size="small"
                     className={styles.shareTargetAddButton}
@@ -342,7 +357,7 @@ const ProjectFormModal: React.FC<Props> = ({
                     disabled={shareMembersLoading}
                     onClick={() => setAuthModalOpen(true)}
                   >
-                    新增
+                    添加
                   </Button>
                 </div>
               </Spin>

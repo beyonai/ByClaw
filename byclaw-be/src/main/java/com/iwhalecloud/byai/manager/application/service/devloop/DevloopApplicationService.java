@@ -57,6 +57,8 @@ public class DevloopApplicationService {
 
     private static final String DELETE_FLAG_DELETED = "1";
 
+    private static final String PROJECT_TYPE_DEFAULT = "default";
+
     /**
      * 研发任务 LLM 对话异步执行线程池。 TtlExecutors 包装以透传 CurrentUserHolder 的 LoginInfo；任务创建接口据此立即返回， chat 在后台执行，避免前端等待数分钟。
      */
@@ -188,9 +190,26 @@ public class DevloopApplicationService {
             project.setResourceId(dto.getResourceId());
         }
         if (dto.getProjectType() != null) {
+            if (PROJECT_TYPE_DEFAULT.equals(project.getProjectType())
+                && !PROJECT_TYPE_DEFAULT.equals(dto.getProjectType())) {
+                // 默认项目类型由系统维护，编辑时只能回显，不能被接口改成普通/研发项目。
+                return ResponseUtil.failRes("默认项目不允许修改项目类型");
+            }
+            if (!PROJECT_TYPE_DEFAULT.equals(project.getProjectType())
+                && PROJECT_TYPE_DEFAULT.equals(dto.getProjectType())) {
+                // 默认项目不允许通过编辑接口手动创建，避免普通项目被改成系统内置分组。
+                return ResponseUtil.failRes("项目类型不允许修改为默认项目");
+            }
             project.setProjectType(dto.getProjectType());
         }
-        if (dto.getIsShare() != null) {
+        if (PROJECT_TYPE_DEFAULT.equals(project.getProjectType())) {
+            if (dto.getIsShare() != null && !Constants.NO_VALUE_N.equalsIgnoreCase(dto.getIsShare())) {
+                // 默认项目不支持共享成员配置，接口层固定为否，避免绕过前端打开共享。
+                return ResponseUtil.failRes("默认项目不允许共享");
+            }
+            project.setIsShare(Constants.NO_VALUE_N);
+        }
+        else if (dto.getIsShare() != null) {
             project.setIsShare(dto.getIsShare());
         }
         project.setUpdateBy(CurrentUserHolder.getCurrentUserId());
@@ -254,6 +273,11 @@ public class DevloopApplicationService {
             // 已经软删除的项目再次删除视为成功，前端刷新列表后会自然消失。
             log.warn("Delete project ignored because project already deleted, projectId={}", projectId);
             return ResponseUtil.successResponse(null);
+        }
+        if (PROJECT_TYPE_DEFAULT.equals(project.getProjectType())) {
+            // 默认项目是系统内置分组，接口层兜底禁止删除，避免绕过前端操作入口。
+            log.warn("Delete project rejected because project is default, projectId={}", projectId);
+            return ResponseUtil.failRes("默认项目不允许删除");
         }
         project.setDeleteFlag(DELETE_FLAG_DELETED);
         project.setUpdateBy(CurrentUserHolder.getCurrentUserId());

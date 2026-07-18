@@ -344,13 +344,13 @@
 }
 
 .projectTagDefault {
-  color: #5f6b7a;
-  background: #eef2f7;
+  color: #596579;
+  background: #f1f4f8;
 }
 
 .projectTagDevelopment {
-  color: #5f6b7a;
-  background: #eef2f7;
+  color: #7a3fd1;
+  background: #f3ecff;
 }
 
 .sessionList {
@@ -1809,6 +1809,15 @@
       overflow-y: auto;
       padding-right: 20px;
     }
+
+    .@{antPrefix}-input,
+    .@{antPrefix}-input-affix-wrapper,
+    .@{antPrefix}-input-number,
+    .@{antPrefix}-select,
+    .@{antPrefix}-space-compact {
+      width: 100%;
+      box-sizing: border-box;
+    }
   }
 }
 
@@ -1821,6 +1830,23 @@
       overflow: visible;
       text-overflow: clip;
       line-height: 20px;
+    }
+  }
+}
+
+.sourceRepoAddButton {
+  width: auto;
+  min-width: 78px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex: 0 0 auto;
+
+  :global {
+    .@{antPrefix}-btn-icon {
+      margin-inline-end: 0;
     }
   }
 }

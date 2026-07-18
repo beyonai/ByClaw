@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState, type Key } from 'react';
-import { Segmented, Tooltip } from 'antd';
+import { Segmented, Tooltip, type MenuProps } from 'antd';
 import type { FileBrowserItem } from '@/service/fileBrowser';
 import type { FileTreeItem } from '../constants';
 import { isDirectory } from '../utils';
@@ -31,9 +31,14 @@ interface FileSpaceBlockProps {
   switchValue?: string;
   defaultGroupsCollapsed?: boolean;
   groupCollapseResetKey?: Key;
+  showActions?: boolean;
   onSwitchChange?: (value: string) => void;
   onExpand: (keys: Key[]) => void;
   onLoadData: (node: FileTreeItem) => Promise<void>;
+  onNodeClick?: (event: React.MouseEvent, node: FileTreeItem) => void;
+  onNodeDoubleClick?: (item: FileTreeItem) => void;
+  getActionItems?: (item: FileBrowserItem) => MenuProps['items'];
+  onAction?: (key: Key, item: FileBrowserItem) => void;
 }
 
 export const getFileSpaceFileCount = (items: FileBrowserItem[] = []) =>
@@ -54,9 +59,14 @@ const FileSpaceBlock: React.FC<FileSpaceBlockProps> = ({
   switchValue,
   defaultGroupsCollapsed = false,
   groupCollapseResetKey,
+  showActions = false,
   onSwitchChange,
   onExpand,
   onLoadData,
+  onNodeClick,
+  onNodeDoubleClick,
+  getActionItems,
+  onAction,
 }) => {
   const [collapsedGroupKeys, setCollapsedGroupKeys] = useState<Set<string>>(() => new Set());
   const groupKeySignature = (groups || []).map((group) => `${group.key}`).join('\n');
@@ -108,13 +118,13 @@ const FileSpaceBlock: React.FC<FileSpaceBlockProps> = ({
         currentPath={treeCurrentPath}
         loading={treeLoading}
         emptyText={treeEmptyText}
-        showActions={false}
+        showActions={showActions}
         onExpand={onExpand}
         onLoadData={onLoadData}
-        onNodeClick={noopNodeClick}
-        onNodeDoubleClick={noopNodeDoubleClick}
-        getActionItems={noopActionItems}
-        onAction={noopAction}
+        onNodeClick={onNodeClick || noopNodeClick}
+        onNodeDoubleClick={onNodeDoubleClick || noopNodeDoubleClick}
+        getActionItems={getActionItems || noopActionItems}
+        onAction={onAction || noopAction}
       />
     </div>
   );

@@ -119,7 +119,7 @@ const TaskKanban: React.FC<TaskKanbanProps> = ({ open, onClose, tasks, onRefresh
                   <span className={styles.kanbanColCount}>{colTasks.length}</span>
                 </div>
                 {colTasks.length === 0 ? (
-                  <Empty description="" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                  <Empty description="暂无数据" image={Empty.PRESENTED_IMAGE_SIMPLE} />
                 ) : (
                   colTasks.map((task) => (
                     <div

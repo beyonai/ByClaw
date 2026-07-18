@@ -17,6 +17,7 @@ import {
   Tag,
   Tooltip,
   message,
+  type MenuProps,
 } from 'antd';
 import {
   AppstoreOutlined,
@@ -33,7 +34,7 @@ import {
   ReloadOutlined,
   RightOutlined,
 } from '@ant-design/icons';
-import { useNavigate } from '@umijs/max';
+import { useIntl, useNavigate } from '@umijs/max';
 import dayjs from 'dayjs';
 import {
   checkDwsAuthStatus,
@@ -57,21 +58,35 @@ import {
   triggerScan,
   updateScanSource,
 } from '@/service/devloop';
-import { listFiles, type FileBrowserItem } from '@/service/fileBrowser';
+import { deleteFiles, listFiles, renameFile, type FileBrowserItem } from '@/service/fileBrowser';
 import TaskKanban from '@/pages/devloop/TaskKanban';
 import type { ProjectSpace } from '@/pages/projectSpace/types';
 import { getArrayData, normalizeProjectSession } from '@/pages/projectSpace/utils';
 import AntdIcon from '@/components/AntdIcon';
+import RenameModal from '@/components/QueryInput/components/FileBrowserEntry/components/FileBrowserPanel/RenameModal';
+import { DragType } from '@/components/QueryInput/withDrag';
 import useGlobal from '@/hooks/useGlobal';
 import { useActiveSiderAgent } from '@/layout/sider/components/ActiveSiderAgentBar';
+import employeeStyles from '@/layout/sider/components/EmployeeList/index.module.less';
 import FileSpaceBlock, {
   getFileSpaceFileCount,
 } from '@/layout/sider/components/FileSiderPanel/components/FileSpaceBlock';
-import { SHARED_FILE_PATH, type FileTreeItem } from '@/layout/sider/components/FileSiderPanel/constants';
+import useFilePreviewActions from '@/layout/sider/components/FileSiderPanel/hooks/useFilePreviewActions';
+import fileSiderStyles from '@/layout/sider/components/FileSiderPanel/index.module.less';
 import {
+  SESSION_FILE_PATH,
+  SHARED_FILE_PATH,
+  type FileTreeItem,
+} from '@/layout/sider/components/FileSiderPanel/constants';
+import {
+  canPreviewFile,
   ensureDirectoryPath,
+  getParentDirectoryPath,
   getSessionFilePath,
   isDirectory,
+  isPathIn,
+  normalizeFileBrowserPath,
+  normalizeReferenceItem,
   sortFileBrowserItems,
   unwrapListResponse,
 } from '@/layout/sider/components/FileSiderPanel/utils';
@@ -253,9 +268,17 @@ const getRequirementDetailText = (requirement: RequirementItem) =>
   requirement.title ||
   '-';
 
+// 资源 tab 下会话文件路径形如 /.sessions/{sessionId}/，操作后需要按会话刷新对应目录。
+const getResourceSessionIdByPath = (path: string) => {
+  const normalizedPath = ensureDirectoryPath(normalizeFileBrowserPath(path));
+  if (!isPathIn(normalizedPath, SESSION_FILE_PATH)) return '';
+  return normalizedPath.slice(SESSION_FILE_PATH.length).split('/').filter(Boolean)[0] || '';
+};
+
 const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, onProjectSharedChange }) => {
+  const intl = useIntl();
   const navigate = useNavigate();
-  const { sessionId: activeChatSessionId, setSessionId } = useGlobal();
+  const { EventEmitter, sessionId: activeChatSessionId, setSessionId } = useGlobal();
   const activeSiderAgent = useActiveSiderAgent();
   const { setDetailPanel, clearDetailPanel } = React.useContext(SiderContentContext);
   const [activeTab, setActiveTab] = useState('requirements');
@@ -275,6 +298,9 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
   const [sessionFilesLoadingMap, setSessionFilesLoadingMap] = useState<Record<string, boolean>>({});
   const [resourceChildrenByPath, setResourceChildrenByPath] = useState<Record<string, FileBrowserItem[]>>({});
   const [resourceExpandedKeys, setResourceExpandedKeys] = useState<React.Key[]>([]);
+  const [resourceRenameOpen, setResourceRenameOpen] = useState(false);
+  const [resourceRenameTarget, setResourceRenameTarget] = useState<FileBrowserItem | null>(null);
+  const [resourceRenameLoading, setResourceRenameLoading] = useState(false);
   const [lastLog, setLastLog] = useState<ScanLogEntry | null>(null);
   const [sourcesLoading, setSourcesLoading] = useState(false);
   const [requirementsLoading, setRequirementsLoading] = useState(false);
@@ -314,6 +340,7 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
   const dwsAuthTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const dwsAuthTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const startingRequirementIdsRef = useRef<Set<number>>(new Set());
+  const resourceClickTimerRef = useRef<number | null>(null);
 
   const projectId = Number(project?.projectId);
   // 项目类型来自后端/静态参数，先按字符串归一，避免默认项目枚举声明不同步时报比较类型错误。
@@ -322,6 +349,11 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
   // 标题下方展示项目描述字段，避免继续显示固定的项目类型详情文案。
   const projectDescription = project?.description?.trim() || '暂无描述';
   const fileResourceId = activeSiderAgent.resourceId || (project?.resourceId ? `${project.resourceId}` : '');
+  const { handlePreview: handleResourcePreview, handleDownload: handleResourceDownload } = useFilePreviewActions({
+    resourceId: fileResourceId,
+    EventEmitter,
+    previewClassName: fileSiderStyles.previewContent,
+  });
   // 研发项目、普通共享项目展示需求 tab；默认项目和普通未共享项目不展示。
   const showRequirementsTab = isDevelopProject || (projectType === 'normal' && !!project?.sharedFlag);
   // 默认项目和未共享的普通项目不展示成员配置，只有研发项目或共享项目需要成员 tab。
@@ -510,6 +542,174 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
     [fileResourceId, resourceChildrenByPath]
   );
 
+  const pruneResourceDirectoryCache = useCallback((targetPath: string) => {
+    const targetDirectoryPath = ensureDirectoryPath(normalizeFileBrowserPath(targetPath));
+    // 文件夹被改名或删除后，清掉旧路径下的展开和子级缓存，避免继续展示旧目录。
+    setResourceExpandedKeys((prev) =>
+      prev.filter((key) => {
+        const normalizedKey = ensureDirectoryPath(normalizeFileBrowserPath(String(key)));
+        return !isPathIn(normalizedKey, targetDirectoryPath);
+      })
+    );
+    setResourceChildrenByPath((prev) =>
+      Object.fromEntries(
+        Object.entries(prev).filter(
+          ([path]) => !isPathIn(ensureDirectoryPath(normalizeFileBrowserPath(path)), targetDirectoryPath)
+        )
+      )
+    );
+  }, []);
+
+  const refreshResourceDirectory = useCallback(
+    async (directoryPath: string) => {
+      if (!fileResourceId) return;
+      const normalizedDirectoryPath = ensureDirectoryPath(normalizeFileBrowserPath(directoryPath));
+      if (normalizedDirectoryPath === SHARED_FILE_PATH) {
+        await fetchSharedResourceFiles();
+        return;
+      }
+
+      const resourceSessionId = getResourceSessionIdByPath(normalizedDirectoryPath);
+      if (resourceSessionId && normalizedDirectoryPath === getSessionFilePath(resourceSessionId)) {
+        await fetchSessionResourceFiles(resourceSessionId);
+        return;
+      }
+
+      const res = await listFiles({ resourceId: fileResourceId, path: normalizedDirectoryPath });
+      setResourceChildrenByPath((prev) => ({
+        ...prev,
+        [normalizedDirectoryPath]: sortFileBrowserItems(unwrapListResponse<FileBrowserItem>(res)),
+      }));
+    },
+    [fetchSessionResourceFiles, fetchSharedResourceFiles, fileResourceId]
+  );
+
+  const getResourceFileActionItems = useCallback(
+    (item: FileBrowserItem): MenuProps['items'] => {
+      const labelIdMap = {
+        preview: 'fileBrowser.action.preview',
+        download: 'directoryManage.downloadFile',
+        rename: 'fileBrowser.action.rename',
+        delete: 'fileBrowser.action.delete',
+      };
+      const actionKeys = [
+        ...(canPreviewFile(item) ? (['preview'] as const) : []),
+        'download',
+        'rename',
+        'delete',
+      ] as const;
+
+      // 资源 tab 先对齐文件树的基础操作，弹窗型的上传/保存类操作后续再单独接入。
+      return actionKeys.map((key) => ({
+        key,
+        label: <div className={employeeStyles.dropdownMenuItem}>{intl.formatMessage({ id: labelIdMap[key] })}</div>,
+      }));
+    },
+    [intl]
+  );
+
+  const handleDeleteResourceFile = useCallback(
+    async (item: FileBrowserItem) => {
+      if (!fileResourceId) return;
+      const itemPath = normalizeFileBrowserPath(item.path);
+      const parentPath = getParentDirectoryPath(itemPath);
+      try {
+        await deleteFiles({ resourceId: fileResourceId, paths: [item.path] });
+        message.success(intl.formatMessage({ id: 'fileBrowser.delete.success' }));
+        if (isDirectory(item)) {
+          pruneResourceDirectoryCache(item.path);
+        }
+        await refreshResourceDirectory(parentPath);
+      } catch (error: any) {
+        message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.delete.failed' }));
+      }
+    },
+    [fileResourceId, intl, pruneResourceDirectoryCache, refreshResourceDirectory]
+  );
+
+  const handleResourceRenameOk = useCallback(
+    async (newName: string) => {
+      if (!resourceRenameTarget || !fileResourceId) return;
+      const parentPath = getParentDirectoryPath(resourceRenameTarget.path);
+      setResourceRenameLoading(true);
+      try {
+        await renameFile({ resourceId: fileResourceId, sourcePath: resourceRenameTarget.path, newName });
+        message.success(intl.formatMessage({ id: 'fileBrowser.rename.success' }));
+        setResourceRenameOpen(false);
+        setResourceRenameTarget(null);
+        if (isDirectory(resourceRenameTarget)) {
+          pruneResourceDirectoryCache(resourceRenameTarget.path);
+        }
+        await refreshResourceDirectory(parentPath);
+      } catch (error: any) {
+        message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.rename.failed' }));
+      } finally {
+        setResourceRenameLoading(false);
+      }
+    },
+    [fileResourceId, intl, pruneResourceDirectoryCache, refreshResourceDirectory, resourceRenameTarget]
+  );
+
+  const handleResourceFileAction = useCallback(
+    (key: React.Key, item: FileBrowserItem) => {
+      if (key === 'preview') {
+        void handleResourcePreview(item);
+      } else if (key === 'download') {
+        void handleResourceDownload(item);
+      } else if (key === 'rename') {
+        setResourceRenameTarget(item);
+        setResourceRenameOpen(true);
+      } else if (key === 'delete') {
+        Modal.confirm({
+          title: intl.formatMessage({ id: 'fileBrowser.delete.confirm' }),
+          content: intl.formatMessage({ id: 'fileBrowser.delete.confirmName' }, { name: item.name }),
+          onOk: () => handleDeleteResourceFile(item),
+        });
+      }
+    },
+    [handleDeleteResourceFile, handleResourceDownload, handleResourcePreview, intl]
+  );
+
+  const clearResourceClickTimer = useCallback(() => {
+    if (resourceClickTimerRef.current) {
+      window.clearTimeout(resourceClickTimerRef.current);
+      resourceClickTimerRef.current = null;
+    }
+  }, []);
+
+  const handleResourceItemClick = useCallback(
+    (event: React.MouseEvent, item: FileTreeItem) => {
+      event.stopPropagation();
+      clearResourceClickTimer();
+      // 延迟执行预览，给双击引用留出取消单击行为的时间窗口。
+      resourceClickTimerRef.current = window.setTimeout(() => {
+        resourceClickTimerRef.current = null;
+        if (isDirectory(item)) return;
+        if (!canPreviewFile(item)) {
+          message.warning(intl.formatMessage({ id: 'fileBrowser.preview.unavailable' }));
+          return;
+        }
+        void handleResourcePreview(item);
+      }, 220);
+    },
+    [clearResourceClickTimer, handleResourcePreview, intl]
+  );
+
+  const handleResourceItemDoubleClick = useCallback(
+    (item: FileTreeItem) => {
+      if (!fileResourceId) return;
+      clearResourceClickTimer();
+      // 和“文件”模块一致，双击文件/文件夹时把引用插入当前聊天输入框。
+      EventEmitter.emit('queryInput-insert-item', {
+        item: normalizeReferenceItem(item, fileResourceId),
+        type: isDirectory(item) ? DragType.commonFolder : DragType.commonFile,
+      });
+    },
+    [EventEmitter, clearResourceClickTimer, fileResourceId]
+  );
+
+  useEffect(() => clearResourceClickTimer, [clearResourceClickTimer]);
+
   const fetchDetailData = useCallback(async () => {
     if (!projectId) return;
     // 打开详情时并行请求当前可见 tab 需要的数据，成员 tab 隐藏时不额外查询成员。
@@ -550,6 +750,9 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
     setSessionFilesLoadingMap({});
     setResourceChildrenByPath({});
     setResourceExpandedKeys([]);
+    setResourceRenameOpen(false);
+    setResourceRenameTarget(null);
+    setResourceRenameLoading(false);
   }, [fileResourceId, projectId]);
 
   useEffect(() => {
@@ -1389,20 +1592,20 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
     const sessionGroups =
       resourceFileScope === 'all'
         ? projectSessions.map((session) => {
-          const sessionResourceId = `${session.sessionId}`;
-          const files = sessionFilesMap[sessionResourceId] || [];
-          const sessionName = getSessionResourceName(session);
-          return {
-            key: sessionResourceId,
-            title: sessionName,
-            titleText: sessionName,
-            currentPath: getSessionFilePath(sessionResourceId),
-            items: files,
-            loading: !!sessionFilesLoadingMap[sessionResourceId],
-            emptyText: '该会话暂无文件',
-            count: getFileSpaceFileCount(files),
-          };
-        })
+            const sessionResourceId = `${session.sessionId}`;
+            const files = sessionFilesMap[sessionResourceId] || [];
+            const sessionName = getSessionResourceName(session);
+            return {
+              key: sessionResourceId,
+              title: sessionName,
+              titleText: sessionName,
+              currentPath: getSessionFilePath(sessionResourceId),
+              items: files,
+              loading: !!sessionFilesLoadingMap[sessionResourceId],
+              emptyText: '该会话暂无文件',
+              count: getFileSpaceFileCount(files),
+            };
+          })
         : currentResourceSession
           ? [
             {
@@ -1429,8 +1632,13 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
           emptyText={fileResourceId ? '暂无共享文件' : '暂无当前数字员工，无法加载文件'}
           childrenByPath={resourceChildrenByPath}
           expandedKeys={resourceExpandedKeys}
+          showActions={!!fileResourceId}
           onExpand={setResourceExpandedKeys}
           onLoadData={loadResourceTreeNode}
+          onNodeClick={handleResourceItemClick}
+          onNodeDoubleClick={handleResourceItemDoubleClick}
+          getActionItems={getResourceFileActionItems}
+          onAction={handleResourceFileAction}
         />
         <FileSpaceBlock
           title="会话空间"
@@ -1442,6 +1650,7 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
           switchValue={resourceFileScope}
           defaultGroupsCollapsed={resourceFileScope === 'all'}
           groupCollapseResetKey={resourceFileScope}
+          showActions={!!fileResourceId}
           switchOptions={[
             { label: '当前会话', value: 'current' },
             { label: '全部会话', value: 'all' },
@@ -1449,6 +1658,10 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
           onSwitchChange={(value) => setResourceFileScope(value as ResourceFileScope)}
           onExpand={setResourceExpandedKeys}
           onLoadData={loadResourceTreeNode}
+          onNodeClick={handleResourceItemClick}
+          onNodeDoubleClick={handleResourceItemDoubleClick}
+          getActionItems={getResourceFileActionItems}
+          onAction={handleResourceFileAction}
         />
       </div>
     );
@@ -1627,17 +1840,6 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
       className={styles.sourceModal}
       footer={(_, { OkBtn, CancelBtn }) => (
         <Space>
-          {editingSource && (
-            <Button
-              danger
-              onClick={() => {
-                setSourceModalOpen(false);
-                handleDeleteSource(editingSource);
-              }}
-            >
-              删除
-            </Button>
-          )}
           <CancelBtn />
           <OkBtn />
         </Space>
@@ -1680,6 +1882,7 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
               notFoundContent={repos.length ? undefined : '项目暂无仓库，点击右侧新增'}
             />
             <Button
+              className={styles.sourceRepoAddButton}
               icon={<PlusOutlined />}
               onClick={() => {
                 setRepoForm({ repoFullName: '', repoUrl: '', defaultBranch: 'main' });
@@ -2050,7 +2253,7 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
       title={`扫描日志 - ${logModalSource?.sourceName || ''}`}
       open={logDrawerOpen}
       onClose={() => setLogDrawerOpen(false)}
-      width={520}
+      width={420}
     >
       <Spin spinning={logLoading}>
         {logList.length ? (
@@ -2121,6 +2324,17 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
       {renderRepoModal()}
       {renderDwsAuthModal()}
       {renderLogDrawer()}
+      <RenameModal
+        open={resourceRenameOpen}
+        currentName={resourceRenameTarget?.name || ''}
+        loading={resourceRenameLoading}
+        onOk={handleResourceRenameOk}
+        onCancel={() => {
+          if (resourceRenameLoading) return;
+          setResourceRenameOpen(false);
+          setResourceRenameTarget(null);
+        }}
+      />
     </div>
   );
 };

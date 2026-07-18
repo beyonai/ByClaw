@@ -102,6 +102,8 @@ const renderProjectSceneTag = (project: ProjectSpace, className?: string) => {
   );
 };
 
+const isDefaultProject = (project?: ProjectSpace) => project?.projectType === 'default';
+
 const getProjectIdFromSaveResponse = (response: any) => {
   // 创建接口有的环境返回 data.projectId，有的请求封装会直接返回 projectId，这里统一兜底取值。
   return `${response?.projectId || response?.id || response?.data?.projectId || response?.data?.id || ''}`;
@@ -540,6 +542,12 @@ const ProjectSpaceList: React.FC = () => {
   };
 
   const handleDeleteProject = (project: ProjectSpace) => {
+    if (isDefaultProject(project)) {
+      // 默认项目是系统内置分组，只允许查看和编辑基础信息，不允许删除。
+      message.warning('默认项目不允许删除');
+      return;
+    }
+
     Modal.confirm({
       title: '确认删除项目',
       content: `确定要删除项目「${project.projectName || '未命名项目'}」吗？`,
@@ -868,7 +876,9 @@ const ProjectSpaceList: React.FC = () => {
                             items: [
                               { key: 'detail', label: '详情' },
                               { key: 'edit', label: '编辑' },
-                              { key: 'delete', label: '删除', danger: true },
+                              ...(!isDefaultProject(project)
+                                ? [{ key: 'delete', label: '删除', danger: true }]
+                                : []),
                             ],
                             onClick: ({ key }) => handleProjectAction(project, key),
                           }}
