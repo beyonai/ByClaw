@@ -3,6 +3,7 @@ package com.iwhalecloud.byai.state.application.service.recorder;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.iwhalecloud.byai.state.domain.recorder.model.RecorderOwner;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
@@ -25,12 +26,17 @@ public class BycliRecorderVerifyPort implements RecorderVerifyPort {
     };
 
     private final RecorderBrowserProperties properties;
+    private final RecorderSandboxEndpointResolver endpointResolver;
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
 
     @Autowired
-    public BycliRecorderVerifyPort(RecorderBrowserProperties properties) {
+    public BycliRecorderVerifyPort(
+        RecorderSandboxEndpointResolver endpointResolver,
+        RecorderBrowserProperties properties
+    ) {
         this(
+            endpointResolver,
             properties,
             HttpClient.newBuilder()
                 .connectTimeout(Duration.ofMillis(properties.getTimeoutMs()))
@@ -40,9 +46,62 @@ public class BycliRecorderVerifyPort implements RecorderVerifyPort {
     }
 
     BycliRecorderVerifyPort(RecorderBrowserProperties properties, HttpClient httpClient, ObjectMapper objectMapper) {
+        this(null, properties, httpClient, objectMapper);
+    }
+
+    BycliRecorderVerifyPort(RecorderBrowserProperties properties) {
+        this(
+            properties,
+            HttpClient.newBuilder()
+                .connectTimeout(Duration.ofMillis(properties.getTimeoutMs()))
+                .build(),
+            new ObjectMapper()
+        );
+    }
+
+    BycliRecorderVerifyPort(
+        RecorderSandboxEndpointResolver endpointResolver,
+        RecorderBrowserProperties properties,
+        HttpClient httpClient,
+        ObjectMapper objectMapper
+    ) {
+        this.endpointResolver = endpointResolver;
         this.properties = properties;
         this.httpClient = httpClient;
         this.objectMapper = objectMapper;
+    }
+
+    @Override
+    public String start(
+        RecorderOwner owner,
+        String canonicalRequestId,
+        String sessionId,
+        String name,
+        String adapterPath,
+        Map<String, Object> executionSeedArgs
+    ) {
+        return start(owner, canonicalRequestId, sessionId, name, adapterPath, null, executionSeedArgs);
+    }
+
+    @Override
+    public String start(
+        RecorderOwner owner,
+        String canonicalRequestId,
+        String sessionId,
+        String name,
+        String adapterPath,
+        String expectedSourceSha256,
+        Map<String, Object> executionSeedArgs
+    ) {
+        return startAt(
+            endpointResolver.resolve(owner, "bycli", "/v1/verify"),
+            canonicalRequestId,
+            sessionId,
+            name,
+            adapterPath,
+            expectedSourceSha256,
+            executionSeedArgs
+        );
     }
 
     @Override
@@ -65,6 +124,26 @@ public class BycliRecorderVerifyPort implements RecorderVerifyPort {
         String expectedSourceSha256,
         Map<String, Object> executionSeedArgs
     ) {
+        return startAt(
+            uri("/v1/verify"),
+            canonicalRequestId,
+            sessionId,
+            name,
+            adapterPath,
+            expectedSourceSha256,
+            executionSeedArgs
+        );
+    }
+
+    private String startAt(
+        URI target,
+        String canonicalRequestId,
+        String sessionId,
+        String name,
+        String adapterPath,
+        String expectedSourceSha256,
+        Map<String, Object> executionSeedArgs
+    ) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("requestId", canonicalRequestId);
         body.put("sessionId", sessionId);
@@ -77,7 +156,7 @@ public class BycliRecorderVerifyPort implements RecorderVerifyPort {
         body.put("fixture", "ignore");
         body.put("trace", "off");
 
-        DaemonResponse response = send("/v1/verify", body);
+        DaemonResponse response = send(target, body);
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
             throw daemonError(response, "verify runner start failed");
         }
@@ -95,8 +174,20 @@ public class BycliRecorderVerifyPort implements RecorderVerifyPort {
 
     @Override
     public Map<String, Object> status(String daemonRequestId) {
+        return statusAt(null, daemonRequestId);
+    }
+
+    @Override
+    public Map<String, Object> status(RecorderOwner owner, String daemonRequestId) {
+        return statusAt(owner, daemonRequestId);
+    }
+
+    private Map<String, Object> statusAt(RecorderOwner owner, String daemonRequestId) {
         String encoded = URLEncoder.encode(daemonRequestId, StandardCharsets.UTF_8);
-        DaemonResponse response = send("/v1/requests/" + encoded, null);
+        URI target = owner == null
+            ? uri("/v1/requests/" + encoded)
+            : endpointResolver.resolve(owner, "bycli", "/v1/requests/" + encoded);
+        DaemonResponse response = send(target, null);
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
             throw daemonError(response, "verify status request failed");
         }
@@ -115,8 +206,8 @@ public class BycliRecorderVerifyPort implements RecorderVerifyPort {
         return statusBody;
     }
 
-    private DaemonResponse send(String path, Map<String, Object> body) {
-        HttpRequest.Builder builder = HttpRequest.newBuilder(uri(path))
+    private DaemonResponse send(URI target, Map<String, Object> body) {
+        HttpRequest.Builder builder = HttpRequest.newBuilder(target)
             .timeout(Duration.ofMillis(properties.getTimeoutMs()))
             .header(BYCLI_HEADER, "1");
         if (body == null) {

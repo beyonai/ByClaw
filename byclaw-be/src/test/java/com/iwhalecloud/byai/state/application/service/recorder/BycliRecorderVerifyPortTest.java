@@ -10,6 +10,7 @@ import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.InetSocketAddress;
+import java.net.URI;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayDeque;
@@ -78,6 +79,24 @@ class BycliRecorderVerifyPortTest {
         assertThat(daemon.requests().get(1).path()).isEqualTo("/v1/requests/req-canonical");
         assertThat(daemon.requests().get(1).header("X-byCLI")).isEqualTo("1");
         assertThat(status).containsEntry("status", "succeeded");
+    }
+
+    @Test
+    void ownerAwareVerifyUsesCurrentUsersBycliProxyEndpoint() throws Exception {
+        daemon = FakeDaemon.start();
+        daemon.enqueueJson(202, Map.of("ok", true, "data", Map.of("requestId", "req-owner", "accepted", true)));
+        RecorderSandboxEndpointResolver resolver = org.mockito.Mockito.mock(RecorderSandboxEndpointResolver.class);
+        org.mockito.Mockito.when(resolver.resolve(new com.iwhalecloud.byai.state.domain.recorder.model.RecorderOwner(1L, "alice"), "bycli", "/v1/verify"))
+            .thenReturn(URI.create("http://127.0.0.1:" + daemon.port() + "/v1/sandboxes/sandbox-1/proxy/19825/v1/verify"));
+
+        BycliRecorderVerifyPort port = port(resolver, 3000);
+        String requestId = port.start(
+            new com.iwhalecloud.byai.state.domain.recorder.model.RecorderOwner(1L, "alice"),
+            "req-owner", "session-1", "example/search", "/tmp/draft.ts", Map.of()
+        );
+
+        assertThat(requestId).isEqualTo("req-owner");
+        assertThat(daemon.requests().getFirst().path()).isEqualTo("/v1/sandboxes/sandbox-1/proxy/19825/v1/verify");
     }
 
     @Test
@@ -188,6 +207,12 @@ class BycliRecorderVerifyPortTest {
         properties.setDaemonPort(daemon.port());
         properties.setTimeoutMs(timeoutMs);
         return new BycliRecorderVerifyPort(properties);
+    }
+
+    private BycliRecorderVerifyPort port(RecorderSandboxEndpointResolver resolver, int timeoutMs) {
+        RecorderBrowserProperties properties = new RecorderBrowserProperties();
+        properties.setTimeoutMs(timeoutMs);
+        return new BycliRecorderVerifyPort(resolver, properties, java.net.http.HttpClient.newHttpClient(), OBJECT_MAPPER);
     }
 
     static final class FakeDaemon implements AutoCloseable {

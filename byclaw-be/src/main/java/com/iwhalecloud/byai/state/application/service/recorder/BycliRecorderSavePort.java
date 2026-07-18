@@ -45,13 +45,14 @@ public class BycliRecorderSavePort implements RecorderSavePort {
     };
 
     private final SandboxIngressEndpointResolver endpointResolver;
+    private final RecorderSandboxEndpointResolver recorderEndpointResolver;
     private final RecorderSaveProperties properties;
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
 
     @Autowired
     public BycliRecorderSavePort(
-        SandboxIngressEndpointResolver endpointResolver,
+        RecorderSandboxEndpointResolver endpointResolver,
         RecorderSaveProperties properties
     ) {
         this(
@@ -71,6 +72,20 @@ public class BycliRecorderSavePort implements RecorderSavePort {
         ObjectMapper objectMapper
     ) {
         this.endpointResolver = endpointResolver;
+        this.recorderEndpointResolver = null;
+        this.properties = properties;
+        this.httpClient = httpClient;
+        this.objectMapper = objectMapper;
+    }
+
+    BycliRecorderSavePort(
+        RecorderSandboxEndpointResolver endpointResolver,
+        RecorderSaveProperties properties,
+        HttpClient httpClient,
+        ObjectMapper objectMapper
+    ) {
+        this.endpointResolver = null;
+        this.recorderEndpointResolver = endpointResolver;
         this.properties = properties;
         this.httpClient = httpClient;
         this.objectMapper = objectMapper;
@@ -124,6 +139,9 @@ public class BycliRecorderSavePort implements RecorderSavePort {
     }
 
     private URI resolveSaveUri(RecorderOwner owner) {
+        if (recorderEndpointResolver != null) {
+            return recorderEndpointResolver.resolve(owner, properties.getInstance(), SAVE_PATH);
+        }
         String endpoint;
         try {
             if (owner == null || owner.userCode() == null || owner.userCode().isBlank()) {

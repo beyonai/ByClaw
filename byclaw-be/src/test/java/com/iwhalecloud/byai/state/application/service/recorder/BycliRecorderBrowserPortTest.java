@@ -12,7 +12,9 @@ import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.InetSocketAddress;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.net.http.HttpClient;
 import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.LinkedHashMap;
@@ -57,6 +59,29 @@ class BycliRecorderBrowserPortTest {
             .containsEntry("localService", "ok")
             .containsEntry("highLevel", "ok")
             .containsEntry("llmSynthesis", false);
+    }
+
+    @Test
+    void healthUsesCurrentUsersBycliSandboxEndpoint() throws Exception {
+        daemon = FakeDaemon.start();
+        daemon.enqueueJson(200, Map.of(
+            "ok", true,
+            "data", Map.of("extensionConnected", true, "localService", "ok")
+        ));
+        RecorderOwner owner = new RecorderOwner(1L, "alice");
+        RecorderSandboxEndpointResolver resolver = org.mockito.Mockito.mock(RecorderSandboxEndpointResolver.class);
+        org.mockito.Mockito.when(resolver.resolve(owner, "bycli", "/status"))
+            .thenReturn(URI.create(daemon.endpoint() + "/status"));
+
+        Map<String, Object> health = new BycliRecorderBrowserPort(
+            resolver,
+            new RecorderBrowserProperties(),
+            HttpClient.newHttpClient(),
+            OBJECT_MAPPER
+        ).health(owner);
+
+        assertThat(health).containsEntry("daemon", "ok");
+        org.mockito.Mockito.verify(resolver).resolve(owner, "bycli", "/status");
     }
 
     @Test
@@ -172,6 +197,10 @@ class BycliRecorderBrowserPortTest {
 
         int port() {
             return server.getAddress().getPort();
+        }
+
+        String endpoint() {
+            return "http://127.0.0.1:" + port();
         }
 
         String lastPath() {

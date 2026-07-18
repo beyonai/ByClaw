@@ -17,8 +17,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
+import com.iwhalecloud.byai.state.domain.recorder.model.RecorderOwner;
 
 @Component
 @ConditionalOnProperty(prefix = "recorder.browser", name = "adapter", havingValue = "bycli", matchIfMissing = true)
@@ -29,12 +31,17 @@ public class BycliRecorderBrowserPort implements RecorderBrowserPort {
     };
 
     private final RecorderBrowserProperties properties;
+    private final RecorderSandboxEndpointResolver endpointResolver;
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
 
     @Autowired
-    public BycliRecorderBrowserPort(RecorderBrowserProperties properties) {
+    public BycliRecorderBrowserPort(
+        ObjectProvider<RecorderSandboxEndpointResolver> endpointResolver,
+        RecorderBrowserProperties properties
+    ) {
         this(
+            endpointResolver.getIfAvailable(),
             properties,
             HttpClient.newBuilder()
                 .connectTimeout(Duration.ofMillis(properties.getTimeoutMs()))
@@ -44,6 +51,26 @@ public class BycliRecorderBrowserPort implements RecorderBrowserPort {
     }
 
     BycliRecorderBrowserPort(RecorderBrowserProperties properties, HttpClient httpClient, ObjectMapper objectMapper) {
+        this(null, properties, httpClient, objectMapper);
+    }
+
+    BycliRecorderBrowserPort(RecorderBrowserProperties properties) {
+        this(
+            properties,
+            HttpClient.newBuilder()
+                .connectTimeout(Duration.ofMillis(properties.getTimeoutMs()))
+                .build(),
+            new ObjectMapper()
+        );
+    }
+
+    BycliRecorderBrowserPort(
+        RecorderSandboxEndpointResolver endpointResolver,
+        RecorderBrowserProperties properties,
+        HttpClient httpClient,
+        ObjectMapper objectMapper
+    ) {
+        this.endpointResolver = endpointResolver;
         this.properties = properties;
         this.httpClient = httpClient;
         this.objectMapper = objectMapper;
@@ -51,8 +78,15 @@ public class BycliRecorderBrowserPort implements RecorderBrowserPort {
 
     @Override
     public Map<String, Object> health() {
+        return health(null);
+    }
+
+    @Override
+    public Map<String, Object> health(RecorderOwner owner) {
         try {
-            DaemonResponse response = sendGet("/status", 2000);
+            DaemonResponse response = endpointResolver == null || owner == null
+                ? sendGet("/status", 2000)
+                : sendGet(endpointResolver.resolve(owner, "bycli", "/status"), 2000);
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
                 return downHealth("daemon status failed (HTTP " + response.statusCode() + ")");
             }
@@ -160,7 +194,11 @@ public class BycliRecorderBrowserPort implements RecorderBrowserPort {
     }
 
     private DaemonResponse sendGet(String path, int timeoutMs) {
-        HttpRequest request = HttpRequest.newBuilder(uri(path))
+        return sendGet(uri(path), timeoutMs);
+    }
+
+    private DaemonResponse sendGet(URI target, int timeoutMs) {
+        HttpRequest request = HttpRequest.newBuilder(target)
             .timeout(Duration.ofMillis(timeoutMs))
             .header(BYCLI_HEADER, "1")
             .GET()
@@ -205,6 +243,9 @@ public class BycliRecorderBrowserPort implements RecorderBrowserPort {
     }
 
     private URI uri(RecorderSession session, String path) {
+        if (endpointResolver != null) {
+            return endpointResolver.resolve(session.owner(), "bycli", path);
+        }
         String host = session.isVnc() && session.gatewayHost() != null && !session.gatewayHost().isBlank()
             ? session.gatewayHost()
             : properties.getDaemonHost();
