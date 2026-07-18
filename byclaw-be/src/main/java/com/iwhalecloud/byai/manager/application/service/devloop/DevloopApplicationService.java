@@ -34,8 +34,6 @@ import com.iwhalecloud.byai.manager.mapper.devloop.ScanLogItemMapper;
 import com.iwhalecloud.byai.manager.mapper.session.ByaiSessionMapper;
 import com.iwhalecloud.byai.manager.qo.devloop.ProjectQo;
 import com.iwhalecloud.byai.manager.qo.devloop.ProjectSessionQo;
-import com.github.pagehelper.Page;
-import com.github.pagehelper.PageHelper;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
 import com.iwhalecloud.byai.state.domain.chat.service.AssistantChatService;
 import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
@@ -638,6 +636,8 @@ public class DevloopApplicationService {
             Map<String, Object> map = new HashMap<>();
             map.put("itemId", item.getItemId());
             map.put("title", item.getTitle());
+            // 需求列表展开态需要展示完整内容，并据 sessionId 判断是否已启动。
+            map.put("content", item.getContent());
             map.put("originId", item.getOriginId());
             map.put("originUrl", item.getOriginUrl());
             map.put("action", item.getAction());
@@ -821,6 +821,7 @@ public class DevloopApplicationService {
         chatDto.setProjectId(projectId);
         chatDto.setChatContent(title);
         chatDto.setAccessTerminal("DevLoop");
+        chatDto.setClientRequestId(AssistantChatService.getClientRequestId());
         assistantChatService.createGroupChatSession(chatDto);
         Long sessionId = chatDto.getSessionId();
 
@@ -984,14 +985,26 @@ public class DevloopApplicationService {
     // ========== 项目成员 ==========
 
     /** 添加项目成员 */
+    @Transactional(rollbackFor = Exception.class)
     public ResponseUtil<Void> addProjectMember(Map<String, Object> params) {
         Long projectId = Long.valueOf(params.get("projectId").toString());
         Long userId = Long.valueOf(params.get("userId").toString());
 
+        Project project = projectMapper.selectById(projectId);
+        if (project == null || DELETE_FLAG_DELETED.equals(project.getDeleteFlag())) {
+            return ResponseUtil.failRes("Project not found");
+        }
         if (projectMemberService.isMember(projectId, userId)) {
             return ResponseUtil.failRes("该用户已是项目成员");
         }
         projectMemberService.addMember(projectId, userId, "member");
+        if (!"Y".equals(project.getIsShare())) {
+            // 从成员 tab 主动添加成员时，项目已经具备共享成员，需同步项目共享状态。
+            project.setIsShare("Y");
+            project.setUpdateBy(CurrentUserHolder.getCurrentUserId());
+            project.setUpdateTime(new Date());
+            projectMapper.updateById(project);
+        }
         return ResponseUtil.successResponse(null);
     }
 

@@ -58,6 +58,8 @@ public class RecorderApplicationService {
 
     public RecorderResponse<Map<String, Object>> health() {
         try {
+            return ok(browserPort.health(currentUserProvider.requireCurrent()));
+        } catch (RecorderSaveException e) {
             return ok(browserPort.health());
         } catch (RecorderBrowserException e) {
             return fail(e.getHttpStatus(), e.getCode(), e.getMessage());
@@ -98,7 +100,7 @@ public class RecorderApplicationService {
         data.put("recordingMode", session.recordingMode());
         if (session.isVnc()) {
             try {
-                RecorderVncEndpoint endpoint = vncProvider.start(session.sessionId());
+                RecorderVncEndpoint endpoint = vncProvider.start(session);
                 session.vncProvider(endpoint.provider());
                 session.vncUrl(endpoint.vncUrl());
                 session.vncContainerName(endpoint.containerName());

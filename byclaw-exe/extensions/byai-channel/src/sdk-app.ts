@@ -40,6 +40,7 @@ import {
   createRedisClient,
   type RedisClient,
 } from "../../shared/src/redis-compat.js";
+import { releaseCancelledSessionDispatch } from "./session-dispatch-gate.js";
 
 export interface ByaiSdkAppOptions {
   account: ResolvedByaiAccount;
@@ -614,6 +615,7 @@ export class ByaiSdkApp {
       activeRequest.abortController.abort(
         new Error(`[${this.account.accountId}] task canceled, reason: ${reason}`),
       );
+      releaseCancelledSessionDispatch(activeRequest.sessionKey);
       clearActiveSdkRequestRecord(activeRequest);
     });
 

@@ -1,4 +1,4 @@
-export type ProjectType = 'normal' | 'develop';
+export type ProjectType = 'normal' | 'develop' | 'default';
 
 export type ProjectShareFlag = 'N' | 'Y';
 
@@ -42,6 +42,7 @@ export interface ProjectSpace {
   projectType: ProjectType;
   isShare: ProjectShareFlag;
   sharedFlag: boolean;
+  createBy?: string | number;
   createTime?: string;
   sessionCount?: number;
   taskCount?: number;

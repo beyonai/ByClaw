@@ -1,6 +1,7 @@
 import { POST, type ConfigType } from '@/service/common/request';
 
-type DevloopProjectType = 'normal' | 'develop';
+// 默认项目只用于系统内置项目回显和编辑，接口层类型也需要覆盖，避免前端判断 default 时类型不一致。
+type DevloopProjectType = 'normal' | 'develop' | 'default';
 
 type DevloopProjectShareFlag = 'N' | 'Y';
 

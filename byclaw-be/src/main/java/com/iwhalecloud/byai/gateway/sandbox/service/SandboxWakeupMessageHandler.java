@@ -56,9 +56,11 @@ public class SandboxWakeupMessageHandler {
         LOGGER.info("收到默认沙箱唤醒消息，userCode={}，targetAgentType={}，executionId={}，sessionId={}，messageId={}",
             userCode, targetAgentType, message.getString("execution_id"), message.getString("session_id"),
             message.getString("message_id"));
+        Long resourceId = StringUtils.startsWith(targetAgentType, WorkerAgentType.BYCLAW_CODE.getCode() + "_")
+            ? SandboxLaunchRouting.DEFAULT_CODE_AGENT_RESOURCE_ID
+            : SandboxLaunchRouting.DEFAULT_RESOURCE_ID;
         sandboxUserContextRunner.runAsUser(userCode,
-            () -> sandboxService.restartSandboxAfterRemoteExit(userCode, SandboxLaunchRouting.DEFAULT_RESOURCE_ID,
-                targetAgentType));
+            () -> sandboxService.restartSandboxAfterRemoteExit(userCode, resourceId, targetAgentType));
         return true;
     }
 
@@ -126,9 +128,13 @@ public class SandboxWakeupMessageHandler {
             return userCode;
         }
 
-        String prefix = WorkerAgentType.BYCLAW_EXE.getCode() + "_";
-        if (StringUtils.startsWith(targetAgentType, prefix)) {
-            return StringUtils.substringAfter(targetAgentType, prefix);
+        String exePrefix = WorkerAgentType.BYCLAW_EXE.getCode() + "_";
+        if (StringUtils.startsWith(targetAgentType, exePrefix)) {
+            return StringUtils.substringAfter(targetAgentType, exePrefix);
+        }
+        String codePrefix = WorkerAgentType.BYCLAW_CODE.getCode() + "_";
+        if (StringUtils.startsWith(targetAgentType, codePrefix)) {
+            return StringUtils.substringAfter(targetAgentType, codePrefix);
         }
         return null;
     }
@@ -137,6 +143,7 @@ public class SandboxWakeupMessageHandler {
         if (StringUtils.isAnyBlank(targetAgentType, userCode)) {
             return false;
         }
-        return StringUtils.equals(targetAgentType, WorkerAgentType.BYCLAW_EXE.getCode() + "_" + userCode);
+        return StringUtils.equals(targetAgentType, WorkerAgentType.BYCLAW_EXE.getCode() + "_" + userCode)
+            || StringUtils.equals(targetAgentType, WorkerAgentType.BYCLAW_CODE.getCode() + "_" + userCode);
     }
 }

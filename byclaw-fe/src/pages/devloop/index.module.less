@@ -453,6 +453,7 @@
   flex: 1;
   min-width: 260px;
   max-width: 320px;
+  min-height: 0;
   background: #fafafa;
   border-radius: 10px;
   padding: 12px;
@@ -483,6 +484,7 @@
 }
 
 .kanbanCard {
+  min-width: 0;
   background: #fff;
   border: 1px solid #f0f0f0;
   border-radius: 8px;
@@ -506,24 +508,56 @@
 }
 
 .kanbanCardTitle {
+  display: -webkit-box;
+  min-width: 0;
   font-size: 14px;
   font-weight: 500;
+  line-height: 20px;
   margin: 0 0 6px;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
 }
 
 .kanbanCardMeta {
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 4px;
   font-size: 12px;
   color: #595959;
+
+  :global {
+    .@{antPrefix}-tag {
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+  }
 }
 
 .kanbanCardFooter {
+  min-width: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   margin-top: 8px;
   font-size: 12px;
   color: #8c8c8c;
+
+  span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  span:last-child {
+    flex-shrink: 0;
+  }
 }

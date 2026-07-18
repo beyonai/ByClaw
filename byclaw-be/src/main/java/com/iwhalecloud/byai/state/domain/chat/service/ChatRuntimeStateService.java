@@ -4,14 +4,13 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.data.redis.core.Cursor;
 import org.springframework.data.redis.core.RedisTemplate;
-import org.springframework.data.redis.core.ScanOptions;
 import org.springframework.stereotype.Service;
 
 import com.alibaba.fastjson.JSON;
@@ -28,6 +27,8 @@ import lombok.extern.slf4j.Slf4j;
 public class ChatRuntimeStateService {
 
     private static final String RUNTIME_KEY_PREFIX = "byai:chat:runtime:";
+
+    private static final String RUNTIME_INDEX_KEY = "byai:chat:runtime:index";
 
     private static final String RECOVERY_LOCK_PREFIX = "byai:chat:recovery-lock:";
 
@@ -67,6 +68,7 @@ public class ChatRuntimeStateService {
             state.setStatus(ChatRuntimeState.STATUS_RUNNING);
             redisTemplate.opsForValue().set(buildKey(ctx.sessionId), JSON.toJSONString(state), RUNTIME_TTL_SECONDS,
                 TimeUnit.SECONDS);
+            redisTemplate.opsForSet().add(RUNTIME_INDEX_KEY, String.valueOf(ctx.sessionId));
         }
         catch (Exception e) {
             log.warn("保存聊天运行态失败, sessionId: {}, traceId: {}", ctx.sessionId, ctx.traceId, e);
@@ -85,6 +87,7 @@ public class ChatRuntimeStateService {
         state.setOwnerInstanceId(chatRuntimeInstance.getInstanceId());
         redisTemplate.opsForValue().set(buildKey(ctx.sessionId), JSON.toJSONString(state), RUNTIME_TTL_SECONDS,
             TimeUnit.SECONDS);
+        redisTemplate.opsForSet().add(RUNTIME_INDEX_KEY, String.valueOf(ctx.sessionId));
     }
 
     public ChatRuntimeState get(Long sessionId) {
@@ -115,27 +118,27 @@ public class ChatRuntimeStateService {
 
     public List<ChatRuntimeState> listRunningStates() {
         List<ChatRuntimeState> states = new ArrayList<>();
-        ScanOptions options = ScanOptions.scanOptions().match(RUNTIME_KEY_PREFIX + "*").count(100).build();
-        try (Cursor<String> cursor = redisTemplate.scan(options)) {
-            while (cursor != null && cursor.hasNext()) {
-                String key = cursor.next();
-                String value = (String) redisTemplate.opsForValue().get(key);
-                if (StringUtils.isBlank(value)) {
+        try {
+            Set<Object> sessionIds = redisTemplate.opsForSet().members(RUNTIME_INDEX_KEY);
+            if (sessionIds == null || sessionIds.isEmpty()) {
+                return states;
+            }
+            for (Object sessionId : sessionIds) {
+                ChatRuntimeState state = get(String.valueOf(sessionId));
+                if (state == null) {
+                    redisTemplate.opsForSet().remove(RUNTIME_INDEX_KEY, sessionId);
                     continue;
                 }
-                try {
-                    ChatRuntimeState state = JSON.parseObject(value, ChatRuntimeState.class);
-                    if (state != null && ChatRuntimeState.STATUS_RUNNING.equals(state.getStatus())) {
-                        states.add(state);
-                    }
+                if (ChatRuntimeState.STATUS_RUNNING.equals(state.getStatus())) {
+                    states.add(state);
                 }
-                catch (Exception e) {
-                    log.warn("解析聊天运行态失败, key: {}", key, e);
+                else {
+                    redisTemplate.opsForSet().remove(RUNTIME_INDEX_KEY, sessionId);
                 }
             }
         }
         catch (Exception e) {
-            log.warn("扫描聊天运行态失败", e);
+            log.warn("列出聊天运行态失败", e);
         }
         return states;
     }
@@ -159,6 +162,7 @@ public class ChatRuntimeStateService {
     public void delete(Long sessionId) {
         if (sessionId != null) {
             redisTemplate.delete(buildKey(sessionId));
+            redisTemplate.opsForSet().remove(RUNTIME_INDEX_KEY, String.valueOf(sessionId));
         }
     }
 

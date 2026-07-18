@@ -16,6 +16,7 @@ import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.InetSocketAddress;
+import java.net.URI;
 import java.net.http.HttpClient;
 import java.time.Duration;
 import java.util.List;
@@ -67,6 +68,22 @@ class BycliRecorderSavePortTest {
         });
         assertThat(result.adapterPath()).isEqualTo("/by/.bycli/clis/example_com/search.js");
         assertThat(result.reportPath()).isEqualTo("/by/.bycli/sites/example_com/recorder/search-report.json");
+    }
+
+    @Test
+    void productionResolverCanReturnProxyPrefixedSaveUri() throws Exception {
+        daemon = FakeDaemon.start();
+        daemon.enqueueJson(200, successEnvelope());
+        RecorderSandboxEndpointResolver resolver = mock(RecorderSandboxEndpointResolver.class);
+        when(resolver.resolve(OWNER, "bycli", "/v1/save-adapter"))
+            .thenReturn(URI.create(daemon.endpoint() + "/v1/sandboxes/sandbox-42/proxy/19825/v1/save-adapter"));
+
+        RecorderSavePort.PublishResult result = port(resolver, enabledProperties(3000)).publish(
+            OWNER, "example_com/search", "export default {};", null, false
+        );
+
+        assertThat(result.adapterPath()).isEqualTo("/by/.bycli/clis/example_com/search.js");
+        verify(resolver).resolve(OWNER, "bycli", "/v1/save-adapter");
     }
 
     @Test
@@ -317,6 +334,13 @@ class BycliRecorderSavePortTest {
             .connectTimeout(Duration.ofMillis(properties.getTimeoutMs()))
             .build();
         return new BycliRecorderSavePort(resolver, properties, client, OBJECT_MAPPER);
+    }
+
+    private static BycliRecorderSavePort port(
+        RecorderSandboxEndpointResolver resolver,
+        RecorderSaveProperties properties
+    ) {
+        return new BycliRecorderSavePort(resolver, properties, HttpClient.newHttpClient(), OBJECT_MAPPER);
     }
 
     private static void assertCode(ThrowingRunnable action, String code, String message) {

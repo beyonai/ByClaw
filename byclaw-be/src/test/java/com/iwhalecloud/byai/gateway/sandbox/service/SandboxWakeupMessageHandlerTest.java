@@ -90,7 +90,7 @@ class SandboxWakeupMessageHandlerTest {
     }
 
     @Test
-    void handle_ignoresDifferentTarget() {
+    void handle_wakesByclawCodeSandboxForByclawCodeTarget() {
         SandboxService sandboxService = mock(SandboxService.class);
         LoginApplicationService loginApplicationService = mock(LoginApplicationService.class);
         SandboxWakeupMessageHandler handler = new SandboxWakeupMessageHandler(sandboxService,
@@ -102,9 +102,9 @@ class SandboxWakeupMessageHandlerTest {
             "user_code", "demo-user"
         ));
 
-        assertThat(handled).isFalse();
-        verify(sandboxService, never()).restartSandboxAfterRemoteExit("demo-user",
-            SandboxLaunchRouting.DEFAULT_RESOURCE_ID, "BYCLAW_CODE_demo-user");
+        assertThat(handled).isTrue();
+        verify(sandboxService).restartSandboxAfterRemoteExit("demo-user",
+            SandboxLaunchRouting.DEFAULT_CODE_AGENT_RESOURCE_ID, "BYCLAW_CODE_demo-user");
     }
 
     @Test
@@ -153,5 +153,22 @@ class SandboxWakeupMessageHandlerTest {
         assertThat(handled).isTrue();
         assertThat(CurrentUserHolder.getLoginInfo()).isSameAs(original);
         CurrentUserHolder.clearLoginInfo();
+    }
+
+    @Test
+    void handle_resolvesUserCodeFromByclawCodeTargetWhenMissing() {
+        SandboxService sandboxService = mock(SandboxService.class);
+        LoginApplicationService loginApplicationService = mock(LoginApplicationService.class);
+        SandboxWakeupMessageHandler handler = new SandboxWakeupMessageHandler(sandboxService,
+            new SandboxUserContextRunner(loginApplicationService));
+
+        boolean handled = handler.handle(Map.of(
+            "policy", "WAKE_AND_WAIT",
+            "target_agent_type", "BYCLAW_CODE_demo-user"
+        ));
+
+        assertThat(handled).isTrue();
+        verify(sandboxService).restartSandboxAfterRemoteExit("demo-user",
+            SandboxLaunchRouting.DEFAULT_CODE_AGENT_RESOURCE_ID, "BYCLAW_CODE_demo-user");
     }
 }

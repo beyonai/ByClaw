@@ -1,14 +1,25 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Button, List, Avatar, Tag, Modal, Input, message, Empty, Spin } from 'antd';
 import { PlusOutlined, DeleteOutlined, SearchOutlined, RobotOutlined } from '@ant-design/icons';
+import { useSelector } from '@umijs/max';
 import { listProjectMembers, addProjectMember, removeProjectMember, bindMemberAgent } from '@/service/devloop';
 import { POST } from '@/service/common/request';
 
 interface MemberListProps {
   projectId?: number;
+  creatorId?: string | number;
 }
 
-const MemberList: React.FC<MemberListProps> = ({ projectId }) => {
+const getMemberUserId = (member: any) => member.userId ?? String(member.id || '').replace(/^user_/, '');
+
+const isProjectOwnerMember = (member: any, creatorId?: string | number) => {
+  // 新老数据都兼容：新数据有 owner role，老数据用项目创建人 ID 兜底。
+  const isOwnerRole = ['owner', 'creator'].includes(`${member?.role || ''}`.toLowerCase());
+  return isOwnerRole || (!!creatorId && `${getMemberUserId(member)}` === `${creatorId}`);
+};
+
+const MemberList: React.FC<MemberListProps> = ({ projectId, creatorId }) => {
+  const userInfo = useSelector((state: any) => state.user?.userInfo) || {};
   const [members, setMembers] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -77,10 +88,24 @@ const MemberList: React.FC<MemberListProps> = ({ projectId }) => {
     }
   };
 
+  const isCurrentUserMember = (member: any) => {
+    return (
+      (!!member.userId && `${member.userId}` === `${userInfo.userId || ''}`) ||
+      (!!member.userCode && `${member.userCode}` === `${userInfo.userCode || ''}`)
+    );
+  };
+
   const handleRemove = (member: any) => {
+    if (isProjectOwnerMember(member, creatorId)) {
+      message.warning('创建者不能被删除');
+      return;
+    }
+
     Modal.confirm({
-      title: '移除成员',
-      content: `确定要移除「${member.userName || member.userId}」吗？`,
+      title: isCurrentUserMember(member) ? '移除自己' : '移除成员',
+      content: isCurrentUserMember(member)
+        ? '移除自己后将无法继续访问该项目，确定移除吗？'
+        : `确定要移除「${member.userName || member.userId}」吗？`,
       okText: '移除',
       okButtonProps: { danger: true },
       onOk: async () => {
@@ -148,7 +173,7 @@ const MemberList: React.FC<MemberListProps> = ({ projectId }) => {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <span>{members.length} 个成员</span>
         <Button icon={<PlusOutlined />} onClick={() => setShowAddModal(true)}>
-          添加成员
+          添加
         </Button>
       </div>
 
@@ -158,54 +183,68 @@ const MemberList: React.FC<MemberListProps> = ({ projectId }) => {
         ) : (
           <List
             dataSource={members}
-            renderItem={(member: any) => (
-              <List.Item
-                actions={[
-                  <Button
-                    key="bind"
-                    type="link"
-                    size="small"
-                    icon={<RobotOutlined />}
-                    onClick={() => handleOpenAgentModal(member)}
-                  >
-                    {member.agentId ? '更换数字员工' : '绑定数字员工'}
-                  </Button>,
-                  ...(member.role !== 'owner'
-                    ? [
-                      <Button
-                        key="remove"
-                        type="link"
-                        danger
-                        size="small"
-                        icon={<DeleteOutlined />}
-                        onClick={() => handleRemove(member)}
-                      >
-                        移除
-                      </Button>,
-                    ]
-                    : []),
-                ]}
-              >
-                <List.Item.Meta
-                  avatar={
-                    <Avatar style={{ background: member.role === 'owner' ? '#1677ff' : '#87d068' }}>
-                      {(member.userName || '?')[0]}
-                    </Avatar>
-                  }
-                  title={
-                    <span>
-                      {member.userName || member.userId} {member.role === 'owner' && <Tag color="blue">创建者</Tag>}
-                    </span>
-                  }
-                  description={
-                    <span>
-                      {member.userCode || ''}
-                      {member.agentName ? ` · 数字员工: ${member.agentName}` : ' · 未绑定数字员工'}
-                    </span>
-                  }
-                />
-              </List.Item>
-            )}
+            renderItem={(member: any) => {
+              const isCreatorMember = isProjectOwnerMember(member, creatorId);
+              return (
+                <List.Item
+                  actions={[
+                    <Button
+                      key="bind"
+                      type="link"
+                      size="small"
+                      icon={<RobotOutlined />}
+                      onClick={() => handleOpenAgentModal(member)}
+                    >
+                      {member.agentId ? '更换数字员工' : '绑定数字员工'}
+                    </Button>,
+                    ...(!isCreatorMember
+                      ? [
+                        <Button
+                          key="remove"
+                          type="link"
+                          danger
+                          size="small"
+                          icon={<DeleteOutlined />}
+                          onClick={() => handleRemove(member)}
+                        >
+                          移除
+                        </Button>,
+                      ]
+                      : []),
+                  ]}
+                >
+                  <List.Item.Meta
+                    avatar={
+                      <Avatar style={{ background: isCreatorMember ? '#1677ff' : '#87d068' }}>
+                        {(member.userName || '?')[0]}
+                      </Avatar>
+                    }
+                    title={
+                      <span style={{ display: 'inline-flex', maxWidth: '100%', alignItems: 'center', gap: 6 }}>
+                        <span
+                          style={{
+                            minWidth: 0,
+                            overflow: 'hidden',
+                            whiteSpace: 'nowrap',
+                            textOverflow: 'ellipsis',
+                          }}
+                        >
+                          {member.userName || member.userId}
+                        </span>
+                        {/* 创建者标签紧跟成员名称展示，和禁删判断使用同一套规则。 */}
+                        {isCreatorMember && <Tag color="blue">创建者</Tag>}
+                      </span>
+                    }
+                    description={
+                      <span>
+                        {member.userCode || ''}
+                        {member.agentName ? ` · 数字员工: ${member.agentName}` : ' · 未绑定数字员工'}
+                      </span>
+                    }
+                  />
+                </List.Item>
+              );
+            }}
           />
         )}
       </Spin>

@@ -1,11 +1,16 @@
 package com.iwhalecloud.byai.state.application.service.recorder;
 
 import com.iwhalecloud.byai.state.domain.recorder.model.RecorderSession;
+import com.iwhalecloud.byai.state.domain.recorder.model.RecorderOwner;
 import java.util.Map;
 
 public interface RecorderBrowserPort {
 
     Map<String, Object> health();
+
+    default Map<String, Object> health(RecorderOwner owner) {
+        return health();
+    }
 
     Map<String, Object> navigate(RecorderSession session, String url);
 

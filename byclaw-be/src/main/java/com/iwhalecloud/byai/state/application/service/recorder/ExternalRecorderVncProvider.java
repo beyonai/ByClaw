@@ -1,5 +1,9 @@
 package com.iwhalecloud.byai.state.application.service.recorder;
 
+import com.iwhalecloud.byai.state.domain.recorder.model.RecorderSession;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.ObjectProvider;
+
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
@@ -8,9 +12,29 @@ import org.springframework.stereotype.Component;
 public class ExternalRecorderVncProvider implements RecorderVncProvider {
 
     private final RecorderBrowserProperties properties;
+    private final RecorderSandboxEndpointResolver endpointResolver;
 
     public ExternalRecorderVncProvider(RecorderBrowserProperties properties) {
+        this((RecorderSandboxEndpointResolver) null, properties);
+    }
+
+    public ExternalRecorderVncProvider(RecorderSandboxEndpointResolver endpointResolver, RecorderBrowserProperties properties) {
+        this.endpointResolver = endpointResolver;
         this.properties = properties;
+    }
+
+    @Autowired
+    public ExternalRecorderVncProvider(ObjectProvider<RecorderSandboxEndpointResolver> endpointResolver, RecorderBrowserProperties properties) {
+        this(endpointResolver.getIfAvailable(), properties);
+    }
+
+    @Override
+    public RecorderVncEndpoint start(RecorderSession session) {
+        if (endpointResolver != null && session != null && session.owner() != null) {
+            String vncUrl = endpointResolver.resolve(session.owner(), "vnc", "").toString();
+            return new RecorderVncEndpoint("external", vncUrl, properties.getGatewayHost(), 0, null, null);
+        }
+        return start(session == null ? null : session.sessionId());
     }
 
     @Override

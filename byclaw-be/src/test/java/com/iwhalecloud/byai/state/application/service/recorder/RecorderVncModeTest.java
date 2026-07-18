@@ -8,6 +8,7 @@ import com.iwhalecloud.byai.state.domain.recorder.model.RecorderOwner;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import java.util.Map;
+import java.net.URI;
 import java.nio.file.Path;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -80,6 +81,21 @@ class RecorderVncModeTest {
             .isInstanceOf(RecorderBrowserException.class)
             .extracting("code")
             .isEqualTo("validation_failed");
+    }
+
+    @Test
+    void externalVncProviderResolvesCurrentUsersVncSandboxEndpoint() {
+        RecorderBrowserProperties properties = new RecorderBrowserProperties();
+        RecorderSandboxEndpointResolver resolver = org.mockito.Mockito.mock(RecorderSandboxEndpointResolver.class);
+        RecorderOwner owner = new RecorderOwner(1L, "alice");
+        org.mockito.Mockito.when(resolver.resolve(owner, "vnc", ""))
+            .thenReturn(URI.create("http://127.0.0.1:8080/v1/sandboxes/sandbox-1/proxy/8081"));
+
+        ExternalRecorderVncProvider provider = new ExternalRecorderVncProvider(resolver, properties);
+        RecorderVncEndpoint endpoint = provider.start(new RecorderSession("session-1", owner));
+
+        assertThat(endpoint.vncUrl()).isEqualTo("http://127.0.0.1:8080/v1/sandboxes/sandbox-1/proxy/8081");
+        assertThat(endpoint.gatewayPort()).isEqualTo(0);
     }
 
     @Test

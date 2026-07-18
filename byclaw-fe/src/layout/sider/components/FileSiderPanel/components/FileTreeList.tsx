@@ -23,6 +23,8 @@ interface FileTreeListProps {
   currentPath: string;
   loading: boolean;
   emptyText: React.ReactNode;
+  // 项目资源等只读场景复用文件树时关闭三点操作，文件模块默认仍展示。
+  showActions?: boolean;
   onExpand: (keys: Key[]) => void;
   onLoadData: (node: FileTreeItem) => Promise<void>;
   onNodeClick: (event: React.MouseEvent, node: FileTreeItem) => void;
@@ -61,6 +63,7 @@ const FileTreeList: React.FC<FileTreeListProps> = ({
   currentPath,
   loading,
   emptyText,
+  showActions = true,
   onExpand,
   onLoadData,
   onNodeClick,
@@ -135,25 +138,27 @@ const FileTreeList: React.FC<FileTreeListProps> = ({
                         <span className={styles.treeTitleText}>{item.name}</span>
                       </span>
                     </Tooltip>
-                    <Dropdown
-                      trigger={['hover']}
-                      overlayClassName={employeeStyles.mydropdown}
-                      menu={{
-                        items: getActionItems(treeItem),
-                        onClick: ({ key, domEvent }) => {
-                          domEvent.stopPropagation();
-                          onAction(key, treeItem);
-                        },
-                      }}
-                    >
-                      <span
-                        className={`${commonStyles.treeActionIcon} ${styles.treeActionTrigger}`}
-                        onClick={(event) => event.stopPropagation()}
-                        onMouseDown={(event) => event.stopPropagation()}
+                    {showActions && (
+                      <Dropdown
+                        trigger={['hover']}
+                        overlayClassName={employeeStyles.mydropdown}
+                        menu={{
+                          items: getActionItems(treeItem),
+                          onClick: ({ key, domEvent }) => {
+                            domEvent.stopPropagation();
+                            onAction(key, treeItem);
+                          },
+                        }}
                       >
-                        <EllipsisOutlined />
-                      </span>
-                    </Dropdown>
+                        <span
+                          className={`${commonStyles.treeActionIcon} ${styles.treeActionTrigger}`}
+                          onClick={(event) => event.stopPropagation()}
+                          onMouseDown={(event) => event.stopPropagation()}
+                        >
+                          <EllipsisOutlined />
+                        </span>
+                      </Dropdown>
+                    )}
                   </span>
                 );
               }}

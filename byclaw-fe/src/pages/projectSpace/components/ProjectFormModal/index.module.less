@@ -1,12 +1,12 @@
 .shareTargetField {
   display: flex;
   flex-direction: column;
-  gap: 8px;
 }
 
 .shareTargetList {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
   min-height: 30px;
 }
@@ -21,7 +21,6 @@
   background-color: #f2f6fa;
 }
 
-.orgAvatar,
 .userAvatar {
   flex: none;
   width: 20px;
@@ -30,11 +29,6 @@
   display: flex;
   align-items: center;
   justify-content: center;
-}
-
-.orgAvatar {
-  color: var(--beyond-color-primary-hover);
-  background: var(--beyond-color-primary-bg-hover);
 }
 
 .userAvatar {
@@ -57,4 +51,18 @@
   color: #a4aab2;
   font-size: 10px;
   cursor: pointer;
+}
+
+.shareTargetEmpty {
+  color: #a4aab2;
+  font-size: 13px;
+  line-height: 30px;
+}
+
+.shareTargetAddButton {
+  flex: none;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 6px;
+  font-size: 13px;
 }

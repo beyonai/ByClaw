@@ -53,6 +53,7 @@ public class RunningOutputStreamRegistry {
         value.put("sessionId", ctx.sessionId);
         value.put("userMessageId", ctx.userMessageId);
         value.put("modelAnswerMessageId", ctx.modelAnswerMessageId);
+        value.put("taskId", ctx.taskId);
         value.put("traceId", ctx.traceId);
         value.put("laneId", ctx.assistantChatDto == null ? null : ctx.assistantChatDto.getLaneId());
         value.put("clientRequestId", ctx.clientRequestId);
@@ -199,6 +200,7 @@ public class RunningOutputStreamRegistry {
             info.setUserMessageId(running.getLong("userMessageId"));
             info.setClientRequestId(running.getString("clientRequestId"));
             info.setModelAnswerMessageId(running.getLong("modelAnswerMessageId"));
+            info.setTaskId(running.getLong("taskId"));
             info.setTransport(running.getString("transport"));
             info.setStartedAt(running.getLong("startedAt"));
             info.setAgentId(running.getLong("agentId"));

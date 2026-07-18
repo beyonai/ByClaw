@@ -1,17 +1,29 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Button, Dropdown, Empty, Input, List, Modal, Spin, Tag, message } from 'antd';
 import { DeleteOutlined, MoreOutlined, PlusOutlined, RobotOutlined, SearchOutlined } from '@ant-design/icons';
+import { useSelector } from '@umijs/max';
 import AddAuthModal from '@/pages/manager/components/AuthListDrawer/AddAuthModal';
 import { addProjectMember, bindMemberAgent, listProjectMembers, removeProjectMember } from '@/service/devloop';
 import { POST } from '@/service/common/request';
 import { getAgentChatAvatar } from '@/utils/agent';
+import styles from './index.module.less';
 
 interface ProjectMemberListProps {
   projectId?: number;
+  creatorId?: string | number;
   onMembersChange?: (members: any[]) => void;
 }
 
-const ProjectMemberList: React.FC<ProjectMemberListProps> = ({ projectId, onMembersChange }) => {
+const getMemberUserId = (member: any) => member.userId ?? String(member.id || '').replace(/^user_/, '');
+
+const isProjectOwnerMember = (member: any, creatorId?: string | number) => {
+  // 新老数据都兼容：新数据有 owner role，老数据用项目创建人 ID 兜底。
+  const isOwnerRole = ['owner', 'creator'].includes(`${member?.role || ''}`.toLowerCase());
+  return isOwnerRole || (!!creatorId && `${getMemberUserId(member)}` === `${creatorId}`);
+};
+
+const ProjectMemberList: React.FC<ProjectMemberListProps> = ({ projectId, creatorId, onMembersChange }) => {
+  const userInfo = useSelector((state: any) => state.user?.userInfo) || {};
   const [members, setMembers] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [showAuthAddModal, setShowAuthAddModal] = useState(false);
@@ -78,16 +90,34 @@ const ProjectMemberList: React.FC<ProjectMemberListProps> = ({ projectId, onMemb
     }
   };
 
+  const isCurrentUserMember = (member: any) => {
+    return (
+      (!!member.userId && `${member.userId}` === `${userInfo.userId || ''}`) ||
+      (!!member.userCode && `${member.userCode}` === `${userInfo.userCode || ''}`)
+    );
+  };
+
+  const removeMember = async (member: any) => {
+    await removeProjectMember(member.memberId);
+    message.success('已移除');
+    void fetchMembers();
+  };
+
   const handleRemove = (member: any) => {
+    if (isProjectOwnerMember(member, creatorId)) {
+      message.warning('创建者不能被删除');
+      return;
+    }
+
     Modal.confirm({
-      title: '移除成员',
-      content: `确定要移除「${member.userName || member.userId}」吗？`,
+      title: isCurrentUserMember(member) ? '移除自己' : '移除成员',
+      content: isCurrentUserMember(member)
+        ? '移除自己后将无法继续访问该项目，确定移除吗？'
+        : `确定要移除「${member.userName || member.userId}」吗？`,
       okText: '移除',
       okButtonProps: { danger: true },
       onOk: async () => {
-        await removeProjectMember(member.memberId);
-        message.success('已移除');
-        void fetchMembers();
+        await removeMember(member);
       },
     });
   };
@@ -166,7 +196,7 @@ const ProjectMemberList: React.FC<ProjectMemberListProps> = ({ projectId, onMemb
               icon: <RobotOutlined />,
               label: member.agentId ? '更换数字员工' : '绑定数字员工',
             },
-            ...(member.role !== 'owner'
+            ...(!isProjectOwnerMember(member, creatorId)
               ? [
                 {
                   key: 'remove',
@@ -196,10 +226,15 @@ const ProjectMemberList: React.FC<ProjectMemberListProps> = ({ projectId, onMemb
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+      <div className={styles.detailSectionHeader}>
         <span>{members.length} 个成员</span>
-        <Button icon={<PlusOutlined />} onClick={() => setShowAuthAddModal(true)}>
-          添加成员
+        <Button
+          size="small"
+          className={styles.detailHeaderActionButton}
+          icon={<PlusOutlined />}
+          onClick={() => setShowAuthAddModal(true)}
+        >
+          添加
         </Button>
       </div>
 
@@ -211,6 +246,7 @@ const ProjectMemberList: React.FC<ProjectMemberListProps> = ({ projectId, onMemb
             dataSource={members}
             renderItem={(member: any) => {
               const memberKey = getMemberKey(member);
+              const isCreatorMember = isProjectOwnerMember(member, creatorId);
               return (
                 <List.Item
                   className="project-member-row"
@@ -224,9 +260,10 @@ const ProjectMemberList: React.FC<ProjectMemberListProps> = ({ projectId, onMemb
                   <List.Item.Meta
                     avatar={<div className="project-member-avatar">{getMemberAvatarText(member)}</div>}
                     title={
-                      <span>
-                        {member.userName || member.userId}
-                        {member.role === 'owner' && (
+                      <span className="project-member-title">
+                        <span className="project-member-name">{member.userName || member.userId}</span>
+                        {/* 创建者标签紧跟成员名称展示，和禁删判断使用同一套规则。 */}
+                        {isCreatorMember && (
                           <Tag className="project-member-role-tag" color="blue">
                             创建者
                           </Tag>

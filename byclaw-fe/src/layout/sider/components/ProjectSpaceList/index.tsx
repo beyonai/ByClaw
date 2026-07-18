@@ -8,8 +8,10 @@ import { trim } from 'lodash';
 import AntdIcon from '@/components/AntdIcon';
 import ChatAvatar from '@/components/ChatAvatar';
 import useGlobal from '@/hooks/useGlobal';
-import { PROJECT_TYPE_LABEL } from '@/pages/projectSpace/constants';
-import ProjectFormModal, { ProjectFormValues } from '@/pages/projectSpace/components/ProjectFormModal';
+import ProjectFormModal, {
+  type ProjectFormValues,
+  type ProjectShareMember,
+} from '@/pages/projectSpace/components/ProjectFormModal';
 import { useProjectList } from '@/pages/projectSpace/hooks/useProjectList';
 import {
   createProject,
@@ -20,6 +22,7 @@ import {
 } from '@/pages/projectSpace/service';
 import type { ProjectSession, ProjectSpace } from '@/pages/projectSpace/types';
 import { getArrayData, normalizeProjectDetail, normalizeProjectSession } from '@/pages/projectSpace/utils';
+import { addProjectMember, listProjectMembers, removeProjectMember } from '@/service/devloop';
 import { processSessionContent, formatTime } from '../DialogueList/util';
 import { SiderContentContext } from '../../siderContentContext';
 import ProjectDetailPanel from './ProjectDetailModal';
@@ -71,6 +74,10 @@ const mergeProjectSessions = (cachedSessions: ProjectSession[] = [], nextSession
 };
 
 const getProjectScene = (project: ProjectSpace) => {
+  if (project.projectType === 'default') {
+    return { classSuffix: 'Default', text: '默认' };
+  }
+
   // 研发项目即使强制共享，列表也优先展示业务类型标签。
   if (project.projectType === 'develop') {
     return { classSuffix: 'Development', text: '研发' };
@@ -102,22 +109,64 @@ const getProjectIdFromSaveResponse = (response: any) => {
 
 const normalizeProjectName = (name?: string) => trim(name || '');
 
-const normalizeShareTargetPayload = (shareTargets: ProjectFormValues['shareTargets'] = []) => {
-  // AddAuthModal 返回 id/name/type，项目接口保存为 targetType/targetId/targetName。
-  return shareTargets
-    .map((target) => {
-      const [, idFromKey] = String(target.id || '').split('_');
-      const targetType = String(target.targetType || target.type || '').toUpperCase();
-      const rawTargetId = target.targetId ?? idFromKey;
-      const numericTargetId = Number(rawTargetId);
-      const targetId = Number.isNaN(numericTargetId) ? rawTargetId : numericTargetId;
-      return {
-        targetType,
-        targetId,
-        targetName: target.targetName || target.name,
-      };
-    })
-    .filter((target) => ['USER', 'ORG'].includes(target.targetType) && target.targetId);
+const getShareMemberUserId = (member: ProjectShareMember | any) =>
+  member.userId ?? String(member.id || '').replace(/^user_/, '');
+
+const normalizeProjectMember = (member: ProjectShareMember | any): ProjectShareMember => {
+  const userId = getShareMemberUserId(member);
+  const userName = member.userName || member.name || `${userId || ''}`;
+  return {
+    ...member,
+    id: member.id || `user_${userId}`,
+    type: 'USER',
+    userId,
+    userCode: member.userCode,
+    userName,
+    name: userName,
+    memberId: member.memberId,
+    role: member.role,
+  };
+};
+
+const syncProjectShareMembers = async (
+  projectId: string | number,
+  desiredMembers: ProjectShareMember[] = [],
+  options: { allowRemove?: boolean } = {}
+) => {
+  const currentMembers = await listProjectMembers(Number(projectId));
+  const currentList = Array.isArray(currentMembers) ? currentMembers : [];
+  const currentUserIdSet = new Set(currentList.map((member) => String(member.userId)));
+  const desiredMemberMap = new Map<string, ProjectShareMember>();
+
+  desiredMembers.map(normalizeProjectMember).forEach((member) => {
+    const userId = getShareMemberUserId(member);
+    if (userId) {
+      desiredMemberMap.set(String(userId), member);
+    }
+  });
+
+  const pendingMembers = Array.from(desiredMemberMap.values()).filter(
+    (member) => !currentUserIdSet.has(String(getShareMemberUserId(member)))
+  );
+
+  await Promise.all(
+    pendingMembers.map((member) =>
+      addProjectMember({
+        projectId: Number(projectId),
+        userId: getShareMemberUserId(member),
+        userCode: member.userCode,
+        userName: member.userName || member.name,
+      })
+    )
+  );
+
+  if (!options.allowRemove) return;
+
+  await Promise.all(
+    currentList
+      .filter((member) => member.role !== 'owner' && !desiredMemberMap.has(String(member.userId)) && member.memberId)
+      .map((member) => removeProjectMember(member.memberId))
+  );
 };
 
 const ProjectSpaceList: React.FC = () => {
@@ -156,6 +205,9 @@ const ProjectSpaceList: React.FC = () => {
       return {
         ...cachedProject,
         ...project,
+        // 详情页内添加成员会先本地回写共享状态，列表标签需要优先使用详情缓存避免刷新前滞后。
+        isShare: cachedProject.isShare,
+        sharedFlag: cachedProject.sharedFlag,
         repos: cachedProject.repos,
         shareTargets: cachedProject.shareTargets,
         sessions: cachedProject.sessions,
@@ -220,7 +272,7 @@ const ProjectSpaceList: React.FC = () => {
       description: editingProject.description,
       projectType: editingProject.projectType,
       sharedFlag: editingProject.sharedFlag,
-      shareTargets: editingProject.shareTargets || [],
+      shareMembers: (editingProject.members || []).map(normalizeProjectMember),
     };
   }, [editingProject]);
 
@@ -283,11 +335,11 @@ const ProjectSpaceList: React.FC = () => {
       const projectId = project.projectId;
       if (!projectId) return project;
       const cachedProject = projectDetailMap[projectId];
-      if (!force && cachedProject?.shareTargets) return cachedProject;
+      if (!force && cachedProject?.repos) return cachedProject;
 
       setDetailLoadingMap((prev) => ({ ...prev, [projectId]: true }));
       try {
-        // 详情/编辑需要 shareTargets、repos 等完整字段，和左侧会话分页加载分开处理。
+        // 详情需要 repos 等完整字段，和左侧会话分页加载分开处理。
         const detail = await getProject(Number(projectId));
         const normalizedProject = normalizeProjectDetail(detail, project) || project;
         const shouldKeepPagedSessions = Boolean(projectSessionPageMap[projectId]);
@@ -335,8 +387,10 @@ const ProjectSpaceList: React.FC = () => {
     const firstProject = projects[0];
     hasAutoSelectedRef.current = true;
     setActiveProjectId(firstProject.projectId);
-    setExpandedProjectIds([]);
-  }, [projectScopeId, projects]);
+    // 打开项目空间列表时默认展开第一个项目，让项目卡片和会话列表直接可见。
+    setExpandedProjectIds([firstProject.projectId]);
+    void fetchProjectSessions(firstProject);
+  }, [fetchProjectSessions, projectScopeId, projects]);
 
   const handleToggleProject = (project: ProjectSpace) => {
     const projectId = project.projectId;
@@ -345,9 +399,10 @@ const ProjectSpaceList: React.FC = () => {
       const isExpanded = prev.includes(projectId);
       if (!isExpanded) {
         void fetchProjectSessions(project);
-        return [...prev, projectId];
+        // 项目列表按手风琴交互处理：展开当前项目时自动收起其它项目。
+        return [projectId];
       }
-      return prev.filter((id) => id !== projectId);
+      return [];
     });
   };
 
@@ -387,7 +442,7 @@ const ProjectSpaceList: React.FC = () => {
       }
 
       setActiveProjectId(projectId);
-      setExpandedProjectIds((prev) => (prev.includes(projectId) ? prev : [projectId, ...prev]));
+      setExpandedProjectIds([projectId]);
       void fetchProjectSessions(targetProject, { force: true });
       void fetchProjects();
     },
@@ -419,10 +474,7 @@ const ProjectSpaceList: React.FC = () => {
     setSessionId?.('');
     setActiveProjectId(newChatProject.projectId);
     setProjectScopeId(newChatProject.projectId);
-    setExpandedProjectIds((prev) => [
-      newChatProject.projectId,
-      ...prev.filter((id) => id !== newChatProject.projectId),
-    ]);
+    setExpandedProjectIds([newChatProject.projectId]);
     void fetchProjectSessions(newChatProject);
     navigate('/chat', {
       state: {
@@ -445,6 +497,36 @@ const ProjectSpaceList: React.FC = () => {
     void fetchProjectFullDetail(project, true).then(setDetailProject);
   };
 
+  const handleProjectSharedChange = useCallback(
+    (projectId: string | number) => {
+      const targetProjectId = `${projectId || ''}`;
+      if (!targetProjectId) return;
+      const patchSharedProject = (project: ProjectSpace): ProjectSpace => ({
+        ...project,
+        isShare: 'Y',
+        sharedFlag: true,
+      });
+
+      // 成员 tab 添加成员后后端会同步 isShare，前端先本地回写，避免详情和标签状态滞后。
+      setProjectDetailMap((prev) => {
+        const cachedProject =
+          prev[targetProjectId] ||
+          (detailProject && `${detailProject.projectId}` === targetProjectId ? detailProject : undefined) ||
+          projects.find((project) => `${project.projectId}` === targetProjectId);
+        if (!cachedProject) return prev;
+        return {
+          ...prev,
+          [targetProjectId]: patchSharedProject(cachedProject),
+        };
+      });
+      setDetailProject((prev) => (prev && `${prev.projectId}` === targetProjectId ? patchSharedProject(prev) : prev));
+      void fetchProjects().catch((error) => {
+        console.error('Failed to refresh project list after member adding:', error);
+      });
+    },
+    [detailProject, fetchProjects, projects]
+  );
+
   const handleProjectHeaderDoubleClick = (project: ProjectSpace) => {
     clearProjectClickTimer();
     setActiveProjectId(project.projectId);
@@ -455,10 +537,6 @@ const ProjectSpaceList: React.FC = () => {
     const cachedProject = projectDetailMap[project.projectId] || project;
     setEditingProject(cachedProject);
     setProjectModalOpen(true);
-    if (!Array.isArray(cachedProject.shareTargets)) {
-      // 编辑表单需要详情接口里的 shareTargets；列表接口没带时打开后再补齐，避免直接保存时误覆盖。
-      void fetchProjectFullDetail(project, true).then(setEditingProject);
-    }
   };
 
   const handleDeleteProject = (project: ProjectSpace) => {
@@ -536,7 +614,8 @@ const ProjectSpaceList: React.FC = () => {
 
     projectSavingRef.current = true;
     setProjectCreating(true);
-    const shareTargets = normalizeShareTargetPayload(values.shareTargets);
+    const submitSharedFlag = values.projectType === 'develop' || values.sharedFlag;
+    const shareMembers = submitSharedFlag ? values.shareMembers || [] : [];
     try {
       if (editingProject) {
         const updatePayload = {
@@ -544,10 +623,13 @@ const ProjectSpaceList: React.FC = () => {
           projectName,
           description: values.description?.trim(),
           projectType: values.projectType,
-          isShare: values.sharedFlag ? 'Y' : 'N',
-          shareTargets: values.sharedFlag ? shareTargets : [],
+          isShare: submitSharedFlag ? 'Y' : 'N',
+          shareTargets: [],
         };
         await updateProject(updatePayload);
+        if (submitSharedFlag && values.shareMembersLoaded) {
+          await syncProjectShareMembers(editingProject.projectId, shareMembers, { allowRemove: true });
+        }
         message.success('项目已更新');
         setProjectDetailMap((prev) => ({
           ...prev,
@@ -556,9 +638,13 @@ const ProjectSpaceList: React.FC = () => {
             projectName,
             description: values.description?.trim(),
             projectType: values.projectType,
-            isShare: values.sharedFlag ? 'Y' : 'N',
-            sharedFlag: values.sharedFlag,
-            shareTargets: values.sharedFlag ? values.shareTargets || [] : [],
+            isShare: submitSharedFlag ? 'Y' : 'N',
+            sharedFlag: submitSharedFlag,
+            members:
+              submitSharedFlag && values.shareMembersLoaded
+                ? shareMembers.map(normalizeProjectMember)
+                : prev[editingProject.projectId]?.members,
+            shareTargets: [],
           },
         }));
       } else {
@@ -567,15 +653,18 @@ const ProjectSpaceList: React.FC = () => {
           description: values.description?.trim(),
           // 新增项目空间只提交当前表单字段。
           projectType: values.projectType,
-          isShare: values.sharedFlag ? 'Y' : 'N',
-          shareTargets: values.sharedFlag ? shareTargets : [],
+          isShare: submitSharedFlag ? 'Y' : 'N',
+          shareTargets: [],
         });
         const createdProjectId = getProjectIdFromSaveResponse(res);
+        if (createdProjectId && submitSharedFlag && shareMembers.length) {
+          await syncProjectShareMembers(createdProjectId, shareMembers);
+        }
         message.success('项目空间创建成功');
         if (createdProjectId) {
           setActiveProjectId(createdProjectId);
           setProjectScopeId(createdProjectId);
-          setExpandedProjectIds((prev) => [createdProjectId, ...prev.filter((id) => id !== createdProjectId)]);
+          setExpandedProjectIds([createdProjectId]);
         }
       }
       setProjectModalOpen(false);
@@ -662,7 +751,7 @@ const ProjectSpaceList: React.FC = () => {
     }
 
     if (!sessions.length) {
-      return <div className={styles.sessionEmpty}>暂无会话</div>;
+      return <Empty className={styles.sessionEmpty} image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无会话" />;
     }
 
     return (
@@ -681,9 +770,7 @@ const ProjectSpaceList: React.FC = () => {
               </span>
               <span className={styles.sessionMain}>
                 <span className={styles.sessionTextWrap}>
-                  <Tooltip placement="top" title={session.sessionName}>
-                    <span className={styles.sessionTitle}>{session.sessionName || '未命名会话'}</span>
-                  </Tooltip>
+                  <span className={styles.sessionTitle}>{session.sessionName || '未命名会话'}</span>
                   <span className={styles.sessionDesc}>
                     {processSessionContent(session.sessionContent) || '暂无会话摘要'}
                   </span>
@@ -707,6 +794,7 @@ const ProjectSpaceList: React.FC = () => {
           project={detailProject}
           onBack={() => setDetailProject(undefined)}
           onEditProject={handleOpenEditProject}
+          onProjectSharedChange={handleProjectSharedChange}
         />
       ) : (
         <>
@@ -751,7 +839,6 @@ const ProjectSpaceList: React.FC = () => {
               {visibleProjects.length ? (
                 visibleProjects.map((project) => {
                   const isExpanded = expandedProjectIds.includes(project.projectId);
-                  const sessionCount = project.sessionCount ?? project.sessions?.length ?? 0;
 
                   return (
                     <div
@@ -771,10 +858,6 @@ const ProjectSpaceList: React.FC = () => {
                               <Tooltip placement="top" title={project.projectName}>
                                 <span className={styles.projectName}>{project.projectName || '未命名项目'}</span>
                               </Tooltip>
-                            </span>
-                            <span className={styles.projectDesc}>
-                              {project.description ||
-                                `${PROJECT_TYPE_LABEL[project.projectType]} · ${sessionCount} 个会话`}
                             </span>
                           </span>
                           {renderProjectSceneTag(project, styles.projectHeaderTag)}
@@ -825,6 +908,8 @@ const ProjectSpaceList: React.FC = () => {
         title={editingProject ? '编辑项目空间' : '新建项目空间'}
         loading={projectCreating}
         initialValues={projectFormInitialValues}
+        projectId={editingProject?.projectId}
+        creatorId={editingProject?.createBy}
         onCancel={() => {
           setProjectModalOpen(false);
           setEditingProject(undefined);

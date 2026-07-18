@@ -180,6 +180,7 @@ public class RecorderVerifyService {
         final String daemonRequestId;
         try {
             daemonRequestId = verifyPort.start(
+                owner,
                 requestId,
                 sessionId,
                 name,
@@ -215,7 +216,7 @@ public class RecorderVerifyService {
         try {
             executor.execute(() -> {
                 try {
-                    poll(requestId, daemonRequestId, resultMapper, terminalObserver);
+                    poll(requestId, daemonRequestId, owner, resultMapper, terminalObserver);
                 } finally {
                     reservations.release();
                 }
@@ -275,6 +276,7 @@ public class RecorderVerifyService {
     private void poll(
         String requestId,
         String daemonRequestId,
+        RecorderOwner owner,
         Function<Map<String, Object>, Map<String, Object>> resultMapper,
         BiConsumer<String, Map<String, Object>> terminalObserver
     ) {
@@ -286,7 +288,7 @@ public class RecorderVerifyService {
             }
             final Map<String, Object> daemonStatus;
             try {
-                daemonStatus = verifyPort.status(daemonRequestId);
+                daemonStatus = verifyPort.status(owner, daemonRequestId);
             } catch (RecorderVerifyException e) {
                 Map<String, Object> normalized = safeTransportError(e.getCode());
                 String status = "verify_timeout".equals(normalized.get("code")) ? "timeout" : "failed";
