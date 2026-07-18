@@ -26,10 +26,12 @@ import {
   FileTextOutlined,
   GithubOutlined,
   LeftOutlined,
+  MessageOutlined,
   PlusOutlined,
   ReloadOutlined,
   RightOutlined,
 } from '@ant-design/icons';
+import { useNavigate } from '@umijs/max';
 import dayjs from 'dayjs';
 import {
   checkDwsAuthStatus,
@@ -165,12 +167,28 @@ const PHASE_COLORS: Record<string, string> = {
 };
 
 const cronPresets = [
+  { value: '*/1 * * * *', label: '每1分钟' },
   { value: '*/15 * * * *', label: '每15分钟' },
   { value: '*/30 * * * *', label: '每30分钟' },
-  { value: '0 */1 * * *', label: '每小时' },
+  { value: '0 */1 * * *', label: '每1小时' },
   { value: '0 */2 * * *', label: '每2小时' },
   { value: '0 9,14,18 * * 1-5', label: '工作日 9/14/18点' },
 ];
+
+const getCronDisplayText = (cronExpr?: string) => {
+  // 渠道卡片展示用户可读的扫描频率，避免直接暴露 cron 表达式。
+  if (!cronExpr) return '手动';
+  const matchedPreset = cronPresets.find((preset) => preset.value === cronExpr);
+  if (matchedPreset) return `${matchedPreset.label}扫描`;
+
+  const minuteMatch = cronExpr.match(/^\*\/(\d+) \* \* \* \*$/);
+  if (minuteMatch) return `每${minuteMatch[1]}分钟扫描`;
+
+  const hourMatch = cronExpr.match(/^0 \*\/(\d+) \* \* \*$/);
+  if (hourMatch) return `每${hourMatch[1]}小时扫描`;
+
+  return cronExpr;
+};
 
 const getDefaultSourceForm = (): SourceForm => ({
   type: 'dingtalk',
@@ -227,7 +245,8 @@ const getRequirementDetailText = (requirement: RequirementItem) =>
   '-';
 
 const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, onProjectSharedChange }) => {
-  const { sessionId: activeChatSessionId } = useGlobal();
+  const navigate = useNavigate();
+  const { sessionId: activeChatSessionId, setSessionId } = useGlobal();
   const activeSiderAgent = useActiveSiderAgent();
   const { setDetailPanel, clearDetailPanel } = React.useContext(SiderContentContext);
   const [activeTab, setActiveTab] = useState('requirements');
@@ -250,6 +269,7 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
   const [lastLog, setLastLog] = useState<ScanLogEntry | null>(null);
   const [sourcesLoading, setSourcesLoading] = useState(false);
   const [requirementsLoading, setRequirementsLoading] = useState(false);
+  const [requirementsRefreshLoading, setRequirementsRefreshLoading] = useState(false);
   const [tasksLoading, setTasksLoading] = useState(false);
   const [scanningId, setScanningId] = useState<number | null>(null);
   const [sourceModalOpen, setSourceModalOpen] = useState(false);
@@ -633,7 +653,8 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
   };
 
   const handleRefreshRequirements = useCallback(async () => {
-    if (!showRequirementsTab) return;
+    if (!showRequirementsTab || requirementsRefreshLoading) return;
+    setRequirementsRefreshLoading(true);
     try {
       const sourceList = await fetchSources();
       setExpandedRequirementId(null);
@@ -641,8 +662,11 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
     } catch (error) {
       console.error('Failed to refresh project requirements:', error);
       message.error('需求列表刷新失败');
+    } finally {
+      // 手动刷新按钮只响应自己的刷新动作，避免打开渠道配置时拉渠道数据导致按钮转圈。
+      setRequirementsRefreshLoading(false);
     }
-  }, [fetchRequirements, fetchSources, showRequirementsTab]);
+  }, [fetchRequirements, fetchSources, requirementsRefreshLoading, showRequirementsTab]);
 
   const handleDetailBodyScroll = useCallback(
     (event: React.UIEvent<HTMLDivElement>) => {
@@ -655,6 +679,20 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
       setVisibleRequirementCount((prev) => Math.min(prev + REQUIREMENT_PAGE_SIZE, requirements.length));
     },
     [activeTab, hasMoreRequirements, requirements.length, showRequirementsTab]
+  );
+
+  const handleGoToTaskChat = useCallback(
+    (task: any, event: React.MouseEvent<HTMLElement>) => {
+      event.stopPropagation();
+      if (!task?.sessionId) {
+        message.warning('未找到任务会话');
+        return;
+      }
+      // 任务会话仍复用右侧聊天页，点击后切换当前会话上下文。
+      setSessionId?.(`${task.sessionId}`);
+      navigate('/chat');
+    },
+    [navigate, setSessionId]
   );
 
   const handleManualRequirementSubmit = () => {
@@ -1021,28 +1059,42 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
                   onChange={(checked) => handleToggleSource(source.sourceId, checked)}
                 />
               </div>
-              {repoLabel(source.repoId) && (
+              {(repoLabel(source.repoId) || source.sourceType === 'dingtalk') && (
                 <div className={styles.detailSourceAuth}>
-                  <Tag icon={<GithubOutlined />} bordered={false} color="blue">
-                    {repoLabel(source.repoId)}
-                  </Tag>
-                </div>
-              )}
-              {source.sourceType === 'dingtalk' && (
-                <div className={styles.detailSourceAuth}>
-                  {dwsAuthed ? (
-                    <Tag color="green" style={{ cursor: 'pointer' }} onClick={() => setDwsAuthDetailVisible(true)}>
-                      DWS 已授权{dwsExpiresAt ? ` · 有效至 ${dayjs(dwsExpiresAt).format('MM-DD HH:mm')}` : ''}
-                    </Tag>
-                  ) : dwsExpired ? (
-                    <Tag color="red" style={{ cursor: 'pointer' }} onClick={handleStartDwsAuth}>
-                      DWS 授权已过期，点击重新授权
-                    </Tag>
-                  ) : (
-                    <Tag color="orange" style={{ cursor: 'pointer' }} onClick={handleStartDwsAuth}>
-                      DWS 未授权，点击授权
+                  {repoLabel(source.repoId) && (
+                    <Tag icon={<GithubOutlined />} bordered={false} color="blue">
+                      {repoLabel(source.repoId)}
                     </Tag>
                   )}
+                  {source.sourceType === 'dingtalk' &&
+                    (dwsAuthed ? (
+                      <Tag
+                        className={styles.detailSourceDwsTag}
+                        color="green"
+                        style={{ cursor: 'pointer' }}
+                        onClick={() => setDwsAuthDetailVisible(true)}
+                      >
+                        DWS 已授权{dwsExpiresAt ? ` · 有效至 ${dayjs(dwsExpiresAt).format('MM-DD HH:mm')}` : ''}
+                      </Tag>
+                    ) : dwsExpired ? (
+                      <Tag
+                        className={styles.detailSourceDwsTag}
+                        color="red"
+                        style={{ cursor: 'pointer' }}
+                        onClick={handleStartDwsAuth}
+                      >
+                        DWS 授权已过期，点击重新授权
+                      </Tag>
+                    ) : (
+                      <Tag
+                        className={styles.detailSourceDwsTag}
+                        color="orange"
+                        style={{ cursor: 'pointer' }}
+                        onClick={handleStartDwsAuth}
+                      >
+                        DWS 未授权，点击授权
+                      </Tag>
+                    ))}
                 </div>
               )}
               <div
@@ -1052,12 +1104,12 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
                     : styles.detailSourceActions
                 }
               >
-                <Tag icon={<ClockCircleOutlined />} bordered={false}>
-                  {source.cronExpr || '手动'}
+                <Tag className={styles.detailSourceFrequencyTag} icon={<ClockCircleOutlined />} bordered={false}>
+                  {getCronDisplayText(source.cronExpr)}
                 </Tag>
                 {source.lastScanTime && (
                   <span className={styles.detailSourceTime}>
-                    上次: {dayjs(source.lastScanTime).format('MM-DD HH:mm')}
+                    上次扫描: {dayjs(source.lastScanTime).format('MM-DD HH:mm')}
                   </span>
                 )}
                 {/* 大面板内从扫描按钮开始换行，避免渠道信息和操作挤在同一行。 */}
@@ -1116,9 +1168,7 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
       <div className={styles.detailChannelPanelHeader}>
         <div className={styles.detailChannelPanelTitle}>
           <h3>渠道配置</h3>
-          <p>
-            {project?.projectName || '项目空间'} · {sources.length} 个渠道
-          </p>
+          <p>{sources.length} 个渠道</p>
         </div>
         <div className={styles.detailChannelPanelActions}>
           <Tooltip title="新增渠道" placement="top">
@@ -1186,8 +1236,8 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
               size="small"
               className={styles.detailHeaderActionButton}
               icon={<ReloadOutlined />}
-              loading={requirementsTabLoading}
-              disabled={requirementsTabLoading}
+              loading={requirementsRefreshLoading}
+              disabled={requirementsRefreshLoading}
               onClick={handleRefreshRequirements}
             >
               刷新
@@ -1239,8 +1289,7 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
                   ) : (
                     <Button
                       size="small"
-                      type="primary"
-                      className={styles.detailRequirementAction}
+                      className={`${styles.detailRequirementAction} ${styles.detailRequirementStartAction}`}
                       loading={isStarting}
                       disabled={isStarting}
                       onClick={(event) => {
@@ -1376,6 +1425,8 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
           childrenByPath={resourceChildrenByPath}
           expandedKeys={resourceExpandedKeys}
           switchValue={resourceFileScope}
+          defaultGroupsCollapsed={resourceFileScope === 'all'}
+          groupCollapseResetKey={resourceFileScope}
           switchOptions={[
             { label: '当前会话', value: 'current' },
             { label: '全部会话', value: 'all' },
@@ -1409,6 +1460,8 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
           {tasks.map((task) => {
             const progress = task.totalRounds > 0 ? Math.round((task.currentRound / task.totalRounds) * 100) : 0;
             const isExpanded = `${expandedTaskId || ''}` === `${task.taskId}`;
+            // 后端当前把任务专属字段置空时，不渲染空 Tag，避免卡片标题下出现残缺横线。
+            const hasTaskMeta = !!task.phase || !!task.agentName || !!task.branchName;
 
             return (
               <div
@@ -1421,11 +1474,13 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
                     <Tooltip placement="top" title={task.title}>
                       <h4 className={styles.detailTaskTitle}>{task.title}</h4>
                     </Tooltip>
-                    <div className={styles.detailTaskMeta}>
-                      <Tag color={PHASE_COLORS[task.phase] || 'default'}>{task.phase}</Tag>
-                      <span>{task.agentName}</span>
-                      {task.branchName && <span className={styles.detailTaskBranch}>{task.branchName}</span>}
-                    </div>
+                    {hasTaskMeta && (
+                      <div className={styles.detailTaskMeta}>
+                        {task.phase && <Tag color={PHASE_COLORS[task.phase] || 'default'}>{task.phase}</Tag>}
+                        {task.agentName && <span>{task.agentName}</span>}
+                        {task.branchName && <span className={styles.detailTaskBranch}>{task.branchName}</span>}
+                      </div>
+                    )}
                     {task.warningTag && (
                       <Tag color="warning" className={styles.detailTaskWarning}>
                         {task.warningTag}
@@ -1481,6 +1536,19 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
                       <label>创建时间</label>
                       <strong>{task.createTime ? dayjs(task.createTime).format('MM-DD HH:mm') : '-'}</strong>
                     </span>
+                    {task.sessionId && (
+                      <div className={styles.detailTaskInlineActions}>
+                        <Button
+                          size="small"
+                          type="link"
+                          className={styles.detailTaskChatButton}
+                          icon={<MessageOutlined />}
+                          onClick={(event) => handleGoToTaskChat(task, event)}
+                        >
+                          进入会话
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

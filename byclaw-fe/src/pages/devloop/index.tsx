@@ -93,12 +93,28 @@ interface RequirementItem {
 const SCORE_COLORS = ['#52c41a', '#73d13d', '#95de64', '#faad14', '#ffc53d'];
 
 const cronPresets = [
+  { value: '*/1 * * * *', label: '每1分钟' },
   { value: '*/15 * * * *', label: '每15分钟' },
   { value: '*/30 * * * *', label: '每30分钟' },
-  { value: '0 */1 * * *', label: '每小时' },
+  { value: '0 */1 * * *', label: '每1小时' },
   { value: '0 */2 * * *', label: '每2小时' },
   { value: '0 9,14,18 * * 1-5', label: '工作日 9/14/18点' },
 ];
+
+const getCronDisplayText = (cronExpr?: string) => {
+  // 渠道卡片展示用户可读的扫描频率，避免直接暴露 cron 表达式。
+  if (!cronExpr) return '手动';
+  const matchedPreset = cronPresets.find((preset) => preset.value === cronExpr);
+  if (matchedPreset) return `${matchedPreset.label}扫描`;
+
+  const minuteMatch = cronExpr.match(/^\*\/(\d+) \* \* \* \*$/);
+  if (minuteMatch) return `每${minuteMatch[1]}分钟扫描`;
+
+  const hourMatch = cronExpr.match(/^0 \*\/(\d+) \* \* \*$/);
+  if (hourMatch) return `每${hourMatch[1]}小时扫描`;
+
+  return cronExpr;
+};
 
 const NeedCollect: React.FC = () => {
   const [view, setView] = useState<'list' | 'detail'>('list');
@@ -1132,12 +1148,12 @@ const NeedCollect: React.FC = () => {
                       </div>
                     )}
                     <div className={styles.cardMeta}>
-                      <Tag icon={<ClockCircleOutlined />} bordered={false}>
-                        {source.cronExpr || '手动'}
+                      <Tag className={styles.frequencyTag} icon={<ClockCircleOutlined />} bordered={false}>
+                        {getCronDisplayText(source.cronExpr)}
                       </Tag>
                       {source.lastScanTime && (
                         <span className={styles.lastScan}>
-                          上次: {dayjs(source.lastScanTime).format('MM-DD HH:mm')}
+                          上次扫描: {dayjs(source.lastScanTime).format('MM-DD HH:mm')}
                         </span>
                       )}
                       <Button
