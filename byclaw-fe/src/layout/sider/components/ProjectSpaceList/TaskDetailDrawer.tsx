@@ -1,9 +1,8 @@
-import React, { useState } from 'react';
-import { Drawer, Tag, Descriptions, Select, Button, message } from 'antd';
+import React from 'react';
+import { Drawer, Tag, Descriptions, Button } from 'antd';
 import { MessageOutlined } from '@ant-design/icons';
 import { useNavigate } from '@umijs/max';
 import { useSelector } from '@umijs/max';
-import { updateTask } from '@/service/devloop';
 import useGlobal from '@/hooks/useGlobal';
 
 interface TaskDetailDrawerProps {
@@ -12,42 +11,19 @@ interface TaskDetailDrawerProps {
   onRefresh: () => void;
 }
 
-const STATUS_OPTIONS = ['待开始', '进行中', '暂停', '完成'];
-const PHASE_OPTIONS = ['分诊', '设计', '编码', '测试', '审批', '发布'];
+// 任务状态色（与看板、卡片保持一致）
+const STATUS_COLORS: Record<string, string> = {
+  待开始: 'default',
+  进行中: 'blue',
+  暂停: 'orange',
+  完成: 'green',
+};
 
-const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({ task, onClose, onRefresh }) => {
-  const [updating, setUpdating] = useState(false);
+// 会话即任务后，状态存于 byai_session_ext 且看板只读，这里仅展示不提供修改入口。
+const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({ task, onClose }) => {
   const navigate = useNavigate();
   const { setSessionId } = useGlobal();
   const userInfo = useSelector(({ user }: any) => user.userInfo);
-
-  const handleStatusChange = async (status: string) => {
-    if (!task) return;
-    setUpdating(true);
-    try {
-      await updateTask({ taskId: task.taskId, status });
-      message.success('状态已更新');
-      onRefresh();
-    } catch {
-      message.error('更新失败');
-    } finally {
-      setUpdating(false);
-    }
-  };
-
-  const handlePhaseChange = async (phase: string) => {
-    if (!task) return;
-    setUpdating(true);
-    try {
-      await updateTask({ taskId: task.taskId, phase });
-      message.success('阶段已更新');
-      onRefresh();
-    } catch {
-      message.error('更新失败');
-    } finally {
-      setUpdating(false);
-    }
-  };
 
   const isMyTask = task?.createBy && userInfo?.userId && String(task.createBy) === String(userInfo.userId);
 
@@ -64,47 +40,10 @@ const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({ task, onClose, onRe
         <>
           <Descriptions column={1} bordered size="small">
             <Descriptions.Item label="状态">
-              <Select
-                size="small"
-                value={task.status}
-                onChange={handleStatusChange}
-                loading={updating}
-                style={{ width: 120 }}
-              >
-                {STATUS_OPTIONS.map((s) => (
-                  <Select.Option key={s} value={s}>
-                    {s}
-                  </Select.Option>
-                ))}
-              </Select>
+              {task.status ? <Tag color={STATUS_COLORS[task.status] || 'default'}>{task.status}</Tag> : '-'}
             </Descriptions.Item>
-            <Descriptions.Item label="阶段">
-              <Select
-                size="small"
-                value={task.phase}
-                onChange={handlePhaseChange}
-                loading={updating}
-                style={{ width: 120 }}
-              >
-                {PHASE_OPTIONS.map((p) => (
-                  <Select.Option key={p} value={p}>
-                    {p}
-                  </Select.Option>
-                ))}
-              </Select>
-            </Descriptions.Item>
-            <Descriptions.Item label="轮次">
-              {task.currentRound}/{task.totalRounds}
-            </Descriptions.Item>
-            <Descriptions.Item label="分数">{task.score}</Descriptions.Item>
-            <Descriptions.Item label="Agent">{task.agentName}</Descriptions.Item>
-            <Descriptions.Item label="分支">{task.branchName || '-'}</Descriptions.Item>
+            <Descriptions.Item label="创建时间">{task.createTime || '-'}</Descriptions.Item>
             <Descriptions.Item label="负责人">{task.assignee || '我'}</Descriptions.Item>
-            {task.warningTag && (
-              <Descriptions.Item label="告警">
-                <Tag color="warning">{task.warningTag}</Tag>
-              </Descriptions.Item>
-            )}
           </Descriptions>
 
           {isMyTask && task.sessionId && (

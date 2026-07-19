@@ -953,11 +953,13 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
         message.warning('未找到任务会话');
         return;
       }
+      // 先关掉覆盖态的渠道/详情面板，否则它会盖在聊天页上挡住跳转后的会话视图。
+      clearDetailPanel?.();
       // 任务会话仍复用右侧聊天页，点击后切换当前会话上下文。
       setSessionId?.(`${task.sessionId}`);
       navigate('/chat');
     },
-    [navigate, setSessionId]
+    [navigate, setSessionId, clearDetailPanel]
   );
 
   const handleManualRequirementSubmit = () => {
