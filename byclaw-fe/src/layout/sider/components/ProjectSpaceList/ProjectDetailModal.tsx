@@ -30,6 +30,7 @@ import {
   GithubOutlined,
   LeftOutlined,
   MessageOutlined,
+  PartitionOutlined,
   PlusOutlined,
   ReloadOutlined,
   RightOutlined,
@@ -61,6 +62,7 @@ import {
 } from '@/service/devloop';
 import { deleteFiles, listFiles, renameFile, type FileBrowserItem } from '@/service/fileBrowser';
 import SessionOverviewDrawer from './SessionOverviewDrawer';
+import TaskDetailDrawer from './TaskDetailDrawer';
 import type { ProjectSpace } from '@/pages/projectSpace/types';
 import { getArrayData, normalizeProjectSession } from '@/pages/projectSpace/utils';
 import AntdIcon from '@/components/AntdIcon';
@@ -392,6 +394,8 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
   // 展开任务时按 sessionId 拉环节概要，缓存于 map 避免重复请求。
   const [taskPhaseMap, setTaskPhaseMap] = useState<Record<string, any>>({});
   const [taskKanbanOpen, setTaskKanbanOpen] = useState(false);
+  // 列表项直接打开环节详情抽屉，不必先经整体视图。
+  const [detailTask, setDetailTask] = useState<any>(null);
   const [repoModalOpen, setRepoModalOpen] = useState(false);
   const [repoForm, setRepoForm] = useState({ repoFullName: '', repoUrl: '', defaultBranch: 'main' });
   const [repoSaving, setRepoSaving] = useState(false);
@@ -1837,7 +1841,8 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
       {tasks.length ? (
         <div className={styles.detailTaskList}>
           {tasks.map((task) => {
-            const progress = task.totalRounds > 0 ? Math.round((task.currentRound / task.totalRounds) * 100) : 0;
+            // 进度由后端按环节口径统一算好（与详情抽屉一致），列表直接用。
+            const progress = typeof task.progress === 'number' ? task.progress : 0;
             const isExpanded = `${expandedTaskId || ''}` === `${task.taskId}`;
             // 会话即任务后仅状态由 session_ext 提供，阶段/分支等仍可能为空，空则不渲染避免残缺横线。
             const hasTaskMeta = !!task.phase || !!task.agentName || !!task.branchName;
@@ -1959,8 +1964,20 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
                       <label>创建时间</label>
                       <strong>{task.createTime ? dayjs(task.createTime).format('MM-DD HH:mm') : '-'}</strong>
                     </span>
-                    {task.sessionId && (
-                      <div className={styles.detailTaskInlineActions}>
+                    <div className={styles.detailTaskInlineActions}>
+                      <Button
+                        size="small"
+                        type="link"
+                        className={styles.detailTaskChatButton}
+                        icon={<PartitionOutlined />}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setDetailTask(task);
+                        }}
+                      >
+                        环节详情
+                      </Button>
+                      {task.sessionId && (
                         <Button
                           size="small"
                           type="link"
@@ -1970,8 +1987,8 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
                         >
                           进入会话
                         </Button>
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
@@ -1991,6 +2008,8 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
         tasks={tasks}
         onRefresh={fetchTasks}
       />
+
+      <TaskDetailDrawer task={detailTask} onClose={() => setDetailTask(null)} onRefresh={fetchTasks} />
     </div>
   );
 

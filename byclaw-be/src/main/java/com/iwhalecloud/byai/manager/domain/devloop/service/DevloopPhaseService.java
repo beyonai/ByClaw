@@ -135,6 +135,22 @@ public class DevloopPhaseService {
         }
     }
 
+    /** 总进度百分比：done 记 1、running 记 0.5，除以环节总数。列表与详情共用此口径，避免漂移。 */
+    public int progressPercent(PhaseSnapshot snapshot) {
+        if (snapshot == null || snapshot.getPhases() == null || snapshot.getPhases().isEmpty()) {
+            return 0;
+        }
+        double sum = 0;
+        for (PhaseState p : snapshot.getPhases()) {
+            if (ST_DONE.equals(p.getStatus())) {
+                sum += 1;
+            } else if (ST_RUNNING.equals(p.getStatus())) {
+                sum += 0.5;
+            }
+        }
+        return (int) Math.round(sum / snapshot.getPhases().size() * 100);
+    }
+
     /** 空快照：7 环节全未开始，当前停在首环节。 */
     public PhaseSnapshot emptySnapshot() {
         PhaseSnapshot snap = new PhaseSnapshot();

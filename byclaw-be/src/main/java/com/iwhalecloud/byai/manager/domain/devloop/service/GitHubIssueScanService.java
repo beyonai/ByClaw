@@ -94,16 +94,15 @@ public class GitHubIssueScanService {
                 String content = issue.path("body").asText("");
                 String htmlUrl = issue.path("html_url").asText();
 
+                // 重复项直接跳过不落库：去重只认 created 行，定时任务每分钟扫描若为重复项写行会撑爆表。
                 if (scanLogService.isDuplicate(source.getSourceId(), issueNumber)) {
-                    scanLogService.createItem(logId, source.getSourceId(),
-                        title, content, issueNumber, htmlUrl, "duplicate");
-                } else {
-                    ScanLogItem item = scanLogService.createItem(logId,
-                        source.getSourceId(), title, content,
-                        issueNumber, htmlUrl, "created");
-                    items.add(item);
-                    createdCount++;
+                    continue;
                 }
+                ScanLogItem item = scanLogService.createItem(logId,
+                    source.getSourceId(), title, content,
+                    issueNumber, htmlUrl, "created");
+                items.add(item);
+                createdCount++;
             }
 
             scanLogService.completeLog(logId, foundCount, createdCount);

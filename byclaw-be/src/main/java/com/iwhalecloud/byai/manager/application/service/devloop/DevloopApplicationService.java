@@ -134,6 +134,9 @@ public class DevloopApplicationService {
     private DevloopPhaseService phaseService;
 
     @Autowired
+    private com.iwhalecloud.byai.manager.mapper.resource.SsResourceMapper ssResourceMapper;
+
+    @Autowired
     private ByaiSystemConfigService byaiSystemConfigService;
 
     /** 创建项目，可同时关联代码仓库 */
@@ -1108,12 +1111,13 @@ public class DevloopApplicationService {
             .eq(ByaiSession::getProjectId, projectId).orderByDesc(ByaiSession::getCreateTime));
         List<Long> sessionIds = sessions.stream().map(ByaiSession::getSessionId)
             .collect(java.util.stream.Collectors.toList());
-        // 批量取状态与环节快照，避免逐会话查 session_ext 造成 N+1；列表只读缓存不触发重算/LLM
+        // 批量取状态与环节快照，避免逐会话查 session_ext 造成 N+1；上下文按会话实时关联解析。
         Map<Long, String> statusMap = loadTaskStatusMap(sessionIds);
         Map<Long, DevloopPhaseService.PhaseSnapshot> phaseMap = loadTaskPhaseMap(sessionIds);
         List<Map<String, Object>> list = new ArrayList<>();
         for (ByaiSession s : sessions) {
-            list.add(sessionAsTask(s, statusMap.get(s.getSessionId()), phaseMap.get(s.getSessionId())));
+            list.add(sessionAsTask(s, statusMap.get(s.getSessionId()), phaseMap.get(s.getSessionId()),
+                resolveTaskContext(s)));
         }
         return ResponseUtil.successResponse(list);
     }
@@ -1123,10 +1127,11 @@ public class DevloopApplicationService {
         ByaiSession s = byaiSessionMapper.selectById(sessionId);
         if (s == null)
             return ResponseUtil.failRes("会话不存在");
-        Map<Long, String> statusMap = loadTaskStatusMap(java.util.Collections.singletonList(sessionId));
-        Map<Long, DevloopPhaseService.PhaseSnapshot> phaseMap = loadTaskPhaseMap(
-            java.util.Collections.singletonList(sessionId));
-        return ResponseUtil.successResponse(sessionAsTask(s, statusMap.get(sessionId), phaseMap.get(sessionId)));
+        List<Long> ids = java.util.Collections.singletonList(sessionId);
+        Map<Long, String> statusMap = loadTaskStatusMap(ids);
+        Map<Long, DevloopPhaseService.PhaseSnapshot> phaseMap = loadTaskPhaseMap(ids);
+        return ResponseUtil.successResponse(
+            sessionAsTask(s, statusMap.get(sessionId), phaseMap.get(sessionId), resolveTaskContext(s)));
     }
 
     /**
@@ -1205,11 +1210,64 @@ public class DevloopApplicationService {
     }
 
     /**
+     * 实时解析任务上下文：不落库，按需从关联链路查。
+     * 需求/仓库：sessionId -> byai_scan_log_item -> source(repoId->仓库) -> log(projectId)；
+     * agent：session.objectId(数字员工resourceId) -> 资源名；负责人：session.creatorId -> 用户名；
+     * 分支：由 taskType(据需求内容判定) + sessionId 确定性重算。关联信息变化后展示随之更新。
+     */
+    private Map<String, Object> resolveTaskContext(ByaiSession s) {
+        Map<String, Object> ctx = new HashMap<>();
+        Long sessionId = s.getSessionId();
+
+        // 派生任务会把 sessionId 回写到需求项；据此还原需求与仓库。手动任务无此行，走项目兜底仓库。
+        ScanLogItem item = scanLogItemMapper.selectOne(new LambdaQueryWrapper<ScanLogItem>()
+            .eq(ScanLogItem::getSessionId, sessionId).last("limit 1"));
+        if (item != null) {
+            ctx.put("requirementTitle", item.getTitle());
+            ctx.put("requirementOriginId", item.getOriginId());
+            ctx.put("sourceItemId", item.getItemId());
+        }
+        ProjectRepo repo = resolveTaskRepo(s.getProjectId(), item);
+        ctx.put("repoFullName", repo != null ? repo.getRepoFullName() : null);
+
+        String taskType = detectTaskType(item, s.getSessionName());
+        ctx.put("branchName", buildBranchName(taskType, sessionId));
+
+        ctx.put("agentName", resolveAgentName(s.getObjectId()));
+        ctx.put("assignee", resolveUserName(s.getCreatorId()));
+        return ctx;
+    }
+
+    /** agentId(resourceId) -> 数字员工名称；查不到返回空串。 */
+    private String resolveAgentName(Long agentId) {
+        if (agentId == null) {
+            return "";
+        }
+        com.iwhalecloud.byai.manager.entity.resource.SsResource res = ssResourceMapper.selectByResourceId(agentId);
+        return res != null && res.getResourceName() != null ? res.getResourceName() : "";
+    }
+
+    /** userId -> 用户名；查不到返回空串。 */
+    private String resolveUserName(Long userId) {
+        if (userId == null) {
+            return "";
+        }
+        try {
+            LoginInfo info = loginApplicationService.getLoginInfo(userId);
+            return info != null && info.getUserName() != null ? info.getUserName() : "";
+        } catch (Exception e) {
+            log.warn("[Devloop] 解析负责人失败, userId={}", userId, e);
+            return "";
+        }
+    }
+
+    /**
      * 会话映射为前端任务形状：taskId 复用 sessionId 保证前端按 taskId 取值与跳转不变；
-     * status 取自 session_ext(task_status)；phase/currentRound 取自环节快照缓存；其余任务专属字段会话无来源，置空。
+     * status 取自 session_ext(task_status)；phase/currentRound 取自环节快照缓存；
+     * agent/仓库/分支/需求/负责人取自 task_context 上下文；无上下文时相关字段为空。
      */
     private Map<String, Object> sessionAsTask(ByaiSession s, String status,
-        DevloopPhaseService.PhaseSnapshot phase) {
+        DevloopPhaseService.PhaseSnapshot phase, Map<String, Object> ctx) {
         Map<String, Object> map = new HashMap<>();
         map.put("taskId", s.getSessionId());
         map.put("sessionId", s.getSessionId());
@@ -1223,12 +1281,17 @@ public class DevloopApplicationService {
         map.put("phase", phase != null ? phase.getCurrentPhase() : null);
         map.put("currentRound", phase != null ? phase.getRound() : null);
         map.put("totalRounds", null);
+        // 进度按环节派生，列表与详情共用 DevloopPhaseService 口径，避免两处算法漂移。
+        map.put("progress", phase != null ? phaseService.progressPercent(phase) : 0);
         map.put("score", null);
-        map.put("assignee", null);
-        map.put("agentName", null);
-        map.put("branchName", null);
+        map.put("assignee", ctx != null ? ctx.get("assignee") : null);
+        map.put("agentName", ctx != null ? ctx.get("agentName") : null);
+        map.put("branchName", ctx != null ? ctx.get("branchName") : null);
+        map.put("repoFullName", ctx != null ? ctx.get("repoFullName") : null);
+        map.put("requirementTitle", ctx != null ? ctx.get("requirementTitle") : null);
+        map.put("requirementOriginId", ctx != null ? ctx.get("requirementOriginId") : null);
         map.put("warningTag", null);
-        map.put("sourceItemId", null);
+        map.put("sourceItemId", ctx != null ? ctx.get("sourceItemId") : null);
         return map;
     }
 
