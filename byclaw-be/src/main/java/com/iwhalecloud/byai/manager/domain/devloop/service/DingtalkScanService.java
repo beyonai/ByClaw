@@ -164,17 +164,15 @@ public class DingtalkScanService {
                 log.debug("[DingtalkScan] msg: id={}, sender={}, content={}",
                     msgId, senderName, content.length() > 50 ? content.substring(0, 50) : content);
 
+                // 重复项直接跳过不落库：去重只认 created 行，定时任务每分钟扫描若为重复项写行会撑爆表。
                 if (scanLogService.isDuplicate(source.getSourceId(), msgId)) {
-                    scanLogService.createItem(logId,
-                        source.getSourceId(), displayTitle,
-                        content, msgId, null, "duplicate");
-                } else {
-                    ScanLogItem item = scanLogService.createItem(logId,
-                        source.getSourceId(), displayTitle,
-                        content, msgId, null, "created");
-                    items.add(item);
-                    createdCount++;
+                    continue;
                 }
+                ScanLogItem item = scanLogService.createItem(logId,
+                    source.getSourceId(), displayTitle,
+                    content, msgId, null, "created");
+                items.add(item);
+                createdCount++;
             }
 
             log.info("[DingtalkScan] done: found={}, created={}", foundCount, createdCount);

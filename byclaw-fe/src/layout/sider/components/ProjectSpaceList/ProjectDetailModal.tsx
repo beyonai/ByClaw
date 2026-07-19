@@ -30,6 +30,7 @@ import {
   GithubOutlined,
   LeftOutlined,
   MessageOutlined,
+  PartitionOutlined,
   PlusOutlined,
   ReloadOutlined,
   RightOutlined,
@@ -61,6 +62,7 @@ import {
 } from '@/service/devloop';
 import { deleteFiles, listFiles, renameFile, type FileBrowserItem } from '@/service/fileBrowser';
 import SessionOverviewDrawer from './SessionOverviewDrawer';
+import TaskDetailDrawer from './TaskDetailDrawer';
 import type { ProjectSpace } from '@/pages/projectSpace/types';
 import { getArrayData, normalizeProjectSession } from '@/pages/projectSpace/utils';
 import AntdIcon from '@/components/AntdIcon';
@@ -172,7 +174,7 @@ const priorityColor = (priority?: string | null) =>
 
 // 综合分配色：>=80 绿，>=60 蓝，<60 橙；无分灰
 const scoreBg = (score?: number | null) => {
-  if (score == null) return '#f0f0f0';
+  if (score === null || score === undefined) return '#f0f0f0';
   if (score >= 80) return '#e9f8f0';
   if (score >= 60) return '#eaf2ff';
   return '#fff3dc';
@@ -392,6 +394,8 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
   // 展开任务时按 sessionId 拉环节概要，缓存于 map 避免重复请求。
   const [taskPhaseMap, setTaskPhaseMap] = useState<Record<string, any>>({});
   const [taskKanbanOpen, setTaskKanbanOpen] = useState(false);
+  // 列表项直接打开环节详情抽屉，不必先经整体视图。
+  const [detailTask, setDetailTask] = useState<any>(null);
   const [repoModalOpen, setRepoModalOpen] = useState(false);
   const [repoForm, setRepoForm] = useState({ repoFullName: '', repoUrl: '', defaultBranch: 'main' });
   const [repoSaving, setRepoSaving] = useState(false);
@@ -1513,6 +1517,78 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
     };
   }, [channelPanelOpen, clearDetailPanel]);
 
+  const renderRequirementDetailModal = () => {
+    if (!detailReq) return null;
+    const detail = parseScoreDetail(detailReq.scoreDetail);
+    const sourceLabel = getSourceLabel(detailReq.sourceType);
+    const scored = detailReq.score !== null && detailReq.score !== undefined;
+    const createTime = detailReq.createTime ? dayjs(detailReq.createTime).format('YYYY-MM-DD HH:mm') : '-';
+    return (
+      <Modal
+        title={detailReq.title}
+        open={!!detailReq}
+        onCancel={() => setDetailReq(null)}
+        footer={<Button onClick={() => setDetailReq(null)}>关闭</Button>}
+        width={720}
+      >
+        <div className={styles.scoreSummary}>
+          <div className={styles.scoreSummaryCircle} style={{ background: scoreBg(detailReq.score) }}>
+            {scored ? detailReq.score : '—'}
+          </div>
+          <div>
+            <div className={styles.scoreSummaryLabel}>AI 综合评分</div>
+            <div className={styles.scoreSummaryPriority}>
+              {detailReq.priority || '—'}
+              {detailReq.sessionId ? ' · 研发中' : ''}
+            </div>
+            <div className={styles.scoreSummaryHint}>
+              {detailReq.sessionId ? '已满足自动派生研发任务规则' : '尚未启动研发任务'}
+            </div>
+          </div>
+        </div>
+
+        {detail.summary && (
+          <div className={styles.formField} style={{ marginTop: 16 }}>
+            <label>AI 整理的产品需求</label>
+            <div>{detail.summary}</div>
+          </div>
+        )}
+        <div className={styles.formField}>
+          <label>原始需求</label>
+          <div style={{ whiteSpace: 'pre-wrap', color: '#555' }}>{getRequirementDetailText(detailReq)}</div>
+        </div>
+        <div className={styles.formField}>
+          <label>来源</label>
+          <div>
+            {sourceLabel} · {detailReq.sourceName || '-'} · {createTime}
+          </div>
+        </div>
+
+        {scored && (
+          <div className={styles.formField}>
+            <label>评分维度</label>
+            <div className={styles.detailScoreDimGrid}>
+              {SCORE_DIMENSIONS.map((d) => (
+                <div key={d.key} className={styles.detailScoreDimItem}>
+                  <span>{d.label}</span>
+                  <strong>
+                    +{detail[d.key] ?? 0} / {d.max}
+                  </strong>
+                </div>
+              ))}
+              {detail.risk !== null && detail.risk !== undefined && detail.risk !== 0 && (
+                <div className={styles.detailScoreDimItem}>
+                  <span>风险与冲突</span>
+                  <strong style={{ color: '#cf1322' }}>{detail.risk}</strong>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </Modal>
+    );
+  };
+
   const renderRequirements = () => (
     <>
       <button type="button" className={styles.detailChannelEntry} onClick={handleToggleChannelPanel}>
@@ -1554,7 +1630,7 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
             const createTime = item.createTime ? dayjs(item.createTime).format('MM-DD HH:mm') : '-';
             const detailText = getRequirementDetailText(item);
             const scoreDetail = parseScoreDetail(item.scoreDetail);
-            const scored = item.score != null;
+            const scored = item.score !== null && item.score !== undefined;
 
             return (
               <div
@@ -1658,78 +1734,6 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
     </>
   );
 
-  const renderRequirementDetailModal = () => {
-    if (!detailReq) return null;
-    const detail = parseScoreDetail(detailReq.scoreDetail);
-    const sourceLabel = getSourceLabel(detailReq.sourceType);
-    const scored = detailReq.score != null;
-    const createTime = detailReq.createTime ? dayjs(detailReq.createTime).format('YYYY-MM-DD HH:mm') : '-';
-    return (
-      <Modal
-        title={detailReq.title}
-        open={!!detailReq}
-        onCancel={() => setDetailReq(null)}
-        footer={<Button onClick={() => setDetailReq(null)}>关闭</Button>}
-        width={720}
-      >
-        <div className={styles.scoreSummary}>
-          <div className={styles.scoreSummaryCircle} style={{ background: scoreBg(detailReq.score) }}>
-            {scored ? detailReq.score : '—'}
-          </div>
-          <div>
-            <div className={styles.scoreSummaryLabel}>AI 综合评分</div>
-            <div className={styles.scoreSummaryPriority}>
-              {detailReq.priority || '—'}
-              {detailReq.sessionId ? ' · 研发中' : ''}
-            </div>
-            <div className={styles.scoreSummaryHint}>
-              {detailReq.sessionId ? '已满足自动派生研发任务规则' : '尚未启动研发任务'}
-            </div>
-          </div>
-        </div>
-
-        {detail.summary && (
-          <div className={styles.formField} style={{ marginTop: 16 }}>
-            <label>AI 整理的产品需求</label>
-            <div>{detail.summary}</div>
-          </div>
-        )}
-        <div className={styles.formField}>
-          <label>原始需求</label>
-          <div style={{ whiteSpace: 'pre-wrap', color: '#555' }}>{getRequirementDetailText(detailReq)}</div>
-        </div>
-        <div className={styles.formField}>
-          <label>来源</label>
-          <div>
-            {sourceLabel} · {detailReq.sourceName || '-'} · {createTime}
-          </div>
-        </div>
-
-        {scored && (
-          <div className={styles.formField}>
-            <label>评分维度</label>
-            <div className={styles.detailScoreDimGrid}>
-              {SCORE_DIMENSIONS.map((d) => (
-                <div key={d.key} className={styles.detailScoreDimItem}>
-                  <span>{d.label}</span>
-                  <strong>
-                    +{detail[d.key] ?? 0} / {d.max}
-                  </strong>
-                </div>
-              ))}
-              {detail.risk != null && detail.risk !== 0 && (
-                <div className={styles.detailScoreDimItem}>
-                  <span>风险与冲突</span>
-                  <strong style={{ color: '#cf1322' }}>{detail.risk}</strong>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-      </Modal>
-    );
-  };
-
   const renderResources = () => {
     const currentSessionFiles = currentResourceSession?.sessionId
       ? sessionFilesMap[`${currentResourceSession.sessionId}`] || []
@@ -1743,20 +1747,20 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
     const sessionGroups =
       resourceFileScope === 'all'
         ? projectSessions.map((session) => {
-            const sessionResourceId = `${session.sessionId}`;
-            const files = sessionFilesMap[sessionResourceId] || [];
-            const sessionName = getSessionResourceName(session);
-            return {
-              key: sessionResourceId,
-              title: sessionName,
-              titleText: sessionName,
-              currentPath: getSessionFilePath(sessionResourceId),
-              items: files,
-              loading: !!sessionFilesLoadingMap[sessionResourceId],
-              emptyText: '该会话暂无文件',
-              count: getFileSpaceFileCount(files),
-            };
-          })
+          const sessionResourceId = `${session.sessionId}`;
+          const files = sessionFilesMap[sessionResourceId] || [];
+          const sessionName = getSessionResourceName(session);
+          return {
+            key: sessionResourceId,
+            title: sessionName,
+            titleText: sessionName,
+            currentPath: getSessionFilePath(sessionResourceId),
+            items: files,
+            loading: !!sessionFilesLoadingMap[sessionResourceId],
+            emptyText: '该会话暂无文件',
+            count: getFileSpaceFileCount(files),
+          };
+        })
         : currentResourceSession
           ? [
             {
@@ -1837,7 +1841,8 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
       {tasks.length ? (
         <div className={styles.detailTaskList}>
           {tasks.map((task) => {
-            const progress = task.totalRounds > 0 ? Math.round((task.currentRound / task.totalRounds) * 100) : 0;
+            // 进度由后端按环节口径统一算好（与详情抽屉一致），列表直接用。
+            const progress = typeof task.progress === 'number' ? task.progress : 0;
             const isExpanded = `${expandedTaskId || ''}` === `${task.taskId}`;
             // 会话即任务后仅状态由 session_ext 提供，阶段/分支等仍可能为空，空则不渲染避免残缺横线。
             const hasTaskMeta = !!task.phase || !!task.agentName || !!task.branchName;
@@ -1959,8 +1964,20 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
                       <label>创建时间</label>
                       <strong>{task.createTime ? dayjs(task.createTime).format('MM-DD HH:mm') : '-'}</strong>
                     </span>
-                    {task.sessionId && (
-                      <div className={styles.detailTaskInlineActions}>
+                    <div className={styles.detailTaskInlineActions}>
+                      <Button
+                        size="small"
+                        type="link"
+                        className={styles.detailTaskChatButton}
+                        icon={<PartitionOutlined />}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setDetailTask(task);
+                        }}
+                      >
+                        环节详情
+                      </Button>
+                      {task.sessionId && (
                         <Button
                           size="small"
                           type="link"
@@ -1970,8 +1987,8 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
                         >
                           进入会话
                         </Button>
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
@@ -1991,6 +2008,8 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
         tasks={tasks}
         onRefresh={fetchTasks}
       />
+
+      <TaskDetailDrawer task={detailTask} onClose={() => setDetailTask(null)} onRefresh={fetchTasks} />
     </div>
   );
 

@@ -8,12 +8,8 @@ import com.iwhalecloud.byai.common.constants.files.FileStatus;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.common.page.PageInfo;
-import com.iwhalecloud.byai.common.storage.impl.WhaleAgentStorageService;
 import com.iwhalecloud.byai.common.storage.model.FileMetadata;
-import com.iwhalecloud.byai.common.storage.model.StorageLocation;
-import com.iwhalecloud.byai.common.util.DateUtils;
 import com.iwhalecloud.byai.common.util.ListUtil;
-import com.iwhalecloud.byai.common.util.MapParamUtil;
 import com.iwhalecloud.byai.common.util.PageHelperUtil;
 import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.manager.application.service.files.FilesApplicationService;
@@ -43,7 +39,6 @@ import com.iwhalecloud.byai.manager.mapper.devloop.ProjectRepoMapper;
 import com.iwhalecloud.byai.manager.mapper.devloop.ProjectShareTargetMapper;
 import com.iwhalecloud.byai.manager.mapper.devloop.ProjectSessionMapper;
 import com.iwhalecloud.byai.manager.mapper.devloop.ScanLogItemMapper;
-import com.iwhalecloud.byai.manager.mapper.session.ByaiSessionExtMapper;
 import com.iwhalecloud.byai.manager.mapper.session.ByaiSessionMapper;
 import com.iwhalecloud.byai.manager.qo.devloop.ProjectQo;
 import com.iwhalecloud.byai.manager.qo.devloop.ProjectSessionQo;
@@ -54,7 +49,6 @@ import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import com.iwhalecloud.byai.common.util.threadPoolUti.ThreadPoolUtil;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -65,14 +59,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
-import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
-import org.springframework.web.util.UriComponentsBuilder;
 
 import java.io.ByteArrayOutputStream;
 
 import java.io.InputStream;
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.Executor;
 
@@ -83,7 +73,7 @@ import java.util.concurrent.Executor;
 @Service
 public class DevloopApplicationService {
 
-    private Logger logger = LoggerFactory.getLogger(DevloopApplicationService.class);
+    private static final Logger logger = LoggerFactory.getLogger(DevloopApplicationService.class);
 
     private static final String DELETE_FLAG_NORMAL = "0";
 
@@ -120,7 +110,7 @@ public class DevloopApplicationService {
     private ByaiSessionMapper byaiSessionMapper;
 
     @Autowired
-    private ByaiSessionExtMapper byaiSessionExtMapper;
+    private com.iwhalecloud.byai.manager.mapper.session.ByaiSessionExtMapper byaiSessionExtMapper;
 
     @Autowired
     private ScanLogItemMapper scanLogItemMapper;
@@ -165,25 +155,28 @@ public class DevloopApplicationService {
     private DevloopPhaseService phaseService;
 
     @Autowired
+    private com.iwhalecloud.byai.manager.mapper.resource.SsResourceMapper ssResourceMapper;
+
+    @Autowired
     private ByaiSystemConfigService byaiSystemConfigService;
-
-    @Autowired
-    private FileService fileService;
-
-    @Autowired
-    private FilesApplicationService filesApplicationService;
 
     @Autowired
     private ProjectShareFileService projectShareFileService;
 
     @Autowired
+    private FilesApplicationService filesApplicationService;
+
+    @Autowired
+    private FileService fileService;
+
+    @Autowired
     private CommonFileStorage commonFileStorage;
 
     @Autowired
-    private UserBucketNamingService userBucketNamingService;
+    private CommonFilePathResolver commonFilePathResolver;
 
     @Autowired
-    private CommonFilePathResolver commonFilePathResolver;
+    private UserBucketNamingService userBucketNamingService;
 
     /** 创建项目，可同时关联代码仓库 */
     @Transactional(rollbackFor = Exception.class)
@@ -738,7 +731,8 @@ public class DevloopApplicationService {
     }
 
     /**
-     * 按扫描源直接查询已收集的需求(action=created)，供需求列表展示。 需求随日志滚动，按“最近N条日志”遍历会漏掉早期扫到的需求，故直接按 source 查条目。
+     * 按扫描源直接查询已收集的需求(action=created)，供需求列表展示。
+     * 需求随日志滚动，按“最近N条日志”遍历会漏掉早期扫到的需求，故直接按 source 查条目。
      */
     public ResponseUtil<List<Map<String, Object>>> listRequirementsBySource(Long sourceId) {
         List<ScanLogItem> items = scanLogService.listCreatedItemsBySource(sourceId);
@@ -894,11 +888,11 @@ public class DevloopApplicationService {
     }
 
     /**
-     * 从需求派生任务（会话）核心逻辑，不依赖登录 ThreadLocal 取当前用户，供手动启动与定时自动派生复用。 userId 用于成员/agent 校验，loginInfo 透传给异步 chat（自动派生时由源创建者的
-     * LoginInfo 构造）。
+     * 从需求派生任务（会话）核心逻辑，不依赖登录 ThreadLocal 取当前用户，供手动启动与定时自动派生复用。
+     * userId 用于成员/agent 校验，loginInfo 透传给异步 chat（自动派生时由源创建者的 LoginInfo 构造）。
      */
     private ResponseUtil<Map<String, Object>> deriveTask(Long userId, LoginInfo loginInfo, Long projectId,
-        Long sourceItemId, String title) {
+                                                         Long sourceItemId, String title) {
         // 防止重复启动：该需求已关联会话则拒绝重复启动
         if (sourceItemId != null) {
             ScanLogItem existing = scanLogItemMapper.selectById(sourceItemId);
@@ -986,8 +980,10 @@ public class DevloopApplicationService {
     }
 
     /**
-     * 定时扫描完成后，按确认规则用源创建者身份为本次新增需求自动派生任务： auto=全部派生；score=综合分达阈值(scoreThreshold，默认70)才派生；manual=不派生。 扫描线程无登录上下文，故用
-     * source.createBy 构造 LoginInfo 并设入 CurrentUserHolder， 复用 deriveTask 后清理，避免污染线程池上下文。
+     * 定时扫描完成后，按确认规则用源创建者身份为本次新增需求自动派生任务：
+     * auto=全部派生；score=综合分达阈值(scoreThreshold，默认70)才派生；manual=不派生。
+     * 扫描线程无登录上下文，故用 source.createBy 构造 LoginInfo 并设入 CurrentUserHolder，
+     * 复用 deriveTask 后清理，避免污染线程池上下文。
      */
     public void autoDeriveForSource(ScanSource source, List<ScanLogItem> newItems) {
         if (source == null || newItems == null || newItems.isEmpty()) {
@@ -1007,8 +1003,7 @@ public class DevloopApplicationService {
         Long ownerUserId;
         try {
             ownerUserId = Long.valueOf(source.getCreateBy());
-        }
-        catch (NumberFormatException e) {
+        } catch (NumberFormatException e) {
             log.warn("[DevloopAuto] 源 {} 创建者非法 {}，跳过自动派生", source.getSourceId(), source.getCreateBy());
             return;
         }
@@ -1031,24 +1026,21 @@ public class DevloopApplicationService {
                     }
                 }
                 try {
-                    ResponseUtil<Map<String, Object>> res = deriveTask(ownerUserId, ownerLogin, source.getProjectId(),
-                        item.getItemId(), item.getTitle());
+                    ResponseUtil<Map<String, Object>> res =
+                        deriveTask(ownerUserId, ownerLogin, source.getProjectId(), item.getItemId(), item.getTitle());
                     if (res == null || res.getCode() != ResponseUtil.SUCCESS) {
                         log.warn("[DevloopAuto] 自动派生失败, item={}, msg={}", item.getItemId(),
                             res != null ? res.getMsg() : "null");
                     }
-                }
-                catch (Exception e) {
+                } catch (Exception e) {
                     log.error("[DevloopAuto] 自动派生异常, item={}", item.getItemId(), e);
                 }
             }
-        }
-        finally {
+        } finally {
             // 还原上下文：线程池复用，避免把源创建者身份泄漏给后续任务
             if (previous != null) {
                 CurrentUserHolder.setLoginInfo(previous);
-            }
-            else {
+            } else {
                 CurrentUserHolder.clearLoginInfo();
             }
         }
@@ -1127,7 +1119,8 @@ public class DevloopApplicationService {
         String repoFullName = repo != null && repo.getRepoFullName() != null ? repo.getRepoFullName() : "";
         String repoUrl = repo != null && repo.getRepoUrl() != null ? repo.getRepoUrl() : repoFullName;
         return template.replace("${projectName}", projectName != null ? projectName : "").replace("${repoUrl}", repoUrl)
-            .replace("${repoFullName}", repoFullName).replace("${branchName}", branchName != null ? branchName : "")
+            .replace("${repoFullName}", repoFullName)
+            .replace("${branchName}", branchName != null ? branchName : "")
             .replace("${taskType}", taskType != null ? taskType : "").replace("${title}", title != null ? title : "")
             .replace("${description}", description != null ? description : "");
     }
@@ -1138,15 +1131,18 @@ public class DevloopApplicationService {
         + "- 任务类型：${taskType}\n" + "- 任务标题：${title}\n\n" + "## 需求详情\n${description}\n\n" + "## 仓库访问说明\n"
         + "- 目标仓库全路径为 ${repoFullName}，它可能是私有仓库；GitHub 访问令牌(PAT)已配置在环境变量 GH_TOKEN 中，请直接使用它克隆和推送。\n"
         + "- 用带令牌的完整地址克隆：git clone https://$GH_TOKEN@github.com/${repoFullName}.git\n"
-        + "- 若提示仓库或分支不存在，通常是私有仓库权限问题，请确认已使用环境变量 GH_TOKEN 中的令牌，不要据此判定仓库不存在、也不要改为在本地新建独立项目。\n\n" + "## 工作要求\n"
+        + "- 若提示仓库或分支不存在，通常是私有仓库权限问题，请确认已使用环境变量 GH_TOKEN 中的令牌，不要据此判定仓库不存在、也不要改为在本地新建独立项目。\n\n"
+        + "## 工作要求\n"
         + "1. 克隆仓库 ${repoFullName}，拉取默认分支最新代码；目标分支 ${branchName} 尚不存在，用 git checkout -b ${branchName} 从默认分支新建并切换。\n"
-        + "2. 仔细理解上述需求详情，定位需要修改的代码。\n" + "3. 完成开发后自测，确保编译通过、相关测试通过。\n" + "4. 提交改动到分支 ${branchName} 并推送，提交信息清晰说明本次改动。\n"
-        + "5. 如需求描述不清或存在阻塞，明确说明遇到的问题。\n\n" + "## 环节汇报规范（重要，供系统追踪任务进度）\n"
-        + "在推进以下研发环节时，每进入/完成/打回一个环节，都要单独输出一行机器可读标记，格式严格如下（方括号与关键字不可省略）：\n" + "- 进入某环节：[PHASE] <环节> START\n"
-        + "- 完成某环节：[PHASE] <环节> DONE\n" + "- 打回上一步：[PHASE] <环节> REJECT-><目标环节> 原因:<简述>\n"
+        + "2. 仔细理解上述需求详情，定位需要修改的代码。\n" + "3. 完成开发后自测，确保编译通过、相关测试通过。\n"
+        + "4. 提交改动到分支 ${branchName} 并推送，提交信息清晰说明本次改动。\n" + "5. 如需求描述不清或存在阻塞，明确说明遇到的问题。\n\n"
+        + "## 环节汇报规范（重要，供系统追踪任务进度）\n"
+        + "在推进以下研发环节时，每进入/完成/打回一个环节，都要单独输出一行机器可读标记，格式严格如下（方括号与关键字不可省略）：\n"
+        + "- 进入某环节：[PHASE] <环节> START\n" + "- 完成某环节：[PHASE] <环节> DONE\n"
+        + "- 打回上一步：[PHASE] <环节> REJECT-><目标环节> 原因:<简述>\n"
         + "环节取值固定为：issue（需求来源）、req（需求分析）、design（方案设计）、coder（编码）、reviewer（代码审查）、tester（测试）、pr（提交PR）。\n"
-        + "示例：[PHASE] coder START ；[PHASE] tester REJECT->coder 原因:单测未覆盖审计日志。\n" + "标记须独占一行、按真实进展实时输出，正常叙述照常进行。\n\n"
-        + "请开始处理。";
+        + "示例：[PHASE] coder START ；[PHASE] tester REJECT->coder 原因:单测未覆盖审计日志。\n"
+        + "标记须独占一行、按真实进展实时输出，正常叙述照常进行。\n\n" + "请开始处理。";
 
     /** 查询项目任务列表：会话即任务，状态取自 session_ext(task_status)，环节取自缓存(task_phase)，供看板按状态分列。 */
     public ResponseUtil<List<Map<String, Object>>> listTasks(Long projectId) {
@@ -1154,12 +1150,13 @@ public class DevloopApplicationService {
             .eq(ByaiSession::getProjectId, projectId).orderByDesc(ByaiSession::getCreateTime));
         List<Long> sessionIds = sessions.stream().map(ByaiSession::getSessionId)
             .collect(java.util.stream.Collectors.toList());
-        // 批量取状态与环节快照，避免逐会话查 session_ext 造成 N+1；列表只读缓存不触发重算/LLM
+        // 批量取状态与环节快照，避免逐会话查 session_ext 造成 N+1；上下文按会话实时关联解析。
         Map<Long, String> statusMap = loadTaskStatusMap(sessionIds);
         Map<Long, DevloopPhaseService.PhaseSnapshot> phaseMap = loadTaskPhaseMap(sessionIds);
         List<Map<String, Object>> list = new ArrayList<>();
         for (ByaiSession s : sessions) {
-            list.add(sessionAsTask(s, statusMap.get(s.getSessionId()), phaseMap.get(s.getSessionId())));
+            list.add(sessionAsTask(s, statusMap.get(s.getSessionId()), phaseMap.get(s.getSessionId()),
+                resolveTaskContext(s)));
         }
         return ResponseUtil.successResponse(list);
     }
@@ -1169,14 +1166,16 @@ public class DevloopApplicationService {
         ByaiSession s = byaiSessionMapper.selectById(sessionId);
         if (s == null)
             return ResponseUtil.failRes("会话不存在");
-        Map<Long, String> statusMap = loadTaskStatusMap(java.util.Collections.singletonList(sessionId));
-        Map<Long, DevloopPhaseService.PhaseSnapshot> phaseMap = loadTaskPhaseMap(
-            java.util.Collections.singletonList(sessionId));
-        return ResponseUtil.successResponse(sessionAsTask(s, statusMap.get(sessionId), phaseMap.get(sessionId)));
+        List<Long> ids = java.util.Collections.singletonList(sessionId);
+        Map<Long, String> statusMap = loadTaskStatusMap(ids);
+        Map<Long, DevloopPhaseService.PhaseSnapshot> phaseMap = loadTaskPhaseMap(ids);
+        return ResponseUtil.successResponse(
+            sessionAsTask(s, statusMap.get(sessionId), phaseMap.get(sessionId), resolveTaskContext(s)));
     }
 
     /**
-     * 查询任务环节进度：按需刷新——缓存缺失或会话有新消息时重算并落库，否则直接返回缓存。 返回完整快照(7 环节 + 状态 + 打回记录)，供详情抽屉逐环节渲染。
+     * 查询任务环节进度：按需刷新——缓存缺失或会话有新消息时重算并落库，否则直接返回缓存。
+     * 返回完整快照(7 环节 + 状态 + 打回记录)，供详情抽屉逐环节渲染。
      */
     public ResponseUtil<DevloopPhaseService.PhaseSnapshot> getTaskPhases(Long sessionId) {
         if (sessionId == null) {
@@ -1200,7 +1199,8 @@ public class DevloopApplicationService {
             return statusMap;
         }
         List<ByaiSessionExt> exts = byaiSessionExtMapper.selectList(new LambdaQueryWrapper<ByaiSessionExt>()
-            .eq(ByaiSessionExt::getExtParamCode, TASK_STATUS_EXT_CODE).in(ByaiSessionExt::getSessionId, sessionIds));
+            .eq(ByaiSessionExt::getExtParamCode, TASK_STATUS_EXT_CODE)
+            .in(ByaiSessionExt::getSessionId, sessionIds));
         for (ByaiSessionExt ext : exts) {
             statusMap.put(ext.getSessionId(), ext.getExtParamValue());
         }
@@ -1214,7 +1214,8 @@ public class DevloopApplicationService {
             return phaseMap;
         }
         List<ByaiSessionExt> exts = byaiSessionExtMapper.selectList(new LambdaQueryWrapper<ByaiSessionExt>()
-            .eq(ByaiSessionExt::getExtParamCode, TASK_PHASE_EXT_CODE).in(ByaiSessionExt::getSessionId, sessionIds));
+            .eq(ByaiSessionExt::getExtParamCode, TASK_PHASE_EXT_CODE)
+            .in(ByaiSessionExt::getSessionId, sessionIds));
         for (ByaiSessionExt ext : exts) {
             DevloopPhaseService.PhaseSnapshot snap = phaseService.fromJson(ext.getExtParamValue());
             if (snap != null) {
@@ -1230,9 +1231,9 @@ public class DevloopApplicationService {
         if (json == null) {
             return;
         }
-        ByaiSessionExt existing = byaiSessionExtMapper
-            .selectOne(new LambdaQueryWrapper<ByaiSessionExt>().eq(ByaiSessionExt::getExtParamCode, TASK_PHASE_EXT_CODE)
-                .eq(ByaiSessionExt::getSessionId, sessionId).last("limit 1"));
+        ByaiSessionExt existing = byaiSessionExtMapper.selectOne(new LambdaQueryWrapper<ByaiSessionExt>()
+            .eq(ByaiSessionExt::getExtParamCode, TASK_PHASE_EXT_CODE).eq(ByaiSessionExt::getSessionId, sessionId)
+            .last("limit 1"));
         if (existing != null) {
             existing.setExtParamValue(json);
             byaiSessionExtMapper.updateById(existing);
@@ -1248,10 +1249,64 @@ public class DevloopApplicationService {
     }
 
     /**
-     * 会话映射为前端任务形状：taskId 复用 sessionId 保证前端按 taskId 取值与跳转不变； status 取自 session_ext(task_status)；phase/currentRound
-     * 取自环节快照缓存；其余任务专属字段会话无来源，置空。
+     * 实时解析任务上下文：不落库，按需从关联链路查。
+     * 需求/仓库：sessionId -> byai_scan_log_item -> source(repoId->仓库) -> log(projectId)；
+     * agent：session.objectId(数字员工resourceId) -> 资源名；负责人：session.creatorId -> 用户名；
+     * 分支：由 taskType(据需求内容判定) + sessionId 确定性重算。关联信息变化后展示随之更新。
      */
-    private Map<String, Object> sessionAsTask(ByaiSession s, String status, DevloopPhaseService.PhaseSnapshot phase) {
+    private Map<String, Object> resolveTaskContext(ByaiSession s) {
+        Map<String, Object> ctx = new HashMap<>();
+        Long sessionId = s.getSessionId();
+
+        // 派生任务会把 sessionId 回写到需求项；据此还原需求与仓库。手动任务无此行，走项目兜底仓库。
+        ScanLogItem item = scanLogItemMapper.selectOne(new LambdaQueryWrapper<ScanLogItem>()
+            .eq(ScanLogItem::getSessionId, sessionId).last("limit 1"));
+        if (item != null) {
+            ctx.put("requirementTitle", item.getTitle());
+            ctx.put("requirementOriginId", item.getOriginId());
+            ctx.put("sourceItemId", item.getItemId());
+        }
+        ProjectRepo repo = resolveTaskRepo(s.getProjectId(), item);
+        ctx.put("repoFullName", repo != null ? repo.getRepoFullName() : null);
+
+        String taskType = detectTaskType(item, s.getSessionName());
+        ctx.put("branchName", buildBranchName(taskType, sessionId));
+
+        ctx.put("agentName", resolveAgentName(s.getObjectId()));
+        ctx.put("assignee", resolveUserName(s.getCreatorId()));
+        return ctx;
+    }
+
+    /** agentId(resourceId) -> 数字员工名称；查不到返回空串。 */
+    private String resolveAgentName(Long agentId) {
+        if (agentId == null) {
+            return "";
+        }
+        com.iwhalecloud.byai.manager.entity.resource.SsResource res = ssResourceMapper.selectByResourceId(agentId);
+        return res != null && res.getResourceName() != null ? res.getResourceName() : "";
+    }
+
+    /** userId -> 用户名；查不到返回空串。 */
+    private String resolveUserName(Long userId) {
+        if (userId == null) {
+            return "";
+        }
+        try {
+            LoginInfo info = loginApplicationService.getLoginInfo(userId);
+            return info != null && info.getUserName() != null ? info.getUserName() : "";
+        } catch (Exception e) {
+            log.warn("[Devloop] 解析负责人失败, userId={}", userId, e);
+            return "";
+        }
+    }
+
+    /**
+     * 会话映射为前端任务形状：taskId 复用 sessionId 保证前端按 taskId 取值与跳转不变；
+     * status 取自 session_ext(task_status)；phase/currentRound 取自环节快照缓存；
+     * agent/仓库/分支/需求/负责人取自 task_context 上下文；无上下文时相关字段为空。
+     */
+    private Map<String, Object> sessionAsTask(ByaiSession s, String status,
+        DevloopPhaseService.PhaseSnapshot phase, Map<String, Object> ctx) {
         Map<String, Object> map = new HashMap<>();
         map.put("taskId", s.getSessionId());
         map.put("sessionId", s.getSessionId());
@@ -1265,12 +1320,17 @@ public class DevloopApplicationService {
         map.put("phase", phase != null ? phase.getCurrentPhase() : null);
         map.put("currentRound", phase != null ? phase.getRound() : null);
         map.put("totalRounds", null);
+        // 进度按环节派生，列表与详情共用 DevloopPhaseService 口径，避免两处算法漂移。
+        map.put("progress", phase != null ? phaseService.progressPercent(phase) : 0);
         map.put("score", null);
-        map.put("assignee", null);
-        map.put("agentName", null);
-        map.put("branchName", null);
+        map.put("assignee", ctx != null ? ctx.get("assignee") : null);
+        map.put("agentName", ctx != null ? ctx.get("agentName") : null);
+        map.put("branchName", ctx != null ? ctx.get("branchName") : null);
+        map.put("repoFullName", ctx != null ? ctx.get("repoFullName") : null);
+        map.put("requirementTitle", ctx != null ? ctx.get("requirementTitle") : null);
+        map.put("requirementOriginId", ctx != null ? ctx.get("requirementOriginId") : null);
         map.put("warningTag", null);
-        map.put("sourceItemId", null);
+        map.put("sourceItemId", ctx != null ? ctx.get("sourceItemId") : null);
         return map;
     }
 
@@ -1365,6 +1425,7 @@ public class DevloopApplicationService {
         dwsAuthService.recordAuthToDb();
         return ResponseUtil.successResponse(null);
     }
+
 
     // ========== 分享到空间 ==========
 
