@@ -9,6 +9,7 @@ import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.common.storage.model.FileMetadata;
+import com.iwhalecloud.byai.common.storage.model.StorageLocation;
 import com.iwhalecloud.byai.common.util.ListUtil;
 import com.iwhalecloud.byai.common.util.PageHelperUtil;
 import com.iwhalecloud.byai.common.util.StringUtil;
@@ -731,8 +732,7 @@ public class DevloopApplicationService {
     }
 
     /**
-     * 按扫描源直接查询已收集的需求(action=created)，供需求列表展示。
-     * 需求随日志滚动，按“最近N条日志”遍历会漏掉早期扫到的需求，故直接按 source 查条目。
+     * 按扫描源直接查询已收集的需求(action=created)，供需求列表展示。 需求随日志滚动，按“最近N条日志”遍历会漏掉早期扫到的需求，故直接按 source 查条目。
      */
     public ResponseUtil<List<Map<String, Object>>> listRequirementsBySource(Long sourceId) {
         List<ScanLogItem> items = scanLogService.listCreatedItemsBySource(sourceId);
@@ -888,11 +888,11 @@ public class DevloopApplicationService {
     }
 
     /**
-     * 从需求派生任务（会话）核心逻辑，不依赖登录 ThreadLocal 取当前用户，供手动启动与定时自动派生复用。
-     * userId 用于成员/agent 校验，loginInfo 透传给异步 chat（自动派生时由源创建者的 LoginInfo 构造）。
+     * 从需求派生任务（会话）核心逻辑，不依赖登录 ThreadLocal 取当前用户，供手动启动与定时自动派生复用。 userId 用于成员/agent 校验，loginInfo 透传给异步 chat（自动派生时由源创建者的
+     * LoginInfo 构造）。
      */
     private ResponseUtil<Map<String, Object>> deriveTask(Long userId, LoginInfo loginInfo, Long projectId,
-                                                         Long sourceItemId, String title) {
+        Long sourceItemId, String title) {
         // 防止重复启动：该需求已关联会话则拒绝重复启动
         if (sourceItemId != null) {
             ScanLogItem existing = scanLogItemMapper.selectById(sourceItemId);
@@ -980,10 +980,8 @@ public class DevloopApplicationService {
     }
 
     /**
-     * 定时扫描完成后，按确认规则用源创建者身份为本次新增需求自动派生任务：
-     * auto=全部派生；score=综合分达阈值(scoreThreshold，默认70)才派生；manual=不派生。
-     * 扫描线程无登录上下文，故用 source.createBy 构造 LoginInfo 并设入 CurrentUserHolder，
-     * 复用 deriveTask 后清理，避免污染线程池上下文。
+     * 定时扫描完成后，按确认规则用源创建者身份为本次新增需求自动派生任务： auto=全部派生；score=综合分达阈值(scoreThreshold，默认70)才派生；manual=不派生。 扫描线程无登录上下文，故用
+     * source.createBy 构造 LoginInfo 并设入 CurrentUserHolder， 复用 deriveTask 后清理，避免污染线程池上下文。
      */
     public void autoDeriveForSource(ScanSource source, List<ScanLogItem> newItems) {
         if (source == null || newItems == null || newItems.isEmpty()) {
@@ -1003,7 +1001,8 @@ public class DevloopApplicationService {
         Long ownerUserId;
         try {
             ownerUserId = Long.valueOf(source.getCreateBy());
-        } catch (NumberFormatException e) {
+        }
+        catch (NumberFormatException e) {
             log.warn("[DevloopAuto] 源 {} 创建者非法 {}，跳过自动派生", source.getSourceId(), source.getCreateBy());
             return;
         }
@@ -1026,21 +1025,24 @@ public class DevloopApplicationService {
                     }
                 }
                 try {
-                    ResponseUtil<Map<String, Object>> res =
-                        deriveTask(ownerUserId, ownerLogin, source.getProjectId(), item.getItemId(), item.getTitle());
+                    ResponseUtil<Map<String, Object>> res = deriveTask(ownerUserId, ownerLogin, source.getProjectId(),
+                        item.getItemId(), item.getTitle());
                     if (res == null || res.getCode() != ResponseUtil.SUCCESS) {
                         log.warn("[DevloopAuto] 自动派生失败, item={}, msg={}", item.getItemId(),
                             res != null ? res.getMsg() : "null");
                     }
-                } catch (Exception e) {
+                }
+                catch (Exception e) {
                     log.error("[DevloopAuto] 自动派生异常, item={}", item.getItemId(), e);
                 }
             }
-        } finally {
+        }
+        finally {
             // 还原上下文：线程池复用，避免把源创建者身份泄漏给后续任务
             if (previous != null) {
                 CurrentUserHolder.setLoginInfo(previous);
-            } else {
+            }
+            else {
                 CurrentUserHolder.clearLoginInfo();
             }
         }
@@ -1119,8 +1121,7 @@ public class DevloopApplicationService {
         String repoFullName = repo != null && repo.getRepoFullName() != null ? repo.getRepoFullName() : "";
         String repoUrl = repo != null && repo.getRepoUrl() != null ? repo.getRepoUrl() : repoFullName;
         return template.replace("${projectName}", projectName != null ? projectName : "").replace("${repoUrl}", repoUrl)
-            .replace("${repoFullName}", repoFullName)
-            .replace("${branchName}", branchName != null ? branchName : "")
+            .replace("${repoFullName}", repoFullName).replace("${branchName}", branchName != null ? branchName : "")
             .replace("${taskType}", taskType != null ? taskType : "").replace("${title}", title != null ? title : "")
             .replace("${description}", description != null ? description : "");
     }
@@ -1131,18 +1132,15 @@ public class DevloopApplicationService {
         + "- 任务类型：${taskType}\n" + "- 任务标题：${title}\n\n" + "## 需求详情\n${description}\n\n" + "## 仓库访问说明\n"
         + "- 目标仓库全路径为 ${repoFullName}，它可能是私有仓库；GitHub 访问令牌(PAT)已配置在环境变量 GH_TOKEN 中，请直接使用它克隆和推送。\n"
         + "- 用带令牌的完整地址克隆：git clone https://$GH_TOKEN@github.com/${repoFullName}.git\n"
-        + "- 若提示仓库或分支不存在，通常是私有仓库权限问题，请确认已使用环境变量 GH_TOKEN 中的令牌，不要据此判定仓库不存在、也不要改为在本地新建独立项目。\n\n"
-        + "## 工作要求\n"
+        + "- 若提示仓库或分支不存在，通常是私有仓库权限问题，请确认已使用环境变量 GH_TOKEN 中的令牌，不要据此判定仓库不存在、也不要改为在本地新建独立项目。\n\n" + "## 工作要求\n"
         + "1. 克隆仓库 ${repoFullName}，拉取默认分支最新代码；目标分支 ${branchName} 尚不存在，用 git checkout -b ${branchName} 从默认分支新建并切换。\n"
-        + "2. 仔细理解上述需求详情，定位需要修改的代码。\n" + "3. 完成开发后自测，确保编译通过、相关测试通过。\n"
-        + "4. 提交改动到分支 ${branchName} 并推送，提交信息清晰说明本次改动。\n" + "5. 如需求描述不清或存在阻塞，明确说明遇到的问题。\n\n"
-        + "## 环节汇报规范（重要，供系统追踪任务进度）\n"
-        + "在推进以下研发环节时，每进入/完成/打回一个环节，都要单独输出一行机器可读标记，格式严格如下（方括号与关键字不可省略）：\n"
-        + "- 进入某环节：[PHASE] <环节> START\n" + "- 完成某环节：[PHASE] <环节> DONE\n"
-        + "- 打回上一步：[PHASE] <环节> REJECT-><目标环节> 原因:<简述>\n"
+        + "2. 仔细理解上述需求详情，定位需要修改的代码。\n" + "3. 完成开发后自测，确保编译通过、相关测试通过。\n" + "4. 提交改动到分支 ${branchName} 并推送，提交信息清晰说明本次改动。\n"
+        + "5. 如需求描述不清或存在阻塞，明确说明遇到的问题。\n\n" + "## 环节汇报规范（重要，供系统追踪任务进度）\n"
+        + "在推进以下研发环节时，每进入/完成/打回一个环节，都要单独输出一行机器可读标记，格式严格如下（方括号与关键字不可省略）：\n" + "- 进入某环节：[PHASE] <环节> START\n"
+        + "- 完成某环节：[PHASE] <环节> DONE\n" + "- 打回上一步：[PHASE] <环节> REJECT-><目标环节> 原因:<简述>\n"
         + "环节取值固定为：issue（需求来源）、req（需求分析）、design（方案设计）、coder（编码）、reviewer（代码审查）、tester（测试）、pr（提交PR）。\n"
-        + "示例：[PHASE] coder START ；[PHASE] tester REJECT->coder 原因:单测未覆盖审计日志。\n"
-        + "标记须独占一行、按真实进展实时输出，正常叙述照常进行。\n\n" + "请开始处理。";
+        + "示例：[PHASE] coder START ；[PHASE] tester REJECT->coder 原因:单测未覆盖审计日志。\n" + "标记须独占一行、按真实进展实时输出，正常叙述照常进行。\n\n"
+        + "请开始处理。";
 
     /** 查询项目任务列表：会话即任务，状态取自 session_ext(task_status)，环节取自缓存(task_phase)，供看板按状态分列。 */
     public ResponseUtil<List<Map<String, Object>>> listTasks(Long projectId) {
@@ -1174,8 +1172,7 @@ public class DevloopApplicationService {
     }
 
     /**
-     * 查询任务环节进度：按需刷新——缓存缺失或会话有新消息时重算并落库，否则直接返回缓存。
-     * 返回完整快照(7 环节 + 状态 + 打回记录)，供详情抽屉逐环节渲染。
+     * 查询任务环节进度：按需刷新——缓存缺失或会话有新消息时重算并落库，否则直接返回缓存。 返回完整快照(7 环节 + 状态 + 打回记录)，供详情抽屉逐环节渲染。
      */
     public ResponseUtil<DevloopPhaseService.PhaseSnapshot> getTaskPhases(Long sessionId) {
         if (sessionId == null) {
@@ -1199,8 +1196,7 @@ public class DevloopApplicationService {
             return statusMap;
         }
         List<ByaiSessionExt> exts = byaiSessionExtMapper.selectList(new LambdaQueryWrapper<ByaiSessionExt>()
-            .eq(ByaiSessionExt::getExtParamCode, TASK_STATUS_EXT_CODE)
-            .in(ByaiSessionExt::getSessionId, sessionIds));
+            .eq(ByaiSessionExt::getExtParamCode, TASK_STATUS_EXT_CODE).in(ByaiSessionExt::getSessionId, sessionIds));
         for (ByaiSessionExt ext : exts) {
             statusMap.put(ext.getSessionId(), ext.getExtParamValue());
         }
@@ -1214,8 +1210,7 @@ public class DevloopApplicationService {
             return phaseMap;
         }
         List<ByaiSessionExt> exts = byaiSessionExtMapper.selectList(new LambdaQueryWrapper<ByaiSessionExt>()
-            .eq(ByaiSessionExt::getExtParamCode, TASK_PHASE_EXT_CODE)
-            .in(ByaiSessionExt::getSessionId, sessionIds));
+            .eq(ByaiSessionExt::getExtParamCode, TASK_PHASE_EXT_CODE).in(ByaiSessionExt::getSessionId, sessionIds));
         for (ByaiSessionExt ext : exts) {
             DevloopPhaseService.PhaseSnapshot snap = phaseService.fromJson(ext.getExtParamValue());
             if (snap != null) {
@@ -1231,9 +1226,9 @@ public class DevloopApplicationService {
         if (json == null) {
             return;
         }
-        ByaiSessionExt existing = byaiSessionExtMapper.selectOne(new LambdaQueryWrapper<ByaiSessionExt>()
-            .eq(ByaiSessionExt::getExtParamCode, TASK_PHASE_EXT_CODE).eq(ByaiSessionExt::getSessionId, sessionId)
-            .last("limit 1"));
+        ByaiSessionExt existing = byaiSessionExtMapper
+            .selectOne(new LambdaQueryWrapper<ByaiSessionExt>().eq(ByaiSessionExt::getExtParamCode, TASK_PHASE_EXT_CODE)
+                .eq(ByaiSessionExt::getSessionId, sessionId).last("limit 1"));
         if (existing != null) {
             existing.setExtParamValue(json);
             byaiSessionExtMapper.updateById(existing);
@@ -1249,18 +1244,17 @@ public class DevloopApplicationService {
     }
 
     /**
-     * 实时解析任务上下文：不落库，按需从关联链路查。
-     * 需求/仓库：sessionId -> byai_scan_log_item -> source(repoId->仓库) -> log(projectId)；
-     * agent：session.objectId(数字员工resourceId) -> 资源名；负责人：session.creatorId -> 用户名；
-     * 分支：由 taskType(据需求内容判定) + sessionId 确定性重算。关联信息变化后展示随之更新。
+     * 实时解析任务上下文：不落库，按需从关联链路查。 需求/仓库：sessionId -> byai_scan_log_item -> source(repoId->仓库) -> log(projectId)；
+     * agent：session.objectId(数字员工resourceId) -> 资源名；负责人：session.creatorId -> 用户名； 分支：由 taskType(据需求内容判定) + sessionId
+     * 确定性重算。关联信息变化后展示随之更新。
      */
     private Map<String, Object> resolveTaskContext(ByaiSession s) {
         Map<String, Object> ctx = new HashMap<>();
         Long sessionId = s.getSessionId();
 
         // 派生任务会把 sessionId 回写到需求项；据此还原需求与仓库。手动任务无此行，走项目兜底仓库。
-        ScanLogItem item = scanLogItemMapper.selectOne(new LambdaQueryWrapper<ScanLogItem>()
-            .eq(ScanLogItem::getSessionId, sessionId).last("limit 1"));
+        ScanLogItem item = scanLogItemMapper
+            .selectOne(new LambdaQueryWrapper<ScanLogItem>().eq(ScanLogItem::getSessionId, sessionId).last("limit 1"));
         if (item != null) {
             ctx.put("requirementTitle", item.getTitle());
             ctx.put("requirementOriginId", item.getOriginId());
@@ -1294,19 +1288,19 @@ public class DevloopApplicationService {
         try {
             LoginInfo info = loginApplicationService.getLoginInfo(userId);
             return info != null && info.getUserName() != null ? info.getUserName() : "";
-        } catch (Exception e) {
+        }
+        catch (Exception e) {
             log.warn("[Devloop] 解析负责人失败, userId={}", userId, e);
             return "";
         }
     }
 
     /**
-     * 会话映射为前端任务形状：taskId 复用 sessionId 保证前端按 taskId 取值与跳转不变；
-     * status 取自 session_ext(task_status)；phase/currentRound 取自环节快照缓存；
-     * agent/仓库/分支/需求/负责人取自 task_context 上下文；无上下文时相关字段为空。
+     * 会话映射为前端任务形状：taskId 复用 sessionId 保证前端按 taskId 取值与跳转不变； status 取自 session_ext(task_status)；phase/currentRound
+     * 取自环节快照缓存； agent/仓库/分支/需求/负责人取自 task_context 上下文；无上下文时相关字段为空。
      */
-    private Map<String, Object> sessionAsTask(ByaiSession s, String status,
-        DevloopPhaseService.PhaseSnapshot phase, Map<String, Object> ctx) {
+    private Map<String, Object> sessionAsTask(ByaiSession s, String status, DevloopPhaseService.PhaseSnapshot phase,
+        Map<String, Object> ctx) {
         Map<String, Object> map = new HashMap<>();
         map.put("taskId", s.getSessionId());
         map.put("sessionId", s.getSessionId());
@@ -1426,7 +1420,6 @@ public class DevloopApplicationService {
         return ResponseUtil.successResponse(null);
     }
 
-
     // ========== 分享到空间 ==========
 
     /**
@@ -1454,17 +1447,23 @@ public class DevloopApplicationService {
 
             // 提取文件信息
             String path = "/" + projectId + "/" + sessionId + "/" + fileName;
-            FileMetadata fileMetadata = commonFileStorage.write(commonFilePathResolver.projectShare(path),
-                inputStream.readAllBytes(), mediaType.toString());
+
+            StorageLocation location = commonFilePathResolver.projectShare(path);
+            FileMetadata fileMetadata = commonFileStorage.write(location, inputStream.readAllBytes(),
+                mediaType.toString());
 
             logger.info("当前上传文件:{}", JSON.toJSONString(fileMetadata));
+
+            String fileUrl = "/commonFile/preview?style=minio&bucketName={bucketName}&filePath={filePath}";
+            fileUrl = fileUrl.replace("{bucketName}", location.getBucketOrRoot()).replace("{filePath}",
+                location.getPath());
 
             Files byaiFiles = new Files();
             byaiFiles.setFileId(sequenceService.nextVal());
             byaiFiles.setChatId(sessionId);
             byaiFiles.setFileName(fileName);
             byaiFiles.setConvertFileName(fileName);
-            byaiFiles.setFileUrl(fileMetadata.getFileUrl());
+            byaiFiles.setFileUrl(fileUrl);
             byaiFiles.setFileType(fileMetadata.getFileType());
             byaiFiles.setCreateBy(CurrentUserHolder.getCurrentUserId());
             byaiFiles.setCompleteTime(new Date());
