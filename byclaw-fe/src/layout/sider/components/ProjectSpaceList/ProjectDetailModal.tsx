@@ -47,7 +47,7 @@ import {
   getProject,
   listProjectSessionsByQo,
   listProjectMembers,
-  listScanLogItems,
+  listRequirementsBySource,
   listScanLogs,
   listScanSources,
   listTasks,
@@ -59,7 +59,7 @@ import {
   updateScanSource,
 } from '@/service/devloop';
 import { deleteFiles, listFiles, renameFile, type FileBrowserItem } from '@/service/fileBrowser';
-import TaskKanban from '@/pages/devloop/TaskKanban';
+import SessionOverviewDrawer from './SessionOverviewDrawer';
 import type { ProjectSpace } from '@/pages/projectSpace/types';
 import { getArrayData, normalizeProjectSession } from '@/pages/projectSpace/utils';
 import AntdIcon from '@/components/AntdIcon';
@@ -140,6 +140,50 @@ type RequirementItem = {
   content?: string;
   description?: string;
   summary?: string;
+  score?: number | null;
+  priority?: string | null;
+  scoreDetail?: string | null;
+};
+
+// AI 评分明细：与后端 score_detail JSON 字段、满分口径对齐
+type ScoreDetail = {
+  businessValue?: number;
+  userImpact?: number;
+  urgency?: number;
+  strategyFit?: number;
+  feasibility?: number;
+  reuseValue?: number;
+  risk?: number;
+  summary?: string;
+};
+
+const SCORE_DIMENSIONS: { key: keyof ScoreDetail; label: string; max: number }[] = [
+  { key: 'businessValue', label: '业务价值', max: 30 },
+  { key: 'userImpact', label: '用户影响', max: 20 },
+  { key: 'urgency', label: '紧迫度', max: 15 },
+  { key: 'strategyFit', label: '战略匹配', max: 15 },
+  { key: 'feasibility', label: '实现可行性', max: 10 },
+  { key: 'reuseValue', label: '复用价值', max: 10 },
+];
+
+const priorityColor = (priority?: string | null) =>
+  priority === 'P0' ? 'red' : priority === 'P1' ? 'orange' : 'default';
+
+// 综合分配色：>=80 绿，>=60 蓝，<60 橙；无分灰
+const scoreBg = (score?: number | null) => {
+  if (score == null) return '#f0f0f0';
+  if (score >= 80) return '#e9f8f0';
+  if (score >= 60) return '#eaf2ff';
+  return '#fff3dc';
+};
+
+const parseScoreDetail = (raw?: string | null): ScoreDetail => {
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
 };
 
 type SourceForm = {
@@ -175,7 +219,6 @@ type Props = {
   onProjectSharedChange?: (projectId: string | number) => void;
 };
 
-const SCORE_COLORS = ['#e9f8f0', '#fff3dc', '#eaf2ff'];
 const REQUIREMENT_PAGE_SIZE = 20;
 
 const PHASE_COLORS: Record<string, string> = {
@@ -185,6 +228,14 @@ const PHASE_COLORS: Record<string, string> = {
   测试: 'purple',
   审批: 'cyan',
   发布: 'gold',
+};
+
+// 任务状态色（状态存于 byai_session_ext，看板与卡片共用）
+const STATUS_COLORS: Record<string, string> = {
+  待开始: 'default',
+  进行中: 'blue',
+  暂停: 'orange',
+  完成: 'green',
 };
 
 const cronPresets = [
@@ -286,6 +337,7 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
   const [repos, setRepos] = useState<RepoOption[]>([]);
   const [requirements, setRequirements] = useState<RequirementItem[]>([]);
   const [visibleRequirementCount, setVisibleRequirementCount] = useState(REQUIREMENT_PAGE_SIZE);
+  const [detailReq, setDetailReq] = useState<RequirementItem | null>(null);
   const [expandedRequirementId, setExpandedRequirementId] = useState<number | null>(null);
   const [startingRequirementIds, setStartingRequirementIds] = useState<Set<number>>(() => new Set());
   const [tasks, setTasks] = useState<any[]>([]);
@@ -402,23 +454,23 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
       try {
         // 只消费本次请求得到的收集源列表，避免 setSources 后触发 useEffect 依赖变化造成需求 tab 循环请求。
         for (const source of sourceList) {
-          const logs = (await listScanLogs(source.sourceId, 10)) || [];
-          for (const log of logs) {
-            if (!latestLog || new Date(log.scanTime) > new Date(latestLog.scanTime)) {
-              latestLog = log;
-            }
-            const items = (await listScanLogItems(log.logId)) || [];
-            items
-              .filter((item: any) => item.action === 'created')
-              .forEach((item: any) => {
-                allItems.push({
-                  ...item,
-                  sourceType: source.sourceType,
-                  sourceName: source.sourceName,
-                });
-              });
+          // 需求直接按源查(含历史)，不再遍历最近日志——否则早期需求会被空扫描日志挤出而漏显。
+          const items = (await listRequirementsBySource(source.sourceId)) || [];
+          items.forEach((item: any) => {
+            allItems.push({
+              ...item,
+              sourceType: source.sourceType,
+              sourceName: source.sourceName,
+            });
+          });
+          // 仅取最近一条日志用于“上次扫描完成”状态展示。
+          const logs = (await listScanLogs(source.sourceId, 1)) || [];
+          if (logs[0] && (!latestLog || new Date(logs[0].scanTime) > new Date(latestLog.scanTime))) {
+            latestLog = logs[0];
           }
         }
+        // 跨源合并后按综合分倒序，未评分(score 为空)沉底。
+        allItems.sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
         setRequirements(allItems);
         setVisibleRequirementCount(REQUIREMENT_PAGE_SIZE);
         setLastLog(latestLog);
@@ -730,6 +782,7 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
   useEffect(() => {
     setActiveTab(showRequirementsTab ? 'requirements' : 'tasks');
     setExpandedTaskId(null);
+    setDetailReq(null);
     setExpandedRequirementId(null);
     setVisibleRequirementCount(REQUIREMENT_PAGE_SIZE);
     startingRequirementIdsRef.current.clear();
@@ -894,8 +947,8 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
   );
 
   const handleGoToTaskChat = useCallback(
-    (task: any, event: React.MouseEvent<HTMLElement>) => {
-      event.stopPropagation();
+    (task: any, event?: React.MouseEvent<HTMLElement>) => {
+      event?.stopPropagation();
       if (!task?.sessionId) {
         message.warning('未找到任务会话');
         return;
@@ -1465,7 +1518,7 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
       </div>
       {requirements.length ? (
         <div className={styles.detailRequirementList}>
-          {visibleRequirements.map((item, index) => {
+          {visibleRequirements.map((item) => {
             const isStarting = startingRequirementIds.has(item.itemId);
             const isStarted = !!item.sessionId;
             const expanded = expandedRequirementId === item.itemId;
@@ -1473,6 +1526,8 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
             const sourceName = item.sourceName || '-';
             const createTime = item.createTime ? dayjs(item.createTime).format('MM-DD HH:mm') : '-';
             const detailText = getRequirementDetailText(item);
+            const scoreDetail = parseScoreDetail(item.scoreDetail);
+            const scored = item.score != null;
 
             return (
               <div
@@ -1483,14 +1538,18 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
                 onClick={() => setExpandedRequirementId((prev) => (prev === item.itemId ? null : item.itemId))}
               >
                 <div className={styles.detailRequirementSummary}>
-                  <span
-                    className={styles.detailScore}
-                    style={{ background: SCORE_COLORS[index % SCORE_COLORS.length] }}
-                  >
-                    {60 + ((item.itemId || index) % 40)}
+                  <span className={styles.detailScore} style={{ background: scoreBg(item.score) }}>
+                    {scored ? item.score : '—'}
                   </span>
                   <div className={styles.detailRequirementMain}>
-                    <strong>{item.title}</strong>
+                    <strong>
+                      {item.priority ? (
+                        <Tag color={priorityColor(item.priority)} style={{ marginRight: 6 }}>
+                          {item.priority}
+                        </Tag>
+                      ) : null}
+                      {item.title}
+                    </strong>
                     <span>
                       {sourceLabel} · {sourceName} · {createTime}
                     </span>
@@ -1523,12 +1582,8 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
                   <div className={styles.detailRequirementExpanded}>
                     <div className={styles.detailRequirementMetaGrid}>
                       <span>
-                        <em>需求ID</em>
-                        <strong>{item.itemId || '-'}</strong>
-                      </span>
-                      <span>
-                        <em>来源</em>
-                        <strong>{sourceLabel}</strong>
+                        <em>综合评分</em>
+                        <strong>{scored ? `${item.score}（${item.priority || '-'}）` : '未评分'}</strong>
                       </span>
                       <span>
                         <em>创建时间</em>
@@ -1540,32 +1595,28 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
                       </span>
                     </div>
                     <div className={styles.detailRequirementDetailText}>
-                      <em>需求内容</em>
-                      {/* 展开卡片内正文会截断，鼠标经过时展示完整需求内容。 */}
+                      <em>{scoreDetail.summary ? 'AI 整理的产品需求' : '需求内容'}</em>
                       <Tooltip
                         title={detailText}
                         placement="top"
                         overlayInnerStyle={{ maxWidth: 360, whiteSpace: 'pre-wrap' }}
                       >
-                        <p>{detailText}</p>
+                        <p>{scoreDetail.summary || detailText}</p>
                       </Tooltip>
                     </div>
-                    {(item.originId || item.originUrl || item.action) && (
-                      <div className={styles.detailRequirementExtra}>
-                        {item.originId && <span>原始ID：{item.originId}</span>}
-                        {item.action && <span>动作：{item.action}</span>}
-                        {item.originUrl && (
-                          <a
-                            href={item.originUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            onClick={(event) => event.stopPropagation()}
-                          >
-                            查看来源
-                          </a>
-                        )}
-                      </div>
-                    )}
+                    <div className={styles.detailRequirementExtra}>
+                      <Button
+                        type="link"
+                        size="small"
+                        style={{ padding: 0 }}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setDetailReq(item);
+                        }}
+                      >
+                        查看完整评分与需求详情
+                      </Button>
+                    </div>
                   </div>
                 )}
               </div>
@@ -1576,8 +1627,81 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
       ) : (
         <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无需求，请去「渠道配置」点击「扫描」收集" />
       )}
+      {renderRequirementDetailModal()}
     </>
   );
+
+  const renderRequirementDetailModal = () => {
+    if (!detailReq) return null;
+    const detail = parseScoreDetail(detailReq.scoreDetail);
+    const sourceLabel = getSourceLabel(detailReq.sourceType);
+    const scored = detailReq.score != null;
+    const createTime = detailReq.createTime ? dayjs(detailReq.createTime).format('YYYY-MM-DD HH:mm') : '-';
+    return (
+      <Modal
+        title={detailReq.title}
+        open={!!detailReq}
+        onCancel={() => setDetailReq(null)}
+        footer={<Button onClick={() => setDetailReq(null)}>关闭</Button>}
+        width={720}
+      >
+        <div className={styles.scoreSummary}>
+          <div className={styles.scoreSummaryCircle} style={{ background: scoreBg(detailReq.score) }}>
+            {scored ? detailReq.score : '—'}
+          </div>
+          <div>
+            <div className={styles.scoreSummaryLabel}>AI 综合评分</div>
+            <div className={styles.scoreSummaryPriority}>
+              {detailReq.priority || '—'}
+              {detailReq.sessionId ? ' · 研发中' : ''}
+            </div>
+            <div className={styles.scoreSummaryHint}>
+              {detailReq.sessionId ? '已满足自动派生研发任务规则' : '尚未启动研发任务'}
+            </div>
+          </div>
+        </div>
+
+        {detail.summary && (
+          <div className={styles.formField} style={{ marginTop: 16 }}>
+            <label>AI 整理的产品需求</label>
+            <div>{detail.summary}</div>
+          </div>
+        )}
+        <div className={styles.formField}>
+          <label>原始需求</label>
+          <div style={{ whiteSpace: 'pre-wrap', color: '#555' }}>{getRequirementDetailText(detailReq)}</div>
+        </div>
+        <div className={styles.formField}>
+          <label>来源</label>
+          <div>
+            {sourceLabel} · {detailReq.sourceName || '-'} · {createTime}
+          </div>
+        </div>
+
+        {scored && (
+          <div className={styles.formField}>
+            <label>评分维度</label>
+            <div className={styles.detailScoreDimGrid}>
+              {SCORE_DIMENSIONS.map((d) => (
+                <div key={d.key} className={styles.detailScoreDimItem}>
+                  <span>{d.label}</span>
+                  <strong>
+                    +{detail[d.key] ?? 0} / {d.max}
+                  </strong>
+                </div>
+              ))}
+              {detail.risk != null && detail.risk !== 0 && (
+                <div className={styles.detailScoreDimItem}>
+                  <span>风险与冲突</span>
+                  <strong style={{ color: '#cf1322' }}>{detail.risk}</strong>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </Modal>
+    );
+  };
 
   const renderResources = () => {
     const currentSessionFiles = currentResourceSession?.sessionId
@@ -1688,7 +1812,7 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
           {tasks.map((task) => {
             const progress = task.totalRounds > 0 ? Math.round((task.currentRound / task.totalRounds) * 100) : 0;
             const isExpanded = `${expandedTaskId || ''}` === `${task.taskId}`;
-            // 后端当前把任务专属字段置空时，不渲染空 Tag，避免卡片标题下出现残缺横线。
+            // 会话即任务后仅状态由 session_ext 提供，阶段/分支等仍可能为空，空则不渲染避免残缺横线。
             const hasTaskMeta = !!task.phase || !!task.agentName || !!task.branchName;
 
             return (
@@ -1702,7 +1826,14 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
                     <Tooltip placement="top" title={task.title}>
                       <h4 className={styles.detailTaskTitle}>{task.title}</h4>
                     </Tooltip>
-                    {hasTaskMeta && (
+                    {task.status && (
+                      <div className={styles.detailTaskMeta}>
+                        <Tag color={STATUS_COLORS[task.status] || 'default'}>{task.status}</Tag>
+                        {task.agentName && <span>{task.agentName}</span>}
+                        {task.branchName && <span className={styles.detailTaskBranch}>{task.branchName}</span>}
+                      </div>
+                    )}
+                    {!task.status && hasTaskMeta && (
                       <div className={styles.detailTaskMeta}>
                         {task.phase && <Tag color={PHASE_COLORS[task.phase] || 'default'}>{task.phase}</Tag>}
                         {task.agentName && <span>{task.agentName}</span>}
@@ -1757,10 +1888,6 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
                       </Tooltip>
                     </span>
                     <span>
-                      <label>会话</label>
-                      <strong>{task.sessionId || '-'}</strong>
-                    </span>
-                    <span>
                       <label>创建时间</label>
                       <strong>{task.createTime ? dayjs(task.createTime).format('MM-DD HH:mm') : '-'}</strong>
                     </span>
@@ -1790,12 +1917,11 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
         />
       )}
 
-      <TaskKanban
+      <SessionOverviewDrawer
         open={taskKanbanOpen}
         onClose={() => setTaskKanbanOpen(false)}
         tasks={tasks}
         onRefresh={fetchTasks}
-        projectId={projectId}
       />
     </div>
   );

@@ -228,11 +228,6 @@ export default [
             component: './accessTokenMgmt',
           },
           {
-            path: '/devloop',
-            name: 'devloop',
-            component: './devloop',
-          },
-          {
             path: '/projectSpace',
             name: 'projectSpace',
             component: './projectSpace',

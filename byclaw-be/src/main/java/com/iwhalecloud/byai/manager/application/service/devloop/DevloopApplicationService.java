@@ -20,6 +20,7 @@ import com.iwhalecloud.byai.manager.dto.devloop.ScanSourceDTO;
 import com.iwhalecloud.byai.manager.dto.session.ByaiSessionDto;
 import com.iwhalecloud.byai.manager.entity.devloop.*;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
+import com.iwhalecloud.byai.manager.entity.session.ByaiSessionExt;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.mapper.devloop.ProjectMapper;
 import com.iwhalecloud.byai.manager.mapper.devloop.ProjectRepoMapper;
@@ -59,6 +60,11 @@ public class DevloopApplicationService {
 
     private static final String PROJECT_TYPE_DEFAULT = "default";
 
+    /** 任务状态存于 byai_session_ext 纵表的键；创建任务默认「进行中」 */
+    private static final String TASK_STATUS_EXT_CODE = "task_status";
+
+    private static final String TASK_STATUS_DEFAULT = "进行中";
+
     /**
      * 研发任务 LLM 对话异步执行线程池。 TtlExecutors 包装以透传 CurrentUserHolder 的 LoginInfo；任务创建接口据此立即返回， chat 在后台执行，避免前端等待数分钟。
      */
@@ -78,6 +84,9 @@ public class DevloopApplicationService {
 
     @Autowired
     private ByaiSessionMapper byaiSessionMapper;
+
+    @Autowired
+    private com.iwhalecloud.byai.manager.mapper.session.ByaiSessionExtMapper byaiSessionExtMapper;
 
     @Autowired
     private ScanLogItemMapper scanLogItemMapper;
@@ -668,22 +677,40 @@ public class DevloopApplicationService {
         List<ScanLogItem> items = scanLogService.listItemsByLogId(logId);
         List<Map<String, Object>> list = new ArrayList<>();
         for (ScanLogItem item : items) {
-            Map<String, Object> map = new HashMap<>();
-            map.put("itemId", item.getItemId());
-            map.put("title", item.getTitle());
-            // 需求列表展开态需要展示完整内容，并据 sessionId 判断是否已启动。
-            map.put("content", item.getContent());
-            map.put("originId", item.getOriginId());
-            map.put("originUrl", item.getOriginUrl());
-            map.put("action", item.getAction());
-            map.put("sessionId", item.getSessionId());
-            map.put("score", item.getScore());
-            map.put("priority", item.getPriority());
-            map.put("scoreDetail", item.getScoreDetail());
-            map.put("createTime", item.getCreateTime());
-            list.add(map);
+            list.add(toRequirementMap(item));
         }
         return ResponseUtil.successResponse(list);
+    }
+
+    /**
+     * 按扫描源直接查询已收集的需求(action=created)，供需求列表展示。
+     * 需求随日志滚动，按“最近N条日志”遍历会漏掉早期扫到的需求，故直接按 source 查条目。
+     */
+    public ResponseUtil<List<Map<String, Object>>> listRequirementsBySource(Long sourceId) {
+        List<ScanLogItem> items = scanLogService.listCreatedItemsBySource(sourceId);
+        List<Map<String, Object>> list = new ArrayList<>();
+        for (ScanLogItem item : items) {
+            list.add(toRequirementMap(item));
+        }
+        return ResponseUtil.successResponse(list);
+    }
+
+    /** 扫描条目转前端需求视图，统一 listScanLogItems 与 listRequirementsBySource 的字段口径。 */
+    private Map<String, Object> toRequirementMap(ScanLogItem item) {
+        Map<String, Object> map = new HashMap<>();
+        map.put("itemId", item.getItemId());
+        map.put("title", item.getTitle());
+        // 需求列表展开态需要展示完整内容，并据 sessionId 判断是否已启动。
+        map.put("content", item.getContent());
+        map.put("originId", item.getOriginId());
+        map.put("originUrl", item.getOriginUrl());
+        map.put("action", item.getAction());
+        map.put("sessionId", item.getSessionId());
+        map.put("score", item.getScore());
+        map.put("priority", item.getPriority());
+        map.put("scoreDetail", item.getScoreDetail());
+        map.put("createTime", item.getCreateTime());
+        return map;
     }
 
     @Autowired
@@ -871,6 +898,15 @@ public class DevloopApplicationService {
         assistantChatService.createGroupChatSession(chatDto);
         Long sessionId = chatDto.getSessionId();
 
+        // 任务状态存入 session_ext 纵表(参考 feishuChatId 等扩展)，默认「进行中」，供任务看板分列
+        ByaiSessionExt statusExt = new ByaiSessionExt();
+        statusExt.setExtId(sequenceService.nextVal());
+        statusExt.setSessionId(sessionId);
+        statusExt.setExtParamName("任务状态");
+        statusExt.setExtParamCode(TASK_STATUS_EXT_CODE);
+        statusExt.setExtParamValue(TASK_STATUS_DEFAULT);
+        byaiSessionExtMapper.insert(statusExt);
+
         String branchName = buildBranchName(taskType, sessionId);
         Project project = projectMapper.selectById(projectId);
         String projectName = project != null ? project.getProjectName() : "";
@@ -1051,13 +1087,16 @@ public class DevloopApplicationService {
         + "3. 完成开发后自测，确保编译通过、相关测试通过\n" + "4. 提交改动到分支 ${branchName}，提交信息清晰说明本次改动\n" + "5. 如需求描述不清或存在阻塞，明确说明遇到的问题\n\n"
         + "请开始处理。";
 
-    /** 查询项目任务列表：会话即任务，返回项目下的会话映射成任务形状（看板专属字段无来源，置空） */
+    /** 查询项目任务列表：会话即任务，状态取自 session_ext(task_status)，供看板按状态分列 */
     public ResponseUtil<List<Map<String, Object>>> listTasks(Long projectId) {
         List<ByaiSession> sessions = byaiSessionMapper.selectList(new LambdaQueryWrapper<ByaiSession>()
             .eq(ByaiSession::getProjectId, projectId).orderByDesc(ByaiSession::getCreateTime));
+        // 批量取任务状态，避免逐会话查 session_ext 造成 N+1
+        Map<Long, String> statusMap = loadTaskStatusMap(
+            sessions.stream().map(ByaiSession::getSessionId).collect(java.util.stream.Collectors.toList()));
         List<Map<String, Object>> list = new ArrayList<>();
         for (ByaiSession s : sessions) {
-            list.add(sessionAsTask(s));
+            list.add(sessionAsTask(s, statusMap.get(s.getSessionId())));
         }
         return ResponseUtil.successResponse(list);
     }
@@ -1067,22 +1106,40 @@ public class DevloopApplicationService {
         ByaiSession s = byaiSessionMapper.selectById(sessionId);
         if (s == null)
             return ResponseUtil.failRes("会话不存在");
-        return ResponseUtil.successResponse(sessionAsTask(s));
+        Map<Long, String> statusMap = loadTaskStatusMap(java.util.Collections.singletonList(sessionId));
+        return ResponseUtil.successResponse(sessionAsTask(s, statusMap.get(sessionId)));
+    }
+
+    /** 批量读取会话的任务状态(session_ext.task_status)，返回 sessionId -> status。 */
+    private Map<Long, String> loadTaskStatusMap(List<Long> sessionIds) {
+        Map<Long, String> statusMap = new HashMap<>();
+        if (sessionIds == null || sessionIds.isEmpty()) {
+            return statusMap;
+        }
+        List<ByaiSessionExt> exts = byaiSessionExtMapper.selectList(new LambdaQueryWrapper<ByaiSessionExt>()
+            .eq(ByaiSessionExt::getExtParamCode, TASK_STATUS_EXT_CODE)
+            .in(ByaiSessionExt::getSessionId, sessionIds));
+        for (ByaiSessionExt ext : exts) {
+            statusMap.put(ext.getSessionId(), ext.getExtParamValue());
+        }
+        return statusMap;
     }
 
     /**
-     * 会话映射为前端任务形状：taskId 复用 sessionId 保证前端按 taskId 取值与跳转不变； status/phase/score/branchName/warningTag/round
-     * 等为任务专属字段，会话无来源，置空。
+     * 会话映射为前端任务形状：taskId 复用 sessionId 保证前端按 taskId 取值与跳转不变；
+     * status 取自 session_ext；sessionContent/updateTime 供列表摘要与时间展示；其余任务专属字段会话无来源，置空。
      */
-    private Map<String, Object> sessionAsTask(ByaiSession s) {
+    private Map<String, Object> sessionAsTask(ByaiSession s, String status) {
         Map<String, Object> map = new HashMap<>();
         map.put("taskId", s.getSessionId());
         map.put("sessionId", s.getSessionId());
         map.put("projectId", s.getProjectId());
         map.put("title", s.getSessionName());
+        map.put("sessionContent", s.getSessionContent());
         map.put("createBy", s.getCreatorId());
         map.put("createTime", s.getCreateTime());
-        map.put("status", null);
+        map.put("updateTime", s.getUpdateTime());
+        map.put("status", status);
         map.put("phase", null);
         map.put("currentRound", null);
         map.put("totalRounds", null);

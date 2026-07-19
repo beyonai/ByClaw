@@ -107,6 +107,17 @@ public class DevloopController {
     }
 
     /**
+     * 按扫描源查询已收集的需求列表(action=created)
+     * @param params 包含 sourceId
+     * @return 该源下所有需求条目(含评分)，按时间倒序
+     */
+    @PostMapping("/source/requirements")
+    public ResponseUtil<List<Map<String, Object>>> listRequirementsBySource(@RequestBody Map<String, Object> params) {
+        Long sourceId = Long.valueOf(params.get("sourceId").toString());
+        return applicationService.listRequirementsBySource(sourceId);
+    }
+
+    /**
      * 保存GitHub Personal Access Token
      * @param params 包含 pat（明文，后端SM4加密存储）
      */

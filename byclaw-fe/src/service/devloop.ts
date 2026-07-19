@@ -98,6 +98,10 @@ export const listScanLogs = (sourceId: number, limit = 20) =>
 
 export const listScanLogItems = (logId: number) => POST<any>('/byaiService/devloop/log/items', { logId });
 
+// 按扫描源直查已收集需求(action=created)，避免按最近N条日志遍历漏掉早期需求
+export const listRequirementsBySource = (sourceId: number) =>
+  POST<any>('/byaiService/devloop/source/requirements', { sourceId });
+
 // PAT 管理
 export const saveGitHubPat = (pat: string) => POST<any>('/byaiService/devloop/pat/github', { pat });
 
