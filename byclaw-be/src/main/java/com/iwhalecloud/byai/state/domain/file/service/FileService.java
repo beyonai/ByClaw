@@ -37,6 +37,15 @@ public class FileService {
     private FilesApplicationService filesApplicationService;
 
     /**
+     * 获取文件信息对象
+     *
+     * @param fileId 文件标识
+     */
+    public Files findById(Long fileId) {
+        return filesMapper.selectById(fileId);
+    }
+
+    /**
      * 保存文件
      *
      * @param files 文件信息
@@ -76,7 +85,8 @@ public class FileService {
             }
 
             String fileUrl = file.getFileUrl();
-            String bucketName = UriComponentsBuilder.fromUriString(fileUrl).build().getQueryParams().getFirst("bucketName");
+            String bucketName = UriComponentsBuilder.fromUriString(fileUrl).build().getQueryParams()
+                .getFirst("bucketName");
             String filePath = UriComponentsBuilder.fromUriString(fileUrl).build().getQueryParams().getFirst("filePath");
 
             InputStream inputStream = filesApplicationService.openCommonFileInputStream(bucketName, filePath);
@@ -84,20 +94,14 @@ public class FileService {
             String fileName = file.getFileName() != null ? file.getFileName() : "file";
             String encodedFileName = URLEncoder.encode(fileName, StandardCharsets.UTF_8);
             Map<String, java.util.Collection<String>> headers = new HashMap<>();
-            headers.put("Content-Disposition",
-                Collections.singletonList("attachment;filename=" + encodedFileName));
-            headers.put("Content-Type",
-                Collections.singletonList("application/octet-stream"));
-            return Response.builder()
-                .status(200)
-                .reason("OK")
-                .headers(headers)
-                .body(inputStream, null)
-                .request(Request.create(Request.HttpMethod.GET,
-                    "/files/download?fileId=" + fileId,
+            headers.put("Content-Disposition", Collections.singletonList("attachment;filename=" + encodedFileName));
+            headers.put("Content-Type", Collections.singletonList("application/octet-stream"));
+            return Response.builder().status(200).reason("OK").headers(headers).body(inputStream, null)
+                .request(Request.create(Request.HttpMethod.GET, "/files/download?fileId=" + fileId,
                     Collections.emptyMap(), null, null, null))
                 .build();
-        } catch (Exception e) {
+        }
+        catch (Exception e) {
             logger.error("下载文件失败 - fileId: {}, error: {}", fileId, e.getMessage(), e);
             return null;
         }

@@ -5,12 +5,18 @@ import com.iwhalecloud.byai.manager.application.service.devloop.DevloopApplicati
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectListDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectRepoDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileListDto;
+import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileQueryDto;
+import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileSaveDto;
 import com.iwhalecloud.byai.manager.dto.session.ByaiSessionDto;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.qo.devloop.ProjectQo;
 import com.iwhalecloud.byai.manager.qo.devloop.ProjectSessionQo;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 import java.util.Map;
@@ -45,7 +51,7 @@ public class ProjectController {
     @PostMapping("/list")
     public ResponseUtil<List<ProjectListDto>> listProjects(@RequestBody ProjectQo projectQo) {
         List<ProjectListDto> projectListDtos = applicationService.listProjects(projectQo);
-         return ResponseUtil.successResponse(projectListDtos);
+        return ResponseUtil.successResponse(projectListDtos);
     }
 
     /**
@@ -137,5 +143,29 @@ public class ProjectController {
         Long projectId = Long.valueOf(params.get("projectId").toString());
         Long sessionId = Long.valueOf(params.get("sessionId").toString());
         return applicationService.unbindProjectSession(projectId, sessionId);
+    }
+
+    /**
+     * 保存到项目空间
+     *
+     * @param dto 请求参数
+     */
+    @PostMapping("/share/saveToSpace")
+    public ResponseUtil<Void> saveShareToSpace(@RequestBody ProjectShareFileSaveDto dto) {
+        applicationService.saveShareToSpace(dto);
+        return ResponseUtil.successResponse();
+    }
+
+    /**
+     * 查询空间文件列表
+     *
+     * @param dto 包含 projectId
+     */
+    @PostMapping("/share/listSpaceFiles")
+    public ResponseUtil<List<ProjectShareFileListDto>> listSpaceFiles(@RequestBody ProjectShareFileQueryDto dto) {
+        if (dto == null || dto.getProjectId() == null || dto.getProjectId() == 0L) {
+            return ResponseUtil.failRes("projectId不能为空");
+        }
+        return ResponseUtil.successResponse(applicationService.listSpaceFiles(dto));
     }
 }

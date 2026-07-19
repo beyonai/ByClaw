@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.devloop.ProjectShareFileMapper">
+
+    <resultMap id="ProjectShareFileListDtoResultMap"
+               type="com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileListDto">
+        <result column="file_id" property="fileId"/>
+        <result column="file_name" property="fileName"/>
+        <result column="file_url" property="fileUrl"/>
+        <result column="project_id" property="projectId"/>
+        <result column="share_link" property="shareLink"/>
+    </resultMap>
+
+    <select id="listSpaceFiles" resultMap="ProjectShareFileListDtoResultMap">
+        SELECT a.file_id,
+               a.file_name,
+               a.file_url,
+               a.project_id,
+               b.share_link
+        FROM byai_files a
+                 JOIN byai_project_share_file b ON a.file_id = b.file_id
+        WHERE a.project_id = #{projectId}
+        ORDER BY b.create_time DESC
+    </select>
+
+</mapper>

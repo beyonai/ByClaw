@@ -112,6 +112,25 @@ COMMENT ON COLUMN byai.byai_project_share.target_type IS '共享对象类型：U
 COMMENT ON COLUMN byai.byai_project_share.target_id IS '共享对象ID';
 COMMENT ON COLUMN byai.byai_project_share.target_name IS '共享对象名称';
 
+-- 项目空间共享文件表
+CREATE TABLE IF NOT EXISTS byai.byai_project_share_file
+(
+    share_id    BIGINT PRIMARY KEY NOT NULL,
+    project_id  BIGINT,
+    file_id     BIGINT             NOT NULL,
+    share_link  VARCHAR(1000),
+    create_by   BIGINT,
+    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+COMMENT ON TABLE byai.byai_project_share_file IS '项目空间共享文件表';
+COMMENT ON COLUMN byai.byai_project_share_file.share_id IS '共享记录ID';
+COMMENT ON COLUMN byai.byai_project_share_file.project_id IS '项目ID';
+COMMENT ON COLUMN byai.byai_project_share_file.file_id IS '文件ID';
+COMMENT ON COLUMN byai.byai_project_share_file.share_link IS '分享链接';
+COMMENT ON COLUMN byai.byai_project_share_file.create_by IS '创建人';
+COMMENT ON COLUMN byai.byai_project_share_file.create_time IS '创建时间';
+
 -- 需求扫描源配置表
 CREATE TABLE IF NOT EXISTS byai.byai_scan_source (
     source_id       BIGINT          NOT NULL,
@@ -213,3 +232,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_project_session_unique ON byai.byai_projec
 CREATE INDEX IF NOT EXISTS idx_project_share_project ON byai.byai_project_share(project_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_project_share_unique
     ON byai.byai_project_share(project_id, target_type, target_id);
+CREATE INDEX IF NOT EXISTS idx_project_share_file_project ON byai.byai_project_share_file(project_id);
+CREATE INDEX IF NOT EXISTS idx_project_share_file_file ON byai.byai_project_share_file(file_id);
+CREATE INDEX IF NOT EXISTS idx_project_share_file_create_by ON byai.byai_project_share_file(create_by);

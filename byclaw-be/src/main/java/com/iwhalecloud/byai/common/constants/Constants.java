@@ -277,6 +277,11 @@ public final class Constants {
      */
     public static final String BUCKET_NAME_ICON = "byai-icon";
 
+    /**
+     * 项目文件共享
+     */
+    public static final String BUCKET_NAME_PROJECT_SHARE = "byai-project-share";
+
     public static final class ResourceBizType {
 
         public static final String DIG_EMPLOYEE = "DIG_EMPLOYEE";
