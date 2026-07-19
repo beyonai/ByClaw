@@ -26,6 +26,14 @@ type DevloopProjectSessionListPayload = {
   keyword?: string;
 };
 
+export type DevloopProjectSpaceFile = {
+  fileId: number;
+  fileName: string;
+  fileUrl: string;
+  projectId: number;
+  shareLink?: string | null;
+};
+
 // 项目管理
 export const createProject = (data: DevloopProjectPayload) => POST<any>('/byaiService/devloop/project/create', data);
 
@@ -59,6 +67,18 @@ export const unbindProjectSession = (data: { projectId: number; sessionId: numbe
 // 项目会话列表按项目懒加载，避免项目列表接口一次带出大量会话。
 export const listProjectSessionsByQo = (data: DevloopProjectSessionListPayload, config?: ConfigType) =>
   POST<any>('/byaiService/devloop/project/session/listByQo', data, config);
+
+// 项目资源 tab 的共享文件空间使用项目维度文件接口，不再读取当前数字员工的 /.shared/ 目录。
+export const listProjectSpaceFiles = (projectId: number) =>
+  POST<DevloopProjectSpaceFile[]>('/byaiService/devloop/project/share/listSpaceFiles', { projectId });
+
+// 会话空间文件保存到当前项目共享文件空间，成功后刷新共享文件列表。
+export const saveProjectFileToSpace = (data: {
+  projectId: number;
+  sessionId: number;
+  filePath: string;
+  fileName: string;
+}) => POST<void>('/byaiService/devloop/project/share/saveToSpace', data);
 
 // 扫描源管理
 export const createScanSource = (data: {

@@ -47,6 +47,7 @@ import {
   deleteScanSource,
   getProject,
   getTaskPhases,
+  listProjectSpaceFiles,
   listProjectSessionsByQo,
   listProjectMembers,
   listRequirementsBySource,
@@ -54,11 +55,13 @@ import {
   listScanSources,
   listTasks,
   saveGitHubPat,
+  saveProjectFileToSpace,
   searchDingtalkGroups,
   startDwsDeviceAuth,
   toggleScanSource,
   triggerScan,
   updateScanSource,
+  type DevloopProjectSpaceFile,
 } from '@/service/devloop';
 import { deleteFiles, listFiles, renameFile, type FileBrowserItem } from '@/service/fileBrowser';
 import SessionOverviewDrawer from './SessionOverviewDrawer';
@@ -84,6 +87,7 @@ import {
 import {
   canPreviewFile,
   ensureDirectoryPath,
+  getFileType,
   getParentDirectoryPath,
   getSessionFilePath,
   isDirectory,
@@ -93,6 +97,7 @@ import {
   sortFileBrowserItems,
   unwrapListResponse,
 } from '@/layout/sider/components/FileSiderPanel/utils';
+import { downloadFile as downloadUrlFile, getFileUrl } from '@/utils/file';
 import { SiderContentContext } from '@/layout/sider/siderContentContext';
 import ProjectMemberList from './ProjectMemberList';
 import styles from './index.module.less';
@@ -214,6 +219,10 @@ type ManualRequirementForm = {
 
 type ResourceFileScope = 'current' | 'all';
 type ProjectResourceSession = NonNullable<ProjectSpace['sessions']>[number];
+type ProjectSpaceFileItem = FileBrowserItem &
+  DevloopProjectSpaceFile & {
+    isProjectSpaceFile: true;
+  };
 
 type Props = {
   project?: ProjectSpace;
@@ -320,6 +329,15 @@ const getSourceLabel = (sourceType?: string) => {
 };
 
 const getSessionResourceName = (session: Partial<ProjectResourceSession>) => session?.sessionName || '未命名会话';
+
+const normalizeProjectSpaceFile = (file: DevloopProjectSpaceFile): ProjectSpaceFileItem => ({
+  ...file,
+  // 项目共享文件接口返回 fileName/fileUrl，这里补齐文件树组件使用的 name/path/isDir 字段。
+  name: file.fileName || '',
+  path: file.fileUrl || `${SHARED_FILE_PATH}${file.fileName || ''}`,
+  isDir: false,
+  isProjectSpaceFile: true,
+});
 
 const getRequirementDetailText = (requirement: RequirementItem) =>
   requirement.productContent ||
@@ -566,12 +584,14 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
   }, [projectId]);
 
   const fetchSharedResourceFiles = useCallback(async () => {
-    if (!fileResourceId) return;
+    if (!projectId) return;
     setSharedFilesLoading(true);
     try {
-      // 共享文件与文件模块“共享文件空间”同源，路径固定使用 /.shared/。
-      const res = await listFiles({ resourceId: fileResourceId, path: SHARED_FILE_PATH });
-      setSharedFiles(sortFileBrowserItems(unwrapListResponse<FileBrowserItem>(res)));
+      // 共享文件空间改为项目维度接口，避免继续读取当前数字员工的 /.shared/ 目录。
+      const res = await listProjectSpaceFiles(projectId);
+      setSharedFiles(
+        sortFileBrowserItems(unwrapListResponse<DevloopProjectSpaceFile>(res).map(normalizeProjectSpaceFile))
+      );
     } catch (error) {
       console.error('Failed to load shared project files:', error);
       message.error('共享文件加载失败');
@@ -579,7 +599,7 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
     } finally {
       setSharedFilesLoading(false);
     }
-  }, [fileResourceId]);
+  }, [projectId]);
 
   const fetchSessionResourceFiles = useCallback(
     async (sessionId: string) => {
@@ -665,7 +685,24 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
     [fetchSessionResourceFiles, fetchSharedResourceFiles, fileResourceId]
   );
 
-  const getResourceFileActionItems = useCallback(
+  const getSharedResourceFileActionItems = useCallback(
+    (item: FileBrowserItem): MenuProps['items'] => {
+      const labelIdMap = {
+        preview: 'fileBrowser.action.preview',
+        download: 'directoryManage.downloadFile',
+      };
+      const actionKeys = [...(canPreviewFile(item) ? (['preview'] as const) : []), 'download'] as const;
+
+      // 项目共享文件来自 listSpaceFiles，只保留新接口能安全支撑的预览和下载操作。
+      return actionKeys.map((key) => ({
+        key,
+        label: <div className={employeeStyles.dropdownMenuItem}>{intl.formatMessage({ id: labelIdMap[key] })}</div>,
+      }));
+    },
+    [intl]
+  );
+
+  const getSessionResourceFileActionItems = useCallback(
     (item: FileBrowserItem): MenuProps['items'] => {
       const labelIdMap = {
         preview: 'fileBrowser.action.preview',
@@ -673,17 +710,23 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
         rename: 'fileBrowser.action.rename',
         delete: 'fileBrowser.action.delete',
       };
+      const canSaveToSpace = !isDirectory(item) && !!getResourceSessionIdByPath(item.path);
       const actionKeys = [
         ...(canPreviewFile(item) ? (['preview'] as const) : []),
         'download',
         'rename',
         'delete',
+        ...(canSaveToSpace ? (['saveToSpace'] as const) : []),
       ] as const;
 
-      // 资源 tab 先对齐文件树的基础操作，弹窗型的上传/保存类操作后续再单独接入。
+      // 会话空间文件可保存到项目共享文件空间；文件夹暂不接入，和后端 saveToSpace 入参保持一致。
       return actionKeys.map((key) => ({
         key,
-        label: <div className={employeeStyles.dropdownMenuItem}>{intl.formatMessage({ id: labelIdMap[key] })}</div>,
+        label: (
+          <div className={employeeStyles.dropdownMenuItem}>
+            {key === 'saveToSpace' ? '保存到空间' : intl.formatMessage({ id: labelIdMap[key] })}
+          </div>
+        ),
       }));
     },
     [intl]
@@ -731,6 +774,105 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
     [fileResourceId, intl, pruneResourceDirectoryCache, refreshResourceDirectory, resourceRenameTarget]
   );
 
+  const handleSharedResourcePreview = useCallback(
+    async (item: FileBrowserItem) => {
+      const fileUrl = (item as ProjectSpaceFileItem).fileUrl;
+      if (!fileUrl) {
+        void handleResourcePreview(item);
+        return;
+      }
+      if (!canPreviewFile(item)) {
+        message.warning(intl.formatMessage({ id: 'fileBrowser.preview.unavailable' }));
+        return;
+      }
+
+      const fileType = getFileType(item.name);
+      EventEmitter.emit('beyond-main-driver-open-type', {
+        title: item.name,
+        width: '50vw',
+        minWidth: '360px',
+        maxWidth: '70vw',
+        drawerType: 'preview',
+        canClose: true,
+        canFullScreen: false,
+      });
+      EventEmitter.emit('beyond-main-driver-message', {
+        data: undefined,
+        type: fileType,
+        title: item.name,
+        className: fileSiderStyles.previewContent,
+      });
+
+      try {
+        // listSpaceFiles 返回的是 commonFile 预览地址，预览时直接按 URL 拉取文件流。
+        const response = await fetch(getFileUrl(fileUrl));
+        if (!response.ok) {
+          throw new Error(response.statusText);
+        }
+        const blob = await response.blob();
+        EventEmitter.emit('beyond-main-driver-message', {
+          data: blob,
+          type: fileType,
+          title: item.name,
+          className: fileSiderStyles.previewContent,
+        });
+      } catch (error: any) {
+        message.error(error?.message || intl.formatMessage({ id: 'fileBrowser.preview.failed' }));
+      }
+    },
+    [EventEmitter, handleResourcePreview, intl]
+  );
+
+  const handleSharedResourceDownload = useCallback(
+    (item: FileBrowserItem) => {
+      const fileUrl = (item as ProjectSpaceFileItem).fileUrl;
+      if (!fileUrl) {
+        void handleResourceDownload(item);
+        return;
+      }
+      downloadUrlFile({ fileUrl, fileName: item.name });
+    },
+    [handleResourceDownload]
+  );
+
+  const handleSaveSessionFileToSpace = useCallback(
+    async (item: FileBrowserItem) => {
+      if (!projectId) return;
+      const resourceSessionId = getResourceSessionIdByPath(item.path);
+      if (!resourceSessionId) {
+        message.warning('无法识别文件所属会话');
+        return;
+      }
+
+      const messageKey = 'projectSaveFileToSpace';
+      message.loading({ key: messageKey, content: '正在保存到空间...', duration: 0 });
+      try {
+        await saveProjectFileToSpace({
+          projectId,
+          sessionId: Number(resourceSessionId),
+          filePath: item.path,
+          fileName: item.name,
+        });
+        message.success({ key: messageKey, content: '已保存到空间' });
+        await fetchSharedResourceFiles();
+      } catch (error: any) {
+        message.error({ key: messageKey, content: error?.message || '保存到空间失败' });
+      }
+    },
+    [fetchSharedResourceFiles, projectId]
+  );
+
+  const handleSharedResourceFileAction = useCallback(
+    (key: React.Key, item: FileBrowserItem) => {
+      if (key === 'preview') {
+        void handleSharedResourcePreview(item);
+      } else if (key === 'download') {
+        handleSharedResourceDownload(item);
+      }
+    },
+    [handleSharedResourceDownload, handleSharedResourcePreview]
+  );
+
   const handleResourceFileAction = useCallback(
     (key: React.Key, item: FileBrowserItem) => {
       if (key === 'preview') {
@@ -746,9 +888,11 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
           content: intl.formatMessage({ id: 'fileBrowser.delete.confirmName' }, { name: item.name }),
           onOk: () => handleDeleteResourceFile(item),
         });
+      } else if (key === 'saveToSpace') {
+        void handleSaveSessionFileToSpace(item);
       }
     },
-    [handleDeleteResourceFile, handleResourceDownload, handleResourcePreview, intl]
+    [handleDeleteResourceFile, handleResourceDownload, handleResourcePreview, handleSaveSessionFileToSpace, intl]
   );
 
   const clearResourceClickTimer = useCallback(() => {
@@ -770,10 +914,14 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
           message.warning(intl.formatMessage({ id: 'fileBrowser.preview.unavailable' }));
           return;
         }
+        if ((item as ProjectSpaceFileItem).isProjectSpaceFile) {
+          void handleSharedResourcePreview(item);
+          return;
+        }
         void handleResourcePreview(item);
       }, 220);
     },
-    [clearResourceClickTimer, handleResourcePreview, intl]
+    [clearResourceClickTimer, handleResourcePreview, handleSharedResourcePreview, intl]
   );
 
   const handleResourceItemDoubleClick = useCallback(
@@ -843,8 +991,12 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
   }, [activeTab, fetchProjectResourceSessions]);
 
   useEffect(() => {
-    if (activeTab !== 'resources' || !fileResourceId) return;
+    if (activeTab !== 'resources') return;
     void fetchSharedResourceFiles();
+  }, [activeTab, fetchSharedResourceFiles]);
+
+  useEffect(() => {
+    if (activeTab !== 'resources' || !fileResourceId) return;
     const sessionIds =
       resourceFileScope === 'all'
         ? projectSessions.map((session) => `${session.sessionId}`).filter(Boolean)
@@ -858,7 +1010,6 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
     activeTab,
     currentResourceSession?.sessionId,
     fetchSessionResourceFiles,
-    fetchSharedResourceFiles,
     fileResourceId,
     projectSessions,
     resourceFileScope,
@@ -1784,16 +1935,16 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
           loading={sharedFilesLoading}
           items={sharedFiles}
           currentPath={SHARED_FILE_PATH}
-          emptyText={fileResourceId ? '暂无共享文件' : '暂无当前数字员工，无法加载文件'}
+          emptyText="暂无共享文件"
           childrenByPath={resourceChildrenByPath}
           expandedKeys={resourceExpandedKeys}
-          showActions={!!fileResourceId}
+          showActions={!!projectId}
           onExpand={setResourceExpandedKeys}
           onLoadData={loadResourceTreeNode}
           onNodeClick={handleResourceItemClick}
           onNodeDoubleClick={handleResourceItemDoubleClick}
-          getActionItems={getResourceFileActionItems}
-          onAction={handleResourceFileAction}
+          getActionItems={getSharedResourceFileActionItems}
+          onAction={handleSharedResourceFileAction}
         />
         <FileSpaceBlock
           title="会话空间"
@@ -1815,7 +1966,7 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
           onLoadData={loadResourceTreeNode}
           onNodeClick={handleResourceItemClick}
           onNodeDoubleClick={handleResourceItemDoubleClick}
-          getActionItems={getResourceFileActionItems}
+          getActionItems={getSessionResourceFileActionItems}
           onAction={handleResourceFileAction}
         />
       </div>
