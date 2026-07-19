@@ -65,6 +65,9 @@ public class DevloopApplicationService {
 
     private static final String TASK_STATUS_DEFAULT = "进行中";
 
+    /** 环节进度快照缓存于 byai_session_ext 纵表的键；避免每次开详情都跑解析/LLM */
+    private static final String TASK_PHASE_EXT_CODE = "task_phase";
+
     /**
      * 研发任务 LLM 对话异步执行线程池。 TtlExecutors 包装以透传 CurrentUserHolder 的 LoginInfo；任务创建接口据此立即返回， chat 在后台执行，避免前端等待数分钟。
      */
@@ -126,6 +129,9 @@ public class DevloopApplicationService {
 
     @Autowired
     private DevloopScoringService scoringService;
+
+    @Autowired
+    private DevloopPhaseService phaseService;
 
     @Autowired
     private ByaiSystemConfigService byaiSystemConfigService;
@@ -1068,9 +1074,10 @@ public class DevloopApplicationService {
         if (template == null || template.isEmpty()) {
             template = DEFAULT_TASK_PROMPT_TEMPLATE;
         }
-        String repoUrl = repo != null && repo.getRepoUrl() != null ? repo.getRepoUrl()
-            : (repo != null ? repo.getRepoFullName() : "");
+        String repoFullName = repo != null && repo.getRepoFullName() != null ? repo.getRepoFullName() : "";
+        String repoUrl = repo != null && repo.getRepoUrl() != null ? repo.getRepoUrl() : repoFullName;
         return template.replace("${projectName}", projectName != null ? projectName : "").replace("${repoUrl}", repoUrl)
+            .replace("${repoFullName}", repoFullName)
             .replace("${branchName}", branchName != null ? branchName : "")
             .replace("${taskType}", taskType != null ? taskType : "").replace("${title}", title != null ? title : "")
             .replace("${description}", description != null ? description : "");
@@ -1078,25 +1085,35 @@ public class DevloopApplicationService {
 
     /** 提示词模板兜底：DB 未配置 DEVLOOP_TASK_START_PROMPT 时使用 */
     private static final String DEFAULT_TASK_PROMPT_TEMPLATE = "你是 ByClaw 开发助手，负责在指定代码仓库中自主完成开发任务。\n\n" + "## 任务信息\n"
-        + "- 项目：${projectName}\n" + "- 代码仓库：${repoUrl}\n" + "- 目标分支：${branchName}\n" + "- 任务类型：${taskType}\n"
-        + "- 任务标题：${title}\n\n" + "## 需求详情\n${description}\n\n" + "## 仓库访问说明\n"
-        + "- ${repoUrl} 可能是私有仓库，GitHub 访问令牌(PAT)已配置在环境变量 GH_TOKEN 中，请直接使用它进行克隆和推送。\n"
-        + "- 克隆时用带令牌的方式拉取，例如：git clone https://$GH_TOKEN@github.com/owner/repo.git\n"
-        + "- 若提示仓库不存在，通常是私有仓库权限问题，请确认已使用环境变量 GH_TOKEN 中的令牌，不要判定为仓库不存在。\n\n" + "## 工作要求\n"
-        + "1. 进入仓库 ${repoUrl}，基于最新代码切出并切换到分支 ${branchName}\n" + "2. 仔细理解上述需求详情，定位需要修改的代码\n"
-        + "3. 完成开发后自测，确保编译通过、相关测试通过\n" + "4. 提交改动到分支 ${branchName}，提交信息清晰说明本次改动\n" + "5. 如需求描述不清或存在阻塞，明确说明遇到的问题\n\n"
-        + "请开始处理。";
+        + "- 项目：${projectName}\n" + "- 代码仓库：${repoFullName}\n" + "- 目标分支：${branchName}（尚未创建，需你新建）\n"
+        + "- 任务类型：${taskType}\n" + "- 任务标题：${title}\n\n" + "## 需求详情\n${description}\n\n" + "## 仓库访问说明\n"
+        + "- 目标仓库全路径为 ${repoFullName}，它可能是私有仓库；GitHub 访问令牌(PAT)已配置在环境变量 GH_TOKEN 中，请直接使用它克隆和推送。\n"
+        + "- 用带令牌的完整地址克隆：git clone https://$GH_TOKEN@github.com/${repoFullName}.git\n"
+        + "- 若提示仓库或分支不存在，通常是私有仓库权限问题，请确认已使用环境变量 GH_TOKEN 中的令牌，不要据此判定仓库不存在、也不要改为在本地新建独立项目。\n\n"
+        + "## 工作要求\n"
+        + "1. 克隆仓库 ${repoFullName}，拉取默认分支最新代码；目标分支 ${branchName} 尚不存在，用 git checkout -b ${branchName} 从默认分支新建并切换。\n"
+        + "2. 仔细理解上述需求详情，定位需要修改的代码。\n" + "3. 完成开发后自测，确保编译通过、相关测试通过。\n"
+        + "4. 提交改动到分支 ${branchName} 并推送，提交信息清晰说明本次改动。\n" + "5. 如需求描述不清或存在阻塞，明确说明遇到的问题。\n\n"
+        + "## 环节汇报规范（重要，供系统追踪任务进度）\n"
+        + "在推进以下研发环节时，每进入/完成/打回一个环节，都要单独输出一行机器可读标记，格式严格如下（方括号与关键字不可省略）：\n"
+        + "- 进入某环节：[PHASE] <环节> START\n" + "- 完成某环节：[PHASE] <环节> DONE\n"
+        + "- 打回上一步：[PHASE] <环节> REJECT-><目标环节> 原因:<简述>\n"
+        + "环节取值固定为：issue（需求来源）、req（需求分析）、design（方案设计）、coder（编码）、reviewer（代码审查）、tester（测试）、pr（提交PR）。\n"
+        + "示例：[PHASE] coder START ；[PHASE] tester REJECT->coder 原因:单测未覆盖审计日志。\n"
+        + "标记须独占一行、按真实进展实时输出，正常叙述照常进行。\n\n" + "请开始处理。";
 
-    /** 查询项目任务列表：会话即任务，状态取自 session_ext(task_status)，供看板按状态分列 */
+    /** 查询项目任务列表：会话即任务，状态取自 session_ext(task_status)，环节取自缓存(task_phase)，供看板按状态分列。 */
     public ResponseUtil<List<Map<String, Object>>> listTasks(Long projectId) {
         List<ByaiSession> sessions = byaiSessionMapper.selectList(new LambdaQueryWrapper<ByaiSession>()
             .eq(ByaiSession::getProjectId, projectId).orderByDesc(ByaiSession::getCreateTime));
-        // 批量取任务状态，避免逐会话查 session_ext 造成 N+1
-        Map<Long, String> statusMap = loadTaskStatusMap(
-            sessions.stream().map(ByaiSession::getSessionId).collect(java.util.stream.Collectors.toList()));
+        List<Long> sessionIds = sessions.stream().map(ByaiSession::getSessionId)
+            .collect(java.util.stream.Collectors.toList());
+        // 批量取状态与环节快照，避免逐会话查 session_ext 造成 N+1；列表只读缓存不触发重算/LLM
+        Map<Long, String> statusMap = loadTaskStatusMap(sessionIds);
+        Map<Long, DevloopPhaseService.PhaseSnapshot> phaseMap = loadTaskPhaseMap(sessionIds);
         List<Map<String, Object>> list = new ArrayList<>();
         for (ByaiSession s : sessions) {
-            list.add(sessionAsTask(s, statusMap.get(s.getSessionId())));
+            list.add(sessionAsTask(s, statusMap.get(s.getSessionId()), phaseMap.get(s.getSessionId())));
         }
         return ResponseUtil.successResponse(list);
     }
@@ -1107,7 +1124,28 @@ public class DevloopApplicationService {
         if (s == null)
             return ResponseUtil.failRes("会话不存在");
         Map<Long, String> statusMap = loadTaskStatusMap(java.util.Collections.singletonList(sessionId));
-        return ResponseUtil.successResponse(sessionAsTask(s, statusMap.get(sessionId)));
+        Map<Long, DevloopPhaseService.PhaseSnapshot> phaseMap = loadTaskPhaseMap(
+            java.util.Collections.singletonList(sessionId));
+        return ResponseUtil.successResponse(sessionAsTask(s, statusMap.get(sessionId), phaseMap.get(sessionId)));
+    }
+
+    /**
+     * 查询任务环节进度：按需刷新——缓存缺失或会话有新消息时重算并落库，否则直接返回缓存。
+     * 返回完整快照(7 环节 + 状态 + 打回记录)，供详情抽屉逐环节渲染。
+     */
+    public ResponseUtil<DevloopPhaseService.PhaseSnapshot> getTaskPhases(Long sessionId) {
+        if (sessionId == null) {
+            return ResponseUtil.failRes("sessionId 不能为空");
+        }
+        DevloopPhaseService.PhaseSnapshot cached = loadTaskPhaseMap(java.util.Collections.singletonList(sessionId))
+            .get(sessionId);
+        long messageCount = phaseService.countMessages(sessionId);
+        if (!phaseService.isStale(cached, messageCount)) {
+            return ResponseUtil.successResponse(cached);
+        }
+        DevloopPhaseService.PhaseSnapshot fresh = phaseService.buildSnapshot(sessionId);
+        persistPhaseSnapshot(sessionId, fresh);
+        return ResponseUtil.successResponse(fresh);
     }
 
     /** 批量读取会话的任务状态(session_ext.task_status)，返回 sessionId -> status。 */
@@ -1125,11 +1163,53 @@ public class DevloopApplicationService {
         return statusMap;
     }
 
+    /** 批量读取会话的环节快照缓存(session_ext.task_phase)，返回 sessionId -> PhaseSnapshot(可空)。 */
+    private Map<Long, DevloopPhaseService.PhaseSnapshot> loadTaskPhaseMap(List<Long> sessionIds) {
+        Map<Long, DevloopPhaseService.PhaseSnapshot> phaseMap = new HashMap<>();
+        if (sessionIds == null || sessionIds.isEmpty()) {
+            return phaseMap;
+        }
+        List<ByaiSessionExt> exts = byaiSessionExtMapper.selectList(new LambdaQueryWrapper<ByaiSessionExt>()
+            .eq(ByaiSessionExt::getExtParamCode, TASK_PHASE_EXT_CODE)
+            .in(ByaiSessionExt::getSessionId, sessionIds));
+        for (ByaiSessionExt ext : exts) {
+            DevloopPhaseService.PhaseSnapshot snap = phaseService.fromJson(ext.getExtParamValue());
+            if (snap != null) {
+                phaseMap.put(ext.getSessionId(), snap);
+            }
+        }
+        return phaseMap;
+    }
+
+    /** 环节快照 upsert 到 session_ext(task_phase)：存在则更新，不存在则插入。 */
+    private void persistPhaseSnapshot(Long sessionId, DevloopPhaseService.PhaseSnapshot snapshot) {
+        String json = phaseService.toJson(snapshot);
+        if (json == null) {
+            return;
+        }
+        ByaiSessionExt existing = byaiSessionExtMapper.selectOne(new LambdaQueryWrapper<ByaiSessionExt>()
+            .eq(ByaiSessionExt::getExtParamCode, TASK_PHASE_EXT_CODE).eq(ByaiSessionExt::getSessionId, sessionId)
+            .last("limit 1"));
+        if (existing != null) {
+            existing.setExtParamValue(json);
+            byaiSessionExtMapper.updateById(existing);
+            return;
+        }
+        ByaiSessionExt ext = new ByaiSessionExt();
+        ext.setExtId(sequenceService.nextVal());
+        ext.setSessionId(sessionId);
+        ext.setExtParamName("任务环节");
+        ext.setExtParamCode(TASK_PHASE_EXT_CODE);
+        ext.setExtParamValue(json);
+        byaiSessionExtMapper.insert(ext);
+    }
+
     /**
      * 会话映射为前端任务形状：taskId 复用 sessionId 保证前端按 taskId 取值与跳转不变；
-     * status 取自 session_ext；sessionContent/updateTime 供列表摘要与时间展示；其余任务专属字段会话无来源，置空。
+     * status 取自 session_ext(task_status)；phase/currentRound 取自环节快照缓存；其余任务专属字段会话无来源，置空。
      */
-    private Map<String, Object> sessionAsTask(ByaiSession s, String status) {
+    private Map<String, Object> sessionAsTask(ByaiSession s, String status,
+        DevloopPhaseService.PhaseSnapshot phase) {
         Map<String, Object> map = new HashMap<>();
         map.put("taskId", s.getSessionId());
         map.put("sessionId", s.getSessionId());
@@ -1140,8 +1220,8 @@ public class DevloopApplicationService {
         map.put("createTime", s.getCreateTime());
         map.put("updateTime", s.getUpdateTime());
         map.put("status", status);
-        map.put("phase", null);
-        map.put("currentRound", null);
+        map.put("phase", phase != null ? phase.getCurrentPhase() : null);
+        map.put("currentRound", phase != null ? phase.getRound() : null);
         map.put("totalRounds", null);
         map.put("score", null);
         map.put("assignee", null);

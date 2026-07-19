@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.manager.interfaces.controller.devloop;
 
 import com.iwhalecloud.byai.manager.application.service.devloop.DevloopApplicationService;
+import com.iwhalecloud.byai.manager.domain.devloop.service.DevloopPhaseService;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectMemberListDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ScanSourceDTO;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
@@ -174,6 +175,14 @@ public class DevloopController {
         Long sessionId = Long.valueOf(params.get("sessionId") != null ? params.get("sessionId").toString()
             : params.get("taskId").toString());
         return applicationService.getTaskDetail(sessionId);
+    }
+
+    /** 获取任务环节进度：从会话消息派生的 7 环节状态 + 打回记录，供详情逐环节展示 */
+    @PostMapping("/task/phases")
+    public ResponseUtil<DevloopPhaseService.PhaseSnapshot> getTaskPhases(@RequestBody Map<String, Object> params) {
+        Long sessionId = Long.valueOf(params.get("sessionId") != null ? params.get("sessionId").toString()
+            : params.get("taskId").toString());
+        return applicationService.getTaskPhases(sessionId);
     }
 
     // ========== 项目成员 ==========

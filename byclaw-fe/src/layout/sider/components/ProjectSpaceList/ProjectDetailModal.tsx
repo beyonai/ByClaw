@@ -45,6 +45,7 @@ import {
   deleteProjectRepo,
   deleteScanSource,
   getProject,
+  getTaskPhases,
   listProjectSessionsByQo,
   listProjectMembers,
   listRequirementsBySource,
@@ -238,6 +239,14 @@ const STATUS_COLORS: Record<string, string> = {
   完成: 'green',
 };
 
+// 环节状态 → 展开区横向概要小节点样式（与 TaskDetailDrawer 竖向流程口径一致）
+const PHASE_STATE_META: Record<string, { cls: string; icon: string }> = {
+  done: { cls: 'phaseMiniDone', icon: '✓' },
+  running: { cls: 'phaseMiniActive', icon: '●' },
+  rejected: { cls: 'phaseMiniRejected', icon: '↩' },
+  pending: { cls: 'phaseMiniWaiting', icon: '○' },
+};
+
 const cronPresets = [
   { value: '*/1 * * * *', label: '每1分钟' },
   { value: '*/5 * * * *', label: '每5分钟' },
@@ -380,6 +389,8 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
   const [channelPanelOpen, setChannelPanelOpen] = useState(false);
   // 左侧小面板内直接展开任务详情，避免在窄侧栏里再叠右侧抽屉。
   const [expandedTaskId, setExpandedTaskId] = useState<string | number | null>(null);
+  // 展开任务时按 sessionId 拉环节概要，缓存于 map 避免重复请求。
+  const [taskPhaseMap, setTaskPhaseMap] = useState<Record<string, any>>({});
   const [taskKanbanOpen, setTaskKanbanOpen] = useState(false);
   const [repoModalOpen, setRepoModalOpen] = useState(false);
   const [repoForm, setRepoForm] = useState({ repoFullName: '', repoUrl: '', defaultBranch: 'main' });
@@ -491,6 +502,20 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
       setTasksLoading(false);
     }
   }, [projectId]);
+
+  // 展开任务时按需拉环节概要（后端按需刷新），结果缓存到 map，收起不清除避免重复请求。
+  const loadTaskPhases = useCallback(async (task: any) => {
+    const sessionId = task?.sessionId;
+    if (!sessionId) return;
+    const key = `${sessionId}`;
+    try {
+      const res: any = await getTaskPhases(Number(sessionId));
+      const snapshot = res?.data ?? res ?? null;
+      setTaskPhaseMap((prev) => ({ ...prev, [key]: snapshot }));
+    } catch {
+      // 环节概要失败不阻断详情展开，静默忽略。
+    }
+  }, []);
 
   const fetchRepos = useCallback(async () => {
     if (!projectId) return;
@@ -1821,7 +1846,13 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
               <div
                 key={task.taskId}
                 className={`${styles.detailTaskCard} ${isExpanded ? styles.detailTaskCardExpanded : ''}`}
-                onClick={() => setExpandedTaskId(isExpanded ? null : task.taskId)}
+                onClick={() => {
+                  const next = isExpanded ? null : task.taskId;
+                  setExpandedTaskId(next);
+                  if (next && !taskPhaseMap[`${task.sessionId}`]) {
+                    loadTaskPhases(task);
+                  }
+                }}
               >
                 <div className={styles.detailTaskCardHeader}>
                   <div className={styles.detailTaskMain}>
@@ -1857,6 +1888,41 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
                 </div>
                 {isExpanded && (
                   <div className={styles.detailTaskInlineDetail}>
+                    {(() => {
+                      const snapshot = taskPhaseMap[`${task.sessionId}`];
+                      const phaseList: any[] = snapshot?.phases || [];
+                      if (!phaseList.length) return null;
+                      const currentPhase = snapshot?.currentPhase;
+                      return (
+                        <div className={styles.detailTaskPhaseSummary}>
+                          <div className={styles.detailTaskPhaseHeader}>
+                            <label>研发环节</label>
+                            {snapshot?.round ? <span>第 {snapshot.round} 轮</span> : null}
+                          </div>
+                          <div className={styles.phaseMiniFlow}>
+                            {phaseList.map((p, idx) => {
+                              const meta = PHASE_STATE_META[p.status] || PHASE_STATE_META.pending;
+                              const isCurrent = p.key === currentPhase;
+                              return (
+                                <React.Fragment key={p.key}>
+                                  {idx > 0 && <span className={styles.phaseMiniLine} />}
+                                  <Tooltip title={`${p.label}·${p.status}`}>
+                                    <span
+                                      className={`${styles.phaseMiniNode} ${styles[meta.cls]} ${
+                                        isCurrent ? styles.phaseMiniCurrent : ''
+                                      }`}
+                                    >
+                                      <em>{p.status === 'done' || p.status === 'rejected' ? meta.icon : idx + 1}</em>
+                                      <i>{p.label}</i>
+                                    </span>
+                                  </Tooltip>
+                                </React.Fragment>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })()}
                     <span>
                       <label>状态</label>
                       <strong>{task.status || '-'}</strong>

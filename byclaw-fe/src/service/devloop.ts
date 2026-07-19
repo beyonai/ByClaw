@@ -120,6 +120,10 @@ export const listTasks = (projectId: number) => POST<any>('/byaiService/devloop/
 // 任务详情即会话详情，后端按 sessionId 查询（taskId 与 sessionId 同值）
 export const getTaskDetail = (sessionId: number) => POST<any>('/byaiService/devloop/task/detail', { sessionId });
 
+// 任务环节进度：后端从会话消息派生 7 环节状态 + 打回记录，按需刷新
+export const getTaskPhases = (sessionId: number) =>
+  POST<any>('/byaiService/devloop/task/phases', { sessionId });
+
 // 项目成员
 export const addProjectMember = (data: {
   projectId: number;
