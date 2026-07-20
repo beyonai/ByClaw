@@ -136,15 +136,28 @@ python3 -c "import yaml" 2>/dev/null || python3 -m pip install pyyaml
 
 对每个匹配到的本体对象，**严格按三要素编写**文档内容：
 
+所有处理中文档必须按来源和状态分目录保存，禁止将三类文件混放：
+
 ```
 /by/.sessions/{session_id}/{任务名称}/
-  ├── {对象类型1}/
-  │     ├── {对象名称1}.md
-  │     └── {对象名称2}.md
-  ├── {对象类型2}/
-  │     └── {对象名称3}.md
-  └── ...
+  ├── 新建对象/                         # Step 3：本次整理生成的对象文档
+  │     ├── {对象名称1}/
+  │     │     ├── {对象实例1}.md
+  │     │     └── {对象实例2}.md
+  │     └── {对象名称2}/
+  │           └── {对象实例3}.md
+  ├── 知识库候选/                       # Step 5.5：从知识库召回并下载的候选文档
+  │     └── {对象名称}/
+  │           └── {对象实例}.md
+  └── 融合结果/                         # Step 5.6：doc-fusion 生成的融合文档
+        └── {对象名称}/
+              └── {对象实例}.md
 ```
+
+目录职责：
+- **新建对象**：仅存放 Step 3 新生成的文档；Step 4、Step 5 和 Step 5.5 均以此目录中的文档为处理对象。
+- **知识库候选**：仅存放 Step 5.5 召回后下载到本地、用于内容确认和融合的知识库文档；候选不等于已确认同一实例。
+- **融合结果**：仅存放 Step 5.6 由 `doc-fusion` 产出的变更文档；不得复制未变更的知识库文档或未融合的新建文档。
 
 文档内容包含：
 - **YAML front matter（严格按字段属性写）**：根据 Step 2 获取的「字段属性」中的字段定义写入，禁止自行增加字段；枚举类字段值调用 `unstructured-ontology-manager` 的 `get_term_type_values.py` 查询允许值列表，从中选择匹配项填入，不得自行编造
@@ -187,10 +200,10 @@ python3 -c "import yaml" 2>/dev/null || python3 -m pip install pyyaml
 ```json
 [
   {
-    "doc_path": "/by/.sessions/{session_id}/{任务名称}/Ability/跨源联邦查询能力.md",
+    "doc_path": "/by/.sessions/{session_id}/{任务名称}/新建对象/Ability/跨源联邦查询能力.md",
     "relations": [
       {
-        "target_doc_id": "/by/.sessions/{session_id}/{任务名称}/Feature/实时跨源查询.md",
+        "target_doc_id": "/by/.sessions/{session_id}/{任务名称}/新建对象/Feature/实时跨源查询.md",
         "relation": "reference",
         "kb_resource_id": "{知识库resourceId}"
       }
@@ -244,7 +257,7 @@ cd /by/.sessions/{session_id} && python3 <skill>/knowledge-organizer/scripts/add
 
 ```bash
 python3 <skill>/knowledge-organizer/scripts/er_resolve.py \
-  --doc-dir /by/.sessions/{session_id}/{任务名称}/{object_type} \
+  --doc-dir /by/.sessions/{session_id}/{任务名称}/新建对象/{对象名称} \
   --object-type {object_type} \
   --identity-fields {identity_fields} \
   --kb-id {kb_id} \
@@ -269,7 +282,7 @@ python3 <skill>/knowledge-organizer/scripts/er_resolve.py \
 - `kb_term_name`：知识库术语名称（可用于 name 比对）
 - `name_match`：identity 字段比对结果（`match_type`: `exact`/`substring`/`fuzzy`/`none`）
 
-Agent 可通过 `kb_resource_id` + `kb_doc_path` 下载文档内容做进一步判断：
+Agent 可通过 `kb_resource_id` + `kb_doc_path` 下载文档内容做进一步判断。下载后的完整候选文档必须保存到 `/by/.sessions/{session_id}/{任务名称}/知识库候选/{对象名称}/{对象实例}.md`，不得写入“新建对象”目录：
 - `by-knowledge-manager read-file --resource-id {kb_resource_id} --file-path {kb_doc_path} --start-line 1 --end-line 80`
 
 **Agent 消解判断流程**：
@@ -286,9 +299,9 @@ Agent 可通过 `kb_resource_id` + `kb_doc_path` 下载文档内容做进一步�
 **⚠️ Step 5.5 之后、Step 6 之前执行，不可跳过。** 对于 Step 5.5 已确认“同一实例”的每一组文档，必须调用子技能 `doc-fusion` 生成融合结果；不得把两份原文直接交给 Step 7 打标。
 
 1. 按对象类型准备三类目录，且三者必须彼此不同：
-   - **现有文档目录**：从知识库下载已确认匹配的候选文档；保留其原始文件名和完整内容
-   - **新增文档目录**：本次 Step 3 生成、并在 Step 5.5 中确认需要融合的文档
-   - **融合输出目录**：`/by/.sessions/{session_id}/{任务名称}/fusion-output/`；禁止写回现有文档目录或新增文档目录
+   - **现有文档目录**：`/by/.sessions/{session_id}/{任务名称}/知识库候选/{对象名称}/`，存放从知识库下载的已确认匹配候选文档；保留其原始文件名和完整内容
+   - **新增文档目录**：`/by/.sessions/{session_id}/{任务名称}/新建对象/{对象名称}/`，存放本次 Step 3 生成、并在 Step 5.5 中确认需要融合的文档
+   - **融合输出目录**：`/by/.sessions/{session_id}/{任务名称}/融合结果/`；禁止写回“知识库候选”或“新建对象”目录
 2. 调用 `knowledge-organizer/skills/doc-fusion` 子技能，严格执行其“扫描 → 内容比对 → 融合 → 独立输出”的流程。融合判断必须结合文件名和正文内容，不能仅以 `name` 字段决定。
 3. 对每个融合结果：
    - 使用知识库现有文档的文件名，`related_docs` 合并去重，并将 `doc_id` 更新为融合输出文件的完整路径；
@@ -303,7 +316,7 @@ Agent 可通过 `kb_resource_id` + `kb_doc_path` 下载文档内容做进一步�
 
 向用户展示：
 1. **整理结果目录树**：列出所有生成的文档及其层级结构
-2. **文档存储地址**：`/by/.sessions/{session_id}/{任务名称}/`
+2. **文档存储地址**：`/by/.sessions/{session_id}/{任务名称}/`，并按“新建对象 / 知识库候选 / 融合结果”三层来源目录展示完整目录树
 3. **核心文档摘要**：每个对象类型的代表性内容概要
 4. **关系图谱**：各文档间的关联关系（阶段1 + 阶段2）
 5. **对象覆盖情况**：列出所有已覆盖的对象类型，以及未使用的对象类型及原因，询问用户是否需要补充
@@ -348,6 +361,7 @@ Agent 可通过 `kb_resource_id` + `kb_doc_path` 下载文档内容做进一步�
 - **按对象ID分组**：将文档按对象ID分组，同一对象ID的文档可以批量处理
 
 **匹配规则**：
+- 新建实例只从“新建对象”目录读取；融合更新只从“融合结果”目录读取；“知识库候选”目录中的文件仅用于消解和融合，禁止直接入库
 - 根据文档的 YAML front matter 中的 `product_code`、对象类型目录判断应录入哪个本体对象
 - 使用 `baiying_call` 调用，`resource_id` 为对象的 resourceId，`resource_type` 为 `"OBJECT"`
 
@@ -416,3 +430,4 @@ baiying_call:
 11. **Step 5.5 不可跳过**：实例消解是入库前的必要步骤，批内去重、KB 候选检索、实体消解+RRF 融合三步必须全部执行
 12. **冲突属性必须标记让用户选**：属性 diff 中出现两边值不同的字段，必须在 Step 6 中用 ⚠️ 标记，由用户确认处理方式后再入库
 13. **Step 5.6 必须使用 doc-fusion**：已确认同一实例的文档必须先融合并输出到独立目录；不得覆盖任一输入目录，不得跳过融合直接入库
+14. **处理目录必须隔离**：Step 3 仅写入“新建对象”，Step 5.5 下载的知识库候选仅写入“知识库候选”，Step 5.6 仅写入“融合结果”；“知识库候选”不得直接入库
