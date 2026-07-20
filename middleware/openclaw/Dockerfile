@@ -176,7 +176,7 @@ RUN set -eux; \
         npm install -g "@sovovs/bycli@${OPENCLI_VERSION}"; \
         mkdir -p /opt/opencli/extension; \
         curl -fsSL -o /tmp/opencli-extension.zip \
-            "https://github.com/sovovs/byCLI/releases/download/v${OPENCLI_VERSION}/bycli-extension-v${OPENCLI_EXTENSION_VERSION}.zip"; \
+            "https://github.com/sovovs/byCLI/releases/download/v${OPENCLI_EXTENSION_VERSION}/bycli-extension-v${OPENCLI_EXTENSION_VERSION}.zip"; \
         unzip -q /tmp/opencli-extension.zip -d /opt/opencli/extension; \
         rm -f /tmp/opencli-extension.zip; \
         chromium --version; \
