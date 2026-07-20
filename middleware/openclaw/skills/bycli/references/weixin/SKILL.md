@@ -2,60 +2,68 @@
 
 Load this reference for `bycli weixin accounts`, `articles`, or `save-articles`; `--auth-source`; `WECHAT_TOKEN`, `WECHAT_COOKIE`, or `WECHAT_FINGERPRINT`; and authentication failures from `mp.weixin.qq.com`.
 
-## Browser authentication (default)
+## Required behavior
 
-Use browser authentication by default to keep credentials out of arguments and agent-visible output:
+- Use browser authentication by default.
+- Add `--site-session persistent` to every browser-authenticated Weixin command so the login tab remains leased after success or failure.
+- Treat the 180-second QR-code wait as internal behavior. `weixin accounts` does not support `--timeout`; never pass `--timeout 180`.
+- On login `TIMEOUT` or `AUTH_REQUIRED`, keep the login tab and browser session open, ask the user to finish logging in, then stop.
+- Continue only after the user confirms login succeeded; rerun the same command with the persistent site session.
+- Use environment authentication only when the user explicitly requests it or Browser Bridge is unavailable in CI/headless automation.
+- Never expose, mix, or retain authentication credentials.
+
+## Browser authentication
+
+Run browser-backed commands with a persistent site session:
 
 ```bash
-bycli weixin accounts "<account name>" --auth-source browser -f json
-bycli weixin articles '<fakeid>' --auth-source browser -f json
-bycli weixin save-articles '<fakeid>' --auth-source browser -f json
+bycli weixin accounts "<account name>" --auth-source browser --site-session persistent -f json
+bycli weixin articles '<fakeid>' --auth-source browser --site-session persistent -f json
+bycli weixin save-articles '<fakeid>' --auth-source browser --site-session persistent -f json
 ```
 
-Before running a browser-backed command, complete the main skill's `doctor` and `daemon status` checks. Reuse the Chrome session for `mp.weixin.qq.com`.
+Before running them, complete the main skill's `doctor` and `daemon status` checks. Reuse the Chrome session for `mp.weixin.qq.com`.
 
 Do not ask the user to extract credentials when browser authentication can satisfy the request. Do not silently switch to environment authentication after a browser or login failure.
 
-### QR-code login
+### QR-code login flow
 
-When the Chrome session is not authenticated:
+1. Let byCLI open and focus the Official Accounts login page when the Chrome session is not authenticated.
+2. Let browser authentication wait internally for up to 180 seconds while checking for a successful login.
+3. After login, let byCLI read the `token` from the authenticated backend URL and obtain domain cookies through Browser Bridge, including HttpOnly cookies.
+4. If the wait ends with `TIMEOUT` / exit code 75 or `AUTH_REQUIRED` / exit code 77, follow the pending-login flow below. These errors are not adapter defects; do not enter AutoFix or modify adapter code.
 
-1. Let byCLI open and focus the Official Accounts login page.
-2. Wait for the user to scan the QR code. Browser authentication provides an internal wait of up to 180 seconds.
-3. Keep the login/QR page and browser session open while authentication is required. Do not close them during the wait, after a timeout, or after `AUTH_REQUIRED`.
-4. Report that user action is required and resume only after login succeeds.
-5. After login, let byCLI read the `token` from the authenticated backend URL and obtain domain cookies through Browser Bridge, including HttpOnly cookies.
+### Pending-login flow
 
-`weixin accounts` does not support `--timeout`. Never pass `--timeout 180`; the correct command is:
-
-```bash
-bycli weixin accounts "<account name>" --auth-source browser -f json
-```
+1. Keep the login/QR tab and browser session open. Do not run normal session cleanup.
+2. Tell the user: "The WeChat Official Accounts login tab is still open. Complete QR-code login and confirm when finished; I will continue afterward."
+3. Stop. Do not run another command or proceed to the next step until the user confirms login succeeded.
+4. After confirmation, rerun the same command with `--site-session persistent`.
 
 ## Environment authentication
 
-Use `--auth-source env` only when the user explicitly requests it or the task runs in CI/headless automation without Browser Bridge:
+Use `--auth-source env` only for an explicit user request or CI/headless automation without Browser Bridge:
 
 | Command | Complete same-session credential set |
 |---|---|
 | `articles`, `save-articles` | `WECHAT_TOKEN` + `WECHAT_COOKIE` |
 | `accounts` | `WECHAT_TOKEN` + `WECHAT_COOKIE` + `WECHAT_FINGERPRINT` |
 
-Never mix browser-derived and environment-derived credential values.
+Never mix browser-derived and environment-derived values. If variables are missing, name them without displaying their values. If all variables exist but authentication fails, ask the user to replace the complete same-session set because it may be expired or mixed across sessions.
 
 ### Obtain credentials safely
 
-Never request that credential values be pasted into chat. Tell the user to perform these steps locally:
+Never request credential values in chat. Tell the user to obtain and inject them locally:
 
 1. Sign in to `https://mp.weixin.qq.com/` in Chrome and enter an authenticated `/cgi-bin/` backend page.
 2. Open DevTools **Network**, then refresh or perform the relevant account/article action.
 3. Select an authenticated request whose origin is exactly `https://mp.weixin.qq.com`.
-4. Set `WECHAT_TOKEN` from that request URL's non-empty `token` query parameter.
-5. Set `WECHAT_COOKIE` from the request's complete `Cookie` request-header value. Do not use `document.cookie`; it omits HttpOnly cookies required by the session.
+4. Set `WECHAT_TOKEN` from the request URL's non-empty `token` query parameter.
+5. Set `WECHAT_COOKIE` from the complete `Cookie` request header. Do not use `document.cookie`; it omits required HttpOnly cookies.
 6. For `accounts`, set `WECHAT_FINGERPRINT` from the `fingerprint` query parameter of the matching `search_biz` request.
-7. Ensure all values came from the same current login session. Re-export the complete set when the session expires.
+7. Ensure every value came from the same current login session. Replace the complete set when the session expires.
 
-The user should inject these values locally through a secret manager or hidden shell input. Do not recommend placing literal values in command arguments, shell history, committed `.env` files, fixtures, logs, traces, or skill files. A safe temporary interactive pattern is:
+Use a secret manager or hidden shell input. Do not place literal values in arguments, shell history, committed `.env` files, fixtures, logs, traces, or skill files:
 
 ```bash
 IFS= read -r -s WECHAT_TOKEN
@@ -65,12 +73,4 @@ bycli weixin articles '<fakeid>' --auth-source env -f json
 unset WECHAT_TOKEN WECHAT_COOKIE
 ```
 
-For `accounts`, collect and export `WECHAT_FINGERPRINT` the same way and unset it afterward. Never print the variables to verify them.
-
-## Authentication failures
-
-`AUTH_REQUIRED` / exit code 77 is not an adapter defect. Do not enter AutoFix or change adapter code.
-
-- Browser mode: keep the login/QR page and browser session open, report that user action is required, and resume only after login succeeds. Do not run normal session cleanup while authentication is pending.
-- Environment mode: name the missing variables without displaying their values. If all are set, explain that the values may be expired or from different sessions and ask the user to replace the complete same-session set.
-- Never echo, inspect, serialize, retain, or return token, Cookie, fingerprint, or sensitive Cookie values.
+For `accounts`, collect, export, and unset `WECHAT_FINGERPRINT` the same way. Never echo, inspect, serialize, retain, or return token, Cookie, fingerprint, or sensitive Cookie values.
