@@ -7,6 +7,7 @@ import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.storage.UserFS;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeApplicationService;
+import com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeRuntimeRefreshService;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceArtifactTypeEnum;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceBizTypeEnum;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceStatus;
@@ -33,11 +34,13 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
@@ -104,6 +107,9 @@ public class ByClawSkillResourceApplicationService {
     private DigitalEmployeeApplicationService digitalEmployeeApplicationService;
 
     @Autowired
+    private DigitalEmployeeRuntimeRefreshService digitalEmployeeRuntimeRefreshService;
+
+    @Autowired
     private AuthApplicationService authApplicationService;
 
     @Autowired
@@ -155,6 +161,8 @@ public class ByClawSkillResourceApplicationService {
             throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.upload.failed"));
         }
         SsResource digitalEmployee = validateDigitalEmployeeSkillManagePermission(resolvedDigitalEmployeeId);
+        Set<Long> affectedDigitalEmployeeIds = new LinkedHashSet<>();
+        affectedDigitalEmployeeIds.add(resolvedDigitalEmployeeId);
 
         for (int i = 0; i < uploadedSkills.size(); i++) {
             MultipartFile uploadFile = uploadFiles.get(i);
@@ -182,14 +190,14 @@ public class ByClawSkillResourceApplicationService {
                 if (primarySkill) {
                     bindSkillToDigitalEmployee(resolvedDigitalEmployeeId, skillResource.getResourceId());
                 }
+                addBoundDigitalEmployeeIds(affectedDigitalEmployeeIds, skillResource.getResourceId());
                 syncSkillTargetContent(userCode, skillResource, extSkill, true);
                 logSkillImportOperation(userCode, digitalEmployee, updated, skillResource.getResourceId(), oldVersion,
                     extSkill.getVersion(), uploadedSkill.getSkillPath(), extSkill.getSkillUrl());
             }
         }
 
-        digitalEmployeeApplicationService.rebuildAndSaveDigitalEmployeeRelSkills(resolvedDigitalEmployeeId);
-        digitalEmployeeApplicationService.synOpenClawWorkSpace(resolvedDigitalEmployeeId);
+        rebuildAndScheduleSkillRuntimeRefresh(affectedDigitalEmployeeIds);
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -342,13 +350,15 @@ public class ByClawSkillResourceApplicationService {
         }
 
         SkillImportResult primaryResult = null;
+        Set<Long> affectedDigitalEmployeeIds = new LinkedHashSet<>();
         for (SsResource existing : existingSkills) {
             SkillImportResult result = overwriteSkillZip(file, metadata, resolvedOwnerType, resolvedCatalogId,
-                sourceType, existing);
+                sourceType, existing, affectedDigitalEmployeeIds);
             if (primaryResult == null) {
                 primaryResult = result;
             }
         }
+        rebuildAndScheduleSkillRuntimeRefresh(affectedDigitalEmployeeIds);
         return primaryResult;
     }
 
@@ -366,7 +376,7 @@ public class ByClawSkillResourceApplicationService {
     }
 
     private SkillImportResult overwriteSkillZip(MultipartFile file, SkillPackageMetadata metadata, String ownerType,
-        Long catalogId, String sourceType, SsResource existing) {
+        Long catalogId, String sourceType, SsResource existing, Set<Long> affectedDigitalEmployeeIds) {
         SsResExtSkill previousExtSkill = ssResExtSkillService.findById(existing.getResourceId());
         String oldVersion = previousExtSkill == null ? null : previousExtSkill.getVersion();
         String previousSourceType = previousExtSkill == null ? null : previousExtSkill.getSourceType();
@@ -386,9 +396,10 @@ public class ByClawSkillResourceApplicationService {
             resource.getResourceId(), oldVersion, extSkill.getVersion(),
             preserveLegacyWorkspaceMetadata ? previousSkillPath : null, extSkill.getSkillUrl());
         List<SsResource> boundDigitalEmployees = findBoundDigitalEmployees(resource.getResourceId());
+        boundDigitalEmployees.stream().map(SsResource::getResourceId).filter(Objects::nonNull)
+            .forEach(affectedDigitalEmployeeIds::add);
         syncLegacyWorkspaceCopy(resourceOwnerUserCode, metadata, file, previousSourceType, previousSkillPath,
             boundDigitalEmployees);
-        refreshBoundDigitalEmployeeSkillRuntime(boundDigitalEmployees);
         return new SkillImportResult(resource, extSkill, true);
     }
 
@@ -655,6 +666,23 @@ public class ByClawSkillResourceApplicationService {
             .collect(Collectors.toList());
     }
 
+    private void addBoundDigitalEmployeeIds(Set<Long> affectedDigitalEmployeeIds, Long skillResourceId) {
+        findBoundDigitalEmployees(skillResourceId).stream().map(SsResource::getResourceId).filter(Objects::nonNull)
+            .forEach(affectedDigitalEmployeeIds::add);
+    }
+
+    /**
+     * 关系快照属于技能导入事务的一部分，重建失败必须让原事务回滚；Redis/工作空间同步仅在提交成功后执行。
+     */
+    private void rebuildAndScheduleSkillRuntimeRefresh(Set<Long> affectedDigitalEmployeeIds) {
+        if (CollectionUtils.isEmpty(affectedDigitalEmployeeIds)) {
+            return;
+        }
+        affectedDigitalEmployeeIds.forEach(
+            digitalEmployeeApplicationService::rebuildAndSaveDigitalEmployeeRelSkills);
+        digitalEmployeeRuntimeRefreshService.scheduleSkillRuntimeRefreshAfterCommit(affectedDigitalEmployeeIds);
+    }
+
     /**
      * 兼容旧的 #技能上传资源：这类资源曾在当前数字员工 workspace 留有副本。
      * 新版安装技能以 hub 为唯一来源；这里只同步原路径，避免历史副本继续覆盖新 hub 技能。
@@ -679,17 +707,6 @@ public class ByClawSkillResourceApplicationService {
             byClawSkillUploadApplicationService.uploadSkillZip(ownerUserCode, digitalEmployee.getResourceId(),
                 new ByteArrayMultipartFile(metadata.originalFilename(), packageBytes, PACKAGE_CONTENT_TYPE));
             return;
-        }
-    }
-
-    private void refreshBoundDigitalEmployeeSkillRuntime(List<SsResource> boundDigitalEmployees) {
-        if (CollectionUtils.isEmpty(boundDigitalEmployees)) {
-            return;
-        }
-        for (SsResource digitalEmployee : boundDigitalEmployees) {
-            // D0.2.1 通过重建 relSkills 再同步工作区刷新已安装技能运行态。
-            digitalEmployeeApplicationService.rebuildAndSaveDigitalEmployeeRelSkills(digitalEmployee.getResourceId());
-            digitalEmployeeApplicationService.synOpenClawWorkSpace(digitalEmployee.getResourceId());
         }
     }
 

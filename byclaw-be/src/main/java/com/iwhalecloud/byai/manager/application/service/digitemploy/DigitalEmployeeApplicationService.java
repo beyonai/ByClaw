@@ -257,6 +257,9 @@ public class DigitalEmployeeApplicationService {
     private DigEmployeeChangeEventPublisher digEmployeeChangeEventPublisher;
 
     @Autowired
+    private DigitalEmployeeRuntimeRefreshService digitalEmployeeRuntimeRefreshService;
+
+    @Autowired
     private DigEmployeeRedisSyncProperties digEmployeeRedisSyncProperties;
 
     /**
@@ -897,8 +900,9 @@ public class DigitalEmployeeApplicationService {
 
         robotChannelRegistryCoordinator.refreshForResource(resourceId);
 
-        digEmployeeChangeEventPublisher.publishAfterCommitOrNow(DigEmployeeChangeEventType.DIG_EMPLOYEE_UPDATED,
-            resourceId);
+        // 保持应用服务自身的更新通知语义：事务提交后先同步最新运行态，再发布 UPDATED 事件。
+        digitalEmployeeRuntimeRefreshService.scheduleDigitalEmployeeUpdateRefreshAfterCommit(resourceId,
+            digitalEmployeeDTO);
 
         return ssResource;
     }
@@ -1332,8 +1336,8 @@ public class DigitalEmployeeApplicationService {
      *
      * @param resourceId 标识
      */
-    public void synOpenClawWorkSpace(Long resourceId) {
-        synOpenClawWorkSpace(resourceId, null);
+    public boolean synOpenClawWorkSpace(Long resourceId) {
+        return synOpenClawWorkSpace(resourceId, null);
     }
 
     /**
@@ -1343,12 +1347,13 @@ public class DigitalEmployeeApplicationService {
      * @param resourceId 标识
      * @param inputDto 前端 save/update 时传入的原始 DTO；为 null 时退化为纯 DB 拼装
      */
-    public void synOpenClawWorkSpace(Long resourceId, DigitalEmployeeDTO inputDto) {
+    public boolean synOpenClawWorkSpace(Long resourceId, DigitalEmployeeDTO inputDto) {
         try {
-            doSyncOpenClawWorkSpace(resourceId, inputDto);
+            return doSyncOpenClawWorkSpace(resourceId, inputDto);
         }
         catch (Exception e) {
             logger.error("同步数字员工资源文件失败，resourceId: {}, error: {}", resourceId, e.getMessage(), e);
+            return false;
         }
     }
 
@@ -1394,7 +1399,7 @@ public class DigitalEmployeeApplicationService {
         return com.alibaba.fastjson.JSON.toJSONString(details);
     }
 
-    private void doSyncOpenClawWorkSpace(Long resourceId, DigitalEmployeeDTO inputDto) {
+    private boolean doSyncOpenClawWorkSpace(Long resourceId, DigitalEmployeeDTO inputDto) {
         EmployeeIdDTO employeeIdDTO = new EmployeeIdDTO();
         employeeIdDTO.setResourceId(resourceId);
         DigitalEmployeeDetailsDTO details = this.findDetailsById(employeeIdDTO);
@@ -1424,7 +1429,7 @@ public class DigitalEmployeeApplicationService {
         ssResourceArtifactService.upsertStandardJsonArtifact(resourceId, ResourceBizTypeEnum.DIG_EMPLOYEE.name(),
             "dig-employee-sync");
 
-        syncDigEmployeeConfigJsonToRedisQuietly(resourceId, jsonContent);
+        boolean redisSyncSucceeded = syncDigEmployeeConfigJsonToRedisQuietly(resourceId, jsonContent);
 
         // 数字员工自己的 JSON 同步完成后，再检查并补齐其关联资源的标准 JSON 产物。
         // 这样可以确保前端保存/更新数字员工后，关联的 toolkit / mcp / agent / kg_* / view / object
@@ -1434,6 +1439,7 @@ public class DigitalEmployeeApplicationService {
 
         logger.info("数字员工已同步至开放资源目录, storageType={}, resourceId={}, resourcePath={}/{}", effectiveStorageType,
             resourceId, resourceDir, fileName);
+        return redisSyncSucceeded;
     }
 
     /**
@@ -1741,17 +1747,23 @@ public class DigitalEmployeeApplicationService {
         return relSkill;
     }
 
-    private void syncDigEmployeeConfigJsonToRedisQuietly(Long resourceId, String jsonContent) {
+    private boolean syncDigEmployeeConfigJsonToRedisQuietly(Long resourceId, String jsonContent) {
         try {
-            syncDigEmployeeConfigJsonToRedis(resourceId, jsonContent);
+            return syncDigEmployeeConfigJsonToRedis(resourceId, jsonContent);
         }
         catch (Exception e) {
             logger.error("同步数字员工完整配置到Redis失败，resourceId: {}, error: {}", resourceId, e.getMessage(), e);
+            return false;
         }
     }
 
-    private void syncDigEmployeeConfigJsonToRedis(Long resourceId, String jsonContent) {
+    private boolean syncDigEmployeeConfigJsonToRedis(Long resourceId, String jsonContent) {
+        if (resourceId == null || StringUtils.isBlank(jsonContent) || digEmployeeRedisSyncProperties == null
+            || !digEmployeeRedisSyncProperties.isJsonRedisSyncEnabled()) {
+            return false;
+        }
         syncResourceConfigJsonToRedis(ResourceBizTypeEnum.DIG_EMPLOYEE.name(), resourceId, jsonContent);
+        return true;
     }
 
     private void syncResourceConfigJsonToRedis(String resourceBizType, Long resourceId, String jsonContent) {

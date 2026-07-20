@@ -80,6 +80,7 @@ class DigitalEmployeeApplicationServiceTest {
     private ResourceAuthContextService resourceAuthContextService;
     private RobotChannelRegistryCoordinator robotChannelRegistryCoordinator;
     private DigEmployeeChangeEventPublisher digEmployeeChangeEventPublisher;
+    private DigitalEmployeeRuntimeRefreshService digitalEmployeeRuntimeRefreshService;
     private SystemConfigService systemConfigService;
     private DigitalEmployeeApplicationService service;
 
@@ -99,6 +100,7 @@ class DigitalEmployeeApplicationServiceTest {
         resourceAuthContextService = mock(ResourceAuthContextService.class);
         robotChannelRegistryCoordinator = mock(RobotChannelRegistryCoordinator.class);
         digEmployeeChangeEventPublisher = mock(DigEmployeeChangeEventPublisher.class);
+        digitalEmployeeRuntimeRefreshService = mock(DigitalEmployeeRuntimeRefreshService.class);
         systemConfigService = mock(SystemConfigService.class);
         when(systemConfigService.getStringParamValueByCode(any())).thenReturn("");
 
@@ -123,6 +125,8 @@ class DigitalEmployeeApplicationServiceTest {
         ReflectionTestUtils.setField(service, "resourceAuthContextService", resourceAuthContextService);
         ReflectionTestUtils.setField(service, "robotChannelRegistryCoordinator", robotChannelRegistryCoordinator);
         ReflectionTestUtils.setField(service, "digEmployeeChangeEventPublisher", digEmployeeChangeEventPublisher);
+        ReflectionTestUtils.setField(service, "digitalEmployeeRuntimeRefreshService",
+            digitalEmployeeRuntimeRefreshService);
         ReflectionTestUtils.setField(service, "systemConfigService", systemConfigService);
 
         LoginInfo loginInfo = new LoginInfo();
@@ -624,6 +628,7 @@ class DigitalEmployeeApplicationServiceTest {
         assertThat(result.getWorkerAgentType()).isEqualTo(WorkerAgentType.BYCLAW_EXE.getCode());
         assertThat(resourceCaptor.getValue().getWorkerAgentType()).isEqualTo(WorkerAgentType.BYCLAW_EXE.getCode());
         assertThat(extCaptor.getValue().getAgentType()).isEqualTo(DigitalEmployType.AGENT_TYPE_ASSISTANT.getCode());
+        verify(digitalEmployeeRuntimeRefreshService).scheduleDigitalEmployeeUpdateRefreshAfterCommit(100L, dto);
     }
 
     @Test
