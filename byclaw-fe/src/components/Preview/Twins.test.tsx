@@ -16,7 +16,9 @@ jest.mock('@/components/Preview/Html', () => ({
   HtmlRender: () => null,
 }));
 jest.mock('@/components/Preview/TextHighlight', () => () => null);
-jest.mock('@/components/Preview/Md', () => () => null);
+jest.mock('@/components/Preview/Md', () => ({ content }: { content?: string }) => (
+  <div data-testid="markdown-preview">{content}</div>
+));
 jest.mock('@/components/Preview/Image', () => () => null);
 
 describe('PreViewFile Office data handling', () => {
@@ -74,5 +76,14 @@ describe('PreViewFile Office data handling', () => {
     await waitFor(() => {
       expect(revokeObjectURL).toHaveBeenCalledWith('blob:office-preview');
     });
+  });
+});
+
+describe('PreViewFile Markdown data handling', () => {
+  it('shows the Markdown preview when data is a string', async () => {
+    render(<PreViewFile data="# Markdown content" type="md" />);
+
+    expect(await screen.findByTestId('markdown-preview')).toBeVisible();
+    expect(screen.getByTestId('markdown-preview')).toHaveTextContent('# Markdown content');
   });
 });

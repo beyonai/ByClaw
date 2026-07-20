@@ -47,6 +47,7 @@ const PreviewTextArea = ({ onPreview, ...textareaProps }: PreviewTextAreaProps) 
       <Button
         aria-label="查看更多"
         className={styles.textareaPreviewAction}
+        disabled={false}
         icon={<FullscreenOutlined />}
         onClick={onPreview}
         size="small"
@@ -207,7 +208,7 @@ const FormItemsRender = ({ idx, item, isDisable, renderNestedForm }: FormItemsRe
             canFullScreen: true,
           });
           EventEmitter.emit('beyond-main-driver-message', {
-            data: name ? form.getFieldValue(name) : '',
+            data: name ? form.getFieldValue(name) : fieldValue,
             type: 'md',
           });
         }}
