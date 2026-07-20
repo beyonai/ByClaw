@@ -27,6 +27,7 @@ import com.iwhalecloud.byai.state.domain.recorder.model.RecorderOwner;
 public class BycliRecorderBrowserPort implements RecorderBrowserPort {
 
     private static final String BYCLI_HEADER = "X-byCLI";
+    private static final int BROWSER_RECOVERY_WAIT_MS = 2000;
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {
     };
 
@@ -84,14 +85,25 @@ public class BycliRecorderBrowserPort implements RecorderBrowserPort {
     @Override
     public Map<String, Object> health(RecorderOwner owner) {
         try {
-            DaemonResponse response = endpointResolver == null || owner == null
-                ? sendGet("/status", 2000)
-                : sendGet(endpointResolver.resolve(owner, "bycli", "/status"), 2000);
+            URI daemonEndpoint = endpointResolver == null || owner == null
+                ? uri("/status")
+                : endpointResolver.resolve(owner, "bycli", "/status");
+            DaemonResponse response = sendGet(daemonEndpoint, 2000);
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
                 return downHealth("daemon status failed (HTTP " + response.statusCode() + ")");
             }
             Map<String, Object> status = dataMap(response.body());
             boolean extensionConnected = Boolean.TRUE.equals(status.get("extensionConnected"));
+            if (!extensionConnected) {
+                recoverBrowser(owner);
+                waitForBrowserRecovery();
+                response = sendGet(daemonEndpoint, 2000);
+                if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                    return downHealth("daemon status failed (HTTP " + response.statusCode() + ")");
+                }
+                status = dataMap(response.body());
+                extensionConnected = Boolean.TRUE.equals(status.get("extensionConnected"));
+            }
             String localService = stringValue(status.get("localService"));
             return Map.of(
                 "localService", localService == null ? "ok" : localService,
@@ -207,9 +219,13 @@ public class BycliRecorderBrowserPort implements RecorderBrowserPort {
     }
 
     private DaemonResponse sendPost(RecorderSession session, String path, Map<String, Object> body, int timeoutMs) {
+        return sendPost(uri(session, path), body, timeoutMs);
+    }
+
+    private DaemonResponse sendPost(URI target, Map<String, Object> body, int timeoutMs) {
         HttpRequest request;
         try {
-            request = HttpRequest.newBuilder(uri(session, path))
+            request = HttpRequest.newBuilder(target)
                 .timeout(Duration.ofMillis(timeoutMs))
                 .header(BYCLI_HEADER, "1")
                 .header("Content-Type", "application/json")
@@ -219,6 +235,25 @@ public class BycliRecorderBrowserPort implements RecorderBrowserPort {
             throw new RecorderBrowserException("network_error", "failed to encode daemon command");
         }
         return send(request);
+    }
+
+    private void recoverBrowser(RecorderOwner owner) {
+        try {
+            URI recoveryEndpoint = endpointResolver == null || owner == null
+                ? uri("/v1/browser/recover")
+                : endpointResolver.resolve(owner, "bycli", "/v1/browser/recover");
+            sendPost(recoveryEndpoint, Map.of(), BROWSER_RECOVERY_WAIT_MS);
+        } catch (RecorderBrowserException ignored) {
+            // The refreshed daemon status below remains the health response source of truth.
+        }
+    }
+
+    private void waitForBrowserRecovery() {
+        try {
+            Thread.sleep(BROWSER_RECOVERY_WAIT_MS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     private DaemonResponse send(HttpRequest request) {
@@ -266,7 +301,9 @@ public class BycliRecorderBrowserPort implements RecorderBrowserPort {
         command.put("action", action);
         command.put("session", session.sessionId());
         command.put("surface", "browser");
-        command.put("contextId", session.contextId());
+        if (session.contextId() != null && !session.contextId().isBlank()) {
+            command.put("contextId", session.contextId());
+        }
         command.put("windowMode", session.isVnc() ? "foreground" : "background");
         return command;
     }

@@ -1,31 +1,16 @@
 #!/usr/bin/env python3
 """实体消解一站式脚本：批内去重 → 双路召回 → RRF融合 → identity比对+属性diff → 输出候选。
 
-合并了 er_dedup_batch.py + er_search_kb.py + er_match.py 的功能。
-
 用法:
     python3 er_resolve.py \
-      --doc-dir /by/.sessions/{session_id}/{任务名称} \
-      --object-type TechSpec \
-      --identity-fields name \
-      --kb-id 78 \
-      --kb-resource-id 10042822 \
-      --output er_resolve_result.json
+      --doc-dir /by/.sessions/{session_id}/{任务名称}/新建对象/{对象名称} \
+      --object-type {对象名称} \
+      --identity-fields name
+
+    下载目录: {doc_dir}/../../知识库候选/{object_type}/
 
 输出:
-    {
-      "doc_path": "...",
-      "kb_resource_id": "10042822",
-      "dedup": {"groups": [...], "singletons": [...]},
-      "candidates": [
-        {
-          "kb_doc_path": "/TechSpec/04_...md",
-          "name_match": {...},
-          "property_diff": {...},
-          "kb_front_matter": {...}
-        }
-      ]
-    }
+    ## 实例消解结果
 """
 
 from __future__ import annotations
@@ -281,17 +266,19 @@ def _get_common():
 def recall_via_term_search(
     keyword: str,
     term_type: str,
-    kb_id: str,
     top_k: int = DEFAULT_TOP_K,
 ) -> list[dict[str, Any]]:
-    """Path-1: term embedding 向量召回——走服务发现。"""
+    """Path-1: term 混合召回（BM25 + jieba + 向量 RRF 融合）——走服务发现。
+
+    每个结果包含 kb_file_path、term_score、term_name，以及从 ext_attrs/labels 提取的
+    kb_id 和 kb_resource_id。
+    """
     _cm = _get_common()
     raw = _cm.post_rpc("term/search", {
         "params": {
             "keyword": keyword,
             "termType": term_type,
-            "queryType": "embedding",
-            "labelFilters": [{"field_code": "kb_id", "filter_value": str(kb_id)}],
+            "queryType": "mixed",
             "topK": top_k,
         }
     })
@@ -299,12 +286,15 @@ def recall_via_term_search(
     results: list[dict[str, Any]] = []
     for item in items:
         ext_attrs = item.get("ext_attrs", {}) or {}
-        fp = ext_attrs.get("kb_file_path", "") or (item.get("labels", {}) or {}).get("kb_file_path", "")
+        labels = item.get("labels", {}) or {}
+        fp = ext_attrs.get("kb_file_path", "") or labels.get("kb_file_path", "")
         if fp:
             results.append({
                 "kb_file_path": fp,
                 "term_score": float(item.get("score") or 0),
                 "term_name": item.get("term_name", ""),
+                "kb_id": ext_attrs.get("kb_id") or labels.get("kb_id", ""),
+                "kb_resource_id": ext_attrs.get("kb_resource_id") or ext_attrs.get("resource_id") or labels.get("kb_resource_id") or labels.get("resource_id", ""),
             })
     return results
 
@@ -364,14 +354,39 @@ def merge_recalls(
     merged: dict[str, dict[str, Any]] = {}
     for r in term_results:
         fp = r["kb_file_path"]
-        merged[fp] = {"kb_file_path": fp, "term_score": r.get("term_score", 0), "semantic_score": 0}
+        merged[fp] = {
+            "kb_file_path": fp,
+            "term_score": r.get("term_score", 0),
+            "semantic_score": 0,
+            "kb_id": r.get("kb_id", ""),
+            "kb_resource_id": r.get("kb_resource_id", ""),
+        }
     for r in semantic_results:
         fp = r["kb_file_path"]
         if fp in merged:
             merged[fp]["semantic_score"] = r.get("semantic_score", 0)
         else:
-            merged[fp] = {"kb_file_path": fp, "term_score": 0, "semantic_score": r.get("semantic_score", 0)}
+            merged[fp] = {
+                "kb_file_path": fp,
+                "term_score": 0,
+                "semantic_score": r.get("semantic_score", 0),
+                "kb_id": r.get("kb_id", ""),
+                "kb_resource_id": r.get("kb_resource_id", ""),
+            }
     return list(merged.values())
+
+
+def _extract_kb_resource_id(term_results: list[dict[str, Any]]) -> str:
+    """从 term 召回结果中提取 kb_resource_id（合并去重，取第一个有效值）。
+
+    注意：ext_attrs/labels 中的 kb_id 是本体库 ID（如 78），不是知识库 resourceId（如 10042822），
+    二者不同，不能互相替代。优先取 kb_resource_id / resource_id 字段。
+    """
+    for r in term_results:
+        rid = r.get("kb_resource_id", "")
+        if rid:
+            return str(rid)
+    return ""
 
 
 # ============================================================
@@ -469,13 +484,11 @@ def run(
     doc_dir: Path,
     object_type: str,
     identity_fields: list[str],
-    kb_id: str,
-    kb_resource_id: str,
 ) -> dict[str, Any]:
     """一站式实体消解。
 
-    候选 KB 文件自动下载到 {doc_dir}/_kb_candidates/{object_type}/，
-    方便 Agent 直接读取本地副本比对内容。
+    kb_resource_id 从 term 召回结果自动提取。提取不到则仅做 term 召回，跳过 search-file 和下载。
+    候选 KB 文件下载到 {doc_dir}/../../知识库候选/{object_type}/。
     """
     # Step 1: 批内去重
     dedup = dedup_batch(doc_dir, identity_fields)
@@ -489,14 +502,18 @@ def run(
         identity = extract_identity(new_fm, identity_fields)
         if not identity:
             logger.warning("No identity fields in %s", doc_path)
-            results[doc_path] = {"doc_path": doc_path, "kb_resource_id": kb_resource_id, "candidates": [], "dedup": dedup}
+            results[doc_path] = {"doc_path": doc_path, "candidates": [], "dedup": dedup}
             continue
 
         keyword = str(list(identity.values())[0])
 
         # Step 2: 双路召回
-        term_results = recall_via_term_search(keyword, object_type, kb_id)
+        term_results = recall_via_term_search(keyword, object_type)
         logger.info("Path-1 term: %d hits", len(term_results))
+
+        # 从 term 结果中自动提取 kb_resource_id
+        kb_resource_id = _extract_kb_resource_id(term_results)
+        logger.info("kb_resource_id: %s", kb_resource_id or "(none)")
 
         # 提取关键摘要做 search-file 检索词
         # 优先用对象的"一句话定义"字段 + 正文前几段
@@ -536,9 +553,10 @@ def run(
         # Step 3: 构建候选列表
         candidates = build_candidates(recalls, identity, new_fm, identity_fields, kb_resource_id)
 
-        # 下载 KB 候选文件到本地 session 目录
-        if candidates:
-            local_download_dir = doc_dir / "_kb_candidates"
+        # 下载 KB 候选文件到知识库候选目录
+        # doc_dir 为 .../新建对象/{对象名称}，下载到 .../知识库候选/{对象名称}/
+        if candidates and kb_resource_id:
+            local_download_dir = doc_dir.parent.parent / "知识库候选" / object_type
             download_candidate_files(candidates, kb_resource_id, local_download_dir)
 
         results[doc_path] = {
@@ -659,8 +677,6 @@ def main() -> None:
     parser.add_argument("--doc-dir", required=True, help="新文档目录")
     parser.add_argument("--object-type", required=True, help="本体对象类型")
     parser.add_argument("--identity-fields", required=True, help="identity 字段，逗号分隔")
-    parser.add_argument("--kb-id", required=True, help="ontology kb_id（如 78）")
-    parser.add_argument("--kb-resource-id", required=True, help="知识库 resourceId（如 10042822）")
     parser.add_argument("--output", default="", help="可选：同时输出 JSON 路径")
     parser.add_argument("--rich", action="store_true", default=True, help="输出 Agent 友好的 Markdown 格式（默认）")
     parser.add_argument("--json", action="store_true", help="仅输出 JSON")
@@ -678,7 +694,7 @@ def main() -> None:
         logger.error("identity-fields cannot be empty")
         raise SystemExit(1)
 
-    result = run(doc_dir, args.object_type, fields, args.kb_id, args.kb_resource_id)
+    result = run(doc_dir, args.object_type, fields)
 
     # JSON 输出
     if args.json or not args.rich:

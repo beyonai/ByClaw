@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.state.interfaces.controller.recorder;
 
 import static org.hamcrest.Matchers.startsWith;
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -205,7 +206,7 @@ class RecorderControllerTest {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.ok").value(true))
             .andExpect(jsonPath("$.data.sessionId", startsWith("session_")))
-            .andExpect(jsonPath("$.data.contextId").value("default"))
+            .andExpect(jsonPath("$.data.contextId").value(nullValue()))
             .andExpect(jsonPath("$.data.awaitingLogin").value(false))
             .andReturn();
 

@@ -85,8 +85,8 @@ FROM ghcr.io/openclaw/openclaw:${OPENCLAW_VERSION}
 USER root
 
 ARG OPENCLAW_VERSION
-ARG OPENCLI_VERSION=2.1.4
-ARG OPENCLI_EXTENSION_VERSION=2.1.0
+ARG OPENCLI_VERSION=2.1.7
+ARG OPENCLI_EXTENSION_VERSION=2.1.6
 ARG DWS_VERSION=v1.0.47
 ARG WECOM_CLI_VERSION=0.1.9
 ARG LARKSUITE_CLI_VERSION=1.0.67
@@ -99,8 +99,11 @@ ENV PIP_BREAK_SYSTEM_PACKAGES=1 \
     OPENCLAW_BUNDLED_PLUGINS_DIR=/app/dist/extensions \
     OPENCLAW_STATE_DIR=/root/.openclaw \
     OPENCLAW_VNC_WEB_PORT=8081 \
-    OPENCLAW_VNC_PORT=5901 \
-    BYCLI_CONFIG_DIR=/by/.bycli \
+    OPENCLAW_VNC_PORT=5901
+
+# bycli dashboard相关系统配置
+ENV BYCLI_CONFIG_DIR=/by/.bycli \
+    BYCLI_BROWSER_RECOVERY_COMMAND=/usr/local/bin/start-chrome.sh \
     BYCLI_DAEMON_HOST=0.0.0.0
 
 RUN set -eux; \
@@ -173,7 +176,7 @@ RUN set -eux; \
         npm install -g "@sovovs/bycli@${OPENCLI_VERSION}"; \
         mkdir -p /opt/opencli/extension; \
         curl -fsSL -o /tmp/opencli-extension.zip \
-            "https://github.com/sovovs/byCLI/releases/download/v${OPENCLI_VERSION}/bycli-extension-v${OPENCLI_EXTENSION_VERSION}.zip"; \
+            "https://github.com/sovovs/byCLI/releases/download/v${OPENCLI_EXTENSION_VERSION}/bycli-extension-v${OPENCLI_EXTENSION_VERSION}.zip"; \
         unzip -q /tmp/opencli-extension.zip -d /opt/opencli/extension; \
         rm -f /tmp/opencli-extension.zip; \
         chromium --version; \

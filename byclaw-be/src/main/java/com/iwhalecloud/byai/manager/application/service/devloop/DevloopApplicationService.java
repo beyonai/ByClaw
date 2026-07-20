@@ -87,6 +87,9 @@ public class DevloopApplicationService {
 
     private static final String TASK_STATUS_DEFAULT = "进行中";
 
+    /** 任务终态：环节进度不再变化，可直接用缓存，无需每次重算 */
+    private static final String TASK_STATUS_DONE = "完成";
+
     /** 环节进度快照缓存于 byai_session_ext 纵表的键；避免每次开详情都跑解析/LLM */
     private static final String TASK_PHASE_EXT_CODE = "task_phase";
 
@@ -1172,17 +1175,22 @@ public class DevloopApplicationService {
     }
 
     /**
-     * 查询任务环节进度：按需刷新——缓存缺失或会话有新消息时重算并落库，否则直接返回缓存。 返回完整快照(7 环节 + 状态 + 打回记录)，供详情抽屉逐环节渲染。
+     * 查询任务环节进度：
+     * 长程任务里同一条消息会被 websocket 持续追加(消息条数不变但内容在变，一条消息可能包含多次环节变动)，
+     * 故不再按消息条数判失效。只有任务已「完成」才用缓存(进度已定格)；未完成一律实时重算并落库。
+     * 返回完整快照(7 环节 + 状态 + 打回记录)，供详情抽屉逐环节渲染。
      */
     public ResponseUtil<DevloopPhaseService.PhaseSnapshot> getTaskPhases(Long sessionId) {
         if (sessionId == null) {
             return ResponseUtil.failRes("sessionId 不能为空");
         }
-        DevloopPhaseService.PhaseSnapshot cached = loadTaskPhaseMap(java.util.Collections.singletonList(sessionId))
-            .get(sessionId);
-        long messageCount = phaseService.countMessages(sessionId);
-        if (!phaseService.isStale(cached, messageCount)) {
-            return ResponseUtil.successResponse(cached);
+        List<Long> ids = java.util.Collections.singletonList(sessionId);
+        String status = loadTaskStatusMap(ids).get(sessionId);
+        if (TASK_STATUS_DONE.equals(status)) {
+            DevloopPhaseService.PhaseSnapshot cached = loadTaskPhaseMap(ids).get(sessionId);
+            if (cached != null) {
+                return ResponseUtil.successResponse(cached);
+            }
         }
         DevloopPhaseService.PhaseSnapshot fresh = phaseService.buildSnapshot(sessionId);
         persistPhaseSnapshot(sessionId, fresh);

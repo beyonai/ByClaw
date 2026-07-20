@@ -62,6 +62,25 @@ class BycliRecorderBrowserPortTest {
     }
 
     @Test
+    void healthRecoversDisconnectedExtensionThenReturnsRefreshedStatus() throws Exception {
+        daemon = FakeDaemon.start();
+        daemon.enqueueJson(200, Map.of("ok", true, "extensionConnected", false));
+        daemon.enqueueJson(202, Map.of("ok", true, "data", Map.of("started", true)));
+        daemon.enqueueJson(200, Map.of("ok", true, "extensionConnected", true));
+
+        RecorderBrowserProperties properties = new RecorderBrowserProperties();
+        properties.setDaemonHost("127.0.0.1");
+        properties.setDaemonPort(daemon.port());
+
+        Map<String, Object> health = new BycliRecorderBrowserPort(properties).health();
+
+        assertThat(daemon.paths()).containsExactly("/status", "/v1/browser/recover", "/status");
+        assertThat(health).containsEntry("daemon", "ok")
+            .containsEntry("extension", "ok")
+            .containsEntry("highLevel", "ok");
+    }
+
+    @Test
     void healthUsesCurrentUsersBycliSandboxEndpoint() throws Exception {
         daemon = FakeDaemon.start();
         daemon.enqueueJson(200, Map.of(
@@ -179,6 +198,7 @@ class BycliRecorderBrowserPortTest {
         private final HttpServer server;
         private final Queue<QueuedResponse> responses = new ArrayDeque<>();
         private String lastPath;
+        private final List<String> paths = new java.util.ArrayList<>();
         private Map<String, List<String>> lastHeaders = Map.of();
         private Map<String, Object> lastBody = Map.of();
 
@@ -191,6 +211,7 @@ class BycliRecorderBrowserPortTest {
             FakeDaemon daemon = new FakeDaemon(server);
             server.createContext("/status", daemon::handle);
             server.createContext("/command", daemon::handle);
+            server.createContext("/v1/browser/recover", daemon::handle);
             server.start();
             return daemon;
         }
@@ -205,6 +226,10 @@ class BycliRecorderBrowserPortTest {
 
         String lastPath() {
             return lastPath;
+        }
+
+        List<String> paths() {
+            return paths;
         }
 
         String lastHeader(String name) {
@@ -230,6 +255,7 @@ class BycliRecorderBrowserPortTest {
         private void handle(HttpExchange exchange) {
             try (exchange) {
                 lastPath = exchange.getRequestURI().getPath();
+                paths.add(lastPath);
                 lastHeaders = new LinkedHashMap<>(exchange.getRequestHeaders());
                 byte[] requestBody = exchange.getRequestBody().readAllBytes();
                 if (requestBody.length > 0) {
