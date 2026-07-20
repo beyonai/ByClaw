@@ -59,12 +59,44 @@ fi
 if [ "$HAS_BE" = true ]; then
   echo "🔍 [pre-commit] Running backend checks..."
 
-  mvn -B -f "$REPO_ROOT/byclaw-be/pom.xml" test
+  # SourceTree may launch hooks with macOS library validation enabled. Keep
+  # native extraction inside the project build directory where possible.
+  BACKEND_NATIVE_TMP_DIR="$REPO_ROOT/byclaw-be/target/native-tmp"
+  SQLITE_TEST_REPORT="$REPO_ROOT/byclaw-be/target/surefire-reports/com.iwhalecloud.byai.gateway.sandbox.service.cronprewarm.OpenClawCronDueJobReaderTest.txt"
+  mkdir -p "$BACKEND_NATIVE_TMP_DIR"
   if [ $? -ne 0 ]; then
-    echo "❌ [pre-commit] Backend tests failed"
+    echo "❌ [pre-commit] Unable to prepare backend native library directory"
     EXIT_CODE=1
   else
-    echo "✅ [pre-commit] Backend checks passed"
+    BACKEND_MAVEN_OPTS="${MAVEN_OPTS:-} -Djava.io.tmpdir=$BACKEND_NATIVE_TMP_DIR -Djansi.tmpdir=$BACKEND_NATIVE_TMP_DIR -Djansi.graceful=true -Dorg.sqlite.tmpdir=$BACKEND_NATIVE_TMP_DIR"
+
+    run_backend_maven() {
+      TMPDIR="$BACKEND_NATIVE_TMP_DIR" MAVEN_OPTS="$BACKEND_MAVEN_OPTS" mvn -B -f "$REPO_ROOT/byclaw-be/pom.xml" "$@"
+    }
+
+    # SQLite JDBC requires a native dylib. Validate it first so that a
+    # SourceTree-only library-validation failure does not mask all other tests.
+    run_backend_maven -Dtest=OpenClawCronDueJobReaderTest test
+    SQLITE_PREFLIGHT_EXIT=$?
+
+    if [ $SQLITE_PREFLIGHT_EXIT -ne 0 ] && [ -f "$SQLITE_TEST_REPORT" ] && grep -q "UnsatisfiedLinkError" "$SQLITE_TEST_REPORT"; then
+      echo "⚠️  [pre-commit] SourceTree blocked SQLite JDBC native loading; skipping OpenClawCronDueJobReaderTest locally"
+      run_backend_maven "-Dtest=!OpenClawCronDueJobReaderTest" test
+      BACKEND_TEST_EXIT=$?
+    elif [ $SQLITE_PREFLIGHT_EXIT -ne 0 ]; then
+      echo "❌ [pre-commit] SQLite preflight test failed"
+      BACKEND_TEST_EXIT=1
+    else
+      run_backend_maven "-Dtest=!OpenClawCronDueJobReaderTest" test
+      BACKEND_TEST_EXIT=$?
+    fi
+
+    if [ $BACKEND_TEST_EXIT -ne 0 ]; then
+      echo "❌ [pre-commit] Backend tests failed"
+      EXIT_CODE=1
+    else
+      echo "✅ [pre-commit] Backend checks passed"
+    fi
   fi
 fi
 

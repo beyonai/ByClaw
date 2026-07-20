@@ -1,19 +1,15 @@
 package com.iwhalecloud.byai.state.domain.template.service;
 
 import cn.hutool.core.date.DateUtil;
-import com.iwhalecloud.byai.manager.entity.superassist.SuasSuperassist;
-import com.iwhalecloud.byai.common.util.UrlUtil;
 import com.iwhalecloud.byai.common.message.entity.ByaiMessageHotDto;
 import com.iwhalecloud.byai.common.feign.request.knowledge.OpenFileDownloadDTO;
-import com.iwhalecloud.byai.common.feign.response.KnowledgeResponse;
 import com.iwhalecloud.byai.state.common.exception.BdpRuntimeException;
 import com.iwhalecloud.byai.state.domain.session.dto.TemplateMessagesCopyRequestDto;
 import com.iwhalecloud.byai.state.domain.file.service.FileService;
-import com.iwhalecloud.byai.common.feign.request.knowledge.Metadata;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
-import com.iwhalecloud.byai.common.constants.Constants;
-import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
-import com.iwhalecloud.byai.state.domain.assitsant.service.SuperassistService;
+import com.iwhalecloud.byai.state.application.service.chat.AssistantChatApplicationService;
+import com.iwhalecloud.byai.manager.dto.resource.UploadItem;
+import com.iwhalecloud.byai.manager.dto.session.SessionUploadResult;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -49,7 +45,7 @@ public class TemplateFileProcessingService {
     private FileService fileService;
 
     @Autowired
-    private SuperassistService superassistService;
+    private AssistantChatApplicationService assistantChatApplicationService;
 
     /**
      * 文件ID在消息内容中的正则表达式模式 匹配JSON格式的文件ID，如 "fileId":"1485803457067106304"
@@ -93,8 +89,7 @@ public class TemplateFileProcessingService {
     /**
      * 处理会话消息中的文件，下载并重新上传，构建文件ID映射关系
      * <p>
-     * 注意：文件重新上传时使用当前登录用户的datasetId，而不是原消息创建者的datasetId。 这是因为： 1. 模板会话是由当前登录用户创建的，文件应该归属于模板创建者 2.
-     * 原文件可能属于不同的用户，直接使用可能导致权限问题 3. 模板的目的是让当前用户能够复用，所以文件应该存储在当前用户的知识库中
+     * 文件会通过当前会话的上传链路重新落盘并生成新文件ID，避免模板继续引用原消息创建者的文件。
      *
      * @param messages 消息列表
      * @param sessionId 会话ID
@@ -119,29 +114,20 @@ public class TemplateFileProcessingService {
             String fileIdStr = entry.getKey();
             Long fileId = entry.getValue();
 
-            // 下载原文件 - 使用公共下载方法
-            try (Response downloadResponse = this.downloadFile(fileId);) {
+            try (Response downloadResponse = this.downloadFile(fileId)) {
 
-                // 从下载响应中获取文件名（如果可用）
                 String originalFileName = getFileNameFromDownloadResponse(downloadResponse, fileId);
 
-                // 重新上传文件，使用当前登录用户的datasetId（因为模板是当前用户创建的）
-                TemplateMessagesCopyRequestDto.FileInfo fileInfo = uploadFileToSession(downloadResponse, sessionId,
-                    originalFileName);
+                TemplateMessagesCopyRequestDto.FileInfo fileInfo = uploadFileViaChat(downloadResponse,
+                    Long.valueOf(sessionId), originalFileName);
                 if (StringUtils.isBlank(fileInfo.getFileId())) {
                     log.error("文件重新上传失败 - fileId: {}", fileId);
                     throw new BdpRuntimeException(I18nUtil.get("template.file.upload.failed", fileId));
                 }
 
-                // 如果上传返回的文件信息中缺少某些字段，使用下载响应中的信息补充
                 if (StringUtils.isBlank(fileInfo.getFileName())) {
                     fileInfo.setFileName(originalFileName);
                 }
-                if (fileInfo.getFileSize() == null || fileInfo.getFileSize() == 0) {
-                    byte[] bodyBytes = downloadResponse.body().asInputStream().readAllBytes();
-                    fileInfo.setFileSize((long) bodyBytes.length);
-                }
-                // fileType 现在从接口响应中获取，不需要手动设置默认值
 
                 fileMappings.put(fileIdStr, fileInfo);
                 log.info("文件处理成功 - 原文件ID: {}, 新文件ID: {}, 文件名: {}, 文件URL: {}", fileId, fileInfo.getFileId(),
@@ -149,7 +135,6 @@ public class TemplateFileProcessingService {
 
             }
             catch (BdpRuntimeException e) {
-                // 重新抛出业务异常
                 throw e;
             }
             catch (Exception e) {
@@ -213,7 +198,6 @@ public class TemplateFileProcessingService {
         }
 
         // 4. 检查文件内容
-        // return validateFileContent(downloadResponse, fileId);
         return true;
     }
 
@@ -362,74 +346,32 @@ public class TemplateFileProcessingService {
         }
     }
 
-    /**
-     * 获取用户的个人对话知识库ID
-     *
-     * @param userId 用户ID
-     * @return 知识库ID
-     */
-    private Long getDatasetId(Long userId) {
-        SuasSuperassist suasSuperassist = superassistService.findByCreateUser(userId);
-        return suasSuperassist.getSessionDatasetId();
-    }
-
-    /**
-     * 获取当前登录用户的个人对话知识库ID
-     *
-     * @return 知识库ID
-     */
-    private Long getCurrentUserDatasetId() {
-        Long userId = CurrentUserHolder.getCurrentUserId();
-        return getDatasetId(userId);
-    }
-
-    /**
-     * 将下载的文件重新上传到指定会话
-     *
-     * @param downloadResponse 下载响应
-     * @param sessionId 会话ID
-     * @param originalFileName 原始文件名
-     * @return 文件信息对象
-     * @throws BdpRuntimeException 当上传失败时抛出
-     */
-    private TemplateMessagesCopyRequestDto.FileInfo uploadFileToSession(Response downloadResponse, String sessionId,
+    private TemplateMessagesCopyRequestDto.FileInfo uploadFileViaChat(Response downloadResponse, Long sessionId,
         String originalFileName) {
         try {
-            // 创建MultipartFile对象
             MultipartFile multipartFile = createMultipartFileFromResponse(downloadResponse,
                 DateUtil.current() + "_" + originalFileName);
 
-            // 使用fileService.preUploadFile上传文件
-            // 参考superAssistKwCatalogApplicationService.uploadFileAndRebuild的逻辑
-            // 使用当前登录用户的datasetId，因为模板是当前用户创建的
-            Long datasetId = this.getCurrentUserDatasetId();
+            SessionUploadResult uploadResult = assistantChatApplicationService.uploadFiles(
+                new MultipartFile[] {multipartFile}, sessionId, null, null);
 
-            // 构建上传文件的元数据信息
-            Metadata metadata = new Metadata();
-            metadata.setDatasetId(datasetId);
-            metadata.setDatasetType("4"); // 4表示个人对话知识库类型
-            metadata.setFileCollectId(datasetId); // 使用datasetId作为fileCollectId
-
-            KnowledgeResponse uploadResponse = null;
-
-            // 检查上传结果
-            if (!Constants.RESPONSE_SUCCESS.equals(uploadResponse.getResultCode())) {
-                log.error("文件上传失败 - sessionId: {}, response: {}", sessionId, uploadResponse.getResultMsg());
-                throw new BdpRuntimeException(
-                    I18nUtil.get("template.file.upload.failed", sessionId, uploadResponse.getResultMsg()));
+            if (uploadResult == null || uploadResult.getUploadItems() == null
+                || uploadResult.getUploadItems().isEmpty()) {
+                log.error("文件上传失败，无返回结果 - sessionId: {}", sessionId);
+                throw new BdpRuntimeException(I18nUtil.get("template.file.upload.failed", sessionId, "无返回结果"));
             }
 
-            // 从响应中提取文件信息
-            TemplateMessagesCopyRequestDto.FileInfo fileInfo = extractFileInfoFromKnowledgeResponse(uploadResponse);
-            if (fileInfo == null || StringUtils.isBlank(fileInfo.getFileId())) {
-                log.error("文件上传成功但无法获取文件信息 - sessionId: {}, response: {}", sessionId, uploadResponse);
+            UploadItem item = uploadResult.getUploadItems().get(0);
+            if (item == null || item.getFileId() == null) {
+                log.error("文件上传成功但无文件ID - sessionId: {}", sessionId);
                 throw new BdpRuntimeException(I18nUtil.get("template.file.upload.no.file.id", sessionId));
             }
-
-            log.info("文件上传成功 - sessionId: {}, newFileId: {}, fileUrl: {}", sessionId, fileInfo.getFileId(),
-                fileInfo.getFileUrl());
+            TemplateMessagesCopyRequestDto.FileInfo fileInfo = new TemplateMessagesCopyRequestDto.FileInfo();
+            fileInfo.setFileId(String.valueOf(item.getFileId()));
+            fileInfo.setFileName(item.getFileName());
+            fileInfo.setFileUrl(item.getFileUrl());
+            fileInfo.setFileSize(multipartFile.getSize());
             return fileInfo;
-
         }
         catch (Exception e) {
             log.error("文件上传异常 - sessionId: {}, error: {}", sessionId, e.getMessage(), e);
@@ -542,58 +484,4 @@ public class TemplateFileProcessingService {
         return "template_file_" + System.currentTimeMillis() + "." + extension;
     }
 
-    /**
-     * 从KnowledgeResponse中提取文件信息
-     *
-     * @param uploadResponse 上传响应
-     * @return 文件信息对象，包含fileId和fileUrl
-     */
-    private TemplateMessagesCopyRequestDto.FileInfo extractFileInfoFromKnowledgeResponse(
-        KnowledgeResponse uploadResponse) {
-        try {
-            // 根据preUploadFile的响应结构来解析文件信息
-            Object resultObject = uploadResponse.getResultObject();
-            if (resultObject instanceof List) {
-                @SuppressWarnings("unchecked")
-                List<Map<String, Object>> resultList = (List<Map<String, Object>>) resultObject;
-                if (!resultList.isEmpty()) {
-                    Map<String, Object> fileInfo = resultList.get(0);
-                    Object fileId = fileInfo.get("fileId");
-                    Object fileUrl = fileInfo.get("fileUrl");
-                    Object fileName = fileInfo.get("fileName");
-                    Object fileSize = fileInfo.get("fileSize");
-                    Object fileType = fileInfo.get("fileType");
-
-                    if (fileId != null) {
-                        // 构建完整的fileUrl，添加前缀
-                        String fullFileUrl = "";
-                        if (fileUrl != null && StringUtils.isNotBlank(fileUrl.toString())) {
-                            String relativeUrl = fileUrl.toString();
-                            // 如果已经是完整URL（包含http://），直接使用
-                            if (relativeUrl.startsWith("http://") || relativeUrl.startsWith("https://")) {
-                                fullFileUrl = relativeUrl;
-                            }
-                            else {
-                                // 否则添加前缀：chat.server.byai + chat.server.conversationService + relativeUrl
-                                String completionConversationUrl = UrlUtil.getCompletionConversationUrl();
-                                fullFileUrl = UrlUtil.concatUrl(completionConversationUrl, relativeUrl);
-                            }
-                        }
-
-                        return TemplateMessagesCopyRequestDto.FileInfo.builder().fileId(fileId.toString())
-                            .fileUrl(fullFileUrl).fileName(fileName != null ? fileName.toString() : "")
-                            .fileSize(fileSize != null ? Long.valueOf(fileSize.toString()) : 0L)
-                            .fileType(fileType != null ? fileType.toString() : "file") // 从接口响应中获取fileType
-                            .build();
-                    }
-                }
-            }
-            log.warn("无法从KnowledgeResponse中解析文件信息 - response: {}", uploadResponse);
-            return null;
-        }
-        catch (Exception e) {
-            log.error("解析KnowledgeResponse失败 - error: {}", e.getMessage(), e);
-            return null;
-        }
-    }
 }

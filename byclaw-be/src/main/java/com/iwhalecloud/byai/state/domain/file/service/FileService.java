@@ -4,24 +4,37 @@ import com.iwhalecloud.byai.manager.entity.file.Files;
 import com.iwhalecloud.byai.manager.mapper.file.FilesMapper;
 import com.iwhalecloud.byai.common.feign.request.knowledge.OpenFileDownloadDTO;
 import com.iwhalecloud.byai.common.feign.response.KnowledgeResponse;
-import com.iwhalecloud.byai.common.feign.response.ManagerResponse;
+import com.iwhalecloud.byai.manager.application.service.files.FilesApplicationService;
+import feign.Request;
 import feign.Response;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.util.UriComponentsBuilder;
+import java.io.InputStream;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
  * @author he.duming
  * @date 2026-01-03 22:27:15
- * @description TODO
  */
 @Service
 public class FileService {
 
+    private static final Logger logger = LoggerFactory.getLogger(FileService.class);
+
     @Autowired
     private FilesMapper filesMapper;
+
+    @Autowired
+    private FilesApplicationService filesApplicationService;
 
     /**
      * 保存文件
@@ -30,22 +43,6 @@ public class FileService {
      */
     public void save(Files files) {
         filesMapper.insert(files);
-    }
-
-    /**
-     * 把门户对象对象转成成KnowledgeResponse返回
-     *
-     * @param resultUtil 结果对象
-     * @param <T> 泛型类型
-     * @return KnowledgeResponse
-     */
-    private <T> KnowledgeResponse<T> converToKnowledgeResponse(ManagerResponse<T> resultUtil) {
-        KnowledgeResponse<T> knowledgeResponse = new KnowledgeResponse<>();
-        knowledgeResponse.setResultCode(KnowledgeResponse.RESPONSE_SUCCESS);
-        knowledgeResponse.setResultMsg(resultUtil.getMsg());
-        knowledgeResponse.setResultObject(resultUtil.getData());
-
-        return knowledgeResponse;
     }
 
     /**
@@ -76,11 +73,39 @@ public class FileService {
     /**
      * API-04 - 下载文件 下载指定文件的原始内容
      *
-     * @param openFileDownload 文件ID
-     * @return 文件流
+     * @param openFileDownload 文件下载请求
+     * @return feign Response 包含文件流
      */
     public Response downloadFiles(OpenFileDownloadDTO openFileDownload) {
-        return null;
+        Long fileId = openFileDownload.getFileId();
+        try {
+            Files file = filesMapper.selectById(fileId);
+            if (file == null) {
+                logger.error("文件不存在 - fileId: {}", fileId);
+                return null;
+            }
+
+            String fileUrl = file.getFileUrl();
+            String bucketName = UriComponentsBuilder.fromUriString(fileUrl).build().getQueryParams()
+                .getFirst("bucketName");
+            String filePath = UriComponentsBuilder.fromUriString(fileUrl).build().getQueryParams().getFirst("filePath");
+
+            InputStream inputStream = filesApplicationService.openCommonFileInputStream(bucketName, filePath);
+
+            String fileName = file.getFileName() != null ? file.getFileName() : "file";
+            String encodedFileName = URLEncoder.encode(fileName, StandardCharsets.UTF_8);
+            Map<String, java.util.Collection<String>> headers = new HashMap<>();
+            headers.put("Content-Disposition", Collections.singletonList("attachment;filename=" + encodedFileName));
+            headers.put("Content-Type", Collections.singletonList("application/octet-stream"));
+            return Response.builder().status(200).reason("OK").headers(headers).body(inputStream, null)
+                .request(Request.create(Request.HttpMethod.GET, "/files/download?fileId=" + fileId,
+                    Collections.emptyMap(), null, null, null))
+                .build();
+        }
+        catch (Exception e) {
+            logger.error("下载文件失败 - fileId: {}, error: {}", fileId, e.getMessage(), e);
+            return null;
+        }
     }
 
     /**
