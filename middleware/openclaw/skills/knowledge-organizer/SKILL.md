@@ -84,7 +84,7 @@ python3 -c "import yaml" 2>/dev/null || python3 -m pip install pyyaml
 调用 `unstructured-ontology-manager` 技能获取当前数字员工有权限的**全部本体对象列表**：
 
 ```bash
-/usr/local/bin/python3 <skill>/unstructured-ontology-manager/scripts/list_resources.py '{}'
+/usr/local/bin/python3 <skill>/unstructured-ontology-manager/scripts/list_mounted_resources.py '{"resource_id":"<数字员工的id>"}
 ```
 
 对每个匹配到的本体对象，通过 `unstructured-ontology-manager` 的 `get_object.py` 脚本获取该对象的完整详情（三要素）：
@@ -281,9 +281,25 @@ Agent 可通过 `kb_resource_id` + `kb_doc_path` 下载文档内容做进一步�
    - **不同名 + 内容同义** → 询问用户是否为同一实例，由用户决定
    - **内容不同义** → 新建实例（走 Step 7 方式 A）
 
+### Step 5.6：文档融合（使用 doc-fusion）
+
+**⚠️ Step 5.5 之后、Step 6 之前执行，不可跳过。** 对于 Step 5.5 已确认“同一实例”的每一组文档，必须调用子技能 `doc-fusion` 生成融合结果；不得把两份原文直接交给 Step 7 打标。
+
+1. 按对象类型准备三类目录，且三者必须彼此不同：
+   - **现有文档目录**：从知识库下载已确认匹配的候选文档；保留其原始文件名和完整内容
+   - **新增文档目录**：本次 Step 3 生成、并在 Step 5.5 中确认需要融合的文档
+   - **融合输出目录**：`/by/.sessions/{session_id}/{任务名称}/fusion-output/`；禁止写回现有文档目录或新增文档目录
+2. 调用 `knowledge-organizer/skills/doc-fusion` 子技能，严格执行其“扫描 → 内容比对 → 融合 → 独立输出”的流程。融合判断必须结合文件名和正文内容，不能仅以 `name` 字段决定。
+3. 对每个融合结果：
+   - 使用知识库现有文档的文件名，`related_docs` 合并去重，并将 `doc_id` 更新为融合输出文件的完整路径；
+   - 保留两份源文档的核心信息，使融合后的正文不比任一源文档更简略；
+   - 记录 `original_source_path`（知识库原文路径）、`current_source_path`（本次新增文档路径）和 `source_path`（融合输出路径），供 Step 6 预览和 Step 7 入库使用。
+4. Step 5.5 判为“不同名 + 内容同义、待用户确认”的候选，不得擅自执行融合；在 Step 6 单独列出，由用户决定后再进入本步骤或改按新建处理。
+5. 未发生变更的知识库现有文档不得复制到融合输出目录；未匹配的新增文档继续作为新建实例，保留原路径。
+
 ### Step 6：用户预览确认（⚠️ 关键节点）
 
-**Step 3 → Step 4 → Step 5 → Step 5.5 → Step 6，必须按顺序执行，不可跳步。在完成两阶段关系梳理和实例消解之前，不得进入此步骤。**
+**Step 3 → Step 4 → Step 5 → Step 5.5 → Step 5.6 → Step 6，必须按顺序执行，不可跳步。在完成两阶段关系梳理、实例消解和文档融合之前，不得进入此步骤。**
 
 向用户展示：
 1. **整理结果目录树**：列出所有生成的文档及其层级结构
@@ -305,6 +321,7 @@ Agent 可通过 `kb_resource_id` + `kb_doc_path` 下载文档内容做进一步�
    ━━ 批内合并（K组）━━
    🔀 /Person/王小明.md + /Person/王小明的运动会经历.md
       → 合并为 /Person/王小明.md（新增属性: 获奖经历×2）
+7. **文档融合结果（新增）**：对每个已融合实例展示知识库原文路径、本次新增文档路径和融合输出路径；待用户确认的同义候选必须标明“未融合，等待决定”。
 
 明确告知用户：
 
@@ -312,7 +329,7 @@ Agent 可通过 `kb_resource_id` + `kb_doc_path` 下载文档内容做进一步�
 > `{存储地址}`
 >
 > 「新建实例」将作为独立文档录入。
-> 「融合更新」将新属性合并到已有文档。
+> 「融合更新」将以 `doc-fusion` 生成的融合文档更新已有文档。
 > 属性有冲突的已标记 ⚠️，请确认处理方式。
 >
 > 确认无误后请回复「确认入库」或「可以」，我将为您执行分流入库。
@@ -353,6 +370,8 @@ baiying_call:
 
 **方式 B：融合更新** → `doc-tagger` 融合更新
 
+仅对 Step 5.6 生成的融合输出文件执行。`original_source_path`、`current_source_path` 和 `source_path` 必须使用 Step 5.6 记录的实际路径；禁止以未融合的新增文档替代 `source_path`。
+
 ```
 baiying_call:
   resource_id: "{对象的resourceId}"
@@ -374,6 +393,7 @@ baiying_call:
 - 各对象类型分布
 - **批内去重合并组数（新增）**
 - **实体消解结果：新建数 / 融合数 / 冲突数（新增）**
+- **doc-fusion 结果：融合文档数 / 待确认候选数（新增）**
 - 阶段1写入的本地关系数量
 - 阶段2写入的知识库关联数量
 - 入库成功/失败数量
@@ -385,7 +405,7 @@ baiying_call:
 
 1. **正文和打标自己做**：文档正文内容、YAML front matter 均由本技能自行生成，不委托给其他 Skill
 2. **YAML 字段值必须查询术语表**：front matter 中的枚举类字段值（如 `product_code`、`owner_type` 等）必须通过 `unstructured-ontology-manager` 的 `get_term_type_values.py` 查询允许值列表，从中选择匹配项填入，不得自行编造；查询结果为空时，在字段后添加注释说明
-3. **关系创建分两阶段**：阶段1（本地）+ 阶段2（知识库），缺一不可；**Step 3 → Step 4 → Step 5 → Step 5.5 → Step 6，必须按顺序执行，不可跳步**
+3. **关系创建分两阶段**：阶段1（本地）+ 阶段2（知识库），缺一不可；**Step 3 → Step 4 → Step 5 → Step 5.5 → Step 5.6 → Step 6，必须按顺序执行，不可跳步**
 4. **阶段2使用 add-related-docs**：严格按其三步流程执行，知识库为空则不写关联
 5. **Step 6 用户确认不可跳过**：未获得用户确认不得调用 doc-tagger 入库
 6. **每个文件单独调用 baiying_call**：禁止合并多个文件到同一次调用
@@ -395,3 +415,4 @@ baiying_call:
 10. **打标录入禁止使用子代理**：Step 7 由主流程直接调用 `baiying_call`，同一轮中可并发发起多个调用
 11. **Step 5.5 不可跳过**：实例消解是入库前的必要步骤，批内去重、KB 候选检索、实体消解+RRF 融合三步必须全部执行
 12. **冲突属性必须标记让用户选**：属性 diff 中出现两边值不同的字段，必须在 Step 6 中用 ⚠️ 标记，由用户确认处理方式后再入库
+13. **Step 5.6 必须使用 doc-fusion**：已确认同一实例的文档必须先融合并输出到独立目录；不得覆盖任一输入目录，不得跳过融合直接入库
