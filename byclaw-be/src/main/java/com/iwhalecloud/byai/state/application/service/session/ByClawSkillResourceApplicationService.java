@@ -50,6 +50,8 @@ import org.apache.commons.compress.archivers.zip.ZipArchiveInputStream;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -63,6 +65,8 @@ import org.springframework.web.multipart.MultipartFile;
  */
 @Service
 public class ByClawSkillResourceApplicationService {
+
+    private static final Logger logger = LoggerFactory.getLogger(ByClawSkillResourceApplicationService.class);
 
     public static final String SOURCE_TYPE_CHAT_UPLOAD = "CHAT_UPLOAD";
 
@@ -166,19 +170,24 @@ public class ByClawSkillResourceApplicationService {
         if (uploadFiles.size() != uploadedSkills.size()) {
             throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.upload.failed"));
         }
-        validateDigitalEmployeeSkillManagePermission(resolvedDigitalEmployeeId);
+        SsResource digitalEmployee = validateDigitalEmployeeSkillManagePermission(resolvedDigitalEmployeeId);
 
         for (int i = 0; i < uploadedSkills.size(); i++) {
             MultipartFile uploadFile = uploadFiles.get(i);
             ByClawSkillDto uploadedSkill = uploadedSkills.get(i);
             SkillPackageMetadata metadata = inspectSkillPackage(uploadFile);
-            SsResource skillResource = saveOrUpdateChatUploadedSkillResource(metadata,
-                DEFAULT_SKILL_CATALOG_ID);
+            SsResource existing = findExistingSkillByNaturalKey(metadata.skillCode());
+            boolean updated = existing != null;
+            String oldVersion = updated ? findSkillExtVersion(existing.getResourceId()) : null;
+            SsResource skillResource = saveOrUpdateSkillResource(metadata, OwnerType.PERSONAL,
+                DEFAULT_SKILL_CATALOG_ID, existing);
             authApplicationService.ensureCreatorDefaultPrivileges(skillResource);
             SsResExtSkill extSkill = saveOrUpdateSkillExt(userCode, skillResource, uploadFile, metadata,
                 uploadedSkill.getSkillPath(), uploadedSkill.getSkillDocObjectKey(), SOURCE_TYPE_CHAT_UPLOAD);
             bindSkillToDigitalEmployee(resolvedDigitalEmployeeId, skillResource.getResourceId());
             syncSkillTargetContent(userCode, skillResource, extSkill, true);
+            logSkillImportOperation(userCode, digitalEmployee, updated, skillResource.getResourceId(), oldVersion,
+                extSkill.getVersion(), uploadedSkill.getSkillPath(), extSkill.getSkillUrl());
         }
 
         digitalEmployeeApplicationService.rebuildAndSaveDigitalEmployeeRelSkills(resolvedDigitalEmployeeId);
@@ -368,10 +377,13 @@ public class ByClawSkillResourceApplicationService {
         if (updated) {
             assertSkillManagePermission(existing);
         }
-        String previousSourceType = updated ? findSkillExtSourceType(existing.getResourceId()) : null;
-        String previousSkillPath = updated ? findSkillExtWorkspacePath(existing.getResourceId()) : null;
-        String previousSkillDocObjectKey = updated ? findSkillExtTargetContentField(existing.getResourceId(),
-            "skillDocObjectKey") : null;
+        SsResExtSkill previousExtSkill = updated ? ssResExtSkillService.findById(existing.getResourceId()) : null;
+        String oldVersion = previousExtSkill == null ? null : previousExtSkill.getVersion();
+        String previousSourceType = previousExtSkill == null ? null : previousExtSkill.getSourceType();
+        String previousSkillPath = previousExtSkill == null ? null
+            : extractString(previousExtSkill.getTargetContent(), "skillPath");
+        String previousSkillDocObjectKey = previousExtSkill == null ? null
+            : extractString(previousExtSkill.getTargetContent(), "skillDocObjectKey");
         SsResource resource = saveOrUpdateSkillResource(metadata, resolvedOwnerType,
             catalogId == null ? DEFAULT_SKILL_CATALOG_ID : catalogId, existing);
         if (!updated) {
@@ -384,6 +396,9 @@ public class ByClawSkillResourceApplicationService {
             preserveLegacyWorkspaceMetadata ? previousSkillDocObjectKey : null,
             preserveLegacyWorkspaceMetadata ? previousSourceType : sourceType);
         syncSkillTargetContent(resourceOwnerUserCode, resource, extSkill, true);
+        logSkillImportOperation(resourceOwnerUserCode, resolveCurrentUserDefaultDigitalEmployee(), updated,
+            resource.getResourceId(), oldVersion, extSkill.getVersion(),
+            preserveLegacyWorkspaceMetadata ? previousSkillPath : null, extSkill.getSkillUrl());
         if (updated) {
             List<SsResource> boundDigitalEmployees = findBoundDigitalEmployees(resource.getResourceId());
             syncLegacyWorkspaceCopy(resourceOwnerUserCode, metadata, file, previousSourceType, previousSkillPath,
@@ -473,7 +488,7 @@ public class ByClawSkillResourceApplicationService {
      * （例如别人授权给我的个人助理）的用户不允许安装/绑定技能。此前工作空间、文件管理、对话上传这几条
      * 绑定链路缺少该校验，会出现“提示安装成功但技能并未真正生效/不展示”的问题。</p>
      */
-    private void validateDigitalEmployeeSkillManagePermission(Long digitalEmployeeResourceId) {
+    private SsResource validateDigitalEmployeeSkillManagePermission(Long digitalEmployeeResourceId) {
         SsResource digitalEmployee = digitalEmployeeResourceId == null ? null
             : ssResourceService.findById(digitalEmployeeResourceId);
         if (digitalEmployee == null) {
@@ -483,20 +498,12 @@ public class ByClawSkillResourceApplicationService {
             throw new IllegalArgumentException(
                 I18nUtil.get("digemployee.skill.install.no.manage.permission", digitalEmployee.getResourceName()));
         }
+        return digitalEmployee;
     }
 
     private SsResource saveOrUpdateSkillResource(SkillPackageMetadata metadata, String ownerType, Long catalogId) {
         SsResource existing = findExistingSkillByNaturalKey(metadata.skillCode());
         return saveOrUpdateSkillResource(metadata, ownerType, catalogId, existing);
-    }
-
-    /**
-     * 对话框/左侧栏上传的技能也需要遵循资源自然键的全局唯一规则。
-     * 命中同编码个人或企业技能时，只有具备其管理权限才允许覆盖。
-     */
-    private SsResource saveOrUpdateChatUploadedSkillResource(SkillPackageMetadata metadata, Long catalogId) {
-        SsResource existing = findExistingSkillByNaturalKey(metadata.skillCode());
-        return saveOrUpdateSkillResource(metadata, OwnerType.PERSONAL, catalogId, existing);
     }
 
     private SsResource saveOrUpdateSkillResource(SkillPackageMetadata metadata, String ownerType, Long catalogId,
@@ -688,18 +695,39 @@ public class ByClawSkillResourceApplicationService {
             && StringUtils.equalsIgnoreCase(extSkill.getSkillType(), SsResExtSkillService.INNER_SKILL_TYPE);
     }
 
-    private String findSkillExtSourceType(Long resourceId) {
+    private String findSkillExtVersion(Long resourceId) {
         SsResExtSkill extSkill = resourceId == null ? null : ssResExtSkillService.findById(resourceId);
-        return extSkill == null ? null : extSkill.getSourceType();
+        return extSkill == null ? null : extSkill.getVersion();
     }
 
-    private String findSkillExtWorkspacePath(Long resourceId) {
-        return findSkillExtTargetContentField(resourceId, "skillPath");
+    private SsResource resolveCurrentUserDefaultDigitalEmployee() {
+        Long digitalEmployeeId = CurrentUserHolder.getDefaultDigEmployeeId();
+        if (digitalEmployeeId == null) {
+            return null;
+        }
+        try {
+            return ssResourceService.findById(digitalEmployeeId);
+        }
+        catch (Exception e) {
+            // 日志补全失败不能影响技能导入主流程。
+            logger.warn("技能操作日志未能获取数字员工信息, digitalEmployeeId={}", digitalEmployeeId, e);
+            return null;
+        }
     }
 
-    private String findSkillExtTargetContentField(Long resourceId, String fieldName) {
-        SsResExtSkill extSkill = resourceId == null ? null : ssResExtSkillService.findById(resourceId);
-        return extSkill == null ? null : extractString(extSkill.getTargetContent(), fieldName);
+    private void logSkillImportOperation(String fallbackUserCode, SsResource digitalEmployee, boolean updated,
+        Long skillId, String oldVersion, String newVersion, String skillPath, String fallbackSkillPath) {
+        String userCode = StringUtils.defaultIfBlank(CurrentUserHolder.getCurrentUserCode(), fallbackUserCode);
+        String userName = StringUtils.defaultIfBlank(CurrentUserHolder.getCurrentUserName(), userCode);
+        Long digitalEmployeeId = digitalEmployee == null ? CurrentUserHolder.getDefaultDigEmployeeId()
+            : digitalEmployee.getResourceId();
+        String digitalEmployeeName = digitalEmployee == null ? "未设置"
+            : StringUtils.defaultIfBlank(digitalEmployee.getResourceName(), "未命名");
+        String operation = updated ? "技能覆盖" : "技能新增";
+        logger.info("用户{}({})正在执行数字员工{}({})的技能操作，operation={}，skillId={}，o-version={}，n-version={}，skillPath={}",
+            userName, userCode, digitalEmployeeName, digitalEmployeeId, operation, skillId,
+            StringUtils.defaultString(oldVersion), StringUtils.defaultString(newVersion),
+            StringUtils.defaultIfBlank(skillPath, fallbackSkillPath));
     }
 
     private List<SsResource> findBoundDigitalEmployees(Long skillResourceId) {
