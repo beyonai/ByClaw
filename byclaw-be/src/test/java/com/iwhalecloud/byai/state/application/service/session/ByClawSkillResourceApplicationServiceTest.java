@@ -181,6 +181,10 @@ class ByClawSkillResourceApplicationServiceTest {
         existingEnterpriseSkill.setOwnerType("enterprise");
         SsResource digitalEmployee = new SsResource();
         digitalEmployee.setResourceId(9001L);
+        digitalEmployee.setResourceName("测试数字员工");
+        SsResExtSkill existingExtSkill = new SsResExtSkill();
+        existingExtSkill.setResourceId(7002L);
+        existingExtSkill.setVersion("v0.1");
 
         when(ssResourceService.findById(9001L)).thenReturn(digitalEmployee);
         when(authApplicationService.hasResourceManagePermission(digitalEmployee)).thenReturn(true);
@@ -189,7 +193,8 @@ class ByClawSkillResourceApplicationServiceTest {
         when(authApplicationService.hasResourceManagePermission(existingEnterpriseSkill)).thenReturn(true);
         when(ssResourceService.updateResourceEntity(any(SsResource.class)))
             .thenAnswer(invocation -> invocation.getArgument(0));
-        when(ssResExtSkillService.findById(7002L)).thenReturn(null);
+        when(ssResExtSkillService.findById(7002L)).thenReturn(existingExtSkill);
+        when(ssResExtSkillService.nextVersion("v0.1")).thenReturn("v0.2");
         when(ssResourceRelDetailService.find(9001L, 7002L)).thenReturn(List.of());
         when(sequenceService.nextVal()).thenReturn(8002L);
 
@@ -199,6 +204,10 @@ class ByClawSkillResourceApplicationServiceTest {
         verify(ssResourceService).updateResourceEntity(resourceCaptor.capture());
         assertThat(resourceCaptor.getValue().getOwnerType()).isEqualTo("enterprise");
         verify(ssResourceService, never()).saveResource(any(SsResource.class));
+
+        ArgumentCaptor<SsResExtSkill> extCaptor = ArgumentCaptor.forClass(SsResExtSkill.class);
+        verify(ssResExtSkillService).saveOrUpdate(extCaptor.capture());
+        assertThat(extCaptor.getValue().getVersion()).isEqualTo("v0.2");
     }
 
     @Test
@@ -278,6 +287,7 @@ class ByClawSkillResourceApplicationServiceTest {
             return resource;
         });
         when(ssResExtSkillService.findById(7101L)).thenReturn(null);
+        when(ssResourceService.findById(9001L)).thenThrow(new RuntimeException("数字员工日志查询异常"));
 
         var result = service.importSkillZips(new org.springframework.web.multipart.MultipartFile[] {uploadFile}, 10L,
             "enterprise");
