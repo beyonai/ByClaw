@@ -1,6 +1,8 @@
 type RuntimeInfo = {
   clientRequestId: string;
   sessionId?: string;
+  // 会话创建阶段保留临时 ID，直到流式回答最终结束。
+  sessionAliasIds?: string[];
   traceId?: string;
   laneId?: string;
   turnId?: string;
@@ -50,11 +52,16 @@ class ChatSessionRuntimeManager {
       this.removeIndexes(oldInfo);
     }
 
+    const sessionId = info.sessionId ? `${info.sessionId}` : oldInfo?.sessionId;
+    const sessionAliasIds = Array.from(
+      new Set([...(oldInfo?.sessionAliasIds || []), ...(info.sessionAliasIds || [])].filter(Boolean))
+    ).filter((sessionAliasId) => sessionAliasId !== sessionId);
     const nextInfo = {
       ...(oldInfo || {}),
       ...info,
       clientRequestId,
-      sessionId: info.sessionId ? `${info.sessionId}` : oldInfo?.sessionId,
+      sessionId,
+      sessionAliasIds,
       traceId: info.traceId ? `${info.traceId}` : oldInfo?.traceId,
       laneId: info.laneId ? `${info.laneId}` : oldInfo?.laneId,
       turnId: info.turnId ? `${info.turnId}` : oldInfo?.turnId,
@@ -69,7 +76,8 @@ class ChatSessionRuntimeManager {
   hydrateRunning(info: RunningChatInfo, cancel?: () => void): void {
     if (!info?.sessionId) return;
     if (!info.running) {
-      this.completeBySession(info.sessionId);
+      // 后端状态查询可能滞后于首条流式消息，不能提前结束当前页面发起的本地回答。
+      this.completeRestoredBySession(info.sessionId);
       return;
     }
 
@@ -136,9 +144,18 @@ class ChatSessionRuntimeManager {
     if (!sessionId) return;
     const info = this.activeByClientRequestId.get(`${clientRequestId}`);
     if (!info) return;
+    // 临时会话项替换为真实会话项前，两个 ID 都需要保持回答中状态，避免蓝点短暂消失。
+    const sessionAliasIds = Array.from(
+      new Set(
+        [...(info.sessionAliasIds || []), info.sessionId].filter((sessionAliasId): sessionAliasId is string =>
+          Boolean(sessionAliasId)
+        )
+      )
+    ).filter((sessionAliasId) => sessionAliasId !== `${sessionId}`);
     this.register({
       clientRequestId: info.clientRequestId,
       sessionId: `${sessionId}`,
+      sessionAliasIds,
     });
   }
 
@@ -154,6 +171,16 @@ class ChatSessionRuntimeManager {
     if (!sessionId) return;
     const clientRequestIds = Array.from(this.activeClientRequestIdsBySessionId.get(`${sessionId}`) || []);
     clientRequestIds.forEach((clientRequestId) => this.complete(clientRequestId));
+  }
+
+  completeRestoredBySession(sessionId?: string | number): boolean {
+    if (!sessionId) return false;
+    // 运行状态接口只负责校正重新进入页面后恢复的会话，实时 SSE 请求由最终事件清理。
+    const restoredClientRequestIds = this.getAllBySession(sessionId)
+      .filter((runtimeInfo) => runtimeInfo.restored)
+      .map((runtimeInfo) => runtimeInfo.clientRequestId);
+    restoredClientRequestIds.forEach((clientRequestId) => this.complete(clientRequestId));
+    return restoredClientRequestIds.length > 0;
   }
 
   isSessionRunning(sessionId?: string): boolean {
@@ -227,12 +254,11 @@ class ChatSessionRuntimeManager {
 
   private addIndexes(info: RuntimeInfo): void {
     const clientRequestId = info.clientRequestId;
-    if (info.sessionId) {
-      const sessionId = `${info.sessionId}`;
+    this.getSessionIds(info).forEach((sessionId) => {
       const ids = this.activeClientRequestIdsBySessionId.get(sessionId) || new Set<string>();
       ids.add(clientRequestId);
       this.activeClientRequestIdsBySessionId.set(sessionId, ids);
-    }
+    });
     if (info.traceId) {
       this.activeClientRequestIdByTraceKey.set(this.getScopedKey(info.sessionId, info.traceId), clientRequestId);
     }
@@ -244,14 +270,13 @@ class ChatSessionRuntimeManager {
 
   private removeIndexes(info: RuntimeInfo): void {
     const clientRequestId = info.clientRequestId;
-    if (info.sessionId) {
-      const sessionId = `${info.sessionId}`;
+    this.getSessionIds(info).forEach((sessionId) => {
       const ids = this.activeClientRequestIdsBySessionId.get(sessionId);
       ids?.delete(clientRequestId);
       if (!ids?.size) {
         this.activeClientRequestIdsBySessionId.delete(sessionId);
       }
-    }
+    });
     if (info.traceId) {
       this.activeClientRequestIdByTraceKey.delete(this.getScopedKey(info.sessionId, info.traceId));
     }
@@ -259,6 +284,10 @@ class ChatSessionRuntimeManager {
       this.activeClientRequestIdByLaneKey.delete(`${info.laneId}`);
       this.activeClientRequestIdByLaneKey.delete(this.getScopedKey(info.sessionId, info.laneId));
     }
+  }
+
+  private getSessionIds(info: RuntimeInfo): string[] {
+    return Array.from(new Set([info.sessionId, ...(info.sessionAliasIds || [])].filter(Boolean).map(String)));
   }
 }
 

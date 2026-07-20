@@ -1,7 +1,3 @@
-jest.mock('@/utils/math', () => ({
-  getRandomNumber: jest.fn(() => 1),
-}));
-
 import {
   addSessionHandler,
   formatByUpdateTime,
@@ -62,13 +58,21 @@ describe('utils/session', () => {
     expect(payload).toMatchObject({
       sessionId: '1',
       avatar: 'beyond/session.png',
-      theme: 'cyan',
       sessionName: 'Test',
     });
+    expect(payload.theme).toBeDefined();
     expect(getSessionObjectTypeMap(1 as any)).toEqual({
       objectId: '10',
       objectType: 'Agent',
     });
+  });
+
+  it('sessionHandler gives the same default theme to the same session', () => {
+    const session = { sessionId: '100345', sessionName: 'Test' } as any;
+
+    // 左侧会话列表和右侧详情独立处理同一会话时，默认头像底色必须一致。
+    const sessionThemes = Array.from({ length: 3 }, () => sessionHandler(session).theme);
+    expect(new Set(sessionThemes).size).toBe(1);
   });
 
   it('sessionHandler overrides avatar for notification sessions', () => {

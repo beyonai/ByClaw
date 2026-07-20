@@ -1,8 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Drawer, Tag, Button, Spin, Empty } from 'antd';
-import { MessageOutlined } from '@ant-design/icons';
-import { useNavigate } from '@umijs/max';
-import { useSelector } from '@umijs/max';
+import { MessageOutlined, RollbackOutlined } from '@ant-design/icons';
+import { useDispatch, useNavigate, useSelector } from '@umijs/max';
 import dayjs from 'dayjs';
 import useGlobal from '@/hooks/useGlobal';
 import { getTaskPhases } from '@/service/devloop';
@@ -12,13 +11,16 @@ interface TaskDetailDrawerProps {
   task: any;
   onClose: () => void;
   onRefresh: () => void;
+  projectId?: string | number;
+  projectName?: string;
 }
 
 // 环节状态 → 展示样式：通过/进行中/被打回/未开始
-const PHASE_STATE_META: Record<string, { cls: string; icon: string; label: string }> = {
+const PHASE_STATE_META: Record<string, { cls: string; icon: React.ReactNode; label: string }> = {
   done: { cls: styles.phaseDone, icon: '✓', label: '完成' },
   running: { cls: styles.phaseActive, icon: '●', label: '进行中' },
-  rejected: { cls: styles.phaseRejected, icon: '↩', label: '被打回' },
+  // 使用标准图标，避免 Unicode 回退箭头被浏览器渲染为彩色 emoji。
+  rejected: { cls: styles.phaseRejected, icon: <RollbackOutlined />, label: '被打回' },
   pending: { cls: styles.phaseWaiting, icon: '○', label: '等待' },
 };
 
@@ -33,9 +35,10 @@ const initials = (name?: string): string => {
 const dash = (v: any): string => (v === null || v === undefined || v === '' ? '-' : `${v}`);
 
 // 会话即任务后，状态存于 byai_session_ext 且看板只读，这里仅展示不提供修改入口。
-const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({ task, onClose }) => {
+const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({ task, onClose, projectId, projectName }) => {
   const navigate = useNavigate();
-  const { setSessionId } = useGlobal();
+  const dispatch = useDispatch();
+  const { EventEmitter, setSessionId } = useGlobal();
   const userInfo = useSelector(({ user }: any) => user.userInfo);
 
   const [phaseLoading, setPhaseLoading] = useState(false);
@@ -65,8 +68,51 @@ const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({ task, onClose }) =>
 
   const handleGoToChat = () => {
     if (!task?.sessionId) return;
-    setSessionId?.(String(task.sessionId));
-    navigate('/chat');
+    // 任务详情跳转绕过普通会话列表时，新增或覆盖同 ID 缓存，避免标题区域拿不到 currentSession。
+    const taskSessionPayload = {
+      ...task,
+      sessionId: `${task.sessionId}`,
+      sessionName: task.sessionName || task.title || task.taskName || '任务会话',
+    };
+    const targetProjectId = [projectId, task.projectId]
+      .map((candidateProjectId) => Number(candidateProjectId))
+      .find((candidateProjectId) => Number.isFinite(candidateProjectId) && candidateProjectId > 0);
+    if (targetProjectId) {
+      // 任务会话也保留项目上下文，聊天页标题才能显示任务进度与成果入口。
+      EventEmitter.emit('projectSpace-session-context', {
+        sessionId: `${task.sessionId}`,
+        projectId: targetProjectId,
+        projectName: projectName || task.projectName,
+      });
+      dispatch({
+        type: 'session/addSession',
+        payload: { ...taskSessionPayload, projectId: targetProjectId },
+      });
+      dispatch({
+        type: 'session/updateSession',
+        payload: { ...taskSessionPayload, projectId: targetProjectId },
+      });
+      setSessionId?.(String(task.sessionId));
+      navigate('/chat', {
+        state: {
+          keepSiderActiveKey: 'sessions',
+          from: 'projectSpace',
+          projectId: targetProjectId,
+          projectName: projectName || task.projectName,
+        },
+      });
+    } else {
+      dispatch({
+        type: 'session/addSession',
+        payload: taskSessionPayload,
+      });
+      dispatch({
+        type: 'session/updateSession',
+        payload: taskSessionPayload,
+      });
+      setSessionId?.(String(task.sessionId));
+      navigate('/chat');
+    }
     onClose();
   };
 

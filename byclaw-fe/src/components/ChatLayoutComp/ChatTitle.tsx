@@ -13,6 +13,8 @@ import NullableAntdCompWithAnim from '../NullableAntdCompWithAnim';
 import { isAdminVip } from '@/utils/auth';
 import { useSelector, useIntl } from '@umijs/max';
 import VNC from './components/VNC';
+import ProjectSessionActions from './ProjectSessionActions';
+import { sessionHandler } from '@/utils/session';
 
 interface ChatTitleProps {
   sessionId?: string;
@@ -20,6 +22,7 @@ interface ChatTitleProps {
   suffix?: React.ReactNode;
   lastAnswer?: any;
   agentType: IAgentType;
+  projectId?: number;
 }
 
 export default function ChatTitle(props: ChatTitleProps) {
@@ -37,15 +40,31 @@ export default function ChatTitle(props: ChatTitleProps) {
 
   // const isSimpleSession = currentSession?.sessionType === SessionType.simple;
 
+  const titleSession = React.useMemo(() => {
+    if (!sessionId) return undefined;
+
+    // 项目/任务入口可能先切换 sessionId 再同步列表缓存，标题不能因此整行消失。
+    return sessionHandler({
+      ...(currentSession || {}),
+      sessionId: `${sessionId}`,
+      sessionName: currentSession?.sessionName || 'New Chat',
+    } as ISession);
+  }, [currentSession, sessionId]);
+
   return (
     <>
       <nav className={styles.chatTitle}>
-        {currentSession?.sessionName && (
+        {titleSession && (
           <div className={classnames(styles.chatTitleWrap, 'ub ub-ac gap8')}>
-            {currentSession && <ChatAvatar session={currentSession} size={32} />}
+            <ChatAvatar session={titleSession} size={32} />
 
-            <div className={styles.chatTitle}>{currentSession?.sessionName}</div>
+            <div className={styles.chatTitle}>{titleSession.sessionName}</div>
             <div className={styles.actions}>
+              <ProjectSessionActions
+                projectId={props.projectId}
+                sessionId={sessionId}
+                sessionName={titleSession.sessionName}
+              />
               <VNC />
               {isAdminVip(userInfo) && (
                 <span className={styles.btn} onClick={() => setOpenTemplate(true)} style={{ padding: '0 8px' }}>

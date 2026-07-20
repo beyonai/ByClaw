@@ -544,6 +544,12 @@ public class DevloopApplicationService {
         String currentUserId = String.valueOf(CurrentUserHolder.getCurrentUserId());
         Date now = new Date();
 
+        // 项目会话列表按 byai_session.project_id 查询，关系表仅用于保留归属历史，绑定时必须同步主记录。
+        session.setProjectId(projectId);
+        session.setUpdateBy(CurrentUserHolder.getCurrentUserId());
+        session.setUpdateTime(now);
+        byaiSessionMapper.updateById(session);
+
         ProjectSession archivedRelation = new ProjectSession();
         archivedRelation.setDeleteFlag(DELETE_FLAG_DELETED);
         archivedRelation.setUpdateBy(currentUserId);

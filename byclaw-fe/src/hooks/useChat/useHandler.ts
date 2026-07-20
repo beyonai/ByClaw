@@ -22,7 +22,7 @@ import { chatSessionRuntimeManager } from '@/utils/chatSessionRuntimeManager';
 type IProps = {
   addSession: (newSession: ISession) => void;
   setSessionId: (sessionId: string) => void;
-  onSessionCreated?: (params: { sessionId: string; clientRequestId?: string }) => void;
+  onSessionCreated?: (params: { sessionId: string; clientRequestId?: string; session: ISession }) => void;
 };
 
 function useHandler(props: IProps) {
@@ -68,16 +68,18 @@ function useHandler(props: IProps) {
 
       chatSessionRuntimeManager.bindSession(sseMsg.clientRequestId, newSessionId);
 
-      addSession({
+      const createdSession = {
         ...(sseRes as ISession),
         sessionId: newSessionId,
-      });
+      };
+      addSession(createdSession);
 
       if (sseMsg.event === 'createSession') {
-        // 只有新建会话事件触发项目绑定，后续流式事件不重复处理项目归属。
+        // 将创建事件中的会话数据一并传出，项目侧栏可直接写入缓存而无需重新请求列表。
         onSessionCreated?.({
           sessionId: newSessionId,
           clientRequestId: sseMsg.clientRequestId,
+          session: createdSession,
         });
       }
 

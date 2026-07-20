@@ -9,6 +9,8 @@ interface SessionOverviewDrawerProps {
   onClose: () => void;
   tasks: any[];
   onRefresh: () => void;
+  projectId?: string | number;
+  projectName?: string;
 }
 
 const COLUMNS = [
@@ -31,7 +33,14 @@ const PHASE_COLORS: Record<string, string> = {
  * 整体任务视图（只读看板）：按任务状态分列展示。
  * 状态来源于 byai_session_ext（task_status），看板仅浏览、点击查看详情，不做拖拽改状态。
  */
-const TaskBoardDrawer: React.FC<SessionOverviewDrawerProps> = ({ open, onClose, tasks, onRefresh }) => {
+const TaskBoardDrawer: React.FC<SessionOverviewDrawerProps> = ({
+  open,
+  onClose,
+  tasks,
+  onRefresh,
+  projectId,
+  projectName,
+}) => {
   const [detailTask, setDetailTask] = useState<any>(null);
 
   return (
@@ -86,7 +95,13 @@ const TaskBoardDrawer: React.FC<SessionOverviewDrawerProps> = ({ open, onClose, 
           })}
         </div>
       </Drawer>
-      <TaskDetailDrawer task={detailTask} onClose={() => setDetailTask(null)} onRefresh={onRefresh} />
+      <TaskDetailDrawer
+        task={detailTask}
+        onClose={() => setDetailTask(null)}
+        onRefresh={onRefresh}
+        projectId={projectId}
+        projectName={projectName}
+      />
     </>
   );
 };

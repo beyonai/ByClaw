@@ -12,12 +12,34 @@ import ChatPageLayout from '@/components/ChatPageLayout';
 
 const BottomContent = lazy(() => import('@/pages/chat/components/BottomContent'));
 
+type ProjectChatContext = {
+  projectId?: number;
+  projectName?: string;
+};
+
+const getProjectChatContext = (locationState: unknown): ProjectChatContext => {
+  const state = (locationState || {}) as {
+    from?: string;
+    projectId?: string | number;
+    projectName?: string;
+  };
+  const projectId = Number(state.projectId);
+  if (state.from !== 'projectSpace' || !Number.isFinite(projectId) || projectId <= 0) {
+    return {};
+  }
+
+  return {
+    projectId,
+    projectName: state.projectName,
+  };
+};
+
 const Chat = () => {
   const intl = useIntl();
   const location = useLocation();
 
   const globalContext = useGlobal();
-  const { sessionId } = globalContext;
+  const { sessionId, EventEmitter } = globalContext;
 
   const userInfo = useSelector(({ user }) => user.userInfo);
 
@@ -62,22 +84,110 @@ const Chat = () => {
     };
   }, []);
 
-  const projectChatExtraParams = React.useMemo(() => {
-    const locationState = (location.state || {}) as {
-      from?: string;
+  const locationProjectContext = React.useMemo(() => getProjectChatContext(location.state), [location.state]);
+  const [projectChatContext, setProjectChatContext] = React.useState<ProjectChatContext>(locationProjectContext);
+  const pendingSessionProjectContextRef = React.useRef<ProjectChatContext | undefined>(undefined);
+  const sessionProjectContextMapRef = React.useRef<Record<string, ProjectChatContext>>({});
+  const [sessionProjectContext, setSessionProjectContext] = React.useState<ProjectChatContext>(() =>
+    sessionId ? locationProjectContext : {}
+  );
+
+  React.useEffect(() => {
+    setProjectChatContext(locationProjectContext);
+  }, [locationProjectContext.projectId, locationProjectContext.projectName]);
+
+  React.useEffect(() => {
+    const handleActiveProjectChange = (payload: { projectId?: string | number; projectName?: string }) => {
+      const projectId = Number(payload?.projectId);
+      setProjectChatContext(
+        Number.isFinite(projectId) && projectId > 0
+          ? {
+            projectId,
+            projectName: payload?.projectName,
+          }
+          : {}
+      );
+    };
+
+    EventEmitter.on('projectSpace-active-project-change', handleActiveProjectChange);
+    return () => {
+      EventEmitter.off('projectSpace-active-project-change', handleActiveProjectChange);
+    };
+  }, [EventEmitter]);
+
+  React.useEffect(() => {
+    const handleProjectSessionPending = (payload: { projectId?: string | number; projectName?: string }) => {
+      const projectId = Number(payload?.projectId);
+      if (Number.isFinite(projectId) && projectId > 0) {
+        // 新会话尚未取得 sessionId 时先缓存项目归属，创建成功后顶部工具仍使用实际发送时选择的项目。
+        pendingSessionProjectContextRef.current = {
+          projectId,
+          projectName: payload?.projectName,
+        };
+      }
+    };
+
+    EventEmitter.on('projectSpace-session-pending', handleProjectSessionPending);
+    return () => {
+      EventEmitter.off('projectSpace-session-pending', handleProjectSessionPending);
+    };
+  }, [EventEmitter]);
+
+  React.useEffect(() => {
+    const handleProjectSessionContext = (payload: {
+      sessionId?: string | number;
       projectId?: string | number;
       projectName?: string;
+    }) => {
+      const projectId = Number(payload?.projectId);
+      const targetSessionId = `${payload?.sessionId || ''}`;
+      if (!targetSessionId || !Number.isFinite(projectId) || projectId <= 0) return;
+
+      const context = { projectId, projectName: payload?.projectName };
+      // 同路由切换任务会话时，先按会话 ID 缓存，避免 sessionId 先更新导致路由 state 尚未生效。
+      sessionProjectContextMapRef.current[targetSessionId] = context;
+      if (targetSessionId === `${sessionId || ''}`) {
+        setSessionProjectContext(context);
+      }
     };
-    if (locationState.from !== 'projectSpace' || !locationState.projectId) {
+
+    EventEmitter.on('projectSpace-session-context', handleProjectSessionContext);
+    return () => {
+      EventEmitter.off('projectSpace-session-context', handleProjectSessionContext);
+    };
+  }, [EventEmitter, sessionId]);
+
+  React.useEffect(() => {
+    if (!sessionId) {
+      setSessionProjectContext({});
+      return;
+    }
+
+    const cachedProjectContext = sessionProjectContextMapRef.current[`${sessionId}`];
+    if (cachedProjectContext?.projectId) {
+      setSessionProjectContext(cachedProjectContext);
+      return;
+    }
+
+    const pendingProjectContext = pendingSessionProjectContextRef.current;
+    if (pendingProjectContext?.projectId) {
+      setSessionProjectContext(pendingProjectContext);
+      pendingSessionProjectContextRef.current = undefined;
+      return;
+    }
+
+    // 打开已有项目会话时以跳转路由携带的项目为准，左侧下拉切换不改变当前会话的工具上下文。
+    setSessionProjectContext(locationProjectContext);
+  }, [locationProjectContext.projectId, locationProjectContext.projectName, sessionId]);
+
+  const projectChatExtraParams = React.useMemo(() => {
+    // 仅在新会话的首条消息中绑定项目，已有会话不能因切换左侧项目下拉框而被重新归属。
+    if (sessionId || !projectChatContext.projectId) {
       return {};
     }
 
-    return {
-      // 项目空间复用普通聊天页，发送时用 projectId 让后端消息和项目会话关系能对齐。
-      projectId: Number(locationState.projectId),
-      projectName: locationState.projectName,
-    };
-  }, [location.state]);
+    return projectChatContext;
+  }, [projectChatContext, sessionId]);
 
   return (
     <ChatPageLayout
@@ -105,6 +215,7 @@ const Chat = () => {
           setIsBottom={setIsBottom}
           queryInputProps={queryInputProps}
           sendExtraParams={projectChatExtraParams}
+          projectId={sessionProjectContext.projectId}
         />
       }
     />

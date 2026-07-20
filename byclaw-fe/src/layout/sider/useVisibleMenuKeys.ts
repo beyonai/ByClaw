@@ -5,10 +5,10 @@ import { getDcSystemConfig } from '@/pages/manager/service/session';
 import { DEFAULT_MENU_CONFIG, getVisibleMenuKeysFromConfig } from '@/constants/system';
 
 const defaultVisibleKeys = getVisibleMenuKeysFromConfig(DEFAULT_MENU_CONFIG);
-// 临时屏蔽视图/对象入口，保留 tabItems 与中心页代码，后续需要时可恢复。
-const TEMP_HIDDEN_MENU_KEYS = new Set(['view', 'object']);
-// 新增菜单在旧配置未下发时也要可见，避免项目空间入口被历史配置隐藏。
-const NEW_DEFAULT_VISIBLE_KEYS = ['projectSpace', 'skill', 'file', 'model', 'ontology'];
+// 项目空间已合入会话入口；同时临时屏蔽视图/对象入口，保留中心页代码以便后续恢复。
+const TEMP_HIDDEN_MENU_KEYS = new Set(['view', 'object', 'projectSpace']);
+// 新增菜单在旧配置未下发时也要可见。
+const NEW_DEFAULT_VISIBLE_KEYS = ['skill', 'file', 'model', 'ontology'];
 
 const hideTemporaryMenuKeys = (visibleKeys: string[]) => visibleKeys.filter((key) => !TEMP_HIDDEN_MENU_KEYS.has(key));
 

@@ -17,6 +17,8 @@
         <result column="update_by" property="updateBy" />
         <result column="update_time" property="updateTime" />
         <result column="state" property="state" />
+        <!-- 项目会话在刷新后需恢复所属项目，以展示聊天标题中的项目操作入口。 -->
+        <result column="project_id" property="projectId" />
     </resultMap>
 
     <!-- 模板会话查询结果映射 -->
@@ -34,7 +36,7 @@
     <sql id="Base_Column_List">
         session_id, parent_session_id, session_name, session_content, session_type,
         create_time, creator_id, object_type, object_id, enterprise_id,
-        update_by, update_time, state
+        update_by, update_time, state, project_id
     </sql>
 
     <!-- 会话查询结果映射（含头像、扩展属性一对多） -->
@@ -64,6 +66,7 @@
                a.update_by,
                a.update_time,
                a.state,
+               a.project_id,
                b.avatar
         FROM byai_session a
         LEFT JOIN ss_resource b ON a.object_id = b.resource_id
