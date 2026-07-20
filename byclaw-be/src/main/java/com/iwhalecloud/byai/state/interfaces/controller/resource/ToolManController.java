@@ -9,6 +9,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
+import com.alibaba.fastjson2.JSON;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
@@ -1097,6 +1098,7 @@ public class ToolManController {
         if (extSkill == null || StringUtils.isBlank(extSkill.getVersion())) {
             return ResponseUtil.fail(I18nUtil.get("byclaw.skill.version.notfound"));
         }
+        logSkillVersionDownload(resolvedSkillId, extSkill);
         boolean innerSkill = StringUtils.equalsIgnoreCase(extSkill.getSkillType(),
             SsResExtSkillService.INNER_SKILL_TYPE);
         Map<String, Object> data = new LinkedHashMap<>();
@@ -1108,6 +1110,38 @@ public class ToolManController {
         data.put("needDownload", !innerSkill);
         data.put("skillUrl", innerSkill ? "" : buildSkillDownloadUrl(resolvedSkillId));
         return ResponseUtil.successResponse(I18nUtil.get("byclaw.skill.version.query.success"), data);
+    }
+
+    private void logSkillVersionDownload(Long skillId, SsResExtSkill extSkill) {
+        Long digitalEmployeeId = null;
+        String digitalEmployeeName = "";
+        try {
+            digitalEmployeeId = suasSuperassistApplicationService.resolveCurrentUserDefaultDigitalEmployeeId();
+            if (digitalEmployeeId != null) {
+                SsResource digitalEmployee = ssResourceService.findById(digitalEmployeeId);
+                digitalEmployeeName = digitalEmployee == null ? "" : digitalEmployee.getResourceName();
+            }
+        }
+        catch (Exception e) {
+            // 审计日志补充数字员工信息失败时，不应影响技能版本查询。
+            logger.warn("获取技能版本下载审计信息失败, digitalEmployeeId={}, skillId={}", digitalEmployeeId, skillId, e);
+        }
+        logger.info("数字员工正在下载技能, digitalEmployeeName={}, digitalEmployeeId={}, skillId={}, version={}, skillPath={}",
+            digitalEmployeeName, digitalEmployeeId, skillId, extSkill.getVersion(),
+            extractSkillPathFromTargetContent(extSkill.getTargetContent()));
+    }
+
+    private String extractSkillPathFromTargetContent(String targetContent) {
+        if (StringUtils.isBlank(targetContent)) {
+            return "";
+        }
+        try {
+            return StringUtils.defaultString(JSON.parseObject(targetContent).getString("skillPath"));
+        }
+        catch (Exception e) {
+            logger.warn("解析技能扩展信息中的 skillPath 失败");
+            return "";
+        }
     }
 
     private String buildSkillDownloadUrl(Long skillId) {
