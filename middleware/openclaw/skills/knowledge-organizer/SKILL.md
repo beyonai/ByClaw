@@ -236,30 +236,93 @@ cd /by/.sessions/{session_id} && python3 <skill>/knowledge-organizer/scripts/add
 - 知识库检索结果为空时，**跳过**，不写入该知识库关联
 - 已有关联不重复写入（去重）
 
+### Step 5.5：实例消解与融合候选识别（新增）
+
+**⚠️ Step 5 之后、Step 6 之前执行，不可跳过。**
+
+使用一站式消解脚本，完成「批内去重 → 双路召回 → identity 比对」：
+
+```bash
+python3 <skill>/knowledge-organizer/scripts/er_resolve.py \
+  --doc-dir /by/.sessions/{session_id}/{任务名称}/{object_type} \
+  --object-type {object_type} \
+  --identity-fields {identity_fields} \
+  --kb-id {kb_id} \
+  --kb-resource-id {kb_resource_id}
+```
+
+**脚本内部流程**：
+1. **批内去重**：同批次相同 identity 的文档自动合并
+2. **Path-1 term 召回**：向量检索 KB 中同对象类型的候选文档（带 label_filters 预过滤）
+3. **Path-2 全文语义召回**：search-file API 对文档内容做语义检索
+4. **RRF 融合排序**：两路召回结果融合后按相关性排序
+5. **identity 比对**：用 name 字段比对新文档与候选的 term_name
+
+**Identity 字段判定规则**（回退策略，优先级从高到低）：
+1. 本体对象定义中 `businessKey=1` 的字段
+2. `name` 字段（大多数对象有 name 字段）
+3. `title` 字段（WritingOutput 等有 title 无 name）
+4. 第一个必填字符串字段（兜底）
+
+**输出格式**：每个新文档包含 `kb_resource_id` 和 `candidates` 列表，每项包含：
+- `kb_doc_path`：知识库中文档路径
+- `kb_term_name`：知识库术语名称（可用于 name 比对）
+- `name_match`：identity 字段比对结果（`match_type`: `exact`/`substring`/`fuzzy`/`none`）
+
+Agent 可通过 `kb_resource_id` + `kb_doc_path` 下载文档内容做进一步判断：
+- `by-knowledge-manager read-file --resource-id {kb_resource_id} --file-path {kb_doc_path} --start-line 1 --end-line 80`
+
+**Agent 消解判断流程**：
+
+1. **先看 name**：`name_match.match_type == "exact"` → 同名，大概率同一实例，读内容确认
+2. **读内容确认**：用 `read-file` 读取候选文档正文 + 新文档正文，对比核心定义、关键依据是否描述同一事物
+3. **综合判断**：
+   - **同名 + 内容同义** → 融合更新（走 Step 7 方式 B）
+   - **不同名 + 内容同义** → 询问用户是否为同一实例，由用户决定
+   - **内容不同义** → 新建实例（走 Step 7 方式 A）
+
 ### Step 6：用户预览确认（⚠️ 关键节点）
 
-**Step 3 → Step 4 → Step 5 → Step 6，必须按顺序执行，不可跳步。在完成两阶段关系梳理之前，不得进入此步骤。**
+**Step 3 → Step 4 → Step 5 → Step 5.5 → Step 6，必须按顺序执行，不可跳步。在完成两阶段关系梳理和实例消解之前，不得进入此步骤。**
 
 向用户展示：
 1. **整理结果目录树**：列出所有生成的文档及其层级结构
 2. **文档存储地址**：`/by/.sessions/{session_id}/{任务名称}/`
 3. **核心文档摘要**：每个对象类型的代表性内容概要
 4. **关系图谱**：各文档间的关联关系（阶段1 + 阶段2）
-5. **对象覆盖情况（⚠️ 新增）**：列出所有已覆盖的对象类型，以及未使用的对象类型及原因，询问用户是否需要补充
+5. **对象覆盖情况**：列出所有已覆盖的对象类型，以及未使用的对象类型及原因，询问用户是否需要补充
+6. **实例消解结果（新增）**：
+
+   ━━ 新建实例（N个）━━
+   ✅ /Person/张三.md → 新增
+
+   ━━ 融合更新（M个）━━
+   🔗 /Person/王小明.md ⇄ KB已有 /Person/王小明.md
+      匹配: name="王小明" ✅ | 置信度: 高
+      新增属性: 获奖经历 → "短跑冠军"
+      无冲突
+
+   ━━ 批内合并（K组）━━
+   🔀 /Person/王小明.md + /Person/王小明的运动会经历.md
+      → 合并为 /Person/王小明.md（新增属性: 获奖经历×2）
 
 明确告知用户：
 
 > 请在继续操作之前，前往以下地址确认文档内容是否符合预期：
 > `{存储地址}`
 >
-> 确认无误后请回复「确认入库」或「可以」，我将为您执行打标录入。
-> 如需修改某篇文档内容，请告知具体文档和修改意见。
+> 「新建实例」将作为独立文档录入。
+> 「融合更新」将新属性合并到已有文档。
+> 属性有冲突的已标记 ⚠️，请确认处理方式。
+>
+> 确认无误后请回复「确认入库」或「可以」，我将为您执行分流入库。
+> 如需修改某篇文档内容或调整消解结果，请告知具体文档和修改意见。
 
 **等待用户明确确认后再进入 Step 7。**
 
-### Step 7：打标录入本体库
+### Step 7：分流入库
 
-用户确认后，**逐个文档**调用 `baiying_call` 进行打标录入。
+用户确认后，按消解结果分流：
 
 **执行方式（⚠️ 禁止使用子代理）**：
 - **不使用子代理**：主流程直接调用 `baiying_call`，禁止通过 `sessions_spawn` 派发子代理处理
@@ -271,15 +334,35 @@ cd /by/.sessions/{session_id} && python3 <skill>/knowledge-organizer/scripts/add
 - 根据文档的 YAML front matter 中的 `product_code`、对象类型目录判断应录入哪个本体对象
 - 使用 `baiying_call` 调用，`resource_id` 为对象的 resourceId，`resource_type` 为 `"OBJECT"`
 
-**调用示例**：
-```
-  resource_id: "10069301"  # Concept对象的resourceId
-  resource_type: "OBJECT"
-  query: "请根据以下文档内容进行结构化打标录入：
-  文档路径：{文件完整路径}
-  文档内容：{完整文档内容}
+---
 
-  请提取文档中的关键信息，完成字段录入。"
+**方式 A：新建实例** → `doc-tagger` 普通打标
+
+```
+baiying_call:
+  resource_id: "{对象的resourceId}"
+  resource_type: "OBJECT"
+  query: "请对以下文档进行结构化打标录入：
+    文档路径：{文件完整路径}
+    文档内容：{完整文档内容}
+
+    请提取文档中的关键信息，完成字段录入。"
+```
+
+---
+
+**方式 B：融合更新** → `doc-tagger` 融合更新
+
+```
+baiying_call:
+  resource_id: "{对象的resourceId}"
+  resource_type: "OBJECT"
+  query: "请执行融合更新，将文件融合后的文件打标更新。
+    original_source_path: {KB已有文档路径}
+    current_source_path: {本次生成文档路径}
+    source_path: {融合后文档路径}
+    content:
+    {融合后完整正文}"
 ```
 
 **注意**：所有 `baiying_call` 调用完成后，汇总结果并汇报。禁止在调用过程中就告知用户"已成功"。
@@ -289,6 +372,8 @@ cd /by/.sessions/{session_id} && python3 <skill>/knowledge-organizer/scripts/add
 向用户汇总：
 - 整理文档数量
 - 各对象类型分布
+- **批内去重合并组数（新增）**
+- **实体消解结果：新建数 / 融合数 / 冲突数（新增）**
 - 阶段1写入的本地关系数量
 - 阶段2写入的知识库关联数量
 - 入库成功/失败数量
@@ -300,7 +385,7 @@ cd /by/.sessions/{session_id} && python3 <skill>/knowledge-organizer/scripts/add
 
 1. **正文和打标自己做**：文档正文内容、YAML front matter 均由本技能自行生成，不委托给其他 Skill
 2. **YAML 字段值必须查询术语表**：front matter 中的枚举类字段值（如 `product_code`、`owner_type` 等）必须通过 `unstructured-ontology-manager` 的 `get_term_type_values.py` 查询允许值列表，从中选择匹配项填入，不得自行编造；查询结果为空时，在字段后添加注释说明
-3. **关系创建分两阶段**：阶段1（本地）+ 阶段2（知识库），缺一不可；**Step 3 → Step 4 → Step 5 → Step 6，必须按顺序执行，不可跳步**
+3. **关系创建分两阶段**：阶段1（本地）+ 阶段2（知识库），缺一不可；**Step 3 → Step 4 → Step 5 → Step 5.5 → Step 6，必须按顺序执行，不可跳步**
 4. **阶段2使用 add-related-docs**：严格按其三步流程执行，知识库为空则不写关联
 5. **Step 6 用户确认不可跳过**：未获得用户确认不得调用 doc-tagger 入库
 6. **每个文件单独调用 baiying_call**：禁止合并多个文件到同一次调用
@@ -308,3 +393,5 @@ cd /by/.sessions/{session_id} && python3 <skill>/knowledge-organizer/scripts/add
 8. **正文必须包含 wiki-link 关系标注和关系线索词**：在"对象说明"和"关键依据"中使用 `[[../类型/文档名.md]]` 格式标注关联，使用「归属」「包含」「实现」「对应」「佐证」「支撑」「依赖于」等线索词
 9. **对象覆盖检查**：进入 Step 3 前，必须遍历所有可用对象类型，对照源文档内容判断是否能提炼为各类型实例，不得遗漏；在 Step 6 中向用户展示未使用的对象类型及原因
 10. **打标录入禁止使用子代理**：Step 7 由主流程直接调用 `baiying_call`，同一轮中可并发发起多个调用
+11. **Step 5.5 不可跳过**：实例消解是入库前的必要步骤，批内去重、KB 候选检索、实体消解+RRF 融合三步必须全部执行
+12. **冲突属性必须标记让用户选**：属性 diff 中出现两边值不同的字段，必须在 Step 6 中用 ⚠️ 标记，由用户确认处理方式后再入库
