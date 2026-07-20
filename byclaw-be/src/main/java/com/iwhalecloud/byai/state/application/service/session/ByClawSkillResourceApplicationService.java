@@ -35,6 +35,7 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -153,8 +154,7 @@ public class ByClawSkillResourceApplicationService {
         }
         for (MultipartFile file : files) {
             SkillPackageMetadata metadata = inspectSkillPackage(file);
-            SsResource existing = findExistingSkillByNaturalKey(metadata.skillCode());
-            if (existing != null) {
+            for (SsResource existing : findExistingSkillsByNaturalKey(metadata.skillCode())) {
                 assertSkillManagePermission(existing);
             }
         }
@@ -176,18 +176,32 @@ public class ByClawSkillResourceApplicationService {
             MultipartFile uploadFile = uploadFiles.get(i);
             ByClawSkillDto uploadedSkill = uploadedSkills.get(i);
             SkillPackageMetadata metadata = inspectSkillPackage(uploadFile);
-            SsResource existing = findExistingSkillByNaturalKey(metadata.skillCode());
-            boolean updated = existing != null;
-            String oldVersion = updated ? findSkillExtVersion(existing.getResourceId()) : null;
-            SsResource skillResource = saveOrUpdateSkillResource(metadata, OwnerType.PERSONAL,
-                DEFAULT_SKILL_CATALOG_ID, existing);
-            authApplicationService.ensureCreatorDefaultPrivileges(skillResource);
-            SsResExtSkill extSkill = saveOrUpdateSkillExt(userCode, skillResource, uploadFile, metadata,
-                uploadedSkill.getSkillPath(), uploadedSkill.getSkillDocObjectKey(), SOURCE_TYPE_CHAT_UPLOAD);
-            bindSkillToDigitalEmployee(resolvedDigitalEmployeeId, skillResource.getResourceId());
-            syncSkillTargetContent(userCode, skillResource, extSkill, true);
-            logSkillImportOperation(userCode, digitalEmployee, updated, skillResource.getResourceId(), oldVersion,
-                extSkill.getVersion(), uploadedSkill.getSkillPath(), extSkill.getSkillUrl());
+            List<SsResource> existingSkills = findExistingSkillsByNaturalKey(metadata.skillCode());
+            boolean updated = CollectionUtils.isNotEmpty(existingSkills);
+            for (SsResource existing : existingSkills) {
+                assertSkillManagePermission(existing);
+            }
+            List<SsResource> resourcesToUpdate = updated ? existingSkills : Collections.singletonList(null);
+            SsResource primarySkillResource = null;
+            for (SsResource existing : resourcesToUpdate) {
+                String oldVersion = existing == null ? null : findSkillExtVersion(existing.getResourceId());
+                SsResource skillResource = saveOrUpdateSkillResource(metadata, OwnerType.PERSONAL,
+                    DEFAULT_SKILL_CATALOG_ID, existing);
+                boolean primarySkill = primarySkillResource == null;
+                if (primarySkill) {
+                    primarySkillResource = skillResource;
+                    // 与原逻辑一致：只为本次导入的主资源补齐创建者默认权限。
+                    authApplicationService.ensureCreatorDefaultPrivileges(skillResource);
+                }
+                SsResExtSkill extSkill = saveOrUpdateSkillExt(userCode, skillResource, uploadFile, metadata,
+                    uploadedSkill.getSkillPath(), uploadedSkill.getSkillDocObjectKey(), SOURCE_TYPE_CHAT_UPLOAD);
+                if (primarySkill) {
+                    bindSkillToDigitalEmployee(resolvedDigitalEmployeeId, skillResource.getResourceId());
+                }
+                syncSkillTargetContent(userCode, skillResource, extSkill, true);
+                logSkillImportOperation(userCode, digitalEmployee, updated, skillResource.getResourceId(), oldVersion,
+                    extSkill.getVersion(), uploadedSkill.getSkillPath(), extSkill.getSkillUrl());
+            }
         }
 
         digitalEmployeeApplicationService.rebuildAndSaveDigitalEmployeeRelSkills(resolvedDigitalEmployeeId);
@@ -372,23 +386,50 @@ public class ByClawSkillResourceApplicationService {
     public SkillImportResult importSkillZip(MultipartFile file, Long catalogId, String ownerType, String sourceType) {
         SkillPackageMetadata metadata = inspectSkillPackage(file);
         String resolvedOwnerType = resolveOwnerType(ownerType);
-        SsResource existing = findExistingSkillByNaturalKey(metadata.skillCode());
-        boolean updated = existing != null;
-        if (updated) {
+        Long resolvedCatalogId = catalogId == null ? DEFAULT_SKILL_CATALOG_ID : catalogId;
+        List<SsResource> existingSkills = findExistingSkillsByNaturalKey(metadata.skillCode());
+        if (CollectionUtils.isEmpty(existingSkills)) {
+            return importNewSkillZip(file, metadata, resolvedOwnerType, resolvedCatalogId, sourceType);
+        }
+
+        for (SsResource existing : existingSkills) {
             assertSkillManagePermission(existing);
         }
-        SsResExtSkill previousExtSkill = updated ? ssResExtSkillService.findById(existing.getResourceId()) : null;
+
+        SkillImportResult primaryResult = null;
+        for (SsResource existing : existingSkills) {
+            SkillImportResult result = overwriteSkillZip(file, metadata, resolvedOwnerType, resolvedCatalogId,
+                sourceType, existing);
+            if (primaryResult == null) {
+                primaryResult = result;
+            }
+        }
+        return primaryResult;
+    }
+
+    private SkillImportResult importNewSkillZip(MultipartFile file, SkillPackageMetadata metadata, String ownerType,
+        Long catalogId, String sourceType) {
+        SsResource resource = saveOrUpdateSkillResource(metadata, ownerType, catalogId, null);
+        authApplicationService.ensureCreatorDefaultPrivileges(resource);
+        String resourceOwnerUserCode = resolveResourceOwnerUserCode(resource);
+        SsResExtSkill extSkill = saveOrUpdateSkillExt(resourceOwnerUserCode, resource, file, metadata, null, null,
+            sourceType);
+        syncSkillTargetContent(resourceOwnerUserCode, resource, extSkill, true);
+        logSkillImportOperation(resourceOwnerUserCode, resolveCurrentUserDefaultDigitalEmployee(), false,
+            resource.getResourceId(), null, extSkill.getVersion(), null, extSkill.getSkillUrl());
+        return new SkillImportResult(resource, extSkill, false);
+    }
+
+    private SkillImportResult overwriteSkillZip(MultipartFile file, SkillPackageMetadata metadata, String ownerType,
+        Long catalogId, String sourceType, SsResource existing) {
+        SsResExtSkill previousExtSkill = ssResExtSkillService.findById(existing.getResourceId());
         String oldVersion = previousExtSkill == null ? null : previousExtSkill.getVersion();
         String previousSourceType = previousExtSkill == null ? null : previousExtSkill.getSourceType();
         String previousSkillPath = previousExtSkill == null ? null
             : extractString(previousExtSkill.getTargetContent(), "skillPath");
         String previousSkillDocObjectKey = previousExtSkill == null ? null
             : extractString(previousExtSkill.getTargetContent(), "skillDocObjectKey");
-        SsResource resource = saveOrUpdateSkillResource(metadata, resolvedOwnerType,
-            catalogId == null ? DEFAULT_SKILL_CATALOG_ID : catalogId, existing);
-        if (!updated) {
-            authApplicationService.ensureCreatorDefaultPrivileges(resource);
-        }
+        SsResource resource = saveOrUpdateSkillResource(metadata, ownerType, catalogId, existing);
         String resourceOwnerUserCode = resolveResourceOwnerUserCode(resource);
         boolean preserveLegacyWorkspaceMetadata = StringUtils.equals(SOURCE_TYPE_CHAT_UPLOAD, previousSourceType);
         SsResExtSkill extSkill = saveOrUpdateSkillExt(resourceOwnerUserCode, resource, file, metadata,
@@ -396,16 +437,14 @@ public class ByClawSkillResourceApplicationService {
             preserveLegacyWorkspaceMetadata ? previousSkillDocObjectKey : null,
             preserveLegacyWorkspaceMetadata ? previousSourceType : sourceType);
         syncSkillTargetContent(resourceOwnerUserCode, resource, extSkill, true);
-        logSkillImportOperation(resourceOwnerUserCode, resolveCurrentUserDefaultDigitalEmployee(), updated,
+        logSkillImportOperation(resourceOwnerUserCode, resolveCurrentUserDefaultDigitalEmployee(), true,
             resource.getResourceId(), oldVersion, extSkill.getVersion(),
             preserveLegacyWorkspaceMetadata ? previousSkillPath : null, extSkill.getSkillUrl());
-        if (updated) {
-            List<SsResource> boundDigitalEmployees = findBoundDigitalEmployees(resource.getResourceId());
-            syncLegacyWorkspaceCopy(resourceOwnerUserCode, metadata, file, previousSourceType, previousSkillPath,
-                boundDigitalEmployees);
-            refreshBoundDigitalEmployeeSkillRuntime(boundDigitalEmployees);
-        }
-        return new SkillImportResult(resource, extSkill, updated);
+        List<SsResource> boundDigitalEmployees = findBoundDigitalEmployees(resource.getResourceId());
+        syncLegacyWorkspaceCopy(resourceOwnerUserCode, metadata, file, previousSourceType, previousSkillPath,
+            boundDigitalEmployees);
+        refreshBoundDigitalEmployeeSkillRuntime(boundDigitalEmployees);
+        return new SkillImportResult(resource, extSkill, true);
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -625,18 +664,7 @@ public class ByClawSkillResourceApplicationService {
      * 所有会写入技能主资源的入口都必须先走本方法，避免跨归属重复插入。
      */
     private SsResource findExistingSkillByNaturalKey(String skillCode) {
-        if (StringUtils.isBlank(skillCode)) {
-            return null;
-        }
-        List<SsResource> resources = ssResourceService.getResourceListByCode(List.of(skillCode));
-        if (CollectionUtils.isEmpty(resources)) {
-            return null;
-        }
-        List<SsResource> sameNaturalKeySkills = resources.stream()
-            .filter(resource -> resource != null && StringUtils.equals(SystemCode.BYAI.getCode(),
-                resource.getSystemCode()))
-            .filter(resource -> ResourceBizTypeEnum.SKILL.name().equals(resource.getResourceBizType()))
-            .collect(Collectors.toList());
+        List<SsResource> sameNaturalKeySkills = findExistingSkillsByNaturalKey(skillCode);
         if (CollectionUtils.isEmpty(sameNaturalKeySkills)) {
             return null;
         }
@@ -648,6 +676,21 @@ public class ByClawSkillResourceApplicationService {
         return sameNaturalKeySkills.stream().filter(this::isAdminVipInnerSkill).findFirst()
             .orElseThrow(() -> new IllegalArgumentException(I18nUtil.get("byclaw.skill.import.no.manage.permission",
                 sameNaturalKeySkills.get(0).getResourceName())));
+    }
+
+    private List<SsResource> findExistingSkillsByNaturalKey(String skillCode) {
+        if (StringUtils.isBlank(skillCode)) {
+            return List.of();
+        }
+        List<SsResource> resources = ssResourceService.getResourceListByCode(List.of(skillCode));
+        if (CollectionUtils.isEmpty(resources)) {
+            return List.of();
+        }
+        return resources.stream()
+            .filter(resource -> resource != null && StringUtils.equals(SystemCode.BYAI.getCode(),
+                resource.getSystemCode()))
+            .filter(resource -> ResourceBizTypeEnum.SKILL.name().equals(resource.getResourceBizType()))
+            .collect(Collectors.toList());
     }
 
     private SsResource findExistingSkill(String skillCode, String ownerType) {
