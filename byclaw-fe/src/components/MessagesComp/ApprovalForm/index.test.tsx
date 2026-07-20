@@ -26,6 +26,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import ApprovalForm from './index';
 
 import type { OperationFormConfirmation } from './index.d';
+import { IFormStatus } from '@/hooks/useSseSender/agent/typescript';
 
 const scrollIntoViewMock = jest.fn();
 const requestAnimationFrameMock = jest.fn((callback: FrameRequestCallback) => {
@@ -211,6 +212,53 @@ describe('ApprovalForm', () => {
     });
     expect(mockEventEmitter.emit).toHaveBeenNthCalledWith(2, 'beyond-main-driver-message', {
       data: '# Updated details',
+      type: 'md',
+    });
+  });
+
+  it('keeps the textarea preview action enabled when the approval form is disabled', async () => {
+    const content: OperationFormConfirmation = {
+      sourceAgentType: 'agent',
+      metadata: '{}',
+      schemaVersion: '1',
+      formId: 'approval-form',
+      formStatus: IFormStatus.FINISH,
+      title: 'Approval',
+      description: 'Please confirm',
+      substance: [
+        {
+          toolCallId: 'tool-call-1',
+          toolName: 'tool-one',
+          actionCode: 'action-one',
+          actionName: 'Action One',
+          title: 'Step One',
+          description: 'First step',
+          rule: [
+            [
+              {
+                formType: 'textarea',
+                fieldCode: 'details',
+                fieldPath: 'details',
+                fieldName: 'Details',
+                fieldType: 'string',
+                fieldValue: 'Approved details',
+              },
+            ],
+          ],
+        },
+      ],
+    };
+
+    render(<ApprovalForm {...createApprovalFormProps(content)} />);
+
+    expect(screen.getByLabelText('Details')).toBeDisabled();
+    const previewButton = screen.getByLabelText('查看更多');
+    expect(previewButton).toBeEnabled();
+
+    fireEvent.click(previewButton);
+
+    expect(mockEventEmitter.emit).toHaveBeenNthCalledWith(2, 'beyond-main-driver-message', {
+      data: 'Approved details',
       type: 'md',
     });
   });
