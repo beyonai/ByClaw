@@ -810,7 +810,7 @@ export function createAgentWatchdog(params: {
                     hasHubSkillChanges = hubSkillSync.changed;
                     if (hubSkillSync.checked > 0) {
                         params.api.logger.info(
-                            `baiying-enhance: hub skill sync checked=${hubSkillSync.checked} downloaded=${hubSkillSync.downloaded.length} skipped=${hubSkillSync.skipped.length}`,
+                            `baiying-enhance: hub skill sync checked=${hubSkillSync.checked} downloaded=${hubSkillSync.downloaded.length} skipped=${hubSkillSync.skipped.length} failed=${hubSkillSync.failed.length}`,
                         );
                     }
                 } catch (err) {

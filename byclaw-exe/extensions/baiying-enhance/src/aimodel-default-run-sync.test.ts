@@ -28,6 +28,7 @@ const bundle = {
 vi.mock("./aimodel-config.js", () => ({
     DEFAULT_AIMODEL_CONFIG_REDIS_KEY: "byai:aimodel:config",
     DEFAULT_AIMODEL_SECRET_PROVIDER_NAME: "baiying-aimodel-redis",
+    DEFAULT_AIMODEL_TIMEOUT_SECONDS: 600,
     DEFAULT_AIMODEL_TYPELIST_FIELD: "LLM",
     DEFAULT_AIMODEL_TYPELIST_REDIS_KEY: "byai:aimodel:typelist",
     resolveAimodelConfigRedisKey: () => "byai:aimodel:config",

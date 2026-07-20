@@ -8,7 +8,7 @@ import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.common.page.PageInfo;
-import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.DingtalkRobotRegistryService;
+import com.iwhalecloud.byai.gateway.channels.service.robot.RobotChannelRegistryCoordinator;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.event.DigEmployeeChangeEventPublisher;
 import com.iwhalecloud.byai.manager.application.service.template.TemplateRuleInfoApplicationService;
@@ -22,6 +22,7 @@ import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtDigEmployeeS
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtSkillService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceRelDetailService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
+import com.iwhalecloud.byai.manager.domain.staticdata.service.SystemConfigService;
 import com.iwhalecloud.byai.manager.domain.superassist.service.SuasSuperassistService;
 import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeDTO;
 import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeDetailsDTO;
@@ -77,8 +78,9 @@ class DigitalEmployeeApplicationServiceTest {
     private AiModelService aiModelService;
     private TemplateRuleInfoApplicationService templateRuleInfoApplicationService;
     private ResourceAuthContextService resourceAuthContextService;
-    private DingtalkRobotRegistryService dingtalkRobotRegistryService;
+    private RobotChannelRegistryCoordinator robotChannelRegistryCoordinator;
     private DigEmployeeChangeEventPublisher digEmployeeChangeEventPublisher;
+    private SystemConfigService systemConfigService;
     private DigitalEmployeeApplicationService service;
 
     @BeforeEach
@@ -95,8 +97,10 @@ class DigitalEmployeeApplicationServiceTest {
         aiModelService = mock(AiModelService.class);
         templateRuleInfoApplicationService = mock(TemplateRuleInfoApplicationService.class);
         resourceAuthContextService = mock(ResourceAuthContextService.class);
-        dingtalkRobotRegistryService = mock(DingtalkRobotRegistryService.class);
+        robotChannelRegistryCoordinator = mock(RobotChannelRegistryCoordinator.class);
         digEmployeeChangeEventPublisher = mock(DigEmployeeChangeEventPublisher.class);
+        systemConfigService = mock(SystemConfigService.class);
+        when(systemConfigService.getStringParamValueByCode(any())).thenReturn("");
 
         MessageSource mockMessageSource = mock(MessageSource.class);
         when(mockMessageSource.getMessage(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(java.util.Locale.class)))
@@ -117,8 +121,9 @@ class DigitalEmployeeApplicationServiceTest {
         ReflectionTestUtils.setField(service, "aiModelService", aiModelService);
         ReflectionTestUtils.setField(service, "templateRuleInfoApplicationService", templateRuleInfoApplicationService);
         ReflectionTestUtils.setField(service, "resourceAuthContextService", resourceAuthContextService);
-        ReflectionTestUtils.setField(service, "dingtalkRobotRegistryService", dingtalkRobotRegistryService);
+        ReflectionTestUtils.setField(service, "robotChannelRegistryCoordinator", robotChannelRegistryCoordinator);
         ReflectionTestUtils.setField(service, "digEmployeeChangeEventPublisher", digEmployeeChangeEventPublisher);
+        ReflectionTestUtils.setField(service, "systemConfigService", systemConfigService);
 
         LoginInfo loginInfo = new LoginInfo();
         loginInfo.setUserId(1L);

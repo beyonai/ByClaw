@@ -1,5 +1,5 @@
 import type { IMessage } from '@/typescript/message';
-import { BugOutlined, DeleteOutlined } from '@ant-design/icons';
+import { BugOutlined, DeleteOutlined, LinkOutlined } from '@ant-design/icons';
 // @ts-ignore
 import { useIntl } from '@umijs/max';
 import { Button, Popconfirm, Tooltip } from 'antd';
@@ -7,7 +7,9 @@ import { Button, Popconfirm, Tooltip } from 'antd';
 import React from 'react';
 
 import btnStyles from '@/components/MessageList/index.module.less';
+import TraceDetailDrawer from '@/components/TraceDetailDrawer';
 import { agentTypeMap } from '@/constants/agent';
+import { useLangfuseConfigStore } from '@/models/common/useLangfuseConfigStore';
 import { getTraceIdByMessageId, qryTroubleshootSession } from '@/service/message';
 import { cacheTroubleshootSession, getCachedTroubleshootSession } from '../../TroubleshootSessionDrawer/sessionCache';
 import useTroubleshootDrawer from '../../TroubleshootSessionDrawer/useTroubleshootDrawer';
@@ -36,6 +38,8 @@ function MoreActions(porps: {
   const { deleteMessage, msg, disabledList, showTroubleshoot = false } = porps;
   const { messageId, traceId } = msg;
   const [troubleshootActionLoading, setTroubleshootActionLoading] = React.useState(false);
+  const [traceDrawerOpen, setTraceDrawerOpen] = React.useState(false);
+  const [resolvedTraceId, setResolvedTraceId] = React.useState<string | undefined>(traceId);
 
   const intl = useIntl();
   const {
@@ -43,6 +47,13 @@ function MoreActions(porps: {
     open: openTroubleshootDrawer,
     loading: troubleshootLoading,
   } = useTroubleshootDrawer();
+
+  const ensureLangfuseConfigLoaded = useLangfuseConfigStore((s) => s.ensureLoaded);
+  const langfuseConfig = useLangfuseConfigStore((s) => s.config);
+  const langfuseEnabled = Boolean(langfuseConfig?.enabled && langfuseConfig?.projectId);
+  React.useEffect(() => {
+    void ensureLangfuseConfigLoaded();
+  }, [ensureLangfuseConfigLoaded]);
 
   const myDeleteMsg = React.useCallback(() => {
     deleteMessage(msg);
@@ -154,10 +165,36 @@ function MoreActions(porps: {
 
   const canDelete = messageId && !disabledList?.includes('delete');
   const canShowTroubleshoot = showTroubleshoot && getMessageAgentType(msg) === agentTypeMap.askAgent;
+  const canShowTrace = langfuseEnabled && !disabledList?.includes('trace');
+
+  const handleOpenTraceDrawer = React.useCallback(() => {
+    setResolvedTraceId(traceId);
+    setTraceDrawerOpen(true);
+    if (!traceId && messageId) {
+      getLatestTraceId().then((fetched) => {
+        if (fetched) setResolvedTraceId(fetched);
+      });
+    }
+  }, [getLatestTraceId, messageId, traceId]);
 
   return (
     <div className={`ub ub-ac ${btnStyles.moreActions}`}>
       {troubleshootDrawerHolder}
+      <TraceDetailDrawer open={traceDrawerOpen} traceId={resolvedTraceId} onClose={() => setTraceDrawerOpen(false)} />
+      {canShowTrace ? (
+        <div className={btnStyles.actionsBarItem} role="presentation">
+          <Tooltip title={intl.formatMessage({ id: 'messageList.viewTraceTooltip' })}>
+            <Button
+              type="text"
+              size="small"
+              icon={<LinkOutlined className={btnStyles.icon} />}
+              onClick={handleOpenTraceDrawer}
+            >
+              <span className={btnStyles.actionsBarText}>{intl.formatMessage({ id: 'messageList.viewTrace' })}</span>
+            </Button>
+          </Tooltip>
+        </div>
+      ) : null}
       {canShowTroubleshoot ? (
         <div className={btnStyles.actionsBarItem} role="presentation">
           <Tooltip title={intl.formatMessage({ id: 'messageList.troubleshootTooltip' })}>

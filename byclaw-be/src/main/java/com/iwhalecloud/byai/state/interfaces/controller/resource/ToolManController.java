@@ -1134,6 +1134,7 @@ public class ToolManController {
             String resolvedUserCode = StringUtils.isNotBlank(userCode) ? userCode
                 : CurrentUserHolder.getCurrentUserCode();
             List<MultipartFile> uploadFiles = resolveSkillUploadFiles(file, files);
+            byClawSkillResourceApplicationService.validateChatUploadedSkillImportPermission(resourceId, uploadFiles);
             List<ByClawSkillDto> data = byClawSkillUploadApplicationService.uploadSkillZips(resolvedUserCode,
                 resourceId, uploadFiles);
             byClawSkillResourceApplicationService.registerChatUploadedSkills(resolvedUserCode, resourceId, uploadFiles,
@@ -1196,6 +1197,7 @@ public class ToolManController {
         String resolvedUserCode = StringUtils.isNotBlank(finalUserCode) ? finalUserCode
             : CurrentUserHolder.getCurrentUserCode();
         try {
+            logSkillDownloadRequest(resolvedUserCode, finalResourceId, finalSkillId, finalSkillPath);
             if (finalSkillId != null) {
                 return downloadManagedSkillZip(finalSkillId);
             }
@@ -1224,6 +1226,34 @@ public class ToolManController {
         }
     }
 
+    private void logSkillDownloadRequest(String userCode, Long resourceId, Long skillId, String skillPath) {
+        Long digitalEmployeeId = resourceId != null ? resourceId : CurrentUserHolder.getDefaultDigEmployeeId();
+        String digitalEmployeeName = "";
+        String skillName = StringUtils.defaultIfBlank(lastPathSegment(skillPath), "未知技能");
+        String skillCode = "";
+        try {
+            if (digitalEmployeeId != null) {
+                SsResource digitalEmployee = ssResourceService.findById(digitalEmployeeId);
+                digitalEmployeeName = digitalEmployee == null ? "" : digitalEmployee.getResourceName();
+            }
+            if (skillId != null) {
+                SsResource skillResource = ssResourceService.findById(skillId);
+                if (skillResource != null) {
+                    skillName = StringUtils.defaultIfBlank(skillResource.getResourceName(), skillName);
+                    skillCode = skillResource.getResourceCode();
+                }
+            }
+        }
+        catch (Exception e) {
+            // 审计日志的补充查询失败不能阻断技能下载。
+            logger.warn("获取技能下载审计信息失败, userCode={}, digitalEmployeeId={}, skillId={}", userCode,
+                digitalEmployeeId, skillId, e);
+        }
+        logger.info("技能下载请求: userCode={}, userName={}, digitalEmployeeId={}, digitalEmployeeName={}, skillId={}, "
+                + "skillCode={}, skillName={}, skillPath={}", userCode, CurrentUserHolder.getCurrentUserName(),
+            digitalEmployeeId, digitalEmployeeName, skillId, skillCode, skillName, skillPath);
+    }
+
     private ResponseEntity<StreamingResponseBody> downloadManagedSkillZip(Long skillId) {
         SsResExtSkill extSkill = ssResExtSkillService.findById(skillId);
         if (extSkill == null) {
@@ -1236,7 +1266,13 @@ public class ToolManController {
         if (StringUtils.isBlank(relativePath)) {
             throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.package.path.notfound"));
         }
-        if (!resourceArtifactStorageService.existsWithinResourceRoot(relativePath)) {
+        logger.info("开始下载资源化技能包: skillId={}, skillType={}, skillUrl={}, relativePath={}, originalFilename={}",
+            skillId, extSkill.getSkillType(), extSkill.getSkillUrl(), relativePath,
+            extSkill.getSkillOriginalFilename());
+        boolean packageExists = resourceArtifactStorageService.existsWithinResourceRoot(relativePath);
+        if (!packageExists) {
+            logger.warn("资源化技能包不存在: skillId={}, skillUrl={}, relativePath={}", skillId, extSkill.getSkillUrl(),
+                relativePath);
             throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.package.file.notfound"));
         }
         String fileName = StringUtils.defaultIfBlank(extSkill.getSkillOriginalFilename(), lastPathSegment(relativePath));
@@ -1248,6 +1284,16 @@ public class ToolManController {
                     throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.package.file.notfound"));
                 }
                 in.transferTo(out);
+            }
+            catch (java.io.IOException e) {
+                logger.error("资源化技能包读取失败: skillId={}, skillUrl={}, relativePath={}", skillId,
+                    extSkill.getSkillUrl(), relativePath, e);
+                throw e;
+            }
+            catch (RuntimeException e) {
+                logger.error("资源化技能包读取失败: skillId={}, skillUrl={}, relativePath={}", skillId,
+                    extSkill.getSkillUrl(), relativePath, e);
+                throw e;
             }
         };
         return ResponseEntity.ok().contentType(MediaType.parseMediaType("application/zip"))

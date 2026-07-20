@@ -339,8 +339,8 @@ const LoginModal: React.FC<LoginModalProps> = ({ open, onClose, className, defau
                     src={`${getPublicPath()}beyond/jingjia.png`}
                     style={{ width: '32px', height: '32px' }}
                     alt="jingjia"
-                    // eslint-disable-next-line react/no-unknown-property
-                    fetchPriority="low"
+                    // React 18 不识别 camelCase fetchPriority，透传小写属性避免控制台告警。
+                    {...{ fetchpriority: 'low' }}
                   />
                 </Button>
               </Tooltip>
@@ -461,8 +461,8 @@ const LoginModal: React.FC<LoginModalProps> = ({ open, onClose, className, defau
               objectFit: 'cover',
             }}
             alt=""
-            // eslint-disable-next-line react/no-unknown-property
-            fetchPriority="low"
+            // React 18 不识别 camelCase fetchPriority，透传小写属性避免控制台告警。
+            {...{ fetchpriority: 'low' }}
           />
         </div>
         <div className={classNames(styles.rightSection)}>

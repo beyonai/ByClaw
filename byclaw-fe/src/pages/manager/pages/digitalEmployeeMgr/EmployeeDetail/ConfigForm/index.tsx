@@ -27,7 +27,13 @@ import {
   message,
   Popconfirm,
 } from 'antd';
-import { FormOutlined, QuestionCircleOutlined, EyeOutlined, ExclamationCircleOutlined } from '@ant-design/icons';
+import {
+  RobotOutlined,
+  FormOutlined,
+  QuestionCircleOutlined,
+  EyeOutlined,
+  ExclamationCircleOutlined,
+} from '@ant-design/icons';
 import classnames from 'classnames';
 import { compact, set, trim } from 'lodash';
 import { customAlphabet } from 'nanoid';
@@ -37,7 +43,7 @@ import { DingtalkCircleFilled } from '@ant-design/icons';
 import { getByParamGroupCode } from '@/pages/manager/service/System';
 import { getCatalogOnResource, getDcSystemConfigListByStandType } from '@/pages/manager/service/DigitalEmployeeMgr';
 import { getDcSystemConfig } from '@/pages/manager/service/session';
-import { listResourceUseAuth } from '@/pages/manager/service/resources';
+import { listResourceUseAuth, queryResourceDetailListByIds } from '@/pages/manager/service/resources';
 import ExampleModal from './ExampleModal';
 import MemoryConfigModal from './MemoryConfigModal';
 import AbilityBoundaryModal from './AbilityBoundaryModal';
@@ -49,6 +55,7 @@ import ToolSelectorModal from './ToolSelectorModal';
 import { compressImgFileAndUpload } from '@/pages/manager/utils/file';
 import { Image } from '@/pages/manager/components/Image';
 import { getAvatarUrl } from '@/pages/manager/utils/agent';
+import { getFileUrl } from '@/utils/file';
 // import UploadFileConfig from './UploadFileConfig';
 import styles from './index.module.less';
 import pStyles from '../index.module.less';
@@ -58,12 +65,69 @@ import { normalizeCatalogTree } from '@/utils/catalog';
 import { DEFAULT_AGENT_TYPE_OPTIONS, DEFAULT_TEMPLATE_DATA } from '../../constants';
 import Ellipsis from '@/pages/manager/components/Ellipsis';
 import { DEFAULT_DIGITAL_EMPLOYEE_TEMPLATES } from '@/pages/manager/constants/digitalResource';
+import { normalizeRobotConfig } from './robotConfig';
 
 const { TextArea } = Input;
 
 const nanoid = customAlphabet('abcdefghijklmnopqrstuvwxyz1234567890', 6);
 const PROMPT_TEXT_FIELD_DEFAULT_MAX_LENGTH = 10000;
+const BUNDLED_SKILL_PAGE_SIZE = 30;
 const getPromptTextLength = (value: any) => Array.from(`${value ?? ''}`).length;
+const formatSkillAddedCount = (count: number, locale: string) => {
+  if (locale?.startsWith('zh')) {
+    if (count >= 10000) {
+      const wanCount = count / 10000;
+      return wanCount >= 10 ? `${Math.floor(wanCount)}万` : `${Number(wanCount.toFixed(1))}万`;
+    }
+    return `${count}`;
+  }
+  if (count >= 1000000) {
+    return `${Number((count / 1000000).toFixed(1))}M`;
+  }
+  if (count >= 1000) {
+    return `${Number((count / 1000).toFixed(1))}K`;
+  }
+  return `${count}`;
+};
+
+const DEFAULT_ROBOT_CHANNEL_OPTIONS = [
+  { value: 'DingTalk', labelZh: '钉钉', labelEn: 'DingTalk' },
+  { value: 'Feishu', labelZh: '飞书', labelEn: 'Feishu' },
+];
+
+const normalizeRobotChannelValue = (channel = '') => `${channel || ''}`.replace(/[\s_-]/g, '').toLowerCase();
+
+const getRobotConfigKey = (item = {}) => {
+  const channel = normalizeRobotChannelValue(item.channel);
+  const identity = item.appId || item.clientId || item.botId || item.robotCode || '';
+  return identity ? `${channel}:${identity}` : '';
+};
+
+const isFeishuRobotConfig = (item = {}) => normalizeRobotChannelValue(item.channel) === 'feishu';
+const isDingtalkRobotConfig = (item = {}) => normalizeRobotChannelValue(item.channel) === 'dingtalk';
+const isWecomRobotConfig = (item = {}) => normalizeRobotChannelValue(item.channel) === 'wecom';
+
+const getRobotConfigIdentityText = (item = {}) => {
+  if (isFeishuRobotConfig(item)) {
+    return `appId: ${item.appId || '-'}`;
+  }
+  if (isWecomRobotConfig(item)) {
+    return `botId: ${item.botId || item.robotCode || '-'}`;
+  }
+  return `clientId: ${item.clientId || '-'}`;
+};
+
+const renderRobotChannelIcon = (item = {}) => {
+  if (isFeishuRobotConfig(item)) {
+    return <AntdIcon type="icon-feishu" className={classnames(styles.robotChannelIcon, styles.feishuRobotIcon)} />;
+  }
+
+  if (isDingtalkRobotConfig(item)) {
+    return <DingtalkCircleFilled className={classnames(styles.robotChannelIcon, styles.fontSize32PrimaryColor)} />;
+  }
+
+  return <RobotOutlined className={classnames(styles.robotChannelIcon, styles.fontSize32PrimaryColor)} />;
+};
 
 // 能力图标选项
 const abilityIcons = [
@@ -144,12 +208,18 @@ const getDigitalEmployeeTemplate = (templates: any[] = [], ownerType?: string, a
 };
 
 const getDigitalEmployeeTemplateMaxLength = (templates: any[] = [], ownerType?: string, agentType?: string) => {
-  const effectiveOwnerType = String(ownerType || '').trim().toLowerCase() === 'personal' ? 'personal' : 'enterprise';
+  const effectiveOwnerType =
+    String(ownerType || '')
+      .trim()
+      .toLowerCase() === 'personal'
+      ? 'personal'
+      : 'enterprise';
   const effectiveAgentType = agentType === undefined || agentType === null ? '' : String(agentType).trim();
   const matchedTemplate = (Array.isArray(templates) ? templates : []).find(
     (item) =>
-      String(item?.ownerType || '').trim().toLowerCase() === effectiveOwnerType &&
-      String(item?.agentType ?? '').trim() === effectiveAgentType
+      String(item?.ownerType || '')
+        .trim()
+        .toLowerCase() === effectiveOwnerType && String(item?.agentType ?? '').trim() === effectiveAgentType
   );
 
   const maxLength = Number(matchedTemplate?.maxLength);
@@ -163,41 +233,191 @@ const getBundledSkillCode = (item: any) => {
   if (typeof item === 'string') {
     return item;
   }
-  return item.skillCode || item.resourceCode || item.value || item.code || item.resourceId || item.id || '';
+  return item.resourceCode || item.skillCode || item.code || item.itemCode || '';
 };
 
-const normalizeBundledSkillCodes = (skills: any[] = []) =>
-  compact(skills.map((item) => `${getBundledSkillCode(item) || ''}`.trim()));
+const normalizeBundledSkillIdentity = (value: any) => `${value ?? ''}`.trim();
+
+const getBundledSkillIdKeys = (item: any) => {
+  if (!item || typeof item === 'string') {
+    return [];
+  }
+  // 配置技能选中态只使用 resourceId 判断，避免同 code、同名或历史字段导致串选中状态。
+  return [item.resourceId].map(normalizeBundledSkillIdentity).filter(Boolean);
+};
+
+const getBundledSkillCodeKeys = (item: any) => {
+  if (!item) {
+    return [];
+  }
+  if (typeof item === 'string') {
+    return [normalizeBundledSkillIdentity(item)].filter(Boolean);
+  }
+  return Array.from(
+    new Set(
+      [item.skillCode, item.resourceCode, item.value, item.code, item.itemCode]
+        .map(normalizeBundledSkillIdentity)
+        .filter(Boolean)
+    )
+  );
+};
+
+const hasSameBundledSkillKey = (leftKeys: string[] = [], rightKeys: string[] = []) => {
+  const rightKeySet = new Set(rightKeys);
+  return leftKeys.some((key) => rightKeySet.has(key));
+};
+
+const isSameBundledSkill = (left: any, right: any) => {
+  const leftIds = getBundledSkillIdKeys(left);
+  const rightIds = getBundledSkillIdKeys(right);
+  // 选中、移除、去重统一按接口返回的 resourceId 匹配，不再用 resourceCode 或名称兜底。
+  return !!leftIds.length && !!rightIds.length && hasSameBundledSkillKey(leftIds, rightIds);
+};
+
+const findBundledSkillOption = (item: any, options: any[] = []) => {
+  const matchedByStableKey = options.find((skill) => isSameBundledSkill(skill, item));
+  if (matchedByStableKey) {
+    return matchedByStableKey;
+  }
+
+  return undefined;
+};
+
+const getBundledSkillPrimaryKey = (item: any) =>
+  getBundledSkillIdKeys(item)[0] || getBundledSkillCodeKeys(item)[0] || getBundledSkillCode(item);
+
+const normalizeBundledSkillOption = (item: any = {}) => {
+  const resourceId = item.resourceId || item.grantResourceId || item.id;
+  const resourceCode = item.resourceCode || item.skillCode || item.code || item.itemCode;
+  const resourceName = item.resourceName || item.name || item.label || resourceCode || `${resourceId || ''}` || '-';
+  const resourceDesc = item.resourceDesc || item.description || item.pluginDesc || item.desc || '';
+
+  return {
+    ...item,
+    // 弹窗卡片 key/value 使用 resourceId，保证选中态和接口唯一资源标识一致。
+    value: resourceId,
+    label: resourceName,
+    description: resourceDesc,
+    resourceId,
+    resourceName,
+    resourceDesc,
+    resourceLogoUrl: item.resourceLogoUrl || item.avatar,
+    avatar: item.avatar,
+    creatorName: item.creatorName || item.createUserName || item.memberName,
+    createUserName: item.createUserName,
+    useCount: item.useCount || item.focusCount || 0,
+    displaySourceType: item.displaySourceType || item.sourceType,
+    sourceType: item.sourceType || item.displaySourceType,
+    skillCode: resourceCode,
+    skillType: item.skillType || 'hub',
+    skillUrl: item.skillUrl || '',
+    versionUrl: item.versionUrl || (resourceId ? `/byaiService/tool/getSkillVersion?skillId=${resourceId}` : ''),
+  };
+};
+
+const getBundledSkillHydrationId = (item: any) => {
+  if (!item || typeof item === 'string') {
+    return /^\d+$/.test(`${item || ''}`.trim()) ? `${item}`.trim() : '';
+  }
+  const rawValue = item.resourceId || item.skillId || item.id || item.grantResourceId || item.value;
+  const value = normalizeBundledSkillIdentity(rawValue);
+  return /^\d+$/.test(value) ? value : '';
+};
+
+const getBundledSkillHydrationCode = (item: any) => {
+  if (!item) {
+    return '';
+  }
+  if (typeof item === 'string') {
+    return normalizeBundledSkillIdentity(item);
+  }
+  const value = normalizeBundledSkillIdentity(item.value);
+  return (
+    normalizeBundledSkillIdentity(item.skillCode || item.resourceCode || item.code || item.itemCode) ||
+    (/^\d+$/.test(value) ? '' : value)
+  );
+};
+
+const getBundledSkillHydrationKey = (item: any) => {
+  const resourceId = getBundledSkillHydrationId(item);
+  if (resourceId) {
+    return `id:${resourceId}`;
+  }
+  const resourceCode = getBundledSkillHydrationCode(item);
+  return resourceCode ? `code:${resourceCode}` : '';
+};
+
+const needHydrateBundledSkill = (item: any) => {
+  if (!item) {
+    return false;
+  }
+  if (typeof item === 'string') {
+    return !!normalizeBundledSkillIdentity(item);
+  }
+  // 默认技能只有 ID/code 时先补齐名称、描述和图标，避免新建页已选卡片显示为“-”。
+  return !(
+    item.label ||
+    item.resourceName ||
+    item.description ||
+    item.resourceDesc ||
+    item.resourceLogoUrl ||
+    item.avatar
+  );
+};
+
+const getListFromResponse = (res: any) => {
+  const data = res?.data || res || {};
+  if (Array.isArray(data)) {
+    return data;
+  }
+  return data.list || data.rows || [];
+};
+
+const findBundledSkillOptionForNormalize = (item: any, options: any[] = []) => {
+  const matchedByResourceId = findBundledSkillOption(item, options);
+  if (matchedByResourceId) {
+    return matchedByResourceId;
+  }
+  const hydrationId = getBundledSkillHydrationId(item);
+  const matchedByHydrationId = hydrationId
+    ? options.find((skill) => getBundledSkillIdKeys(skill).includes(hydrationId))
+    : undefined;
+  if (matchedByHydrationId) {
+    // 兼容模板把默认技能写成纯数字字符串的历史配置，补全展示时可按 resourceId 回填。
+    return matchedByHydrationId;
+  }
+  if (getBundledSkillIdKeys(item).length) {
+    return undefined;
+  }
+  const codeKeys = getBundledSkillCodeKeys(item);
+  // 默认模板里的老数据可能只有 skillCode，补全展示时才允许按 code 精确匹配，弹窗选中态仍只按 resourceId。
+  return codeKeys.length
+    ? options.find((skill) => hasSameBundledSkillKey(codeKeys, getBundledSkillCodeKeys(skill)))
+    : undefined;
+};
 
 const normalizeBundledSkillItems = (skills: any[] = [], options: any[] = []) =>
   compact(
     skills.map((item) => {
       const rawCode = `${getBundledSkillCode(item) || ''}`.trim();
       const option =
-        options.find((skill) =>
-          [
-            skill?.value,
-            skill?.skillCode,
-            skill?.resourceCode,
-            skill?.code,
-            skill?.resourceId,
-            skill?.id,
-            skill?.label,
-            skill?.resourceName,
-            skill?.itemName,
-            skill?.name,
-          ]
-            .filter((value) => value !== undefined && value !== null)
-            .some((value) => `${value}`.trim() === rawCode)
-        ) || (typeof item === 'object' && item !== null ? item : null);
+        findBundledSkillOptionForNormalize(item, options) || (typeof item === 'object' && item !== null ? item : null);
 
-      const resourceId = option?.resourceId || option?.skillId || option?.id;
+      const resourceId = option?.resourceId;
+      // value 已经改为 resourceId，保存技能编码时只使用 resourceCode/skillCode 等编码字段。
       const skillCode = `${
-        option?.skillCode || option?.resourceCode || option?.value || option?.code || rawCode || ''
+        option?.resourceCode || option?.skillCode || option?.code || option?.itemCode || rawCode || ''
       }`.trim();
       const normalized = {
         resourceId,
         skillCode,
+        // 已选技能列表需要名称和描述；保存时一并保留，避免翻页/重开后只能显示“-”。
+        label: option?.label || option?.resourceName || skillCode,
+        resourceName: option?.resourceName || option?.label || skillCode,
+        description: option?.description || option?.resourceDesc,
+        resourceDesc: option?.resourceDesc || option?.description,
+        resourceLogoUrl: option?.resourceLogoUrl,
+        avatar: option?.avatar,
         skillType: option?.skillType,
         skillUrl: option?.skillUrl,
         versionUrl: option?.versionUrl,
@@ -371,12 +591,16 @@ const ConfigForm = (props) => {
   const intl = useIntl();
   const { pick } = useFileTookit();
   const isEN = getLocale().includes('en');
+  const bundledSkillListRef = useRef<HTMLDivElement | null>(null);
+  const bundledSkillLoadMoreLockRef = useRef(false);
+  const hydratedBundledSkillKeysRef = useRef<Set<string>>(new Set());
   const [robotChannelOptions, setRobotChannelOptions] = useState([]);
   const [catalogList, setCatalogList] = useState([]);
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [robotModalOpen, setRobotModalOpen] = useState(false);
   const [modelPopoverOpen, setModelPopoverOpen] = useState(false);
   const [robotItem, setRobotItem] = useState<RobotConfig>({ channel: '' });
+  const [robotEditingIndex, setRobotEditingIndex] = useState<number | null>(null);
   const [templateData, setTemplateData] = useState([]);
   const [promptTextMaxLength, setPromptTextMaxLength] = useState(PROMPT_TEXT_FIELD_DEFAULT_MAX_LENGTH);
   const [configurableTabs, setConfigurableTabs] = useState<
@@ -387,15 +611,39 @@ const ConfigForm = (props) => {
   const [bundledSkillLoading, setBundledSkillLoading] = useState(false);
   const [bundledSkillModalOpen, setBundledSkillModalOpen] = useState(false);
   const [bundledSkillSearchName, setBundledSkillSearchName] = useState('');
+  const [bundledSkillPagination, setBundledSkillPagination] = useState({
+    pageNum: 1,
+    pageSize: BUNDLED_SKILL_PAGE_SIZE,
+    total: 0,
+    current: 1,
+  });
   const formOwnerType = Form.useWatch('ownerType', { form, preserve: true });
   const effectiveOwnerType = formOwnerType || ownerType;
   const selectedSkills = Form.useWatch('bundledSkills', { form, preserve: true }) || [];
-  const selectedSkillCodes = useMemo(() => normalizeBundledSkillCodes(selectedSkills), [selectedSkills]);
+  const selectedBundledSkillItems = useMemo(() => {
+    const seenKeys = new Set();
+    // 已选列表用弹窗同一套匹配规则回填展示项，避免 value/resourceId 字段不一致导致已选状态不同步。
+    return compact(selectedSkills.map((skill) => findBundledSkillOption(skill, bundledSkillOptions) || skill)).filter(
+      (item) => {
+        const primaryKey = getBundledSkillPrimaryKey(item);
+        if (!primaryKey || seenKeys.has(primaryKey)) {
+          return false;
+        }
+        seenKeys.add(primaryKey);
+        return true;
+      }
+    );
+  }, [bundledSkillOptions, selectedSkills]);
 
   useEffect(() => {
     let mounted = true;
 
     const fetchRobotChannels = async () => {
+      const fallbackOptions = DEFAULT_ROBOT_CHANNEL_OPTIONS.map((item) => ({
+        value: item.value,
+        label: isEN ? item.labelEn : item.labelZh,
+      }));
+
       try {
         const res = await getByParamGroupCode({
           paramGroupCode: 'DIG_EMPLOYEE_MACHINE_CHANNEL',
@@ -406,8 +654,8 @@ const ConfigForm = (props) => {
           setRobotChannelOptions(
             list
               .map((item) => ({
-                value: item?.paramValue,
-                label: isEN ? item?.paramEnName : item?.paramName,
+                value: `${item?.paramValue || ''}`.trim(),
+                label: (isEN ? item?.paramEnName : item?.paramName) || item?.paramDesc || item?.paramValue || '',
                 seq: Number(item?.paramSeq) || 0,
               }))
               .filter((item) => item.value)
@@ -416,10 +664,10 @@ const ConfigForm = (props) => {
           );
           return;
         }
-        setRobotChannelOptions([]);
+        setRobotChannelOptions(fallbackOptions);
       } catch {
         if (mounted) {
-          setRobotChannelOptions([]);
+          setRobotChannelOptions(fallbackOptions);
         }
       }
     };
@@ -470,53 +718,68 @@ const ConfigForm = (props) => {
     };
   }, []);
 
-  useEffect(() => {
-    let mounted = true;
+  const fetchBundledSkills = useCallback(async (params: any = {}) => {
+    const pageNum = Number(params.pageNum || 1);
+    const pageSize = Number(params.pageSize || BUNDLED_SKILL_PAGE_SIZE);
+    const keyword = trim(params.keyword || '');
+    const append = !!params.append;
+    setBundledSkillLoading(true);
+    try {
+      const res = await listResourceUseAuth({
+        resourceBizTypeList: ['SKILL'],
+        pageNum,
+        pageSize,
+        // 配置技能搜索和配置工具/知识保持一致，交给后端按关键字查询。
+        keyword,
+      });
 
-    const fetchBundledSkills = async () => {
-      setBundledSkillLoading(true);
-      try {
-        const res = await listResourceUseAuth({
-          resourceBizTypeList: ['SKILL'],
-          pageNum: 1,
-          pageSize: 9999,
+      const pageInfo = res?.data || res || {};
+      const list = pageInfo?.list || pageInfo?.rows || [];
+      const nextOptions = list.map(normalizeBundledSkillOption).filter((item) => item.value);
+      setBundledSkillOptions((prevOptions) => {
+        if (!append) return nextOptions;
+        const seenResourceIds = new Set();
+        // 滚动加载下一页时追加并按 resourceId 去重，避免触底重复请求造成重复卡片。
+        return [...prevOptions, ...nextOptions].filter((item) => {
+          const resourceId = normalizeBundledSkillIdentity(item.resourceId);
+          if (!resourceId || seenResourceIds.has(resourceId)) return false;
+          seenResourceIds.add(resourceId);
+          return true;
         });
-        if (!mounted) return;
-
-        const pageInfo = res?.data || res || {};
-        const list = pageInfo?.list || pageInfo?.rows || [];
-        setBundledSkillOptions(
-          list
-            .map((item) => ({
-              ...item,
-              value: item.skillCode || item.resourceCode || item.code || item.itemCode,
-              label: item.itemName || item.name || item.resourceName || item.resourceCode || '-',
-              description: item.resourceDesc || item.description || item.pluginDesc || item.desc || '',
-              skillCode: item.skillCode || item.resourceCode || item.code || item.itemCode,
-              skillType: item.skillType || 'hub',
-              skillUrl: item.skillUrl || '',
-              versionUrl:
-                item.versionUrl ||
-                (item.resourceId ? `/byaiService/tool/getSkillVersion?skillId=${item.resourceId}` : ''),
-            }))
-            .filter((item) => item.value)
-        );
-      } catch {
-        if (mounted) {
-          setBundledSkillOptions([]);
-        }
-      } finally {
-        if (mounted) {
-          setBundledSkillLoading(false);
-        }
+      });
+      setBundledSkillPagination({
+        pageNum: Number(pageInfo.pageNum || pageInfo.pageIndex || pageNum),
+        pageSize: Number(pageInfo.pageSize || pageSize),
+        total: Number(pageInfo.total || 0),
+        current: Number(pageInfo.pageNum || pageInfo.pageIndex || pageNum),
+      });
+      if (!append) {
+        // 搜索或重新打开弹窗后回到顶部，避免停留在底部时立即触发下一页加载。
+        requestAnimationFrame(() => {
+          if (bundledSkillListRef.current) bundledSkillListRef.current.scrollTop = 0;
+        });
       }
-    };
+    } catch {
+      if (!append) {
+        setBundledSkillOptions([]);
+      }
+      setBundledSkillPagination((prev) => ({
+        ...prev,
+        pageNum,
+        current: pageNum,
+        pageSize,
+        total: 0,
+      }));
+    } finally {
+      bundledSkillLoadMoreLockRef.current = false;
+      setBundledSkillLoading(false);
+    }
+  }, []);
 
-    fetchBundledSkills();
-    return () => {
-      mounted = false;
-    };
-  }, [isEN]);
+  useEffect(() => {
+    if (!bundledSkillModalOpen) return;
+    fetchBundledSkills({ pageNum: 1, pageSize: BUNDLED_SKILL_PAGE_SIZE, keyword: '' });
+  }, [bundledSkillModalOpen, fetchBundledSkills]);
 
   useEffect(() => {
     let mounted = true;
@@ -573,6 +836,16 @@ const ConfigForm = (props) => {
         map[item.value] = item.label;
         return map;
       }, {}),
+    [robotChannelOptions]
+  );
+
+  const getRobotChannelLabel = useCallback(
+    (channel) => {
+      const matchedOption = robotChannelOptions.find(
+        (item) => normalizeRobotChannelValue(item.value) === normalizeRobotChannelValue(channel)
+      );
+      return matchedOption?.label || channel || '-';
+    },
     [robotChannelOptions]
   );
 
@@ -634,19 +907,38 @@ const ConfigForm = (props) => {
     };
   }, []);
 
-  const handleRobotModalOk = useCallback((item) => {
-    setRobotModalOpen(false);
-    setRobotConfigs((prev) => {
-      if (item.clientId) {
-        const target = prev.find((it) => it.clientId === item.clientId);
-        if (target) {
-          return prev.map((it) => (it.clientId === item.clientId ? item : it));
+  const handleRobotModalOk = useCallback(
+    (item) => {
+      setRobotModalOpen(false);
+      const nextItem = normalizeRobotConfig(item);
+      setRobotConfigs((prev) => {
+        // appId/clientId 等身份字段允许编辑，不能用它们判断“当前编辑的是哪一条”。
+        // 编辑入口会记录数组下标，保存时优先按下标替换原配置，避免修改 appId 后被当成新增机器人。
+        if (robotEditingIndex !== null && robotEditingIndex >= 0 && robotEditingIndex < prev.length) {
+          return prev.map((it, index) => (index === robotEditingIndex ? nextItem : it));
         }
-        return [...prev, item];
-      }
 
-      return [...prev, item];
-    });
+        const nextKey = getRobotConfigKey(nextItem);
+        if (nextKey) {
+          const target = prev.find((it) => getRobotConfigKey(it) === nextKey);
+          if (target) {
+            return prev.map((it) => (getRobotConfigKey(it) === nextKey ? nextItem : it));
+          }
+          return [...prev, nextItem];
+        }
+
+        return [...prev, nextItem];
+      });
+      setRobotEditingIndex(null);
+    },
+    [robotEditingIndex, setRobotConfigs]
+  );
+
+  const handleRobotModalOpenChange = useCallback((nextOpen) => {
+    setRobotModalOpen(nextOpen);
+    if (!nextOpen) {
+      setRobotEditingIndex(null);
+    }
   }, []);
 
   const normalizeSkillType = useCallback((type) => {
@@ -1100,17 +1392,235 @@ const ConfigForm = (props) => {
     syncRoleToForm({ bundledSkills: normalizedSkills });
   }, [bundledSkillOptions, form, syncRoleToForm]);
 
-  const filteredBundledSkillOptions = useMemo(() => {
-    const keyword = trim(bundledSkillSearchName).toLowerCase();
-    if (!keyword) {
-      return bundledSkillOptions;
-    }
-    return bundledSkillOptions.filter((item) => {
-      return [item.label, item.value, item.skillCode, item.resourceCode, item.description].some((value) =>
-        `${value || ''}`.toLowerCase().includes(keyword)
-      );
+  useEffect(() => {
+    const currentSkills = Array.isArray(selectedSkills) ? selectedSkills : [];
+    const pendingSkills = currentSkills.filter((skill) => {
+      if (!needHydrateBundledSkill(skill)) {
+        return false;
+      }
+      const key = getBundledSkillHydrationKey(skill);
+      return key && !hydratedBundledSkillKeysRef.current.has(key);
     });
-  }, [bundledSkillOptions, bundledSkillSearchName]);
+    if (!pendingSkills.length) {
+      return;
+    }
+
+    let cancelled = false;
+    let completed = false;
+    const pendingKeys = pendingSkills.map(getBundledSkillHydrationKey).filter(Boolean);
+
+    const mergeBundledSkillOptions = (options: any[] = []) => {
+      const seenKeys = new Set();
+      return compact(options).filter((item) => {
+        const primaryKey = getBundledSkillPrimaryKey(item);
+        if (!primaryKey || seenKeys.has(primaryKey)) {
+          return false;
+        }
+        seenKeys.add(primaryKey);
+        return true;
+      });
+    };
+
+    const hydrateSelectedBundledSkills = async () => {
+      pendingKeys.forEach((key) => hydratedBundledSkillKeysRef.current.add(key));
+      const resourceIds = Array.from(new Set(pendingSkills.map(getBundledSkillHydrationId).filter(Boolean)));
+      const resourceCodes = Array.from(new Set(pendingSkills.map(getBundledSkillHydrationCode).filter(Boolean)));
+      const fetchedOptions: any[] = [];
+
+      if (resourceIds.length) {
+        try {
+          const res = await queryResourceDetailListByIds({ resourceIds });
+          fetchedOptions.push(...getListFromResponse(res).map(normalizeBundledSkillOption));
+        } catch (error) {
+          console.error('hydrate bundled skills by ids failed', error);
+        }
+      }
+
+      if (resourceCodes.length) {
+        const codeMatchedOptions = await Promise.all(
+          resourceCodes.map(async (resourceCode) => {
+            try {
+              const res = await listResourceUseAuth({
+                resourceBizTypeList: ['SKILL'],
+                pageNum: 1,
+                pageSize: BUNDLED_SKILL_PAGE_SIZE,
+                // 默认配置按 resourceCode 精确补全；接口仍使用 keyword 查询候选，再由前端做精确过滤。
+                keyword: resourceCode,
+              });
+              const list = getListFromResponse(res);
+              const matched = list.find((item) => getBundledSkillCodeKeys(item).includes(resourceCode));
+              return matched ? normalizeBundledSkillOption(matched) : null;
+            } catch (error) {
+              console.error('hydrate bundled skills by code failed', error);
+              return null;
+            }
+          })
+        );
+        fetchedOptions.push(...compact(codeMatchedOptions));
+      }
+
+      if (cancelled) {
+        return;
+      }
+
+      const nextOptions = mergeBundledSkillOptions([...bundledSkillOptions, ...fetchedOptions]);
+      if (fetchedOptions.length) {
+        setBundledSkillOptions(nextOptions);
+      }
+
+      const latestSkills = form.getFieldValue('bundledSkills') || currentSkills;
+      const normalizedSkills = normalizeBundledSkillItems(latestSkills, nextOptions);
+      if (JSON.stringify(latestSkills) === JSON.stringify(normalizedSkills)) {
+        completed = true;
+        return;
+      }
+      form.setFieldsValue({ bundledSkills: normalizedSkills });
+      syncRoleToForm({ bundledSkills: normalizedSkills });
+      completed = true;
+    };
+
+    hydrateSelectedBundledSkills();
+
+    return () => {
+      cancelled = true;
+      if (!completed) {
+        pendingKeys.forEach((key) => hydratedBundledSkillKeysRef.current.delete(key));
+      }
+    };
+  }, [bundledSkillOptions, form, selectedSkills, syncRoleToForm]);
+
+  // 配置技能搜索已改为后端搜索，弹窗只渲染接口当前页返回的数据。
+  const filteredBundledSkillOptions = bundledSkillOptions;
+
+  const searchBundledSkills = useCallback(
+    (keyword = bundledSkillSearchName) => {
+      // 配置技能搜索回到第一页，分页大小固定沿用当前分页设置。
+      fetchBundledSkills({
+        pageNum: 1,
+        pageSize: bundledSkillPagination.pageSize || BUNDLED_SKILL_PAGE_SIZE,
+        keyword,
+      });
+    },
+    [bundledSkillPagination.pageSize, bundledSkillSearchName, fetchBundledSkills]
+  );
+
+  const loadMoreBundledSkills = useCallback(() => {
+    if (bundledSkillLoading || bundledSkillLoadMoreLockRef.current) return;
+    if (!bundledSkillPagination.total || bundledSkillOptions.length >= bundledSkillPagination.total) return;
+    bundledSkillLoadMoreLockRef.current = true;
+    // 配置技能弹窗触底后继续请求下一页，每页仍固定 30 条。
+    fetchBundledSkills({
+      pageNum: bundledSkillPagination.pageNum + 1,
+      pageSize: bundledSkillPagination.pageSize || BUNDLED_SKILL_PAGE_SIZE,
+      keyword: bundledSkillSearchName,
+      append: true,
+    });
+  }, [
+    bundledSkillLoading,
+    bundledSkillOptions.length,
+    bundledSkillPagination.pageNum,
+    bundledSkillPagination.pageSize,
+    bundledSkillPagination.total,
+    bundledSkillSearchName,
+    fetchBundledSkills,
+  ]);
+
+  const handleBundledSkillListScroll = useCallback(
+    (event) => {
+      const target = event.currentTarget;
+      const distanceToBottom = target.scrollHeight - target.scrollTop - target.clientHeight;
+      // 距离底部较近时提前加载下一页，滚动体验比完全到底再请求更顺。
+      if (distanceToBottom <= 80) {
+        loadMoreBundledSkills();
+      }
+    },
+    [loadMoreBundledSkills]
+  );
+
+  useEffect(() => {
+    if (!bundledSkillModalOpen || bundledSkillLoading) return;
+    if (!bundledSkillPagination.total || bundledSkillOptions.length >= bundledSkillPagination.total) return;
+
+    const checkScrollableAndLoadMore = () => {
+      const list = bundledSkillListRef.current;
+      if (!list) return;
+      // 首屏 20 条刚好铺满但没有出现滚动条时，主动补拉下一页，否则用户无法触发 onScroll。
+      if (list.scrollHeight <= list.clientHeight + 8) {
+        loadMoreBundledSkills();
+      }
+    };
+
+    const rafId = requestAnimationFrame(checkScrollableAndLoadMore);
+    return () => cancelAnimationFrame(rafId);
+  }, [
+    bundledSkillLoading,
+    bundledSkillModalOpen,
+    bundledSkillOptions.length,
+    bundledSkillPagination.total,
+    loadMoreBundledSkills,
+  ]);
+
+  const getBundledSkillSourceName = useCallback(
+    (item: any = {}) => {
+      const normalizedSourceType = `${item.displaySourceType || item.sourceType || ''}`
+        .replace(/[-\s]/g, '_')
+        .toUpperCase();
+      const sourceLabelMap: Record<string, string> = {
+        ASSISTANT_BOUND: 'resource.skillSource.assistantBound',
+        LOBSTER_INSTALLED: 'resource.skillSource.lobsterInstalled',
+        USER_DEVELOPED: 'resource.skillSource.userDeveloped',
+      };
+      return sourceLabelMap[normalizedSourceType]
+        ? intl.formatMessage({ id: sourceLabelMap[normalizedSourceType] })
+        : item.creatorName || item.createUserName || intl.formatMessage({ id: 'common.none' });
+    },
+    [intl]
+  );
+
+  const getBundledSkillTag = useCallback(
+    (item: any = {}) => {
+      if (item.tagName) {
+        return item.tagName;
+      }
+      if (`${item.skillType || ''}`.toLowerCase() === 'inner') {
+        // 配置技能弹窗卡片右上角空间有限，系统内置技能使用短标签展示。
+        return getLocale().includes('en') ? 'Built-in' : '内置';
+      }
+      if (
+        `${item.displaySourceType || item.sourceType || ''}`.replace(/[-\s]/g, '_').toUpperCase() === 'USER_DEVELOPED'
+      ) {
+        return intl.formatMessage({ id: 'resource.skillSource.userDeveloped' });
+      }
+      return '';
+    },
+    [intl]
+  );
+
+  const renderBundledSkillPoster = useCallback(
+    (item: any = {}, className?: string) => {
+      const imageUrl = item.resourceLogoUrl || item.avatar ? getFileUrl(item.resourceLogoUrl || item.avatar) : '';
+
+      return (
+        <div className={classnames(styles.bundledSkillPosterImageWrap, className)}>
+          <div className={styles.bundledSkillPosterPlaceholder}>
+            <div className={styles.bundledSkillPosterOrb} />
+            <span>{intl.formatMessage({ id: 'common.skill' })}</span>
+          </div>
+          {imageUrl && (
+            <img
+              className={styles.bundledSkillPosterImage}
+              src={imageUrl}
+              alt={item.label || item.resourceName || item.skillCode || ''}
+              onError={(event) => {
+                event.currentTarget.style.display = 'none';
+              }}
+            />
+          )}
+        </div>
+      );
+    },
+    [intl]
+  );
 
   const handlePromptTextAreaChange = useCallback(
     (fieldLabel, value) => {
@@ -2280,42 +2790,55 @@ const ConfigForm = (props) => {
                     disabled={isReadOnly}
                     onClick={() => {
                       setBundledSkillSearchName('');
+                      setBundledSkillPagination((prev) => ({ ...prev, pageNum: 1, current: 1 }));
                       setBundledSkillModalOpen(true);
                     }}
                   >
                     + {intl.formatMessage({ id: 'common.plus' })}
                   </Button>
                 </div>
-                {selectedSkillCodes.length > 0 && (
+                {selectedBundledSkillItems.length > 0 && (
                   <div className={styles.skillsList}>
-                    {selectedSkillCodes
-                      .map((code) => bundledSkillOptions.find((item) => item.value === code))
-                      .filter(Boolean)
-                      .map((item) => (
-                        <Card key={item.value} className={classnames(styles.configCard, styles.skillCard)}>
-                          <div className={styles.skillContent}>
-                            <AntdIcon type="icon-chajiantubiao" className={styles.fontSize36MarginRight12} />
-                            <div className={styles.skillInfo}>
-                              <div className={styles.skillHeader}>
-                                <span className={styles.skillName}>{item.label}</span>
-                              </div>
-                              <div className={styles.skillDescription}>{item.description}</div>
+                    {selectedBundledSkillItems.map((item) => (
+                      <Card
+                        key={getBundledSkillPrimaryKey(item)}
+                        className={classnames(styles.configCard, styles.skillCard, styles.selectedBundledSkillCard)}
+                      >
+                        <div
+                          className={classnames(
+                            styles.skillContent,
+                            styles.bundledSkillContent,
+                            styles.selectedBundledSkillContent
+                          )}
+                        >
+                          {renderBundledSkillPoster(item, styles.selectedBundledSkillPosterImageWrap)}
+                          <div className={classnames(styles.skillInfo, styles.bundledSkillInfo)}>
+                            <div className={styles.skillHeader}>
+                              <span className={styles.skillName}>
+                                {item.label || item.resourceName || item.skillCode || item.resourceId || '-'}
+                              </span>
                             </div>
-                            <div className={styles.skillActions}>
-                              {!isReadOnly && (
-                                <Space>
-                                  <AntdIcon
-                                    type="icon-a-Deleteshanchu"
-                                    onClick={() => {
-                                      updateBundledSkills(selectedSkillCodes.filter((code) => code !== item.value));
-                                    }}
-                                  />
-                                </Space>
-                              )}
+                            <div className={classnames(styles.skillDescription, styles.selectedBundledSkillDesc)}>
+                              {item.resourceDesc || item.description || '-'}
                             </div>
                           </div>
-                        </Card>
-                      ))}
+                          <div className={styles.skillActions}>
+                            {!isReadOnly && (
+                              <Space>
+                                <AntdIcon
+                                  type="icon-a-Deleteshanchu"
+                                  onClick={() => {
+                                    updateBundledSkills(
+                                      selectedSkills.filter((skill) => !isSameBundledSkill(skill, item))
+                                    );
+                                  }}
+                                />
+                              </Space>
+                            )}
+                          </div>
+                        </div>
+                      </Card>
+                    ))}
                   </div>
                 )}
               </div>
@@ -2333,6 +2856,7 @@ const ConfigForm = (props) => {
                         size="small"
                         disabled={isReadOnly}
                         onClick={() => {
+                          setRobotEditingIndex(null);
                           setRobotItem({});
                           setRobotModalOpen(true);
                         }}
@@ -2341,25 +2865,31 @@ const ConfigForm = (props) => {
                       </Button>
                     )}
                   </div>
-                  {robotConfigs.map((item) => {
+                  {robotConfigs.map((item, index) => {
+                    const robotConfigKey = getRobotConfigKey(item);
+                    const channelLabel = getRobotChannelLabel(item.channel);
                     return (
-                      <Card key={item.clientId} className={classnames(styles.configCard, styles.skillCard)}>
+                      <Card
+                        key={`${robotConfigKey || 'robot'}-${index}`}
+                        className={classnames(styles.configCard, styles.skillCard)}
+                      >
                         <div className={classnames(styles.skillContent, 'ub gap12 ub-ac')}>
-                          <DingtalkCircleFilled className={styles.fontSize32PrimaryColor} />
+                          {renderRobotChannelIcon(item)}
                           <div className={styles.skillInfo}>
                             <div className={styles.skillHeader}>
                               <span className={styles.skillName}>
-                                {intl.formatMessage({ id: 'digitalEmployeeMgr.robotName' })}
+                                {channelLabel} {intl.formatMessage({ id: 'digitalEmployeeMgr.robotName' })}
                               </span>
                             </div>
                             <div className={classnames(styles.skillDescription, styles.textTertiaryColor)}>
-                              clientId: <span>{item.clientId}</span>
+                              <span>{getRobotConfigIdentityText(item)}</span>
                             </div>
                           </div>
                           <div className={classnames(styles.skillActions, styles.marginLeftAuto)}>
                             {isReadOnly ? (
                               <EyeOutlined
                                 onClick={() => {
+                                  setRobotEditingIndex(index);
                                   setRobotItem(item);
                                   setRobotModalOpen(true);
                                 }}
@@ -2368,6 +2898,7 @@ const ConfigForm = (props) => {
                               <Space>
                                 <FormOutlined
                                   onClick={() => {
+                                    setRobotEditingIndex(index);
                                     setRobotItem(item);
                                     setRobotModalOpen(true);
                                   }}
@@ -2375,7 +2906,9 @@ const ConfigForm = (props) => {
                                 <AntdIcon
                                   type="icon-a-Deleteshanchu"
                                   onClick={() => {
-                                    setRobotConfigs(robotConfigs.filter((it) => it.clientId !== item.clientId));
+                                    setRobotConfigs((prev) =>
+                                      prev.filter((it, currentIndex) => currentIndex !== index)
+                                    );
                                   }}
                                 />
                               </Space>
@@ -2911,8 +3444,10 @@ const ConfigForm = (props) => {
       />
       <Modal
         className={styles.bundledSkillModal}
+        wrapClassName={styles.bundledSkillModalWrap}
         open={bundledSkillModalOpen}
-        width={900}
+        width="min(1840px, calc(100vw - 96px))"
+        style={{ top: 48, paddingBottom: 0 }}
         onCancel={() => setBundledSkillModalOpen(false)}
         destroyOnHidden
         closable={false}
@@ -2926,10 +3461,17 @@ const ConfigForm = (props) => {
             <div className={styles.headerRight}>
               <Input
                 className={styles.searchInput}
-                suffix={<AntdIcon type="icon-a-Searchsousuo" />}
+                suffix={<AntdIcon type="icon-a-Searchsousuo" onClick={() => searchBundledSkills()} />}
                 allowClear
                 value={bundledSkillSearchName}
-                onChange={(e) => setBundledSkillSearchName(e.target.value)}
+                onChange={(e) => {
+                  const nextKeyword = e.target.value;
+                  setBundledSkillSearchName(nextKeyword);
+                  if (!trim(nextKeyword)) {
+                    searchBundledSkills('');
+                  }
+                }}
+                onPressEnter={() => searchBundledSkills()}
                 placeholder={intl.formatMessage({ id: 'employeeDetail.bundledSkillsSearchPlaceholder' })}
               />
               <AntdIcon
@@ -2942,55 +3484,91 @@ const ConfigForm = (props) => {
           <div className={styles.bundledSkillCardListWrap}>
             <Spin spinning={bundledSkillLoading}>
               {filteredBundledSkillOptions.length > 0 ? (
-                <div className={styles.bundledSkillCardList}>
+                <div
+                  className={styles.bundledSkillCardList}
+                  ref={bundledSkillListRef}
+                  onScroll={handleBundledSkillListScroll}
+                >
                   {filteredBundledSkillOptions.map((item) => {
-                    const isSelected = selectedSkillCodes.includes(item.value);
+                    const isSelected = selectedSkills.some((skill) => isSameBundledSkill(skill, item));
+                    const tagText = getBundledSkillTag(item);
+                    const rawUseCount = Number(item.useCount || item.focusCount || 0);
+                    const useCount = Number.isFinite(rawUseCount) ? rawUseCount : 0;
+                    const sourceName = getBundledSkillSourceName(item);
 
                     return (
-                      <div key={item.value} className={styles.bundledSkillModalCard}>
-                        <div className={styles.bundledSkillModalCardInner}>
-                          <AntdIcon type="icon-chajiantubiao" className={styles.fontSize36MarginRight12} />
-                          <div className={styles.bundledSkillModalCardInfo}>
-                            <div className={styles.bundledSkillModalCardTitle}>
-                              {item.label}
-                              {/* <Tag>{item.value}</Tag> */}
-                            </div>
-                            <Ellipsis
-                              lines={1}
-                              tooltip
-                              tooltipProps={{
-                                overlayStyle: { maxWidth: 500, overflowWrap: 'break-word', wordWrap: 'break-word' },
-                              }}
-                            >
-                              {item.description || '-'}
-                            </Ellipsis>
+                      <div
+                        key={item.value}
+                        className={classnames(styles.bundledSkillModalCard, {
+                          [styles.selectedBundledSkillModalCard]: isSelected,
+                          [styles.hasBundledSkillPosterTag]: !!tagText,
+                        })}
+                      >
+                        {tagText && (
+                          <span className={styles.bundledSkillPosterTag}>
+                            <span>{tagText}</span>
+                          </span>
+                        )}
+                        {renderBundledSkillPoster(item)}
+                        <div className={styles.bundledSkillPosterBody}>
+                          <div className={styles.bundledSkillPosterHeader}>
+                            <div className={styles.bundledSkillModalCardTitle}>{item.label}</div>
                           </div>
-                          <Button
-                            className={classnames(styles.actionButton, {
-                              [styles.isAdd]: isSelected,
-                              [styles.notAdd]: !isSelected,
-                            })}
-                            danger={isSelected}
-                            size="small"
-                            onClick={() => {
-                              if (isSelected) {
-                                updateBundledSkills(selectedSkillCodes.filter((code) => code !== item.value));
-                                return;
-                              }
-                              updateBundledSkills([...selectedSkillCodes, item.value]);
+                          <Ellipsis
+                            className={styles.bundledSkillModalCardDesc}
+                            lines={1}
+                            tooltip
+                            tooltipProps={{
+                              overlayStyle: { maxWidth: 500, overflowWrap: 'break-word', wordWrap: 'break-word' },
                             }}
                           >
-                            {isSelected
-                              ? intl.formatMessage({ id: 'itemCard.remove' })
-                              : intl.formatMessage({ id: 'common.add' })}
-                          </Button>
+                            {item.description || '-'}
+                          </Ellipsis>
+                          <div className={styles.bundledSkillPosterFooter}>
+                            <span className={styles.bundledSkillPosterSource} title={sourceName}>
+                              <span className={styles.bundledSkillPosterSourceIcon}>
+                                <AntdIcon type="icon-chajiantubiao" />
+                              </span>
+                              <span className={styles.bundledSkillPosterSourceText}>{sourceName}</span>
+                            </span>
+                            <span className={styles.bundledSkillPosterDivider} />
+                            <span className={styles.bundledSkillPosterUseCount}>
+                              {intl.formatMessage(
+                                { id: 'resource.skillAddedCount' },
+                                {
+                                  count: formatSkillAddedCount(useCount, getLocale()),
+                                }
+                              )}
+                            </span>
+                          </div>
                         </div>
+                        <Button
+                          className={classnames(styles.actionButton, {
+                            [styles.isAdd]: isSelected,
+                            [styles.notAdd]: !isSelected,
+                          })}
+                          danger={isSelected}
+                          size="small"
+                          onClick={() => {
+                            if (isSelected) {
+                              updateBundledSkills(selectedSkills.filter((skill) => !isSameBundledSkill(skill, item)));
+                              return;
+                            }
+                            updateBundledSkills([...selectedSkills, item]);
+                          }}
+                        >
+                          {isSelected
+                            ? intl.formatMessage({ id: 'itemCard.remove' })
+                            : intl.formatMessage({ id: 'common.add' })}
+                        </Button>
                       </div>
                     );
                   })}
                 </div>
               ) : (
-                <Empty />
+                <div className={styles.bundledSkillEmpty}>
+                  <Empty />
+                </div>
               )}
             </Spin>
           </div>
@@ -3003,7 +3581,7 @@ const ConfigForm = (props) => {
       />
       <RobotModal
         open={robotModalOpen}
-        setOpen={setRobotModalOpen}
+        setOpen={handleRobotModalOpenChange}
         onOk={handleRobotModalOk}
         robotChannelLabelMap={robotChannelLabelMap}
         item={robotItem}

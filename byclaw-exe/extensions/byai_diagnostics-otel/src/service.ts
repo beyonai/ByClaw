@@ -66,8 +66,8 @@ const DROPPED_OTEL_ATTRIBUTE_KEYS = new Set([
   "openclaw.trace_id",
 ]);
 const LOW_CARDINALITY_VALUE_RE = /^[A-Za-z0-9_.:-]{1,120}$/u;
-const MAX_OTEL_CONTENT_ATTRIBUTE_CHARS = 16 * 1024;
-const MAX_OTEL_CONTENT_ARRAY_ITEMS = 50;
+const DEFAULT_OTEL_CONTENT_ATTRIBUTE_CHARS = 128 * 1024;
+const DEFAULT_OTEL_CONTENT_ARRAY_ITEMS = 200;
 const MAX_OTEL_LOG_BODY_CHARS = 4 * 1024;
 const MAX_OTEL_LOG_ATTRIBUTE_COUNT = 64;
 const MAX_OTEL_LOG_ATTRIBUTE_VALUE_CHARS = 4 * 1024;
@@ -111,6 +111,11 @@ export type DiagnosticsOtelForcedContentCapture = {
   toolDefinitions?: boolean;
 };
 
+export type DiagnosticsOtelContentLimitsConfig = {
+  maxAttributeChars?: unknown;
+  maxArrayItems?: unknown;
+};
+
 /**
  * Which diagnostic events should build the outer `openclaw.message.inbound`
  * SERVER span (and be treated as "inbound-owning" by dispatch handlers).
@@ -136,6 +141,7 @@ export type DiagnosticsOtelServiceOptions = {
   /** Env var for default Langfuse user id when events omit userId (default: USER_CODE). */
   langfuseUserIdEnvVar?: string;
   forceContentCapture?: DiagnosticsOtelForcedContentCapture;
+  contentLimits?: DiagnosticsOtelContentLimitsConfig;
   assignToolContentIoAttributes?: boolean;
   /** Channels/sources that should build the outer message.inbound SERVER span. */
   inboundChannels?: DiagnosticsOtelInboundChannelConfig;
@@ -151,6 +157,11 @@ type OtelModelCallContent = {
   outputMessages?: unknown;
   systemPrompt?: string;
   toolDefinitions?: unknown;
+};
+
+type OtelContentLimits = {
+  maxAttributeChars: number;
+  maxArrayItems: number;
 };
 
 type MessageDeliveryDiagnosticEvent = Extract<
@@ -809,6 +820,46 @@ function normalizeOtelLogString(value: string, maxChars: number): string {
   return clampOtelLogText(redactSensitiveText(value), maxChars);
 }
 
+function readPositiveInteger(value: unknown, fallback: number): number {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+    return Math.trunc(value);
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return Math.trunc(parsed);
+    }
+  }
+  return fallback;
+}
+
+function readRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function resolveOtelContentLimits(
+  otel: unknown,
+  fallbackLimits?: DiagnosticsOtelContentLimitsConfig,
+): OtelContentLimits {
+  const config = readRecord(otel);
+  const limits = {
+    ...readRecord(fallbackLimits),
+    ...readRecord(config?.contentLimits),
+  };
+  return {
+    maxAttributeChars: readPositiveInteger(
+      limits?.maxAttributeChars ?? config?.maxContentAttributeChars,
+      DEFAULT_OTEL_CONTENT_ATTRIBUTE_CHARS,
+    ),
+    maxArrayItems: readPositiveInteger(
+      limits?.maxArrayItems ?? config?.maxContentArrayItems,
+      DEFAULT_OTEL_CONTENT_ARRAY_ITEMS,
+    ),
+  };
+}
+
 function resolveContentCapturePolicy(value: unknown): OtelContentCapturePolicy {
   if (value === true) {
     return {
@@ -862,22 +913,22 @@ function hasPreloadedOtelSdk(): boolean {
   return process.env[PRELOADED_OTEL_SDK_ENV] === "1";
 }
 
-function normalizeOtelContentValue(value: unknown): string | undefined {
+function normalizeOtelContentValue(value: unknown, limits: OtelContentLimits): string | undefined {
   if (typeof value === "string") {
-    return normalizeOtelLogString(value, MAX_OTEL_CONTENT_ATTRIBUTE_CHARS);
+    return normalizeOtelLogString(value, limits.maxAttributeChars);
   }
   if (Array.isArray(value)) {
     const items: string[] = [];
-    for (const item of value.slice(0, MAX_OTEL_CONTENT_ARRAY_ITEMS)) {
+    for (const item of value.slice(0, limits.maxArrayItems)) {
       if (typeof item === "string") {
         items.push(item);
       }
     }
     if (items.length > 0) {
-      return normalizeOtelLogString(items.join("\n"), MAX_OTEL_CONTENT_ATTRIBUTE_CHARS);
+      return normalizeOtelLogString(items.join("\n"), limits.maxAttributeChars);
     }
   }
-  const json = safeJsonString(value, MAX_OTEL_CONTENT_ATTRIBUTE_CHARS);
+  const json = safeJsonString(value, limits);
   if (json) {
     return json;
   }
@@ -886,15 +937,7 @@ function normalizeOtelContentValue(value: unknown): string | undefined {
 
 const TRUNCATED_JSON_TEXT_SUFFIX = "...(truncated)";
 const JSON_TRUNCATION_STRING_BUDGETS = [8192, 4096, 2048, 1024, 512, 256, 128, 64, 32] as const;
-const JSON_TRUNCATION_ARRAY_ITEM_BUDGETS = [
-  MAX_OTEL_CONTENT_ARRAY_ITEMS,
-  100,
-  50,
-  25,
-  10,
-  5,
-  1,
-] as const;
+const JSON_TRUNCATION_ARRAY_ITEM_BUDGETS = [100, 50, 25, 10, 5, 1] as const;
 const JSON_TRUNCATION_MAX_OBJECT_FIELDS = 64;
 const JSON_TRUNCATION_MAX_DEPTH = 8;
 
@@ -906,15 +949,30 @@ type JsonTruncationOptions = {
   seen: WeakSet<object>;
 };
 
-function safeJsonString(value: unknown, maxChars: number): string | undefined {
+function jsonTruncationArrayItemBudgets(maxArrayItems: number): number[] {
+  const budgets = [maxArrayItems, ...JSON_TRUNCATION_ARRAY_ITEM_BUDGETS].filter(
+    (item) => item > 0 && item <= maxArrayItems,
+  );
+  return [...new Set(budgets)];
+}
+
+function safeJsonString(value: unknown, limits: OtelContentLimits): string | undefined {
   if (value === undefined || typeof value === "function" || typeof value === "symbol") {
     return undefined;
   }
   const exact = stringifyJsonForOtelAttribute(value);
-  if (exact && exact.length <= maxChars) {
-    return exact;
+  const structurallyBounded = truncateJsonValueForOtelAttribute(value, {
+    maxArrayItems: limits.maxArrayItems,
+    maxDepth: JSON_TRUNCATION_MAX_DEPTH,
+    maxObjectFields: JSON_TRUNCATION_MAX_OBJECT_FIELDS,
+    maxStringChars: limits.maxAttributeChars,
+    seen: new WeakSet<object>(),
+  });
+  const structurallyBoundedJson = stringifyJsonForOtelAttribute(structurallyBounded);
+  if (structurallyBoundedJson && structurallyBoundedJson.length <= limits.maxAttributeChars) {
+    return structurallyBoundedJson;
   }
-  for (const maxArrayItems of JSON_TRUNCATION_ARRAY_ITEM_BUDGETS) {
+  for (const maxArrayItems of jsonTruncationArrayItemBudgets(limits.maxArrayItems)) {
     for (const maxStringChars of JSON_TRUNCATION_STRING_BUDGETS) {
       const candidate = truncateJsonValueForOtelAttribute(value, {
         maxArrayItems,
@@ -924,7 +982,7 @@ function safeJsonString(value: unknown, maxChars: number): string | undefined {
         seen: new WeakSet<object>(),
       });
       const json = stringifyJsonForOtelAttribute(candidate);
-      if (json && json.length <= maxChars) {
+      if (json && json.length <= limits.maxAttributeChars) {
         return json;
       }
     }
@@ -934,7 +992,7 @@ function safeJsonString(value: unknown, maxChars: number): string | undefined {
     reason: exact ? "max_attribute_size" : "unserializable_value",
     type: describeJsonValue(value),
   });
-  return summary && summary.length <= maxChars ? summary : undefined;
+  return summary && summary.length <= limits.maxAttributeChars ? summary : undefined;
 }
 
 function stringifyJsonForOtelAttribute(value: unknown): string | undefined {
@@ -1058,7 +1116,7 @@ function toolCallResponsePart(part: Record<string, unknown>): Record<string, unk
   };
 }
 
-function contentParts(value: unknown): Record<string, unknown>[] {
+function contentParts(value: unknown, limits: OtelContentLimits): Record<string, unknown>[] {
   if (typeof value === "string") {
     return value.length > 0 ? [textPart(value)] : [];
   }
@@ -1069,7 +1127,7 @@ function contentParts(value: unknown): Record<string, unknown>[] {
     if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
       return [textPart(String(value))];
     }
-    const json = safeJsonString(value, MAX_OTEL_CONTENT_ATTRIBUTE_CHARS);
+    const json = safeJsonString(value, limits);
     return json ? [textPart(json)] : [];
   }
   const parts: Record<string, unknown>[] = [];
@@ -1104,7 +1162,7 @@ function contentParts(value: unknown): Record<string, unknown>[] {
         ...(part.arguments !== undefined ? { arguments: part.arguments } : {}),
       });
     } else if (part.type === "tool_call_response") {
-      parts.push(toolCallResponsePart(part));
+        parts.push(toolCallResponsePart(part));
     } else if (part.type === "image") {
       const data = typeof part.data === "string" ? part.data : undefined;
       parts.push({
@@ -1121,6 +1179,7 @@ function contentParts(value: unknown): Record<string, unknown>[] {
 
 function normalizeGenAiMessage(
   value: unknown,
+  limits: OtelContentLimits,
   fallbackRole = "user",
 ): Record<string, unknown> | undefined {
   if (typeof value === "string") {
@@ -1133,7 +1192,7 @@ function normalizeGenAiMessage(
   const role = rawRole === "toolResult" ? "tool" : rawRole;
   let parts: Record<string, unknown>[];
   if (role === "tool") {
-    const explicitParts = contentParts(value.parts);
+    const explicitParts = contentParts(value.parts, limits);
     parts =
       explicitParts.length > 0
         ? explicitParts
@@ -1144,7 +1203,7 @@ function normalizeGenAiMessage(
             }),
           ];
   } else {
-    parts = contentParts(value.parts ?? value.content);
+    parts = contentParts(value.parts ?? value.content, limits);
   }
   if (parts.length === 0) {
     return undefined;
@@ -1158,11 +1217,15 @@ function normalizeGenAiMessage(
   };
 }
 
-function normalizeGenAiMessages(value: unknown, fallbackRole: "user" | "assistant") {
+function normalizeGenAiMessages(
+  value: unknown,
+  fallbackRole: "user" | "assistant",
+  limits: OtelContentLimits,
+) {
   const source = Array.isArray(value) ? value : value === undefined ? [] : [value];
   const messages: Record<string, unknown>[] = [];
-  for (const item of source.slice(0, MAX_OTEL_CONTENT_ARRAY_ITEMS)) {
-    const message = normalizeGenAiMessage(item, fallbackRole);
+  for (const item of source.slice(0, limits.maxArrayItems)) {
+    const message = normalizeGenAiMessage(item, limits, fallbackRole);
     if (message) {
       messages.push(message);
     }
@@ -1182,12 +1245,12 @@ function normalizeGenAiToolDefinition(value: unknown): Record<string, unknown> |
   };
 }
 
-function normalizeGenAiToolDefinitions(value: unknown) {
+function normalizeGenAiToolDefinitions(value: unknown, limits: OtelContentLimits) {
   if (!Array.isArray(value)) {
     return [];
   }
   const definitions: Record<string, unknown>[] = [];
-  for (const item of value.slice(0, MAX_OTEL_CONTENT_ARRAY_ITEMS)) {
+  for (const item of value.slice(0, limits.maxArrayItems)) {
     const definition = normalizeGenAiToolDefinition(item);
     if (definition) {
       definitions.push(definition);
@@ -1200,8 +1263,9 @@ function assignJsonAttribute(
   attributes: Record<string, string | number | boolean>,
   key: string,
   value: unknown,
+  limits: OtelContentLimits,
 ): void {
-  const json = safeJsonString(value, MAX_OTEL_CONTENT_ATTRIBUTE_CHARS);
+  const json = safeJsonString(value, limits);
   if (json) {
     attributes[key] = json;
   }
@@ -1211,30 +1275,31 @@ function assignGenAiModelContentAttributes(
   attributes: Record<string, string | number | boolean>,
   content: OtelModelCallContent | undefined,
   policy: OtelContentCapturePolicy,
+  limits: OtelContentLimits,
 ): void {
   if (policy.systemPrompt && typeof content?.systemPrompt === "string") {
     const systemInstructions = [textPart(content.systemPrompt)];
-    assignJsonAttribute(attributes, ATTR_GEN_AI_SYSTEM_INSTRUCTIONS, systemInstructions);
+    assignJsonAttribute(attributes, ATTR_GEN_AI_SYSTEM_INSTRUCTIONS, systemInstructions, limits);
   }
   if (policy.inputMessages) {
-    const inputMessages = normalizeGenAiMessages(content?.inputMessages, "user");
+    const inputMessages = normalizeGenAiMessages(content?.inputMessages, "user", limits);
     if (inputMessages.length > 0) {
-      assignJsonAttribute(attributes, ATTR_GEN_AI_INPUT_MESSAGES, inputMessages);
-      assignJsonAttribute(attributes, "input.value", inputMessages);
+      assignJsonAttribute(attributes, ATTR_GEN_AI_INPUT_MESSAGES, inputMessages, limits);
+      assignJsonAttribute(attributes, "input.value", inputMessages, limits);
       attributes["input.mime_type"] = "application/json";
     }
   }
   if (policy.toolDefinitions) {
-    const toolDefinitions = normalizeGenAiToolDefinitions(content?.toolDefinitions);
+    const toolDefinitions = normalizeGenAiToolDefinitions(content?.toolDefinitions, limits);
     if (toolDefinitions.length > 0) {
-      assignJsonAttribute(attributes, ATTR_GEN_AI_TOOL_DEFINITIONS, toolDefinitions);
+      assignJsonAttribute(attributes, ATTR_GEN_AI_TOOL_DEFINITIONS, toolDefinitions, limits);
     }
   }
   if (policy.outputMessages) {
-    const outputMessages = normalizeGenAiMessages(content?.outputMessages, "assistant");
+    const outputMessages = normalizeGenAiMessages(content?.outputMessages, "assistant", limits);
     if (outputMessages.length > 0) {
-      assignJsonAttribute(attributes, ATTR_GEN_AI_OUTPUT_MESSAGES, outputMessages);
-      assignJsonAttribute(attributes, "output.value", outputMessages);
+      assignJsonAttribute(attributes, ATTR_GEN_AI_OUTPUT_MESSAGES, outputMessages, limits);
+      assignJsonAttribute(attributes, "output.value", outputMessages, limits);
       attributes["output.mime_type"] = "application/json";
     }
   }
@@ -1244,8 +1309,9 @@ function assignOtelContentAttribute(
   attributes: Record<string, string | number | boolean>,
   key: string,
   value: unknown,
+  limits: OtelContentLimits,
 ): boolean {
-  const normalized = normalizeOtelContentValue(value);
+  const normalized = normalizeOtelContentValue(value, limits);
   if (normalized) {
     attributes[key] = normalized;
     return true;
@@ -1257,13 +1323,15 @@ function assignOtelModelContentAttributes(
   attributes: Record<string, string | number | boolean>,
   content: OtelModelCallContent | undefined,
   policy: OtelContentCapturePolicy,
+  limits: OtelContentLimits,
 ): void {
-  assignGenAiModelContentAttributes(attributes, content, policy);
+  assignGenAiModelContentAttributes(attributes, content, policy, limits);
   if (policy.inputMessages) {
     assignOtelContentAttribute(
       attributes,
       "openclaw.content.input_messages",
       content?.inputMessages,
+      limits,
     );
   }
   if (policy.toolDefinitions) {
@@ -1271,6 +1339,7 @@ function assignOtelModelContentAttributes(
       attributes,
       "openclaw.content.tool_definitions",
       content?.toolDefinitions,
+      limits,
     );
   }
   if (policy.outputMessages) {
@@ -1278,10 +1347,16 @@ function assignOtelModelContentAttributes(
       attributes,
       "openclaw.content.output_messages",
       content?.outputMessages,
+      limits,
     );
   }
   if (policy.systemPrompt) {
-    assignOtelContentAttribute(attributes, "openclaw.content.system_prompt", content?.systemPrompt);
+    assignOtelContentAttribute(
+      attributes,
+      "openclaw.content.system_prompt",
+      content?.systemPrompt,
+      limits,
+    );
   }
 }
 
@@ -1312,6 +1387,7 @@ function assignOtelToolContentAttributes(
   event: Record<string, unknown>,
   policy: OtelContentCapturePolicy,
   options: Pick<DiagnosticsOtelServiceOptions, "assignToolContentIoAttributes">,
+  limits: OtelContentLimits,
   privateData?: Record<string, unknown>,
 ): void {
   const toolContent = readOtelToolCallContent(event, privateData);
@@ -1320,9 +1396,10 @@ function assignOtelToolContentAttributes(
       attributes,
       "openclaw.content.tool_input",
       toolContent.toolInput,
+      limits,
     );
     if (assigned && options.assignToolContentIoAttributes) {
-      assignOtelContentAttribute(attributes, "input.value", toolContent.toolInput);
+      assignOtelContentAttribute(attributes, "input.value", toolContent.toolInput, limits);
       attributes["input.mime_type"] = "application/json";
     }
   }
@@ -1331,9 +1408,10 @@ function assignOtelToolContentAttributes(
       attributes,
       "openclaw.content.tool_output",
       toolContent.toolOutput,
+      limits,
     );
     if (assigned && options.assignToolContentIoAttributes) {
-      assignOtelContentAttribute(attributes, "output.value", toolContent.toolOutput);
+      assignOtelContentAttribute(attributes, "output.value", toolContent.toolOutput, limits);
       attributes["output.mime_type"] = "application/json";
     }
   }
@@ -1667,6 +1745,7 @@ export function createDiagnosticsOtelService(
         resolveContentCapturePolicy(otel.captureContent),
         options.forceContentCapture,
       );
+      const contentLimits = resolveOtelContentLimits(otel, options.contentLimits);
       const sdkPreloaded = hasPreloadedOtelSdk();
 
       const resource = resourceFromAttributes({
@@ -1810,6 +1889,10 @@ export function createDiagnosticsOtelService(
       ) =>
         isInboundChannelDiagnosticEvent(evt) &&
         (metadata.trusted || isConfiguredNativeChannelEvent(evt));
+      const passesCorrelatedSpanGate = (
+        evt: { channel?: string; source?: string },
+        metadata: DiagnosticEventMetadata,
+      ) => metadata.trusted || isConfiguredNativeChannelEvent(evt);
       const langfuseUserContext: LangfuseUserContext = {
         defaultUserId: resolveDefaultLangfuseUserId(options),
         sessionUserIdsBySessionKey: new Map<string, string>(),
@@ -2263,11 +2346,15 @@ export function createDiagnosticsOtelService(
         evt: DiagnosticEventPayload,
         metadata: DiagnosticEventMetadata,
       ) => (metadata.trusted ? normalizeTraceContext(evt.trace) : undefined);
+      const correlatedTraceContext = (
+        evt: DiagnosticEventPayload,
+        metadata: DiagnosticEventMetadata,
+      ) => (passesCorrelatedSpanGate(evt, metadata) ? normalizeTraceContext(evt.trace) : undefined);
       const activeTrustedParentContext = (
         evt: DiagnosticEventPayload,
         metadata: DiagnosticEventMetadata,
       ) => {
-        const parentSpanId = trustedTraceContext(evt, metadata)?.parentSpanId;
+        const parentSpanId = correlatedTraceContext(evt, metadata)?.parentSpanId;
         if (!parentSpanId) {
           return undefined;
         }
@@ -2283,7 +2370,7 @@ export function createDiagnosticsOtelService(
         metadata: DiagnosticEventMetadata,
         span: ReturnType<typeof tracer.startSpan>,
       ) => {
-        const spanId = trustedTraceContext(evt, metadata)?.spanId;
+        const spanId = correlatedTraceContext(evt, metadata)?.spanId;
         if (spanId) {
           activeTrustedSpans.set(spanId, span);
         }
@@ -2354,7 +2441,7 @@ export function createDiagnosticsOtelService(
         evt: DiagnosticEventPayload,
         metadata: DiagnosticEventMetadata,
       ) => {
-        const spanId = trustedTraceContext(evt, metadata)?.spanId;
+        const spanId = correlatedTraceContext(evt, metadata)?.spanId;
         if (!spanId) {
           return undefined;
         }
@@ -2781,7 +2868,7 @@ export function createDiagnosticsOtelService(
         if (!tracesEnabled || !passesInboundTrustGate(evt, metadata)) {
           return;
         }
-        const traceContext = trustedTraceContext(evt, metadata);
+        const traceContext = correlatedTraceContext(evt, metadata);
         if (!traceContext?.spanId || activeTrustedSpans.has(traceContext.spanId)) {
           return;
         }
@@ -2860,7 +2947,7 @@ export function createDiagnosticsOtelService(
         const byaiInboundSpan = sessionKey
           ? activeByaiInboundSpansBySessionKey.get(sessionKey)
           : undefined;
-        const trustedTrace = trustedTraceContext(evt, metadata);
+        const trustedTrace = correlatedTraceContext(evt, metadata);
         const trackedSpan = trustedTrace?.spanId
           ? activeTrustedSpans.get(trustedTrace.spanId)
           : undefined;
@@ -2951,7 +3038,7 @@ export function createDiagnosticsOtelService(
         evt: Extract<DiagnosticEventPayload, { type: "run.started" }>,
         metadata: DiagnosticEventMetadata,
       ) => {
-        if (!tracesEnabled || !passesInboundTrustGate(evt, metadata)) {
+        if (!tracesEnabled || !passesCorrelatedSpanGate(evt, metadata)) {
           return;
         }
         const byaiInboundSpan = activeByaiInboundSpanForRun(evt);
@@ -2969,7 +3056,7 @@ export function createDiagnosticsOtelService(
             startTimeMs: evt.ts,
           }),
         );
-        const parentSpanId = trustedTraceContext(evt, metadata)?.parentSpanId;
+        const parentSpanId = correlatedTraceContext(evt, metadata)?.parentSpanId;
         if (parentSpanId && !activeTrustedSpans.has(parentSpanId)) {
           activeTrustedSpanAliases.set(parentSpanId, span);
         }
@@ -3075,7 +3162,7 @@ export function createDiagnosticsOtelService(
       });
 
       const recordTalkEvent = (evt: TalkDiagnosticEvent, metadata: DiagnosticEventMetadata) => {
-        if (!passesInboundTrustGate(evt, metadata)) {
+        if (!passesCorrelatedSpanGate(evt, metadata)) {
           return;
         }
         const attrs = talkEventAttrs(evt);
@@ -3278,7 +3365,7 @@ export function createDiagnosticsOtelService(
         if (byaiInboundSpan) {
           spanAttrs["byai.inbound.linked"] = true;
         }
-        const trustedTrace = trustedTraceContext(evt, metadata);
+        const trustedTrace = correlatedTraceContext(evt, metadata);
         const trackedSpan = trustedTrace?.spanId
           ? activeTrustedSpans.get(trustedTrace.spanId)
           : undefined;
@@ -3350,7 +3437,7 @@ export function createDiagnosticsOtelService(
         evt: Extract<DiagnosticEventPayload, { type: "harness.run.started" }>,
         metadata: DiagnosticEventMetadata,
       ) => {
-        if (!tracesEnabled || !passesInboundTrustGate(evt, metadata)) {
+        if (!tracesEnabled || !passesCorrelatedSpanGate(evt, metadata)) {
           return;
         }
         const spanAttrs: Record<string, string | number | boolean> = harnessRunMetricAttrs(evt);
@@ -3561,7 +3648,7 @@ export function createDiagnosticsOtelService(
         evt: Extract<DiagnosticEventPayload, { type: "model.call.started" }>,
         metadata: DiagnosticEventMetadata,
       ) => {
-        if (!tracesEnabled || !passesInboundTrustGate(evt, metadata)) {
+        if (!tracesEnabled || !passesCorrelatedSpanGate(evt, metadata)) {
           return;
         }
         const spanAttrs: Record<string, string | number | boolean> = {
@@ -3618,7 +3705,12 @@ export function createDiagnosticsOtelService(
         }
         assignModelCallSizeTimingAttrs(spanAttrs, evt);
         assignLangfuseCompletionStartTimeAttr(spanAttrs, evt);
-        assignOtelModelContentAttributes(spanAttrs, modelContent, contentCapturePolicy);
+        assignOtelModelContentAttributes(
+          spanAttrs,
+          modelContent,
+          contentCapturePolicy,
+          contentLimits,
+        );
         assignLangfuseGenAiUsageAttrs(spanAttrs, readAssistantUsageFromModelCallContent(modelContent));
         const span =
           takeTrackedTrustedSpan(evt, metadata) ??
@@ -3673,7 +3765,12 @@ export function createDiagnosticsOtelService(
         }
         assignModelCallSizeTimingAttrs(spanAttrs, evt);
         assignLangfuseCompletionStartTimeAttr(spanAttrs, evt);
-        assignOtelModelContentAttributes(spanAttrs, modelContent, contentCapturePolicy);
+        assignOtelModelContentAttributes(
+          spanAttrs,
+          modelContent,
+          contentCapturePolicy,
+          contentLimits,
+        );
         assignLangfuseGenAiUsageAttrs(spanAttrs, readAssistantUsageFromModelCallContent(modelContent));
         const span =
           takeTrackedTrustedSpan(evt, metadata) ??
@@ -3747,7 +3844,7 @@ export function createDiagnosticsOtelService(
         metadata: DiagnosticEventMetadata,
         privateData?: Record<string, unknown>,
       ) => {
-        if (!tracesEnabled || !passesInboundTrustGate(evt, metadata)) {
+        if (!tracesEnabled || !passesCorrelatedSpanGate(evt, metadata)) {
           return;
         }
         const spanAttrs = toolExecutionBaseAttrs(evt);
@@ -3757,6 +3854,7 @@ export function createDiagnosticsOtelService(
           evt as unknown as Record<string, unknown>,
           contentCapturePolicy,
           options,
+          contentLimits,
           privateData,
         );
         const span = spanWithDuration("openclaw.tool.execution", spanAttrs, undefined, {
@@ -3795,6 +3893,7 @@ export function createDiagnosticsOtelService(
           evt as unknown as Record<string, unknown>,
           contentCapturePolicy,
           options,
+          contentLimits,
           privateData,
         );
         const span =
@@ -3838,6 +3937,7 @@ export function createDiagnosticsOtelService(
           evt as unknown as Record<string, unknown>,
           contentCapturePolicy,
           options,
+          contentLimits,
           privateData,
         );
         const span =

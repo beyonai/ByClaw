@@ -1,4 +1,4 @@
 interface:
-  display_name: "byCLI Markdown 入库"
-  short_description: "将 byCLI Markdown 输出归档并导入知识库"
-  default_prompt: "把 byCLI 输出的 Markdown 内容入库"
+  display_name: "byCLI 浏览器驱动与采集"
+  short_description: "驱动浏览器采集数据、修复失败的 adapter、编写新 adapter"
+  default_prompt: "用 bycli 帮我采集这个网站的数据"

@@ -20,12 +20,14 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
 
 @Service
 public class DingtalkRobotRegistryService {
@@ -39,23 +41,49 @@ public class DingtalkRobotRegistryService {
     private final DingtalkRobotConfigService dingtalkRobotConfigService;
     private final DingtalkTokenService dingtalkTokenService;
     private final AtomicBoolean started = new AtomicBoolean(false);
-    private final ExecutorService streamExecutor = Executors.newCachedThreadPool(new StreamThreadFactory());
+    private final ExecutorService streamExecutor;
+    private final Function<DingtalkRobotChannelConfig, OpenDingTalkClient> openDingTalkClientFactory;
     private final Object refreshLock = new Object();
 
     private final Map<String, OpenDingTalkClient> openDingTalkClients = new ConcurrentHashMap<>();
     private final Map<String, DingtalkRobotChannelConfig> activeRobotConfigs = new ConcurrentHashMap<>();
+    private final Set<String> startingRobotCodes = ConcurrentHashMap.newKeySet();
 
+    @org.springframework.beans.factory.annotation.Autowired
     public DingtalkRobotRegistryService(
             DingtalkStreamProperties properties,
             DingtalkBotListener dingtalkBotListener,
             SsResExtDigEmployeeService ssResExtDigEmployeeService,
             DingtalkRobotConfigService dingtalkRobotConfigService,
             DingtalkTokenService dingtalkTokenService) {
+        this(
+                properties,
+                dingtalkBotListener,
+                ssResExtDigEmployeeService,
+                dingtalkRobotConfigService,
+                dingtalkTokenService,
+                null,
+                Executors.newCachedThreadPool(new StreamThreadFactory())
+        );
+    }
+
+    DingtalkRobotRegistryService(
+            DingtalkStreamProperties properties,
+            DingtalkBotListener dingtalkBotListener,
+            SsResExtDigEmployeeService ssResExtDigEmployeeService,
+            DingtalkRobotConfigService dingtalkRobotConfigService,
+            DingtalkTokenService dingtalkTokenService,
+            Function<DingtalkRobotChannelConfig, OpenDingTalkClient> openDingTalkClientFactory,
+            ExecutorService streamExecutor) {
         this.properties = properties;
         this.dingtalkBotListener = dingtalkBotListener;
         this.ssResExtDigEmployeeService = ssResExtDigEmployeeService;
         this.dingtalkRobotConfigService = dingtalkRobotConfigService;
         this.dingtalkTokenService = dingtalkTokenService;
+        this.openDingTalkClientFactory = openDingTalkClientFactory == null
+                ? this::buildOpenDingTalkClient
+                : openDingTalkClientFactory;
+        this.streamExecutor = streamExecutor;
     }
 
     public void initializeRobotClients() {
@@ -106,7 +134,8 @@ public class DingtalkRobotRegistryService {
         }
         dingtalkRobotConfigService.replaceRobotConfigsForResource(resourceId, robotConfigs);
         for (DingtalkRobotChannelConfig robotConfig : robotConfigs) {
-            if (activeRobotConfigs.containsKey(robotConfig.getRobotCode())) {
+            if (activeRobotConfigs.containsKey(robotConfig.getRobotCode())
+                    || startingRobotCodes.contains(robotConfig.getRobotCode())) {
                 logger.info("Skip register existing DingTalk stream bot. robotCode={}, resourceId={}",
                         robotConfig.getRobotCode(), robotConfig.getResourceId());
                 continue;
@@ -207,42 +236,64 @@ public class DingtalkRobotRegistryService {
     }
 
     private void startRobotClient(DingtalkRobotChannelConfig robotConfig) {
+        String robotCode = robotConfig.getRobotCode();
+        if (!startingRobotCodes.add(robotCode)) {
+            logger.info("Skip register starting DingTalk stream bot. robotCode={}, resourceId={}",
+                    robotCode, robotConfig.getResourceId());
+            return;
+        }
+
         logger.info("Register DingTalk stream bot. robotCode={}, resourceId={}, resourceName={}, appId={}, clientIdSuffix={}",
-                robotConfig.getRobotCode(),
+                robotCode,
                 robotConfig.getResourceId(),
                 robotConfig.getResourceName(),
                 robotConfig.getAppId(),
                 maskClientId(robotConfig.getClientId()));
 
-        OpenDingTalkStreamClientBuilder builder = OpenDingTalkStreamClientBuilder
-                .custom()
-                .credential(new AuthClientCredential(robotConfig.getClientId(), robotConfig.getClientSecret()))
-                .registerCallbackListener(DingtalkStreamBotLifecycle.BOT_MESSAGE_TOPIC, dingtalkBotListener);
-
-        OpenDingTalkClient client = builder.build();
-        openDingTalkClients.put(robotConfig.getRobotCode(), client);
-        activeRobotConfigs.put(robotConfig.getRobotCode(), robotConfig);
+        OpenDingTalkClient client;
+        try {
+            client = openDingTalkClientFactory.apply(robotConfig);
+        } catch (RuntimeException e) {
+            startingRobotCodes.remove(robotCode);
+            throw e;
+        }
+        openDingTalkClients.put(robotCode, client);
         streamExecutor.submit(() -> {
             try {
                 client.start();
+                activeRobotConfigs.put(robotCode, robotConfig);
                 logger.info("DingTalk stream bot started. topic={}, robotCode={}, resourceId={}, resourceName={}, appId={}",
                         DingtalkStreamBotLifecycle.BOT_MESSAGE_TOPIC,
-                        robotConfig.getRobotCode(),
+                        robotCode,
                         robotConfig.getResourceId(),
                         robotConfig.getResourceName(),
                         robotConfig.getAppId());
             } catch (Exception e) {
+                openDingTalkClients.remove(robotCode, client);
+                activeRobotConfigs.remove(robotCode);
+                dingtalkTokenService.evictAccessTokensByRobotCode(robotCode);
                 logger.error("Failed to start DingTalk stream bot. robotCode={}, resourceId={}, resourceName={}, appId={}",
-                        robotConfig.getRobotCode(),
+                        robotCode,
                         robotConfig.getResourceId(),
                         robotConfig.getResourceName(),
                         robotConfig.getAppId(),
                         e);
+            } finally {
+                startingRobotCodes.remove(robotCode);
             }
         });
     }
 
+    private OpenDingTalkClient buildOpenDingTalkClient(DingtalkRobotChannelConfig robotConfig) {
+        OpenDingTalkStreamClientBuilder builder = OpenDingTalkStreamClientBuilder
+                .custom()
+                .credential(new AuthClientCredential(robotConfig.getClientId(), robotConfig.getClientSecret()))
+                .registerCallbackListener(DingtalkStreamBotLifecycle.BOT_MESSAGE_TOPIC, dingtalkBotListener);
+        return builder.build();
+    }
+
     private void stopRobotClient(String robotCode) {
+        startingRobotCodes.remove(robotCode);
         OpenDingTalkClient client = openDingTalkClients.remove(robotCode);
         dingtalkTokenService.evictAccessTokensByRobotCode(robotCode);
         if (client == null) {

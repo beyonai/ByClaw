@@ -13,7 +13,9 @@ public enum AssistantAccessChannel {
 
     WEB(ChannelType.WEB),
     APP(ChannelType.APP),
-    DINGTALK(ChannelType.DINGTALK);
+    DINGTALK(ChannelType.DINGTALK),
+    FEISHU(ChannelType.FEISHU),
+    WECOM(ChannelType.WECOM);
 
     private final ChannelType channelType;
 

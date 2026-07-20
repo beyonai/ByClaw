@@ -1,4 +1,4 @@
-import React, { useMemo, type Key } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState, type Key } from 'react';
 import { Dropdown, Empty, Spin, Tooltip, Tree, type MenuProps } from 'antd';
 import { EllipsisOutlined } from '@ant-design/icons';
 import AntdIcon from '@/components/AntdIcon';
@@ -68,12 +68,46 @@ const FileTreeList: React.FC<FileTreeListProps> = ({
   getActionItems,
   onAction,
 }) => {
+  const [hoveredActionKey, setHoveredActionKey] = useState('');
+  const [openActionKey, setOpenActionKey] = useState('');
+  const closeActionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const treeData = useMemo(() => {
     const expandedDirectoryKeySet = new Set(
       expandedKeys.map((key) => ensureDirectoryPath(normalizeFileBrowserPath(String(key))))
     );
     return toFileTreeData(items, childrenByPath, expandedDirectoryKeySet);
   }, [childrenByPath, expandedKeys, items]);
+
+  const clearActionCloseTimer = useCallback(() => {
+    if (closeActionTimerRef.current) {
+      clearTimeout(closeActionTimerRef.current);
+      closeActionTimerRef.current = null;
+    }
+  }, []);
+
+  const keepActionOpen = useCallback(
+    (actionKey: string) => {
+      clearActionCloseTimer();
+      setHoveredActionKey(actionKey);
+      setOpenActionKey(actionKey);
+    },
+    [clearActionCloseTimer]
+  );
+
+  const closeActionLater = useCallback(
+    (actionKey: string) => {
+      clearActionCloseTimer();
+      closeActionTimerRef.current = setTimeout(() => {
+        setOpenActionKey((prev) => (prev === actionKey ? '' : prev));
+        setHoveredActionKey((prev) => (prev === actionKey ? '' : prev));
+      }, 180);
+    },
+    [clearActionCloseTimer]
+  );
+
+  useEffect(() => {
+    return () => clearActionCloseTimer();
+  }, [clearActionCloseTimer]);
 
   return (
     <div className={styles.categoryBody}>
@@ -85,7 +119,14 @@ const FileTreeList: React.FC<FileTreeListProps> = ({
               selectable={false}
               treeData={treeData}
               expandedKeys={expandedKeys}
-              onExpand={(keys) => onExpand(keys)}
+              onExpand={(keys, info) => {
+                onExpand(keys);
+                const item = info.node as unknown as FileTreeItem;
+                const directoryPath = ensureDirectoryPath(normalizeFileBrowserPath(item.path));
+                if (info.expanded && isDirectory(item) && childrenByPath[directoryPath]) {
+                  void onLoadData(item);
+                }
+              }}
               loadData={(node) => onLoadData(node as unknown as FileTreeItem)}
               icon={(node) => {
                 const item = node as unknown as FileTreeItem;
@@ -95,11 +136,9 @@ const FileTreeList: React.FC<FileTreeListProps> = ({
                   ? 'a-Folder-openwenjianjia-kai'
                   : getIconType(item.name, isDirectory(item));
                 return (
-                  <Tooltip title={item.name} placement="right">
-                    <span>
-                      <AntdIcon type={`icon-${iconType}`} />
-                    </span>
-                  </Tooltip>
+                  <span>
+                    <AntdIcon type={`icon-${iconType}`} />
+                  </span>
                 );
               }}
               className={`${commonStyles.tree} ${styles.fileTree}`}
@@ -115,6 +154,8 @@ const FileTreeList: React.FC<FileTreeListProps> = ({
                   isDirectory(treeItem) &&
                   ensureDirectoryPath(normalizeFileBrowserPath(treeItem.path)) ===
                     ensureDirectoryPath(normalizeFileBrowserPath(currentPath));
+                const actionKey = `${treeItem.key || treeItem.path || ''}`;
+                const actionVisible = hoveredActionKey === actionKey || openActionKey === actionKey;
 
                 return (
                   <span
@@ -122,32 +163,63 @@ const FileTreeList: React.FC<FileTreeListProps> = ({
                       styles.treeTitleContent,
                       directoryExpanded ? styles.treeTitleContentExpanded : '',
                       directoryCurrent ? styles.treeTitleContentCurrent : '',
+                      actionVisible ? styles.treeTitleContentActionVisible : '',
                     ]
                       .filter(Boolean)
                       .join(' ')}
+                    onMouseEnter={() => setHoveredActionKey(actionKey)}
+                    onMouseLeave={() => {
+                      if (openActionKey !== actionKey) {
+                        setHoveredActionKey((prev) => (prev === actionKey ? '' : prev));
+                      }
+                    }}
                   >
-                    <Tooltip title={item.name} placement="right">
-                      <span
-                        className={[styles.treeTitleName, previewable ? styles.previewableTreeTitle : '']
-                          .filter(Boolean)
-                          .join(' ')}
-                      >
+                    <span
+                      className={[styles.treeTitleName, previewable ? styles.previewableTreeTitle : '']
+                        .filter(Boolean)
+                        .join(' ')}
+                    >
+                      {/* 文件名提示放到上方，避免右侧浮层遮挡三个点操作按钮。 */}
+                      <Tooltip title={item.name} placement="top">
                         <span className={styles.treeTitleText}>{item.name}</span>
-                      </span>
-                    </Tooltip>
+                      </Tooltip>
+                    </span>
                     <Dropdown
                       trigger={['hover']}
+                      open={openActionKey === actionKey}
+                      onOpenChange={(open) => {
+                        if (open) {
+                          keepActionOpen(actionKey);
+                          return;
+                        }
+                        closeActionLater(actionKey);
+                      }}
+                      mouseEnterDelay={0}
+                      mouseLeaveDelay={0.2}
                       overlayClassName={employeeStyles.mydropdown}
+                      popupRender={(menus) => (
+                        <div
+                          onMouseEnter={() => keepActionOpen(actionKey)}
+                          onMouseLeave={() => closeActionLater(actionKey)}
+                        >
+                          {menus}
+                        </div>
+                      )}
                       menu={{
                         items: getActionItems(treeItem),
                         onClick: ({ key, domEvent }) => {
                           domEvent.stopPropagation();
+                          clearActionCloseTimer();
+                          setOpenActionKey('');
+                          setHoveredActionKey('');
                           onAction(key, treeItem);
                         },
                       }}
                     >
                       <span
-                        className={`${commonStyles.treeActionIcon} ${styles.treeActionTrigger}`}
+                        className={styles.treeActionTrigger}
+                        onMouseEnter={() => keepActionOpen(actionKey)}
+                        onMouseLeave={() => closeActionLater(actionKey)}
                         onClick={(event) => event.stopPropagation()}
                         onMouseDown={(event) => event.stopPropagation()}
                       >

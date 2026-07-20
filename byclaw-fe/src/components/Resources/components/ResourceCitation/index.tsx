@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useContext, useState, useEffect, useMemo, useRef } from 'react';
 import { Spin, Modal, Checkbox, Button, List, Tabs, Input, message, Empty, Tooltip, Dropdown } from 'antd';
 import { useIntl, useSelector } from '@umijs/max';
 import { debounce, trim } from 'lodash';
@@ -7,25 +7,35 @@ import AntdIcon from '@/components/AntdIcon';
 import withDrag, { DragType } from '@/components/QueryInput/withDrag';
 import { ResourceTypeMap } from '@/constants/resource';
 import { getResourceImageUrl } from '@/layout/sider/components/ResourceSiderPanel/ResourceSiderListItem';
+import { SiderContentContext } from '@/layout/sider/siderContentContext';
 import { getFileUrl } from '@/utils/file';
 import styles from './index.module.less';
 import employeeStyles from '@/layout/sider/components/EmployeeList/index.module.less';
 // import Empty from '@/components/Empty';
 import {
   listResourceUseAuth,
-  deleteResource,
   queryDigEmployeeRelResourceAuth,
   queryResourceMembers,
   qryByClawFileByUserCode,
-  queryWorkspaceSkillList,
   readFile,
-  downloadSkillZip,
+  deleteSkill,
 } from '@/pages/manager/service/resources';
-import { mapWorkspaceSkillRows, isWorkspaceSkill } from '@/components/Resources/workspaceSkill/utils';
+import AddAuthModal from '@/pages/manager/components/AuthListDrawer/AddAuthModal';
+import SkillDetailDrawer from '@/pages/manager/components/SkillDetailDrawer/SkillDetailDrawer';
+import { batchHandleAuth, listAuthDetail } from '@/pages/manager/service/DigitalResourceMgr';
+import { uninstallDigitalEmployeeRelResources } from '@/pages/manager/service/DigitalEmployeeMgr';
+import {
+  isWorkspaceSkill,
+  SKILL_DISPLAY_SOURCE_USER_DEVELOPED,
+  type WorkspaceSkillItem,
+} from '@/components/Resources/workspaceSkill/utils';
+import { queryDigitalEmployeeSkillResources } from '@/components/Resources/workspaceSkill/queryDigitalEmployeeSkillResources';
+import { useWorkspaceSkillActions } from '@/components/Resources/workspaceSkill/useWorkspaceSkillActions';
 import useGlobal from '@/hooks/useGlobal';
 
 const Draggable = withDrag(DragType.tool);
 const { TabPane } = Tabs;
+const SHARE_GRANT_TYPE = 'FORCE_USE';
 
 interface IResourceItem {
   resourceId: string;
@@ -35,8 +45,14 @@ interface IResourceItem {
   resourceType: React.Key;
   resourceSourcePkId: string;
   resourceBizType: string;
+  resourceCode?: string;
   isTop: string;
   createTime: string;
+  description?: string;
+  useStartTime?: string;
+  useList?: any[];
+  managerList?: any[];
+  usedDigitalEmployees?: any[];
   extInfo?: {
     targetContent?: string;
   };
@@ -44,6 +60,8 @@ interface IResourceItem {
   isFromResourceModule?: boolean;
   skillPath?: string;
   skillUrl?: string;
+  displaySourceType?: string;
+  resourceBacked?: boolean;
 }
 
 interface Props {
@@ -62,6 +80,35 @@ interface Props {
 
   /** 渲染形态：grid（默认，卡片网格）或 list（列表，用于小面板弹窗） */
   layout?: 'grid' | 'list';
+}
+
+const getGrantItem = (item: any) => ({
+  ...item,
+  id: `${String(item.grantToObjType).toLowerCase()}_${item.grantToObjId}`,
+  name: item.grantToObjName,
+  type: item.grantToObjType,
+});
+
+const transformGrantItem = (item: any) => {
+  const [, idFromKey] = String(item.id || '').split('_');
+  return {
+    grantToObjId: idFromKey || item.grantToObjId,
+    grantToObjType: item.type || item.grantToObjType,
+  };
+};
+
+interface AuthDetailResponse {
+  code?: number;
+  msg?: string;
+  data?: {
+    redList?: any[];
+    blackList?: any[];
+  };
+}
+
+interface AuthSaveResponse {
+  code?: number;
+  msg?: string;
 }
 
 const ResourceList = (props: Props) => {
@@ -102,12 +149,15 @@ const ResourceList = (props: Props) => {
   const [selectedRelatedObject, setSelectedRelatedObject] = useState<any>(null);
   const [relatedObjectDetailMap, setRelatedObjectDetailMap] = useState<Record<string, any>>({});
   const [relatedObjectLoading, setRelatedObjectLoading] = useState(false);
-  const [downloadingSkill, setDownloadingSkill] = useState<string | null>(null);
-  const [deletingSkill, setDeletingSkill] = useState<string | null>(null);
+  const [shareModalOpen, setShareModalOpen] = useState(false);
+  const [shareRecord, setShareRecord] = useState<IResourceItem | null>(null);
+  const [shareAuthList, setShareAuthList] = useState<any[]>([]);
+  const [shareBlackList, setShareBlackList] = useState<any[]>([]);
   const [failedResourceImageUrls, setFailedResourceImageUrls] = useState<Set<string>>(() => new Set());
 
   const intl = useIntl();
   const { userInfo } = useSelector((state: any) => state.user);
+  const { setDetailPanel, clearDetailPanel } = useContext(SiderContentContext);
 
   const lockBizTypes = resourceBizTypeList && resourceBizTypeList.length > 0;
 
@@ -156,7 +206,10 @@ const ResourceList = (props: Props) => {
   }, [defaultResources, keyword, resourceType, resources]);
 
   const pageSize = 100;
-  const loadResources = async (reset = false, myResourceType: string = resourceType) => {
+  const getReloadResourceType = (payload?: string | { resourceType?: string }) =>
+    typeof payload === 'string' ? payload : payload?.resourceType;
+
+  const loadResources = async (reset = false, resourceTypePayload?: string | { resourceType?: string }) => {
     if (resources) {
       return;
     }
@@ -167,6 +220,7 @@ const ResourceList = (props: Props) => {
 
     try {
       let rows: any[] = [];
+      const myResourceType = getReloadResourceType(resourceTypePayload) || resourceType;
       const currentResourceBizTypeList =
         Array.isArray(resourceBizTypeList) && resourceBizTypeList.length
           ? resourceBizTypeList
@@ -194,43 +248,33 @@ const ResourceList = (props: Props) => {
       } else {
         const currentPage = reset ? 1 : pageIndex;
         if (normalizedAgentId) {
-          const response = await queryDigEmployeeRelResourceAuth({
-            resourceId: normalizedAgentId,
-            pageSize,
-            pageNum: currentPage,
-            keyword: searchValue.current.trim(),
-            resourceBizTypeList: currentResourceBizTypeList,
-          });
-          const allRows = Array.isArray(response?.rows)
-            ? response.rows
-            : Array.isArray(response?.list)
-              ? response.list
-              : [];
-          rows =
-            Array.isArray(currentResourceBizTypeList) && currentResourceBizTypeList.length
-              ? allRows.filter((item: any) => currentResourceBizTypeList.includes(item.resourceBizType))
-              : allRows;
-          // 与左侧“技能中心”同口径：技能 tab 首屏在“已绑定技能”之外，合并“用户开发（工作空间未绑定）”技能。
-          if (myResourceType === 'SKILL' && reset) {
-            try {
-              const workspaceSkillResponse: any = await queryWorkspaceSkillList({
-                resourceId: normalizedAgentId,
-                userCode: userInfo?.userCode,
-                keyword: searchValue.current.trim(),
-              });
-              const workspaceRaw = Array.isArray(workspaceSkillResponse)
-                ? workspaceSkillResponse
-                : Array.isArray(workspaceSkillResponse?.data)
-                  ? workspaceSkillResponse.data
-                  : Array.isArray(workspaceSkillResponse?.rows)
-                    ? workspaceSkillResponse.rows
-                    : Array.isArray(workspaceSkillResponse?.list)
-                      ? workspaceSkillResponse.list
-                      : [];
-              rows = [...rows, ...mapWorkspaceSkillRows(workspaceRaw)];
-            } catch (error) {
-              console.warn('query workspace skills failed', error);
-            }
+          if (myResourceType === 'SKILL') {
+            const skillResult = await queryDigitalEmployeeSkillResources({
+              resourceId: normalizedAgentId,
+              pageSize,
+              pageNum: currentPage,
+              keyword: searchValue.current.trim(),
+              userCode: userInfo?.userCode,
+              includeWorkspace: reset,
+            });
+            rows = skillResult.rows;
+          } else {
+            const response = await queryDigEmployeeRelResourceAuth({
+              resourceId: normalizedAgentId,
+              pageSize,
+              pageNum: currentPage,
+              keyword: searchValue.current.trim(),
+              resourceBizTypeList: currentResourceBizTypeList,
+            });
+            const allRows = Array.isArray(response?.rows)
+              ? response.rows
+              : Array.isArray(response?.list)
+                ? response.list
+                : [];
+            rows =
+              Array.isArray(currentResourceBizTypeList) && currentResourceBizTypeList.length
+                ? allRows.filter((item: any) => currentResourceBizTypeList.includes(item.resourceBizType))
+                : allRows;
           }
         } else {
           const response = await listResourceUseAuth({
@@ -250,13 +294,51 @@ const ResourceList = (props: Props) => {
       } else {
         setResourceList((prev) => [...defaultResources, ...prev, ...rows]);
       }
-      setPageIndex(pageIndex + 1);
+      setPageIndex((reset ? 1 : pageIndex) + 1);
     } catch (error) {
       console.error('Failed to load resources:', error);
     } finally {
       setLoading(false);
     }
   };
+
+  const refreshSkillResources = () => {
+    // 技能列表刷新统一走事件，避免引用面板本地和事件监听各请求一次。
+    EventEmitter.emit('beyond-resourceList-resourceType-reload', 'SKILL');
+  };
+
+  const openShareAuthModal = async (item: IResourceItem) => {
+    if (!item.resourceId || !item.resourceBizType) return;
+    try {
+      const detail = (await listAuthDetail({
+        grantType: SHARE_GRANT_TYPE,
+        grantObjType: item.resourceBizType,
+        grantObjId: item.resourceId,
+      })) as unknown as AuthDetailResponse;
+
+      if (detail && detail.code === 0) {
+        setShareRecord(item);
+        setShareAuthList(detail.data?.redList?.map(getGrantItem) || []);
+        setShareBlackList(detail.data?.blackList?.map(getGrantItem) || []);
+        setShareModalOpen(true);
+        return;
+      }
+
+      message.error(detail?.msg || intl.formatMessage({ id: 'common.operationFailed' }));
+    } catch (error: any) {
+      message.error(error?.message || intl.formatMessage({ id: 'common.operationFailed' }));
+    }
+  };
+
+  const workspaceActions = useWorkspaceSkillActions({
+    resourceId: normalizedAgentId,
+    setDetailPanel,
+    clearDetailPanel,
+    onShareAuth: (resourceItem) => {
+      void openShareAuthModal(resourceItem as IResourceItem);
+    },
+    onChanged: refreshSkillResources,
+  });
 
   // 初始加载
   useEffect(() => {
@@ -429,7 +511,8 @@ const ResourceList = (props: Props) => {
           className={styles.compactAvatarImage}
           src={resourceImageUrl}
           alt=""
-          fetchPriority="low"
+          // React 18 不识别 camelCase fetchPriority，透传小写属性避免控制台告警。
+          {...{ fetchpriority: 'low' }}
           onError={() => {
             setFailedResourceImageUrls((prev) => {
               if (prev.has(resourceImageUrl)) {
@@ -455,63 +538,6 @@ const ResourceList = (props: Props) => {
     return <AntdIcon type={getResourceIcon(item.resourceName)} className={styles.defaultLogoIcon} />;
   };
 
-  // 处理技能下载（带防抖）
-  const handleDownloadSkill = useMemo(() => {
-    const download = async (item: IResourceItem) => {
-      // 资源化（已绑定）技能与用户开发（工作空间未绑定）技能的存储路径命名空间不同：
-      // - 资源化技能：按 skillId 走资源包下载；
-      // - 工作空间技能：按 skillPath 打包 /.openclaw/workspace-baiying-agent-{resourceId}/skills 下的目录。
-      // 不能都塞进 skillPath，否则工作空间技能会命中资源下载校验而报错。
-      const workspace = isWorkspaceSkill(item as any);
-      if (workspace ? !item.skillPath : !item.resourceId) {
-        message.error(intl.formatMessage({ id: 'resource.skillDownload.noSkillPath' }));
-        return;
-      }
-      setDownloadingSkill(`${workspace ? item.skillPath : item.resourceId}`);
-
-      try {
-        const params: {
-          skillPath?: string;
-          skillId?: string | number;
-          resourceId?: string | number;
-          userCode?: string;
-        } = workspace
-          ? {
-            skillPath: item.skillPath as string,
-            ...(normalizedAgentId ? { resourceId: normalizedAgentId } : {}),
-            ...(userInfo?.userCode ? { userCode: userInfo.userCode } : {}),
-          }
-          : { skillId: item.resourceId };
-
-        const response = await downloadSkillZip(params);
-
-        // request.ts 在 responseType=blob 时统一封装成 { fileName, file }；这里只用 file 字段构造 Blob，
-        // 直接 new Blob([response]) 会把整个对象当字符串塞进去（变成 "[object Object]"），导致下载文件无法解压。
-        const fileBlob = response?.file;
-        if (fileBlob) {
-          const blob = fileBlob instanceof Blob ? fileBlob : new Blob([fileBlob], { type: 'application/zip' });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = response?.fileName || `${item.resourceName || 'skill'}.zip`;
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-          URL.revokeObjectURL(url);
-        } else {
-          message.error(intl.formatMessage({ id: 'resource.skillDownload.failed' }));
-        }
-      } catch (error) {
-        console.error('技能下载失败：', error);
-        message.error(intl.formatMessage({ id: 'resource.skillDownload.failed' }));
-      } finally {
-        setDownloadingSkill(null);
-      }
-    };
-
-    return debounce(download, 500, { leading: true, trailing: false });
-  }, [userInfo, normalizedAgentId, intl]);
-
   const handleRelatedObjectClick = async (object: any, forceRefresh = false) => {
     const objectKey = getRelatedObjectKey(object);
     setSelectedRelatedObject(object);
@@ -536,24 +562,133 @@ const ResourceList = (props: Props) => {
     }
   };
 
-  const handleDeleteSkill = async (item: IResourceItem) => {
-    const resourceId = item.resourceId;
-    if (!resourceId) {
-      message.error(intl.formatMessage({ id: 'common.deleteFail' }));
+  const handleSkillDetail = async (item: IResourceItem) => {
+    if (isWorkspaceSkill(item as WorkspaceSkillItem)) {
+      await workspaceActions.openDetail(item as WorkspaceSkillItem);
       return;
     }
-    setDeletingSkill(resourceId);
-    try {
-      await deleteResource({ resourceId });
-      setResourceList((prev) => prev.filter((resource) => resource.resourceId !== resourceId));
-      message.success(intl.formatMessage({ id: 'common.deleteSuccess' }));
-      EventEmitter.emit('beyond-resourceList-resourceType-reload', 'SKILL');
-    } catch (error) {
-      console.error('技能删除失败：', error);
-      message.error(intl.formatMessage({ id: 'common.deleteFailed' }));
-    } finally {
-      setDeletingSkill(null);
+
+    if (!item.resourceId) {
+      message.error(intl.formatMessage({ id: 'common.operationFailed' }));
+      return;
     }
+
+    // 引用技能详情与左侧技能列表保持一致，统一从右侧详情面板打开。
+    setDetailPanel?.(
+      <SkillDetailDrawer
+        resourceId={String(item.resourceId)}
+        title={intl.formatMessage({ id: 'common.skill' })}
+        open
+        panel
+        onClose={() => clearDetailPanel?.()}
+      />,
+      { width: 350 }
+    );
+  };
+
+  const handleShareSkill = async (item: IResourceItem) => {
+    if (!isWorkspaceSkill(item as WorkspaceSkillItem)) {
+      await openShareAuthModal(item);
+      return;
+    }
+    // 工作空间技能需先资源化，成功后再打开使用授权弹窗，保持与左侧技能小列表一致。
+    await workspaceActions.shareSkill(item as WorkspaceSkillItem);
+  };
+
+  const handleShareCancel = () => {
+    setShareModalOpen(false);
+    setShareRecord(null);
+    setShareAuthList([]);
+    setShareBlackList([]);
+  };
+
+  const handleShareConfirm = async (authList: any[]) => {
+    if (!shareRecord?.resourceId || !shareRecord?.resourceBizType) return;
+
+    const redList = authList.map((item) => ({
+      ...transformGrantItem(item),
+      grantType: SHARE_GRANT_TYPE,
+    }));
+    const blackList = shareBlackList.map((item) => ({
+      ...transformGrantItem(item),
+      grantType: SHARE_GRANT_TYPE,
+    }));
+
+    try {
+      const res = (await batchHandleAuth(
+        {
+          grantObjId: shareRecord.resourceId,
+          grantObjType: shareRecord.resourceBizType,
+          redList,
+          blackList,
+          resourceId: shareRecord.resourceId,
+        },
+        '/byaiService/auth/privilegeGrant/setResourceUsers'
+      )) as unknown as AuthSaveResponse;
+
+      if (res && res.code === 0) {
+        message.success(intl.formatMessage({ id: 'common.shareSuccess' }));
+        handleShareCancel();
+        refreshSkillResources();
+        return;
+      }
+
+      message.error(res?.msg || intl.formatMessage({ id: 'common.shareFailed' }));
+    } catch (error: any) {
+      message.error(error?.message || intl.formatMessage({ id: 'common.shareFailed' }));
+    }
+  };
+
+  const handleUninstallSkill = (item: IResourceItem) => {
+    if (!normalizedAgentId) {
+      message.error(intl.formatMessage({ id: 'resource.noDefaultDigitalEmployee' }));
+      return;
+    }
+
+    const workspaceSkill = isWorkspaceSkill(item as WorkspaceSkillItem);
+    const employeeName = intl.formatMessage({ id: 'resource.currentDigitalEmployee' });
+
+    Modal.confirm({
+      title: intl.formatMessage({ id: 'resource.uninstallSkill' }),
+      content: intl.formatMessage(
+        {
+          id: workspaceSkill ? 'resource.uninstallWorkspaceSkillConfirm' : 'resource.uninstallSkillConfirm',
+        },
+        { employeeName, skillName: item.resourceName }
+      ),
+      okText: intl.formatMessage({ id: 'common.confirm' }),
+      cancelText: intl.formatMessage({ id: 'common.cancel' }),
+      async onOk() {
+        try {
+          if (workspaceSkill) {
+            if (!item.skillPath) {
+              message.error(intl.formatMessage({ id: 'resource.skillDownload.noSkillPath' }));
+              return;
+            }
+            await deleteSkill({
+              skillPath: item.skillPath,
+              resourceId: normalizedAgentId,
+              userCode: userInfo?.userCode,
+            });
+          } else {
+            // 引用技能的“卸载”只解除当前数字员工绑定，不删除技能资源本体。
+            const res: any = await uninstallDigitalEmployeeRelResources({
+              digitalEmployeeId: normalizedAgentId,
+              relIds: [item.resourceId],
+            });
+            if (res && res.code !== 0) {
+              message.error(res.msg || intl.formatMessage({ id: 'common.operationFailed' }));
+              return;
+            }
+          }
+          message.success(intl.formatMessage({ id: 'resource.uninstallSuccess' }));
+          setResourceList((prev) => prev.filter((resource) => resource.resourceId !== item.resourceId));
+          refreshSkillResources();
+        } catch (error: any) {
+          message.error(error?.message || error || intl.formatMessage({ id: 'common.operationFailed' }));
+        }
+      },
+    });
   };
 
   // 处理更多按钮点击
@@ -777,7 +912,20 @@ const ResourceList = (props: Props) => {
     );
   };
 
-  // 渲染卡片/列表项的操作下拉菜单（详情 / 下载 / 删除）
+  const renderSkillSourceTag = (item: IResourceItem): React.ReactNode => {
+    if (resourceType !== 'SKILL' || item.displaySourceType !== SKILL_DISPLAY_SOURCE_USER_DEVELOPED) {
+      return null;
+    }
+    return (
+      <span className={styles.compactSkillSourceTag}>
+        <span className={styles.compactSkillSourceTagText}>
+          {intl.formatMessage({ id: 'resource.skillSource.userDeveloped' })}
+        </span>
+      </span>
+    );
+  };
+
+  // 渲染卡片/列表项的操作下拉菜单
   const renderActionDropdown = (item: IResourceItem, variant: 'grid' | 'list' = 'grid'): React.ReactNode => {
     if (resourceType !== 'OBJECT' && resourceType !== 'VIEW' && resourceType !== 'SPACE' && resourceType !== 'SKILL') {
       return null;
@@ -844,17 +992,23 @@ const ResourceList = (props: Props) => {
             ...(resourceType === 'SKILL'
               ? [
                 {
-                  key: 'download',
-                  label: intl.formatMessage({ id: 'common.download' }),
-                  onClick: () => handleDownloadSkill(item),
-                  disabled: !!deletingSkill,
+                  key: 'detail',
+                  label: intl.formatMessage({ id: 'common.detail' }),
+                  onClick: () => {
+                    void handleSkillDetail(item);
+                  },
                 },
                 {
-                  key: 'delete',
-                  label: intl.formatMessage({ id: 'common.delete' }),
-                  onClick: () => handleDeleteSkill(item),
-                  disabled: !!downloadingSkill,
-                  danger: true,
+                  key: 'share',
+                  label: intl.formatMessage({ id: 'common.share' }),
+                  onClick: () => {
+                    void handleShareSkill(item);
+                  },
+                },
+                {
+                  key: 'uninstall',
+                  label: intl.formatMessage({ id: 'resource.uninstallSkill' }),
+                  onClick: () => handleUninstallSkill(item),
                 },
               ]
               : []),
@@ -885,8 +1039,12 @@ const ResourceList = (props: Props) => {
   };
 
   useEffect(() => {
-    const reload = (resourceType: string) => {
-      loadResources(true, resourceType);
+    const reload = (payload?: string | { resourceType?: string }) => {
+      const nextResourceType = getReloadResourceType(payload);
+      if (nextResourceType !== resourceType) {
+        return;
+      }
+      loadResources(true, nextResourceType);
     };
 
     EventEmitter.on('beyond-resourceList-resourceType-reload', reload);
@@ -923,6 +1081,7 @@ const ResourceList = (props: Props) => {
                     title={
                       <span className={styles.compactTitleRow}>
                         <span className={styles.nameText}>{item.resourceName}</span>
+                        {renderSkillSourceTag(item)}
                         {renderResourceBizTypeTag(item.resourceBizType)}
                       </span>
                     }
@@ -1196,6 +1355,15 @@ const ResourceList = (props: Props) => {
           })()
         ) : null}
       </Modal>
+      {shareModalOpen && (
+        <AddAuthModal
+          title={intl.formatMessage({ id: 'auth.addAuthObject' })}
+          value={shareAuthList}
+          showPost={false}
+          onCancel={handleShareCancel}
+          onOk={handleShareConfirm}
+        />
+      )}
     </div>
   );
 };

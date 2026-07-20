@@ -588,6 +588,17 @@ export default {
   'messageList.troubleshootTooltip': '调用百应运维数字员工排查问题',
   'messageList.troubleshootPrompt': '需要排查的trace_id={traceId}，\n',
   'messageList.mentionDigitalEmployee': '点击 @ {name}',
+  'messageList.viewTrace': '调用链',
+  'messageList.viewTraceTooltip': '查看本次回答的完整调用链',
+
+  'traceDetail.title': '调用链详情',
+  'traceDetail.input': '用户输入',
+  'traceDetail.timeline': '调用链',
+  'traceDetail.defaultAgentName': '模型回复',
+  'traceDetail.empty': '暂无调用链数据',
+  'traceDetail.openInLangfuse': '在 Langfuse 中打开',
+  'traceDetail.openInLangfuseTooltip': '跳转到 Langfuse 查看完整 trace',
+  'traceDetail.externalUrlMissing': '暂未配置 Langfuse 地址，无法跳转',
 
   'citeRender.title': '引用消息',
   'citeRender.deleteConfirm': '确定删除该引用吗？',

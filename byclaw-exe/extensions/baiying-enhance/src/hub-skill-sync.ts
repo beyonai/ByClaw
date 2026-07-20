@@ -43,6 +43,7 @@ export type HubSkillSyncResult = {
   checked: number;
   downloaded: string[];
   skipped: string[];
+  failed: string[];
 };
 
 function nonEmptyString(value: unknown): string {
@@ -291,7 +292,10 @@ async function downloadToFile(params: {
   });
   if (!response.ok || !response.body) {
     const bodyText = await response.text().catch(() => "");
-    throw new Error(`download failed HTTP ${response.status}: ${bodyText.slice(0, 200)}`);
+    const sentHeaders = Object.keys(params.headers).join(", ");
+    throw new Error(
+      `download failed HTTP ${response.status}: ${bodyText.slice(0, 200)} (url=${params.url} headers=[${sentHeaders}])`,
+    );
   }
   await pipeline(Readable.fromWeb(response.body as any), createWriteStream(params.filePath));
 }
@@ -397,18 +401,6 @@ async function installDownloadedSkill(params: {
   }
 }
 
-function collectHubSkillRefs(managed: Array<Pick<AdaptedManagedAgent, "hubSkills">>): BaiyingHubSkillRef[] {
-  const refs = new Map<string, BaiyingHubSkillRef>();
-  for (const agent of managed) {
-    for (const ref of agent.hubSkills ?? []) {
-      if (!refs.has(ref.skillCode)) {
-        refs.set(ref.skillCode, ref);
-      }
-    }
-  }
-  return [...refs.values()];
-}
-
 export async function syncHubSkillsForManagedAgents(params: {
   managed: Array<Pick<AdaptedManagedAgent, "hubSkills">>;
   redisJsonStore?: BaiyingRedisJsonStore;
@@ -417,9 +409,9 @@ export async function syncHubSkillsForManagedAgents(params: {
   baseUrl?: string;
   timeoutMs?: number;
 }): Promise<HubSkillSyncResult> {
-  const refs = collectHubSkillRefs(params.managed);
-  if (refs.length === 0) {
-    return { changed: false, checked: 0, downloaded: [], skipped: [] };
+  const hasAnyHubSkills = params.managed.some((a) => (a.hubSkills?.length ?? 0) > 0);
+  if (!hasAnyHubSkills) {
+    return { changed: false, checked: 0, downloaded: [], skipped: [], failed: [] };
   }
   const baseUrl =
     params.baseUrl?.replace(/\/+$/g, "") ||
@@ -432,37 +424,55 @@ export async function syncHubSkillsForManagedAgents(params: {
   const skillsRoot = path.join(params.stateDir ?? resolveStateDir(), "skills");
   const downloaded: string[] = [];
   const skipped: string[] = [];
+  const failed: string[] = [];
+  const processed = new Set<string>();
 
-  for (const ref of refs) {
-    const versionUrl = resolveHubSkillApiUrl(baseUrl, ref.versionUrl);
-    const version = await fetchHubSkillVersion({ url: versionUrl, headers, timeoutMs });
-    const downloadUrl = resolveHubSkillApiUrl(baseUrl, version.skillUrl ?? ref.skillUrl);
-    const targetDir = path.join(skillsRoot, ref.skillCode);
-    const local = await readLocalMetadata(targetDir);
-    const localSkillDocExists = await hasSkillDoc(targetDir);
-    if (local?.version === version.version && localSkillDocExists) {
-      skipped.push(ref.skillCode);
-      continue;
+  for (const agent of params.managed) {
+    for (const ref of agent.hubSkills ?? []) {
+      if (processed.has(ref.skillCode)) {
+        continue;
+      }
+      processed.add(ref.skillCode);
+
+      try {
+        const versionUrl = resolveHubSkillApiUrl(baseUrl, ref.versionUrl);
+        const version = await fetchHubSkillVersion({ url: versionUrl, headers, timeoutMs });
+        const downloadUrl = resolveHubSkillApiUrl(baseUrl, version.skillUrl ?? ref.skillUrl);
+        const targetDir = path.join(skillsRoot, ref.skillCode);
+        const local = await readLocalMetadata(targetDir);
+        const localSkillDocExists = await hasSkillDoc(targetDir);
+        if (local?.skillUrl === downloadUrl && local?.version === version.version && localSkillDocExists) {
+          skipped.push(ref.skillCode);
+          continue;
+        }
+        await installDownloadedSkill({
+          skillCode: ref.skillCode,
+          downloadUrl,
+          versionUrl,
+          version: version.version,
+          headers,
+          timeoutMs,
+          targetDir,
+        });
+        downloaded.push(ref.skillCode);
+        params.logger?.info?.(
+          `baiying-enhance: hub skill synced skillCode=${ref.skillCode} version=${version.version}`,
+        );
+      } catch (err) {
+        failed.push(ref.skillCode);
+        params.logger?.warn?.(
+          `baiying-enhance: hub skill sync failed skillCode=${ref.skillCode}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        break;
+      }
     }
-    await installDownloadedSkill({
-      skillCode: ref.skillCode,
-      downloadUrl,
-      versionUrl,
-      version: version.version,
-      headers,
-      timeoutMs,
-      targetDir,
-    });
-    downloaded.push(ref.skillCode);
-    params.logger?.info?.(
-      `baiying-enhance: hub skill synced skillCode=${ref.skillCode} version=${version.version}`,
-    );
   }
 
   return {
     changed: downloaded.length > 0,
-    checked: refs.length,
+    checked: processed.size,
     downloaded,
     skipped,
+    failed,
   };
 }

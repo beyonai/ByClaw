@@ -8,6 +8,22 @@
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
-    "properties": {}
+    "properties": {
+      "contentLimits": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Limits for content captured into OTEL span attributes.",
+        "properties": {
+          "maxAttributeChars": {
+            "type": "number",
+            "description": "Maximum characters per captured content attribute. Defaults to 131072."
+          },
+          "maxArrayItems": {
+            "type": "number",
+            "description": "Maximum items captured from content arrays. Defaults to 200."
+          }
+        }
+      }
+    }
   }
 }

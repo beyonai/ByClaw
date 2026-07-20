@@ -257,10 +257,20 @@ public class LangfuseController {
     public ResponseUtil getLangfuseConfig() {
         try {
             log.info("Getting Langfuse configuration");
-            Map<String, Object> config = Map.of("host", langfuseService.getLangfuseHost(), "environment",
-                langfuseService.getLangfuseEnv(), "hasSecretKey",
-                StringUtils.isNotBlank(langfuseService.getLangfuseSecretKey()), "hasPublicKey",
-                StringUtils.isNotBlank(langfuseService.getLangfusePublicKey()));
+            String host = langfuseService.getLangfuseHost();
+            String environment = langfuseService.getLangfuseEnv();
+            String projectId = langfuseService.getLangfuseProjectId();
+            boolean hasSecretKey = StringUtils.isNotBlank(langfuseService.getLangfuseSecretKey());
+            boolean hasPublicKey = StringUtils.isNotBlank(langfuseService.getLangfusePublicKey());
+            boolean enabled = StringUtils.isNotBlank(host) && hasSecretKey && hasPublicKey;
+
+            Map<String, Object> config = new HashMap<>();
+            config.put("host", host);
+            config.put("environment", environment);
+            config.put("projectId", projectId);
+            config.put("hasSecretKey", hasSecretKey);
+            config.put("hasPublicKey", hasPublicKey);
+            config.put("enabled", enabled);
             return ResponseUtil.successResponse(config);
         }
         catch (Exception e) {

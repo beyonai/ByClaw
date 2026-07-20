@@ -1,6 +1,6 @@
 import { message, Modal } from 'antd';
 import classNames from 'classnames';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useDispatch, useIntl, useSelector } from '@umijs/max';
 
 import useShowModal from '@/pages/manager/hooks/useShowModal';
@@ -29,13 +29,17 @@ type ModelTagItem = {
 
 const initPagination = {
   pageIndex: 1,
-  pageSize: 10,
+  // 模型卡片按三列展示时每次加载 12 条，滚动追加时保持整齐的 4 行数据。
+  pageSize: 12,
   total: 0,
 };
 
 const ModelMgr: React.FC = () => {
   const intl = useIntl();
   const dispatch = useDispatch();
+  const pageScrollRef = useRef<HTMLDivElement | null>(null);
+  // 滚动触底加载下一页时加本地锁，避免 loading 状态回写前重复发起请求。
+  const loadMoreLockRef = useRef(false);
   const isLoading = useSelector(({ loading }: any) => loading.effects['modelMgr/getModelListByPage']);
   const actionLoading = useSelector(
     ({ loading }: any) =>
@@ -115,6 +119,7 @@ const ModelMgr: React.FC = () => {
         status?: ModelStatus;
         ability?: string;
         system?: string;
+        append?: boolean;
       }>
     ) => {
       const hasKeyword = !!params && Object.prototype.hasOwnProperty.call(params, 'keyword');
@@ -123,6 +128,7 @@ const ModelMgr: React.FC = () => {
       const hasSystem = !!params && Object.prototype.hasOwnProperty.call(params, 'system');
       const pageNum = params?.pageNum ?? pagination.pageIndex;
       const pageSize = params?.pageSize ?? pagination.pageSize;
+      const append = !!params?.append;
       const nextKeyword = hasKeyword ? params?.keyword : keyword;
       const nextStatus = hasStatus ? params?.status : status;
       const nextAbility = hasAbility ? params?.ability : ability;
@@ -143,8 +149,28 @@ const ModelMgr: React.FC = () => {
           const pageIndex = res?.pageIndex ?? pageNum;
           const newPageSize = res?.pageSize ?? pageSize;
           const total = res?.total ?? 0;
-          setList(rows);
+          setList((prevList) => {
+            if (!append) return rows;
+            // 下一页数据追加到当前列表，并按模型唯一标识去重，避免滚动边界重复触发造成重复卡片。
+            const seenKeys = new Set<string>();
+            return [...prevList, ...rows].filter((item, index) => {
+              const rowKey = `${item?.id ?? item?.modelId ?? item?.modelCode ?? index}`;
+              if (seenKeys.has(rowKey)) return false;
+              seenKeys.add(rowKey);
+              return true;
+            });
+          });
           setPagination({ pageIndex, pageSize: newPageSize, total });
+          loadMoreLockRef.current = false;
+          if (!append) {
+            // 搜索、筛选、刷新后回到顶部，避免停留在底部时立即再次触底加载。
+            requestAnimationFrame(() => {
+              if (pageScrollRef.current) pageScrollRef.current.scrollTop = 0;
+            });
+          }
+        },
+        fail: () => {
+          loadMoreLockRef.current = false;
         },
       });
     },
@@ -307,6 +333,7 @@ const ModelMgr: React.FC = () => {
     return chips;
   }, [ability, abilityLabelMap, intl, keyword, resetAndFetch, status, statusTreeData, system, systemLabelMap]);
 
+  // 无限滚动列表执行状态类操作后统一回第一页，避免只刷新当前分页导致前面已加载数据丢失。
   const setStatusAction = (record: any, nextStatus: ModelStatus) => {
     dispatch({
       type: 'modelMgr/setModelStatus',
@@ -316,7 +343,7 @@ const ModelMgr: React.FC = () => {
       },
       success: () => {
         message.success(intl.formatMessage({ id: 'modelMgr.operationSuccess' }));
-        fetchList();
+        fetchList({ pageNum: 1, pageSize: pagination.pageSize });
         fetchOverviewStats();
       },
     });
@@ -333,11 +360,11 @@ const ModelMgr: React.FC = () => {
         },
         success: () => {
           message.success(intl.formatMessage({ id: 'modelMgr.operationSuccess' }));
-          fetchList();
+          fetchList({ pageNum: 1, pageSize: pagination.pageSize });
         },
       });
     },
-    [dispatch, fetchList, intl]
+    [dispatch, fetchList, intl, pagination.pageSize]
   );
 
   const deleteAction = (record: any) => {
@@ -483,8 +510,31 @@ const ModelMgr: React.FC = () => {
     [abilityLabelMap, formAction, intl, setDefaultAction, systemLabelMap]
   );
 
+  const loadNextPage = useCallback(() => {
+    if (isLoading || actionLoading || loadMoreLockRef.current) return;
+    if (!pagination.total || list.length >= pagination.total) return;
+    loadMoreLockRef.current = true;
+    fetchList({
+      pageNum: pagination.pageIndex + 1,
+      pageSize: pagination.pageSize,
+      append: true,
+    });
+  }, [actionLoading, fetchList, isLoading, list.length, pagination.pageIndex, pagination.pageSize, pagination.total]);
+
+  const handlePageScroll = useCallback(
+    (event: React.UIEvent<HTMLDivElement>) => {
+      const target = event.currentTarget;
+      const distanceToBottom = target.scrollHeight - target.scrollTop - target.clientHeight;
+      // 距离底部较近时提前加载下一页，减少用户停在底部等待的空档。
+      if (distanceToBottom <= 80) {
+        loadNextPage();
+      }
+    },
+    [loadNextPage]
+  );
+
   return (
-    <div className={`${styles.modelMgr} ${commonStyles.commonTabList}`}>
+    <div className={`${styles.modelMgr} ${commonStyles.commonTabList}`} ref={pageScrollRef} onScroll={handlePageScroll}>
       <div className={classNames(commonStyles.tabContent, 'minH0')}>
         <ModelHeroPanel
           intl={intl}
@@ -544,9 +594,6 @@ const ModelMgr: React.FC = () => {
           pagination={pagination as any}
           onAdd={() => formAction.handleShow('add')}
           onReset={clearFilters}
-          onPageChange={({ pageIndex, pageSize }) => {
-            fetchList({ pageNum: pageIndex, pageSize });
-          }}
           cardItemFn={cardItemFn}
         />
       </div>

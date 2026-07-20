@@ -338,6 +338,11 @@ function useHandler(props: IProps) {
           sessionId: newAnswerMsg?.sessionId,
           messageId: newAnswerMsg?.messageId,
         });
+        EventEmitter.emit('beyond-resourceList-resourceType-reload', {
+          resourceType: 'SKILL',
+          resetSkillFilters: false,
+          skipResourceCenterRefresh: true,
+        });
       }
       return onionsProps;
     },

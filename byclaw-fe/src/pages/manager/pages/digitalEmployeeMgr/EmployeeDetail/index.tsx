@@ -27,6 +27,7 @@ import PublishModal from '../components/PublishModal';
 import RefineModal from '../components/RefineModal';
 import LogInfoDrawer from './components/LogInfoDrawer';
 import ConfigForm from './ConfigForm';
+import { normalizeRobotConfig } from './ConfigForm/robotConfig';
 import { DEFAULT_PERSONALITY_DEFINITION } from './personalityDefinitionDefault';
 import styles from './index.module.less';
 import Log from './Log';
@@ -147,6 +148,12 @@ const parseBundledSkills = (value) => {
         const normalized = {
           resourceId,
           skillCode: `${skillCode || ''}`.trim(),
+          label: item?.label || item?.resourceName || item?.name,
+          resourceName: item?.resourceName || item?.label || item?.name,
+          description: item?.description || item?.resourceDesc || item?.remark,
+          resourceDesc: item?.resourceDesc || item?.description || item?.remark,
+          resourceLogoUrl: item?.resourceLogoUrl,
+          avatar: item?.avatar,
           skillType: item?.skillType,
           skillUrl: item?.skillUrl,
           versionUrl: item?.versionUrl,
@@ -172,6 +179,77 @@ const parseBundledSkills = (value) => {
   } catch {
     return normalizeBundledSkillItems(value.split(','));
   }
+};
+
+const normalizeBundledSkillFromRelResource = (item = {}) => {
+  const resourceType = item.grantResourceType || item.resourceBizType;
+  if (resourceType !== 'SKILL') {
+    return null;
+  }
+  const resourceId = item.resourceId || item.grantResourceId || item.id;
+  if (!resourceId) {
+    return null;
+  }
+  const resourceCode = item.resourceCode || item.skillCode || item.code || item.itemCode || '';
+  // 详情接口的 relIds 只带 ID，完整名称和描述在 relResourceList，这里合并给已选技能回显使用。
+  return {
+    resourceId,
+    skillCode: resourceCode,
+    label: item.resourceName || resourceCode || `${resourceId}`,
+    resourceName: item.resourceName || resourceCode || `${resourceId}`,
+    description: item.resourceDesc || item.description || item.remark || '',
+    resourceDesc: item.resourceDesc || item.description || item.remark || '',
+    resourceLogoUrl: item.resourceLogoUrl || item.avatar,
+    avatar: item.avatar,
+    skillType: item.skillType,
+    skillUrl: item.skillUrl,
+    versionUrl: item.versionUrl || (resourceId ? `/byaiService/tool/getSkillVersion?skillId=${resourceId}` : ''),
+  };
+};
+
+const normalizeRelIdList = (value) => {
+  if (Array.isArray(value)) {
+    return value.map((item) => `${item ?? ''}`.trim()).filter(Boolean);
+  }
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) {
+        return parsed.map((item) => `${item ?? ''}`.trim()).filter(Boolean);
+      }
+    } catch {
+      return value
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean);
+    }
+  }
+  return [];
+};
+
+const mergeBundledSkillsWithRelResources = (skills = [], relResourceList = [], relIds = []) => {
+  const skillInfoMap = new Map();
+  (Array.isArray(relResourceList) ? relResourceList : []).forEach((item) => {
+    const normalized = normalizeBundledSkillFromRelResource(item);
+    if (normalized?.resourceId) {
+      skillInfoMap.set(`${normalized.resourceId}`, normalized);
+    }
+  });
+
+  const mergedSkills = parseBundledSkills(skills).map((skill) => {
+    const relSkill = skillInfoMap.get(`${skill.resourceId || skill.skillId || skill.id}`);
+    return relSkill ? { ...relSkill, ...skill } : skill;
+  });
+  const existingIds = new Set(mergedSkills.map((skill) => `${skill.resourceId || skill.skillId || skill.id}`));
+  // 旧数据可能只在 relIds 里保存技能 ID，完整信息在 relResourceList，需要从 relIds 补齐已选技能。
+  normalizeRelIdList(relIds).forEach((relId) => {
+    const relSkill = skillInfoMap.get(relId);
+    if (relSkill && !existingIds.has(relId)) {
+      mergedSkills.push(relSkill);
+      existingIds.add(relId);
+    }
+  });
+  return mergedSkills;
 };
 
 const parseDigitalEmployeeTemplates = (value) => {
@@ -326,12 +404,18 @@ const getDigitalEmployeeTemplate = (templates, ownerType, agentType) => {
 
 const getDigitalEmployeeTemplateMaxLength = (templates, ownerType, agentType) => {
   const list = Array.isArray(templates) ? templates : [];
-  const effectiveOwnerType = String(ownerType || '').trim().toLowerCase() === 'personal' ? 'personal' : 'enterprise';
+  const effectiveOwnerType =
+    String(ownerType || '')
+      .trim()
+      .toLowerCase() === 'personal'
+      ? 'personal'
+      : 'enterprise';
   const effectiveAgentType = agentType === undefined || agentType === null ? '' : String(agentType).trim();
   const matchedTemplate = list.find(
     (item) =>
-      String(item?.ownerType || '').trim().toLowerCase() === effectiveOwnerType &&
-      String(item?.agentType ?? '').trim() === effectiveAgentType
+      String(item?.ownerType || '')
+        .trim()
+        .toLowerCase() === effectiveOwnerType && String(item?.agentType ?? '').trim() === effectiveAgentType
   );
 
   const maxLength = Number(matchedTemplate?.maxLength);
@@ -690,6 +774,7 @@ const EmployeeDetail = ({ loading }) => {
             robotChannelConfigList: robotChannelConfigListRaw,
             catalogId,
             relTools,
+            relIds: detailRelIds,
           } = res || {};
 
           // debugger;
@@ -792,13 +877,18 @@ const EmployeeDetail = ({ loading }) => {
             } = extractPromptFieldsFromCorePersonaDefinition(corePersonaDefinitionValue);
             const promptWorkStandard = promptFieldValuesFromCore.agent || promptFieldValuesFromCore.workStandard || '';
             const effectiveWorkStandard = promptWorkStandard || res?.workStandard || res?.roleAttributes || '';
+            const bundledSkillsFromDetail = mergeBundledSkillsWithRelResources(
+              res?.skills || res?.bundledSkills || prologueRoleJson?.bundledSkills,
+              relResourceList,
+              detailRelIds
+            );
 
             const roleJson = JSON.stringify({
               processingFlow: res?.processingFlow || '',
               personalityDimensions: res?.personalityDimensions || '',
               wordPreferences: res?.wordPreferences || '',
               sentenceAndTone: res?.sentenceAndTone || '',
-              bundledSkills: parseBundledSkills(res?.skills || res?.bundledSkills || prologueRoleJson?.bundledSkills),
+              bundledSkills: bundledSkillsFromDetail,
               agent: promptFieldValuesFromCore.agent || effectiveWorkStandard,
               soul: promptFieldValuesFromCore.soul || '',
               tools: res?.toolStandard || promptFieldValuesFromCore.tools || '',
@@ -887,7 +977,7 @@ const EmployeeDetail = ({ loading }) => {
               personalityDimensions: res?.personalityDimensions || '',
               wordPreferences: res?.wordPreferences || '',
               sentenceAndTone: res?.sentenceAndTone || '',
-              bundledSkills: parseBundledSkills(res?.skills || res?.bundledSkills || prologueRoleJson?.bundledSkills),
+              bundledSkills: bundledSkillsFromDetail,
               agent: promptFieldValuesFromCore.agent || effectiveWorkStandard,
               soul: promptFieldValuesFromCore.soul || '',
               tools: res?.toolStandard || promptFieldValuesFromCore.tools || '',
@@ -959,6 +1049,15 @@ const EmployeeDetail = ({ loading }) => {
                     Object.prototype.hasOwnProperty.call(parsed, 'clientSecret') ||
                     Object.prototype.hasOwnProperty.call(parsed, 'robotCode') ||
                     Object.prototype.hasOwnProperty.call(parsed, 'AICardId') ||
+                    Object.prototype.hasOwnProperty.call(parsed, 'appId') ||
+                    Object.prototype.hasOwnProperty.call(parsed, 'appSecret') ||
+                    Object.prototype.hasOwnProperty.call(parsed, 'verificationToken') ||
+                    Object.prototype.hasOwnProperty.call(parsed, 'encryptKey') ||
+                    Object.prototype.hasOwnProperty.call(parsed, 'botId') ||
+                    Object.prototype.hasOwnProperty.call(parsed, 'secret') ||
+                    Object.prototype.hasOwnProperty.call(parsed, 'agentId') ||
+                    Object.prototype.hasOwnProperty.call(parsed, 'corpId') ||
+                    Object.prototype.hasOwnProperty.call(parsed, 'corpSecret') ||
                     false;
 
                   if (hasMachineChannelKeys) {
@@ -969,6 +1068,15 @@ const EmployeeDetail = ({ loading }) => {
                         clientSecret: parsed?.clientSecret ?? '',
                         robotCode: parsed?.robotCode ?? '',
                         AICardId: parsed?.AICardId ?? '',
+                        appId: parsed?.appId ?? '',
+                        appSecret: parsed?.appSecret ?? '',
+                        verificationToken: parsed?.verificationToken ?? '',
+                        encryptKey: parsed?.encryptKey ?? '',
+                        botId: parsed?.botId ?? '',
+                        secret: parsed?.secret ?? '',
+                        agentId: parsed?.agentId ?? '',
+                        corpId: parsed?.corpId ?? '',
+                        corpSecret: parsed?.corpSecret ?? '',
                       },
                     ];
                   }
@@ -982,6 +1090,15 @@ const EmployeeDetail = ({ loading }) => {
                     Object.prototype.hasOwnProperty.call(machineChannelRaw, 'clientSecret') ||
                     Object.prototype.hasOwnProperty.call(machineChannelRaw, 'robotCode') ||
                     Object.prototype.hasOwnProperty.call(machineChannelRaw, 'AICardId') ||
+                    Object.prototype.hasOwnProperty.call(machineChannelRaw, 'appId') ||
+                    Object.prototype.hasOwnProperty.call(machineChannelRaw, 'appSecret') ||
+                    Object.prototype.hasOwnProperty.call(machineChannelRaw, 'verificationToken') ||
+                    Object.prototype.hasOwnProperty.call(machineChannelRaw, 'encryptKey') ||
+                    Object.prototype.hasOwnProperty.call(machineChannelRaw, 'botId') ||
+                    Object.prototype.hasOwnProperty.call(machineChannelRaw, 'secret') ||
+                    Object.prototype.hasOwnProperty.call(machineChannelRaw, 'agentId') ||
+                    Object.prototype.hasOwnProperty.call(machineChannelRaw, 'corpId') ||
+                    Object.prototype.hasOwnProperty.call(machineChannelRaw, 'corpSecret') ||
                     false;
 
                   if (hasMachineChannelKeys) {
@@ -992,6 +1109,15 @@ const EmployeeDetail = ({ loading }) => {
                         clientSecret: machineChannelRaw?.clientSecret ?? '',
                         robotCode: machineChannelRaw?.robotCode ?? '',
                         AICardId: machineChannelRaw?.AICardId ?? '',
+                        appId: machineChannelRaw?.appId ?? '',
+                        appSecret: machineChannelRaw?.appSecret ?? '',
+                        verificationToken: machineChannelRaw?.verificationToken ?? '',
+                        encryptKey: machineChannelRaw?.encryptKey ?? '',
+                        botId: machineChannelRaw?.botId ?? '',
+                        secret: machineChannelRaw?.secret ?? '',
+                        agentId: machineChannelRaw?.agentId ?? '',
+                        corpId: machineChannelRaw?.corpId ?? '',
+                        corpSecret: machineChannelRaw?.corpSecret ?? '',
                       },
                     ];
                   }
@@ -1000,17 +1126,7 @@ const EmployeeDetail = ({ loading }) => {
 
               // 新格式要求必须有渠道（channel），不再兼容 robotChannelConfigList 旧字段
               if (Array.isArray(robotList) && robotList.length > 0) {
-                setRobotConfigs(
-                  robotList
-                    .map((item) => ({
-                      channel: item.channel || '',
-                      clientId: item.clientId ?? '',
-                      clientSecret: item.clientSecret ?? '',
-                      robotCode: item.robotCode ?? '',
-                      AICardId: item.AICardId ?? '',
-                    }))
-                    .filter((it) => it.channel)
-                );
+                setRobotConfigs(robotList.map((item) => normalizeRobotConfig(item)).filter((it) => it.channel));
               } else {
                 setRobotConfigs([]);
               }
@@ -1086,7 +1202,11 @@ const EmployeeDetail = ({ loading }) => {
         effectiveAgentType || agentType
       );
       setPromptFieldMaxLength(nextMaxLength);
-      const relSkills = Array.isArray(templateConfig?.relSkills) ? templateConfig.relSkills : [];
+      // 默认模板里的技能可能配置为数组、逗号字符串或 JSON 字符串，这里统一解析后交给配置表单补全展示。
+      const relSkillsConfig = [templateConfig?.relSkills, templateConfig?.skills, templateConfig?.bundledSkills].find(
+        (value) => (Array.isArray(value) ? value.length > 0 : !!value)
+      );
+      const relSkills = parseBundledSkills(relSkillsConfig);
       const relTools = Array.isArray(templateConfig?.relTools) ? templateConfig.relTools : [];
 
       if (relSkills.length > 0) {
@@ -1397,7 +1517,9 @@ const EmployeeDetail = ({ loading }) => {
             templateId: rule.templateId,
           })),
           // 后端字段 machineChannel 期望（示例）：
-          // 多渠道：[{"channel":"DingTalk","clientId":"...","clientSecret":"...","robotCode":"...","AICardId":"..."}, {...}]
+          // 多渠道：
+          // 钉钉 [{"channel":"DingTalk","clientId":"...","clientSecret":"...","robotCode":"...","AICardId":"..."}]
+          // 飞书 [{"channel":"Feishu","appId":"...","appSecret":"...","verificationToken":"...","encryptKey":"..."}]
           machineChannel: JSON.stringify(
             (() => {
               if (!Array.isArray(robotConfigs) || robotConfigs.length === 0) {

@@ -13,9 +13,14 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -186,11 +191,7 @@ class DingtalkCardServiceTest {
             }
         };
 
-        DingtalkCardStreamingOutputStream outputStream = new DingtalkCardStreamingOutputStream(
-                objectMapper,
-                recordingService,
-                new DingtalkCardStreamSession(null, "", "track-001")
-        );
+        DingtalkCardStreamingOutputStream outputStream = newUnthrottledOutputStream(recordingService, "track-001");
 
         outputStream.write("""
                 {"event":"answerDelta","contentType":"1002","choices":[{"delta":{"content":"你"}}]}
@@ -224,11 +225,7 @@ class DingtalkCardServiceTest {
 
         };
 
-        DingtalkCardStreamingOutputStream outputStream = new DingtalkCardStreamingOutputStream(
-                objectMapper,
-                recordingService,
-                new DingtalkCardStreamSession(null, "", "track-002")
-        );
+        DingtalkCardStreamingOutputStream outputStream = newUnthrottledOutputStream(recordingService, "track-002");
 
         outputStream.write("""
                 {"event":"answerStart","messageId":"m-001","contentType":"1002"}
@@ -242,6 +239,85 @@ class DingtalkCardServiceTest {
 
         assertThat(latestContent.get()).isEqualTo("你好");
         assertThat(finalized.get()).isTrue();
+    }
+
+    @Test
+    void appStreamResponseShouldFinalizeCardAndCompleteStream() throws Exception {
+        AtomicReference<String> latestContent = new AtomicReference<>("");
+        AtomicBoolean finalized = new AtomicBoolean(false);
+        DingtalkCardService recordingService = new DingtalkCardService(objectMapper, tokenService, robotConfigService) {
+            @Override
+            public void streamingUpdateAssistantReply(DingtalkCardStreamSession session, String content, boolean isFinalize) {
+                latestContent.set(content);
+                finalized.set(isFinalize);
+                if (isFinalize) {
+                    session.setFinalized(true);
+                }
+            }
+
+            @Override
+            public void updateCopyContent(DingtalkCardStreamSession session, String copyContent) {
+                // no-op for this unit test
+            }
+        };
+        DingtalkCardStreamingOutputStream outputStream = newUnthrottledOutputStream(recordingService, "track-app-end");
+
+        outputStream.write("""
+                {"event":"answerDelta","contentType":"1002","choices":[{"delta":{"content":"异步回答"}}]}
+                """.getBytes());
+
+        assertThat(outputStream.completionFuture()).isNotDone();
+        outputStream.write("""
+                {"event":"appStreamResponse"}
+                """.getBytes());
+        outputStream.completionFuture().get(2, TimeUnit.SECONDS);
+
+        assertThat(latestContent.get()).isEqualTo("异步回答");
+        assertThat(finalized.get()).isTrue();
+    }
+
+    @Test
+    void completionIdleTimeoutShouldResetAfterEachWrite() throws Exception {
+        DingtalkCardService recordingService = new DingtalkCardService(objectMapper, tokenService, robotConfigService) {
+            @Override
+            public void streamingUpdateAssistantReply(DingtalkCardStreamSession session, String content, boolean isFinalize) {
+                if (isFinalize) {
+                    session.setFinalized(true);
+                }
+            }
+
+            @Override
+            public void updateCopyContent(DingtalkCardStreamSession session, String copyContent) {
+                // no-op for this unit test
+            }
+        };
+        DingtalkCardStreamingOutputStream outputStream = newUnthrottledOutputStream(recordingService, "track-idle");
+        ExecutorService waiter = Executors.newSingleThreadExecutor();
+        try {
+            Future<Boolean> completed = waiter.submit(() -> {
+                try {
+                    outputStream.awaitCompletionAfterIdle(250, TimeUnit.MILLISECONDS);
+                    return true;
+                } catch (java.util.concurrent.TimeoutException e) {
+                    return false;
+                }
+            });
+
+            Thread.sleep(150);
+            outputStream.write("""
+                    {"event":"answerDelta","contentType":"1002","choices":[{"delta":{"content":"慢"}}]}
+                    """.getBytes());
+            Thread.sleep(150);
+
+            assertThat(completed).isNotDone();
+
+            outputStream.write("""
+                    {"event":"appStreamResponse"}
+                    """.getBytes());
+            assertThat(completed.get(2, TimeUnit.SECONDS)).isTrue();
+        } finally {
+            waiter.shutdownNow();
+        }
     }
 
     @Test
@@ -268,11 +344,7 @@ class DingtalkCardServiceTest {
 
         };
 
-        DingtalkCardStreamingOutputStream outputStream = new DingtalkCardStreamingOutputStream(
-                objectMapper,
-                recordingService,
-                new DingtalkCardStreamSession(null, "", "track-003")
-        );
+        DingtalkCardStreamingOutputStream outputStream = newUnthrottledOutputStream(recordingService, "track-003");
 
         outputStream.write("""
                 {"event":"reasoningLogStart","messageId":"m-003"}
@@ -295,6 +367,46 @@ class DingtalkCardServiceTest {
         assertThat(latestContent.get()).isEqualTo(
                 "<span style=\"color:#a4aab2;\"><em>&emsp;&emsp;用户</em></span>\n\n---\n\n答案"
         );
+        assertThat(finalized.get()).isTrue();
+    }
+
+    @Test
+    void shouldHideReasoningByDefault() throws Exception {
+        AtomicReference<String> latestContent = new AtomicReference<>("");
+        AtomicBoolean finalized = new AtomicBoolean(false);
+
+        DingtalkCardService recordingService = new DingtalkCardService(objectMapper, tokenService, robotConfigService) {
+            @Override
+            public void streamingUpdateAssistantReply(DingtalkCardStreamSession session, String content, boolean isFinalize) {
+                latestContent.set(content);
+                finalized.set(isFinalize);
+                if (isFinalize) {
+                    session.setFinalized(true);
+                }
+            }
+
+            @Override
+            public void updateCopyContent(DingtalkCardStreamSession session, String copyContent) {
+                // no-op for this unit test
+            }
+        };
+
+        DingtalkCardStreamingOutputStream outputStream = new DingtalkCardStreamingOutputStream(
+                objectMapper,
+                recordingService,
+                new DingtalkCardStreamSession(null, "", "track-hide-reasoning"),
+                null,
+                null
+        );
+
+        outputStream.write("""
+                {"event":"reasoningLogDelta","contentType":"1002","choices":[{"delta":{"content":"思考过程"}}]}
+                {"event":"answerDelta","contentType":"1002","choices":[{"delta":{"content":"答案"}}]}
+                """.getBytes());
+        outputStream.finish();
+
+        assertThat(latestContent.get()).isEqualTo("答案");
+        assertThat(latestContent.get()).doesNotContain("思考过程");
         assertThat(finalized.get()).isTrue();
     }
 
@@ -322,11 +434,7 @@ class DingtalkCardServiceTest {
 
         };
 
-        DingtalkCardStreamingOutputStream outputStream = new DingtalkCardStreamingOutputStream(
-                objectMapper,
-                recordingService,
-                new DingtalkCardStreamSession(null, "", "track-005")
-        );
+        DingtalkCardStreamingOutputStream outputStream = newUnthrottledOutputStream(recordingService, "track-005");
 
         outputStream.write("""
                 {"event":"reasoningLogDelta","contentType":"1001","orderId":"r-001","choices":[{"delta":{"content":"第一段"}}]}
@@ -373,11 +481,7 @@ class DingtalkCardServiceTest {
             }
         };
 
-        DingtalkCardStreamingOutputStream outputStream = new DingtalkCardStreamingOutputStream(
-                objectMapper,
-                recordingService,
-                new DingtalkCardStreamSession(null, "", "track-008")
-        );
+        DingtalkCardStreamingOutputStream outputStream = newUnthrottledOutputStream(recordingService, "track-008");
 
         outputStream.write("""
                 {"event":"reasoningLogDelta","contentType":"1002","orderId":"r-010","choices":[{"delta":{"content":"上一段"}}]}
@@ -419,11 +523,7 @@ class DingtalkCardServiceTest {
             }
         };
 
-        DingtalkCardStreamingOutputStream outputStream = new DingtalkCardStreamingOutputStream(
-                objectMapper,
-                recordingService,
-                new DingtalkCardStreamSession(null, "", "track-009")
-        );
+        DingtalkCardStreamingOutputStream outputStream = newUnthrottledOutputStream(recordingService, "track-009");
 
         outputStream.write("""
                 {"event":"reasoningLogDelta","contentType":"1002","orderId":"r-020","choices":[{"delta":{"content":"上一段"}}]}
@@ -470,11 +570,7 @@ class DingtalkCardServiceTest {
 
         };
 
-        DingtalkCardStreamingOutputStream outputStream = new DingtalkCardStreamingOutputStream(
-                objectMapper,
-                recordingService,
-                new DingtalkCardStreamSession(null, "", "track-006")
-        );
+        DingtalkCardStreamingOutputStream outputStream = newUnthrottledOutputStream(recordingService, "track-006");
 
         outputStream.write("""
                 {"event":"reasoningLogDelta","contentType":"3004","choices":[{"delta":{"content":"引用资源"}}]}
@@ -518,11 +614,7 @@ class DingtalkCardServiceTest {
             }
         };
 
-        DingtalkCardStreamingOutputStream outputStream = new DingtalkCardStreamingOutputStream(
-                objectMapper,
-                recordingService,
-                new DingtalkCardStreamSession(null, "", "track-007")
-        );
+        DingtalkCardStreamingOutputStream outputStream = newUnthrottledOutputStream(recordingService, "track-007");
 
         outputStream.write("""
                 {"event":"reasoningLogDelta","contentType":"1002","choices":[{"delta":{"content":"思考"}}]}
@@ -562,11 +654,7 @@ class DingtalkCardServiceTest {
 
         };
 
-        DingtalkCardStreamingOutputStream outputStream = new DingtalkCardStreamingOutputStream(
-                objectMapper,
-                recordingService,
-                new DingtalkCardStreamSession(null, "", "track-004")
-        );
+        DingtalkCardStreamingOutputStream outputStream = newUnthrottledOutputStream(recordingService, "track-004");
 
         outputStream.write("""
                 {"event":"answerDelta","contentType":"2008","choices":[{"delta":{"content":"任务卡片"}}]}
@@ -579,5 +667,74 @@ class DingtalkCardServiceTest {
         assertThat(streamedContents).doesNotContain("任务卡片");
         assertThat(latestContent.get()).isEqualTo("markdown文本");
         assertThat(finalized.get()).isTrue();
+    }
+
+    @Test
+    void shouldThrottleFrequentCardStreamingUpdatesAndFlushOnFinish() throws Exception {
+        List<String> streamedContents = new ArrayList<>();
+        List<Boolean> finalizedStates = new ArrayList<>();
+        AtomicLong nowMillis = new AtomicLong(1_000L);
+
+        DingtalkCardService recordingService = new DingtalkCardService(objectMapper, tokenService, robotConfigService) {
+            @Override
+            public void streamingUpdateAssistantReply(DingtalkCardStreamSession session, String content, boolean isFinalize) {
+                streamedContents.add(content);
+                finalizedStates.add(isFinalize);
+                if (isFinalize) {
+                    session.setFinalized(true);
+                }
+            }
+
+            @Override
+            public void updateCopyContent(DingtalkCardStreamSession session, String copyContent) {
+                // no-op for this unit test
+            }
+        };
+
+        DingtalkCardStreamingOutputStream outputStream = new DingtalkCardStreamingOutputStream(
+                objectMapper,
+                recordingService,
+                new DingtalkCardStreamSession(null, "", "track-throttle"),
+                null,
+                null,
+                nowMillis::get,
+                300L
+        );
+
+        outputStream.write("""
+                {"event":"answerDelta","contentType":"1002","choices":[{"delta":{"content":"你"}}]}
+                """.getBytes());
+        nowMillis.set(1_100L);
+        outputStream.write("""
+                {"event":"answerDelta","contentType":"1002","choices":[{"delta":{"content":"好"}}]}
+                """.getBytes());
+        nowMillis.set(1_200L);
+        outputStream.write("""
+                {"event":"answerDelta","contentType":"1002","choices":[{"delta":{"content":"呀"}}]}
+                """.getBytes());
+        nowMillis.set(1_300L);
+        outputStream.write("""
+                {"event":"answerDelta","contentType":"1002","choices":[{"delta":{"content":"！"}}]}
+                """.getBytes());
+        outputStream.finish();
+
+        assertThat(streamedContents).containsExactly("你", "你好呀！", "你好呀！");
+        assertThat(finalizedStates).containsExactly(false, false, true);
+    }
+
+    private DingtalkCardStreamingOutputStream newUnthrottledOutputStream(
+            DingtalkCardService recordingService,
+            String outTrackId
+    ) {
+        return new DingtalkCardStreamingOutputStream(
+                objectMapper,
+                recordingService,
+                new DingtalkCardStreamSession(null, "", outTrackId),
+                null,
+                null,
+                System::currentTimeMillis,
+                0L,
+                true
+        );
     }
 }

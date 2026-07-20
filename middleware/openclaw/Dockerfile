@@ -89,9 +89,12 @@ FROM ghcr.io/openclaw/openclaw:${OPENCLAW_VERSION}
 USER root
 
 ARG OPENCLAW_VERSION
-ARG OPENCLI_VERSION=1.8.0
-ARG OPENCLI_EXTENSION_VERSION=1.0.15
 ARG ZREAD_CLI_VERSION=0.2.13
+ARG OPENCLI_VERSION=2.1.3
+ARG OPENCLI_EXTENSION_VERSION=2.1.0
+ARG DWS_VERSION=v1.0.47
+ARG WECOM_CLI_VERSION=0.1.9
+ARG LARKSUITE_CLI_VERSION=1.0.67
 ARG INSTALL_BROWSER_STACK=true
 
 RUN chown root:root /app
@@ -101,7 +104,9 @@ ENV PIP_BREAK_SYSTEM_PACKAGES=1 \
     OPENCLAW_BUNDLED_PLUGINS_DIR=/app/dist/extensions \
     OPENCLAW_STATE_DIR=/root/.openclaw \
     OPENCLAW_VNC_WEB_PORT=8081 \
-    OPENCLAW_VNC_PORT=5901
+    OPENCLAW_VNC_PORT=5901 \
+    BYCLI_CONFIG_DIR=/by/.bycli \
+    BYCLI_DAEMON_HOST=0.0.0.0
 
 RUN set -eux; \
     if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
@@ -173,7 +178,7 @@ RUN set -eux; \
         npm install -g "@sovovs/bycli@${OPENCLI_VERSION}"; \
         mkdir -p /opt/opencli/extension; \
         curl -fsSL -o /tmp/opencli-extension.zip \
-            "https://github.com/jackwener/OpenCLI/releases/download/v${OPENCLI_VERSION}/opencli-extension-v${OPENCLI_EXTENSION_VERSION}.zip"; \
+            "https://github.com/sovovs/byCLI/releases/download/v${OPENCLI_VERSION}/bycli-extension-v${OPENCLI_EXTENSION_VERSION}.zip"; \
         unzip -q /tmp/opencli-extension.zip -d /opt/opencli/extension; \
         rm -f /tmp/opencli-extension.zip; \
         chromium --version; \
@@ -278,7 +283,12 @@ RUN chmod +x \
     /usr/local/bin/start-openclaw.sh \
     /usr/local/bin/start-gbrain.sh
 
-RUN export DWS_VERSION=v1.0.47 && curl -fsSL https://raw.githubusercontent.com/DingTalk-Real-AI/dingtalk-workspace-cli/main/scripts/install.sh | sh
+RUN set -eux; \
+    export DWS_VERSION="${DWS_VERSION}"; \
+    curl -fsSL https://raw.githubusercontent.com/DingTalk-Real-AI/dingtalk-workspace-cli/main/scripts/install.sh | sh; \
+    npm install -g "@wecom/cli@${WECOM_CLI_VERSION}" "@larksuite/cli@${LARKSUITE_CLI_VERSION}" "@sovovs/wechat-article-crawler@1.0.0"; \
+    wecom-cli --version; \
+    command -v lark-cli
 
 # 安装 Bun 运行环境（gbrain 必需）— 从官方镜像拷贝二进制，避免 curl 下载超时
 COPY --from=oven/bun:1-debian /usr/local/bin/bun /usr/local/bin/bun

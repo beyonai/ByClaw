@@ -20,8 +20,10 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Langfuse服务类
@@ -52,6 +54,10 @@ public class LangfuseService {
 
     public String getLangfuseEnv() {
         return ApplicationContextUtil.getEnvProperty(EnvConfigKey.LANGFUSE_ENV);
+    }
+
+    public String getLangfuseProjectId() {
+        return ApplicationContextUtil.getEnvProperty(EnvConfigKey.LANGFUSE_PROJECT_ID);
     }
 
     /**
@@ -628,14 +634,22 @@ public class LangfuseService {
                 // 按父子关系分组
                 Map<String, List<Map<String, Object>>> observationsByParent = new HashMap<>();
                 List<Map<String, Object>> rootObservations = new ArrayList<>();
+                Set<String> observationIds = new HashSet<>();
+
+                for (Map<String, Object> obs : observations) {
+                    String obsId = MapParamUtil.getStringValue(obs, "id");
+                    if (StringUtils.isNotBlank(obsId)) {
+                        observationIds.add(obsId);
+                    }
+                }
 
                 for (Map<String, Object> obs : observations) {
                     String parentId = MapParamUtil.getStringValue(obs, "parentObservationId");
                     // 移除metadata以减少数据量
                     obs.remove("metadata");
 
-                    if (StringUtils.isBlank(parentId)) {
-                        // 没有父级，是根节点
+                    if (StringUtils.isBlank(parentId) || !observationIds.contains(parentId)) {
+                        // Keep orphan observations visible when Langfuse omits their parent span.
                         rootObservations.add(obs);
                     }
                     else {
@@ -891,6 +905,11 @@ public class LangfuseService {
      */
     private List<Map<String, Object>> buildTimelineBasicInfo(List<Map<String, Object>> rootObservations,
         Map<String, List<Map<String, Object>>> observationsByParent) {
+        return buildTimelineBasicInfo(rootObservations, observationsByParent, null);
+    }
+
+    private List<Map<String, Object>> buildTimelineBasicInfo(List<Map<String, Object>> rootObservations,
+        Map<String, List<Map<String, Object>>> observationsByParent, String parentId) {
 
         List<Map<String, Object>> result = new ArrayList<>();
 
@@ -899,13 +918,13 @@ public class LangfuseService {
             if (obsType == null)
                 obsType = "observation";
 
-            Map<String, Object> obsItem = buildTimelineBasicItem(obs, obsType, null);
+            Map<String, Object> obsItem = buildTimelineBasicItem(obs, obsType, parentId);
 
             // 递归构建子项
             String obsId = (String) obs.get("id");
             if (observationsByParent.containsKey(obsId)) {
                 List<Map<String, Object>> children = buildTimelineBasicInfo(observationsByParent.get(obsId),
-                    observationsByParent);
+                    observationsByParent, obsId);
                 obsItem.put("children", children);
             }
 
