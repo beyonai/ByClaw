@@ -89,7 +89,8 @@ async def _post_via_discovery(
     if isinstance(response.data, str):
         return response.data
     body: dict[str, Any] = response.data if isinstance(response.data, dict) else {}
-    if not response.is_success or body.get("code", 0) != 0:
+    code = body.get("code", 0)
+    if not response.is_success or (code != 0 and code != 200 and not body.get("success")):
         raise ValueError(
             f"HTTP {response.status_code} {service_name}{path}: {body.get('msg', body)}"
         )

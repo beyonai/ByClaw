@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.state.domain.resource.service;
 
 import com.iwhalecloud.byai.common.constants.resource.OwnerType;
 import com.iwhalecloud.byai.common.constants.resource.ResourceBizType;
+import com.iwhalecloud.byai.common.constants.resource.SystemCode;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import org.apache.commons.lang3.StringUtils;
@@ -20,7 +21,17 @@ public final class ResourceImportOwnerTypeValidator {
 
     public static void validate(SsResource existing, String importOwnerType, String importResourceCode,
                                 String importResourceName, String importResourceBizType) {
+        validate(existing, importOwnerType, importResourceCode, importResourceName, importResourceBizType, null);
+    }
+
+    public static void validate(SsResource existing, String importOwnerType, String importResourceCode,
+                                String importResourceName, String importResourceBizType, String importSystemCode) {
         if (existing == null) {
+            return;
+        }
+
+        // 老智能体来源允许在重复导入时切换个人/企业归属，更新流程会将新 ownerType 写回原记录。
+        if (SystemCode.WHAGE_AGENT.getCode().equalsIgnoreCase(StringUtils.trimToEmpty(importSystemCode))) {
             return;
         }
 

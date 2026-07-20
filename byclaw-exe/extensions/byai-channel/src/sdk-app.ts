@@ -1,7 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import {
-  createRedis,
   WorkerRegistry,
   WorkerRunner,
   GatewayDataEmitter,
@@ -9,6 +8,7 @@ import {
   WorkerHeartbeat,
   ActionType,
   QueueNames,
+  RegistryKeys,
 } from "@byclaw/by-framework";
 import type { OpenClawConfig } from "openclaw/plugin-sdk";
 import { resolveInboundLanguage } from "./i18n.js";
@@ -35,6 +35,12 @@ import {
   parseByaiLaneMetadata,
   parseByaiMultiAgentBatchMetadata,
 } from "./multi-agent.js";
+import {
+  applyByFrameworkRedisKeyPatch,
+  createRedisClient,
+  type RedisClient,
+} from "../../shared/src/redis-compat.js";
+import { releaseCancelledSessionDispatch } from "./session-dispatch-gate.js";
 
 export interface ByaiSdkAppOptions {
   account: ResolvedByaiAccount;
@@ -223,7 +229,7 @@ function isRedisNoGroupError(err: unknown): boolean {
 function installNoGroupRecovery(params: {
   runner: WorkerRunner;
   registry: WorkerRegistry;
-  redis: import("ioredis").Redis;
+  redis: RedisClient;
   workerId: string;
   agentTypes: string[];
   runnerGroupName?: string;
@@ -279,7 +285,7 @@ function installNoGroupRecovery(params: {
 }
 
 async function setRunnerAgentTypeStreamsToLatest(params: {
-  redis: import("ioredis").Redis;
+  redis: RedisClient;
   agentTypes: string[];
   runnerGroupName?: string;
   log?: ByaiSdkLogger;
@@ -312,7 +318,7 @@ export class ByaiSdkApp {
 
   private runner: WorkerRunner | null = null;
   private stopSubscription: (() => void) | null = null;
-  private redis: import("ioredis").Redis | null = null;
+  private redis: RedisClient | null = null;
   private workerHeartbeat: WorkerHeartbeat | null = null;
 
   constructor(opts: ByaiSdkAppOptions) {
@@ -338,8 +344,9 @@ export class ByaiSdkApp {
     }
 
     debug?.(`[${this.account.accountId}] byai-channel redisInfo: ${JSON.stringify(redisInfo)}`);
+    applyByFrameworkRedisKeyPatch({ QueueNames, RegistryKeys }, redisInfo);
 
-    const redis = createRedis(redisInfo);
+    const redis = createRedisClient(redisInfo);
     this.redis = redis;
 
     const userCode = getUserCode();
@@ -349,7 +356,8 @@ export class ByaiSdkApp {
 
     debug?.(`[${this.account.accountId}] byai-channel usercode: ${userCode}`);
 
-    const workerId = `byai-channel-worker-${userCode}-${Math.random().toString(16).slice(2, 6)}`;
+    // Use injected worker_id if available; otherwise fall back to deterministic id for backward compatibility
+    const workerId = process.env.BYAI_WORKER_ID || `byai-channel-worker-${userCode}`;
     const agentTypes = [`BYCLAW_EXE_${userCode}`];
 
     const registry = new WorkerRegistry(redis);
@@ -363,7 +371,7 @@ export class ByaiSdkApp {
     const runner = new WorkerRunner(
       { workerId, agentTypes, registry },
       {
-        redisClient: createRedis(redisInfo),
+        redisClient: createRedisClient(redisInfo) as never,
         ...(runnerGroupName ? { groupName: runnerGroupName } : {}),
       },
     );
@@ -607,6 +615,7 @@ export class ByaiSdkApp {
       activeRequest.abortController.abort(
         new Error(`[${this.account.accountId}] task canceled, reason: ${reason}`),
       );
+      releaseCancelledSessionDispatch(activeRequest.sessionKey);
       clearActiveSdkRequestRecord(activeRequest);
     });
 

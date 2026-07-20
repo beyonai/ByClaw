@@ -65,6 +65,7 @@ import com.iwhalecloud.byai.state.domain.resource.qo.DownloadSkillZipQo;
 import com.iwhalecloud.byai.state.domain.resource.qo.GenerateResourceImageQo;
 import com.iwhalecloud.byai.state.domain.resource.qo.PersonalAgentArchiveQo;
 import com.iwhalecloud.byai.state.domain.resource.qo.ResourceDetailQo;
+import com.iwhalecloud.byai.state.domain.resource.qo.ThirdPartySkillInstallQo;
 import com.iwhalecloud.byai.state.domain.resource.qo.UpdateResourceBasicInfoQo;
 import com.iwhalecloud.byai.state.domain.resource.qo.WorkspaceSkillQo;
 import com.iwhalecloud.byai.state.domain.resource.service.ResourceApplicationService;
@@ -481,6 +482,29 @@ public class ToolManController {
             logger.error("importSkillZip failed", e);
             return ResponseUtil
                 .fail(e.getMessage() != null ? e.getMessage() : I18nUtil.get("byclaw.skill.upload.failed"));
+        }
+    }
+
+    /** 第三方技能超市：按下载地址安装技能到指定数字员工。 */
+    @PostMapping("/installThirdPartySkill")
+    public ResponseUtil<ObjectZipImportResult> installThirdPartySkill(@RequestBody ThirdPartySkillInstallQo request) {
+        try {
+            if (request == null) {
+                return ResponseUtil.fail(I18nUtil.get("param.cannot.be.null"));
+            }
+            ByClawSkillResourceApplicationService.SkillImportResult itemResult =
+                byClawSkillResourceApplicationService.installThirdPartySkill(request.getDigId(),
+                    request.getDownloadUrl());
+            return ResponseUtil.successResponse(I18nUtil.get("byclaw.third.party.skill.install.success"),
+                byClawSkillResourceApplicationService.buildSingleSkillImportResult(itemResult));
+        }
+        catch (IllegalArgumentException | BdpRuntimeException e) {
+            return ResponseUtil.fail(e.getMessage());
+        }
+        catch (Exception e) {
+            logger.error("installThirdPartySkill failed, digId={}", request == null ? null : request.getDigId(), e);
+            return ResponseUtil.fail(e.getMessage() != null ? e.getMessage()
+                : I18nUtil.get("byclaw.third.party.skill.install.failed"));
         }
     }
 
@@ -1197,6 +1221,7 @@ public class ToolManController {
         String resolvedUserCode = StringUtils.isNotBlank(finalUserCode) ? finalUserCode
             : CurrentUserHolder.getCurrentUserCode();
         try {
+            logSkillDownloadRequest(resolvedUserCode, finalResourceId, finalSkillId, finalSkillPath);
             if (finalSkillId != null) {
                 return downloadManagedSkillZip(finalSkillId);
             }
@@ -1223,6 +1248,34 @@ public class ToolManController {
             return ResponseEntity.badRequest().contentType(MediaType.parseMediaType("text/plain; charset=UTF-8"))
                 .body(out -> out.write(fallbackMsg.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
         }
+    }
+
+    private void logSkillDownloadRequest(String userCode, Long resourceId, Long skillId, String skillPath) {
+        Long digitalEmployeeId = resourceId != null ? resourceId : CurrentUserHolder.getDefaultDigEmployeeId();
+        String digitalEmployeeName = "";
+        String skillName = StringUtils.defaultIfBlank(lastPathSegment(skillPath), "未知技能");
+        String skillCode = "";
+        try {
+            if (digitalEmployeeId != null) {
+                SsResource digitalEmployee = ssResourceService.findById(digitalEmployeeId);
+                digitalEmployeeName = digitalEmployee == null ? "" : digitalEmployee.getResourceName();
+            }
+            if (skillId != null) {
+                SsResource skillResource = ssResourceService.findById(skillId);
+                if (skillResource != null) {
+                    skillName = StringUtils.defaultIfBlank(skillResource.getResourceName(), skillName);
+                    skillCode = skillResource.getResourceCode();
+                }
+            }
+        }
+        catch (Exception e) {
+            // 审计日志的补充查询失败不能阻断技能下载。
+            logger.warn("获取技能下载审计信息失败, userCode={}, digitalEmployeeId={}, skillId={}", userCode,
+                digitalEmployeeId, skillId, e);
+        }
+        logger.info("技能下载请求: userCode={}, userName={}, digitalEmployeeId={}, digitalEmployeeName={}, skillId={}, "
+                + "skillCode={}, skillName={}, skillPath={}", userCode, CurrentUserHolder.getCurrentUserName(),
+            digitalEmployeeId, digitalEmployeeName, skillId, skillCode, skillName, skillPath);
     }
 
     private ResponseEntity<StreamingResponseBody> downloadManagedSkillZip(Long skillId) {

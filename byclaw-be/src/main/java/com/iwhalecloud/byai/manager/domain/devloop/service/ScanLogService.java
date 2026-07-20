@@ -98,6 +98,15 @@ public class ScanLogService {
         return scanLogItemMapper.selectList(wrapper);
     }
 
+    /** 查询某扫描源下所有已收集(created)的需求条目，按时间倒序，供需求列表直查 */
+    public List<ScanLogItem> listCreatedItemsBySource(Long sourceId) {
+        LambdaQueryWrapper<ScanLogItem> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(ScanLogItem::getSourceId, sourceId)
+               .eq(ScanLogItem::getAction, "created")
+               .orderByDesc(ScanLogItem::getCreateTime);
+        return scanLogItemMapper.selectList(wrapper);
+    }
+
     /** 判断同一源下是否已存在相同originId的已创建条目 */
     public boolean isDuplicate(Long sourceId, String originId) {
         LambdaQueryWrapper<ScanLogItem> wrapper = new LambdaQueryWrapper<>();

@@ -214,7 +214,7 @@ export const PreViewFile = React.memo((props: TwinsProps & { extra?: React.React
           </Suspense>
         </div>
         <div
-          style={{ display: !!uri && tab === 'preview' && ['md'].includes(type) ? 'block' : 'none' }}
+          style={{ display: !!content && tab === 'preview' && ['md'].includes(type) ? 'block' : 'none' }}
           className={'full-width full-height'}
         >
           <Suspense fallback={<Spin />}>

@@ -1,4 +1,10 @@
-import type { Capability, Dict, ExecutorFailure, ExecutorResponse } from "../types.js";
+import type {
+  Capability,
+  Dict,
+  ExecutorFailure,
+  ExecutorResponse,
+  ResourceContext,
+} from "../types.js";
 import { asString, isRecord } from "../types.js";
 import type { AuthContext } from "../auth.js";
 import { applyEnvAuthOverrides, ensureMcpIdentityHeaders, mergeAuthHeaders } from "../auth.js";
@@ -315,6 +321,10 @@ async function executeOntologyResourceViaCallAgent(input: {
   }
   const toolCallId = input.parameters.tool_call_id as string;
 
+  const resourceContext = isRecord(input.parameters.resource_context)
+    ? (input.parameters.resource_context as ResourceContext)
+    : {};
+
   return executeViaCallAgent({
     capability: input.capability,
     content,
@@ -340,6 +350,7 @@ async function executeOntologyResourceViaCallAgent(input: {
     langfuseTraceId,
     logger: input.logger,
     parentMessageId: toolCallId,
+    resourceContext,
   });
 }
 

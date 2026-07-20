@@ -145,7 +145,7 @@ function resolveFromGlobalStore(sessionKey: string): ChannelSessionResolveResult
   if (byChild) {
     const sid = typeof byChild.sessionId === "string" ? byChild.sessionId.trim() : "";
     if (sid) {
-      const commonFields = extractCommonFieldsFromSessionKey(key);
+      const commonFields = extractCommonFieldsFromSessionKey(byChild.sessionKey || key);
       return {
         sessionId: sid,
         traceId: typeof byChild.traceId === "string" ? byChild.traceId.trim() : undefined,

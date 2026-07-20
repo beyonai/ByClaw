@@ -149,5 +149,6 @@ export type {
   RemoteTaskFollowup,
   RemoteTaskFollowupDeliveryClass,
   RemoteTaskFollowupDispatchResult,
+  RemoteTaskFollowupItem,
   RemoteTaskFollowupStatus,
 } from "./src/remote-followup.js";

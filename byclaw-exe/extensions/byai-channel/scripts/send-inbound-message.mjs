@@ -10,7 +10,9 @@
  *   # Or route to a specific digital employee (agentId 10002171):
  *   node scripts/send-inbound-message.mjs --agent-id 10002171 --content "你好"
  *
- * Env: REDIS_HOST, REDIS_PORT, REDIS_USERNAME, REDIS_PASSWORD, REDIS_DATABASE, USER_CODE
+ * Env: REDIS_HOST/REDIS_PORT or REDIS_CLUSTER_HOST, REDIS_USERNAME,
+ * REDIS_PASSWORD, REDIS_DATABASE, USER_CODE. Spring-style keys such as
+ * spring.data.redis.cluster.nodes and spring.data.redis.password are also read.
  */
 import crypto from "node:crypto";
 import process from "node:process";
@@ -82,18 +84,145 @@ Options:
 }
 
 function readRedisInfo() {
-  const host = process.env.REDIS_HOST?.trim();
-  const port = process.env.REDIS_PORT?.trim();
+  applyRedisEnvAliases();
+  const clusterRaw =
+    envString("REDIS_CLUSTER_HOST") ||
+    envString("REDIS_CLUSTER_NODES") ||
+    envString("spring.data.redis.cluster.nodes") ||
+    envString("spring.redis.cluster.nodes");
+  const clusterNodes = parseClusterNodes(clusterRaw);
+  const mode = envString("REDIS_MODE") || (clusterNodes.length > 0 ? "cluster" : "standalone");
+  const keySchemaVersion = envString("REDIS_KEY_SCHEMA_VERSION") || (mode === "cluster" ? "v2" : "v1");
+  if (mode === "cluster" && keySchemaVersion !== "v2") {
+    throw new Error("Redis Cluster requires REDIS_KEY_SCHEMA_VERSION=v2");
+  }
+  if (mode === "cluster") {
+    if (clusterNodes.length === 0) {
+      throw new Error("REDIS_CLUSTER_HOST or spring.data.redis.cluster.nodes is required");
+    }
+    return {
+      mode,
+      clusterNodes,
+      keySchemaVersion,
+      username: envString("REDIS_USERNAME") || undefined,
+      password: envString("REDIS_PASSWORD") || undefined,
+    };
+  }
+  const host = envString("REDIS_HOST");
+  const port = envString("REDIS_PORT");
   if (!host || !port) {
-    throw new Error("REDIS_HOST and REDIS_PORT are required");
+    throw new Error("REDIS_HOST and REDIS_PORT are required for standalone Redis");
   }
   return {
+    mode: "standalone",
+    keySchemaVersion,
+    clusterNodes: [],
     host,
     port: Number.parseInt(port, 10),
-    username: process.env.REDIS_USERNAME?.trim() || undefined,
-    password: process.env.REDIS_PASSWORD?.trim() || undefined,
-    db: Number.parseInt(process.env.REDIS_DATABASE ?? "0", 10),
+    username: envString("REDIS_USERNAME") || undefined,
+    password: envString("REDIS_PASSWORD") || undefined,
+    db: Number.parseInt(envString("REDIS_DATABASE") || envString("REDIS_DB") || "0", 10),
   };
+}
+
+function envString(name) {
+  return typeof process.env[name] === "string" ? process.env[name].trim() : "";
+}
+
+function applyRedisEnvAliases() {
+  const springClusterNodes =
+    envString("spring.data.redis.cluster.nodes") || envString("spring.redis.cluster.nodes");
+  if (!process.env.REDIS_CLUSTER_HOST && springClusterNodes) {
+    process.env.REDIS_CLUSTER_HOST = springClusterNodes;
+  }
+  const aliases = [
+    ["REDIS_HOST", ["spring.data.redis.host", "spring.redis.host"]],
+    ["REDIS_PORT", ["spring.data.redis.port", "spring.redis.port"]],
+    ["REDIS_USERNAME", ["spring.data.redis.username", "spring.redis.username"]],
+    ["REDIS_PASSWORD", ["spring.data.redis.password", "spring.redis.password"]],
+    ["REDIS_DATABASE", ["spring.data.redis.database", "spring.redis.database", "REDIS_DB"]],
+  ];
+  for (const [target, sources] of aliases) {
+    if (process.env[target]) continue;
+    const value = sources.map(envString).find(Boolean);
+    if (value) process.env[target] = value;
+  }
+  if (!process.env.REDIS_DB && process.env.REDIS_DATABASE) {
+    process.env.REDIS_DB = process.env.REDIS_DATABASE;
+  }
+  if ((process.env.REDIS_CLUSTER_HOST || process.env.REDIS_CLUSTER_NODES) && !process.env.REDIS_KEY_SCHEMA_VERSION) {
+    process.env.REDIS_KEY_SCHEMA_VERSION = "v2";
+  }
+}
+
+function parseClusterNodes(raw) {
+  return String(raw || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => {
+      const idx = item.lastIndexOf(":");
+      if (idx <= 0) return null;
+      const host = item.slice(0, idx).trim();
+      const port = Number.parseInt(item.slice(idx + 1).trim(), 10);
+      return host && Number.isFinite(port) ? { host, port } : null;
+    })
+    .filter(Boolean);
+}
+
+function v2(config) {
+  return config.keySchemaVersion === "v2";
+}
+
+function versioned(config, v1, v2Suffix) {
+  return v2(config) ? `byai_gateway:v2:${v2Suffix}` : v1;
+}
+
+function patchFrameworkRedisKeys(framework, config) {
+  if (!v2(config)) return;
+  const { QueueNames, RegistryKeys } = framework;
+  if (QueueNames) {
+    QueueNames.ctrl_stream = (agentType) =>
+      versioned(config, `byai_gateway:ctrl:agent_type:${agentType}`, `ctrl:agent_type:${agentType}`);
+    QueueNames.worker_ctrl_stream = (workerId) =>
+      versioned(config, `byai_gateway:ctrl:worker:${workerId}`, `ctrl:worker:{${workerId}}`);
+    QueueNames.session_data_stream = (sessionId) =>
+      versioned(config, `byai_gateway:session:${sessionId}:data_stream`, `session:{${sessionId}}:data_stream`);
+    QueueNames.task_group = (groupId) =>
+      versioned(config, `byai_gateway:task_group:${groupId}`, `task_group:{${groupId}}`);
+    QueueNames.task_group_results = (groupId) =>
+      versioned(config, `byai_gateway:task_group:${groupId}:results`, `task_group:{${groupId}}:results`);
+  }
+  if (RegistryKeys) {
+    RegistryKeys.KNOWN_WORKERS = versioned(config, "byai_gateway:registry:workers", "registry:workers");
+    RegistryKeys.SD_SERVICES = versioned(config, "byai_gateway:sd:services", "sd:services");
+    RegistryKeys.WORKER_DEFAULT_LEASE_TTL_SECONDS = 30;
+    RegistryKeys.worker_online_lease = (workerId) =>
+      versioned(config, `byai_gateway:registry:worker:online:${workerId}`, `registry:worker:{${workerId}}:online`);
+    RegistryKeys.workerDeclaredAgentTypes = (workerId) =>
+      versioned(config, `byai_gateway:registry:worker:agent_types:${workerId}`, `registry:worker:{${workerId}}:agent_types`);
+    RegistryKeys.agentTypeMembers = (agentType) =>
+      versioned(config, `byai_gateway:registry:agent_type:workers:${agentType}`, `registry:agent_type:{${agentType}}:workers`);
+    RegistryKeys.worker_lock = (workerId) =>
+      versioned(config, `byai_gateway:registry:worker:lock:${workerId}`, `registry:worker:{${workerId}}:lock`);
+    RegistryKeys.session_registry = (sessionId) =>
+      versioned(config, `byai_gateway:session:${sessionId}:registry`, `session:{${sessionId}}:registry`);
+  }
+}
+
+async function createRedisConnection(config) {
+  if (config.mode === "cluster") {
+    const Redis = (await import("ioredis")).default;
+    return new Redis.Cluster(config.clusterNodes, {
+      redisOptions: {
+        username: config.username,
+        password: config.password,
+      },
+      scaleReads: "master",
+    });
+  }
+  const { createRedis } = await importFramework();
+  return createRedis(config);
 }
 
 function buildLlmMessagePayload(opts) {
@@ -198,9 +327,11 @@ async function main() {
   const targetAgentType = `BYCLAW_EXE_${userCode}`;
   const traceId = crypto.randomBytes(16).toString("hex");
 
-  const { createRedis, GatewayClient, WorkerRegistry } = await importFramework();
+  const framework = await importFramework();
+  const { GatewayClient, WorkerRegistry } = framework;
   const redisInfo = readRedisInfo();
-  const redis = createRedis(redisInfo);
+  patchFrameworkRedisKeys(framework, redisInfo);
+  const redis = await createRedisConnection(redisInfo);
   const registry = new WorkerRegistry(redis);
   const client = new GatewayClient(registry, redis);
 

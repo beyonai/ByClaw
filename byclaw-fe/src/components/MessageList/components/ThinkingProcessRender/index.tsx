@@ -38,14 +38,14 @@ function ThinkingProcessRender(props: IProps) {
     (path: string, val: any) => {
       const newMsg = { ...msg };
       set(newMsg, `thinkList.${path}`, val);
-      updateMessage(newMsg);
+      return updateMessage(newMsg);
     },
-    [updateMessage]
+    [updateMessage, msg]
   );
 
   const updateMessageListItemContent = React.useCallback(
     (path: string, val: any) => {
-      updateMessageList(`${path}`, val);
+      return updateMessageList(`${path}`, val);
     },
     [updateMessageList]
   );

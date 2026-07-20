@@ -47,6 +47,36 @@
         ORDER BY COALESCE(s.update_time, s.create_time) DESC, s.create_time DESC
     </select>
 
+    <select id="selectSessionsByProjectByQo" resultMap="ProjectSessionDtoResultMap">
+        SELECT a.session_id,
+               a.parent_session_id,
+               a.session_name,
+               a.create_time,
+               a.creator_id,
+               a.object_type,
+               a.object_id,
+               a.enterprise_id,
+               a.session_content,
+               a.is_debug,
+               a.session_type,
+               a.update_by,
+               a.update_time,
+               a.state,
+               a.project_id,
+               r.avatar
+        FROM byai_session a
+                 JOIN byai_project b ON a.project_id = b.project_id
+                 LEFT JOIN ss_resource r ON a.object_id = r.resource_id
+        WHERE b.project_id = #{projectId}
+        <if test="keyword != null and keyword != ''">
+            AND a.session_name LIKE CONCAT('%', #{keyword}, '%')
+        </if>
+        <if test="createBy != null">
+            AND a.creator_id =#{createBy}
+        </if>
+        ORDER BY COALESCE(a.update_time, a.create_time) DESC, a.create_time DESC
+    </select>
+
     <select id="countSessionsByProjectId" resultType="java.lang.Long">
         SELECT COUNT(1)
         FROM byai_project_session ps

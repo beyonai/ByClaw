@@ -1,6 +1,8 @@
 package com.iwhalecloud.byai.manager.interfaces.controller.devloop;
 
 import com.iwhalecloud.byai.manager.application.service.devloop.DevloopApplicationService;
+import com.iwhalecloud.byai.manager.domain.devloop.service.DevloopPhaseService;
+import com.iwhalecloud.byai.manager.dto.devloop.ProjectMemberListDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ScanSourceDTO;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -106,6 +108,17 @@ public class DevloopController {
     }
 
     /**
+     * 按扫描源查询已收集的需求列表(action=created)
+     * @param params 包含 sourceId
+     * @return 该源下所有需求条目(含评分)，按时间倒序
+     */
+    @PostMapping("/source/requirements")
+    public ResponseUtil<List<Map<String, Object>>> listRequirementsBySource(@RequestBody Map<String, Object> params) {
+        Long sourceId = Long.valueOf(params.get("sourceId").toString());
+        return applicationService.listRequirementsBySource(sourceId);
+    }
+
+    /**
      * 保存GitHub Personal Access Token
      * @param params 包含 pat（明文，后端SM4加密存储）
      */
@@ -156,17 +169,20 @@ public class DevloopController {
         return applicationService.listTasks(projectId);
     }
 
-    /** 更新任务 */
-    @PostMapping("/task/update")
-    public ResponseUtil<Void> updateTask(@RequestBody Map<String, Object> params) {
-        return applicationService.updateTask(params);
-    }
-
-    /** 获取任务详情 */
+    /** 获取任务(会话)详情 */
     @PostMapping("/task/detail")
     public ResponseUtil<Map<String, Object>> getTaskDetail(@RequestBody Map<String, Object> params) {
-        Long taskId = Long.valueOf(params.get("taskId").toString());
-        return applicationService.getTaskDetail(taskId);
+        Long sessionId = Long.valueOf(params.get("sessionId") != null ? params.get("sessionId").toString()
+            : params.get("taskId").toString());
+        return applicationService.getTaskDetail(sessionId);
+    }
+
+    /** 获取任务环节进度：从会话消息派生的 7 环节状态 + 打回记录，供详情逐环节展示 */
+    @PostMapping("/task/phases")
+    public ResponseUtil<DevloopPhaseService.PhaseSnapshot> getTaskPhases(@RequestBody Map<String, Object> params) {
+        Long sessionId = Long.valueOf(params.get("sessionId") != null ? params.get("sessionId").toString()
+            : params.get("taskId").toString());
+        return applicationService.getTaskPhases(sessionId);
     }
 
     // ========== 项目成员 ==========
@@ -179,7 +195,7 @@ public class DevloopController {
 
     /** 查询项目成员列表 */
     @PostMapping("/member/list")
-    public ResponseUtil<List<Map<String, Object>>> listProjectMembers(@RequestBody Map<String, Object> params) {
+    public ResponseUtil<List<ProjectMemberListDto>> listProjectMembers(@RequestBody Map<String, Object> params) {
         Long projectId = Long.valueOf(params.get("projectId").toString());
         return applicationService.listProjectMembers(projectId);
     }

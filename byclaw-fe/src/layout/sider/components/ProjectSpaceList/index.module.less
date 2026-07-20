@@ -72,6 +72,44 @@
   font-weight: 400;
 }
 
+.scopeDropdown {
+  :global {
+    .@{antPrefix}-dropdown-menu {
+      min-width: 240px;
+      padding: 8px;
+    }
+
+    .@{antPrefix}-dropdown-menu-item {
+      min-width: 0;
+    }
+
+    .@{antPrefix}-dropdown-menu-title-content {
+      min-width: 0;
+      width: 100%;
+    }
+  }
+}
+
+.scopeMenuLabel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 220px;
+  width: 100%;
+}
+
+.scopeMenuName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scopeMenuTag {
+  margin-left: auto;
+}
+
 .actionRow {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 36px;
@@ -131,34 +169,67 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 10px 0 12px;
+  padding: 4px 6px 8px;
+  background: #fff;
+  // 父子滚动同时触发时隔离绘制层，避免展开会话列表透到下方项目缝隙里。
+  isolation: isolate;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 .projectItem {
+  position: relative;
+  z-index: 1;
+  border: 1px solid transparent;
   border-radius: 10px;
-  padding: 7px 8px 7px 6px;
+  padding: 2px;
   background: transparent;
+  transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+}
+
+.projectItemExpanded {
+  z-index: 0;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  border-color: #dfe6f0;
+  background: #fff;
+  box-shadow: 0 8px 20px rgba(31, 45, 77, 0.08);
+}
+
+.projectTop {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  background: #fff;
+  border-radius: 8px;
+  padding: 3px 4px;
   transition: background-color 0.2s;
 
   &:hover {
     background: #f7f9fd;
-  }
-}
 
-.projectActive {
-  background: #f5f7fc;
-}
+    .projectHeader {
+      padding-right: 28px;
+    }
 
-.projectTop {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-
-  &:hover {
     .projectAction {
       opacity: 1;
+      pointer-events: auto;
     }
   }
+}
+
+.projectItemExpanded .projectTop {
+  border-bottom: 1px solid #edf1f7;
+  border-radius: 8px 8px 0 0;
 }
 
 .projectHeader {
@@ -166,16 +237,20 @@
   min-width: 0;
   border: 0;
   padding: 0;
+  box-sizing: border-box;
   background: transparent;
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   text-align: left;
   cursor: pointer;
+  transition: padding-right 0.2s;
 }
 
 .projectAction {
-  flex: 0 0 24px;
+  position: absolute;
+  top: 50%;
+  right: 0;
   width: 24px;
   height: 24px;
   border: 0;
@@ -187,6 +262,8 @@
   background: transparent;
   cursor: pointer;
   opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%);
   transition: opacity 0.2s, background-color 0.2s;
 
   &:hover {
@@ -194,13 +271,9 @@
   }
 }
 
-.projectActive .projectAction {
-  opacity: 1;
-}
-
 .expandIcon {
   flex: 0 0 12px;
-  height: 38px;
+  height: 28px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -236,7 +309,7 @@
   color: #1f2633;
   font-size: 13px;
   font-weight: 600;
-  line-height: 18px;
+  line-height: 17px;
 }
 
 .projectDesc {
@@ -246,14 +319,18 @@
 }
 
 .projectTag {
-  height: 20px;
-  line-height: 20px;
+  height: 18px;
+  line-height: 18px;
   flex-shrink: 0;
   margin-inline-end: 0;
-  padding: 0 6px;
+  padding: 0 5px;
   border-radius: 6px;
   font-size: 12px;
   font-weight: 700;
+}
+
+.projectHeaderTag {
+  margin-left: auto;
 }
 
 .projectTagPersonal {
@@ -266,27 +343,45 @@
   background: #e9f8f0;
 }
 
+.projectTagDefault {
+  color: #596579;
+  background: #f1f4f8;
+}
+
 .projectTagDevelopment {
-  color: #5f6b7a;
-  background: #eef2f7;
+  color: #7a3fd1;
+  background: #f3ecff;
 }
 
 .sessionList {
-  margin-top: 6px;
-  padding-left: 49px;
+  position: relative;
+  z-index: 0;
+  margin-top: 0;
+  // 项目头和会话列表共用外层卡片，这里只负责卡片内部会话区域滚动。
+  padding: 6px 4px 8px;
+  max-height: min(520px, calc(100vh - 350px));
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
+  background: #fff;
+  overscroll-behavior: contain;
+  contain: paint;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 .sessionItem {
   width: 100%;
   min-width: 0;
   border: 0;
-  border-radius: 8px;
-  padding: 6px 8px;
+  border-radius: 12px;
+  padding: 8px 10px;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 8px;
   text-align: left;
   color: #1f2633;
@@ -300,47 +395,56 @@
 }
 
 .sessionItemActive {
-  background: rgba(36, 107, 254, 0.1);
+  background: rgba(0, 0, 0, 0.04);
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
 }
 
-.sessionIcon {
-  flex: 0 0 20px;
-  width: 20px;
-  height: 20px;
-  border-radius: 7px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: #246bfe;
-  background: #edf3ff;
-  font-size: 14px;
+.sessionAvatar {
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
+  line-height: 1;
+  display: flex;
 }
 
 .sessionMain {
   min-width: 0;
   flex: 1;
-  display: flex;
-  flex-direction: column;
+}
+
+.sessionTextWrap {
+  position: relative;
+  display: block;
+  min-width: 0;
+  width: 100%;
 }
 
 .sessionTitle {
+  display: block;
+  padding-right: 44px;
   color: #14161a;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 500;
-  line-height: 18px;
+  line-height: 22px;
 }
 
 .sessionDesc {
+  display: block;
+  padding-right: 44px;
   color: #707680;
   font-size: 12px;
-  line-height: 18px;
+  font-weight: 400;
+  line-height: 20px;
 }
 
 .sessionTime {
-  flex-shrink: 0;
+  position: absolute;
+  top: 0;
+  right: 0;
   color: #a4aab2;
-  font-size: 11px;
-  line-height: 18px;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 20px;
 }
 
 .sessionSkeleton {
@@ -351,9 +455,34 @@
 }
 
 .sessionEmpty {
-  padding: 8px 0;
+  min-height: 120px;
+  margin: 0;
+  padding: 24px 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+
+  :global {
+    .@{antPrefix}-empty-image {
+      height: 54px;
+      margin-bottom: 8px;
+    }
+
+    .@{antPrefix}-empty-description {
+      color: #8a96a8;
+      font-size: 14px;
+      line-height: 20px;
+    }
+  }
+}
+
+.sessionMoreLoading {
+  width: 100%;
+  height: 28px;
   color: #a4aab2;
   font-size: 12px;
+  line-height: 28px;
   text-align: center;
 }
 
@@ -386,7 +515,7 @@
     .@{antPrefix}-tabs-nav-list {
       width: 100%;
       display: grid !important;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
+      grid-template-columns: repeat(var(--project-detail-tab-count, 4), minmax(0, 1fr));
       padding: 3px;
       border-radius: 10px;
       background: #f1f3f8;
@@ -450,9 +579,9 @@
   h3 {
     margin: 0 0 2px;
     color: #1f2633;
-    font-size: 16px;
+    font-size: 14px;
     font-weight: 700;
-    line-height: 22px;
+    line-height: 20px;
   }
 
   p {
@@ -471,21 +600,17 @@
 
 .detailIconButton,
 .detailAddButton {
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
-}
-
-.detailIconButton {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
   border: 0;
   color: #6f7c90;
   background: transparent;
-}
 
-.detailAddButton {
-  color: #1f2633;
-  border-color: #dfe6f0;
-  background: #fff;
+  &:hover {
+    color: #246bfe;
+    background: #f2f6ff;
+  }
 }
 
 .detailTabsWrap {
@@ -569,7 +694,7 @@
   min-height: 0;
   flex: 1;
   overflow-y: auto;
-  padding: 12px 8px 20px;
+  padding: 8px 8px 20px;
   background: #fff;
 }
 
@@ -616,6 +741,66 @@
 
     .@{antPrefix}-list-item-action > li {
       padding: 0 4px;
+    }
+
+    .@{antPrefix}-list-item.project-member-row {
+      position: relative;
+      flex-direction: row;
+      align-items: flex-start;
+      padding-right: 38px;
+    }
+
+    .project-member-row .@{antPrefix}-list-item-meta {
+      width: auto;
+      flex: 1;
+    }
+
+    .project-member-avatar {
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      background-color: var(--beyond-color-primary-hover);
+      font-size: 10px;
+      line-height: 1;
+    }
+
+    .project-member-title {
+      display: inline-flex;
+      max-width: 100%;
+      align-items: center;
+      gap: 6px;
+      vertical-align: top;
+    }
+
+    .project-member-name {
+      min-width: 0;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+
+    .project-member-role-tag {
+      flex-shrink: 0;
+      margin-inline-end: 0;
+    }
+
+    .project-member-more {
+      position: absolute;
+      top: 18px;
+      right: 4px;
+      width: 28px;
+      height: 28px;
+      color: #6b778c;
+      border-radius: 6px;
+
+      &:hover {
+        color: #246bfe;
+        background: #f2f6ff;
+      }
     }
   }
 }
@@ -677,65 +862,90 @@
 
   strong {
     color: #1f2633;
-    font-size: 13px;
-    line-height: 18px;
+    font-size: 14px;
+    line-height: 20px;
   }
 
   span {
     color: #7c8798;
-    font-size: 12px;
-    line-height: 18px;
+    font-size: 13px;
+    line-height: 20px;
   }
 }
 
 .detailSourceActions {
-  padding: 10px 12px;
+  padding: 6px 12px 10px;
   display: flex;
   align-items: center;
   gap: 6px;
   flex-wrap: wrap;
-  background: #fafcff;
 
   :global {
     .@{antPrefix}-tag {
       margin-inline-end: 0;
+      font-size: 13px;
     }
 
     .@{antPrefix}-btn-link {
-      height: 24px;
-      padding: 0 2px;
-      font-size: 12px;
+      height: 28px;
+      padding: 0 8px;
+      border: 1px solid #dfe6f0;
+      border-radius: 7px;
+      background: #fff;
+      font-size: 13px;
+
+      &:hover {
+        border-color: rgba(36, 107, 254, 0.35);
+        background: #f2f6ff;
+      }
     }
   }
 }
 
-.detailSourceTime {
-  color: #8a96a8;
-  font-size: 12px;
-  line-height: 22px;
+.detailSourceButtonGroup {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
-.detailScanStatus {
-  padding: 10px 12px;
+.detailSourceActionsPanel {
+  .detailSourceButtonGroup {
+    flex-basis: 100%;
+  }
+}
+
+.detailSourceAuth {
+  padding: 14px 12px 4px;
   display: flex;
   align-items: center;
-  gap: 8px;
-  color: #526075;
-  font-size: 12px;
-  border-bottom: 1px solid #edf1f7;
-  background: #fafcff;
+  gap: 6px;
+  flex-wrap: wrap;
+
+  :global {
+    .@{antPrefix}-tag {
+      margin-inline-end: 0;
+      font-size: 13px;
+      line-height: 22px;
+      padding: 0 8px;
+    }
+  }
 }
 
-.detailStatusDot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  background: #31b576;
+.detailSourceFrequencyTag {
+  color: #7c8798;
+  border-color: transparent;
+  background: transparent;
 }
 
-.detailTime {
-  color: #8a96a8;
+.detailSourceDwsTag {
+  font-size: 12px !important;
+}
+
+.detailSourceTime {
+  color: #7c8798;
+  font-size: 13px;
+  line-height: 24px;
 }
 
 .detailSourceTags {
@@ -762,9 +972,142 @@
   font-weight: 600;
 }
 
+.detailChannelEntry {
+  width: 100%;
+  min-height: 38px;
+  margin-bottom: 10px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  color: #1f2633;
+  background: #f2f6fa;
+  text-align: left;
+  cursor: pointer;
+  font-weight: 500;
+  transition: background-color 0.2s;
+
+  &:hover {
+    background: #eef3f8;
+  }
+
+  > span {
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  strong {
+    color: #1f2633;
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 20px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  :global {
+    .anticon {
+      flex-shrink: 0;
+      color: #1f2633;
+      font-size: 14px;
+
+      &:last-child {
+        margin-left: auto;
+      }
+    }
+  }
+}
+
+.detailChannelEntryIcon {
+  flex-shrink: 0;
+  font-size: 18px;
+  color: #1f2633;
+}
+
+.detailChannelPanel {
+  height: 100%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+}
+
+.detailChannelPanelHeader {
+  flex-shrink: 0;
+  min-height: 72px;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid #edf1f7;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.detailChannelPanelTitle {
+  min-width: 0;
+
+  h3,
+  p {
+    margin: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  h3 {
+    color: #1f2633;
+    font-size: 15px;
+    font-weight: 700;
+    line-height: 22px;
+  }
+
+  p {
+    color: #7c8798;
+    font-size: 13px;
+    line-height: 20px;
+  }
+}
+
+.detailChannelPanelActions {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+
+  :global {
+    .@{antPrefix}-btn {
+      height: 34px;
+      border-radius: 9px;
+    }
+  }
+}
+
+.detailChannelPanelBody {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 12px 24px;
+  background: #fff;
+}
+
+.detailChannelSourceList {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+
+  .detailSourceCard {
+    min-height: 178px;
+  }
+}
+
 .detailSectionHeader {
   margin-top: 10px;
   margin-bottom: 10px;
+  padding-left: 4px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -773,21 +1116,64 @@
   font-weight: 400;
 }
 
+.detailHeaderActionButton {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #526075;
+  font-size: 13px;
+}
+
 .detailRequirementList {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
+}
+
+.detailRequirementMore {
+  height: 28px;
+  color: #8a96a8;
+  font-size: 12px;
+  line-height: 28px;
+  text-align: center;
 }
 
 .detailRequirementItem {
   min-height: 72px;
-  padding: 10px;
+  padding: 16px 10px;
   border: 1px solid #dfe6f0;
   border-radius: 10px;
   display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 10px;
+  background: #fff;
+  cursor: pointer;
+  transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+
+  &:hover {
+    border-color: rgba(36, 107, 254, 0.35);
+    background: #fbfdff;
+    box-shadow: 0 4px 12px rgba(36, 107, 254, 0.08);
+  }
+}
+
+.detailRequirementItemExpanded {
+  // 展开前后共用同一顶部留白，避免展开详情时标题区突然贴近卡片上边缘。
+  justify-content: flex-start;
+  border-color: rgba(36, 107, 254, 0.42);
+  box-shadow: 0 6px 16px rgba(36, 107, 254, 0.1);
+}
+
+.detailRequirementSummary {
+  width: 100%;
+  min-width: 0;
+  display: flex;
   align-items: center;
   gap: 8px;
-  background: #fff;
 }
 
 .detailScore {
@@ -802,6 +1188,75 @@
   font-weight: 700;
   flex-shrink: 0;
   background: #e9f8f0;
+}
+
+/* 需求评分详情弹窗：AI 综合评分区 */
+.scoreSummary {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px;
+  background: #f7f9fc;
+  border-radius: 8px;
+  margin-bottom: 8px;
+}
+
+.scoreSummaryCircle {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  border: 1px solid #eee;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  font-weight: 700;
+  color: #1f2937;
+  flex-shrink: 0;
+}
+
+.scoreSummaryLabel {
+  font-size: 12px;
+  color: #999;
+}
+
+.scoreSummaryPriority {
+  font-size: 16px;
+  font-weight: 600;
+  color: #333;
+}
+
+.scoreSummaryHint {
+  font-size: 12px;
+  color: #999;
+  margin-top: 2px;
+}
+
+/* 需求评分维度网格（弹窗内） */
+.detailScoreDimGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.detailScoreDimItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border: 1px solid #eef0f4;
+  border-radius: 6px;
+
+  span {
+    color: #667085;
+    font-size: 12px;
+  }
+
+  strong {
+    font-size: 13px;
+    color: #1f2937;
+  }
 }
 
 .detailRequirementMain {
@@ -831,12 +1286,149 @@
   }
 }
 
+// 优先级标签与需求名称使用垂直居中对齐，避免标签因行内基线偏上。
+.detailRequirementPriority {
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+.detailRequirementExpanded {
+  width: 100%;
+  padding: 10px;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: #f7f9fc;
+}
+
+.detailRequirementMetaGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+
+  span {
+    min-width: 0;
+    padding: 6px 8px;
+    border-radius: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    background: #fff;
+  }
+
+  em {
+    color: #8a96a8;
+    font-size: 11px;
+    font-style: normal;
+    line-height: 16px;
+  }
+
+  strong {
+    min-width: 0;
+    color: #344056;
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 18px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+}
+
+.detailRequirementDetailText {
+  padding: 8px;
+  border-radius: 6px;
+  background: #fff;
+
+  em {
+    display: block;
+    margin-bottom: 4px;
+    color: #8a96a8;
+    font-size: 11px;
+    font-style: normal;
+    line-height: 16px;
+  }
+
+  p {
+    display: -webkit-box;
+    margin: 0;
+    color: #344056;
+    font-size: 12px;
+    line-height: 18px;
+    overflow: hidden;
+    -webkit-line-clamp: 4;
+    line-clamp: 4;
+    -webkit-box-orient: vertical;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+}
+
+.detailRequirementExtra {
+  min-width: 0;
+  display: flex;
+  // 详情入口按钮在需求展开区域内水平居中。
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  color: #7c8798;
+  font-size: 12px;
+  line-height: 18px;
+
+  span,
+  a {
+    max-width: 100%;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+}
+
+.detailRequirementAction {
+  flex-shrink: 0;
+  min-width: 48px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 30px;
+}
+
+.detailRequirementStartAction {
+  // 启动按钮使用浅蓝标签态，和“已启动”保持同一视觉规格但用色区分可点击状态。
+  color: #246bfe;
+  border-color: #b9ccff;
+  background: #eef4ff;
+
+  &:hover,
+  &:focus {
+    color: #1557d9;
+    border-color: #8fb0ff;
+    background: #e4edff;
+  }
+}
+
+.detailRequirementStartedAction {
+  // 已启动代表不能重复操作，使用浅灰禁用态弱化可点击感。
+  &,
+  &:disabled,
+  &[disabled] {
+    color: #8a96a8;
+    border-color: #d8dee8;
+    background: #f4f6f9;
+    opacity: 1;
+    cursor: not-allowed;
+  }
+}
+
 .detailTaskPanel {
   min-width: 0;
 }
 
 .detailTaskHeader {
   margin: 10px 0 12px;
+  padding-left: 4px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -844,11 +1436,6 @@
   color: #526075;
   font-size: 13px;
   font-weight: 400;
-
-  > span {
-    min-width: 0;
-    line-height: 20px;
-  }
 }
 
 .detailTaskList {
@@ -858,12 +1445,14 @@
 }
 
 .detailTaskCard {
-  padding: 12px 12px 10px;
+  min-height: 50px;
+  padding: 12px;
   border: 1px solid #dfe6f0;
   border-left: 3px solid #faad14;
   border-radius: 10px;
   display: flex;
-  align-items: flex-start;
+  flex-direction: column;
+  justify-content: center;
   gap: 10px;
   background: #fff;
   cursor: pointer;
@@ -875,13 +1464,27 @@
   }
 }
 
+.detailTaskCardExpanded {
+  // 展开详情后内容高度增加，恢复顶部排布，避免详情区域被居中压缩。
+  justify-content: flex-start;
+  border-color: #b8cdfd;
+  box-shadow: 0 6px 16px rgba(28, 48, 90, 0.1);
+}
+
+// 进度信息固定在右上角，任务元信息可以使用卡片的完整宽度。
+.detailTaskCardHeader {
+  min-width: 0;
+  width: 100%;
+  position: relative;
+}
+
 .detailTaskMain {
   min-width: 0;
-  flex: 1;
+  width: 100%;
 }
 
 .detailTaskTitle {
-  margin: 0 0 8px;
+  margin: 0;
   color: #1677ff;
   font-size: 14px;
   font-weight: 500;
@@ -892,18 +1495,23 @@
   -webkit-line-clamp: 2;
   line-clamp: 2;
   word-break: break-all;
+  padding-right: 100px;
 }
 
 .detailTaskMeta {
   min-width: 0;
+  width: 100%;
+  margin-top: 8px;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   color: #66758a;
   font-size: 12px;
 
   span {
     min-width: 0;
+    flex-shrink: 0;
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
@@ -911,7 +1519,7 @@
 }
 
 .detailTaskBranch {
-  max-width: 120px;
+  max-width: 100%;
 }
 
 .detailTaskWarning {
@@ -919,7 +1527,9 @@
 }
 
 .detailTaskRight {
-  flex: 0 0 auto;
+  position: absolute;
+  top: 0;
+  right: 0;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -933,10 +1543,257 @@
   }
 }
 
+.detailTaskInlineDetail {
+  width: 100%;
+  padding-top: 10px;
+  border-top: 1px dashed #dfe6f0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 10px;
+
+  span {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  label {
+    color: #8a96a8;
+    font-size: 12px;
+    line-height: 16px;
+    cursor: inherit;
+  }
+
+  strong {
+    min-width: 0;
+    color: #1f2633;
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 18px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+}
+
+.detailTaskInlineWide {
+  grid-column: span 2;
+}
+
+// 任务展开详情的操作按钮独占一行，并分别贴靠左右两侧。
+.detailTaskInlineActions {
+  grid-column: span 2;
+  display: flex;
+  justify-content: space-between;
+  padding-top: 2px;
+}
+
+.detailTaskChatButton {
+  padding: 0;
+  background: transparent;
+
+  &:hover,
+  &:focus {
+    background: transparent;
+  }
+}
+
 .detailSourceGrid {
   display: grid;
   grid-template-columns: 1fr;
   gap: 8px;
+}
+
+.detailResourcePanel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.detailResourceBlock {
+  border: 1px solid #dfe6f0;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.detailResourceBlockHeader {
+  min-height: 58px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #edf1f7;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  :global {
+    .@{antPrefix}-segmented {
+      flex-shrink: 0;
+      height: 30px;
+      padding: 2px;
+      border-radius: 8px;
+      display: inline-flex;
+      align-items: center;
+      background: #eef2f7;
+    }
+
+    .@{antPrefix}-segmented-item {
+      height: 26px;
+      min-height: 26px;
+      border-radius: 7px;
+      display: inline-flex;
+      align-items: center;
+      color: #6f7c90;
+      font-size: 12px;
+      line-height: 1;
+    }
+
+    .@{antPrefix}-segmented-item-label {
+      height: 26px;
+      min-height: 0;
+      padding: 0 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 1;
+    }
+
+    .@{antPrefix}-segmented-item-selected {
+      color: #246bfe;
+      background: #fff;
+    }
+  }
+}
+
+.detailResourceBlockTitle {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+
+  strong,
+  span {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  strong {
+    color: #1f2633;
+    font-size: 14px;
+    font-weight: 700;
+    line-height: 20px;
+  }
+
+  span {
+    color: #8592a6;
+    font-size: 12px;
+    line-height: 16px;
+  }
+}
+
+.detailResourceBlockCount {
+  flex-shrink: 0;
+  min-width: 18px;
+  color: #728096;
+  font-size: 13px;
+  line-height: 18px;
+  text-align: right;
+}
+
+.detailResourceFileList {
+  min-height: 120px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.detailResourceFileItem {
+  min-width: 0;
+  height: 30px;
+  padding: 0 6px;
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #526075;
+
+  &:hover {
+    background: #f5f8fd;
+  }
+}
+
+.detailResourceFileIcon {
+  flex-shrink: 0;
+  font-size: 16px;
+}
+
+.detailResourceFileName {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.detailResourceEmpty {
+  min-height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #9aa6b8;
+  font-size: 13px;
+  text-align: center;
+}
+
+.detailSessionResourceList {
+  min-height: 160px;
+}
+
+.detailSessionResourceGroup {
+  border-top: 1px solid #edf1f7;
+
+  &:first-child {
+    border-top: 0;
+  }
+}
+
+.detailSessionResourceHeader {
+  height: 34px;
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #344056;
+  background: #f6f8fb;
+}
+
+.detailSessionResourceArrow {
+  flex-shrink: 0;
+  color: #8b98aa;
+  font-size: 10px;
+}
+
+.detailSessionResourceName {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 20px;
+}
+
+.detailSessionResourceCount {
+  flex-shrink: 0;
+  color: #8a96a8;
+  font-size: 12px;
+  line-height: 18px;
 }
 
 .detailResourceCard {
@@ -992,11 +1849,597 @@
 .formField {
   margin-bottom: 14px;
 
-  label {
+  // 仅字段标题用 block，避免波及内部 antd 组件的 label（如 Radio.Button 的 .ant-radio-button-wrapper）导致竖排
+  > label {
     display: block;
     margin-bottom: 6px;
     color: #526075;
     font-size: 13px;
     font-weight: 600;
   }
+}
+
+/* 收集源表单双列布局：两列等宽，跨列项用 .formFieldFull */
+.formGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  column-gap: 16px;
+}
+
+.formFieldFull {
+  grid-column: 1 / -1;
+}
+
+.sourceModal {
+  :global {
+    .@{antPrefix}-modal-content {
+      // 收集源编辑字段较多时只滚动弹窗内容，避免撑出页面级滚动条。
+      max-height: calc(100vh - 96px);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .@{antPrefix}-modal-header,
+    .@{antPrefix}-modal-footer {
+      flex-shrink: 0;
+    }
+
+    .@{antPrefix}-modal-body {
+      min-height: 0;
+      // 收集源表单滚动区单独限高，保证底部操作按钮始终完整露出。
+      max-height: calc(100vh - 260px);
+      overflow-y: auto;
+      padding-right: 20px;
+    }
+
+    .@{antPrefix}-input,
+    .@{antPrefix}-input-affix-wrapper,
+    .@{antPrefix}-input-number,
+    .@{antPrefix}-select,
+    .@{antPrefix}-space-compact {
+      width: 100%;
+      box-sizing: border-box;
+    }
+  }
+}
+
+.sourceSelectPopup {
+  min-width: 180px;
+
+  :global {
+    .@{antPrefix}-select-item-option-content {
+      white-space: normal;
+      overflow: visible;
+      text-overflow: clip;
+      line-height: 20px;
+    }
+  }
+}
+
+// 需求详情内容较长时只滚动弹窗主体，避免页面跟随产生滚动。
+.requirementDetailModal {
+  :global {
+    .@{antPrefix}-modal-content {
+      max-height: calc(100vh - 96px);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .@{antPrefix}-modal-header,
+    .@{antPrefix}-modal-footer {
+      flex-shrink: 0;
+    }
+
+    .@{antPrefix}-modal-body {
+      min-height: 0;
+      max-height: calc(100vh - 260px);
+      overflow-y: auto;
+      padding-right: 20px;
+    }
+  }
+}
+
+.sourceRepoAddButton {
+  width: auto;
+  min-width: 78px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex: 0 0 auto;
+
+  :global {
+    .@{antPrefix}-btn-icon {
+      margin-inline-end: 0;
+    }
+  }
+}
+
+.manualRequirementModal {
+  :global {
+    .@{antPrefix}-modal-content {
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    .@{antPrefix}-modal-header {
+      padding: 20px 24px 16px;
+      margin-bottom: 0;
+      border-bottom: 1px solid #edf1f7;
+    }
+
+    .@{antPrefix}-modal-body {
+      padding: 20px 24px 4px;
+    }
+
+    .@{antPrefix}-modal-footer {
+      padding: 14px 24px 20px;
+      border-top: 1px solid #edf1f7;
+    }
+
+    .@{antPrefix}-btn {
+      height: 34px;
+      border-radius: 9px;
+    }
+
+    .@{antPrefix}-input,
+    .@{antPrefix}-select-selector {
+      border-radius: 8px;
+    }
+  }
+}
+
+.manualRequirementTitle {
+  h3 {
+    margin: 0 0 6px;
+    color: #1f2633;
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 22px;
+  }
+
+  p {
+    margin: 0;
+    color: #75839a;
+    font-size: 13px;
+    line-height: 18px;
+  }
+}
+
+.manualRequirementForm {
+  .formField {
+    margin-bottom: 16px;
+  }
+}
+
+.manualRequirementRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+}
+
+.repoModalDivider {
+  margin: 16px 0 12px;
+  border-top: 1px solid #f0f0f0;
+}
+
+.dwsAuthDetail {
+  line-height: 2.2;
+
+  p {
+    margin: 0;
+  }
+}
+
+/* 整体任务视图看板样式（只读） */
+.kanbanBoard {
+  display: flex;
+  gap: 16px;
+  padding: 20px;
+  min-height: 100%;
+  overflow-x: auto;
+}
+
+.kanbanColumn {
+  flex: 1;
+  min-width: 260px;
+  max-width: 320px;
+  min-height: 0;
+  background: #fafafa;
+  border-radius: 10px;
+  padding: 12px;
+  transition: background-color 0.2s, box-shadow 0.2s;
+}
+
+.kanbanColumnDragOver {
+  background: #f0f6ff;
+  box-shadow: inset 0 0 0 1px #91caff;
+}
+
+.kanbanColHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.kanbanColTitle {
+  color: #333;
+}
+
+.kanbanColCount {
+  color: #8c8c8c;
+  font-weight: 400;
+}
+
+.kanbanCard {
+  min-width: 0;
+  background: #fff;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 10px;
+  cursor: grab;
+  transition: box-shadow 0.2s, opacity 0.2s, transform 0.2s;
+
+  &:hover {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  }
+
+  &:active {
+    cursor: grabbing;
+  }
+}
+
+.kanbanCardDragging {
+  opacity: 0.55;
+  transform: scale(0.98);
+}
+
+.kanbanCardTitle {
+  display: -webkit-box;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+  margin: 0 0 6px;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+.kanbanCardMeta {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: #595959;
+
+  :global {
+    .@{antPrefix}-tag {
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+  }
+}
+
+.kanbanCardFooter {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: #8c8c8c;
+
+  span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  span:last-child {
+    flex-shrink: 0;
+  }
+}
+
+/* 任务详情 - Agent 执行概览 */
+.taskHero {
+  padding: 16px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #eef4ff 0%, #f7f9ff 100%);
+}
+
+.taskHeroAgent {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+
+  small {
+    display: block;
+    font-size: 12px;
+    color: rgba(0, 0, 0, 0.45);
+  }
+
+  strong {
+    font-size: 16px;
+    color: rgba(0, 0, 0, 0.88);
+  }
+}
+
+.taskHeroAvatar {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+  background: #1677ff;
+}
+
+.taskHeroTrack {
+  height: 8px;
+  border-radius: 4px;
+  background: rgba(22, 119, 255, 0.15);
+  overflow: hidden;
+
+  span {
+    display: block;
+    height: 100%;
+    border-radius: 4px;
+    background: #1677ff;
+    transition: width 0.3s;
+  }
+}
+
+.taskHeroProgress p {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: rgba(0, 0, 0, 0.65);
+}
+
+/* 任务详情 - 执行上下文网格 */
+.taskContextGrid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+
+.taskContextItem {
+  padding: 10px 12px;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+
+  label {
+    display: block;
+    font-size: 12px;
+    color: rgba(0, 0, 0, 0.45);
+    margin-bottom: 4px;
+  }
+
+  strong {
+    font-size: 14px;
+    color: rgba(0, 0, 0, 0.85);
+    word-break: break-all;
+  }
+}
+
+/* 任务详情 - 研发环节竖向流程 */
+.phaseSection {
+  margin-top: 24px;
+}
+
+.phaseSectionTitle {
+  margin: 0 0 12px;
+  font-size: 14px;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.85);
+}
+
+.phaseFlow {
+  display: flex;
+  flex-direction: column;
+}
+
+.phaseNode {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+
+  /* 环节间竖向连接线 */
+  &:not(:last-child)::after {
+    content: '';
+    position: absolute;
+    left: 13px;
+    top: 34px;
+    bottom: -10px;
+    width: 2px;
+    background: #f0f0f0;
+  }
+}
+
+.phaseNodeMark {
+  z-index: 1;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+  background: #d9d9d9;
+}
+
+.phaseNodeBody {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.4;
+
+  strong {
+    font-size: 14px;
+    color: rgba(0, 0, 0, 0.85);
+  }
+
+  small {
+    font-size: 12px;
+    color: rgba(0, 0, 0, 0.45);
+  }
+}
+
+.phaseCurrentDot {
+  color: #1677ff;
+  font-weight: 600;
+}
+
+.phaseDone .phaseNodeMark {
+  background: #52c41a;
+}
+
+.phaseActive .phaseNodeMark {
+  background: #1677ff;
+}
+
+.phaseRejected .phaseNodeMark {
+  background: #ff4d4f;
+}
+
+.phaseWaiting .phaseNodeMark {
+  background: #d9d9d9;
+}
+
+.kickbackList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.kickbackItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.kickbackRound {
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.kickbackReason {
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.65);
+}
+
+/* 任务卡片展开区 - 研发环节横向概要 */
+.detailTaskPhaseSummary {
+  grid-column: 1 / -1;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.02);
+}
+
+.detailTaskPhaseHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+
+  label {
+    font-size: 12px;
+    color: rgba(0, 0, 0, 0.45);
+  }
+
+  span {
+    font-size: 12px;
+    color: #1677ff;
+  }
+}
+
+.phaseMiniFlow {
+  display: flex;
+  align-items: flex-start;
+  // 拉开研发环节节点，避免环节名称彼此贴在一起。
+  column-gap: 8px;
+  overflow-x: auto;
+}
+
+.phaseMiniLine {
+  flex: 1;
+  min-width: 12px;
+  height: 2px;
+  margin-top: 11px;
+  background: #e8e8e8;
+}
+
+.phaseMiniNode {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+
+  em {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-style: normal;
+    font-weight: 600;
+    color: #fff;
+    background: #d9d9d9;
+  }
+
+  i {
+    font-size: 11px;
+    font-style: normal;
+    line-height: 1;
+    color: rgba(0, 0, 0, 0.45);
+    white-space: nowrap;
+  }
+}
+
+.phaseMiniDone em {
+  background: #52c41a;
+}
+
+.phaseMiniActive em {
+  background: #1677ff;
+}
+
+.phaseMiniRejected em {
+  background: #ff4d4f;
+}
+
+.phaseMiniWaiting em {
+  background: #d9d9d9;
+}
+
+.phaseMiniCurrent i {
+  color: #1677ff;
+  font-weight: 600;
 }

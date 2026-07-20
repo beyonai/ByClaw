@@ -13,7 +13,6 @@ import { chatModeMap } from '@/constants/query';
 import { ResourceTypeMap } from '@/constants/resource';
 
 import UploadFile from '../components/UploadFile';
-import FileBrowserEntry from '../components/FileBrowserEntry';
 
 import type { UserInfo } from '@/models/common/user';
 import type { IFile } from '@/typescript/file';
@@ -310,7 +309,6 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
     return (
       <>
         <Space size="large" className={styles.bottomRight}>
-          <FileBrowserEntry />
           {/* 多员工模式下 @ 入口始终保留，用于继续追加数字员工。 */}
           <MentionPopover
             type="@"

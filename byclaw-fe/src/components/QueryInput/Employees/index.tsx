@@ -10,7 +10,6 @@ import CarouselFile from '@/components/MessageList/components/CarouselFile';
 import QueryInputBase, { IProps as pIProps, IState as pIState } from '@/components/QueryInput/queryInputBase';
 
 import UploadFile from '../components/UploadFile';
-import FileBrowserEntry from '../components/FileBrowserEntry';
 
 import type { UserState } from '@/models/common/user';
 import type { IAgentCache } from '@/typescript/agent';
@@ -212,7 +211,6 @@ class EmployeesInputChat extends QueryInputBase<IProps, IState> {
     return (
       <>
         <Space size="large" className={styles.bottomRight}>
-          <FileBrowserEntry />
           {/* 多员工模式下 @ 入口始终保留，用于继续追加数字员工。 */}
           <MentionPopover
             type="@"

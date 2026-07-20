@@ -1,51 +1,99 @@
 package com.iwhalecloud.byai.manager.application.service.devloop;
 
+import com.alibaba.fastjson.JSON;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.iwhalecloud.byai.common.constants.Constants;
+import com.iwhalecloud.byai.common.constants.files.FileStatus;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
+import com.iwhalecloud.byai.common.login.bean.LoginInfo;
+import com.iwhalecloud.byai.common.page.PageInfo;
+import com.iwhalecloud.byai.common.storage.model.FileMetadata;
+import com.iwhalecloud.byai.common.storage.model.StorageLocation;
+import com.iwhalecloud.byai.common.util.ListUtil;
+import com.iwhalecloud.byai.common.util.PageHelperUtil;
+import com.iwhalecloud.byai.common.util.StringUtil;
+import com.iwhalecloud.byai.manager.application.service.files.FilesApplicationService;
 import com.iwhalecloud.byai.manager.application.service.job.DevloopPatService;
-import com.iwhalecloud.byai.manager.domain.devloop.service.DingtalkScanService;
-import com.iwhalecloud.byai.manager.domain.devloop.service.DwsAuthService;
-import com.iwhalecloud.byai.manager.domain.devloop.service.GitHubIssueScanService;
-import com.iwhalecloud.byai.manager.domain.devloop.service.ScanLogService;
-import com.iwhalecloud.byai.manager.domain.devloop.service.ScanSourceService;
-import com.iwhalecloud.byai.manager.domain.devloop.service.DevloopTaskService;
-import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectMemberService;
+import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService;
+import com.iwhalecloud.byai.manager.application.service.user.UserBucketNamingService;
+import com.iwhalecloud.byai.manager.domain.devloop.service.*;
+import com.iwhalecloud.byai.manager.domain.file.service.CommonFilePathResolver;
+import com.iwhalecloud.byai.manager.domain.file.service.CommonFileStorage;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.ProjectListDto;
+import com.iwhalecloud.byai.manager.dto.devloop.ProjectMemberListDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectRepoDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileListDto;
+import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileQueryDto;
+import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileSaveDto;
+import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareTargetDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ScanSourceDTO;
 import com.iwhalecloud.byai.manager.dto.session.ByaiSessionDto;
 import com.iwhalecloud.byai.manager.entity.devloop.*;
+import com.iwhalecloud.byai.manager.entity.file.Files;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
+import com.iwhalecloud.byai.manager.entity.session.ByaiSessionExt;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.mapper.devloop.ProjectMapper;
 import com.iwhalecloud.byai.manager.mapper.devloop.ProjectRepoMapper;
+import com.iwhalecloud.byai.manager.mapper.devloop.ProjectShareTargetMapper;
 import com.iwhalecloud.byai.manager.mapper.devloop.ProjectSessionMapper;
 import com.iwhalecloud.byai.manager.mapper.devloop.ScanLogItemMapper;
-import com.iwhalecloud.byai.manager.mapper.resource.SsResourceMapper;
-import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.mapper.session.ByaiSessionMapper;
-import com.iwhalecloud.byai.common.feign.response.sandbox.SandboxLaunchData;
-import com.iwhalecloud.byai.gateway.sandbox.service.SandboxService;
+import com.iwhalecloud.byai.manager.qo.devloop.ProjectQo;
+import com.iwhalecloud.byai.manager.qo.devloop.ProjectSessionQo;
+import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
+import com.iwhalecloud.byai.state.domain.chat.service.AssistantChatService;
+import com.iwhalecloud.byai.state.domain.file.service.FileService;
+import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
+import com.iwhalecloud.byai.common.util.threadPoolUti.ThreadPoolUtil;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.MediaType;
+import org.springframework.http.MediaTypeFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import java.io.ByteArrayOutputStream;
+
+import java.io.InputStream;
 import java.util.*;
+import java.util.concurrent.Executor;
 
 /**
- * 研发闭环应用服务
- * 聚合项目管理、扫描源管理、扫描执行、日志查询、PAT管理、钉钉群搜索等业务逻辑
+ * 研发闭环应用服务 聚合项目管理、扫描源管理、扫描执行、日志查询、PAT管理、钉钉群搜索等业务逻辑
  */
 @Slf4j
 @Service
 public class DevloopApplicationService {
 
+    private static final Logger logger = LoggerFactory.getLogger(DevloopApplicationService.class);
+
     private static final String DELETE_FLAG_NORMAL = "0";
 
     private static final String DELETE_FLAG_DELETED = "1";
+
+    private static final String PROJECT_TYPE_DEFAULT = "default";
+
+    /** 任务状态存于 byai_session_ext 纵表的键；创建任务默认「进行中」 */
+    private static final String TASK_STATUS_EXT_CODE = "task_status";
+
+    private static final String TASK_STATUS_DEFAULT = "进行中";
+
+    /** 环节进度快照缓存于 byai_session_ext 纵表的键；避免每次开详情都跑解析/LLM */
+    private static final String TASK_PHASE_EXT_CODE = "task_phase";
+
+    /**
+     * 研发任务 LLM 对话异步执行线程池。 TtlExecutors 包装以透传 CurrentUserHolder 的 LoginInfo；任务创建接口据此立即返回， chat 在后台执行，避免前端等待数分钟。
+     */
+    private static final Executor TASK_CHAT_EXECUTOR = ThreadPoolUtil.getThreadPool(2, 8, 100, 60, "devloop-task-chat");
 
     @Autowired
     private ProjectMapper projectMapper;
@@ -54,16 +102,19 @@ public class DevloopApplicationService {
     private ProjectRepoMapper projectRepoMapper;
 
     @Autowired
+    private ProjectShareTargetMapper projectShareTargetMapper;
+
+    @Autowired
     private ProjectSessionMapper projectSessionMapper;
 
     @Autowired
     private ByaiSessionMapper byaiSessionMapper;
 
     @Autowired
-    private ScanLogItemMapper scanLogItemMapper;
+    private com.iwhalecloud.byai.manager.mapper.session.ByaiSessionExtMapper byaiSessionExtMapper;
 
     @Autowired
-    private SsResourceMapper ssResourceMapper;
+    private ScanLogItemMapper scanLogItemMapper;
 
     @Autowired
     private ScanSourceService scanSourceService;
@@ -84,23 +135,64 @@ public class DevloopApplicationService {
     private DevloopPatService patService;
 
     @Autowired
-    private DevloopTaskService taskService;
-
-    @Autowired
     private ProjectMemberService projectMemberService;
 
     @Autowired
-    private SandboxService sandboxService;
+    private ProjectSessionService projectSessionService;
 
     @Autowired
     private SequenceService sequenceService;
 
+    @Autowired
+    private AssistantChatService assistantChatService;
+
+    @Autowired
+    private LoginApplicationService loginApplicationService;
+
+    @Autowired
+    private DevloopScoringService scoringService;
+
+    @Autowired
+    private DevloopPhaseService phaseService;
+
+    @Autowired
+    private com.iwhalecloud.byai.manager.mapper.resource.SsResourceMapper ssResourceMapper;
+
+    @Autowired
+    private ByaiSystemConfigService byaiSystemConfigService;
+
+    @Autowired
+    private ProjectShareFileService projectShareFileService;
+
+    @Autowired
+    private FilesApplicationService filesApplicationService;
+
+    @Autowired
+    private FileService fileService;
+
+    @Autowired
+    private CommonFileStorage commonFileStorage;
+
+    @Autowired
+    private CommonFilePathResolver commonFilePathResolver;
+
+    @Autowired
+    private UserBucketNamingService userBucketNamingService;
+
     /** 创建项目，可同时关联代码仓库 */
     @Transactional(rollbackFor = Exception.class)
     public ResponseUtil<Map<String, Object>> createProject(ProjectDTO dto) {
+        String projectName = normalizeProjectName(dto.getProjectName());
+        if (projectName.isEmpty()) {
+            return ResponseUtil.failRes("项目名称不能为空");
+        }
+        if (existsProjectName(projectName, null)) {
+            return ResponseUtil.failRes("项目名称已存在");
+        }
+
         Project project = new Project();
         project.setProjectId(sequenceService.nextVal());
-        project.setProjectName(dto.getProjectName());
+        project.setProjectName(projectName);
         project.setDescription(dto.getDescription());
         project.setResourceId(dto.getResourceId());
         project.setProjectType(dto.getProjectType() != null ? dto.getProjectType() : "normal");
@@ -110,95 +202,140 @@ public class DevloopApplicationService {
         project.setDeleteFlag(DELETE_FLAG_NORMAL);
         projectMapper.insert(project);
 
-        if (dto.getRepos() != null) {
-            for (ProjectRepoDTO repoDto : dto.getRepos()) {
-                ProjectRepo repo = new ProjectRepo();
-                repo.setRepoId(sequenceService.nextVal());
-                repo.setProjectId(project.getProjectId());
-                repo.setRepoFullName(repoDto.getRepoFullName());
-                repo.setRepoUrl(repoDto.getRepoUrl());
-                repo.setDefaultBranch(repoDto.getDefaultBranch() != null
-                    ? repoDto.getDefaultBranch() : "main");
-                repo.setCreateBy(String.valueOf(CurrentUserHolder.getCurrentUserId()));
-                repo.setCreateTime(new Date());
-                projectRepoMapper.insert(repo);
-            }
+        saveProjectRepos(project.getProjectId(), dto.getRepos());
+        if (Constants.YES_VALUE_Y.equalsIgnoreCase(project.getIsShare())) {
+            this.saveOrUpdateProjectMember(project.getProjectId(), dto.getShareTargets());
         }
 
         // 创建者自动加为 owner 成员
-        projectMemberService.addMember(
-            project.getProjectId(),
-            CurrentUserHolder.getCurrentUserId(),
-            CurrentUserHolder.getCurrentUserCode(),
-            CurrentUserHolder.getCurrentUserName(),
-            "owner"
-        );
+        projectMemberService.addMember(project.getProjectId(), CurrentUserHolder.getCurrentUserId(), "owner");
 
         Map<String, Object> result = new HashMap<>();
         result.put("projectId", project.getProjectId());
         return ResponseUtil.successResponse(result);
     }
 
-    /** 查询项目列表，按创建时间倒序；keyword 用于项目名称/描述模糊搜索。 */
-    public ResponseUtil<List<Map<String, Object>>> listProjects(String keyword) {
-        LambdaQueryWrapper<Project> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(Project::getDeleteFlag, DELETE_FLAG_NORMAL);
-        String searchKeyword = keyword == null ? "" : keyword.trim();
-        if (!searchKeyword.isEmpty()) {
-            wrapper.and(w -> w.like(Project::getProjectName, searchKeyword)
-                .or()
-                .like(Project::getDescription, searchKeyword));
-        }
-        wrapper.orderByDesc(Project::getCreateTime);
-        List<Project> projects = projectMapper.selectList(wrapper);
-
-        List<Map<String, Object>> list = new ArrayList<>();
-        for (Project p : projects) {
-            Map<String, Object> map = new HashMap<>();
-            map.put("projectId", p.getProjectId());
-            map.put("projectName", p.getProjectName());
-            map.put("description", p.getDescription());
-            map.put("resourceId", p.getResourceId());
-            map.put("projectType", p.getProjectType());
-            map.put("isShare", p.getIsShare());
-            map.put("createTime", p.getCreateTime());
-            map.put("sessionCount", safeCountProjectSessions(p.getProjectId()));
-            list.add(map);
-        }
-        return ResponseUtil.successResponse(list);
+    /** 查询项目列表 */
+    public List<ProjectListDto> listProjects(ProjectQo projectQo) {
+        ProjectQo query = projectQo == null ? new ProjectQo() : projectQo;
+        query.setCreateBy(CurrentUserHolder.getCurrentUserId());
+        return projectMapper.selectProjectsByQo(query);
     }
 
-    /** 修改项目名称或描述 */
+    /** 按项目管理文档修改项目基础信息，并在传入 repos 时整体替换仓库列表。 */
     @Transactional(rollbackFor = Exception.class)
     public ResponseUtil<Void> updateProject(ProjectDTO dto) {
         Project project = projectMapper.selectById(dto.getProjectId());
+
         if (project == null || DELETE_FLAG_DELETED.equals(project.getDeleteFlag())) {
             return ResponseUtil.failRes("Project not found");
         }
+
         if (dto.getProjectName() != null) {
-            project.setProjectName(dto.getProjectName());
+            String projectName = normalizeProjectName(dto.getProjectName());
+            if (projectName.isEmpty()) {
+                return ResponseUtil.failRes("项目名称不能为空");
+            }
+            if (existsProjectName(projectName, dto.getProjectId())) {
+                return ResponseUtil.failRes("项目名称已存在");
+            }
+            project.setProjectName(projectName);
         }
         if (dto.getDescription() != null) {
             project.setDescription(dto.getDescription());
         }
+        if (dto.getResourceId() != null) {
+            project.setResourceId(dto.getResourceId());
+        }
         if (dto.getProjectType() != null) {
+            if (PROJECT_TYPE_DEFAULT.equals(project.getProjectType())
+                && !PROJECT_TYPE_DEFAULT.equals(dto.getProjectType())) {
+                // 默认项目类型由系统维护，编辑时只能回显，不能被接口改成普通/研发项目。
+                return ResponseUtil.failRes("默认项目不允许修改项目类型");
+            }
+            if (!PROJECT_TYPE_DEFAULT.equals(project.getProjectType())
+                && PROJECT_TYPE_DEFAULT.equals(dto.getProjectType())) {
+                // 默认项目不允许通过编辑接口手动创建，避免普通项目被改成系统内置分组。
+                return ResponseUtil.failRes("项目类型不允许修改为默认项目");
+            }
             project.setProjectType(dto.getProjectType());
         }
-        if (dto.getIsShare() != null) {
+        if (PROJECT_TYPE_DEFAULT.equals(project.getProjectType())) {
+            if (dto.getIsShare() != null && !Constants.NO_VALUE_N.equalsIgnoreCase(dto.getIsShare())) {
+                // 默认项目不支持共享成员配置，接口层固定为否，避免绕过前端打开共享。
+                return ResponseUtil.failRes("默认项目不允许共享");
+            }
+            project.setIsShare(Constants.NO_VALUE_N);
+        }
+        else if (dto.getIsShare() != null) {
             project.setIsShare(dto.getIsShare());
         }
         project.setUpdateBy(CurrentUserHolder.getCurrentUserId());
         project.setUpdateTime(new Date());
         projectMapper.updateById(project);
-        return ResponseUtil.successResponse(null);
+        if (dto.getRepos() != null) {
+            // 接口文档 update 支持 repos，传入时以前端提交的仓库列表为准做整体替换。
+            projectRepoMapper
+                .delete(new LambdaQueryWrapper<ProjectRepo>().eq(ProjectRepo::getProjectId, dto.getProjectId()));
+            saveProjectRepos(dto.getProjectId(), dto.getRepos());
+        }
+
+        // 如果不分享的，移除分享成员
+        if (Constants.NO_VALUE_N.equalsIgnoreCase(project.getIsShare())) {
+            projectMemberService.removeMember(project.getProjectId(), "member");
+        }
+        else if (dto.getShareTargets() != null) {
+            this.saveOrUpdateProjectMember(project.getProjectId(), dto.getShareTargets());
+        }
+
+        return ResponseUtil.successResponse();
+    }
+
+    /**
+     * 保存或者更新项目成员
+     *
+     * @param projectId 项目标识
+     * @param projectShareTargetDTOs 分享成员列表
+     */
+    private void saveOrUpdateProjectMember(Long projectId, List<ProjectShareTargetDTO> projectShareTargetDTOs) {
+
+        if (ListUtil.isEmpty(projectShareTargetDTOs)) {
+            return;
+        }
+
+        for (ProjectShareTargetDTO projectShareTargetDTO : projectShareTargetDTOs) {
+
+            Long userId = projectShareTargetDTO.getTargetId();
+
+            // 如果存在，则跳，不存在则添加
+            ProjectMember projectMember = projectMemberService.findByProjectAndUser(projectId, userId);
+            if (projectMember != null) {
+                continue;
+            }
+            else {
+                projectMemberService.addMember(projectId, userId, "member");
+            }
+        }
     }
 
     /** 软删除项目 */
     @Transactional(rollbackFor = Exception.class)
     public ResponseUtil<Void> deleteProject(Long projectId) {
         Project project = projectMapper.selectById(projectId);
-        if (project == null || DELETE_FLAG_DELETED.equals(project.getDeleteFlag())) {
-            return ResponseUtil.failRes("Project not found");
+        if (project == null) {
+            // 删除操作按幂等处理，列表旧数据或重复提交时不再把已不存在项目暴露成报错。
+            log.warn("Delete project ignored because project not found, projectId={}", projectId);
+            return ResponseUtil.successResponse(null);
+        }
+        if (DELETE_FLAG_DELETED.equals(project.getDeleteFlag())) {
+            // 已经软删除的项目再次删除视为成功，前端刷新列表后会自然消失。
+            log.warn("Delete project ignored because project already deleted, projectId={}", projectId);
+            return ResponseUtil.successResponse(null);
+        }
+        if (PROJECT_TYPE_DEFAULT.equals(project.getProjectType())) {
+            // 默认项目是系统内置分组，接口层兜底禁止删除，避免绕过前端操作入口。
+            log.warn("Delete project rejected because project is default, projectId={}", projectId);
+            return ResponseUtil.failRes("默认项目不允许删除");
         }
         project.setDeleteFlag(DELETE_FLAG_DELETED);
         project.setUpdateBy(CurrentUserHolder.getCurrentUserId());
@@ -226,16 +363,33 @@ public class DevloopApplicationService {
         map.put("projectType", project.getProjectType());
         map.put("isShare", project.getIsShare());
         map.put("repos", repos);
+        map.put("shareTargets", safeListProjectShareTargets(projectId));
         map.put("sessions", sessions);
         map.put("sessionCount", sessions.size());
         return ResponseUtil.successResponse(map);
+    }
+
+    private String normalizeProjectName(String projectName) {
+        return projectName == null ? "" : projectName.trim();
+    }
+
+    private boolean existsProjectName(String projectName, Long excludeProjectId) {
+        LambdaQueryWrapper<Project> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(Project::getDeleteFlag, DELETE_FLAG_NORMAL).eq(Project::getProjectName, projectName);
+        if (excludeProjectId != null) {
+            wrapper.ne(Project::getProjectId, excludeProjectId);
+        }
+        // 新建/编辑统一以后端最终入库名称为准查重，避免并发或绕过前端导致同名项目。
+        Long count = projectMapper.selectCount(wrapper);
+        return count != null && count > 0;
     }
 
     private Long safeCountProjectSessions(Long projectId) {
         try {
             Long sessionCount = projectSessionMapper.countSessionsByProjectId(projectId);
             return sessionCount == null ? 0L : sessionCount;
-        } catch (Exception error) {
+        }
+        catch (Exception error) {
             if (isProjectSessionTableMissing(error)) {
                 // 兼容已执行旧版 V0.3.0 但漏建项目会话关联表的环境，避免项目列表整体不可用。
                 log.warn("Project session relation table is missing, fallback sessionCount=0, projectId={}", projectId);
@@ -248,7 +402,8 @@ public class DevloopApplicationService {
     private List<ByaiSessionDto> safeListProjectSessions(Long projectId) {
         try {
             return projectSessionMapper.selectSessionsByProjectId(projectId);
-        } catch (Exception error) {
+        }
+        catch (Exception error) {
             if (isProjectSessionTableMissing(error)) {
                 // 表缺失时详情页先展示项目基础信息，后续迁移补表后会话列表自动恢复。
                 log.warn("Project session relation table is missing, fallback sessions empty, projectId={}", projectId);
@@ -259,18 +414,116 @@ public class DevloopApplicationService {
     }
 
     private boolean isProjectSessionTableMissing(Throwable error) {
+        return isTableMissing(error, "byai_project_session");
+    }
+
+    private boolean isProjectShareTableMissing(Throwable error) {
+        return isTableMissing(error, "byai_project_share");
+    }
+
+    private boolean isTableMissing(Throwable error, String tableName) {
         Throwable current = error;
         while (current != null) {
             String message = current.getMessage();
             if (message != null) {
                 String lowerMessage = message.toLowerCase(Locale.ROOT);
-                if (lowerMessage.contains("byai_project_session") && lowerMessage.contains("does not exist")) {
+                if (lowerMessage.contains(tableName) && lowerMessage.contains("does not exist")) {
                     return true;
                 }
             }
             current = current.getCause();
         }
         return false;
+    }
+
+    private void saveProjectRepos(Long projectId, List<ProjectRepoDTO> repos) {
+        if (repos == null) {
+            return;
+        }
+        for (ProjectRepoDTO repoDto : repos) {
+            insertProjectRepo(projectId, repoDto);
+        }
+    }
+
+    /** 插入单条项目仓库；全名为空则跳过。供批量保存与单独新增复用。 */
+    private ProjectRepo insertProjectRepo(Long projectId, ProjectRepoDTO repoDto) {
+        if (repoDto == null || repoDto.getRepoFullName() == null || repoDto.getRepoFullName().trim().isEmpty()) {
+            return null;
+        }
+        String defaultBranch = repoDto.getDefaultBranch() != null ? repoDto.getDefaultBranch().trim() : "";
+        ProjectRepo repo = new ProjectRepo();
+        repo.setRepoId(sequenceService.nextVal());
+        repo.setProjectId(projectId);
+        repo.setRepoFullName(repoDto.getRepoFullName().trim());
+        repo.setRepoUrl(repoDto.getRepoUrl() != null ? repoDto.getRepoUrl().trim() : null);
+        repo.setDefaultBranch(defaultBranch.isEmpty() ? "main" : defaultBranch);
+        repo.setCreateBy(String.valueOf(CurrentUserHolder.getCurrentUserId()));
+        repo.setCreateTime(new Date());
+        projectRepoMapper.insert(repo);
+        return repo;
+    }
+
+    /** 新增单个项目仓库，供扫描源关联仓库时即席补充。 */
+    public ResponseUtil<Map<String, Object>> createProjectRepo(ProjectRepoDTO dto) {
+        if (dto == null || dto.getProjectId() == null) {
+            return ResponseUtil.failRes("projectId不能为空");
+        }
+        if (dto.getRepoFullName() == null || dto.getRepoFullName().trim().isEmpty()) {
+            return ResponseUtil.failRes("仓库全名不能为空");
+        }
+        ProjectRepo repo = insertProjectRepo(dto.getProjectId(), dto);
+        Map<String, Object> result = new HashMap<>();
+        result.put("repoId", repo.getRepoId());
+        result.put("repoFullName", repo.getRepoFullName());
+        result.put("repoUrl", repo.getRepoUrl());
+        result.put("defaultBranch", repo.getDefaultBranch());
+        return ResponseUtil.successResponse(result);
+    }
+
+    /** 删除项目仓库；已被扫描源关联时拒绝删除，避免任务丢失开发仓库。 */
+    public ResponseUtil<Void> deleteProjectRepo(Long repoId) {
+        if (repoId == null) {
+            return ResponseUtil.failRes("repoId不能为空");
+        }
+        Long boundCount = scanSourceService.countByRepoId(repoId);
+        if (boundCount != null && boundCount > 0) {
+            return ResponseUtil.failRes("该仓库已被 " + boundCount + " 个扫描源关联，请先解除关联再删除");
+        }
+        projectRepoMapper.deleteById(repoId);
+        return ResponseUtil.successResponse(null);
+    }
+
+    private List<Map<String, Object>> listProjectShareTargets(Long projectId) {
+        LambdaQueryWrapper<ProjectShareTarget> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(ProjectShareTarget::getProjectId, projectId).orderByAsc(ProjectShareTarget::getCreateTime);
+        List<ProjectShareTarget> targets = projectShareTargetMapper.selectList(wrapper);
+        List<Map<String, Object>> list = new ArrayList<>();
+        for (ProjectShareTarget target : targets) {
+            Map<String, Object> map = new HashMap<>();
+            map.put("shareId", target.getShareId());
+            map.put("projectId", target.getProjectId());
+            map.put("targetType", target.getTargetType());
+            map.put("targetId", target.getTargetId());
+            map.put("targetName", target.getTargetName());
+            map.put("createBy", target.getCreateBy());
+            map.put("createTime", target.getCreateTime());
+            list.add(map);
+        }
+        return list;
+    }
+
+    private List<Map<String, Object>> safeListProjectShareTargets(Long projectId) {
+        try {
+            return listProjectShareTargets(projectId);
+        }
+        catch (Exception error) {
+            if (isProjectShareTableMissing(error)) {
+                // 兼容已执行旧版 V0.3.0 但缺少项目共享对象表的环境，避免项目列表/详情整体不可用。
+                log.warn("Project share target table is missing, fallback shareTargets empty, projectId={}", projectId);
+                return Collections.emptyList();
+            }
+            throw error instanceof RuntimeException ? (RuntimeException) error : new IllegalStateException(error);
+        }
     }
 
     /** 绑定会话到项目；项目空间是一组会话分组，一个会话只保留一个有效项目归属。 */
@@ -292,17 +545,12 @@ public class DevloopApplicationService {
         archivedRelation.setDeleteFlag(DELETE_FLAG_DELETED);
         archivedRelation.setUpdateBy(currentUserId);
         archivedRelation.setUpdateTime(now);
-        projectSessionMapper.update(
-            archivedRelation,
-            new LambdaUpdateWrapper<ProjectSession>()
-                .eq(ProjectSession::getSessionId, sessionId)
-                .eq(ProjectSession::getDeleteFlag, DELETE_FLAG_NORMAL)
-                .ne(ProjectSession::getProjectId, projectId)
-        );
+        projectSessionMapper.update(archivedRelation,
+            new LambdaUpdateWrapper<ProjectSession>().eq(ProjectSession::getSessionId, sessionId)
+                .eq(ProjectSession::getDeleteFlag, DELETE_FLAG_NORMAL).ne(ProjectSession::getProjectId, projectId));
 
         LambdaQueryWrapper<ProjectSession> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(ProjectSession::getProjectId, projectId)
-            .eq(ProjectSession::getSessionId, sessionId);
+        wrapper.eq(ProjectSession::getProjectId, projectId).eq(ProjectSession::getSessionId, sessionId);
         List<ProjectSession> existingRelations = projectSessionMapper.selectList(wrapper);
         if (!existingRelations.isEmpty()) {
             ProjectSession relation = existingRelations.get(0);
@@ -331,14 +579,23 @@ public class DevloopApplicationService {
         relation.setDeleteFlag(DELETE_FLAG_DELETED);
         relation.setUpdateBy(String.valueOf(CurrentUserHolder.getCurrentUserId()));
         relation.setUpdateTime(new Date());
-        projectSessionMapper.update(
-            relation,
-            new LambdaUpdateWrapper<ProjectSession>()
-                .eq(ProjectSession::getProjectId, projectId)
-                .eq(ProjectSession::getSessionId, sessionId)
-                .eq(ProjectSession::getDeleteFlag, DELETE_FLAG_NORMAL)
-        );
+        projectSessionMapper.update(relation,
+            new LambdaUpdateWrapper<ProjectSession>().eq(ProjectSession::getProjectId, projectId)
+                .eq(ProjectSession::getSessionId, sessionId).eq(ProjectSession::getDeleteFlag, DELETE_FLAG_NORMAL));
         return ResponseUtil.successResponse(null);
+    }
+
+    /**
+     * 根据项目查询关联会话列表。 ProjectSessionQo 透传到领域服务 / mapper。
+     */
+    public PageInfo<ByaiSessionDto> listSessionsByProject(ProjectSessionQo projectSessionQo) {
+        if (projectSessionQo.getProjectId() == null) {
+            return PageHelperUtil.emptyPage(projectSessionQo.getPageNum(), projectSessionQo.getPageSize());
+        }
+
+        projectSessionQo.setCreateBy(CurrentUserHolder.getCurrentUserId());
+
+        return projectSessionService.listSessionsByProject(projectSessionQo);
     }
 
     /** 创建扫描源 */
@@ -350,6 +607,9 @@ public class DevloopApplicationService {
         source.setConfig(dto.getConfig());
         source.setCronExpr(dto.getCronExpr());
         source.setEnabled(dto.getEnabled() != null ? dto.getEnabled() : "1");
+        source.setRepoId(dto.getRepoId());
+        source.setConfirmMode(dto.getConfirmMode() != null ? dto.getConfirmMode() : "manual");
+        source.setScoreThreshold(dto.getScoreThreshold() != null ? dto.getScoreThreshold() : 70);
         source.setCreateBy(String.valueOf(CurrentUserHolder.getCurrentUserId()));
         ScanSource created = scanSourceService.create(source);
 
@@ -365,6 +625,9 @@ public class DevloopApplicationService {
         source.setSourceName(dto.getSourceName());
         source.setConfig(dto.getConfig());
         source.setCronExpr(dto.getCronExpr());
+        source.setRepoId(dto.getRepoId());
+        source.setConfirmMode(dto.getConfirmMode());
+        source.setScoreThreshold(dto.getScoreThreshold());
         source.setUpdateBy(String.valueOf(CurrentUserHolder.getCurrentUserId()));
         scanSourceService.update(source);
         return ResponseUtil.successResponse(null);
@@ -388,6 +651,9 @@ public class DevloopApplicationService {
             map.put("config", s.getConfig());
             map.put("cronExpr", s.getCronExpr());
             map.put("enabled", s.getEnabled());
+            map.put("repoId", s.getRepoId());
+            map.put("confirmMode", s.getConfirmMode());
+            map.put("scoreThreshold", s.getScoreThreshold());
             map.put("lastScanTime", s.getLastScanTime());
             list.add(map);
         }
@@ -418,14 +684,20 @@ public class DevloopApplicationService {
                 return ResponseUtil.failRes("GitHub PAT not configured");
             }
             items = gitHubIssueScanService.scan(source, pat);
-        } else if ("dingtalk".equals(type)) {
+        }
+        else if ("dingtalk".equals(type)) {
             items = dingtalkScanService.scan(source);
             if (items == null) {
-                return ResponseUtil.failRes("DWS未授权，请先在扫描源设置中完成钉钉授权");
+                return ResponseUtil.failRes("钉钉扫描失败，请检查：1) DWS是否已授权 2) 当前组织是否有消息搜索权限 3) 查看扫描日志获取详细错误");
             }
-        } else {
+        }
+        else {
             return ResponseUtil.failRes("Unknown source type: " + type);
         }
+
+        // 先对本次新增需求 LLM 打分（供展示、排序、score 模式判定），再按确认规则派生
+        scoringService.scoreItems(items);
+        autoDeriveForSource(source, items);
 
         Map<String, Object> result = new HashMap<>();
         result.put("createdCount", items.size());
@@ -433,8 +705,7 @@ public class DevloopApplicationService {
     }
 
     /** 查询扫描日志列表 */
-    public ResponseUtil<List<Map<String, Object>>> listScanLogs(
-            Long sourceId, int limit) {
+    public ResponseUtil<List<Map<String, Object>>> listScanLogs(Long sourceId, int limit) {
         List<ScanLog> logs = scanLogService.listBySourceId(sourceId, limit);
         List<Map<String, Object>> list = new ArrayList<>();
         for (ScanLog l : logs) {
@@ -455,16 +726,39 @@ public class DevloopApplicationService {
         List<ScanLogItem> items = scanLogService.listItemsByLogId(logId);
         List<Map<String, Object>> list = new ArrayList<>();
         for (ScanLogItem item : items) {
-            Map<String, Object> map = new HashMap<>();
-            map.put("itemId", item.getItemId());
-            map.put("title", item.getTitle());
-            map.put("originId", item.getOriginId());
-            map.put("originUrl", item.getOriginUrl());
-            map.put("action", item.getAction());
-            map.put("createTime", item.getCreateTime());
-            list.add(map);
+            list.add(toRequirementMap(item));
         }
         return ResponseUtil.successResponse(list);
+    }
+
+    /**
+     * 按扫描源直接查询已收集的需求(action=created)，供需求列表展示。 需求随日志滚动，按“最近N条日志”遍历会漏掉早期扫到的需求，故直接按 source 查条目。
+     */
+    public ResponseUtil<List<Map<String, Object>>> listRequirementsBySource(Long sourceId) {
+        List<ScanLogItem> items = scanLogService.listCreatedItemsBySource(sourceId);
+        List<Map<String, Object>> list = new ArrayList<>();
+        for (ScanLogItem item : items) {
+            list.add(toRequirementMap(item));
+        }
+        return ResponseUtil.successResponse(list);
+    }
+
+    /** 扫描条目转前端需求视图，统一 listScanLogItems 与 listRequirementsBySource 的字段口径。 */
+    private Map<String, Object> toRequirementMap(ScanLogItem item) {
+        Map<String, Object> map = new HashMap<>();
+        map.put("itemId", item.getItemId());
+        map.put("title", item.getTitle());
+        // 需求列表展开态需要展示完整内容，并据 sessionId 判断是否已启动。
+        map.put("content", item.getContent());
+        map.put("originId", item.getOriginId());
+        map.put("originUrl", item.getOriginUrl());
+        map.put("action", item.getAction());
+        map.put("sessionId", item.getSessionId());
+        map.put("score", item.getScore());
+        map.put("priority", item.getPriority());
+        map.put("scoreDetail", item.getScoreDetail());
+        map.put("createTime", item.getCreateTime());
+        return map;
     }
 
     @Autowired
@@ -476,11 +770,10 @@ public class DevloopApplicationService {
         Long userId = CurrentUserHolder.getCurrentUserId();
         String paramKey = "GH_TOKEN";
 
-        LambdaQueryWrapper<com.iwhalecloud.byai.manager.entity.users.UserPrivateParam> wrapper =
-            new LambdaQueryWrapper<>();
+        LambdaQueryWrapper<com.iwhalecloud.byai.manager.entity.users.UserPrivateParam> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(com.iwhalecloud.byai.manager.entity.users.UserPrivateParam::getUserId, userId)
-               .eq(com.iwhalecloud.byai.manager.entity.users.UserPrivateParam::getParamKey, paramKey)
-               .eq(com.iwhalecloud.byai.manager.entity.users.UserPrivateParam::getDeleteFlag, "0");
+            .eq(com.iwhalecloud.byai.manager.entity.users.UserPrivateParam::getParamKey, paramKey)
+            .eq(com.iwhalecloud.byai.manager.entity.users.UserPrivateParam::getDeleteFlag, "0");
 
         var existing = userPrivateParamMapper.selectOne(wrapper);
         String encrypted = com.iwhalecloud.byai.common.ecrypt.Sm4Util.encrypt(pat);
@@ -491,7 +784,8 @@ public class DevloopApplicationService {
             existing.setParamValueLast4(last4);
             existing.setUpdateTime(new Date());
             userPrivateParamMapper.updateById(existing);
-        } else {
+        }
+        else {
             var param = new com.iwhalecloud.byai.manager.entity.users.UserPrivateParam();
             param.setParamId(sequenceService.nextVal());
             param.setUserId(userId);
@@ -512,11 +806,10 @@ public class DevloopApplicationService {
         Long userId = CurrentUserHolder.getCurrentUserId();
         String paramKey = "GH_TOKEN";
 
-        LambdaQueryWrapper<com.iwhalecloud.byai.manager.entity.users.UserPrivateParam> wrapper =
-            new LambdaQueryWrapper<>();
+        LambdaQueryWrapper<com.iwhalecloud.byai.manager.entity.users.UserPrivateParam> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(com.iwhalecloud.byai.manager.entity.users.UserPrivateParam::getUserId, userId)
-               .eq(com.iwhalecloud.byai.manager.entity.users.UserPrivateParam::getParamKey, paramKey)
-               .eq(com.iwhalecloud.byai.manager.entity.users.UserPrivateParam::getDeleteFlag, "0");
+            .eq(com.iwhalecloud.byai.manager.entity.users.UserPrivateParam::getParamKey, paramKey)
+            .eq(com.iwhalecloud.byai.manager.entity.users.UserPrivateParam::getDeleteFlag, "0");
 
         var existing = userPrivateParamMapper.selectOne(wrapper);
         Map<String, Object> result = new HashMap<>();
@@ -547,8 +840,7 @@ public class DevloopApplicationService {
             Process process = pb.start();
 
             StringBuilder output = new StringBuilder();
-            try (var reader = new java.io.BufferedReader(
-                    new java.io.InputStreamReader(process.getInputStream()))) {
+            try (var reader = new java.io.BufferedReader(new java.io.InputStreamReader(process.getInputStream()))) {
                 String line;
                 while ((line = reader.readLine()) != null) {
                     output.append(line);
@@ -572,7 +864,8 @@ public class DevloopApplicationService {
                     groups.add(g);
                 }
             }
-        } catch (Exception e) {
+        }
+        catch (Exception e) {
             log.error("DingTalk group search failed", e);
             return ResponseUtil.failRes("搜索失败: " + e.getMessage());
         }
@@ -581,26 +874,35 @@ public class DevloopApplicationService {
 
     // ========== 研发任务 ==========
 
-    /** 从需求创建任务 */
+    /** 从需求创建任务（前端手动启动入口，身份取当前登录用户） */
     @Transactional(rollbackFor = Exception.class)
     public ResponseUtil<Map<String, Object>> createTask(Map<String, Object> params) {
         Long projectId = Long.valueOf(params.get("projectId").toString());
-        Long sourceItemId = params.containsKey("sourceItemId")
-            ? Long.valueOf(params.get("sourceItemId").toString()) : null;
-        String title = params.containsKey("title") && params.get("title") != null
-            ? params.get("title").toString() : null;
+        Long sourceItemId = params.containsKey("sourceItemId") ? Long.valueOf(params.get("sourceItemId").toString())
+            : null;
+        String title = params.containsKey("title") && params.get("title") != null ? params.get("title").toString()
+            : null;
+        Long currentUserId = CurrentUserHolder.getCurrentUserId();
+        LoginInfo loginInfo = CurrentUserHolder.getLoginInfo();
+        return deriveTask(currentUserId, loginInfo, projectId, sourceItemId, title);
+    }
 
-        // 防止重复启动：如果该需求已有未完成的任务，拒绝创建
+    /**
+     * 从需求派生任务（会话）核心逻辑，不依赖登录 ThreadLocal 取当前用户，供手动启动与定时自动派生复用。 userId 用于成员/agent 校验，loginInfo 透传给异步 chat（自动派生时由源创建者的
+     * LoginInfo 构造）。
+     */
+    private ResponseUtil<Map<String, Object>> deriveTask(Long userId, LoginInfo loginInfo, Long projectId,
+        Long sourceItemId, String title) {
+        // 防止重复启动：该需求已关联会话则拒绝重复启动
         if (sourceItemId != null) {
-            Task existing = taskService.findActiveBySourceItemId(sourceItemId);
-            if (existing != null) {
-                return ResponseUtil.failRes("该需求已有进行中的任务，无法重复启动");
+            ScanLogItem existing = scanLogItemMapper.selectById(sourceItemId);
+            if (existing != null && existing.getSessionId() != null) {
+                return ResponseUtil.failRes("该需求已启动会话，无法重复启动");
             }
         }
 
-        // 校验当前用户是否绑定了数字员工
-        Long currentUserId = CurrentUserHolder.getCurrentUserId();
-        ProjectMember member = projectMemberService.findByProjectAndUser(projectId, currentUserId);
+        // 校验用户是否绑定了数字员工
+        ProjectMember member = projectMemberService.findByProjectAndUser(projectId, userId);
         if (member == null) {
             return ResponseUtil.failRes("您不是该项目成员，无法创建任务");
         }
@@ -611,154 +913,450 @@ public class DevloopApplicationService {
 
         if (sourceItemId != null && (title == null || title.isEmpty())) {
             ScanLogItem item = scanLogItemMapper.selectById(sourceItemId);
-            if (item != null) title = item.getTitle();
+            if (item != null)
+                title = item.getTitle();
         }
         if (title == null || title.isEmpty()) {
             return ResponseUtil.failRes("任务标题不能为空");
         }
 
-        Task task = new Task();
-        task.setProjectId(projectId);
-        task.setSourceItemId(sourceItemId);
-        task.setTitle(title);
-        taskService.create(task);
+        // 加载需求项：提供需求详情与任务类型判定依据
+        ScanLogItem sourceItem = sourceItemId != null ? scanLogItemMapper.selectById(sourceItemId) : null;
+        String description = sourceItem != null && sourceItem.getContent() != null && !sourceItem.getContent().isEmpty()
+            ? sourceItem.getContent()
+            : title;
+        String taskType = detectTaskType(sourceItem, title);
 
+        // 解析目标仓库：需求项 -> 扫描源.repoId -> 仓库；手动任务取项目首个仓库兜底
+        ProjectRepo repo = resolveTaskRepo(projectId, sourceItem);
+        if (repo == null) {
+            return ResponseUtil.failRes("未找到目标仓库，请为扫描源关联仓库或在项目下添加仓库");
+        }
+
+        // 会话即任务：同步建会话（带 projectId）拿到 sessionId，分支名依赖 sessionId，
+        // 再据此生成完整提示词写回 chatDto，耗时的 LLM 对话放到事务提交后异步执行。
+        // 先用 title 作会话内容让会话名可读，建成后再覆盖为完整提示词供异步 chat 使用。
+        AssistantChatDto chatDto = new AssistantChatDto();
+        chatDto.setSessionId(null);
+        chatDto.setAgentId(agentId);
+        chatDto.setProjectId(projectId);
+        chatDto.setChatContent(title);
+        chatDto.setAccessTerminal("DevLoop");
+        chatDto.setClientRequestId(AssistantChatService.getClientRequestId());
+        assistantChatService.createGroupChatSession(chatDto);
+        Long sessionId = chatDto.getSessionId();
+
+        // 任务状态存入 session_ext 纵表(参考 feishuChatId 等扩展)，默认「进行中」，供任务看板分列
+        ByaiSessionExt statusExt = new ByaiSessionExt();
+        statusExt.setExtId(sequenceService.nextVal());
+        statusExt.setSessionId(sessionId);
+        statusExt.setExtParamName("任务状态");
+        statusExt.setExtParamCode(TASK_STATUS_EXT_CODE);
+        statusExt.setExtParamValue(TASK_STATUS_DEFAULT);
+        byaiSessionExtMapper.insert(statusExt);
+
+        String branchName = buildBranchName(taskType, sessionId);
+        Project project = projectMapper.selectById(projectId);
+        String projectName = project != null ? project.getProjectName() : "";
+        chatDto.setChatContent(buildTaskPrompt(projectName, repo, branchName, taskType, title, description));
+
+        // 需求项回写 sessionId，标记“已启动”并支持跳转会话
         if (sourceItemId != null) {
             ScanLogItem item = new ScanLogItem();
             item.setItemId(sourceItemId);
-            item.setTaskId(task.getTaskId());
+            item.setSessionId(sessionId);
             scanLogItemMapper.updateById(item);
         }
 
-        // 拉取沙箱
-        String userCode = member.getUserCode();
-        String sandboxEndpoint = null;
-        String sandboxId = null;
-        if (userCode != null) {
-            try {
-                SandboxLaunchData launchData = sandboxService.launchSandboxWithServiceKey(userCode, null);
-                if (launchData != null) {
-                    sandboxEndpoint = launchData.getEndpoint();
-                    sandboxId = launchData.getSandboxId();
-                }
-            } catch (Exception e) {
-                log.warn("拉取沙箱失败，任务仍创建: {}", e.getMessage());
-            }
-        }
+        // 事务提交后再异步触发 chat：确保异步线程能读到本事务已建的 session。
+        submitTaskChatAfterCommit(chatDto, loginInfo, sessionId);
 
         Map<String, Object> result = new HashMap<>();
-        result.put("taskId", task.getTaskId());
         result.put("agentId", agentId);
-        result.put("userCode", userCode);
+        result.put("sessionId", sessionId);
+        result.put("branchName", branchName);
         result.put("title", title);
-        result.put("sandboxEndpoint", sandboxEndpoint);
-        result.put("sandboxId", sandboxId);
         return ResponseUtil.successResponse(result);
     }
 
-    /** 查询项目任务列表 */
+    /**
+     * 定时扫描完成后，按确认规则用源创建者身份为本次新增需求自动派生任务： auto=全部派生；score=综合分达阈值(scoreThreshold，默认70)才派生；manual=不派生。 扫描线程无登录上下文，故用
+     * source.createBy 构造 LoginInfo 并设入 CurrentUserHolder， 复用 deriveTask 后清理，避免污染线程池上下文。
+     */
+    public void autoDeriveForSource(ScanSource source, List<ScanLogItem> newItems) {
+        if (source == null || newItems == null || newItems.isEmpty()) {
+            return;
+        }
+        String mode = source.getConfirmMode();
+        boolean autoAll = "auto".equalsIgnoreCase(mode);
+        boolean byScore = "score".equalsIgnoreCase(mode);
+        if (!autoAll && !byScore) {
+            return;
+        }
+        int threshold = source.getScoreThreshold() != null ? source.getScoreThreshold() : 70;
+        if (source.getCreateBy() == null || source.getCreateBy().isEmpty()) {
+            log.warn("[DevloopAuto] 源 {} 无创建者，跳过自动派生", source.getSourceId());
+            return;
+        }
+        Long ownerUserId;
+        try {
+            ownerUserId = Long.valueOf(source.getCreateBy());
+        }
+        catch (NumberFormatException e) {
+            log.warn("[DevloopAuto] 源 {} 创建者非法 {}，跳过自动派生", source.getSourceId(), source.getCreateBy());
+            return;
+        }
+        LoginInfo ownerLogin = loginApplicationService.getLoginInfo(ownerUserId);
+        if (ownerLogin == null) {
+            log.warn("[DevloopAuto] 无法加载源创建者 {} 的登录信息，跳过自动派生", ownerUserId);
+            return;
+        }
+        LoginInfo previous = CurrentUserHolder.getLoginInfo();
+        try {
+            CurrentUserHolder.setLoginInfo(ownerLogin);
+            // 扫描线程无外层事务，deriveTask 内每条 mapper 自动提交，单条失败不影响其余；
+            // 会话即时落库，submitTaskChatAfterCommit 因无活动事务直接异步执行 chat。
+            for (ScanLogItem item : newItems) {
+                // score 模式：仅综合分达阈值的需求自动派生，其余留待人工确认
+                if (byScore) {
+                    Integer s = item.getScore();
+                    if (s == null || s < threshold) {
+                        continue;
+                    }
+                }
+                try {
+                    ResponseUtil<Map<String, Object>> res = deriveTask(ownerUserId, ownerLogin, source.getProjectId(),
+                        item.getItemId(), item.getTitle());
+                    if (res == null || res.getCode() != ResponseUtil.SUCCESS) {
+                        log.warn("[DevloopAuto] 自动派生失败, item={}, msg={}", item.getItemId(),
+                            res != null ? res.getMsg() : "null");
+                    }
+                }
+                catch (Exception e) {
+                    log.error("[DevloopAuto] 自动派生异常, item={}", item.getItemId(), e);
+                }
+            }
+        }
+        finally {
+            // 还原上下文：线程池复用，避免把源创建者身份泄漏给后续任务
+            if (previous != null) {
+                CurrentUserHolder.setLoginInfo(previous);
+            }
+            else {
+                CurrentUserHolder.clearLoginInfo();
+            }
+        }
+    }
+
+    /**
+     * 在当前事务提交后，用 TTL 线程池异步执行 LLM 对话。 sessionId 已在事务内建好并写入 chatDto，chat 走“已有会话”分支，不会重复建会话。 无事务时（理论上不会发生）直接提交，保证仍能执行。
+     */
+    private void submitTaskChatAfterCommit(AssistantChatDto chatDto, LoginInfo loginInfo, Long taskId) {
+        Runnable chatTask = () -> {
+            try {
+                assistantChatService.chat(chatDto, new ByteArrayOutputStream(), loginInfo);
+            }
+            catch (Exception e) {
+                log.error("[DevloopTask] 异步 LLM chat 执行失败, taskId={}, sessionId={}", taskId, chatDto.getSessionId(), e);
+            }
+        };
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    TASK_CHAT_EXECUTOR.execute(chatTask);
+                }
+            });
+        }
+        else {
+            TASK_CHAT_EXECUTOR.execute(chatTask);
+        }
+    }
+
+    /** 判定任务类型：需求项含 bug/缺陷 标记归为 bug，否则为需求 */
+    private String detectTaskType(ScanLogItem item, String title) {
+        String haystack = ((item != null && item.getTitle() != null ? item.getTitle() : "") + " "
+            + (item != null && item.getContent() != null ? item.getContent() : "") + " "
+            + (item != null && item.getAction() != null ? item.getAction() : "") + " " + (title != null ? title : ""))
+            .toLowerCase();
+        if (haystack.contains("bug") || haystack.contains("缺陷") || haystack.contains("修复")) {
+            return "bug";
+        }
+        return "需求";
+    }
+
+    /** 分支名策略：bug -> fix/task-{id}，其余 -> feat/task-{id} */
+    private String buildBranchName(String taskType, Long taskId) {
+        String prefix = "bug".equals(taskType) ? "fix" : "feat";
+        return prefix + "/task-" + taskId;
+    }
+
+    /**
+     * 解析任务目标仓库：需求项 -> 扫描源.repoId -> 仓库； 手动任务或扫描源未绑定仓库时，取项目首个仓库兜底。
+     */
+    private ProjectRepo resolveTaskRepo(Long projectId, ScanLogItem item) {
+        if (item != null && item.getSourceId() != null) {
+            ScanSource source = scanSourceService.findById(item.getSourceId());
+            if (source != null && source.getRepoId() != null) {
+                ProjectRepo repo = projectRepoMapper.selectById(source.getRepoId());
+                if (repo != null) {
+                    return repo;
+                }
+            }
+        }
+        List<ProjectRepo> repos = projectRepoMapper
+            .selectList(new LambdaQueryWrapper<ProjectRepo>().eq(ProjectRepo::getProjectId, projectId));
+        return repos.isEmpty() ? null : repos.get(0);
+    }
+
+    /**
+     * 构造任务启动提示词：从 byai_system_config 取模板并填充占位符； 模板缺失时用内置兜底模板，保证任务始终可创建。
+     */
+    private String buildTaskPrompt(String projectName, ProjectRepo repo, String branchName, String taskType,
+        String title, String description) {
+        String template = byaiSystemConfigService.findByParamCode("DEVLOOP_TASK_START_PROMPT");
+        if (template == null || template.isEmpty()) {
+            template = DEFAULT_TASK_PROMPT_TEMPLATE;
+        }
+        String repoFullName = repo != null && repo.getRepoFullName() != null ? repo.getRepoFullName() : "";
+        String repoUrl = repo != null && repo.getRepoUrl() != null ? repo.getRepoUrl() : repoFullName;
+        return template.replace("${projectName}", projectName != null ? projectName : "").replace("${repoUrl}", repoUrl)
+            .replace("${repoFullName}", repoFullName).replace("${branchName}", branchName != null ? branchName : "")
+            .replace("${taskType}", taskType != null ? taskType : "").replace("${title}", title != null ? title : "")
+            .replace("${description}", description != null ? description : "");
+    }
+
+    /** 提示词模板兜底：DB 未配置 DEVLOOP_TASK_START_PROMPT 时使用 */
+    private static final String DEFAULT_TASK_PROMPT_TEMPLATE = "你是 ByClaw 开发助手，负责在指定代码仓库中自主完成开发任务。\n\n" + "## 任务信息\n"
+        + "- 项目：${projectName}\n" + "- 代码仓库：${repoFullName}\n" + "- 目标分支：${branchName}（尚未创建，需你新建）\n"
+        + "- 任务类型：${taskType}\n" + "- 任务标题：${title}\n\n" + "## 需求详情\n${description}\n\n" + "## 仓库访问说明\n"
+        + "- 目标仓库全路径为 ${repoFullName}，它可能是私有仓库；GitHub 访问令牌(PAT)已配置在环境变量 GH_TOKEN 中，请直接使用它克隆和推送。\n"
+        + "- 用带令牌的完整地址克隆：git clone https://$GH_TOKEN@github.com/${repoFullName}.git\n"
+        + "- 若提示仓库或分支不存在，通常是私有仓库权限问题，请确认已使用环境变量 GH_TOKEN 中的令牌，不要据此判定仓库不存在、也不要改为在本地新建独立项目。\n\n" + "## 工作要求\n"
+        + "1. 克隆仓库 ${repoFullName}，拉取默认分支最新代码；目标分支 ${branchName} 尚不存在，用 git checkout -b ${branchName} 从默认分支新建并切换。\n"
+        + "2. 仔细理解上述需求详情，定位需要修改的代码。\n" + "3. 完成开发后自测，确保编译通过、相关测试通过。\n" + "4. 提交改动到分支 ${branchName} 并推送，提交信息清晰说明本次改动。\n"
+        + "5. 如需求描述不清或存在阻塞，明确说明遇到的问题。\n\n" + "## 环节汇报规范（重要，供系统追踪任务进度）\n"
+        + "在推进以下研发环节时，每进入/完成/打回一个环节，都要单独输出一行机器可读标记，格式严格如下（方括号与关键字不可省略）：\n" + "- 进入某环节：[PHASE] <环节> START\n"
+        + "- 完成某环节：[PHASE] <环节> DONE\n" + "- 打回上一步：[PHASE] <环节> REJECT-><目标环节> 原因:<简述>\n"
+        + "环节取值固定为：issue（需求来源）、req（需求分析）、design（方案设计）、coder（编码）、reviewer（代码审查）、tester（测试）、pr（提交PR）。\n"
+        + "示例：[PHASE] coder START ；[PHASE] tester REJECT->coder 原因:单测未覆盖审计日志。\n" + "标记须独占一行、按真实进展实时输出，正常叙述照常进行。\n\n"
+        + "请开始处理。";
+
+    /** 查询项目任务列表：会话即任务，状态取自 session_ext(task_status)，环节取自缓存(task_phase)，供看板按状态分列。 */
     public ResponseUtil<List<Map<String, Object>>> listTasks(Long projectId) {
-        List<Task> tasks = taskService.listByProjectId(projectId);
+        List<ByaiSession> sessions = byaiSessionMapper.selectList(new LambdaQueryWrapper<ByaiSession>()
+            .eq(ByaiSession::getProjectId, projectId).orderByDesc(ByaiSession::getCreateTime));
+        List<Long> sessionIds = sessions.stream().map(ByaiSession::getSessionId)
+            .collect(java.util.stream.Collectors.toList());
+        // 批量取状态与环节快照，避免逐会话查 session_ext 造成 N+1；上下文按会话实时关联解析。
+        Map<Long, String> statusMap = loadTaskStatusMap(sessionIds);
+        Map<Long, DevloopPhaseService.PhaseSnapshot> phaseMap = loadTaskPhaseMap(sessionIds);
         List<Map<String, Object>> list = new ArrayList<>();
-        for (Task t : tasks) {
-            Map<String, Object> map = new HashMap<>();
-            map.put("taskId", t.getTaskId());
-            map.put("projectId", t.getProjectId());
-            map.put("sourceItemId", t.getSourceItemId());
-            map.put("title", t.getTitle());
-            map.put("status", t.getStatus());
-            map.put("phase", t.getPhase());
-            map.put("currentRound", t.getCurrentRound());
-            map.put("totalRounds", t.getTotalRounds());
-            map.put("score", t.getScore());
-            map.put("assignee", t.getAssignee());
-            map.put("agentName", t.getAgentName());
-            map.put("branchName", t.getBranchName());
-            map.put("warningTag", t.getWarningTag());
-            map.put("createTime", t.getCreateTime());
-            list.add(map);
+        for (ByaiSession s : sessions) {
+            list.add(sessionAsTask(s, statusMap.get(s.getSessionId()), phaseMap.get(s.getSessionId()),
+                resolveTaskContext(s)));
         }
         return ResponseUtil.successResponse(list);
     }
 
-    /** 更新任务字段 */
-    public ResponseUtil<Void> updateTask(Map<String, Object> params) {
-        Long taskId = Long.valueOf(params.get("taskId").toString());
-        Task task = taskService.getById(taskId);
-        if (task == null) return ResponseUtil.failRes("任务不存在");
-
-        if (params.containsKey("status")) task.setStatus(params.get("status").toString());
-        if (params.containsKey("phase")) task.setPhase(params.get("phase").toString());
-        if (params.containsKey("currentRound")) task.setCurrentRound(Integer.valueOf(params.get("currentRound").toString()));
-        if (params.containsKey("totalRounds")) task.setTotalRounds(Integer.valueOf(params.get("totalRounds").toString()));
-        if (params.containsKey("score")) task.setScore(Integer.valueOf(params.get("score").toString()));
-        if (params.containsKey("assignee")) task.setAssignee(params.get("assignee").toString());
-        if (params.containsKey("branchName")) task.setBranchName(params.get("branchName").toString());
-        if (params.containsKey("warningTag")) task.setWarningTag(params.get("warningTag").toString());
-        if (params.containsKey("sessionId")) task.setSessionId(Long.valueOf(params.get("sessionId").toString()));
-        taskService.update(task);
-        return ResponseUtil.successResponse(null);
+    /** 查询单个任务详情：按 sessionId 取会话 */
+    public ResponseUtil<Map<String, Object>> getTaskDetail(Long sessionId) {
+        ByaiSession s = byaiSessionMapper.selectById(sessionId);
+        if (s == null)
+            return ResponseUtil.failRes("会话不存在");
+        List<Long> ids = java.util.Collections.singletonList(sessionId);
+        Map<Long, String> statusMap = loadTaskStatusMap(ids);
+        Map<Long, DevloopPhaseService.PhaseSnapshot> phaseMap = loadTaskPhaseMap(ids);
+        return ResponseUtil.successResponse(
+            sessionAsTask(s, statusMap.get(sessionId), phaseMap.get(sessionId), resolveTaskContext(s)));
     }
 
-    /** 查询单个任务详情 */
-    public ResponseUtil<Map<String, Object>> getTaskDetail(Long taskId) {
-        Task t = taskService.getById(taskId);
-        if (t == null) return ResponseUtil.failRes("任务不存在");
+    /**
+     * 查询任务环节进度：按需刷新——缓存缺失或会话有新消息时重算并落库，否则直接返回缓存。 返回完整快照(7 环节 + 状态 + 打回记录)，供详情抽屉逐环节渲染。
+     */
+    public ResponseUtil<DevloopPhaseService.PhaseSnapshot> getTaskPhases(Long sessionId) {
+        if (sessionId == null) {
+            return ResponseUtil.failRes("sessionId 不能为空");
+        }
+        DevloopPhaseService.PhaseSnapshot cached = loadTaskPhaseMap(java.util.Collections.singletonList(sessionId))
+            .get(sessionId);
+        long messageCount = phaseService.countMessages(sessionId);
+        if (!phaseService.isStale(cached, messageCount)) {
+            return ResponseUtil.successResponse(cached);
+        }
+        DevloopPhaseService.PhaseSnapshot fresh = phaseService.buildSnapshot(sessionId);
+        persistPhaseSnapshot(sessionId, fresh);
+        return ResponseUtil.successResponse(fresh);
+    }
+
+    /** 批量读取会话的任务状态(session_ext.task_status)，返回 sessionId -> status。 */
+    private Map<Long, String> loadTaskStatusMap(List<Long> sessionIds) {
+        Map<Long, String> statusMap = new HashMap<>();
+        if (sessionIds == null || sessionIds.isEmpty()) {
+            return statusMap;
+        }
+        List<ByaiSessionExt> exts = byaiSessionExtMapper.selectList(new LambdaQueryWrapper<ByaiSessionExt>()
+            .eq(ByaiSessionExt::getExtParamCode, TASK_STATUS_EXT_CODE).in(ByaiSessionExt::getSessionId, sessionIds));
+        for (ByaiSessionExt ext : exts) {
+            statusMap.put(ext.getSessionId(), ext.getExtParamValue());
+        }
+        return statusMap;
+    }
+
+    /** 批量读取会话的环节快照缓存(session_ext.task_phase)，返回 sessionId -> PhaseSnapshot(可空)。 */
+    private Map<Long, DevloopPhaseService.PhaseSnapshot> loadTaskPhaseMap(List<Long> sessionIds) {
+        Map<Long, DevloopPhaseService.PhaseSnapshot> phaseMap = new HashMap<>();
+        if (sessionIds == null || sessionIds.isEmpty()) {
+            return phaseMap;
+        }
+        List<ByaiSessionExt> exts = byaiSessionExtMapper.selectList(new LambdaQueryWrapper<ByaiSessionExt>()
+            .eq(ByaiSessionExt::getExtParamCode, TASK_PHASE_EXT_CODE).in(ByaiSessionExt::getSessionId, sessionIds));
+        for (ByaiSessionExt ext : exts) {
+            DevloopPhaseService.PhaseSnapshot snap = phaseService.fromJson(ext.getExtParamValue());
+            if (snap != null) {
+                phaseMap.put(ext.getSessionId(), snap);
+            }
+        }
+        return phaseMap;
+    }
+
+    /** 环节快照 upsert 到 session_ext(task_phase)：存在则更新，不存在则插入。 */
+    private void persistPhaseSnapshot(Long sessionId, DevloopPhaseService.PhaseSnapshot snapshot) {
+        String json = phaseService.toJson(snapshot);
+        if (json == null) {
+            return;
+        }
+        ByaiSessionExt existing = byaiSessionExtMapper
+            .selectOne(new LambdaQueryWrapper<ByaiSessionExt>().eq(ByaiSessionExt::getExtParamCode, TASK_PHASE_EXT_CODE)
+                .eq(ByaiSessionExt::getSessionId, sessionId).last("limit 1"));
+        if (existing != null) {
+            existing.setExtParamValue(json);
+            byaiSessionExtMapper.updateById(existing);
+            return;
+        }
+        ByaiSessionExt ext = new ByaiSessionExt();
+        ext.setExtId(sequenceService.nextVal());
+        ext.setSessionId(sessionId);
+        ext.setExtParamName("任务环节");
+        ext.setExtParamCode(TASK_PHASE_EXT_CODE);
+        ext.setExtParamValue(json);
+        byaiSessionExtMapper.insert(ext);
+    }
+
+    /**
+     * 实时解析任务上下文：不落库，按需从关联链路查。 需求/仓库：sessionId -> byai_scan_log_item -> source(repoId->仓库) -> log(projectId)；
+     * agent：session.objectId(数字员工resourceId) -> 资源名；负责人：session.creatorId -> 用户名； 分支：由 taskType(据需求内容判定) + sessionId
+     * 确定性重算。关联信息变化后展示随之更新。
+     */
+    private Map<String, Object> resolveTaskContext(ByaiSession s) {
+        Map<String, Object> ctx = new HashMap<>();
+        Long sessionId = s.getSessionId();
+
+        // 派生任务会把 sessionId 回写到需求项；据此还原需求与仓库。手动任务无此行，走项目兜底仓库。
+        ScanLogItem item = scanLogItemMapper
+            .selectOne(new LambdaQueryWrapper<ScanLogItem>().eq(ScanLogItem::getSessionId, sessionId).last("limit 1"));
+        if (item != null) {
+            ctx.put("requirementTitle", item.getTitle());
+            ctx.put("requirementOriginId", item.getOriginId());
+            ctx.put("sourceItemId", item.getItemId());
+        }
+        ProjectRepo repo = resolveTaskRepo(s.getProjectId(), item);
+        ctx.put("repoFullName", repo != null ? repo.getRepoFullName() : null);
+
+        String taskType = detectTaskType(item, s.getSessionName());
+        ctx.put("branchName", buildBranchName(taskType, sessionId));
+
+        ctx.put("agentName", resolveAgentName(s.getObjectId()));
+        ctx.put("assignee", resolveUserName(s.getCreatorId()));
+        return ctx;
+    }
+
+    /** agentId(resourceId) -> 数字员工名称；查不到返回空串。 */
+    private String resolveAgentName(Long agentId) {
+        if (agentId == null) {
+            return "";
+        }
+        com.iwhalecloud.byai.manager.entity.resource.SsResource res = ssResourceMapper.selectByResourceId(agentId);
+        return res != null && res.getResourceName() != null ? res.getResourceName() : "";
+    }
+
+    /** userId -> 用户名；查不到返回空串。 */
+    private String resolveUserName(Long userId) {
+        if (userId == null) {
+            return "";
+        }
+        try {
+            LoginInfo info = loginApplicationService.getLoginInfo(userId);
+            return info != null && info.getUserName() != null ? info.getUserName() : "";
+        }
+        catch (Exception e) {
+            log.warn("[Devloop] 解析负责人失败, userId={}", userId, e);
+            return "";
+        }
+    }
+
+    /**
+     * 会话映射为前端任务形状：taskId 复用 sessionId 保证前端按 taskId 取值与跳转不变； status 取自 session_ext(task_status)；phase/currentRound
+     * 取自环节快照缓存； agent/仓库/分支/需求/负责人取自 task_context 上下文；无上下文时相关字段为空。
+     */
+    private Map<String, Object> sessionAsTask(ByaiSession s, String status, DevloopPhaseService.PhaseSnapshot phase,
+        Map<String, Object> ctx) {
         Map<String, Object> map = new HashMap<>();
-        map.put("taskId", t.getTaskId());
-        map.put("projectId", t.getProjectId());
-        map.put("sourceItemId", t.getSourceItemId());
-        map.put("title", t.getTitle());
-        map.put("status", t.getStatus());
-        map.put("phase", t.getPhase());
-        map.put("currentRound", t.getCurrentRound());
-        map.put("totalRounds", t.getTotalRounds());
-        map.put("score", t.getScore());
-        map.put("assignee", t.getAssignee());
-        map.put("agentName", t.getAgentName());
-        map.put("branchName", t.getBranchName());
-        map.put("warningTag", t.getWarningTag());
-        map.put("createTime", t.getCreateTime());
-        return ResponseUtil.successResponse(map);
+        map.put("taskId", s.getSessionId());
+        map.put("sessionId", s.getSessionId());
+        map.put("projectId", s.getProjectId());
+        map.put("title", s.getSessionName());
+        map.put("sessionContent", s.getSessionContent());
+        map.put("createBy", s.getCreatorId());
+        map.put("createTime", s.getCreateTime());
+        map.put("updateTime", s.getUpdateTime());
+        map.put("status", status);
+        map.put("phase", phase != null ? phase.getCurrentPhase() : null);
+        map.put("currentRound", phase != null ? phase.getRound() : null);
+        map.put("totalRounds", null);
+        // 进度按环节派生，列表与详情共用 DevloopPhaseService 口径，避免两处算法漂移。
+        map.put("progress", phase != null ? phaseService.progressPercent(phase) : 0);
+        map.put("score", null);
+        map.put("assignee", ctx != null ? ctx.get("assignee") : null);
+        map.put("agentName", ctx != null ? ctx.get("agentName") : null);
+        map.put("branchName", ctx != null ? ctx.get("branchName") : null);
+        map.put("repoFullName", ctx != null ? ctx.get("repoFullName") : null);
+        map.put("requirementTitle", ctx != null ? ctx.get("requirementTitle") : null);
+        map.put("requirementOriginId", ctx != null ? ctx.get("requirementOriginId") : null);
+        map.put("warningTag", null);
+        map.put("sourceItemId", ctx != null ? ctx.get("sourceItemId") : null);
+        return map;
     }
 
     // ========== 项目成员 ==========
 
     /** 添加项目成员 */
+    @Transactional(rollbackFor = Exception.class)
     public ResponseUtil<Void> addProjectMember(Map<String, Object> params) {
         Long projectId = Long.valueOf(params.get("projectId").toString());
         Long userId = Long.valueOf(params.get("userId").toString());
-        String userCode = params.containsKey("userCode") ? params.get("userCode").toString() : null;
-        String userName = params.containsKey("userName") ? params.get("userName").toString() : null;
 
+        Project project = projectMapper.selectById(projectId);
+        if (project == null || DELETE_FLAG_DELETED.equals(project.getDeleteFlag())) {
+            return ResponseUtil.failRes("Project not found");
+        }
         if (projectMemberService.isMember(projectId, userId)) {
             return ResponseUtil.failRes("该用户已是项目成员");
         }
-        projectMemberService.addMember(projectId, userId, userCode, userName, "member");
+        projectMemberService.addMember(projectId, userId, "member");
+        if (!"Y".equals(project.getIsShare())) {
+            // 从成员 tab 主动添加成员时，项目已经具备共享成员，需同步项目共享状态。
+            project.setIsShare("Y");
+            project.setUpdateBy(CurrentUserHolder.getCurrentUserId());
+            project.setUpdateTime(new Date());
+            projectMapper.updateById(project);
+        }
         return ResponseUtil.successResponse(null);
     }
 
     /** 查询项目成员列表 */
-    public ResponseUtil<List<Map<String, Object>>> listProjectMembers(Long projectId) {
-        List<ProjectMember> members = projectMemberService.listByProjectId(projectId);
-        List<Map<String, Object>> list = new ArrayList<>();
-        for (ProjectMember m : members) {
-            Map<String, Object> map = new HashMap<>();
-            map.put("memberId", m.getMemberId());
-            map.put("projectId", m.getProjectId());
-            map.put("userId", m.getUserId());
-            map.put("userCode", m.getUserCode());
-            map.put("userName", m.getUserName());
-            map.put("role", m.getRole());
-            map.put("agentId", m.getAgentId());
-            if (m.getAgentId() != null) {
-                SsResource resource = ssResourceMapper.selectById(m.getAgentId());
-                map.put("agentName", resource != null ? resource.getResourceName() : null);
-            }
-            map.put("createTime", m.getCreateTime());
-            list.add(map);
-        }
-        return ResponseUtil.successResponse(list);
+    public ResponseUtil<List<ProjectMemberListDto>> listProjectMembers(Long projectId) {
+        return ResponseUtil.successResponse(projectMemberService.listProjectMembers(projectId));
     }
 
     /** 移除项目成员 */
@@ -766,8 +1364,7 @@ public class DevloopApplicationService {
         ProjectMember member = projectMemberService.getById(memberId);
         if (member != null) {
             Project project = projectMapper.selectById(member.getProjectId());
-            if (project != null && project.getCreateBy() != null
-                && project.getCreateBy().equals(member.getUserId())) {
+            if (project != null && project.getCreateBy() != null && project.getCreateBy().equals(member.getUserId())) {
                 return ResponseUtil.failRes("项目创建者不能被移除");
             }
         }
@@ -803,7 +1400,13 @@ public class DevloopApplicationService {
         result.put("savedAt", dbStatus.getOrDefault("savedAt", ""));
         result.put("runtimeAuthenticated", runtimeStatus.get("authenticated"));
         result.put("tokenValid", runtimeStatus.get("tokenValid"));
+        result.put("refreshTokenValid", runtimeStatus.getOrDefault("refreshTokenValid", false));
         result.put("expiresAt", runtimeStatus.getOrDefault("expiresAt", ""));
+        result.put("refreshExpiresAt", runtimeStatus.getOrDefault("refreshExpiresAt", ""));
+        result.put("corpId", runtimeStatus.getOrDefault("corpId", ""));
+        result.put("corpName", runtimeStatus.getOrDefault("corpName", ""));
+        result.put("userId", runtimeStatus.getOrDefault("userId", ""));
+        result.put("userName", runtimeStatus.getOrDefault("userName", ""));
         return ResponseUtil.successResponse(result);
     }
 
@@ -815,5 +1418,77 @@ public class DevloopApplicationService {
         }
         dwsAuthService.recordAuthToDb();
         return ResponseUtil.successResponse(null);
+    }
+
+    // ========== 分享到空间 ==========
+
+    /**
+     * 保存到项目空间。
+     *
+     * @param dto 请求参数（projectId、sessionId、filePath、fileName）
+     */
+    public void saveShareToSpace(ProjectShareFileSaveDto dto) {
+
+        Long projectId = dto.getProjectId();
+        Long sessionId = dto.getSessionId();
+        String filePath = dto.getFilePath();
+        String fileName = dto.getFileName();
+
+        // 获取文件名
+        if (StringUtil.isEmpty(fileName)) {
+            fileName = StringUtils.substringAfterLast(filePath, "/");
+        }
+
+        // 根据文件名获取类型
+        MediaType mediaType = MediaTypeFactory.getMediaType(fileName).orElse(MediaType.APPLICATION_OCTET_STREAM);
+
+        String bucketName = userBucketNamingService.buildUserBucketName(CurrentUserHolder.getCurrentUserCode());
+        try (InputStream inputStream = filesApplicationService.openCommonFileInputStream(bucketName, filePath)) {
+
+            // 提取文件信息
+            String path = "/" + projectId + "/" + sessionId + "/" + fileName;
+
+            StorageLocation location = commonFilePathResolver.projectShare(path);
+            FileMetadata fileMetadata = commonFileStorage.write(location, inputStream.readAllBytes(),
+                mediaType.toString());
+
+            logger.info("当前上传文件:{}", JSON.toJSONString(fileMetadata));
+
+            String fileUrl = "/commonFile/preview?style=minio&bucketName={bucketName}&filePath={filePath}";
+            fileUrl = fileUrl.replace("{bucketName}", location.getBucketOrRoot()).replace("{filePath}",
+                location.getPath());
+
+            Files byaiFiles = new Files();
+            byaiFiles.setFileId(sequenceService.nextVal());
+            byaiFiles.setChatId(sessionId);
+            byaiFiles.setFileName(fileName);
+            byaiFiles.setConvertFileName(fileName);
+            byaiFiles.setFileUrl(fileUrl);
+            byaiFiles.setFileType(fileMetadata.getFileType());
+            byaiFiles.setCreateBy(CurrentUserHolder.getCurrentUserId());
+            byaiFiles.setCompleteTime(new Date());
+            byaiFiles.setFileSystemType(fileMetadata.getStorageType());
+            byaiFiles.setContentType(fileMetadata.getContentType());
+            byaiFiles.setLength(fileMetadata.getFileSize());
+            byaiFiles.setFileStatus(FileStatus.STATUS_00A);
+            byaiFiles.setProjectId(projectId);
+            fileService.save(byaiFiles);
+
+            // 保存文件分享
+            projectShareFileService.save(projectId, byaiFiles.getFileId(), null);
+        }
+        catch (Exception e) {
+            logger.error(e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 查询空间文件列表。
+     *
+     * @param dto 查询条件（projectId）
+     * @return 空间文件列表
+     */
+    public List<ProjectShareFileListDto> listSpaceFiles(ProjectShareFileQueryDto dto) {
+        return projectShareFileService.listSpaceFiles(dto.getProjectId());
     }
 }

@@ -112,6 +112,40 @@ class DefaultResourceJsonConnectivityValidationServiceTest {
     }
 
     @Test
+    void validate_whenInternalDatasetHasNoKnowledgeLifecycleOperations_skipsConnectivityValidation() {
+        ReflectionTestUtils.setField(service, "failFast", true);
+
+        String json = """
+            {
+              "systemCode": "dataset",
+              "resourceBizType": "KG_DOC",
+              "resourceService": [
+                {
+                  "openapiSchema": {
+                    "paths": {
+                      "/api/v1/listDir": {
+                        "post": {
+                          "operationId": "listDir"
+                        }
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+            """;
+
+        assertThatCode(() -> service.validate(context("KG_DOC", "/resource/doc/KG_DOC_2.json", json)))
+            .doesNotThrowAnyException();
+
+        verify(resourceCurlService, org.mockito.Mockito.never()).runOpenApiOperation(
+            org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString(),
+            org.mockito.ArgumentMatchers.any(JSONObject.class), org.mockito.ArgumentMatchers.anyString(),
+            org.mockito.ArgumentMatchers.anySet(), org.mockito.ArgumentMatchers.anyMap(),
+            org.mockito.ArgumentMatchers.anyMap());
+    }
+
+    @Test
     void validate_whenByclawCodeAgent_skipsAgentHealthValidation() throws Exception {
         ReflectionTestUtils.setField(service, "failFast", true);
         String json = """

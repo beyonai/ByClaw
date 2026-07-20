@@ -1,5 +1,5 @@
 import React, { useCallback, useContext, useState, useEffect, useRef } from 'react';
-import { UploadOutlined, SearchOutlined, PlusOutlined } from '@ant-design/icons';
+import { UploadOutlined, SearchOutlined, PlusOutlined, FullscreenOutlined } from '@ant-design/icons';
 import { useIntl, useSelector, useNavigate, useSearchParams } from '@umijs/max';
 import type { TabsProps } from 'antd';
 import { Button, Input, Space, Tooltip, message, Tabs } from 'antd';
@@ -98,7 +98,7 @@ const parseBannerList = (value: any) => {
 
 const Resources: React.FC<Props> = ({ resourceType }) => {
   const intl = useIntl();
-  const { EventEmitter } = useGlobal();
+  const { EventEmitter, agentId, agentInfo } = useGlobal();
 
   // 根据 resourceType 判断资源名称
   const getResourceName = () => {
@@ -127,29 +127,51 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
     Array<{ catalogId: string | number; catalogName: string; pcatalogId?: string | number }>
   >([]);
 
-  const defaultTab = (): 'personal' | 'enterprise' => {
+  type ResourceTab = 'personal' | 'enterprise' | 'marketplace';
+  const defaultTab = (): ResourceTab => {
     const tabFromUrl = searchParams.get('tab');
-    if (tabFromUrl === 'enterprise' || tabFromUrl === 'personal') {
+    if (
+      tabFromUrl === 'enterprise' ||
+      tabFromUrl === 'personal' ||
+      (resourceType === 'SKILL' && tabFromUrl === 'marketplace')
+    ) {
       return tabFromUrl;
     }
     return 'personal';
   };
 
-  const [activeTab, setActiveTab] = useState<'personal' | 'enterprise'>(defaultTab());
+  const [activeTab, setActiveTab] = useState<ResourceTab>(defaultTab());
+  const marketplaceRef = useRef<HTMLDivElement>(null);
   const { setDetailPanel, clearDetailPanel } = useContext(SiderContentContext);
 
   useEffect(() => {
     const tabFromUrl = searchParams.get('tab');
-    if ((tabFromUrl === 'enterprise' || tabFromUrl === 'personal') && tabFromUrl !== activeTab) {
+    if (
+      (tabFromUrl === 'enterprise' ||
+        tabFromUrl === 'personal' ||
+        (resourceType === 'SKILL' && tabFromUrl === 'marketplace')) &&
+      tabFromUrl !== activeTab
+    ) {
       setActiveTab(tabFromUrl);
     }
   }, [activeTab, searchParams]);
 
   const { logoutModuleEvent } = useModuleEvent('KNOWLEDGE_CENTER');
 
-  const { userInfo } = useSelector(({ user }: any) => ({
+  const { userInfo, defaultDigEmployeeId } = useSelector(({ user, employees }: any) => ({
     userInfo: user?.userInfo,
+    defaultDigEmployeeId: employees?.defaultDigEmployeeId,
   }));
+  const activeDigitalEmployeeId =
+    agentId || agentInfo?.agentId || defaultDigEmployeeId || userInfo?.defaultDigEmployeeId;
+  const skillMarketplaceUrl = React.useMemo(() => {
+    const url = new URL('https://www.iwhaleai.com/skillHub/dashboard');
+    url.searchParams.set('tab', 'skills');
+    if (activeDigitalEmployeeId) {
+      url.searchParams.set('digId', `${activeDigitalEmployeeId}`);
+    }
+    return url.toString();
+  }, [activeDigitalEmployeeId]);
   const usersOrganizations = get(userInfo, 'usersOrganizations') || [];
   const userTypeList = usersOrganizations.map((item: any) => item.userType);
   const isAdmin = !isEmpty(intersection(userTypeList, ['PLAT_MAN', 'PLAT_DEVOPS']));
@@ -522,6 +544,32 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
       key: 'enterprise',
       label: `${intl.formatMessage({ id: 'resource.enterprise' })}${resourceName}`,
     },
+    ...(resourceType === 'SKILL'
+      ? [
+        {
+          key: 'marketplace',
+          label: (
+            <span className={styles.marketplaceTabLabel}>
+              {intl.formatMessage({ id: 'resource.skillMarketplace' })}
+              <Tooltip title={intl.formatMessage({ id: 'resource.marketplaceFullscreen' })}>
+                <button
+                  type="button"
+                  className={styles.fullscreenButton}
+                  aria-label={intl.formatMessage({ id: 'resource.marketplaceFullscreen' })}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    marketplaceRef.current?.requestFullscreen?.();
+                  }}
+                >
+                  <FullscreenOutlined />
+                </button>
+              </Tooltip>
+            </span>
+          ),
+        },
+      ]
+      : []),
   ];
 
   const bannerLabel = React.useMemo(() => {
@@ -567,10 +615,10 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
     <div className={styles.fileManagerContainer}>
       <CommonTabs
         activeKey={activeTab}
-        tabBarExtraContent={tabBarExtraContent}
+        tabBarExtraContent={activeTab === 'marketplace' ? undefined : tabBarExtraContent}
         items={items}
         onChange={(key: string) => {
-          const nextTab = key as 'personal' | 'enterprise';
+          const nextTab = key as ResourceTab;
           const nextSearchParams = new URLSearchParams(searchParams);
           nextSearchParams.set('tab', nextTab);
           setCatalogId('');
@@ -581,51 +629,62 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
           setSearchParams(nextSearchParams);
         }}
       />
-      <div className={classnames('full-width ub ub-ver ub-f1', styles.wrapper)}>
-        {bannerLoaded && bannerUrl && (
-          <div className="mb-16">
-            <img className={styles.marketBg} src={bannerUrl} alt="poster" />
-          </div>
-        )}
-        <div className={classnames('ub ub-ac gap8', styles.filterBar)}>
-          <Tabs
-            className={classnames('ub-f1', styles.tabs)}
-            activeKey={catalogId}
-            items={[
-              { label: intl.formatMessage({ id: 'digitalEmployees.skillSquare.allCategory' }), key: '' },
-              ...topLevelCatalogList.map((item) => ({
-                label: item.catalogName,
-                key: `${item?.catalogId}`,
-              })),
-            ]}
-            onChange={(activeKey) => {
-              setCatalogId(`${activeKey}`);
-              // 重置搜索值
-              setSearchValue('');
-              setDebouncedSearchValue('');
-              // 刷新逻辑由ResourceList组件内部处理
-            }}
+      {resourceType === 'SKILL' && activeTab === 'marketplace' ? (
+        <div ref={marketplaceRef} className={styles.marketplaceFrameContainer}>
+          <iframe
+            title={intl.formatMessage({ id: 'resource.skillMarketplace' })}
+            className={styles.marketplaceFrame}
+            src={skillMarketplaceUrl}
+            allow="fullscreen"
           />
         </div>
-        <ResourceList
-          key={refreshKey}
-          resourceType={resourceType}
-          activeTab={activeTab}
-          searchValue={debouncedSearchValue}
-          catalogId={catalogId}
-          dropdownParam={dropdownParam}
-          resourceName={resourceName}
-          knowledgeCapability={knowledgeCapability}
-          knowledgeCapabilityDisabledTip={knowledgeCapabilityDisabledTip}
-          onDetail={handleDetail}
-          onEdit={handleEditItem}
-          onAuth={handleAuth}
-          onApplyUse={handleApplyUse}
-          onAuditUse={handleAuditUse}
-          onRefresh={refreshList}
-          skillCardViewMode="new"
-        />
-      </div>
+      ) : (
+        <div className={classnames('full-width ub ub-ver ub-f1', styles.wrapper)}>
+          {bannerLoaded && bannerUrl && (
+            <div className="mb-16">
+              <img className={styles.marketBg} src={bannerUrl} alt="poster" />
+            </div>
+          )}
+          <div className={classnames('ub ub-ac gap8', styles.filterBar)}>
+            <Tabs
+              className={classnames('ub-f1', styles.tabs)}
+              activeKey={catalogId}
+              items={[
+                { label: intl.formatMessage({ id: 'digitalEmployees.skillSquare.allCategory' }), key: '' },
+                ...topLevelCatalogList.map((item) => ({
+                  label: item.catalogName,
+                  key: `${item?.catalogId}`,
+                })),
+              ]}
+              onChange={(activeKey) => {
+                setCatalogId(`${activeKey}`);
+                // 重置搜索值
+                setSearchValue('');
+                setDebouncedSearchValue('');
+                // 刷新逻辑由ResourceList组件内部处理
+              }}
+            />
+          </div>
+          <ResourceList
+            key={refreshKey}
+            resourceType={resourceType}
+            activeTab={activeTab}
+            searchValue={debouncedSearchValue}
+            catalogId={catalogId}
+            dropdownParam={dropdownParam}
+            resourceName={resourceName}
+            knowledgeCapability={knowledgeCapability}
+            knowledgeCapabilityDisabledTip={knowledgeCapabilityDisabledTip}
+            onDetail={handleDetail}
+            onEdit={handleEditItem}
+            onAuth={handleAuth}
+            onApplyUse={handleApplyUse}
+            onAuditUse={handleAuditUse}
+            onRefresh={refreshList}
+            skillCardViewMode="new"
+          />
+        </div>
+      )}
       <ResourceImport
         visible={importModalOpen}
         resourceName={resourceName}

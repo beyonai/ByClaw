@@ -54,7 +54,7 @@ const ProjectSidebar: React.FC<Props> = ({
                   <strong>{project.projectName}</strong>
                   <small>{project.description || '暂无项目描述'}</small>
                 </span>
-                <Tag bordered={false} color={project.projectType === 'development' ? 'purple' : 'blue'}>
+                <Tag bordered={false} color={project.projectType === 'develop' ? 'purple' : 'blue'}>
                   {PROJECT_TYPE_LABEL[project.projectType]}
                 </Tag>
               </button>

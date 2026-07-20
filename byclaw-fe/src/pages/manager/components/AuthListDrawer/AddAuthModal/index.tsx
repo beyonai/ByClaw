@@ -20,8 +20,15 @@ import styles from './index.module.less';
 
 const defaultPagination = { pageNum: 1, pageSize: 15, total: 0 };
 
+const searchTypeToDataType = {
+  [searchTypeMap.org]: listTypeMap.org,
+  [searchTypeMap.user]: 'USER',
+  [searchTypeMap.post]: listTypeMap.post,
+  [searchTypeMap.station]: listTypeMap.station,
+};
+
 const AddAuthModal = (props) => {
-  const { onCancel, onOk, value, title, onlyUser = false, showPost = true, showStation = false } = props;
+  const { onCancel, onOk, value, title, onlyUser = false, showPost = true, showStation = false, allowedTypes } = props;
 
   const intl = useIntl();
 
@@ -95,35 +102,44 @@ const AddAuthModal = (props) => {
     return total > size(currentList);
   }, [isSearch, searchList, listType, postList, memberList, total]);
 
+  const searchTypeItems = useMemo(() => {
+    const normalizedAllowedTypes = allowedTypes?.map((item) => String(item).toUpperCase());
+    return searchTypeOpts.filter((item) => {
+      if (item.key === searchTypeMap.agent) return false;
+      if (!normalizedAllowedTypes?.length || item.key === searchTypeMap.all) return true;
+      return normalizedAllowedTypes.includes(searchTypeToDataType[item.key]);
+    });
+  }, [allowedTypes]);
+
   // 当前渲染的数据列表
   const dataList = useMemo(() => {
+    const filterAllowedTypes = (list = []) => {
+      const normalizedAllowedTypes = allowedTypes?.map((item) => String(item).toUpperCase());
+      if (!normalizedAllowedTypes?.length) return list;
+      return list.filter((item) => normalizedAllowedTypes.includes(String(item?.type || '').toUpperCase()));
+    };
+
     if (isSearch) {
       // undefined标识无数据
-      return hasSearch && !searchList.length ? undefined : searchList;
+      const filteredSearchList = filterAllowedTypes(searchList);
+      return hasSearch && !filteredSearchList.length ? undefined : filteredSearchList;
     }
 
     if (isOrg) {
-      return [...treeData, ...memberList];
+      return filterAllowedTypes([...treeData, ...memberList]);
     }
 
     if (isStation) {
-      return treeData;
+      return filterAllowedTypes(treeData);
     }
 
-    return postList;
-  }, [isOrg, isStation, treeData, memberList, postList, isSearch, searchList, hasSearch]);
+    return filterAllowedTypes(postList);
+  }, [allowedTypes, isOrg, isStation, treeData, memberList, postList, isSearch, searchList, hasSearch]);
 
   // 分类功能渲染
   const categoryRender = useMemo(() => {
     if (!onlyUser && isSearch) {
-      return (
-        <Tabs
-          size="small"
-          activeKey={searchType}
-          items={searchTypeOpts.filter((item) => item.key !== searchTypeMap.agent)}
-          onChange={handleSearch}
-        />
-      );
+      return <Tabs size="small" activeKey={searchType} items={searchTypeItems} onChange={handleSearch} />;
     }
 
     if (!isSearch && (showPost || showStation)) {
@@ -165,7 +181,19 @@ const AddAuthModal = (props) => {
     }
 
     return null;
-  }, [isSearch, onlyUser, showPost, showStation, searchType, isOrg, isPost, isStation, handleSearch, intl]);
+  }, [
+    isSearch,
+    onlyUser,
+    showPost,
+    showStation,
+    searchType,
+    searchTypeItems,
+    isOrg,
+    isPost,
+    isStation,
+    handleSearch,
+    intl,
+  ]);
 
   // 树层级信息，组织、驻地
   const treeLevelRender = useMemo(

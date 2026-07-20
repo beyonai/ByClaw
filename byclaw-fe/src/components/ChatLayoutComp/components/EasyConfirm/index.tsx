@@ -1,19 +1,21 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { Suspense, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import classnames from 'classnames';
-import { Pagination } from 'antd';
-import { concat, isEmpty, assign } from 'lodash';
+import { Pagination, theme } from 'antd';
+import { concat, isEmpty, merge } from 'lodash';
 // import CloseOutlined from '@ant-design/icons/CloseOutlined';
 
 import QueryInput from '@/components/QueryInput';
-import ApprovalFormComp, { IProps as IApprovalFormProps } from '@/components/MessagesComp/ApprovalForm';
+import lazyHandler from '@/components/MessageList/lazyHandler';
+import NotSupport from '@/components/NotSupport';
 
 import useGlobal from '@/hooks/useGlobal';
 import { IFormStatus } from '@/hooks/useSseSender/agent/typescript';
 
 import type { IAgentType } from '@/typescript/agent';
-import type { IMessage } from '@/typescript/message';
+import type { IMessage, IMessageListItem } from '@/typescript/message';
 import type { ISendProps } from '@/hooks/useChat';
 import type { DefaultValueSchema } from '@/components/QueryInput/RichInput/types';
+import { useIntl } from '@umijs/max';
 
 import styles from './index.module.less';
 import inputStyle from '@/components/ChatLayoutComp/index.module.less';
@@ -41,6 +43,14 @@ type IProps = {
   messageState?: IMessageState;
 };
 
+type IEasyConfirmCompProps = {
+  message: IMessage;
+  messageListItemContent: IMessageListItem['content'];
+  messageListItem?: IMessageListItem;
+  thinkListItem?: IMessageListItem;
+  [key: string]: unknown;
+};
+
 const EasyConfirm = (props: IProps) => {
   const {
     disabledInput,
@@ -57,20 +67,26 @@ const EasyConfirm = (props: IProps) => {
   } = props;
 
   const { EventEmitter } = useGlobal();
+  const { formatMessage } = useIntl();
+  const { token } = theme.useToken();
 
   const [page, setPage] = useState<number>(1);
-  const [list, setList] = useState<IApprovalFormProps[]>([]);
+  const [list, setList] = useState<IEasyConfirmCompProps[]>([]);
 
   const currentMsgIdRef = useRef(lastMsg?.msgId || '');
 
-  const getUUId = useCallback((myapprovalFormItem: IApprovalFormProps) => {
-    const listItem = myapprovalFormItem?.messageListItem || myapprovalFormItem?.thinkListItem;
+  const getUUId = useCallback((easyConfirmItem: IEasyConfirmCompProps) => {
+    const listItem = easyConfirmItem?.messageListItem || easyConfirmItem?.thinkListItem;
     const uuid = listItem?.uuid || '';
 
     return uuid;
   }, []);
 
   const compProps = useMemo(() => list[page - 1], [page, list]);
+  const Comp = useMemo(() => {
+    const contentType = compProps?.messageListItem?.contentType || compProps?.thinkListItem?.contentType;
+    return lazyHandler.lazyComp(`${contentType}`) as React.ComponentType<any> | null;
+  }, [compProps]);
 
   const inputDraftKey = sessionId || 'default';
   const inputDraft = inputDraftMap.get(inputDraftKey);
@@ -100,7 +116,7 @@ const EasyConfirm = (props: IProps) => {
   }, [lastMsg?.msgId]);
 
   useEffect(() => {
-    const getter = (list: IApprovalFormProps[]) => {
+    const getter = (list: IEasyConfirmCompProps | IEasyConfirmCompProps[]) => {
       if (!list || isEmpty(list)) return;
 
       setList((prevList) => {
@@ -112,9 +128,8 @@ const EasyConfirm = (props: IProps) => {
           const target = prevList.find((item) => {
             return getUUId(item) === uuid;
           });
-          console.log(target, approvalFormItem);
           if (target) {
-            assign(target, approvalFormItem);
+            merge(target, approvalFormItem);
           } else {
             prevList.push(approvalFormItem);
           }
@@ -167,9 +182,9 @@ const EasyConfirm = (props: IProps) => {
 
   return (
     <>
-      <div className={classnames(styles.easyConfirm, 'ub ub-ver gap8')}>
-        <div className="ub ub-pj">
-          <div>请选择要操作的步骤</div>
+      <div className={classnames(styles.easyConfirm, 'ub ub-ver gap8')} style={{ boxShadow: token.boxShadowTertiary }}>
+        <div className="ub ub-pj" style={{ display: list.length > 1 ? 'flex' : 'none' }}>
+          <div>{formatMessage({ id: 'easyConfirm.pagination.title' })}</div>
           <Pagination
             simple
             size="small"
@@ -180,7 +195,16 @@ const EasyConfirm = (props: IProps) => {
           />
           {/* <CloseOutlined /> */}
         </div>
-        <div className="ub-f1">{compProps && <ApprovalFormComp {...(compProps || {})} key={getUUId(compProps)} />}</div>
+        <div className="ub-f1">
+          {compProps &&
+            (Comp ? (
+              <Suspense>
+                <Comp {...compProps} key={getUUId(compProps)} />
+              </Suspense>
+            ) : (
+              <NotSupport />
+            ))}
+        </div>
       </div>
     </>
   );

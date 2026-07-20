@@ -519,6 +519,174 @@
   white-space: nowrap;
 }
 
+.fileSpaceBlock {
+  border: 1px solid #dfe6f0;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.fileSpaceHeader {
+  min-height: 42px;
+  padding: 8px 10px;
+  border-bottom: 1px solid #edf1f7;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #f7f9fc;
+}
+
+.fileSpaceTitle {
+  min-width: 0;
+  flex: 1;
+  color: #1f2533;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 20px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.fileSpaceCount {
+  flex-shrink: 0;
+  min-width: 18px;
+  color: #728096;
+  font-size: 12px;
+  line-height: 18px;
+  text-align: right;
+}
+
+.fileSpaceSegmented {
+  flex-shrink: 0;
+  height: 28px;
+  padding: 2px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  background: #eef2f7;
+
+  :global {
+    .@{antPrefix}-segmented-item {
+      height: 24px;
+      min-height: 24px;
+      border-radius: 7px;
+      display: inline-flex;
+      align-items: center;
+      color: #6f7c90;
+      font-size: 12px;
+      line-height: 1;
+    }
+
+    .@{antPrefix}-segmented-item-label {
+      height: 24px;
+      min-height: 0;
+      padding: 0 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 1;
+    }
+
+    .@{antPrefix}-segmented-item-selected {
+      color: #246bfe;
+      background: #fff;
+    }
+  }
+}
+
+.fileSpaceTreeWrap {
+  padding: 4px 8px 8px;
+  background: #fff;
+
+  .treeScroll {
+    min-height: 96px;
+    max-height: clamp(120px, 28vh, 320px);
+  }
+
+  .treeTitleText {
+    font-size: 13px;
+    line-height: 20px;
+  }
+
+  :global {
+    .@{antPrefix}-empty {
+      margin: 24px 0;
+    }
+  }
+}
+
+.fileSpaceGroupList {
+  background: #fff;
+}
+
+.fileSpaceGroup {
+  border-top: 1px solid #edf1f7;
+
+  &:first-child {
+    border-top: 0;
+  }
+}
+
+.fileSpaceGroupHeader {
+  height: 34px;
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #344056;
+  background: #f6f8fb;
+  cursor: pointer;
+  user-select: none;
+
+  &:hover {
+    background: #eef3fb;
+  }
+}
+
+.fileSpaceGroupArrow {
+  flex-shrink: 0;
+  color: #8b98aa;
+  font-size: 10px;
+  transition: transform 0.16s ease;
+}
+
+.fileSpaceGroupCollapsed {
+  // 折叠会话分组时保留标题行，箭头转向右侧提示可以再次展开。
+  .fileSpaceGroupArrow {
+    transform: rotate(-90deg);
+  }
+}
+
+.fileSpaceGroupTitle {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: #344056;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 20px;
+}
+
+.fileSpaceGroupCount {
+  flex-shrink: 0;
+  color: #8a96a8;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.fileSpaceEmpty {
+  min-height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #9aa6b8;
+  font-size: 13px;
+  text-align: center;
+}
+
 .searchMoreActionWrap {
   position: absolute;
   top: 0;

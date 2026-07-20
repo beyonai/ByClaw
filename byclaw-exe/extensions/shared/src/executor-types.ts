@@ -82,6 +82,8 @@ export type ResourceContext = Dict & {
   langfuseTraceId?: unknown;
   langfuse_parent_observation_id?: unknown;
   langfuseParentObservationId?: unknown;
+  parent_session_key?: unknown;
+  accountId?: unknown;
   language?: string;
   beyondToken?: string;
 };

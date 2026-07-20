@@ -4,14 +4,26 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
 import java.util.Date;
+import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.SetOperations;
+import org.springframework.data.redis.core.ValueOperations;
+import org.springframework.test.util.ReflectionTestUtils;
 
+import com.alibaba.fastjson.JSON;
 import com.iwhalecloud.byai.common.constants.chat.ChatObjType;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
 import com.iwhalecloud.byai.state.domain.chat.dto.ChatRuntimeState;
@@ -66,11 +78,86 @@ class ChatRuntimeStateServiceTest {
         assertEquals(ChatUseageEnum.USER_INPUT.getCode(), ctx.askMsg.getUsage());
     }
 
-    private ChatRuntimeState runtimeState(ByaiMessageHotDtoDto askMsg) {
-        AssistantChatDto assistantChatDto = new AssistantChatDto();
-        assistantChatDto.setAgentType("001");
-        assistantChatDto.setChatContent("hello");
+    @Test
+    void saveAddsSessionToRuntimeIndex() {
+        RedisTemplate<String, Object> redisTemplate = mock(RedisTemplate.class);
+        ValueOperations<String, Object> valueOperations = mock(ValueOperations.class);
+        SetOperations<String, Object> setOperations = mock(SetOperations.class);
+        ChatRuntimeInstance chatRuntimeInstance = mock(ChatRuntimeInstance.class);
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(redisTemplate.opsForSet()).thenReturn(setOperations);
+        when(chatRuntimeInstance.getInstanceId()).thenReturn("instance-1");
+        ReflectionTestUtils.setField(service, "redisTemplate", redisTemplate);
+        ReflectionTestUtils.setField(service, "chatRuntimeInstance", chatRuntimeInstance);
 
+        ChatProcessContext ctx = new ChatProcessContext(null, assistantChatDto());
+        ctx.sessionId = 10L;
+        ctx.traceId = "trace-1";
+        ctx.modelAnswerMessageId = 101L;
+
+        service.save(ctx, "token-1");
+
+        verify(valueOperations).set(eq("byai:chat:runtime:10"), anyString(), eq(24 * 60 * 60L),
+            eq(TimeUnit.SECONDS));
+        verify(setOperations).add("byai:chat:runtime:index", "10");
+    }
+
+    @Test
+    void touchRefreshesSessionInRuntimeIndex() {
+        RedisTemplate<String, Object> redisTemplate = mock(RedisTemplate.class);
+        ValueOperations<String, Object> valueOperations = mock(ValueOperations.class);
+        SetOperations<String, Object> setOperations = mock(SetOperations.class);
+        ChatRuntimeInstance chatRuntimeInstance = mock(ChatRuntimeInstance.class);
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(redisTemplate.opsForSet()).thenReturn(setOperations);
+        when(chatRuntimeInstance.getInstanceId()).thenReturn("instance-1");
+        ChatRuntimeState state = runtimeState(null);
+        state.setToken("token-1");
+        when(valueOperations.get("byai:chat:runtime:10")).thenReturn(JSON.toJSONString(state));
+        ReflectionTestUtils.setField(service, "redisTemplate", redisTemplate);
+        ReflectionTestUtils.setField(service, "chatRuntimeInstance", chatRuntimeInstance);
+
+        ChatProcessContext ctx = new ChatProcessContext(null, assistantChatDto());
+        ctx.sessionId = 10L;
+        ctx.runningOutputStreamToken = "token-1";
+
+        service.touch(ctx);
+
+        verify(setOperations).add("byai:chat:runtime:index", "10");
+    }
+
+    @Test
+    void listRunningStatesUsesRuntimeIndexInsteadOfKeyspaceScan() {
+        RedisTemplate<String, Object> redisTemplate = mock(RedisTemplate.class);
+        ValueOperations<String, Object> valueOperations = mock(ValueOperations.class);
+        SetOperations<String, Object> setOperations = mock(SetOperations.class);
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(redisTemplate.opsForSet()).thenReturn(setOperations);
+        ReflectionTestUtils.setField(service, "redisTemplate", redisTemplate);
+
+        ChatRuntimeState running = runtimeState(null);
+        running.setStatus(ChatRuntimeState.STATUS_RUNNING);
+        ChatRuntimeState finished = runtimeState(null);
+        finished.setSessionId(11L);
+        finished.setStatus(ChatRuntimeState.STATUS_FINISHED);
+        Set<Object> indexMembers = new LinkedHashSet<>();
+        indexMembers.add("10");
+        indexMembers.add("11");
+        indexMembers.add("12");
+        when(setOperations.members("byai:chat:runtime:index")).thenReturn(indexMembers);
+        when(valueOperations.get("byai:chat:runtime:10")).thenReturn(JSON.toJSONString(running));
+        when(valueOperations.get("byai:chat:runtime:11")).thenReturn(JSON.toJSONString(finished));
+        when(valueOperations.get("byai:chat:runtime:12")).thenReturn(null);
+
+        List<ChatRuntimeState> states = service.listRunningStates();
+
+        assertEquals(1, states.size());
+        assertEquals(10L, states.get(0).getSessionId());
+        verify(setOperations).remove("byai:chat:runtime:index", "11");
+        verify(setOperations).remove("byai:chat:runtime:index", "12");
+    }
+
+    private ChatRuntimeState runtimeState(ByaiMessageHotDtoDto askMsg) {
         ChatRuntimeState state = new ChatRuntimeState();
         state.setSessionId(10L);
         state.setTraceId("trace-1");
@@ -78,9 +165,16 @@ class ChatRuntimeStateServiceTest {
         state.setModelAnswerMessageId(101L);
         state.setTaskId(300L);
         state.setUserId(200L);
-        state.setAssistantChatDto(assistantChatDto);
+        state.setAssistantChatDto(assistantChatDto());
         state.setAskMsg(askMsg);
         state.setToken("token");
         return state;
+    }
+
+    private AssistantChatDto assistantChatDto() {
+        AssistantChatDto assistantChatDto = new AssistantChatDto();
+        assistantChatDto.setAgentType("001");
+        assistantChatDto.setChatContent("hello");
+        return assistantChatDto;
     }
 }

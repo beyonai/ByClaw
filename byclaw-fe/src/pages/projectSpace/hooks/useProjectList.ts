@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { message } from 'antd';
 import { listProjects } from '../service';
 import type { ProjectSpace } from '../types';
 import { getArrayData, normalizeProject } from '../utils';
@@ -13,8 +14,16 @@ export const useProjectList = () => {
       setLoading(true);
       try {
         // 项目列表搜索走后端 keyword，避免列表数据量变大后只在前端过滤当前页数据。
-        const res = await listProjects({ keyword: searchKeyword.trim() || undefined });
+        const res = await listProjects(
+          { keyword: searchKeyword.trim() || undefined },
+          { responseCfg: { hideErrorTips: true } }
+        );
         setProjects(getArrayData(res).map(normalizeProject));
+      } catch (error) {
+        // 左侧小列表需要就地提示，避免接口失败时只结束 loading 但界面没有反馈。
+        const errorMessage = typeof error === 'string' && error.trim() ? error : '项目列表加载失败';
+        console.error('Failed to load project list:', error);
+        message.error(errorMessage);
       } finally {
         setLoading(false);
       }

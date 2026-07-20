@@ -1,18 +1,19 @@
-import Redis from "ioredis";
 import type { TelemetrySink } from "../reporter.js";
 import type { TelemetryBusyLogLine } from "../types.js";
+import {
+  createRedisClient,
+  hasRedisConnectionConfig,
+  readRedisConfig,
+  type RedisClient,
+  type RedisConnectionConfig,
+} from "../../../../shared/src/redis-compat.js";
 
 type LoggerLike = {
   info?: (message: string) => void;
   warn?: (message: string) => void;
 };
 
-export type TelemetryRedisPublishConfig = {
-  host: string;
-  port: number;
-  db: number;
-  username?: string;
-  password?: string;
+export type TelemetryRedisPublishConfig = RedisConnectionConfig & {
   userCode: string;
   agentType: string;
   topic: string;
@@ -34,7 +35,7 @@ const TELEMETRY_AGENT_TYPE = "BYCLAW_EXE";
 
 export class RedisTelemetrySink implements TelemetrySink {
   readonly id = "redis-pubsub";
-  private readonly client: Redis;
+  private readonly client: RedisClient;
   private queue: Promise<void> = Promise.resolve();
   private warnedPublishFailure = false;
 
@@ -42,15 +43,11 @@ export class RedisTelemetrySink implements TelemetrySink {
     private readonly config: TelemetryRedisPublishConfig,
     private readonly logger?: LoggerLike,
   ) {
-    this.client = new Redis({
-      host: config.host,
-      port: config.port,
-      db: config.db,
-      username: config.username,
-      password: config.password,
+    this.client = createRedisClient(config, {
+      lazyConnect: true,
+      enableOfflineQueue: true,
       connectTimeout: config.connectTimeoutMs,
       maxRetriesPerRequest: 1,
-      lazyConnect: true,
     });
   }
 
@@ -100,24 +97,15 @@ export function createRedisTelemetrySinkFromEnv(params: {
 export function resolveTelemetryRedisPublishConfig(
   env: NodeJS.ProcessEnv,
 ): TelemetryRedisPublishConfig | null {
-  const host = env.REDIS_HOST?.trim();
-  const port = Number.parseInt(env.REDIS_PORT?.trim() || "", 10);
-  const db = Number.parseInt(env.REDIS_DATABASE?.trim() || "0", 10);
-  const username = env.REDIS_USERNAME?.trim() || undefined;
-  const password =
-    env.REDIS_PASSWORD !== undefined && env.REDIS_PASSWORD !== "" ? env.REDIS_PASSWORD : undefined;
+  const redis = readRedisConfig(env);
   const userCode = env.USER_CODE?.trim();
 
-  if (!host || !Number.isFinite(port) || !Number.isFinite(db) || !userCode) {
+  if (!hasRedisConnectionConfig(redis) || !userCode) {
     return null;
   }
 
   return {
-    host,
-    port,
-    db,
-    username,
-    password,
+    ...redis,
     userCode,
     agentType: TELEMETRY_AGENT_TYPE,
     topic: TELEMETRY_REDIS_STATS_TOPIC,

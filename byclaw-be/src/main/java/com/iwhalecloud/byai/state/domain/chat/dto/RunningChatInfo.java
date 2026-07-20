@@ -21,6 +21,8 @@ public class RunningChatInfo {
 
     private Long modelAnswerMessageId;
 
+    private Long taskId;
+
     private String transport;
 
     private Long startedAt;

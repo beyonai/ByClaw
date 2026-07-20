@@ -15,7 +15,7 @@ import getDisplayQuestion from '@/components/QueryInput/getDisplayQuestion';
 
 type IProps = {
   msg: IMessage;
-  updateMessage: (message: IMessage) => void;
+  updateMessage: (message: IMessage) => IMessage;
   hideThinking?: boolean;
 };
 
@@ -26,13 +26,13 @@ const CompRenderer = React.memo(
     messageListItem: IMessageListItem;
     messageListItemContent: IMessageListItem['content'];
     messageIdx: number;
-    updateMessageList: (path: string, val: any) => void;
+    updateMessageList: (path: string, val: any) => IMessage;
   }) => {
     const { Comp, message, messageListItem, messageListItemContent, messageIdx, updateMessageList } = props;
 
     const updateMessageListItemContent = React.useCallback(
       (content: IMessageListItem['content']) => {
-        updateMessageList(`${messageIdx}.content`, content);
+        return updateMessageList(`${messageIdx}.content`, content);
       },
       [updateMessageList, messageIdx]
     );
@@ -55,10 +55,10 @@ function MsgRenderer(props: IProps) {
   const { text, messageList, msgId } = msg;
 
   const updateMessageList = React.useCallback(
-    (path: string, val: any) => {
+    (path: string, val: any): IMessage => {
       const newMsg = { ...msg };
       set(newMsg, `messageList.${path}`, val);
-      updateMessage(newMsg);
+      return updateMessage(newMsg);
     },
     [updateMessage, msg]
   );

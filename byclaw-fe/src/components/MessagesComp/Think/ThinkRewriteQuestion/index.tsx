@@ -9,6 +9,7 @@ import ConditionItem from './ConditionItem';
 import FieldItem from './FieldItem';
 import useCountDown from '@/hooks/useCountDown';
 import ChatLayoutCompContext from '@/components/ChatLayoutComp/hooks/useContext';
+import withEasyConfirm from '@/components/MessagesComp/withEasyConfirm';
 
 import styles from './index.module.less';
 import { ComparisonMap, IConditionItem, IFieldItem, IParadigmItem, IParadigmResultItem } from './interface';
@@ -23,7 +24,7 @@ type IProps = {
   thinkListItem?: IMessageListItem;
 };
 
-export default function ThinkRewriteQuestion(props: IProps) {
+function ThinkRewriteQuestion(props: IProps) {
   const { messageListItemContent, message, updateMessageListItemContent, messageIdx } = props;
   const intl = useIntl();
   const { EventEmitter, layoutMode } = useGlobal();
@@ -281,3 +282,5 @@ export default function ThinkRewriteQuestion(props: IProps) {
     </div>
   );
 }
+
+export default withEasyConfirm(ThinkRewriteQuestion);

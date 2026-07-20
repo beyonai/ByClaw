@@ -28,9 +28,11 @@ public class WhaleAgentSandboxRuntimeProvider implements SandboxRuntimeProvider 
     private static final Logger log = LoggerFactory.getLogger(WhaleAgentSandboxRuntimeProvider.class);
 
     private final FeignWhaleAgentService feignWhaleAgentService;
+    private final WhaleAgentEndpointResolver endpointResolver;
 
     public WhaleAgentSandboxRuntimeProvider(FeignWhaleAgentService feignWhaleAgentService) {
         this.feignWhaleAgentService = feignWhaleAgentService;
+        this.endpointResolver = new WhaleAgentEndpointResolver(feignWhaleAgentService);
     }
 
     @Override
@@ -139,6 +141,44 @@ public class WhaleAgentSandboxRuntimeProvider implements SandboxRuntimeProvider 
             .endpoints(endpoints)
             .metadata(request.getMetadata())
             .build();
+    }
+
+    /**
+     * Re-hydrate endpoints for sandboxes discovered through {@code findReusable}
+     * / {@code getSandbox}. WhaleAgent's listSandboxes and getSandboxInfo
+     * responses omit the endpoint — without this override those paths would
+     * hand the lifecycle service an empty endpoint list, causing
+     * {@code SandboxService.registerSandboxEndpoint} to skip worker
+     * registration and leaving the sandbox record in a {@code RUNNING} state
+     * that the gateway can never route to.
+     */
+    @Override
+    public List<String> resolveEndpoints(SandboxRuntimeInstance instance,
+                                         SandboxServiceSpec spec,
+                                         CreateSandboxRequest request) {
+        if (instance == null) {
+            return List.of();
+        }
+        // Fresh create response already carries endpoints — short-circuit.
+        if (instance.getEndpoints() != null && !instance.getEndpoints().isEmpty()) {
+            return instance.getEndpoints();
+        }
+        String userCode = resolveUserCode(instance, request);
+        return withUserCode(userCode,
+            () -> endpointResolver.resolve(instance, spec, WHALE_AGENT_SANDBOX_TYPE));
+    }
+
+    private static String resolveUserCode(SandboxRuntimeInstance instance, CreateSandboxRequest request) {
+        if (instance != null && instance.getMetadata() != null) {
+            String userCode = instance.getMetadata().get("userCode");
+            if (StringUtils.isNotBlank(userCode)) {
+                return userCode;
+            }
+        }
+        if (request != null && request.getMetadata() != null) {
+            return request.getMetadata().get("userCode");
+        }
+        return null;
     }
 
     @Override

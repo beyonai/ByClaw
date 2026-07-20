@@ -135,3 +135,5 @@ fix(be): correct pagination boundary
 - Behavior changes require tests and docs updates.
 - Do not add a `.ai/` directory; agent config lives in this file and `AGENTS.md`.
 - Root docs in English; module-internal docs follow the module's existing language (often Chinese).
+
+@RTK.md

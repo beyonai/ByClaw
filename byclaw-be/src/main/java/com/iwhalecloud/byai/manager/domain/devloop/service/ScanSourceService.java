@@ -74,6 +74,14 @@ public class ScanSourceService {
         return scanSourceMapper.selectList(wrapper);
     }
 
+    /** 统计关联到指定仓库的未删除扫描源数量，用于删除仓库前的占用校验 */
+    public Long countByRepoId(Long repoId) {
+        LambdaQueryWrapper<ScanSource> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(ScanSource::getRepoId, repoId)
+               .eq(ScanSource::getDeleteFlag, "0");
+        return scanSourceMapper.selectCount(wrapper);
+    }
+
     /** 更新扫描源最近扫描时间 */
     public void updateLastScanTime(Long sourceId) {
         ScanSource source = new ScanSource();

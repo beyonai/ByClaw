@@ -99,12 +99,18 @@ class ByclawResultFileStorage(ResultFileStorage):
 
     @staticmethod
     def _strip_session_prefix(file_path: str) -> str:
-        for prefix in ("/.sessions/", "/.session/"):
-            if not file_path.startswith(prefix):
-                continue
-            path_parts = file_path.split("/", 3)
-            if len(path_parts) >= 4:
-                return f"/{path_parts[3]}"
+        import re
+        match = re.search(r"/\.sessions?/(\d+)/(.*)", file_path)
+        if match:
+            # if not session_id:
+            #     session_id = match.group(1)
+            file_path = "/" + match.group(2)
+        # for prefix in ("/.sessions/", "/.session/"):
+        #     if not file_path.startswith(prefix):
+        #         continue
+        #     path_parts = file_path.split("/", 3)
+        #     if len(path_parts) >= 4:
+        #         return f"/{path_parts[3]}"
         return file_path
 
     def _post_json(self, path: str, payload: dict[str, Any]) -> Any:
