@@ -1677,6 +1677,7 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
     return (
       <Modal
         title={detailReq.title}
+        className={styles.requirementDetailModal}
         open={!!detailReq}
         onCancel={() => setDetailReq(null)}
         footer={<Button onClick={() => setDetailReq(null)}>关闭</Button>}
@@ -1798,7 +1799,7 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
                   <div className={styles.detailRequirementMain}>
                     <strong>
                       {item.priority ? (
-                        <Tag color={priorityColor(item.priority)} style={{ marginRight: 6 }}>
+                        <Tag color={priorityColor(item.priority)} className={styles.detailRequirementPriority}>
                           {item.priority}
                         </Tag>
                       ) : null}
@@ -2015,17 +2016,16 @@ const ProjectDetailPanel: React.FC<Props> = ({ project, onBack, onEditProject, o
                     <Tooltip placement="top" title={task.title}>
                       <h4 className={styles.detailTaskTitle}>{task.title}</h4>
                     </Tooltip>
+                    {/* 收起状态暂不展示数字员工名称，展开详情仍显示完整信息。 */}
                     {task.status && (
                       <div className={styles.detailTaskMeta}>
                         <Tag color={STATUS_COLORS[task.status] || 'default'}>{task.status}</Tag>
-                        {task.agentName && <span>{task.agentName}</span>}
                         {task.branchName && <span className={styles.detailTaskBranch}>{task.branchName}</span>}
                       </div>
                     )}
                     {!task.status && hasTaskMeta && (
                       <div className={styles.detailTaskMeta}>
                         {task.phase && <Tag color={PHASE_COLORS[task.phase] || 'default'}>{task.phase}</Tag>}
-                        {task.agentName && <span>{task.agentName}</span>}
                         {task.branchName && <span className={styles.detailTaskBranch}>{task.branchName}</span>}
                       </div>
                     )}

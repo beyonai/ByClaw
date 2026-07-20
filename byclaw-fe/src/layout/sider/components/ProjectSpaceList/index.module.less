@@ -1286,6 +1286,12 @@
   }
 }
 
+// 优先级标签与需求名称使用垂直居中对齐，避免标签因行内基线偏上。
+.detailRequirementPriority {
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
 .detailRequirementExpanded {
   width: 100%;
   padding: 10px;
@@ -1362,6 +1368,8 @@
 .detailRequirementExtra {
   min-width: 0;
   display: flex;
+  // 详情入口按钮在需求展开区域内水平居中。
+  justify-content: center;
   flex-wrap: wrap;
   gap: 6px 10px;
   color: #7c8798;
@@ -1463,17 +1471,16 @@
   box-shadow: 0 6px 16px rgba(28, 48, 90, 0.1);
 }
 
+// 进度信息固定在右上角，任务元信息可以使用卡片的完整宽度。
 .detailTaskCardHeader {
   min-width: 0;
   width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 10px;
+  position: relative;
 }
 
 .detailTaskMain {
   min-width: 0;
-  flex: 1;
+  width: 100%;
 }
 
 .detailTaskTitle {
@@ -1488,19 +1495,23 @@
   -webkit-line-clamp: 2;
   line-clamp: 2;
   word-break: break-all;
+  padding-right: 100px;
 }
 
 .detailTaskMeta {
   min-width: 0;
+  width: 100%;
   margin-top: 8px;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   color: #66758a;
   font-size: 12px;
 
   span {
     min-width: 0;
+    flex-shrink: 0;
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
@@ -1508,7 +1519,7 @@
 }
 
 .detailTaskBranch {
-  max-width: 120px;
+  max-width: 100%;
 }
 
 .detailTaskWarning {
@@ -1516,7 +1527,9 @@
 }
 
 .detailTaskRight {
-  flex: 0 0 auto;
+  position: absolute;
+  top: 0;
+  right: 0;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -1568,11 +1581,11 @@
   grid-column: span 2;
 }
 
-// 任务展开详情里的会话入口独占一行，避免挤压上方字段。
+// 任务展开详情的操作按钮独占一行，并分别贴靠左右两侧。
 .detailTaskInlineActions {
   grid-column: span 2;
   display: flex;
-  justify-content: center;
+  justify-content: space-between;
   padding-top: 2px;
 }
 
@@ -1899,6 +1912,29 @@
       overflow: visible;
       text-overflow: clip;
       line-height: 20px;
+    }
+  }
+}
+
+// 需求详情内容较长时只滚动弹窗主体，避免页面跟随产生滚动。
+.requirementDetailModal {
+  :global {
+    .@{antPrefix}-modal-content {
+      max-height: calc(100vh - 96px);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .@{antPrefix}-modal-header,
+    .@{antPrefix}-modal-footer {
+      flex-shrink: 0;
+    }
+
+    .@{antPrefix}-modal-body {
+      min-height: 0;
+      max-height: calc(100vh - 260px);
+      overflow-y: auto;
+      padding-right: 20px;
     }
   }
 }
@@ -2344,12 +2380,14 @@
 .phaseMiniFlow {
   display: flex;
   align-items: flex-start;
+  // 拉开研发环节节点，避免环节名称彼此贴在一起。
+  column-gap: 8px;
   overflow-x: auto;
 }
 
 .phaseMiniLine {
   flex: 1;
-  min-width: 8px;
+  min-width: 12px;
   height: 2px;
   margin-top: 11px;
   background: #e8e8e8;
