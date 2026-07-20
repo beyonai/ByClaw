@@ -23,9 +23,7 @@ description: Use when resolving newly organized documents for one ontology objec
    python3 <knowledge-organizer>/scripts/er_resolve.py \
      --doc-dir {任务目录}/新建对象/{对象名称} \
      --object-type {object_type} \
-     --identity-fields {identity_fields} \
-     --kb-id {kb_id} \
-     --kb-resource-id {kb_resource_id}
+     --identity-fields {identity_fields}
    ```
 
    脚本完成批内去重、term/full-text 双路召回和 RRF 排序。

@@ -1,29 +1,16 @@
 #!/usr/bin/env python3
 """实体消解一站式脚本：批内去重 → 双路召回 → RRF融合 → identity比对+属性diff → 输出候选。
 
-合并了 er_dedup_batch.py + er_search_kb.py + er_match.py 的功能。
-
 用法:
     python3 er_resolve.py \
-      --doc-dir /by/.sessions/{session_id}/{任务名称}/{object_type} \
-      --object-type TechSpec \
-      --identity-fields name \
-      --output er_resolve_result.json
+      --doc-dir /by/.sessions/{session_id}/{任务名称}/新建对象/{对象名称} \
+      --object-type {对象名称} \
+      --identity-fields name
+
+    下载目录: {doc_dir}/../../知识库候选/{object_type}/
 
 输出:
-    {
-      "doc_path": "...",
-      "kb_resource_id": "10042822",
-      "dedup": {"groups": [...], "singletons": [...]},
-      "candidates": [
-        {
-          "kb_doc_path": "/TechSpec/04_...md",
-          "name_match": {...},
-          "property_diff": {...},
-          "kb_front_matter": {...}
-        }
-      ]
-    }
+    ## 实例消解结果
 """
 
 from __future__ import annotations
@@ -501,7 +488,7 @@ def run(
     """一站式实体消解。
 
     kb_resource_id 从 term 召回结果自动提取。提取不到则仅做 term 召回，跳过 search-file 和下载。
-    候选 KB 文件自动下载到 {doc_dir}/_kb_candidates/。
+    候选 KB 文件下载到 {doc_dir}/../../知识库候选/{object_type}/。
     """
     # Step 1: 批内去重
     dedup = dedup_batch(doc_dir, identity_fields)
@@ -566,9 +553,10 @@ def run(
         # Step 3: 构建候选列表
         candidates = build_candidates(recalls, identity, new_fm, identity_fields, kb_resource_id)
 
-        # 下载 KB 候选文件到本地 session 目录
+        # 下载 KB 候选文件到知识库候选目录
+        # doc_dir 为 .../新建对象/{对象名称}，下载到 .../知识库候选/{对象名称}/
         if candidates and kb_resource_id:
-            local_download_dir = doc_dir / "_kb_candidates"
+            local_download_dir = doc_dir.parent.parent / "知识库候选" / object_type
             download_candidate_files(candidates, kb_resource_id, local_download_dir)
 
         results[doc_path] = {
