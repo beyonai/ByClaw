@@ -4,6 +4,7 @@ import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeApplicationService;
+import com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeRuntimeRefreshService;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceArtifactTypeEnum;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtSkillService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceArtifactService;
@@ -34,6 +35,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
@@ -52,6 +54,7 @@ class ByClawSkillResourceApplicationServiceTest {
     private ResourceArtifactStorageService resourceArtifactStorageService;
     private SequenceService sequenceService;
     private DigitalEmployeeApplicationService digitalEmployeeApplicationService;
+    private DigitalEmployeeRuntimeRefreshService digitalEmployeeRuntimeRefreshService;
     private AuthApplicationService authApplicationService;
     private ByClawSkillResourceApplicationService service;
 
@@ -64,6 +67,7 @@ class ByClawSkillResourceApplicationServiceTest {
         resourceArtifactStorageService = mock(ResourceArtifactStorageService.class);
         sequenceService = mock(SequenceService.class);
         digitalEmployeeApplicationService = mock(DigitalEmployeeApplicationService.class);
+        digitalEmployeeRuntimeRefreshService = mock(DigitalEmployeeRuntimeRefreshService.class);
         authApplicationService = mock(AuthApplicationService.class);
 
         service = new ByClawSkillResourceApplicationService();
@@ -74,6 +78,8 @@ class ByClawSkillResourceApplicationServiceTest {
         ReflectionTestUtils.setField(service, "resourceArtifactStorageService", resourceArtifactStorageService);
         ReflectionTestUtils.setField(service, "sequenceService", sequenceService);
         ReflectionTestUtils.setField(service, "digitalEmployeeApplicationService", digitalEmployeeApplicationService);
+        ReflectionTestUtils.setField(service, "digitalEmployeeRuntimeRefreshService",
+            digitalEmployeeRuntimeRefreshService);
         ReflectionTestUtils.setField(service, "authApplicationService", authApplicationService);
         prepareI18nUtil();
 
@@ -145,7 +151,9 @@ class ByClawSkillResourceApplicationServiceTest {
         verify(ssResourceArtifactService).upsertArtifact(eq(7001L), eq("SKILL"),
             eq(ResourceArtifactTypeEnum.STANDARD_JSON.name()), eq("minio"), eq("skill/SKILL_7001.json"),
             eq("chat-upload-skill-json"));
-        verify(digitalEmployeeApplicationService).synOpenClawWorkSpace(9001L);
+        verify(digitalEmployeeApplicationService).rebuildAndSaveDigitalEmployeeRelSkills(9001L);
+        verify(digitalEmployeeRuntimeRefreshService).scheduleSkillRuntimeRefreshAfterCommit(
+            org.mockito.ArgumentMatchers.argThat(ids -> ids.size() == 1 && ids.contains(9001L)));
     }
 
     @Test
@@ -166,7 +174,20 @@ class ByClawSkillResourceApplicationServiceTest {
             List.of(uploadedSkill))).isInstanceOf(IllegalArgumentException.class);
 
         verify(ssResourceService, never()).saveResource(any(SsResource.class));
-        verify(digitalEmployeeApplicationService, never()).synOpenClawWorkSpace(anyLong());
+        verify(digitalEmployeeRuntimeRefreshService, never()).scheduleSkillRuntimeRefreshAfterCommit(any());
+    }
+
+    @Test
+    void rebuildAndScheduleSkillRuntimeRefresh_doesNotScheduleWhenRelSkillsRebuildFails() {
+        doThrow(new IllegalStateException("rebuild failed"))
+            .when(digitalEmployeeApplicationService).rebuildAndSaveDigitalEmployeeRelSkills(9001L);
+
+        assertThatThrownBy(() -> ReflectionTestUtils.invokeMethod(service,
+            "rebuildAndScheduleSkillRuntimeRefresh", new java.util.LinkedHashSet<>(List.of(9001L))))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("rebuild failed");
+
+        verify(digitalEmployeeRuntimeRefreshService, never()).scheduleSkillRuntimeRefreshAfterCommit(any());
     }
 
     @Test
@@ -193,6 +214,16 @@ class ByClawSkillResourceApplicationServiceTest {
         SsResource digitalEmployee = new SsResource();
         digitalEmployee.setResourceId(9001L);
         digitalEmployee.setResourceName("测试数字员工");
+        digitalEmployee.setResourceBizType("DIG_EMPLOYEE");
+        SsResource otherDigitalEmployee = new SsResource();
+        otherDigitalEmployee.setResourceId(9002L);
+        otherDigitalEmployee.setResourceBizType("DIG_EMPLOYEE");
+        SsResourceRelDetail currentRelation = new SsResourceRelDetail();
+        currentRelation.setResourceId(9001L);
+        currentRelation.setRelResourceId(7002L);
+        SsResourceRelDetail historicalRelation = new SsResourceRelDetail();
+        historicalRelation.setResourceId(9002L);
+        historicalRelation.setRelResourceId(7005L);
         SsResExtSkill existingExtSkill = new SsResExtSkill();
         existingExtSkill.setResourceId(7002L);
         existingExtSkill.setVersion("v0.1");
@@ -213,6 +244,11 @@ class ByClawSkillResourceApplicationServiceTest {
         when(ssResExtSkillService.nextVersion("v0.1")).thenReturn("v0.2");
         when(ssResExtSkillService.nextVersion("v0.3")).thenReturn("v0.4");
         when(ssResourceRelDetailService.find(9001L, 7002L)).thenReturn(List.of());
+        when(ssResourceRelDetailService.list(
+            org.mockito.ArgumentMatchers.<com.baomidou.mybatisplus.core.conditions.Wrapper<SsResourceRelDetail>>any()))
+                .thenReturn(List.of(currentRelation), List.of(historicalRelation));
+        when(ssResourceService.findByIdList(List.of(9001L))).thenReturn(List.of(digitalEmployee));
+        when(ssResourceService.findByIdList(List.of(9002L))).thenReturn(List.of(otherDigitalEmployee));
         when(sequenceService.nextVal()).thenReturn(8002L);
 
         service.registerChatUploadedSkills("user001", 9001L, List.of(uploadFile), List.of(uploadedSkill));
@@ -227,6 +263,10 @@ class ByClawSkillResourceApplicationServiceTest {
         verify(ssResExtSkillService, times(2)).saveOrUpdate(extCaptor.capture());
         assertThat(extCaptor.getAllValues()).extracting(SsResExtSkill::getVersion).containsExactly("v0.2", "v0.4");
         verify(ssResourceRelDetailService, never()).find(9001L, 7005L);
+        verify(digitalEmployeeApplicationService).rebuildAndSaveDigitalEmployeeRelSkills(9001L);
+        verify(digitalEmployeeApplicationService).rebuildAndSaveDigitalEmployeeRelSkills(9002L);
+        verify(digitalEmployeeRuntimeRefreshService).scheduleSkillRuntimeRefreshAfterCommit(
+            org.mockito.ArgumentMatchers.argThat(ids -> ids.size() == 2 && ids.containsAll(List.of(9001L, 9002L))));
     }
 
     @Test
@@ -479,7 +519,7 @@ class ByClawSkillResourceApplicationServiceTest {
 
         verify(ssResourceService, never()).updateResourceEntity(any(SsResource.class));
         verify(ssResExtSkillService, never()).saveOrUpdate(any(SsResExtSkill.class));
-        verify(digitalEmployeeApplicationService, never()).refreshInstalledSkillRuntime(anyLong());
+        verify(digitalEmployeeRuntimeRefreshService, never()).scheduleSkillRuntimeRefreshAfterCommit(any());
     }
 
     @Test
@@ -517,7 +557,9 @@ class ByClawSkillResourceApplicationServiceTest {
 
         service.importSkillZip(uploadFile, 10L, "enterprise", "SKILL_MANAGE_IMPORT");
 
-        verify(digitalEmployeeApplicationService).refreshInstalledSkillRuntime(9001L);
+        verify(digitalEmployeeApplicationService).rebuildAndSaveDigitalEmployeeRelSkills(9001L);
+        verify(digitalEmployeeRuntimeRefreshService).scheduleSkillRuntimeRefreshAfterCommit(
+            org.mockito.ArgumentMatchers.argThat(ids -> ids.size() == 1 && ids.contains(9001L)));
     }
 
     @Test

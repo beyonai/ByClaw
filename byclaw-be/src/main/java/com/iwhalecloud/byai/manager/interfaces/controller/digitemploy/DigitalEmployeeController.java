@@ -117,9 +117,6 @@ public class DigitalEmployeeController {
 
         SsResource ssResource = digitalEmployeeApplicationService.updateDigitalEmployee(digitalEmployeeDTO);
 
-        // 同步openClaw工作空间：透传原始入参，relTools / relPrompt 等不入 DB 的运行期字段需要从入参直接进 JSON。
-        digitalEmployeeApplicationService.synOpenClawWorkSpace(ssResource.getResourceId(), digitalEmployeeDTO);
-
         EmployeeIdDTO employeeIdDTO = new EmployeeIdDTO();
         employeeIdDTO.setResourceId(ssResource.getResourceId());
         DigitalEmployeeDetailsDTO details = digitalEmployeeApplicationService.findDetailsById(employeeIdDTO);
