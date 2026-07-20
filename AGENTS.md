@@ -63,6 +63,7 @@ cd byclaw-exe && pip install -e ".[dev]" && ruff check . && pytest
 2. **No new cross-module source coupling.** Prefer APIs, shared `packages/`, or versioned artifacts—not direct imports across product boundaries unless already established.
 3. **Behavior changes require tests and documentation updates** (`docs/` or the relevant module docs) where applicable.
 4. **Do not recreate a `.ai/` directory.** Agent rules live here and in [CLAUDE.md](CLAUDE.md).
+5. **Confirm before committing documentation.** Before staging or committing any file under `docs/`, obtain the user's explicit approval for that documentation change.
 
 ## Pull requests
 
