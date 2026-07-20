@@ -30,7 +30,6 @@ import java.io.IOException;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
-import java.net.InetAddress;
 import java.net.URI;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
@@ -555,14 +554,10 @@ public class ByClawSkillResourceApplicationService {
         HttpURLConnection connection = null;
         try {
             URI uri = URI.create(StringUtils.trimToEmpty(downloadUrl));
-            if (!"https".equalsIgnoreCase(uri.getScheme()) || StringUtils.isBlank(uri.getHost())) {
+            boolean supportedScheme = "http".equalsIgnoreCase(uri.getScheme())
+                || "https".equalsIgnoreCase(uri.getScheme());
+            if (!supportedScheme || StringUtils.isBlank(uri.getHost())) {
                 throw new IllegalArgumentException(I18nUtil.get("byclaw.third.party.skill.url.invalid"));
-            }
-            for (InetAddress address : InetAddress.getAllByName(uri.getHost())) {
-                if (address.isAnyLocalAddress() || address.isLoopbackAddress() || address.isLinkLocalAddress()
-                    || address.isSiteLocalAddress() || address.isMulticastAddress()) {
-                    throw new IllegalArgumentException(I18nUtil.get("byclaw.third.party.skill.url.invalid"));
-                }
             }
             connection = (HttpURLConnection)new URL(uri.toASCIIString()).openConnection();
             connection.setConnectTimeout(THIRD_PARTY_DOWNLOAD_TIMEOUT_MILLIS);
