@@ -46,6 +46,7 @@ class RecorderVncModeTest {
         assertThat(response.status()).isEqualTo(200);
         Map<String, Object> data = response.body().data();
         assertThat(data).containsEntry("recordingMode", "vnc")
+            .containsEntry("contextId", null)
             .containsEntry("vncUrl", "http://existing-vnc.example/vnc.html");
         assertThat(vnc.startedSessionId).isEqualTo(data.get("sessionId"));
     }

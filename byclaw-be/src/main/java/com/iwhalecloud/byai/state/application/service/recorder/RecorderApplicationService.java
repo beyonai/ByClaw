@@ -85,7 +85,7 @@ public class RecorderApplicationService {
         }
         RecorderSession session = sessionRegistry.createSession(
             owner,
-            defaultString(body, "contextId", "default"),
+            stringValue(body, "contextId"),
             stringValue(body, "targetId"),
             "create_page_await_user_login".equals(mode),
             recordingMode
