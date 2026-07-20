@@ -60,6 +60,11 @@ public class DevloopPhaseService {
     private static final String SRC_LLM = "llm";
     private static final String SRC_EMPTY = "empty";
 
+    // 只解析数字员工的回答(usage=SYSTEM_RESPONSE)。用户输入(usage=USER_INPUT，含任务启动提示词里的
+    // [PHASE] 示例标记)必须跳过，否则提示词中的示例会被当成真实进展，导致任务一启动就误判到 coder 阶段。
+    // 判别用 byai_message.usage 而非 role：系统里问答同为 agent-user 角色，仅靠 usage 区分输入/回答。
+    private static final int USAGE_SYSTEM_RESPONSE = 2;
+
     // 一个任务的完整对话回看上限，够覆盖多轮打回即可，避免超长会话拖慢解析
     private static final int MAX_MESSAGES = 100;
 
@@ -171,7 +176,15 @@ public class DevloopPhaseService {
         if (messages == null || messages.isEmpty()) {
             return new ArrayList<>();
         }
-        List<ByaiMessageHotDto> asc = new ArrayList<>(messages);
+        // 只保留数字员工回答(usage=SYSTEM_RESPONSE)：任务启动提示词是用户输入且含 [PHASE] 示例标记，
+        // 参与解析会污染进展判定，导致任务一启动就误判到 coder 阶段。
+        List<ByaiMessageHotDto> asc = new ArrayList<>();
+        for (ByaiMessageHotDto msg : messages) {
+            Integer usage = msg.getUsage();
+            if (usage != null && usage == USAGE_SYSTEM_RESPONSE) {
+                asc.add(msg);
+            }
+        }
         java.util.Collections.reverse(asc);
         return asc;
     }
@@ -378,22 +391,14 @@ public class DevloopPhaseService {
         return result.length() > MAX_TRANSCRIPT_CHARS ? result.substring(0, MAX_TRANSCRIPT_CHARS) : result;
     }
 
-    /** 单条消息的可扫描文本：正文 + 推理段 + 工具调用日志，任意有值即拼接。 */
+    /**
+     * 单条消息的可扫描文本：只取正文 messageContent。
+     * 不含 inferLog/callLogs（推理段与工具调用日志，如 git clone/exec 输出），
+     * 那些内容会让 LLM 把准备动作误判成编码环节，且 [PHASE] 汇报标记本就应在正文里。
+     */
     private String messageText(ByaiMessageHotDto msg) {
-        StringBuilder sb = new StringBuilder();
-        appendIfPresent(sb, msg.getMessageContent());
-        appendIfPresent(sb, msg.getInferLog());
-        appendIfPresent(sb, msg.getCallLogs());
-        return sb.toString();
-    }
-
-    private void appendIfPresent(StringBuilder sb, String v) {
-        if (v != null && !v.isEmpty()) {
-            if (sb.length() > 0) {
-                sb.append('\n');
-            }
-            sb.append(v);
-        }
+        String content = msg.getMessageContent();
+        return content != null ? content : "";
     }
 
     private String normalizePhase(String raw) {
