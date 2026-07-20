@@ -110,14 +110,6 @@ public class DevloopPhaseService {
         return empty;
     }
 
-    /** 缓存是否失效：会话消息条数变化即认为需要重算，避免每次开详情都跑解析/LLM。 */
-    public boolean isStale(PhaseSnapshot cached, long currentMessageCount) {
-        return cached == null || cached.getMessageCount() != (int) currentMessageCount;
-    }
-
-    public long countMessages(Long sessionId) {
-        return byaiMessageHotService.countBySessionId(sessionId);
-    }
 
     public String toJson(PhaseSnapshot snapshot) {
         try {
