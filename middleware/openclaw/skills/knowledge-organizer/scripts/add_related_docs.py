@@ -31,6 +31,21 @@ RELATED_DOCS_START = "--- related_docs ---"
 RELATED_DOCS_END = "--- related_docs ---"
 
 
+def body_start_offset(content: str) -> int | None:
+    """Return the first body offset, rejecting malformed YAML front matter.
+
+    A related_docs block is a document footer, never front-matter metadata.  The
+    explicit split also prevents a malformed front matter block from being
+    silently rewritten as though it were a footer.
+    """
+    if not content.startswith("---\n"):
+        return 0
+    closing = re.search(r"^---\s*$", content[4:], re.MULTILINE)
+    if closing is None:
+        return None
+    return 4 + closing.end()
+
+
 def build_related_docs_block(doc_id: str, related_docs: list) -> str:
     """构建符合格式的 related_docs 块"""
     block_lines = [
@@ -43,7 +58,11 @@ def build_related_docs_block(doc_id: str, related_docs: list) -> str:
     for item in related_docs:
         block_lines.append(f"  - target_doc_id: {item['target_doc_id']}")
         block_lines.append(f"    relation: {item['relation']}")
-        block_lines.append(f"    kb_resource_id: \"{item['kb_resource_id']}\"")
+        kb_resource_id = item.get('kb_resource_id')
+        if kb_resource_id is None:
+            block_lines.append("    kb_resource_id: null")
+        else:
+            block_lines.append(f"    kb_resource_id: \"{kb_resource_id}\"")
     
     block_lines.append("")
     block_lines.append(RELATED_DOCS_END)
@@ -60,9 +79,14 @@ def add_relations_to_doc(doc_path: str, relations: list) -> bool:
     with open(doc_path, 'r', encoding='utf-8') as f:
         content = f.read()
     
-    # 检查是否已存在 related_docs 块
+    body_start = body_start_offset(content)
+    if body_start is None:
+        print(f"ERROR: Unclosed YAML front matter in {doc_path}")
+        return False
+
+    # 只在正文中检查 related_docs 块，绝不触碰 YAML front matter。
     pattern = rf'{re.escape(RELATED_DOCS_START)}\n(.*?)\n{re.escape(RELATED_DOCS_END)}'
-    match = re.search(pattern, content, re.DOTALL)
+    match = re.search(pattern, content[body_start:], re.DOTALL)
     
     if match:
         # 已有块，解析并合并
@@ -88,7 +112,9 @@ def add_relations_to_doc(doc_path: str, relations: list) -> bool:
         
         # 重新构建块
         new_block = build_related_docs_block(data.get('doc_id', doc_path), data['related_docs'])
-        new_content = content[:match.start()] + new_block + content[match.end():]
+        absolute_start = body_start + match.start()
+        absolute_end = body_start + match.end()
+        new_content = content[:absolute_start] + new_block + content[absolute_end:]
     else:
         # 没有已有块，创建新块
         new_block = build_related_docs_block(doc_path, relations)
