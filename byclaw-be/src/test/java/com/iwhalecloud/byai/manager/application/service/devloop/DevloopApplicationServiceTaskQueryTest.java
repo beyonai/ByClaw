@@ -132,6 +132,23 @@ class DevloopApplicationServiceTaskQueryTest {
         assertThat(running).isEqualTo(2);
     }
 
+    @Test
+    void returnsEmptyTaskStateWhenProjectionIsNotAvailableYet() {
+        ByaiSession session = taskSession(123L, 9L);
+        when(byaiSessionMapper.selectById(123L)).thenReturn(session);
+
+        LoginInfo owner = new LoginInfo();
+        owner.setUserCode("owner-code");
+        when(loginApplicationService.getLoginInfo(9L)).thenReturn(owner);
+        when(taskStateReader.read("owner-code", 123L))
+            .thenThrow(new IllegalStateException("projection missing"));
+
+        ResponseUtil<DevloopTaskStateDto> response = service.getTaskPhases(123L);
+
+        assertThat(response.isSuccess()).isTrue();
+        assertThat(response.getData()).isNull();
+    }
+
     private ByaiSession taskSession(Long sessionId, Long creatorId) {
         ByaiSession session = new ByaiSession();
         session.setSessionId(sessionId);

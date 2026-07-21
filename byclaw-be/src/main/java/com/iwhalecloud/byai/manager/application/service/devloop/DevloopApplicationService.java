@@ -1373,7 +1373,7 @@ public class DevloopApplicationService {
         }
         catch (Exception e) {
             log.warn("[Devloop] 读取任务状态失败, sessionId={}", sessionId, e);
-            return ResponseUtil.failRes("任务状态尚不可用");
+            return ResponseUtil.successResponse(null);
         }
     }
 
