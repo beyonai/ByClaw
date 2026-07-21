@@ -306,6 +306,76 @@ async function loadPlanner() {
   return import(`${pathToFileURL(outfile).href}?t=${Date.now()}`);
 }
 
+async function loadMetadataBootstrap() {
+  const entryPoint = path.join(rootDir, "src", "metadata-bootstrap.ts");
+  assert.ok(fs.existsSync(entryPoint), "metadata bootstrap module is missing");
+  const outfile = path.join(bundleDir, "metadata-bootstrap.bundle.mjs");
+  await esbuild.build({
+    entryPoints: [entryPoint],
+    outfile,
+    bundle: true,
+    platform: "node",
+    format: "esm",
+    target: PACKAGE.nodeTarget,
+    packages: "external",
+    logLevel: "silent",
+  });
+  return import(`${pathToFileURL(outfile).href}?t=${Date.now()}`);
+}
+
+async function assertMetadataBootstrapProtocol() {
+  const {
+    createMetadataBootstrapContract,
+    renderMetadataFirstDelegationContent,
+    validateMetadataBootstrapContract,
+  } = await loadMetadataBootstrap();
+  const runDir = path.join(workspaceRoot, "metadata-bootstrap-protocol");
+  const clientsDir = path.join(runDir, "clients");
+  const metadataPath = path.join(runDir, "metadata.md");
+  const queryPath = path.join(runDir, "query.md");
+  const clientInstructionsPath = path.join(clientsDir, "claude-code.md");
+  const receiptPath = path.join(runDir, "bootstrap-receipt.json");
+  const metadataContent = [
+    "# ByClaw ACP Metadata",
+    "",
+    "## Future Business Rule",
+    "",
+    "This heading is intentionally unknown to the adapter and must remain authoritative.",
+    "",
+  ].join("\n");
+  fs.mkdirSync(clientsDir, { recursive: true });
+  fs.writeFileSync(metadataPath, metadataContent, "utf8");
+  fs.writeFileSync(queryPath, "# Query\n\nprivate user query\n", "utf8");
+  fs.writeFileSync(clientInstructionsPath, "# Client Instructions\n", "utf8");
+
+  const contract = createMetadataBootstrapContract({
+    bootstrapId: "bootstrap-fixture",
+    runDir,
+    metadataPath,
+    metadataContent,
+    clientInstructionsPath,
+    queryPath,
+    receiptPath,
+  });
+  assert.equal(contract.policy, "fail-closed");
+  assert.equal(contract.metadata.readMode, "complete-to-eof");
+  assert.equal(contract.metadata.bytes, Buffer.byteLength(metadataContent));
+  assert.equal(contract.metadata.sha256.length, 64);
+  assert.equal(contract.query.readAfterBootstrap, true);
+  assert.equal(contract.receipt.requiredStatus, "READY");
+  assert.doesNotThrow(() => validateMetadataBootstrapContract(contract));
+
+  const content = renderMetadataFirstDelegationContent({ contract, metadataContent });
+  assert.match(content, /read[^\n]*EOF/iu);
+  assert.match(content, /referenced resources/iu);
+  assert.match(content, /bootstrap-receipt\.json/u);
+  assert.match(content, /Future Business Rule/u);
+  assert.ok(
+    content.indexOf("Future Business Rule") < content.indexOf("<USER_QUERY_ACCESS>"),
+    "unknown future metadata rules must appear before query access",
+  );
+}
+
 async function main() {
   assert.equal(
     DEFAULTS.aimodelResolverProtocolVersion,
@@ -319,6 +389,7 @@ async function main() {
   );
 
   const selected = selectedKinds();
+  await assertMetadataBootstrapProtocol();
   const { createByclawAcpPlan, buildCallAgentContentFromPlan } = await loadPlanner();
   assert.equal(
     typeof buildCallAgentContentFromPlan,

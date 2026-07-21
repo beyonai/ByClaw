@@ -216,6 +216,7 @@ export const RESPONSE_LANGUAGE = {
 
 export const BUNDLE = {
   version: 1,
+  metadataBootstrapProtocolVersion: 1,
   source: "byclaw-digital-employee-redis",
   fallbackPathPart: "byclaw-acp",
   attributionSource: "acp-tooluse-runtime-metadata",
@@ -226,6 +227,9 @@ export const BUNDLE = {
   randomSliceEnd: 8,
   queryFileName: "query.md",
   metadataFileName: "metadata.md",
+  runsDirName: "runs",
+  bootstrapContractFileName: "bootstrap-contract.json",
+  bootstrapReceiptFileName: "bootstrap-receipt.json",
   clientsDirName: "clients",
   clientInstructionFileExtension: ".md",
   clientDirNames: {
