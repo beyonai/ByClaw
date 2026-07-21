@@ -1055,15 +1055,6 @@ const ProjectSpaceList: React.FC = () => {
       ) : (
         <>
           <div className={styles.header}>
-            <div className={styles.searchInput}>
-              <Input
-                value={sessionKeyword}
-                suffix={<SearchOutlined onClick={handleSessionSearchSubmit} />}
-                placeholder={t('searchPlaceholder')}
-                onChange={(event) => handleSessionSearchChange(event.target.value)}
-                onPressEnter={handleSessionSearchSubmit}
-              />
-            </div>
             <div className={styles.scopeActionRow}>
               <Dropdown
                 trigger={['click']}
@@ -1099,6 +1090,16 @@ const ProjectSpaceList: React.FC = () => {
                 <AntdIcon className={styles.enterProjectDetailArrow} type="icon-a-Rightyou" />
               </button>
             )}
+            {/* 会话搜索紧接项目详情入口，且始终只查询当前选中的项目。 */}
+            <div className={styles.searchInput}>
+              <Input
+                value={sessionKeyword}
+                suffix={<SearchOutlined onClick={handleSessionSearchSubmit} />}
+                placeholder={t('searchPlaceholder')}
+                onChange={(event) => handleSessionSearchChange(event.target.value)}
+                onPressEnter={handleSessionSearchSubmit}
+              />
+            </div>
           </div>
 
           <Spin spinning={loading} wrapperClassName={styles.spin}>

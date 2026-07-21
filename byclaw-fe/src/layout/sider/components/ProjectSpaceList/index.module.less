@@ -791,6 +791,36 @@
   }
 }
 
+// 成员统计和添加入口保持原有层级，搜索框单独占满一行以适配窄侧栏。
+.detailMemberToolbar {
+  flex-shrink: 0;
+
+  .detailSectionHeader {
+    margin-bottom: 4px;
+  }
+}
+
+.detailMemberSearch {
+  min-width: 0;
+  margin: 0 4px 8px;
+}
+
+// 搜索框占据需求工具栏的剩余宽度，刷新操作保持固定的图标按钮尺寸。
+.detailRequirementHeader {
+  gap: 8px;
+}
+
+.detailRequirementSearch {
+  min-width: 0;
+  flex: 1;
+}
+
+.detailRequirementRefreshButton {
+  width: 28px;
+  padding: 0;
+  justify-content: center;
+}
+
 // 需求列表独立滚动，保持此前隐藏滚动条的体验并承接触底加载。
 .detailRequirementScroll {
   min-height: 0;
@@ -851,62 +881,64 @@
 
     .@{antPrefix}-list-item.project-member-row {
       position: relative;
-      flex-direction: row;
-      min-height: 56px;
-      align-items: center;
-      // 与任务列表一致保留 10px 左间距，避免成员头像贴边。
-      padding-left: 10px;
-      padding-right: 38px;
+      width: 100%;
+      flex-direction: column;
+      gap: 10px;
+      // 成员卡片直接复用需求卡片的容器规格，不再保留成员专属底色或尺寸。
+      min-height: 64px;
+      align-items: stretch;
+      padding: 8px 10px;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      justify-content: center;
+      background: transparent;
+      cursor: default;
+      transition: background-color 0.2s, border-color 0.2s;
+
+      &:hover {
+        background: #f5f7fa;
+      }
     }
 
-    .project-member-row .@{antPrefix}-list-item-meta {
-      width: auto;
-      flex: 1;
-      align-items: center;
-      margin-bottom: 0;
-    }
-
-    .project-member-row .@{antPrefix}-list-item-meta-avatar {
-      margin-inline-end: 10px;
+    .project-member-list .@{antPrefix}-list-items {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
     }
 
     .project-member-avatar {
       width: 32px;
       height: 32px;
-      // 成员头像保持用户模块的蓝底圆角方形，不使用需求、任务列表的圆形背景。
-      border-radius: 10px;
+      // 成员头像与需求图标同为 32px 圆形，只展示姓名首字以避免文字拥挤。
+      border-radius: 50%;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 11px;
-      font-weight: 600;
+      font-size: 13px;
+      font-weight: 500;
       line-height: 1;
       color: #fff;
-      background: #246bfe;
+      background: #6b778c;
+
+      &.project-member-avatar-creator {
+        background: #1677ff;
+      }
+
+      &.project-member-avatar-regular {
+        background: #6b778c;
+      }
+
+      // 当前登录用户只通过头像底色区分，不改变整条成员卡片的背景。
+      &.project-member-avatar-current-user {
+        background: #52c41a;
+      }
     }
 
     .project-member-title {
-      display: inline-flex;
-      max-width: 100%;
+      min-width: 0;
+      display: flex;
       align-items: center;
       gap: 6px;
-      vertical-align: top;
-    }
-
-    .project-member-row .@{antPrefix}-list-item-meta-title {
-      margin-bottom: 0;
-      color: #14161a;
-      // 成员列表在左侧窄面板使用更紧凑的两行文字层级。
-      font-size: 11px;
-      font-weight: 500;
-      line-height: 16px;
-    }
-
-    .project-member-row .@{antPrefix}-list-item-meta-description {
-      margin-top: 3px;
-      color: #707680;
-      font-size: 10px;
-      line-height: 15px;
     }
 
     .project-member-name {
@@ -925,14 +957,11 @@
     }
 
     .project-member-more {
-      position: absolute;
-      top: 50%;
-      right: 8px;
       width: 28px;
       height: 28px;
+      padding: 0;
       color: #6b778c;
       border-radius: 6px;
-      transform: translateY(-50%);
 
       &:hover {
         color: #246bfe;
@@ -940,18 +969,6 @@
       }
     }
   }
-}
-
-// 直接挂在成员文字节点上，覆盖 List.Item.Meta 的默认字号。
-.projectMemberName {
-  // 成员名称与需求、任务标题统一字号，保证左侧列表的可读性。
-  font-size: 13px;
-  line-height: 18px;
-}
-
-.projectMemberDescription {
-  font-size: 12px;
-  line-height: 17px;
 }
 
 .detailSourceList {
@@ -1126,9 +1143,10 @@
 }
 
 .detailChannelEntry {
-  width: 100%;
+  // 补偿需求内容区 8px 与顶部 Tab 区 10px 的水平内边距差，保持两者同宽。
+  width: calc(100% - 4px);
   min-height: 38px;
-  margin-bottom: 10px;
+  margin: 0 2px 10px;
   padding: 6px 8px;
   border: 0;
   border-radius: 8px;
@@ -1547,42 +1565,58 @@
 }
 
 .detailTaskHeader {
-  // 筛选栏自身不再增加顶部空白，列表区域仍保留原有下方留白。
+  // 搜索框与研发项目专用筛选分两行展示，窄侧栏也能完整显示各控件。
   margin: 0 0 12px;
-  // 与 Tab 切换外沿一致，日期筛选和任务视图按钮作为整体对齐。
+  // 与 Tab 切换外沿一致，搜索和筛选区域保持相同水平对齐。
   padding: 0 4px;
   display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 10px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
   color: #526075;
   font-size: 13px;
   font-weight: 400;
 }
 
-// 普通项目任务按会话处理，不显示研发项目专用的筛选栏与任务视图入口。
-.detailTaskHeaderHidden {
-  display: none;
+.detailTaskSearch {
+  width: 100%;
+  min-width: 0;
 }
 
 .detailTaskHeaderActions {
+  width: 100%;
   min-width: 0;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: flex-start;
   gap: 8px;
 
   :global {
     .@{antPrefix}-picker {
-      // 任务日期筛选需要比紧凑图标按钮更易点击，单独提升控件高度。
+      // 日期值变化时保持固定基准宽度；窄面板优先收缩日期，不挤压右侧任务视图按钮。
+      flex: 0 1 240px;
       width: 240px;
+      min-width: 0;
+      max-width: calc(100% - 40px);
       height: 32px;
+      box-sizing: border-box;
+      overflow: hidden;
     }
 
     // 左侧窄面板需完整容纳两个日期，缩小输入字号并压缩中间分隔符留白。
+    .@{antPrefix}-picker-input {
+      min-width: 0;
+    }
+
     .@{antPrefix}-picker-input > input,
     .@{antPrefix}-picker-range-separator {
       font-size: 12px;
+    }
+
+    .@{antPrefix}-picker-input > input {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     .@{antPrefix}-picker-range-separator {

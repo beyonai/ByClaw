@@ -772,6 +772,11 @@ public class DevloopApplicationService {
      * 只查两次(源列表 + 条目 IN 源)，替代前端逐源循环请求(N+1)与内存排序；顺带回填 sourceName/sourceType。
      */
     public ResponseUtil<List<Map<String, Object>>> listRequirementsByProject(Long projectId) {
+        return listRequirementsByProject(projectId, null);
+    }
+
+    /** 按项目查询已收集需求，并按标题和内容筛选匹配的条目。 */
+    public ResponseUtil<List<Map<String, Object>>> listRequirementsByProject(Long projectId, String keyword) {
         List<ScanSource> sources = scanSourceService.listByProjectId(projectId);
         if (sources.isEmpty()) {
             return ResponseUtil.successResponse(new ArrayList<>());
@@ -782,7 +787,7 @@ public class DevloopApplicationService {
             sourceById.put(s.getSourceId(), s);
             sourceIds.add(s.getSourceId());
         }
-        List<ScanLogItem> items = scanLogService.listCreatedItemsBySources(sourceIds);
+        List<ScanLogItem> items = scanLogService.listCreatedItemsBySources(sourceIds, keyword);
         List<Map<String, Object>> list = new ArrayList<>();
         for (ScanLogItem item : items) {
             list.add(toRequirementMap(item, sourceById.get(item.getSourceId())));
@@ -1331,13 +1336,19 @@ public class DevloopApplicationService {
         LambdaQueryWrapper<ByaiSession> wrapper = new LambdaQueryWrapper<ByaiSession>()
             .eq(ByaiSession::getProjectId, query.getProjectId())
             .ge(query.getCreateTimeStart() != null, ByaiSession::getCreateTime, query.getCreateTimeStart())
-            .le(query.getCreateTimeEnd() != null, ByaiSession::getCreateTime, query.getCreateTimeEnd())
-            .orderByDesc(ByaiSession::getCreateTime)
-            .orderByDesc(ByaiSession::getSessionId);
+            .le(query.getCreateTimeEnd() != null, ByaiSession::getCreateTime, query.getCreateTimeEnd());
+        // 任务视图来自会话数据，关键字同时匹配会话标题和摘要，分页总数与前端搜索结果一致。
+        if (StringUtils.isNotBlank(query.getKeyword())) {
+            String keyword = query.getKeyword().trim();
+            wrapper.and(condition -> condition.like(ByaiSession::getSessionName, keyword)
+                .or()
+                .like(ByaiSession::getSessionContent, keyword));
+        }
         if (DEFAULT_PROJECT_ID.equals(query.getProjectId())) {
             // 默认项目共用 -1 分组，查询时必须按当前创建人隔离，避免读取其他账号的会话任务。
             wrapper.eq(ByaiSession::getCreatorId, CurrentUserHolder.getCurrentUserId());
         }
+        wrapper.orderByDesc(ByaiSession::getCreateTime).orderByDesc(ByaiSession::getSessionId);
         Page<ByaiSession> sessionPage = byaiSessionMapper
             .selectPage(new Page<>(query.getPageNum(), query.getPageSize()), wrapper);
 
@@ -1581,7 +1592,12 @@ public class DevloopApplicationService {
 
     /** 查询项目成员列表 */
     public ResponseUtil<List<ProjectMemberListDto>> listProjectMembers(Long projectId) {
-        return ResponseUtil.successResponse(projectMemberService.listProjectMembers(projectId));
+        return listProjectMembers(projectId, null);
+    }
+
+    /** 查询项目成员列表，并按姓名、账号和已绑定数字员工名称筛选。 */
+    public ResponseUtil<List<ProjectMemberListDto>> listProjectMembers(Long projectId, String keyword) {
+        return ResponseUtil.successResponse(projectMemberService.listProjectMembers(projectId, StringUtils.trimToNull(keyword)));
     }
 
     /** 移除项目成员 */

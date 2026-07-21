@@ -35,6 +35,7 @@ import {
   PlusOutlined,
   ReloadOutlined,
   RightOutlined,
+  SearchOutlined,
 } from '@ant-design/icons';
 import { useDispatch, useIntl, useNavigate, useSelector } from '@umijs/max';
 import dayjs, { type Dayjs } from 'dayjs';
@@ -162,6 +163,7 @@ type TaskQueryState = {
   pageNum: number;
   pageSize: number;
   dateRange: TaskDateRange;
+  keyword: string;
 };
 
 type TaskFetchOptions = Partial<TaskQueryState> & {
@@ -421,6 +423,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const [sources, setSources] = useState<ScanSourceItem[]>([]);
   const [repos, setRepos] = useState<RepoOption[]>([]);
   const [requirements, setRequirements] = useState<RequirementItem[]>([]);
+  const [requirementSearchKeyword, setRequirementSearchKeyword] = useState('');
   const [visibleRequirementCount, setVisibleRequirementCount] = useState(REQUIREMENT_PAGE_SIZE);
   const [detailReq, setDetailReq] = useState<RequirementItem | null>(null);
   const [startingRequirementIds, setStartingRequirementIds] = useState<Set<number>>(() => new Set());
@@ -428,6 +431,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const [taskTotal, setTaskTotal] = useState(0);
   const [hasMoreTasks, setHasMoreTasks] = useState(false);
   const [taskDateRange, setTaskDateRange] = useState<TaskDateRange>(null);
+  const [taskSearchKeyword, setTaskSearchKeyword] = useState('');
   const [, setMembers] = useState<any[]>([]);
   const [resourceFileScope, setResourceFileScope] = useState<ResourceFileScope>('current');
   const [sharedFiles, setSharedFiles] = useState<FileBrowserItem[]>([]);
@@ -483,11 +487,19 @@ const ProjectDetailPanel: React.FC<Props> = ({
     getDefaultManualRequirementForm
   );
   const groupSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const requirementSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const taskSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dwsAuthTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const dwsAuthTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const startingRequirementIdsRef = useRef<Set<number>>(new Set());
   const resourceClickTimerRef = useRef<number | null>(null);
-  const taskQueryRef = useRef<TaskQueryState>({ pageNum: 1, pageSize: TASK_PAGE_SIZE, dateRange: null });
+  const requirementQueryVersionRef = useRef(0);
+  const taskQueryRef = useRef<TaskQueryState>({
+    pageNum: 1,
+    pageSize: TASK_PAGE_SIZE,
+    dateRange: null,
+    keyword: '',
+  });
   const taskQueryVersionRef = useRef(0);
   const taskAppendingVersionRef = useRef<number | null>(null);
   const taskRequestCountRef = useRef(0);
@@ -517,10 +529,16 @@ const ProjectDetailPanel: React.FC<Props> = ({
       }
 
       // 任务列表单击直接进入关联会话，并补齐会话缓存和项目上下文。
+      const normalizedTaskSession = normalizeTaskSession(task, projectId, t);
       const taskSessionPayload = {
         ...task,
-        sessionId: `${task.sessionId}`,
-        sessionName: task.sessionName || task.title || task.taskName || t('task.defaultSessionName'),
+        sessionId: normalizedTaskSession.sessionId,
+        sessionName: normalizedTaskSession.sessionName,
+      };
+      // 新增流程自行计算稳定主题色；二次更新只回填列表解析出的头像，避免 undefined 覆盖默认会话头像。
+      const taskSessionUpdatePayload = {
+        ...taskSessionPayload,
+        avatar: normalizedTaskSession.avatar,
       };
       const targetProjectId = [projectId, task.projectId]
         .map((candidateProjectId) => Number(candidateProjectId))
@@ -541,7 +559,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
         });
         dispatch({
           type: 'session/updateSession',
-          payload: { ...taskSessionPayload, projectId: targetProjectId },
+          payload: { ...taskSessionUpdatePayload, projectId: targetProjectId },
         });
         setSessionId?.(String(task.sessionId));
         navigate('/chat', {
@@ -556,7 +574,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
       }
 
       dispatch({ type: 'session/addSession', payload: taskSessionPayload });
-      dispatch({ type: 'session/updateSession', payload: taskSessionPayload });
+      dispatch({ type: 'session/updateSession', payload: taskSessionUpdatePayload });
       setSessionId?.(String(task.sessionId));
       navigate('/chat');
     },
@@ -598,23 +616,30 @@ const ProjectDetailPanel: React.FC<Props> = ({
   }, [projectId]);
 
   const fetchRequirements = useCallback(
-    async (sourceList: ScanSourceItem[] = []) => {
+    async (sourceList?: ScanSourceItem[], keyword = '') => {
       if (!projectId) return;
+      const queryVersion = requirementQueryVersionRef.current + 1;
+      requirementQueryVersionRef.current = queryVersion;
       setRequirementsLoading(true);
       try {
         // 一次按项目直查全部需求，后端已 join 源并按创建时间倒序；不再逐源循环请求、不再前端排序。
-        const items = ((await listRequirementsByProject(projectId)) || []) as RequirementItem[];
+        const items = ((await listRequirementsByProject(projectId, keyword)) || []) as RequirementItem[];
+        if (queryVersion !== requirementQueryVersionRef.current) return;
         setRequirements(items);
         setVisibleRequirementCount(REQUIREMENT_PAGE_SIZE);
-        // “上次扫描完成”时间直接取源列表里最大的 lastScanTime，省掉逐源查扫描日志。
-        const latestScanTime = sourceList
-          .map((s: any) => s.lastScanTime)
-          .filter(Boolean)
-          .sort()
-          .pop();
-        setLastLog(latestScanTime ? ({ scanTime: latestScanTime } as ScanLogEntry) : null);
+        if (sourceList) {
+          // “上次扫描完成”时间直接取源列表里最大的 lastScanTime，省掉逐源查扫描日志。
+          const latestScanTime = sourceList
+            .map((s: any) => s.lastScanTime)
+            .filter(Boolean)
+            .sort()
+            .pop();
+          setLastLog(latestScanTime ? ({ scanTime: latestScanTime } as ScanLogEntry) : null);
+        }
       } finally {
-        setRequirementsLoading(false);
+        if (queryVersion === requirementQueryVersionRef.current) {
+          setRequirementsLoading(false);
+        }
       }
     },
     [projectId]
@@ -631,6 +656,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
       if (!append) taskQueryVersionRef.current = queryVersion;
       taskQueryRef.current = queryState;
       setTaskDateRange(queryState.dateRange);
+      setTaskSearchKeyword(queryState.keyword);
       if (append) taskAppendingVersionRef.current = queryVersion;
       taskRequestCountRef.current += 1;
       setTasksLoading(true);
@@ -641,6 +667,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
           pageSize: queryState.pageSize,
           createTimeStart: queryState.dateRange?.[0]?.startOf('day').format('YYYY-MM-DD HH:mm:ss'),
           createTimeEnd: queryState.dateRange?.[1]?.endOf('day').format('YYYY-MM-DD HH:mm:ss'),
+          keyword: queryState.keyword || undefined,
         });
         // 筛选重置列表，触底请求只追加未出现过的任务，避免滚动事件重复触发产生重复卡片。
         if (queryVersion !== taskQueryVersionRef.current) return;
@@ -667,6 +694,36 @@ const ProjectDetailPanel: React.FC<Props> = ({
       }
     },
     [projectId]
+  );
+
+  const handleTaskSearchChange = useCallback(
+    (value: string) => {
+      setTaskSearchKeyword(value);
+      if (taskSearchTimerRef.current) clearTimeout(taskSearchTimerRef.current);
+
+      // 与会话列表保持一致，输入停顿后再查询，避免每个字符都触发任务列表请求。
+      taskSearchTimerRef.current = setTimeout(() => {
+        void fetchTasks({ pageNum: 1, keyword: value.trim() });
+        taskSearchTimerRef.current = null;
+      }, 300);
+    },
+    [fetchTasks]
+  );
+
+  const handleTaskSearchSubmit = useCallback(() => {
+    if (taskSearchTimerRef.current) {
+      clearTimeout(taskSearchTimerRef.current);
+      taskSearchTimerRef.current = null;
+    }
+    void fetchTasks({ pageNum: 1, keyword: taskSearchKeyword.trim() });
+  }, [fetchTasks, taskSearchKeyword]);
+
+  useEffect(
+    () => () => {
+      if (taskSearchTimerRef.current) clearTimeout(taskSearchTimerRef.current);
+      if (requirementSearchTimerRef.current) clearTimeout(requirementSearchTimerRef.current);
+    },
+    []
   );
 
   const fetchRepos = useCallback(async () => {
@@ -1090,7 +1147,9 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const fetchDetailData = useCallback(async () => {
     if (!projectId) return;
     // 打开详情时并行请求当前可见 tab 需要的数据，成员 tab 隐藏时不额外查询成员。
-    const requirementPromise = showRequirementsTab ? fetchSources().then(fetchRequirements) : Promise.resolve();
+    const requirementPromise = showRequirementsTab
+      ? fetchSources().then((sourceList) => fetchRequirements(sourceList, ''))
+      : Promise.resolve();
     const memberPromise = showMembersTab ? fetchMembers() : Promise.resolve();
     await Promise.all([requirementPromise, fetchTasks(), memberPromise, fetchRepos()]);
   }, [
@@ -1105,15 +1164,26 @@ const ProjectDetailPanel: React.FC<Props> = ({
   ]);
 
   useEffect(() => {
-    taskQueryRef.current = { pageNum: 1, pageSize: TASK_PAGE_SIZE, dateRange: null };
+    if (requirementSearchTimerRef.current) {
+      clearTimeout(requirementSearchTimerRef.current);
+      requirementSearchTimerRef.current = null;
+    }
+    requirementQueryVersionRef.current += 1;
+    if (taskSearchTimerRef.current) {
+      clearTimeout(taskSearchTimerRef.current);
+      taskSearchTimerRef.current = null;
+    }
+    taskQueryRef.current = { pageNum: 1, pageSize: TASK_PAGE_SIZE, dateRange: null, keyword: '' };
     taskQueryVersionRef.current += 1;
     taskAppendingVersionRef.current = null;
     setTaskDateRange(null);
+    setTaskSearchKeyword('');
     setTasks([]);
     setTaskTotal(0);
     setHasMoreTasks(false);
     setActiveTab(showRequirementsTab ? 'requirements' : 'tasks');
     setDetailReq(null);
+    setRequirementSearchKeyword('');
     setVisibleRequirementCount(REQUIREMENT_PAGE_SIZE);
     startingRequirementIdsRef.current.clear();
     setStartingRequirementIds(new Set());
@@ -1258,7 +1328,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
     setRequirementsRefreshLoading(true);
     try {
       const sourceList = await fetchSources();
-      await fetchRequirements(sourceList);
+      await fetchRequirements(sourceList, requirementSearchKeyword.trim());
     } catch (error) {
       console.error('Failed to refresh project requirements:', error);
       message.error(t('requirement.refreshFailed'));
@@ -1266,7 +1336,30 @@ const ProjectDetailPanel: React.FC<Props> = ({
       // 手动刷新按钮只响应自己的刷新动作，避免打开渠道配置时拉渠道数据导致按钮转圈。
       setRequirementsRefreshLoading(false);
     }
-  }, [fetchRequirements, fetchSources, requirementsRefreshLoading, showRequirementsTab, t]);
+  }, [fetchRequirements, fetchSources, requirementSearchKeyword, requirementsRefreshLoading, showRequirementsTab, t]);
+
+  const handleRequirementSearchChange = useCallback(
+    (value: string) => {
+      setRequirementSearchKeyword(value);
+      setVisibleRequirementCount(REQUIREMENT_PAGE_SIZE);
+      if (requirementSearchTimerRef.current) clearTimeout(requirementSearchTimerRef.current);
+
+      // 与会话、任务列表统一在输入停顿后查询，避免每个字符都请求需求接口。
+      requirementSearchTimerRef.current = setTimeout(() => {
+        void fetchRequirements(undefined, value.trim());
+        requirementSearchTimerRef.current = null;
+      }, 300);
+    },
+    [fetchRequirements]
+  );
+
+  const handleRequirementSearchSubmit = useCallback(() => {
+    if (requirementSearchTimerRef.current) {
+      clearTimeout(requirementSearchTimerRef.current);
+      requirementSearchTimerRef.current = null;
+    }
+    void fetchRequirements(undefined, requirementSearchKeyword.trim());
+  }, [fetchRequirements, requirementSearchKeyword]);
 
   const handleRequirementListScroll = useCallback(
     (event: React.UIEvent<HTMLDivElement>) => {
@@ -1379,7 +1472,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
       setSourceModalOpen(false);
       setEditingSource(null);
       const sourceList = await fetchSources();
-      await fetchRequirements(sourceList);
+      await fetchRequirements(sourceList, requirementSearchKeyword.trim());
     } catch {
       message.error(t(editingSource ? 'source.updateFailed' : 'source.addFailed'));
     }
@@ -1479,7 +1572,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
         await deleteScanSource(source.sourceId);
         message.success(t('source.deleteSuccess'));
         const sourceList = await fetchSources();
-        await fetchRequirements(sourceList);
+        await fetchRequirements(sourceList, requirementSearchKeyword.trim());
       },
     });
   };
@@ -1490,7 +1583,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
       const res = await triggerScan(sourceId);
       message.success(t('source.scanSuccess', { count: res?.createdCount || 0 }));
       const sourceList = await fetchSources();
-      await fetchRequirements(sourceList);
+      await fetchRequirements(sourceList, requirementSearchKeyword.trim());
     } catch {
       message.error(t('source.scanFailed'));
     } finally {
@@ -1539,14 +1632,17 @@ const ProjectDetailPanel: React.FC<Props> = ({
         prev.map((item) => (item.itemId === requirementId ? { ...item, sessionId: res.sessionId } : item))
       );
       message.success(t('requirement.createTaskSuccess'));
-      await Promise.all([fetchTasks({ pageNum: 1 }), fetchSources().then(fetchRequirements)]);
+      await Promise.all([
+        fetchTasks({ pageNum: 1 }),
+        fetchSources().then((sourceList) => fetchRequirements(sourceList, requirementSearchKeyword.trim())),
+      ]);
       setActiveTab('tasks');
     } catch (error: any) {
       const errorMessage = error?.message || t('requirement.createTaskFailed');
       message.error(errorMessage);
       if (errorMessage.includes('重复启动') || errorMessage.includes('已有进行中的任务')) {
         // 页面需求数据可能落后于后端任务状态，重复启动失败后主动刷新让按钮状态回到已启动。
-        void fetchRequirements(sources);
+        void fetchRequirements(sources, requirementSearchKeyword.trim());
       }
     } finally {
       startingRequirementIdsRef.current.delete(requirementId);
@@ -1937,8 +2033,17 @@ const ProjectDetailPanel: React.FC<Props> = ({
           </span>
           <RightOutlined />
         </button>
-        <div className={styles.detailSectionHeader}>
-          <span>{t('requirement.count', { count: requirements.length })}</span>
+        <div className={`${styles.detailSectionHeader} ${styles.detailRequirementHeader}`}>
+          <div className={`${styles.searchInput} ${styles.detailRequirementSearch}`}>
+            <Input
+              allowClear
+              placeholder={t('requirement.searchPlaceholder')}
+              suffix={<SearchOutlined onClick={handleRequirementSearchSubmit} />}
+              value={requirementSearchKeyword}
+              onChange={(event) => handleRequirementSearchChange(event.target.value)}
+              onPressEnter={handleRequirementSearchSubmit}
+            />
+          </div>
           <Space size={6}>
             {/* 人工新增需求接口未接入，等后端接口可用后再恢复入口。 */}
             {/* <Tooltip title={t('manualRequirement.title')} placement="top">
@@ -1946,15 +2051,14 @@ const ProjectDetailPanel: React.FC<Props> = ({
             </Tooltip> */}
             <Tooltip title={t('common.refresh')} placement="top">
               <Button
+                aria-label={t('common.refresh')}
                 size="small"
-                className={styles.detailHeaderActionButton}
+                className={`${styles.detailHeaderActionButton} ${styles.detailRequirementRefreshButton}`}
                 icon={<ReloadOutlined />}
                 loading={requirementsRefreshLoading}
                 disabled={requirementsRefreshLoading}
                 onClick={handleRefreshRequirements}
-              >
-                {t('common.refresh')}
-              </Button>
+              />
             </Tooltip>
           </Space>
         </div>
@@ -2212,35 +2316,43 @@ const ProjectDetailPanel: React.FC<Props> = ({
 
   const renderTasks = () => (
     <div className={styles.detailTaskPanel}>
-      {/* 普通项目任务按会话展示，隐藏研发项目专用的日期筛选和任务视图入口。 */}
-      <div
-        className={`${styles.detailTaskHeader} ${
-          isDevelopProject ? '' : styles.detailTaskHeaderHidden
-        }`}
-      >
-        <div className={styles.detailTaskHeaderActions}>
-          <DatePicker.RangePicker
-            size="small"
+      <div className={styles.detailTaskHeader}>
+        <div className={`${styles.searchInput} ${styles.detailTaskSearch}`}>
+          <Input
             allowClear
-            value={taskDateRange}
-            placeholder={[t('task.dateStartPlaceholder'), t('task.dateEndPlaceholder')]}
-            onChange={(dates) => {
-              void fetchTasks({ pageNum: 1, dateRange: dates as TaskDateRange });
-            }}
+            placeholder={t('task.searchPlaceholder')}
+            suffix={<SearchOutlined onClick={handleTaskSearchSubmit} />}
+            value={taskSearchKeyword}
+            onChange={(event) => handleTaskSearchChange(event.target.value)}
+            onPressEnter={handleTaskSearchSubmit}
           />
-          {/* 任务看板只适用于研发项目；普通项目任务按会话展示，不提供研发状态视图。 */}
-          {isDevelopProject && taskTotal > 0 && (
-            <Tooltip title={t('task.viewTooltip')} placement="top">
-              <Button
-                aria-label={t('task.viewTooltip')}
-                size="small"
-                className={`${styles.detailHeaderActionButton} ${styles.detailTaskViewButton}`}
-                icon={<AppstoreOutlined />}
-                onClick={() => setTaskKanbanOpen(true)}
-              />
-            </Tooltip>
-          )}
         </div>
+        {/* 普通项目任务按会话展示，仅隐藏研发项目专用的日期筛选和任务视图入口。 */}
+        {isDevelopProject && (
+          <div className={styles.detailTaskHeaderActions}>
+            <DatePicker.RangePicker
+              size="small"
+              allowClear
+              value={taskDateRange}
+              placeholder={[t('task.dateStartPlaceholder'), t('task.dateEndPlaceholder')]}
+              onChange={(dates) => {
+                void fetchTasks({ pageNum: 1, dateRange: dates as TaskDateRange });
+              }}
+            />
+            {/* 任务看板只适用于研发项目；普通项目任务按会话展示，不提供研发状态视图。 */}
+            {taskTotal > 0 && (
+              <Tooltip title={t('task.viewTooltip')} placement="top">
+                <Button
+                  aria-label={t('task.viewTooltip')}
+                  size="small"
+                  className={`${styles.detailHeaderActionButton} ${styles.detailTaskViewButton}`}
+                  icon={<AppstoreOutlined />}
+                  onClick={() => setTaskKanbanOpen(true)}
+                />
+              </Tooltip>
+            )}
+          </div>
+        )}
       </div>
 
       {/* 任务列表独立滚动，研发项目的日期筛选和任务视图入口始终固定在顶部。 */}
