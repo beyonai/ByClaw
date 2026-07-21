@@ -42,11 +42,6 @@ const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({ task, onClose, proj
   const [phaseLoading, setPhaseLoading] = useState(false);
   const [snapshot, setSnapshot] = useState<DevloopTaskState | null>(null);
 
-  const normalizedTaskStatus = `${snapshot?.status || task?.status || ''}`.trim().toLowerCase();
-  const isPendingTask =
-    task?.stateAvailable === false || ['pending', '待开始', '未开始'].includes(normalizedTaskStatus);
-  const canEnterTaskSession = Boolean(task?.sessionId && !isPendingTask);
-
   // 打开抽屉时按 sessionId 定点读取 v2 会话状态投影。
   useEffect(() => {
     if (!task?.sessionId || task?.stateAvailable === false) {
@@ -138,7 +133,7 @@ const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({ task, onClose, proj
       width={640}
       extra={
         task?.sessionId ? (
-          <Button type="primary" icon={<MessageOutlined />} disabled={!canEnterTaskSession} onClick={handleGoToChat}>
+          <Button type="primary" icon={<MessageOutlined />} onClick={handleGoToChat}>
             进入会话
           </Button>
         ) : null

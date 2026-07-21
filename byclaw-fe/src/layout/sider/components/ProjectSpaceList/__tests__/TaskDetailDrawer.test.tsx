@@ -45,7 +45,7 @@ describe('TaskDetailDrawer session entry', () => {
     expect(await screen.findByRole('button', { name: /进入会话/ })).toBeEnabled();
   });
 
-  it('keeps the session entry disabled while the task is pending', async () => {
+  it('allows entering the session while the task is pending', async () => {
     render(
       <TaskDetailDrawer
         task={{
@@ -60,6 +60,6 @@ describe('TaskDetailDrawer session entry', () => {
       />
     );
 
-    expect(await screen.findByRole('button', { name: /进入会话/ })).toBeDisabled();
+    expect(await screen.findByRole('button', { name: /进入会话/ })).toBeEnabled();
   });
 });
