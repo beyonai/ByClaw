@@ -121,8 +121,8 @@ byai-channel `session_id`. Do not pass a digital-employee id, agent id, run id,
 or generated id. The adapter records this value as `byaiChannelSessionId` and
 uses it for the shared directory name when it is path-safe.
 
-The adapter also writes byai-channel fixed work specs into `metadata.md`,
-`clients/{client}.md`, and `plan-bundle.json`. These specs include the Session
+The adapter also writes byai-channel fixed work specs into `metadata.md` and
+`plan-bundle.json`. These specs include the Session
 Files rules: downstream ACP clients must resolve `/object/...`, `/view/...`,
 and `/qa/...` paths against `/by/.sessions/{byai-channel_session_id}` before
 reading, citing, or returning file links.
@@ -154,12 +154,13 @@ Before `call_acp_agent` dispatches, the adapter writes and validates:
 ```text
 <run_dir>/metadata.md
 <run_dir>/query.md
-<run_dir>/clients/<client>.md
 <run_dir>/bootstrap-contract.json
 <run_dir>/plan-bundle.json
 ```
 
-The contract records absolute paths, metadata byte length, SHA-256,
+Bootstrap contract protocol version 2 removes the former client-instructions
+artifact and makes `metadata.md` the single rule source. The contract records
+absolute paths, metadata byte length, SHA-256,
 `complete-to-eof` read mode, fail-closed policy, and the required
 `bootstrap-receipt.json` path. Missing, empty, or path-escaping required
 artifacts—and any metadata integrity change—prevent remote dispatch with

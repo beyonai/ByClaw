@@ -563,6 +563,7 @@ async function assertMetadataBootstrapProtocol() {
     planBundlePath,
     receiptPath,
   });
+  assert.equal(contract.protocolVersion, 2, "client-instruction-free bootstrap contracts must use version 2");
   assert.equal(contract.policy, "fail-closed");
   assert.equal(contract.metadata.readMode, "complete-to-eof");
   assert.equal(contract.metadata.bytes, Buffer.byteLength(metadataContent));

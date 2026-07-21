@@ -284,6 +284,28 @@ export const fixture = {
       expectedClientType: "codex"
     },
     {
+      name: "codex-agent-no-linked-skills",
+      config: {
+        defaultAcpAgentId: "codex",
+        defaultAcpClientType: "codex"
+      },
+      request: {
+        kind: "agent",
+        id: "900001",
+        acpAgentId: "codex",
+        acpClientType: "codex",
+        input: {
+          title: "codex without linked skills fixture"
+        }
+      },
+      expectedKind: "agent",
+      expectedId: "900001",
+      expectedAgentIds: ["900001"],
+      expectedCoordinatorId: "900001",
+      expectedAcpAgentId: "codex",
+      expectedClientType: "codex"
+    },
+    {
       name: "remote-default-overrides-legacy-claude",
       config: {
         defaultAcpAgentId: "byclaw-remote-claude"
