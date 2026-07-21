@@ -550,7 +550,7 @@
     .@{antPrefix}-tabs-nav-list {
       width: 100%;
       display: grid !important;
-      grid-template-columns: repeat(var(--project-detail-tab-count, 4), minmax(0, 1fr));
+      grid-template-columns: repeat(4, minmax(0, 1fr));
       padding: 3px;
       border-radius: 8px;
       background: #f1f3f8;
@@ -577,6 +577,22 @@
 
     .@{antPrefix}-tabs-tab-active .@{antPrefix}-tabs-tab-btn {
       color: #246bfe;
+    }
+  }
+
+  &.projectDetailPanelTabCount2 {
+    :global {
+      .@{antPrefix}-tabs-nav-list {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+  }
+
+  &.projectDetailPanelTabCount3 {
+    :global {
+      .@{antPrefix}-tabs-nav-list {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
     }
   }
 }
@@ -747,6 +763,15 @@
 .detailRequirementsBodyPanel {
   display: flex;
   overflow: hidden;
+  padding-bottom: 8px;
+}
+
+// 任务 Tab 与需求 Tab 一样固定筛选栏，仅让数据列表在内部滚动。
+.detailTasksBodyPanel {
+  display: flex;
+  overflow: hidden;
+  // 与需求、资源 Tab 共用首个元素的 8px 顶部间距。
+  padding-top: 8px;
   padding-bottom: 8px;
 }
 
@@ -1066,6 +1091,10 @@
   font-size: 12px !important;
 }
 
+.detailSourceDwsTagClickable {
+  cursor: pointer;
+}
+
 .detailSourceTime {
   color: #7c8798;
   font-size: 13px;
@@ -1283,6 +1312,11 @@
 
   &:hover {
     background: #f5f7fa;
+
+    .detailTaskMoreAction {
+      opacity: 1;
+      pointer-events: auto;
+    }
   }
 }
 
@@ -1333,6 +1367,8 @@
   font-size: 16px;
   font-weight: 600;
   line-height: 24px;
+  // 长英文、路径等无空格内容按可用宽度断行，避免溢出详情抽屉。
+  overflow-wrap: anywhere;
   word-break: break-word;
 }
 
@@ -1341,26 +1377,6 @@
   align-items: center;
   gap: 8px;
   min-width: 0;
-}
-
-.requirementDetailPriority {
-  flex-shrink: 0;
-  color: #344056;
-  font-size: 14px;
-  font-weight: 600;
-  line-height: 20px;
-}
-
-.requirementDetailUnstartedTag {
-  height: 20px;
-  flex-shrink: 0;
-  margin-inline-end: 0;
-  padding: 0 6px;
-  border-radius: 4px;
-  color: #8a96a8;
-  font-size: 12px;
-  line-height: 20px;
-  background: #f1f4f8;
 }
 
 .requirementDetailSection {
@@ -1426,7 +1442,8 @@
 /* 需求评分维度网格（抽屉内） */
 .detailScoreDimGrid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  // 宽度足够时一行展示三项，空间不足时自动降为两项或单项。
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 8px;
   margin-top: 10px;
 }
@@ -1448,6 +1465,10 @@
     font-size: 13px;
     color: #1f2937;
   }
+}
+
+.detailScoreRisk {
+  color: #cf1322 !important;
 }
 
 .detailRequirementMain {
@@ -1519,18 +1540,29 @@
 
 .detailTaskPanel {
   min-width: 0;
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
 }
 
 .detailTaskHeader {
-  margin: 10px 0 12px;
-  padding-left: 4px;
+  // 筛选栏自身不再增加顶部空白，列表区域仍保留原有下方留白。
+  margin: 0 0 12px;
+  // 与 Tab 切换外沿一致，日期筛选和任务视图按钮作为整体对齐。
+  padding: 0 4px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 10px;
   color: #526075;
   font-size: 13px;
   font-weight: 400;
+}
+
+// 普通项目任务按会话处理，不显示研发项目专用的筛选栏与任务视图入口。
+.detailTaskHeaderHidden {
+  display: none;
 }
 
 .detailTaskHeaderActions {
@@ -1542,15 +1574,21 @@
 
   :global {
     .@{antPrefix}-picker {
+      // 任务日期筛选需要比紧凑图标按钮更易点击，单独提升控件高度。
       width: 240px;
+      height: 32px;
+    }
+
+    // 左侧窄面板需完整容纳两个日期，缩小输入字号并压缩中间分隔符留白。
+    .@{antPrefix}-picker-input > input,
+    .@{antPrefix}-picker-range-separator {
+      font-size: 12px;
+    }
+
+    .@{antPrefix}-picker-range-separator {
+      padding: 0 4px;
     }
   }
-}
-
-.detailTaskPagination {
-  margin-top: 16px;
-  display: flex;
-  justify-content: flex-end;
 }
 
 .detailTaskList {
@@ -1559,7 +1597,37 @@
   gap: 2px;
 }
 
+// 任务列表触底加载时只滚动列表本身，避免日期筛选随内容一起滚出可视区。
+.detailTaskScroll {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+.detailTaskLoadingMore {
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.detailTaskViewButton {
+  // 固定为不可收缩的正方形，与日期范围筛选保持同一高度。
+  flex: 0 0 32px;
+  min-width: 32px;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+}
+
 .detailTaskCard {
+  position: relative;
   min-height: 56px;
   padding: 8px 10px;
   border: 1px solid transparent;
@@ -1575,12 +1643,22 @@
   &:hover {
     background: #f5f7fa;
   }
+
+  // 与会话列表 activeItem 保持一致，突出最近一次点击的任务。
+  &.detailTaskCardActive {
+    background: rgba(0, 0, 0, 0.04);
+    box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  }
 }
 
-.detailTaskCardExpanded {
-  // 展开详情仍沿用会话列表底色，只通过细边框区分当前任务。
-  border-color: #c9dcff;
-  background: #f8fbff;
+.detailTaskCard:hover .detailTaskMoreAction {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.detailTaskCard:hover .detailTaskCardHeaderWithAction,
+.detailTaskCardHeaderWithActionOpen {
+  padding-right: 28px;
 }
 
 .detailTaskIcon {
@@ -1599,11 +1677,16 @@
 .detailTaskCardHeader {
   min-width: 0;
   width: 100%;
+  box-sizing: border-box;
   // 状态标签作为独立右列，相对任务标题和描述两行的整体垂直居中。
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   column-gap: 8px;
+}
+
+.detailTaskCardHeaderWithAction {
+  transition: padding-right 0.2s;
 }
 
 .detailTaskMain {
@@ -1640,10 +1723,38 @@
   line-height: 20px;
 }
 
+// 研发任务的详情入口仅在卡片悬停或下拉菜单展开时展示，避免干扰会话主操作。
+.detailTaskMoreAction {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  z-index: 1;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: 6px;
+  color: #7c8798;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%);
+  transition: opacity 0.2s, background-color 0.2s;
+
+  &:hover {
+    color: #526075;
+    background: rgba(0, 0, 0, 0.04);
+  }
+}
+
+.detailTaskMoreActionOpen {
+  opacity: 1;
+  pointer-events: auto;
+}
+
 // 任务状态标签与任务视图使用同一状态层级，只在列表内采用紧凑尺寸。
 .detailTaskStatusPending {
-  color: #707680;
-  background: #f2f4f7;
+  // 待开始改为浅蓝灰，和任务卡片选中时的中性灰底色拉开层级。
+  color: #52667d;
+  background: #e8eff8;
 }
 
 .detailTaskStatusRunning {
@@ -1742,39 +1853,45 @@
   gap: 12px;
 }
 
-// 代码变更卡片:参考常见 git 管理视图,状态字母角标 + 文件名/路径 + 增删行统计。
+// 代码变更卡片对齐共享文件空间的边框、标题栏和内容留白，保留 Git 状态信息。
 .codeChangeCard {
   border: 1px solid #dfe6f0;
-  border-radius: 10px;
+  border-radius: 8px;
   overflow: hidden;
   background: #fff;
 }
 
 .codeChangeHeader {
-  min-height: 46px;
-  padding: 10px 14px;
+  min-height: 42px;
+  padding: 8px 10px;
   border-bottom: 1px solid #edf1f7;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
+  background: #f7f9fc;
 }
 
 .codeChangeHeaderMain {
+  min-width: 0;
+  flex: 1;
   display: flex;
   align-items: center;
-  gap: 10px;
-  min-width: 0;
+  gap: 8px;
 
   strong {
-    font-size: 14px;
-    font-weight: 700;
-    color: #1f2633;
+    flex-shrink: 0;
+    color: #1f2533;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 20px;
     white-space: nowrap;
   }
 }
 
 .codeChangeBranch {
+  min-width: 0;
+  flex: 1;
   font-size: 12px;
   color: #728096;
   font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
@@ -1794,31 +1911,35 @@
 }
 
 .codeChangeCount {
-  min-width: 22px;
-  height: 20px;
-  padding: 0 7px;
-  border-radius: 10px;
-  background: #eef2f7;
-  color: #52607a;
+  flex-shrink: 0;
+  min-width: 18px;
+  color: #728096;
   font-size: 12px;
-  font-weight: 600;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  font-weight: 400;
+  line-height: 18px;
+  text-align: right;
 }
 
 .codeChangeEmpty {
-  padding: 22px 14px;
-  text-align: center;
+  min-height: 120px;
+  padding: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   color: #8a96a8;
   font-size: 13px;
+  line-height: 20px;
+  text-align: center;
+  word-break: break-word;
 }
 
 .codeChangeList {
   display: flex;
   flex-direction: column;
-  max-height: 320px;
+  gap: 2px;
+  max-height: clamp(120px, 28vh, 320px);
   overflow-y: auto;
+  padding: 4px 8px 8px;
 }
 
 .codeChangeItem {
@@ -1826,12 +1947,9 @@
   grid-template-columns: 22px minmax(0, 1fr) auto;
   align-items: center;
   column-gap: 10px;
-  padding: 8px 14px;
+  padding: 8px 6px;
+  border-radius: 6px;
   color: inherit;
-
-  &:not(:last-child) {
-    border-bottom: 1px solid #f2f5f9;
-  }
 
   &:hover {
     background: #f5f7fa;
@@ -1889,7 +2007,7 @@
 
 .codeChangeName {
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 500;
   color: #1f2633;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2243,6 +2361,42 @@
   }
 }
 
+.sourceRepoCompact {
+  width: 100%;
+}
+
+.sourceRepoSelect {
+  flex: 1;
+}
+
+.sourceScoreRule {
+  margin-top: 8px;
+}
+
+.sourceScoreRuleInput {
+  width: 80px;
+  margin: 0 8px;
+}
+
+.sourceConfirmHint {
+  margin-top: 6px;
+  color: #999;
+  font-size: 12px;
+}
+
+.dwsAuthorizationInstruction,
+.dwsAuthorizationDeviceCode {
+  margin: 4px 0;
+}
+
+.dwsAuthorizationDeviceCode {
+  color: #666;
+}
+
+.repoDescription {
+  color: #999;
+}
+
 .manualRequirementModal {
   :global {
     .@{antPrefix}-modal-content {
@@ -2319,25 +2473,50 @@
   }
 }
 
+.agentSearchInput {
+  margin-bottom: 16px;
+}
+
+.agentList {
+  height: 400px;
+  overflow-y: auto;
+}
+
+.agentListAvatar {
+  width: 40px;
+  height: 40px;
+}
+
 /* 整体任务视图看板样式（只读） */
+.taskBoardDrawer {
+  :global {
+    .@{antPrefix}-drawer-body {
+      padding: 0;
+      overflow: auto;
+    }
+  }
+}
+
 .kanbanToolbar {
   position: sticky;
   top: 0;
   z-index: 2;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  // 移除任务总数后，日期筛选与分页从工具栏左侧起排。
+  justify-content: flex-start;
   gap: 16px;
   min-height: 56px;
   padding: 10px 20px;
   background: #fff;
   border-bottom: 1px solid #f0f0f0;
-}
 
-.kanbanToolbarSummary {
-  margin-right: auto;
-  color: #595959;
-  font-size: 14px;
+  :global {
+    // 整体任务视图的日期筛选提高点击高度，和工具栏视觉规格保持一致。
+    .@{antPrefix}-picker {
+      height: 32px;
+    }
+  }
 }
 
 .kanbanBoard {
@@ -2371,6 +2550,28 @@
   margin-bottom: 12px;
   font-size: 14px;
   font-weight: 500;
+}
+
+.kanbanColIcon {
+  width: 14px;
+  display: inline-flex;
+  justify-content: center;
+}
+
+.kanbanColIconPending {
+  color: #8c8c8c;
+}
+
+.kanbanColIconRunning {
+  color: #1677ff;
+}
+
+.kanbanColIconPaused {
+  color: #faad14;
+}
+
+.kanbanColIconDone {
+  color: #52c41a;
 }
 
 .kanbanColTitle {
@@ -2437,6 +2638,14 @@
       white-space: nowrap;
     }
   }
+}
+
+.kanbanPhaseTag {
+  margin-inline-end: 4px;
+}
+
+.kanbanWarningTag {
+  margin-top: 4px;
 }
 
 .kanbanCardFooter {
@@ -2517,28 +2726,39 @@
   flex-shrink: 0;
   width: 40px;
   height: 40px;
-  border-radius: 10px;
+  // 复用数字员工真实头像时按圆形裁切，保持和会话、员工列表一致。
+  border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 14px;
-  font-weight: 700;
-  color: #fff;
-  background: #1677ff;
+  overflow: hidden;
+  background: #fff;
 }
 
-.taskHeroTrack {
+.taskHeroProgressBar {
+  width: 100%;
   height: 8px;
+  display: block;
+  appearance: none;
+  border: 0;
   border-radius: 4px;
+  color: #246bfe;
   background: #dce9ff;
   overflow: hidden;
 
-  span {
-    display: block;
-    height: 100%;
+  &::-webkit-progress-bar {
+    background: #dce9ff;
     border-radius: 4px;
+  }
+
+  &::-webkit-progress-value {
     background: #246bfe;
-    transition: width 0.3s;
+    border-radius: 4px;
+  }
+
+  &::-moz-progress-bar {
+    background: #246bfe;
+    border-radius: 4px;
   }
 }
 
@@ -2575,6 +2795,11 @@
     color: #344056;
     word-break: break-word;
   }
+}
+
+// 关联需求跨越两列，其余上下文字段仍保持两列各占 50% 的布局。
+.taskContextItemFull {
+  grid-column: 1 / -1;
 }
 
 /* 任务详情 - 研发环节竖向流程 */
@@ -2662,6 +2887,11 @@
   background: #1677ff;
 }
 
+.phasePaused .phaseNodeMark {
+  // 暂停状态使用橙色，与完成、执行中和异常状态保持清晰区分。
+  background: #faad14;
+}
+
 .phaseRejected .phaseNodeMark {
   background: #ff4d4f;
 }
@@ -2691,9 +2921,4 @@
 .kickbackReason {
   font-size: 12px;
   color: #526075;
-}
-
-.taskDetailAction {
-  display: flex;
-  justify-content: center;
 }

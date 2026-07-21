@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Dropdown, Empty, Input, Modal, Skeleton, Spin, Tag, Tooltip, message } from 'antd';
 import { DownOutlined, PlusOutlined, SearchOutlined } from '@ant-design/icons';
 // @ts-ignore
-import { useDispatch, useNavigate, useSelector } from '@umijs/max';
+import { useDispatch, useIntl, useNavigate, useSelector } from '@umijs/max';
 import classNames from 'classnames';
 import { trim } from 'lodash';
 import useGlobal from '@/hooks/useGlobal';
@@ -36,6 +36,8 @@ type ProjectSessionPageState = {
   keyword?: string;
 };
 
+type ProjectSpaceTranslate = (id: string, values?: Record<string, string | number>) => string;
+
 const sortProjectSessions = (sessions: ProjectSession[] = []) => {
   return [...sessions].sort((left, right) => {
     const leftTime = new Date(left.updateTime || left.createTime || 0).getTime();
@@ -57,25 +59,25 @@ const mergeProjectSessions = (cachedSessions: ProjectSession[] = [], nextSession
   return Array.from(sessionMap.values());
 };
 
-const getProjectScene = (project: ProjectSpace) => {
+const getProjectScene = (project: ProjectSpace, t: ProjectSpaceTranslate) => {
   if (project.projectType === 'default') {
-    return { classSuffix: 'Default', text: '默认' };
+    return { classSuffix: 'Default', text: t('scene.default') };
   }
 
   // 研发项目即使强制共享，列表也优先展示业务类型标签。
   if (project.projectType === 'develop') {
-    return { classSuffix: 'Development', text: '研发' };
+    return { classSuffix: 'Development', text: t('scene.development') };
   }
 
   if (project.sharedFlag) {
-    return { classSuffix: 'Shared', text: '共享' };
+    return { classSuffix: 'Shared', text: t('scene.shared') };
   }
 
-  return { classSuffix: 'Personal', text: '个人' };
+  return { classSuffix: 'Personal', text: t('scene.personal') };
 };
 
-const renderProjectSceneTag = (project: ProjectSpace, className?: string) => {
-  const scene = getProjectScene(project);
+const renderProjectSceneTag = (project: ProjectSpace, t: ProjectSpaceTranslate, className?: string) => {
+  const scene = getProjectScene(project, t);
   return (
     <Tag
       bordered={false}
@@ -156,9 +158,15 @@ const syncProjectShareMembers = async (
 };
 
 const ProjectSpaceList: React.FC = () => {
+  const intl = useIntl();
   const navigate = useNavigate();
   const dispatch = useDispatch();
   const userInfo = useSelector((state: any) => state.user?.userInfo) || {};
+  // 项目侧栏全部静态文案复用同一翻译入口，避免散落的硬编码字符串。
+  const t = useCallback(
+    (id: string, values?: Record<string, string | number>) => intl.formatMessage({ id: `projectSpace.${id}` }, values),
+    [intl]
+  );
   const { EventEmitter, setAgentId, setSessionId } = useGlobal();
   const { clearDetailPanel } = React.useContext(SiderContentContext);
   const { projects, loading, fetchProjects } = useProjectList();
@@ -198,7 +206,7 @@ const ProjectSpaceList: React.FC = () => {
     return mergedProjects.find((project) => project.projectId === projectScopeId);
   }, [mergedProjects, projectScopeId]);
 
-  const scopeTitle = activeScopeProject?.projectName || '请选择项目';
+  const scopeTitle = activeScopeProject?.projectName || t('selectProject');
   const currentUserId = userInfo.userId ?? userInfo.id;
   const isProjectCreator = (project?: ProjectSpace) =>
     Boolean(project?.createBy && currentUserId && `${project.createBy}` === `${currentUserId}`);
@@ -208,12 +216,12 @@ const ProjectSpaceList: React.FC = () => {
       key: project.projectId,
       label: (
         <span className={styles.scopeMenuLabel}>
-          <span className={styles.scopeMenuName}>{project.projectName || '未命名项目'}</span>
-          {renderProjectSceneTag(project, styles.scopeMenuTag)}
+          <span className={styles.scopeMenuName}>{project.projectName || t('unnamedProject')}</span>
+          {renderProjectSceneTag(project, t, styles.scopeMenuTag)}
         </span>
       ),
     }));
-  }, [mergedProjects]);
+  }, [mergedProjects, t]);
 
   const projectFormInitialValues = useMemo(() => {
     if (!editingProject) return undefined;
@@ -274,13 +282,13 @@ const ProjectSpaceList: React.FC = () => {
         return nextProject;
       } catch (error) {
         console.error('Failed to load project sessions:', error);
-        message.error('项目会话加载失败');
+        message.error(t('message.sessionLoadFailed'));
         return project;
       } finally {
         setLoadingMap((prev) => ({ ...prev, [projectId]: false }));
       }
     },
-    [projectDetailMap, projectSessionPageMap]
+    [projectDetailMap, projectSessionPageMap, t]
   );
 
   const fetchProjectFullDetail = useCallback(
@@ -309,13 +317,13 @@ const ProjectSpaceList: React.FC = () => {
         return nextProject;
       } catch (error) {
         console.error('Failed to load project detail:', error);
-        message.error('项目详情加载失败');
+        message.error(t('message.detailLoadFailed'));
         return project;
       } finally {
         setDetailLoadingMap((prev) => ({ ...prev, [projectId]: false }));
       }
     },
-    [projectDetailMap, projectSessionPageMap]
+    [projectDetailMap, projectSessionPageMap, t]
   );
 
   useEffect(() => {
@@ -410,7 +418,7 @@ const ProjectSpaceList: React.FC = () => {
           ...payload.session,
           sessionId,
           projectId,
-          sessionName: payload.session?.sessionName || pendingSession?.sessionName || 'New Chat',
+          sessionName: payload.session?.sessionName || pendingSession?.sessionName || t('newChatName'),
           // 与会话模块新增会话的排序逻辑保持一致，缺少服务端更新时间时置顶展示。
           updateTime: payload.session?.updateTime || new Date().toISOString(),
         },
@@ -449,7 +457,7 @@ const ProjectSpaceList: React.FC = () => {
         },
       }));
     },
-    [fetchProjects, mergedProjects, projectDetailMap, projectSessionPageMap]
+    [fetchProjects, mergedProjects, projectDetailMap, projectSessionPageMap, t]
   );
 
   const handleProjectSessionPending = useCallback(
@@ -485,7 +493,7 @@ const ProjectSpaceList: React.FC = () => {
         {
           sessionId: pendingSessionId,
           projectId,
-          sessionName: payload.sessionName || 'New Chat',
+          sessionName: payload.sessionName || t('newChatName'),
           sessionContent: payload.sessionContent || '',
           updateTime: payload.updateTime || new Date().toISOString(),
         },
@@ -517,7 +525,7 @@ const ProjectSpaceList: React.FC = () => {
         },
       }));
     },
-    [fetchProjects, mergedProjects, projectDetailMap, projectSessionPageMap]
+    [fetchProjects, mergedProjects, projectDetailMap, projectSessionPageMap, t]
   );
 
   useEffect(() => {
@@ -550,7 +558,7 @@ const ProjectSpaceList: React.FC = () => {
 
   const handleNewChat = useCallback(() => {
     if (!activeScopeProject?.projectId) {
-      message.warning('请先选择项目');
+      message.warning(t('message.selectProjectFirst'));
       return;
     }
 
@@ -566,7 +574,7 @@ const ProjectSpaceList: React.FC = () => {
         projectName: activeScopeProject.projectName,
       },
     });
-  }, [activeScopeProject, clearDetailPanel, navigate, setAgentId, setSessionId]);
+  }, [activeScopeProject, clearDetailPanel, navigate, setAgentId, setSessionId, t]);
 
   useEffect(() => {
     // 全局侧栏加号由当前项目选择器处理，确保新会话绑定到正在查看的项目。
@@ -614,7 +622,7 @@ const ProjectSpaceList: React.FC = () => {
 
   const handleOpenEditProject = (project: ProjectSpace) => {
     if (!isProjectCreator(project)) {
-      message.warning('只有项目创建人可以编辑项目');
+      message.warning(t('message.onlyCreatorCanEdit'));
       return;
     }
     const cachedProject = projectDetailMap[project.projectId] || project;
@@ -624,27 +632,27 @@ const ProjectSpaceList: React.FC = () => {
 
   const handleDeleteProject = (project: ProjectSpace) => {
     if (!isProjectCreator(project)) {
-      message.warning('只有项目创建人可以删除项目');
+      message.warning(t('message.onlyCreatorCanDelete'));
       return;
     }
     if (isDefaultProject(project)) {
       // 默认项目是系统内置分组，只允许查看和编辑基础信息，不允许删除。
-      message.warning('默认项目不允许删除');
+      message.warning(t('message.defaultCannotDelete'));
       return;
     }
 
     let deleteProjectConfirm: ReturnType<typeof Modal.confirm> | undefined;
     deleteProjectConfirm = Modal.confirm({
-      title: '确认删除项目',
-      content: `确定要删除项目「${project.projectName || '未命名项目'}」吗？`,
-      okText: '删除',
+      title: t('deleteProject.title'),
+      content: t('deleteProject.content', { name: project.projectName || t('unnamedProject') }),
+      okText: t('deleteProject.confirm'),
       okButtonProps: { danger: true },
       onOk: async () => {
         try {
           await deleteProject(Number(project.projectId));
           // 删除接口成功后立即关闭二次确认，再进行提示和非阻塞列表刷新。
           deleteProjectConfirm?.destroy();
-          message.success('项目已删除');
+          message.success(t('message.deleteSuccess'));
           setProjectDetailMap((prev) => {
             const next = { ...prev };
             delete next[project.projectId];
@@ -668,7 +676,7 @@ const ProjectSpaceList: React.FC = () => {
           void fetchProjects();
         } catch (error) {
           console.error('Failed to delete project:', error);
-          message.error('项目删除失败');
+          message.error(t('message.deleteFailed'));
         }
       },
     });
@@ -707,7 +715,7 @@ const ProjectSpaceList: React.FC = () => {
 
     const projectName = normalizeProjectName(values.projectName);
     if (!projectName) {
-      message.warning('请输入项目名称');
+      message.warning(t('message.projectNameRequired'));
       return;
     }
 
@@ -716,7 +724,7 @@ const ProjectSpaceList: React.FC = () => {
       return !isCurrentEditingProject && normalizeProjectName(project.projectName) === projectName;
     });
     if (duplicateProject) {
-      message.warning('项目名称已存在，请修改后再保存');
+      message.warning(t('message.projectNameDuplicate'));
       return;
     }
 
@@ -739,7 +747,7 @@ const ProjectSpaceList: React.FC = () => {
         if (submitSharedFlag && values.shareMembersLoaded) {
           await syncProjectShareMembers(editingProject.projectId, shareMembers, { allowRemove: true });
         }
-        message.success('项目已更新');
+        message.success(t('message.updateSuccess'));
         setProjectDetailMap((prev) => ({
           ...prev,
           [editingProject.projectId]: {
@@ -769,7 +777,7 @@ const ProjectSpaceList: React.FC = () => {
         if (createdProjectId && submitSharedFlag && shareMembers.length) {
           await syncProjectShareMembers(createdProjectId, shareMembers);
         }
-        message.success('项目空间创建成功');
+        message.success(t('message.createSuccess'));
       }
       setProjectModalOpen(false);
       setEditingProject(undefined);
@@ -788,7 +796,7 @@ const ProjectSpaceList: React.FC = () => {
       }
     } catch (error) {
       console.error('Failed to create project:', error);
-      message.error(editingProject ? '项目更新失败' : '项目空间创建失败');
+      message.error(t(editingProject ? 'message.updateFailed' : 'message.createFailed'));
     } finally {
       projectSavingRef.current = false;
       setProjectCreating(false);
@@ -797,7 +805,7 @@ const ProjectSpaceList: React.FC = () => {
 
   const handleOpenSession = (project: ProjectSpace, session: ProjectSession) => {
     if (!session.sessionId) {
-      message.warning('未找到会话ID');
+      message.warning(t('message.sessionIdMissing'));
       return;
     }
 
@@ -820,7 +828,7 @@ const ProjectSpaceList: React.FC = () => {
     const sessionCachePayload = {
       ...session,
       sessionId: `${session.sessionId}`,
-      sessionName: session.sessionName || 'New Chat',
+      sessionName: session.sessionName || t('newChatName'),
       projectId: `${project.projectId}`,
     };
 
@@ -890,7 +898,10 @@ const ProjectSpaceList: React.FC = () => {
         [projectId]: {
           ...cachedProject,
           sessions,
-          sessionCount: Math.max(0, Number(cachedProject.sessionCount ?? (cachedProject.sessions || []).length) - removedCount),
+          sessionCount: Math.max(
+            0,
+            Number(cachedProject.sessionCount ?? (cachedProject.sessions || []).length) - removedCount
+          ),
         },
       };
     });
@@ -933,7 +944,8 @@ const ProjectSpaceList: React.FC = () => {
         [projectId]: {
           ...cachedProject,
           sessions: restoreSession(cachedProject.sessions),
-          sessionCount: Number(cachedProject.sessionCount ?? (cachedProject.sessions || []).length) + (alreadyRestored ? 0 : 1),
+          sessionCount:
+            Number(cachedProject.sessionCount ?? (cachedProject.sessions || []).length) + (alreadyRestored ? 0 : 1),
         },
       };
     });
@@ -1001,7 +1013,9 @@ const ProjectSpaceList: React.FC = () => {
     }
 
     if (!sessions.length) {
-      return <Empty className={styles.sessionEmpty} image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无会话" />;
+      return (
+        <Empty className={styles.sessionEmpty} image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('emptySessions')} />
+      );
     }
 
     return (
@@ -1016,12 +1030,14 @@ const ProjectSpaceList: React.FC = () => {
               onSelect={(item) => handleOpenSession(project, item as ProjectSession)}
               onSessionEditOptimistic={(payload) => handleProjectSessionNameChange(project, payload)}
               onSessionEditRollback={(payload) => handleProjectSessionNameChange(project, payload)}
-              onSessionDeleteOptimistic={(item) => handleProjectSessionDeleteOptimistic(project, item as ProjectSession)}
+              onSessionDeleteOptimistic={(item) =>
+                handleProjectSessionDeleteOptimistic(project, item as ProjectSession)
+              }
               onSessionDeleteRollback={(item) => handleProjectSessionDeleteRollback(project, item as ProjectSession)}
             />
           );
         })}
-        {isLoadingMore && <div className={styles.sessionMoreLoading}>加载中...</div>}
+        {isLoadingMore && <div className={styles.sessionMoreLoading}>{t('loading')}</div>}
       </>
     );
   };
@@ -1043,7 +1059,7 @@ const ProjectSpaceList: React.FC = () => {
               <Input
                 value={sessionKeyword}
                 suffix={<SearchOutlined onClick={handleSessionSearchSubmit} />}
-                placeholder="请输入关键字"
+                placeholder={t('searchPlaceholder')}
                 onChange={(event) => handleSessionSearchChange(event.target.value)}
                 onPressEnter={handleSessionSearchSubmit}
               />
@@ -1066,7 +1082,7 @@ const ProjectSpaceList: React.FC = () => {
                   </span>
                 </button>
               </Dropdown>
-              <Tooltip title="新建项目" placement="top">
+              <Tooltip title={t('createProject')} placement="top">
                 {/* 右侧仅保留新建项目入口，项目详情由下方快捷入口承载。 */}
                 <Button className={styles.newProjectButton} icon={<PlusOutlined />} onClick={handleOpenCreateProject} />
               </Tooltip>
@@ -1079,7 +1095,7 @@ const ProjectSpaceList: React.FC = () => {
               >
                 {/* 使用笔记本图标，保持与员工侧栏“发现数字员工”一致的整行快捷入口结构。 */}
                 <AntdIcon className={styles.enterProjectDetailIcon} type="icon-a-Notebook-onebijiben" />
-                <span className={styles.enterProjectDetailText}>进入项目详情</span>
+                <span className={styles.enterProjectDetailText}>{t('enterProjectDetail')}</span>
                 <AntdIcon className={styles.enterProjectDetailArrow} type="icon-a-Rightyou" />
               </button>
             )}
@@ -1094,7 +1110,7 @@ const ProjectSpaceList: React.FC = () => {
                 renderSessionList(activeScopeProject)
               ) : (
                 <div className={styles.emptyWrap}>
-                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无项目空间" />
+                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('emptyProjects')} />
                 </div>
               )}
             </div>
@@ -1104,7 +1120,7 @@ const ProjectSpaceList: React.FC = () => {
 
       <ProjectFormModal
         open={projectModalOpen}
-        title={editingProject ? '编辑项目空间' : '新建项目空间'}
+        title={editingProject ? t('editProject') : t('createProject')}
         loading={projectCreating}
         initialValues={projectFormInitialValues}
         projectId={editingProject?.projectId}
