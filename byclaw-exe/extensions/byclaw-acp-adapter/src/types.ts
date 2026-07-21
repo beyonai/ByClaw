@@ -98,6 +98,39 @@ export type ByclawAcpPlanRequest = {
   languageProvided?: boolean;
 };
 
+export type MetadataArtifact = {
+  path: string;
+  sha256: string;
+  bytes: number;
+  required: true;
+  readMode: "complete-to-eof";
+};
+
+export type MetadataBootstrapContract = {
+  protocolVersion: 1;
+  bootstrapId: string;
+  policy: "fail-closed";
+  runDir: string;
+  precedence: string[];
+  metadata: MetadataArtifact;
+  clientInstructions: {
+    path: string;
+    required: true;
+  };
+  query: {
+    path: string;
+    readAfterBootstrap: true;
+  };
+  planBundle: {
+    path: string;
+    required: true;
+  };
+  receipt: {
+    path: string;
+    requiredStatus: "READY";
+  };
+};
+
 export type ByclawAcpPlan = {
   kind: "agent" | "team" | "workflow" | "loop";
   id: string;

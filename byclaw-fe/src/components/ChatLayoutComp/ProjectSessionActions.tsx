@@ -123,13 +123,7 @@ const ProjectSessionActions: React.FC<ProjectSessionActionsProps> = ({ projectId
           />
         </Tooltip>
       </span>
-      <TaskDetailDrawer
-        task={taskDetail}
-        onClose={() => setTaskDetail(null)}
-        onRefresh={() => undefined}
-        projectId={projectId}
-        projectName={project?.projectName}
-      />
+      <TaskDetailDrawer task={taskDetail} onClose={() => setTaskDetail(null)} />
       <ProjectSessionResultDrawer
         open={resultDrawerOpen}
         resourceId={resourceId}

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -136,6 +137,7 @@ function assertSessionsSpawnPayload(params) {
   const bundle = JSON.parse(fs.readFileSync(bundlePath, "utf8"));
   const agentModels = bundle.agentModels;
   const sharedContext = bundle.sharedContext;
+  const bootstrapContractPath = sharedContext.bootstrapContractPath;
   const expectedReplyLanguage = testCase.request.replyLanguage ?? testCase.request.language ?? "zh_CN";
   const expectedByaiSessionId = testCase.request.sessionId;
   const expectedSessionRoot = `${SESSION_FILES_ROOT}/${expectedByaiSessionId}`;
@@ -193,6 +195,18 @@ function assertSessionsSpawnPayload(params) {
     `${testCase.name} metadata fixedWorkSpecs sessionRoot mismatch`,
   );
   assert.ok(sharedContext, `${testCase.name} bundle.sharedContext is missing`);
+  assert.ok(sharedContext.bootstrapId, `${testCase.name} sharedContext.bootstrapId is missing`);
+  assert.ok(sharedContext.runDir, `${testCase.name} sharedContext.runDir is missing`);
+  assert.ok(
+    sharedContext.runDir.startsWith(path.join(sharedContext.sharedDir, "runs")),
+    `${testCase.name} runDir must be isolated below sharedDir/runs`,
+  );
+  assert.ok(bootstrapContractPath, `${testCase.name} bootstrap contract path is missing`);
+  assert.ok(fs.existsSync(bootstrapContractPath), `${testCase.name} bootstrap contract is missing`);
+  assert.ok(
+    sharedContext.bootstrapReceiptPath.startsWith(sharedContext.runDir),
+    `${testCase.name} bootstrap receipt must be scoped to runDir`,
+  );
   assert.equal(bundle.clientType, fixture.config.defaultAcpClientType, `${testCase.name} clientType mismatch`);
   assert.equal(sharedContext.sessionId, expectedByaiSessionId, `${testCase.name} sharedContext.sessionId mismatch`);
   assert.equal(
@@ -241,6 +255,19 @@ function assertSessionsSpawnPayload(params) {
   const metadata = fs.readFileSync(sharedContext.metadataPath, "utf8");
   const query = fs.readFileSync(sharedContext.queryPath, "utf8");
   const clientInstructions = fs.readFileSync(sharedContext.clientInstructionsPath, "utf8");
+  const bootstrapContract = JSON.parse(fs.readFileSync(bootstrapContractPath, "utf8"));
+  assert.equal(bootstrapContract.bootstrapId, sharedContext.bootstrapId);
+  assert.equal(bootstrapContract.runDir, sharedContext.runDir);
+  assert.equal(bootstrapContract.metadata.path, sharedContext.metadataPath);
+  assert.equal(bootstrapContract.metadata.bytes, Buffer.byteLength(metadata));
+  assert.equal(
+    bootstrapContract.metadata.sha256,
+    createHash("sha256").update(metadata, "utf8").digest("hex"),
+    `${testCase.name} metadata sha256 mismatch`,
+  );
+  assert.equal(bootstrapContract.metadata.readMode, "complete-to-eof");
+  assert.equal(bootstrapContract.query.readAfterBootstrap, true);
+  assert.equal(bootstrapContract.receipt.requiredStatus, "READY");
   assert.match(query, /Reply language: zh_CN/u, `${testCase.name} query should include reply language`);
   assert.match(metadata, /responseLanguage/u, `${testCase.name} metadata should include responseLanguage`);
   assert.match(metadata, /Fixed Work Specs/u, `${testCase.name} metadata should include fixed work specs`);
@@ -306,6 +333,237 @@ async function loadPlanner() {
   return import(`${pathToFileURL(outfile).href}?t=${Date.now()}`);
 }
 
+async function loadMetadataBootstrap() {
+  const entryPoint = path.join(rootDir, "src", "metadata-bootstrap.ts");
+  assert.ok(fs.existsSync(entryPoint), "metadata bootstrap module is missing");
+  const outfile = path.join(bundleDir, "metadata-bootstrap.bundle.mjs");
+  await esbuild.build({
+    entryPoints: [entryPoint],
+    outfile,
+    bundle: true,
+    platform: "node",
+    format: "esm",
+    target: PACKAGE.nodeTarget,
+    packages: "external",
+    logLevel: "silent",
+  });
+  return import(`${pathToFileURL(outfile).href}?t=${Date.now()}`);
+}
+
+async function loadCallAcpAgentTool() {
+  const outfile = path.join(bundleDir, "call-acp-agent-tool.bundle.mjs");
+  await esbuild.build({
+    entryPoints: [path.join(rootDir, "src", "call-acp-agent-tool.ts")],
+    outfile,
+    bundle: true,
+    platform: "node",
+    format: "esm",
+    target: PACKAGE.nodeTarget,
+    packages: "external",
+    logLevel: "silent",
+    plugins: [
+      {
+        name: "openclaw-routing-test-stub",
+        setup(build) {
+          build.onResolve({ filter: /^openclaw\/plugin-sdk\/routing$/ }, () => ({
+            path: "openclaw-routing-test-stub",
+            namespace: "byclaw-test",
+          }));
+          build.onLoad({ filter: /.*/, namespace: "byclaw-test" }, () => ({
+            contents: "export function isSubagentSessionKey() { return false; }",
+          }));
+        },
+      },
+    ],
+  });
+  return import(`${pathToFileURL(outfile).href}?t=${Date.now()}`);
+}
+
+async function assertCallAcpAgentToolFailsClosed(snapshot) {
+  const { createByclawCallAcpAgentTool } = await loadCallAcpAgentTool();
+  let executorCallCount = 0;
+  const environmentKeys = [
+    "USER_CODE",
+    "LANGFUSE_BASE_URL",
+    "LANGFUSE_PUBLIC_KEY",
+    "LANGFUSE_SECRET_KEY",
+    "OPENCLAW_STATE_DIR",
+  ];
+  const savedEnvironment = Object.fromEntries(environmentKeys.map((key) => [key, process.env[key]]));
+  process.env.USER_CODE = "metadata-bootstrap-test";
+  delete process.env.LANGFUSE_BASE_URL;
+  delete process.env.LANGFUSE_PUBLIC_KEY;
+  delete process.env.LANGFUSE_SECRET_KEY;
+  process.env.OPENCLAW_STATE_DIR = "/dev/null/openclaw-state";
+  try {
+    const config = {
+      ...jsonClone(fixture.config),
+      defaultCwd: path.join(workspaceRoot, "call-tool-fail-closed"),
+      sqlitePath: path.join(workspaceRoot, "call-tool-fail-closed", "state.sqlite"),
+    };
+    const tool = createByclawCallAcpAgentTool({
+      config,
+      registry: {
+        snapshot: async () => jsonClone(snapshot),
+      },
+      executeViaCallAgent: async () => {
+        executorCallCount += 1;
+        return { success: true };
+      },
+    })({
+      sessionKey: "agent:main:metadata-bootstrap-test",
+      channelSessionId: "metadata-bootstrap-test-session",
+      channelTraceId: "a".repeat(32),
+      langfuseParentObservationId: "b".repeat(16),
+    });
+    const result = await tool.execute("metadata-bootstrap-test-call", {
+      kind: "agent",
+      id: "900002",
+      input: "protected query",
+    });
+    assert.equal(result.error_code, "ACP_METADATA_BOOTSTRAP_INVALID");
+    assert.match(result.error, /metadata bootstrap materialization failed/iu);
+    assert.equal(executorCallCount, 0, "bootstrap failure must not call the remote executor");
+  } finally {
+    for (const key of environmentKeys) {
+      const value = savedEnvironment[key];
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  }
+}
+
+async function assertMetadataBootstrapProtocol() {
+  const {
+    createMetadataBootstrapContract,
+    loadMetadataBootstrapContract,
+    metadataBootstrapFailureResponse,
+    renderMetadataFirstDelegationContent,
+    validateMetadataBootstrapContract,
+  } = await loadMetadataBootstrap();
+  const runDir = path.join(workspaceRoot, "runs", "metadata-bootstrap-protocol");
+  const clientsDir = path.join(runDir, "clients");
+  const metadataPath = path.join(runDir, "metadata.md");
+  const queryPath = path.join(runDir, "query.md");
+  const clientInstructionsPath = path.join(clientsDir, "claude-code.md");
+  const planBundlePath = path.join(runDir, "plan-bundle.json");
+  const receiptPath = path.join(runDir, "bootstrap-receipt.json");
+  const metadataContent = [
+    "# ByClaw ACP Metadata",
+    "",
+    "## Future Business Rule",
+    "",
+    "This heading is intentionally unknown to the adapter and must remain authoritative.",
+    "",
+  ].join("\n");
+  fs.mkdirSync(clientsDir, { recursive: true });
+  fs.writeFileSync(metadataPath, metadataContent, "utf8");
+  fs.writeFileSync(queryPath, "# Query\n\nprivate user query\n", "utf8");
+  fs.writeFileSync(clientInstructionsPath, "# Client Instructions\n", "utf8");
+  fs.writeFileSync(planBundlePath, '{"fixture":true}\n', "utf8");
+
+  const contract = createMetadataBootstrapContract({
+    bootstrapId: path.basename(runDir),
+    runDir,
+    metadataPath,
+    metadataContent,
+    clientInstructionsPath,
+    queryPath,
+    planBundlePath,
+    receiptPath,
+  });
+  assert.equal(contract.policy, "fail-closed");
+  assert.equal(contract.metadata.readMode, "complete-to-eof");
+  assert.equal(contract.metadata.bytes, Buffer.byteLength(metadataContent));
+  assert.equal(contract.metadata.sha256.length, 64);
+  assert.equal(contract.query.readAfterBootstrap, true);
+  assert.equal(contract.planBundle.path, planBundlePath);
+  assert.equal(contract.planBundle.required, true);
+  assert.equal(contract.receipt.requiredStatus, "READY");
+  assert.doesNotThrow(() => validateMetadataBootstrapContract(contract));
+  const contractPath = path.join(runDir, "bootstrap-contract.json");
+  fs.writeFileSync(contractPath, JSON.stringify(contract), "utf8");
+  assert.equal(loadMetadataBootstrapContract(contractPath).contract.bootstrapId, contract.bootstrapId);
+  const outsideContractPath = path.join(workspaceRoot, "outside-bootstrap-contract.json");
+  fs.writeFileSync(outsideContractPath, JSON.stringify(contract), "utf8");
+  assert.throws(
+    () => loadMetadataBootstrapContract(outsideContractPath),
+    /contract.*runDir/iu,
+    "bootstrap contract file must be inside its declared runDir",
+  );
+  const tamperedContract = jsonClone(contract);
+  tamperedContract.query.readAfterBootstrap = false;
+  assert.throws(
+    () => validateMetadataBootstrapContract(tamperedContract),
+    /query.*bootstrap/iu,
+    "runtime contract validation must reject bypassing metadata bootstrap",
+  );
+  const malformedContract = jsonClone(contract);
+  delete malformedContract.metadata;
+  assert.throws(
+    () => validateMetadataBootstrapContract(malformedContract),
+    /contract.*metadata/iu,
+    "malformed JSON contracts must fail with a bootstrap validation error",
+  );
+  const precedenceTamperedContract = jsonClone(contract);
+  precedenceTamperedContract.precedence.reverse();
+  assert.throws(
+    () => validateMetadataBootstrapContract(precedenceTamperedContract),
+    /precedence/iu,
+    "business-rule precedence must not be mutable",
+  );
+  const escapedPlanBundleContract = jsonClone(contract);
+  escapedPlanBundleContract.planBundle.path = path.join(workspaceRoot, "outside-plan-bundle.json");
+  fs.writeFileSync(escapedPlanBundleContract.planBundle.path, "{}\n", "utf8");
+  assert.throws(
+    () => validateMetadataBootstrapContract(escapedPlanBundleContract),
+    /plan bundle.*runDir/iu,
+    "plan bundle must stay inside the bootstrap runDir",
+  );
+  fs.rmSync(planBundlePath);
+  assert.throws(
+    () => validateMetadataBootstrapContract(contract),
+    /plan bundle.*cannot be read/iu,
+    "missing plan bundle must block bootstrap validation",
+  );
+  fs.writeFileSync(planBundlePath, '{"fixture":true}\n', "utf8");
+
+  const content = renderMetadataFirstDelegationContent({ contract, metadataContent });
+  assert.match(content, /read[^\n]*EOF/iu);
+  assert.match(content, /referenced resources/iu);
+  assert.match(content, /bootstrap-receipt\.json/u);
+  assert.match(content, /do not read query\.md or plan-bundle\.json/iu);
+  assert.match(content, /Future Business Rule/u);
+  assert.ok(
+    content.indexOf("Future Business Rule") < content.indexOf("<USER_QUERY_ACCESS>"),
+    "unknown future metadata rules must appear before query access",
+  );
+  assert.equal(
+    typeof metadataBootstrapFailureResponse,
+    "function",
+    "call_acp_agent must export its metadata bootstrap fail-closed response helper",
+  );
+  assert.deepEqual(
+    metadataBootstrapFailureResponse({
+      error: new Error("metadata digest mismatch"),
+      requesterSessionKey: "agent:main:test",
+      sessionId: "session-test",
+    }),
+    {
+      success: false,
+      error_code: "ACP_METADATA_BOOTSTRAP_INVALID",
+      error: "metadata digest mismatch",
+      target: {
+        requester_session_key: "agent:main:test",
+        session_id: "session-test",
+      },
+    },
+  );
+}
+
 async function main() {
   assert.equal(
     DEFAULTS.aimodelResolverProtocolVersion,
@@ -319,6 +577,7 @@ async function main() {
   );
 
   const selected = selectedKinds();
+  await assertMetadataBootstrapProtocol();
   const { createByclawAcpPlan, buildCallAgentContentFromPlan } = await loadPlanner();
   assert.equal(
     typeof buildCallAgentContentFromPlan,
@@ -326,6 +585,7 @@ async function main() {
     "planner should export buildCallAgentContentFromPlan for the byclawCallAcpAgent tool",
   );
   const snapshot = jsonClone(fixture.snapshot);
+  await assertCallAcpAgentToolFailsClosed(snapshot);
   const cases = fixture.requestCases.filter((item) => !selected || selected.has(item.name));
 
   assert.ok(cases.length > 0, "no request cases selected");
@@ -354,15 +614,44 @@ async function main() {
       request,
     });
     assertSessionsSpawnPayload({ plan, testCase: effectiveTestCase, snapshot });
+    const rawInput = typeof request.input === "string" ? request.input : JSON.stringify(request.input ?? {});
+    assert.ok(
+      !plan.task.includes(rawInput),
+      `${testCase.name} bootstrap task must not expose the raw query before metadata bootstrap`,
+    );
 
-    // byclawCallAcpAgent delegation content: reuses plan.task, which embeds the
-    // user query plus the on-disk shared-context file paths that the remote ACP
-    // agent reads. Structured bundle data travels via files, not inline.
+    if (testCase.name === "agent") {
+      const duplicatePlan = createByclawAcpPlan({ config, snapshot, request });
+      const firstBundle = JSON.parse(fs.readFileSync(plan.sessionsSpawn.bundle.path, "utf8"));
+      const duplicateBundle = JSON.parse(fs.readFileSync(duplicatePlan.sessionsSpawn.bundle.path, "utf8"));
+      assert.notEqual(
+        firstBundle.sharedContext.runDir,
+        duplicateBundle.sharedContext.runDir,
+        "same-session plans must use different immutable run directories",
+      );
+      assert.ok(
+        firstBundle.sharedContext.clientInstructionsPath &&
+          fs.readFileSync(firstBundle.sharedContext.clientInstructionsPath, "utf8").indexOf("metadata.md") <
+            fs.readFileSync(firstBundle.sharedContext.clientInstructionsPath, "utf8").indexOf("query.md"),
+        "client instructions must require metadata before query access",
+      );
+      const substitutedPlan = jsonClone(plan);
+      substitutedPlan.sessionsSpawn.bundle.bootstrapContractPath =
+        duplicateBundle.sharedContext.bootstrapContractPath;
+      assert.throws(
+        () => buildCallAgentContentFromPlan(substitutedPlan),
+        /contract.*(runDir|bootstrapId|path)|plan.*contract/iu,
+        "call-agent dispatch must reject a self-consistent contract from another run",
+      );
+    }
+
+    // byclawCallAcpAgent delegation content validates and inlines metadata as
+    // an authoritative business-rule manual before it permits query access.
     const callAgentContent = buildCallAgentContentFromPlan(plan);
-    assert.equal(
+    assert.notEqual(
       callAgentContent,
       plan.task,
-      `${testCase.name} call-agent content should equal plan.task`,
+      `${testCase.name} call-agent content should be a metadata-first envelope`,
     );
     assert.match(callAgentContent, /query\.md/u, `${testCase.name} call-agent content should point to query.md`);
     assert.match(
@@ -370,11 +659,30 @@ async function main() {
       /metadata\.md/u,
       `${testCase.name} call-agent content should point to metadata.md`,
     );
-    assert.match(
-      callAgentContent,
-      /plan-bundle\.json/u,
-      `${testCase.name} call-agent content should point to plan-bundle.json`,
+    assert.match(callAgentContent, /bootstrap-contract\.json/u);
+    assert.match(callAgentContent, /bootstrap-receipt\.json/u);
+    assert.match(callAgentContent, /complete metadata document/iu);
+    assert.match(callAgentContent, /referenced resources/iu);
+    assert.ok(
+      callAgentContent.indexOf("<METADATA_BUSINESS_RULE_MANUAL>") <
+        callAgentContent.indexOf("<USER_QUERY_ACCESS>"),
+      `${testCase.name} metadata manual must precede query access`,
     );
+    assert.ok(
+      !callAgentContent.includes(rawInput),
+      `${testCase.name} call-agent bootstrap must not inline the raw query`,
+    );
+
+    if (testCase.name === "agent") {
+      const tamperedPlan = createByclawAcpPlan({ config, snapshot, request });
+      const tamperedBundle = JSON.parse(fs.readFileSync(tamperedPlan.sessionsSpawn.bundle.path, "utf8"));
+      fs.appendFileSync(tamperedBundle.sharedContext.metadataPath, "\nmetadata changed after planning\n", "utf8");
+      assert.throws(
+        () => buildCallAgentContentFromPlan(tamperedPlan),
+        /metadata.*mismatch/iu,
+        "call-agent dispatch must reject changed metadata",
+      );
+    }
 
     summaries.push({
       kind: testCase.name,

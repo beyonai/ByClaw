@@ -104,6 +104,7 @@ export type DevloopTaskItem = {
   stageLoopCount?: number;
   assignee?: string;
   agentName?: string;
+  avatar?: string;
   branchName?: string;
   repoFullName?: string;
   requirementTitle?: string;

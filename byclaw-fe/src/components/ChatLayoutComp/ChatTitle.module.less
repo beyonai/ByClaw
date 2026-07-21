@@ -55,8 +55,9 @@ nav.chatTitle {
       color: #526075;
       box-shadow: none;
 
+      // 鼠标点击不保留高亮，键盘聚焦时仍提供清晰的可访问性反馈。
       &:hover,
-      &:focus {
+      &:focus-visible {
         color: #246bfe;
         background: #f0f5ff;
       }

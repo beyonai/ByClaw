@@ -6,6 +6,7 @@ Load this reference for `bycli weixin accounts`, `articles`, `save-articles`, or
 
 - Use browser authentication by default. Every browser-authenticated Weixin command must include `--site-session persistent --keep-tab true`.
 - Before browser commands, complete the main skill's `doctor` and `daemon status` checks. Reuse the Chrome session for `mp.weixin.qq.com`.
+- A newly leased adapter tab may begin at `about:blank`. The adapter navigates to `mp.weixin.qq.com` and then re-reads the page state. If existing Chrome cookies redirect it to an authenticated `/cgi-bin/` URL with a non-empty `token`, browser authentication succeeded: continue the command and do not report `AUTH_REQUIRED` merely because the initial tab was blank or redirected. This post-navigation check belongs to the adapter; do not run `bycli browser` commands to reproduce it.
 - `weixin accounts` does not support `--timeout`; never pass `--timeout 180`.
 - Do not ask the user to extract credentials when browser authentication can satisfy the request. Do not silently switch to environment authentication after a browser, login, or verification failure.
 - Never expose, mix, or retain authentication credentials.
@@ -19,7 +20,7 @@ bycli weixin download --url '<article-url>' --site-session persistent --keep-tab
 
 ## 2. Login and verification gate
 
-Treat login `AUTH_REQUIRED` / exit code 77, legacy/outer login `TIMEOUT` / exit code 75, anti-bot prompts, CAPTCHAs, sliders, SMS/security checks, and WeChat environment-verification pages or buttons as a required human-verification gate. This includes the page saying “环境异常，完成验证后即可继续访问” with a “去验证” button. These are not adapter defects; do not enter AutoFix or modify adapter code.
+After the adapter's post-navigation check, treat login `AUTH_REQUIRED` / exit code 77, legacy/outer login `TIMEOUT` / exit code 75, anti-bot prompts, CAPTCHAs, sliders, SMS/security checks, and WeChat environment-verification pages or buttons as a required human-verification gate. This includes the page saying “环境异常，完成验证后即可继续访问” with a “去验证” button. These are not adapter defects; do not enter AutoFix or modify adapter code.
 
 The adapter returns this gate immediately: for QR-code login, it opens and focuses the login tab, then returns `AUTH_REQUIRED`; for an article environment-verification page, `download` and `save-articles` return `AUTH_REQUIRED` without continuing to another article.
 

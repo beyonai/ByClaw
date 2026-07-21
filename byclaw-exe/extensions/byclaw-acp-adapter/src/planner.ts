@@ -33,6 +33,12 @@ import {
   SESSION_FILES,
 } from "./constants.js";
 import { compactByclawSkill } from "./skill-paths.js";
+import {
+  createMetadataBootstrapContract,
+  loadMetadataBootstrapContract,
+  MetadataBootstrapError,
+  renderMetadataFirstDelegationContent,
+} from "./metadata-bootstrap.js";
 
 const DEFAULT_CLAUDE_CODE_MODEL =
   process.env[ENV.byclawAcpClaudeModel] || process.env[ENV.anthropicModel] || DEFAULTS.claudeCodeModel;
@@ -709,13 +715,15 @@ function renderClientInstructions(params: {
     "",
     params.responseLanguage.instruction,
     "",
-    "1. Read `query.md` first and treat it as the user request.",
-    "2. Read `metadata.md` before planning. It is the authority for agent roster, skill paths, workflow, loop, and model metadata.",
-    "3. Use `plan-bundle.json` only when machine-readable detail is needed.",
-    "4. Do not invent agents or skills that are absent from metadata.",
-    "5. Follow the responseLanguage policy from `metadata.md` for all user-visible output.",
-    "6. Preserve proof: list which roster member handled each work item and cite evidence paths or command output.",
-    "7. Follow the Fixed Work Specs below; they are mandatory for all downstream agents and subagents.",
+    "1. Before planning or business work, read `metadata.md` completely from byte 0 through EOF and verify it against `bootstrap-contract.json`.",
+    "2. Treat the entire metadata document as authoritative business rules; do not depend on a fixed list of known headings.",
+    "3. Load every resource that metadata makes mandatory for the current task, including future resource types unknown to this client.",
+    "4. Write `bootstrap-receipt.json`; if any mandatory rule or resource cannot be satisfied, write BLOCKED and do not read `query.md`.",
+    "5. Only after the receipt status is READY, read `query.md` and treat it as the user request.",
+    "6. Only after READY, use `plan-bundle.json` when machine-readable detail is needed; it contains the protected user input.",
+    "7. Do not invent agents, skills, or business rules that are absent from metadata.",
+    "8. Preserve proof: cite loaded rule/resource paths and command output, and list which roster member handled each work item.",
+    "9. Follow the Fixed Work Specs below; they are mandatory for all downstream agents and subagents.",
     "",
     "## Fixed Work Specs",
     "",
@@ -758,6 +766,8 @@ function buildTask(params: {
   queryPath: string;
   metadataPath: string;
   clientInstructionsPath: string;
+  bootstrapContractPath: string;
+  bootstrapReceiptPath: string;
   members?: NormalizedByclawAgent[];
   claudeTeam?: JsonRecord;
   workflow?: ByclawWorkflow;
@@ -767,26 +777,26 @@ function buildTask(params: {
     `你是通过 OpenClaw ACP 接入的 ${params.clientType} client，下游任务来自 ByClaw ${params.kind}: ${params.name}。`,
     `回复语言: ${params.responseLanguage.language}。${params.responseLanguage.instruction}`,
     "",
-    "用户 query:",
-    "",
-    markdownInput(params.input),
-    "",
     "共享上下文目录已经写入 OpenClaw 与 ACP client 可见的文件系统。",
     `- sharedDir: ${params.sharedDir}`,
-    `- query: ${params.queryPath}`,
+    `- bootstrapContract: ${params.bootstrapContractPath}`,
+    `- bootstrapReceipt: ${params.bootstrapReceiptPath}`,
     `- metadata: ${params.metadataPath}`,
     `- clientInstructions: ${params.clientInstructionsPath}`,
     `- machineBundle: ${params.bundlePath}`,
     `- byaiChannelSessionId: ${params.fixedWorkSpecs.sessionFiles.byaiChannelSessionId}`,
     `- sessionFilesRoot: ${params.fixedWorkSpecs.sessionFiles.sessionRoot}`,
     "",
-    "执行顺序:",
-    "1. 先读取 query.md，确认用户原始请求。",
-    "2. 再读取 metadata.md，按其中 agent roster、linkedSkills、workflow/loop 和模型配置驱动主 agent。",
-    "3. 遵守 metadata.md 中的 responseLanguage；所有用户可见输出必须符合该语言策略。",
-    "4. 遵守 metadata.md 和 clientInstructions 中的 Fixed Work Specs，尤其是 Session Files 路径拼接规则。",
-    "5. 按 clientInstructions 中当前 client 类型的规则派生或调用子 agent。",
-    "6. 完成后输出 summary、proof/evidence、risks、verdict、next_action。",
+    "强制启动门禁（fail-closed）:",
+    "1. 在读取用户 query、规划、调用子 agent 或修改业务文件前，先读取 bootstrap-contract.json。",
+    "   READY 前禁止读取 query.md 和包含原始 input 的 plan-bundle.json。",
+    "2. 从字节 0 完整读取 metadata.md 直到 EOF，并校验 contract 中的字节数与 SHA-256。",
+    "3. 将整份 metadata.md 作为业务规则说明书；不得只识别或选择当前已知章节。",
+    "4. 按 metadata.md 自身要求加载本任务所需的所有引用资源，包括未来新增的资源类型。",
+    "5. 写入 bootstrap-receipt.json；任何强制规则或资源不可满足时写 BLOCKED，禁止读取 query。",
+    "6. 只有 receipt 状态为 READY 后，才允许读取并执行 query.md。",
+    `- READY 后的 query: ${params.queryPath}`,
+    "7. 执行期间持续遵守 metadata.md，并在结果中给出规则遵循与验证证据。",
   ].join("\n");
 }
 
@@ -823,18 +833,61 @@ function materializePlanBundle(params: {
     clientSharedDirName(params.clientType),
     sessionId,
   );
-  const bundlePath = path.join(sharedDir, PATHS.planBundleFileName);
-  const queryPath = path.join(sharedDir, BUNDLE.queryFileName);
-  const metadataPath = path.join(sharedDir, BUNDLE.metadataFileName);
+  const bootstrapId = safePathPart(generatedSessionId);
+  const runDir = path.join(sharedDir, BUNDLE.runsDirName, bootstrapId);
+  const bundlePath = path.join(runDir, PATHS.planBundleFileName);
+  const queryPath = path.join(runDir, BUNDLE.queryFileName);
+  const metadataPath = path.join(runDir, BUNDLE.metadataFileName);
   const clientInstructionsPath = path.join(
-    sharedDir,
+    runDir,
     BUNDLE.clientsDirName,
     clientInstructionFileName(params.clientType),
   );
+  const bootstrapContractPath = path.join(runDir, BUNDLE.bootstrapContractFileName);
+  const bootstrapReceiptPath = path.join(runDir, BUNDLE.bootstrapReceiptFileName);
   const linkedSkills = collectLinkedSkills(params.members, params.cwd);
   const fixedWorkSpecs = buildFixedWorkSpecs({
     byaiChannelSessionId,
     responseLanguage: params.responseLanguage,
+  });
+  const queryContent = renderQueryMarkdown({
+    kind: params.kind,
+    id: params.id,
+    name: params.name,
+    input: params.input,
+    responseLanguage: params.responseLanguage,
+  });
+  const metadataContent = renderMetadataMarkdown({
+    kind: params.kind,
+    id: params.id,
+    name: params.name,
+    model: params.model,
+    clientType: params.clientType,
+    cwd: params.cwd,
+    responseLanguage: params.responseLanguage,
+    fixedWorkSpecs,
+    agentModels: params.agentModels,
+    claudeTeam: params.claudeTeam,
+    members: params.members,
+    linkedSkills,
+    team: params.team,
+    workflow: params.workflow,
+    loop: params.loop,
+  });
+  const clientInstructionsContent = renderClientInstructions({
+    clientType: params.clientType,
+    responseLanguage: params.responseLanguage,
+    fixedWorkSpecs,
+  });
+  const metadataBootstrap = createMetadataBootstrapContract({
+    bootstrapId,
+    runDir,
+    metadataPath,
+    metadataContent,
+    clientInstructionsPath,
+    queryPath,
+    planBundlePath: bundlePath,
+    receiptPath: bootstrapReceiptPath,
   });
   const bundle = {
     version: BUNDLE.version,
@@ -855,13 +908,19 @@ function materializePlanBundle(params: {
     claudeTeam: compactClaudeTeam(params.claudeTeam),
     members: params.members.map((agent) => compactAgent(agent, params.cwd)),
     linkedSkills,
+    metadataBootstrap,
     sharedContext: {
       sharedDir,
+      runDir,
+      bootstrapId,
       sessionId,
       byaiChannelSessionId,
       queryPath,
       metadataPath,
       clientInstructionsPath,
+      bootstrapContractPath,
+      bootstrapReceiptPath,
+      metadataIntegrity: metadataBootstrap.metadata,
       bundlePath,
       sessionFilesRoot: fixedWorkSpecs.sessionFiles.sessionRoot,
     },
@@ -885,58 +944,43 @@ function materializePlanBundle(params: {
       visibleOutputPolicy: BUNDLE.visibleOutputPolicy,
     },
   };
-  atomicWriteText(
-    queryPath,
-    renderQueryMarkdown({
-      kind: params.kind,
-      id: params.id,
-      name: params.name,
-      input: params.input,
-      responseLanguage: params.responseLanguage,
-    }),
-  );
-  atomicWriteText(
-    metadataPath,
-    renderMetadataMarkdown({
-      kind: params.kind,
-      id: params.id,
-      name: params.name,
-      model: params.model,
-      clientType: params.clientType,
-      cwd: params.cwd,
-      responseLanguage: params.responseLanguage,
-      fixedWorkSpecs,
-      agentModels: params.agentModels,
-      claudeTeam: params.claudeTeam,
-      members: params.members,
-      linkedSkills,
-      team: params.team,
-      workflow: params.workflow,
-      loop: params.loop,
-    }),
-  );
-  atomicWriteText(
-    clientInstructionsPath,
-    renderClientInstructions({
+  try {
+    atomicWriteText(queryPath, queryContent);
+    atomicWriteText(metadataPath, metadataContent);
+    atomicWriteText(clientInstructionsPath, clientInstructionsContent);
+    atomicWriteJson(bootstrapContractPath, metadataBootstrap);
+    atomicWriteJson(bundlePath, bundle);
+    loadMetadataBootstrapContract(bootstrapContractPath, {
+      bootstrapId,
+      runDir,
+      planBundlePath: bundlePath,
+    });
+    return {
+      path: bundlePath,
+      sharedDir,
+      runDir,
+      bootstrapId,
+      sessionId,
+      queryPath,
+      metadataPath,
+      clientInstructionsPath,
+      bootstrapContractPath,
+      bootstrapReceiptPath,
+      metadataIntegrity: metadataBootstrap.metadata,
       clientType: params.clientType,
       responseLanguage: params.responseLanguage,
       fixedWorkSpecs,
-    }),
-  );
-  atomicWriteJson(bundlePath, bundle);
-  return {
-    path: bundlePath,
-    sharedDir,
-    sessionId,
-    queryPath,
-    metadataPath,
-    clientInstructionsPath,
-    clientType: params.clientType,
-    responseLanguage: params.responseLanguage,
-    fixedWorkSpecs,
-    bytes: Buffer.byteLength(JSON.stringify(bundle)),
-    sha256Hint: `${params.kind}:${params.id}`,
-  };
+      bytes: Buffer.byteLength(JSON.stringify(bundle)),
+      sha256Hint: `${params.kind}:${params.id}`,
+    };
+  } catch (error) {
+    if (error instanceof MetadataBootstrapError) {
+      throw error;
+    }
+    throw new MetadataBootstrapError(
+      `metadata bootstrap materialization failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 }
 
 function cleanAcpAgentId(value: string | undefined): string | undefined {
@@ -1015,13 +1059,27 @@ function buildPlan(params: {
 
 /**
  * Build the natural-language `content` handed to a remote ACP agent via
- * `executeViaCallAgent`. The plan's `task` already embeds the user query, the
- * on-disk shared-context file paths (query.md / metadata.md / plan-bundle.json)
- * and the read-then-execute ordering, so the remote agent reads the structured
- * bundle from the filesystem rather than receiving it inline in the prompt.
+ * `executeViaCallAgent`. The complete validated metadata business-rule manual
+ * is placed before query access so future metadata sections are automatically
+ * authoritative without adapter-specific parsing.
  */
 export function buildCallAgentContentFromPlan(plan: ByclawAcpPlan): string {
-  return plan.task;
+  const bundle = isRecord(plan.sessionsSpawn.bundle) ? plan.sessionsSpawn.bundle : {};
+  const contractPath = nonEmptyString(bundle.bootstrapContractPath);
+  const bootstrapId = nonEmptyString(bundle.bootstrapId);
+  const runDir = nonEmptyString(bundle.runDir);
+  const planBundlePath = nonEmptyString(bundle.path);
+  if (!contractPath || !bootstrapId || !runDir || !planBundlePath) {
+    throw new MetadataBootstrapError(
+      "plan bootstrap contract path, bootstrapId, runDir, and plan bundle path are required",
+    );
+  }
+  const { contract, metadataContent } = loadMetadataBootstrapContract(contractPath, {
+    bootstrapId,
+    runDir,
+    planBundlePath,
+  });
+  return renderMetadataFirstDelegationContent({ contract, metadataContent });
 }
 
 export function createByclawAcpPlan(params: {
@@ -1088,6 +1146,8 @@ export function createByclawAcpPlan(params: {
       queryPath: String(bundle.queryPath),
       metadataPath: String(bundle.metadataPath),
       clientInstructionsPath: String(bundle.clientInstructionsPath),
+      bootstrapContractPath: String(bundle.bootstrapContractPath),
+      bootstrapReceiptPath: String(bundle.bootstrapReceiptPath),
       members: [agent],
       claudeTeam,
     });
@@ -1161,6 +1221,8 @@ export function createByclawAcpPlan(params: {
       queryPath: String(bundle.queryPath),
       metadataPath: String(bundle.metadataPath),
       clientInstructionsPath: String(bundle.clientInstructionsPath),
+      bootstrapContractPath: String(bundle.bootstrapContractPath),
+      bootstrapReceiptPath: String(bundle.bootstrapReceiptPath),
       members,
       claudeTeam,
     });
@@ -1239,6 +1301,8 @@ export function createByclawAcpPlan(params: {
       queryPath: String(bundle.queryPath),
       metadataPath: String(bundle.metadataPath),
       clientInstructionsPath: String(bundle.clientInstructionsPath),
+      bootstrapContractPath: String(bundle.bootstrapContractPath),
+      bootstrapReceiptPath: String(bundle.bootstrapReceiptPath),
       members,
       claudeTeam,
       workflow,
@@ -1320,6 +1384,8 @@ export function createByclawAcpPlan(params: {
     queryPath: String(bundle.queryPath),
     metadataPath: String(bundle.metadataPath),
     clientInstructionsPath: String(bundle.clientInstructionsPath),
+    bootstrapContractPath: String(bundle.bootstrapContractPath),
+    bootstrapReceiptPath: String(bundle.bootstrapReceiptPath),
     members,
     claudeTeam,
     workflow,

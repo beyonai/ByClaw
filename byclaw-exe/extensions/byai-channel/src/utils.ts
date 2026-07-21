@@ -14,9 +14,54 @@ export function generateRandomId() {
   return crypto.randomUUID().replace(/-/g, '');
 }
 
-let prevEmitIncrementKey = '';
 // 用于累积流式内容的缓冲区
 const streamSnapshots: Record<string, string> = {};
+
+function normalizeIncrementalSnapshot(
+  rawText: string,
+  normalize?: (text: string) => string,
+) {
+  return normalize ? normalize(rawText) : rawText;
+}
+
+export function rememberIncrementalTextSnapshot(params: {
+  key: string;
+  rawText: string;
+  normalize?: (text: string) => string;
+}) {
+  if (!params.rawText) {
+    return;
+  }
+  const fullText = normalizeIncrementalSnapshot(params.rawText, params.normalize);
+  if (!fullText.trim()) {
+    return;
+  }
+  streamSnapshots[params.key] = fullText;
+}
+
+export function appendIncrementalTextSnapshot(params: {
+  key: string;
+  delta: string;
+  normalize?: (text: string) => string;
+}) {
+  if (!params.delta) {
+    return;
+  }
+  const delta = normalizeIncrementalSnapshot(params.delta, params.normalize);
+  if (!delta.trim()) {
+    return;
+  }
+  streamSnapshots[params.key] = `${streamSnapshots[params.key] ?? ""}${delta}`;
+}
+
+export function clearIncrementalTextSnapshot(keyOrPrefix: string) {
+  Object.keys(streamSnapshots).forEach((key) => {
+    if (key === keyOrPrefix || key.startsWith(keyOrPrefix)) {
+      delete streamSnapshots[key];
+    }
+  });
+}
+
 export async function emitIncrementalText(params: {
   key: string;
   rawText: string;
@@ -26,15 +71,7 @@ export async function emitIncrementalText(params: {
   if (!params.rawText) {
     return;
   }
-  if (params.key !== prevEmitIncrementKey) {
-    Object.keys(streamSnapshots).forEach((key) => {
-      if (key !== params.key) {
-        delete streamSnapshots[key];
-      }
-    });
-  }
-  prevEmitIncrementKey = params.key;
-  const fullText = params.normalize ? params.normalize(params.rawText) : params.rawText;
+  const fullText = normalizeIncrementalSnapshot(params.rawText, params.normalize);
   if (!fullText.trim()) {
     return;
   }

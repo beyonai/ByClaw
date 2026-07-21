@@ -32,7 +32,15 @@ import {
 import { AgentEvent } from "./types";
 import type { OpenClawPluginApi } from "@openclaw/plugin-sdk/core";
 import { isSubagentSessionKey } from "openclaw/plugin-sdk/routing";
-import { emitIncrementalText, generateRandomId, getAgentNameById, normalizeReasoningPreviewText } from "./utils";
+import {
+  appendIncrementalTextSnapshot,
+  clearIncrementalTextSnapshot,
+  emitIncrementalText,
+  generateRandomId,
+  getAgentNameById,
+  normalizeReasoningPreviewText,
+  rememberIncrementalTextSnapshot,
+} from "./utils";
 import {
   buildCompactionNoticeText,
   buildThinkingEndText,
@@ -270,21 +278,41 @@ async function handleAssistantEvent(
       ? previousEmit.messageId
       : generateRandomId(),
   };
+  const answerStreamKey = `${event.runId}:assistant:answer`;
+  const explicitDelta = stringValue(event.data?.delta);
+  const cumulativeText = stringValue(event.data?.text);
+  const isReplacement = event.data?.replace === true;
+  const emitAnswerDelta = async (answerDelta: string) => {
+    appendByclawAssistantContextDelta({
+      request,
+      id: request.laneMetadata?.answerMessageId ?? `${event.runId}:assistant`,
+      text: answerDelta,
+      agentId: request.laneMetadata?.agentId ?? event.agentId,
+      agentName: request.laneMetadata?.agentName,
+    });
+    await emitSdkChunk(request, answerDelta, answerOptions);
+  };
+  if (explicitDelta && !isReplacement) {
+    if (cumulativeText) {
+      rememberIncrementalTextSnapshot({
+        key: answerStreamKey,
+        rawText: cumulativeText,
+      });
+    } else {
+      appendIncrementalTextSnapshot({
+        key: answerStreamKey,
+        delta: explicitDelta,
+      });
+    }
+    await emitAnswerDelta(explicitDelta);
+    return;
+  }
   // assistant 流是权威可见源，按 runId 做简单前缀增量即可（sendText 的去重改由
   // message tool 事件驱动，不再和 assistant 流抢同一缓冲）。
   await emitIncrementalText({
-    key: `${event.runId}:assistant:answer`,
-    rawText: stringValue(event.data?.text) || text,
-    emit: async (answerDelta) => {
-      appendByclawAssistantContextDelta({
-        request,
-        id: request.laneMetadata?.answerMessageId ?? `${event.runId}:assistant`,
-        text: answerDelta,
-        agentId: request.laneMetadata?.agentId ?? event.agentId,
-        agentName: request.laneMetadata?.agentName,
-      });
-      await emitSdkChunk(request, answerDelta, answerOptions);
-    },
+    key: answerStreamKey,
+    rawText: text,
+    emit: async (answerDelta) => emitAnswerDelta(answerDelta),
   });
 }
 
@@ -370,6 +398,7 @@ async function handleLifecycleEvent(
       eventType: EventType.ANSWER_DELTA,
     });
   }
+  clearIncrementalTextSnapshot(`${event.runId}:`);
   const completionReason =
     phase === "error" && isOpenClawContextOverflowDispatchError(data?.error)
       ? "root_lifecycle_context_overflow_error"
