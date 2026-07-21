@@ -3,6 +3,7 @@ package com.iwhalecloud.byai.manager.application.service.devloop;
 import com.alibaba.fastjson.JSON;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.iwhalecloud.byai.common.constants.Constants;
 import com.iwhalecloud.byai.common.constants.files.FileStatus;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
@@ -30,6 +31,9 @@ import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileQueryDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileSaveDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareTargetDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ScanSourceDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskListQueryDto;
+import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskStateDto;
+import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskViewDto;
 import com.iwhalecloud.byai.manager.dto.session.ByaiSessionDto;
 import com.iwhalecloud.byai.manager.entity.devloop.*;
 import com.iwhalecloud.byai.manager.entity.file.Files;
@@ -88,21 +92,13 @@ public class DevloopApplicationService {
 
     private static final String PROJECT_TYPE_DEFAULT = "default";
 
-    /** 任务状态存于 byai_session_ext 纵表的键；创建任务默认「进行中」 */
-    private static final String TASK_STATUS_EXT_CODE = "task_status";
-
-    private static final String TASK_STATUS_DEFAULT = "进行中";
-
-    /** 任务终态：环节进度不再变化，可直接用缓存，无需每次重算 */
-    private static final String TASK_STATUS_DONE = "完成";
+    /** v2 状态投影终态；只有明确完成的任务才释放 agent 并发额度。 */
+    private static final String TASK_STATUS_COMPLETED = "completed";
 
     /** 单个数字员工并发运行任务上限的全局配置键；缺省 1，超过则该 agent 本轮不再接新任务，避免 codeagent OOM。 */
     private static final String AGENT_MAX_CONCURRENT_CODE = "DEVLOOP_AGENT_MAX_CONCURRENT";
 
     private static final int AGENT_MAX_CONCURRENT_DEFAULT = 1;
-
-    /** 环节进度快照缓存于 byai_session_ext 纵表的键；避免每次开详情都跑解析/LLM */
-    private static final String TASK_PHASE_EXT_CODE = "task_phase";
 
     /**
      * 研发任务 LLM 对话异步执行线程池。 TtlExecutors 包装以透传 CurrentUserHolder 的 LoginInfo；任务创建接口据此立即返回， chat 在后台执行，避免前端等待数分钟。
@@ -167,7 +163,7 @@ public class DevloopApplicationService {
     private DevloopScoringService scoringService;
 
     @Autowired
-    private DevloopPhaseService phaseService;
+    private DevloopTaskStateReader taskStateReader;
 
     @Autowired
     private GitHubCompareService gitHubCompareService;
@@ -1003,15 +999,6 @@ public class DevloopApplicationService {
         assistantChatService.createGroupChatSession(chatDto);
         Long sessionId = chatDto.getSessionId();
 
-        // 任务状态存入 session_ext 纵表(参考 feishuChatId 等扩展)，默认「进行中」，供任务看板分列
-        ByaiSessionExt statusExt = new ByaiSessionExt();
-        statusExt.setExtId(sequenceService.nextVal());
-        statusExt.setSessionId(sessionId);
-        statusExt.setExtParamName("任务状态");
-        statusExt.setExtParamCode(TASK_STATUS_EXT_CODE);
-        statusExt.setExtParamValue(TASK_STATUS_DEFAULT);
-        byaiSessionExtMapper.insert(statusExt);
-
         String branchName = buildBranchName(taskType, sessionId);
         Project project = projectMapper.selectById(projectId);
         String projectName = project != null ? project.getProjectName() : "";
@@ -1203,21 +1190,17 @@ public class DevloopApplicationService {
         return best;
     }
 
-    /** 某 agent 在指定项目下「进行中」任务数：会话(objectId=agent) 关联 session_ext(task_status)。 */
+    /** 某 agent 在指定项目下未完成任务数：状态来自 v2 会话投影，状态不可用时按占用额度处理。 */
     private int countRunningTasksByAgent(Long projectId, Long agentId) {
         List<ByaiSession> sessions = byaiSessionMapper.selectList(new LambdaQueryWrapper<ByaiSession>()
             .eq(ByaiSession::getProjectId, projectId).eq(ByaiSession::getObjectId, agentId));
         if (sessions.isEmpty()) {
             return 0;
         }
-        List<Long> ids = sessions.stream().map(ByaiSession::getSessionId)
-            .collect(java.util.stream.Collectors.toList());
-        Map<Long, String> statusMap = loadTaskStatusMap(ids);
         int running = 0;
-        for (Long id : ids) {
-            // 缺省视为「进行中」：新建任务即写该状态；只有显式「完成」才释放并发额度
-            String st = statusMap.getOrDefault(id, TASK_STATUS_DEFAULT);
-            if (TASK_STATUS_DEFAULT.equals(st)) {
+        for (ByaiSession session : sessions) {
+            DevloopTaskStateDto state = tryReadTaskState(session);
+            if (state == null || !TASK_STATUS_COMPLETED.equals(state.getStatus())) {
                 running++;
             }
         }
@@ -1326,63 +1309,72 @@ public class DevloopApplicationService {
         + "- 若提示仓库或分支不存在，通常是私有仓库权限问题，请确认已使用环境变量 GH_TOKEN 中的令牌，不要据此判定仓库不存在、也不要改为在本地新建独立项目。\n\n" + "## 工作要求\n"
         + "1. 克隆仓库 ${repoFullName}，拉取默认分支最新代码；目标分支 ${branchName} 尚不存在，用 git checkout -b ${branchName} 从默认分支新建并切换。\n"
         + "2. 仔细理解上述需求详情，定位需要修改的代码。\n" + "3. 完成开发后自测，确保编译通过、相关测试通过。\n" + "4. 提交改动到分支 ${branchName} 并推送，提交信息清晰说明本次改动。\n"
-        + "5. 如需求描述不清或存在阻塞，明确说明遇到的问题。\n\n" + "## 环节汇报规范（重要，供系统追踪任务进度）\n"
-        + "在推进以下研发环节时，每进入/完成/打回一个环节，都要单独输出一行机器可读标记，格式严格如下（方括号与关键字不可省略）：\n" + "- 进入某环节：[PHASE] <环节> START\n"
-        + "- 完成某环节：[PHASE] <环节> DONE\n" + "- 打回上一步：[PHASE] <环节> REJECT-><目标环节> 原因:<简述>\n"
-        + "环节取值固定为：issue（需求来源）、req（需求分析）、design（方案设计）、coder（编码）、reviewer（代码审查）、tester（测试）、pr（提交PR）。\n"
-        + "示例：[PHASE] coder START ；[PHASE] tester REJECT->coder 原因:单测未覆盖审计日志。\n" + "标记须独占一行、按真实进展实时输出，正常叙述照常进行。\n\n"
+        + "5. 如需求描述不清或存在阻塞，明确说明遇到的问题。\n"
+        + "6. 使用 self-developed-rules skill 持续维护任务状态、阶段、证据与交付物。\n\n"
         + "请开始处理。";
 
-    /** 查询项目任务列表：会话即任务，状态取自 session_ext(task_status)，环节取自缓存(task_phase)，供看板按状态分列。 */
-    public ResponseUtil<List<Map<String, Object>>> listTasks(Long projectId) {
-        List<ByaiSession> sessions = byaiSessionMapper.selectList(new LambdaQueryWrapper<ByaiSession>()
-            .eq(ByaiSession::getProjectId, projectId).orderByDesc(ByaiSession::getCreateTime));
-        List<Long> sessionIds = sessions.stream().map(ByaiSession::getSessionId)
-            .collect(java.util.stream.Collectors.toList());
-        // 批量取状态与环节快照，避免逐会话查 session_ext 造成 N+1；上下文按会话实时关联解析。
-        Map<Long, String> statusMap = loadTaskStatusMap(sessionIds);
-        Map<Long, DevloopPhaseService.PhaseSnapshot> phaseMap = loadTaskPhaseMap(sessionIds);
-        List<Map<String, Object>> list = new ArrayList<>();
-        for (ByaiSession s : sessions) {
-            list.add(sessionAsTask(s, statusMap.get(s.getSessionId()), phaseMap.get(s.getSessionId()),
-                resolveTaskContext(s)));
+    /** 数据库先分页，再读取当前页会话状态投影；单页最多触发 100 次 UserFS 定点读取。 */
+    public ResponseUtil<PageInfo<DevloopTaskViewDto>> listTasks(DevloopTaskListQueryDto query) {
+        if (query == null || query.getProjectId() == null) {
+            return ResponseUtil.failRes("projectId 不能为空");
         }
-        return ResponseUtil.successResponse(list);
+        try {
+            query.normalizeAndValidate();
+        }
+        catch (IllegalArgumentException e) {
+            return ResponseUtil.failRes(e.getMessage());
+        }
+
+        LambdaQueryWrapper<ByaiSession> wrapper = new LambdaQueryWrapper<ByaiSession>()
+            .eq(ByaiSession::getProjectId, query.getProjectId())
+            .ge(query.getCreateTimeStart() != null, ByaiSession::getCreateTime, query.getCreateTimeStart())
+            .le(query.getCreateTimeEnd() != null, ByaiSession::getCreateTime, query.getCreateTimeEnd())
+            .orderByDesc(ByaiSession::getCreateTime)
+            .orderByDesc(ByaiSession::getSessionId);
+        Page<ByaiSession> sessionPage = byaiSessionMapper
+            .selectPage(new Page<>(query.getPageNum(), query.getPageSize()), wrapper);
+
+        List<DevloopTaskViewDto> tasks = new ArrayList<>();
+        for (ByaiSession session : sessionPage.getRecords()) {
+            DevloopTaskStateDto state = tryReadTaskState(session);
+            tasks.add(sessionAsTask(session, state, resolveTaskContext(session)));
+        }
+
+        PageInfo<DevloopTaskViewDto> result = new PageInfo<>();
+        result.setPageNum((int) sessionPage.getCurrent());
+        result.setPageSize((int) sessionPage.getSize());
+        result.setTotal(sessionPage.getTotal());
+        result.setTotalPages((int) sessionPage.getPages());
+        result.setList(tasks);
+        return ResponseUtil.successResponse(result);
     }
 
-    /** 查询单个任务详情：按 sessionId 取会话 */
-    public ResponseUtil<Map<String, Object>> getTaskDetail(Long sessionId) {
-        ByaiSession s = byaiSessionMapper.selectById(sessionId);
-        if (s == null)
+    /** 查询单个任务详情：会话元数据来自数据库，状态来自 v2 会话投影。 */
+    public ResponseUtil<DevloopTaskViewDto> getTaskDetail(Long sessionId) {
+        ByaiSession session = byaiSessionMapper.selectById(sessionId);
+        if (session == null) {
             return ResponseUtil.failRes("会话不存在");
-        List<Long> ids = java.util.Collections.singletonList(sessionId);
-        Map<Long, String> statusMap = loadTaskStatusMap(ids);
-        Map<Long, DevloopPhaseService.PhaseSnapshot> phaseMap = loadTaskPhaseMap(ids);
+        }
         return ResponseUtil.successResponse(
-            sessionAsTask(s, statusMap.get(sessionId), phaseMap.get(sessionId), resolveTaskContext(s)));
+            sessionAsTask(session, tryReadTaskState(session), resolveTaskContext(session)));
     }
 
-    /**
-     * 查询任务环节进度：
-     * 长程任务里同一条消息会被 websocket 持续追加(消息条数不变但内容在变，一条消息可能包含多次环节变动)，
-     * 故不再按消息条数判失效。只有任务已「完成」才用缓存(进度已定格)；未完成一律实时重算并落库。
-     * 返回完整快照(7 环节 + 状态 + 打回记录)，供详情抽屉逐环节渲染。
-     */
-    public ResponseUtil<DevloopPhaseService.PhaseSnapshot> getTaskPhases(Long sessionId) {
+    /** 直接按 sessionId 读取 v2 会话状态投影，不再解析消息或访问 session_ext。 */
+    public ResponseUtil<DevloopTaskStateDto> getTaskPhases(Long sessionId) {
         if (sessionId == null) {
             return ResponseUtil.failRes("sessionId 不能为空");
         }
-        List<Long> ids = java.util.Collections.singletonList(sessionId);
-        String status = loadTaskStatusMap(ids).get(sessionId);
-        if (TASK_STATUS_DONE.equals(status)) {
-            DevloopPhaseService.PhaseSnapshot cached = loadTaskPhaseMap(ids).get(sessionId);
-            if (cached != null) {
-                return ResponseUtil.successResponse(cached);
-            }
+        ByaiSession session = byaiSessionMapper.selectById(sessionId);
+        if (session == null) {
+            return ResponseUtil.failRes("会话不存在");
         }
-        DevloopPhaseService.PhaseSnapshot fresh = phaseService.buildSnapshot(sessionId);
-        persistPhaseSnapshot(sessionId, fresh);
-        return ResponseUtil.successResponse(fresh);
+        try {
+            return ResponseUtil.successResponse(readTaskState(session));
+        }
+        catch (Exception e) {
+            log.warn("[Devloop] 读取任务状态失败, sessionId={}", sessionId, e);
+            return ResponseUtil.failRes("任务状态尚不可用");
+        }
     }
 
     /**
@@ -1440,58 +1432,25 @@ public class DevloopApplicationService {
         return map;
     }
 
-    /** 批量读取会话的任务状态(session_ext.task_status)，返回 sessionId -> status。 */
-    private Map<Long, String> loadTaskStatusMap(List<Long> sessionIds) {
-        Map<Long, String> statusMap = new HashMap<>();
-        if (sessionIds == null || sessionIds.isEmpty()) {
-            return statusMap;
+    private DevloopTaskStateDto tryReadTaskState(ByaiSession session) {
+        try {
+            return readTaskState(session);
         }
-        List<ByaiSessionExt> exts = byaiSessionExtMapper.selectList(new LambdaQueryWrapper<ByaiSessionExt>()
-            .eq(ByaiSessionExt::getExtParamCode, TASK_STATUS_EXT_CODE).in(ByaiSessionExt::getSessionId, sessionIds));
-        for (ByaiSessionExt ext : exts) {
-            statusMap.put(ext.getSessionId(), ext.getExtParamValue());
+        catch (Exception e) {
+            log.warn("[Devloop] 读取任务状态失败, sessionId={}", session.getSessionId(), e);
+            return null;
         }
-        return statusMap;
     }
 
-    /** 批量读取会话的环节快照缓存(session_ext.task_phase)，返回 sessionId -> PhaseSnapshot(可空)。 */
-    private Map<Long, DevloopPhaseService.PhaseSnapshot> loadTaskPhaseMap(List<Long> sessionIds) {
-        Map<Long, DevloopPhaseService.PhaseSnapshot> phaseMap = new HashMap<>();
-        if (sessionIds == null || sessionIds.isEmpty()) {
-            return phaseMap;
+    private DevloopTaskStateDto readTaskState(ByaiSession session) {
+        if (session.getCreatorId() == null) {
+            throw new IllegalStateException("会话缺少创建者");
         }
-        List<ByaiSessionExt> exts = byaiSessionExtMapper.selectList(new LambdaQueryWrapper<ByaiSessionExt>()
-            .eq(ByaiSessionExt::getExtParamCode, TASK_PHASE_EXT_CODE).in(ByaiSessionExt::getSessionId, sessionIds));
-        for (ByaiSessionExt ext : exts) {
-            DevloopPhaseService.PhaseSnapshot snap = phaseService.fromJson(ext.getExtParamValue());
-            if (snap != null) {
-                phaseMap.put(ext.getSessionId(), snap);
-            }
+        LoginInfo owner = loginApplicationService.getLoginInfo(session.getCreatorId());
+        if (owner == null || StringUtils.isBlank(owner.getUserCode())) {
+            throw new IllegalStateException("无法解析会话创建者");
         }
-        return phaseMap;
-    }
-
-    /** 环节快照 upsert 到 session_ext(task_phase)：存在则更新，不存在则插入。 */
-    private void persistPhaseSnapshot(Long sessionId, DevloopPhaseService.PhaseSnapshot snapshot) {
-        String json = phaseService.toJson(snapshot);
-        if (json == null) {
-            return;
-        }
-        ByaiSessionExt existing = byaiSessionExtMapper
-            .selectOne(new LambdaQueryWrapper<ByaiSessionExt>().eq(ByaiSessionExt::getExtParamCode, TASK_PHASE_EXT_CODE)
-                .eq(ByaiSessionExt::getSessionId, sessionId).last("limit 1"));
-        if (existing != null) {
-            existing.setExtParamValue(json);
-            byaiSessionExtMapper.updateById(existing);
-            return;
-        }
-        ByaiSessionExt ext = new ByaiSessionExt();
-        ext.setExtId(sequenceService.nextVal());
-        ext.setSessionId(sessionId);
-        ext.setExtParamName("任务环节");
-        ext.setExtParamCode(TASK_PHASE_EXT_CODE);
-        ext.setExtParamValue(json);
-        byaiSessionExtMapper.insert(ext);
+        return taskStateReader.read(owner.getUserCode(), session.getSessionId());
     }
 
     /**
@@ -1546,37 +1505,40 @@ public class DevloopApplicationService {
         }
     }
 
-    /**
-     * 会话映射为前端任务形状：taskId 复用 sessionId 保证前端按 taskId 取值与跳转不变； status 取自 session_ext(task_status)；phase/currentRound
-     * 取自环节快照缓存； agent/仓库/分支/需求/负责人取自 task_context 上下文；无上下文时相关字段为空。
-     */
-    private Map<String, Object> sessionAsTask(ByaiSession s, String status, DevloopPhaseService.PhaseSnapshot phase,
-        Map<String, Object> ctx) {
-        Map<String, Object> map = new HashMap<>();
-        map.put("taskId", s.getSessionId());
-        map.put("sessionId", s.getSessionId());
-        map.put("projectId", s.getProjectId());
-        map.put("title", s.getSessionName());
-        map.put("sessionContent", s.getSessionContent());
-        map.put("createBy", s.getCreatorId());
-        map.put("createTime", s.getCreateTime());
-        map.put("updateTime", s.getUpdateTime());
-        map.put("status", status);
-        map.put("phase", phase != null ? phase.getCurrentPhase() : null);
-        map.put("currentRound", phase != null ? phase.getRound() : null);
-        map.put("totalRounds", null);
-        // 进度按环节派生，列表与详情共用 DevloopPhaseService 口径，避免两处算法漂移。
-        map.put("progress", phase != null ? phaseService.progressPercent(phase) : 0);
-        map.put("score", null);
-        map.put("assignee", ctx != null ? ctx.get("assignee") : null);
-        map.put("agentName", ctx != null ? ctx.get("agentName") : null);
-        map.put("branchName", ctx != null ? ctx.get("branchName") : null);
-        map.put("repoFullName", ctx != null ? ctx.get("repoFullName") : null);
-        map.put("requirementTitle", ctx != null ? ctx.get("requirementTitle") : null);
-        map.put("requirementOriginId", ctx != null ? ctx.get("requirementOriginId") : null);
-        map.put("warningTag", null);
-        map.put("sourceItemId", ctx != null ? ctx.get("sourceItemId") : null);
-        return map;
+    /** 会话元数据与 v2 状态投影合并为任务视图；状态文件不存在时保留元数据并标记不可用。 */
+    private DevloopTaskViewDto sessionAsTask(ByaiSession session, DevloopTaskStateDto state,
+        Map<String, Object> context) {
+        DevloopTaskViewDto task = new DevloopTaskViewDto();
+        task.setTaskId(session.getSessionId());
+        task.setSessionId(session.getSessionId());
+        task.setProjectId(session.getProjectId());
+        task.setTitle(session.getSessionName());
+        task.setSessionContent(session.getSessionContent());
+        task.setCreateBy(session.getCreatorId());
+        task.setCreateTime(session.getCreateTime());
+        task.setUpdateTime(session.getUpdateTime());
+        task.setStateAvailable(state != null);
+        if (state != null) {
+            task.setTraceId(state.getTraceId());
+            task.setRevision(state.getRevision());
+            task.setStatus(state.getStatus());
+            task.setStatusLabel(state.getStatusLabel());
+            task.setCurrentStage(state.getCurrentStage());
+            task.setProgress(state.getProgress() != null ? state.getProgress().getPercent() : 0);
+            task.setLoopCount(state.getLoopCount());
+            task.setStageLoopCount(state.getStageLoopCount());
+        }
+        else {
+            task.setProgress(0);
+        }
+        task.setAssignee(context != null ? (String) context.get("assignee") : null);
+        task.setAgentName(context != null ? (String) context.get("agentName") : null);
+        task.setBranchName(context != null ? (String) context.get("branchName") : null);
+        task.setRepoFullName(context != null ? (String) context.get("repoFullName") : null);
+        task.setRequirementTitle(context != null ? (String) context.get("requirementTitle") : null);
+        task.setRequirementOriginId(context != null ? (String) context.get("requirementOriginId") : null);
+        task.setSourceItemId(context != null ? (Long) context.get("sourceItemId") : null);
+        return task;
     }
 
     // ========== 项目成员 ==========

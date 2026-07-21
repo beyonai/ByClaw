@@ -1533,6 +1533,26 @@
   font-weight: 400;
 }
 
+.detailTaskHeaderActions {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+
+  :global {
+    .@{antPrefix}-picker {
+      width: 240px;
+    }
+  }
+}
+
+.detailTaskPagination {
+  margin-top: 16px;
+  display: flex;
+  justify-content: flex-end;
+}
+
 .detailTaskList {
   display: flex;
   flex-direction: column;
@@ -2300,6 +2320,26 @@
 }
 
 /* 整体任务视图看板样式（只读） */
+.kanbanToolbar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 16px;
+  min-height: 56px;
+  padding: 10px 20px;
+  background: #fff;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.kanbanToolbarSummary {
+  margin-right: auto;
+  color: #595959;
+  font-size: 14px;
+}
+
 .kanbanBoard {
   display: flex;
   gap: 16px;
