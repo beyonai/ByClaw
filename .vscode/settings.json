@@ -15,5 +15,6 @@
   "java.project.referencedLibraries": [
     "byclaw-be/target/lib/**/*.jar"
   ],
-  "java.configuration.updateBuildConfiguration": "automatic"
+  "java.configuration.updateBuildConfiguration": "automatic",
+  "java.compile.nullAnalysis.mode": "automatic"
 }

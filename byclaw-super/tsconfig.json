@@ -1,0 +1,7 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/by-conductor" },
+    { "path": "apps/byclaw-super" }
+  ]
+}

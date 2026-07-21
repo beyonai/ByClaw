@@ -1,0 +1,21 @@
+{
+  "name": "byclaw-super-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "ByClaw conductor engine and multi-tenant super assistant service",
+  "scripts": {
+    "build": "pnpm -r --if-present run build",
+    "typecheck": "pnpm -r --if-present run typecheck",
+    "test": "pnpm -r --if-present run test"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "@types/node": "26.1.1",
+    "typescript": "7.0.2",
+    "vitest": "4.1.10"
+  },
+  "packageManager": "pnpm@11.3.0"
+}

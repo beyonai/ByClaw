@@ -1,0 +1,29 @@
+{
+  "name": "fastify-pi-sdk-starter-legacy",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Archived Fastify and Pi SDK starter retained during the monorepo migration",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/main.js",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "0.80.10",
+    "@fastify/cors": "11.3.0",
+    "dotenv": "17.4.2",
+    "fastify": "5.10.0"
+  },
+  "devDependencies": {
+    "@types/node": "26.1.1",
+    "tsx": "4.23.1",
+    "typescript": "7.0.2",
+    "vitest": "4.1.10"
+  }
+}

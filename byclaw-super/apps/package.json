@@ -1,0 +1,21 @@
+{
+  "name": "@byclaw/byclaw-super",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Multi-tenant super assistant service built on by-conductor",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@byclaw/by-conductor": "workspace:*",
+    "@byclaw/by-framework": "1.5.1",
+    "@fastify/cors": "11.3.0",
+    "dotenv": "17.4.2",
+    "fastify": "5.10.0"
+  }
+}
