@@ -54,7 +54,7 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 - 写 adapter 后必须 `bycli browser verify` 通过 + 字段值与网页肉眼比对
 - **采集任务成功后必须按「Browser 驱动成功后 — 收尾两问」处理；问②的落盘、话术、二选一与执行规则以「采集后处理衔接」为唯一权威定义**
 - 钉钉相关采集任务必须读取 [dingtalk-dws-bridge.md](./references/dingtalk-dws-bridge.md)，并通过 dws skill 获取数据；仍按 bycli 的落盘与采集后处理收尾规则处理
-- 微信公众平台 `weixin accounts/articles/save-articles`、`--auth-source`、`WECHAT_TOKEN` / `WECHAT_COOKIE` / `WECHAT_FINGERPRINT` 或 `mp.weixin.qq.com` 认证失败任务，必须读取 [references/weixin/SKILL.md](./references/weixin/SKILL.md)
+- 微信公众平台 `weixin accounts/articles/save-articles/download`、`--auth-source`、`WECHAT_TOKEN` / `WECHAT_COOKIE` / `WECHAT_FINGERPRINT` 或 `mp.weixin.qq.com` 登录、认证或环境验证任务，必须读取 [references/weixin/SKILL.md](./references/weixin/SKILL.md)；其微信登录/验证规则优先于本文件的通用错误处理、AutoFix 和 cleanup 规则
 - 浏览器 session 结束后执行 cleanup（close tab → stop daemon → stop browser）
 - Login/Auth/人工验证页面例外：不关闭 session、TAB、daemon 或浏览器，报告 session name + URL 给用户并等待用户完成验证
 
@@ -186,17 +186,18 @@ bycli gh pr list --limit 5         # 透传调用
 
 ### 自修复入口
 
-命令失败时加 `--trace retain-on-failure` 重跑，读取 trace `summary.md`，进入 AutoFix 流程。
+命令失败时加 `--trace retain-on-failure` 重跑，读取 trace `summary.md`，进入 AutoFix 流程。微信登录/验证的 `TIMEOUT`、`AUTH_REQUIRED`、CAPTCHA 或环境验证除外，按 `references/weixin/SKILL.md` 停止并等待用户。
 
 ## 错误处理
 
 | 错误类型 | Agent 行为 |
 |---------|-----------|
-| AUTH_REQUIRED (exit 77) | STOP，提示用户登录 |
+| Weixin 登录/验证：`AUTH_REQUIRED` (77)、登录 `TIMEOUT` (75)、CAPTCHA 或环境验证 | 加载 `references/weixin/SKILL.md`；保留当前 TAB、daemon 和浏览器，提示用户操作并停止。不得 AutoFix、trace 重跑、改超时或重复执行命令 |
+| AUTH_REQUIRED (exit 77，非 Weixin) | STOP，提示用户登录 |
 | BROWSER_CONNECT (exit 69) | STOP，运行 `bycli doctor` + `bycli daemon status` 诊断；`bycli daemon restart` 后仍连不上则停止一切动作，提示用户检查 Chrome 与 byCLI 扩展插件是否正常启动 |
-| CAPTCHA / 限流 / 环境验证 | STOP，不是 adapter 问题；保持当前 TAB、daemon 和浏览器，等待用户完成验证 |
+| CAPTCHA / 限流 / 环境验证（非 Weixin） | STOP，不是 adapter 问题；保持当前 TAB、daemon 和浏览器，等待用户完成验证 |
 | SELECTOR / EMPTY_RESULT / API_ERROR | 进入 AutoFix 流程 |
-| TIMEOUT / PAGE_CHANGED | 进入 AutoFix 流程 |
+| TIMEOUT / PAGE_CHANGED | 进入 AutoFix 流程（Weixin 登录 `TIMEOUT` / exit 75 除外） |
 | 3 轮修复仍失败 | 报告尝试过的方法，停止 |
 | 站点大改需要重写 | 转 Adapter 编写流程 |
 
@@ -223,17 +224,17 @@ bycli browser <session> state
 
 注意：`bycli browser <sess> open` 是 CDP 客户端，不能冷启动 Chromium。未运行时报 `Browser profile "<id>" is not connected`，必须先 `openclaw browser start`。
 
-### 关闭流程（非登录页）
+### 关闭流程（非登录或验证页）
 
 何时执行三层关闭（以下条件**同时满足**）：
 
 1. 当前浏览器任务链已完成（数据已获取 / 操作已完成）
-2. 当前页面**不是** login/SSO/MFA 页面
+2. 当前页面**不是** login/SSO/MFA、CAPTCHA、反爬或环境验证页面
 3. 没有后续操作需要复用同一 session
 
 何时不关闭：
 
-- 页面仍在 login/SSO/MFA → 保持 session，报告 session name + URL
+- 页面仍在 login/SSO/MFA、CAPTCHA、反爬或环境验证 → 保持 session，报告 session name + URL
 - 用户后续任务明确需要继续使用同一浏览器上下文
 - 多步操作未完成（如「采集多页 → 入库」是连续动作，中间不关）
 

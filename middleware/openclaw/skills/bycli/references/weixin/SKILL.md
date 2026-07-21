@@ -2,11 +2,11 @@
 
 Load this reference for `bycli weixin accounts`, `articles`, `save-articles`, or `download`; `--auth-source`; `WECHAT_TOKEN`, `WECHAT_COOKIE`, or `WECHAT_FINGERPRINT`; and authentication failures from `mp.weixin.qq.com`.
 
-## 1. Browser authentication and session
+## 1. Browser session
 
 - Use browser authentication by default. Every browser-authenticated Weixin command must include `--site-session persistent --keep-tab true`.
 - Before browser commands, complete the main skill's `doctor` and `daemon status` checks. Reuse the Chrome session for `mp.weixin.qq.com`.
-- Treat the 180-second QR-code wait as internal behavior. `weixin accounts` does not support `--timeout`; never pass `--timeout 180`.
+- `weixin accounts` does not support `--timeout`; never pass `--timeout 180`.
 - Do not ask the user to extract credentials when browser authentication can satisfy the request. Do not silently switch to environment authentication after a browser, login, or verification failure.
 - Never expose, mix, or retain authentication credentials.
 
@@ -17,16 +17,18 @@ bycli weixin save-articles '<fakeid>' --limit 10 --auth-source browser --site-se
 bycli weixin download --url '<article-url>' --site-session persistent --keep-tab true -f json
 ```
 
-## 2. Human-verification gate
+## 2. Login and verification gate
 
-Treat login `TIMEOUT` / exit code 75, `AUTH_REQUIRED` / exit code 77, anti-bot prompts, CAPTCHAs, sliders, SMS/security checks, and WeChat environment-verification pages or buttons as a required human-verification gate. This includes the page saying “环境异常，完成验证后即可继续访问” with a “去验证” button. These are not adapter defects; do not enter AutoFix or modify adapter code.
+Treat login `AUTH_REQUIRED` / exit code 77, legacy/outer login `TIMEOUT` / exit code 75, anti-bot prompts, CAPTCHAs, sliders, SMS/security checks, and WeChat environment-verification pages or buttons as a required human-verification gate. This includes the page saying “环境异常，完成验证后即可继续访问” with a “去验证” button. These are not adapter defects; do not enter AutoFix or modify adapter code.
+
+The adapter returns this gate immediately: for QR-code login, it opens and focuses the login tab, then returns `AUTH_REQUIRED`; for an article environment-verification page, `download` and `save-articles` return `AUTH_REQUIRED` without continuing to another article.
 
 1. Stop all tool execution immediately. Do not click the verification button, solve or bypass the challenge, refresh/retry, navigate, focus another page, switch to `web read`, change authentication source, or fall back to another acquisition method.
 2. Freeze the current browser context. Do not invoke any further `bycli weixin`, `bycli browser`, `bycli doctor`, daemon, or browser-lifecycle command; do not close the tab, clean up the session, or stop/restart the daemon or browser.
 3. Ask the user to complete the verification in the already open tab and explicitly confirm completion. For the “环境异常” page, the user—not the agent—clicks “去验证”.
 4. Only after that confirmation, rerun the interrupted command with `--site-session persistent --keep-tab true`.
 
-For QR-code login, let byCLI open and focus the Official Accounts login page and wait internally for up to 180 seconds. After successful login, byCLI reads the `token` from the authenticated backend URL and obtains domain cookies, including HttpOnly cookies, through Browser Bridge.
+On the first Weixin login `TIMEOUT` / exit 75, follow this gate immediately. Do not set `BYCLI_BROWSER_COMMAND_TIMEOUT`, manually open a second WeChat login page, inspect or diagnose a retained `about:blank` tab, or attempt another `accounts` command before the user confirms login succeeded. After confirmation, the rerun reads the `token` from the authenticated backend URL and obtains domain cookies, including HttpOnly cookies, through Browser Bridge.
 
 ## 3. Collection workflow
 
