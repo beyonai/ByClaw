@@ -90,6 +90,11 @@ public class DevloopApplicationService {
     /** 任务终态：环节进度不再变化，可直接用缓存，无需每次重算 */
     private static final String TASK_STATUS_DONE = "完成";
 
+    /** 单个数字员工并发运行任务上限的全局配置键；缺省 1，超过则该 agent 本轮不再接新任务，避免 codeagent OOM。 */
+    private static final String AGENT_MAX_CONCURRENT_CODE = "DEVLOOP_AGENT_MAX_CONCURRENT";
+
+    private static final int AGENT_MAX_CONCURRENT_DEFAULT = 1;
+
     /** 环节进度快照缓存于 byai_session_ext 纵表的键；避免每次开详情都跑解析/LLM */
     private static final String TASK_PHASE_EXT_CODE = "task_phase";
 
@@ -650,23 +655,25 @@ public class DevloopApplicationService {
 
     /** 查询项目下的扫描源列表 */
     public ResponseUtil<List<Map<String, Object>>> listScanSources(Long projectId) {
-        List<ScanSource> sources = scanSourceService.listByProjectId(projectId);
-        List<Map<String, Object>> list = new ArrayList<>();
-        for (ScanSource s : sources) {
-            Map<String, Object> map = new HashMap<>();
-            map.put("sourceId", s.getSourceId());
-            map.put("sourceName", s.getSourceName());
-            map.put("sourceType", s.getSourceType());
-            map.put("config", s.getConfig());
-            map.put("cronExpr", s.getCronExpr());
-            map.put("enabled", s.getEnabled());
-            map.put("repoId", s.getRepoId());
-            map.put("confirmMode", s.getConfirmMode());
-            map.put("scoreThreshold", s.getScoreThreshold());
-            map.put("lastScanTime", s.getLastScanTime());
-            list.add(map);
-        }
+        List<Map<String, Object>> list = scanSourceService.listByProjectId(projectId).stream()
+            .map(this::scanSourceToVo).collect(java.util.stream.Collectors.toList());
         return ResponseUtil.successResponse(list);
+    }
+
+    /** 扫描源对外视图：白名单字段，刻意排除 createBy/updateBy/时间戳/deleteFlag 等内部字段。 */
+    private Map<String, Object> scanSourceToVo(ScanSource s) {
+        Map<String, Object> map = new HashMap<>();
+        map.put("sourceId", s.getSourceId());
+        map.put("sourceName", s.getSourceName());
+        map.put("sourceType", s.getSourceType());
+        map.put("config", s.getConfig());
+        map.put("cronExpr", s.getCronExpr());
+        map.put("enabled", s.getEnabled());
+        map.put("repoId", s.getRepoId());
+        map.put("confirmMode", s.getConfirmMode());
+        map.put("scoreThreshold", s.getScoreThreshold());
+        map.put("lastScanTime", s.getLastScanTime());
+        return map;
     }
 
     /** 启用或停用扫描源 */
@@ -704,12 +711,12 @@ public class DevloopApplicationService {
             return ResponseUtil.failRes("Unknown source type: " + type);
         }
 
-        // 先对本次新增需求 LLM 打分（供展示、排序、score 模式判定），再按确认规则派生
-        scoringService.scoreItems(items);
-        autoDeriveForSource(source, items);
+        // 一次 LLM 调用完成拆分+评分，返回派发列表（子需求+未拆分条），再按确认规则派生
+        List<ScanLogItem> dispatchItems = scoringService.splitAndScore(items);
+        autoDeriveForSource(source, dispatchItems);
 
         Map<String, Object> result = new HashMap<>();
-        result.put("createdCount", items.size());
+        result.put("createdCount", dispatchItems.size());
         return ResponseUtil.successResponse(result);
     }
 
@@ -752,8 +759,35 @@ public class DevloopApplicationService {
         return ResponseUtil.successResponse(list);
     }
 
-    /** 扫描条目转前端需求视图，统一 listScanLogItems 与 listRequirementsBySource 的字段口径。 */
+    /**
+     * 按项目一次查全部需求(action=created)，DB 层按创建时间倒序，供需求列表直查。
+     * 只查两次(源列表 + 条目 IN 源)，替代前端逐源循环请求(N+1)与内存排序；顺带回填 sourceName/sourceType。
+     */
+    public ResponseUtil<List<Map<String, Object>>> listRequirementsByProject(Long projectId) {
+        List<ScanSource> sources = scanSourceService.listByProjectId(projectId);
+        if (sources.isEmpty()) {
+            return ResponseUtil.successResponse(new ArrayList<>());
+        }
+        Map<Long, ScanSource> sourceById = new HashMap<>();
+        List<Long> sourceIds = new ArrayList<>();
+        for (ScanSource s : sources) {
+            sourceById.put(s.getSourceId(), s);
+            sourceIds.add(s.getSourceId());
+        }
+        List<ScanLogItem> items = scanLogService.listCreatedItemsBySources(sourceIds);
+        List<Map<String, Object>> list = new ArrayList<>();
+        for (ScanLogItem item : items) {
+            list.add(toRequirementMap(item, sourceById.get(item.getSourceId())));
+        }
+        return ResponseUtil.successResponse(list);
+    }
+
     private Map<String, Object> toRequirementMap(ScanLogItem item) {
+        return toRequirementMap(item, null);
+    }
+
+    /** 扫描条目转前端需求视图，统一各需求列表接口字段口径；source 非空时回填来源名/类型。 */
+    private Map<String, Object> toRequirementMap(ScanLogItem item, ScanSource source) {
         Map<String, Object> map = new HashMap<>();
         map.put("itemId", item.getItemId());
         map.put("title", item.getTitle());
@@ -767,6 +801,11 @@ public class DevloopApplicationService {
         map.put("priority", item.getPriority());
         map.put("scoreDetail", item.getScoreDetail());
         map.put("createTime", item.getCreateTime());
+        map.put("sourceId", item.getSourceId());
+        if (source != null) {
+            map.put("sourceName", source.getSourceName());
+            map.put("sourceType", source.getSourceType());
+        }
         return map;
     }
 
@@ -989,11 +1028,15 @@ public class DevloopApplicationService {
     }
 
     /**
-     * 定时扫描完成后，按确认规则用源创建者身份为本次新增需求自动派生任务： auto=全部派生；score=综合分达阈值(scoreThreshold，默认70)才派生；manual=不派生。 扫描线程无登录上下文，故用
-     * source.createBy 构造 LoginInfo 并设入 CurrentUserHolder， 复用 deriveTask 后清理，避免污染线程池上下文。
+     * 定时扫描完成后按确认规则自动派生任务，并在项目内做负载均衡：
+     * auto=全部待派；score=综合分达阈值(默认70)才待派；manual=不派。
+     * 候选执行人=项目内绑定了数字员工的成员；按各自当前「进行中」任务数从低到高选，
+     * 单 agent 并发达上限(全局 cap，默认1)则跳过，避免一股脑丢给 codeagent 导致 OOM。
+     * 全员已满则本轮不派，留待下轮重新捞取未启动需求（轻量排队）。
+     * 每条任务以「被选中成员本人」身份创建（负责人=该成员，用其绑定 agent 执行）。
      */
     public void autoDeriveForSource(ScanSource source, List<ScanLogItem> newItems) {
-        if (source == null || newItems == null || newItems.isEmpty()) {
+        if (source == null) {
             return;
         }
         String mode = source.getConfirmMode();
@@ -1002,58 +1045,188 @@ public class DevloopApplicationService {
         if (!autoAll && !byScore) {
             return;
         }
+        Long projectId = source.getProjectId();
         int threshold = source.getScoreThreshold() != null ? source.getScoreThreshold() : 70;
-        if (source.getCreateBy() == null || source.getCreateBy().isEmpty()) {
-            log.warn("[DevloopAuto] 源 {} 无创建者，跳过自动派生", source.getSourceId());
-            return;
-        }
-        Long ownerUserId;
-        try {
-            ownerUserId = Long.valueOf(source.getCreateBy());
-        }
-        catch (NumberFormatException e) {
-            log.warn("[DevloopAuto] 源 {} 创建者非法 {}，跳过自动派生", source.getSourceId(), source.getCreateBy());
-            return;
-        }
-        LoginInfo ownerLogin = loginApplicationService.getLoginInfo(ownerUserId);
-        if (ownerLogin == null) {
-            log.warn("[DevloopAuto] 无法加载源创建者 {} 的登录信息，跳过自动派生", ownerUserId);
-            return;
-        }
-        LoginInfo previous = CurrentUserHolder.getLoginInfo();
-        try {
-            CurrentUserHolder.setLoginInfo(ownerLogin);
-            // 扫描线程无外层事务，deriveTask 内每条 mapper 自动提交，单条失败不影响其余；
-            // 会话即时落库，submitTaskChatAfterCommit 因无活动事务直接异步执行 chat。
-            for (ScanLogItem item : newItems) {
-                // score 模式：仅综合分达阈值的需求自动派生，其余留待人工确认
-                if (byScore) {
-                    Integer s = item.getScore();
-                    if (s == null || s < threshold) {
-                        continue;
-                    }
-                }
-                try {
-                    ResponseUtil<Map<String, Object>> res = deriveTask(ownerUserId, ownerLogin, source.getProjectId(),
-                        item.getItemId(), item.getTitle());
-                    if (res == null || res.getCode() != ResponseUtil.SUCCESS) {
-                        log.warn("[DevloopAuto] 自动派生失败, item={}, msg={}", item.getItemId(),
-                            res != null ? res.getMsg() : "null");
-                    }
-                }
-                catch (Exception e) {
-                    log.error("[DevloopAuto] 自动派生异常, item={}", item.getItemId(), e);
+
+        // 待派需求 = 本轮新增 + 本源历史未启动(sessionId=null)，合并去重；后者实现“上轮全忙、本轮补派”的轻量排队
+        List<ScanLogItem> pending = collectPendingItems(source, newItems, byScore, threshold);
+        // 新增 vs 重捞拆分统计：新增=本轮扫到的未启动条数，重捞=历史未启动补进来的条数
+        int newCount = 0;
+        if (newItems != null) {
+            for (ScanLogItem it : newItems) {
+                if (it.getItemId() != null && it.getSessionId() == null) {
+                    newCount++;
                 }
             }
         }
+        int requeueCount = Math.max(0, pending.size() - newCount);
+        if (pending.isEmpty()) {
+            log.info("[DevloopAuto] 源 {} 无待派需求(新增0/重捞0)，跳过", source.getSourceId());
+            return;
+        }
+
+        // 候选执行人：项目内绑定了数字员工的成员；无候选直接跳过
+        List<ProjectMember> candidates = new ArrayList<>();
+        for (ProjectMember m : projectMemberService.listByProjectId(projectId)) {
+            if (m.getAgentId() != null && m.getUserId() != null) {
+                candidates.add(m);
+            }
+        }
+        if (candidates.isEmpty()) {
+            log.warn("[DevloopAuto] 项目 {} 无绑定数字员工的成员，跳过自动派生", projectId);
+            return;
+        }
+
+        int cap = agentMaxConcurrent();
+        // 各 agent 当前在跑任务数（内存累加，避免一轮把需求全砸给同一空闲 agent）
+        Map<Long, Integer> loadByAgent = new HashMap<>();
+        for (ProjectMember m : candidates) {
+            loadByAgent.put(m.getAgentId(), countRunningTasksByAgent(projectId, m.getAgentId()));
+        }
+
+        int dispatched = 0;
+        int failed = 0;
+        int skippedByCap = 0;
+        LoginInfo previous = CurrentUserHolder.getLoginInfo();
+        try {
+            for (ScanLogItem item : pending) {
+                ProjectMember chosen = pickLeastLoadedMember(candidates, loadByAgent, cap);
+                if (chosen == null) {
+                    // 全员满 cap：本轮不再派，剩余需求下轮重新捞取
+                    skippedByCap = pending.size() - dispatched - failed;
+                    break;
+                }
+                LoginInfo memberLogin = loginApplicationService.getLoginInfo(chosen.getUserId());
+                if (memberLogin == null) {
+                    log.warn("[DevloopAuto] 无法加载成员 {} 登录信息，跳过其本次派发", chosen.getUserId());
+                    failed++;
+                    // 该成员本轮不可用：临时置满，避免死循环反复选中
+                    loadByAgent.put(chosen.getAgentId(), cap);
+                    continue;
+                }
+                try {
+                    CurrentUserHolder.setLoginInfo(memberLogin);
+                    ResponseUtil<Map<String, Object>> res = deriveTask(chosen.getUserId(), memberLogin, projectId,
+                        item.getItemId(), item.getTitle());
+                    if (res != null && res.getCode() == ResponseUtil.SUCCESS) {
+                        // 派发成功才计入负载，供后续需求继续均衡
+                        loadByAgent.merge(chosen.getAgentId(), 1, Integer::sum);
+                        dispatched++;
+                    }
+                    else {
+                        failed++;
+                        log.warn("[DevloopAuto] 自动派生失败, item={}, member={}, msg={}", item.getItemId(),
+                            chosen.getUserId(), res != null ? res.getMsg() : "null");
+                    }
+                }
+                catch (Exception e) {
+                    failed++;
+                    log.error("[DevloopAuto] 自动派生异常, item={}, member={}", item.getItemId(), chosen.getUserId(), e);
+                }
+                finally {
+                    CurrentUserHolder.clearLoginInfo();
+                }
+            }
+            // 每轮派发结果汇总：观察补派是否正常工作(新增/重捞/实际派/满cap跳过/失败)
+            log.info("[DevloopAuto] 源 {} 派发汇总: 新增{} 重捞{} 候选员工{} cap{} -> 实际派{} 满cap跳过{} 失败{}",
+                source.getSourceId(), newCount, requeueCount, candidates.size(), cap, dispatched, skippedByCap, failed);
+        }
         finally {
-            // 还原上下文：线程池复用，避免把源创建者身份泄漏给后续任务
+            // 还原上下文：线程池复用，避免把身份泄漏给后续任务
             if (previous != null) {
                 CurrentUserHolder.setLoginInfo(previous);
             }
             else {
                 CurrentUserHolder.clearLoginInfo();
             }
+        }
+    }
+
+    /**
+     * 收集本源待派需求：本轮新增 + 历史未启动(sessionId=null)，按 itemId 去重。
+     * score 模式仅保留综合分达阈值者。历史未启动的参与，实现全忙跳过后下轮自动补派。
+     */
+    private List<ScanLogItem> collectPendingItems(ScanSource source, List<ScanLogItem> newItems, boolean byScore,
+        int threshold) {
+        Map<Long, ScanLogItem> byId = new LinkedHashMap<>();
+        if (newItems != null) {
+            for (ScanLogItem it : newItems) {
+                if (it.getItemId() != null && it.getSessionId() == null) {
+                    byId.put(it.getItemId(), it);
+                }
+            }
+        }
+        for (ScanLogItem it : scanLogService.listCreatedItemsBySource(source.getSourceId())) {
+            if (it.getItemId() != null && it.getSessionId() == null) {
+                byId.putIfAbsent(it.getItemId(), it);
+            }
+        }
+        List<ScanLogItem> result = new ArrayList<>();
+        for (ScanLogItem it : byId.values()) {
+            // 疑似/确认重复的不派发，只放行 normal 与人工判过“其实不同”(not_dup)；空值兼容历史数据视为 normal
+            String dedup = it.getDedupStatus();
+            if (dedup != null && !"normal".equals(dedup) && !"not_dup".equals(dedup)) {
+                continue;
+            }
+            if (byScore) {
+                Integer s = it.getScore();
+                if (s == null || s < threshold) {
+                    continue;
+                }
+            }
+            result.add(it);
+        }
+        return result;
+    }
+
+    /** 选负载最低且未达 cap 的成员；全员已满返回 null。候选已按 createTime 升序，天然稳定轮转。 */
+    private ProjectMember pickLeastLoadedMember(List<ProjectMember> candidates, Map<Long, Integer> loadByAgent,
+        int cap) {
+        ProjectMember best = null;
+        int bestLoad = Integer.MAX_VALUE;
+        for (ProjectMember m : candidates) {
+            int load = loadByAgent.getOrDefault(m.getAgentId(), 0);
+            if (load < cap && load < bestLoad) {
+                best = m;
+                bestLoad = load;
+            }
+        }
+        return best;
+    }
+
+    /** 某 agent 在指定项目下「进行中」任务数：会话(objectId=agent) 关联 session_ext(task_status)。 */
+    private int countRunningTasksByAgent(Long projectId, Long agentId) {
+        List<ByaiSession> sessions = byaiSessionMapper.selectList(new LambdaQueryWrapper<ByaiSession>()
+            .eq(ByaiSession::getProjectId, projectId).eq(ByaiSession::getObjectId, agentId));
+        if (sessions.isEmpty()) {
+            return 0;
+        }
+        List<Long> ids = sessions.stream().map(ByaiSession::getSessionId)
+            .collect(java.util.stream.Collectors.toList());
+        Map<Long, String> statusMap = loadTaskStatusMap(ids);
+        int running = 0;
+        for (Long id : ids) {
+            // 缺省视为「进行中」：新建任务即写该状态；只有显式「完成」才释放并发额度
+            String st = statusMap.getOrDefault(id, TASK_STATUS_DEFAULT);
+            if (TASK_STATUS_DEFAULT.equals(st)) {
+                running++;
+            }
+        }
+        return running;
+    }
+
+    /** 读全局单 agent 并发上限；未配置或非法用默认值，最小为 1。 */
+    private int agentMaxConcurrent() {
+        String raw = byaiSystemConfigService.findByParamCode(AGENT_MAX_CONCURRENT_CODE);
+        if (raw == null || raw.trim().isEmpty()) {
+            return AGENT_MAX_CONCURRENT_DEFAULT;
+        }
+        try {
+            return Math.max(1, Integer.parseInt(raw.trim()));
+        }
+        catch (NumberFormatException e) {
+            log.warn("[DevloopAuto] 并发上限配置非法 {}，用默认 {}", raw, AGENT_MAX_CONCURRENT_DEFAULT);
+            return AGENT_MAX_CONCURRENT_DEFAULT;
         }
     }
 

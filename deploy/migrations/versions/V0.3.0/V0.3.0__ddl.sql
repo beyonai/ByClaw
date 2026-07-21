@@ -203,6 +203,10 @@ CREATE TABLE IF NOT EXISTS byai.byai_scan_log_item (
     score           INT,
     priority        VARCHAR(8),
     score_detail    TEXT,
+    parent_item_id  BIGINT,
+    content_hash    VARCHAR(64),
+    dedup_status    VARCHAR(20)     DEFAULT 'normal',
+    duplicate_of_item_id BIGINT,
     create_time     TIMESTAMP       DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT pk_byai_scan_log_item PRIMARY KEY (item_id)
 );
@@ -215,16 +219,23 @@ COMMENT ON COLUMN byai.byai_scan_log_item.title IS '需求标题';
 COMMENT ON COLUMN byai.byai_scan_log_item.content IS '需求内容';
 COMMENT ON COLUMN byai.byai_scan_log_item.origin_id IS '来源原始ID(issue号/消息ID)';
 COMMENT ON COLUMN byai.byai_scan_log_item.origin_url IS '来源链接';
-COMMENT ON COLUMN byai.byai_scan_log_item.action IS '处理动作 created/duplicate/deferred';
+COMMENT ON COLUMN byai.byai_scan_log_item.action IS '处理动作 created/duplicate/deferred/split(被拆分的原始条,不派发)';
 COMMENT ON COLUMN byai.byai_scan_log_item.session_id IS '已启动会话ID(byai_session.session_id)，标记需求已启动';
 COMMENT ON COLUMN byai.byai_scan_log_item.score IS 'AI综合评分 0-100';
 COMMENT ON COLUMN byai.byai_scan_log_item.priority IS 'AI优先级 P0/P1/P2';
 COMMENT ON COLUMN byai.byai_scan_log_item.score_detail IS 'AI评分明细JSON:各维度得分/风险/AI整理需求';
+COMMENT ON COLUMN byai.byai_scan_log_item.parent_item_id IS '拆分溯源:子需求指向被拆分的原始item;未拆分为空';
+COMMENT ON COLUMN byai.byai_scan_log_item.content_hash IS '归一化内容指纹,二期去重用';
+COMMENT ON COLUMN byai.byai_scan_log_item.dedup_status IS '去重状态 normal/suspected_dup/confirmed_dup/not_dup';
+COMMENT ON COLUMN byai.byai_scan_log_item.duplicate_of_item_id IS '疑似/确认重复时指向的原始item';
 
 -- 索引
 CREATE INDEX IF NOT EXISTS idx_scan_source_project ON byai.byai_scan_source(project_id);
 CREATE INDEX IF NOT EXISTS idx_scan_log_source ON byai.byai_scan_log(source_id);
 CREATE INDEX IF NOT EXISTS idx_scan_log_item_log ON byai.byai_scan_log_item(log_id);
+CREATE INDEX IF NOT EXISTS idx_scan_log_item_hash ON byai.byai_scan_log_item(content_hash);
+CREATE INDEX IF NOT EXISTS idx_scan_log_item_dedup ON byai.byai_scan_log_item(dedup_status);
+CREATE INDEX IF NOT EXISTS idx_scan_log_item_parent ON byai.byai_scan_log_item(parent_item_id);
 CREATE INDEX IF NOT EXISTS idx_project_repo_project ON byai.byai_project_repo(project_id);
 CREATE INDEX IF NOT EXISTS idx_project_session_project ON byai.byai_project_session(project_id);
 CREATE INDEX IF NOT EXISTS idx_project_session_session ON byai.byai_project_session(session_id);

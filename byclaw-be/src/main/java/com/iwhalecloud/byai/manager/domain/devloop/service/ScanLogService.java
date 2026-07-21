@@ -107,6 +107,21 @@ public class ScanLogService {
         return scanLogItemMapper.selectList(wrapper);
     }
 
+    /**
+     * 批量查询多个扫描源下已收集(created)的需求条目，按时间倒序。
+     * 供项目需求列表一次查全部源，避免前端逐源循环请求(N+1)与内存排序。
+     */
+    public List<ScanLogItem> listCreatedItemsBySources(List<Long> sourceIds) {
+        if (sourceIds == null || sourceIds.isEmpty()) {
+            return new java.util.ArrayList<>();
+        }
+        LambdaQueryWrapper<ScanLogItem> wrapper = new LambdaQueryWrapper<>();
+        wrapper.in(ScanLogItem::getSourceId, sourceIds)
+               .eq(ScanLogItem::getAction, "created")
+               .orderByDesc(ScanLogItem::getCreateTime);
+        return scanLogItemMapper.selectList(wrapper);
+    }
+
     /** 判断同一源下是否已存在相同originId的已创建条目 */
     public boolean isDuplicate(Long sourceId, String originId) {
         LambdaQueryWrapper<ScanLogItem> wrapper = new LambdaQueryWrapper<>();

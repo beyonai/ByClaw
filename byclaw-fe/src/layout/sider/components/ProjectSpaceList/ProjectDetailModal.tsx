@@ -49,7 +49,7 @@ import {
   listProjectSpaceFiles,
   listProjectSessionsByQo,
   listProjectMembers,
-  listRequirementsBySource,
+  listRequirementsByProject,
   listScanLogs,
   listScanSources,
   listTasks,
@@ -470,32 +470,18 @@ const ProjectDetailPanel: React.FC<Props> = ({
     async (sourceList: ScanSourceItem[] = []) => {
       if (!projectId) return;
       setRequirementsLoading(true);
-      const allItems: RequirementItem[] = [];
-      let latestLog: ScanLogEntry | null = null;
-
       try {
-        // 只消费本次请求得到的收集源列表，避免 setSources 后触发 useEffect 依赖变化造成需求 tab 循环请求。
-        for (const source of sourceList) {
-          // 需求直接按源查(含历史)，不再遍历最近日志——否则早期需求会被空扫描日志挤出而漏显。
-          const items = (await listRequirementsBySource(source.sourceId)) || [];
-          items.forEach((item: any) => {
-            allItems.push({
-              ...item,
-              sourceType: source.sourceType,
-              sourceName: source.sourceName,
-            });
-          });
-          // 仅取最近一条日志用于“上次扫描完成”状态展示。
-          const logs = (await listScanLogs(source.sourceId, 1)) || [];
-          if (logs[0] && (!latestLog || new Date(logs[0].scanTime) > new Date(latestLog.scanTime))) {
-            latestLog = logs[0];
-          }
-        }
-        // 跨源合并后按综合分倒序，未评分(score 为空)沉底。
-        allItems.sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
-        setRequirements(allItems);
+        // 一次按项目直查全部需求，后端已 join 源并按创建时间倒序；不再逐源循环请求、不再前端排序。
+        const items = ((await listRequirementsByProject(projectId)) || []) as RequirementItem[];
+        setRequirements(items);
         setVisibleRequirementCount(REQUIREMENT_PAGE_SIZE);
-        setLastLog(latestLog);
+        // “上次扫描完成”时间直接取源列表里最大的 lastScanTime，省掉逐源查扫描日志。
+        const latestScanTime = sourceList
+          .map((s: any) => s.lastScanTime)
+          .filter(Boolean)
+          .sort()
+          .pop();
+        setLastLog(latestScanTime ? ({ scanTime: latestScanTime } as ScanLogEntry) : null);
       } finally {
         setRequirementsLoading(false);
       }

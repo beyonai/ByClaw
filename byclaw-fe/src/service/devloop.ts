@@ -122,6 +122,10 @@ export const listScanLogItems = (logId: number) => POST<any>('/byaiService/devlo
 export const listRequirementsBySource = (sourceId: number) =>
   POST<any>('/byaiService/devloop/source/requirements', { sourceId });
 
+// 按项目一次查全部需求(后端时间倒序)，替代前端逐源循环请求
+export const listRequirementsByProject = (projectId: number) =>
+  POST<any>('/byaiService/devloop/project/requirements', { projectId });
+
 // PAT 管理
 export const saveGitHubPat = (pat: string) => POST<any>('/byaiService/devloop/pat/github', { pat });
 

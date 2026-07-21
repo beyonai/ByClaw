@@ -7,21 +7,36 @@ import com.iwhalecloud.byai.manager.domain.aimodel.service.AIService;
 import com.iwhalecloud.byai.manager.entity.devloop.ScanLogItem;
 import com.iwhalecloud.byai.manager.mapper.devloop.ScanLogItemMapper;
 import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
+import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 研发闭环需求评分服务。
- * 对扫描到的候选需求调用 LLM 按多维度打分，回写综合分、优先级与明细 JSON，供优先级排序与自动派生使用。
+ * 研发闭环需求「拆分 + 评分」服务。
+ * 一次 LLM 调用完成两件事：把一条消息里耦合的多个独立需求拆开，并对每个子需求多维度打分。
+ * 拆出多条时原始条标记 action=split（不派发），为每个子需求落一条 item（parent_item_id 溯源）；
+ * 只拆出一条时原地更新原 item。返回供派发的 item 列表（子需求 + 未拆分条，不含被拆分的原始条）。
  */
 @Slf4j
 @Service
 public class DevloopScoringService {
 
+    // 拆分+评分合并提示词；缺失时回退纯评分提示词，保证仍能评分（不拆分）
+    private static final String SPLIT_SCORE_PROMPT_CODE = "DEVLOOP_REQUIREMENT_SPLIT_SCORE_PROMPT";
+
     private static final String SCORE_PROMPT_CODE = "DEVLOOP_REQUIREMENT_SCORE_PROMPT";
+
+    // 单条消息最多拆出的子需求数，超出保留原条不拆，防止模型过度拆分刷爆任务
+    private static final int MAX_SPLIT = 5;
+
+    // 拆分产生的原始条动作：不进需求列表(listCreatedItemsBySource 只取 created)、不派发
+    private static final String ACTION_SPLIT = "split";
+
+    private static final String DEDUP_NORMAL = "normal";
 
     // 各维度分值上限，用于裁剪模型越界输出，保证综合分口径稳定
     private static final int MAX_BUSINESS_VALUE = 30;
@@ -47,31 +62,50 @@ public class DevloopScoringService {
     @Autowired
     private ScanLogItemMapper scanLogItemMapper;
 
-    /** 对一批需求逐条评分并回写；单条失败不影响其余。 */
-    public void scoreItems(List<ScanLogItem> items) {
+    @Autowired
+    private SequenceService sequenceService;
+
+    /**
+     * 对一批扫描到的原始需求逐条「拆分 + 评分」，返回供派发的 item 列表。
+     * 单条失败不影响其余；配置类错误（如未配置默认 LLM 模型）整批中止并给可操作提示。
+     * 返回列表 = 各原始条的处理结果：拆分则为子需求们，未拆分则为原条本身（已回写分数）。
+     */
+    public List<ScanLogItem> splitAndScore(List<ScanLogItem> items) {
+        List<ScanLogItem> dispatchList = new ArrayList<>();
         if (items == null || items.isEmpty()) {
-            return;
+            return dispatchList;
         }
-        String template = byaiSystemConfigService.findByParamCode(SCORE_PROMPT_CODE);
+        // 优先用「拆分+评分」合并提示词；缺失回退纯评分提示词（此时不拆分，仅评分）
+        String template = byaiSystemConfigService.findByParamCode(SPLIT_SCORE_PROMPT_CODE);
+        boolean splitEnabled = template != null && !template.isEmpty();
+        if (!splitEnabled) {
+            template = byaiSystemConfigService.findByParamCode(SCORE_PROMPT_CODE);
+        }
         if (template == null || template.isEmpty()) {
-            log.warn("[DevloopScore] 未配置评分提示词 {}，本批 {} 条需求跳过评分（分数为空）。"
-                + "请在系统配置中添加该提示词。", SCORE_PROMPT_CODE, items.size());
-            return;
+            log.warn("[DevloopScore] 未配置拆分/评分提示词，本批 {} 条需求跳过（分数为空、不拆分）。", items.size());
+            return new ArrayList<>(items);
         }
         for (ScanLogItem item : items) {
             try {
-                scoreOne(item, template);
+                dispatchList.addAll(splitAndScoreOne(item, template, splitEnabled));
             } catch (Exception e) {
-                // 配置类错误（如未配置默认 LLM 模型）整批都会失败，单独给出可操作提示且不刷全堆栈；
-                // 其余为单条运行时异常，打印堆栈便于定位。
                 String hint = configErrorHint(e);
                 if (hint != null) {
-                    log.error("[DevloopScore] 评分中止：{} 本批剩余需求分数将为空。item={}", hint, item.getItemId());
-                    return;
+                    log.error("[DevloopScore] 处理中止：{} 本批剩余需求将不评分/不拆分。item={}", hint, item.getItemId());
+                    // 中止：剩余未处理的原条按原样进入派发列表，避免漏派
+                    for (ScanLogItem rest : items) {
+                        if (!dispatchList.contains(rest) && rest.getSessionId() == null) {
+                            dispatchList.add(rest);
+                        }
+                    }
+                    return dispatchList;
                 }
-                log.error("[DevloopScore] 评分失败, item={}", item.getItemId(), e);
+                log.error("[DevloopScore] 拆分/评分失败, item={}", item.getItemId(), e);
+                // 单条失败：原条按原样进入派发列表
+                dispatchList.add(item);
             }
         }
+        return dispatchList;
     }
 
     /**
@@ -105,20 +139,82 @@ public class DevloopScoringService {
         return msg;
     }
 
-    /** 对单条需求评分并回写 score/priority/scoreDetail。 */
-    private void scoreOne(ScanLogItem item, String template) {
+    /**
+     * 单条原始需求：一次 LLM 调用拆分+评分。返回本条对应的派发 item 列表。
+     * 模型返回 requirements 数组：仅 1 条=不拆分，原地更新原条；多条=原条标 split(不派发)，为每条子需求落新 item。
+     */
+    private List<ScanLogItem> splitAndScoreOne(ScanLogItem item, String template, boolean splitEnabled) {
         String content = item.getContent() != null ? item.getContent() : "";
-        String userPrompt = template
-            .replace("${title}", item.getTitle() != null ? item.getTitle() : "")
+        String userPrompt = template.replace("${title}", item.getTitle() != null ? item.getTitle() : "")
             .replace("${content}", content);
 
-        String raw = aiService.generateText(null, userPrompt, null, 800);
+        String raw = aiService.generateText(null, userPrompt, null, 1500);
         JsonNode node = parseScoreJson(raw);
+        List<ScanLogItem> out = new ArrayList<>();
         if (node == null) {
-            log.warn("[DevloopScore] 模型返回无法解析为评分JSON, item={}", item.getItemId());
-            return;
+            log.warn("[DevloopScore] 模型返回无法解析, item={}，按原条不拆分不评分处理", item.getItemId());
+            out.add(item);
+            return out;
         }
 
+        // 拆分+评分提示词返回 requirements 数组；纯评分提示词返回单个评分对象(无 requirements)
+        JsonNode reqs = node.path("requirements");
+        List<JsonNode> subs = new ArrayList<>();
+        if (reqs.isArray() && reqs.size() > 0) {
+            reqs.forEach(subs::add);
+        } else {
+            subs.add(node); // 兼容纯评分：整个对象当作单个需求的评分
+        }
+
+        boolean doSplit = splitEnabled && subs.size() > 1;
+        if (doSplit && subs.size() > MAX_SPLIT) {
+            // 过度拆分：放弃拆分，退化为对原条整体评分，避免刷爆任务
+            log.warn("[DevloopScore] item={} 拆出 {} 条超上限 {}，退化为不拆分整体评分", item.getItemId(), subs.size(),
+                MAX_SPLIT);
+            doSplit = false;
+            subs = subs.subList(0, 1);
+        }
+
+        if (!doSplit) {
+            // 不拆分：原地把评分回写到原 item
+            applyScore(item, subs.get(0), false, null, null, null);
+            out.add(item);
+            return out;
+        }
+
+        // 拆分：原条标记 split（不进列表、不派发），为每个子需求落新 item
+        ScanLogItem markSplit = new ScanLogItem();
+        markSplit.setItemId(item.getItemId());
+        markSplit.setAction(ACTION_SPLIT);
+        scanLogItemMapper.updateById(markSplit);
+
+        for (JsonNode sub : subs) {
+            ScanLogItem child = new ScanLogItem();
+            child.setItemId(sequenceService.nextVal());
+            child.setLogId(item.getLogId());
+            child.setSourceId(item.getSourceId());
+            String subTitle = sub.path("title").asText("");
+            String subContent = sub.path("content").asText("");
+            child.setTitle(!subTitle.isEmpty() ? subTitle : item.getTitle());
+            child.setContent(!subContent.isEmpty() ? subContent : content);
+            child.setOriginId(item.getOriginId());
+            child.setOriginUrl(item.getOriginUrl());
+            child.setAction("created");
+            child.setParentItemId(item.getItemId());
+            child.setDedupStatus(DEDUP_NORMAL);
+            applyScore(child, sub, true, item.getLogId(), item.getSourceId(), item.getItemId());
+            out.add(child);
+        }
+        log.info("[DevloopScore] item={} 拆分为 {} 个子需求", item.getItemId(), subs.size());
+        return out;
+    }
+
+    /**
+     * 计算评分并写入 item：isNew=true 走 insert（子需求新建），false 走 update（原条回写）。
+     * 无论新旧都回填内存对象，供后续 score 模式派生直接读取。
+     */
+    private void applyScore(ScanLogItem target, JsonNode node, boolean isNew, Long logId, Long sourceId,
+        Long parentId) {
         int businessValue = clamp(node.path("businessValue").asInt(0), 0, MAX_BUSINESS_VALUE);
         int userImpact = clamp(node.path("userImpact").asInt(0), 0, MAX_USER_IMPACT);
         int urgency = clamp(node.path("urgency").asInt(0), 0, MAX_URGENCY);
@@ -128,11 +224,9 @@ public class DevloopScoringService {
         int risk = clamp(node.path("risk").asInt(0), MIN_RISK, 0);
         String summary = node.path("summary").asText("");
 
-        int score = businessValue + userImpact + urgency + strategyFit + feasibility + reuseValue + risk;
-        score = clamp(score, 0, 100);
+        int score = clamp(businessValue + userImpact + urgency + strategyFit + feasibility + reuseValue + risk, 0, 100);
         String priority = score >= PRIORITY_P0_MIN ? "P0" : (score >= PRIORITY_P1_MIN ? "P1" : "P2");
 
-        // 明细固化裁剪后的分值，避免前端展示与综合分口径不一致
         ObjectNode detail = MAPPER.createObjectNode();
         detail.put("businessValue", businessValue);
         detail.put("userImpact", userImpact);
@@ -142,18 +236,23 @@ public class DevloopScoringService {
         detail.put("reuseValue", reuseValue);
         detail.put("risk", risk);
         detail.put("summary", summary);
+        String detailJson = detail.toString();
 
-        ScanLogItem update = new ScanLogItem();
-        update.setItemId(item.getItemId());
-        update.setScore(score);
-        update.setPriority(priority);
-        update.setScoreDetail(detail.toString());
-        scanLogItemMapper.updateById(update);
+        // 回填内存对象（新条已在调用处 set 好其它字段）
+        target.setScore(score);
+        target.setPriority(priority);
+        target.setScoreDetail(detailJson);
 
-        // 回填内存对象，供扫描流程后续（如 score 模式自动派生）直接读取，避免再查库
-        item.setScore(score);
-        item.setPriority(priority);
-        item.setScoreDetail(detail.toString());
+        if (isNew) {
+            scanLogItemMapper.insert(target);
+        } else {
+            ScanLogItem update = new ScanLogItem();
+            update.setItemId(target.getItemId());
+            update.setScore(score);
+            update.setPriority(priority);
+            update.setScoreDetail(detailJson);
+            scanLogItemMapper.updateById(update);
+        }
     }
 
     /** 从模型文本中抽取 JSON 对象；容忍 markdown 代码块与前后噪声。 */

@@ -118,6 +118,13 @@ public class DevloopController {
         return applicationService.listRequirementsBySource(sourceId);
     }
 
+    /** 按项目一次查全部需求(时间倒序)，供需求列表直查，替代前端逐源循环 */
+    @PostMapping("/project/requirements")
+    public ResponseUtil<List<Map<String, Object>>> listRequirementsByProject(@RequestBody Map<String, Object> params) {
+        Long projectId = Long.valueOf(params.get("projectId").toString());
+        return applicationService.listRequirementsByProject(projectId);
+    }
+
     /**
      * 保存GitHub Personal Access Token
      * @param params 包含 pat（明文，后端SM4加密存储）
