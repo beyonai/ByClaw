@@ -49,6 +49,7 @@ import {
   listProjectSpaceFiles,
   listProjectSessionsByQo,
   listProjectMembers,
+  getTaskChanges,
   listRequirementsByProject,
   listScanLogs,
   listScanSources,
@@ -61,6 +62,7 @@ import {
   triggerScan,
   updateScanSource,
   type DevloopProjectSpaceFile,
+  type DevloopTaskChanges,
 } from '@/service/devloop';
 import { deleteFiles, listFiles, renameFile, type FileBrowserItem } from '@/service/fileBrowser';
 import SessionOverviewDrawer from './SessionOverviewDrawer';
@@ -236,6 +238,25 @@ type Props = {
 
 const REQUIREMENT_PAGE_SIZE = 20;
 
+// GitHub 文件变更状态 -> 角标字母/配色,沿用常见 git 管理视觉:新增绿/修改黄/删除红/重命名蓝。
+const FILE_CHANGE_META: Record<string, { letter: string; label: string; className: string }> = {
+  added: { letter: 'A', label: '新增', className: 'fileChangeAdded' },
+  modified: { letter: 'M', label: '修改', className: 'fileChangeModified' },
+  changed: { letter: 'M', label: '修改', className: 'fileChangeModified' },
+  removed: { letter: 'D', label: '删除', className: 'fileChangeRemoved' },
+  renamed: { letter: 'R', label: '重命名', className: 'fileChangeRenamed' },
+  copied: { letter: 'C', label: '复制', className: 'fileChangeRenamed' },
+};
+
+const getFileChangeMeta = (status?: string) =>
+  FILE_CHANGE_META[(status || 'modified').toLowerCase()] || FILE_CHANGE_META.modified;
+
+// 从完整路径拆出文件名与所在目录,分别加粗/弱化展示。
+const splitFilePath = (path: string) => {
+  const idx = path.lastIndexOf('/');
+  return idx >= 0 ? { name: path.slice(idx + 1), dir: path.slice(0, idx) } : { name: path, dir: '' };
+};
+
 const cronPresets = [
   { value: '*/1 * * * *', label: '每1分钟' },
   { value: '*/5 * * * *', label: '每5分钟' },
@@ -366,6 +387,9 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const [sessionFilesLoadingMap, setSessionFilesLoadingMap] = useState<Record<string, boolean>>({});
   const [resourceChildrenByPath, setResourceChildrenByPath] = useState<Record<string, FileBrowserItem[]>>({});
   const [resourceExpandedKeys, setResourceExpandedKeys] = useState<React.Key[]>([]);
+  // 资源 tab 的“代码变更”卡片:按当前会话(任务)拉取远程分支相对基线的文件变更。
+  const [taskChanges, setTaskChanges] = useState<DevloopTaskChanges | null>(null);
+  const [taskChangesLoading, setTaskChangesLoading] = useState(false);
   const [resourceRenameOpen, setResourceRenameOpen] = useState(false);
   const [resourceRenameTarget, setResourceRenameTarget] = useState<FileBrowserItem | null>(null);
   const [resourceRenameLoading, setResourceRenameLoading] = useState(false);
@@ -610,6 +634,24 @@ const ProjectDetailPanel: React.FC<Props> = ({
       setSharedFilesLoading(false);
     }
   }, [projectId]);
+
+  // 代码变更按当前会话(任务)拉取:远程分支相对基线的文件 diff。切换会话时重取。
+  const fetchTaskChanges = useCallback(async (sessionId?: string | number | null) => {
+    if (!sessionId) {
+      setTaskChanges(null);
+      return;
+    }
+    setTaskChangesLoading(true);
+    try {
+      const res = await getTaskChanges(Number(sessionId));
+      setTaskChanges(res || null);
+    } catch (error) {
+      console.error('Failed to load task changes:', error);
+      setTaskChanges(null);
+    } finally {
+      setTaskChangesLoading(false);
+    }
+  }, []);
 
   const fetchSessionResourceFiles = useCallback(
     async (sessionId: string) => {
@@ -1002,6 +1044,12 @@ const ProjectDetailPanel: React.FC<Props> = ({
     if (activeTab !== 'resources') return;
     void fetchSharedResourceFiles();
   }, [activeTab, fetchSharedResourceFiles]);
+
+  // 代码变更只跟当前会话(任务)走,与“会话空间”的当前会话同口径;切会话即重取。仅研发项目拉取。
+  useEffect(() => {
+    if (activeTab !== 'resources' || !isDevelopProject) return;
+    void fetchTaskChanges(currentResourceSession?.sessionId);
+  }, [activeTab, isDevelopProject, currentResourceSession?.sessionId, fetchTaskChanges]);
 
   useEffect(() => {
     if (activeTab !== 'resources' || !fileResourceId) return;
@@ -1870,6 +1918,111 @@ const ProjectDetailPanel: React.FC<Props> = ({
     </div>
   );
 
+  // 资源 Tab 顶部的“代码变更”卡片:仅研发项目有任务/分支概念,普通项目隐藏。
+  const renderCodeChanges = () => {
+    if (!isDevelopProject) return null;
+    const empty = (text: string) => (
+      <div className={styles.codeChangeEmpty}>{taskChangesLoading ? '加载中…' : text}</div>
+    );
+
+    let body: React.ReactNode;
+    const status = taskChanges?.status;
+    if (!currentResourceSession?.sessionId) {
+      body = empty('选择会话后查看代码变更');
+    } else if (taskChangesLoading && !taskChanges) {
+      body = empty('加载中…');
+    } else if (!taskChanges || status === 'http_error') {
+      body = empty(taskChanges?.message || '暂时无法获取代码变更');
+    } else if (status === 'no_repo') {
+      body = empty('任务未关联代码仓库');
+    } else if (status === 'no_token') {
+      body = empty('未配置 GitHub 访问令牌，无法读取远程分支变更');
+    } else if (status === 'branch_not_found') {
+      body = empty(`远程分支尚未创建（${taskChanges.headBranch || '-'}），Agent 推送后可查看变更`);
+    } else if (!taskChanges.files?.length) {
+      body = empty('该分支相对基线暂无文件变更');
+    } else {
+      body = (
+        <div className={styles.codeChangeList}>
+          {taskChanges.files.map((file) => {
+            const meta = getFileChangeMeta(file.status);
+            const { name, dir } = splitFilePath(file.filename);
+            const renamedFrom =
+              file.status?.toLowerCase() === 'renamed' && file.previousFilename ? file.previousFilename : '';
+            // 有 blobUrl 就整行超链到 GitHub 该文件页面(删除文件无 blobUrl,退化为不可点)。
+            const rowClassName = file.blobUrl
+              ? `${styles.codeChangeItem} ${styles.codeChangeItemLink}`
+              : styles.codeChangeItem;
+            const inner = (
+              <>
+                <span
+                  className={`${styles.codeChangeBadge} ${styles[meta.className]}`}
+                  title={meta.label}
+                >
+                  {meta.letter}
+                </span>
+                <div className={styles.codeChangeInfo}>
+                  <strong className={styles.codeChangeName}>{name}</strong>
+                  <span className={styles.codeChangePath}>{renamedFrom ? `${renamedFrom} → ${file.filename}` : dir || file.filename}</span>
+                </div>
+                <div className={styles.codeChangeStat}>
+                  {file.additions > 0 && <span className={styles.codeChangeAdd}>+{file.additions}</span>}
+                  {file.deletions > 0 && <span className={styles.codeChangeDel}>-{file.deletions}</span>}
+                </div>
+              </>
+            );
+            return file.blobUrl ? (
+              <a
+                className={rowClassName}
+                key={file.filename}
+                href={file.blobUrl}
+                target="_blank"
+                rel="noreferrer"
+              >
+                {inner}
+              </a>
+            ) : (
+              <div className={styles.codeChangeItem} key={file.filename}>
+                {inner}
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
+    const branchLabel = taskChanges?.headBranch || currentResourceSession?.sessionName || '';
+    return (
+      <div className={styles.codeChangeCard}>
+        <div className={styles.codeChangeHeader}>
+          <div className={styles.codeChangeHeaderMain}>
+            <strong>代码变更</strong>
+            {branchLabel ? (
+              // 分支名即 GitHub 入口:有 compareUrl 就超链到整体比对页,否则纯文本展示。
+              taskChanges?.compareUrl ? (
+                <a
+                  className={`${styles.codeChangeBranch} ${styles.codeChangeBranchLink}`}
+                  href={taskChanges.compareUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  title="在 GitHub 查看本次比对"
+                >
+                  {branchLabel}
+                </a>
+              ) : (
+                <span className={styles.codeChangeBranch}>{branchLabel}</span>
+              )
+            ) : null}
+          </div>
+          {status === 'ok' && taskChanges?.files?.length ? (
+            <span className={styles.codeChangeCount}>{taskChanges.files.length}</span>
+          ) : null}
+        </div>
+        {body}
+      </div>
+    );
+  };
+
   const renderResources = () => {
     const currentSessionFiles = currentResourceSession?.sessionId
       ? sessionFilesMap[`${currentResourceSession.sessionId}`] || []
@@ -1945,6 +2098,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
           getActionItems={getSessionResourceFileActionItems}
           onAction={handleResourceFileAction}
         />
+        {renderCodeChanges()}
       </div>
     );
   };

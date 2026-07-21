@@ -13,6 +13,7 @@ import com.iwhalecloud.byai.common.storage.model.StorageLocation;
 import com.iwhalecloud.byai.common.util.ListUtil;
 import com.iwhalecloud.byai.common.util.PageHelperUtil;
 import com.iwhalecloud.byai.common.util.StringUtil;
+import com.iwhalecloud.byai.common.ecrypt.Sm4Util;
 import com.iwhalecloud.byai.manager.application.service.files.FilesApplicationService;
 import com.iwhalecloud.byai.manager.application.service.job.DevloopPatService;
 import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService;
@@ -32,15 +33,20 @@ import com.iwhalecloud.byai.manager.dto.devloop.ScanSourceDTO;
 import com.iwhalecloud.byai.manager.dto.session.ByaiSessionDto;
 import com.iwhalecloud.byai.manager.entity.devloop.*;
 import com.iwhalecloud.byai.manager.entity.file.Files;
+import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSessionExt;
+import com.iwhalecloud.byai.manager.entity.users.UserPrivateParam;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.mapper.devloop.ProjectMapper;
 import com.iwhalecloud.byai.manager.mapper.devloop.ProjectRepoMapper;
 import com.iwhalecloud.byai.manager.mapper.devloop.ProjectShareTargetMapper;
 import com.iwhalecloud.byai.manager.mapper.devloop.ProjectSessionMapper;
 import com.iwhalecloud.byai.manager.mapper.devloop.ScanLogItemMapper;
+import com.iwhalecloud.byai.manager.mapper.resource.SsResourceMapper;
+import com.iwhalecloud.byai.manager.mapper.session.ByaiSessionExtMapper;
 import com.iwhalecloud.byai.manager.mapper.session.ByaiSessionMapper;
+import com.iwhalecloud.byai.manager.mapper.users.UserPrivateParamMapper;
 import com.iwhalecloud.byai.manager.qo.devloop.ProjectQo;
 import com.iwhalecloud.byai.manager.qo.devloop.ProjectSessionQo;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
@@ -119,7 +125,7 @@ public class DevloopApplicationService {
     private ByaiSessionMapper byaiSessionMapper;
 
     @Autowired
-    private com.iwhalecloud.byai.manager.mapper.session.ByaiSessionExtMapper byaiSessionExtMapper;
+    private ByaiSessionExtMapper byaiSessionExtMapper;
 
     @Autowired
     private ScanLogItemMapper scanLogItemMapper;
@@ -164,7 +170,10 @@ public class DevloopApplicationService {
     private DevloopPhaseService phaseService;
 
     @Autowired
-    private com.iwhalecloud.byai.manager.mapper.resource.SsResourceMapper ssResourceMapper;
+    private GitHubCompareService gitHubCompareService;
+
+    @Autowired
+    private SsResourceMapper ssResourceMapper;
 
     @Autowired
     private ByaiSystemConfigService byaiSystemConfigService;
@@ -810,7 +819,7 @@ public class DevloopApplicationService {
     }
 
     @Autowired
-    private com.iwhalecloud.byai.manager.mapper.users.UserPrivateParamMapper userPrivateParamMapper;
+    private UserPrivateParamMapper userPrivateParamMapper;
 
     /** 保存GitHub PAT，SM4加密存储 */
     @Transactional(rollbackFor = Exception.class)
@@ -818,13 +827,13 @@ public class DevloopApplicationService {
         Long userId = CurrentUserHolder.getCurrentUserId();
         String paramKey = "GH_TOKEN";
 
-        LambdaQueryWrapper<com.iwhalecloud.byai.manager.entity.users.UserPrivateParam> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(com.iwhalecloud.byai.manager.entity.users.UserPrivateParam::getUserId, userId)
-            .eq(com.iwhalecloud.byai.manager.entity.users.UserPrivateParam::getParamKey, paramKey)
-            .eq(com.iwhalecloud.byai.manager.entity.users.UserPrivateParam::getDeleteFlag, "0");
+        LambdaQueryWrapper<UserPrivateParam> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(UserPrivateParam::getUserId, userId)
+            .eq(UserPrivateParam::getParamKey, paramKey)
+            .eq(UserPrivateParam::getDeleteFlag, "0");
 
         var existing = userPrivateParamMapper.selectOne(wrapper);
-        String encrypted = com.iwhalecloud.byai.common.ecrypt.Sm4Util.encrypt(pat);
+        String encrypted = Sm4Util.encrypt(pat);
         String last4 = pat.length() > 4 ? pat.substring(pat.length() - 4) : pat;
 
         if (existing != null) {
@@ -834,7 +843,7 @@ public class DevloopApplicationService {
             userPrivateParamMapper.updateById(existing);
         }
         else {
-            var param = new com.iwhalecloud.byai.manager.entity.users.UserPrivateParam();
+            var param = new UserPrivateParam();
             param.setParamId(sequenceService.nextVal());
             param.setUserId(userId);
             param.setParamKey(paramKey);
@@ -854,10 +863,10 @@ public class DevloopApplicationService {
         Long userId = CurrentUserHolder.getCurrentUserId();
         String paramKey = "GH_TOKEN";
 
-        LambdaQueryWrapper<com.iwhalecloud.byai.manager.entity.users.UserPrivateParam> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(com.iwhalecloud.byai.manager.entity.users.UserPrivateParam::getUserId, userId)
-            .eq(com.iwhalecloud.byai.manager.entity.users.UserPrivateParam::getParamKey, paramKey)
-            .eq(com.iwhalecloud.byai.manager.entity.users.UserPrivateParam::getDeleteFlag, "0");
+        LambdaQueryWrapper<UserPrivateParam> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(UserPrivateParam::getUserId, userId)
+            .eq(UserPrivateParam::getParamKey, paramKey)
+            .eq(UserPrivateParam::getDeleteFlag, "0");
 
         var existing = userPrivateParamMapper.selectOne(wrapper);
         Map<String, Object> result = new HashMap<>();
@@ -1376,6 +1385,61 @@ public class DevloopApplicationService {
         return ResponseUtil.successResponse(fresh);
     }
 
+    /**
+     * 查询任务代码变更:目标分支相对仓库默认分支的文件变更列表(远程分支口径)。
+     * base=仓库 defaultBranch(默认 main),head=任务分支(与详情同口径 buildBranchName),token 取任务创建者的 PAT。
+     * TODO(本地分支): codeagent 容器内未 push 的本地改动后端不可达,目前仅覆盖远程已 push 分支;后续若 exe 层能回报本地 diff 再补。
+     */
+    public ResponseUtil<Map<String, Object>> getTaskChanges(Long sessionId) {
+        if (sessionId == null) {
+            return ResponseUtil.failRes("sessionId 不能为空");
+        }
+        ByaiSession s = byaiSessionMapper.selectById(sessionId);
+        if (s == null) {
+            return ResponseUtil.failRes("会话不存在");
+        }
+        // 与 resolveTaskContext 同口径:需求项 -> 源.repoId -> 仓库;手动任务取项目首个仓库兜底。
+        ScanLogItem item = scanLogItemMapper
+            .selectOne(new LambdaQueryWrapper<ScanLogItem>().eq(ScanLogItem::getSessionId, sessionId).last("limit 1"));
+        ProjectRepo repo = resolveTaskRepo(s.getProjectId(), item);
+        String repoFullName = repo != null ? repo.getRepoFullName() : null;
+        String baseBranch = repo != null && repo.getDefaultBranch() != null && !repo.getDefaultBranch().isEmpty()
+            ? repo.getDefaultBranch() : "main";
+        String headBranch = buildBranchName(detectTaskType(item, s.getSessionName()), sessionId);
+        String pat = patService.getGitHubPat(s.getCreatorId() != null ? String.valueOf(s.getCreatorId()) : null);
+
+        GitHubCompareService.CompareResult result = gitHubCompareService.compare(repoFullName, baseBranch, headBranch,
+            pat);
+        return ResponseUtil.successResponse(compareResultToMap(result));
+    }
+
+    /** 比对结果转前端形状:状态字符串 + 分支信息 + 文件变更数组。 */
+    private Map<String, Object> compareResultToMap(GitHubCompareService.CompareResult result) {
+        Map<String, Object> map = new HashMap<>();
+        // 状态转小写字符串,前端按 ok/no_repo/no_token/branch_not_found/http_error 分支渲染不同空态。
+        map.put("status", result.getStatus().name().toLowerCase());
+        map.put("repoFullName", result.getRepoFullName());
+        map.put("baseBranch", result.getBaseBranch());
+        map.put("headBranch", result.getHeadBranch());
+        map.put("aheadBy", result.getAheadBy());
+        map.put("compareUrl", result.getCompareUrl());
+        map.put("message", result.getMessage());
+        List<Map<String, Object>> files = new ArrayList<>();
+        for (GitHubCompareService.FileChange f : result.getFiles()) {
+            Map<String, Object> fm = new HashMap<>();
+            fm.put("filename", f.getFilename());
+            fm.put("status", f.getStatus());
+            fm.put("additions", f.getAdditions());
+            fm.put("deletions", f.getDeletions());
+            fm.put("previousFilename", f.getPreviousFilename());
+            fm.put("blobUrl", f.getBlobUrl());
+            files.add(fm);
+        }
+        map.put("files", files);
+        map.put("fileCount", files.size());
+        return map;
+    }
+
     /** 批量读取会话的任务状态(session_ext.task_status)，返回 sessionId -> status。 */
     private Map<Long, String> loadTaskStatusMap(List<Long> sessionIds) {
         Map<Long, String> statusMap = new HashMap<>();
@@ -1463,7 +1527,7 @@ public class DevloopApplicationService {
         if (agentId == null) {
             return "";
         }
-        com.iwhalecloud.byai.manager.entity.resource.SsResource res = ssResourceMapper.selectByResourceId(agentId);
+        SsResource res = ssResourceMapper.selectByResourceId(agentId);
         return res != null && res.getResourceName() != null ? res.getResourceName() : "";
     }
 

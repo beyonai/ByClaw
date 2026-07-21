@@ -192,6 +192,14 @@ public class DevloopController {
         return applicationService.getTaskPhases(sessionId);
     }
 
+    /** 获取任务代码变更：目标分支相对仓库默认分支的文件变更列表(远程分支口径) */
+    @PostMapping("/task/changes")
+    public ResponseUtil<Map<String, Object>> getTaskChanges(@RequestBody Map<String, Object> params) {
+        Long sessionId = Long.valueOf(params.get("sessionId") != null ? params.get("sessionId").toString()
+            : params.get("taskId").toString());
+        return applicationService.getTaskChanges(sessionId);
+    }
+
     // ========== 项目成员 ==========
 
     /** 添加项目成员 */

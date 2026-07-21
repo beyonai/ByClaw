@@ -144,6 +144,30 @@ export const listTasks = (projectId: number) => POST<any>('/byaiService/devloop/
 // 任务详情即会话详情，后端按 sessionId 查询（taskId 与 sessionId 同值）
 export const getTaskDetail = (sessionId: number) => POST<any>('/byaiService/devloop/task/detail', { sessionId });
 
+// 任务代码变更：目标分支相对仓库默认分支的文件变更列表(远程分支口径)。
+// status: ok | no_repo | no_token | branch_not_found | http_error；files 每项含 filename/status/additions/deletions/previousFilename。
+export type DevloopTaskChanges = {
+  status: 'ok' | 'no_repo' | 'no_token' | 'branch_not_found' | 'http_error';
+  repoFullName?: string | null;
+  baseBranch?: string | null;
+  headBranch?: string | null;
+  aheadBy?: number;
+  compareUrl?: string | null;
+  message?: string | null;
+  fileCount?: number;
+  files: {
+    filename: string;
+    status: string;
+    additions: number;
+    deletions: number;
+    previousFilename?: string | null;
+    blobUrl?: string | null;
+  }[];
+};
+
+export const getTaskChanges = (sessionId: number) =>
+  POST<DevloopTaskChanges>('/byaiService/devloop/task/changes', { sessionId });
+
 // 任务环节进度：后端从会话消息派生 7 环节状态 + 打回记录，按需刷新
 export const getTaskPhases = (sessionId: number) =>
   POST<any>('/byaiService/devloop/task/phases', { sessionId });
