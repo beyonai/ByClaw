@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -136,6 +137,7 @@ function assertSessionsSpawnPayload(params) {
   const bundle = JSON.parse(fs.readFileSync(bundlePath, "utf8"));
   const agentModels = bundle.agentModels;
   const sharedContext = bundle.sharedContext;
+  const bootstrapContractPath = sharedContext.bootstrapContractPath;
   const expectedReplyLanguage = testCase.request.replyLanguage ?? testCase.request.language ?? "zh_CN";
   const expectedByaiSessionId = testCase.request.sessionId;
   const expectedSessionRoot = `${SESSION_FILES_ROOT}/${expectedByaiSessionId}`;
@@ -193,6 +195,18 @@ function assertSessionsSpawnPayload(params) {
     `${testCase.name} metadata fixedWorkSpecs sessionRoot mismatch`,
   );
   assert.ok(sharedContext, `${testCase.name} bundle.sharedContext is missing`);
+  assert.ok(sharedContext.bootstrapId, `${testCase.name} sharedContext.bootstrapId is missing`);
+  assert.ok(sharedContext.runDir, `${testCase.name} sharedContext.runDir is missing`);
+  assert.ok(
+    sharedContext.runDir.startsWith(path.join(sharedContext.sharedDir, "runs")),
+    `${testCase.name} runDir must be isolated below sharedDir/runs`,
+  );
+  assert.ok(bootstrapContractPath, `${testCase.name} bootstrap contract path is missing`);
+  assert.ok(fs.existsSync(bootstrapContractPath), `${testCase.name} bootstrap contract is missing`);
+  assert.ok(
+    sharedContext.bootstrapReceiptPath.startsWith(sharedContext.runDir),
+    `${testCase.name} bootstrap receipt must be scoped to runDir`,
+  );
   assert.equal(bundle.clientType, fixture.config.defaultAcpClientType, `${testCase.name} clientType mismatch`);
   assert.equal(sharedContext.sessionId, expectedByaiSessionId, `${testCase.name} sharedContext.sessionId mismatch`);
   assert.equal(
@@ -241,6 +255,19 @@ function assertSessionsSpawnPayload(params) {
   const metadata = fs.readFileSync(sharedContext.metadataPath, "utf8");
   const query = fs.readFileSync(sharedContext.queryPath, "utf8");
   const clientInstructions = fs.readFileSync(sharedContext.clientInstructionsPath, "utf8");
+  const bootstrapContract = JSON.parse(fs.readFileSync(bootstrapContractPath, "utf8"));
+  assert.equal(bootstrapContract.bootstrapId, sharedContext.bootstrapId);
+  assert.equal(bootstrapContract.runDir, sharedContext.runDir);
+  assert.equal(bootstrapContract.metadata.path, sharedContext.metadataPath);
+  assert.equal(bootstrapContract.metadata.bytes, Buffer.byteLength(metadata));
+  assert.equal(
+    bootstrapContract.metadata.sha256,
+    createHash("sha256").update(metadata, "utf8").digest("hex"),
+    `${testCase.name} metadata sha256 mismatch`,
+  );
+  assert.equal(bootstrapContract.metadata.readMode, "complete-to-eof");
+  assert.equal(bootstrapContract.query.readAfterBootstrap, true);
+  assert.equal(bootstrapContract.receipt.requiredStatus, "READY");
   assert.match(query, /Reply language: zh_CN/u, `${testCase.name} query should include reply language`);
   assert.match(metadata, /responseLanguage/u, `${testCase.name} metadata should include responseLanguage`);
   assert.match(metadata, /Fixed Work Specs/u, `${testCase.name} metadata should include fixed work specs`);
@@ -425,15 +452,30 @@ async function main() {
       request,
     });
     assertSessionsSpawnPayload({ plan, testCase: effectiveTestCase, snapshot });
+    const rawInput = typeof request.input === "string" ? request.input : JSON.stringify(request.input ?? {});
+    assert.ok(
+      !plan.task.includes(rawInput),
+      `${testCase.name} bootstrap task must not expose the raw query before metadata bootstrap`,
+    );
 
-    // byclawCallAcpAgent delegation content: reuses plan.task, which embeds the
-    // user query plus the on-disk shared-context file paths that the remote ACP
-    // agent reads. Structured bundle data travels via files, not inline.
+    if (testCase.name === "agent") {
+      const duplicatePlan = createByclawAcpPlan({ config, snapshot, request });
+      const firstBundle = JSON.parse(fs.readFileSync(plan.sessionsSpawn.bundle.path, "utf8"));
+      const duplicateBundle = JSON.parse(fs.readFileSync(duplicatePlan.sessionsSpawn.bundle.path, "utf8"));
+      assert.notEqual(
+        firstBundle.sharedContext.runDir,
+        duplicateBundle.sharedContext.runDir,
+        "same-session plans must use different immutable run directories",
+      );
+    }
+
+    // byclawCallAcpAgent delegation content validates and inlines metadata as
+    // an authoritative business-rule manual before it permits query access.
     const callAgentContent = buildCallAgentContentFromPlan(plan);
-    assert.equal(
+    assert.notEqual(
       callAgentContent,
       plan.task,
-      `${testCase.name} call-agent content should equal plan.task`,
+      `${testCase.name} call-agent content should be a metadata-first envelope`,
     );
     assert.match(callAgentContent, /query\.md/u, `${testCase.name} call-agent content should point to query.md`);
     assert.match(
@@ -441,10 +483,18 @@ async function main() {
       /metadata\.md/u,
       `${testCase.name} call-agent content should point to metadata.md`,
     );
-    assert.match(
-      callAgentContent,
-      /plan-bundle\.json/u,
-      `${testCase.name} call-agent content should point to plan-bundle.json`,
+    assert.match(callAgentContent, /bootstrap-contract\.json/u);
+    assert.match(callAgentContent, /bootstrap-receipt\.json/u);
+    assert.match(callAgentContent, /complete metadata document/iu);
+    assert.match(callAgentContent, /referenced resources/iu);
+    assert.ok(
+      callAgentContent.indexOf("<METADATA_BUSINESS_RULE_MANUAL>") <
+        callAgentContent.indexOf("<USER_QUERY_ACCESS>"),
+      `${testCase.name} metadata manual must precede query access`,
+    );
+    assert.ok(
+      !callAgentContent.includes(rawInput),
+      `${testCase.name} call-agent bootstrap must not inline the raw query`,
     );
 
     summaries.push({

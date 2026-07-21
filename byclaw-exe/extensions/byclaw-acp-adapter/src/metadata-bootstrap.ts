@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { BUNDLE } from "./constants.js";
+import { BUNDLE, PATHS } from "./constants.js";
 import type { MetadataBootstrapContract } from "./types.js";
 
 const PRECEDENCE = [
@@ -148,12 +148,15 @@ export function renderMetadataFirstDelegationContent(params: {
     `Bootstrap id: ${contract.bootstrapId}`,
     `Bootstrap contract: ${path.join(contract.runDir, BUNDLE.bootstrapContractFileName)}`,
     `Authoritative metadata: ${contract.metadata.path}`,
+    `Required client instructions: ${contract.clientInstructions.path}`,
+    `Machine plan bundle: ${path.join(contract.runDir, PATHS.planBundleFileName)}`,
     `Expected metadata bytes: ${contract.metadata.bytes}`,
     `Expected metadata sha256: ${contract.metadata.sha256}`,
     `Bootstrap receipt: ${contract.receipt.path}`,
     "Read metadata.md from byte 0 through EOF, even when a file-reading tool truncates its first response.",
     "Verify the on-disk byte count and SHA-256 before treating bootstrap as READY.",
     "Treat the complete metadata document as the business-rule manual. Do not rely on a fixed list of known headings.",
+    "After metadata integrity passes, read the required client instructions named by the contract.",
     "Follow metadata instructions to load all referenced resources required for this task, including future resource types unknown to this adapter.",
     "Write bootstrap-receipt.json with READY or BLOCKED, integrity evidence, acknowledged rules, loaded referenced resources, and blockers.",
     "If any mandatory rule or referenced resource cannot be loaded, write BLOCKED and do not access the query.",
