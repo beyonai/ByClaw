@@ -56,7 +56,7 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 - 钉钉相关采集任务必须读取 [dingtalk-dws-bridge.md](./references/dingtalk-dws-bridge.md)，并通过 dws skill 获取数据；仍按 bycli 的落盘与采集后处理收尾规则处理
 - 微信公众平台 `weixin accounts/articles/save-articles`、`--auth-source`、`WECHAT_TOKEN` / `WECHAT_COOKIE` / `WECHAT_FINGERPRINT` 或 `mp.weixin.qq.com` 认证失败任务，必须读取 [references/weixin/SKILL.md](./references/weixin/SKILL.md)
 - 浏览器 session 结束后执行 cleanup（close tab → stop daemon → stop browser）
-- Login/Auth 页面例外：不关闭 session，报告 session name + URL 给用户
+- Login/Auth/人工验证页面例外：不关闭 session、TAB、daemon 或浏览器，报告 session name + URL 给用户并等待用户完成验证
 
 ## 意图决策树
 
@@ -194,7 +194,7 @@ bycli gh pr list --limit 5         # 透传调用
 |---------|-----------|
 | AUTH_REQUIRED (exit 77) | STOP，提示用户登录 |
 | BROWSER_CONNECT (exit 69) | STOP，运行 `bycli doctor` + `bycli daemon status` 诊断；`bycli daemon restart` 后仍连不上则停止一切动作，提示用户检查 Chrome 与 byCLI 扩展插件是否正常启动 |
-| CAPTCHA / 限流 | STOP，不是 adapter 问题 |
+| CAPTCHA / 限流 / 环境验证 | STOP，不是 adapter 问题；保持当前 TAB、daemon 和浏览器，等待用户完成验证 |
 | SELECTOR / EMPTY_RESULT / API_ERROR | 进入 AutoFix 流程 |
 | TIMEOUT / PAGE_CHANGED | 进入 AutoFix 流程 |
 | 3 轮修复仍失败 | 报告尝试过的方法，停止 |
@@ -263,9 +263,9 @@ openclaw browser --browser-profile openclaw stop
 - `daemon stop` 只断 CDP 连接，Chromium 仍在运行
 - 只有 `openclaw browser stop` 才能真正释放 Chromium 进程
 
-### Login/Auth 页面例外
+### Login/Auth/人工验证页面例外
 
-页面仍在 login/SSO/MFA 状态时，**不执行任何关闭操作**。保持 session 存活，向用户报告 session name + URL。
+页面仍在 login/SSO/MFA、CAPTCHA、反爬或环境验证状态时，**不执行任何关闭、跳转或重试操作**。保持当前 session、TAB、daemon 与浏览器存活，向用户报告 session name + URL，并等待用户亲自完成验证和明确确认。
 
 ### Kill-all-Chrome
 
