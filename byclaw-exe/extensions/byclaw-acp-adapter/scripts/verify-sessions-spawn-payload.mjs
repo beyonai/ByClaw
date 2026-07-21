@@ -294,6 +294,31 @@ function assertSessionsSpawnPayload(params) {
   );
   assert.match(metadata, /linkedSkills/u, `${testCase.name} metadata should include mounted linkedSkills`);
   assert.match(metadata, /skillDocPath/u, `${testCase.name} metadata should include absolute skillDocPath`);
+  assert.match(
+    metadata,
+    /Every Linked Skill[^\n]*mandatory bootstrap input/iu,
+    `${testCase.name} metadata should make every Linked Skill mandatory bootstrap input`,
+  );
+  assert.match(
+    metadata,
+    /Do not copy, install, symlink, or materialize[^\n]*public[^\n]*skill directories/iu,
+    `${testCase.name} metadata should forbid public skill-directory materialization`,
+  );
+  assert.match(
+    clientInstructions,
+    /every Linked Skill[^\n]*skillDocPath[^\n]*EOF/iu,
+    `${testCase.name} client instructions should load every Linked Skill from skillDocPath to EOF`,
+  );
+  assert.match(
+    clientInstructions,
+    /Do not copy, install, symlink, or materialize[^\n]*public[^\n]*skill directories/iu,
+    `${testCase.name} client instructions should forbid public skill-directory materialization`,
+  );
+  assert.match(
+    clientInstructions,
+    /apply every loaded Linked Skill[^\n]*trigger conditions[^\n]*does not count as using/iu,
+    `${testCase.name} client instructions should require actual use of triggered Linked Skills`,
+  );
   if (testCase.expectedAgentIds.includes("900002")) {
     assert.ok(
       bundle.linkedSkills.some((skill) => skill.id === FIXTURE_LINKED_SKILL_ID),
@@ -663,10 +688,30 @@ async function main() {
     assert.match(callAgentContent, /bootstrap-receipt\.json/u);
     assert.match(callAgentContent, /complete metadata document/iu);
     assert.match(callAgentContent, /referenced resources/iu);
+    assert.match(
+      callAgentContent,
+      /every Linked Skill[^\n]*skillDocPath[^\n]*EOF/iu,
+      `${testCase.name} call-agent content should load every Linked Skill before query access`,
+    );
+    assert.match(
+      callAgentContent,
+      /Do not copy, install, symlink, or materialize[^\n]*public[^\n]*skill directories/iu,
+      `${testCase.name} call-agent content should forbid public skill-directory materialization`,
+    );
+    assert.match(
+      callAgentContent,
+      /apply every loaded Linked Skill[^\n]*trigger conditions[^\n]*does not count as using/iu,
+      `${testCase.name} call-agent content should require actual use of triggered Linked Skills`,
+    );
     assert.ok(
       callAgentContent.indexOf("<METADATA_BUSINESS_RULE_MANUAL>") <
         callAgentContent.indexOf("<USER_QUERY_ACCESS>"),
       `${testCase.name} metadata manual must precede query access`,
+    );
+    assert.ok(
+      callAgentContent.search(/every Linked Skill[^\n]*skillDocPath[^\n]*EOF/iu) <
+        callAgentContent.indexOf("<USER_QUERY_ACCESS>"),
+      `${testCase.name} Linked Skills bootstrap must precede query access`,
     );
     assert.ok(
       !callAgentContent.includes(rawInput),
