@@ -26,6 +26,8 @@ public class DevloopTaskViewDto {
     private Integer stageLoopCount;
     private String assignee;
     private String agentName;
+    /** 关联数字员工头像，供任务详情与会话列表复用。 */
+    private String avatar;
     private String branchName;
     private String repoFullName;
     private String requirementTitle;

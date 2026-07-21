@@ -72,4 +72,18 @@ describe('SessionOverviewDrawer', () => {
       );
     });
   });
+
+  it('does not re-query after the initial task request fails', async () => {
+    mockListTasks.mockRejectedValueOnce(new Error('整体任务视图查询失败'));
+
+    render(<SessionOverviewDrawer open onClose={jest.fn()} projectId={10000811} projectName="百应研发项目" />);
+
+    await waitFor(() => {
+      expect(mockListTasks).toHaveBeenCalledTimes(1);
+    });
+    // 等待失败请求触发的状态更新完成，防止依赖变化再次触发初始查询。
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(mockListTasks).toHaveBeenCalledTimes(1);
+  });
 });

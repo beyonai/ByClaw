@@ -1,8 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState, type Key } from 'react';
 import { Drawer } from 'antd';
 import FileSpaceBlock from '@/layout/sider/components/FileSiderPanel/components/FileSpaceBlock';
-import useFilePreviewActions from '@/layout/sider/components/FileSiderPanel/hooks/useFilePreviewActions';
-import fileSiderStyles from '@/layout/sider/components/FileSiderPanel/index.module.less';
 import { DragType } from '@/components/QueryInput/withDrag';
 import type { FileBrowserItem } from '@/service/fileBrowser';
 import { listFiles } from '@/service/fileBrowser';
@@ -18,6 +16,7 @@ import {
   unwrapListResponse,
 } from '@/layout/sider/components/FileSiderPanel/utils';
 import useGlobal from '@/hooks/useGlobal';
+import ProjectSessionFilePreviewDrawer from './ProjectSessionFilePreviewDrawer';
 
 type ProjectSessionResultDrawerProps = {
   open: boolean;
@@ -39,12 +38,8 @@ const ProjectSessionResultDrawer: React.FC<ProjectSessionResultDrawerProps> = ({
   const [loading, setLoading] = useState(false);
   const [childrenByPath, setChildrenByPath] = useState<Record<string, FileBrowserItem[]>>({});
   const [expandedKeys, setExpandedKeys] = useState<Key[]>([]);
+  const [previewFile, setPreviewFile] = useState<FileBrowserItem>();
   const clickTimerRef = useRef<number | null>(null);
-  const { handlePreview } = useFilePreviewActions({
-    resourceId,
-    EventEmitter,
-    previewClassName: fileSiderStyles.previewContent,
-  });
 
   const clearClickTimer = useCallback(() => {
     if (clickTimerRef.current) {
@@ -73,7 +68,10 @@ const ProjectSessionResultDrawer: React.FC<ProjectSessionResultDrawerProps> = ({
   }, [resourceId, sessionId]);
 
   useEffect(() => {
-    if (!open) return;
+    setPreviewFile(undefined);
+    if (!open) {
+      return;
+    }
     setExpandedKeys([]);
     setChildrenByPath({});
     void loadSessionFiles();
@@ -108,11 +106,12 @@ const ProjectSessionResultDrawer: React.FC<ProjectSessionResultDrawerProps> = ({
       clickTimerRef.current = window.setTimeout(() => {
         clickTimerRef.current = null;
         if (!isDirectory(node) && canPreviewFile(node)) {
-          void handlePreview(node);
+          // 成果文件在嵌套右侧抽屉中预览，避免全局预览层被成果抽屉遮挡。
+          setPreviewFile(node);
         }
       }, 220);
     },
-    [clearClickTimer, handlePreview]
+    [clearClickTimer]
   );
 
   const handleNodeDoubleClick = useCallback(
@@ -128,8 +127,14 @@ const ProjectSessionResultDrawer: React.FC<ProjectSessionResultDrawerProps> = ({
     [EventEmitter, clearClickTimer, resourceId]
   );
 
+  const handleClose = () => {
+    clearClickTimer();
+    setPreviewFile(undefined);
+    onClose();
+  };
+
   return (
-    <Drawer title="任务成果" open={open} onClose={onClose} width={480} destroyOnClose>
+    <Drawer title="任务成果" open={open} onClose={handleClose} width={480} destroyOnClose>
       <FileSpaceBlock
         title={sessionName || '当前会话'}
         loading={loading}
@@ -145,6 +150,12 @@ const ProjectSessionResultDrawer: React.FC<ProjectSessionResultDrawerProps> = ({
         onNodeDoubleClick={handleNodeDoubleClick}
         getActionItems={() => []}
         onAction={() => undefined}
+      />
+      <ProjectSessionFilePreviewDrawer
+        open={!!previewFile}
+        resourceId={resourceId}
+        file={previewFile}
+        onClose={() => setPreviewFile(undefined)}
       />
     </Drawer>
   );

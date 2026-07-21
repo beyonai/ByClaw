@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Button, Dropdown, Empty, Input, List, Modal, Spin, Tag, message } from 'antd';
 import { DeleteOutlined, MoreOutlined, PlusOutlined, RobotOutlined, SearchOutlined } from '@ant-design/icons';
-import { useSelector } from '@umijs/max';
+import { useIntl, useSelector } from '@umijs/max';
 import AddAuthModal from '@/pages/manager/components/AuthListDrawer/AddAuthModal';
 import { addProjectMember, bindMemberAgent, listProjectMembers, removeProjectMember } from '@/service/devloop';
 import { POST } from '@/service/common/request';
@@ -23,7 +23,14 @@ const isProjectOwnerMember = (member: any, creatorId?: string | number) => {
 };
 
 const ProjectMemberList: React.FC<ProjectMemberListProps> = ({ projectId, creatorId, onMembersChange }) => {
+  const intl = useIntl();
   const userInfo = useSelector((state: any) => state.user?.userInfo) || {};
+  // 成员面板文案集中使用同一命名空间，便于与项目详情其它 Tab 保持一致。
+  const t = useCallback(
+    (id: string, values?: Record<string, string | number>) =>
+      intl.formatMessage({ id: `projectSpace.members.${id}` }, values),
+    [intl]
+  );
   const [members, setMembers] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [showAuthAddModal, setShowAuthAddModal] = useState(false);
@@ -66,7 +73,7 @@ const ProjectMemberList: React.FC<ProjectMemberListProps> = ({ projectId, creato
     });
 
     if (!pendingUsers.length) {
-      message.warning('请选择要添加的成员');
+      message.warning(t('selectMembers'));
       return;
     }
 
@@ -82,11 +89,11 @@ const ProjectMemberList: React.FC<ProjectMemberListProps> = ({ projectId, creato
           });
         })
       );
-      message.success(`已添加 ${pendingUsers.length} 个成员`);
+      message.success(t('addSuccess', { count: pendingUsers.length }));
       setShowAuthAddModal(false);
       void fetchMembers();
     } catch {
-      message.error('添加失败');
+      message.error(t('addFailed'));
     }
   };
 
@@ -99,22 +106,22 @@ const ProjectMemberList: React.FC<ProjectMemberListProps> = ({ projectId, creato
 
   const removeMember = async (member: any) => {
     await removeProjectMember(member.memberId);
-    message.success('已移除');
+    message.success(t('removeSuccess'));
     void fetchMembers();
   };
 
   const handleRemove = (member: any) => {
     if (isProjectOwnerMember(member, creatorId)) {
-      message.warning('创建者不能被删除');
+      message.warning(t('creatorCannotRemove'));
       return;
     }
 
     Modal.confirm({
-      title: isCurrentUserMember(member) ? '移除自己' : '移除成员',
+      title: isCurrentUserMember(member) ? t('removeSelf') : t('removeMember'),
       content: isCurrentUserMember(member)
-        ? '移除自己后将无法继续访问该项目，确定移除吗？'
-        : `确定要移除「${member.userName || member.userId}」吗？`,
-      okText: '移除',
+        ? t('removeSelfConfirm')
+        : t('removeConfirm', { name: `${member.userName || member.userId}` }),
+      okText: t('remove'),
       okButtonProps: { danger: true },
       onOk: async () => {
         await removeMember(member);
@@ -161,12 +168,12 @@ const ProjectMemberList: React.FC<ProjectMemberListProps> = ({ projectId, creato
         memberId: bindingMember.memberId,
         agentId: agent.resourceId || agent.agentId || agent.id,
       });
-      message.success(`已绑定数字员工「${agent.resourceName || agent.name || agent.agentName}」`);
+      message.success(t('bindSuccess', { name: `${agent.resourceName || agent.name || agent.agentName}` }));
       void fetchMembers();
       setShowAgentModal(false);
       setBindingMember(null);
     } catch {
-      message.error('绑定失败');
+      message.error(t('bindFailed'));
     }
   };
 
@@ -194,17 +201,17 @@ const ProjectMemberList: React.FC<ProjectMemberListProps> = ({ projectId, creato
             {
               key: 'bind',
               icon: <RobotOutlined />,
-              label: member.agentId ? '更换数字员工' : '绑定数字员工',
+              label: member.agentId ? t('changeAgent') : t('bindAgent'),
             },
             ...(!isProjectOwnerMember(member, creatorId)
               ? [
-                {
-                  key: 'remove',
-                  danger: true,
-                  icon: <DeleteOutlined />,
-                  label: '移除',
-                },
-              ]
+                  {
+                    key: 'remove',
+                    danger: true,
+                    icon: <DeleteOutlined />,
+                    label: t('remove'),
+                  },
+                ]
               : []),
           ],
           onClick: ({ key }) => {
@@ -227,21 +234,21 @@ const ProjectMemberList: React.FC<ProjectMemberListProps> = ({ projectId, creato
   return (
     <div>
       <div className={styles.detailSectionHeader}>
-        <span>{members.length} 个成员</span>
+        <span>{t('count', { count: members.length })}</span>
         <Button
           size="small"
           className={styles.detailHeaderActionButton}
           icon={<PlusOutlined />}
           onClick={() => setShowAuthAddModal(true)}
         >
-          添加
+          {t('add')}
         </Button>
       </div>
 
       <Spin spinning={loading}>
         {members.length === 0 ? (
           // 成员空态与需求 Tab 统一使用简洁图标，保持项目详情各列表的视觉一致。
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无成员" />
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('empty')} />
         ) : (
           <>
             {/* 成员列表复用任务 Tab 的无分隔线紧凑行样式。 */}
@@ -271,13 +278,13 @@ const ProjectMemberList: React.FC<ProjectMemberListProps> = ({ projectId, creato
                           {/* 创建者标签紧跟成员名称展示，和禁删判断使用同一套规则。 */}
                           {isCreatorMember && (
                             <Tag className="project-member-role-tag" color="blue">
-                              创建者
+                              {t('creator')}
                             </Tag>
                           )}
                         </span>
                       }
                       description={
-                        <span className={styles.projectMemberDescription}>{member.agentName || '未绑定数字员工'}</span>
+                        <span className={styles.projectMemberDescription}>{member.agentName || t('unboundAgent')}</span>
                       }
                     />
                     {renderMemberActionMenu(member)}
@@ -291,7 +298,7 @@ const ProjectMemberList: React.FC<ProjectMemberListProps> = ({ projectId, creato
 
       {showAuthAddModal && (
         <AddAuthModal
-          title="新增授权对象"
+          title={t('addAuthorizedObject')}
           onlyUser
           showPost={false}
           value={[]}
@@ -301,7 +308,7 @@ const ProjectMemberList: React.FC<ProjectMemberListProps> = ({ projectId, creato
       )}
 
       <Modal
-        title={`为「${bindingMember?.userName || ''}」绑定数字员工`}
+        title={t('bindAgentTitle', { name: bindingMember?.userName || '' })}
         open={showAgentModal}
         onCancel={() => {
           setShowAgentModal(false);
@@ -311,18 +318,18 @@ const ProjectMemberList: React.FC<ProjectMemberListProps> = ({ projectId, creato
         width={520}
       >
         <Input.Search
-          placeholder="搜索数字员工"
+          placeholder={t('searchAgent')}
           value={agentKeyword}
           onChange={(event) => setAgentKeyword(event.target.value)}
           onSearch={() => handleSearchAgent(1)}
           enterButton={<SearchOutlined />}
           loading={agentSearching}
-          style={{ marginBottom: 16 }}
+          className={styles.agentSearchInput}
         />
         <Spin spinning={agentSearching}>
-          <div style={{ height: 400, overflowY: 'auto' }}>
+          <div className={styles.agentList}>
             {agentList.length === 0 ? (
-              <Empty description="暂无数字员工" />
+              <Empty description={t('emptyAgents')} />
             ) : (
               <List
                 dataSource={agentList}
@@ -337,12 +344,12 @@ const ProjectMemberList: React.FC<ProjectMemberListProps> = ({ projectId, creato
                   <List.Item
                     actions={[
                       <Button key="select" type="link" size="small" onClick={() => handleBindAgent(agent)}>
-                        选择
+                        {t('select')}
                       </Button>,
                     ]}
                   >
                     <List.Item.Meta
-                      avatar={<div style={{ width: 40, height: 40 }}>{getAgentChatAvatar(getAgentAvatar(agent))}</div>}
+                      avatar={<div className={styles.agentListAvatar}>{getAgentChatAvatar(getAgentAvatar(agent))}</div>}
                       title={agent.resourceName || agent.name || agent.agentName}
                       description={agent.description || agent.desc || ''}
                     />

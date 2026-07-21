@@ -9,7 +9,6 @@ import {
   InputNumber,
   List,
   Modal,
-  Pagination,
   Radio,
   Select,
   Space,
@@ -37,7 +36,7 @@ import {
   ReloadOutlined,
   RightOutlined,
 } from '@ant-design/icons';
-import { useDispatch, useIntl, useNavigate } from '@umijs/max';
+import { useDispatch, useIntl, useNavigate, useSelector } from '@umijs/max';
 import dayjs, { type Dayjs } from 'dayjs';
 import {
   checkDwsAuthStatus,
@@ -72,6 +71,7 @@ import TaskDetailDrawer from './TaskDetailDrawer';
 import type { ProjectSpace } from '@/pages/projectSpace/types';
 import { getArrayData, normalizeProjectSession } from '@/pages/projectSpace/utils';
 import AntdIcon from '@/components/AntdIcon';
+import ChatAvatar from '@/components/ChatAvatar';
 import RenameModal from '@/components/QueryInput/components/FileBrowserEntry/components/FileBrowserPanel/RenameModal';
 import { DragType } from '@/components/QueryInput/withDrag';
 import useGlobal from '@/hooks/useGlobal';
@@ -99,6 +99,8 @@ import {
   unwrapListResponse,
 } from '@/layout/sider/components/FileSiderPanel/utils';
 import { downloadFile as downloadUrlFile, getFileUrl } from '@/utils/file';
+import { sessionHandler } from '@/utils/session';
+import type { ISession } from '@/typescript/session';
 import { SiderContentContext } from '@/layout/sider/siderContentContext';
 import ProjectMemberList from './ProjectMemberList';
 import styles from './index.module.less';
@@ -162,6 +164,10 @@ type TaskQueryState = {
   dateRange: TaskDateRange;
 };
 
+type TaskFetchOptions = Partial<TaskQueryState> & {
+  append?: boolean;
+};
+
 // AI 评分明细：与后端 score_detail JSON 字段、满分口径对齐
 type ScoreDetail = {
   businessValue?: number;
@@ -174,34 +180,31 @@ type ScoreDetail = {
   summary?: string;
 };
 
-const SCORE_DIMENSIONS: { key: keyof ScoreDetail; label: string; max: number }[] = [
-  { key: 'businessValue', label: '业务价值', max: 30 },
-  { key: 'userImpact', label: '用户影响', max: 20 },
-  { key: 'urgency', label: '紧迫度', max: 15 },
-  { key: 'strategyFit', label: '战略匹配', max: 15 },
-  { key: 'feasibility', label: '实现可行性', max: 10 },
-  { key: 'reuseValue', label: '复用价值', max: 10 },
+type ProjectDetailTranslate = (id: string, values?: Record<string, string | number>) => string;
+
+// 详情面板的静态元数据仅保存语言键，切换语言时不会再依赖中文常量。
+const SCORE_DIMENSIONS: { key: keyof ScoreDetail; labelId: string; max: number }[] = [
+  { key: 'businessValue', labelId: 'requirement.score.businessValue', max: 30 },
+  { key: 'userImpact', labelId: 'requirement.score.userImpact', max: 20 },
+  { key: 'urgency', labelId: 'requirement.score.urgency', max: 15 },
+  { key: 'strategyFit', labelId: 'requirement.score.strategyFit', max: 15 },
+  { key: 'feasibility', labelId: 'requirement.score.feasibility', max: 10 },
+  { key: 'reuseValue', labelId: 'requirement.score.reuseValue', max: 10 },
 ];
 
 const getTaskStatusMeta = (status?: string) => {
   // 任务列表与任务视图共用状态口径，同时兼容后端返回的中英文枚举值。
   const normalizedStatus = `${status || ''}`.trim().toLowerCase();
   if (['完成', '已完成', 'done', 'completed'].includes(normalizedStatus)) {
-    return { label: '完成', className: 'Done' };
+    return { labelId: 'task.status.completed', className: 'Done' };
   }
   if (['进行中', 'doing', 'running', 'in_progress'].includes(normalizedStatus)) {
-    return { label: '进行中', className: 'Running' };
+    return { labelId: 'task.status.inProgress', className: 'Running' };
   }
   if (['暂停', 'paused', 'pause'].includes(normalizedStatus)) {
-    return { label: '暂停', className: 'Paused' };
+    return { labelId: 'task.status.paused', className: 'Paused' };
   }
-  return { label: '待开始', className: 'Pending' };
-};
-
-const getConfirmModeDescription = (confirmMode: string) => {
-  if (confirmMode === 'auto') return '扫描到的新需求将自动派生为研发任务并启动会话';
-  if (confirmMode === 'score') return '综合评分达到阈值的需求自动派生，其余进入列表等待人工确认';
-  return '扫描到的需求进入列表，需人工点击「启动任务」';
+  return { labelId: 'task.status.pending', className: 'Pending' };
 };
 
 const parseScoreDetail = (raw?: string | null): ScoreDetail => {
@@ -253,15 +256,17 @@ type Props = {
 };
 
 const REQUIREMENT_PAGE_SIZE = 20;
+// 任务列表固定页大小，取消分页器后按此值触底追加。
+const TASK_PAGE_SIZE = 20;
 
 // GitHub 文件变更状态 -> 角标字母/配色,沿用常见 git 管理视觉:新增绿/修改黄/删除红/重命名蓝。
-const FILE_CHANGE_META: Record<string, { letter: string; label: string; className: string }> = {
-  added: { letter: 'A', label: '新增', className: 'fileChangeAdded' },
-  modified: { letter: 'M', label: '修改', className: 'fileChangeModified' },
-  changed: { letter: 'M', label: '修改', className: 'fileChangeModified' },
-  removed: { letter: 'D', label: '删除', className: 'fileChangeRemoved' },
-  renamed: { letter: 'R', label: '重命名', className: 'fileChangeRenamed' },
-  copied: { letter: 'C', label: '复制', className: 'fileChangeRenamed' },
+const FILE_CHANGE_META: Record<string, { letter: string; labelId: string; className: string }> = {
+  added: { letter: 'A', labelId: 'codeChanges.status.added', className: 'fileChangeAdded' },
+  modified: { letter: 'M', labelId: 'codeChanges.status.modified', className: 'fileChangeModified' },
+  changed: { letter: 'M', labelId: 'codeChanges.status.modified', className: 'fileChangeModified' },
+  removed: { letter: 'D', labelId: 'codeChanges.status.removed', className: 'fileChangeRemoved' },
+  renamed: { letter: 'R', labelId: 'codeChanges.status.renamed', className: 'fileChangeRenamed' },
+  copied: { letter: 'C', labelId: 'codeChanges.status.copied', className: 'fileChangeRenamed' },
 };
 
 const getFileChangeMeta = (status?: string) =>
@@ -274,26 +279,26 @@ const splitFilePath = (path: string) => {
 };
 
 const cronPresets = [
-  { value: '*/1 * * * *', label: '每1分钟' },
-  { value: '*/5 * * * *', label: '每5分钟' },
-  { value: '*/15 * * * *', label: '每15分钟' },
-  { value: '*/30 * * * *', label: '每30分钟' },
-  { value: '0 */1 * * *', label: '每1小时' },
-  { value: '0 */2 * * *', label: '每2小时' },
-  { value: '0 9,14,18 * * 1-5', label: '工作日 9/14/18点' },
+  { value: '*/1 * * * *', labelId: 'source.cron.everyOneMinute' },
+  { value: '*/5 * * * *', labelId: 'source.cron.everyFiveMinutes' },
+  { value: '*/15 * * * *', labelId: 'source.cron.everyFifteenMinutes' },
+  { value: '*/30 * * * *', labelId: 'source.cron.everyThirtyMinutes' },
+  { value: '0 */1 * * *', labelId: 'source.cron.everyOneHour' },
+  { value: '0 */2 * * *', labelId: 'source.cron.everyTwoHours' },
+  { value: '0 9,14,18 * * 1-5', labelId: 'source.cron.weekdaySchedule' },
 ];
 
-const getCronDisplayText = (cronExpr?: string) => {
+const getCronDisplayText = (cronExpr: string | undefined, t: ProjectDetailTranslate) => {
   // 渠道卡片展示用户可读的扫描频率，避免直接暴露 cron 表达式。
-  if (!cronExpr) return '手动';
+  if (!cronExpr) return t('source.cron.manual');
   const matchedPreset = cronPresets.find((preset) => preset.value === cronExpr);
-  if (matchedPreset) return `${matchedPreset.label}扫描`;
+  if (matchedPreset) return t('source.cron.scanAt', { frequency: t(matchedPreset.labelId) });
 
   const minuteMatch = cronExpr.match(/^\*\/(\d+) \* \* \* \*$/);
-  if (minuteMatch) return `每${minuteMatch[1]}分钟扫描`;
+  if (minuteMatch) return t('source.cron.everyMinutesScan', { minutes: minuteMatch[1] });
 
   const hourMatch = cronExpr.match(/^0 \*\/(\d+) \* \* \*$/);
-  if (hourMatch) return `每${hourMatch[1]}小时扫描`;
+  if (hourMatch) return t('source.cron.everyHoursScan', { hours: hourMatch[1] });
 
   return cronExpr;
 };
@@ -321,11 +326,15 @@ const getDefaultManualRequirementForm = (): ManualRequirementForm => ({
   productContent: '',
 });
 
-const formatConfig = (type: string, config?: string) => {
+const formatConfig = (type: string, config: string | undefined, t: ProjectDetailTranslate) => {
   try {
     const parsedConfig = JSON.parse(config || '{}');
     if (type === 'dingtalk') return parsedConfig.chatName || parsedConfig.chatId || parsedConfig.groupId || '-';
-    if (type === 'github_issue') return parsedConfig.labels ? `标签: ${parsedConfig.labels}` : '全部 Issue';
+    if (type === 'github_issue') {
+      return parsedConfig.labels
+        ? t('source.config.labels', { labels: parsedConfig.labels })
+        : t('source.config.allIssues');
+    }
     return '-';
   } catch {
     return '-';
@@ -337,13 +346,28 @@ const getSourceIcon = (sourceType: string) => {
   return <GithubOutlined />;
 };
 
-const getSourceLabel = (sourceType?: string) => {
-  if (sourceType === 'dingtalk') return '钉钉';
-  if (sourceType === 'github_issue') return 'GitHub Issues';
-  return '需求来源';
+const getSourceLabel = (sourceType: string | undefined, t: ProjectDetailTranslate) => {
+  if (sourceType === 'dingtalk') return t('source.type.dingtalk');
+  if (sourceType === 'github_issue') return t('source.type.githubIssues');
+  return t('source.type.default');
 };
 
-const getSessionResourceName = (session: Partial<ProjectResourceSession>) => session?.sessionName || '未命名会话';
+const getSessionResourceName = (session: Partial<ProjectResourceSession>, t: ProjectDetailTranslate) =>
+  session?.sessionName || t('resource.unnamedSession');
+
+// 非研发任务视觉上等同普通会话，复用会话头像的默认图片和稳定主题色规则。
+const normalizeTaskSession = (task: any, fallbackProjectId: number, t: ProjectDetailTranslate): ISession => {
+  const session: ISession = {
+    parentSessionId: Number(task?.parentSessionId || 0),
+    sessionId: `${task?.sessionId || task?.taskId || ''}`,
+    sessionName: task?.sessionName || task?.title || task?.taskName || t('task.defaultSessionName'),
+    createTime: `${task?.createTime || ''}`,
+    updateTime: `${task?.updateTime || task?.createTime || ''}`,
+    projectId: `${task?.projectId ?? fallbackProjectId}`,
+    avatar: task?.avatar,
+  };
+  return sessionHandler(session);
+};
 
 const normalizeProjectSpaceFile = (file: DevloopProjectSpaceFile): ProjectSpaceFileItem => ({
   ...file,
@@ -357,14 +381,14 @@ const normalizeProjectSpaceFile = (file: DevloopProjectSpaceFile): ProjectSpaceF
 const isProjectSpaceFile = (item: FileTreeItem): item is ProjectSpaceFileTreeItem =>
   'isProjectSpaceFile' in item && item.isProjectSpaceFile === true;
 
-const getRequirementDetailText = (requirement: RequirementItem) =>
+const getRequirementDetailText = (requirement: RequirementItem, t: ProjectDetailTranslate) =>
   requirement.productContent ||
   requirement.originalContent ||
   requirement.content ||
   requirement.description ||
   requirement.summary ||
   requirement.title ||
-  '-';
+  t('common.emptyValue');
 
 // 资源 tab 下会话文件路径形如 /.sessions/{sessionId}/，操作后需要按会话刷新对应目录。
 const getResourceSessionIdByPath = (path: string) => {
@@ -381,8 +405,15 @@ const ProjectDetailPanel: React.FC<Props> = ({
   onProjectSharedChange,
 }) => {
   const intl = useIntl();
+  // 项目详情的所有固定界面文案统一从 detail 命名空间读取。
+  const t = useCallback(
+    (id: string, values?: Record<string, string | number>) =>
+      intl.formatMessage({ id: `projectSpace.detail.${id}` }, values),
+    [intl]
+  );
   const dispatch = useDispatch();
   const navigate = useNavigate();
+  const userInfo = useSelector(({ user }: any) => user.userInfo);
   const { EventEmitter, sessionId: activeChatSessionId, setSessionId } = useGlobal();
   const activeSiderAgent = useActiveSiderAgent();
   const { setDetailPanel, clearDetailPanel } = React.useContext(SiderContentContext);
@@ -395,8 +426,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const [startingRequirementIds, setStartingRequirementIds] = useState<Set<number>>(() => new Set());
   const [tasks, setTasks] = useState<any[]>([]);
   const [taskTotal, setTaskTotal] = useState(0);
-  const [taskPageNum, setTaskPageNum] = useState(1);
-  const [taskPageSize, setTaskPageSize] = useState(20);
+  const [hasMoreTasks, setHasMoreTasks] = useState(false);
   const [taskDateRange, setTaskDateRange] = useState<TaskDateRange>(null);
   const [, setMembers] = useState<any[]>([]);
   const [resourceFileScope, setResourceFileScope] = useState<ResourceFileScope>('current');
@@ -439,8 +469,12 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const [logLoading, setLogLoading] = useState(false);
   const [channelPanelOpen, setChannelPanelOpen] = useState(false);
   const [taskKanbanOpen, setTaskKanbanOpen] = useState(false);
-  // 列表项直接打开环节详情抽屉，不必先经整体视图。
+  // 研发任务通过更多操作打开环节详情抽屉，不必先经整体视图。
   const [detailTask, setDetailTask] = useState<any>(null);
+  // 记录任务列表最近一次点击项，详情打开或进入会话后仍保留选中反馈。
+  const [selectedTaskId, setSelectedTaskId] = useState<string>();
+  // 菜单展开时保持研发任务的更多操作可见，避免鼠标移入菜单后图标闪动。
+  const [openTaskActionId, setOpenTaskActionId] = useState<string>();
   const [repoModalOpen, setRepoModalOpen] = useState(false);
   const [repoForm, setRepoForm] = useState({ repoFullName: '', repoUrl: '', defaultBranch: 'main' });
   const [repoSaving, setRepoSaving] = useState(false);
@@ -453,7 +487,10 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const dwsAuthTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const startingRequirementIdsRef = useRef<Set<number>>(new Set());
   const resourceClickTimerRef = useRef<number | null>(null);
-  const taskQueryRef = useRef<TaskQueryState>({ pageNum: 1, pageSize: 20, dateRange: null });
+  const taskQueryRef = useRef<TaskQueryState>({ pageNum: 1, pageSize: TASK_PAGE_SIZE, dateRange: null });
+  const taskQueryVersionRef = useRef(0);
+  const taskAppendingVersionRef = useRef<number | null>(null);
+  const taskRequestCountRef = useRef(0);
 
   const projectId = Number(project?.projectId);
   // 项目类型来自后端/静态参数，先按字符串归一，避免默认项目枚举声明不同步时报比较类型错误。
@@ -475,15 +512,15 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const handleOpenTaskSession = useCallback(
     (task: any) => {
       if (!task?.sessionId) {
-        message.warning('该任务尚未关联会话');
+        message.warning(t('task.noSession'));
         return;
       }
 
-      // 非研发项目的任务直接进入关联会话，并补齐会话缓存和项目上下文。
+      // 任务列表单击直接进入关联会话，并补齐会话缓存和项目上下文。
       const taskSessionPayload = {
         ...task,
         sessionId: `${task.sessionId}`,
-        sessionName: task.sessionName || task.title || task.taskName || '任务会话',
+        sessionName: task.sessionName || task.title || task.taskName || t('task.defaultSessionName'),
       };
       const targetProjectId = [projectId, task.projectId]
         .map((candidateProjectId) => Number(candidateProjectId))
@@ -523,7 +560,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
       setSessionId?.(String(task.sessionId));
       navigate('/chat');
     },
-    [EventEmitter, dispatch, navigate, project?.projectName, projectId, setSessionId]
+    [EventEmitter, dispatch, navigate, project?.projectName, projectId, setSessionId, t]
   );
 
   const projectSessions = useMemo(() => {
@@ -541,12 +578,12 @@ const ProjectDetailPanel: React.FC<Props> = ({
       return (
         projectSessions.find((session) => `${session.sessionId}` === activeSessionId) || {
           sessionId: activeSessionId,
-          sessionName: '当前会话',
+          sessionName: t('resource.currentSession'),
         }
       );
     }
     return projectSessions[0];
-  }, [activeChatSessionId, projectSessions]);
+  }, [activeChatSessionId, projectSessions, t]);
 
   const fetchSources = useCallback(async () => {
     if (!projectId) return [];
@@ -584,13 +621,18 @@ const ProjectDetailPanel: React.FC<Props> = ({
   );
 
   const fetchTasks = useCallback(
-    async (overrides: Partial<TaskQueryState> = {}) => {
+    async ({ append = false, ...overrides }: TaskFetchOptions = {}) => {
       if (!projectId) return;
+
       const queryState = { ...taskQueryRef.current, ...overrides };
+      const queryVersion = append ? taskQueryVersionRef.current : taskQueryVersionRef.current + 1;
+      if (append && taskAppendingVersionRef.current === queryVersion) return;
+
+      if (!append) taskQueryVersionRef.current = queryVersion;
       taskQueryRef.current = queryState;
-      setTaskPageNum(queryState.pageNum);
-      setTaskPageSize(queryState.pageSize);
       setTaskDateRange(queryState.dateRange);
+      if (append) taskAppendingVersionRef.current = queryVersion;
+      taskRequestCountRef.current += 1;
       setTasksLoading(true);
       try {
         const taskPage = await listTasks({
@@ -600,10 +642,28 @@ const ProjectDetailPanel: React.FC<Props> = ({
           createTimeStart: queryState.dateRange?.[0]?.startOf('day').format('YYYY-MM-DD HH:mm:ss'),
           createTimeEnd: queryState.dateRange?.[1]?.endOf('day').format('YYYY-MM-DD HH:mm:ss'),
         });
-        setTasks(Array.isArray(taskPage?.list) ? taskPage.list : []);
-        setTaskTotal(taskPage?.total || 0);
+        // 筛选重置列表，触底请求只追加未出现过的任务，避免滚动事件重复触发产生重复卡片。
+        if (queryVersion !== taskQueryVersionRef.current) return;
+
+        const taskList = Array.isArray(taskPage?.list) ? taskPage.list : [];
+        const total = Number(taskPage?.total || 0);
+        setTasks((currentTasks) => {
+          if (!append) return taskList;
+
+          const existingTaskKeys = new Set(currentTasks.map((task) => `${task.taskId || task.sessionId}`));
+          return [
+            ...currentTasks,
+            ...taskList.filter((task) => !existingTaskKeys.has(`${task.taskId || task.sessionId}`)),
+          ];
+        });
+        setTaskTotal(total);
+        setHasMoreTasks(queryState.pageNum * queryState.pageSize < total);
       } finally {
-        setTasksLoading(false);
+        if (append && taskAppendingVersionRef.current === queryVersion) {
+          taskAppendingVersionRef.current = null;
+        }
+        taskRequestCountRef.current = Math.max(0, taskRequestCountRef.current - 1);
+        setTasksLoading(taskRequestCountRef.current > 0);
       }
     },
     [projectId]
@@ -664,12 +724,12 @@ const ProjectDetailPanel: React.FC<Props> = ({
       );
     } catch (error) {
       console.error('Failed to load shared project files:', error);
-      message.error('共享文件加载失败');
+      message.error(t('resource.sharedFilesLoadFailed'));
       setSharedFiles([]);
     } finally {
       setSharedFilesLoading(false);
     }
-  }, [projectId]);
+  }, [projectId, t]);
 
   // 代码变更按当前会话(任务)拉取:远程分支相对基线的文件 diff。切换会话时重取。
   const fetchTaskChanges = useCallback(async (sessionId?: string | number | null) => {
@@ -812,12 +872,12 @@ const ProjectDetailPanel: React.FC<Props> = ({
         key,
         label: (
           <div className={employeeStyles.dropdownMenuItem}>
-            {key === 'saveToSpace' ? '保存到空间' : intl.formatMessage({ id: labelIdMap[key] })}
+            {key === 'saveToSpace' ? t('resource.saveToSpace') : intl.formatMessage({ id: labelIdMap[key] })}
           </div>
         ),
       }));
     },
-    [intl]
+    [intl, t]
   );
 
   const handleDeleteResourceFile = useCallback(
@@ -928,12 +988,12 @@ const ProjectDetailPanel: React.FC<Props> = ({
       if (!projectId) return;
       const resourceSessionId = getResourceSessionIdByPath(item.path);
       if (!resourceSessionId) {
-        message.warning('无法识别文件所属会话');
+        message.warning(t('resource.sessionNotFound'));
         return;
       }
 
       const messageKey = 'projectSaveFileToSpace';
-      message.loading({ key: messageKey, content: '正在保存到空间...', duration: 0 });
+      message.loading({ key: messageKey, content: t('resource.savingToSpace'), duration: 0 });
       try {
         await saveProjectFileToSpace({
           projectId,
@@ -941,13 +1001,13 @@ const ProjectDetailPanel: React.FC<Props> = ({
           filePath: item.path,
           fileName: item.name,
         });
-        message.success({ key: messageKey, content: '已保存到空间' });
+        message.success({ key: messageKey, content: t('resource.savedToSpace') });
         await fetchSharedResourceFiles();
       } catch (error: any) {
-        message.error({ key: messageKey, content: error?.message || '保存到空间失败' });
+        message.error({ key: messageKey, content: error?.message || t('resource.saveToSpaceFailed') });
       }
     },
-    [fetchSharedResourceFiles, projectId]
+    [fetchSharedResourceFiles, projectId, t]
   );
 
   const handleSharedResourceFileAction = useCallback(
@@ -1045,11 +1105,13 @@ const ProjectDetailPanel: React.FC<Props> = ({
   ]);
 
   useEffect(() => {
-    taskQueryRef.current = { pageNum: 1, pageSize: 20, dateRange: null };
-    setTaskPageNum(1);
-    setTaskPageSize(20);
+    taskQueryRef.current = { pageNum: 1, pageSize: TASK_PAGE_SIZE, dateRange: null };
+    taskQueryVersionRef.current += 1;
+    taskAppendingVersionRef.current = null;
     setTaskDateRange(null);
+    setTasks([]);
     setTaskTotal(0);
+    setHasMoreTasks(false);
     setActiveTab(showRequirementsTab ? 'requirements' : 'tasks');
     setDetailReq(null);
     setVisibleRequirementCount(REQUIREMENT_PAGE_SIZE);
@@ -1158,22 +1220,19 @@ const ProjectDetailPanel: React.FC<Props> = ({
   // 各 tab 只响应自己的加载状态；需求 tab 已有可见数据时不再整块遮罩，避免“数据已出现但还在 loading”的观感。
   const detailSpinning =
     (activeTab === 'requirements' && requirementsTabLoading && !hasRequirementVisibleData) ||
-    (activeTab === 'tasks' && tasksLoading);
+    (activeTab === 'tasks' && tasksLoading && !tasks.length);
 
   const tabItems = useMemo(
     () => [
-      ...(showRequirementsTab ? [{ key: 'requirements', label: '需求' }] : []),
-      { key: 'tasks', label: '任务' },
-      { key: 'resources', label: '资源' },
-      ...(showMembersTab ? [{ key: 'members', label: '成员' }] : []),
+      ...(showRequirementsTab ? [{ key: 'requirements', label: t('tabs.requirements') }] : []),
+      { key: 'tasks', label: t('tabs.tasks') },
+      { key: 'resources', label: t('tabs.resources') },
+      ...(showMembersTab ? [{ key: 'members', label: t('tabs.members') }] : []),
     ],
-    [showMembersTab, showRequirementsTab]
+    [showMembersTab, showRequirementsTab, t]
   );
 
-  const detailPanelStyle = useMemo(
-    () => ({ '--project-detail-tab-count': tabItems.length } as React.CSSProperties),
-    [tabItems.length]
-  );
+  const detailPanelTabCountClass = styles[`projectDetailPanelTabCount${tabItems.length}`] || '';
 
   const resetSourceForm = (type: SourceType = 'dingtalk') => {
     setEditingSource(null);
@@ -1202,12 +1261,12 @@ const ProjectDetailPanel: React.FC<Props> = ({
       await fetchRequirements(sourceList);
     } catch (error) {
       console.error('Failed to refresh project requirements:', error);
-      message.error('需求列表刷新失败');
+      message.error(t('requirement.refreshFailed'));
     } finally {
       // 手动刷新按钮只响应自己的刷新动作，避免打开渠道配置时拉渠道数据导致按钮转圈。
       setRequirementsRefreshLoading(false);
     }
-  }, [fetchRequirements, fetchSources, requirementsRefreshLoading, showRequirementsTab]);
+  }, [fetchRequirements, fetchSources, requirementsRefreshLoading, showRequirementsTab, t]);
 
   const handleRequirementListScroll = useCallback(
     (event: React.UIEvent<HTMLDivElement>) => {
@@ -1222,35 +1281,48 @@ const ProjectDetailPanel: React.FC<Props> = ({
     [hasMoreRequirements, requirements.length]
   );
 
+  const handleTaskListScroll = useCallback(
+    (event: React.UIEvent<HTMLDivElement>) => {
+      if (!hasMoreTasks) return;
+
+      const { scrollTop, scrollHeight, clientHeight } = event.currentTarget;
+      if (scrollHeight - scrollTop - clientHeight > 80) return;
+
+      // 任务接口按页返回，触底时继续追加下一页，分页条件与当前日期筛选保持一致。
+      void fetchTasks({ pageNum: taskQueryRef.current.pageNum + 1, append: true });
+    },
+    [fetchTasks, hasMoreTasks]
+  );
+
   const handleManualRequirementSubmit = () => {
     if (!manualRequirementForm.title.trim()) {
-      message.warning('请填写需求名称');
+      message.warning(t('manualRequirement.validation.titleRequired'));
       return;
     }
     if (!manualRequirementForm.originalContent.trim()) {
-      message.warning('请填写原始需求');
+      message.warning(t('manualRequirement.validation.originalContentRequired'));
       return;
     }
 
     // 后端人工新增需求接口还未接入，先保留表单与校验，避免前端伪造需求数据导致后续状态不一致。
-    message.info('人工新增需求接口待后端接入');
+    message.info(t('manualRequirement.unavailable'));
   };
 
   const handleSaveSource = async () => {
     if (!projectId) return;
     if (!sourceForm.name.trim()) {
-      message.error('请填写名称');
+      message.error(t('source.validation.nameRequired'));
       return;
     }
     if (!sourceForm.repoId) {
-      message.error('请选择关联仓库');
+      message.error(t('source.validation.repoRequired'));
       return;
     }
 
     let config = '';
     if (sourceForm.type === 'dingtalk') {
       if (!sourceForm.chatId) {
-        message.error('请选择钉钉群');
+        message.error(t('source.validation.groupRequired'));
         return;
       }
       const selectedGroup = groupOptions.find((group) => group.value === sourceForm.chatId);
@@ -1265,7 +1337,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
       });
     } else {
       if (!hasPatSaved && !sourceForm.pat.trim()) {
-        message.error('请填写 GitHub PAT');
+        message.error(t('source.validation.patRequired'));
         return;
       }
       // GitHub 实际扫描仓库由 repoId 关联，config 只保留过滤条件。
@@ -1288,7 +1360,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
           confirmMode: sourceForm.confirmMode,
           scoreThreshold: sourceForm.scoreThreshold,
         });
-        message.success('收集源已更新');
+        message.success(t('source.updateSuccess'));
       } else {
         await createScanSource({
           projectId,
@@ -1301,7 +1373,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
           confirmMode: sourceForm.confirmMode,
           scoreThreshold: sourceForm.scoreThreshold,
         });
-        message.success('收集源添加成功');
+        message.success(t('source.addSuccess'));
       }
 
       setSourceModalOpen(false);
@@ -1309,7 +1381,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
       const sourceList = await fetchSources();
       await fetchRequirements(sourceList);
     } catch {
-      message.error(editingSource ? '更新失败' : '添加失败');
+      message.error(t(editingSource ? 'source.updateFailed' : 'source.addFailed'));
     }
   };
 
@@ -1349,7 +1421,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const handleCreateRepo = async () => {
     if (!projectId) return;
     if (!repoForm.repoFullName.trim()) {
-      message.error('请填写仓库全名 owner/repo');
+      message.error(t('repository.validation.fullNameRequired'));
       return;
     }
 
@@ -1362,15 +1434,15 @@ const ProjectDetailPanel: React.FC<Props> = ({
         defaultBranch: repoForm.defaultBranch.trim() || undefined,
       });
       if (!res?.repoId) {
-        message.error('新增仓库失败');
+        message.error(t('repository.createFailed'));
         return;
       }
-      message.success('仓库已新增');
+      message.success(t('repository.createSuccess'));
       setRepoForm({ repoFullName: '', repoUrl: '', defaultBranch: 'main' });
       await fetchRepos();
       setSourceForm((prev) => ({ ...prev, repoId: res.repoId }));
     } catch {
-      message.error('新增仓库失败');
+      message.error(t('repository.createFailed'));
     } finally {
       setRepoSaving(false);
     }
@@ -1378,20 +1450,20 @@ const ProjectDetailPanel: React.FC<Props> = ({
 
   const handleDeleteRepo = (repo: RepoOption) => {
     Modal.confirm({
-      title: '确认删除',
-      content: `确定删除仓库「${repo.repoFullName || repo.repoUrl || repo.repoId}」吗？`,
-      okText: '删除',
+      title: t('common.deleteConfirmTitle'),
+      content: t('repository.deleteConfirm', { name: `${repo.repoFullName || repo.repoUrl || repo.repoId}` }),
+      okText: t('common.delete'),
       okButtonProps: { danger: true },
       onOk: async () => {
         try {
           await deleteProjectRepo(repo.repoId);
-          message.success('仓库已删除');
+          message.success(t('repository.deleteSuccess'));
           if (sourceForm.repoId === repo.repoId) {
             setSourceForm((prev) => ({ ...prev, repoId: undefined }));
           }
           await fetchRepos();
         } catch (error: any) {
-          message.error(error?.message || '删除失败，可能已被扫描源关联');
+          message.error(error?.message || t('repository.deleteFailed'));
         }
       },
     });
@@ -1399,13 +1471,13 @@ const ProjectDetailPanel: React.FC<Props> = ({
 
   const handleDeleteSource = (source: ScanSourceItem) => {
     Modal.confirm({
-      title: '确认删除',
-      content: `确定要删除收集源「${source.sourceName}」吗？`,
-      okText: '删除',
+      title: t('common.deleteConfirmTitle'),
+      content: t('source.deleteConfirm', { name: source.sourceName }),
+      okText: t('common.delete'),
       okButtonProps: { danger: true },
       onOk: async () => {
         await deleteScanSource(source.sourceId);
-        message.success('已删除');
+        message.success(t('source.deleteSuccess'));
         const sourceList = await fetchSources();
         await fetchRequirements(sourceList);
       },
@@ -1416,11 +1488,11 @@ const ProjectDetailPanel: React.FC<Props> = ({
     setScanningId(sourceId);
     try {
       const res = await triggerScan(sourceId);
-      message.success(`扫描完成，新建 ${res?.createdCount || 0} 条`);
+      message.success(t('source.scanSuccess', { count: res?.createdCount || 0 }));
       const sourceList = await fetchSources();
       await fetchRequirements(sourceList);
     } catch {
-      message.error('扫描失败');
+      message.error(t('source.scanFailed'));
     } finally {
       setScanningId(null);
     }
@@ -1428,7 +1500,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
 
   const handleToggleSource = async (sourceId: number, checked: boolean) => {
     await toggleScanSource(sourceId, checked ? '1' : '0');
-    message.success(checked ? '已启用' : '已暂停');
+    message.success(t(checked ? 'source.enabled' : 'source.paused'));
     await fetchSources();
   };
 
@@ -1458,7 +1530,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
         title: requirement.title,
       });
       if (!res) {
-        message.error('创建任务失败');
+        message.error(t('requirement.createTaskFailed'));
         return;
       }
 
@@ -1466,11 +1538,11 @@ const ProjectDetailPanel: React.FC<Props> = ({
       setRequirements((prev) =>
         prev.map((item) => (item.itemId === requirementId ? { ...item, sessionId: res.sessionId } : item))
       );
-      message.success('任务已创建');
-      await Promise.all([fetchTasks(), fetchSources().then(fetchRequirements)]);
+      message.success(t('requirement.createTaskSuccess'));
+      await Promise.all([fetchTasks({ pageNum: 1 }), fetchSources().then(fetchRequirements)]);
       setActiveTab('tasks');
     } catch (error: any) {
-      const errorMessage = error?.message || '创建任务失败';
+      const errorMessage = error?.message || t('requirement.createTaskFailed');
       message.error(errorMessage);
       if (errorMessage.includes('重复启动') || errorMessage.includes('已有进行中的任务')) {
         // 页面需求数据可能落后于后端任务状态，重复启动失败后主动刷新让按钮状态回到已启动。
@@ -1527,7 +1599,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
         if (dwsAuthTimeoutRef.current) clearTimeout(dwsAuthTimeoutRef.current);
         dwsAuthTimerRef.current = null;
         dwsAuthTimeoutRef.current = null;
-        message.success('钉钉授权成功');
+        message.success(t('dws.authorizeSuccess'));
         setDwsAuthed(true);
         setDwsExpired(false);
         setDwsAuthDetail(res);
@@ -1545,7 +1617,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
       dwsAuthTimeoutRef.current = null;
       setDwsDeviceInfo(null);
       setDwsAuthPolling(false);
-      message.warning('授权超时，请重试');
+      message.warning(t('dws.authorizeTimeout'));
     }, 180000);
   };
 
@@ -1559,10 +1631,10 @@ const ProjectDetailPanel: React.FC<Props> = ({
         setDwsAuthPolling(true);
         pollDwsAuthStatus();
       } else {
-        message.error(res?.message || '启动授权失败');
+        message.error(res?.message || t('dws.authorizeStartFailed'));
       }
     } catch {
-      message.error('启动授权失败');
+      message.error(t('dws.authorizeStartFailed'));
     } finally {
       setDwsAuthLoading(false);
     }
@@ -1574,7 +1646,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
     return repo ? repo.repoFullName || repo.repoUrl || String(repo.repoId) : null;
   };
 
-  const renderSourceList = (emptyText = '暂无收集源，点击右上角 + 添加', options: { panel?: boolean } = {}) => (
+  const renderSourceList = (emptyText = t('source.empty'), options: { panel?: boolean } = {}) => (
     <Spin spinning={sourcesLoading && !sources.length}>
       {sources.length ? (
         <div className={options.panel ? styles.detailChannelSourceList : styles.detailSourceList}>
@@ -1584,7 +1656,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
                 <span className={styles.detailSourceIcon}>{getSourceIcon(source.sourceType)}</span>
                 <div className={styles.detailSourceTitle}>
                   <strong>{source.sourceName}</strong>
-                  <span>{formatConfig(source.sourceType, source.config)}</span>
+                  <span>{formatConfig(source.sourceType, source.config, t)}</span>
                 </div>
                 <Switch
                   size="small"
@@ -1602,30 +1674,29 @@ const ProjectDetailPanel: React.FC<Props> = ({
                   {source.sourceType === 'dingtalk' &&
                     (dwsAuthed ? (
                       <Tag
-                        className={styles.detailSourceDwsTag}
+                        className={`${styles.detailSourceDwsTag} ${styles.detailSourceDwsTagClickable}`}
                         color="green"
-                        style={{ cursor: 'pointer' }}
                         onClick={() => setDwsAuthDetailVisible(true)}
                       >
-                        DWS 已授权{dwsExpiresAt ? ` · 有效至 ${dayjs(dwsExpiresAt).format('MM-DD HH:mm')}` : ''}
+                        {dwsExpiresAt
+                          ? t('dws.authorizedUntil', { expiry: dayjs(dwsExpiresAt).format('MM-DD HH:mm') })
+                          : t('dws.authorized')}
                       </Tag>
                     ) : dwsExpired ? (
                       <Tag
-                        className={styles.detailSourceDwsTag}
+                        className={`${styles.detailSourceDwsTag} ${styles.detailSourceDwsTagClickable}`}
                         color="red"
-                        style={{ cursor: 'pointer' }}
                         onClick={handleStartDwsAuth}
                       >
-                        DWS 授权已过期，点击重新授权
+                        {t('dws.authorizationExpired')}
                       </Tag>
                     ) : (
                       <Tag
-                        className={styles.detailSourceDwsTag}
+                        className={`${styles.detailSourceDwsTag} ${styles.detailSourceDwsTagClickable}`}
                         color="orange"
-                        style={{ cursor: 'pointer' }}
                         onClick={handleStartDwsAuth}
                       >
-                        DWS 未授权，点击授权
+                        {t('dws.authorizationRequired')}
                       </Tag>
                     ))}
                 </div>
@@ -1638,11 +1709,11 @@ const ProjectDetailPanel: React.FC<Props> = ({
                 }
               >
                 <Tag className={styles.detailSourceFrequencyTag} icon={<ClockCircleOutlined />} bordered={false}>
-                  {getCronDisplayText(source.cronExpr)}
+                  {getCronDisplayText(source.cronExpr, t)}
                 </Tag>
                 {source.lastScanTime && (
                   <span className={styles.detailSourceTime}>
-                    上次扫描: {dayjs(source.lastScanTime).format('MM-DD HH:mm')}
+                    {t('source.lastScanAt', { time: dayjs(source.lastScanTime).format('MM-DD HH:mm') })}
                   </span>
                 )}
                 {/* 大面板内从扫描按钮开始换行，避免渠道信息和操作挤在同一行。 */}
@@ -1654,13 +1725,13 @@ const ProjectDetailPanel: React.FC<Props> = ({
                     loading={scanningId === source.sourceId}
                     onClick={() => handleTriggerScan(source.sourceId)}
                   >
-                    扫描
+                    {t('source.scan')}
                   </Button>
                   <Button type="link" size="small" icon={<FileTextOutlined />} onClick={() => handleViewLogs(source)}>
-                    日志
+                    {t('source.logs')}
                   </Button>
                   <Button type="link" size="small" icon={<EditOutlined />} onClick={() => handleEditSource(source)}>
-                    编辑
+                    {t('common.edit')}
                   </Button>
                   <Button
                     type="link"
@@ -1669,7 +1740,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
                     icon={<DeleteOutlined />}
                     onClick={() => handleDeleteSource(source)}
                   >
-                    删除
+                    {t('common.delete')}
                   </Button>
                 </div>
               </div>
@@ -1700,23 +1771,21 @@ const ProjectDetailPanel: React.FC<Props> = ({
     <div className={styles.detailChannelPanel}>
       <div className={styles.detailChannelPanelHeader}>
         <div className={styles.detailChannelPanelTitle}>
-          <h3>渠道配置</h3>
-          <p>{sources.length} 个渠道</p>
+          <h3>{t('channel.title')}</h3>
+          <p>{t('channel.count', { count: sources.length })}</p>
         </div>
         <div className={styles.detailChannelPanelActions}>
-          <Tooltip title="新增渠道" placement="top">
+          <Tooltip title={t('channel.add')} placement="top">
             <Button type="primary" icon={<PlusOutlined />} onClick={() => openAddSourceModal()}>
-              新增渠道
+              {t('channel.add')}
             </Button>
           </Tooltip>
-          <Tooltip title="关闭" placement="top">
+          <Tooltip title={t('common.close')} placement="top">
             <Button icon={<CloseOutlined />} onClick={handleCloseChannelPanel} />
           </Tooltip>
         </div>
       </div>
-      <div className={styles.detailChannelPanelBody}>
-        {renderSourceList('暂无渠道，点击右上角新增渠道', { panel: true })}
-      </div>
+      <div className={styles.detailChannelPanelBody}>{renderSourceList(t('channel.empty'), { panel: true })}</div>
     </div>
   );
 
@@ -1738,6 +1807,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
     setDetailPanel,
     sources,
     sourcesLoading,
+    t,
   ]);
 
   useEffect(() => {
@@ -1752,15 +1822,19 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const renderRequirementDetailDrawer = () => {
     if (!detailReq) return null;
     const detail = parseScoreDetail(detailReq.scoreDetail);
-    const sourceLabel = getSourceLabel(detailReq.sourceType);
+    const sourceLabel = getSourceLabel(detailReq.sourceType, t);
     const scored = detailReq.score !== null && detailReq.score !== undefined;
     const createTime = detailReq.createTime ? dayjs(detailReq.createTime).format('YYYY-MM-DD HH:mm') : '-';
-    const productContent = detail.summary || detailReq.productContent || '-';
+    const productContent = detail.summary || detailReq.productContent || t('common.emptyValue');
     const originalContent =
-      detailReq.originalContent || detailReq.content || detailReq.description || detailReq.summary || '-';
+      detailReq.originalContent ||
+      detailReq.content ||
+      detailReq.description ||
+      detailReq.summary ||
+      t('common.emptyValue');
     return (
       <Drawer
-        title="需求详情"
+        title={t('requirement.detail.title')}
         className={styles.requirementDetailDrawer}
         open={!!detailReq}
         onClose={() => setDetailReq(null)}
@@ -1769,53 +1843,46 @@ const ProjectDetailPanel: React.FC<Props> = ({
         <div className={styles.requirementDetailDrawerContent}>
           <div className={styles.requirementDetailTitleRow}>
             <div className={styles.requirementDetailTitle}>{detailReq.title}</div>
-            {/* 评分概览收敛为优先级，未派生研发任务时以状态标签提示。 */}
-            <strong className={styles.requirementDetailPriority}>{detailReq.priority || '—'}</strong>
-            {!detailReq.sessionId && (
-              <Tag bordered={false} className={styles.requirementDetailUnstartedTag}>
-                未启动
-              </Tag>
-            )}
           </div>
 
           <section className={styles.requirementDetailSection}>
-            <h3>基本信息</h3>
+            <h3>{t('requirement.detail.basicInfo')}</h3>
             <div className={styles.requirementDetailInfoGrid}>
               <div className={styles.requirementDetailInfoItem}>
-                <label>需求 ID</label>
-                <span>{detailReq.itemId || '-'}</span>
+                <label>{t('requirement.detail.id')}</label>
+                <span>{detailReq.itemId || t('common.emptyValue')}</span>
               </div>
               <div className={styles.requirementDetailInfoItem}>
-                <label>任务状态</label>
-                <span>{detailReq.sessionId ? '已启动' : '未启动'}</span>
+                <label>{t('requirement.detail.taskStatus')}</label>
+                <span>{t(detailReq.sessionId ? 'requirement.started' : 'requirement.notStarted')}</span>
               </div>
               <div className={styles.requirementDetailInfoItem}>
-                <label>来源类型</label>
+                <label>{t('requirement.detail.sourceType')}</label>
                 <span>{sourceLabel}</span>
               </div>
               <div className={styles.requirementDetailInfoItem}>
-                <label>来源名称</label>
-                <span>{detailReq.sourceName || '-'}</span>
+                <label>{t('requirement.detail.sourceName')}</label>
+                <span>{detailReq.sourceName || t('common.emptyValue')}</span>
               </div>
               <div className={styles.requirementDetailInfoItem}>
-                <label>来源记录</label>
-                <span>{detailReq.originId || '-'}</span>
+                <label>{t('requirement.detail.sourceRecord')}</label>
+                <span>{detailReq.originId || t('common.emptyValue')}</span>
               </div>
               <div className={styles.requirementDetailInfoItem}>
-                <label>创建时间</label>
+                <label>{t('requirement.detail.createdAt')}</label>
                 <span>{createTime}</span>
               </div>
               <div className={styles.requirementDetailInfoItem}>
-                <label>关联会话</label>
-                <span>{detailReq.sessionId || '-'}</span>
+                <label>{t('requirement.detail.session')}</label>
+                <span>{detailReq.sessionId || t('common.emptyValue')}</span>
               </div>
               <div className={styles.requirementDetailInfoItem}>
-                <label>处理动作</label>
-                <span>{detailReq.action || '-'}</span>
+                <label>{t('requirement.detail.action')}</label>
+                <span>{detailReq.action || t('common.emptyValue')}</span>
               </div>
               {detailReq.originUrl && (
                 <div className={`${styles.requirementDetailInfoItem} ${styles.requirementDetailInfoItemFull}`}>
-                  <label>来源链接</label>
+                  <label>{t('requirement.detail.sourceLink')}</label>
                   <a href={detailReq.originUrl} target="_blank" rel="noreferrer">
                     {detailReq.originUrl}
                   </a>
@@ -1825,22 +1892,22 @@ const ProjectDetailPanel: React.FC<Props> = ({
           </section>
 
           <section className={styles.requirementDetailSection}>
-            <h3>AI 整理的产品需求</h3>
+            <h3>{t('requirement.detail.productContent')}</h3>
             <div className={styles.requirementDetailText}>{productContent}</div>
           </section>
 
           <section className={styles.requirementDetailSection}>
-            <h3>原始需求</h3>
+            <h3>{t('requirement.detail.originalContent')}</h3>
             <div className={styles.requirementDetailText}>{originalContent}</div>
           </section>
 
           {scored && (
             <section className={styles.requirementDetailSection}>
-              <h3>评分维度</h3>
+              <h3>{t('requirement.detail.scoreDimensions')}</h3>
               <div className={styles.detailScoreDimGrid}>
                 {SCORE_DIMENSIONS.map((d) => (
                   <div key={d.key} className={styles.detailScoreDimItem}>
-                    <span>{d.label}</span>
+                    <span>{t(d.labelId)}</span>
                     <strong>
                       +{detail[d.key] ?? 0} / {d.max}
                     </strong>
@@ -1848,8 +1915,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
                 ))}
                 {detail.risk !== null && detail.risk !== undefined && detail.risk !== 0 && (
                   <div className={styles.detailScoreDimItem}>
-                    <span>风险与冲突</span>
-                    <strong style={{ color: '#cf1322' }}>{detail.risk}</strong>
+                    <span>{t('requirement.score.risk')}</span>
+                    <strong className={styles.detailScoreRisk}>{detail.risk}</strong>
                   </div>
                 )}
               </div>
@@ -1866,18 +1933,18 @@ const ProjectDetailPanel: React.FC<Props> = ({
         <button type="button" className={styles.detailChannelEntry} onClick={handleToggleChannelPanel}>
           <AntdIcon type="icon-chajian" className={styles.detailChannelEntryIcon} />
           <span>
-            <strong>需求渠道配置</strong>
+            <strong>{t('channel.requirementConfiguration')}</strong>
           </span>
           <RightOutlined />
         </button>
         <div className={styles.detailSectionHeader}>
-          <span>{requirements.length} 个需求</span>
+          <span>{t('requirement.count', { count: requirements.length })}</span>
           <Space size={6}>
             {/* 人工新增需求接口未接入，等后端接口可用后再恢复入口。 */}
-            {/* <Tooltip title="人工新增" placement="top">
+            {/* <Tooltip title={t('manualRequirement.title')} placement="top">
               <Button size="small" icon={<PlusOutlined />} onClick={openManualRequirementModal} />
             </Tooltip> */}
-            <Tooltip title="刷新" placement="top">
+            <Tooltip title={t('common.refresh')} placement="top">
               <Button
                 size="small"
                 className={styles.detailHeaderActionButton}
@@ -1886,7 +1953,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
                 disabled={requirementsRefreshLoading}
                 onClick={handleRefreshRequirements}
               >
-                刷新
+                {t('common.refresh')}
               </Button>
             </Tooltip>
           </Space>
@@ -1901,7 +1968,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
               {visibleRequirements.map((item) => {
                 const isStarting = startingRequirementIds.has(item.itemId);
                 const isStarted = !!item.sessionId;
-                const detailText = getRequirementDetailText(item);
+                const detailText = getRequirementDetailText(item, t);
 
                 return (
                   <div
@@ -1911,14 +1978,12 @@ const ProjectDetailPanel: React.FC<Props> = ({
                     onClick={() => setDetailReq(item)}
                   >
                     <div className={styles.detailRequirementSummary}>
-                      {/* 需求摘要与会话列表保持一致：描述直接展示，不附加悬停提示。 */}
+                      {/* 需求名称和描述与会话列表保持一致，直接展示且不附加悬停提示。 */}
                       <span className={styles.detailRequirementIcon}>
                         <FileTextOutlined />
                       </span>
                       <div className={styles.detailRequirementMain}>
-                        <Tooltip placement="top" title={item.title}>
-                          <strong>{item.title}</strong>
-                        </Tooltip>
+                        <strong>{item.title}</strong>
                         <span>{detailText}</span>
                       </div>
                       {isStarted ? (
@@ -1928,7 +1993,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
                           disabled
                           onClick={(event) => event.stopPropagation()}
                         >
-                          已启动
+                          {t('requirement.started')}
                         </Button>
                       ) : (
                         <Button
@@ -1941,17 +2006,17 @@ const ProjectDetailPanel: React.FC<Props> = ({
                             void handleStartTask(item);
                           }}
                         >
-                          {isStarting ? '启动中' : '启动'}
+                          {t(isStarting ? 'requirement.starting' : 'requirement.start')}
                         </Button>
                       )}
                     </div>
                   </div>
                 );
               })}
-              {hasMoreRequirements && <div className={styles.detailRequirementMore}>向下滚动加载更多</div>}
+              {hasMoreRequirements && <div className={styles.detailRequirementMore}>{t('requirement.loadMore')}</div>}
             </div>
           ) : (
-            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无数据" />
+            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('common.empty')} />
           )}
         </Spin>
       </div>
@@ -1962,26 +2027,32 @@ const ProjectDetailPanel: React.FC<Props> = ({
   // 资源 Tab 顶部的“代码变更”卡片:仅研发项目有任务/分支概念,普通项目隐藏。
   const renderCodeChanges = () => {
     if (!isDevelopProject) return null;
-    const empty = (text: string) => (
-      <div className={styles.codeChangeEmpty}>{taskChangesLoading ? '加载中…' : text}</div>
+    const empty = (id: string, values?: Record<string, string | number>) => (
+      <div className={styles.codeChangeEmpty}>
+        {taskChangesLoading ? t('codeChanges.loading') : t(id, values)}
+      </div>
     );
 
     let body: React.ReactNode;
     const status = taskChanges?.status;
     if (!currentResourceSession?.sessionId) {
-      body = empty('选择会话后查看代码变更');
+      body = empty('codeChanges.selectSession');
     } else if (taskChangesLoading && !taskChanges) {
-      body = empty('加载中…');
+      body = empty('codeChanges.loading');
     } else if (!taskChanges || status === 'http_error') {
-      body = empty(taskChanges?.message || '暂时无法获取代码变更');
+      body = taskChanges?.message ? (
+        <div className={styles.codeChangeEmpty}>{taskChanges.message}</div>
+      ) : (
+        empty('codeChanges.unavailable')
+      );
     } else if (status === 'no_repo') {
-      body = empty('任务未关联代码仓库');
+      body = empty('codeChanges.noRepository');
     } else if (status === 'no_token') {
-      body = empty('未配置 GitHub 访问令牌，无法读取远程分支变更');
+      body = empty('codeChanges.noToken');
     } else if (status === 'branch_not_found') {
-      body = empty(`远程分支尚未创建（${taskChanges.headBranch || '-'}），Agent 推送后可查看变更`);
+      body = empty('codeChanges.branchNotFound', { branch: taskChanges.headBranch || '-' });
     } else if (!taskChanges.files?.length) {
-      body = empty('该分支相对基线暂无文件变更');
+      body = empty('codeChanges.noChanges');
     } else {
       body = (
         <div className={styles.codeChangeList}>
@@ -1996,7 +2067,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
               : styles.codeChangeItem;
             const inner = (
               <>
-                <span className={`${styles.codeChangeBadge} ${styles[meta.className]}`} title={meta.label}>
+                <span className={`${styles.codeChangeBadge} ${styles[meta.className]}`} title={t(meta.labelId)}>
                   {meta.letter}
                 </span>
                 <div className={styles.codeChangeInfo}>
@@ -2030,7 +2101,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
       <div className={styles.codeChangeCard}>
         <div className={styles.codeChangeHeader}>
           <div className={styles.codeChangeHeaderMain}>
-            <strong>代码变更</strong>
+            <strong>{t('codeChanges.title')}</strong>
             {branchLabel ? (
               // 分支名即 GitHub 入口:有 compareUrl 就超链到整体比对页,否则纯文本展示。
               taskChanges?.compareUrl ? (
@@ -2039,7 +2110,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
                   href={taskChanges.compareUrl}
                   target="_blank"
                   rel="noreferrer"
-                  title="在 GitHub 查看本次比对"
+                  title={t('codeChanges.openInGitHub')}
                 >
                   {branchLabel}
                 </a>
@@ -2067,7 +2138,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
         return projectSessions.map((session) => {
           const sessionResourceId = `${session.sessionId}`;
           const files = sessionFilesMap[sessionResourceId] || [];
-          const sessionName = getSessionResourceName(session);
+          const sessionName = getSessionResourceName(session, t);
           return {
             key: sessionResourceId,
             title: sessionName,
@@ -2075,34 +2146,33 @@ const ProjectDetailPanel: React.FC<Props> = ({
             currentPath: getSessionFilePath(sessionResourceId),
             items: files,
             loading: !!sessionFilesLoadingMap[sessionResourceId],
-            emptyText: '该会话暂无文件',
+            emptyText: t('resource.emptySessionFiles'),
           };
         });
       }
-      if (currentResourceSession) {
-        return [
-          {
-            key: `${currentResourceSession.sessionId}`,
-            title: getSessionResourceName(currentResourceSession),
-            titleText: getSessionResourceName(currentResourceSession),
-            currentPath: getSessionFilePath(`${currentResourceSession.sessionId}`),
-            items: currentSessionFiles,
-            loading: !!sessionFilesLoadingMap[`${currentResourceSession.sessionId}`],
-            emptyText: '该会话暂无文件',
-          },
-        ];
-      }
-      return [];
+
+      if (!currentResourceSession) return [];
+      return [
+        {
+          key: `${currentResourceSession.sessionId}`,
+          title: getSessionResourceName(currentResourceSession, t),
+          titleText: getSessionResourceName(currentResourceSession, t),
+          currentPath: getSessionFilePath(`${currentResourceSession.sessionId}`),
+          items: currentSessionFiles,
+          loading: !!sessionFilesLoadingMap[`${currentResourceSession.sessionId}`],
+          emptyText: t('resource.emptySessionFiles'),
+        },
+      ];
     })();
 
     return (
       <div className={styles.detailResourcePanel}>
         <FileSpaceBlock
-          title="共享文件空间"
+          title={t('resource.sharedSpace')}
           loading={sharedFilesLoading}
           items={sharedFiles}
           currentPath={SHARED_FILE_PATH}
-          emptyText="暂无共享文件"
+          emptyText={t('resource.emptySharedFiles')}
           childrenByPath={resourceChildrenByPath}
           expandedKeys={resourceExpandedKeys}
           showActions={!!projectId}
@@ -2114,8 +2184,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
           onAction={handleSharedResourceFileAction}
         />
         <FileSpaceBlock
-          title="会话空间"
-          emptyText={resourceFileScope === 'all' ? '暂无会话' : '暂无当前会话'}
+          title={t('resource.sessionSpace')}
+          emptyText={t(resourceFileScope === 'all' ? 'resource.emptySessions' : 'resource.emptyCurrentSession')}
           groups={sessionGroups}
           childrenByPath={resourceChildrenByPath}
           expandedKeys={resourceExpandedKeys}
@@ -2124,8 +2194,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
           groupCollapseResetKey={resourceFileScope}
           showActions={!!fileResourceId}
           switchOptions={[
-            { label: '当前会话', value: 'current' },
-            { label: '全部会话', value: 'all' },
+            { label: t('resource.currentSession'), value: 'current' },
+            { label: t('resource.allSessions'), value: 'all' },
           ]}
           onSwitchChange={(value) => setResourceFileScope(value as ResourceFileScope)}
           onExpand={setResourceExpandedKeys}
@@ -2142,114 +2212,157 @@ const ProjectDetailPanel: React.FC<Props> = ({
 
   const renderTasks = () => (
     <div className={styles.detailTaskPanel}>
-      <div className={styles.detailTaskHeader}>
-        <span>{taskTotal} 个任务</span>
+      {/* 普通项目任务按会话展示，隐藏研发项目专用的日期筛选和任务视图入口。 */}
+      <div
+        className={`${styles.detailTaskHeader} ${
+          isDevelopProject ? '' : styles.detailTaskHeaderHidden
+        }`}
+      >
         <div className={styles.detailTaskHeaderActions}>
           <DatePicker.RangePicker
             size="small"
             allowClear
             value={taskDateRange}
-            placeholder={['创建开始日期', '创建结束日期']}
+            placeholder={[t('task.dateStartPlaceholder'), t('task.dateEndPlaceholder')]}
             onChange={(dates) => {
               void fetchTasks({ pageNum: 1, dateRange: dates as TaskDateRange });
             }}
           />
-          <Button
-            size="small"
-            className={styles.detailHeaderActionButton}
-            icon={<AppstoreOutlined />}
-            onClick={() => setTaskKanbanOpen(true)}
-          >
-            视图
-          </Button>
+          {/* 任务看板只适用于研发项目；普通项目任务按会话展示，不提供研发状态视图。 */}
+          {isDevelopProject && taskTotal > 0 && (
+            <Tooltip title={t('task.viewTooltip')} placement="top">
+              <Button
+                aria-label={t('task.viewTooltip')}
+                size="small"
+                className={`${styles.detailHeaderActionButton} ${styles.detailTaskViewButton}`}
+                icon={<AppstoreOutlined />}
+                onClick={() => setTaskKanbanOpen(true)}
+              />
+            </Tooltip>
+          )}
         </div>
       </div>
 
-      {tasks.length ? (
-        <div className={styles.detailTaskList}>
-          {tasks.map((task) => {
-            const taskAssignee = task.assignee || task.assigneeName || task.agentName || '-';
-            const taskCreateTime = task.createTime ? dayjs(task.createTime).format('MM-DD HH:mm') : '-';
-            // 第二行仅保留字段值，避免重复显示负责人和创建时间标签。
-            const taskMetaText = `${taskAssignee} · ${taskCreateTime}`;
-            const taskStatusMeta = getTaskStatusMeta(task.status || task.taskStatus || task.currentStatus);
+      {/* 任务列表独立滚动，研发项目的日期筛选和任务视图入口始终固定在顶部。 */}
+      <div className={styles.detailTaskScroll} onScroll={handleTaskListScroll}>
+        <Spin spinning={tasksLoading && tasks.length > 0}>
+          {tasks.length ? (
+            <div className={styles.detailTaskList}>
+              {tasks.map((task) => {
+                const taskAssignee = task.assignee || task.assigneeName || task.agentName || '-';
+                const taskCreateTime = task.createTime ? dayjs(task.createTime).format('MM-DD HH:mm') : '-';
+                const taskAssigneeId = task.assigneeId ?? task.createBy;
+                const currentUserId = userInfo?.userId ?? userInfo?.id;
+                // 优先按用户 ID 判断处理人；历史数据缺失 ID 时再用用户名兜底，避免同名用户误判。
+                const isCurrentUserAssignee =
+                  taskAssigneeId && currentUserId
+                    ? `${taskAssigneeId}` === `${currentUserId}`
+                    : !!taskAssignee && !!userInfo?.userName && taskAssignee === userInfo.userName;
+                // 非研发项目的任务即会话，第二行直接展示会话摘要；研发项目保留负责人和创建时间。
+                const taskDescription = isDevelopProject
+                  ? `${taskAssignee} · ${taskCreateTime}`
+                  : `${task.sessionContent || ''}`;
+                const taskStatusMeta = getTaskStatusMeta(task.status || task.taskStatus || task.currentStatus);
+                // 下拉菜单展开时维持状态标签的让位，防止悬浮菜单遮挡右侧内容。
+                const isTaskActionOpen = openTaskActionId === `${task.taskId}`;
+                const isTaskSelected = selectedTaskId === `${task.taskId}`;
 
-            return (
-              <div
-                key={task.taskId}
-                className={styles.detailTaskCard}
-                onClick={() => {
-                  // 研发项目查看环节详情，其他项目直接进入任务关联的会话。
-                  if (isDevelopProject) {
-                    setDetailTask(task);
-                    return;
-                  }
-                  handleOpenTaskSession(task);
-                }}
-              >
-                <div className={styles.detailTaskIcon}>
-                  {/* 任务与需求使用不同语义图标，便于在两个列表间快速识别。 */}
-                  <FundProjectionScreenOutlined />
-                </div>
-                <div className={styles.detailTaskCardHeader}>
-                  <div className={styles.detailTaskMain}>
-                    <div className={styles.detailTaskTitleRow}>
-                      <Tooltip placement="top" title={task.title}>
-                        <h4 className={styles.detailTaskTitle}>{task.title || '未命名任务'}</h4>
-                      </Tooltip>
-                    </div>
-                    {/* 描述信息仅用于列表扫读，不显示悬停提示。 */}
-                    <p className={styles.detailTaskDescription}>{taskMetaText}</p>
-                  </div>
-                  {/* 状态独立占据右侧列，针对标题和描述两行整体上下居中。 */}
-                  <Tag
-                    bordered={false}
-                    className={`${styles.detailTaskStatusTag} ${styles[`detailTaskStatus${taskStatusMeta.className}`]}`}
+                return (
+                  <div
+                    key={task.taskId}
+                    className={`${styles.detailTaskCard} ${isTaskSelected ? styles.detailTaskCardActive : ''}`}
+                    onClick={() => {
+                      setSelectedTaskId(`${task.taskId}`);
+                      // 研发项目仅允许处理人进入会话，其他成员打开只读任务详情。
+                      if (isDevelopProject && !isCurrentUserAssignee) {
+                        setDetailTask(task);
+                        return;
+                      }
+                      handleOpenTaskSession(task);
+                    }}
                   >
-                    {taskStatusMeta.label}
-                  </Tag>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      ) : (
-        <Empty
-          image={Empty.PRESENTED_IMAGE_SIMPLE}
-          description={isDevelopProject ? '暂无任务，在需求 Tab 点击「启动」创建' : '暂无任务'}
-        />
-      )}
+                    {isDevelopProject ? (
+                      <div className={styles.detailTaskIcon}>
+                        {/* 研发任务保持绿色研发图标，区别于普通会话。 */}
+                        <FundProjectionScreenOutlined />
+                      </div>
+                    ) : (
+                      <ChatAvatar session={normalizeTaskSession(task, projectId, t)} size={32} />
+                    )}
+                    <div
+                      className={`${styles.detailTaskCardHeader} ${
+                        isDevelopProject ? styles.detailTaskCardHeaderWithAction : ''
+                      } ${isTaskActionOpen ? styles.detailTaskCardHeaderWithActionOpen : ''}`}
+                    >
+                      <div className={styles.detailTaskMain}>
+                        <div className={styles.detailTaskTitleRow}>
+                          <h4 className={styles.detailTaskTitle}>{task.title || t('task.unnamed')}</h4>
+                        </div>
+                        {/* 任务名称和描述仅用于列表扫读，不显示悬停提示。 */}
+                        <p className={styles.detailTaskDescription}>{taskDescription}</p>
+                      </div>
+                      {/* 非研发项目的任务按普通会话展示，不显示研发任务状态。 */}
+                      {isDevelopProject && (
+                        <Tag
+                          bordered={false}
+                          className={`${styles.detailTaskStatusTag} ${
+                            styles[`detailTaskStatus${taskStatusMeta.className}`]
+                          }`}
+                        >
+                          {t(taskStatusMeta.labelId)}
+                        </Tag>
+                      )}
+                      {isDevelopProject && (
+                        <Dropdown
+                          trigger={['hover']}
+                          placement="bottomRight"
+                          onOpenChange={(open) => setOpenTaskActionId(open ? `${task.taskId}` : undefined)}
+                          menu={{
+                            items: [{ key: 'view-detail', label: t('task.viewDetail') }],
+                            onClick: ({ domEvent }) => {
+                              domEvent.preventDefault();
+                              domEvent.stopPropagation();
+                              setSelectedTaskId(`${task.taskId}`);
+                              setOpenTaskActionId(undefined);
+                              setDetailTask(task);
+                            },
+                          }}
+                        >
+                          {/* 研发任务详情改为辅助操作，卡片主点击始终进入任务会话。 */}
+                          <Button
+                            type="text"
+                            size="small"
+                            className={`${styles.detailTaskMoreAction} ${
+                              isTaskActionOpen ? styles.detailTaskMoreActionOpen : ''
+                            }`}
+                            icon={<EllipsisOutlined />}
+                            onClick={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                            }}
+                            onMouseDown={(event) => event.stopPropagation()}
+                          />
+                        </Dropdown>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('common.empty')} />
+          )}
+          {tasksLoading && tasks.length > 0 && (
+            <div className={styles.detailTaskLoadingMore}>
+              <Spin size="small" />
+            </div>
+          )}
+        </Spin>
+      </div>
 
-      {taskTotal > 0 && (
-        <Pagination
-          className={styles.detailTaskPagination}
-          size="small"
-          current={taskPageNum}
-          pageSize={taskPageSize}
-          total={taskTotal}
-          showSizeChanger
-          pageSizeOptions={[10, 20, 50, 100]}
-          showTotal={(total) => `共 ${total} 条`}
-          onChange={(pageNum, pageSize) => {
-            void fetchTasks({ pageNum, pageSize });
-          }}
-        />
-      )}
+      <SessionOverviewDrawer open={taskKanbanOpen} onClose={() => setTaskKanbanOpen(false)} projectId={projectId} />
 
-      <SessionOverviewDrawer
-        open={taskKanbanOpen}
-        onClose={() => setTaskKanbanOpen(false)}
-        projectId={projectId}
-        projectName={project?.projectName}
-      />
-
-      <TaskDetailDrawer
-        task={detailTask}
-        onClose={() => setDetailTask(null)}
-        onRefresh={fetchTasks}
-        projectId={projectId}
-        projectName={project?.projectName}
-      />
+      <TaskDetailDrawer task={detailTask} onClose={() => setDetailTask(null)} />
     </div>
   );
 
@@ -2280,7 +2393,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
 
   const renderAddSourceModal = () => (
     <Modal
-      title={editingSource ? '编辑收集源' : '添加收集源'}
+      title={t(editingSource ? 'source.editTitle' : 'source.addTitle')}
       open={sourceModalOpen}
       onOk={handleSaveSource}
       onCancel={() => {
@@ -2288,7 +2401,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
         setEditingSource(null);
         setGroupOptions([]);
       }}
-      okText={editingSource ? '保存' : '添加'}
+      okText={t(editingSource ? 'common.save' : 'common.add')}
       width={640}
       className={styles.sourceModal}
       footer={(_, { OkBtn, CancelBtn }) => (
@@ -2300,31 +2413,31 @@ const ProjectDetailPanel: React.FC<Props> = ({
     >
       <div className={styles.formGrid}>
         <div className={styles.formField}>
-          <label>类型</label>
+          <label>{t('source.field.type')}</label>
           <Select
             value={sourceForm.type}
             disabled={!!editingSource}
             onChange={(type) => setSourceForm((prev) => ({ ...prev, type }))}
             options={[
-              { value: 'dingtalk', label: '钉钉群消息' },
-              { value: 'github_issue', label: 'GitHub Issue' },
+              { value: 'dingtalk', label: t('source.type.dingtalkGroup') },
+              { value: 'github_issue', label: t('source.type.githubIssue') },
             ]}
           />
         </div>
         <div className={styles.formField}>
-          <label>名称</label>
+          <label>{t('source.field.name')}</label>
           <Input
-            placeholder="收集源名称"
+            placeholder={t('source.placeholder.name')}
             value={sourceForm.name}
             onChange={(event) => setSourceForm((prev) => ({ ...prev, name: event.target.value }))}
           />
         </div>
         <div className={styles.formField}>
-          <label>关联仓库</label>
-          <Space.Compact style={{ width: '100%' }}>
+          <label>{t('source.field.repository')}</label>
+          <Space.Compact className={styles.sourceRepoCompact}>
             <Select
-              style={{ flex: 1 }}
-              placeholder="选择该源扫来的需求要开发的仓库"
+              className={styles.sourceRepoSelect}
+              placeholder={t('source.placeholder.repository')}
               value={sourceForm.repoId}
               allowClear
               onChange={(repoId) => setSourceForm((prev) => ({ ...prev, repoId }))}
@@ -2332,7 +2445,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
                 value: repo.repoId,
                 label: repo.repoFullName || repo.repoUrl || String(repo.repoId),
               }))}
-              notFoundContent={repos.length ? undefined : '项目暂无仓库，点击右侧新增'}
+              notFoundContent={repos.length ? undefined : t('source.noRepositories')}
             />
             <Button
               className={styles.sourceRepoAddButton}
@@ -2342,48 +2455,52 @@ const ProjectDetailPanel: React.FC<Props> = ({
                 setRepoModalOpen(true);
               }}
             >
-              新增
+              {t('common.add')}
             </Button>
           </Space.Compact>
         </div>
         <div className={styles.formField}>
-          <label>扫描频率</label>
+          <label>{t('source.field.scanFrequency')}</label>
           <Select
             value={sourceForm.cron}
             onChange={(cron) => setSourceForm((prev) => ({ ...prev, cron }))}
-            options={cronPresets}
+            options={cronPresets.map((preset) => ({ value: preset.value, label: t(preset.labelId) }))}
             popupClassName={styles.sourceSelectPopup}
           />
         </div>
         <div className={styles.formFieldFull}>
           <div className={styles.formField}>
-            <label>需求确认规则</label>
+            <label>{t('source.field.confirmRule')}</label>
             <Radio.Group
               value={sourceForm.confirmMode}
               onChange={(event) => setSourceForm((prev) => ({ ...prev, confirmMode: event.target.value }))}
               optionType="button"
               buttonStyle="solid"
               options={[
-                { value: 'manual', label: '人工确认' },
-                { value: 'auto', label: '全自动派生' },
-                { value: 'score', label: '按需求得分' },
+                { value: 'manual', label: t('source.confirm.manual') },
+                { value: 'auto', label: t('source.confirm.auto') },
+                { value: 'score', label: t('source.confirm.score') },
               ]}
             />
             {sourceForm.confirmMode === 'score' && (
-              <div style={{ marginTop: 8 }}>
-                得分达到
+              <div className={styles.sourceScoreRule}>
+                {t('source.confirm.scorePrefix')}
                 <InputNumber
                   min={0}
                   max={100}
                   value={sourceForm.scoreThreshold}
                   onChange={(value) => setSourceForm((prev) => ({ ...prev, scoreThreshold: value ?? 70 }))}
-                  style={{ width: 80, margin: '0 8px' }}
+                  className={styles.sourceScoreRuleInput}
                 />
-                分自动转任务，低于该分数需要人工干预
+                {t('source.confirm.scoreSuffix')}
               </div>
             )}
-            <div style={{ marginTop: 6, fontSize: 12, color: '#999' }}>
-              {getConfirmModeDescription(sourceForm.confirmMode)}
+            <div className={styles.sourceConfirmHint}>
+              {sourceForm.confirmMode === 'auto'
+                ? t('source.confirm.autoHint')
+                : sourceForm.confirmMode === 'score'
+                  ? t('source.confirm.scoreHint')
+                  : t('source.confirm.manualHint')}
             </div>
           </div>
         </div>
@@ -2392,15 +2509,15 @@ const ProjectDetailPanel: React.FC<Props> = ({
             {!dwsAuthed && (
               <div className={styles.formFieldFull}>
                 <div className={styles.formField}>
-                  <label>钉钉授权</label>
+                  <label>{t('dws.authorization')}</label>
                   {dwsDeviceInfo ? (
                     <div>
-                      <p style={{ margin: '4px 0' }}>请在手机钉钉打开以下链接完成授权：</p>
+                      <p className={styles.dwsAuthorizationInstruction}>{t('dws.authorizationInstruction')}</p>
                       <a href={dwsDeviceInfo.verificationUrl} target="_blank" rel="noreferrer">
                         {dwsDeviceInfo.verificationUrl}
                       </a>
-                      <p style={{ margin: '4px 0', color: '#666' }}>
-                        设备码: <strong>{dwsDeviceInfo.userCode}</strong>
+                      <p className={styles.dwsAuthorizationDeviceCode}>
+                        {t('dws.deviceCode')}: <strong>{dwsDeviceInfo.userCode}</strong>
                       </p>
                       {dwsAuthPolling && <Spin size="small" />}
                     </div>
@@ -2411,7 +2528,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
                       loading={dwsAuthLoading}
                       onClick={handleStartDwsAuth}
                     >
-                      授权钉钉扫描
+                      {t('dws.authorizeScan')}
                     </Button>
                   )}
                 </div>
@@ -2419,16 +2536,16 @@ const ProjectDetailPanel: React.FC<Props> = ({
             )}
             {dwsAuthed && (
               <div className={styles.formField}>
-                <label>钉钉授权</label>
-                <Tag color="green">已授权</Tag>
+                <label>{t('dws.authorization')}</label>
+                <Tag color="green">{t('dws.status.authorized')}</Tag>
               </div>
             )}
             <div className={styles.formField}>
-              <label>钉钉群</label>
+              <label>{t('source.field.dingtalkGroup')}</label>
               <Select
                 showSearch
                 filterOption={false}
-                placeholder="输入群名搜索"
+                placeholder={t('source.placeholder.groupSearch')}
                 value={sourceForm.chatId || undefined}
                 onSearch={handleGroupSearch}
                 onChange={(chatId, option) => {
@@ -2437,30 +2554,30 @@ const ProjectDetailPanel: React.FC<Props> = ({
                 }}
                 options={groupOptions}
                 loading={groupSearching}
-                notFoundContent={groupSearching ? <Spin size="small" /> : '输入至少2个字搜索'}
+                notFoundContent={groupSearching ? <Spin size="small" /> : t('source.groupSearchHint')}
               />
             </div>
             <div className={styles.formField}>
-              <label>关键词</label>
+              <label>{t('source.field.keyword')}</label>
               <Input
-                placeholder="默认: 需求"
+                placeholder={t('source.placeholder.defaultKeyword')}
                 value={sourceForm.keywords}
                 onChange={(event) => setSourceForm((prev) => ({ ...prev, keywords: event.target.value }))}
               />
             </div>
             <div className={styles.formField}>
-              <label>回溯时长（小时）</label>
+              <label>{t('source.field.lookbackHours')}</label>
               <Select
                 value={sourceForm.lookbackHours}
                 onChange={(lookbackHours) => setSourceForm((prev) => ({ ...prev, lookbackHours }))}
                 popupClassName={styles.sourceSelectPopup}
                 options={[
-                  { value: '6', label: '6小时' },
-                  { value: '12', label: '12小时' },
-                  { value: '24', label: '24小时（默认）' },
-                  { value: '48', label: '48小时' },
-                  { value: '72', label: '72小时' },
-                  { value: '168', label: '7天' },
+                  { value: '6', label: t('source.lookback.hours', { hours: 6 }) },
+                  { value: '12', label: t('source.lookback.hours', { hours: 12 }) },
+                  { value: '24', label: t('source.lookback.defaultHours', { hours: 24 }) },
+                  { value: '48', label: t('source.lookback.hours', { hours: 48 }) },
+                  { value: '72', label: t('source.lookback.hours', { hours: 72 }) },
+                  { value: '168', label: t('source.lookback.days', { days: 7 }) },
                 ]}
               />
             </div>
@@ -2470,18 +2587,18 @@ const ProjectDetailPanel: React.FC<Props> = ({
           <>
             {!hasPatSaved && (
               <div className={styles.formField}>
-                <label>GitHub PAT</label>
+                <label>{t('source.field.githubPat')}</label>
                 <Input.Password
-                  placeholder="输入 Personal Access Token"
+                  placeholder={t('source.placeholder.githubPat')}
                   value={sourceForm.pat}
                   onChange={(event) => setSourceForm((prev) => ({ ...prev, pat: event.target.value }))}
                 />
               </div>
             )}
             <div className={styles.formField}>
-              <label>标签过滤（可选）</label>
+              <label>{t('source.field.labelFilter')}</label>
               <Input
-                placeholder="如 bug,feature"
+                placeholder={t('source.placeholder.labelFilter')}
                 value={sourceForm.labels}
                 onChange={(event) => setSourceForm((prev) => ({ ...prev, labels: event.target.value }))}
               />
@@ -2496,34 +2613,34 @@ const ProjectDetailPanel: React.FC<Props> = ({
     <Modal
       title={
         <div className={styles.manualRequirementTitle}>
-          <h3>人工新增需求</h3>
-          <p>提交后由 AI 统一分析、评分并生成需求文档</p>
+          <h3>{t('manualRequirement.title')}</h3>
+          <p>{t('manualRequirement.description')}</p>
         </div>
       }
       open={manualRequirementOpen}
       onCancel={() => setManualRequirementOpen(false)}
       onOk={handleManualRequirementSubmit}
-      okText="交给 AI 分析"
-      cancelText="取消"
+      okText={t('manualRequirement.submit')}
+      cancelText={t('common.cancel')}
       width={720}
       className={styles.manualRequirementModal}
     >
       <div className={styles.manualRequirementForm}>
         <div className={styles.manualRequirementRow}>
           <div className={styles.formField}>
-            <label>原始来源</label>
+            <label>{t('manualRequirement.field.sourceType')}</label>
             <Select
               value={manualRequirementForm.sourceType}
               onChange={(sourceType) => setManualRequirementForm((prev) => ({ ...prev, sourceType }))}
               options={[
-                { value: 'manual', label: '人工录入' },
-                { value: 'customer_feedback', label: '客户反馈' },
-                { value: 'internal_proposal', label: '内部提案' },
+                { value: 'manual', label: t('manualRequirement.source.manual') },
+                { value: 'customer_feedback', label: t('manualRequirement.source.customerFeedback') },
+                { value: 'internal_proposal', label: t('manualRequirement.source.internalProposal') },
               ]}
             />
           </div>
           <div className={styles.formField}>
-            <label>影响分支</label>
+            <label>{t('manualRequirement.field.branch')}</label>
             <Input
               placeholder="develop"
               value={manualRequirementForm.branch}
@@ -2532,26 +2649,26 @@ const ProjectDetailPanel: React.FC<Props> = ({
           </div>
         </div>
         <div className={styles.formField}>
-          <label>需求名称</label>
+          <label>{t('manualRequirement.field.title')}</label>
           <Input
-            placeholder="一句话描述期望解决的问题"
+            placeholder={t('manualRequirement.placeholder.title')}
             value={manualRequirementForm.title}
             onChange={(event) => setManualRequirementForm((prev) => ({ ...prev, title: event.target.value }))}
           />
         </div>
         <div className={styles.formField}>
-          <label>原始需求</label>
+          <label>{t('manualRequirement.field.originalContent')}</label>
           <Input.TextArea
-            placeholder="记录用户原话、问题背景和触发场景"
+            placeholder={t('manualRequirement.placeholder.originalContent')}
             rows={4}
             value={manualRequirementForm.originalContent}
             onChange={(event) => setManualRequirementForm((prev) => ({ ...prev, originalContent: event.target.value }))}
           />
         </div>
         <div className={styles.formField}>
-          <label>产品需求</label>
+          <label>{t('manualRequirement.field.productContent')}</label>
           <Input.TextArea
-            placeholder="可选：为空时由 AI 自动整理目标、范围与验收标准"
+            placeholder={t('manualRequirement.placeholder.productContent')}
             rows={4}
             value={manualRequirementForm.productContent}
             onChange={(event) => setManualRequirementForm((prev) => ({ ...prev, productContent: event.target.value }))}
@@ -2563,14 +2680,14 @@ const ProjectDetailPanel: React.FC<Props> = ({
 
   const renderRepoModal = () => (
     <Modal
-      title="维护项目仓库"
+      title={t('repository.modalTitle')}
       open={repoModalOpen}
       onCancel={() => setRepoModalOpen(false)}
-      footer={<Button onClick={() => setRepoModalOpen(false)}>关闭</Button>}
+      footer={<Button onClick={() => setRepoModalOpen(false)}>{t('common.close')}</Button>}
       width={560}
     >
       <div className={styles.formField}>
-        <label>已有仓库</label>
+        <label>{t('repository.field.existing')}</label>
         {repos.length ? (
           <List
             size="small"
@@ -2587,14 +2704,14 @@ const ProjectDetailPanel: React.FC<Props> = ({
                     icon={<DeleteOutlined />}
                     onClick={() => handleDeleteRepo(repo)}
                   >
-                    删除
+                    {t('common.delete')}
                   </Button>,
                 ]}
               >
                 <List.Item.Meta
                   title={repo.repoFullName}
                   description={
-                    <span style={{ color: '#999' }}>
+                    <span className={styles.repoDescription}>
                       {repo.repoUrl || '-'}
                       {repo.defaultBranch ? ` · ${repo.defaultBranch}` : ''}
                     </span>
@@ -2604,28 +2721,28 @@ const ProjectDetailPanel: React.FC<Props> = ({
             )}
           />
         ) : (
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无仓库" />
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('repository.empty')} />
         )}
       </div>
       <div className={styles.repoModalDivider} />
       <div className={styles.formField}>
-        <label>仓库全名 owner/repo</label>
+        <label>{t('repository.field.fullName')}</label>
         <Input
-          placeholder="如 beyonai/byclaw-test"
+          placeholder={t('repository.placeholder.fullName')}
           value={repoForm.repoFullName}
           onChange={(event) => setRepoForm((prev) => ({ ...prev, repoFullName: event.target.value }))}
         />
       </div>
       <div className={styles.formField}>
-        <label>仓库地址（可选）</label>
+        <label>{t('repository.field.url')}</label>
         <Input
-          placeholder="如 https://github.com/beyonai/byclaw-test"
+          placeholder={t('repository.placeholder.url')}
           value={repoForm.repoUrl}
           onChange={(event) => setRepoForm((prev) => ({ ...prev, repoUrl: event.target.value }))}
         />
       </div>
       <div className={styles.formField}>
-        <label>默认分支</label>
+        <label>{t('repository.field.defaultBranch')}</label>
         <Input
           placeholder="main"
           value={repoForm.defaultBranch}
@@ -2633,14 +2750,14 @@ const ProjectDetailPanel: React.FC<Props> = ({
         />
       </div>
       <Button type="primary" icon={<PlusOutlined />} loading={repoSaving} onClick={handleCreateRepo}>
-        新增仓库
+        {t('repository.create')}
       </Button>
     </Modal>
   );
 
   const renderDwsAuthModal = () => (
     <Modal
-      title="DWS 钉钉授权信息"
+      title={t('dws.detailTitle')}
       open={dwsAuthDetailVisible}
       onCancel={() => setDwsAuthDetailVisible(false)}
       footer={[
@@ -2653,53 +2770,61 @@ const ProjectDetailPanel: React.FC<Props> = ({
             handleStartDwsAuth();
           }}
         >
-          重新授权
+          {t('dws.reauthorize')}
         </Button>,
         <Button key="close" onClick={() => setDwsAuthDetailVisible(false)}>
-          关闭
+          {t('common.close')}
         </Button>,
       ]}
     >
       {dwsAuthDetail ? (
         <div className={styles.dwsAuthDetail}>
           <p>
-            <strong>认证状态：</strong>
-            {dwsAuthDetail.tokenValid ? <Tag color="green">有效</Tag> : <Tag color="red">无效</Tag>}
+            <strong>{t('dws.field.authStatus')}</strong>
+            {dwsAuthDetail.tokenValid ? (
+              <Tag color="green">{t('dws.status.valid')}</Tag>
+            ) : (
+              <Tag color="red">{t('dws.status.invalid')}</Tag>
+            )}
           </p>
           <p>
-            <strong>组织名称：</strong>
+            <strong>{t('dws.field.organizationName')}</strong>
             {dwsAuthDetail.corpName || '-'}
           </p>
           <p>
-            <strong>用户名称：</strong>
+            <strong>{t('dws.field.userName')}</strong>
             {dwsAuthDetail.userName || '-'}
           </p>
           <p>
-            <strong>组织ID：</strong>
+            <strong>{t('dws.field.organizationId')}</strong>
             {dwsAuthDetail.corpId || '-'}
           </p>
           <p>
-            <strong>Access Token 有效至：</strong>
+            <strong>{t('dws.field.accessTokenExpiresAt')}</strong>
             {dwsAuthDetail.expiresAt ? dayjs(dwsAuthDetail.expiresAt).format('YYYY-MM-DD HH:mm:ss') : '-'}
           </p>
           <p>
-            <strong>Refresh Token 状态：</strong>
-            {dwsAuthDetail.refreshTokenValid ? <Tag color="green">有效</Tag> : <Tag color="red">已过期</Tag>}
+            <strong>{t('dws.field.refreshTokenStatus')}</strong>
+            {dwsAuthDetail.refreshTokenValid ? (
+              <Tag color="green">{t('dws.status.valid')}</Tag>
+            ) : (
+              <Tag color="red">{t('dws.status.expired')}</Tag>
+            )}
           </p>
           <p>
-            <strong>Refresh Token 有效至：</strong>
+            <strong>{t('dws.field.refreshTokenExpiresAt')}</strong>
             {dwsAuthDetail.refreshExpiresAt ? dayjs(dwsAuthDetail.refreshExpiresAt).format('YYYY-MM-DD HH:mm:ss') : '-'}
           </p>
         </div>
       ) : (
-        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无授权信息" />
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('dws.emptyAuthorization')} />
       )}
     </Modal>
   );
 
   const renderLogDrawer = () => (
     <Drawer
-      title={`扫描日志 - ${logModalSource?.sourceName || ''}`}
+      title={t('log.title', { name: logModalSource?.sourceName || '' })}
       open={logDrawerOpen}
       onClose={() => setLogDrawerOpen(false)}
       width={420}
@@ -2715,13 +2840,19 @@ const ProjectDetailPanel: React.FC<Props> = ({
                     <span>
                       {dayjs(log.scanTime).format('YYYY-MM-DD HH:mm:ss')}{' '}
                       <Tag color={log.status === 'success' ? 'green' : log.status === 'failed' ? 'red' : 'blue'}>
-                        {log.status === 'success' ? '成功' : log.status === 'failed' ? '失败' : '运行中'}
+                        {t(
+                          log.status === 'success'
+                            ? 'log.status.success'
+                            : log.status === 'failed'
+                              ? 'log.status.failed'
+                              : 'log.status.running'
+                        )}
                       </Tag>
                     </span>
                   }
                   description={
                     log.status === 'success'
-                      ? `发现 ${log.foundCount} 条，新增 ${log.createdCount} 条`
+                      ? t('log.summary', { found: log.foundCount, created: log.createdCount })
                       : log.errorMsg || ''
                   }
                 />
@@ -2729,16 +2860,16 @@ const ProjectDetailPanel: React.FC<Props> = ({
             )}
           />
         ) : (
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无扫描记录" />
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('log.empty')} />
         )}
       </Spin>
     </Drawer>
   );
 
   const detailActionItems: MenuProps['items'] = [
-    ...(showRequirementsTab ? [{ key: 'add-source', label: '添加收集源' }] : []),
-    ...(onEditProject ? [{ key: 'edit-project', label: '编辑项目' }] : []),
-    ...(onDeleteProject ? [{ key: 'delete-project', label: '删除项目', danger: true }] : []),
+    ...(showRequirementsTab ? [{ key: 'add-source', label: t('source.addTitle') }] : []),
+    ...(onEditProject ? [{ key: 'edit-project', label: t('project.edit') }] : []),
+    ...(onDeleteProject ? [{ key: 'delete-project', label: t('project.delete'), danger: true }] : []),
   ];
 
   const handleDetailAction = ({ key }: { key: string }) => {
@@ -2758,15 +2889,16 @@ const ProjectDetailPanel: React.FC<Props> = ({
   // 文件资源树保留滚动条；其余三个紧凑列表仅隐藏滚动条外观，仍可正常滚动。
   const hideDetailBodyScrollbar = ['requirements', 'tasks', 'members'].includes(activeTab);
   const isRequirementsTab = activeTab === 'requirements';
+  const isTasksTab = activeTab === 'tasks' || (activeTab === 'requirements' && !showRequirementsTab);
 
   return (
-    <div className={styles.projectDetailPanel} style={detailPanelStyle}>
+    <div className={`${styles.projectDetailPanel} ${detailPanelTabCountClass}`}>
       <div className={styles.detailPanelHeader}>
-        <Tooltip title="返回" placement="top">
+        <Tooltip title={t('common.back')} placement="top">
           <Button className={styles.detailBackButton} icon={<LeftOutlined />} onClick={onBack} />
         </Tooltip>
         <div className={styles.detailPanelTitle}>
-          <h3>{project?.projectName || '项目详情'}</h3>
+          <h3>{project?.projectName || t('project.detailTitle')}</h3>
           <p title={projectDescription}>{projectDescription}</p>
         </div>
         <div className={styles.detailPanelActions}>
@@ -2785,7 +2917,9 @@ const ProjectDetailPanel: React.FC<Props> = ({
         <div
           className={`${styles.detailBodyPanel} ${
             hideDetailBodyScrollbar ? styles.detailBodyPanelScrollbarHidden : ''
-          } ${isRequirementsTab ? styles.detailRequirementsBodyPanel : ''}`}
+          } ${isRequirementsTab ? styles.detailRequirementsBodyPanel : ''} ${
+            isTasksTab ? styles.detailTasksBodyPanel : ''
+          }`}
         >
           {renderTabContent()}
         </div>

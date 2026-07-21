@@ -92,6 +92,9 @@ public class DevloopApplicationService {
 
     private static final String PROJECT_TYPE_DEFAULT = "default";
 
+    /** 所有用户共用的默认项目分组 ID，查询会话时必须再按创建人隔离。 */
+    private static final Long DEFAULT_PROJECT_ID = -1L;
+
     /** v2 状态投影终态；只有明确完成的任务才释放 agent 并发额度。 */
     private static final String TASK_STATUS_COMPLETED = "completed";
 
@@ -1331,6 +1334,10 @@ public class DevloopApplicationService {
             .le(query.getCreateTimeEnd() != null, ByaiSession::getCreateTime, query.getCreateTimeEnd())
             .orderByDesc(ByaiSession::getCreateTime)
             .orderByDesc(ByaiSession::getSessionId);
+        if (DEFAULT_PROJECT_ID.equals(query.getProjectId())) {
+            // 默认项目共用 -1 分组，查询时必须按当前创建人隔离，避免读取其他账号的会话任务。
+            wrapper.eq(ByaiSession::getCreatorId, CurrentUserHolder.getCurrentUserId());
+        }
         Page<ByaiSession> sessionPage = byaiSessionMapper
             .selectPage(new Page<>(query.getPageNum(), query.getPageSize()), wrapper);
 
@@ -1476,18 +1483,21 @@ public class DevloopApplicationService {
         String taskType = detectTaskType(item, s.getSessionName());
         ctx.put("branchName", buildBranchName(taskType, sessionId));
 
-        ctx.put("agentName", resolveAgentName(s.getObjectId()));
+        // 同一次资源查询同时补齐任务详情所需的数字员工名称和头像，避免重复访问资源表。
+        SsResource agentResource = resolveAgentResource(s.getObjectId());
+        ctx.put("agentName", agentResource != null && agentResource.getResourceName() != null
+            ? agentResource.getResourceName() : "");
+        ctx.put("agentAvatar", agentResource != null ? agentResource.getAvatar() : "");
         ctx.put("assignee", resolveUserName(s.getCreatorId()));
         return ctx;
     }
 
-    /** agentId(resourceId) -> 数字员工名称；查不到返回空串。 */
-    private String resolveAgentName(Long agentId) {
+    /** agentId(resourceId) -> 数字员工资源；查不到返回 null。 */
+    private SsResource resolveAgentResource(Long agentId) {
         if (agentId == null) {
-            return "";
+            return null;
         }
-        SsResource res = ssResourceMapper.selectByResourceId(agentId);
-        return res != null && res.getResourceName() != null ? res.getResourceName() : "";
+        return ssResourceMapper.selectByResourceId(agentId);
     }
 
     /** userId -> 用户名；查不到返回空串。 */
@@ -1533,6 +1543,8 @@ public class DevloopApplicationService {
         }
         task.setAssignee(context != null ? (String) context.get("assignee") : null);
         task.setAgentName(context != null ? (String) context.get("agentName") : null);
+        // 数字员工头像与名称同源返回，前端任务详情无需再次查询资源接口。
+        task.setAvatar(context != null ? (String) context.get("agentAvatar") : null);
         task.setBranchName(context != null ? (String) context.get("branchName") : null);
         task.setRepoFullName(context != null ? (String) context.get("repoFullName") : null);
         task.setRequirementTitle(context != null ? (String) context.get("requirementTitle") : null);
