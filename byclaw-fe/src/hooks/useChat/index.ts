@@ -133,6 +133,12 @@ const getPositiveNumber = (value: unknown) => {
   return Number.isFinite(numberValue) && numberValue > 0 ? numberValue : undefined;
 };
 
+// 默认项目在后端使用 -1 标识，创建会话时应与普通项目一样参与列表临时项和关系绑定。
+const getProjectNumber = (value: unknown) => {
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) && (numberValue === -1 || numberValue > 0) ? numberValue : undefined;
+};
+
 const PROJECT_SESSION_BIND_RETRY_DELAYS = [0, 500, 1500];
 
 const wait = (delay: number) =>
@@ -229,9 +235,9 @@ function useChat(props: IProps) {
 
   const bindSessionToProject = usePersistFn(
     async (projectId: unknown, targetSessionId: unknown, clientRequestId?: string, session?: ISession) => {
-      const normalizedProjectId = getPositiveNumber(projectId);
+      const normalizedProjectId = getProjectNumber(projectId);
       const normalizedSessionId = getPositiveNumber(targetSessionId);
-      if (!normalizedProjectId || !normalizedSessionId) {
+      if (normalizedProjectId === undefined || !normalizedSessionId) {
         return;
       }
 
@@ -929,8 +935,8 @@ function useChat(props: IProps) {
     const primaryEntry = laneEntries[0];
     const newAnswerMsg = primaryEntry.answerMsg;
     const clientRequestId = primaryEntry.lane.clientRequestId;
-    const projectId = getPositiveNumber(get(restPayload, 'projectId'));
-    const isNewProjectSession = Boolean(projectId && !sessionId);
+    const projectId = getProjectNumber(get(restPayload, 'projectId'));
+    const isNewProjectSession = projectId !== undefined && !sessionId;
     const multiAgent = isMultiAgentSend
       ? {
         turnId,
@@ -962,7 +968,7 @@ function useChat(props: IProps) {
 
     if (!isContinuingRunningTrace) {
       laneEntries.forEach((entry) => {
-        if (projectId) {
+        if (projectId !== undefined) {
           // 会话创建成功后用 clientRequestId 找回所属项目，再用真实 sessionId 建立关系。
           pendingProjectIdByClientRequestRef.current.set(entry.lane.clientRequestId, `${projectId}`);
           // 首条消息发送后立即在项目会话列表插入临时项，避免等待后端创建会话和绑定关系完成。
@@ -1005,7 +1011,7 @@ function useChat(props: IProps) {
       });
     }
 
-    if (projectId && sessionId) {
+    if (projectId !== undefined && sessionId) {
       void bindSessionToProject(projectId, sessionId);
     }
 

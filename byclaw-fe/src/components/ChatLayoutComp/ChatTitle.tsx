@@ -43,11 +43,19 @@ export default function ChatTitle(props: ChatTitleProps) {
   const titleSession = React.useMemo(() => {
     if (!sessionId) return undefined;
 
-    // 项目/任务入口可能先切换 sessionId 再同步列表缓存，标题不能因此整行消失。
+    // 缓存会话已带有列表计算出的头像和主题色，直接复用，避免再次标准化后图标样式与列表不一致。
+    if (currentSession) {
+      return {
+        ...currentSession,
+        sessionId: `${sessionId}`,
+        sessionName: currentSession.sessionName || 'New Chat',
+      };
+    }
+
+    // 项目/任务入口可能先切换 sessionId 再同步列表缓存，缓存缺失时仍保留标题行。
     return sessionHandler({
-      ...(currentSession || {}),
       sessionId: `${sessionId}`,
-      sessionName: currentSession?.sessionName || 'New Chat',
+      sessionName: 'New Chat',
     } as ISession);
   }, [currentSession, sessionId]);
 

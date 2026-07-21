@@ -125,10 +125,10 @@ const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({ task, onClose, proj
   // 总进度按环节完成占比派生：done 记 1，running 记 0.5，除以环节总数。
   const progress = phases.length
     ? Math.round(
-      (phases.reduce((acc, p) => acc + (p.status === 'done' ? 1 : p.status === 'running' ? 0.5 : 0), 0) /
+        (phases.reduce((acc, p) => acc + (p.status === 'done' ? 1 : p.status === 'running' ? 0.5 : 0), 0) /
           phases.length) *
           100
-    )
+      )
     : 0;
 
   const agentName = task?.agentName || 'Code Agent';
@@ -136,113 +136,118 @@ const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({ task, onClose, proj
   const requirement = task?.requirementTitle || task?.requirementOriginId;
 
   return (
-    <Drawer title={task?.title || '任务详情'} open={!!task} onClose={onClose} width={640}>
+    <Drawer title="任务详情" className={styles.taskDetailDrawer} open={!!task} onClose={onClose} width={640}>
       {task && (
         <Spin spinning={phaseLoading}>
-          {/* Agent 执行概览：头像 + 当前 Agent + 阶段·轮次·总进度 */}
-          <div className={styles.taskHero}>
-            <div className={styles.taskHeroAgent}>
-              <span className={styles.taskHeroAvatar}>{initials(agentName)}</span>
-              <div>
-                <small>当前执行 Agent</small>
-                <strong>{agentName}</strong>
-              </div>
-            </div>
-            <div className={styles.taskHeroProgress}>
-              <div className={styles.taskHeroTrack}>
-                <span style={{ width: `${progress}%` }} />
-              </div>
-              <p>
-                {currentPhaseLabel ? `${currentPhaseLabel}阶段` : '未开始'}
-                {round ? ` · 第 ${round} 轮` : ''} · 总进度 {progress}%
-              </p>
-            </div>
-          </div>
+          <div className={styles.taskDetailDrawerContent}>
+            {/* 任务标题与需求详情保持同一内容层级，避免占用抽屉头部展示空间。 */}
+            <div className={styles.taskDetailTitle}>{task.title || task.taskName || '未命名任务'}</div>
 
-          {/* 执行上下文 */}
-          <div className={styles.phaseSection}>
-            <h3 className={styles.phaseSectionTitle}>执行上下文</h3>
-            <div className={styles.taskContextGrid}>
-              <div className={styles.taskContextItem}>
-                <label>关联需求</label>
-                <strong>{dash(requirement)}</strong>
+            {/* Agent 执行概览：头像 + 当前 Agent + 阶段·轮次·总进度 */}
+            <div className={styles.taskHero}>
+              <div className={styles.taskHeroAgent}>
+                <span className={styles.taskHeroAvatar}>{initials(agentName)}</span>
+                <div>
+                  <small>当前执行 Agent</small>
+                  <strong>{agentName}</strong>
+                </div>
               </div>
-              <div className={styles.taskContextItem}>
-                <label>代码仓库</label>
-                <strong>{dash(task.repoFullName)}</strong>
-              </div>
-              <div className={styles.taskContextItem}>
-                <label>工作分支</label>
-                <strong>{dash(task.branchName)}</strong>
-              </div>
-              <div className={styles.taskContextItem}>
-                <label>任务负责人</label>
-                <strong>{dash(task.assignee)}</strong>
-              </div>
-              <div className={styles.taskContextItem}>
-                <label>创建时间</label>
-                <strong>{task.createTime ? dayjs(task.createTime).format('YYYY-MM-DD HH:mm') : '-'}</strong>
+              <div className={styles.taskHeroProgress}>
+                <div className={styles.taskHeroTrack}>
+                  <span style={{ width: `${progress}%` }} />
+                </div>
+                <p>
+                  {currentPhaseLabel ? `${currentPhaseLabel}阶段` : '未开始'}
+                  {round ? ` · 第 ${round} 轮` : ''} · 总进度 {progress}%
+                </p>
               </div>
             </div>
-          </div>
 
-          {/* 研发环节进度 */}
-          <div className={styles.phaseSection}>
-            <h3 className={styles.phaseSectionTitle}>研发环节进度</h3>
-            {phases.length === 0 ? (
-              <Empty description="暂无环节信息" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-            ) : (
-              <div className={styles.phaseFlow}>
-                {phases.map((p, idx) => {
-                  const meta = PHASE_STATE_META[p.status] || PHASE_STATE_META.pending;
-                  const isCurrent = p.key === currentPhase;
-                  return (
-                    <div key={p.key} className={`${styles.phaseNode} ${meta.cls}`}>
-                      <span className={styles.phaseNodeMark}>
-                        {p.status === 'done' || p.status === 'rejected' ? meta.icon : idx + 1}
-                      </span>
-                      <div className={styles.phaseNodeBody}>
-                        <strong>
-                          {p.label}
-                          {isCurrent && <span className={styles.phaseCurrentDot}> · 当前</span>}
-                        </strong>
-                        <small>{meta.label}</small>
+            {/* 执行上下文 */}
+            <div className={styles.phaseSection}>
+              <h3 className={styles.phaseSectionTitle}>执行上下文</h3>
+              <div className={styles.taskContextGrid}>
+                <div className={styles.taskContextItem}>
+                  <label>关联需求</label>
+                  <strong>{dash(requirement)}</strong>
+                </div>
+                <div className={styles.taskContextItem}>
+                  <label>代码仓库</label>
+                  <strong>{dash(task.repoFullName)}</strong>
+                </div>
+                <div className={styles.taskContextItem}>
+                  <label>工作分支</label>
+                  <strong>{dash(task.branchName)}</strong>
+                </div>
+                <div className={styles.taskContextItem}>
+                  <label>任务负责人</label>
+                  <strong>{dash(task.assignee)}</strong>
+                </div>
+                <div className={styles.taskContextItem}>
+                  <label>创建时间</label>
+                  <strong>{task.createTime ? dayjs(task.createTime).format('YYYY-MM-DD HH:mm') : '-'}</strong>
+                </div>
+              </div>
+            </div>
+
+            {/* 研发环节进度 */}
+            <div className={styles.phaseSection}>
+              <h3 className={styles.phaseSectionTitle}>研发环节进度</h3>
+              {phases.length === 0 ? (
+                <Empty description="暂无环节信息" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+              ) : (
+                <div className={styles.phaseFlow}>
+                  {phases.map((p, idx) => {
+                    const meta = PHASE_STATE_META[p.status] || PHASE_STATE_META.pending;
+                    const isCurrent = p.key === currentPhase;
+                    return (
+                      <div key={p.key} className={`${styles.phaseNode} ${meta.cls}`}>
+                        <span className={styles.phaseNodeMark}>
+                          {p.status === 'done' || p.status === 'rejected' ? meta.icon : idx + 1}
+                        </span>
+                        <div className={styles.phaseNodeBody}>
+                          <strong>
+                            {p.label}
+                            {isCurrent && <span className={styles.phaseCurrentDot}> · 当前</span>}
+                          </strong>
+                          <small>{meta.label}</small>
+                        </div>
                       </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {kickbacks.length > 0 && (
+              <div className={styles.phaseSection}>
+                <h3 className={styles.phaseSectionTitle}>打回记录</h3>
+                <div className={styles.kickbackList}>
+                  {kickbacks.map((kb, i) => {
+                    const fromLabel = phases.find((p) => p.key === kb.from)?.label || kb.from;
+                    const toLabel = phases.find((p) => p.key === kb.to)?.label || kb.to;
+                    return (
+                      <div key={i} className={styles.kickbackItem}>
+                        <Tag color="error" bordered={false}>
+                          {fromLabel} → {toLabel}
+                        </Tag>
+                        <span className={styles.kickbackRound}>第 {kb.round} 轮</span>
+                        {kb.reason && <span className={styles.kickbackReason}>{kb.reason}</span>}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {isMyTask && task.sessionId && (
+              <div className={styles.taskDetailAction}>
+                <Button type="primary" icon={<MessageOutlined />} onClick={handleGoToChat}>
+                  进入我的任务会话
+                </Button>
               </div>
             )}
           </div>
-
-          {kickbacks.length > 0 && (
-            <div className={styles.phaseSection}>
-              <h3 className={styles.phaseSectionTitle}>打回记录</h3>
-              <div className={styles.kickbackList}>
-                {kickbacks.map((kb, i) => {
-                  const fromLabel = phases.find((p) => p.key === kb.from)?.label || kb.from;
-                  const toLabel = phases.find((p) => p.key === kb.to)?.label || kb.to;
-                  return (
-                    <div key={i} className={styles.kickbackItem}>
-                      <Tag color="error" bordered={false}>
-                        {fromLabel} → {toLabel}
-                      </Tag>
-                      <span className={styles.kickbackRound}>第 {kb.round} 轮</span>
-                      {kb.reason && <span className={styles.kickbackReason}>{kb.reason}</span>}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {isMyTask && task.sessionId && (
-            <div style={{ marginTop: 24, textAlign: 'center' }}>
-              <Button type="primary" icon={<MessageOutlined />} onClick={handleGoToChat}>
-                进入我的任务会话
-              </Button>
-            </div>
-          )}
         </Spin>
       )}
     </Drawer>

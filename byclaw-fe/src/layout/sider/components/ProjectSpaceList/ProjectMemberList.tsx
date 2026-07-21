@@ -240,7 +240,8 @@ const ProjectMemberList: React.FC<ProjectMemberListProps> = ({ projectId, creato
 
       <Spin spinning={loading}>
         {members.length === 0 ? (
-          <Empty description="暂无成员" />
+          // 成员空态与需求 Tab 统一使用简洁图标，保持项目详情各列表的视觉一致。
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无成员" />
         ) : (
           <>
             {/* 成员列表复用任务 Tab 的无分隔线紧凑行样式。 */}

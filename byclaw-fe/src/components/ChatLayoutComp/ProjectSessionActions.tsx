@@ -20,6 +20,7 @@ const ProjectSessionActions: React.FC<ProjectSessionActionsProps> = ({ projectId
   const [project, setProject] = useState<any>(null);
   const [taskDetail, setTaskDetail] = useState<any>(null);
   const [taskLoading, setTaskLoading] = useState(false);
+  const [taskProgressTooltipOpen, setTaskProgressTooltipOpen] = useState(false);
   const [resultDrawerOpen, setResultDrawerOpen] = useState(false);
 
   useEffect(() => {
@@ -56,6 +57,8 @@ const ProjectSessionActions: React.FC<ProjectSessionActionsProps> = ({ projectId
   const isDevelopmentProject = project?.projectType === 'develop' || project?.projectType === 'development';
 
   const handleOpenTaskProgress = useCallback(async () => {
+    // 点击后立即关闭悬浮提示，避免抽屉打开时 Tooltip 停留在按钮上方。
+    setTaskProgressTooltipOpen(false);
     const numericSessionId = Number(sessionId);
     if (!Number.isFinite(numericSessionId) || numericSessionId <= 0) {
       message.warning('未找到任务会话');
@@ -84,6 +87,11 @@ const ProjectSessionActions: React.FC<ProjectSessionActionsProps> = ({ projectId
     }
   }, [sessionId, sessionName]);
 
+  const handleTaskProgressTooltipOpenChange = (open: boolean) => {
+    // 任务详情加载或已打开时不再展示提示，防止鼠标仍停留在按钮上导致 Tooltip 重新出现。
+    setTaskProgressTooltipOpen(open && !taskLoading && !taskDetail);
+  };
+
   // 任务成果面向全部会话展示；任务进度仅在研发项目中提供。
   if (!sessionId) return null;
 
@@ -91,7 +99,12 @@ const ProjectSessionActions: React.FC<ProjectSessionActionsProps> = ({ projectId
     <>
       <span className={styles.projectSessionActions}>
         {isDevelopmentProject && (
-          <Tooltip title="任务进度" placement="bottom">
+          <Tooltip
+            title="任务进度"
+            placement="bottom"
+            open={taskProgressTooltipOpen}
+            onOpenChange={handleTaskProgressTooltipOpenChange}
+          >
             <Button
               type="text"
               className={styles.projectActionButton}

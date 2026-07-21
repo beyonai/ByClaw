@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Dropdown, Empty, Input, Modal, Skeleton, Spin, Tag, message } from 'antd';
-import { DownOutlined, EllipsisOutlined, SearchOutlined } from '@ant-design/icons';
+import { Button, Dropdown, Empty, Input, Modal, Skeleton, Spin, Tag, Tooltip, message } from 'antd';
+import { DownOutlined, PlusOutlined, SearchOutlined } from '@ant-design/icons';
 // @ts-ignore
 import { useDispatch, useNavigate, useSelector } from '@umijs/max';
 import classNames from 'classnames';
@@ -21,6 +21,7 @@ import {
 import type { ProjectSession, ProjectSpace } from '@/pages/projectSpace/types';
 import { getArrayData, normalizeProjectDetail, normalizeProjectSession } from '@/pages/projectSpace/utils';
 import { addProjectMember, listProjectMembers, removeProjectMember } from '@/service/devloop';
+import AntdIcon from '@/components/AntdIcon';
 import { SiderContentContext } from '../../siderContentContext';
 import DialogueCard from '../DialogueList/DialogueCard';
 import ProjectDetailPanel from './ProjectDetailModal';
@@ -213,16 +214,6 @@ const ProjectSpaceList: React.FC = () => {
       ),
     }));
   }, [mergedProjects]);
-
-  const projectActionMenuItems = useMemo(() => {
-    return [
-      { key: 'create-project', label: '新建项目' },
-      ...(activeScopeProject
-        ? // 新建与详情操作同属项目快捷菜单，不再额外分组。
-        [{ key: 'detail', label: '项目详情' }]
-        : []),
-    ];
-  }, [activeScopeProject]);
 
   const projectFormInitialValues = useMemo(() => {
     if (!editingProject) return undefined;
@@ -642,7 +633,8 @@ const ProjectSpaceList: React.FC = () => {
       return;
     }
 
-    Modal.confirm({
+    let deleteProjectConfirm: ReturnType<typeof Modal.confirm> | undefined;
+    deleteProjectConfirm = Modal.confirm({
       title: '确认删除项目',
       content: `确定要删除项目「${project.projectName || '未命名项目'}」吗？`,
       okText: '删除',
@@ -650,6 +642,8 @@ const ProjectSpaceList: React.FC = () => {
       onOk: async () => {
         try {
           await deleteProject(Number(project.projectId));
+          // 删除接口成功后立即关闭二次确认，再进行提示和非阻塞列表刷新。
+          deleteProjectConfirm?.destroy();
           message.success('项目已删除');
           setProjectDetailMap((prev) => {
             const next = { ...prev };
@@ -671,29 +665,13 @@ const ProjectSpaceList: React.FC = () => {
             setSessionKeyword('');
             setDetailProject(undefined);
           }
-          await fetchProjects();
+          void fetchProjects();
         } catch (error) {
           console.error('Failed to delete project:', error);
           message.error('项目删除失败');
         }
       },
     });
-  };
-
-  function handleCurrentProjectAction(actionKey: string) {
-    if (!activeScopeProject) return;
-    if (actionKey === 'detail') {
-      // 项目编辑和删除统一进入详情页处理，列表菜单只保留详情入口。
-      void handleOpenProjectDetail(activeScopeProject);
-    }
-  }
-
-  const handleProjectActionMenuClick = ({ key }: { key: string }) => {
-    if (key === 'create-project') {
-      handleOpenCreateProject();
-      return;
-    }
-    handleCurrentProjectAction(key);
   };
 
   const handleSessionSearchChange = (value: string) => {
@@ -746,6 +724,7 @@ const ProjectSpaceList: React.FC = () => {
     setProjectCreating(true);
     const submitSharedFlag = values.projectType === 'develop' || values.sharedFlag;
     const shareMembers = submitSharedFlag ? values.shareMembers || [] : [];
+    let createdProjectId = '';
     try {
       if (editingProject) {
         const updatePayload = {
@@ -786,23 +765,27 @@ const ProjectSpaceList: React.FC = () => {
           isShare: submitSharedFlag ? 'Y' : 'N',
           shareTargets: [],
         });
-        const createdProjectId = getProjectIdFromSaveResponse(res);
+        createdProjectId = getProjectIdFromSaveResponse(res);
         if (createdProjectId && submitSharedFlag && shareMembers.length) {
           await syncProjectShareMembers(createdProjectId, shareMembers);
         }
         message.success('项目空间创建成功');
-        if (createdProjectId) {
-          setProjectScopeId(createdProjectId);
-          setSessionKeyword('');
-        }
       }
       setProjectModalOpen(false);
       setEditingProject(undefined);
-      // 创建/更新接口成功后，列表刷新失败不能再覆盖成功提示。
-      void fetchProjects().catch((error) => {
-        console.error('Failed to refresh project list after saving:', error);
-        message.warning('项目已保存，列表刷新失败，请稍后手动刷新');
-      });
+      const refreshedProjects = await fetchProjects();
+      if (createdProjectId) {
+        const createdProject = refreshedProjects.find((project) => `${project.projectId}` === createdProjectId);
+        // 新项目已进入下拉数据后优先使用规范化数据；未命中时保留接口 ID，等待后续列表响应补齐。
+        const selectedProjectId = createdProject?.projectId || createdProjectId;
+        const selectedProjectName = createdProject?.projectName || projectName;
+        setProjectScopeId(selectedProjectId);
+        setSessionKeyword('');
+        EventEmitter.emit('projectSpace-active-project-change', {
+          projectId: selectedProjectId,
+          projectName: selectedProjectName,
+        });
+      }
     } catch (error) {
       console.error('Failed to create project:', error);
       message.error(editingProject ? '项目更新失败' : '项目空间创建失败');
@@ -865,6 +848,117 @@ const ProjectSpaceList: React.FC = () => {
     });
   };
 
+  const handleProjectSessionNameChange = useCallback(
+    (project: ProjectSpace, payload: { sessionId: string; sessionName: string }) => {
+      const projectId = project.projectId;
+      // 编辑时立即回写项目侧栏缓存；接口失败时同一处理器接收旧名称完成回滚。
+      const updateSessionName = (sessions: ProjectSession[] = []) =>
+        sessions.map((session) =>
+          `${session.sessionId}` === `${payload.sessionId}` ? { ...session, sessionName: payload.sessionName } : session
+        );
+
+      setProjectDetailMap((prev) => {
+        const cachedProject = prev[projectId] || project;
+        return {
+          ...prev,
+          [projectId]: {
+            ...cachedProject,
+            sessions: updateSessionName(cachedProject.sessions),
+          },
+        };
+      });
+      setDetailProject((prev) =>
+        prev?.projectId === projectId ? { ...prev, sessions: updateSessionName(prev.sessions) } : prev
+      );
+    },
+    []
+  );
+
+  const handleProjectSessionDeleteOptimistic = useCallback((project: ProjectSpace, deletedSession: ProjectSession) => {
+    const projectId = project.projectId;
+    const sessionId = `${deletedSession.sessionId}`;
+    // 删除确认后立即同步项目会话缓存和分页总数，列表无需等待接口响应。
+    const removeSession = (sessions: ProjectSession[] = []) =>
+      sessions.filter((session) => `${session.sessionId}` !== `${sessionId}`);
+
+    setProjectDetailMap((prev) => {
+      const cachedProject = prev[projectId] || project;
+      const sessions = removeSession(cachedProject.sessions);
+      const removedCount = (cachedProject.sessions || []).length - sessions.length;
+      return {
+        ...prev,
+        [projectId]: {
+          ...cachedProject,
+          sessions,
+          sessionCount: Math.max(0, Number(cachedProject.sessionCount ?? (cachedProject.sessions || []).length) - removedCount),
+        },
+      };
+    });
+    setProjectSessionPageMap((prev) => {
+      const sessionPage = prev[projectId];
+      if (!sessionPage) return prev;
+      return {
+        ...prev,
+        [projectId]: {
+          ...sessionPage,
+          total: Math.max(0, sessionPage.total - 1),
+        },
+      };
+    });
+    setDetailProject((prev) =>
+      prev?.projectId === projectId
+        ? {
+            ...prev,
+            sessions: removeSession(prev.sessions),
+            sessionCount: Math.max(0, Number(prev.sessionCount ?? (prev.sessions || []).length) - 1),
+          }
+        : prev
+    );
+  }, []);
+
+  const handleProjectSessionDeleteRollback = useCallback((project: ProjectSpace, restoredSession: ProjectSession) => {
+    const projectId = project.projectId;
+    const sessionId = `${restoredSession.sessionId}`;
+    // 删除接口失败时将原会话插回缓存和分页总数，恢复用户确认前的列表状态。
+    const restoreSession = (sessions: ProjectSession[] = []) => {
+      if (sessions.some((session) => `${session.sessionId}` === sessionId)) return sessions;
+      return mergeProjectSessions(sessions, [restoredSession]);
+    };
+
+    setProjectDetailMap((prev) => {
+      const cachedProject = prev[projectId] || project;
+      const alreadyRestored = (cachedProject.sessions || []).some((session) => `${session.sessionId}` === sessionId);
+      return {
+        ...prev,
+        [projectId]: {
+          ...cachedProject,
+          sessions: restoreSession(cachedProject.sessions),
+          sessionCount: Number(cachedProject.sessionCount ?? (cachedProject.sessions || []).length) + (alreadyRestored ? 0 : 1),
+        },
+      };
+    });
+    setProjectSessionPageMap((prev) => {
+      const sessionPage = prev[projectId];
+      if (!sessionPage) return prev;
+      return {
+        ...prev,
+        [projectId]: {
+          ...sessionPage,
+          total: sessionPage.total + 1,
+        },
+      };
+    });
+    setDetailProject((prev) => {
+      if (prev?.projectId !== projectId) return prev;
+      const alreadyRestored = (prev.sessions || []).some((session) => `${session.sessionId}` === sessionId);
+      return {
+        ...prev,
+        sessions: restoreSession(prev.sessions),
+        sessionCount: Number(prev.sessionCount ?? (prev.sessions || []).length) + (alreadyRestored ? 0 : 1),
+      };
+    });
+  }, []);
+
   const handleSessionListScroll = useCallback(
     (project: ProjectSpace, event: React.UIEvent<HTMLDivElement>) => {
       const projectId = project.projectId;
@@ -918,8 +1012,12 @@ const ProjectSpaceList: React.FC = () => {
             <DialogueCard
               key={session.sessionId}
               item={session as any}
-              cannotActionList={['delete', 'edit']}
+              // 项目会话沿用普通会话的编辑、删除操作，悬停时展示标准三点菜单。
               onSelect={(item) => handleOpenSession(project, item as ProjectSession)}
+              onSessionEditOptimistic={(payload) => handleProjectSessionNameChange(project, payload)}
+              onSessionEditRollback={(payload) => handleProjectSessionNameChange(project, payload)}
+              onSessionDeleteOptimistic={(item) => handleProjectSessionDeleteOptimistic(project, item as ProjectSession)}
+              onSessionDeleteRollback={(item) => handleProjectSessionDeleteRollback(project, item as ProjectSession)}
             />
           );
         })}
@@ -968,17 +1066,23 @@ const ProjectSpaceList: React.FC = () => {
                   </span>
                 </button>
               </Dropdown>
-              <Dropdown
-                // 更多操作在鼠标经过三个点时直接展开，项目切换下拉仍使用点击触发。
-                trigger={['hover']}
-                menu={{
-                  items: projectActionMenuItems,
-                  onClick: handleProjectActionMenuClick,
-                }}
-              >
-                <Button className={styles.projectMoreButton} icon={<EllipsisOutlined />} />
-              </Dropdown>
+              <Tooltip title="新建项目" placement="top">
+                {/* 右侧仅保留新建项目入口，项目详情由下方快捷入口承载。 */}
+                <Button className={styles.newProjectButton} icon={<PlusOutlined />} onClick={handleOpenCreateProject} />
+              </Tooltip>
             </div>
+            {activeScopeProject && (
+              <button
+                type="button"
+                className={styles.enterProjectDetail}
+                onClick={() => void handleOpenProjectDetail(activeScopeProject)}
+              >
+                {/* 使用笔记本图标，保持与员工侧栏“发现数字员工”一致的整行快捷入口结构。 */}
+                <AntdIcon className={styles.enterProjectDetailIcon} type="icon-a-Notebook-onebijiben" />
+                <span className={styles.enterProjectDetailText}>进入项目详情</span>
+                <AntdIcon className={styles.enterProjectDetailArrow} type="icon-a-Rightyou" />
+              </button>
+            )}
           </div>
 
           <Spin spinning={loading} wrapperClassName={styles.spin}>

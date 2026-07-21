@@ -35,7 +35,7 @@ import {
   ReloadOutlined,
   RightOutlined,
 } from '@ant-design/icons';
-import { useIntl } from '@umijs/max';
+import { useDispatch, useIntl, useNavigate } from '@umijs/max';
 import dayjs from 'dayjs';
 import {
   checkDwsAuthStatus,
@@ -170,14 +170,6 @@ const SCORE_DIMENSIONS: { key: keyof ScoreDetail; label: string; max: number }[]
   { key: 'feasibility', label: '实现可行性', max: 10 },
   { key: 'reuseValue', label: '复用价值', max: 10 },
 ];
-
-// 综合分配色：>=80 绿，>=60 蓝，<60 橙；无分灰
-const scoreBg = (score?: number | null) => {
-  if (score === null || score === undefined) return '#f0f0f0';
-  if (score >= 80) return '#e9f8f0';
-  if (score >= 60) return '#eaf2ff';
-  return '#fff3dc';
-};
 
 const getTaskStatusMeta = (status?: string) => {
   // 任务列表与任务视图共用状态口径，同时兼容后端返回的中英文枚举值。
@@ -352,7 +344,9 @@ const ProjectDetailPanel: React.FC<Props> = ({
   onProjectSharedChange,
 }) => {
   const intl = useIntl();
-  const { EventEmitter, sessionId: activeChatSessionId } = useGlobal();
+  const dispatch = useDispatch();
+  const navigate = useNavigate();
+  const { EventEmitter, sessionId: activeChatSessionId, setSessionId } = useGlobal();
   const activeSiderAgent = useActiveSiderAgent();
   const { setDetailPanel, clearDetailPanel } = React.useContext(SiderContentContext);
   const [activeTab, setActiveTab] = useState('requirements');
@@ -420,8 +414,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
   // 项目类型来自后端/静态参数，先按字符串归一，避免默认项目枚举声明不同步时报比较类型错误。
   const projectType = project?.projectType ? String(project.projectType) : undefined;
   const isDevelopProject = projectType === 'develop';
-  // 标题下方展示项目描述字段，避免继续显示固定的项目类型详情文案。
-  const projectDescription = project?.description?.trim() || '暂无描述';
+  // 标题下方展示项目描述字段，描述为空时保留空白而不显示兜底文案。
+  const projectDescription = project?.description?.trim() || '';
   const fileResourceId = activeSiderAgent.resourceId || (project?.resourceId ? `${project.resourceId}` : '');
   const { handlePreview: handleResourcePreview, handleDownload: handleResourceDownload } = useFilePreviewActions({
     resourceId: fileResourceId,
@@ -432,6 +426,61 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const showRequirementsTab = isDevelopProject || (projectType === 'normal' && !!project?.sharedFlag);
   // 默认项目和未共享的普通项目不展示成员配置，只有研发项目或共享项目需要成员 tab。
   const showMembersTab = projectType !== 'default' && (isDevelopProject || !!project?.sharedFlag);
+
+  const handleOpenTaskSession = useCallback(
+    (task: any) => {
+      if (!task?.sessionId) {
+        message.warning('该任务尚未关联会话');
+        return;
+      }
+
+      // 非研发项目的任务直接进入关联会话，并补齐会话缓存和项目上下文。
+      const taskSessionPayload = {
+        ...task,
+        sessionId: `${task.sessionId}`,
+        sessionName: task.sessionName || task.title || task.taskName || '任务会话',
+      };
+      const targetProjectId = [projectId, task.projectId]
+        .map((candidateProjectId) => Number(candidateProjectId))
+        .find(
+          (candidateProjectId) =>
+            Number.isFinite(candidateProjectId) && (candidateProjectId === -1 || candidateProjectId > 0)
+        );
+
+      if (targetProjectId !== undefined) {
+        EventEmitter.emit('projectSpace-session-context', {
+          sessionId: `${task.sessionId}`,
+          projectId: targetProjectId,
+          projectName: project?.projectName || task.projectName,
+        });
+        dispatch({
+          type: 'session/addSession',
+          payload: { ...taskSessionPayload, projectId: targetProjectId },
+        });
+        dispatch({
+          type: 'session/updateSession',
+          payload: { ...taskSessionPayload, projectId: targetProjectId },
+        });
+        setSessionId?.(String(task.sessionId));
+        navigate('/chat', {
+          state: {
+            keepSiderActiveKey: 'sessions',
+            from: 'projectSpace',
+            projectId: targetProjectId,
+            projectName: project?.projectName || task.projectName,
+          },
+        });
+        return;
+      }
+
+      dispatch({ type: 'session/addSession', payload: taskSessionPayload });
+      dispatch({ type: 'session/updateSession', payload: taskSessionPayload });
+      setSessionId?.(String(task.sessionId));
+      navigate('/chat');
+    },
+    [EventEmitter, dispatch, navigate, project?.projectName, projectId, setSessionId]
+  );
+
   const projectSessions = useMemo(() => {
     const sessionMap = new Map<string, ProjectResourceSession>();
     [...(project?.sessions || []), ...resourceSessions].forEach((session) => {
@@ -1629,21 +1678,15 @@ const ProjectDetailPanel: React.FC<Props> = ({
         width={640}
       >
         <div className={styles.requirementDetailDrawerContent}>
-          <div className={styles.requirementDetailTitle}>{detailReq.title}</div>
-          <div className={styles.scoreSummary}>
-            <div className={styles.scoreSummaryCircle} style={{ background: scoreBg(detailReq.score) }}>
-              {scored ? detailReq.score : '—'}
-            </div>
-            <div>
-              <div className={styles.scoreSummaryLabel}>AI 综合评分</div>
-              <div className={styles.scoreSummaryPriority}>
-                {detailReq.priority || '—'}
-                {detailReq.sessionId ? ' · 研发中' : ''}
-              </div>
-              <div className={styles.scoreSummaryHint}>
-                {detailReq.sessionId ? '已满足自动派生研发任务规则' : '尚未启动研发任务'}
-              </div>
-            </div>
+          <div className={styles.requirementDetailTitleRow}>
+            <div className={styles.requirementDetailTitle}>{detailReq.title}</div>
+            {/* 评分概览收敛为优先级，未派生研发任务时以状态标签提示。 */}
+            <strong className={styles.requirementDetailPriority}>{detailReq.priority || '—'}</strong>
+            {!detailReq.sessionId && (
+              <Tag bordered={false} className={styles.requirementDetailUnstartedTag}>
+                未启动
+              </Tag>
+            )}
           </div>
 
           <section className={styles.requirementDetailSection}>
@@ -1734,7 +1777,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
         <button type="button" className={styles.detailChannelEntry} onClick={handleToggleChannelPanel}>
           <AntdIcon type="icon-chajian" className={styles.detailChannelEntryIcon} />
           <span>
-            <strong>渠道配置</strong>
+            <strong>需求渠道配置</strong>
           </span>
           <RightOutlined />
         </button>
@@ -1819,7 +1862,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
               {hasMoreRequirements && <div className={styles.detailRequirementMore}>向下滚动加载更多</div>}
             </div>
           ) : (
-            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无需求，请去「渠道配置」点击「扫描」收集" />
+            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无数据" />
           )}
         </Spin>
       </div>
@@ -1936,8 +1979,12 @@ const ProjectDetailPanel: React.FC<Props> = ({
                 key={task.taskId}
                 className={styles.detailTaskCard}
                 onClick={() => {
-                  // 卡片点击与“环节详情”按钮保持一致，直接打开详情抽屉而不再展开列表项。
-                  setDetailTask(task);
+                  // 研发项目查看环节详情，其他项目直接进入任务关联的会话。
+                  if (isDevelopProject) {
+                    setDetailTask(task);
+                    return;
+                  }
+                  handleOpenTaskSession(task);
                 }}
               >
                 <div className={styles.detailTaskIcon}>

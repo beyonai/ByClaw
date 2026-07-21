@@ -11,6 +11,11 @@ import type { IAgentType } from '@/typescript/agent';
 import ChatPageLayout from '@/components/ChatPageLayout';
 
 const BottomContent = lazy(() => import('@/pages/chat/components/BottomContent'));
+// 后端使用 -1 标识默认项目；它与正数项目 ID 都是聊天项目上下文的合法值。
+const DEFAULT_PROJECT_ID = -1;
+
+const isValidProjectContextId = (projectId: number) =>
+  Number.isFinite(projectId) && (projectId === DEFAULT_PROJECT_ID || projectId > 0);
 
 type ProjectChatContext = {
   projectId?: number;
@@ -24,7 +29,7 @@ const getProjectChatContext = (locationState: unknown): ProjectChatContext => {
     projectName?: string;
   };
   const projectId = Number(state.projectId);
-  if (state.from !== 'projectSpace' || !Number.isFinite(projectId) || projectId <= 0) {
+  if (state.from !== 'projectSpace' || !isValidProjectContextId(projectId)) {
     return {};
   }
 
@@ -100,7 +105,7 @@ const Chat = () => {
     const handleActiveProjectChange = (payload: { projectId?: string | number; projectName?: string }) => {
       const projectId = Number(payload?.projectId);
       setProjectChatContext(
-        Number.isFinite(projectId) && projectId > 0
+        isValidProjectContextId(projectId)
           ? {
             projectId,
             projectName: payload?.projectName,
@@ -118,7 +123,7 @@ const Chat = () => {
   React.useEffect(() => {
     const handleProjectSessionPending = (payload: { projectId?: string | number; projectName?: string }) => {
       const projectId = Number(payload?.projectId);
-      if (Number.isFinite(projectId) && projectId > 0) {
+      if (isValidProjectContextId(projectId)) {
         // 新会话尚未取得 sessionId 时先缓存项目归属，创建成功后顶部工具仍使用实际发送时选择的项目。
         pendingSessionProjectContextRef.current = {
           projectId,
@@ -141,7 +146,7 @@ const Chat = () => {
     }) => {
       const projectId = Number(payload?.projectId);
       const targetSessionId = `${payload?.sessionId || ''}`;
-      if (!targetSessionId || !Number.isFinite(projectId) || projectId <= 0) return;
+      if (!targetSessionId || !isValidProjectContextId(projectId)) return;
 
       const context = { projectId, projectName: payload?.projectName };
       // 同路由切换任务会话时，先按会话 ID 缓存，避免 sessionId 先更新导致路由 state 尚未生效。

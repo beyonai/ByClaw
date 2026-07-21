@@ -251,6 +251,17 @@ const ProjectFormModal: React.FC<Props> = ({
     form.submit();
   };
 
+  const handleFormKeyDown = (event: React.KeyboardEvent<HTMLFormElement>) => {
+    const target = event.target as HTMLElement;
+    const isSubmitInput = target.tagName === 'INPUT' && !target.closest('.ant-select');
+    // 仅项目名称等单行输入框回车提交，避免影响文本域、下拉选择和共享成员操作按钮。
+    if (event.key !== 'Enter' || event.nativeEvent.isComposing || !isSubmitInput) {
+      return;
+    }
+    event.preventDefault();
+    handleModalOk();
+  };
+
   const handleSubmit = (values: ProjectFormValues) => {
     const submitSharedFlag =
       values.projectType === 'default' ? false : values.projectType === 'develop' || values.sharedFlag;
@@ -274,7 +285,14 @@ const ProjectFormModal: React.FC<Props> = ({
       onOk={handleModalOk}
       width={720}
     >
-      <Form form={form} layout="vertical" preserve={false} initialValues={formInitialValues} onFinish={handleSubmit}>
+      <Form
+        form={form}
+        layout="vertical"
+        preserve={false}
+        initialValues={formInitialValues}
+        onFinish={handleSubmit}
+        onKeyDown={handleFormKeyDown}
+      >
         <Form.Item name="projectName" label="项目名称" rules={[{ required: true, message: '请输入项目名称' }]}>
           <Input maxLength={100} placeholder="请输入项目名称" />
         </Form.Item>
