@@ -307,7 +307,7 @@ export function renderMetadataFirstDelegationContent(params: {
     "Treat the complete metadata document as the business-rule manual. Do not rely on a fixed list of known headings.",
     "After metadata integrity passes, read the required client instructions named by the contract.",
     "Read every Linked Skill directly from its metadata skillDocPath from byte 0 through EOF before query access.",
-    "Do not copy, install, symlink, or materialize Linked Skills into public Claude Code or Codex skill directories.",
+    "Do not copy, install, symlink, or materialize Linked Skills into `.claude/skills`, `.agents/skills`, `.codex/skills`, or equivalent public skill directories.",
     "Follow metadata instructions to load all other referenced resources required for this task, including future resource types unknown to this adapter.",
     "Write bootstrap-receipt.json with READY or BLOCKED, integrity evidence, acknowledged rules, every loaded Linked Skill path, loaded referenced resources, and blockers.",
     "If any mandatory rule, Linked Skill, or referenced resource cannot be loaded, write BLOCKED and do not access the query.",

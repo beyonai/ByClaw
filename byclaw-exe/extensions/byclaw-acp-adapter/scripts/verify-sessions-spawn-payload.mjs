@@ -141,6 +141,9 @@ function assertSessionsSpawnPayload(params) {
   const expectedReplyLanguage = testCase.request.replyLanguage ?? testCase.request.language ?? "zh_CN";
   const expectedByaiSessionId = testCase.request.sessionId;
   const expectedSessionRoot = `${SESSION_FILES_ROOT}/${expectedByaiSessionId}`;
+  const expectedClientType = testCase.expectedClientType ?? fixture.config.defaultAcpClientType;
+  const expectedClientDirName =
+    expectedClientType === "codex" ? PATHS.clientDirNames.codex : PATHS.clientDirNames.claudeCode;
 
   assert.equal(payload.runtime, ACP.runtime, `${testCase.name} sessionsSpawn.runtime mismatch`);
   assert.equal(payload.agentId, expectedAcpAgentId, `${testCase.name} sessionsSpawn.agentId mismatch`);
@@ -207,7 +210,7 @@ function assertSessionsSpawnPayload(params) {
     sharedContext.bootstrapReceiptPath.startsWith(sharedContext.runDir),
     `${testCase.name} bootstrap receipt must be scoped to runDir`,
   );
-  assert.equal(bundle.clientType, fixture.config.defaultAcpClientType, `${testCase.name} clientType mismatch`);
+  assert.equal(bundle.clientType, expectedClientType, `${testCase.name} clientType mismatch`);
   assert.equal(sharedContext.sessionId, expectedByaiSessionId, `${testCase.name} sharedContext.sessionId mismatch`);
   assert.equal(
     sharedContext.byaiChannelSessionId,
@@ -228,13 +231,13 @@ function assertSessionsSpawnPayload(params) {
   assert.equal(sharedContext.bundlePath, bundlePath, `${testCase.name} sharedContext.bundlePath mismatch`);
   assert.ok(
     sharedContext.sharedDir.includes(
-      path.join(PATHS.byclawDir, PATHS.acpRunsDir, PATHS.clientDirNames.claudeCode),
+      path.join(PATHS.byclawDir, PATHS.acpRunsDir, expectedClientDirName),
     ),
-    `${testCase.name} shared directory should use .byclaw/acp-runs/claudeCode`,
+    `${testCase.name} shared directory should use .byclaw/acp-runs/${expectedClientDirName}`,
   );
   assert.ok(
     sharedContext.sharedDir.endsWith(
-      path.join(PATHS.byclawDir, PATHS.acpRunsDir, PATHS.clientDirNames.claudeCode, expectedByaiSessionId),
+      path.join(PATHS.byclawDir, PATHS.acpRunsDir, expectedClientDirName, expectedByaiSessionId),
     ),
     `${testCase.name} shared directory should end with the byai-channel session id`,
   );
@@ -293,7 +296,16 @@ function assertSessionsSpawnPayload(params) {
     `${testCase.name} client instructions should include session files root`,
   );
   assert.match(metadata, /linkedSkills/u, `${testCase.name} metadata should include mounted linkedSkills`);
-  assert.match(metadata, /skillDocPath/u, `${testCase.name} metadata should include absolute skillDocPath`);
+  const expectedLinkedSkillCount = testCase.expectedAgentIds.reduce(
+    (count, agentId) => count + (findAgent(snapshot, agentId).linkedSkills?.length ?? 0),
+    0,
+  );
+  assert.equal(bundle.linkedSkills.length, expectedLinkedSkillCount, `${testCase.name} linkedSkills count mismatch`);
+  if (expectedLinkedSkillCount > 0) {
+    assert.match(metadata, /skillDocPath/u, `${testCase.name} metadata should include absolute skillDocPath`);
+  } else {
+    assert.doesNotMatch(metadata, /"skillDocPath"/u, `${testCase.name} metadata must not invent skillDocPath`);
+  }
   assert.match(
     metadata,
     /Every Linked Skill[^\n]*mandatory bootstrap input/iu,
@@ -314,11 +326,23 @@ function assertSessionsSpawnPayload(params) {
     /Do not copy, install, symlink, or materialize[^\n]*public[^\n]*skill directories/iu,
     `${testCase.name} client instructions should forbid public skill-directory materialization`,
   );
+  for (const publicSkillDir of [".claude/skills", ".agents/skills", ".codex/skills"]) {
+    assert.match(metadata, new RegExp(publicSkillDir.replace(".", "\\."), "u"));
+    assert.match(clientInstructions, new RegExp(publicSkillDir.replace(".", "\\."), "u"));
+  }
   assert.match(
     clientInstructions,
     /apply every loaded Linked Skill[^\n]*trigger conditions[^\n]*does not count as using/iu,
     `${testCase.name} client instructions should require actual use of triggered Linked Skills`,
   );
+  if (expectedClientType === "codex") {
+    assert.match(clientInstructions, /## Codex/u, `${testCase.name} should use Codex instructions`);
+    assert.match(clientInstructions, /\.agents\/skills/u);
+    assert.match(clientInstructions, /\.codex\/skills/u);
+  } else {
+    assert.match(clientInstructions, /## Claude Code/u, `${testCase.name} should use Claude Code instructions`);
+    assert.match(clientInstructions, /\.claude\/skills/u);
+  }
   if (testCase.expectedAgentIds.includes("900002")) {
     assert.ok(
       bundle.linkedSkills.some((skill) => skill.id === FIXTURE_LINKED_SKILL_ID),
@@ -449,6 +473,73 @@ async function assertCallAcpAgentToolFailsClosed(snapshot) {
     assert.equal(result.error_code, "ACP_METADATA_BOOTSTRAP_INVALID");
     assert.match(result.error, /metadata bootstrap materialization failed/iu);
     assert.equal(executorCallCount, 0, "bootstrap failure must not call the remote executor");
+  } finally {
+    for (const key of environmentKeys) {
+      const value = savedEnvironment[key];
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  }
+}
+
+async function assertCallAcpAgentToolDispatchesBootstrap(snapshot) {
+  const { createByclawCallAcpAgentTool } = await loadCallAcpAgentTool();
+  let executorInput;
+  const environmentKeys = [
+    "USER_CODE",
+    "LANGFUSE_BASE_URL",
+    "LANGFUSE_PUBLIC_KEY",
+    "LANGFUSE_SECRET_KEY",
+    "OPENCLAW_STATE_DIR",
+  ];
+  const savedEnvironment = Object.fromEntries(environmentKeys.map((key) => [key, process.env[key]]));
+  const defaultCwd = path.join(workspaceRoot, "call-tool-success");
+  process.env.USER_CODE = "metadata-bootstrap-success-test";
+  delete process.env.LANGFUSE_BASE_URL;
+  delete process.env.LANGFUSE_PUBLIC_KEY;
+  delete process.env.LANGFUSE_SECRET_KEY;
+  process.env.OPENCLAW_STATE_DIR = path.join(defaultCwd, ".openclaw");
+  try {
+    const config = {
+      ...jsonClone(fixture.config),
+      defaultCwd,
+      sqlitePath: path.join(defaultCwd, "state.sqlite"),
+    };
+    const tool = createByclawCallAcpAgentTool({
+      config,
+      registry: {
+        snapshot: async () => jsonClone(snapshot),
+      },
+      executeViaCallAgent: async (input) => {
+        executorInput = input;
+        return { success: true };
+      },
+    })({
+      sessionKey: "agent:main:metadata-bootstrap-success-test",
+      channelSessionId: "metadata-bootstrap-success-session",
+      channelTraceId: "c".repeat(32),
+      langfuseParentObservationId: "d".repeat(16),
+    });
+    const result = await tool.execute("metadata-bootstrap-success-call", {
+      kind: "agent",
+      id: "900002",
+      input: "protected query",
+    });
+    assert.equal(result.success, true);
+    assert.ok(executorInput, "successful call_acp_agent must invoke the remote executor");
+    assert.equal(executorInput.payload.cwd, defaultCwd, "call_acp_agent must preserve the planned cwd");
+    assert.match(executorInput.content, /every Linked Skill[^\n]*skillDocPath[^\n]*EOF/iu);
+    assert.match(executorInput.content, /\.claude\/skills/u);
+    assert.match(executorInput.content, /\.agents\/skills/u);
+    assert.match(executorInput.content, /\.codex\/skills/u);
+    assert.ok(
+      executorInput.content.search(/every Linked Skill[^\n]*skillDocPath[^\n]*EOF/iu) <
+        executorInput.content.indexOf("<USER_QUERY_ACCESS>"),
+      "call_acp_agent must send Linked Skills bootstrap before query access",
+    );
   } finally {
     for (const key of environmentKeys) {
       const value = savedEnvironment[key];
@@ -611,6 +702,7 @@ async function main() {
   );
   const snapshot = jsonClone(fixture.snapshot);
   await assertCallAcpAgentToolFailsClosed(snapshot);
+  await assertCallAcpAgentToolDispatchesBootstrap(snapshot);
   const cases = fixture.requestCases.filter((item) => !selected || selected.has(item.name));
 
   assert.ok(cases.length > 0, "no request cases selected");
