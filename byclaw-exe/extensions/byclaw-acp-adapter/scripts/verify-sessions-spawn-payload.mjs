@@ -224,9 +224,15 @@ function assertSessionsSpawnPayload(params) {
   );
   assert.ok(fs.existsSync(sharedContext.queryPath), `${testCase.name} query.md is missing`);
   assert.ok(fs.existsSync(sharedContext.metadataPath), `${testCase.name} metadata.md is missing`);
-  assert.ok(
-    fs.existsSync(sharedContext.clientInstructionsPath),
-    `${testCase.name} client instructions are missing`,
+  assert.equal(
+    sharedContext.clientInstructionsPath,
+    undefined,
+    `${testCase.name} sharedContext must not expose a client instructions artifact`,
+  );
+  assert.equal(
+    fs.existsSync(path.join(sharedContext.runDir, "clients")),
+    false,
+    `${testCase.name} runDir must not contain a clients directory`,
   );
   assert.equal(sharedContext.bundlePath, bundlePath, `${testCase.name} sharedContext.bundlePath mismatch`);
   assert.ok(
@@ -243,7 +249,11 @@ function assertSessionsSpawnPayload(params) {
   );
   assert.match(payload.task, /query\.md/u, `${testCase.name} task should point to query.md`);
   assert.match(payload.task, /metadata\.md/u, `${testCase.name} task should point to metadata.md`);
-  assert.match(payload.task, /clientInstructions/u, `${testCase.name} task should point to client instructions`);
+  assert.doesNotMatch(
+    payload.task,
+    /clientInstructions|client instructions/iu,
+    `${testCase.name} task must not reference a client instructions artifact`,
+  );
   assert.match(payload.task, /回复语言: zh_CN/u, `${testCase.name} task should include reply language`);
   assert.match(
     payload.task,
@@ -257,7 +267,6 @@ function assertSessionsSpawnPayload(params) {
   );
   const metadata = fs.readFileSync(sharedContext.metadataPath, "utf8");
   const query = fs.readFileSync(sharedContext.queryPath, "utf8");
-  const clientInstructions = fs.readFileSync(sharedContext.clientInstructionsPath, "utf8");
   const bootstrapContract = JSON.parse(fs.readFileSync(bootstrapContractPath, "utf8"));
   assert.equal(bootstrapContract.bootstrapId, sharedContext.bootstrapId);
   assert.equal(bootstrapContract.runDir, sharedContext.runDir);
@@ -269,6 +278,11 @@ function assertSessionsSpawnPayload(params) {
     `${testCase.name} metadata sha256 mismatch`,
   );
   assert.equal(bootstrapContract.metadata.readMode, "complete-to-eof");
+  assert.equal(
+    bootstrapContract.clientInstructions,
+    undefined,
+    `${testCase.name} bootstrap contract must not depend on client instructions`,
+  );
   assert.equal(bootstrapContract.query.readAfterBootstrap, true);
   assert.equal(bootstrapContract.receipt.requiredStatus, "READY");
   assert.match(query, /Reply language: zh_CN/u, `${testCase.name} query should include reply language`);
@@ -279,21 +293,6 @@ function assertSessionsSpawnPayload(params) {
     metadata,
     new RegExp(expectedSessionRoot.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"),
     `${testCase.name} metadata should include session files root`,
-  );
-  assert.match(
-    clientInstructions,
-    /Reply language: zh_CN/u,
-    `${testCase.name} client instructions should include reply language`,
-  );
-  assert.match(
-    clientInstructions,
-    /Fixed Work Specs/u,
-    `${testCase.name} client instructions should include fixed work specs`,
-  );
-  assert.match(
-    clientInstructions,
-    new RegExp(expectedSessionRoot.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"),
-    `${testCase.name} client instructions should include session files root`,
   );
   assert.match(metadata, /linkedSkills/u, `${testCase.name} metadata should include mounted linkedSkills`);
   const expectedLinkedSkillCount = testCase.expectedAgentIds.reduce(
@@ -316,32 +315,8 @@ function assertSessionsSpawnPayload(params) {
     /Do not copy, install, symlink, or materialize[^\n]*public[^\n]*skill directories/iu,
     `${testCase.name} metadata should forbid public skill-directory materialization`,
   );
-  assert.match(
-    clientInstructions,
-    /every Linked Skill[^\n]*skillDocPath[^\n]*EOF/iu,
-    `${testCase.name} client instructions should load every Linked Skill from skillDocPath to EOF`,
-  );
-  assert.match(
-    clientInstructions,
-    /Do not copy, install, symlink, or materialize[^\n]*public[^\n]*skill directories/iu,
-    `${testCase.name} client instructions should forbid public skill-directory materialization`,
-  );
   for (const publicSkillDir of [".claude/skills", ".agents/skills", ".codex/skills"]) {
     assert.match(metadata, new RegExp(publicSkillDir.replace(".", "\\."), "u"));
-    assert.match(clientInstructions, new RegExp(publicSkillDir.replace(".", "\\."), "u"));
-  }
-  assert.match(
-    clientInstructions,
-    /apply every loaded Linked Skill[^\n]*trigger conditions[^\n]*does not count as using/iu,
-    `${testCase.name} client instructions should require actual use of triggered Linked Skills`,
-  );
-  if (expectedClientType === "codex") {
-    assert.match(clientInstructions, /## Codex/u, `${testCase.name} should use Codex instructions`);
-    assert.match(clientInstructions, /\.agents\/skills/u);
-    assert.match(clientInstructions, /\.codex\/skills/u);
-  } else {
-    assert.match(clientInstructions, /## Claude Code/u, `${testCase.name} should use Claude Code instructions`);
-    assert.match(clientInstructions, /\.claude\/skills/u);
   }
   if (testCase.expectedAgentIds.includes("900002")) {
     assert.ok(
@@ -535,6 +510,7 @@ async function assertCallAcpAgentToolDispatchesBootstrap(snapshot) {
     assert.match(executorInput.content, /\.claude\/skills/u);
     assert.match(executorInput.content, /\.agents\/skills/u);
     assert.match(executorInput.content, /\.codex\/skills/u);
+    assert.doesNotMatch(executorInput.content, /Required client instructions|clientInstructions/iu);
     assert.ok(
       executorInput.content.search(/every Linked Skill[^\n]*skillDocPath[^\n]*EOF/iu) <
         executorInput.content.indexOf("<USER_QUERY_ACCESS>"),
@@ -561,10 +537,8 @@ async function assertMetadataBootstrapProtocol() {
     validateMetadataBootstrapContract,
   } = await loadMetadataBootstrap();
   const runDir = path.join(workspaceRoot, "runs", "metadata-bootstrap-protocol");
-  const clientsDir = path.join(runDir, "clients");
   const metadataPath = path.join(runDir, "metadata.md");
   const queryPath = path.join(runDir, "query.md");
-  const clientInstructionsPath = path.join(clientsDir, "claude-code.md");
   const planBundlePath = path.join(runDir, "plan-bundle.json");
   const receiptPath = path.join(runDir, "bootstrap-receipt.json");
   const metadataContent = [
@@ -575,10 +549,9 @@ async function assertMetadataBootstrapProtocol() {
     "This heading is intentionally unknown to the adapter and must remain authoritative.",
     "",
   ].join("\n");
-  fs.mkdirSync(clientsDir, { recursive: true });
+  fs.mkdirSync(runDir, { recursive: true });
   fs.writeFileSync(metadataPath, metadataContent, "utf8");
   fs.writeFileSync(queryPath, "# Query\n\nprivate user query\n", "utf8");
-  fs.writeFileSync(clientInstructionsPath, "# Client Instructions\n", "utf8");
   fs.writeFileSync(planBundlePath, '{"fixture":true}\n', "utf8");
 
   const contract = createMetadataBootstrapContract({
@@ -586,7 +559,6 @@ async function assertMetadataBootstrapProtocol() {
     runDir,
     metadataPath,
     metadataContent,
-    clientInstructionsPath,
     queryPath,
     planBundlePath,
     receiptPath,
@@ -595,6 +567,7 @@ async function assertMetadataBootstrapProtocol() {
   assert.equal(contract.metadata.readMode, "complete-to-eof");
   assert.equal(contract.metadata.bytes, Buffer.byteLength(metadataContent));
   assert.equal(contract.metadata.sha256.length, 64);
+  assert.equal(contract.clientInstructions, undefined, "bootstrap contract must not include client instructions");
   assert.equal(contract.query.readAfterBootstrap, true);
   assert.equal(contract.planBundle.path, planBundlePath);
   assert.equal(contract.planBundle.required, true);
@@ -653,6 +626,7 @@ async function assertMetadataBootstrapProtocol() {
   assert.match(content, /bootstrap-receipt\.json/u);
   assert.match(content, /do not read query\.md or plan-bundle\.json/iu);
   assert.match(content, /Future Business Rule/u);
+  assert.doesNotMatch(content, /Required client instructions|clientInstructions/iu);
   assert.ok(
     content.indexOf("Future Business Rule") < content.indexOf("<USER_QUERY_ACCESS>"),
     "unknown future metadata rules must appear before query access",
@@ -732,6 +706,7 @@ async function main() {
     });
     assertSessionsSpawnPayload({ plan, testCase: effectiveTestCase, snapshot });
     const rawInput = typeof request.input === "string" ? request.input : JSON.stringify(request.input ?? {});
+    const expectedClientType = testCase.expectedClientType ?? fixture.config.defaultAcpClientType;
     assert.ok(
       !plan.task.includes(rawInput),
       `${testCase.name} bootstrap task must not expose the raw query before metadata bootstrap`,
@@ -746,11 +721,15 @@ async function main() {
         duplicateBundle.sharedContext.runDir,
         "same-session plans must use different immutable run directories",
       );
-      assert.ok(
-        firstBundle.sharedContext.clientInstructionsPath &&
-          fs.readFileSync(firstBundle.sharedContext.clientInstructionsPath, "utf8").indexOf("metadata.md") <
-            fs.readFileSync(firstBundle.sharedContext.clientInstructionsPath, "utf8").indexOf("query.md"),
-        "client instructions must require metadata before query access",
+      assert.equal(
+        firstBundle.sharedContext.clientInstructionsPath,
+        undefined,
+        "plan bundles must not expose client instructions",
+      );
+      assert.equal(
+        fs.existsSync(path.join(firstBundle.sharedContext.runDir, "clients")),
+        false,
+        "plan bundles must not materialize a clients directory",
       );
       const substitutedPlan = jsonClone(plan);
       substitutedPlan.sessionsSpawn.bundle.bootstrapContractPath =
@@ -780,6 +759,17 @@ async function main() {
     assert.match(callAgentContent, /bootstrap-receipt\.json/u);
     assert.match(callAgentContent, /complete metadata document/iu);
     assert.match(callAgentContent, /referenced resources/iu);
+    assert.doesNotMatch(callAgentContent, /Required client instructions|clientInstructions/iu);
+    assert.match(callAgentContent, /## ACP Client Execution Policy/u);
+    assert.match(callAgentContent, /Do not invent agents, skills, or business rules/iu);
+    assert.match(callAgentContent, /Preserve proof[^\n]*loaded rule[^\n]*resource paths/iu);
+    if (expectedClientType === "codex") {
+      assert.match(callAgentContent, /Use the main Codex agent as coordinator/u);
+      assert.match(callAgentContent, /derive subagent prompts from[^\n]*metadata\.md[^\n]*roster entries/iu);
+    } else {
+      assert.match(callAgentContent, /Use Task\/Agent subagents when available/u);
+      assert.match(callAgentContent, /subagent_type[^\n]*metadata\.md[^\n]*roster entries/iu);
+    }
     assert.match(
       callAgentContent,
       /every Linked Skill[^\n]*skillDocPath[^\n]*EOF/iu,

@@ -113,10 +113,6 @@ export type MetadataBootstrapContract = {
   runDir: string;
   precedence: string[];
   metadata: MetadataArtifact;
-  clientInstructions: {
-    path: string;
-    required: true;
-  };
   query: {
     path: string;
     readAfterBootstrap: true;

@@ -113,7 +113,8 @@ ${STATE_DIR}/.byclaw/acp-runs/{ACP_CLIENT_TYPE}/{byai-channel_session_id}/runs/{
 The session directory remains stable for byai-channel correlation, while every
 plan gets an immutable `bootstrap_id` subdirectory. Concurrent delegations in
 one chat session therefore do not overwrite each other's query, metadata,
-client instructions, plan bundle, bootstrap contract, or bootstrap receipt.
+plan bundle, bootstrap contract, or bootstrap receipt. Client-specific instruction
+files are not generated; `metadata.md` is the single business-rule manual.
 
 `sessionId` passed to `byclawAcpPlan` / `byclawAcpRun` must be the real
 byai-channel `session_id`. Do not pass a digital-employee id, agent id, run id,

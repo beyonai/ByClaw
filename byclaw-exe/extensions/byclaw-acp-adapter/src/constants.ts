@@ -230,8 +230,6 @@ export const BUNDLE = {
   runsDirName: "runs",
   bootstrapContractFileName: "bootstrap-contract.json",
   bootstrapReceiptFileName: "bootstrap-receipt.json",
-  clientsDirName: "clients",
-  clientInstructionFileExtension: ".md",
   clientDirNames: {
     claudeCode: "claudeCode",
     codex: "codex",
