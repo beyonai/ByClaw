@@ -9,6 +9,10 @@ import { registerBaiyingHttpRoutes } from "./http-routes.js";
 import { resolveConfigSyncHotPrefixes, resolveDigEmployeePubSub } from "./plugin-config.js";
 import { resolveBundledBaiyingResourcesDir } from "./plugin-paths.js";
 import { registerManagedAgentModelHooks } from "./managed-agent-model-hook.js";
+import {
+  createStandaloneHubSkillRunSync,
+  registerHubSkillRunSyncHook,
+} from "./hub-skill-run-hook.js";
 import { createRedisJsonStore, setSharedRedisJsonStore } from "./redis-json-store.js";
 import { loadBaiyingRedisEnvDefaults } from "./redis-env.js";
 import { createBaiyingCallToolFactory } from "./baiying-call-tool.js";
@@ -196,6 +200,14 @@ export function registerBaiyingEnhancePlugin(api: OpenClawPluginApi): void {
         }`,
       );
     });
+  });
+
+  registerHubSkillRunSyncHook(api, {
+    getSyncBeforeRun: () => agentWatch?.__syncHubSkillsBeforeRun?.bind(agentWatch),
+    standaloneSyncBeforeRun: createStandaloneHubSkillRunSync({
+      api,
+      redisJsonStore,
+    }),
   });
 
   registerManagedAgentModelHooks(api, {

@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BaiyingRedisJsonStore } from "./redis-json-store.js";
 import {
   buildHubSkillAuthHeaders,
+  loadInstalledHubSkillRefs,
   resolveHubSkillApiUrl,
   syncHubSkillsForManagedAgents,
   validateHubSkillZipEntryName,
@@ -58,6 +59,34 @@ describe("hub-skill-sync", () => {
     vi.unstubAllEnvs();
   });
 
+  it("rebuilds run-check references from installed Hub Skill metadata", async () => {
+    const stateDir = await mkdtemp(path.join(tmpdir(), "baiying-hub-installed-state-"));
+    const skillDir = path.join(stateDir, "skills", "installed-hub");
+    await mkdir(skillDir, { recursive: true });
+    await writeFile(path.join(skillDir, "SKILL.md"), "# installed\n", "utf8");
+    await writeFile(
+      path.join(skillDir, ".baiying-hub-skill.json"),
+      JSON.stringify({
+        skillCode: "installed-hub",
+        version: "v1",
+        skillUrl: "/download?id=1",
+        versionUrl: "/version?id=1",
+        downloadedAt: "2026-07-21T00:00:00.000Z",
+      }),
+      "utf8",
+    );
+
+    await expect(
+      loadInstalledHubSkillRefs({ stateDir, skillCodes: ["installed-hub", "ordinary-skill"] }),
+    ).resolves.toEqual([
+      {
+        skillCode: "installed-hub",
+        skillUrl: "/download?id=1",
+        versionUrl: "/version?id=1",
+      },
+    ]);
+  });
+
   it("resolves relative hub API URLs against the discovered backend service", () => {
     expect(
       resolveHubSkillApiUrl(
@@ -97,6 +126,59 @@ describe("hub-skill-sync", () => {
       "X-User-Id": "0027024710",
     });
     expect(Object.keys(headers)).not.toContain("userName");
+  });
+
+  it("logs strong-consistency request details with redacted headers and local/remote versions", async () => {
+    vi.stubEnv("USER_CODE", "0027024710");
+    const stateDir = await mkdtemp(path.join(tmpdir(), "baiying-hub-log-state-"));
+    const zipPath = await createSkillZip({ skillCode: "logged-skill" });
+    const store = {
+      getStringByKey: vi.fn(async () => "user-1"),
+      getHashByKey: vi.fn(async () => ({
+        "Beyond-Token": "beyond-secret",
+        "Sso-Token": "sso-secret",
+        WHALE_AGENT_AUTHORIZATION: "Bearer auth-secret",
+      })),
+    } as unknown as BaiyingRedisJsonStore;
+    const info = vi.fn();
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(versionResponse("v7"))
+      .mockResolvedValueOnce(zipResponse(zipPath));
+
+    await syncHubSkillsForManagedAgents({
+      managed: [
+        {
+          hubSkills: [
+            {
+              skillCode: "logged-skill",
+              skillUrl: "/byaiService/tool/downloadSkillZip?skillId=7",
+              versionUrl: "/byaiService/tool/getSkillVersion?skillId=7",
+            },
+          ],
+        },
+      ],
+      redisJsonStore: store,
+      logger: { info },
+      stateDir,
+      baseUrl: "http://example.test/byaiService",
+      timeoutMs: 5000,
+      trigger: "agent-run",
+    });
+
+    const logs = info.mock.calls.map(([message]) => String(message)).join("\n");
+    expect(logs).toContain("trigger=agent-run");
+    expect(logs).toContain("requestType=version");
+    expect(logs).toContain("url=http://example.test/byaiService/tool/getSkillVersion?skillId=7");
+    expect(logs).toContain("skillCode=logged-skill");
+    expect(logs).toContain("localVersion=(none)");
+    expect(logs).toContain("remoteVersion=v7");
+    expect(logs).toContain('"Authorization":"[REDACTED]"');
+    expect(logs).toContain('"Beyond-Token":"[REDACTED]"');
+    expect(logs).toContain('"Sso-Token":"[REDACTED]"');
+    expect(logs).toContain('"X-User-Id":"0027024710"');
+    expect(logs).not.toContain("auth-secret");
+    expect(logs).not.toContain("beyond-secret");
+    expect(logs).not.toContain("sso-secret");
   });
 
   it("downloads a hub skill when local metadata is missing and skips the same version later", async () => {
@@ -183,4 +265,3 @@ describe("hub-skill-sync", () => {
     expect(() => validateHubSkillZipEntryName("safe/SKILL.md")).not.toThrow();
   });
 });
-

@@ -87,6 +87,7 @@ function formatSkillList(skills: string[]): string {
 }
 
 const SNAPSHOT_INVALIDATION_ENTRY = "__baiying_enhance_reload";
+let skillsSnapshotInvalidationRevision = 0;
 
 function stableJson(value: unknown): string {
     if (value === null || typeof value !== "object") {
@@ -105,7 +106,9 @@ function toolSignature(tools: unknown): string {
     return stableJson(tools ?? null);
 }
 
-function managedSnapshotSignature(managed: LoadedManagedAgent[]): string {
+function managedSnapshotSignature(
+    managed: Array<Pick<AdaptedManagedAgent, "agentId" | "listEntry">>,
+): string {
     return managed
         .map(
             (m) =>
@@ -119,7 +122,10 @@ function managedSnapshotSignature(managed: LoadedManagedAgent[]): string {
 
 function touchSkillsSnapshotInvalidation<T extends { skills?: any }>(
     cfg: T,
-    params: { managed: LoadedManagedAgent[]; reason: string },
+    params: {
+        managed: Array<Pick<AdaptedManagedAgent, "agentId" | "listEntry">>;
+        reason: string;
+    },
 ): T {
     cfg.skills = {
         ...(cfg.skills ?? {}),
@@ -130,6 +136,7 @@ function touchSkillsSnapshotInvalidation<T extends { skills?: any }>(
                 config: {
                     reason: params.reason,
                     managedSnapshotSignature: managedSnapshotSignature(params.managed),
+                    revision: `${Date.now()}-${++skillsSnapshotInvalidationRevision}`,
                 },
             },
         },
@@ -418,6 +425,8 @@ export type AgentWatchdog = {
      * also force config write and workspace markdown re-seed for all currently visible agents.
      */
     __flushNow?: (opts?: AgentFlushNowOptions) => Promise<void>;
+    /** Strong-consistency Hub Skill version check for the agent about to run. */
+    __syncHubSkillsBeforeRun?: (agentId: string | undefined) => Promise<void>;
 };
 
 export function createAgentWatchdog(params: {
@@ -453,6 +462,7 @@ export function createAgentWatchdog(params: {
     let lastSkillSyncFailureSignature = "";
     let skillScanTimer: ReturnType<typeof setInterval> | undefined;
     let closeSkillWatchers: (() => void) | undefined;
+    const hubSkillRunSyncInFlight = new Map<string, Promise<void>>();
     let unauthorizedMountedWorkspaceCheckDone = false;
     let unauthorizedMountedWorkspaceCheckDeferredLogged = false;
 
@@ -470,6 +480,64 @@ export function createAgentWatchdog(params: {
         params.pluginConfig.aimodelTypeListRedisKey,
     );
     const warnLog = { warn: (m: string) => params.api.logger.warn(m) };
+
+    const syncHubSkillRefBeforeRun = (
+        ref: NonNullable<AdaptedManagedAgent["hubSkills"]>[number],
+    ): Promise<void> => {
+        const existing = hubSkillRunSyncInFlight.get(ref.skillCode);
+        if (existing) {
+            return existing;
+        }
+        const run = (async () => {
+            const result = await syncHubSkillsForManagedAgents({
+                managed: [{ hubSkills: [ref] }],
+                redisJsonStore: params.redisJsonStore,
+                logger: {
+                    info: (m) => params.api.logger.info(m),
+                    warn: (m) => params.api.logger.warn(m),
+                },
+                trigger: "agent-run",
+            });
+            if (result.failed.length > 0) {
+                throw new Error(`Hub Skill run check failed: ${result.failed.join(",")}`);
+            }
+            if (!result.changed) {
+                return;
+            }
+            await mutateOpenClawConfigFile(params.api, (base) => {
+                const next = structuredClone(base);
+                touchSkillsSnapshotInvalidation(next, {
+                    managed: params.registry.list(),
+                    reason: "hub-skill-run-sync",
+                });
+                return next;
+            });
+            params.api.logger.info(
+                `baiying-enhance: hub skill run refresh completed trigger=agent-run skillCode=${ref.skillCode}`,
+            );
+        })().finally(() => {
+            if (hubSkillRunSyncInFlight.get(ref.skillCode) === run) {
+                hubSkillRunSyncInFlight.delete(ref.skillCode);
+            }
+        });
+        hubSkillRunSyncInFlight.set(ref.skillCode, run);
+        return run;
+    };
+
+    const syncHubSkillsBeforeRun = async (agentId: string | undefined): Promise<void> => {
+        if (!hubSkillAutoSync) {
+            return;
+        }
+        const normalizedAgentId = agentId?.trim();
+        if (!normalizedAgentId) {
+            return;
+        }
+        const managed = params.registry.get(normalizedAgentId);
+        if (!managed?.hubSkills?.length) {
+            return;
+        }
+        await Promise.all(managed.hubSkills.map((ref) => syncHubSkillRefBeforeRun(ref)));
+    };
 
     const resolveDefaultModelForFlush = async (cfgBeforeLoad: ReturnType<typeof params.api.runtime.config.loadConfig>) => {
         const defaultModelFromRedis = await resolveDefaultBaiyingAimodelProviderBundle({
@@ -1303,5 +1371,6 @@ export function createAgentWatchdog(params: {
             }
             await flush();
         },
+        __syncHubSkillsBeforeRun: syncHubSkillsBeforeRun,
     };
 }

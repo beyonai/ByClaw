@@ -1784,6 +1784,116 @@ describe("createAgentWatchdog", () => {
         await expect(readFile(path.join(stateDir, "skills", "hub-skill", "SKILL.md"), "utf8")).resolves.toContain("# hub-skill");
     });
 
+    it("checks the current agent hub skills before a run and coalesces concurrent checks", async () => {
+        const dir = await mkdtemp(path.join(tmpdir(), "baiying-wd-hub-run-"));
+        const stateDir = await mkdtemp(path.join(tmpdir(), "baiying-wd-hub-run-state-"));
+        const zipPath = await createHubSkillZip("hub-run-skill");
+        const agentId = `${MANAGED_AGENT_PREFIX}10026038`;
+        const registry = new AgentRegistryState();
+        registry.replaceAll([
+            {
+                sourceKey: "10026038",
+                agentId,
+                providerKey: "baiying-m-10026038",
+                modelRef: "baiying-m-10026038/demo",
+                allowSpawnFrom: ["main"],
+                listEntry: {
+                    id: agentId,
+                    name: "Hub Run Agent",
+                    skills: ["hub-run-skill"],
+                },
+                hubSkills: [
+                    {
+                        skillCode: "hub-run-skill",
+                        skillUrl: "/byaiService/tool/downloadSkillZip?skillId=8",
+                        versionUrl: "/byaiService/tool/getSkillVersion?skillId=8",
+                    },
+                ],
+            } as any,
+        ]);
+        vi.stubEnv("OPENCLAW_STATE_DIR", stateDir);
+        vi.stubEnv("BAIYING_WORKSPACE_ARCHIVE_BASE_URL", "http://example.test/byaiService");
+        const fetchMock = vi
+            .spyOn(globalThis, "fetch")
+            .mockImplementationOnce(async () => {
+                await new Promise((resolve) => setTimeout(resolve, 10));
+                return new Response(
+                    JSON.stringify({
+                        code: 0,
+                        success: true,
+                        data: {
+                            version: "v8",
+                            skillUrl: "/byaiService/tool/downloadSkillZip?skillId=8",
+                        },
+                    }),
+                    { status: 200, headers: { "content-type": "application/json" } },
+                );
+            })
+            .mockResolvedValueOnce(
+                new Response(createReadStream(zipPath) as any, {
+                    status: 200,
+                    headers: { "content-type": "application/zip" },
+                }),
+            )
+            .mockResolvedValueOnce(
+                new Response(
+                    JSON.stringify({
+                        code: 0,
+                        success: true,
+                        data: {
+                            version: "v8",
+                            skillUrl: "/byaiService/tool/downloadSkillZip?skillId=8",
+                        },
+                    }),
+                    { status: 200, headers: { "content-type": "application/json" } },
+                ),
+            );
+        const writeConfigFile = vi.fn(async () => {});
+        const api = createMockApi(writeConfigFile, [
+            { id: "main", name: "Main", identity: { name: "Main" } },
+            {
+                id: agentId,
+                name: "Hub Run Agent",
+                identity: { name: "Hub Run Agent" },
+                skills: ["hub-run-skill"],
+            },
+        ]) as any;
+        const wd = createAgentWatchdog({
+            api,
+            registry,
+            absoluteDir: dir,
+            contentIndexPath: path.join(dir, DEFAULT_INDEX_FILENAME),
+            executorPath: path.join(dir, "executor.py"),
+            pluginConfig: {
+                workspaceAutoSeed: false,
+                persistAgentContentIndex: false,
+                workspaceSkillScanIntervalMs: 0,
+            },
+            debounceMs: 60_000,
+        });
+
+        await Promise.all([
+            wd.__syncHubSkillsBeforeRun!(agentId),
+            wd.__syncHubSkillsBeforeRun!(agentId),
+        ]);
+        await wd.__syncHubSkillsBeforeRun!(agentId);
+
+        expect(fetchMock).toHaveBeenCalledTimes(3);
+        expect(writeConfigFile).toHaveBeenCalledTimes(1);
+        expect(writeConfigFile.mock.calls[0][0].skills.entries.__baiying_enhance_reload.config.reason).toBe(
+            "hub-skill-run-sync",
+        );
+        expect(api.logger.info).toHaveBeenCalledWith(expect.stringContaining("trigger=agent-run"));
+        await expect(
+            readFile(path.join(stateDir, "skills", "hub-run-skill", "SKILL.md"), "utf8"),
+        ).resolves.toContain("# hub-run-skill");
+
+        fetchMock.mockRejectedValueOnce(new Error("version endpoint unavailable"));
+        await expect(wd.__syncHubSkillsBeforeRun!(agentId)).rejects.toThrow(
+            "Hub Skill run check failed: hub-run-skill",
+        );
+    });
+
     it("merges JSON, agent workspace, and main shared workspace skills", async () => {
         const dir = await mkdtemp(path.join(tmpdir(), "baiying-wd-skill-"));
         const agentWs = await mkdtemp(path.join(tmpdir(), "baiying-agentws-"));

@@ -46,8 +46,36 @@ export type HubSkillSyncResult = {
   failed: string[];
 };
 
+const SENSITIVE_HEADER_PATTERN = /authorization|cookie|token|api[-_]?key|secret/i;
+const SENSITIVE_URL_PARAM_PATTERN = /authorization|cookie|token|api[-_]?key|secret/i;
+
 function nonEmptyString(value: unknown): string {
   return typeof value === "string" || typeof value === "number" ? String(value).trim() : "";
+}
+
+function headersForLog(headers: Record<string, string>): string {
+  return JSON.stringify(
+    Object.fromEntries(
+      Object.entries(headers).map(([name, value]) => [
+        name,
+        SENSITIVE_HEADER_PATTERN.test(name) ? "[REDACTED]" : value,
+      ]),
+    ),
+  );
+}
+
+function urlForLog(rawUrl: string): string {
+  try {
+    const url = new URL(rawUrl);
+    for (const name of url.searchParams.keys()) {
+      if (SENSITIVE_URL_PARAM_PATTERN.test(name)) {
+        url.searchParams.set(name, "[REDACTED]");
+      }
+    }
+    return url.toString();
+  } catch {
+    return rawUrl;
+  }
 }
 
 function normalizeHeaderName(name: string): string {
@@ -248,6 +276,34 @@ async function readLocalMetadata(skillDir: string): Promise<HubSkillMetadata | n
   }
 }
 
+export async function loadInstalledHubSkillRefs(params: {
+  skillCodes: string[];
+  stateDir?: string;
+}): Promise<BaiyingHubSkillRef[]> {
+  const skillsRoot = path.join(params.stateDir ?? resolveStateDir(), "skills");
+  const refs: BaiyingHubSkillRef[] = [];
+  for (const rawSkillCode of params.skillCodes) {
+    const skillCode = nonEmptyString(rawSkillCode);
+    if (!skillCode || path.basename(skillCode) !== skillCode) {
+      continue;
+    }
+    const metadata = await readLocalMetadata(path.join(skillsRoot, skillCode));
+    if (
+      metadata?.skillCode !== skillCode ||
+      !metadata.skillUrl ||
+      !metadata.versionUrl
+    ) {
+      continue;
+    }
+    refs.push({
+      skillCode,
+      skillUrl: metadata.skillUrl,
+      versionUrl: metadata.versionUrl,
+    });
+  }
+  return refs;
+}
+
 async function hasSkillDoc(skillDir: string): Promise<boolean> {
   try {
     await fs.access(path.join(skillDir, SKILL_DOC_FILE));
@@ -408,6 +464,7 @@ export async function syncHubSkillsForManagedAgents(params: {
   stateDir?: string;
   baseUrl?: string;
   timeoutMs?: number;
+  trigger?: string;
 }): Promise<HubSkillSyncResult> {
   const hasAnyHubSkills = params.managed.some((a) => (a.hubSkills?.length ?? 0) > 0);
   if (!hasAnyHubSkills) {
@@ -426,6 +483,8 @@ export async function syncHubSkillsForManagedAgents(params: {
   const skipped: string[] = [];
   const failed: string[] = [];
   const processed = new Set<string>();
+  const trigger = nonEmptyString(params.trigger) || "managed-sync";
+  const loggedHeaders = headersForLog(headers);
 
   for (const agent of params.managed) {
     for (const ref of agent.hubSkills ?? []) {
@@ -436,15 +495,28 @@ export async function syncHubSkillsForManagedAgents(params: {
 
       try {
         const versionUrl = resolveHubSkillApiUrl(baseUrl, ref.versionUrl);
-        const version = await fetchHubSkillVersion({ url: versionUrl, headers, timeoutMs });
-        const downloadUrl = resolveHubSkillApiUrl(baseUrl, version.skillUrl ?? ref.skillUrl);
         const targetDir = path.join(skillsRoot, ref.skillCode);
         const local = await readLocalMetadata(targetDir);
         const localSkillDocExists = await hasSkillDoc(targetDir);
-        if (local?.skillUrl === downloadUrl && local?.version === version.version && localSkillDocExists) {
+        params.logger?.info?.(
+          `baiying-enhance: hub skill check request trigger=${trigger} requestType=version skillCode=${ref.skillCode} localVersion=${local?.version ?? "(none)"} url=${urlForLog(versionUrl)} headers=${loggedHeaders}`,
+        );
+        const version = await fetchHubSkillVersion({ url: versionUrl, headers, timeoutMs });
+        const downloadUrl = resolveHubSkillApiUrl(baseUrl, version.skillUrl ?? ref.skillUrl);
+        const changed =
+          local?.skillUrl !== downloadUrl ||
+          local?.version !== version.version ||
+          !localSkillDocExists;
+        params.logger?.info?.(
+          `baiying-enhance: hub skill version checked trigger=${trigger} skillCode=${ref.skillCode} localVersion=${local?.version ?? "(none)"} remoteVersion=${version.version} changed=${changed}`,
+        );
+        if (!changed) {
           skipped.push(ref.skillCode);
           continue;
         }
+        params.logger?.info?.(
+          `baiying-enhance: hub skill check request trigger=${trigger} requestType=download skillCode=${ref.skillCode} localVersion=${local?.version ?? "(none)"} remoteVersion=${version.version} url=${urlForLog(downloadUrl)} headers=${loggedHeaders}`,
+        );
         await installDownloadedSkill({
           skillCode: ref.skillCode,
           downloadUrl,
@@ -456,12 +528,12 @@ export async function syncHubSkillsForManagedAgents(params: {
         });
         downloaded.push(ref.skillCode);
         params.logger?.info?.(
-          `baiying-enhance: hub skill synced skillCode=${ref.skillCode} version=${version.version}`,
+          `baiying-enhance: hub skill synced trigger=${trigger} skillCode=${ref.skillCode} version=${version.version}`,
         );
       } catch (err) {
         failed.push(ref.skillCode);
         params.logger?.warn?.(
-          `baiying-enhance: hub skill sync failed skillCode=${ref.skillCode}: ${err instanceof Error ? err.message : String(err)}`,
+          `baiying-enhance: hub skill sync failed trigger=${trigger} skillCode=${ref.skillCode}: ${err instanceof Error ? err.message : String(err)}`,
         );
         break;
       }
