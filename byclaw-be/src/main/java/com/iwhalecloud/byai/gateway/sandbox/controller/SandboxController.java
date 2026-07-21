@@ -212,8 +212,8 @@ public class SandboxController {
                 }
 
                 // 查询数据库记录获取完整状态
-                SsSandboxRecord record = sandboxRecordMapper.selectRunningByUserAndResource(
-                    userCode, sandbox.getSandboxType(), sandbox.getResourceId()
+                SsSandboxRecord record = sandboxRecordMapper.selectLatestBySandboxId(
+                    userCode, sandbox.getSandboxType(), sandbox.getSandboxId()
                 );
 
                 Map<String, Object> result = new HashMap<>();
