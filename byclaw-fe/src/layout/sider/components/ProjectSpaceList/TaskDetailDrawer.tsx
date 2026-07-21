@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Button, Drawer, Empty, Spin } from 'antd';
 import { MessageOutlined, PauseCircleOutlined } from '@ant-design/icons';
-import { useDispatch, useNavigate, useSelector } from '@umijs/max';
+import { useDispatch, useNavigate } from '@umijs/max';
 import dayjs from 'dayjs';
 import useGlobal from '@/hooks/useGlobal';
 import { getTaskPhases, type DevloopTaskState } from '@/service/devloop';
@@ -38,17 +38,20 @@ const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({ task, onClose, proj
   const navigate = useNavigate();
   const dispatch = useDispatch();
   const { EventEmitter, setSessionId } = useGlobal();
-  const userInfo = useSelector(({ user }: any) => user.userInfo);
 
   const [phaseLoading, setPhaseLoading] = useState(false);
   const [snapshot, setSnapshot] = useState<DevloopTaskState | null>(null);
 
-  const isMyTask = task?.createBy && userInfo?.userId && String(task.createBy) === String(userInfo.userId);
+  const normalizedTaskStatus = `${snapshot?.status || task?.status || ''}`.trim().toLowerCase();
+  const isPendingTask =
+    task?.stateAvailable === false || ['pending', '待开始', '未开始'].includes(normalizedTaskStatus);
+  const canEnterTaskSession = Boolean(task?.sessionId && !isPendingTask);
 
   // 打开抽屉时按 sessionId 定点读取 v2 会话状态投影。
   useEffect(() => {
-    if (!task?.sessionId) {
+    if (!task?.sessionId || task?.stateAvailable === false) {
       setSnapshot(null);
+      setPhaseLoading(false);
       return;
     }
     let cancelled = false;
@@ -63,7 +66,7 @@ const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({ task, onClose, proj
     return () => {
       cancelled = true;
     };
-  }, [task?.sessionId]);
+  }, [task?.sessionId, task?.stateAvailable]);
 
   const handleGoToChat = () => {
     if (!task?.sessionId) return;
@@ -127,7 +130,20 @@ const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({ task, onClose, proj
   const requirement = task?.requirementTitle || task?.requirementOriginId;
 
   return (
-    <Drawer title="任务详情" className={styles.taskDetailDrawer} open={!!task} onClose={onClose} width={640}>
+    <Drawer
+      title="任务详情"
+      className={styles.taskDetailDrawer}
+      open={!!task}
+      onClose={onClose}
+      width={640}
+      extra={
+        task?.sessionId ? (
+          <Button type="primary" icon={<MessageOutlined />} disabled={!canEnterTaskSession} onClick={handleGoToChat}>
+            进入会话
+          </Button>
+        ) : null
+      }
+    >
       {task && (
         <Spin spinning={phaseLoading}>
           <div className={styles.taskDetailDrawerContent}>
@@ -210,7 +226,10 @@ const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({ task, onClose, proj
             <div className={styles.phaseSection}>
               <h3 className={styles.phaseSectionTitle}>研发环节进度</h3>
               {phases.length === 0 ? (
-                <Empty description="暂无环节信息" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                <Empty
+                  description={task?.stateAvailable === false ? '任务状态为空' : '暂无环节信息'}
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                />
               ) : (
                 <div className={styles.phaseFlow}>
                   {phases.map((p, idx) => {
@@ -238,14 +257,6 @@ const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({ task, onClose, proj
                 </div>
               )}
             </div>
-
-            {isMyTask && task.sessionId && (
-              <div className={styles.taskDetailAction}>
-                <Button type="primary" icon={<MessageOutlined />} onClick={handleGoToChat}>
-                  进入我的任务会话
-                </Button>
-              </div>
-            )}
           </div>
         </Spin>
       )}
