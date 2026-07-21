@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { Drawer, Tag, Button, Spin, Empty } from 'antd';
-import { MessageOutlined, RollbackOutlined } from '@ant-design/icons';
+import { Button, Drawer, Empty, Spin } from 'antd';
+import { MessageOutlined, PauseCircleOutlined } from '@ant-design/icons';
 import { useDispatch, useNavigate, useSelector } from '@umijs/max';
 import dayjs from 'dayjs';
 import useGlobal from '@/hooks/useGlobal';
-import { getTaskPhases } from '@/service/devloop';
+import { getTaskPhases, type DevloopTaskState } from '@/service/devloop';
 import styles from './index.module.less';
 
 interface TaskDetailDrawerProps {
@@ -15,12 +15,11 @@ interface TaskDetailDrawerProps {
   projectName?: string;
 }
 
-// 环节状态 → 展示样式：通过/进行中/被打回/未开始
+// v2 状态机阶段状态 → 展示样式
 const PHASE_STATE_META: Record<string, { cls: string; icon: React.ReactNode; label: string }> = {
-  done: { cls: styles.phaseDone, icon: '✓', label: '完成' },
-  running: { cls: styles.phaseActive, icon: '●', label: '进行中' },
-  // 使用标准图标，避免 Unicode 回退箭头被浏览器渲染为彩色 emoji。
-  rejected: { cls: styles.phaseRejected, icon: <RollbackOutlined />, label: '被打回' },
+  completed: { cls: styles.phaseDone, icon: '✓', label: '完成' },
+  in_progress: { cls: styles.phaseActive, icon: '●', label: '进行中' },
+  paused: { cls: styles.phaseRejected, icon: <PauseCircleOutlined />, label: '暂停' },
   pending: { cls: styles.phaseWaiting, icon: '○', label: '等待' },
 };
 
@@ -34,7 +33,7 @@ const initials = (name?: string): string => {
 
 const dash = (v: any): string => (v === null || v === undefined || v === '' ? '-' : `${v}`);
 
-// 会话即任务后，状态存于 byai_session_ext 且看板只读，这里仅展示不提供修改入口。
+// 会话即任务后，状态来自 self-developed-rules v2 会话投影；页面只读展示。
 const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({ task, onClose, projectId, projectName }) => {
   const navigate = useNavigate();
   const dispatch = useDispatch();
@@ -42,11 +41,11 @@ const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({ task, onClose, proj
   const userInfo = useSelector(({ user }: any) => user.userInfo);
 
   const [phaseLoading, setPhaseLoading] = useState(false);
-  const [snapshot, setSnapshot] = useState<any>(null);
+  const [snapshot, setSnapshot] = useState<DevloopTaskState | null>(null);
 
   const isMyTask = task?.createBy && userInfo?.userId && String(task.createBy) === String(userInfo.userId);
 
-  // 打开抽屉时按 sessionId 拉环节进度；后端按需刷新（缓存缺失或有新消息才重算）。
+  // 打开抽屉时按 sessionId 定点读取 v2 会话状态投影。
   useEffect(() => {
     if (!task?.sessionId) {
       setSnapshot(null);
@@ -116,20 +115,12 @@ const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({ task, onClose, proj
     onClose();
   };
 
-  const phases: any[] = snapshot?.phases || [];
-  const kickbacks: any[] = snapshot?.kickbacks || [];
-  const currentPhase = snapshot?.currentPhase;
-  const currentPhaseLabel = phases.find((p) => p.key === currentPhase)?.label;
-  const round = snapshot?.round;
-
-  // 总进度按环节完成占比派生：done 记 1，running 记 0.5，除以环节总数。
-  const progress = phases.length
-    ? Math.round(
-        (phases.reduce((acc, p) => acc + (p.status === 'done' ? 1 : p.status === 'running' ? 0.5 : 0), 0) /
-          phases.length) *
-          100
-      )
-    : 0;
+  const phases = snapshot?.stages || [];
+  const currentPhase = snapshot?.currentStage?.stageId;
+  const currentPhaseLabel = snapshot?.currentStage?.stageName;
+  const taskLoopCount = snapshot?.loopCount || 0;
+  const stageLoopCount = snapshot?.stageLoopCount || 0;
+  const progress = snapshot?.progress?.percent || 0;
 
   const agentName = task?.agentName || 'Code Agent';
   // 展示需求标题（originId 对钉钉是消息ID乱码，仅作兜底）。
@@ -143,7 +134,7 @@ const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({ task, onClose, proj
             {/* 任务标题与需求详情保持同一内容层级，避免占用抽屉头部展示空间。 */}
             <div className={styles.taskDetailTitle}>{task.title || task.taskName || '未命名任务'}</div>
 
-            {/* Agent 执行概览：头像 + 当前 Agent + 阶段·轮次·总进度 */}
+            {/* Agent 执行概览：头像 + 当前 Agent + 阶段·任务总循环·当前环节循环·总进度 */}
             <div className={styles.taskHero}>
               <div className={styles.taskHeroAgent}>
                 <span className={styles.taskHeroAvatar}>{initials(agentName)}</span>
@@ -158,10 +149,35 @@ const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({ task, onClose, proj
                 </div>
                 <p>
                   {currentPhaseLabel ? `${currentPhaseLabel}阶段` : '未开始'}
-                  {round ? ` · 第 ${round} 轮` : ''} · 总进度 {progress}%
+                  {taskLoopCount ? ` · 任务总循环 ${taskLoopCount} 次` : ''}
+                  {stageLoopCount ? ` · 当前环节循环 ${stageLoopCount} 次` : ''} · 总进度 {progress}%
                 </p>
               </div>
             </div>
+
+            {snapshot?.status === 'paused' && snapshot.pause && (
+              <div className={styles.phaseSection}>
+                <h3 className={styles.phaseSectionTitle}>暂停与恢复条件</h3>
+                <div className={styles.taskContextGrid}>
+                  <div className={styles.taskContextItem}>
+                    <label>暂停原因</label>
+                    <strong>{dash(snapshot.pause.reason)}</strong>
+                  </div>
+                  <div className={styles.taskContextItem}>
+                    <label>影响</label>
+                    <strong>{dash(snapshot.pause.impact)}</strong>
+                  </div>
+                  <div className={styles.taskContextItem}>
+                    <label>恢复条件</label>
+                    <strong>{dash(snapshot.pause.resume_condition)}</strong>
+                  </div>
+                  <div className={styles.taskContextItem}>
+                    <label>决策人</label>
+                    <strong>{dash(snapshot.pause.decision_owner)}</strong>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* 执行上下文 */}
             <div className={styles.phaseSection}>
@@ -199,18 +215,22 @@ const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({ task, onClose, proj
                 <div className={styles.phaseFlow}>
                   {phases.map((p, idx) => {
                     const meta = PHASE_STATE_META[p.status] || PHASE_STATE_META.pending;
-                    const isCurrent = p.key === currentPhase;
+                    const isCurrent = p.stageId === currentPhase;
                     return (
-                      <div key={p.key} className={`${styles.phaseNode} ${meta.cls}`}>
+                      <div key={p.stageId} className={`${styles.phaseNode} ${meta.cls}`}>
                         <span className={styles.phaseNodeMark}>
-                          {p.status === 'done' || p.status === 'rejected' ? meta.icon : idx + 1}
+                          {p.status === 'completed' || p.status === 'paused' ? meta.icon : idx + 1}
                         </span>
                         <div className={styles.phaseNodeBody}>
                           <strong>
-                            {p.label}
+                            {p.stageName}
                             {isCurrent && <span className={styles.phaseCurrentDot}> · 当前</span>}
                           </strong>
-                          <small>{meta.label}</small>
+                          <small>
+                            {p.statusLabel || meta.label}
+                            {p.activity ? ` · ${p.activity}` : ''}
+                            {p.loopCount ? ` · 环节循环 ${p.loopCount} 次` : ''}
+                          </small>
                         </div>
                       </div>
                     );
@@ -218,27 +238,6 @@ const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({ task, onClose, proj
                 </div>
               )}
             </div>
-
-            {kickbacks.length > 0 && (
-              <div className={styles.phaseSection}>
-                <h3 className={styles.phaseSectionTitle}>打回记录</h3>
-                <div className={styles.kickbackList}>
-                  {kickbacks.map((kb, i) => {
-                    const fromLabel = phases.find((p) => p.key === kb.from)?.label || kb.from;
-                    const toLabel = phases.find((p) => p.key === kb.to)?.label || kb.to;
-                    return (
-                      <div key={i} className={styles.kickbackItem}>
-                        <Tag color="error" bordered={false}>
-                          {fromLabel} → {toLabel}
-                        </Tag>
-                        <span className={styles.kickbackRound}>第 {kb.round} 轮</span>
-                        {kb.reason && <span className={styles.kickbackReason}>{kb.reason}</span>}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
 
             {isMyTask && task.sessionId && (
               <div className={styles.taskDetailAction}>

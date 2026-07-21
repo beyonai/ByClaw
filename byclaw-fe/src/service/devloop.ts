@@ -26,6 +26,99 @@ type DevloopProjectSessionListPayload = {
   keyword?: string;
 };
 
+export type DevloopTaskListQuery = {
+  projectId: number;
+  createTimeStart?: string;
+  createTimeEnd?: string;
+  pageNum?: number;
+  pageSize?: number;
+};
+
+export type DevloopTaskCurrentStage = {
+  stageId: string;
+  stageIndex: number;
+  stageName: string;
+  skill?: string;
+  activity?: string;
+  nextAction?: string;
+  startedAt?: string;
+};
+
+export type DevloopTaskStage = {
+  stageId: string;
+  sequence: number;
+  stageName: string;
+  skill?: string;
+  status: 'pending' | 'in_progress' | 'paused' | 'completed';
+  statusLabel?: string;
+  activity?: string;
+  resultSummary?: string;
+  progressPercent?: number;
+  loopCount?: number;
+  startedAt?: string;
+  updatedAt?: string;
+  completedAt?: string;
+};
+
+export type DevloopTaskState = {
+  schemaVersion: '2.0.0';
+  revision: number;
+  sessionId: string;
+  traceId: string;
+  title: string;
+  status: 'pending' | 'in_progress' | 'paused' | 'completed';
+  statusLabel: string;
+  currentStage: DevloopTaskCurrentStage;
+  progress: {
+    percent: number;
+    completedStages: number;
+    totalStages: number;
+    summary: string;
+  };
+  loopCount: number;
+  stageLoopCount: number;
+  stages: DevloopTaskStage[];
+  transitions: Array<Record<string, any>>;
+  pause?: Record<string, any> | null;
+  stateFile: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type DevloopTaskItem = {
+  taskId: number;
+  sessionId: number;
+  projectId: number;
+  title?: string;
+  createBy?: number;
+  createTime?: string;
+  updateTime?: string;
+  stateAvailable: boolean;
+  traceId?: string;
+  revision?: number;
+  status?: DevloopTaskState['status'];
+  statusLabel?: string;
+  currentStage?: DevloopTaskCurrentStage;
+  progress: number;
+  loopCount?: number;
+  stageLoopCount?: number;
+  assignee?: string;
+  agentName?: string;
+  branchName?: string;
+  repoFullName?: string;
+  requirementTitle?: string;
+  requirementOriginId?: string;
+  sourceItemId?: number;
+};
+
+export type DevloopTaskPage = {
+  pageNum: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+  list: DevloopTaskItem[];
+};
+
 export type DevloopProjectSpaceFile = {
   fileId: number;
   fileName: string;
@@ -139,14 +232,15 @@ export const searchDingtalkGroups = (query: string) =>
 export const createTask = (data: { projectId: number; sourceItemId?: number; title?: string }) =>
   POST<any>('/byaiService/devloop/task/create', data);
 
-export const listTasks = (projectId: number) => POST<any>('/byaiService/devloop/task/list', { projectId });
+export const listTasks = (query: DevloopTaskListQuery) =>
+  POST<DevloopTaskPage>('/byaiService/devloop/task/list', query);
 
 // 任务详情即会话详情，后端按 sessionId 查询（taskId 与 sessionId 同值）
 export const getTaskDetail = (sessionId: number) => POST<any>('/byaiService/devloop/task/detail', { sessionId });
 
-// 任务环节进度：后端从会话消息派生 7 环节状态 + 打回记录，按需刷新
+// 任务环节进度：直接读取 self-developed-rules v2 会话状态投影
 export const getTaskPhases = (sessionId: number) =>
-  POST<any>('/byaiService/devloop/task/phases', { sessionId });
+  POST<DevloopTaskState>('/byaiService/devloop/task/phases', { sessionId });
 
 // 项目成员
 export const addProjectMember = (data: {

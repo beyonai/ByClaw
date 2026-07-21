@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Button,
+  DatePicker,
   Drawer,
   Dropdown,
   Empty,
@@ -8,6 +9,7 @@ import {
   InputNumber,
   List,
   Modal,
+  Pagination,
   Radio,
   Select,
   Space,
@@ -36,7 +38,7 @@ import {
   RightOutlined,
 } from '@ant-design/icons';
 import { useDispatch, useIntl, useNavigate } from '@umijs/max';
-import dayjs from 'dayjs';
+import dayjs, { type Dayjs } from 'dayjs';
 import {
   checkDwsAuthStatus,
   checkGitHubPat,
@@ -150,6 +152,14 @@ type RequirementItem = {
   scoreDetail?: string | null;
 };
 
+type TaskDateRange = [Dayjs | null, Dayjs | null] | null;
+
+type TaskQueryState = {
+  pageNum: number;
+  pageSize: number;
+  dateRange: TaskDateRange;
+};
+
 // AI 评分明细：与后端 score_detail JSON 字段、满分口径对齐
 type ScoreDetail = {
   businessValue?: number;
@@ -184,6 +194,12 @@ const getTaskStatusMeta = (status?: string) => {
     return { label: '暂停', className: 'Paused' };
   }
   return { label: '待开始', className: 'Pending' };
+};
+
+const getConfirmModeDescription = (confirmMode: string) => {
+  if (confirmMode === 'auto') return '扫描到的新需求将自动派生为研发任务并启动会话';
+  if (confirmMode === 'score') return '综合评分达到阈值的需求自动派生，其余进入列表等待人工确认';
+  return '扫描到的需求进入列表，需人工点击「启动任务」';
 };
 
 const parseScoreDetail = (raw?: string | null): ScoreDetail => {
@@ -357,6 +373,10 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const [detailReq, setDetailReq] = useState<RequirementItem | null>(null);
   const [startingRequirementIds, setStartingRequirementIds] = useState<Set<number>>(() => new Set());
   const [tasks, setTasks] = useState<any[]>([]);
+  const [taskTotal, setTaskTotal] = useState(0);
+  const [taskPageNum, setTaskPageNum] = useState(1);
+  const [taskPageSize, setTaskPageSize] = useState(20);
+  const [taskDateRange, setTaskDateRange] = useState<TaskDateRange>(null);
   const [, setMembers] = useState<any[]>([]);
   const [resourceFileScope, setResourceFileScope] = useState<ResourceFileScope>('current');
   const [sharedFiles, setSharedFiles] = useState<FileBrowserItem[]>([]);
@@ -409,6 +429,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const dwsAuthTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const startingRequirementIdsRef = useRef<Set<number>>(new Set());
   const resourceClickTimerRef = useRef<number | null>(null);
+  const taskQueryRef = useRef<TaskQueryState>({ pageNum: 1, pageSize: 20, dateRange: null });
 
   const projectId = Number(project?.projectId);
   // 项目类型来自后端/静态参数，先按字符串归一，避免默认项目枚举声明不同步时报比较类型错误。
@@ -538,16 +559,31 @@ const ProjectDetailPanel: React.FC<Props> = ({
     [projectId]
   );
 
-  const fetchTasks = useCallback(async () => {
-    if (!projectId) return;
-    setTasksLoading(true);
-    try {
-      const taskList = (await listTasks(projectId)) || [];
-      setTasks(taskList);
-    } finally {
-      setTasksLoading(false);
-    }
-  }, [projectId]);
+  const fetchTasks = useCallback(
+    async (overrides: Partial<TaskQueryState> = {}) => {
+      if (!projectId) return;
+      const queryState = { ...taskQueryRef.current, ...overrides };
+      taskQueryRef.current = queryState;
+      setTaskPageNum(queryState.pageNum);
+      setTaskPageSize(queryState.pageSize);
+      setTaskDateRange(queryState.dateRange);
+      setTasksLoading(true);
+      try {
+        const taskPage = await listTasks({
+          projectId,
+          pageNum: queryState.pageNum,
+          pageSize: queryState.pageSize,
+          createTimeStart: queryState.dateRange?.[0]?.startOf('day').format('YYYY-MM-DD HH:mm:ss'),
+          createTimeEnd: queryState.dateRange?.[1]?.endOf('day').format('YYYY-MM-DD HH:mm:ss'),
+        });
+        setTasks(Array.isArray(taskPage?.list) ? taskPage.list : []);
+        setTaskTotal(taskPage?.total || 0);
+      } finally {
+        setTasksLoading(false);
+      }
+    },
+    [projectId]
+  );
 
   const fetchRepos = useCallback(async () => {
     if (!projectId) return;
@@ -967,6 +1003,11 @@ const ProjectDetailPanel: React.FC<Props> = ({
   ]);
 
   useEffect(() => {
+    taskQueryRef.current = { pageNum: 1, pageSize: 20, dateRange: null };
+    setTaskPageNum(1);
+    setTaskPageSize(20);
+    setTaskDateRange(null);
+    setTaskTotal(0);
     setActiveTab(showRequirementsTab ? 'requirements' : 'tasks');
     setDetailReq(null);
     setVisibleRequirementCount(REQUIREMENT_PAGE_SIZE);
@@ -1005,12 +1046,12 @@ const ProjectDetailPanel: React.FC<Props> = ({
 
   useEffect(() => {
     if (activeTab !== 'resources' || !fileResourceId) return;
-    const sessionIds =
-      resourceFileScope === 'all'
-        ? projectSessions.map((session) => `${session.sessionId}`).filter(Boolean)
-        : currentResourceSession?.sessionId
-          ? [`${currentResourceSession.sessionId}`]
-          : [];
+    let sessionIds: string[] = [];
+    if (resourceFileScope === 'all') {
+      sessionIds = projectSessions.map((session) => `${session.sessionId}`).filter(Boolean);
+    } else if (currentResourceSession?.sessionId) {
+      sessionIds = [`${currentResourceSession.sessionId}`];
+    }
     Array.from(new Set(sessionIds)).forEach((item) => {
       void fetchSessionResourceFiles(item);
     });
@@ -1875,9 +1916,9 @@ const ProjectDetailPanel: React.FC<Props> = ({
       ? sessionFilesMap[`${currentResourceSession.sessionId}`] || []
       : [];
     // 项目资源 Tab 仅展示会话和文件树，不展示“几个文件”的统计文本。
-    const sessionGroups =
-      resourceFileScope === 'all'
-        ? projectSessions.map((session) => {
+    const sessionGroups = (() => {
+      if (resourceFileScope === 'all') {
+        return projectSessions.map((session) => {
           const sessionResourceId = `${session.sessionId}`;
           const files = sessionFilesMap[sessionResourceId] || [];
           const sessionName = getSessionResourceName(session);
@@ -1890,20 +1931,23 @@ const ProjectDetailPanel: React.FC<Props> = ({
             loading: !!sessionFilesLoadingMap[sessionResourceId],
             emptyText: '该会话暂无文件',
           };
-        })
-        : currentResourceSession
-          ? [
-            {
-              key: `${currentResourceSession.sessionId}`,
-              title: getSessionResourceName(currentResourceSession),
-              titleText: getSessionResourceName(currentResourceSession),
-              currentPath: getSessionFilePath(`${currentResourceSession.sessionId}`),
-              items: currentSessionFiles,
-              loading: !!sessionFilesLoadingMap[`${currentResourceSession.sessionId}`],
-              emptyText: '该会话暂无文件',
-            },
-          ]
-          : [];
+        });
+      }
+      if (currentResourceSession) {
+        return [
+          {
+            key: `${currentResourceSession.sessionId}`,
+            title: getSessionResourceName(currentResourceSession),
+            titleText: getSessionResourceName(currentResourceSession),
+            currentPath: getSessionFilePath(`${currentResourceSession.sessionId}`),
+            items: currentSessionFiles,
+            loading: !!sessionFilesLoadingMap[`${currentResourceSession.sessionId}`],
+            emptyText: '该会话暂无文件',
+          },
+        ];
+      }
+      return [];
+    })();
 
     return (
       <div className={styles.detailResourcePanel}>
@@ -1951,9 +1995,18 @@ const ProjectDetailPanel: React.FC<Props> = ({
 
   const renderTasks = () => (
     <div className={styles.detailTaskPanel}>
-      {tasks.length > 0 && (
-        <div className={styles.detailTaskHeader}>
-          <span>{tasks.length} 个任务</span>
+      <div className={styles.detailTaskHeader}>
+        <span>{taskTotal} 个任务</span>
+        <div className={styles.detailTaskHeaderActions}>
+          <DatePicker.RangePicker
+            size="small"
+            allowClear
+            value={taskDateRange}
+            placeholder={['创建开始日期', '创建结束日期']}
+            onChange={(dates) => {
+              void fetchTasks({ pageNum: 1, dateRange: dates as TaskDateRange });
+            }}
+          />
           <Button
             size="small"
             className={styles.detailHeaderActionButton}
@@ -1963,7 +2016,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
             视图
           </Button>
         </div>
-      )}
+      </div>
 
       {tasks.length ? (
         <div className={styles.detailTaskList}>
@@ -2020,11 +2073,25 @@ const ProjectDetailPanel: React.FC<Props> = ({
         />
       )}
 
+      {taskTotal > 0 && (
+        <Pagination
+          className={styles.detailTaskPagination}
+          size="small"
+          current={taskPageNum}
+          pageSize={taskPageSize}
+          total={taskTotal}
+          showSizeChanger
+          pageSizeOptions={[10, 20, 50, 100]}
+          showTotal={(total) => `共 ${total} 条`}
+          onChange={(pageNum, pageSize) => {
+            void fetchTasks({ pageNum, pageSize });
+          }}
+        />
+      )}
+
       <SessionOverviewDrawer
         open={taskKanbanOpen}
         onClose={() => setTaskKanbanOpen(false)}
-        tasks={tasks}
-        onRefresh={fetchTasks}
         projectId={projectId}
         projectName={project?.projectName}
       />
@@ -2169,11 +2236,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
               </div>
             )}
             <div style={{ marginTop: 6, fontSize: 12, color: '#999' }}>
-              {sourceForm.confirmMode === 'auto'
-                ? '扫描到的新需求将自动派生为研发任务并启动会话'
-                : sourceForm.confirmMode === 'score'
-                  ? '综合评分达到阈值的需求自动派生，其余进入列表等待人工确认'
-                  : '扫描到的需求进入列表，需人工点击「启动任务」'}
+              {getConfirmModeDescription(sourceForm.confirmMode)}
             </div>
           </div>
         </div>
