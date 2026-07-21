@@ -23,6 +23,17 @@ Do not use browser driving, curl, HTTP APIs, or generic web scraping for DingTal
 3. For dws commands, include `--format json` on every command that supports formatted output.
 4. Record `metadata.backend` as `dws`.
 
+## Authentication Recovery in Sandboxed Runs
+
+Treat DWS responses such as `AUTH_REQUIRED`, `not_authenticated`, `未登录`, or their equivalent as a recoverable authentication state. This is different from a DingTalk permission denial, invalid ID, or missing-data error.
+
+1. Start device authorization **in the exact runner that issued the failed DWS request**: run `dws auth login --device`. Add `--format json` only if the installed command supports it.
+2. Ask the user only to scan or otherwise complete the displayed device authorization. Do **not** ask them to run `dws auth login` in an arbitrary local terminal: its credentials may be isolated from the collection runner.
+3. In that same runner, verify completion with `dws auth status --format json`, then retry the original failed DWS command once.
+4. If the runner cannot display device authorization, or the authorization expires, report that limitation. State that the login must run in the same runner, `HOME`, and `DWS_CONFIG_DIR` as the collection command.
+
+Never expose or persist OAuth tokens, refresh tokens, client secrets, device credentials, or credential-file contents in chat or collection artifacts. Do not use browser automation, curl, or another user/session to bypass authentication. Do not route permission, invalid-ID, or data-not-found errors through this flow, and do not retry authentication in a loop.
+
 ## Ownership Boundary
 
 | Area | Owner |
