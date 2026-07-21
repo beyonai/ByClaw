@@ -350,17 +350,106 @@ async function loadMetadataBootstrap() {
   return import(`${pathToFileURL(outfile).href}?t=${Date.now()}`);
 }
 
+async function loadCallAcpAgentTool() {
+  const outfile = path.join(bundleDir, "call-acp-agent-tool.bundle.mjs");
+  await esbuild.build({
+    entryPoints: [path.join(rootDir, "src", "call-acp-agent-tool.ts")],
+    outfile,
+    bundle: true,
+    platform: "node",
+    format: "esm",
+    target: PACKAGE.nodeTarget,
+    packages: "external",
+    logLevel: "silent",
+    plugins: [
+      {
+        name: "openclaw-routing-test-stub",
+        setup(build) {
+          build.onResolve({ filter: /^openclaw\/plugin-sdk\/routing$/ }, () => ({
+            path: "openclaw-routing-test-stub",
+            namespace: "byclaw-test",
+          }));
+          build.onLoad({ filter: /.*/, namespace: "byclaw-test" }, () => ({
+            contents: "export function isSubagentSessionKey() { return false; }",
+          }));
+        },
+      },
+    ],
+  });
+  return import(`${pathToFileURL(outfile).href}?t=${Date.now()}`);
+}
+
+async function assertCallAcpAgentToolFailsClosed(snapshot) {
+  const { createByclawCallAcpAgentTool } = await loadCallAcpAgentTool();
+  let executorCallCount = 0;
+  const environmentKeys = [
+    "USER_CODE",
+    "LANGFUSE_BASE_URL",
+    "LANGFUSE_PUBLIC_KEY",
+    "LANGFUSE_SECRET_KEY",
+    "OPENCLAW_STATE_DIR",
+  ];
+  const savedEnvironment = Object.fromEntries(environmentKeys.map((key) => [key, process.env[key]]));
+  process.env.USER_CODE = "metadata-bootstrap-test";
+  delete process.env.LANGFUSE_BASE_URL;
+  delete process.env.LANGFUSE_PUBLIC_KEY;
+  delete process.env.LANGFUSE_SECRET_KEY;
+  process.env.OPENCLAW_STATE_DIR = "/dev/null/openclaw-state";
+  try {
+    const config = {
+      ...jsonClone(fixture.config),
+      defaultCwd: path.join(workspaceRoot, "call-tool-fail-closed"),
+      sqlitePath: path.join(workspaceRoot, "call-tool-fail-closed", "state.sqlite"),
+    };
+    const tool = createByclawCallAcpAgentTool({
+      config,
+      registry: {
+        snapshot: async () => jsonClone(snapshot),
+      },
+      executeViaCallAgent: async () => {
+        executorCallCount += 1;
+        return { success: true };
+      },
+    })({
+      sessionKey: "agent:main:metadata-bootstrap-test",
+      channelSessionId: "metadata-bootstrap-test-session",
+      channelTraceId: "a".repeat(32),
+      langfuseParentObservationId: "b".repeat(16),
+    });
+    const result = await tool.execute("metadata-bootstrap-test-call", {
+      kind: "agent",
+      id: "900002",
+      input: "protected query",
+    });
+    assert.equal(result.error_code, "ACP_METADATA_BOOTSTRAP_INVALID");
+    assert.match(result.error, /metadata bootstrap materialization failed/iu);
+    assert.equal(executorCallCount, 0, "bootstrap failure must not call the remote executor");
+  } finally {
+    for (const key of environmentKeys) {
+      const value = savedEnvironment[key];
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  }
+}
+
 async function assertMetadataBootstrapProtocol() {
   const {
     createMetadataBootstrapContract,
+    loadMetadataBootstrapContract,
+    metadataBootstrapFailureResponse,
     renderMetadataFirstDelegationContent,
     validateMetadataBootstrapContract,
   } = await loadMetadataBootstrap();
-  const runDir = path.join(workspaceRoot, "metadata-bootstrap-protocol");
+  const runDir = path.join(workspaceRoot, "runs", "metadata-bootstrap-protocol");
   const clientsDir = path.join(runDir, "clients");
   const metadataPath = path.join(runDir, "metadata.md");
   const queryPath = path.join(runDir, "query.md");
   const clientInstructionsPath = path.join(clientsDir, "claude-code.md");
+  const planBundlePath = path.join(runDir, "plan-bundle.json");
   const receiptPath = path.join(runDir, "bootstrap-receipt.json");
   const metadataContent = [
     "# ByClaw ACP Metadata",
@@ -374,14 +463,16 @@ async function assertMetadataBootstrapProtocol() {
   fs.writeFileSync(metadataPath, metadataContent, "utf8");
   fs.writeFileSync(queryPath, "# Query\n\nprivate user query\n", "utf8");
   fs.writeFileSync(clientInstructionsPath, "# Client Instructions\n", "utf8");
+  fs.writeFileSync(planBundlePath, '{"fixture":true}\n', "utf8");
 
   const contract = createMetadataBootstrapContract({
-    bootstrapId: "bootstrap-fixture",
+    bootstrapId: path.basename(runDir),
     runDir,
     metadataPath,
     metadataContent,
     clientInstructionsPath,
     queryPath,
+    planBundlePath,
     receiptPath,
   });
   assert.equal(contract.policy, "fail-closed");
@@ -389,17 +480,87 @@ async function assertMetadataBootstrapProtocol() {
   assert.equal(contract.metadata.bytes, Buffer.byteLength(metadataContent));
   assert.equal(contract.metadata.sha256.length, 64);
   assert.equal(contract.query.readAfterBootstrap, true);
+  assert.equal(contract.planBundle.path, planBundlePath);
+  assert.equal(contract.planBundle.required, true);
   assert.equal(contract.receipt.requiredStatus, "READY");
   assert.doesNotThrow(() => validateMetadataBootstrapContract(contract));
+  const contractPath = path.join(runDir, "bootstrap-contract.json");
+  fs.writeFileSync(contractPath, JSON.stringify(contract), "utf8");
+  assert.equal(loadMetadataBootstrapContract(contractPath).contract.bootstrapId, contract.bootstrapId);
+  const outsideContractPath = path.join(workspaceRoot, "outside-bootstrap-contract.json");
+  fs.writeFileSync(outsideContractPath, JSON.stringify(contract), "utf8");
+  assert.throws(
+    () => loadMetadataBootstrapContract(outsideContractPath),
+    /contract.*runDir/iu,
+    "bootstrap contract file must be inside its declared runDir",
+  );
+  const tamperedContract = jsonClone(contract);
+  tamperedContract.query.readAfterBootstrap = false;
+  assert.throws(
+    () => validateMetadataBootstrapContract(tamperedContract),
+    /query.*bootstrap/iu,
+    "runtime contract validation must reject bypassing metadata bootstrap",
+  );
+  const malformedContract = jsonClone(contract);
+  delete malformedContract.metadata;
+  assert.throws(
+    () => validateMetadataBootstrapContract(malformedContract),
+    /contract.*metadata/iu,
+    "malformed JSON contracts must fail with a bootstrap validation error",
+  );
+  const precedenceTamperedContract = jsonClone(contract);
+  precedenceTamperedContract.precedence.reverse();
+  assert.throws(
+    () => validateMetadataBootstrapContract(precedenceTamperedContract),
+    /precedence/iu,
+    "business-rule precedence must not be mutable",
+  );
+  const escapedPlanBundleContract = jsonClone(contract);
+  escapedPlanBundleContract.planBundle.path = path.join(workspaceRoot, "outside-plan-bundle.json");
+  fs.writeFileSync(escapedPlanBundleContract.planBundle.path, "{}\n", "utf8");
+  assert.throws(
+    () => validateMetadataBootstrapContract(escapedPlanBundleContract),
+    /plan bundle.*runDir/iu,
+    "plan bundle must stay inside the bootstrap runDir",
+  );
+  fs.rmSync(planBundlePath);
+  assert.throws(
+    () => validateMetadataBootstrapContract(contract),
+    /plan bundle.*cannot be read/iu,
+    "missing plan bundle must block bootstrap validation",
+  );
+  fs.writeFileSync(planBundlePath, '{"fixture":true}\n', "utf8");
 
   const content = renderMetadataFirstDelegationContent({ contract, metadataContent });
   assert.match(content, /read[^\n]*EOF/iu);
   assert.match(content, /referenced resources/iu);
   assert.match(content, /bootstrap-receipt\.json/u);
+  assert.match(content, /do not read query\.md or plan-bundle\.json/iu);
   assert.match(content, /Future Business Rule/u);
   assert.ok(
     content.indexOf("Future Business Rule") < content.indexOf("<USER_QUERY_ACCESS>"),
     "unknown future metadata rules must appear before query access",
+  );
+  assert.equal(
+    typeof metadataBootstrapFailureResponse,
+    "function",
+    "call_acp_agent must export its metadata bootstrap fail-closed response helper",
+  );
+  assert.deepEqual(
+    metadataBootstrapFailureResponse({
+      error: new Error("metadata digest mismatch"),
+      requesterSessionKey: "agent:main:test",
+      sessionId: "session-test",
+    }),
+    {
+      success: false,
+      error_code: "ACP_METADATA_BOOTSTRAP_INVALID",
+      error: "metadata digest mismatch",
+      target: {
+        requester_session_key: "agent:main:test",
+        session_id: "session-test",
+      },
+    },
   );
 }
 
@@ -424,6 +585,7 @@ async function main() {
     "planner should export buildCallAgentContentFromPlan for the byclawCallAcpAgent tool",
   );
   const snapshot = jsonClone(fixture.snapshot);
+  await assertCallAcpAgentToolFailsClosed(snapshot);
   const cases = fixture.requestCases.filter((item) => !selected || selected.has(item.name));
 
   assert.ok(cases.length > 0, "no request cases selected");
@@ -467,6 +629,20 @@ async function main() {
         duplicateBundle.sharedContext.runDir,
         "same-session plans must use different immutable run directories",
       );
+      assert.ok(
+        firstBundle.sharedContext.clientInstructionsPath &&
+          fs.readFileSync(firstBundle.sharedContext.clientInstructionsPath, "utf8").indexOf("metadata.md") <
+            fs.readFileSync(firstBundle.sharedContext.clientInstructionsPath, "utf8").indexOf("query.md"),
+        "client instructions must require metadata before query access",
+      );
+      const substitutedPlan = jsonClone(plan);
+      substitutedPlan.sessionsSpawn.bundle.bootstrapContractPath =
+        duplicateBundle.sharedContext.bootstrapContractPath;
+      assert.throws(
+        () => buildCallAgentContentFromPlan(substitutedPlan),
+        /contract.*(runDir|bootstrapId|path)|plan.*contract/iu,
+        "call-agent dispatch must reject a self-consistent contract from another run",
+      );
     }
 
     // byclawCallAcpAgent delegation content validates and inlines metadata as
@@ -496,6 +672,17 @@ async function main() {
       !callAgentContent.includes(rawInput),
       `${testCase.name} call-agent bootstrap must not inline the raw query`,
     );
+
+    if (testCase.name === "agent") {
+      const tamperedPlan = createByclawAcpPlan({ config, snapshot, request });
+      const tamperedBundle = JSON.parse(fs.readFileSync(tamperedPlan.sessionsSpawn.bundle.path, "utf8"));
+      fs.appendFileSync(tamperedBundle.sharedContext.metadataPath, "\nmetadata changed after planning\n", "utf8");
+      assert.throws(
+        () => buildCallAgentContentFromPlan(tamperedPlan),
+        /metadata.*mismatch/iu,
+        "call-agent dispatch must reject changed metadata",
+      );
+    }
 
     summaries.push({
       kind: testCase.name,

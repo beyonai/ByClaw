@@ -107,8 +107,13 @@ responses, Claude agent files, and SQLite run ledger rows are written.
 ACP task files are written under the OpenClaw/byai-channel shared root:
 
 ```text
-${STATE_DIR}/.byclaw/acp-runs/{ACP_CLIENT_TYPE}/{byai-channel_session_id}
+${STATE_DIR}/.byclaw/acp-runs/{ACP_CLIENT_TYPE}/{byai-channel_session_id}/runs/{bootstrap_id}
 ```
+
+The session directory remains stable for byai-channel correlation, while every
+plan gets an immutable `bootstrap_id` subdirectory. Concurrent delegations in
+one chat session therefore do not overwrite each other's query, metadata,
+client instructions, plan bundle, bootstrap contract, or bootstrap receipt.
 
 `sessionId` passed to `byclawAcpPlan` / `byclawAcpRun` must be the real
 byai-channel `session_id`. Do not pass a digital-employee id, agent id, run id,
@@ -132,9 +137,47 @@ runs a **local** ACP sub-session.
 bundle: agent roster, linkedSkills, model config, `query.md` / `metadata.md` /
 `plan-bundle.json`) and then delegates the task to a **remote** ACP agent
 (`BYCLAW_CODE_<USER_CODE>`) asynchronously via the shared `executeViaCallAgent`
-helper. The plan's task text — which embeds the user query and the on-disk
-shared-context file paths — is the delegation prompt; structured bundle data is
-read by the remote agent from the filesystem, not sent inline.
+helper. The planner keeps the user query in the isolated `query.md`; the remote
+delegation content validates and places the complete `metadata.md` business-rule
+manual before query access.
+
+### Metadata-first business-rule bootstrap
+
+`metadata.md` is the complete authoritative business-rule manual for the
+downstream ACP client. The adapter does not parse known headings such as
+`Response Language`, `Session Files`, or `Linked Skills`; future sections are
+automatically governed by the same protocol.
+
+Before `call_acp_agent` dispatches, the adapter writes and validates:
+
+```text
+<run_dir>/metadata.md
+<run_dir>/query.md
+<run_dir>/clients/<client>.md
+<run_dir>/bootstrap-contract.json
+<run_dir>/plan-bundle.json
+```
+
+The contract records absolute paths, metadata byte length, SHA-256,
+`complete-to-eof` read mode, fail-closed policy, and the required
+`bootstrap-receipt.json` path. Missing, empty, or path-escaping required
+artifacts—and any metadata integrity change—prevent remote dispatch with
+`ACP_METADATA_BOOTSTRAP_INVALID`. The current plan's run directory, bootstrap
+id, contract path, and plan-bundle path are cross-checked so another run's
+self-consistent contract cannot be substituted.
+
+The call-agent content places the complete validated metadata manual before
+query access. It prohibits planning, subagent calls, business-file changes, and
+business conclusions until the client has read metadata to EOF, verified its
+integrity, loaded every resource that metadata makes mandatory, and written a
+`READY` receipt. Any unmet mandatory rule or resource produces a `BLOCKED`
+receipt and the query must not be read or executed.
+
+This is the strongest fail-closed contract available in the current one-shot
+asynchronous call-agent flow: the adapter guarantees rule visibility, metadata
+integrity, and required-artifact presence/containment before the query, but cannot independently prove the
+model's internal reading behavior. The contract and receipt are compatible
+with a future two-phase worker handshake (`bootstrap -> READY -> query`).
 
 On dispatch the tool records a `task_started` event to the shared
 `baiying-remote-tasks/tasks.jsonl` log (consumed by `byai-channel`'s

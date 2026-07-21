@@ -121,6 +121,10 @@ export type MetadataBootstrapContract = {
     path: string;
     readAfterBootstrap: true;
   };
+  planBundle: {
+    path: string;
+    required: true;
+  };
   receipt: {
     path: string;
     requiredStatus: "READY";

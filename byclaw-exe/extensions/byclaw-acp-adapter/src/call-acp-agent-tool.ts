@@ -20,6 +20,10 @@ import type {
   ResourceContext,
 } from "../../shared/src/executor-types.js";
 import { CALL_ACP_AGENT, DEFAULTS } from "./constants.js";
+import {
+  MetadataBootstrapError,
+  metadataBootstrapFailureResponse,
+} from "./metadata-bootstrap.js";
 import { buildCallAgentContentFromPlan, createByclawAcpPlan } from "./planner.js";
 import type { ByclawRegistry } from "./registry.js";
 import type { ByclawAcpPlanRequest, ResolvedByclawAcpAdapterConfig } from "./types.js";
@@ -114,8 +118,8 @@ export type CreateByclawCallAcpAgentToolParams = {
  * The tool is registered as a `(ctx) => tool` factory so it can read byai-channel
  * session context from the shared in-process store. It runs the planner to
  * materialize the shared-context bundle (agent roster, linkedSkills, model
- * config, query/metadata files) and hands the plan's task text to the remote
- * agent as the delegation prompt.
+ * config, query/metadata files) and hands a validated metadata-first bootstrap
+ * envelope to the remote agent as the delegation prompt.
  */
 export function createByclawCallAcpAgentTool(params: CreateByclawCallAcpAgentToolParams) {
   const executor = params.executeViaCallAgent ?? executeViaCallAgent;
@@ -216,21 +220,41 @@ export function createByclawCallAcpAgentTool(params: CreateByclawCallAcpAgentToo
           })
         : false;
 
-      // Run the planner to materialize the shared-context bundle (agent roster,
-      // linkedSkills, model config, query.md / metadata.md / plan-bundle.json)
-      // and derive the delegation prompt. The bundle is written to the shared
-      // filesystem; only the plan.task text travels in the call-agent content.
-      const plan = createByclawAcpPlan({
-        config,
-        snapshot: await registry.snapshot(),
-        request: {
-          ...toolParams,
+      // Materialize one immutable metadata-first bootstrap snapshot. The remote
+      // content includes the complete validated metadata manual before query
+      // access; structured files remain available in the shared filesystem.
+      let plan: ReturnType<typeof createByclawAcpPlan>;
+      let content: string;
+      try {
+        plan = createByclawAcpPlan({
+          config,
+          snapshot: await registry.snapshot(),
+          request: {
+            ...toolParams,
+            sessionId: channelResolve.sessionId,
+            language: toolParams.language ?? channelResolve.language,
+            replyLanguage: toolParams.replyLanguage,
+          },
+        });
+        content = buildCallAgentContentFromPlan(plan);
+      } catch (error) {
+        if (!(error instanceof MetadataBootstrapError)) {
+          throw error;
+        }
+        const failure = metadataBootstrapFailureResponse({
+          error,
+          requesterSessionKey,
           sessionId: channelResolve.sessionId,
-          language: toolParams.language ?? channelResolve.language,
-          replyLanguage: toolParams.replyLanguage,
-        },
-      });
-      const content = buildCallAgentContentFromPlan(plan);
+        });
+        if (langfuseToolObservationCreated) {
+          await updateLangfuseToolObservation({
+            observationId: syntheticLangfuseToolObservationId,
+            output: failure,
+            logger,
+          });
+        }
+        return failure;
+      }
 
       const agentId = normalizeText(contextRecord.agentId) || CALL_ACP_AGENT.defaultAgentId;
       const resourceContext: ResourceContext = {

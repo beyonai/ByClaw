@@ -35,11 +35,10 @@ import {
 import { compactByclawSkill } from "./skill-paths.js";
 import {
   createMetadataBootstrapContract,
+  loadMetadataBootstrapContract,
   MetadataBootstrapError,
   renderMetadataFirstDelegationContent,
-  validateMetadataBootstrapContract,
 } from "./metadata-bootstrap.js";
-import type { MetadataBootstrapContract } from "./types.js";
 
 const DEFAULT_CLAUDE_CODE_MODEL =
   process.env[ENV.byclawAcpClaudeModel] || process.env[ENV.anthropicModel] || DEFAULTS.claudeCodeModel;
@@ -716,13 +715,15 @@ function renderClientInstructions(params: {
     "",
     params.responseLanguage.instruction,
     "",
-    "1. Read `query.md` first and treat it as the user request.",
-    "2. Read `metadata.md` before planning. It is the authority for agent roster, skill paths, workflow, loop, and model metadata.",
-    "3. Use `plan-bundle.json` only when machine-readable detail is needed.",
-    "4. Do not invent agents or skills that are absent from metadata.",
-    "5. Follow the responseLanguage policy from `metadata.md` for all user-visible output.",
-    "6. Preserve proof: list which roster member handled each work item and cite evidence paths or command output.",
-    "7. Follow the Fixed Work Specs below; they are mandatory for all downstream agents and subagents.",
+    "1. Before planning or business work, read `metadata.md` completely from byte 0 through EOF and verify it against `bootstrap-contract.json`.",
+    "2. Treat the entire metadata document as authoritative business rules; do not depend on a fixed list of known headings.",
+    "3. Load every resource that metadata makes mandatory for the current task, including future resource types unknown to this client.",
+    "4. Write `bootstrap-receipt.json`; if any mandatory rule or resource cannot be satisfied, write BLOCKED and do not read `query.md`.",
+    "5. Only after the receipt status is READY, read `query.md` and treat it as the user request.",
+    "6. Only after READY, use `plan-bundle.json` when machine-readable detail is needed; it contains the protected user input.",
+    "7. Do not invent agents, skills, or business rules that are absent from metadata.",
+    "8. Preserve proof: cite loaded rule/resource paths and command output, and list which roster member handled each work item.",
+    "9. Follow the Fixed Work Specs below; they are mandatory for all downstream agents and subagents.",
     "",
     "## Fixed Work Specs",
     "",
@@ -788,6 +789,7 @@ function buildTask(params: {
     "",
     "强制启动门禁（fail-closed）:",
     "1. 在读取用户 query、规划、调用子 agent 或修改业务文件前，先读取 bootstrap-contract.json。",
+    "   READY 前禁止读取 query.md 和包含原始 input 的 plan-bundle.json。",
     "2. 从字节 0 完整读取 metadata.md 直到 EOF，并校验 contract 中的字节数与 SHA-256。",
     "3. 将整份 metadata.md 作为业务规则说明书；不得只识别或选择当前已知章节。",
     "4. 按 metadata.md 自身要求加载本任务所需的所有引用资源，包括未来新增的资源类型。",
@@ -877,9 +879,6 @@ function materializePlanBundle(params: {
     responseLanguage: params.responseLanguage,
     fixedWorkSpecs,
   });
-  atomicWriteText(queryPath, queryContent);
-  atomicWriteText(metadataPath, metadataContent);
-  atomicWriteText(clientInstructionsPath, clientInstructionsContent);
   const metadataBootstrap = createMetadataBootstrapContract({
     bootstrapId,
     runDir,
@@ -887,11 +886,9 @@ function materializePlanBundle(params: {
     metadataContent,
     clientInstructionsPath,
     queryPath,
+    planBundlePath: bundlePath,
     receiptPath: bootstrapReceiptPath,
   });
-  validateMetadataBootstrapContract(metadataBootstrap);
-  atomicWriteJson(bootstrapContractPath, metadataBootstrap);
-
   const bundle = {
     version: BUNDLE.version,
     generatedAt: new Date().toISOString(),
@@ -947,25 +944,43 @@ function materializePlanBundle(params: {
       visibleOutputPolicy: BUNDLE.visibleOutputPolicy,
     },
   };
-  atomicWriteJson(bundlePath, bundle);
-  return {
-    path: bundlePath,
-    sharedDir,
-    runDir,
-    bootstrapId,
-    sessionId,
-    queryPath,
-    metadataPath,
-    clientInstructionsPath,
-    bootstrapContractPath,
-    bootstrapReceiptPath,
-    metadataIntegrity: metadataBootstrap.metadata,
-    clientType: params.clientType,
-    responseLanguage: params.responseLanguage,
-    fixedWorkSpecs,
-    bytes: Buffer.byteLength(JSON.stringify(bundle)),
-    sha256Hint: `${params.kind}:${params.id}`,
-  };
+  try {
+    atomicWriteText(queryPath, queryContent);
+    atomicWriteText(metadataPath, metadataContent);
+    atomicWriteText(clientInstructionsPath, clientInstructionsContent);
+    atomicWriteJson(bootstrapContractPath, metadataBootstrap);
+    atomicWriteJson(bundlePath, bundle);
+    loadMetadataBootstrapContract(bootstrapContractPath, {
+      bootstrapId,
+      runDir,
+      planBundlePath: bundlePath,
+    });
+    return {
+      path: bundlePath,
+      sharedDir,
+      runDir,
+      bootstrapId,
+      sessionId,
+      queryPath,
+      metadataPath,
+      clientInstructionsPath,
+      bootstrapContractPath,
+      bootstrapReceiptPath,
+      metadataIntegrity: metadataBootstrap.metadata,
+      clientType: params.clientType,
+      responseLanguage: params.responseLanguage,
+      fixedWorkSpecs,
+      bytes: Buffer.byteLength(JSON.stringify(bundle)),
+      sha256Hint: `${params.kind}:${params.id}`,
+    };
+  } catch (error) {
+    if (error instanceof MetadataBootstrapError) {
+      throw error;
+    }
+    throw new MetadataBootstrapError(
+      `metadata bootstrap materialization failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 }
 
 function cleanAcpAgentId(value: string | undefined): string | undefined {
@@ -1051,18 +1066,19 @@ function buildPlan(params: {
 export function buildCallAgentContentFromPlan(plan: ByclawAcpPlan): string {
   const bundle = isRecord(plan.sessionsSpawn.bundle) ? plan.sessionsSpawn.bundle : {};
   const contractPath = nonEmptyString(bundle.bootstrapContractPath);
-  if (!contractPath) {
-    throw new MetadataBootstrapError("plan bootstrap contract path is missing");
-  }
-  let contract: MetadataBootstrapContract;
-  try {
-    contract = JSON.parse(fs.readFileSync(contractPath, "utf8")) as MetadataBootstrapContract;
-  } catch (error) {
+  const bootstrapId = nonEmptyString(bundle.bootstrapId);
+  const runDir = nonEmptyString(bundle.runDir);
+  const planBundlePath = nonEmptyString(bundle.path);
+  if (!contractPath || !bootstrapId || !runDir || !planBundlePath) {
     throw new MetadataBootstrapError(
-      `bootstrap contract cannot be read: ${error instanceof Error ? error.message : String(error)}`,
+      "plan bootstrap contract path, bootstrapId, runDir, and plan bundle path are required",
     );
   }
-  const metadataContent = validateMetadataBootstrapContract(contract);
+  const { contract, metadataContent } = loadMetadataBootstrapContract(contractPath, {
+    bootstrapId,
+    runDir,
+    planBundlePath,
+  });
   return renderMetadataFirstDelegationContent({ contract, metadataContent });
 }
 

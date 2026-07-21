@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { BUNDLE, PATHS } from "./constants.js";
+import { BUNDLE } from "./constants.js";
 import type { MetadataBootstrapContract } from "./types.js";
 
 const PRECEDENCE = [
@@ -11,11 +11,67 @@ const PRECEDENCE = [
   "model-defaults",
 ] as const;
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function assertMetadataBootstrapContractShape(
+  value: unknown,
+): asserts value is MetadataBootstrapContract {
+  if (!isRecord(value)) {
+    throw new MetadataBootstrapError("bootstrap contract must be an object");
+  }
+  if (typeof value.bootstrapId !== "string" || typeof value.runDir !== "string") {
+    throw new MetadataBootstrapError("bootstrap contract bootstrapId and runDir are required");
+  }
+  if (!Array.isArray(value.precedence) || !value.precedence.every((item) => typeof item === "string")) {
+    throw new MetadataBootstrapError("bootstrap contract precedence must be a string array");
+  }
+  if (!isRecord(value.metadata)) {
+    throw new MetadataBootstrapError("bootstrap contract metadata is required");
+  }
+  if (
+    typeof value.metadata.path !== "string" ||
+    typeof value.metadata.sha256 !== "string" ||
+    typeof value.metadata.bytes !== "number"
+  ) {
+    throw new MetadataBootstrapError("bootstrap contract metadata path, sha256, and bytes are required");
+  }
+  if (!isRecord(value.clientInstructions) || typeof value.clientInstructions.path !== "string") {
+    throw new MetadataBootstrapError("bootstrap contract client instructions path is required");
+  }
+  if (!isRecord(value.query) || typeof value.query.path !== "string") {
+    throw new MetadataBootstrapError("bootstrap contract query path is required");
+  }
+  if (!isRecord(value.planBundle) || typeof value.planBundle.path !== "string") {
+    throw new MetadataBootstrapError("bootstrap contract plan bundle path is required");
+  }
+  if (!isRecord(value.receipt) || typeof value.receipt.path !== "string") {
+    throw new MetadataBootstrapError("bootstrap contract receipt path is required");
+  }
+}
+
 export class MetadataBootstrapError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "MetadataBootstrapError";
   }
+}
+
+export function metadataBootstrapFailureResponse(params: {
+  error: unknown;
+  requesterSessionKey: string;
+  sessionId: string;
+}) {
+  return {
+    success: false,
+    error_code: "ACP_METADATA_BOOTSTRAP_INVALID",
+    error: params.error instanceof Error ? params.error.message : String(params.error),
+    target: {
+      requester_session_key: params.requesterSessionKey,
+      session_id: params.sessionId,
+    },
+  };
 }
 
 function metadataDigest(content: string): string {
@@ -76,6 +132,7 @@ export function createMetadataBootstrapContract(params: {
   metadataContent: string;
   clientInstructionsPath: string;
   queryPath: string;
+  planBundlePath: string;
   receiptPath: string;
 }): MetadataBootstrapContract {
   assertNonEmptyText(params.bootstrapId, "bootstrapId");
@@ -101,6 +158,10 @@ export function createMetadataBootstrapContract(params: {
       path: path.resolve(params.queryPath),
       readAfterBootstrap: true,
     },
+    planBundle: {
+      path: path.resolve(params.planBundlePath),
+      required: true,
+    },
     receipt: {
       path: path.resolve(params.receiptPath),
       requiredStatus: "READY",
@@ -111,6 +172,7 @@ export function createMetadataBootstrapContract(params: {
 export function validateMetadataBootstrapContract(
   contract: MetadataBootstrapContract,
 ): string {
+  assertMetadataBootstrapContractShape(contract);
   if (contract.protocolVersion !== BUNDLE.metadataBootstrapProtocolVersion) {
     throw new MetadataBootstrapError(
       `unsupported metadata bootstrap protocol version: ${contract.protocolVersion}`,
@@ -119,11 +181,42 @@ export function validateMetadataBootstrapContract(
   if (contract.policy !== "fail-closed") {
     throw new MetadataBootstrapError("metadata bootstrap policy must be fail-closed");
   }
+  if (JSON.stringify(contract.precedence) !== JSON.stringify(PRECEDENCE)) {
+    throw new MetadataBootstrapError("metadata bootstrap precedence is invalid");
+  }
+  if (!Number.isSafeInteger(contract.metadata.bytes) || contract.metadata.bytes <= 0) {
+    throw new MetadataBootstrapError("metadata bootstrap byte length must be a positive integer");
+  }
+  if (!/^[a-f0-9]{64}$/u.test(contract.metadata.sha256)) {
+    throw new MetadataBootstrapError("metadata bootstrap sha256 must be a lowercase hexadecimal digest");
+  }
+  if (contract.metadata.required !== true || contract.metadata.readMode !== "complete-to-eof") {
+    throw new MetadataBootstrapError("metadata bootstrap must require a complete-to-EOF metadata read");
+  }
+  if (contract.clientInstructions.required !== true) {
+    throw new MetadataBootstrapError("client instructions must be required by metadata bootstrap");
+  }
+  if (contract.query.readAfterBootstrap !== true) {
+    throw new MetadataBootstrapError("query access before metadata bootstrap is forbidden");
+  }
+  if (contract.planBundle.required !== true) {
+    throw new MetadataBootstrapError("plan bundle must be required by metadata bootstrap");
+  }
+  if (contract.receipt.requiredStatus !== "READY") {
+    throw new MetadataBootstrapError("metadata bootstrap receipt must require READY status");
+  }
   assertNonEmptyText(contract.bootstrapId, "bootstrapId");
+  if (path.basename(path.resolve(contract.runDir)) !== contract.bootstrapId) {
+    throw new MetadataBootstrapError("bootstrap contract runDir must end with bootstrapId");
+  }
+  if (path.basename(path.dirname(path.resolve(contract.runDir))) !== BUNDLE.runsDirName) {
+    throw new MetadataBootstrapError(`bootstrap contract runDir must be inside ${BUNDLE.runsDirName}`);
+  }
   for (const [label, filePath] of [
     ["metadata.md", contract.metadata.path],
     ["client instructions", contract.clientInstructions.path],
     ["query.md", contract.query.path],
+    ["plan bundle", contract.planBundle.path],
     ["bootstrap receipt", contract.receipt.path],
   ] as const) {
     assertPathInsideRunDir(contract.runDir, filePath, label);
@@ -132,7 +225,63 @@ export function validateMetadataBootstrapContract(
   assertMetadataMatches(contract, metadataContent);
   readRequiredText(contract.clientInstructions.path, "client instructions");
   readRequiredText(contract.query.path, "query.md");
+  const planBundleContent = readRequiredText(contract.planBundle.path, "plan bundle");
+  try {
+    const planBundle = JSON.parse(planBundleContent) as unknown;
+    if (!isRecord(planBundle)) {
+      throw new Error("expected a JSON object");
+    }
+  } catch (error) {
+    throw new MetadataBootstrapError(
+      `plan bundle is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
   return metadataContent;
+}
+
+export function loadMetadataBootstrapContract(
+  contractPath: string,
+  expected?: {
+    bootstrapId: string;
+    runDir: string;
+    planBundlePath: string;
+  },
+): {
+  contract: MetadataBootstrapContract;
+  metadataContent: string;
+} {
+  const contractContent = readRequiredText(contractPath, "bootstrap contract");
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(contractContent) as unknown;
+  } catch (error) {
+    throw new MetadataBootstrapError(
+      `bootstrap contract is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  assertMetadataBootstrapContractShape(parsed);
+  const contract = parsed;
+  assertPathInsideRunDir(contract.runDir, contractPath, "bootstrap contract");
+  if (expected) {
+    const expectedRunDir = path.resolve(expected.runDir);
+    const expectedContractPath = path.join(expectedRunDir, BUNDLE.bootstrapContractFileName);
+    if (path.resolve(contractPath) !== expectedContractPath) {
+      throw new MetadataBootstrapError("plan bootstrap contract path does not match its runDir");
+    }
+    if (path.resolve(contract.runDir) !== expectedRunDir) {
+      throw new MetadataBootstrapError("bootstrap contract runDir does not match the current plan");
+    }
+    if (contract.bootstrapId !== expected.bootstrapId) {
+      throw new MetadataBootstrapError("bootstrap contract bootstrapId does not match the current plan");
+    }
+    if (path.resolve(contract.planBundle.path) !== path.resolve(expected.planBundlePath)) {
+      throw new MetadataBootstrapError("bootstrap contract plan bundle path does not match the current plan");
+    }
+  }
+  return {
+    contract,
+    metadataContent: validateMetadataBootstrapContract(contract),
+  };
 }
 
 export function renderMetadataFirstDelegationContent(params: {
@@ -144,12 +293,12 @@ export function renderMetadataFirstDelegationContent(params: {
   return [
     "<BUSINESS_RULE_BOOTSTRAP>",
     "Policy: fail-closed.",
-    "Before bootstrap status is READY, do not read the user query, plan business work, invoke subagents, modify business files, or produce business conclusions.",
+    "Before bootstrap status is READY, do not read query.md or plan-bundle.json, plan business work, invoke subagents, modify business files, or produce business conclusions.",
     `Bootstrap id: ${contract.bootstrapId}`,
     `Bootstrap contract: ${path.join(contract.runDir, BUNDLE.bootstrapContractFileName)}`,
     `Authoritative metadata: ${contract.metadata.path}`,
     `Required client instructions: ${contract.clientInstructions.path}`,
-    `Machine plan bundle: ${path.join(contract.runDir, PATHS.planBundleFileName)}`,
+    `Machine plan bundle (access only after READY): ${contract.planBundle.path}`,
     `Expected metadata bytes: ${contract.metadata.bytes}`,
     `Expected metadata sha256: ${contract.metadata.sha256}`,
     `Bootstrap receipt: ${contract.receipt.path}`,
