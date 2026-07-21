@@ -1,4 +1,4 @@
-import { post } from './common/request';
+import { POST } from './common/request';
 
 export interface SandboxInfo {
   userCode: string;
@@ -21,14 +21,14 @@ export interface LaunchSandboxResult {
  * 查询沙箱信息
  */
 export async function getSandboxInfo(params: { userCode?: string; sandboxType?: string }): Promise<SandboxInfo[]> {
-  return post('/sandbox/getSandboxInfo', params);
+  return POST('/sandbox/getSandboxInfo', params);
 }
 
 /**
  * 释放沙箱
  */
 export async function removeSandbox(params: { userCode: string; resourceId?: number | null }): Promise<void> {
-  return post('/sandbox/removeSandbox', params);
+  return POST('/sandbox/removeSandbox', params);
 }
 
 /**
@@ -38,19 +38,19 @@ export async function launchSandboxByUserCode(params: {
   userCode: string;
   serviceKey?: string;
 }): Promise<LaunchSandboxResult> {
-  return post('/sandbox/launchByUserCode', params);
+  return POST('/sandbox/launchByUserCode', params);
 }
 
 /**
  * 沙箱心跳
  */
 export async function sandboxHeartbeat(params: { resourceId?: number }): Promise<void> {
-  return post('/sandbox/heartbeat', params);
+  return POST('/sandbox/heartbeat', params);
 }
 
 /**
  * 沙箱续约
  */
 export async function renewSandbox(params: { userCode?: string; resourceId?: number }): Promise<SandboxInfo> {
-  return post('/sandbox/renewSandbox', params);
+  return POST('/sandbox/renewSandbox', params);
 }
