@@ -210,6 +210,12 @@ public class SandboxController {
                 if (sandboxType != null && !sandboxType.equalsIgnoreCase(sandbox.getSandboxType())) {
                     continue;
                 }
+
+                // 查询数据库记录获取完整状态
+                SsSandboxRecord record = sandboxRecordMapper.selectRunningByUserAndResource(
+                    userCode, sandbox.getSandboxType(), sandbox.getResourceId()
+                );
+
                 Map<String, Object> result = new HashMap<>();
                 result.put("userCode", userCode);
                 result.put("sandboxType", sandbox.getSandboxType());
@@ -217,6 +223,7 @@ public class SandboxController {
                 result.put("endpoints", sandbox.getEndpoints());
                 result.put("instanceEndpoints", sandbox.getInstanceEndpoints());
                 result.put("token", sandbox.getGatewayToken());
+                result.put("status", record != null ? record.getStatus() : "UNKNOWN");
                 data.add(result);
             }
         }

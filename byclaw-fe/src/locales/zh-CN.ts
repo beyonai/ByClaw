@@ -1574,6 +1574,12 @@ export default {
   'newChat.alreadyLatestSession': '已经是最新会话',
 
   'sandbox.waitTips': '正在初始化安全沙箱环境，请稍候...',
+  'sandbox.status.running': 'OpenClaw 运行中',
+  'sandbox.status.transitioning': 'OpenClaw 启动/停止中',
+  'sandbox.status.stopped': 'OpenClaw 已停止',
+  'sandbox.action.restart': '重启沙箱',
+  'sandbox.restart.success': '沙箱重启成功',
+  'sandbox.restart.failed': '沙箱重启失败，请稍后重试',
   'ThinkRewriteQuestion.originalQuestion': '原查询',
   'thinkStatus.errorDetail': '错误详情',
   compaction: '上下文压缩',
