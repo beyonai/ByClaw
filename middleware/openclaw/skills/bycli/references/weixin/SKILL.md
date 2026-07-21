@@ -25,8 +25,10 @@ The adapter returns this gate immediately: for QR-code login, it opens and focus
 
 1. Stop all tool execution immediately. Do not click the verification button, solve or bypass the challenge, refresh/retry, navigate, focus another page, switch to `web read`, change authentication source, or fall back to another acquisition method.
 2. Freeze the current browser context. Do not invoke any further `bycli weixin`, `bycli browser`, `bycli doctor`, daemon, or browser-lifecycle command; do not close the tab, clean up the session, or stop/restart the daemon or browser.
-3. Ask the user to complete the verification in the already open tab and explicitly confirm completion. For the “环境异常” page, the user—not the agent—clicks “去验证”.
-4. Only after that confirmation, rerun the interrupted command with `--site-session persistent --keep-tab true`.
+3. Ask the user to complete the verification in the already open tab and explicitly confirm completion. For the “环境异常” page, the user—not the agent—clicks “去验证”. Then send the prompt as the final response and end the current turn.
+4. While waiting, do not run a status check, `state`, `evaluate`, page inspection, retry, or any other tool command. Do not infer a new login requirement from a retained tab or backend URL.
+5. Only after the user's next explicit confirmation (for example, “已登录” or “验证完成”), rerun the interrupted command exactly once with `--site-session persistent --keep-tab true`; do not perform a preflight browser check first.
+6. If that single rerun still returns an authentication error, report the exact error and stop. Do not claim the session is expired or reopen login based solely on page state.
 
 On the first Weixin login `TIMEOUT` / exit 75, follow this gate immediately. Do not set `BYCLI_BROWSER_COMMAND_TIMEOUT`, manually open a second WeChat login page, inspect or diagnose a retained `about:blank` tab, or attempt another `accounts` command before the user confirms login succeeded. After confirmation, the rerun reads the `token` from the authenticated backend URL and obtains domain cookies, including HttpOnly cookies, through Browser Bridge.
 

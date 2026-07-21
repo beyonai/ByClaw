@@ -39,6 +39,8 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 - 不要在委派入库或知识整理失败时清理产物、Session 结束时自动清理、未列清单未确认就清理、删除 `audit_required=true` 目录
 - 不要在钉钉相关采集任务中绕过 dws 去用浏览器、curl、HTTP API 或通用网页抓取
 - 不要无 adapter 时绕过 `bycli browser` 直接用 `web_fetch` / `browser` 通用工具
+- 不要把 `bycli browser <session> open <url>` 或 `state` 当作浏览器冷启动、桥接健康检查或 adapter 预热命令；它们会申请 TAB 租约，缺少租约时可创建 `about:blank` TAB
+- 不要用 `bycli browser <session> ...` 检查或操作 adapter 打开的 TAB；`browser` 与 `adapter` 是不同 surface，即使 session 字符串相同也不共享 TAB 租约
 - 不要向用户输出本 skill 的内部决策逻辑（步骤编号、流程名称、路由分支）——直接执行
 
 ## 严格要求 (MUST DO)
@@ -46,7 +48,7 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 - Agent 调用支持格式化输出的数据 / adapter 命令时加 `-f json` 获取可解析输出；`doctor`、`daemon`、`browser` 生命周期命令以及不支持 `--format` 的子命令按其原生命令执行
 - 浏览器操作前确认 `bycli doctor` 通过（仅 COOKIE/INTERCEPT/UI 策略需要）
 - 每次执行 `bycli doctor` 后（无论成功与否）必须紧接着执行 `bycli daemon status`，确认 daemon 处于 running 且 Extension 为 connected，据此判断桥接是否正常；任一不满足则视为桥接异常，按以下阶梯升级处理：
-  1. 桥接异常 → 先按冷启动流程重启（`openclaw browser start` → `bycli doctor` → `bycli daemon status`）
+  1. 桥接异常 → 先按冷启动流程恢复进程与桥接（`openclaw browser start` → `bycli doctor` → `bycli daemon status`）；冷启动不包含 `bycli browser open/state`
   2. 仍异常 → `bycli daemon restart`，再 `bycli daemon status` 复检
   3. `bycli daemon restart` 后仍连接不上（daemon 未 running 或 Extension 未 connected）→ **STOP，停止一切浏览器动作**，提示用户检查 Chrome 是否正常启动、byCLI 扩展插件是否已安装并启用，恢复后再重试；不得继续驱动或降级到通用工具
 - 修复 adapter 时仅修改 trace `summary.md` 里 `adapterSourcePath` 指向的文件
@@ -56,7 +58,7 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 - 钉钉相关采集任务必须读取 [dingtalk-dws-bridge.md](./references/dingtalk-dws-bridge.md)，并通过 dws skill 获取数据；仍按 bycli 的落盘与采集后处理收尾规则处理
 - 微信公众平台 `weixin accounts/articles/save-articles/download`、`--auth-source`、`WECHAT_TOKEN` / `WECHAT_COOKIE` / `WECHAT_FINGERPRINT` 或 `mp.weixin.qq.com` 登录、认证或环境验证任务，必须读取 [references/weixin/SKILL.md](./references/weixin/SKILL.md)；其微信登录/验证规则优先于本文件的通用错误处理、AutoFix 和 cleanup 规则
 - 浏览器 session 结束后执行 cleanup（close tab → stop daemon → stop browser）
-- Login/Auth/人工验证页面例外：不关闭 session、TAB、daemon 或浏览器，报告 session name + URL 给用户并等待用户完成验证
+- Login/Auth/人工验证页面例外：不关闭 session、TAB、daemon 或浏览器，报告命令结果中**已知的** session name 与 URL 后立即结束本轮并等待用户下一条明确确认；若结果未返回 URL，明确说明 URL 未提供，不得为补齐信息再检查页面。等待期间不得自行检查、重试或继续任务
 
 ## 意图决策树
 
@@ -192,9 +194,9 @@ bycli gh pr list --limit 5         # 透传调用
 
 | 错误类型 | Agent 行为 |
 |---------|-----------|
-| Weixin 登录/验证：`AUTH_REQUIRED` (77)、登录 `TIMEOUT` (75)、CAPTCHA 或环境验证 | 加载 `references/weixin/SKILL.md`；保留当前 TAB、daemon 和浏览器，提示用户操作并停止。不得 AutoFix、trace 重跑、改超时或重复执行命令 |
+| Weixin 登录/验证：`AUTH_REQUIRED` (77)、登录 `TIMEOUT` (75)、CAPTCHA 或环境验证 | 加载 `references/weixin/SKILL.md`；保留当前 TAB、daemon 和浏览器，提示用户操作后立即结束本轮。等待期间不得自行检查、AutoFix、trace 重跑、改超时或重复执行命令 |
 | AUTH_REQUIRED (exit 77，非 Weixin) | STOP，提示用户登录 |
-| BROWSER_CONNECT (exit 69) | STOP，运行 `bycli doctor` + `bycli daemon status` 诊断；`bycli daemon restart` 后仍连不上则停止一切动作，提示用户检查 Chrome 与 byCLI 扩展插件是否正常启动 |
+| BROWSER_CONNECT (exit 69) | 按「严格要求」的桥接异常阶梯执行冷启动诊断与最多一次 daemon restart；复检仍失败后才 STOP，且不得执行 `browser open/state` |
 | CAPTCHA / 限流 / 环境验证（非 Weixin） | STOP，不是 adapter 问题；保持当前 TAB、daemon 和浏览器，等待用户完成验证 |
 | SELECTOR / EMPTY_RESULT / API_ERROR | 进入 AutoFix 流程 |
 | TIMEOUT / PAGE_CHANGED | 进入 AutoFix 流程（Weixin 登录 `TIMEOUT` / exit 75 除外） |
@@ -209,7 +211,7 @@ bycli gh pr list --limit 5         # 透传调用
 |------|------|---------|
 | Chromium 进程树 | OpenClaw browser plugin | `openclaw browser --browser-profile openclaw start/stop/status` |
 | byCLI Browser Bridge daemon (port 19825) | `bycli` 自身 | `bycli daemon start/restart/stop` |
-| Browser tab lease (CDP target) | `bycli` session name | `bycli browser <sess> open/close` |
+| Browser tab lease (CDP target) | `surface + session + browser context` | raw browser 用 `bycli browser <sess> ...`；adapter 由命令自身管理 |
 | Extension 握手 | 两侧都需要 | `bycli doctor` 检查 |
 
 ### 冷启动
@@ -218,11 +220,32 @@ bycli gh pr list --limit 5         # 透传调用
 openclaw browser --browser-profile openclaw start
 bycli doctor
 bycli daemon status                # doctor 后必跑：确认 daemon running + Extension connected
-bycli browser <session> open <url>
-bycli browser <session> state
 ```
 
-注意：`bycli browser <sess> open` 是 CDP 客户端，不能冷启动 Chromium。未运行时报 `Browser profile "<id>" is not connected`，必须先 `openclaw browser start`。
+冷启动只恢复 Chromium、daemon 和 Extension 握手，**不创建、导航或检查任务 TAB**。`bycli browser <sess> open` 是有副作用的 CDP 导航命令，不是冷启动命令；Chromium 未运行时必须先执行 `openclaw browser start`。
+
+### 桥接正常后的 TAB 分流
+
+| 场景 | 必须行为 |
+|------|---------|
+| 有现成 adapter | 直接执行 `bycli <site> <command>`；不先执行任何 `bycli browser ...` 命令 |
+| 继续 raw browser session | 先用 `bycli browser <session> tab list` 只读列举 browser surface 下的现有 TAB；有目标 TAB 时复用其 `page`，后续命令必须带 `--tab <page>` |
+| 接管用户已打开的 TAB | 让目标 TAB 保持在前台，执行 `bycli browser <session> bind`；不用 `open` 覆盖当前页 |
+| 需要导航 raw browser TAB | 仅在明确需要打开目标 URL 时执行 `open`；已有 TAB 时保持同一 session 并用 `--tab <page>` 定向导航，不更换 session 来新建 TAB |
+| 需要 DOM 交互 | 页面已导航到目标 URL 后，用 `state` 或范围更小的 `find` 获取实时 ref；它们不是 session 存在性检查 |
+| 非 DOM 读取 | `get url`、`extract`、`network` 等命令不要为了例行预检再追加 `state` |
+
+Session 复用边界：
+
+- 同名 session 只在同一 `surface + browser context` 且租约仍存活时指向同一 TAB；session name 不是持久的 Chrome TAB 标识
+- `bycli browser <session> tab list` 只查 browser surface；返回空数组时表示当前 browser surface 下没有可复用租约，不能据此判断 adapter TAB 不存在
+- `open` 和 `state` 在缺少租约时都可申请 TAB；`open` 导航前会先使用 `about:blank` 建立租约，命令中途失败时该空白 TAB 可能保留
+- `tab list` 返回多个 TAB 时，根据其 URL 和 title 选择唯一目标 `page`；无法确定时停止并请用户确认，不得猜测后导航或新建 TAB
+- `tab list` 非空但当前 URL 不是目标页时，使用同一 session 的 `open <url> --tab <page>` 导航已有 TAB；不为同一任务生成新 session name
+- 复用已列出 TAB 时不得省略 `--tab <page>`；若 TAB 在列举后被关闭或 target 失效，报告原始错误并停止，不得去掉 `--tab` 回退到自动申请新 TAB
+- `bind` 失败或前台 TAB 发生变化时，报告原始错误并停止；不得自动换 session、执行 `open` 或绑定其他 TAB
+- `open` 失败后不得更换 session name 或循环执行 `open/state`；先根据原始错误分流，遇到登录、CAPTCHA、反爬或环境验证立即按验证规则停止
+- adapter（包括 Weixin）的 persistent session 由 adapter surface 自身复用；不得用同名 `bycli browser` session 做预检、聚焦、`state` 或验证登录状态
 
 ### 关闭流程（非登录或验证页）
 
@@ -234,7 +257,7 @@ bycli browser <session> state
 
 何时不关闭：
 
-- 页面仍在 login/SSO/MFA、CAPTCHA、反爬或环境验证 → 保持 session，报告 session name + URL
+- 页面仍在 login/SSO/MFA、CAPTCHA、反爬或环境验证 → 保持 session，报告命令结果中已知的 session name 和 URL；未返回 URL 时不补查
 - 用户后续任务明确需要继续使用同一浏览器上下文
 - 多步操作未完成（如「采集多页 → 入库」是连续动作，中间不关）
 
@@ -266,7 +289,7 @@ openclaw browser --browser-profile openclaw stop
 
 ### Login/Auth/人工验证页面例外
 
-页面仍在 login/SSO/MFA、CAPTCHA、反爬或环境验证状态时，**不执行任何关闭、跳转或重试操作**。保持当前 session、TAB、daemon 与浏览器存活，向用户报告 session name + URL，并等待用户亲自完成验证和明确确认。
+页面仍在 login/SSO/MFA、CAPTCHA、反爬或环境验证状态时，**不执行任何关闭、跳转、页面检查或重试操作**。保持当前 session、TAB、daemon 与浏览器存活，向用户报告命令结果中已知的 session name 和 URL；未返回 URL 时直接注明未提供，不得调用 `state`、`tab list`、`get url` 或其他命令补查。然后等待用户亲自完成验证和明确确认。
 
 ### Kill-all-Chrome
 
