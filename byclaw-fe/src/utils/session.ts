@@ -1,6 +1,5 @@
 import { themes } from '@/constants/theme';
 import { size, omit } from 'lodash';
-import { getRandomNumber } from '@/utils/math';
 
 import type { ISessionState } from '@/models/session';
 import type { ISession } from '@/typescript/session';
@@ -42,12 +41,23 @@ export const getSessionObjectTypeMap = (sessionId: string) => {
   return SESSION_OBJECT_MAP[sessionId];
 };
 
+const getSessionTheme = (sessionId?: string | number) => {
+  const themeCount = size(themes);
+  if (!themeCount) return undefined;
+  // 同一会话会被列表和详情分别标准化，默认主题色必须由会话 ID 稳定计算。
+  const themeIndex = Array.from(`${sessionId || ''}`).reduce(
+    (hash, character) => (hash * 31 + character.charCodeAt(0)) >>> 0,
+    0
+  );
+  return themes[themeIndex % themeCount];
+};
+
 export const sessionHandler = (item: ISession, targetList?: ISession[]) => {
   const payload = {
     ...item,
     sessionId: `${item.sessionId || ''}`,
     avatar: item.avatar ? item.avatar : 'beyond/session.png',
-    theme: item.avatar ? undefined : themes[getRandomNumber(0, size(themes) - 1)],
+    theme: item.avatar ? undefined : getSessionTheme(item.sessionId),
     sessionName: formatSessionName(item),
   };
 

@@ -456,7 +456,8 @@ export const hydrateRunningSessions = (runningInfoList: RunningChatInfo[] = []) 
       return;
     }
     if (!runningSessionIds.has(`${item.sessionId}`)) {
-      chatSessionRuntimeManager.completeBySession(item.sessionId);
+      // 全局状态回查只能结束恢复的旧会话，实时回答仍由 SSE 完成事件结束。
+      chatSessionRuntimeManager.completeRestoredBySession(item.sessionId);
     }
   });
 };

@@ -42,5 +42,17 @@ public class ScanLogItem {
     /** AI评分明细JSON：各维度得分/风险/AI整理需求 */
     private String scoreDetail;
 
+    /** 拆分溯源：子需求指向被拆分的原始 item；未拆分为空 */
+    private Long parentItemId;
+
+    /** 归一化内容指纹，二期去重用 */
+    private String contentHash;
+
+    /** 去重状态 normal/suspected_dup/confirmed_dup/not_dup */
+    private String dedupStatus;
+
+    /** 疑似/确认重复时指向的原始 item */
+    private Long duplicateOfItemId;
+
     private Date createTime;
 }

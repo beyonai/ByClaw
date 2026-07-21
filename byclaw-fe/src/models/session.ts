@@ -317,6 +317,8 @@ const sessionModel: SessionModelType = {
           type: 'updateState',
           payload: updatePayload,
         });
+        // 供项目空间等独立会话缓存仅在接口成功后同步名称。
+        return sessionId;
       } catch (error) {
         console.error(error);
         const { sessionList } = yield select((state: any) => state.session);
@@ -334,6 +336,7 @@ const sessionModel: SessionModelType = {
           type: 'updateState',
           payload: updatePayload,
         });
+        return '';
       } finally {
         yield put({ type: 'updateState', payload: { editLoading: false } });
       }

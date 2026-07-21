@@ -133,6 +133,12 @@ const getPositiveNumber = (value: unknown) => {
   return Number.isFinite(numberValue) && numberValue > 0 ? numberValue : undefined;
 };
 
+// 默认项目在后端使用 -1 标识，创建会话时应与普通项目一样参与列表临时项和关系绑定。
+const getProjectNumber = (value: unknown) => {
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) && (numberValue === -1 || numberValue > 0) ? numberValue : undefined;
+};
+
 const PROJECT_SESSION_BIND_RETRY_DELAYS = [0, 500, 1500];
 
 const wait = (delay: number) =>
@@ -228,10 +234,10 @@ function useChat(props: IProps) {
   });
 
   const bindSessionToProject = usePersistFn(
-    async (projectId: unknown, targetSessionId: unknown, clientRequestId?: string) => {
-      const normalizedProjectId = getPositiveNumber(projectId);
+    async (projectId: unknown, targetSessionId: unknown, clientRequestId?: string, session?: ISession) => {
+      const normalizedProjectId = getProjectNumber(projectId);
       const normalizedSessionId = getPositiveNumber(targetSessionId);
-      if (!normalizedProjectId || !normalizedSessionId) {
+      if (normalizedProjectId === undefined || !normalizedSessionId) {
         return;
       }
 
@@ -262,10 +268,17 @@ function useChat(props: IProps) {
           }
         }
         boundProjectSessionKeysRef.current.add(cacheKey);
-        // 通知项目侧栏刷新当前项目会话，避免等用户手动展开才看到新会话。
+        // 用真实会话替换发送时插入的临时项，避免为新增一条数据重新查询整页列表。
         EventEmitter.emit('projectSpace-session-bound', {
           projectId: `${normalizedProjectId}`,
           sessionId: `${normalizedSessionId}`,
+          clientRequestId,
+          session: session
+            ? {
+              ...session,
+              sessionId: `${normalizedSessionId}`,
+            }
+            : undefined,
         });
       } catch (error) {
         console.error('Failed to bind project session:', error);
@@ -277,15 +290,17 @@ function useChat(props: IProps) {
     }
   );
 
-  const onSessionCreated = usePersistFn((params: { sessionId: string; clientRequestId?: string }) => {
-    const clientRequestId = params.clientRequestId || '';
-    const projectId = clientRequestId ? pendingProjectIdByClientRequestRef.current.get(clientRequestId) : undefined;
-    if (!projectId) {
-      return;
-    }
+  const onSessionCreated = usePersistFn(
+    (params: { sessionId: string; clientRequestId?: string; session: ISession }) => {
+      const clientRequestId = params.clientRequestId || '';
+      const projectId = clientRequestId ? pendingProjectIdByClientRequestRef.current.get(clientRequestId) : undefined;
+      if (!projectId) {
+        return;
+      }
 
-    void bindSessionToProject(projectId, params.sessionId, clientRequestId);
-  });
+      void bindSessionToProject(projectId, params.sessionId, clientRequestId, params.session);
+    }
+  );
 
   const {
     sessionInfoHandler,
@@ -392,8 +407,10 @@ function useChat(props: IProps) {
       if (hasRunningInfo) {
         return;
       }
-      chatSessionRuntimeManager.completeBySession(sessionId);
-      await reloadLatestMessageList();
+      // 后端运行状态可能晚于首轮 SSE 建立，只清理断线恢复的旧运行态，保留本地流式回答。
+      if (chatSessionRuntimeManager.completeRestoredBySession(sessionId)) {
+        await reloadLatestMessageList();
+      }
     } catch (error) {
       console.error(error);
     }
@@ -593,7 +610,8 @@ function useChat(props: IProps) {
         const runningInfoList = sessionRunningInfoList.filter((item) => item.running && item.traceId);
         if (!runningInfoList.length) {
           if (sessionRunningInfoList.length) {
-            chatSessionRuntimeManager.completeBySession(sessionId);
+            // 初始状态回查不能覆盖当前页面正在接收 SSE 的本地请求。
+            chatSessionRuntimeManager.completeRestoredBySession(sessionId);
           }
           return;
         }
@@ -917,7 +935,8 @@ function useChat(props: IProps) {
     const primaryEntry = laneEntries[0];
     const newAnswerMsg = primaryEntry.answerMsg;
     const clientRequestId = primaryEntry.lane.clientRequestId;
-    const projectId = getPositiveNumber(get(restPayload, 'projectId'));
+    const projectId = getProjectNumber(get(restPayload, 'projectId'));
+    const isNewProjectSession = projectId !== undefined && !sessionId;
     const multiAgent = isMultiAgentSend
       ? {
         turnId,
@@ -949,9 +968,20 @@ function useChat(props: IProps) {
 
     if (!isContinuingRunningTrace) {
       laneEntries.forEach((entry) => {
-        if (projectId) {
+        if (projectId !== undefined) {
           // 会话创建成功后用 clientRequestId 找回所属项目，再用真实 sessionId 建立关系。
           pendingProjectIdByClientRequestRef.current.set(entry.lane.clientRequestId, `${projectId}`);
+          // 首条消息发送后立即在项目会话列表插入临时项，避免等待后端创建会话和绑定关系完成。
+          if (isNewProjectSession) {
+            EventEmitter.emit('projectSpace-session-pending', {
+              projectId: `${projectId}`,
+              projectName: get(restPayload, 'projectName'),
+              clientRequestId: entry.lane.clientRequestId,
+              sessionName: newQueryMsg.text || 'New Chat',
+              sessionContent: newQueryMsg.text || '',
+              updateTime: new Date().toISOString(),
+            });
+          }
         }
         registerPendingChatContext({
           clientRequestId: entry.lane.clientRequestId,
@@ -967,7 +997,8 @@ function useChat(props: IProps) {
 
         chatSessionRuntimeManager.register({
           clientRequestId: entry.lane.clientRequestId,
-          sessionId: entry.answerMsg.sessionId,
+          // 临时会话也注册到旧会话列表使用的运行状态管理器，完成事件会自动清除回答中标识。
+          sessionId: isNewProjectSession ? `pending_${entry.lane.clientRequestId}` : entry.answerMsg.sessionId,
           laneId: isMultiAgentSend ? entry.lane.laneId : undefined,
           turnId: isMultiAgentSend ? turnId : undefined,
           answerMessageId: entry.answerMsg.msgId,
@@ -980,7 +1011,7 @@ function useChat(props: IProps) {
       });
     }
 
-    if (projectId && sessionId) {
+    if (projectId !== undefined && sessionId) {
       void bindSessionToProject(projectId, sessionId);
     }
 

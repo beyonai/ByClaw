@@ -118,9 +118,11 @@ public class DevloopScanJob {
                 logger.warn("[DevloopScanJob] Unknown source type: {}", type);
                 return;
         }
-        // 先 LLM 打分（供展示/排序/score 模式判定），再按确认规则自动派生
-        scoringService.scoreItems(newItems);
-        devloopApplicationService.autoDeriveForSource(source, newItems);
+        // 一次 LLM 调用完成拆分+评分：一条消息里的多个独立需求被拆开，各自打分；
+        // 返回派发列表（子需求 + 未拆分条，不含被拆分的原始条），再按确认规则自动派生。
+        List<com.iwhalecloud.byai.manager.entity.devloop.ScanLogItem> dispatchItems = scoringService
+            .splitAndScore(newItems);
+        devloopApplicationService.autoDeriveForSource(source, dispatchItems);
     }
 
     /**

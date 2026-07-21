@@ -27,11 +27,10 @@ description: Use when resolving newly organized documents for one ontology objec
    ```
 
    脚本完成批内去重、term/full-text 双路召回和 RRF 排序。
-3. 对需要确认的候选，用 `by-knowledge-manager read-file` 下载完整正文到“知识库候选”目录，并结合 identity 与正文核心定义判断：
-   - 同名且内容同义：标记为已确认融合；
-   - 不同名但内容同义：标记为待用户确认；
+3. 对候选，用 `by-knowledge-manager read-file` 下载完整正文到“知识库候选”目录，并结合 identity 与正文核心定义判断：
+   - 内容同义或可确定为同一实例：立即标记为融合；不因名称不同等待用户确认；
    - 内容不同义或无候选：标记为新建。
-4. 仅将“已确认融合”的文档对交给 `doc-fusion`；待确认与新建文档保留在“新建对象”目录，不得写入“融合结果”。
+4. 所有可融合文档对都必须交给 `doc-fusion`；新建文档保留在“新建对象”目录，不得写入“融合结果”。冲突与用户确认由 Step 7 的入库工具处理。
 
 ## 返回主流程
 

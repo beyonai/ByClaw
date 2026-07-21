@@ -1,7 +1,10 @@
 package com.iwhalecloud.byai.manager.interfaces.controller.devloop;
 
 import com.iwhalecloud.byai.manager.application.service.devloop.DevloopApplicationService;
-import com.iwhalecloud.byai.manager.domain.devloop.service.DevloopPhaseService;
+import com.iwhalecloud.byai.common.page.PageInfo;
+import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskListQueryDto;
+import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskStateDto;
+import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskViewDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectMemberListDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ScanSourceDTO;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
@@ -118,6 +121,13 @@ public class DevloopController {
         return applicationService.listRequirementsBySource(sourceId);
     }
 
+    /** 按项目一次查全部需求(时间倒序)，供需求列表直查，替代前端逐源循环 */
+    @PostMapping("/project/requirements")
+    public ResponseUtil<List<Map<String, Object>>> listRequirementsByProject(@RequestBody Map<String, Object> params) {
+        Long projectId = Long.valueOf(params.get("projectId").toString());
+        return applicationService.listRequirementsByProject(projectId);
+    }
+
     /**
      * 保存GitHub Personal Access Token
      * @param params 包含 pat（明文，后端SM4加密存储）
@@ -164,25 +174,32 @@ public class DevloopController {
 
     /** 查询项目任务列表 */
     @PostMapping("/task/list")
-    public ResponseUtil<List<Map<String, Object>>> listTasks(@RequestBody Map<String, Object> params) {
-        Long projectId = Long.valueOf(params.get("projectId").toString());
-        return applicationService.listTasks(projectId);
+    public ResponseUtil<PageInfo<DevloopTaskViewDto>> listTasks(@RequestBody DevloopTaskListQueryDto query) {
+        return applicationService.listTasks(query);
     }
 
     /** 获取任务(会话)详情 */
     @PostMapping("/task/detail")
-    public ResponseUtil<Map<String, Object>> getTaskDetail(@RequestBody Map<String, Object> params) {
+    public ResponseUtil<DevloopTaskViewDto> getTaskDetail(@RequestBody Map<String, Object> params) {
         Long sessionId = Long.valueOf(params.get("sessionId") != null ? params.get("sessionId").toString()
             : params.get("taskId").toString());
         return applicationService.getTaskDetail(sessionId);
     }
 
-    /** 获取任务环节进度：从会话消息派生的 7 环节状态 + 打回记录，供详情逐环节展示 */
+    /** 获取任务环节进度：直接读取 self-developed-rules v2 会话状态投影 */
     @PostMapping("/task/phases")
-    public ResponseUtil<DevloopPhaseService.PhaseSnapshot> getTaskPhases(@RequestBody Map<String, Object> params) {
+    public ResponseUtil<DevloopTaskStateDto> getTaskPhases(@RequestBody Map<String, Object> params) {
         Long sessionId = Long.valueOf(params.get("sessionId") != null ? params.get("sessionId").toString()
             : params.get("taskId").toString());
         return applicationService.getTaskPhases(sessionId);
+    }
+
+    /** 获取任务代码变更：目标分支相对仓库默认分支的文件变更列表(远程分支口径) */
+    @PostMapping("/task/changes")
+    public ResponseUtil<Map<String, Object>> getTaskChanges(@RequestBody Map<String, Object> params) {
+        Long sessionId = Long.valueOf(params.get("sessionId") != null ? params.get("sessionId").toString()
+            : params.get("taskId").toString());
+        return applicationService.getTaskChanges(sessionId);
     }
 
     // ========== 项目成员 ==========

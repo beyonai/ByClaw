@@ -91,6 +91,8 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
             matcherList.add(Pattern.compile("/api/v1/template-sessions/page")); // 模板分页开放
             matcherList.add(Pattern.compile("/api/v1/template-sessions/getTemplateTypes")); // 模板开放
             matcherList.add(Pattern.compile("/ws")); // ws 接口
+            matcherList.add(Pattern.compile("/system/session/getDcSystemConfigValueByCodes")); // 登录页系统配置（免登录）
+            matcherList.add(Pattern.compile("/system/staticdata/getDcSystemConfig")); // 登录页品牌配置（免登录）
             matcherList.add(Pattern.compile("/open/api/inner/.*"));
             matcherList.add(Pattern.compile("/open/api/v1/queryDigEmployeeList")); // 数字员工列表查询（免登录）
             matcherList.add(Pattern.compile("/open/api/v1/queryDigEmployeeDetail")); // 数字员工详情查询（免登录）

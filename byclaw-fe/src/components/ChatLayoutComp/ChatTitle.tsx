@@ -13,6 +13,8 @@ import NullableAntdCompWithAnim from '../NullableAntdCompWithAnim';
 import { isAdminVip } from '@/utils/auth';
 import { useSelector, useIntl } from '@umijs/max';
 import VNC from './components/VNC';
+import ProjectSessionActions from './ProjectSessionActions';
+import { sessionHandler } from '@/utils/session';
 
 interface ChatTitleProps {
   sessionId?: string;
@@ -20,6 +22,7 @@ interface ChatTitleProps {
   suffix?: React.ReactNode;
   lastAnswer?: any;
   agentType: IAgentType;
+  projectId?: number;
 }
 
 export default function ChatTitle(props: ChatTitleProps) {
@@ -37,15 +40,39 @@ export default function ChatTitle(props: ChatTitleProps) {
 
   // const isSimpleSession = currentSession?.sessionType === SessionType.simple;
 
+  const titleSession = React.useMemo(() => {
+    if (!sessionId) return undefined;
+
+    // 缓存会话已带有列表计算出的头像和主题色，直接复用，避免再次标准化后图标样式与列表不一致。
+    if (currentSession) {
+      return {
+        ...currentSession,
+        sessionId: `${sessionId}`,
+        sessionName: currentSession.sessionName || 'New Chat',
+      };
+    }
+
+    // 项目/任务入口可能先切换 sessionId 再同步列表缓存，缓存缺失时仍保留标题行。
+    return sessionHandler({
+      sessionId: `${sessionId}`,
+      sessionName: 'New Chat',
+    } as ISession);
+  }, [currentSession, sessionId]);
+
   return (
     <>
       <nav className={styles.chatTitle}>
-        {currentSession?.sessionName && (
+        {titleSession && (
           <div className={classnames(styles.chatTitleWrap, 'ub ub-ac gap8')}>
-            {currentSession && <ChatAvatar session={currentSession} size={32} />}
+            <ChatAvatar session={titleSession} size={32} />
 
-            <div className={styles.chatTitle}>{currentSession?.sessionName}</div>
+            <div className={styles.chatTitle}>{titleSession.sessionName}</div>
             <div className={styles.actions}>
+              <ProjectSessionActions
+                projectId={props.projectId}
+                sessionId={sessionId}
+                sessionName={titleSession.sessionName}
+              />
               <VNC />
               {isAdminVip(userInfo) && (
                 <span className={styles.btn} onClick={() => setOpenTemplate(true)} style={{ padding: '0 8px' }}>

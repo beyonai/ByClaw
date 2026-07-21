@@ -3,7 +3,8 @@
   flex-direction: column;
   width: 100%;
   height: 100%;
-  padding: 12px 12px 0;
+  // 项目列表外层留白与会话模块的 8px 内边距保持一致。
+  padding: 8px;
   background: #fff;
 }
 
@@ -11,8 +12,8 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding: 4px 0 14px;
-  border-bottom: 1px solid #edf1f7;
+  // 外层已统一使用 8px 留白，搜索框顶部不再叠加额外间距。
+  padding: 0 0 8px;
 }
 
 .searchInput {
@@ -110,41 +111,74 @@
   margin-left: auto;
 }
 
-.actionRow {
+// 项目下拉和新建项目按钮共用一行，保持新建按钮固定在下拉框右侧。
+.scopeActionRow {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 36px;
   gap: 8px;
 }
 
-.newChatButton {
-  height: 36px;
-  border-radius: 9px;
-  font-size: 14px;
-  font-weight: 700;
-  box-shadow: none;
-
-  :global {
-    .@{antPrefix}-btn-icon {
-      font-size: 16px;
-    }
-  }
+// 与员工侧栏“发现数字员工”一致的项目详情快捷入口，保持项目选择器下方的信息层级。
+.enterProjectDetail {
+  width: 100%;
+  border: 0;
+  border-radius: 6px;
+  padding: 8px;
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 2px;
+  color: inherit;
+  font-family: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  background: #f2f6fa;
 }
 
+.enterProjectDetailIcon {
+  flex-shrink: 0;
+  margin-right: 6px;
+  color: inherit;
+  font-size: 16px;
+}
+
+.enterProjectDetailText {
+  // 仅文案使用中等字重，避免右侧箭头随文本变粗。
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.enterProjectDetailArrow {
+  flex-shrink: 0;
+  margin-left: auto;
+  color: inherit;
+  font-size: 16px;
+  font-weight: 400;
+}
+
+// 项目下拉右侧仅保留新建入口，延续侧栏紧凑的图标按钮规格。
 .newProjectButton {
   width: 36px;
   height: 36px;
-  border-radius: 9px;
-  color: #1f2633;
+  padding: 0;
+  border: 0;
+  color: #667085;
   font-size: 16px;
-  font-weight: 700;
-  border-color: #dfe6f0;
-  background: #fff;
-  box-shadow: 0 6px 16px rgba(28, 48, 90, 0.06);
+  background: transparent;
+  box-shadow: none;
 
+  &:focus,
+  &:active {
+    color: #667085;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  // 放在焦点态之后，鼠标仍停留在按钮上时继续展示 hover 反馈。
   &:hover {
     color: #246bfe;
-    border-color: #b8cdfd;
-    background: #f8fbff;
+    background: #eaf2ff;
   }
 }
 
@@ -168,8 +202,9 @@
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 4px 6px 8px;
+  // 这里直接承载会话卡片，沿用会话模块的连续列表间距。
+  gap: 0;
+  padding: 4px 0 8px;
   background: #fff;
   // 父子滚动同时触发时隔离绘制层，避免展开会话列表透到下方项目缝隙里。
   isolation: isolate;
@@ -517,7 +552,7 @@
       display: grid !important;
       grid-template-columns: repeat(var(--project-detail-tab-count, 4), minmax(0, 1fr));
       padding: 3px;
-      border-radius: 10px;
+      border-radius: 8px;
       background: #f1f3f8;
     }
 
@@ -698,6 +733,52 @@
   background: #fff;
 }
 
+// 需求、任务、成员均复用同一内容滚动容器，仅隐藏轨道，不阻断滚轮与触控滚动。
+.detailBodyPanelScrollbarHidden {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+// 需求 Tab 的外层不参与滚动，固定头部与内部需求列表分离。
+.detailRequirementsBodyPanel {
+  display: flex;
+  overflow: hidden;
+  padding-bottom: 8px;
+}
+
+.detailRequirementsPanel {
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.detailRequirementsToolbar {
+  flex-shrink: 0;
+
+  // 需求标题与第一条列表项间距收紧，不影响任务和成员标题行。
+  .detailSectionHeader {
+    margin-bottom: 4px;
+  }
+}
+
+// 需求列表独立滚动，保持此前隐藏滚动条的体验并承接触底加载。
+.detailRequirementScroll {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
 .detailEmbeddedContent {
   // 项目详情复用 /devloop 的任务和成员能力，这里只约束外层，让它适配左侧窄面板。
   min-width: 0;
@@ -746,26 +827,37 @@
     .@{antPrefix}-list-item.project-member-row {
       position: relative;
       flex-direction: row;
-      align-items: flex-start;
+      min-height: 56px;
+      align-items: center;
+      // 与任务列表一致保留 10px 左间距，避免成员头像贴边。
+      padding-left: 10px;
       padding-right: 38px;
     }
 
     .project-member-row .@{antPrefix}-list-item-meta {
       width: auto;
       flex: 1;
+      align-items: center;
+      margin-bottom: 0;
+    }
+
+    .project-member-row .@{antPrefix}-list-item-meta-avatar {
+      margin-inline-end: 10px;
     }
 
     .project-member-avatar {
-      width: 28px;
-      height: 28px;
-      border-radius: 6px;
+      width: 32px;
+      height: 32px;
+      // 成员头像保持用户模块的蓝底圆角方形，不使用需求、任务列表的圆形背景。
+      border-radius: 10px;
       display: flex;
       align-items: center;
       justify-content: center;
-      color: #fff;
-      background-color: var(--beyond-color-primary-hover);
-      font-size: 10px;
+      font-size: 11px;
+      font-weight: 600;
       line-height: 1;
+      color: #fff;
+      background: #246bfe;
     }
 
     .project-member-title {
@@ -774,6 +866,22 @@
       align-items: center;
       gap: 6px;
       vertical-align: top;
+    }
+
+    .project-member-row .@{antPrefix}-list-item-meta-title {
+      margin-bottom: 0;
+      color: #14161a;
+      // 成员列表在左侧窄面板使用更紧凑的两行文字层级。
+      font-size: 11px;
+      font-weight: 500;
+      line-height: 16px;
+    }
+
+    .project-member-row .@{antPrefix}-list-item-meta-description {
+      margin-top: 3px;
+      color: #707680;
+      font-size: 10px;
+      line-height: 15px;
     }
 
     .project-member-name {
@@ -786,16 +894,20 @@
     .project-member-role-tag {
       flex-shrink: 0;
       margin-inline-end: 0;
+      padding-inline: 4px;
+      font-size: 11px;
+      line-height: 18px;
     }
 
     .project-member-more {
       position: absolute;
-      top: 18px;
-      right: 4px;
+      top: 50%;
+      right: 8px;
       width: 28px;
       height: 28px;
       color: #6b778c;
       border-radius: 6px;
+      transform: translateY(-50%);
 
       &:hover {
         color: #246bfe;
@@ -803,6 +915,18 @@
       }
     }
   }
+}
+
+// 直接挂在成员文字节点上，覆盖 List.Item.Meta 的默认字号。
+.projectMemberName {
+  // 成员名称与需求、任务标题统一字号，保证左侧列表的可读性。
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.projectMemberDescription {
+  font-size: 12px;
+  line-height: 17px;
 }
 
 .detailSourceList {
@@ -1130,7 +1254,8 @@
 .detailRequirementList {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  // 需求卡片列表保持紧凑，减少相邻数据之间的垂直留白。
+  gap: 3px;
 }
 
 .detailRequirementMore {
@@ -1141,98 +1266,164 @@
   text-align: center;
 }
 
+// 需求列表与任务列表共用无边框、悬浮浅灰底色的卡片状态。
 .detailRequirementItem {
-  min-height: 72px;
-  padding: 16px 10px;
-  border: 1px solid #dfe6f0;
-  border-radius: 10px;
+  min-height: 64px;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
   display: flex;
   flex-direction: column;
-  justify-content: flex-start;
+  // 最小高度多出的空间均分到内容上下，避免卡片下方留白更大。
+  justify-content: center;
   gap: 10px;
-  background: #fff;
+  background: transparent;
   cursor: pointer;
-  transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+  transition: background-color 0.2s, border-color 0.2s;
 
   &:hover {
-    border-color: rgba(36, 107, 254, 0.35);
-    background: #fbfdff;
-    box-shadow: 0 4px 12px rgba(36, 107, 254, 0.08);
+    background: #f5f7fa;
   }
-}
-
-.detailRequirementItemExpanded {
-  // 展开前后共用同一顶部留白，避免展开详情时标题区突然贴近卡片上边缘。
-  justify-content: flex-start;
-  border-color: rgba(36, 107, 254, 0.42);
-  box-shadow: 0 6px 16px rgba(36, 107, 254, 0.1);
 }
 
 .detailRequirementSummary {
   width: 100%;
   min-width: 0;
-  display: flex;
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 8px;
+  column-gap: 10px;
 }
 
-.detailScore {
+// 需求列表复用会话列表的图标规格，评分信息收敛到右侧详情抽屉。
+.detailRequirementIcon {
   width: 32px;
   height: 32px;
+  // 需求与任务图标统一使用圆形背景块，避免与列表卡片圆角混淆。
   border-radius: 50%;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: #14865a;
-  font-size: 12px;
-  font-weight: 700;
+  color: #1677ff;
+  font-size: 16px;
   flex-shrink: 0;
-  background: #e9f8f0;
+  background: #edf4ff;
 }
 
-/* 需求评分详情弹窗：AI 综合评分区 */
-.scoreSummary {
+/* 需求详情抽屉：标题状态与字段分区 */
+.requirementDetailDrawer {
+  :global {
+    .@{antPrefix}-drawer-body {
+      padding: 16px;
+      background: #f7f9fc;
+    }
+  }
+}
+
+.requirementDetailDrawerContent {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 16px;
-  padding: 16px;
-  background: #f7f9fc;
-  border-radius: 8px;
-  margin-bottom: 8px;
 }
 
-.scoreSummaryCircle {
-  width: 64px;
-  height: 64px;
-  border-radius: 50%;
-  border: 1px solid #eee;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 24px;
-  font-weight: 700;
-  color: #1f2937;
-  flex-shrink: 0;
-}
-
-.scoreSummaryLabel {
-  font-size: 12px;
-  color: #999;
-}
-
-.scoreSummaryPriority {
+.requirementDetailTitle {
+  min-width: 0;
+  flex: 1;
+  color: #1f2633;
   font-size: 16px;
   font-weight: 600;
-  color: #333;
+  line-height: 24px;
+  word-break: break-word;
 }
 
-.scoreSummaryHint {
+.requirementDetailTitleRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.requirementDetailPriority {
+  flex-shrink: 0;
+  color: #344056;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+}
+
+.requirementDetailUnstartedTag {
+  height: 20px;
+  flex-shrink: 0;
+  margin-inline-end: 0;
+  padding: 0 6px;
+  border-radius: 4px;
+  color: #8a96a8;
   font-size: 12px;
-  color: #999;
-  margin-top: 2px;
+  line-height: 20px;
+  background: #f1f4f8;
 }
 
-/* 需求评分维度网格（弹窗内） */
+.requirementDetailSection {
+  padding: 14px;
+  border: 1px solid #e6ebf2;
+  border-radius: 8px;
+  background: #fff;
+
+  h3 {
+    margin: 0 0 12px;
+    color: #344056;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 20px;
+  }
+}
+
+.requirementDetailInfoGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+}
+
+.requirementDetailInfoItem {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+
+  label {
+    color: #8a96a8;
+    font-size: 12px;
+    line-height: 18px;
+  }
+
+  span,
+  a {
+    overflow: hidden;
+    color: #344056;
+    font-size: 13px;
+    line-height: 20px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  a {
+    color: #246bfe;
+  }
+}
+
+.requirementDetailInfoItemFull {
+  grid-column: 1 / -1;
+}
+
+.requirementDetailText {
+  color: #526075;
+  font-size: 13px;
+  line-height: 22px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 需求评分维度网格（抽屉内） */
 .detailScoreDimGrid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1276,6 +1467,8 @@
   strong {
     color: #1f2633;
     font-size: 13px;
+    // 与任务列表标题使用同一字重，避免需求标题显得过粗。
+    font-weight: 500;
     line-height: 18px;
   }
 
@@ -1286,113 +1479,15 @@
   }
 }
 
-// 优先级标签与需求名称使用垂直居中对齐，避免标签因行内基线偏上。
-.detailRequirementPriority {
-  margin-right: 6px;
-  vertical-align: middle;
-}
-
-.detailRequirementExpanded {
-  width: 100%;
-  padding: 10px;
-  border-radius: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  background: #f7f9fc;
-}
-
-.detailRequirementMetaGrid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-
-  span {
-    min-width: 0;
-    padding: 6px 8px;
-    border-radius: 6px;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    background: #fff;
-  }
-
-  em {
-    color: #8a96a8;
-    font-size: 11px;
-    font-style: normal;
-    line-height: 16px;
-  }
-
-  strong {
-    min-width: 0;
-    color: #344056;
-    font-size: 12px;
-    font-weight: 500;
-    line-height: 18px;
-    overflow: hidden;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-  }
-}
-
-.detailRequirementDetailText {
-  padding: 8px;
-  border-radius: 6px;
-  background: #fff;
-
-  em {
-    display: block;
-    margin-bottom: 4px;
-    color: #8a96a8;
-    font-size: 11px;
-    font-style: normal;
-    line-height: 16px;
-  }
-
-  p {
-    display: -webkit-box;
-    margin: 0;
-    color: #344056;
-    font-size: 12px;
-    line-height: 18px;
-    overflow: hidden;
-    -webkit-line-clamp: 4;
-    line-clamp: 4;
-    -webkit-box-orient: vertical;
-    white-space: pre-wrap;
-    word-break: break-word;
-  }
-}
-
-.detailRequirementExtra {
-  min-width: 0;
-  display: flex;
-  // 详情入口按钮在需求展开区域内水平居中。
-  justify-content: center;
-  flex-wrap: wrap;
-  gap: 6px 10px;
-  color: #7c8798;
-  font-size: 12px;
-  line-height: 18px;
-
-  span,
-  a {
-    max-width: 100%;
-    overflow: hidden;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-  }
-}
-
 .detailRequirementAction {
+  // 需求列表操作保持紧凑，三字状态文案仍保留必要的点击面积。
   flex-shrink: 0;
-  min-width: 48px;
-  height: 30px;
-  padding: 0 10px;
-  border-radius: 8px;
+  min-width: 40px;
+  height: 26px;
+  padding: 0 5px;
+  border-radius: 6px;
   font-size: 12px;
-  line-height: 30px;
+  line-height: 24px;
 }
 
 .detailRequirementStartAction {
@@ -1438,44 +1533,77 @@
   font-weight: 400;
 }
 
+.detailTaskHeaderActions {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+
+  :global {
+    .@{antPrefix}-picker {
+      width: 240px;
+    }
+  }
+}
+
+.detailTaskPagination {
+  margin-top: 16px;
+  display: flex;
+  justify-content: flex-end;
+}
+
 .detailTaskList {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 2px;
 }
 
 .detailTaskCard {
-  min-height: 50px;
-  padding: 12px;
-  border: 1px solid #dfe6f0;
-  border-left: 3px solid #faad14;
-  border-radius: 10px;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 10px;
-  background: #fff;
+  min-height: 56px;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  align-items: center;
+  column-gap: 10px;
+  background: transparent;
   cursor: pointer;
-  transition: box-shadow 0.2s, border-color 0.2s;
+  transition: background-color 0.2s, border-color 0.2s;
 
   &:hover {
-    border-color: #cfd8e8;
-    box-shadow: 0 4px 12px rgba(28, 48, 90, 0.08);
+    background: #f5f7fa;
   }
 }
 
 .detailTaskCardExpanded {
-  // 展开详情后内容高度增加，恢复顶部排布，避免详情区域被居中压缩。
-  justify-content: flex-start;
-  border-color: #b8cdfd;
-  box-shadow: 0 6px 16px rgba(28, 48, 90, 0.1);
+  // 展开详情仍沿用会话列表底色，只通过细边框区分当前任务。
+  border-color: #c9dcff;
+  background: #f8fbff;
 }
 
-// 进度信息固定在右上角，任务元信息可以使用卡片的完整宽度。
+.detailTaskIcon {
+  width: 32px;
+  height: 32px;
+  // 任务采用绿色进度图标，与需求的蓝色文档图标区分。
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #1c9b68;
+  font-size: 16px;
+  background: #eaf8f0;
+}
+
 .detailTaskCardHeader {
   min-width: 0;
   width: 100%;
-  position: relative;
+  // 状态标签作为独立右列，相对任务标题和描述两行的整体垂直居中。
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 8px;
 }
 
 .detailTaskMain {
@@ -1483,67 +1611,70 @@
   width: 100%;
 }
 
-.detailTaskTitle {
-  margin: 0;
-  color: #1677ff;
-  font-size: 14px;
-  font-weight: 500;
-  line-height: 20px;
-  overflow: hidden;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-  word-break: break-all;
-  padding-right: 100px;
-}
-
-.detailTaskMeta {
+.detailTaskTitleRow {
   min-width: 0;
-  width: 100%;
-  margin-top: 8px;
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  color: #66758a;
-  font-size: 12px;
-
-  span {
-    min-width: 0;
-    flex-shrink: 0;
-    overflow: hidden;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-  }
-}
-
-.detailTaskBranch {
-  max-width: 100%;
-}
-
-.detailTaskWarning {
-  margin-top: 6px;
-}
-
-.detailTaskRight {
-  position: absolute;
-  top: 0;
-  right: 0;
-  display: inline-flex;
-  align-items: center;
   gap: 6px;
-  color: #526075;
-  font-size: 12px;
+}
 
-  strong {
-    color: #1f2633;
-    font-size: 13px;
-    font-weight: 600;
-  }
+.detailTaskTitle {
+  min-width: 0;
+  flex: 1;
+  margin: 0;
+  color: #14161a;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 18px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.detailTaskStatusTag {
+  flex-shrink: 0;
+  margin-inline-end: 0;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 20px;
+}
+
+// 任务状态标签与任务视图使用同一状态层级，只在列表内采用紧凑尺寸。
+.detailTaskStatusPending {
+  color: #707680;
+  background: #f2f4f7;
+}
+
+.detailTaskStatusRunning {
+  color: #246bfe;
+  background: #edf4ff;
+}
+
+.detailTaskStatusPaused {
+  color: #b7791f;
+  background: #fff7e6;
+}
+
+.detailTaskStatusDone {
+  color: #16835b;
+  background: #e9f8f0;
+}
+
+.detailTaskDescription {
+  min-width: 0;
+  width: 100%;
+  margin: 3px 0 0;
+  overflow: hidden;
+  color: #707680;
+  font-size: 12px;
+  line-height: 17px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .detailTaskInlineDetail {
+  grid-column: 1 / -1;
   width: 100%;
   padding-top: 10px;
   border-top: 1px dashed #dfe6f0;
@@ -1609,6 +1740,185 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+// 代码变更卡片:参考常见 git 管理视图,状态字母角标 + 文件名/路径 + 增删行统计。
+.codeChangeCard {
+  border: 1px solid #dfe6f0;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.codeChangeHeader {
+  min-height: 46px;
+  padding: 10px 14px;
+  border-bottom: 1px solid #edf1f7;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.codeChangeHeaderMain {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+
+  strong {
+    font-size: 14px;
+    font-weight: 700;
+    color: #1f2633;
+    white-space: nowrap;
+  }
+}
+
+.codeChangeBranch {
+  font-size: 12px;
+  color: #728096;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+// 分支名可点时超链到 GitHub 比对页,复用分支样式,仅加交互色。
+.codeChangeBranchLink {
+  cursor: pointer;
+
+  &:hover {
+    color: #246bfe;
+    text-decoration: underline;
+  }
+}
+
+.codeChangeCount {
+  min-width: 22px;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 10px;
+  background: #eef2f7;
+  color: #52607a;
+  font-size: 12px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.codeChangeEmpty {
+  padding: 22px 14px;
+  text-align: center;
+  color: #8a96a8;
+  font-size: 13px;
+}
+
+.codeChangeList {
+  display: flex;
+  flex-direction: column;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.codeChangeItem {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 10px;
+  padding: 8px 14px;
+  color: inherit;
+
+  &:not(:last-child) {
+    border-bottom: 1px solid #f2f5f9;
+  }
+
+  &:hover {
+    background: #f5f7fa;
+  }
+}
+
+// 可点击行(带 blobUrl)本身是 <a>,去掉链接默认下划线/配色,交互沿用悬浮底色。
+.codeChangeItemLink {
+  cursor: pointer;
+  text-decoration: none;
+
+  &:hover {
+    text-decoration: none;
+    color: inherit;
+  }
+}
+
+.codeChangeBadge {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.fileChangeAdded {
+  color: #1c9b68;
+  background: #eaf8f0;
+}
+
+.fileChangeModified {
+  color: #b7791f;
+  background: #fdf3e0;
+}
+
+.fileChangeRemoved {
+  color: #d9432f;
+  background: #fdeceb;
+}
+
+.fileChangeRenamed {
+  color: #246bfe;
+  background: #eaf2ff;
+}
+
+.codeChangeInfo {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.codeChangeName {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1f2633;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.codeChangePath {
+  font-size: 12px;
+  color: #8a96a8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.codeChangeStat {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+}
+
+.codeChangeAdd {
+  color: #1c9b68;
+}
+
+.codeChangeDel {
+  color: #d9432f;
 }
 
 .detailResourceBlock {
@@ -1916,29 +2226,6 @@
   }
 }
 
-// 需求详情内容较长时只滚动弹窗主体，避免页面跟随产生滚动。
-.requirementDetailModal {
-  :global {
-    .@{antPrefix}-modal-content {
-      max-height: calc(100vh - 96px);
-      display: flex;
-      flex-direction: column;
-    }
-
-    .@{antPrefix}-modal-header,
-    .@{antPrefix}-modal-footer {
-      flex-shrink: 0;
-    }
-
-    .@{antPrefix}-modal-body {
-      min-height: 0;
-      max-height: calc(100vh - 260px);
-      overflow-y: auto;
-      padding-right: 20px;
-    }
-  }
-}
-
 .sourceRepoAddButton {
   width: auto;
   min-width: 78px;
@@ -2033,6 +2320,26 @@
 }
 
 /* 整体任务视图看板样式（只读） */
+.kanbanToolbar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 16px;
+  min-height: 56px;
+  padding: 10px 20px;
+  background: #fff;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.kanbanToolbarSummary {
+  margin-right: auto;
+  color: #595959;
+  font-size: 14px;
+}
+
 .kanbanBoard {
   display: flex;
   gap: 16px;
@@ -2154,11 +2461,35 @@
   }
 }
 
+/* 任务详情复用需求详情的抽屉层级、背景色和信息卡规范。 */
+.taskDetailDrawer {
+  :global {
+    .@{antPrefix}-drawer-body {
+      padding: 16px;
+      background: #f7f9fc;
+    }
+  }
+}
+
+.taskDetailDrawerContent {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.taskDetailTitle {
+  color: #1f2633;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 24px;
+  word-break: break-word;
+}
+
 /* 任务详情 - Agent 执行概览 */
 .taskHero {
   padding: 16px;
-  border-radius: 10px;
-  background: linear-gradient(135deg, #eef4ff 0%, #f7f9ff 100%);
+  border-radius: 8px;
+  background: #f7f9fc;
 }
 
 .taskHeroAgent {
@@ -2170,12 +2501,15 @@
   small {
     display: block;
     font-size: 12px;
-    color: rgba(0, 0, 0, 0.45);
+    line-height: 18px;
+    color: #8a96a8;
   }
 
   strong {
     font-size: 16px;
-    color: rgba(0, 0, 0, 0.88);
+    font-weight: 600;
+    line-height: 24px;
+    color: #344056;
   }
 }
 
@@ -2196,14 +2530,14 @@
 .taskHeroTrack {
   height: 8px;
   border-radius: 4px;
-  background: rgba(22, 119, 255, 0.15);
+  background: #dce9ff;
   overflow: hidden;
 
   span {
     display: block;
     height: 100%;
     border-radius: 4px;
-    background: #1677ff;
+    background: #246bfe;
     transition: width 0.3s;
   }
 }
@@ -2211,45 +2545,52 @@
 .taskHeroProgress p {
   margin: 8px 0 0;
   font-size: 13px;
-  color: rgba(0, 0, 0, 0.65);
+  line-height: 20px;
+  color: #526075;
 }
 
 /* 任务详情 - 执行上下文网格 */
 .taskContextGrid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
 }
 
 .taskContextItem {
-  padding: 10px 12px;
-  border: 1px solid #f0f0f0;
-  border-radius: 8px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 
   label {
-    display: block;
     font-size: 12px;
-    color: rgba(0, 0, 0, 0.45);
-    margin-bottom: 4px;
+    line-height: 18px;
+    color: #8a96a8;
   }
 
   strong {
-    font-size: 14px;
-    color: rgba(0, 0, 0, 0.85);
-    word-break: break-all;
+    font-size: 13px;
+    font-weight: 400;
+    line-height: 20px;
+    color: #344056;
+    word-break: break-word;
   }
 }
 
 /* 任务详情 - 研发环节竖向流程 */
 .phaseSection {
-  margin-top: 24px;
+  padding: 14px;
+  border: 1px solid #e6ebf2;
+  border-radius: 8px;
+  background: #fff;
 }
 
 .phaseSectionTitle {
   margin: 0 0 12px;
   font-size: 14px;
   font-weight: 600;
-  color: rgba(0, 0, 0, 0.85);
+  line-height: 20px;
+  color: #344056;
 }
 
 .phaseFlow {
@@ -2272,7 +2613,7 @@
     top: 34px;
     bottom: -10px;
     width: 2px;
-    background: #f0f0f0;
+    background: #e6ebf2;
   }
 }
 
@@ -2298,12 +2639,13 @@
 
   strong {
     font-size: 14px;
-    color: rgba(0, 0, 0, 0.85);
+    font-weight: 600;
+    color: #344056;
   }
 
   small {
     font-size: 12px;
-    color: rgba(0, 0, 0, 0.45);
+    color: #8a96a8;
   }
 }
 
@@ -2343,103 +2685,15 @@
 
 .kickbackRound {
   font-size: 12px;
-  color: rgba(0, 0, 0, 0.45);
+  color: #8a96a8;
 }
 
 .kickbackReason {
   font-size: 12px;
-  color: rgba(0, 0, 0, 0.65);
+  color: #526075;
 }
 
-/* 任务卡片展开区 - 研发环节横向概要 */
-.detailTaskPhaseSummary {
-  grid-column: 1 / -1;
-  padding: 8px 10px;
-  margin-bottom: 6px;
-  border-radius: 8px;
-  background: rgba(0, 0, 0, 0.02);
-}
-
-.detailTaskPhaseHeader {
+.taskDetailAction {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 8px;
-
-  label {
-    font-size: 12px;
-    color: rgba(0, 0, 0, 0.45);
-  }
-
-  span {
-    font-size: 12px;
-    color: #1677ff;
-  }
-}
-
-.phaseMiniFlow {
-  display: flex;
-  align-items: flex-start;
-  // 拉开研发环节节点，避免环节名称彼此贴在一起。
-  column-gap: 8px;
-  overflow-x: auto;
-}
-
-.phaseMiniLine {
-  flex: 1;
-  min-width: 12px;
-  height: 2px;
-  margin-top: 11px;
-  background: #e8e8e8;
-}
-
-.phaseMiniNode {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 3px;
-  flex-shrink: 0;
-
-  em {
-    width: 22px;
-    height: 22px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 11px;
-    font-style: normal;
-    font-weight: 600;
-    color: #fff;
-    background: #d9d9d9;
-  }
-
-  i {
-    font-size: 11px;
-    font-style: normal;
-    line-height: 1;
-    color: rgba(0, 0, 0, 0.45);
-    white-space: nowrap;
-  }
-}
-
-.phaseMiniDone em {
-  background: #52c41a;
-}
-
-.phaseMiniActive em {
-  background: #1677ff;
-}
-
-.phaseMiniRejected em {
-  background: #ff4d4f;
-}
-
-.phaseMiniWaiting em {
-  background: #d9d9d9;
-}
-
-.phaseMiniCurrent i {
-  color: #1677ff;
-  font-weight: 600;
+  justify-content: center;
 }

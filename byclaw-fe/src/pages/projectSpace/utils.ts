@@ -1,3 +1,4 @@
+import { sessionHandler } from '@/utils/session';
 import type { ProjectSession, ProjectShareTarget, ProjectSpace } from './types';
 
 export const getArrayData = (response: any): any[] => {
@@ -13,13 +14,26 @@ const getObjectData = (response: any): any => {
   return response?.data && !Array.isArray(response.data) ? response.data : response;
 };
 
-export const normalizeProjectSession = (item: any, projectId?: string): ProjectSession => ({
-  ...item,
-  // 后端 Long 到前端统一转字符串，避免项目会话高亮、跳转时出现数字/字符串不匹配。
-  projectId: `${item?.projectId || projectId || ''}`,
-  sessionId: `${item?.sessionId || ''}`,
-  sessionName: item?.sessionName || '',
-});
+export const normalizeProjectSession = (item: any, projectId?: string): ProjectSession => {
+  const normalizedProjectId = `${item?.projectId || projectId || ''}`;
+  const normalizedSessionId = `${item?.sessionId || ''}`;
+
+  // 与旧会话列表共用头像兜底逻辑，缺少头像时展示会话默认图而非通用人员头像。
+  const session = sessionHandler({
+    ...item,
+    projectId: normalizedProjectId,
+    sessionId: normalizedSessionId,
+    sessionName: item?.sessionName || '',
+  } as any);
+
+  return {
+    ...session,
+    // 后端 Long 到前端统一转字符串，避免项目会话高亮、跳转时出现数字/字符串不匹配。
+    projectId: normalizedProjectId,
+    sessionId: normalizedSessionId,
+    sessionName: item?.sessionName || '',
+  } as ProjectSession;
+};
 
 const normalizeShareTarget = (item: any): ProjectShareTarget => {
   const type = item?.type || item?.targetType || item?.grantToObjType || 'USER';

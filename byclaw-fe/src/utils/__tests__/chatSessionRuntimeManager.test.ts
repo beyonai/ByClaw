@@ -19,6 +19,24 @@ describe('utils/chatSessionRuntimeManager', () => {
     expect(chatSessionRuntimeManager.isSessionRunning('s1')).toBe(false);
   });
 
+  it('keeps the pending session state while it is replaced with the real session', () => {
+    chatSessionRuntimeManager.register({
+      clientRequestId: 'client-req-1',
+      sessionId: 'pending_client-req-1',
+      restored: false,
+    });
+
+    // 项目列表替换临时会话项与 createSession 事件不是同一时刻，期间两个 ID 都应显示回答中。
+    chatSessionRuntimeManager.bindSession('client-req-1', 's1');
+
+    expect(chatSessionRuntimeManager.isSessionRunning('pending_client-req-1')).toBe(true);
+    expect(chatSessionRuntimeManager.isSessionRunning('s1')).toBe(true);
+
+    chatSessionRuntimeManager.complete('client-req-1');
+    expect(chatSessionRuntimeManager.isSessionRunning('pending_client-req-1')).toBe(false);
+    expect(chatSessionRuntimeManager.isSessionRunning('s1')).toBe(false);
+  });
+
   it('hydrates restored running state from backend status', () => {
     chatSessionRuntimeManager.hydrateRunning({
       sessionId: 's1',
@@ -60,6 +78,26 @@ describe('utils/chatSessionRuntimeManager', () => {
     expect(runtimeInfo?.restored).toBe(false);
     expect(runtimeInfo?.traceId).toBe('q1_a1');
     expect(runtimeInfo?.answerMessageId).toBe('a1');
+  });
+
+  it('keeps a local stream active when the backend running status is temporarily stale', () => {
+    chatSessionRuntimeManager.register({
+      clientRequestId: 'local-1',
+      sessionId: 's1',
+      restored: false,
+    });
+
+    // 首轮流式回答建立后，运行状态接口可能暂时还未返回 running=true。
+    chatSessionRuntimeManager.hydrateRunning({
+      sessionId: 's1',
+      running: false,
+      clientRequestId: 'local-1',
+    });
+
+    expect(chatSessionRuntimeManager.isSessionRunning('s1')).toBe(true);
+
+    chatSessionRuntimeManager.complete('local-1');
+    expect(chatSessionRuntimeManager.isSessionRunning('s1')).toBe(false);
   });
 
   it('tracks the last applied stream id for restored sessions', () => {

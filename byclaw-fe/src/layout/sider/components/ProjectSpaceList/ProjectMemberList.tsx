@@ -240,43 +240,52 @@ const ProjectMemberList: React.FC<ProjectMemberListProps> = ({ projectId, creato
 
       <Spin spinning={loading}>
         {members.length === 0 ? (
-          <Empty description="暂无成员" />
+          // 成员空态与需求 Tab 统一使用简洁图标，保持项目详情各列表的视觉一致。
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无成员" />
         ) : (
-          <List
-            dataSource={members}
-            renderItem={(member: any) => {
-              const memberKey = getMemberKey(member);
-              const isCreatorMember = isProjectOwnerMember(member, creatorId);
-              return (
-                <List.Item
-                  className="project-member-row"
-                  onMouseEnter={() => setHoveredMemberKey(memberKey)}
-                  onMouseLeave={() => {
-                    if (openActionMemberKey !== memberKey) {
-                      setHoveredMemberKey(undefined);
-                    }
-                  }}
-                >
-                  <List.Item.Meta
-                    avatar={<div className="project-member-avatar">{getMemberAvatarText(member)}</div>}
-                    title={
-                      <span className="project-member-title">
-                        <span className="project-member-name">{member.userName || member.userId}</span>
-                        {/* 创建者标签紧跟成员名称展示，和禁删判断使用同一套规则。 */}
-                        {isCreatorMember && (
-                          <Tag className="project-member-role-tag" color="blue">
-                            创建者
-                          </Tag>
-                        )}
-                      </span>
-                    }
-                    description={<span>{member.agentName || '未绑定数字员工'}</span>}
-                  />
-                  {renderMemberActionMenu(member)}
-                </List.Item>
-              );
-            }}
-          />
+          <>
+            {/* 成员列表复用任务 Tab 的无分隔线紧凑行样式。 */}
+            <List
+              split={false}
+              dataSource={members}
+              renderItem={(member: any) => {
+                const memberKey = getMemberKey(member);
+                const isCreatorMember = isProjectOwnerMember(member, creatorId);
+                return (
+                  <List.Item
+                    className="project-member-row"
+                    onMouseEnter={() => setHoveredMemberKey(memberKey)}
+                    onMouseLeave={() => {
+                      if (openActionMemberKey !== memberKey) {
+                        setHoveredMemberKey(undefined);
+                      }
+                    }}
+                  >
+                    <List.Item.Meta
+                      avatar={<div className="project-member-avatar">{getMemberAvatarText(member)}</div>}
+                      title={
+                        <span className="project-member-title">
+                          <span className={`${styles.projectMemberName} project-member-name`}>
+                            {member.userName || member.userId}
+                          </span>
+                          {/* 创建者标签紧跟成员名称展示，和禁删判断使用同一套规则。 */}
+                          {isCreatorMember && (
+                            <Tag className="project-member-role-tag" color="blue">
+                              创建者
+                            </Tag>
+                          )}
+                        </span>
+                      }
+                      description={
+                        <span className={styles.projectMemberDescription}>{member.agentName || '未绑定数字员工'}</span>
+                      }
+                    />
+                    {renderMemberActionMenu(member)}
+                  </List.Item>
+                );
+              }}
+            />
+          </>
         )}
       </Spin>
 

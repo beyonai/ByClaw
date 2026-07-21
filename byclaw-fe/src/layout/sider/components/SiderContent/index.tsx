@@ -5,7 +5,6 @@ import classnames from 'classnames';
 import useVisibleMenuKeys from '../../useVisibleMenuKeys';
 import styles from './index.module.less';
 
-const DialogueList = lazy(() => import('@/layout/sider/components/DialogueList'));
 const ProjectSpaceList = lazy(() => import('@/layout/sider/components/ProjectSpaceList'));
 const EmployeeList = lazy(() => import('@/layout/sider/components/EmployeeList'));
 const Knowledge = lazy(() => import('@/layout/sider/components/Knowledge'));
@@ -27,8 +26,10 @@ export const tabItems: any[] = [
     icon: 'icon-cebianlan-duihuajilu',
     activeIcon: 'icon-huihua-fill',
     label: 'sider.session',
-    ChildComponent: DialogueList,
+    // 会话入口统一展示按项目归属分组的会话列表，避免与独立项目入口重复。
+    ChildComponent: ProjectSpaceList,
     navigatePath: '/chat',
+    forceRender: true,
   },
   {
     key: 'agent',
@@ -37,14 +38,6 @@ export const tabItems: any[] = [
     label: 'employees.title',
     ChildComponent: EmployeeList,
     navigatePath: '/digitalEmployees',
-  },
-  {
-    key: 'projectSpace',
-    icon: 'icon-cebianlan',
-    activeIcon: 'icon-cebianlan',
-    label: 'sider.projectSpace',
-    ChildComponent: ProjectSpaceList,
-    navigatePath: '/chat',
   },
   {
     key: 'searchAndQuery',

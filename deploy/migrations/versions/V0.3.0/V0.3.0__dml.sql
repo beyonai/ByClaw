@@ -101,3 +101,45 @@ ${transcript}
 - 严格用如下结构：
 
 {"currentPhase":"coder","round":1,"phases":[{"key":"issue","status":"done"},{"key":"req","status":"done"},{"key":"design","status":"done"},{"key":"coder","status":"running"},{"key":"reviewer","status":"pending"},{"key":"tester","status":"pending"},{"key":"pr","status":"pending"}],"kickbacks":[]}', '研发闭环环节抽取提示词，占位符 ${transcript}，要求模型返回环节状态JSON');
+
+
+-- 研发闭环：单个数字员工并发运行任务上限（负载均衡自动派发用）
+-- 存于 byai_system_config，param_code=DEVLOOP_AGENT_MAX_CONCURRENT，默认 1
+-- 某 agent 在跑任务数达到该值则本轮不再接新任务，避免一股脑丢给 codeagent 导致 OOM
+delete from byai.byai_system_config where param_code in ('DEVLOOP_AGENT_MAX_CONCURRENT');
+INSERT INTO byai.byai_system_config (param_id, param_type, param_code, param_name, param_en_name, param_value, param_desc)
+VALUES (nextval('byai.seq_any_table'), 'txt', 'DEVLOOP_AGENT_MAX_CONCURRENT', '数字员工并发任务上限', 'DEVLOOP_AGENT_MAX_CONCURRENT', '1', '研发闭环自动派发时，单个数字员工同时进行中的任务数上限，默认1，超过则本轮跳过该员工');
+
+
+-- 研发闭环：需求「拆分+评分」合并提示词（一次 LLM 调用完成拆分与打分）
+-- 存于 byai_system_config，param_code=DEVLOOP_REQUIREMENT_SPLIT_SCORE_PROMPT，可在线调整
+-- 占位符：${title} ${content}；模型须返回 {"requirements":[{title,content,各维度分,summary}]}
+delete from byai.byai_system_config where param_code in ('DEVLOOP_REQUIREMENT_SPLIT_SCORE_PROMPT');
+INSERT INTO byai.byai_system_config (param_id, param_type, param_code, param_name, param_en_name, param_value, param_desc)
+VALUES (nextval('byai.seq_any_table'), 'txt', 'DEVLOOP_REQUIREMENT_SPLIT_SCORE_PROMPT', '研发需求拆分+评分提示词', 'DEVLOOP_REQUIREMENT_SPLIT_SCORE_PROMPT', '你是资深产品与研发评审专家。下面是一条从群消息/Issue 收集到的候选需求，可能包含多个相互独立的需求，也可能只是一个需求。请先判断是否需要拆分，再对每个独立需求多维度打分。
+
+## 待评估内容
+标题：${title}
+内容：${content}
+
+## 拆分规则
+- 仅当内容里确实包含多个「相互独立、可分别交付」的需求时才拆分；一个需求的多个步骤/细节不要拆开。
+- 最多拆 5 个；无法明确拆分时按 1 个处理（原样返回一条）。
+- 每个子需求给出清晰的 title（简短）和 content（自包含、不依赖其它子需求也能理解）。
+
+## 评分维度与分值上限（对每个子需求分别打分）
+- businessValue 业务价值（0-30）
+- userImpact 用户影响（0-20）
+- urgency 紧迫度（0-15）
+- strategyFit 战略匹配（0-15）
+- feasibility 实现可行性（0-10）
+- reuseValue 复用价值（0-10）
+- risk 风险与冲突（-10-0，负分扣减）
+
+## 输出要求
+- 只输出一个 JSON 对象，不要任何解释、不要 markdown 代码块。
+- requirements 为数组，每个元素含 title、content 及各维度整数分与 summary（一句话概括该需求要交付的能力）。
+- 不拆分时 requirements 只含 1 个元素。
+- 严格用如下结构：
+
+{"requirements":[{"title":"","content":"","businessValue":0,"userImpact":0,"urgency":0,"strategyFit":0,"feasibility":0,"reuseValue":0,"risk":0,"summary":""}]}', '研发闭环拆分+评分提示词，占位符 ${title} ${content}，要求模型返回 requirements 数组');

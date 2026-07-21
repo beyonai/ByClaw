@@ -20,7 +20,6 @@ import Icon from '@/components/AntdIcon/icon';
 import Feedback from '../header/components/Feedback';
 import useUserDropdown from '../header/useUserDropdown';
 import SiderSearch from './siderSearch';
-import useNewChat from '../header/components/NewChat/useNewChat';
 import { getDisplayUserNameInChat } from '@/utils/chat';
 import useGlobal from '@/hooks/useGlobal';
 import { clearEasyConfirmInputDraft } from '@/components/ChatLayoutComp/components/EasyConfirm';
@@ -101,8 +100,6 @@ const Sidebar = () => {
     return DEFAULT_SIDER_CONTENT_WIDTH;
   });
 
-  const handleNewChat = useNewChat();
-
   const handleMenuTabClick = React.useCallback(
     (tab: (typeof tabItems)[number]) => {
       const isChatPage = isChatPanelPath(pathname);
@@ -121,14 +118,6 @@ const Sidebar = () => {
       if (tab.key === 'sessions') {
         if (!isChatPage && pathname !== tab.navigatePath) {
           navigate(tab.navigatePath);
-        }
-        return;
-      }
-
-      if (tab.key === 'projectSpace') {
-        if (!isChatPage && pathname !== tab.navigatePath) {
-          // 项目空间复用右侧聊天页，路由切换后仍保持左侧项目空间列表激活。
-          navigate(tab.navigatePath, { state: { keepSiderActiveKey: 'projectSpace' } });
         }
         return;
       }
@@ -325,7 +314,8 @@ const Sidebar = () => {
             onClick={() => {
               clearDetailPanel?.();
               clearEasyConfirmInputDraft();
-              handleNewChat();
+              // 项目会话组件持有当前下拉选中的项目，由它带 projectId 创建会话。
+              EventEmitter.emit('projectSpace-create-session');
             }}
           >
             <Icon type="icon-xinjianduihua-fill" style={{ color: token.colorPrimary }} />
