@@ -27,6 +27,9 @@ public class LocalGitChangeService {
     /** 单条 git 命令最长等待秒数,防止卡死拖垮请求线程。 */
     private static final int GIT_TIMEOUT_SECONDS = 20;
 
+    /** git 空树对象哈希(恒定值):基线分支不存在时对它 diff,把 HEAD 已提交内容全列为新增。它是 tree 非 commit。 */
+    private static final String EMPTY_TREE_HASH = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+
     /** 本地变更结果状态:闭合取值,前端据此区分空态。 */
     public enum LocalStatus {
         /** 成功取到本地变更 */
@@ -130,8 +133,15 @@ public class LocalGitChangeService {
         if (refExists(dir, baseBranch)) {
             return baseBranch;
         }
-        // git 空树对象哈希,恒定值;对它 diff 等于"相对空仓库",把工作区已 commit 内容全列为新增。
-        return "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+        return EMPTY_TREE_HASH;
+    }
+
+    /**
+     * 构造 diff 范围:普通分支用 base...HEAD(基于 merge-base 的对称差,只算任务分支引入的改动);
+     * 空树哈希是 tree 非 commit,不支持三点(merge-base)语法,必须用两点 base..HEAD 直接 diff。
+     */
+    private String diffRange(String baseRef) {
+        return EMPTY_TREE_HASH.equals(baseRef) ? baseRef + "..HEAD" : baseRef + "...HEAD";
     }
 
     private boolean refExists(File dir, String ref) {
@@ -149,10 +159,19 @@ public class LocalGitChangeService {
         }
     }
 
-    /** git diff --numstat {base}...HEAD:解析每个文件的增删行与重命名。 */
+    /**
+     * git diff {base}...HEAD 的已提交变更:--name-status 拿变更类型(A/M/D/R),--numstat 拿增删行,按文件名合并。
+     * numstat 本身不带类型,单用它所有文件都会被当成 modified,故必须叠加 name-status。
+     */
     private void collectNumstat(File dir, String baseRef, Map<String, LocalFileChange> out) throws Exception {
-        String output = runGit(dir, "diff", "--numstat", "-M", baseRef + "...HEAD");
-        for (String line : output.split("\n")) {
+        // 1) 类型 + 增删行分别取,再按新路径合并。
+        Map<String, String> statusByFile = new LinkedHashMap<>();
+        Map<String, String> previousByFile = new LinkedHashMap<>();
+        String range = diffRange(baseRef);
+        parseNameStatus(runGit(dir, "diff", "--name-status", "-M", range), statusByFile, previousByFile);
+
+        String numstat = runGit(dir, "diff", "--numstat", "-M", range);
+        for (String line : numstat.split("\n")) {
             String row = line.trim();
             if (row.isEmpty()) {
                 continue;
@@ -165,16 +184,49 @@ public class LocalGitChangeService {
             int additions = parseCount(parts[0]);
             int deletions = parseCount(parts[1]);
             String rawPath = parts[2];
-            String filename = rawPath;
-            String previousFilename = null;
-            String status = "modified";
-            if (rawPath.contains("=>")) {
-                // a/{old => new}/b 或 old => new,统一取箭头两侧拼出新旧路径。
-                previousFilename = normalizeRename(rawPath, true);
-                filename = normalizeRename(rawPath, false);
-                status = "renamed";
-            }
+            String filename = rawPath.contains("=>") ? normalizeRename(rawPath, false) : rawPath;
+            String previousFilename = previousByFile.get(filename);
+            // 类型以 name-status 为准;缺失(理论不会)兜底 modified。
+            String status = statusByFile.getOrDefault(filename, "modified");
             out.put(filename, new LocalFileChange(filename, status, additions, deletions, previousFilename));
+        }
+    }
+
+    /** 解析 git diff --name-status:首列状态码(A/M/D/R###/C###),映射为 added/modified/removed/renamed/copied。 */
+    private void parseNameStatus(String output, Map<String, String> statusByFile, Map<String, String> previousByFile) {
+        for (String line : output.split("\n")) {
+            if (line.trim().isEmpty()) {
+                continue;
+            }
+            String[] parts = line.split("\t");
+            if (parts.length < 2) {
+                continue;
+            }
+            char code = parts[0].charAt(0);
+            switch (code) {
+                case 'A':
+                    statusByFile.put(parts[1], "added");
+                    break;
+                case 'D':
+                    statusByFile.put(parts[1], "removed");
+                    break;
+                case 'R':
+                    // R{score}\t{old}\t{new}
+                    if (parts.length >= 3) {
+                        statusByFile.put(parts[2], "renamed");
+                        previousByFile.put(parts[2], parts[1]);
+                    }
+                    break;
+                case 'C':
+                    if (parts.length >= 3) {
+                        statusByFile.put(parts[2], "copied");
+                        previousByFile.put(parts[2], parts[1]);
+                    }
+                    break;
+                default:
+                    statusByFile.put(parts[1], "modified");
+                    break;
+            }
         }
     }
 
@@ -249,15 +301,25 @@ public class LocalGitChangeService {
         return trimmed;
     }
 
-    /** 在工作区目录同步执行一条 git 命令,合并 stderr,超时强杀,返回 stdout 文本。 */
+    /**
+     * 在工作区目录同步执行一条 git 命令,超时强杀,返回 stdout 文本。
+     * stderr 单独读取、不混入 stdout(否则 git 的 fatal 提示会被当成变更行解析);退出码非 0 时抛异常带上 stderr。
+     */
     private String runGit(File dir, String... args) throws Exception {
         Process process = newGit(dir, args).start();
-        StringBuilder output = new StringBuilder();
-        try (BufferedReader reader = new BufferedReader(
-            new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+        // stdout 与 stderr 分开读:stdout 才是可解析数据,stderr 仅用于报错。
+        StringBuilder stdout = new StringBuilder();
+        StringBuilder stderr = new StringBuilder();
+        try (BufferedReader out = new BufferedReader(
+            new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8));
+            BufferedReader err = new BufferedReader(
+                new InputStreamReader(process.getErrorStream(), StandardCharsets.UTF_8))) {
             String line;
-            while ((line = reader.readLine()) != null) {
-                output.append(line).append('\n');
+            while ((line = out.readLine()) != null) {
+                stdout.append(line).append('\n');
+            }
+            while ((line = err.readLine()) != null) {
+                stderr.append(line).append('\n');
             }
         }
         boolean finished = process.waitFor(GIT_TIMEOUT_SECONDS, TimeUnit.SECONDS);
@@ -265,18 +327,26 @@ public class LocalGitChangeService {
             process.destroyForcibly();
             throw new IllegalStateException("git 命令超时: " + String.join(" ", args));
         }
-        return output.toString();
+        if (process.exitValue() != 0) {
+            // 非 0 退出(如 dubious ownership、非法 ref):抛异常带 stderr,由上层收敛为 GIT_ERROR,不把错误文本当数据。
+            throw new IllegalStateException(
+                "git " + String.join(" ", args) + " 失败: " + stderr.toString().trim());
+        }
+        return stdout.toString();
     }
 
     private ProcessBuilder newGit(File dir, String... args) {
         List<String> cmd = new ArrayList<>();
         cmd.add("git");
+        // 绕过 dubious ownership:NFS 工作区属主(如 uid 999)与运行进程用户(容器内 appuser)常不一致,
+        // 否则 git 拒绝在该目录操作。只读 diff/status 无写入风险,对全部路径放行。
+        cmd.add("-c");
+        cmd.add("safe.directory=*");
         for (String a : args) {
             cmd.add(a);
         }
         ProcessBuilder pb = new ProcessBuilder(cmd);
         pb.directory(dir);
-        pb.redirectErrorStream(true);
         return pb;
     }
 }
