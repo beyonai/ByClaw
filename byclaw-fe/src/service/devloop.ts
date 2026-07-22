@@ -244,6 +244,8 @@ export const getTaskDetail = (sessionId: number) => POST<any>('/byaiService/devl
 // status: ok | no_repo | no_token | branch_not_found | http_error；files 每项含 filename/status/additions/deletions/previousFilename。
 export type DevloopTaskChanges = {
   status: 'ok' | 'no_repo' | 'no_token' | 'branch_not_found' | 'http_error';
+  // 变更来源:local=读宿主机工作区 git(含未推送/未提交),remote=GitHub 远程 compare(仅已推送)。
+  source?: 'local' | 'remote';
   repoFullName?: string | null;
   baseBranch?: string | null;
   headBranch?: string | null;

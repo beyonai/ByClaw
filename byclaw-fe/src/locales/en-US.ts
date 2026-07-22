@@ -1618,7 +1618,8 @@ export default {
   'projectSpace.detail.codeChanges.unavailable': 'Code changes are unavailable for now',
   'projectSpace.detail.codeChanges.noRepository': 'This task is not linked to a repository',
   'projectSpace.detail.codeChanges.noToken': 'No GitHub access token is configured to read remote branch changes',
-  'projectSpace.detail.codeChanges.branchNotFound': 'The remote branch “{branch}” has not been created yet. View changes after the agent pushes it.',
+  'projectSpace.detail.codeChanges.branchNotFound':
+    'The remote branch “{branch}” has not been created yet. View changes after the agent pushes it.',
   'projectSpace.detail.codeChanges.noChanges': 'This branch has no file changes compared with its base',
   'projectSpace.detail.codeChanges.openInGitHub': 'View this comparison on GitHub',
   'projectSpace.detail.codeChanges.status.added': 'Added',
@@ -1626,6 +1627,7 @@ export default {
   'projectSpace.detail.codeChanges.status.removed': 'Removed',
   'projectSpace.detail.codeChanges.status.renamed': 'Renamed',
   'projectSpace.detail.codeChanges.status.copied': 'Copied',
+  'projectSpace.detail.codeChanges.localBadge': 'Incl. unpushed',
   'projectSpace.detail.repository.modalTitle': 'Manage Project Repositories',
   'projectSpace.detail.repository.field.existing': 'Existing Repositories',
   'projectSpace.detail.repository.field.fullName': 'Repository Full Name (owner/repo)',

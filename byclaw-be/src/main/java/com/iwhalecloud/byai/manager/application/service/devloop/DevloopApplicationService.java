@@ -64,6 +64,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.http.MediaTypeFactory;
 import org.springframework.stereotype.Service;
@@ -74,6 +75,8 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.io.ByteArrayOutputStream;
 
 import java.io.InputStream;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.Executor;
 
@@ -85,6 +88,13 @@ import java.util.concurrent.Executor;
 public class DevloopApplicationService {
 
     private static final Logger logger = LoggerFactory.getLogger(DevloopApplicationService.class);
+
+    /** 本地文件存储根(NFS 挂载点),与 LocalStorageService 同源配置;用于拼会话工作区绝对路径读本地 git 变更。 */
+    @Value("${file.storage.local.path:${byclaw.sandbox.volume.file-root:/tmp/byclaw-storage}}")
+    private String fileStorageRoot;
+
+    /** 会话私有工作区目录名,即 {bucket}/by/.sessions 里的 by 段,与前端会话空间口径一致。 */
+    private static final String SESSION_WORKSPACE_SEGMENT = "by/.sessions";
 
     private static final String DELETE_FLAG_NORMAL = "0";
 
@@ -170,6 +180,9 @@ public class DevloopApplicationService {
 
     @Autowired
     private GitHubCompareService gitHubCompareService;
+
+    @Autowired
+    private LocalGitChangeService localGitChangeService;
 
     @Autowired
     private SsResourceMapper ssResourceMapper;
@@ -1396,9 +1409,10 @@ public class DevloopApplicationService {
     }
 
     /**
-     * 查询任务代码变更:目标分支相对仓库默认分支的文件变更列表(远程分支口径)。
-     * base=仓库 defaultBranch(默认 main),head=任务分支(与详情同口径 buildBranchName),token 取任务创建者的 PAT。
-     * TODO(本地分支): codeagent 容器内未 push 的本地改动后端不可达,目前仅覆盖远程已 push 分支;后续若 exe 层能回报本地 diff 再补。
+     * 查询任务代码变更:本地优先,远程兜底。
+     * 本地=直接读宿主机会话工作区的 git 仓库跑 git diff,含未 push/未 commit 的最新改动;
+     * 工作区不存在或不是 git 仓库时,回退到 GitHubCompareService 的远程 compare(仅覆盖已 push 分支)。
+     * base=仓库 defaultBranch(默认 main),head=任务分支(与详情同口径 buildBranchName)。
      */
     public ResponseUtil<Map<String, Object>> getTaskChanges(Long sessionId) {
         if (sessionId == null) {
@@ -1408,19 +1422,107 @@ public class DevloopApplicationService {
         if (s == null) {
             return ResponseUtil.failRes("会话不存在");
         }
-        // 与 resolveTaskContext 同口径:需求项 -> 源.repoId -> 仓库;手动任务取项目首个仓库兜底。
-        ScanLogItem item = scanLogItemMapper
-            .selectOne(new LambdaQueryWrapper<ScanLogItem>().eq(ScanLogItem::getSessionId, sessionId).last("limit 1"));
-        ProjectRepo repo = resolveTaskRepo(s.getProjectId(), item);
-        String repoFullName = repo != null ? repo.getRepoFullName() : null;
-        String baseBranch = repo != null && repo.getDefaultBranch() != null && !repo.getDefaultBranch().isEmpty()
-            ? repo.getDefaultBranch() : "main";
-        String headBranch = buildBranchName(detectTaskType(item, s.getSessionName()), sessionId);
-        String pat = patService.getGitHubPat(s.getCreatorId() != null ? String.valueOf(s.getCreatorId()) : null);
+        // 代码变更是只读展示,任何本地/远程异常都不抛前端:顶层兜底,失败返回 http_error 空态并记日志。
+        try {
+            // 与 resolveTaskContext 同口径:需求项 -> 源.repoId -> 仓库;手动任务取项目首个仓库兜底。
+            ScanLogItem item = scanLogItemMapper.selectOne(
+                new LambdaQueryWrapper<ScanLogItem>().eq(ScanLogItem::getSessionId, sessionId).last("limit 1"));
+            ProjectRepo repo = resolveTaskRepo(s.getProjectId(), item);
+            String repoFullName = repo != null ? repo.getRepoFullName() : null;
+            String baseBranch = repo != null && repo.getDefaultBranch() != null && !repo.getDefaultBranch().isEmpty()
+                ? repo.getDefaultBranch() : "main";
+            String headBranch = buildBranchName(detectTaskType(item, s.getSessionName()), sessionId);
 
-        GitHubCompareService.CompareResult result = gitHubCompareService.compare(repoFullName, baseBranch, headBranch,
-            pat);
-        return ResponseUtil.successResponse(compareResultToMap(result));
+            // 本地优先:能定位到工作区 git 仓库就用本地 diff(最新、含未 push)。本地采集自身已兜底,再包一层防未捕获异常。
+            Path workspaceDir = resolveSessionWorkspace(s, repoFullName);
+            if (workspaceDir != null) {
+                try {
+                    LocalGitChangeService.LocalChangeResult local = localGitChangeService.collectChanges(workspaceDir,
+                        baseBranch);
+                    if (local.getStatus() == LocalGitChangeService.LocalStatus.OK) {
+                        return ResponseUtil.successResponse(localResultToMap(local, repoFullName));
+                    }
+                    log.info("[Devloop] 本地工作区变更不可用({}),回退远程 compare, sessionId={}", local.getStatus(), sessionId);
+                }
+                catch (Exception e) {
+                    log.warn("[Devloop] 本地 git 变更采集异常,回退远程 compare, sessionId={}", sessionId, e);
+                }
+            }
+
+            // 兜底:远程 compare,需要任务创建者的 GitHub PAT。
+            String pat = patService.getGitHubPat(s.getCreatorId() != null ? String.valueOf(s.getCreatorId()) : null);
+            GitHubCompareService.CompareResult result = gitHubCompareService.compare(repoFullName, baseBranch,
+                headBranch, pat);
+            return ResponseUtil.successResponse(compareResultToMap(result));
+        }
+        catch (Exception e) {
+            // 兜底:任何未预期异常都吞掉,返回 http_error 空态,前端照常渲染"暂时无法获取代码变更"。
+            log.error("[Devloop] 查询任务代码变更失败, sessionId={}", sessionId, e);
+            return ResponseUtil.successResponse(errorChangesMap());
+        }
+    }
+
+    /** 代码变更查询失败时的兜底空态:status=http_error,前端据此展示"暂时无法获取代码变更",不报错。 */
+    private Map<String, Object> errorChangesMap() {
+        Map<String, Object> map = new HashMap<>();
+        map.put("status", "http_error");
+        map.put("files", new ArrayList<>());
+        map.put("fileCount", 0);
+        return map;
+    }
+
+    /**
+     * 拼会话工作区里 git 仓库的宿主机绝对路径:{nfs根}/{bucket}/by/.sessions/{sessionId}/{repoName}。
+     * bucket 由创建者 userCode 解析;repoName 取 repoFullName 去掉 owner/ 前缀。任一环节缺失返回 null(走远程兜底)。
+     */
+    private Path resolveSessionWorkspace(ByaiSession session, String repoFullName) {
+        if (repoFullName == null || repoFullName.trim().isEmpty() || session.getCreatorId() == null) {
+            return null;
+        }
+        try {
+            LoginInfo owner = loginApplicationService.getLoginInfo(session.getCreatorId());
+            if (owner == null || StringUtils.isBlank(owner.getUserCode())) {
+                return null;
+            }
+            String bucket = userBucketNamingService.buildUserBucketName(owner.getUserCode());
+            String repoName = StringUtils.substringAfterLast(repoFullName, "/");
+            if (StringUtils.isBlank(repoName)) {
+                repoName = repoFullName;
+            }
+            return Paths.get(fileStorageRoot, bucket, SESSION_WORKSPACE_SEGMENT, String.valueOf(session.getSessionId()),
+                repoName);
+        }
+        catch (Exception e) {
+            log.warn("[Devloop] 解析会话工作区路径失败, sessionId={}", session.getSessionId(), e);
+            return null;
+        }
+    }
+
+    /** 本地变更结果转前端形状:与 compareResultToMap 同构,status/files 字段口径一致,前端无需区分来源。 */
+    private Map<String, Object> localResultToMap(LocalGitChangeService.LocalChangeResult result, String repoFullName) {
+        Map<String, Object> map = new HashMap<>();
+        map.put("status", "ok");
+        // 标记来源为本地,便于前端在需要时提示"含未推送改动";不识别该字段也不影响渲染。
+        map.put("source", "local");
+        map.put("repoFullName", repoFullName);
+        map.put("baseBranch", result.getBaseBranch());
+        map.put("headBranch", result.getHeadBranch());
+        map.put("compareUrl", null);
+        map.put("message", result.getMessage());
+        List<Map<String, Object>> files = new ArrayList<>();
+        for (LocalGitChangeService.LocalFileChange f : result.getFiles()) {
+            Map<String, Object> fm = new HashMap<>();
+            fm.put("filename", f.getFilename());
+            fm.put("status", f.getStatus());
+            fm.put("additions", f.getAdditions());
+            fm.put("deletions", f.getDeletions());
+            fm.put("previousFilename", f.getPreviousFilename());
+            fm.put("blobUrl", null);
+            files.add(fm);
+        }
+        map.put("files", files);
+        map.put("fileCount", files.size());
+        return map;
     }
 
     /** 比对结果转前端形状:状态字符串 + 分支信息 + 文件变更数组。 */
@@ -1428,6 +1530,8 @@ public class DevloopApplicationService {
         Map<String, Object> map = new HashMap<>();
         // 状态转小写字符串,前端按 ok/no_repo/no_token/branch_not_found/http_error 分支渲染不同空态。
         map.put("status", result.getStatus().name().toLowerCase());
+        // 来源标记为远程,与本地口径统一;前端可据此提示"仅远程已推送"。
+        map.put("source", "remote");
         map.put("repoFullName", result.getRepoFullName());
         map.put("baseBranch", result.getBaseBranch());
         map.put("headBranch", result.getHeadBranch());

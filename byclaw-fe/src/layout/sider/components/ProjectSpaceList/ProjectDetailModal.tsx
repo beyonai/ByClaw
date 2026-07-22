@@ -2132,9 +2132,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const renderCodeChanges = () => {
     if (!isDevelopProject) return null;
     const empty = (id: string, values?: Record<string, string | number>) => (
-      <div className={styles.codeChangeEmpty}>
-        {taskChangesLoading ? t('codeChanges.loading') : t(id, values)}
-      </div>
+      <div className={styles.codeChangeEmpty}>{taskChangesLoading ? t('codeChanges.loading') : t(id, values)}</div>
     );
 
     let body: React.ReactNode;
@@ -2221,6 +2219,9 @@ const ProjectDetailPanel: React.FC<Props> = ({
               ) : (
                 <span className={styles.codeChangeBranch}>{branchLabel}</span>
               )
+            ) : null}
+            {taskChanges?.source === 'local' && status === 'ok' ? (
+              <span className={styles.codeChangeLocalBadge}>{t('codeChanges.localBadge')}</span>
             ) : null}
           </div>
           {status === 'ok' && taskChanges?.files?.length ? (
