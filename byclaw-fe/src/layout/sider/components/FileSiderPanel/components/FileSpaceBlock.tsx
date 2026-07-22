@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState, type Key } from 'react';
 import { Segmented, Tooltip, type MenuProps } from 'antd';
+import { ReloadOutlined } from '@ant-design/icons';
 import type { FileBrowserItem } from '@/service/fileBrowser';
 import type { FileTreeItem } from '../constants';
 import { isDirectory } from '../utils';
@@ -34,6 +35,7 @@ interface FileSpaceBlockProps {
   accordionGroups?: boolean;
   groupCollapseResetKey?: Key;
   showActions?: boolean;
+  onRefresh?: () => void;
   onSwitchChange?: (value: string) => void;
   onExpand: (keys: Key[]) => void;
   onLoadData: (node: FileTreeItem) => Promise<void>;
@@ -64,6 +66,7 @@ const FileSpaceBlock: React.FC<FileSpaceBlockProps> = ({
   accordionGroups = false,
   groupCollapseResetKey,
   showActions = false,
+  onRefresh,
   onSwitchChange,
   onExpand,
   onLoadData,
@@ -154,6 +157,16 @@ const FileSpaceBlock: React.FC<FileSpaceBlockProps> = ({
           />
         )}
         {typeof count === 'number' && <span className={styles.fileSpaceCount}>{count}</span>}
+        {onRefresh && (
+          <button
+            type="button"
+            className={styles.fileSpaceRefresh}
+            onClick={onRefresh}
+            aria-label="refresh"
+          >
+            <ReloadOutlined spin={loading} />
+          </button>
+        )}
       </div>
       {groups ? (
         groups.length ? (

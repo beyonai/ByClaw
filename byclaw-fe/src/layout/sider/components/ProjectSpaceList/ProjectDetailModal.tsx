@@ -919,6 +919,19 @@ const ProjectDetailPanel: React.FC<Props> = ({
     [fileResourceId]
   );
 
+  // 会话空间刷新:按当前范围(当前会话/全部会话)重新拉取对应会话的文件。
+  const refreshSessionResourceFiles = useCallback(() => {
+    const sessionIds =
+      resourceFileScope === 'all'
+        ? projectSessions.map((session) => `${session.sessionId}`).filter(Boolean)
+        : currentResourceSession?.sessionId
+          ? [`${currentResourceSession.sessionId}`]
+          : [];
+    Array.from(new Set(sessionIds)).forEach((id) => {
+      void fetchSessionResourceFiles(id);
+    });
+  }, [resourceFileScope, projectSessions, currentResourceSession?.sessionId, fetchSessionResourceFiles]);
+
   const loadResourceTreeNode = useCallback(
     async (node: FileTreeItem) => {
       if (!fileResourceId || !isDirectory(node)) return;
@@ -2359,13 +2372,18 @@ const ProjectDetailPanel: React.FC<Props> = ({
                 <span className={styles.codeChangeBranch}>{branchLabel}</span>
               )
             ) : null}
-            {taskChanges?.source === 'local' && status === 'ok' ? (
-              <span className={styles.codeChangeLocalBadge}>{t('codeChanges.localBadge')}</span>
-            ) : null}
           </div>
           {status === 'ok' && taskChanges?.files?.length ? (
             <span className={styles.codeChangeCount}>{taskChanges.files.length}</span>
           ) : null}
+          <button
+            type="button"
+            className={styles.codeChangeRefresh}
+            onClick={() => void fetchTaskChanges(currentResourceSession?.sessionId)}
+            aria-label="refresh"
+          >
+            <ReloadOutlined spin={taskChangesLoading} />
+          </button>
         </div>
         {body}
       </div>
@@ -2474,6 +2492,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
           childrenByPath={resourceChildrenByPath}
           expandedKeys={resourceExpandedKeys}
           showActions={!!projectId}
+          onRefresh={() => void fetchSharedResourceFiles()}
           onExpand={setResourceExpandedKeys}
           onLoadData={loadResourceTreeNode}
           onNodeClick={handleResourceItemClick}
@@ -2493,6 +2512,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
           accordionGroups={resourceFileScope === 'all'}
           groupCollapseResetKey={resourceFileScope}
           showActions={!!fileResourceId}
+          onRefresh={refreshSessionResourceFiles}
           switchOptions={[
             { label: t('resource.currentSession'), value: 'current' },
             { label: t('resource.allSessions'), value: 'all' },
