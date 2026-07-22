@@ -1948,6 +1948,11 @@ export default {
   'sandbox.status.transitioning': 'Sandbox Starting/Stopping',
   'sandbox.status.stopped': 'Sandbox Stopped',
   'sandbox.action.restart': 'Restart Sandbox',
+  'sandbox.restart.confirm.title': 'Confirm Restart Sandbox',
+  'sandbox.restart.confirm.content':
+    'Restarting the sandbox will interrupt currently running tasks. Are you sure you want to continue?',
+  'sandbox.restart.confirm.ok': 'OK',
+  'sandbox.restart.confirm.cancel': 'Cancel',
   'sandbox.restart.success': 'Sandbox restarted successfully',
   'sandbox.restart.failed': 'Failed to restart sandbox, please try again later',
   'ThinkRewriteQuestion.originalQuestion': 'Original Question',
