@@ -33,7 +33,9 @@ import { saveTool } from '@/pages/manager/service/DigitalEmployeeMgr';
 import { resourceBizTypeMap } from '@/constants/knowledge';
 import { SiderContentContext } from '@/layout/sider/siderContentContext';
 import useGlobal from '@/hooks/useGlobal';
+import { getToken } from '@/utils/auth';
 import { get, trim, intersection, isEmpty } from 'lodash';
+import { buildSkillMarketplaceUrl, isSkillMarketplaceInstalledMessage } from './utils';
 import styles from './index.module.less';
 
 interface IResourceItem {
@@ -142,6 +144,7 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
 
   const [activeTab, setActiveTab] = useState<ResourceTab>(defaultTab());
   const marketplaceRef = useRef<HTMLDivElement>(null);
+  const marketplaceIframeRef = useRef<HTMLIFrameElement>(null);
   const { setDetailPanel, clearDetailPanel } = useContext(SiderContentContext);
 
   useEffect(() => {
@@ -164,14 +167,12 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
   }));
   const activeDigitalEmployeeId =
     agentId || agentInfo?.agentId || defaultDigEmployeeId || userInfo?.defaultDigEmployeeId;
-  const skillMarketplaceUrl = React.useMemo(() => {
-    const url = new URL('https://www.iwhaleai.com/skillHub/dashboard');
-    url.searchParams.set('tab', 'skills');
-    if (activeDigitalEmployeeId) {
-      url.searchParams.set('digId', `${activeDigitalEmployeeId}`);
-    }
-    return url.toString();
-  }, [activeDigitalEmployeeId]);
+  const portalOrigin = typeof window === 'undefined' ? undefined : window.location.origin;
+  const beyondToken = getToken();
+  const skillMarketplaceUrl = React.useMemo(
+    () => buildSkillMarketplaceUrl(activeDigitalEmployeeId, beyondToken, portalOrigin),
+    [activeDigitalEmployeeId, beyondToken, portalOrigin]
+  );
   const usersOrganizations = get(userInfo, 'usersOrganizations') || [];
   const userTypeList = usersOrganizations.map((item: any) => item.userType);
   const isAdmin = !isEmpty(intersection(userTypeList, ['PLAT_MAN', 'PLAT_DEVOPS']));
@@ -200,6 +201,28 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
       skipResourceCenterRefresh: true,
     });
   }, [EventEmitter, resourceType]);
+
+  useEffect(() => {
+    if (resourceType !== 'SKILL') {
+      return;
+    }
+
+    const marketplaceOrigin = new URL(skillMarketplaceUrl).origin;
+    const handleSkillMarketplaceMessage = (event: MessageEvent) => {
+      if (event.origin !== marketplaceOrigin || event.source !== marketplaceIframeRef.current?.contentWindow) {
+        return;
+      }
+      if (!isSkillMarketplaceInstalledMessage(event.data, activeDigitalEmployeeId)) {
+        return;
+      }
+      notifySiderResourceListReload();
+    };
+
+    window.addEventListener('message', handleSkillMarketplaceMessage);
+    return () => {
+      window.removeEventListener('message', handleSkillMarketplaceMessage);
+    };
+  }, [activeDigitalEmployeeId, notifySiderResourceListReload, resourceType, skillMarketplaceUrl]);
 
   useEffect(() => {
     const handleResourceTypeReload = (
@@ -544,33 +567,31 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
       key: 'enterprise',
       label: `${intl.formatMessage({ id: 'resource.enterprise' })}${resourceName}`,
     },
-    ...(resourceType === 'SKILL'
-      ? [
-        {
-          key: 'marketplace',
-          label: (
-            <span className={styles.marketplaceTabLabel}>
-              {intl.formatMessage({ id: 'resource.skillMarketplace' })}
-              <Tooltip title={intl.formatMessage({ id: 'resource.marketplaceFullscreen' })}>
-                <button
-                  type="button"
-                  className={styles.fullscreenButton}
-                  aria-label={intl.formatMessage({ id: 'resource.marketplaceFullscreen' })}
-                  onClick={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    marketplaceRef.current?.requestFullscreen?.();
-                  }}
-                >
-                  <FullscreenOutlined />
-                </button>
-              </Tooltip>
-            </span>
-          ),
-        },
-      ]
-      : []),
   ];
+  if (resourceType === 'SKILL') {
+    items.push({
+      key: 'marketplace',
+      label: (
+        <span className={styles.marketplaceTabLabel}>
+          {intl.formatMessage({ id: 'resource.skillMarketplace' })}
+          <Tooltip title={intl.formatMessage({ id: 'resource.marketplaceFullscreen' })}>
+            <button
+              type="button"
+              className={styles.fullscreenButton}
+              aria-label={intl.formatMessage({ id: 'resource.marketplaceFullscreen' })}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                marketplaceRef.current?.requestFullscreen?.();
+              }}
+            >
+              <FullscreenOutlined />
+            </button>
+          </Tooltip>
+        </span>
+      ),
+    });
+  }
 
   const bannerLabel = React.useMemo(() => {
     if (resourceType === 'KG_DOC') {
@@ -632,10 +653,12 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
       {resourceType === 'SKILL' && activeTab === 'marketplace' ? (
         <div ref={marketplaceRef} className={styles.marketplaceFrameContainer}>
           <iframe
+            ref={marketplaceIframeRef}
             title={intl.formatMessage({ id: 'resource.skillMarketplace' })}
             className={styles.marketplaceFrame}
             src={skillMarketplaceUrl}
             allow="fullscreen"
+            referrerPolicy="no-referrer"
           />
         </div>
       ) : (

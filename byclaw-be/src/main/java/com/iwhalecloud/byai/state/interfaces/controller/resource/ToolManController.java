@@ -503,7 +503,8 @@ public class ToolManController {
             return ResponseUtil.fail(e.getMessage());
         }
         catch (Exception e) {
-            logger.error("installThirdPartySkill failed, digId={}", request == null ? null : request.getDigId(), e);
+            logger.error("installThirdPartySkill failed, userCode={}, digId={}", CurrentUserHolder.getCurrentUserCode(),
+                request == null ? null : request.getDigId(), e);
             return ResponseUtil.fail(e.getMessage() != null ? e.getMessage()
                 : I18nUtil.get("byclaw.third.party.skill.install.failed"));
         }
