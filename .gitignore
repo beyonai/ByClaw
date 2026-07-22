@@ -77,6 +77,11 @@ byclaw-data/resource/import_package_owl_onto_bak/
 # Agent/local tool state
 .codegraph/
 .playwright-mcp/
+.superpowers/
+docs/superpowers/
+.claude/settings.local.json
+.neuralmemory/
+.rtk/
 
 # Vscode
 .vscode/
@@ -107,5 +112,7 @@ byclaw-data/.vscode/launch.json
 byclaw-data/.vscode/settings.json
 .vscode/launch.json
 
-.codegraph
 .workbuddy/
+.worktrees/
+
+.codegraph
