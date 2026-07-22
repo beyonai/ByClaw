@@ -101,6 +101,37 @@ fi
 
 mkdir -p "${OPENCLAW_BROWSER_USER_DATA_DIR}" "${OPENCLAW_STATE_DIR}/opencli"
 
+if command -v flock >/dev/null 2>&1; then
+  exec 9>"${OPENCLAW_STATE_DIR}/opencli/chrome-start.lock"
+  if ! flock -n 9; then
+    log "startup is already in progress"
+    exit 0
+  fi
+fi
+
+clear_stale_profile_lock() {
+  profile_lock="${OPENCLAW_BROWSER_USER_DATA_DIR}/SingletonLock"
+  [ -L "${profile_lock}" ] || return 0
+
+  lock_target="$(readlink "${profile_lock}" 2>/dev/null || true)"
+  lock_pid="${lock_target##*-}"
+  case "${lock_pid}" in
+    ''|*[!0-9]*) return 0 ;;
+  esac
+
+  if ps -p "${lock_pid}" -o args= 2>/dev/null | grep -F -- "--user-data-dir=${OPENCLAW_BROWSER_USER_DATA_DIR}" >/dev/null; then
+    return 0
+  fi
+
+  log "removing stale Chromium profile lock (PID ${lock_pid})"
+  rm -f \
+    "${OPENCLAW_BROWSER_USER_DATA_DIR}/SingletonLock" \
+    "${OPENCLAW_BROWSER_USER_DATA_DIR}/SingletonCookie" \
+    "${OPENCLAW_BROWSER_USER_DATA_DIR}/SingletonSocket"
+}
+
+clear_stale_profile_lock
+
 if ! pgrep -f "Xvfb ${DISPLAY}" >/dev/null 2>&1; then
   log "starting Xvfb on ${DISPLAY}"
   Xvfb "${DISPLAY}" -screen 0 "${OPENCLAW_XVFB_SCREEN:-1365x768x24}" -nolisten tcp >/tmp/openclaw-xvfb.log 2>&1 &
