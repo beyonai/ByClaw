@@ -2,6 +2,7 @@
   "files": [],
   "references": [
     { "path": "packages/by-conductor" },
-    { "path": "apps/byclaw-super" }
+    { "path": "packages/connectors/openclaw-by-framework" },
+    { "path": "app" }
   ]
 }

@@ -1,9 +1,9 @@
 {
-  "name": "@byclaw/by-conductor",
+  "name": "@byclaw/connector-openclaw-by-framework",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Framework-neutral agent orchestration engine",
+  "description": "OpenClaw connector transported by @byclaw/by-framework",
   "files": ["dist"],
   "exports": {
     ".": {
@@ -19,7 +19,7 @@
     "node": ">=22.19.0"
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "0.80.10",
-    "typebox": "1.1.38"
+    "@byclaw/by-conductor": "workspace:*",
+    "@byclaw/by-framework": "1.5.1"
   }
 }

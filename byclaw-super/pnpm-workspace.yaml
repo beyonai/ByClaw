@@ -1,6 +1,7 @@
 packages:
-  - "apps/*"
+  - "app"
   - "packages/*"
+  - "packages/connectors/*"
 
 allowBuilds:
   "@google/genai": true
