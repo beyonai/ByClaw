@@ -80,7 +80,7 @@ const langMap: Record<string, BundledLanguage> = {
 
 // 纯文本类(可读源码展示):显式文本类型 + 白名单里的代码/配置扩展名(不依赖 langMap,未高亮也纯文本兜底)。
 const isTextLike = (type: string) =>
-  ['txt', 'text', 'log'].includes(type) || CODE_TEXT_EXTENSIONS.includes(type);
+  ['txt', 'text', 'log', 'json'].includes(type) || CODE_TEXT_EXTENSIONS.includes(type);
 
 const officeTypes = ['pptx', 'docx', 'xlsx'];
 
