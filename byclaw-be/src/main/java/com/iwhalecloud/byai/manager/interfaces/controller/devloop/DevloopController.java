@@ -125,8 +125,12 @@ public class DevloopController {
     @PostMapping("/project/requirements")
     public ResponseUtil<List<Map<String, Object>>> listRequirementsByProject(@RequestBody Map<String, Object> params) {
         Long projectId = Long.valueOf(params.get("projectId").toString());
-        String keyword = params.get("keyword") != null ? params.get("keyword").toString() : null;
-        return applicationService.listRequirementsByProject(projectId, keyword);
+        String title = params.get("title") != null ? params.get("title").toString() : null;
+        // 兼容已发布前端的 keyword 入参，但需求查询始终只按名称执行。
+        if (title == null && params.get("keyword") != null) {
+            title = params.get("keyword").toString();
+        }
+        return applicationService.listRequirementsByProject(projectId, title);
     }
 
     /**
@@ -224,8 +228,12 @@ public class DevloopController {
     @PostMapping("/member/list")
     public ResponseUtil<List<ProjectMemberListDto>> listProjectMembers(@RequestBody Map<String, Object> params) {
         Long projectId = Long.valueOf(params.get("projectId").toString());
-        String keyword = params.get("keyword") != null ? params.get("keyword").toString() : null;
-        return applicationService.listProjectMembers(projectId, keyword);
+        String userName = params.get("userName") != null ? params.get("userName").toString() : null;
+        // 兼容已发布前端的 keyword 入参，但后续查询仍只按成员姓名执行。
+        if (userName == null && params.get("keyword") != null) {
+            userName = params.get("keyword").toString();
+        }
+        return applicationService.listProjectMembers(projectId, userName);
     }
 
     /** 移除项目成员 */

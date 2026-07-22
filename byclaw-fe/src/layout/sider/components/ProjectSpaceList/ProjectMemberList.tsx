@@ -1,11 +1,13 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Button, Dropdown, Empty, Input, List, Modal, Spin, Tag, message } from 'antd';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Button, Dropdown, Empty, Input, List, Modal, Spin, Tag, Tooltip, message } from 'antd';
 import { DeleteOutlined, MoreOutlined, PlusOutlined, RobotOutlined, SearchOutlined } from '@ant-design/icons';
 import { useIntl, useSelector } from '@umijs/max';
 import AddAuthModal from '@/pages/manager/components/AuthListDrawer/AddAuthModal';
 import { addProjectMember, bindMemberAgent, listProjectMembers, removeProjectMember } from '@/service/devloop';
 import { POST } from '@/service/common/request';
 import { getAgentChatAvatar } from '@/utils/agent';
+import { getDisplayUserNameInChat } from '@/utils/chat';
+import ListEndMessage from './ListEndMessage';
 import styles from './index.module.less';
 
 interface ProjectMemberListProps {
@@ -13,6 +15,11 @@ interface ProjectMemberListProps {
   creatorId?: string | number;
   onMembersChange?: (members: any[]) => void;
 }
+
+// 成员接口当前一次返回项目成员，左侧窄面板按固定数量分段渲染并在触底时继续展示。
+const MEMBER_PAGE_SIZE = 20;
+// 绑定数字员工接口按 10 条一页请求，弹窗滚动到底部时继续加载下一页。
+const AGENT_PAGE_SIZE = 10;
 
 const getMemberUserId = (member: any) => member.userId ?? String(member.id || '').replace(/^user_/, '');
 
@@ -33,6 +40,7 @@ const ProjectMemberList: React.FC<ProjectMemberListProps> = ({ projectId, creato
   );
   const [members, setMembers] = useState<any[]>([]);
   const [memberSearchKeyword, setMemberSearchKeyword] = useState('');
+  const [visibleMemberCount, setVisibleMemberCount] = useState(MEMBER_PAGE_SIZE);
   const [loading, setLoading] = useState(false);
   const [showAuthAddModal, setShowAuthAddModal] = useState(false);
   const [hoveredMemberKey, setHoveredMemberKey] = useState<string>();
@@ -44,27 +52,34 @@ const ProjectMemberList: React.FC<ProjectMemberListProps> = ({ projectId, creato
   const [agentList, setAgentList] = useState<any[]>([]);
   const [agentSearching, setAgentSearching] = useState(false);
   const [agentPage, setAgentPage] = useState(1);
-  const [agentTotal, setAgentTotal] = useState(0);
+  const [hasMoreAgents, setHasMoreAgents] = useState(false);
   const memberSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const memberQueryVersionRef = useRef(0);
+  const agentSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const agentQueryVersionRef = useRef(0);
+  const agentLoadingMoreRef = useRef(false);
 
-  const fetchMembers = useCallback(async (keyword = '') => {
-    if (!projectId) return;
-    const queryVersion = memberQueryVersionRef.current + 1;
-    memberQueryVersionRef.current = queryVersion;
-    setLoading(true);
-    try {
-      const res = await listProjectMembers(projectId, keyword);
-      if (queryVersion !== memberQueryVersionRef.current) return;
-      const memberList = Array.isArray(res) ? res : [];
-      setMembers(memberList);
-      if (!keyword.trim()) onMembersChange?.(memberList);
-    } finally {
-      if (queryVersion === memberQueryVersionRef.current) {
-        setLoading(false);
+  const fetchMembers = useCallback(
+    async (keyword = '') => {
+      if (!projectId) return;
+      const queryVersion = memberQueryVersionRef.current + 1;
+      memberQueryVersionRef.current = queryVersion;
+      setLoading(true);
+      try {
+        const res = await listProjectMembers(projectId, keyword);
+        if (queryVersion !== memberQueryVersionRef.current) return;
+        const memberList = Array.isArray(res) ? res : [];
+        setMembers(memberList);
+        setVisibleMemberCount(MEMBER_PAGE_SIZE);
+        if (!keyword.trim()) onMembersChange?.(memberList);
+      } finally {
+        if (queryVersion === memberQueryVersionRef.current) {
+          setLoading(false);
+        }
       }
-    }
-  }, [onMembersChange, projectId]);
+    },
+    [onMembersChange, projectId]
+  );
 
   useEffect(() => {
     if (memberSearchTimerRef.current) {
@@ -104,6 +119,22 @@ const ProjectMemberList: React.FC<ProjectMemberListProps> = ({ projectId, creato
     }
     void fetchMembers(memberSearchKeyword.trim());
   }, [fetchMembers, memberSearchKeyword]);
+
+  const visibleMembers = useMemo(() => members.slice(0, visibleMemberCount), [members, visibleMemberCount]);
+  const hasMoreMembers = visibleMemberCount < members.length;
+
+  const handleMemberListScroll = useCallback(
+    (event: React.UIEvent<HTMLDivElement>) => {
+      if (!hasMoreMembers) return;
+
+      const { scrollTop, scrollHeight, clientHeight } = event.currentTarget;
+      if (scrollHeight - scrollTop - clientHeight > 80) return;
+
+      // 成员数据已在当前查询中返回，触底时按 20 条递增显示，避免一次性渲染过多卡片。
+      setVisibleMemberCount((prev) => Math.min(prev + MEMBER_PAGE_SIZE, members.length));
+    },
+    [hasMoreMembers, members.length]
+  );
 
   const refreshMembersAfterMutation = useCallback(async () => {
     if (!projectId) return;
@@ -199,36 +230,148 @@ const ProjectMemberList: React.FC<ProjectMemberListProps> = ({ projectId, creato
     });
   };
 
-  const handleSearchAgent = async (page = 1) => {
+  const clearAgentSearchTimer = useCallback(() => {
+    if (agentSearchTimerRef.current) {
+      clearTimeout(agentSearchTimerRef.current);
+      agentSearchTimerRef.current = null;
+    }
+  }, []);
+
+  const handleSearchAgent = useCallback(async (page = 1, keyword = '', append = false) => {
+    if (append && agentLoadingMoreRef.current) return;
+
+    // 新查询递增版本号，避免前一次搜索或上一页请求覆盖当前关键字的结果。
+    const queryVersion = append ? agentQueryVersionRef.current : agentQueryVersionRef.current + 1;
+    if (append) {
+      agentLoadingMoreRef.current = true;
+    } else {
+      agentQueryVersionRef.current = queryVersion;
+      agentLoadingMoreRef.current = false;
+    }
+
     setAgentSearching(true);
     try {
       const res = await POST<any>('/byaiService/api/v2/digitEmploy/discover', {
-        keyword: agentKeyword.trim(),
+        keyword: keyword.trim(),
         pageNum: page,
-        pageSize: 10,
+        pageSize: AGENT_PAGE_SIZE,
       });
+      if (queryVersion !== agentQueryVersionRef.current) return;
+
       const list = res?.data?.list || res?.list || res?.data || [];
-      const total = res?.data?.total || res?.total || 0;
-      setAgentList(Array.isArray(list) ? list : []);
-      setAgentTotal(total);
+      const nextPageList = Array.isArray(list) ? list : [];
+      const rawTotal = res?.data?.total ?? res?.total;
+      const total = Number(rawTotal);
+      const hasValidTotal = rawTotal !== undefined && rawTotal !== null && rawTotal !== '' && Number.isFinite(total);
+
+      setAgentList((currentList) => {
+        if (!append) return nextPageList;
+
+        // 触底追加时按数字员工 ID 去重，避免数据更新时相邻页出现重复项。
+        const agentIds = new Set(
+          currentList.map((agent) => `${agent.resourceId || agent.agentId || agent.id || agent.resourceCode || ''}`)
+        );
+        return currentList.concat(
+          nextPageList.filter((agent) => {
+            const agentId = `${agent.resourceId || agent.agentId || agent.id || agent.resourceCode || ''}`;
+            if (!agentId || !agentIds.has(agentId)) {
+              if (agentId) agentIds.add(agentId);
+              return true;
+            }
+            return false;
+          })
+        );
+      });
       setAgentPage(page);
+      setHasMoreAgents(
+        nextPageList.length > 0 &&
+          (hasValidTotal ? page * AGENT_PAGE_SIZE < total : nextPageList.length === AGENT_PAGE_SIZE)
+      );
     } catch {
-      setAgentList([]);
+      if (queryVersion === agentQueryVersionRef.current) {
+        if (!append) setAgentList([]);
+        setHasMoreAgents(false);
+      }
     } finally {
-      setAgentSearching(false);
+      if (append && queryVersion === agentQueryVersionRef.current) {
+        agentLoadingMoreRef.current = false;
+      }
+      if (queryVersion === agentQueryVersionRef.current) {
+        setAgentSearching(false);
+      }
     }
-  };
+  }, []);
+
+  const handleAgentKeywordChange = useCallback(
+    (keyword: string) => {
+      setAgentKeyword(keyword);
+      clearAgentSearchTimer();
+      agentQueryVersionRef.current += 1;
+      agentLoadingMoreRef.current = false;
+      setAgentSearching(false);
+      setHasMoreAgents(false);
+
+      // 输入停止 300ms 后再请求，减少模糊搜索时的接口调用频次。
+      agentSearchTimerRef.current = setTimeout(() => {
+        agentSearchTimerRef.current = null;
+        void handleSearchAgent(1, keyword);
+      }, 300);
+    },
+    [clearAgentSearchTimer, handleSearchAgent]
+  );
+
+  const handleAgentSearchSubmit = useCallback(
+    (keyword: string) => {
+      clearAgentSearchTimer();
+      setAgentKeyword(keyword);
+      void handleSearchAgent(1, keyword);
+    },
+    [clearAgentSearchTimer, handleSearchAgent]
+  );
+
+  const handleAgentListScroll = useCallback(
+    (event: React.UIEvent<HTMLDivElement>) => {
+      if (!hasMoreAgents || agentSearching || agentLoadingMoreRef.current) return;
+
+      const { scrollTop, scrollHeight, clientHeight } = event.currentTarget;
+      if (scrollHeight - scrollTop - clientHeight > 80) return;
+
+      // 接近列表底部时追加下一页，替代原来的页码切换。
+      void handleSearchAgent(agentPage + 1, agentKeyword, true);
+    },
+    [agentKeyword, agentPage, agentSearching, handleSearchAgent, hasMoreAgents]
+  );
+
+  const handleCloseAgentModal = useCallback(() => {
+    clearAgentSearchTimer();
+    // 关闭弹窗后使未完成请求失效，避免下次打开时写入旧数据。
+    agentQueryVersionRef.current += 1;
+    agentLoadingMoreRef.current = false;
+    setShowAgentModal(false);
+    setBindingMember(null);
+  }, [clearAgentSearchTimer]);
+
+  useEffect(
+    () => () => {
+      clearAgentSearchTimer();
+      agentQueryVersionRef.current += 1;
+      agentLoadingMoreRef.current = false;
+    },
+    [clearAgentSearchTimer]
+  );
 
   const handleOpenAgentModal = (member: any) => {
+    clearAgentSearchTimer();
+    agentQueryVersionRef.current += 1;
+    agentLoadingMoreRef.current = false;
     setBindingMember(member);
     setAgentKeyword('');
     setAgentList([]);
     setAgentPage(1);
-    setAgentTotal(0);
+    setHasMoreAgents(false);
+    setAgentSearching(false);
     setShowAgentModal(true);
-    setTimeout(() => {
-      void handleSearchAgent(1);
-    }, 100);
+    void handleSearchAgent(1, '');
   };
 
   const handleBindAgent = async (agent: any) => {
@@ -240,8 +383,7 @@ const ProjectMemberList: React.FC<ProjectMemberListProps> = ({ projectId, creato
       });
       message.success(t('bindSuccess', { name: `${agent.resourceName || agent.name || agent.agentName}` }));
       void refreshMembersAfterMutation();
-      setShowAgentModal(false);
-      setBindingMember(null);
+      handleCloseAgentModal();
     } catch {
       message.error(t('bindFailed'));
     }
@@ -250,9 +392,8 @@ const ProjectMemberList: React.FC<ProjectMemberListProps> = ({ projectId, creato
   const getMemberKey = (member: any) => `${member.memberId || member.userId || member.userCode || ''}`;
 
   const getMemberAvatarText = (member: any) => {
-    // 成员头像只展示姓名首字，和项目详情内的紧凑圆形图标保持一致。
-    const memberName = `${member.userName || member.userId || ''}`.trim();
-    return Array.from(memberName)[0] || '?';
+    // 成员图标沿用左侧底部用户头像规则，展示姓名后两位而非首字。
+    return getDisplayUserNameInChat(`${member.userName || member.userId || ''}`.trim()) || '?';
   };
 
   const getAgentAvatar = (agent: any) => agent.chatAvatar || agent.avatar || agent.icon || agent.resourceLogoUrl;
@@ -276,13 +417,13 @@ const ProjectMemberList: React.FC<ProjectMemberListProps> = ({ projectId, creato
             },
             ...(!isProjectOwnerMember(member, creatorId)
               ? [
-                  {
-                    key: 'remove',
-                    danger: true,
-                    icon: <DeleteOutlined />,
-                    label: t('remove'),
-                  },
-                ]
+                {
+                  key: 'remove',
+                  danger: true,
+                  icon: <DeleteOutlined />,
+                  label: t('remove'),
+                },
+              ]
               : []),
           ],
           onClick: ({ key }) => {
@@ -303,19 +444,8 @@ const ProjectMemberList: React.FC<ProjectMemberListProps> = ({ projectId, creato
   };
 
   return (
-    <div>
+    <div className={styles.detailMemberPanel}>
       <div className={styles.detailMemberToolbar}>
-        <div className={styles.detailSectionHeader}>
-          <span>{t('count', { count: members.length })}</span>
-          <Button
-            size="small"
-            className={styles.detailHeaderActionButton}
-            icon={<PlusOutlined />}
-            onClick={() => setShowAuthAddModal(true)}
-          >
-            {t('add')}
-          </Button>
-        </div>
         <div className={`${styles.searchInput} ${styles.detailMemberSearch}`}>
           <Input
             allowClear
@@ -326,73 +456,84 @@ const ProjectMemberList: React.FC<ProjectMemberListProps> = ({ projectId, creato
             onPressEnter={handleMemberSearchSubmit}
           />
         </div>
+        {/* 图标按钮的悬停文案明确为添加成员，避免与其他“添加”操作混淆。 */}
+        <Tooltip title={t('addMember')} placement="top">
+          {/* 添加成员收敛为搜索框右侧图标操作，避免工具栏占两行。 */}
+          <Button
+            aria-label={t('addMember')}
+            size="small"
+            className={`${styles.detailHeaderActionButton} ${styles.detailMemberAddButton}`}
+            icon={<PlusOutlined />}
+            onClick={() => setShowAuthAddModal(true)}
+          />
+        </Tooltip>
       </div>
 
-      <Spin spinning={loading}>
-        {members.length === 0 ? (
-          // 成员空态与需求 Tab 统一使用简洁图标，保持项目详情各列表的视觉一致。
-          <Empty
-            image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description={memberSearchKeyword.trim() ? t('searchEmpty') : t('empty')}
-          />
-        ) : (
-          <>
-            {/* 成员列表复用需求 Tab 的无边框紧凑卡片样式。 */}
-            <List
-              className="project-member-list"
-              split={false}
-              dataSource={members}
-              renderItem={(member: any) => {
-                const memberKey = getMemberKey(member);
-                const isCreatorMember = isProjectOwnerMember(member, creatorId);
-                // 当前登录用户沿用移除确认的身份判断，确保头像与身份标签状态一致。
-                const isCurrentUser = isCurrentUserMember(member);
-                // 创建者身份优先展示，创建者本人不叠加当前用户配色或标签。
-                const showCurrentUserState = isCurrentUser && !isCreatorMember;
-                return (
-                  <List.Item
-                    className={`${styles.detailRequirementItem} project-member-row`}
-                    onMouseEnter={() => setHoveredMemberKey(memberKey)}
-                    onMouseLeave={() => {
-                      if (openActionMemberKey !== memberKey) {
-                        setHoveredMemberKey(undefined);
-                      }
-                    }}
-                  >
-                    <div className={styles.detailRequirementSummary}>
-                      <div
-                        className={`${styles.detailRequirementIcon} project-member-avatar ${
-                          isCreatorMember ? 'project-member-avatar-creator' : 'project-member-avatar-regular'
-                        }${showCurrentUserState ? ' project-member-avatar-current-user' : ''}`}
-                      >
-                        {getMemberAvatarText(member)}
-                      </div>
-                      <div className={styles.detailRequirementMain}>
-                        <div className="project-member-title">
-                          <strong className="project-member-name">{member.userName || member.userId}</strong>
-                          {/* 创建者标签紧跟成员名称展示，和禁删判断使用同一套规则。 */}
-                          {isCreatorMember && (
-                            <Tag className="project-member-role-tag" color="blue">
-                              {t('creator')}
-                            </Tag>
-                          )}
-                          {showCurrentUserState && (
-                            <Tag className="project-member-role-tag" color="green">
-                              {t('currentUser')}
-                            </Tag>
-                          )}
-                        </div>
-                        <span>{member.agentName || t('unboundAgent')}</span>
-                      </div>
-                      {renderMemberActionMenu(member)}
-                    </div>
-                  </List.Item>
-                );
-              }}
+      <div className={styles.detailMemberScroll} onScroll={handleMemberListScroll}>
+        <Spin spinning={loading}>
+          {members.length === 0 ? (
+            // 成员空态与需求 Tab 统一使用简洁图标，保持项目详情各列表的视觉一致。
+            <Empty
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+              description={memberSearchKeyword.trim() ? t('searchEmpty') : t('empty')}
             />
-          </>
-        )}
-      </Spin>
+          ) : (
+            <>
+              {/* 成员列表复用需求 Tab 的无边框紧凑卡片样式。 */}
+              <List
+                className="project-member-list"
+                split={false}
+                dataSource={visibleMembers}
+                renderItem={(member: any) => {
+                  const memberKey = getMemberKey(member);
+                  const isCreatorMember = isProjectOwnerMember(member, creatorId);
+                  // 当前登录用户沿用移除确认的身份判断，确保头像与身份标签状态一致。
+                  const isCurrentUser = isCurrentUserMember(member);
+                  // 创建者身份优先展示，创建者本人不叠加当前用户配色或标签。
+                  const showCurrentUserState = isCurrentUser && !isCreatorMember;
+                  return (
+                    <List.Item
+                      className={`${styles.detailRequirementItem} project-member-row`}
+                      onMouseEnter={() => setHoveredMemberKey(memberKey)}
+                      onMouseLeave={() => {
+                        if (openActionMemberKey !== memberKey) {
+                          setHoveredMemberKey(undefined);
+                        }
+                      }}
+                    >
+                      <div className={styles.detailRequirementSummary}>
+                        {/* 成员头像不复用需求图标，直接沿用左侧底部用户头像的方形主色样式。 */}
+                        <div className="project-member-avatar">{getMemberAvatarText(member)}</div>
+                        <div className={styles.detailRequirementMain}>
+                          <div className="project-member-title">
+                            <strong className="project-member-name">{member.userName || member.userId}</strong>
+                            {/* 创建者标签紧跟成员名称展示，和禁删判断使用同一套规则。 */}
+                            {isCreatorMember && (
+                              <Tag className="project-member-role-tag" color="blue">
+                                {t('creator')}
+                              </Tag>
+                            )}
+                            {/* 当前用户标签与创建者保持同一颜色体系，头像继续沿用普通成员底色。 */}
+                            {showCurrentUserState && (
+                              <Tag className="project-member-role-tag" color="blue">
+                                {t('currentUser')}
+                              </Tag>
+                            )}
+                          </div>
+                          <span>{member.agentName || t('unboundAgent')}</span>
+                        </div>
+                        {renderMemberActionMenu(member)}
+                      </div>
+                    </List.Item>
+                  );
+                }}
+              />
+              {/* 所有成员分段展示完成后，展示与数字员工列表一致的到底提示。 */}
+              {!hasMoreMembers && !loading && <ListEndMessage />}
+            </>
+          )}
+        </Spin>
+      </div>
 
       {showAuthAddModal && (
         <AddAuthModal
@@ -408,36 +549,26 @@ const ProjectMemberList: React.FC<ProjectMemberListProps> = ({ projectId, creato
       <Modal
         title={t('bindAgentTitle', { name: bindingMember?.userName || '' })}
         open={showAgentModal}
-        onCancel={() => {
-          setShowAgentModal(false);
-          setBindingMember(null);
-        }}
+        onCancel={handleCloseAgentModal}
         footer={null}
         width={520}
       >
+        {/* 查询加载态统一由下方列表展示，避免搜索框和列表同时转圈。 */}
         <Input.Search
           placeholder={t('searchAgent')}
           value={agentKeyword}
-          onChange={(event) => setAgentKeyword(event.target.value)}
-          onSearch={() => handleSearchAgent(1)}
+          onChange={(event) => handleAgentKeywordChange(event.target.value)}
+          onSearch={handleAgentSearchSubmit}
           enterButton={<SearchOutlined />}
-          loading={agentSearching}
           className={styles.agentSearchInput}
         />
         <Spin spinning={agentSearching}>
-          <div className={styles.agentList}>
+          <div className={styles.agentList} onScroll={handleAgentListScroll}>
             {agentList.length === 0 ? (
               <Empty description={t('emptyAgents')} />
             ) : (
               <List
                 dataSource={agentList}
-                pagination={{
-                  current: agentPage,
-                  pageSize: 10,
-                  total: agentTotal,
-                  size: 'small',
-                  onChange: (page) => handleSearchAgent(page),
-                }}
                 renderItem={(agent: any) => (
                   <List.Item
                     actions={[
@@ -446,10 +577,11 @@ const ProjectMemberList: React.FC<ProjectMemberListProps> = ({ projectId, creato
                       </Button>,
                     ]}
                   >
+                    {/* 数字员工发现接口的标准描述字段为 resourceDesc，兼容历史 description/desc。 */}
                     <List.Item.Meta
                       avatar={<div className={styles.agentListAvatar}>{getAgentChatAvatar(getAgentAvatar(agent))}</div>}
                       title={agent.resourceName || agent.name || agent.agentName}
-                      description={agent.description || agent.desc || ''}
+                      description={agent.resourceDesc || agent.description || agent.desc || ''}
                     />
                   </List.Item>
                 )}
