@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Dropdown, Tooltip, message } from 'antd';
+import { Dropdown, Tooltip, message, Modal } from 'antd';
 import type { MenuProps } from 'antd';
 import { useIntl } from '@umijs/max';
 import classNames from 'classnames';
@@ -18,16 +18,24 @@ const SandboxStatusIndicator: React.FC<SandboxStatusIndicatorProps> = ({ userCod
   const [isRestarting, setIsRestarting] = useState(false);
 
   const handleRestart = async () => {
-    try {
-      setIsRestarting(true);
-      await restartSandbox();
-      message.success(intl.formatMessage({ id: 'sandbox.restart.success' }));
-      refetch();
-    } catch (error) {
-      message.error(intl.formatMessage({ id: 'sandbox.restart.failed' }));
-    } finally {
-      setIsRestarting(false);
-    }
+    Modal.confirm({
+      title: intl.formatMessage({ id: 'sandbox.restart.confirm.title' }),
+      content: intl.formatMessage({ id: 'sandbox.restart.confirm.content' }),
+      okText: intl.formatMessage({ id: 'sandbox.restart.confirm.ok' }),
+      cancelText: intl.formatMessage({ id: 'sandbox.restart.confirm.cancel' }),
+      onOk: async () => {
+        try {
+          setIsRestarting(true);
+          await restartSandbox();
+          message.success(intl.formatMessage({ id: 'sandbox.restart.success' }));
+          refetch();
+        } catch (error) {
+          message.error(intl.formatMessage({ id: 'sandbox.restart.failed' }));
+        } finally {
+          setIsRestarting(false);
+        }
+      },
+    });
   };
 
   const menuItems: MenuProps['items'] = [
