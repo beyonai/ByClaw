@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { useRequest } from '@umijs/max';
+import { useState, useEffect } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { getSandboxInfo, removeSandbox, launchSandboxByUserCode, type SandboxInfo } from '@/service/sandbox';
 
 type SandboxStatus = 'running' | 'transitioning' | 'stopped';
@@ -28,21 +28,21 @@ function calculateStatus(sandboxes: SandboxInfo[]): SandboxStatus {
 export default function useSandboxStatus(userCode: string) {
   const [status, setStatus] = useState<SandboxStatus>('stopped');
 
-  const {
-    data,
-    loading,
-    run: refetch,
-  } = useRequest(() => getSandboxInfo({ userCode, sandboxType: 'openclaw' }), {
-    pollingInterval: POLL_INTERVAL,
-    ready: !!userCode,
-    onSuccess: (sandboxes: SandboxInfo[]) => {
-      const calculatedStatus = calculateStatus(sandboxes);
-      setStatus(calculatedStatus);
-    },
-    onError: () => {
-      setStatus('stopped');
-    },
+  const { data, isLoading, refetch } = useQuery({
+    queryKey: ['sandboxStatus', userCode],
+    queryFn: () => getSandboxInfo({ userCode, sandboxType: 'openclaw' }),
+    refetchInterval: POLL_INTERVAL,
+    enabled: !!userCode,
   });
+
+  useEffect(() => {
+    if (data) {
+      const calculatedStatus = calculateStatus(data);
+      setStatus(calculatedStatus);
+    } else {
+      setStatus('stopped');
+    }
+  }, [data]);
 
   const restartSandbox = async () => {
     // 1. 释放当前沙箱
@@ -64,7 +64,7 @@ export default function useSandboxStatus(userCode: string) {
 
   return {
     status,
-    isLoading: loading,
+    isLoading,
     sandboxes: data || [],
     refetch,
     restartSandbox,
