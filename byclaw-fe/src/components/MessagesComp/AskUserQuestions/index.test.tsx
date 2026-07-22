@@ -52,7 +52,7 @@ jest.mock('@/service/message', () => ({
 }));
 
 import React, { useState } from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 import { IFormStatus } from '@/hooks/useSseSender/agent/typescript';
 import { updateMessageStructById } from '@/service/message';
@@ -225,6 +225,7 @@ describe('AskUserQuestions', () => {
     expect(screen.getByRole('tab', { name: 'Choose capabilities' }).querySelector('em')).not.toBeNull();
   });
 
+  // Ant Design 选项交互与异步持久化在双 worker 钩子中可能超过默认 5 秒。
   it('ignores a blank other option in multi-select mode', async () => {
     renderQuestions({
       substance: {
@@ -242,8 +243,11 @@ describe('AskUserQuestions', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: /Testing/ }));
     expect(screen.getByRole('button', { name: 'form.confirm' })).toBeEnabled();
 
-    fireEvent.click(screen.getByRole('button', { name: 'form.confirm' }));
-    await waitFor(() => expect(updateMessageStructByIdMock).toHaveBeenCalled());
+    // 确认操作会等待异步持久化；用 act 统一刷新 Promise 与状态更新，避免双 worker 时超时。
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'form.confirm' }));
+    });
+    expect(updateMessageStructByIdMock).toHaveBeenCalled();
 
     const persistedContent = JSON.parse(updateMessageStructByIdMock.mock.calls[0][0].content);
     expect(persistedContent.answers[0]).toEqual(
@@ -253,7 +257,7 @@ describe('AskUserQuestions', () => {
         otherText: '',
       })
     );
-  });
+  }, 15000);
 
   it('uses tabs for multiple questions and requires every question to be answered', () => {
     renderQuestions({

@@ -30,7 +30,7 @@ export type DevloopTaskListQuery = {
   projectId: number;
   createTimeStart?: string;
   createTimeEnd?: string;
-  keyword?: string;
+  taskName?: string;
   pageNum?: number;
   pageSize?: number;
 };
@@ -217,9 +217,9 @@ export const listScanLogItems = (logId: number) => POST<any>('/byaiService/devlo
 export const listRequirementsBySource = (sourceId: number) =>
   POST<any>('/byaiService/devloop/source/requirements', { sourceId });
 
-// 按项目一次查需求(后端时间倒序)，可按标题和内容模糊搜索。
-export const listRequirementsByProject = (projectId: number, keyword?: string) =>
-  POST<any>('/byaiService/devloop/project/requirements', { projectId, keyword: keyword || undefined });
+// 按项目一次查需求(后端时间倒序)，仅按需求名称模糊搜索。
+export const listRequirementsByProject = (projectId: number, title?: string) =>
+  POST<any>('/byaiService/devloop/project/requirements', { projectId, title: title || undefined });
 
 // PAT 管理
 export const saveGitHubPat = (pat: string) => POST<any>('/byaiService/devloop/pat/github', { pat });
@@ -289,9 +289,9 @@ export const addProjectMember = (data: {
   userName?: string;
 }) => POST<any>('/byaiService/devloop/member/add', data);
 
-// 项目成员列表支持按姓名、账号和绑定数字员工名称模糊搜索。
-export const listProjectMembers = (projectId: number, keyword?: string) =>
-  POST<any>('/byaiService/devloop/member/list', { projectId, keyword: keyword || undefined });
+// 项目成员列表仅按成员姓名模糊搜索，和成员 Tab 的输入提示保持一致。
+export const listProjectMembers = (projectId: number, userName?: string) =>
+  POST<any>('/byaiService/devloop/member/list', { projectId, userName: userName || undefined });
 
 export const removeProjectMember = (memberId: number) => POST<any>('/byaiService/devloop/member/remove', { memberId });
 

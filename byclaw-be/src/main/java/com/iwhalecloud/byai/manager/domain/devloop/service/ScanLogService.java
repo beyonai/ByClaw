@@ -116,19 +116,17 @@ public class ScanLogService {
         return listCreatedItemsBySources(sourceIds, null);
     }
 
-    /** 批量查询项目扫描源的已收集需求，并按标题和内容进行模糊匹配。 */
-    public List<ScanLogItem> listCreatedItemsBySources(List<Long> sourceIds, String keyword) {
+    /** 批量查询项目扫描源的已收集需求，并仅按需求名称进行模糊匹配。 */
+    public List<ScanLogItem> listCreatedItemsBySources(List<Long> sourceIds, String title) {
         if (sourceIds == null || sourceIds.isEmpty()) {
             return new java.util.ArrayList<>();
         }
         LambdaQueryWrapper<ScanLogItem> wrapper = new LambdaQueryWrapper<>();
         wrapper.in(ScanLogItem::getSourceId, sourceIds)
                .eq(ScanLogItem::getAction, "created");
-        String normalizedKeyword = StringUtils.trimToNull(keyword);
-        if (normalizedKeyword != null) {
-            wrapper.and(condition -> condition.like(ScanLogItem::getTitle, normalizedKeyword)
-                .or()
-                .like(ScanLogItem::getContent, normalizedKeyword));
+        String normalizedTitle = StringUtils.trimToNull(title);
+        if (normalizedTitle != null) {
+            wrapper.like(ScanLogItem::getTitle, normalizedTitle);
         }
         wrapper.orderByDesc(ScanLogItem::getCreateTime);
         return scanLogItemMapper.selectList(wrapper);

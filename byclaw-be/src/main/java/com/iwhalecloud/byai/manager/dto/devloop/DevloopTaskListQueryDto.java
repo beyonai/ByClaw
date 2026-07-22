@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.manager.dto.devloop;
 
 import java.util.Date;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonFormat;
 
 import lombok.Data;
@@ -21,8 +22,9 @@ public class DevloopTaskListQueryDto {
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private Date createTimeEnd;
 
-    /** 按会话标题和摘要模糊查询。 */
-    private String keyword;
+    /** 按任务名称模糊查询；兼容旧版 keyword 请求字段。 */
+    @JsonAlias("keyword")
+    private String taskName;
 
     private Integer pageNum;
     private Integer pageSize;

@@ -788,8 +788,8 @@ public class DevloopApplicationService {
         return listRequirementsByProject(projectId, null);
     }
 
-    /** 按项目查询已收集需求，并按标题和内容筛选匹配的条目。 */
-    public ResponseUtil<List<Map<String, Object>>> listRequirementsByProject(Long projectId, String keyword) {
+    /** 按项目查询已收集需求，并仅按需求名称筛选匹配的条目。 */
+    public ResponseUtil<List<Map<String, Object>>> listRequirementsByProject(Long projectId, String title) {
         List<ScanSource> sources = scanSourceService.listByProjectId(projectId);
         if (sources.isEmpty()) {
             return ResponseUtil.successResponse(new ArrayList<>());
@@ -800,7 +800,7 @@ public class DevloopApplicationService {
             sourceById.put(s.getSourceId(), s);
             sourceIds.add(s.getSourceId());
         }
-        List<ScanLogItem> items = scanLogService.listCreatedItemsBySources(sourceIds, keyword);
+        List<ScanLogItem> items = scanLogService.listCreatedItemsBySources(sourceIds, title);
         List<Map<String, Object>> list = new ArrayList<>();
         for (ScanLogItem item : items) {
             list.add(toRequirementMap(item, sourceById.get(item.getSourceId())));
@@ -1350,12 +1350,9 @@ public class DevloopApplicationService {
             .eq(ByaiSession::getProjectId, query.getProjectId())
             .ge(query.getCreateTimeStart() != null, ByaiSession::getCreateTime, query.getCreateTimeStart())
             .le(query.getCreateTimeEnd() != null, ByaiSession::getCreateTime, query.getCreateTimeEnd());
-        // 任务视图来自会话数据，关键字同时匹配会话标题和摘要，分页总数与前端搜索结果一致。
-        if (StringUtils.isNotBlank(query.getKeyword())) {
-            String keyword = query.getKeyword().trim();
-            wrapper.and(condition -> condition.like(ByaiSession::getSessionName, keyword)
-                .or()
-                .like(ByaiSession::getSessionContent, keyword));
+        // 任务名称与会话标题一一对应，搜索仅匹配名称，分页总数与前端搜索结果一致。
+        if (StringUtils.isNotBlank(query.getTaskName())) {
+            wrapper.like(ByaiSession::getSessionName, query.getTaskName().trim());
         }
         if (DEFAULT_PROJECT_ID.equals(query.getProjectId())) {
             // 默认项目共用 -1 分组，查询时必须按当前创建人隔离，避免读取其他账号的会话任务。
@@ -1739,9 +1736,9 @@ public class DevloopApplicationService {
         return listProjectMembers(projectId, null);
     }
 
-    /** 查询项目成员列表，并按姓名、账号和已绑定数字员工名称筛选。 */
-    public ResponseUtil<List<ProjectMemberListDto>> listProjectMembers(Long projectId, String keyword) {
-        return ResponseUtil.successResponse(projectMemberService.listProjectMembers(projectId, StringUtils.trimToNull(keyword)));
+    /** 查询项目成员列表，并仅按成员姓名筛选。 */
+    public ResponseUtil<List<ProjectMemberListDto>> listProjectMembers(Long projectId, String userName) {
+        return ResponseUtil.successResponse(projectMemberService.listProjectMembers(projectId, StringUtils.trimToNull(userName)));
     }
 
     /** 移除项目成员 */

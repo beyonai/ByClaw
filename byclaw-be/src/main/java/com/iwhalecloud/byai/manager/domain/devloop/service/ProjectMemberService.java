@@ -70,9 +70,9 @@ public class ProjectMemberService {
         return listProjectMembers(projectId, null);
     }
 
-    /** 按项目查询成员，并按姓名、账号和已绑定数字员工名称模糊筛选。 */
-    public List<ProjectMemberListDto> listProjectMembers(Long projectId, String keyword) {
-        return memberMapper.listProjectMembers(projectId, keyword);
+    /** 按项目查询成员，并仅按成员姓名模糊筛选。 */
+    public List<ProjectMemberListDto> listProjectMembers(Long projectId, String userName) {
+        return memberMapper.listProjectMembers(projectId, userName);
     }
 
     /**

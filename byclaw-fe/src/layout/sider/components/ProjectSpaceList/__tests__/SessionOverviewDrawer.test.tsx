@@ -3,6 +3,31 @@ import dayjs from 'dayjs';
 import { listTasks } from '@/service/devloop';
 import SessionOverviewDrawer from '../SessionOverviewDrawer';
 
+// 单测只校验任务看板行为，避免加载 Umi 运行时及其 Node 环境依赖。
+jest.mock('@umijs/max', () => {
+  // 保持 intl 引用稳定，避免依赖翻译函数的查询 effect 在测试中重复执行。
+  const intl = {
+    formatMessage: ({ id }: { id: string }) => id,
+  };
+
+  return {
+    useIntl: () => intl,
+  };
+});
+
+jest.mock('antd', () => {
+  const antd = jest.requireActual('antd');
+
+  return {
+    ...antd,
+    // 该用例不覆盖日期组件交互，避免 RangePicker 在 JSDOM 中的受控值循环影响任务看板断言。
+    DatePicker: {
+      ...antd.DatePicker,
+      RangePicker: () => null,
+    },
+  };
+});
+
 jest.mock('@/service/devloop', () => ({
   listTasks: jest.fn(),
 }));

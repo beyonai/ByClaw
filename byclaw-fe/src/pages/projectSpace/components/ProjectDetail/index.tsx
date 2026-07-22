@@ -3,6 +3,7 @@ import { ReloadOutlined } from '@ant-design/icons';
 import { useEffect, useMemo, useState } from 'react';
 import { PROJECT_DETAIL_SECTIONS, type ProjectDetailSection } from '../../constants';
 import { useProjectSessions } from '../../hooks/useProjectSessions';
+import { useProjectTypeConfig } from '../../hooks/useProjectTypeConfig';
 import type { ProjectSession, ProjectSpace } from '../../types';
 import ProjectMembers from '../ProjectMembers';
 import ProjectRequirements from '../ProjectRequirements';
@@ -21,10 +22,11 @@ interface Props {
 const ProjectDetail: React.FC<Props> = ({ project, loading, onRefresh, onOpenSession }) => {
   const [activeSection, setActiveSection] = useState<ProjectDetailSection>('sessions');
   const { sessions, total } = useProjectSessions(project);
-  const showRequirementsSection =
-    project?.projectType === 'develop' || (project?.projectType === 'normal' && !!project?.sharedFlag);
-  const showMembersSection =
-    project?.projectType !== 'default' && (project?.projectType === 'develop' || !!project?.sharedFlag);
+  const { isDevelopProjectEnabled } = useProjectTypeConfig();
+  // 研发能力以静态参数为准，未配置研发项目时普通共享项目也不展示研发专属分区。
+  const isDevelopProject = isDevelopProjectEnabled && project?.projectType === 'develop';
+  const showRequirementsSection = isDevelopProject;
+  const showMembersSection = isDevelopProject;
   const detailSections = useMemo(
     () =>
       PROJECT_DETAIL_SECTIONS.filter((item) => {

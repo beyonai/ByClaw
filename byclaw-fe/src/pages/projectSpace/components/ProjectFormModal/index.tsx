@@ -4,8 +4,8 @@ import { CloseCircleFilled, PlusOutlined } from '@ant-design/icons';
 import { useSelector } from '@umijs/max';
 import AddAuthModal from '@/pages/manager/components/AuthListDrawer/AddAuthModal';
 import { listProjectMembers } from '@/service/devloop';
-import { getDcSystemConfigListByStandType } from '@/service/system';
-import { DEFAULT_PROJECT_TYPE_OPTION, PROJECT_TYPE_OPTIONS, PROJECT_TYPE_STAND_TYPE } from '../../constants';
+import { DEFAULT_PROJECT_TYPE_OPTION, PROJECT_TYPE_LABEL, PROJECT_TYPE_OPTIONS } from '../../constants';
+import type { ProjectTypeOption } from '../../hooks/useProjectTypeConfig';
 import type { ProjectSpace } from '../../types';
 import styles from './index.module.less';
 
@@ -36,11 +36,11 @@ interface Props {
   initialValues?: Partial<ProjectFormValues>;
   projectId?: string | number;
   creatorId?: string | number;
+  projectTypeConfigOptions?: ProjectTypeOption[];
+  projectTypeLoading?: boolean;
   onCancel: () => void;
   onSubmit: (values: ProjectFormValues) => void;
 }
-
-type ProjectTypeOption = { label: string; value: ProjectSpace['projectType'] };
 
 const getMemberUserId = (member: any) => member.userId ?? String(member.id || '').replace(/^user_/, '');
 
@@ -48,35 +48,6 @@ const isProjectOwnerMember = (member: any, creatorId?: string | number) => {
   // 新老数据都兼容：新数据有 owner role，老数据用项目创建人 ID 兜底。
   const isOwnerRole = ['owner', 'creator'].includes(`${member?.role || ''}`.toLowerCase());
   return isOwnerRole || (!!creatorId && `${getMemberUserId(member)}` === `${creatorId}`);
-};
-
-const getStaticConfigList = (response: any): any[] => {
-  if (Array.isArray(response)) return response;
-  if (Array.isArray(response?.data)) return response.data;
-  if (Array.isArray(response?.rows)) return response.rows;
-  if (Array.isArray(response?.list)) return response.list;
-  return [];
-};
-
-const getProjectTypeOptionsFromConfig = (response: any): ProjectTypeOption[] => {
-  const validProjectTypeSet = new Set(['normal', 'develop', 'default']);
-
-  return getStaticConfigList(response)
-    .map((item, index) => {
-      const value = `${item?.paramValue || item?.paramEnName || ''}`.trim();
-      const label = item?.paramName || item?.paramDesc || item?.paramEnName || value;
-      return {
-        label,
-        value,
-        seq: Number(item?.paramSeq ?? index),
-      };
-    })
-    .filter((item) => item.value && validProjectTypeSet.has(item.value))
-    .sort((left, right) => left.seq - right.seq)
-    .map((item) => ({
-      label: item.label,
-      value: item.value as ProjectSpace['projectType'],
-    }));
 };
 
 const normalizeShareMember = (member: any): ProjectShareMember => {
@@ -102,6 +73,8 @@ const ProjectFormModal: React.FC<Props> = ({
   initialValues,
   projectId,
   creatorId,
+  projectTypeConfigOptions,
+  projectTypeLoading,
   onCancel,
   onSubmit,
 }) => {
@@ -111,11 +84,13 @@ const ProjectFormModal: React.FC<Props> = ({
   const [selectedShareMembers, setSelectedShareMembers] = useState<ProjectShareMember[]>([]);
   const [shareMembersLoading, setShareMembersLoading] = useState(false);
   const [shareMembersLoaded, setShareMembersLoaded] = useState(false);
-  const [projectTypeConfigOptions, setProjectTypeConfigOptions] = useState<ProjectTypeOption[]>(PROJECT_TYPE_OPTIONS);
-  const [projectTypeLoading, setProjectTypeLoading] = useState(false);
+  const configuredProjectTypeOptions = projectTypeConfigOptions?.length
+    ? projectTypeConfigOptions
+    : PROJECT_TYPE_OPTIONS;
+  const isDevelopProjectEnabled = configuredProjectTypeOptions.some((option) => option.value === 'develop');
   const projectType = Form.useWatch('projectType', form);
   const sharedFlag = Form.useWatch('sharedFlag', form);
-  const isDevelopProject = projectType === 'develop';
+  const isDevelopProject = isDevelopProjectEnabled && projectType === 'develop';
   const formInitialValues = useMemo(() => {
     const values = {
       projectName: '',
@@ -134,36 +109,30 @@ const ProjectFormModal: React.FC<Props> = ({
   const isEditingDefaultProject = !!projectId && formInitialValues.projectType === 'default';
   const isDefaultProject = projectType === 'default' || isEditingDefaultProject;
   const isProjectShared = !isDefaultProject && (isDevelopProject || !!sharedFlag);
-  const projectTypeOptions = useMemo(() => {
-    const configOptions = projectTypeConfigOptions.length ? projectTypeConfigOptions : PROJECT_TYPE_OPTIONS;
-    const normalOptions = configOptions.filter((option) => option.value !== 'default');
+  const visibleProjectTypeOptions = useMemo(() => {
+    const selectableOptions = configuredProjectTypeOptions.filter((option) => option.value !== 'default');
 
     // 默认项目只用于编辑默认项目时回显，不放入新建项目和普通项目编辑的下拉选项。
     if (formInitialValues.projectType === 'default') {
-      const defaultOption = configOptions.find((option) => option.value === 'default') || DEFAULT_PROJECT_TYPE_OPTION;
-      return [defaultOption, ...normalOptions];
+      const defaultOption =
+        configuredProjectTypeOptions.find((option) => option.value === 'default') || DEFAULT_PROJECT_TYPE_OPTION;
+      return [defaultOption, ...selectableOptions];
     }
-    return normalOptions;
-  }, [formInitialValues.projectType, projectTypeConfigOptions]);
 
-  useEffect(() => {
-    if (!open) return;
+    if (!selectableOptions.some((option) => option.value === formInitialValues.projectType)) {
+      // 历史研发项目在未配置研发类型的环境中仅允许回显，避免 Select 出现空值。
+      return [
+        {
+          label: PROJECT_TYPE_LABEL[formInitialValues.projectType],
+          value: formInitialValues.projectType,
+          disabled: true,
+        },
+        ...selectableOptions,
+      ];
+    }
 
-    setProjectTypeLoading(true);
-    getDcSystemConfigListByStandType(PROJECT_TYPE_STAND_TYPE, { responseCfg: { hideErrorTips: true } })
-      .then((response) => {
-        const nextOptions = getProjectTypeOptionsFromConfig(response);
-        // 静态参数为空时回退本地默认值，避免配置异常导致项目表单不可用。
-        setProjectTypeConfigOptions(nextOptions.length ? nextOptions : PROJECT_TYPE_OPTIONS);
-      })
-      .catch((error) => {
-        console.error('Failed to load project type config:', error);
-        setProjectTypeConfigOptions(PROJECT_TYPE_OPTIONS);
-      })
-      .finally(() => {
-        setProjectTypeLoading(false);
-      });
-  }, [open]);
+    return selectableOptions;
+  }, [configuredProjectTypeOptions, formInitialValues.projectType]);
 
   useEffect(() => {
     if (!open) return;
@@ -173,6 +142,12 @@ const ProjectFormModal: React.FC<Props> = ({
     setSelectedShareMembers((formInitialValues.shareMembers || []).map(normalizeShareMember));
     setShareMembersLoaded(!projectId);
   }, [form, formInitialValues, open, projectId]);
+
+  useEffect(() => {
+    if (!open || projectId || !visibleProjectTypeOptions.length) return;
+    // 新建项目始终采用当前下拉列表第一项，静态参数异步返回后也会同步更新默认值。
+    form.setFieldValue('projectType', visibleProjectTypeOptions[0].value);
+  }, [form, open, projectId, visibleProjectTypeOptions]);
 
   useEffect(() => {
     if (!open || !projectId) return;
@@ -240,7 +215,8 @@ const ProjectFormModal: React.FC<Props> = ({
   };
 
   const handleModalOk = () => {
-    if (loading) return;
+    // 项目类型能力未确认前不提交，避免历史研发项目被按普通项目规则保存。
+    if (loading || projectTypeLoading) return;
 
     // 后端共享成员保存/校验暂未实现，先不限制必填；实现后恢复下面这段校验。
     // const submitSharedFlag = form.getFieldValue('projectType') === 'develop' || form.getFieldValue('sharedFlag');
@@ -263,8 +239,8 @@ const ProjectFormModal: React.FC<Props> = ({
   };
 
   const handleSubmit = (values: ProjectFormValues) => {
-    const submitSharedFlag =
-      values.projectType === 'default' ? false : values.projectType === 'develop' || values.sharedFlag;
+    const submitIsDevelopProject = isDevelopProjectEnabled && values.projectType === 'develop';
+    const submitSharedFlag = values.projectType === 'default' ? false : submitIsDevelopProject || values.sharedFlag;
     // 共享成员由成员 tab 同源数据维护，提交时合并进表单值，避免未注册字段丢失。
     onSubmit({
       ...values,
@@ -280,7 +256,7 @@ const ProjectFormModal: React.FC<Props> = ({
       title={title}
       open={open}
       confirmLoading={loading}
-      okButtonProps={{ disabled: loading }}
+      okButtonProps={{ disabled: loading || projectTypeLoading }}
       onCancel={onCancel}
       onOk={handleModalOk}
       width={720}
@@ -303,9 +279,9 @@ const ProjectFormModal: React.FC<Props> = ({
           <Select
             disabled={isEditingDefaultProject}
             loading={projectTypeLoading}
-            options={projectTypeOptions}
+            options={visibleProjectTypeOptions}
             onChange={(value: ProjectSpace['projectType']) => {
-              if (value === 'develop') {
+              if (isDevelopProjectEnabled && value === 'develop') {
                 form.setFieldValue('sharedFlag', true);
                 return;
               }
