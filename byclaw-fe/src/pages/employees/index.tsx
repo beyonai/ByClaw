@@ -13,6 +13,7 @@ import ChatLayoutComp from '@/components/ChatLayoutComp';
 import { agentTypeMap } from '@/constants/agent';
 import useGlobal from '@/hooks/useGlobal';
 import { queryResourceDetail } from '@/pages/manager/service/DigitalResourceMgr';
+import { queryResourceOperationPermissions } from '@/pages/manager/service/resources';
 import { IAgentCache } from '@/typescript/agent';
 import { getAgentChatAvatar, agentHandler, isSandboxAgent } from '@/utils/agent';
 import { AgentInfo } from '@/pages/digitalEmployees/components/AllDigitalEmployees/components/AvatarCardItem';
@@ -22,6 +23,7 @@ import { getAllDigitalEmployeesV2 } from '@/service/digitalEmployees';
 import RenderRightTop from '../digitalEmployees/components/AllDigitalEmployees/RenderRightTop';
 import RenderRightBottom from '../digitalEmployees/components/AllDigitalEmployees/RenderRightBottom';
 import AgentIframe from './components/AgentIframe';
+import { canShowEmployeeChat, type EmployeeUsePermission } from './chatPermission';
 // import ScheduleTaskModal from './components/ScheduleTaskModal';
 // import ScheduleTaskList from './components/ScheduleTaskList';
 
@@ -50,12 +52,15 @@ const Employees = () => {
 
   const [appInfo, setAppInfo] = useState<Record<string, any>>({});
   const [coreCompetencies, setCoreCompetencies] = useState<any[]>([]);
+  const [employeeUsePermission, setEmployeeUsePermission] = useState<EmployeeUsePermission | null>(null);
 
   // const [scheduleTaskVisible, setScheduleTaskVisible] = useState(false);
   // const [editTask, setEditTask] = useState<any>(null);
   // const [taskListRefreshKey, setTaskListRefreshKey] = useState(0);
 
   const myAgentId = agentId || searchParams.get('agentId');
+  const employeeTab = searchParams.get('tab');
+  const employeeResourceId = `${agentInfo?.resourceId || agentInfo?.id || ''}`;
 
   // const handleScheduleTaskOk = (values: any) => {
   //   // 创建/更新成功后刷新任务列表
@@ -102,12 +107,9 @@ const Employees = () => {
     return payload;
   }, [appInfo]);
 
-  // const canChat = useMemo(() => {
-  //   if (isBottom) return true;
-  //   const { grantType } = agentInfo || {};
-  //   console.log('grantType', grantType);
-  //   return !!grantType;
-  // }, [agentInfo, isBottom]);
+  const canChat = useMemo(() => {
+    return canShowEmployeeChat(employeeTab, employeeResourceId, employeeUsePermission);
+  }, [employeeResourceId, employeeTab, employeeUsePermission]);
 
   const disableActionList = React.useMemo(() => {
     const list: ('delete' | 'apply' | 'unapply')[] = [];
@@ -158,6 +160,38 @@ const Employees = () => {
   useEffect(() => {
     setIsBottom(!!sessionId);
   }, [sessionId]);
+
+  useEffect(() => {
+    if (employeeTab !== 'enterprise' || !employeeResourceId) {
+      setEmployeeUsePermission(null);
+      return undefined;
+    }
+
+    let cancelled = false;
+    setEmployeeUsePermission(null);
+
+    queryResourceOperationPermissions({ resourceId: employeeResourceId })
+      .then((res: any) => {
+        if (cancelled) {
+          return;
+        }
+
+        const permissions = res?.data || res || {};
+        setEmployeeUsePermission({
+          resourceId: employeeResourceId,
+          hasUsePermission: permissions?.hasUsePermission === true,
+        });
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setEmployeeUsePermission(null);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [employeeResourceId, employeeTab]);
 
   useEffect(() => {
     // 当redirectUrl中带有agentId，pclayout中的searchParams获取不到agentId
@@ -323,20 +357,20 @@ const Employees = () => {
             </div>
           )}
 
-          {/* {canChat && ( */}
-          <div className={classnames({ 'ub-f1': isBottom })}>
-            <ChatLayoutComp
-              sessionId={sessionId || ''}
-              getContainer={() => document.getElementById('employees_wrapper')}
-              agentType={agentTypeMap.agent}
-              queryInputProps={{
-                placeholder: '',
-              }}
-              isBottom={isBottom}
-              setIsBottom={setIsBottom}
-            />
-          </div>
-          {/* )} */}
+          {canChat && (
+            <div className={classnames({ 'ub-f1': isBottom })}>
+              <ChatLayoutComp
+                sessionId={sessionId || ''}
+                getContainer={() => document.getElementById('employees_wrapper')}
+                agentType={agentTypeMap.agent}
+                queryInputProps={{
+                  placeholder: '',
+                }}
+                isBottom={isBottom}
+                setIsBottom={setIsBottom}
+              />
+            </div>
+          )}
         </div>
       </div>
 
