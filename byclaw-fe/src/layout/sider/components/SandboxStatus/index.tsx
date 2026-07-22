@@ -16,26 +16,24 @@ const SandboxStatusIndicator: React.FC<SandboxStatusIndicatorProps> = ({ userCod
   const intl = useIntl();
   const { status, refetch, restartSandbox } = useSandboxStatus(userCode);
   const [isRestarting, setIsRestarting] = useState(false);
+  const [confirmModalVisible, setConfirmModalVisible] = useState(false);
 
-  const handleRestart = async () => {
-    Modal.confirm({
-      title: intl.formatMessage({ id: 'sandbox.restart.confirm.title' }),
-      content: intl.formatMessage({ id: 'sandbox.restart.confirm.content' }),
-      okText: intl.formatMessage({ id: 'sandbox.restart.confirm.ok' }),
-      cancelText: intl.formatMessage({ id: 'sandbox.restart.confirm.cancel' }),
-      onOk: async () => {
-        try {
-          setIsRestarting(true);
-          await restartSandbox();
-          message.success(intl.formatMessage({ id: 'sandbox.restart.success' }));
-          refetch();
-        } catch (error) {
-          message.error(intl.formatMessage({ id: 'sandbox.restart.failed' }));
-        } finally {
-          setIsRestarting(false);
-        }
-      },
-    });
+  const handleRestartConfirm = async () => {
+    setIsRestarting(true);
+    try {
+      await restartSandbox();
+      message.success(intl.formatMessage({ id: 'sandbox.restart.success' }));
+      setConfirmModalVisible(false);
+      refetch();
+    } catch (error) {
+      message.error(intl.formatMessage({ id: 'sandbox.restart.failed' }));
+    } finally {
+      setIsRestarting(false);
+    }
+  };
+
+  const handleRestart = () => {
+    setConfirmModalVisible(true);
   };
 
   const menuItems: MenuProps['items'] = [
@@ -67,13 +65,29 @@ const SandboxStatusIndicator: React.FC<SandboxStatusIndicatorProps> = ({ userCod
   });
 
   return (
-    <Dropdown menu={{ items: menuItems }} placement="topRight" trigger={['click']}>
-      <Tooltip placement="right" title={getStatusText()}>
-        <div className={classNames(styles.sandboxStatusWrap, className)} style={style}>
-          <div className={statusDotClass} />
-        </div>
-      </Tooltip>
-    </Dropdown>
+    <>
+      <Dropdown menu={{ items: menuItems }} placement="topRight" trigger={['click']}>
+        <Tooltip placement="right" title={getStatusText()}>
+          <div className={classNames(styles.sandboxStatusWrap, className)} style={style}>
+            <div className={statusDotClass} />
+          </div>
+        </Tooltip>
+      </Dropdown>
+      <Modal
+        title={intl.formatMessage({ id: 'sandbox.restart.confirm.title' })}
+        open={confirmModalVisible}
+        onOk={handleRestartConfirm}
+        onCancel={() => setConfirmModalVisible(false)}
+        okText={intl.formatMessage({ id: 'sandbox.restart.confirm.ok' })}
+        cancelText={intl.formatMessage({ id: 'sandbox.restart.confirm.cancel' })}
+        confirmLoading={isRestarting}
+        cancelButtonProps={{ disabled: isRestarting }}
+        maskClosable={!isRestarting}
+        closable={!isRestarting}
+      >
+        {intl.formatMessage({ id: 'sandbox.restart.confirm.content' })}
+      </Modal>
+    </>
   );
 };
 
