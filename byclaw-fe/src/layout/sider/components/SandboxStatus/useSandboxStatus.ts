@@ -4,7 +4,7 @@ import { getSandboxInfo, removeSandbox, launchSandboxByUserCode, type SandboxInf
 
 type SandboxStatus = 'running' | 'transitioning' | 'stopped';
 
-const POLL_INTERVAL = 10000; // 10秒轮询一次
+const POLL_INTERVAL = 5000; // 5秒轮询一次
 
 function calculateStatus(sandboxes: SandboxInfo[]): SandboxStatus {
   if (!sandboxes || sandboxes.length === 0) {
