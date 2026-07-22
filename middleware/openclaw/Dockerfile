@@ -95,14 +95,12 @@ ARG INSTALL_BROWSER_STACK=true
 RUN chown root:root /app
 
 RUN set -eux; \
-    for gid in 999 1001; do \
-        group_name="$(getent group "${gid}" | cut -d: -f1 || true)"; \
-        if [ -z "${group_name}" ]; then \
-            group_name="byclaw-gid-${gid}"; \
-            groupadd --gid "${gid}" "${group_name}"; \
-        fi; \
-        usermod -aG "${group_name}" root; \
-    done
+    if getent group byclaw >/dev/null; then \
+        test "$(getent group byclaw | cut -d: -f3)" = "999"; \
+    else \
+        groupadd --gid 999 byclaw; \
+    fi; \
+    usermod -aG byclaw root
 
 ENV PIP_BREAK_SYSTEM_PACKAGES=1 \
     PIP_ROOT_USER_ACTION=ignore \
