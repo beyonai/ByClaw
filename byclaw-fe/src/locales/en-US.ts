@@ -1940,6 +1940,12 @@ export default {
   'newChat.alreadyLatestSession': 'Already in the latest session',
 
   'sandbox.waitTips': 'Initializing sandbox environment, please wait...',
+  'sandbox.status.running': 'Sandbox Running',
+  'sandbox.status.transitioning': 'Sandbox Starting/Stopping',
+  'sandbox.status.stopped': 'Sandbox Stopped',
+  'sandbox.action.restart': 'Restart Sandbox',
+  'sandbox.restart.success': 'Sandbox restarted successfully',
+  'sandbox.restart.failed': 'Failed to restart sandbox, please try again later',
   'ThinkRewriteQuestion.originalQuestion': 'Original Question',
   'thinkStatus.errorDetail': 'Error Detail',
   compaction: 'Context Compression',
