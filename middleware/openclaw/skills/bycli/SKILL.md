@@ -307,6 +307,16 @@ pkill -f chromium 2>/dev/null || true
 ### 1. 自动落盘（采集完成时立即执行，无需等用户确认）
 
 - 将采集结果完整内容（Markdown 正文 + 元数据）自动落盘到会话目录，**最多落盘 10 篇**
+- 每篇预存 Markdown 正文开头必须写入 YAML front matter 字段 `bycli_filter`，其数组值来自本次用户明确给出的检索词、站内筛选参数和用户限定；例如：
+
+  ```yaml
+  ---
+  bycli_filter:
+    - 初生婴儿
+  ---
+  ```
+
+  未提供明确条件时写 `bycli_filter: []`，不得从标题、站点标签、推荐排序或模型推断条件。若原文已有 YAML front matter，合并或更新该字段并保留其余字段，不得创建第二段 front matter。
 - 同时写入 `bycli-output.json`（含全部结果索引，包括未落盘文章的标题 / URL）
 - 落盘后向用户展示采集摘要并询问：
 
@@ -318,7 +328,7 @@ pkill -f chromium 2>/dev/null || true
 - **知识整理** → 委派 knowledge-organizer skill（知识整理），把用户选择范围内的已落盘 Markdown / 支持的文档文件路径交给它；整理、拆分、gbrain 写入、对象打标等按该 skill 的规则执行
 - 入库和知识整理是互斥处理动作；如果用户同时要求两者，先让用户选择其中一个，不自动排序、不组合执行
 - **已落盘文章** → 后续 skill 直接使用落盘文件，不重新采集
-- **超出 10 篇的剩余文章** → 委派前先按用户选择范围逐篇补采正文并追加落盘，再交给对应 skill
+- **超出 10 篇的剩余文章** → 委派前先按用户选择范围逐篇补采正文；补采时同样写入或合并 `bycli_filter` YAML front matter，并追加落盘，再交给对应 skill
 - 处理范围以用户选择为准（全部 / 指定篇目 / 仅前 N 篇）
 
 ### 3. 用户拒绝 / 跳过
@@ -362,14 +372,14 @@ pkill -f chromium 2>/dev/null || true
 | 文件 | 说明 |
 |------|------|
 | `bycli-output.json` | 规范化入参，结构 `{title, url, items:[{title, url, author, publish_time, markdown, fileName}]}` |
-| `<fileName>.md` | 原始 Markdown 正文（与 `items[].fileName` 一致） |
+| `<fileName>.md` | 原始 Markdown 正文（与 `items[].fileName` 一致）；文件开头包含 `bycli_filter` YAML front matter，该规则适用于全部 site、现成 adapter 和浏览器降级驱动 |
 
 ### 可选文件
 
 | 文件 | 说明 |
 |------|------|
 | `search-results.json` | 多结果采集的原始结果快照 |
-| `metadata.json` | 来源、点赞 / 评论 / 阅读数、采集时间、策略、session 信息 |
+| `metadata.json` | 来源、点赞 / 评论 / 阅读数、采集时间、策略、session 信息，以及本次用户明确提供的 `bycli_filter` 条件 |
 | `pages/<slug>.html` / `pages/<slug>.json` | 原始抓取页（事后回放） |
 
 ### 落盘后交给处理技能

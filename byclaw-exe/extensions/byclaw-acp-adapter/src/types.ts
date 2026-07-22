@@ -107,16 +107,12 @@ export type MetadataArtifact = {
 };
 
 export type MetadataBootstrapContract = {
-  protocolVersion: 1;
+  protocolVersion: 2;
   bootstrapId: string;
   policy: "fail-closed";
   runDir: string;
   precedence: string[];
   metadata: MetadataArtifact;
-  clientInstructions: {
-    path: string;
-    required: true;
-  };
   query: {
     path: string;
     readAfterBootstrap: true;

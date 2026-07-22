@@ -94,6 +94,14 @@ ARG INSTALL_BROWSER_STACK=true
 
 RUN chown root:root /app
 
+RUN set -eux; \
+    if getent group byclaw >/dev/null; then \
+        test "$(getent group byclaw | cut -d: -f3)" = "999"; \
+    else \
+        groupadd --gid 999 byclaw; \
+    fi; \
+    usermod -aG byclaw root
+
 ENV PIP_BREAK_SYSTEM_PACKAGES=1 \
     PIP_ROOT_USER_ACTION=ignore \
     OPENCLAW_BUNDLED_PLUGINS_DIR=/app/dist/extensions \
@@ -199,7 +207,7 @@ RUN set -eux; \
     python3 --version | grep -q 'Python 3.12'; \
     python3 -m pip config --global set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple; \
     python3 -m pip config --global set global.trusted-host pypi.tuna.tsinghua.edu.cn; \
-    python3 -m pip install --no-cache-dir redis websockify by-framework; \
+    python3 -m pip install --no-cache-dir redis websockify by-framework==0.2.2.dev10; \
     rm -f /usr/bin/websockify; \
     ln -sf /usr/local/bin/websockify /usr/bin/websockify; \
     websockify --help >/dev/null

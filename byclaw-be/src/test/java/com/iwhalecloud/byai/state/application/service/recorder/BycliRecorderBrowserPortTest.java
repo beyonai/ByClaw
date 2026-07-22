@@ -66,6 +66,7 @@ class BycliRecorderBrowserPortTest {
         daemon = FakeDaemon.start();
         daemon.enqueueJson(200, Map.of("ok", true, "extensionConnected", false));
         daemon.enqueueJson(202, Map.of("ok", true, "data", Map.of("started", true)));
+        daemon.enqueueJson(200, Map.of("ok", true, "extensionConnected", false));
         daemon.enqueueJson(200, Map.of("ok", true, "extensionConnected", true));
 
         RecorderBrowserProperties properties = new RecorderBrowserProperties();
@@ -74,10 +75,34 @@ class BycliRecorderBrowserPortTest {
 
         Map<String, Object> health = new BycliRecorderBrowserPort(properties).health();
 
-        assertThat(daemon.paths()).containsExactly("/status", "/v1/browser/recover", "/status");
+        assertThat(daemon.paths()).containsExactly("/status", "/v1/browser/recover", "/status", "/status");
         assertThat(health).containsEntry("daemon", "ok")
             .containsEntry("extension", "ok")
             .containsEntry("highLevel", "ok");
+    }
+
+    @Test
+    void navigateRecoversDisconnectedExtensionAndRetriesOnce() throws Exception {
+        daemon = FakeDaemon.start();
+        daemon.enqueueJson(503, Map.of(
+            "ok", false,
+            "errorCode", "extension_not_connected",
+            "error", "Extension not connected"
+        ));
+        daemon.enqueueJson(202, Map.of("ok", true, "data", Map.of("started", true)));
+        daemon.enqueueJson(200, Map.of("ok", true, "extensionConnected", true));
+        daemon.enqueueJson(200, Map.of(
+            "ok", true,
+            "page", "page-after-recovery",
+            "data", Map.of("title", "Recovered")
+        ));
+        RecorderSession session = new RecorderSession("session-1", new RecorderOwner(1L, "alice"));
+
+        Map<String, Object> result = port().navigate(session, "https://example.com/recovered");
+
+        assertThat(daemon.paths()).containsExactly("/command", "/v1/browser/recover", "/status", "/command");
+        assertThat(result).containsEntry("page", "page-after-recovery")
+            .containsEntry("title", "Recovered");
     }
 
     @Test

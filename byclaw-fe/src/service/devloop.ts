@@ -30,6 +30,7 @@ export type DevloopTaskListQuery = {
   projectId: number;
   createTimeStart?: string;
   createTimeEnd?: string;
+  taskName?: string;
   pageNum?: number;
   pageSize?: number;
 };
@@ -216,9 +217,9 @@ export const listScanLogItems = (logId: number) => POST<any>('/byaiService/devlo
 export const listRequirementsBySource = (sourceId: number) =>
   POST<any>('/byaiService/devloop/source/requirements', { sourceId });
 
-// 按项目一次查全部需求(后端时间倒序)，替代前端逐源循环请求
-export const listRequirementsByProject = (projectId: number) =>
-  POST<any>('/byaiService/devloop/project/requirements', { projectId });
+// 按项目一次查需求(后端时间倒序)，仅按需求名称模糊搜索。
+export const listRequirementsByProject = (projectId: number, title?: string) =>
+  POST<any>('/byaiService/devloop/project/requirements', { projectId, title: title || undefined });
 
 // PAT 管理
 export const saveGitHubPat = (pat: string) => POST<any>('/byaiService/devloop/pat/github', { pat });
@@ -243,6 +244,8 @@ export const getTaskDetail = (sessionId: number) => POST<any>('/byaiService/devl
 // status: ok | no_repo | no_token | branch_not_found | http_error；files 每项含 filename/status/additions/deletions/previousFilename。
 export type DevloopTaskChanges = {
   status: 'ok' | 'no_repo' | 'no_token' | 'branch_not_found' | 'http_error';
+  // 变更来源:local=读宿主机工作区 git(含未推送/未提交),remote=GitHub 远程 compare(仅已推送)。
+  source?: 'local' | 'remote';
   repoFullName?: string | null;
   baseBranch?: string | null;
   headBranch?: string | null;
@@ -263,6 +266,17 @@ export type DevloopTaskChanges = {
 export const getTaskChanges = (sessionId: number) =>
   POST<DevloopTaskChanges>('/byaiService/devloop/task/changes', { sessionId });
 
+// 单个文件的本地 diff(unified 文本),供 modal 逐行渲染。status: ok | no_workspace | not_git_repo | git_error。
+export type DevloopTaskFileDiff = {
+  status: 'ok' | 'no_workspace' | 'not_git_repo' | 'git_error';
+  filename?: string | null;
+  diff?: string | null;
+  message?: string | null;
+};
+
+export const getTaskFileDiff = (sessionId: number, filePath: string) =>
+  POST<DevloopTaskFileDiff>('/byaiService/devloop/task/file-diff', { sessionId, filePath });
+
 // 任务环节进度：直接读取 self-developed-rules v2 会话状态投影
 export const getTaskPhases = (sessionId: number) =>
   POST<DevloopTaskState>('/byaiService/devloop/task/phases', { sessionId });
@@ -275,7 +289,9 @@ export const addProjectMember = (data: {
   userName?: string;
 }) => POST<any>('/byaiService/devloop/member/add', data);
 
-export const listProjectMembers = (projectId: number) => POST<any>('/byaiService/devloop/member/list', { projectId });
+// 项目成员列表仅按成员姓名模糊搜索，和成员 Tab 的输入提示保持一致。
+export const listProjectMembers = (projectId: number, userName?: string) =>
+  POST<any>('/byaiService/devloop/member/list', { projectId, userName: userName || undefined });
 
 export const removeProjectMember = (memberId: number) => POST<any>('/byaiService/devloop/member/remove', { memberId });
 

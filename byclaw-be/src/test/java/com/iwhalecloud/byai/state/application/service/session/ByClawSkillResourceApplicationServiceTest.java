@@ -733,7 +733,9 @@ class ByClawSkillResourceApplicationServiceTest {
         ArgumentCaptor<SsResExtSkill> extCaptor = ArgumentCaptor.forClass(SsResExtSkill.class);
         verify(ssResExtSkillService).saveOrUpdate(extCaptor.capture());
         assertThat(extCaptor.getValue().getTargetContent()).contains("\"sourceDownloadUrl\":\"" + downloadUrl + "\"");
-        verify(digitalEmployeeApplicationService).refreshInstalledSkillRuntime(9001L);
+        verify(digitalEmployeeApplicationService).rebuildAndSaveDigitalEmployeeRelSkills(9001L);
+        verify(digitalEmployeeRuntimeRefreshService).scheduleSkillRuntimeRefreshAfterCommit(
+            org.mockito.ArgumentMatchers.argThat(ids -> ids.size() == 1 && ids.contains(9001L)));
     }
 
     @Test

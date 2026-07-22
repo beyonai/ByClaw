@@ -2,6 +2,43 @@ import { ALL_KNOWLEDGE_RESOURCE_BIZ_TYPE_VALUES, ALL_RESOURCE_BIZ_TYPE_VALUES } 
 
 const KNOWLEDGE_RESOURCE_BIZ_TYPE_VALUES = ['KG_DOC', 'KG_QA', 'KG_TERM'];
 
+export const SKILL_MARKETPLACE_INSTALLED_MESSAGE_TYPE = 'BYCLAW_SKILL_INSTALLED';
+
+export const buildSkillMarketplaceUrl = (
+  digitalEmployeeId?: string | number | null,
+  beyondToken?: string | null,
+  parentOrigin?: string | null
+) => {
+  const url = new URL('https://www.iwhaleai.com/skillHub/dashboard');
+  url.searchParams.set('tab', 'skills');
+  if (`${digitalEmployeeId ?? ''}`.trim()) {
+    url.searchParams.set('digId', `${digitalEmployeeId}`);
+  }
+  if (`${beyondToken ?? ''}`.trim()) {
+    url.searchParams.set('beyondToken', `${beyondToken}`.trim());
+  }
+  if (`${parentOrigin ?? ''}`.trim()) {
+    url.searchParams.set('parentOrigin', `${parentOrigin}`.trim());
+  }
+  return url.toString();
+};
+
+export const isSkillMarketplaceInstalledMessage = (
+  payload: unknown,
+  activeDigitalEmployeeId?: string | number | null
+) => {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return false;
+  }
+
+  const message = payload as Record<string, unknown>;
+  const activeDigId = `${activeDigitalEmployeeId ?? ''}`.trim();
+  const messageDigId = `${message.digId ?? ''}`.trim();
+  return Boolean(
+    activeDigId && messageDigId === activeDigId && message.type === SKILL_MARKETPLACE_INSTALLED_MESSAGE_TYPE
+  );
+};
+
 const getAllResourceBizTypeValues = (resourceType?: string) =>
   resourceType === 'KG_DOC' ? ALL_KNOWLEDGE_RESOURCE_BIZ_TYPE_VALUES : ALL_RESOURCE_BIZ_TYPE_VALUES;
 

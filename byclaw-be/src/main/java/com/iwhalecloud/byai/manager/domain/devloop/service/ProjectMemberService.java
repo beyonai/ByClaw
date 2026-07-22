@@ -67,7 +67,12 @@ public class ProjectMemberService {
      * @return 成员列表 DTO；无成员时返回空列表
      */
     public List<ProjectMemberListDto> listProjectMembers(Long projectId) {
-        return memberMapper.listProjectMembers(projectId);
+        return listProjectMembers(projectId, null);
+    }
+
+    /** 按项目查询成员，并仅按成员姓名模糊筛选。 */
+    public List<ProjectMemberListDto> listProjectMembers(Long projectId, String userName) {
+        return memberMapper.listProjectMembers(projectId, userName);
     }
 
     /**

@@ -9,8 +9,8 @@ export const PROJECT_TYPE_LABEL: Record<ProjectType, string> = {
 };
 
 export const PROJECT_TYPE_OPTIONS: Array<{ label: string; value: ProjectType }> = [
+  // 静态参数不可用时保守回退普通项目，避免未部署研发闭环的环境误展示研发能力。
   { label: PROJECT_TYPE_LABEL.normal, value: 'normal' },
-  { label: PROJECT_TYPE_LABEL.develop, value: 'develop' },
 ];
 
 export const DEFAULT_PROJECT_TYPE_OPTION: { label: string; value: ProjectType } = {

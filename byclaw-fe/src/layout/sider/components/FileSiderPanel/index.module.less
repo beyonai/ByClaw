@@ -557,6 +557,27 @@
   text-align: right;
 }
 
+.fileSpaceRefresh {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #728096;
+  background: transparent;
+  cursor: pointer;
+  transition: color 0.2s, background-color 0.2s;
+
+  &:hover {
+    color: #246bfe;
+    background: #eaf2ff;
+  }
+}
+
 .fileSpaceSegmented {
   flex-shrink: 0;
   height: 28px;
@@ -614,6 +635,11 @@
       margin: 24px 0;
     }
   }
+}
+
+.fileSpaceTreeWrapCompact {
+  // 项目共享文件直接展示根目录内容，收紧左侧留白以对齐卡片标题。
+  padding-left: 4px;
 }
 
 .fileSpaceGroupList {

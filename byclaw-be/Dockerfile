@@ -13,6 +13,7 @@ RUN apk add --no-cache \
     curl \
     bash \
     gcompat \
+    git \
     && rm -rf /var/cache/apk/*
 
 # 安装 DWS CLI（使用预下载的二进制，避免构建时网络下载）。

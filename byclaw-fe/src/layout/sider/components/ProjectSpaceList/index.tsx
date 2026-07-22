@@ -11,6 +11,7 @@ import ProjectFormModal, {
   type ProjectShareMember,
 } from '@/pages/projectSpace/components/ProjectFormModal';
 import { useProjectList } from '@/pages/projectSpace/hooks/useProjectList';
+import { useProjectTypeConfig } from '@/pages/projectSpace/hooks/useProjectTypeConfig';
 import {
   createProject,
   deleteProject,
@@ -170,6 +171,8 @@ const ProjectSpaceList: React.FC = () => {
   const { EventEmitter, setAgentId, setSessionId } = useGlobal();
   const { clearDetailPanel } = React.useContext(SiderContentContext);
   const { projects, loading, fetchProjects } = useProjectList();
+  // 项目类型配置决定研发闭环能力是否开放，侧栏表单和详情使用同一份结果。
+  const { projectTypeOptions, projectTypeLoading, isDevelopProjectEnabled } = useProjectTypeConfig();
   const [projectScopeId, setProjectScopeId] = useState<string>();
   const [sessionKeyword, setSessionKeyword] = useState('');
   const [projectDetailMap, setProjectDetailMap] = useState<Record<string, ProjectSpace>>({});
@@ -730,7 +733,9 @@ const ProjectSpaceList: React.FC = () => {
 
     projectSavingRef.current = true;
     setProjectCreating(true);
-    const submitSharedFlag = values.projectType === 'develop' || values.sharedFlag;
+    const submitIsDevelopProject = isDevelopProjectEnabled && values.projectType === 'develop';
+    // 默认项目固定不共享，研发项目是否强制共享取决于当前环境是否启用研发类型。
+    const submitSharedFlag = values.projectType === 'default' ? false : submitIsDevelopProject || values.sharedFlag;
     const shareMembers = submitSharedFlag ? values.shareMembers || [] : [];
     let createdProjectId = '';
     try {
@@ -919,10 +924,10 @@ const ProjectSpaceList: React.FC = () => {
     setDetailProject((prev) =>
       prev?.projectId === projectId
         ? {
-            ...prev,
-            sessions: removeSession(prev.sessions),
-            sessionCount: Math.max(0, Number(prev.sessionCount ?? (prev.sessions || []).length) - 1),
-          }
+          ...prev,
+          sessions: removeSession(prev.sessions),
+          sessionCount: Math.max(0, Number(prev.sessionCount ?? (prev.sessions || []).length) - 1),
+        }
         : prev
     );
   }, []);
@@ -1051,19 +1056,11 @@ const ProjectSpaceList: React.FC = () => {
           onEditProject={isProjectCreator(detailProject) ? handleOpenEditProject : undefined}
           onDeleteProject={isProjectCreator(detailProject) ? handleDeleteProject : undefined}
           onProjectSharedChange={handleProjectSharedChange}
+          developProjectEnabled={isDevelopProjectEnabled}
         />
       ) : (
         <>
           <div className={styles.header}>
-            <div className={styles.searchInput}>
-              <Input
-                value={sessionKeyword}
-                suffix={<SearchOutlined onClick={handleSessionSearchSubmit} />}
-                placeholder={t('searchPlaceholder')}
-                onChange={(event) => handleSessionSearchChange(event.target.value)}
-                onPressEnter={handleSessionSearchSubmit}
-              />
-            </div>
             <div className={styles.scopeActionRow}>
               <Dropdown
                 trigger={['click']}
@@ -1099,6 +1096,16 @@ const ProjectSpaceList: React.FC = () => {
                 <AntdIcon className={styles.enterProjectDetailArrow} type="icon-a-Rightyou" />
               </button>
             )}
+            {/* 会话搜索紧接项目详情入口，且始终只查询当前选中的项目。 */}
+            <div className={styles.searchInput}>
+              <Input
+                value={sessionKeyword}
+                suffix={<SearchOutlined onClick={handleSessionSearchSubmit} />}
+                placeholder={t('searchPlaceholder')}
+                onChange={(event) => handleSessionSearchChange(event.target.value)}
+                onPressEnter={handleSessionSearchSubmit}
+              />
+            </div>
           </div>
 
           <Spin spinning={loading} wrapperClassName={styles.spin}>
@@ -1125,6 +1132,8 @@ const ProjectSpaceList: React.FC = () => {
         initialValues={projectFormInitialValues}
         projectId={editingProject?.projectId}
         creatorId={editingProject?.createBy}
+        projectTypeConfigOptions={projectTypeOptions}
+        projectTypeLoading={projectTypeLoading}
         onCancel={() => {
           setProjectModalOpen(false);
           setEditingProject(undefined);

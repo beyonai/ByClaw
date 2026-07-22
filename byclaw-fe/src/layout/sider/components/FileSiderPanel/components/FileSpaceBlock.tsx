@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState, type Key } from 'react';
 import { Segmented, Tooltip, type MenuProps } from 'antd';
+import { ReloadOutlined } from '@ant-design/icons';
 import type { FileBrowserItem } from '@/service/fileBrowser';
 import type { FileTreeItem } from '../constants';
 import { isDirectory } from '../utils';
@@ -29,9 +30,12 @@ interface FileSpaceBlockProps {
   expandedKeys: Key[];
   switchOptions?: { label: React.ReactNode; value: string }[];
   switchValue?: string;
+  compactTreePadding?: boolean;
   defaultGroupsCollapsed?: boolean;
+  accordionGroups?: boolean;
   groupCollapseResetKey?: Key;
   showActions?: boolean;
+  onRefresh?: () => void;
   onSwitchChange?: (value: string) => void;
   onExpand: (keys: Key[]) => void;
   onLoadData: (node: FileTreeItem) => Promise<void>;
@@ -57,9 +61,12 @@ const FileSpaceBlock: React.FC<FileSpaceBlockProps> = ({
   expandedKeys,
   switchOptions,
   switchValue,
+  compactTreePadding = false,
   defaultGroupsCollapsed = false,
+  accordionGroups = false,
   groupCollapseResetKey,
   showActions = false,
+  onRefresh,
   onSwitchChange,
   onExpand,
   onLoadData,
@@ -81,19 +88,26 @@ const FileSpaceBlock: React.FC<FileSpaceBlockProps> = ({
     setCollapsedGroupKeys(defaultGroupsCollapsed ? new Set(groupKeys) : new Set());
   }, [defaultGroupsCollapsed, groupCollapseResetKey, groupKeySignature]);
 
-  // 会话分组没有后端折叠状态，前端记录折叠 key，让整条标题行都能展开/收起。
-  const toggleGroup = useCallback((groupKey: Key) => {
-    const normalizedKey = `${groupKey}`;
-    setCollapsedGroupKeys((prev) => {
-      const next = new Set(prev);
-      if (next.has(normalizedKey)) {
-        next.delete(normalizedKey);
-      } else {
+  // 会话分组没有后端折叠状态；手风琴模式展开一项时，将其它分组一并折叠。
+  const toggleGroup = useCallback(
+    (groupKey: Key) => {
+      const normalizedKey = `${groupKey}`;
+      setCollapsedGroupKeys((prev) => {
+        const next = new Set(prev);
+        if (next.has(normalizedKey)) {
+          if (accordionGroups) {
+            const groupKeys = groupKeySignature ? groupKeySignature.split('\n') : [];
+            return new Set(groupKeys.filter((key) => key !== normalizedKey));
+          }
+          next.delete(normalizedKey);
+          return next;
+        }
         next.add(normalizedKey);
-      }
-      return next;
-    });
-  }, []);
+        return next;
+      });
+    },
+    [accordionGroups, groupKeySignature]
+  );
 
   const handleGroupKeyDown = useCallback(
     (groupKey: Key, event: React.KeyboardEvent<HTMLDivElement>) => {
@@ -110,7 +124,7 @@ const FileSpaceBlock: React.FC<FileSpaceBlockProps> = ({
     treeLoading: boolean,
     treeEmptyText: React.ReactNode
   ) => (
-    <div className={styles.fileSpaceTreeWrap}>
+    <div className={`${styles.fileSpaceTreeWrap} ${compactTreePadding ? styles.fileSpaceTreeWrapCompact : ''}`}>
       <FileTreeList
         items={treeItems}
         childrenByPath={childrenByPath}
@@ -143,6 +157,16 @@ const FileSpaceBlock: React.FC<FileSpaceBlockProps> = ({
           />
         )}
         {typeof count === 'number' && <span className={styles.fileSpaceCount}>{count}</span>}
+        {onRefresh && (
+          <button
+            type="button"
+            className={styles.fileSpaceRefresh}
+            onClick={onRefresh}
+            aria-label="refresh"
+          >
+            <ReloadOutlined spin={loading} />
+          </button>
+        )}
       </div>
       {groups ? (
         groups.length ? (
