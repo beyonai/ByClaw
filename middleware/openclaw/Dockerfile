@@ -94,6 +94,16 @@ ARG INSTALL_BROWSER_STACK=true
 
 RUN chown root:root /app
 
+RUN set -eux; \
+    for gid in 999 1001; do \
+        group_name="$(getent group "${gid}" | cut -d: -f1 || true)"; \
+        if [ -z "${group_name}" ]; then \
+            group_name="byclaw-gid-${gid}"; \
+            groupadd --gid "${gid}" "${group_name}"; \
+        fi; \
+        usermod -aG "${group_name}" root; \
+    done
+
 ENV PIP_BREAK_SYSTEM_PACKAGES=1 \
     PIP_ROOT_USER_ACTION=ignore \
     OPENCLAW_BUNDLED_PLUGINS_DIR=/app/dist/extensions \
