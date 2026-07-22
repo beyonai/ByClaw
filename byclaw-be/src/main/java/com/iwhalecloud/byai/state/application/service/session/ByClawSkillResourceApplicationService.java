@@ -279,7 +279,7 @@ public class ByClawSkillResourceApplicationService {
             SOURCE_TYPE_SKILL_MARKET_INSTALL, resolvedDownloadUrl);
         bindSkillToDigitalEmployee(resolvedDigId, resource.getResourceId());
         syncSkillTargetContent(resolvedUserCode, resource, extSkill, true);
-        digitalEmployeeApplicationService.refreshInstalledSkillRuntime(resolvedDigId);
+        rebuildAndScheduleSkillRuntimeRefresh(new LinkedHashSet<>(Collections.singletonList(resolvedDigId)));
         return new SkillImportResult(resource, extSkill, updated);
     }
 
