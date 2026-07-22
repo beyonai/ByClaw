@@ -550,10 +550,6 @@ function markdownInput(input: unknown): string {
   return typeof input === "string" ? input : markdownJson(input ?? {});
 }
 
-function clientInstructionFileName(clientType: string): string {
-  return `${safePathPart(clientType)}${BUNDLE.clientInstructionFileExtension}`;
-}
-
 function canonicalClientType(value: string | undefined): string | undefined {
   if (typeof value !== "string" || !value.trim()) {
     return undefined;
@@ -632,6 +628,29 @@ function renderQueryMarkdown(params: {
   ].join("\n");
 }
 
+function renderClientExecutionPolicy(clientType: string): string[] {
+  const common = [
+    "Do not invent agents, skills, or business rules that are absent from metadata.",
+    "Preserve proof: cite loaded rule and resource paths, cite relevant command output, and list which roster member handled each work item.",
+    "Follow the Fixed Work Specs for all downstream agents and subagents.",
+    "Load Linked Skills from the absolute \`skillDocPath\` values in metadata. A skill missing from the client's default skill discovery is not a reason to skip it.",
+  ];
+  if (clientType === ACP_CLIENT_TYPES.codex) {
+    return [
+      ...common,
+      "Use the main Codex agent as coordinator.",
+      "When spawning subagents is available, derive subagent prompts from \`metadata.md\` roster entries.",
+      "Keep code changes scoped to the user query and verify with the repository commands that match the touched module.",
+    ];
+  }
+  return [
+    ...common,
+    "Use Task/Agent subagents when available.",
+    "\`subagent_type\` or subagent name must come from \`metadata.md\` roster entries.",
+    "Each roster member in the relevant workflow must produce proof or an explicit skip reason.",
+  ];
+}
+
 function renderMetadataMarkdown(params: {
   kind: ByclawAcpPlan["kind"];
   id: string;
@@ -678,6 +697,10 @@ function renderMetadataMarkdown(params: {
     "",
     markdownJson(params.fixedWorkSpecs),
     "",
+    "## ACP Client Execution Policy",
+    "",
+    ...renderClientExecutionPolicy(params.clientType),
+    "",
     "## Agent Roster",
     "",
     "The downstream ACP client must choose subagents from this roster when the client supports subagents.",
@@ -706,64 +729,6 @@ function renderMetadataMarkdown(params: {
   ].join("\n");
 }
 
-function renderClientInstructions(params: {
-  clientType: string;
-  responseLanguage: ResponseLanguagePolicy;
-  fixedWorkSpecs: FixedWorkSpecs;
-}): string {
-  const common = [
-    "# ACP Client Instructions",
-    "",
-    `Client type: ${params.clientType}`,
-    `Reply language: ${params.responseLanguage.language}`,
-    "",
-    params.responseLanguage.instruction,
-    "",
-    "1. Before planning or business work, read `metadata.md` completely from byte 0 through EOF and verify it against `bootstrap-contract.json`.",
-    "2. Treat the entire metadata document as authoritative business rules; do not depend on a fixed list of known headings.",
-    "3. Read every Linked Skill directly from its metadata `skillDocPath` from byte 0 through EOF before accessing the query.",
-    "4. Do not copy, install, symlink, or materialize Linked Skills into `.claude/skills`, `.agents/skills`, `.codex/skills`, or equivalent public skill directories.",
-    "5. Load every other resource that metadata makes mandatory for the current task, including future resource types unknown to this client.",
-    "6. Write `bootstrap-receipt.json`; if any mandatory rule, Linked Skill, or resource cannot be satisfied, write BLOCKED and do not read `query.md`.",
-    "7. Only after the receipt status is READY, read `query.md` and treat it as the user request.",
-    "8. After READY, apply every loaded Linked Skill whose trigger conditions match the query; acknowledging or summarizing a skill does not count as using it.",
-    "9. Only after READY, use `plan-bundle.json` when machine-readable detail is needed; it contains the protected user input.",
-    "10. Do not invent agents, skills, or business rules that are absent from metadata.",
-    "11. Preserve proof: cite loaded rule/resource paths and command output, and list which roster member handled each work item.",
-    "12. Follow the Fixed Work Specs below; they are mandatory for all downstream agents and subagents.",
-    "",
-    "## Fixed Work Specs",
-    "",
-    params.fixedWorkSpecs.sessionFiles.policyMarkdown,
-  ];
-  if (params.clientType === ACP_CLIENT_TYPES.codex) {
-    return [
-      ...common,
-      "",
-      "## Codex",
-      "",
-      "- Use the main Codex agent as coordinator.",
-      "- When spawning subagents is available, derive subagent prompts from `metadata.md` roster entries.",
-      "- Load Linked Skills from the absolute `skillDocPath` values in metadata; do not depend on `.agents/skills` or legacy `.codex/skills` discovery.",
-      "- A Linked Skill missing from Codex's default skill list is not a reason to skip it.",
-      "- Keep code changes scoped to the user query and verify with the repository commands that match the touched module.",
-      "",
-    ].join("\n");
-  }
-  return [
-    ...common,
-    "",
-    "## Claude Code",
-    "",
-    "- Use Task/Agent subagents when available.",
-    "- `subagent_type` or subagent name must come from `metadata.md` roster entries.",
-    "- Load Linked Skills from the absolute `skillDocPath` values in metadata; do not depend on `.claude/skills` discovery.",
-    "- A Linked Skill missing from Claude Code's default skill list is not a reason to skip it.",
-    "- Each roster member in the relevant workflow should produce proof or an explicit skip reason.",
-    "",
-  ].join("\n");
-}
-
 function buildTask(params: {
   kind: string;
   name: string;
@@ -776,7 +741,6 @@ function buildTask(params: {
   sharedDir: string;
   queryPath: string;
   metadataPath: string;
-  clientInstructionsPath: string;
   bootstrapContractPath: string;
   bootstrapReceiptPath: string;
   members?: NormalizedByclawAgent[];
@@ -793,7 +757,6 @@ function buildTask(params: {
     `- bootstrapContract: ${params.bootstrapContractPath}`,
     `- bootstrapReceipt: ${params.bootstrapReceiptPath}`,
     `- metadata: ${params.metadataPath}`,
-    `- clientInstructions: ${params.clientInstructionsPath}`,
     `- machineBundle: ${params.bundlePath}`,
     `- byaiChannelSessionId: ${params.fixedWorkSpecs.sessionFiles.byaiChannelSessionId}`,
     `- sessionFilesRoot: ${params.fixedWorkSpecs.sessionFiles.sessionRoot}`,
@@ -852,11 +815,6 @@ function materializePlanBundle(params: {
   const bundlePath = path.join(runDir, PATHS.planBundleFileName);
   const queryPath = path.join(runDir, BUNDLE.queryFileName);
   const metadataPath = path.join(runDir, BUNDLE.metadataFileName);
-  const clientInstructionsPath = path.join(
-    runDir,
-    BUNDLE.clientsDirName,
-    clientInstructionFileName(params.clientType),
-  );
   const bootstrapContractPath = path.join(runDir, BUNDLE.bootstrapContractFileName);
   const bootstrapReceiptPath = path.join(runDir, BUNDLE.bootstrapReceiptFileName);
   const linkedSkills = collectLinkedSkills(params.members, params.cwd);
@@ -888,17 +846,11 @@ function materializePlanBundle(params: {
     workflow: params.workflow,
     loop: params.loop,
   });
-  const clientInstructionsContent = renderClientInstructions({
-    clientType: params.clientType,
-    responseLanguage: params.responseLanguage,
-    fixedWorkSpecs,
-  });
   const metadataBootstrap = createMetadataBootstrapContract({
     bootstrapId,
     runDir,
     metadataPath,
     metadataContent,
-    clientInstructionsPath,
     queryPath,
     planBundlePath: bundlePath,
     receiptPath: bootstrapReceiptPath,
@@ -931,7 +883,6 @@ function materializePlanBundle(params: {
       byaiChannelSessionId,
       queryPath,
       metadataPath,
-      clientInstructionsPath,
       bootstrapContractPath,
       bootstrapReceiptPath,
       metadataIntegrity: metadataBootstrap.metadata,
@@ -961,7 +912,6 @@ function materializePlanBundle(params: {
   try {
     atomicWriteText(queryPath, queryContent);
     atomicWriteText(metadataPath, metadataContent);
-    atomicWriteText(clientInstructionsPath, clientInstructionsContent);
     atomicWriteJson(bootstrapContractPath, metadataBootstrap);
     atomicWriteJson(bundlePath, bundle);
     loadMetadataBootstrapContract(bootstrapContractPath, {
@@ -977,7 +927,6 @@ function materializePlanBundle(params: {
       sessionId,
       queryPath,
       metadataPath,
-      clientInstructionsPath,
       bootstrapContractPath,
       bootstrapReceiptPath,
       metadataIntegrity: metadataBootstrap.metadata,
@@ -1096,6 +1045,91 @@ export function buildCallAgentContentFromPlan(plan: ByclawAcpPlan): string {
   return renderMetadataFirstDelegationContent({ contract, metadataContent });
 }
 
+export type ByclawCallAgentDispatch = {
+  kind: ByclawAcpPlan["kind"];
+  id: string;
+  cwd: string;
+  query: string;
+  skillPaths: string[];
+  modelConfig?: JsonRecord;
+};
+
+function callAgentQuery(input: unknown): string {
+  if (typeof input === "string") {
+    return input;
+  }
+  if (input === undefined) {
+    return "";
+  }
+  return JSON.stringify(input);
+}
+
+/**
+ * Resolve the minimal remote call-agent payload without materializing plan,
+ * metadata, bootstrap, query, or native-client files.
+ */
+export function createByclawCallAgentDispatch(params: {
+  config: ResolvedByclawAcpAdapterConfig;
+  snapshot: ByclawRegistrySnapshot;
+  request: ByclawAcpPlanRequest;
+}): ByclawCallAgentDispatch {
+  const { config, snapshot, request } = params;
+  const resolvedTarget = resolvePlanTargetById(snapshot, request.id);
+  const inferredTarget =
+    resolvedTarget ||
+    (request.id
+      ? undefined
+      : inferPlanTargetFromInput(snapshot, request.input) ||
+        inferLinkedSkillAgentTarget(snapshot, request.input));
+  const effectiveRequest = inferredTarget
+    ? { ...request, kind: inferredTarget.kind, id: inferredTarget.id }
+    : request;
+  const kind = effectiveRequest.kind || inferPlanKind(snapshot, effectiveRequest.id);
+  const cwd = request.cwd || config.defaultCwd;
+
+  let id: string;
+  let members: NormalizedByclawAgent[];
+  let coordinator: NormalizedByclawAgent | undefined;
+  if (kind === "agent") {
+    coordinator = findAgent(snapshot, effectiveRequest.id);
+    id = coordinator.id;
+    members = [coordinator];
+  } else if (kind === "team") {
+    const team = findTeam(snapshot, effectiveRequest.id);
+    id = team.id;
+    members = team.memberAgentIds
+      .map((memberId) => agentById(snapshot, memberId))
+      .filter(Boolean) as NormalizedByclawAgent[];
+    coordinator = team.coordinatorAgentId
+      ? agentById(snapshot, team.coordinatorAgentId)
+      : members[0];
+  } else {
+    const workflow = kind === "workflow"
+      ? findWorkflow(snapshot, effectiveRequest.id)
+      : findWorkflow(snapshot, findLoop(snapshot, effectiveRequest.id).workflowId);
+    id = kind === "workflow" ? workflow.id : findLoop(snapshot, effectiveRequest.id).id;
+    const team = workflow.teamId
+      ? snapshot.teams.find((item) => item.id === workflow.teamId)
+      : undefined;
+    members = (team?.memberAgentIds || workflow.steps.map((step) => step.agentId))
+      .map((memberId) => agentById(snapshot, memberId))
+      .filter(Boolean) as NormalizedByclawAgent[];
+    coordinator = members[0];
+  }
+
+  const skillPaths = collectLinkedSkills(members, cwd)
+    .map((skill) => nonEmptyString(skill.skillPath))
+    .filter((skillPath, index, values) => skillPath && values.indexOf(skillPath) === index);
+  return {
+    kind,
+    id,
+    cwd,
+    query: callAgentQuery(effectiveRequest.input),
+    skillPaths,
+    ...(coordinator?.modelConfig ? { modelConfig: compactModelConfig(coordinator.modelConfig) } : {}),
+  };
+}
+
 export function createByclawAcpPlan(params: {
   config: ResolvedByclawAcpAdapterConfig;
   snapshot: ByclawRegistrySnapshot;
@@ -1159,7 +1193,6 @@ export function createByclawAcpPlan(params: {
       sharedDir: String(bundle.sharedDir),
       queryPath: String(bundle.queryPath),
       metadataPath: String(bundle.metadataPath),
-      clientInstructionsPath: String(bundle.clientInstructionsPath),
       bootstrapContractPath: String(bundle.bootstrapContractPath),
       bootstrapReceiptPath: String(bundle.bootstrapReceiptPath),
       members: [agent],
@@ -1234,7 +1267,6 @@ export function createByclawAcpPlan(params: {
       sharedDir: String(bundle.sharedDir),
       queryPath: String(bundle.queryPath),
       metadataPath: String(bundle.metadataPath),
-      clientInstructionsPath: String(bundle.clientInstructionsPath),
       bootstrapContractPath: String(bundle.bootstrapContractPath),
       bootstrapReceiptPath: String(bundle.bootstrapReceiptPath),
       members,
@@ -1314,7 +1346,6 @@ export function createByclawAcpPlan(params: {
       sharedDir: String(bundle.sharedDir),
       queryPath: String(bundle.queryPath),
       metadataPath: String(bundle.metadataPath),
-      clientInstructionsPath: String(bundle.clientInstructionsPath),
       bootstrapContractPath: String(bundle.bootstrapContractPath),
       bootstrapReceiptPath: String(bundle.bootstrapReceiptPath),
       members,
@@ -1397,7 +1428,6 @@ export function createByclawAcpPlan(params: {
     sharedDir: String(bundle.sharedDir),
     queryPath: String(bundle.queryPath),
     metadataPath: String(bundle.metadataPath),
-    clientInstructionsPath: String(bundle.clientInstructionsPath),
     bootstrapContractPath: String(bundle.bootstrapContractPath),
     bootstrapReceiptPath: String(bundle.bootstrapReceiptPath),
     members,

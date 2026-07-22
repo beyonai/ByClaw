@@ -37,9 +37,6 @@ function assertMetadataBootstrapContractShape(
   ) {
     throw new MetadataBootstrapError("bootstrap contract metadata path, sha256, and bytes are required");
   }
-  if (!isRecord(value.clientInstructions) || typeof value.clientInstructions.path !== "string") {
-    throw new MetadataBootstrapError("bootstrap contract client instructions path is required");
-  }
   if (!isRecord(value.query) || typeof value.query.path !== "string") {
     throw new MetadataBootstrapError("bootstrap contract query path is required");
   }
@@ -130,7 +127,6 @@ export function createMetadataBootstrapContract(params: {
   runDir: string;
   metadataPath: string;
   metadataContent: string;
-  clientInstructionsPath: string;
   queryPath: string;
   planBundlePath: string;
   receiptPath: string;
@@ -149,10 +145,6 @@ export function createMetadataBootstrapContract(params: {
       bytes: Buffer.byteLength(params.metadataContent),
       required: true,
       readMode: "complete-to-eof",
-    },
-    clientInstructions: {
-      path: path.resolve(params.clientInstructionsPath),
-      required: true,
     },
     query: {
       path: path.resolve(params.queryPath),
@@ -193,9 +185,6 @@ export function validateMetadataBootstrapContract(
   if (contract.metadata.required !== true || contract.metadata.readMode !== "complete-to-eof") {
     throw new MetadataBootstrapError("metadata bootstrap must require a complete-to-EOF metadata read");
   }
-  if (contract.clientInstructions.required !== true) {
-    throw new MetadataBootstrapError("client instructions must be required by metadata bootstrap");
-  }
   if (contract.query.readAfterBootstrap !== true) {
     throw new MetadataBootstrapError("query access before metadata bootstrap is forbidden");
   }
@@ -214,7 +203,6 @@ export function validateMetadataBootstrapContract(
   }
   for (const [label, filePath] of [
     ["metadata.md", contract.metadata.path],
-    ["client instructions", contract.clientInstructions.path],
     ["query.md", contract.query.path],
     ["plan bundle", contract.planBundle.path],
     ["bootstrap receipt", contract.receipt.path],
@@ -223,7 +211,6 @@ export function validateMetadataBootstrapContract(
   }
   const metadataContent = readRequiredText(contract.metadata.path, "metadata.md");
   assertMetadataMatches(contract, metadataContent);
-  readRequiredText(contract.clientInstructions.path, "client instructions");
   readRequiredText(contract.query.path, "query.md");
   const planBundleContent = readRequiredText(contract.planBundle.path, "plan bundle");
   try {
@@ -297,7 +284,6 @@ export function renderMetadataFirstDelegationContent(params: {
     `Bootstrap id: ${contract.bootstrapId}`,
     `Bootstrap contract: ${path.join(contract.runDir, BUNDLE.bootstrapContractFileName)}`,
     `Authoritative metadata: ${contract.metadata.path}`,
-    `Required client instructions: ${contract.clientInstructions.path}`,
     `Machine plan bundle (access only after READY): ${contract.planBundle.path}`,
     `Expected metadata bytes: ${contract.metadata.bytes}`,
     `Expected metadata sha256: ${contract.metadata.sha256}`,
@@ -305,7 +291,6 @@ export function renderMetadataFirstDelegationContent(params: {
     "Read metadata.md from byte 0 through EOF, even when a file-reading tool truncates its first response.",
     "Verify the on-disk byte count and SHA-256 before treating bootstrap as READY.",
     "Treat the complete metadata document as the business-rule manual. Do not rely on a fixed list of known headings.",
-    "After metadata integrity passes, read the required client instructions named by the contract.",
     "Read every Linked Skill directly from its metadata skillDocPath from byte 0 through EOF before query access.",
     "Do not copy, install, symlink, or materialize Linked Skills into `.claude/skills`, `.agents/skills`, `.codex/skills`, or equivalent public skill directories.",
     "Follow metadata instructions to load all other referenced resources required for this task, including future resource types unknown to this adapter.",

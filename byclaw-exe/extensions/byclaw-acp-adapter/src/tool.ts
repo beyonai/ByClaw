@@ -109,7 +109,7 @@ function renderSessionsSpawnMirror(plan: ReturnType<typeof createByclawAcpPlan>)
     `ByClaw ACP ${plan.kind} plan ${plan.id} is ready.`,
     `Call the generic ${ACP.nextType} tool with exactly the JSON object below.`,
     "Do not add attachments, context=fork, bundle, modelConfig, or a short task summary.",
-    "The task text already includes shared filesystem paths for query.md, metadata.md, client instructions, and plan-bundle.json.",
+    "The task text already includes shared filesystem paths for query.md, metadata.md, bootstrap artifacts, and plan-bundle.json.",
     "Full agentModels, team/workflow metadata, and per-agent model configuration are stored in the shared filesystem bundle referenced inside the task text.",
     `Response language: ${plan.replyLanguage}. The downstream ACP client must follow the responseLanguage policy in metadata.md and plan-bundle.json.`,
     `Summary: runtime=${plan.sessionsSpawn.runtime}; agentId=${plan.sessionsSpawn.agentId}; model=${plan.sessionsSpawn.model}; modelConfig=${plan.sessionsSpawn.modelConfig ? "present" : "missing"}; bundle=${bundlePath || "missing"}; agentModelsInBundle=${agentModelCount}.`,
