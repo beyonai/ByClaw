@@ -1,33 +1,36 @@
 import cors from "@fastify/cors";
-import type { ConnectorHealth, RunEvent, RunStatus } from "@byclaw/by-conductor";
-import { OPENCLAW_BY_FRAMEWORK_CONNECTOR_ID } from "@byclaw/connector-openclaw-by-framework";
-import Fastify, { type FastifyBaseLogger, type FastifyInstance } from "fastify";
+import type { ConnectorHealth } from "@byclaw/by-conductor";
+import Fastify, {
+  type FastifyBaseLogger,
+  type FastifyInstance,
+  type FastifyReply,
+} from "fastify";
 import type { RunService } from "@byclaw/by-conductor";
+import { BeyondTokenAuthError } from "../auth/beyond-token.js";
+import { ByClawBeAgentCatalogError } from "../byclaw-be-agent-catalog.js";
+import type { RunIngressService } from "../run-ingress-service.js";
+import { createByClawSseSerializer } from "./byclaw-sse.js";
 
-type ThreadBody = {
-  tenantId: string;
-  userCode: string;
-  userName?: string;
+type CreateRunBody = {
+  message: string;
 };
-
-type AgentBody = {
-  agentId: string;
-  agentCode?: string;
-  agentName: string;
-  description?: string;
-  connectorId?: string;
-};
-
-type RunBody = { message: string; agentList: AgentBody[] };
 
 export interface BuildHttpAppOptions {
   runService: RunService;
   corsOrigin: string | boolean;
   logger?: boolean | { level: string } | FastifyBaseLogger;
+  runIngress: RunIngressService;
   readiness(): Promise<{
     ready: boolean;
     pi: { healthy: boolean; message?: string; model?: string };
     connectors: Record<string, ConnectorHealth>;
+    worker: {
+      enabled: boolean;
+      healthy: boolean;
+      workerId?: string;
+      agentType?: string;
+      message?: string;
+    };
   }>;
 }
 
@@ -38,11 +41,15 @@ const idParamSchema = {
 } as const;
 
 /**
- * 构建纯 HTTP/SSE 适配层；业务状态机和调度全部委托给 RunService。
+ * 构建纯 HTTP/SSE 适配层；外部只暴露创建 Run 和订阅 Run 事件。
  * 该函数不启动端口，便于测试使用 Fastify inject。
  */
 export async function buildHttpApp(options: BuildHttpAppOptions): Promise<FastifyInstance> {
-  const app = Fastify({ logger: options.logger ?? false });
+  const app = Fastify({
+    logger: options.logger ?? false,
+    // 禁止 Ajv 静默删除额外字段，让 message-only 请求契约可被调用方明确感知。
+    ajv: { customOptions: { removeAdditional: false } },
+  });
   await app.register(cors, { origin: options.corsOrigin });
 
   // 存活检查只表示 HTTP 进程可响应，不检查外部依赖。
@@ -56,123 +63,45 @@ export async function buildHttpApp(options: BuildHttpAppOptions): Promise<Fastif
     return readiness;
   });
 
-  // 创建 Thread，保存租户和用户上下文供后续 Run 使用。
-  app.post<{ Body: ThreadBody }>(
-    "/v1/threads",
+  // 创建一次 Run；Thread 仍是内部状态机实现细节。
+  app.post<{ Body: CreateRunBody }>(
+    "/v1/runs",
     {
       schema: {
         body: {
           type: "object",
           additionalProperties: false,
-          required: ["tenantId", "userCode"],
-          properties: {
-            tenantId: { type: "string", minLength: 1, maxLength: 256 },
-            userCode: { type: "string", minLength: 1, maxLength: 256 },
-            userName: { type: "string", minLength: 1, maxLength: 256 },
-          },
-        },
-      },
-    },
-    async (request, reply) => {
-      const thread = await options.runService.createThread(request.body);
-      return reply.code(201).send(thread);
-    },
-  );
-
-  // 创建 Run，并把 API Agent 描述转换为包含内部执行目标的授权快照。
-  app.post<{ Params: { threadId: string }; Body: RunBody }>(
-    "/v1/threads/:threadId/runs",
-    {
-      schema: {
-        params: {
-          type: "object",
-          required: ["threadId"],
-          properties: { threadId: { type: "string", minLength: 1 } },
-        },
-        body: {
-          type: "object",
-          additionalProperties: false,
-          required: ["message", "agentList"],
+          required: ["message"],
           properties: {
             message: { type: "string", minLength: 1, maxLength: 100_000 },
-            agentList: {
-              type: "array",
-              maxItems: 1_000,
-              items: {
-                type: "object",
-                additionalProperties: false,
-                required: ["agentId", "agentName"],
-                properties: {
-                  agentId: { type: "string", minLength: 1, maxLength: 256 },
-                  agentCode: { type: "string", minLength: 1, maxLength: 256 },
-                  agentName: { type: "string", minLength: 1, maxLength: 256 },
-                  description: { type: "string", maxLength: 4_000 },
-                  connectorId: { type: "string", minLength: 1, maxLength: 256 },
-                },
-              },
-            },
           },
         },
       },
     },
     async (request, reply) => {
       try {
-        const run = await options.runService.createRun({
-          threadId: request.params.threadId,
+        const beyondToken = headerString(request.headers["beyond-token"]);
+        if (!beyondToken) {
+          return authError(reply, "Beyond-Token header is required");
+        }
+        const systemCode = headerString(request.headers["system-code"]);
+        const run = await options.runIngress.createRun({
           message: request.body.message,
-          agentList: request.body.agentList.map((agent) => ({
-            id: agent.agentId,
-            ...(agent.agentCode ? { code: agent.agentCode } : {}),
-            name: agent.agentName,
-            ...(agent.description ? { description: agent.description } : {}),
-            execution: {
-              connectorId: agent.connectorId ?? OPENCLAW_BY_FRAMEWORK_CONNECTOR_ID,
-              targetId: agent.agentId,
-            },
-          })),
-          metadata: beyondTokenMetadata(request.headers["beyond-token"]),
+          beyondToken,
+          ...(systemCode ? { systemCode } : {}),
         });
         return reply.code(202).send({
           runId: run.id,
-          threadId: run.threadId,
           status: run.status,
           eventsUrl: `/v1/runs/${run.id}/events`,
         });
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        return reply.code(message.startsWith("Thread not found") ? 404 : 400).send({ error: message });
+        return requestError(reply, error);
       }
     },
   );
 
-  // 返回 Run 状态及其委派明细。
-  app.get<{ Params: { runId: string } }>(
-    "/v1/runs/:runId",
-    { schema: { params: idParamSchema } },
-    async (request, reply) => {
-      const details = await options.runService.getRunDetails(request.params.runId);
-      if (!details) {
-        return reply.code(404).send({ error: "Run not found" });
-      }
-      return details;
-    },
-  );
-
-  // 取消排队中或活动 Run；已在终态的 Run 保持幂等并返回 200。
-  app.post<{ Params: { runId: string } }>(
-    "/v1/runs/:runId/cancel",
-    { schema: { params: idParamSchema } },
-    async (request, reply) => {
-      const before = await options.runService.getRun(request.params.runId);
-      if (!before) {
-        return reply.code(404).send({ error: "Run not found" });
-      }
-      const run = await options.runService.cancelRun(request.params.runId);
-      return reply.code(isTerminal(before.status) ? 200 : 202).send(run);
-    },
-  );
-
-  // 回放 Last-Event-ID 之后的事件并持续推送；客户端断开不会取消 Run。
+  // 订阅 Run 事件；输出 ByClaw 现有 answer/reasoning/appStreamResponse 格式。
   app.get<{ Params: { runId: string } }>(
     "/v1/runs/:runId/events",
     { schema: { params: idParamSchema } },
@@ -181,8 +110,27 @@ export async function buildHttpApp(options: BuildHttpAppOptions): Promise<Fastif
       if (!run) {
         return reply.code(404).send({ error: "Run not found" });
       }
+      const beyondToken = headerString(request.headers["beyond-token"]);
+      if (!beyondToken) {
+        return authError(reply, "Beyond-Token header is required");
+      }
+      const userCode = await options.runService.getRunUserCode(run.id);
+      if (!userCode) {
+        return reply.code(404).send({ error: "Run owner not found" });
+      }
+      const systemCode = headerString(request.headers["system-code"]);
+      try {
+        await options.runIngress.verifyRunOwner(userCode, {
+          beyondToken,
+          ...(systemCode ? { systemCode } : {}),
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return authError(reply, message);
+      }
       const afterEventId = parseLastEventId(request.headers["last-event-id"]);
       const controller = new AbortController();
+      const serializeSse = createByClawSseSerializer();
       reply.hijack();
       reply.raw.once("close", () => controller.abort());
       reply.raw.writeHead(200, {
@@ -211,10 +159,34 @@ export async function buildHttpApp(options: BuildHttpAppOptions): Promise<Fastif
   return app;
 }
 
-/** 把请求头中的临时 Beyond-Token 放入当前 Run metadata，不进入响应或执行引用。 */
-function beyondTokenMetadata(value: string | string[] | undefined): Record<string, unknown> {
-  const token = Array.isArray(value) ? value[0] : value;
-  return token ? { "Beyond-Token": token } : {};
+/** 从 Fastify 请求头值中读取单个非空字符串。 */
+function headerString(value: string | string[] | undefined): string {
+  const raw = Array.isArray(value) ? value[0] : value;
+  return typeof raw === "string" ? raw.trim() : "";
+}
+
+/** 返回与 ByClaw 后端 AccessTokenVerifyInterceptor 一致的 401 响应结构。 */
+function authError(reply: FastifyReply, message: string) {
+  return reply.code(401).send({
+    resultCode: 401,
+    resultMsg: message,
+    type: 1,
+  });
+}
+
+/** 将鉴权、ByClaw BE 上游和普通请求异常映射为稳定的 HTTP 响应。 */
+function requestError(reply: FastifyReply, error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (
+    error instanceof BeyondTokenAuthError ||
+    (error instanceof ByClawBeAgentCatalogError && error.statusCode === 401)
+  ) {
+    return authError(reply, message);
+  }
+  if (error instanceof ByClawBeAgentCatalogError) {
+    return reply.code(502).send({ error: message });
+  }
+  return reply.code(400).send({ error: message });
 }
 
 /** 容错解析 SSE Last-Event-ID；非法值按首次订阅处理。 */
@@ -222,14 +194,4 @@ function parseLastEventId(value: string | string[] | undefined): number {
   const raw = Array.isArray(value) ? value[0] : value;
   const parsed = Number(raw ?? 0);
   return Number.isInteger(parsed) && parsed >= 0 ? parsed : 0;
-}
-
-/** 按 SSE 协议序列化带递增 ID 的 Run 事件。 */
-function serializeSse(event: RunEvent): string {
-  return `id: ${event.eventId}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`;
-}
-
-/** 判断 Run 是否已经进入不可逆终态。 */
-function isTerminal(status: RunStatus): boolean {
-  return status === "COMPLETED" || status === "FAILED" || status === "CANCELLED";
 }

@@ -1,8 +1,14 @@
 {
-  "files": [],
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "app",
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/.tsbuildinfo"
+  },
+  "include": ["app/**/*.ts"],
+  "exclude": ["app/test", "app/dist", "dist", "node_modules"],
   "references": [
     { "path": "packages/by-conductor" },
-    { "path": "packages/connectors/openclaw-by-framework" },
-    { "path": "app" }
+    { "path": "packages/connectors/openclaw-by-framework" }
   ]
 }

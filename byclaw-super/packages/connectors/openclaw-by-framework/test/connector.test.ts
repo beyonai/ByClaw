@@ -50,6 +50,7 @@ describe("OpenClawByFrameworkConnector", () => {
       redis: redis as never,
       gatewayClient: { sendMessage, cancelTask },
       readBlockMs: 1,
+      sourceAgentType: "CUSTOM_MAESTRO",
     });
 
     const execution = await connector.start(request(), { signal: new AbortController().signal });
@@ -60,7 +61,7 @@ describe("OpenClawByFrameworkConnector", () => {
 
     expect(sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({
-        sourceAgentType: "BY_MAESTRO",
+        sourceAgentType: "CUSTOM_MAESTRO",
         targetAgentType: "BYCLAW_EXE_user-1",
         sessionId: "maestro:tenant-1:thread-1:run-1:delegation-1",
         requireOnlineWorker: true,

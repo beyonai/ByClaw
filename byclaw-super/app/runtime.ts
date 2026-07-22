@@ -11,10 +11,16 @@ import {
   type LeaderSessionFactory,
   type PiRuntimeConfig,
 } from "@byclaw/by-conductor";
+import { createRedis } from "@byclaw/by-framework";
 import { OpenClawByFrameworkConnector } from "@byclaw/connector-openclaw-by-framework";
 import type { FastifyInstance } from "fastify";
+import { createBeyondTokenVerifier } from "./auth/beyond-token.js";
+import { ByClawBeAgentCatalog } from "./byclaw-be-agent-catalog.js";
 import { loadConfig, type AppConfig } from "./config.js";
+import { RedisByClawBeEndpointResolver } from "./redis-service-discovery.js";
+import { RunIngressService } from "./run-ingress-service.js";
 import { buildHttpApp } from "./server/app.js";
+import { ByFrameworkWorkerRuntime } from "./worker/by-framework-worker.js";
 
 /**
  * 延迟初始化 Pi，允许 HTTP 服务暴露 /ready 说明模型配置问题，
@@ -73,25 +79,45 @@ export interface Application {
  * 具体 Connector 在这里注入，因此 by-conductor 不依赖任何传输实现。
  */
 export async function createApplication(config = loadConfig()): Promise<Application> {
+  // 数据暂时放内存，后续迁到数据库
   const threadRepository = new InMemoryThreadRepository();
   const runRepository = new InMemoryRunRepository();
   const delegationRepository = new InMemoryDelegationRepository();
   const eventStore = new InMemoryRunEventStore();
+  
+  // 创建连接器
   const connectors = new ConnectorRegistry();
-  const openClaw = new OpenClawByFrameworkConnector({ redisOptions: config.redis });
+  // Connector 和 ByClaw BE 服务发现共用同一个 Redis 连接。
+  const redis = createRedis(config.redis);
+  // 初始化 openclaw 连接器，目前使用 ByFramework 来连接
+  const openClaw = new OpenClawByFrameworkConnector({
+    redis,
+    // Connector 回调的 sourceAgentType 必须与入站 Worker 的逻辑路由名一致。
+    sourceAgentType: config.worker.agentType,
+  });
   connectors.register(openClaw);
+
   const delegationService = new DelegationService(
     connectors,
     delegationRepository,
     eventStore,
     config.delegationTimeoutMs,
   );
+
+  //pi agent 初始化，后续模型配置改为由从业务系统中读取 
   const piConfig: PiRuntimeConfig = {
     ...(config.piProvider ? { provider: config.piProvider } : {}),
     ...(config.piModel ? { model: config.piModel } : {}),
     ...(config.openAiBaseUrl ? { openAiBaseUrl: config.openAiBaseUrl } : {}),
   };
+
+  //懒加载
   const leaders = new LazyPiLeaderFactory(piConfig);
+  // 数字员工授权列表由 ByClaw BE 实时提供，外部调用方不再传入 agentList。
+  const agentCatalog = new ByClawBeAgentCatalog({
+    ...config.byClawBe,
+    endpointResolver: new RedisByClawBeEndpointResolver(redis),
+  });
   const runService = new RunService(
     threadRepository,
     runRepository,
@@ -100,39 +126,85 @@ export async function createApplication(config = loadConfig()): Promise<Applicat
     delegationService,
     leaders,
   );
+  const runIngress = new RunIngressService(
+    runService,
+    createBeyondTokenVerifier(config.auth),
+    agentCatalog,
+  );
+  let workerRuntime: ByFrameworkWorkerRuntime | undefined;
+
+  //启动 http 服务
   const app = await buildHttpApp({
     runService,
     corsOrigin: config.corsOrigin,
     logger: { level: config.logLevel },
+    runIngress,
     // /ready 同时要求 Pi 与全部已注册 Connector 健康。
     readiness: async () => {
-      const [pi, connectorHealth] = await Promise.all([runService.health(), connectors.health()]);
+      const [pi, connectorHealth, workerHealth] = await Promise.all([
+        runService.health(),
+        connectors.health(),
+        workerRuntime?.health() ??
+          Promise.resolve<{ healthy: boolean; message?: string }>({ healthy: true }),
+      ]);
+      const worker = {
+        enabled: config.worker.enabled,
+        healthy: workerHealth.healthy,
+        ...(workerRuntime
+          ? { workerId: workerRuntime.workerId, agentType: workerRuntime.agentType }
+          : {}),
+        ...(workerHealth.message ? { message: workerHealth.message } : {}),
+      };
       return {
-        ready: pi.healthy && Object.values(connectorHealth).every((health) => health.healthy),
+        ready:
+          pi.healthy &&
+          Object.values(connectorHealth).every((health) => health.healthy) &&
+          worker.healthy,
         pi,
         connectors: connectorHealth,
+        worker,
       };
     },
   });
+  // Worker 属于业务入口，由 Composition Root 注册；Connector 只承担 OpenClaw 出站传输。
+  if (config.worker.enabled) {
+    workerRuntime = new ByFrameworkWorkerRuntime({
+      redis,
+      runService,
+      runIngress,
+      agentType: config.worker.agentType,
+      ...(config.worker.workerId ? { workerId: config.worker.workerId } : {}),
+      maxConcurrency: config.worker.maxConcurrency,
+      logger: app.log,
+    });
+  }
   let closed = false;
 
   return {
     app,
     runService,
     config,
-    /** 绑定端口并启动 Fastify。 */
+    /** 先注册 by-framework Worker，再绑定 HTTP 端口，避免就绪窗口接到无法消费的任务。 */
     async start() {
-      await app.listen({ host: config.host, port: config.port });
+      await workerRuntime?.start();
+      try {
+        await app.listen({ host: config.host, port: config.port });
+      } catch (error) {
+        await workerRuntime?.close();
+        throw error;
+      }
     },
-    /** 按编排层、HTTP 层、外部连接的顺序执行幂等关闭。 */
+    /** 先停止两个入站入口，再释放编排层、Connector 与共享 Redis。 */
     async close() {
       if (closed) {
         return;
       }
       closed = true;
+      await workerRuntime?.close();
       await runService.dispose();
       await app.close();
       await openClaw.close();
+      await redis.quit();
     },
   };
 }

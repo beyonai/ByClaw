@@ -111,6 +111,16 @@ export class RunService {
     return this.runs.get(runId);
   }
 
+  /** 查询 Run 所属 Thread 的 userCode，供外层订阅接口执行身份校验。 */
+  async getRunUserCode(runId: string): Promise<string | undefined> {
+    const run = await this.runs.get(runId);
+    if (!run) {
+      return undefined;
+    }
+    const thread = await this.threads.get(run.threadId);
+    return thread?.userCode;
+  }
+
   /** 查询 Run 及其全部委派记录，供状态接口一次性返回。 */
   async getRunDetails(runId: string): Promise<{
     run: Run;

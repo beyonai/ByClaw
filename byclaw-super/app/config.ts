@@ -1,4 +1,9 @@
 import type { RedisConnectionConfig } from "@byclaw/connector-openclaw-by-framework";
+import {
+  DEFAULT_BYCLAW_LOGIN_JWT_PUBLIC_KEY,
+  type BeyondTokenVerifierOptions,
+} from "./auth/beyond-token.js";
+import type { ByClawBeAgentCatalogOptions } from "./byclaw-be-agent-catalog.js";
 
 export interface AppConfig {
   host: string;
@@ -7,9 +12,20 @@ export interface AppConfig {
   logLevel: string;
   delegationTimeoutMs: number;
   redis: RedisConnectionConfig;
+  auth: BeyondTokenVerifierOptions;
+  byClawBe: Omit<ByClawBeAgentCatalogOptions, "fetchImpl">;
+  worker: ByFrameworkWorkerConfig;
   piProvider?: string;
   piModel?: string;
   openAiBaseUrl?: string;
+}
+
+/** by-framework 入站 Worker 的业务层配置。 */
+export interface ByFrameworkWorkerConfig {
+  enabled: boolean;
+  agentType: string;
+  workerId?: string;
+  maxConcurrency: number;
 }
 
 /** 从环境变量加载并校验应用配置，避免无效端口或半配置模型进入运行期。 */
@@ -38,10 +54,51 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     logLevel: env.LOG_LEVEL ?? "info",
     delegationTimeoutMs,
     redis,
+    auth: {
+      publicKey: env.LOGIN_JWT_PUBLIC_KEY ?? DEFAULT_BYCLAW_LOGIN_JWT_PUBLIC_KEY,
+    },
+    byClawBe: {
+      baseUrl: env.BYCLAW_BE_BASE_URL ?? "http://127.0.0.1:8086",
+      timeoutMs: integer(env.BYCLAW_BE_TIMEOUT_MS ?? "10000", "BYCLAW_BE_TIMEOUT_MS", 1, 300_000),
+    },
+    worker: {
+      enabled: booleanValue(env.BYCLAW_WORKER_ENABLED ?? "true", "BYCLAW_WORKER_ENABLED"),
+      agentType: nonEmpty(env.BYCLAW_WORKER_AGENT_TYPE ?? "BY_MAESTRO", "BYCLAW_WORKER_AGENT_TYPE"),
+      ...(env.BYCLAW_WORKER_ID
+        ? { workerId: nonEmpty(env.BYCLAW_WORKER_ID, "BYCLAW_WORKER_ID") }
+        : {}),
+      maxConcurrency: integer(
+        env.BYCLAW_WORKER_MAX_CONCURRENCY ?? "10",
+        "BYCLAW_WORKER_MAX_CONCURRENCY",
+        1,
+        1_000,
+      ),
+    },
     ...(env.PI_PROVIDER ? { piProvider: env.PI_PROVIDER } : {}),
     ...(env.PI_MODEL ? { piModel: env.PI_MODEL } : {}),
     ...(env.OPENAI_BASE_URL ? { openAiBaseUrl: env.OPENAI_BASE_URL } : {}),
   };
+}
+
+/** 解析显式布尔环境变量，避免任意非空字符串被误判为开启。 */
+function booleanValue(raw: string, name: string): boolean {
+  const normalized = raw.trim().toLowerCase();
+  if (normalized === "true" || normalized === "1") {
+    return true;
+  }
+  if (normalized === "false" || normalized === "0") {
+    return false;
+  }
+  throw new Error(`${name} must be true, false, 1 or 0, received: ${raw}`);
+}
+
+/** 校验必须存在的文本环境变量，并返回去除首尾空白后的值。 */
+function nonEmpty(raw: string, name: string): string {
+  const value = raw.trim();
+  if (!value) {
+    throw new Error(`${name} must not be empty`);
+  }
+  return value;
 }
 
 /** 解析带上下界的整数环境变量，并在启动阶段给出明确错误。 */

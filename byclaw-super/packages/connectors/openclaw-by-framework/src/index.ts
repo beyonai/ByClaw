@@ -28,6 +28,7 @@ export interface OpenClawConnectorOptions {
   redis?: RedisClient;
   gatewayClient?: GatewayClientLike;
   readBlockMs?: number;
+  sourceAgentType?: string;
 }
 
 type DataMessage = {
@@ -56,6 +57,7 @@ export class OpenClawByFrameworkConnector implements AgentConnector {
   readonly #client: GatewayClientLike;
   readonly #ownsRedis: boolean;
   readonly #readBlockMs: number;
+  readonly #sourceAgentType: string;
 
   /** 可注入 Redis 和 GatewayClient 以支持测试；缺省时创建并持有真实连接。 */
   constructor(options: OpenClawConnectorOptions = {}) {
@@ -64,6 +66,7 @@ export class OpenClawByFrameworkConnector implements AgentConnector {
     this.#client =
       options.gatewayClient ?? new GatewayClient(new WorkerRegistry(this.#redis), this.#redis);
     this.#readBlockMs = options.readBlockMs ?? 1_000;
+    this.#sourceAgentType = options.sourceAgentType ?? "BY_MAESTRO";
   }
 
   /**
@@ -101,7 +104,7 @@ export class OpenClawByFrameworkConnector implements AgentConnector {
       metadata["Beyond-Token"] = beyondToken;
     }
     const params: SendMessageParams = {
-      sourceAgentType: "BY_MAESTRO",
+      sourceAgentType: this.#sourceAgentType,
       targetAgentType,
       sessionId: childSessionId,
       content: request.task,
