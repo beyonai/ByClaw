@@ -6,6 +6,7 @@ import cn from 'classnames';
 import AntdIcon from '@/components/AntdIcon';
 import { copyWithMessage } from '@/utils/copy';
 import { BundledLanguage } from 'shiki';
+import { CODE_TEXT_EXTENSIONS } from '@/components/QueryInput/components/FileBrowserEntry/components/FileBrowserPanel/constants';
 import { Animated } from '../Animated';
 // import { KeepAlive } from '../KeepAlive';
 import ss from './Twins.module.less';
@@ -44,11 +45,42 @@ const typeMap: Record<string, string> = {
   pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
 };
 
+// 文件扩展名 -> shiki 语言。仅收录 shiki/bundle-web 实际打包的语言;传入未打包的 lang 会让 codeToHtml 抛错致预览白屏。
+// 未命中的代码/配置类型(如 go/rust/kotlin)仍按纯文本展示(见 isTextLike + TextHighlight 默认 lang)。
 const langMap: Record<string, BundledLanguage> = {
   md: 'markdown',
   json: 'json',
   html: 'html',
+  xml: 'xml',
+  ts: 'typescript',
+  tsx: 'tsx',
+  js: 'javascript',
+  jsx: 'jsx',
+  mjs: 'javascript',
+  cjs: 'javascript',
+  java: 'java',
+  py: 'python',
+  c: 'c',
+  h: 'c',
+  cpp: 'cpp',
+  cc: 'cpp',
+  hpp: 'cpp',
+  php: 'php',
+  sh: 'shellscript',
+  bash: 'bash',
+  zsh: 'zsh',
+  sql: 'sql',
+  vue: 'vue',
+  css: 'css',
+  less: 'less',
+  scss: 'scss',
+  yaml: 'yaml',
+  yml: 'yaml',
 };
+
+// 纯文本类(可读源码展示):显式文本类型 + 白名单里的代码/配置扩展名(不依赖 langMap,未高亮也纯文本兜底)。
+const isTextLike = (type: string) =>
+  ['txt', 'text', 'log', 'json'].includes(type) || CODE_TEXT_EXTENSIONS.includes(type);
 
 const officeTypes = ['pptx', 'docx', 'xlsx'];
 
@@ -109,8 +141,8 @@ export const PreViewFile = React.memo((props: TwinsProps & { extra?: React.React
     if (data instanceof Blob && !officeTypes.includes(type)) {
       let blob: Blob = data;
 
-      // 可查看源码
-      if (type && ['txt', 'md', 'h5', 'html', 'json', 'text'].includes(type)) {
+      // 可查看源码:markdown/html 走各自预览,其余文本与代码类型统一读文本高亮。
+      if (type && (isTextLike(type) || ['md', 'h5', 'html'].includes(type))) {
         setLoading(true);
         blob
           .text()
@@ -178,7 +210,10 @@ export const PreViewFile = React.memo((props: TwinsProps & { extra?: React.React
             <AntdIcon type="icon-a-Downloadxiazai" onClick={onDownload} />
           </span>
         )}
-        <span className={ss.icon} style={{ display: ['h5', 'html', 'md', 'txt'].includes(type) ? '' : 'none' }}>
+        <span
+          style={{ display: isTextLike(type) || ['h5', 'html', 'md'].includes(type) ? '' : 'none' }}
+          className={ss.icon}
+        >
           <AntdIcon type="icon-a-Copyfuzhi1" onClick={onCopy} />
         </span>
         {extra}

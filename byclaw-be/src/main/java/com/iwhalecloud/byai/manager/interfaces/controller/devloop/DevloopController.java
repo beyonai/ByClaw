@@ -125,7 +125,8 @@ public class DevloopController {
     @PostMapping("/project/requirements")
     public ResponseUtil<List<Map<String, Object>>> listRequirementsByProject(@RequestBody Map<String, Object> params) {
         Long projectId = Long.valueOf(params.get("projectId").toString());
-        return applicationService.listRequirementsByProject(projectId);
+        String keyword = params.get("keyword") != null ? params.get("keyword").toString() : null;
+        return applicationService.listRequirementsByProject(projectId, keyword);
     }
 
     /**
@@ -214,7 +215,8 @@ public class DevloopController {
     @PostMapping("/member/list")
     public ResponseUtil<List<ProjectMemberListDto>> listProjectMembers(@RequestBody Map<String, Object> params) {
         Long projectId = Long.valueOf(params.get("projectId").toString());
-        return applicationService.listProjectMembers(projectId);
+        String keyword = params.get("keyword") != null ? params.get("keyword").toString() : null;
+        return applicationService.listProjectMembers(projectId, keyword);
     }
 
     /** 移除项目成员 */

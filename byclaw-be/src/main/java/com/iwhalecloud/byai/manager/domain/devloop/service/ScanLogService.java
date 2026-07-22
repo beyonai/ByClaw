@@ -7,6 +7,7 @@ import com.iwhalecloud.byai.manager.mapper.devloop.ScanLogItemMapper;
 import com.iwhalecloud.byai.manager.mapper.devloop.ScanLogMapper;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -112,13 +113,24 @@ public class ScanLogService {
      * 供项目需求列表一次查全部源，避免前端逐源循环请求(N+1)与内存排序。
      */
     public List<ScanLogItem> listCreatedItemsBySources(List<Long> sourceIds) {
+        return listCreatedItemsBySources(sourceIds, null);
+    }
+
+    /** 批量查询项目扫描源的已收集需求，并按标题和内容进行模糊匹配。 */
+    public List<ScanLogItem> listCreatedItemsBySources(List<Long> sourceIds, String keyword) {
         if (sourceIds == null || sourceIds.isEmpty()) {
             return new java.util.ArrayList<>();
         }
         LambdaQueryWrapper<ScanLogItem> wrapper = new LambdaQueryWrapper<>();
         wrapper.in(ScanLogItem::getSourceId, sourceIds)
-               .eq(ScanLogItem::getAction, "created")
-               .orderByDesc(ScanLogItem::getCreateTime);
+               .eq(ScanLogItem::getAction, "created");
+        String normalizedKeyword = StringUtils.trimToNull(keyword);
+        if (normalizedKeyword != null) {
+            wrapper.and(condition -> condition.like(ScanLogItem::getTitle, normalizedKeyword)
+                .or()
+                .like(ScanLogItem::getContent, normalizedKeyword));
+        }
+        wrapper.orderByDesc(ScanLogItem::getCreateTime);
         return scanLogItemMapper.selectList(wrapper);
     }
 

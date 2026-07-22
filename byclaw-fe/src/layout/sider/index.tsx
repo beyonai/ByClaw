@@ -18,6 +18,7 @@ import useVisibleMenuKeys from './useVisibleMenuKeys';
 import styles from './index.module.less';
 import Icon from '@/components/AntdIcon/icon';
 import Feedback from '../header/components/Feedback';
+import SandboxStatusIndicator from './components/SandboxStatus';
 import useUserDropdown from '../header/useUserDropdown';
 import SiderSearch from './siderSearch';
 import { getDisplayUserNameInChat } from '@/utils/chat';
@@ -349,6 +350,11 @@ const Sidebar = () => {
           userId={userInfo.userId}
           className={classnames(styles.smallIconWrap)}
           style={{ background: 'transparent', marginTop: 'auto' }}
+        />
+        <SandboxStatusIndicator
+          userCode={userInfo.userCode}
+          className={classnames(styles.smallIconWrap)}
+          style={{ background: 'transparent' }}
         />
         <SelectLang placement="right" style={{ fontSize: 16 }} className={styles.smallIconWrap} />
         <Dropdown

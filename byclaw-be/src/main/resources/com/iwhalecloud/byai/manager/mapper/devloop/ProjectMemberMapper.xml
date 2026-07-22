@@ -33,6 +33,14 @@
                  LEFT JOIN po_users b ON a.user_id = b.user_id
                  LEFT JOIN ss_resource c ON a.agent_id = c.resource_id
         WHERE a.project_id = #{projectId}
+        <if test="keyword != null and keyword != ''">
+            AND (
+                b.user_name LIKE CONCAT('%', #{keyword}, '%')
+                OR b.user_code LIKE CONCAT('%', #{keyword}, '%')
+                OR CAST(a.user_id AS VARCHAR) LIKE CONCAT('%', #{keyword}, '%')
+                OR c.resource_name LIKE CONCAT('%', #{keyword}, '%')
+            )
+        </if>
         ORDER BY a.create_time ASC
     </select>
 

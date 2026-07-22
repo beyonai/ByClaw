@@ -21,6 +21,9 @@ public class DevloopTaskListQueryDto {
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private Date createTimeEnd;
 
+    /** 按会话标题和摘要模糊查询。 */
+    private String keyword;
+
     private Integer pageNum;
     private Integer pageSize;
 

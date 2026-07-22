@@ -125,32 +125,7 @@
         WHERE a.resource_biz_type = 'DIG_EMPLOYEE'
           AND a.resource_status = '2'
           AND b.prologue IS NOT NULL
-        <choose>
-            <when test="_databaseId == 'postgresql'">
-                AND (
-                    b.prologue::jsonb->>'modelId' = CAST(#{modelId} AS TEXT)
-                    OR b.prologue::jsonb->'modelInfo'->>'modelId' = CAST(#{modelId} AS TEXT)
-                )
-            </when>
-            <when test="_databaseId == 'mysql'">
-                AND (
-                    JSON_UNQUOTE(JSON_EXTRACT(b.prologue, '$.modelId')) = CAST(#{modelId} AS CHAR)
-                    OR JSON_UNQUOTE(JSON_EXTRACT(b.prologue, '$.modelInfo.modelId')) = CAST(#{modelId} AS CHAR)
-                )
-            </when>
-            <when test="_databaseId == 'oracle'">
-                AND (
-                    JSON_VALUE(b.prologue, '$.modelId') = TO_CHAR(#{modelId})
-                    OR JSON_VALUE(b.prologue, '$.modelInfo.modelId') = TO_CHAR(#{modelId})
-                )
-            </when>
-            <otherwise>
-                AND (
-                    b.prologue::jsonb->>'modelId' = CAST(#{modelId} AS TEXT)
-                    OR b.prologue::jsonb->'modelInfo'->>'modelId' = CAST(#{modelId} AS TEXT)
-                )
-            </otherwise>
-        </choose>
+          AND b.prologue LIKE CONCAT('%', #{modelId}, '%')
     </select>
 
     <select id="selectDigitalEmployeeByQo" resultMap="digitalEmployeePageVoResultMap">
