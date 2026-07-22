@@ -71,6 +71,7 @@ import {
 import { deleteFiles, listFiles, renameFile, type FileBrowserItem } from '@/service/fileBrowser';
 import SessionOverviewDrawer from './SessionOverviewDrawer';
 import TaskDetailDrawer from './TaskDetailDrawer';
+import { isCurrentUserTaskAssignee } from './taskAccess';
 import type { ProjectSpace } from '@/pages/projectSpace/types';
 import { getArrayData, normalizeProjectSession } from '@/pages/projectSpace/utils';
 import AntdIcon from '@/components/AntdIcon';
@@ -562,6 +563,10 @@ const ProjectDetailPanel: React.FC<Props> = ({
   // 需求和成员配置只服务研发项目，普通共享项目也不展示这两个 Tab。
   const showRequirementsTab = isDevelopProject;
   const showMembersTab = isDevelopProject;
+  const canEnterDetailTaskSession = useMemo(
+    () => isCurrentUserTaskAssignee(detailTask, userInfo),
+    [detailTask, userInfo]
+  );
 
   const handleOpenTaskSession = useCallback(
     (task: any) => {
@@ -918,6 +923,19 @@ const ProjectDetailPanel: React.FC<Props> = ({
     },
     [fileResourceId]
   );
+
+  // 会话空间刷新:按当前范围(当前会话/全部会话)重新拉取对应会话的文件。
+  const refreshSessionResourceFiles = useCallback(() => {
+    const sessionIds =
+      resourceFileScope === 'all'
+        ? projectSessions.map((session) => `${session.sessionId}`).filter(Boolean)
+        : currentResourceSession?.sessionId
+          ? [`${currentResourceSession.sessionId}`]
+          : [];
+    Array.from(new Set(sessionIds)).forEach((id) => {
+      void fetchSessionResourceFiles(id);
+    });
+  }, [resourceFileScope, projectSessions, currentResourceSession?.sessionId, fetchSessionResourceFiles]);
 
   const loadResourceTreeNode = useCallback(
     async (node: FileTreeItem) => {
@@ -2359,13 +2377,18 @@ const ProjectDetailPanel: React.FC<Props> = ({
                 <span className={styles.codeChangeBranch}>{branchLabel}</span>
               )
             ) : null}
-            {taskChanges?.source === 'local' && status === 'ok' ? (
-              <span className={styles.codeChangeLocalBadge}>{t('codeChanges.localBadge')}</span>
-            ) : null}
           </div>
           {status === 'ok' && taskChanges?.files?.length ? (
             <span className={styles.codeChangeCount}>{taskChanges.files.length}</span>
           ) : null}
+          <button
+            type="button"
+            className={styles.codeChangeRefresh}
+            onClick={() => void fetchTaskChanges(currentResourceSession?.sessionId)}
+            aria-label="refresh"
+          >
+            <ReloadOutlined spin={taskChangesLoading} />
+          </button>
         </div>
         {body}
       </div>
@@ -2474,6 +2497,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
           childrenByPath={resourceChildrenByPath}
           expandedKeys={resourceExpandedKeys}
           showActions={!!projectId}
+          onRefresh={() => void fetchSharedResourceFiles()}
           onExpand={setResourceExpandedKeys}
           onLoadData={loadResourceTreeNode}
           onNodeClick={handleResourceItemClick}
@@ -2493,6 +2517,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
           accordionGroups={resourceFileScope === 'all'}
           groupCollapseResetKey={resourceFileScope}
           showActions={!!fileResourceId}
+          onRefresh={refreshSessionResourceFiles}
           switchOptions={[
             { label: t('resource.currentSession'), value: 'current' },
             { label: t('resource.allSessions'), value: 'all' },
@@ -2574,13 +2599,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
                 {tasks.map((task) => {
                   const taskAssignee = task.assignee || task.assigneeName || task.agentName || '-';
                   const taskCreateTime = task.createTime ? dayjs(task.createTime).format('MM-DD HH:mm') : '-';
-                  const taskAssigneeId = task.assigneeId ?? task.createBy;
-                  const currentUserId = userInfo?.userId ?? userInfo?.id;
                   // 优先按用户 ID 判断处理人；历史数据缺失 ID 时再用用户名兜底，避免同名用户误判。
-                  const isCurrentUserAssignee =
-                    taskAssigneeId && currentUserId
-                      ? `${taskAssigneeId}` === `${currentUserId}`
-                      : !!taskAssignee && !!userInfo?.userName && taskAssignee === userInfo.userName;
+                  const isCurrentUserAssignee = isCurrentUserTaskAssignee(task, userInfo);
                   // 非研发项目的任务即会话，第二行直接展示会话摘要；研发项目保留负责人和创建时间。
                   const taskDescription = isDevelopProject
                     ? `${taskAssignee} · ${taskCreateTime}`
@@ -2688,7 +2708,15 @@ const ProjectDetailPanel: React.FC<Props> = ({
 
       <SessionOverviewDrawer open={taskKanbanOpen} onClose={() => setTaskKanbanOpen(false)} projectId={projectId} />
 
-      <TaskDetailDrawer task={detailTask} onClose={() => setDetailTask(null)} />
+      <TaskDetailDrawer
+        task={detailTask}
+        onClose={() => setDetailTask(null)}
+        canEnterSession={canEnterDetailTaskSession}
+        onEnterSession={(task) => {
+          handleOpenTaskSession(task);
+          setDetailTask(null);
+        }}
+      />
     </div>
   );
 

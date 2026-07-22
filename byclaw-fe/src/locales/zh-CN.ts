@@ -1686,6 +1686,7 @@ export default {
   'projectSpace.detail.manualRequirement.placeholder.productContent': '可选：为空时由 AI 自动整理目标、范围与验收标准',
   // 项目任务详情抽屉
   'projectTaskDetail.title': '任务详情',
+  'projectTaskDetail.enterSession': '进入会话',
   'projectTaskDetail.defaultTaskName': '未命名任务',
   'projectTaskDetail.defaultTaskSessionName': '任务会话',
   'projectTaskDetail.defaultAgentName': 'Code Agent',

@@ -1702,6 +1702,7 @@ export default {
     'Optional: AI will organize objectives, scope, and acceptance criteria when empty',
   // Project task detail drawer
   'projectTaskDetail.title': 'Task Details',
+  'projectTaskDetail.enterSession': 'Enter Conversation',
   'projectTaskDetail.defaultTaskName': 'Unnamed task',
   'projectTaskDetail.defaultTaskSessionName': 'Task conversation',
   'projectTaskDetail.defaultAgentName': 'Code Agent',

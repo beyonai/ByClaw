@@ -27,6 +27,7 @@ import getElementData, { getElementDisplayText } from './utils/getElementData';
 import { withMention, withEditableNavigation } from './plugins';
 import { Props, ParagraphElementType, PayloadType, IResourceType, MentionTriggerInfo, Resource } from './types';
 import { createKeyboardHandler } from './utils/keyboardHandler';
+import type { ResourceElementType } from './elements/resource';
 import useDefaultAgentPlaceholder from './useDefaultAgentPlaceholder';
 import { setAgentCache } from './agentCache';
 import useDefaultAgentElement from './useDefaultAgentElement';
@@ -34,6 +35,14 @@ import useOnPaste from './useOnPaste';
 import useGlobal from '@/hooks/useGlobal';
 
 type SetTextParams = string | Parameters<typeof getDescendantValueByDefaultValue>[0];
+
+const isAgentToolNode = (node: unknown): node is ResourceElementType => {
+  if (!node || typeof node !== 'object') {
+    return false;
+  }
+  const candidate = node as { type?: unknown; isAgentTool?: unknown };
+  return candidate.type === ELEMENT_RESOURCE && candidate.isAgentTool === true;
+};
 
 /** 带 aria-label 的 Editable 根元素，用于无障碍与测试定位（slate-react 未将 aria-label 透传到 DOM） */
 const EditableRootWithAria = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>((props, ref) => (
@@ -283,8 +292,16 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
         // @ts-ignore
         isDefaultAgent: false,
       };
-    } else if (type === ResourceType.agentTool) {
-      if (chatMode === chatModeMap.expert && !agentId) {
+    } else if (type === ResourceType.agentTool && isAgentToolNode(node)) {
+      const hasInlineAgent =
+        !!node.agentId &&
+        getResourceList(value).some(
+          (resource) =>
+            resource.resourceType === ResourceType.digitalEmployee && `${resource.resourceId}` === `${node.agentId}`
+        );
+      const isSelectedAgentSkill = (!!agentId && `${agentId}` === `${node.agentId}`) || hasInlineAgent;
+
+      if (chatMode === chatModeMap.expert && !agentId && !isSelectedAgentSkill) {
         // 当前没有@任何数字员工，但是直接选择了某个数字员工的技能，那么拆分成两步：
         // 1. 先@这个数字员工
         // 2. 再选择技能
@@ -301,10 +318,10 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
         });
         return;
       }
-      if (agentId && `${agentId}` === `${node.agentId}`) {
-        // 当前模式是专家模式，并且选择了当前数字员工的技能，那么就不需要展示数字员工的名称，直接展示技能名称就好
+      if (isSelectedAgentSkill) {
+        // 当前输入框已经引用该数字员工时，仅展示技能名称，避免重复展示数字员工。
         node.name = node.resourceName;
-        delete node.chatAvatar;
+        node.chatAvatar = undefined;
         node.children = [{ text: getElementDisplayText({ resourceType: type, data: { name: node.resourceName } }) }];
       }
     }

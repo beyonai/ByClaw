@@ -483,7 +483,9 @@
       let wsPath = prefix ? prefix + '/websockify' : 'websockify';
       if (wsPath.charAt(0) === '/') wsPath = wsPath.slice(1);
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      return protocol + '//' + window.location.host + '/' + wsPath;
+      const token = new URLSearchParams(window.location.search).get('token');
+      const query = token ? '?token=' + encodeURIComponent(token) : '';
+      return protocol + '//' + window.location.host + '/' + wsPath + query;
     }
 
     function setStatus(state, text) {

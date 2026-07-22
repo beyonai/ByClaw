@@ -1,9 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button, Tooltip, message } from 'antd';
 import { FolderOpenOutlined, FundProjectionScreenOutlined } from '@ant-design/icons';
-import { getProject } from '@/service/devloop';
+import { useSelector } from '@umijs/max';
+import { getProject, getTaskDetail } from '@/service/devloop';
 import { useActiveSiderAgent } from '@/layout/sider/components/ActiveSiderAgentBar';
 import TaskDetailDrawer from '@/layout/sider/components/ProjectSpaceList/TaskDetailDrawer';
+import { isCurrentUserTaskAssignee } from '@/layout/sider/components/ProjectSpaceList/taskAccess';
 import ProjectSessionResultDrawer from './ProjectSessionResultDrawer';
 import styles from './ChatTitle.module.less';
 
@@ -17,8 +19,10 @@ const getResponseData = (response: any) => response?.data ?? response;
 
 const ProjectSessionActions: React.FC<ProjectSessionActionsProps> = ({ projectId, sessionId, sessionName }) => {
   const activeSiderAgent = useActiveSiderAgent();
+  const userInfo = useSelector(({ user }: any) => user.userInfo);
   const [project, setProject] = useState<any>(null);
   const [taskDetail, setTaskDetail] = useState<any>(null);
+  const [taskLoading, setTaskLoading] = useState(false);
   const [taskProgressTooltipOpen, setTaskProgressTooltipOpen] = useState(false);
   const [resultDrawerOpen, setResultDrawerOpen] = useState(false);
 
@@ -54,8 +58,9 @@ const ProjectSessionActions: React.FC<ProjectSessionActionsProps> = ({ projectId
   );
   // 兼容旧环境仍返回 development 的项目类型；仅研发项目展示任务进度入口。
   const isDevelopmentProject = project?.projectType === 'develop' || project?.projectType === 'development';
+  const canEnterTaskSession = useMemo(() => isCurrentUserTaskAssignee(taskDetail, userInfo), [taskDetail, userInfo]);
 
-  const handleOpenTaskProgress = useCallback(() => {
+  const handleOpenTaskProgress = useCallback(async () => {
     // 点击后立即关闭悬浮提示，避免抽屉打开时 Tooltip 停留在按钮上方。
     setTaskProgressTooltipOpen(false);
     const numericSessionId = Number(sessionId);
@@ -64,18 +69,33 @@ const ProjectSessionActions: React.FC<ProjectSessionActionsProps> = ({ projectId
       return;
     }
 
-    // 与任务列表的“查看详情”一致，抽屉自身按会话 ID 读取研发阶段，不再额外请求任务详情。
-    setTaskDetail({
-      taskId: numericSessionId,
-      sessionId: numericSessionId,
-      projectId,
-      title: sessionName || '任务详情',
-    });
+    setTaskLoading(true);
+    try {
+      const response = await getTaskDetail(numericSessionId);
+      const task = getResponseData(response);
+      if (!task || task?.success === false) {
+        message.warning('当前会话暂无关联任务');
+        return;
+      }
+
+      // 会话入口只持有基础会话信息，需以任务详情接口回填执行上下文。
+      setTaskDetail({
+        ...task,
+        projectId: task.projectId ?? projectId,
+        sessionId: task.sessionId || numericSessionId,
+        title: task.title || task.taskName || sessionName || '任务详情',
+      });
+    } catch (error) {
+      console.error('Failed to load task progress:', error);
+      message.error('任务进度加载失败');
+    } finally {
+      setTaskLoading(false);
+    }
   }, [projectId, sessionId, sessionName]);
 
   const handleTaskProgressTooltipOpenChange = (open: boolean) => {
     // 任务详情已打开时不再展示提示，防止鼠标仍停留在按钮上导致 Tooltip 重新出现。
-    setTaskProgressTooltipOpen(open && !taskDetail);
+    setTaskProgressTooltipOpen(open && !taskLoading && !taskDetail);
   };
 
   // 任务成果面向全部会话展示；任务进度仅在研发项目中提供。
@@ -95,6 +115,7 @@ const ProjectSessionActions: React.FC<ProjectSessionActionsProps> = ({ projectId
               type="text"
               className={styles.projectActionButton}
               icon={<FundProjectionScreenOutlined />}
+              loading={taskLoading}
               onClick={handleOpenTaskProgress}
             />
           </Tooltip>
@@ -108,7 +129,12 @@ const ProjectSessionActions: React.FC<ProjectSessionActionsProps> = ({ projectId
           />
         </Tooltip>
       </span>
-      <TaskDetailDrawer task={taskDetail} onClose={() => setTaskDetail(null)} />
+      <TaskDetailDrawer
+        task={taskDetail}
+        onClose={() => setTaskDetail(null)}
+        canEnterSession={canEnterTaskSession}
+        onEnterSession={() => setTaskDetail(null)}
+      />
       <ProjectSessionResultDrawer
         open={resultDrawerOpen}
         resourceId={resourceId}
