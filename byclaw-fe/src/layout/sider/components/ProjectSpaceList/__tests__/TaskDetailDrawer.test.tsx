@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 
 const mockGetTaskPhases = jest.fn(() => Promise.resolve(null));
 
@@ -69,5 +69,35 @@ describe('TaskDetailDrawer', () => {
 
     expect(await screen.findByText('待开始任务')).toBeInTheDocument();
     expect(await screen.findByText('projectTaskDetail.emptyState')).toBeInTheDocument();
+  });
+
+  it('renders the header session-entry action and delegates navigation', async () => {
+    const task = {
+      sessionId: 125,
+      stateAvailable: false,
+      title: '可进入会话的待开始任务',
+    };
+    const onEnterSession = jest.fn();
+
+    render(<TaskDetailDrawer task={task} onClose={jest.fn()} canEnterSession onEnterSession={onEnterSession} />);
+
+    const enterSessionButton = await screen.findByRole('button', { name: /projectTaskDetail\.enterSession/ });
+    fireEvent.click(enterSessionButton);
+
+    expect(onEnterSession).toHaveBeenCalledWith(task);
+  });
+
+  it('hides the session-entry action for non-assignees', async () => {
+    render(
+      <TaskDetailDrawer
+        task={{ sessionId: 126, stateAvailable: true, title: '其他负责人任务' }}
+        onClose={jest.fn()}
+        canEnterSession={false}
+        onEnterSession={jest.fn()}
+      />
+    );
+
+    expect(await screen.findByText('其他负责人任务')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'projectTaskDetail.enterSession' })).not.toBeInTheDocument();
   });
 });
