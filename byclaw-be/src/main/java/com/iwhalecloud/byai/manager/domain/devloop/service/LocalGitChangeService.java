@@ -124,6 +124,54 @@ public class LocalGitChangeService {
         }
     }
 
+    /** 单文件 diff 结果:状态 + unified diff 文本。 */
+    @Getter
+    public static class FileDiffResult {
+        private final LocalStatus status;
+        private final String filename;
+        private final String diff;
+        private final String message;
+
+        private FileDiffResult(LocalStatus status, String filename, String diff, String message) {
+            this.status = status;
+            this.filename = filename;
+            this.diff = diff;
+            this.message = message;
+        }
+    }
+
+    /**
+     * 取单个文件相对基线的 unified diff 文本(含已提交与未提交改动),供前端 modal 逐行渲染红绿。
+     * 与 collectChanges 同口径解析基线;全程兜底,任何异常收敛为状态,不抛上层。
+     */
+    public FileDiffResult fileDiff(Path workspaceDir, String baseBranch, String filePath) {
+        if (workspaceDir == null || filePath == null || filePath.trim().isEmpty()) {
+            return new FileDiffResult(LocalStatus.NO_WORKSPACE, filePath, null, "参数缺失");
+        }
+        try {
+            File dir = workspaceDir.toFile();
+            if (!dir.isDirectory()) {
+                return new FileDiffResult(LocalStatus.NO_WORKSPACE, filePath, null, "工作区目录不存在");
+            }
+            if (!new File(dir, ".git").exists()) {
+                return new FileDiffResult(LocalStatus.NOT_GIT_REPO, filePath, null, "工作区不是 git 仓库");
+            }
+            String baseRef = resolveBaseRef(dir, baseBranch);
+            // 单文件 diff:范围与列表一致,-- 后限定文件路径。已提交 + 未提交改动都会体现在 base..HEAD 与工作区叠加中,
+            // 这里用 base 到工作区(不加 ...HEAD)一次性覆盖:git diff {base} -- {file} 比较基线与当前工作区。
+            String diff = runGit(dir, "diff", baseRef, "--", filePath);
+            if (diff.trim().isEmpty()) {
+                // 基线到工作区无差异时,可能是文件仅在未提交暂存态;退而比较 HEAD 与工作区。
+                diff = runGit(dir, "diff", "HEAD", "--", filePath);
+            }
+            return new FileDiffResult(LocalStatus.OK, filePath, diff, null);
+        }
+        catch (Exception e) {
+            log.warn("[Devloop] 本地文件 diff 失败 dir={} file={}", workspaceDir, filePath, e);
+            return new FileDiffResult(LocalStatus.GIT_ERROR, filePath, null, e.getMessage());
+        }
+    }
+
     /** 基线引用解析:优先远程跟踪 origin/{base},其次本地 {base};都无则用 git 空树哈希(列全部文件为新增)。 */
     private String resolveBaseRef(File dir, String baseBranch) {
         String candidate = "origin/" + baseBranch;

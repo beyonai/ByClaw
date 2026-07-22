@@ -1472,6 +1472,46 @@ public class DevloopApplicationService {
     }
 
     /**
+     * 查询任务单个文件的本地 diff(unified 文本),供前端 modal 逐行渲染。仅本地工作区口径;
+     * 工作区不可用或出错时返回 status 非 ok,前端提示,不抛异常。
+     */
+    public ResponseUtil<Map<String, Object>> getTaskFileDiff(Long sessionId, String filePath) {
+        if (sessionId == null || filePath == null || filePath.trim().isEmpty()) {
+            return ResponseUtil.failRes("sessionId 与 filePath 不能为空");
+        }
+        try {
+            ByaiSession s = byaiSessionMapper.selectById(sessionId);
+            if (s == null) {
+                return ResponseUtil.failRes("会话不存在");
+            }
+            ScanLogItem item = scanLogItemMapper.selectOne(
+                new LambdaQueryWrapper<ScanLogItem>().eq(ScanLogItem::getSessionId, sessionId).last("limit 1"));
+            ProjectRepo repo = resolveTaskRepo(s.getProjectId(), item);
+            String repoFullName = repo != null ? repo.getRepoFullName() : null;
+            String baseBranch = repo != null && repo.getDefaultBranch() != null && !repo.getDefaultBranch().isEmpty()
+                ? repo.getDefaultBranch() : "main";
+            Path workspaceDir = resolveSessionWorkspace(s, repoFullName);
+
+            LocalGitChangeService.FileDiffResult result = localGitChangeService.fileDiff(workspaceDir, baseBranch,
+                filePath);
+            Map<String, Object> map = new HashMap<>();
+            map.put("status", result.getStatus().name().toLowerCase());
+            map.put("filename", result.getFilename());
+            map.put("diff", result.getDiff());
+            map.put("message", result.getMessage());
+            return ResponseUtil.successResponse(map);
+        }
+        catch (Exception e) {
+            log.error("[Devloop] 查询文件 diff 失败, sessionId={}, file={}", sessionId, filePath, e);
+            Map<String, Object> map = new HashMap<>();
+            map.put("status", "git_error");
+            map.put("filename", filePath);
+            map.put("diff", null);
+            return ResponseUtil.successResponse(map);
+        }
+    }
+
+    /**
      * 拼会话工作区里 git 仓库的宿主机绝对路径:{nfs根}/{bucket}/by/.sessions/{sessionId}/{repoName}。
      * bucket 由创建者 userCode 解析;repoName 取 repoFullName 去掉 owner/ 前缀。任一环节缺失返回 null(走远程兜底)。
      */

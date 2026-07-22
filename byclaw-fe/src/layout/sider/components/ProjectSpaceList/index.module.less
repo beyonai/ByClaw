@@ -2013,6 +2013,15 @@
   }
 }
 
+// 本地变更行是 <button>,清掉按钮默认样式,保持与列表行一致的网格布局。
+.codeChangeItemButton {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  font: inherit;
+}
+
 .codeChangeBadge {
   width: 22px;
   height: 22px;
@@ -2066,6 +2075,11 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  // 深层目录省略头部、保留尾部(离文件更近的目录名更有辨识度):rtl 让省略号出现在左端,
+  // bdi 方向内联覆盖保证路径本身仍按从左到右阅读。hover 时 title 显示全路径。
+  direction: rtl;
+  text-align: left;
+  unicode-bidi: plaintext;
 }
 
 .codeChangeStat {
@@ -2967,4 +2981,73 @@
 .kickbackReason {
   font-size: 12px;
   color: #526075;
+}
+
+// 文件 diff modal:标题含文件名+全路径,正文等宽字体逐行渲染 unified diff。
+.diffModalTitle {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.diffModalName {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1f2633;
+}
+
+.diffModalPath {
+  font-size: 12px;
+  color: #8a96a8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+  unicode-bidi: plaintext;
+}
+
+.diffModalEmpty {
+  padding: 40px 0;
+  text-align: center;
+  color: #8a96a8;
+  font-size: 13px;
+}
+
+.diffModalBody {
+  max-height: 65vh;
+  overflow: auto;
+  border: 1px solid #e6ebf2;
+  border-radius: 6px;
+  background: #fbfcfe;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.diffLine {
+  padding: 0 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+// git 客户端配色:新增绿底、删除红底、hunk 头蓝灰、上下文常态。
+.diffLineAdd {
+  background: #e6ffec;
+  color: #1c7c3c;
+}
+
+.diffLineDel {
+  background: #ffebe9;
+  color: #b31d28;
+}
+
+.diffLineHunk {
+  background: #eef2f7;
+  color: #5a6b86;
+}
+
+.diffLineContext {
+  color: #444c5a;
 }

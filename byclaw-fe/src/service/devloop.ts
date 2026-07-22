@@ -266,6 +266,17 @@ export type DevloopTaskChanges = {
 export const getTaskChanges = (sessionId: number) =>
   POST<DevloopTaskChanges>('/byaiService/devloop/task/changes', { sessionId });
 
+// 单个文件的本地 diff(unified 文本),供 modal 逐行渲染。status: ok | no_workspace | not_git_repo | git_error。
+export type DevloopTaskFileDiff = {
+  status: 'ok' | 'no_workspace' | 'not_git_repo' | 'git_error';
+  filename?: string | null;
+  diff?: string | null;
+  message?: string | null;
+};
+
+export const getTaskFileDiff = (sessionId: number, filePath: string) =>
+  POST<DevloopTaskFileDiff>('/byaiService/devloop/task/file-diff', { sessionId, filePath });
+
 // 任务环节进度：直接读取 self-developed-rules v2 会话状态投影
 export const getTaskPhases = (sessionId: number) =>
   POST<DevloopTaskState>('/byaiService/devloop/task/phases', { sessionId });

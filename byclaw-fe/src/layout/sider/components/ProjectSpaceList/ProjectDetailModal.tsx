@@ -52,6 +52,7 @@ import {
   listProjectSessionsByQo,
   listProjectMembers,
   getTaskChanges,
+  getTaskFileDiff,
   listRequirementsByProject,
   listScanLogs,
   listScanSources,
@@ -65,6 +66,7 @@ import {
   updateScanSource,
   type DevloopProjectSpaceFile,
   type DevloopTaskChanges,
+  type DevloopTaskFileDiff,
 } from '@/service/devloop';
 import { deleteFiles, listFiles, renameFile, type FileBrowserItem } from '@/service/fileBrowser';
 import SessionOverviewDrawer from './SessionOverviewDrawer';
@@ -280,6 +282,25 @@ const splitFilePath = (path: string) => {
   return idx >= 0 ? { name: path.slice(idx + 1), dir: path.slice(0, idx) } : { name: path, dir: '' };
 };
 
+// unified diff 行类型:git diff 输出按行首字符分类,供 modal 逐行着色(参考 git 客户端)。
+type DiffLineType = 'meta' | 'hunk' | 'add' | 'del' | 'context';
+
+const classifyDiffLine = (line: string): DiffLineType => {
+  if (line.startsWith('diff ') || line.startsWith('index ') || line.startsWith('--- ') || line.startsWith('+++ ')) {
+    return 'meta';
+  }
+  if (line.startsWith('@@')) return 'hunk';
+  if (line.startsWith('+')) return 'add';
+  if (line.startsWith('-')) return 'del';
+  return 'context';
+};
+
+// 把 unified diff 文本解析为带类型的行数组;meta/无内容行过滤掉文件头噪音只留必要信息。
+const parseDiffLines = (diff?: string | null): { type: DiffLineType; text: string }[] => {
+  if (!diff) return [];
+  return diff.split('\n').map((text) => ({ type: classifyDiffLine(text), text }));
+};
+
 const cronPresets = [
   { value: '*/1 * * * *', labelId: 'source.cron.everyOneMinute' },
   { value: '*/5 * * * *', labelId: 'source.cron.everyFiveMinutes' },
@@ -444,6 +465,10 @@ const ProjectDetailPanel: React.FC<Props> = ({
   // 资源 tab 的“代码变更”卡片:按当前会话(任务)拉取远程分支相对基线的文件变更。
   const [taskChanges, setTaskChanges] = useState<DevloopTaskChanges | null>(null);
   const [taskChangesLoading, setTaskChangesLoading] = useState(false);
+  // 代码变更文件 diff modal:点文件行拉取该文件 unified diff 并弹窗逐行渲染。
+  const [diffModalFile, setDiffModalFile] = useState<string | null>(null);
+  const [diffModalData, setDiffModalData] = useState<DevloopTaskFileDiff | null>(null);
+  const [diffModalLoading, setDiffModalLoading] = useState(false);
   const [resourceRenameOpen, setResourceRenameOpen] = useState(false);
   const [resourceRenameTarget, setResourceRenameTarget] = useState<FileBrowserItem | null>(null);
   const [resourceRenameLoading, setResourceRenameLoading] = useState(false);
@@ -804,6 +829,32 @@ const ProjectDetailPanel: React.FC<Props> = ({
     } finally {
       setTaskChangesLoading(false);
     }
+  }, []);
+
+  // 点变更文件行:打开 diff modal 并拉取该文件的本地 unified diff。
+  const openFileDiff = useCallback(
+    async (filePath: string) => {
+      const sessionId = currentResourceSession?.sessionId;
+      if (!sessionId) return;
+      setDiffModalFile(filePath);
+      setDiffModalData(null);
+      setDiffModalLoading(true);
+      try {
+        const res = await getTaskFileDiff(Number(sessionId), filePath);
+        setDiffModalData(res || null);
+      } catch (error) {
+        console.error('Failed to load file diff:', error);
+        setDiffModalData(null);
+      } finally {
+        setDiffModalLoading(false);
+      }
+    },
+    [currentResourceSession?.sessionId]
+  );
+
+  const closeFileDiff = useCallback(() => {
+    setDiffModalFile(null);
+    setDiffModalData(null);
   }, []);
 
   const fetchSessionResourceFiles = useCallback(
@@ -2163,10 +2214,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
             const { name, dir } = splitFilePath(file.filename);
             const renamedFrom =
               file.status?.toLowerCase() === 'renamed' && file.previousFilename ? file.previousFilename : '';
-            // 有 blobUrl 就整行超链到 GitHub 该文件页面(删除文件无 blobUrl,退化为不可点)。
-            const rowClassName = file.blobUrl
-              ? `${styles.codeChangeItem} ${styles.codeChangeItemLink}`
-              : styles.codeChangeItem;
+            // 本地变更点行看 diff(弹 modal);远程变更(有 blobUrl)整行超链到 GitHub 文件页。
+            const isLocal = taskChanges?.source === 'local';
             const inner = (
               <>
                 <span className={`${styles.codeChangeBadge} ${styles[meta.className]}`} title={t(meta.labelId)}>
@@ -2174,7 +2223,11 @@ const ProjectDetailPanel: React.FC<Props> = ({
                 </span>
                 <div className={styles.codeChangeInfo}>
                   <strong className={styles.codeChangeName}>{name}</strong>
-                  <span className={styles.codeChangePath}>
+                  {/* 深层目录路径:整段展示并挂 title,过长时 CSS 头部省略(rtl)保留尾部目录名,hover 看全路径。 */}
+                  <span
+                    className={styles.codeChangePath}
+                    title={renamedFrom ? `${renamedFrom} → ${file.filename}` : file.filename}
+                  >
                     {renamedFrom ? `${renamedFrom} → ${file.filename}` : dir || file.filename}
                   </span>
                 </div>
@@ -2184,11 +2237,32 @@ const ProjectDetailPanel: React.FC<Props> = ({
                 </div>
               </>
             );
-            return file.blobUrl ? (
-              <a className={rowClassName} key={file.filename} href={file.blobUrl} target="_blank" rel="noreferrer">
-                {inner}
-              </a>
-            ) : (
+            if (file.blobUrl) {
+              return (
+                <a
+                  className={`${styles.codeChangeItem} ${styles.codeChangeItemLink}`}
+                  key={file.filename}
+                  href={file.blobUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {inner}
+                </a>
+              );
+            }
+            if (isLocal) {
+              return (
+                <button
+                  type="button"
+                  className={`${styles.codeChangeItem} ${styles.codeChangeItemLink} ${styles.codeChangeItemButton}`}
+                  key={file.filename}
+                  onClick={() => openFileDiff(file.filename)}
+                >
+                  {inner}
+                </button>
+              );
+            }
+            return (
               <div className={styles.codeChangeItem} key={file.filename}>
                 {inner}
               </div>
@@ -2311,6 +2385,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
           onAction={handleResourceFileAction}
         />
         {renderCodeChanges()}
+        {renderFileDiffModal()}
       </div>
     );
   };
@@ -2478,6 +2553,59 @@ const ProjectDetailPanel: React.FC<Props> = ({
       <TaskDetailDrawer task={detailTask} onClose={() => setDetailTask(null)} />
     </div>
   );
+
+  // 文件 diff modal:逐行渲染 unified diff,行首 +/-/@@ 分别着色,像 git 客户端。
+  const renderFileDiffModal = () => {
+    const open = !!diffModalFile;
+    const lines = parseDiffLines(diffModalData?.diff);
+    const status = diffModalData?.status;
+    const hasDiff = status === 'ok' && lines.some((l) => l.type === 'add' || l.type === 'del');
+    const fileName = diffModalFile ? splitFilePath(diffModalFile).name : '';
+    return (
+      <Modal
+        open={open}
+        onCancel={closeFileDiff}
+        footer={null}
+        width={900}
+        title={
+          <div className={styles.diffModalTitle}>
+            <span className={styles.diffModalName}>{fileName}</span>
+            {diffModalFile ? <span className={styles.diffModalPath}>{diffModalFile}</span> : null}
+          </div>
+        }
+        className={styles.diffModal}
+      >
+        {diffModalLoading ? (
+          <div className={styles.diffModalEmpty}>
+            <Spin />
+          </div>
+        ) : !diffModalData || status !== 'ok' ? (
+          <div className={styles.diffModalEmpty}>{diffModalData?.message || t('codeChanges.diffUnavailable')}</div>
+        ) : !hasDiff ? (
+          <div className={styles.diffModalEmpty}>{t('codeChanges.diffEmpty')}</div>
+        ) : (
+          <div className={styles.diffModalBody}>
+            {lines.map((line, idx) => {
+              if (line.type === 'meta') return null;
+              const cls =
+                line.type === 'add'
+                  ? styles.diffLineAdd
+                  : line.type === 'del'
+                    ? styles.diffLineDel
+                    : line.type === 'hunk'
+                      ? styles.diffLineHunk
+                      : styles.diffLineContext;
+              return (
+                <div className={`${styles.diffLine} ${cls}`} key={idx}>
+                  {line.text || ' '}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Modal>
+    );
+  };
 
   const renderTabContent = () => {
     if (activeTab === 'requirements' && !showRequirementsTab) {

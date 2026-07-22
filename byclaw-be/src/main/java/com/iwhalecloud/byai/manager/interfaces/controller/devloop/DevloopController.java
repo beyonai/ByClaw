@@ -203,6 +203,15 @@ public class DevloopController {
         return applicationService.getTaskChanges(sessionId);
     }
 
+    /** 获取任务单个文件的本地 diff(unified 文本),供前端 modal 逐行渲染变更内容 */
+    @PostMapping("/task/file-diff")
+    public ResponseUtil<Map<String, Object>> getTaskFileDiff(@RequestBody Map<String, Object> params) {
+        Long sessionId = Long.valueOf(params.get("sessionId") != null ? params.get("sessionId").toString()
+            : params.get("taskId").toString());
+        String filePath = params.get("filePath") != null ? params.get("filePath").toString() : "";
+        return applicationService.getTaskFileDiff(sessionId, filePath);
+    }
+
     // ========== 项目成员 ==========
 
     /** 添加项目成员 */

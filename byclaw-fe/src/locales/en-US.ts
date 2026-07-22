@@ -1628,6 +1628,8 @@ export default {
   'projectSpace.detail.codeChanges.status.renamed': 'Renamed',
   'projectSpace.detail.codeChanges.status.copied': 'Copied',
   'projectSpace.detail.codeChanges.localBadge': 'Incl. unpushed',
+  'projectSpace.detail.codeChanges.diffUnavailable': 'Unable to load the diff for this file',
+  'projectSpace.detail.codeChanges.diffEmpty': 'No displayable diff for this file',
   'projectSpace.detail.repository.modalTitle': 'Manage Project Repositories',
   'projectSpace.detail.repository.field.existing': 'Existing Repositories',
   'projectSpace.detail.repository.field.fullName': 'Repository Full Name (owner/repo)',
