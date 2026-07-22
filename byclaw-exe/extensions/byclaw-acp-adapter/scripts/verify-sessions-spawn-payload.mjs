@@ -403,64 +403,7 @@ async function loadCallAcpAgentTool() {
   return import(`${pathToFileURL(outfile).href}?t=${Date.now()}`);
 }
 
-async function assertCallAcpAgentToolFailsClosed(snapshot) {
-  const { createByclawCallAcpAgentTool } = await loadCallAcpAgentTool();
-  let executorCallCount = 0;
-  const environmentKeys = [
-    "USER_CODE",
-    "LANGFUSE_BASE_URL",
-    "LANGFUSE_PUBLIC_KEY",
-    "LANGFUSE_SECRET_KEY",
-    "OPENCLAW_STATE_DIR",
-  ];
-  const savedEnvironment = Object.fromEntries(environmentKeys.map((key) => [key, process.env[key]]));
-  process.env.USER_CODE = "metadata-bootstrap-test";
-  delete process.env.LANGFUSE_BASE_URL;
-  delete process.env.LANGFUSE_PUBLIC_KEY;
-  delete process.env.LANGFUSE_SECRET_KEY;
-  process.env.OPENCLAW_STATE_DIR = "/dev/null/openclaw-state";
-  try {
-    const config = {
-      ...jsonClone(fixture.config),
-      defaultCwd: path.join(workspaceRoot, "call-tool-fail-closed"),
-      sqlitePath: path.join(workspaceRoot, "call-tool-fail-closed", "state.sqlite"),
-    };
-    const tool = createByclawCallAcpAgentTool({
-      config,
-      registry: {
-        snapshot: async () => jsonClone(snapshot),
-      },
-      executeViaCallAgent: async () => {
-        executorCallCount += 1;
-        return { success: true };
-      },
-    })({
-      sessionKey: "agent:main:metadata-bootstrap-test",
-      channelSessionId: "metadata-bootstrap-test-session",
-      channelTraceId: "a".repeat(32),
-      langfuseParentObservationId: "b".repeat(16),
-    });
-    const result = await tool.execute("metadata-bootstrap-test-call", {
-      kind: "agent",
-      id: "900002",
-      input: "protected query",
-    });
-    assert.equal(result.error_code, "ACP_METADATA_BOOTSTRAP_INVALID");
-    assert.match(result.error, /metadata bootstrap materialization failed/iu);
-    assert.equal(executorCallCount, 0, "bootstrap failure must not call the remote executor");
-  } finally {
-    for (const key of environmentKeys) {
-      const value = savedEnvironment[key];
-      if (value === undefined) {
-        delete process.env[key];
-      } else {
-        process.env[key] = value;
-      }
-    }
-  }
-}
-
-async function assertCallAcpAgentToolDispatchesBootstrap(snapshot) {
+async function assertCallAcpAgentToolDispatchesQueryAndSessionSkills(snapshot) {
   const { createByclawCallAcpAgentTool } = await loadCallAcpAgentTool();
   let executorInput;
   const environmentKeys = [
@@ -472,33 +415,46 @@ async function assertCallAcpAgentToolDispatchesBootstrap(snapshot) {
   ];
   const savedEnvironment = Object.fromEntries(environmentKeys.map((key) => [key, process.env[key]]));
   const defaultCwd = path.join(workspaceRoot, "call-tool-success");
-  process.env.USER_CODE = "metadata-bootstrap-success-test";
+  process.env.USER_CODE = "session-skills-test";
   delete process.env.LANGFUSE_BASE_URL;
   delete process.env.LANGFUSE_PUBLIC_KEY;
   delete process.env.LANGFUSE_SECRET_KEY;
   process.env.OPENCLAW_STATE_DIR = path.join(defaultCwd, ".openclaw");
   try {
+    fs.rmSync(defaultCwd, { recursive: true, force: true });
     const config = {
       ...jsonClone(fixture.config),
       defaultCwd,
       sqlitePath: path.join(defaultCwd, "state.sqlite"),
     };
+    const dispatchSnapshot = jsonClone(snapshot);
+    dispatchSnapshot.agents.find((agent) => agent.id === "900002").linkedSkills.push({
+      id: "910002",
+      redisKey: "SKILL_910002",
+      name: "fixture-review-skill",
+      code: "fixture-review-skill",
+      description: "Second session-scoped fixture skill.",
+      skillPath: "/workspace/skills/fixture-review-skill",
+      skillDocObjectKey: "/workspace/skills/fixture-review-skill/SKILL.md",
+      skillType: "hub",
+      source: { resourceId: "910002", resourceBizType: "SKILL" },
+    });
     const tool = createByclawCallAcpAgentTool({
       config,
       registry: {
-        snapshot: async () => jsonClone(snapshot),
+        snapshot: async () => dispatchSnapshot,
       },
       executeViaCallAgent: async (input) => {
         executorInput = input;
         return { success: true };
       },
     })({
-      sessionKey: "agent:main:metadata-bootstrap-success-test",
-      channelSessionId: "metadata-bootstrap-success-session",
+      sessionKey: "agent:main:session-skills-test",
+      channelSessionId: "session-skills-test-session",
       channelTraceId: "c".repeat(32),
       langfuseParentObservationId: "d".repeat(16),
     });
-    const result = await tool.execute("metadata-bootstrap-success-call", {
+    const result = await tool.execute("session-skills-test-call", {
       kind: "agent",
       id: "900002",
       input: "protected query",
@@ -506,15 +462,19 @@ async function assertCallAcpAgentToolDispatchesBootstrap(snapshot) {
     assert.equal(result.success, true);
     assert.ok(executorInput, "successful call_acp_agent must invoke the remote executor");
     assert.equal(executorInput.payload.cwd, defaultCwd, "call_acp_agent must preserve the planned cwd");
-    assert.match(executorInput.content, /every Linked Skill[^\n]*skillDocPath[^\n]*EOF/iu);
-    assert.match(executorInput.content, /\.claude\/skills/u);
-    assert.match(executorInput.content, /\.agents\/skills/u);
-    assert.match(executorInput.content, /\.codex\/skills/u);
-    assert.doesNotMatch(executorInput.content, /Required client instructions|clientInstructions/iu);
-    assert.ok(
-      executorInput.content.search(/every Linked Skill[^\n]*skillDocPath[^\n]*EOF/iu) <
-        executorInput.content.indexOf("<USER_QUERY_ACCESS>"),
-      "call_acp_agent must send Linked Skills bootstrap before query access",
+    assert.equal(executorInput.content, "protected query", "call_acp_agent content must contain only the query");
+    assert.deepEqual(
+      executorInput.payload.skillPaths,
+      [
+        "/workspace/skills/fixture-engineering-skill",
+        "/workspace/skills/fixture-review-skill",
+      ],
+      "call_acp_agent must pass every linked skillPath through the session payload",
+    );
+    assert.equal(
+      fs.existsSync(defaultCwd),
+      false,
+      "call_acp_agent must not materialize metadata.md, bootstrap files, or client artifacts",
     );
   } finally {
     for (const key of environmentKeys) {
@@ -676,8 +636,7 @@ async function main() {
     "planner should export buildCallAgentContentFromPlan for the byclawCallAcpAgent tool",
   );
   const snapshot = jsonClone(fixture.snapshot);
-  await assertCallAcpAgentToolFailsClosed(snapshot);
-  await assertCallAcpAgentToolDispatchesBootstrap(snapshot);
+  await assertCallAcpAgentToolDispatchesQueryAndSessionSkills(snapshot);
   const cases = fixture.requestCases.filter((item) => !selected || selected.has(item.name));
 
   assert.ok(cases.length > 0, "no request cases selected");

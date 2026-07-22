@@ -1045,6 +1045,91 @@ export function buildCallAgentContentFromPlan(plan: ByclawAcpPlan): string {
   return renderMetadataFirstDelegationContent({ contract, metadataContent });
 }
 
+export type ByclawCallAgentDispatch = {
+  kind: ByclawAcpPlan["kind"];
+  id: string;
+  cwd: string;
+  query: string;
+  skillPaths: string[];
+  modelConfig?: JsonRecord;
+};
+
+function callAgentQuery(input: unknown): string {
+  if (typeof input === "string") {
+    return input;
+  }
+  if (input === undefined) {
+    return "";
+  }
+  return JSON.stringify(input);
+}
+
+/**
+ * Resolve the minimal remote call-agent payload without materializing plan,
+ * metadata, bootstrap, query, or native-client files.
+ */
+export function createByclawCallAgentDispatch(params: {
+  config: ResolvedByclawAcpAdapterConfig;
+  snapshot: ByclawRegistrySnapshot;
+  request: ByclawAcpPlanRequest;
+}): ByclawCallAgentDispatch {
+  const { config, snapshot, request } = params;
+  const resolvedTarget = resolvePlanTargetById(snapshot, request.id);
+  const inferredTarget =
+    resolvedTarget ||
+    (request.id
+      ? undefined
+      : inferPlanTargetFromInput(snapshot, request.input) ||
+        inferLinkedSkillAgentTarget(snapshot, request.input));
+  const effectiveRequest = inferredTarget
+    ? { ...request, kind: inferredTarget.kind, id: inferredTarget.id }
+    : request;
+  const kind = effectiveRequest.kind || inferPlanKind(snapshot, effectiveRequest.id);
+  const cwd = request.cwd || config.defaultCwd;
+
+  let id: string;
+  let members: NormalizedByclawAgent[];
+  let coordinator: NormalizedByclawAgent | undefined;
+  if (kind === "agent") {
+    coordinator = findAgent(snapshot, effectiveRequest.id);
+    id = coordinator.id;
+    members = [coordinator];
+  } else if (kind === "team") {
+    const team = findTeam(snapshot, effectiveRequest.id);
+    id = team.id;
+    members = team.memberAgentIds
+      .map((memberId) => agentById(snapshot, memberId))
+      .filter(Boolean) as NormalizedByclawAgent[];
+    coordinator = team.coordinatorAgentId
+      ? agentById(snapshot, team.coordinatorAgentId)
+      : members[0];
+  } else {
+    const workflow = kind === "workflow"
+      ? findWorkflow(snapshot, effectiveRequest.id)
+      : findWorkflow(snapshot, findLoop(snapshot, effectiveRequest.id).workflowId);
+    id = kind === "workflow" ? workflow.id : findLoop(snapshot, effectiveRequest.id).id;
+    const team = workflow.teamId
+      ? snapshot.teams.find((item) => item.id === workflow.teamId)
+      : undefined;
+    members = (team?.memberAgentIds || workflow.steps.map((step) => step.agentId))
+      .map((memberId) => agentById(snapshot, memberId))
+      .filter(Boolean) as NormalizedByclawAgent[];
+    coordinator = members[0];
+  }
+
+  const skillPaths = collectLinkedSkills(members, cwd)
+    .map((skill) => nonEmptyString(skill.skillPath))
+    .filter((skillPath, index, values) => skillPath && values.indexOf(skillPath) === index);
+  return {
+    kind,
+    id,
+    cwd,
+    query: callAgentQuery(effectiveRequest.input),
+    skillPaths,
+    ...(coordinator?.modelConfig ? { modelConfig: compactModelConfig(coordinator.modelConfig) } : {}),
+  };
+}
+
 export function createByclawAcpPlan(params: {
   config: ResolvedByclawAcpAdapterConfig;
   snapshot: ByclawRegistrySnapshot;
