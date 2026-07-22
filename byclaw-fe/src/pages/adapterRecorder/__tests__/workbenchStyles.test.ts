@@ -49,7 +49,7 @@ describe('adapter recorder scoped styles', () => {
     expect(headingStyle).toContain('gap: 18px;');
     expect(moduleSource).toContain('.sidebar {');
     expect(moduleSource).toContain('flex: 1 1 auto;');
-    expect(moduleSource).toContain('.sidebar,\n.stage');
+    expect(moduleSource).toMatch(/\.sidebar,\r?\n\.stage/);
     expect(moduleSource).toContain('height: 100%;');
     expect(moduleSource).toContain('@media (max-width: 767px)');
     expect(moduleSource).toContain('@media (prefers-reduced-motion: reduce)');

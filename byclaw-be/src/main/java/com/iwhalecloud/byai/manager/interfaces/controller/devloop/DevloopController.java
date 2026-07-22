@@ -5,18 +5,15 @@ import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskListQueryDto;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskStateDto;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskViewDto;
-import com.iwhalecloud.byai.manager.dto.devloop.ProjectMemberListDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ScanSourceDTO;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
-
 import java.util.List;
 import java.util.Map;
 
 /**
- * 研发闭环控制器
- * 提供需求收集源管理、扫描触发、扫描日志、GitHub PAT、钉钉群搜索等接口
+ * 研发闭环控制器 提供需求收集源管理、扫描触发、扫描日志、GitHub PAT、钉钉群搜索等接口
  */
 @RestController
 @RequestMapping("/devloop")
@@ -27,6 +24,7 @@ public class DevloopController {
 
     /**
      * 创建扫描源
+     *
      * @param dto 扫描源信息（projectId、sourceName、sourceType、config必填）
      * @return 新建源ID
      */
@@ -37,6 +35,7 @@ public class DevloopController {
 
     /**
      * 修改扫描源配置
+     *
      * @param dto 包含 sourceId（必填）、sourceName、config、cronExpr（可选）
      */
     @PostMapping("/source/update")
@@ -46,6 +45,7 @@ public class DevloopController {
 
     /**
      * 删除扫描源
+     *
      * @param params 包含 sourceId
      */
     @PostMapping("/source/delete")
@@ -56,6 +56,7 @@ public class DevloopController {
 
     /**
      * 查询项目下的扫描源列表
+     *
      * @param params 包含 projectId
      * @return 扫描源列表（含启用状态、最近扫描时间等）
      */
@@ -67,6 +68,7 @@ public class DevloopController {
 
     /**
      * 启用/停用扫描源
+     *
      * @param params 包含 sourceId、enabled（"1"启用/"0"停用）
      */
     @PostMapping("/source/toggle")
@@ -78,6 +80,7 @@ public class DevloopController {
 
     /**
      * 手动触发一次扫描
+     *
      * @param params 包含 sourceId
      * @return 本次扫描新建的条目数
      */
@@ -89,6 +92,7 @@ public class DevloopController {
 
     /**
      * 查询扫描日志列表
+     *
      * @param params 包含 sourceId、limit（可选，默认20）
      * @return 按时间倒序的扫描日志
      */
@@ -101,6 +105,7 @@ public class DevloopController {
 
     /**
      * 查询某次扫描的详细条目
+     *
      * @param params 包含 logId
      * @return 扫描发现的每条需求/Issue信息
      */
@@ -112,6 +117,7 @@ public class DevloopController {
 
     /**
      * 按扫描源查询已收集的需求列表(action=created)
+     *
      * @param params 包含 sourceId
      * @return 该源下所有需求条目(含评分)，按时间倒序
      */
@@ -135,6 +141,7 @@ public class DevloopController {
 
     /**
      * 保存GitHub Personal Access Token
+     *
      * @param params 包含 pat（明文，后端SM4加密存储）
      */
     @PostMapping("/pat/github")
@@ -148,6 +155,7 @@ public class DevloopController {
 
     /**
      * 检查当前用户是否已保存GitHub PAT
+     *
      * @return hasPat布尔值，已存储时额外返回last4
      */
     @PostMapping("/pat/github/check")
@@ -157,6 +165,7 @@ public class DevloopController {
 
     /**
      * 搜索钉钉群（通过DWS CLI）
+     *
      * @param params 包含 query（群名关键词，至少2个字符）
      * @return 匹配的群列表（openConversationId + name）
      */
@@ -186,67 +195,34 @@ public class DevloopController {
     /** 获取任务(会话)详情 */
     @PostMapping("/task/detail")
     public ResponseUtil<DevloopTaskViewDto> getTaskDetail(@RequestBody Map<String, Object> params) {
-        Long sessionId = Long.valueOf(params.get("sessionId") != null ? params.get("sessionId").toString()
-            : params.get("taskId").toString());
+        Long sessionId = Long.valueOf(
+            params.get("sessionId") != null ? params.get("sessionId").toString() : params.get("taskId").toString());
         return applicationService.getTaskDetail(sessionId);
     }
 
     /** 获取任务环节进度：直接读取 self-developed-rules v2 会话状态投影 */
     @PostMapping("/task/phases")
     public ResponseUtil<DevloopTaskStateDto> getTaskPhases(@RequestBody Map<String, Object> params) {
-        Long sessionId = Long.valueOf(params.get("sessionId") != null ? params.get("sessionId").toString()
-            : params.get("taskId").toString());
+        Long sessionId = Long.valueOf(
+            params.get("sessionId") != null ? params.get("sessionId").toString() : params.get("taskId").toString());
         return applicationService.getTaskPhases(sessionId);
     }
 
     /** 获取任务代码变更：目标分支相对仓库默认分支的文件变更列表(远程分支口径) */
     @PostMapping("/task/changes")
     public ResponseUtil<Map<String, Object>> getTaskChanges(@RequestBody Map<String, Object> params) {
-        Long sessionId = Long.valueOf(params.get("sessionId") != null ? params.get("sessionId").toString()
-            : params.get("taskId").toString());
+        Long sessionId = Long.valueOf(
+            params.get("sessionId") != null ? params.get("sessionId").toString() : params.get("taskId").toString());
         return applicationService.getTaskChanges(sessionId);
     }
 
     /** 获取任务单个文件的本地 diff(unified 文本),供前端 modal 逐行渲染变更内容 */
     @PostMapping("/task/file-diff")
     public ResponseUtil<Map<String, Object>> getTaskFileDiff(@RequestBody Map<String, Object> params) {
-        Long sessionId = Long.valueOf(params.get("sessionId") != null ? params.get("sessionId").toString()
-            : params.get("taskId").toString());
+        Long sessionId = Long.valueOf(
+            params.get("sessionId") != null ? params.get("sessionId").toString() : params.get("taskId").toString());
         String filePath = params.get("filePath") != null ? params.get("filePath").toString() : "";
         return applicationService.getTaskFileDiff(sessionId, filePath);
-    }
-
-    // ========== 项目成员 ==========
-
-    /** 添加项目成员 */
-    @PostMapping("/member/add")
-    public ResponseUtil<Void> addProjectMember(@RequestBody Map<String, Object> params) {
-        return applicationService.addProjectMember(params);
-    }
-
-    /** 查询项目成员列表 */
-    @PostMapping("/member/list")
-    public ResponseUtil<List<ProjectMemberListDto>> listProjectMembers(@RequestBody Map<String, Object> params) {
-        Long projectId = Long.valueOf(params.get("projectId").toString());
-        String userName = params.get("userName") != null ? params.get("userName").toString() : null;
-        // 兼容已发布前端的 keyword 入参，但后续查询仍只按成员姓名执行。
-        if (userName == null && params.get("keyword") != null) {
-            userName = params.get("keyword").toString();
-        }
-        return applicationService.listProjectMembers(projectId, userName);
-    }
-
-    /** 移除项目成员 */
-    @PostMapping("/member/remove")
-    public ResponseUtil<Void> removeProjectMember(@RequestBody Map<String, Object> params) {
-        Long memberId = Long.valueOf(params.get("memberId").toString());
-        return applicationService.removeProjectMember(memberId);
-    }
-
-    /** 绑定数字员工到成员 */
-    @PostMapping("/member/bindAgent")
-    public ResponseUtil<Void> bindMemberAgent(@RequestBody Map<String, Object> params) {
-        return applicationService.bindMemberAgent(params);
     }
 
     // ========== DWS 钉钉授权 ==========
