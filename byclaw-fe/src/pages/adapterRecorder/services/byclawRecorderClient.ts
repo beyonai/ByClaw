@@ -333,14 +333,17 @@ export function createHttpRecorderClient(bootstrap: RecorderBootstrap): Recorder
     verify: (name: string) => callAsync<VerifySummary>('/recorder/verify', { name }),
     // N5:pipeline 改 202 异步(score~90s+generate+verify 耗时长);callAsync 轮询到终态,onProgress 实时回阶段耗时,onPartial 分阶段回 prompt。
     pipeline: (
-      llmEgressAcknowledgedAt: number,
+      llmEgressAcknowledgedAt: number | undefined,
       candidateIds?: string[],
       onProgress?: (phases: ProgressPhase[]) => void,
       onPartial?: (prompts: PartialPrompts) => void
     ) =>
       callAsync<PipelineResult>(
         '/recorder/pipeline',
-        { llmEgressAcknowledgedAt, ...(candidateIds?.length ? { candidateIds } : {}) },
+        {
+          ...(llmEgressAcknowledgedAt !== undefined ? { llmEgressAcknowledgedAt } : {}),
+          ...(candidateIds?.length ? { candidateIds } : {}),
+        },
         onProgress,
         onPartial
       ),
@@ -350,26 +353,32 @@ export function createHttpRecorderClient(bootstrap: RecorderBootstrap): Recorder
       }),
     // 拆步①评分:score-only,202 异步。回候选(含 LLM 语义)+ 双提示词 + 送 LLM 候选 id。
     pipelineScore: (
-      llmEgressAcknowledgedAt: number,
+      llmEgressAcknowledgedAt: number | undefined,
       candidateIds?: string[],
       onProgress?: (phases: ProgressPhase[]) => void,
       onPartial?: (prompts: PartialPrompts) => void
     ) =>
       callAsync<PipelineScoreResult>(
         '/recorder/pipeline/score',
-        { llmEgressAcknowledgedAt, ...(candidateIds?.length ? { candidateIds } : {}) },
+        {
+          ...(llmEgressAcknowledgedAt !== undefined ? { llmEgressAcknowledgedAt } : {}),
+          ...(candidateIds?.length ? { candidateIds } : {}),
+        },
         onProgress,
         onPartial
       ),
     // 拆步②生成:generate-only,202 异步。读 be 存的 genCands 生成脚本+静态检查+写草稿(不 verify)。
     pipelineGenerate: (
-      llmEgressAcknowledgedAt: number,
+      llmEgressAcknowledgedAt: number | undefined,
       candidateIds?: string[],
       onProgress?: (phases: ProgressPhase[]) => void
     ) =>
       callAsync<{ drafts: PipelineDraft[] }>(
         '/recorder/pipeline/generate',
-        { llmEgressAcknowledgedAt, ...(candidateIds && candidateIds.length ? { candidateIds } : {}) },
+        {
+          ...(llmEgressAcknowledgedAt !== undefined ? { llmEgressAcknowledgedAt } : {}),
+          ...(candidateIds && candidateIds.length ? { candidateIds } : {}),
+        },
         onProgress
       ),
     // 拆步③单草稿测试:draftId 真 verify,202 异步。回 verify 结果 + usable。

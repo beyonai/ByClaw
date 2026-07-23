@@ -145,7 +145,7 @@ export interface RecorderClient {
    *  onProgress=pipeline 异步轮询途中的阶段进度回调(score/generate/verify 耗时),用于页面实时展示。
    *  onPartial=阶段性 prompt 回调(be 在 score/generate 就绪时分阶段回),让分析过渡页按阶段展示提示词。 */
   pipeline(
-    llmEgressAcknowledgedAt: number,
+    llmEgressAcknowledgedAt?: number,
     candidateIds?: string[],
     onProgress?: (phases: PipelineProgressPhase[]) => void,
     onPartial?: (prompts: PipelinePartialPrompts) => void
@@ -160,7 +160,7 @@ export interface RecorderClient {
   /** 拆步①评分:score-only。回候选(含 LLM inferredFunction/paramUnion)+ score/generate 提示词 + 送 LLM 候选 id。
    *  不生成、不产草稿。genCands 由 be 存 registry 供第②步生成复用。202 异步。 */
   pipelineScore(
-    llmEgressAcknowledgedAt: number,
+    llmEgressAcknowledgedAt?: number,
     candidateIds?: string[],
     onProgress?: (phases: PipelineProgressPhase[]) => void,
     onPartial?: (prompts: PipelinePartialPrompts) => void

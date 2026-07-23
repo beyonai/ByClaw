@@ -8,6 +8,7 @@ import ScriptsStep from './ScriptsStep';
 
 interface Props {
   loading: boolean;
+  llmSynthesis: boolean;
 
   /** 当前子步:candidates(评分候选)/ generate(生成脚本)/ scripts(测试保存)。 */
   subStep: 'candidates' | 'generate' | 'scripts';
@@ -52,6 +53,7 @@ export default function PipelineStep(props: Props) {
     return (
       <GenerateStep
         loading={props.loading}
+        llmSynthesis={props.llmSynthesis}
         generatePrompt={props.generatePrompt}
         pipelineProgress={props.pipelineProgress}
         selectedCount={genSelectedIds.length}
@@ -80,6 +82,7 @@ export default function PipelineStep(props: Props) {
   return (
     <ScoreCandidatesStep
       loading={props.loading}
+      llmSynthesis={props.llmSynthesis}
       candidates={props.candidates}
       sentCandidateIds={props.sentCandidateIds}
       prompts={props.prompts}

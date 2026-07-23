@@ -1,7 +1,7 @@
 /* eslint-disable indent */
 // 录制工作台主框架 —— 全屏单页:标题 + 会话状态带、青色进度轨(StepRail)、当前 step 操作区。
 // 失败态切 ErrorRecovery;完成态显示 Result。数据/状态机走 useRecorderSession model。
-import { useRef, useEffect, useState } from 'react';
+import { useRef, useEffect } from 'react';
 import { Result, Spin, Typography } from 'antd';
 import { CheckCircleOutlined, LoadingOutlined } from '@ant-design/icons';
 import { useSelector } from '@umijs/max';
@@ -16,7 +16,6 @@ import BindStep from './steps/BindStep';
 import CaptureStep from './steps/CaptureStep';
 import RankStep from './steps/RankStep';
 import PipelineStep from './steps/PipelineStep';
-import InitStep from './steps/InitStep';
 import VerifyStep from './steps/VerifyStep';
 import { FLOW_STEPS, flowStepsFor, STATE_ORDER, PIPELINE_SUBSTEP_OFFSET, isFailed } from './constants/recorder';
 import { isActiveRecordingLayout } from './recordingLayout';
@@ -26,7 +25,6 @@ const { Text } = Typography;
 export default function Workbench() {
   const userInfo = useSelector(({ user }) => user.userInfo);
   const { state, data, loading, error, actions } = useRecorderSession();
-  const [rankedView, setRankedView] = useState<'candidates' | 'draft'>('candidates');
 
   const llmOn = !!data.health?.llmSynthesis;
   const order = STATE_ORDER[state];
@@ -42,9 +40,6 @@ export default function Workbench() {
     }
     if (state !== 'capture_b') autoRankedRef.current = false;
   }, [state, llmOn, loading, error, actions]);
-  useEffect(() => {
-    if (state !== 'ranked') setRankedView('candidates');
-  }, [state]);
   // 记录已到达的最高 step:失败态 order=-1,用它把"失败"定位到失败前所在步骤,而非错误落到步骤 0。
   const lastReachedRef = useRef(0);
   // A/B 拆成独立步骤后,page_ready 在 B 段(已有 sampleA)应定位到「录制 B」步,而非「录制 A」(STATE_ORDER
@@ -102,60 +97,33 @@ export default function Workbench() {
         );
       }
       case 'ranked':
-        // N5 verify-then-save:LLM 可用 → 走 pipeline(评分+多脚本+verify+选/改/存);
-        // LLM 未启用 → 兜底回退到手动流程(选候选 + dry-run 预览 + 写入,旧 init/verify 链)。
-        if (data.health?.llmSynthesis) {
-          return (
-            <PipelineStep
-              loading={loading}
-              subStep={data.pipelineSubStep ?? 'candidates'}
-              drafts={data.pipelineDrafts}
-              prompts={data.pipelinePrompts}
-              candidates={data.candidates}
-              sentCandidateIds={data.pipelineSentIds}
-              pipelineProgress={data.pipelineProgress}
-              seedA={data.seedA}
-              seedB={data.seedB}
-              sampleA={data.sampleA}
-              sampleB={data.sampleB}
-              rankScorePrompt={data.rankScorePrompt}
-              generatePrompt={data.generatePrompt}
-              llmRawJson={data.llmRawJson}
-              draftVerifying={data.draftVerifying}
-              savedDraftIds={data.savedDraftIds}
-              savedAdapters={data.savedAdapters}
-              onRunScore={actions.runScore}
-              onGoToGenerate={actions.goToGenerate}
-              onGoToCandidates={actions.goToCandidates}
-              onRunGenerate={actions.runGenerate}
-              onPreviewGenerate={actions.previewGeneratePrompt}
-              onVerifyDraft={actions.verifyDraft}
-              onSaveDraft={actions.saveDraft}
-            />
-          );
-        }
-        return rankedView === 'draft' ? (
-          <InitStep
+        return (
+          <PipelineStep
+            llmSynthesis={llmOn}
             loading={loading}
-            selectedCandidate={data.candidates?.find((c) => c.id === data.selectedCandidateId)}
-            adapterName={data.adapterName}
-            preview={data.draftPreview}
-            onPreview={actions.previewInit}
-            onWrite={actions.writeInit}
-            onBack={() => setRankedView('candidates')}
-          />
-        ) : (
-          <RankStep
-            loading={loading}
+            subStep={data.pipelineSubStep ?? 'candidates'}
+            drafts={data.pipelineDrafts}
+            prompts={data.pipelinePrompts}
             candidates={data.candidates}
-            selectedId={data.selectedCandidateId}
+            sentCandidateIds={data.pipelineSentIds}
+            pipelineProgress={data.pipelineProgress}
+            seedA={data.seedA}
+            seedB={data.seedB}
             sampleA={data.sampleA}
             sampleB={data.sampleB}
-            onRank={actions.rank}
-            onSelect={(id) => {
-              actions.selectCandidate(id);
-              setRankedView('draft');
-            }}
+            rankScorePrompt={data.rankScorePrompt}
+            generatePrompt={data.generatePrompt}
+            llmRawJson={data.llmRawJson}
+            draftVerifying={data.draftVerifying}
+            savedDraftIds={data.savedDraftIds}
+            savedAdapters={data.savedAdapters}
+            onRunScore={(candidateIds) => actions.runScore(candidateIds, llmOn)}
+            onGoToGenerate={actions.goToGenerate}
+            onGoToCandidates={actions.goToCandidates}
+            onRunGenerate={(candidateIds) => actions.runGenerate(candidateIds, llmOn)}
+            onPreviewGenerate={actions.previewGeneratePrompt}
+            onVerifyDraft={actions.verifyDraft}
+            onSaveDraft={actions.saveDraft}
           />
         );
       case 'draft_created':

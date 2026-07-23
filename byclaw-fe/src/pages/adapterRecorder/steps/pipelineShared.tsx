@@ -36,6 +36,7 @@ export function CandidateTable({
   seedA,
   seedB,
   locked,
+  llmSynthesis = true,
 }: {
   candidates: RankCandidate[];
   selectedIds: string[];
@@ -43,6 +44,7 @@ export function CandidateTable({
   seedA?: string;
   seedB?: string;
   locked?: boolean;
+  llmSynthesis?: boolean;
 }) {
   const { token } = theme.useToken();
   const rows = [...candidates].sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
@@ -230,7 +232,11 @@ export function CandidateTable({
       scroll={{ y: 320 }}
       title={() => (
         <Text type="secondary" style={{ fontSize: 12 }}>
-          {locked ? '候选接口(已勾选的传给 LLM)' : '勾选要交给 LLM 评审/生成的接口(默认按评分选前若干;勾越多越慢)'}
+          {locked
+            ? `候选接口(已勾选的${llmSynthesis ? '传给 LLM' : '生成本地脚本'})`
+            : llmSynthesis
+            ? '勾选要交给 LLM 评审/生成的接口(默认按评分选前若干;勾越多越慢)'
+            : '勾选要生成本地脚本的接口'}
           {seeds.length ? (
             <>
               {' '}
@@ -254,7 +260,9 @@ export function CandidateTable({
       items={[
         {
           key: 'cands',
-          label: `候选接口(${rows.length} 个${locked ? `,已送 AI ${sentSet.size}` : `,已选 ${selectedIds.length}`})`,
+          label: `候选接口(${rows.length} 个${
+            locked ? `,${llmSynthesis ? '已送 AI' : '已选择'} ${sentSet.size}` : `,已选 ${selectedIds.length}`
+          })`,
           children: table,
         },
       ]}

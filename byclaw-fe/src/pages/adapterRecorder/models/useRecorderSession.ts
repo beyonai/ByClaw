@@ -1,4 +1,4 @@
-/* eslint-disable lines-around-comment */
+/* eslint-disable indent, lines-around-comment */
 // 录制会话状态机 model(@umijs/max model)。
 // 持有 SessionState + stateVersion,每个动作按 05 State Machine 校验当前态,
 // 非法转移返回 invalid_state(不调用后端),错误态走 failed。
@@ -409,13 +409,14 @@ export default function useRecorderSession() {
       );
     },
     // 拆步①评分:score-only。进 ranked 后自动触发(或用户重跑)。回候选(含 LLM 语义)+ 双提示词。不推进,停 candidates 子步。
-    runScore: (candidateIds?: string[]) => {
+    runScore: (candidateIds?: string[], llmSynthesis = true) => {
+      const llmEgressAcknowledgedAt = llmSynthesis ? Date.now() : undefined;
       setData((d) => ({ ...d, pipelineProgress: [] }));
       return run(
         'pipelineScore',
         () =>
           client.pipelineScore(
-            Date.now(),
+            llmEgressAcknowledgedAt,
             candidateIds,
             (phases) => setData((d) => ({ ...d, pipelineProgress: phases })),
             (partial) =>
@@ -437,7 +438,7 @@ export default function useRecorderSession() {
             pipelinePrompts: { score: d.scorePrompt, generate: d.generatePrompt, screenshotCount: d.screenshotCount },
             generatePrompt: d.generatePrompt,
             llmRawJson: d.llmRawJson,
-            llmEgressAck: Date.now(),
+            llmEgressAck: llmEgressAcknowledgedAt,
             pipelineSubStep: 'candidates',
           },
         })
@@ -448,12 +449,13 @@ export default function useRecorderSession() {
     // 候选页「上一步」/生成页返回 → 回候选子步。
     goToCandidates: () => setData((d) => ({ ...d, pipelineSubStep: 'candidates' })),
     // 拆步②生成:generate-only。点「生成 cli 脚本」触发。完成后自动进 scripts 子步展示脚本。
-    runGenerate: (candidateIds?: string[]) => {
+    runGenerate: (candidateIds?: string[], llmSynthesis = true) => {
+      const llmEgressAcknowledgedAt = llmSynthesis ? Date.now() : undefined;
       setData((d) => ({ ...d, pipelineProgress: [] }));
       return run(
         'pipelineGenerate',
         () =>
-          client.pipelineGenerate(Date.now(), candidateIds, (phases) =>
+          client.pipelineGenerate(llmEgressAcknowledgedAt, candidateIds, (phases) =>
             setData((d) => ({ ...d, pipelineProgress: phases }))
           ),
         // 重新生成:清上一轮的草稿测试/保存痕迹(savedDraftIds/savedAdapters/draftVerifying),避免残留展示。
@@ -478,9 +480,10 @@ export default function useRecorderSession() {
         pipelineDrafts:
           sourceToVerify === undefined
             ? d.pipelineDrafts
-            : d.pipelineDrafts?.map((draft) =>
-              draft.id === draftId ? applyDraftSourceEdit(draft, sourceToVerify) : draft
-            ),
+            : d.pipelineDrafts?.map((draft) => {
+                if (draft.id === draftId) return applyDraftSourceEdit(draft, sourceToVerify);
+                return draft;
+              }),
         draftVerifying: { ...d.draftVerifying, [draftId]: true },
       }));
       return run(

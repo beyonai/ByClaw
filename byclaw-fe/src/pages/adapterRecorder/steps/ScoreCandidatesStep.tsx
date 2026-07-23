@@ -79,6 +79,7 @@ function LlmReturnPanel({ candidates, llmRawJson }: { candidates?: RankCandidate
 
 interface Props {
   loading: boolean;
+  llmSynthesis: boolean;
 
   /** 已评分产出的候选(含 LLM inferredFunction/paramUnion);未评分时 undefined。 */
   candidates?: RankCandidate[];
@@ -114,6 +115,7 @@ interface Props {
 
 export default function ScoreCandidatesStep({
   loading,
+  llmSynthesis,
   candidates,
   sentCandidateIds,
   prompts,
@@ -160,19 +162,22 @@ export default function ScoreCandidatesStep({
   }, [selectedCandidateIds, onSelectionChange]);
 
   return (
-    <Card title="① 评分候选接口" variant="borderless">
+    <Card title={llmSynthesis ? '① 评分候选接口' : '① 选择候选接口'} variant="borderless">
       <Paragraph type="secondary" style={{ lineHeight: 1.7 }}>
-        把 A/B 录制痕迹交给 LLM 评审 → 自动评分、推断每个接口的用途与参数角色。下方可查看本次分析用的痕迹与发给 AI
-        的提示词。 确认候选后点「下一步」进入脚本生成。
+        {llmSynthesis
+          ? '把 A/B 录制痕迹交给 LLM 评审 → 自动评分、推断每个接口的用途与参数角色。下方可查看本次分析用的痕迹与发给 AI 的提示词。确认候选后点「下一步」进入脚本生成。'
+          : '基于 A/B 录制痕迹的本地规则评分，勾选需要生成脚本的接口。确认候选后点「下一步」进入脚本生成。'}
       </Paragraph>
 
       {/* 折叠一(A/B 痕迹)+ 折叠二(评分提示词);评分完成前默认展开。 */}
-      <AnalysisEvidencePanel
-        sampleA={sampleA}
-        sampleB={sampleB}
-        scorePrompt={rankScorePrompt ?? prompts?.score}
-        defaultOpen={!scoreRan}
-      />
+      {llmSynthesis && (
+        <AnalysisEvidencePanel
+          sampleA={sampleA}
+          sampleB={sampleB}
+          scorePrompt={rankScorePrompt ?? prompts?.score}
+          defaultOpen={!scoreRan}
+        />
+      )}
 
       {/* score(LLM 评分)未跑完:显示"评分中",**不展示 rank 规则分候选**(避免低分闪现误导,
           rank 只是转场过渡的规则分)。等 LLM 评分完(scoreRan)才展示带 LLM 分/推断的候选表。 */}
@@ -180,19 +185,21 @@ export default function ScoreCandidatesStep({
         loading || !!pipelineProgress?.length ? (
           <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
             <Spin indicator={<LoadingOutlined style={{ fontSize: 20 }} spin />} />
-            <Text type="secondary">正在用 LLM 评分候选接口(推断用途、参数角色、双轨打分)…</Text>
+            <Text type="secondary">
+              {llmSynthesis ? '正在用 LLM 评分候选接口(推断用途、参数角色、双轨打分)…' : '正在准备本地候选选择…'}
+            </Text>
           </div>
         ) : (
           <Alert
             style={{ marginTop: 12 }}
             type="warning"
             showIcon
-            icon={<RobotOutlined />}
-            message="尚未评分"
-            description="点下方按钮开始 LLM 评分,或返回重录。"
+            icon={llmSynthesis ? <RobotOutlined /> : undefined}
+            message={llmSynthesis ? '尚未评分' : '尚未准备候选'}
+            description={llmSynthesis ? '点下方按钮开始 LLM 评分,或返回重录。' : '点下方按钮加载本地候选,或返回重录。'}
             action={
               <Button type="primary" onClick={() => onRunScore()}>
-                开始评分
+                {llmSynthesis ? '开始评分' : '加载候选'}
               </Button>
             }
           />
@@ -206,13 +213,14 @@ export default function ScoreCandidatesStep({
               onSelectChange={setSelectedCandidateIds}
               seedA={seedA}
               seedB={seedB}
+              llmSynthesis={llmSynthesis}
             />
           </div>
-          <LlmReturnPanel candidates={candidates} llmRawJson={llmRawJson} />
+          {llmSynthesis && <LlmReturnPanel candidates={candidates} llmRawJson={llmRawJson} />}
           {/* score 提示词已由上方 AnalysisEvidencePanel 展示(去重);generate 提示词移到生成脚本页按选中候选展示。 */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 12, flexWrap: 'wrap' }}>
             <Text type="secondary" style={{ fontSize: 12 }}>
-              已选 {selectedCandidateIds.length} 个接口交给 LLM 生成脚本
+              已选 {selectedCandidateIds.length} 个接口{llmSynthesis ? '交给 LLM 生成脚本' : '生成本地脚本'}
             </Text>
             <span style={{ flex: 1 }} />
             <Button
@@ -220,7 +228,7 @@ export default function ScoreCandidatesStep({
               loading={loading}
               onClick={() => onRunScore(selectedCandidateIds.length ? selectedCandidateIds : undefined)}
             >
-              重新评分
+              {llmSynthesis ? '重新评分' : '重新加载'}
             </Button>
             <Button
               type="primary"
