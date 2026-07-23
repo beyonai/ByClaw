@@ -24,7 +24,8 @@ describe('components/Resources utils', () => {
     expect(url.origin + url.pathname).toBe('https://www.iwhaleai.com/skillHub/dashboard');
     expect(url.searchParams.get('tab')).toBe('skills');
     expect(url.searchParams.get('digId')).toBe('10029822');
-    expect(url.searchParams.get('beyondToken')).toBe('token+/=value');
+    expect(url.searchParams.get('BeyondToken')).toBe('token+/=value');
+    expect(url.searchParams.has('beyondToken')).toBe(false);
     expect(url.searchParams.has('userCode')).toBe(false);
     expect(url.searchParams.get('parentOrigin')).toBe('https://portal.example.com');
   });
