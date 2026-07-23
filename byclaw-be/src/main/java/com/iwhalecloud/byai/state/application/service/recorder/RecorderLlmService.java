@@ -55,6 +55,7 @@ public class RecorderLlmService {
 
     private ResolvedModel resolveDefaultModel() {
         if (modelManagementApplicationService == null) {
+            log.warn("Recorder default LLM model list lookup skipped: ModelManagementApplicationService is unavailable");
             return ResolvedModel.unavailable("default_model_list_lookup_failed");
         }
         ModelVO listedModel;

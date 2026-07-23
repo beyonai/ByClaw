@@ -107,6 +107,27 @@ class RecorderLlmServiceTest {
     }
 
     @Test
+    void logsWhenModelManagementServiceIsUnavailableBeforeListLookup() {
+        Logger logger = (Logger) LoggerFactory.getLogger(RecorderLlmService.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        logger.addAppender(appender);
+        appender.start();
+
+        try {
+            assertThat(RecorderLlmService.unavailable().availability())
+                .isEqualTo(new RecorderLlmService.Availability(false, null, "default_model_list_lookup_failed"));
+            assertThat(appender.list).anySatisfy(event -> {
+                assertThat(event.getLevel()).isEqualTo(Level.WARN);
+                assertThat(event.getFormattedMessage())
+                    .contains("Recorder default LLM model list lookup skipped", "ModelManagementApplicationService is unavailable");
+            });
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
+    }
+
+    @Test
     void logsDetailLookupFailureWithModelIdAndCause() {
         ModelManagementApplicationService models = mock(ModelManagementApplicationService.class);
         ModelListResponse page = new ModelListResponse();
