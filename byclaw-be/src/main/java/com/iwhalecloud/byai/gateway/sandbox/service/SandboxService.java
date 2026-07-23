@@ -1667,6 +1667,23 @@ public class SandboxService {
         if (!orphanSamples.isEmpty()) {
             LOGGER.warn("沙箱一致性检测发现远端孤儿候选，userCode：{}，sandboxType：{}，样例：{}",
                 group.getUserCode(), group.getSandboxType(), orphanSamples);
+
+            // Auto-cleanup orphan sandboxes stuck in Pending state for more than 30 minutes
+            for (SandboxRuntimeInstance orphan : remoteBySandboxId.values()) {
+                if (orphan == null || dbBySandboxId.containsKey(orphan.getSandboxId())) {
+                    continue;
+                }
+                if (orphan.getCreatedAt() == null) {
+                    continue;
+                }
+                long ageMinutes = java.time.Duration.between(orphan.getCreatedAt(), java.time.OffsetDateTime.now()).toMinutes();
+                if ("Pending".equalsIgnoreCase(orphan.getState()) && ageMinutes > 30) {
+                    LOGGER.info("自动清理孤儿沙箱，sandboxId：{}，状态：{}，创建时间：{}，已存在：{} 分钟",
+                        orphan.getSandboxId(), orphan.getState(), orphan.getCreatedAt(), ageMinutes);
+                    cleanupRemoteSandboxQuietly(group.getUserCode(), group.getSandboxType(),
+                        orphan.getSandboxId(), "orphan-pending-timeout");
+                }
+            }
         }
     }
 

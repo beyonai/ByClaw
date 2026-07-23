@@ -354,9 +354,13 @@ public class StandardSandboxLifecycleService implements SandboxLifecycleFacade {
 
     private static String buildIdempotencyKey(String userCode, String sandboxType, Map<String, String> metadata) {
         String resourceId = metadata != null ? Objects.toString(metadata.get("resourceId"), "") : "";
-        String recordId = metadata != null ? Objects.toString(metadata.get("recordId"), "") : "";
+        // Fixed: remove recordId from idempotency key calculation
+        // recordId is the DB primary key generated after insert, which causes each request to have a different
+        // idempotencyKey, preventing OpenSandbox from recognizing duplicate requests and reusing existing sandboxes.
+        // The idempotency key should only depend on request parameters (userCode, sandboxType, resourceId),
+        // not on execution results (recordId).
         String raw = Objects.toString(userCode, "") + "\0" + Objects.toString(sandboxType, "")
-            + "\0" + resourceId + "\0" + recordId;
+            + "\0" + resourceId;
         try {
             MessageDigest md = MessageDigest.getInstance("SHA-256");
             byte[] digest = md.digest(raw.getBytes(StandardCharsets.UTF_8));
