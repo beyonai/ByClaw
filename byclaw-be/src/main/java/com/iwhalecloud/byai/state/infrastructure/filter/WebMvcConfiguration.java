@@ -263,7 +263,7 @@ public class WebMvcConfiguration implements WebMvcConfigurer {
                 // 只处理你的业务对象，不处理 springdoc-openapi 的对象
                 String packageName = clazz.getPackageName();
                 // 只处理 com.ztesoft 下的对象
-                return packageName.startsWith("com.ztesoft");
+                return packageName.startsWith("com.iwhalecloud");
             }
         };
         // 配置 fastJsonConverter 的相关属性（如你原来的代码）
