@@ -5,6 +5,7 @@ import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskListQueryDto;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskStateDto;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskViewDto;
+import com.iwhalecloud.byai.manager.dto.devloop.ManualRequirementDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ScanSourceDTO;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -137,6 +138,12 @@ public class DevloopController {
             title = params.get("keyword").toString();
         }
         return applicationService.listRequirementsByProject(projectId, title);
+    }
+
+    /** 手工录入项目需求，复用现有需求列表与任务派生链路。 */
+    @PostMapping("/requirement/create")
+    public ResponseUtil<Map<String, Object>> createManualRequirement(@RequestBody ManualRequirementDTO dto) {
+        return applicationService.createManualRequirement(dto);
     }
 
     /**

@@ -1,4 +1,4 @@
-import { getTaskPhases, listRequirementsByProject, listTasks } from '../devloop';
+import { createManualRequirement, getTaskPhases, listRequirementsByProject, listTasks } from '../devloop';
 
 jest.mock('@/service/common/request', () => ({
   POST: jest.fn(),
@@ -41,5 +41,20 @@ describe('Devloop task service', () => {
     getTaskPhases(123);
 
     expect(mockPOST).toHaveBeenCalledWith('/byaiService/devloop/task/phases', { sessionId: 123 });
+  });
+
+  it('posts manual requirements to the project requirement endpoint', () => {
+    const requirement = {
+      projectId: 203,
+      sourceType: 'customer_feedback' as const,
+      branch: 'develop',
+      title: '优化登录流程',
+      originalContent: '客户反馈登录步骤过多。',
+      productContent: '简化登录流程并保留安全校验。',
+    };
+
+    createManualRequirement(requirement);
+
+    expect(mockPOST).toHaveBeenCalledWith('/byaiService/devloop/requirement/create', requirement);
   });
 });

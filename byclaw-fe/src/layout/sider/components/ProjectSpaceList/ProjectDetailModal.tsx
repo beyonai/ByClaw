@@ -42,6 +42,7 @@ import dayjs, { type Dayjs } from 'dayjs';
 import {
   checkDwsAuthStatus,
   checkGitHubPat,
+  createManualRequirement,
   createProjectRepo,
   createScanSource,
   createTask,
@@ -159,6 +160,8 @@ type RequirementItem = {
   score?: number | null;
   priority?: string | null;
   scoreDetail?: string | null;
+  manualSourceType?: string;
+  branch?: string;
 };
 
 type TaskDateRange = [Dayjs | null, Dayjs | null] | null;
@@ -238,7 +241,7 @@ type SourceForm = {
 };
 
 type ManualRequirementForm = {
-  sourceType: string;
+  sourceType: 'manual' | 'customer_feedback' | 'internal_proposal';
   branch: string;
   title: string;
   originalContent: string;
@@ -375,6 +378,9 @@ const getSourceIcon = (sourceType: string) => {
 const getSourceLabel = (sourceType: string | undefined, t: ProjectDetailTranslate) => {
   if (sourceType === 'dingtalk') return t('source.type.dingtalk');
   if (sourceType === 'github_issue') return t('source.type.githubIssues');
+  if (sourceType === 'manual') return t('manualRequirement.source.manual');
+  if (sourceType === 'customer_feedback') return t('manualRequirement.source.customerFeedback');
+  if (sourceType === 'internal_proposal') return t('manualRequirement.source.internalProposal');
   return t('source.type.default');
 };
 
@@ -514,6 +520,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const [repoForm, setRepoForm] = useState({ repoFullName: '', repoUrl: '', defaultBranch: 'main' });
   const [repoSaving, setRepoSaving] = useState(false);
   const [manualRequirementOpen, setManualRequirementOpen] = useState(false);
+  const [manualRequirementSubmitting, setManualRequirementSubmitting] = useState(false);
   const [manualRequirementForm, setManualRequirementForm] = useState<ManualRequirementForm>(
     getDefaultManualRequirementForm
   );
@@ -626,6 +633,17 @@ const ProjectDetailPanel: React.FC<Props> = ({
       navigate('/chat');
     },
     [EventEmitter, dispatch, navigate, project?.projectName, projectId, setSessionId, t]
+  );
+
+  const handleOpenTaskDetail = useCallback(
+    (task: any) => {
+      if (channelPanelOpen) {
+        setChannelPanelOpen(false);
+        clearDetailPanel?.();
+      }
+      setDetailTask(task);
+    },
+    [channelPanelOpen, clearDetailPanel]
   );
 
   const projectSessions = useMemo(() => {
@@ -1515,7 +1533,13 @@ const ProjectDetailPanel: React.FC<Props> = ({
     [fetchTasks, hasMoreTasks]
   );
 
-  const handleManualRequirementSubmit = () => {
+  const openManualRequirementModal = () => {
+    setManualRequirementForm(getDefaultManualRequirementForm());
+    setManualRequirementOpen(true);
+  };
+
+  const handleManualRequirementSubmit = async () => {
+    if (!projectId || manualRequirementSubmitting) return;
     if (!manualRequirementForm.title.trim()) {
       message.warning(t('manualRequirement.validation.titleRequired'));
       return;
@@ -1525,8 +1549,26 @@ const ProjectDetailPanel: React.FC<Props> = ({
       return;
     }
 
-    // 后端人工新增需求接口还未接入，先保留表单与校验，避免前端伪造需求数据导致后续状态不一致。
-    message.info(t('manualRequirement.unavailable'));
+    setManualRequirementSubmitting(true);
+    try {
+      await createManualRequirement({
+        projectId,
+        sourceType: manualRequirementForm.sourceType,
+        branch: manualRequirementForm.branch.trim() || undefined,
+        title: manualRequirementForm.title.trim(),
+        originalContent: manualRequirementForm.originalContent.trim(),
+        productContent: manualRequirementForm.productContent.trim() || undefined,
+      });
+      message.success(t('manualRequirement.createSuccess'));
+      setManualRequirementOpen(false);
+      setManualRequirementForm(getDefaultManualRequirementForm());
+      const sourceList = await fetchSources();
+      await fetchRequirements(sourceList, requirementSearchKeyword.trim());
+    } catch (error: any) {
+      message.error(error?.message || t('manualRequirement.createFailed'));
+    } finally {
+      setManualRequirementSubmitting(false);
+    }
   };
 
   const handleSaveSource = async () => {
@@ -2046,7 +2088,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const renderRequirementDetailDrawer = () => {
     if (!detailReq) return null;
     const detail = parseScoreDetail(detailReq.scoreDetail);
-    const sourceLabel = getSourceLabel(detailReq.sourceType, t);
+    const sourceLabel = getSourceLabel(detailReq.manualSourceType || detailReq.sourceType, t);
     const scored = detailReq.score !== null && detailReq.score !== undefined;
     const createTime = detailReq.createTime ? dayjs(detailReq.createTime).format('YYYY-MM-DD HH:mm') : '-';
     const productContent = detail.summary || detailReq.productContent || t('common.emptyValue');
@@ -2174,10 +2216,15 @@ const ProjectDetailPanel: React.FC<Props> = ({
             />
           </div>
           <Space size={6}>
-            {/* 人工新增需求接口未接入，等后端接口可用后再恢复入口。 */}
-            {/* <Tooltip title={t('manualRequirement.title')} placement="top">
-              <Button size="small" icon={<PlusOutlined />} onClick={openManualRequirementModal} />
-            </Tooltip> */}
+            <Tooltip title={t('manualRequirement.title')} placement="top">
+              <Button
+                aria-label={t('manualRequirement.title')}
+                size="small"
+                className={`${styles.detailHeaderActionButton} ${styles.detailManualRequirementAddButton}`}
+                icon={<PlusOutlined />}
+                onClick={openManualRequirementModal}
+              />
+            </Tooltip>
             <Tooltip title={t('common.refresh')} placement="top">
               <Button
                 aria-label={t('common.refresh')}
@@ -2618,7 +2665,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
                         setSelectedTaskId(`${task.taskId}`);
                         // 研发项目仅允许处理人进入会话，其他成员打开只读任务详情。
                         if (isDevelopProject && !isCurrentUserAssignee) {
-                          setDetailTask(task);
+                          handleOpenTaskDetail(task);
                           return;
                         }
                         handleOpenTaskSession(task);
@@ -2667,7 +2714,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
                                 domEvent.stopPropagation();
                                 setSelectedTaskId(`${task.taskId}`);
                                 setOpenTaskActionId(undefined);
-                                setDetailTask(task);
+                                handleOpenTaskDetail(task);
                               },
                             }}
                           >
@@ -2973,8 +3020,12 @@ const ProjectDetailPanel: React.FC<Props> = ({
         </div>
       }
       open={manualRequirementOpen}
-      onCancel={() => setManualRequirementOpen(false)}
+      onCancel={() => {
+        if (!manualRequirementSubmitting) setManualRequirementOpen(false);
+      }}
       onOk={handleManualRequirementSubmit}
+      confirmLoading={manualRequirementSubmitting}
+      closable={!manualRequirementSubmitting}
       okText={t('manualRequirement.submit')}
       cancelText={t('common.cancel')}
       width={720}

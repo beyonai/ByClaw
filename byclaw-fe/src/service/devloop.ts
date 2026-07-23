@@ -221,6 +221,15 @@ export const listRequirementsBySource = (sourceId: number) =>
 export const listRequirementsByProject = (projectId: number, title?: string) =>
   POST<any>('/byaiService/devloop/project/requirements', { projectId, title: title || undefined });
 
+export const createManualRequirement = (data: {
+  projectId: number;
+  sourceType: 'manual' | 'customer_feedback' | 'internal_proposal';
+  branch?: string;
+  title: string;
+  originalContent: string;
+  productContent?: string;
+}) => POST<any>('/byaiService/devloop/requirement/create', data);
+
 // PAT 管理
 export const saveGitHubPat = (pat: string) => POST<any>('/byaiService/devloop/pat/github', { pat });
 

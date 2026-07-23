@@ -2,6 +2,8 @@ package com.iwhalecloud.byai.manager.application.service.devloop;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.common.page.PageInfo;
@@ -11,6 +13,7 @@ import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationSe
 import com.iwhalecloud.byai.manager.application.service.user.UserBucketNamingService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.*;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectMemberListDto;
+import com.iwhalecloud.byai.manager.dto.devloop.ManualRequirementDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ScanSourceDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskListQueryDto;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskStateDto;
@@ -80,6 +83,18 @@ public class DevloopApplicationService {
     private static final String AGENT_MAX_CONCURRENT_CODE = "DEVLOOP_AGENT_MAX_CONCURRENT";
 
     private static final int AGENT_MAX_CONCURRENT_DEFAULT = 1;
+
+    /** 手工录入需求复用扫描条目存储，但不属于可扫描渠道。 */
+    private static final String MANUAL_SOURCE_TYPE = "manual";
+
+    private static final String MANUAL_SOURCE_NAME = "手工录入";
+
+    private static final String MANUAL_REQUIREMENT_CONTENT_KEY = "manualRequirement";
+
+    private static final Set<String> MANUAL_REQUIREMENT_ORIGIN_TYPES =
+        Set.of("manual", "customer_feedback", "internal_proposal");
+
+    private static final ObjectMapper MANUAL_REQUIREMENT_MAPPER = new ObjectMapper();
 
     /**
      * 研发任务 LLM 对话异步执行线程池。 TtlExecutors 包装以透传 CurrentUserHolder 的 LoginInfo；任务创建接口据此立即返回， chat 在后台执行，避免前端等待数分钟。
@@ -195,7 +210,8 @@ public class DevloopApplicationService {
 
     /** 查询项目下的扫描源列表 */
     public ResponseUtil<List<Map<String, Object>>> listScanSources(Long projectId) {
-        List<Map<String, Object>> list = scanSourceService.listByProjectId(projectId).stream().map(this::scanSourceToVo)
+        List<Map<String, Object>> list = scanSourceService.listByProjectId(projectId).stream()
+            .filter(source -> !MANUAL_SOURCE_TYPE.equals(source.getSourceType())).map(this::scanSourceToVo)
             .collect(java.util.stream.Collectors.toList());
         return ResponseUtil.successResponse(list);
     }
@@ -327,6 +343,71 @@ public class DevloopApplicationService {
         return ResponseUtil.successResponse(list);
     }
 
+    /**
+     * 新建手工需求。需求继续落在 scan log item 中，避免绕开现有需求列表、启动任务和任务详情的关联链路。
+     * 每个项目只维护一个禁用的内部来源，不参与定时扫描，也不返回到渠道配置页。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public ResponseUtil<Map<String, Object>> createManualRequirement(ManualRequirementDTO dto) {
+        if (dto == null || dto.getProjectId() == null) {
+            return ResponseUtil.failRes("projectId不能为空");
+        }
+        String title = StringUtils.trimToNull(dto.getTitle());
+        if (title == null) {
+            return ResponseUtil.failRes("需求名称不能为空");
+        }
+        String originalContent = StringUtils.trimToNull(dto.getOriginalContent());
+        if (originalContent == null) {
+            return ResponseUtil.failRes("原始需求不能为空");
+        }
+        String originType = StringUtils.defaultIfBlank(dto.getSourceType(), "manual").trim();
+        if (!MANUAL_REQUIREMENT_ORIGIN_TYPES.contains(originType)) {
+            return ResponseUtil.failRes("不支持的手工需求来源");
+        }
+
+        ScanSource source = findOrCreateManualSource(dto.getProjectId());
+        ScanLog log = scanLogService.createLog(source.getSourceId(), dto.getProjectId());
+        ScanLogItem item = scanLogService.createItem(log.getLogId(), source.getSourceId(), title,
+            serializeManualRequirementContent(originType, dto.getBranch(), originalContent, dto.getProductContent()),
+            "manual:" + UUID.randomUUID(), null, "created");
+        scanLogService.completeLog(log.getLogId(), 1, 1);
+
+        return ResponseUtil.successResponse(toRequirementMap(item, source));
+    }
+
+    private ScanSource findOrCreateManualSource(Long projectId) {
+        for (ScanSource source : scanSourceService.listByProjectId(projectId)) {
+            if (MANUAL_SOURCE_TYPE.equals(source.getSourceType())) {
+                return source;
+            }
+        }
+
+        ScanSource source = new ScanSource();
+        source.setProjectId(projectId);
+        source.setSourceName(MANUAL_SOURCE_NAME);
+        source.setSourceType(MANUAL_SOURCE_TYPE);
+        source.setConfig("{}");
+        source.setEnabled("0");
+        source.setConfirmMode("manual");
+        source.setCreateBy(String.valueOf(CurrentUserHolder.getCurrentUserId()));
+        return scanSourceService.create(source);
+    }
+
+    private String serializeManualRequirementContent(String originType, String branch, String originalContent,
+        String productContent) {
+        Map<String, String> content = new LinkedHashMap<>();
+        content.put("sourceType", originType);
+        content.put("branch", StringUtils.trimToEmpty(branch));
+        content.put("originalContent", originalContent);
+        content.put("productContent", StringUtils.trimToEmpty(productContent));
+        try {
+            return MANUAL_REQUIREMENT_MAPPER.writeValueAsString(Map.of(MANUAL_REQUIREMENT_CONTENT_KEY, content));
+        }
+        catch (Exception e) {
+            throw new IllegalStateException("手工需求内容序列化失败", e);
+        }
+    }
+
     private Map<String, Object> toRequirementMap(ScanLogItem item) {
         return toRequirementMap(item, null);
     }
@@ -337,7 +418,8 @@ public class DevloopApplicationService {
         map.put("itemId", item.getItemId());
         map.put("title", item.getTitle());
         // 需求列表展开态需要展示完整内容，并据 sessionId 判断是否已启动。
-        map.put("content", item.getContent());
+        ManualRequirementContent manualContent = parseManualRequirementContent(item.getContent());
+        map.put("content", manualContent != null ? formatManualRequirementContent(manualContent) : item.getContent());
         map.put("originId", item.getOriginId());
         map.put("originUrl", item.getOriginUrl());
         map.put("action", item.getAction());
@@ -347,11 +429,64 @@ public class DevloopApplicationService {
         map.put("scoreDetail", item.getScoreDetail());
         map.put("createTime", item.getCreateTime());
         map.put("sourceId", item.getSourceId());
+        if (manualContent != null) {
+            map.put("manualSourceType", manualContent.sourceType());
+            map.put("branch", manualContent.branch());
+            map.put("originalContent", manualContent.originalContent());
+            map.put("productContent", manualContent.productContent());
+        }
         if (source != null) {
             map.put("sourceName", source.getSourceName());
             map.put("sourceType", source.getSourceType());
         }
         return map;
+    }
+
+    private String getRequirementContent(ScanLogItem item) {
+        if (item == null) {
+            return "";
+        }
+        ManualRequirementContent manualContent = parseManualRequirementContent(item.getContent());
+        return manualContent != null ? formatManualRequirementContent(manualContent) : StringUtils.defaultString(item.getContent());
+    }
+
+    private ManualRequirementContent parseManualRequirementContent(String content) {
+        if (StringUtils.isBlank(content)) {
+            return null;
+        }
+        try {
+            JsonNode root = MANUAL_REQUIREMENT_MAPPER.readTree(content);
+            JsonNode manual = root.path(MANUAL_REQUIREMENT_CONTENT_KEY);
+            if (!manual.isObject()) {
+                return null;
+            }
+            String originalContent = StringUtils.trimToNull(manual.path("originalContent").asText());
+            if (originalContent == null) {
+                return null;
+            }
+            return new ManualRequirementContent(manual.path("sourceType").asText("manual"),
+                manual.path("branch").asText(""), originalContent, manual.path("productContent").asText(""));
+        }
+        catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private String formatManualRequirementContent(ManualRequirementContent content) {
+        StringBuilder description = new StringBuilder();
+        description.append("来源：").append(content.sourceType()).append('\n');
+        if (StringUtils.isNotBlank(content.branch())) {
+            description.append("影响分支：").append(content.branch()).append('\n');
+        }
+        if (StringUtils.isNotBlank(content.productContent())) {
+            description.append("产品需求：\n").append(content.productContent()).append("\n\n");
+        }
+        description.append("原始需求：\n").append(content.originalContent());
+        return description.toString();
+    }
+
+    private record ManualRequirementContent(String sourceType, String branch, String originalContent,
+        String productContent) {
     }
 
     @Autowired
@@ -513,8 +648,8 @@ public class DevloopApplicationService {
 
         // 加载需求项：提供需求详情与任务类型判定依据
         ScanLogItem sourceItem = sourceItemId != null ? scanLogItemMapper.selectById(sourceItemId) : null;
-        String description = sourceItem != null && sourceItem.getContent() != null && !sourceItem.getContent().isEmpty()
-            ? sourceItem.getContent()
+        String description = sourceItem != null && StringUtils.isNotBlank(sourceItem.getContent())
+            ? getRequirementContent(sourceItem)
             : title;
         String taskType = detectTaskType(sourceItem, title);
 
@@ -784,7 +919,7 @@ public class DevloopApplicationService {
     /** 判定任务类型：需求项含 bug/缺陷 标记归为 bug，否则为需求 */
     private String detectTaskType(ScanLogItem item, String title) {
         String haystack = ((item != null && item.getTitle() != null ? item.getTitle() : "") + " "
-            + (item != null && item.getContent() != null ? item.getContent() : "") + " "
+            + getRequirementContent(item) + " "
             + (item != null && item.getAction() != null ? item.getAction() : "") + " " + (title != null ? title : ""))
             .toLowerCase();
         if (haystack.contains("bug") || haystack.contains("缺陷") || haystack.contains("修复")) {
