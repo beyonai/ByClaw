@@ -204,7 +204,7 @@ export function CandidateTable({
       width: 88,
       render: (_, c) =>
         sentSet.has(c.id) ? (
-          <Tag icon={<CheckCircleFilled />} color="success" title="本轮已把该接口证据发送给 LLM 评分/生成">
+          <Tag icon={<CheckCircleFilled />} color="success" title="本轮已把该接口元数据发送给 LLM 评分">
             已送
           </Tag>
         ) : (
@@ -233,9 +233,9 @@ export function CandidateTable({
       title={() => (
         <Text type="secondary" style={{ fontSize: 12 }}>
           {locked
-            ? `候选接口(已勾选的${llmSynthesis ? '传给 LLM' : '生成本地脚本'})`
+            ? `候选接口(已勾选的${llmSynthesis ? '参与 AI 评分' : '生成本地脚本'})`
             : llmSynthesis
-            ? '勾选要交给 LLM 评审/生成的接口(默认按评分选前若干;勾越多越慢)'
+            ? '勾选要交给 LLM 评审的接口（默认按评分选前若干；勾越多越慢）'
             : '勾选要生成本地脚本的接口'}
           {seeds.length ? (
             <>

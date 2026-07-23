@@ -24,6 +24,7 @@ interface Props {
   rankScorePrompt?: string;
   generatePrompt?: string;
   llmRawJson?: string;
+  llmError?: string;
   draftVerifying?: Record<string, boolean>;
   savedDraftIds?: string[];
   savedAdapters?: SavedAdapter[];
@@ -54,7 +55,6 @@ export default function PipelineStep(props: Props) {
       <GenerateStep
         loading={props.loading}
         llmSynthesis={props.llmSynthesis}
-        generatePrompt={props.generatePrompt}
         pipelineProgress={props.pipelineProgress}
         selectedCount={genSelectedIds.length}
         onRunGenerate={() => props.onRunGenerate(genSelectedIds.length ? genSelectedIds : undefined)}
@@ -93,6 +93,7 @@ export default function PipelineStep(props: Props) {
       sampleB={props.sampleB}
       rankScorePrompt={props.rankScorePrompt}
       llmRawJson={props.llmRawJson}
+      llmError={props.llmError}
       onRunScore={props.onRunScore}
       onSelectionChange={setGenSelectedIds}
       onNext={props.onGoToGenerate}

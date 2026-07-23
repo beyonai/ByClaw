@@ -55,7 +55,7 @@ interface SessionData {
   /** dry-run 预览结果(不推进会话) */
   draftPreview?: InitResult;
 
-  /** P0-2:LLM 外发同意时刻;一旦同意,后续 preview/write 复用,允许把痕迹发往 Anthropic 合成。 */
+  /** 用户明确同意候选元数据外发进行 LLM 评分的时刻。 */
   llmEgressAck?: number;
 
   /** N4/N5:LLM 流水线产出的脚本草稿(verify 后)+ 被拒候选 */
@@ -79,6 +79,7 @@ interface SessionData {
 
   /** 拆步①score 阶段 LLM 返回的原始 interfaces JSON(评分候选页折叠展示原始返回)。 */
   llmRawJson?: string;
+  llmError?: string;
 
   /** 拆步③每个草稿的「测试中」标记(draftId → 是否 verify 进行中),驱动测试按钮 loading。 */
   draftVerifying?: Record<string, boolean>;
@@ -438,6 +439,7 @@ export default function useRecorderSession() {
             pipelinePrompts: { score: d.scorePrompt, generate: d.generatePrompt, screenshotCount: d.screenshotCount },
             generatePrompt: d.generatePrompt,
             llmRawJson: d.llmRawJson,
+            llmError: d.llmError,
             llmEgressAck: llmEgressAcknowledgedAt,
             pipelineSubStep: 'candidates',
           },
@@ -449,13 +451,12 @@ export default function useRecorderSession() {
     // 候选页「上一步」/生成页返回 → 回候选子步。
     goToCandidates: () => setData((d) => ({ ...d, pipelineSubStep: 'candidates' })),
     // 拆步②生成:generate-only。点「生成 cli 脚本」触发。完成后自动进 scripts 子步展示脚本。
-    runGenerate: (candidateIds?: string[], llmSynthesis = true) => {
-      const llmEgressAcknowledgedAt = llmSynthesis ? Date.now() : undefined;
+    runGenerate: (candidateIds?: string[]) => {
       setData((d) => ({ ...d, pipelineProgress: [] }));
       return run(
         'pipelineGenerate',
         () =>
-          client.pipelineGenerate(llmEgressAcknowledgedAt, candidateIds, (phases) =>
+          client.pipelineGenerate(undefined, candidateIds, (phases) =>
             setData((d) => ({ ...d, pipelineProgress: phases }))
           ),
         // 重新生成:清上一轮的草稿测试/保存痕迹(savedDraftIds/savedAdapters/draftVerifying),避免残留展示。

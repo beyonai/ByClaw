@@ -14,6 +14,7 @@ import java.util.HashSet;
 import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -31,6 +32,7 @@ public class RecorderApplicationService {
     private final RecorderDraftStore draftStore;
     private final RecorderCurrentUserProvider currentUserProvider;
     private final RecorderResourceSaveService resourceSaveService;
+    private final RecorderLlmService recorderLlmService;
 
     public RecorderApplicationService(
         RecorderSessionRegistry sessionRegistry,
@@ -44,6 +46,26 @@ public class RecorderApplicationService {
         RecorderCurrentUserProvider currentUserProvider,
         RecorderResourceSaveService resourceSaveService
     ) {
+        this(
+            sessionRegistry, requestRegistry, rankService, pipelineService, browserPort, vncProvider, verifyService,
+            draftStore, currentUserProvider, resourceSaveService, RecorderLlmService.unavailable()
+        );
+    }
+
+    @Autowired
+    public RecorderApplicationService(
+        RecorderSessionRegistry sessionRegistry,
+        RecorderRequestRegistry requestRegistry,
+        RecorderRankService rankService,
+        RecorderPipelineService pipelineService,
+        RecorderBrowserPort browserPort,
+        RecorderVncProvider vncProvider,
+        RecorderVerifyService verifyService,
+        RecorderDraftStore draftStore,
+        RecorderCurrentUserProvider currentUserProvider,
+        RecorderResourceSaveService resourceSaveService,
+        RecorderLlmService recorderLlmService
+    ) {
         this.sessionRegistry = sessionRegistry;
         this.requestRegistry = requestRegistry;
         this.rankService = rankService;
@@ -54,13 +76,14 @@ public class RecorderApplicationService {
         this.draftStore = draftStore;
         this.currentUserProvider = currentUserProvider;
         this.resourceSaveService = resourceSaveService;
+        this.recorderLlmService = recorderLlmService;
     }
 
     public RecorderResponse<Map<String, Object>> health() {
         try {
-            return ok(browserPort.health(currentUserProvider.requireCurrent()));
+            return ok(withLlmHealth(browserPort.health(currentUserProvider.requireCurrent())));
         } catch (RecorderSaveException e) {
-            return ok(browserPort.health());
+            return ok(withLlmHealth(browserPort.health()));
         } catch (RecorderBrowserException e) {
             return fail(e.getHttpStatus(), e.getCode(), e.getMessage());
         }
@@ -385,8 +408,28 @@ public class RecorderApplicationService {
             if (!sessionRegistry.canAdvance(session, RecorderSessionAction.PIPELINE)) {
                 return fail(400, "invalid_state", "cannot run pipeline stage from " + session.state().wireValue());
             }
-            return accepted(session, "pipeline", pipelineService.score(session, stringList(body.get("candidateIds"))));
+            return accepted(
+                session,
+                "pipeline",
+                pipelineService.score(session, stringList(body.get("candidateIds")), hasLlmEgressApproval(body))
+            );
         }
+    }
+
+    private Map<String, Object> withLlmHealth(Map<String, Object> browserHealth) {
+        Map<String, Object> health = new LinkedHashMap<>(browserHealth);
+        RecorderLlmService.Availability availability = recorderLlmService.availability();
+        health.put("llmSynthesis", availability.available());
+        health.put(
+            "llmSynthesisMessage",
+            availability.available() ? "已配置默认 LLM 模型；AI 评分需在下一步明确同意。" : "未配置默认 LLM 模型；将继续使用本地规则流程。"
+        );
+        return health;
+    }
+
+    private boolean hasLlmEgressApproval(Map<String, Object> body) {
+        Object value = body.get("llmEgressAcknowledgedAt");
+        return value instanceof Number number && number.longValue() > 0;
     }
 
     public RecorderResponse<Map<String, Object>> pipelineGenerate(Map<String, Object> body) {
