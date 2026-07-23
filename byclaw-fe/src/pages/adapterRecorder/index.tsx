@@ -19,6 +19,7 @@ import PipelineStep from './steps/PipelineStep';
 import InitStep from './steps/InitStep';
 import VerifyStep from './steps/VerifyStep';
 import { FLOW_STEPS, flowStepsFor, STATE_ORDER, PIPELINE_SUBSTEP_OFFSET, isFailed } from './constants/recorder';
+import { isActiveRecordingLayout } from './recordingLayout';
 
 const { Text } = Typography;
 
@@ -139,7 +140,7 @@ export default function Workbench() {
               onRank={actions.rank}
               onSelect={actions.selectCandidate}
             />
-            <div style={{ marginTop: 16 }}>
+            <div className={styles.nextStep}>
               <InitStep
                 loading={loading}
                 selectedCandidate={data.candidates?.find((c) => c.id === data.selectedCandidateId)}
@@ -215,7 +216,11 @@ export default function Workbench() {
   const inlineError = error && !failed ? error : null;
 
   return (
-    <div className={`${styles.workbench} ${data.recording ? styles.recordingWorkbench : ''}`}>
+    <div
+      className={`${styles.workbench} ${
+        isActiveRecordingLayout(state, data.recording) ? styles.recordingWorkbench : ''
+      }`}
+    >
       <div className={styles.shell}>
         <header className={styles.head}>
           <div className={styles.heading}>
@@ -235,7 +240,7 @@ export default function Workbench() {
           </aside>
 
           <main className={styles.stage} data-testid="recorder-work-surface">
-            <div className={data.recording ? styles.recordingStage : undefined}>
+            <div className={data.recording ? styles.recordingStage : styles.stepStage}>
               {inlineError && (
                 <ErrorRecovery
                   error={inlineError}
