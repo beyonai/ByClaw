@@ -28,8 +28,9 @@ export const buildSkillMarketplaceUrl = (
   if (`${digitalEmployeeId ?? ''}`.trim()) {
     url.searchParams.set('digId', `${digitalEmployeeId}`);
   }
+  url.searchParams.delete('beyondToken');
   if (`${beyondToken ?? ''}`.trim()) {
-    url.searchParams.set('beyondToken', `${beyondToken}`.trim());
+    url.searchParams.set('BeyondToken', `${beyondToken}`.trim());
   }
   if (`${parentOrigin ?? ''}`.trim()) {
     url.searchParams.set('parentOrigin', `${parentOrigin}`.trim());
