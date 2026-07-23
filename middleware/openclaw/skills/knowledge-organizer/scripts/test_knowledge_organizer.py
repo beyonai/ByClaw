@@ -6,7 +6,11 @@ import importlib.util
 import json
 import subprocess
 import tempfile
+import threading
+import time
 import unittest
+from concurrent.futures import ThreadPoolExecutor
+from unittest.mock import patch
 from pathlib import Path
 
 
@@ -42,7 +46,8 @@ class FakeApi:
         self.write_kwargs = kwargs
         return {"records": [{"term_id": "ods-term-1"}]}
 
-    def extract_fragments(self, **_kwargs: object) -> dict[str, object]:
+    def extract_fragments(self, **kwargs: object) -> dict[str, object]:
+        self.extract_kwargs = kwargs
         return {
             "fragments": [
                 {
@@ -83,6 +88,39 @@ class FakeApi:
         return {"status": "accepted"}
 
 
+class ConcurrentFakeApi(FakeApi):
+    def __init__(self) -> None:
+        self.active_extractions = 0
+        self.maximum_active_extractions = 0
+        self.extract_calls: list[str] = []
+        self.failed_contents: set[str] = set()
+        self._lock = threading.Lock()
+
+    def extract_fragments(
+        self, *, content: str, ads_objects: dict[str, object], user_intent: str | None = None
+    ) -> dict[str, object]:
+        with self._lock:
+            self.active_extractions += 1
+            self.maximum_active_extractions = max(self.maximum_active_extractions, self.active_extractions)
+            self.extract_calls.append(content)
+        try:
+            time.sleep(0.03)
+            if content in self.failed_contents:
+                raise ValueError(f"cannot organize {content}")
+            return {
+                "fragments": [
+                    {
+                        "object_code": "concept",
+                        "entity_name": content,
+                        "content": f"关于 {content} 的知识。",
+                    }
+                ]
+            }
+        finally:
+            with self._lock:
+                self.active_extractions -= 1
+
+
 class KnowledgeOrganizerInitializationTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -118,6 +156,22 @@ class KnowledgeOrganizerInitializationTests(unittest.TestCase):
         self.assertIn("{init,ingest,organize,build}", result.stdout)
         self.assertNotIn("run", result.stdout)
 
+    def test_discovery_transport_runs_concurrent_coroutines_without_sharing_an_event_loop(self) -> None:
+        transport = knowledge_organizer.ByFrameworkDiscoveryTransport()
+
+        async def value_after_wait(value: int) -> tuple[int, int]:
+            await knowledge_organizer.asyncio.sleep(0.02)
+            return value, id(knowledge_organizer.asyncio.get_running_loop())
+
+        try:
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                results = list(executor.map(lambda value: transport.run(value_after_wait(value)), range(4)))
+        finally:
+            transport.close()
+
+        self.assertEqual([value for value, _loop_id in results], [0, 1, 2, 3])
+        self.assertEqual(len({loop_id for _value, loop_id in results}), 1)
+
     def test_extract_json_object_accepts_prose_and_markdown_fence(self) -> None:
         value = knowledge_organizer.extract_json_object(
             "分析完成。\n```json\n{\"fragments\": []}\n```\n以上是结果。"
@@ -127,6 +181,25 @@ class KnowledgeOrganizerInitializationTests(unittest.TestCase):
     def test_extract_json_object_rejects_response_without_json_object(self) -> None:
         with self.assertRaisesRegex(ValueError, "JSON"):
             knowledge_organizer.extract_json_object("模型没有遵循格式")
+
+    def test_extract_fragments_treats_user_intent_as_a_hard_scope(self) -> None:
+        class RecordingModel:
+            def complete_json(self, *, system_prompt: str, user_message: str) -> dict[str, object]:
+                self.system_prompt = system_prompt
+                self.user_message = user_message
+                return {"fragments": []}
+
+        model = RecordingModel()
+        api = knowledge_organizer.ServiceApi(object(), model)
+
+        api.extract_fragments(
+            content="智能客服与智能外呼的介绍",
+            ads_objects={"concept": {"objectCode": "concept"}},
+            user_intent="只抽取对象实例：智能客服",
+        )
+
+        self.assertIn("只抽取对象实例：智能客服", model.user_message)
+        self.assertIn("只输出直接符合该范围的条目", model.system_prompt)
 
     def test_ingest_snapshots_file_and_persists_ods_term_id(self) -> None:
         self.organizer.initialize(self.task_dir, "employee-1")
@@ -205,6 +278,24 @@ class KnowledgeOrganizerInitializationTests(unittest.TestCase):
         self.assertEqual(builds[0]["status"], "accepted")
         self.assertEqual(self.api.build_request, (["ads-term-1"], 1))
 
+    def test_organize_passes_and_persists_user_intent(self) -> None:
+        self.organizer.initialize(self.task_dir, "employee-1")
+        source = Path(self.temp_dir.name) / "notes.md"
+        source.write_text("# 智能客服", encoding="utf-8")
+        self.organizer.ingest(
+            self.task_dir,
+            source=source,
+            object_code="raw_doc",
+            storage_file_name="智能客服说明.md",
+            labels={"title": "智能客服"},
+        )
+
+        self.organizer.organize(self.task_dir, user_intent="仅抽取智能客服实例")
+
+        self.assertEqual(self.api.extract_kwargs["user_intent"], "仅抽取智能客服实例")
+        state = self.organizer._load_state(self.task_dir)
+        self.assertEqual(state["ingestions"][0]["organize_intent"], "仅抽取智能客服实例")
+
     def test_organize_uses_one_model_choice_for_multiple_entity_candidates(self) -> None:
         self.organizer.initialize(self.task_dir, "employee-1")
         source = Path(self.temp_dir.name) / "notes.md"
@@ -226,6 +317,58 @@ class KnowledgeOrganizerInitializationTests(unittest.TestCase):
         self.assertEqual(len(self.api.ambiguous), 1)
         self.assertEqual(self.api.fragment_items[0]["instanceId"], "old-2")
         self.assertFalse(hasattr(self.api, "created_entity"))
+
+    def test_organize_runs_at_most_four_files_concurrently_and_saves_each_completion(self) -> None:
+        api = ConcurrentFakeApi()
+        organizer = knowledge_organizer.KnowledgeOrganizer(api)
+        organizer.initialize(self.task_dir, "employee-1")
+        for index in range(5):
+            source = Path(self.temp_dir.name) / f"notes-{index}.md"
+            source.write_text(f"document-{index}", encoding="utf-8")
+            organizer.ingest(
+                self.task_dir,
+                source=source,
+                object_code="raw_doc",
+                storage_file_name=f"文档-{index}.md",
+                labels={"title": f"文档-{index}"},
+            )
+
+        with patch.object(organizer, "_save_state", wraps=organizer._save_state) as save_state:
+            fragments = organizer.organize(self.task_dir)
+
+        self.assertEqual(len(fragments), 5)
+        self.assertEqual(api.maximum_active_extractions, 4)
+        self.assertEqual(save_state.call_count, 5)
+
+    def test_organize_resume_retries_only_failed_or_unfinished_files(self) -> None:
+        api = ConcurrentFakeApi()
+        organizer = knowledge_organizer.KnowledgeOrganizer(api)
+        organizer.initialize(self.task_dir, "employee-1")
+        for content in ("successful", "retry-me"):
+            source = Path(self.temp_dir.name) / f"{content}.md"
+            source.write_text(content, encoding="utf-8")
+            organizer.ingest(
+                self.task_dir,
+                source=source,
+                object_code="raw_doc",
+                storage_file_name=f"{content}.md",
+                labels={"title": content},
+            )
+        api.failed_contents.add("retry-me")
+
+        first = organizer.organize(self.task_dir)
+        second = organizer.organize(self.task_dir)
+        api.failed_contents.clear()
+        resumed = organizer.organize(self.task_dir, resume=True)
+
+        self.assertEqual(len(first), 1)
+        self.assertEqual(second, [])
+        self.assertEqual(len(resumed), 1)
+        self.assertEqual(api.extract_calls.count("successful"), 1)
+        self.assertEqual(api.extract_calls.count("retry-me"), 2)
+        state = organizer._load_state(self.task_dir)
+        statuses = [ingestion.get("organize_status") for ingestion in state["ingestions"]]
+        self.assertEqual(statuses, ["succeeded", "succeeded"])
 
 
 if __name__ == "__main__":

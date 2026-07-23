@@ -85,10 +85,21 @@ CLI 读取并快照原始文件，真实入库路径自动添加时间戳。成�
 python3 <knowledge-organizer>/scripts/knowledge_organizer.py organize \
   --task-dir "{完整任务目录}" \
   --object-code "{限定ADS对象编码1}" \
-  --object-code "{限定ADS对象编码2}"
+  --object-code "{限定ADS对象编码2}" \
+  --user-intent "仅抽取智能客服实例"
 ```
 
-`--object-code` 可重复。当用户限定对象范围时，Agent 必须传入全部锁定范围内的 ADS 对象编码；脚本会拒绝未授权或非 ADS 编码，并且只使用这些对象定义进行提取、检索、关联和创建。用户未限定范围时，不传该参数，脚本使用全部授权 ADS 对象。
+默认以最多 4 个文件任务并发整理；每个文件完成后立即更新 `state.json`。如命令中断或个别文件失败，使用 `--resume` 仅恢复未完成或失败的文件，已成功文件不会重复处理：
+
+```bash
+python3 <knowledge-organizer>/scripts/knowledge_organizer.py organize \
+  --task-dir "{完整任务目录}" \
+  --resume
+```
+
+`--object-code` 可重复。当用户限定对象范围时，Agent **必须**将匹配到的全部且仅这些 ADS `objectCode` 逐一通过 `--object-code` 传入；不得遗漏、扩大为全量授权对象，或用相似对象替代。`--user-intent` 不能替代该对象类型白名单。脚本会拒绝未授权或非 ADS 编码，并且只使用传入对象定义进行提取、检索、关联和创建。用户未限定范围时，才不传该参数并使用全部授权 ADS 对象。
+
+`--user-intent` 是可选的用户关注范围，例如指定对象类型、对象实例或实体名称。传入后，模型只输出直接符合该范围的条目；不传则按全部可用 ADS 对象抽取。恢复失败任务时未重新传入该参数，会沿用该文件上次保存的用户意图；重新传入会覆盖它。
 
 脚本仅处理成功入库的 ODS 文档：使用允许范围内的 ADS 对象定义抽取原子知识碎片，按 ADS 对象类型批量检索实体；零候选创建实体，单候选直接关联，多候选由模型一次性裁决零或一个候选。所有合法碎片直接入库，不做去重或置信度过滤。
 
