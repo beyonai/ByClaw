@@ -1715,15 +1715,28 @@ export default {
   'projectSpace.detail.log.empty': 'No scan records',
   // 手工录入需求弹窗及需求详情来源展示。
   'projectSpace.detail.manualRequirement.title': 'Add Requirement',
+  'projectSpace.detail.manualRequirement.editTitle': 'Edit Requirement',
   'projectSpace.detail.manualRequirement.description':
     'Save it to the current project requirement list, then start a development task when ready.',
+  'projectSpace.detail.manualRequirement.editDescription': 'Save changes to update this project requirement.',
   'projectSpace.detail.manualRequirement.submit': 'Save',
   'projectSpace.detail.manualRequirement.createSuccess': 'Requirement saved',
   'projectSpace.detail.manualRequirement.createFailed': 'Failed to save requirement',
+  'projectSpace.detail.manualRequirement.updateSuccess': 'Requirement updated',
+  'projectSpace.detail.manualRequirement.updateFailed': 'Failed to update requirement',
+  'projectSpace.detail.manualRequirement.action.more': 'More actions',
+  'projectSpace.detail.manualRequirement.action.edit': 'Edit',
+  'projectSpace.detail.manualRequirement.action.delete': 'Delete',
+  'projectSpace.detail.manualRequirement.deleteConfirmTitle': 'Delete Requirement',
+  'projectSpace.detail.manualRequirement.deleteConfirm':
+    'Delete requirement “{name}”? This action cannot be undone.',
+  'projectSpace.detail.manualRequirement.deleteSuccess': 'Requirement deleted',
+  'projectSpace.detail.manualRequirement.deleteFailed': 'Failed to delete requirement',
   'projectSpace.detail.manualRequirement.validation.titleRequired': 'Enter a requirement name',
   'projectSpace.detail.manualRequirement.validation.originalContentRequired': 'Enter the original requirement',
   'projectSpace.detail.manualRequirement.field.sourceType': 'Original Source',
   'projectSpace.detail.manualRequirement.field.branch': 'Affected Branch',
+  'projectSpace.detail.manualRequirement.field.repository': 'Repository',
   'projectSpace.detail.manualRequirement.field.title': 'Requirement Name',
   'projectSpace.detail.manualRequirement.field.originalContent': 'Original Requirement',
   'projectSpace.detail.manualRequirement.field.productContent': 'Product Requirement',
@@ -1732,10 +1745,13 @@ export default {
   'projectSpace.detail.manualRequirement.source.internalProposal': 'Internal Proposal',
   'projectSpace.detail.manualRequirement.placeholder.title': 'Describe the problem to solve in one sentence',
   'projectSpace.detail.manualRequirement.placeholder.branch': 'For example: develop',
+  'projectSpace.detail.manualRequirement.placeholder.repository': 'Select the repository for this requirement',
   'projectSpace.detail.manualRequirement.placeholder.originalContent':
     'Record the user’s words, the problem context, and the triggering scenario',
   'projectSpace.detail.manualRequirement.placeholder.productContent':
     'Optional: AI will organize objectives, scope, and acceptance criteria when empty',
+  'projectSpace.detail.manualRequirement.noRepositories': 'There are no project repositories. Add one on the right.',
+  'projectSpace.detail.manualRequirement.validation.repoRequired': 'Select a repository',
   // Project task detail drawer
   'projectTaskDetail.title': 'Task Details',
   'projectTaskDetail.enterSession': 'Enter Conversation',

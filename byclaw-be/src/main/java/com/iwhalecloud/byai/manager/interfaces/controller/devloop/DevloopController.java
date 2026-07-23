@@ -5,7 +5,9 @@ import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskListQueryDto;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskStateDto;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskViewDto;
+import com.iwhalecloud.byai.manager.dto.devloop.ManualRequirementDeleteDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ManualRequirementDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.ManualRequirementUpdateDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ScanSourceDTO;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -149,6 +151,27 @@ public class DevloopController {
     @PostMapping("/requirement/create")
     public ResponseUtil<Map<String, Object>> createManualRequirement(@RequestBody ManualRequirementDTO dto) {
         return applicationService.createManualRequirement(dto);
+    }
+
+    /**
+     * 修改尚未启动的手工需求。扫描渠道产生的需求及已启动需求均不能通过该接口修改。
+     *
+     * @param dto 手工需求的可编辑字段及需求条目 ID
+     * @return 按当前请求语言组装的已修改需求
+     */
+    @PostMapping("/requirement/update")
+    public ResponseUtil<Map<String, Object>> updateManualRequirement(@RequestBody ManualRequirementUpdateDTO dto) {
+        return applicationService.updateManualRequirement(dto);
+    }
+
+    /**
+     * 删除尚未启动的手工需求。服务端仅允许所属项目创建者执行，避免绕过前端权限控制。
+     *
+     * @param dto 待删除的需求条目 ID
+     */
+    @PostMapping("/requirement/delete")
+    public ResponseUtil<Void> deleteManualRequirement(@RequestBody ManualRequirementDeleteDTO dto) {
+        return applicationService.deleteManualRequirement(dto);
     }
 
     /**

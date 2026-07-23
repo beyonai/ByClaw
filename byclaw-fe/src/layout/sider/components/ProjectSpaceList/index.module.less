@@ -1371,6 +1371,10 @@
       opacity: 1;
       pointer-events: auto;
     }
+
+    .detailRequirementMoreAction {
+      display: inline-flex;
+    }
   }
 }
 
@@ -1381,6 +1385,14 @@
   grid-template-columns: 32px minmax(0, 1fr) auto;
   align-items: center;
   column-gap: 10px;
+}
+
+.detailRequirementActions {
+  // 启动研发与更多操作固定在同一右侧区域，显示三点时不挤压需求标题。
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
 }
 
 // 需求列表复用会话列表的图标规格，评分信息收敛到右侧详情抽屉。
@@ -1563,6 +1575,25 @@
   border-radius: 6px;
   font-size: 12px;
   line-height: 24px;
+}
+
+.detailRequirementMoreAction {
+  // 三点按钮默认不占用布局空间，仅在卡片悬停或菜单展开时显示。
+  display: none;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  color: #667085;
+
+  &:hover,
+  &:focus {
+    color: #246bfe;
+    background: #eaf2ff;
+  }
+}
+
+.detailRequirementMoreActionOpen {
+  display: inline-flex;
 }
 
 .detailRequirementStartAction {
@@ -2610,6 +2641,36 @@
 
 .manualRequirementFormFull {
   grid-column: 1 / -1;
+}
+
+.manualRequirementRepoCompact {
+  width: 100%;
+  min-width: 0;
+
+  :global {
+    // 仓库选择框需为右侧新增按钮预留空间，避免在需求弹窗中被全宽规则挤压。
+    .@{antPrefix}-select {
+      width: auto;
+      min-width: 0;
+      height: 34px;
+      flex: 1 1 0;
+    }
+
+    // 需求弹窗内按钮统一为 34px，仓库下拉同步该高度并校正单选文本的垂直居中。
+    .@{antPrefix}-select-single .@{antPrefix}-select-selector {
+      height: 34px;
+    }
+
+    .@{antPrefix}-select-single .@{antPrefix}-select-selector .@{antPrefix}-select-selection-item,
+    .@{antPrefix}-select-single .@{antPrefix}-select-selector .@{antPrefix}-select-selection-placeholder {
+      line-height: 32px;
+    }
+  }
+}
+
+.manualRequirementRepoSelect {
+  min-width: 0;
+  flex: 1 1 0;
 }
 
 .manualRequirementSourceType {
