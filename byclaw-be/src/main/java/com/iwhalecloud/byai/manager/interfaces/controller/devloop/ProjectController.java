@@ -179,32 +179,6 @@ public class ProjectController {
     }
 
     /**
-     * 绑定会话到项目，用于项目空间下新建会话后建立分组关系
-     *
-     * @param params 包含 projectId、sessionId
-     */
-    @PostMapping("/session/bind")
-    public ResponseUtil<Void> bindProjectSession(@RequestBody Map<String, Object> params) {
-        Long projectId = MapParamUtil.getLongValue(params, "projectId");
-        Long sessionId = MapParamUtil.getLongValue(params, "sessionId");
-        projectApplicationService.bindProjectSession(projectId, sessionId);
-        return ResponseUtil.successResponse();
-    }
-
-    /**
-     * 取消项目和会话的有效关联
-     *
-     * @param params 包含 projectId、sessionId
-     */
-    @PostMapping("/session/unbind")
-    public ResponseUtil<Void> unbindProjectSession(@RequestBody Map<String, Object> params) {
-        Long projectId = MapParamUtil.getLongValue(params, "projectId");
-        Long sessionId = MapParamUtil.getLongValue(params, "sessionId");
-        projectApplicationService.unbindProjectSession(projectId, sessionId);
-        return ResponseUtil.successResponse();
-    }
-
-    /**
      * 保存到项目空间
      *
      * @param dto 请求参数

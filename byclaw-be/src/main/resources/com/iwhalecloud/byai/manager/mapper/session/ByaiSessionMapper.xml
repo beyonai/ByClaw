@@ -195,4 +195,82 @@
         </where>
     </select>
 
+    <resultMap id="ProjectSessionDtoResultMap" type="com.iwhalecloud.byai.manager.dto.session.ByaiSessionDto">
+        <id column="session_id" property="sessionId" />
+        <result column="parent_session_id" property="parentSessionId" />
+        <result column="session_name" property="sessionName" />
+        <result column="session_content" property="sessionContent" />
+        <result column="session_type" property="sessionType" />
+        <result column="create_time" property="createTime" />
+        <result column="creator_id" property="creatorId" />
+        <result column="object_type" property="objectType" />
+        <result column="object_id" property="objectId" />
+        <result column="enterprise_id" property="enterpriseId" />
+        <result column="update_by" property="updateBy" />
+        <result column="update_time" property="updateTime" />
+        <result column="state" property="state" />
+        <result column="project_id" property="projectId" />
+        <result column="avatar" property="avatar" />
+        <collection property="sessionExts"
+                    ofType="com.iwhalecloud.byai.manager.entity.session.ByaiSessionExt"
+                    select="com.iwhalecloud.byai.manager.mapper.session.ByaiSessionExtMapper.selectBySessionId"
+                    column="session_id" />
+    </resultMap>
+
+    <select id="selectSessionsByProjectId" resultMap="ProjectSessionDtoResultMap">
+        SELECT a.session_id,
+               a.parent_session_id,
+               a.session_name,
+               a.session_content,
+               a.session_type,
+               a.create_time,
+               a.creator_id,
+               a.object_type,
+               a.object_id,
+               a.enterprise_id,
+               a.update_by,
+               a.update_time,
+               a.state,
+               a.project_id,
+               r.avatar
+        FROM byai_session a
+                 LEFT JOIN ss_resource r ON a.object_id = r.resource_id
+        WHERE a.project_id = #{projectId}
+          AND (a.state IS NULL OR a.state != 'DELETED')
+        ORDER BY COALESCE(a.update_time, a.create_time) DESC, a.create_time DESC
+    </select>
+
+    <select id="selectSessionsByProjectByQo" resultMap="ProjectSessionDtoResultMap">
+        SELECT a.session_id,
+               a.parent_session_id,
+               a.session_name,
+               a.create_time,
+               a.creator_id,
+               a.object_type,
+               a.object_id,
+               a.enterprise_id,
+               a.session_content,
+               a.is_debug,
+               a.session_type,
+               a.update_by,
+               a.update_time,
+               a.state,
+               a.project_id,
+               r.avatar
+        FROM byai_session a
+                 JOIN byai_project b ON a.project_id = b.project_id
+                 LEFT JOIN ss_resource r ON a.object_id = r.resource_id
+        WHERE b.project_id = #{projectId}
+        <if test="keyword != null and keyword != ''">
+            AND (
+                a.session_name LIKE CONCAT('%', #{keyword}, '%')
+                OR a.session_content LIKE CONCAT('%', #{keyword}, '%')
+            )
+        </if>
+        <if test="createBy != null">
+            AND a.creator_id = #{createBy}
+        </if>
+        ORDER BY COALESCE(a.update_time, a.create_time) DESC, a.create_time DESC
+    </select>
+
 </mapper>
