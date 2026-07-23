@@ -64,13 +64,9 @@ public class ProjectMemberService {
      * 按项目ID联查成员列表，补充用户工号/名称及绑定数字员工名称。
      *
      * @param projectId 项目ID
+     * @param userName 用户名
      * @return 成员列表 DTO；无成员时返回空列表
      */
-    public List<ProjectMemberListDto> listProjectMembers(Long projectId) {
-        return listProjectMembers(projectId, null);
-    }
-
-    /** 按项目查询成员，并仅按成员姓名模糊筛选。 */
     public List<ProjectMemberListDto> listProjectMembers(Long projectId, String userName) {
         return memberMapper.listProjectMembers(projectId, userName);
     }

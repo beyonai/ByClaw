@@ -27,7 +27,9 @@ import com.iwhalecloud.byai.state.domain.recorder.model.RecorderOwner;
 public class BycliRecorderBrowserPort implements RecorderBrowserPort {
 
     private static final String BYCLI_HEADER = "X-byCLI";
-    private static final int BROWSER_RECOVERY_WAIT_MS = 2000;
+    private static final int BROWSER_RECOVERY_REQUEST_TIMEOUT_MS = 2000;
+    private static final int BROWSER_RECOVERY_TIMEOUT_MS = 10000;
+    private static final int BROWSER_RECOVERY_POLL_INTERVAL_MS = 250;
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {
     };
 
@@ -88,20 +90,13 @@ public class BycliRecorderBrowserPort implements RecorderBrowserPort {
             URI daemonEndpoint = endpointResolver == null || owner == null
                 ? uri("/status")
                 : endpointResolver.resolve(owner, "bycli", "/status");
-            DaemonResponse response = sendGet(daemonEndpoint, 2000);
-            if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                return downHealth("daemon status failed (HTTP " + response.statusCode() + ")");
-            }
-            Map<String, Object> status = dataMap(response.body());
+            Map<String, Object> status = status(daemonEndpoint);
             boolean extensionConnected = Boolean.TRUE.equals(status.get("extensionConnected"));
             if (!extensionConnected) {
-                recoverBrowser(owner);
-                waitForBrowserRecovery();
-                response = sendGet(daemonEndpoint, 2000);
-                if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                    return downHealth("daemon status failed (HTTP " + response.statusCode() + ")");
+                Map<String, Object> recoveredStatus = recoverBrowserAndWait(owner, daemonEndpoint);
+                if (recoveredStatus != null) {
+                    status = recoveredStatus;
                 }
-                status = dataMap(response.body());
                 extensionConnected = Boolean.TRUE.equals(status.get("extensionConnected"));
             }
             String localService = stringValue(status.get("localService"));
@@ -187,13 +182,20 @@ public class BycliRecorderBrowserPort implements RecorderBrowserPort {
     }
 
     private DaemonCommandResult command(RecorderSession session, Map<String, Object> command) {
-        command.put("id", "be_" + UUID.randomUUID().toString().replace("-", "").substring(0, 16));
-        DaemonResponse response = sendPost(session, "/command", command, properties.getTimeoutMs());
-        Map<String, Object> payload = response.body();
-        if (response.statusCode() >= 200 && response.statusCode() < 300 && Boolean.TRUE.equals(payload.get("ok"))) {
+        DaemonResponse response = sendCommand(session, command);
+        if (!commandSucceeded(response) && isExtensionDisconnected(response)) {
+            URI daemonEndpoint = uri(session, "/status");
+            Map<String, Object> status = recoverBrowserAndWait(session.owner(), daemonEndpoint);
+            if (status != null && Boolean.TRUE.equals(status.get("extensionConnected"))) {
+                response = sendCommand(session, command);
+            }
+        }
+        if (commandSucceeded(response)) {
+            Map<String, Object> payload = response.body();
             return new DaemonCommandResult(dataMap(payload), stringValue(payload.get("page")));
         }
 
+        Map<String, Object> payload = response.body();
         String message = stringValue(payload.get("error"));
         if (message == null || message.isBlank()) {
             message = "daemon command failed (HTTP " + response.statusCode() + ")";
@@ -203,6 +205,22 @@ public class BycliRecorderBrowserPort implements RecorderBrowserPort {
             rawCode = inferHttpErrorCode(response.statusCode(), message);
         }
         throw new RecorderBrowserException(toRecorderErrorCode(rawCode, message), message);
+    }
+
+    private DaemonResponse sendCommand(RecorderSession session, Map<String, Object> command) {
+        command.put("id", "be_" + UUID.randomUUID().toString().replace("-", "").substring(0, 16));
+        return sendPost(session, "/command", command, properties.getTimeoutMs());
+    }
+
+    private boolean commandSucceeded(DaemonResponse response) {
+        return response.statusCode() >= 200
+            && response.statusCode() < 300
+            && Boolean.TRUE.equals(response.body().get("ok"));
+    }
+
+    private boolean isExtensionDisconnected(DaemonResponse response) {
+        String rawCode = stringValue(response.body().get("errorCode"));
+        return "extension_not_connected".equals(rawCode) || "extension_disconnected".equals(rawCode);
     }
 
     private DaemonResponse sendGet(String path, int timeoutMs) {
@@ -237,20 +255,46 @@ public class BycliRecorderBrowserPort implements RecorderBrowserPort {
         return send(request);
     }
 
-    private void recoverBrowser(RecorderOwner owner) {
+    private Map<String, Object> recoverBrowserAndWait(RecorderOwner owner, URI daemonEndpoint) {
+        if (!recoverBrowser(owner)) {
+            return null;
+        }
+        long deadlineNanos = System.nanoTime() + Duration.ofMillis(BROWSER_RECOVERY_TIMEOUT_MS).toNanos();
+        Map<String, Object> status = null;
+        do {
+            waitForBrowserRecovery(BROWSER_RECOVERY_POLL_INTERVAL_MS);
+            status = status(daemonEndpoint);
+            if (Boolean.TRUE.equals(status.get("extensionConnected"))) {
+                return status;
+            }
+        } while (System.nanoTime() < deadlineNanos);
+        return status;
+    }
+
+    private boolean recoverBrowser(RecorderOwner owner) {
         try {
             URI recoveryEndpoint = endpointResolver == null || owner == null
                 ? uri("/v1/browser/recover")
                 : endpointResolver.resolve(owner, "bycli", "/v1/browser/recover");
-            sendPost(recoveryEndpoint, Map.of(), BROWSER_RECOVERY_WAIT_MS);
+            DaemonResponse response = sendPost(recoveryEndpoint, Map.of(), BROWSER_RECOVERY_REQUEST_TIMEOUT_MS);
+            return response.statusCode() >= 200 && response.statusCode() < 300;
         } catch (RecorderBrowserException ignored) {
             // The refreshed daemon status below remains the health response source of truth.
+            return false;
         }
     }
 
-    private void waitForBrowserRecovery() {
+    private Map<String, Object> status(URI daemonEndpoint) {
+        DaemonResponse response = sendGet(daemonEndpoint, BROWSER_RECOVERY_REQUEST_TIMEOUT_MS);
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            throw new RecorderBrowserException("daemon_unavailable", "daemon status failed (HTTP " + response.statusCode() + ")");
+        }
+        return dataMap(response.body());
+    }
+
+    private void waitForBrowserRecovery(int waitMs) {
         try {
-            Thread.sleep(BROWSER_RECOVERY_WAIT_MS);
+            Thread.sleep(waitMs);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }

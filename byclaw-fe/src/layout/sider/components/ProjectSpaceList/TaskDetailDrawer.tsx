@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Drawer, Empty, Spin } from 'antd';
-import { PauseCircleOutlined, RollbackOutlined } from '@ant-design/icons';
+import { Button, Drawer, Empty, Spin } from 'antd';
+import { MessageOutlined, PauseCircleOutlined, RollbackOutlined } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import dayjs from 'dayjs';
 import { getTaskPhases, type DevloopTaskState } from '@/service/devloop';
@@ -10,6 +10,8 @@ import styles from './index.module.less';
 interface TaskDetailDrawerProps {
   task: any;
   onClose: () => void;
+  canEnterSession?: boolean;
+  onEnterSession?: (task: any) => void;
 }
 
 // 同时兼容 v2 阶段状态和旧状态值，任务详情始终按同一视觉语义展示。
@@ -35,8 +37,7 @@ const PHASE_LABEL_IDS: Record<string, string> = {
 
 const dash = (value: any): string => (value === null || value === undefined || value === '' ? '-' : `${value}`);
 
-// 会话跳转由任务列表的主点击承担，详情抽屉只展示任务上下文和研发进度。
-const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({ task, onClose }) => {
+const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({ task, onClose, canEnterSession, onEnterSession }) => {
   const intl = useIntl();
   const t = (id: string, values?: Record<string, string | number>) => intl.formatMessage({ id }, values);
   const [phaseLoading, setPhaseLoading] = useState(false);
@@ -96,6 +97,13 @@ const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({ task, onClose }) =>
       open={!!task}
       onClose={onClose}
       width={640}
+      extra={
+        task?.sessionId && canEnterSession ? (
+          <Button type="primary" icon={<MessageOutlined />} onClick={() => onEnterSession?.(task)}>
+            {t('projectTaskDetail.enterSession')}
+          </Button>
+        ) : null
+      }
     >
       {task && (
         <Spin spinning={phaseLoading}>

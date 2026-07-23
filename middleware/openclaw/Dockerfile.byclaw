@@ -100,6 +100,12 @@ RUN set -eux; \
     else \
         groupadd --gid 999 byclaw; \
     fi; \
+    if getent passwd byclaw >/dev/null; then \
+        test "$(id -u byclaw)" = "999"; \
+        test "$(id -g byclaw)" = "999"; \
+    else \
+        useradd --uid 999 --gid 999 --home-dir /root --no-create-home --shell /usr/sbin/nologin byclaw; \
+    fi; \
     usermod -aG byclaw root
 
 ENV PIP_BREAK_SYSTEM_PACKAGES=1 \
@@ -308,5 +314,7 @@ RUN bun install -g github:garrytan/gbrain
 RUN rm -fr /root/.agents/skills
 
 EXPOSE 8081
+
+USER byclaw
 
 ENTRYPOINT ["/usr/local/bin/startAll.sh"]

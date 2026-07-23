@@ -130,17 +130,17 @@ export type DevloopProjectSpaceFile = {
 };
 
 // 项目管理
-export const createProject = (data: DevloopProjectPayload) => POST<any>('/byaiService/devloop/project/create', data);
+export const createProject = (data: DevloopProjectPayload) => POST<any>('/byaiService/project/create', data);
 
 export const listProjects = (data?: { keyword?: string }, config?: ConfigType) =>
-  POST<any>('/byaiService/devloop/project/list', data || {}, config);
+  POST<any>('/byaiService/project/list', data || {}, config);
 
-export const getProject = (projectId: number) => POST<any>('/byaiService/devloop/project/get', { projectId });
+export const getProject = (projectId: number) => POST<any>('/byaiService/project/get', { projectId });
 
 export const updateProject = (data: Partial<DevloopProjectPayload> & { projectId: number }) =>
-  POST<any>('/byaiService/devloop/project/update', data);
+  POST<any>('/byaiService/project/update', data);
 
-export const deleteProject = (projectId: number) => POST<any>('/byaiService/devloop/project/delete', { projectId });
+export const deleteProject = (projectId: number) => POST<any>('/byaiService/project/delete', { projectId });
 
 // 项目仓库维护：扫描源关联仓库时可即席新增/删除
 export const createProjectRepo = (data: {
@@ -148,24 +148,24 @@ export const createProjectRepo = (data: {
   repoFullName: string;
   repoUrl?: string;
   defaultBranch?: string;
-}) => POST<any>('/byaiService/devloop/project/repo/create', data);
+}) => POST<any>('/byaiService/project/repo/create', data);
 
-export const deleteProjectRepo = (repoId: number) => POST<any>('/byaiService/devloop/project/repo/delete', { repoId });
+export const deleteProjectRepo = (repoId: number) => POST<any>('/byaiService/project/repo/delete', { repoId });
 
 // 项目空间按会话分组展示，创建会话后需要显式建立项目-会话关系。
 export const bindProjectSession = (data: { projectId: number; sessionId: number }) =>
-  POST<any>('/byaiService/devloop/project/session/bind', data);
+  POST<any>('/byaiService/project/session/bind', data);
 
 export const unbindProjectSession = (data: { projectId: number; sessionId: number }) =>
-  POST<any>('/byaiService/devloop/project/session/unbind', data);
+  POST<any>('/byaiService/project/session/unbind', data);
 
 // 项目会话列表按项目懒加载，避免项目列表接口一次带出大量会话。
 export const listProjectSessionsByQo = (data: DevloopProjectSessionListPayload, config?: ConfigType) =>
-  POST<any>('/byaiService/devloop/project/session/listByQo', data, config);
+  POST<any>('/byaiService/project/session/listByQo', data, config);
 
 // 项目资源 tab 的共享文件空间使用项目维度文件接口，不再读取当前数字员工的 /.shared/ 目录。
 export const listProjectSpaceFiles = (projectId: number) =>
-  POST<DevloopProjectSpaceFile[]>('/byaiService/devloop/project/share/listSpaceFiles', { projectId });
+  POST<DevloopProjectSpaceFile[]>('/byaiService/project/share/listSpaceFiles', { projectId });
 
 // 会话空间文件保存到当前项目共享文件空间，成功后刷新共享文件列表。
 export const saveProjectFileToSpace = (data: {
@@ -173,7 +173,7 @@ export const saveProjectFileToSpace = (data: {
   sessionId: number;
   filePath: string;
   fileName: string;
-}) => POST<void>('/byaiService/devloop/project/share/saveToSpace', data);
+}) => POST<void>('/byaiService/project/share/saveToSpace', data);
 
 // 扫描源管理
 export const createScanSource = (data: {
@@ -287,16 +287,16 @@ export const addProjectMember = (data: {
   userId: string | number;
   userCode?: string;
   userName?: string;
-}) => POST<any>('/byaiService/devloop/member/add', data);
+}) => POST<any>('/byaiService/project/member/add', data);
 
 // 项目成员列表仅按成员姓名模糊搜索，和成员 Tab 的输入提示保持一致。
 export const listProjectMembers = (projectId: number, userName?: string) =>
-  POST<any>('/byaiService/devloop/member/list', { projectId, userName: userName || undefined });
+  POST<any>('/byaiService/project/member/list', { projectId, userName: userName || undefined });
 
-export const removeProjectMember = (memberId: number) => POST<any>('/byaiService/devloop/member/remove', { memberId });
+export const removeProjectMember = (memberId: number) => POST<any>('/byaiService/project/member/remove', { memberId });
 
 export const bindMemberAgent = (data: { memberId: number; agentId: number }) =>
-  POST<any>('/byaiService/devloop/member/bindAgent', data);
+  POST<any>('/byaiService/project/member/bindAgent', data);
 
 // DWS 钉钉授权
 export const startDwsDeviceAuth = () => POST<any>('/byaiService/devloop/dws/startDeviceAuth', {});
