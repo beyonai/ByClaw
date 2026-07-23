@@ -65,11 +65,10 @@ public class DwsAuthService {
     private static final String DWS_CONFIG_SEGMENT = "by/.dws";
 
     /**
-     * dws 登录态(DEK/token 密文)实际存在 XDG_DATA_HOME 下的 ~/.local/share/dws-cli,
-     * 这才是隔离的关键:只隔离 DWS_CONFIG_DIR 不隔离 XDG_DATA_HOME,DEK 全局共享 -> 一人授权全员"已授权"。
-     * 每个用户单独一份 XDG_DATA_HOME,放到 {bucket}/by/.dws-data。
+     * dws 登录态(DEK/token 密文)实际存在 $HOME/.local/share/dws-cli,dws 只认 HOME,不认 XDG_DATA_HOME/DWS_CONFIG_DIR。
+     * 这才是隔离的关键:每个用户单独一份 HOME,放到 {bucket}/by/.dws-home;共用 HOME 会导致一人授权全员"已授权"。
      */
-    private static final String DWS_DATA_SEGMENT = "by/.dws-data";
+    private static final String DWS_HOME_SEGMENT = "by/.dws-home";
 
     @Autowired
     private UserPrivateParamMapper userPrivateParamMapper;
@@ -117,27 +116,26 @@ public class DwsAuthService {
     }
 
     /**
-     * 给 dws 子进程 env 注入用户隔离配置:关闭 keychain + 专属 DWS_CONFIG_DIR(profiles) + 专属 XDG_DATA_HOME(登录态/DEK)。
-     * 关键:登录态/DEK 存 XDG_DATA_HOME 下的 ~/.local/share/dws-cli,只隔离 DWS_CONFIG_DIR 不够,必须同时隔离 XDG_DATA_HOME。
+     * 给 dws 子进程 env 注入用户隔离配置:关闭 keychain + 专属 HOME(登录态/DEK) + 专属 DWS_CONFIG_DIR(profiles)。
+     * 关键(Linux 实测确证):dws 的 DEK/token 密文存 $HOME/.local/share/dws-cli,只认 HOME,不认 XDG_DATA_HOME/DWS_CONFIG_DIR。
+     * 因此每个用户必须用独立 HOME 才能真正隔离登录态;共用 HOME 会导致一人授权全员"已授权"。
      * @return true 表示成功按用户隔离;false 表示解析不出该用户目录(调用方据此判定未授权,不冒用全局)。
      */
     public boolean applyUserDwsEnv(Map<String, String> env, Long userId) {
-        if (!env.containsKey("HOME")) {
-            env.put("HOME", System.getProperty("user.home"));
-        }
         env.put(DWS_DISABLE_KEYCHAIN_KEY, DWS_DISABLE_KEYCHAIN_VALUE);
         String base = resolveBucketBase(userId);
         if (base == null) {
             return false;
         }
+        // HOME 隔离 DEK/token(核心);DWS_CONFIG_DIR 隔离 profiles(可选,一并指到用户目录保持整洁)。
+        String homeDir = ensureDir(Paths.get(base, DWS_HOME_SEGMENT));
         String configDir = ensureDir(Paths.get(base, DWS_CONFIG_SEGMENT));
-        String dataDir = ensureDir(Paths.get(base, DWS_DATA_SEGMENT));
-        if (configDir == null || dataDir == null) {
+        if (homeDir == null || configDir == null) {
             return false;
         }
+        env.put("HOME", homeDir);
         env.put("DWS_CONFIG_DIR", configDir);
-        env.put("XDG_DATA_HOME", dataDir);
-        log.info("[DwsAuth] applyUserDwsEnv userId={} configDir={} xdgDataHome={}", userId, configDir, dataDir);
+        log.info("[DwsAuth] applyUserDwsEnv userId={} home={} configDir={}", userId, homeDir, configDir);
         return true;
     }
 
@@ -156,7 +154,7 @@ public class DwsAuthService {
     }
 
     /**
-     * 构造 dws 子进程:按用户注入隔离 env(禁 keychain + DWS_CONFIG_DIR + XDG_DATA_HOME)。
+     * 构造 dws 子进程:按用户注入隔离 env(禁 keychain + 专属 HOME + DWS_CONFIG_DIR)。
      * 用于授权动作(startDeviceAuth/injectToken):由当前登录用户发起。
      */
     private ProcessBuilder newDwsProcess(Long userId, List<String> cmd) {
@@ -318,7 +316,7 @@ public class DwsAuthService {
             List<String> cmd = List.of(DWS_BIN, "auth", "status", "--format", "json");
             ProcessBuilder pb = new ProcessBuilder(cmd);
             pb.redirectErrorStream(true);
-            // 严格按用户隔离(禁 keychain + DWS_CONFIG_DIR + XDG_DATA_HOME);解析不出该用户目录则判未授权,绝不冒用全局。
+            // 严格按用户隔离(禁 keychain + 专属 HOME + DWS_CONFIG_DIR);解析不出该用户目录则判未授权,绝不冒用全局。
             if (!applyUserDwsEnv(pb.environment(), userId)) {
                 log.info("[DwsAuth] 无法解析用户 {} 的 dws 隔离目录,判定未授权", userId);
                 return Map.of("authenticated", false, "tokenValid", false);
