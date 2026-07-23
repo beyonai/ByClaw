@@ -11,7 +11,8 @@ export default function TraceChart({ entries }: Props) {
   if (!entries?.length) return <Empty description="暂无 trace 数据" image={Empty.PRESENTED_IMAGE_SIMPLE} />;
 
   const data = entries
-    .map((entry) => ({
+    .map((entry, index) => ({
+      key: entry.requestId ? `${entry.requestId}-${index}` : `${entry.method}-${entry.pathname ?? entry.url}-${index}`,
       name: `${entry.method} ${entry.pathname ?? entry.url}`,
       ms: entry.timing?.durationMs ?? 0,
     }))
@@ -24,7 +25,7 @@ export default function TraceChart({ entries }: Props) {
         const width = `${Math.max(6, Math.round((item.ms / maxMs) * 100))}%`;
         const slow = item.ms > 250;
         return (
-          <div key={item.name} style={{ display: 'grid', gap: 4 }}>
+          <div key={item.key} style={{ display: 'grid', gap: 4 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 12 }}>
               <span
                 style={{
