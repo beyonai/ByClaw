@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.state.application.service.recorder;
 
 import com.iwhalecloud.byai.state.domain.recorder.model.RecorderSession;
+import java.net.URI;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.ObjectProvider;
 
@@ -31,7 +32,9 @@ public class ExternalRecorderVncProvider implements RecorderVncProvider {
     @Override
     public RecorderVncEndpoint start(RecorderSession session) {
         if (endpointResolver != null && session != null && session.owner() != null) {
-            String vncUrl = endpointResolver.resolve(session.owner(), "vnc", "").toString();
+            URI endpoint = endpointResolver.resolve(session.owner(), "vnc", "");
+            String vncUrl = endpoint.getRawPath()
+                + (endpoint.getRawQuery() == null ? "" : "?" + endpoint.getRawQuery());
             return new RecorderVncEndpoint("external", vncUrl, properties.getGatewayHost(), 0, null, null);
         }
         return start(session == null ? null : session.sessionId());

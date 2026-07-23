@@ -215,7 +215,7 @@ export default function Workbench() {
   const inlineError = error && !failed ? error : null;
 
   return (
-    <div className={styles.workbench}>
+    <div className={`${styles.workbench} ${data.recording ? styles.recordingWorkbench : ''}`}>
       <div className={styles.shell}>
         <header className={styles.head}>
           <div className={styles.heading}>
@@ -235,17 +235,19 @@ export default function Workbench() {
           </aside>
 
           <main className={styles.stage} data-testid="recorder-work-surface">
-            {inlineError && (
-              <ErrorRecovery
-                error={inlineError}
-                terminal={false}
-                onRetry={() => {
-                  // 非终止错误:清错由下一次动作触发,这里仅提供重置兜底
-                }}
-                onReset={actions.reset}
-              />
-            )}
-            {renderByStage()}
+            <div className={data.recording ? styles.recordingStage : undefined}>
+              {inlineError && (
+                <ErrorRecovery
+                  error={inlineError}
+                  terminal={false}
+                  onRetry={() => {
+                    // 非终止错误:清错由下一次动作触发,这里仅提供重置兜底
+                  }}
+                  onReset={actions.reset}
+                />
+              )}
+              {renderByStage()}
+            </div>
           </main>
         </div>
       </div>

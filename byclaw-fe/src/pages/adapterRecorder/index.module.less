@@ -566,6 +566,28 @@
   box-shadow: 0 20px 55px -38px rgba(50, 65, 95, 0.34);
 }
 
+.recordingWorkbench {
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+
+  .shell {
+    height: calc(100dvh - clamp(12px, 1.5vw, 20px) * 2);
+    min-height: 0;
+  }
+
+  .body {
+    min-height: 0;
+  }
+}
+
+.recordingStage {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
 @media (max-width: 900px) {
   .body {
     grid-template-columns: 190px minmax(0, 1fr);
@@ -647,6 +669,22 @@
     height: auto;
     padding: 14px;
     border-radius: 16px;
+  }
+
+  .recordingWorkbench {
+    height: auto;
+    min-height: 100vh;
+    overflow: visible;
+
+    .shell {
+      height: auto;
+    }
+  }
+
+  .recordingStage {
+    display: block;
+    height: auto;
+    overflow: visible;
   }
 }
 
