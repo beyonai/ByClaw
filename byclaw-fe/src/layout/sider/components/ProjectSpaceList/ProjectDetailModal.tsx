@@ -111,7 +111,7 @@ import ProjectMemberList from './ProjectMemberList';
 import ListEndMessage from './ListEndMessage';
 import styles from './index.module.less';
 
-type SourceType = 'dingtalk' | 'github_issue';
+type SourceType = 'dingtalk' | 'dingtalk_todo' | 'github_issue';
 
 type ScanSourceItem = {
   sourceId: number;
@@ -240,6 +240,8 @@ type SourceForm = {
   repoId?: number;
   confirmMode: string;
   scoreThreshold: number;
+  // 钉钉待办:优先级过滤(多选,值为 10/20/30/40),空=全部优先级。
+  todoPriority: string[];
 };
 
 type ManualRequirementForm = {
@@ -349,6 +351,7 @@ const getDefaultSourceForm = (): SourceForm => ({
   repoId: undefined,
   confirmMode: 'manual',
   scoreThreshold: 70,
+  todoPriority: [],
 });
 
 // 每次打开弹窗都创建新表单，避免取消或提交过的内容残留到下一次录入。
@@ -365,6 +368,11 @@ const formatConfig = (type: string, config: string | undefined, t: ProjectDetail
   try {
     const parsedConfig = JSON.parse(config || '{}');
     if (type === 'dingtalk') return parsedConfig.chatName || parsedConfig.chatId || parsedConfig.groupId || '-';
+    if (type === 'dingtalk_todo') {
+      return parsedConfig.keyword
+        ? t('source.config.keyword', { keyword: parsedConfig.keyword })
+        : t('source.type.dingtalkTodo');
+    }
     if (type === 'github_issue') {
       return parsedConfig.labels
         ? t('source.config.labels', { labels: parsedConfig.labels })
@@ -377,12 +385,13 @@ const formatConfig = (type: string, config: string | undefined, t: ProjectDetail
 };
 
 const getSourceIcon = (sourceType: string) => {
-  if (sourceType === 'dingtalk') return <DingdingOutlined />;
+  if (sourceType === 'dingtalk' || sourceType === 'dingtalk_todo') return <DingdingOutlined />;
   return <GithubOutlined />;
 };
 
 const getSourceLabel = (sourceType: string | undefined, t: ProjectDetailTranslate) => {
   if (sourceType === 'dingtalk') return t('source.type.dingtalk');
+  if (sourceType === 'dingtalk_todo') return t('source.type.dingtalkTodo');
   if (sourceType === 'github_issue') return t('source.type.githubIssues');
   if (sourceType === 'manual') return t('manualRequirement.source.manual');
   if (sourceType === 'customer_feedback') return t('manualRequirement.source.customerFeedback');
@@ -1607,6 +1616,13 @@ const ProjectDetailPanel: React.FC<Props> = ({
         lookbackHours: parseInt(sourceForm.lookbackHours, 10) || 24,
         corpId: dwsAuthDetail?.corpId || '',
       });
+    } else if (sourceForm.type === 'dingtalk_todo') {
+      // 待办固定拉"派给我(executor)"的未完成项;keyword 过滤研发需求,priority 逗号拼接给 DWS。
+      config = JSON.stringify({
+        keyword: sourceForm.keywords || '需求',
+        priority: (sourceForm.todoPriority || []).join(','),
+        corpId: dwsAuthDetail?.corpId || '',
+      });
     } else {
       if (!hasPatSaved && !sourceForm.pat.trim()) {
         message.error(t('source.validation.patRequired'));
@@ -1680,6 +1696,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
       repoId: source.repoId ?? undefined,
       confirmMode: source.confirmMode || 'manual',
       scoreThreshold: source.scoreThreshold ?? 70,
+      // 待办优先级 config 存逗号串,回填成多选数组;非待办源为空。
+      todoPriority: config.priority ? String(config.priority).split(',').filter(Boolean) : [],
     });
     // 已保存的群名先放入下拉选项，编辑时不需要重新搜索也能展示正确名称。
     if (config.groupId) {
@@ -2847,6 +2865,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
             onChange={(type) => setSourceForm((prev) => ({ ...prev, type }))}
             options={[
               { value: 'dingtalk', label: t('source.type.dingtalkGroup') },
+              { value: 'dingtalk_todo', label: t('source.type.dingtalkTodo') },
               { value: 'github_issue', label: t('source.type.githubIssue') },
             ]}
           />
@@ -2931,7 +2950,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
             </div>
           </div>
         </div>
-        {sourceForm.type === 'dingtalk' && (
+        {(sourceForm.type === 'dingtalk' || sourceForm.type === 'dingtalk_todo') && (
           <>
             {!dwsAuthed && (
               <div className={styles.formFieldFull}>
@@ -2967,6 +2986,10 @@ const ProjectDetailPanel: React.FC<Props> = ({
                 <Tag color="green">{t('dws.status.authorized')}</Tag>
               </div>
             )}
+          </>
+        )}
+        {sourceForm.type === 'dingtalk' && (
+          <>
             <div className={styles.formField}>
               <label>{t('source.field.dingtalkGroup')}</label>
               <Select
@@ -3005,6 +3028,34 @@ const ProjectDetailPanel: React.FC<Props> = ({
                   { value: '48', label: t('source.lookback.hours', { hours: 48 }) },
                   { value: '72', label: t('source.lookback.hours', { hours: 72 }) },
                   { value: '168', label: t('source.lookback.days', { days: 7 }) },
+                ]}
+              />
+            </div>
+          </>
+        )}
+        {sourceForm.type === 'dingtalk_todo' && (
+          <>
+            <div className={styles.formField}>
+              <label>{t('source.field.keyword')}</label>
+              <Input
+                placeholder={t('source.placeholder.todoKeyword')}
+                value={sourceForm.keywords}
+                onChange={(event) => setSourceForm((prev) => ({ ...prev, keywords: event.target.value }))}
+              />
+            </div>
+            <div className={styles.formField}>
+              <label>{t('source.field.todoPriority')}</label>
+              <Select
+                mode="multiple"
+                allowClear
+                placeholder={t('source.placeholder.todoPriority')}
+                value={sourceForm.todoPriority}
+                onChange={(todoPriority) => setSourceForm((prev) => ({ ...prev, todoPriority }))}
+                options={[
+                  { value: '40', label: t('source.todoPriority.urgent') },
+                  { value: '30', label: t('source.todoPriority.high') },
+                  { value: '20', label: t('source.todoPriority.normal') },
+                  { value: '10', label: t('source.todoPriority.low') },
                 ]}
               />
             </div>

@@ -27,9 +27,7 @@ export function loadMonorepoEnvForUmi(): void {
         continue;
       }
       const key = line.slice(0, eq).trim();
-      // HOST is reserved by Webpack Dev Server / Umi for binding address and HMR WebSocket;
-      // use BE_HOST for backend proxy target instead
-      if (!key || key === 'HOST' || process.env[key] !== undefined) {
+      if (!key) {
         continue;
       }
       let val = line.slice(eq + 1).trim();
@@ -38,6 +36,19 @@ export function loadMonorepoEnvForUmi(): void {
         (val.startsWith("'") && val.endsWith("'"))
       ) {
         val = val.slice(1, -1);
+      }
+      // HOST is reserved by Webpack Dev Server / Umi for binding address and HMR WebSocket,
+      // so we never set process.env.HOST. But its value is also the remote backend host, which
+      // the file-remote dev proxy needs when BE runs locally without the NFS mount. Stash it
+      // under a non-reserved key so the proxy can target the remote server.
+      if (key === 'HOST') {
+        if (process.env.BYCLAW_REMOTE_BE_HOST === undefined) {
+          process.env.BYCLAW_REMOTE_BE_HOST = val;
+        }
+        continue;
+      }
+      if (process.env[key] !== undefined) {
+        continue;
       }
       process.env[key] = val;
     }
