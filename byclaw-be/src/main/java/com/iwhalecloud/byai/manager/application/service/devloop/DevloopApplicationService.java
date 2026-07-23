@@ -198,8 +198,12 @@ public class DevloopApplicationService {
         return ResponseUtil.successResponse(result);
     }
 
-    /** 修改扫描源配置（名称、config、cron） */
+    /** 修改扫描源配置（名称、config、cron）。仅创建者可改。 */
     public ResponseUtil<Void> updateScanSource(ScanSourceDTO dto) {
+        String denied = requireSourceCreator(dto.getSourceId());
+        if (denied != null) {
+            return ResponseUtil.failRes(denied);
+        }
         ScanSource source = new ScanSource();
         source.setSourceId(dto.getSourceId());
         source.setSourceName(dto.getSourceName());
@@ -213,10 +217,33 @@ public class DevloopApplicationService {
         return ResponseUtil.successResponse(null);
     }
 
-    /** 删除扫描源 */
+    /** 删除扫描源。仅创建者可删。 */
     public ResponseUtil<Void> deleteScanSource(Long sourceId) {
+        String denied = requireSourceCreator(sourceId);
+        if (denied != null) {
+            return ResponseUtil.failRes(denied);
+        }
         scanSourceService.delete(sourceId);
         return ResponseUtil.successResponse(null);
+    }
+
+    /**
+     * 校验当前登录用户是否为该扫描源创建者。是则返回 null(放行);否则返回错误提示。
+     * 后端硬控制:前端隐藏按钮只是体验,越权改删/授权必须在服务端挡住。
+     */
+    private String requireSourceCreator(Long sourceId) {
+        if (sourceId == null) {
+            return "参数缺失";
+        }
+        ScanSource source = scanSourceService.findById(sourceId);
+        if (source == null) {
+            return "来源不存在";
+        }
+        Long currentUserId = CurrentUserHolder.getCurrentUserId();
+        if (currentUserId == null || !String.valueOf(currentUserId).equals(source.getCreateBy())) {
+            return "只有来源创建者可以操作";
+        }
+        return null;
     }
 
     /** 查询项目可配置的扫描渠道；手工来源只是扫描日志基础设施，不能展示在渠道配置页。 */
@@ -240,7 +267,23 @@ public class DevloopApplicationService {
         map.put("confirmMode", s.getConfirmMode());
         map.put("scoreThreshold", s.getScoreThreshold());
         map.put("lastScanTime", s.getLastScanTime());
+        // 创建者信息:前端据此判断"当前用户是否创建者",控制授权/编辑/删除入口;createByName 供展示。
+        map.put("createBy", s.getCreateBy());
+        map.put("createByName", resolveUserName(parseUserId(s.getCreateBy())));
         return map;
+    }
+
+    /** 字符串 userId 转 Long,非法返回 null(供 resolveUserName 等按 Long 取用户名)。 */
+    private Long parseUserId(String userId) {
+        if (userId == null || userId.trim().isEmpty()) {
+            return null;
+        }
+        try {
+            return Long.valueOf(userId.trim());
+        }
+        catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     /** 启用或停用扫描源 */
@@ -616,7 +659,8 @@ public class DevloopApplicationService {
 
             ProcessBuilder pb = new ProcessBuilder(cmd);
             pb.redirectErrorStream(true);
-            // 群搜索由当前登录用户发起,用其 bucket 的 .dws 授权。
+            // 群搜索由当前登录用户发起,关闭 keychain + 用其 bucket 的 .dws 授权。
+            pb.environment().put("DWS_DISABLE_KEYCHAIN", "1");
             Long currentUserId = CurrentUserHolder.getCurrentUserId();
             String dwsConfigDir = dwsAuthService
                 .resolveDwsConfigDir(currentUserId != null ? String.valueOf(currentUserId) : null);
@@ -1426,13 +1470,40 @@ public class DevloopApplicationService {
         return ResponseUtil.failRes((String) result.getOrDefault("message", "启动授权失败"));
     }
 
-    /** 检查DWS授权状态（前端轮询用） */
+    /** 检查DWS授权状态（前端轮询用）：新建源弹窗里当前用户给自己授权的场景，查当前登录用户。 */
     public ResponseUtil<Map<String, Object>> checkDwsAuthStatus() {
-        Map<String, Object> dbStatus = dwsAuthService.checkDwsToken();
-        Map<String, Object> runtimeStatus = dwsAuthService.getAuthStatus();
+        return ResponseUtil.successResponse(buildDwsStatus(CurrentUserHolder.getCurrentUserId(), true));
+    }
+
+    /**
+     * 按扫描源查授权状态：查该源【创建者】的授权(不是当前登录用户)，用于列表逐源展示。
+     * 额外返回 canAuthorize(当前登录用户==创建者才可授权) 与创建者名，供前端 (c) 文案与入口控制。
+     */
+    public ResponseUtil<Map<String, Object>> checkDwsAuthStatusBySource(Long sourceId) {
+        ScanSource source = scanSourceService.findById(sourceId);
+        if (source == null) {
+            return ResponseUtil.failRes("来源不存在");
+        }
+        Long creatorId = parseUserId(source.getCreateBy());
+        Long currentUserId = CurrentUserHolder.getCurrentUserId();
+        boolean canAuthorize = currentUserId != null && currentUserId.equals(creatorId);
+
+        Map<String, Object> result = buildDwsStatus(creatorId, canAuthorize);
+        result.put("canAuthorize", canAuthorize);
+        result.put("creatorId", source.getCreateBy());
+        result.put("creatorName", resolveUserName(creatorId));
+        return ResponseUtil.successResponse(result);
+    }
+
+    /** 构造某用户的 DWS 授权状态视图。includeDbToken=true 时附带 DB 授权记录(hasToken/savedAt)。 */
+    private Map<String, Object> buildDwsStatus(Long userId, boolean includeDbToken) {
+        Map<String, Object> runtimeStatus = dwsAuthService.getAuthStatus(userId);
         Map<String, Object> result = new HashMap<>();
-        result.put("hasToken", dbStatus.get("hasToken"));
-        result.put("savedAt", dbStatus.getOrDefault("savedAt", ""));
+        if (includeDbToken) {
+            Map<String, Object> dbStatus = dwsAuthService.checkDwsToken();
+            result.put("hasToken", dbStatus.get("hasToken"));
+            result.put("savedAt", dbStatus.getOrDefault("savedAt", ""));
+        }
         result.put("runtimeAuthenticated", runtimeStatus.get("authenticated"));
         result.put("tokenValid", runtimeStatus.get("tokenValid"));
         result.put("refreshTokenValid", runtimeStatus.getOrDefault("refreshTokenValid", false));
@@ -1442,7 +1513,7 @@ public class DevloopApplicationService {
         result.put("corpName", runtimeStatus.getOrDefault("corpName", ""));
         result.put("userId", runtimeStatus.getOrDefault("userId", ""));
         result.put("userName", runtimeStatus.getOrDefault("userName", ""));
-        return ResponseUtil.successResponse(result);
+        return result;
     }
 
     /** 直接使用token授权 */

@@ -28,6 +28,7 @@ import {
   DingdingOutlined,
   EditOutlined,
   EllipsisOutlined,
+  EyeOutlined,
   FileTextOutlined,
   FundProjectionScreenOutlined,
   GithubOutlined,
@@ -41,6 +42,7 @@ import { useDispatch, useIntl, useNavigate, useSelector } from '@umijs/max';
 import dayjs from 'dayjs';
 import {
   checkDwsAuthStatus,
+  checkDwsAuthStatusBySource,
   checkGitHubPat,
   createManualRequirement,
   createProjectRepo,
@@ -125,6 +127,18 @@ type ScanSourceItem = {
   confirmMode?: string;
   scoreThreshold?: number | null;
   lastScanTime?: string | null;
+  // 创建者:用于授权/编辑/删除的创建者权限控制。
+  createBy?: string | null;
+  createByName?: string | null;
+};
+
+// 按源的 DWS 授权状态(查该源创建者的授权)。
+type SourceDwsStatus = {
+  tokenValid?: boolean;
+  hasToken?: boolean;
+  expiresAt?: string;
+  canAuthorize?: boolean;
+  creatorName?: string;
 };
 
 type RepoOption = {
@@ -470,6 +484,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const { setDetailPanel, clearDetailPanel } = React.useContext(SiderContentContext);
   const [activeTab, setActiveTab] = useState('requirements');
   const [sources, setSources] = useState<ScanSourceItem[]>([]);
+  // 每个钉钉/待办源的授权状态(查各自创建者),键为 sourceId。替代旧的全局 dwsAuthed 单一状态。
+  const [sourceDwsStatusMap, setSourceDwsStatusMap] = useState<Record<number, SourceDwsStatus>>({});
   const [repos, setRepos] = useState<RepoOption[]>([]);
   const [requirements, setRequirements] = useState<RequirementItem[]>([]);
   const [requirementSearchKeyword, setRequirementSearchKeyword] = useState('');
@@ -510,6 +526,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const [scanningId, setScanningId] = useState<number | null>(null);
   const [sourceModalOpen, setSourceModalOpen] = useState(false);
   const [editingSource, setEditingSource] = useState<ScanSourceItem | null>(null);
+  // 非创建者查看渠道:复用编辑弹窗,字段 disabled + 隐藏确定按钮。
+  const [sourceModalReadonly, setSourceModalReadonly] = useState(false);
   const [sourceForm, setSourceForm] = useState<SourceForm>(getDefaultSourceForm);
   // 新增和编辑渠道共用保存状态，统一控制确定按钮的加载反馈。
   const [sourceSaving, setSourceSaving] = useState(false);
@@ -692,17 +710,51 @@ const ProjectDetailPanel: React.FC<Props> = ({
     return projectSessions[0];
   }, [activeChatSessionId, projectSessions, t]);
 
+  // 逐个钉钉/待办源查授权状态(查各自创建者)。GitHub 源无需。
+  const fetchSourceDwsStatuses = useCallback(async (sourceList: ScanSourceItem[]) => {
+    const dingtalkSources = (sourceList || []).filter(
+      (s) => s.sourceType === 'dingtalk' || s.sourceType === 'dingtalk_todo'
+    );
+    if (!dingtalkSources.length) {
+      setSourceDwsStatusMap({});
+      return;
+    }
+    const entries = await Promise.all(
+      dingtalkSources.map(async (s) => {
+        try {
+          const res = await checkDwsAuthStatusBySource(s.sourceId);
+          return [s.sourceId, (res || {}) as SourceDwsStatus] as const;
+        } catch {
+          return [s.sourceId, {} as SourceDwsStatus] as const;
+        }
+      })
+    );
+    setSourceDwsStatusMap(Object.fromEntries(entries));
+  }, []);
+
   const fetchSources = useCallback(async () => {
     if (!projectId) return [];
     setSourcesLoading(true);
     try {
       const sourceList = (await listScanSources(projectId)) || [];
       setSources(sourceList);
+      void fetchSourceDwsStatuses(sourceList as ScanSourceItem[]);
       return sourceList as ScanSourceItem[];
     } finally {
       setSourcesLoading(false);
     }
-  }, [projectId]);
+  }, [projectId, fetchSourceDwsStatuses]);
+
+  // 当前登录用户是否为该源创建者:控制授权/编辑/删除入口。
+  const isSourceCreator = useCallback(
+    (source: ScanSourceItem) => {
+      const currentUserId = userInfo?.userId ?? userInfo?.id;
+      return (
+        currentUserId != null && source.createBy != null && `${source.createBy}` === `${currentUserId}`
+      );
+    },
+    [userInfo]
+  );
 
   const fetchRequirements = useCallback(
     async (sourceList?: ScanSourceItem[], title = '') => {
@@ -1486,6 +1538,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
 
   const resetSourceForm = (type: SourceType = 'github_issue') => {
     setEditingSource(null);
+    setSourceModalReadonly(false);
     setSourceForm({
       ...getDefaultSourceForm(),
       type,
@@ -1696,7 +1749,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
     }
   };
 
-  const handleEditSource = (source: ScanSourceItem) => {
+  const handleEditSource = (source: ScanSourceItem, readonly = false) => {
+    setSourceModalReadonly(readonly);
     setEditingSource(source);
     let config: any = {};
     try {
@@ -1962,6 +2016,48 @@ const ProjectDetailPanel: React.FC<Props> = ({
     return repo ? repo.repoFullName || repo.repoUrl || String(repo.repoId) : null;
   };
 
+  // 钉钉/待办源的授权标签:按源创建者的授权状态展示。
+  // 创建者本人:可点授权/查看;非创建者:只读展示"创建者{名字}已/未授权",不可点(授权是创建者的事)。
+  const renderSourceDwsTag = (source: ScanSourceItem) => {
+    const status = sourceDwsStatusMap[source.sourceId] || {};
+    const creator = isSourceCreator(source);
+    const creatorName = source.createByName || status.creatorName || '';
+    const authed = !!status.tokenValid;
+
+    if (creator) {
+      // 创建者本人:沿用可点交互(已授权查看详情;未授权/过期点击发起授权)。
+      if (authed) {
+        return (
+          <Tag
+            className={`${styles.detailSourceDwsTag} ${styles.detailSourceDwsTagClickable}`}
+            color="green"
+            onClick={() => setDwsAuthDetailVisible(true)}
+          >
+            {t('dws.authorized')}
+          </Tag>
+        );
+      }
+      return (
+        <Tag
+          className={`${styles.detailSourceDwsTag} ${styles.detailSourceDwsTagClickable}`}
+          color={status.hasToken ? 'red' : 'orange'}
+          onClick={handleStartDwsAuth}
+        >
+          {status.hasToken ? t('dws.authorizationExpired') : t('dws.authorizationRequired')}
+        </Tag>
+      );
+    }
+
+    // 非创建者:只读,不可点。(c) 文案带创建者名。
+    return (
+      <Tag className={styles.detailSourceDwsTag} color={authed ? 'green' : 'default'}>
+        {authed
+          ? t('dws.creatorAuthorized', { name: creatorName || t('dws.creatorFallback') })
+          : t('dws.creatorNotAuthorized', { name: creatorName || t('dws.creatorFallback') })}
+      </Tag>
+    );
+  };
+
   const renderSourceList = (emptyText = t('source.empty'), options: { panel?: boolean } = {}) => (
     <Spin spinning={sourcesLoading && !sources.length}>
       {sources.length ? (
@@ -1990,33 +2086,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
                     </Tag>
                   )}
                   {(source.sourceType === 'dingtalk' || source.sourceType === 'dingtalk_todo') &&
-                    (dwsAuthed ? (
-                      <Tag
-                        className={`${styles.detailSourceDwsTag} ${styles.detailSourceDwsTagClickable}`}
-                        color="green"
-                        onClick={() => setDwsAuthDetailVisible(true)}
-                      >
-                        {dwsExpiresAt
-                          ? t('dws.authorizedUntil', { expiry: dayjs(dwsExpiresAt).format('MM-DD HH:mm') })
-                          : t('dws.authorized')}
-                      </Tag>
-                    ) : dwsExpired ? (
-                      <Tag
-                        className={`${styles.detailSourceDwsTag} ${styles.detailSourceDwsTagClickable}`}
-                        color="red"
-                        onClick={handleStartDwsAuth}
-                      >
-                        {t('dws.authorizationExpired')}
-                      </Tag>
-                    ) : (
-                      <Tag
-                        className={`${styles.detailSourceDwsTag} ${styles.detailSourceDwsTagClickable}`}
-                        color="orange"
-                        onClick={handleStartDwsAuth}
-                      >
-                        {t('dws.authorizationRequired')}
-                      </Tag>
-                    ))}
+                    renderSourceDwsTag(source)}
                 </div>
               )}
               <div
@@ -2048,18 +2118,37 @@ const ProjectDetailPanel: React.FC<Props> = ({
                   <Button type="link" size="small" icon={<FileTextOutlined />} onClick={() => handleViewLogs(source)}>
                     {t('source.logs')}
                   </Button>
-                  <Button type="link" size="small" icon={<EditOutlined />} onClick={() => handleEditSource(source)}>
-                    {t('common.edit')}
-                  </Button>
-                  <Button
-                    type="link"
-                    size="small"
-                    danger
-                    icon={<DeleteOutlined />}
-                    onClick={() => handleDeleteSource(source)}
-                  >
-                    {t('common.delete')}
-                  </Button>
+                  {/* 创建者:可编辑/删除;非创建者:只读查看(复用弹窗,disabled + 无确定按钮)。 */}
+                  {isSourceCreator(source) ? (
+                    <>
+                      <Button
+                        type="link"
+                        size="small"
+                        icon={<EditOutlined />}
+                        onClick={() => handleEditSource(source)}
+                      >
+                        {t('common.edit')}
+                      </Button>
+                      <Button
+                        type="link"
+                        size="small"
+                        danger
+                        icon={<DeleteOutlined />}
+                        onClick={() => handleDeleteSource(source)}
+                      >
+                        {t('common.delete')}
+                      </Button>
+                    </>
+                  ) : (
+                    <Button
+                      type="link"
+                      size="small"
+                      icon={<EyeOutlined />}
+                      onClick={() => handleEditSource(source, true)}
+                    >
+                      {t('common.view')}
+                    </Button>
+                  )}
                 </div>
               </div>
             </div>
@@ -2874,13 +2963,14 @@ const ProjectDetailPanel: React.FC<Props> = ({
 
   const renderAddSourceModal = () => (
     <Modal
-      title={t(editingSource ? 'source.editTitle' : 'source.addTitle')}
+      title={t(sourceModalReadonly ? 'source.viewTitle' : editingSource ? 'source.editTitle' : 'source.addTitle')}
       open={sourceModalOpen}
       onOk={handleSaveSource}
       confirmLoading={sourceSaving}
       onCancel={() => {
         setSourceModalOpen(false);
         setEditingSource(null);
+        setSourceModalReadonly(false);
         setGroupOptions([]);
       }}
       okText={t(editingSource ? 'common.save' : 'common.add')}
@@ -2890,7 +2980,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
       footer={(_, { OkBtn, CancelBtn }) => (
         <Space>
           <CancelBtn />
-          <OkBtn />
+          {/* 只读查看时隐藏确定按钮,仅保留关闭。 */}
+          {!sourceModalReadonly && <OkBtn />}
         </Space>
       )}
     >
@@ -2899,7 +2990,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
           <label>{t('source.field.type')}</label>
           <Select
             value={sourceForm.type}
-            disabled={!!editingSource}
+            disabled={!!editingSource || sourceModalReadonly}
             onChange={(type) => setSourceForm((prev) => ({ ...prev, type }))}
             options={[
               { value: 'github_issue', label: t('source.type.githubIssue') },
@@ -2913,6 +3004,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
           <Input
             placeholder={t('source.placeholder.name')}
             value={sourceForm.name}
+            disabled={sourceModalReadonly}
             onChange={(event) => setSourceForm((prev) => ({ ...prev, name: event.target.value }))}
           />
         </div>
@@ -2924,6 +3016,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
               placeholder={t('source.placeholder.repository')}
               value={sourceForm.repoId}
               allowClear
+              disabled={sourceModalReadonly}
               onChange={(repoId) => setSourceForm((prev) => ({ ...prev, repoId }))}
               options={repos.map((repo) => ({
                 value: repo.repoId,
@@ -2931,22 +3024,25 @@ const ProjectDetailPanel: React.FC<Props> = ({
               }))}
               notFoundContent={repos.length ? undefined : t('source.noRepositories')}
             />
-            <Button
-              className={styles.sourceRepoAddButton}
-              icon={<PlusOutlined />}
-              onClick={() => {
-                setRepoForm({ repoFullName: '', repoUrl: '', defaultBranch: 'main' });
-                setRepoModalOpen(true);
-              }}
-            >
-              {t('common.add')}
-            </Button>
+            {!sourceModalReadonly && (
+              <Button
+                className={styles.sourceRepoAddButton}
+                icon={<PlusOutlined />}
+                onClick={() => {
+                  setRepoForm({ repoFullName: '', repoUrl: '', defaultBranch: 'main' });
+                  setRepoModalOpen(true);
+                }}
+              >
+                {t('common.add')}
+              </Button>
+            )}
           </Space.Compact>
         </div>
         <div className={styles.formField}>
           <label>{t('source.field.scanFrequency')}</label>
           <Select
             value={sourceForm.cron}
+            disabled={sourceModalReadonly}
             onChange={(cron) => setSourceForm((prev) => ({ ...prev, cron }))}
             options={cronPresets.map((preset) => ({ value: preset.value, label: t(preset.labelId) }))}
             popupClassName={styles.sourceSelectPopup}
@@ -2957,6 +3053,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
             <label>{t('source.field.confirmRule')}</label>
             <Radio.Group
               value={sourceForm.confirmMode}
+              disabled={sourceModalReadonly}
               onChange={(event) => setSourceForm((prev) => ({ ...prev, confirmMode: event.target.value }))}
               optionType="button"
               buttonStyle="solid"
@@ -2973,6 +3070,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
                   min={0}
                   max={100}
                   value={sourceForm.scoreThreshold}
+                  disabled={sourceModalReadonly}
                   onChange={(value) => setSourceForm((prev) => ({ ...prev, scoreThreshold: value ?? 70 }))}
                   className={styles.sourceScoreRuleInput}
                 />
@@ -2988,7 +3086,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
             </div>
           </div>
         </div>
-        {(sourceForm.type === 'dingtalk' || sourceForm.type === 'dingtalk_todo') && (
+        {!sourceModalReadonly && (sourceForm.type === 'dingtalk' || sourceForm.type === 'dingtalk_todo') && (
           <>
             {!dwsAuthed && (
               <div className={styles.formFieldFull}>
@@ -3035,6 +3133,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
                 filterOption={false}
                 placeholder={t('source.placeholder.groupSearch')}
                 value={sourceForm.chatId || undefined}
+                disabled={sourceModalReadonly}
                 onSearch={handleGroupSearch}
                 onChange={(chatId, option) => {
                   const chatName = Array.isArray(option) ? '' : (option?.label as string) || '';
@@ -3050,6 +3149,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
               <Input
                 placeholder={t('source.placeholder.defaultKeyword')}
                 value={sourceForm.keywords}
+                disabled={sourceModalReadonly}
                 onChange={(event) => setSourceForm((prev) => ({ ...prev, keywords: event.target.value }))}
               />
             </div>
@@ -3057,6 +3157,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
               <label>{t('source.field.lookbackHours')}</label>
               <Select
                 value={sourceForm.lookbackHours}
+                disabled={sourceModalReadonly}
                 onChange={(lookbackHours) => setSourceForm((prev) => ({ ...prev, lookbackHours }))}
                 popupClassName={styles.sourceSelectPopup}
                 options={[
@@ -3078,6 +3179,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
               <Input
                 placeholder={t('source.placeholder.todoKeyword')}
                 value={sourceForm.keywords}
+                disabled={sourceModalReadonly}
                 onChange={(event) => setSourceForm((prev) => ({ ...prev, keywords: event.target.value }))}
               />
             </div>
@@ -3088,6 +3190,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
                 allowClear
                 placeholder={t('source.placeholder.todoPriority')}
                 value={sourceForm.todoPriority}
+                disabled={sourceModalReadonly}
                 onChange={(todoPriority) => setSourceForm((prev) => ({ ...prev, todoPriority }))}
                 options={[
                   { value: '40', label: t('source.todoPriority.urgent') },
@@ -3107,6 +3210,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
                 <Input.Password
                   placeholder={t('source.placeholder.githubPat')}
                   value={sourceForm.pat}
+                  disabled={sourceModalReadonly}
                   onChange={(event) => setSourceForm((prev) => ({ ...prev, pat: event.target.value }))}
                 />
               </div>
@@ -3116,6 +3220,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
               <Input
                 placeholder={t('source.placeholder.labelFilter')}
                 value={sourceForm.labels}
+                disabled={sourceModalReadonly}
                 onChange={(event) => setSourceForm((prev) => ({ ...prev, labels: event.target.value }))}
               />
             </div>

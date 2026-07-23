@@ -46,6 +46,13 @@ public class DwsAuthService {
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final String DWS_BIN = "dws";
     private static final String PARAM_KEY_DWS_TOKEN = "DWS_TOKEN";
+    /**
+     * 关闭 keychain,改用 file-DEK 后端把登录态加密落到 DWS_CONFIG_DIR。
+     * 这是 per-user 目录隔离生效的前提:默认 keychain 模式下 token 存系统钥匙串,DWS_CONFIG_DIR 换目录也读到同一份(全局共享)。
+     * 显式设进每个 dws 子进程 env,不依赖容器全局 ENV,保证本地/各部署环境一致。
+     */
+    private static final String DWS_DISABLE_KEYCHAIN_KEY = "DWS_DISABLE_KEYCHAIN";
+    private static final String DWS_DISABLE_KEYCHAIN_VALUE = "1";
 
     private static final Pattern USER_CODE_PATTERN = Pattern.compile("authorization code:\\s*(\\S+)");
     private static final Pattern VERIFY_URL_PATTERN = Pattern.compile("(https://login\\.dingtalk\\.com/oauth2/device/verify\\.htm\\?user_code=\\S+)");
@@ -106,6 +113,8 @@ public class DwsAuthService {
             String bucket = userBucketNamingService.buildUserBucketName(owner.getUserCode());
             Path dir = Paths.get(fileStorageRoot, bucket, DWS_CONFIG_SEGMENT);
             java.nio.file.Files.createDirectories(dir);
+            log.info("[DwsAuth] resolveDwsConfigDir userId={} userCode={} -> {}", userId, owner.getUserCode(),
+                dir);
             return dir.toString();
         }
         catch (Exception e) {
@@ -117,6 +126,7 @@ public class DwsAuthService {
     /**
      * 构造 dws 子进程:统一注入 HOME 与用户专属 DWS_CONFIG_DIR。
      * userId 为空或解析失败时不设 DWS_CONFIG_DIR,回退 dws 默认 ~/.dws(兼容存量)。
+     * 仅用于授权动作(startDeviceAuth/injectToken):由当前登录用户发起,回退默认目录可接受。
      */
     private ProcessBuilder newDwsProcess(Long userId, List<String> cmd) {
         ProcessBuilder pb = new ProcessBuilder(cmd);
@@ -125,6 +135,8 @@ public class DwsAuthService {
         if (!env.containsKey("HOME")) {
             env.put("HOME", System.getProperty("user.home"));
         }
+        // 关闭 keychain:让登录态跟 DWS_CONFIG_DIR 走,是 per-user 隔离生效的前提。
+        env.put(DWS_DISABLE_KEYCHAIN_KEY, DWS_DISABLE_KEYCHAIN_VALUE);
         String configDir = resolveDwsConfigDir(userId);
         if (configDir != null) {
             env.put("DWS_CONFIG_DIR", configDir);
@@ -274,11 +286,29 @@ public class DwsAuthService {
         return getAuthStatus(CurrentUserHolder.getCurrentUserId());
     }
 
-    /** 查询指定用户的 dws 授权状态:用该用户 bucket 下的 DWS_CONFIG_DIR。 */
+    /**
+     * 查询指定用户的 dws 授权状态:严格用该用户 bucket 下的 DWS_CONFIG_DIR。
+     * 关键:解析不出该用户专属目录时,直接判定未授权,【绝不回退全局 ~/.dws】——
+     * 否则会读到别人授权过的 token,误报该用户"已授权"(如非创建者看别人的源)。
+     */
     public Map<String, Object> getAuthStatus(Long userId) {
+        String configDir = resolveDwsConfigDir(userId);
+        if (configDir == null) {
+            // 无法定位该用户专属授权目录:视为未授权,不冒用全局授权。
+            log.info("[DwsAuth] 无法解析用户 {} 的 dws 配置目录,判定未授权", userId);
+            return Map.of("authenticated", false, "tokenValid", false);
+        }
         try {
             List<String> cmd = List.of(DWS_BIN, "auth", "status", "--format", "json");
-            ProcessBuilder pb = newDwsProcess(userId, cmd);
+            ProcessBuilder pb = new ProcessBuilder(cmd);
+            pb.redirectErrorStream(true);
+            Map<String, String> env = pb.environment();
+            if (!env.containsKey("HOME")) {
+                env.put("HOME", System.getProperty("user.home"));
+            }
+            // 严格指定该用户目录 + 关闭 keychain,不走 newDwsProcess 的回退逻辑。
+            env.put(DWS_DISABLE_KEYCHAIN_KEY, DWS_DISABLE_KEYCHAIN_VALUE);
+            env.put("DWS_CONFIG_DIR", configDir);
             Process process = pb.start();
 
             StringBuilder output = new StringBuilder();

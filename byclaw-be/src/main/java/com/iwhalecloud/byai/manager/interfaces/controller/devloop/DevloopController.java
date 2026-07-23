@@ -245,10 +245,17 @@ public class DevloopController {
         return applicationService.startDwsDeviceAuth();
     }
 
-    /** 检查DWS授权状态（前端轮询，直到tokenValid=true） */
+    /** 检查DWS授权状态（前端轮询，直到tokenValid=true）：新建源时当前用户给自己授权用 */
     @PostMapping("/dws/authStatus")
     public ResponseUtil<Map<String, Object>> checkDwsAuthStatus() {
         return applicationService.checkDwsAuthStatus();
+    }
+
+    /** 按扫描源查授权状态：查该源创建者的授权,返回 canAuthorize/creatorName,供列表逐源展示 */
+    @PostMapping("/dws/authStatus/bySource")
+    public ResponseUtil<Map<String, Object>> checkDwsAuthStatusBySource(@RequestBody Map<String, Object> params) {
+        Long sourceId = Long.valueOf(params.get("sourceId").toString());
+        return applicationService.checkDwsAuthStatusBySource(sourceId);
     }
 
     /** 直接使用token授权 */

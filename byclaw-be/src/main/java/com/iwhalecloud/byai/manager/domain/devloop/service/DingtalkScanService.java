@@ -103,6 +103,8 @@ public class DingtalkScanService {
             if (!env.containsKey("HOME")) {
                 env.put("HOME", System.getProperty("user.home"));
             }
+            // 关闭 keychain,让登录态跟 DWS_CONFIG_DIR 走(与授权侧一致,否则读到全局钥匙串授权)。
+            env.put("DWS_DISABLE_KEYCHAIN", "1");
             String dwsConfigDir = dwsAuthService.resolveDwsConfigDir(source.getCreateBy());
             if (dwsConfigDir != null) {
                 env.put("DWS_CONFIG_DIR", dwsConfigDir);
