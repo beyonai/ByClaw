@@ -63,6 +63,10 @@
       flex-shrink: 0;
     }
 
+    .embed .tv-bar {
+      display: none;
+    }
+
     .tv-title {
       display: flex;
       align-items: center;
@@ -473,6 +477,11 @@
     const optResize = document.getElementById('optResize');
     const btnCtrlAltDel = document.getElementById('btnCtrlAltDel');
     const tv = document.getElementById('tv');
+    const pageParams = new URLSearchParams(window.location.search);
+
+    if (pageParams.get('hideHeader') === 'true') {
+      document.body.classList.add('embed');
+    }
 
     let rfb = null;
     let openPanel = null;

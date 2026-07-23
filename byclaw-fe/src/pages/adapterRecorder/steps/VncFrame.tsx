@@ -19,6 +19,7 @@ export function buildVncFrameSrc(vncUrl: string): string {
   url.searchParams.set('autoconnect', 'true');
   url.searchParams.set('resize', 'scale');
   url.searchParams.set('reconnect', 'true');
+  url.searchParams.set('hideHeader', 'true');
   return url.toString();
 }
 

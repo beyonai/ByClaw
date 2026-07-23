@@ -20,3 +20,6 @@ assert.equal(
   websocketUrl,
   'ws://sandbox.example:9005/v1/sandboxes/sandbox-id/proxy/8081/websockify?token=sandbox-token',
 );
+
+assert.match(source, /get\('hideHeader'\)/, 'noVNC page should support the hideHeader query parameter');
+assert.match(source, /classList\.add\('embed'\)/, 'hideHeader should enable the headerless layout');

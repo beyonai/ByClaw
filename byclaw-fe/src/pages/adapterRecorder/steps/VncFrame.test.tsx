@@ -15,7 +15,7 @@ describe('VncFrame', () => {
 
     expect(screen.getByTitle('vnc-recording')).toHaveAttribute(
       'src',
-      'http://localhost/v1/sandboxes/sandbox-1/proxy/8081/?token=sandbox-token&autoconnect=true&resize=scale&reconnect=true'
+      'http://localhost/v1/sandboxes/sandbox-1/proxy/8081/?token=sandbox-token&autoconnect=true&resize=scale&reconnect=true&hideHeader=true'
     );
   });
 });
