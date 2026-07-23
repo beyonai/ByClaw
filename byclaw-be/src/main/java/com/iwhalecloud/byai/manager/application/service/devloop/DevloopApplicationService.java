@@ -137,6 +137,9 @@ public class DevloopApplicationService {
     private DingtalkScanService dingtalkScanService;
 
     @Autowired
+    private DingtalkTodoScanService dingtalkTodoScanService;
+
+    @Autowired
     private DwsAuthService dwsAuthService;
 
     @Autowired
@@ -269,6 +272,12 @@ public class DevloopApplicationService {
             items = dingtalkScanService.scan(source);
             if (items == null) {
                 return ResponseUtil.failRes("钉钉扫描失败，请检查：1) DWS是否已授权 2) 当前组织是否有消息搜索权限 3) 查看扫描日志获取详细错误");
+            }
+        }
+        else if ("dingtalk_todo".equals(type)) {
+            items = dingtalkTodoScanService.scan(source);
+            if (items == null) {
+                return ResponseUtil.failRes("钉钉待办扫描失败，请检查：1) DWS是否已授权 2) 当前组织待办访问权限 3) 查看扫描日志获取详细错误");
             }
         }
         else {
@@ -1046,8 +1055,8 @@ public class DevloopApplicationService {
         if (StringUtils.isNotBlank(query.getTaskName())) {
             wrapper.like(ByaiSession::getSessionName, query.getTaskName().trim());
         }
-        if (DEFAULT_PROJECT_ID.equals(query.getProjectId())) {
-            // 默认项目共用 -1 分组，查询时必须按当前创建人隔离，避免读取其他账号的会话任务。
+        if (DEFAULT_PROJECT_ID.equals(query.getProjectId()) || Boolean.TRUE.equals(query.getOnlyMine())) {
+            // 默认项目共用 -1 分组必须按创建人隔离；onlyMine 过滤同样只看当前登录用户的会话，两者叠加无害。
             wrapper.eq(ByaiSession::getCreatorId, CurrentUserHolder.getCurrentUserId());
         }
         wrapper.orderByDesc(ByaiSession::getCreateTime).orderByDesc(ByaiSession::getSessionId);

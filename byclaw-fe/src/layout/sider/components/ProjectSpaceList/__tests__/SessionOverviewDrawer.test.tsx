@@ -69,15 +69,17 @@ describe('SessionOverviewDrawer', () => {
     });
   });
 
-  it('queries the current full day by default and uses server pagination', async () => {
-    const today = dayjs();
+  it('queries the current week by default and uses server pagination', async () => {
+    const now = dayjs();
     render(<SessionOverviewDrawer open onClose={jest.fn()} projectId={10000811} projectName="百应研发项目" />);
 
     await waitFor(() => {
       expect(mockListTasks).toHaveBeenCalledWith({
         projectId: 10000811,
-        createTimeStart: today.startOf('day').format('YYYY-MM-DD HH:mm:ss'),
-        createTimeEnd: today.endOf('day').format('YYYY-MM-DD HH:mm:ss'),
+        // 默认查本自然周，日期取值前端仍统一按天边界对齐。
+        createTimeStart: now.startOf('week').startOf('day').format('YYYY-MM-DD HH:mm:ss'),
+        createTimeEnd: now.endOf('week').endOf('day').format('YYYY-MM-DD HH:mm:ss'),
+        onlyMine: undefined,
         pageNum: 1,
         pageSize: 20,
       });

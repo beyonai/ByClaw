@@ -26,6 +26,9 @@ public class DevloopTaskListQueryDto {
     @JsonAlias("keyword")
     private String taskName;
 
+    /** 仅看当前登录用户负责（创建）的任务，为空或 false 时返回项目全部任务。 */
+    private Boolean onlyMine;
+
     private Integer pageNum;
     private Integer pageSize;
 

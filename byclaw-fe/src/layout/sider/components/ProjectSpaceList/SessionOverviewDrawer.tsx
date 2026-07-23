@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { DatePicker, Drawer, Empty, Pagination, Spin, Tag, message } from 'antd';
+import { Checkbox, DatePicker, Drawer, Empty, Pagination, Segmented, Spin, Tag, message } from 'antd';
 import { useIntl } from '@umijs/max';
 import dayjs, { type Dayjs } from 'dayjs';
 import { listTasks, type DevloopTaskItem } from '@/service/devloop';
@@ -14,10 +14,14 @@ interface SessionOverviewDrawerProps {
 
 type TaskDateRange = [Dayjs | null, Dayjs | null] | null;
 
+// 日期快捷选择：今天 / 本周 / 本月；自定义表示用户手动改动了 RangePicker，快捷段不再高亮。
+type DatePreset = 'today' | 'week' | 'month' | 'custom';
+
 type BoardQueryState = {
   pageNum: number;
   pageSize: number;
   dateRange: TaskDateRange;
+  onlyMine: boolean;
 };
 
 const COLUMNS = [
@@ -35,7 +39,16 @@ const getTaskStatusKey = (status?: string) => {
   return 'pending';
 };
 
-const getCurrentDayRange = (): TaskDateRange => [dayjs().startOf('day'), dayjs().endOf('day')];
+// 依赖应用运行时 dayjs.locale('zh-cn')：周起始为周一，所以“本周”是本自然周（周一至周日）。
+const getPresetRange = (preset: Exclude<DatePreset, 'custom'>): TaskDateRange => {
+  const now = dayjs();
+  if (preset === 'today') return [now.startOf('day'), now.endOf('day')];
+  if (preset === 'week') return [now.startOf('week'), now.endOf('week')];
+  return [now.startOf('month'), now.endOf('month')];
+};
+
+// 默认查本自然周，而非仅今天，避免刚进看板只看到当天任务。
+const DEFAULT_PRESET: DatePreset = 'week';
 
 // 任务看板按时间范围和分页从服务端读取，避免项目任务较多时一次性加载全部会话。
 const TaskBoardDrawer: React.FC<SessionOverviewDrawerProps> = ({ open, onClose, projectId }) => {
@@ -51,8 +64,15 @@ const TaskBoardDrawer: React.FC<SessionOverviewDrawerProps> = ({ open, onClose, 
   const [total, setTotal] = useState(0);
   const [pageNum, setPageNum] = useState(1);
   const [pageSize, setPageSize] = useState(20);
-  const [dateRange, setDateRange] = useState<TaskDateRange>(getCurrentDayRange);
-  const queryRef = useRef<BoardQueryState>({ pageNum: 1, pageSize: 20, dateRange: getCurrentDayRange() });
+  const [dateRange, setDateRange] = useState<TaskDateRange>(() => getPresetRange('week'));
+  const [datePreset, setDatePreset] = useState<DatePreset>(DEFAULT_PRESET);
+  const [onlyMine, setOnlyMine] = useState(false);
+  const queryRef = useRef<BoardQueryState>({
+    pageNum: 1,
+    pageSize: 20,
+    dateRange: getPresetRange('week'),
+    onlyMine: false,
+  });
 
   const fetchBoardTasks = useCallback(
     async (overrides: Partial<BoardQueryState> = {}) => {
@@ -66,12 +86,14 @@ const TaskBoardDrawer: React.FC<SessionOverviewDrawerProps> = ({ open, onClose, 
       setPageNum(queryState.pageNum);
       setPageSize(queryState.pageSize);
       setDateRange(queryState.dateRange);
+      setOnlyMine(queryState.onlyMine);
       setLoading(true);
       try {
         const taskPage = await listTasks({
           projectId: numericProjectId,
           createTimeStart: queryState.dateRange?.[0]?.startOf('day').format('YYYY-MM-DD HH:mm:ss'),
           createTimeEnd: queryState.dateRange?.[1]?.endOf('day').format('YYYY-MM-DD HH:mm:ss'),
+          onlyMine: queryState.onlyMine || undefined,
           pageNum: queryState.pageNum,
           pageSize: queryState.pageSize,
         });
@@ -90,9 +112,19 @@ const TaskBoardDrawer: React.FC<SessionOverviewDrawerProps> = ({ open, onClose, 
 
   useEffect(() => {
     if (!open) return;
-    const currentDayRange = getCurrentDayRange();
-    void fetchBoardTasks({ pageNum: 1, pageSize: 20, dateRange: currentDayRange });
+    // 每次打开重置为默认本周视图，不携带上次的自定义筛选。
+    setDatePreset(DEFAULT_PRESET);
+    void fetchBoardTasks({ pageNum: 1, pageSize: 20, dateRange: getPresetRange('week'), onlyMine: false });
   }, [fetchBoardTasks, open]);
+
+  const handlePresetChange = useCallback(
+    (preset: DatePreset) => {
+      if (preset === 'custom') return;
+      setDatePreset(preset);
+      void fetchBoardTasks({ pageNum: 1, dateRange: getPresetRange(preset) });
+    },
+    [fetchBoardTasks]
+  );
 
   return (
     <>
@@ -104,7 +136,17 @@ const TaskBoardDrawer: React.FC<SessionOverviewDrawerProps> = ({ open, onClose, 
         width="90vw"
       >
         <div className={styles.kanbanToolbar}>
-          {/* 不单独展示任务总数，日期筛选从工具栏左侧开始排列。 */}
+          {/* 快速选择今天/本周/本月，日期筛选从工具栏左侧开始排列。 */}
+          <Segmented
+            size="small"
+            value={datePreset === 'custom' ? '' : datePreset}
+            options={[
+              { label: t('projectSpace.taskBoard.preset.today'), value: 'today' },
+              { label: t('projectSpace.taskBoard.preset.week'), value: 'week' },
+              { label: t('projectSpace.taskBoard.preset.month'), value: 'month' },
+            ]}
+            onChange={(value) => handlePresetChange(value as DatePreset)}
+          />
           <DatePicker.RangePicker
             size="small"
             allowClear
@@ -114,9 +156,19 @@ const TaskBoardDrawer: React.FC<SessionOverviewDrawerProps> = ({ open, onClose, 
               t('projectSpace.taskBoard.dateEndPlaceholder'),
             ]}
             onChange={(dates) => {
+              // 手动选择日期即视为自定义区间，快捷段取消高亮。
+              setDatePreset('custom');
               void fetchBoardTasks({ pageNum: 1, dateRange: dates as TaskDateRange });
             }}
           />
+          <Checkbox
+            checked={onlyMine}
+            onChange={(e) => {
+              void fetchBoardTasks({ pageNum: 1, onlyMine: e.target.checked });
+            }}
+          >
+            {t('projectSpace.taskBoard.onlyMine')}
+          </Checkbox>
           {total > 0 && (
             <Pagination
               size="small"
