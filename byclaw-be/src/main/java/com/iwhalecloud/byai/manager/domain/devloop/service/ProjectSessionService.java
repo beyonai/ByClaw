@@ -5,28 +5,35 @@ import com.github.pagehelper.PageHelper;
 import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.common.util.PageHelperUtil;
 import com.iwhalecloud.byai.manager.dto.session.ByaiSessionDto;
-import com.iwhalecloud.byai.manager.mapper.devloop.ProjectSessionMapper;
+import com.iwhalecloud.byai.manager.mapper.session.ByaiSessionMapper;
 import com.iwhalecloud.byai.manager.qo.devloop.ProjectSessionQo;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-/** 项目会话关联领域服务 */
+/**
+ * 项目会话查询服务（基于 byai_session.project_id）。
+ */
 @Slf4j
 @Service
 public class ProjectSessionService {
 
     @Autowired
-    private ProjectSessionMapper projectSessionMapper;
+    private ByaiSessionMapper byaiSessionMapper;
 
     /**
-     * 按查询条件查询项目关联会话列表。 ProjectSessionQo 透传到 mapper。
+     * 按查询条件查询项目关联会话列表。
      */
     public PageInfo<ByaiSessionDto> listSessionsByProject(ProjectSessionQo qo) {
-
         Page<ByaiSessionDto> page = PageHelper.startPage(qo.getPageNum(), qo.getPageSize());
-        projectSessionMapper.selectSessionsByProjectByQo(qo);
-
+        byaiSessionMapper.selectSessionsByProjectByQo(qo);
         return PageHelperUtil.toPageInfo(page);
+    }
+
+    /**
+     * 查询项目下全部有效会话。
+     */
+    public java.util.List<ByaiSessionDto> listSessionsByProjectId(Long projectId) {
+        return byaiSessionMapper.selectSessionsByProjectId(projectId);
     }
 }

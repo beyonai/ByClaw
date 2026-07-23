@@ -2,7 +2,6 @@ package com.iwhalecloud.byai.manager.application.service.devloop;
 
 import com.alibaba.fastjson.JSON;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.iwhalecloud.byai.common.constants.Constants;
 import com.iwhalecloud.byai.common.constants.devloop.DeleteFlag;
 import com.iwhalecloud.byai.common.constants.devloop.MemberRole;
@@ -41,14 +40,8 @@ import com.iwhalecloud.byai.manager.dto.session.ByaiSessionDto;
 import com.iwhalecloud.byai.manager.entity.devloop.Project;
 import com.iwhalecloud.byai.manager.entity.devloop.ProjectMember;
 import com.iwhalecloud.byai.manager.entity.devloop.ProjectRepo;
-import com.iwhalecloud.byai.manager.entity.devloop.ProjectSession;
-import com.iwhalecloud.byai.manager.entity.devloop.ProjectShareTarget;
 import com.iwhalecloud.byai.manager.entity.file.Files;
-import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
 import com.iwhalecloud.byai.manager.mapper.devloop.ProjectRepoMapper;
-import com.iwhalecloud.byai.manager.mapper.devloop.ProjectSessionMapper;
-import com.iwhalecloud.byai.manager.mapper.devloop.ProjectShareTargetMapper;
-import com.iwhalecloud.byai.manager.mapper.session.ByaiSessionMapper;
 import com.iwhalecloud.byai.manager.qo.devloop.ProjectQo;
 import com.iwhalecloud.byai.manager.qo.devloop.ProjectSessionQo;
 import com.iwhalecloud.byai.state.domain.file.service.FileService;
@@ -97,9 +90,6 @@ public class ProjectApplicationService {
     private SequenceService sequenceService;
 
     @Autowired
-    private ByaiSessionMapper byaiSessionMapper;
-
-    @Autowired
     private ProjectRepoMapper projectRepoMapper;
 
     @Autowired
@@ -110,9 +100,6 @@ public class ProjectApplicationService {
 
     @Autowired
     private ProjectMemberService projectMemberService;
-
-    @Autowired
-    private ProjectSessionMapper projectSessionMapper;
 
     @Autowired
     private ProjectSessionService projectSessionService;
@@ -128,9 +115,6 @@ public class ProjectApplicationService {
 
     @Autowired
     private UserBucketNamingService userBucketNamingService;
-
-    @Autowired
-    private ProjectShareTargetMapper projectShareTargetMapper;
 
     /**
      * 分页查询用户可见项目
@@ -523,7 +507,7 @@ public class ProjectApplicationService {
     }
 
     /**
-     * 查询项目详情，含仓库、分享对象与会话。
+     * 查询项目详情，含仓库与会话。
      *
      * @param projectId 项目 ID
      * @return 项目详情
@@ -536,7 +520,7 @@ public class ProjectApplicationService {
         LambdaQueryWrapper<ProjectRepo> repoWrapper = new LambdaQueryWrapper<>();
         repoWrapper.eq(ProjectRepo::getProjectId, projectId);
         List<ProjectRepo> repos = projectRepoMapper.selectList(repoWrapper);
-        List<ByaiSessionDto> sessions = safeListProjectSessions(projectId);
+        List<ByaiSessionDto> sessions = projectSessionService.listSessionsByProjectId(projectId);
 
         Map<String, Object> map = new HashMap<>();
         map.put("projectId", project.getProjectId());
@@ -546,7 +530,6 @@ public class ProjectApplicationService {
         map.put("projectType", project.getProjectType());
         map.put("isShare", project.getIsShare());
         map.put("repos", repos);
-        map.put("shareTargets", safeListProjectShareTargets(projectId));
         map.put("sessions", sessions);
         map.put("sessionCount", sessions.size());
         return map;
@@ -560,49 +543,6 @@ public class ProjectApplicationService {
      */
     private String normalizeProjectName(String projectName) {
         return projectName == null ? "" : projectName.trim();
-    }
-
-    /**
-     * 查询项目会话列表，关联表缺失时返回空列表。
-     *
-     * @param projectId 项目 ID
-     * @return 会话列表
-     */
-    private List<ByaiSessionDto> safeListProjectSessions(Long projectId) {
-        return projectSessionMapper.selectSessionsByProjectId(projectId);
-
-    }
-
-    /**
-     * 判断是否为项目分享对象表不存在异常。
-     *
-     * @param error 异常
-     * @return true 表示表不存在
-     */
-    private boolean isProjectShareTableMissing(Throwable error) {
-        return isTableMissing(error, "byai_project_share");
-    }
-
-    /**
-     * 判断异常链中是否包含指定表不存在错误。
-     *
-     * @param error 异常
-     * @param tableName 表名
-     * @return true 表示表不存在
-     */
-    private boolean isTableMissing(Throwable error, String tableName) {
-        Throwable current = error;
-        while (current != null) {
-            String message = current.getMessage();
-            if (message != null) {
-                String lowerMessage = message.toLowerCase(Locale.ROOT);
-                if (lowerMessage.contains(tableName) && lowerMessage.contains("does not exist")) {
-                    return true;
-                }
-            }
-            current = current.getCause();
-        }
-        return false;
     }
 
     /**
@@ -680,122 +620,6 @@ public class ProjectApplicationService {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("project.repo.bound", boundCount));
         }
         projectRepoMapper.deleteById(repoId);
-    }
-
-    /**
-     * 查询项目分享对象列表。
-     *
-     * @param projectId 项目 ID
-     * @return 分享对象列表
-     */
-    private List<Map<String, Object>> listProjectShareTargets(Long projectId) {
-        LambdaQueryWrapper<ProjectShareTarget> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(ProjectShareTarget::getProjectId, projectId).orderByAsc(ProjectShareTarget::getCreateTime);
-        List<ProjectShareTarget> targets = projectShareTargetMapper.selectList(wrapper);
-        List<Map<String, Object>> list = new ArrayList<>();
-        for (ProjectShareTarget target : targets) {
-            Map<String, Object> map = new HashMap<>();
-            map.put("shareId", target.getShareId());
-            map.put("projectId", target.getProjectId());
-            map.put("targetType", target.getTargetType());
-            map.put("targetId", target.getTargetId());
-            map.put("targetName", target.getTargetName());
-            map.put("createBy", target.getCreateBy());
-            map.put("createTime", target.getCreateTime());
-            list.add(map);
-        }
-        return list;
-    }
-
-    /**
-     * 查询项目分享对象，分享表缺失时返回空列表。
-     *
-     * @param projectId 项目 ID
-     * @return 分享对象列表
-     */
-    private List<Map<String, Object>> safeListProjectShareTargets(Long projectId) {
-        try {
-            return listProjectShareTargets(projectId);
-        }
-        catch (Exception error) {
-            if (isProjectShareTableMissing(error)) {
-                // 兼容已执行旧版 V0.3.0 但缺少项目共享对象表的环境，避免项目列表/详情整体不可用。
-                log.warn("Project share target table is missing, fallback shareTargets empty, projectId={}", projectId);
-                return Collections.emptyList();
-            }
-            throw error instanceof RuntimeException ? (RuntimeException) error : new IllegalStateException(error);
-        }
-    }
-
-    /**
-     * 绑定会话到项目，一个会话仅保留一个有效项目归属。
-     *
-     * @param projectId 项目 ID
-     * @param sessionId 会话 ID
-     */
-    public void bindProjectSession(Long projectId, Long sessionId) {
-        Project project = projectService.findById(projectId);
-        if (project == null || DeleteFlag.DELETED.equals(project.getDeleteFlag())) {
-            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.not.found");
-        }
-        ByaiSession session = byaiSessionMapper.selectById(sessionId);
-        if (session == null) {
-            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.session.not.found");
-        }
-
-        String currentUserId = String.valueOf(CurrentUserHolder.getCurrentUserId());
-        Date now = new Date();
-
-        // 项目会话列表按 byai_session.project_id 查询，关系表仅用于保留归属历史，绑定时必须同步主记录。
-        session.setProjectId(projectId);
-        session.setUpdateBy(CurrentUserHolder.getCurrentUserId());
-        session.setUpdateTime(now);
-        byaiSessionMapper.updateById(session);
-
-        ProjectSession archivedRelation = new ProjectSession();
-        archivedRelation.setDeleteFlag(DeleteFlag.DELETED);
-        archivedRelation.setUpdateBy(currentUserId);
-        archivedRelation.setUpdateTime(now);
-        projectSessionMapper.update(archivedRelation,
-            new LambdaUpdateWrapper<ProjectSession>().eq(ProjectSession::getSessionId, sessionId)
-                .eq(ProjectSession::getDeleteFlag, DeleteFlag.NORMAL).ne(ProjectSession::getProjectId, projectId));
-
-        LambdaQueryWrapper<ProjectSession> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(ProjectSession::getProjectId, projectId).eq(ProjectSession::getSessionId, sessionId);
-        List<ProjectSession> existingRelations = projectSessionMapper.selectList(wrapper);
-        if (!existingRelations.isEmpty()) {
-            ProjectSession relation = existingRelations.get(0);
-            relation.setDeleteFlag(DeleteFlag.NORMAL);
-            relation.setUpdateBy(currentUserId);
-            relation.setUpdateTime(now);
-            projectSessionMapper.updateById(relation);
-            return;
-        }
-
-        ProjectSession relation = new ProjectSession();
-        relation.setRelationId(sequenceService.nextVal());
-        relation.setProjectId(projectId);
-        relation.setSessionId(sessionId);
-        relation.setCreateBy(currentUserId);
-        relation.setCreateTime(now);
-        relation.setDeleteFlag(DeleteFlag.NORMAL);
-        projectSessionMapper.insert(relation);
-    }
-
-    /**
-     * 取消项目与会话的有效关联，软删除并保留历史。
-     *
-     * @param projectId 项目 ID
-     * @param sessionId 会话 ID
-     */
-    public void unbindProjectSession(Long projectId, Long sessionId) {
-        ProjectSession relation = new ProjectSession();
-        relation.setDeleteFlag(DeleteFlag.DELETED);
-        relation.setUpdateBy(String.valueOf(CurrentUserHolder.getCurrentUserId()));
-        relation.setUpdateTime(new Date());
-        projectSessionMapper.update(relation,
-            new LambdaUpdateWrapper<ProjectSession>().eq(ProjectSession::getProjectId, projectId)
-                .eq(ProjectSession::getSessionId, sessionId).eq(ProjectSession::getDeleteFlag, DeleteFlag.NORMAL));
     }
 
     /**
