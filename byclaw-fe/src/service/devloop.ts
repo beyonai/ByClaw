@@ -155,13 +155,6 @@ export const createProjectRepo = (data: {
 
 export const deleteProjectRepo = (repoId: number) => POST<any>('/byaiService/project/repo/delete', { repoId });
 
-// 项目空间按会话分组展示，创建会话后需要显式建立项目-会话关系。
-export const bindProjectSession = (data: { projectId: number; sessionId: number }) =>
-  POST<any>('/byaiService/project/session/bind', data);
-
-export const unbindProjectSession = (data: { projectId: number; sessionId: number }) =>
-  POST<any>('/byaiService/project/session/unbind', data);
-
 // 项目会话列表按项目懒加载，避免项目列表接口一次带出大量会话。
 export const listProjectSessionsByQo = (data: DevloopProjectSessionListPayload, config?: ConfigType) =>
   POST<any>('/byaiService/project/session/listByQo', data, config);
