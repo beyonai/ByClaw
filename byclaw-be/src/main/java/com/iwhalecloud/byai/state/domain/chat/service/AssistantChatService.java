@@ -509,6 +509,7 @@ public class AssistantChatService {
         Long newSessionId = sequenceService.nextVal();
         // 设置会话基本信息
         sessionMembersDto.setSessionId(newSessionId);
+        sessionMembersDto.setProjectId(assistantChatDto.getProjectId());
         sessionMembersDto.setSessionContent(assistantChatDto.getChatContent());
         sessionMembersDto.setObjectType(ConversationObjectType.DIGITAL_EMPLOYEES);
         sessionMembersDto.setObjectId(assistantChatDto.getAgentId());

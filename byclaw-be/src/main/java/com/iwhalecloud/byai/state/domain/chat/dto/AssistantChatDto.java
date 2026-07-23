@@ -209,4 +209,8 @@ public class AssistantChatDto {
      */
     private String resumeMessageId;
 
+    /**
+     * 会话关联项目
+     */
+    private Long projectId;
 }
