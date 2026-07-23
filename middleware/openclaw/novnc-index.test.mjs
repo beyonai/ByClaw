@@ -23,3 +23,8 @@ assert.equal(
 
 assert.match(source, /get\('hideHeader'\)/, 'noVNC page should support the hideHeader query parameter');
 assert.match(source, /classList\.add\('embed'\)/, 'hideHeader should enable the headerless layout');
+assert.match(
+  source,
+  /<div class="sidebar-wrap collapsed" id="sidebarWrap">/,
+  'noVNC sidebar should start collapsed',
+);
