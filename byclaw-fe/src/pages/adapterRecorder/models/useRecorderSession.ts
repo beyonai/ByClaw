@@ -7,6 +7,7 @@ import { Modal } from 'antd';
 import { getRecorderClient, type RecordingMode } from '../services/recorderClient';
 import { INVALID_STATE_HINT, isTerminalError } from '../constants/recorder';
 import { deriveAdapterName } from './adapterName';
+import { selectCandidateData } from './candidateSelection';
 import { isActionAllowed, type RecorderAction } from './transitions';
 import type {
   CaptureSample,
@@ -375,11 +376,7 @@ export default function useRecorderSession() {
         })
       ),
     // 选定候选时即派生并固化 adapter 名(init 预览/写入与 verify 复用同一个,避免漂移)。
-    selectCandidate: (id: string) =>
-      setData((d) => {
-        const cand = d.candidates?.find((c) => c.id === id);
-        return { ...d, selectedCandidateId: id, adapterName: cand ? deriveAdapterName(cand) : d.adapterName };
-      }),
+    selectCandidate: (id: string) => setData((d) => selectCandidateData(d, id, deriveAdapterName)),
     // dry-run 预览:不推进会话,产出 {report,dryRun} 供用户审阅。
     // egressConsent=true 时(用户点「用 AI 生成」)才带 egress 同意戳 → be 才会把痕迹发模型合成(P0-2);
     // 一旦同意即记入 session,后续重复预览/写入复用,无需再问。

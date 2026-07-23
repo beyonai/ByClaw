@@ -1,7 +1,7 @@
 /* eslint-disable indent */
 // 录制工作台主框架 —— 全屏单页:标题 + 会话状态带、青色进度轨(StepRail)、当前 step 操作区。
 // 失败态切 ErrorRecovery;完成态显示 Result。数据/状态机走 useRecorderSession model。
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useState } from 'react';
 import { Result, Spin, Typography } from 'antd';
 import { CheckCircleOutlined, LoadingOutlined } from '@ant-design/icons';
 import { useSelector } from '@umijs/max';
@@ -26,6 +26,7 @@ const { Text } = Typography;
 export default function Workbench() {
   const userInfo = useSelector(({ user }) => user.userInfo);
   const { state, data, loading, error, actions } = useRecorderSession();
+  const [rankedView, setRankedView] = useState<'candidates' | 'draft'>('candidates');
 
   const llmOn = !!data.health?.llmSynthesis;
   const order = STATE_ORDER[state];
@@ -41,6 +42,9 @@ export default function Workbench() {
     }
     if (state !== 'capture_b') autoRankedRef.current = false;
   }, [state, llmOn, loading, error, actions]);
+  useEffect(() => {
+    if (state !== 'ranked') setRankedView('candidates');
+  }, [state]);
   // 记录已到达的最高 step:失败态 order=-1,用它把"失败"定位到失败前所在步骤,而非错误落到步骤 0。
   const lastReachedRef = useRef(0);
   // A/B 拆成独立步骤后,page_ready 在 B 段(已有 sampleA)应定位到「录制 B」步,而非「录制 A」(STATE_ORDER
@@ -130,28 +134,29 @@ export default function Workbench() {
             />
           );
         }
-        return (
-          <>
-            <RankStep
-              loading={loading}
-              candidates={data.candidates}
-              selectedId={data.selectedCandidateId}
-              sampleA={data.sampleA}
-              sampleB={data.sampleB}
-              onRank={actions.rank}
-              onSelect={actions.selectCandidate}
-            />
-            <div className={styles.nextStep}>
-              <InitStep
-                loading={loading}
-                selectedCandidate={data.candidates?.find((c) => c.id === data.selectedCandidateId)}
-                adapterName={data.adapterName}
-                preview={data.draftPreview}
-                onPreview={actions.previewInit}
-                onWrite={actions.writeInit}
-              />
-            </div>
-          </>
+        return rankedView === 'draft' ? (
+          <InitStep
+            loading={loading}
+            selectedCandidate={data.candidates?.find((c) => c.id === data.selectedCandidateId)}
+            adapterName={data.adapterName}
+            preview={data.draftPreview}
+            onPreview={actions.previewInit}
+            onWrite={actions.writeInit}
+            onBack={() => setRankedView('candidates')}
+          />
+        ) : (
+          <RankStep
+            loading={loading}
+            candidates={data.candidates}
+            selectedId={data.selectedCandidateId}
+            sampleA={data.sampleA}
+            sampleB={data.sampleB}
+            onRank={actions.rank}
+            onSelect={(id) => {
+              actions.selectCandidate(id);
+              setRankedView('draft');
+            }}
+          />
         );
       case 'draft_created':
       case 'verifying':

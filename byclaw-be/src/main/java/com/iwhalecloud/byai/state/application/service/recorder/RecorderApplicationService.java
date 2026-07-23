@@ -289,6 +289,10 @@ public class RecorderApplicationService {
             if (!sessionRegistry.canAdvance(session, RecorderSessionAction.INIT)) {
                 return fail(400, "invalid_state", "cannot init from " + session.state().wireValue());
             }
+            Map<String, Object> selectedCandidate = selectedCandidate(session, stringValue(body, "selectedCandidateId"));
+            if (selectedCandidate == null) {
+                return fail(400, "validation_failed", "selectedCandidateId does not match a ranked candidate");
+            }
             if ("write".equals(stringValue(body, "writePolicy"))) {
                 sessionRegistry.advance(session, RecorderSessionAction.INIT, RecorderSessionState.DRAFT_CREATED);
             }
@@ -303,7 +307,7 @@ public class RecorderApplicationService {
             return ok(Map.of(
                 "report", report,
                 "dryRun", Map.of("exists", false, "changedLines", 0),
-                "generatedSource", "export default {};",
+                "generatedSource", generatedSource(selectedCandidate),
                 "llmSynthesisOffered", false
             ));
         }
@@ -836,6 +840,53 @@ public class RecorderApplicationService {
             }
         });
         return mapped;
+    }
+
+    private Map<String, Object> selectedCandidate(RecorderSession session, String selectedCandidateId) {
+        return session.candidates().stream()
+            .filter(candidate -> selectedCandidateId.equals(stringValue(candidate, "id")))
+            .findFirst()
+            .orElse(null);
+    }
+
+    private String generatedSource(Map<String, Object> candidate) {
+        Map<String, Object> endpoint = candidate.get("endpoint") instanceof Map<?, ?> raw ? map(raw) : Map.of();
+        String method = defaultString(endpoint, "method", "GET");
+        String pathname = defaultString(endpoint, "pathname", "/");
+        List<String> params = candidate.get("args") instanceof List<?> args
+            ? args.stream()
+                .filter(Map.class::isInstance)
+                .map(Map.class::cast)
+                .map(this::map)
+                .map(arg -> defaultString(arg, "argName", defaultString(arg, "paramName", "")))
+                .filter(name -> !name.isBlank())
+                .toList()
+            : List.of();
+        List<String> columns = candidate.get("columns") instanceof List<?> items
+            ? items.stream()
+                .filter(Map.class::isInstance)
+                .map(Map.class::cast)
+                .map(this::map)
+                .map(column -> defaultString(column, "name", "value"))
+                .toList()
+            : List.of();
+
+        return """
+            // Generated from the selected recorder endpoint. Review before writing.
+            export default {
+              request: { method: '%s', path: '%s', params: [%s] },
+              columns: [%s],
+            };
+            """.formatted(
+                jsString(method),
+                jsString(pathname),
+                params.stream().map(name -> "'" + jsString(name) + "'").collect(java.util.stream.Collectors.joining(", ")),
+                columns.stream().map(name -> "'" + jsString(name) + "'").collect(java.util.stream.Collectors.joining(", "))
+            );
+    }
+
+    private String jsString(String value) {
+        return value.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n").replace("\r", "\\r");
     }
 
     private Map<String, Object> sessionState(RecorderSession session) {

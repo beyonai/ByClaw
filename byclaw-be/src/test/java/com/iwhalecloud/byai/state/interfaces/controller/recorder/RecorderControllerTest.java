@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.state.interfaces.controller.recorder;
 
 import static org.hamcrest.Matchers.startsWith;
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -465,6 +466,22 @@ class RecorderControllerTest {
         verifyPort.allowTerminal = true;
         awaitRequestStatus(requestId, "succeeded")
             .andExpect(jsonPath("$.data.result.ok").value(true));
+    }
+
+    @Test
+    void initDryRunGeneratesInspectableSourceFromSelectedCandidate() throws Exception {
+        String sessionId = bindAndRankSession();
+
+        mockMvc.perform(post("/recorder/init")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                    {"sessionId":"%s","name":"example/search","selectedCandidateId":"cand_example_com_search","writePolicy":"dry-run"}
+                    """.formatted(sessionId)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.generatedSource", containsString("export default")))
+            .andExpect(jsonPath("$.data.generatedSource", containsString("/search")))
+            .andExpect(jsonPath("$.data.generatedSource", not("export default {};")))
+            .andExpect(jsonPath("$.data.report.warnings[0]", containsString("no filesystem write was performed")));
     }
 
     @Test
