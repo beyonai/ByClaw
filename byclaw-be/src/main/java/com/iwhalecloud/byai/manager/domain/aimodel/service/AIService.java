@@ -60,6 +60,20 @@ public class AIService {
 
     public String generateText(String systemPrompt, String userPrompt, String modelCode, int maxTokens) {
         ModelDto defaultModel = getDefaultModel();
+        return generateText(systemPrompt, userPrompt, defaultModel, modelCode, maxTokens);
+    }
+
+    /**
+     * Uses a model resolved by a caller that owns the model-selection policy.
+     *
+     * <p>The recorder uses this overload after resolving the configured default through model management, so its
+     * request path does not depend on the Redis model cache.</p>
+     */
+    public String generateText(String systemPrompt, String userPrompt, ModelDto model, int maxTokens) {
+        return generateText(systemPrompt, userPrompt, model, null, maxTokens);
+    }
+
+    private String generateText(String systemPrompt, String userPrompt, ModelDto defaultModel, String modelCode, int maxTokens) {
         String apiUrl = defaultModel.getUrl() + "/chat/completions";
         String apiKey = defaultModel.getAuthToken();
         String model = defaultModel.getModelCode();

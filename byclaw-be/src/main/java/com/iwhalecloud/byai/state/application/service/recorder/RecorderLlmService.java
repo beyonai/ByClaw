@@ -1,8 +1,13 @@
 package com.iwhalecloud.byai.state.application.service.recorder;
 
 import com.iwhalecloud.byai.common.feign.response.knowledge.ModelDto;
+import com.iwhalecloud.byai.manager.application.service.aimodel.ModelManagementApplicationService;
 import com.iwhalecloud.byai.manager.domain.aimodel.service.AIService;
-import com.iwhalecloud.byai.manager.domain.aimodel.service.AiModelService;
+import com.iwhalecloud.byai.manager.dto.aimodel.ModelListRequest;
+import com.iwhalecloud.byai.manager.dto.aimodel.ModelListResponse;
+import com.iwhalecloud.byai.manager.dto.aimodel.ModelVO;
+import java.util.Comparator;
+import java.util.List;
 import org.springframework.stereotype.Service;
 
 /**
@@ -14,16 +19,19 @@ import org.springframework.stereotype.Service;
 @Service
 public class RecorderLlmService {
 
-    private final AiModelService aiModelService;
+    private static final String AVAILABLE = "available";
+    private static final String LLM_MODEL_TYPE = "LLM";
+
+    private final ModelManagementApplicationService modelManagementApplicationService;
     private final AIService aiService;
 
-    public RecorderLlmService(AiModelService aiModelService, AIService aiService) {
-        this.aiModelService = aiModelService;
+    public RecorderLlmService(ModelManagementApplicationService modelManagementApplicationService, AIService aiService) {
+        this.modelManagementApplicationService = modelManagementApplicationService;
         this.aiService = aiService;
     }
 
     private RecorderLlmService() {
-        this.aiModelService = null;
+        this.modelManagementApplicationService = null;
         this.aiService = null;
     }
 
@@ -32,35 +40,77 @@ public class RecorderLlmService {
     }
 
     public Availability availability() {
-        if (aiModelService == null) {
-            return Availability.unavailable();
-        }
-        try {
-            ModelDto model = aiModelService.getDefaultChatModel();
-            if (model == null || isBlank(model.getUrl()) || isBlank(model.getAuthToken()) || isBlank(model.getModelCode())) {
-                return Availability.unavailable();
-            }
-            return new Availability(true, model.getModelCode());
-        } catch (RuntimeException ignored) {
-            // A missing/invalid default model is a non-blocking recorder health degradation.
-            return Availability.unavailable();
-        }
+        return resolveDefaultModel().availability();
     }
 
     public String generateText(String systemPrompt, String userPrompt, int maxTokens) {
-        if (!availability().available()) {
-            throw new IllegalStateException("default LLM model is unavailable");
+        ResolvedModel resolved = resolveDefaultModel();
+        if (!resolved.availability().available()) {
+            throw new IllegalStateException("default LLM model is unavailable: " + resolved.availability().reason());
         }
-        return aiService.generateText(systemPrompt, userPrompt, null, maxTokens);
+        return aiService.generateText(systemPrompt, userPrompt, resolved.model(), maxTokens);
+    }
+
+    private ResolvedModel resolveDefaultModel() {
+        if (modelManagementApplicationService == null) {
+            return ResolvedModel.unavailable("default_model_lookup_failed");
+        }
+        try {
+            ModelListRequest request = new ModelListRequest();
+            request.setOwnerType("PUBLIC");
+            request.setStatus("ENABLED");
+            request.setPageNum(1);
+            request.setPageSize(100);
+            ModelListResponse page = modelManagementApplicationService.getModelListByPage(request);
+            List<ModelVO> rows = page == null || page.getRows() == null ? List.of() : page.getRows();
+            ModelVO listedModel = rows.stream()
+                .filter(this::isLlmModel)
+                .filter(model -> Integer.valueOf(1).equals(model.getIsDefault()))
+                .min(Comparator.comparing(ModelVO::getId, Comparator.nullsLast(Long::compareTo)))
+                .orElseGet(() -> rows.stream().filter(this::isLlmModel).findFirst().orElse(null));
+            if (listedModel == null || listedModel.getId() == null) {
+                return ResolvedModel.unavailable("default_model_not_found");
+            }
+            ModelVO detail = modelManagementApplicationService.getModelDetail(String.valueOf(listedModel.getId()));
+            if (detail == null) {
+                return ResolvedModel.unavailable("default_model_detail_unavailable");
+            }
+            if (isBlank(detail.getApiEndpoint())) {
+                return ResolvedModel.unavailable("default_model_endpoint_missing");
+            }
+            if (isBlank(detail.getApiToken())) {
+                return ResolvedModel.unavailable("default_model_token_missing");
+            }
+            if (isBlank(detail.getModelCode())) {
+                return ResolvedModel.unavailable("default_model_code_missing");
+            }
+            ModelDto model = new ModelDto();
+            model.setUrl(detail.getApiEndpoint());
+            model.setAuthToken(detail.getApiToken());
+            model.setModelCode(detail.getModelCode());
+            return new ResolvedModel(model, new Availability(true, detail.getModelCode(), AVAILABLE));
+        } catch (RuntimeException ignored) {
+            return ResolvedModel.unavailable("default_model_lookup_failed");
+        }
     }
 
     private boolean isBlank(String value) {
         return value == null || value.isBlank();
     }
 
-    public record Availability(boolean available, String modelCode) {
-        static Availability unavailable() {
-            return new Availability(false, null);
+    private boolean isLlmModel(ModelVO model) {
+        return model != null && LLM_MODEL_TYPE.equalsIgnoreCase(model.getModelType());
+    }
+
+    public record Availability(boolean available, String modelCode, String reason) {
+        static Availability unavailable(String reason) {
+            return new Availability(false, null, reason);
+        }
+    }
+
+    private record ResolvedModel(ModelDto model, Availability availability) {
+        static ResolvedModel unavailable(String reason) {
+            return new ResolvedModel(null, Availability.unavailable(reason));
         }
     }
 }

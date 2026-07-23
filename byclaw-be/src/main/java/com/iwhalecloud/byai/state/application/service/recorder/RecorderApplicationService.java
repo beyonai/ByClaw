@@ -420,11 +420,24 @@ public class RecorderApplicationService {
         Map<String, Object> health = new LinkedHashMap<>(browserHealth);
         RecorderLlmService.Availability availability = recorderLlmService.availability();
         health.put("llmSynthesis", availability.available());
+        health.put("llmSynthesisReason", availability.reason());
         health.put(
             "llmSynthesisMessage",
-            availability.available() ? "已配置默认 LLM 模型；AI 评分需在下一步明确同意。" : "未配置默认 LLM 模型；将继续使用本地规则流程。"
+            llmSynthesisMessage(availability)
         );
         return health;
+    }
+
+    private String llmSynthesisMessage(RecorderLlmService.Availability availability) {
+        return switch (availability.reason()) {
+            case "available" -> "已配置默认 LLM 模型；AI 评分需在下一步明确同意。";
+            case "default_model_not_found" -> "未找到已启用的默认 LLM 模型；将继续使用本地规则流程。";
+            case "default_model_detail_unavailable" -> "默认 LLM 模型详情不可用；将继续使用本地规则流程。";
+            case "default_model_endpoint_missing" -> "默认 LLM 模型缺少服务地址；将继续使用本地规则流程。";
+            case "default_model_token_missing" -> "默认 LLM 模型缺少服务端凭据；将继续使用本地规则流程。";
+            case "default_model_code_missing" -> "默认 LLM 模型缺少模型编码；将继续使用本地规则流程。";
+            default -> "默认 LLM 模型查询失败；将继续使用本地规则流程。";
+        };
     }
 
     private boolean hasLlmEgressApproval(Map<String, Object> body) {

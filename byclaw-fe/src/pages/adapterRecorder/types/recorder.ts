@@ -268,6 +268,9 @@ export interface HealthReport {
 
   /** LLM 配置状态的非阻断说明（不包含模型地址或凭据）。 */
   llmSynthesisMessage?: string;
+
+  /** LLM 配置可用性原因码；不包含模型地址、凭据或内部异常。 */
+  llmSynthesisReason?: string;
 }
 
 /** RecorderReport(bundle $defs/RecorderReport)—— init 预览/写入产出的报告 */
