@@ -139,10 +139,13 @@ final class SandboxRuntimeRequestFactory {
         String state = status.getState().trim().toLowerCase(java.util.Locale.ROOT);
         // Use exclusion list instead of inclusion list - exclude only terminal/failed states
         // Reusable: Pending, Running, Ready (starting/creating states can be reused)
-        // Non-reusable: Failed, Succeeded, Terminated, Error, Unknown, Exited
+        // Non-reusable: Failed, Succeeded, Completed, Terminated, Stopped, Killed, Error, Unknown, Exited
         return !"failed".equals(state)
             && !"succeeded".equals(state)
+            && !"completed".equals(state)
             && !"terminated".equals(state)
+            && !"stopped".equals(state)
+            && !"killed".equals(state)
             && !"error".equals(state)
             && !"unknown".equals(state)
             && !"exited".equals(state);
