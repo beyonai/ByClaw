@@ -729,11 +729,16 @@ class KnowledgeOrganizer:
             object_code = raw.get("object_code")
             entity_name = raw.get("entity_name")
             content = raw.get("content")
-            if object_code not in ads_objects or not all(isinstance(value, str) and value.strip() for value in (entity_name, content)):
+            normalized_entity_name = self._normalize_entity_name(entity_name) if isinstance(entity_name, str) else None
+            if object_code not in ads_objects or not all(
+                isinstance(value, str) and value.strip() for value in (normalized_entity_name, content)
+            ):
                 raise ValueError("模型碎片包含无效 ADS 对象、实体名称或内容")
             if self._is_placeholder(content):
                 raise ValueError("模型碎片 content 使用了占位符")
-            fragments.append({"object_code": object_code, "entity_name": entity_name, "content": content})
+            fragments.append(
+                {"object_code": object_code, "entity_name": normalized_entity_name, "content": content}
+            )
         return fragments
 
     @staticmethod
@@ -780,7 +785,7 @@ class KnowledgeOrganizer:
             for item in ambiguous:
                 object_code = str(item["object_code"])
                 entity_name = str(item["entity_name"])
-                choice = choices.get(f"{object_code}:{entity_name}")
+                choice = self._candidate_choice(choices, object_code, entity_name)
                 if choice is None:
                     resolved[(object_code, entity_name)] = self.api.create_entity(
                         object_code=object_code, entity_name=entity_name
@@ -793,6 +798,28 @@ class KnowledgeOrganizer:
                 else:
                     raise ValueError("模型选择了未返回的实体候选")
         return [resolved[(fragment["object_code"], fragment["entity_name"])] for fragment in fragments], selection
+
+    @staticmethod
+    def _candidate_choice(choices: dict[str, Any], object_code: str, entity_name: str) -> Any:
+        exact_key = f"{object_code}:{entity_name}"
+        if exact_key in choices:
+            return choices[exact_key]
+        matched_choices = [
+            value
+            for key, value in choices.items()
+            if isinstance(key, str)
+            and ":" in key
+            and key.split(":", maxsplit=1)[0].strip() == object_code
+            and KnowledgeOrganizer._normalize_entity_name(key.split(":", maxsplit=1)[1])
+            == KnowledgeOrganizer._normalize_entity_name(entity_name)
+        ]
+        if len(matched_choices) > 1:
+            raise ValueError("模型对同一实体返回了重复候选选择")
+        return matched_choices[0] if matched_choices else None
+
+    @staticmethod
+    def _normalize_entity_name(value: str) -> str:
+        return "".join(value.split())
 
     def _all_authorized_objects(self, employee_resource_id: str) -> list[dict[str, Any]]:
         page = 1

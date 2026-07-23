@@ -182,6 +182,22 @@ class KnowledgeOrganizerInitializationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "JSON"):
             knowledge_organizer.extract_json_object("模型没有遵循格式")
 
+    def test_validated_fragments_removes_whitespace_from_entity_name(self) -> None:
+        fragments = self.organizer._validated_fragments(
+            {
+                "fragments": [
+                    {
+                        "object_code": "concept",
+                        "entity_name": "智 能\t客 服\u3000实例",
+                        "content": "智能客服实例的说明。",
+                    }
+                ]
+            },
+            {"concept": {}},
+        )
+
+        self.assertEqual(fragments[0]["entity_name"], "智能客服实例")
+
     def test_extract_fragments_treats_user_intent_as_a_hard_scope(self) -> None:
         class RecordingModel:
             def complete_json(self, *, system_prompt: str, user_message: str) -> dict[str, object]:
@@ -315,6 +331,27 @@ class KnowledgeOrganizerInitializationTests(unittest.TestCase):
         self.organizer.organize(self.task_dir)
 
         self.assertEqual(len(self.api.ambiguous), 1)
+        self.assertEqual(self.api.fragment_items[0]["instanceId"], "old-2")
+        self.assertFalse(hasattr(self.api, "created_entity"))
+
+    def test_organize_accepts_candidate_choice_key_with_space_after_colon(self) -> None:
+        self.organizer.initialize(self.task_dir, "employee-1")
+        source = Path(self.temp_dir.name) / "notes.md"
+        source.write_text("# 智能客服", encoding="utf-8")
+        self.organizer.ingest(
+            self.task_dir,
+            source=source,
+            object_code="raw_doc",
+            storage_file_name="智能客服说明.md",
+            labels={"title": "智能客服"},
+        )
+        self.api.search_hits = {
+            "智能客服": [{"instance_id": "old-1"}, {"instance_id": "old-2"}],
+        }
+        self.api.candidate_choices = {"concept: 智 能\t客服": "old-2"}
+
+        self.organizer.organize(self.task_dir)
+
         self.assertEqual(self.api.fragment_items[0]["instanceId"], "old-2")
         self.assertFalse(hasattr(self.api, "created_entity"))
 
