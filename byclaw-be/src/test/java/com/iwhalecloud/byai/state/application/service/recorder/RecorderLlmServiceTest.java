@@ -11,7 +11,12 @@ import com.iwhalecloud.byai.manager.domain.aimodel.service.AIService;
 import com.iwhalecloud.byai.manager.dto.aimodel.ModelListResponse;
 import com.iwhalecloud.byai.manager.dto.aimodel.ModelVO;
 import java.util.List;
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 
 class RecorderLlmServiceTest {
 
@@ -70,6 +75,67 @@ class RecorderLlmServiceTest {
 
         assertThat(service.availability())
             .isEqualTo(new RecorderLlmService.Availability(false, null, "default_model_detail_lookup_failed"));
+    }
+
+    @Test
+    void logsListLookupFailureWithSafeQueryContextAndCause() {
+        ModelManagementApplicationService models = mock(ModelManagementApplicationService.class);
+        when(models.getModelListByPage(org.mockito.ArgumentMatchers.any())).thenThrow(new IllegalStateException("database unavailable"));
+        Logger logger = (Logger) LoggerFactory.getLogger(RecorderLlmService.class);
+        Level previousLevel = logger.getLevel();
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        logger.setLevel(Level.WARN);
+        logger.addAppender(appender);
+        appender.start();
+
+        try {
+            RecorderLlmService service = new RecorderLlmService(models, mock(AIService.class));
+
+            assertThat(service.availability())
+                .isEqualTo(new RecorderLlmService.Availability(false, null, "default_model_list_lookup_failed"));
+            assertThat(appender.list).anySatisfy(event -> {
+                assertThat(event.getLevel()).isEqualTo(Level.WARN);
+                assertThat(event.getFormattedMessage())
+                    .contains("Recorder default LLM model list lookup failed", "ownerType=PUBLIC", "status=ENABLED");
+                assertThat(event.getThrowableProxy()).isNotNull();
+            });
+        } finally {
+            logger.detachAppender(appender);
+            logger.setLevel(previousLevel);
+            appender.stop();
+        }
+    }
+
+    @Test
+    void logsDetailLookupFailureWithModelIdAndCause() {
+        ModelManagementApplicationService models = mock(ModelManagementApplicationService.class);
+        ModelListResponse page = new ModelListResponse();
+        page.setRows(List.of(model("12", 1, null, null, "default-chat")));
+        when(models.getModelListByPage(org.mockito.ArgumentMatchers.any())).thenReturn(page);
+        when(models.getModelDetail("12")).thenThrow(new IllegalStateException("detail unavailable"));
+        Logger logger = (Logger) LoggerFactory.getLogger(RecorderLlmService.class);
+        Level previousLevel = logger.getLevel();
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        logger.setLevel(Level.WARN);
+        logger.addAppender(appender);
+        appender.start();
+
+        try {
+            RecorderLlmService service = new RecorderLlmService(models, mock(AIService.class));
+
+            assertThat(service.availability())
+                .isEqualTo(new RecorderLlmService.Availability(false, null, "default_model_detail_lookup_failed"));
+            assertThat(appender.list).anySatisfy(event -> {
+                assertThat(event.getLevel()).isEqualTo(Level.WARN);
+                assertThat(event.getFormattedMessage())
+                    .contains("Recorder default LLM model detail lookup failed", "modelId=12");
+                assertThat(event.getThrowableProxy()).isNotNull();
+            });
+        } finally {
+            logger.detachAppender(appender);
+            logger.setLevel(previousLevel);
+            appender.stop();
+        }
     }
 
     @Test

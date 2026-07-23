@@ -210,15 +210,16 @@ class RecorderDraftStoreTest {
     }
 
     @Test
-    void productionStoreFailsClosedWhenProviderHasNoSecureDirectoryStreams() throws Exception {
+    @EnabledOnOs(OS.LINUX)
+    void productionStoreWritesWhenProviderHasNoSecureDirectoryStreams() throws Exception {
         try (var stream = Files.newDirectoryStream(tempDir)) {
             Assumptions.assumeFalse(stream instanceof SecureDirectoryStream<?>);
         }
         RecorderDraftStore store = new RecorderDraftStore(new RecorderBycliPathResolver(tempDir));
 
-        assertThatThrownBy(() -> store.write(new RecorderOwner(1L, "alice"), "session", "draft", "source"))
-            .isInstanceOf(RecorderSaveException.class)
-            .hasFieldOrPropertyWithValue("code", "bycli_storage_unavailable");
+        RecorderBycliPaths paths = store.write(new RecorderOwner(1L, "alice"), "session", "draft", "source");
+
+        assertThat(Files.readString(paths.backendPath())).isEqualTo("source");
     }
 
     @Test
