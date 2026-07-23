@@ -26,7 +26,15 @@ http://portal.internal.example/byaiService/tool/installThirdPartySkill
 
 ### 2.1 地址与参数
 
-技能超市页面地址由对端提供，并按门户所在的开发、测试或生产环境分别配置。以下使用对端阿里云页面地址举例：
+技能超市页面地址由对端提供，并按门户所在的开发、测试或生产环境分别配置在
+`byai.byai_system_config` 表中：
+
+| 字段 | 配置值 |
+| --- | --- |
+| `param_code` | `WHALE_AGENT_SKILL_MARKET_URL` |
+| `param_value` | 当前环境的技能超市完整页面地址，包含原页面参数，例如 `https://www.iwhaleai.com/skillHub/dashboard?tab=skills` |
+
+以下使用对端阿里云页面地址举例：
 
 ```text
 https://www.iwhaleai.com/skillHub/dashboard?tab=skills&digId=10029822&beyondToken=<URL编码后的Token>&parentOrigin=https%3A%2F%2Fportal.example.com
@@ -34,16 +42,15 @@ https://www.iwhaleai.com/skillHub/dashboard?tab=skills&digId=10029822&beyondToke
 
 | 参数 | 必填 | 说明 |
 | --- | --- | --- |
-| `tab` | 是 | 固定为 `skills` |
 | `digId` | 是 | 当前数字员工资源 ID |
 | `beyondToken` | 是 | 门户当前登录用户的 `Beyond-Token` |
 | `parentOrigin` | 是 | 门户页面 Origin，用于安装成功后的 `postMessage` 通知 |
 
 拼接规则：
 
-- 技能超市页面地址取当前环境的配置值，地址中包含协议、域名和页面路径。
+- 技能超市页面地址取 `WHALE_AGENT_SKILL_MARKET_URL` 的配置值，地址中包含协议、域名、页面路径及对端原有参数。
 - `https://www.iwhaleai.com/skillHub/dashboard` 仅作为对端阿里云页面地址示例，各环境使用对应的配置值。
-- `tab` 固定传 `skills`。
+- `tab=skills` 是示例原地址的一部分，门户不生成或修改该参数。
 - `digId` 取门户当前正在操作的数字员工 ID。
 - `beyondToken` 取门户当前登录用户的 `Beyond-Token`。
 - `parentOrigin` 取门户页面的 `window.location.origin`，只包含协议、域名和端口。
@@ -66,7 +73,6 @@ import { getToken } from '@/utils/auth';
 
 function buildSkillMarketplaceUrl(skillMarketplacePageUrl: string, digId: string | number) {
   const url = new URL(skillMarketplacePageUrl);
-  url.searchParams.set('tab', 'skills');
   url.searchParams.set('digId', String(digId));
   url.searchParams.set('beyondToken', getToken());
   url.searchParams.set('parentOrigin', window.location.origin);

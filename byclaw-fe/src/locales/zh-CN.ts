@@ -120,6 +120,7 @@ export default {
   'resource.enterprise': '企业',
   'resource.skillMarketplace': '技能超市',
   'resource.marketplaceFullscreen': '全屏查看技能超市',
+  'resource.skillMarketplaceUrlMissing': '技能超市地址未配置或格式错误',
   'resource.type': '类型',
   'resource.permission': '权限',
   'resource.selectOrgScope': '选择组织范围',
