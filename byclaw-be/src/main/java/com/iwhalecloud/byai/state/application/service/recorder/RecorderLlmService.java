@@ -8,6 +8,7 @@ import com.iwhalecloud.byai.manager.dto.aimodel.ModelListResponse;
 import com.iwhalecloud.byai.manager.dto.aimodel.ModelVO;
 import java.util.Comparator;
 import java.util.List;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 /**
@@ -17,6 +18,7 @@ import org.springframework.stereotype.Service;
  * model service and are never returned by recorder APIs.</p>
  */
 @Service
+@Slf4j
 public class RecorderLlmService {
 
     private static final String AVAILABLE = "available";
@@ -69,7 +71,9 @@ public class RecorderLlmService {
                 .filter(model -> Integer.valueOf(1).equals(model.getIsDefault()))
                 .min(Comparator.comparing(ModelVO::getId, Comparator.nullsLast(Long::compareTo)))
                 .orElseGet(() -> rows.stream().filter(this::isLlmModel).findFirst().orElse(null));
-        } catch (RuntimeException ignored) {
+        } catch (RuntimeException exception) {
+            log.warn("Recorder default LLM model list lookup failed: ownerType=PUBLIC, status=ENABLED, pageNum=1, pageSize=100",
+                exception);
             return ResolvedModel.unavailable("default_model_list_lookup_failed");
         }
         if (listedModel == null || listedModel.getId() == null) {
@@ -77,9 +81,11 @@ public class RecorderLlmService {
         }
 
         ModelVO detail;
+        String modelId = String.valueOf(listedModel.getId());
         try {
-            detail = modelManagementApplicationService.getModelDetail(String.valueOf(listedModel.getId()));
-        } catch (RuntimeException ignored) {
+            detail = modelManagementApplicationService.getModelDetail(modelId);
+        } catch (RuntimeException exception) {
+            log.warn("Recorder default LLM model detail lookup failed: modelId={}", modelId, exception);
             return ResolvedModel.unavailable("default_model_detail_lookup_failed");
         }
         if (detail == null) {
