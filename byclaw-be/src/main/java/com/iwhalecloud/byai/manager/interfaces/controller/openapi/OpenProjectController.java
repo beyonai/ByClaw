@@ -7,6 +7,7 @@ import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.manager.application.service.devloop.ProjectApplicationService;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectListDto;
+import com.iwhalecloud.byai.manager.dto.devloop.MemberBatchDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectMemberListDto;
 import com.iwhalecloud.byai.manager.entity.devloop.Project;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
@@ -134,6 +135,30 @@ public class OpenProjectController {
     public ResponseUtil<Void> removeProjectMember(@RequestBody Map<String, Object> params) {
         Long memberId = MapParamUtil.getLongValue(params, "memberId");
         projectApplicationService.removeProjectMember(memberId);
+        return ResponseUtil.successResponse();
+    }
+
+    /**
+     * 批量添加项目成员
+     *
+     * @param dto 包含 projectId、userIds
+     */
+    @ManageLogAnnotation(name = "API调用", description = "批量添加项目成员")
+    @PostMapping("/batchAddProjectMembers")
+    public ResponseUtil<Void> batchAddProjectMembers(@RequestBody MemberBatchDTO dto) {
+        projectApplicationService.batchAddProjectMembers(dto);
+        return ResponseUtil.successResponse();
+    }
+
+    /**
+     * 批量移除项目成员
+     *
+     * @param dto 包含 projectId、userIds
+     */
+    @ManageLogAnnotation(name = "API调用", description = "批量移除项目成员")
+    @PostMapping("/batchRemoveProjectMembers")
+    public ResponseUtil<Void> batchRemoveProjectMembers(@RequestBody MemberBatchDTO dto) {
+        projectApplicationService.batchRemoveProjectMembers(dto);
         return ResponseUtil.successResponse();
     }
 

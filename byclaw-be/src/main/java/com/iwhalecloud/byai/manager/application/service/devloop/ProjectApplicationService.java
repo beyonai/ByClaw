@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.iwhalecloud.byai.common.constants.Constants;
 import com.iwhalecloud.byai.common.constants.devloop.DeleteFlag;
+import com.iwhalecloud.byai.common.constants.devloop.MemberRole;
 import com.iwhalecloud.byai.common.constants.errorcode.CommonErrorCode;
 import com.iwhalecloud.byai.common.constants.files.FileStatus;
 import com.iwhalecloud.byai.common.exception.BaseException;
@@ -28,6 +29,7 @@ import com.iwhalecloud.byai.manager.domain.file.service.CommonFilePathResolver;
 import com.iwhalecloud.byai.manager.domain.file.service.CommonFileStorage;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectListDto;
+import com.iwhalecloud.byai.manager.dto.devloop.MemberBatchDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectMemberListDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectRepoDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileListDto;
@@ -169,7 +171,8 @@ public class ProjectApplicationService {
         }
 
         // 创建者自动加为 owner 成员
-        projectMemberService.addMember(project.getProjectId(), CurrentUserHolder.getCurrentUserId(), "owner");
+        projectMemberService.addMember(project.getProjectId(), CurrentUserHolder.getCurrentUserId(),
+            MemberRole.OWNER);
 
         return project;
     }
@@ -248,7 +251,7 @@ public class ProjectApplicationService {
 
         // 如果不分享的，移除分享成员
         if (Constants.NO_VALUE_N.equalsIgnoreCase(project.getIsShare())) {
-            projectMemberService.removeMember(project.getProjectId(), "member");
+            projectMemberService.removeMember(project.getProjectId(), MemberRole.MEMBER);
         }
         else if (dto.getShareTargets() != null) {
             this.saveOrUpdateProjectMember(project.getProjectId(), dto.getShareTargets());
@@ -277,7 +280,7 @@ public class ProjectApplicationService {
                 continue;
             }
             else {
-                projectMemberService.addMember(projectId, userId, "member");
+                projectMemberService.addMember(projectId, userId, MemberRole.MEMBER);
             }
         }
     }
@@ -337,7 +340,7 @@ public class ProjectApplicationService {
         if (projectMemberService.isMember(projectId, userId)) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.member.already.exists");
         }
-        projectMemberService.addMember(projectId, userId, "member");
+        projectMemberService.addMember(projectId, userId, MemberRole.MEMBER);
         if (!Constants.YES_VALUE_Y.equals(project.getIsShare())) {
             // 从成员 tab 主动添加成员时，项目已经具备共享成员，需同步项目共享状态。
             project.setIsShare(Constants.YES_VALUE_Y);
@@ -361,6 +364,49 @@ public class ProjectApplicationService {
             }
         }
         projectMemberService.removeMember(memberId);
+    }
+
+    /**
+     * 批量添加项目成员。
+     *
+     * @param memberBatchDTO 含 projectId、userIds
+     */
+    public void batchAddProjectMembers(MemberBatchDTO memberBatchDTO) {
+        Long projectId = memberBatchDTO.getProjectId();
+        List<Long> userIds = memberBatchDTO.getUserIds();
+        if (ListUtil.isEmpty(userIds)) {
+            return;
+        }
+
+        for (Long userId : userIds) {
+            ProjectMember projectMember = projectMemberService.findByProjectAndUser(projectId, userId);
+            if (projectMember == null) {
+                projectMemberService.addMember(projectId, userId, MemberRole.MEMBER);
+            }
+        }
+    }
+
+    /**
+     * 批量移除项目成员。
+     *
+     * @param memberBatchDTO 含 projectId、userIds
+     */
+    public void batchRemoveProjectMembers(MemberBatchDTO memberBatchDTO) {
+        Long projectId = memberBatchDTO.getProjectId();
+
+        List<Long> userIds = memberBatchDTO.getUserIds();
+
+        if (ListUtil.isEmpty(userIds)) {
+            return;
+        }
+
+        for (Long userId : userIds) {
+            ProjectMember projectMember = projectMemberService.findByProjectAndUser(projectId, userId);
+            // 存在当前成员，并且不是创建人
+            if (projectMember != null && !MemberRole.OWNER.equalsIgnoreCase(projectMember.getRole())) {
+                projectMemberService.removeMember(projectMember.getMemberId());
+            }
+        }
     }
 
     /**

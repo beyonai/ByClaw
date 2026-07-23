@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.devloop.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.iwhalecloud.byai.common.constants.devloop.MemberRole;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectMemberListDto;
 import com.iwhalecloud.byai.manager.entity.devloop.ProjectMember;
 import com.iwhalecloud.byai.manager.mapper.devloop.ProjectMemberMapper;
@@ -42,7 +43,7 @@ public class ProjectMemberService {
         member.setMemberId(sequenceService.nextVal());
         member.setProjectId(projectId);
         member.setUserId(userId);
-        member.setRole(role != null ? role : "member");
+        member.setRole(role != null ? role : MemberRole.MEMBER);
         member.setCreateTime(new Date());
         memberMapper.insert(member);
         return member;
