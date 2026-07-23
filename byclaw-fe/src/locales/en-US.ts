@@ -119,6 +119,7 @@ export default {
   'resource.enterprise': 'Enterprise',
   'resource.skillMarketplace': 'Skill Marketplace',
   'resource.marketplaceFullscreen': 'View skill marketplace in fullscreen',
+  'resource.skillMarketplaceUrlMissing': 'The skill marketplace URL is missing or invalid',
   'resource.type': 'Type',
   'resource.permission': 'Permission',
   'resource.selectOrgScope': 'Select organization scope',
