@@ -74,44 +74,6 @@ COMMENT ON COLUMN byai.byai_project_repo.repo_full_name IS '仓库全名 owner/r
 COMMENT ON COLUMN byai.byai_project_repo.repo_url IS '仓库地址';
 COMMENT ON COLUMN byai.byai_project_repo.default_branch IS '默认分支';
 
--- 项目会话关联表
-CREATE TABLE IF NOT EXISTS byai.byai_project_session (
-    relation_id     BIGINT          NOT NULL,
-    project_id      BIGINT          NOT NULL,
-    session_id      BIGINT          NOT NULL,
-    create_by       BIGINT,
-    create_time     TIMESTAMP       DEFAULT CURRENT_TIMESTAMP,
-    update_by       VARCHAR(64),
-    update_time     TIMESTAMP       DEFAULT CURRENT_TIMESTAMP,
-    delete_flag     CHAR(1)         DEFAULT '0',
-    CONSTRAINT pk_byai_project_session PRIMARY KEY (relation_id)
-);
-
-COMMENT ON TABLE byai.byai_project_session IS '项目会话关联表';
-COMMENT ON COLUMN byai.byai_project_session.relation_id IS '关联记录ID';
-COMMENT ON COLUMN byai.byai_project_session.project_id IS '项目ID';
-COMMENT ON COLUMN byai.byai_project_session.session_id IS '会话ID';
-COMMENT ON COLUMN byai.byai_project_session.delete_flag IS '删除标记 0正常 1删除';
-
--- 项目共享对象表
-CREATE TABLE IF NOT EXISTS byai.byai_project_share (
-    share_id      BIGINT       NOT NULL,
-    project_id    BIGINT       NOT NULL,
-    target_type   VARCHAR(20)  NOT NULL,
-    target_id     BIGINT       NOT NULL,
-    target_name   VARCHAR(200),
-    create_by     BIGINT,
-    create_time   TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT pk_byai_project_share PRIMARY KEY (share_id)
-);
-
-COMMENT ON TABLE byai.byai_project_share IS '项目共享对象表';
-COMMENT ON COLUMN byai.byai_project_share.share_id IS '共享记录ID';
-COMMENT ON COLUMN byai.byai_project_share.project_id IS '项目ID';
-COMMENT ON COLUMN byai.byai_project_share.target_type IS '共享对象类型：USER人员，ORG组织';
-COMMENT ON COLUMN byai.byai_project_share.target_id IS '共享对象ID';
-COMMENT ON COLUMN byai.byai_project_share.target_name IS '共享对象名称';
-
 -- 项目空间共享文件表
 CREATE TABLE IF NOT EXISTS byai.byai_project_share_file
 (
@@ -237,12 +199,6 @@ CREATE INDEX IF NOT EXISTS idx_scan_log_item_hash ON byai.byai_scan_log_item(con
 CREATE INDEX IF NOT EXISTS idx_scan_log_item_dedup ON byai.byai_scan_log_item(dedup_status);
 CREATE INDEX IF NOT EXISTS idx_scan_log_item_parent ON byai.byai_scan_log_item(parent_item_id);
 CREATE INDEX IF NOT EXISTS idx_project_repo_project ON byai.byai_project_repo(project_id);
-CREATE INDEX IF NOT EXISTS idx_project_session_project ON byai.byai_project_session(project_id);
-CREATE INDEX IF NOT EXISTS idx_project_session_session ON byai.byai_project_session(session_id);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_project_session_unique ON byai.byai_project_session(project_id, session_id);
-CREATE INDEX IF NOT EXISTS idx_project_share_project ON byai.byai_project_share(project_id);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_project_share_unique
-    ON byai.byai_project_share(project_id, target_type, target_id);
 CREATE INDEX IF NOT EXISTS idx_project_share_file_project ON byai.byai_project_share_file(project_id);
 CREATE INDEX IF NOT EXISTS idx_project_share_file_file ON byai.byai_project_share_file(file_id);
 CREATE INDEX IF NOT EXISTS idx_project_share_file_create_by ON byai.byai_project_share_file(create_by);
