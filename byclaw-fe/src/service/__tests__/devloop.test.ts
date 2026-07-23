@@ -43,14 +43,15 @@ describe('Devloop task service', () => {
     expect(mockPOST).toHaveBeenCalledWith('/byaiService/devloop/task/phases', { sessionId: 123 });
   });
 
+  // 覆盖所有手工录入字段（含来源类型）的前后端请求契约。
   it('posts manual requirements to the project requirement endpoint', () => {
     const requirement = {
       projectId: 203,
       sourceType: 'customer_feedback' as const,
       branch: 'develop',
-      title: '优化登录流程',
-      originalContent: '客户反馈登录步骤过多。',
-      productContent: '简化登录流程并保留安全校验。',
+      title: 'Improve login flow',
+      originalContent: 'Customers report that the login flow has too many steps.',
+      productContent: 'Simplify the flow while retaining security checks.',
     };
 
     createManualRequirement(requirement);

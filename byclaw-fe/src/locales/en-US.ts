@@ -1680,6 +1680,7 @@ export default {
   'projectSpace.detail.log.status.running': 'Running',
   'projectSpace.detail.log.summary': '{found} found, {created} created',
   'projectSpace.detail.log.empty': 'No scan records',
+  // 手工录入需求弹窗及需求详情来源展示。
   'projectSpace.detail.manualRequirement.title': 'Manually Enter Requirement',
   'projectSpace.detail.manualRequirement.description':
     'Save it to the current project requirement list, then start a development task when ready.',
@@ -1697,6 +1698,7 @@ export default {
   'projectSpace.detail.manualRequirement.source.customerFeedback': 'Customer Feedback',
   'projectSpace.detail.manualRequirement.source.internalProposal': 'Internal Proposal',
   'projectSpace.detail.manualRequirement.placeholder.title': 'Describe the problem to solve in one sentence',
+  'projectSpace.detail.manualRequirement.placeholder.branch': 'For example: develop',
   'projectSpace.detail.manualRequirement.placeholder.originalContent':
     'Record the user’s words, the problem context, and the triggering scenario',
   'projectSpace.detail.manualRequirement.placeholder.productContent':

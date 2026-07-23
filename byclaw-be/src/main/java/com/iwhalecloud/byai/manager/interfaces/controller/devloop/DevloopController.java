@@ -140,7 +140,12 @@ public class DevloopController {
         return applicationService.listRequirementsByProject(projectId, title);
     }
 
-    /** 手工录入项目需求，复用现有需求列表与任务派生链路。 */
+    /**
+     * 新建不经渠道扫描的手工需求。仍写入扫描日志链路，需求列表和任务派生无需维护独立数据流。
+     *
+     * @param dto 语言无关的手工需求字段
+     * @return 按当前请求语言组装的已创建需求
+     */
     @PostMapping("/requirement/create")
     public ResponseUtil<Map<String, Object>> createManualRequirement(@RequestBody ManualRequirementDTO dto) {
         return applicationService.createManualRequirement(dto);

@@ -830,7 +830,7 @@
   margin: 0;
 }
 
-// 成员添加、需求刷新、任务刷新和任务视图统一使用同一套紧凑图标按钮规格。
+// 成员添加、手工录入需求、需求刷新、任务刷新和任务视图统一使用同一套紧凑图标按钮规格。
 .detailMemberAddButton,
 .detailManualRequirementAddButton,
 .detailRequirementRefreshButton,
@@ -2555,18 +2555,19 @@
     }
 
     .@{antPrefix}-modal-header {
-      padding: 20px 24px 16px;
+      padding: 16px 20px 12px;
       margin-bottom: 0;
       border-bottom: 1px solid #edf1f7;
     }
 
     .@{antPrefix}-modal-body {
-      padding: 20px 24px 4px;
+      padding: 14px 20px 0;
     }
 
     .@{antPrefix}-modal-footer {
-      padding: 14px 24px 20px;
-      border-top: 1px solid #edf1f7;
+      // 手工需求弹窗的操作区不再使用分割线，和新增渠道弹窗保持轻量视觉层级。
+      padding: 10px 20px 16px;
+      border-top: 0;
     }
 
     .@{antPrefix}-btn {
@@ -2600,14 +2601,45 @@
 
 .manualRequirementForm {
   .formField {
-    margin-bottom: 16px;
+    margin-bottom: 12px;
   }
 }
 
-.manualRequirementRow {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 16px;
+.manualRequirementSourceType {
+  width: 100%;
+  display: flex;
+
+  :global {
+    // 与新增渠道的需求确认规则一致，三个来源以等宽按钮形式切换。
+    .@{antPrefix}-radio-button-wrapper {
+      min-width: 0;
+      flex: 1 1 0;
+      padding: 0 8px;
+      text-align: center;
+    }
+  }
+}
+
+.manualRequirementTextArea {
+  position: relative;
+
+  :global {
+    // 为右上角字数提示预留水平空间，避免首行文字与计数重叠。
+    .@{antPrefix}-input {
+      padding-right: 64px;
+    }
+  }
+}
+
+.manualRequirementTextCount {
+  position: absolute;
+  z-index: 1;
+  top: 7px;
+  right: 12px;
+  color: #98a2b3;
+  font-size: 12px;
+  line-height: 18px;
+  pointer-events: none;
 }
 
 .repoModalDivider {

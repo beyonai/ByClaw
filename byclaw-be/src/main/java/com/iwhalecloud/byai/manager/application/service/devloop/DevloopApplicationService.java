@@ -8,6 +8,7 @@ import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.common.ecrypt.Sm4Util;
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.manager.application.service.job.DevloopPatService;
 import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService;
 import com.iwhalecloud.byai.manager.application.service.user.UserBucketNamingService;
@@ -84,16 +85,23 @@ public class DevloopApplicationService {
 
     private static final int AGENT_MAX_CONCURRENT_DEFAULT = 1;
 
-    /** 手工录入需求复用扫描条目存储，但不属于可扫描渠道。 */
+    /** 手工录入需求复用扫描条目存储，但不作为可扫描渠道。 */
     private static final String MANUAL_SOURCE_TYPE = "manual";
 
-    private static final String MANUAL_SOURCE_NAME = "手工录入";
+    /** 数据库存储语言无关的内部标识；展示名称在每次请求时根据当前语言解析。 */
+    private static final String MANUAL_SOURCE_NAME = MANUAL_SOURCE_TYPE;
 
+    /**
+     * 手工录入内容的持久化包裹标识。外部扫描内容仍按原文存储，读取时只识别该流程创建的记录，
+     * 不改变已有渠道内容。
+     */
     private static final String MANUAL_REQUIREMENT_CONTENT_KEY = "manualRequirement";
 
+    /** 手工需求 JSON 包裹中持久化的稳定、语言无关的来源标识。 */
     private static final Set<String> MANUAL_REQUIREMENT_ORIGIN_TYPES =
         Set.of("manual", "customer_feedback", "internal_proposal");
 
+    /** 仅用于内部 JSON 包裹的独立 Mapper，避免受 HTTP JSON 全局配置影响。 */
     private static final ObjectMapper MANUAL_REQUIREMENT_MAPPER = new ObjectMapper();
 
     /**
@@ -208,7 +216,7 @@ public class DevloopApplicationService {
         return ResponseUtil.successResponse(null);
     }
 
-    /** 查询项目下的扫描源列表 */
+    /** 查询项目可配置的扫描渠道；手工来源只是扫描日志基础设施，不能展示在渠道配置页。 */
     public ResponseUtil<List<Map<String, Object>>> listScanSources(Long projectId) {
         List<Map<String, Object>> list = scanSourceService.listByProjectId(projectId).stream()
             .filter(source -> !MANUAL_SOURCE_TYPE.equals(source.getSourceType())).map(this::scanSourceToVo)
@@ -344,25 +352,25 @@ public class DevloopApplicationService {
     }
 
     /**
-     * 新建手工需求。需求继续落在 scan log item 中，避免绕开现有需求列表、启动任务和任务详情的关联链路。
-     * 每个项目只维护一个禁用的内部来源，不参与定时扫描，也不返回到渠道配置页。
+     * 新建手工需求，复用扫描日志存储，使需求列表、任务启动和任务详情继续沿用既有关联链路。
+     * 每个项目只维护一个禁用的内部来源，不参与定时扫描或渠道配置。
      */
     @Transactional(rollbackFor = Exception.class)
     public ResponseUtil<Map<String, Object>> createManualRequirement(ManualRequirementDTO dto) {
         if (dto == null || dto.getProjectId() == null) {
-            return ResponseUtil.failRes("projectId不能为空");
+            return ResponseUtil.failRes(I18nUtil.get("devloop.manualRequirement.projectId.required"));
         }
         String title = StringUtils.trimToNull(dto.getTitle());
         if (title == null) {
-            return ResponseUtil.failRes("需求名称不能为空");
+            return ResponseUtil.failRes(I18nUtil.get("devloop.manualRequirement.title.required"));
         }
         String originalContent = StringUtils.trimToNull(dto.getOriginalContent());
         if (originalContent == null) {
-            return ResponseUtil.failRes("原始需求不能为空");
+            return ResponseUtil.failRes(I18nUtil.get("devloop.manualRequirement.originalContent.required"));
         }
         String originType = StringUtils.defaultIfBlank(dto.getSourceType(), "manual").trim();
         if (!MANUAL_REQUIREMENT_ORIGIN_TYPES.contains(originType)) {
-            return ResponseUtil.failRes("不支持的手工需求来源");
+            return ResponseUtil.failRes(I18nUtil.get("devloop.manualRequirement.sourceType.unsupported"));
         }
 
         ScanSource source = findOrCreateManualSource(dto.getProjectId());
@@ -375,6 +383,10 @@ public class DevloopApplicationService {
         return ResponseUtil.successResponse(toRequirementMap(item, source));
     }
 
+    /**
+     * 每个项目复用一个禁用来源，因为扫描条目、任务派生和需求查询都通过 sourceId 关联。
+     * 该来源永不作为外部扫描渠道被调度。
+     */
     private ScanSource findOrCreateManualSource(Long projectId) {
         for (ScanSource source : scanSourceService.listByProjectId(projectId)) {
             if (MANUAL_SOURCE_TYPE.equals(source.getSourceType())) {
@@ -393,6 +405,10 @@ public class DevloopApplicationService {
         return scanSourceService.create(source);
     }
 
+    /**
+     * 将语言无关字段保存为带命名空间的 JSON 包裹，而不存已渲染的文案。
+     * 既可无歧义解析，也兼容历史和第三方渠道的纯文本扫描内容。
+     */
     private String serializeManualRequirementContent(String originType, String branch, String originalContent,
         String productContent) {
         Map<String, String> content = new LinkedHashMap<>();
@@ -404,7 +420,7 @@ public class DevloopApplicationService {
             return MANUAL_REQUIREMENT_MAPPER.writeValueAsString(Map.of(MANUAL_REQUIREMENT_CONTENT_KEY, content));
         }
         catch (Exception e) {
-            throw new IllegalStateException("手工需求内容序列化失败", e);
+            throw new IllegalStateException(I18nUtil.get("devloop.manualRequirement.content.serialize.failed"), e);
         }
     }
 
@@ -412,7 +428,10 @@ public class DevloopApplicationService {
         return toRequirementMap(item, null);
     }
 
-    /** 扫描条目转前端需求视图，统一各需求列表接口字段口径；source 非空时回填来源名/类型。 */
+    /**
+     * 扫描条目转统一需求视图；手工来源名称与内容在读取时国际化，避免持久化标识和负载
+     * 绑定创建者语言。
+     */
     private Map<String, Object> toRequirementMap(ScanLogItem item, ScanSource source) {
         Map<String, Object> map = new HashMap<>();
         map.put("itemId", item.getItemId());
@@ -436,12 +455,17 @@ public class DevloopApplicationService {
             map.put("productContent", manualContent.productContent());
         }
         if (source != null) {
-            map.put("sourceName", source.getSourceName());
+            map.put("sourceName", MANUAL_SOURCE_TYPE.equals(source.getSourceType())
+                ? I18nUtil.get("devloop.manualRequirement.source.name") : source.getSourceName());
             map.put("sourceType", source.getSourceType());
         }
         return map;
     }
 
+    /**
+     * 获取需求视图和 LLM 任务提示词共用的可读描述。
+     * 格式化在当前执行上下文完成，再交给异步会话执行。
+     */
     private String getRequirementContent(ScanLogItem item) {
         if (item == null) {
             return "";
@@ -450,6 +474,10 @@ public class DevloopApplicationService {
         return manualContent != null ? formatManualRequirementContent(manualContent) : StringUtils.defaultString(item.getContent());
     }
 
+    /**
+     * 仅解析手工录入 JSON 包裹；格式错误、缺失包裹或字段不完整时返回 {@code null}，
+     * 保留已有扫描需求的原始内容路径。
+     */
     private ManualRequirementContent parseManualRequirementContent(String content) {
         if (StringUtils.isBlank(content)) {
             return null;
@@ -472,19 +500,36 @@ public class DevloopApplicationService {
         }
     }
 
+    /**
+     * 使用当前请求语言格式化持久化的手工字段。禁止把结果再存回库：
+     * 后续读取者的语言可能不同，JSON 包裹保持语言无关。
+     */
     private String formatManualRequirementContent(ManualRequirementContent content) {
         StringBuilder description = new StringBuilder();
-        description.append("来源：").append(content.sourceType()).append('\n');
+        description.append(I18nUtil.get("devloop.manualRequirement.content.source",
+            manualRequirementOriginLabel(content.sourceType()))).append('\n');
         if (StringUtils.isNotBlank(content.branch())) {
-            description.append("影响分支：").append(content.branch()).append('\n');
+            description.append(I18nUtil.get("devloop.manualRequirement.content.branch", content.branch())).append('\n');
         }
         if (StringUtils.isNotBlank(content.productContent())) {
-            description.append("产品需求：\n").append(content.productContent()).append("\n\n");
+            description.append(I18nUtil.get("devloop.manualRequirement.content.product")).append('\n')
+                .append(content.productContent()).append("\n\n");
         }
-        description.append("原始需求：\n").append(content.originalContent());
+        description.append(I18nUtil.get("devloop.manualRequirement.content.original")).append('\n')
+            .append(content.originalContent());
         return description.toString();
     }
 
+    /** 将持久化来源标识转换为当前语言的展示名称。 */
+    private String manualRequirementOriginLabel(String originType) {
+        return switch (originType) {
+            case "customer_feedback" -> I18nUtil.get("devloop.manualRequirement.origin.customerFeedback");
+            case "internal_proposal" -> I18nUtil.get("devloop.manualRequirement.origin.internalProposal");
+            default -> I18nUtil.get("devloop.manualRequirement.origin.manual");
+        };
+    }
+
+    /** 手工需求 JSON 包裹中携带的已解析、语言无关的数据。 */
     private record ManualRequirementContent(String sourceType, String branch, String originalContent,
         String productContent) {
     }
@@ -646,7 +691,8 @@ public class DevloopApplicationService {
             return ResponseUtil.failRes("任务标题不能为空");
         }
 
-        // 加载需求项：提供需求详情与任务类型判定依据
+        // 将手工需求 JSON 按当前执行上下文的语言渲染后，再写入异步 LLM 提示词。
+        // 普通扫描内容经 getRequirementContent 处理时保持原样。
         ScanLogItem sourceItem = sourceItemId != null ? scanLogItemMapper.selectById(sourceItemId) : null;
         String description = sourceItem != null && StringUtils.isNotBlank(sourceItem.getContent())
             ? getRequirementContent(sourceItem)

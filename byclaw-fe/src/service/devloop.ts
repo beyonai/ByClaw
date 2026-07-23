@@ -221,6 +221,10 @@ export const listRequirementsBySource = (sourceId: number) =>
 export const listRequirementsByProject = (projectId: number, title?: string) =>
   POST<any>('/byaiService/devloop/project/requirements', { projectId, title: title || undefined });
 
+/**
+ * 通过手工录入链路新建需求。sourceType 保存业务来源，后端仍通过内部 manual 来源持久化，
+ * 因此此联合类型必须与 ManualRequirementDTO 保持一致。
+ */
 export const createManualRequirement = (data: {
   projectId: number;
   sourceType: 'manual' | 'customer_feedback' | 'internal_proposal';

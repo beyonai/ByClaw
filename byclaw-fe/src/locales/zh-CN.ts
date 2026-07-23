@@ -1667,6 +1667,7 @@ export default {
   'projectSpace.detail.log.status.running': '运行中',
   'projectSpace.detail.log.summary': '发现 {found} 条，新增 {created} 条',
   'projectSpace.detail.log.empty': '暂无扫描记录',
+  // 手工录入需求弹窗及需求详情来源展示。
   'projectSpace.detail.manualRequirement.title': '手工录入需求',
   'projectSpace.detail.manualRequirement.description': '保存后会加入当前项目的需求列表，可直接启动研发任务',
   'projectSpace.detail.manualRequirement.submit': '保存需求',
@@ -1683,6 +1684,7 @@ export default {
   'projectSpace.detail.manualRequirement.source.customerFeedback': '客户反馈',
   'projectSpace.detail.manualRequirement.source.internalProposal': '内部提案',
   'projectSpace.detail.manualRequirement.placeholder.title': '一句话描述期望解决的问题',
+  'projectSpace.detail.manualRequirement.placeholder.branch': '例如 develop',
   'projectSpace.detail.manualRequirement.placeholder.originalContent': '记录用户原话、问题背景和触发场景',
   'projectSpace.detail.manualRequirement.placeholder.productContent': '可选：为空时由 AI 自动整理目标、范围与验收标准',
   // 项目任务详情抽屉

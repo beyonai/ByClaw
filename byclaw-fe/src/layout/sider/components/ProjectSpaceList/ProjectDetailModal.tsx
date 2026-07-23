@@ -160,7 +160,9 @@ type RequirementItem = {
   score?: number | null;
   priority?: string | null;
   scoreDetail?: string | null;
+  // 手工需求的业务来源；sourceType 仍表示后端内部的 manual 扫描来源。
   manualSourceType?: string;
+  // 用户填写的影响分支上下文，不等同任务创建后生成的工作分支。
   branch?: string;
 };
 
@@ -268,6 +270,8 @@ type Props = {
 const REQUIREMENT_PAGE_SIZE = 20;
 // 任务列表固定页大小，取消分页器后按此值触底追加。
 const TASK_PAGE_SIZE = 20;
+// 后端尚未限制手工需求的两个长文本字段，前端统一限制为 500 字，避免无界内容写入任务提示词。
+const MANUAL_REQUIREMENT_CONTENT_MAX_LENGTH = 500;
 
 // GitHub 文件变更状态 -> 角标字母/配色,沿用常见 git 管理视觉:新增绿/修改黄/删除红/重命名蓝。
 const FILE_CHANGE_META: Record<string, { letter: string; labelId: string; className: string }> = {
@@ -347,6 +351,8 @@ const getDefaultSourceForm = (): SourceForm => ({
   scoreThreshold: 70,
 });
 
+// 每次打开弹窗都创建新表单，避免取消或提交过的内容残留到下一次录入。
+// 分支字段仅是需求上下文，真正的任务分支由后端启动任务时生成。
 const getDefaultManualRequirementForm = (): ManualRequirementForm => ({
   sourceType: 'manual',
   branch: 'develop',
@@ -567,9 +573,9 @@ const ProjectDetailPanel: React.FC<Props> = ({
     EventEmitter,
     previewClassName: fileSiderStyles.previewContent,
   });
-  // 需求和成员配置只服务研发项目，普通共享项目也不展示这两个 Tab。
+  // 需求只服务研发项目；成员管理同时服务研发项目和普通共享项目。
   const showRequirementsTab = isDevelopProject;
-  const showMembersTab = isDevelopProject;
+  const showMembersTab = isDevelopProject || !!project?.sharedFlag;
   const canEnterDetailTaskSession = useMemo(
     () => isCurrentUserTaskAssignee(detailTask, userInfo),
     [detailTask, userInfo]
@@ -638,6 +644,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const handleOpenTaskDetail = useCallback(
     (task: any) => {
       if (channelPanelOpen) {
+        // 渠道配置渲染在共享的右侧详情面板中。
+        // 打开任务详情前必须先清除该覆盖层，避免两个大页面同时显示。
         setChannelPanelOpen(false);
         clearDetailPanel?.();
       }
@@ -1562,6 +1570,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
       message.success(t('manualRequirement.createSuccess'));
       setManualRequirementOpen(false);
       setManualRequirementForm(getDefaultManualRequirementForm());
+      // fetchRequirements 需要来源列表重新计算最后扫描时间，创建后两个数据集都要刷新。
       const sourceList = await fetchSources();
       await fetchRequirements(sourceList, requirementSearchKeyword.trim());
     } catch (error: any) {
@@ -2033,6 +2042,14 @@ const ProjectDetailPanel: React.FC<Props> = ({
     void fetchSources();
   };
 
+  const handleTabChange = (nextTab: string) => {
+    if (nextTab !== 'requirements' && channelPanelOpen) {
+      // 渠道配置大面板只服务需求页签；切换到其他页签时立即移除右侧覆盖层。
+      handleCloseChannelPanel();
+    }
+    setActiveTab(nextTab);
+  };
+
   const renderChannelPanel = () => (
     <div className={styles.detailChannelPanel}>
       <div className={styles.detailChannelPanelHeader}>
@@ -2084,10 +2101,18 @@ const ProjectDetailPanel: React.FC<Props> = ({
     };
   }, [channelPanelOpen, clearDetailPanel]);
 
+  useEffect(() => {
+    if (!channelPanelOpen || activeTab === 'requirements') return;
+    // 除点击页签外，启动任务等流程也会直接切换 activeTab；这里兜底关闭渠道配置覆盖层。
+    setChannelPanelOpen(false);
+    clearDetailPanel?.();
+  }, [activeTab, channelPanelOpen, clearDetailPanel]);
+
   // 需求列表保持紧凑，完整字段统一在右侧抽屉展示。
   const renderRequirementDetailDrawer = () => {
     if (!detailReq) return null;
     const detail = parseScoreDetail(detailReq.scoreDetail);
+    // 内部扫描来源始终为 manual；manualSourceType 保存表单中选定的业务来源。
     const sourceLabel = getSourceLabel(detailReq.manualSourceType || detailReq.sourceType, t);
     const scored = detailReq.score !== null && detailReq.score !== undefined;
     const createTime = detailReq.createTime ? dayjs(detailReq.createTime).format('YYYY-MM-DD HH:mm') : '-';
@@ -3029,30 +3054,32 @@ const ProjectDetailPanel: React.FC<Props> = ({
       okText={t('manualRequirement.submit')}
       cancelText={t('common.cancel')}
       width={720}
+      centered
       className={styles.manualRequirementModal}
     >
       <div className={styles.manualRequirementForm}>
-        <div className={styles.manualRequirementRow}>
-          <div className={styles.formField}>
-            <label>{t('manualRequirement.field.sourceType')}</label>
-            <Select
-              value={manualRequirementForm.sourceType}
-              onChange={(sourceType) => setManualRequirementForm((prev) => ({ ...prev, sourceType }))}
-              options={[
-                { value: 'manual', label: t('manualRequirement.source.manual') },
-                { value: 'customer_feedback', label: t('manualRequirement.source.customerFeedback') },
-                { value: 'internal_proposal', label: t('manualRequirement.source.internalProposal') },
-              ]}
-            />
-          </div>
-          <div className={styles.formField}>
-            <label>{t('manualRequirement.field.branch')}</label>
-            <Input
-              placeholder="develop"
-              value={manualRequirementForm.branch}
-              onChange={(event) => setManualRequirementForm((prev) => ({ ...prev, branch: event.target.value }))}
-            />
-          </div>
+        <div className={styles.formField}>
+          <label>{t('manualRequirement.field.sourceType')}</label>
+          <Radio.Group
+            className={styles.manualRequirementSourceType}
+            value={manualRequirementForm.sourceType}
+            onChange={(event) => setManualRequirementForm((prev) => ({ ...prev, sourceType: event.target.value }))}
+            optionType="button"
+            buttonStyle="solid"
+            options={[
+              { value: 'manual', label: t('manualRequirement.source.manual') },
+              { value: 'customer_feedback', label: t('manualRequirement.source.customerFeedback') },
+              { value: 'internal_proposal', label: t('manualRequirement.source.internalProposal') },
+            ]}
+          />
+        </div>
+        <div className={styles.formField}>
+          <label>{t('manualRequirement.field.branch')}</label>
+          <Input
+            placeholder={t('manualRequirement.placeholder.branch')}
+            value={manualRequirementForm.branch}
+            onChange={(event) => setManualRequirementForm((prev) => ({ ...prev, branch: event.target.value }))}
+          />
         </div>
         <div className={styles.formField}>
           <label>{t('manualRequirement.field.title')}</label>
@@ -3064,21 +3091,37 @@ const ProjectDetailPanel: React.FC<Props> = ({
         </div>
         <div className={styles.formField}>
           <label>{t('manualRequirement.field.originalContent')}</label>
-          <Input.TextArea
-            placeholder={t('manualRequirement.placeholder.originalContent')}
-            rows={4}
-            value={manualRequirementForm.originalContent}
-            onChange={(event) => setManualRequirementForm((prev) => ({ ...prev, originalContent: event.target.value }))}
-          />
+          <div className={styles.manualRequirementTextArea}>
+            <span className={styles.manualRequirementTextCount}>
+              {manualRequirementForm.originalContent.length}/{MANUAL_REQUIREMENT_CONTENT_MAX_LENGTH}
+            </span>
+            <Input.TextArea
+              maxLength={MANUAL_REQUIREMENT_CONTENT_MAX_LENGTH}
+              placeholder={t('manualRequirement.placeholder.originalContent')}
+              rows={4}
+              value={manualRequirementForm.originalContent}
+              onChange={(event) =>
+                setManualRequirementForm((prev) => ({ ...prev, originalContent: event.target.value }))
+              }
+            />
+          </div>
         </div>
         <div className={styles.formField}>
           <label>{t('manualRequirement.field.productContent')}</label>
-          <Input.TextArea
-            placeholder={t('manualRequirement.placeholder.productContent')}
-            rows={4}
-            value={manualRequirementForm.productContent}
-            onChange={(event) => setManualRequirementForm((prev) => ({ ...prev, productContent: event.target.value }))}
-          />
+          <div className={styles.manualRequirementTextArea}>
+            <span className={styles.manualRequirementTextCount}>
+              {manualRequirementForm.productContent.length}/{MANUAL_REQUIREMENT_CONTENT_MAX_LENGTH}
+            </span>
+            <Input.TextArea
+              maxLength={MANUAL_REQUIREMENT_CONTENT_MAX_LENGTH}
+              placeholder={t('manualRequirement.placeholder.productContent')}
+              rows={4}
+              value={manualRequirementForm.productContent}
+              onChange={(event) =>
+                setManualRequirementForm((prev) => ({ ...prev, productContent: event.target.value }))
+              }
+            />
+          </div>
         </div>
       </div>
     </Modal>
@@ -3326,7 +3369,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
         </div>
       </div>
       <div className={styles.detailTabsWrap}>
-        <Tabs activeKey={activeTab} onChange={setActiveTab} items={tabItems} />
+        <Tabs activeKey={activeTab} onChange={handleTabChange} items={tabItems} />
       </div>
       <Spin spinning={detailSpinning} wrapperClassName={styles.detailSpin}>
         <div
