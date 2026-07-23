@@ -1679,7 +1679,9 @@ public class SandboxService {
             LOGGER.warn("沙箱一致性检测发现远端孤儿候选，userCode：{}，sandboxType：{}，样例：{}",
                 group.getUserCode(), group.getSandboxType(), orphanSamples);
 
-            // Auto-cleanup orphan sandboxes stuck in Pending state for more than 30 minutes
+            // Auto-cleanup orphan sandboxes:
+            // 1. Terminal states (failed/error/terminated/etc.) - cleanup immediately
+            // 2. Pending state for more than 30 minutes - likely creation timeout
             for (SandboxRuntimeInstance orphan : remoteBySandboxId.values()) {
                 if (orphan == null || dbBySandboxId.containsKey(orphan.getSandboxId())) {
                     continue;
@@ -1687,12 +1689,37 @@ public class SandboxService {
                 if (orphan.getCreatedAt() == null) {
                     continue;
                 }
+
+                String state = orphan.getState();
+                if (state == null || state.isBlank()) {
+                    continue;
+                }
+
+                String normalizedState = state.trim().toLowerCase(java.util.Locale.ROOT);
                 long ageMinutes = java.time.Duration.between(orphan.getCreatedAt(), java.time.OffsetDateTime.now()).toMinutes();
-                if ("Pending".equalsIgnoreCase(orphan.getState()) && ageMinutes > 30) {
-                    LOGGER.info("自动清理孤儿沙箱，sandboxId：{}，状态：{}，创建时间：{}，已存在：{} 分钟",
-                        orphan.getSandboxId(), orphan.getState(), orphan.getCreatedAt(), ageMinutes);
+
+                // Check if orphan is in a terminal state that should be cleaned up
+                boolean isTerminalState = "failed".equals(normalizedState)
+                    || "succeeded".equals(normalizedState)
+                    || "completed".equals(normalizedState)
+                    || "terminated".equals(normalizedState)
+                    || "stopped".equals(normalizedState)
+                    || "killed".equals(normalizedState)
+                    || "error".equals(normalizedState)
+                    || "unknown".equals(normalizedState)
+                    || "exited".equals(normalizedState);
+
+                // Check if orphan is stuck in Pending for too long
+                boolean isPendingTimeout = "pending".equals(normalizedState) && ageMinutes > 30;
+
+                if (isTerminalState || isPendingTimeout) {
+                    String reason = isTerminalState
+                        ? "orphan-terminal-state"
+                        : "orphan-pending-timeout";
+                    LOGGER.info("自动清理孤儿沙箱，sandboxId：{}，状态：{}，创建时间：{}，已存在：{} 分钟，原因：{}",
+                        orphan.getSandboxId(), orphan.getState(), orphan.getCreatedAt(), ageMinutes, reason);
                     cleanupRemoteSandboxQuietly(group.getUserCode(), group.getSandboxType(),
-                        orphan.getSandboxId(), "orphan-pending-timeout");
+                        orphan.getSandboxId(), reason);
                 }
             }
         }
