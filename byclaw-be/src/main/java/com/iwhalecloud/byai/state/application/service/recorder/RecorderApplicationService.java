@@ -458,6 +458,12 @@ public class RecorderApplicationService {
             try {
                 return accepted(session, "pipeline", pipelineService.generate(session, stringList(body.get("candidateIds"))));
             } catch (RecorderSaveException e) {
+                log.warn(
+                    "Recorder pipeline generation failed, sessionId={}, code={}",
+                    session.sessionId(),
+                    e.getCode(),
+                    e
+                );
                 return bycliStorageUnavailable();
             }
         }

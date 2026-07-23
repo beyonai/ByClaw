@@ -42,6 +42,10 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -52,6 +56,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.slf4j.LoggerFactory;
 @DisabledOnOs(OS.WINDOWS)
 class RecorderControllerTest {
 
@@ -361,6 +366,31 @@ class RecorderControllerTest {
             .andExpect(jsonPath("$.error.code").value("bycli_storage_unavailable"))
             .andExpect(jsonPath("$.error.message").value("bycli storage unavailable"))
             .andExpect(content().string(org.hamcrest.Matchers.not(containsString(tempDir.toString()))));
+    }
+
+    @Test
+    void pipelineGenerateLogsStorageFailureWithSessionIdAndCause() throws Exception {
+        String sessionId = bindAndRankSession();
+        Files.createSymbolicLink(tempDir.resolve("byclaw-alice"), Path.of("/tmp"));
+        Logger logger = (Logger) LoggerFactory.getLogger(RecorderApplicationService.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        logger.addAppender(appender);
+        appender.start();
+
+        try {
+            RecorderResponse<Map<String, Object>> response = service.pipelineGenerate(Map.of("sessionId", sessionId));
+
+            org.assertj.core.api.Assertions.assertThat(response.status()).isEqualTo(503);
+            org.assertj.core.api.Assertions.assertThat(appender.list).anySatisfy(event -> {
+                org.assertj.core.api.Assertions.assertThat(event.getLevel()).isEqualTo(Level.WARN);
+                org.assertj.core.api.Assertions.assertThat(event.getFormattedMessage())
+                    .contains("Recorder pipeline generation failed", sessionId, "bycli_storage_unavailable");
+                org.assertj.core.api.Assertions.assertThat(event.getThrowableProxy()).isNotNull();
+            });
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
     }
 
     @Test
