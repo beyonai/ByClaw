@@ -31,6 +31,7 @@ import com.iwhalecloud.byai.manager.dto.devloop.ProjectDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectListDto;
 import com.iwhalecloud.byai.manager.dto.devloop.MemberBatchDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectMemberListDto;
+import com.iwhalecloud.byai.manager.dto.devloop.ProjectMemberSaveDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectRepoDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileListDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileQueryDto;
@@ -60,14 +61,18 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.http.MediaTypeFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 项目管理应用服务。
@@ -347,6 +352,103 @@ public class ProjectApplicationService {
             project.setUpdateBy(CurrentUserHolder.getCurrentUserId());
             project.setUpdateTime(new Date());
             projectService.update(project);
+        }
+    }
+
+    /**
+     * 按前端提交的当前成员列表整体保存项目普通成员。
+     * <p>
+     * 项目创建者始终保留：即使请求列表未携带创建者，也不会删除其成员记录；
+     * 其余成员按最终列表一次性完成删除和批量新增，避免前端逐个调用删除接口。
+     *
+     * @param dto 含项目 ID 与当前成员用户 ID 列表的请求参数
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void saveProjectMembers(ProjectMemberSaveDto dto) {
+        if (dto == null || dto.getProjectId() == null || dto.getUserIds() == null) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.member.user.ids.required");
+        }
+
+        Project project = projectService.findById(dto.getProjectId());
+        if (project == null || DeleteFlag.DELETED.equals(project.getDeleteFlag())) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500, "project.not.found");
+        }
+
+        Set<Long> selectedUserIds = new LinkedHashSet<>();
+        for (Long userId : dto.getUserIds()) {
+            addProjectMemberUserId(selectedUserIds, userId);
+        }
+
+        Long creatorId = project.getCreateBy();
+        List<ProjectMember> existingMembers = projectMemberService.listByProjectId(project.getProjectId());
+        Set<Long> existingUserIds = new HashSet<>();
+        List<Long> memberIdsToRemove = new ArrayList<>();
+        boolean creatorMemberExists = false;
+        for (ProjectMember member : existingMembers) {
+            Long memberUserId = member.getUserId();
+            if (memberUserId != null) {
+                existingUserIds.add(memberUserId);
+            }
+            if (creatorId != null && creatorId.equals(memberUserId)) {
+                // 创建者即使未出现在请求成员列表中，也必须保留其成员记录。
+                creatorMemberExists = true;
+                continue;
+            }
+            if (memberUserId != null && !selectedUserIds.contains(memberUserId)) {
+                memberIdsToRemove.add(member.getMemberId());
+            }
+        }
+
+        if (!memberIdsToRemove.isEmpty()) {
+            projectMemberService.removeMembers(memberIdsToRemove);
+        }
+
+        if (creatorId != null && !creatorMemberExists) {
+            // 兼容历史项目缺失 owner 成员记录的情况，整体保存时补齐创建者。
+            projectMemberService.addMember(project.getProjectId(), creatorId, "owner");
+            existingUserIds.add(creatorId);
+        }
+
+        List<Long> userIdsToAdd = new ArrayList<>();
+        for (Long selectedUserId : selectedUserIds) {
+            if (!existingUserIds.contains(selectedUserId)) {
+                userIdsToAdd.add(selectedUserId);
+            }
+        }
+        projectMemberService.addMembers(project.getProjectId(), userIdsToAdd, "member");
+        if (!userIdsToAdd.isEmpty() && !Constants.YES_VALUE_Y.equals(project.getIsShare())) {
+            // 通过成员整体保存新增普通成员时，与旧新增成员接口保持一致地开启项目共享。
+            project.setIsShare(Constants.YES_VALUE_Y);
+            project.setUpdateBy(CurrentUserHolder.getCurrentUserId());
+            project.setUpdateTime(new Date());
+            projectService.update(project);
+        }
+    }
+
+    /**
+     * 过滤空值和非正数用户 ID，避免非法参数被写入项目成员表。
+     *
+     * @param userIds 去重后的用户 ID 集合
+     * @param rawUserId 原始用户 ID
+     */
+    private void addProjectMemberUserId(Set<Long> userIds, Object rawUserId) {
+        if (rawUserId == null) {
+            return;
+        }
+        Long userId;
+        if (rawUserId instanceof Number) {
+            userId = ((Number) rawUserId).longValue();
+        }
+        else {
+            try {
+                userId = Long.valueOf(String.valueOf(rawUserId));
+            }
+            catch (NumberFormatException exception) {
+                return;
+            }
+        }
+        if (userId > 0) {
+            userIds.add(userId);
         }
     }
 

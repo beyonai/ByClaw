@@ -28,7 +28,17 @@ const searchTypeToDataType = {
 };
 
 const AddAuthModal = (props) => {
-  const { onCancel, onOk, value, title, onlyUser = false, showPost = true, showStation = false, allowedTypes } = props;
+  const {
+    onCancel,
+    onOk,
+    value,
+    title,
+    onlyUser = false,
+    showPost = true,
+    showStation = false,
+    allowedTypes,
+    confirmLoading = false,
+  } = props;
 
   const intl = useIntl();
 
@@ -297,6 +307,7 @@ const AddAuthModal = (props) => {
       onOk={(vals) => {
         onOk(vals);
       }}
+      confirmLoading={confirmLoading}
       isLoading={isLoading}
       onDrillOrg={(item) => {
         setIsLoading(true);

@@ -1,22 +1,22 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Checkbox, DatePicker, Drawer, Empty, Pagination, Segmented, Spin, Tag, message } from 'antd';
 import { useIntl } from '@umijs/max';
-import dayjs, { type Dayjs } from 'dayjs';
+import dayjs from 'dayjs';
 import { listTasks, type DevloopTaskItem } from '@/service/devloop';
 import TaskDetailDrawer from './TaskDetailDrawer';
+import { getTaskDateRangePresets, type TaskDateRange } from './taskDatePresets';
 import styles from './index.module.less';
 
 interface SessionOverviewDrawerProps {
   open: boolean;
   onClose: () => void;
   projectId?: string | number;
+  canEnterSession?: (task: DevloopTaskItem) => boolean;
+  onEnterSession?: (task: DevloopTaskItem) => void;
 }
-
-type TaskDateRange = [Dayjs | null, Dayjs | null] | null;
 
 // 日期快捷选择：今天 / 本周 / 本月；自定义表示用户手动改动了 RangePicker，快捷段不再高亮。
 type DatePreset = 'today' | 'week' | 'month' | 'custom';
-
 type BoardQueryState = {
   pageNum: number;
   pageSize: number;
@@ -39,25 +39,51 @@ const getTaskStatusKey = (status?: string) => {
   return 'pending';
 };
 
-// 依赖应用运行时 dayjs.locale('zh-cn')：周起始为周一，所以“本周”是本自然周（周一至周日）。
+// 快捷日期页签始终按周一到周日计算，和日期组件“本周”预设保持一致。
 const getPresetRange = (preset: Exclude<DatePreset, 'custom'>): TaskDateRange => {
   const now = dayjs();
   if (preset === 'today') return [now.startOf('day'), now.endOf('day')];
-  if (preset === 'week') return [now.startOf('week'), now.endOf('week')];
+  if (preset === 'week') {
+    const weekStart = now.subtract((now.day() + 6) % 7, 'day').startOf('day');
+    return [weekStart, weekStart.add(6, 'day').endOf('day')];
+  }
   return [now.startOf('month'), now.endOf('month')];
+};
+
+// 日期组件选择预设后按自然日边界反向识别对应页签，避免“本周”已生效但页面页签未高亮。
+const getDatePresetByRange = (dateRange: TaskDateRange): DatePreset => {
+  const startDate = dateRange?.[0];
+  const endDate = dateRange?.[1];
+  if (!startDate || !endDate) return 'custom';
+
+  for (const preset of ['today', 'week', 'month'] as const) {
+    const presetRange = getPresetRange(preset);
+    if (presetRange?.[0]?.isSame(startDate, 'day') && presetRange?.[1]?.isSame(endDate, 'day')) {
+      return preset;
+    }
+  }
+  return 'custom';
 };
 
 // 默认查本自然周，而非仅今天，避免刚进看板只看到当天任务。
 const DEFAULT_PRESET: DatePreset = 'week';
 
 // 任务看板按时间范围和分页从服务端读取，避免项目任务较多时一次性加载全部会话。
-const TaskBoardDrawer: React.FC<SessionOverviewDrawerProps> = ({ open, onClose, projectId }) => {
+const TaskBoardDrawer: React.FC<SessionOverviewDrawerProps> = ({
+  open,
+  onClose,
+  projectId,
+  canEnterSession,
+  onEnterSession,
+}) => {
   const intl = useIntl();
   // 保持翻译函数引用稳定，避免请求失败后的状态更新重新触发任务看板的初始查询 effect。
   const t = useCallback(
     (id: string, values?: Record<string, string | number>) => intl.formatMessage({ id }, values),
     [intl]
   );
+  // 看板与任务 Tab 使用同一快捷日期范围，避免用户在两个入口得到不同的筛选结果。
+  const taskDatePresets = useMemo(() => getTaskDateRangePresets((id) => intl.formatMessage({ id })), [intl]);
   const [detailTask, setDetailTask] = useState<DevloopTaskItem | null>(null);
   const [tasks, setTasks] = useState<DevloopTaskItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -136,9 +162,9 @@ const TaskBoardDrawer: React.FC<SessionOverviewDrawerProps> = ({ open, onClose, 
         width="90vw"
       >
         <div className={styles.kanbanToolbar}>
-          {/* 快速选择今天/本周/本月，日期筛选从工具栏左侧开始排列。 */}
+          {/* 快速选择今天/本周/本月；中等尺寸页签与 32px 日期筛选高度对齐。 */}
           <Segmented
-            size="small"
+            size="middle"
             value={datePreset === 'custom' ? '' : datePreset}
             options={[
               { label: t('projectSpace.taskBoard.preset.today'), value: 'today' },
@@ -155,10 +181,11 @@ const TaskBoardDrawer: React.FC<SessionOverviewDrawerProps> = ({ open, onClose, 
               t('projectSpace.taskBoard.dateStartPlaceholder'),
               t('projectSpace.taskBoard.dateEndPlaceholder'),
             ]}
+            presets={taskDatePresets}
             onChange={(dates) => {
-              // 手动选择日期即视为自定义区间，快捷段取消高亮。
-              setDatePreset('custom');
-              void fetchBoardTasks({ pageNum: 1, dateRange: dates as TaskDateRange });
+              const nextDateRange = dates as TaskDateRange;
+              setDatePreset(getDatePresetByRange(nextDateRange));
+              void fetchBoardTasks({ pageNum: 1, dateRange: nextDateRange });
             }}
           />
           <Checkbox
@@ -187,7 +214,9 @@ const TaskBoardDrawer: React.FC<SessionOverviewDrawerProps> = ({ open, onClose, 
         <Spin spinning={loading}>
           <div className={styles.kanbanBoard}>
             {COLUMNS.map((column) => {
-              const columnTasks = tasks.filter((task) => getTaskStatusKey(task.status || task.statusLabel) === column.key);
+              const columnTasks = tasks.filter(
+                (task) => getTaskStatusKey(task.status || task.statusLabel) === column.key
+              );
               return (
                 <div key={column.key} className={styles.kanbanColumn}>
                   <div className={styles.kanbanColHeader}>
@@ -206,7 +235,9 @@ const TaskBoardDrawer: React.FC<SessionOverviewDrawerProps> = ({ open, onClose, 
                         className={styles.kanbanCard}
                         onClick={() => setDetailTask(task)}
                       >
-                        <h4 className={styles.kanbanCardTitle}>{task.title || t('projectSpace.taskBoard.unnamedTask')}</h4>
+                        <h4 className={styles.kanbanCardTitle}>
+                          {task.title || t('projectSpace.taskBoard.unnamedTask')}
+                        </h4>
                         {task.currentStage?.stageName && (
                           <div className={styles.kanbanCardMeta}>
                             <Tag className={styles.kanbanPhaseTag} color="blue">
@@ -228,7 +259,16 @@ const TaskBoardDrawer: React.FC<SessionOverviewDrawerProps> = ({ open, onClose, 
           </div>
         </Spin>
       </Drawer>
-      <TaskDetailDrawer task={detailTask} onClose={() => setDetailTask(null)} />
+      <TaskDetailDrawer
+        task={detailTask}
+        onClose={() => setDetailTask(null)}
+        // 看板详情复用外部传入的处理人权限，避免不同入口出现不一致的会话操作。
+        canEnterSession={!!detailTask && !!onEnterSession && !!canEnterSession?.(detailTask)}
+        onEnterSession={(task) => {
+          onEnterSession?.(task);
+          setDetailTask(null);
+        }}
+      />
     </>
   );
 };

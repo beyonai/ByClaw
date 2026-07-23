@@ -7,6 +7,7 @@ import com.iwhalecloud.byai.manager.application.service.devloop.ProjectApplicati
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectListDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectMemberListDto;
+import com.iwhalecloud.byai.manager.dto.devloop.ProjectMemberSaveDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectRepoDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileListDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileQueryDto;
@@ -110,13 +111,24 @@ public class ProjectController {
     }
 
     /**
-     * 添加项目成员
+     * 批量添加项目成员
      *
-     * @param params 包含 projectId、userId
+     * @param params 包含 projectId、userIds；兼容旧版单个 userId
      */
     @PostMapping("/member/add")
     public ResponseUtil<Void> addProjectMember(@RequestBody Map<String, Object> params) {
         projectApplicationService.addProjectMember(params);
+        return ResponseUtil.successResponse();
+    }
+
+    /**
+     * 整体保存项目成员列表。
+     *
+     * @param dto 包含 projectId、userIds，userIds 为空数组时移除全部普通成员
+     */
+    @PostMapping("/member/save")
+    public ResponseUtil<Void> saveProjectMembers(@RequestBody ProjectMemberSaveDto dto) {
+        projectApplicationService.saveProjectMembers(dto);
         return ResponseUtil.successResponse();
     }
 

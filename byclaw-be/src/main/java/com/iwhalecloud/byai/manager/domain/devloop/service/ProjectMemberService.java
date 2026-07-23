@@ -10,8 +10,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.Date;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * 项目成员领域服务。
@@ -47,6 +50,52 @@ public class ProjectMemberService {
         member.setCreateTime(new Date());
         memberMapper.insert(member);
         return member;
+    }
+
+    /**
+     * 向指定项目批量添加成员。
+     * <p>
+     * 调用方负责筛除已存在成员；此处仍会去重，避免同一次请求中重复写入相同用户。
+     *
+     * @param projectId 项目 ID
+     * @param userIds 用户 ID 列表
+     * @param role 成员角色（如 owner / member），可空
+     */
+    public void addMembers(Long projectId, List<Long> userIds, String role) {
+        if (userIds == null || userIds.isEmpty()) {
+            return;
+        }
+
+        Set<Long> uniqueUserIds = new LinkedHashSet<>(userIds);
+        Date createTime = new Date();
+        List<ProjectMember> members = new ArrayList<>(uniqueUserIds.size());
+        for (Long userId : uniqueUserIds) {
+            if (userId == null) {
+                continue;
+            }
+            ProjectMember member = new ProjectMember();
+            member.setMemberId(sequenceService.nextVal());
+            member.setProjectId(projectId);
+            member.setUserId(userId);
+            member.setRole(role != null ? role : "member");
+            member.setCreateTime(createTime);
+            members.add(member);
+        }
+        if (!members.isEmpty()) {
+            memberMapper.insertBatch(members);
+        }
+    }
+
+    /**
+     * 按成员记录 ID 批量删除成员。
+     *
+     * @param memberIds 待删除的成员记录 ID 列表
+     */
+    public void removeMembers(List<Long> memberIds) {
+        if (memberIds == null || memberIds.isEmpty()) {
+            return;
+        }
+        memberMapper.deleteBatchIds(new ArrayList<>(new LinkedHashSet<>(memberIds)));
     }
 
     /**

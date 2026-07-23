@@ -2555,18 +2555,14 @@
     }
 
     .@{antPrefix}-modal-header {
-      padding: 16px 20px 12px;
-      margin-bottom: 0;
-      border-bottom: 1px solid #edf1f7;
+      margin-bottom: 20;
     }
 
     .@{antPrefix}-modal-body {
-      padding: 14px 20px 0;
+      padding: 12px 0px 0px;
     }
 
     .@{antPrefix}-modal-footer {
-      // 手工需求弹窗的操作区不再使用分割线，和新增渠道弹窗保持轻量视觉层级。
-      padding: 10px 20px 16px;
       border-top: 0;
     }
 
@@ -2595,14 +2591,25 @@
     margin: 0;
     color: #75839a;
     font-size: 13px;
+    font-weight: 500;
     line-height: 18px;
   }
 }
 
 .manualRequirementForm {
+  // 原始来源和影响分支为同一行的两个等宽字段，需求名称及长内容字段跨整行展示。
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  column-gap: 16px;
+
   .formField {
+    min-width: 0;
     margin-bottom: 12px;
   }
+}
+
+.manualRequirementFormFull {
+  grid-column: 1 / -1;
 }
 
 .manualRequirementSourceType {
@@ -2621,21 +2628,19 @@
 }
 
 .manualRequirementTextArea {
+  // 字数提示放在文本框外侧右下方，预留空间避免和下一字段重叠。
   position: relative;
-
-  :global {
-    // 为右上角字数提示预留水平空间，避免首行文字与计数重叠。
-    .@{antPrefix}-input {
-      padding-right: 64px;
-    }
-  }
+  padding-bottom: 24px;
 }
 
 .manualRequirementTextCount {
+  // 计数与文本框底边右侧对齐，效果与输入框原生字数提示保持一致。
   position: absolute;
   z-index: 1;
-  top: 7px;
-  right: 12px;
+  top: auto;
+  right: 0;
+  bottom: 0;
+  left: auto;
   color: #98a2b3;
   font-size: 12px;
   line-height: 18px;
@@ -2669,8 +2674,21 @@
   height: 40px;
 }
 
+// 绑定数字员工弹窗中的描述最多展示一行，避免长文本撑高单个列表项。
+.agentListDescription {
+  display: -webkit-box;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  line-height: 20px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
+}
+
 /* 整体任务视图看板样式（只读） */
 .taskBoardDrawer {
+  --task-board-toolbar-height: 56px;
+
   :global {
     .@{antPrefix}-drawer-body {
       padding: 0;
@@ -2685,10 +2703,11 @@
   z-index: 2;
   display: flex;
   align-items: center;
-  // 日期筛选固定在左侧，分页通过自动左边距固定在右侧。
+  // 任务范围与日期筛选固定在左侧，分页通过自动左边距固定在右侧。
   justify-content: flex-start;
   gap: 16px;
-  min-height: 56px;
+  min-height: var(--task-board-toolbar-height);
+  box-sizing: border-box;
   padding: 10px 20px;
   background: #fff;
   border-bottom: 1px solid #f0f0f0;
@@ -2709,9 +2728,11 @@
 .kanbanBoard {
   display: flex;
   gap: 16px;
-  padding: 20px;
+  // 顶部留白下移到列头，确保状态列头从初始位置就贴在固定工具栏下方。
+  padding: 0 20px 20px;
   min-height: 100%;
-  overflow-x: auto;
+  // 横向滚动交给外层抽屉，避免内部滚动容器导致状态列头的 sticky 定位失效。
+  overflow: visible;
 }
 
 .kanbanColumn {
@@ -2721,7 +2742,7 @@
   min-height: 0;
   background: #fafafa;
   border-radius: 10px;
-  padding: 12px;
+  padding: 0 12px 12px;
   transition: background-color 0.2s, box-shadow 0.2s;
 }
 
@@ -2731,10 +2752,16 @@
 }
 
 .kanbanColHeader {
+  // 状态列头从看板打开时即固定在日期筛选工具栏下方，不会先跟随列表上移。
+  position: sticky;
+  top: var(--task-board-toolbar-height);
+  z-index: 1;
   display: flex;
   align-items: center;
   gap: 8px;
+  padding: 12px 0 8px;
   margin-bottom: 12px;
+  background: #fafafa;
   font-size: 14px;
   font-weight: 500;
 }

@@ -108,6 +108,7 @@ class DevloopApplicationServiceManualRequirementTest {
         assertThat(response.getData()).containsEntry("itemId", 500L).containsEntry("sourceType", "manual")
             .containsEntry("manualSourceType", "customer_feedback").containsEntry("branch", "develop")
             .containsEntry("sourceName", "Manual entry")
+            .doesNotContainKey("creatorId").doesNotContainKey("creatorName")
             .containsEntry("originalContent", "Customers report that the login flow has too many steps.")
             .containsEntry("productContent", "Simplify the flow while retaining security checks.");
         assertThat(response.getData().get("content")).asString().contains("Affected branch: develop")

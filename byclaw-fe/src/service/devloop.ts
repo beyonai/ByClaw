@@ -31,6 +31,7 @@ export type DevloopTaskListQuery = {
   createTimeStart?: string;
   createTimeEnd?: string;
   taskName?: string;
+
   /** 仅看当前登录用户负责（创建）的任务；后端按当前用户的会话过滤，分页总数随之收敛。 */
   onlyMine?: boolean;
   pageNum?: number;
@@ -299,10 +300,16 @@ export const getTaskPhases = (sessionId: number) =>
 // 项目成员
 export const addProjectMember = (data: {
   projectId: number;
-  userId: string | number;
+  // userIds 用于成员列表多选新增；userId 保留以兼容已有的单成员调用。
+  userIds?: Array<string | number>;
+  userId?: string | number;
   userCode?: string;
   userName?: string;
 }) => POST<any>('/byaiService/project/member/add', data);
+
+// 保存项目最终成员列表，新增和删除成员由后端在同一事务中统一处理。
+export const saveProjectMembers = (data: { projectId: number; userIds: Array<string | number> }) =>
+  POST<any>('/byaiService/project/member/save', data);
 
 // 项目成员列表仅按成员姓名模糊搜索，和成员 Tab 的输入提示保持一致。
 export const listProjectMembers = (projectId: number, userName?: string) =>

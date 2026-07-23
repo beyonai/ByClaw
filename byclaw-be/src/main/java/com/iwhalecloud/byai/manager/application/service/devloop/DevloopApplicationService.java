@@ -438,8 +438,7 @@ public class DevloopApplicationService {
     }
 
     /**
-     * 扫描条目转统一需求视图；手工来源名称与内容在读取时国际化，避免持久化标识和负载
-     * 绑定创建者语言。
+     * 扫描条目转统一需求视图；手工来源名称与内容在读取时国际化，避免持久化内部标识和已渲染文案。
      */
     private Map<String, Object> toRequirementMap(ScanLogItem item, ScanSource source) {
         Map<String, Object> map = new HashMap<>();

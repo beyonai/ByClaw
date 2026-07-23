@@ -9,6 +9,7 @@ import com.iwhalecloud.byai.manager.dto.devloop.ProjectDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectListDto;
 import com.iwhalecloud.byai.manager.dto.devloop.MemberBatchDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectMemberListDto;
+import com.iwhalecloud.byai.manager.dto.devloop.ProjectMemberSaveDto;
 import com.iwhalecloud.byai.manager.entity.devloop.Project;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.qo.devloop.ProjectQo;
@@ -114,14 +115,26 @@ public class OpenProjectController {
     }
 
     /**
-     * 添加项目成员
+     * 批量添加项目成员
      *
-     * @param params 包含 projectId、userId
+     * @param params 包含 projectId、userIds；兼容旧版单个 userId
      */
     @ManageLogAnnotation(name = "API调用", description = "添加项目成员")
     @PostMapping("/addProjectMember")
     public ResponseUtil<Void> addProjectMember(@RequestBody Map<String, Object> params) {
         projectApplicationService.addProjectMember(params);
+        return ResponseUtil.successResponse();
+    }
+
+    /**
+     * 整体保存项目成员列表。
+     *
+     * @param dto 包含 projectId、userIds，userIds 为空数组时移除全部普通成员
+     */
+    @ManageLogAnnotation(name = "API调用", description = "整体保存项目成员")
+    @PostMapping("/saveProjectMembers")
+    public ResponseUtil<Void> saveProjectMembers(@RequestBody ProjectMemberSaveDto dto) {
+        projectApplicationService.saveProjectMembers(dto);
         return ResponseUtil.successResponse();
     }
 

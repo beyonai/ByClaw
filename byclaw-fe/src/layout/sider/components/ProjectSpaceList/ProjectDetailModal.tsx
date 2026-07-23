@@ -38,7 +38,7 @@ import {
   SearchOutlined,
 } from '@ant-design/icons';
 import { useDispatch, useIntl, useNavigate, useSelector } from '@umijs/max';
-import dayjs, { type Dayjs } from 'dayjs';
+import dayjs from 'dayjs';
 import {
   checkDwsAuthStatus,
   checkGitHubPat,
@@ -73,6 +73,7 @@ import { deleteFiles, listFiles, renameFile, type FileBrowserItem } from '@/serv
 import SessionOverviewDrawer from './SessionOverviewDrawer';
 import TaskDetailDrawer from './TaskDetailDrawer';
 import { isCurrentUserTaskAssignee } from './taskAccess';
+import { getTaskDateRangePresets, type TaskDateRange } from './taskDatePresets';
 import type { ProjectSpace } from '@/pages/projectSpace/types';
 import { getArrayData, normalizeProjectSession } from '@/pages/projectSpace/utils';
 import AntdIcon from '@/components/AntdIcon';
@@ -165,8 +166,6 @@ type RequirementItem = {
   // 用户填写的影响分支上下文，不等同任务创建后生成的工作分支。
   branch?: string;
 };
-
-type TaskDateRange = [Dayjs | null, Dayjs | null] | null;
 
 type TaskQueryState = {
   pageNum: number;
@@ -266,14 +265,15 @@ type Props = {
   onEditProject?: (project: ProjectSpace) => void;
   onDeleteProject?: (project: ProjectSpace) => void;
   onProjectSharedChange?: (projectId: string | number) => void;
+  onCurrentUserRemoved?: (projectId: number) => void;
   developProjectEnabled?: boolean;
 };
 
 const REQUIREMENT_PAGE_SIZE = 20;
 // 任务列表固定页大小，取消分页器后按此值触底追加。
 const TASK_PAGE_SIZE = 20;
-// 后端尚未限制手工需求的两个长文本字段，前端统一限制为 500 字，避免无界内容写入任务提示词。
-const MANUAL_REQUIREMENT_CONTENT_MAX_LENGTH = 500;
+// 后端尚未限制手工需求的两个长文本字段，前端统一限制为 1000 字，避免无界内容写入任务提示词。
+const MANUAL_REQUIREMENT_CONTENT_MAX_LENGTH = 1000;
 
 // GitHub 文件变更状态 -> 角标字母/配色,沿用常见 git 管理视觉:新增绿/修改黄/删除红/重命名蓝。
 const FILE_CHANGE_META: Record<string, { letter: string; labelId: string; className: string }> = {
@@ -450,6 +450,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
   onEditProject,
   onDeleteProject,
   onProjectSharedChange,
+  onCurrentUserRemoved,
   developProjectEnabled = false,
 }) => {
   const intl = useIntl();
@@ -459,6 +460,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
       intl.formatMessage({ id: `projectSpace.detail.${id}` }, values),
     [intl]
   );
+  // 任务 Tab 与整体任务视图共享快捷日期范围，保证同一选择对应相同的服务端查询条件。
+  const taskDatePresets = useMemo(() => getTaskDateRangePresets((id) => intl.formatMessage({ id })), [intl]);
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const userInfo = useSelector(({ user }: any) => user.userInfo);
@@ -508,6 +511,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const [sourceModalOpen, setSourceModalOpen] = useState(false);
   const [editingSource, setEditingSource] = useState<ScanSourceItem | null>(null);
   const [sourceForm, setSourceForm] = useState<SourceForm>(getDefaultSourceForm);
+  // 新增和编辑渠道共用保存状态，统一控制确定按钮的加载反馈。
+  const [sourceSaving, setSourceSaving] = useState(false);
   const [hasPatSaved, setHasPatSaved] = useState(false);
   const [groupOptions, setGroupOptions] = useState<{ value: string; label: string }[]>([]);
   const [groupSearching, setGroupSearching] = useState(false);
@@ -545,6 +550,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const dwsAuthTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const dwsAuthTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const startingRequirementIdsRef = useRef<Set<number>>(new Set());
+  // 状态更新前先同步加锁，避免连续点击确定按钮重复保存渠道。
+  const sourceSavingRef = useRef(false);
   const resourceClickTimerRef = useRef<number | null>(null);
   const requirementQueryVersionRef = useRef(0);
   const taskQueryRef = useRef<TaskQueryState>({
@@ -856,6 +863,16 @@ const ProjectDetailPanel: React.FC<Props> = ({
     },
     [onProjectSharedChange, project?.sharedFlag, projectId]
   );
+
+  const handleCurrentUserRemoved = useCallback(() => {
+    // 当前用户退出项目后立即清除右侧覆盖面板，避免保留已无权限访问的项目上下文。
+    clearDetailPanel?.();
+    if (projectId && onCurrentUserRemoved) {
+      onCurrentUserRemoved(projectId);
+      return;
+    }
+    onBack();
+  }, [clearDetailPanel, onBack, onCurrentUserRemoved, projectId]);
 
   const fetchProjectResourceSessions = useCallback(async () => {
     if (!projectId) return;
@@ -1590,7 +1607,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
   };
 
   const handleSaveSource = async () => {
-    if (!projectId) return;
+    if (!projectId || sourceSavingRef.current) return;
     if (!sourceForm.name.trim()) {
       message.error(t('source.validation.nameRequired'));
       return;
@@ -1632,6 +1649,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
       config = JSON.stringify({ labels: sourceForm.labels, state: 'open' });
     }
 
+    sourceSavingRef.current = true;
+    setSourceSaving(true);
     try {
       if (sourceForm.type === 'github_issue' && sourceForm.pat.trim()) {
         await saveGitHubPat(sourceForm.pat.trim());
@@ -1670,6 +1689,10 @@ const ProjectDetailPanel: React.FC<Props> = ({
       await fetchRequirements(sourceList, requirementSearchKeyword.trim());
     } catch {
       message.error(t(editingSource ? 'source.updateFailed' : 'source.addFailed'));
+    } finally {
+      // 保存流程结束后释放提交锁，失败时用户也可以修正表单后再次保存。
+      sourceSavingRef.current = false;
+      setSourceSaving(false);
     }
   };
 
@@ -2663,6 +2686,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
               allowClear
               value={taskDateRange}
               placeholder={[t('task.dateStartPlaceholder'), t('task.dateEndPlaceholder')]}
+              presets={taskDatePresets}
               onChange={(dates) => {
                 void fetchTasks({ pageNum: 1, dateRange: dates as TaskDateRange });
               }}
@@ -2798,7 +2822,17 @@ const ProjectDetailPanel: React.FC<Props> = ({
         </Spin>
       </div>
 
-      <SessionOverviewDrawer open={taskKanbanOpen} onClose={() => setTaskKanbanOpen(false)} projectId={projectId} />
+      <SessionOverviewDrawer
+        open={taskKanbanOpen}
+        onClose={() => setTaskKanbanOpen(false)}
+        projectId={projectId}
+        // 整体任务视图沿用任务列表的处理人校验和进入会话逻辑。
+        canEnterSession={(task) => isCurrentUserTaskAssignee(task, userInfo)}
+        onEnterSession={(task) => {
+          handleOpenTaskSession(task);
+          setTaskKanbanOpen(false);
+        }}
+      />
 
       <TaskDetailDrawer
         task={detailTask}
@@ -2828,6 +2862,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
               projectId={projectId}
               creatorId={project?.createBy}
               onMembersChange={handleMembersChange}
+              onCurrentUserRemoved={handleCurrentUserRemoved}
             />
           </div>
         );
@@ -2842,6 +2877,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
       title={t(editingSource ? 'source.editTitle' : 'source.addTitle')}
       open={sourceModalOpen}
       onOk={handleSaveSource}
+      confirmLoading={sourceSaving}
       onCancel={() => {
         setSourceModalOpen(false);
         setEditingSource(null);
@@ -3111,6 +3147,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
       className={styles.manualRequirementModal}
     >
       <div className={styles.manualRequirementForm}>
+        {/* 原始来源与影响分支共用一行的两个等宽栅格，便于快速补全需求来源上下文。 */}
         <div className={styles.formField}>
           <label>{t('manualRequirement.field.sourceType')}</label>
           <Radio.Group
@@ -3134,7 +3171,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
             onChange={(event) => setManualRequirementForm((prev) => ({ ...prev, branch: event.target.value }))}
           />
         </div>
-        <div className={styles.formField}>
+        <div className={`${styles.formField} ${styles.manualRequirementFormFull}`}>
           <label>{t('manualRequirement.field.title')}</label>
           <Input
             placeholder={t('manualRequirement.placeholder.title')}
@@ -3142,7 +3179,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
             onChange={(event) => setManualRequirementForm((prev) => ({ ...prev, title: event.target.value }))}
           />
         </div>
-        <div className={styles.formField}>
+        <div className={`${styles.formField} ${styles.manualRequirementFormFull}`}>
           <label>{t('manualRequirement.field.originalContent')}</label>
           <div className={styles.manualRequirementTextArea}>
             <span className={styles.manualRequirementTextCount}>
@@ -3159,7 +3196,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
             />
           </div>
         </div>
-        <div className={styles.formField}>
+        <div className={`${styles.formField} ${styles.manualRequirementFormFull}`}>
           <label>{t('manualRequirement.field.productContent')}</label>
           <div className={styles.manualRequirementTextArea}>
             <span className={styles.manualRequirementTextCount}>

@@ -19,6 +19,15 @@
         <result column="resource_name" property="agentName"/>
     </resultMap>
 
+    <!-- 成员授权弹窗一次提交多人时使用单条批量插入语句落库。 -->
+    <insert id="insertBatch">
+        INSERT INTO byai_project_member (member_id, project_id, user_id, role, create_time)
+        VALUES
+        <foreach collection="members" item="member" separator=",">
+            (#{member.memberId}, #{member.projectId}, #{member.userId}, #{member.role}, #{member.createTime})
+        </foreach>
+    </insert>
+
     <select id="listProjectMembers" resultMap="ProjectMemberListDtoResultMap">
         SELECT a.member_id,
                a.project_id,

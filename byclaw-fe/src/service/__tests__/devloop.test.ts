@@ -13,9 +13,10 @@ describe('Devloop task service', () => {
     jest.clearAllMocks();
   });
 
-  it('passes creation time range and pagination to the task list endpoint', () => {
+  it('passes only-mine filter, creation time range, and pagination to the task list endpoint', () => {
     const query = {
       projectId: 203,
+      onlyMine: true,
       createTimeStart: '2026-07-01 00:00:00',
       createTimeEnd: '2026-07-21 23:59:59',
       taskName: '优化登录流程',
