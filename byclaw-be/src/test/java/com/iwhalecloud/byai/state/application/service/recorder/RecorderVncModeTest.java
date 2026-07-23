@@ -90,12 +90,12 @@ class RecorderVncModeTest {
         RecorderSandboxEndpointResolver resolver = org.mockito.Mockito.mock(RecorderSandboxEndpointResolver.class);
         RecorderOwner owner = new RecorderOwner(1L, "alice");
         org.mockito.Mockito.when(resolver.resolve(owner, "vnc", ""))
-            .thenReturn(URI.create("http://127.0.0.1:8080/v1/sandboxes/sandbox-1/proxy/8081"));
+            .thenReturn(URI.create("http://192.168.0.83:9005/v1/sandboxes/sandbox-1/proxy/8081?token=sandbox-token"));
 
         ExternalRecorderVncProvider provider = new ExternalRecorderVncProvider(resolver, properties);
         RecorderVncEndpoint endpoint = provider.start(new RecorderSession("session-1", owner));
 
-        assertThat(endpoint.vncUrl()).isEqualTo("http://127.0.0.1:8080/v1/sandboxes/sandbox-1/proxy/8081");
+        assertThat(endpoint.vncUrl()).isEqualTo("/v1/sandboxes/sandbox-1/proxy/8081?token=sandbox-token");
         assertThat(endpoint.gatewayPort()).isEqualTo(0);
     }
 
