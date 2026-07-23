@@ -61,8 +61,15 @@ public class DwsAuthService {
     @Value("${file.storage.local.path:${byclaw.sandbox.volume.file-root:/tmp/byclaw-storage}}")
     private String fileStorageRoot;
 
-    /** 用户私有工作区目录名,dws 配置放到 {bucket}/by/.dws,与 .sessions 平级。 */
+    /** 用户私有工作区目录名,dws 配置(profiles)放到 {bucket}/by/.dws,与 .sessions 平级。 */
     private static final String DWS_CONFIG_SEGMENT = "by/.dws";
+
+    /**
+     * dws 登录态(DEK/token 密文)实际存在 XDG_DATA_HOME 下的 ~/.local/share/dws-cli,
+     * 这才是隔离的关键:只隔离 DWS_CONFIG_DIR 不隔离 XDG_DATA_HOME,DEK 全局共享 -> 一人授权全员"已授权"。
+     * 每个用户单独一份 XDG_DATA_HOME,放到 {bucket}/by/.dws-data。
+     */
+    private static final String DWS_DATA_SEGMENT = "by/.dws-data";
 
     @Autowired
     private UserPrivateParamMapper userPrivateParamMapper;
@@ -79,29 +86,8 @@ public class DwsAuthService {
     // 后台运行的 device flow 进程
     private final AtomicReference<Process> deviceFlowProcess = new AtomicReference<>(null);
 
-    /**
-     * 解析用户专属的 dws 配置目录:{nfs根}/byclaw-${userCode}/by/.dws。
-     * dws 的 token(file-DEK 加密)与 profile 均落在此目录,实现按需求来源创建者隔离。
-     * userId 解析失败返回 null,调用方回退到全局默认目录(兼容存量,不隔离)。
-     */
-    /**
-     * 公开给扫描服务复用:解析某用户(源创建者)的 dws 配置目录,供其执行 dws 命令时设 DWS_CONFIG_DIR。
-     * 入参是字符串 userId(源的 createBy),解析失败返回 null(调用方回退默认目录)。
-     */
-    public String resolveDwsConfigDir(String userId) {
-        if (userId == null || userId.trim().isEmpty()) {
-            return null;
-        }
-        try {
-            return resolveDwsConfigDir(Long.valueOf(userId.trim()));
-        }
-        catch (NumberFormatException e) {
-            log.warn("[DwsAuth] invalid userId for resolveDwsConfigDir: {}", userId);
-            return null;
-        }
-    }
-
-    private String resolveDwsConfigDir(Long userId) {
+    /** 解析用户 bucket 的绝对路径根 {fileStorageRoot}/byclaw-{userCode};失败返回 null。 */
+    private String resolveBucketBase(Long userId) {
         if (userId == null) {
             return null;
         }
@@ -111,36 +97,72 @@ public class DwsAuthService {
                 return null;
             }
             String bucket = userBucketNamingService.buildUserBucketName(owner.getUserCode());
-            Path dir = Paths.get(fileStorageRoot, bucket, DWS_CONFIG_SEGMENT);
+            return Paths.get(fileStorageRoot, bucket).toString();
+        }
+        catch (Exception e) {
+            log.warn("[DwsAuth] 解析用户 bucket 失败, userId={}", userId, e);
+            return null;
+        }
+    }
+
+    private String ensureDir(Path dir) {
+        try {
             java.nio.file.Files.createDirectories(dir);
-            log.info("[DwsAuth] resolveDwsConfigDir userId={} userCode={} -> {}", userId, owner.getUserCode(),
-                dir);
             return dir.toString();
         }
         catch (Exception e) {
-            log.warn("[DwsAuth] 解析用户 dws 配置目录失败, userId={}", userId, e);
+            log.warn("[DwsAuth] 创建目录失败: {}", dir, e);
             return null;
         }
     }
 
     /**
-     * 构造 dws 子进程:统一注入 HOME 与用户专属 DWS_CONFIG_DIR。
-     * userId 为空或解析失败时不设 DWS_CONFIG_DIR,回退 dws 默认 ~/.dws(兼容存量)。
-     * 仅用于授权动作(startDeviceAuth/injectToken):由当前登录用户发起,回退默认目录可接受。
+     * 给 dws 子进程 env 注入用户隔离配置:关闭 keychain + 专属 DWS_CONFIG_DIR(profiles) + 专属 XDG_DATA_HOME(登录态/DEK)。
+     * 关键:登录态/DEK 存 XDG_DATA_HOME 下的 ~/.local/share/dws-cli,只隔离 DWS_CONFIG_DIR 不够,必须同时隔离 XDG_DATA_HOME。
+     * @return true 表示成功按用户隔离;false 表示解析不出该用户目录(调用方据此判定未授权,不冒用全局)。
+     */
+    public boolean applyUserDwsEnv(Map<String, String> env, Long userId) {
+        if (!env.containsKey("HOME")) {
+            env.put("HOME", System.getProperty("user.home"));
+        }
+        env.put(DWS_DISABLE_KEYCHAIN_KEY, DWS_DISABLE_KEYCHAIN_VALUE);
+        String base = resolveBucketBase(userId);
+        if (base == null) {
+            return false;
+        }
+        String configDir = ensureDir(Paths.get(base, DWS_CONFIG_SEGMENT));
+        String dataDir = ensureDir(Paths.get(base, DWS_DATA_SEGMENT));
+        if (configDir == null || dataDir == null) {
+            return false;
+        }
+        env.put("DWS_CONFIG_DIR", configDir);
+        env.put("XDG_DATA_HOME", dataDir);
+        log.info("[DwsAuth] applyUserDwsEnv userId={} configDir={} xdgDataHome={}", userId, configDir, dataDir);
+        return true;
+    }
+
+    /** 字符串 userId 重载,供扫描服务用 source.createBy。 */
+    public boolean applyUserDwsEnv(Map<String, String> env, String userId) {
+        Long uid = null;
+        if (userId != null && !userId.trim().isEmpty()) {
+            try {
+                uid = Long.valueOf(userId.trim());
+            }
+            catch (NumberFormatException e) {
+                log.warn("[DwsAuth] invalid userId for applyUserDwsEnv: {}", userId);
+            }
+        }
+        return applyUserDwsEnv(env, uid);
+    }
+
+    /**
+     * 构造 dws 子进程:按用户注入隔离 env(禁 keychain + DWS_CONFIG_DIR + XDG_DATA_HOME)。
+     * 用于授权动作(startDeviceAuth/injectToken):由当前登录用户发起。
      */
     private ProcessBuilder newDwsProcess(Long userId, List<String> cmd) {
         ProcessBuilder pb = new ProcessBuilder(cmd);
         pb.redirectErrorStream(true);
-        Map<String, String> env = pb.environment();
-        if (!env.containsKey("HOME")) {
-            env.put("HOME", System.getProperty("user.home"));
-        }
-        // 关闭 keychain:让登录态跟 DWS_CONFIG_DIR 走,是 per-user 隔离生效的前提。
-        env.put(DWS_DISABLE_KEYCHAIN_KEY, DWS_DISABLE_KEYCHAIN_VALUE);
-        String configDir = resolveDwsConfigDir(userId);
-        if (configDir != null) {
-            env.put("DWS_CONFIG_DIR", configDir);
-        }
+        applyUserDwsEnv(pb.environment(), userId);
         return pb;
     }
 
@@ -292,23 +314,15 @@ public class DwsAuthService {
      * 否则会读到别人授权过的 token,误报该用户"已授权"(如非创建者看别人的源)。
      */
     public Map<String, Object> getAuthStatus(Long userId) {
-        String configDir = resolveDwsConfigDir(userId);
-        if (configDir == null) {
-            // 无法定位该用户专属授权目录:视为未授权,不冒用全局授权。
-            log.info("[DwsAuth] 无法解析用户 {} 的 dws 配置目录,判定未授权", userId);
-            return Map.of("authenticated", false, "tokenValid", false);
-        }
         try {
             List<String> cmd = List.of(DWS_BIN, "auth", "status", "--format", "json");
             ProcessBuilder pb = new ProcessBuilder(cmd);
             pb.redirectErrorStream(true);
-            Map<String, String> env = pb.environment();
-            if (!env.containsKey("HOME")) {
-                env.put("HOME", System.getProperty("user.home"));
+            // 严格按用户隔离(禁 keychain + DWS_CONFIG_DIR + XDG_DATA_HOME);解析不出该用户目录则判未授权,绝不冒用全局。
+            if (!applyUserDwsEnv(pb.environment(), userId)) {
+                log.info("[DwsAuth] 无法解析用户 {} 的 dws 隔离目录,判定未授权", userId);
+                return Map.of("authenticated", false, "tokenValid", false);
             }
-            // 严格指定该用户目录 + 关闭 keychain,不走 newDwsProcess 的回退逻辑。
-            env.put(DWS_DISABLE_KEYCHAIN_KEY, DWS_DISABLE_KEYCHAIN_VALUE);
-            env.put("DWS_CONFIG_DIR", configDir);
             Process process = pb.start();
 
             StringBuilder output = new StringBuilder();

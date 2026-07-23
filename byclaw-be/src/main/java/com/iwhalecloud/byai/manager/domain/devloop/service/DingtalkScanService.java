@@ -98,17 +98,8 @@ public class DingtalkScanService {
 
             ProcessBuilder pb = new ProcessBuilder(cmd);
             pb.redirectErrorStream(true);
-            // 确保 dws 能找到 HOME 下的配置；DWS_CONFIG_DIR 指向源创建者 bucket 的 .dws,读其专属授权。
-            Map<String, String> env = pb.environment();
-            if (!env.containsKey("HOME")) {
-                env.put("HOME", System.getProperty("user.home"));
-            }
-            // 关闭 keychain,让登录态跟 DWS_CONFIG_DIR 走(与授权侧一致,否则读到全局钥匙串授权)。
-            env.put("DWS_DISABLE_KEYCHAIN", "1");
-            String dwsConfigDir = dwsAuthService.resolveDwsConfigDir(source.getCreateBy());
-            if (dwsConfigDir != null) {
-                env.put("DWS_CONFIG_DIR", dwsConfigDir);
-            }
+            // 按源创建者隔离 dws 环境(禁 keychain + DWS_CONFIG_DIR + XDG_DATA_HOME),读其专属授权。
+            dwsAuthService.applyUserDwsEnv(pb.environment(), source.getCreateBy());
             Process process = pb.start();
 
             StringBuilder output = new StringBuilder();

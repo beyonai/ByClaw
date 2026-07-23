@@ -792,14 +792,8 @@ public class DevloopApplicationService {
 
             ProcessBuilder pb = new ProcessBuilder(cmd);
             pb.redirectErrorStream(true);
-            // 群搜索由当前登录用户发起,关闭 keychain + 用其 bucket 的 .dws 授权。
-            pb.environment().put("DWS_DISABLE_KEYCHAIN", "1");
-            Long currentUserId = CurrentUserHolder.getCurrentUserId();
-            String dwsConfigDir = dwsAuthService
-                .resolveDwsConfigDir(currentUserId != null ? String.valueOf(currentUserId) : null);
-            if (dwsConfigDir != null) {
-                pb.environment().put("DWS_CONFIG_DIR", dwsConfigDir);
-            }
+            // 群搜索由当前登录用户发起:按其身份隔离 dws 环境(禁 keychain + DWS_CONFIG_DIR + XDG_DATA_HOME)。
+            dwsAuthService.applyUserDwsEnv(pb.environment(), CurrentUserHolder.getCurrentUserId());
             Process process = pb.start();
 
             StringBuilder output = new StringBuilder();
