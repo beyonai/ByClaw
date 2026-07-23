@@ -137,6 +137,7 @@ export default function Workbench() {
               candidates={data.candidates}
               selectedId={data.selectedCandidateId}
               sampleA={data.sampleA}
+              sampleB={data.sampleB}
               onRank={actions.rank}
               onSelect={actions.selectCandidate}
             />
@@ -204,6 +205,7 @@ export default function Workbench() {
           candidates={data.candidates}
           selectedId={data.selectedCandidateId}
           sampleA={data.sampleA}
+          sampleB={data.sampleB}
           onRank={actions.rank}
           onSelect={actions.selectCandidate}
         />
