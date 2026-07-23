@@ -126,6 +126,17 @@ public class ProjectApplicationService {
     private ProjectShareTargetMapper projectShareTargetMapper;
 
     /**
+     * 分页查询用户可见项目
+     *
+     * @param projectQo 查询对象
+     * @return PageInfo<ProjectListDto>
+     */
+    public PageInfo<ProjectListDto> selectProjectsByQo(ProjectQo projectQo) {
+        projectQo.setCreateBy(CurrentUserHolder.getCurrentUserId());
+        return projectService.selectProjectsByQo(projectQo);
+    }
+
+    /**
      * 创建项目，可同时写入仓库与分享成员。
      *
      * @param dto 项目信息
@@ -171,7 +182,7 @@ public class ProjectApplicationService {
      */
     public List<ProjectListDto> listProjects(ProjectQo projectQo) {
         projectQo.setCreateBy(CurrentUserHolder.getCurrentUserId());
-        return projectService.selectProjectsByQo(projectQo);
+        return projectService.listProjects(projectQo);
     }
 
     /**
@@ -728,4 +739,5 @@ public class ProjectApplicationService {
         }
         return projectShareFileService.listSpaceFiles(dto.getProjectId());
     }
+
 }
