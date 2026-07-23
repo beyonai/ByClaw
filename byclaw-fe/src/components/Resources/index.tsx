@@ -2,7 +2,7 @@ import React, { useCallback, useContext, useState, useEffect, useRef } from 'rea
 import { UploadOutlined, SearchOutlined, PlusOutlined, FullscreenOutlined } from '@ant-design/icons';
 import { useIntl, useSelector, useNavigate, useSearchParams } from '@umijs/max';
 import type { TabsProps } from 'antd';
-import { Button, Input, Space, Tooltip, message, Tabs } from 'antd';
+import { Button, Empty, Input, Space, Spin, Tooltip, message, Tabs } from 'antd';
 import classnames from 'classnames';
 import AntdIcon from '@/components/AntdIcon';
 import useModuleEvent from '@/hooks/useModuleEvent';
@@ -145,6 +145,8 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
   const [activeTab, setActiveTab] = useState<ResourceTab>(defaultTab());
   const marketplaceRef = useRef<HTMLDivElement>(null);
   const marketplaceIframeRef = useRef<HTMLIFrameElement>(null);
+  const [skillMarketplaceBaseUrl, setSkillMarketplaceBaseUrl] = useState('');
+  const [skillMarketplaceConfigLoaded, setSkillMarketplaceConfigLoaded] = useState(resourceType !== 'SKILL');
   const { setDetailPanel, clearDetailPanel } = useContext(SiderContentContext);
 
   useEffect(() => {
@@ -170,8 +172,8 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
   const portalOrigin = typeof window === 'undefined' ? undefined : window.location.origin;
   const beyondToken = getToken();
   const skillMarketplaceUrl = React.useMemo(
-    () => buildSkillMarketplaceUrl(activeDigitalEmployeeId, beyondToken, portalOrigin),
-    [activeDigitalEmployeeId, beyondToken, portalOrigin]
+    () => buildSkillMarketplaceUrl(skillMarketplaceBaseUrl, activeDigitalEmployeeId, beyondToken, portalOrigin),
+    [activeDigitalEmployeeId, beyondToken, portalOrigin, skillMarketplaceBaseUrl]
   );
   const usersOrganizations = get(userInfo, 'usersOrganizations') || [];
   const userTypeList = usersOrganizations.map((item: any) => item.userType);
@@ -203,7 +205,7 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
   }, [EventEmitter, resourceType]);
 
   useEffect(() => {
-    if (resourceType !== 'SKILL') {
+    if (resourceType !== 'SKILL' || !skillMarketplaceUrl) {
       return;
     }
 
@@ -223,6 +225,35 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
       window.removeEventListener('message', handleSkillMarketplaceMessage);
     };
   }, [activeDigitalEmployeeId, notifySiderResourceListReload, resourceType, skillMarketplaceUrl]);
+
+  useEffect(() => {
+    if (resourceType !== 'SKILL') {
+      return;
+    }
+
+    let active = true;
+    setSkillMarketplaceConfigLoaded(false);
+    getDcSystemConfig({ paramCode: 'WHALE_AGENT_SKILL_MARKET_URL' })
+      .then((res: any) => {
+        if (active) {
+          setSkillMarketplaceBaseUrl(trim(res?.paramValue));
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setSkillMarketplaceBaseUrl('');
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setSkillMarketplaceConfigLoaded(true);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [resourceType]);
 
   useEffect(() => {
     const handleResourceTypeReload = (
@@ -652,14 +683,24 @@ const Resources: React.FC<Props> = ({ resourceType }) => {
       />
       {resourceType === 'SKILL' && activeTab === 'marketplace' ? (
         <div ref={marketplaceRef} className={styles.marketplaceFrameContainer}>
-          <iframe
-            ref={marketplaceIframeRef}
-            title={intl.formatMessage({ id: 'resource.skillMarketplace' })}
-            className={styles.marketplaceFrame}
-            src={skillMarketplaceUrl}
-            allow="fullscreen"
-            referrerPolicy="no-referrer"
-          />
+          {!skillMarketplaceConfigLoaded ? (
+            <div className={styles.marketplaceFramePlaceholder}>
+              <Spin />
+            </div>
+          ) : skillMarketplaceUrl ? (
+            <iframe
+              ref={marketplaceIframeRef}
+              title={intl.formatMessage({ id: 'resource.skillMarketplace' })}
+              className={styles.marketplaceFrame}
+              src={skillMarketplaceUrl}
+              allow="fullscreen"
+              referrerPolicy="no-referrer"
+            />
+          ) : (
+            <div className={styles.marketplaceFramePlaceholder}>
+              <Empty description={intl.formatMessage({ id: 'resource.skillMarketplaceUrlMissing' })} />
+            </div>
+          )}
         </div>
       ) : (
         <div className={classnames('full-width ub ub-ver ub-f1', styles.wrapper)}>
