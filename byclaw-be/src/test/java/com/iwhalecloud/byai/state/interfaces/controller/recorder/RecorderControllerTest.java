@@ -121,7 +121,7 @@ class RecorderControllerTest {
             .andExpect(jsonPath("$.data.extension").value("disconnected"))
             .andExpect(jsonPath("$.data.highLevel").value("down"))
             .andExpect(jsonPath("$.data.llmSynthesis").value(false))
-            .andExpect(jsonPath("$.data.llmSynthesisReason").value("default_model_lookup_failed"))
+            .andExpect(jsonPath("$.data.llmSynthesisReason").value("default_model_list_lookup_failed"))
             .andExpect(jsonPath("$.error").doesNotExist());
     }
 

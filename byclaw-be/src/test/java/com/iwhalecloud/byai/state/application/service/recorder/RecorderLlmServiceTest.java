@@ -48,14 +48,28 @@ class RecorderLlmServiceTest {
     }
 
     @Test
-    void reportsLookupFailureAsNonBlockingUnavailable() {
+    void reportsListLookupFailureAsNonBlockingUnavailable() {
         ModelManagementApplicationService models = mock(ModelManagementApplicationService.class);
         when(models.getModelListByPage(org.mockito.ArgumentMatchers.any())).thenThrow(new IllegalStateException("not configured"));
 
         RecorderLlmService service = new RecorderLlmService(models, mock(AIService.class));
 
         assertThat(service.availability())
-            .isEqualTo(new RecorderLlmService.Availability(false, null, "default_model_lookup_failed"));
+            .isEqualTo(new RecorderLlmService.Availability(false, null, "default_model_list_lookup_failed"));
+    }
+
+    @Test
+    void reportsDetailLookupFailureAsNonBlockingUnavailable() {
+        ModelManagementApplicationService models = mock(ModelManagementApplicationService.class);
+        ModelListResponse page = new ModelListResponse();
+        page.setRows(List.of(model("12", 1, null, null, "default-chat")));
+        when(models.getModelListByPage(org.mockito.ArgumentMatchers.any())).thenReturn(page);
+        when(models.getModelDetail("12")).thenThrow(new IllegalStateException("details unavailable"));
+
+        RecorderLlmService service = new RecorderLlmService(models, mock(AIService.class));
+
+        assertThat(service.availability())
+            .isEqualTo(new RecorderLlmService.Availability(false, null, "default_model_detail_lookup_failed"));
     }
 
     @Test

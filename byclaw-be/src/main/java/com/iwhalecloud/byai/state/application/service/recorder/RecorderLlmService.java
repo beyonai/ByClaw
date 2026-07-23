@@ -53,8 +53,9 @@ public class RecorderLlmService {
 
     private ResolvedModel resolveDefaultModel() {
         if (modelManagementApplicationService == null) {
-            return ResolvedModel.unavailable("default_model_lookup_failed");
+            return ResolvedModel.unavailable("default_model_list_lookup_failed");
         }
+        ModelVO listedModel;
         try {
             ModelListRequest request = new ModelListRequest();
             request.setOwnerType("PUBLIC");
@@ -63,35 +64,41 @@ public class RecorderLlmService {
             request.setPageSize(100);
             ModelListResponse page = modelManagementApplicationService.getModelListByPage(request);
             List<ModelVO> rows = page == null || page.getRows() == null ? List.of() : page.getRows();
-            ModelVO listedModel = rows.stream()
+            listedModel = rows.stream()
                 .filter(this::isLlmModel)
                 .filter(model -> Integer.valueOf(1).equals(model.getIsDefault()))
                 .min(Comparator.comparing(ModelVO::getId, Comparator.nullsLast(Long::compareTo)))
                 .orElseGet(() -> rows.stream().filter(this::isLlmModel).findFirst().orElse(null));
-            if (listedModel == null || listedModel.getId() == null) {
-                return ResolvedModel.unavailable("default_model_not_found");
-            }
-            ModelVO detail = modelManagementApplicationService.getModelDetail(String.valueOf(listedModel.getId()));
-            if (detail == null) {
-                return ResolvedModel.unavailable("default_model_detail_unavailable");
-            }
-            if (isBlank(detail.getApiEndpoint())) {
-                return ResolvedModel.unavailable("default_model_endpoint_missing");
-            }
-            if (isBlank(detail.getApiToken())) {
-                return ResolvedModel.unavailable("default_model_token_missing");
-            }
-            if (isBlank(detail.getModelCode())) {
-                return ResolvedModel.unavailable("default_model_code_missing");
-            }
-            ModelDto model = new ModelDto();
-            model.setUrl(detail.getApiEndpoint());
-            model.setAuthToken(detail.getApiToken());
-            model.setModelCode(detail.getModelCode());
-            return new ResolvedModel(model, new Availability(true, detail.getModelCode(), AVAILABLE));
         } catch (RuntimeException ignored) {
-            return ResolvedModel.unavailable("default_model_lookup_failed");
+            return ResolvedModel.unavailable("default_model_list_lookup_failed");
         }
+        if (listedModel == null || listedModel.getId() == null) {
+            return ResolvedModel.unavailable("default_model_not_found");
+        }
+
+        ModelVO detail;
+        try {
+            detail = modelManagementApplicationService.getModelDetail(String.valueOf(listedModel.getId()));
+        } catch (RuntimeException ignored) {
+            return ResolvedModel.unavailable("default_model_detail_lookup_failed");
+        }
+        if (detail == null) {
+            return ResolvedModel.unavailable("default_model_detail_unavailable");
+        }
+        if (isBlank(detail.getApiEndpoint())) {
+            return ResolvedModel.unavailable("default_model_endpoint_missing");
+        }
+        if (isBlank(detail.getApiToken())) {
+            return ResolvedModel.unavailable("default_model_token_missing");
+        }
+        if (isBlank(detail.getModelCode())) {
+            return ResolvedModel.unavailable("default_model_code_missing");
+        }
+        ModelDto model = new ModelDto();
+        model.setUrl(detail.getApiEndpoint());
+        model.setAuthToken(detail.getApiToken());
+        model.setModelCode(detail.getModelCode());
+        return new ResolvedModel(model, new Availability(true, detail.getModelCode(), AVAILABLE));
     }
 
     private boolean isBlank(String value) {

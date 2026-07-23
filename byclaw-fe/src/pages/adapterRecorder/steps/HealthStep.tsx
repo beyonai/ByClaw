@@ -7,6 +7,8 @@ const { Text, Paragraph } = Typography;
 
 const LLM_SYNTHESIS_DESCRIPTIONS: Record<string, string> = {
   default_model_not_found: '未找到已启用的默认 LLM 模型；可继续使用本地规则流程。',
+  default_model_list_lookup_failed: '默认模型列表查询失败；可继续使用本地规则流程。',
+  default_model_detail_lookup_failed: '默认模型详情查询失败；可继续使用本地规则流程。',
   default_model_detail_unavailable: '默认模型详情不可用；可继续使用本地规则流程。',
   default_model_endpoint_missing: '默认模型缺少服务地址；可继续使用本地规则流程。',
   default_model_token_missing: '默认模型缺少服务端凭据；可继续使用本地规则流程。',

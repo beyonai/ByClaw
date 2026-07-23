@@ -431,6 +431,8 @@ public class RecorderApplicationService {
     private String llmSynthesisMessage(RecorderLlmService.Availability availability) {
         return switch (availability.reason()) {
             case "available" -> "已配置默认 LLM 模型；AI 评分需在下一步明确同意。";
+            case "default_model_list_lookup_failed" -> "默认 LLM 模型列表查询失败；将继续使用本地规则流程。";
+            case "default_model_detail_lookup_failed" -> "默认 LLM 模型详情查询失败；将继续使用本地规则流程。";
             case "default_model_not_found" -> "未找到已启用的默认 LLM 模型；将继续使用本地规则流程。";
             case "default_model_detail_unavailable" -> "默认 LLM 模型详情不可用；将继续使用本地规则流程。";
             case "default_model_endpoint_missing" -> "默认 LLM 模型缺少服务地址；将继续使用本地规则流程。";
