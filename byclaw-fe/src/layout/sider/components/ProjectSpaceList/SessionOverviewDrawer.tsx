@@ -66,12 +66,12 @@ const TaskBoardDrawer: React.FC<SessionOverviewDrawerProps> = ({ open, onClose, 
   const [pageSize, setPageSize] = useState(20);
   const [dateRange, setDateRange] = useState<TaskDateRange>(() => getPresetRange('week'));
   const [datePreset, setDatePreset] = useState<DatePreset>(DEFAULT_PRESET);
-  const [onlyMine, setOnlyMine] = useState(false);
+  const [onlyMine, setOnlyMine] = useState(true);
   const queryRef = useRef<BoardQueryState>({
     pageNum: 1,
     pageSize: 20,
     dateRange: getPresetRange('week'),
-    onlyMine: false,
+    onlyMine: true,
   });
 
   const fetchBoardTasks = useCallback(
@@ -112,9 +112,9 @@ const TaskBoardDrawer: React.FC<SessionOverviewDrawerProps> = ({ open, onClose, 
 
   useEffect(() => {
     if (!open) return;
-    // 每次打开重置为默认本周视图，不携带上次的自定义筛选。
+    // 每次打开重置为默认视图：本周 + 只看我的，不携带上次的自定义筛选。
     setDatePreset(DEFAULT_PRESET);
-    void fetchBoardTasks({ pageNum: 1, pageSize: 20, dateRange: getPresetRange('week'), onlyMine: false });
+    void fetchBoardTasks({ pageNum: 1, pageSize: 20, dateRange: getPresetRange('week'), onlyMine: true });
   }, [fetchBoardTasks, open]);
 
   const handlePresetChange = useCallback(

@@ -98,10 +98,14 @@ public class DingtalkScanService {
 
             ProcessBuilder pb = new ProcessBuilder(cmd);
             pb.redirectErrorStream(true);
-            // 确保 dws 能找到 HOME 下的配置和 keyring
+            // 确保 dws 能找到 HOME 下的配置；DWS_CONFIG_DIR 指向源创建者 bucket 的 .dws,读其专属授权。
             Map<String, String> env = pb.environment();
             if (!env.containsKey("HOME")) {
                 env.put("HOME", System.getProperty("user.home"));
+            }
+            String dwsConfigDir = dwsAuthService.resolveDwsConfigDir(source.getCreateBy());
+            if (dwsConfigDir != null) {
+                env.put("DWS_CONFIG_DIR", dwsConfigDir);
             }
             Process process = pb.start();
 

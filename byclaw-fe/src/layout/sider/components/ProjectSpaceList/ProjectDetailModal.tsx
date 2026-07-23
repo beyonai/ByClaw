@@ -339,7 +339,7 @@ const getCronDisplayText = (cronExpr: string | undefined, t: ProjectDetailTransl
 };
 
 const getDefaultSourceForm = (): SourceForm => ({
-  type: 'dingtalk',
+  type: 'github_issue',
   name: '',
   chatId: '',
   chatName: '',
@@ -1467,7 +1467,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
 
   const detailPanelTabCountClass = styles[`projectDetailPanelTabCount${tabItems.length}`] || '';
 
-  const resetSourceForm = (type: SourceType = 'dingtalk') => {
+  const resetSourceForm = (type: SourceType = 'github_issue') => {
     setEditingSource(null);
     setSourceForm({
       ...getDefaultSourceForm(),
@@ -1476,7 +1476,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
     setGroupOptions([]);
   };
 
-  const openAddSourceModal = (type: SourceType = 'dingtalk') => {
+  const openAddSourceModal = (type: SourceType = 'github_issue') => {
     resetSourceForm(type);
     setSourceModalOpen(true);
   };
@@ -1957,14 +1957,16 @@ const ProjectDetailPanel: React.FC<Props> = ({
                   onChange={(checked) => handleToggleSource(source.sourceId, checked)}
                 />
               </div>
-              {(repoLabel(source.repoId) || source.sourceType === 'dingtalk') && (
+              {(repoLabel(source.repoId) ||
+                source.sourceType === 'dingtalk' ||
+                source.sourceType === 'dingtalk_todo') && (
                 <div className={styles.detailSourceAuth}>
                   {repoLabel(source.repoId) && (
                     <Tag icon={<GithubOutlined />} bordered={false} color="blue">
                       {repoLabel(source.repoId)}
                     </Tag>
                   )}
-                  {source.sourceType === 'dingtalk' &&
+                  {(source.sourceType === 'dingtalk' || source.sourceType === 'dingtalk_todo') &&
                     (dwsAuthed ? (
                       <Tag
                         className={`${styles.detailSourceDwsTag} ${styles.detailSourceDwsTagClickable}`}
@@ -2864,9 +2866,9 @@ const ProjectDetailPanel: React.FC<Props> = ({
             disabled={!!editingSource}
             onChange={(type) => setSourceForm((prev) => ({ ...prev, type }))}
             options={[
+              { value: 'github_issue', label: t('source.type.githubIssue') },
               { value: 'dingtalk', label: t('source.type.dingtalkGroup') },
               { value: 'dingtalk_todo', label: t('source.type.dingtalkTodo') },
-              { value: 'github_issue', label: t('source.type.githubIssue') },
             ]}
           />
         </div>

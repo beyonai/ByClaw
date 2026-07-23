@@ -79,7 +79,7 @@ describe('SessionOverviewDrawer', () => {
         // 默认查本自然周，日期取值前端仍统一按天边界对齐。
         createTimeStart: now.startOf('week').startOf('day').format('YYYY-MM-DD HH:mm:ss'),
         createTimeEnd: now.endOf('week').endOf('day').format('YYYY-MM-DD HH:mm:ss'),
-        onlyMine: undefined,
+        onlyMine: true,
         pageNum: 1,
         pageSize: 20,
       });

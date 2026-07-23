@@ -617,6 +617,13 @@ public class DevloopApplicationService {
 
             ProcessBuilder pb = new ProcessBuilder(cmd);
             pb.redirectErrorStream(true);
+            // 群搜索由当前登录用户发起,用其 bucket 的 .dws 授权。
+            Long currentUserId = CurrentUserHolder.getCurrentUserId();
+            String dwsConfigDir = dwsAuthService
+                .resolveDwsConfigDir(currentUserId != null ? String.valueOf(currentUserId) : null);
+            if (dwsConfigDir != null) {
+                pb.environment().put("DWS_CONFIG_DIR", dwsConfigDir);
+            }
             Process process = pb.start();
 
             StringBuilder output = new StringBuilder();
