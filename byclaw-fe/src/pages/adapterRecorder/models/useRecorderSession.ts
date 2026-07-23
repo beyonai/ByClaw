@@ -447,7 +447,7 @@ export default function useRecorderSession() {
       );
     },
     // 候选页「下一步」→ 进生成子步(纯前端切页,不调 be)。
-    goToGenerate: () => setData((d) => ({ ...d, pipelineSubStep: 'generate' })),
+    goToGenerate: () => setData((d) => ({ ...d, pipelineSubStep: 'generate', pipelineProgress: undefined })),
     // 候选页「上一步」/生成页返回 → 回候选子步。
     goToCandidates: () => setData((d) => ({ ...d, pipelineSubStep: 'candidates' })),
     // 拆步②生成:generate-only。点「生成 cli 脚本」触发。完成后自动进 scripts 子步展示脚本。

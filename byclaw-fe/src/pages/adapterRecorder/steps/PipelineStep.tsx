@@ -44,6 +44,7 @@ export default function PipelineStep(props: Props) {
   // 用户在候选页勾选要生成脚本的接口 —— 提升到容器级,让 generate 子步也拿得到(修 bug:此前
   // 选中态只活在 ScoreCandidatesStep 内,generate 拿不到 → be 为所有 decision==='generate' 候选生成)。
   const [genSelectedIds, setGenSelectedIds] = useState<string[]>([]);
+  const selectedCandidates = (props.candidates ?? []).filter((candidate) => genSelectedIds.includes(candidate.id));
 
   // 进入生成子步 / 选中变化 → 按选中候选取 generate 提示词预览(与实际生成一致的透明预览)。
   useEffect(() => {
@@ -56,7 +57,7 @@ export default function PipelineStep(props: Props) {
         loading={props.loading}
         llmSynthesis={props.llmSynthesis}
         pipelineProgress={props.pipelineProgress}
-        selectedCount={genSelectedIds.length}
+        selectedCandidates={selectedCandidates}
         onRunGenerate={() => props.onRunGenerate(genSelectedIds.length ? genSelectedIds : undefined)}
         onBack={props.onGoToCandidates}
       />
