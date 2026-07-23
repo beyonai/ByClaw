@@ -150,14 +150,18 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
   }, [sessionId, sessionList]);
 
   const onReceivedChatMessages = useCallback(
-    (metadata?: string) => {
+    (payload?: { sessionId?: string; metadata?: string }) => {
+      const { sessionId: sourceSessionId, metadata } = payload || {};
+      if (`${sourceSessionId}` !== `${sessionId}`) {
+        return;
+      }
       const agentInfo = getResponseAgentInfo({ agentList, employeesList }, metadata);
       if (agentInfo) {
         setAgentId?.(agentInfo.agentId);
         setMyAgentType(agentInfo.agentType);
       }
     },
-    [agentList, employeesList]
+    [agentList, employeesList, sessionId]
   );
 
   const {
