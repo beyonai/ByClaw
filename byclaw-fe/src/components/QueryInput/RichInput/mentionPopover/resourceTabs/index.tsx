@@ -48,6 +48,7 @@ const ResourceTabs: React.FC<Props> = ({
   agentId,
   sessionId,
   showKnowledgeTab,
+  showSpaceTab = true,
   showSkillTab,
   agentIds,
 }) => {
@@ -393,7 +394,8 @@ const ResourceTabs: React.FC<Props> = ({
   );
 
   useEffect(() => {
-    const visible: string[] = ['space'];
+    const visible: string[] = [];
+    if (showSpaceTab) visible.push('space');
     if (visibleKeys.includes('knowledge')) visible.push('knowledge');
     if (visibleKeys.includes('tool')) visible.push('tool');
     if (visibleKeys.includes('view')) visible.push('view');
@@ -403,7 +405,7 @@ const ResourceTabs: React.FC<Props> = ({
     if (!visible.length) return;
     const newActiveTabValue = activeTab && visible.includes(activeTab) ? activeTab : visible[0];
     setActiveTab(newActiveTabValue);
-  }, [activeTab, showKnowledgeTab, showSkillTab, agentIds, visibleKeys, isOpenSource]);
+  }, [activeTab, showKnowledgeTab, showSpaceTab, showSkillTab, agentIds, visibleKeys, isOpenSource]);
 
   const tabItems = useMemo(() => {
     const items: {
@@ -411,21 +413,23 @@ const ResourceTabs: React.FC<Props> = ({
       label: string;
       children: React.ReactNode;
     }[] = [];
-    items.push({
-      key: 'space',
-      label: intl.formatMessage({ id: 'sider.space' }),
-      children: (
-        <div className={styles.listContainer}>
-          <ResourceCitation
-            resourceType="SPACE"
-            onSelect={onSelectObject}
-            keyword={queryKeyword}
-            agentId={agentId}
-            agentIds={agentIds}
-          />
-        </div>
-      ),
-    });
+    if (showSpaceTab) {
+      items.push({
+        key: 'space',
+        label: intl.formatMessage({ id: 'sider.space' }),
+        children: (
+          <div className={styles.listContainer}>
+            <ResourceCitation
+              resourceType="SPACE"
+              onSelect={onSelectObject}
+              keyword={queryKeyword}
+              agentId={agentId}
+              agentIds={agentIds}
+            />
+          </div>
+        ),
+      });
+    }
     items.push({
       key: 'knowledge',
       label: intl.formatMessage({ id: 'sider.knowledge' }),
@@ -592,6 +596,7 @@ const ResourceTabs: React.FC<Props> = ({
     agentIds,
     isOpenSource,
     showKnowledgeTab,
+    showSpaceTab,
     showSkillTab,
     shouldUseSharedResourceQuery,
     sharedLoading,
@@ -607,12 +612,13 @@ const ResourceTabs: React.FC<Props> = ({
   ]);
 
   const visibleTabs = useMemo(() => {
-    const baseTabs = [
-      {
+    const baseTabs: { key: string; label: string }[] = [];
+    if (showSpaceTab) {
+      baseTabs.push({
         key: 'space',
         label: intl.formatMessage({ id: 'sider.space' }),
-      },
-    ];
+      });
+    }
 
     const conditionalTabs = [
       {
@@ -654,7 +660,7 @@ const ResourceTabs: React.FC<Props> = ({
     });
 
     return [...baseTabs, ...filteredConditionalTabs, ...(isOpenSource ? [skillTab, fileTab] : [])];
-  }, [agentType, intl, visibleKeys, isOpenSource]);
+  }, [agentType, intl, showSpaceTab, visibleKeys, isOpenSource]);
 
   if (!hasAnyTab) {
     return (

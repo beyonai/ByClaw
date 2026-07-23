@@ -221,6 +221,7 @@ const MentionPopover = ({
                         keyword={inputText}
                         agentIds={resourceAgentIds}
                         showKnowledgeTab={!!currentAgent && currentAgent.knowledgeCount !== 0}
+                        showSpaceTab={false}
                         showSkillTab={!!currentAgent && currentAgent.skillsCount !== 0}
                       />
                     </div>
