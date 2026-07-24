@@ -1,6 +1,5 @@
 package com.iwhalecloud.byai.state.interfaces.controller.resource;
 
-import java.net.URI;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -495,11 +494,11 @@ public class ToolManController {
         String userCode = CurrentUserHolder.getCurrentUserCode();
         Long digId = request == null ? null : request.getDigId();
         String downloadUrl = request == null ? null : request.getDownloadUrl();
-        String logDownloadUrl = sanitizeDownloadUrlForLog(downloadUrl);
+        String requestBody = serializeThirdPartySkillInstallRequest(request);
         String downloadUrlHash = StringUtils.isBlank(downloadUrl) ? "" : DigestUtils.sha256Hex(downloadUrl.trim());
         logger.info(
-            "第三方技能安装接口调用开始，userCode={}, digId={}, downloadUrl={}, downloadUrlHash={}",
-            userCode, digId, logDownloadUrl, downloadUrlHash);
+            "第三方技能安装接口调用开始，userCode={}, requestBody={}, downloadUrlHash={}",
+            userCode, requestBody, downloadUrlHash);
         try {
             if (request == null) {
                 throw new IllegalArgumentException(I18nUtil.get("param.cannot.be.null"));
@@ -512,7 +511,7 @@ public class ToolManController {
             SsResExtSkill extSkill = itemResult.extSkill();
             logger.info(
                 "第三方技能安装接口调用成功，userCode={}, digId={}, operation={}, resourceId={}, resourceCode={}, "
-                    + "resourceName={}, version={}, skillUrl={}, packageSize={}, downloadUrl={}, downloadUrlHash={}, "
+                    + "resourceName={}, version={}, skillUrl={}, packageSize={}, requestBody={}, downloadUrlHash={}, "
                     + "durationMs={}",
                 userCode, digId, itemResult.updated() ? "UPDATE" : "CREATE",
                 resource == null ? null : resource.getResourceId(),
@@ -521,45 +520,28 @@ public class ToolManController {
                 extSkill == null ? null : extSkill.getVersion(),
                 extSkill == null ? null : extSkill.getSkillUrl(),
                 extSkill == null ? null : extSkill.getSkillPackageSize(),
-                logDownloadUrl, downloadUrlHash, elapsedMillis(startNanos));
+                requestBody, downloadUrlHash, elapsedMillis(startNanos));
             return ResponseUtil.successResponse(I18nUtil.get("byclaw.third.party.skill.install.success"),
                 result);
         }
         catch (IllegalArgumentException | BdpRuntimeException e) {
             logger.warn(
-                "第三方技能安装接口调用失败，userCode={}, digId={}, downloadUrl={}, downloadUrlHash={}, reason={}, "
+                "第三方技能安装接口调用失败，userCode={}, digId={}, requestBody={}, downloadUrlHash={}, reason={}, "
                     + "durationMs={}",
-                userCode, digId, logDownloadUrl, downloadUrlHash, e.getMessage(), elapsedMillis(startNanos));
+                userCode, digId, requestBody, downloadUrlHash, e.getMessage(), elapsedMillis(startNanos));
             return ResponseUtil.fail(e.getMessage());
         }
         catch (Exception e) {
             logger.error(
-                "第三方技能安装接口调用异常，userCode={}, digId={}, downloadUrl={}, downloadUrlHash={}, durationMs={}",
-                userCode, digId, logDownloadUrl, downloadUrlHash, elapsedMillis(startNanos), e);
+                "第三方技能安装接口调用异常，userCode={}, digId={}, requestBody={}, downloadUrlHash={}, durationMs={}",
+                userCode, digId, requestBody, downloadUrlHash, elapsedMillis(startNanos), e);
             return ResponseUtil.fail(e.getMessage() != null ? e.getMessage()
                 : I18nUtil.get("byclaw.third.party.skill.install.failed"));
         }
     }
 
-    static String sanitizeDownloadUrlForLog(String downloadUrl) {
-        if (StringUtils.isBlank(downloadUrl)) {
-            return "";
-        }
-        try {
-            URI uri = URI.create(downloadUrl.trim());
-            if (StringUtils.isBlank(uri.getScheme()) || StringUtils.isBlank(uri.getHost())) {
-                return "[invalid-url]";
-            }
-            String host = uri.getHost();
-            if (host.contains(":") && !host.startsWith("[")) {
-                host = "[" + host + "]";
-            }
-            String port = uri.getPort() < 0 ? "" : ":" + uri.getPort();
-            return uri.getScheme() + "://" + host + port + StringUtils.defaultString(uri.getRawPath());
-        }
-        catch (Exception e) {
-            return "[invalid-url]";
-        }
+    static String serializeThirdPartySkillInstallRequest(ThirdPartySkillInstallQo request) {
+        return request == null ? "null" : JSON.toJSONString(request);
     }
 
     private static long elapsedMillis(long startNanos) {
