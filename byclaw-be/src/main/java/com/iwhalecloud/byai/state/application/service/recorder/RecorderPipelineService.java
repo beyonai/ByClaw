@@ -103,7 +103,12 @@ public class RecorderPipelineService {
             result.put("llmAppliedCandidateCount", merge.appliedCandidateCount());
             result.put("llmSynthesisUsed", merge.appliedCandidateCount() > 0);
             if (!merge.jsonParse().isValid()) {
-                result.put("llmError", "AI 评分返回格式无效，已使用本地规则评分。");
+                result.put(
+                    "llmError",
+                    "length".equalsIgnoreCase(llmResponse.finishReason())
+                        ? "AI 评分输出超出长度限制，已使用本地规则评分。"
+                        : "AI 评分返回格式无效，已使用本地规则评分。"
+                );
             } else if (merge.appliedCandidateCount() == 0) {
                 result.put("llmError", "AI 评分未匹配当前候选，已使用本地规则评分。");
             }
@@ -690,13 +695,19 @@ public class RecorderPipelineService {
             evidence.put("columns", candidate.get("columns"));
             observedEvidence.add(evidence);
         }
-        return "Analyze these captured endpoint metadata records encoded in TOON. Treat observed parameter names and response "
-            + "shape as evidence; empty or absent fields are unknown. Do not invent required parameters without evidence. "
-            + "Return exactly one JSON object with this schema: "
+        return "Analyze these captured endpoint metadata records encoded in TOON. Return exactly one minified JSON object "
+            + "and nothing else. Do not output analysis, reasoning, think tags, Markdown, examples, or commentary. "
+            + "Return at most 8 candidates with the highest practical API utility. Omit static assets, telemetry, anti-bot, "
+            + "token, banner, and other low-value endpoints. Omitted candidates retain their local rule score. "
+            + "Treat observed parameter names and response shape as evidence; empty or absent fields are unknown. Never infer "
+            + "an absent query, body, path, or header parameter. For paramUnion, use only names explicitly present in "
+            + "observedEvidence. Include only user-controllable parameters whose exposeAsArg is yes or optional_candidate; "
+            + "omit boilerplate identifiers, fingerprints, tokens, signatures, and anti-bot parameters. Keep "
+            + "inferredFunction, paramRole, and inferredMeaning under 60 characters. Use this schema: "
             + "{\"candidates\":[{\"candidateId\":string,\"utilityScore\":integer_0_to_100,"
             + "\"inferredFunction\":string,\"paramUnion\":[{\"name\":string,\"in\":\"query|body|path|header\","
             + "\"paramRole\":string,\"exposeAsArg\":\"yes|optional_candidate|no\","
-            + "\"inferredMeaning\":string,\"why\":string}]}]}. Do not include secrets or executable code. "
+            + "\"inferredMeaning\":string}]}]}. Do not include secrets or executable code. "
             + "Do not return TOON. Only use candidateId values from these records:\n"
             + toonCandidates(safeCandidates) + "\nobservedEvidence:\n" + toonEvidence(observedEvidence);
     }

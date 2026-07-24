@@ -53,6 +53,10 @@ class RecorderPipelineServiceTest {
 
         assertThat(String.valueOf(result.get("scorePrompt")))
             .contains("captured endpoint metadata records encoded in TOON")
+            .contains("Return at most 8 candidates with the highest practical API utility")
+            .contains("Do not output analysis, reasoning, think tags, Markdown, examples, or commentary")
+            .contains("Include only user-controllable parameters")
+            .contains("Omitted candidates retain their local rule score")
             .contains("records[1]{id,method,host,pathname,score}:")
             .contains("cand_search,GET,api.example.test,/search,88")
             .contains("queryKeys[1]: key_word")
@@ -61,7 +65,36 @@ class RecorderPipelineServiceTest {
             .contains("columns[1]{name,type}:")
             .contains("title,string")
             .contains("Do not return TOON")
+            .doesNotContain("\"why\":string")
             .doesNotContain("Score recorder candidates:");
+    }
+
+    @Test
+    void scoreReportsOutputTruncationWhenTheModelHitsItsLengthLimit() {
+        RecorderLlmService llmService = mock(RecorderLlmService.class);
+        when(llmService.availability()).thenReturn(new RecorderLlmService.Availability(true, "test-model", "available"));
+        when(llmService.generateJsonObjectWithMetadata(anyString(), anyString(), anyInt())).thenReturn(
+            new RecorderLlmService.JsonObjectResponse(
+                "{\"candidates\":[{\"candidateId\":\"candidate-1\",\"inferredFunction\":\"unfinished",
+                "length"
+            )
+        );
+        RecorderPipelineService pipeline = new RecorderPipelineService(
+            RecorderDraftStoreTestSupport.forFileRoot(tempDir), new CapturingVerifyService(), llmService
+        );
+        RecorderSession session = new RecorderSession("session-1", new RecorderOwner(1L, "alice"));
+        session.candidates(List.of(Map.of(
+            "id", "candidate-1",
+            "score", 80,
+            "endpoint", Map.of("method", "GET", "host", "example.com", "pathname", "/search")
+        )));
+
+        Map<String, Object> result = pipeline.score(session, List.of(), true);
+
+        assertThat(result)
+            .containsEntry("llmError", "AI 评分输出超出长度限制，已使用本地规则评分。")
+            .containsEntry("llmAppliedCandidateCount", 0)
+            .containsEntry("llmSynthesisUsed", false);
     }
 
     @Test

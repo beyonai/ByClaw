@@ -102,6 +102,8 @@ public class RecorderLlmService {
         model.setUrl(detail.getApiEndpoint());
         model.setAuthToken(detail.getApiToken());
         model.setModelCode(detail.getModelCode());
+        model.setProviderName(detail.getProviderName());
+        model.setModelProtocol(detail.getModelProtocol());
         return new ResolvedModel(model, new Availability(true, detail.getModelCode(), AVAILABLE));
     }
 

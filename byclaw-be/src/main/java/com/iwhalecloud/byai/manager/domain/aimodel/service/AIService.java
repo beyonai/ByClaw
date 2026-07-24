@@ -39,6 +39,9 @@ import org.springframework.web.client.RestTemplate;
 @Service
 public class AIService {
 
+    private static final String FINAL_JSON_ONLY_INSTRUCTION =
+        "Do not output analysis, reasoning, or <think> blocks. Return only the final JSON object.";
+
     @Autowired
     private AiModelService aiModelService;
 
@@ -112,19 +115,29 @@ public class AIService {
             Map<String, Object> requestBody = new HashMap<>();
             requestBody.put("model", model);
 
+            JsonGenerationPolicy jsonPolicy = jsonObject
+                ? resolveJsonGenerationPolicy(defaultModel, model)
+                : JsonGenerationPolicy.notApplicable();
+            String effectiveUserPrompt = jsonPolicy.promptFallback()
+                ? userPrompt + "\n\n" + FINAL_JSON_ONLY_INSTRUCTION
+                : userPrompt;
+
             List<Map<String, String>> messages = new ArrayList<>();
             if (StringUtils.isNotBlank(systemPrompt)) {
                 messages.add(Map.of("role", "system", "content", systemPrompt));
             }
-            messages.add(Map.of("role", "user", "content", userPrompt));
+            messages.add(Map.of("role", "user", "content", effectiveUserPrompt));
             requestBody.put("messages", messages);
 
-            requestBody.put("temperature", 0.7);
+            requestBody.put("temperature", jsonObject ? jsonPolicy.temperature() : 0.7);
             requestBody.put("max_tokens", maxTokens > 0 ? maxTokens : 4000);
             if (jsonObject) {
                 requestBody.put("response_format", Map.of("type", "json_object"));
+                requestBody.putAll(jsonPolicy.requestParams());
             }
-            applyThinkingParams(requestBody, defaultModel);
+            else {
+                applyThinkingParams(requestBody, defaultModel);
+            }
 
             // 设置请求头
             HttpHeaders headers = new HttpHeaders();
@@ -143,10 +156,11 @@ public class AIService {
                 List<Map<String, Object>> choices = (List<Map<String, Object>>) responseMap.get("choices");
                 if (choices != null && !choices.isEmpty()) {
                     Map<String, Object> firstChoice = choices.get(0);
-                    Map<String, String> message = (Map<String, String>) firstChoice.get("message");
+                    Map<String, Object> message = (Map<String, Object>) firstChoice.get("message");
                     Object finishReason = firstChoice.get("finish_reason");
                     return new GeneratedText(
-                        message.get("content"), finishReason instanceof String ? (String) finishReason : null
+                        message == null || message.get("content") == null ? null : String.valueOf(message.get("content")),
+                        finishReason instanceof String ? (String) finishReason : null
                     );
                 }
             }
@@ -294,6 +308,164 @@ public class AIService {
     }
 
     public record GeneratedText(String content, String finishReason) {
+    }
+
+    private JsonGenerationPolicy resolveJsonGenerationPolicy(ModelDto modelDto, String requestedModel) {
+        String provider = resolveProvider(modelDto);
+        String model = normalizeString(requestedModel, "");
+
+        if (provider.contains("openrouter")) {
+            if (isMandatoryOpenRouterReasoningModel(model)) {
+                return JsonGenerationPolicy.fallback(Map.of("reasoning", Map.of("exclude", true)), 0.0);
+            }
+            return JsonGenerationPolicy.withParams(
+                Map.of("reasoning", Map.of("effort", "none", "exclude", true)), 0.0
+            );
+        }
+        if (provider.contains("together")) {
+            if (isExplicitThinkingOnlyModel(model)) {
+                return JsonGenerationPolicy.fallback(Map.of(), 0.0);
+            }
+            return JsonGenerationPolicy.withParams(Map.of("reasoning", Map.of("enabled", false)), 0.0);
+        }
+        if (isProviderOrUnambiguousModel(provider, model, "deepseek", "deepseek")) {
+            if (model.contains("r1")) {
+                return JsonGenerationPolicy.fallback(Map.of(), 0.0);
+            }
+            return JsonGenerationPolicy.withParams(Map.of("thinking", Map.of("type", "disabled")), 0.0);
+        }
+        if (isProviderOrUnambiguousModel(provider, model, "minimax", "minimax")) {
+            if (model.contains("m3")) {
+                return JsonGenerationPolicy.withParams(Map.of("thinking", Map.of("type", "disabled")), 0.1);
+            }
+            if (model.contains("m2")) {
+                return JsonGenerationPolicy.fallback(Map.of("reasoning_split", true), 0.1);
+            }
+            return JsonGenerationPolicy.fallback(Map.of(), 0.1);
+        }
+        if (isQwenProvider(provider, model)) {
+            if (isExplicitThinkingOnlyModel(model)) {
+                return JsonGenerationPolicy.fallback(Map.of(), 0.0);
+            }
+            return JsonGenerationPolicy.withParams(Map.of("enable_thinking", false), 0.0);
+        }
+        if (isZaiProvider(provider, model)) {
+            if (supportsZaiThinkingSwitch(model)) {
+                return JsonGenerationPolicy.withParams(Map.of("thinking", Map.of("type", "disabled")), 0.0);
+            }
+            return JsonGenerationPolicy.withParams(Map.of(), 0.0);
+        }
+        if (isGoogleProvider(provider, model)) {
+            if (model.contains("gemini-2.5-flash") || model.contains("gemini-2.5-flash-lite")) {
+                return JsonGenerationPolicy.withParams(Map.of("reasoning_effort", "none"), 1.0);
+            }
+            if (model.contains("gemini-2.5-pro") || model.contains("gemini-3")) {
+                return JsonGenerationPolicy.fallback(Map.of("reasoning_effort", "low"), 1.0);
+            }
+            return JsonGenerationPolicy.fallback(Map.of(), 1.0);
+        }
+        if (isOpenAiProvider(provider, model)) {
+            if (supportsOpenAiNoReasoning(model)) {
+                return JsonGenerationPolicy.withParams(Map.of("reasoning_effort", "none"), 0.0);
+            }
+            if (isOpenAiReasoningModel(model)) {
+                return JsonGenerationPolicy.fallback(Map.of(), 0.0);
+            }
+            return JsonGenerationPolicy.withParams(Map.of(), 0.0);
+        }
+        if (provider.contains("anthropic") || provider.contains("claude")) {
+            // Native Claude requests disable thinking by omitting the optional thinking object. An OpenAI-compatible
+            // proxy has no portable equivalent, so keep the request parameter-free and reinforce the output contract.
+            return JsonGenerationPolicy.fallback(Map.of(), 0.0);
+        }
+        return JsonGenerationPolicy.fallback(Map.of(), 0.0);
+    }
+
+    private String resolveProvider(ModelDto modelDto) {
+        if (StringUtils.isNotBlank(modelDto.getProviderName())) {
+            return normalizeString(modelDto.getProviderName(), "");
+        }
+        Map<String, Object> instanceParam = modelDto.getInstanceParam();
+        if (instanceParam != null && instanceParam.get("providerName") != null) {
+            return normalizeString(instanceParam.get("providerName"), "");
+        }
+        if (instanceParam != null && instanceParam.get("reasoningConfig") instanceof Map<?, ?> config) {
+            Object compatFormat = config.get("compatFormat");
+            if (compatFormat != null) {
+                return normalizeString(compatFormat, "");
+            }
+        }
+        return "";
+    }
+
+    private boolean isProviderOrUnambiguousModel(String provider, String model, String providerToken,
+        String modelToken) {
+        return provider.contains(providerToken) || (provider.isEmpty() && model.contains(modelToken));
+    }
+
+    private boolean isQwenProvider(String provider, String model) {
+        return provider.contains("qwen") || provider.contains("alibaba") || provider.contains("dashscope")
+            || provider.contains("aliyun") || (provider.isEmpty() && model.contains("qwen"));
+    }
+
+    private boolean isZaiProvider(String provider, String model) {
+        return provider.equals("zai") || provider.contains("z.ai") || provider.contains("zhipu")
+            || provider.contains("智谱") || (provider.isEmpty() && model.startsWith("glm-"));
+    }
+
+    private boolean isGoogleProvider(String provider, String model) {
+        return provider.contains("google") || provider.contains("gemini")
+            || (provider.isEmpty() && model.startsWith("gemini-"));
+    }
+
+    private boolean isOpenAiProvider(String provider, String model) {
+        return provider.contains("openai") || (provider.isEmpty() && (model.startsWith("gpt-") || model.matches("o\\d.*")));
+    }
+
+    private boolean supportsZaiThinkingSwitch(String model) {
+        return model.startsWith("glm-5") || model.startsWith("glm-4.5") || model.startsWith("glm-4.6")
+            || model.startsWith("glm-4.7");
+    }
+
+    private boolean supportsOpenAiNoReasoning(String model) {
+        if (model.contains("-pro")) {
+            return false;
+        }
+        return model.startsWith("gpt-5.1") || model.startsWith("gpt-5.2") || model.startsWith("gpt-5.3")
+            || model.startsWith("gpt-5.4") || model.startsWith("gpt-5.5") || model.startsWith("gpt-5.6")
+            || model.startsWith("gpt-5.7") || model.startsWith("gpt-5.8") || model.startsWith("gpt-5.9")
+            || model.startsWith("gpt-6");
+    }
+
+    private boolean isOpenAiReasoningModel(String model) {
+        return model.startsWith("o1") || model.startsWith("o3") || model.startsWith("o4")
+            || model.equals("gpt-5") || model.startsWith("gpt-5-");
+    }
+
+    private boolean isMandatoryOpenRouterReasoningModel(String model) {
+        return model.equals("openrouter/auto") || model.equals("openrouter/free") || model.contains("gemini-3")
+            || model.contains("gemini-2.5-pro") || model.contains("deepseek-r1")
+            || isExplicitThinkingOnlyModel(model);
+    }
+
+    private boolean isExplicitThinkingOnlyModel(String model) {
+        return model.contains("-thinking") || model.startsWith("qwq") || model.contains("/qwq")
+            || model.contains("reasoning-only");
+    }
+
+    private record JsonGenerationPolicy(Map<String, Object> requestParams, double temperature,
+                                        boolean promptFallback) {
+        static JsonGenerationPolicy withParams(Map<String, Object> requestParams, double temperature) {
+            return new JsonGenerationPolicy(requestParams, temperature, false);
+        }
+
+        static JsonGenerationPolicy fallback(Map<String, Object> requestParams, double temperature) {
+            return new JsonGenerationPolicy(requestParams, temperature, true);
+        }
+
+        static JsonGenerationPolicy notApplicable() {
+            return withParams(Map.of(), 0.7);
+        }
     }
 
     @SuppressWarnings("unchecked")
