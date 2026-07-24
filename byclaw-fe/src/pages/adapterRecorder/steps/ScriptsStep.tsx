@@ -122,7 +122,7 @@ export default function ScriptsStep({
                   title={sourceChanged || !d.usable ? '源码已修改或尚未通过测试，请先重新测试' : undefined}
                   onClick={() => onSaveDraft(d.id, source)}
                 >
-                  {saved ? '再次保存' : '保存到 ~/.bycli/clis/'}
+                  {saved ? '再次保存' : '保存'}
                 </Button>
                 {(sourceChanged || !d.usable) && !saved && (
                   <Text type="secondary" style={{ fontSize: 12 }}>

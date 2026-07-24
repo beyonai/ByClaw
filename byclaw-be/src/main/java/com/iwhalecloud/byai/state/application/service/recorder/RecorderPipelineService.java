@@ -463,19 +463,127 @@ public class RecorderPipelineService {
         String site = String.valueOf(endpoint.getOrDefault("host", "example.com"))
             .replaceAll("[^A-Za-z0-9]+", "_")
             .replaceAll("_+$", "");
+        String method = String.valueOf(endpoint.getOrDefault("method", "GET")).toUpperCase();
+        String urlTemplate = String.valueOf(endpoint.getOrDefault(
+            "urlTemplate",
+            "https://" + endpoint.getOrDefault("host", "example.com") + endpoint.getOrDefault("pathname", "/")
+        ));
+        String baseUrl = urlTemplate.contains("?") ? urlTemplate.substring(0, urlTemplate.indexOf('?')) : urlTemplate;
+        List<Map<String, Object>> args = mapList(candidate.get("args"));
+        List<Map<String, Object>> columns = mapList(candidate.get("columns"));
+        if (columns.isEmpty()) {
+            columns = List.of(Map.of("name", "value"));
+        }
         return """
             import { cli, Strategy } from '@sovovs/bycli/registry';
+            import { CommandExecutionError, EmptyResultError } from '@sovovs/bycli/errors';
 
             cli({
-              site: '%s',
-              name: '%s',
+              site: %s,
+              name: %s,
               access: 'read',
-              description: 'Generated recorder adapter for %s/%s',
+              description: %s,
               strategy: Strategy.PUBLIC,
               browser: false,
-              args: [],
-              func: async () => [{ candidateId: '%s' }],
+              args: %s,
+              columns: %s,
+              func: async (args) => {
+                const url = new URL(%s);
+            %s
+                let response;
+                try {
+                  response = await fetch(url, { method: %s, headers: { Accept: 'application/json' } });
+                } catch (error) {
+                  throw new CommandExecutionError(`request failed: ${error?.message || error}`);
+                }
+                if (!response.ok) throw new CommandExecutionError(`request failed: HTTP ${response.status}`);
+                const data = await response.json();
+            %s
+                if (!Array.isArray(rows) || rows.length === 0) throw new EmptyResultError(%s, 'API returned no rows');
+                return rows.map((item) => (%s));
+              },
             });
-            """.formatted(site, commandName, site, commandName, candidate.get("id"));
+            """.formatted(
+                jsString(site),
+                jsString(commandName),
+                jsString("Generated recorder adapter for " + site + "/" + commandName),
+                sourceArgs(args),
+                sourceColumns(columns),
+                jsString(baseUrl),
+                sourceQueryAssignments(args),
+                jsString(method),
+                sourceRows(endpoint),
+                jsString(site + " " + commandName),
+                sourceRow(columns)
+            );
+    }
+
+    private List<Map<String, Object>> mapList(Object value) {
+        if (!(value instanceof List<?> raw)) {
+            return List.of();
+        }
+        return raw.stream().map(this::mapValue).filter(map -> !map.isEmpty()).toList();
+    }
+
+    private String sourceArgs(List<Map<String, Object>> args) {
+        if (args.isEmpty()) {
+            return "[]";
+        }
+        return "[\n" + args.stream().map(arg -> {
+            String name = String.valueOf(arg.getOrDefault("argName", arg.getOrDefault("name", "query")));
+            String defaultValue = String.valueOf(arg.getOrDefault("defaultValue", ""));
+            return "    { name: " + jsString(name) + ", type: 'string', default: " + jsString(defaultValue)
+                + ", help: " + jsString("Captured query parameter " + name) + " },";
+        }).collect(java.util.stream.Collectors.joining("\n")) + "\n  ]";
+    }
+
+    private String sourceColumns(List<Map<String, Object>> columns) {
+        return "[" + columns.stream()
+            .map(column -> jsString(String.valueOf(column.getOrDefault("name", "value"))))
+            .collect(java.util.stream.Collectors.joining(", ")) + "]";
+    }
+
+    private String sourceQueryAssignments(List<Map<String, Object>> args) {
+        return args.stream().map(arg -> {
+            String name = String.valueOf(arg.getOrDefault("argName", arg.getOrDefault("name", "query")));
+            return "    url.searchParams.set(" + jsString(name) + ", String(args." + jsIdentifier(name) + "));";
+        }).collect(java.util.stream.Collectors.joining("\n"));
+    }
+
+    private String sourceRow(List<Map<String, Object>> columns) {
+        return "{ " + columns.stream().map(column -> {
+            String name = String.valueOf(column.getOrDefault("name", "value"));
+            if ("value".equals(name) && "$[]".equals(column.get("path"))) {
+                return "value: typeof item === 'string' ? item : JSON.stringify(item)";
+            }
+            return jsIdentifier(name) + ": item?." + jsIdentifier(name) + " ?? null";
+        }).collect(java.util.stream.Collectors.joining(", ")) + " }";
+    }
+
+    private String sourceRows(Map<String, Object> endpoint) {
+        String rowPath = stringValue(endpoint.get("rowPath"));
+        if (rowPath != null && rowPath.matches("\\$(\\.[A-Za-z_$][A-Za-z0-9_$]*)*\\[\\]")) {
+            String expression = "data" + rowPath.substring(1, rowPath.length() - 2).replace(".", "?.");
+            return "    const rows = " + expression + ";";
+        }
+        return """
+                const findRows = (value) => {
+                  if (Array.isArray(value)) return value;
+                  if (!value || typeof value !== 'object') return [];
+                  for (const nested of Object.values(value)) {
+                    const rows = findRows(nested);
+                    if (rows.length) return rows;
+                  }
+                  return [];
+                };
+                const rows = findRows(data);""";
+    }
+
+    private String jsIdentifier(String value) {
+        return value.matches("[A-Za-z_$][A-Za-z0-9_$]*") ? value : "[" + jsString(value) + "]";
+    }
+
+    private String jsString(String value) {
+        return "'" + value.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n") + "'";
     }
 }

@@ -315,6 +315,36 @@ class RecorderPipelineServiceTest {
     }
 
     @Test
+    void generatedDraftFetchesTheCapturedEndpointInsteadOfReturningCandidateMetadata() {
+        RecorderPipelineService pipeline = pipeline(new CapturingVerifyService());
+        RecorderSession session = new RecorderSession("session-1", new RecorderOwner(1L, "alice"));
+        session.candidates(List.of(Map.of(
+            "id", "candidate-1",
+            "endpoint", Map.of(
+                "method", "GET",
+                "host", "api.example.test",
+                "pathname", "/search",
+                "urlTemplate", "https://api.example.test/search?q={q}",
+                "rowPath", "$.items[]"
+            ),
+            "args", List.of(Map.of("argName", "q", "defaultValue", "alpha")),
+            "columns", List.of(Map.of("name", "title", "path", "$.items[].title", "type", "string"))
+        )));
+
+        Map<String, Object> response = pipeline.generate(session, List.of());
+        String source = String.valueOf(map(((List<?>) response.get("drafts")).getFirst()).get("source"));
+
+        assertThat(source)
+            .contains("import { CommandExecutionError, EmptyResultError } from '@sovovs/bycli/errors';")
+            .contains("const url = new URL('https://api.example.test/search');")
+            .contains("url.searchParams.set('q', String(args.q));")
+            .contains("response = await fetch(url, { method: 'GET', headers: { Accept: 'application/json' } });")
+            .contains("const rows = data?.items;")
+            .contains("title: item?.title ?? null")
+            .doesNotContain("candidateId");
+    }
+
+    @Test
     void saveSourceUsesTheSameUtf8ValidationBoundaryAsVerification() {
         RecorderPipelineService pipeline = pipeline(new CapturingVerifyService());
         Map<String, Object> draft = draft();

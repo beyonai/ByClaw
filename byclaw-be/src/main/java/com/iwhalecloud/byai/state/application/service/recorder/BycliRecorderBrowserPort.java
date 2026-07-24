@@ -30,6 +30,7 @@ public class BycliRecorderBrowserPort implements RecorderBrowserPort {
     private static final int BROWSER_RECOVERY_REQUEST_TIMEOUT_MS = 2000;
     private static final int BROWSER_RECOVERY_TIMEOUT_MS = 10000;
     private static final int BROWSER_RECOVERY_POLL_INTERVAL_MS = 250;
+    private static final int MAX_RESPONSE_SAMPLE_BYTES = 64 * 1024;
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {
     };
 
@@ -363,10 +364,65 @@ public class BycliRecorderBrowserPort implements RecorderBrowserPort {
         List<Map<String, Object>> result = new ArrayList<>();
         for (Object item : items) {
             if (item instanceof Map<?, ?> raw) {
-                result.add(stringMap(raw));
+                result.add(redactedEntry(raw));
             }
         }
         return result;
+    }
+
+    private Map<String, Object> redactedEntry(Map<?, ?> raw) {
+        Map<String, Object> entry = stringMap(raw);
+        if (entry.containsKey("responseBody")) {
+            Object redacted = redactedResponse(entry.get("responseBody"));
+            if (redacted == null) {
+                entry.remove("responseBody");
+            } else {
+                entry.put("responseBody", redacted);
+            }
+        }
+        return entry;
+    }
+
+    private Object redactedResponse(Object response) {
+        if (response instanceof String text) {
+            if (text.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > MAX_RESPONSE_SAMPLE_BYTES) {
+                return null;
+            }
+            try {
+                return objectMapper.writeValueAsString(redactJsonValues(objectMapper.readValue(text, Object.class)));
+            } catch (JsonProcessingException ignored) {
+                return null;
+            }
+        }
+        if (response instanceof Map<?, ?> || response instanceof List<?>) {
+            return redactJsonValues(response);
+        }
+        return null;
+    }
+
+    private Object redactJsonValues(Object value) {
+        if (value instanceof Map<?, ?> raw) {
+            Map<String, Object> redacted = new LinkedHashMap<>();
+            raw.forEach((key, item) -> {
+                if (key instanceof String text) {
+                    redacted.put(text, redactJsonValues(item));
+                }
+            });
+            return redacted;
+        }
+        if (value instanceof List<?> items) {
+            return items.stream().map(this::redactJsonValues).toList();
+        }
+        if (value instanceof String) {
+            return "<redacted>";
+        }
+        if (value instanceof Number) {
+            return 0;
+        }
+        if (value instanceof Boolean) {
+            return false;
+        }
+        return null;
     }
 
     private Map<String, Object> dataMap(Map<String, Object> payload) {

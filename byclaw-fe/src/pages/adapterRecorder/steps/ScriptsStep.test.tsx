@@ -27,6 +27,20 @@ const draft: PipelineDraft = {
 };
 
 describe('ScriptsStep save state', () => {
+  it('labels an unsaved draft save button concisely', () => {
+    render(
+      <ScriptsStep
+        loading={false}
+        drafts={[draft]}
+        onVerifyDraft={jest.fn()}
+        onSaveDraft={jest.fn()}
+        onBack={jest.fn()}
+      />
+    );
+
+    expect(screen.getByRole('button', { name: 'save 保存' })).toBeEnabled();
+  });
+
   it('keeps a previously saved draft actionable and saves the same verified source again', () => {
     const onSaveDraft = jest.fn();
     render(
