@@ -139,25 +139,25 @@ EOF
 }
 
 service_command() {
-  if [[ -x "${VENV_BIN_DIR}/uvicorn" ]]; then
-    printf 'cd "%s" && exec "%s/uvicorn" byclaw_data.platform.routes:create_app --factory --host "%s" --port "%s" --log-level "%s"' \
-      "$SCRIPT_DIR" "$VENV_BIN_DIR" "$SERVICE_HOST" "$SERVICE_PORT" "$UVICORN_LOG_LEVEL"
+  if [[ -x "${VENV_BIN_DIR}/python" ]]; then
+    printf 'cd "%s" && DATACLOUD_LOG_DIR="%s" exec "%s/python" -m byclaw_data.platform.main --host "%s" --port "%s" --log-level "%s" --log-dir "%s"' \
+      "$SCRIPT_DIR" "$SERVICE_LOG_DIR" "$VENV_BIN_DIR" "$SERVICE_HOST" "$SERVICE_PORT" "$UVICORN_LOG_LEVEL" "$SERVICE_LOG_DIR"
     return 0
   fi
 
-  printf 'cd "%s" && exec uv run uvicorn byclaw_data.platform.routes:create_app --factory --host "%s" --port "%s" --log-level "%s"' \
-    "$SCRIPT_DIR" "$SERVICE_HOST" "$SERVICE_PORT" "$UVICORN_LOG_LEVEL"
+  printf 'cd "%s" && DATACLOUD_LOG_DIR="%s" exec uv run python -m byclaw_data.platform.main --host "%s" --port "%s" --log-level "%s" --log-dir "%s"' \
+    "$SCRIPT_DIR" "$SERVICE_LOG_DIR" "$SERVICE_HOST" "$SERVICE_PORT" "$UVICORN_LOG_LEVEL" "$SERVICE_LOG_DIR"
 }
 
 worker_command() {
   if [[ -x "${VENV_BIN_DIR}/python" ]]; then
-    printf 'cd "%s" && exec "%s/python" -m byclaw_data.main' \
-      "$SCRIPT_DIR" "$VENV_BIN_DIR"
+    printf 'cd "%s" && DATACLOUD_LOG_DIR="%s" exec "%s/python" -m byclaw_data.main' \
+      "$SCRIPT_DIR" "$WORKER_LOG_DIR" "$VENV_BIN_DIR"
     return 0
   fi
 
-  printf 'cd "%s" && exec uv run python -m byclaw_data.main' \
-    "$SCRIPT_DIR"
+  printf 'cd "%s" && DATACLOUD_LOG_DIR="%s" exec uv run python -m byclaw_data.main' \
+    "$SCRIPT_DIR" "$WORKER_LOG_DIR"
 }
 
 load_env_file "${REPO_ROOT}/.env"
@@ -222,7 +222,9 @@ STARTUP_TIMEOUT="${DATACLOUD_DATA_SERVICE_STARTUP_TIMEOUT:-60}"
 WORKSPACE_DIR="${DATACLOUD_GATEWAY_WORKSPACE_DIR:-/tmp/datacloud}"
 DEFAULT_ONTOLOGY_DIR="${SCRIPT_DIR}/resource"
 LOG_DIR="${DATACLOUD_LOG_DIR:-${SCRIPT_DIR}/logs}"
-SERVICE_LOG_FILE="${LOG_DIR}/datacloud_data_service.log"
+SERVICE_LOG_DIR="${DATACLOUD_SERVICE_LOG_DIR:-${LOG_DIR}/service}"
+WORKER_LOG_DIR="${DATACLOUD_WORKER_LOG_DIR:-${LOG_DIR}/worker}"
+SERVICE_LOG_FILE="${LOG_DIR}/byclaw_data_service.log"
 WORKER_LOG_FILE="${LOG_DIR}/byclaw_data_worker.log"
 UVICORN_LOG_LEVEL="${DATACLOUD_DATA_SERVICE_LOG_LEVEL:-info}"
 
@@ -310,7 +312,7 @@ elif [[ -z "${DC_ONTOLOGY_PATH:-}" && -d "$DEFAULT_ONTOLOGY_DIR" ]]; then
   export DC_ONTOLOGY_PATH="$DEFAULT_ONTOLOGY_DIR"
 fi
 
-mkdir -p "${WORKSPACE_DIR}" "${DC_CSV_BASE_DIR}" "${LOG_DIR}"
+mkdir -p "${WORKSPACE_DIR}" "${DC_CSV_BASE_DIR}" "${LOG_DIR}" "${SERVICE_LOG_DIR}" "${WORKER_LOG_DIR}"
 
 PIDS=()
 NAMES=()

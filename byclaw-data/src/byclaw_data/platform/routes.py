@@ -27,6 +27,10 @@ def _get_service_port() -> int:
 def create_app(**kwargs):
     """Create the byclaw MCP app on top of datacloud_platform."""
 
+    os.environ.setdefault("DATACLOUD_LOG_DIR", "logs/service")
+    from datacloud_analysis.logging_setup import setup_logging  # noqa: PLC0415
+    setup_logging(extra_namespaces=("byclaw_data",))
+
     normalize_runtime_environment()
 
     # Inject ByClaw result_file_storage BEFORE get_platform() initialises the singleton.
