@@ -298,8 +298,8 @@ RUN bun install -g github:garrytan/gbrain
 # rm
 RUN rm -fr /root/.agents/skills
 
-RUN addgroup -g 1001 -S appgroup && \
-    adduser -u 1001 -S appuser -G appgroup && \
+RUN groupadd --gid 1001 appgroup && \
+    useradd --uid 1001 --gid appgroup --create-home --shell /bin/bash appuser && \
     mkdir -p /home/appuser/.openclaw /by/.bycli && \
     chown -R appuser:appgroup /app /home/appuser /by
 
