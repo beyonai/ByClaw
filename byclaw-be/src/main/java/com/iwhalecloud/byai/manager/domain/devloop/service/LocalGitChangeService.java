@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.domain.devloop.service;
 
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -94,17 +95,20 @@ public class LocalGitChangeService {
      */
     public LocalChangeResult collectChanges(Path workspaceDir, String baseBranch) {
         if (workspaceDir == null) {
-            return LocalChangeResult.fail(LocalStatus.NO_WORKSPACE, baseBranch, null, "工作区路径为空");
+            return LocalChangeResult.fail(LocalStatus.NO_WORKSPACE, baseBranch, null,
+                I18nUtil.get("devloop.git.workspace.path.empty"));
         }
 
         // 全程兜底:目录检查到 git 执行的任何异常都收敛为结果状态,绝不抛给上层/前端。
         try {
             File dir = workspaceDir.toFile();
             if (!dir.isDirectory()) {
-                return LocalChangeResult.fail(LocalStatus.NO_WORKSPACE, baseBranch, null, "工作区目录不存在");
+                return LocalChangeResult.fail(LocalStatus.NO_WORKSPACE, baseBranch, null,
+                    I18nUtil.get("devloop.git.workspace.not.found"));
             }
             if (!new File(dir, ".git").exists()) {
-                return LocalChangeResult.fail(LocalStatus.NOT_GIT_REPO, baseBranch, null, "工作区不是 git 仓库");
+                return LocalChangeResult.fail(LocalStatus.NOT_GIT_REPO, baseBranch, null,
+                    I18nUtil.get("devloop.git.workspace.not.repository"));
             }
 
             String headBranch = runGit(dir, "rev-parse", "--abbrev-ref", "HEAD").trim();
@@ -120,7 +124,8 @@ public class LocalGitChangeService {
         }
         catch (Exception e) {
             log.warn("[Devloop] 本地 git 变更采集失败 dir={}", workspaceDir, e);
-            return LocalChangeResult.fail(LocalStatus.GIT_ERROR, baseBranch, null, e.getMessage());
+            return LocalChangeResult.fail(LocalStatus.GIT_ERROR, baseBranch, null,
+                I18nUtil.get("devloop.git.command.failed", e.getMessage()));
         }
     }
 
@@ -146,15 +151,18 @@ public class LocalGitChangeService {
      */
     public FileDiffResult fileDiff(Path workspaceDir, String baseBranch, String filePath) {
         if (workspaceDir == null || filePath == null || filePath.trim().isEmpty()) {
-            return new FileDiffResult(LocalStatus.NO_WORKSPACE, filePath, null, "参数缺失");
+            return new FileDiffResult(LocalStatus.NO_WORKSPACE, filePath, null,
+                I18nUtil.get("devloop.git.diff.parameters.required"));
         }
         try {
             File dir = workspaceDir.toFile();
             if (!dir.isDirectory()) {
-                return new FileDiffResult(LocalStatus.NO_WORKSPACE, filePath, null, "工作区目录不存在");
+                return new FileDiffResult(LocalStatus.NO_WORKSPACE, filePath, null,
+                    I18nUtil.get("devloop.git.workspace.not.found"));
             }
             if (!new File(dir, ".git").exists()) {
-                return new FileDiffResult(LocalStatus.NOT_GIT_REPO, filePath, null, "工作区不是 git 仓库");
+                return new FileDiffResult(LocalStatus.NOT_GIT_REPO, filePath, null,
+                    I18nUtil.get("devloop.git.workspace.not.repository"));
             }
             String baseRef = resolveBaseRef(dir, baseBranch);
             // 单文件 diff:范围与列表一致,-- 后限定文件路径。已提交 + 未提交改动都会体现在 base..HEAD 与工作区叠加中,
@@ -168,7 +176,8 @@ public class LocalGitChangeService {
         }
         catch (Exception e) {
             log.warn("[Devloop] 本地文件 diff 失败 dir={} file={}", workspaceDir, filePath, e);
-            return new FileDiffResult(LocalStatus.GIT_ERROR, filePath, null, e.getMessage());
+            return new FileDiffResult(LocalStatus.GIT_ERROR, filePath, null,
+                I18nUtil.get("devloop.git.command.failed", e.getMessage()));
         }
     }
 
@@ -373,12 +382,12 @@ public class LocalGitChangeService {
         boolean finished = process.waitFor(GIT_TIMEOUT_SECONDS, TimeUnit.SECONDS);
         if (!finished) {
             process.destroyForcibly();
-            throw new IllegalStateException("git 命令超时: " + String.join(" ", args));
+            throw new IllegalStateException(I18nUtil.get("devloop.git.command.timeout", String.join(" ", args)));
         }
         if (process.exitValue() != 0) {
             // 非 0 退出(如 dubious ownership、非法 ref):抛异常带 stderr,由上层收敛为 GIT_ERROR,不把错误文本当数据。
-            throw new IllegalStateException(
-                "git " + String.join(" ", args) + " 失败: " + stderr.toString().trim());
+            throw new IllegalStateException(I18nUtil.get("devloop.git.command.failed",
+                "git " + String.join(" ", args) + ": " + stderr.toString().trim()));
         }
         return stdout.toString();
     }

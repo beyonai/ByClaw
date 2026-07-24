@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.manager.domain.devloop.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.util.OkHttpUtil;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
@@ -103,10 +104,12 @@ public class GitHubCompareService {
      */
     public CompareResult compare(String repoFullName, String base, String head, String pat) {
         if (repoFullName == null || repoFullName.trim().isEmpty()) {
-            return CompareResult.fail(CompareStatus.NO_REPO, repoFullName, base, head, "任务未关联代码仓库");
+            return CompareResult.fail(CompareStatus.NO_REPO, repoFullName, base, head,
+                I18nUtil.get("devloop.github.task.repository.not.found"));
         }
         if (pat == null || pat.trim().isEmpty()) {
-            return CompareResult.fail(CompareStatus.NO_TOKEN, repoFullName, base, head, "未配置 GitHub 访问令牌");
+            return CompareResult.fail(CompareStatus.NO_TOKEN, repoFullName, base, head,
+                I18nUtil.get("devloop.github.token.not.configured"));
         }
 
         // compare 端点的 basehead 段整体是一个路径参数,分支名里的 / 不能编码,否则 GitHub 无法解析;
@@ -123,16 +126,17 @@ public class GitHubCompareService {
         try {
             Response response = OkHttpUtil.getRequest(url, headers);
             if (response == null) {
-                return CompareResult.fail(CompareStatus.HTTP_ERROR, repoFullName, base, head, "GitHub 无响应");
+                return CompareResult.fail(CompareStatus.HTTP_ERROR, repoFullName, base, head,
+                    I18nUtil.get("devloop.github.no.response"));
             }
             if (response.code() == 404) {
                 // 分支不存在或仓库不可见:最常见是目标分支还没 push。
                 return CompareResult.fail(CompareStatus.BRANCH_NOT_FOUND, repoFullName, base, head,
-                    "远程分支尚未创建(" + head + ")");
+                    I18nUtil.get("devloop.github.branch.not.found", head));
             }
             if (!response.isSuccessful() || response.body() == null) {
                 return CompareResult.fail(CompareStatus.HTTP_ERROR, repoFullName, base, head,
-                    "GitHub HTTP " + response.code());
+                    I18nUtil.get("devloop.github.http.failed", response.code()));
             }
 
             JsonNode root = MAPPER.readTree(response.body().string());
@@ -151,7 +155,8 @@ public class GitHubCompareService {
             return CompareResult.ok(repoFullName, base, head, aheadBy, files, compareUrl);
         } catch (Exception e) {
             log.error("[Devloop] GitHub compare 失败 repo={} {}...{}", repoFullName, base, head, e);
-            return CompareResult.fail(CompareStatus.HTTP_ERROR, repoFullName, base, head, e.getMessage());
+            return CompareResult.fail(CompareStatus.HTTP_ERROR, repoFullName, base, head,
+                I18nUtil.get("devloop.github.compare.failed", e.getMessage()));
         }
     }
 }

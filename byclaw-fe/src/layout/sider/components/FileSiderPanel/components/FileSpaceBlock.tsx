@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState, type Key } from 'react';
-import { Segmented, Tooltip, type MenuProps } from 'antd';
+import { Empty, Segmented, Tooltip, type MenuProps } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import type { FileBrowserItem } from '@/service/fileBrowser';
 import type { FileTreeItem } from '../constants';
@@ -32,6 +32,7 @@ interface FileSpaceBlockProps {
   switchValue?: string;
   compactTreePadding?: boolean;
   fillContainer?: boolean;
+  resourceEmptyStyle?: boolean;
   defaultGroupsCollapsed?: boolean;
   accordionGroups?: boolean;
   groupCollapseResetKey?: Key;
@@ -64,6 +65,7 @@ const FileSpaceBlock: React.FC<FileSpaceBlockProps> = ({
   switchValue,
   compactTreePadding = false,
   fillContainer = false,
+  resourceEmptyStyle = false,
   defaultGroupsCollapsed = false,
   accordionGroups = false,
   groupCollapseResetKey,
@@ -152,6 +154,8 @@ const FileSpaceBlock: React.FC<FileSpaceBlockProps> = ({
         // 成果抽屉需要由文件树承接剩余高度，避免复用组件默认的固定卡片高度。
         fillContainer ? styles.fileSpaceBlockFill : '',
         fillContainer ? styles.fileSpaceBlockPlain : '',
+        // 资源 Tab 的文件空间空态需要和代码变更卡片使用相同的高度与居中方式。
+        resourceEmptyStyle ? styles.fileSpaceBlockResource : '',
       ]
         .filter(Boolean)
         .join(' ')}
@@ -204,6 +208,10 @@ const FileSpaceBlock: React.FC<FileSpaceBlockProps> = ({
                 </div>
               );
             })}
+          </div>
+        ) : resourceEmptyStyle ? (
+          <div className={styles.fileSpaceEmpty}>
+            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={emptyText} />
           </div>
         ) : (
           <div className={styles.fileSpaceEmpty}>{emptyText}</div>

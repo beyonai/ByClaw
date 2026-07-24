@@ -551,6 +551,50 @@
   border-radius: 0;
 }
 
+// 资源 Tab 的共享空间和会话空间与代码变更卡片统一空态高度，避免三个卡片留白不一致。
+.fileSpaceBlockResource {
+  .fileSpaceTreeWrap {
+    padding: 0;
+
+    :global {
+      .@{antPrefix}-empty {
+        min-height: 120px;
+        margin: 0;
+        padding: 16px;
+        box-sizing: border-box;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        color: #8a96a8;
+        font-size: 13px;
+        line-height: 20px;
+        text-align: center;
+        word-break: break-word;
+      }
+    }
+  }
+
+  .fileSpaceEmpty {
+    min-height: 120px;
+    padding: 16px;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #8a96a8;
+    line-height: 20px;
+    text-align: center;
+    word-break: break-word;
+
+    :global {
+      .@{antPrefix}-empty {
+        margin: 0;
+      }
+    }
+  }
+}
+
 .fileSpaceHeader {
   min-height: 42px;
   padding: 8px 10px;

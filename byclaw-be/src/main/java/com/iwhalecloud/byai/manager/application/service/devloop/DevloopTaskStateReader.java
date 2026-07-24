@@ -7,6 +7,7 @@ import org.springframework.stereotype.Service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.PropertyNamingStrategies;
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.storage.UserFS;
 import com.iwhalecloud.byai.gateway.sandbox.service.SandboxUserContextRunner;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskStateDto;
@@ -37,15 +38,16 @@ public class DevloopTaskStateReader {
         try (InputStream inputStream = userFS.read(path)) {
             DevloopTaskStateDto state = projectionObjectMapper.readValue(inputStream, DevloopTaskStateDto.class);
             if (!SUPPORTED_SCHEMA_VERSION.equals(state.getSchemaVersion())) {
-                throw new IllegalStateException("不支持的任务状态版本: " + state.getSchemaVersion());
+                throw new IllegalStateException(I18nUtil.get("devloop.task.state.version.unsupported",
+                    state.getSchemaVersion()));
             }
             if (!String.valueOf(sessionId).equals(state.getSessionId())) {
-                throw new IllegalStateException("任务状态会话标识不匹配");
+                throw new IllegalStateException(I18nUtil.get("devloop.task.state.session.mismatch"));
             }
             return state;
         }
         catch (IOException e) {
-            throw new IllegalStateException("读取任务状态失败: " + e.getMessage(), e);
+            throw new IllegalStateException(I18nUtil.get("devloop.task.state.read.failed", e.getMessage()), e);
         }
     }
 }
