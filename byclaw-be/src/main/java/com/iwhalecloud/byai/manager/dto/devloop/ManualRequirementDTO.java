@@ -18,6 +18,9 @@ public class ManualRequirementDTO {
     /** 可选的受影响分支上下文，仅用于描述需求，不能替代创建任务时生成的目标分支。 */
     private String branch;
 
+    /** 可选的关联项目仓库 ID；仅归属当前需求，不能写入项目共用的内部手工来源。 */
+    private Long repoId;
+
     /** 必填的需求标题，后续复用为任务初始标题。 */
     private String title;
 

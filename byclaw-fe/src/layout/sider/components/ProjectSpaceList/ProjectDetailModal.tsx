@@ -28,6 +28,7 @@ import {
   DingdingOutlined,
   EditOutlined,
   EllipsisOutlined,
+  EyeOutlined,
   FileTextOutlined,
   FundProjectionScreenOutlined,
   GithubOutlined,
@@ -41,11 +42,13 @@ import { useDispatch, useIntl, useNavigate, useSelector } from '@umijs/max';
 import dayjs from 'dayjs';
 import {
   checkDwsAuthStatus,
+  checkDwsAuthStatusBySource,
   checkGitHubPat,
   createManualRequirement,
   createProjectRepo,
   createScanSource,
   createTask,
+  deleteManualRequirement,
   deleteProjectRepo,
   deleteScanSource,
   getProject,
@@ -64,6 +67,7 @@ import {
   startDwsDeviceAuth,
   toggleScanSource,
   triggerScan,
+  updateManualRequirement,
   updateScanSource,
   type DevloopProjectSpaceFile,
   type DevloopTaskChanges,
@@ -125,6 +129,18 @@ type ScanSourceItem = {
   confirmMode?: string;
   scoreThreshold?: number | null;
   lastScanTime?: string | null;
+  // 创建者:用于授权/编辑/删除的创建者权限控制。
+  createBy?: string | null;
+  createByName?: string | null;
+};
+
+// 按源的 DWS 授权状态(查该源创建者的授权)。
+type SourceDwsStatus = {
+  tokenValid?: boolean;
+  hasToken?: boolean;
+  expiresAt?: string;
+  canAuthorize?: boolean;
+  creatorName?: string;
 };
 
 type RepoOption = {
@@ -165,6 +181,8 @@ type RequirementItem = {
   manualSourceType?: string;
   // 用户填写的影响分支上下文，不等同任务创建后生成的工作分支。
   branch?: string;
+  // 手工需求指定的研发仓库，优先于项目默认仓库用于启动研发任务。
+  repoId?: number | null;
 };
 
 type TaskQueryState = {
@@ -243,9 +261,12 @@ type SourceForm = {
   todoPriority: string[];
 };
 
+type ManualRequirementSourceType = 'manual' | 'customer_feedback' | 'internal_proposal';
+
 type ManualRequirementForm = {
-  sourceType: 'manual' | 'customer_feedback' | 'internal_proposal';
+  sourceType: ManualRequirementSourceType;
   branch: string;
+  repoId?: number;
   title: string;
   originalContent: string;
   productContent: string;
@@ -359,10 +380,20 @@ const getDefaultSourceForm = (): SourceForm => ({
 const getDefaultManualRequirementForm = (): ManualRequirementForm => ({
   sourceType: 'manual',
   branch: 'develop',
+  repoId: undefined,
   title: '',
   originalContent: '',
   productContent: '',
 });
+
+// 后端只为可解析的手工需求 JSON 回填 manualSourceType，据此排除内部来源中的历史或异常扫描条目。
+const isManualRequirement = (requirement: RequirementItem) => Boolean(requirement.manualSourceType);
+
+// 后端仅接受固定来源枚举，历史数据缺少业务来源时按“人工录入”回填。
+const getManualRequirementSourceType = (sourceType?: string): ManualRequirementSourceType => {
+  if (sourceType === 'customer_feedback' || sourceType === 'internal_proposal') return sourceType;
+  return 'manual';
+};
 
 const formatConfig = (type: string, config: string | undefined, t: ProjectDetailTranslate) => {
   try {
@@ -470,6 +501,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const { setDetailPanel, clearDetailPanel } = React.useContext(SiderContentContext);
   const [activeTab, setActiveTab] = useState('requirements');
   const [sources, setSources] = useState<ScanSourceItem[]>([]);
+  // 每个钉钉/待办源的授权状态(查各自创建者),键为 sourceId。替代旧的全局 dwsAuthed 单一状态。
+  const [sourceDwsStatusMap, setSourceDwsStatusMap] = useState<Record<number, SourceDwsStatus>>({});
   const [repos, setRepos] = useState<RepoOption[]>([]);
   const [requirements, setRequirements] = useState<RequirementItem[]>([]);
   const [requirementSearchKeyword, setRequirementSearchKeyword] = useState('');
@@ -510,6 +543,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const [scanningId, setScanningId] = useState<number | null>(null);
   const [sourceModalOpen, setSourceModalOpen] = useState(false);
   const [editingSource, setEditingSource] = useState<ScanSourceItem | null>(null);
+  // 非创建者查看渠道:复用编辑弹窗,字段 disabled + 隐藏确定按钮。
+  const [sourceModalReadonly, setSourceModalReadonly] = useState(false);
   const [sourceForm, setSourceForm] = useState<SourceForm>(getDefaultSourceForm);
   // 新增和编辑渠道共用保存状态，统一控制确定按钮的加载反馈。
   const [sourceSaving, setSourceSaving] = useState(false);
@@ -537,10 +572,17 @@ const ProjectDetailPanel: React.FC<Props> = ({
   // 菜单展开时保持研发任务的更多操作可见，避免鼠标移入菜单后图标闪动。
   const [openTaskActionId, setOpenTaskActionId] = useState<string>();
   const [repoModalOpen, setRepoModalOpen] = useState(false);
+  // 仓库弹窗被渠道、手工需求共用，创建完成后按打开来源回填对应表单。
+  const [repoModalTarget, setRepoModalTarget] = useState<'source' | 'manualRequirement'>('source');
   const [repoForm, setRepoForm] = useState({ repoFullName: '', repoUrl: '', defaultBranch: 'main' });
   const [repoSaving, setRepoSaving] = useState(false);
   const [manualRequirementOpen, setManualRequirementOpen] = useState(false);
   const [manualRequirementSubmitting, setManualRequirementSubmitting] = useState(false);
+  // 新增、修改共用同一表单，编辑态保存当前待修改的需求条目。
+  const [editingManualRequirement, setEditingManualRequirement] = useState<RequirementItem | null>(null);
+  // 更多菜单展开时维持三点按钮可见，避免移入菜单后按钮闪动。
+  const [openManualRequirementActionId, setOpenManualRequirementActionId] = useState<string>();
+  const [deletingManualRequirementId, setDeletingManualRequirementId] = useState<number | null>(null);
   const [manualRequirementForm, setManualRequirementForm] = useState<ManualRequirementForm>(
     getDefaultManualRequirementForm
   );
@@ -552,6 +594,10 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const startingRequirementIdsRef = useRef<Set<number>>(new Set());
   // 状态更新前先同步加锁，避免连续点击确定按钮重复保存渠道。
   const sourceSavingRef = useRef(false);
+  // 手工需求的新建和修改共用同步锁，避免 React 状态尚未刷新时重复提交。
+  const manualRequirementSubmittingRef = useRef(false);
+  // 删除确认弹窗返回 Promise 时会展示 loading；同步锁用于拦截重复确认。
+  const deletingManualRequirementIdRef = useRef<number | null>(null);
   const resourceClickTimerRef = useRef<number | null>(null);
   const requirementQueryVersionRef = useRef(0);
   const taskQueryRef = useRef<TaskQueryState>({
@@ -565,6 +611,17 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const taskRequestCountRef = useRef(0);
 
   const projectId = Number(project?.projectId);
+  // 删除入口只在项目创建者侧展示；服务端仍会根据项目创建者再次校验。
+  const isProjectCreator = useMemo(() => {
+    const currentUserId = userInfo?.userId ?? userInfo?.id;
+    return (
+      currentUserId !== undefined &&
+      currentUserId !== null &&
+      project?.createBy !== undefined &&
+      project.createBy !== null &&
+      `${currentUserId}` === `${project.createBy}`
+    );
+  }, [project?.createBy, userInfo?.id, userInfo?.userId]);
   // 项目类型来自后端/静态参数，先按字符串归一，避免默认项目枚举声明不同步时报比较类型错误。
   const projectType = project?.projectType ? String(project.projectType) : undefined;
   // 详情标题与项目列表使用同一场景标签规则，研发项目优先于共享状态展示。
@@ -692,17 +749,55 @@ const ProjectDetailPanel: React.FC<Props> = ({
     return projectSessions[0];
   }, [activeChatSessionId, projectSessions, t]);
 
+  // 逐个钉钉/待办源查授权状态(查各自创建者)。GitHub 源无需。
+  const fetchSourceDwsStatuses = useCallback(async (sourceList: ScanSourceItem[]) => {
+    const dingtalkSources = (sourceList || []).filter(
+      (s) => s.sourceType === 'dingtalk' || s.sourceType === 'dingtalk_todo'
+    );
+    if (!dingtalkSources.length) {
+      setSourceDwsStatusMap({});
+      return;
+    }
+    const entries = await Promise.all(
+      dingtalkSources.map(async (s) => {
+        try {
+          const res = await checkDwsAuthStatusBySource(s.sourceId);
+          return [s.sourceId, (res || {}) as SourceDwsStatus] as const;
+        } catch {
+          return [s.sourceId, {} as SourceDwsStatus] as const;
+        }
+      })
+    );
+    setSourceDwsStatusMap(Object.fromEntries(entries));
+  }, []);
+
   const fetchSources = useCallback(async () => {
     if (!projectId) return [];
     setSourcesLoading(true);
     try {
       const sourceList = (await listScanSources(projectId)) || [];
       setSources(sourceList);
+      void fetchSourceDwsStatuses(sourceList as ScanSourceItem[]);
       return sourceList as ScanSourceItem[];
     } finally {
       setSourcesLoading(false);
     }
-  }, [projectId]);
+  }, [projectId, fetchSourceDwsStatuses]);
+
+  // 当前登录用户是否为该源创建者:控制授权/编辑/删除入口。
+  const isSourceCreator = useCallback(
+    (source: ScanSourceItem) => {
+      const currentUserId = userInfo?.userId ?? userInfo?.id;
+      return (
+        currentUserId !== undefined &&
+        currentUserId !== null &&
+        source.createBy !== undefined &&
+        source.createBy !== null &&
+        `${source.createBy}` === `${currentUserId}`
+      );
+    },
+    [userInfo]
+  );
 
   const fetchRequirements = useCallback(
     async (sourceList?: ScanSourceItem[], title = '') => {
@@ -1486,6 +1581,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
 
   const resetSourceForm = (type: SourceType = 'github_issue') => {
     setEditingSource(null);
+    setSourceModalReadonly(false);
     setSourceForm({
       ...getDefaultSourceForm(),
       type,
@@ -1568,12 +1664,38 @@ const ProjectDetailPanel: React.FC<Props> = ({
   );
 
   const openManualRequirementModal = () => {
+    if (manualRequirementSubmittingRef.current) return;
+
+    setEditingManualRequirement(null);
     setManualRequirementForm(getDefaultManualRequirementForm());
     setManualRequirementOpen(true);
   };
 
+  const openEditManualRequirementModal = (requirement: RequirementItem) => {
+    if (
+      manualRequirementSubmittingRef.current ||
+      startingRequirementIdsRef.current.has(requirement.itemId) ||
+      (requirement.sessionId !== undefined && requirement.sessionId !== null) ||
+      !isManualRequirement(requirement)
+    ) {
+      return;
+    }
+
+    setEditingManualRequirement(requirement);
+    setManualRequirementForm({
+      sourceType: getManualRequirementSourceType(requirement.manualSourceType),
+      branch: requirement.branch || '',
+      repoId: requirement.repoId ?? undefined,
+      title: requirement.title || '',
+      originalContent: requirement.originalContent || '',
+      productContent: requirement.productContent || '',
+    });
+    setManualRequirementOpen(true);
+  };
+
   const handleManualRequirementSubmit = async () => {
-    if (!projectId || manualRequirementSubmitting) return;
+    if (!projectId || manualRequirementSubmittingRef.current) return;
+    const repoId = manualRequirementForm.repoId;
     if (!manualRequirementForm.title.trim()) {
       message.warning(t('manualRequirement.validation.titleRequired'));
       return;
@@ -1582,28 +1704,97 @@ const ProjectDetailPanel: React.FC<Props> = ({
       message.warning(t('manualRequirement.validation.originalContentRequired'));
       return;
     }
+    if (!repoId) {
+      message.warning(t('manualRequirement.validation.repoRequired'));
+      return;
+    }
 
+    const editingRequirementId = editingManualRequirement?.itemId;
+    const isEditingManualRequirement = editingRequirementId !== undefined;
+    const manualRequirementPayload = {
+      sourceType: manualRequirementForm.sourceType,
+      branch: manualRequirementForm.branch.trim() || undefined,
+      repoId,
+      title: manualRequirementForm.title.trim(),
+      originalContent: manualRequirementForm.originalContent.trim(),
+      productContent: manualRequirementForm.productContent.trim() || undefined,
+    };
+
+    manualRequirementSubmittingRef.current = true;
     setManualRequirementSubmitting(true);
     try {
-      await createManualRequirement({
-        projectId,
-        sourceType: manualRequirementForm.sourceType,
-        branch: manualRequirementForm.branch.trim() || undefined,
-        title: manualRequirementForm.title.trim(),
-        originalContent: manualRequirementForm.originalContent.trim(),
-        productContent: manualRequirementForm.productContent.trim() || undefined,
-      });
-      message.success(t('manualRequirement.createSuccess'));
+      if (isEditingManualRequirement) {
+        await updateManualRequirement({ itemId: editingRequirementId, ...manualRequirementPayload });
+      } else {
+        await createManualRequirement({ projectId, ...manualRequirementPayload });
+      }
+      message.success(
+        t(isEditingManualRequirement ? 'manualRequirement.updateSuccess' : 'manualRequirement.createSuccess')
+      );
       setManualRequirementOpen(false);
+      setEditingManualRequirement(null);
       setManualRequirementForm(getDefaultManualRequirementForm());
-      // fetchRequirements 需要来源列表重新计算最后扫描时间，创建后两个数据集都要刷新。
+      // 列表和当前已打开的详情都可能保留旧内容，保存后统一按项目重新拉取。
+      if (isEditingManualRequirement && detailReq?.itemId === editingRequirementId) {
+        setDetailReq(null);
+      }
       const sourceList = await fetchSources();
       await fetchRequirements(sourceList, requirementSearchKeyword.trim());
     } catch (error: any) {
-      message.error(error?.message || t('manualRequirement.createFailed'));
+      message.error(
+        error?.message ||
+          t(isEditingManualRequirement ? 'manualRequirement.updateFailed' : 'manualRequirement.createFailed')
+      );
     } finally {
+      manualRequirementSubmittingRef.current = false;
       setManualRequirementSubmitting(false);
     }
+  };
+
+  const handleDeleteManualRequirement = (requirement: RequirementItem) => {
+    if (
+      !isProjectCreator ||
+      startingRequirementIdsRef.current.has(requirement.itemId) ||
+      (requirement.sessionId !== undefined && requirement.sessionId !== null) ||
+      !isManualRequirement(requirement) ||
+      deletingManualRequirementIdRef.current !== null
+    ) {
+      return;
+    }
+
+    Modal.confirm({
+      title: t('manualRequirement.deleteConfirmTitle'),
+      content: t('manualRequirement.deleteConfirm', { name: requirement.title }),
+      okText: t('common.delete'),
+      cancelText: t('common.cancel'),
+      okButtonProps: { danger: true },
+      // 返回 Promise 后确认按钮会自动进入 loading，避免等待删除接口时重复确认。
+      onOk: async () => {
+        if (deletingManualRequirementIdRef.current !== null) return;
+
+        deletingManualRequirementIdRef.current = requirement.itemId;
+        setDeletingManualRequirementId(requirement.itemId);
+        try {
+          await deleteManualRequirement(requirement.itemId);
+          message.success(t('manualRequirement.deleteSuccess'));
+          if (detailReq?.itemId === requirement.itemId) {
+            setDetailReq(null);
+          }
+          // 删除已成功后先移除本地列表项，使确认弹窗立即关闭；列表刷新不应阻塞成功结果。
+          setRequirements((items) => items.filter((item) => item.itemId !== requirement.itemId));
+          void fetchRequirements(undefined, requirementSearchKeyword.trim()).catch(() => {
+            // 删除结果已生效，刷新失败时保留本地移除结果，避免将刷新异常误报为删除失败。
+          });
+        } catch (error: any) {
+          message.error(error?.message || t('manualRequirement.deleteFailed'));
+          // 抛出异常让确认弹窗保持打开，用户修正问题后可直接再次确认删除。
+          throw error;
+        } finally {
+          deletingManualRequirementIdRef.current = null;
+          setDeletingManualRequirementId(null);
+        }
+      },
+    });
   };
 
   const handleSaveSource = async () => {
@@ -1696,7 +1887,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
     }
   };
 
-  const handleEditSource = (source: ScanSourceItem) => {
+  const handleEditSource = (source: ScanSourceItem, readonly = false) => {
+    setSourceModalReadonly(readonly);
     setEditingSource(source);
     let config: any = {};
     try {
@@ -1753,7 +1945,11 @@ const ProjectDetailPanel: React.FC<Props> = ({
       message.success(t('repository.createSuccess'));
       setRepoForm({ repoFullName: '', repoUrl: '', defaultBranch: 'main' });
       await fetchRepos();
-      setSourceForm((prev) => ({ ...prev, repoId: res.repoId }));
+      if (repoModalTarget === 'manualRequirement') {
+        setManualRequirementForm((prev) => ({ ...prev, repoId: res.repoId }));
+      } else {
+        setSourceForm((prev) => ({ ...prev, repoId: res.repoId }));
+      }
     } catch {
       message.error(t('repository.createFailed'));
     } finally {
@@ -1773,6 +1969,9 @@ const ProjectDetailPanel: React.FC<Props> = ({
           message.success(t('repository.deleteSuccess'));
           if (sourceForm.repoId === repo.repoId) {
             setSourceForm((prev) => ({ ...prev, repoId: undefined }));
+          }
+          if (manualRequirementForm.repoId === repo.repoId) {
+            setManualRequirementForm((prev) => ({ ...prev, repoId: undefined }));
           }
           await fetchRepos();
         } catch (error: any) {
@@ -1962,6 +2161,48 @@ const ProjectDetailPanel: React.FC<Props> = ({
     return repo ? repo.repoFullName || repo.repoUrl || String(repo.repoId) : null;
   };
 
+  // 钉钉/待办源的授权标签:按源创建者的授权状态展示。
+  // 创建者本人:可点授权/查看;非创建者:只读展示"创建者{名字}已/未授权",不可点(授权是创建者的事)。
+  const renderSourceDwsTag = (source: ScanSourceItem) => {
+    const status = sourceDwsStatusMap[source.sourceId] || {};
+    const creator = isSourceCreator(source);
+    const creatorName = source.createByName || status.creatorName || '';
+    const authed = !!status.tokenValid;
+
+    if (creator) {
+      // 创建者本人:沿用可点交互(已授权查看详情;未授权/过期点击发起授权)。
+      if (authed) {
+        return (
+          <Tag
+            className={`${styles.detailSourceDwsTag} ${styles.detailSourceDwsTagClickable}`}
+            color="green"
+            onClick={() => setDwsAuthDetailVisible(true)}
+          >
+            {t('dws.authorized')}
+          </Tag>
+        );
+      }
+      return (
+        <Tag
+          className={`${styles.detailSourceDwsTag} ${styles.detailSourceDwsTagClickable}`}
+          color={status.hasToken ? 'red' : 'orange'}
+          onClick={handleStartDwsAuth}
+        >
+          {status.hasToken ? t('dws.authorizationExpired') : t('dws.authorizationRequired')}
+        </Tag>
+      );
+    }
+
+    // 非创建者:只读,不可点。(c) 文案带创建者名。
+    return (
+      <Tag className={styles.detailSourceDwsTag} color={authed ? 'green' : 'default'}>
+        {authed
+          ? t('dws.creatorAuthorized', { name: creatorName || t('dws.creatorFallback') })
+          : t('dws.creatorNotAuthorized', { name: creatorName || t('dws.creatorFallback') })}
+      </Tag>
+    );
+  };
+
   const renderSourceList = (emptyText = t('source.empty'), options: { panel?: boolean } = {}) => (
     <Spin spinning={sourcesLoading && !sources.length}>
       {sources.length ? (
@@ -1990,33 +2231,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
                     </Tag>
                   )}
                   {(source.sourceType === 'dingtalk' || source.sourceType === 'dingtalk_todo') &&
-                    (dwsAuthed ? (
-                      <Tag
-                        className={`${styles.detailSourceDwsTag} ${styles.detailSourceDwsTagClickable}`}
-                        color="green"
-                        onClick={() => setDwsAuthDetailVisible(true)}
-                      >
-                        {dwsExpiresAt
-                          ? t('dws.authorizedUntil', { expiry: dayjs(dwsExpiresAt).format('MM-DD HH:mm') })
-                          : t('dws.authorized')}
-                      </Tag>
-                    ) : dwsExpired ? (
-                      <Tag
-                        className={`${styles.detailSourceDwsTag} ${styles.detailSourceDwsTagClickable}`}
-                        color="red"
-                        onClick={handleStartDwsAuth}
-                      >
-                        {t('dws.authorizationExpired')}
-                      </Tag>
-                    ) : (
-                      <Tag
-                        className={`${styles.detailSourceDwsTag} ${styles.detailSourceDwsTagClickable}`}
-                        color="orange"
-                        onClick={handleStartDwsAuth}
-                      >
-                        {t('dws.authorizationRequired')}
-                      </Tag>
-                    ))}
+                    renderSourceDwsTag(source)}
                 </div>
               )}
               <div
@@ -2048,18 +2263,37 @@ const ProjectDetailPanel: React.FC<Props> = ({
                   <Button type="link" size="small" icon={<FileTextOutlined />} onClick={() => handleViewLogs(source)}>
                     {t('source.logs')}
                   </Button>
-                  <Button type="link" size="small" icon={<EditOutlined />} onClick={() => handleEditSource(source)}>
-                    {t('common.edit')}
-                  </Button>
-                  <Button
-                    type="link"
-                    size="small"
-                    danger
-                    icon={<DeleteOutlined />}
-                    onClick={() => handleDeleteSource(source)}
-                  >
-                    {t('common.delete')}
-                  </Button>
+                  {/* 创建者:可编辑/删除;非创建者:只读查看(复用弹窗,disabled + 无确定按钮)。 */}
+                  {isSourceCreator(source) ? (
+                    <>
+                      <Button
+                        type="link"
+                        size="small"
+                        icon={<EditOutlined />}
+                        onClick={() => handleEditSource(source)}
+                      >
+                        {t('common.edit')}
+                      </Button>
+                      <Button
+                        type="link"
+                        size="small"
+                        danger
+                        icon={<DeleteOutlined />}
+                        onClick={() => handleDeleteSource(source)}
+                      >
+                        {t('common.delete')}
+                      </Button>
+                    </>
+                  ) : (
+                    <Button
+                      type="link"
+                      size="small"
+                      icon={<EyeOutlined />}
+                      onClick={() => handleEditSource(source, true)}
+                    >
+                      {t('common.view')}
+                    </Button>
+                  )}
                 </div>
               </div>
             </div>
@@ -2315,8 +2549,28 @@ const ProjectDetailPanel: React.FC<Props> = ({
             <div className={styles.detailRequirementList}>
               {visibleRequirements.map((item) => {
                 const isStarting = startingRequirementIds.has(item.itemId);
-                const isStarted = !!item.sessionId;
+                const isStarted = item.sessionId !== undefined && item.sessionId !== null;
+                // 只有未启动且未处于启动请求中的手工需求可编辑，扫描渠道需求继续保持只读。
+                const canOperateManualRequirement = isManualRequirement(item) && !isStarted && !isStarting;
+                const isManualRequirementActionOpen = openManualRequirementActionId === `${item.itemId}`;
                 const detailText = getRequirementDetailText(item, t);
+                const manualRequirementActionItems: MenuProps['items'] = [
+                  {
+                    key: 'edit',
+                    icon: <EditOutlined />,
+                    label: t('manualRequirement.action.edit'),
+                  },
+                  ...(isProjectCreator
+                    ? [
+                      {
+                        key: 'delete',
+                        icon: <DeleteOutlined />,
+                        label: t('manualRequirement.action.delete'),
+                        danger: true,
+                      },
+                    ]
+                    : []),
+                ];
 
                 return (
                   <div
@@ -2334,29 +2588,70 @@ const ProjectDetailPanel: React.FC<Props> = ({
                         <strong>{item.title}</strong>
                         <span>{detailText}</span>
                       </div>
-                      {isStarted ? (
-                        <Button
-                          size="small"
-                          className={`${styles.detailRequirementAction} ${styles.detailRequirementStartedAction}`}
-                          disabled
-                          onClick={(event) => event.stopPropagation()}
-                        >
-                          {t('requirement.started')}
-                        </Button>
-                      ) : (
-                        <Button
-                          size="small"
-                          className={`${styles.detailRequirementAction} ${styles.detailRequirementStartAction}`}
-                          loading={isStarting}
-                          disabled={isStarting}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            void handleStartTask(item);
-                          }}
-                        >
-                          {t(isStarting ? 'requirement.starting' : 'requirement.start')}
-                        </Button>
-                      )}
+                      <div className={styles.detailRequirementActions}>
+                        {isStarted ? (
+                          <Button
+                            size="small"
+                            className={`${styles.detailRequirementAction} ${styles.detailRequirementStartedAction}`}
+                            disabled
+                            onClick={(event) => event.stopPropagation()}
+                          >
+                            {t('requirement.started')}
+                          </Button>
+                        ) : (
+                          <Button
+                            size="small"
+                            className={`${styles.detailRequirementAction} ${styles.detailRequirementStartAction}`}
+                            loading={isStarting}
+                            disabled={isStarting}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void handleStartTask(item);
+                            }}
+                          >
+                            {t(isStarting ? 'requirement.starting' : 'requirement.start')}
+                          </Button>
+                        )}
+                        {canOperateManualRequirement && (
+                          <Dropdown
+                            trigger={['hover']}
+                            placement="bottomRight"
+                            onOpenChange={(open) =>
+                              setOpenManualRequirementActionId(open ? `${item.itemId}` : undefined)
+                            }
+                            menu={{
+                              items: manualRequirementActionItems,
+                              onClick: ({ key, domEvent }) => {
+                                domEvent.preventDefault();
+                                domEvent.stopPropagation();
+                                setOpenManualRequirementActionId(undefined);
+                                if (key === 'edit') {
+                                  openEditManualRequirementModal(item);
+                                } else if (key === 'delete') {
+                                  handleDeleteManualRequirement(item);
+                                }
+                              },
+                            }}
+                          >
+                            <Button
+                              type="text"
+                              size="small"
+                              aria-label={t('manualRequirement.action.more')}
+                              className={`${styles.detailRequirementMoreAction} ${
+                                isManualRequirementActionOpen ? styles.detailRequirementMoreActionOpen : ''
+                              }`}
+                              icon={<EllipsisOutlined />}
+                              loading={deletingManualRequirementId === item.itemId}
+                              disabled={deletingManualRequirementId === item.itemId}
+                              onClick={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                              }}
+                              onMouseDown={(event) => event.stopPropagation()}
+                            />
+                          </Dropdown>
+                        )}
+                      </div>
                     </div>
                   </div>
                 );
@@ -2874,13 +3169,14 @@ const ProjectDetailPanel: React.FC<Props> = ({
 
   const renderAddSourceModal = () => (
     <Modal
-      title={t(editingSource ? 'source.editTitle' : 'source.addTitle')}
+      title={t(sourceModalReadonly ? 'source.viewTitle' : editingSource ? 'source.editTitle' : 'source.addTitle')}
       open={sourceModalOpen}
       onOk={handleSaveSource}
       confirmLoading={sourceSaving}
       onCancel={() => {
         setSourceModalOpen(false);
         setEditingSource(null);
+        setSourceModalReadonly(false);
         setGroupOptions([]);
       }}
       okText={t(editingSource ? 'common.save' : 'common.add')}
@@ -2890,7 +3186,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
       footer={(_, { OkBtn, CancelBtn }) => (
         <Space>
           <CancelBtn />
-          <OkBtn />
+          {/* 只读查看时隐藏确定按钮,仅保留关闭。 */}
+          {!sourceModalReadonly && <OkBtn />}
         </Space>
       )}
     >
@@ -2899,7 +3196,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
           <label>{t('source.field.type')}</label>
           <Select
             value={sourceForm.type}
-            disabled={!!editingSource}
+            disabled={!!editingSource || sourceModalReadonly}
             onChange={(type) => setSourceForm((prev) => ({ ...prev, type }))}
             options={[
               { value: 'github_issue', label: t('source.type.githubIssue') },
@@ -2913,6 +3210,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
           <Input
             placeholder={t('source.placeholder.name')}
             value={sourceForm.name}
+            disabled={sourceModalReadonly}
             onChange={(event) => setSourceForm((prev) => ({ ...prev, name: event.target.value }))}
           />
         </div>
@@ -2924,6 +3222,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
               placeholder={t('source.placeholder.repository')}
               value={sourceForm.repoId}
               allowClear
+              disabled={sourceModalReadonly}
               onChange={(repoId) => setSourceForm((prev) => ({ ...prev, repoId }))}
               options={repos.map((repo) => ({
                 value: repo.repoId,
@@ -2931,22 +3230,26 @@ const ProjectDetailPanel: React.FC<Props> = ({
               }))}
               notFoundContent={repos.length ? undefined : t('source.noRepositories')}
             />
-            <Button
-              className={styles.sourceRepoAddButton}
-              icon={<PlusOutlined />}
-              onClick={() => {
-                setRepoForm({ repoFullName: '', repoUrl: '', defaultBranch: 'main' });
-                setRepoModalOpen(true);
-              }}
-            >
-              {t('common.add')}
-            </Button>
+            {!sourceModalReadonly && (
+              <Button
+                className={styles.sourceRepoAddButton}
+                icon={<PlusOutlined />}
+                onClick={() => {
+                  setRepoModalTarget('source');
+                  setRepoForm({ repoFullName: '', repoUrl: '', defaultBranch: 'main' });
+                  setRepoModalOpen(true);
+                }}
+              >
+                {t('common.add')}
+              </Button>
+            )}
           </Space.Compact>
         </div>
         <div className={styles.formField}>
           <label>{t('source.field.scanFrequency')}</label>
           <Select
             value={sourceForm.cron}
+            disabled={sourceModalReadonly}
             onChange={(cron) => setSourceForm((prev) => ({ ...prev, cron }))}
             options={cronPresets.map((preset) => ({ value: preset.value, label: t(preset.labelId) }))}
             popupClassName={styles.sourceSelectPopup}
@@ -2957,6 +3260,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
             <label>{t('source.field.confirmRule')}</label>
             <Radio.Group
               value={sourceForm.confirmMode}
+              disabled={sourceModalReadonly}
               onChange={(event) => setSourceForm((prev) => ({ ...prev, confirmMode: event.target.value }))}
               optionType="button"
               buttonStyle="solid"
@@ -2973,6 +3277,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
                   min={0}
                   max={100}
                   value={sourceForm.scoreThreshold}
+                  disabled={sourceModalReadonly}
                   onChange={(value) => setSourceForm((prev) => ({ ...prev, scoreThreshold: value ?? 70 }))}
                   className={styles.sourceScoreRuleInput}
                 />
@@ -2988,7 +3293,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
             </div>
           </div>
         </div>
-        {(sourceForm.type === 'dingtalk' || sourceForm.type === 'dingtalk_todo') && (
+        {!sourceModalReadonly && (sourceForm.type === 'dingtalk' || sourceForm.type === 'dingtalk_todo') && (
           <>
             {!dwsAuthed && (
               <div className={styles.formFieldFull}>
@@ -3035,6 +3340,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
                 filterOption={false}
                 placeholder={t('source.placeholder.groupSearch')}
                 value={sourceForm.chatId || undefined}
+                disabled={sourceModalReadonly}
                 onSearch={handleGroupSearch}
                 onChange={(chatId, option) => {
                   const chatName = Array.isArray(option) ? '' : (option?.label as string) || '';
@@ -3050,6 +3356,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
               <Input
                 placeholder={t('source.placeholder.defaultKeyword')}
                 value={sourceForm.keywords}
+                disabled={sourceModalReadonly}
                 onChange={(event) => setSourceForm((prev) => ({ ...prev, keywords: event.target.value }))}
               />
             </div>
@@ -3057,6 +3364,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
               <label>{t('source.field.lookbackHours')}</label>
               <Select
                 value={sourceForm.lookbackHours}
+                disabled={sourceModalReadonly}
                 onChange={(lookbackHours) => setSourceForm((prev) => ({ ...prev, lookbackHours }))}
                 popupClassName={styles.sourceSelectPopup}
                 options={[
@@ -3078,6 +3386,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
               <Input
                 placeholder={t('source.placeholder.todoKeyword')}
                 value={sourceForm.keywords}
+                disabled={sourceModalReadonly}
                 onChange={(event) => setSourceForm((prev) => ({ ...prev, keywords: event.target.value }))}
               />
             </div>
@@ -3088,6 +3397,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
                 allowClear
                 placeholder={t('source.placeholder.todoPriority')}
                 value={sourceForm.todoPriority}
+                disabled={sourceModalReadonly}
                 onChange={(todoPriority) => setSourceForm((prev) => ({ ...prev, todoPriority }))}
                 options={[
                   { value: '40', label: t('source.todoPriority.urgent') },
@@ -3107,6 +3417,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
                 <Input.Password
                   placeholder={t('source.placeholder.githubPat')}
                   value={sourceForm.pat}
+                  disabled={sourceModalReadonly}
                   onChange={(event) => setSourceForm((prev) => ({ ...prev, pat: event.target.value }))}
                 />
               </div>
@@ -3116,6 +3427,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
               <Input
                 placeholder={t('source.placeholder.labelFilter')}
                 value={sourceForm.labels}
+                disabled={sourceModalReadonly}
                 onChange={(event) => setSourceForm((prev) => ({ ...prev, labels: event.target.value }))}
               />
             </div>
@@ -3129,13 +3441,17 @@ const ProjectDetailPanel: React.FC<Props> = ({
     <Modal
       title={
         <div className={styles.manualRequirementTitle}>
-          <h3>{t('manualRequirement.title')}</h3>
-          <p>{t('manualRequirement.description')}</p>
+          <h3>{t(editingManualRequirement ? 'manualRequirement.editTitle' : 'manualRequirement.title')}</h3>
+          <p>{t(editingManualRequirement ? 'manualRequirement.editDescription' : 'manualRequirement.description')}</p>
         </div>
       }
       open={manualRequirementOpen}
       onCancel={() => {
-        if (!manualRequirementSubmitting) setManualRequirementOpen(false);
+        if (!manualRequirementSubmittingRef.current) {
+          setManualRequirementOpen(false);
+          setEditingManualRequirement(null);
+          setManualRequirementForm(getDefaultManualRequirementForm());
+        }
       }}
       onOk={handleManualRequirementSubmit}
       confirmLoading={manualRequirementSubmitting}
@@ -3178,6 +3494,35 @@ const ProjectDetailPanel: React.FC<Props> = ({
             value={manualRequirementForm.title}
             onChange={(event) => setManualRequirementForm((prev) => ({ ...prev, title: event.target.value }))}
           />
+        </div>
+        <div className={`${styles.formField} ${styles.manualRequirementFormFull}`}>
+          <label>{t('manualRequirement.field.repository')}</label>
+          {/* 手工需求与渠道共用项目仓库列表，新增仓库后自动回填当前需求表单。 */}
+          <Space.Compact className={styles.manualRequirementRepoCompact}>
+            <Select
+              className={styles.manualRequirementRepoSelect}
+              placeholder={t('manualRequirement.placeholder.repository')}
+              value={manualRequirementForm.repoId}
+              allowClear
+              onChange={(repoId) => setManualRequirementForm((prev) => ({ ...prev, repoId }))}
+              options={repos.map((repo) => ({
+                value: repo.repoId,
+                label: repo.repoFullName || repo.repoUrl || String(repo.repoId),
+              }))}
+              notFoundContent={repos.length ? undefined : t('manualRequirement.noRepositories')}
+            />
+            <Button
+              className={styles.sourceRepoAddButton}
+              icon={<PlusOutlined />}
+              onClick={() => {
+                setRepoModalTarget('manualRequirement');
+                setRepoForm({ repoFullName: '', repoUrl: '', defaultBranch: 'main' });
+                setRepoModalOpen(true);
+              }}
+            >
+              {t('common.add')}
+            </Button>
+          </Space.Compact>
         </div>
         <div className={`${styles.formField} ${styles.manualRequirementFormFull}`}>
           <label>{t('manualRequirement.field.originalContent')}</label>
@@ -3224,6 +3569,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
       onCancel={() => setRepoModalOpen(false)}
       footer={<Button onClick={() => setRepoModalOpen(false)}>{t('common.close')}</Button>}
       width={560}
+      // 仓库弹窗可从渠道或需求弹窗内打开，需要始终覆盖在父弹窗上方。
+      zIndex={1100}
     >
       <div className={styles.formField}>
         <label>{t('repository.field.existing')}</label>

@@ -95,11 +95,8 @@ public class DingtalkTodoScanService {
             if (!env.containsKey("HOME")) {
                 env.put("HOME", System.getProperty("user.home"));
             }
-            // DWS_CONFIG_DIR 指向源创建者 bucket 的 .dws,读其专属授权(与群消息扫描一致)。
-            String dwsConfigDir = dwsAuthService.resolveDwsConfigDir(source.getCreateBy());
-            if (dwsConfigDir != null) {
-                env.put("DWS_CONFIG_DIR", dwsConfigDir);
-            }
+            // 按源创建者隔离 dws 环境(禁 keychain + DWS_CONFIG_DIR + XDG_DATA_HOME),读其专属授权(与群消息扫描一致)。
+            dwsAuthService.applyUserDwsEnv(env, source.getCreateBy());
             Process process = pb.start();
 
             StringBuilder output = new StringBuilder();

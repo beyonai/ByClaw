@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.manager.application.service.devloop;
 
 import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONObject;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.iwhalecloud.byai.common.constants.Constants;
 import com.iwhalecloud.byai.common.constants.devloop.DeleteFlag;
@@ -23,6 +24,7 @@ import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectMemberService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectSessionService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ProjectShareFileService;
+import com.iwhalecloud.byai.manager.domain.devloop.service.ScanLogService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ScanSourceService;
 import com.iwhalecloud.byai.manager.domain.file.service.CommonFilePathResolver;
 import com.iwhalecloud.byai.manager.domain.file.service.CommonFileStorage;
@@ -40,6 +42,8 @@ import com.iwhalecloud.byai.manager.dto.session.ByaiSessionDto;
 import com.iwhalecloud.byai.manager.entity.devloop.Project;
 import com.iwhalecloud.byai.manager.entity.devloop.ProjectMember;
 import com.iwhalecloud.byai.manager.entity.devloop.ProjectRepo;
+import com.iwhalecloud.byai.manager.entity.devloop.ScanLogItem;
+import com.iwhalecloud.byai.manager.entity.devloop.ScanSource;
 import com.iwhalecloud.byai.manager.entity.file.Files;
 import com.iwhalecloud.byai.manager.mapper.devloop.ProjectRepoMapper;
 import com.iwhalecloud.byai.manager.qo.devloop.ProjectQo;
@@ -80,6 +84,12 @@ public class ProjectApplicationService {
 
     private static final String PROJECT_TYPE_DEFAULT = "default";
 
+    /** 手工需求复用的内部扫描源类型，仓库关联实际保存于单条需求 JSON。 */
+    private static final String MANUAL_SOURCE_TYPE = "manual";
+
+    /** 手工需求内容 JSON 的命名空间，与需求创建和编辑链路保持一致。 */
+    private static final String MANUAL_REQUIREMENT_CONTENT_KEY = "manualRequirement";
+
     @Autowired
     private FileService fileService;
 
@@ -94,6 +104,9 @@ public class ProjectApplicationService {
 
     @Autowired
     private ScanSourceService scanSourceService;
+
+    @Autowired
+    private ScanLogService scanLogService;
 
     @Autowired
     private CommonFileStorage commonFileStorage;
@@ -607,7 +620,7 @@ public class ProjectApplicationService {
     }
 
     /**
-     * 删除项目仓库，已被扫描源关联时拒绝删除。
+     * 删除项目仓库，已被扫描源或手工需求关联时拒绝删除。
      *
      * @param repoId 仓库 ID
      */
@@ -619,7 +632,50 @@ public class ProjectApplicationService {
         if (boundCount != null && boundCount > 0) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("project.repo.bound", boundCount));
         }
+        ProjectRepo repo = projectRepoMapper.selectById(repoId);
+        long manualRequirementBoundCount = repo == null ? 0
+            : countManualRequirementRepoBindings(repo.getProjectId(), repoId);
+        if (manualRequirementBoundCount > 0) {
+            throw new BaseException(CommonErrorCode.ERROR_CODE_50500,
+                I18nUtil.get("project.repo.manualRequirement.bound", manualRequirementBoundCount));
+        }
         projectRepoMapper.deleteById(repoId);
+    }
+
+    /**
+     * 统计项目内明确关联该仓库的手工需求。仓库 ID 写在单条需求 JSON 中，不能只查项目共用 manual 扫描源。
+     */
+    private long countManualRequirementRepoBindings(Long projectId, Long repoId) {
+        long count = 0;
+        for (ScanSource source : scanSourceService.listByProjectId(projectId)) {
+            if (!MANUAL_SOURCE_TYPE.equals(source.getSourceType()) || source.getSourceId() == null) {
+                continue;
+            }
+            for (ScanLogItem item : scanLogService.listCreatedItemsBySource(source.getSourceId())) {
+                if (isManualRequirementBoundToRepo(item, repoId)) {
+                    count++;
+                }
+            }
+        }
+        return count;
+    }
+
+    /**
+     * 仅识别带手工需求命名空间的 JSON，历史需求未保存 repoId 时返回 false，保持原有删除行为。
+     */
+    private boolean isManualRequirementBoundToRepo(ScanLogItem item, Long repoId) {
+        if (item == null || StringUtils.isBlank(item.getContent()) || repoId == null) {
+            return false;
+        }
+        try {
+            JSONObject root = JSON.parseObject(item.getContent());
+            JSONObject manualRequirement = root != null ? root.getJSONObject(MANUAL_REQUIREMENT_CONTENT_KEY) : null;
+            return manualRequirement != null && repoId.equals(manualRequirement.getLong("repoId"));
+        }
+        catch (Exception ignored) {
+            // 非 JSON 的扫描内容及异常历史数据不属于手工需求仓库关联。
+            return false;
+        }
     }
 
     /**

@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.manager.application.service.devloop;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -14,7 +15,9 @@ import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationSe
 import com.iwhalecloud.byai.manager.application.service.user.UserBucketNamingService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.*;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectMemberListDto;
+import com.iwhalecloud.byai.manager.dto.devloop.ManualRequirementDeleteDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ManualRequirementDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.ManualRequirementUpdateDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ScanSourceDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskListQueryDto;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskStateDto;
@@ -198,8 +201,12 @@ public class DevloopApplicationService {
         return ResponseUtil.successResponse(result);
     }
 
-    /** 修改扫描源配置（名称、config、cron） */
+    /** 修改扫描源配置（名称、config、cron）。仅创建者可改。 */
     public ResponseUtil<Void> updateScanSource(ScanSourceDTO dto) {
+        String denied = requireSourceCreator(dto.getSourceId());
+        if (denied != null) {
+            return ResponseUtil.failRes(denied);
+        }
         ScanSource source = new ScanSource();
         source.setSourceId(dto.getSourceId());
         source.setSourceName(dto.getSourceName());
@@ -213,10 +220,33 @@ public class DevloopApplicationService {
         return ResponseUtil.successResponse(null);
     }
 
-    /** 删除扫描源 */
+    /** 删除扫描源。仅创建者可删。 */
     public ResponseUtil<Void> deleteScanSource(Long sourceId) {
+        String denied = requireSourceCreator(sourceId);
+        if (denied != null) {
+            return ResponseUtil.failRes(denied);
+        }
         scanSourceService.delete(sourceId);
         return ResponseUtil.successResponse(null);
+    }
+
+    /**
+     * 校验当前登录用户是否为该扫描源创建者。是则返回 null(放行);否则返回错误提示。
+     * 后端硬控制:前端隐藏按钮只是体验,越权改删/授权必须在服务端挡住。
+     */
+    private String requireSourceCreator(Long sourceId) {
+        if (sourceId == null) {
+            return "参数缺失";
+        }
+        ScanSource source = scanSourceService.findById(sourceId);
+        if (source == null) {
+            return "来源不存在";
+        }
+        Long currentUserId = CurrentUserHolder.getCurrentUserId();
+        if (currentUserId == null || !String.valueOf(currentUserId).equals(source.getCreateBy())) {
+            return "只有来源创建者可以操作";
+        }
+        return null;
     }
 
     /** 查询项目可配置的扫描渠道；手工来源只是扫描日志基础设施，不能展示在渠道配置页。 */
@@ -240,7 +270,23 @@ public class DevloopApplicationService {
         map.put("confirmMode", s.getConfirmMode());
         map.put("scoreThreshold", s.getScoreThreshold());
         map.put("lastScanTime", s.getLastScanTime());
+        // 创建者信息:前端据此判断"当前用户是否创建者",控制授权/编辑/删除入口;createByName 供展示。
+        map.put("createBy", s.getCreateBy());
+        map.put("createByName", resolveUserName(parseUserId(s.getCreateBy())));
         return map;
+    }
+
+    /** 字符串 userId 转 Long,非法返回 null(供 resolveUserName 等按 Long 取用户名)。 */
+    private Long parseUserId(String userId) {
+        if (userId == null || userId.trim().isEmpty()) {
+            return null;
+        }
+        try {
+            return Long.valueOf(userId.trim());
+        }
+        catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     /** 启用或停用扫描源 */
@@ -381,15 +427,117 @@ public class DevloopApplicationService {
         if (!MANUAL_REQUIREMENT_ORIGIN_TYPES.contains(originType)) {
             return ResponseUtil.failRes(I18nUtil.get("devloop.manualRequirement.sourceType.unsupported"));
         }
+        if (!isProjectRepo(dto.getProjectId(), dto.getRepoId())) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.manualRequirement.repo.invalid"));
+        }
 
         ScanSource source = findOrCreateManualSource(dto.getProjectId());
         ScanLog log = scanLogService.createLog(source.getSourceId(), dto.getProjectId());
         ScanLogItem item = scanLogService.createItem(log.getLogId(), source.getSourceId(), title,
-            serializeManualRequirementContent(originType, dto.getBranch(), originalContent, dto.getProductContent()),
+            serializeManualRequirementContent(originType, dto.getBranch(), dto.getRepoId(), originalContent,
+                dto.getProductContent()),
             "manual:" + UUID.randomUUID(), null, "created");
         scanLogService.completeLog(log.getLogId(), 1, 1);
 
         return ResponseUtil.successResponse(toRequirementMap(item, source));
+    }
+
+    /**
+     * 修改手工录入需求。需求必须仍未启动，且通过内部 manual 来源和 JSON 包裹双重识别，
+     * 防止扫描渠道需求被误改。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public ResponseUtil<Map<String, Object>> updateManualRequirement(ManualRequirementUpdateDTO dto) {
+        if (dto == null || dto.getItemId() == null) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.manualRequirement.itemId.required"));
+        }
+        String title = StringUtils.trimToNull(dto.getTitle());
+        if (title == null) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.manualRequirement.title.required"));
+        }
+        String originalContent = StringUtils.trimToNull(dto.getOriginalContent());
+        if (originalContent == null) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.manualRequirement.originalContent.required"));
+        }
+        String originType = StringUtils.defaultIfBlank(dto.getSourceType(), "manual").trim();
+        if (!MANUAL_REQUIREMENT_ORIGIN_TYPES.contains(originType)) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.manualRequirement.sourceType.unsupported"));
+        }
+
+        ScanLogItem item = scanLogItemMapper.selectById(dto.getItemId());
+        ScanSource source = getEditableManualRequirementSource(item);
+        if (source == null) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.manualRequirement.edit.forbidden"));
+        }
+        if (!isProjectRepo(source.getProjectId(), dto.getRepoId())) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.manualRequirement.repo.invalid"));
+        }
+
+        ScanLogItem updateItem = new ScanLogItem();
+        updateItem.setTitle(title);
+        updateItem.setContent(serializeManualRequirementContent(originType, dto.getBranch(), dto.getRepoId(),
+            originalContent, dto.getProductContent()));
+        LambdaUpdateWrapper<ScanLogItem> updateWrapper = new LambdaUpdateWrapper<ScanLogItem>()
+            .eq(ScanLogItem::getItemId, dto.getItemId()).eq(ScanLogItem::getAction, "created")
+            .isNull(ScanLogItem::getSessionId);
+        if (scanLogItemMapper.update(updateItem, updateWrapper) == 0) {
+            // 与创建任务并发时，由条件更新保证已启动需求不会被覆盖。
+            return ResponseUtil.failRes(I18nUtil.get("devloop.manualRequirement.edit.forbidden"));
+        }
+
+        item.setTitle(updateItem.getTitle());
+        item.setContent(updateItem.getContent());
+        return ResponseUtil.successResponse(toRequirementMap(item, source));
+    }
+
+    /**
+     * 删除手工录入需求。先验证手工且未启动，再核对所属项目创建者，最后使用条件删除应对并发启动任务。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public ResponseUtil<Void> deleteManualRequirement(ManualRequirementDeleteDTO dto) {
+        if (dto == null || dto.getItemId() == null) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.manualRequirement.itemId.required"));
+        }
+
+        ScanLogItem item = scanLogItemMapper.selectById(dto.getItemId());
+        ScanSource source = getEditableManualRequirementSource(item);
+        if (source == null) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.manualRequirement.delete.forbidden"));
+        }
+
+        Project project = projectMapper.selectById(source.getProjectId());
+        if (project == null || DELETE_FLAG_DELETED.equals(project.getDeleteFlag())) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.manualRequirement.project.notFound"));
+        }
+        Long currentUserId = CurrentUserHolder.getCurrentUserId();
+        if (currentUserId == null || !currentUserId.equals(project.getCreateBy())) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.manualRequirement.delete.creator.required"));
+        }
+
+        LambdaQueryWrapper<ScanLogItem> deleteWrapper = new LambdaQueryWrapper<ScanLogItem>()
+            .eq(ScanLogItem::getItemId, dto.getItemId()).eq(ScanLogItem::getAction, "created")
+            .isNull(ScanLogItem::getSessionId);
+        if (scanLogItemMapper.delete(deleteWrapper) == 0) {
+            // 与创建任务并发时，由条件删除保证已启动需求不会被删除。
+            return ResponseUtil.failRes(I18nUtil.get("devloop.manualRequirement.delete.forbidden"));
+        }
+        return ResponseUtil.successResponse(null);
+    }
+
+    /**
+     * 返回可编辑的手工需求来源；未启动、内部 manual 来源且内容可解析时才放行。
+     * 该校验同时保证外部扫描需求保持原有只读行为。
+     */
+    private ScanSource getEditableManualRequirementSource(ScanLogItem item) {
+        if (item == null || item.getSourceId() == null || item.getSessionId() != null
+            || !"created".equals(item.getAction())) {
+            return null;
+        }
+        ScanSource source = scanSourceService.findById(item.getSourceId());
+        if (source == null || !MANUAL_SOURCE_TYPE.equals(source.getSourceType())) {
+            return null;
+        }
+        return parseManualRequirementContent(item.getContent()) == null ? null : source;
     }
 
     /**
@@ -415,14 +563,34 @@ public class DevloopApplicationService {
     }
 
     /**
+     * 校验关联仓库归属当前项目。手工需求的仓库可为空，以兼容历史数据和项目尚未配置仓库的场景。
+     */
+    private boolean isProjectRepo(Long projectId, Long repoId) {
+        return repoId == null || findProjectRepo(projectId, repoId) != null;
+    }
+
+    /**
+     * 按项目范围查找仓库，避免请求参数或历史异常数据关联到其他项目的仓库。
+     */
+    private ProjectRepo findProjectRepo(Long projectId, Long repoId) {
+        if (projectId == null || repoId == null) {
+            return null;
+        }
+        ProjectRepo repo = projectRepoMapper.selectById(repoId);
+        return repo != null && projectId.equals(repo.getProjectId()) ? repo : null;
+    }
+
+    /**
      * 将语言无关字段保存为带命名空间的 JSON 包裹，而不存已渲染的文案。
      * 既可无歧义解析，也兼容历史和第三方渠道的纯文本扫描内容。
      */
-    private String serializeManualRequirementContent(String originType, String branch, String originalContent,
-        String productContent) {
-        Map<String, String> content = new LinkedHashMap<>();
+    private String serializeManualRequirementContent(String originType, String branch, Long repoId,
+        String originalContent, String productContent) {
+        Map<String, Object> content = new LinkedHashMap<>();
         content.put("sourceType", originType);
         content.put("branch", StringUtils.trimToEmpty(branch));
+        // 仓库归属写入单条需求，项目共用的 manual 扫描源不保存 repoId，避免互相覆盖。
+        content.put("repoId", repoId);
         content.put("originalContent", originalContent);
         content.put("productContent", StringUtils.trimToEmpty(productContent));
         try {
@@ -459,6 +627,8 @@ public class DevloopApplicationService {
         if (manualContent != null) {
             map.put("manualSourceType", manualContent.sourceType());
             map.put("branch", manualContent.branch());
+            // 历史手工需求 JSON 中没有 repoId 时返回 null，继续沿用项目仓库兜底逻辑。
+            map.put("repoId", manualContent.repoId());
             map.put("originalContent", manualContent.originalContent());
             map.put("productContent", manualContent.productContent());
         }
@@ -500,8 +670,14 @@ public class DevloopApplicationService {
             if (originalContent == null) {
                 return null;
             }
+            JsonNode repoIdNode = manual.path("repoId");
+            // 兼容未保存 repoId 的历史 JSON；仅接受正整数，异常值视为未关联仓库。
+            Long repoId = repoIdNode.isIntegralNumber() && repoIdNode.canConvertToLong() && repoIdNode.asLong() > 0
+                ? repoIdNode.asLong()
+                : null;
             return new ManualRequirementContent(manual.path("sourceType").asText("manual"),
-                manual.path("branch").asText(""), originalContent, manual.path("productContent").asText(""));
+                manual.path("branch").asText(""), repoId, originalContent,
+                manual.path("productContent").asText(""));
         }
         catch (Exception ignored) {
             return null;
@@ -538,7 +714,7 @@ public class DevloopApplicationService {
     }
 
     /** 手工需求 JSON 包裹中携带的已解析、语言无关的数据。 */
-    private record ManualRequirementContent(String sourceType, String branch, String originalContent,
+    private record ManualRequirementContent(String sourceType, String branch, Long repoId, String originalContent,
         String productContent) {
     }
 
@@ -616,13 +792,8 @@ public class DevloopApplicationService {
 
             ProcessBuilder pb = new ProcessBuilder(cmd);
             pb.redirectErrorStream(true);
-            // 群搜索由当前登录用户发起,用其 bucket 的 .dws 授权。
-            Long currentUserId = CurrentUserHolder.getCurrentUserId();
-            String dwsConfigDir = dwsAuthService
-                .resolveDwsConfigDir(currentUserId != null ? String.valueOf(currentUserId) : null);
-            if (dwsConfigDir != null) {
-                pb.environment().put("DWS_CONFIG_DIR", dwsConfigDir);
-            }
+            // 群搜索由当前登录用户发起:按其身份隔离 dws 环境(禁 keychain + DWS_CONFIG_DIR + XDG_DATA_HOME)。
+            dwsAuthService.applyUserDwsEnv(pb.environment(), CurrentUserHolder.getCurrentUserId());
             Process process = pb.start();
 
             StringBuilder output = new StringBuilder();
@@ -714,7 +885,7 @@ public class DevloopApplicationService {
             : title;
         String taskType = detectTaskType(sourceItem, title);
 
-        // 解析目标仓库：需求项 -> 扫描源.repoId -> 仓库；手动任务取项目首个仓库兜底
+        // 手工需求优先使用其 JSON 内的 repoId，不修改项目共用 manual 来源，避免影响其他手工需求。
         ProjectRepo repo = resolveTaskRepo(projectId, sourceItem);
         if (repo == null) {
             return ResponseUtil.failRes("未找到目标仓库，请为扫描源关联仓库或在项目下添加仓库");
@@ -996,16 +1167,22 @@ public class DevloopApplicationService {
     }
 
     /**
-     * 解析任务目标仓库：需求项 -> 扫描源.repoId -> 仓库； 手动任务或扫描源未绑定仓库时，取项目首个仓库兜底。
+     * 解析任务目标仓库：手工需求先取自身 JSON 的 repoId，再取扫描源 repoId；均缺失时取项目首个仓库兜底。
      */
     private ProjectRepo resolveTaskRepo(Long projectId, ScanLogItem item) {
-        if (item != null && item.getSourceId() != null) {
-            ScanSource source = scanSourceService.findById(item.getSourceId());
-            if (source != null && source.getRepoId() != null) {
-                ProjectRepo repo = projectRepoMapper.selectById(source.getRepoId());
-                if (repo != null) {
-                    return repo;
+        if (item != null) {
+            ScanSource source = item.getSourceId() != null ? scanSourceService.findById(item.getSourceId()) : null;
+            if (source != null && MANUAL_SOURCE_TYPE.equals(source.getSourceType())) {
+                // 单条手工需求的仓库优先级最高，历史 JSON 缺少该字段时自然继续走后续兜底。
+                ManualRequirementContent manualContent = parseManualRequirementContent(item.getContent());
+                ProjectRepo manualRepo = manualContent != null ? findProjectRepo(projectId, manualContent.repoId()) : null;
+                if (manualRepo != null) {
+                    return manualRepo;
                 }
+            }
+            ProjectRepo sourceRepo = source != null ? findProjectRepo(projectId, source.getRepoId()) : null;
+            if (sourceRepo != null) {
+                return sourceRepo;
             }
         }
         List<ProjectRepo> repos = projectRepoMapper
@@ -1126,7 +1303,7 @@ public class DevloopApplicationService {
         }
         // 代码变更是只读展示,任何本地/远程异常都不抛前端:顶层兜底,失败返回 http_error 空态并记日志。
         try {
-            // 与 resolveTaskContext 同口径:需求项 -> 源.repoId -> 仓库;手动任务取项目首个仓库兜底。
+            // 与 resolveTaskContext 同口径：手工需求自身仓库优先，再回退扫描源和项目仓库。
             ScanLogItem item = scanLogItemMapper.selectOne(
                 new LambdaQueryWrapper<ScanLogItem>().eq(ScanLogItem::getSessionId, sessionId).last("limit 1"));
             ProjectRepo repo = resolveTaskRepo(s.getProjectId(), item);
@@ -1319,7 +1496,7 @@ public class DevloopApplicationService {
     }
 
     /**
-     * 实时解析任务上下文：不落库，按需从关联链路查。 需求/仓库：sessionId -> byai_scan_log_item -> source(repoId->仓库) -> log(projectId)；
+     * 实时解析任务上下文：不落库，按需从关联链路查。需求/仓库优先级为：手工需求 JSON.repoId、扫描源 repoId、项目仓库；
      * agent：session.objectId(数字员工resourceId) -> 资源名；负责人：session.creatorId -> 用户名； 分支：由 taskType(据需求内容判定) + sessionId
      * 确定性重算。关联信息变化后展示随之更新。
      */
@@ -1426,13 +1603,40 @@ public class DevloopApplicationService {
         return ResponseUtil.failRes((String) result.getOrDefault("message", "启动授权失败"));
     }
 
-    /** 检查DWS授权状态（前端轮询用） */
+    /** 检查DWS授权状态（前端轮询用）：新建源弹窗里当前用户给自己授权的场景，查当前登录用户。 */
     public ResponseUtil<Map<String, Object>> checkDwsAuthStatus() {
-        Map<String, Object> dbStatus = dwsAuthService.checkDwsToken();
-        Map<String, Object> runtimeStatus = dwsAuthService.getAuthStatus();
+        return ResponseUtil.successResponse(buildDwsStatus(CurrentUserHolder.getCurrentUserId(), true));
+    }
+
+    /**
+     * 按扫描源查授权状态：查该源【创建者】的授权(不是当前登录用户)，用于列表逐源展示。
+     * 额外返回 canAuthorize(当前登录用户==创建者才可授权) 与创建者名，供前端 (c) 文案与入口控制。
+     */
+    public ResponseUtil<Map<String, Object>> checkDwsAuthStatusBySource(Long sourceId) {
+        ScanSource source = scanSourceService.findById(sourceId);
+        if (source == null) {
+            return ResponseUtil.failRes("来源不存在");
+        }
+        Long creatorId = parseUserId(source.getCreateBy());
+        Long currentUserId = CurrentUserHolder.getCurrentUserId();
+        boolean canAuthorize = currentUserId != null && currentUserId.equals(creatorId);
+
+        Map<String, Object> result = buildDwsStatus(creatorId, canAuthorize);
+        result.put("canAuthorize", canAuthorize);
+        result.put("creatorId", source.getCreateBy());
+        result.put("creatorName", resolveUserName(creatorId));
+        return ResponseUtil.successResponse(result);
+    }
+
+    /** 构造某用户的 DWS 授权状态视图。includeDbToken=true 时附带 DB 授权记录(hasToken/savedAt)。 */
+    private Map<String, Object> buildDwsStatus(Long userId, boolean includeDbToken) {
+        Map<String, Object> runtimeStatus = dwsAuthService.getAuthStatus(userId);
         Map<String, Object> result = new HashMap<>();
-        result.put("hasToken", dbStatus.get("hasToken"));
-        result.put("savedAt", dbStatus.getOrDefault("savedAt", ""));
+        if (includeDbToken) {
+            Map<String, Object> dbStatus = dwsAuthService.checkDwsToken();
+            result.put("hasToken", dbStatus.get("hasToken"));
+            result.put("savedAt", dbStatus.getOrDefault("savedAt", ""));
+        }
         result.put("runtimeAuthenticated", runtimeStatus.get("authenticated"));
         result.put("tokenValid", runtimeStatus.get("tokenValid"));
         result.put("refreshTokenValid", runtimeStatus.getOrDefault("refreshTokenValid", false));
@@ -1442,7 +1646,7 @@ public class DevloopApplicationService {
         result.put("corpName", runtimeStatus.getOrDefault("corpName", ""));
         result.put("userId", runtimeStatus.getOrDefault("userId", ""));
         result.put("userName", runtimeStatus.getOrDefault("userName", ""));
-        return ResponseUtil.successResponse(result);
+        return result;
     }
 
     /** 直接使用token授权 */

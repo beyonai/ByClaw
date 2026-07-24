@@ -217,18 +217,32 @@ export const listRequirementsBySource = (sourceId: number) =>
 export const listRequirementsByProject = (projectId: number, title?: string) =>
   POST<any>('/byaiService/devloop/project/requirements', { projectId, title: title || undefined });
 
+/** 手工需求的可编辑字段，与后端的创建、修改 DTO 保持一致。 */
+type ManualRequirementPayload = {
+  projectId: number;
+  sourceType: 'manual' | 'customer_feedback' | 'internal_proposal';
+  branch?: string;
+  // 手工需求单独关联研发仓库，避免项目存在多个仓库时回退到第一个仓库。
+  repoId: number;
+  title: string;
+  originalContent: string;
+  productContent?: string;
+};
+
 /**
  * 通过手工录入链路新建需求。sourceType 保存业务来源，后端仍通过内部 manual 来源持久化，
  * 因此此联合类型必须与 ManualRequirementDTO 保持一致。
  */
-export const createManualRequirement = (data: {
-  projectId: number;
-  sourceType: 'manual' | 'customer_feedback' | 'internal_proposal';
-  branch?: string;
-  title: string;
-  originalContent: string;
-  productContent?: string;
-}) => POST<any>('/byaiService/devloop/requirement/create', data);
+export const createManualRequirement = (data: ManualRequirementPayload) =>
+  POST<any>('/byaiService/devloop/requirement/create', data);
+
+/** 修改尚未启动的手工需求，项目归属由后端按需求条目反查。 */
+export const updateManualRequirement = (data: Omit<ManualRequirementPayload, 'projectId'> & { itemId: number }) =>
+  POST<any>('/byaiService/devloop/requirement/update', data);
+
+/** 删除尚未启动的手工需求，后端会再次校验当前用户是否为项目创建者。 */
+export const deleteManualRequirement = (itemId: number) =>
+  POST<any>('/byaiService/devloop/requirement/delete', { itemId });
 
 // PAT 管理
 export const saveGitHubPat = (pat: string) => POST<any>('/byaiService/devloop/pat/github', { pat });
@@ -317,5 +331,9 @@ export const bindMemberAgent = (data: { memberId: number; agentId: number }) =>
 export const startDwsDeviceAuth = () => POST<any>('/byaiService/devloop/dws/startDeviceAuth', {});
 
 export const checkDwsAuthStatus = () => POST<any>('/byaiService/devloop/dws/authStatus', {});
+
+// 按扫描源查授权状态：查该源创建者的授权，返回 canAuthorize/creatorName，供列表逐源展示与入口控制。
+export const checkDwsAuthStatusBySource = (sourceId: number) =>
+  POST<any>('/byaiService/devloop/dws/authStatus/bySource', { sourceId });
 
 export const saveDwsToken = (token: string) => POST<any>('/byaiService/devloop/dws/saveToken', { token });

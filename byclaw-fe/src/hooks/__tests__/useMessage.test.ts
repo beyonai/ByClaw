@@ -171,7 +171,10 @@ describe('hooks/useChat/useMessage', () => {
         messageIds: ['m1', 'm2'],
       },
     });
-    expect(eventEmitter.emit).toHaveBeenCalledWith('RECEIVE_SESSION_RECORDS_LAST_METADATA', '{"a":1}');
+    expect(eventEmitter.emit).toHaveBeenCalledWith('RECEIVE_SESSION_RECORDS_LAST_METADATA', {
+      sessionId: 's1',
+      metadata: '{"a":1}',
+    });
     expect(eventEmitter.emit).toHaveBeenCalledWith('scrollToMsgOnSessionChanged', {
       sessionId: 's1',
       targetMessageId: 'm2',
