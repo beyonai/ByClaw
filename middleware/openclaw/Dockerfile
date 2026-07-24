@@ -87,7 +87,10 @@ USER root
 ARG OPENCLAW_VERSION
 ARG OPENCLI_VERSION=2.1.11
 ARG OPENCLI_EXTENSION_VERSION=2.1.11
-ARG DWS_VERSION=v1.0.47
+# 与 byclaw-be 预下载包同源同版本(byclaw-be/docker/dws/version.md);amd64 走预下载,arm64 用此版本联网 fallback。
+ARG DWS_VERSION=v1.0.52
+# buildx 目标架构(amd64/arm64),用于选择预下载二进制或 fallback。
+ARG TARGETARCH
 ARG WECOM_CLI_VERSION=0.1.9
 ARG LARKSUITE_CLI_VERSION=1.0.67
 ARG INSTALL_BROWSER_STACK=true
@@ -263,9 +266,22 @@ RUN chmod +x \
     /usr/local/bin/start-openclaw.sh \
     /usr/local/bin/start-gbrain.sh
 
+# DWS CLI:amd64 用 byclaw-be 预下载的 v1.0.52 二进制(与后端同源,避免构建时联网下载);
+# arm64 无预下载包,回退到官方 install.sh(按 DWS_VERSION 安装)。
+COPY byclaw-be/docker/dws/dws-linux-amd64.tar.gz /tmp/dws-linux-amd64.tar.gz
 RUN set -eux; \
     export DWS_VERSION="${DWS_VERSION}"; \
-    curl -fsSL https://raw.githubusercontent.com/DingTalk-Real-AI/dingtalk-workspace-cli/main/scripts/install.sh | sh; \
+    if [ "${TARGETARCH}" = "amd64" ]; then \
+        tar -xzf /tmp/dws-linux-amd64.tar.gz -C /usr/local/bin dws; \
+        chmod +x /usr/local/bin/dws; \
+    else \
+        echo ">>> no prebuilt dws for ${TARGETARCH}, falling back to install.sh"; \
+        curl -fsSL https://raw.githubusercontent.com/DingTalk-Real-AI/dingtalk-workspace-cli/main/scripts/install.sh \
+            | DWS_INSTALL_DIR=/usr/local/bin sh; \
+    fi; \
+    rm -f /tmp/dws-linux-amd64.tar.gz; \
+    command -v dws; \
+    dws --version; \
     npm install -g "@wecom/cli@${WECOM_CLI_VERSION}" "@larksuite/cli@${LARKSUITE_CLI_VERSION}" "@sovovs/wechat-article-crawler@1.0.0"; \
     wecom-cli --version; \
     command -v lark-cli

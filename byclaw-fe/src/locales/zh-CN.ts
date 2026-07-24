@@ -1738,6 +1738,7 @@ export default {
   // 项目任务详情抽屉
   'projectTaskDetail.title': '任务详情',
   'projectTaskDetail.enterSession': '进入会话',
+  'projectTaskDetail.viewSession': '查看会话',
   'projectTaskDetail.defaultTaskName': '未命名任务',
   'projectTaskDetail.defaultTaskSessionName': '任务会话',
   'projectTaskDetail.defaultAgentName': 'Code Agent',

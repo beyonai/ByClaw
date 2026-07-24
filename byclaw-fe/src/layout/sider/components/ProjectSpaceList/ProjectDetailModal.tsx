@@ -714,6 +714,26 @@ const ProjectDetailPanel: React.FC<Props> = ({
     [EventEmitter, dispatch, navigate, project?.projectName, projectId, setSessionId, t]
   );
 
+  // 只读查看别人任务的会话:复用全局回放 Drawer 的 preview 机制,有历史消息、无输入框,不能对话。
+  const handleOpenReadonlySession = useCallback(
+    (task: any) => {
+      if (!task?.sessionId) {
+        message.warning(t('task.noSession'));
+        return;
+      }
+      const sessionName = task.title || task.taskName || task.sessionName || `#${task.sessionId}`;
+      EventEmitter.emit('beyond-fullabsolute-driver-open-type', {
+        drawerType: 'readonlysession',
+        canClose: true,
+        title: sessionName,
+      });
+      EventEmitter.emit('beyond-fullabsolute-driver-message', {
+        sessionInfo: { sessionId: `${task.sessionId}`, sessionName },
+      });
+    },
+    [EventEmitter, t]
+  );
+
   const handleOpenTaskDetail = useCallback(
     (task: any) => {
       if (channelPanelOpen) {
@@ -2266,12 +2286,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
                   {/* 创建者:可编辑/删除;非创建者:只读查看(复用弹窗,disabled + 无确定按钮)。 */}
                   {isSourceCreator(source) ? (
                     <>
-                      <Button
-                        type="link"
-                        size="small"
-                        icon={<EditOutlined />}
-                        onClick={() => handleEditSource(source)}
-                      >
+                      <Button type="link" size="small" icon={<EditOutlined />} onClick={() => handleEditSource(source)}>
                         {t('common.edit')}
                       </Button>
                       <Button
@@ -2575,7 +2590,9 @@ const ProjectDetailPanel: React.FC<Props> = ({
                 return (
                   <div
                     key={item.itemId}
-                    className={styles.detailRequirementItem}
+                    className={`${styles.detailRequirementItem} ${
+                      canOperateManualRequirement ? styles.detailRequirementItemWithAction : ''
+                    }`}
                     // 卡片点击直接打开右侧详情，列表项始终保持固定高度。
                     onClick={() => setDetailReq(item)}
                   >
@@ -2588,7 +2605,11 @@ const ProjectDetailPanel: React.FC<Props> = ({
                         <strong>{item.title}</strong>
                         <span>{detailText}</span>
                       </div>
-                      <div className={styles.detailRequirementActions}>
+                      <div
+                        className={`${styles.detailRequirementActions} ${
+                          isManualRequirementActionOpen ? styles.detailRequirementActionsOpen : ''
+                        }`}
+                      >
                         {isStarted ? (
                           <Button
                             size="small"
@@ -3135,6 +3156,10 @@ const ProjectDetailPanel: React.FC<Props> = ({
         canEnterSession={canEnterDetailTaskSession}
         onEnterSession={(task) => {
           handleOpenTaskSession(task);
+          setDetailTask(null);
+        }}
+        onViewSession={(task) => {
+          handleOpenReadonlySession(task);
           setDetailTask(null);
         }}
       />

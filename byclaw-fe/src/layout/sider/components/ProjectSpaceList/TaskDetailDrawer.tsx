@@ -12,6 +12,8 @@ interface TaskDetailDrawerProps {
   onClose: () => void;
   canEnterSession?: boolean;
   onEnterSession?: (task: any) => void;
+  // 只读查看会话:非处理人可看别人任务的会话消息(无输入框,不能对话)。
+  onViewSession?: (task: any) => void;
 }
 
 // 同时兼容 v2 阶段状态和旧状态值，任务详情始终按同一视觉语义展示。
@@ -37,7 +39,13 @@ const PHASE_LABEL_IDS: Record<string, string> = {
 
 const dash = (value: any): string => (value === null || value === undefined || value === '' ? '-' : `${value}`);
 
-const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({ task, onClose, canEnterSession, onEnterSession }) => {
+const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
+  task,
+  onClose,
+  canEnterSession,
+  onEnterSession,
+  onViewSession,
+}) => {
   const intl = useIntl();
   const t = (id: string, values?: Record<string, string | number>) => intl.formatMessage({ id }, values);
   const [phaseLoading, setPhaseLoading] = useState(false);
@@ -98,10 +106,18 @@ const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({ task, onClose, canE
       onClose={onClose}
       width={640}
       extra={
-        task?.sessionId && canEnterSession ? (
-          <Button type="primary" icon={<MessageOutlined />} onClick={() => onEnterSession?.(task)}>
-            {t('projectTaskDetail.enterSession')}
-          </Button>
+        task?.sessionId ? (
+          canEnterSession ? (
+            // 处理人:进入可对话会话。
+            <Button type="primary" icon={<MessageOutlined />} onClick={() => onEnterSession?.(task)}>
+              {t('projectTaskDetail.enterSession')}
+            </Button>
+          ) : onViewSession ? (
+            // 非处理人:只读查看会话(有消息、无输入框)。
+            <Button icon={<MessageOutlined />} onClick={() => onViewSession(task)}>
+              {t('projectTaskDetail.viewSession')}
+            </Button>
+          ) : null
         ) : null
       }
     >

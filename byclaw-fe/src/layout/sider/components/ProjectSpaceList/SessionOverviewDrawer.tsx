@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Checkbox, DatePicker, Drawer, Empty, Pagination, Segmented, Spin, Tag, message } from 'antd';
+import { Checkbox, DatePicker, Drawer, Empty, Segmented, Spin, Tag, message } from 'antd';
 import { useIntl } from '@umijs/max';
 import dayjs from 'dayjs';
 import { listTasks, type DevloopTaskItem } from '@/service/devloop';
@@ -18,10 +18,16 @@ interface SessionOverviewDrawerProps {
 // 日期快捷选择：今天 / 本周 / 本月；自定义表示用户手动改动了 RangePicker，快捷段不再高亮。
 type DatePreset = 'today' | 'week' | 'month' | 'custom';
 type BoardQueryState = {
-  pageNum: number;
-  pageSize: number;
   dateRange: TaskDateRange;
   onlyMine: boolean;
+};
+type TaskColumnKey = 'pending' | 'running' | 'paused' | 'done';
+type BoardColumnState = {
+  tasks: DevloopTaskItem[];
+  pageNum: number;
+  total: number;
+  hasMore: boolean;
+  loading: boolean;
 };
 
 const COLUMNS = [
@@ -29,15 +35,23 @@ const COLUMNS = [
   { key: 'running', icon: '●', classSuffix: 'Running', labelId: 'projectSpace.taskBoard.status.running' },
   { key: 'paused', icon: '◑', classSuffix: 'Paused', labelId: 'projectSpace.taskBoard.status.paused' },
   { key: 'done', icon: '✓', classSuffix: 'Done', labelId: 'projectSpace.taskBoard.status.done' },
-];
+] as const;
 
-const getTaskStatusKey = (status?: string) => {
-  const normalizedStatus = `${status || ''}`.trim().toLowerCase();
-  if (['完成', '已完成', 'done', 'completed'].includes(normalizedStatus)) return 'done';
-  if (['进行中', 'doing', 'running', 'in_progress'].includes(normalizedStatus)) return 'running';
-  if (['暂停', 'paused', 'pause'].includes(normalizedStatus)) return 'paused';
-  return 'pending';
+const TASK_PAGE_SIZE = 30;
+const TASK_STATUS_BY_COLUMN: Record<TaskColumnKey, 'pending' | 'in_progress' | 'paused' | 'completed'> = {
+  pending: 'pending',
+  running: 'in_progress',
+  paused: 'paused',
+  done: 'completed',
 };
+
+// 四个状态列各自保存分页进度，筛选条件变化时统一从第一页重新查询。
+const createColumnStates = (loading = false): Record<TaskColumnKey, BoardColumnState> => ({
+  pending: { tasks: [], pageNum: 0, total: 0, hasMore: false, loading },
+  running: { tasks: [], pageNum: 0, total: 0, hasMore: false, loading },
+  paused: { tasks: [], pageNum: 0, total: 0, hasMore: false, loading },
+  done: { tasks: [], pageNum: 0, total: 0, hasMore: false, loading },
+});
 
 // 快捷日期页签始终按周一到周日计算，和日期组件“本周”预设保持一致。
 const getPresetRange = (preset: Exclude<DatePreset, 'custom'>): TaskDateRange => {
@@ -68,7 +82,7 @@ const getDatePresetByRange = (dateRange: TaskDateRange): DatePreset => {
 // 默认查本自然周，而非仅今天，避免刚进看板只看到当天任务。
 const DEFAULT_PRESET: DatePreset = 'week';
 
-// 任务看板按时间范围和分页从服务端读取，避免项目任务较多时一次性加载全部会话。
+// 任务看板按状态分列查询，每列独立分页，避免一个状态的数据挤占其它状态的首屏数量。
 const TaskBoardDrawer: React.FC<SessionOverviewDrawerProps> = ({
   open,
   onClose,
@@ -85,71 +99,136 @@ const TaskBoardDrawer: React.FC<SessionOverviewDrawerProps> = ({
   // 看板与任务 Tab 使用同一快捷日期范围，避免用户在两个入口得到不同的筛选结果。
   const taskDatePresets = useMemo(() => getTaskDateRangePresets((id) => intl.formatMessage({ id })), [intl]);
   const [detailTask, setDetailTask] = useState<DevloopTaskItem | null>(null);
-  const [tasks, setTasks] = useState<DevloopTaskItem[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [total, setTotal] = useState(0);
-  const [pageNum, setPageNum] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
+  const [columnStates, setColumnStates] = useState<Record<TaskColumnKey, BoardColumnState>>(() => createColumnStates());
   const [dateRange, setDateRange] = useState<TaskDateRange>(() => getPresetRange('week'));
   const [datePreset, setDatePreset] = useState<DatePreset>(DEFAULT_PRESET);
   const [onlyMine, setOnlyMine] = useState(true);
   const queryRef = useRef<BoardQueryState>({
-    pageNum: 1,
-    pageSize: 20,
     dateRange: getPresetRange('week'),
     onlyMine: true,
   });
+  const requestVersionRef = useRef(0);
+  const loadingRequestKeysRef = useRef(new Set<string>());
+  const loadFailedShownRef = useRef(false);
 
-  const fetchBoardTasks = useCallback(
-    async (overrides: Partial<BoardQueryState> = {}) => {
+  const fetchColumnTasks = useCallback(
+    async (
+      columnKey: TaskColumnKey,
+      queryState: BoardQueryState,
+      pageNum: number,
+      append: boolean,
+      requestVersion: number
+    ) => {
       const numericProjectId = Number(projectId);
       if (!Number.isFinite(numericProjectId) || (numericProjectId !== -1 && numericProjectId <= 0)) {
         return;
       }
+      const requestKey = `${requestVersion}-${columnKey}`;
+      if (loadingRequestKeysRef.current.has(requestKey)) return;
+      loadingRequestKeysRef.current.add(requestKey);
 
-      const queryState = { ...queryRef.current, ...overrides };
-      queryRef.current = queryState;
-      setPageNum(queryState.pageNum);
-      setPageSize(queryState.pageSize);
-      setDateRange(queryState.dateRange);
-      setOnlyMine(queryState.onlyMine);
-      setLoading(true);
+      setColumnStates((previous) => ({
+        ...previous,
+        [columnKey]: { ...previous[columnKey], loading: true },
+      }));
       try {
         const taskPage = await listTasks({
           projectId: numericProjectId,
           createTimeStart: queryState.dateRange?.[0]?.startOf('day').format('YYYY-MM-DD HH:mm:ss'),
           createTimeEnd: queryState.dateRange?.[1]?.endOf('day').format('YYYY-MM-DD HH:mm:ss'),
           onlyMine: queryState.onlyMine || undefined,
-          pageNum: queryState.pageNum,
-          pageSize: queryState.pageSize,
+          status: TASK_STATUS_BY_COLUMN[columnKey],
+          pageNum,
+          pageSize: TASK_PAGE_SIZE,
         });
-        setTasks(Array.isArray(taskPage?.list) ? taskPage.list : []);
-        setTotal(taskPage?.total || 0);
+        if (requestVersion !== requestVersionRef.current) return;
+
+        const nextTasks = Array.isArray(taskPage?.list) ? taskPage.list : [];
+        const total = Number(taskPage?.total) || 0;
+        setColumnStates((previous) => {
+          const previousColumn = previous[columnKey];
+          const tasks = append
+            ? [
+              ...previousColumn.tasks,
+              ...nextTasks.filter((task) => !previousColumn.tasks.some((item) => item.sessionId === task.sessionId)),
+            ]
+            : nextTasks;
+          return {
+            ...previous,
+            [columnKey]: {
+              tasks,
+              pageNum,
+              total,
+              hasMore: tasks.length < total,
+              loading: false,
+            },
+          };
+        });
       } catch (error: any) {
-        setTasks([]);
-        setTotal(0);
-        message.error(error?.message || t('projectSpace.taskBoard.loadFailed'));
+        if (requestVersion === requestVersionRef.current && !loadFailedShownRef.current) {
+          loadFailedShownRef.current = true;
+          message.error(error?.message || t('projectSpace.taskBoard.loadFailed'));
+        }
       } finally {
-        setLoading(false);
+        loadingRequestKeysRef.current.delete(requestKey);
+        if (requestVersion === requestVersionRef.current) {
+          setColumnStates((previous) => ({
+            ...previous,
+            [columnKey]: { ...previous[columnKey], loading: false },
+          }));
+        }
       }
     },
     [projectId, t]
+  );
+
+  const reloadBoard = useCallback(
+    (overrides: Partial<BoardQueryState> = {}) => {
+      const queryState = { ...queryRef.current, ...overrides };
+      queryRef.current = queryState;
+      setDateRange(queryState.dateRange);
+      setOnlyMine(queryState.onlyMine);
+      loadFailedShownRef.current = false;
+      const requestVersion = requestVersionRef.current + 1;
+      requestVersionRef.current = requestVersion;
+      const numericProjectId = Number(projectId);
+      if (!Number.isFinite(numericProjectId) || (numericProjectId !== -1 && numericProjectId <= 0)) {
+        setColumnStates(createColumnStates());
+        return;
+      }
+      setColumnStates(createColumnStates(true));
+      void Promise.all(COLUMNS.map((column) => fetchColumnTasks(column.key, queryState, 1, false, requestVersion)));
+    },
+    [fetchColumnTasks, projectId]
   );
 
   useEffect(() => {
     if (!open) return;
     // 每次打开重置为默认视图：本周 + 只看我的，不携带上次的自定义筛选。
     setDatePreset(DEFAULT_PRESET);
-    void fetchBoardTasks({ pageNum: 1, pageSize: 20, dateRange: getPresetRange('week'), onlyMine: true });
-  }, [fetchBoardTasks, open]);
+    reloadBoard({ dateRange: getPresetRange('week'), onlyMine: true });
+  }, [open, reloadBoard]);
 
   const handlePresetChange = useCallback(
     (preset: DatePreset) => {
       if (preset === 'custom') return;
       setDatePreset(preset);
-      void fetchBoardTasks({ pageNum: 1, dateRange: getPresetRange(preset) });
+      reloadBoard({ dateRange: getPresetRange(preset) });
     },
-    [fetchBoardTasks]
+    [reloadBoard]
+  );
+
+  const handleColumnScroll = useCallback(
+    (columnKey: TaskColumnKey, event: React.UIEvent<HTMLDivElement>) => {
+      const columnState = columnStates[columnKey];
+      const scrollContainer = event.currentTarget;
+      const remainingHeight = scrollContainer.scrollHeight - scrollContainer.scrollTop - scrollContainer.clientHeight;
+      if (columnState.loading || !columnState.hasMore || remainingHeight > 24) return;
+
+      // 同一状态列的请求 key 会拦截连续滚动触发，避免触底时重复加载下一页。
+      void fetchColumnTasks(columnKey, queryRef.current, columnState.pageNum + 1, true, requestVersionRef.current);
+    },
+    [columnStates, fetchColumnTasks]
   );
 
   return (
@@ -185,79 +264,70 @@ const TaskBoardDrawer: React.FC<SessionOverviewDrawerProps> = ({
             onChange={(dates) => {
               const nextDateRange = dates as TaskDateRange;
               setDatePreset(getDatePresetByRange(nextDateRange));
-              void fetchBoardTasks({ pageNum: 1, dateRange: nextDateRange });
+              reloadBoard({ dateRange: nextDateRange });
             }}
           />
           <Checkbox
             checked={onlyMine}
             onChange={(e) => {
-              void fetchBoardTasks({ pageNum: 1, onlyMine: e.target.checked });
+              reloadBoard({ onlyMine: e.target.checked });
             }}
           >
             {t('projectSpace.taskBoard.onlyMine')}
           </Checkbox>
-          {total > 0 && (
-            <Pagination
-              size="small"
-              current={pageNum}
-              pageSize={pageSize}
-              total={total}
-              showSizeChanger
-              pageSizeOptions={[10, 20, 50, 100]}
-              showTotal={(count) => t('projectSpace.taskBoard.paginationTotal', { count })}
-              onChange={(nextPageNum, nextPageSize) => {
-                void fetchBoardTasks({ pageNum: nextPageNum, pageSize: nextPageSize });
-              }}
-            />
-          )}
         </div>
-        <Spin spinning={loading}>
-          <div className={styles.kanbanBoard}>
-            {COLUMNS.map((column) => {
-              const columnTasks = tasks.filter(
-                (task) => getTaskStatusKey(task.status || task.statusLabel) === column.key
-              );
-              return (
-                <div key={column.key} className={styles.kanbanColumn}>
-                  <div className={styles.kanbanColHeader}>
-                    <span className={`${styles.kanbanColIcon} ${styles[`kanbanColIcon${column.classSuffix}`]}`}>
-                      {column.icon}
-                    </span>
-                    <span className={styles.kanbanColTitle}>{t(column.labelId)}</span>
-                    <span className={styles.kanbanColCount}>{columnTasks.length}</span>
-                  </div>
-                  {columnTasks.length === 0 ? (
-                    <Empty description="" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-                  ) : (
-                    columnTasks.map((task) => (
-                      <div
-                        key={task.sessionId || task.taskId}
-                        className={styles.kanbanCard}
-                        onClick={() => setDetailTask(task)}
-                      >
-                        <h4 className={styles.kanbanCardTitle}>
-                          {task.title || t('projectSpace.taskBoard.unnamedTask')}
-                        </h4>
-                        {task.currentStage?.stageName && (
-                          <div className={styles.kanbanCardMeta}>
-                            <Tag className={styles.kanbanPhaseTag} color="blue">
-                              {task.currentStage.stageName}
-                            </Tag>
-                            <span>{t('projectSpace.taskBoard.progress', { progress: task.progress || 0 })}</span>
-                          </div>
-                        )}
-                        <div className={styles.kanbanCardFooter}>
-                          <span>{task.assignee || task.agentName || '-'}</span>
-                          <span>{task.createTime ? dayjs(task.createTime).format('M/D HH:mm') : ''}</span>
-                        </div>
-                      </div>
-                    ))
-                  )}
+        <div className={styles.kanbanBoard}>
+          {COLUMNS.map((column) => {
+            const columnState = columnStates[column.key];
+            return (
+              <div key={column.key} className={styles.kanbanColumn}>
+                <div className={styles.kanbanColHeader}>
+                  <span className={`${styles.kanbanColIcon} ${styles[`kanbanColIcon${column.classSuffix}`]}`}>
+                    {column.icon}
+                  </span>
+                  <span className={styles.kanbanColTitle}>{t(column.labelId)}</span>
+                  <span className={styles.kanbanColCount}>{columnState.total}</span>
                 </div>
-              );
-            })}
-          </div>
-        </Spin>
+                <div className={styles.kanbanColumnContent} onScroll={(event) => handleColumnScroll(column.key, event)}>
+                  <Spin spinning={columnState.loading} wrapperClassName={styles.kanbanColumnSpin}>
+                    {columnState.tasks.length === 0 ? (
+                      <Empty description="" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                    ) : (
+                      columnState.tasks.map((task) => (
+                        <div
+                          key={task.sessionId || task.taskId}
+                          className={styles.kanbanCard}
+                          onClick={() => setDetailTask(task)}
+                        >
+                          <h4 className={styles.kanbanCardTitle}>
+                            {task.title || t('projectSpace.taskBoard.unnamedTask')}
+                          </h4>
+                          {task.currentStage?.stageName && (
+                            <div className={styles.kanbanCardMeta}>
+                              <Tag className={styles.kanbanPhaseTag} color="blue">
+                                {task.currentStage.stageName}
+                              </Tag>
+                              <span>{t('projectSpace.taskBoard.progress', { progress: task.progress || 0 })}</span>
+                            </div>
+                          )}
+                          <div className={styles.kanbanCardFooter}>
+                            <span>{task.assignee || task.agentName || '-'}</span>
+                            <span>{task.createTime ? dayjs(task.createTime).format('M/D HH:mm') : ''}</span>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                    {columnState.loading && columnState.tasks.length > 0 && (
+                      <div className={styles.kanbanColumnLoadingMore}>
+                        <Spin size="small" />
+                      </div>
+                    )}
+                  </Spin>
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </Drawer>
       <TaskDetailDrawer
         task={detailTask}

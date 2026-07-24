@@ -2566,7 +2566,7 @@ class DataCloudWorker(GatewayWorker):
                 #     content_type=SseMessageType.text.value,
                 # )
                 await context.flush_to_history()
-                return {"status": "done", "metadata": all_metadata}
+                return {"status": "COMPLETED", "metadata": all_metadata, "content": _CHITCHAT_DIRECT_REPLY}
         else:
             # ResumeCommand 或 paradigm resume：清空残留，避免旧 node_id 被带入下一轮图运行
             context._knowledge_enhance_node_id = ""
