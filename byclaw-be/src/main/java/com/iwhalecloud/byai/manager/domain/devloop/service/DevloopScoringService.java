@@ -3,6 +3,7 @@ package com.iwhalecloud.byai.manager.domain.devloop.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.manager.domain.aimodel.service.AIService;
 import com.iwhalecloud.byai.manager.entity.devloop.ScanLogItem;
 import com.iwhalecloud.byai.manager.mapper.devloop.ScanLogItemMapper;
@@ -119,10 +120,10 @@ public class DevloopScoringService {
         }
         if (msg.contains("chat_model.not.configured") || msg.contains("no.default.model")
             || msg.contains("no default model")) {
-            return "未配置默认聊天(LLM)模型。请在「模型管理」将一个可用 LLM 模型设为默认（打默认标签）。";
+            return I18nUtil.get("devloop.scoring.default.model.not.configured");
         }
         if (msg.contains("api.call.failed") || msg.contains("api.request.failed")) {
-            return "调用大模型接口失败（可能是 token 失效/额度不足/网络不通）：" + msg;
+            return I18nUtil.get("devloop.scoring.model.call.failed", msg);
         }
         return null;
     }

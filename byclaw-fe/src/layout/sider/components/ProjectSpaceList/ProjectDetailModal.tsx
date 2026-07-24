@@ -592,6 +592,9 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const dwsAuthTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const dwsAuthTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const startingRequirementIdsRef = useRef<Set<number>>(new Set());
+  // 新增表单只在打开时自动回填一次首个仓库，避免用户主动清空选择后又被重复选回。
+  const sourceRepoDefaultedRef = useRef(false);
+  const manualRequirementRepoDefaultedRef = useRef(false);
   // 状态更新前先同步加锁，避免连续点击确定按钮重复保存渠道。
   const sourceSavingRef = useRef(false);
   // 手工需求的新建和修改共用同步锁，避免 React 状态尚未刷新时重复提交。
@@ -960,6 +963,37 @@ const ProjectDetailPanel: React.FC<Props> = ({
     const detail = await getProject(projectId);
     setRepos(detail?.repos || []);
   }, [projectId]);
+
+  useEffect(() => {
+    if (
+      !sourceModalOpen ||
+      editingSource ||
+      sourceModalReadonly ||
+      sourceRepoDefaultedRef.current ||
+      sourceForm.repoId !== undefined ||
+      !repos.length
+    ) {
+      return;
+    }
+    sourceRepoDefaultedRef.current = true;
+    // 新增渠道默认使用项目仓库列表第一项，编辑渠道保留原有关联仓库。
+    setSourceForm((prev) => ({ ...prev, repoId: repos[0].repoId }));
+  }, [editingSource, repos, sourceForm.repoId, sourceModalOpen, sourceModalReadonly]);
+
+  useEffect(() => {
+    if (
+      !manualRequirementOpen ||
+      editingManualRequirement ||
+      manualRequirementRepoDefaultedRef.current ||
+      manualRequirementForm.repoId !== undefined ||
+      !repos.length
+    ) {
+      return;
+    }
+    manualRequirementRepoDefaultedRef.current = true;
+    // 新增需求默认使用项目仓库列表第一项，编辑需求保留原有关联仓库。
+    setManualRequirementForm((prev) => ({ ...prev, repoId: repos[0].repoId }));
+  }, [editingManualRequirement, manualRequirementForm.repoId, manualRequirementOpen, repos]);
 
   const fetchMembers = useCallback(async () => {
     if (!projectId) return;
@@ -1610,6 +1644,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
   };
 
   const openAddSourceModal = (type: SourceType = 'github_issue') => {
+    sourceRepoDefaultedRef.current = false;
     resetSourceForm(type);
     setSourceModalOpen(true);
   };
@@ -1686,6 +1721,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const openManualRequirementModal = () => {
     if (manualRequirementSubmittingRef.current) return;
 
+    manualRequirementRepoDefaultedRef.current = false;
     setEditingManualRequirement(null);
     setManualRequirementForm(getDefaultManualRequirementForm());
     setManualRequirementOpen(true);
@@ -1840,14 +1876,14 @@ const ProjectDetailPanel: React.FC<Props> = ({
         groupId: sourceForm.chatId,
         // 群名用于列表展示和编辑回填，扫描仍以 groupId 为准。
         chatName,
-        keyword: sourceForm.keywords || '需求',
+        keyword: sourceForm.keywords || t('source.defaultKeyword'),
         lookbackHours: parseInt(sourceForm.lookbackHours, 10) || 24,
         corpId: dwsAuthDetail?.corpId || '',
       });
     } else if (sourceForm.type === 'dingtalk_todo') {
       // 待办固定拉"派给我(executor)"的未完成项;keyword 过滤研发需求,priority 逗号拼接给 DWS。
       config = JSON.stringify({
-        keyword: sourceForm.keywords || '需求',
+        keyword: sourceForm.keywords || t('source.defaultKeyword'),
         priority: (sourceForm.todoPriority || []).join(','),
         corpId: dwsAuthDetail?.corpId || '',
       });
@@ -2697,7 +2733,13 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const renderCodeChanges = () => {
     if (!isDevelopProject) return null;
     const empty = (id: string, values?: Record<string, string | number>) => (
-      <div className={styles.codeChangeEmpty}>{taskChangesLoading ? t('codeChanges.loading') : t(id, values)}</div>
+      <div className={styles.codeChangeEmpty}>
+        {taskChangesLoading ? (
+          <Spin size="small" />
+        ) : (
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t(id, values)} />
+        )}
+      </div>
     );
 
     let body: React.ReactNode;
@@ -2708,7 +2750,9 @@ const ProjectDetailPanel: React.FC<Props> = ({
       body = empty('codeChanges.loading');
     } else if (!taskChanges || status === 'http_error') {
       body = taskChanges?.message ? (
-        <div className={styles.codeChangeEmpty}>{taskChanges.message}</div>
+        <div className={styles.codeChangeEmpty}>
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={taskChanges.message} />
+        </div>
       ) : (
         empty('codeChanges.unavailable')
       );
@@ -2925,6 +2969,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
           currentPath={SHARED_FILE_PATH}
           emptyText={t('resource.emptySharedFiles')}
           compactTreePadding
+          resourceEmptyStyle
           childrenByPath={resourceChildrenByPath}
           expandedKeys={resourceExpandedKeys}
           showActions={!!projectId}
@@ -2940,6 +2985,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
           title={t('resource.sessionSpace')}
           emptyText={t(resourceFileScope === 'all' ? 'resource.emptySessions' : 'resource.emptyCurrentSession')}
           groups={sessionGroups}
+          resourceEmptyStyle
           childrenByPath={resourceChildrenByPath}
           expandedKeys={resourceExpandedKeys}
           switchValue={resourceFileScope}
@@ -2950,8 +2996,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
           showActions={!!fileResourceId}
           onRefresh={refreshSessionResourceFiles}
           switchOptions={[
-            { label: t('resource.currentSession'), value: 'current' },
-            { label: t('resource.allSessions'), value: 'all' },
+            { label: t('resource.scope.current'), value: 'current' },
+            { label: t('resource.scope.all'), value: 'all' },
           ]}
           onSwitchChange={(value) => setResourceFileScope(value as ResourceFileScope)}
           onExpand={setResourceExpandedKeys}
@@ -3488,8 +3534,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
       className={styles.manualRequirementModal}
     >
       <div className={styles.manualRequirementForm}>
-        {/* 原始来源与影响分支共用一行的两个等宽栅格，便于快速补全需求来源上下文。 */}
-        <div className={styles.formField}>
+        {/* 原始来源占第一行左侧 50%，影响分支与关联仓库在下一行并排各占 50%。 */}
+        <div className={`${styles.formField} ${styles.manualRequirementSourceField}`}>
           <label>{t('manualRequirement.field.sourceType')}</label>
           <Radio.Group
             className={styles.manualRequirementSourceType}
@@ -3512,15 +3558,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
             onChange={(event) => setManualRequirementForm((prev) => ({ ...prev, branch: event.target.value }))}
           />
         </div>
-        <div className={`${styles.formField} ${styles.manualRequirementFormFull}`}>
-          <label>{t('manualRequirement.field.title')}</label>
-          <Input
-            placeholder={t('manualRequirement.placeholder.title')}
-            value={manualRequirementForm.title}
-            onChange={(event) => setManualRequirementForm((prev) => ({ ...prev, title: event.target.value }))}
-          />
-        </div>
-        <div className={`${styles.formField} ${styles.manualRequirementFormFull}`}>
+        <div className={styles.formField}>
           <label>{t('manualRequirement.field.repository')}</label>
           {/* 手工需求与渠道共用项目仓库列表，新增仓库后自动回填当前需求表单。 */}
           <Space.Compact className={styles.manualRequirementRepoCompact}>
@@ -3548,6 +3586,14 @@ const ProjectDetailPanel: React.FC<Props> = ({
               {t('common.add')}
             </Button>
           </Space.Compact>
+        </div>
+        <div className={`${styles.formField} ${styles.manualRequirementFormFull}`}>
+          <label>{t('manualRequirement.field.title')}</label>
+          <Input
+            placeholder={t('manualRequirement.placeholder.title')}
+            value={manualRequirementForm.title}
+            onChange={(event) => setManualRequirementForm((prev) => ({ ...prev, title: event.target.value }))}
+          />
         </div>
         <div className={`${styles.formField} ${styles.manualRequirementFormFull}`}>
           <label>{t('manualRequirement.field.originalContent')}</label>

@@ -2,6 +2,10 @@ package com.iwhalecloud.byai.state.application.service.recorder;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import com.iwhalecloud.byai.state.domain.recorder.model.RecorderSession;
 import com.iwhalecloud.byai.state.domain.recorder.model.RecorderOwner;
@@ -25,6 +29,64 @@ class RecorderPipelineServiceTest {
 
     @TempDir
     Path tempDir;
+
+    @Test
+    void scoreReturnsTheCompleteSanitizedPromptSentToLlm() {
+        RecorderPipelineService pipeline = pipeline(new CapturingVerifyService());
+        RecorderSession session = new RecorderSession("session-1", new RecorderOwner(1L, "alice"));
+        session.candidates(List.of(Map.of(
+            "id", "cand_search",
+            "endpoint", Map.of("method", "GET", "host", "api.example.test", "pathname", "/search"),
+            "score", 88
+        )));
+
+        Map<String, Object> result = pipeline.score(session, List.of(), false);
+
+        assertThat(String.valueOf(result.get("scorePrompt")))
+            .contains("Analyze these captured endpoint metadata records.")
+            .contains("cand_search")
+            .contains("GET")
+            .contains("api.example.test")
+            .contains("/search")
+            .contains("88")
+            .doesNotContain("Score recorder candidates:");
+    }
+
+    @Test
+    void scoreExtractsJsonFromThinkingOutputAndMergesMatchedCandidateSemantics() {
+        RecorderLlmService llmService = mock(RecorderLlmService.class);
+        when(llmService.availability()).thenReturn(new RecorderLlmService.Availability(true, "test-model", "available"));
+        when(llmService.generateJsonObject(anyString(), anyString(), anyInt())).thenReturn("""
+            <think>Analyse the endpoints first; an invalid example is {not-json}.</think>
+            ```json
+            {"candidates":[{"candidateId":"candidate-1","utilityScore":91,"inferredFunction":"Search articles","paramUnion":[{"name":"query","in":"query","paramRole":"search term","exposeAsArg":"yes"}]}]}
+            ```
+            """);
+        RecorderPipelineService pipeline = new RecorderPipelineService(
+            RecorderDraftStoreTestSupport.forFileRoot(tempDir), new CapturingVerifyService(), llmService
+        );
+        RecorderSession session = new RecorderSession("session-1", new RecorderOwner(1L, "alice"));
+        session.candidates(List.of(Map.of(
+            "id", "candidate-1",
+            "score", 80,
+            "endpoint", Map.of("method", "GET", "host", "example.com", "pathname", "/search")
+        )));
+
+        Map<String, Object> result = pipeline.score(session, List.of(), true);
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> candidate = ((List<Map<String, Object>>) result.get("candidates")).getFirst();
+        assertThat(candidate)
+            .containsEntry("scoredBy", "llm")
+            .containsEntry("llmUtilityScore", 91)
+            .containsEntry("inferredFunction", "Search articles");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> parameter = ((List<Map<String, Object>>) candidate.get("paramUnion")).getFirst();
+        assertThat(parameter)
+            .containsEntry("name", "query")
+            .containsEntry("exposeAsArg", "yes");
+        assertThat(result).containsEntry("llmAppliedCandidateCount", 1).doesNotContainKey("llmError");
+    }
 
     @Test
     void delayedVerifyCallbacksCannotMutateTerminalSessionDrafts() {

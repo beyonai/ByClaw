@@ -39,6 +39,7 @@ public class DevloopTaskListQueryDto {
         pageNum = pageNum == null || pageNum < 1 ? DEFAULT_PAGE_NUM : pageNum;
         pageSize = pageSize == null || pageSize < 1 ? DEFAULT_PAGE_SIZE : Math.min(pageSize, MAX_PAGE_SIZE);
         if (createTimeStart != null && createTimeEnd != null && createTimeStart.after(createTimeEnd)) {
+            // DTO 校验保持稳定的异常文本，避免脱离 Spring 上下文的单元测试拿不到国际化资源。
             throw new IllegalArgumentException("创建时间开始值不能晚于结束值");
         }
     }

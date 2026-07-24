@@ -112,6 +112,27 @@ class RecorderLlmServiceTest {
                 && "default-chat".equals(resolved.getModelCode())), org.mockito.ArgumentMatchers.eq(1200));
     }
 
+    @Test
+    void requestsStructuredJsonFromTheResolvedRecorderModel() {
+        ModelManagementApplicationService models = mock(ModelManagementApplicationService.class);
+        AIService aiService = mock(AIService.class);
+        ModelVO listedModel = model("12", 1, null, null, "default-chat");
+        ModelVO detail = model("12", 1, "https://model.example", "server-only-token", "default-chat");
+        ModelListResponse page = new ModelListResponse();
+        page.setRows(List.of(listedModel));
+        when(models.getModelListByPage(org.mockito.ArgumentMatchers.any())).thenReturn(page);
+        when(models.getModelDetail("12")).thenReturn(detail);
+        when(aiService.generateJsonObject(org.mockito.ArgumentMatchers.<String>any(), org.mockito.ArgumentMatchers.<String>any(),
+            org.mockito.ArgumentMatchers.any(ModelDto.class), org.mockito.ArgumentMatchers.anyInt())).thenReturn("{}");
+
+        RecorderLlmService service = new RecorderLlmService(models, aiService);
+
+        assertThat(service.generateJsonObject("system", "user", 1200)).isEqualTo("{}");
+        verify(aiService).generateJsonObject(org.mockito.ArgumentMatchers.eq("system"), org.mockito.ArgumentMatchers.eq("user"),
+            org.mockito.ArgumentMatchers.<ModelDto>argThat(resolved -> "default-chat".equals(resolved.getModelCode())),
+            org.mockito.ArgumentMatchers.eq(1200));
+    }
+
     private ModelVO model(String id, int isDefault, String endpoint, String token, String modelCode) {
         ModelVO model = new ModelVO();
         model.setId(Long.valueOf(id));

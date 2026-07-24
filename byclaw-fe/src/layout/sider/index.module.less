@@ -215,6 +215,12 @@
 }
 
 .tabLabel {
+  // 侧栏宽度固定，英文菜单文案超长时截断，避免挤出菜单区域。
+  width: 44px;
+  overflow: hidden;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 10px;
   line-height: 14px;
 }

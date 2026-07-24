@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.manager.interfaces.controller.devloop;
 
 import com.iwhalecloud.byai.manager.application.service.devloop.DevloopApplicationService;
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskListQueryDto;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskStateDto;
@@ -183,7 +184,7 @@ public class DevloopController {
     public ResponseUtil<Void> saveGitHubPat(@RequestBody Map<String, Object> params) {
         String pat = params.get("pat") != null ? params.get("pat").toString() : "";
         if (pat.isEmpty()) {
-            return ResponseUtil.failRes("PAT不能为空");
+            return ResponseUtil.failRes(I18nUtil.get("devloop.pat.required"));
         }
         return applicationService.saveGitHubPat(pat);
     }
@@ -208,7 +209,7 @@ public class DevloopController {
     public ResponseUtil<List<Map<String, Object>>> searchDingtalkGroups(@RequestBody Map<String, Object> params) {
         String query = params.get("query") != null ? params.get("query").toString() : "";
         if (query.isEmpty()) {
-            return ResponseUtil.failRes("查询关键词不能为空");
+            return ResponseUtil.failRes(I18nUtil.get("devloop.dingtalk.search.keyword.required"));
         }
         return applicationService.searchDingtalkGroups(query);
     }
@@ -286,7 +287,7 @@ public class DevloopController {
     public ResponseUtil<Void> saveDwsToken(@RequestBody Map<String, Object> params) {
         String token = params.get("token") != null ? params.get("token").toString() : "";
         if (token.isEmpty()) {
-            return ResponseUtil.failRes("Token不能为空");
+            return ResponseUtil.failRes(I18nUtil.get("devloop.dws.token.required"));
         }
         return applicationService.saveDwsToken(token);
     }

@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.common.ecrypt.Sm4Util;
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService;
@@ -227,7 +228,7 @@ public class DwsAuthService {
                 log.error("[DwsAuth] failed to parse device flow output: {}", fullOutput);
                 process.destroyForcibly();
                 deviceFlowProcess.set(null);
-                return Map.of("success", false, "message", "获取设备码失败");
+                return Map.of("success", false, "message", I18nUtil.get("devloop.dws.device.code.failed"));
             }
 
             log.info("[DwsAuth] device flow started: userCode={}, url={}", userCode, verificationUrl);
@@ -263,7 +264,8 @@ public class DwsAuthService {
             );
         } catch (Exception e) {
             log.error("[DwsAuth] startDeviceAuth failed", e);
-            return Map.of("success", false, "message", "启动设备授权失败: " + e.getMessage());
+            return Map.of("success", false,
+                "message", I18nUtil.get("devloop.dws.device.auth.start.failed", e.getMessage()));
         }
     }
 

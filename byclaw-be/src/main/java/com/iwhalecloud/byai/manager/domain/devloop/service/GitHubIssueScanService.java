@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.manager.domain.devloop.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.util.OkHttpUtil;
 import com.iwhalecloud.byai.manager.entity.devloop.ProjectRepo;
 import com.iwhalecloud.byai.manager.entity.devloop.ScanLogItem;
@@ -53,7 +54,7 @@ public class GitHubIssueScanService {
             logId = scanLog.getLogId();
 
             if (repo.isEmpty()) {
-                scanLogService.failLog(logId, "未关联目标仓库，无法扫描 GitHub Issue");
+                scanLogService.failLog(logId, I18nUtil.get("devloop.github.repository.required"));
                 return items;
             }
 
