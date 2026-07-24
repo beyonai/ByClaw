@@ -83,7 +83,7 @@ RUN chown root:root /app
 ENV PIP_BREAK_SYSTEM_PACKAGES=1 \
     PIP_ROOT_USER_ACTION=ignore \
     OPENCLAW_BUNDLED_PLUGINS_DIR=/app/dist/extensions \
-    OPENCLAW_STATE_DIR=/home/appuser/.openclaw
+    OPENCLAW_STATE_DIR=/by/.openclaw
 
 RUN set -eux; \
     if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
@@ -135,8 +135,7 @@ RUN chmod +x \
 
 RUN groupadd --gid 1001 appgroup && \
     useradd --uid 1001 --gid appgroup --create-home --shell /bin/bash appuser && \
-    mkdir -p /home/appuser/.openclaw && \
-    chown -R appuser:appgroup /app /home/appuser
+    chown -R appuser:appgroup /home/appuser
 
 USER appuser
 
