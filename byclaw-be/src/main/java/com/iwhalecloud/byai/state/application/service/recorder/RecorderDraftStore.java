@@ -112,6 +112,15 @@ public class RecorderDraftStore {
 
     private void writeWithSecureHandle(RecorderOwner owner, Path target, String source) throws IOException {
         Path directory = target.getParent();
+        if (!supportsSecureDirectoryStreams(pathResolver.fileRoot()) && directoryProvisioner instanceof LinuxRecorderDirectoryProvisioner linux) {
+            linux.writeFileAtomically(
+                pathResolver.fileRoot(),
+                pathResolver.fileRoot().relativize(directory),
+                target.getFileName().toString(),
+                source
+            );
+            return;
+        }
         String temporaryName = ".draft-" + UUID.randomUUID() + ".tmp";
         Path temporary = Path.of(temporaryName);
         Path targetName = target.getFileName();
@@ -128,6 +137,12 @@ public class RecorderDraftStore {
             } finally {
                 deleteTemporary(secureDirectory, temporary);
             }
+        }
+    }
+
+    private boolean supportsSecureDirectoryStreams(Path fileRoot) throws IOException {
+        try (DirectoryStream<Path> directory = Files.newDirectoryStream(fileRoot)) {
+            return directory instanceof SecureDirectoryStream<?>;
         }
     }
 

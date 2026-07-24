@@ -14,11 +14,10 @@ import AnalysisEvidencePanel from './components/AnalysisEvidencePanel';
 import HealthStep from './steps/HealthStep';
 import BindStep from './steps/BindStep';
 import CaptureStep from './steps/CaptureStep';
-import RankStep from './steps/RankStep';
 import PipelineStep from './steps/PipelineStep';
-import InitStep from './steps/InitStep';
 import VerifyStep from './steps/VerifyStep';
 import { FLOW_STEPS, flowStepsFor, STATE_ORDER, PIPELINE_SUBSTEP_OFFSET, isFailed } from './constants/recorder';
+import { isActiveRecordingLayout } from './recordingLayout';
 
 const { Text } = Typography;
 
@@ -30,16 +29,16 @@ export default function Workbench() {
   const order = STATE_ORDER[state];
   const failed = isFailed(state);
 
-  // LLM 路径:进入 capture_b 自动跑 rank(候选提取,纯本地不外发)→ 用户无需手动「执行排序」,
-  // 直接到 PipelineStep 的外发同意闸。ref 防重复触发;离开 capture_b 即复位以便重录。
+  // A/B 录制完成后自动跑本地 rank(不外发)，无论默认 LLM 是否可用都不需要用户手动「执行排序」。
+  // ref 防重复触发；离开 capture_b 即复位以便重录。
   const autoRankedRef = useRef(false);
   useEffect(() => {
-    if (state === 'capture_b' && llmOn && !loading && !error && !autoRankedRef.current) {
+    if (state === 'capture_b' && !loading && !error && !autoRankedRef.current) {
       autoRankedRef.current = true;
       actions.rank();
     }
     if (state !== 'capture_b') autoRankedRef.current = false;
-  }, [state, llmOn, loading, error, actions]);
+  }, [state, loading, error, actions]);
   // 记录已到达的最高 step:失败态 order=-1,用它把"失败"定位到失败前所在步骤,而非错误落到步骤 0。
   const lastReachedRef = useRef(0);
   // A/B 拆成独立步骤后,page_ready 在 B 段(已有 sampleA)应定位到「录制 B」步,而非「录制 A」(STATE_ORDER
@@ -97,59 +96,35 @@ export default function Workbench() {
         );
       }
       case 'ranked':
-        // N5 verify-then-save:LLM 可用 → 走 pipeline(评分+多脚本+verify+选/改/存);
-        // LLM 未启用 → 兜底回退到手动流程(选候选 + dry-run 预览 + 写入,旧 init/verify 链)。
-        if (data.health?.llmSynthesis) {
-          return (
-            <PipelineStep
-              loading={loading}
-              subStep={data.pipelineSubStep ?? 'candidates'}
-              drafts={data.pipelineDrafts}
-              prompts={data.pipelinePrompts}
-              candidates={data.candidates}
-              sentCandidateIds={data.pipelineSentIds}
-              pipelineProgress={data.pipelineProgress}
-              seedA={data.seedA}
-              seedB={data.seedB}
-              sampleA={data.sampleA}
-              sampleB={data.sampleB}
-              rankScorePrompt={data.rankScorePrompt}
-              generatePrompt={data.generatePrompt}
-              llmRawJson={data.llmRawJson}
-              draftVerifying={data.draftVerifying}
-              savedDraftIds={data.savedDraftIds}
-              savedAdapters={data.savedAdapters}
-              onRunScore={actions.runScore}
-              onGoToGenerate={actions.goToGenerate}
-              onGoToCandidates={actions.goToCandidates}
-              onRunGenerate={actions.runGenerate}
-              onPreviewGenerate={actions.previewGeneratePrompt}
-              onVerifyDraft={actions.verifyDraft}
-              onSaveDraft={actions.saveDraft}
-            />
-          );
-        }
         return (
-          <>
-            <RankStep
-              loading={loading}
-              candidates={data.candidates}
-              selectedId={data.selectedCandidateId}
-              sampleA={data.sampleA}
-              onRank={actions.rank}
-              onSelect={actions.selectCandidate}
-            />
-            <div style={{ marginTop: 16 }}>
-              <InitStep
-                loading={loading}
-                selectedCandidate={data.candidates?.find((c) => c.id === data.selectedCandidateId)}
-                adapterName={data.adapterName}
-                preview={data.draftPreview}
-                onPreview={actions.previewInit}
-                onWrite={actions.writeInit}
-              />
-            </div>
-          </>
+          <PipelineStep
+            llmSynthesis={llmOn}
+            loading={loading}
+            subStep={data.pipelineSubStep ?? 'candidates'}
+            drafts={data.pipelineDrafts}
+            prompts={data.pipelinePrompts}
+            candidates={data.candidates}
+            sentCandidateIds={data.pipelineSentIds}
+            pipelineProgress={data.pipelineProgress}
+            seedA={data.seedA}
+            seedB={data.seedB}
+            sampleA={data.sampleA}
+            sampleB={data.sampleB}
+            rankScorePrompt={data.rankScorePrompt}
+            generatePrompt={data.generatePrompt}
+            llmRawJson={data.llmRawJson}
+            llmError={data.llmError}
+            draftVerifying={data.draftVerifying}
+            savedDraftIds={data.savedDraftIds}
+            savedAdapters={data.savedAdapters}
+            onRunScore={(candidateIds, egressConsent) => actions.runScore(candidateIds, llmOn && egressConsent)}
+            onGoToGenerate={actions.goToGenerate}
+            onGoToCandidates={actions.goToCandidates}
+            onRunGenerate={(candidateIds) => actions.runGenerate(candidateIds)}
+            onPreviewGenerate={actions.previewGeneratePrompt}
+            onVerifyDraft={actions.verifyDraft}
+            onSaveDraft={actions.saveDraft}
+          />
         );
       case 'draft_created':
       case 'verifying':
@@ -175,37 +150,23 @@ export default function Workbench() {
         />
       );
     }
-    // capture_b → 候选提取。LLM 路径自动跑 rank,只显示分析中(无手动「排序候选」步);
-    // LLM-off 兜底仍走手动 RankStep(选候选)。
+    // capture_b → 候选提取：统一自动执行本地 rank，不存在手动「排序候选」入口。
     if (state === 'capture_b') {
-      if (llmOn) {
-        return (
-          <div>
-            <div style={{ padding: '32px 8px 24px', textAlign: 'center' }}>
-              <Spin indicator={<LoadingOutlined style={{ fontSize: 28 }} spin />} />
-              <div style={{ marginTop: 12 }}>
-                <Text type="secondary">正在分析录制痕迹、提取候选接口…</Text>
-              </div>
-            </div>
-            {/* 透明展示:本次分析用的 A/B 痕迹 + rank 阶段发给 LLM 的评分提示词(运行中提示词未回 → 占位)。 */}
-            <AnalysisEvidencePanel
-              sampleA={data.sampleA}
-              sampleB={data.sampleB}
-              scorePrompt={data.rankScorePrompt}
-              defaultOpen
-            />
-          </div>
-        );
-      }
       return (
-        <RankStep
-          loading={loading}
-          candidates={data.candidates}
-          selectedId={data.selectedCandidateId}
-          sampleA={data.sampleA}
-          onRank={actions.rank}
-          onSelect={actions.selectCandidate}
-        />
+        <div>
+          <div style={{ padding: '32px 8px 24px', textAlign: 'center' }}>
+            <Spin indicator={<LoadingOutlined style={{ fontSize: 28 }} spin />} />
+            <div style={{ marginTop: 12 }}>
+              <Text type="secondary">正在分析录制痕迹、提取候选接口…</Text>
+            </div>
+          </div>
+          <AnalysisEvidencePanel
+            sampleA={data.sampleA}
+            sampleB={data.sampleB}
+            scorePrompt={data.rankScorePrompt}
+            defaultOpen
+          />
+        </div>
       );
     }
     return renderActiveStep();
@@ -215,7 +176,11 @@ export default function Workbench() {
   const inlineError = error && !failed ? error : null;
 
   return (
-    <div className={styles.workbench}>
+    <div
+      className={`${styles.workbench} ${
+        isActiveRecordingLayout(state, data.recording) ? styles.recordingWorkbench : ''
+      }`}
+    >
       <div className={styles.shell}>
         <header className={styles.head}>
           <div className={styles.heading}>
@@ -235,17 +200,19 @@ export default function Workbench() {
           </aside>
 
           <main className={styles.stage} data-testid="recorder-work-surface">
-            {inlineError && (
-              <ErrorRecovery
-                error={inlineError}
-                terminal={false}
-                onRetry={() => {
-                  // 非终止错误:清错由下一次动作触发,这里仅提供重置兜底
-                }}
-                onReset={actions.reset}
-              />
-            )}
-            {renderByStage()}
+            <div className={data.recording ? styles.recordingStage : styles.stepStage}>
+              {inlineError && (
+                <ErrorRecovery
+                  error={inlineError}
+                  terminal={false}
+                  onRetry={() => {
+                    // 非终止错误:清错由下一次动作触发,这里仅提供重置兜底
+                  }}
+                  onReset={actions.reset}
+                />
+              )}
+              {renderByStage()}
+            </div>
           </main>
         </div>
       </div>

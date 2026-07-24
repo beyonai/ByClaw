@@ -1,7 +1,13 @@
 // Step 5 · 生成草稿 —— select-only init,契约三态:dry-run 预览 → ADR-0005 责任声明 → 确认写入。
 // 预览不推进会话;写入(带 responsibleUseAcknowledgedAt)推进 ranked→draft_created。
 import { useState } from 'react';
-import { FileTextOutlined, EyeOutlined, SafetyCertificateOutlined, RobotOutlined } from '@ant-design/icons';
+import {
+  ArrowLeftOutlined,
+  FileTextOutlined,
+  EyeOutlined,
+  SafetyCertificateOutlined,
+  RobotOutlined,
+} from '@ant-design/icons';
 import { Alert, Button, Card, Checkbox, Descriptions, Space, Tag, Typography, theme } from 'antd';
 import type { InitResult, RankCandidate } from '../types/recorder';
 
@@ -20,14 +26,26 @@ interface Props {
   /** egressConsent=true 时携带 LLM 外发同意(点「用 AI 生成」才传),不传则不外发、空骨架预览。 */
   onPreview: (egressConsent?: boolean) => void;
   onWrite: () => void;
+  onBack: () => void;
 }
 
-export default function InitStep({ loading, selectedCandidate, adapterName, preview, onPreview, onWrite }: Props) {
+export default function InitStep({
+  loading,
+  selectedCandidate,
+  adapterName,
+  preview,
+  onPreview,
+  onWrite,
+  onBack,
+}: Props) {
   const [acknowledged, setAcknowledged] = useState(false);
   const { token } = theme.useToken();
 
   return (
     <Card title="生成 Adapter 草稿" variant="borderless">
+      <Button icon={<ArrowLeftOutlined />} onClick={onBack} style={{ marginBottom: 12 }}>
+        返回候选
+      </Button>
       <Paragraph type="secondary" style={{ lineHeight: 1.6 }}>
         基于选定候选 select-only 生成 adapter:先 dry-run 预览(不写盘),确认 ADR-0005 责任声明后写入。
         写入成功后会话推进到 draft_created。
@@ -60,7 +78,7 @@ export default function InitStep({ loading, selectedCandidate, adapterName, prev
 
       {preview && (
         <div style={{ marginTop: 16 }}>
-          <Descriptions size="small" column={1} colon={false} styles={{ label: { width: 110 } }} bordered>
+          <Descriptions size="small" column={2} colon={false} styles={{ label: { width: 110 } }} bordered>
             <Descriptions.Item label="Adapter 路径">
               <Text className="code" copyable>
                 {preview.report.adapterPath}
@@ -71,13 +89,13 @@ export default function InitStep({ loading, selectedCandidate, adapterName, prev
                 {preview.report.reportPath}
               </Text>
             </Descriptions.Item>
-            <Descriptions.Item label="发布通道">
+            <Descriptions.Item label="发布通道" span={2}>
               <Text className="code">{preview.report.releaseChannel}</Text>
               <Text type="secondary" style={{ marginLeft: 8 }}>
                 profile {preview.report.localExperimentProfile} · cfg v{preview.report.configSnapshotVersion}
               </Text>
             </Descriptions.Item>
-            <Descriptions.Item label="Dry-run">
+            <Descriptions.Item label="Dry-run" span={2}>
               {preview.dryRun.exists ? (
                 <Tag color={token.colorWarning}>已存在,将覆盖</Tag>
               ) : (

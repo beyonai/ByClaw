@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.manager.application.service.job;
 
 import com.iwhalecloud.byai.common.util.RedisUtil;
 import com.iwhalecloud.byai.manager.domain.devloop.service.DingtalkScanService;
+import com.iwhalecloud.byai.manager.domain.devloop.service.DingtalkTodoScanService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.GitHubIssueScanService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.ScanSourceService;
 import com.iwhalecloud.byai.manager.entity.devloop.ScanSource;
@@ -37,6 +38,7 @@ public class DevloopScanJob {
 
     private static final String SOURCE_TYPE_GITHUB_ISSUE = "github_issue";
     private static final String SOURCE_TYPE_DINGTALK = "dingtalk";
+    private static final String SOURCE_TYPE_DINGTALK_TODO = "dingtalk_todo";
 
     @Value("${devloop.scan.lockTimeout:120}")
     private int lockTimeout;
@@ -49,6 +51,9 @@ public class DevloopScanJob {
 
     @Autowired
     private DingtalkScanService dingtalkScanService;
+
+    @Autowired
+    private DingtalkTodoScanService dingtalkTodoScanService;
 
     @Autowired
     private DevloopPatService patService;
@@ -113,6 +118,9 @@ public class DevloopScanJob {
                 break;
             case SOURCE_TYPE_DINGTALK:
                 newItems = dingtalkScanService.scan(source);
+                break;
+            case SOURCE_TYPE_DINGTALK_TODO:
+                newItems = dingtalkTodoScanService.scan(source);
                 break;
             default:
                 logger.warn("[DevloopScanJob] Unknown source type: {}", type);

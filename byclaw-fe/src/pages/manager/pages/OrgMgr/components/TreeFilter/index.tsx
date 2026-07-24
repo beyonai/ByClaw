@@ -41,7 +41,7 @@ function TreeFilter(props: IProps) {
     return treeData.find((i) => !isEmpty(i.children));
   }, [treeData]);
 
-  const onMulitSelect = (record: ITreeData) => {
+  const onMulitSelect = React.useCallback((record: ITreeData) => {
     setSelectList((prevList) => {
       const hasSelected = prevList.find((i) => i.key === record.key);
       const isRoot = record.keypath === record.key; // 根节点
@@ -54,23 +54,26 @@ function TreeFilter(props: IProps) {
       }
       return [...prevList, record];
     });
-  };
+  }, []);
 
-  const onSingleSelect = (record: ITreeData) => {
-    setSelectList((prevList) => {
-      const hasSelected = prevList.find((i) => i.key === record.key);
+  const onSingleSelect = React.useCallback(
+    (record: ITreeData) => {
+      setSelectList((prevList) => {
+        const hasSelected = prevList.find((i) => i.key === record.key);
 
-      if (hasSelected) {
-        if (mode === 'radio') return prevList;
-        onOk?.([]);
+        if (hasSelected) {
+          if (mode === 'radio') return prevList;
+          onOk?.([]);
+          setOpen(false);
+          return [];
+        }
+        onOk?.([record]);
         setOpen(false);
-        return [];
-      }
-      onOk?.([record]);
-      setOpen(false);
-      return [record];
-    });
-  };
+        return [record];
+      });
+    },
+    [mode, onOk]
+  );
 
   const onSelect = React.useCallback(
     (record?: ITreeData) => {
@@ -82,7 +85,7 @@ function TreeFilter(props: IProps) {
         onSingleSelect(record);
       }
     },
-    [hasChildItem]
+    [hasChildItem, onMulitSelect, onSingleSelect]
   );
 
   // const onDelete = React.useCallback((record: ITreeData) => {

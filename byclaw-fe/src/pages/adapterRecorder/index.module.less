@@ -29,10 +29,12 @@
   --beyond-color-bg-container: @surface;
   --beyond-color-bg-elevated: @surface;
   --beyond-color-bg-layout: @canvas;
-  min-height: 100vh;
+  box-sizing: border-box;
+  height: 100%;
+  min-height: 0;
   overflow-x: hidden;
-  overflow-y: auto;
-  padding: clamp(12px, 1.5vw, 20px) clamp(12px, 2.5vw, 40px);
+  overflow-y: hidden;
+  padding: clamp(8px, 1vw, 12px) clamp(12px, 2vw, 28px);
   color: @text;
   background: @canvas;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -433,9 +435,10 @@
 
 .shell {
   display: flex;
+  height: 100%;
   flex-direction: column;
-  gap: 20px;
-  min-height: calc(100vh - clamp(12px, 1.5vw, 20px) * 2);
+  gap: 10px;
+  min-height: 0;
   max-width: 1480px;
   margin: 0 auto;
 }
@@ -452,7 +455,7 @@
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 18px;
+  gap: 10px;
   flex-wrap: wrap;
   width: 100%;
 }
@@ -463,7 +466,7 @@
   gap: 12px;
   margin: 0;
   color: @text;
-  font-size: clamp(22px, 2.4vw, 30px);
+  font-size: clamp(21px, 2vw, 26px);
   font-weight: 700;
   letter-spacing: -0.02em;
 }
@@ -479,25 +482,27 @@
 .subtitle {
   margin: 0;
   color: @text-dim;
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .body {
   display: grid;
   flex: 1 1 auto;
-  grid-template-columns: 220px minmax(0, 1fr);
+  grid-template-columns: 180px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   align-items: stretch;
-  gap: 28px;
-  min-height: 620px;
+  gap: 18px;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .sidebar {
   display: flex;
   min-width: 0;
   flex-direction: column;
-  padding: 18px 12px 14px;
+  padding: 14px 8px 10px;
   border: 1px solid @line;
-  border-radius: 18px;
+  border-radius: 16px;
   background: fade(@surface, 72%);
 }
 
@@ -510,7 +515,7 @@
 .sidebarIntro {
   display: grid;
   gap: 5px;
-  padding: 0 10px 14px;
+  padding: 0 6px 8px;
 }
 
 .sidebarEyebrow {
@@ -529,7 +534,7 @@
   position: relative;
   flex-direction: column;
   gap: 2px;
-  padding: 6px 10px;
+  padding: 4px 6px;
 }
 
 .sidebar > :global(.wb-rail .wb-step) {
@@ -537,7 +542,7 @@
   flex-direction: row;
   align-items: center;
   gap: 11px;
-  min-height: 48px;
+  min-height: 44px;
 }
 
 .sidebar > :global(.wb-rail .wb-step::before) {
@@ -559,16 +564,83 @@
 
 .stage {
   min-width: 0;
-  padding: 26px;
+  min-height: 0;
+  overflow: hidden;
+  padding: 18px;
   border: 1px solid @line;
-  border-radius: 20px;
+  border-radius: 16px;
   background: @surface;
   box-shadow: 0 20px 55px -38px rgba(50, 65, 95, 0.34);
 }
 
+.recordingWorkbench {
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+
+  .shell {
+    height: calc(100dvh - clamp(12px, 1.5vw, 20px) * 2);
+    min-height: 0;
+  }
+
+  .body {
+    min-height: 0;
+  }
+}
+
+.recordingStage {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.stepStage {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+
+  > :global(.ant-card),
+  > :global(.beyond-card) {
+    display: flex;
+    min-height: 0;
+    flex: 1 1 auto;
+    flex-direction: column;
+  }
+
+  > :global(.ant-card) > :global(.ant-card-body),
+  > :global(.beyond-card) > :global(.beyond-card-body) {
+    min-height: 0;
+    flex: 1 1 auto;
+    overflow-y: auto;
+  }
+}
+
+.nextStep {
+  margin-top: 10px;
+  flex: 0 0 auto;
+
+  :global(.ant-card-head),
+  :global(.beyond-card-head) {
+    padding: 10px 14px;
+  }
+
+  :global(.ant-card-body),
+  :global(.beyond-card-body) {
+    padding: 12px 14px;
+  }
+
+  :global(.ant-typography),
+  :global(.beyond-typography) {
+    margin-bottom: 8px;
+  }
+}
+
 @media (max-width: 900px) {
   .body {
-    grid-template-columns: 190px minmax(0, 1fr);
+    grid-template-columns: 170px minmax(0, 1fr);
     gap: 18px;
   }
 
@@ -647,6 +719,22 @@
     height: auto;
     padding: 14px;
     border-radius: 16px;
+  }
+
+  .recordingWorkbench {
+    height: auto;
+    min-height: 100vh;
+    overflow: visible;
+
+    .shell {
+      height: auto;
+    }
+  }
+
+  .recordingStage {
+    display: block;
+    height: auto;
+    overflow: visible;
   }
 }
 

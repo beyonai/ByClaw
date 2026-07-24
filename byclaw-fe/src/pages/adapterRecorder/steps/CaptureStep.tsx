@@ -11,6 +11,7 @@ import LivePreview from './LivePreview';
 import EmbeddedFrame from './EmbeddedFrame';
 import VncFrame from './VncFrame';
 import type { RecordingMode } from '../services/recorderClient';
+import styles from './CaptureStep.module.less';
 
 const { Paragraph, Text } = Typography;
 
@@ -129,6 +130,20 @@ function SampleColumn({
   ) : (
     <Tag color="default">待录制</Tag>
   );
+  const seedInput = (
+    <Input
+      size="small"
+      value={seed}
+      onChange={(e) => onSeedChange(e.target.value)}
+      placeholder="本次搜索的关键词(用于评分识别;A/B 填不同词更准,如 A=apple、B=banana)"
+      prefix={
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          关键词
+        </Text>
+      }
+      allowClear
+    />
+  );
 
   // 录到的用户操作(user-action 轨):操作在前、接口在后(因果顺序)。
   const actions = sample?.actions ?? [];
@@ -213,26 +228,12 @@ function SampleColumn({
   } else if (recording) {
     body = (
       <>
-        <div style={{ marginBottom: 8 }}>
-          <Input
-            size="small"
-            value={seed}
-            onChange={(e) => onSeedChange(e.target.value)}
-            placeholder={`本次搜索的关键词(用于评分识别;A/B 填不同词更准,如 A=apple、B=banana)`}
-            prefix={
-              <Text type="secondary" style={{ fontSize: 12 }}>
-                关键词
-              </Text>
-            }
-            allowClear
-          />
-        </div>
         {recordingMode === 'vnc' ? (
-          <VncFrame vncUrl={vncUrl} height={560} />
+          <VncFrame vncUrl={vncUrl} />
         ) : recordingMode === 'embedded_iframe' ? (
-          <EmbeddedFrame src={targetUrl} height={560} />
+          <EmbeddedFrame src={targetUrl} />
         ) : (
-          <LivePreview height={560} />
+          <LivePreview />
         )}
       </>
     );
@@ -276,15 +277,33 @@ function SampleColumn({
   return (
     <Card
       size="small"
+      className={recording ? styles.recordingCard : undefined}
       title={
-        <Space>
-          <span>样本 {name}</span>
-          {statusTag}
-        </Space>
+        recording ? (
+          <div className={styles.recordingHeader}>
+            <Space className={styles.recordingHeaderMeta}>
+              <span>样本 {name}</span>
+              {statusTag}
+            </Space>
+            <div className={styles.recordingSeed}>{seedInput}</div>
+          </div>
+        ) : (
+          <Space>
+            <span>样本 {name}</span>
+            {statusTag}
+          </Space>
+        )
       }
     >
-      <div style={{ minHeight: 132 }}>{body}</div>
-      <div style={{ marginTop: 12 }}>{footer}</div>
+      <div className={recording ? styles.recordingContent : undefined}>
+        <div
+          className={recording ? styles.recordingPreview : undefined}
+          style={recording ? undefined : { minHeight: 132 }}
+        >
+          {body}
+        </div>
+        <div className={recording ? styles.recordingFooter : styles.footer}>{footer}</div>
+      </div>
     </Card>
   );
 }
@@ -374,7 +393,7 @@ export default function CaptureStep({
     );
 
   return (
-    <div>
+    <div className={rec ? styles.recordingStep : undefined}>
       {/* 单行紧凑头:阶段说明 + 目标 URL(去掉外层重复 Card 标题 + 大段说明 + 独立 URL 块)。 */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
         <Text type="secondary" style={{ fontSize: 13 }}>

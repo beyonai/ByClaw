@@ -15,8 +15,7 @@ import java.util.Date;
 import java.util.List;
 
 /**
- * 扫描日志领域服务
- * 管理扫描执行记录和扫描条目，提供去重判断
+ * 扫描日志领域服务 管理扫描执行记录和扫描条目，提供去重判断
  */
 @Slf4j
 @Service
@@ -65,9 +64,8 @@ public class ScanLogService {
     }
 
     /** 创建扫描条目记录 */
-    public ScanLogItem createItem(Long logId, Long sourceId, String title,
-                                  String content, String originId,
-                                  String originUrl, String action) {
+    public ScanLogItem createItem(Long logId, Long sourceId, String title, String content, String originId,
+        String originUrl, String action) {
         ScanLogItem item = new ScanLogItem();
         item.setItemId(sequenceService.nextVal());
         item.setLogId(logId);
@@ -85,32 +83,27 @@ public class ScanLogService {
     /** 按时间倒序查询指定源的扫描日志 */
     public List<ScanLog> listBySourceId(Long sourceId, int limit) {
         LambdaQueryWrapper<ScanLog> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(ScanLog::getSourceId, sourceId)
-               .orderByDesc(ScanLog::getScanTime)
-               .last("LIMIT " + limit);
+        wrapper.eq(ScanLog::getSourceId, sourceId).orderByDesc(ScanLog::getScanTime).last("LIMIT " + limit);
         return scanLogMapper.selectList(wrapper);
     }
 
     /** 查询某次扫描的所有条目 */
     public List<ScanLogItem> listItemsByLogId(Long logId) {
         LambdaQueryWrapper<ScanLogItem> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(ScanLogItem::getLogId, logId)
-               .orderByAsc(ScanLogItem::getCreateTime);
+        wrapper.eq(ScanLogItem::getLogId, logId).orderByAsc(ScanLogItem::getCreateTime);
         return scanLogItemMapper.selectList(wrapper);
     }
 
     /** 查询某扫描源下所有已收集(created)的需求条目，按时间倒序，供需求列表直查 */
     public List<ScanLogItem> listCreatedItemsBySource(Long sourceId) {
         LambdaQueryWrapper<ScanLogItem> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(ScanLogItem::getSourceId, sourceId)
-               .eq(ScanLogItem::getAction, "created")
-               .orderByDesc(ScanLogItem::getCreateTime);
+        wrapper.eq(ScanLogItem::getSourceId, sourceId).eq(ScanLogItem::getAction, "created")
+            .orderByDesc(ScanLogItem::getCreateTime);
         return scanLogItemMapper.selectList(wrapper);
     }
 
     /**
-     * 批量查询多个扫描源下已收集(created)的需求条目，按时间倒序。
-     * 供项目需求列表一次查全部源，避免前端逐源循环请求(N+1)与内存排序。
+     * 批量查询多个扫描源下已收集(created)的需求条目，按时间倒序。 供项目需求列表一次查全部源，避免前端逐源循环请求(N+1)与内存排序。
      */
     public List<ScanLogItem> listCreatedItemsBySources(List<Long> sourceIds) {
         return listCreatedItemsBySources(sourceIds, null);
@@ -122,8 +115,7 @@ public class ScanLogService {
             return new java.util.ArrayList<>();
         }
         LambdaQueryWrapper<ScanLogItem> wrapper = new LambdaQueryWrapper<>();
-        wrapper.in(ScanLogItem::getSourceId, sourceIds)
-               .eq(ScanLogItem::getAction, "created");
+        wrapper.in(ScanLogItem::getSourceId, sourceIds).eq(ScanLogItem::getAction, "created");
         String normalizedTitle = StringUtils.trimToNull(title);
         if (normalizedTitle != null) {
             wrapper.like(ScanLogItem::getTitle, normalizedTitle);
@@ -135,9 +127,25 @@ public class ScanLogService {
     /** 判断同一源下是否已存在相同originId的已创建条目 */
     public boolean isDuplicate(Long sourceId, String originId) {
         LambdaQueryWrapper<ScanLogItem> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(ScanLogItem::getSourceId, sourceId)
-               .eq(ScanLogItem::getOriginId, originId)
-               .eq(ScanLogItem::getAction, "created");
+        wrapper.eq(ScanLogItem::getSourceId, sourceId).eq(ScanLogItem::getOriginId, originId).eq(ScanLogItem::getAction,
+            "created");
         return scanLogItemMapper.selectCount(wrapper) > 0;
     }
+
+    /**
+     * 删除会话关联的扫描
+     *
+     * @param sessionId 会话信息
+     */
+    public void deleteItemBySessionId(Long sessionId) {
+
+        if (sessionId == null) {
+            return;
+        }
+
+        LambdaQueryWrapper<ScanLogItem> deleteWrapper = new LambdaQueryWrapper<>();
+        deleteWrapper.eq(ScanLogItem::getSessionId, sessionId);
+        scanLogItemMapper.delete(deleteWrapper);
+    }
+
 }

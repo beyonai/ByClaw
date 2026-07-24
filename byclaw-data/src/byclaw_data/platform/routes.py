@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 from contextlib import asynccontextmanager
+from collections.abc import Callable
 from typing import AsyncIterator
 
 from redis.asyncio import Redis
@@ -14,6 +15,27 @@ from by_framework.core.discovery import ServiceRegistry
 from byclaw_data.runtime import normalize_runtime_environment
 
 logger = logging.getLogger(__name__)
+
+
+def _configure_platform_logging(
+    *,
+    setup_logging_func: Callable[..., None] | None = None,
+) -> None:
+    """Initialize application loggers for the platform HTTP service."""
+    if setup_logging_func is None:
+        from datacloud_analysis.logging_setup import setup_logging  # noqa: PLC0415
+
+        setup_logging_func = setup_logging
+
+    log_level = (
+        os.environ.get("DATACLOUD_DATA_SERVICE_LOG_LEVEL")
+        or os.environ.get("DATACLOUD_LOG_LEVEL")
+        or "info"
+    ).upper()
+    setup_logging_func(
+        level=log_level,
+        extra_namespaces=("byclaw_data", "datacloud_knowledge"),
+    )
 
 
 def _get_service_port() -> int:
@@ -27,7 +49,12 @@ def _get_service_port() -> int:
 def create_app(**kwargs):
     """Create the byclaw MCP app on top of datacloud_platform."""
 
+    os.environ.setdefault("DATACLOUD_LOG_DIR", "logs/service")
+    from datacloud_analysis.logging_setup import setup_logging  # noqa: PLC0415
+    setup_logging(extra_namespaces=("byclaw_data",))
+
     normalize_runtime_environment()
+    _configure_platform_logging()
 
     # Inject ByClaw result_file_storage BEFORE get_platform() initialises the singleton.
     # loader_runtime._configure_runtime_services() reads build_result_file_storage at
@@ -47,6 +74,7 @@ def create_app(**kwargs):
 
     # 挂载代码查询路由（无需额外端口）
     from byclaw_data.code_api import _mount_code_api
+
     _mount_code_api(app)
 
     return app

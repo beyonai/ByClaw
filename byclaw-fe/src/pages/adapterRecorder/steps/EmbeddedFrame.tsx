@@ -13,10 +13,9 @@ const RENDER_TIMEOUT_MS = 6000; // 超时未 load 视为可能反嵌(反嵌时�
 
 interface Props {
   src?: string;
-  height?: number;
 }
 
-export default function EmbeddedFrame({ src, height = 560 }: Props) {
+export default function EmbeddedFrame({ src }: Props) {
   const { token } = theme.useToken();
   const [failed, setFailed] = useState(false);
   const loadedRef = useRef(false);
@@ -40,7 +39,9 @@ export default function EmbeddedFrame({ src, height = 560 }: Props) {
   }
 
   return (
-    <div style={{ position: 'relative' }}>
+    <div
+      style={{ position: 'relative', display: 'flex', minHeight: 0, height: '100%', flex: 1, flexDirection: 'column' }}
+    >
       {/* debugger infobar 占位:Chrome 在被 attach 的 tab 顶部强制显示黄条,留间距防遮挡 iframe 顶部内容。 */}
       <div style={{ marginBottom: 8 }}>
         <Text type="secondary" style={{ fontSize: 12 }}>
@@ -83,7 +84,8 @@ export default function EmbeddedFrame({ src, height = 560 }: Props) {
           onError={() => setFailed(true)}
           style={{
             width: '100%',
-            height,
+            minHeight: 0,
+            flex: 1,
             border: `1px solid ${token.colorBorderSecondary}`,
             borderRadius: token.borderRadius,
             background: token.colorBgContainer,

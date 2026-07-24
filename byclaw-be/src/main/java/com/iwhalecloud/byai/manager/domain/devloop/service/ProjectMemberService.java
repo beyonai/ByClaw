@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.devloop.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.iwhalecloud.byai.common.constants.devloop.MemberRole;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectMemberListDto;
 import com.iwhalecloud.byai.manager.entity.devloop.ProjectMember;
 import com.iwhalecloud.byai.manager.mapper.devloop.ProjectMemberMapper;
@@ -9,8 +10,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.Date;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * 项目成员领域服务。
@@ -42,10 +46,56 @@ public class ProjectMemberService {
         member.setMemberId(sequenceService.nextVal());
         member.setProjectId(projectId);
         member.setUserId(userId);
-        member.setRole(role != null ? role : "member");
+        member.setRole(role != null ? role : MemberRole.MEMBER);
         member.setCreateTime(new Date());
         memberMapper.insert(member);
         return member;
+    }
+
+    /**
+     * 向指定项目批量添加成员。
+     * <p>
+     * 调用方负责筛除已存在成员；此处仍会去重，避免同一次请求中重复写入相同用户。
+     *
+     * @param projectId 项目 ID
+     * @param userIds 用户 ID 列表
+     * @param role 成员角色（如 owner / member），可空
+     */
+    public void addMembers(Long projectId, List<Long> userIds, String role) {
+        if (userIds == null || userIds.isEmpty()) {
+            return;
+        }
+
+        Set<Long> uniqueUserIds = new LinkedHashSet<>(userIds);
+        Date createTime = new Date();
+        List<ProjectMember> members = new ArrayList<>(uniqueUserIds.size());
+        for (Long userId : uniqueUserIds) {
+            if (userId == null) {
+                continue;
+            }
+            ProjectMember member = new ProjectMember();
+            member.setMemberId(sequenceService.nextVal());
+            member.setProjectId(projectId);
+            member.setUserId(userId);
+            member.setRole(role != null ? role : "member");
+            member.setCreateTime(createTime);
+            members.add(member);
+        }
+        if (!members.isEmpty()) {
+            memberMapper.insertBatch(members);
+        }
+    }
+
+    /**
+     * 按成员记录 ID 批量删除成员。
+     *
+     * @param memberIds 待删除的成员记录 ID 列表
+     */
+    public void removeMembers(List<Long> memberIds) {
+        if (memberIds == null || memberIds.isEmpty()) {
+            return;
+        }
+        memberMapper.deleteBatchIds(new ArrayList<>(new LinkedHashSet<>(memberIds)));
     }
 
     /**
@@ -64,13 +114,9 @@ public class ProjectMemberService {
      * 按项目ID联查成员列表，补充用户工号/名称及绑定数字员工名称。
      *
      * @param projectId 项目ID
+     * @param userName 用户名
      * @return 成员列表 DTO；无成员时返回空列表
      */
-    public List<ProjectMemberListDto> listProjectMembers(Long projectId) {
-        return listProjectMembers(projectId, null);
-    }
-
-    /** 按项目查询成员，并仅按成员姓名模糊筛选。 */
     public List<ProjectMemberListDto> listProjectMembers(Long projectId, String userName) {
         return memberMapper.listProjectMembers(projectId, userName);
     }

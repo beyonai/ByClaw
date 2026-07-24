@@ -1,4 +1,4 @@
-import { getTaskPhases, listRequirementsByProject, listTasks } from '../devloop';
+import { createManualRequirement, getTaskPhases, listRequirementsByProject, listTasks } from '../devloop';
 
 jest.mock('@/service/common/request', () => ({
   POST: jest.fn(),
@@ -13,9 +13,10 @@ describe('Devloop task service', () => {
     jest.clearAllMocks();
   });
 
-  it('passes creation time range and pagination to the task list endpoint', () => {
+  it('passes only-mine filter, creation time range, and pagination to the task list endpoint', () => {
     const query = {
       projectId: 203,
+      onlyMine: true,
       createTimeStart: '2026-07-01 00:00:00',
       createTimeEnd: '2026-07-21 23:59:59',
       taskName: '优化登录流程',
@@ -41,5 +42,22 @@ describe('Devloop task service', () => {
     getTaskPhases(123);
 
     expect(mockPOST).toHaveBeenCalledWith('/byaiService/devloop/task/phases', { sessionId: 123 });
+  });
+
+  // 覆盖所有手工录入字段（含来源类型和关联仓库）的前后端请求契约。
+  it('posts manual requirements to the project requirement endpoint', () => {
+    const requirement = {
+      projectId: 203,
+      sourceType: 'customer_feedback' as const,
+      branch: 'develop',
+      repoId: 301,
+      title: 'Improve login flow',
+      originalContent: 'Customers report that the login flow has too many steps.',
+      productContent: 'Simplify the flow while retaining security checks.',
+    };
+
+    createManualRequirement(requirement);
+
+    expect(mockPOST).toHaveBeenCalledWith('/byaiService/devloop/requirement/create', requirement);
   });
 });

@@ -283,7 +283,7 @@ public class DevloopPhaseService {
         String userPrompt = template.replace("${transcript}", transcript);
         String raw;
         try {
-            raw = aiService.generateText(null, userPrompt, null, 800);
+            raw = aiService.generateText(null, userPrompt, (String) null, 800);
         } catch (Exception e) {
             log.warn("[DevloopPhase] LLM 抽取环节失败", e);
             return null;

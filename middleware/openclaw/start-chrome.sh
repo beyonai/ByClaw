@@ -132,9 +132,15 @@ clear_stale_profile_lock() {
 
 clear_stale_profile_lock
 
+xvfb_screen="${OPENCLAW_XVFB_SCREEN:-1365x768x24}"
+xvfb_width="${xvfb_screen%%x*}"
+xvfb_height_and_depth="${xvfb_screen#*x}"
+xvfb_height="${xvfb_height_and_depth%%x*}"
+chrome_window_size="${OPENCLAW_CHROME_WINDOW_SIZE:-${xvfb_width},${xvfb_height}}"
+
 if ! pgrep -f "Xvfb ${DISPLAY}" >/dev/null 2>&1; then
   log "starting Xvfb on ${DISPLAY}"
-  Xvfb "${DISPLAY}" -screen 0 "${OPENCLAW_XVFB_SCREEN:-1365x768x24}" -nolisten tcp >/tmp/openclaw-xvfb.log 2>&1 &
+  Xvfb "${DISPLAY}" -screen 0 "${xvfb_screen}" -nolisten tcp >/tmp/openclaw-xvfb.log 2>&1 &
   sleep 1
 fi
 
@@ -220,5 +226,6 @@ log "starting ${OPENCLAW_CHROME_EXECUTABLE}, profile=${OPENCLAW_BROWSER_PROFILE}
   --no-default-browser-check \
   --disable-dev-shm-usage \
   --no-sandbox \
-  --window-size="${OPENCLAW_CHROME_WINDOW_SIZE:-1365,768}" \
+  --window-size="${chrome_window_size}" \
+  --window-position=0,0 \
   about:blank >/tmp/openclaw-chrome.log 2>&1 &

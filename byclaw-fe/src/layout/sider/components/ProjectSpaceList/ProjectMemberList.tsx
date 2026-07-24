@@ -3,7 +3,8 @@ import { Button, Dropdown, Empty, Input, List, Modal, Spin, Tag, Tooltip, messag
 import { DeleteOutlined, MoreOutlined, PlusOutlined, RobotOutlined, SearchOutlined } from '@ant-design/icons';
 import { useIntl, useSelector } from '@umijs/max';
 import AddAuthModal from '@/pages/manager/components/AuthListDrawer/AddAuthModal';
-import { addProjectMember, bindMemberAgent, listProjectMembers, removeProjectMember } from '@/service/devloop';
+import { dataItemTypeMap } from '@/pages/manager/components/PersonnelModel';
+import { bindMemberAgent, listProjectMembers, saveProjectMembers } from '@/service/devloop';
 import { POST } from '@/service/common/request';
 import { getAgentChatAvatar } from '@/utils/agent';
 import { getDisplayUserNameInChat } from '@/utils/chat';
@@ -14,6 +15,7 @@ interface ProjectMemberListProps {
   projectId?: number;
   creatorId?: string | number;
   onMembersChange?: (members: any[]) => void;
+  onCurrentUserRemoved?: (projectId: number) => void;
 }
 
 // 成员接口当前一次返回项目成员，左侧窄面板按固定数量分段渲染并在触底时继续展示。
@@ -29,9 +31,15 @@ const isProjectOwnerMember = (member: any, creatorId?: string | number) => {
   return isOwnerRole || (!!creatorId && `${getMemberUserId(member)}` === `${creatorId}`);
 };
 
-const ProjectMemberList: React.FC<ProjectMemberListProps> = ({ projectId, creatorId, onMembersChange }) => {
+const ProjectMemberList: React.FC<ProjectMemberListProps> = ({
+  projectId,
+  creatorId,
+  onMembersChange,
+  onCurrentUserRemoved,
+}) => {
   const intl = useIntl();
   const userInfo = useSelector((state: any) => state.user?.userInfo) || {};
+  const currentUserId = userInfo.userId ?? userInfo.id;
   // 成员面板文案集中使用同一命名空间，便于与项目详情其它 Tab 保持一致。
   const t = useCallback(
     (id: string, values?: Record<string, string | number>) =>
@@ -43,6 +51,10 @@ const ProjectMemberList: React.FC<ProjectMemberListProps> = ({ projectId, creato
   const [visibleMemberCount, setVisibleMemberCount] = useState(MEMBER_PAGE_SIZE);
   const [loading, setLoading] = useState(false);
   const [showAuthAddModal, setShowAuthAddModal] = useState(false);
+  const [authSelectedMembers, setAuthSelectedMembers] = useState<any[]>([]);
+  const [authMembersLoading, setAuthMembersLoading] = useState(false);
+  const [authMemberSaving, setAuthMemberSaving] = useState(false);
+  const [addMemberTooltipOpen, setAddMemberTooltipOpen] = useState(false);
   const [hoveredMemberKey, setHoveredMemberKey] = useState<string>();
   const [openActionMemberKey, setOpenActionMemberKey] = useState<string>();
 
@@ -58,6 +70,21 @@ const ProjectMemberList: React.FC<ProjectMemberListProps> = ({ projectId, creato
   const agentSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const agentQueryVersionRef = useRef(0);
   const agentLoadingMoreRef = useRef(false);
+  // 使用同步标记拦截状态更新前的连续点击，避免重复提交成员保存请求。
+  const authMemberSavingRef = useRef(false);
+  // 创建者才可维护项目成员；历史项目缺少 createBy 时以成员 owner 角色兜底识别。
+  const isCurrentUserProjectCreator = useMemo(() => {
+    if (currentUserId === undefined || currentUserId === null || `${currentUserId}` === '') return false;
+    if (creatorId !== undefined && creatorId !== null && `${creatorId}` === `${currentUserId}`) return true;
+
+    return members.some((member) => {
+      const memberUserId = getMemberUserId(member);
+      const matchesCurrentUser =
+        `${memberUserId}` === `${currentUserId}` ||
+        (!!userInfo.userCode && `${member.userCode || ''}` === `${userInfo.userCode}`);
+      return matchesCurrentUser && isProjectOwnerMember(member, creatorId);
+    });
+  }, [creatorId, currentUserId, members, userInfo.userCode]);
 
   const fetchMembers = useCallback(
     async (keyword = '') => {
@@ -155,60 +182,149 @@ const ProjectMemberList: React.FC<ProjectMemberListProps> = ({ projectId, creato
     }
   }, [fetchMembers, memberSearchKeyword, onMembersChange, projectId]);
 
-  const handleAddAuthMembers = async (selectedUsers: any[] = []) => {
-    if (!projectId) return;
+  const normalizeAuthSelectedMember = (member: any) => {
+    const userId = getMemberUserId(member);
+    const userName = member.userName || member.name || `${userId || ''}`;
 
-    // 左侧小列表使用授权对象弹窗选人，确认时只提交新增且尚未加入项目的人员。
-    let currentMemberList: any[] = [];
+    return {
+      ...member,
+      // 授权对象组件以 id、name、type 渲染右侧“已选择”列表，项目成员接口字段需在此统一转换。
+      id: `user_${userId}`,
+      name: userName,
+      type: dataItemTypeMap.user,
+      userId,
+      userName,
+      // 右侧已选择区域沿用授权组件的 cannotDel 约定，创建者不展示删除入口。
+      cannotDel: isProjectOwnerMember(member, creatorId),
+    };
+  };
+
+  const handleOpenAuthAddModal = async () => {
+    if (!projectId || authMembersLoading || !isCurrentUserProjectCreator) return;
+
+    setAuthMembersLoading(true);
     try {
+      // 当前成员列表可能处于搜索状态，打开授权弹窗时始终读取完整成员集以展示全部已选择成员。
       const currentMemberRes = await listProjectMembers(projectId);
-      currentMemberList = Array.isArray(currentMemberRes) ? currentMemberRes : [];
+      const currentMemberList = Array.isArray(currentMemberRes) ? currentMemberRes : [];
+      setAuthSelectedMembers(
+        currentMemberList
+          .map(normalizeAuthSelectedMember)
+          .filter((member) => member.userId !== undefined && member.userId !== null && `${member.userId}` !== '')
+      );
+      setShowAuthAddModal(true);
     } catch {
       message.error(t('addFailed'));
-      return;
+    } finally {
+      setAuthMembersLoading(false);
     }
-    const currentMemberIdSet = new Set(currentMemberList.map((member) => String(member.userId)));
-    const pendingUsers = selectedUsers.filter((user) => {
-      const userId = user.userId ?? String(user.id || '').replace(/^user_/, '');
-      return userId && !currentMemberIdSet.has(String(userId));
-    });
+  };
 
-    if (!pendingUsers.length) {
-      message.warning(t('selectMembers'));
-      return;
-    }
+  const handleAddAuthMembers = async (selectedUsers: any[] = []) => {
+    if (!projectId || authMemberSavingRef.current || !isCurrentUserProjectCreator) return;
+
+    authMemberSavingRef.current = true;
+    setAuthMemberSaving(true);
 
     try {
-      await Promise.all(
-        pendingUsers.map((user) => {
-          const userId = user.userId ?? String(user.id || '').replace(/^user_/, '');
-          return addProjectMember({
-            projectId,
-            userId,
-            userCode: user.userCode,
-            userName: user.userName || user.name,
+      // 保存前重新读取成员，避免弹窗打开期间其他操作变更成员后按过期数据覆盖。
+      const currentMemberRes = await listProjectMembers(projectId);
+      const currentMemberList = Array.isArray(currentMemberRes) ? currentMemberRes : [];
+      const selectedUserIdMap = new Map<string, string | number>();
+      selectedUsers.forEach((user) => {
+        const userId = getMemberUserId(user);
+        if (userId !== undefined && userId !== null && `${userId}` !== '') {
+          selectedUserIdMap.set(String(userId), userId);
+        }
+      });
+
+      const creatorRemovalAttempted = currentMemberList.some((member) => {
+        const userId = getMemberUserId(member);
+        return !selectedUserIdMap.has(String(userId)) && isProjectOwnerMember(member, creatorId);
+      });
+
+      if (creatorRemovalAttempted) {
+        // 创建者不能删除，提交前重新补回创建者，避免保存最终成员列表时误删。
+        message.warning(t('creatorCannotRemove'));
+        currentMemberList
+          .filter((member) => isProjectOwnerMember(member, creatorId))
+          .forEach((member) => {
+            const userId = getMemberUserId(member);
+            if (userId !== undefined && userId !== null && `${userId}` !== '') {
+              selectedUserIdMap.set(String(userId), userId);
+            }
           });
-        })
+      }
+
+      const currentMemberIdSet = new Set(
+        currentMemberList
+          .map((member) => getMemberUserId(member))
+          .filter((userId) => userId !== undefined && userId !== null && `${userId}` !== '')
+          .map((userId) => String(userId))
       );
-      message.success(t('addSuccess', { count: pendingUsers.length }));
+      const selectedUserIds = Array.from(selectedUserIdMap.values());
+      const hasMemberChanges =
+        currentMemberIdSet.size !== selectedUserIdMap.size ||
+        Array.from(selectedUserIdMap.keys()).some((userId) => !currentMemberIdSet.has(userId));
+
+      if (!hasMemberChanges) {
+        if (!creatorRemovalAttempted) {
+          setShowAuthAddModal(false);
+          setAuthSelectedMembers([]);
+        }
+        return;
+      }
+
+      // 将最终成员数组一次提交，后端在一个事务内完成新增、删除和去重。
+      await saveProjectMembers({ projectId, userIds: selectedUserIds });
+      message.success(t('saveSuccess'));
       setShowAuthAddModal(false);
+      setAuthSelectedMembers([]);
       void refreshMembersAfterMutation();
     } catch {
-      message.error(t('addFailed'));
+      message.error(t('saveFailed'));
+    } finally {
+      // 无论保存成功、失败或无需保存，都恢复按钮状态并释放提交锁。
+      authMemberSavingRef.current = false;
+      setAuthMemberSaving(false);
     }
   };
 
   const isCurrentUserMember = (member: any) => {
     return (
-      (!!member.userId && `${member.userId}` === `${userInfo.userId || ''}`) ||
-      (!!member.userCode && `${member.userCode}` === `${userInfo.userCode || ''}`)
+      (currentUserId !== undefined && currentUserId !== null && `${getMemberUserId(member)}` === `${currentUserId}`) ||
+      (!!member.userCode && !!userInfo.userCode && `${member.userCode}` === `${userInfo.userCode}`)
     );
   };
 
   const removeMember = async (member: any) => {
-    await removeProjectMember(member.memberId);
-    message.success(t('removeSuccess'));
-    void refreshMembersAfterMutation();
+    if (!projectId) return;
+
+    try {
+      // 单条移除同样提交最终成员数组，避免成员管理的不同入口调用不同删除接口。
+      const currentMemberRes = await listProjectMembers(projectId);
+      const currentMemberList = Array.isArray(currentMemberRes) ? currentMemberRes : [];
+      const targetUserId = String(getMemberUserId(member));
+      const remainingUserIdMap = new Map<string, string | number>();
+      currentMemberList.forEach((currentMember) => {
+        const userId = getMemberUserId(currentMember);
+        if (userId !== undefined && userId !== null && `${userId}` !== '' && String(userId) !== targetUserId) {
+          remainingUserIdMap.set(String(userId), userId);
+        }
+      });
+      const remainingUserIds = Array.from(remainingUserIdMap.values());
+      await saveProjectMembers({ projectId, userIds: remainingUserIds });
+      message.success(t('removeSuccess'));
+      if (isCurrentUserMember(member)) {
+        // 当前用户移除自己后已无项目访问权限，交由父级退出详情并刷新项目列表。
+        onCurrentUserRemoved?.(projectId);
+        return;
+      }
+      void refreshMembersAfterMutation();
+    } catch (error) {
+      message.error(t('saveFailed'));
+      throw error;
+    }
   };
 
   const handleRemove = (member: any) => {
@@ -399,6 +515,10 @@ const ProjectMemberList: React.FC<ProjectMemberListProps> = ({ projectId, creato
   const getAgentAvatar = (agent: any) => agent.chatAvatar || agent.avatar || agent.icon || agent.resourceLogoUrl;
 
   const renderMemberActionMenu = (member: any) => {
+    // 创建者可管理全部成员；普通成员仅可管理自己的数字员工绑定和退出项目入口。
+    const canOperateMember = isCurrentUserProjectCreator || isCurrentUserMember(member);
+    if (!canOperateMember) return null;
+
     const memberKey = getMemberKey(member);
     const showAction = hoveredMemberKey === memberKey || openActionMemberKey === memberKey;
 
@@ -456,17 +576,28 @@ const ProjectMemberList: React.FC<ProjectMemberListProps> = ({ projectId, creato
             onPressEnter={handleMemberSearchSubmit}
           />
         </div>
-        {/* 图标按钮的悬停文案明确为添加成员，避免与其他“添加”操作混淆。 */}
-        <Tooltip title={t('addMember')} placement="top">
-          {/* 添加成员收敛为搜索框右侧图标操作，避免工具栏占两行。 */}
-          <Button
-            aria-label={t('addMember')}
-            size="small"
-            className={`${styles.detailHeaderActionButton} ${styles.detailMemberAddButton}`}
-            icon={<PlusOutlined />}
-            onClick={() => setShowAuthAddModal(true)}
-          />
-        </Tooltip>
+        {isCurrentUserProjectCreator && (
+          <Tooltip
+            title={t('addMember')}
+            placement="top"
+            open={addMemberTooltipOpen}
+            onOpenChange={setAddMemberTooltipOpen}
+          >
+            {/* 添加成员仅对项目创建者显示，非创建者时搜索框自动占满整行。 */}
+            <Button
+              aria-label={t('addMember')}
+              size="small"
+              className={`${styles.detailHeaderActionButton} ${styles.detailMemberAddButton}`}
+              icon={<PlusOutlined />}
+              loading={authMembersLoading}
+              onClick={() => {
+                // 打开授权弹窗前主动收起悬停提示，避免遮罩层上残留“添加成员”文案。
+                setAddMemberTooltipOpen(false);
+                void handleOpenAuthAddModal();
+              }}
+            />
+          </Tooltip>
+        )}
       </div>
 
       <div className={styles.detailMemberScroll} onScroll={handleMemberListScroll}>
@@ -537,11 +668,15 @@ const ProjectMemberList: React.FC<ProjectMemberListProps> = ({ projectId, creato
 
       {showAuthAddModal && (
         <AddAuthModal
-          title={t('addAuthorizedObject')}
+          title={t('addMember')}
           onlyUser
           showPost={false}
-          value={[]}
-          onCancel={() => setShowAuthAddModal(false)}
+          value={authSelectedMembers}
+          confirmLoading={authMemberSaving}
+          onCancel={() => {
+            setShowAuthAddModal(false);
+            setAuthSelectedMembers([]);
+          }}
           onOk={handleAddAuthMembers}
         />
       )}
@@ -581,7 +716,14 @@ const ProjectMemberList: React.FC<ProjectMemberListProps> = ({ projectId, creato
                     <List.Item.Meta
                       avatar={<div className={styles.agentListAvatar}>{getAgentChatAvatar(getAgentAvatar(agent))}</div>}
                       title={agent.resourceName || agent.name || agent.agentName}
-                      description={agent.resourceDesc || agent.description || agent.desc || ''}
+                      description={
+                        <span
+                          className={styles.agentListDescription}
+                          title={agent.resourceDesc || agent.description || agent.desc || ''}
+                        >
+                          {agent.resourceDesc || agent.description || agent.desc || ''}
+                        </span>
+                      }
                     />
                   </List.Item>
                 )}

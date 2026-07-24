@@ -140,6 +140,8 @@ def main() -> None:
         if env_path.is_file():
             load_dotenv(dotenv_path=env_path)
 
+    os.environ.setdefault("DATACLOUD_LOG_DIR", "logs/worker")
+
     normalize_runtime_environment()
 
     from byclaw_data.plugins.recommended_question_plugins import (

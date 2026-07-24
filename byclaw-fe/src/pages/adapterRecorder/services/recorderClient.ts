@@ -52,7 +52,7 @@ export interface RankResult {
   scorePrompt?: string;
 }
 
-/** 拆步①评分结果:候选(含 LLM 语义)+ 双阶段提示词 + 送 LLM 候选 id + 被拒候选。 */
+/** 拆步①评分结果:候选、本地提示词、可选的 LLM 语义评分状态。 */
 export interface PipelineScoreResult {
   candidates: RankCandidate[];
   rejected: Array<{ candidateId: string; reason: string }>;
@@ -60,15 +60,17 @@ export interface PipelineScoreResult {
   /** score 阶段发给 LLM 的评分提示词。 */
   scorePrompt: string;
 
-  /** generate 阶段将发给 LLM 的生成提示词(score 已算出 genCands,故此刻可得)。 */
+  /** 本地确定性生成阶段的说明提示词。 */
   generatePrompt: string;
   screenshotCount: number;
 
-  /** 被送 LLM 生成的候选 id(= decision==='generate' 的候选)。 */
+  /** 本轮参与候选处理的接口。 */
   sentCandidateIds: string[];
 
   /** LLM 返回的原始 interfaces JSON 文本(透明展示;LLM-off/解析失败时缺省)。 */
   llmRawJson?: string;
+  llmSynthesisUsed?: boolean;
+  llmError?: string;
 }
 
 /** bind 返回:awaitingLogin=true 表示进入 awaiting_user_login 分支;vncUrl=vnc 模式容器 noVNC 画面地址 */
@@ -145,7 +147,7 @@ export interface RecorderClient {
    *  onProgress=pipeline 异步轮询途中的阶段进度回调(score/generate/verify 耗时),用于页面实时展示。
    *  onPartial=阶段性 prompt 回调(be 在 score/generate 就绪时分阶段回),让分析过渡页按阶段展示提示词。 */
   pipeline(
-    llmEgressAcknowledgedAt: number,
+    llmEgressAcknowledgedAt?: number,
     candidateIds?: string[],
     onProgress?: (phases: PipelineProgressPhase[]) => void,
     onPartial?: (prompts: PipelinePartialPrompts) => void
@@ -160,7 +162,7 @@ export interface RecorderClient {
   /** 拆步①评分:score-only。回候选(含 LLM inferredFunction/paramUnion)+ score/generate 提示词 + 送 LLM 候选 id。
    *  不生成、不产草稿。genCands 由 be 存 registry 供第②步生成复用。202 异步。 */
   pipelineScore(
-    llmEgressAcknowledgedAt: number,
+    llmEgressAcknowledgedAt?: number,
     candidateIds?: string[],
     onProgress?: (phases: PipelineProgressPhase[]) => void,
     onPartial?: (prompts: PipelinePartialPrompts) => void

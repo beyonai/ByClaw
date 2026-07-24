@@ -830,8 +830,9 @@
   margin: 0;
 }
 
-// 成员添加、需求刷新、任务刷新和任务视图统一使用同一套紧凑图标按钮规格。
+// 成员添加、手工录入需求、需求刷新、任务刷新和任务视图统一使用同一套紧凑图标按钮规格。
 .detailMemberAddButton,
+.detailManualRequirementAddButton,
 .detailRequirementRefreshButton,
 .detailTaskRefreshButton,
 .detailTaskViewButton {
@@ -1350,6 +1351,7 @@
 
 // 需求列表与任务列表共用无边框、悬浮浅灰底色的卡片状态。
 .detailRequirementItem {
+  position: relative;
   min-height: 64px;
   padding: 8px 10px;
   border: 1px solid transparent;
@@ -1373,6 +1375,11 @@
   }
 }
 
+.detailRequirementItemWithAction:hover .detailRequirementMoreAction {
+  opacity: 1;
+  pointer-events: auto;
+}
+
 .detailRequirementSummary {
   width: 100%;
   min-width: 0;
@@ -1380,6 +1387,19 @@
   grid-template-columns: 32px minmax(0, 1fr) auto;
   align-items: center;
   column-gap: 10px;
+}
+
+.detailRequirementActions {
+  // 与任务卡片一致：三点按钮绝对定位，悬停时通过右内边距为其让位，默认不留空白。
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  transition: padding-right 0.2s;
+}
+
+.detailRequirementItemWithAction:hover .detailRequirementActions,
+.detailRequirementActionsOpen {
+  padding-right: 28px;
 }
 
 // 需求列表复用会话列表的图标规格，评分信息收敛到右侧详情抽屉。
@@ -1562,6 +1582,34 @@
   border-radius: 6px;
   font-size: 12px;
   line-height: 24px;
+}
+
+.detailRequirementMoreAction {
+  // 与任务卡片更多按钮一致，透明态仍可通过 opacity 平滑淡入且不参与布局。
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  z-index: 1;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: 6px;
+  color: #7c8798;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%);
+  transition: opacity 0.2s, background-color 0.2s;
+
+  &:hover,
+  &:focus {
+    color: #526075;
+    background: rgba(0, 0, 0, 0.04);
+  }
+}
+
+.detailRequirementMoreActionOpen {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .detailRequirementStartAction {
@@ -2554,18 +2602,15 @@
     }
 
     .@{antPrefix}-modal-header {
-      padding: 20px 24px 16px;
-      margin-bottom: 0;
-      border-bottom: 1px solid #edf1f7;
+      margin-bottom: 20;
     }
 
     .@{antPrefix}-modal-body {
-      padding: 20px 24px 4px;
+      padding: 12px 0px 0px;
     }
 
     .@{antPrefix}-modal-footer {
-      padding: 14px 24px 20px;
-      border-top: 1px solid #edf1f7;
+      border-top: 0;
     }
 
     .@{antPrefix}-btn {
@@ -2593,20 +2638,90 @@
     margin: 0;
     color: #75839a;
     font-size: 13px;
+    font-weight: 500;
     line-height: 18px;
   }
 }
 
 .manualRequirementForm {
+  // 原始来源和影响分支为同一行的两个等宽字段，需求名称及长内容字段跨整行展示。
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  column-gap: 16px;
+
   .formField {
-    margin-bottom: 16px;
+    min-width: 0;
+    margin-bottom: 12px;
   }
 }
 
-.manualRequirementRow {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 16px;
+.manualRequirementFormFull {
+  grid-column: 1 / -1;
+}
+
+.manualRequirementRepoCompact {
+  width: 100%;
+  min-width: 0;
+
+  :global {
+    // 仓库选择框需为右侧新增按钮预留空间，避免在需求弹窗中被全宽规则挤压。
+    .@{antPrefix}-select {
+      width: auto;
+      min-width: 0;
+      height: 34px;
+      flex: 1 1 0;
+    }
+
+    // 需求弹窗内按钮统一为 34px，仓库下拉同步该高度并校正单选文本的垂直居中。
+    .@{antPrefix}-select-single .@{antPrefix}-select-selector {
+      height: 34px;
+    }
+
+    .@{antPrefix}-select-single .@{antPrefix}-select-selector .@{antPrefix}-select-selection-item,
+    .@{antPrefix}-select-single .@{antPrefix}-select-selector .@{antPrefix}-select-selection-placeholder {
+      line-height: 32px;
+    }
+  }
+}
+
+.manualRequirementRepoSelect {
+  min-width: 0;
+  flex: 1 1 0;
+}
+
+.manualRequirementSourceType {
+  width: 100%;
+  display: flex;
+
+  :global {
+    // 与新增渠道的需求确认规则一致，三个来源以等宽按钮形式切换。
+    .@{antPrefix}-radio-button-wrapper {
+      min-width: 0;
+      flex: 1 1 0;
+      padding: 0 8px;
+      text-align: center;
+    }
+  }
+}
+
+.manualRequirementTextArea {
+  // 字数提示放在文本框外侧右下方，预留空间避免和下一字段重叠。
+  position: relative;
+  padding-bottom: 24px;
+}
+
+.manualRequirementTextCount {
+  // 计数与文本框底边右侧对齐，效果与输入框原生字数提示保持一致。
+  position: absolute;
+  z-index: 1;
+  top: auto;
+  right: 0;
+  bottom: 0;
+  left: auto;
+  color: #98a2b3;
+  font-size: 12px;
+  line-height: 18px;
+  pointer-events: none;
 }
 
 .repoModalDivider {
@@ -2636,26 +2751,38 @@
   height: 40px;
 }
 
+// 绑定数字员工弹窗中的描述最多展示一行，避免长文本撑高单个列表项。
+.agentListDescription {
+  display: -webkit-box;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  line-height: 20px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
+}
+
 /* 整体任务视图看板样式（只读） */
 .taskBoardDrawer {
   :global {
     .@{antPrefix}-drawer-body {
       padding: 0;
-      overflow: auto;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
     }
   }
 }
 
 .kanbanToolbar {
-  position: sticky;
-  top: 0;
-  z-index: 2;
   display: flex;
   align-items: center;
-  // 日期筛选固定在左侧，分页通过自动左边距固定在右侧。
+  flex-shrink: 0;
+  // 任务范围与日期筛选固定在工具栏左侧。
   justify-content: flex-start;
   gap: 16px;
-  min-height: 56px;
+  min-height: var(--task-board-toolbar-height);
+  box-sizing: border-box;
   padding: 10px 20px;
   background: #fff;
   border-bottom: 1px solid #f0f0f0;
@@ -2665,20 +2792,26 @@
     .@{antPrefix}-picker {
       height: 32px;
     }
-
-    .@{antPrefix}-pagination {
-      // 与日期筛选分居工具栏两端，避免分页紧跟在日期组件后面。
-      margin-left: auto;
-    }
   }
 }
 
 .kanbanBoard {
+  flex: 1;
+  min-height: 0;
   display: flex;
   gap: 16px;
-  padding: 20px;
-  min-height: 100%;
+  align-items: stretch;
+  // 顶部留白下移到列头，确保状态列头与筛选工具栏对齐。
+  padding: 0 20px 20px;
+  // 四列不足以容纳时仅允许横向滚动，纵向滚动由每个状态列独立处理。
   overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 .kanbanColumn {
@@ -2686,9 +2819,11 @@
   min-width: 260px;
   max-width: 320px;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
   background: #fafafa;
   border-radius: 10px;
-  padding: 12px;
+  padding: 0 12px 12px;
   transition: background-color 0.2s, box-shadow 0.2s;
 }
 
@@ -2698,12 +2833,46 @@
 }
 
 .kanbanColHeader {
+  // 列头在列滚动区之外，始终显示在当前状态列顶部。
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 8px;
+  padding: 12px 0 8px;
   margin-bottom: 12px;
+  background: #fafafa;
   font-size: 14px;
   font-weight: 500;
+}
+
+.kanbanColumnContent {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+.kanbanColumnSpin {
+  min-height: 100%;
+
+  :global {
+    .@{antPrefix}-spin-container {
+      min-height: 100%;
+    }
+  }
+}
+
+.kanbanColumnLoadingMore {
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .kanbanColIcon {

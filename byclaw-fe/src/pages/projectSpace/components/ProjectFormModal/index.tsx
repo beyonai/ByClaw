@@ -1,7 +1,7 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button, Form, Input, Modal, Select, Spin, Switch, Tooltip, message } from 'antd';
 import { CloseCircleFilled, PlusOutlined } from '@ant-design/icons';
-import { useSelector } from '@umijs/max';
+import { useIntl, useSelector } from '@umijs/max';
 import AddAuthModal from '@/pages/manager/components/AuthListDrawer/AddAuthModal';
 import { listProjectMembers } from '@/service/devloop';
 import { DEFAULT_PROJECT_TYPE_OPTION, PROJECT_TYPE_LABEL, PROJECT_TYPE_OPTIONS } from '../../constants';
@@ -18,6 +18,7 @@ export interface ProjectShareMember {
   name: string;
   memberId?: string | number;
   role?: string;
+  cannotDel?: boolean;
 }
 
 export interface ProjectFormValues {
@@ -78,12 +79,17 @@ const ProjectFormModal: React.FC<Props> = ({
   onCancel,
   onSubmit,
 }) => {
+  const intl = useIntl();
   const userInfo = useSelector((state: any) => state.user?.userInfo) || {};
   const [form] = Form.useForm<ProjectFormValues>();
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [selectedShareMembers, setSelectedShareMembers] = useState<ProjectShareMember[]>([]);
   const [shareMembersLoading, setShareMembersLoading] = useState(false);
   const [shareMembersLoaded, setShareMembersLoaded] = useState(false);
+  const currentUserId = userInfo.userId ?? userInfo.id;
+  const currentUserCode = userInfo.userCode;
+  const currentUserName = userInfo.userName || userInfo.userNickName || userInfo.nickName || currentUserCode;
+  const memberT = useCallback((id: string) => intl.formatMessage({ id: `projectSpace.members.${id}` }), [intl]);
   const configuredProjectTypeOptions = projectTypeConfigOptions?.length
     ? projectTypeConfigOptions
     : PROJECT_TYPE_OPTIONS;
@@ -109,6 +115,16 @@ const ProjectFormModal: React.FC<Props> = ({
   const isEditingDefaultProject = !!projectId && formInitialValues.projectType === 'default';
   const isDefaultProject = projectType === 'default' || isEditingDefaultProject;
   const isProjectShared = !isDefaultProject && (isDevelopProject || !!sharedFlag);
+  const normalizeProjectShareMember = useCallback(
+    (member: any): ProjectShareMember => {
+      const normalizedMember = normalizeShareMember(member);
+      // 已落库项目的创建者在授权弹窗右侧不展示删除入口，避免用户误以为可以移除。
+      return isProjectOwnerMember(normalizedMember, creatorId)
+        ? { ...normalizedMember, cannotDel: true }
+        : normalizedMember;
+    },
+    [creatorId]
+  );
   const visibleProjectTypeOptions = useMemo(() => {
     const selectableOptions = configuredProjectTypeOptions.filter((option) => option.value !== 'default');
 
@@ -139,9 +155,9 @@ const ProjectFormModal: React.FC<Props> = ({
     // Antd Form 的 initialValues 只在首次挂载生效，每次打开弹窗时主动重置，避免新建项目带出上次旧值。
     form.resetFields();
     form.setFieldsValue(formInitialValues);
-    setSelectedShareMembers((formInitialValues.shareMembers || []).map(normalizeShareMember));
+    setSelectedShareMembers((formInitialValues.shareMembers || []).map(normalizeProjectShareMember));
     setShareMembersLoaded(!projectId);
-  }, [form, formInitialValues, open, projectId]);
+  }, [form, formInitialValues, normalizeProjectShareMember, open, projectId]);
 
   useEffect(() => {
     if (!open || projectId || !visibleProjectTypeOptions.length) return;
@@ -158,17 +174,17 @@ const ProjectFormModal: React.FC<Props> = ({
       .then((res) => {
         const memberList = Array.isArray(res) ? res : [];
         // 共享成员直接使用成员 tab 的同一份项目成员数据，避免共享配置和成员列表两套数据不一致。
-        setSelectedShareMembers(memberList.map(normalizeShareMember));
+        setSelectedShareMembers(memberList.map(normalizeProjectShareMember));
         setShareMembersLoaded(true);
       })
       .catch((error) => {
         console.error('Failed to load project members for share members:', error);
-        message.error('共享成员加载失败');
+        message.error(memberT('loadFailed'));
       })
       .finally(() => {
         setShareMembersLoading(false);
       });
-  }, [open, projectId]);
+  }, [memberT, normalizeProjectShareMember, open, projectId]);
 
   useEffect(() => {
     if (!open || !isDevelopProject) return;
@@ -183,28 +199,68 @@ const ProjectFormModal: React.FC<Props> = ({
     form.setFields([{ name: 'shareMembers', errors: [] }]);
   }, [form, isDefaultProject, open]);
 
+  useEffect(() => {
+    if (!open || projectId || !isProjectShared || !currentUserId) return;
+
+    setSelectedShareMembers((previousMembers) => {
+      const currentUserIndex = previousMembers.findIndex(
+        (member) =>
+          `${getMemberUserId(member)}` === `${currentUserId}` ||
+          (!!currentUserCode && `${member.userCode || ''}` === `${currentUserCode}`)
+      );
+
+      if (currentUserIndex >= 0) {
+        // 新建项目尚未落库时没有 creatorId，给当前用户补 owner 身份以复用创建者禁删规则。
+        return previousMembers.map((member, index) =>
+          index === currentUserIndex && (!isProjectOwnerMember(member) || !member.cannotDel)
+            ? { ...member, role: 'owner', cannotDel: true }
+            : member
+        );
+      }
+
+      // 打开共享后，项目创建者必须作为共享成员保留，提交后由后端以 owner 角色持久化。
+      const ownerMember = normalizeShareMember({
+        id: `user_${currentUserId}`,
+        type: 'USER',
+        userId: currentUserId,
+        userCode: currentUserCode,
+        userName: currentUserName || `${currentUserId}`,
+        name: currentUserName || `${currentUserId}`,
+        role: 'owner',
+        cannotDel: true,
+      });
+      return [ownerMember, ...previousMembers];
+    });
+  }, [currentUserCode, currentUserId, currentUserName, isProjectShared, open, projectId]);
+
   const removeShareMember = (targetId: string) => {
     setSelectedShareMembers((prev) => prev.filter((target) => target.id !== targetId));
   };
 
   const isCurrentUserMember = (member: ProjectShareMember) => {
     return (
-      (!!member.userId && `${member.userId}` === `${userInfo.userId || ''}`) ||
-      (!!member.userCode && `${member.userCode}` === `${userInfo.userCode || ''}`)
+      (!!member.userId && `${member.userId}` === `${currentUserId || ''}`) ||
+      (!!member.userCode && `${member.userCode}` === `${currentUserCode || ''}`)
     );
   };
 
+  const isNewProjectOwnerMember = (member: ProjectShareMember) => !projectId && isCurrentUserMember(member);
+
+  const isLockedShareMember = (member: ProjectShareMember) => {
+    return isProjectOwnerMember(member, creatorId) || isNewProjectOwnerMember(member);
+  };
+
   const handleRemoveShareTarget = (member: ProjectShareMember) => {
-    if (isProjectOwnerMember(member, creatorId)) {
-      message.warning('创建者不能被删除');
+    if (isLockedShareMember(member)) {
+      message.warning(memberT('creatorCannotRemove'));
       return;
     }
 
     if (isCurrentUserMember(member)) {
       Modal.confirm({
-        title: '移除自己',
-        content: '保存后你将从该项目共享成员中移除，确定继续吗？',
-        okText: '移除',
+        title: memberT('removeSelf'),
+        content: memberT('removeSelfConfirm'),
+        okText: memberT('remove'),
         okButtonProps: { danger: true },
         onOk: () => removeShareMember(member.id),
       });
@@ -218,7 +274,7 @@ const ProjectFormModal: React.FC<Props> = ({
     // 项目类型能力未确认前不提交，避免历史研发项目被按普通项目规则保存。
     if (loading || projectTypeLoading) return;
 
-    // 后端共享成员保存/校验暂未实现，先不限制必填；实现后恢复下面这段校验。
+    // 开启共享时创建者会自动保留为成员，成员保存由项目提交后的同步逻辑完成，无需额外拦截空选项。
     // const submitSharedFlag = form.getFieldValue('projectType') === 'develop' || form.getFieldValue('sharedFlag');
     // if (submitSharedFlag && !selectedShareMembers.length) {
     //   form.setFields([{ name: 'shareMembers', errors: ['请选择共享成员'] }]);
@@ -303,12 +359,12 @@ const ProjectFormModal: React.FC<Props> = ({
         </Form.Item>
         {isProjectShared && (
           <Form.Item label="共享成员">
-            {/* 后端共享成员保存/校验暂未实现，先不展示必填态；实现后恢复 required/validateStatus/help。 */}
+            {/* 开启共享时创建者始终自动保留，成员保存和成员列表使用同一接口，无需额外展示必填态。 */}
             <div className={styles.shareTargetField}>
               <Spin spinning={shareMembersLoading}>
                 <div className={styles.shareTargetList}>
                   {selectedShareMembers.map((member) => {
-                    const isCreatorMember = isProjectOwnerMember(member, creatorId);
+                    const isCreatorMember = isLockedShareMember(member);
                     const isSelfMember = isCurrentUserMember(member);
                     const removeIcon = (
                       <CloseCircleFilled
@@ -323,7 +379,7 @@ const ProjectFormModal: React.FC<Props> = ({
                         <div className={styles.shareTargetName}>{member.name}</div>
                         {!isCreatorMember &&
                           (isSelfMember ? (
-                            <Tooltip title="移除自己" placement="top">
+                            <Tooltip title={memberT('removeSelf')} placement="top">
                               {removeIcon}
                             </Tooltip>
                           ) : (
@@ -334,7 +390,7 @@ const ProjectFormModal: React.FC<Props> = ({
 
                     if (isCreatorMember) {
                       return (
-                        <Tooltip key={member.id} title="不允许移除创建者" placement="top">
+                        <Tooltip key={member.id} title={memberT('creatorCannotRemove')} placement="top">
                           {memberItem}
                         </Tooltip>
                       );
@@ -342,7 +398,9 @@ const ProjectFormModal: React.FC<Props> = ({
 
                     return <React.Fragment key={member.id}>{memberItem}</React.Fragment>;
                   })}
-                  {!selectedShareMembers.length && <span className={styles.shareTargetEmpty}>暂无共享成员</span>}
+                  {!selectedShareMembers.length && (
+                    <span className={styles.shareTargetEmpty}>{memberT('emptySharedMember')}</span>
+                  )}
                   {/* 添加按钮跟随成员标签流式排列，避免独占一整行。 */}
                   <Button
                     size="small"
@@ -351,7 +409,7 @@ const ProjectFormModal: React.FC<Props> = ({
                     disabled={shareMembersLoading}
                     onClick={() => setAuthModalOpen(true)}
                   >
-                    添加
+                    {memberT('add')}
                   </Button>
                 </div>
               </Spin>
@@ -361,17 +419,28 @@ const ProjectFormModal: React.FC<Props> = ({
       </Form>
       {authModalOpen && (
         <AddAuthModal
-          title="新增共享成员"
+          title={memberT('addSharedMember')}
           value={selectedShareMembers}
           onlyUser
           showPost={false}
           onCancel={() => setAuthModalOpen(false)}
           onOk={(members: any[]) => {
             const memberMap = new Map<string, ProjectShareMember>();
-            [...selectedShareMembers, ...members.map(normalizeShareMember)].forEach((member) => {
+            // 授权弹窗返回的是最终选择；只补回不可删除的创建者，不能再合并已被用户取消的普通成员。
+            members.map(normalizeProjectShareMember).forEach((member) => {
               memberMap.set(String(member.userId), member);
             });
-            setSelectedShareMembers(Array.from(memberMap.values()));
+            selectedShareMembers.filter(isLockedShareMember).forEach((member) => {
+              memberMap.set(String(member.userId), { ...member, cannotDel: true });
+            });
+            setSelectedShareMembers(
+              Array.from(memberMap.values()).map((member) =>
+                // 授权弹窗会按左侧数据重建已选项，新建项目需在合并后再次固定创建者 owner 身份。
+                isNewProjectOwnerMember(member)
+                  ? { ...member, role: 'owner', cannotDel: true }
+                  : normalizeProjectShareMember(member)
+              )
+            );
             form.setFields([{ name: 'shareMembers', errors: [] }]);
             setAuthModalOpen(false);
           }}

@@ -31,6 +31,12 @@ export type DevloopTaskListQuery = {
   createTimeStart?: string;
   createTimeEnd?: string;
   taskName?: string;
+
+  /** 仅看当前登录用户负责（创建）的任务；后端按当前用户的会话过滤，分页总数随之收敛。 */
+  onlyMine?: boolean;
+
+  /** 任务状态筛选，整体任务视图按状态列分别查询。 */
+  status?: 'pending' | 'in_progress' | 'paused' | 'completed';
   pageNum?: number;
   pageSize?: number;
 };
@@ -130,17 +136,17 @@ export type DevloopProjectSpaceFile = {
 };
 
 // 项目管理
-export const createProject = (data: DevloopProjectPayload) => POST<any>('/byaiService/devloop/project/create', data);
+export const createProject = (data: DevloopProjectPayload) => POST<any>('/byaiService/project/create', data);
 
 export const listProjects = (data?: { keyword?: string }, config?: ConfigType) =>
-  POST<any>('/byaiService/devloop/project/list', data || {}, config);
+  POST<any>('/byaiService/project/list', data || {}, config);
 
-export const getProject = (projectId: number) => POST<any>('/byaiService/devloop/project/get', { projectId });
+export const getProject = (projectId: number) => POST<any>('/byaiService/project/get', { projectId });
 
 export const updateProject = (data: Partial<DevloopProjectPayload> & { projectId: number }) =>
-  POST<any>('/byaiService/devloop/project/update', data);
+  POST<any>('/byaiService/project/update', data);
 
-export const deleteProject = (projectId: number) => POST<any>('/byaiService/devloop/project/delete', { projectId });
+export const deleteProject = (projectId: number) => POST<any>('/byaiService/project/delete', { projectId });
 
 // 项目仓库维护：扫描源关联仓库时可即席新增/删除
 export const createProjectRepo = (data: {
@@ -148,24 +154,17 @@ export const createProjectRepo = (data: {
   repoFullName: string;
   repoUrl?: string;
   defaultBranch?: string;
-}) => POST<any>('/byaiService/devloop/project/repo/create', data);
+}) => POST<any>('/byaiService/project/repo/create', data);
 
-export const deleteProjectRepo = (repoId: number) => POST<any>('/byaiService/devloop/project/repo/delete', { repoId });
-
-// 项目空间按会话分组展示，创建会话后需要显式建立项目-会话关系。
-export const bindProjectSession = (data: { projectId: number; sessionId: number }) =>
-  POST<any>('/byaiService/devloop/project/session/bind', data);
-
-export const unbindProjectSession = (data: { projectId: number; sessionId: number }) =>
-  POST<any>('/byaiService/devloop/project/session/unbind', data);
+export const deleteProjectRepo = (repoId: number) => POST<any>('/byaiService/project/repo/delete', { repoId });
 
 // 项目会话列表按项目懒加载，避免项目列表接口一次带出大量会话。
 export const listProjectSessionsByQo = (data: DevloopProjectSessionListPayload, config?: ConfigType) =>
-  POST<any>('/byaiService/devloop/project/session/listByQo', data, config);
+  POST<any>('/byaiService/project/session/listByQo', data, config);
 
 // 项目资源 tab 的共享文件空间使用项目维度文件接口，不再读取当前数字员工的 /.shared/ 目录。
 export const listProjectSpaceFiles = (projectId: number) =>
-  POST<DevloopProjectSpaceFile[]>('/byaiService/devloop/project/share/listSpaceFiles', { projectId });
+  POST<DevloopProjectSpaceFile[]>('/byaiService/project/share/listSpaceFiles', { projectId });
 
 // 会话空间文件保存到当前项目共享文件空间，成功后刷新共享文件列表。
 export const saveProjectFileToSpace = (data: {
@@ -173,7 +172,7 @@ export const saveProjectFileToSpace = (data: {
   sessionId: number;
   filePath: string;
   fileName: string;
-}) => POST<void>('/byaiService/devloop/project/share/saveToSpace', data);
+}) => POST<void>('/byaiService/project/share/saveToSpace', data);
 
 // 扫描源管理
 export const createScanSource = (data: {
@@ -220,6 +219,33 @@ export const listRequirementsBySource = (sourceId: number) =>
 // 按项目一次查需求(后端时间倒序)，仅按需求名称模糊搜索。
 export const listRequirementsByProject = (projectId: number, title?: string) =>
   POST<any>('/byaiService/devloop/project/requirements', { projectId, title: title || undefined });
+
+/** 手工需求的可编辑字段，与后端的创建、修改 DTO 保持一致。 */
+type ManualRequirementPayload = {
+  projectId: number;
+  sourceType: 'manual' | 'customer_feedback' | 'internal_proposal';
+  branch?: string;
+  // 手工需求单独关联研发仓库，避免项目存在多个仓库时回退到第一个仓库。
+  repoId: number;
+  title: string;
+  originalContent: string;
+  productContent?: string;
+};
+
+/**
+ * 通过手工录入链路新建需求。sourceType 保存业务来源，后端仍通过内部 manual 来源持久化，
+ * 因此此联合类型必须与 ManualRequirementDTO 保持一致。
+ */
+export const createManualRequirement = (data: ManualRequirementPayload) =>
+  POST<any>('/byaiService/devloop/requirement/create', data);
+
+/** 修改尚未启动的手工需求，项目归属由后端按需求条目反查。 */
+export const updateManualRequirement = (data: Omit<ManualRequirementPayload, 'projectId'> & { itemId: number }) =>
+  POST<any>('/byaiService/devloop/requirement/update', data);
+
+/** 删除尚未启动的手工需求，后端会再次校验当前用户是否为项目创建者。 */
+export const deleteManualRequirement = (itemId: number) =>
+  POST<any>('/byaiService/devloop/requirement/delete', { itemId });
 
 // PAT 管理
 export const saveGitHubPat = (pat: string) => POST<any>('/byaiService/devloop/pat/github', { pat });
@@ -284,23 +310,33 @@ export const getTaskPhases = (sessionId: number) =>
 // 项目成员
 export const addProjectMember = (data: {
   projectId: number;
-  userId: string | number;
+  // userIds 用于成员列表多选新增；userId 保留以兼容已有的单成员调用。
+  userIds?: Array<string | number>;
+  userId?: string | number;
   userCode?: string;
   userName?: string;
-}) => POST<any>('/byaiService/devloop/member/add', data);
+}) => POST<any>('/byaiService/project/member/add', data);
+
+// 保存项目最终成员列表，新增和删除成员由后端在同一事务中统一处理。
+export const saveProjectMembers = (data: { projectId: number; userIds: Array<string | number> }) =>
+  POST<any>('/byaiService/project/member/save', data);
 
 // 项目成员列表仅按成员姓名模糊搜索，和成员 Tab 的输入提示保持一致。
 export const listProjectMembers = (projectId: number, userName?: string) =>
-  POST<any>('/byaiService/devloop/member/list', { projectId, userName: userName || undefined });
+  POST<any>('/byaiService/project/member/list', { projectId, userName: userName || undefined });
 
-export const removeProjectMember = (memberId: number) => POST<any>('/byaiService/devloop/member/remove', { memberId });
+export const removeProjectMember = (memberId: number) => POST<any>('/byaiService/project/member/remove', { memberId });
 
 export const bindMemberAgent = (data: { memberId: number; agentId: number }) =>
-  POST<any>('/byaiService/devloop/member/bindAgent', data);
+  POST<any>('/byaiService/project/member/bindAgent', data);
 
 // DWS 钉钉授权
 export const startDwsDeviceAuth = () => POST<any>('/byaiService/devloop/dws/startDeviceAuth', {});
 
 export const checkDwsAuthStatus = () => POST<any>('/byaiService/devloop/dws/authStatus', {});
+
+// 按扫描源查授权状态：查该源创建者的授权，返回 canAuthorize/creatorName，供列表逐源展示与入口控制。
+export const checkDwsAuthStatusBySource = (sourceId: number) =>
+  POST<any>('/byaiService/devloop/dws/authStatus/bySource', { sourceId });
 
 export const saveDwsToken = (token: string) => POST<any>('/byaiService/devloop/dws/saveToken', { token });

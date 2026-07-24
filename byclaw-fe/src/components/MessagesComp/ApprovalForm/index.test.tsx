@@ -21,7 +21,7 @@ jest.mock('@/service/message', () => ({
 }));
 
 import React from 'react';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 import ApprovalForm from './index';
 
@@ -190,14 +190,10 @@ describe('ApprovalForm', () => {
     render(<ApprovalForm {...createApprovalFormProps(content)} />);
 
     const textarea = screen.getByLabelText('Details');
-    await waitFor(() => {
-      expect(textarea).toHaveValue('Initial details');
-    });
+    expect(textarea).toHaveValue('Initial details');
 
-    await act(async () => {
-      fireEvent.change(textarea, {
-        target: { value: '# Updated details' },
-      });
+    fireEvent.change(textarea, {
+      target: { value: '# Updated details' },
     });
     mockEventEmitter.emit.mockClear();
     fireEvent.click(screen.getByLabelText('查看更多'));

@@ -5,15 +5,22 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.common.ecrypt.Sm4Util;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
+import com.iwhalecloud.byai.common.login.bean.LoginInfo;
+import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService;
+import com.iwhalecloud.byai.manager.application.service.user.UserBucketNamingService;
 import com.iwhalecloud.byai.manager.entity.users.UserPrivateParam;
 import com.iwhalecloud.byai.manager.mapper.users.UserPrivateParamMapper;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
@@ -39,9 +46,29 @@ public class DwsAuthService {
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final String DWS_BIN = "dws";
     private static final String PARAM_KEY_DWS_TOKEN = "DWS_TOKEN";
+    /**
+     * 关闭 keychain,改用 file-DEK 后端把登录态加密落到 DWS_CONFIG_DIR。
+     * 这是 per-user 目录隔离生效的前提:默认 keychain 模式下 token 存系统钥匙串,DWS_CONFIG_DIR 换目录也读到同一份(全局共享)。
+     * 显式设进每个 dws 子进程 env,不依赖容器全局 ENV,保证本地/各部署环境一致。
+     */
+    private static final String DWS_DISABLE_KEYCHAIN_KEY = "DWS_DISABLE_KEYCHAIN";
+    private static final String DWS_DISABLE_KEYCHAIN_VALUE = "1";
 
     private static final Pattern USER_CODE_PATTERN = Pattern.compile("authorization code:\\s*(\\S+)");
     private static final Pattern VERIFY_URL_PATTERN = Pattern.compile("(https://login\\.dingtalk\\.com/oauth2/device/verify\\.htm\\?user_code=\\S+)");
+
+    /** 本地文件存储根(NFS 挂载点),与会话工作区/代码变更同源;dws 配置按用户 bucket 隔离落在其下。 */
+    @Value("${file.storage.local.path:${byclaw.sandbox.volume.file-root:/tmp/byclaw-storage}}")
+    private String fileStorageRoot;
+
+    /** 用户私有工作区目录名,dws 配置(profiles)放到 {bucket}/by/.dws,与 .sessions 平级。 */
+    private static final String DWS_CONFIG_SEGMENT = "by/.dws";
+
+    /**
+     * dws 登录态(DEK/token 密文)实际存在 $HOME/.local/share/dws-cli,dws 只认 HOME,不认 XDG_DATA_HOME/DWS_CONFIG_DIR。
+     * 这才是隔离的关键:每个用户单独一份 HOME,放到 {bucket}/by/.dws-home;共用 HOME 会导致一人授权全员"已授权"。
+     */
+    private static final String DWS_HOME_SEGMENT = "by/.dws-home";
 
     @Autowired
     private UserPrivateParamMapper userPrivateParamMapper;
@@ -49,8 +76,93 @@ public class DwsAuthService {
     @Autowired
     private SequenceService sequenceService;
 
+    @Autowired
+    private UserBucketNamingService userBucketNamingService;
+
+    @Autowired
+    private LoginApplicationService loginApplicationService;
+
     // 后台运行的 device flow 进程
     private final AtomicReference<Process> deviceFlowProcess = new AtomicReference<>(null);
+
+    /** 解析用户 bucket 的绝对路径根 {fileStorageRoot}/byclaw-{userCode};失败返回 null。 */
+    private String resolveBucketBase(Long userId) {
+        if (userId == null) {
+            return null;
+        }
+        try {
+            LoginInfo owner = loginApplicationService.getLoginInfo(userId);
+            if (owner == null || StringUtils.isBlank(owner.getUserCode())) {
+                return null;
+            }
+            String bucket = userBucketNamingService.buildUserBucketName(owner.getUserCode());
+            return Paths.get(fileStorageRoot, bucket).toString();
+        }
+        catch (Exception e) {
+            log.warn("[DwsAuth] 解析用户 bucket 失败, userId={}", userId, e);
+            return null;
+        }
+    }
+
+    private String ensureDir(Path dir) {
+        try {
+            java.nio.file.Files.createDirectories(dir);
+            return dir.toString();
+        }
+        catch (Exception e) {
+            log.warn("[DwsAuth] 创建目录失败: {}", dir, e);
+            return null;
+        }
+    }
+
+    /**
+     * 给 dws 子进程 env 注入用户隔离配置:关闭 keychain + 专属 HOME(登录态/DEK) + 专属 DWS_CONFIG_DIR(profiles)。
+     * 关键(Linux 实测确证):dws 的 DEK/token 密文存 $HOME/.local/share/dws-cli,只认 HOME,不认 XDG_DATA_HOME/DWS_CONFIG_DIR。
+     * 因此每个用户必须用独立 HOME 才能真正隔离登录态;共用 HOME 会导致一人授权全员"已授权"。
+     * @return true 表示成功按用户隔离;false 表示解析不出该用户目录(调用方据此判定未授权,不冒用全局)。
+     */
+    public boolean applyUserDwsEnv(Map<String, String> env, Long userId) {
+        env.put(DWS_DISABLE_KEYCHAIN_KEY, DWS_DISABLE_KEYCHAIN_VALUE);
+        String base = resolveBucketBase(userId);
+        if (base == null) {
+            return false;
+        }
+        // HOME 隔离 DEK/token(核心);DWS_CONFIG_DIR 隔离 profiles(可选,一并指到用户目录保持整洁)。
+        String homeDir = ensureDir(Paths.get(base, DWS_HOME_SEGMENT));
+        String configDir = ensureDir(Paths.get(base, DWS_CONFIG_SEGMENT));
+        if (homeDir == null || configDir == null) {
+            return false;
+        }
+        env.put("HOME", homeDir);
+        env.put("DWS_CONFIG_DIR", configDir);
+        log.info("[DwsAuth] applyUserDwsEnv userId={} home={} configDir={}", userId, homeDir, configDir);
+        return true;
+    }
+
+    /** 字符串 userId 重载,供扫描服务用 source.createBy。 */
+    public boolean applyUserDwsEnv(Map<String, String> env, String userId) {
+        Long uid = null;
+        if (userId != null && !userId.trim().isEmpty()) {
+            try {
+                uid = Long.valueOf(userId.trim());
+            }
+            catch (NumberFormatException e) {
+                log.warn("[DwsAuth] invalid userId for applyUserDwsEnv: {}", userId);
+            }
+        }
+        return applyUserDwsEnv(env, uid);
+    }
+
+    /**
+     * 构造 dws 子进程:按用户注入隔离 env(禁 keychain + 专属 HOME + DWS_CONFIG_DIR)。
+     * 用于授权动作(startDeviceAuth/injectToken):由当前登录用户发起。
+     */
+    private ProcessBuilder newDwsProcess(Long userId, List<String> cmd) {
+        ProcessBuilder pb = new ProcessBuilder(cmd);
+        pb.redirectErrorStream(true);
+        applyUserDwsEnv(pb.environment(), userId);
+        return pb;
+    }
 
     /**
      * 启动 Device Flow 认证（异步）
@@ -59,6 +171,8 @@ public class DwsAuthService {
      * 前端拿到 URL 后 window.open() 让用户授权，然后轮询 /dws/authStatus 等成功。
      */
     public Map<String, Object> startDeviceAuth() {
+        // 授权归属当前登录用户:token 落到该用户 bucket 的 .dws,后台线程也据此记录,不再"取最近一条"猜人。
+        final Long authUserId = CurrentUserHolder.getCurrentUserId();
         try {
             // 如果已有进程在跑，先 kill
             Process existing = deviceFlowProcess.getAndSet(null);
@@ -67,13 +181,9 @@ public class DwsAuthService {
             }
 
             List<String> cmd = List.of(DWS_BIN, "auth", "login", "--device", "-y");
-            log.info("[DwsAuth] starting device flow: {}", String.join(" ", cmd));
+            log.info("[DwsAuth] starting device flow for userId={}: {}", authUserId, String.join(" ", cmd));
 
-            ProcessBuilder pb = new ProcessBuilder(cmd);
-            pb.redirectErrorStream(true);
-            if (!pb.environment().containsKey("HOME")) {
-                pb.environment().put("HOME", System.getProperty("user.home"));
-            }
+            ProcessBuilder pb = newDwsProcess(authUserId, cmd);
             Process process = pb.start();
             deviceFlowProcess.set(process);
 
@@ -128,9 +238,9 @@ public class DwsAuthService {
                 try {
                     boolean finished = bgProcess.waitFor(900, TimeUnit.SECONDS);
                     if (finished && bgProcess.exitValue() == 0) {
-                        log.info("[DwsAuth] device flow completed successfully");
-                        // 记录授权到 DB
-                        recordAuthToDbInternal();
+                        log.info("[DwsAuth] device flow completed successfully for userId={}", authUserId);
+                        // 记录授权到 DB:用发起授权的用户身份,不再取最近一条猜人。
+                        recordAuthToDbForUser(authUserId);
                     } else if (!finished) {
                         log.warn("[DwsAuth] device flow timed out (900s)");
                         bgProcess.destroyForcibly();
@@ -161,13 +271,10 @@ public class DwsAuthService {
      * 直接用 token 登录（用于用户手动输入 token 的场景）
      */
     public boolean injectToken(String accessToken) {
+        Long userId = CurrentUserHolder.getCurrentUserId();
         try {
             List<String> cmd = List.of(DWS_BIN, "auth", "login", "--token", accessToken, "-y", "--format", "json");
-            ProcessBuilder pb = new ProcessBuilder(cmd);
-            pb.redirectErrorStream(true);
-            if (!pb.environment().containsKey("HOME")) {
-                pb.environment().put("HOME", System.getProperty("user.home"));
-            }
+            ProcessBuilder pb = newDwsProcess(userId, cmd);
             Process process = pb.start();
 
             StringBuilder output = new StringBuilder();
@@ -196,12 +303,23 @@ public class DwsAuthService {
      * 获取 dws auth 状态（包含完整认证信息）
      */
     public Map<String, Object> getAuthStatus() {
+        return getAuthStatus(CurrentUserHolder.getCurrentUserId());
+    }
+
+    /**
+     * 查询指定用户的 dws 授权状态:严格用该用户 bucket 下的 DWS_CONFIG_DIR。
+     * 关键:解析不出该用户专属目录时,直接判定未授权,【绝不回退全局 ~/.dws】——
+     * 否则会读到别人授权过的 token,误报该用户"已授权"(如非创建者看别人的源)。
+     */
+    public Map<String, Object> getAuthStatus(Long userId) {
         try {
             List<String> cmd = List.of(DWS_BIN, "auth", "status", "--format", "json");
             ProcessBuilder pb = new ProcessBuilder(cmd);
             pb.redirectErrorStream(true);
-            if (!pb.environment().containsKey("HOME")) {
-                pb.environment().put("HOME", System.getProperty("user.home"));
+            // 严格按用户隔离(禁 keychain + 专属 HOME + DWS_CONFIG_DIR);解析不出该用户目录则判未授权,绝不冒用全局。
+            if (!applyUserDwsEnv(pb.environment(), userId)) {
+                log.info("[DwsAuth] 无法解析用户 {} 的 dws 隔离目录,判定未授权", userId);
+                return Map.of("authenticated", false, "tokenValid", false);
             }
             Process process = pb.start();
 
@@ -239,7 +357,15 @@ public class DwsAuthService {
      * 如果 token 失效（refresh_token 过期），返回 false，需要用户重新走 device flow。
      */
     public boolean ensureAuthenticated(String userId) {
-        Map<String, Object> status = getAuthStatus();
+        // 按需求来源创建者查其专属 dws 目录的授权状态,不再共用全局。
+        Long uid = null;
+        try {
+            uid = userId != null ? Long.valueOf(userId) : null;
+        }
+        catch (NumberFormatException e) {
+            log.warn("[DwsAuth] invalid userId for ensureAuthenticated: {}", userId);
+        }
+        Map<String, Object> status = getAuthStatus(uid);
         if (Boolean.TRUE.equals(status.get("tokenValid"))) {
             return true;
         }
@@ -265,34 +391,24 @@ public class DwsAuthService {
     }
 
     /**
-     * 记录授权完成到 DB（后台线程调用，无 CurrentUser 上下文）
+     * 记录授权完成到 DB（后台线程调用，userId 由发起授权时捕获传入，不再"取最近一条"猜人）。
      */
-    private void recordAuthToDbInternal() {
+    private void recordAuthToDbForUser(Long userId) {
+        if (userId == null) {
+            log.warn("[DwsAuth] recordAuthToDbForUser skipped: null userId");
+            return;
+        }
         try {
-            Map<String, Object> status = getAuthStatus();
+            Map<String, Object> status = getAuthStatus(userId);
             String expiresAt = (String) status.getOrDefault("expiresAt", "");
 
             String metadata = String.format("{\"expiresAt\":\"%s\",\"authorizedAt\":\"%s\"}",
                 expiresAt, LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME));
 
-            // 后台线程没有用户上下文，查 DB 里最近的授权记录更新
-            LambdaQueryWrapper<UserPrivateParam> wrapper = new LambdaQueryWrapper<>();
-            wrapper.eq(UserPrivateParam::getParamKey, PARAM_KEY_DWS_TOKEN)
-                   .eq(UserPrivateParam::getDeleteFlag, "0")
-                   .orderByDesc(UserPrivateParam::getUpdateTime)
-                   .last("LIMIT 1");
-            UserPrivateParam existing = userPrivateParamMapper.selectOne(wrapper);
-
-            String cipher = Sm4Util.encrypt(metadata);
-            if (existing != null) {
-                existing.setParamValueCipher(cipher);
-                existing.setParamValueLast4("auth");
-                existing.setUpdateTime(new Date());
-                userPrivateParamMapper.updateById(existing);
-            }
-            log.info("[DwsAuth] recorded auth to DB");
+            saveOrUpdateParam(userId, PARAM_KEY_DWS_TOKEN, metadata);
+            log.info("[DwsAuth] recorded auth to DB for userId={}", userId);
         } catch (Exception e) {
-            log.error("[DwsAuth] recordAuthToDbInternal failed", e);
+            log.error("[DwsAuth] recordAuthToDbForUser failed, userId={}", userId, e);
         }
     }
 
@@ -300,14 +416,7 @@ public class DwsAuthService {
      * 记录授权完成到 DB（有用户上下文时调用）
      */
     public void recordAuthToDb() {
-        Long userId = CurrentUserHolder.getCurrentUserId();
-        Map<String, Object> status = getAuthStatus();
-        String expiresAt = (String) status.getOrDefault("expiresAt", "");
-
-        String metadata = String.format("{\"expiresAt\":\"%s\",\"authorizedAt\":\"%s\"}",
-            expiresAt, LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME));
-
-        saveOrUpdateParam(userId, PARAM_KEY_DWS_TOKEN, metadata);
+        recordAuthToDbForUser(CurrentUserHolder.getCurrentUserId());
     }
 
     private void saveOrUpdateParam(Long userId, String key, String value) {

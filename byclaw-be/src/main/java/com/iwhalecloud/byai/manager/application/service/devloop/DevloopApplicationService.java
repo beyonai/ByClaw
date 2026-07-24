@@ -1,42 +1,29 @@
 package com.iwhalecloud.byai.manager.application.service.devloop;
 
-import com.alibaba.fastjson.JSON;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import com.iwhalecloud.byai.common.constants.Constants;
-import com.iwhalecloud.byai.common.constants.files.FileStatus;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.common.page.PageInfo;
-import com.iwhalecloud.byai.common.storage.model.FileMetadata;
-import com.iwhalecloud.byai.common.storage.model.StorageLocation;
-import com.iwhalecloud.byai.common.util.ListUtil;
-import com.iwhalecloud.byai.common.util.PageHelperUtil;
-import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.common.ecrypt.Sm4Util;
-import com.iwhalecloud.byai.manager.application.service.files.FilesApplicationService;
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.manager.application.service.job.DevloopPatService;
 import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService;
 import com.iwhalecloud.byai.manager.application.service.user.UserBucketNamingService;
 import com.iwhalecloud.byai.manager.domain.devloop.service.*;
-import com.iwhalecloud.byai.manager.domain.file.service.CommonFilePathResolver;
-import com.iwhalecloud.byai.manager.domain.file.service.CommonFileStorage;
-import com.iwhalecloud.byai.manager.dto.devloop.ProjectDTO;
-import com.iwhalecloud.byai.manager.dto.devloop.ProjectListDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectMemberListDto;
-import com.iwhalecloud.byai.manager.dto.devloop.ProjectRepoDTO;
-import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileListDto;
-import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileQueryDto;
-import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileSaveDto;
-import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareTargetDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.ManualRequirementDeleteDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.ManualRequirementDTO;
+import com.iwhalecloud.byai.manager.dto.devloop.ManualRequirementUpdateDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ScanSourceDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskListQueryDto;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskStateDto;
 import com.iwhalecloud.byai.manager.dto.devloop.DevloopTaskViewDto;
 import com.iwhalecloud.byai.manager.dto.session.ByaiSessionDto;
 import com.iwhalecloud.byai.manager.entity.devloop.*;
-import com.iwhalecloud.byai.manager.entity.file.Files;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSessionExt;
@@ -44,18 +31,13 @@ import com.iwhalecloud.byai.manager.entity.users.UserPrivateParam;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.mapper.devloop.ProjectMapper;
 import com.iwhalecloud.byai.manager.mapper.devloop.ProjectRepoMapper;
-import com.iwhalecloud.byai.manager.mapper.devloop.ProjectShareTargetMapper;
-import com.iwhalecloud.byai.manager.mapper.devloop.ProjectSessionMapper;
 import com.iwhalecloud.byai.manager.mapper.devloop.ScanLogItemMapper;
 import com.iwhalecloud.byai.manager.mapper.resource.SsResourceMapper;
 import com.iwhalecloud.byai.manager.mapper.session.ByaiSessionExtMapper;
 import com.iwhalecloud.byai.manager.mapper.session.ByaiSessionMapper;
 import com.iwhalecloud.byai.manager.mapper.users.UserPrivateParamMapper;
-import com.iwhalecloud.byai.manager.qo.devloop.ProjectQo;
-import com.iwhalecloud.byai.manager.qo.devloop.ProjectSessionQo;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
 import com.iwhalecloud.byai.state.domain.chat.service.AssistantChatService;
-import com.iwhalecloud.byai.state.domain.file.service.FileService;
 import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import com.iwhalecloud.byai.common.util.threadPoolUti.ThreadPoolUtil;
@@ -65,8 +47,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.MediaType;
-import org.springframework.http.MediaTypeFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -74,14 +54,13 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import java.io.ByteArrayOutputStream;
 
-import java.io.InputStream;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.Executor;
 
 /**
- * 研发闭环应用服务 聚合项目管理、扫描源管理、扫描执行、日志查询、PAT管理、钉钉群搜索等业务逻辑
+ * 研发闭环应用服务 聚合扫描源管理、扫描执行、日志查询、PAT管理、钉钉群搜索等业务逻辑（项目管理见 ProjectApplicationService）
  */
 @Slf4j
 @Service
@@ -96,11 +75,7 @@ public class DevloopApplicationService {
     /** 会话私有工作区目录名,即 {bucket}/by/.sessions 里的 by 段,与前端会话空间口径一致。 */
     private static final String SESSION_WORKSPACE_SEGMENT = "by/.sessions";
 
-    private static final String DELETE_FLAG_NORMAL = "0";
-
     private static final String DELETE_FLAG_DELETED = "1";
-
-    private static final String PROJECT_TYPE_DEFAULT = "default";
 
     /** 所有用户共用的默认项目分组 ID，查询会话时必须再按创建人隔离。 */
     private static final Long DEFAULT_PROJECT_ID = -1L;
@@ -113,6 +88,25 @@ public class DevloopApplicationService {
 
     private static final int AGENT_MAX_CONCURRENT_DEFAULT = 1;
 
+    /** 手工录入需求复用扫描条目存储，但不作为可扫描渠道。 */
+    private static final String MANUAL_SOURCE_TYPE = "manual";
+
+    /** 数据库存储语言无关的内部标识；展示名称在每次请求时根据当前语言解析。 */
+    private static final String MANUAL_SOURCE_NAME = MANUAL_SOURCE_TYPE;
+
+    /**
+     * 手工录入内容的持久化包裹标识。外部扫描内容仍按原文存储，读取时只识别该流程创建的记录，
+     * 不改变已有渠道内容。
+     */
+    private static final String MANUAL_REQUIREMENT_CONTENT_KEY = "manualRequirement";
+
+    /** 手工需求 JSON 包裹中持久化的稳定、语言无关的来源标识。 */
+    private static final Set<String> MANUAL_REQUIREMENT_ORIGIN_TYPES =
+        Set.of("manual", "customer_feedback", "internal_proposal");
+
+    /** 仅用于内部 JSON 包裹的独立 Mapper，避免受 HTTP JSON 全局配置影响。 */
+    private static final ObjectMapper MANUAL_REQUIREMENT_MAPPER = new ObjectMapper();
+
     /**
      * 研发任务 LLM 对话异步执行线程池。 TtlExecutors 包装以透传 CurrentUserHolder 的 LoginInfo；任务创建接口据此立即返回， chat 在后台执行，避免前端等待数分钟。
      */
@@ -123,12 +117,6 @@ public class DevloopApplicationService {
 
     @Autowired
     private ProjectRepoMapper projectRepoMapper;
-
-    @Autowired
-    private ProjectShareTargetMapper projectShareTargetMapper;
-
-    @Autowired
-    private ProjectSessionMapper projectSessionMapper;
 
     @Autowired
     private ByaiSessionMapper byaiSessionMapper;
@@ -152,6 +140,9 @@ public class DevloopApplicationService {
     private DingtalkScanService dingtalkScanService;
 
     @Autowired
+    private DingtalkTodoScanService dingtalkTodoScanService;
+
+    @Autowired
     private DwsAuthService dwsAuthService;
 
     @Autowired
@@ -159,9 +150,6 @@ public class DevloopApplicationService {
 
     @Autowired
     private ProjectMemberService projectMemberService;
-
-    @Autowired
-    private ProjectSessionService projectSessionService;
 
     @Autowired
     private SequenceService sequenceService;
@@ -191,447 +179,7 @@ public class DevloopApplicationService {
     private ByaiSystemConfigService byaiSystemConfigService;
 
     @Autowired
-    private ProjectShareFileService projectShareFileService;
-
-    @Autowired
-    private FilesApplicationService filesApplicationService;
-
-    @Autowired
-    private FileService fileService;
-
-    @Autowired
-    private CommonFileStorage commonFileStorage;
-
-    @Autowired
-    private CommonFilePathResolver commonFilePathResolver;
-
-    @Autowired
     private UserBucketNamingService userBucketNamingService;
-
-    /** 创建项目，可同时关联代码仓库 */
-    @Transactional(rollbackFor = Exception.class)
-    public ResponseUtil<Map<String, Object>> createProject(ProjectDTO dto) {
-        String projectName = normalizeProjectName(dto.getProjectName());
-        if (projectName.isEmpty()) {
-            return ResponseUtil.failRes("项目名称不能为空");
-        }
-        if (existsProjectName(projectName, null)) {
-            return ResponseUtil.failRes("项目名称已存在");
-        }
-
-        Project project = new Project();
-        project.setProjectId(sequenceService.nextVal());
-        project.setProjectName(projectName);
-        project.setDescription(dto.getDescription());
-        project.setResourceId(dto.getResourceId());
-        project.setProjectType(dto.getProjectType() != null ? dto.getProjectType() : "normal");
-        project.setIsShare(dto.getIsShare() != null ? dto.getIsShare() : "N");
-        project.setCreateBy(CurrentUserHolder.getCurrentUserId());
-        project.setCreateTime(new Date());
-        project.setDeleteFlag(DELETE_FLAG_NORMAL);
-        projectMapper.insert(project);
-
-        saveProjectRepos(project.getProjectId(), dto.getRepos());
-        if (Constants.YES_VALUE_Y.equalsIgnoreCase(project.getIsShare())) {
-            this.saveOrUpdateProjectMember(project.getProjectId(), dto.getShareTargets());
-        }
-
-        // 创建者自动加为 owner 成员
-        projectMemberService.addMember(project.getProjectId(), CurrentUserHolder.getCurrentUserId(), "owner");
-
-        Map<String, Object> result = new HashMap<>();
-        result.put("projectId", project.getProjectId());
-        return ResponseUtil.successResponse(result);
-    }
-
-    /** 查询项目列表 */
-    public List<ProjectListDto> listProjects(ProjectQo projectQo) {
-        ProjectQo query = projectQo == null ? new ProjectQo() : projectQo;
-        query.setCreateBy(CurrentUserHolder.getCurrentUserId());
-        return projectMapper.selectProjectsByQo(query);
-    }
-
-    /** 按项目管理文档修改项目基础信息，并在传入 repos 时整体替换仓库列表。 */
-    @Transactional(rollbackFor = Exception.class)
-    public ResponseUtil<Void> updateProject(ProjectDTO dto) {
-        Project project = projectMapper.selectById(dto.getProjectId());
-
-        if (project == null || DELETE_FLAG_DELETED.equals(project.getDeleteFlag())) {
-            return ResponseUtil.failRes("Project not found");
-        }
-
-        if (dto.getProjectName() != null) {
-            String projectName = normalizeProjectName(dto.getProjectName());
-            if (projectName.isEmpty()) {
-                return ResponseUtil.failRes("项目名称不能为空");
-            }
-            if (existsProjectName(projectName, dto.getProjectId())) {
-                return ResponseUtil.failRes("项目名称已存在");
-            }
-            project.setProjectName(projectName);
-        }
-        if (dto.getDescription() != null) {
-            project.setDescription(dto.getDescription());
-        }
-        if (dto.getResourceId() != null) {
-            project.setResourceId(dto.getResourceId());
-        }
-        if (dto.getProjectType() != null) {
-            if (PROJECT_TYPE_DEFAULT.equals(project.getProjectType())
-                && !PROJECT_TYPE_DEFAULT.equals(dto.getProjectType())) {
-                // 默认项目类型由系统维护，编辑时只能回显，不能被接口改成普通/研发项目。
-                return ResponseUtil.failRes("默认项目不允许修改项目类型");
-            }
-            if (!PROJECT_TYPE_DEFAULT.equals(project.getProjectType())
-                && PROJECT_TYPE_DEFAULT.equals(dto.getProjectType())) {
-                // 默认项目不允许通过编辑接口手动创建，避免普通项目被改成系统内置分组。
-                return ResponseUtil.failRes("项目类型不允许修改为默认项目");
-            }
-            project.setProjectType(dto.getProjectType());
-        }
-        if (PROJECT_TYPE_DEFAULT.equals(project.getProjectType())) {
-            if (dto.getIsShare() != null && !Constants.NO_VALUE_N.equalsIgnoreCase(dto.getIsShare())) {
-                // 默认项目不支持共享成员配置，接口层固定为否，避免绕过前端打开共享。
-                return ResponseUtil.failRes("默认项目不允许共享");
-            }
-            project.setIsShare(Constants.NO_VALUE_N);
-        }
-        else if (dto.getIsShare() != null) {
-            project.setIsShare(dto.getIsShare());
-        }
-        project.setUpdateBy(CurrentUserHolder.getCurrentUserId());
-        project.setUpdateTime(new Date());
-        projectMapper.updateById(project);
-        if (dto.getRepos() != null) {
-            // 接口文档 update 支持 repos，传入时以前端提交的仓库列表为准做整体替换。
-            projectRepoMapper
-                .delete(new LambdaQueryWrapper<ProjectRepo>().eq(ProjectRepo::getProjectId, dto.getProjectId()));
-            saveProjectRepos(dto.getProjectId(), dto.getRepos());
-        }
-
-        // 如果不分享的，移除分享成员
-        if (Constants.NO_VALUE_N.equalsIgnoreCase(project.getIsShare())) {
-            projectMemberService.removeMember(project.getProjectId(), "member");
-        }
-        else if (dto.getShareTargets() != null) {
-            this.saveOrUpdateProjectMember(project.getProjectId(), dto.getShareTargets());
-        }
-
-        return ResponseUtil.successResponse();
-    }
-
-    /**
-     * 保存或者更新项目成员
-     *
-     * @param projectId 项目标识
-     * @param projectShareTargetDTOs 分享成员列表
-     */
-    private void saveOrUpdateProjectMember(Long projectId, List<ProjectShareTargetDTO> projectShareTargetDTOs) {
-
-        if (ListUtil.isEmpty(projectShareTargetDTOs)) {
-            return;
-        }
-
-        for (ProjectShareTargetDTO projectShareTargetDTO : projectShareTargetDTOs) {
-
-            Long userId = projectShareTargetDTO.getTargetId();
-
-            // 如果存在，则跳，不存在则添加
-            ProjectMember projectMember = projectMemberService.findByProjectAndUser(projectId, userId);
-            if (projectMember != null) {
-                continue;
-            }
-            else {
-                projectMemberService.addMember(projectId, userId, "member");
-            }
-        }
-    }
-
-    /** 软删除项目 */
-    @Transactional(rollbackFor = Exception.class)
-    public ResponseUtil<Void> deleteProject(Long projectId) {
-        Project project = projectMapper.selectById(projectId);
-        if (project == null) {
-            // 删除操作按幂等处理，列表旧数据或重复提交时不再把已不存在项目暴露成报错。
-            log.warn("Delete project ignored because project not found, projectId={}", projectId);
-            return ResponseUtil.successResponse(null);
-        }
-        if (DELETE_FLAG_DELETED.equals(project.getDeleteFlag())) {
-            // 已经软删除的项目再次删除视为成功，前端刷新列表后会自然消失。
-            log.warn("Delete project ignored because project already deleted, projectId={}", projectId);
-            return ResponseUtil.successResponse(null);
-        }
-        if (PROJECT_TYPE_DEFAULT.equals(project.getProjectType())) {
-            // 默认项目是系统内置分组，接口层兜底禁止删除，避免绕过前端操作入口。
-            log.warn("Delete project rejected because project is default, projectId={}", projectId);
-            return ResponseUtil.failRes("默认项目不允许删除");
-        }
-        project.setDeleteFlag(DELETE_FLAG_DELETED);
-        project.setUpdateBy(CurrentUserHolder.getCurrentUserId());
-        project.setUpdateTime(new Date());
-        projectMapper.updateById(project);
-        return ResponseUtil.successResponse(null);
-    }
-
-    /** 查询项目详情，含关联仓库和会话列表 */
-    public ResponseUtil<Map<String, Object>> getProject(Long projectId) {
-        Project project = projectMapper.selectById(projectId);
-        if (project == null || DELETE_FLAG_DELETED.equals(project.getDeleteFlag())) {
-            return ResponseUtil.failRes("Project not found");
-        }
-        LambdaQueryWrapper<ProjectRepo> repoWrapper = new LambdaQueryWrapper<>();
-        repoWrapper.eq(ProjectRepo::getProjectId, projectId);
-        List<ProjectRepo> repos = projectRepoMapper.selectList(repoWrapper);
-        List<ByaiSessionDto> sessions = safeListProjectSessions(projectId);
-
-        Map<String, Object> map = new HashMap<>();
-        map.put("projectId", project.getProjectId());
-        map.put("projectName", project.getProjectName());
-        map.put("description", project.getDescription());
-        map.put("resourceId", project.getResourceId());
-        map.put("projectType", project.getProjectType());
-        map.put("isShare", project.getIsShare());
-        map.put("repos", repos);
-        map.put("shareTargets", safeListProjectShareTargets(projectId));
-        map.put("sessions", sessions);
-        map.put("sessionCount", sessions.size());
-        return ResponseUtil.successResponse(map);
-    }
-
-    private String normalizeProjectName(String projectName) {
-        return projectName == null ? "" : projectName.trim();
-    }
-
-    private boolean existsProjectName(String projectName, Long excludeProjectId) {
-        LambdaQueryWrapper<Project> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(Project::getDeleteFlag, DELETE_FLAG_NORMAL).eq(Project::getProjectName, projectName);
-        if (excludeProjectId != null) {
-            wrapper.ne(Project::getProjectId, excludeProjectId);
-        }
-        // 新建/编辑统一以后端最终入库名称为准查重，避免并发或绕过前端导致同名项目。
-        Long count = projectMapper.selectCount(wrapper);
-        return count != null && count > 0;
-    }
-
-    private Long safeCountProjectSessions(Long projectId) {
-        try {
-            Long sessionCount = projectSessionMapper.countSessionsByProjectId(projectId);
-            return sessionCount == null ? 0L : sessionCount;
-        }
-        catch (Exception error) {
-            if (isProjectSessionTableMissing(error)) {
-                // 兼容已执行旧版 V0.3.0 但漏建项目会话关联表的环境，避免项目列表整体不可用。
-                log.warn("Project session relation table is missing, fallback sessionCount=0, projectId={}", projectId);
-                return 0L;
-            }
-            throw error instanceof RuntimeException ? (RuntimeException) error : new IllegalStateException(error);
-        }
-    }
-
-    private List<ByaiSessionDto> safeListProjectSessions(Long projectId) {
-        try {
-            return projectSessionMapper.selectSessionsByProjectId(projectId);
-        }
-        catch (Exception error) {
-            if (isProjectSessionTableMissing(error)) {
-                // 表缺失时详情页先展示项目基础信息，后续迁移补表后会话列表自动恢复。
-                log.warn("Project session relation table is missing, fallback sessions empty, projectId={}", projectId);
-                return Collections.emptyList();
-            }
-            throw error instanceof RuntimeException ? (RuntimeException) error : new IllegalStateException(error);
-        }
-    }
-
-    private boolean isProjectSessionTableMissing(Throwable error) {
-        return isTableMissing(error, "byai_project_session");
-    }
-
-    private boolean isProjectShareTableMissing(Throwable error) {
-        return isTableMissing(error, "byai_project_share");
-    }
-
-    private boolean isTableMissing(Throwable error, String tableName) {
-        Throwable current = error;
-        while (current != null) {
-            String message = current.getMessage();
-            if (message != null) {
-                String lowerMessage = message.toLowerCase(Locale.ROOT);
-                if (lowerMessage.contains(tableName) && lowerMessage.contains("does not exist")) {
-                    return true;
-                }
-            }
-            current = current.getCause();
-        }
-        return false;
-    }
-
-    private void saveProjectRepos(Long projectId, List<ProjectRepoDTO> repos) {
-        if (repos == null) {
-            return;
-        }
-        for (ProjectRepoDTO repoDto : repos) {
-            insertProjectRepo(projectId, repoDto);
-        }
-    }
-
-    /** 插入单条项目仓库；全名为空则跳过。供批量保存与单独新增复用。 */
-    private ProjectRepo insertProjectRepo(Long projectId, ProjectRepoDTO repoDto) {
-        if (repoDto == null || repoDto.getRepoFullName() == null || repoDto.getRepoFullName().trim().isEmpty()) {
-            return null;
-        }
-        String defaultBranch = repoDto.getDefaultBranch() != null ? repoDto.getDefaultBranch().trim() : "";
-        ProjectRepo repo = new ProjectRepo();
-        repo.setRepoId(sequenceService.nextVal());
-        repo.setProjectId(projectId);
-        repo.setRepoFullName(repoDto.getRepoFullName().trim());
-        repo.setRepoUrl(repoDto.getRepoUrl() != null ? repoDto.getRepoUrl().trim() : null);
-        repo.setDefaultBranch(defaultBranch.isEmpty() ? "main" : defaultBranch);
-        repo.setCreateBy(String.valueOf(CurrentUserHolder.getCurrentUserId()));
-        repo.setCreateTime(new Date());
-        projectRepoMapper.insert(repo);
-        return repo;
-    }
-
-    /** 新增单个项目仓库，供扫描源关联仓库时即席补充。 */
-    public ResponseUtil<Map<String, Object>> createProjectRepo(ProjectRepoDTO dto) {
-        if (dto == null || dto.getProjectId() == null) {
-            return ResponseUtil.failRes("projectId不能为空");
-        }
-        if (dto.getRepoFullName() == null || dto.getRepoFullName().trim().isEmpty()) {
-            return ResponseUtil.failRes("仓库全名不能为空");
-        }
-        ProjectRepo repo = insertProjectRepo(dto.getProjectId(), dto);
-        Map<String, Object> result = new HashMap<>();
-        result.put("repoId", repo.getRepoId());
-        result.put("repoFullName", repo.getRepoFullName());
-        result.put("repoUrl", repo.getRepoUrl());
-        result.put("defaultBranch", repo.getDefaultBranch());
-        return ResponseUtil.successResponse(result);
-    }
-
-    /** 删除项目仓库；已被扫描源关联时拒绝删除，避免任务丢失开发仓库。 */
-    public ResponseUtil<Void> deleteProjectRepo(Long repoId) {
-        if (repoId == null) {
-            return ResponseUtil.failRes("repoId不能为空");
-        }
-        Long boundCount = scanSourceService.countByRepoId(repoId);
-        if (boundCount != null && boundCount > 0) {
-            return ResponseUtil.failRes("该仓库已被 " + boundCount + " 个扫描源关联，请先解除关联再删除");
-        }
-        projectRepoMapper.deleteById(repoId);
-        return ResponseUtil.successResponse(null);
-    }
-
-    private List<Map<String, Object>> listProjectShareTargets(Long projectId) {
-        LambdaQueryWrapper<ProjectShareTarget> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(ProjectShareTarget::getProjectId, projectId).orderByAsc(ProjectShareTarget::getCreateTime);
-        List<ProjectShareTarget> targets = projectShareTargetMapper.selectList(wrapper);
-        List<Map<String, Object>> list = new ArrayList<>();
-        for (ProjectShareTarget target : targets) {
-            Map<String, Object> map = new HashMap<>();
-            map.put("shareId", target.getShareId());
-            map.put("projectId", target.getProjectId());
-            map.put("targetType", target.getTargetType());
-            map.put("targetId", target.getTargetId());
-            map.put("targetName", target.getTargetName());
-            map.put("createBy", target.getCreateBy());
-            map.put("createTime", target.getCreateTime());
-            list.add(map);
-        }
-        return list;
-    }
-
-    private List<Map<String, Object>> safeListProjectShareTargets(Long projectId) {
-        try {
-            return listProjectShareTargets(projectId);
-        }
-        catch (Exception error) {
-            if (isProjectShareTableMissing(error)) {
-                // 兼容已执行旧版 V0.3.0 但缺少项目共享对象表的环境，避免项目列表/详情整体不可用。
-                log.warn("Project share target table is missing, fallback shareTargets empty, projectId={}", projectId);
-                return Collections.emptyList();
-            }
-            throw error instanceof RuntimeException ? (RuntimeException) error : new IllegalStateException(error);
-        }
-    }
-
-    /** 绑定会话到项目；项目空间是一组会话分组，一个会话只保留一个有效项目归属。 */
-    @Transactional(rollbackFor = Exception.class)
-    public ResponseUtil<Void> bindProjectSession(Long projectId, Long sessionId) {
-        Project project = projectMapper.selectById(projectId);
-        if (project == null || DELETE_FLAG_DELETED.equals(project.getDeleteFlag())) {
-            return ResponseUtil.failRes("Project not found");
-        }
-        ByaiSession session = byaiSessionMapper.selectById(sessionId);
-        if (session == null) {
-            return ResponseUtil.failRes("Session not found");
-        }
-
-        String currentUserId = String.valueOf(CurrentUserHolder.getCurrentUserId());
-        Date now = new Date();
-
-        // 项目会话列表按 byai_session.project_id 查询，关系表仅用于保留归属历史，绑定时必须同步主记录。
-        session.setProjectId(projectId);
-        session.setUpdateBy(CurrentUserHolder.getCurrentUserId());
-        session.setUpdateTime(now);
-        byaiSessionMapper.updateById(session);
-
-        ProjectSession archivedRelation = new ProjectSession();
-        archivedRelation.setDeleteFlag(DELETE_FLAG_DELETED);
-        archivedRelation.setUpdateBy(currentUserId);
-        archivedRelation.setUpdateTime(now);
-        projectSessionMapper.update(archivedRelation,
-            new LambdaUpdateWrapper<ProjectSession>().eq(ProjectSession::getSessionId, sessionId)
-                .eq(ProjectSession::getDeleteFlag, DELETE_FLAG_NORMAL).ne(ProjectSession::getProjectId, projectId));
-
-        LambdaQueryWrapper<ProjectSession> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(ProjectSession::getProjectId, projectId).eq(ProjectSession::getSessionId, sessionId);
-        List<ProjectSession> existingRelations = projectSessionMapper.selectList(wrapper);
-        if (!existingRelations.isEmpty()) {
-            ProjectSession relation = existingRelations.get(0);
-            relation.setDeleteFlag(DELETE_FLAG_NORMAL);
-            relation.setUpdateBy(currentUserId);
-            relation.setUpdateTime(now);
-            projectSessionMapper.updateById(relation);
-            return ResponseUtil.successResponse(null);
-        }
-
-        ProjectSession relation = new ProjectSession();
-        relation.setRelationId(sequenceService.nextVal());
-        relation.setProjectId(projectId);
-        relation.setSessionId(sessionId);
-        relation.setCreateBy(currentUserId);
-        relation.setCreateTime(now);
-        relation.setDeleteFlag(DELETE_FLAG_NORMAL);
-        projectSessionMapper.insert(relation);
-        return ResponseUtil.successResponse(null);
-    }
-
-    /** 取消项目和会话的有效关联，保留历史记录便于后续恢复或审计。 */
-    @Transactional(rollbackFor = Exception.class)
-    public ResponseUtil<Void> unbindProjectSession(Long projectId, Long sessionId) {
-        ProjectSession relation = new ProjectSession();
-        relation.setDeleteFlag(DELETE_FLAG_DELETED);
-        relation.setUpdateBy(String.valueOf(CurrentUserHolder.getCurrentUserId()));
-        relation.setUpdateTime(new Date());
-        projectSessionMapper.update(relation,
-            new LambdaUpdateWrapper<ProjectSession>().eq(ProjectSession::getProjectId, projectId)
-                .eq(ProjectSession::getSessionId, sessionId).eq(ProjectSession::getDeleteFlag, DELETE_FLAG_NORMAL));
-        return ResponseUtil.successResponse(null);
-    }
-
-    /**
-     * 根据项目查询关联会话列表。 ProjectSessionQo 透传到领域服务 / mapper。
-     */
-    public PageInfo<ByaiSessionDto> listSessionsByProject(ProjectSessionQo projectSessionQo) {
-        if (projectSessionQo.getProjectId() == null) {
-            return PageHelperUtil.emptyPage(projectSessionQo.getPageNum(), projectSessionQo.getPageSize());
-        }
-
-        projectSessionQo.setCreateBy(CurrentUserHolder.getCurrentUserId());
-
-        return projectSessionService.listSessionsByProject(projectSessionQo);
-    }
 
     /** 创建扫描源 */
     public ResponseUtil<Map<String, Object>> createScanSource(ScanSourceDTO dto) {
@@ -653,8 +201,12 @@ public class DevloopApplicationService {
         return ResponseUtil.successResponse(result);
     }
 
-    /** 修改扫描源配置（名称、config、cron） */
+    /** 修改扫描源配置（名称、config、cron）。仅创建者可改。 */
     public ResponseUtil<Void> updateScanSource(ScanSourceDTO dto) {
+        String denied = requireSourceCreator(dto.getSourceId());
+        if (denied != null) {
+            return ResponseUtil.failRes(denied);
+        }
         ScanSource source = new ScanSource();
         source.setSourceId(dto.getSourceId());
         source.setSourceName(dto.getSourceName());
@@ -668,16 +220,40 @@ public class DevloopApplicationService {
         return ResponseUtil.successResponse(null);
     }
 
-    /** 删除扫描源 */
+    /** 删除扫描源。仅创建者可删。 */
     public ResponseUtil<Void> deleteScanSource(Long sourceId) {
+        String denied = requireSourceCreator(sourceId);
+        if (denied != null) {
+            return ResponseUtil.failRes(denied);
+        }
         scanSourceService.delete(sourceId);
         return ResponseUtil.successResponse(null);
     }
 
-    /** 查询项目下的扫描源列表 */
+    /**
+     * 校验当前登录用户是否为该扫描源创建者。是则返回 null(放行);否则返回错误提示。
+     * 后端硬控制:前端隐藏按钮只是体验,越权改删/授权必须在服务端挡住。
+     */
+    private String requireSourceCreator(Long sourceId) {
+        if (sourceId == null) {
+            return "参数缺失";
+        }
+        ScanSource source = scanSourceService.findById(sourceId);
+        if (source == null) {
+            return "来源不存在";
+        }
+        Long currentUserId = CurrentUserHolder.getCurrentUserId();
+        if (currentUserId == null || !String.valueOf(currentUserId).equals(source.getCreateBy())) {
+            return "只有来源创建者可以操作";
+        }
+        return null;
+    }
+
+    /** 查询项目可配置的扫描渠道；手工来源只是扫描日志基础设施，不能展示在渠道配置页。 */
     public ResponseUtil<List<Map<String, Object>>> listScanSources(Long projectId) {
         List<Map<String, Object>> list = scanSourceService.listByProjectId(projectId).stream()
-            .map(this::scanSourceToVo).collect(java.util.stream.Collectors.toList());
+            .filter(source -> !MANUAL_SOURCE_TYPE.equals(source.getSourceType())).map(this::scanSourceToVo)
+            .collect(java.util.stream.Collectors.toList());
         return ResponseUtil.successResponse(list);
     }
 
@@ -694,7 +270,23 @@ public class DevloopApplicationService {
         map.put("confirmMode", s.getConfirmMode());
         map.put("scoreThreshold", s.getScoreThreshold());
         map.put("lastScanTime", s.getLastScanTime());
+        // 创建者信息:前端据此判断"当前用户是否创建者",控制授权/编辑/删除入口;createByName 供展示。
+        map.put("createBy", s.getCreateBy());
+        map.put("createByName", resolveUserName(parseUserId(s.getCreateBy())));
         return map;
+    }
+
+    /** 字符串 userId 转 Long,非法返回 null(供 resolveUserName 等按 Long 取用户名)。 */
+    private Long parseUserId(String userId) {
+        if (userId == null || userId.trim().isEmpty()) {
+            return null;
+        }
+        try {
+            return Long.valueOf(userId.trim());
+        }
+        catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     /** 启用或停用扫描源 */
@@ -726,6 +318,12 @@ public class DevloopApplicationService {
             items = dingtalkScanService.scan(source);
             if (items == null) {
                 return ResponseUtil.failRes("钉钉扫描失败，请检查：1) DWS是否已授权 2) 当前组织是否有消息搜索权限 3) 查看扫描日志获取详细错误");
+            }
+        }
+        else if ("dingtalk_todo".equals(type)) {
+            items = dingtalkTodoScanService.scan(source);
+            if (items == null) {
+                return ResponseUtil.failRes("钉钉待办扫描失败，请检查：1) DWS是否已授权 2) 当前组织待办访问权限 3) 查看扫描日志获取详细错误");
             }
         }
         else {
@@ -781,8 +379,8 @@ public class DevloopApplicationService {
     }
 
     /**
-     * 按项目一次查全部需求(action=created)，DB 层按创建时间倒序，供需求列表直查。
-     * 只查两次(源列表 + 条目 IN 源)，替代前端逐源循环请求(N+1)与内存排序；顺带回填 sourceName/sourceType。
+     * 按项目一次查全部需求(action=created)，DB 层按创建时间倒序，供需求列表直查。 只查两次(源列表 + 条目 IN 源)，替代前端逐源循环请求(N+1)与内存排序；顺带回填
+     * sourceName/sourceType。
      */
     public ResponseUtil<List<Map<String, Object>>> listRequirementsByProject(Long projectId) {
         return listRequirementsByProject(projectId, null);
@@ -808,17 +406,215 @@ public class DevloopApplicationService {
         return ResponseUtil.successResponse(list);
     }
 
+    /**
+     * 新建手工需求，复用扫描日志存储，使需求列表、任务启动和任务详情继续沿用既有关联链路。
+     * 每个项目只维护一个禁用的内部来源，不参与定时扫描或渠道配置。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public ResponseUtil<Map<String, Object>> createManualRequirement(ManualRequirementDTO dto) {
+        if (dto == null || dto.getProjectId() == null) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.manualRequirement.projectId.required"));
+        }
+        String title = StringUtils.trimToNull(dto.getTitle());
+        if (title == null) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.manualRequirement.title.required"));
+        }
+        String originalContent = StringUtils.trimToNull(dto.getOriginalContent());
+        if (originalContent == null) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.manualRequirement.originalContent.required"));
+        }
+        String originType = StringUtils.defaultIfBlank(dto.getSourceType(), "manual").trim();
+        if (!MANUAL_REQUIREMENT_ORIGIN_TYPES.contains(originType)) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.manualRequirement.sourceType.unsupported"));
+        }
+        if (!isProjectRepo(dto.getProjectId(), dto.getRepoId())) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.manualRequirement.repo.invalid"));
+        }
+
+        ScanSource source = findOrCreateManualSource(dto.getProjectId());
+        ScanLog log = scanLogService.createLog(source.getSourceId(), dto.getProjectId());
+        ScanLogItem item = scanLogService.createItem(log.getLogId(), source.getSourceId(), title,
+            serializeManualRequirementContent(originType, dto.getBranch(), dto.getRepoId(), originalContent,
+                dto.getProductContent()),
+            "manual:" + UUID.randomUUID(), null, "created");
+        scanLogService.completeLog(log.getLogId(), 1, 1);
+
+        return ResponseUtil.successResponse(toRequirementMap(item, source));
+    }
+
+    /**
+     * 修改手工录入需求。需求必须仍未启动，且通过内部 manual 来源和 JSON 包裹双重识别，
+     * 防止扫描渠道需求被误改。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public ResponseUtil<Map<String, Object>> updateManualRequirement(ManualRequirementUpdateDTO dto) {
+        if (dto == null || dto.getItemId() == null) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.manualRequirement.itemId.required"));
+        }
+        String title = StringUtils.trimToNull(dto.getTitle());
+        if (title == null) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.manualRequirement.title.required"));
+        }
+        String originalContent = StringUtils.trimToNull(dto.getOriginalContent());
+        if (originalContent == null) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.manualRequirement.originalContent.required"));
+        }
+        String originType = StringUtils.defaultIfBlank(dto.getSourceType(), "manual").trim();
+        if (!MANUAL_REQUIREMENT_ORIGIN_TYPES.contains(originType)) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.manualRequirement.sourceType.unsupported"));
+        }
+
+        ScanLogItem item = scanLogItemMapper.selectById(dto.getItemId());
+        ScanSource source = getEditableManualRequirementSource(item);
+        if (source == null) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.manualRequirement.edit.forbidden"));
+        }
+        if (!isProjectRepo(source.getProjectId(), dto.getRepoId())) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.manualRequirement.repo.invalid"));
+        }
+
+        ScanLogItem updateItem = new ScanLogItem();
+        updateItem.setTitle(title);
+        updateItem.setContent(serializeManualRequirementContent(originType, dto.getBranch(), dto.getRepoId(),
+            originalContent, dto.getProductContent()));
+        LambdaUpdateWrapper<ScanLogItem> updateWrapper = new LambdaUpdateWrapper<ScanLogItem>()
+            .eq(ScanLogItem::getItemId, dto.getItemId()).eq(ScanLogItem::getAction, "created")
+            .isNull(ScanLogItem::getSessionId);
+        if (scanLogItemMapper.update(updateItem, updateWrapper) == 0) {
+            // 与创建任务并发时，由条件更新保证已启动需求不会被覆盖。
+            return ResponseUtil.failRes(I18nUtil.get("devloop.manualRequirement.edit.forbidden"));
+        }
+
+        item.setTitle(updateItem.getTitle());
+        item.setContent(updateItem.getContent());
+        return ResponseUtil.successResponse(toRequirementMap(item, source));
+    }
+
+    /**
+     * 删除手工录入需求。先验证手工且未启动，再核对所属项目创建者，最后使用条件删除应对并发启动任务。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public ResponseUtil<Void> deleteManualRequirement(ManualRequirementDeleteDTO dto) {
+        if (dto == null || dto.getItemId() == null) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.manualRequirement.itemId.required"));
+        }
+
+        ScanLogItem item = scanLogItemMapper.selectById(dto.getItemId());
+        ScanSource source = getEditableManualRequirementSource(item);
+        if (source == null) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.manualRequirement.delete.forbidden"));
+        }
+
+        Project project = projectMapper.selectById(source.getProjectId());
+        if (project == null || DELETE_FLAG_DELETED.equals(project.getDeleteFlag())) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.manualRequirement.project.notFound"));
+        }
+        Long currentUserId = CurrentUserHolder.getCurrentUserId();
+        if (currentUserId == null || !currentUserId.equals(project.getCreateBy())) {
+            return ResponseUtil.failRes(I18nUtil.get("devloop.manualRequirement.delete.creator.required"));
+        }
+
+        LambdaQueryWrapper<ScanLogItem> deleteWrapper = new LambdaQueryWrapper<ScanLogItem>()
+            .eq(ScanLogItem::getItemId, dto.getItemId()).eq(ScanLogItem::getAction, "created")
+            .isNull(ScanLogItem::getSessionId);
+        if (scanLogItemMapper.delete(deleteWrapper) == 0) {
+            // 与创建任务并发时，由条件删除保证已启动需求不会被删除。
+            return ResponseUtil.failRes(I18nUtil.get("devloop.manualRequirement.delete.forbidden"));
+        }
+        return ResponseUtil.successResponse(null);
+    }
+
+    /**
+     * 返回可编辑的手工需求来源；未启动、内部 manual 来源且内容可解析时才放行。
+     * 该校验同时保证外部扫描需求保持原有只读行为。
+     */
+    private ScanSource getEditableManualRequirementSource(ScanLogItem item) {
+        if (item == null || item.getSourceId() == null || item.getSessionId() != null
+            || !"created".equals(item.getAction())) {
+            return null;
+        }
+        ScanSource source = scanSourceService.findById(item.getSourceId());
+        if (source == null || !MANUAL_SOURCE_TYPE.equals(source.getSourceType())) {
+            return null;
+        }
+        return parseManualRequirementContent(item.getContent()) == null ? null : source;
+    }
+
+    /**
+     * 每个项目复用一个禁用来源，因为扫描条目、任务派生和需求查询都通过 sourceId 关联。
+     * 该来源永不作为外部扫描渠道被调度。
+     */
+    private ScanSource findOrCreateManualSource(Long projectId) {
+        for (ScanSource source : scanSourceService.listByProjectId(projectId)) {
+            if (MANUAL_SOURCE_TYPE.equals(source.getSourceType())) {
+                return source;
+            }
+        }
+
+        ScanSource source = new ScanSource();
+        source.setProjectId(projectId);
+        source.setSourceName(MANUAL_SOURCE_NAME);
+        source.setSourceType(MANUAL_SOURCE_TYPE);
+        source.setConfig("{}");
+        source.setEnabled("0");
+        source.setConfirmMode("manual");
+        source.setCreateBy(String.valueOf(CurrentUserHolder.getCurrentUserId()));
+        return scanSourceService.create(source);
+    }
+
+    /**
+     * 校验关联仓库归属当前项目。手工需求的仓库可为空，以兼容历史数据和项目尚未配置仓库的场景。
+     */
+    private boolean isProjectRepo(Long projectId, Long repoId) {
+        return repoId == null || findProjectRepo(projectId, repoId) != null;
+    }
+
+    /**
+     * 按项目范围查找仓库，避免请求参数或历史异常数据关联到其他项目的仓库。
+     */
+    private ProjectRepo findProjectRepo(Long projectId, Long repoId) {
+        if (projectId == null || repoId == null) {
+            return null;
+        }
+        ProjectRepo repo = projectRepoMapper.selectById(repoId);
+        return repo != null && projectId.equals(repo.getProjectId()) ? repo : null;
+    }
+
+    /**
+     * 将语言无关字段保存为带命名空间的 JSON 包裹，而不存已渲染的文案。
+     * 既可无歧义解析，也兼容历史和第三方渠道的纯文本扫描内容。
+     */
+    private String serializeManualRequirementContent(String originType, String branch, Long repoId,
+        String originalContent, String productContent) {
+        Map<String, Object> content = new LinkedHashMap<>();
+        content.put("sourceType", originType);
+        content.put("branch", StringUtils.trimToEmpty(branch));
+        // 仓库归属写入单条需求，项目共用的 manual 扫描源不保存 repoId，避免互相覆盖。
+        content.put("repoId", repoId);
+        content.put("originalContent", originalContent);
+        content.put("productContent", StringUtils.trimToEmpty(productContent));
+        try {
+            return MANUAL_REQUIREMENT_MAPPER.writeValueAsString(Map.of(MANUAL_REQUIREMENT_CONTENT_KEY, content));
+        }
+        catch (Exception e) {
+            throw new IllegalStateException(I18nUtil.get("devloop.manualRequirement.content.serialize.failed"), e);
+        }
+    }
+
     private Map<String, Object> toRequirementMap(ScanLogItem item) {
         return toRequirementMap(item, null);
     }
 
-    /** 扫描条目转前端需求视图，统一各需求列表接口字段口径；source 非空时回填来源名/类型。 */
+    /**
+     * 扫描条目转统一需求视图；手工来源名称与内容在读取时国际化，避免持久化内部标识和已渲染文案。
+     */
     private Map<String, Object> toRequirementMap(ScanLogItem item, ScanSource source) {
         Map<String, Object> map = new HashMap<>();
         map.put("itemId", item.getItemId());
         map.put("title", item.getTitle());
         // 需求列表展开态需要展示完整内容，并据 sessionId 判断是否已启动。
-        map.put("content", item.getContent());
+        ManualRequirementContent manualContent = parseManualRequirementContent(item.getContent());
+        map.put("content", manualContent != null ? formatManualRequirementContent(manualContent) : item.getContent());
         map.put("originId", item.getOriginId());
         map.put("originUrl", item.getOriginUrl());
         map.put("action", item.getAction());
@@ -828,11 +624,98 @@ public class DevloopApplicationService {
         map.put("scoreDetail", item.getScoreDetail());
         map.put("createTime", item.getCreateTime());
         map.put("sourceId", item.getSourceId());
+        if (manualContent != null) {
+            map.put("manualSourceType", manualContent.sourceType());
+            map.put("branch", manualContent.branch());
+            // 历史手工需求 JSON 中没有 repoId 时返回 null，继续沿用项目仓库兜底逻辑。
+            map.put("repoId", manualContent.repoId());
+            map.put("originalContent", manualContent.originalContent());
+            map.put("productContent", manualContent.productContent());
+        }
         if (source != null) {
-            map.put("sourceName", source.getSourceName());
+            map.put("sourceName", MANUAL_SOURCE_TYPE.equals(source.getSourceType())
+                ? I18nUtil.get("devloop.manualRequirement.source.name") : source.getSourceName());
             map.put("sourceType", source.getSourceType());
         }
         return map;
+    }
+
+    /**
+     * 获取需求视图和 LLM 任务提示词共用的可读描述。
+     * 格式化在当前执行上下文完成，再交给异步会话执行。
+     */
+    private String getRequirementContent(ScanLogItem item) {
+        if (item == null) {
+            return "";
+        }
+        ManualRequirementContent manualContent = parseManualRequirementContent(item.getContent());
+        return manualContent != null ? formatManualRequirementContent(manualContent) : StringUtils.defaultString(item.getContent());
+    }
+
+    /**
+     * 仅解析手工录入 JSON 包裹；格式错误、缺失包裹或字段不完整时返回 {@code null}，
+     * 保留已有扫描需求的原始内容路径。
+     */
+    private ManualRequirementContent parseManualRequirementContent(String content) {
+        if (StringUtils.isBlank(content)) {
+            return null;
+        }
+        try {
+            JsonNode root = MANUAL_REQUIREMENT_MAPPER.readTree(content);
+            JsonNode manual = root.path(MANUAL_REQUIREMENT_CONTENT_KEY);
+            if (!manual.isObject()) {
+                return null;
+            }
+            String originalContent = StringUtils.trimToNull(manual.path("originalContent").asText());
+            if (originalContent == null) {
+                return null;
+            }
+            JsonNode repoIdNode = manual.path("repoId");
+            // 兼容未保存 repoId 的历史 JSON；仅接受正整数，异常值视为未关联仓库。
+            Long repoId = repoIdNode.isIntegralNumber() && repoIdNode.canConvertToLong() && repoIdNode.asLong() > 0
+                ? repoIdNode.asLong()
+                : null;
+            return new ManualRequirementContent(manual.path("sourceType").asText("manual"),
+                manual.path("branch").asText(""), repoId, originalContent,
+                manual.path("productContent").asText(""));
+        }
+        catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    /**
+     * 使用当前请求语言格式化持久化的手工字段。禁止把结果再存回库：
+     * 后续读取者的语言可能不同，JSON 包裹保持语言无关。
+     */
+    private String formatManualRequirementContent(ManualRequirementContent content) {
+        StringBuilder description = new StringBuilder();
+        description.append(I18nUtil.get("devloop.manualRequirement.content.source",
+            manualRequirementOriginLabel(content.sourceType()))).append('\n');
+        if (StringUtils.isNotBlank(content.branch())) {
+            description.append(I18nUtil.get("devloop.manualRequirement.content.branch", content.branch())).append('\n');
+        }
+        if (StringUtils.isNotBlank(content.productContent())) {
+            description.append(I18nUtil.get("devloop.manualRequirement.content.product")).append('\n')
+                .append(content.productContent()).append("\n\n");
+        }
+        description.append(I18nUtil.get("devloop.manualRequirement.content.original")).append('\n')
+            .append(content.originalContent());
+        return description.toString();
+    }
+
+    /** 将持久化来源标识转换为当前语言的展示名称。 */
+    private String manualRequirementOriginLabel(String originType) {
+        return switch (originType) {
+            case "customer_feedback" -> I18nUtil.get("devloop.manualRequirement.origin.customerFeedback");
+            case "internal_proposal" -> I18nUtil.get("devloop.manualRequirement.origin.internalProposal");
+            default -> I18nUtil.get("devloop.manualRequirement.origin.manual");
+        };
+    }
+
+    /** 手工需求 JSON 包裹中携带的已解析、语言无关的数据。 */
+    private record ManualRequirementContent(String sourceType, String branch, Long repoId, String originalContent,
+        String productContent) {
     }
 
     @Autowired
@@ -845,8 +728,7 @@ public class DevloopApplicationService {
         String paramKey = "GH_TOKEN";
 
         LambdaQueryWrapper<UserPrivateParam> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(UserPrivateParam::getUserId, userId)
-            .eq(UserPrivateParam::getParamKey, paramKey)
+        wrapper.eq(UserPrivateParam::getUserId, userId).eq(UserPrivateParam::getParamKey, paramKey)
             .eq(UserPrivateParam::getDeleteFlag, "0");
 
         var existing = userPrivateParamMapper.selectOne(wrapper);
@@ -881,8 +763,7 @@ public class DevloopApplicationService {
         String paramKey = "GH_TOKEN";
 
         LambdaQueryWrapper<UserPrivateParam> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(UserPrivateParam::getUserId, userId)
-            .eq(UserPrivateParam::getParamKey, paramKey)
+        wrapper.eq(UserPrivateParam::getUserId, userId).eq(UserPrivateParam::getParamKey, paramKey)
             .eq(UserPrivateParam::getDeleteFlag, "0");
 
         var existing = userPrivateParamMapper.selectOne(wrapper);
@@ -911,6 +792,8 @@ public class DevloopApplicationService {
 
             ProcessBuilder pb = new ProcessBuilder(cmd);
             pb.redirectErrorStream(true);
+            // 群搜索由当前登录用户发起:按其身份隔离 dws 环境(禁 keychain + DWS_CONFIG_DIR + XDG_DATA_HOME)。
+            dwsAuthService.applyUserDwsEnv(pb.environment(), CurrentUserHolder.getCurrentUserId());
             Process process = pb.start();
 
             StringBuilder output = new StringBuilder();
@@ -994,14 +877,15 @@ public class DevloopApplicationService {
             return ResponseUtil.failRes("任务标题不能为空");
         }
 
-        // 加载需求项：提供需求详情与任务类型判定依据
+        // 将手工需求 JSON 按当前执行上下文的语言渲染后，再写入异步 LLM 提示词。
+        // 普通扫描内容经 getRequirementContent 处理时保持原样。
         ScanLogItem sourceItem = sourceItemId != null ? scanLogItemMapper.selectById(sourceItemId) : null;
-        String description = sourceItem != null && sourceItem.getContent() != null && !sourceItem.getContent().isEmpty()
-            ? sourceItem.getContent()
+        String description = sourceItem != null && StringUtils.isNotBlank(sourceItem.getContent())
+            ? getRequirementContent(sourceItem)
             : title;
         String taskType = detectTaskType(sourceItem, title);
 
-        // 解析目标仓库：需求项 -> 扫描源.repoId -> 仓库；手动任务取项目首个仓库兜底
+        // 手工需求优先使用其 JSON 内的 repoId，不修改项目共用 manual 来源，避免影响其他手工需求。
         ProjectRepo repo = resolveTaskRepo(projectId, sourceItem);
         if (repo == null) {
             return ResponseUtil.failRes("未找到目标仓库，请为扫描源关联仓库或在项目下添加仓库");
@@ -1045,11 +929,8 @@ public class DevloopApplicationService {
     }
 
     /**
-     * 定时扫描完成后按确认规则自动派生任务，并在项目内做负载均衡：
-     * auto=全部待派；score=综合分达阈值(默认70)才待派；manual=不派。
-     * 候选执行人=项目内绑定了数字员工的成员；按各自当前「进行中」任务数从低到高选，
-     * 单 agent 并发达上限(全局 cap，默认1)则跳过，避免一股脑丢给 codeagent 导致 OOM。
-     * 全员已满则本轮不派，留待下轮重新捞取未启动需求（轻量排队）。
+     * 定时扫描完成后按确认规则自动派生任务，并在项目内做负载均衡： auto=全部待派；score=综合分达阈值(默认70)才待派；manual=不派。 候选执行人=项目内绑定了数字员工的成员；按各自当前「进行中」任务数从低到高选，
+     * 单 agent 并发达上限(全局 cap，默认1)则跳过，避免一股脑丢给 codeagent 导致 OOM。 全员已满则本轮不派，留待下轮重新捞取未启动需求（轻量排队）。
      * 每条任务以「被选中成员本人」身份创建（负责人=该成员，用其绑定 agent 执行）。
      */
     public void autoDeriveForSource(ScanSource source, List<ScanLogItem> newItems) {
@@ -1145,8 +1026,8 @@ public class DevloopApplicationService {
                 }
             }
             // 每轮派发结果汇总：观察补派是否正常工作(新增/重捞/实际派/满cap跳过/失败)
-            log.info("[DevloopAuto] 源 {} 派发汇总: 新增{} 重捞{} 候选员工{} cap{} -> 实际派{} 满cap跳过{} 失败{}",
-                source.getSourceId(), newCount, requeueCount, candidates.size(), cap, dispatched, skippedByCap, failed);
+            log.info("[DevloopAuto] 源 {} 派发汇总: 新增{} 重捞{} 候选员工{} cap{} -> 实际派{} 满cap跳过{} 失败{}", source.getSourceId(),
+                newCount, requeueCount, candidates.size(), cap, dispatched, skippedByCap, failed);
         }
         finally {
             // 还原上下文：线程池复用，避免把身份泄漏给后续任务
@@ -1160,8 +1041,7 @@ public class DevloopApplicationService {
     }
 
     /**
-     * 收集本源待派需求：本轮新增 + 历史未启动(sessionId=null)，按 itemId 去重。
-     * score 模式仅保留综合分达阈值者。历史未启动的参与，实现全忙跳过后下轮自动补派。
+     * 收集本源待派需求：本轮新增 + 历史未启动(sessionId=null)，按 itemId 去重。 score 模式仅保留综合分达阈值者。历史未启动的参与，实现全忙跳过后下轮自动补派。
      */
     private List<ScanLogItem> collectPendingItems(ScanSource source, List<ScanLogItem> newItems, boolean byScore,
         int threshold) {
@@ -1271,7 +1151,7 @@ public class DevloopApplicationService {
     /** 判定任务类型：需求项含 bug/缺陷 标记归为 bug，否则为需求 */
     private String detectTaskType(ScanLogItem item, String title) {
         String haystack = ((item != null && item.getTitle() != null ? item.getTitle() : "") + " "
-            + (item != null && item.getContent() != null ? item.getContent() : "") + " "
+            + getRequirementContent(item) + " "
             + (item != null && item.getAction() != null ? item.getAction() : "") + " " + (title != null ? title : ""))
             .toLowerCase();
         if (haystack.contains("bug") || haystack.contains("缺陷") || haystack.contains("修复")) {
@@ -1287,16 +1167,22 @@ public class DevloopApplicationService {
     }
 
     /**
-     * 解析任务目标仓库：需求项 -> 扫描源.repoId -> 仓库； 手动任务或扫描源未绑定仓库时，取项目首个仓库兜底。
+     * 解析任务目标仓库：手工需求先取自身 JSON 的 repoId，再取扫描源 repoId；均缺失时取项目首个仓库兜底。
      */
     private ProjectRepo resolveTaskRepo(Long projectId, ScanLogItem item) {
-        if (item != null && item.getSourceId() != null) {
-            ScanSource source = scanSourceService.findById(item.getSourceId());
-            if (source != null && source.getRepoId() != null) {
-                ProjectRepo repo = projectRepoMapper.selectById(source.getRepoId());
-                if (repo != null) {
-                    return repo;
+        if (item != null) {
+            ScanSource source = item.getSourceId() != null ? scanSourceService.findById(item.getSourceId()) : null;
+            if (source != null && MANUAL_SOURCE_TYPE.equals(source.getSourceType())) {
+                // 单条手工需求的仓库优先级最高，历史 JSON 缺少该字段时自然继续走后续兜底。
+                ManualRequirementContent manualContent = parseManualRequirementContent(item.getContent());
+                ProjectRepo manualRepo = manualContent != null ? findProjectRepo(projectId, manualContent.repoId()) : null;
+                if (manualRepo != null) {
+                    return manualRepo;
                 }
+            }
+            ProjectRepo sourceRepo = source != null ? findProjectRepo(projectId, source.getRepoId()) : null;
+            if (sourceRepo != null) {
+                return sourceRepo;
             }
         }
         List<ProjectRepo> repos = projectRepoMapper
@@ -1330,17 +1216,17 @@ public class DevloopApplicationService {
         + "- 若提示仓库或分支不存在，通常是私有仓库权限问题，请确认已使用环境变量 GH_TOKEN 中的令牌，不要据此判定仓库不存在、也不要改为在本地新建独立项目。\n\n" + "## 工作要求\n"
         + "1. 克隆仓库 ${repoFullName}，拉取默认分支最新代码；目标分支 ${branchName} 尚不存在，用 git checkout -b ${branchName} 从默认分支新建并切换。\n"
         + "2. 仔细理解上述需求详情，定位需要修改的代码。\n" + "3. 完成开发后自测，确保编译通过、相关测试通过。\n" + "4. 提交改动到分支 ${branchName} 并推送，提交信息清晰说明本次改动。\n"
-        + "5. 如需求描述不清或存在阻塞，明确说明遇到的问题。\n"
-        + "6. 使用 self-developed-rules skill 持续维护任务状态、阶段、证据与交付物。\n\n"
-        + "请开始处理。";
+        + "5. 如需求描述不清或存在阻塞，明确说明遇到的问题。\n" + "6. 使用 self-developed-rules skill 持续维护任务状态、阶段、证据与交付物。\n\n" + "请开始处理。";
 
     /** 数据库先分页，再读取当前页会话状态投影；单页最多触发 100 次 UserFS 定点读取。 */
     public ResponseUtil<PageInfo<DevloopTaskViewDto>> listTasks(DevloopTaskListQueryDto query) {
         if (query == null || query.getProjectId() == null) {
             return ResponseUtil.failRes("projectId 不能为空");
         }
+        final String taskStatus;
         try {
             query.normalizeAndValidate();
+            taskStatus = normalizeTaskStatusFilter(query.getStatus());
         }
         catch (IllegalArgumentException e) {
             return ResponseUtil.failRes(e.getMessage());
@@ -1354,11 +1240,15 @@ public class DevloopApplicationService {
         if (StringUtils.isNotBlank(query.getTaskName())) {
             wrapper.like(ByaiSession::getSessionName, query.getTaskName().trim());
         }
-        if (DEFAULT_PROJECT_ID.equals(query.getProjectId())) {
-            // 默认项目共用 -1 分组，查询时必须按当前创建人隔离，避免读取其他账号的会话任务。
+        if (DEFAULT_PROJECT_ID.equals(query.getProjectId()) || Boolean.TRUE.equals(query.getOnlyMine())) {
+            // 默认项目共用 -1 分组必须按创建人隔离；onlyMine 过滤同样只看当前登录用户的会话，两者叠加无害。
             wrapper.eq(ByaiSession::getCreatorId, CurrentUserHolder.getCurrentUserId());
         }
         wrapper.orderByDesc(ByaiSession::getCreateTime).orderByDesc(ByaiSession::getSessionId);
+
+        if (taskStatus != null) {
+            return listTasksByStatus(query, wrapper, taskStatus);
+        }
         Page<ByaiSession> sessionPage = byaiSessionMapper
             .selectPage(new Page<>(query.getPageNum(), query.getPageSize()), wrapper);
 
@@ -1377,14 +1267,73 @@ public class DevloopApplicationService {
         return ResponseUtil.successResponse(result);
     }
 
+    /**
+     * 任务状态保存在会话状态投影中，数据库没有可直接过滤的状态列。
+     * 因此状态看板查询需先读取状态投影，再对每个状态列独立分页，保证四列总数和加载更多结果准确。
+     */
+    private ResponseUtil<PageInfo<DevloopTaskViewDto>> listTasksByStatus(DevloopTaskListQueryDto query,
+        LambdaQueryWrapper<ByaiSession> wrapper, String taskStatus) {
+        List<ByaiSession> sessions = byaiSessionMapper.selectList(wrapper);
+        List<DevloopTaskViewDto> tasks = new ArrayList<>();
+        int matchedCount = 0;
+        int offset = (query.getPageNum() - 1) * query.getPageSize();
+
+        for (ByaiSession session : sessions) {
+            DevloopTaskStateDto state = tryReadTaskState(session);
+            if (!taskStatus.equals(resolveTaskStatusForFilter(state))) {
+                continue;
+            }
+            if (matchedCount >= offset && tasks.size() < query.getPageSize()) {
+                tasks.add(sessionAsTask(session, state, resolveTaskContext(session)));
+            }
+            matchedCount++;
+        }
+
+        PageInfo<DevloopTaskViewDto> result = new PageInfo<>();
+        result.setPageNum(query.getPageNum());
+        result.setPageSize(query.getPageSize());
+        result.setTotal((long) matchedCount);
+        result.setTotalPages((int) Math.ceil((double) matchedCount / query.getPageSize()));
+        result.setList(tasks);
+        return ResponseUtil.successResponse(result);
+    }
+
+    /** 将前端看板状态和会话状态投影的状态统一为内部筛选值。 */
+    private String normalizeTaskStatusFilter(String status) {
+        if (StringUtils.isBlank(status)) {
+            return null;
+        }
+        switch (status.trim().toLowerCase(Locale.ROOT)) {
+            case "pending":
+            case "not_started":
+                return "pending";
+            case "running":
+            case "in_progress":
+                return "in_progress";
+            case "paused":
+                return "paused";
+            case "done":
+            case "completed":
+                return "completed";
+            default:
+                throw new IllegalArgumentException("任务状态参数无效");
+        }
+    }
+
+    /** 状态投影缺失时沿用前端展示口径，归类到待开始列。 */
+    private String resolveTaskStatusForFilter(DevloopTaskStateDto state) {
+        String status = state == null ? null : normalizeTaskStatusFilter(state.getStatus());
+        return status == null ? "pending" : status;
+    }
+
     /** 查询单个任务详情：会话元数据来自数据库，状态来自 v2 会话投影。 */
     public ResponseUtil<DevloopTaskViewDto> getTaskDetail(Long sessionId) {
         ByaiSession session = byaiSessionMapper.selectById(sessionId);
         if (session == null) {
             return ResponseUtil.failRes("会话不存在");
         }
-        return ResponseUtil.successResponse(
-            sessionAsTask(session, tryReadTaskState(session), resolveTaskContext(session)));
+        return ResponseUtil
+            .successResponse(sessionAsTask(session, tryReadTaskState(session), resolveTaskContext(session)));
     }
 
     /** 直接按 sessionId 读取 v2 会话状态投影，不再解析消息或访问 session_ext。 */
@@ -1406,10 +1355,8 @@ public class DevloopApplicationService {
     }
 
     /**
-     * 查询任务代码变更:本地优先,远程兜底。
-     * 本地=直接读宿主机会话工作区的 git 仓库跑 git diff,含未 push/未 commit 的最新改动;
-     * 工作区不存在或不是 git 仓库时,回退到 GitHubCompareService 的远程 compare(仅覆盖已 push 分支)。
-     * base=仓库 defaultBranch(默认 main),head=任务分支(与详情同口径 buildBranchName)。
+     * 查询任务代码变更:本地优先,远程兜底。 本地=直接读宿主机会话工作区的 git 仓库跑 git diff,含未 push/未 commit 的最新改动; 工作区不存在或不是 git 仓库时,回退到
+     * GitHubCompareService 的远程 compare(仅覆盖已 push 分支)。 base=仓库 defaultBranch(默认 main),head=任务分支(与详情同口径 buildBranchName)。
      */
     public ResponseUtil<Map<String, Object>> getTaskChanges(Long sessionId) {
         if (sessionId == null) {
@@ -1421,13 +1368,14 @@ public class DevloopApplicationService {
         }
         // 代码变更是只读展示,任何本地/远程异常都不抛前端:顶层兜底,失败返回 http_error 空态并记日志。
         try {
-            // 与 resolveTaskContext 同口径:需求项 -> 源.repoId -> 仓库;手动任务取项目首个仓库兜底。
+            // 与 resolveTaskContext 同口径：手工需求自身仓库优先，再回退扫描源和项目仓库。
             ScanLogItem item = scanLogItemMapper.selectOne(
                 new LambdaQueryWrapper<ScanLogItem>().eq(ScanLogItem::getSessionId, sessionId).last("limit 1"));
             ProjectRepo repo = resolveTaskRepo(s.getProjectId(), item);
             String repoFullName = repo != null ? repo.getRepoFullName() : null;
             String baseBranch = repo != null && repo.getDefaultBranch() != null && !repo.getDefaultBranch().isEmpty()
-                ? repo.getDefaultBranch() : "main";
+                ? repo.getDefaultBranch()
+                : "main";
             String headBranch = buildBranchName(detectTaskType(item, s.getSessionName()), sessionId);
 
             // 本地优先:能定位到工作区 git 仓库就用本地 diff(最新、含未 push)。本地采集自身已兜底,再包一层防未捕获异常。
@@ -1469,8 +1417,7 @@ public class DevloopApplicationService {
     }
 
     /**
-     * 查询任务单个文件的本地 diff(unified 文本),供前端 modal 逐行渲染。仅本地工作区口径;
-     * 工作区不可用或出错时返回 status 非 ok,前端提示,不抛异常。
+     * 查询任务单个文件的本地 diff(unified 文本),供前端 modal 逐行渲染。仅本地工作区口径; 工作区不可用或出错时返回 status 非 ok,前端提示,不抛异常。
      */
     public ResponseUtil<Map<String, Object>> getTaskFileDiff(Long sessionId, String filePath) {
         if (sessionId == null || filePath == null || filePath.trim().isEmpty()) {
@@ -1486,7 +1433,8 @@ public class DevloopApplicationService {
             ProjectRepo repo = resolveTaskRepo(s.getProjectId(), item);
             String repoFullName = repo != null ? repo.getRepoFullName() : null;
             String baseBranch = repo != null && repo.getDefaultBranch() != null && !repo.getDefaultBranch().isEmpty()
-                ? repo.getDefaultBranch() : "main";
+                ? repo.getDefaultBranch()
+                : "main";
             Path workspaceDir = resolveSessionWorkspace(s, repoFullName);
 
             LocalGitChangeService.FileDiffResult result = localGitChangeService.fileDiff(workspaceDir, baseBranch,
@@ -1509,8 +1457,8 @@ public class DevloopApplicationService {
     }
 
     /**
-     * 拼会话工作区里 git 仓库的宿主机绝对路径:{nfs根}/{bucket}/by/.sessions/{sessionId}/{repoName}。
-     * bucket 由创建者 userCode 解析;repoName 取 repoFullName 去掉 owner/ 前缀。任一环节缺失返回 null(走远程兜底)。
+     * 拼会话工作区里 git 仓库的宿主机绝对路径:{nfs根}/{bucket}/by/.sessions/{sessionId}/{repoName}。 bucket 由创建者 userCode 解析;repoName 取
+     * repoFullName 去掉 owner/ 前缀。任一环节缺失返回 null(走远程兜底)。
      */
     private Path resolveSessionWorkspace(ByaiSession session, String repoFullName) {
         if (repoFullName == null || repoFullName.trim().isEmpty() || session.getCreatorId() == null) {
@@ -1613,7 +1561,7 @@ public class DevloopApplicationService {
     }
 
     /**
-     * 实时解析任务上下文：不落库，按需从关联链路查。 需求/仓库：sessionId -> byai_scan_log_item -> source(repoId->仓库) -> log(projectId)；
+     * 实时解析任务上下文：不落库，按需从关联链路查。需求/仓库优先级为：手工需求 JSON.repoId、扫描源 repoId、项目仓库；
      * agent：session.objectId(数字员工resourceId) -> 资源名；负责人：session.creatorId -> 用户名； 分支：由 taskType(据需求内容判定) + sessionId
      * 确定性重算。关联信息变化后展示随之更新。
      */
@@ -1637,8 +1585,8 @@ public class DevloopApplicationService {
 
         // 同一次资源查询同时补齐任务详情所需的数字员工名称和头像，避免重复访问资源表。
         SsResource agentResource = resolveAgentResource(s.getObjectId());
-        ctx.put("agentName", agentResource != null && agentResource.getResourceName() != null
-            ? agentResource.getResourceName() : "");
+        ctx.put("agentName",
+            agentResource != null && agentResource.getResourceName() != null ? agentResource.getResourceName() : "");
         ctx.put("agentAvatar", agentResource != null ? agentResource.getAvatar() : "");
         ctx.put("assignee", resolveUserName(s.getCreatorId()));
         return ctx;
@@ -1707,60 +1655,7 @@ public class DevloopApplicationService {
 
     // ========== 项目成员 ==========
 
-    /** 添加项目成员 */
-    @Transactional(rollbackFor = Exception.class)
-    public ResponseUtil<Void> addProjectMember(Map<String, Object> params) {
-        Long projectId = Long.valueOf(params.get("projectId").toString());
-        Long userId = Long.valueOf(params.get("userId").toString());
 
-        Project project = projectMapper.selectById(projectId);
-        if (project == null || DELETE_FLAG_DELETED.equals(project.getDeleteFlag())) {
-            return ResponseUtil.failRes("Project not found");
-        }
-        if (projectMemberService.isMember(projectId, userId)) {
-            return ResponseUtil.failRes("该用户已是项目成员");
-        }
-        projectMemberService.addMember(projectId, userId, "member");
-        if (!"Y".equals(project.getIsShare())) {
-            // 从成员 tab 主动添加成员时，项目已经具备共享成员，需同步项目共享状态。
-            project.setIsShare("Y");
-            project.setUpdateBy(CurrentUserHolder.getCurrentUserId());
-            project.setUpdateTime(new Date());
-            projectMapper.updateById(project);
-        }
-        return ResponseUtil.successResponse(null);
-    }
-
-    /** 查询项目成员列表 */
-    public ResponseUtil<List<ProjectMemberListDto>> listProjectMembers(Long projectId) {
-        return listProjectMembers(projectId, null);
-    }
-
-    /** 查询项目成员列表，并仅按成员姓名筛选。 */
-    public ResponseUtil<List<ProjectMemberListDto>> listProjectMembers(Long projectId, String userName) {
-        return ResponseUtil.successResponse(projectMemberService.listProjectMembers(projectId, StringUtils.trimToNull(userName)));
-    }
-
-    /** 移除项目成员 */
-    public ResponseUtil<Void> removeProjectMember(Long memberId) {
-        ProjectMember member = projectMemberService.getById(memberId);
-        if (member != null) {
-            Project project = projectMapper.selectById(member.getProjectId());
-            if (project != null && project.getCreateBy() != null && project.getCreateBy().equals(member.getUserId())) {
-                return ResponseUtil.failRes("项目创建者不能被移除");
-            }
-        }
-        projectMemberService.removeMember(memberId);
-        return ResponseUtil.successResponse(null);
-    }
-
-    /** 绑定数字员工到成员 */
-    public ResponseUtil<Void> bindMemberAgent(Map<String, Object> params) {
-        Long memberId = Long.valueOf(params.get("memberId").toString());
-        Long agentId = Long.valueOf(params.get("agentId").toString());
-        projectMemberService.bindAgent(memberId, agentId);
-        return ResponseUtil.successResponse(null);
-    }
 
     // ========== DWS 钉钉授权 ==========
 
@@ -1773,13 +1668,40 @@ public class DevloopApplicationService {
         return ResponseUtil.failRes((String) result.getOrDefault("message", "启动授权失败"));
     }
 
-    /** 检查DWS授权状态（前端轮询用） */
+    /** 检查DWS授权状态（前端轮询用）：新建源弹窗里当前用户给自己授权的场景，查当前登录用户。 */
     public ResponseUtil<Map<String, Object>> checkDwsAuthStatus() {
-        Map<String, Object> dbStatus = dwsAuthService.checkDwsToken();
-        Map<String, Object> runtimeStatus = dwsAuthService.getAuthStatus();
+        return ResponseUtil.successResponse(buildDwsStatus(CurrentUserHolder.getCurrentUserId(), true));
+    }
+
+    /**
+     * 按扫描源查授权状态：查该源【创建者】的授权(不是当前登录用户)，用于列表逐源展示。
+     * 额外返回 canAuthorize(当前登录用户==创建者才可授权) 与创建者名，供前端 (c) 文案与入口控制。
+     */
+    public ResponseUtil<Map<String, Object>> checkDwsAuthStatusBySource(Long sourceId) {
+        ScanSource source = scanSourceService.findById(sourceId);
+        if (source == null) {
+            return ResponseUtil.failRes("来源不存在");
+        }
+        Long creatorId = parseUserId(source.getCreateBy());
+        Long currentUserId = CurrentUserHolder.getCurrentUserId();
+        boolean canAuthorize = currentUserId != null && currentUserId.equals(creatorId);
+
+        Map<String, Object> result = buildDwsStatus(creatorId, canAuthorize);
+        result.put("canAuthorize", canAuthorize);
+        result.put("creatorId", source.getCreateBy());
+        result.put("creatorName", resolveUserName(creatorId));
+        return ResponseUtil.successResponse(result);
+    }
+
+    /** 构造某用户的 DWS 授权状态视图。includeDbToken=true 时附带 DB 授权记录(hasToken/savedAt)。 */
+    private Map<String, Object> buildDwsStatus(Long userId, boolean includeDbToken) {
+        Map<String, Object> runtimeStatus = dwsAuthService.getAuthStatus(userId);
         Map<String, Object> result = new HashMap<>();
-        result.put("hasToken", dbStatus.get("hasToken"));
-        result.put("savedAt", dbStatus.getOrDefault("savedAt", ""));
+        if (includeDbToken) {
+            Map<String, Object> dbStatus = dwsAuthService.checkDwsToken();
+            result.put("hasToken", dbStatus.get("hasToken"));
+            result.put("savedAt", dbStatus.getOrDefault("savedAt", ""));
+        }
         result.put("runtimeAuthenticated", runtimeStatus.get("authenticated"));
         result.put("tokenValid", runtimeStatus.get("tokenValid"));
         result.put("refreshTokenValid", runtimeStatus.getOrDefault("refreshTokenValid", false));
@@ -1789,7 +1711,7 @@ public class DevloopApplicationService {
         result.put("corpName", runtimeStatus.getOrDefault("corpName", ""));
         result.put("userId", runtimeStatus.getOrDefault("userId", ""));
         result.put("userName", runtimeStatus.getOrDefault("userName", ""));
-        return ResponseUtil.successResponse(result);
+        return result;
     }
 
     /** 直接使用token授权 */
@@ -1800,77 +1722,5 @@ public class DevloopApplicationService {
         }
         dwsAuthService.recordAuthToDb();
         return ResponseUtil.successResponse(null);
-    }
-
-    // ========== 分享到空间 ==========
-
-    /**
-     * 保存到项目空间。
-     *
-     * @param dto 请求参数（projectId、sessionId、filePath、fileName）
-     */
-    public void saveShareToSpace(ProjectShareFileSaveDto dto) {
-
-        Long projectId = dto.getProjectId();
-        Long sessionId = dto.getSessionId();
-        String filePath = dto.getFilePath();
-        String fileName = dto.getFileName();
-
-        // 获取文件名
-        if (StringUtil.isEmpty(fileName)) {
-            fileName = StringUtils.substringAfterLast(filePath, "/");
-        }
-
-        // 根据文件名获取类型
-        MediaType mediaType = MediaTypeFactory.getMediaType(fileName).orElse(MediaType.APPLICATION_OCTET_STREAM);
-
-        String bucketName = userBucketNamingService.buildUserBucketName(CurrentUserHolder.getCurrentUserCode());
-        try (InputStream inputStream = filesApplicationService.openCommonFileInputStream(bucketName, filePath)) {
-
-            // 提取文件信息
-            String path = "/" + projectId + "/" + sessionId + "/" + fileName;
-
-            StorageLocation location = commonFilePathResolver.projectShare(path);
-            FileMetadata fileMetadata = commonFileStorage.write(location, inputStream.readAllBytes(),
-                mediaType.toString());
-
-            logger.info("当前上传文件:{}", JSON.toJSONString(fileMetadata));
-
-            String fileUrl = "/commonFile/preview?style=minio&bucketName={bucketName}&filePath={filePath}";
-            fileUrl = fileUrl.replace("{bucketName}", location.getBucketOrRoot()).replace("{filePath}",
-                location.getPath());
-
-            Files byaiFiles = new Files();
-            byaiFiles.setFileId(sequenceService.nextVal());
-            byaiFiles.setChatId(sessionId);
-            byaiFiles.setFileName(fileName);
-            byaiFiles.setConvertFileName(fileName);
-            byaiFiles.setFileUrl(fileUrl);
-            byaiFiles.setFileType(fileMetadata.getFileType());
-            byaiFiles.setCreateBy(CurrentUserHolder.getCurrentUserId());
-            byaiFiles.setCompleteTime(new Date());
-            byaiFiles.setFileSystemType(fileMetadata.getStorageType());
-            byaiFiles.setContentType(fileMetadata.getContentType());
-            byaiFiles.setLength(fileMetadata.getFileSize());
-            byaiFiles.setFileStatus(FileStatus.STATUS_00A);
-            byaiFiles.setProjectId(projectId);
-            fileService.save(byaiFiles);
-
-            // 保存文件分享
-            projectShareFileService.save(projectId, byaiFiles.getFileId(), null);
-        }
-        catch (Exception e) {
-            logger.error(e.getMessage(), e);
-        }
-    }
-
-    /**
-     * 查询空间文件列表。
-     *
-     * @param dto 查询条件（projectId）
-     * @return 空间文件列表
-     */
-    public List<ProjectShareFileListDto> listSpaceFiles(ProjectShareFileQueryDto dto) {
-        return projectShareFileService.listSpaceFiles(dto.getProjectId());
     }
 }

@@ -38,7 +38,8 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 - 不要把采集产物落到 `/tmp/` 或工作区根目录，不要让入参与正文分在不同目录，不要覆盖已有时间戳目录
 - 不要在委派入库或知识整理失败时清理产物、Session 结束时自动清理、未列清单未确认就清理、删除 `audit_required=true` 目录
 - 不要在钉钉相关采集任务中绕过 dws 去用浏览器、curl、HTTP API 或通用网页抓取
-- 不要无 adapter 时绕过 `bycli browser` 直接用 `web_fetch` / `browser` 通用工具
+- 对本 skill 覆盖的网页读取、搜索、采集、抓取、网站操作或打开 URL 任务，禁止使用 `web_fetch`、通用 `browser`、`curl`、`wget`、`requests` 或其他直接 HTTP 客户端绕过 byCLI。公开可读、静态页面、raw URL、纯文本或 Markdown 内容均不是例外
+- 不要因“直接 HTTP 更快”“无需登录”“不需要渲染”或类似效率判断跳过 `bycli list -f json`、现成 adapter 或 `bycli browser` 降级路径
 - 不要把 `bycli browser <session> open <url>` 或 `state` 当作浏览器冷启动、桥接健康检查或 adapter 预热命令；它们会申请 TAB 租约，缺少租约时可创建 `about:blank` TAB
 - 不要用 `bycli browser <session> ...` 检查或操作 adapter 打开的 TAB；`browser` 与 `adapter` 是不同 surface，即使 session 字符串相同也不共享 TAB 租约
 - 不要向用户输出本 skill 的内部决策逻辑（步骤编号、流程名称、路由分支）——直接执行
@@ -74,7 +75,8 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 | 采集成功后处理 / "存到知识库" / "入库" / "知识整理" | 入库进入 bycli 内部 knowledge-ingest 流程；知识整理委派 knowledge-organizer | [knowledge-ingest.md](./references/knowledge-ingest.md) |
 
 关键区分：
-- 有现成 adapter → 直接用 `bycli <site> <command>`
+- 所有网页读取、搜索、采集、抓取、网站操作或打开 URL 任务 → 先执行 `bycli list -f json` 动态发现 adapter，再选择执行路径；不得先调用通用网页工具
+- 有现成 adapter → 直接用 `bycli <site> <command>`。adapter 即使内部使用浏览器，仍必须由 adapter 管理；不得改用 raw `bycli browser` 或通用网页工具
 - 钉钉相关采集 → bycli 作为唯一入口，按 [dingtalk-dws-bridge.md](./references/dingtalk-dws-bridge.md) 加载 dws 获取数据，不走浏览器降级
 - 没有 adapter 但需要一次性浏览 / 查询 → Browser 驱动（是否触发复用和采集后处理收尾，按下方收尾条件判断）
 - 没有 adapter 且需要复用 → 写新 adapter
@@ -82,7 +84,7 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 - 已有 Markdown 内容 + 用户说"入库" → 进入 [knowledge-ingest.md](./references/knowledge-ingest.md) 流程
 - 已有 Markdown 内容 + 用户说"知识整理" / "整理资料" → 委派 knowledge-organizer skill（知识整理）
 
-收到**搜索 / 采集 / 抓取 / 网站操作 / 入库 / 知识整理**类任务时，先按本决策树路由，未确定路径前不直接调用通用 `web_fetch` / `browser` 工具。本 skill 不匹配时再评估其他 skill（如 `dws`、`knowledge-organizer`），全部不匹配才兜底通用工具。
+收到**搜索 / 采集 / 抓取 / 网站操作 / 入库 / 知识整理**类任务时，先按本决策树路由。网页相关任务在 adapter 缺失时必须使用 `bycli browser`，不得降级到通用网页工具。只有 byCLI 已明确报告该任务不支持或当前无法执行，且 agent 已先向用户说明 byCLI 的具体结果与无法继续的原因，才可在用户确认后使用其他工具；不得因“内容公开”“静态”“纯 Markdown”或“更高效”自行触发此例外。
 
 收到钉钉域名或钉钉产品采集任务时，本 skill 仍是入口；读取 [dingtalk-dws-bridge.md](./references/dingtalk-dws-bridge.md) 后加载 dws skill。dws 只负责获取钉钉数据，不接管 bycli 的产物目录、采集后处理询问、knowledge-ingest 流程或 knowledge-organizer 委派。
 
@@ -97,7 +99,7 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 
 ### 适配器缺失降级（强制）
 
-`bycli list -f json` 无对应适配器时：
+`bycli list -f json` 确认无对应适配器时：
 
 1. 用 `bycli browser` 系列命令完成任务，不跳到通用工具
 2. 按下方浏览器生命周期 + [browser.md](./references/browser.md) 规范执行

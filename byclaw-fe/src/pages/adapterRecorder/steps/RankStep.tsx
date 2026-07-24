@@ -11,11 +11,12 @@ interface Props {
   candidates?: RankCandidate[];
   selectedId?: string;
   sampleA?: CaptureSample;
+  sampleB?: CaptureSample;
   onRank: () => void;
   onSelect: (id: string) => void;
 }
 
-export default function RankStep({ loading, candidates, selectedId, sampleA, onRank, onSelect }: Props) {
+export default function RankStep({ loading, candidates, selectedId, sampleA, sampleB, onRank, onSelect }: Props) {
   const ranked = !!candidates?.length;
   return (
     <Card title="排序候选 endpoint" variant="borderless">
@@ -40,8 +41,8 @@ export default function RankStep({ loading, candidates, selectedId, sampleA, onR
             </Row>
           </Col>
           <Col xs={24} lg={10}>
-            <Card size="small" title="样本 A · 请求耗时对比">
-              <TraceChart entries={sampleA?.entries} />
+            <Card size="small" title="A/B 样本差异与候选关联">
+              <TraceChart sampleA={sampleA} sampleB={sampleB} candidates={candidates} selectedId={selectedId} />
             </Card>
           </Col>
         </Row>

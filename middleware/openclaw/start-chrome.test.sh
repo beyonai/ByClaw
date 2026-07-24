@@ -30,6 +30,7 @@ START_CHROME_TEST_ARGS="${test_root}/chromium.args" \
 OPENCLAW_STATE_DIR="${state_dir}" \
 OPENCLAW_BROWSER_USER_DATA_DIR="${user_data_dir}" \
 OPENCLAW_CHROME_REMOTE_DEBUGGING_ADDRESS=127.0.0.1 \
+OPENCLAW_XVFB_SCREEN=1600x960x24 \
 OPENCLI_EXTENSION_DIR="${extension_dir}" \
 OPENCLAW_ENABLE_CHROME=true \
 OPENCLAW_CONFIG_FILE="${test_root}/missing-openclaw.json" \
@@ -45,3 +46,26 @@ test -z "$(find "${user_data_dir}" -maxdepth 1 -name SingletonLock -print)"
 test -z "$(find "${user_data_dir}" -maxdepth 1 -name SingletonCookie -print)"
 test -z "$(find "${user_data_dir}" -maxdepth 1 -name SingletonSocket -print)"
 grep -Fx -- "--load-extension=${extension_dir}" "${test_root}/chromium.args"
+grep -Fx -- "--window-size=1600,960" "${test_root}/chromium.args"
+grep -Fx -- "--window-position=0,0" "${test_root}/chromium.args"
+
+PATH="${fake_bin}:${PATH}" \
+START_CHROME_TEST_ARGS="${test_root}/chromium-override.args" \
+OPENCLAW_STATE_DIR="${state_dir}" \
+OPENCLAW_BROWSER_USER_DATA_DIR="${user_data_dir}" \
+OPENCLAW_CHROME_REMOTE_DEBUGGING_ADDRESS=127.0.0.1 \
+OPENCLAW_XVFB_SCREEN=1600x960x24 \
+OPENCLAW_CHROME_WINDOW_SIZE=1280,720 \
+OPENCLI_EXTENSION_DIR="${extension_dir}" \
+OPENCLAW_ENABLE_CHROME=true \
+OPENCLAW_CONFIG_FILE="${test_root}/missing-openclaw.json" \
+"$(dirname "$0")/start-chrome.sh"
+
+attempt=0
+while [ ! -f "${test_root}/chromium-override.args" ] && [ "${attempt}" -lt 20 ]; do
+  sleep 1
+  attempt=$((attempt + 1))
+done
+
+grep -Fx -- "--window-size=1280,720" "${test_root}/chromium-override.args"
+grep -Fx -- "--window-position=0,0" "${test_root}/chromium-override.args"

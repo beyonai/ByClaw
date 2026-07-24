@@ -26,33 +26,40 @@ http://portal.internal.example/byaiService/tool/installThirdPartySkill
 
 ### 2.1 地址与参数
 
-技能超市页面地址由对端提供，并按门户所在的开发、测试或生产环境分别配置。以下使用对端阿里云页面地址举例：
+技能超市页面地址由对端提供，并按门户所在的开发、测试或生产环境分别配置在
+`byai.byai_system_config` 表中：
+
+| 字段 | 配置值 |
+| --- | --- |
+| `param_code` | `WHALE_AGENT_SKILL_MARKET_URL` |
+| `param_value` | 当前环境的技能超市完整页面地址，包含原页面参数，例如 `https://www.iwhaleai.com/skillHub/dashboard?tab=skills` |
+
+以下使用对端阿里云页面地址举例：
 
 ```text
-https://www.iwhaleai.com/skillHub/dashboard?tab=skills&digId=10029822&beyondToken=<URL编码后的Token>&parentOrigin=https%3A%2F%2Fportal.example.com
+https://www.iwhaleai.com/skillHub/dashboard?tab=skills&digId=10029822&BeyondToken=<URL编码后的Token>&parentOrigin=https%3A%2F%2Fportal.example.com
 ```
 
 | 参数 | 必填 | 说明 |
 | --- | --- | --- |
-| `tab` | 是 | 固定为 `skills` |
 | `digId` | 是 | 当前数字员工资源 ID |
-| `beyondToken` | 是 | 门户当前登录用户的 `Beyond-Token` |
+| `BeyondToken` | 是 | 门户当前登录用户的 `Beyond-Token` |
 | `parentOrigin` | 是 | 门户页面 Origin，用于安装成功后的 `postMessage` 通知 |
 
 拼接规则：
 
-- 技能超市页面地址取当前环境的配置值，地址中包含协议、域名和页面路径。
+- 技能超市页面地址取 `WHALE_AGENT_SKILL_MARKET_URL` 的配置值，地址中包含协议、域名、页面路径及对端原有参数。
 - `https://www.iwhaleai.com/skillHub/dashboard` 仅作为对端阿里云页面地址示例，各环境使用对应的配置值。
-- `tab` 固定传 `skills`。
+- `tab=skills` 是示例原地址的一部分，门户不生成或修改该参数。
 - `digId` 取门户当前正在操作的数字员工 ID。
-- `beyondToken` 取门户当前登录用户的 `Beyond-Token`。
+- `BeyondToken` 取门户当前登录用户的 `Beyond-Token`。
 - `parentOrigin` 取门户页面的 `window.location.origin`，只包含协议、域名和端口。
 - 必须使用 `URL`/`URLSearchParams` 拼接参数，不能直接使用字符串连接 Token。
 
 例如，门户地址为 `https://portal.example.com`，当前数字员工 ID 为 `10029822`，则最终 iframe URL 形式为：
 
 ```text
-https://www.iwhaleai.com/skillHub/dashboard?tab=skills&digId=10029822&beyondToken=eyJhbGciOiJSUzI1NiJ9.example.signature&parentOrigin=https%3A%2F%2Fportal.example.com
+https://www.iwhaleai.com/skillHub/dashboard?tab=skills&digId=10029822&BeyondToken=eyJhbGciOiJSUzI1NiJ9.example.signature&parentOrigin=https%3A%2F%2Fportal.example.com
 ```
 
 示例 Token 仅用于展示参数位置，不是真实有效凭证。
@@ -66,9 +73,8 @@ import { getToken } from '@/utils/auth';
 
 function buildSkillMarketplaceUrl(skillMarketplacePageUrl: string, digId: string | number) {
   const url = new URL(skillMarketplacePageUrl);
-  url.searchParams.set('tab', 'skills');
   url.searchParams.set('digId', String(digId));
-  url.searchParams.set('beyondToken', getToken());
+  url.searchParams.set('BeyondToken', getToken());
   url.searchParams.set('parentOrigin', window.location.origin);
   return url.toString();
 }
@@ -85,27 +91,27 @@ iframe 嵌入示例：
 />
 ```
 
-门户切换当前数字员工或登录 Token 发生变化时，应重新生成 `src`，确保 iframe 中的 `digId` 和 `beyondToken` 与当前门户上下文一致。
+门户切换当前数字员工或登录 Token 发生变化时，应重新生成 `src`，确保 iframe 中的 `digId` 和 `BeyondToken` 与当前门户上下文一致。
 
 ### 2.3 对端读取参数
 
-对端页面读取 `beyondToken` 后应遵守以下要求：
+对端页面读取 `BeyondToken` 后应遵守以下要求：
 
 - 仅保存在当前页面内存中，不写入 `localStorage`、`sessionStorage`、Cookie 或数据库。
 - 不在控制台、访问日志、错误日志、链路标签或埋点中打印 Token。
 - 调用门户接口时放在 `Beyond-Token` Header，不能放在安装接口的 URL 或 JSON 请求体中。
-- 建议读取后通过 `history.replaceState` 从浏览器地址栏中删除 `beyondToken` 参数，内存中继续保留其值。
+- 建议读取后通过 `history.replaceState` 从浏览器地址栏中删除 `BeyondToken` 参数，内存中继续保留其值。
 - 收到 HTTP `401` 时停止重试，提示用户刷新门户登录状态并重新进入技能超市。
 
 删除地址栏 Token 的前端示例：
 
 ```javascript
 const currentUrl = new URL(window.location.href);
-const beyondToken = currentUrl.searchParams.get('beyondToken') || '';
+const beyondToken = currentUrl.searchParams.get('BeyondToken') || '';
 const digId = currentUrl.searchParams.get('digId') || '';
 const parentOrigin = currentUrl.searchParams.get('parentOrigin') || '';
 
-currentUrl.searchParams.delete('beyondToken');
+currentUrl.searchParams.delete('BeyondToken');
 window.history.replaceState(null, '', currentUrl.toString());
 ```
 
@@ -116,7 +122,7 @@ window.history.replaceState(null, '', currentUrl.toString());
 ```http
 Content-Type: application/json; charset=UTF-8
 System-Code: BYAI
-Beyond-Token: <iframe参数中的beyondToken>
+Beyond-Token: <iframe参数中的BeyondToken>
 ```
 
 `Beyond-Token` 和 HTTP Header 名称不区分大小写，但建议按本文格式传递。
@@ -199,6 +205,16 @@ export async function installSkill({ portalOrigin, beyondToken, digId, downloadU
 8. 重建数字员工关联技能缓存，并发布数字员工更新事件。
 
 `userCode` 由门户从 `Beyond-Token` 中解析，并用于后续用户权限上下文和 Hub 路径处理。
+
+### 6.1 调用日志
+
+门户分别记录接口调用开始、安装成功、业务失败和系统异常日志。日志包含用户编码、数字员工 ID、
+新增或覆盖类型、资源 ID/编码/名称、技能版本、Hub 路径、技能包大小、完整请求体、下载地址哈希及耗时。
+请求体中的 `digId`、`downloadUrl` 会按收到的原值记录；`downloadUrl` 的账号信息、查询参数和 fragment
+也会完整写入日志。`Beyond-Token` 属于请求头，不写入日志。
+
+下载失败时还会记录完整下载地址、失败阶段、HTTP 状态与状态描述、响应类型、响应长度、重定向地址、
+已下载字节数、错误响应内容、异常类型、异常堆栈及耗时。错误响应内容最多记录 4 KiB，超出部分会标记截断。
 
 ## 7. 新增与覆盖规则
 

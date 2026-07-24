@@ -5,17 +5,32 @@ const KNOWLEDGE_RESOURCE_BIZ_TYPE_VALUES = ['KG_DOC', 'KG_QA', 'KG_TERM'];
 export const SKILL_MARKETPLACE_INSTALLED_MESSAGE_TYPE = 'BYCLAW_SKILL_INSTALLED';
 
 export const buildSkillMarketplaceUrl = (
+  marketplaceBaseUrl?: string | null,
   digitalEmployeeId?: string | number | null,
   beyondToken?: string | null,
   parentOrigin?: string | null
 ) => {
-  const url = new URL('https://www.iwhaleai.com/skillHub/dashboard');
-  url.searchParams.set('tab', 'skills');
+  const configuredUrl = `${marketplaceBaseUrl ?? ''}`.trim();
+  if (!configuredUrl) {
+    return '';
+  }
+
+  let url: URL;
+  try {
+    url = new URL(configuredUrl);
+  } catch {
+    return '';
+  }
+  if (!['http:', 'https:'].includes(url.protocol)) {
+    return '';
+  }
+
   if (`${digitalEmployeeId ?? ''}`.trim()) {
     url.searchParams.set('digId', `${digitalEmployeeId}`);
   }
+  url.searchParams.delete('beyondToken');
   if (`${beyondToken ?? ''}`.trim()) {
-    url.searchParams.set('beyondToken', `${beyondToken}`.trim());
+    url.searchParams.set('BeyondToken', `${beyondToken}`.trim());
   }
   if (`${parentOrigin ?? ''}`.trim()) {
     url.searchParams.set('parentOrigin', `${parentOrigin}`.trim());

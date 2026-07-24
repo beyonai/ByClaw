@@ -26,6 +26,12 @@ public class DevloopTaskListQueryDto {
     @JsonAlias("keyword")
     private String taskName;
 
+    /** 仅看当前登录用户负责（创建）的任务，为空或 false 时返回项目全部任务。 */
+    private Boolean onlyMine;
+
+    /** 任务状态筛选，支持 pending、in_progress、paused、completed。 */
+    private String status;
+
     private Integer pageNum;
     private Integer pageSize;
 

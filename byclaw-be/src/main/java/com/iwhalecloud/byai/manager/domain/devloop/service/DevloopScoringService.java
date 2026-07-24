@@ -148,7 +148,7 @@ public class DevloopScoringService {
         String userPrompt = template.replace("${title}", item.getTitle() != null ? item.getTitle() : "")
             .replace("${content}", content);
 
-        String raw = aiService.generateText(null, userPrompt, null, 1500);
+        String raw = aiService.generateText(null, userPrompt, (String) null, 1500);
         JsonNode node = parseScoreJson(raw);
         List<ScanLogItem> out = new ArrayList<>();
         if (node == null) {

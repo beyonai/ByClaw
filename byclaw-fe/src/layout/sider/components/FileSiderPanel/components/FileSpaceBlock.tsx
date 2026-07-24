@@ -31,6 +31,7 @@ interface FileSpaceBlockProps {
   switchOptions?: { label: React.ReactNode; value: string }[];
   switchValue?: string;
   compactTreePadding?: boolean;
+  fillContainer?: boolean;
   defaultGroupsCollapsed?: boolean;
   accordionGroups?: boolean;
   groupCollapseResetKey?: Key;
@@ -62,6 +63,7 @@ const FileSpaceBlock: React.FC<FileSpaceBlockProps> = ({
   switchOptions,
   switchValue,
   compactTreePadding = false,
+  fillContainer = false,
   defaultGroupsCollapsed = false,
   accordionGroups = false,
   groupCollapseResetKey,
@@ -144,7 +146,16 @@ const FileSpaceBlock: React.FC<FileSpaceBlockProps> = ({
   );
 
   return (
-    <div className={styles.fileSpaceBlock}>
+    <div
+      className={[
+        styles.fileSpaceBlock,
+        // 成果抽屉需要由文件树承接剩余高度，避免复用组件默认的固定卡片高度。
+        fillContainer ? styles.fileSpaceBlockFill : '',
+        fillContainer ? styles.fileSpaceBlockPlain : '',
+      ]
+        .filter(Boolean)
+        .join(' ')}
+    >
       <div className={styles.fileSpaceHeader}>
         <span className={styles.fileSpaceTitle}>{title}</span>
         {!!switchOptions?.length && (
@@ -158,12 +169,7 @@ const FileSpaceBlock: React.FC<FileSpaceBlockProps> = ({
         )}
         {typeof count === 'number' && <span className={styles.fileSpaceCount}>{count}</span>}
         {onRefresh && (
-          <button
-            type="button"
-            className={styles.fileSpaceRefresh}
-            onClick={onRefresh}
-            aria-label="refresh"
-          >
+          <button type="button" className={styles.fileSpaceRefresh} onClick={onRefresh} aria-label="refresh">
             <ReloadOutlined spin={loading} />
           </button>
         )}

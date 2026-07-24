@@ -1,4 +1,4 @@
-/* eslint-disable lines-around-comment */
+/* eslint-disable indent, lines-around-comment */
 // 录制会话状态机 model(@umijs/max model)。
 // 持有 SessionState + stateVersion,每个动作按 05 State Machine 校验当前态,
 // 非法转移返回 invalid_state(不调用后端),错误态走 failed。
@@ -7,6 +7,7 @@ import { Modal } from 'antd';
 import { getRecorderClient, type RecordingMode } from '../services/recorderClient';
 import { INVALID_STATE_HINT, isTerminalError } from '../constants/recorder';
 import { deriveAdapterName } from './adapterName';
+import { selectCandidateData } from './candidateSelection';
 import { isActionAllowed, type RecorderAction } from './transitions';
 import type {
   CaptureSample,
@@ -54,7 +55,7 @@ interface SessionData {
   /** dry-run 预览结果(不推进会话) */
   draftPreview?: InitResult;
 
-  /** P0-2:LLM 外发同意时刻;一旦同意,后续 preview/write 复用,允许把痕迹发往 Anthropic 合成。 */
+  /** 用户明确同意候选元数据外发进行 LLM 评分的时刻。 */
   llmEgressAck?: number;
 
   /** N4/N5:LLM 流水线产出的脚本草稿(verify 后)+ 被拒候选 */
@@ -78,6 +79,7 @@ interface SessionData {
 
   /** 拆步①score 阶段 LLM 返回的原始 interfaces JSON(评分候选页折叠展示原始返回)。 */
   llmRawJson?: string;
+  llmError?: string;
 
   /** 拆步③每个草稿的「测试中」标记(draftId → 是否 verify 进行中),驱动测试按钮 loading。 */
   draftVerifying?: Record<string, boolean>;
@@ -375,11 +377,7 @@ export default function useRecorderSession() {
         })
       ),
     // 选定候选时即派生并固化 adapter 名(init 预览/写入与 verify 复用同一个,避免漂移)。
-    selectCandidate: (id: string) =>
-      setData((d) => {
-        const cand = d.candidates?.find((c) => c.id === id);
-        return { ...d, selectedCandidateId: id, adapterName: cand ? deriveAdapterName(cand) : d.adapterName };
-      }),
+    selectCandidate: (id: string) => setData((d) => selectCandidateData(d, id, deriveAdapterName)),
     // dry-run 预览:不推进会话,产出 {report,dryRun} 供用户审阅。
     // egressConsent=true 时(用户点「用 AI 生成」)才带 egress 同意戳 → be 才会把痕迹发模型合成(P0-2);
     // 一旦同意即记入 session,后续重复预览/写入复用,无需再问。
@@ -412,13 +410,14 @@ export default function useRecorderSession() {
       );
     },
     // 拆步①评分:score-only。进 ranked 后自动触发(或用户重跑)。回候选(含 LLM 语义)+ 双提示词。不推进,停 candidates 子步。
-    runScore: (candidateIds?: string[]) => {
+    runScore: (candidateIds?: string[], llmSynthesis = true) => {
+      const llmEgressAcknowledgedAt = llmSynthesis ? Date.now() : undefined;
       setData((d) => ({ ...d, pipelineProgress: [] }));
       return run(
         'pipelineScore',
         () =>
           client.pipelineScore(
-            Date.now(),
+            llmEgressAcknowledgedAt,
             candidateIds,
             (phases) => setData((d) => ({ ...d, pipelineProgress: phases })),
             (partial) =>
@@ -440,14 +439,15 @@ export default function useRecorderSession() {
             pipelinePrompts: { score: d.scorePrompt, generate: d.generatePrompt, screenshotCount: d.screenshotCount },
             generatePrompt: d.generatePrompt,
             llmRawJson: d.llmRawJson,
-            llmEgressAck: Date.now(),
+            llmError: d.llmError,
+            llmEgressAck: llmEgressAcknowledgedAt,
             pipelineSubStep: 'candidates',
           },
         })
       );
     },
     // 候选页「下一步」→ 进生成子步(纯前端切页,不调 be)。
-    goToGenerate: () => setData((d) => ({ ...d, pipelineSubStep: 'generate' })),
+    goToGenerate: () => setData((d) => ({ ...d, pipelineSubStep: 'generate', pipelineProgress: undefined })),
     // 候选页「上一步」/生成页返回 → 回候选子步。
     goToCandidates: () => setData((d) => ({ ...d, pipelineSubStep: 'candidates' })),
     // 拆步②生成:generate-only。点「生成 cli 脚本」触发。完成后自动进 scripts 子步展示脚本。
@@ -456,7 +456,7 @@ export default function useRecorderSession() {
       return run(
         'pipelineGenerate',
         () =>
-          client.pipelineGenerate(Date.now(), candidateIds, (phases) =>
+          client.pipelineGenerate(undefined, candidateIds, (phases) =>
             setData((d) => ({ ...d, pipelineProgress: phases }))
           ),
         // 重新生成:清上一轮的草稿测试/保存痕迹(savedDraftIds/savedAdapters/draftVerifying),避免残留展示。
@@ -481,9 +481,10 @@ export default function useRecorderSession() {
         pipelineDrafts:
           sourceToVerify === undefined
             ? d.pipelineDrafts
-            : d.pipelineDrafts?.map((draft) =>
-              draft.id === draftId ? applyDraftSourceEdit(draft, sourceToVerify) : draft
-            ),
+            : d.pipelineDrafts?.map((draft) => {
+                if (draft.id === draftId) return applyDraftSourceEdit(draft, sourceToVerify);
+                return draft;
+              }),
         draftVerifying: { ...d.draftVerifying, [draftId]: true },
       }));
       return run(

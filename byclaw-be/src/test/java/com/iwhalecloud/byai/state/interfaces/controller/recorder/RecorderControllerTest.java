@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.state.interfaces.controller.recorder;
 
 import static org.hamcrest.Matchers.startsWith;
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -41,6 +42,10 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -51,6 +56,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.slf4j.LoggerFactory;
 @DisabledOnOs(OS.WINDOWS)
 class RecorderControllerTest {
 
@@ -115,6 +121,7 @@ class RecorderControllerTest {
             .andExpect(jsonPath("$.data.extension").value("disconnected"))
             .andExpect(jsonPath("$.data.highLevel").value("down"))
             .andExpect(jsonPath("$.data.llmSynthesis").value(false))
+            .andExpect(jsonPath("$.data.llmSynthesisReason").value("default_model_list_lookup_failed"))
             .andExpect(jsonPath("$.error").doesNotExist());
     }
 
@@ -362,6 +369,31 @@ class RecorderControllerTest {
     }
 
     @Test
+    void pipelineGenerateLogsStorageFailureWithSessionIdAndCause() throws Exception {
+        String sessionId = bindAndRankSession();
+        Files.createSymbolicLink(tempDir.resolve("byclaw-alice"), Path.of("/tmp"));
+        Logger logger = (Logger) LoggerFactory.getLogger(RecorderApplicationService.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        logger.addAppender(appender);
+        appender.start();
+
+        try {
+            RecorderResponse<Map<String, Object>> response = service.pipelineGenerate(Map.of("sessionId", sessionId));
+
+            org.assertj.core.api.Assertions.assertThat(response.status()).isEqualTo(503);
+            org.assertj.core.api.Assertions.assertThat(appender.list).anySatisfy(event -> {
+                org.assertj.core.api.Assertions.assertThat(event.getLevel()).isEqualTo(Level.WARN);
+                org.assertj.core.api.Assertions.assertThat(event.getFormattedMessage())
+                    .contains("Recorder pipeline generation failed", sessionId, "bycli_storage_unavailable");
+                org.assertj.core.api.Assertions.assertThat(event.getThrowableProxy()).isNotNull();
+            });
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
+    }
+
+    @Test
     void draftVerifyExposesRunningThenExpectationShapedTerminalResult() throws Exception {
         String sessionId = bindAndRankSession();
         String draftPath = generateDraft(sessionId);
@@ -465,6 +497,22 @@ class RecorderControllerTest {
         verifyPort.allowTerminal = true;
         awaitRequestStatus(requestId, "succeeded")
             .andExpect(jsonPath("$.data.result.ok").value(true));
+    }
+
+    @Test
+    void initDryRunGeneratesInspectableSourceFromSelectedCandidate() throws Exception {
+        String sessionId = bindAndRankSession();
+
+        mockMvc.perform(post("/recorder/init")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                    {"sessionId":"%s","name":"example/search","selectedCandidateId":"cand_example_com_search","writePolicy":"dry-run"}
+                    """.formatted(sessionId)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.generatedSource", containsString("export default")))
+            .andExpect(jsonPath("$.data.generatedSource", containsString("/search")))
+            .andExpect(jsonPath("$.data.generatedSource", not("export default {};")))
+            .andExpect(jsonPath("$.data.report.warnings[0]", containsString("no filesystem write was performed")));
     }
 
     @Test
