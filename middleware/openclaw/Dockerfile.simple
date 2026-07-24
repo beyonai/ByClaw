@@ -56,11 +56,7 @@ RUN set -eux; \
     for dir in src/*/; do \
         [ -f "$dir/package.json" ] || continue; \
         name=$(basename "$dir"); \
-        if node --input-type=module -e ' \
-            import { readFileSync } from "fs"; \
-            const pkg = JSON.parse(readFileSync(process.argv[2] + "package.json", "utf8")); \
-            process.exit((pkg.scripts || {}).build ? 0 : 1); \
-        ' "$dir"; then \
+        if node -e "process.exit(require('./${dir}package.json').scripts?.build?0:1)"; then \
             echo ">>> npm run build: $name"; \
             (cd "$dir" && npm run build); \
         fi; \
