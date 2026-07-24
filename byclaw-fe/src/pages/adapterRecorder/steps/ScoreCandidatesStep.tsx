@@ -2,20 +2,20 @@
 // 候选表(含 LLM 接口功能推断)+ 底部「下一步」。评分运行中显示进度 + 实时分阶段提示词。
 import { useEffect, useRef, useState } from 'react';
 import { RobotOutlined, ArrowRightOutlined, LoadingOutlined } from '@ant-design/icons';
-import { Alert, Button, Card, Collapse, Input, Space, Spin, Tag, Typography } from 'antd';
+import { Alert, Button, Card, Collapse, Input, Modal, Space, Spin, Tag, Typography } from 'antd';
 import type { CaptureSample, PipelinePrompts, RankCandidate } from '../types/recorder';
 import AnalysisEvidencePanel from '../components/AnalysisEvidencePanel';
 import { CandidateTable } from './pipelineShared';
 
 const { Paragraph, Text } = Typography;
 
-/** LLM 返回内容面板:默认展**结构化摘要**(每候选 inferredFunction + 双轨信号 + paramUnion 角色),
- *  内嵌「查看原始 JSON」子折叠(llmRawJson 只读)。摘要从已 merge LLM 语义的候选提取。 */
+/** LLM 返回内容面板:区分已应用到候选的语义评分与未解析的原始模型输出。 */
 function LlmReturnPanel({ candidates, llmRawJson }: { candidates?: RankCandidate[]; llmRawJson?: string }) {
   const llmCands = (candidates ?? []).filter((c) => c.scoredBy === 'llm' || c.inferredFunction || c.paramUnion?.length);
   if (!llmCands.length && !llmRawJson) return null;
   const summary = (
     <Space direction="vertical" size={10} style={{ width: '100%' }}>
+      <Text strong>已应用的 AI 评分</Text>
       {llmCands.length ? (
         llmCands.map((c) => (
           <div key={c.id} style={{ borderInlineStart: '2px solid #d9d9d9', paddingInlineStart: 8 }}>
@@ -43,7 +43,7 @@ function LlmReturnPanel({ candidates, llmRawJson }: { candidates?: RankCandidate
         ))
       ) : (
         <Text type="secondary" style={{ fontSize: 12 }}>
-          (无结构化摘要,见原始 JSON)
+          本次模型返回尚未应用到候选，当前仍使用规则评分。
         </Text>
       )}
       {llmRawJson && (
@@ -52,7 +52,7 @@ function LlmReturnPanel({ candidates, llmRawJson }: { candidates?: RankCandidate
           items={[
             {
               key: 'raw',
-              label: '查看原始 JSON',
+              label: '原始模型返回（未解析）',
               children: (
                 <Input.TextArea
                   className="code"
@@ -72,7 +72,7 @@ function LlmReturnPanel({ candidates, llmRawJson }: { candidates?: RankCandidate
     <Collapse
       size="small"
       style={{ marginBottom: 12 }}
-      items={[{ key: 'llm-return', label: 'LLM 返回内容(评分推断)', children: summary }]}
+      items={[{ key: 'llm-return', label: 'AI 评分结果', children: summary }]}
     />
   );
 }
@@ -135,6 +135,16 @@ export default function ScoreCandidatesStep({
   const [selectedCandidateIds, setSelectedCandidateIds] = useState<string[]>([]);
   const selectionInit = useRef(false);
   const autoScoredRef = useRef(false);
+
+  const confirmLlmRescore = () => {
+    Modal.confirm({
+      title: '使用 AI 重新评分？',
+      content: '将再次把所选接口的 method、host、path 与本地评分发送给默认 LLM；不会发送 Cookie、请求体或脚本。',
+      okText: '同意并重新评分',
+      cancelText: '取消',
+      onOk: () => onRunScore(selectedCandidateIds.length ? selectedCandidateIds : undefined, true),
+    });
+  };
 
   // 本地流程进入评分候选页即自动跑一次 score。LLM 流程必须由用户点击明确同意按钮后才可外发。
   // 关键:即使 rank 已产出候选(candidates 非空),只要 score 阶段没跑过就必须跑——它才写 genStage 供 generate 用。
@@ -230,9 +240,13 @@ export default function ScoreCandidatesStep({
             <Button
               size="small"
               loading={loading}
-              onClick={() => onRunScore(selectedCandidateIds.length ? selectedCandidateIds : undefined, llmSynthesis)}
+              onClick={() =>
+                llmSynthesis
+                  ? confirmLlmRescore()
+                  : onRunScore(selectedCandidateIds.length ? selectedCandidateIds : undefined)
+              }
             >
-              {llmSynthesis ? '重新评分' : '重新加载'}
+              {llmSynthesis ? '使用 AI 重新评分' : '重新加载'}
             </Button>
             <Button
               type="primary"

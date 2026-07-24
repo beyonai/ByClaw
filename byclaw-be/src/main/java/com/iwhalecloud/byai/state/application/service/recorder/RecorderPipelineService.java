@@ -1,5 +1,8 @@
 package com.iwhalecloud.byai.state.application.service.recorder;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.state.domain.recorder.model.RecorderSession;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -10,11 +13,15 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 @Component
 public class RecorderPipelineService {
 
+    private static final Logger log = LoggerFactory.getLogger(RecorderPipelineService.class);
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private static final String ACTIVE_VERIFY_TOKEN = "_activeVerifyToken";
     static final int MAX_SOURCE_BYTES = 1024 * 1024;
     private static final String SOURCE_VALIDATION_MESSAGE =
@@ -48,6 +55,7 @@ public class RecorderPipelineService {
 
     public Map<String, Object> score(RecorderSession session, List<String> candidateIds, boolean llmEgressApproved) {
         List<Map<String, Object>> selected = selectCandidates(session, candidateIds);
+        long startedAtNanos = System.nanoTime();
         Map<String, Object> result = new LinkedHashMap<>();
         result.putAll(Map.of(
             "candidates", selected,
@@ -59,24 +67,71 @@ public class RecorderPipelineService {
         ));
         result.put("llmSynthesisUsed", false);
         if (!llmEgressApproved) {
+            log.info(
+                "recorder_llm_score phase=skipped sessionId={} candidateCount={} approved=false modelCalled=false "
+                    + "mergeApplied=false fallback=rule_score_no_approval elapsedMs={}",
+                session.sessionId(), selected.size(), elapsedMillis(startedAtNanos)
+            );
             return result;
         }
         RecorderLlmService.Availability availability = recorderLlmService.availability();
         if (!availability.available()) {
             result.put("llmError", "默认 LLM 模型不可用，已使用本地规则评分。");
+            log.warn(
+                "recorder_llm_score phase=skipped sessionId={} candidateCount={} approved=true modelCalled=false "
+                    + "availabilityReason={} mergeApplied=false fallback=rule_score_model_unavailable elapsedMs={}",
+                session.sessionId(), selected.size(), availability.reason(), elapsedMillis(startedAtNanos)
+            );
             return result;
         }
         try {
-            result.put("llmRawJson", recorderLlmService.generateText(
+            log.info(
+                "recorder_llm_score phase=calling sessionId={} candidateCount={} approved=true modelCalled=true",
+                session.sessionId(), selected.size()
+            );
+            String llmRawJson = recorderLlmService.generateText(
                 "You are a recorder API analyst. Return concise JSON only. Do not produce executable code.",
                 llmScorePrompt(selected),
                 1200
-            ));
+            );
+            result.put("llmRawJson", llmRawJson);
             result.put("llmSynthesisUsed", true);
-        } catch (RuntimeException ignored) {
+            LlmJsonParseResult jsonParse = inspectLlmJson(llmRawJson);
+            log.info(
+                "recorder_llm_score phase=received sessionId={} candidateCount={} approved=true modelCalled=true "
+                    + "responseLength={} jsonParse={} parseErrorType={} mergeApplied=false "
+                    + "fallback=rule_score_merge_not_implemented elapsedMs={}",
+                session.sessionId(), selected.size(), llmRawJson == null ? 0 : llmRawJson.length(), jsonParse.status(),
+                jsonParse.errorType(), elapsedMillis(startedAtNanos)
+            );
+        } catch (RuntimeException e) {
             result.put("llmError", "LLM 评分调用失败，已使用本地规则评分。");
+            log.warn(
+                "recorder_llm_score phase=call_failed sessionId={} candidateCount={} approved=true modelCalled=true "
+                    + "exceptionType={} mergeApplied=false fallback=rule_score_call_failed elapsedMs={}",
+                session.sessionId(), selected.size(), e.getClass().getSimpleName(), elapsedMillis(startedAtNanos)
+            );
         }
         return result;
+    }
+
+    private static long elapsedMillis(long startedAtNanos) {
+        return (System.nanoTime() - startedAtNanos) / 1_000_000;
+    }
+
+    private static LlmJsonParseResult inspectLlmJson(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return new LlmJsonParseResult("empty", "none");
+        }
+        try {
+            JsonNode parsed = OBJECT_MAPPER.readTree(raw);
+            return new LlmJsonParseResult(parsed != null && parsed.isObject() ? "object" : "non_object", "none");
+        } catch (JsonProcessingException e) {
+            return new LlmJsonParseResult("invalid", e.getClass().getSimpleName());
+        }
+    }
+
+    private record LlmJsonParseResult(String status, String errorType) {
     }
 
     public Map<String, Object> generate(RecorderSession session, List<String> candidateIds) {
