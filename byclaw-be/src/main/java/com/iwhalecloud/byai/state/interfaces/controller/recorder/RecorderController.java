@@ -114,7 +114,7 @@ public class RecorderController {
 
     @PostMapping("/save")
     public ResponseEntity<RecorderEnvelope<Map<String, Object>>> save(@RequestBody(required = false) Map<String, Object> body) {
-        return response(recorderApplicationService.save(normalize(body)));
+        return response(recorderApplicationService.saveAdapter(normalize(body)));
     }
 
     @PostMapping("/cancel")

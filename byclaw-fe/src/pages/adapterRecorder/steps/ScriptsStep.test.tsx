@@ -68,4 +68,29 @@ describe('ScriptsStep save state', () => {
     fireEvent.click(saveAgain);
     expect(onSaveDraft).toHaveBeenCalledWith('draft_0', 'same verified source');
   });
+
+  it('reports a single saved script with its relative CLI path', () => {
+    render(
+      <ScriptsStep
+        loading={false}
+        drafts={[draft]}
+        savedAdapters={[
+          {
+            draftId: 'draft_0',
+            site: 'api_juejin_cn',
+            name: 'search_api_v1_search',
+            adapterPath: '/by/.bycli/clis/api_juejin_cn/search_api_v1_search.js',
+          },
+        ]}
+        onVerifyDraft={jest.fn()}
+        onSaveDraft={jest.fn()}
+        onBack={jest.fn()}
+      />
+    );
+
+    expect(
+      screen.getByText('已成功保存 1 个脚本到 .bycli/clis/api_juejin_cn/search_api_v1_search.js')
+    ).toBeInTheDocument();
+    expect(screen.queryByText('/by/.bycli/clis/api_juejin_cn/search_api_v1_search.js')).not.toBeInTheDocument();
+  });
 });

@@ -2,7 +2,7 @@
 // 可逐个测/存,保存后卡片标记已存,停留本页(不自动结束会话)。
 import { useEffect, useState } from 'react';
 import { CheckCircleFilled, ExperimentOutlined, SaveOutlined, ArrowLeftOutlined } from '@ant-design/icons';
-import { Alert, Button, Card, Space, Tag, Typography } from 'antd';
+import { Alert, Button, Card, Space, Typography } from 'antd';
 import type { PipelineDraft, SavedAdapter } from '../types/recorder';
 import { DraftCard } from './pipelineShared';
 
@@ -49,6 +49,10 @@ export default function ScriptsStep({
   }, [draftKey]);
 
   const savedSet = new Set(savedDraftIds ?? []);
+  const savedPath = savedAdapters?.[0]?.adapterPath;
+  const relativeSavedPath = savedPath?.includes('.bycli/clis/')
+    ? savedPath.slice(savedPath.indexOf('.bycli/clis/'))
+    : '.bycli/clis/';
 
   if (!drafts?.length) {
     return (
@@ -73,19 +77,7 @@ export default function ScriptsStep({
           type="success"
           showIcon
           style={{ marginBottom: 12 }}
-          message={`已保存 ${savedAdapters.length} 个脚本到 ~/.bycli/clis/`}
-          description={
-            <Space direction="vertical" size={2} style={{ width: '100%' }}>
-              {savedAdapters.map((a) => (
-                <Text key={a.adapterPath ?? `${a.site}/${a.name}`} className="code" style={{ fontSize: 12 }}>
-                  <Tag color="success" style={{ marginInlineEnd: 6 }}>
-                    {a.site}/{a.name}
-                  </Tag>
-                  {a.adapterPath}
-                </Text>
-              ))}
-            </Space>
-          }
+          message={`已成功保存 ${savedAdapters.length} 个脚本到 ${relativeSavedPath}`}
         />
       ) : null}
 

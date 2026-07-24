@@ -484,7 +484,7 @@ public class RecorderApplicationService {
         }
     }
 
-    public RecorderResponse<Map<String, Object>> save(Map<String, Object> body) {
+    public RecorderResponse<Map<String, Object>> saveAdapter(Map<String, Object> body) {
         RecorderResponse<Map<String, Object>> checked = requireSession(body);
         if (checked != null) {
             return checked;

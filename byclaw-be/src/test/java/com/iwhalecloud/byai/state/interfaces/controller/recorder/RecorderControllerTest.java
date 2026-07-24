@@ -830,7 +830,7 @@ class RecorderControllerTest {
             CompletableFuture<RecorderResponse<Map<String, Object>>> save = CompletableFuture.supplyAsync(() -> {
                 loginAs(1L, "alice");
                 try {
-                    return service.save(Map.of("sessionId", sessionId, "draftId", "draft_0"));
+                    return service.saveAdapter(Map.of("sessionId", sessionId, "draftId", "draft_0"));
                 } finally {
                     CurrentUserHolder.clearLoginInfo();
                 }
@@ -877,7 +877,7 @@ class RecorderControllerTest {
             CompletableFuture<RecorderResponse<Map<String, Object>>> save = CompletableFuture.supplyAsync(() -> {
                 loginAs(1L, "alice");
                 try {
-                    return service.save(Map.of(
+                    return service.saveAdapter(Map.of(
                         "sessionId", sessionId,
                         "drafts", List.of(Map.of("draftId", "draft_0"), Map.of("draftId", "draft_1"))
                     ));
