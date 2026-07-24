@@ -373,7 +373,7 @@ export function DraftCard({
 }) {
   const { token } = theme.useToken();
   const v = draft.verify;
-  const untested = !draft.usable && v.reasons?.includes('尚未测试');
+  const untested = !draft.usable && (v.reasons?.includes('尚未测试') || v.reasons?.includes('pending verification'));
   return (
     <Card
       size="small"
