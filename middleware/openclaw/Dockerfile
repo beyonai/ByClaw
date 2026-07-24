@@ -108,7 +108,7 @@ RUN set -eux; \
 ENV PIP_BREAK_SYSTEM_PACKAGES=1 \
     PIP_ROOT_USER_ACTION=ignore \
     OPENCLAW_BUNDLED_PLUGINS_DIR=/app/dist/extensions \
-    OPENCLAW_STATE_DIR=/home/appuser/.openclaw \
+    OPENCLAW_STATE_DIR=/by/.openclaw \
     OPENCLAW_VNC_WEB_PORT=8081 \
     OPENCLAW_VNC_PORT=5901
 
@@ -300,8 +300,9 @@ RUN rm -fr /root/.agents/skills
 
 RUN groupadd --gid 1001 appgroup && \
     useradd --uid 1001 --gid appgroup --create-home --shell /bin/bash appuser && \
-    mkdir -p /home/appuser/.openclaw /by/.bycli && \
-    chown -R appuser:appgroup /app /home/appuser /by /usr/share/novnc
+    mkdir -p /by/.bycli && \
+    chown -R appuser:appgroup /home/appuser /by && \
+    { [ -f /usr/share/novnc/index.html ] && chmod a+w /usr/share/novnc/index.html || true; }
 
 USER appuser
 
