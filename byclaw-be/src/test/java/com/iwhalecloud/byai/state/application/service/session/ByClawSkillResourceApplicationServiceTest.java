@@ -1,5 +1,10 @@
 package com.iwhalecloud.byai.state.application.service.session;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
+import com.sun.net.httpserver.HttpServer;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
@@ -17,6 +22,8 @@ import com.iwhalecloud.byai.state.domain.resource.service.ResourceArtifactStorag
 import com.iwhalecloud.byai.state.domain.session.dto.ByClawSkillDto;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import java.io.ByteArrayOutputStream;
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
@@ -25,6 +32,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.MessageSource;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -708,6 +716,53 @@ class ByClawSkillResourceApplicationServiceTest {
         verify(ssResourceService).updateResourceEntity(existing);
         verify(ssResourceService, never()).saveResource(any(SsResource.class));
         verify(authApplicationService, never()).ensureCreatorDefaultPrivileges(existing);
+    }
+
+    @Test
+    void downloadThirdPartySkillPackage_logsDetailedHttpFailure() throws Exception {
+        byte[] errorBody = "{\"error\":\"skill not found\",\"code\":\"SKILL_404\"}"
+            .getBytes(StandardCharsets.UTF_8);
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/download", exchange -> {
+            exchange.getResponseHeaders().set("Content-Type", "application/json;charset=UTF-8");
+            exchange.sendResponseHeaders(502, errorBody.length);
+            try (var output = exchange.getResponseBody()) {
+                output.write(errorBody);
+            }
+        });
+        server.start();
+        String downloadUrl = "http://127.0.0.1:" + server.getAddress().getPort()
+            + "/download?skillIds=821937217247941&token=raw-token";
+        Logger serviceLogger = (Logger)LoggerFactory.getLogger(ByClawSkillResourceApplicationService.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        serviceLogger.addAppender(appender);
+        appender.start();
+
+        try {
+            assertThatThrownBy(() -> service.downloadThirdPartySkillPackage(downloadUrl))
+                .isInstanceOf(IllegalArgumentException.class);
+
+            assertThat(appender.list).anySatisfy(event -> {
+                assertThat(event.getLevel()).isEqualTo(Level.ERROR);
+                assertThat(event.getFormattedMessage()).contains(
+                    "第三方技能包下载失败",
+                    "userCode=user001",
+                    "downloadUrl=" + downloadUrl,
+                    "stage=VALIDATE_HTTP_STATUS",
+                    "httpStatus=502",
+                    "contentType=application/json;charset=UTF-8",
+                    "contentLength=" + errorBody.length,
+                    "downloadedBytes=0",
+                    "errorResponse={\"error\":\"skill not found\",\"code\":\"SKILL_404\"}",
+                    "exceptionType=java.lang.IllegalArgumentException");
+                assertThat(event.getThrowableProxy()).isNotNull();
+            });
+        }
+        finally {
+            serviceLogger.detachAppender(appender);
+            appender.stop();
+            server.stop(0);
+        }
     }
 
     private byte[] skillZipBytes(String skillName) {

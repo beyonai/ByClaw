@@ -2,20 +2,26 @@ package com.iwhalecloud.byai.state.interfaces.controller.resource;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.iwhalecloud.byai.state.domain.resource.qo.ThirdPartySkillInstallQo;
 import org.junit.jupiter.api.Test;
 
 class ToolManControllerTest {
 
     @Test
-    void sanitizeDownloadUrlForLogRemovesCredentialsQueryAndFragment() {
-        assertThat(ToolManController.sanitizeDownloadUrlForLog(
-            "https://user:secret@example.com/skills/demo.zip?skillIds=123&token=secret#fragment"))
-            .isEqualTo("https://example.com/skills/demo.zip");
+    void serializeThirdPartySkillInstallRequestKeepsCompleteParameters() {
+        ThirdPartySkillInstallQo request = new ThirdPartySkillInstallQo();
+        request.setDigId(10005856L);
+        request.setDownloadUrl(
+            "https://user:secret@example.com/skills/demo.zip?skillIds=123&token=secret#fragment");
+
+        assertThat(ToolManController.serializeThirdPartySkillInstallRequest(request))
+            .isEqualTo("{\"digId\":10005856,"
+                + "\"downloadUrl\":\"https://user:secret@example.com/skills/demo.zip"
+                + "?skillIds=123&token=secret#fragment\"}");
     }
 
     @Test
-    void sanitizeDownloadUrlForLogHandlesBlankAndInvalidValues() {
-        assertThat(ToolManController.sanitizeDownloadUrlForLog(null)).isEmpty();
-        assertThat(ToolManController.sanitizeDownloadUrlForLog("not-a-url")).isEqualTo("[invalid-url]");
+    void serializeThirdPartySkillInstallRequestHandlesNullRequest() {
+        assertThat(ToolManController.serializeThirdPartySkillInstallRequest(null)).isEqualTo("null");
     }
 }
