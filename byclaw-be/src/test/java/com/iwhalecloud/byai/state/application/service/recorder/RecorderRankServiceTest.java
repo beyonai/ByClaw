@@ -35,6 +35,7 @@ class RecorderRankServiceTest {
             .extractingByKey("urlTemplate")
             .isEqualTo("https://api.juejin.cn/search_api/v1/search?aid={aid}&query={query}&cursor={cursor}");
         assertThat(candidates.toString()).doesNotContain("mon.zijieapi.com", "vcs.zijieapi.com");
+        assertThat(candidates.getFirst()).doesNotContainKey("risks");
     }
 
     @Test

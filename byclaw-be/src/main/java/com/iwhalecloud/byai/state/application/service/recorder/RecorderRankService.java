@@ -89,7 +89,6 @@ public class RecorderRankService {
             endpoint.put("rowPath", responseShape.rowPath());
         }
         candidate.put("scoreExplanation", scoreExplanation(aggregate));
-        candidate.put("risks", List.of("Java recorder ranker uses deterministic capture heuristics; semantic LLM scoring is delegated to pipeline."));
         candidate.put("mergedRequestIds", aggregate.requestIds());
         return candidate;
     }
