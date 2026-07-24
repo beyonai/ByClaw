@@ -301,7 +301,7 @@ RUN rm -fr /root/.agents/skills
 RUN groupadd --gid 1001 appgroup && \
     useradd --uid 1001 --gid appgroup --create-home --shell /bin/bash appuser && \
     mkdir -p /home/appuser/.openclaw /by/.bycli && \
-    chown -R appuser:appgroup /app /home/appuser /by
+    chown -R appuser:appgroup /app /home/appuser /by /usr/share/novnc
 
 USER appuser
 
