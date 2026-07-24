@@ -14,7 +14,6 @@ import java.util.HashSet;
 import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -34,25 +33,6 @@ public class RecorderApplicationService {
     private final RecorderResourceSaveService resourceSaveService;
     private final RecorderLlmService recorderLlmService;
 
-    public RecorderApplicationService(
-        RecorderSessionRegistry sessionRegistry,
-        RecorderRequestRegistry requestRegistry,
-        RecorderRankService rankService,
-        RecorderPipelineService pipelineService,
-        RecorderBrowserPort browserPort,
-        RecorderVncProvider vncProvider,
-        RecorderVerifyService verifyService,
-        RecorderDraftStore draftStore,
-        RecorderCurrentUserProvider currentUserProvider,
-        RecorderResourceSaveService resourceSaveService
-    ) {
-        this(
-            sessionRegistry, requestRegistry, rankService, pipelineService, browserPort, vncProvider, verifyService,
-            draftStore, currentUserProvider, resourceSaveService, RecorderLlmService.unavailable()
-        );
-    }
-
-    @Autowired
     public RecorderApplicationService(
         RecorderSessionRegistry sessionRegistry,
         RecorderRequestRegistry requestRegistry,
@@ -460,12 +440,6 @@ public class RecorderApplicationService {
             try {
                 return accepted(session, "pipeline", pipelineService.generate(session, stringList(body.get("candidateIds"))));
             } catch (RecorderSaveException e) {
-                log.warn(
-                    "Recorder pipeline generation failed, sessionId={}, code={}",
-                    session.sessionId(),
-                    e.getCode(),
-                    e
-                );
                 return bycliStorageUnavailable();
             }
         }
