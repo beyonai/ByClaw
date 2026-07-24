@@ -11,6 +11,81 @@ jest.mock('./pipelineShared', () => ({
 }));
 
 describe('ScoreCandidatesStep AI prompt', () => {
+  it('automatically starts AI scoring with consent when LLM synthesis is enabled', () => {
+    const onRunScore = jest.fn();
+    render(
+      <ScoreCandidatesStep loading={false} llmSynthesis candidates={[]} onRunScore={onRunScore} onNext={jest.fn()} />
+    );
+
+    expect(onRunScore).toHaveBeenCalledTimes(1);
+    expect(onRunScore).toHaveBeenCalledWith(undefined, true);
+  });
+
+  it('does not automatically score after the score stage completes with no selected candidates', () => {
+    const onRunScore = jest.fn();
+    render(
+      <ScoreCandidatesStep
+        loading={false}
+        llmSynthesis
+        candidates={[]}
+        sentCandidateIds={[]}
+        onRunScore={onRunScore}
+        onNext={jest.fn()}
+      />
+    );
+
+    expect(onRunScore).not.toHaveBeenCalled();
+  });
+
+  it('does not automatically score while loading', () => {
+    const onRunScore = jest.fn();
+    render(<ScoreCandidatesStep loading llmSynthesis candidates={[]} onRunScore={onRunScore} onNext={jest.fn()} />);
+
+    expect(onRunScore).not.toHaveBeenCalled();
+  });
+
+  it('automatically starts AI scoring after loading completes', () => {
+    const onRunScore = jest.fn();
+    const { rerender } = render(
+      <ScoreCandidatesStep loading llmSynthesis candidates={[]} onRunScore={onRunScore} onNext={jest.fn()} />
+    );
+
+    rerender(
+      <ScoreCandidatesStep loading={false} llmSynthesis candidates={[]} onRunScore={onRunScore} onNext={jest.fn()} />
+    );
+
+    expect(onRunScore).toHaveBeenCalledTimes(1);
+    expect(onRunScore).toHaveBeenCalledWith(undefined, true);
+  });
+
+  it('automatically starts local scoring without egress consent', () => {
+    const onRunScore = jest.fn();
+    render(
+      <ScoreCandidatesStep
+        loading={false}
+        llmSynthesis={false}
+        candidates={[]}
+        onRunScore={onRunScore}
+        onNext={jest.fn()}
+      />
+    );
+
+    expect(onRunScore).toHaveBeenCalledTimes(1);
+    expect(onRunScore).toHaveBeenCalledWith(undefined, false);
+  });
+
+  it('explains the limited data sent to the LLM', () => {
+    render(
+      <ScoreCandidatesStep loading={false} llmSynthesis candidates={[]} onRunScore={jest.fn()} onNext={jest.fn()} />
+    );
+
+    expect(
+      screen.getByText(
+        '仅将候选接口的 method、host、path 与本地评分发送给默认 LLM 做语义评分；不会发送 Cookie、请求体或可执行脚本。脚本仍由本地确定性模板生成。'
+      )
+    ).toBeInTheDocument();
+  });
+
   it('does not render the AI prompt panel before score completes', () => {
     render(
       <ScoreCandidatesStep loading={false} llmSynthesis candidates={[]} onRunScore={jest.fn()} onNext={jest.fn()} />

@@ -146,15 +146,14 @@ export default function ScoreCandidatesStep({
     });
   };
 
-  // 本地流程进入评分候选页即自动跑一次 score。LLM 流程必须由用户点击明确同意按钮后才可外发。
+  // 进入评分候选页即自动跑一次 score；LLM 流程会显式传入外发同意标记。
   // 关键:即使 rank 已产出候选(candidates 非空),只要 score 阶段没跑过就必须跑——它才写 genStage 供 generate 用。
   useEffect(() => {
-    if (!llmSynthesis && !scoreRan && !loading && !autoScoredRef.current) {
+    if (!scoreRan && !loading && !autoScoredRef.current) {
       autoScoredRef.current = true;
-      onRunScore();
+      onRunScore(undefined, llmSynthesis);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [scoreRan, loading, llmSynthesis, onRunScore]);
 
   // 评分回来后用 be 的 top-N 初始化默认勾选(仅一次,之后尊重用户改动)。
   useEffect(() => {
@@ -173,7 +172,7 @@ export default function ScoreCandidatesStep({
     <Card title={llmSynthesis ? '① 评分候选接口' : '① 选择候选接口'} variant="borderless">
       <Paragraph type="secondary" style={{ lineHeight: 1.7 }}>
         {llmSynthesis
-          ? '你确认后，仅将候选接口的 method、host、path 与本地评分发送给默认 LLM 做语义评分；不会发送 Cookie、请求体或可执行脚本。脚本仍由本地确定性模板生成。'
+          ? '仅将候选接口的 method、host、path 与本地评分发送给默认 LLM 做语义评分；不会发送 Cookie、请求体或可执行脚本。脚本仍由本地确定性模板生成。'
           : '基于 A/B 录制痕迹的本地规则评分，勾选需要生成脚本的接口。确认候选后点「下一步」进入脚本生成。'}
       </Paragraph>
 
