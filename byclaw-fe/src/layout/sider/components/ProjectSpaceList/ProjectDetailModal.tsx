@@ -2286,12 +2286,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
                   {/* 创建者:可编辑/删除;非创建者:只读查看(复用弹窗,disabled + 无确定按钮)。 */}
                   {isSourceCreator(source) ? (
                     <>
-                      <Button
-                        type="link"
-                        size="small"
-                        icon={<EditOutlined />}
-                        onClick={() => handleEditSource(source)}
-                      >
+                      <Button type="link" size="small" icon={<EditOutlined />} onClick={() => handleEditSource(source)}>
                         {t('common.edit')}
                       </Button>
                       <Button
@@ -2595,7 +2590,9 @@ const ProjectDetailPanel: React.FC<Props> = ({
                 return (
                   <div
                     key={item.itemId}
-                    className={styles.detailRequirementItem}
+                    className={`${styles.detailRequirementItem} ${
+                      canOperateManualRequirement ? styles.detailRequirementItemWithAction : ''
+                    }`}
                     // 卡片点击直接打开右侧详情，列表项始终保持固定高度。
                     onClick={() => setDetailReq(item)}
                   >
@@ -2608,7 +2605,11 @@ const ProjectDetailPanel: React.FC<Props> = ({
                         <strong>{item.title}</strong>
                         <span>{detailText}</span>
                       </div>
-                      <div className={styles.detailRequirementActions}>
+                      <div
+                        className={`${styles.detailRequirementActions} ${
+                          isManualRequirementActionOpen ? styles.detailRequirementActionsOpen : ''
+                        }`}
+                      >
                         {isStarted ? (
                           <Button
                             size="small"

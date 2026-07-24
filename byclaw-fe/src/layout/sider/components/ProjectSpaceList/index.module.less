@@ -1351,6 +1351,7 @@
 
 // 需求列表与任务列表共用无边框、悬浮浅灰底色的卡片状态。
 .detailRequirementItem {
+  position: relative;
   min-height: 64px;
   padding: 8px 10px;
   border: 1px solid transparent;
@@ -1371,11 +1372,12 @@
       opacity: 1;
       pointer-events: auto;
     }
-
-    .detailRequirementMoreAction {
-      display: inline-flex;
-    }
   }
+}
+
+.detailRequirementItemWithAction:hover .detailRequirementMoreAction {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .detailRequirementSummary {
@@ -1388,11 +1390,16 @@
 }
 
 .detailRequirementActions {
-  // 启动研发与更多操作固定在同一右侧区域，显示三点时不挤压需求标题。
+  // 与任务卡片一致：三点按钮绝对定位，悬停时通过右内边距为其让位，默认不留空白。
   display: inline-flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 2px;
+  transition: padding-right 0.2s;
+}
+
+.detailRequirementItemWithAction:hover .detailRequirementActions,
+.detailRequirementActionsOpen {
+  padding-right: 28px;
 }
 
 // 需求列表复用会话列表的图标规格，评分信息收敛到右侧详情抽屉。
@@ -1578,22 +1585,31 @@
 }
 
 .detailRequirementMoreAction {
-  // 三点按钮默认不占用布局空间，仅在卡片悬停或菜单展开时显示。
-  display: none;
-  width: 26px;
-  height: 26px;
+  // 与任务卡片更多按钮一致，透明态仍可通过 opacity 平滑淡入且不参与布局。
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  z-index: 1;
+  width: 24px;
+  height: 24px;
   padding: 0;
-  color: #667085;
+  border-radius: 6px;
+  color: #7c8798;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%);
+  transition: opacity 0.2s, background-color 0.2s;
 
   &:hover,
   &:focus {
-    color: #246bfe;
-    background: #eaf2ff;
+    color: #526075;
+    background: rgba(0, 0, 0, 0.04);
   }
 }
 
 .detailRequirementMoreActionOpen {
-  display: inline-flex;
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .detailRequirementStartAction {
@@ -2748,23 +2764,21 @@
 
 /* 整体任务视图看板样式（只读） */
 .taskBoardDrawer {
-  --task-board-toolbar-height: 56px;
-
   :global {
     .@{antPrefix}-drawer-body {
       padding: 0;
-      overflow: auto;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
     }
   }
 }
 
 .kanbanToolbar {
-  position: sticky;
-  top: 0;
-  z-index: 2;
   display: flex;
   align-items: center;
-  // 任务范围与日期筛选固定在左侧，分页通过自动左边距固定在右侧。
+  flex-shrink: 0;
+  // 任务范围与日期筛选固定在工具栏左侧。
   justify-content: flex-start;
   gap: 16px;
   min-height: var(--task-board-toolbar-height);
@@ -2778,22 +2792,26 @@
     .@{antPrefix}-picker {
       height: 32px;
     }
-
-    .@{antPrefix}-pagination {
-      // 与日期筛选分居工具栏两端，避免分页紧跟在日期组件后面。
-      margin-left: auto;
-    }
   }
 }
 
 .kanbanBoard {
+  flex: 1;
+  min-height: 0;
   display: flex;
   gap: 16px;
-  // 顶部留白下移到列头，确保状态列头从初始位置就贴在固定工具栏下方。
+  align-items: stretch;
+  // 顶部留白下移到列头，确保状态列头与筛选工具栏对齐。
   padding: 0 20px 20px;
-  min-height: 100%;
-  // 横向滚动交给外层抽屉，避免内部滚动容器导致状态列头的 sticky 定位失效。
-  overflow: visible;
+  // 四列不足以容纳时仅允许横向滚动，纵向滚动由每个状态列独立处理。
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 .kanbanColumn {
@@ -2801,6 +2819,8 @@
   min-width: 260px;
   max-width: 320px;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
   background: #fafafa;
   border-radius: 10px;
   padding: 0 12px 12px;
@@ -2813,10 +2833,8 @@
 }
 
 .kanbanColHeader {
-  // 状态列头从看板打开时即固定在日期筛选工具栏下方，不会先跟随列表上移。
-  position: sticky;
-  top: var(--task-board-toolbar-height);
-  z-index: 1;
+  // 列头在列滚动区之外，始终显示在当前状态列顶部。
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -2825,6 +2843,36 @@
   background: #fafafa;
   font-size: 14px;
   font-weight: 500;
+}
+
+.kanbanColumnContent {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+.kanbanColumnSpin {
+  min-height: 100%;
+
+  :global {
+    .@{antPrefix}-spin-container {
+      min-height: 100%;
+    }
+  }
+}
+
+.kanbanColumnLoadingMore {
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .kanbanColIcon {

@@ -526,6 +526,31 @@
   background: #fff;
 }
 
+// 任务成果等抽屉场景使用剩余可用高度，文件树内部滚动以保留持续浏览体验。
+.fileSpaceBlockFill {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+
+  .fileSpaceTreeWrap {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+
+    .treeScroll {
+      flex: 1;
+      max-height: none;
+    }
+  }
+}
+
+.fileSpaceBlockPlain {
+  border: 0;
+  border-radius: 0;
+}
+
 .fileSpaceHeader {
   min-height: 42px;
   padding: 8px 10px;

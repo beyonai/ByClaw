@@ -134,13 +134,22 @@ const ProjectSessionResultDrawer: React.FC<ProjectSessionResultDrawerProps> = ({
   };
 
   return (
-    <Drawer title="任务成果" open={open} onClose={handleClose} width={480} destroyOnClose>
+    <Drawer
+      title="任务成果"
+      open={open}
+      onClose={handleClose}
+      width={480}
+      destroyOnClose
+      // 抽屉主体固定高度并保留左右间距，文件树在剩余区域内滚动，避免内容变多时压缩展示区域。
+      styles={{ body: { padding: '0 16px', overflow: 'hidden', display: 'flex', flexDirection: 'column' } }}
+    >
       <FileSpaceBlock
         title={sessionName || '当前会话'}
         loading={loading}
         items={files}
         currentPath={getSessionFilePath(sessionId)}
         emptyText={resourceId ? '当前会话暂无成果文件' : '未关联文件空间'}
+        fillContainer
         childrenByPath={childrenByPath}
         expandedKeys={expandedKeys}
         showActions={false}

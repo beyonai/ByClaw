@@ -1223,8 +1223,10 @@ public class DevloopApplicationService {
         if (query == null || query.getProjectId() == null) {
             return ResponseUtil.failRes("projectId 不能为空");
         }
+        final String taskStatus;
         try {
             query.normalizeAndValidate();
+            taskStatus = normalizeTaskStatusFilter(query.getStatus());
         }
         catch (IllegalArgumentException e) {
             return ResponseUtil.failRes(e.getMessage());
@@ -1243,6 +1245,10 @@ public class DevloopApplicationService {
             wrapper.eq(ByaiSession::getCreatorId, CurrentUserHolder.getCurrentUserId());
         }
         wrapper.orderByDesc(ByaiSession::getCreateTime).orderByDesc(ByaiSession::getSessionId);
+
+        if (taskStatus != null) {
+            return listTasksByStatus(query, wrapper, taskStatus);
+        }
         Page<ByaiSession> sessionPage = byaiSessionMapper
             .selectPage(new Page<>(query.getPageNum(), query.getPageSize()), wrapper);
 
@@ -1259,6 +1265,65 @@ public class DevloopApplicationService {
         result.setTotalPages((int) sessionPage.getPages());
         result.setList(tasks);
         return ResponseUtil.successResponse(result);
+    }
+
+    /**
+     * 任务状态保存在会话状态投影中，数据库没有可直接过滤的状态列。
+     * 因此状态看板查询需先读取状态投影，再对每个状态列独立分页，保证四列总数和加载更多结果准确。
+     */
+    private ResponseUtil<PageInfo<DevloopTaskViewDto>> listTasksByStatus(DevloopTaskListQueryDto query,
+        LambdaQueryWrapper<ByaiSession> wrapper, String taskStatus) {
+        List<ByaiSession> sessions = byaiSessionMapper.selectList(wrapper);
+        List<DevloopTaskViewDto> tasks = new ArrayList<>();
+        int matchedCount = 0;
+        int offset = (query.getPageNum() - 1) * query.getPageSize();
+
+        for (ByaiSession session : sessions) {
+            DevloopTaskStateDto state = tryReadTaskState(session);
+            if (!taskStatus.equals(resolveTaskStatusForFilter(state))) {
+                continue;
+            }
+            if (matchedCount >= offset && tasks.size() < query.getPageSize()) {
+                tasks.add(sessionAsTask(session, state, resolveTaskContext(session)));
+            }
+            matchedCount++;
+        }
+
+        PageInfo<DevloopTaskViewDto> result = new PageInfo<>();
+        result.setPageNum(query.getPageNum());
+        result.setPageSize(query.getPageSize());
+        result.setTotal((long) matchedCount);
+        result.setTotalPages((int) Math.ceil((double) matchedCount / query.getPageSize()));
+        result.setList(tasks);
+        return ResponseUtil.successResponse(result);
+    }
+
+    /** 将前端看板状态和会话状态投影的状态统一为内部筛选值。 */
+    private String normalizeTaskStatusFilter(String status) {
+        if (StringUtils.isBlank(status)) {
+            return null;
+        }
+        switch (status.trim().toLowerCase(Locale.ROOT)) {
+            case "pending":
+            case "not_started":
+                return "pending";
+            case "running":
+            case "in_progress":
+                return "in_progress";
+            case "paused":
+                return "paused";
+            case "done":
+            case "completed":
+                return "completed";
+            default:
+                throw new IllegalArgumentException("任务状态参数无效");
+        }
+    }
+
+    /** 状态投影缺失时沿用前端展示口径，归类到待开始列。 */
+    private String resolveTaskStatusForFilter(DevloopTaskStateDto state) {
+        String status = state == null ? null : normalizeTaskStatusFilter(state.getStatus());
+        return status == null ? "pending" : status;
     }
 
     /** 查询单个任务详情：会话元数据来自数据库，状态来自 v2 会话投影。 */

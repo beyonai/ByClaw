@@ -34,6 +34,9 @@ export type DevloopTaskListQuery = {
 
   /** 仅看当前登录用户负责（创建）的任务；后端按当前用户的会话过滤，分页总数随之收敛。 */
   onlyMine?: boolean;
+
+  /** 任务状态筛选，整体任务视图按状态列分别查询。 */
+  status?: 'pending' | 'in_progress' | 'paused' | 'completed';
   pageNum?: number;
   pageSize?: number;
 };

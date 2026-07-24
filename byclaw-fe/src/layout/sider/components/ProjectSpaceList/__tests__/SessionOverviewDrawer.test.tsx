@@ -65,67 +65,72 @@ const mockListTasks = listTasks as jest.MockedFunction<typeof listTasks>;
 describe('SessionOverviewDrawer', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    mockListTasks.mockResolvedValue({
-      pageNum: 1,
-      pageSize: 20,
-      total: 25,
-      totalPages: 2,
-      list: [
-        {
-          taskId: 1,
-          sessionId: 1,
-          projectId: 10000811,
-          title: '当天待开始任务',
-          status: 'pending',
-          statusLabel: '待开始',
-          stateAvailable: true,
-          progress: 0,
-        },
-        {
-          taskId: 2,
-          sessionId: 2,
-          projectId: 10000811,
-          title: '当天进行中任务',
-          status: 'in_progress',
-          statusLabel: '进行中',
-          stateAvailable: true,
-          progress: 50,
-        },
-      ],
-    });
+    // 看板现在按状态并行请求，测试数据按请求状态分别返回，避免同一任务出现在多个状态列。
+    mockListTasks.mockImplementation(async (query) => ({
+      pageNum: query.pageNum || 1,
+      pageSize: 30,
+      total: query.status === 'pending' || query.status === 'in_progress' ? 1 : 0,
+      totalPages: 1,
+      list:
+        query.status === 'pending'
+          ? [
+              {
+                taskId: 1,
+                sessionId: 1,
+                projectId: 10000811,
+                title: '当天待开始任务',
+                status: 'pending',
+                statusLabel: '待开始',
+                stateAvailable: true,
+                progress: 0,
+              },
+            ]
+          : query.status === 'in_progress'
+          ? [
+              {
+                taskId: 2,
+                sessionId: 2,
+                projectId: 10000811,
+                title: '当天进行中任务',
+                status: 'in_progress',
+                statusLabel: '进行中',
+                stateAvailable: true,
+                progress: 50,
+              },
+            ]
+          : [],
+    }));
   });
 
-  it('queries the current week by default and uses server pagination', async () => {
+  it('queries four status columns with independent page size', async () => {
     const now = dayjs();
     const weekStart = now.subtract((now.day() + 6) % 7, 'day').startOf('day');
     render(<SessionOverviewDrawer open onClose={jest.fn()} projectId={10000811} projectName="百应研发项目" />);
 
     await waitFor(() => {
-      expect(mockListTasks).toHaveBeenCalledWith({
-        projectId: 10000811,
-        // 默认查本自然周，日期取值前端仍统一按天边界对齐。
-        createTimeStart: weekStart.format('YYYY-MM-DD HH:mm:ss'),
-        createTimeEnd: weekStart.add(6, 'day').endOf('day').format('YYYY-MM-DD HH:mm:ss'),
-        // 组件默认勾选“只看我的”，与同事统一后的 onlyMine 参数保持一致。
-        onlyMine: true,
-        pageNum: 1,
-        pageSize: 20,
-      });
+      expect(mockListTasks).toHaveBeenCalledTimes(4);
     });
-    expect(await screen.findByText('当天待开始任务')).toBeInTheDocument();
-    expect(await screen.findByText('当天进行中任务')).toBeInTheDocument();
-
-    fireEvent.click(screen.getByTitle('2'));
-
-    await waitFor(() => {
-      expect(mockListTasks).toHaveBeenLastCalledWith(
+    const requests = mockListTasks.mock.calls.map(([query]) => query);
+    expect(requests).toEqual(
+      expect.arrayContaining([
         expect.objectContaining({
           projectId: 10000811,
-          pageNum: 2,
-          pageSize: 20,
-        })
-      );
-    });
+          // 默认查本自然周，日期取值前端仍统一按天边界对齐。
+          createTimeStart: weekStart.format('YYYY-MM-DD HH:mm:ss'),
+          createTimeEnd: weekStart.add(6, 'day').endOf('day').format('YYYY-MM-DD HH:mm:ss'),
+          // 组件默认勾选“只看我的”，与同事统一后的 onlyMine 参数保持一致。
+          onlyMine: true,
+          pageNum: 1,
+          pageSize: 30,
+          status: 'pending',
+        }),
+        expect.objectContaining({ status: 'in_progress', pageNum: 1, pageSize: 30 }),
+        expect.objectContaining({ status: 'paused', pageNum: 1, pageSize: 30 }),
+        expect.objectContaining({ status: 'completed', pageNum: 1, pageSize: 30 }),
+      ])
+    );
+    expect(await screen.findByText('当天待开始任务')).toBeInTheDocument();
+    expect(await screen.findByText('当天进行中任务')).toBeInTheDocument();
   });
 
   it('activates the week tab after selecting the current week in the date picker', async () => {
@@ -158,12 +163,12 @@ describe('SessionOverviewDrawer', () => {
     render(<SessionOverviewDrawer open onClose={jest.fn()} projectId={10000811} projectName="百应研发项目" />);
 
     await waitFor(() => {
-      expect(mockListTasks).toHaveBeenCalledTimes(1);
+      expect(mockListTasks).toHaveBeenCalledTimes(4);
     });
     // 等待失败请求触发的状态更新完成，防止依赖变化再次触发初始查询。
     await new Promise((resolve) => setTimeout(resolve, 50));
 
-    expect(mockListTasks).toHaveBeenCalledTimes(1);
+    expect(mockListTasks).toHaveBeenCalledTimes(4);
   });
 
   it('passes the eligible task session-entry action to the task detail drawer', async () => {
