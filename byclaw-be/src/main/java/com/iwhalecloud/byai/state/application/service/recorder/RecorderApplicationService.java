@@ -245,7 +245,6 @@ public class RecorderApplicationService {
 
         Map<String, Object> data = sessionState(session);
         data.put("candidates", session.candidates());
-        data.put("scorePrompt", "Stub score prompt for recorder candidate ranking.");
         return ok(data);
     }
 

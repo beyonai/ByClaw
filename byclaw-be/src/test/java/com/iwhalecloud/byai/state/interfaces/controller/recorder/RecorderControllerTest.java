@@ -299,7 +299,8 @@ class RecorderControllerTest {
             .andExpect(jsonPath("$.data.candidates[0].endpoint.host").value("api.example.test"))
             .andExpect(jsonPath("$.data.candidates[0].endpoint.pathname").value("/v1/search"))
             .andExpect(jsonPath("$.data.candidates[0].endpoint.queryParams.keyword").value("{keyword}"))
-            .andExpect(jsonPath("$.data.candidates[0].args[0].paramName").value("keyword"));
+            .andExpect(jsonPath("$.data.candidates[0].args[0].paramName").value("keyword"))
+            .andExpect(jsonPath("$.data.scorePrompt").doesNotExist());
     }
 
     @Test

@@ -45,8 +45,6 @@ interface SessionData {
   seedB?: string;
   candidates?: RankCandidate[];
 
-  /** rank 阶段真正发给 LLM 的评分提示词(透明展示:转场页 + 候选表回看;LLM-off 时 undefined)。 */
-  rankScorePrompt?: string;
   selectedCandidateId?: string;
 
   /** 从选定候选派生并固化的 adapter 名(site/command);init 预览/写入与 verify 复用同一个 */
@@ -373,7 +371,7 @@ export default function useRecorderSession() {
         () => client.rank(),
         (d) => ({
           next: 'ranked',
-          patch: { candidates: d.candidates, rankScorePrompt: d.scorePrompt, pipelineSubStep: 'candidates' },
+          patch: { candidates: d.candidates, pipelineSubStep: 'candidates' },
         })
       ),
     // 选定候选时即派生并固化 adapter 名(init 预览/写入与 verify 复用同一个,避免漂移)。

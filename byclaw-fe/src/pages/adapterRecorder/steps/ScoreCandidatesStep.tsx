@@ -1,4 +1,4 @@
-// 拆步① 评分候选页:进入自动 score(评分)→ 折叠一(A/B 痕迹 + rank 提示词)+ 折叠二(评分提示词)+
+// 拆步① 评分候选页:进入自动 score(评分)→ A/B 痕迹 + 评分完成后的 LLM 提示词+
 // 候选表(含 LLM 接口功能推断)+ 底部「下一步」。评分运行中显示进度 + 实时分阶段提示词。
 import { useEffect, useRef, useState } from 'react';
 import { RobotOutlined, ArrowRightOutlined, LoadingOutlined } from '@ant-design/icons';
@@ -97,9 +97,6 @@ interface Props {
   sampleA?: CaptureSample;
   sampleB?: CaptureSample;
 
-  /** rank 阶段发给 LLM 的评分提示词(AnalysisEvidencePanel 折叠二)。 */
-  rankScorePrompt?: string;
-
   /** LLM 返回的原始 interfaces JSON(「LLM 返回内容」折叠展示)。 */
   llmRawJson?: string;
   llmError?: string;
@@ -125,7 +122,6 @@ export default function ScoreCandidatesStep({
   seedB,
   sampleA,
   sampleB,
-  rankScorePrompt,
   llmRawJson,
   llmError,
   onRunScore,
@@ -171,13 +167,14 @@ export default function ScoreCandidatesStep({
           : '基于 A/B 录制痕迹的本地规则评分，勾选需要生成脚本的接口。确认候选后点「下一步」进入脚本生成。'}
       </Paragraph>
 
-      {/* 折叠一(A/B 痕迹)+ 折叠二(评分提示词);评分完成前默认展开。 */}
-      {llmSynthesis && (
+      {/* 仅在用户确认且 score 阶段完成后展示实际发给 LLM 的提示词。 */}
+      {llmSynthesis && scoreRan && (
         <AnalysisEvidencePanel
           sampleA={sampleA}
           sampleB={sampleB}
-          scorePrompt={rankScorePrompt ?? prompts?.score}
-          defaultOpen={!scoreRan}
+          scorePrompt={prompts?.score}
+          showScorePrompt
+          defaultOpen={false}
         />
       )}
 
@@ -224,7 +221,7 @@ export default function ScoreCandidatesStep({
           </div>
           {llmSynthesis && <LlmReturnPanel candidates={candidates} llmRawJson={llmRawJson} />}
           {llmError && <Alert style={{ marginTop: 12 }} type="warning" showIcon message={llmError} />}
-          {/* score 提示词已由上方 AnalysisEvidencePanel 展示(去重);generate 提示词移到生成脚本页按选中候选展示。 */}
+          {/* score 提示词已由上方 AnalysisEvidencePanel 展示;generate 提示词移到生成脚本页按选中候选展示。 */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 12, flexWrap: 'wrap' }}>
             <Text type="secondary" style={{ fontSize: 12 }}>
               已选 {selectedCandidateIds.length} 个接口生成本地脚本
