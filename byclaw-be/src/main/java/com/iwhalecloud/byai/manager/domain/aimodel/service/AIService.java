@@ -70,10 +70,32 @@ public class AIService {
      * request path does not depend on the Redis model cache.</p>
      */
     public String generateText(String systemPrompt, String userPrompt, ModelDto model, int maxTokens) {
-        return generateText(systemPrompt, userPrompt, model, null, maxTokens);
+        return generateText(systemPrompt, userPrompt, model, null, maxTokens, false);
     }
 
-    private String generateText(String systemPrompt, String userPrompt, ModelDto defaultModel, String modelCode, int maxTokens) {
+    /** Requests OpenAI-compatible JSON-object output for callers that require machine-readable results. */
+    public String generateJsonObject(String systemPrompt, String userPrompt, ModelDto model, int maxTokens) {
+        return generateText(systemPrompt, userPrompt, model, null, maxTokens, true);
+    }
+
+    private String generateText(
+        String systemPrompt,
+        String userPrompt,
+        ModelDto defaultModel,
+        String modelCode,
+        int maxTokens
+    ) {
+        return generateText(systemPrompt, userPrompt, defaultModel, modelCode, maxTokens, false);
+    }
+
+    private String generateText(
+        String systemPrompt,
+        String userPrompt,
+        ModelDto defaultModel,
+        String modelCode,
+        int maxTokens,
+        boolean jsonObject
+    ) {
         String apiUrl = defaultModel.getUrl() + "/chat/completions";
         String apiKey = defaultModel.getAuthToken();
         String model = defaultModel.getModelCode();
@@ -94,6 +116,9 @@ public class AIService {
 
             requestBody.put("temperature", 0.7);
             requestBody.put("max_tokens", maxTokens > 0 ? maxTokens : 4000);
+            if (jsonObject) {
+                requestBody.put("response_format", Map.of("type", "json_object"));
+            }
             applyThinkingParams(requestBody, defaultModel);
 
             // 设置请求头

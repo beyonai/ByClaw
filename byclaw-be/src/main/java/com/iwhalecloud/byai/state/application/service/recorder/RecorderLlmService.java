@@ -45,6 +45,14 @@ public class RecorderLlmService {
         return aiService.generateText(systemPrompt, userPrompt, resolved.model(), maxTokens);
     }
 
+    public String generateJsonObject(String systemPrompt, String userPrompt, int maxTokens) {
+        ResolvedModel resolved = resolveDefaultModel();
+        if (!resolved.availability().available()) {
+            throw new IllegalStateException("default LLM model is unavailable: " + resolved.availability().reason());
+        }
+        return aiService.generateJsonObject(systemPrompt, userPrompt, resolved.model(), maxTokens);
+    }
+
     private ResolvedModel resolveDefaultModel() {
         ModelVO listedModel;
         try {

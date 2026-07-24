@@ -55,12 +55,13 @@ public class RecorderPipelineService {
 
     public Map<String, Object> score(RecorderSession session, List<String> candidateIds, boolean llmEgressApproved) {
         List<Map<String, Object>> selected = selectCandidates(session, candidateIds);
+        String scorePrompt = llmScorePrompt(selected);
         long startedAtNanos = System.nanoTime();
         Map<String, Object> result = new LinkedHashMap<>();
         result.putAll(Map.of(
             "candidates", selected,
             "rejected", List.of(),
-            "scorePrompt", prompts(selected).get("score"),
+            "scorePrompt", scorePrompt,
             "generatePrompt", prompts(selected).get("generate"),
             "screenshotCount", 0,
             "sentCandidateIds", selected.stream().map(c -> c.get("id")).toList()
@@ -89,20 +90,28 @@ public class RecorderPipelineService {
                 "recorder_llm_score phase=calling sessionId={} candidateCount={} approved=true modelCalled=true",
                 session.sessionId(), selected.size()
             );
-            String llmRawJson = recorderLlmService.generateText(
-                "You are a recorder API analyst. Return concise JSON only. Do not produce executable code.",
-                llmScorePrompt(selected),
+            String llmRawJson = recorderLlmService.generateJsonObject(
+                "You are a recorder API analyst. Return one JSON object only, with no thinking, Markdown, or executable code.",
+                scorePrompt,
                 1200
             );
             result.put("llmRawJson", llmRawJson);
-            result.put("llmSynthesisUsed", true);
-            LlmJsonParseResult jsonParse = inspectLlmJson(llmRawJson);
+            LlmScoreMergeResult merge = mergeLlmScore(llmRawJson, selected);
+            result.put("candidates", merge.candidates());
+            result.put("llmAppliedCandidateCount", merge.appliedCandidateCount());
+            result.put("llmSynthesisUsed", merge.appliedCandidateCount() > 0);
+            if (!merge.jsonParse().isValid()) {
+                result.put("llmError", "AI 评分返回格式无效，已使用本地规则评分。");
+            } else if (merge.appliedCandidateCount() == 0) {
+                result.put("llmError", "AI 评分未匹配当前候选，已使用本地规则评分。");
+            }
             log.info(
                 "recorder_llm_score phase=received sessionId={} candidateCount={} approved=true modelCalled=true "
-                    + "responseLength={} jsonParse={} parseErrorType={} mergeApplied=false "
-                    + "fallback=rule_score_merge_not_implemented elapsedMs={}",
-                session.sessionId(), selected.size(), llmRawJson == null ? 0 : llmRawJson.length(), jsonParse.status(),
-                jsonParse.errorType(), elapsedMillis(startedAtNanos)
+                    + "responseLength={} jsonParse={} parseErrorType={} mergeApplied={} appliedCandidateCount={} "
+                    + "fallback={} elapsedMs={}",
+                session.sessionId(), selected.size(), llmRawJson == null ? 0 : llmRawJson.length(), merge.jsonParse().status(),
+                merge.jsonParse().errorType(), merge.appliedCandidateCount() > 0, merge.appliedCandidateCount(),
+                merge.fallback(), elapsedMillis(startedAtNanos)
             );
         } catch (RuntimeException e) {
             result.put("llmError", "LLM 评分调用失败，已使用本地规则评分。");
@@ -119,19 +128,185 @@ public class RecorderPipelineService {
         return (System.nanoTime() - startedAtNanos) / 1_000_000;
     }
 
-    private static LlmJsonParseResult inspectLlmJson(String raw) {
-        if (raw == null || raw.isBlank()) {
-            return new LlmJsonParseResult("empty", "none");
+    private static LlmScoreMergeResult mergeLlmScore(String raw, List<Map<String, Object>> candidates) {
+        List<Map<String, Object>> mergedCandidates = candidates.stream()
+            .map(LinkedHashMap::new)
+            .map(candidate -> (Map<String, Object>) candidate)
+            .toList();
+        LlmJsonParseResult jsonParse = parseJsonObject(raw);
+        if (!jsonParse.isValid()) {
+            return new LlmScoreMergeResult(mergedCandidates, 0, jsonParse, "rule_score_invalid_llm_json");
         }
-        try {
-            JsonNode parsed = OBJECT_MAPPER.readTree(raw);
-            return new LlmJsonParseResult(parsed != null && parsed.isObject() ? "object" : "non_object", "none");
-        } catch (JsonProcessingException e) {
-            return new LlmJsonParseResult("invalid", e.getClass().getSimpleName());
+        JsonNode scoredCandidates = jsonParse.object().path("candidates");
+        if (!scoredCandidates.isArray()) {
+            return new LlmScoreMergeResult(mergedCandidates, 0, jsonParse, "rule_score_invalid_llm_schema");
+        }
+        Map<String, Map<String, Object>> candidateById = new LinkedHashMap<>();
+        for (Map<String, Object> candidate : mergedCandidates) {
+            candidateById.put(String.valueOf(candidate.get("id")), candidate);
+        }
+        int applied = 0;
+        for (JsonNode scoredCandidate : scoredCandidates) {
+            if (!scoredCandidate.isObject()) {
+                continue;
+            }
+            Map<String, Object> candidate = candidateById.get(textValue(scoredCandidate, "candidateId", 200));
+            if (candidate == null || !applyLlmSemantics(candidate, scoredCandidate)) {
+                continue;
+            }
+            applied++;
+        }
+        return new LlmScoreMergeResult(
+            mergedCandidates, applied, jsonParse, applied > 0 ? "none" : "rule_score_no_matching_llm_candidate"
+        );
+    }
+
+    private static boolean applyLlmSemantics(Map<String, Object> candidate, JsonNode scoredCandidate) {
+        boolean applied = false;
+        Integer utilityScore = boundedInteger(scoredCandidate.get("utilityScore"), 0, 100);
+        if (utilityScore != null) {
+            candidate.put("llmUtilityScore", utilityScore);
+            applied = true;
+        }
+        String inferredFunction = textValue(scoredCandidate, "inferredFunction", 500);
+        if (inferredFunction != null) {
+            candidate.put("inferredFunction", inferredFunction);
+            applied = true;
+        }
+        List<Map<String, Object>> paramUnion = paramUnion(scoredCandidate.get("paramUnion"));
+        if (!paramUnion.isEmpty()) {
+            candidate.put("paramUnion", paramUnion);
+            applied = true;
+        }
+        if (applied) {
+            candidate.put("scoredBy", "llm");
+        }
+        return applied;
+    }
+
+    private static List<Map<String, Object>> paramUnion(JsonNode value) {
+        if (value == null || !value.isArray()) {
+            return List.of();
+        }
+        List<Map<String, Object>> parameters = new ArrayList<>();
+        for (JsonNode parameter : value) {
+            String name = textValue(parameter, "name", 100);
+            String location = textValue(parameter, "in", 20);
+            if (name == null || !List.of("query", "body", "path", "header").contains(location)) {
+                continue;
+            }
+            Map<String, Object> safe = new LinkedHashMap<>();
+            safe.put("name", name);
+            safe.put("in", location);
+            putText(safe, "paramRole", parameter, 200);
+            putAllowedText(safe, "exposeAsArg", parameter, List.of("yes", "optional_candidate", "no"));
+            putText(safe, "inferredMeaning", parameter, 500);
+            putText(safe, "why", parameter, 500);
+            parameters.add(safe);
+        }
+        return parameters;
+    }
+
+    private static void putText(Map<String, Object> target, String field, JsonNode source, int maximumLength) {
+        String value = textValue(source, field, maximumLength);
+        if (value != null) {
+            target.put(field, value);
         }
     }
 
-    private record LlmJsonParseResult(String status, String errorType) {
+    private static void putAllowedText(Map<String, Object> target, String field, JsonNode source, List<String> allowed) {
+        String value = textValue(source, field, 50);
+        if (allowed.contains(value)) {
+            target.put(field, value);
+        }
+    }
+
+    private static Integer boundedInteger(JsonNode value, int minimum, int maximum) {
+        if (value == null || !value.canConvertToInt()) {
+            return null;
+        }
+        int parsed = value.intValue();
+        return parsed >= minimum && parsed <= maximum ? parsed : null;
+    }
+
+    private static String textValue(JsonNode object, String field, int maximumLength) {
+        if (object == null || !object.isObject() || !object.path(field).isTextual()) {
+            return null;
+        }
+        String value = object.path(field).textValue().trim();
+        return value.isEmpty() || value.length() > maximumLength ? null : value;
+    }
+
+    private static LlmJsonParseResult parseJsonObject(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return new LlmJsonParseResult("empty", "none", null);
+        }
+        try {
+            JsonNode parsed = OBJECT_MAPPER.readTree(extractJsonObject(raw));
+            return parsed != null && parsed.isObject()
+                ? new LlmJsonParseResult("object", "none", parsed)
+                : new LlmJsonParseResult("non_object", "none", null);
+        } catch (JsonProcessingException e) {
+            return new LlmJsonParseResult("invalid", e.getClass().getSimpleName(), null);
+        }
+    }
+
+    private static String extractJsonObject(String raw) {
+        String response = removeLeadingThinking(raw);
+        int start = response.indexOf('{');
+        if (start < 0) {
+            return response;
+        }
+        boolean inString = false;
+        boolean escaped = false;
+        int depth = 0;
+        for (int index = start; index < response.length(); index++) {
+            char character = response.charAt(index);
+            if (escaped) {
+                escaped = false;
+                continue;
+            }
+            if (character == '\\' && inString) {
+                escaped = true;
+                continue;
+            }
+            if (character == '"') {
+                inString = !inString;
+                continue;
+            }
+            if (inString) {
+                continue;
+            }
+            if (character == '{') {
+                depth++;
+            } else if (character == '}' && --depth == 0) {
+                return response.substring(start, index + 1);
+            }
+        }
+        return response.substring(start);
+    }
+
+    private static String removeLeadingThinking(String raw) {
+        String response = raw.trim();
+        if (!response.startsWith("<think>")) {
+            return response;
+        }
+        int closingTag = response.indexOf("</think>");
+        return closingTag < 0 ? response : response.substring(closingTag + "</think>".length()).trim();
+    }
+
+    private record LlmJsonParseResult(String status, String errorType, JsonNode object) {
+        private boolean isValid() {
+            return object != null;
+        }
+    }
+
+    private record LlmScoreMergeResult(
+        List<Map<String, Object>> candidates,
+        int appliedCandidateCount,
+        LlmJsonParseResult jsonParse,
+        String fallback
+    ) {
     }
 
     public Map<String, Object> generate(RecorderSession session, List<String> candidateIds) {
@@ -502,8 +677,12 @@ public class RecorderPipelineService {
             safe.put("score", candidate.get("score"));
             safeCandidates.add(safe);
         }
-        return "Analyze these captured endpoint metadata records. Infer a concise purpose and any parameter roles. "
-            + "Do not include secrets or executable code. Records: " + safeCandidates;
+        return "Analyze these captured endpoint metadata records. Return exactly one JSON object with this schema: "
+            + "{\"candidates\":[{\"candidateId\":string,\"utilityScore\":integer_0_to_100,"
+            + "\"inferredFunction\":string,\"paramUnion\":[{\"name\":string,\"in\":\"query|body|path|header\","
+            + "\"paramRole\":string,\"exposeAsArg\":\"yes|optional_candidate|no\","
+            + "\"inferredMeaning\":string,\"why\":string}]}]}. Do not include secrets or executable code. "
+            + "Only use candidateId values from these records: " + safeCandidates;
     }
 
     private String commandName(String pathname, int index) {
