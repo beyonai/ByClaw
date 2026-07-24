@@ -53,7 +53,7 @@ services:
     restart: unless-stopped
 
   opensandbox-server:
-    user: "999:1001"
+    user: "1001:1001"
     image: ${IMAGE_SANDBOX_SERVER:-sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/server:v0.1.9}
     container_name: byclaw-opensandbox-${CONTAINER_SUFFIX:-middleware}
     ports:
