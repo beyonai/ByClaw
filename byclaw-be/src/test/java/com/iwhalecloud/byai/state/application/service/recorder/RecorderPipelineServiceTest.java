@@ -253,7 +253,9 @@ class RecorderPipelineServiceTest {
             }
         };
         CapturingVerifyService verifyService = new CapturingVerifyService();
-        RecorderPipelineService pipeline = new RecorderPipelineService(failingStore, verifyService);
+        RecorderPipelineService pipeline = new RecorderPipelineService(
+            failingStore, verifyService, RecorderLlmServiceTestSupport.unavailable()
+        );
         RecorderSession session = new RecorderSession("session-1", new RecorderOwner(1L, "alice"));
         Map<String, Object> draft = draft();
         draft.put("verifiedSourceHash", "old-hash");
@@ -340,7 +342,8 @@ class RecorderPipelineServiceTest {
     private RecorderPipelineService pipeline(CapturingVerifyService verifyService) {
         return new RecorderPipelineService(
             RecorderDraftStoreTestSupport.forFileRoot(tempDir),
-            verifyService
+            verifyService,
+            RecorderLlmServiceTestSupport.unavailable()
         );
     }
 

@@ -29,13 +29,14 @@ class RecorderVncModeTest {
             new RecorderSessionRegistry(),
             requests,
             new RecorderRankService(),
-            new RecorderPipelineService(drafts, verify),
+            new RecorderPipelineService(drafts, verify, RecorderLlmServiceTestSupport.unavailable()),
             new InMemoryRecorderBrowserPort(),
             vnc,
             verify,
             drafts,
             new RecorderCurrentUserProvider(),
-            org.mockito.Mockito.mock(RecorderResourceSaveService.class)
+            org.mockito.Mockito.mock(RecorderResourceSaveService.class),
+            RecorderLlmServiceTestSupport.unavailable()
         );
 
         RecorderResponse<Map<String, Object>> response = service.bind(Map.of(
