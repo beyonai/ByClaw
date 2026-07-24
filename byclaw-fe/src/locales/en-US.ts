@@ -1755,6 +1755,7 @@ export default {
   // Project task detail drawer
   'projectTaskDetail.title': 'Task Details',
   'projectTaskDetail.enterSession': 'Enter Conversation',
+  'projectTaskDetail.viewSession': 'View Conversation',
   'projectTaskDetail.defaultTaskName': 'Unnamed task',
   'projectTaskDetail.defaultTaskSessionName': 'Task conversation',
   'projectTaskDetail.defaultAgentName': 'Code Agent',

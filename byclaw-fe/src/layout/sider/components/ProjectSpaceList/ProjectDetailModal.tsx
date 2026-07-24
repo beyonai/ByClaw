@@ -714,6 +714,26 @@ const ProjectDetailPanel: React.FC<Props> = ({
     [EventEmitter, dispatch, navigate, project?.projectName, projectId, setSessionId, t]
   );
 
+  // 只读查看别人任务的会话:复用全局回放 Drawer 的 preview 机制,有历史消息、无输入框,不能对话。
+  const handleOpenReadonlySession = useCallback(
+    (task: any) => {
+      if (!task?.sessionId) {
+        message.warning(t('task.noSession'));
+        return;
+      }
+      const sessionName = task.title || task.taskName || task.sessionName || `#${task.sessionId}`;
+      EventEmitter.emit('beyond-fullabsolute-driver-open-type', {
+        drawerType: 'readonlysession',
+        canClose: true,
+        title: sessionName,
+      });
+      EventEmitter.emit('beyond-fullabsolute-driver-message', {
+        sessionInfo: { sessionId: `${task.sessionId}`, sessionName },
+      });
+    },
+    [EventEmitter, t]
+  );
+
   const handleOpenTaskDetail = useCallback(
     (task: any) => {
       if (channelPanelOpen) {
@@ -3135,6 +3155,10 @@ const ProjectDetailPanel: React.FC<Props> = ({
         canEnterSession={canEnterDetailTaskSession}
         onEnterSession={(task) => {
           handleOpenTaskSession(task);
+          setDetailTask(null);
+        }}
+        onViewSession={(task) => {
+          handleOpenReadonlySession(task);
           setDetailTask(null);
         }}
       />
