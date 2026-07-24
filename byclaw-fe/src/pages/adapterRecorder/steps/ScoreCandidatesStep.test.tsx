@@ -150,6 +150,26 @@ describe('ScoreCandidatesStep AI prompt', () => {
 
     expect(screen.getByText('已应用的 AI 评分')).toBeInTheDocument();
     expect(screen.getByText('本次模型返回尚未应用到候选，当前仍使用规则评分。')).toBeInTheDocument();
-    expect(screen.getByText('原始模型返回（未解析）')).toBeInTheDocument();
+    expect(screen.getByText('模型最终返回')).toBeInTheDocument();
+  });
+
+  it('shows only final model content when the provider embeds thinking tags', () => {
+    render(
+      <ScoreCandidatesStep
+        loading={false}
+        llmSynthesis
+        candidates={[]}
+        sentCandidateIds={[]}
+        llmRawJson={'<think>private reasoning</think>\n{"candidates":[]}'}
+        onRunScore={jest.fn()}
+        onNext={jest.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /AI 评分结果/ }));
+    fireEvent.click(screen.getByRole('button', { name: /模型最终返回/ }));
+
+    expect(screen.getByDisplayValue('{"candidates":[]}')).toBeInTheDocument();
+    expect(screen.queryByDisplayValue(/private reasoning/)).not.toBeInTheDocument();
   });
 });

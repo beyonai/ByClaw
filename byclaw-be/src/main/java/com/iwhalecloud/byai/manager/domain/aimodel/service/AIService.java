@@ -400,22 +400,22 @@ public class AIService {
 
     private boolean isProviderOrUnambiguousModel(String provider, String model, String providerToken,
         String modelToken) {
-        return provider.contains(providerToken) || (provider.isEmpty() && model.contains(modelToken));
+        return provider.contains(providerToken) || model.contains(modelToken);
     }
 
     private boolean isQwenProvider(String provider, String model) {
         return provider.contains("qwen") || provider.contains("alibaba") || provider.contains("dashscope")
-            || provider.contains("aliyun") || (provider.isEmpty() && model.contains("qwen"));
+            || provider.contains("aliyun") || model.contains("qwen");
     }
 
     private boolean isZaiProvider(String provider, String model) {
         return provider.equals("zai") || provider.contains("z.ai") || provider.contains("zhipu")
-            || provider.contains("智谱") || (provider.isEmpty() && model.startsWith("glm-"));
+            || provider.contains("智谱") || model.startsWith("glm-");
     }
 
     private boolean isGoogleProvider(String provider, String model) {
         return provider.contains("google") || provider.contains("gemini")
-            || (provider.isEmpty() && model.startsWith("gemini-"));
+            || model.startsWith("gemini-");
     }
 
     private boolean isOpenAiProvider(String provider, String model) {

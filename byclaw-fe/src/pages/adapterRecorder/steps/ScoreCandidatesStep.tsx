@@ -9,10 +9,18 @@ import { CandidateTable } from './pipelineShared';
 
 const { Paragraph, Text } = Typography;
 
-/** LLM 返回内容面板:区分已应用到候选的语义评分与未解析的原始模型输出。 */
+function finalModelContent(raw?: string) {
+  if (!raw) return undefined;
+  const trimmed = raw.trim();
+  const withoutCompleteThinking = trimmed.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+  return /^<think>/i.test(withoutCompleteThinking) ? undefined : withoutCompleteThinking || undefined;
+}
+
+/** LLM 返回内容面板:区分已应用到候选的语义评分与过滤思考块后的最终模型输出。 */
 function LlmReturnPanel({ candidates, llmRawJson }: { candidates?: RankCandidate[]; llmRawJson?: string }) {
   const llmCands = (candidates ?? []).filter((c) => c.scoredBy === 'llm' || c.inferredFunction || c.paramUnion?.length);
-  if (!llmCands.length && !llmRawJson) return null;
+  const finalContent = finalModelContent(llmRawJson);
+  if (!llmCands.length && !finalContent) return null;
   const summary = (
     <Space direction="vertical" size={10} style={{ width: '100%' }}>
       <Text strong>已应用的 AI 评分</Text>
@@ -46,17 +54,17 @@ function LlmReturnPanel({ candidates, llmRawJson }: { candidates?: RankCandidate
           本次模型返回尚未应用到候选，当前仍使用规则评分。
         </Text>
       )}
-      {llmRawJson && (
+      {finalContent && (
         <Collapse
           size="small"
           items={[
             {
               key: 'raw',
-              label: '原始模型返回（未解析）',
+              label: '模型最终返回',
               children: (
                 <Input.TextArea
                   className="code"
-                  value={llmRawJson}
+                  value={finalContent}
                   readOnly
                   autoSize={{ minRows: 6, maxRows: 20 }}
                   style={{ fontSize: 11 }}
@@ -97,7 +105,7 @@ interface Props {
   sampleA?: CaptureSample;
   sampleB?: CaptureSample;
 
-  /** LLM 返回的原始 interfaces JSON(「LLM 返回内容」折叠展示)。 */
+  /** LLM 返回内容；展示时会过滤思考块。 */
   llmRawJson?: string;
   llmError?: string;
 

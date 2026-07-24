@@ -48,6 +48,13 @@ class AIServiceTest {
     }
 
     @Test
+    void unambiguousDeepSeekModelOverridesGenericOpenAiCompatibleProviderName() {
+        assertRequestContains("OpenAI", "deepseek-v4", """
+            {"thinking": {"type": "disabled"}}
+            """);
+    }
+
+    @Test
     void qwenJsonRequestsUseEnableThinkingFalse() {
         assertRequestContains("Qwen", "qwen3.7-plus", """
             {"enable_thinking": false}
@@ -55,8 +62,25 @@ class AIServiceTest {
     }
 
     @Test
+    void unambiguousQwenModelOverridesGenericOpenAiCompatibleProviderName() {
+        assertRequestContains("OpenAI", "qwen3.7-plus", """
+            {"enable_thinking": false}
+            """);
+    }
+
+    @Test
     void minimaxM3JsonRequestsUseNativeThinkingSwitchAndPositiveTemperature() {
         assertRequestContains("MiniMax", "MiniMax-M3", """
+            {
+              "temperature": 0.1,
+              "thinking": {"type": "disabled"}
+            }
+            """);
+    }
+
+    @Test
+    void unambiguousMinimaxModelOverridesGenericOpenAiCompatibleProviderName() {
+        assertRequestContains("OpenAI", "MiniMax-M3", """
             {
               "temperature": 0.1,
               "thinking": {"type": "disabled"}
@@ -93,6 +117,13 @@ class AIServiceTest {
     }
 
     @Test
+    void unambiguousZaiModelOverridesGenericOpenAiCompatibleProviderName() {
+        assertRequestContains("OpenAI", "glm-5.1", """
+            {"thinking": {"type": "disabled"}}
+            """);
+    }
+
+    @Test
     void openRouterJsonRequestsDisableAndExcludeReasoningWhenModelAllowsIt() {
         assertRequestContains("OpenRouter", "openai/gpt-5.2", """
             {"reasoning": {"effort": "none", "exclude": true}}
@@ -122,6 +153,16 @@ class AIServiceTest {
     @Test
     void gemini25FlashUsesReasoningEffortNone() {
         assertRequestContains("Google", "gemini-2.5-flash", """
+            {
+              "temperature": 1.0,
+              "reasoning_effort": "none"
+            }
+            """);
+    }
+
+    @Test
+    void unambiguousGeminiModelOverridesGenericOpenAiCompatibleProviderName() {
+        assertRequestContains("OpenAI", "gemini-2.5-flash", """
             {
               "temperature": 1.0,
               "reasoning_effort": "none"
