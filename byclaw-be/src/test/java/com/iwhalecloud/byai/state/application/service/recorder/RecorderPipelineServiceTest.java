@@ -36,21 +36,31 @@ class RecorderPipelineServiceTest {
     void scoreReturnsTheCompleteSanitizedPromptSentToLlm() {
         RecorderPipelineService pipeline = pipeline(new CapturingVerifyService());
         RecorderSession session = new RecorderSession("session-1", new RecorderOwner(1L, "alice"));
-        session.candidates(List.of(Map.of(
-            "id", "cand_search",
-            "endpoint", Map.of("method", "GET", "host", "api.example.test", "pathname", "/search"),
-            "score", 88
-        )));
+        Map<String, Object> candidate = new LinkedHashMap<>();
+        candidate.put("id", "cand_search");
+        candidate.put("endpoint", Map.of(
+            "method", "GET",
+            "host", "api.example.test",
+            "pathname", "/search",
+            "rowPath", "$.data"
+        ));
+        candidate.put("score", 88);
+        candidate.put("args", List.of(Map.of("in", "query", "paramName", "key_word")));
+        candidate.put("columns", List.of(Map.of("name", "title", "type", "string")));
+        session.candidates(List.of(candidate));
 
         Map<String, Object> result = pipeline.score(session, List.of(), false);
 
         assertThat(String.valueOf(result.get("scorePrompt")))
-            .contains("Analyze these captured endpoint metadata records.")
-            .contains("cand_search")
-            .contains("GET")
-            .contains("api.example.test")
-            .contains("/search")
-            .contains("88")
+            .contains("captured endpoint metadata records encoded in TOON")
+            .contains("records[1]{id,method,host,pathname,score}:")
+            .contains("cand_search,GET,api.example.test,/search,88")
+            .contains("queryKeys[1]: key_word")
+            .contains("responseShape:")
+            .contains("rowPath: $.data")
+            .contains("columns[1]{name,type}:")
+            .contains("title,string")
+            .contains("Do not return TOON")
             .doesNotContain("Score recorder candidates:");
     }
 
