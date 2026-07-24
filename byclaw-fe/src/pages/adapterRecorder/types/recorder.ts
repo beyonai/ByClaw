@@ -263,8 +263,14 @@ export interface HealthReport {
   extension: 'ok' | 'disconnected';
   highLevel: 'ok' | 'down';
 
-  /** N5:LLM 合成是否可用(开关+key)。false → ranked 回退手动流程(RankStep+InitStep)。 */
+  /** 已配置默认 LLM 时为 true；不可用时仍可继续本地排序与本地脚本生成。 */
   llmSynthesis?: boolean;
+
+  /** LLM 配置状态的非阻断说明（不包含模型地址或凭据）。 */
+  llmSynthesisMessage?: string;
+
+  /** LLM 配置可用性原因码；不包含模型地址、凭据或内部异常。 */
+  llmSynthesisReason?: string;
 }
 
 /** RecorderReport(bundle $defs/RecorderReport)—— init 预览/写入产出的报告 */

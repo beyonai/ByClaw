@@ -20,11 +20,7 @@ import type {
   ResourceContext,
 } from "../../shared/src/executor-types.js";
 import { CALL_ACP_AGENT, DEFAULTS } from "./constants.js";
-import {
-  MetadataBootstrapError,
-  metadataBootstrapFailureResponse,
-} from "./metadata-bootstrap.js";
-import { buildCallAgentContentFromPlan, createByclawAcpPlan } from "./planner.js";
+import { createByclawCallAgentDispatch } from "./planner.js";
 import type { ByclawRegistry } from "./registry.js";
 import type { ByclawAcpPlanRequest, ResolvedByclawAcpAdapterConfig } from "./types.js";
 
@@ -117,9 +113,9 @@ export type CreateByclawCallAcpAgentToolParams = {
  *
  * The tool is registered as a `(ctx) => tool` factory so it can read byai-channel
  * session context from the shared in-process store. It runs the planner to
- * materialize the shared-context bundle (agent roster, linkedSkills, model
- * config, query/metadata files) and hands a validated metadata-first bootstrap
- * envelope to the remote agent as the delegation prompt.
+ * resolve the selected agents' linked Skill plugin roots, pass them through
+ * the call-agent session payload, and hand only the original query to the
+ * remote agent.
  */
 export function createByclawCallAcpAgentTool(params: CreateByclawCallAcpAgentToolParams) {
   const executor = params.executeViaCallAgent ?? executeViaCallAgent;
@@ -220,41 +216,11 @@ export function createByclawCallAcpAgentTool(params: CreateByclawCallAcpAgentToo
           })
         : false;
 
-      // Materialize one immutable metadata-first bootstrap snapshot. The remote
-      // content includes the complete validated metadata manual before query
-      // access; structured files remain available in the shared filesystem.
-      let plan: ReturnType<typeof createByclawAcpPlan>;
-      let content: string;
-      try {
-        plan = createByclawAcpPlan({
-          config,
-          snapshot: await registry.snapshot(),
-          request: {
-            ...toolParams,
-            sessionId: channelResolve.sessionId,
-            language: toolParams.language ?? channelResolve.language,
-            replyLanguage: toolParams.replyLanguage,
-          },
-        });
-        content = buildCallAgentContentFromPlan(plan);
-      } catch (error) {
-        if (!(error instanceof MetadataBootstrapError)) {
-          throw error;
-        }
-        const failure = metadataBootstrapFailureResponse({
-          error,
-          requesterSessionKey,
-          sessionId: channelResolve.sessionId,
-        });
-        if (langfuseToolObservationCreated) {
-          await updateLangfuseToolObservation({
-            observationId: syntheticLangfuseToolObservationId,
-            output: failure,
-            logger,
-          });
-        }
-        return failure;
-      }
+      const dispatch = createByclawCallAgentDispatch({
+        config,
+        snapshot: await registry.snapshot(),
+        request: toolParams,
+      });
 
       const agentId = normalizeText(contextRecord.agentId) || CALL_ACP_AGENT.defaultAgentId;
       const resourceContext: ResourceContext = {
@@ -262,7 +228,7 @@ export function createByclawCallAcpAgentTool(params: CreateByclawCallAcpAgentToo
           resourceId: agentId,
         },
         selected_resource: {
-          resourceId: plan.id,
+          resourceId: dispatch.id,
         },
         session_key: requesterSessionKey,
         requester_session_key: requesterSessionKey,
@@ -278,11 +244,12 @@ export function createByclawCallAcpAgentTool(params: CreateByclawCallAcpAgentToo
       const result = await executor({
         capability: {} as Capability,
         payload: {
-          cwd: plan.cwd,
-          modelConfig: plan.sessionsSpawn?.modelConfig,
+          cwd: dispatch.cwd,
+          modelConfig: dispatch.modelConfig,
+          skillPaths: dispatch.skillPaths,
         },
         target: {} as Dict,
-        content,
+        content: dispatch.query,
         sessionId: channelResolve.sessionId,
         traceId: channelResolve.traceId ?? "",
         langfuseTraceId,

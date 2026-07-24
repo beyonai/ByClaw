@@ -14,6 +14,7 @@ import java.util.HashSet;
 import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -31,6 +32,7 @@ public class RecorderApplicationService {
     private final RecorderDraftStore draftStore;
     private final RecorderCurrentUserProvider currentUserProvider;
     private final RecorderResourceSaveService resourceSaveService;
+    private final RecorderLlmService recorderLlmService;
 
     public RecorderApplicationService(
         RecorderSessionRegistry sessionRegistry,
@@ -44,6 +46,26 @@ public class RecorderApplicationService {
         RecorderCurrentUserProvider currentUserProvider,
         RecorderResourceSaveService resourceSaveService
     ) {
+        this(
+            sessionRegistry, requestRegistry, rankService, pipelineService, browserPort, vncProvider, verifyService,
+            draftStore, currentUserProvider, resourceSaveService, RecorderLlmService.unavailable()
+        );
+    }
+
+    @Autowired
+    public RecorderApplicationService(
+        RecorderSessionRegistry sessionRegistry,
+        RecorderRequestRegistry requestRegistry,
+        RecorderRankService rankService,
+        RecorderPipelineService pipelineService,
+        RecorderBrowserPort browserPort,
+        RecorderVncProvider vncProvider,
+        RecorderVerifyService verifyService,
+        RecorderDraftStore draftStore,
+        RecorderCurrentUserProvider currentUserProvider,
+        RecorderResourceSaveService resourceSaveService,
+        RecorderLlmService recorderLlmService
+    ) {
         this.sessionRegistry = sessionRegistry;
         this.requestRegistry = requestRegistry;
         this.rankService = rankService;
@@ -54,13 +76,14 @@ public class RecorderApplicationService {
         this.draftStore = draftStore;
         this.currentUserProvider = currentUserProvider;
         this.resourceSaveService = resourceSaveService;
+        this.recorderLlmService = recorderLlmService;
     }
 
     public RecorderResponse<Map<String, Object>> health() {
         try {
-            return ok(browserPort.health(currentUserProvider.requireCurrent()));
+            return ok(withLlmHealth(browserPort.health(currentUserProvider.requireCurrent())));
         } catch (RecorderSaveException e) {
-            return ok(browserPort.health());
+            return ok(withLlmHealth(browserPort.health()));
         } catch (RecorderBrowserException e) {
             return fail(e.getHttpStatus(), e.getCode(), e.getMessage());
         }
@@ -289,6 +312,10 @@ public class RecorderApplicationService {
             if (!sessionRegistry.canAdvance(session, RecorderSessionAction.INIT)) {
                 return fail(400, "invalid_state", "cannot init from " + session.state().wireValue());
             }
+            Map<String, Object> selectedCandidate = selectedCandidate(session, stringValue(body, "selectedCandidateId"));
+            if (selectedCandidate == null) {
+                return fail(400, "validation_failed", "selectedCandidateId does not match a ranked candidate");
+            }
             if ("write".equals(stringValue(body, "writePolicy"))) {
                 sessionRegistry.advance(session, RecorderSessionAction.INIT, RecorderSessionState.DRAFT_CREATED);
             }
@@ -303,7 +330,7 @@ public class RecorderApplicationService {
             return ok(Map.of(
                 "report", report,
                 "dryRun", Map.of("exists", false, "changedLines", 0),
-                "generatedSource", "export default {};",
+                "generatedSource", generatedSource(selectedCandidate),
                 "llmSynthesisOffered", false
             ));
         }
@@ -381,8 +408,43 @@ public class RecorderApplicationService {
             if (!sessionRegistry.canAdvance(session, RecorderSessionAction.PIPELINE)) {
                 return fail(400, "invalid_state", "cannot run pipeline stage from " + session.state().wireValue());
             }
-            return accepted(session, "pipeline", pipelineService.score(session, stringList(body.get("candidateIds"))));
+            return accepted(
+                session,
+                "pipeline",
+                pipelineService.score(session, stringList(body.get("candidateIds")), hasLlmEgressApproval(body))
+            );
         }
+    }
+
+    private Map<String, Object> withLlmHealth(Map<String, Object> browserHealth) {
+        Map<String, Object> health = new LinkedHashMap<>(browserHealth);
+        RecorderLlmService.Availability availability = recorderLlmService.availability();
+        health.put("llmSynthesis", availability.available());
+        health.put("llmSynthesisReason", availability.reason());
+        health.put(
+            "llmSynthesisMessage",
+            llmSynthesisMessage(availability)
+        );
+        return health;
+    }
+
+    private String llmSynthesisMessage(RecorderLlmService.Availability availability) {
+        return switch (availability.reason()) {
+            case "available" -> "已配置默认 LLM 模型；AI 评分需在下一步明确同意。";
+            case "default_model_list_lookup_failed" -> "默认 LLM 模型列表查询失败；将继续使用本地规则流程。";
+            case "default_model_detail_lookup_failed" -> "默认 LLM 模型详情查询失败；将继续使用本地规则流程。";
+            case "default_model_not_found" -> "未找到已启用的默认 LLM 模型；将继续使用本地规则流程。";
+            case "default_model_detail_unavailable" -> "默认 LLM 模型详情不可用；将继续使用本地规则流程。";
+            case "default_model_endpoint_missing" -> "默认 LLM 模型缺少服务地址；将继续使用本地规则流程。";
+            case "default_model_token_missing" -> "默认 LLM 模型缺少服务端凭据；将继续使用本地规则流程。";
+            case "default_model_code_missing" -> "默认 LLM 模型缺少模型编码；将继续使用本地规则流程。";
+            default -> "默认 LLM 模型查询失败；将继续使用本地规则流程。";
+        };
+    }
+
+    private boolean hasLlmEgressApproval(Map<String, Object> body) {
+        Object value = body.get("llmEgressAcknowledgedAt");
+        return value instanceof Number number && number.longValue() > 0;
     }
 
     public RecorderResponse<Map<String, Object>> pipelineGenerate(Map<String, Object> body) {
@@ -398,6 +460,12 @@ public class RecorderApplicationService {
             try {
                 return accepted(session, "pipeline", pipelineService.generate(session, stringList(body.get("candidateIds"))));
             } catch (RecorderSaveException e) {
+                log.warn(
+                    "Recorder pipeline generation failed, sessionId={}, code={}",
+                    session.sessionId(),
+                    e.getCode(),
+                    e
+                );
                 return bycliStorageUnavailable();
             }
         }
@@ -836,6 +904,53 @@ public class RecorderApplicationService {
             }
         });
         return mapped;
+    }
+
+    private Map<String, Object> selectedCandidate(RecorderSession session, String selectedCandidateId) {
+        return session.candidates().stream()
+            .filter(candidate -> selectedCandidateId.equals(stringValue(candidate, "id")))
+            .findFirst()
+            .orElse(null);
+    }
+
+    private String generatedSource(Map<String, Object> candidate) {
+        Map<String, Object> endpoint = candidate.get("endpoint") instanceof Map<?, ?> raw ? map(raw) : Map.of();
+        String method = defaultString(endpoint, "method", "GET");
+        String pathname = defaultString(endpoint, "pathname", "/");
+        List<String> params = candidate.get("args") instanceof List<?> args
+            ? args.stream()
+                .filter(Map.class::isInstance)
+                .map(Map.class::cast)
+                .map(this::map)
+                .map(arg -> defaultString(arg, "argName", defaultString(arg, "paramName", "")))
+                .filter(name -> !name.isBlank())
+                .toList()
+            : List.of();
+        List<String> columns = candidate.get("columns") instanceof List<?> items
+            ? items.stream()
+                .filter(Map.class::isInstance)
+                .map(Map.class::cast)
+                .map(this::map)
+                .map(column -> defaultString(column, "name", "value"))
+                .toList()
+            : List.of();
+
+        return """
+            // Generated from the selected recorder endpoint. Review before writing.
+            export default {
+              request: { method: '%s', path: '%s', params: [%s] },
+              columns: [%s],
+            };
+            """.formatted(
+                jsString(method),
+                jsString(pathname),
+                params.stream().map(name -> "'" + jsString(name) + "'").collect(java.util.stream.Collectors.joining(", ")),
+                columns.stream().map(name -> "'" + jsString(name) + "'").collect(java.util.stream.Collectors.joining(", "))
+            );
+    }
+
+    private String jsString(String value) {
+        return value.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n").replace("\r", "\\r");
     }
 
     private Map<String, Object> sessionState(RecorderSession session) {

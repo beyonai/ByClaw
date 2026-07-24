@@ -25,12 +25,7 @@ function keyEventParams(e: React.KeyboardEvent, type: 'keyDown' | 'keyUp'): Reco
   };
 }
 
-interface Props {
-  /** 画面自然尺寸未知时的展示宽度(px);坐标换算用 img 实际渲染尺寸 vs 自然尺寸的比例。 */
-  height?: number;
-}
-
-export default function LivePreview({ height = 360 }: Props) {
+export default function LivePreview() {
   const { token } = theme.useToken();
   const client = useRef(getRecorderClient()).current;
   const imgRef = useRef<HTMLImageElement>(null);
@@ -193,7 +188,7 @@ export default function LivePreview({ height = 360 }: Props) {
   );
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+    <div style={{ display: 'flex', minHeight: 0, height: '100%', flex: 1, flexDirection: 'column', gap: 6 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <Text type="secondary" style={{ fontSize: 12 }}>
           目标页投屏{interactive ? '·可操作' : '·只读'}
@@ -213,7 +208,8 @@ export default function LivePreview({ height = 360 }: Props) {
         style={{
           position: 'relative',
           width: '100%',
-          height: `min(${height}px, 72vh)`,
+          minHeight: 0,
+          flex: 1,
           overflow: 'hidden',
           border: `1px solid ${interactive ? token.colorWarning : token.colorBorder}`,
           borderRadius: token.borderRadius,

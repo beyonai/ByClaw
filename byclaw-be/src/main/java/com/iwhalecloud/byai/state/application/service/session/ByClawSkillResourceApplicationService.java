@@ -96,6 +96,8 @@ public class ByClawSkillResourceApplicationService {
 
     private static final int THIRD_PARTY_SKILL_MAX_BYTES = 50 * 1024 * 1024;
 
+    private static final int THIRD_PARTY_ERROR_RESPONSE_LOG_MAX_BYTES = 4096;
+
     private static final String ADMIN_VIP_USER_CODE = "adminvip";
 
     @Autowired
@@ -279,7 +281,7 @@ public class ByClawSkillResourceApplicationService {
             SOURCE_TYPE_SKILL_MARKET_INSTALL, resolvedDownloadUrl);
         bindSkillToDigitalEmployee(resolvedDigId, resource.getResourceId());
         syncSkillTargetContent(resolvedUserCode, resource, extSkill, true);
-        digitalEmployeeApplicationService.refreshInstalledSkillRuntime(resolvedDigId);
+        rebuildAndScheduleSkillRuntimeRefresh(new LinkedHashSet<>(Collections.singletonList(resolvedDigId)));
         return new SkillImportResult(resource, extSkill, updated);
     }
 
@@ -608,49 +610,73 @@ public class ByClawSkillResourceApplicationService {
     }
 
     protected byte[] downloadThirdPartySkillPackage(String downloadUrl) {
+        long startNanos = System.nanoTime();
+        String resolvedDownloadUrl = StringUtils.trimToEmpty(downloadUrl);
         HttpURLConnection connection = null;
+        String stage = "VALIDATE_URL";
+        int status = -1;
+        String responseMessage = "";
+        String contentType = "";
+        long contentLength = -1L;
+        String redirectLocation = "";
+        int downloadedBytes = 0;
+        String errorResponse = "";
         try {
-            URI uri = URI.create(StringUtils.trimToEmpty(downloadUrl));
+            URI uri = URI.create(resolvedDownloadUrl);
             boolean supportedScheme = "http".equalsIgnoreCase(uri.getScheme())
                 || "https".equalsIgnoreCase(uri.getScheme());
             if (!supportedScheme || StringUtils.isBlank(uri.getHost())) {
                 throw new IllegalArgumentException(I18nUtil.get("byclaw.third.party.skill.url.invalid"));
             }
+            stage = "OPEN_CONNECTION";
             connection = (HttpURLConnection)new URL(uri.toASCIIString()).openConnection();
             connection.setConnectTimeout(THIRD_PARTY_DOWNLOAD_TIMEOUT_MILLIS);
             connection.setReadTimeout(THIRD_PARTY_DOWNLOAD_TIMEOUT_MILLIS);
             connection.setInstanceFollowRedirects(false);
             connection.setRequestMethod("GET");
-            int status = connection.getResponseCode();
+            stage = "GET_HTTP_RESPONSE";
+            status = connection.getResponseCode();
+            responseMessage = StringUtils.defaultString(connection.getResponseMessage());
+            contentType = StringUtils.defaultString(connection.getContentType());
+            contentLength = connection.getContentLengthLong();
+            redirectLocation = StringUtils.defaultString(connection.getHeaderField("Location"));
             if (status < 200 || status >= 300) {
+                stage = "VALIDATE_HTTP_STATUS";
+                errorResponse = readThirdPartyDownloadErrorResponseForLog(connection);
                 throw new IllegalArgumentException(I18nUtil.get("byclaw.third.party.skill.download.failed"));
             }
-            long contentLength = connection.getContentLengthLong();
+            stage = "VALIDATE_CONTENT_LENGTH";
             if (contentLength > THIRD_PARTY_SKILL_MAX_BYTES) {
                 throw new IllegalArgumentException(I18nUtil.get("byclaw.third.party.skill.package.too.large"));
             }
+            stage = "READ_RESPONSE_BODY";
             try (InputStream input = connection.getInputStream();
                 ByteArrayOutputStream output = new ByteArrayOutputStream()) {
                 byte[] buffer = new byte[8192];
-                int total = 0;
                 int read;
                 while ((read = input.read(buffer)) != -1) {
-                    total += read;
-                    if (total > THIRD_PARTY_SKILL_MAX_BYTES) {
+                    downloadedBytes += read;
+                    if (downloadedBytes > THIRD_PARTY_SKILL_MAX_BYTES) {
+                        stage = "VALIDATE_DOWNLOADED_SIZE";
                         throw new IllegalArgumentException(I18nUtil.get("byclaw.third.party.skill.package.too.large"));
                     }
                     output.write(buffer, 0, read);
                 }
-                if (total == 0) {
+                if (downloadedBytes == 0) {
+                    stage = "VALIDATE_RESPONSE_BODY";
                     throw new IllegalArgumentException(I18nUtil.get("byclaw.skill.zip.empty"));
                 }
                 return output.toByteArray();
             }
         }
         catch (IllegalArgumentException e) {
+            logThirdPartySkillDownloadFailure(resolvedDownloadUrl, stage, status, responseMessage, contentType,
+                contentLength, redirectLocation, downloadedBytes, errorResponse, startNanos, e);
             throw e;
         }
         catch (Exception e) {
+            logThirdPartySkillDownloadFailure(resolvedDownloadUrl, stage, status, responseMessage, contentType,
+                contentLength, redirectLocation, downloadedBytes, errorResponse, startNanos, e);
             throw new IllegalArgumentException(I18nUtil.get("byclaw.third.party.skill.download.failed"), e);
         }
         finally {
@@ -658,6 +684,44 @@ public class ByClawSkillResourceApplicationService {
                 connection.disconnect();
             }
         }
+    }
+
+    private String readThirdPartyDownloadErrorResponseForLog(HttpURLConnection connection) {
+        try (InputStream input = connection.getErrorStream()) {
+            if (input == null) {
+                return "";
+            }
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            byte[] buffer = new byte[1024];
+            int remaining = THIRD_PARTY_ERROR_RESPONSE_LOG_MAX_BYTES;
+            int read;
+            while (remaining > 0 && (read = input.read(buffer, 0, Math.min(buffer.length, remaining))) != -1) {
+                output.write(buffer, 0, read);
+                remaining -= read;
+            }
+            String responseBody = output.toString(StandardCharsets.UTF_8);
+            if (remaining == 0 && input.read() != -1) {
+                responseBody += "...[truncated]";
+            }
+            return responseBody;
+        }
+        catch (Exception e) {
+            return "[读取错误响应失败：" + e.getClass().getName() + ": "
+                + StringUtils.defaultString(e.getMessage()) + "]";
+        }
+    }
+
+    private void logThirdPartySkillDownloadFailure(String downloadUrl, String stage, int status,
+        String responseMessage, String contentType, long contentLength, String redirectLocation,
+        int downloadedBytes, String errorResponse, long startNanos, Exception exception) {
+        logger.error(
+            "第三方技能包下载失败，userCode={}, downloadUrl={}, stage={}, httpStatus={}, responseMessage={}, "
+                + "contentType={}, contentLength={}, redirectLocation={}, downloadedBytes={}, errorResponse={}, "
+                + "durationMs={}, exceptionType={}, reason={}",
+            CurrentUserHolder.getCurrentUserCode(), downloadUrl, stage, status, responseMessage, contentType,
+            contentLength, redirectLocation, downloadedBytes, errorResponse,
+            (System.nanoTime() - startNanos) / 1_000_000L, exception.getClass().getName(),
+            StringUtils.defaultString(exception.getMessage()), exception);
     }
 
     private String resolveThirdPartySkillFilename(String downloadUrl) {

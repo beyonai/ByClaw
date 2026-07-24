@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.manager.dto.devloop;
 
 import java.util.Date;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonFormat;
 
 import lombok.Data;
@@ -20,6 +21,16 @@ public class DevloopTaskListQueryDto {
 
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private Date createTimeEnd;
+
+    /** 按任务名称模糊查询；兼容旧版 keyword 请求字段。 */
+    @JsonAlias("keyword")
+    private String taskName;
+
+    /** 仅看当前登录用户负责（创建）的任务，为空或 false 时返回项目全部任务。 */
+    private Boolean onlyMine;
+
+    /** 任务状态筛选，支持 pending、in_progress、paused、completed。 */
+    private String status;
 
     private Integer pageNum;
     private Integer pageSize;

@@ -10,6 +10,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -22,10 +23,21 @@ public class RecorderPipelineService {
 
     private final RecorderDraftStore draftStore;
     private final RecorderVerifyService verifyService;
+    private final RecorderLlmService recorderLlmService;
 
     public RecorderPipelineService(RecorderDraftStore draftStore, RecorderVerifyService verifyService) {
+        this(draftStore, verifyService, RecorderLlmService.unavailable());
+    }
+
+    @Autowired
+    public RecorderPipelineService(
+        RecorderDraftStore draftStore,
+        RecorderVerifyService verifyService,
+        RecorderLlmService recorderLlmService
+    ) {
         this.draftStore = draftStore;
         this.verifyService = verifyService;
+        this.recorderLlmService = recorderLlmService;
     }
 
     public Map<String, Object> preview(RecorderSession session, List<String> candidateIds) {
@@ -37,15 +49,40 @@ public class RecorderPipelineService {
     }
 
     public Map<String, Object> score(RecorderSession session, List<String> candidateIds) {
+        return score(session, candidateIds, false);
+    }
+
+    public Map<String, Object> score(RecorderSession session, List<String> candidateIds, boolean llmEgressApproved) {
         List<Map<String, Object>> selected = selectCandidates(session, candidateIds);
-        return Map.of(
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.putAll(Map.of(
             "candidates", selected,
             "rejected", List.of(),
             "scorePrompt", prompts(selected).get("score"),
             "generatePrompt", prompts(selected).get("generate"),
             "screenshotCount", 0,
             "sentCandidateIds", selected.stream().map(c -> c.get("id")).toList()
-        );
+        ));
+        result.put("llmSynthesisUsed", false);
+        if (!llmEgressApproved) {
+            return result;
+        }
+        RecorderLlmService.Availability availability = recorderLlmService.availability();
+        if (!availability.available()) {
+            result.put("llmError", "默认 LLM 模型不可用，已使用本地规则评分。");
+            return result;
+        }
+        try {
+            result.put("llmRawJson", recorderLlmService.generateText(
+                "You are a recorder API analyst. Return concise JSON only. Do not produce executable code.",
+                llmScorePrompt(selected),
+                1200
+            ));
+            result.put("llmSynthesisUsed", true);
+        } catch (RuntimeException ignored) {
+            result.put("llmError", "LLM 评分调用失败，已使用本地规则评分。");
+        }
+        return result;
     }
 
     public Map<String, Object> generate(RecorderSession session, List<String> candidateIds) {
@@ -402,6 +439,22 @@ public class RecorderPipelineService {
             "generate", "Generate adapter drafts for: " + candidates.stream().map(c -> c.get("id")).toList(),
             "screenshotCount", 0
         );
+    }
+
+    private String llmScorePrompt(List<Map<String, Object>> candidates) {
+        List<Map<String, Object>> safeCandidates = new ArrayList<>();
+        for (Map<String, Object> candidate : candidates) {
+            Map<String, Object> endpoint = mapValue(candidate.get("endpoint"));
+            Map<String, Object> safe = new LinkedHashMap<>();
+            safe.put("id", candidate.get("id"));
+            safe.put("method", endpoint.get("method"));
+            safe.put("host", endpoint.get("host"));
+            safe.put("pathname", endpoint.get("pathname"));
+            safe.put("score", candidate.get("score"));
+            safeCandidates.add(safe);
+        }
+        return "Analyze these captured endpoint metadata records. Infer a concise purpose and any parameter roles. "
+            + "Do not include secrets or executable code. Records: " + safeCandidates;
     }
 
     private String commandName(String pathname, int index) {

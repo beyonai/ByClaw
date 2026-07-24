@@ -15,7 +15,6 @@ import usePersistFn from '@/hooks/usePersistFn';
 import useSend from '@/hooks/useSseSender/useSend';
 import { compareStreamId } from '@/hooks/useSseSender/chatStream';
 import { getChatRunningSnapshot, getChatRunningStatus } from '@/service/message';
-import { bindProjectSession } from '@/service/devloop';
 
 import { UserState } from '@/models/common/user';
 import { ISessionState } from '@/models/session';
@@ -133,18 +132,11 @@ const getPositiveNumber = (value: unknown) => {
   return Number.isFinite(numberValue) && numberValue > 0 ? numberValue : undefined;
 };
 
-// 默认项目在后端使用 -1 标识，创建会话时应与普通项目一样参与列表临时项和关系绑定。
+// 默认项目在后端使用 -1 标识，创建会话时应与普通项目一样参与列表临时项。
 const getProjectNumber = (value: unknown) => {
   const numberValue = Number(value);
   return Number.isFinite(numberValue) && (numberValue === -1 || numberValue > 0) ? numberValue : undefined;
 };
-
-const PROJECT_SESSION_BIND_RETRY_DELAYS = [0, 500, 1500];
-
-const wait = (delay: number) =>
-  new Promise((resolve) => {
-    window.setTimeout(resolve, delay);
-  });
 
 type MultiAgentLane = {
   laneId: string;
@@ -234,7 +226,7 @@ function useChat(props: IProps) {
   });
 
   const bindSessionToProject = usePersistFn(
-    async (projectId: unknown, targetSessionId: unknown, clientRequestId?: string, session?: ISession) => {
+    (projectId: unknown, targetSessionId: unknown, clientRequestId?: string, session?: ISession) => {
       const normalizedProjectId = getProjectNumber(projectId);
       const normalizedSessionId = getPositiveNumber(targetSessionId);
       if (normalizedProjectId === undefined || !normalizedSessionId) {
@@ -249,43 +241,21 @@ function useChat(props: IProps) {
         return;
       }
 
-      try {
-        // createSession 事件和会话落库在不同链路上，短暂重试避免刚返回 sessionId 时关系绑定查不到会话。
-        for (const delay of PROJECT_SESSION_BIND_RETRY_DELAYS) {
-          if (delay) {
-            await wait(delay);
+      boundProjectSessionKeysRef.current.add(cacheKey);
+      // 会话归属由创建链路写入 byai_session.project_id，这里只通知项目空间刷新临时项。
+      EventEmitter.emit('projectSpace-session-bound', {
+        projectId: `${normalizedProjectId}`,
+        sessionId: `${normalizedSessionId}`,
+        clientRequestId,
+        session: session
+          ? {
+            ...session,
+            sessionId: `${normalizedSessionId}`,
           }
-          try {
-            await bindProjectSession({
-              projectId: normalizedProjectId,
-              sessionId: normalizedSessionId,
-            });
-            break;
-          } catch (error) {
-            if (delay === PROJECT_SESSION_BIND_RETRY_DELAYS[PROJECT_SESSION_BIND_RETRY_DELAYS.length - 1]) {
-              throw error;
-            }
-          }
-        }
-        boundProjectSessionKeysRef.current.add(cacheKey);
-        // 用真实会话替换发送时插入的临时项，避免为新增一条数据重新查询整页列表。
-        EventEmitter.emit('projectSpace-session-bound', {
-          projectId: `${normalizedProjectId}`,
-          sessionId: `${normalizedSessionId}`,
-          clientRequestId,
-          session: session
-            ? {
-              ...session,
-              sessionId: `${normalizedSessionId}`,
-            }
-            : undefined,
-        });
-      } catch (error) {
-        console.error('Failed to bind project session:', error);
-      } finally {
-        if (clientRequestId) {
-          pendingProjectIdByClientRequestRef.current.delete(clientRequestId);
-        }
+          : undefined,
+      });
+      if (clientRequestId) {
+        pendingProjectIdByClientRequestRef.current.delete(clientRequestId);
       }
     }
   );
@@ -1012,7 +982,7 @@ function useChat(props: IProps) {
     }
 
     if (projectId !== undefined && sessionId) {
-      void bindSessionToProject(projectId, sessionId);
+      bindSessionToProject(projectId, sessionId);
     }
 
     // 发送请求并处理SSE响应

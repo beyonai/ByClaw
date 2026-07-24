@@ -19,6 +19,15 @@
         <result column="resource_name" property="agentName"/>
     </resultMap>
 
+    <!-- 成员授权弹窗一次提交多人时使用单条批量插入语句落库。 -->
+    <insert id="insertBatch">
+        INSERT INTO byai_project_member (member_id, project_id, user_id, role, create_time)
+        VALUES
+        <foreach collection="members" item="member" separator=",">
+            (#{member.memberId}, #{member.projectId}, #{member.userId}, #{member.role}, #{member.createTime})
+        </foreach>
+    </insert>
+
     <select id="listProjectMembers" resultMap="ProjectMemberListDtoResultMap">
         SELECT a.member_id,
                a.project_id,
@@ -33,6 +42,10 @@
                  LEFT JOIN po_users b ON a.user_id = b.user_id
                  LEFT JOIN ss_resource c ON a.agent_id = c.resource_id
         WHERE a.project_id = #{projectId}
+        <if test="userName != null and userName != ''">
+            <!-- 成员列表搜索只匹配姓名，避免账号和绑定数字员工名称产生额外命中。 -->
+            AND b.user_name LIKE CONCAT('%', #{userName}, '%')
+        </if>
         ORDER BY a.create_time ASC
     </select>
 

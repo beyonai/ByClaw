@@ -234,6 +234,11 @@ afterEach(() => {
 async function flushSearch() {
   await act(async () => {
     jest.runOnlyPendingTimers();
+    // 资源搜索包含多层 Promise.allSettled，需要等待完整异步链路提交页面状态。
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
     await Promise.resolve();
   });
 }

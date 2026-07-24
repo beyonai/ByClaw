@@ -9,6 +9,7 @@ describe('adapter recorder scoped styles', () => {
     const modulePath = path.join(recorderDir, 'index.module.less');
     const moduleSource = fs.existsSync(modulePath) ? fs.readFileSync(modulePath, 'utf8') : '';
     const headingStyle = moduleSource.slice(moduleSource.indexOf('.heading {'), moduleSource.indexOf('.title {'));
+    const bodyStyle = moduleSource.slice(moduleSource.indexOf('.body {'), moduleSource.indexOf('.sidebar {'));
     const identityModuleSource = fs.readFileSync(
       path.join(recorderDir, 'components', 'UserIdentityBar.module.less'),
       'utf8'
@@ -41,15 +42,15 @@ describe('adapter recorder scoped styles', () => {
 
     expect(moduleSource).toContain('@canvas: #f6f8fc;');
     expect(moduleSource).toContain('@surface: #ffffff;');
-    expect(moduleSource).toContain('padding: clamp(12px, 1.5vw, 20px) clamp(12px, 2.5vw, 40px);');
-    expect(moduleSource).toContain('gap: 20px;');
+    expect(moduleSource).toContain('padding: clamp(8px, 1vw, 12px) clamp(12px, 2vw, 28px);');
+    expect(bodyStyle).toContain('gap: 18px;');
     expect(headingStyle).toContain('align-items: baseline;');
     expect(headingStyle).toContain('justify-content: space-between;');
     expect(headingStyle).toContain('width: 100%;');
-    expect(headingStyle).toContain('gap: 18px;');
+    expect(headingStyle).toContain('gap: 10px;');
     expect(moduleSource).toContain('.sidebar {');
     expect(moduleSource).toContain('flex: 1 1 auto;');
-    expect(moduleSource).toContain('.sidebar,\n.stage');
+    expect(moduleSource).toMatch(/\.sidebar,\r?\n\.stage/);
     expect(moduleSource).toContain('height: 100%;');
     expect(moduleSource).toContain('@media (max-width: 767px)');
     expect(moduleSource).toContain('@media (prefers-reduced-motion: reduce)');

@@ -94,6 +94,14 @@ ARG INSTALL_BROWSER_STACK=true
 
 RUN chown root:root /app
 
+RUN set -eux; \
+    if getent group byclaw >/dev/null; then \
+        test "$(getent group byclaw | cut -d: -f3)" = "999"; \
+    else \
+        groupadd --gid 999 byclaw; \
+    fi; \
+    usermod -aG byclaw root
+
 ENV PIP_BREAK_SYSTEM_PACKAGES=1 \
     PIP_ROOT_USER_ACTION=ignore \
     OPENCLAW_BUNDLED_PLUGINS_DIR=/app/dist/extensions \
@@ -199,38 +207,12 @@ RUN set -eux; \
     python3 --version | grep -q 'Python 3.12'; \
     python3 -m pip config --global set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple; \
     python3 -m pip config --global set global.trusted-host pypi.tuna.tsinghua.edu.cn; \
-    python3 -m pip install --no-cache-dir redis websockify by-framework; \
+    python3 -m pip install --no-cache-dir redis websockify by-framework==0.2.2.dev10; \
     rm -f /usr/bin/websockify; \
     ln -sf /usr/local/bin/websockify /usr/bin/websockify; \
     websockify --help >/dev/null
 
 COPY --from=ext-builder /build/out/ /app/dist-runtime/extensions/
-
-RUN --mount=type=cache,target=/root/.npm \
-    set -eux; \
-    npm config set registry https://registry.npmmirror.com --global; \
-    npm config set fund false --global; \
-    npm config set audit false --global; \
-    npm config set prefer-offline true --global; \
-    rm -rf /tmp/openclaw-acpx-plugin /app/dist/extensions/acpx; \
-    npm install --prefix /tmp/openclaw-acpx-plugin --omit=dev --ignore-scripts --no-package-lock --prefer-offline "@openclaw/acpx@${OPENCLAW_VERSION}"; \
-    mkdir -p /app/dist/extensions/acpx; \
-    cp -a /tmp/openclaw-acpx-plugin/node_modules/@openclaw/acpx/. /app/dist/extensions/acpx/; \
-    cp -a /tmp/openclaw-acpx-plugin/node_modules /app/dist/extensions/acpx/node_modules; \
-    rm -rf /app/dist/extensions/acpx/node_modules/@openclaw/acpx /tmp/openclaw-acpx-plugin; \
-    chown -R root:root /app/dist/extensions/acpx; \
-    chmod -R go-w /app/dist/extensions/acpx; \
-    test -f /app/dist/extensions/acpx/dist/index.js; \
-    test -f /app/dist/extensions/acpx/openclaw.plugin.json; \
-    node --input-type=module -e ' \
-      import { readFileSync } from "node:fs"; \
-      const expectedVersion = process.argv[1]; \
-      const manifest = JSON.parse(readFileSync("/app/dist/extensions/acpx/openclaw.plugin.json", "utf8")); \
-      const pkg = JSON.parse(readFileSync("/app/dist/extensions/acpx/package.json", "utf8")); \
-      if (manifest.id !== "acpx") throw new Error(`unexpected acpx plugin id: ${manifest.id}`); \
-      if (pkg.name !== "@openclaw/acpx") throw new Error(`unexpected acpx package name: ${pkg.name}`); \
-      if (pkg.version !== expectedVersion) throw new Error(`unexpected acpx version: ${pkg.version}`); \
-    ' "$OPENCLAW_VERSION"
 
 RUN set -eux; \
     rm -rf /app/dist/extensions/diagnostics-otel; \

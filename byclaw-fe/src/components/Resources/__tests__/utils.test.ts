@@ -1,7 +1,9 @@
 import {
+  buildSkillMarketplaceUrl,
   buildResourceListFilterParam,
   getBaseResourceBizTypeList,
   isAllResourceBizTypeSelected,
+  isSkillMarketplaceInstalledMessage,
   normalizeResourceBizTypeList,
 } from '../utils';
 
@@ -9,6 +11,49 @@ const ALL_RESOURCE_BIZ_TYPE_VALUES = ['MCP', 'TOOLKIT', 'AGENT'];
 const ALL_KNOWLEDGE_RESOURCE_BIZ_TYPE_VALUES = ['KG_DOC', 'KG_TERM', 'KG_QA'];
 
 describe('components/Resources utils', () => {
+  it('adds the digital employee and current Beyond-Token to the skill marketplace URL', () => {
+    const url = new URL(
+      buildSkillMarketplaceUrl(
+        'https://www.iwhaleai.com/skillHub/dashboard?tab=skills',
+        10029822,
+        'token+/=value',
+        'https://portal.example.com'
+      )
+    );
+
+    expect(url.origin + url.pathname).toBe('https://www.iwhaleai.com/skillHub/dashboard');
+    expect(url.searchParams.get('tab')).toBe('skills');
+    expect(url.searchParams.get('digId')).toBe('10029822');
+    expect(url.searchParams.get('BeyondToken')).toBe('token+/=value');
+    expect(url.searchParams.has('beyondToken')).toBe(false);
+    expect(url.searchParams.has('userCode')).toBe(false);
+    expect(url.searchParams.get('parentOrigin')).toBe('https://portal.example.com');
+  });
+
+  it('returns an empty URL when the configured skill marketplace address is missing or invalid', () => {
+    expect(buildSkillMarketplaceUrl('', 10029822, 'token', 'https://portal.example.com')).toBe('');
+    expect(buildSkillMarketplaceUrl('not-a-url', 10029822, 'token', 'https://portal.example.com')).toBe('');
+    expect(buildSkillMarketplaceUrl('javascript:alert(1)', 10029822, 'token', 'https://portal.example.com')).toBe('');
+  });
+
+  it('accepts only skill-installed messages for the active digital employee', () => {
+    expect(
+      isSkillMarketplaceInstalledMessage(
+        {
+          type: 'BYCLAW_SKILL_INSTALLED',
+          digId: '10029822',
+        },
+        10029822
+      )
+    ).toBe(true);
+    expect(isSkillMarketplaceInstalledMessage({ type: 'OTHER_EVENT', digId: '10029822' }, 10029822)).toBe(false);
+    expect(isSkillMarketplaceInstalledMessage({ type: 'BYCLAW_SKILL_INSTALLED', digId: '10029823' }, 10029822)).toBe(
+      false
+    );
+    expect(isSkillMarketplaceInstalledMessage({ type: 'BYCLAW_SKILL_INSTALLED' }, 10029822)).toBe(false);
+    expect(isSkillMarketplaceInstalledMessage(null, 10029822)).toBe(false);
+  });
+
   it('treats empty and legacy full selections as all resource biz types', () => {
     expect(isAllResourceBizTypeSelected()).toBe(true);
     expect(isAllResourceBizTypeSelected([])).toBe(true);

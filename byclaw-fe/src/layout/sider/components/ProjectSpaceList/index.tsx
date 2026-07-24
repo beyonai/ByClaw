@@ -11,6 +11,7 @@ import ProjectFormModal, {
   type ProjectShareMember,
 } from '@/pages/projectSpace/components/ProjectFormModal';
 import { useProjectList } from '@/pages/projectSpace/hooks/useProjectList';
+import { useProjectTypeConfig } from '@/pages/projectSpace/hooks/useProjectTypeConfig';
 import {
   createProject,
   deleteProject,
@@ -20,7 +21,7 @@ import {
 } from '@/pages/projectSpace/service';
 import type { ProjectSession, ProjectSpace } from '@/pages/projectSpace/types';
 import { getArrayData, normalizeProjectDetail, normalizeProjectSession } from '@/pages/projectSpace/utils';
-import { addProjectMember, listProjectMembers, removeProjectMember } from '@/service/devloop';
+import { saveProjectMembers } from '@/service/devloop';
 import AntdIcon from '@/components/AntdIcon';
 import { SiderContentContext } from '../../siderContentContext';
 import DialogueCard from '../DialogueList/DialogueCard';
@@ -28,6 +29,8 @@ import ProjectDetailPanel from './ProjectDetailModal';
 import styles from './index.module.less';
 
 const PROJECT_SESSION_PAGE_SIZE = 30;
+// 左侧项目选择仅持久化项目 ID，刷新浏览器后由最新可见项目列表校验并恢复。
+const PROJECT_SCOPE_STORAGE_KEY = 'byclaw.projectSpace.selectedProjectId';
 
 type ProjectSessionPageState = {
   pageNum: number;
@@ -90,6 +93,32 @@ const renderProjectSceneTag = (project: ProjectSpace, t: ProjectSpaceTranslate, 
 
 const isDefaultProject = (project?: ProjectSpace) => project?.projectType === 'default';
 
+const getStoredProjectScopeId = () => {
+  if (typeof window === 'undefined') return undefined;
+
+  try {
+    return window.localStorage.getItem(PROJECT_SCOPE_STORAGE_KEY)?.trim() || undefined;
+  } catch {
+    // 浏览器禁用本地存储时不影响当前会话中的项目切换。
+    return undefined;
+  }
+};
+
+const saveProjectScopeIdToStorage = (projectId?: string | number) => {
+  if (typeof window === 'undefined') return;
+
+  try {
+    const normalizedProjectId = `${projectId ?? ''}`.trim();
+    if (normalizedProjectId) {
+      window.localStorage.setItem(PROJECT_SCOPE_STORAGE_KEY, normalizedProjectId);
+      return;
+    }
+    window.localStorage.removeItem(PROJECT_SCOPE_STORAGE_KEY);
+  } catch {
+    // 浏览器禁用本地存储时不影响当前会话中的项目切换。
+  }
+};
+
 const getProjectIdFromSaveResponse = (response: any) => {
   // 创建接口有的环境返回 data.projectId，有的请求封装会直接返回 projectId，这里统一兜底取值。
   return `${response?.projectId || response?.id || response?.data?.projectId || response?.data?.id || ''}`;
@@ -116,14 +145,7 @@ const normalizeProjectMember = (member: ProjectShareMember | any): ProjectShareM
   };
 };
 
-const syncProjectShareMembers = async (
-  projectId: string | number,
-  desiredMembers: ProjectShareMember[] = [],
-  options: { allowRemove?: boolean } = {}
-) => {
-  const currentMembers = await listProjectMembers(Number(projectId));
-  const currentList = Array.isArray(currentMembers) ? currentMembers : [];
-  const currentUserIdSet = new Set(currentList.map((member) => String(member.userId)));
+const syncProjectShareMembers = async (projectId: string | number, desiredMembers: ProjectShareMember[] = []) => {
   const desiredMemberMap = new Map<string, ProjectShareMember>();
 
   desiredMembers.map(normalizeProjectMember).forEach((member) => {
@@ -133,28 +155,11 @@ const syncProjectShareMembers = async (
     }
   });
 
-  const pendingMembers = Array.from(desiredMemberMap.values()).filter(
-    (member) => !currentUserIdSet.has(String(getShareMemberUserId(member)))
-  );
-
-  await Promise.all(
-    pendingMembers.map((member) =>
-      addProjectMember({
-        projectId: Number(projectId),
-        userId: getShareMemberUserId(member),
-        userCode: member.userCode,
-        userName: member.userName || member.name,
-      })
-    )
-  );
-
-  if (!options.allowRemove) return;
-
-  await Promise.all(
-    currentList
-      .filter((member) => member.role !== 'owner' && !desiredMemberMap.has(String(member.userId)) && member.memberId)
-      .map((member) => removeProjectMember(member.memberId))
-  );
+  // 共享成员以最终成员数组一次保存，后端统一在事务内计算新增和删除成员。
+  await saveProjectMembers({
+    projectId: Number(projectId),
+    userIds: Array.from(desiredMemberMap.values()).map((member) => getShareMemberUserId(member)),
+  });
 };
 
 const ProjectSpaceList: React.FC = () => {
@@ -170,7 +175,9 @@ const ProjectSpaceList: React.FC = () => {
   const { EventEmitter, setAgentId, setSessionId } = useGlobal();
   const { clearDetailPanel } = React.useContext(SiderContentContext);
   const { projects, loading, fetchProjects } = useProjectList();
-  const [projectScopeId, setProjectScopeId] = useState<string>();
+  // 项目类型配置决定研发闭环能力是否开放，侧栏表单和详情使用同一份结果。
+  const { projectTypeOptions, projectTypeLoading, isDevelopProjectEnabled } = useProjectTypeConfig();
+  const [projectScopeId, setProjectScopeId] = useState<string | undefined>(() => getStoredProjectScopeId());
   const [sessionKeyword, setSessionKeyword] = useState('');
   const [projectDetailMap, setProjectDetailMap] = useState<Record<string, ProjectSpace>>({});
   const [detailLoadingMap, setDetailLoadingMap] = useState<Record<string, boolean>>({});
@@ -180,11 +187,26 @@ const ProjectSpaceList: React.FC = () => {
   const [editingProject, setEditingProject] = useState<ProjectSpace>();
   const [projectCreating, setProjectCreating] = useState(false);
   const [detailProject, setDetailProject] = useState<ProjectSpace>();
+  const [inaccessibleProjectIds, setInaccessibleProjectIds] = useState<Set<string>>(() => new Set());
   const projectSavingRef = useRef(false);
   const sessionSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 新建项目的列表响应可能稍后才返回，期间保留待选 ID，避免被无效本地存储回退逻辑提前清除。
+  const pendingCreatedProjectIdRef = useRef<string>();
+
+  const updateProjectScopeId = useCallback((projectId?: string | number) => {
+    const normalizedProjectId = `${projectId ?? ''}`.trim();
+    // 选中项目与本地存储同步更新，刷新浏览器后可以恢复上次的项目上下文。
+    setProjectScopeId(normalizedProjectId || undefined);
+    saveProjectScopeIdToStorage(normalizedProjectId);
+  }, []);
+
+  const visibleProjects = useMemo(
+    () => projects.filter((project) => !inaccessibleProjectIds.has(`${project.projectId}`)),
+    [inaccessibleProjectIds, projects]
+  );
 
   const mergedProjects = useMemo(() => {
-    return projects.map((project) => {
+    return visibleProjects.map((project) => {
       const cachedProject = projectDetailMap[project.projectId];
       if (!cachedProject) return project;
       return {
@@ -200,7 +222,7 @@ const ProjectSpaceList: React.FC = () => {
           projectSessionPageMap[project.projectId]?.total ?? project.sessionCount ?? cachedProject.sessionCount,
       };
     });
-  }, [projectDetailMap, projectSessionPageMap, projects]);
+  }, [projectDetailMap, projectSessionPageMap, visibleProjects]);
 
   const activeScopeProject = useMemo(() => {
     return mergedProjects.find((project) => project.projectId === projectScopeId);
@@ -327,16 +349,34 @@ const ProjectSpaceList: React.FC = () => {
   );
 
   useEffect(() => {
-    if (!projects.length) {
-      setProjectScopeId(undefined);
-      setProjectSessionPageMap({});
-      setSessionMoreLoadingMap({});
+    if (!visibleProjects.length) {
+      // 无可见项目时仅在状态实际有内容时清理，避免空对象触发 effect 重复更新。
+      setProjectScopeId((current) => current || undefined);
+      setProjectSessionPageMap((current) => (Object.keys(current).length ? {} : current));
+      setSessionMoreLoadingMap((current) => (Object.keys(current).length ? {} : current));
       return;
     }
 
-    if (projectScopeId && !projects.some((project) => project.projectId === projectScopeId)) {
-      // 新建项目后接口刷新期间先保留待选项目，避免临时回退到默认项目。
+    if (projectScopeId && inaccessibleProjectIds.has(`${projectScopeId}`)) {
+      // 退出当前项目后不允许默认选择逻辑重新选中该项目。
+      updateProjectScopeId();
+      setSessionKeyword('');
       return;
+    }
+
+    if (projectScopeId && !visibleProjects.some((project) => project.projectId === projectScopeId)) {
+      if (pendingCreatedProjectIdRef.current === projectScopeId) {
+        // 新项目尚未进入列表时继续等待下一次列表刷新，暂不写入或删除本地存储。
+        return;
+      }
+      // 本地保存的项目已删除或无访问权限时清除旧值，随后自动回退到默认项目。
+      updateProjectScopeId();
+      return;
+    }
+
+    if (projectScopeId && pendingCreatedProjectIdRef.current === projectScopeId) {
+      // 项目已进入当前可见列表后再持久化，避免缓存尚不可访问的项目 ID。
+      pendingCreatedProjectIdRef.current = undefined;
     }
 
     if (projectScopeId && projectSessionPageMap[projectScopeId]) {
@@ -344,21 +384,30 @@ const ProjectSpaceList: React.FC = () => {
     }
 
     const firstProject =
-      projects.find((project) => project.projectId === projectScopeId) ||
-      projects.find(isDefaultProject) ||
-      projects[0];
-    setProjectScopeId(firstProject.projectId);
+      visibleProjects.find((project) => project.projectId === projectScopeId) ||
+      visibleProjects.find(isDefaultProject) ||
+      visibleProjects[0];
+    updateProjectScopeId(firstProject.projectId);
     setSessionKeyword('');
     // 打开项目模块时默认选择系统默认项目，让会话列表直接可见。
     void fetchProjectSessions(firstProject, { force: true, keyword: '' });
-  }, [fetchProjectSessions, projectScopeId, projectSessionPageMap, projects]);
+  }, [
+    fetchProjectSessions,
+    inaccessibleProjectIds,
+    projectScopeId,
+    projectSessionPageMap,
+    updateProjectScopeId,
+    visibleProjects,
+  ]);
 
   const handleSelectProjectScope = ({ key }: { key: string }) => {
     if (sessionSearchTimerRef.current) {
       clearTimeout(sessionSearchTimerRef.current);
       sessionSearchTimerRef.current = null;
     }
-    setProjectScopeId(key);
+    // 用户主动切换项目时取消新建项目的等待态，以当前选择为准。
+    pendingCreatedProjectIdRef.current = undefined;
+    updateProjectScopeId(key);
     const selectedProject = mergedProjects.find((project) => project.projectId === key);
     if (!selectedProject) return;
 
@@ -587,7 +636,11 @@ const ProjectSpaceList: React.FC = () => {
   const handleOpenProjectDetail = (project: ProjectSpace) => {
     setDetailProject(projectDetailMap[project.projectId] || project);
     // 详情视图占用左侧小列表区域，不弹遮罩，右侧聊天页保持原状态。
-    void fetchProjectFullDetail(project, true).then(setDetailProject);
+    const targetProjectId = `${project.projectId}`;
+    void fetchProjectFullDetail(project, true).then((detail) => {
+      // 详情请求可能在退出项目或切换详情后才返回，只回写仍处于当前详情的同一项目。
+      setDetailProject((current) => (`${current?.projectId || ''}` === targetProjectId ? detail : current));
+    });
   };
 
   const handleProjectSharedChange = useCallback(
@@ -618,6 +671,51 @@ const ProjectSpaceList: React.FC = () => {
       });
     },
     [detailProject, fetchProjects, projects]
+  );
+
+  const handleCurrentUserRemovedFromProject = useCallback(
+    (projectId: number) => {
+      const targetProjectId = `${projectId || ''}`;
+      if (!targetProjectId) return;
+
+      // 退出项目后先从本地可见范围移除，再刷新后端列表，避免接口返回前短暂显示已无权限的项目。
+      setInaccessibleProjectIds((prev) => {
+        if (prev.has(targetProjectId)) return prev;
+        const next = new Set(prev);
+        next.add(targetProjectId);
+        return next;
+      });
+      setProjectDetailMap((prev) => {
+        const next = { ...prev };
+        delete next[targetProjectId];
+        return next;
+      });
+      setDetailLoadingMap((prev) => {
+        const next = { ...prev };
+        delete next[targetProjectId];
+        return next;
+      });
+      setProjectSessionPageMap((prev) => {
+        const next = { ...prev };
+        delete next[targetProjectId];
+        return next;
+      });
+      setSessionMoreLoadingMap((prev) => {
+        const next = { ...prev };
+        delete next[targetProjectId];
+        return next;
+      });
+      setDetailProject((prev) => (`${prev?.projectId || ''}` === targetProjectId ? undefined : prev));
+      if (`${projectScopeId || ''}` === targetProjectId) {
+        updateProjectScopeId();
+        setSessionKeyword('');
+      }
+      clearDetailPanel?.();
+      void fetchProjects().catch((error) => {
+        console.error('Failed to refresh project list after leaving project:', error);
+      });
+    },
+    [clearDetailPanel, fetchProjects, projectScopeId, updateProjectScopeId]
   );
 
   const handleOpenEditProject = (project: ProjectSpace) => {
@@ -669,7 +767,7 @@ const ProjectSpaceList: React.FC = () => {
             return next;
           });
           if (projectScopeId === project.projectId) {
-            setProjectScopeId(undefined);
+            updateProjectScopeId();
             setSessionKeyword('');
             setDetailProject(undefined);
           }
@@ -730,7 +828,9 @@ const ProjectSpaceList: React.FC = () => {
 
     projectSavingRef.current = true;
     setProjectCreating(true);
-    const submitSharedFlag = values.projectType === 'develop' || values.sharedFlag;
+    const submitIsDevelopProject = isDevelopProjectEnabled && values.projectType === 'develop';
+    // 默认项目固定不共享，研发项目是否强制共享取决于当前环境是否启用研发类型。
+    const submitSharedFlag = values.projectType === 'default' ? false : submitIsDevelopProject || values.sharedFlag;
     const shareMembers = submitSharedFlag ? values.shareMembers || [] : [];
     let createdProjectId = '';
     try {
@@ -745,7 +845,7 @@ const ProjectSpaceList: React.FC = () => {
         };
         await updateProject(updatePayload);
         if (submitSharedFlag && values.shareMembersLoaded) {
-          await syncProjectShareMembers(editingProject.projectId, shareMembers, { allowRemove: true });
+          await syncProjectShareMembers(editingProject.projectId, shareMembers);
         }
         message.success(t('message.updateSuccess'));
         setProjectDetailMap((prev) => ({
@@ -787,7 +887,13 @@ const ProjectSpaceList: React.FC = () => {
         // 新项目已进入下拉数据后优先使用规范化数据；未命中时保留接口 ID，等待后续列表响应补齐。
         const selectedProjectId = createdProject?.projectId || createdProjectId;
         const selectedProjectName = createdProject?.projectName || projectName;
-        setProjectScopeId(selectedProjectId);
+        if (createdProject) {
+          updateProjectScopeId(selectedProjectId);
+        } else {
+          // 列表尚未返回新项目时仅保留当前会话选择，待项目可见后由 effect 写入本地存储。
+          pendingCreatedProjectIdRef.current = selectedProjectId;
+          setProjectScopeId(selectedProjectId);
+        }
         setSessionKeyword('');
         EventEmitter.emit('projectSpace-active-project-change', {
           projectId: selectedProjectId,
@@ -919,10 +1025,10 @@ const ProjectSpaceList: React.FC = () => {
     setDetailProject((prev) =>
       prev?.projectId === projectId
         ? {
-            ...prev,
-            sessions: removeSession(prev.sessions),
-            sessionCount: Math.max(0, Number(prev.sessionCount ?? (prev.sessions || []).length) - 1),
-          }
+          ...prev,
+          sessions: removeSession(prev.sessions),
+          sessionCount: Math.max(0, Number(prev.sessionCount ?? (prev.sessions || []).length) - 1),
+        }
         : prev
     );
   }, []);
@@ -1051,19 +1157,12 @@ const ProjectSpaceList: React.FC = () => {
           onEditProject={isProjectCreator(detailProject) ? handleOpenEditProject : undefined}
           onDeleteProject={isProjectCreator(detailProject) ? handleDeleteProject : undefined}
           onProjectSharedChange={handleProjectSharedChange}
+          onCurrentUserRemoved={handleCurrentUserRemovedFromProject}
+          developProjectEnabled={isDevelopProjectEnabled}
         />
       ) : (
         <>
           <div className={styles.header}>
-            <div className={styles.searchInput}>
-              <Input
-                value={sessionKeyword}
-                suffix={<SearchOutlined onClick={handleSessionSearchSubmit} />}
-                placeholder={t('searchPlaceholder')}
-                onChange={(event) => handleSessionSearchChange(event.target.value)}
-                onPressEnter={handleSessionSearchSubmit}
-              />
-            </div>
             <div className={styles.scopeActionRow}>
               <Dropdown
                 trigger={['click']}
@@ -1099,6 +1198,16 @@ const ProjectSpaceList: React.FC = () => {
                 <AntdIcon className={styles.enterProjectDetailArrow} type="icon-a-Rightyou" />
               </button>
             )}
+            {/* 会话搜索紧接项目详情入口，且始终只查询当前选中的项目。 */}
+            <div className={styles.searchInput}>
+              <Input
+                value={sessionKeyword}
+                suffix={<SearchOutlined onClick={handleSessionSearchSubmit} />}
+                placeholder={t('searchPlaceholder')}
+                onChange={(event) => handleSessionSearchChange(event.target.value)}
+                onPressEnter={handleSessionSearchSubmit}
+              />
+            </div>
           </div>
 
           <Spin spinning={loading} wrapperClassName={styles.spin}>
@@ -1125,6 +1234,8 @@ const ProjectSpaceList: React.FC = () => {
         initialValues={projectFormInitialValues}
         projectId={editingProject?.projectId}
         creatorId={editingProject?.createBy}
+        projectTypeConfigOptions={projectTypeOptions}
+        projectTypeLoading={projectTypeLoading}
         onCancel={() => {
           setProjectModalOpen(false);
           setEditingProject(undefined);

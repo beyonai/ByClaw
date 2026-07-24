@@ -1,9 +1,24 @@
 // Step 1 · 健康检查 —— health(daemon/extension/high-level 健康状态列表)
-import { ApiOutlined, CloudServerOutlined, DisconnectOutlined, RocketOutlined } from '@ant-design/icons';
-import { Badge, Button, Card, List, Space, Typography, theme } from 'antd';
+import { ApiOutlined, CloudServerOutlined, DisconnectOutlined, RobotOutlined, RocketOutlined } from '@ant-design/icons';
+import { Alert, Badge, Button, Card, List, Space, Typography, theme } from 'antd';
 import type { HealthReport } from '../types/recorder';
 
 const { Text, Paragraph } = Typography;
+
+const LLM_SYNTHESIS_DESCRIPTIONS: Record<string, string> = {
+  default_model_not_found: '未找到已启用的默认 LLM 模型；可继续使用本地规则流程。',
+  default_model_list_lookup_failed: '默认模型列表查询失败；可继续使用本地规则流程。',
+  default_model_detail_lookup_failed: '默认模型详情查询失败；可继续使用本地规则流程。',
+  default_model_detail_unavailable: '默认模型详情不可用；可继续使用本地规则流程。',
+  default_model_endpoint_missing: '默认模型缺少服务地址；可继续使用本地规则流程。',
+  default_model_token_missing: '默认模型缺少服务端凭据；可继续使用本地规则流程。',
+  default_model_code_missing: '默认模型缺少模型编码；可继续使用本地规则流程。',
+  default_model_lookup_failed: '默认模型查询失败；可继续使用本地规则流程。',
+};
+
+export function llmSynthesisDescription(reason?: string): string | undefined {
+  return reason ? LLM_SYNTHESIS_DESCRIPTIONS[reason] : undefined;
+}
 
 const ITEMS: Array<{ key: keyof HealthReport; label: string; icon: React.ReactNode }> = [
   { key: 'localService', label: 'Local Service', icon: <CloudServerOutlined /> },
@@ -53,6 +68,20 @@ export default function HealthStep({ health, loading, done, onRun }: Props) {
             </List.Item>
           );
         }}
+      />
+      <Alert
+        style={{ marginTop: token.marginMD }}
+        type={health?.llmSynthesis ? 'success' : 'info'}
+        showIcon
+        icon={<RobotOutlined />}
+        message={health?.llmSynthesis ? '默认 LLM 已配置（可选）' : '默认 LLM 暂不可用（不阻断）'}
+        description={
+          health?.llmSynthesis
+            ? health.llmSynthesisMessage
+            : llmSynthesisDescription(health?.llmSynthesisReason) ??
+              health?.llmSynthesisMessage ??
+              '健康检查完成后可继续录制；未配置 LLM 时将使用本地规则流程。'
+        }
       />
       <Button type="primary" loading={loading} disabled={done} onClick={onRun} style={{ marginTop: token.marginMD }}>
         {done ? '健康检查已通过' : '运行健康检查'}

@@ -303,7 +303,10 @@ export default function useMessage({ sessionId }: { sessionId?: string }) {
           const msg = list[i];
           if (msg.fromBeyond) {
             // 在这里写是因为，只需要每次切换会话查询聊天记录后，找到最后一条fromBeyond的记录
-            EventEmitter.emit('RECEIVE_SESSION_RECORDS_LAST_METADATA', msg.metadata);
+            EventEmitter.emit('RECEIVE_SESSION_RECORDS_LAST_METADATA', {
+              sessionId,
+              metadata: msg.metadata,
+            });
             break;
           }
         }

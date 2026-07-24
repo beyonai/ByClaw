@@ -5,9 +5,11 @@ import com.iwhalecloud.byai.manager.dto.session.ByaiSessionDto;
 import com.iwhalecloud.byai.manager.dto.session.TemplateSessionQueryRequestDto;
 import com.iwhalecloud.byai.manager.dto.session.TemplateSessionQueryResponseDto;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
+import com.iwhalecloud.byai.manager.qo.devloop.ProjectSessionQo;
 import com.iwhalecloud.byai.manager.qo.searchask.RecentlySearchAskQo;
 import com.iwhalecloud.byai.manager.qo.session.ByaiSessionQo;
 import com.iwhalecloud.byai.manager.vo.searchask.RecentlySearchAskVo;
+import org.apache.ibatis.annotations.Param;
 
 import java.util.List;
 
@@ -41,4 +43,14 @@ public interface ByaiSessionMapper extends BaseMapper<ByaiSession> {
      * @return List
      */
     List<RecentlySearchAskVo> queryRecentlySearchAsk(RecentlySearchAskQo recentlySessionQo);
+
+    /**
+     * 查询项目下的有效会话，按最近更新时间排序。
+     */
+    List<ByaiSessionDto> selectSessionsByProjectId(@Param("projectId") Long projectId);
+
+    /**
+     * 按查询条件查询项目下的有效会话。
+     */
+    List<ByaiSessionDto> selectSessionsByProjectByQo(ProjectSessionQo qo);
 }

@@ -1,14 +1,19 @@
 package com.iwhalecloud.byai.manager.interfaces.controller.devloop;
 
 import com.iwhalecloud.byai.common.page.PageInfo;
-import com.iwhalecloud.byai.manager.application.service.devloop.DevloopApplicationService;
+import com.iwhalecloud.byai.common.util.MapParamUtil;
+import com.iwhalecloud.byai.common.util.StringUtil;
+import com.iwhalecloud.byai.manager.application.service.devloop.ProjectApplicationService;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectListDto;
+import com.iwhalecloud.byai.manager.dto.devloop.ProjectMemberListDto;
+import com.iwhalecloud.byai.manager.dto.devloop.ProjectMemberSaveDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectRepoDTO;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileListDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileQueryDto;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileSaveDto;
 import com.iwhalecloud.byai.manager.dto.session.ByaiSessionDto;
+import com.iwhalecloud.byai.manager.entity.devloop.Project;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.qo.devloop.ProjectQo;
 import com.iwhalecloud.byai.manager.qo.devloop.ProjectSessionQo;
@@ -25,21 +30,21 @@ import java.util.Map;
  * 项目管理控制器 提供研发项目的创建、查询、修改、删除接口
  */
 @RestController
-@RequestMapping("/devloop/project")
+@RequestMapping("/project")
 public class ProjectController {
 
     @Autowired
-    private DevloopApplicationService applicationService;
+    private ProjectApplicationService projectApplicationService;
 
     /**
      * 创建项目
      *
      * @param dto 项目信息（projectName必填，description、resourceId、repos可选）
-     * @return 新建项目ID
+     * @return 新建项目
      */
     @PostMapping("/create")
-    public ResponseUtil<Map<String, Object>> createProject(@RequestBody ProjectDTO dto) {
-        return applicationService.createProject(dto);
+    public ResponseUtil<Project> createProject(@RequestBody ProjectDTO dto) {
+        return ResponseUtil.successResponse(projectApplicationService.createProject(dto));
     }
 
     /**
@@ -50,8 +55,7 @@ public class ProjectController {
      */
     @PostMapping("/list")
     public ResponseUtil<List<ProjectListDto>> listProjects(@RequestBody ProjectQo projectQo) {
-        List<ProjectListDto> projectListDtos = applicationService.listProjects(projectQo);
-        return ResponseUtil.successResponse(projectListDtos);
+        return ResponseUtil.successResponse(projectApplicationService.listProjects(projectQo));
     }
 
     /**
@@ -62,8 +66,8 @@ public class ProjectController {
      */
     @PostMapping("/get")
     public ResponseUtil<Map<String, Object>> getProject(@RequestBody Map<String, Object> params) {
-        Long projectId = Long.valueOf(params.get("projectId").toString());
-        return applicationService.getProject(projectId);
+        Long projectId = MapParamUtil.getLongValue(params, "projectId");
+        return ResponseUtil.successResponse(projectApplicationService.getProject(projectId));
     }
 
     /**
@@ -73,7 +77,8 @@ public class ProjectController {
      */
     @PostMapping("/update")
     public ResponseUtil<Void> updateProject(@RequestBody ProjectDTO dto) {
-        return applicationService.updateProject(dto);
+        projectApplicationService.updateProject(dto);
+        return ResponseUtil.successResponse();
     }
 
     /**
@@ -83,8 +88,71 @@ public class ProjectController {
      */
     @PostMapping("/delete")
     public ResponseUtil<Void> deleteProject(@RequestBody Map<String, Object> params) {
-        Long projectId = Long.valueOf(params.get("projectId").toString());
-        return applicationService.deleteProject(projectId);
+        Long projectId = MapParamUtil.getLongValue(params, "projectId");
+        projectApplicationService.deleteProject(projectId);
+        return ResponseUtil.successResponse();
+    }
+
+    /**
+     * 查询项目成员列表
+     *
+     * @param params 包含 projectId，可选 userName / keyword
+     * @return 成员列表
+     */
+    @PostMapping("/member/list")
+    public ResponseUtil<List<ProjectMemberListDto>> listProjectMembers(@RequestBody Map<String, Object> params) {
+        Long projectId = MapParamUtil.getLongValue(params, "projectId");
+        String userName = MapParamUtil.getStringValue(params, "userName");
+        // 兼容已发布前端的 keyword 入参，但后续查询仍只按成员姓名执行。
+        if (StringUtil.isEmpty(userName)) {
+            userName = MapParamUtil.getStringValue(params, "keyword");
+        }
+        return ResponseUtil.successResponse(projectApplicationService.listProjectMembers(projectId, userName));
+    }
+
+    /**
+     * 批量添加项目成员
+     *
+     * @param params 包含 projectId、userIds；兼容旧版单个 userId
+     */
+    @PostMapping("/member/add")
+    public ResponseUtil<Void> addProjectMember(@RequestBody Map<String, Object> params) {
+        projectApplicationService.addProjectMember(params);
+        return ResponseUtil.successResponse();
+    }
+
+    /**
+     * 整体保存项目成员列表。
+     *
+     * @param dto 包含 projectId、userIds，userIds 为空数组时移除全部普通成员
+     */
+    @PostMapping("/member/save")
+    public ResponseUtil<Void> saveProjectMembers(@RequestBody ProjectMemberSaveDto dto) {
+        projectApplicationService.saveProjectMembers(dto);
+        return ResponseUtil.successResponse();
+    }
+
+    /**
+     * 移除项目成员
+     *
+     * @param params 包含 memberId
+     */
+    @PostMapping("/member/remove")
+    public ResponseUtil<Void> removeProjectMember(@RequestBody Map<String, Object> params) {
+        Long memberId = MapParamUtil.getLongValue(params, "memberId");
+        projectApplicationService.removeProjectMember(memberId);
+        return ResponseUtil.successResponse();
+    }
+
+    /**
+     * 绑定数字员工到项目成员
+     *
+     * @param params 包含 memberId、agentId
+     */
+    @PostMapping("/member/bindAgent")
+    public ResponseUtil<Void> bindMemberAgent(@RequestBody Map<String, Object> params) {
+        projectApplicationService.bindMemberAgent(params);
+        return ResponseUtil.successResponse();
     }
 
     /**
@@ -95,7 +163,7 @@ public class ProjectController {
      */
     @PostMapping("/repo/create")
     public ResponseUtil<Map<String, Object>> createProjectRepo(@RequestBody ProjectRepoDTO dto) {
-        return applicationService.createProjectRepo(dto);
+        return ResponseUtil.successResponse(projectApplicationService.createProjectRepo(dto));
     }
 
     /**
@@ -105,8 +173,9 @@ public class ProjectController {
      */
     @PostMapping("/repo/delete")
     public ResponseUtil<Void> deleteProjectRepo(@RequestBody Map<String, Object> params) {
-        Long repoId = Long.valueOf(params.get("repoId").toString());
-        return applicationService.deleteProjectRepo(repoId);
+        Long repoId = MapParamUtil.getLongValue(params, "repoId");
+        projectApplicationService.deleteProjectRepo(repoId);
+        return ResponseUtil.successResponse();
     }
 
     /**
@@ -117,32 +186,7 @@ public class ProjectController {
      */
     @PostMapping("/session/listByQo")
     public ResponseUtil<PageInfo<ByaiSessionDto>> listSessionsByProject(@RequestBody ProjectSessionQo qo) {
-        PageInfo<ByaiSessionDto> pageInfo = applicationService.listSessionsByProject(qo);
-        return ResponseUtil.successResponse(pageInfo);
-    }
-
-    /**
-     * 绑定会话到项目，用于项目空间下新建会话后建立分组关系
-     *
-     * @param params 包含 projectId、sessionId
-     */
-    @PostMapping("/session/bind")
-    public ResponseUtil<Void> bindProjectSession(@RequestBody Map<String, Object> params) {
-        Long projectId = Long.valueOf(params.get("projectId").toString());
-        Long sessionId = Long.valueOf(params.get("sessionId").toString());
-        return applicationService.bindProjectSession(projectId, sessionId);
-    }
-
-    /**
-     * 取消项目和会话的有效关联
-     *
-     * @param params 包含 projectId、sessionId
-     */
-    @PostMapping("/session/unbind")
-    public ResponseUtil<Void> unbindProjectSession(@RequestBody Map<String, Object> params) {
-        Long projectId = Long.valueOf(params.get("projectId").toString());
-        Long sessionId = Long.valueOf(params.get("sessionId").toString());
-        return applicationService.unbindProjectSession(projectId, sessionId);
+        return ResponseUtil.successResponse(projectApplicationService.listSessionsByProject(qo));
     }
 
     /**
@@ -152,7 +196,7 @@ public class ProjectController {
      */
     @PostMapping("/share/saveToSpace")
     public ResponseUtil<Void> saveShareToSpace(@RequestBody ProjectShareFileSaveDto dto) {
-        applicationService.saveShareToSpace(dto);
+        projectApplicationService.saveShareToSpace(dto);
         return ResponseUtil.successResponse();
     }
 
@@ -163,9 +207,6 @@ public class ProjectController {
      */
     @PostMapping("/share/listSpaceFiles")
     public ResponseUtil<List<ProjectShareFileListDto>> listSpaceFiles(@RequestBody ProjectShareFileQueryDto dto) {
-        if (dto == null || dto.getProjectId() == null || dto.getProjectId() == 0L) {
-            return ResponseUtil.failRes("projectId不能为空");
-        }
-        return ResponseUtil.successResponse(applicationService.listSpaceFiles(dto));
+        return ResponseUtil.successResponse(projectApplicationService.listSpaceFiles(dto));
     }
 }

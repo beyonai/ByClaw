@@ -22,14 +22,16 @@
       "justMyCode": false
     },
     {
-      "name": "2byclaw-data-worker [源码调试]",
+      "name": "byclaw-data-service [source debug 8088]",
       "type": "debugpy",
       "request": "launch",
       "python": "${workspaceFolder}/byclaw-data/.venv/Scripts/python.exe",
-      "program": "${workspaceFolder}/byclaw-data/src/byclaw_data/main.py",
+      "program": "${workspaceFolder}/byclaw-data/src/byclaw_data/platform/main.py",
       "cwd": "${workspaceFolder}/byclaw-data",
       "envFile": "${workspaceFolder}/byclaw-data/.env2",
       "env": {
+        "DATACLOUD_DATA_SERVICE_HOST": "0.0.0.0",
+        "DATACLOUD_DATA_SERVICE_PORT": "8088",
         "PYTHONPATH": "${workspaceFolder}/byclaw-data/src;${workspaceFolder}/../by-datacloud/packages/datacloud-platform/src;${workspaceFolder}/../by-datacloud/packages/datacloud-analysis/src;${workspaceFolder}/../by-datacloud/packages/datacloud-data/src;${workspaceFolder}/../by-datacloud/packages/datacloud-knowledge/src;${env:PYTHONPATH}",
       },
       "justMyCode": false

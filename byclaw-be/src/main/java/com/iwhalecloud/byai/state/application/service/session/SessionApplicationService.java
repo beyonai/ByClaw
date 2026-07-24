@@ -9,6 +9,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import com.iwhalecloud.byai.common.message.qo.MessageHotDelQo;
 import com.iwhalecloud.byai.common.message.service.ByaiMessageHotService;
+import com.iwhalecloud.byai.manager.domain.devloop.service.ScanLogService;
 import com.iwhalecloud.byai.manager.dto.session.ByaiSessionDto;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
 import com.iwhalecloud.byai.manager.qo.session.ByaiSessionQo;
@@ -57,6 +58,9 @@ public class SessionApplicationService {
 
     @Autowired
     private SessionService sessionService;
+
+    @Autowired
+    private ScanLogService scanLogService;
 
     @Autowired
     private SessionExtService sessionExtService;
@@ -233,6 +237,9 @@ public class SessionApplicationService {
         MessageHotDelQo messageHotDelQo = new MessageHotDelQo();
         messageHotDelQo.setSessionId(sessionId);
         byaiMessageHotService.deleteByQo(messageHotDelQo);
+
+        // 删除关联扫描项
+        scanLogService.deleteItemBySessionId(sessionId);
 
     }
 

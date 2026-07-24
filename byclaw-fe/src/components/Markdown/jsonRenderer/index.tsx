@@ -50,7 +50,7 @@ const getTypeIcon = () => {
 let JsonArray: React.FC<JsonRendererProps>;
 let JsonObject: React.FC<JsonRendererProps>;
 
-const ExpandableStringValue: React.FC<ExpandableStringValueProps> = ({ value }) => {
+const ExpandableStringValue: React.FC<ExpandableStringValueProps> = React.memo(({ value }) => {
   const [expanded, setExpanded] = useState(false);
 
   if (value.length <= STRING_COLLAPSE_LENGTH) {
@@ -87,71 +87,73 @@ const ExpandableStringValue: React.FC<ExpandableStringValueProps> = ({ value }) 
       &quot;
     </span>
   );
-};
+});
 
 // 渲染JSON值
-const JsonValue: React.FC<JsonValueProps> = ({ value, level, showCopyButton, defaultExpanded, isLast = false }) => {
-  const intl = useIntl();
-  const [copied, setCopied] = useState(false);
-  const valueType = getValueType(value);
-  const handleCopy = async () => {
-    try {
-      await copyTextToClipboard(JSON.stringify(value, null, 2));
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch (error) {
-      console.error('复制失败:', error);
-    }
-  };
+const JsonValue: React.FC<JsonValueProps> = React.memo(
+  ({ value, level, showCopyButton, defaultExpanded, isLast = false }) => {
+    const intl = useIntl();
+    const [copied, setCopied] = useState(false);
+    const valueType = getValueType(value);
+    const handleCopy = async () => {
+      try {
+        await copyTextToClipboard(JSON.stringify(value, null, 2));
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      } catch (error) {
+        console.error('复制失败:', error);
+      }
+    };
 
-  const renderValue = () => {
-    switch (valueType) {
-      case 'null':
-        return <span className={styles.nullValue}>null</span>;
-      case 'undefined':
-        return <span className={styles.undefinedValue}>undefined</span>;
-      case 'boolean':
-        return <span className={styles.booleanValue}>{String(value)}</span>;
-      case 'number':
-        return <span className={styles.numberValue}>{value}</span>;
-      case 'string':
-        return <ExpandableStringValue value={value} />;
-      case 'array':
-        return <JsonArray data={value} level={level + 1} isLast={isLast} defaultExpanded={defaultExpanded} />;
-      case 'object':
-        return <JsonObject data={value} level={level + 1} isLast={isLast} defaultExpanded={defaultExpanded} />;
-      default:
-        return <span className={styles.unknownValue}>{String(value)}</span>;
-    }
-  };
+    const renderValue = () => {
+      switch (valueType) {
+        case 'null':
+          return <span className={styles.nullValue}>null</span>;
+        case 'undefined':
+          return <span className={styles.undefinedValue}>undefined</span>;
+        case 'boolean':
+          return <span className={styles.booleanValue}>{String(value)}</span>;
+        case 'number':
+          return <span className={styles.numberValue}>{value}</span>;
+        case 'string':
+          return <ExpandableStringValue value={value} />;
+        case 'array':
+          return <JsonArray data={value} level={level + 1} isLast={isLast} defaultExpanded={defaultExpanded} />;
+        case 'object':
+          return <JsonObject data={value} level={level + 1} isLast={isLast} defaultExpanded={defaultExpanded} />;
+        default:
+          return <span className={styles.unknownValue}>{String(value)}</span>;
+      }
+    };
 
-  return (
-    <div className={styles.jsonValue}>
-      {getTypeIcon()}
-      {renderValue()}
-      {showCopyButton && (
-        <Tooltip
-          title={
-            copied
-              ? intl.formatMessage({ id: 'common.copySuccess' })
-              : intl.formatMessage({ id: 'jsonRenderer.copyValue' })
-          }
-        >
-          <Button
-            type="text"
-            size="small"
-            icon={copied ? <CheckOutlined /> : <CopyOutlined />}
-            onClick={handleCopy}
-            className={styles.copyButton}
-          />
-        </Tooltip>
-      )}
-    </div>
-  );
-};
+    return (
+      <div className={styles.jsonValue}>
+        {getTypeIcon()}
+        {renderValue()}
+        {showCopyButton && (
+          <Tooltip
+            title={
+              copied
+                ? intl.formatMessage({ id: 'common.copySuccess' })
+                : intl.formatMessage({ id: 'jsonRenderer.copyValue' })
+            }
+          >
+            <Button
+              type="text"
+              size="small"
+              icon={copied ? <CheckOutlined /> : <CopyOutlined />}
+              onClick={handleCopy}
+              className={styles.copyButton}
+            />
+          </Tooltip>
+        )}
+      </div>
+    );
+  }
+);
 
 // 渲染JSON对象
-JsonObject = ({ data, level = 0, showCopyButton, defaultExpanded }) => {
+JsonObject = React.memo(({ data, level = 0, showCopyButton, defaultExpanded }) => {
   const intl = useIntl();
   const [expanded, setExpanded] = useState(!!defaultExpanded); // 默认不展开
   const [copied, setCopied] = useState(false);
@@ -235,10 +237,10 @@ JsonObject = ({ data, level = 0, showCopyButton, defaultExpanded }) => {
       ) : null}
     </div>
   );
-};
+});
 
 // 渲染JSON数组
-JsonArray = ({ data, level = 0, showCopyButton, defaultExpanded }) => {
+JsonArray = React.memo(({ data, level = 0, showCopyButton, defaultExpanded }) => {
   const intl = useIntl();
   const [expanded, setExpanded] = useState(!!defaultExpanded); // 默认不展开
   const [copied, setCopied] = useState(false);
@@ -319,7 +321,7 @@ JsonArray = ({ data, level = 0, showCopyButton, defaultExpanded }) => {
       ) : null}
     </div>
   );
-};
+});
 
 // 主JSON渲染器组件
 const JsonRenderer: React.FC<JsonRendererProps> = ({
@@ -414,4 +416,4 @@ const JsonRenderer: React.FC<JsonRendererProps> = ({
   return <JsonValue value={data} level={level} isLast={isLast} />;
 };
 
-export default JsonRenderer;
+export default React.memo(JsonRenderer);

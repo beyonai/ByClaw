@@ -141,6 +141,9 @@ function assertSessionsSpawnPayload(params) {
   const expectedReplyLanguage = testCase.request.replyLanguage ?? testCase.request.language ?? "zh_CN";
   const expectedByaiSessionId = testCase.request.sessionId;
   const expectedSessionRoot = `${SESSION_FILES_ROOT}/${expectedByaiSessionId}`;
+  const expectedClientType = testCase.expectedClientType ?? fixture.config.defaultAcpClientType;
+  const expectedClientDirName =
+    expectedClientType === "codex" ? PATHS.clientDirNames.codex : PATHS.clientDirNames.claudeCode;
 
   assert.equal(payload.runtime, ACP.runtime, `${testCase.name} sessionsSpawn.runtime mismatch`);
   assert.equal(payload.agentId, expectedAcpAgentId, `${testCase.name} sessionsSpawn.agentId mismatch`);
@@ -207,7 +210,7 @@ function assertSessionsSpawnPayload(params) {
     sharedContext.bootstrapReceiptPath.startsWith(sharedContext.runDir),
     `${testCase.name} bootstrap receipt must be scoped to runDir`,
   );
-  assert.equal(bundle.clientType, fixture.config.defaultAcpClientType, `${testCase.name} clientType mismatch`);
+  assert.equal(bundle.clientType, expectedClientType, `${testCase.name} clientType mismatch`);
   assert.equal(sharedContext.sessionId, expectedByaiSessionId, `${testCase.name} sharedContext.sessionId mismatch`);
   assert.equal(
     sharedContext.byaiChannelSessionId,
@@ -221,26 +224,36 @@ function assertSessionsSpawnPayload(params) {
   );
   assert.ok(fs.existsSync(sharedContext.queryPath), `${testCase.name} query.md is missing`);
   assert.ok(fs.existsSync(sharedContext.metadataPath), `${testCase.name} metadata.md is missing`);
-  assert.ok(
-    fs.existsSync(sharedContext.clientInstructionsPath),
-    `${testCase.name} client instructions are missing`,
+  assert.equal(
+    sharedContext.clientInstructionsPath,
+    undefined,
+    `${testCase.name} sharedContext must not expose a client instructions artifact`,
+  );
+  assert.equal(
+    fs.existsSync(path.join(sharedContext.runDir, "clients")),
+    false,
+    `${testCase.name} runDir must not contain a clients directory`,
   );
   assert.equal(sharedContext.bundlePath, bundlePath, `${testCase.name} sharedContext.bundlePath mismatch`);
   assert.ok(
     sharedContext.sharedDir.includes(
-      path.join(PATHS.byclawDir, PATHS.acpRunsDir, PATHS.clientDirNames.claudeCode),
+      path.join(PATHS.byclawDir, PATHS.acpRunsDir, expectedClientDirName),
     ),
-    `${testCase.name} shared directory should use .byclaw/acp-runs/claudeCode`,
+    `${testCase.name} shared directory should use .byclaw/acp-runs/${expectedClientDirName}`,
   );
   assert.ok(
     sharedContext.sharedDir.endsWith(
-      path.join(PATHS.byclawDir, PATHS.acpRunsDir, PATHS.clientDirNames.claudeCode, expectedByaiSessionId),
+      path.join(PATHS.byclawDir, PATHS.acpRunsDir, expectedClientDirName, expectedByaiSessionId),
     ),
     `${testCase.name} shared directory should end with the byai-channel session id`,
   );
   assert.match(payload.task, /query\.md/u, `${testCase.name} task should point to query.md`);
   assert.match(payload.task, /metadata\.md/u, `${testCase.name} task should point to metadata.md`);
-  assert.match(payload.task, /clientInstructions/u, `${testCase.name} task should point to client instructions`);
+  assert.doesNotMatch(
+    payload.task,
+    /clientInstructions|client instructions/iu,
+    `${testCase.name} task must not reference a client instructions artifact`,
+  );
   assert.match(payload.task, /回复语言: zh_CN/u, `${testCase.name} task should include reply language`);
   assert.match(
     payload.task,
@@ -254,7 +267,6 @@ function assertSessionsSpawnPayload(params) {
   );
   const metadata = fs.readFileSync(sharedContext.metadataPath, "utf8");
   const query = fs.readFileSync(sharedContext.queryPath, "utf8");
-  const clientInstructions = fs.readFileSync(sharedContext.clientInstructionsPath, "utf8");
   const bootstrapContract = JSON.parse(fs.readFileSync(bootstrapContractPath, "utf8"));
   assert.equal(bootstrapContract.bootstrapId, sharedContext.bootstrapId);
   assert.equal(bootstrapContract.runDir, sharedContext.runDir);
@@ -266,6 +278,11 @@ function assertSessionsSpawnPayload(params) {
     `${testCase.name} metadata sha256 mismatch`,
   );
   assert.equal(bootstrapContract.metadata.readMode, "complete-to-eof");
+  assert.equal(
+    bootstrapContract.clientInstructions,
+    undefined,
+    `${testCase.name} bootstrap contract must not depend on client instructions`,
+  );
   assert.equal(bootstrapContract.query.readAfterBootstrap, true);
   assert.equal(bootstrapContract.receipt.requiredStatus, "READY");
   assert.match(query, /Reply language: zh_CN/u, `${testCase.name} query should include reply language`);
@@ -277,23 +294,30 @@ function assertSessionsSpawnPayload(params) {
     new RegExp(expectedSessionRoot.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"),
     `${testCase.name} metadata should include session files root`,
   );
-  assert.match(
-    clientInstructions,
-    /Reply language: zh_CN/u,
-    `${testCase.name} client instructions should include reply language`,
-  );
-  assert.match(
-    clientInstructions,
-    /Fixed Work Specs/u,
-    `${testCase.name} client instructions should include fixed work specs`,
-  );
-  assert.match(
-    clientInstructions,
-    new RegExp(expectedSessionRoot.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"),
-    `${testCase.name} client instructions should include session files root`,
-  );
   assert.match(metadata, /linkedSkills/u, `${testCase.name} metadata should include mounted linkedSkills`);
-  assert.match(metadata, /skillDocPath/u, `${testCase.name} metadata should include absolute skillDocPath`);
+  const expectedLinkedSkillCount = testCase.expectedAgentIds.reduce(
+    (count, agentId) => count + (findAgent(snapshot, agentId).linkedSkills?.length ?? 0),
+    0,
+  );
+  assert.equal(bundle.linkedSkills.length, expectedLinkedSkillCount, `${testCase.name} linkedSkills count mismatch`);
+  if (expectedLinkedSkillCount > 0) {
+    assert.match(metadata, /skillDocPath/u, `${testCase.name} metadata should include absolute skillDocPath`);
+  } else {
+    assert.doesNotMatch(metadata, /"skillDocPath"/u, `${testCase.name} metadata must not invent skillDocPath`);
+  }
+  assert.match(
+    metadata,
+    /Every Linked Skill[^\n]*mandatory bootstrap input/iu,
+    `${testCase.name} metadata should make every Linked Skill mandatory bootstrap input`,
+  );
+  assert.match(
+    metadata,
+    /Do not copy, install, symlink, or materialize[^\n]*public[^\n]*skill directories/iu,
+    `${testCase.name} metadata should forbid public skill-directory materialization`,
+  );
+  for (const publicSkillDir of [".claude/skills", ".agents/skills", ".codex/skills"]) {
+    assert.match(metadata, new RegExp(publicSkillDir.replace(".", "\\."), "u"));
+  }
   if (testCase.expectedAgentIds.includes("900002")) {
     assert.ok(
       bundle.linkedSkills.some((skill) => skill.id === FIXTURE_LINKED_SKILL_ID),
@@ -379,9 +403,9 @@ async function loadCallAcpAgentTool() {
   return import(`${pathToFileURL(outfile).href}?t=${Date.now()}`);
 }
 
-async function assertCallAcpAgentToolFailsClosed(snapshot) {
+async function assertCallAcpAgentToolDispatchesQueryAndSessionSkills(snapshot) {
   const { createByclawCallAcpAgentTool } = await loadCallAcpAgentTool();
-  let executorCallCount = 0;
+  let executorInput;
   const environmentKeys = [
     "USER_CODE",
     "LANGFUSE_BASE_URL",
@@ -390,40 +414,68 @@ async function assertCallAcpAgentToolFailsClosed(snapshot) {
     "OPENCLAW_STATE_DIR",
   ];
   const savedEnvironment = Object.fromEntries(environmentKeys.map((key) => [key, process.env[key]]));
-  process.env.USER_CODE = "metadata-bootstrap-test";
+  const defaultCwd = path.join(workspaceRoot, "call-tool-success");
+  process.env.USER_CODE = "session-skills-test";
   delete process.env.LANGFUSE_BASE_URL;
   delete process.env.LANGFUSE_PUBLIC_KEY;
   delete process.env.LANGFUSE_SECRET_KEY;
-  process.env.OPENCLAW_STATE_DIR = "/dev/null/openclaw-state";
+  process.env.OPENCLAW_STATE_DIR = path.join(defaultCwd, ".openclaw");
   try {
+    fs.rmSync(defaultCwd, { recursive: true, force: true });
     const config = {
       ...jsonClone(fixture.config),
-      defaultCwd: path.join(workspaceRoot, "call-tool-fail-closed"),
-      sqlitePath: path.join(workspaceRoot, "call-tool-fail-closed", "state.sqlite"),
+      defaultCwd,
+      sqlitePath: path.join(defaultCwd, "state.sqlite"),
     };
+    const dispatchSnapshot = jsonClone(snapshot);
+    dispatchSnapshot.agents.find((agent) => agent.id === "900002").linkedSkills.push({
+      id: "910002",
+      redisKey: "SKILL_910002",
+      name: "fixture-review-skill",
+      code: "fixture-review-skill",
+      description: "Second session-scoped fixture skill.",
+      skillPath: "/workspace/skills/fixture-review-skill",
+      skillDocObjectKey: "/workspace/skills/fixture-review-skill/SKILL.md",
+      skillType: "hub",
+      source: { resourceId: "910002", resourceBizType: "SKILL" },
+    });
     const tool = createByclawCallAcpAgentTool({
       config,
       registry: {
-        snapshot: async () => jsonClone(snapshot),
+        snapshot: async () => dispatchSnapshot,
       },
-      executeViaCallAgent: async () => {
-        executorCallCount += 1;
+      executeViaCallAgent: async (input) => {
+        executorInput = input;
         return { success: true };
       },
     })({
-      sessionKey: "agent:main:metadata-bootstrap-test",
-      channelSessionId: "metadata-bootstrap-test-session",
-      channelTraceId: "a".repeat(32),
-      langfuseParentObservationId: "b".repeat(16),
+      sessionKey: "agent:main:session-skills-test",
+      channelSessionId: "session-skills-test-session",
+      channelTraceId: "c".repeat(32),
+      langfuseParentObservationId: "d".repeat(16),
     });
-    const result = await tool.execute("metadata-bootstrap-test-call", {
+    const result = await tool.execute("session-skills-test-call", {
       kind: "agent",
       id: "900002",
       input: "protected query",
     });
-    assert.equal(result.error_code, "ACP_METADATA_BOOTSTRAP_INVALID");
-    assert.match(result.error, /metadata bootstrap materialization failed/iu);
-    assert.equal(executorCallCount, 0, "bootstrap failure must not call the remote executor");
+    assert.equal(result.success, true);
+    assert.ok(executorInput, "successful call_acp_agent must invoke the remote executor");
+    assert.equal(executorInput.payload.cwd, defaultCwd, "call_acp_agent must preserve the planned cwd");
+    assert.equal(executorInput.content, "protected query", "call_acp_agent content must contain only the query");
+    assert.deepEqual(
+      executorInput.payload.skillPaths,
+      [
+        "/workspace/skills/fixture-engineering-skill",
+        "/workspace/skills/fixture-review-skill",
+      ],
+      "call_acp_agent must pass every linked skillPath through the session payload",
+    );
+    assert.equal(
+      fs.existsSync(defaultCwd),
+      false,
+      "call_acp_agent must not materialize metadata.md, bootstrap files, or client artifacts",
+    );
   } finally {
     for (const key of environmentKeys) {
       const value = savedEnvironment[key];
@@ -445,10 +497,8 @@ async function assertMetadataBootstrapProtocol() {
     validateMetadataBootstrapContract,
   } = await loadMetadataBootstrap();
   const runDir = path.join(workspaceRoot, "runs", "metadata-bootstrap-protocol");
-  const clientsDir = path.join(runDir, "clients");
   const metadataPath = path.join(runDir, "metadata.md");
   const queryPath = path.join(runDir, "query.md");
-  const clientInstructionsPath = path.join(clientsDir, "claude-code.md");
   const planBundlePath = path.join(runDir, "plan-bundle.json");
   const receiptPath = path.join(runDir, "bootstrap-receipt.json");
   const metadataContent = [
@@ -459,10 +509,9 @@ async function assertMetadataBootstrapProtocol() {
     "This heading is intentionally unknown to the adapter and must remain authoritative.",
     "",
   ].join("\n");
-  fs.mkdirSync(clientsDir, { recursive: true });
+  fs.mkdirSync(runDir, { recursive: true });
   fs.writeFileSync(metadataPath, metadataContent, "utf8");
   fs.writeFileSync(queryPath, "# Query\n\nprivate user query\n", "utf8");
-  fs.writeFileSync(clientInstructionsPath, "# Client Instructions\n", "utf8");
   fs.writeFileSync(planBundlePath, '{"fixture":true}\n', "utf8");
 
   const contract = createMetadataBootstrapContract({
@@ -470,15 +519,16 @@ async function assertMetadataBootstrapProtocol() {
     runDir,
     metadataPath,
     metadataContent,
-    clientInstructionsPath,
     queryPath,
     planBundlePath,
     receiptPath,
   });
+  assert.equal(contract.protocolVersion, 2, "client-instruction-free bootstrap contracts must use version 2");
   assert.equal(contract.policy, "fail-closed");
   assert.equal(contract.metadata.readMode, "complete-to-eof");
   assert.equal(contract.metadata.bytes, Buffer.byteLength(metadataContent));
   assert.equal(contract.metadata.sha256.length, 64);
+  assert.equal(contract.clientInstructions, undefined, "bootstrap contract must not include client instructions");
   assert.equal(contract.query.readAfterBootstrap, true);
   assert.equal(contract.planBundle.path, planBundlePath);
   assert.equal(contract.planBundle.required, true);
@@ -537,6 +587,7 @@ async function assertMetadataBootstrapProtocol() {
   assert.match(content, /bootstrap-receipt\.json/u);
   assert.match(content, /do not read query\.md or plan-bundle\.json/iu);
   assert.match(content, /Future Business Rule/u);
+  assert.doesNotMatch(content, /Required client instructions|clientInstructions/iu);
   assert.ok(
     content.indexOf("Future Business Rule") < content.indexOf("<USER_QUERY_ACCESS>"),
     "unknown future metadata rules must appear before query access",
@@ -585,7 +636,7 @@ async function main() {
     "planner should export buildCallAgentContentFromPlan for the byclawCallAcpAgent tool",
   );
   const snapshot = jsonClone(fixture.snapshot);
-  await assertCallAcpAgentToolFailsClosed(snapshot);
+  await assertCallAcpAgentToolDispatchesQueryAndSessionSkills(snapshot);
   const cases = fixture.requestCases.filter((item) => !selected || selected.has(item.name));
 
   assert.ok(cases.length > 0, "no request cases selected");
@@ -615,6 +666,7 @@ async function main() {
     });
     assertSessionsSpawnPayload({ plan, testCase: effectiveTestCase, snapshot });
     const rawInput = typeof request.input === "string" ? request.input : JSON.stringify(request.input ?? {});
+    const expectedClientType = testCase.expectedClientType ?? fixture.config.defaultAcpClientType;
     assert.ok(
       !plan.task.includes(rawInput),
       `${testCase.name} bootstrap task must not expose the raw query before metadata bootstrap`,
@@ -629,11 +681,15 @@ async function main() {
         duplicateBundle.sharedContext.runDir,
         "same-session plans must use different immutable run directories",
       );
-      assert.ok(
-        firstBundle.sharedContext.clientInstructionsPath &&
-          fs.readFileSync(firstBundle.sharedContext.clientInstructionsPath, "utf8").indexOf("metadata.md") <
-            fs.readFileSync(firstBundle.sharedContext.clientInstructionsPath, "utf8").indexOf("query.md"),
-        "client instructions must require metadata before query access",
+      assert.equal(
+        firstBundle.sharedContext.clientInstructionsPath,
+        undefined,
+        "plan bundles must not expose client instructions",
+      );
+      assert.equal(
+        fs.existsSync(path.join(firstBundle.sharedContext.runDir, "clients")),
+        false,
+        "plan bundles must not materialize a clients directory",
       );
       const substitutedPlan = jsonClone(plan);
       substitutedPlan.sessionsSpawn.bundle.bootstrapContractPath =
@@ -663,10 +719,41 @@ async function main() {
     assert.match(callAgentContent, /bootstrap-receipt\.json/u);
     assert.match(callAgentContent, /complete metadata document/iu);
     assert.match(callAgentContent, /referenced resources/iu);
+    assert.doesNotMatch(callAgentContent, /Required client instructions|clientInstructions/iu);
+    assert.match(callAgentContent, /## ACP Client Execution Policy/u);
+    assert.match(callAgentContent, /Do not invent agents, skills, or business rules/iu);
+    assert.match(callAgentContent, /Preserve proof[^\n]*loaded rule[^\n]*resource paths/iu);
+    if (expectedClientType === "codex") {
+      assert.match(callAgentContent, /Use the main Codex agent as coordinator/u);
+      assert.match(callAgentContent, /derive subagent prompts from[^\n]*metadata\.md[^\n]*roster entries/iu);
+    } else {
+      assert.match(callAgentContent, /Use Task\/Agent subagents when available/u);
+      assert.match(callAgentContent, /subagent_type[^\n]*metadata\.md[^\n]*roster entries/iu);
+    }
+    assert.match(
+      callAgentContent,
+      /every Linked Skill[^\n]*skillDocPath[^\n]*EOF/iu,
+      `${testCase.name} call-agent content should load every Linked Skill before query access`,
+    );
+    assert.match(
+      callAgentContent,
+      /Do not copy, install, symlink, or materialize[^\n]*public[^\n]*skill directories/iu,
+      `${testCase.name} call-agent content should forbid public skill-directory materialization`,
+    );
+    assert.match(
+      callAgentContent,
+      /apply every loaded Linked Skill[^\n]*trigger conditions[^\n]*does not count as using/iu,
+      `${testCase.name} call-agent content should require actual use of triggered Linked Skills`,
+    );
     assert.ok(
       callAgentContent.indexOf("<METADATA_BUSINESS_RULE_MANUAL>") <
         callAgentContent.indexOf("<USER_QUERY_ACCESS>"),
       `${testCase.name} metadata manual must precede query access`,
+    );
+    assert.ok(
+      callAgentContent.search(/every Linked Skill[^\n]*skillDocPath[^\n]*EOF/iu) <
+        callAgentContent.indexOf("<USER_QUERY_ACCESS>"),
+      `${testCase.name} Linked Skills bootstrap must precede query access`,
     );
     assert.ok(
       !callAgentContent.includes(rawInput),

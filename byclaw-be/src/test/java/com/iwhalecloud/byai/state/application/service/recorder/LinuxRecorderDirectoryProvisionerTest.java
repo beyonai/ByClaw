@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.DisabledOnOs;
 import org.junit.jupiter.api.condition.OS;
@@ -96,6 +97,25 @@ class LinuxRecorderDirectoryProvisionerTest {
         assertThat(libc.created).isEmpty();
     }
 
+    @Test
+    void atomicallyWritesDraftThroughTrustedDirectoryDescriptors() {
+        FakeLibC libc = new FakeLibC();
+        LinuxRecorderDirectoryProvisioner provisioner = new LinuxRecorderDirectoryProvisioner("Linux", () -> libc);
+
+        provisioner.writeFileAtomically(
+            Path.of("/mnt/byclaw-file"),
+            Path.of("byclaw-alice/by/.bycli/.recorder-drafts/session"),
+            "draft.js",
+            "source"
+        );
+
+        assertThat(libc.written).isEqualTo("source");
+        assertThat(libc.fsynced).isTrue();
+        assertThat(libc.renamedFrom).startsWith(".draft-");
+        assertThat(libc.renamedFrom).endsWith(".tmp");
+        assertThat(libc.renamedTo).isEqualTo("draft.js");
+    }
+
     private static final class FakeLibC implements LinuxRecorderDirectoryProvisioner.LibC {
         private final Map<String, Integer> attempts = new HashMap<>();
         private final List<String> created = new ArrayList<>();
@@ -103,6 +123,10 @@ class LinuxRecorderDirectoryProvisionerTest {
         private final List<String> mkdirAttempts = new ArrayList<>();
         private final List<Integer> closed = new ArrayList<>();
         private final List<Integer> openatFlags = new ArrayList<>();
+        private String written = "";
+        private boolean fsynced;
+        private String renamedFrom;
+        private String renamedTo;
         private String openedRoot;
         private int rootFlags;
         private String failSegment;
@@ -135,6 +159,11 @@ class LinuxRecorderDirectoryProvisionerTest {
         }
 
         @Override
+        public int openat(int directoryFd, String path, int flags, int mode) {
+            return nextFd++;
+        }
+
+        @Override
         public int mkdirat(int directoryFd, String path, int mode) {
             mkdirAttempts.add(path);
             if (path.equals(eexistSegment)) {
@@ -148,6 +177,30 @@ class LinuxRecorderDirectoryProvisionerTest {
         @Override
         public int close(int fd) {
             closed.add(fd);
+            return 0;
+        }
+
+        @Override
+        public int write(int fd, byte[] buffer, int count) {
+            written += new String(buffer, 0, count, StandardCharsets.UTF_8);
+            return count;
+        }
+
+        @Override
+        public int fsync(int fd) {
+            fsynced = true;
+            return 0;
+        }
+
+        @Override
+        public int renameat(int oldDirectoryFd, String oldPath, int newDirectoryFd, String newPath) {
+            renamedFrom = oldPath;
+            renamedTo = newPath;
+            return 0;
+        }
+
+        @Override
+        public int unlinkat(int directoryFd, String path, int flags) {
             return 0;
         }
     }

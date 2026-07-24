@@ -43,9 +43,13 @@ RUN --mount=type=cache,target=/root/.npm \
     for pid in $pids; do wait "$pid"; done
 
 # copy full source and build
+# byai-channel has relative imports from ../../shared/src/ and ../../byclaw-acp-adapter/src/,
+# so those workspace siblings must be present under src/ for esbuild to resolve them.
 COPY byclaw-exe/extensions/baiying-enhance/ ./src/baiying-enhance/
 COPY byclaw-exe/extensions/byai-channel/ ./src/byai-channel/
 COPY byclaw-exe/extensions/byai_diagnostics-otel/ ./src/byai_diagnostics-otel/
+COPY byclaw-exe/extensions/shared/ ./src/shared/
+COPY byclaw-exe/extensions/byclaw-acp-adapter/ ./src/byclaw-acp-adapter/
 
 RUN set -eux; \
     mkdir -p /build/out; \
@@ -54,7 +58,7 @@ RUN set -eux; \
         name=$(basename "$dir"); \
         if node --input-type=module -e ' \
             import { readFileSync } from "fs"; \
-            const pkg = JSON.parse(readFileSync(process.argv[1] + "package.json", "utf8")); \
+            const pkg = JSON.parse(readFileSync(process.argv[2] + "package.json", "utf8")); \
             process.exit((pkg.scripts || {}).build ? 0 : 1); \
         ' "$dir"; then \
             echo ">>> npm run build: $name"; \

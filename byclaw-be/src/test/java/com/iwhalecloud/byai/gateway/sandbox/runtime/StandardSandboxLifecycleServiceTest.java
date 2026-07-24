@@ -133,7 +133,13 @@ class StandardSandboxLifecycleServiceTest {
             .isTrue();
         assertThat(SandboxRuntimeRequestFactory.isReusableSandboxState(new SandboxStatus("ready", null, null, null)))
             .isTrue();
+        // Pending is now reusable - wait for the sandbox to start instead of creating a new one
         assertThat(SandboxRuntimeRequestFactory.isReusableSandboxState(new SandboxStatus("pending", null, null, null)))
+            .isTrue();
+        // Terminal states should not be reusable
+        assertThat(SandboxRuntimeRequestFactory.isReusableSandboxState(new SandboxStatus("failed", null, null, null)))
+            .isFalse();
+        assertThat(SandboxRuntimeRequestFactory.isReusableSandboxState(new SandboxStatus("exited", null, null, null)))
             .isFalse();
         assertThat(SandboxRuntimeRequestFactory.isReusableSandboxState(null)).isFalse();
     }

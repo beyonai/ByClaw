@@ -101,6 +101,9 @@ public class TransactionAdviceConfig {
         txMap.put("generateV3Stream", notSurpportedTx);
         txMap.put("generateText", notSurpportedTx);
         txMap.put("generateTextStream", notSurpportedTx);
+        // Recorder draft generation only writes the per-user sandbox volume. Storage failures are mapped to a stable
+        // 503 response, so it must not join a database transaction that would later surface as rollback-only.
+        txMap.put("pipelineGenerate", notSurpportedTx);
         txMap.put("*", requiredTx);
 
         /* 事务管理规则，声明具备事务管理的方法名 **/
