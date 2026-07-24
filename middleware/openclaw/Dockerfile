@@ -108,7 +108,7 @@ RUN set -eux; \
 ENV PIP_BREAK_SYSTEM_PACKAGES=1 \
     PIP_ROOT_USER_ACTION=ignore \
     OPENCLAW_BUNDLED_PLUGINS_DIR=/app/dist/extensions \
-    OPENCLAW_STATE_DIR=/root/.openclaw \
+    OPENCLAW_STATE_DIR=/home/appuser/.openclaw \
     OPENCLAW_VNC_WEB_PORT=8081 \
     OPENCLAW_VNC_PORT=5901
 
@@ -289,13 +289,21 @@ RUN set -eux; \
 # 安装 Bun 运行环境（gbrain 必需）— 从官方镜像拷贝二进制，避免 curl 下载超时
 COPY --from=oven/bun:1-debian /usr/local/bin/bun /usr/local/bin/bun
 RUN ln -sf /usr/local/bin/bun /usr/local/bin/bunx
-ENV PATH="/root/.bun/bin:/usr/local/bin:$PATH"
+ENV BUN_INSTALL=/usr/local \
+    PATH="/usr/local/bin:$PATH"
 
-# add gbrain（官方原版）
+# add gbrain（官方原版）— BUN_INSTALL=/usr/local 使 gbrain 安装到 /usr/local/bin
 RUN bun install -g github:garrytan/gbrain
 
 # rm
 RUN rm -fr /root/.agents/skills
+
+RUN addgroup -g 1001 -S appgroup && \
+    adduser -u 1001 -S appuser -G appgroup && \
+    mkdir -p /home/appuser/.openclaw /by/.bycli && \
+    chown -R appuser:appgroup /app /home/appuser /by
+
+USER appuser
 
 EXPOSE 8081
 

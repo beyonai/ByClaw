@@ -83,7 +83,7 @@ RUN chown root:root /app
 ENV PIP_BREAK_SYSTEM_PACKAGES=1 \
     PIP_ROOT_USER_ACTION=ignore \
     OPENCLAW_BUNDLED_PLUGINS_DIR=/app/dist/extensions \
-    OPENCLAW_STATE_DIR=/root/.openclaw
+    OPENCLAW_STATE_DIR=/home/appuser/.openclaw
 
 RUN set -eux; \
     if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
@@ -132,6 +132,13 @@ COPY middleware/openclaw/start-openclaw.sh          /usr/local/bin/start-opencla
 RUN chmod +x \
     /usr/local/bin/openclaw-runtime-bootstrap \
     /usr/local/bin/start-openclaw.sh
+
+RUN addgroup -g 1001 -S appgroup && \
+    adduser -u 1001 -S appuser -G appgroup && \
+    mkdir -p /home/appuser/.openclaw && \
+    chown -R appuser:appgroup /app /home/appuser
+
+USER appuser
 
 EXPOSE 8080
 
