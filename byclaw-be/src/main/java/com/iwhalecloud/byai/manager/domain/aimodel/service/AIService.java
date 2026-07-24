@@ -70,11 +70,16 @@ public class AIService {
      * request path does not depend on the Redis model cache.</p>
      */
     public String generateText(String systemPrompt, String userPrompt, ModelDto model, int maxTokens) {
-        return generateText(systemPrompt, userPrompt, model, null, maxTokens, false);
+        return generateText(systemPrompt, userPrompt, model, null, maxTokens, false).content();
     }
 
     /** Requests OpenAI-compatible JSON-object output for callers that require machine-readable results. */
     public String generateJsonObject(String systemPrompt, String userPrompt, ModelDto model, int maxTokens) {
+        return generateJsonObjectWithMetadata(systemPrompt, userPrompt, model, maxTokens).content();
+    }
+
+    /** Requests a JSON object and preserves the upstream completion reason for operational diagnostics. */
+    public GeneratedText generateJsonObjectWithMetadata(String systemPrompt, String userPrompt, ModelDto model, int maxTokens) {
         return generateText(systemPrompt, userPrompt, model, null, maxTokens, true);
     }
 
@@ -85,10 +90,10 @@ public class AIService {
         String modelCode,
         int maxTokens
     ) {
-        return generateText(systemPrompt, userPrompt, defaultModel, modelCode, maxTokens, false);
+        return generateText(systemPrompt, userPrompt, defaultModel, modelCode, maxTokens, false).content();
     }
 
-    private String generateText(
+    private GeneratedText generateText(
         String systemPrompt,
         String userPrompt,
         ModelDto defaultModel,
@@ -139,7 +144,10 @@ public class AIService {
                 if (choices != null && !choices.isEmpty()) {
                     Map<String, Object> firstChoice = choices.get(0);
                     Map<String, String> message = (Map<String, String>) firstChoice.get("message");
-                    return message.get("content");
+                    Object finishReason = firstChoice.get("finish_reason");
+                    return new GeneratedText(
+                        message.get("content"), finishReason instanceof String ? (String) finishReason : null
+                    );
                 }
             }
             throw new BaseException(I18nUtil.get("ai.openai.api.request.failed", response.getStatusCode()));
@@ -283,6 +291,9 @@ public class AIService {
     @FunctionalInterface
     public interface TextChunkHandler {
         void onChunk(String chunk) throws IOException;
+    }
+
+    public record GeneratedText(String content, String finishReason) {
     }
 
     @SuppressWarnings("unchecked")

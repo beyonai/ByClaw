@@ -22,6 +22,7 @@ public class RecorderPipelineService {
 
     private static final Logger log = LoggerFactory.getLogger(RecorderPipelineService.class);
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+    private static final int LLM_SCORE_MAX_TOKENS = 4000;
     private static final String ACTIVE_VERIFY_TOKEN = "_activeVerifyToken";
     static final int MAX_SOURCE_BYTES = 1024 * 1024;
     private static final String SOURCE_VALIDATION_MESSAGE =
@@ -87,14 +88,15 @@ public class RecorderPipelineService {
         }
         try {
             log.info(
-                "recorder_llm_score phase=calling sessionId={} candidateCount={} approved=true modelCalled=true",
-                session.sessionId(), selected.size()
+                "recorder_llm_score phase=calling sessionId={} candidateCount={} approved=true modelCalled=true maxTokens={}",
+                session.sessionId(), selected.size(), LLM_SCORE_MAX_TOKENS
             );
-            String llmRawJson = recorderLlmService.generateJsonObject(
+            RecorderLlmService.JsonObjectResponse llmResponse = recorderLlmService.generateJsonObjectWithMetadata(
                 "You are a recorder API analyst. Return one JSON object only, with no thinking, Markdown, or executable code.",
                 scorePrompt,
-                1200
+                LLM_SCORE_MAX_TOKENS
             );
+            String llmRawJson = llmResponse.content();
             result.put("llmRawJson", llmRawJson);
             LlmScoreMergeResult merge = mergeLlmScore(llmRawJson, selected);
             result.put("candidates", merge.candidates());
@@ -108,10 +110,10 @@ public class RecorderPipelineService {
             log.info(
                 "recorder_llm_score phase=received sessionId={} candidateCount={} approved=true modelCalled=true "
                     + "responseLength={} jsonParse={} parseErrorType={} mergeApplied={} appliedCandidateCount={} "
-                    + "fallback={} elapsedMs={}",
+                    + "finishReason={} fallback={} elapsedMs={}",
                 session.sessionId(), selected.size(), llmRawJson == null ? 0 : llmRawJson.length(), merge.jsonParse().status(),
                 merge.jsonParse().errorType(), merge.appliedCandidateCount() > 0, merge.appliedCandidateCount(),
-                merge.fallback(), elapsedMillis(startedAtNanos)
+                llmResponse.finishReason(), merge.fallback(), elapsedMillis(startedAtNanos)
             );
         } catch (RuntimeException e) {
             result.put("llmError", "LLM 评分调用失败，已使用本地规则评分。");
@@ -667,6 +669,7 @@ public class RecorderPipelineService {
 
     private String llmScorePrompt(List<Map<String, Object>> candidates) {
         List<Map<String, Object>> safeCandidates = new ArrayList<>();
+        List<Map<String, Object>> observedEvidence = new ArrayList<>();
         for (Map<String, Object> candidate : candidates) {
             Map<String, Object> endpoint = mapValue(candidate.get("endpoint"));
             Map<String, Object> safe = new LinkedHashMap<>();
@@ -676,13 +679,102 @@ public class RecorderPipelineService {
             safe.put("pathname", endpoint.get("pathname"));
             safe.put("score", candidate.get("score"));
             safeCandidates.add(safe);
+
+            Map<String, Object> evidence = new LinkedHashMap<>();
+            evidence.put("candidateId", candidate.get("id"));
+            evidence.put("queryKeys", argumentNames(candidate, "query"));
+            evidence.put("bodyKeys", argumentNames(candidate, "body"));
+            evidence.put("pathKeys", argumentNames(candidate, "path"));
+            evidence.put("requestHeaderNames", argumentNames(candidate, "header"));
+            evidence.put("rowPath", endpoint.get("rowPath"));
+            evidence.put("columns", candidate.get("columns"));
+            observedEvidence.add(evidence);
         }
-        return "Analyze these captured endpoint metadata records. Return exactly one JSON object with this schema: "
+        return "Analyze these captured endpoint metadata records encoded in TOON. Treat observed parameter names and response "
+            + "shape as evidence; empty or absent fields are unknown. Do not invent required parameters without evidence. "
+            + "Return exactly one JSON object with this schema: "
             + "{\"candidates\":[{\"candidateId\":string,\"utilityScore\":integer_0_to_100,"
             + "\"inferredFunction\":string,\"paramUnion\":[{\"name\":string,\"in\":\"query|body|path|header\","
             + "\"paramRole\":string,\"exposeAsArg\":\"yes|optional_candidate|no\","
             + "\"inferredMeaning\":string,\"why\":string}]}]}. Do not include secrets or executable code. "
-            + "Only use candidateId values from these records: " + safeCandidates;
+            + "Do not return TOON. Only use candidateId values from these records:\n"
+            + toonCandidates(safeCandidates) + "\nobservedEvidence:\n" + toonEvidence(observedEvidence);
+    }
+
+    private List<String> argumentNames(Map<String, Object> candidate, String location) {
+        if (!(candidate.get("args") instanceof List<?> args)) {
+            return List.of();
+        }
+        List<String> names = new ArrayList<>();
+        for (Object argument : args) {
+            Map<String, Object> value = mapValue(argument);
+            if (location.equals(value.get("in")) && stringValue(value.get("paramName")) != null) {
+                names.add(stringValue(value.get("paramName")));
+            }
+        }
+        return names;
+    }
+
+    private String toonCandidates(List<Map<String, Object>> candidates) {
+        StringBuilder toon = new StringBuilder("records[").append(candidates.size())
+            .append("]{id,method,host,pathname,score}:");
+        for (Map<String, Object> candidate : candidates) {
+            toon.append("\n  ").append(toonScalar(candidate.get("id")))
+                .append(',').append(toonScalar(candidate.get("method")))
+                .append(',').append(toonScalar(candidate.get("host")))
+                .append(',').append(toonScalar(candidate.get("pathname")))
+                .append(',').append(toonScalar(candidate.get("score")));
+        }
+        return toon.toString();
+    }
+
+    private String toonEvidence(List<Map<String, Object>> evidenceEntries) {
+        StringBuilder toon = new StringBuilder("  records[").append(evidenceEntries.size()).append("]:");
+        for (Map<String, Object> evidence : evidenceEntries) {
+            toon.append("\n    - candidateId: ").append(toonScalar(evidence.get("candidateId")))
+                .append("\n      queryKeys").append(toonArray(evidence.get("queryKeys")))
+                .append("\n      bodyKeys").append(toonArray(evidence.get("bodyKeys")))
+                .append("\n      pathKeys").append(toonArray(evidence.get("pathKeys")))
+                .append("\n      requestHeaderNames").append(toonArray(evidence.get("requestHeaderNames")))
+                .append("\n      responseShape:");
+            if (evidence.get("rowPath") != null) {
+                toon.append("\n        rowPath: ").append(toonScalar(evidence.get("rowPath")));
+            }
+            appendToonColumns(toon, evidence.get("columns"));
+        }
+        return toon.toString();
+    }
+
+    private String toonArray(Object value) {
+        if (!(value instanceof List<?> items) || items.isEmpty()) {
+            return ": []";
+        }
+        return "[" + items.size() + "]: " + items.stream().map(this::toonScalar).collect(java.util.stream.Collectors.joining(","));
+    }
+
+    private void appendToonColumns(StringBuilder toon, Object value) {
+        if (!(value instanceof List<?> columns) || columns.isEmpty()) {
+            toon.append("\n        columns: []");
+            return;
+        }
+        toon.append("\n        columns[").append(columns.size()).append("]{name,type}:");
+        for (Object column : columns) {
+            Map<String, Object> columnValue = mapValue(column);
+            toon.append("\n          ").append(toonScalar(columnValue.get("name")))
+                .append(',').append(toonScalar(columnValue.get("type")));
+        }
+    }
+
+    private String toonScalar(Object value) {
+        if (value instanceof Number || value instanceof Boolean) {
+            return String.valueOf(value);
+        }
+        String text = value == null ? "" : String.valueOf(value);
+        if (text.matches("[A-Za-z0-9_./$-]+")) {
+            return text;
+        }
+        return "\"" + text.replace("\\", "\\\\").replace("\"", "\\\"")
+            .replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t") + "\"";
     }
 
     private String commandName(String pathname, int index) {
