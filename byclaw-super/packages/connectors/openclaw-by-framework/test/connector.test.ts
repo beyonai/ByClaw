@@ -63,7 +63,7 @@ describe("OpenClawByFrameworkConnector", () => {
       expect.objectContaining({
         sourceAgentType: "CUSTOM_MAESTRO",
         targetAgentType: "BYCLAW_EXE_user-1",
-        sessionId: "maestro:tenant-1:thread-1:run-1:delegation-1",
+        sessionId: "maestro:user-1:session-1:run-1:delegation-1",
         requireOnlineWorker: true,
         extraPayload: {
           agent_id: "1001",
@@ -78,11 +78,12 @@ describe("OpenClawByFrameworkConnector", () => {
       }),
     );
     expect(events).toEqual([
-      { type: "output_delta", text: "hello " },
-      { type: "output_delta", text: "world" },
+      { type: "output_delta", text: "hello ", cursor: "2-0" },
+      { type: "output_delta", text: "world", cursor: "3-0" },
       {
         type: "completed",
         result: { status: "completed", output: "hello world", artifacts: [] },
+        cursor: "4-0",
       },
     ]);
     expect(JSON.stringify(execution.ref)).not.toContain("token-value");
@@ -146,7 +147,78 @@ describe("OpenClawByFrameworkConnector", () => {
     expect(events).toEqual([
       {
         type: "failed",
+        cursor: "1-0",
         error: { code: "OPENCLAW_ERROR", message: "worker failed", retryable: false },
+      },
+    ]);
+  });
+
+  it("resumes from a persisted Redis cursor without dispatching again", async () => {
+    const xread = vi.fn(async () => [
+      [
+        "stream",
+        [
+          ["8-0", ["data", dataMessage("answerDelta", " resumed", "trace-resume")]],
+          ["9-0", ["data", dataMessage("appStreamResponse", "", "trace-resume")]],
+        ],
+      ],
+    ]);
+    const sendMessage = vi.fn();
+    const connector = new OpenClawByFrameworkConnector({
+      redis: {
+        xread,
+        ping: vi.fn(async () => "PONG"),
+        quit: vi.fn(async () => "OK"),
+        status: "ready",
+      } as never,
+      gatewayClient: {
+        sendMessage,
+        cancelTask: vi.fn(async () => ({
+          success: true,
+          message_id: "delegation-resume",
+          execution_id: "trace-resume",
+          worker_id: "worker-1",
+          status: "CANCEL_REQUESTED",
+          timestamp: Date.now(),
+        })),
+      },
+      readBlockMs: 1,
+    });
+
+    const execution = await connector.resume(
+      {
+        connectorId: connector.id,
+        executionId: "trace-resume",
+        metadata: {
+          childSessionId: "maestro:user-1:session-1:run-1:delegation-resume",
+          messageId: "delegation-resume",
+          traceId: "trace-resume",
+          targetAgentType: "BYCLAW_EXE_user-1",
+        },
+      },
+      { signal: new AbortController().signal, cursor: "7-0" },
+    );
+    const events = [];
+    for await (const event of execution.events) {
+      events.push(event);
+    }
+
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(xread).toHaveBeenCalledWith(
+      "COUNT",
+      50,
+      "BLOCK",
+      1,
+      "STREAMS",
+      expect.any(String),
+      "7-0",
+    );
+    expect(events).toEqual([
+      { type: "output_delta", text: " resumed", cursor: "8-0" },
+      {
+        type: "completed",
+        result: { status: "completed", output: " resumed", artifacts: [] },
+        cursor: "9-0",
       },
     ]);
   });
@@ -154,10 +226,9 @@ describe("OpenClawByFrameworkConnector", () => {
 
 function request(): ConnectorRequest {
   return {
-    tenantId: "tenant-1",
     userCode: "user-1",
     userName: "User",
-    threadId: "thread-1",
+    sessionId: "session-1",
     runId: "run-1",
     delegationId: "delegation-1",
     agent: {

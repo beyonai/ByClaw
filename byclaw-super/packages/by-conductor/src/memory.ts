@@ -1,30 +1,57 @@
 import type {
+  ExecutionCredentialRepository,
+  IngressSessionBindingRepository,
   DelegationRepository,
+  RunExecutionClaim,
+  RunExecutionQueue,
   RunEventStore,
   RunRepository,
-  ThreadRepository,
+  SessionRepository,
 } from "./repositories.js";
-import type { Delegation, Run, RunEvent, Thread } from "./types.js";
+import type { EncryptedExecutionCredential } from "./execution-credentials.js";
+import type {
+  CallerPrincipal,
+  Delegation,
+  Run,
+  RunEvent,
+  Session,
+} from "./types.js";
 
-/** 开发闭环使用的 Thread 内存仓库；所有读写都复制对象，避免调用方意外修改存储。 */
-export class InMemoryThreadRepository implements ThreadRepository {
-  readonly #items = new Map<string, Thread>();
+/** 开发闭环使用的 Session 内存仓库；所有读写都复制对象，避免调用方意外修改存储。 */
+export class InMemorySessionRepository implements SessionRepository {
+  readonly #items = new Map<string, Session>();
 
-  /** 保存 Thread 的结构化副本。 */
-  async save(thread: Thread): Promise<void> {
-    this.#items.set(thread.id, structuredClone(thread));
+  /** 保存 Session 的结构化副本。 */
+  async save(session: Session): Promise<void> {
+    this.#items.set(session.id, structuredClone(session));
   }
 
-  /** 返回 Thread 的结构化副本。 */
-  async get(threadId: string): Promise<Thread | undefined> {
-    const item = this.#items.get(threadId);
+  /** 返回 Session 的结构化副本。 */
+  async get(sessionId: string): Promise<Session | undefined> {
+    const item = this.#items.get(sessionId);
     return item ? structuredClone(item) : undefined;
+  }
+
+  /** owner 不匹配时与不存在使用相同结果。 */
+  async getOwned(
+    sessionId: string,
+    owner: CallerPrincipal,
+  ): Promise<Session | undefined> {
+    const session = await this.get(sessionId);
+    return session?.owner.userCode === owner.userCode ? session : undefined;
+  }
+
+  /** 删除 Session；不存在时保持幂等。 */
+  async delete(sessionId: string): Promise<void> {
+    this.#items.delete(sessionId);
   }
 }
 
 /** 开发闭环使用的 Run 内存仓库。 */
 export class InMemoryRunRepository implements RunRepository {
   readonly #items = new Map<string, Run>();
+
+  constructor(private readonly sessions: SessionRepository) {}
 
   /** 保存 Run 的结构化副本。 */
   async save(run: Run): Promise<void> {
@@ -37,12 +64,24 @@ export class InMemoryRunRepository implements RunRepository {
     return item ? structuredClone(item) : undefined;
   }
 
-  /** 返回某个 Thread 的 Run，并保持创建顺序。 */
-  async listByThread(threadId: string): Promise<Run[]> {
+  /** 返回某个 Session 的 Run，并保持创建顺序。 */
+  async listBySession(sessionId: string): Promise<Run[]> {
     return [...this.#items.values()]
-      .filter((run) => run.threadId === threadId)
+      .filter((run) => run.sessionId === sessionId)
       .sort((a, b) => a.createdAt - b.createdAt)
       .map((run) => structuredClone(run));
+  }
+
+  /** 通过 Session owner 进行关联授权查询。 */
+  async getOwned(
+    runId: string,
+    owner: CallerPrincipal,
+  ): Promise<Run | undefined> {
+    const run = await this.get(runId);
+    if (!run || !(await this.sessions.getOwned(run.sessionId, owner))) {
+      return undefined;
+    }
+    return run;
   }
 }
 
@@ -51,7 +90,7 @@ export class InMemoryDelegationRepository implements DelegationRepository {
   readonly #items = new Map<string, Delegation>();
 
   /** 保存 Delegation 的结构化副本。 */
-  async save(delegation: Delegation): Promise<void> {
+  async save(delegation: Delegation, _claim?: RunExecutionClaim): Promise<void> {
     this.#items.set(delegation.id, structuredClone(delegation));
   }
 
@@ -160,4 +199,142 @@ export class InMemoryRunEventStore implements RunEventStore {
       waiter.finish();
     }
   }
+}
+
+/** 测试与本地开发使用的入站 Session 映射。 */
+export class InMemoryIngressSessionBindingRepository
+implements IngressSessionBindingRepository {
+  readonly #items = new Map<string, string>();
+
+  async get(input: {
+    source: string;
+    userCode: string;
+    externalSessionId: string;
+  }): Promise<string | undefined> {
+    return this.#items.get(bindingKey(input));
+  }
+
+  async bind(input: {
+    source: string;
+    userCode: string;
+    externalSessionId: string;
+    sessionId: string;
+    now: number;
+  }): Promise<void> {
+    this.#items.set(bindingKey(input), input.sessionId);
+  }
+}
+
+/**
+ * 单进程测试队列。它同样执行 Session 级互斥和单调 fencing，
+ * 让 RunService 的测试语义尽量贴近 PostgreSQL 实现。
+ */
+export class InMemoryRunExecutionQueue implements RunExecutionQueue {
+  readonly #queued: Run[] = [];
+  readonly #activeSessions = new Set<string>();
+  readonly #fencing = new Map<string, number>();
+
+  async enqueue(run: Run): Promise<void> {
+    if (!this.#queued.some((candidate) => candidate.id === run.id)) {
+      this.#queued.push(structuredClone(run));
+      this.#queued.sort((left, right) => left.createdAt - right.createdAt);
+    }
+  }
+
+  async claimNext(
+    instanceId: string,
+    leaseMs: number,
+  ): Promise<RunExecutionClaim | undefined> {
+    const index = this.#queued.findIndex(
+      (run) => !this.#activeSessions.has(run.sessionId),
+    );
+    if (index < 0) {
+      return undefined;
+    }
+    const [run] = this.#queued.splice(index, 1);
+    if (!run) {
+      return undefined;
+    }
+    const fencingToken = (this.#fencing.get(run.sessionId) ?? 0) + 1;
+    this.#fencing.set(run.sessionId, fencingToken);
+    this.#activeSessions.add(run.sessionId);
+    return {
+      runId: run.id,
+      sessionId: run.sessionId,
+      ownerInstanceId: instanceId,
+      attemptNo: run.attemptNo + 1,
+      fencingToken,
+      leaseExpiresAt: Date.now() + leaseMs,
+    };
+  }
+
+  async heartbeat(claim: RunExecutionClaim, leaseMs: number): Promise<boolean> {
+    const current = this.#fencing.get(claim.sessionId);
+    if (current !== claim.fencingToken || !this.#activeSessions.has(claim.sessionId)) {
+      return false;
+    }
+    claim.leaseExpiresAt = Date.now() + leaseMs;
+    return true;
+  }
+
+  async release(claim: RunExecutionClaim): Promise<void> {
+    if (this.#fencing.get(claim.sessionId) === claim.fencingToken) {
+      this.#activeSessions.delete(claim.sessionId);
+    }
+  }
+}
+
+/** 仅用于单元测试的密文仓库；不会存储 seal 前的明文。 */
+export class InMemoryExecutionCredentialRepository
+implements ExecutionCredentialRepository {
+  readonly #items = new Map<string, EncryptedExecutionCredential>();
+
+  async save(credential: EncryptedExecutionCredential): Promise<void> {
+    this.#items.set(credential.runId, cloneCredential(credential));
+  }
+
+  async loadForLease(input: {
+    runId: string;
+    instanceId: string;
+    fencingToken: number;
+    now: number;
+  }): Promise<EncryptedExecutionCredential | undefined> {
+    const item = this.#items.get(input.runId);
+    return item && item.expiresAt > input.now ? cloneCredential(item) : undefined;
+  }
+
+  async delete(runId: string): Promise<void> {
+    this.#items.delete(runId);
+  }
+
+  async deleteExpired(now: number): Promise<number> {
+    let deleted = 0;
+    for (const [runId, credential] of this.#items) {
+      if (credential.expiresAt <= now) {
+        this.#items.delete(runId);
+        deleted += 1;
+      }
+    }
+    return deleted;
+  }
+}
+
+function bindingKey(input: {
+  source: string;
+  userCode: string;
+  externalSessionId: string;
+}): string {
+  return JSON.stringify([input.source, input.userCode, input.externalSessionId]);
+}
+
+function cloneCredential(
+  credential: EncryptedExecutionCredential,
+): EncryptedExecutionCredential {
+  return {
+    ...credential,
+    ciphertext: Uint8Array.from(credential.ciphertext),
+    encryptedDataKey: Uint8Array.from(credential.encryptedDataKey),
+    nonce: Uint8Array.from(credential.nonce),
+    authTag: Uint8Array.from(credential.authTag),
+  };
 }

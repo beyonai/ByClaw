@@ -17,7 +17,8 @@
     "types": ["node"],
     "paths": {
       "@byclaw/by-conductor": ["./packages/by-conductor/src/index.ts"],
-      "@byclaw/connector-openclaw-by-framework": ["./packages/connectors/openclaw-by-framework/src/index.ts"]
+      "@byclaw/connector-openclaw-by-framework": ["./packages/connectors/openclaw-by-framework/src/index.ts"],
+      "@byclaw/storage-postgres": ["./packages/storage-postgres/src/index.ts"]
     }
   }
 }

@@ -34,12 +34,18 @@ export interface AgentResult {
   error?: string;
 }
 
-/** 连续对话和 FIFO 调度的边界。 */
-export interface Thread {
-  id: string;
-  tenantId: string;
+/** 从已验证凭证构造的调用者身份，也是 Session 的授权边界。 */
+export interface CallerPrincipal {
   userCode: string;
   userName?: string;
+}
+
+/** 连续对话、Pi 上下文和 FIFO 调度的统一边界。 */
+export interface Session {
+  id: string;
+  owner: CallerPrincipal;
+  /** 已成功提交到长期 Pi 上下文的单调递增版本。 */
+  contextRevision: number;
   createdAt: number;
   updatedAt: number;
 }
@@ -55,13 +61,28 @@ export type RunStatus =
   | "FAILED"
   | "CANCELLED";
 
+export type RunExecutionStage =
+  | "QUEUED"
+  | "LEADER_RUNNING"
+  | "CONNECTOR_WAITING"
+  | "LEADER_SYNTHESIZING"
+  | "SETTLED";
+
 /** 一次用户请求的输入、授权快照和执行状态。 */
 export interface Run {
   id: string;
-  threadId: string;
+  sessionId: string;
   input: string;
   agentList: AgentProfile[];
   status: RunStatus;
+  /** 本次 Run 开始时所依赖的已提交 Pi 上下文版本。 */
+  baseContextRevision: number;
+  /** 每次跨实例接管都会增加，用于区分恢复前后的工作检查点。 */
+  attemptNo: number;
+  executionStage: RunExecutionStage;
+  leaseFencingToken?: number;
+  /** 乐观锁版本；每次状态更新递增。 */
+  version: number;
   finalAnswer?: string;
   error?: string;
   createdAt: number;
@@ -98,6 +119,10 @@ export interface Delegation {
   expectedOutput?: string;
   status: DelegationStatus;
   externalRef?: ExternalExecutionRef;
+  connectorCursor?: string;
+  /** 已确认 cursor 之前的 Connector 输出，供跨实例 resume 后继续聚合。 */
+  partialOutput?: string;
+  version: number;
   result?: AgentResult;
   error?: string;
   createdAt: number;
@@ -108,6 +133,7 @@ export interface Delegation {
 
 export type RunEventType =
   | "run.created"
+  | "run.attempt"
   | "run.status"
   | "leader.delta"
   | "delegation.started"
@@ -122,7 +148,6 @@ export type RunEventType =
 export interface RunEvent {
   eventId: number;
   timestamp: number;
-  threadId: string;
   runId: string;
   type: RunEventType;
   data: Record<string, JsonValue>;

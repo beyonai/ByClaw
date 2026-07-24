@@ -9,7 +9,7 @@ const headers: Record<string, string> = {
   "content-type": "application/json",
   "Beyond-Token": token,
 };
-const runResponse = await fetch(`${baseUrl}/v1/runs`, {
+const runResponse = await fetch(`${baseUrl}/v1/sessions`, {
   method: "POST",
   headers,
   body: JSON.stringify({

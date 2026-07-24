@@ -1,5 +1,10 @@
 import { hostname } from "node:os";
-import type { RunEvent, RunService } from "@byclaw/by-conductor";
+import type {
+  CallerPrincipal,
+  IngressSessionBindingRepository,
+  RunEvent,
+  RunService,
+} from "@byclaw/by-conductor";
 import {
   AgentState,
   AgentTaskResult,
@@ -19,7 +24,10 @@ import type { RunIngressService } from "../run-ingress-service.js";
 
 type RedisClient = ReturnType<typeof createRedis>;
 type WorkerRunService = Pick<RunService, "streamEvents" | "cancelRun">;
-type WorkerRunIngress = Pick<RunIngressService, "createRun">;
+type WorkerRunIngress = Pick<
+  RunIngressService,
+  "createSessionRun" | "createRun" | "resolvePrincipal"
+>;
 
 export interface WorkerLogger {
   info(bindings: Record<string, unknown>, message: string): void;
@@ -34,6 +42,7 @@ export interface ByClawSuperWorkerOptions {
   registry?: WorkerRegistry;
   runService: WorkerRunService;
   runIngress: WorkerRunIngress;
+  sessionBindings?: IngressSessionBindingRepository;
   logger?: WorkerLogger;
 }
 
@@ -46,7 +55,9 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
   readonly #runService: WorkerRunService;
   readonly #runIngress: WorkerRunIngress;
   readonly #logger: WorkerLogger | undefined;
+  readonly #sessionBindings: IngressSessionBindingRepository | undefined;
   readonly #activeRuns = new Map<string, string>();
+  readonly #externalSessionBindings = new Map<string, string>();
 
   /** 注入共享 Redis、业务 Run 入口和日志实现。 */
   constructor(options: ByClawSuperWorkerOptions) {
@@ -56,6 +67,7 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
     this.#runService = options.runService;
     this.#runIngress = options.runIngress;
     this.#logger = options.logger;
+    this.#sessionBindings = options.sessionBindings;
   }
 
   /** 声明当前 Worker 可处理的逻辑 Agent 类型，供 by-framework 注册和路由。 */
@@ -95,11 +107,33 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
 
     await context.checkCancelled();
     this.#logger?.info(commandLogFields(command), "开始处理 by-framework 入站任务");
-    const run = await this.#runIngress.createRun({
-      message,
+    const auth = {
       beyondToken,
       ...(systemCode ? { systemCode } : {}),
-    });
+    };
+    const principal = await this.#runIngress.resolvePrincipal(auth);
+    const bindingKey = externalSessionBindingKey(principal, command.header.sessionId);
+    const sessionId = this.#sessionBindings
+      ? await this.#sessionBindings.get({
+          source: "by-framework",
+          userCode: principal.userCode,
+          externalSessionId: command.header.sessionId,
+        })
+      : this.#externalSessionBindings.get(bindingKey);
+    const run = sessionId
+      ? await this.#runIngress.createRun({ sessionId, message, ...auth })
+      : await this.#runIngress.createSessionRun({ message, ...auth });
+    if (this.#sessionBindings) {
+      await this.#sessionBindings.bind({
+        source: "by-framework",
+        userCode: principal.userCode,
+        externalSessionId: command.header.sessionId,
+        sessionId: run.sessionId,
+        now: Date.now(),
+      });
+    } else {
+      this.#externalSessionBindings.set(bindingKey, run.sessionId);
+    }
     this.#activeRuns.set(command.header.messageId, run.id);
     this.#logger?.info(
       { ...commandLogFields(command), runId: run.id },
@@ -209,6 +243,7 @@ export interface ByFrameworkWorkerRuntimeOptions {
   redis: RedisClient;
   runService: WorkerRunService;
   runIngress: WorkerRunIngress;
+  sessionBindings?: IngressSessionBindingRepository;
   agentType: string;
   workerId?: string;
   maxConcurrency: number;
@@ -241,6 +276,7 @@ export class ByFrameworkWorkerRuntime {
       registry: this.#registry,
       runService: options.runService,
       runIngress: options.runIngress,
+      ...(options.sessionBindings ? { sessionBindings: options.sessionBindings } : {}),
       ...(options.logger ? { logger: options.logger } : {}),
     });
     this.#runner = new WorkerRunner(worker, {
@@ -399,6 +435,11 @@ function progressMessage(event: RunEvent): string {
   if (event.type === "run.created") {
     return "任务已创建";
   }
+  if (event.type === "run.attempt") {
+    return Number(event.data.attemptNo) > 1
+      ? "任务已由其他实例恢复执行"
+      : "任务开始执行";
+  }
   if (event.type === "run.status") {
     return runStatusMessage(stringData(event.data.status));
   }
@@ -454,6 +495,17 @@ function commandLogFields(command: GatewayCommand): Record<string, unknown> {
     traceId: command.header.traceId,
     sourceAgentType: command.header.sourceAgentType,
   };
+}
+
+/** 外部 sessionId 在验签 userCode 内绑定，避免不同用户发生碰撞。 */
+function externalSessionBindingKey(
+  principal: CallerPrincipal,
+  externalSessionId: string,
+): string {
+  return JSON.stringify([
+    principal.userCode,
+    externalSessionId,
+  ]);
 }
 
 /** 判断未知值是否为可安全读取字段的对象。 */

@@ -9,6 +9,7 @@
   "exclude": ["app/test", "app/dist", "dist", "node_modules"],
   "references": [
     { "path": "packages/by-conductor" },
-    { "path": "packages/connectors/openclaw-by-framework" }
+    { "path": "packages/connectors/openclaw-by-framework" },
+    { "path": "packages/storage-postgres" }
   ]
 }

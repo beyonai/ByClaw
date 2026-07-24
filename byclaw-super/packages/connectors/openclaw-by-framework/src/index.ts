@@ -50,7 +50,7 @@ export class OpenClawByFrameworkConnector implements AgentConnector {
     streaming: true,
     cancellation: true,
     artifacts: false,
-    resumable: false,
+    resumable: true,
   };
 
   readonly #redis: RedisClient;
@@ -66,7 +66,7 @@ export class OpenClawByFrameworkConnector implements AgentConnector {
     this.#client =
       options.gatewayClient ?? new GatewayClient(new WorkerRegistry(this.#redis), this.#redis);
     this.#readBlockMs = options.readBlockMs ?? 1_000;
-    this.#sourceAgentType = options.sourceAgentType ?? "BY_MAESTRO";
+    this.#sourceAgentType = options.sourceAgentType ?? "BY_SUPER";
   }
 
   /**
@@ -82,8 +82,8 @@ export class OpenClawByFrameworkConnector implements AgentConnector {
     }
     const childSessionId = [
       "maestro",
-      request.tenantId,
-      request.threadId,
+      request.userCode,
+      request.sessionId,
       request.runId,
       request.delegationId,
     ].join(":");
@@ -113,6 +113,9 @@ export class OpenClawByFrameworkConnector implements AgentConnector {
       requireOnlineWorker: true,
       extraPayload,
       metadata,
+      // 稳定 ID 让外部执行记录可按 Delegation 定位；真正重连仍走 resume，不重复 send。
+      messageId: request.delegationId,
+      traceId: request.delegationId,
     };
     const response = await this.#client.sendMessage(params);
     if (!response.success) {
@@ -155,7 +158,55 @@ export class OpenClawByFrameworkConnector implements AgentConnector {
     };
     return {
       ref,
-      events: this.#readEvents(childSessionId, response.trace_id, context.signal, cancel),
+      events: this.#readEvents(
+        childSessionId,
+        response.trace_id,
+        "0-0",
+        context.signal,
+        cancel,
+      ),
+      cancel,
+    };
+  }
+
+  /** 使用已保存的 child session、message 和 trace 从 cursor 后继续消费。 */
+  async resume(
+    ref: ExternalExecutionRef,
+    context: { signal: AbortSignal; cursor?: string },
+  ): Promise<ConnectorExecution> {
+    if (ref.connectorId !== this.id) {
+      throw new Error(`Cannot resume a different connector: ${ref.connectorId}`);
+    }
+    const childSessionId = refString(ref, "childSessionId");
+    const messageId = refString(ref, "messageId");
+    const traceId = refString(ref, "traceId") || ref.executionId;
+    const targetAgentType = refString(ref, "targetAgentType");
+    if (!childSessionId || !messageId || !traceId || !targetAgentType) {
+      throw new Error("OpenClaw external execution reference is incomplete");
+    }
+    let cancelPromise: Promise<void> | undefined;
+    const cancel = async (reason: string): Promise<void> => {
+      cancelPromise ??= this.#client
+        .cancelTask({
+          messageId,
+          sessionId: childSessionId,
+          targetAgentType,
+          reason,
+          requestedBy: "byclaw-super",
+          cancelMode: "graceful",
+        })
+        .then(() => undefined);
+      await cancelPromise;
+    };
+    return {
+      ref,
+      events: this.#readEvents(
+        childSessionId,
+        traceId,
+        context.cursor ?? "0-0",
+        context.signal,
+        cancel,
+      ),
       cancel,
     };
   }
@@ -190,11 +241,12 @@ export class OpenClawByFrameworkConnector implements AgentConnector {
   async *#readEvents(
     sessionId: string,
     traceId: string,
+    startCursor: string,
     signal: AbortSignal,
     cancel: (reason: string) => Promise<void>,
   ): AsyncIterable<ConnectorEvent> {
     const stream = QueueNames.session_data_stream(sessionId);
-    let cursor = "0-0";
+    let cursor = startCursor;
     let output = "";
     while (!signal.aborted) {
       const rows = await this.#redis.xread(
@@ -216,7 +268,7 @@ export class OpenClawByFrameworkConnector implements AgentConnector {
           const text = extractContent(message.data);
           if (text) {
             output += text;
-            yield { type: "output_delta", text };
+            yield { type: "output_delta", text, cursor };
           }
           continue;
         }
@@ -233,12 +285,13 @@ export class OpenClawByFrameworkConnector implements AgentConnector {
             output,
             artifacts: [],
           };
-          yield { type: "completed", result };
+          yield { type: "completed", result, cursor };
           return;
         }
         if (message.event_type === "error") {
           yield {
             type: "failed",
+            cursor,
             error: {
               code: "OPENCLAW_ERROR",
               message: extractError(message),
@@ -252,6 +305,11 @@ export class OpenClawByFrameworkConnector implements AgentConnector {
     await cancel("connector event stream aborted").catch(() => undefined);
     throw abortError(signal.reason);
   }
+}
+
+function refString(ref: ExternalExecutionRef, key: string): string {
+  const value = ref.metadata?.[key];
+  return typeof value === "string" ? value : "";
 }
 
 /** 从 metadata 中安全读取非空字符串，避免把非字符串凭证传给 by-framework。 */

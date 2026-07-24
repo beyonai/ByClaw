@@ -14,13 +14,13 @@ import { ByClawSuperGatewayWorker } from "../worker/by-framework-worker.js";
 
 describe("ByClawSuperGatewayWorker", () => {
   it("creates a Run and maps its events to by-framework output", async () => {
-    const createRun = vi.fn(async () => run());
+    const createSessionRun = vi.fn(async () => run());
     const cancelRun = vi.fn();
     const emitChunk = vi.fn(async () => undefined);
     const emitState = vi.fn(async () => undefined);
     const logger = loggerMock();
     const worker = createWorker({
-      createRun,
+      createSessionRun,
       cancelRun,
       streamEvents: () => completedEvents(),
       logger,
@@ -32,7 +32,7 @@ describe("ByClawSuperGatewayWorker", () => {
       contextMock({ emitChunk, emitState }),
     );
 
-    expect(createRun).toHaveBeenCalledWith({
+    expect(createSessionRun).toHaveBeenCalledWith({
       message: "请分析数据",
       beyondToken: "secret-token",
       systemCode: "system-1",
@@ -50,9 +50,9 @@ describe("ByClawSuperGatewayWorker", () => {
   });
 
   it("accepts Resume without creating another Run", async () => {
-    const createRun = vi.fn();
+    const createSessionRun = vi.fn();
     const worker = createWorker({
-      createRun,
+      createSessionRun,
       cancelRun: vi.fn(),
       streamEvents: () => completedEvents(),
     });
@@ -64,7 +64,64 @@ describe("ByClawSuperGatewayWorker", () => {
 
     expect(result.status).toBe(AgentState.COMPLETED);
     expect(result.replyData).toBeNull();
-    expect(createRun).not.toHaveBeenCalled();
+    expect(createSessionRun).not.toHaveBeenCalled();
+  });
+
+  it("reuses the internal Session for the same by-framework session", async () => {
+    const createSessionRun = vi.fn(async () => run());
+    const createRun = vi.fn(async () => run());
+    const worker = createWorker({
+      createSessionRun,
+      createRun,
+      cancelRun: vi.fn(),
+      streamEvents: () => completedEvents(),
+    });
+
+    await worker.processCommand(askCommand(), contextMock());
+    await worker.processCommand(askCommand(), contextMock());
+
+    expect(createSessionRun).toHaveBeenCalledWith({
+      message: "请分析数据",
+      beyondToken: "secret-token",
+      systemCode: "system-1",
+    });
+    expect(createRun).toHaveBeenCalledWith({
+      sessionId: "session-1",
+      message: "请分析数据",
+      beyondToken: "secret-token",
+      systemCode: "system-1",
+    });
+  });
+
+  it("isolates identical external session IDs by caller principal", async () => {
+    const createSessionRun = vi.fn(async ({ beyondToken }: { beyondToken: string }) =>
+      beyondToken === "a-token"
+        ? run("QUEUED", "a-run", "a-session")
+        : run("QUEUED", "b-run", "b-session"),
+    );
+    const createRun = vi.fn(async () => run("QUEUED", "a-run-2", "a-session"));
+    const worker = createWorker({
+      createSessionRun,
+      createRun,
+      resolvePrincipal: vi.fn(async ({ beyondToken }: { beyondToken: string }) => ({
+        userCode: beyondToken === "a-token" ? "user-a" : "user-b",
+      })),
+      cancelRun: vi.fn(),
+      streamEvents: () => completedEvents(),
+    });
+
+    await worker.processCommand(askCommand("a-token"), contextMock());
+    await worker.processCommand(askCommand("b-token"), contextMock());
+    await worker.processCommand(askCommand("a-token"), contextMock());
+
+    expect(createSessionRun).toHaveBeenCalledTimes(2);
+    expect(createRun).toHaveBeenCalledOnce();
+    expect(createRun).toHaveBeenCalledWith({
+      sessionId: "a-session",
+      message: "请分析数据",
+      beyondToken: "a-token",
+      systemCode: "system-1",
+    });
   });
 
   it("maps CancelTask to the active internal Run", async () => {
@@ -72,15 +129,15 @@ describe("ByClawSuperGatewayWorker", () => {
     const waitForRelease = new Promise<void>((resolve) => {
       releaseEvents = resolve;
     });
-    const createRun = vi.fn(async () => run());
+    const createSessionRun = vi.fn(async () => run());
     const cancelRun = vi.fn(async () => run("CANCELLED"));
     const worker = createWorker({
-      createRun,
+      createSessionRun,
       cancelRun,
       streamEvents: () => cancelledEvents(waitForRelease),
     });
     const processing = worker.processCommand(askCommand(), contextMock());
-    await vi.waitFor(() => expect(createRun).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(createSessionRun).toHaveBeenCalledOnce());
 
     await worker.onCancelTask(
       new CancelTaskCommand(header(), "message-1", "", "", "caller cancelled"),
@@ -94,13 +151,13 @@ describe("ByClawSuperGatewayWorker", () => {
 
   it("rejects AskAgent without Beyond-Token", async () => {
     const worker = createWorker({
-      createRun: vi.fn(),
+      createSessionRun: vi.fn(),
       cancelRun: vi.fn(),
       streamEvents: () => completedEvents(),
     });
     const command = new AskAgentCommand(
       new MessageHeader("message-1", "session-1", "trace-1", {
-        targetAgentType: "BY_MAESTRO",
+        targetAgentType: "BY_SUPER",
       }),
       "hello",
     );
@@ -113,17 +170,27 @@ describe("ByClawSuperGatewayWorker", () => {
 
 /** 创建隔离 Redis I/O 的 Worker 单元测试实例。 */
 function createWorker(options: {
-  createRun: ReturnType<typeof vi.fn>;
+  createSessionRun: ReturnType<typeof vi.fn>;
+  createRun?: ReturnType<typeof vi.fn>;
+  resolvePrincipal?: ReturnType<typeof vi.fn>;
   cancelRun: ReturnType<typeof vi.fn>;
   streamEvents: () => AsyncIterable<RunEvent>;
   logger?: ReturnType<typeof loggerMock>;
 }): ByClawSuperGatewayWorker {
   return new ByClawSuperGatewayWorker({
     workerId: "worker-1",
-    agentType: "BY_MAESTRO",
+    agentType: "BY_SUPER",
     redis: {} as never,
     registry: {} as WorkerRegistry,
-    runIngress: { createRun: options.createRun },
+    runIngress: {
+      createSessionRun: options.createSessionRun,
+      createRun: options.createRun ?? vi.fn(async () => run()),
+      resolvePrincipal:
+        options.resolvePrincipal ??
+        vi.fn(async () => ({
+          userCode: "user-1",
+        })),
+    },
     runService: {
       cancelRun: options.cancelRun,
       streamEvents: options.streamEvents,
@@ -133,17 +200,17 @@ function createWorker(options: {
 }
 
 /** 构造携带有效 Token 和 systemCode 的 AskAgent 命令。 */
-function askCommand(): AskAgentCommand {
-  return new AskAgentCommand(header(), [{ role: "user", content: { text: "请分析数据" } }]);
+function askCommand(token = "secret-token"): AskAgentCommand {
+  return new AskAgentCommand(header(token), [{ role: "user", content: { text: "请分析数据" } }]);
 }
 
 /** 构造测试命令共用的 by-framework 消息头。 */
-function header(): MessageHeader {
+function header(token = "secret-token"): MessageHeader {
   return new MessageHeader("message-1", "session-1", "trace-1", {
     sourceAgentType: "BY_PARENT",
-    targetAgentType: "BY_MAESTRO",
+    targetAgentType: "BY_SUPER",
     metadata: {
-      "Beyond-Token": "secret-token",
+      "Beyond-Token": token,
       "System-Code": "system-1",
     },
   });
@@ -187,7 +254,6 @@ function event(
   return {
     eventId,
     timestamp: eventId,
-    threadId: "thread-1",
     runId: "run-1",
     type,
     data,
@@ -195,10 +261,14 @@ function event(
 }
 
 /** 构造最小 Run 快照。 */
-function run(status: Run["status"] = "QUEUED"): Run {
+function run(
+  status: Run["status"] = "QUEUED",
+  id = "run-1",
+  sessionId = "session-1",
+): Run {
   return {
-    id: "run-1",
-    threadId: "thread-1",
+    id,
+    sessionId,
     input: "请分析数据",
     agentList: [],
     status,

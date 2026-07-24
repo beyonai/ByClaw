@@ -125,6 +125,9 @@ function progressMessage(event: RunEvent): string {
   if (event.type === "run.created") {
     return "任务已创建";
   }
+  if (event.type === "run.attempt") {
+    return Number(event.data.attemptNo) > 1 ? "任务已由其他实例恢复执行" : "任务开始执行";
+  }
   if (event.type === "run.status") {
     return runStatusMessage(stringData(event.data.status));
   }

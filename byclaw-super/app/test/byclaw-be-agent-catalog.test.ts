@@ -67,12 +67,13 @@ describe("ByClaw BE Agent Catalog", () => {
       "System-Code": "BYAI",
       language: "zh-CN",
     });
-    expect(JSON.parse(String(init?.body))).toMatchObject({
+    expect(JSON.parse(String(init?.body))).toEqual({
       terminals: ["ALL", "PC", "APP"],
       pageNum: 1,
       pageSize: 9_999,
+      keyword: "",
       metaStatus: "ALL",
-      orgFilters: [{ type: "ALL" }],
+      orgFilters: [{ type: "all" }],
       orderField: "updateTime",
       orderBy: "desc",
       language: "zh-CN",

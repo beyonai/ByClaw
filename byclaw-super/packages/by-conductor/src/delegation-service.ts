@@ -1,15 +1,20 @@
 import { randomUUID } from "node:crypto";
 import type { ConnectorExecution, ConnectorRequest } from "./connectors.js";
 import { ConnectorRegistry } from "./connectors.js";
-import type { DelegationRepository, RunEventStore } from "./repositories.js";
+import type {
+  DelegationRepository,
+  RunEventStore,
+  RunExecutionClaim,
+} from "./repositories.js";
 import type {
   AgentProfile,
   AgentResult,
   ArtifactRef,
   Delegation,
   DelegationStatus,
-  Thread,
+  Session,
 } from "./types.js";
+import { TERMINAL_DELEGATION_STATUSES } from "./types.js";
 
 /** 表示 Leader 请求了本次 Run 授权快照之外的 Agent。 */
 export class UnauthorizedAgentError extends Error {
@@ -21,7 +26,7 @@ export class UnauthorizedAgentError extends Error {
 }
 
 export interface ExecuteDelegationInput {
-  thread: Thread;
+  session: Session;
   runId: string;
   agents: AgentProfile[];
   agentId: string;
@@ -29,6 +34,9 @@ export interface ExecuteDelegationInput {
   expectedOutput?: string;
   metadata: Record<string, unknown>;
   signal: AbortSignal;
+  leaseClaim?: RunExecutionClaim;
+  /** SYNTHESIZING 恢复时允许复用本 Run 已完成且参数相同的委派结果。 */
+  reuseCompleted?: boolean;
 }
 
 type ActiveExecution = {
@@ -42,6 +50,7 @@ type ActiveExecution = {
  */
 export class DelegationService {
   readonly #active = new Map<string, Map<string, ActiveExecution>>();
+  readonly #claims = new Map<string, RunExecutionClaim>();
 
   /** 注入 Connector 注册表、持久化 Port 以及可替换的时间和 ID 实现。 */
   constructor(
@@ -64,31 +73,70 @@ export class DelegationService {
     }
 
     const connector = this.connectors.require(agent.execution.connectorId);
-    const delegationId = this.createId();
-    let delegation: Delegation = {
-      id: delegationId,
-      runId: input.runId,
-      agentId: agent.id,
-      connectorId: connector.id,
-      task: input.task,
-      ...(input.expectedOutput ? { expectedOutput: input.expectedOutput } : {}),
-      status: "QUEUED",
-      createdAt: this.now(),
-      updatedAt: this.now(),
-    };
-    await this.delegations.save(delegation);
-    await this.events.append({
-      timestamp: this.now(),
-      threadId: input.thread.id,
-      runId: input.runId,
-      type: "delegation.started",
-      data: {
-        delegationId,
+    const historical = await this.delegations.listByRun(input.runId);
+    if (input.reuseCompleted) {
+      const completed = historical
+        .slice()
+        .reverse()
+        .find(
+          (candidate) =>
+            candidate.status === "COMPLETED" &&
+            candidate.result &&
+            candidate.agentId === agent.id &&
+            candidate.task === input.task &&
+            candidate.expectedOutput === input.expectedOutput,
+        );
+      if (completed?.result) {
+        return structuredClone(completed.result);
+      }
+    }
+    if (input.leaseClaim) {
+      this.#claims.set(input.runId, input.leaseClaim);
+    }
+    const existing = historical
+      .reverse()
+      .find(
+        (candidate) =>
+          !TERMINAL_DELEGATION_STATUSES.has(candidate.status) &&
+          candidate.agentId === agent.id &&
+          candidate.task === input.task &&
+          candidate.expectedOutput === input.expectedOutput,
+      );
+    const delegationId = existing?.id ?? this.createId();
+    const resuming = Boolean(existing?.externalRef);
+    let delegation: Delegation =
+      existing ?? {
+        id: delegationId,
+        runId: input.runId,
         agentId: agent.id,
-        agentName: agent.name,
         connectorId: connector.id,
-      },
-    });
+        task: input.task,
+        ...(input.expectedOutput ? { expectedOutput: input.expectedOutput } : {}),
+        status: "QUEUED",
+        version: 0,
+        createdAt: this.now(),
+        updatedAt: this.now(),
+      };
+    if (!existing) {
+      try {
+        await this.#saveDelegationWithEvent(delegation, {
+          timestamp: this.now(),
+          runId: input.runId,
+          type: "delegation.started",
+          data: {
+            delegationId,
+            agentId: agent.id,
+            agentName: agent.name,
+            connectorId: connector.id,
+          },
+        });
+      } catch (error) {
+        if (this.#claims.get(input.runId) === input.leaseClaim) {
+          this.#claims.delete(input.runId);
+        }
+        throw error;
+      }
+    }
 
     const controller = new AbortController();
     let timedOut = false;
@@ -106,52 +154,80 @@ export class DelegationService {
     }, this.timeoutMs);
 
     try {
-      const request: ConnectorRequest = {
-        tenantId: input.thread.tenantId,
-        userCode: input.thread.userCode,
-        ...(input.thread.userName ? { userName: input.thread.userName } : {}),
-        threadId: input.thread.id,
-        runId: input.runId,
-        delegationId,
-        agent,
-        task: input.task,
-        ...(input.expectedOutput ? { expectedOutput: input.expectedOutput } : {}),
-        metadata: input.metadata,
-      };
-      execution = await connector.start(request, { signal: controller.signal });
+      if (resuming) {
+        if (!connector.resume || !delegation.externalRef) {
+          throw new Error(`Connector does not support persisted resume: ${connector.id}`);
+        }
+        execution = await connector.resume(delegation.externalRef, {
+          signal: controller.signal,
+          ...(delegation.connectorCursor
+            ? { cursor: delegation.connectorCursor }
+            : {}),
+        });
+      } else {
+        const request: ConnectorRequest = {
+          userCode: input.session.owner.userCode,
+          ...(input.session.owner.userName ? { userName: input.session.owner.userName } : {}),
+          sessionId: input.session.id,
+          runId: input.runId,
+          delegationId,
+          agent,
+          task: input.task,
+          ...(input.expectedOutput ? { expectedOutput: input.expectedOutput } : {}),
+          metadata: input.metadata,
+        };
+        execution = await connector.start(request, { signal: controller.signal });
+      }
       if (controller.signal.aborted) {
         await execution.cancel(timedOut ? "delegation timeout" : "run cancelled");
-        return await this.#finishAborted(delegation, input.thread.id, timedOut);
+        return await this.#finishAborted(delegation, timedOut);
       }
 
-      delegation = {
-        ...delegation,
-        status: "RUNNING",
-        externalRef: execution.ref,
-        startedAt: this.now(),
-        updatedAt: this.now(),
-      };
-      await this.delegations.save(delegation);
+      if (!resuming) {
+        delegation = {
+          ...delegation,
+          status: "RUNNING",
+          version: delegation.version + 1,
+          externalRef: execution.ref,
+          startedAt: this.now(),
+          updatedAt: this.now(),
+        };
+        await this.#saveDelegation(delegation);
+      }
       this.#track(input.runId, delegationId, execution);
 
-      let output = "";
+      let output = delegation.partialOutput ?? "";
       const artifacts: ArtifactRef[] = [];
       for await (const event of execution.events) {
         if (controller.signal.aborted) {
-          return await this.#finishAborted(delegation, input.thread.id, timedOut);
+          return await this.#finishAborted(delegation, timedOut);
         }
         if (event.type === "output_delta") {
           output += event.text;
+          delegation = await this.#checkpointProgress(
+            delegation,
+            output,
+            event.cursor,
+          );
           continue;
         }
         if (event.type === "artifact") {
           artifacts.push(event.artifact);
+          delegation = await this.#checkpointProgress(
+            delegation,
+            output,
+            event.cursor,
+          );
           continue;
         }
         if (event.type === "progress") {
-          await this.events.append({
+          delegation = await this.#checkpointProgress(
+            delegation,
+            output,
+            event.cursor,
+          );
+          await this.#appendEvent({
             timestamp: this.now(),
-            threadId: input.thread.id,
             runId: input.runId,
             type: "delegation.progress",
             data: { delegationId, agentId: agent.id, message: event.message },
@@ -159,12 +235,17 @@ export class DelegationService {
           continue;
         }
         if (event.type === "completed") {
+          delegation = await this.#checkpointProgress(
+            delegation,
+            output,
+            event.cursor,
+          );
           const result: AgentResult = {
             ...event.result,
-            output: event.result.output || output,
+            output: output || event.result.output,
             artifacts: event.result.artifacts.length > 0 ? event.result.artifacts : artifacts,
           };
-          await this.#finish(delegation, input.thread.id, "COMPLETED", result);
+          await this.#finish(delegation, "COMPLETED", result);
           return result;
         }
         const result: AgentResult = {
@@ -173,7 +254,7 @@ export class DelegationService {
           artifacts,
           error: event.error.message,
         };
-        await this.#finish(delegation, input.thread.id, "FAILED", result);
+        await this.#finish(delegation, "FAILED", result);
         return result;
       }
 
@@ -183,7 +264,7 @@ export class DelegationService {
         artifacts,
         error: "Connector event stream ended without a terminal event",
       };
-      await this.#finish(delegation, input.thread.id, "FAILED", result);
+      await this.#finish(delegation, "FAILED", result);
       return result;
     } catch (error) {
       if (controller.signal.aborted) {
@@ -195,22 +276,62 @@ export class DelegationService {
             timedOut ? "delegation timeout" : "run cancelled",
           );
         }
-        return await this.#finishAborted(delegation, input.thread.id, timedOut);
+        return await this.#finishAborted(delegation, timedOut);
       }
       const message = error instanceof Error ? error.message : String(error);
+      if (execution) {
+        // externalRef/cursor 无法可靠持久化时停止外部任务，避免留下无人接管的执行。
+        await this.#cancelExecution(
+          input.runId,
+          delegationId,
+          execution,
+          "delegation persistence or stream failed",
+        ).catch(() => undefined);
+      }
+      // 保存 externalRef 或 cursor 失败时，本地 version 可能领先数据库；以真相源版本收敛终态。
+      delegation = (await this.delegations.get(delegationId)) ?? delegation;
+      if (
+        TERMINAL_DELEGATION_STATUSES.has(delegation.status) &&
+        delegation.result
+      ) {
+        return structuredClone(delegation.result);
+      }
       const result: AgentResult = {
         status: "failed",
-        output: "",
+        output: delegation.partialOutput ?? "",
         artifacts: [],
         error: message,
       };
-      await this.#finish(delegation, input.thread.id, "FAILED", result);
+      await this.#finish(delegation, "FAILED", result);
       return result;
     } finally {
       clearTimeout(timeout);
       input.signal.removeEventListener("abort", forwardAbort);
       this.#untrack(input.runId, delegationId);
+      if (this.#claims.get(input.runId) === input.leaseClaim) {
+        this.#claims.delete(input.runId);
+      }
     }
+  }
+
+  /** 每确认一个 Connector cursor 就保存累计输出，resume 后不会重复或丢失前缀。 */
+  async #checkpointProgress(
+    delegation: Delegation,
+    partialOutput: string,
+    cursor: string | undefined,
+  ): Promise<Delegation> {
+    if (!cursor && partialOutput === (delegation.partialOutput ?? "")) {
+      return delegation;
+    }
+    const updated: Delegation = {
+      ...delegation,
+      partialOutput,
+      ...(cursor ? { connectorCursor: cursor } : {}),
+      version: delegation.version + 1,
+      updatedAt: this.now(),
+    };
+    await this.#saveDelegation(updated);
+    return updated;
   }
 
   /** 取消指定 Run 当前所有活动委派；单个取消失败不会阻止其他委派被取消。 */
@@ -262,37 +383,35 @@ export class DelegationService {
   /** 将 AbortSignal 的中止原因转换为取消或超时结果，并统一完成委派。 */
   async #finishAborted(
     delegation: Delegation,
-    threadId: string,
     timedOut: boolean,
   ): Promise<AgentResult> {
     const result: AgentResult = {
       status: timedOut ? "timed_out" : "cancelled",
-      output: "",
+      output: delegation.partialOutput ?? "",
       artifacts: [],
       error: timedOut ? `Delegation timed out after ${this.timeoutMs}ms` : "Delegation cancelled",
     };
-    await this.#finish(delegation, threadId, timedOut ? "TIMED_OUT" : "CANCELLED", result);
+    await this.#finish(delegation, timedOut ? "TIMED_OUT" : "CANCELLED", result);
     return result;
   }
 
   /** 保存委派终态并写入面向上层的简化事件，不暴露 Connector 原始推理内容。 */
   async #finish(
     delegation: Delegation,
-    threadId: string,
     status: DelegationStatus,
     result: AgentResult,
   ): Promise<void> {
-    await this.delegations.save({
+    const finished: Delegation = {
       ...delegation,
       status,
+      version: delegation.version + 1,
       result,
       ...(result.error ? { error: result.error } : {}),
       updatedAt: this.now(),
       finishedAt: this.now(),
-    });
-    await this.events.append({
+    };
+    await this.#saveDelegationWithEvent(finished, {
       timestamp: this.now(),
-      threadId,
       runId: delegation.runId,
       type: status === "COMPLETED" ? "delegation.completed" : "delegation.failed",
       data: {
@@ -302,5 +421,37 @@ export class DelegationService {
         ...(result.error ? { error: result.error } : {}),
       },
     });
+  }
+
+  /** 持久化实现将委派快照与事件放在同一事务，内存实现保持简单回退。 */
+  async #saveDelegationWithEvent(
+    delegation: Delegation,
+    event: Parameters<RunEventStore["append"]>[0],
+  ): Promise<void> {
+    const claim = this.#claims.get(delegation.runId);
+    if (this.delegations.saveWithEvent) {
+      await this.delegations.saveWithEvent(delegation, event, claim);
+      return;
+    }
+    await this.delegations.save(delegation, claim);
+    await this.#appendEvent(event);
+  }
+
+  async #saveDelegation(delegation: Delegation): Promise<void> {
+    await this.delegations.save(
+      delegation,
+      this.#claims.get(delegation.runId),
+    );
+  }
+
+  async #appendEvent(
+    event: Parameters<RunEventStore["append"]>[0],
+  ): Promise<void> {
+    const claim = this.#claims.get(event.runId);
+    if (claim && this.events.appendForClaim) {
+      await this.events.appendForClaim(event, claim);
+      return;
+    }
+    await this.events.append(event);
   }
 }

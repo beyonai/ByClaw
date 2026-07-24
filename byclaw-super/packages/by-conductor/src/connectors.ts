@@ -8,10 +8,9 @@ import type {
 
 /** 编排层传给 Connector 的完整执行上下文；metadata 只在当前 Run 内短暂使用。 */
 export interface ConnectorRequest {
-  tenantId: string;
   userCode: string;
   userName?: string;
-  threadId: string;
+  sessionId: string;
   runId: string;
   delegationId: string;
   agent: AgentProfile;
@@ -37,12 +36,16 @@ export interface ConnectorError {
 }
 
 /** 不同传输实现都必须转换成的标准事件联合类型。 */
-export type ConnectorEvent =
+export type ConnectorEvent = (
   | { type: "progress"; message: string }
   | { type: "output_delta"; text: string }
   | { type: "artifact"; artifact: ArtifactRef }
   | { type: "completed"; result: AgentResult }
-  | { type: "failed"; error: ConnectorError };
+  | { type: "failed"; error: ConnectorError }
+) & {
+  /** Connector 自身可恢复的消费位置；保存后才能确认该事件已被编排层处理。 */
+  cursor?: string;
+};
 
 /** 已启动的外部执行，包括可持久化引用、事件流和取消句柄。 */
 export interface ConnectorExecution {
@@ -68,6 +71,12 @@ export interface AgentConnector {
   start(
     request: ConnectorRequest,
     context: { signal: AbortSignal },
+  ): Promise<ConnectorExecution>;
+
+  /** 从已持久化 externalRef/cursor 重连同一个外部执行，不得再次投递任务。 */
+  resume?(
+    ref: ExternalExecutionRef,
+    context: { signal: AbortSignal; cursor?: string },
   ): Promise<ConnectorExecution>;
 
   /** 检查 Connector 自身依赖是否可用；具体目标 Agent 的在线性仍在投递时校验。 */

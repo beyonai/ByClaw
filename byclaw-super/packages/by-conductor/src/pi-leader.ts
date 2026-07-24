@@ -8,7 +8,16 @@ import {
   SettingsManager,
   type AgentSession,
 } from "@earendil-works/pi-coding-agent";
+import { createHash } from "node:crypto";
+import { mkdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { Type } from "typebox";
+import type { LeaderCheckpointStore } from "./repositories.js";
+import {
+  exportPiSessionCheckpoint,
+  materializePiSessionCheckpoint,
+} from "./pi-session-checkpoint.js";
 import type {
   LeaderRunInput,
   LeaderRunResult,
@@ -30,6 +39,16 @@ export interface PiRuntimeConfig {
   openAiBaseUrl?: string;
   cwd?: string;
   systemPrompt?: string;
+  checkpointStore?: LeaderCheckpointStore;
+  /** 用于隔离同一主机上的多个实例，不会直接拼入文件路径。 */
+  instanceId?: string;
+  /** 实例级缓存根目录；工厂会在下面再创建 instance hash 子目录。 */
+  sessionCacheDirectory?: string;
+  compaction?: {
+    enabled?: boolean;
+    reserveTokens?: number;
+    keepRecentTokens?: number;
+  };
 }
 
 /** 基于 Pi SDK 创建和复用 Leader Session 的工厂。 */
@@ -40,6 +59,13 @@ export class PiLeaderSessionFactory implements LeaderSessionFactory {
     private readonly selectedModel: NonNullable<ReturnType<ModelRuntime["getModel"]>>,
     private readonly cwd: string,
     private readonly systemPrompt: string,
+    private readonly checkpointStore: LeaderCheckpointStore | undefined,
+    private readonly sessionCacheDirectory: string,
+    private readonly compaction: {
+      enabled: boolean;
+      reserveTokens: number;
+      keepRecentTokens: number;
+    },
   ) {}
 
   /**
@@ -87,17 +113,52 @@ export class PiLeaderSessionFactory implements LeaderSessionFactory {
           : "No authenticated Pi model is available",
       );
     }
+    const cacheRoot =
+      config.sessionCacheDirectory ?? join(tmpdir(), "byclaw-super-pi");
+    const instanceCacheDirectory = join(
+      cacheRoot,
+      cacheScope(config.instanceId ?? `process-${process.pid}`),
+    );
+    // JSONL 可由 PostgreSQL重建；启动时清理同一实例上次异常退出留下的运行缓存。
+    await rm(instanceCacheDirectory, { recursive: true, force: true });
+    await mkdir(instanceCacheDirectory, { recursive: true, mode: 0o700 });
     return new PiLeaderSessionFactory(
       runtime,
       selected,
       config.cwd ?? process.cwd(),
       config.systemPrompt ?? LEADER_SYSTEM_PROMPT,
+      config.checkpointStore,
+      instanceCacheDirectory,
+      {
+        enabled: config.compaction?.enabled ?? true,
+        reserveTokens: config.compaction?.reserveTokens ?? 16_384,
+        keepRecentTokens: config.compaction?.keepRecentTokens ?? 20_000,
+      },
     );
   }
 
-  /** 为一个 Thread 创建独立的内存 Pi Session。 */
-  async create(_threadId: string): Promise<LeaderSession> {
-    return PiLeaderSession.create(this.runtime, this.selectedModel, this.cwd, this.systemPrompt);
+  /** 从 PostgreSQL committed checkpoint 恢复；新 Session 使用隔离的本地 JSONL。 */
+  async create(sessionId: string): Promise<LeaderSession> {
+    const directory = join(this.sessionCacheDirectory, sessionId);
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    const stored = await this.checkpointStore?.load(sessionId);
+    const manager = stored
+      ? (
+          await materializePiSessionCheckpoint(stored.checkpoint, {
+            directory,
+            cwdOverride: this.cwd,
+          })
+        ).manager
+      : SessionManager.create(this.cwd, directory, { id: sessionId });
+    return PiLeaderSession.create(
+      this.runtime,
+      this.selectedModel,
+      this.cwd,
+      this.systemPrompt,
+      manager,
+      stored?.revision ?? 0,
+      this.compaction,
+    );
   }
 
   /** 返回已选模型信息；能构造出工厂即代表模型发现与认证已经通过。 */
@@ -109,12 +170,22 @@ export class PiLeaderSessionFactory implements LeaderSessionFactory {
   }
 }
 
+function cacheScope(instanceId: string): string {
+  return createHash("sha256").update(instanceId).digest("hex").slice(0, 24);
+}
+
 /** 对 Pi AgentSession 的最小封装，只向编排层暴露运行、取消和释放能力。 */
 class PiLeaderSession implements LeaderSession {
+  contextRevision: number;
   private activeInput: LeaderRunInput | undefined;
 
   /** 保存已配置完成的 Pi Session。 */
-  private constructor(private readonly session: AgentSession) {}
+  private constructor(
+    private readonly session: AgentSession,
+    contextRevision: number,
+  ) {
+    this.contextRevision = contextRevision;
+  }
 
   /**
    * 构造受限的 Pi Session：关闭扩展、技能和上下文文件，只注册 delegateAgent 工具。
@@ -124,6 +195,13 @@ class PiLeaderSession implements LeaderSession {
     model: NonNullable<ReturnType<ModelRuntime["getModel"]>>,
     cwd: string,
     systemPrompt: string,
+    sessionManager: SessionManager,
+    contextRevision: number,
+    compaction: {
+      enabled: boolean;
+      reserveTokens: number;
+      keepRecentTokens: number;
+    },
   ): Promise<PiLeaderSession> {
     let wrapper: PiLeaderSession | undefined;
     const delegateAgent = defineTool({
@@ -155,7 +233,7 @@ class PiLeaderSession implements LeaderSession {
       },
     });
     const settingsManager = SettingsManager.inMemory({
-      compaction: { enabled: false },
+      compaction,
       retry: { enabled: true, maxRetries: 2 },
     });
     const resourceLoader = new DefaultResourceLoader({
@@ -167,6 +245,28 @@ class PiLeaderSession implements LeaderSession {
       noPromptTemplates: true,
       noThemes: true,
       noContextFiles: true,
+      extensionFactories: [
+        {
+          name: "byclaw-run-context",
+          factory: (pi) => {
+            pi.on("before_agent_start", (event) => {
+              const active = wrapper?.activeInput;
+              if (!active) {
+                return undefined;
+              }
+              const agentContext = active.agents.map((agent) => ({
+                id: agent.id,
+                ...(agent.code ? { code: agent.code } : {}),
+                name: agent.name,
+                ...(agent.description ? { description: agent.description } : {}),
+              }));
+              return {
+                systemPrompt: `${event.systemPrompt}\n\nCurrent authorized agents for this turn only (supersedes earlier lists):\n${JSON.stringify(agentContext)}`,
+              };
+            });
+          },
+        },
+      ],
       systemPromptOverride: () => systemPrompt,
       appendSystemPromptOverride: () => [],
     });
@@ -179,15 +279,15 @@ class PiLeaderSession implements LeaderSession {
       tools: ["delegateAgent"],
       customTools: [delegateAgent],
       resourceLoader,
-      sessionManager: SessionManager.inMemory(cwd),
+      sessionManager,
       settingsManager,
     });
-    wrapper = new PiLeaderSession(created.session);
+    wrapper = new PiLeaderSession(created.session, contextRevision);
     return wrapper;
   }
 
   /**
-   * 在同一个 Thread Session 中执行一次用户请求，并把最终回答及增量输出交给编排层。
+   * 在同一个业务 Session 对应的 Pi 会话中执行一次请求，并把最终回答及增量输出交给编排层。
    * 每次运行都会注入最新授权 Agent 快照，覆盖历史上下文中可能存在的旧列表。
    */
   async run(input: LeaderRunInput): Promise<LeaderRunResult> {
@@ -198,6 +298,7 @@ class PiLeaderSession implements LeaderSession {
     let currentAssistant = "";
     let lastAssistant = "";
     let deltaWrites = Promise.resolve();
+    let checkpointWrites = Promise.resolve();
     // 仅消费可展示的回答文本；Pi 的隐藏推理和工具内部事件不会向外透传。
     const unsubscribe = this.session.subscribe((event) => {
       if (event.type === "message_start" && event.message.role === "assistant") {
@@ -213,6 +314,9 @@ class PiLeaderSession implements LeaderSession {
         if (currentAssistant.trim()) {
           lastAssistant = currentAssistant;
         }
+      } else if (event.type === "entry_appended" && input.onCheckpoint) {
+        const checkpoint = exportPiSessionCheckpoint(this.session.sessionManager);
+        checkpointWrites = checkpointWrites.then(() => input.onCheckpoint?.(checkpoint));
       }
     });
     // 把 Run 的 AbortSignal 转发给 Pi Session。
@@ -225,15 +329,9 @@ class PiLeaderSession implements LeaderSession {
       if (input.signal.aborted) {
         throw input.signal.reason ?? new Error("Run cancelled");
       }
-      const agentContext = input.agents.map((agent) => ({
-        id: agent.id,
-        ...(agent.code ? { code: agent.code } : {}),
-        name: agent.name,
-        ...(agent.description ? { description: agent.description } : {}),
-      }));
-      const prompt = `<runtime_context>\nCurrent authorized agents (this list supersedes earlier lists):\n${JSON.stringify(agentContext)}\n</runtime_context>\n\n<user_request>\n${input.message}\n</user_request>`;
-      await this.session.prompt(prompt, { source: "rpc" });
-      await deltaWrites;
+      // Agent 授权快照通过 before_agent_start 临时注入 system prompt，不进入长期 transcript。
+      await this.session.prompt(input.message, { source: "rpc" });
+      await Promise.all([deltaWrites, checkpointWrites]);
       return { text: lastAssistant || currentAssistant };
     } finally {
       input.signal.removeEventListener("abort", onAbort);
@@ -247,8 +345,31 @@ class PiLeaderSession implements LeaderSession {
     await this.session.abort();
   }
 
+  checkpoint() {
+    if (!this.session.isIdle) {
+      throw new Error("Cannot checkpoint an active Pi Leader session");
+    }
+    return exportPiSessionCheckpoint(this.session.sessionManager);
+  }
+
+  markCommitted(revision: number): void {
+    if (revision !== this.contextRevision + 1) {
+      throw new Error(
+        `Pi Leader revision must advance by one: ${this.contextRevision} -> ${revision}`,
+      );
+    }
+    this.contextRevision = revision;
+  }
+
   /** 释放 Pi Session 持有的订阅和模型资源。 */
-  dispose(): void {
+  async dispose(): Promise<void> {
+    const sessionFile = this.session.sessionFile;
     this.session.dispose();
+    if (sessionFile) {
+      // 每个业务 Session 使用独立 UUID 目录；淘汰时连同 JSONL 一起清除空缓存目录。
+      await rm(dirname(sessionFile), { recursive: true, force: true }).catch(
+        () => undefined,
+      );
+    }
   }
 }

@@ -10,7 +10,7 @@ const DISCOVER_REQUEST = {
   pageSize: 9_999,
   keyword: "",
   metaStatus: "ALL",
-  orgFilters: [{ type: "ALL" }],
+  orgFilters: [{ type: "all" }],
   orderField: "updateTime",
   orderBy: "desc",
   language: "zh-CN",

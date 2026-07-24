@@ -1,18 +1,18 @@
+import { randomUUID } from "node:crypto";
 import {
   ConnectorRegistry,
   DelegationService,
-  InMemoryDelegationRepository,
-  InMemoryRunEventStore,
-  InMemoryRunRepository,
-  InMemoryThreadRepository,
+  EnvelopeExecutionCredentialCipher,
   PiLeaderSessionFactory,
   RunService,
+  type KeyEncryptionService,
   type LeaderSession,
   type LeaderSessionFactory,
   type PiRuntimeConfig,
 } from "@byclaw/by-conductor";
 import { createRedis } from "@byclaw/by-framework";
 import { OpenClawByFrameworkConnector } from "@byclaw/connector-openclaw-by-framework";
+import { PostgresDatabase } from "@byclaw/storage-postgres";
 import type { FastifyInstance } from "fastify";
 import { createBeyondTokenVerifier } from "./auth/beyond-token.js";
 import { ByClawBeAgentCatalog } from "./byclaw-be-agent-catalog.js";
@@ -42,13 +42,13 @@ class LazyPiLeaderFactory implements LeaderSessionFactory {
     );
   }
 
-  /** 使用已经初始化的 Pi 工厂创建 Thread Session；初始化失败时复用原始异常。 */
-  async create(threadId: string): Promise<LeaderSession> {
+  /** 使用已经初始化的 Pi 工厂创建业务 Session 对应的 Pi 会话。 */
+  async create(sessionId: string): Promise<LeaderSession> {
     const initialized = await this.#factory;
     if (initialized.error) {
       throw initialized.error;
     }
-    return initialized.factory.create(threadId);
+    return initialized.factory.create(sessionId);
   }
 
   /** 将 Pi 初始化异常转换为 readiness 可消费的健康状态。 */
@@ -74,16 +74,35 @@ export interface Application {
   close(): Promise<void>;
 }
 
+export interface ApplicationDependencies {
+  /**
+   * 生产必须注入真实 KMS adapter。此依赖不提供“本地密钥”隐式降级，
+   * 防止多实例在配置错误时悄悄失去凭证接管能力。
+   */
+  keyEncryptionService: KeyEncryptionService;
+}
+
 /**
  * 应用 Composition Root：创建 Port 实现、注册 Connector、组装编排服务和 HTTP 层。
  * 具体 Connector 在这里注入，因此 by-conductor 不依赖任何传输实现。
  */
-export async function createApplication(config = loadConfig()): Promise<Application> {
-  // 数据暂时放内存，后续迁到数据库
-  const threadRepository = new InMemoryThreadRepository();
-  const runRepository = new InMemoryRunRepository();
-  const delegationRepository = new InMemoryDelegationRepository();
-  const eventStore = new InMemoryRunEventStore();
+export async function createApplication(
+  config = loadConfig(),
+  dependencies?: ApplicationDependencies,
+): Promise<Application> {
+  if (!dependencies?.keyEncryptionService) {
+    throw new Error(
+      "A production KeyEncryptionService must be injected for KMS envelope encryption",
+    );
+  }
+  const database = new PostgresDatabase(config.database);
+  if (config.database.migrateOnStart) {
+    await database.migrate();
+  }
+  const sessionRepository = database.sessions;
+  const runRepository = database.runs;
+  const delegationRepository = database.delegations;
+  const eventStore = database.events;
   
   // 创建连接器
   const connectors = new ConnectorRegistry();
@@ -97,6 +116,7 @@ export async function createApplication(config = loadConfig()): Promise<Applicat
   });
   connectors.register(openClaw);
 
+  //编排服务
   const delegationService = new DelegationService(
     connectors,
     delegationRepository,
@@ -109,6 +129,11 @@ export async function createApplication(config = loadConfig()): Promise<Applicat
     ...(config.piProvider ? { provider: config.piProvider } : {}),
     ...(config.piModel ? { model: config.piModel } : {}),
     ...(config.openAiBaseUrl ? { openAiBaseUrl: config.openAiBaseUrl } : {}),
+    checkpointStore: database.checkpoints,
+    instanceId: config.instanceId,
+    ...(config.piSessionCacheDirectory
+      ? { sessionCacheDirectory: config.piSessionCacheDirectory }
+      : {}),
   };
 
   //懒加载
@@ -119,17 +144,35 @@ export async function createApplication(config = loadConfig()): Promise<Applicat
     endpointResolver: new RedisByClawBeEndpointResolver(redis),
   });
   const runService = new RunService(
-    threadRepository,
+    sessionRepository,
     runRepository,
     delegationRepository,
     eventStore,
     delegationService,
     leaders,
+    Date.now,
+    randomUUID,
+    {
+      executionQueue: database.queue,
+      checkpoints: database.checkpoints,
+      credentials: database.credentials,
+      credentialCipher: new EnvelopeExecutionCredentialCipher(
+        dependencies.keyEncryptionService,
+      ),
+      instanceId: config.instanceId,
+      leaseMs: config.runLeaseMs,
+      queuePollMs: config.runQueuePollMs,
+      maxConcurrentRuns: config.worker.maxConcurrency,
+      leaderCacheMaxEntries: config.piSessionCacheMaxEntries,
+      leaderCacheIdleTtlMs: config.piSessionCacheIdleTtlMs,
+      credentialCleanupIntervalMs: config.runCredentialCleanupIntervalMs,
+    },
   );
   const runIngress = new RunIngressService(
     runService,
     createBeyondTokenVerifier(config.auth),
     agentCatalog,
+    config.runCredentialMaxTtlMs,
   );
   let workerRuntime: ByFrameworkWorkerRuntime | undefined;
 
@@ -147,6 +190,13 @@ export async function createApplication(config = loadConfig()): Promise<Applicat
         workerRuntime?.health() ??
           Promise.resolve<{ healthy: boolean; message?: string }>({ healthy: true }),
       ]);
+      const schemaHealth = await database.health();
+      const listenerHealth = database.events.listenerHealth();
+      const databaseHealth = {
+        ...schemaHealth,
+        healthy: schemaHealth.healthy && listenerHealth.healthy,
+        listener: listenerHealth,
+      };
       const worker = {
         enabled: config.worker.enabled,
         healthy: workerHealth.healthy,
@@ -157,10 +207,12 @@ export async function createApplication(config = loadConfig()): Promise<Applicat
       };
       return {
         ready:
+          databaseHealth.healthy &&
           pi.healthy &&
           Object.values(connectorHealth).every((health) => health.healthy) &&
           worker.healthy,
         pi,
+        database: databaseHealth,
         connectors: connectorHealth,
         worker,
       };
@@ -172,6 +224,7 @@ export async function createApplication(config = loadConfig()): Promise<Applicat
       redis,
       runService,
       runIngress,
+      sessionBindings: database.bindings,
       agentType: config.worker.agentType,
       ...(config.worker.workerId ? { workerId: config.worker.workerId } : {}),
       maxConcurrency: config.worker.maxConcurrency,
@@ -186,6 +239,14 @@ export async function createApplication(config = loadConfig()): Promise<Applicat
     config,
     /** 先注册 by-framework Worker，再绑定 HTTP 端口，避免就绪窗口接到无法消费的任务。 */
     async start() {
+      await database.start();
+      const databaseHealth = await database.health();
+      if (!databaseHealth.healthy) {
+        throw new Error(
+          databaseHealth.message ?? "PostgreSQL persistence is not ready",
+        );
+      }
+      runService.start();
       await workerRuntime?.start();
       try {
         await app.listen({ host: config.host, port: config.port });
@@ -205,6 +266,7 @@ export async function createApplication(config = loadConfig()): Promise<Applicat
       await app.close();
       await openClaw.close();
       await redis.quit();
+      await database.close();
     },
   };
 }
