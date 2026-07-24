@@ -302,7 +302,7 @@ RUN groupadd --gid 1001 appgroup && \
     useradd --uid 1001 --gid appgroup --create-home --shell /bin/bash appuser && \
     mkdir -p /by/.bycli && \
     chown -R appuser:appgroup /home/appuser /by && \
-    { [ -f /usr/share/novnc/index.html ] && chmod a+w /usr/share/novnc/index.html || true; }
+    { [ -f /usr/share/novnc/index.html ] && chown appuser:appgroup /usr/share/novnc/index.html || true; }
 
 USER appuser
 
