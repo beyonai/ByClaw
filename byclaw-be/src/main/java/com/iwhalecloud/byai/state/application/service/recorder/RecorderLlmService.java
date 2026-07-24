@@ -46,11 +46,16 @@ public class RecorderLlmService {
     }
 
     public String generateJsonObject(String systemPrompt, String userPrompt, int maxTokens) {
+        return generateJsonObjectWithMetadata(systemPrompt, userPrompt, maxTokens).content();
+    }
+
+    public JsonObjectResponse generateJsonObjectWithMetadata(String systemPrompt, String userPrompt, int maxTokens) {
         ResolvedModel resolved = resolveDefaultModel();
         if (!resolved.availability().available()) {
             throw new IllegalStateException("default LLM model is unavailable: " + resolved.availability().reason());
         }
-        return aiService.generateJsonObject(systemPrompt, userPrompt, resolved.model(), maxTokens);
+        AIService.GeneratedText response = aiService.generateJsonObjectWithMetadata(systemPrompt, userPrompt, resolved.model(), maxTokens);
+        return new JsonObjectResponse(response.content(), response.finishReason());
     }
 
     private ResolvedModel resolveDefaultModel() {
@@ -112,6 +117,9 @@ public class RecorderLlmService {
         static Availability unavailable(String reason) {
             return new Availability(false, null, reason);
         }
+    }
+
+    public record JsonObjectResponse(String content, String finishReason) {
     }
 
     private record ResolvedModel(ModelDto model, Availability availability) {

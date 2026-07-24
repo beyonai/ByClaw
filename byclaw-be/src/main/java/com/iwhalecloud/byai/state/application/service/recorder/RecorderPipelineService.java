@@ -22,6 +22,7 @@ public class RecorderPipelineService {
 
     private static final Logger log = LoggerFactory.getLogger(RecorderPipelineService.class);
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+    private static final int LLM_SCORE_MAX_TOKENS = 4000;
     private static final String ACTIVE_VERIFY_TOKEN = "_activeVerifyToken";
     static final int MAX_SOURCE_BYTES = 1024 * 1024;
     private static final String SOURCE_VALIDATION_MESSAGE =
@@ -87,14 +88,15 @@ public class RecorderPipelineService {
         }
         try {
             log.info(
-                "recorder_llm_score phase=calling sessionId={} candidateCount={} approved=true modelCalled=true",
-                session.sessionId(), selected.size()
+                "recorder_llm_score phase=calling sessionId={} candidateCount={} approved=true modelCalled=true maxTokens={}",
+                session.sessionId(), selected.size(), LLM_SCORE_MAX_TOKENS
             );
-            String llmRawJson = recorderLlmService.generateJsonObject(
+            RecorderLlmService.JsonObjectResponse llmResponse = recorderLlmService.generateJsonObjectWithMetadata(
                 "You are a recorder API analyst. Return one JSON object only, with no thinking, Markdown, or executable code.",
                 scorePrompt,
-                1200
+                LLM_SCORE_MAX_TOKENS
             );
+            String llmRawJson = llmResponse.content();
             result.put("llmRawJson", llmRawJson);
             LlmScoreMergeResult merge = mergeLlmScore(llmRawJson, selected);
             result.put("candidates", merge.candidates());
@@ -108,10 +110,10 @@ public class RecorderPipelineService {
             log.info(
                 "recorder_llm_score phase=received sessionId={} candidateCount={} approved=true modelCalled=true "
                     + "responseLength={} jsonParse={} parseErrorType={} mergeApplied={} appliedCandidateCount={} "
-                    + "fallback={} elapsedMs={}",
+                    + "finishReason={} fallback={} elapsedMs={}",
                 session.sessionId(), selected.size(), llmRawJson == null ? 0 : llmRawJson.length(), merge.jsonParse().status(),
                 merge.jsonParse().errorType(), merge.appliedCandidateCount() > 0, merge.appliedCandidateCount(),
-                merge.fallback(), elapsedMillis(startedAtNanos)
+                llmResponse.finishReason(), merge.fallback(), elapsedMillis(startedAtNanos)
             );
         } catch (RuntimeException e) {
             result.put("llmError", "LLM 评分调用失败，已使用本地规则评分。");

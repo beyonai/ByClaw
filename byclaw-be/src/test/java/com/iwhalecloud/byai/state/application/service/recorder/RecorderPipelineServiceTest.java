@@ -4,7 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.iwhalecloud.byai.state.domain.recorder.model.RecorderSession;
@@ -56,12 +58,14 @@ class RecorderPipelineServiceTest {
     void scoreExtractsJsonFromThinkingOutputAndMergesMatchedCandidateSemantics() {
         RecorderLlmService llmService = mock(RecorderLlmService.class);
         when(llmService.availability()).thenReturn(new RecorderLlmService.Availability(true, "test-model", "available"));
-        when(llmService.generateJsonObject(anyString(), anyString(), anyInt())).thenReturn("""
-            <think>Analyse the endpoints first; an invalid example is {not-json}.</think>
-            ```json
-            {"candidates":[{"candidateId":"candidate-1","utilityScore":91,"inferredFunction":"Search articles","paramUnion":[{"name":"query","in":"query","paramRole":"search term","exposeAsArg":"yes"}]}]}
-            ```
-            """);
+        when(llmService.generateJsonObjectWithMetadata(anyString(), anyString(), anyInt())).thenReturn(
+            new RecorderLlmService.JsonObjectResponse("""
+                <think>Analyse the endpoints first; an invalid example is {not-json}.</think>
+                ```json
+                {"candidates":[{"candidateId":"candidate-1","utilityScore":91,"inferredFunction":"Search articles","paramUnion":[{"name":"query","in":"query","paramRole":"search term","exposeAsArg":"yes"}]}]}
+                ```
+                """, "stop")
+        );
         RecorderPipelineService pipeline = new RecorderPipelineService(
             RecorderDraftStoreTestSupport.forFileRoot(tempDir), new CapturingVerifyService(), llmService
         );
@@ -86,6 +90,7 @@ class RecorderPipelineServiceTest {
             .containsEntry("name", "query")
             .containsEntry("exposeAsArg", "yes");
         assertThat(result).containsEntry("llmAppliedCandidateCount", 1).doesNotContainKey("llmError");
+        verify(llmService).generateJsonObjectWithMetadata(anyString(), anyString(), eq(4000));
     }
 
     @Test
