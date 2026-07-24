@@ -42,9 +42,22 @@ function EntryRow({ e }: { e: NetworkEntry }) {
   );
 }
 
+function deduplicateEntries(entries: NetworkEntry[]): NetworkEntry[] {
+  const seen = new Set<string>();
+  return entries.filter((entry) => {
+    const path = entry.pathname || entry.url || '—';
+    const key = `${entry.method}\u0000${entry.host ?? ''}\u0000${path}`;
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+}
+
 /** 单个样本(A/B)的痕迹分组:标题带条数,列表限高滚动。 */
 function SampleBlock({ sample }: { sample: CaptureSample }) {
-  const entries = sample.entries ?? [];
+  const entries = deduplicateEntries(sample.entries ?? []);
   return (
     <div>
       <Text type="secondary" style={{ fontSize: 12 }}>
