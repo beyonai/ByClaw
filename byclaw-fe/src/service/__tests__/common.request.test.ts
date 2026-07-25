@@ -84,9 +84,21 @@ import { logout } from '../user';
 import { GET, globalLogout, POST } from '../common/request';
 
 const mockAxiosCreate = (axios as any).create as jest.Mock;
-const responseErrorInterceptor = mockResponseInterceptorUse.mock.calls[0][1] as (error: unknown) => Promise<never>;
+let responseErrorInterceptor: ((error: unknown) => Promise<never>) | undefined;
+
+function rejectWithResponseInterceptor(error: unknown): Promise<never> {
+  if (!responseErrorInterceptor) throw new Error('Expected Axios response error interceptor to be registered');
+  return responseErrorInterceptor(error);
+}
 
 describe('Service Common Request', () => {
+  beforeAll(() => {
+    const interceptor = mockResponseInterceptorUse.mock.calls[0]?.[1];
+    if (typeof interceptor !== 'function')
+      throw new Error('Expected Axios response error interceptor to be registered');
+    responseErrorInterceptor = interceptor as (error: unknown) => Promise<never>;
+  });
+
   beforeEach(() => {
     jest.clearAllMocks();
   });
@@ -183,12 +195,12 @@ describe('Service Common Request', () => {
       },
     };
 
-    await expect(responseErrorInterceptor(error)).rejects.toBe(error);
+    await expect(rejectWithResponseInterceptor(error)).rejects.toBe(error);
   });
 
   it('continues to stringify HTTP 409 errors without the opt-in', async () => {
     await expect(
-      responseErrorInterceptor({
+      rejectWithResponseInterceptor({
         status: 409,
         config: { url: '/byaiService/other' },
         response: { data: { msg: 'conflict' }, status: 409, statusText: 'Conflict' },
@@ -198,7 +210,7 @@ describe('Service Common Request', () => {
 
   it('continues to stringify opted-in errors outside HTTP 409', async () => {
     await expect(
-      responseErrorInterceptor({
+      rejectWithResponseInterceptor({
         status: 500,
         config: { url: '/byaiService/recorder/save', preserveErrorResponse: true },
         response: { data: { msg: 'server error' }, status: 500, statusText: 'Internal Server Error' },
