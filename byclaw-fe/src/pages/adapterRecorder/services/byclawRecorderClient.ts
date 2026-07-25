@@ -177,13 +177,13 @@ function isRecorderEnvelope(value: unknown): value is RequestEnvelope<unknown> {
   ) {
     return false;
   }
+  if (typeof envelope.error !== 'object' || envelope.error === null || Array.isArray(envelope.error)) return false;
   const error = envelope.error as Record<string, unknown>;
-  return (
-    typeof envelope.error === 'object' &&
-    envelope.error !== null &&
-    isErrorCode(error.code) &&
-    typeof error.message === 'string'
-  );
+  const hasValidHint = !('hint' in error) || typeof error.hint === 'string';
+  const hasValidDetails =
+    !('details' in error) ||
+    (typeof error.details === 'object' && error.details !== null && !Array.isArray(error.details));
+  return isErrorCode(error.code) && typeof error.message === 'string' && hasValidHint && hasValidDetails;
 }
 
 type RawSaveResult = Omit<SaveResult, 'allSucceeded'> & { allSucceeded?: boolean };

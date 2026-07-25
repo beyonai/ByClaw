@@ -417,4 +417,42 @@ describe('adapter recorder client selection', () => {
 
     expect(result.error?.code).toBe('network_error');
   });
+
+  it('maps a rejected envelope with malformed error details to network_error', async () => {
+    (POST as jest.Mock).mockRejectedValueOnce({
+      response: {
+        data: {
+          ok: false,
+          schemaVersion: 'recorder.v1',
+          requestId: 'save_conflict',
+          data: null,
+          error: { code: 'adapter_exists', message: 'x', details: 1 },
+        },
+      },
+    });
+
+    const client = createHttpRecorderClient({ enabled: true, baseUrl: '/byaiService/recorder' });
+    const result = await client.saveAdapter('draft_0', 'edited source');
+
+    expect(result.error?.code).toBe('network_error');
+  });
+
+  it('maps a rejected envelope with malformed error hint to network_error', async () => {
+    (POST as jest.Mock).mockRejectedValueOnce({
+      response: {
+        data: {
+          ok: false,
+          schemaVersion: 'recorder.v1',
+          requestId: 'save_conflict',
+          data: null,
+          error: { code: 'adapter_exists', message: 'x', hint: 1 },
+        },
+      },
+    });
+
+    const client = createHttpRecorderClient({ enabled: true, baseUrl: '/byaiService/recorder' });
+    const result = await client.saveAdapter('draft_0', 'edited source');
+
+    expect(result.error?.code).toBe('network_error');
+  });
 });
