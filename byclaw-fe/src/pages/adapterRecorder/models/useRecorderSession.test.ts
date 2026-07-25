@@ -174,6 +174,19 @@ describe('recorder verify-then-save state', () => {
     );
   });
 
+  it('renders the conflicting adapter path in overwrite confirmation content', () => {
+    const adapterPath = '/by/.bycli/clis/example_com/search.js';
+    const conflictWithPath: RequestEnvelope<SaveResult> = {
+      ...conflict,
+      error: {
+        ...conflict.error!,
+        details: { adapterPath },
+      },
+    };
+
+    expect(formatAdapterOverwriteConfirmationContent(conflictWithPath)).toContain(adapterPath);
+  });
+
   it('retries the exact save operation with overwrite=true only after confirmation', async () => {
     const save = jest.fn().mockResolvedValueOnce(conflict).mockResolvedValueOnce(success);
     const confirm = jest.fn().mockResolvedValue(true);
