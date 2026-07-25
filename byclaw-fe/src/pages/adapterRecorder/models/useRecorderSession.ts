@@ -166,19 +166,23 @@ function isAdapterExists(response: RequestEnvelope<SaveResult>): boolean {
  */
 export async function saveWithOverwriteConfirmation(
   save: (overwrite: boolean) => Promise<RequestEnvelope<SaveResult>>,
-  confirmOverwrite: () => Promise<boolean>
+  confirmOverwrite: (response: RequestEnvelope<SaveResult>) => Promise<boolean>
 ): Promise<OverwriteSaveOutcome> {
   const first = await save(false);
   if (!isAdapterExists(first)) return { response: first, cancelled: false };
-  if (!(await confirmOverwrite())) return { response: first, cancelled: true };
+  if (!(await confirmOverwrite(first))) return { response: first, cancelled: true };
   return { response: await save(true), cancelled: false };
 }
 
-function confirmAdapterOverwrite(): Promise<boolean> {
+function confirmAdapterOverwrite(response: RequestEnvelope<SaveResult>): Promise<boolean> {
+  const adapterPath = response.error?.details?.adapterPath;
+  const conflictPath = typeof adapterPath === 'string' ? adapterPath : undefined;
   return new Promise((resolve) => {
     Modal.confirm({
       title: 'CLI 脚本已存在',
-      content: '是否覆盖当前用户沙箱中同名的 CLI 脚本？',
+      content: conflictPath
+        ? `是否覆盖当前用户沙箱中同名的 CLI 脚本？冲突路径：${conflictPath}`
+        : '是否覆盖当前用户沙箱中同名的 CLI 脚本？',
       okText: '覆盖保存',
       cancelText: '取消',
       onOk: () => resolve(true),
