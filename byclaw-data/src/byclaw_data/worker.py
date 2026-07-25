@@ -2660,11 +2660,18 @@ class DataCloudWorker(GatewayWorker):
                 # 同一个 LangGraph checkpoint，并发写入触发 InvalidUpdateError。
                 # 用 parent_message_id（即上游的 tool_call_id）区分不同子任务调用，
                 # 确保每个子任务有独立的 thread_id 和 checkpoint。
+                # NOTE: parent_message_id == "-1" 表示"无父消息"（顶层用户请求），
+                # 不应拼入 thread_id，否则多轮对话无法复用同一 checkpoint。
                 _tool_call_id = str(
                     getattr(getattr(command, "header", None), "parent_message_id", "")
                     or ""
                 ).strip()
-                if _tool_call_id and not isinstance(command, ResumeCommand):
+                # "-1" 和空字符串均视为无父消息；仅真实 UUID/ID 才拼入 thread_id
+                if (
+                    _tool_call_id
+                    and _tool_call_id != "-1"
+                    and not isinstance(command, ResumeCommand)
+                ):
                     dyn_thread_id = (
                         f"{runtime_agent_key}:{context.session_id}:{_tool_call_id}"
                     )
