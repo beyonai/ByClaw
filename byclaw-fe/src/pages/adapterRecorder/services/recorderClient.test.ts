@@ -359,4 +359,23 @@ describe('adapter recorder client selection', () => {
 
     expect(result.data?.allSucceeded).toBe(false);
   });
+
+  it('preserves an adapter conflict envelope rejected by the HTTP transport', async () => {
+    const conflict = {
+      ok: false,
+      schemaVersion: 'recorder.v1' as const,
+      requestId: 'save_conflict',
+      data: null,
+      error: {
+        code: 'adapter_exists',
+        details: { adapterPath: '/by/.bycli/clis/example_com/search.js' },
+      },
+    };
+    (POST as jest.Mock).mockRejectedValueOnce({ response: { data: conflict } });
+
+    const client = createHttpRecorderClient({ enabled: true, baseUrl: '/byaiService/recorder' });
+    const result = await client.saveAdapter('draft_0', 'edited source');
+
+    expect(result).toEqual(conflict);
+  });
 });

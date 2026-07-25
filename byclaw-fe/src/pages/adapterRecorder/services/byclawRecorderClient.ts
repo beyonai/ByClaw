@@ -118,6 +118,26 @@ function envelopeError(code: ErrorCode, message: string): RequestEnvelope<never>
   return { ok: false, schemaVersion: 'recorder.v1', requestId: '', data: null, error: { code, message } };
 }
 
+function isRecorderEnvelope(value: unknown): value is RequestEnvelope<unknown> {
+  if (typeof value !== 'object' || value === null) return false;
+  const envelope = value as Record<string, unknown>;
+  if (
+    typeof envelope.ok !== 'boolean' ||
+    envelope.schemaVersion !== 'recorder.v1' ||
+    typeof envelope.requestId !== 'string' ||
+    !('data' in envelope) ||
+    !('error' in envelope)
+  ) {
+    return false;
+  }
+  return (
+    envelope.error === null ||
+    (typeof envelope.error === 'object' &&
+      envelope.error !== null &&
+      typeof (envelope.error as Record<string, unknown>).code === 'string')
+  );
+}
+
 type RawSaveResult = Omit<SaveResult, 'allSucceeded'> & { allSucceeded?: boolean };
 
 /** 单存成功没有 allSucceeded；统一补 true，并从首个成功项派生旧 UI 使用的 adapterPath。 */
@@ -178,6 +198,8 @@ export function createHttpRecorderClient(bootstrap: RecorderBootstrap): Recorder
           : await POST<RequestEnvelope<T>>(url, body ?? {}, requestConfig);
       return json;
     } catch (e) {
+      const responseData = (e as { response?: { data?: unknown } } | null)?.response?.data;
+      if (isRecorderEnvelope(responseData)) return responseData as RequestEnvelope<T>;
       return envelopeError('network_error', e instanceof Error ? e.message : '请求失败') as RequestEnvelope<T>;
     }
   }
