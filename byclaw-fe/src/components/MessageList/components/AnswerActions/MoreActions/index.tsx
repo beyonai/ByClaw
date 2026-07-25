@@ -13,29 +13,52 @@ import { useLangfuseConfigStore } from '@/models/common/useLangfuseConfigStore';
 import { getTraceIdByMessageId, qryTroubleshootSession } from '@/service/message';
 import { cacheTroubleshootSession, getCachedTroubleshootSession } from '../../TroubleshootSessionDrawer/sessionCache';
 import useTroubleshootDrawer from '../../TroubleshootSessionDrawer/useTroubleshootDrawer';
+import type { IAgentCache } from '@/typescript/agent';
 
 const traceIdCache = new Map<string, string>();
 const traceIdRequestCache = new Map<string, Promise<string>>();
 const troubleshootSessionRequestCache = new Map<string, Promise<string>>();
 
-const getMessageAgentType = (msg: IMessage) => {
+const getMessageAgentType = (msg: IMessage, employeesList: IAgentCache[] = [], agentList: IAgentCache[] = []) => {
+  let metadata: Record<string, unknown> = {};
+
   try {
-    const metadata = msg.metadata ? JSON.parse(msg.metadata) : {};
-    if (metadata?.agentType) return `${metadata.agentType}`;
+    metadata = msg.metadata ? JSON.parse(msg.metadata) : {};
   } catch {
     // ignore invalid metadata
   }
 
-  return msg.agentType ? `${msg.agentType}` : '';
+  const metadataAgentType = metadata?.agentType;
+  const messageAgentType = msg.agentType;
+  const agentType = metadataAgentType ?? messageAgentType;
+  const shouldResolveFromEmployeeList = agentType === null || `${agentType}` === '' || `${agentType}` === '0';
+
+  if (!shouldResolveFromEmployeeList) {
+    return `${agentType}`;
+  }
+
+  const agentId = metadata?.agentId || metadata?.resourceId || msg.agentId;
+  if (!agentId) {
+    return agentType === null ? '' : `${agentType}`;
+  }
+
+  const employee = [...agentList, ...employeesList].find((item) =>
+    [item.agentId, item.id, item.resourceId, item.resourceCode].some((value) => `${value}` === `${agentId}`)
+  );
+  const resolvedAgentType = employee?.agentType;
+
+  return resolvedAgentType === null ? (agentType === null ? '' : `${agentType}`) : `${resolvedAgentType}`;
 };
 
 function MoreActions(porps: {
   deleteMessage: (message: IMessage) => void;
   msg: IMessage;
+  employeesList?: IAgentCache[];
+  agentList?: IAgentCache[];
   disabledList?: string[];
   showTroubleshoot?: boolean;
 }) {
-  const { deleteMessage, msg, disabledList, showTroubleshoot = false } = porps;
+  const { deleteMessage, msg, employeesList = [], agentList = [], disabledList, showTroubleshoot = false } = porps;
   const { messageId, traceId } = msg;
   const [troubleshootActionLoading, setTroubleshootActionLoading] = React.useState(false);
   const [traceDrawerOpen, setTraceDrawerOpen] = React.useState(false);
@@ -165,7 +188,8 @@ function MoreActions(porps: {
   }, [getLatestTraceId, messageId, openTroubleshootDrawer, syncTroubleshootSessionCache, traceId]);
 
   const canDelete = messageId && !disabledList?.includes('delete');
-  const canShowTroubleshoot = showTroubleshoot && (getMessageAgentType(msg) === agentTypeMap.askAgent || !getMessageAgentType(msg));
+  const messageAgentType = getMessageAgentType(msg, employeesList, agentList);
+  const canShowTroubleshoot = showTroubleshoot && messageAgentType === agentTypeMap.askAgent;
   const canShowTrace = langfuseEnabled && !disabledList?.includes('trace');
 
   const handleOpenTraceDrawer = React.useCallback(() => {
