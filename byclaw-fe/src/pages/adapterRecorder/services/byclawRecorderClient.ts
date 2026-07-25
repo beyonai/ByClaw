@@ -131,10 +131,10 @@ function isRecorderEnvelope(value: unknown): value is RequestEnvelope<unknown> {
     return false;
   }
   return (
-    envelope.error === null ||
-    (typeof envelope.error === 'object' &&
-      envelope.error !== null &&
-      typeof (envelope.error as Record<string, unknown>).code === 'string')
+    typeof envelope.error === 'object' &&
+    envelope.error !== null &&
+    typeof (envelope.error as Record<string, unknown>).code === 'string' &&
+    typeof (envelope.error as Record<string, unknown>).message === 'string'
   );
 }
 

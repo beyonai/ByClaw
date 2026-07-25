@@ -368,6 +368,7 @@ describe('adapter recorder client selection', () => {
       data: null,
       error: {
         code: 'adapter_exists',
+        message: 'An adapter already exists at this path.',
         details: { adapterPath: '/by/.bycli/clis/example_com/search.js' },
       },
     };
@@ -377,5 +378,24 @@ describe('adapter recorder client selection', () => {
     const result = await client.saveAdapter('draft_0', 'edited source');
 
     expect(result).toEqual(conflict);
+  });
+
+  it('maps a rejected envelope without an error message to network_error', async () => {
+    (POST as jest.Mock).mockRejectedValueOnce({
+      response: {
+        data: {
+          ok: false,
+          schemaVersion: 'recorder.v1',
+          requestId: 'save_conflict',
+          data: null,
+          error: { code: 'adapter_exists' },
+        },
+      },
+    });
+
+    const client = createHttpRecorderClient({ enabled: true, baseUrl: '/byaiService/recorder' });
+    const result = await client.saveAdapter('draft_0', 'edited source');
+
+    expect(result.error?.code).toBe('network_error');
   });
 });
