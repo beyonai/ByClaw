@@ -196,6 +196,16 @@ describe('Service Common Request', () => {
     ).rejects.toBe('conflict');
   });
 
+  it('continues to stringify opted-in errors outside HTTP 409', async () => {
+    await expect(
+      responseErrorInterceptor({
+        status: 500,
+        config: { url: '/byaiService/recorder/save', preserveErrorResponse: true },
+        response: { data: { msg: 'server error' }, status: 500, statusText: 'Internal Server Error' },
+      })
+    ).rejects.toBe('server error');
+  });
+
   it('redirects to login when login count exceeds the limit', async () => {
     mockRequest.mockResolvedValue({
       data: {

@@ -443,6 +443,7 @@ describe('adapter recorder client selection', () => {
   it('maps a rejected envelope without an error message to network_error', async () => {
     (POST as jest.Mock).mockRejectedValueOnce({
       response: {
+        status: 409,
         data: {
           ok: false,
           schemaVersion: 'recorder.v1',
@@ -462,6 +463,7 @@ describe('adapter recorder client selection', () => {
   it('maps a rejected envelope with an unknown error code to network_error', async () => {
     (POST as jest.Mock).mockRejectedValueOnce({
       response: {
+        status: 409,
         data: {
           ok: false,
           schemaVersion: 'recorder.v1',
@@ -481,6 +483,7 @@ describe('adapter recorder client selection', () => {
   it('maps a rejected envelope with malformed error details to network_error', async () => {
     (POST as jest.Mock).mockRejectedValueOnce({
       response: {
+        status: 409,
         data: {
           ok: false,
           schemaVersion: 'recorder.v1',
@@ -500,6 +503,7 @@ describe('adapter recorder client selection', () => {
   it('maps a rejected envelope with malformed error hint to network_error', async () => {
     (POST as jest.Mock).mockRejectedValueOnce({
       response: {
+        status: 409,
         data: {
           ok: false,
           schemaVersion: 'recorder.v1',
