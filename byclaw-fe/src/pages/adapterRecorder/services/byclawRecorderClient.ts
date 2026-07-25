@@ -108,6 +108,49 @@ let seq = 0;
 const clientRequestId = () => `cli_${Date.now().toString(36)}_${(++seq).toString(36)}`;
 export const DEFAULT_RECORDER_API_ROOT = '/byaiService/recorder';
 
+const RECORDER_ERROR_CODES = new Set<ErrorCode>([
+  'validation_failed',
+  'invalid_state',
+  'csrf_failed',
+  'auth_failed',
+  'auth_required',
+  'authentication_required',
+  'responsible_use_required',
+  'network_error',
+  'insufficient_samples',
+  'daemon_unavailable',
+  'daemon_timeout',
+  'daemon_protocol_error',
+  'extension_disconnected',
+  'profile_busy',
+  'queue_full',
+  'page_lost',
+  'navigation_url_forbidden',
+  'navigation_redirect_requires_interception',
+  'dns_resolution_failed',
+  'request_not_found',
+  'session_not_found',
+  'idempotency_conflict',
+  'temp_store_full',
+  'verify_timeout',
+  'pipeline_timeout',
+  'analyze_timeout',
+  'adapter_runtime_error',
+  'runner_protocol_error',
+  'shape_mismatch',
+  'fixture_mismatch',
+  'output_truncated',
+  'feature_disabled',
+  'ambiguous_iframe_target',
+  'config_invalid',
+  'verification_required',
+  'source_changed_after_verify',
+  'save_adapter_disabled',
+  'adapter_exists',
+  'bycli_storage_unavailable',
+  'resource_save_failed',
+]);
+
 export function buildRecorderEndpoint(apiRoot: string | undefined, path: string): string {
   const root = (apiRoot || DEFAULT_RECORDER_API_ROOT).replace(/\/$/, '');
   const endpoint = path.startsWith('/recorder/') ? path.slice('/recorder'.length) : path;
@@ -116,6 +159,10 @@ export function buildRecorderEndpoint(apiRoot: string | undefined, path: string)
 
 function envelopeError(code: ErrorCode, message: string): RequestEnvelope<never> {
   return { ok: false, schemaVersion: 'recorder.v1', requestId: '', data: null, error: { code, message } };
+}
+
+function isErrorCode(value: unknown): value is ErrorCode {
+  return typeof value === 'string' && RECORDER_ERROR_CODES.has(value as ErrorCode);
 }
 
 function isRecorderEnvelope(value: unknown): value is RequestEnvelope<unknown> {
@@ -130,11 +177,12 @@ function isRecorderEnvelope(value: unknown): value is RequestEnvelope<unknown> {
   ) {
     return false;
   }
+  const error = envelope.error as Record<string, unknown>;
   return (
     typeof envelope.error === 'object' &&
     envelope.error !== null &&
-    typeof (envelope.error as Record<string, unknown>).code === 'string' &&
-    typeof (envelope.error as Record<string, unknown>).message === 'string'
+    isErrorCode(error.code) &&
+    typeof error.message === 'string'
   );
 }
 
