@@ -165,7 +165,7 @@ function MoreActions(porps: {
   }, [getLatestTraceId, messageId, openTroubleshootDrawer, syncTroubleshootSessionCache, traceId]);
 
   const canDelete = messageId && !disabledList?.includes('delete');
-  const canShowTroubleshoot = showTroubleshoot && getMessageAgentType(msg) === agentTypeMap.askAgent;
+  const canShowTroubleshoot = showTroubleshoot && (getMessageAgentType(msg) === agentTypeMap.askAgent || !getMessageAgentType(msg));
   const canShowTrace = langfuseEnabled && !disabledList?.includes('trace');
 
   const handleOpenTraceDrawer = React.useCallback(() => {
