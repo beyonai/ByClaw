@@ -35,7 +35,7 @@ function MoreActions(porps: {
   disabledList?: string[];
   showTroubleshoot?: boolean;
 }) {
-  const { deleteMessage, msg, disabledList, showTroubleshoot = true } = porps;
+  const { deleteMessage, msg, disabledList, showTroubleshoot = false } = porps;
   const { messageId, traceId } = msg;
   const [troubleshootActionLoading, setTroubleshootActionLoading] = React.useState(false);
   const [traceDrawerOpen, setTraceDrawerOpen] = React.useState(false);
