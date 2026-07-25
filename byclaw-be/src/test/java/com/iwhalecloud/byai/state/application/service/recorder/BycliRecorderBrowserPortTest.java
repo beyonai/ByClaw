@@ -194,6 +194,26 @@ class BycliRecorderBrowserPortTest {
     }
 
     @Test
+    void captureReadRedactsResponseValuesBeforeKeepingSamples() throws Exception {
+        daemon = FakeDaemon.start();
+        List<Map<String, Object>> entries = List.of(Map.of(
+            "requestId", "net-1",
+            "method", "GET",
+            "url", "https://api.example.test/search?q=alpha",
+            "responseBody", "{\"data\":{\"items\":[{\"title\":\"private-title\",\"id\":7}]}}"
+        ));
+        daemon.enqueueJson(200, Map.of("ok", true, "data", Map.of("entries", entries)));
+        RecorderSession session = new RecorderSession("session-1", new RecorderOwner(1L, "alice"));
+        session.targetId("page-real-1");
+
+        Map<String, Object> result = port().captureRead(session, "A", "alpha");
+
+        assertThat(session.samples().get("A").toString()).doesNotContain("private-title", "7");
+        assertThat(result.toString()).doesNotContain("private-title", "7");
+        assertThat(session.samples().get("A").getFirst().get("responseBody")).isNotNull();
+    }
+
+    @Test
     void daemonFailuresMapToRecorderBrowserExceptionCodes() throws Exception {
         daemon = FakeDaemon.start();
         daemon.enqueueJson(200, Map.of(

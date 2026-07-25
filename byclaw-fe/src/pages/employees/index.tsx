@@ -362,7 +362,7 @@ const Employees = () => {
               <ChatLayoutComp
                 sessionId={sessionId || ''}
                 getContainer={() => document.getElementById('employees_wrapper')}
-                agentType={agentTypeMap.agent}
+                agentType={agentInfo?.agentType || agentTypeMap.agent}
                 queryInputProps={{
                   placeholder: '',
                 }}

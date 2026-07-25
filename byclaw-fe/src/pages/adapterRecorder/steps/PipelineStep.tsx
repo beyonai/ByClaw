@@ -21,7 +21,6 @@ interface Props {
   seedB?: string;
   sampleA?: CaptureSample;
   sampleB?: CaptureSample;
-  rankScorePrompt?: string;
   generatePrompt?: string;
   llmRawJson?: string;
   llmError?: string;
@@ -92,7 +91,6 @@ export default function PipelineStep(props: Props) {
       seedB={props.seedB}
       sampleA={props.sampleA}
       sampleB={props.sampleB}
-      rankScorePrompt={props.rankScorePrompt}
       llmRawJson={props.llmRawJson}
       llmError={props.llmError}
       onRunScore={props.onRunScore}

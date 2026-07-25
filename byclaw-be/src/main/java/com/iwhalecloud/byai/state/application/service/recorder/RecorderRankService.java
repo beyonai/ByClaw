@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.state.application.service.recorder;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.state.domain.recorder.model.RecorderSession;
 import java.net.URI;
 import java.util.ArrayList;
@@ -13,6 +15,11 @@ import org.springframework.stereotype.Component;
 
 @Component
 public class RecorderRankService {
+
+    private static final int MAX_RESPONSE_SAMPLE_BYTES = 64 * 1024;
+    private static final int MAX_COLUMNS = 12;
+
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     public List<Map<String, Object>> rank(RecorderSession session) {
         Map<String, Aggregate> aggregates = new LinkedHashMap<>();
@@ -48,6 +55,7 @@ public class RecorderRankService {
         String host = uri.getHost();
         Map<String, String> query = aggregate.query();
         String id = "cand_" + sanitize(host + aggregate.path().replace('/', '_'));
+        ResponseShape responseShape = responseShape(aggregate.responseSample());
 
         Map<String, Object> endpoint = new LinkedHashMap<>();
         endpoint.put("method", aggregate.method());
@@ -62,7 +70,8 @@ public class RecorderRankService {
                 "argName", name,
                 "in", "query",
                 "paramName", name,
-                "valueType", "string"
+                "valueType", "string",
+                "defaultValue", query.get(name)
             ))
             .toList();
 
@@ -73,9 +82,13 @@ public class RecorderRankService {
         candidate.put("confidence", aggregate.score() >= 85 ? "high" : aggregate.score() >= 70 ? "medium" : "low");
         candidate.put("reviewRequired", aggregate.score() < 70);
         candidate.put("args", args);
-        candidate.put("columns", List.of(Map.of("name", "title", "path", "$.items[].title", "type", "string")));
+        candidate.put("columns", responseShape.columns().isEmpty()
+            ? List.of(Map.of("name", "value", "path", "$[]", "type", "json"))
+            : responseShape.columns());
+        if (responseShape.rowPath() != null) {
+            endpoint.put("rowPath", responseShape.rowPath());
+        }
         candidate.put("scoreExplanation", scoreExplanation(aggregate));
-        candidate.put("risks", List.of("Java recorder ranker uses deterministic capture heuristics; semantic LLM scoring is delegated to pipeline."));
         candidate.put("mergedRequestIds", aggregate.requestIds());
         return candidate;
     }
@@ -155,6 +168,84 @@ public class RecorderRankService {
         return value.replaceAll("[^A-Za-z0-9]+", "_").replaceAll("^_+|_+$", "").toLowerCase();
     }
 
+    private ResponseShape responseShape(Object rawResponse) {
+        Object response = parsedResponse(rawResponse);
+        RowArray rowArray = firstRowArray(response, "$");
+        if (rowArray == null || rowArray.rows().isEmpty() || !(rowArray.rows().getFirst() instanceof Map<?, ?> rawRow)) {
+            return new ResponseShape(null, List.of());
+        }
+        List<Map<String, Object>> columns = new ArrayList<>();
+        for (Map.Entry<?, ?> entry : rawRow.entrySet()) {
+            if (!(entry.getKey() instanceof String name) || !scalar(entry.getValue())) {
+                continue;
+            }
+            columns.add(Map.of(
+                "name", name,
+                "path", rowArray.path() + "." + name,
+                "type", columnType(entry.getValue())
+            ));
+            if (columns.size() == MAX_COLUMNS) {
+                break;
+            }
+        }
+        return new ResponseShape(rowArray.path(), columns);
+    }
+
+    private Object parsedResponse(Object rawResponse) {
+        if (rawResponse instanceof Map<?, ?> || rawResponse instanceof List<?>) {
+            return rawResponse;
+        }
+        if (!(rawResponse instanceof String text)
+            || text.isBlank()
+            || text.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > MAX_RESPONSE_SAMPLE_BYTES) {
+            return null;
+        }
+        try {
+            return objectMapper.readValue(text, Object.class);
+        } catch (JsonProcessingException ignored) {
+            return null;
+        }
+    }
+
+    private RowArray firstRowArray(Object value, String path) {
+        if (value instanceof List<?> rows) {
+            return new RowArray(path + "[]", rows);
+        }
+        if (!(value instanceof Map<?, ?> map)) {
+            return null;
+        }
+        for (Map.Entry<?, ?> entry : map.entrySet()) {
+            if (!(entry.getKey() instanceof String name)) {
+                continue;
+            }
+            RowArray rows = firstRowArray(entry.getValue(), path + "." + name);
+            if (rows != null && !rows.rows().isEmpty()) {
+                return rows;
+            }
+        }
+        return null;
+    }
+
+    private boolean scalar(Object value) {
+        return value == null || value instanceof String || value instanceof Number || value instanceof Boolean;
+    }
+
+    private String columnType(Object value) {
+        if (value instanceof Boolean) {
+            return "boolean";
+        }
+        if (value instanceof Number) {
+            return "number";
+        }
+        return "string";
+    }
+
+    private record ResponseShape(String rowPath, List<Map<String, Object>> columns) {
+    }
+
+    private record RowArray(String path, List<?> rows) {
+    }
+
     private static final class Aggregate {
         private static final Set<String> SEARCH_PARAMETERS = Set.of("query", "q", "keyword", "keywords", "search");
 
@@ -166,6 +257,7 @@ public class RecorderRankService {
         private final Map<String, Set<String>> queryValues = new LinkedHashMap<>();
         private final Set<String> samples = new LinkedHashSet<>();
         private final List<String> requestIds = new ArrayList<>();
+        private Object responseSample;
 
         private Aggregate(String key, String method, URI uri, String path) {
             this.key = key;
@@ -182,6 +274,9 @@ public class RecorderRankService {
             });
             if (entry.get("requestId") instanceof String requestId && !requestId.isBlank()) {
                 requestIds.add(requestId);
+            }
+            if (responseSample == null) {
+                responseSample = entry.get("responseBody");
             }
         }
 
@@ -209,5 +304,6 @@ public class RecorderRankService {
         private Map<String, String> query() { return query; }
         private Set<String> samples() { return samples; }
         private List<String> requestIds() { return requestIds; }
+        private Object responseSample() { return responseSample; }
     }
 }

@@ -236,15 +236,15 @@ public class DevloopApplicationService {
      */
     private String requireSourceCreator(Long sourceId) {
         if (sourceId == null) {
-            return "参数缺失";
+            return I18nUtil.get("devloop.source.parameter.required");
         }
         ScanSource source = scanSourceService.findById(sourceId);
         if (source == null) {
-            return "来源不存在";
+            return I18nUtil.get("devloop.source.not.found");
         }
         Long currentUserId = CurrentUserHolder.getCurrentUserId();
         if (currentUserId == null || !String.valueOf(currentUserId).equals(source.getCreateBy())) {
-            return "只有来源创建者可以操作";
+            return I18nUtil.get("devloop.source.creator.required");
         }
         return null;
     }
@@ -302,7 +302,7 @@ public class DevloopApplicationService {
     public ResponseUtil<Map<String, Object>> triggerScan(Long sourceId) {
         ScanSource source = scanSourceService.findById(sourceId);
         if (source == null) {
-            return ResponseUtil.failRes("Source not found");
+            return ResponseUtil.failRes(I18nUtil.get("devloop.source.not.found"));
         }
 
         List<ScanLogItem> items;
@@ -310,24 +310,24 @@ public class DevloopApplicationService {
         if ("github_issue".equals(type)) {
             String pat = patService.getGitHubPat(source.getCreateBy());
             if (pat == null) {
-                return ResponseUtil.failRes("GitHub PAT not configured");
+                return ResponseUtil.failRes(I18nUtil.get("devloop.github.pat.not.configured"));
             }
             items = gitHubIssueScanService.scan(source, pat);
         }
         else if ("dingtalk".equals(type)) {
             items = dingtalkScanService.scan(source);
             if (items == null) {
-                return ResponseUtil.failRes("钉钉扫描失败，请检查：1) DWS是否已授权 2) 当前组织是否有消息搜索权限 3) 查看扫描日志获取详细错误");
+                return ResponseUtil.failRes(I18nUtil.get("devloop.dingtalk.scan.failed"));
             }
         }
         else if ("dingtalk_todo".equals(type)) {
             items = dingtalkTodoScanService.scan(source);
             if (items == null) {
-                return ResponseUtil.failRes("钉钉待办扫描失败，请检查：1) DWS是否已授权 2) 当前组织待办访问权限 3) 查看扫描日志获取详细错误");
+                return ResponseUtil.failRes(I18nUtil.get("devloop.dingtalk.todo.scan.failed"));
             }
         }
         else {
-            return ResponseUtil.failRes("Unknown source type: " + type);
+            return ResponseUtil.failRes(I18nUtil.get("devloop.source.type.unsupported", type));
         }
 
         // 一次 LLM 调用完成拆分+评分，返回派发列表（子需求+未拆分条），再按确认规则派生
@@ -807,7 +807,7 @@ public class DevloopApplicationService {
             boolean finished = process.waitFor(30, java.util.concurrent.TimeUnit.SECONDS);
             if (!finished) {
                 process.destroyForcibly();
-                return ResponseUtil.failRes("搜索超时");
+                return ResponseUtil.failRes(I18nUtil.get("devloop.dingtalk.search.timeout"));
             }
 
             var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
@@ -824,7 +824,7 @@ public class DevloopApplicationService {
         }
         catch (Exception e) {
             log.error("DingTalk group search failed", e);
-            return ResponseUtil.failRes("搜索失败: " + e.getMessage());
+            return ResponseUtil.failRes(I18nUtil.get("devloop.dingtalk.search.failed", e.getMessage()));
         }
         return ResponseUtil.successResponse(groups);
     }
@@ -854,17 +854,17 @@ public class DevloopApplicationService {
         if (sourceItemId != null) {
             ScanLogItem existing = scanLogItemMapper.selectById(sourceItemId);
             if (existing != null && existing.getSessionId() != null) {
-                return ResponseUtil.failRes("该需求已启动会话，无法重复启动");
+                return ResponseUtil.failRes(I18nUtil.get("devloop.task.requirement.already.started"));
             }
         }
 
         // 校验用户是否绑定了数字员工
         ProjectMember member = projectMemberService.findByProjectAndUser(projectId, userId);
         if (member == null) {
-            return ResponseUtil.failRes("您不是该项目成员，无法创建任务");
+            return ResponseUtil.failRes(I18nUtil.get("devloop.task.project.member.required"));
         }
         if (member.getAgentId() == null) {
-            return ResponseUtil.failRes("请先在成员管理中绑定数字员工");
+            return ResponseUtil.failRes(I18nUtil.get("devloop.task.agent.required"));
         }
         Long agentId = member.getAgentId();
 
@@ -874,7 +874,7 @@ public class DevloopApplicationService {
                 title = item.getTitle();
         }
         if (title == null || title.isEmpty()) {
-            return ResponseUtil.failRes("任务标题不能为空");
+            return ResponseUtil.failRes(I18nUtil.get("devloop.task.title.required"));
         }
 
         // 将手工需求 JSON 按当前执行上下文的语言渲染后，再写入异步 LLM 提示词。
@@ -888,7 +888,7 @@ public class DevloopApplicationService {
         // 手工需求优先使用其 JSON 内的 repoId，不修改项目共用 manual 来源，避免影响其他手工需求。
         ProjectRepo repo = resolveTaskRepo(projectId, sourceItem);
         if (repo == null) {
-            return ResponseUtil.failRes("未找到目标仓库，请为扫描源关联仓库或在项目下添加仓库");
+            return ResponseUtil.failRes(I18nUtil.get("devloop.task.repository.not.found"));
         }
 
         // 会话即任务：同步建会话（带 projectId）拿到 sessionId，分支名依赖 sessionId，
@@ -1221,7 +1221,7 @@ public class DevloopApplicationService {
     /** 数据库先分页，再读取当前页会话状态投影；单页最多触发 100 次 UserFS 定点读取。 */
     public ResponseUtil<PageInfo<DevloopTaskViewDto>> listTasks(DevloopTaskListQueryDto query) {
         if (query == null || query.getProjectId() == null) {
-            return ResponseUtil.failRes("projectId 不能为空");
+            return ResponseUtil.failRes(I18nUtil.get("project.id.required"));
         }
         final String taskStatus;
         try {
@@ -1229,7 +1229,10 @@ public class DevloopApplicationService {
             taskStatus = normalizeTaskStatusFilter(query.getStatus());
         }
         catch (IllegalArgumentException e) {
-            return ResponseUtil.failRes(e.getMessage());
+            // DTO 可能在无 Spring 上下文的场景执行，接口返回前统一把校验文案转换为当前语言。
+            String message = "创建时间开始值不能晚于结束值".equals(e.getMessage())
+                ? I18nUtil.get("devloop.task.date.range.invalid") : e.getMessage();
+            return ResponseUtil.failRes(message);
         }
 
         LambdaQueryWrapper<ByaiSession> wrapper = new LambdaQueryWrapper<ByaiSession>()
@@ -1316,7 +1319,7 @@ public class DevloopApplicationService {
             case "completed":
                 return "completed";
             default:
-                throw new IllegalArgumentException("任务状态参数无效");
+                throw new IllegalArgumentException(I18nUtil.get("devloop.task.status.invalid"));
         }
     }
 
@@ -1330,7 +1333,7 @@ public class DevloopApplicationService {
     public ResponseUtil<DevloopTaskViewDto> getTaskDetail(Long sessionId) {
         ByaiSession session = byaiSessionMapper.selectById(sessionId);
         if (session == null) {
-            return ResponseUtil.failRes("会话不存在");
+            return ResponseUtil.failRes(I18nUtil.get("devloop.task.session.not.found"));
         }
         return ResponseUtil
             .successResponse(sessionAsTask(session, tryReadTaskState(session), resolveTaskContext(session)));
@@ -1339,11 +1342,11 @@ public class DevloopApplicationService {
     /** 直接按 sessionId 读取 v2 会话状态投影，不再解析消息或访问 session_ext。 */
     public ResponseUtil<DevloopTaskStateDto> getTaskPhases(Long sessionId) {
         if (sessionId == null) {
-            return ResponseUtil.failRes("sessionId 不能为空");
+            return ResponseUtil.failRes(I18nUtil.get("devloop.task.session.id.required"));
         }
         ByaiSession session = byaiSessionMapper.selectById(sessionId);
         if (session == null) {
-            return ResponseUtil.failRes("会话不存在");
+            return ResponseUtil.failRes(I18nUtil.get("devloop.task.session.not.found"));
         }
         try {
             return ResponseUtil.successResponse(readTaskState(session));
@@ -1360,11 +1363,11 @@ public class DevloopApplicationService {
      */
     public ResponseUtil<Map<String, Object>> getTaskChanges(Long sessionId) {
         if (sessionId == null) {
-            return ResponseUtil.failRes("sessionId 不能为空");
+            return ResponseUtil.failRes(I18nUtil.get("devloop.task.session.id.required"));
         }
         ByaiSession s = byaiSessionMapper.selectById(sessionId);
         if (s == null) {
-            return ResponseUtil.failRes("会话不存在");
+            return ResponseUtil.failRes(I18nUtil.get("devloop.task.session.not.found"));
         }
         // 代码变更是只读展示,任何本地/远程异常都不抛前端:顶层兜底,失败返回 http_error 空态并记日志。
         try {
@@ -1421,12 +1424,12 @@ public class DevloopApplicationService {
      */
     public ResponseUtil<Map<String, Object>> getTaskFileDiff(Long sessionId, String filePath) {
         if (sessionId == null || filePath == null || filePath.trim().isEmpty()) {
-            return ResponseUtil.failRes("sessionId 与 filePath 不能为空");
+            return ResponseUtil.failRes(I18nUtil.get("devloop.task.file.diff.parameters.required"));
         }
         try {
             ByaiSession s = byaiSessionMapper.selectById(sessionId);
             if (s == null) {
-                return ResponseUtil.failRes("会话不存在");
+                return ResponseUtil.failRes(I18nUtil.get("devloop.task.session.not.found"));
             }
             ScanLogItem item = scanLogItemMapper.selectOne(
                 new LambdaQueryWrapper<ScanLogItem>().eq(ScanLogItem::getSessionId, sessionId).last("limit 1"));
@@ -1665,7 +1668,8 @@ public class DevloopApplicationService {
         if (Boolean.TRUE.equals(result.get("success"))) {
             return ResponseUtil.successResponse(result);
         }
-        return ResponseUtil.failRes((String) result.getOrDefault("message", "启动授权失败"));
+        return ResponseUtil.failRes(
+            (String) result.getOrDefault("message", I18nUtil.get("devloop.dws.auth.start.failed")));
     }
 
     /** 检查DWS授权状态（前端轮询用）：新建源弹窗里当前用户给自己授权的场景，查当前登录用户。 */
@@ -1680,7 +1684,7 @@ public class DevloopApplicationService {
     public ResponseUtil<Map<String, Object>> checkDwsAuthStatusBySource(Long sourceId) {
         ScanSource source = scanSourceService.findById(sourceId);
         if (source == null) {
-            return ResponseUtil.failRes("来源不存在");
+            return ResponseUtil.failRes(I18nUtil.get("devloop.source.not.found"));
         }
         Long creatorId = parseUserId(source.getCreateBy());
         Long currentUserId = CurrentUserHolder.getCurrentUserId();
@@ -1718,7 +1722,7 @@ public class DevloopApplicationService {
     public ResponseUtil<Void> saveDwsToken(String token) {
         boolean injected = dwsAuthService.injectToken(token);
         if (!injected) {
-            return ResponseUtil.failRes("Token无效，注入失败");
+            return ResponseUtil.failRes(I18nUtil.get("devloop.dws.token.invalid"));
         }
         dwsAuthService.recordAuthToDb();
         return ResponseUtil.successResponse(null);

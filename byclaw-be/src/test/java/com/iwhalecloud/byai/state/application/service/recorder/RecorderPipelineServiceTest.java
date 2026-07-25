@@ -2,6 +2,12 @@ package com.iwhalecloud.byai.state.application.service.recorder;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import com.iwhalecloud.byai.state.domain.recorder.model.RecorderSession;
 import com.iwhalecloud.byai.state.domain.recorder.model.RecorderOwner;
@@ -25,6 +31,110 @@ class RecorderPipelineServiceTest {
 
     @TempDir
     Path tempDir;
+
+    @Test
+    void scoreReturnsTheCompleteSanitizedPromptSentToLlm() {
+        RecorderPipelineService pipeline = pipeline(new CapturingVerifyService());
+        RecorderSession session = new RecorderSession("session-1", new RecorderOwner(1L, "alice"));
+        Map<String, Object> candidate = new LinkedHashMap<>();
+        candidate.put("id", "cand_search");
+        candidate.put("endpoint", Map.of(
+            "method", "GET",
+            "host", "api.example.test",
+            "pathname", "/search",
+            "rowPath", "$.data"
+        ));
+        candidate.put("score", 88);
+        candidate.put("args", List.of(Map.of("in", "query", "paramName", "key_word")));
+        candidate.put("columns", List.of(Map.of("name", "title", "type", "string")));
+        session.candidates(List.of(candidate));
+
+        Map<String, Object> result = pipeline.score(session, List.of(), false);
+
+        assertThat(String.valueOf(result.get("scorePrompt")))
+            .contains("captured endpoint metadata records encoded in TOON")
+            .contains("Return at most 8 candidates with the highest practical API utility")
+            .contains("Do not output analysis, reasoning, think tags, Markdown, examples, or commentary")
+            .contains("Include only user-controllable parameters")
+            .contains("Omitted candidates retain their local rule score")
+            .contains("records[1]{id,method,host,pathname,score}:")
+            .contains("cand_search,GET,api.example.test,/search,88")
+            .contains("queryKeys[1]: key_word")
+            .contains("responseShape:")
+            .contains("rowPath: $.data")
+            .contains("columns[1]{name,type}:")
+            .contains("title,string")
+            .contains("Do not return TOON")
+            .doesNotContain("\"why\":string")
+            .doesNotContain("Score recorder candidates:");
+    }
+
+    @Test
+    void scoreReportsOutputTruncationWhenTheModelHitsItsLengthLimit() {
+        RecorderLlmService llmService = mock(RecorderLlmService.class);
+        when(llmService.availability()).thenReturn(new RecorderLlmService.Availability(true, "test-model", "available"));
+        when(llmService.generateJsonObjectWithMetadata(anyString(), anyString(), anyInt())).thenReturn(
+            new RecorderLlmService.JsonObjectResponse(
+                "{\"candidates\":[{\"candidateId\":\"candidate-1\",\"inferredFunction\":\"unfinished",
+                "length"
+            )
+        );
+        RecorderPipelineService pipeline = new RecorderPipelineService(
+            RecorderDraftStoreTestSupport.forFileRoot(tempDir), new CapturingVerifyService(), llmService
+        );
+        RecorderSession session = new RecorderSession("session-1", new RecorderOwner(1L, "alice"));
+        session.candidates(List.of(Map.of(
+            "id", "candidate-1",
+            "score", 80,
+            "endpoint", Map.of("method", "GET", "host", "example.com", "pathname", "/search")
+        )));
+
+        Map<String, Object> result = pipeline.score(session, List.of(), true);
+
+        assertThat(result)
+            .containsEntry("llmError", "AI 评分输出超出长度限制，已使用本地规则评分。")
+            .containsEntry("llmAppliedCandidateCount", 0)
+            .containsEntry("llmSynthesisUsed", false);
+    }
+
+    @Test
+    void scoreExtractsJsonFromThinkingOutputAndMergesMatchedCandidateSemantics() {
+        RecorderLlmService llmService = mock(RecorderLlmService.class);
+        when(llmService.availability()).thenReturn(new RecorderLlmService.Availability(true, "test-model", "available"));
+        when(llmService.generateJsonObjectWithMetadata(anyString(), anyString(), anyInt())).thenReturn(
+            new RecorderLlmService.JsonObjectResponse("""
+                <think>Analyse the endpoints first; an invalid example is {not-json}.</think>
+                ```json
+                {"candidates":[{"candidateId":"candidate-1","utilityScore":91,"inferredFunction":"Search articles","paramUnion":[{"name":"query","in":"query","paramRole":"search term","exposeAsArg":"yes"}]}]}
+                ```
+                """, "stop")
+        );
+        RecorderPipelineService pipeline = new RecorderPipelineService(
+            RecorderDraftStoreTestSupport.forFileRoot(tempDir), new CapturingVerifyService(), llmService
+        );
+        RecorderSession session = new RecorderSession("session-1", new RecorderOwner(1L, "alice"));
+        session.candidates(List.of(Map.of(
+            "id", "candidate-1",
+            "score", 80,
+            "endpoint", Map.of("method", "GET", "host", "example.com", "pathname", "/search")
+        )));
+
+        Map<String, Object> result = pipeline.score(session, List.of(), true);
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> candidate = ((List<Map<String, Object>>) result.get("candidates")).getFirst();
+        assertThat(candidate)
+            .containsEntry("scoredBy", "llm")
+            .containsEntry("llmUtilityScore", 91)
+            .containsEntry("inferredFunction", "Search articles");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> parameter = ((List<Map<String, Object>>) candidate.get("paramUnion")).getFirst();
+        assertThat(parameter)
+            .containsEntry("name", "query")
+            .containsEntry("exposeAsArg", "yes");
+        assertThat(result).containsEntry("llmAppliedCandidateCount", 1).doesNotContainKey("llmError");
+        verify(llmService).generateJsonObjectWithMetadata(anyString(), anyString(), eq(4000));
+    }
 
     @Test
     void delayedVerifyCallbacksCannotMutateTerminalSessionDrafts() {
@@ -312,6 +422,36 @@ class RecorderPipelineServiceTest {
         assertThat(pipeline.verifyDraft(session, "draft_0")).contains("request-1");
         assertThat(verifyService.adapterPath).isEqualTo("/by/.bycli/.recorder-drafts/session-1/draft_0.js");
         assertThat(tempDir.resolve("byclaw-alice/by/.bycli/.recorder-drafts/session-1/draft_0.js")).exists();
+    }
+
+    @Test
+    void generatedDraftFetchesTheCapturedEndpointInsteadOfReturningCandidateMetadata() {
+        RecorderPipelineService pipeline = pipeline(new CapturingVerifyService());
+        RecorderSession session = new RecorderSession("session-1", new RecorderOwner(1L, "alice"));
+        session.candidates(List.of(Map.of(
+            "id", "candidate-1",
+            "endpoint", Map.of(
+                "method", "GET",
+                "host", "api.example.test",
+                "pathname", "/search",
+                "urlTemplate", "https://api.example.test/search?q={q}",
+                "rowPath", "$.items[]"
+            ),
+            "args", List.of(Map.of("argName", "q", "defaultValue", "alpha")),
+            "columns", List.of(Map.of("name", "title", "path", "$.items[].title", "type", "string"))
+        )));
+
+        Map<String, Object> response = pipeline.generate(session, List.of());
+        String source = String.valueOf(map(((List<?>) response.get("drafts")).getFirst()).get("source"));
+
+        assertThat(source)
+            .contains("import { CommandExecutionError, EmptyResultError } from '@sovovs/bycli/errors';")
+            .contains("const url = new URL('https://api.example.test/search');")
+            .contains("url.searchParams.set('q', String(args.q));")
+            .contains("response = await fetch(url, { method: 'GET', headers: { Accept: 'application/json' } });")
+            .contains("const rows = data?.items;")
+            .contains("title: item?.title ?? null")
+            .doesNotContain("candidateId");
     }
 
     @Test

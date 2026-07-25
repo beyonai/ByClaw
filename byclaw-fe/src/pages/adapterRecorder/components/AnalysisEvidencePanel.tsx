@@ -1,6 +1,4 @@
-// 分析证据面板 —— 透明展示两块内容,转场页(rank 运行中)与 ranked 候选表都复用:
-//   1. A/B 两次录制的请求痕迹(按 sample 分组,method/host+path/状态/耗时;WS 帧单独标注)
-//   2. rank 阶段真正发给 LLM 的评分提示词(scorePrompt;运行中未回则占位)
+// 分析证据面板 —— 展示 A/B 两次录制的请求痕迹；评分完成后可额外展示实际发给 LLM 的评分提示词。
 // 配色全走主题 token,等宽字段用 .code class(与 CandidateCard 一致)。
 import { Collapse, Empty, Input, Space, Tag, Typography, theme } from 'antd';
 import type { CaptureSample, NetworkEntry } from '../types/recorder';
@@ -44,9 +42,22 @@ function EntryRow({ e }: { e: NetworkEntry }) {
   );
 }
 
+function deduplicateEntries(entries: NetworkEntry[]): NetworkEntry[] {
+  const seen = new Set<string>();
+  return entries.filter((entry) => {
+    const path = entry.pathname || entry.url || '—';
+    const key = `${entry.method}\u0000${entry.host ?? ''}\u0000${path}`;
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+}
+
 /** 单个样本(A/B)的痕迹分组:标题带条数,列表限高滚动。 */
 function SampleBlock({ sample }: { sample: CaptureSample }) {
-  const entries = sample.entries ?? [];
+  const entries = deduplicateEntries(sample.entries ?? []);
   return (
     <div>
       <Text type="secondary" style={{ fontSize: 12 }}>
@@ -75,15 +86,24 @@ interface Props {
   sampleA?: CaptureSample;
   sampleB?: CaptureSample;
 
-  /** rank 阶段真正发给 LLM 的评分提示词;运行中未回时 undefined → 占位提示。 */
+  /** score 阶段实际发给 LLM 的评分提示词。 */
   scorePrompt?: string;
+
+  /** 仅在 score 阶段完成后显示评分提示词，rank 转场只显示录制痕迹。 */
+  showScorePrompt?: boolean;
 
   /** 默认是否展开(转场页可展开吸睛;ranked 候选表默认折叠避免占屏)。 */
   defaultOpen?: boolean;
 }
 
-/** A/B 痕迹 + rank LLM 提示词的透明展示面板。两处复用(转场页 / ranked 候选表)。 */
-export default function AnalysisEvidencePanel({ sampleA, sampleB, scorePrompt, defaultOpen }: Props) {
+/** A/B 痕迹面板；可选显示 score 阶段的 LLM 提示词。 */
+export default function AnalysisEvidencePanel({
+  sampleA,
+  sampleB,
+  scorePrompt,
+  showScorePrompt = false,
+  defaultOpen,
+}: Props) {
   const samples = [sampleA, sampleB].filter((s): s is CaptureSample => !!s);
   const items = [
     {
@@ -99,19 +119,23 @@ export default function AnalysisEvidencePanel({ sampleA, sampleB, scorePrompt, d
         <Empty description="暂无痕迹" image={Empty.PRESENTED_IMAGE_SIMPLE} />
       ),
     },
-    {
-      key: 'prompt',
-      label: scorePrompt ? '发给 AI 的评分提示词(rank 阶段)' : '发给 AI 的评分提示词(评分完成后展示)',
-      children: (
-        <Input.TextArea
-          className="code"
-          value={scorePrompt || '(评分进行中,提示词稍后展示)'}
-          readOnly
-          autoSize={{ minRows: 4, maxRows: 16 }}
-          style={{ fontSize: 12 }}
-        />
-      ),
-    },
+    ...(showScorePrompt
+      ? [
+        {
+          key: 'prompt',
+          label: '发给 AI 的评分提示词',
+          children: (
+            <Input.TextArea
+              className="code"
+              value={scorePrompt || '(未返回评分提示词)'}
+              readOnly
+              autoSize={{ minRows: 4, maxRows: 16 }}
+              style={{ fontSize: 12 }}
+            />
+          ),
+        },
+      ]
+      : []),
   ];
   return <Collapse size="small" defaultActiveKey={defaultOpen ? ['evidence', 'prompt'] : []} items={items} />;
 }

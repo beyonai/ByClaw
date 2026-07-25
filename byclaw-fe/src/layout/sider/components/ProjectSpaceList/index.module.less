@@ -1352,6 +1352,7 @@
 // 需求列表与任务列表共用无边框、悬浮浅灰底色的卡片状态。
 .detailRequirementItem {
   position: relative;
+  min-width: 0;
   min-height: 64px;
   padding: 8px 10px;
   border: 1px solid transparent;
@@ -1384,14 +1385,18 @@
   width: 100%;
   min-width: 0;
   display: grid;
-  grid-template-columns: 32px minmax(0, 1fr) auto;
+  // 英文按钮和标题长度不固定，操作列必须允许收缩，避免卡片撑出详情面板宽度。
+  grid-template-columns: 32px minmax(0, 1fr) minmax(0, auto);
   align-items: center;
   column-gap: 10px;
+  overflow: hidden;
 }
 
 .detailRequirementActions {
   // 与任务卡片一致：三点按钮绝对定位，悬停时通过右内边距为其让位，默认不留空白。
   display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
   align-items: center;
   justify-content: flex-end;
   transition: padding-right 0.2s;
@@ -1582,6 +1587,7 @@
   border-radius: 6px;
   font-size: 12px;
   line-height: 24px;
+  white-space: nowrap;
 }
 
 .detailRequirementMoreAction {
@@ -2090,6 +2096,12 @@
   line-height: 20px;
   text-align: center;
   word-break: break-word;
+
+  :global {
+    .@{antPrefix}-empty {
+      margin: 0;
+    }
+  }
 }
 
 .codeChangeList {
@@ -2526,16 +2538,23 @@
 .sourceRepoAddButton {
   width: auto;
   min-width: 78px;
+  height: 34px;
   padding: 0 12px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 8px;
   flex: 0 0 auto;
 
   :global {
     .@{antPrefix}-btn-icon {
+      width: 16px;
+      height: 16px;
       margin-inline-end: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex: 0 0 16px;
     }
   }
 }
@@ -2549,7 +2568,25 @@
     .@{antPrefix}-select {
       width: auto;
       min-width: 0;
+      height: 34px;
       flex: 1 1 0;
+    }
+
+    // 新增渠道的仓库下拉与右侧添加按钮统一使用 34px 高度，并校正单选文本垂直居中。
+    .@{antPrefix}-select-single .@{antPrefix}-select-selector {
+      height: 34px;
+    }
+
+    .@{antPrefix}-select-single .@{antPrefix}-select-selector .@{antPrefix}-select-selection-item,
+    .@{antPrefix}-select-single .@{antPrefix}-select-selector .@{antPrefix}-select-selection-placeholder {
+      line-height: 32px;
+    }
+
+    // 收集源弹窗的全宽控件规则会作用到紧凑组合，添加按钮必须固定宽度以避免图标与文字重叠。
+    .@{antPrefix}-btn {
+      width: auto;
+      min-width: 78px;
+      flex: 0 0 auto;
     }
   }
 }
@@ -2644,7 +2681,7 @@
 }
 
 .manualRequirementForm {
-  // 原始来源和影响分支为同一行的两个等宽字段，需求名称及长内容字段跨整行展示。
+  // 原始来源独占一行，影响分支和关联仓库各占一半，需求名称及长内容字段跨整行展示。
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   column-gap: 16px;
@@ -2657,6 +2694,12 @@
 
 .manualRequirementFormFull {
   grid-column: 1 / -1;
+}
+
+.manualRequirementSourceField {
+  // 原始来源独占第一行但保持左侧 50% 宽度，右侧保留空白。
+  grid-column: 1 / -1;
+  width: 50%;
 }
 
 .manualRequirementRepoCompact {
@@ -2690,11 +2733,14 @@
 }
 
 .manualRequirementSourceType {
-  width: 100%;
+  // 原始来源字段位于表单左侧 50% 列，Tab 容器铺满该列，整体切换区域保持 50% 宽度。
   display: flex;
+  width: 100%;
+  max-width: 100%;
+  white-space: nowrap;
 
   :global {
-    // 与新增渠道的需求确认规则一致，三个来源以等宽按钮形式切换。
+    // 三个来源选项等分填满左侧 50% 区域，避免切换控件右侧出现空白。
     .@{antPrefix}-radio-button-wrapper {
       min-width: 0;
       flex: 1 1 0;

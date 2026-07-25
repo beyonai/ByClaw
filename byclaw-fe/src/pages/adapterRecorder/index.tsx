@@ -110,7 +110,6 @@ export default function Workbench() {
             seedB={data.seedB}
             sampleA={data.sampleA}
             sampleB={data.sampleB}
-            rankScorePrompt={data.rankScorePrompt}
             generatePrompt={data.generatePrompt}
             llmRawJson={data.llmRawJson}
             llmError={data.llmError}
@@ -160,12 +159,7 @@ export default function Workbench() {
               <Text type="secondary">正在分析录制痕迹、提取候选接口…</Text>
             </div>
           </div>
-          <AnalysisEvidencePanel
-            sampleA={data.sampleA}
-            sampleB={data.sampleB}
-            scorePrompt={data.rankScorePrompt}
-            defaultOpen
-          />
+          <AnalysisEvidencePanel sampleA={data.sampleA} sampleB={data.sampleB} defaultOpen />
         </div>
       );
     }

@@ -309,12 +309,11 @@ export function createHttpRecorderClient(bootstrap: RecorderBootstrap): Recorder
     sendInput: (cdpMethod: string, cdpParams: Record<string, unknown>) =>
       call<{ dispatched: boolean }>('/recorder/input', { body: { cdpMethod, cdpParams } }),
     rank: async () => {
-      // be 返回 {sessionId,state,stateVersion,candidates,scorePrompt?};前端要候选数组 + rank 阶段 LLM 提示词(透明展示)。
-      const res = await call<{ candidates?: RankCandidate[]; scorePrompt?: string }>('/recorder/rank', { body: {} });
+      // rank 仅返回本地规则排序的候选；实际 LLM 评分提示词由 pipeline/score 返回。
+      const res = await call<{ candidates?: RankCandidate[] }>('/recorder/rank', { body: {} });
       if (!res.ok || res.data === null) return res as unknown as RequestEnvelope<RankResult>;
       const candidates = Array.isArray(res.data.candidates) ? res.data.candidates : [];
-      const scorePrompt = typeof res.data.scorePrompt === 'string' ? res.data.scorePrompt : undefined;
-      return { ...res, data: { candidates, scorePrompt } };
+      return { ...res, data: { candidates } };
     },
     // be /recorder/init 是同步 200,直接回 InitResult{report,dryRun}(不建 request、非 202 轮询)。
     init: (

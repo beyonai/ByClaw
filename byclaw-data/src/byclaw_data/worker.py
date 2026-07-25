@@ -1109,6 +1109,9 @@ def _update_early_langfuse_trace(
     *,
     status: str,
     error: str = "",
+    answer: str = "",
+    question: str = "",
+    trace_id: str = "",
 ) -> None:
     """更新 early trace 的最终状态并关闭 OTel span。"""
     if handle is None:
@@ -1118,9 +1121,68 @@ def _update_early_langfuse_trace(
         if status == "error":
             span.update(output={"error": error}, level="ERROR", status_message=error)
         else:
-            span.update(output={"status": "ok"})
+            _output: dict[str, Any] = {"status": "ok"}
+            if answer:
+                _output["answer"] = answer[:10000]  # 限长防 OTel payload 溢出
+            span.update(output=_output)
         span.end()
         lf.flush()
+
+        # 通过 ingestion API 回写 trace 级别的 input/output，使其在 Langfuse trace 列表中可见
+        _tid = trace_id or getattr(span, "trace_id", "") or ""
+        if _tid and (question or answer):
+            _ingest_trace_io(
+                trace_id=_tid,
+                input_text=question[:5000] if question else None,
+                output_text=answer[:5000] if answer else None,
+            )
+    except Exception:
+        pass
+
+
+def _ingest_trace_io(
+    *,
+    trace_id: str,
+    input_text: str | None = None,
+    output_text: str | None = None,
+) -> None:
+    """直接调用 Langfuse ingestion API 设置 trace 级别 input/output。"""
+    import uuid as _uuid
+    from datetime import datetime as _dt, timezone as _tz
+
+    _secret = os.getenv("LANGFUSE_SECRET_KEY", "")
+    _public = os.getenv("LANGFUSE_PUBLIC_KEY", "")
+    _base = (os.getenv("LANGFUSE_BASE_URL") or os.getenv("LANGFUSE_HOST") or "").rstrip("/")
+    if not _secret or not _public or not _base:
+        return
+
+    try:
+        import httpx  # noqa: PLC0415
+
+        _body: dict[str, Any] = {"id": trace_id}
+        if input_text:
+            _body["input"] = input_text
+        if output_text:
+            _body["output"] = output_text
+
+        _now = _dt.now(_tz.utc).isoformat().replace("+00:00", "Z")
+        _payload = {
+            "batch": [
+                {
+                    "id": str(_uuid.uuid4()),
+                    "type": "trace-create",
+                    "timestamp": _now,
+                    "body": _body,
+                }
+            ]
+        }
+        httpx.post(
+            f"{_base}/api/public/ingestion",
+            json=_payload,
+            auth=(_public, _secret),
+            headers={"x-langfuse-public-key": _public},
+            timeout=5.0,
+        )
     except Exception:
         pass
 
@@ -1852,7 +1914,9 @@ class DataCloudWorker(GatewayWorker):
         ) as _rid:
             try:
                 result = await self._process_command_inner(command, context, _rid)
-                _update_early_langfuse_trace(_early_lf_trace_ctx.get(), status="ok")
+                _answer = (result or {}).get("content", "") if isinstance(result, dict) else ""
+                _question = str(getattr(command, "content", "") or "")[:5000]
+                _update_early_langfuse_trace(_early_lf_trace_ctx.get(), status="ok", answer=_answer, question=_question, trace_id=_trace_id)
                 # ── 自动评分：写入客观指标到 Langfuse scores 表 ─────────────
                 _lf_handle = _early_lf_trace_ctx.get()
                 if _lf_handle is not None:
@@ -2529,7 +2593,7 @@ class DataCloudWorker(GatewayWorker):
                     #     content_type=SseMessageType.text.value,
                     # )
                     await context.flush_to_history()
-                return {"status": "done", "metadata": all_metadata}
+                return {"status": "done", "metadata": all_metadata, "content": _CHITCHAT_DIRECT_REPLY}
 
         if isinstance(command, AskAgentCommand) and _paradigm_resume_value is None:
             # 推送初始思考内容（不再包裹"问题理解"标题）
@@ -2643,7 +2707,15 @@ class DataCloudWorker(GatewayWorker):
                 "beyond_token": _dyn_beyond_token,
                 "skill_workspace_dir": _dyn_skill_ws,
                 "rel_resource_list": _rel_resource_list,
+                "langfuse_trace_id": _cmd_trace_id,
             }
+            # 将 early span 的 id 作为 CallbackHandler 的父节点，确保 LLM span 挂载在 datacloud-agent 下
+            _early = _early_lf_trace_ctx.get()
+            if _early is not None:
+                try:
+                    _dyn_extras["langfuse_parent_span_id"] = str(_early[1].id)
+                except Exception:
+                    pass
             if _dyn_skill_task_prompt:
                 _dyn_task_prompt, _dyn_first_dir, _dyn_catalog = _dyn_skill_task_prompt
                 _dyn_extras["task_prompt"] = _dyn_task_prompt

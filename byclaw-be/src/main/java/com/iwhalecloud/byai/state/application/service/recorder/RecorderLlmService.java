@@ -45,6 +45,19 @@ public class RecorderLlmService {
         return aiService.generateText(systemPrompt, userPrompt, resolved.model(), maxTokens);
     }
 
+    public String generateJsonObject(String systemPrompt, String userPrompt, int maxTokens) {
+        return generateJsonObjectWithMetadata(systemPrompt, userPrompt, maxTokens).content();
+    }
+
+    public JsonObjectResponse generateJsonObjectWithMetadata(String systemPrompt, String userPrompt, int maxTokens) {
+        ResolvedModel resolved = resolveDefaultModel();
+        if (!resolved.availability().available()) {
+            throw new IllegalStateException("default LLM model is unavailable: " + resolved.availability().reason());
+        }
+        AIService.GeneratedText response = aiService.generateJsonObjectWithMetadata(systemPrompt, userPrompt, resolved.model(), maxTokens);
+        return new JsonObjectResponse(response.content(), response.finishReason());
+    }
+
     private ResolvedModel resolveDefaultModel() {
         ModelVO listedModel;
         try {
@@ -89,6 +102,8 @@ public class RecorderLlmService {
         model.setUrl(detail.getApiEndpoint());
         model.setAuthToken(detail.getApiToken());
         model.setModelCode(detail.getModelCode());
+        model.setProviderName(detail.getProviderName());
+        model.setModelProtocol(detail.getModelProtocol());
         return new ResolvedModel(model, new Availability(true, detail.getModelCode(), AVAILABLE));
     }
 
@@ -104,6 +119,9 @@ public class RecorderLlmService {
         static Availability unavailable(String reason) {
             return new Availability(false, null, reason);
         }
+    }
+
+    public record JsonObjectResponse(String content, String finishReason) {
     }
 
     private record ResolvedModel(ModelDto model, Availability availability) {

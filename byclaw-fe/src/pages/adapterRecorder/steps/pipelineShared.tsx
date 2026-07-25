@@ -48,6 +48,9 @@ export function CandidateTable({
 }) {
   const { token } = theme.useToken();
   const rows = [...candidates].sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+  const hasAppliedLlmUtility = rows.some(
+    (candidate) => candidate.scoredBy === 'llm' && typeof candidate.llmUtilityScore === 'number'
+  );
   const seeds = [seedA, seedB].filter((s): s is string => !!s && !!s.trim());
   const sentSet = new Set(selectedIds);
   const columns: ColumnsType<RankCandidate> = [
@@ -138,37 +141,57 @@ export function CandidateTable({
     {
       title: 'Rank 置信',
       key: 'score',
-      width: 170,
+      width: 150,
       render: (_, c) => {
-        const { rank, utility } = candidateScoreDimensions(c);
+        const { rank } = candidateScoreDimensions(c);
         return (
-          <Space direction="vertical" size={2}>
-            <Space size={4} wrap>
-              <Text strong>{rank.score}</Text>
-              <Tag color={rank.band === 'high' ? 'success' : rank.band === 'medium' ? token.colorPrimary : 'default'}>
-                {rank.band}
-              </Tag>
-              <Tag
-                color={c.scoredBy === 'llm' ? token.colorPrimary : undefined}
-                style={{ fontSize: 10 }}
-                title={
-                  c.scoredBy === 'llm'
-                    ? 'LLM 评分(模型判定信号成立性,录制阶段证据置信,非 verify 结果)'
-                    : '规则评分(LLM 不可用时的启发式兜底,非 verify 结果)'
-                }
-              >
-                {c.scoredBy === 'llm' ? 'LLM' : '规则'}
-              </Tag>
-            </Space>
-            {utility && (
-              <Text type="secondary" style={{ fontSize: 11 }} title="模型对『做成数据命令是否有用』的语义判断,仅供参考">
-                LLM 效用 {utility.score} · {utility.band}
-              </Text>
-            )}
+          <Space size={4} wrap>
+            <Text strong>{rank.score}</Text>
+            <Tag color={rank.band === 'high' ? 'success' : rank.band === 'medium' ? token.colorPrimary : 'default'}>
+              {rank.band}
+            </Tag>
+            <Tag
+              color={c.scoredBy === 'llm' ? token.colorPrimary : undefined}
+              style={{ fontSize: 10 }}
+              title={
+                c.scoredBy === 'llm'
+                  ? 'LLM 评分(模型判定信号成立性,录制阶段证据置信,非 verify 结果)'
+                  : '规则评分(LLM 不可用时的启发式兜底,非 verify 结果)'
+              }
+            >
+              {c.scoredBy === 'llm' ? 'LLM' : '规则'}
+            </Tag>
           </Space>
         );
       },
     },
+    ...(hasAppliedLlmUtility
+      ? [
+          {
+            title: 'LLM 效用',
+            key: 'llmUtility',
+            width: 130,
+            render: (_: unknown, c: RankCandidate) => {
+              const { utility } = candidateScoreDimensions(c);
+              return utility && c.scoredBy === 'llm' ? (
+                <Space size={4} wrap>
+                  <Text strong>{utility.score}</Text>
+                  <Tag
+                    color={
+                      utility.band === 'high' ? 'success' : utility.band === 'medium' ? token.colorPrimary : 'default'
+                    }
+                    title="模型对『做成数据命令是否有用』的语义判断；仅在评分响应成功解析并合并后显示"
+                  >
+                    {utility.band}
+                  </Tag>
+                </Space>
+              ) : (
+                <Text type="secondary">—</Text>
+              );
+            },
+          },
+        ]
+      : []),
     {
       title: 'seed→参数',
       key: 'seed',
@@ -350,7 +373,7 @@ export function DraftCard({
 }) {
   const { token } = theme.useToken();
   const v = draft.verify;
-  const untested = !draft.usable && v.reasons?.includes('尚未测试');
+  const untested = !draft.usable && (v.reasons?.includes('尚未测试') || v.reasons?.includes('pending verification'));
   return (
     <Card
       size="small"

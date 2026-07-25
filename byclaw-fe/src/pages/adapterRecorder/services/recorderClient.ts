@@ -44,12 +44,9 @@ export interface PipelinePartialPrompts {
   screenshotCount?: number;
 }
 
-/** rank 结果:候选数组 + rank 阶段真正发给 LLM 的评分提示词(LLM-off 时 undefined)。 */
+/** rank 结果:候选数组。rank 阶段仅做本地规则排序，不调用 LLM。 */
 export interface RankResult {
   candidates: RankCandidate[];
-
-  /** rank 阶段实际发给 LLM 的评分提示词(与 be buildScorePrompt 同源;LLM 未启用时缺省)。 */
-  scorePrompt?: string;
 }
 
 /** 拆步①评分结果:候选、本地提示词、可选的 LLM 语义评分状态。 */
@@ -119,8 +116,7 @@ export interface RecorderClient {
    *  cdpMethod 限 Input.dispatchMouseEvent/dispatchKeyEvent/insertText(be 侧白名单)。 */
   sendInput(cdpMethod: string, cdpParams: Record<string, unknown>): Promise<RequestEnvelope<{ dispatched: boolean }>>;
 
-  /** rank(候选提取 + LLM 语义重打分,同步 200)。返回候选数组 + rank 阶段真正发给 LLM 的评分提示词
-   *  (scorePrompt;LLM-off 时 undefined),供转场页/候选表透明展示。 */
+  /** rank(候选提取 + 本地规则排序,同步 200)。 */
   rank(): Promise<RequestEnvelope<RankResult>>;
 
   /**

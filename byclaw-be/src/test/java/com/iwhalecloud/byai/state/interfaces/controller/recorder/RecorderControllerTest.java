@@ -299,7 +299,8 @@ class RecorderControllerTest {
             .andExpect(jsonPath("$.data.candidates[0].endpoint.host").value("api.example.test"))
             .andExpect(jsonPath("$.data.candidates[0].endpoint.pathname").value("/v1/search"))
             .andExpect(jsonPath("$.data.candidates[0].endpoint.queryParams.keyword").value("{keyword}"))
-            .andExpect(jsonPath("$.data.candidates[0].args[0].paramName").value("keyword"));
+            .andExpect(jsonPath("$.data.candidates[0].args[0].paramName").value("keyword"))
+            .andExpect(jsonPath("$.data.scorePrompt").doesNotExist());
     }
 
     @Test
@@ -829,7 +830,7 @@ class RecorderControllerTest {
             CompletableFuture<RecorderResponse<Map<String, Object>>> save = CompletableFuture.supplyAsync(() -> {
                 loginAs(1L, "alice");
                 try {
-                    return service.save(Map.of("sessionId", sessionId, "draftId", "draft_0"));
+                    return service.saveAdapter(Map.of("sessionId", sessionId, "draftId", "draft_0"));
                 } finally {
                     CurrentUserHolder.clearLoginInfo();
                 }
@@ -876,7 +877,7 @@ class RecorderControllerTest {
             CompletableFuture<RecorderResponse<Map<String, Object>>> save = CompletableFuture.supplyAsync(() -> {
                 loginAs(1L, "alice");
                 try {
-                    return service.save(Map.of(
+                    return service.saveAdapter(Map.of(
                         "sessionId", sessionId,
                         "drafts", List.of(Map.of("draftId", "draft_0"), Map.of("draftId", "draft_1"))
                     ));

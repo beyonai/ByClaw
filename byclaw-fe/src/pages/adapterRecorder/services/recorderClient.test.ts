@@ -44,6 +44,51 @@ describe('adapter recorder client selection', () => {
     );
   });
 
+  it('does not expose a score prompt from local rank results', async () => {
+    (POST as jest.Mock)
+      .mockResolvedValueOnce({
+        ok: true,
+        schemaVersion: 'recorder.v1',
+        requestId: 'bind_req',
+        data: { sessionId: 'session_1', contextId: 'ctx', targetId: 'target', awaitingLogin: false },
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        schemaVersion: 'recorder.v1',
+        requestId: 'rank_req',
+        data: {
+          candidates: [
+            {
+              id: 'cand_search',
+              endpoint: { method: 'GET', host: 'api.example.test', pathname: '/search' },
+              score: 90,
+              confidence: 'high',
+              reviewRequired: false,
+            },
+          ],
+          scorePrompt: 'obsolete rank prompt',
+        },
+        error: null,
+      });
+
+    const client = createHttpRecorderClient({ enabled: true, baseUrl: '/byaiService/recorder' });
+    await client.bind('existing');
+    const result = await client.rank();
+
+    expect(result.data).toEqual({
+      candidates: [
+        {
+          id: 'cand_search',
+          endpoint: { method: 'GET', host: 'api.example.test', pathname: '/search' },
+          score: 90,
+          confidence: 'high',
+          reviewRequired: false,
+        },
+      ],
+    });
+  });
+
   it('verifies the current editor source and preserves terminal verification metadata', async () => {
     (POST as jest.Mock)
       .mockResolvedValueOnce({

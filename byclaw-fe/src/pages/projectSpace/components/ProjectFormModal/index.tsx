@@ -4,7 +4,7 @@ import { CloseCircleFilled, PlusOutlined } from '@ant-design/icons';
 import { useIntl, useSelector } from '@umijs/max';
 import AddAuthModal from '@/pages/manager/components/AuthListDrawer/AddAuthModal';
 import { listProjectMembers } from '@/service/devloop';
-import { DEFAULT_PROJECT_TYPE_OPTION, PROJECT_TYPE_LABEL, PROJECT_TYPE_OPTIONS } from '../../constants';
+import { DEFAULT_PROJECT_TYPE_OPTION, PROJECT_TYPE_OPTIONS } from '../../constants';
 import type { ProjectTypeOption } from '../../hooks/useProjectTypeConfig';
 import type { ProjectSpace } from '../../types';
 import styles from './index.module.less';
@@ -69,7 +69,7 @@ const normalizeShareMember = (member: any): ProjectShareMember => {
 
 const ProjectFormModal: React.FC<Props> = ({
   open,
-  title = '新建项目空间',
+  title,
   loading,
   initialValues,
   projectId,
@@ -89,10 +89,27 @@ const ProjectFormModal: React.FC<Props> = ({
   const currentUserId = userInfo.userId ?? userInfo.id;
   const currentUserCode = userInfo.userCode;
   const currentUserName = userInfo.userName || userInfo.userNickName || userInfo.nickName || currentUserCode;
+  const formT = useCallback((id: string) => intl.formatMessage({ id: `projectSpace.projectForm.${id}` }), [intl]);
   const memberT = useCallback((id: string) => intl.formatMessage({ id: `projectSpace.members.${id}` }), [intl]);
   const configuredProjectTypeOptions = projectTypeConfigOptions?.length
     ? projectTypeConfigOptions
     : PROJECT_TYPE_OPTIONS;
+  const localizedProjectTypeLabels = useMemo(
+    () => ({
+      normal: formT('type.normal'),
+      develop: formT('type.develop'),
+      default: formT('type.default'),
+    }),
+    [formT]
+  );
+  const localizedProjectTypeOptions = useMemo(
+    () =>
+      configuredProjectTypeOptions.map((option) => ({
+        ...option,
+        label: localizedProjectTypeLabels[option.value] || option.label,
+      })),
+    [configuredProjectTypeOptions, localizedProjectTypeLabels]
+  );
   const isDevelopProjectEnabled = configuredProjectTypeOptions.some((option) => option.value === 'develop');
   const projectType = Form.useWatch('projectType', form);
   const sharedFlag = Form.useWatch('sharedFlag', form);
@@ -126,12 +143,14 @@ const ProjectFormModal: React.FC<Props> = ({
     [creatorId]
   );
   const visibleProjectTypeOptions = useMemo(() => {
-    const selectableOptions = configuredProjectTypeOptions.filter((option) => option.value !== 'default');
+    const selectableOptions = localizedProjectTypeOptions.filter((option) => option.value !== 'default');
 
     // 默认项目只用于编辑默认项目时回显，不放入新建项目和普通项目编辑的下拉选项。
     if (formInitialValues.projectType === 'default') {
-      const defaultOption =
-        configuredProjectTypeOptions.find((option) => option.value === 'default') || DEFAULT_PROJECT_TYPE_OPTION;
+      const defaultOption = localizedProjectTypeOptions.find((option) => option.value === 'default') || {
+        ...DEFAULT_PROJECT_TYPE_OPTION,
+        label: localizedProjectTypeLabels.default,
+      };
       return [defaultOption, ...selectableOptions];
     }
 
@@ -139,7 +158,10 @@ const ProjectFormModal: React.FC<Props> = ({
       // 历史研发项目在未配置研发类型的环境中仅允许回显，避免 Select 出现空值。
       return [
         {
-          label: PROJECT_TYPE_LABEL[formInitialValues.projectType],
+          label:
+            localizedProjectTypeLabels[formInitialValues.projectType] ||
+            localizedProjectTypeOptions.find((option) => option.value === formInitialValues.projectType)?.label ||
+            formInitialValues.projectType,
           value: formInitialValues.projectType,
           disabled: true,
         },
@@ -148,7 +170,7 @@ const ProjectFormModal: React.FC<Props> = ({
     }
 
     return selectableOptions;
-  }, [configuredProjectTypeOptions, formInitialValues.projectType]);
+  }, [formInitialValues.projectType, localizedProjectTypeLabels, localizedProjectTypeOptions]);
 
   useEffect(() => {
     if (!open) return;
@@ -309,7 +331,7 @@ const ProjectFormModal: React.FC<Props> = ({
   return (
     <Modal
       destroyOnClose
-      title={title}
+      title={title || formT(projectId ? 'editTitle' : 'createTitle')}
       open={open}
       confirmLoading={loading}
       okButtonProps={{ disabled: loading || projectTypeLoading }}
@@ -325,13 +347,17 @@ const ProjectFormModal: React.FC<Props> = ({
         onFinish={handleSubmit}
         onKeyDown={handleFormKeyDown}
       >
-        <Form.Item name="projectName" label="项目名称" rules={[{ required: true, message: '请输入项目名称' }]}>
-          <Input maxLength={100} placeholder="请输入项目名称" />
+        <Form.Item
+          name="projectName"
+          label={formT('field.projectName')}
+          rules={[{ required: true, message: formT('validation.projectNameRequired') }]}
+        >
+          <Input maxLength={100} placeholder={formT('placeholder.projectName')} />
         </Form.Item>
-        <Form.Item name="description" label="项目描述">
-          <Input.TextArea rows={3} maxLength={500} placeholder="请输入项目描述" />
+        <Form.Item name="description" label={formT('field.description')}>
+          <Input.TextArea rows={3} maxLength={500} placeholder={formT('placeholder.description')} />
         </Form.Item>
-        <Form.Item name="projectType" label="项目类型">
+        <Form.Item name="projectType" label={formT('field.projectType')}>
           <Select
             disabled={isEditingDefaultProject}
             loading={projectTypeLoading}
@@ -347,7 +373,7 @@ const ProjectFormModal: React.FC<Props> = ({
             }}
           />
         </Form.Item>
-        <Form.Item name="sharedFlag" label="是否共享" valuePropName="checked">
+        <Form.Item name="sharedFlag" label={formT('field.shared')} valuePropName="checked">
           <Switch
             disabled={isDevelopProject || isDefaultProject}
             onChange={(checked) => {
@@ -358,7 +384,7 @@ const ProjectFormModal: React.FC<Props> = ({
           />
         </Form.Item>
         {isProjectShared && (
-          <Form.Item label="共享成员">
+          <Form.Item label={formT('field.sharedMembers')}>
             {/* 开启共享时创建者始终自动保留，成员保存和成员列表使用同一接口，无需额外展示必填态。 */}
             <div className={styles.shareTargetField}>
               <Spin spinning={shareMembersLoading}>
