@@ -1,5 +1,6 @@
 import {
   applyDraftSourceEdit,
+  formatAdapterOverwriteConfirmationContent,
   mergeDraftVerification,
   mergeSaveResult,
   saveWithOverwriteConfirmation,
@@ -157,6 +158,20 @@ describe('recorder verify-then-save state', () => {
     await saveWithOverwriteConfirmation(save, confirm);
 
     expect(confirm).toHaveBeenCalledWith(conflictWithPath);
+  });
+
+  it('renders an empty-string adapter path in overwrite confirmation content', () => {
+    const conflictWithEmptyPath: RequestEnvelope<SaveResult> = {
+      ...conflict,
+      error: {
+        ...conflict.error!,
+        details: { adapterPath: '' },
+      },
+    };
+
+    expect(formatAdapterOverwriteConfirmationContent(conflictWithEmptyPath)).toBe(
+      '是否覆盖当前用户沙箱中同名的 CLI 脚本？冲突路径：'
+    );
   });
 
   it('retries the exact save operation with overwrite=true only after confirmation', async () => {

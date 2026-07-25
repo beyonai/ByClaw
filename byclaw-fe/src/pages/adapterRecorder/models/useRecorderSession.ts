@@ -174,15 +174,19 @@ export async function saveWithOverwriteConfirmation(
   return { response: await save(true), cancelled: false };
 }
 
-function confirmAdapterOverwrite(response: RequestEnvelope<SaveResult>): Promise<boolean> {
+export function formatAdapterOverwriteConfirmationContent(response: RequestEnvelope<SaveResult>): string {
   const adapterPath = response.error?.details?.adapterPath;
   const conflictPath = typeof adapterPath === 'string' ? adapterPath : undefined;
+  return conflictPath !== undefined
+    ? `是否覆盖当前用户沙箱中同名的 CLI 脚本？冲突路径：${conflictPath}`
+    : '是否覆盖当前用户沙箱中同名的 CLI 脚本？';
+}
+
+function confirmAdapterOverwrite(response: RequestEnvelope<SaveResult>): Promise<boolean> {
   return new Promise((resolve) => {
     Modal.confirm({
       title: 'CLI 脚本已存在',
-      content: conflictPath
-        ? `是否覆盖当前用户沙箱中同名的 CLI 脚本？冲突路径：${conflictPath}`
-        : '是否覆盖当前用户沙箱中同名的 CLI 脚本？',
+      content: formatAdapterOverwriteConfirmationContent(response),
       okText: '覆盖保存',
       cancelText: '取消',
       onOk: () => resolve(true),
