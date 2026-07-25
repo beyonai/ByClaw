@@ -170,8 +170,10 @@ function isRecorderEnvelope(value: unknown): value is RequestEnvelope<unknown> {
   const envelope = value as Record<string, unknown>;
   if (
     typeof envelope.ok !== 'boolean' ||
+    envelope.ok !== false ||
     envelope.schemaVersion !== 'recorder.v1' ||
     typeof envelope.requestId !== 'string' ||
+    envelope.data !== null ||
     !('data' in envelope) ||
     !('error' in envelope)
   ) {
@@ -237,6 +239,7 @@ export function createHttpRecorderClient(bootstrap: RecorderBootstrap): Recorder
         responseCfg: {
           customHandle: true,
           hideErrorTips: true,
+          preserveErrorResponse: true,
         },
       };
       const url = buildRecorderEndpoint(apiRoot, path);
@@ -246,8 +249,8 @@ export function createHttpRecorderClient(bootstrap: RecorderBootstrap): Recorder
           : await POST<RequestEnvelope<T>>(url, body ?? {}, requestConfig);
       return json;
     } catch (e) {
-      const responseData = (e as { response?: { data?: unknown } } | null)?.response?.data;
-      if (isRecorderEnvelope(responseData)) return responseData as RequestEnvelope<T>;
+      const response = (e as { response?: { status?: unknown; data?: unknown } } | null)?.response;
+      if (response?.status === 409 && isRecorderEnvelope(response.data)) return response.data as RequestEnvelope<T>;
       return envelopeError('network_error', e instanceof Error ? e.message : '请求失败') as RequestEnvelope<T>;
     }
   }

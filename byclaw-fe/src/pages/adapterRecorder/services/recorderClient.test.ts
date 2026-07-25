@@ -372,12 +372,72 @@ describe('adapter recorder client selection', () => {
         details: { adapterPath: '/by/.bycli/clis/example_com/search.js' },
       },
     };
-    (POST as jest.Mock).mockRejectedValueOnce({ response: { data: conflict } });
+    (POST as jest.Mock).mockRejectedValueOnce({ response: { status: 409, data: conflict } });
 
     const client = createHttpRecorderClient({ enabled: true, baseUrl: '/byaiService/recorder' });
     const result = await client.saveAdapter('draft_0', 'edited source');
 
     expect(result).toEqual(conflict);
+  });
+
+  it('maps a rejected adapter conflict envelope with a non-conflict status to network_error', async () => {
+    (POST as jest.Mock).mockRejectedValueOnce({
+      response: {
+        status: 500,
+        data: {
+          ok: false,
+          schemaVersion: 'recorder.v1',
+          requestId: 'save_conflict',
+          data: null,
+          error: { code: 'adapter_exists', message: 'An adapter already exists at this path.' },
+        },
+      },
+    });
+
+    const client = createHttpRecorderClient({ enabled: true, baseUrl: '/byaiService/recorder' });
+    const result = await client.saveAdapter('draft_0', 'edited source');
+
+    expect(result.error?.code).toBe('network_error');
+  });
+
+  it('maps a rejected success envelope to network_error', async () => {
+    (POST as jest.Mock).mockRejectedValueOnce({
+      response: {
+        status: 409,
+        data: {
+          ok: true,
+          schemaVersion: 'recorder.v1',
+          requestId: 'save_conflict',
+          data: null,
+          error: { code: 'adapter_exists', message: 'An adapter already exists at this path.' },
+        },
+      },
+    });
+
+    const client = createHttpRecorderClient({ enabled: true, baseUrl: '/byaiService/recorder' });
+    const result = await client.saveAdapter('draft_0', 'edited source');
+
+    expect(result.error?.code).toBe('network_error');
+  });
+
+  it('maps a rejected envelope with response data to network_error', async () => {
+    (POST as jest.Mock).mockRejectedValueOnce({
+      response: {
+        status: 409,
+        data: {
+          ok: false,
+          schemaVersion: 'recorder.v1',
+          requestId: 'save_conflict',
+          data: { unexpected: true },
+          error: { code: 'adapter_exists', message: 'An adapter already exists at this path.' },
+        },
+      },
+    });
+
+    const client = createHttpRecorderClient({ enabled: true, baseUrl: '/byaiService/recorder' });
+    const result = await client.saveAdapter('draft_0', 'edited source');
+
+    expect(result.error?.code).toBe('network_error');
   });
 
   it('maps a rejected envelope without an error message to network_error', async () => {

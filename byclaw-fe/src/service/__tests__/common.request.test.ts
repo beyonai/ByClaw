@@ -84,6 +84,7 @@ import { logout } from '../user';
 import { GET, globalLogout, POST } from '../common/request';
 
 const mockAxiosCreate = (axios as any).create as jest.Mock;
+const responseErrorInterceptor = mockResponseInterceptorUse.mock.calls[0][1] as (error: unknown) => Promise<never>;
 
 describe('Service Common Request', () => {
   beforeEach(() => {
@@ -169,6 +170,30 @@ describe('Service Common Request', () => {
 
     await expect(POST('/api/fail', { id: 1 })).rejects.toBe('boom');
     expect(showRequestErrorModal).toHaveBeenCalledWith('boom');
+  });
+
+  it('preserves an opted-in HTTP 409 error response for a caller to handle', async () => {
+    const error = {
+      status: 409,
+      config: { url: '/byaiService/recorder/save', preserveErrorResponse: true },
+      response: {
+        data: { ok: false, schemaVersion: 'recorder.v1' },
+        status: 409,
+        statusText: 'Conflict',
+      },
+    };
+
+    await expect(responseErrorInterceptor(error)).rejects.toBe(error);
+  });
+
+  it('continues to stringify HTTP 409 errors without the opt-in', async () => {
+    await expect(
+      responseErrorInterceptor({
+        status: 409,
+        config: { url: '/byaiService/other' },
+        response: { data: { msg: 'conflict' }, status: 409, statusText: 'Conflict' },
+      })
+    ).rejects.toBe('conflict');
   });
 
   it('redirects to login when login count exceeds the limit', async () => {

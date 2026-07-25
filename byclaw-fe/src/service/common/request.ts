@@ -21,6 +21,7 @@ export interface ConfigType {
   responseCfg?: {
     hideErrorTips?: boolean;
     customHandle?: boolean;
+    preserveErrorResponse?: boolean;
   } & Record<string, unknown>;
 }
 
@@ -189,6 +190,9 @@ instance.interceptors.response.use(
   (err): any => {
     const { status, config, response } = err;
     const { url } = config;
+    if (status === 409 && config?.preserveErrorResponse && response) {
+      return Promise.reject(err);
+    }
     if (err.name === 'CanceledError') {
       // 请求被取消了，不用走下面的逻辑，将错误返回，给业务测判断错误类型
       return Promise.reject(err);
@@ -220,8 +224,6 @@ export function request(url: string, data: any, cfg: ConfigType, method: Method)
   const { cancelToken, maxQuantity, languageConf = true, responseCfg, ...config } = cfg;
 
   if (data && isPlainObject(data)) {
-
-    /* 参数去空 */
     for (const key in data) {
       if (data[key] === null || data[key] === undefined) {
         delete data[key];
@@ -270,6 +272,7 @@ export function request(url: string, data: any, cfg: ConfigType, method: Method)
       myHeader: {
         ...headers,
       },
+      preserveErrorResponse: responseCfg?.preserveErrorResponse,
       ...config, // 用户自定义配置，可以覆盖前面的配置
     })
     .then((res) => {
