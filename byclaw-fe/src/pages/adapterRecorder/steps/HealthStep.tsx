@@ -137,7 +137,7 @@ export default function HealthStep({ health, loading, onRun, onNext }: Props) {
           description="请修复 Local Service、byCLI Daemon、Chrome 扩展和 High-Level 模块后重新运行健康检查。"
         />
       ) : null}
-      <Space style={{ marginTop: token.marginMD }}>
+      <Space style={{ marginTop: token.marginMD, width: '100%', justifyContent: 'space-between' }}>
         <Button type="primary" loading={loading} onClick={onRun}>
           运行健康检查
         </Button>
