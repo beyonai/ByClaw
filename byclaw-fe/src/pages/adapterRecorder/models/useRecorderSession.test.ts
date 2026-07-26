@@ -1,5 +1,6 @@
 import {
   applyDraftSourceEdit,
+  canContinueAfterHealth,
   formatAdapterOverwriteConfirmationContent,
   mergeDraftVerification,
   mergeSaveResult,
@@ -27,6 +28,27 @@ const draft: PipelineDraft = {
 };
 
 describe('recorder verify-then-save state', () => {
+  it('continues after required health checks even when no LLM is available', () => {
+    expect(
+      canContinueAfterHealth({
+        localService: 'ok',
+        daemon: 'ok',
+        extension: 'ok',
+        highLevel: 'ok',
+        llmSynthesis: false,
+      })
+    ).toBe(true);
+    expect(
+      canContinueAfterHealth({
+        localService: 'ok',
+        daemon: 'down',
+        extension: 'ok',
+        highLevel: 'ok',
+        llmSynthesis: true,
+      })
+    ).toBe(false);
+  });
+
   it('invalidates local verification metadata immediately after source editing', () => {
     const edited = applyDraftSourceEdit(draft, 'edited source');
 

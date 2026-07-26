@@ -115,6 +115,13 @@ export function applyDraftSourceEdit(draft: PipelineDraft, source: string): Pipe
   };
 }
 
+/** LLM 是可选增强，只有四项录制基础依赖全部可用时才能进入绑定会话。 */
+export function canContinueAfterHealth(health?: HealthReport): boolean {
+  return (
+    health?.localService === 'ok' && health.daemon === 'ok' && health.extension === 'ok' && health.highLevel === 'ok'
+  );
+}
+
 /** 只把终态结果绑定到实际送检的源码。 */
 export function mergeDraftVerification(
   draft: PipelineDraft,
@@ -278,8 +285,22 @@ export default function useRecorderSession() {
       run(
         'health',
         () => client.health(),
-        (d) => ({ next: 'health_checked', patch: { health: d } })
+        (d) => ({ next: 'idle', patch: { health: d } })
       ),
+    // 健康结果停留在当前页供用户确认;仅四项必需依赖均通过时才显式进入绑定步骤。
+    continueAfterHealth: () => {
+      if (!canContinueAfterHealth(data.health)) {
+        setError({
+          code: 'invalid_state',
+          message: '必需健康检查尚未全部通过，请重新运行健康检查',
+          hint: INVALID_STATE_HINT,
+        });
+        return false;
+      }
+      setError(null);
+      advance('health_checked');
+      return true;
+    },
     // 新建录制会话:仅绑定浏览器 + 保存目标 URL,**不导航、不开 tab**(开 tab 推迟到「开始录制」)。
     // 若目标站点需要登录,用户在「开始录制」后打开的 byCLI 标签页内自行完成登录(Recorder 只绑定已有登录)。
     bind: (url: string, recordingMode?: RecordingMode) =>

@@ -66,7 +66,14 @@ export default function Workbench() {
   const renderActiveStep = () => {
     switch (state) {
       case 'idle':
-        return <HealthStep health={data.health} loading={loading} done={false} onRun={actions.health} />;
+        return (
+          <HealthStep
+            health={data.health}
+            loading={loading}
+            onRun={actions.health}
+            onNext={actions.continueAfterHealth}
+          />
+        );
       case 'health_checked':
         return <BindStep loading={loading} onBind={actions.bind} />;
       // 绑定后进录制 A 步;A 完成(capture_a)进录制 B 步。page_ready 按 sampleA 区分在 A 还是 B 段。

@@ -20,24 +20,49 @@ export function llmSynthesisDescription(reason?: string): string | undefined {
   return reason ? LLM_SYNTHESIS_DESCRIPTIONS[reason] : undefined;
 }
 
-const ITEMS: Array<{ key: keyof HealthReport; label: string; icon: React.ReactNode }> = [
+const REQUIRED_ITEMS: Array<{
+  key: 'localService' | 'daemon' | 'extension' | 'highLevel';
+  label: string;
+  icon: React.ReactNode;
+}> = [
   { key: 'localService', label: 'Local Service', icon: <CloudServerOutlined /> },
   { key: 'daemon', label: 'byCLI Daemon', icon: <ApiOutlined /> },
   { key: 'extension', label: 'Chrome 扩展', icon: <DisconnectOutlined /> },
   { key: 'highLevel', label: 'High-Level 模块', icon: <RocketOutlined /> },
 ];
 
+export function requiredHealthChecksPass(health?: HealthReport): boolean {
+  return (
+    health?.localService === 'ok' && health.daemon === 'ok' && health.extension === 'ok' && health.highLevel === 'ok'
+  );
+}
+
+export function llmHealthStatus(health?: HealthReport): '未检查' | '可用' | '不可用' {
+  if (health?.llmSynthesis === undefined) return '未检查';
+  return health.llmSynthesis ? '可用' : '不可用';
+}
+
+function llmHealthDescription(health?: HealthReport): string | undefined {
+  if (health?.llmSynthesis) return health.llmSynthesisMessage;
+  const reason =
+    llmSynthesisDescription(health?.llmSynthesisReason) ?? health?.llmSynthesisMessage ?? '将使用本地规则流程。';
+  return `${reason} 仍可使用本地规则评分和本地脚本生成。`;
+}
+
 interface Props {
   health?: HealthReport;
   loading: boolean;
-  done: boolean;
   onRun: () => void;
+  onNext: () => void;
 }
 
 // App UI:健康检查是只读状态读数(非交互),用左对齐状态列表而非居中卡片网格;
 // 颜色统一走主题 token(theme.useToken),不再内联硬编码 hex。
-export default function HealthStep({ health, loading, done, onRun }: Props) {
+export default function HealthStep({ health, loading, onRun, onNext }: Props) {
   const { token } = theme.useToken();
+  const requiredChecksPass = requiredHealthChecksPass(health);
+  const llmStatus = llmHealthStatus(health);
+  const llmDescription = llmHealthDescription(health);
   return (
     <Card title="健康检查" variant="borderless">
       <Paragraph type="secondary" style={{ lineHeight: 1.6 }}>
@@ -45,7 +70,7 @@ export default function HealthStep({ health, loading, done, onRun }: Props) {
       </Paragraph>
       <List
         size="small"
-        dataSource={ITEMS}
+        dataSource={REQUIRED_ITEMS}
         renderItem={(it) => {
           const v = health?.[it.key];
           const okState = v === 'ok';
@@ -69,23 +94,59 @@ export default function HealthStep({ health, loading, done, onRun }: Props) {
           );
         }}
       />
-      <Alert
-        style={{ marginTop: token.marginMD }}
-        type={health?.llmSynthesis ? 'success' : 'info'}
-        showIcon
-        icon={<RobotOutlined />}
-        message={health?.llmSynthesis ? '默认 LLM 已配置（可选）' : '默认 LLM 暂不可用（不阻断）'}
-        description={
-          health?.llmSynthesis
-            ? health.llmSynthesisMessage
-            : llmSynthesisDescription(health?.llmSynthesisReason) ??
-              health?.llmSynthesisMessage ??
-              '健康检查完成后可继续录制；未配置 LLM 时将使用本地规则流程。'
-        }
+      <List
+        size="small"
+        dataSource={[{ key: 'llm', label: '默认 LLM', icon: <RobotOutlined /> }]}
+        renderItem={(it) => (
+          <List.Item>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+              <Space size={token.marginSM}>
+                <span style={{ color: llmStatus === '可用' ? token.colorSuccess : token.colorTextSecondary }}>
+                  {it.icon}
+                </span>
+                <Text strong>{it.label}</Text>
+              </Space>
+              <Badge
+                status={llmStatus === '可用' ? 'success' : llmStatus === '不可用' ? 'warning' : 'default'}
+                text={
+                  <Text className="code" type="secondary">
+                    {llmStatus}
+                  </Text>
+                }
+              />
+            </div>
+          </List.Item>
+        )}
       />
-      <Button type="primary" loading={loading} disabled={done} onClick={onRun} style={{ marginTop: token.marginMD }}>
-        {done ? '健康检查已通过' : '运行健康检查'}
-      </Button>
+      {health ? (
+        <Alert
+          style={{ marginTop: token.marginMD }}
+          type={health.llmSynthesis ? 'success' : 'info'}
+          showIcon
+          icon={<RobotOutlined />}
+          message={health.llmSynthesis ? '默认 LLM 已配置（可选）' : '未检测到可用默认 LLM'}
+          description={llmDescription}
+        />
+      ) : null}
+      {health && !requiredChecksPass ? (
+        <Alert
+          style={{ marginTop: token.marginMD }}
+          type="warning"
+          showIcon
+          message="必需服务检查未通过"
+          description="请修复 Local Service、byCLI Daemon、Chrome 扩展和 High-Level 模块后重新运行健康检查。"
+        />
+      ) : null}
+      <Space style={{ marginTop: token.marginMD }}>
+        <Button type="primary" loading={loading} onClick={onRun}>
+          运行健康检查
+        </Button>
+        {requiredChecksPass ? (
+          <Button disabled={loading} onClick={onNext}>
+            下一步
+          </Button>
+        ) : null}
+      </Space>
     </Card>
   );
 }
