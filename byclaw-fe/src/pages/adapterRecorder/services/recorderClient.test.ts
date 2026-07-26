@@ -405,6 +405,27 @@ describe('adapter recorder client selection', () => {
     expect(result).toEqual(conflict);
   });
 
+  it('preserves an adapter conflict envelope when the backend returns a null hint', async () => {
+    const conflict = {
+      ok: false,
+      schemaVersion: 'recorder.v1' as const,
+      requestId: 'save_conflict',
+      data: null,
+      error: {
+        code: 'adapter_exists',
+        message: 'CLI adapter already exists',
+        hint: null,
+        details: { adapterPath: '/by/.bycli/clis/api_juejin_cn/search_api_v1_search.js' },
+      },
+    };
+    (POST as jest.Mock).mockRejectedValueOnce({ response: { status: 409, data: conflict } });
+
+    const client = createHttpRecorderClient({ enabled: true, baseUrl: '/byaiService/recorder' });
+    const result = await client.saveAdapter('draft_0', 'edited source');
+
+    expect(result).toEqual(conflict);
+  });
+
   it('maps a rejected adapter conflict envelope with a non-conflict status to network_error', async () => {
     (POST as jest.Mock).mockRejectedValueOnce({
       response: {

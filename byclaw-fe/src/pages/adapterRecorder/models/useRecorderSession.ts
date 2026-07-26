@@ -2,7 +2,7 @@
 // 录制会话状态机 model(@umijs/max model)。
 // 持有 SessionState + stateVersion,每个动作按 05 State Machine 校验当前态,
 // 非法转移返回 invalid_state(不调用后端),错误态走 failed。
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { createElement, useCallback, useMemo, useRef, useState } from 'react';
 import { Modal } from 'antd';
 import { getRecorderClient, type RecordingMode } from '../services/recorderClient';
 import { INVALID_STATE_HINT, isTerminalError } from '../constants/recorder';
@@ -184,18 +184,51 @@ export async function saveWithOverwriteConfirmation(
 export function formatAdapterOverwriteConfirmationContent(response: RequestEnvelope<SaveResult>): string {
   const adapterPath = response.error?.details?.adapterPath;
   const conflictPath = typeof adapterPath === 'string' ? adapterPath : undefined;
-  return conflictPath !== undefined
-    ? `是否覆盖当前用户沙箱中同名的 CLI 脚本？冲突路径：${conflictPath}`
-    : '是否覆盖当前用户沙箱中同名的 CLI 脚本？';
+  const pathContent = conflictPath !== undefined ? ` 冲突路径：${conflictPath}` : '';
+  return `当前用户沙箱中已存在同名 CLI 脚本，继续保存将覆盖原文件。${pathContent} 覆盖后原脚本将无法恢复，请确认是否继续。`;
+}
+
+export function renderAdapterOverwriteConfirmationContent(response: RequestEnvelope<SaveResult>) {
+  const adapterPath = response.error?.details?.adapterPath;
+  const conflictPath = typeof adapterPath === 'string' ? adapterPath : undefined;
+  return createElement(
+    'div',
+    null,
+    createElement('div', null, '当前用户沙箱中已存在同名 CLI 脚本，继续保存将覆盖原文件。'),
+    conflictPath !== undefined
+      ? createElement(
+          'code',
+          {
+            style: {
+              display: 'block',
+              marginTop: 12,
+              padding: '8px 12px',
+              background: '#f5f5f5',
+              borderRadius: 6,
+              wordBreak: 'break-all',
+            },
+          },
+          conflictPath
+        )
+      : null,
+    createElement('div', { style: { marginTop: 12 } }, '覆盖后原脚本将无法恢复，请确认是否继续。')
+  );
+}
+
+export function getAdapterOverwriteConfirmationCopy(response: RequestEnvelope<SaveResult>) {
+  return {
+    title: 'CLI 脚本已存在',
+    content: renderAdapterOverwriteConfirmationContent(response),
+    okText: '覆盖保存',
+    cancelText: '取消',
+    okType: 'danger' as const,
+  };
 }
 
 function confirmAdapterOverwrite(response: RequestEnvelope<SaveResult>): Promise<boolean> {
   return new Promise((resolve) => {
     Modal.confirm({
-      title: 'CLI 脚本已存在',
-      content: formatAdapterOverwriteConfirmationContent(response),
-      okText: '覆盖保存',
-      cancelText: '取消',
+      ...getAdapterOverwriteConfirmationCopy(response),
       onOk: () => resolve(true),
       onCancel: () => resolve(false),
     });

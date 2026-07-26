@@ -181,7 +181,7 @@ function isRecorderEnvelope(value: unknown): value is RequestEnvelope<unknown> {
   }
   if (typeof envelope.error !== 'object' || envelope.error === null || Array.isArray(envelope.error)) return false;
   const error = envelope.error as Record<string, unknown>;
-  const hasValidHint = !('hint' in error) || typeof error.hint === 'string';
+  const hasValidHint = !('hint' in error) || error.hint === null || typeof error.hint === 'string';
   const hasValidDetails =
     !('details' in error) ||
     (typeof error.details === 'object' && error.details !== null && !Array.isArray(error.details));
