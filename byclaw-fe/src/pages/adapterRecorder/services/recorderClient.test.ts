@@ -1,4 +1,4 @@
-import { getRecorderClient, resetRecorderClient } from './recorderClient';
+import { getEnabledRecordingModes, getRecorderClient, resetRecorderClient } from './recorderClient';
 import { buildRecorderEndpoint, createHttpRecorderClient } from './byclawRecorderClient';
 import { GET, POST } from '@/service/common/request';
 
@@ -8,10 +8,35 @@ jest.mock('@/service/common/request', () => ({
 }));
 
 describe('adapter recorder client selection', () => {
+  const originalRecordingModes = process.env.RECORDER_RECORDING_MODES;
+
   afterEach(() => {
     resetRecorderClient();
     jest.clearAllMocks();
     window.sessionStorage.clear();
+    if (originalRecordingModes === undefined) {
+      delete process.env.RECORDER_RECORDING_MODES;
+    } else {
+      process.env.RECORDER_RECORDING_MODES = originalRecordingModes;
+    }
+  });
+
+  it('defaults enabled recording modes to VNC', () => {
+    delete process.env.RECORDER_RECORDING_MODES;
+
+    expect(getEnabledRecordingModes()).toEqual(['vnc']);
+  });
+
+  it('uses the configured supported recording modes', () => {
+    process.env.RECORDER_RECORDING_MODES = 'tab_projection, embedded_iframe, tab_projection';
+
+    expect(getEnabledRecordingModes()).toEqual(['tab_projection', 'embedded_iframe']);
+  });
+
+  it('falls back to VNC when configured recording modes are unsupported', () => {
+    process.env.RECORDER_RECORDING_MODES = 'unsupported';
+
+    expect(getEnabledRecordingModes()).toEqual(['vnc']);
   });
 
   it('uses the byclaw recorder HTTP client by default', async () => {

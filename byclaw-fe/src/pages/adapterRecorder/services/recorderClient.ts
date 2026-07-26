@@ -29,6 +29,9 @@ export type BindMode = 'existing' | 'await_login';
  *  - vnc:浏览器+扩展+daemon 全在 podman 容器内,noVNC 投容器画面、用户操作容器 Chromium 录制(受 flag gate)。 */
 export type RecordingMode = 'tab_projection' | 'embedded_iframe' | 'vnc';
 
+const SUPPORTED_RECORDING_MODES: RecordingMode[] = ['tab_projection', 'embedded_iframe', 'vnc'];
+const DEFAULT_RECORDING_MODES: RecordingMode[] = ['vnc'];
+
 /** pipeline 阶段进度项(score/generate/verify…):前端轮询途中实时展示每阶段是否结束 + 耗时。 */
 export interface PipelineProgressPhase {
   stage: string;
@@ -266,6 +269,16 @@ export function getRecorderClient(): RecorderClient {
 
 export function resetRecorderClient(): void {
   cached = null;
+}
+
+/** 仪表盘录制方式：默认只显示 VNC；环境变量可用逗号分隔的方式覆盖。 */
+export function getEnabledRecordingModes(): RecordingMode[] {
+  const configuredModes = process.env.RECORDER_RECORDING_MODES?.split(',')
+    .map((mode) => mode.trim())
+    .filter((mode): mode is RecordingMode => SUPPORTED_RECORDING_MODES.includes(mode as RecordingMode));
+  const uniqueModes = configuredModes ? [...new Set(configuredModes)] : [];
+
+  return uniqueModes.length > 0 ? uniqueModes : DEFAULT_RECORDING_MODES;
 }
 
 /** embedded_iframe 录制模式是否可用:读 bootstrap flag；默认关闭。 */

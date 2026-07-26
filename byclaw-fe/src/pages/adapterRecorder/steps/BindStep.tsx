@@ -3,12 +3,8 @@
 // 标签页内自行完成登录(Recorder 只绑定已有登录,不收集或回放凭据)。
 import { LinkOutlined, DesktopOutlined, BlockOutlined, CloudServerOutlined } from '@ant-design/icons';
 import { Alert, Button, Card, Form, Input, Segmented, Space, Typography } from 'antd';
-import { useState } from 'react';
-import {
-  isEmbeddedIframeRecordingAvailable,
-  isVncRecordingAvailable,
-  type RecordingMode,
-} from '../services/recorderClient';
+import { type ReactNode, useState } from 'react';
+import { getEnabledRecordingModes, type RecordingMode } from '../services/recorderClient';
 
 const { Paragraph, Text } = Typography;
 
@@ -25,18 +21,20 @@ const MODE_HINT: Record<RecordingMode, string> = {
   vnc: '在容器内的浏览器中录制,画面经 noVNC 投回本页;浏览器与登录态都在容器里,适合部署到服务器集中录制。',
 };
 
+const MODE_OPTIONS: Record<RecordingMode, { label: string; value: RecordingMode; icon: ReactNode }> = {
+  tab_projection: { label: '登录站(投屏)', value: 'tab_projection', icon: <DesktopOutlined /> },
+  embedded_iframe: { label: '公开站(页内嵌入)', value: 'embedded_iframe', icon: <BlockOutlined /> },
+  vnc: { label: 'VNC(容器)', value: 'vnc', icon: <CloudServerOutlined /> },
+};
+
 export default function BindStep({ loading, onBind }: Props) {
   const [url, setUrl] = useState('https://juejin.cn/');
-  const [mode, setMode] = useState<RecordingMode>('vnc');
-  const embeddedAvailable = isEmbeddedIframeRecordingAvailable();
-  const vncAvailable = isVncRecordingAvailable();
+  const enabledModes = getEnabledRecordingModes();
+  const [mode, setMode] = useState<RecordingMode>(() =>
+    enabledModes.includes('vnc') ? 'vnc' : enabledModes[0] ?? 'vnc'
+  );
 
-  // 录制方式选项:投屏恒在;页内嵌入/VNC 各受 be flag gate。
-  const modeOptions = [
-    { label: '登录站(投屏)', value: 'tab_projection', icon: <DesktopOutlined /> },
-    ...(embeddedAvailable ? [{ label: '公开站(页内嵌入)', value: 'embedded_iframe', icon: <BlockOutlined /> }] : []),
-    ...(vncAvailable ? [{ label: 'VNC(容器)', value: 'vnc', icon: <CloudServerOutlined /> }] : []),
-  ];
+  const modeOptions = enabledModes.map((recordingMode) => MODE_OPTIONS[recordingMode]);
   const showModePicker = modeOptions.length > 1;
 
   const handleBind = () => {
