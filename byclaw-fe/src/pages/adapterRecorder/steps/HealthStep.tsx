@@ -42,6 +42,10 @@ export function llmHealthStatus(health?: HealthReport): '未检查' | '可用' |
   return health.llmSynthesis ? '可用' : '不可用';
 }
 
+export function shouldShowLlmUnavailableAlert(health?: HealthReport): boolean {
+  return health?.llmSynthesis === false;
+}
+
 function llmHealthDescription(health?: HealthReport): string | undefined {
   if (health?.llmSynthesis) return health.llmSynthesisMessage;
   const reason =
@@ -118,13 +122,13 @@ export default function HealthStep({ health, loading, onRun, onNext }: Props) {
           </List.Item>
         )}
       />
-      {health ? (
+      {shouldShowLlmUnavailableAlert(health) ? (
         <Alert
           style={{ marginTop: token.marginMD }}
-          type={health.llmSynthesis ? 'success' : 'info'}
+          type="info"
           showIcon
           icon={<RobotOutlined />}
-          message={health.llmSynthesis ? '默认 LLM 已配置（可选）' : '未检测到可用默认 LLM'}
+          message="未检测到可用默认 LLM"
           description={llmDescription}
         />
       ) : null}

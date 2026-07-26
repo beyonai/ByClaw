@@ -1,4 +1,9 @@
-import { llmHealthStatus, llmSynthesisDescription, requiredHealthChecksPass } from './HealthStep';
+import {
+  llmHealthStatus,
+  llmSynthesisDescription,
+  requiredHealthChecksPass,
+  shouldShowLlmUnavailableAlert,
+} from './HealthStep';
 
 describe('llmSynthesisDescription', () => {
   it('explains a missing default-model credential without leaking configuration details', () => {
@@ -47,5 +52,27 @@ describe('health readiness', () => {
     expect(
       llmHealthStatus({ localService: 'ok', daemon: 'ok', extension: 'ok', highLevel: 'ok', llmSynthesis: false })
     ).toBe('不可用');
+  });
+
+  it('shows the extra LLM notice only after an unavailable LLM check', () => {
+    expect(shouldShowLlmUnavailableAlert()).toBe(false);
+    expect(
+      shouldShowLlmUnavailableAlert({
+        localService: 'ok',
+        daemon: 'ok',
+        extension: 'ok',
+        highLevel: 'ok',
+        llmSynthesis: true,
+      })
+    ).toBe(false);
+    expect(
+      shouldShowLlmUnavailableAlert({
+        localService: 'ok',
+        daemon: 'ok',
+        extension: 'ok',
+        highLevel: 'ok',
+        llmSynthesis: false,
+      })
+    ).toBe(true);
   });
 });
