@@ -162,6 +162,7 @@ public class ByClawFileQueryApplicationService {
         // 如果没有，走默认路径
         String prefix = userSpaceDto.getPrefix();
         Long resourceId = userSpaceDto.getResourceId();
+        String normalizedKeyword = StringUtils.trimToEmpty(userSpaceDto.getKeyword()).toLowerCase(Locale.ROOT);
 
         if (StringUtil.isNotEmpty(prefix)) {
             logger.info("use current prefix={}", prefix);
@@ -201,10 +202,22 @@ public class ByClawFileQueryApplicationService {
                 continue;
             }
 
+            if (!matchKeyword(userSpaceVo, normalizedKeyword)) {
+                continue;
+            }
+
             resultList.add(userSpaceVo);
         }
 
         return resultList;
+    }
+
+    private boolean matchKeyword(UserSpaceVo userSpaceVo, String normalizedKeyword) {
+        if (StringUtils.isBlank(normalizedKeyword)) {
+            return true;
+        }
+        return StringUtils.defaultString(userSpaceVo.getName()).toLowerCase(Locale.ROOT).contains(normalizedKeyword)
+            || StringUtils.defaultString(userSpaceVo.getFilePath()).toLowerCase(Locale.ROOT).contains(normalizedKeyword);
     }
 
     private String buildAgentRootPrefix(Long resourceId) {
