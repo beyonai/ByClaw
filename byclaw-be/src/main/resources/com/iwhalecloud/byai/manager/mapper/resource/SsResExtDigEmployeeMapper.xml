@@ -543,8 +543,8 @@
             </choose>
             <if test="keyword != null and keyword != ''">
                 and (
-                    a.resource_name like concat('%', #{keyword}, '%')
-                    or a.resource_desc like concat('%', #{keyword}, '%')
+                    UPPER(a.resource_name) like concat('%', UPPER(#{keyword}), '%')
+                    or UPPER(a.resource_desc) like concat('%', UPPER(#{keyword}), '%')
                 )
             </if>
             order by case when a.resource_status = 3 then 1 else 0 end asc,
