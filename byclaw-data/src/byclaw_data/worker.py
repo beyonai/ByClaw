@@ -550,13 +550,14 @@ def _parse_skill_meta(content: str) -> dict[str, str]:
     return result
 
 
-def _extract_skill_resource_ids(resource_list: list[Any]) -> list[str]:
-    """从 resource_list 中提取 SKILL 类型条目的 resourceId。
+def _extract_skill_resource_ids(resource_list: list[Any]) -> list[tuple[str, str]]:
+    """从 resource_list 中提取 SKILL 类型条目的 (resourceId, resourceCode)。
 
-    SKILL 条目的 resourceCode 为 null，路径取 resourceId。
-    示例 resourceId：/.openclaw/workspace-baiying-agent-10000289/skills/老鹰-战略全局分析
+    返回 (resourceId, resourceCode) 列表。
+    - resourceId:  资源数据库 ID（如 "11016760"），或虚拟路径（如 "/.openclaw/.../skills/老鹰"）
+    - resourceCode: 技能编码/名称（如 "猎手-销售漏斗分析"），Hub 技能路径定位关键字段
     """
-    result: list[str] = []
+    result: list[tuple[str, str]] = []
     for item in resource_list:
         if not isinstance(item, dict):
             continue
@@ -564,8 +565,9 @@ def _extract_skill_resource_ids(resource_list: list[Any]) -> list[str]:
         if rtype != "SKILL":
             continue
         rid = str(item.get("resourceId") or "").strip()
+        rcode = str(item.get("resourceCode") or "").strip()
         if rid:
-            result.append(rid)
+            result.append((rid, rcode))
     return result
 
 
@@ -647,22 +649,78 @@ def _load_skills(
     _log = logging.getLogger(__name__)
 
     if skill_ids:
-        # 路径A：显式 SKILL 条目，懒加载
-        for resource_id in skill_ids:
+        # 路径A：显式 SKILL 条目，按 resourceId 构造路径加载
+        for resource_id, resource_code in skill_ids:
+            skill_md: Path | None = None
+            path_label = ""
+
+            # 路径A-1：resourceId 作为虚拟路径（工作空间技能）
             skill_path = (
                 Path(minio_root)
                 / f"byclaw-{user_code}"
                 / "by"
                 / resource_id.lstrip("/")
             )
-            if not first_skill_path:
-                first_skill_path = str(skill_path)
-            skill_md = skill_path / "SKILL.md"
-            if not skill_md.exists():
+            candidate = skill_path / "SKILL.md"
+            if candidate.exists():
+                skill_md = candidate
+                path_label = "path-A"
+
+            # 路径A-2：Hub 技能 — resourceCode 定位到 .openclaw/skills/
+            if skill_md is None and resource_code:
+                hub_path = (
+                    Path(minio_root)
+                    / f"byclaw-{user_code}"
+                    / "by"
+                    / ".openclaw"
+                    / "skills"
+                    / resource_code
+                )
+                candidate = hub_path / "SKILL.md"
+                if candidate.exists():
+                    skill_md = candidate
+                    path_label = "path-hub"
+
+            # 路径A-3：resourceId 可能也是有效的 hub 技能名（兼容旧格式）
+            if skill_md is None and "/" not in resource_id:
+                hub_path2 = (
+                    Path(minio_root)
+                    / f"byclaw-{user_code}"
+                    / "by"
+                    / ".openclaw"
+                    / "skills"
+                    / resource_id
+                )
+                candidate = hub_path2 / "SKILL.md"
+                if candidate.exists():
+                    skill_md = candidate
+                    path_label = "path-hub-by-id"
+
+            if skill_md is None:
                 _log.warning(
-                    "_load_skills: SKILL.md not found at %s, skipping", skill_md
+                    "_load_skills: SKILL.md not found for resource_id=%s resource_code=%s, "
+                    "tried path-A=%s path-hub=%s, skipping",
+                    resource_id,
+                    resource_code,
+                    skill_path / "SKILL.md",
+                    (
+                        Path(minio_root)
+                        / f"byclaw-{user_code}"
+                        / "by"
+                        / ".openclaw"
+                        / "skills"
+                        / (resource_code or resource_id)
+                        / "SKILL.md"
+                    ) if resource_code or "/" not in resource_id else "(no hub path)",
                 )
                 continue
+
+            if not first_skill_path:
+                first_skill_path = str(skill_md.parent)
+
+            _log.info(
+                "_load_skills: found SKILL.md via %s at %s", path_label, skill_md
+            )
             try:
                 content = skill_md.read_text(encoding="utf-8")
             except OSError as exc:
@@ -675,7 +733,7 @@ def _load_skills(
             all_warnings.extend(w)
             skill_entries.append(
                 (
-                    meta.get("name") or skill_path.name,
+                    meta.get("name") or resource_code or skill_md.parent.name,
                     meta.get("description") or "",
                     content,
                     skill_md,
