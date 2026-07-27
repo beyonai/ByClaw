@@ -2798,6 +2798,54 @@ class DataCloudWorker(GatewayWorker):
                     len(_resource_list_for_extract),
                 )
 
+
+            # ── Per-agent model override: DIG_EMPLOYEE prologue.modelInfo.modelId ──
+            # 仅顶层请求（有 agent_id）启用；子 Agent（by_agent_id=None）走默认模型
+            _per_agent_llm: dict | None = None
+            if by_agent_id is not None and context.redis is not None:
+                try:
+                    from byclaw_data.redis_agent_config import get_dig_employee_from_redis
+                    _employee = await get_dig_employee_from_redis(
+                        context.redis, str(by_agent_id), self._resource_path
+                    )
+                    if _employee:
+                        _prologue_raw = _employee.get("prologue") or ""
+                        if _prologue_raw:
+                            import json as _json_prologue
+                            _prologue = _json_prologue.loads(_prologue_raw) if isinstance(_prologue_raw, str) else _prologue_raw
+                            _model_id = (_prologue.get("modelInfo") or {}).get("modelId")
+                            if _model_id is not None:
+                                _agent_model = get_model_by_instance_id(None, _model_id)
+                                if _agent_model and _agent_model.get("modelCode"):
+                                    _ip = _agent_model.get("instanceParam") or {}
+                                    _per_agent_llm = {
+                                        "model": str(_agent_model.get("modelCode") or ""),
+                                        "api_key": str(_agent_model.get("authToken") or ""),
+                                        "base_url": str(_agent_model.get("url") or ""),
+                                        "temperature": str(_ip.get("temperature") or "0.0"),
+                                        "model_kwargs": _ip.get("extendParam") or {},
+                                    }
+                                    logger.info(
+                                        "Per-agent model resolved: agent_id=%s modelId=%s "
+                                        "model=%s base_url=%s session=%s",
+                                        by_agent_id, _model_id,
+                                        _per_agent_llm["model"],
+                                        _per_agent_llm["base_url"],
+                                        context.session_id,
+                                    )
+                            else:
+                                logger.info(
+                                    "Per-agent model: agent_id=%s prologue but no modelId, using default",
+                                    by_agent_id,
+                                )
+                except Exception as _e:
+                    logger.warning(
+                        "Per-agent model resolve failed for agent_id=%s: %s, using default",
+                        by_agent_id, _e,
+                    )
+            if _per_agent_llm is not None:
+                _dyn_extras["llm_config"] = _per_agent_llm
+
             # ── 情形一：构建 RequestToolContext（per-request 授权范围） ─────────────────
             tool_context: Any = None
             try:
