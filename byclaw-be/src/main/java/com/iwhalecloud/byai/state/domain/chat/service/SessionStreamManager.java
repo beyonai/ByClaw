@@ -8,6 +8,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
+import com.iwhaleai.byai.framework.common.Constants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -45,12 +46,6 @@ import com.iwhalecloud.byai.state.domain.ws.handler.RedisStreamMessageListener;
 public class SessionStreamManager implements ApplicationListener<ContextClosedEvent> {
 
     private static final Logger log = LoggerFactory.getLogger(SessionStreamManager.class);
-
-    /** Gateway Session Stream Key 前缀 */
-    private static final String STREAM_KEY_PREFIX = "byai_gateway:session:";
-
-    /** Stream Key 后缀 */
-    private static final String STREAM_KEY_SUFFIX = ":data_stream";
 
     /** 消费者组名称 */
     public static final String CONSUMER_GROUP = "byai_conversation_service_group";
@@ -221,7 +216,7 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
      * @return 完整的 Stream Key，格式：byai_gateway:session:{sessionId}:data_stream
      */
     public String buildStreamKey(String sessionId) {
-        return STREAM_KEY_PREFIX + sessionId + STREAM_KEY_SUFFIX;
+        return Constants.QueueNames.sessionDataStream(sessionId);
     }
 
     /**
