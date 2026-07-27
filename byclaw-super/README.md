@@ -19,12 +19,30 @@
 ## 项目结构
 
 ```text
-app/                                      byclaw-super 业务应用源码（相当于 src）
-app/worker/                               by-framework 入站 Worker 适配与生命周期
-packages/by-conductor/                    编排核心、Pi Leader、Connector SPI
-packages/connectors/openclaw-by-framework OpenClaw/by-framework Connector
-packages/storage-postgres/                PostgreSQL migration 与持久化 adapter
-legacy/fastify-pi-starter/                重构前行为参考，不参与 workspace
+app/                                         byclaw-super 业务应用源码（相当于 src）
+├── auth/                                    Beyond-Token 验签
+├── business/                                Agent Catalog 与 ByClaw BE 服务发现
+├── config/                                  配置读取和稳定默认值
+├── ingress/                                 HTTP、Worker 共用的鉴权和 Run 创建入口
+├── server/                                  Fastify HTTP/SSE 适配层
+│   ├── routes/                              capability、session、run、health 路由
+│   ├── app.ts                               Fastify 初始化和路由装配
+│   ├── byclaw-sse.ts                        RunEvent 到 ByClaw SSE 协议的序列化
+│   ├── http-request-utils.ts                请求头、鉴权和错误响应辅助函数
+│   ├── http-responses.ts                    对外 DTO 与分页游标
+│   ├── http-schemas.ts                      Fastify JSON Schema
+│   └── http-types.ts                        HTTP 层共享类型
+├── worker/
+│   ├── by-framework-worker.ts               Worker 命令处理、事件转发和生命周期
+│   └── by-framework-protocol.ts             by-framework 协议解析与消息构造
+└── runtime.ts                               应用 Composition Root
+
+packages/by-conductor/                       编排核心、Pi Leader、Connector SPI
+packages/connectors/openclaw-by-framework/
+├── src/index.ts                             OpenClaw 投递、恢复和 Redis Stream 消费
+└── src/by-framework-codec.ts                by-framework 消息解析和交互表单转换
+packages/storage-postgres/                   PostgreSQL migration 与持久化 adapter
+e2e/                                        HTTP/SSE 端到端测试
 ```
 
 根目录 `byclaw-super` 本身就是可启动的业务应用包。`app/` 只是源码目录，不是独立
@@ -43,6 +61,22 @@ app → connector-openclaw-by-framework → by-conductor
 新增 Hermes、Codex 等 Runtime 时，实现新的 `AgentConnector` 包并在 `app` 注册，不修改 Pi Leader。
 by-framework Worker 是业务入口，因此实现在 `app/worker`；Connector 仍只负责访问外部
 Agent Runtime，二者不会放进同一个包。
+
+### 代码组织约定
+
+- `app/runtime.ts` 只负责创建依赖、注册 Connector 和管理应用生命周期，不承载请求业务逻辑；
+- `app/ingress` 统一 HTTP 与 Worker 的身份解析、授权快照和 Run 创建流程；
+- `app/server/routes` 按资源组织路由，输入校验、响应映射和通用请求处理分别放在
+  `http-schemas.ts`、`http-responses.ts` 和 `http-request-utils.ts`；
+- `app/worker/by-framework-worker.ts` 负责 Worker 流程，纯协议解析和消息构造放在
+  `by-framework-protocol.ts`；
+- Connector 主类负责投递、恢复和事件消费，原始消息解析放在同包的 codec 文件；
+- `packages/by-conductor` 不依赖 Fastify、Redis 或 PostgreSQL，只通过 Repository 和
+  `AgentConnector` 接口访问外部能力。
+
+新增代码优先按现有职责放入对应文件。只有当一段逻辑可以独立阅读、复用或测试时才拆出函数或
+文件；不为简单转发增加基类、管理器或额外抽象层。涉及 Run 状态、lease、fencing、checkpoint
+或数据库事务边界的调整必须配套测试，不能以目录整理名义改变执行语义。
 
 ## 上下文工程
 
@@ -423,7 +457,7 @@ LOG_LEVEL=debug
 Worker 日志会记录 `workerId`、`agentType`、`messageId`、`sessionId`、`traceId` 和内部
 `runId`，不会记录任务正文或 `Beyond-Token`。本地直接运行 `pnpm dev` 即可在终端查看。
 
-## Verification
+## 验证
 
 ```bash
 pnpm typecheck

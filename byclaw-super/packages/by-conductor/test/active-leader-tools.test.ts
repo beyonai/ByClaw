@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  ASK_USER_QUESTION_TOOL_NAME,
   DELEGATE_AGENT_TOOL_NAME,
   resolveActiveLeaderToolNames,
 } from "../src/context/active-leader-tools.js";
@@ -16,16 +15,13 @@ const analyst: AgentProfile = {
 };
 
 describe("resolveActiveLeaderToolNames", () => {
-  it("hides delegation but keeps user interaction when no Agent is authorized", () => {
-    expect(resolveActiveLeaderToolNames([])).toEqual([
-      ASK_USER_QUESTION_TOOL_NAME,
-    ]);
+  it("exposes no Leader tools when no Agent is authorized and Ask User is disabled", () => {
+    expect(resolveActiveLeaderToolNames([])).toEqual([]);
   });
 
-  it("enables delegation when at least one Agent is authorized", () => {
+  it("only enables delegation when at least one Agent is authorized", () => {
     expect(resolveActiveLeaderToolNames([analyst])).toEqual([
       DELEGATE_AGENT_TOOL_NAME,
-      ASK_USER_QUESTION_TOOL_NAME,
     ]);
   });
 
