@@ -65,37 +65,8 @@ services:
       - byclaw-network
     restart: unless-stopped
 
-  redis-cluster-init:
-    image: ${IMAGE_REDIS:-ghcr.io/beyonai/byclaw/byclaw-redis:main}
-    container_name: byclaw-redis-cluster-init-${CONTAINER_SUFFIX:-middleware}
-    depends_on:
-      - redis-node-1
-      - redis-node-2
-      - redis-node-3
-      - redis-node-4
-      - redis-node-5
-      - redis-node-6
-    network_mode: host
-    entrypoint:
-      - /bin/sh
-      - -c
-      - |
-        CLUSTER_HOST="${HOST}"
-        P1="${REDIS_CLUSTER_PORT_1:-6371}"
-        P2="${REDIS_CLUSTER_PORT_2:-6372}"
-        P3="${REDIS_CLUSTER_PORT_3:-6373}"
-        P4="${REDIS_CLUSTER_PORT_4:-6374}"
-        P5="${REDIS_CLUSTER_PORT_5:-6375}"
-        P6="${REDIS_CLUSTER_PORT_6:-6376}"
-        echo "Waiting for Redis nodes to start..."
-        sleep 5
-        echo "Creating Redis cluster on $CLUSTER_HOST ..."
-        redis-cli -a "${REDIS_PASSWORD}" --cluster create \
-          "$CLUSTER_HOST:$P1" "$CLUSTER_HOST:$P2" "$CLUSTER_HOST:$P3" \
-          "$CLUSTER_HOST:$P4" "$CLUSTER_HOST:$P5" "$CLUSTER_HOST:$P6" \
-          --cluster-replicas 1 --cluster-yes
-        echo "Redis cluster created."
-    restart: "no"
+# NOTE: cluster creation is handled by start-redis-cluster.sh (real readiness
+# polling + idempotent + stale-state reset), not by an init container.
 
 networks:
   byclaw-network:
