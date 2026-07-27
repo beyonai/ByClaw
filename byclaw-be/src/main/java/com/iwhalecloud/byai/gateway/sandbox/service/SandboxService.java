@@ -1,10 +1,10 @@
 package com.iwhalecloud.byai.gateway.sandbox.service;
 
-import java.time.Duration;
-import java.time.Instant;
 import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.Date;
@@ -24,9 +24,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
-import com.iwhalecloud.byai.common.util.OkHttpUtil;
-import com.iwhalecloud.byai.gateway.sandbox.client.OpenSandboxClient;
-import com.iwhalecloud.byai.gateway.sandbox.client.model.SandboxDetail;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -36,19 +33,22 @@ import org.springframework.context.annotation.Lazy;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhaleai.byai.framework.common.Constants;
 import com.iwhaleai.byai.framework.common.RedisClient;
 import com.iwhaleai.byai.framework.core.WorkerRegistry;
 import com.iwhaleai.byai.framework.core.discovery.ServiceRegistry;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.common.constants.resource.WorkerAgentType;
 import com.iwhalecloud.byai.common.feign.request.sandbox.SandboxLaunchRequest;
 import com.iwhalecloud.byai.common.feign.response.SandboxResponse;
 import com.iwhalecloud.byai.common.feign.response.sandbox.SandboxLaunchData;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
+import com.iwhalecloud.byai.common.util.OkHttpUtil;
 import com.iwhalecloud.byai.common.util.RedisUtil;
+import com.iwhalecloud.byai.gateway.sandbox.client.OpenSandboxClient;
+import com.iwhalecloud.byai.gateway.sandbox.client.model.SandboxDetail;
 import com.iwhalecloud.byai.gateway.sandbox.model.SandboxInfo;
 import com.iwhalecloud.byai.gateway.sandbox.model.SandboxLeasePolicy;
 import com.iwhalecloud.byai.gateway.sandbox.runtime.SandboxRuntimeInstance;
@@ -299,7 +299,7 @@ public class SandboxService {
     }
 
     /**
-     * 清除用户首选 serviceKey
+     * 清除用户首选 serviceKey，并同步释放对应的沙箱实例（STARTING/RUNNING 均释放）。
      *
      * @param userCode 用户工号
      */
@@ -307,8 +307,27 @@ public class SandboxService {
         if (StringUtils.isBlank(userCode)) {
             return;
         }
+        String preferred = getPreferredServiceKey(userCode);
+        if (preferred != null) {
+            try {
+                SsSandboxRecord active = sandboxRecordMapper.selectActiveByUserAndResource(userCode, preferred, null);
+                if (active != null) {
+                    String releaseReason = manualReleaseReason(userCode);
+                    if (STATUS_STARTING.equals(active.getStatus())) {
+                        markStartingSandboxReleased(active, releaseReason);
+                    } else if (STATUS_RUNNING.equals(active.getStatus())) {
+                        doRemoveSandbox(active, releaseReason);
+                    }
+                    LOGGER.info("随首选 serviceKey 清除同步释放沙箱: userCode={}, sandboxType={}, recordId={}",
+                        userCode, preferred, active.getId());
+                }
+            } catch (Exception e) {
+                LOGGER.warn("清除首选 serviceKey 时释放沙箱实例失败（忽略，继续清除缓存）: userCode={}, preferred={}",
+                    userCode, preferred, e);
+            }
+        }
         RedisUtil.removeKey(PREFERRED_SERVICE_KEY_PREFIX + userCode);
-        LOGGER.info("清除用户首选 serviceKey: userCode={}", userCode);
+        LOGGER.info("清除用户首选 serviceKey: userCode={}, preferred={}", userCode, preferred);
     }
 
     /**
