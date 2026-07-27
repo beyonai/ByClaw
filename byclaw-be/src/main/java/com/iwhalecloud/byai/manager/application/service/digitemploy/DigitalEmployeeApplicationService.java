@@ -861,6 +861,11 @@ public class DigitalEmployeeApplicationService {
         if (ssResource == null) {
             throw new BaseException(CommonErrorCode.ERROR_CODE_50500, I18nUtil.get("resource.not.found"));
         }
+        // 超级助手即使已不再是当前默认助理，其创建者仍可编辑模型等运行配置。
+        if (isDefaultSuperAssistantResource(ssResource)
+            && Objects.equals(ssResource.getCreateBy(), CurrentUserHolder.getCurrentUserId())) {
+            return;
+        }
         if (isCurrentUserBoundDefaultDigitalEmployee(ssResource)) {
             return;
         }

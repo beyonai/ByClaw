@@ -2684,8 +2684,8 @@ public class AuthApplicationService {
         boolean canEdit = isDigitalEmployee
             ? (canManage || isBoundDefaultDigEmployee)
             : (canManage && !isDefaultResource);
-        // 默认超级助手是登录初始化的个人底座资源，即使当前用户绑定为默认助理，也不开放编辑入口。
-        vo.setCanEdit(canEdit && !isDefaultSuperAssistantResource && !isWhaleAgentExternalKnowledgeOrToolResource);
+        // 默认超级助手允许编辑模型等运行配置，但仍保留授权、删除等默认资源保护。
+        vo.setCanEdit(canEdit && !isWhaleAgentExternalKnowledgeOrToolResource);
         vo.setCanManageAuth(canManage && !isDefaultResource && !isDefaultSuperAssistantResource
             && !isPersonalAssistantResource);
         vo.setCanUseAuth(canSetUse && !isDefaultSuperAssistantResource);
