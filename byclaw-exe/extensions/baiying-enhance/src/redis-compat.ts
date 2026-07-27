@@ -74,6 +74,10 @@ export function resolveRedisCompatConfig(env: NodeJS.ProcessEnv = process.env): 
     throw new Error("REDIS_MODE=cluster requires REDIS_CLUSTER_HOST");
   }
 
+  if (mode === "cluster") {
+    return { mode, host, port, db, username, password, clusterNodes };
+  }
+
   if (!host || !Number.isFinite(port) || !Number.isFinite(db)) {
     return null;
   }
