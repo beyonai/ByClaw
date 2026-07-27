@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { DelegationService } from "./delegation-service.js";
-import type { EnvelopeExecutionCredentialCipher } from "./execution-credentials.js";
 import type { LeaderSession, LeaderSessionFactory } from "./leader.js";
 import { LeaderSessionCache } from "./leader-session-cache.js";
 import type {
@@ -10,6 +9,8 @@ import type {
   RunEventStore,
   RunExecutionClaim,
   RunExecutionQueue,
+  RunPage,
+  RunPageCursor,
   RunRepository,
   SessionRepository,
 } from "./repositories.js";
@@ -21,6 +22,9 @@ import type {
   RunEvent,
   RunStatus,
   Session,
+  ThinkingLevel,
+  UserInteractionQuestion,
+  UserInteractionResponse,
 } from "./types.js";
 import { TERMINAL_RUN_STATUSES } from "./types.js";
 
@@ -31,9 +35,10 @@ export interface CreateSessionInput {
 export interface CreateRunInput {
   sessionId: string;
   message: string;
+  thinkingLevel?: ThinkingLevel;
   agentList: AgentProfile[];
   metadata?: Record<string, unknown>;
-  /** 只在 ingress 到 KMS seal 的短暂调用链中存在，绝不写入 Run/Event/Pi。 */
+  /** 仅写入专用短期凭证表，不写入 Run、Event 或 Pi Session。 */
   executionCredential?: {
     secret: string;
     expiresAt: number;
@@ -42,6 +47,7 @@ export interface CreateRunInput {
 
 export interface CreateSessionRunInput extends CreateSessionInput {
   message: string;
+  thinkingLevel?: ThinkingLevel;
   agentList: AgentProfile[];
   metadata?: Record<string, unknown>;
   executionCredential?: {
@@ -53,19 +59,22 @@ export interface CreateSessionRunInput extends CreateSessionInput {
 type QueueEntry = { runId: string; metadata: Record<string, unknown> };
 type SessionQueue = { running: boolean; entries: QueueEntry[] };
 type ActiveRun = { controller: AbortController; leader: LeaderSession };
+type PendingLeaderInteraction = {
+  runId: string;
+  resolve(response: UserInteractionResponse): void;
+};
 
 export interface RunServiceRuntimeOptions {
   executionQueue?: RunExecutionQueue;
   checkpoints?: LeaderCheckpointStore;
   credentials?: ExecutionCredentialRepository;
-  credentialCipher?: EnvelopeExecutionCredentialCipher;
   instanceId?: string;
   leaseMs?: number;
   queuePollMs?: number;
   maxConcurrentRuns?: number;
   leaderCacheMaxEntries?: number;
   leaderCacheIdleTtlMs?: number;
-  /** 清理已过期 KMS 密文凭证的周期；默认 60 秒。 */
+  /** 清理已过期执行凭证的周期；默认 60 秒。 */
   credentialCleanupIntervalMs?: number;
 }
 
@@ -79,7 +88,9 @@ export class RunService {
   readonly #active = new Map<string, ActiveRun>();
   readonly #executionClaims = new Map<string, RunExecutionClaim>();
   readonly #ephemeralMetadata = new Map<string, Record<string, unknown>>();
+  readonly #pendingLeaderInteractions = new Map<string, PendingLeaderInteraction>();
   readonly #inFlightClaims = new Set<Promise<void>>();
+  readonly #persistentWaiting = new Set<string>();
   readonly #instanceId: string;
   readonly #leaseMs: number;
   readonly #queuePollMs: number;
@@ -166,6 +177,69 @@ export class RunService {
     return this.sessions.getOwned(sessionId, owner);
   }
 
+  /** 提交一个待处理的人机交互；可同时覆盖 Leader 原生工具和 Connector 适配路径。 */
+  async respondToInteraction(
+    runId: string,
+    interactionId: string,
+    response: UserInteractionResponse,
+  ): Promise<void> {
+    if (!isUserInteractionResponse(response)) {
+      throw new Error("Invalid user interaction response");
+    }
+    const run = await this.runs.get(runId);
+    if (!run) {
+      throw new Error(`Run not found: ${runId}`);
+    }
+    if (TERMINAL_RUN_STATUSES.has(run.status)) {
+      throw new Error(`Run is already terminal: ${runId} (${run.status})`);
+    }
+    if (
+      await this.delegationService.respondToInteraction(
+        runId,
+        interactionId,
+        structuredClone(response),
+      )
+    ) {
+      return;
+    }
+    const pending = this.#pendingLeaderInteractions.get(interactionId);
+    const history = await this.events.list(runId);
+    const requested = history
+      .slice()
+      .reverse()
+      .find(
+        (event) =>
+          event.type === "interaction.requested" &&
+          event.data.interactionId === interactionId &&
+          event.data.source === "leader",
+      );
+    const alreadyResponded = history.some(
+      (event) =>
+        event.type === "interaction.responded" &&
+        event.data.interactionId === interactionId &&
+        (!requested || event.eventId > requested.eventId),
+    );
+    if (!requested || alreadyResponded) {
+      throw new Error(`Pending interaction not found: ${interactionId}`);
+    }
+    await this.#appendRunEvent({
+      timestamp: this.now(),
+      runId,
+      type: "interaction.responded",
+      data: {
+        interactionId,
+        source: "leader",
+        action: response.action,
+        ...(response.answers ? { answers: response.answers } : {}),
+        ...(response.text ? { text: response.text } : {}),
+      },
+    });
+    if (pending?.runId === runId) {
+      this.#pendingLeaderInteractions.delete(interactionId);
+      pending.resolve(structuredClone(response));
+    }
+  }
+
   /** 回滚尚未创建任何 Run 的 Session；已被使用的 Session 不允许删除。 */
   async deleteEmptySession(sessionId: string): Promise<void> {
     if ((await this.runs.listBySession(sessionId)).length > 0) {
@@ -174,7 +248,7 @@ export class RunService {
     await this.sessions.delete(sessionId);
   }
 
-  /** 首个入口原子创建业务 Session、Run、run.created 和执行凭证密文。 */
+  /** 首个入口原子创建业务 Session、Run、run.created 和短期执行凭证。 */
   async createSessionRun(input: CreateSessionRunInput): Promise<Run> {
     validateAgentList(input.agentList);
     const now = this.now();
@@ -189,6 +263,7 @@ export class RunService {
       id: this.createId(),
       sessionId: session.id,
       input: input.message,
+      thinkingLevel: input.thinkingLevel ?? "off",
       agentList: structuredClone(input.agentList),
       status: "QUEUED",
       baseContextRevision: 0,
@@ -204,19 +279,15 @@ export class RunService {
       type: "run.created",
       data: { status: "QUEUED" },
     } as const;
-    const credential =
-      input.executionCredential && this.runtime.credentialCipher
-        ? await this.runtime.credentialCipher.seal({
-            runId: run.id,
-            userCode: session.owner.userCode,
-            secret: input.executionCredential.secret,
-            expiresAt: input.executionCredential.expiresAt,
-          })
-        : undefined;
+    const credential = input.executionCredential && this.runtime.credentials
+      ? {
+          runId: run.id,
+          secret: input.executionCredential.secret,
+          expiresAt: input.executionCredential.expiresAt,
+          createdAt: now,
+        }
+      : undefined;
     const credentialRepository = this.runtime.credentials;
-    if (credential && !credentialRepository) {
-      throw new Error("Execution credential repository is not configured");
-    }
     if (this.runs.createSessionWithRun) {
       await this.runs.createSessionWithRun(session, run, event, credential);
     } else {
@@ -256,6 +327,7 @@ export class RunService {
       id: this.createId(),
       sessionId: session.id,
       input: input.message,
+      thinkingLevel: input.thinkingLevel ?? "off",
       agentList: structuredClone(input.agentList),
       status: "QUEUED",
       baseContextRevision: session.contextRevision,
@@ -271,27 +343,23 @@ export class RunService {
       type: "run.created",
       data: { status: "QUEUED" },
     } as const;
-    const encryptedCredential =
-      input.executionCredential && this.runtime.credentialCipher
-        ? await this.runtime.credentialCipher.seal({
-            runId: run.id,
-            userCode: session.owner.userCode,
-            secret: input.executionCredential.secret,
-            expiresAt: input.executionCredential.expiresAt,
-          })
-        : undefined;
-    if (encryptedCredential && !this.runtime.credentials) {
-      throw new Error("Execution credential repository is not configured");
-    }
+    const credential = input.executionCredential && this.runtime.credentials
+      ? {
+          runId: run.id,
+          secret: input.executionCredential.secret,
+          expiresAt: input.executionCredential.expiresAt,
+          createdAt: now,
+        }
+      : undefined;
     if (this.runs.createWithEvent) {
-      await this.runs.createWithEvent(run, createdEvent, encryptedCredential);
+      await this.runs.createWithEvent(run, createdEvent, credential);
     } else {
       await this.runs.save(run);
-      if (encryptedCredential) {
+      if (credential) {
         if (!this.runtime.credentials) {
           throw new Error("Execution credential repository is not configured");
         }
-        await this.runtime.credentials.save(encryptedCredential);
+        await this.runtime.credentials.save(credential);
       }
       await this.events.append(createdEvent);
     }
@@ -309,6 +377,25 @@ export class RunService {
     owner: CallerPrincipal,
   ): Promise<Run | undefined> {
     return this.runs.getOwned(runId, owner);
+  }
+
+  /** 在 owner 校验后读取 Session 的一页 Run，避免越权方枚举历史消息。 */
+  async listOwnedSessionRuns(
+    sessionId: string,
+    owner: CallerPrincipal,
+    input: {
+      limit: number;
+      before?: RunPageCursor;
+    },
+  ): Promise<RunPage | undefined> {
+    if (!(await this.sessions.getOwned(sessionId, owner))) {
+      return undefined;
+    }
+    return this.runs.listPageBySession({
+      sessionId,
+      limit: input.limit,
+      ...(input.before ? { before: input.before } : {}),
+    });
   }
 
   /** 查询 Run 及其全部委派记录，供状态接口一次性返回。 */
@@ -417,7 +504,8 @@ export class RunService {
     this.#claimLoop = (async () => {
       while (
         !this.#stopping &&
-        this.#persistentActive < this.#maxConcurrentRuns
+        this.#persistentActive - this.#persistentWaiting.size <
+          this.#maxConcurrentRuns
       ) {
         const claim = await this.runtime.executionQueue?.claimNext(
           this.#instanceId,
@@ -433,6 +521,7 @@ export class RunService {
           .catch(() => undefined)
           .finally(() => {
             this.#inFlightClaims.delete(execution);
+            this.#persistentWaiting.delete(claim.runId);
             this.#persistentActive -= 1;
             void this.#kickPersistentQueue();
           });
@@ -466,7 +555,7 @@ export class RunService {
     void this.#pump(run.sessionId);
   }
 
-  /** 读取经过 lease 校验的密文凭证，执行完成后释放当前 Session lease。 */
+  /** 读取经过 lease 校验的短期凭证，执行完成后释放当前 Session lease。 */
   async #executeClaim(claim: RunExecutionClaim): Promise<void> {
     const queue = this.runtime.executionQueue;
     if (!queue) {
@@ -486,27 +575,18 @@ export class RunService {
         return;
       }
       let metadata = this.#ephemeralMetadata.get(run.id) ?? {};
-      if (this.runtime.credentials && this.runtime.credentialCipher) {
-        const session = await this.sessions.get(run.sessionId);
-        if (!session) {
-          await this.#finishFailed(run, `Session not found: ${run.sessionId}`);
-          return;
-        }
-        const encrypted = await this.runtime.credentials.loadForLease({
+      if (this.runtime.credentials) {
+        const credential = await this.runtime.credentials.loadForLease({
           runId: run.id,
           instanceId: claim.ownerInstanceId,
           fencingToken: claim.fencingToken,
           now: this.now(),
         });
-        if (!encrypted) {
+        if (!credential) {
           await this.#finishFailed(run, "EXECUTION_CREDENTIAL_EXPIRED");
           return;
         }
-        const secret = await this.runtime.credentialCipher.open(
-          encrypted,
-          session.owner.userCode,
-        );
-        metadata = { "Beyond-Token": secret };
+        metadata = { "Beyond-Token": credential.secret };
       }
       if (this.events.appendForClaim) {
         await this.events.appendForClaim(
@@ -595,7 +675,6 @@ export class RunService {
           `Leader context revision ${leader.contextRevision} does not match Run base ${latest.baseContextRevision}`,
         );
       }
-      current = await this.#setStatus(latest, "RUNNING");
       const runController = new AbortController();
       controller = runController;
       if (claim && this.runtime.executionQueue) {
@@ -612,8 +691,36 @@ export class RunService {
       }
       this.#active.set(run.id, { controller: runController, leader });
       dirtyLeader = true;
+      let leaderMessage = latest.input;
+      if (recoveringStage === "USER_INTERACTION_WAITING") {
+        const history = await this.events.list(latest.id);
+        const requested = history
+          .slice()
+          .reverse()
+          .find(
+            (event) => event.type === "interaction.requested",
+          );
+        if (requested?.data.source === "leader") {
+          this.#persistentWaiting.add(latest.id);
+          void this.#kickPersistentQueue();
+          const response = await this.#waitForInteractionResponse(
+            latest.id,
+            String(requested.data.interactionId),
+            requested.eventId,
+            runController.signal,
+          );
+          this.#persistentWaiting.delete(latest.id);
+          leaderMessage = `${latest.input}
+
+The user has now answered the clarification requested in the previous attempt.
+Continue the original task using this response:
+${JSON.stringify(response)}`;
+        }
+      }
+      current = await this.#setStatus(latest, "RUNNING");
       const result = await leader.run({
-        message: current.input,
+        message: leaderMessage,
+        thinkingLevel: current.thinkingLevel ?? "off",
         agents: current.agentList,
         signal: runController.signal,
         // Leader 的可见回答增量被规范化为 Run 事件，供 SSE 消费。
@@ -663,11 +770,87 @@ export class RunService {
             ...(recoveringStage === "LEADER_SYNTHESIZING"
               ? { reuseCompleted: true }
               : {}),
+            onInputRequired: async (interactionId) => {
+              current = await this.#setStatus(current, "WAITING_USER", {
+                interactionId,
+                source: "by-framework",
+              });
+            },
+            onInputResolved: async (interactionId) => {
+              if (!runController.signal.aborted) {
+                current = await this.#setStatus(current, "WAITING_AGENT", {
+                  interactionId,
+                  resumed: true,
+                });
+              }
+            },
           });
           if (!runController.signal.aborted) {
             current = await this.#setStatus(current, "SYNTHESIZING");
           }
           return delegated;
+        },
+        askUser: async ({ toolCallId, questions, signal }) => {
+          validateInteractionQuestions(questions);
+          const interactionId = `${current.id}:${toolCallId}`;
+          current = await this.#setStatus(current, "WAITING_USER", {
+            interactionId,
+            source: "leader",
+          });
+          const requestedEvent = await this.#appendRunEvent({
+            timestamp: this.now(),
+            runId: current.id,
+            type: "interaction.requested",
+            data: {
+              interactionId,
+              source: "leader",
+              request: {
+                questions,
+                uiPayload: toLegacyFormPayload(questions),
+              } as unknown as JsonValue,
+            },
+          });
+          const response = await new Promise<UserInteractionResponse>((resolve, reject) => {
+            const interactionSignal = signal ?? runController.signal;
+            const onAbort = () => {
+              this.#pendingLeaderInteractions.delete(interactionId);
+              reject(interactionSignal.reason ?? new Error("User interaction cancelled"));
+            };
+            if (interactionSignal.aborted) {
+              onAbort();
+              return;
+            }
+            interactionSignal.addEventListener("abort", onAbort, { once: true });
+            this.#pendingLeaderInteractions.set(interactionId, {
+              runId: current.id,
+              resolve: (value) => {
+                interactionSignal.removeEventListener("abort", onAbort);
+                resolve(value);
+              },
+            });
+            void this.#waitForInteractionResponse(
+              current.id,
+              interactionId,
+              requestedEvent.eventId,
+              interactionSignal,
+            )
+              .then((value) => {
+                const pending = this.#pendingLeaderInteractions.get(interactionId);
+                if (pending?.runId !== current.id) {
+                  return;
+                }
+                this.#pendingLeaderInteractions.delete(interactionId);
+                pending.resolve(value);
+              })
+              .catch(() => undefined);
+          });
+          if (!runController.signal.aborted) {
+            current = await this.#setStatus(current, "RUNNING", {
+              interactionId,
+              resumed: true,
+            });
+          }
+          return response;
         },
       });
 
@@ -719,6 +902,11 @@ export class RunService {
         clearInterval(heartbeat);
       }
       this.#active.delete(run.id);
+      for (const [interactionId, interaction] of this.#pendingLeaderInteractions) {
+        if (interaction.runId === run.id) {
+          this.#pendingLeaderInteractions.delete(interactionId);
+        }
+      }
       leaderLease?.release();
       if (dirtyLeader) {
         await this.#leaderCache.evict(run.sessionId);
@@ -726,6 +914,7 @@ export class RunService {
       if (claim && this.#executionClaims.get(run.id) === claim) {
         this.#executionClaims.delete(run.id);
       }
+      this.#persistentWaiting.delete(run.id);
     }
   }
 
@@ -737,6 +926,8 @@ export class RunService {
       executionStage:
         status === "WAITING_AGENT"
           ? "CONNECTOR_WAITING"
+          : status === "WAITING_USER"
+            ? "USER_INTERACTION_WAITING"
           : status === "SYNTHESIZING"
             ? "LEADER_SYNTHESIZING"
             : status === "RUNNING"
@@ -752,6 +943,14 @@ export class RunService {
       type: "run.status",
       data: { status, ...data },
     });
+    if (this.#executionClaims.has(updated.id)) {
+      if (status === "WAITING_USER") {
+        this.#persistentWaiting.add(updated.id);
+        void this.#kickPersistentQueue();
+      } else {
+        this.#persistentWaiting.delete(updated.id);
+      }
+    }
     return updated;
   }
 
@@ -857,6 +1056,100 @@ export class RunService {
     await this.runs.save(run);
     return this.events.append(event);
   }
+
+  async #appendRunEvent(
+    event: Omit<RunEvent, "eventId">,
+  ): Promise<RunEvent> {
+    const claim = this.#executionClaims.get(event.runId);
+    if (claim && this.events.appendForClaim) {
+      return this.events.appendForClaim(event, claim);
+    }
+    return this.events.append(event);
+  }
+
+  async #waitForInteractionResponse(
+    runId: string,
+    interactionId: string,
+    afterEventId: number,
+    signal: AbortSignal,
+  ): Promise<UserInteractionResponse> {
+    for await (const event of this.events.stream(runId, afterEventId, signal)) {
+      if (
+        event.type === "interaction.responded" &&
+        event.data.interactionId === interactionId
+      ) {
+        const action =
+          event.data.action === "skip" || event.data.action === "cancel"
+            ? event.data.action
+            : "submit";
+        const answers =
+          event.data.answers &&
+          typeof event.data.answers === "object" &&
+          !Array.isArray(event.data.answers)
+            ? event.data.answers
+            : undefined;
+        return {
+          action,
+          ...(answers ? { answers } : {}),
+          ...(typeof event.data.text === "string"
+            ? { text: event.data.text }
+            : {}),
+        };
+      }
+    }
+    throw new Error(`Interaction event stream ended: ${interactionId}`);
+  }
+}
+
+function validateInteractionQuestions(questions: UserInteractionQuestion[]): void {
+  if (questions.length < 1 || questions.length > 4) {
+    throw new Error("askUserQuestion requires 1-4 questions");
+  }
+  for (const question of questions) {
+    if (!question.header.trim() || !question.question.trim()) {
+      throw new Error("Each user interaction question requires a header and question");
+    }
+    if (question.options.length < 2 || question.options.length > 4) {
+      throw new Error("Each user interaction question requires 2-4 options");
+    }
+  }
+}
+
+function toLegacyFormPayload(
+  questions: UserInteractionQuestion[],
+): Record<string, JsonValue> {
+  return {
+    formStatus: 0,
+    humanTool: true,
+    pluginMachineFields: questions.map((question, index) => ({
+      formType: question.multiSelect ? "textarea" : "select",
+      fieldName: question.header,
+      fieldCode: `answer_${index + 1}`,
+      description: question.multiSelect
+        ? `${question.question}\n可多选：${question.options
+            .map((option) => option.label)
+            .join("、")}`
+        : question.question,
+      required: true,
+      ...(question.multiSelect
+        ? {}
+        : {
+            optional: question.options.map((option) => ({
+              label: option.label,
+              value: option.value ?? option.label,
+              description: option.description,
+            })),
+          }),
+    })),
+  };
+}
+
+function isUserInteractionResponse(value: UserInteractionResponse): boolean {
+  return (
+    value.action === "submit" ||
+    value.action === "skip" ||
+    value.action === "cancel"
+  );
 }
 
 function validateAgentList(agentList: AgentProfile[]): void {

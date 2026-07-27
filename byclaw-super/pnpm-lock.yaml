@@ -67,11 +67,11 @@ importers:
         specifier: workspace:*
         version: link:../by-conductor
       pg:
-        specifier: ^8.22.0
+        specifier: 8.22.0
         version: 8.22.0
     devDependencies:
       '@types/pg':
-        specifier: ^8.20.0
+        specifier: 8.20.0
         version: 8.20.0
 
 packages:

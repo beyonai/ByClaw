@@ -1,6 +1,6 @@
 import type { AgentProfile } from "@byclaw/by-conductor";
 import { OPENCLAW_BY_FRAMEWORK_CONNECTOR_ID } from "@byclaw/connector-openclaw-by-framework";
-import type { ByClawBeEndpointResolver } from "./redis-service-discovery.js";
+import type { ByClawBeEndpointResolver } from "./endpoint-resolver.js";
 
 const DISCOVER_PATH = "/byaiService/api/v2/digitEmploy/discover";
 

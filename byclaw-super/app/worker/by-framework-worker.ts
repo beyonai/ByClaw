@@ -1,9 +1,7 @@
-import { hostname } from "node:os";
-import type {
-  CallerPrincipal,
-  IngressSessionBindingRepository,
-  RunEvent,
-  RunService,
+import {
+  type IngressSessionBindingRepository,
+  type RunEvent,
+  type RunService,
 } from "@byclaw/by-conductor";
 import {
   AgentState,
@@ -11,6 +9,7 @@ import {
   AskAgentCommand,
   CancelTaskCommand,
   EventType,
+  GatewayDataEmitter,
   GatewayWorker,
   ResumeCommand,
   WorkerRegistry,
@@ -20,13 +19,35 @@ import {
   createRedis,
 } from "@byclaw/by-framework";
 import { BeyondTokenAuthError } from "../auth/beyond-token.js";
-import type { RunIngressService } from "../run-ingress-service.js";
+import type { RunIngressService } from "../ingress/run-ingress-service.js";
+import {
+  closeReasoning,
+  commandLogFields,
+  commandString,
+  commandThinkingLevel,
+  defaultWorkerId,
+  delay,
+  externalSessionBindingKey,
+  extractMessage,
+  isDelegationReasoningEvent,
+  progressMessage,
+  protocolMessage,
+  recordString,
+  recordValue,
+  stringData,
+  toError,
+  visibleEventCharacters,
+} from "./by-framework-protocol.js";
 
 type RedisClient = ReturnType<typeof createRedis>;
-type WorkerRunService = Pick<RunService, "streamEvents" | "cancelRun">;
+type WorkerRunService = Pick<
+  RunService,
+  "streamEvents" | "cancelRun" | "respondToInteraction"
+>;
+type WorkerProtocolEmitter = Pick<GatewayDataEmitter, "emitEvent">;
 type WorkerRunIngress = Pick<
   RunIngressService,
-  "createSessionRun" | "createRun" | "resolvePrincipal"
+  "createSessionRun" | "createRun" | "resolvePrincipal" | "authorizeRun"
 >;
 
 export interface WorkerLogger {
@@ -43,6 +64,7 @@ export interface ByClawSuperWorkerOptions {
   runService: WorkerRunService;
   runIngress: WorkerRunIngress;
   sessionBindings?: IngressSessionBindingRepository;
+  protocolEmitter?: WorkerProtocolEmitter;
   logger?: WorkerLogger;
 }
 
@@ -54,6 +76,7 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
   readonly #agentType: string;
   readonly #runService: WorkerRunService;
   readonly #runIngress: WorkerRunIngress;
+  readonly #protocolEmitter: WorkerProtocolEmitter;
   readonly #logger: WorkerLogger | undefined;
   readonly #sessionBindings: IngressSessionBindingRepository | undefined;
   readonly #activeRuns = new Map<string, string>();
@@ -66,6 +89,8 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
     this.#agentType = options.agentType;
     this.#runService = options.runService;
     this.#runIngress = options.runIngress;
+    this.#protocolEmitter =
+      options.protocolEmitter ?? new GatewayDataEmitter(options.redis);
     this.#logger = options.logger;
     this.#sessionBindings = options.sessionBindings;
   }
@@ -81,6 +106,38 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
    */
   async processCommand(command: GatewayCommand, context: AgentContext): Promise<AgentTaskResult> {
     if (command instanceof ResumeCommand) {
+      const interactionId = recordString(command.header.metadata, "interaction_id");
+      const runId = recordString(command.header.metadata, "parent_run_id");
+      if (interactionId && runId) {
+        const beyondToken = commandString(command, "Beyond-Token");
+        if (!beyondToken) {
+          throw new BeyondTokenAuthError("Beyond-Token metadata is required");
+        }
+        const systemCode = commandString(command, "System-Code");
+        const authorized = await this.#runIngress.authorizeRun(runId, {
+          beyondToken,
+          ...(systemCode ? { systemCode } : {}),
+        });
+        if (authorized.run.id !== runId) {
+          throw new Error(`Authorized Run does not match Resume target: ${runId}`);
+        }
+        await this.#runService.respondToInteraction(runId, interactionId, {
+          action: "submit",
+          text: extractMessage(command.content),
+        });
+        // 这是对既有 Run 的辅助输入，不是一个新的聊天终态。标记当前 Resume
+        // context 已收尾，避免 by-framework 自动发送 APP_STREAM_RESPONSE 提前关闭共享流。
+        context.setStreamFinished(true);
+        this.#logger?.info(
+          { ...commandLogFields(command), runId, interactionId },
+          "已恢复用户交互",
+        );
+        return new AgentTaskResult({
+          status: AgentState.COMPLETED,
+          content: "",
+          replyData: null,
+        });
+      }
       this.#logger?.info(
         commandLogFields(command),
         "收到子 Agent Resume 回调",
@@ -104,6 +161,7 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
       throw new BeyondTokenAuthError("Beyond-Token metadata is required");
     }
     const systemCode = commandString(command, "System-Code");
+    const thinkingLevel = commandThinkingLevel(command);
 
     await context.checkCancelled();
     this.#logger?.info(commandLogFields(command), "开始处理 by-framework 入站任务");
@@ -121,8 +179,17 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
         })
       : this.#externalSessionBindings.get(bindingKey);
     const run = sessionId
-      ? await this.#runIngress.createRun({ sessionId, message, ...auth })
-      : await this.#runIngress.createSessionRun({ message, ...auth });
+      ? await this.#runIngress.createRun({
+          sessionId,
+          message,
+          thinkingLevel,
+          ...auth,
+        })
+      : await this.#runIngress.createSessionRun({
+          message,
+          thinkingLevel,
+          ...auth,
+        });
     if (this.#sessionBindings) {
       await this.#sessionBindings.bind({
         source: "by-framework",
@@ -176,32 +243,83 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
     let reasoningStarted = false;
     let reasoningEnded = false;
     let answer = "";
+    const streamStartedAt = Date.now();
+    let previousEventHandledAt = streamStartedAt;
+    let eventCount = 0;
+    let visibleDeltaCount = 0;
+    let visibleCharacterCount = 0;
+    let firstVisibleEventMs: number | undefined;
 
     for await (const event of this.#runService.streamEvents(runId)) {
+      const eventArrivedAt = Date.now();
+      const visibleCharacters = visibleEventCharacters(event);
+      eventCount += 1;
+      if (visibleCharacters > 0) {
+        visibleDeltaCount += 1;
+        visibleCharacterCount += visibleCharacters;
+        firstVisibleEventMs ??= eventArrivedAt - streamStartedAt;
+      }
+      this.#logger?.info(
+        {
+          diagnostic: "stream_timing",
+          stage: "internal_event_received",
+          runId,
+          eventId: event.eventId,
+          eventType: event.type,
+          eventCount,
+          visibleCharacters,
+          streamElapsedMs: eventArrivedAt - streamStartedAt,
+          waitForNextEventMs: eventArrivedAt - previousEventHandledAt,
+          persistedEventAgeMs: Math.max(0, eventArrivedAt - event.timestamp),
+        },
+        "[stream_timing] 收到内部流事件",
+      );
+
       if (context.isCancelRequested()) {
         await this.#runService.cancelRun(runId, "by-framework task cancelled");
         await context.checkCancelled();
       }
 
+      if (
+        isDelegationReasoningEvent(event) &&
+        (!reasoningStarted || reasoningEnded)
+      ) {
+        await this.#emitWithTiming(event, "reasoning_start", 0, () =>
+          context.emitState("", EventType.REASONING_LOG_START),
+        );
+        reasoningStarted = true;
+        reasoningEnded = false;
+      }
+      await this.#forwardDelegationEvent(event, context);
+      await this.#forwardInteractionEvent(event, context);
+
       const progress = progressMessage(event);
       if (progress) {
         if (!reasoningStarted || reasoningEnded) {
-          await context.emitState("", EventType.REASONING_LOG_START);
+          await this.#emitWithTiming(event, "reasoning_start", 0, () =>
+            context.emitState("", EventType.REASONING_LOG_START),
+          );
           reasoningStarted = true;
           reasoningEnded = false;
         }
-        await context.emitState(progress, EventType.REASONING_LOG_DELTA);
+        await this.#emitWithTiming(event, "reasoning_delta", progress.length, () =>
+          context.emitState(progress, EventType.REASONING_LOG_DELTA),
+        );
       }
 
       if (event.type === "leader.delta") {
         if (reasoningStarted && !reasoningEnded) {
-          await context.emitState("", EventType.REASONING_LOG_END);
+          await this.#emitWithTiming(event, "reasoning_end", 0, () =>
+            context.emitState("", EventType.REASONING_LOG_END),
+          );
           reasoningEnded = true;
         }
         const delta = stringData(event.data.text);
         if (delta) {
           answer += delta;
-          await context.emitChunk(delta, EventType.ANSWER_DELTA);
+          await this.#emitWithTiming(event, "answer_delta", delta.length, () =>
+            context.emitChunk(delta, EventType.ANSWER_DELTA),
+          );
         }
       }
 
@@ -209,9 +327,23 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
         const finalAnswer = stringData(event.data.finalAnswer);
         if (!answer && finalAnswer) {
           answer = finalAnswer;
-          await context.emitChunk(finalAnswer, EventType.ANSWER_DELTA);
+          await this.#emitWithTiming(
+            event,
+            "answer_delta_fallback",
+            finalAnswer.length,
+            () => context.emitChunk(finalAnswer, EventType.ANSWER_DELTA),
+          );
         }
         await closeReasoning(context, reasoningStarted, reasoningEnded);
+        this.#logStreamSummary({
+          runId,
+          terminalStatus: "completed",
+          streamStartedAt,
+          eventCount,
+          visibleDeltaCount,
+          visibleCharacterCount,
+          firstVisibleEventMs,
+        });
         return new AgentTaskResult({
           status: AgentState.COMPLETED,
           content: answer || finalAnswer,
@@ -222,6 +354,15 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
       if (event.type === "run.cancelled") {
         await closeReasoning(context, reasoningStarted, reasoningEnded);
         await context.checkCancelled();
+        this.#logStreamSummary({
+          runId,
+          terminalStatus: "cancelled",
+          streamStartedAt,
+          eventCount,
+          visibleDeltaCount,
+          visibleCharacterCount,
+          firstVisibleEventMs,
+        });
         return new AgentTaskResult({
           status: AgentState.CANCELLED,
           content: "",
@@ -231,11 +372,238 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
 
       if (event.type === "run.failed") {
         await closeReasoning(context, reasoningStarted, reasoningEnded);
+        this.#logStreamSummary({
+          runId,
+          terminalStatus: "failed",
+          streamStartedAt,
+          eventCount,
+          visibleDeltaCount,
+          visibleCharacterCount,
+          firstVisibleEventMs,
+        });
         throw new Error(stringData(event.data.error) || "Run failed");
       }
+
+      previousEventHandledAt = Date.now();
     }
 
     throw new Error(`Run event stream ended without a terminal event: ${runId}`);
+  }
+
+  /** 计量一次 by-framework 写入，区分上游事件等待和 Redis/协议发送阻塞。 */
+  async #emitWithTiming(
+    event: RunEvent,
+    outputType: string,
+    characters: number,
+    emit: () => Promise<unknown>,
+  ): Promise<void> {
+    const startedAt = Date.now();
+    try {
+      await emit();
+      this.#logger?.info(
+        {
+          diagnostic: "stream_timing",
+          stage: "by_framework_emit_completed",
+          runId: event.runId,
+          eventId: event.eventId,
+          eventType: event.type,
+          outputType,
+          characters,
+          emitDurationMs: Date.now() - startedAt,
+        },
+        "[stream_timing] by-framework 流事件发送完成",
+      );
+    } catch (error) {
+      this.#logger?.error(
+        {
+          diagnostic: "stream_timing",
+          stage: "by_framework_emit_failed",
+          runId: event.runId,
+          eventId: event.eventId,
+          eventType: event.type,
+          outputType,
+          characters,
+          emitDurationMs: Date.now() - startedAt,
+          error: toError(error).message,
+        },
+        "[stream_timing] by-framework 流事件发送失败",
+      );
+      throw error;
+    }
+  }
+
+  /** 输出单次 Run 的流式诊断汇总，不记录正文或调用凭证。 */
+  #logStreamSummary(input: {
+    runId: string;
+    terminalStatus: string;
+    streamStartedAt: number;
+    eventCount: number;
+    visibleDeltaCount: number;
+    visibleCharacterCount: number;
+    firstVisibleEventMs: number | undefined;
+  }): void {
+    this.#logger?.info(
+      {
+        diagnostic: "stream_timing",
+        stage: "stream_summary",
+        runId: input.runId,
+        terminalStatus: input.terminalStatus,
+        totalDurationMs: Date.now() - input.streamStartedAt,
+        eventCount: input.eventCount,
+        visibleDeltaCount: input.visibleDeltaCount,
+        visibleCharacterCount: input.visibleCharacterCount,
+        firstVisibleEventMs: input.firstVisibleEventMs ?? null,
+      },
+      "[stream_timing] by-framework 流式转发结束",
+    );
+  }
+
+  /**
+   * 把已持久化的 Delegation 事件映射为前端现有的思考树协议：
+   * Agent 调用是 3009 状态节点，子 Agent 正文是挂在该节点下的 1002 文本。
+   */
+  async #forwardDelegationEvent(
+    event: RunEvent,
+    context: AgentContext,
+  ): Promise<void> {
+    if (event.type === "delegation.started") {
+      await this.#emitDelegationStatus(event, context, "_START_");
+      return;
+    }
+    if (event.type === "delegation.output.delta") {
+      const text = stringData(event.data.text);
+      if (text) {
+        await this.#emitDelegationOutput(event, context, text);
+      }
+      return;
+    }
+    if (event.type === "delegation.completed") {
+      await this.#emitDelegationStatus(event, context, "_DONE_");
+      return;
+    }
+    if (event.type === "delegation.failed") {
+      await this.#emitDelegationStatus(event, context, "_ERROR_");
+    }
+  }
+
+  /** 将统一交互事件输出为前端既有的 3013 表单卡片。 */
+  async #forwardInteractionEvent(
+    event: RunEvent,
+    context: AgentContext,
+  ): Promise<void> {
+    if (event.type !== "interaction.requested") {
+      return;
+    }
+    const interactionId = stringData(event.data.interactionId);
+    const request = recordValue(event.data.request);
+    const uiPayload =
+      recordValue(request?.uiPayload) ?? {
+        formStatus: 0,
+        pluginMachineFields: [],
+      };
+    const delegationId = stringData(event.data.delegationId);
+    const content = JSON.stringify(uiPayload);
+    await this.#emitWithTiming(event, "user_interaction", content.length, () =>
+      this.#protocolEmitter.emitEvent({
+        sessionId: context.sessionId,
+        traceId: context.traceId,
+        eventType: EventType.REASONING_LOG_DELTA,
+        sourceAgentType: this.#agentType,
+        messageId: interactionId,
+        parentMessageId: delegationId || "-1",
+        data: protocolMessage({
+          event: EventType.REASONING_LOG_DELTA,
+          content,
+          contentType: "3013",
+          orderId: interactionId,
+          parentOrderId: delegationId || "-1",
+          agentId: "",
+          agentName: "",
+        }),
+        metadata: {
+          parent_run_id: event.runId,
+          interaction_id: interactionId,
+          ...(delegationId ? { delegation_id: delegationId } : {}),
+        },
+      }),
+    );
+  }
+
+  /** 输出可由前端按同一 orderId 原位更新的 Agent 调用状态节点。 */
+  async #emitDelegationStatus(
+    event: RunEvent,
+    context: AgentContext,
+    status: "_START_" | "_DONE_" | "_ERROR_",
+  ): Promise<void> {
+    const delegationId = stringData(event.data.delegationId);
+    if (!delegationId) {
+      return;
+    }
+    const agentId = stringData(event.data.agentId);
+    const agentName = stringData(event.data.agentName);
+    const content = `正在调用 Agent：${agentName || agentId || "Agent"}`;
+    await this.#emitWithTiming(event, "delegation_status", content.length, () =>
+      this.#protocolEmitter.emitEvent({
+        sessionId: context.sessionId,
+        traceId: context.traceId,
+        eventType: EventType.REASONING_LOG_DELTA,
+        sourceAgentType: this.#agentType,
+        messageId: delegationId,
+        parentMessageId: "-1",
+        data: protocolMessage({
+          event: EventType.REASONING_LOG_DELTA,
+          content,
+          contentType: "3009",
+          orderId: delegationId,
+          parentOrderId: "-1",
+          agentId,
+          agentName,
+          objectType: "tool_call",
+          status,
+        }),
+        metadata: {
+          parent_run_id: event.runId,
+          delegation_id: delegationId,
+        },
+      }),
+    );
+  }
+
+  /** 原样输出子 Agent 正文，并用 parentOrderId 挂到对应 Agent 调用节点。 */
+  async #emitDelegationOutput(
+    event: RunEvent,
+    context: AgentContext,
+    text: string,
+  ): Promise<void> {
+    const delegationId = stringData(event.data.delegationId);
+    if (!delegationId) {
+      return;
+    }
+    const agentId = stringData(event.data.agentId);
+    const agentName = stringData(event.data.agentName);
+    await this.#emitWithTiming(event, "delegation_output_delta", text.length, () =>
+      this.#protocolEmitter.emitEvent({
+        sessionId: context.sessionId,
+        traceId: context.traceId,
+        eventType: EventType.REASONING_LOG_DELTA,
+        sourceAgentType: this.#agentType,
+        messageId: `${delegationId}:output`,
+        parentMessageId: delegationId,
+        data: protocolMessage({
+          event: EventType.REASONING_LOG_DELTA,
+          content: text,
+          contentType: "1002",
+          orderId: `${delegationId}:output`,
+          parentOrderId: delegationId,
+          agentId,
+          agentName,
+        }),
+        metadata: {
+          parent_run_id: event.runId,
+          delegation_id: delegationId,
+        },
+      }),
+    );
   }
 }
 
@@ -375,150 +743,4 @@ export class ByFrameworkWorkerRuntime {
       `Timed out waiting for by-framework Worker to become online: ${this.workerId}`,
     );
   }
-}
-
-/** 从 AskAgent 的多种内容表示中提取最后一条非空用户文本。 */
-function extractMessage(content: unknown): string {
-  if (typeof content === "string") {
-    return content.trim();
-  }
-  if (Array.isArray(content)) {
-    for (let index = content.length - 1; index >= 0; index -= 1) {
-      const message = extractMessage(content[index]);
-      if (message) {
-        return message;
-      }
-    }
-    return "";
-  }
-  if (!isRecord(content)) {
-    return "";
-  }
-  if (typeof content.text === "string") {
-    return content.text.trim();
-  }
-  return extractMessage(content.content);
-}
-
-/** 按大小写不敏感方式从 command metadata 或 extraPayload 读取字符串字段。 */
-function commandString(command: AskAgentCommand, key: string): string {
-  return (
-    recordString(command.header.metadata, key) ||
-    recordString(command.extraPayload, key)
-  );
-}
-
-/** 从记录中读取大小写不敏感的非空字符串值。 */
-function recordString(record: Readonly<Record<string, unknown>>, key: string): string {
-  const expected = key.toLowerCase();
-  for (const [candidate, value] of Object.entries(record)) {
-    if (candidate.toLowerCase() === expected && typeof value === "string") {
-      return value.trim();
-    }
-  }
-  return "";
-}
-
-/** 关闭尚未结束的简化思考阶段，且不透传 Pi 或 OpenClaw 原始 reasoning。 */
-async function closeReasoning(
-  context: AgentContext,
-  started: boolean,
-  ended: boolean,
-): Promise<void> {
-  if (started && !ended) {
-    await context.emitState("", EventType.REASONING_LOG_END);
-  }
-}
-
-/** 将内部事件转换为对调用方安全、稳定的中文执行进度。 */
-function progressMessage(event: RunEvent): string {
-  if (event.type === "run.created") {
-    return "任务已创建";
-  }
-  if (event.type === "run.attempt") {
-    return Number(event.data.attemptNo) > 1
-      ? "任务已由其他实例恢复执行"
-      : "任务开始执行";
-  }
-  if (event.type === "run.status") {
-    return runStatusMessage(stringData(event.data.status));
-  }
-  if (event.type === "delegation.started") {
-    return `正在调用 ${stringData(event.data.agentName) || stringData(event.data.agentId) || "Agent"}`;
-  }
-  if (event.type === "delegation.progress") {
-    return stringData(event.data.message);
-  }
-  if (event.type === "delegation.completed") {
-    return `Agent ${stringData(event.data.agentId) || ""} 已完成`.trim();
-  }
-  if (event.type === "delegation.failed") {
-    return `Agent ${stringData(event.data.agentId) || ""} 执行失败`.trim();
-  }
-  return "";
-}
-
-/** 将内部 Run 状态映射为面向用户的进度描述。 */
-function runStatusMessage(status: string): string {
-  switch (status) {
-    case "QUEUED":
-      return "任务已进入队列";
-    case "RUNNING":
-      return "正在理解任务";
-    case "WAITING_AGENT":
-      return "正在等待 Agent 执行";
-    case "SYNTHESIZING":
-      return "正在汇总 Agent 结果";
-    case "CANCELLING":
-      return "正在取消任务";
-    default:
-      return "";
-  }
-}
-
-/** 从 RunEvent JSON 字段中安全读取字符串。 */
-function stringData(value: unknown): string {
-  return typeof value === "string" ? value : "";
-}
-
-/** 生成同一主机内稳定且便于定位的默认 Worker 实例 ID。 */
-function defaultWorkerId(): string {
-  const host = hostname().trim().replace(/[^a-zA-Z0-9_.-]/g, "-") || "unknown-host";
-  return `byclaw-super-${host}`;
-}
-
-/** 构造不包含消息正文和凭证的结构化日志字段。 */
-function commandLogFields(command: GatewayCommand): Record<string, unknown> {
-  return {
-    messageId: command.header.messageId,
-    sessionId: command.header.sessionId,
-    traceId: command.header.traceId,
-    sourceAgentType: command.header.sourceAgentType,
-  };
-}
-
-/** 外部 sessionId 在验签 userCode 内绑定，避免不同用户发生碰撞。 */
-function externalSessionBindingKey(
-  principal: CallerPrincipal,
-  externalSessionId: string,
-): string {
-  return JSON.stringify([
-    principal.userCode,
-    externalSessionId,
-  ]);
-}
-
-/** 判断未知值是否为可安全读取字段的对象。 */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-/** 把未知异常统一转换为 Error，便于日志和健康检查使用。 */
-function toError(error: unknown): Error {
-  return error instanceof Error ? error : new Error(String(error));
-}
-
-/** 非阻塞等待一次短轮询间隔。 */
-function delay(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }

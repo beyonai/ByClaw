@@ -1,11 +1,9 @@
 import "dotenv/config";
-import { loadConfig } from "./config.js";
+import { loadConfig } from "./config/index.js";
 import { createApplication } from "./runtime.js";
-import { loadKeyEncryptionService } from "./security/kms-adapter.js";
 
 const config = loadConfig();
-const keyEncryptionService = await loadKeyEncryptionService(config.kms);
-const application = await createApplication(config, { keyEncryptionService });
+const application = await createApplication(config);
 
 /** 收到进程信号时走应用的幂等关闭流程。 */
 const shutdown = async () => {

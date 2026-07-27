@@ -1,11 +1,13 @@
 import { randomUUID } from "node:crypto";
 import {
+  AgentCapabilityCompileError,
   ConnectorRegistry,
   DelegationService,
-  EnvelopeExecutionCredentialCipher,
   PiLeaderSessionFactory,
   RunService,
-  type KeyEncryptionService,
+  type AgentCapabilityCompileInput,
+  type AgentCapabilityCompileResult,
+  type AgentCapabilityCompiler,
   type LeaderSession,
   type LeaderSessionFactory,
   type PiRuntimeConfig,
@@ -15,18 +17,24 @@ import { OpenClawByFrameworkConnector } from "@byclaw/connector-openclaw-by-fram
 import { PostgresDatabase } from "@byclaw/storage-postgres";
 import type { FastifyInstance } from "fastify";
 import { createBeyondTokenVerifier } from "./auth/beyond-token.js";
-import { ByClawBeAgentCatalog } from "./byclaw-be-agent-catalog.js";
-import { loadConfig, type AppConfig } from "./config.js";
-import { RedisByClawBeEndpointResolver } from "./redis-service-discovery.js";
-import { RunIngressService } from "./run-ingress-service.js";
+import { ByClawBeAgentCatalog } from "./business/agent-catalog.js";
+import { loadConfig, type AppConfig } from "./config/index.js";
+import { RedisByClawBeEndpointResolver } from "./business/endpoint-resolver.js";
+import { RunIngressService } from "./ingress/run-ingress-service.js";
 import { buildHttpApp } from "./server/app.js";
 import { ByFrameworkWorkerRuntime } from "./worker/by-framework-worker.js";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Pi Leader 工厂
+// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * 延迟初始化 Pi，允许 HTTP 服务暴露 /ready 说明模型配置问题，
  * 而不是在 Composition Root 创建阶段直接丢失诊断上下文。
  */
-class LazyPiLeaderFactory implements LeaderSessionFactory {
+class LazyPiLeaderFactory
+  implements LeaderSessionFactory, AgentCapabilityCompiler
+{
   readonly #factory: Promise<
     | { factory: PiLeaderSessionFactory; error?: never }
     | { factory?: never; error: Error }
@@ -51,6 +59,21 @@ class LazyPiLeaderFactory implements LeaderSessionFactory {
     return initialized.factory.create(sessionId);
   }
 
+  /** 复用已初始化的 Pi 模型执行无状态能力卡编译。 */
+  async compile(
+    input: AgentCapabilityCompileInput,
+  ): Promise<AgentCapabilityCompileResult> {
+    const initialized = await this.#factory;
+    if (initialized.error) {
+      throw new AgentCapabilityCompileError(
+        "Capability model is unavailable",
+        503,
+        { cause: initialized.error },
+      );
+    }
+    return initialized.factory.compile(input);
+  }
+
   /** 将 Pi 初始化异常转换为 readiness 可消费的健康状态。 */
   async health(): Promise<{ healthy: boolean; message?: string; model?: string }> {
     const initialized = await this.#factory;
@@ -64,6 +87,10 @@ class LazyPiLeaderFactory implements LeaderSessionFactory {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 公共契约
+// ─────────────────────────────────────────────────────────────────────────────
+
 export interface Application {
   app: FastifyInstance;
   runService: RunService;
@@ -74,58 +101,16 @@ export interface Application {
   close(): Promise<void>;
 }
 
-export interface ApplicationDependencies {
-  /**
-   * 生产必须注入真实 KMS adapter。此依赖不提供“本地密钥”隐式降级，
-   * 防止多实例在配置错误时悄悄失去凭证接管能力。
-   */
-  keyEncryptionService: KeyEncryptionService;
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// 组装辅助：把 createApplication 里自成一块的配置/选项/健康聚合抽离出来
+// ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * 应用 Composition Root：创建 Port 实现、注册 Connector、组装编排服务和 HTTP 层。
- * 具体 Connector 在这里注入，因此 by-conductor 不依赖任何传输实现。
- */
-export async function createApplication(
-  config = loadConfig(),
-  dependencies?: ApplicationDependencies,
-): Promise<Application> {
-  if (!dependencies?.keyEncryptionService) {
-    throw new Error(
-      "A production KeyEncryptionService must be injected for KMS envelope encryption",
-    );
-  }
-  const database = new PostgresDatabase(config.database);
-  if (config.database.migrateOnStart) {
-    await database.migrate();
-  }
-  const sessionRepository = database.sessions;
-  const runRepository = database.runs;
-  const delegationRepository = database.delegations;
-  const eventStore = database.events;
-  
-  // 创建连接器
-  const connectors = new ConnectorRegistry();
-  // Connector 和 ByClaw BE 服务发现共用同一个 Redis 连接。
-  const redis = createRedis(config.redis);
-  // 初始化 openclaw 连接器，目前使用 ByFramework 来连接
-  const openClaw = new OpenClawByFrameworkConnector({
-    redis,
-    // Connector 回调的 sourceAgentType 必须与入站 Worker 的逻辑路由名一致。
-    sourceAgentType: config.worker.agentType,
-  });
-  connectors.register(openClaw);
-
-  //编排服务
-  const delegationService = new DelegationService(
-    connectors,
-    delegationRepository,
-    eventStore,
-    config.delegationTimeoutMs,
-  );
-
-  //pi agent 初始化，后续模型配置改为由从业务系统中读取 
-  const piConfig: PiRuntimeConfig = {
+/** 收敛 Pi 模型运行时配置：provider/model/baseUrl 按是否配置条件展开。 */
+function buildPiRuntimeConfig(
+  config: AppConfig,
+  database: PostgresDatabase,
+): PiRuntimeConfig {
+  return {
     ...(config.piProvider ? { provider: config.piProvider } : {}),
     ...(config.piModel ? { model: config.piModel } : {}),
     ...(config.openAiBaseUrl ? { openAiBaseUrl: config.openAiBaseUrl } : {}),
@@ -135,14 +120,117 @@ export async function createApplication(
       ? { sessionCacheDirectory: config.piSessionCacheDirectory }
       : {}),
   };
+}
 
-  //懒加载
-  const leaders = new LazyPiLeaderFactory(piConfig);
+/** 组装 RunService 的可观测/队列/凭证运行期参数。 */
+function buildRunServiceOptions(
+  config: AppConfig,
+  database: PostgresDatabase,
+) {
+  return {
+    executionQueue: database.queue,
+    checkpoints: database.checkpoints,
+    credentials: database.credentials,
+    instanceId: config.instanceId,
+    leaseMs: config.runLeaseMs,
+    queuePollMs: config.runQueuePollMs,
+    maxConcurrentRuns: config.worker.maxConcurrency,
+    leaderCacheMaxEntries: config.piSessionCacheMaxEntries,
+    leaderCacheIdleTtlMs: config.piSessionCacheIdleTtlMs,
+    credentialCleanupIntervalMs: config.runCredentialCleanupIntervalMs,
+  };
+}
+
+/** 聚合 /ready 需要的健康信号：数据库、Pi、连接器与 Worker。 */
+async function collectReadiness(input: {
+  runService: RunService;
+  connectors: ConnectorRegistry;
+  database: PostgresDatabase;
+  worker: { enabled: boolean; runtime?: ByFrameworkWorkerRuntime };
+}) {
+  const { runService, connectors, database, worker } = input;
+  const [pi, connectorHealth, workerHealth] = await Promise.all([
+    runService.health(),
+    connectors.health(),
+    worker.runtime?.health() ??
+      Promise.resolve<{ healthy: boolean; message?: string }>({ healthy: true }),
+  ]);
+  const schemaHealth = await database.health();
+  const listenerHealth = database.events.listenerHealth();
+  const databaseHealth = {
+    ...schemaHealth,
+    healthy: schemaHealth.healthy && listenerHealth.healthy,
+    listener: listenerHealth,
+  };
+  const workerReport = {
+    enabled: worker.enabled,
+    healthy: workerHealth.healthy,
+    ...(worker.runtime
+      ? { workerId: worker.runtime.workerId, agentType: worker.runtime.agentType }
+      : {}),
+    ...(workerHealth.message ? { message: workerHealth.message } : {}),
+  };
+  return {
+    ready:
+      databaseHealth.healthy &&
+      pi.healthy &&
+      Object.values(connectorHealth).every((health) => health.healthy) &&
+      workerReport.healthy,
+    pi,
+    database: databaseHealth,
+    connectors: connectorHealth,
+    worker: workerReport,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Composition Root
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 应用 Composition Root：创建 Port 实现、注册 Connector、组装编排服务和 HTTP 层。
+ * 具体 Connector 在这里注入，因此 by-conductor 不依赖任何传输实现。
+ */
+export async function createApplication(
+  config = loadConfig(),
+): Promise<Application> {
+  // 1) 持久化层：Postgres + 仓储（按配置在启动时迁移 schema）。
+  const database = new PostgresDatabase(config.database);
+  if (config.database.migrateOnStart) {
+    await database.migrate();
+  }
+  const sessionRepository = database.sessions;
+  const runRepository = database.runs;
+  const delegationRepository = database.delegations;
+  const eventStore = database.events;
+
+  // 2) 出站传输：Connector 与 ByClaw BE 服务发现共用同一个 Redis 连接。
+  const connectors = new ConnectorRegistry();
+  const redis = createRedis(config.redis);
+  // 初始化 openclaw 连接器，目前使用 ByFramework 来连接。
+  // Connector 回调的 sourceAgentType 必须与入站 Worker 的逻辑路由名一致。
+  const openClaw = new OpenClawByFrameworkConnector({
+    redis,
+    sourceAgentType: config.worker.agentType,
+  });
+  connectors.register(openClaw);
+
+  // 3) 编排核心：委派服务 + Pi Leader + 数字员工授权目录。
+  const delegationService = new DelegationService(
+    connectors,
+    delegationRepository,
+    eventStore,
+    config.delegationTimeoutMs,
+  );
+  // 后续模型配置改为由业务系统读取；此处仍按 AppConfig 构造 Pi 运行时。
+  const leaders = new LazyPiLeaderFactory(buildPiRuntimeConfig(config, database));
   // 数字员工授权列表由 ByClaw BE 实时提供，外部调用方不再传入 agentList。
   const agentCatalog = new ByClawBeAgentCatalog({
     ...config.byClawBe,
     endpointResolver: new RedisByClawBeEndpointResolver(redis),
   });
+
+  // 4) Run 流水线：RunService（快照授权、调度 Leader）+ 入站鉴权与 Run 创建。
   const runService = new RunService(
     sessionRepository,
     runRepository,
@@ -152,21 +240,7 @@ export async function createApplication(
     leaders,
     Date.now,
     randomUUID,
-    {
-      executionQueue: database.queue,
-      checkpoints: database.checkpoints,
-      credentials: database.credentials,
-      credentialCipher: new EnvelopeExecutionCredentialCipher(
-        dependencies.keyEncryptionService,
-      ),
-      instanceId: config.instanceId,
-      leaseMs: config.runLeaseMs,
-      queuePollMs: config.runQueuePollMs,
-      maxConcurrentRuns: config.worker.maxConcurrency,
-      leaderCacheMaxEntries: config.piSessionCacheMaxEntries,
-      leaderCacheIdleTtlMs: config.piSessionCacheIdleTtlMs,
-      credentialCleanupIntervalMs: config.runCredentialCleanupIntervalMs,
-    },
+    buildRunServiceOptions(config, database),
   );
   const runIngress = new RunIngressService(
     runService,
@@ -174,51 +248,30 @@ export async function createApplication(
     agentCatalog,
     config.runCredentialMaxTtlMs,
   );
-  let workerRuntime: ByFrameworkWorkerRuntime | undefined;
 
-  //启动 http 服务
+  // 5) HTTP 入口：/ready 同时要求 Pi、全部已注册 Connector、数据库与 Worker 健康。
+  let workerRuntime: ByFrameworkWorkerRuntime | undefined;
   const app = await buildHttpApp({
+    capabilityCompiler: leaders,
     runService,
     corsOrigin: config.corsOrigin,
     logger: { level: config.logLevel },
     runIngress,
-    // /ready 同时要求 Pi 与全部已注册 Connector 健康。
-    readiness: async () => {
-      const [pi, connectorHealth, workerHealth] = await Promise.all([
-        runService.health(),
-        connectors.health(),
-        workerRuntime?.health() ??
-          Promise.resolve<{ healthy: boolean; message?: string }>({ healthy: true }),
-      ]);
-      const schemaHealth = await database.health();
-      const listenerHealth = database.events.listenerHealth();
-      const databaseHealth = {
-        ...schemaHealth,
-        healthy: schemaHealth.healthy && listenerHealth.healthy,
-        listener: listenerHealth,
-      };
-      const worker = {
-        enabled: config.worker.enabled,
-        healthy: workerHealth.healthy,
-        ...(workerRuntime
-          ? { workerId: workerRuntime.workerId, agentType: workerRuntime.agentType }
-          : {}),
-        ...(workerHealth.message ? { message: workerHealth.message } : {}),
-      };
-      return {
-        ready:
-          databaseHealth.healthy &&
-          pi.healthy &&
-          Object.values(connectorHealth).every((health) => health.healthy) &&
-          worker.healthy,
-        pi,
-        database: databaseHealth,
-        connectors: connectorHealth,
-        worker,
-      };
-    },
+    // workerRuntime 在第 7 步按需赋值；闭包在调用时读取，保证读到最终实例。
+    readiness: async () =>
+      collectReadiness({
+        runService,
+        connectors,
+        database,
+        worker: {
+          enabled: config.worker.enabled,
+          ...(workerRuntime ? { runtime: workerRuntime } : {}),
+        },
+      }),
   });
-  // Worker 属于业务入口，由 Composition Root 注册；Connector 只承担 OpenClaw 出站传输。
+
+  // 6) by-framework 入站 Worker：业务入口，由 Composition Root 按需注册。
+  //    Connector 只承担 OpenClaw 出站传输，二者职责分离。
   if (config.worker.enabled) {
     workerRuntime = new ByFrameworkWorkerRuntime({
       redis,
@@ -231,8 +284,9 @@ export async function createApplication(
       logger: app.log,
     });
   }
-  let closed = false;
 
+  // 8) 生命周期：先注册 Worker 再监听端口；关闭时逆序释放。
+  let closed = false;
   return {
     app,
     runService,

@@ -244,6 +244,23 @@ class RouteServiceTest {
     }
 
     @Test
+    void route_sendsDefaultSuperAssistantToBySuperWithoutUserSuffix() throws Exception {
+        ChatProcessContext ctx = buildContext(WorkerAgentType.BY_SUPER.getCode(), 1001L);
+        when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(), any(), any()))
+                .thenAnswer(invocation -> {
+                    ctx.gatewayEventQueue.offer(currentTraceDoneEvent(ctx));
+                    return successResponse();
+                });
+
+        routeService.route(ctx);
+
+        verify(gatewayClient).sendMessage(eq(WorkerAgentType.BY_SUPER.getCode()), eq("3"), eq("hello"), eq("u1"),
+                eq("testUser"), anyString(), eq("-1"), eq("2"), eq(ctx.getTraceId()), eq(ctx.getParams()), any());
+        verifyNoInteractions(sandboxService);
+    }
+
+    @Test
     void route_replacesCompositeSkillPlaceholderBeforeSendingToGateway() throws Exception {
         ChatProcessContext ctx = buildContext();
         ctx.getAssistantChatDto().setChatContent(

@@ -42,14 +42,17 @@ pnpm workspace. The root directory itself is the deployable app `@byclaw/byclaw-
 app/                              Composition Root + HTTP/Worker adapters (this is src/)
   index.ts                        process entry: dotenv, createApplication(), signal-driven shutdown
   runtime.ts                      Composition Root: wires ports, Connector, services, HTTP, Worker
-  config.ts                       loadConfig(): validates/normalizes .env into AppConfig
+  config/                         loadConfig(): validates/normalizes .env into AppConfig
+    index.ts                      env → AppConfig (config-defaults.ts holds the defaults table)
+  ingress/
+    run-ingress-service.ts        SHARED ingress: token verify → agent snapshot → createRun
+  business/                       ByClaw BE outbound integration
+    agent-catalog.ts              authorized agents from ByClaw BE (/digitEmploy/discover)
+    endpoint-resolver.ts          resolves ByClaw BE endpoint from Redis service registry
+  auth/beyond-token.ts            RS256 JWT verifier (reuses ByClaw BE login public key)
   server/app.ts                   Fastify HTTP: Session/Run creation, Run query/cancel, authenticated SSE
   server/byclaw-sse.ts            RunEvent → ByClaw thinking/answer SSE frame serializer
   worker/by-framework-worker.ts   by-framework inbound Worker + runtime lifecycle
-  run-ingress-service.ts          SHARED ingress: token verify → agent snapshot → createRun
-  byclaw-be-agent-catalog.ts      authorized agents from ByClaw BE (/digitEmploy/discover)
-  redis-service-discovery.ts      resolves ByClaw BE endpoint from Redis service registry
-  auth/beyond-token.ts            RS256 JWT verifier (reuses ByClaw BE login public key)
   adapters/openclaw/              reserved for app-local Connector shims
   scripts/smoke.ts                the `pnpm smoke` round-trip
   test/                           vitest specs

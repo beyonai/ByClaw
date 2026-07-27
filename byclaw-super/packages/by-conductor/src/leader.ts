@@ -1,9 +1,16 @@
 import type { PiSessionCheckpoint } from "./pi-session-checkpoint.js";
-import type { AgentProfile, AgentResult } from "./types.js";
+import type {
+  AgentProfile,
+  AgentResult,
+  ThinkingLevel,
+  UserInteractionQuestion,
+  UserInteractionResponse,
+} from "./types.js";
 
 /** Leader 执行单次 Run 所需的授权快照和边界回调。 */
 export interface LeaderRunInput {
   message: string;
+  thinkingLevel: ThinkingLevel;
   agents: AgentProfile[];
   signal: AbortSignal;
   /** 接收最终可见回答的文本增量。 */
@@ -17,6 +24,12 @@ export interface LeaderRunInput {
     expectedOutput?: string;
     signal?: AbortSignal;
   }): Promise<AgentResult>;
+  /** 暂停当前工具调用，等待用户通过固定 UI 回答结构化问题。 */
+  askUser(input: {
+    toolCallId: string;
+    questions: UserInteractionQuestion[];
+    signal?: AbortSignal;
+  }): Promise<UserInteractionResponse>;
 }
 
 /** Leader 单次 Run 的最终可见结果。 */

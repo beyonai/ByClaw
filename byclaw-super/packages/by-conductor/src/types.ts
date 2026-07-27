@@ -55,6 +55,7 @@ export type RunStatus =
   | "QUEUED"
   | "RUNNING"
   | "WAITING_AGENT"
+  | "WAITING_USER"
   | "SYNTHESIZING"
   | "CANCELLING"
   | "COMPLETED"
@@ -65,14 +66,36 @@ export type RunExecutionStage =
   | "QUEUED"
   | "LEADER_RUNNING"
   | "CONNECTOR_WAITING"
+  | "USER_INTERACTION_WAITING"
   | "LEADER_SYNTHESIZING"
   | "SETTLED";
+
+export const THINKING_LEVELS = [
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+] as const;
+
+export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
+
+export function isThinkingLevel(value: unknown): value is ThinkingLevel {
+  return (
+    typeof value === "string" &&
+    (THINKING_LEVELS as readonly string[]).includes(value)
+  );
+}
 
 /** 一次用户请求的输入、授权快照和执行状态。 */
 export interface Run {
   id: string;
   sessionId: string;
   input: string;
+  /** 本次 Run 使用的模型思考等级；未指定时为 off。 */
+  thinkingLevel?: ThinkingLevel;
   agentList: AgentProfile[];
   status: RunStatus;
   /** 本次 Run 开始时所依赖的已提交 Pi 上下文版本。 */
@@ -95,6 +118,7 @@ export type DelegationStatus =
   | "CREATED"
   | "QUEUED"
   | "RUNNING"
+  | "WAITING_USER"
   | "COMPLETED"
   | "FAILED"
   | "CANCELLED"
@@ -114,6 +138,8 @@ export interface Delegation {
   id: string;
   runId: string;
   agentId: string;
+  /** 创建时快照的 Agent 名称，供终态事件与对外 DTO 展示，不依赖 Run 的 agentList。 */
+  agentName?: string;
   connectorId: string;
   task: string;
   expectedOutput?: string;
@@ -131,6 +157,35 @@ export interface Delegation {
   finishedAt?: number;
 }
 
+/** 用户交互工具可展示的一个候选项。 */
+export interface UserInteractionOption {
+  label: string;
+  value?: string;
+  description: string;
+}
+
+/** 一次用户交互中的单个问题。 */
+export interface UserInteractionQuestion {
+  header: string;
+  question: string;
+  options: UserInteractionOption[];
+  multiSelect?: boolean;
+}
+
+/** Agent 或 Connector 请求前端展示的结构化问题。 */
+export interface UserInteractionRequest {
+  questions: UserInteractionQuestion[];
+  /** 兼容既有 by-framework 3013 表单的原始 UI 数据。 */
+  uiPayload?: Record<string, JsonValue>;
+}
+
+/** 用户对待处理交互的响应；生命周期动作由 UI 发出，不由模型调用。 */
+export interface UserInteractionResponse {
+  action: "submit" | "skip" | "cancel";
+  answers?: Record<string, JsonValue>;
+  text?: string;
+}
+
 export type RunEventType =
   | "run.created"
   | "run.attempt"
@@ -138,8 +193,11 @@ export type RunEventType =
   | "leader.delta"
   | "delegation.started"
   | "delegation.progress"
+  | "delegation.output.delta"
   | "delegation.completed"
   | "delegation.failed"
+  | "interaction.requested"
+  | "interaction.responded"
   | "run.completed"
   | "run.failed"
   | "run.cancelled";

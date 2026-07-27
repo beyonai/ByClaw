@@ -1,4 +1,6 @@
+export * from "./agent-capability.js";
 export * from "./connectors.js";
+export * from "./context/index.js";
 export * from "./delegation-service.js";
 export * from "./execution-credentials.js";
 export * from "./leader.js";

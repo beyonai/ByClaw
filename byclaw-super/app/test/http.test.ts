@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  AgentCapabilityCompileError,
   ConnectorRegistry,
   DelegationService,
   InMemoryDelegationRepository,
@@ -7,11 +8,15 @@ import {
   InMemoryRunRepository,
   InMemorySessionRepository,
   RunService,
+  type AgentCapabilityCompiler,
+  type AgentConnector,
+  type AgentProfile,
+  type ConnectorEvent,
   type LeaderSessionFactory,
 } from "@byclaw/by-conductor";
 import type { BeyondTokenVerifier } from "../auth/beyond-token.js";
-import type { AuthorizedAgentCatalog } from "../byclaw-be-agent-catalog.js";
-import { RunIngressService } from "../run-ingress-service.js";
+import type { AuthorizedAgentCatalog } from "../business/agent-catalog.js";
+import { RunIngressService } from "../ingress/run-ingress-service.js";
 import { buildHttpApp } from "../server/app.js";
 
 const apps: Awaited<ReturnType<typeof buildHttpApp>>[] = [];
@@ -21,6 +26,108 @@ afterEach(async () => {
 });
 
 describe("Session / Run HTTP/SSE API", () => {
+  it("compiles an authenticated Agent capability card without creating a Run", async () => {
+    const service = createService();
+    const verifyBeyondToken = vi.fn(async () => ({ userCode: "creator" }));
+    const compile = vi.fn(async () => capabilityCardResult());
+    const app = await createApp(
+      service,
+      verifyBeyondToken,
+      { listAuthorizedAgents: async () => [] },
+      true,
+      { compile },
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/agent-capability-cards/compile",
+      headers: { "Beyond-Token": "creator-token" },
+      payload: {
+        locale: "zh-CN",
+        agent: {
+          name: "经营分析助手",
+          description: "分析经营数据",
+          skills: [{ code: "sql", name: "SQL 查询" }],
+        },
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(verifyBeyondToken).toHaveBeenCalledWith({ token: "creator-token" });
+    expect(compile).toHaveBeenCalledWith({
+      locale: "zh-CN",
+      agent: {
+        name: "经营分析助手",
+        description: "分析经营数据",
+        skills: [{ code: "sql", name: "SQL 查询" }],
+      },
+    });
+    expect(response.json()).toMatchObject({
+      schemaVersion: "byclaw.agent-capability-card/v1",
+      routingText: "经营数据分析 Agent",
+    });
+    expect(await service.getRunDetails("missing")).toBeUndefined();
+    await service.dispose();
+  });
+
+  it("requires authentication for capability card compilation", async () => {
+    const service = createService();
+    const compile = vi.fn(async () => capabilityCardResult());
+    const app = await createApp(
+      service,
+      async () => ({ userCode: "creator" }),
+      { listAuthorizedAgents: async () => [] },
+      true,
+      { compile },
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/agent-capability-cards/compile",
+      payload: {
+        agent: {
+          name: "经营分析助手",
+          description: "分析经营数据",
+        },
+      },
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(compile).not.toHaveBeenCalled();
+    await service.dispose();
+  });
+
+  it("returns 422 when capability source information is insufficient", async () => {
+    const service = createService();
+    const app = await createApp(
+      service,
+      async () => ({ userCode: "creator" }),
+      { listAuthorizedAgents: async () => [] },
+      true,
+      {
+        compile: async () => {
+          throw new AgentCapabilityCompileError(
+            "At least one capability source is required",
+            422,
+          );
+        },
+      },
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/agent-capability-cards/compile",
+      headers: { "Beyond-Token": "creator-token" },
+      payload: { agent: { name: "万能助手" } },
+    });
+
+    expect(response.statusCode).toBe(422);
+    expect(response.json()).toEqual({
+      error: "At least one capability source is required",
+    });
+    await service.dispose();
+  });
+
   it("creates a Session with its first Run and streams SSE without leaking the token", async () => {
     const service = createService();
     const verifyBeyondToken = vi.fn(async () => ({ userCode: "user" }));
@@ -85,7 +192,160 @@ describe("Session / Run HTTP/SSE API", () => {
       runId: response.runId,
       sessionId: response.sessionId,
       status: "COMPLETED",
+      delegations: [],
     });
+    await service.dispose();
+  });
+
+  it("accepts a per-Run thinkingLevel and rejects unsupported values", async () => {
+    const service = createService();
+    const app = await createApp(service);
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/v1/sessions",
+      headers: { "Beyond-Token": "token" },
+      payload: { message: "think deeply", thinkingLevel: "high" },
+    });
+    expect(created.statusCode).toBe(202);
+    const { runId } = created.json<{ runId: string }>();
+    expect(await service.getRun(runId)).toMatchObject({
+      input: "think deeply",
+      thinkingLevel: "high",
+    });
+
+    const invalid = await app.inject({
+      method: "POST",
+      url: "/v1/sessions",
+      headers: { "Beyond-Token": "token" },
+      payload: { message: "invalid", thinkingLevel: "unlimited" },
+    });
+    expect(invalid.statusCode).toBe(400);
+    await service.dispose();
+  });
+
+  it("returns delegation results in the run snapshot without leaking internals", async () => {
+    const sessions = new InMemorySessionRepository();
+    const runs = new InMemoryRunRepository(sessions);
+    const delegations = new InMemoryDelegationRepository();
+    const events = new InMemoryRunEventStore();
+    const registry = new ConnectorRegistry();
+    const agent: AgentProfile = {
+      id: "agent-1",
+      name: "数据助理",
+      execution: { connectorId: "fake", targetId: "agent-1" },
+    };
+    const connector: AgentConnector = {
+      id: "fake",
+      capabilities: {
+        streaming: true,
+        cancellation: true,
+        artifacts: true,
+        resumable: false,
+      },
+      async start() {
+        return {
+          ref: { connectorId: "fake", executionId: "ext-1" },
+          events: (async function* (): AsyncIterable<ConnectorEvent> {
+            yield { type: "output_delta", text: "partial answer" };
+            yield {
+              type: "completed",
+              result: {
+                status: "completed",
+                output: "final answer",
+                artifacts: [
+                  {
+                    id: "art-1",
+                    name: "r.csv",
+                    uri: "file://r.csv",
+                    mimeType: "text/csv",
+                  },
+                ],
+              },
+            };
+          })(),
+          cancel: async () => undefined,
+        };
+      },
+      async health() {
+        return { healthy: true };
+      },
+    };
+    registry.register(connector);
+    const delegationService = new DelegationService(registry, delegations, events, 1_000);
+    const leaders: LeaderSessionFactory = {
+      async create() {
+        return {
+          contextRevision: 0,
+          async run(input) {
+            const res = await input.delegate({ agentId: "agent-1", task: "do it" });
+            await input.onDelta("summary");
+            return { text: `summary:${res.output}` };
+          },
+          async abort() {},
+          checkpoint() {
+            return undefined;
+          },
+          markCommitted() {},
+          dispose() {},
+        };
+      },
+      async health() {
+        return { healthy: true, model: "fake/model" };
+      },
+    };
+    let now = 1_000_000;
+    const service = new RunService(
+      sessions,
+      runs,
+      delegations,
+      events,
+      delegationService,
+      leaders,
+      () => ++now,
+    );
+    const agentCatalog = { listAuthorizedAgents: vi.fn(async () => [agent]) };
+    const app = await createApp(service, undefined, agentCatalog);
+
+    const owned = await createSession(app, "very-secret-token", "hi");
+    await waitFor(async () => (await service.getRun(owned.runId))?.status === "COMPLETED");
+
+    const snapshot = await app.inject({
+      method: "GET",
+      url: `/v1/runs/${owned.runId}`,
+      headers: { "Beyond-Token": "very-secret-token" },
+    });
+    expect(snapshot.statusCode).toBe(200);
+    const body = snapshot.json();
+    expect(body.delegations).toHaveLength(1);
+    expect(body.delegations[0]).toMatchObject({
+      agentId: "agent-1",
+      agentName: "数据助理",
+      status: "COMPLETED",
+      output: "partial answer",
+      artifactCount: 1,
+      truncated: false,
+    });
+    expect(body.delegations[0].artifacts).toHaveLength(1);
+    // 不泄露内部传输、原始 task 或凭证字段
+    for (const key of ["connectorId", "externalRef", "task", "expectedOutput"]) {
+      expect(body.delegations[0]).not.toHaveProperty(key);
+    }
+    expect(snapshot.body).not.toContain("very-secret-token");
+
+    const sse = await app.inject({
+      method: "GET",
+      url: `/v1/runs/${owned.runId}/events`,
+      headers: { "Beyond-Token": "very-secret-token" },
+    });
+    expect(sse.statusCode).toBe(200);
+    expect(sse.body).toContain("event: subAgentStart");
+    expect(sse.body).toContain("event: subAgentOutputDelta");
+    expect(sse.body).toContain("event: subAgentEnd");
+    expect(sse.body).toContain('"messageId":"');
+    expect(sse.body).toContain('"queryMessageId":"');
+    expect(sse.body).toContain('"content":"partial answer"');
+    expect(sse.body).not.toContain("very-secret-token");
     await service.dispose();
   });
 
@@ -112,6 +372,84 @@ describe("Session / Run HTTP/SSE API", () => {
     expect((await service.getRun(second.runId))?.sessionId).toBe(first.sessionId);
     expect((await service.getRun(other.runId))?.sessionId).toBe(other.sessionId);
     expect(agentCatalog.listAuthorizedAgents).toHaveBeenCalledTimes(3);
+    await service.dispose();
+  });
+
+  it("returns paginated Session messages from Run inputs and final answers", async () => {
+    const service = createService();
+    const app = await createApp(service);
+    const first = await createSession(app, "owner-token", "first");
+    const secondResponse = await app.inject({
+      method: "POST",
+      url: `/v1/sessions/${first.sessionId}/runs`,
+      headers: { "Beyond-Token": "owner-token" },
+      payload: { message: "second" },
+    });
+    const thirdResponse = await app.inject({
+      method: "POST",
+      url: `/v1/sessions/${first.sessionId}/runs`,
+      headers: { "Beyond-Token": "owner-token" },
+      payload: { message: "third" },
+    });
+    const second = secondResponse.json<{ runId: string }>();
+    const third = thirdResponse.json<{ runId: string }>();
+    await waitFor(async () =>
+      (
+        await Promise.all(
+          [first.runId, second.runId, third.runId].map(
+            async (runId) =>
+              (await service.getRun(runId))?.status === "COMPLETED",
+          ),
+        )
+      ).every(Boolean),
+    );
+
+    const latestResponse = await app.inject({
+      method: "GET",
+      url: `/v1/sessions/${first.sessionId}/messages?limit=2`,
+      headers: { "Beyond-Token": "owner-token" },
+    });
+    expect(latestResponse.statusCode).toBe(200);
+    const latest = latestResponse.json<{
+      sessionId: string;
+      items: Array<{
+        runId: string;
+        role: "user" | "assistant";
+        content: string;
+        runStatus: string;
+      }>;
+      nextCursor: string | null;
+    }>();
+    expect(latest.sessionId).toBe(first.sessionId);
+    expect(latest.items.map(({ role, content }) => ({ role, content }))).toEqual([
+      { role: "user", content: "second" },
+      { role: "assistant", content: "answer:second" },
+      { role: "user", content: "third" },
+      { role: "assistant", content: "answer:third" },
+    ]);
+    expect(latest.items.every((item) => item.runStatus === "COMPLETED")).toBe(true);
+    expect(latest.nextCursor).toEqual(expect.any(String));
+
+    const olderResponse = await app.inject({
+      method: "GET",
+      url: `/v1/sessions/${first.sessionId}/messages?limit=2&before=${encodeURIComponent(
+        latest.nextCursor ?? "",
+      )}`,
+      headers: { "Beyond-Token": "owner-token" },
+    });
+    expect(olderResponse.statusCode).toBe(200);
+    expect(olderResponse.json()).toMatchObject({
+      sessionId: first.sessionId,
+      items: [
+        { runId: first.runId, role: "user", content: "first" },
+        {
+          runId: first.runId,
+          role: "assistant",
+          content: "answer:first",
+        },
+      ],
+      nextCursor: null,
+    });
     await service.dispose();
   });
 
@@ -155,6 +493,11 @@ describe("Session / Run HTTP/SSE API", () => {
       url: `/v1/runs/${owned.runId}/cancel`,
       headers: { "Beyond-Token": "b-token" },
     });
+    const historyForeign = await app.inject({
+      method: "GET",
+      url: `/v1/sessions/${owned.sessionId}/messages`,
+      headers: { "Beyond-Token": "b-token" },
+    });
 
     for (const response of [
       appendForeign,
@@ -163,6 +506,7 @@ describe("Session / Run HTTP/SSE API", () => {
       queryMissing,
       streamForeign,
       cancelForeign,
+      historyForeign,
     ]) {
       expect(response.statusCode).toBe(404);
     }
@@ -199,8 +543,13 @@ describe("Session / Run HTTP/SSE API", () => {
       url: "/v1/sessions",
       payload: { message: "hello" },
     });
+    const missingHistoryToken = await app.inject({
+      method: "GET",
+      url: "/v1/sessions/missing/messages",
+    });
     expect(missingToken.statusCode).toBe(401);
     expect(missingToken.json()).toMatchObject({ resultCode: 401, type: 1 });
+    expect(missingHistoryToken.statusCode).toBe(401);
     expect((await app.inject({ method: "GET", url: "/ready" })).statusCode).toBe(503);
     await service.dispose();
   });
@@ -255,8 +604,12 @@ async function createApp(
   verifyBeyondToken: BeyondTokenVerifier = async () => ({ userCode: "user" }),
   agentCatalog: AuthorizedAgentCatalog = { listAuthorizedAgents: async () => [] },
   ready = true,
+  capabilityCompiler: AgentCapabilityCompiler = {
+    compile: async () => capabilityCardResult(),
+  },
 ) {
   const app = await buildHttpApp({
+    capabilityCompiler,
     runService: service,
     corsOrigin: true,
     runIngress: new RunIngressService(service, verifyBeyondToken, agentCatalog),
@@ -269,6 +622,29 @@ async function createApp(
   });
   apps.push(app);
   return app;
+}
+
+function capabilityCardResult() {
+  return {
+    schemaVersion: "byclaw.agent-capability-card/v1" as const,
+    generatorVersion: "1.0.0" as const,
+    sourceFingerprint: `sha256:${"a".repeat(64)}`,
+    card: {
+      summary: "分析经营数据",
+      capabilities: ["经营数据分析"],
+      bestFor: ["分析经营指标"],
+      requires: ["指标"],
+      delivers: ["分析结论"],
+      limitations: [],
+      keywords: ["经营分析", "指标分析", "数据分析"],
+    },
+    routingText: "经营数据分析 Agent",
+    quality: {
+      confidence: "medium" as const,
+      missingInformation: [],
+      warnings: [],
+    },
+  };
 }
 
 async function createSession(
@@ -319,6 +695,7 @@ function createService(): RunService {
       return { healthy: true, model: "fake/model" };
     },
   };
+  let now = 1_000_000;
   return new RunService(
     sessions,
     runs,
@@ -326,5 +703,19 @@ function createService(): RunService {
     events,
     delegationService,
     leaders,
+    () => ++now,
   );
+}
+
+async function waitFor(
+  condition: () => Promise<boolean>,
+  timeoutMs = 1_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!(await condition())) {
+    if (Date.now() >= deadline) {
+      throw new Error("Timed out waiting for HTTP test condition");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
 }

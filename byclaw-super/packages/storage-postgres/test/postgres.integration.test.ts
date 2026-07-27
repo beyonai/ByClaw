@@ -1,17 +1,15 @@
-import { randomBytes, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import {
   ConnectorRegistry,
   DelegationService,
-  EnvelopeExecutionCredentialCipher,
   RunService,
   createPiSessionCheckpoint,
-  type EncryptedExecutionCredential,
-  type KeyEncryptionService,
-  type KmsEncryptionContext,
+  type ExecutionCredential,
   type LeaderSessionFactory,
   type PiSessionCheckpoint,
   type Run,
   type Session,
+  type ThinkingLevel,
 } from "@byclaw/by-conductor";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PostgresDatabase } from "../src/postgres-database.js";
@@ -46,7 +44,7 @@ suite("PostgreSQL persistence integration", () => {
     }
     if (sessionsToDelete.length > 0) {
       await database.pool.query(
-        `DELETE FROM "${database.schema}"."sessions" WHERE id = ANY($1::uuid[])`,
+        `DELETE FROM "${database.schema}"."byai_super_sessions" WHERE id = ANY($1::uuid[])`,
         [sessionsToDelete],
       );
     }
@@ -92,7 +90,7 @@ suite("PostgreSQL persistence integration", () => {
       }),
     ).resolves.toBe(second.id);
 
-    const run = queuedRun(first.id);
+    const run = queuedRun(first.id, "high");
     await database.runs.createWithEvent?.(run, {
       runId: run.id,
       timestamp: Date.now(),
@@ -149,6 +147,27 @@ suite("PostgreSQL persistence integration", () => {
         data: { status: "COMPLETED", finalAnswer: "done" },
       },
     );
+    await expect(
+      database.runs.listPageBySession({
+        sessionId: first.id,
+        limit: 1,
+      }),
+    ).resolves.toMatchObject({
+      runs: [{
+        id: run.id,
+        input: "hello",
+        thinkingLevel: "high",
+        finalAnswer: "done",
+      }],
+      hasMore: false,
+    });
+    await expect(
+      database.runs.listPageBySession({
+        sessionId: first.id,
+        limit: 1,
+        before: { createdAt: run.createdAt, runId: run.id },
+      }),
+    ).resolves.toMatchObject({ runs: [], hasMore: false });
   });
 
   it("hands an expired lease to another instance and fences the old owner", async () => {
@@ -167,8 +186,14 @@ suite("PostgreSQL persistence integration", () => {
     expect(first?.runId).toBe(run.id);
     await expect(database.queue.claimNext("instance-b", 30_000)).resolves.toBeUndefined();
 
-    const credential = encryptedCredential(run.id);
+    const credential = executionCredential(run.id);
     await database.credentials.save(credential);
+    const storedCredential = await database.pool.query(
+      `SELECT credential FROM "${database.schema}"."byai_super_run_execution_credentials"
+        WHERE run_id = $1`,
+      [run.id],
+    );
+    expect(storedCredential.rows[0]?.credential).toBe("short-lived-token");
     await expect(
       database.credentials.loadForLease({
         runId: run.id,
@@ -176,10 +201,13 @@ suite("PostgreSQL persistence integration", () => {
         fencingToken: first?.fencingToken ?? 0,
         now: Date.now(),
       }),
-    ).resolves.toMatchObject({ runId: run.id });
+    ).resolves.toMatchObject({
+      runId: run.id,
+      secret: "short-lived-token",
+    });
 
     await database.pool.query(
-      `UPDATE "${database.schema}"."session_execution_leases"
+      `UPDATE "${database.schema}"."byai_super_session_execution_leases"
           SET lease_expires_at = clock_timestamp() - interval '1 second'
         WHERE session_id = $1`,
       [owner.id],
@@ -277,11 +305,9 @@ suite("PostgreSQL persistence integration", () => {
   });
 
   it("lets two RunService instances compete while executing a Run only once", async () => {
-    const kms = new IntegrationKms();
-    const cipher = new EnvelopeExecutionCredentialCipher(kms);
     const executions: string[] = [];
-    const first = createPersistentRunService("instance-a", cipher, executions);
-    const second = createPersistentRunService("instance-b", cipher, executions);
+    const first = createPersistentRunService("instance-a", executions);
+    const second = createPersistentRunService("instance-b", executions);
     first.start();
     second.start();
     try {
@@ -299,7 +325,7 @@ suite("PostgreSQL persistence integration", () => {
 
       expect(executions).toEqual(["execute-once"]);
       const credentials = await database.pool.query(
-        `SELECT 1 FROM "${database.schema}"."run_execution_credentials" WHERE run_id = $1`,
+        `SELECT 1 FROM "${database.schema}"."byai_super_run_execution_credentials" WHERE run_id = $1`,
         [run.id],
       );
       expect(credentials.rowCount).toBe(0);
@@ -310,7 +336,6 @@ suite("PostgreSQL persistence integration", () => {
 
   function createPersistentRunService(
     instanceId: string,
-    cipher: EnvelopeExecutionCredentialCipher,
     executions: string[],
   ): RunService {
     const connectors = new ConnectorRegistry();
@@ -353,7 +378,6 @@ suite("PostgreSQL persistence integration", () => {
       {
         executionQueue: database.queue,
         credentials: database.credentials,
-        credentialCipher: cipher,
         instanceId,
         leaseMs: 5_000,
         queuePollMs: 10,
@@ -374,12 +398,13 @@ function session(userCode: string): Session {
   };
 }
 
-function queuedRun(sessionId: string): Run {
+function queuedRun(sessionId: string, thinkingLevel: ThinkingLevel = "off"): Run {
   const now = Date.now();
   return {
     id: randomUUID(),
     sessionId,
     input: "hello",
+    thinkingLevel,
     agentList: [],
     status: "QUEUED",
     baseContextRevision: 0,
@@ -391,16 +416,11 @@ function queuedRun(sessionId: string): Run {
   };
 }
 
-function encryptedCredential(runId: string): EncryptedExecutionCredential {
+function executionCredential(runId: string): ExecutionCredential {
   const now = Date.now();
   return {
     runId,
-    ciphertext: randomBytes(16),
-    encryptedDataKey: randomBytes(48),
-    keyVersion: "test-v1",
-    nonce: randomBytes(12),
-    authTag: randomBytes(16),
-    aadVersion: 1,
+    secret: "short-lived-token",
     expiresAt: now + 60_000,
     createdAt: now,
   };
@@ -412,40 +432,6 @@ function requiredEnv(name: string): string {
     throw new Error(`${name} is required for PostgreSQL integration tests`);
   }
   return value;
-}
-
-class IntegrationKms implements KeyEncryptionService {
-  readonly #keys = new Map<string, { key: Uint8Array; context: string }>();
-
-  async generateDataKey(context: KmsEncryptionContext) {
-    const id = randomUUID();
-    const key = randomBytes(32);
-    this.#keys.set(id, {
-      key: Uint8Array.from(key),
-      context: JSON.stringify(context),
-    });
-    return {
-      plaintextKey: Uint8Array.from(key),
-      encryptedKey: Buffer.from(id),
-      keyVersion: "integration-v1",
-    };
-  }
-
-  async decryptDataKey(input: {
-    encryptedKey: Uint8Array;
-    keyVersion: string;
-    context: KmsEncryptionContext;
-  }): Promise<Uint8Array> {
-    const stored = this.#keys.get(Buffer.from(input.encryptedKey).toString());
-    if (
-      !stored ||
-      input.keyVersion !== "integration-v1" ||
-      stored.context !== JSON.stringify(input.context)
-    ) {
-      throw new Error("integration KMS context mismatch");
-    }
-    return Uint8Array.from(stored.key);
-  }
 }
 
 async function waitFor(

@@ -4,6 +4,8 @@ import type {
   ArtifactRef,
   ExternalExecutionRef,
   JsonValue,
+  UserInteractionRequest,
+  UserInteractionResponse,
 } from "./types.js";
 
 /** 编排层传给 Connector 的完整执行上下文；metadata 只在当前 Run 内短暂使用。 */
@@ -40,6 +42,12 @@ export type ConnectorEvent = (
   | { type: "progress"; message: string }
   | { type: "output_delta"; text: string }
   | { type: "artifact"; artifact: ArtifactRef }
+  | {
+      type: "input_required";
+      interactionId: string;
+      request: UserInteractionRequest;
+      resumeToken?: Record<string, JsonValue>;
+    }
   | { type: "completed"; result: AgentResult }
   | { type: "failed"; error: ConnectorError }
 ) & {
@@ -53,6 +61,12 @@ export interface ConnectorExecution {
   events: AsyncIterable<ConnectorEvent>;
   /** 请求外部系统取消本次执行；实现必须保证重复调用安全。 */
   cancel(reason: string): Promise<void>;
+  /** 向一个已暂停的外部执行提交用户输入；仅支持人机交互的 Connector 实现。 */
+  respondToInput?(
+    interactionId: string,
+    response: UserInteractionResponse,
+    resumeToken?: Record<string, JsonValue>,
+  ): Promise<void>;
 }
 
 /** Connector 依赖的健康检查结果。 */

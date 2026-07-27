@@ -1,4 +1,5 @@
 import {
+  ActionType,
   EventType,
   GatewayClient,
   QueueNames,
@@ -16,7 +17,20 @@ import type {
   ConnectorHealth,
   ConnectorRequest,
   ExternalExecutionRef,
+  JsonValue,
+  UserInteractionResponse,
 } from "@byclaw/by-conductor";
+import {
+  abortError,
+  extractContent,
+  extractError,
+  extractUserInput,
+  jsonString,
+  parseDataMessage,
+  parseXreadRows,
+  refString,
+  stringMetadata,
+} from "./by-framework-codec.js";
 
 export const OPENCLAW_BY_FRAMEWORK_CONNECTOR_ID = "openclaw-by-framework";
 
@@ -30,15 +44,6 @@ export interface OpenClawConnectorOptions {
   readBlockMs?: number;
   sourceAgentType?: string;
 }
-
-type DataMessage = {
-  trace_id?: string;
-  session_id?: string;
-  event_type?: string;
-  state_msg?: string;
-  data?: unknown;
-  metadata?: Record<string, unknown>;
-};
 
 /**
  * 通过 by-framework Gateway/Redis 协议连接 OpenClaw Worker。
@@ -154,6 +159,7 @@ export class OpenClawByFrameworkConnector implements AgentConnector {
         messageId: response.message_id,
         traceId: response.trace_id,
         targetAgentType,
+        userCode: request.userCode,
       },
     };
     return {
@@ -166,6 +172,8 @@ export class OpenClawByFrameworkConnector implements AgentConnector {
         cancel,
       ),
       cancel,
+      respondToInput: (interactionId, response, resumeToken) =>
+        this.#resumeUserInput(ref, interactionId, response, resumeToken),
     };
   }
 
@@ -208,7 +216,54 @@ export class OpenClawByFrameworkConnector implements AgentConnector {
         cancel,
       ),
       cancel,
+      respondToInput: (interactionId, response, resumeToken) =>
+        this.#resumeUserInput(ref, interactionId, response, resumeToken),
     };
+  }
+
+  /** 把统一用户响应映射回 by-framework 的 RESUME 控制消息。 */
+  async #resumeUserInput(
+    ref: ExternalExecutionRef,
+    interactionId: string,
+    response: UserInteractionResponse,
+    resumeToken?: Record<string, JsonValue>,
+  ): Promise<void> {
+    const childSessionId = refString(ref, "childSessionId");
+    const targetAgentType =
+      jsonString(resumeToken?.sourceAgentType) || refString(ref, "targetAgentType");
+    const traceId = jsonString(resumeToken?.traceId) || refString(ref, "traceId");
+    const messageId = jsonString(resumeToken?.messageId) || interactionId;
+    if (!childSessionId || !targetAgentType) {
+      throw new Error("OpenClaw resume reference is incomplete");
+    }
+    const content =
+      response.action === "submit"
+        ? response.text || JSON.stringify(response.answers ?? {})
+        : response.action === "skip"
+          ? "User skipped this question."
+          : "User cancelled this interaction.";
+    const result = await this.#client.sendMessage({
+      actionType: ActionType.RESUME,
+      sourceAgentType: this.#sourceAgentType,
+      targetAgentType,
+      sessionId: childSessionId,
+      content,
+      messageId,
+      traceId,
+      userCode: refString(ref, "userCode"),
+      parentMessageId: jsonString(resumeToken?.parentMessageId),
+      metadata: {
+        interaction_id: interactionId,
+        ...(response.answers ? { user_answers: response.answers } : {}),
+      },
+      extraPayload: {
+        status: response.action === "cancel" ? "CANCELLED" : "RESUMED",
+        reply_data: response.answers ?? response.text ?? null,
+      },
+    });
+    if (!result.success) {
+      throw new Error(`OpenClaw user-input resume failed: ${result.error ?? result.status}`);
+    }
   }
 
   /** 检查 Connector 所依赖的 Redis 是否可达。 */
@@ -272,11 +327,44 @@ export class OpenClawByFrameworkConnector implements AgentConnector {
           }
           continue;
         }
+        if (message.event_type === EventType.FINAL_ANSWER) {
+          const finalAnswer = extractContent(message.data);
+          if (!finalAnswer) {
+            continue;
+          }
+          // by-framework 的 Worker 即使没有主动 emitChunk，也会在终态发送 finalAnswer。
+          // 已收到流式前缀时只补齐缺失后缀，避免把完整终态答案重复追加一遍。
+          if (!output) {
+            output = finalAnswer;
+            yield { type: "output_delta", text: finalAnswer, cursor };
+          } else if (finalAnswer.startsWith(output) && finalAnswer.length > output.length) {
+            const suffix = finalAnswer.slice(output.length);
+            output = finalAnswer;
+            yield { type: "output_delta", text: suffix, cursor };
+          } else if (finalAnswer !== output) {
+            // 终态内容与流式内容不具备前缀关系时，以终态为最终快照；
+            // 不发送会造成客户端重复拼接的 delta，Run 终态详情会返回该权威结果。
+            output = finalAnswer;
+          }
+          continue;
+        }
         if (
           message.event_type === EventType.REASONING_LOG_START ||
-          message.event_type === EventType.REASONING_LOG_DELTA ||
           message.event_type === EventType.REASONING_LOG_END
         ) {
+          continue;
+        }
+        if (message.event_type === EventType.REASONING_LOG_DELTA) {
+          const input = extractUserInput(message);
+          if (input) {
+            yield {
+              type: "input_required",
+              interactionId: input.interactionId,
+              request: input.request,
+              resumeToken: input.resumeToken,
+              cursor,
+            };
+          }
           continue;
         }
         if (message.event_type === EventType.APP_STREAM_RESPONSE) {
@@ -305,91 +393,6 @@ export class OpenClawByFrameworkConnector implements AgentConnector {
     await cancel("connector event stream aborted").catch(() => undefined);
     throw abortError(signal.reason);
   }
-}
-
-function refString(ref: ExternalExecutionRef, key: string): string {
-  const value = ref.metadata?.[key];
-  return typeof value === "string" ? value : "";
-}
-
-/** 从 metadata 中安全读取非空字符串，避免把非字符串凭证传给 by-framework。 */
-function stringMetadata(metadata: Record<string, unknown>, key: string): string | undefined {
-  const value = metadata[key];
-  return typeof value === "string" && value ? value : undefined;
-}
-
-/** 把任意中止原因规范化为 Error，便于上游按统一异常路径处理。 */
-function abortError(reason: unknown): Error {
-  if (reason instanceof Error) {
-    return reason;
-  }
-  const error = new Error(typeof reason === "string" ? reason : "Operation aborted");
-  error.name = "AbortError";
-  return error;
-}
-
-/** 判断未知 JSON 值是否为普通键值对象。 */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-/** 容错解析 Redis Stream 中的 by-framework 数据消息。 */
-function parseDataMessage(raw: string): DataMessage | undefined {
-  try {
-    const value: unknown = JSON.parse(raw);
-    return isRecord(value) ? (value as DataMessage) : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-/** 从 OpenAI 兼容的流式 choices 结构中提取文本增量。 */
-function extractContent(data: unknown): string {
-  if (!isRecord(data) || !Array.isArray(data.choices)) {
-    return "";
-  }
-  const first = data.choices[0];
-  if (!isRecord(first) || !isRecord(first.delta)) {
-    return "";
-  }
-  return typeof first.delta.content === "string" ? first.delta.content : "";
-}
-
-/** 按 metadata、状态消息、内容的优先级提取可读错误。 */
-function extractError(message: DataMessage): string {
-  const metadataError = message.metadata?.error;
-  if (typeof metadataError === "string" && metadataError) {
-    return metadataError;
-  }
-  if (message.state_msg) {
-    return message.state_msg;
-  }
-  return extractContent(message.data) || "OpenClaw execution failed";
-}
-
-/** 把 ioredis 的 XREAD 嵌套返回值展平为消息 ID 与 data 字段。 */
-function parseXreadRows(rows: unknown): Array<{ id: string; data: string }> {
-  if (!Array.isArray(rows)) {
-    return [];
-  }
-  const result: Array<{ id: string; data: string }> = [];
-  for (const streamRow of rows) {
-    if (!Array.isArray(streamRow) || !Array.isArray(streamRow[1])) {
-      continue;
-    }
-    for (const item of streamRow[1]) {
-      if (!Array.isArray(item) || typeof item[0] !== "string" || !Array.isArray(item[1])) {
-        continue;
-      }
-      const fields = item[1];
-      const dataIndex = fields.indexOf("data");
-      const data = dataIndex >= 0 ? fields[dataIndex + 1] : undefined;
-      if (typeof data === "string") {
-        result.push({ id: item[0], data });
-      }
-    }
-  }
-  return result;
 }
 
 export type { RedisConnectionConfig } from "@byclaw/by-framework";

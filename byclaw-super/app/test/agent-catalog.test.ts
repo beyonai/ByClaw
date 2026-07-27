@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   ByClawBeAgentCatalog,
   ByClawBeAgentCatalogError,
-} from "../byclaw-be-agent-catalog.js";
+} from "../business/agent-catalog.js";
 
 describe("ByClaw BE Agent Catalog", () => {
   it("calls discover with the token and maps only authorized agents", async () => {

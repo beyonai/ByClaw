@@ -1,10 +1,11 @@
 import {
   createPiSessionCheckpoint,
+  isThinkingLevel,
   validatePiSessionCheckpoint,
   type CallerPrincipal,
   type Delegation,
   type DelegationRepository,
-  type EncryptedExecutionCredential,
+  type ExecutionCredential,
   type ExecutionCredentialRepository,
   type IngressSessionBindingRepository,
   type JsonValue,
@@ -15,6 +16,7 @@ import {
   type RunEventStore,
   type RunExecutionClaim,
   type RunExecutionQueue,
+  type RunPage,
   type RunRepository,
   type Session,
   type SessionRepository,
@@ -27,6 +29,7 @@ import {
 } from "pg";
 import {
   LATEST_POSTGRES_SCHEMA_VERSION,
+  POSTGRES_TABLE_PREFIX,
   POSTGRES_MIGRATIONS,
 } from "./migrations.js";
 
@@ -35,6 +38,7 @@ const NON_TERMINAL_RUN_STATUSES = [
   "QUEUED",
   "RUNNING",
   "WAITING_AGENT",
+  "WAITING_USER",
   "SYNTHESIZING",
   "CANCELLING",
 ] as const;
@@ -321,7 +325,7 @@ export class PostgresRunRepository implements RunRepository {
   async createWithEvent(
     run: Run,
     event: Omit<RunEvent, "eventId">,
-    credential?: EncryptedExecutionCredential,
+    credential?: ExecutionCredential,
   ): Promise<RunEvent> {
     return transaction(this.pool, async (client) => {
       await writeRun(client, this.schema, run);
@@ -338,7 +342,7 @@ export class PostgresRunRepository implements RunRepository {
     session: Session,
     run: Run,
     event: Omit<RunEvent, "eventId">,
-    credential?: EncryptedExecutionCredential,
+    credential?: ExecutionCredential,
   ): Promise<RunEvent> {
     return transaction(this.pool, async (client) => {
       await client.query(
@@ -379,6 +383,37 @@ export class PostgresRunRepository implements RunRepository {
       [sessionId],
     );
     return result.rows.map(mapRun);
+  }
+
+  async listPageBySession(input: {
+    sessionId: string;
+    limit: number;
+    before?: { createdAt: number; runId: string };
+  }): Promise<RunPage> {
+    const values: unknown[] = [input.sessionId];
+    const beforeClause = input.before
+      ? "AND (created_at, id) < ($2, $3)"
+      : "";
+    if (input.before) {
+      values.push(date(input.before.createdAt), input.before.runId);
+    }
+    values.push(input.limit + 1);
+    const result = await this.pool.query(
+      `SELECT * FROM ${table(this.schema, "runs")}
+        WHERE session_id = $1
+          ${beforeClause}
+        ORDER BY created_at DESC, id DESC
+        LIMIT $${values.length}`,
+      values,
+    );
+    const hasMore = result.rows.length > input.limit;
+    return {
+      runs: result.rows
+        .slice(0, input.limit)
+        .map(mapRun)
+        .reverse(),
+      hasMore,
+    };
   }
 
   async getOwned(runId: string, owner: CallerPrincipal): Promise<Run | undefined> {
@@ -888,7 +923,7 @@ implements ExecutionCredentialRepository {
     private readonly schema: string,
   ) {}
 
-  async save(credential: EncryptedExecutionCredential): Promise<void> {
+  async save(credential: ExecutionCredential): Promise<void> {
     await transaction(this.pool, async (client) => {
       await writeCredential(client, this.schema, credential);
     });
@@ -899,7 +934,7 @@ implements ExecutionCredentialRepository {
     instanceId: string;
     fencingToken: number;
     now: number;
-  }): Promise<EncryptedExecutionCredential | undefined> {
+  }): Promise<ExecutionCredential | undefined> {
     const result = await this.pool.query(
       `SELECT c.*
          FROM ${table(this.schema, "run_execution_credentials")} c
@@ -936,39 +971,28 @@ implements ExecutionCredentialRepository {
 async function writeCredential(
   client: PoolClient,
   schema: string,
-  credential: EncryptedExecutionCredential,
+  credential: ExecutionCredential,
 ): Promise<void> {
   const values = [
     credential.runId,
-    Buffer.from(credential.ciphertext),
-    Buffer.from(credential.encryptedDataKey),
-    credential.keyVersion,
-    Buffer.from(credential.nonce),
-    Buffer.from(credential.authTag),
-    credential.aadVersion,
+    credential.secret,
     date(credential.expiresAt),
     date(credential.createdAt),
   ];
   await advisoryLock(client, `credential:${credential.runId}`);
   const updated = await client.query(
     `UPDATE ${table(schema, "run_execution_credentials")}
-        SET ciphertext = $2,
-            encrypted_data_key = $3,
-            key_version = $4,
-            nonce = $5,
-            auth_tag = $6,
-            aad_version = $7,
-            expires_at = $8,
-            created_at = $9
+        SET credential = $2,
+            expires_at = $3,
+            created_at = $4
       WHERE run_id = $1`,
     values,
   );
   if (updated.rowCount === 0) {
     await client.query(
       `INSERT INTO ${table(schema, "run_execution_credentials")} (
-         run_id, ciphertext, encrypted_data_key, key_version, nonce, auth_tag,
-         aad_version, expires_at, created_at
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+         run_id, credential, expires_at, created_at
+       ) VALUES ($1, $2, $3, $4)`,
       values,
     );
   }
@@ -1327,6 +1351,7 @@ async function writeDelegation(
     date(delegation.updatedAt),
     nullableDate(delegation.startedAt),
     nullableDate(delegation.finishedAt),
+    delegation.agentName ?? null,
   ];
   const updated = await client.query(
     `UPDATE ${table(schema, "delegations")}
@@ -1339,7 +1364,8 @@ async function writeDelegation(
             version = $8::bigint,
             updated_at = $9,
             started_at = $10,
-            finished_at = $11
+            finished_at = $11,
+            agent_name = $12
       WHERE id = $1 AND version = $8::bigint - 1`,
     [
       delegation.id,
@@ -1353,6 +1379,7 @@ async function writeDelegation(
       date(delegation.updatedAt),
       nullableDate(delegation.startedAt),
       nullableDate(delegation.finishedAt),
+      delegation.agentName ?? null,
     ],
   );
   if (updated.rowCount !== 0) {
@@ -1369,10 +1396,10 @@ async function writeDelegation(
     `INSERT INTO ${table(schema, "delegations")} (
        id, run_id, agent_id, connector_id, task, expected_output, status,
        external_ref, connector_cursor, result, partial_output, error, version,
-       created_at, updated_at, started_at, finished_at
+       created_at, updated_at, started_at, finished_at, agent_name
      ) VALUES (
        $1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10::jsonb, $11, $12, $13,
-       $14, $15, $16, $17
+       $14, $15, $16, $17, $18
      )`,
     values,
   );
@@ -1547,13 +1574,15 @@ function validatePiEntryContent(value: unknown): void {
   const record = value as Record<string, unknown>;
   if (
     record.type === "toolCall" &&
-    record.name !== "delegateAgent"
+    record.name !== "delegateAgent" &&
+    record.name !== "askUserQuestion"
   ) {
     throw new Error(`Unsupported Pi tool call: ${String(record.name)}`);
   }
   if (
     record.role === "toolResult" &&
-    record.toolName !== "delegateAgent"
+    record.toolName !== "delegateAgent" &&
+    record.toolName !== "askUserQuestion"
   ) {
     throw new Error(`Unsupported Pi tool result: ${String(record.toolName)}`);
   }
@@ -1580,6 +1609,7 @@ function runValues(run: Run): unknown[] {
     run.id,
     run.sessionId,
     run.input,
+    run.thinkingLevel ?? "off",
     JSON.stringify(run.agentList),
     run.status,
     run.baseContextRevision,
@@ -1644,21 +1674,26 @@ async function writeRun(
   }
   await client.query(
     `INSERT INTO ${table(schema, "runs")} (
-       id, session_id, input, agent_snapshot, status, base_context_revision,
+       id, session_id, input, thinking_level, agent_snapshot, status, base_context_revision,
        attempt_no, execution_stage, lease_fencing_token, final_answer,
        error_message, version, created_at, updated_at, started_at, finished_at
      ) VALUES (
-       $1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16
+       $1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
      )`,
     values,
   );
 }
 
 function mapRun(row: QueryResultRow): Run {
+  const thinkingLevel = row.thinking_level ?? "off";
+  if (!isThinkingLevel(thinkingLevel)) {
+    throw new Error(`Invalid persisted Run thinking level: ${String(thinkingLevel)}`);
+  }
   return {
     id: text(row.id),
     sessionId: text(row.session_id),
     input: text(row.input),
+    thinkingLevel,
     agentList: row.agent_snapshot as Run["agentList"],
     status: row.status as Run["status"],
     baseContextRevision: integer(row.base_context_revision),
@@ -1682,6 +1717,7 @@ function mapDelegation(row: QueryResultRow): Delegation {
     id: text(row.id),
     runId: text(row.run_id),
     agentId: text(row.agent_id),
+    ...(row.agent_name === null ? {} : { agentName: text(row.agent_name) }),
     connectorId: text(row.connector_id),
     task: text(row.task),
     ...(row.expected_output === null
@@ -1719,15 +1755,10 @@ function mapRunEvent(row: QueryResultRow): RunEvent {
   };
 }
 
-function mapCredential(row: QueryResultRow): EncryptedExecutionCredential {
+function mapCredential(row: QueryResultRow): ExecutionCredential {
   return {
     runId: text(row.run_id),
-    ciphertext: Uint8Array.from(row.ciphertext as Buffer),
-    encryptedDataKey: Uint8Array.from(row.encrypted_data_key as Buffer),
-    keyVersion: text(row.key_version),
-    nonce: Uint8Array.from(row.nonce as Buffer),
-    authTag: Uint8Array.from(row.auth_tag as Buffer),
-    aadVersion: integer(row.aad_version),
+    secret: text(row.credential),
     expiresAt: milliseconds(row.expires_at),
     createdAt: milliseconds(row.created_at),
   };
@@ -1813,7 +1844,7 @@ function quote(identifier: string): string {
 }
 
 function table(schema: string, name: string): string {
-  return `${quote(schema)}.${quote(name)}`;
+  return `${quote(schema)}.${quote(`${POSTGRES_TABLE_PREFIX}${name}`)}`;
 }
 
 function date(value: number): Date {

@@ -810,7 +810,8 @@ public class DigitalEmployeeApplicationService {
      */
     private void fillDigitalEmployeeImplInfo(SsResource ssResource, String agentType) {
         resourceRuntimeInfoResolver.fillResource(ssResource,
-            resourceRuntimeInfoResolver.resolveDigitalEmployee(agentType, ssResource.getResourceId()));
+            resourceRuntimeInfoResolver.resolveDigitalEmployee(agentType, ssResource.getResourceId(),
+                ssResource.getResourceCode()));
     }
 
     /**

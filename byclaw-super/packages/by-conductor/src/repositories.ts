@@ -1,4 +1,4 @@
-import type { EncryptedExecutionCredential } from "./execution-credentials.js";
+import type { ExecutionCredential } from "./execution-credentials.js";
 import type { PiSessionCheckpoint } from "./pi-session-checkpoint.js";
 import type {
   CallerPrincipal,
@@ -19,6 +19,18 @@ export interface SessionRepository {
   delete(sessionId: string): Promise<void>;
 }
 
+/** Session 历史翻页使用的稳定游标；createdAt 相同时用 Run ID 打破平局。 */
+export interface RunPageCursor {
+  createdAt: number;
+  runId: string;
+}
+
+export interface RunPage {
+  /** 按 createdAt、Run ID 正序返回，便于前端直接渲染。 */
+  runs: Run[];
+  hasMore: boolean;
+}
+
 export interface RunRepository {
   /** 新建或覆盖保存 Run。 */
   save(run: Run): Promise<void>;
@@ -31,23 +43,29 @@ export interface RunRepository {
     event: Omit<RunEvent, "eventId">,
     claim?: RunExecutionClaim,
   ): Promise<RunEvent>;
-  /** PostgreSQL 实现用同一事务创建 Run、首事件及其执行凭证密文。 */
+  /** PostgreSQL 实现用同一事务创建 Run、首事件及其短期执行凭证。 */
   createWithEvent?(
     run: Run,
     event: Omit<RunEvent, "eventId">,
-    credential?: EncryptedExecutionCredential,
+    credential?: ExecutionCredential,
   ): Promise<RunEvent>;
-  /** 首个入口用同一事务创建 Session、Run、首事件和凭证密文。 */
+  /** 首个入口用同一事务创建 Session、Run、首事件和短期执行凭证。 */
   createSessionWithRun?(
     session: Session,
     run: Run,
     event: Omit<RunEvent, "eventId">,
-    credential?: EncryptedExecutionCredential,
+    credential?: ExecutionCredential,
   ): Promise<RunEvent>;
   /** 按 ID 读取 Run。 */
   get(runId: string): Promise<Run | undefined>;
   /** 按创建时间返回指定 Session 下的 Run。 */
   listBySession(sessionId: string): Promise<Run[]>;
+  /** 从最新一页向更早历史翻页；limit 按 Run/对话轮次计算。 */
+  listPageBySession(input: {
+    sessionId: string;
+    limit: number;
+    before?: RunPageCursor;
+  }): Promise<RunPage>;
   /** 按 owner 关联查询 Run，越权与不存在都返回 undefined。 */
   getOwned(runId: string, owner: CallerPrincipal): Promise<Run | undefined>;
 }
@@ -166,15 +184,15 @@ export interface LeaderCheckpointStore {
   ): Promise<void>;
 }
 
-/** 密文凭证存储；loadForLease 必须在 SQL 中校验当前 lease 与 fencing。 */
+/** 短期凭证存储；loadForLease 必须在 SQL 中校验当前 lease、fencing 和过期时间。 */
 export interface ExecutionCredentialRepository {
-  save(credential: EncryptedExecutionCredential): Promise<void>;
+  save(credential: ExecutionCredential): Promise<void>;
   loadForLease(input: {
     runId: string;
     instanceId: string;
     fencingToken: number;
     now: number;
-  }): Promise<EncryptedExecutionCredential | undefined>;
+  }): Promise<ExecutionCredential | undefined>;
   delete(runId: string): Promise<void>;
   deleteExpired(now: number): Promise<number>;
 }

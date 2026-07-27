@@ -1,14 +1,17 @@
 import type {
   CallerPrincipal,
   Run,
+  RunPage,
+  RunPageCursor,
   RunService,
   Session,
+  ThinkingLevel,
 } from "@byclaw/by-conductor";
 import {
   type BeyondTokenClaims,
   type BeyondTokenVerifier,
-} from "./auth/beyond-token.js";
-import type { AuthorizedAgentCatalog } from "./byclaw-be-agent-catalog.js";
+} from "../auth/beyond-token.js";
+import type { AuthorizedAgentCatalog } from "../business/agent-catalog.js";
 
 interface AuthenticatedIngressRequest {
   beyondToken: string;
@@ -17,6 +20,7 @@ interface AuthenticatedIngressRequest {
 
 export interface CreateSessionRunRequest extends AuthenticatedIngressRequest {
   message: string;
+  thinkingLevel?: ThinkingLevel;
 }
 
 export interface AppendSessionRunRequest extends CreateSessionRunRequest {
@@ -51,8 +55,9 @@ export class RunIngressService {
     return this.runService.createSessionRun({
       owner: principal,
       message: input.message,
+      thinkingLevel: input.thinkingLevel ?? "off",
       agentList,
-      // 明文只用于当前实例的快速路径；生产接管从 KMS 密文恢复。
+      // Token 同时写入专用短期凭证表，供其他实例在 lease 接管后恢复。
       metadata: { "Beyond-Token": input.beyondToken },
       executionCredential: {
         secret: input.beyondToken,
@@ -70,6 +75,7 @@ export class RunIngressService {
     return this.runService.createRun({
       sessionId: input.sessionId,
       message: input.message,
+      thinkingLevel: input.thinkingLevel ?? "off",
       agentList,
       metadata: { "Beyond-Token": input.beyondToken },
       executionCredential: {
@@ -113,6 +119,29 @@ export class RunIngressService {
     return this.requireOwnedSession(sessionId, await this.resolvePrincipal(input));
   }
 
+  /** 验签并按 Session owner 读取历史 Run；越权与不存在保持相同 404。 */
+  async listSessionRuns(
+    sessionId: string,
+    input: AuthenticatedIngressRequest & {
+      limit: number;
+      before?: RunPageCursor;
+    },
+  ): Promise<RunPage> {
+    const principal = await this.resolvePrincipal(input);
+    const page = await this.runService.listOwnedSessionRuns(
+      sessionId,
+      principal,
+      {
+        limit: input.limit,
+        ...(input.before ? { before: input.before } : {}),
+      },
+    );
+    if (!page) {
+      throw new ResourceNotFoundError("Session");
+    }
+    return page;
+  }
+
   /** 校验当前调用者是否拥有 Run 所属 Session。 */
   async authorizeRun(
     runId: string,
@@ -128,6 +157,19 @@ export class RunIngressService {
       throw new ResourceNotFoundError("Run");
     }
     return { run, session };
+  }
+
+  /** owner 校验后返回 Run 及其 Delegation，供 HTTP 查询接口映射为对外 DTO。 */
+  async getRunDetails(
+    runId: string,
+    input: AuthenticatedIngressRequest,
+  ): Promise<NonNullable<Awaited<ReturnType<RunService["getRunDetails"]>>>> {
+    const { run } = await this.authorizeRun(runId, input);
+    const details = await this.runService.getRunDetails(run.id);
+    if (!details) {
+      throw new ResourceNotFoundError("Run");
+    }
+    return details;
   }
 
   private async requireOwnedSession(

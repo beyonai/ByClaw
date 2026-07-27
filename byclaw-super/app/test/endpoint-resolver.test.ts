@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { RedisByClawBeEndpointResolver } from "../redis-service-discovery.js";
+import { RedisByClawBeEndpointResolver } from "../business/endpoint-resolver.js";
 
 describe("Redis ByClaw BE service discovery", () => {
   it("reads ByaiService instances and returns the registered endpoint", async () => {

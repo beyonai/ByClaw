@@ -8,13 +8,15 @@ export interface PostgresMigration {
   sql: string;
 }
 
-/** 首版持久化模型：业务状态、Pi 原生记录、跨实例租约和加密执行凭证。 */
+export const POSTGRES_TABLE_PREFIX = "byai_super_";
+
+/** 持久化模型：业务状态、Pi 原生记录、跨实例租约和短期执行凭证。 */
 export const POSTGRES_MIGRATIONS: readonly PostgresMigration[] = [
   {
     version: 1,
     name: "initial_multi_user_persistence",
     sql: `
-CREATE TABLE sessions (
+CREATE TABLE ${POSTGRES_TABLE_PREFIX}sessions (
   id uuid PRIMARY KEY,
   owner_version smallint NOT NULL DEFAULT 1,
   user_code text NOT NULL,
@@ -31,11 +33,11 @@ CREATE TABLE sessions (
   )
 );
 CREATE INDEX sessions_owner_updated_idx
-  ON sessions(owner_version, user_code, updated_at DESC);
+  ON ${POSTGRES_TABLE_PREFIX}sessions(owner_version, user_code, updated_at DESC);
 
-CREATE TABLE runs (
+CREATE TABLE ${POSTGRES_TABLE_PREFIX}runs (
   id uuid PRIMARY KEY,
-  session_id uuid NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  session_id uuid NOT NULL REFERENCES ${POSTGRES_TABLE_PREFIX}sessions(id) ON DELETE CASCADE,
   input text NOT NULL,
   agent_snapshot jsonb NOT NULL,
   status text NOT NULL,
@@ -52,13 +54,13 @@ CREATE TABLE runs (
   started_at timestamptz NULL,
   finished_at timestamptz NULL
 );
-CREATE INDEX runs_session_created_idx ON runs(session_id, created_at, id);
-CREATE INDEX runs_claim_idx ON runs(status, created_at)
+CREATE INDEX runs_session_created_idx ON ${POSTGRES_TABLE_PREFIX}runs(session_id, created_at, id);
+CREATE INDEX runs_claim_idx ON ${POSTGRES_TABLE_PREFIX}runs(status, created_at)
   WHERE status IN ('CREATED', 'QUEUED', 'RUNNING', 'WAITING_AGENT', 'SYNTHESIZING', 'CANCELLING');
 
-CREATE TABLE delegations (
+CREATE TABLE ${POSTGRES_TABLE_PREFIX}delegations (
   id uuid PRIMARY KEY,
-  run_id uuid NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+  run_id uuid NOT NULL REFERENCES ${POSTGRES_TABLE_PREFIX}runs(id) ON DELETE CASCADE,
   agent_id text NOT NULL,
   connector_id text NOT NULL,
   task text NOT NULL,
@@ -75,10 +77,10 @@ CREATE TABLE delegations (
   started_at timestamptz NULL,
   finished_at timestamptz NULL
 );
-CREATE INDEX delegations_run_created_idx ON delegations(run_id, created_at, id);
+CREATE INDEX delegations_run_created_idx ON ${POSTGRES_TABLE_PREFIX}delegations(run_id, created_at, id);
 
-CREATE TABLE run_events (
-  run_id uuid NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+CREATE TABLE ${POSTGRES_TABLE_PREFIX}run_events (
+  run_id uuid NOT NULL REFERENCES ${POSTGRES_TABLE_PREFIX}runs(id) ON DELETE CASCADE,
   event_id bigint NOT NULL,
   timestamp timestamptz NOT NULL,
   type text NOT NULL,
@@ -86,8 +88,8 @@ CREATE TABLE run_events (
   PRIMARY KEY (run_id, event_id)
 );
 
-CREATE TABLE pi_sessions (
-  session_id uuid PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+CREATE TABLE ${POSTGRES_TABLE_PREFIX}pi_sessions (
+  session_id uuid PRIMARY KEY REFERENCES ${POSTGRES_TABLE_PREFIX}sessions(id) ON DELETE CASCADE,
   pi_session_id text NOT NULL,
   pi_sdk_version text NOT NULL,
   session_format_version integer NOT NULL,
@@ -102,15 +104,15 @@ CREATE TABLE pi_sessions (
   updated_at timestamptz NOT NULL
 );
 
-CREATE TABLE pi_session_entries (
-  session_id uuid NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+CREATE TABLE ${POSTGRES_TABLE_PREFIX}pi_session_entries (
+  session_id uuid NOT NULL REFERENCES ${POSTGRES_TABLE_PREFIX}sessions(id) ON DELETE CASCADE,
   seq bigint NOT NULL,
   entry_id text NOT NULL,
   parent_id text NULL,
   entry_type text NOT NULL,
   entry_json jsonb NOT NULL,
   visibility text NOT NULL,
-  run_id uuid NULL REFERENCES runs(id) ON DELETE SET NULL,
+  run_id uuid NULL REFERENCES ${POSTGRES_TABLE_PREFIX}runs(id) ON DELETE SET NULL,
   attempt_no integer NULL,
   created_at timestamptz NOT NULL,
   PRIMARY KEY (session_id, seq),
@@ -118,16 +120,16 @@ CREATE TABLE pi_session_entries (
   CONSTRAINT pi_entry_visibility CHECK (visibility IN ('COMMITTED', 'PENDING'))
 );
 CREATE INDEX pi_entries_run_attempt_idx
-  ON pi_session_entries(run_id, attempt_no, visibility);
+  ON ${POSTGRES_TABLE_PREFIX}pi_session_entries(run_id, attempt_no, visibility);
 
-CREATE TABLE ingress_session_bindings (
+CREATE TABLE ${POSTGRES_TABLE_PREFIX}ingress_session_bindings (
   source text NOT NULL,
   owner_version smallint NOT NULL DEFAULT 1,
   user_code text NOT NULL,
   tenant_id text NULL,
   namespace text NULL,
   external_session_id text NOT NULL,
-  session_id uuid NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  session_id uuid NOT NULL REFERENCES ${POSTGRES_TABLE_PREFIX}sessions(id) ON DELETE CASCADE,
   created_at timestamptz NOT NULL,
   updated_at timestamptz NOT NULL,
   PRIMARY KEY (source, owner_version, user_code, external_session_id),
@@ -136,19 +138,19 @@ CREATE TABLE ingress_session_bindings (
   )
 );
 
-CREATE TABLE session_execution_leases (
-  session_id uuid PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+CREATE TABLE ${POSTGRES_TABLE_PREFIX}session_execution_leases (
+  session_id uuid PRIMARY KEY REFERENCES ${POSTGRES_TABLE_PREFIX}sessions(id) ON DELETE CASCADE,
   owner_instance_id text NOT NULL,
   fencing_token bigint NOT NULL,
   lease_expires_at timestamptz NOT NULL,
   heartbeat_at timestamptz NOT NULL,
-  run_id uuid NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+  run_id uuid NOT NULL REFERENCES ${POSTGRES_TABLE_PREFIX}runs(id) ON DELETE CASCADE,
   attempt_no integer NOT NULL
 );
-CREATE INDEX session_leases_expiry_idx ON session_execution_leases(lease_expires_at);
+CREATE INDEX session_leases_expiry_idx ON ${POSTGRES_TABLE_PREFIX}session_execution_leases(lease_expires_at);
 
-CREATE TABLE run_execution_credentials (
-  run_id uuid PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+CREATE TABLE ${POSTGRES_TABLE_PREFIX}run_execution_credentials (
+  run_id uuid PRIMARY KEY REFERENCES ${POSTGRES_TABLE_PREFIX}runs(id) ON DELETE CASCADE,
   ciphertext bytea NOT NULL,
   encrypted_data_key bytea NOT NULL,
   key_version text NOT NULL,
@@ -158,14 +160,58 @@ CREATE TABLE run_execution_credentials (
   expires_at timestamptz NOT NULL,
   created_at timestamptz NOT NULL
 );
-CREATE INDEX run_credentials_expiry_idx ON run_execution_credentials(expires_at);
+CREATE INDEX run_credentials_expiry_idx ON ${POSTGRES_TABLE_PREFIX}run_execution_credentials(expires_at);
 `,
   },
   {
     version: 2,
     name: "delegation_resume_partial_output",
     sql: `
-ALTER TABLE delegations ADD COLUMN IF NOT EXISTS partial_output text NULL;
+ALTER TABLE ${POSTGRES_TABLE_PREFIX}delegations ADD COLUMN IF NOT EXISTS partial_output text NULL;
+`,
+  },
+  {
+    version: 3,
+    name: "plaintext_run_execution_credentials",
+    sql: `
+DROP TABLE ${POSTGRES_TABLE_PREFIX}run_execution_credentials;
+CREATE TABLE ${POSTGRES_TABLE_PREFIX}run_execution_credentials (
+  run_id uuid PRIMARY KEY REFERENCES ${POSTGRES_TABLE_PREFIX}runs(id) ON DELETE CASCADE,
+  credential text NOT NULL,
+  expires_at timestamptz NOT NULL,
+  created_at timestamptz NOT NULL
+);
+CREATE INDEX run_credentials_expiry_idx ON ${POSTGRES_TABLE_PREFIX}run_execution_credentials(expires_at);
+`,
+  },
+  {
+    version: 4,
+    name: "delegation_agent_name",
+    sql: `
+ALTER TABLE ${POSTGRES_TABLE_PREFIX}delegations ADD COLUMN IF NOT EXISTS agent_name text NULL;
+`,
+  },
+  {
+    version: 5,
+    name: "run_thinking_level",
+    sql: `
+ALTER TABLE ${POSTGRES_TABLE_PREFIX}runs
+  ADD COLUMN IF NOT EXISTS thinking_level text NOT NULL DEFAULT 'off';
+ALTER TABLE ${POSTGRES_TABLE_PREFIX}runs
+  ADD CONSTRAINT runs_thinking_level_check
+  CHECK (thinking_level IN ('off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'));
+    `,
+  },
+  {
+    version: 6,
+    name: "user_interaction_waiting_status",
+    sql: `
+DROP INDEX IF EXISTS runs_claim_idx;
+CREATE INDEX runs_claim_idx ON ${POSTGRES_TABLE_PREFIX}runs(status, created_at)
+  WHERE status IN (
+    'CREATED', 'QUEUED', 'RUNNING', 'WAITING_AGENT', 'WAITING_USER',
+    'SYNTHESIZING', 'CANCELLING'
+  );
 `,
   },
 ] as const;

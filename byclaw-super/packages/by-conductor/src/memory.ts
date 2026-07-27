@@ -5,10 +5,11 @@ import type {
   RunExecutionClaim,
   RunExecutionQueue,
   RunEventStore,
+  RunPage,
   RunRepository,
   SessionRepository,
 } from "./repositories.js";
-import type { EncryptedExecutionCredential } from "./execution-credentials.js";
+import type { ExecutionCredential } from "./execution-credentials.js";
 import type {
   CallerPrincipal,
   Delegation,
@@ -70,6 +71,34 @@ export class InMemoryRunRepository implements RunRepository {
       .filter((run) => run.sessionId === sessionId)
       .sort((a, b) => a.createdAt - b.createdAt)
       .map((run) => structuredClone(run));
+  }
+
+  async listPageBySession(input: {
+    sessionId: string;
+    limit: number;
+    before?: { createdAt: number; runId: string };
+  }): Promise<RunPage> {
+    const descending = [...this.#items.values()]
+      .filter(
+        (run) =>
+          run.sessionId === input.sessionId &&
+          (!input.before ||
+            run.createdAt < input.before.createdAt ||
+            (run.createdAt === input.before.createdAt &&
+              run.id < input.before.runId)),
+      )
+      .sort(
+        (a, b) =>
+          b.createdAt - a.createdAt || b.id.localeCompare(a.id),
+      );
+    const hasMore = descending.length > input.limit;
+    return {
+      runs: descending
+        .slice(0, input.limit)
+        .reverse()
+        .map((run) => structuredClone(run)),
+      hasMore,
+    };
   }
 
   /** 通过 Session owner 进行关联授权查询。 */
@@ -284,13 +313,13 @@ export class InMemoryRunExecutionQueue implements RunExecutionQueue {
   }
 }
 
-/** 仅用于单元测试的密文仓库；不会存储 seal 前的明文。 */
+/** 仅用于单元测试的短期执行凭证仓库。 */
 export class InMemoryExecutionCredentialRepository
 implements ExecutionCredentialRepository {
-  readonly #items = new Map<string, EncryptedExecutionCredential>();
+  readonly #items = new Map<string, ExecutionCredential>();
 
-  async save(credential: EncryptedExecutionCredential): Promise<void> {
-    this.#items.set(credential.runId, cloneCredential(credential));
+  async save(credential: ExecutionCredential): Promise<void> {
+    this.#items.set(credential.runId, structuredClone(credential));
   }
 
   async loadForLease(input: {
@@ -298,9 +327,11 @@ implements ExecutionCredentialRepository {
     instanceId: string;
     fencingToken: number;
     now: number;
-  }): Promise<EncryptedExecutionCredential | undefined> {
+  }): Promise<ExecutionCredential | undefined> {
     const item = this.#items.get(input.runId);
-    return item && item.expiresAt > input.now ? cloneCredential(item) : undefined;
+    return item && item.expiresAt > input.now
+      ? structuredClone(item)
+      : undefined;
   }
 
   async delete(runId: string): Promise<void> {
@@ -325,16 +356,4 @@ function bindingKey(input: {
   externalSessionId: string;
 }): string {
   return JSON.stringify([input.source, input.userCode, input.externalSessionId]);
-}
-
-function cloneCredential(
-  credential: EncryptedExecutionCredential,
-): EncryptedExecutionCredential {
-  return {
-    ...credential,
-    ciphertext: Uint8Array.from(credential.ciphertext),
-    encryptedDataKey: Uint8Array.from(credential.encryptedDataKey),
-    nonce: Uint8Array.from(credential.nonce),
-    authTag: Uint8Array.from(credential.authTag),
-  };
 }

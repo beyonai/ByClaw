@@ -1,0 +1,213 @@
+import { randomUUID } from "node:crypto";
+import { hostname } from "node:os";
+import {
+  THINKING_LEVELS,
+  isThinkingLevel,
+  type CallerPrincipal,
+  type RunEvent,
+  type ThinkingLevel,
+} from "@byclaw/by-conductor";
+import {
+  EventType,
+  type AgentContext,
+  type AskAgentCommand,
+  type GatewayCommand,
+} from "@byclaw/by-framework";
+
+/**
+ * by-framework 协议的解析和序列化辅助函数。
+ * 这里不访问 Redis、Repository 或 RunService，便于单独阅读和测试协议细节。
+ */
+
+/** 从 AskAgent 的多种内容表示中提取最后一条非空用户文本。 */
+export function extractMessage(content: unknown): string {
+  if (typeof content === "string") {
+    return content.trim();
+  }
+  if (Array.isArray(content)) {
+    for (let index = content.length - 1; index >= 0; index -= 1) {
+      const message = extractMessage(content[index]);
+      if (message) {
+        return message;
+      }
+    }
+    return "";
+  }
+  if (!isRecord(content)) {
+    return "";
+  }
+  if (typeof content.text === "string") {
+    return content.text.trim();
+  }
+  return extractMessage(content.content);
+}
+
+/** 按大小写不敏感方式从 command metadata 或 extraPayload 读取字符串字段。 */
+export function commandString(
+  command: {
+    header: { metadata: Readonly<Record<string, unknown>> };
+    extraPayload?: Readonly<Record<string, unknown>>;
+  },
+  key: string,
+): string {
+  return (
+    recordString(command.header.metadata, key) ||
+    recordString(command.extraPayload ?? {}, key)
+  );
+}
+
+/** 思考等级属于调用业务参数，只从 AskAgent extraPayload 读取。 */
+export function commandThinkingLevel(command: AskAgentCommand): ThinkingLevel {
+  const value = command.extraPayload.thinkingLevel;
+  if (value === undefined) {
+    return "off";
+  }
+  if (isThinkingLevel(value)) {
+    return value;
+  }
+  throw new Error(
+    `AskAgent extraPayload.thinkingLevel must be one of ${THINKING_LEVELS.join(", ")}`,
+  );
+}
+
+/** 从记录中读取大小写不敏感的非空字符串值。 */
+export function recordString(
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+): string {
+  const expected = key.toLowerCase();
+  for (const [candidate, value] of Object.entries(record)) {
+    if (candidate.toLowerCase() === expected && typeof value === "string") {
+      return value.trim();
+    }
+  }
+  return "";
+}
+
+/** 关闭尚未结束的简化思考阶段，且不透传内部 reasoning。 */
+export async function closeReasoning(
+  context: AgentContext,
+  started: boolean,
+  ended: boolean,
+): Promise<void> {
+  if (started && !ended) {
+    await context.emitState("", EventType.REASONING_LOG_END);
+  }
+}
+
+/** 将内部事件转换为对调用方安全、稳定的执行进度。 */
+export function progressMessage(event: RunEvent): string {
+  if (event.type === "delegation.progress") {
+    return stringData(event.data.message);
+  }
+  return "";
+}
+
+/** 判断事件是否需要包在 reasoning 阶段内展示。 */
+export function isDelegationReasoningEvent(event: RunEvent): boolean {
+  return [
+    "delegation.started",
+    "delegation.output.delta",
+    "delegation.completed",
+    "delegation.failed",
+    "interaction.requested",
+  ].includes(event.type);
+}
+
+/** 构造与 GatewayDataEmitter 一致、并带业务 Agent 标识的消息体。 */
+export function protocolMessage(input: {
+  event: string;
+  content: string;
+  contentType: string;
+  orderId: string;
+  parentOrderId: string;
+  agentId: string;
+  agentName: string;
+  objectType?: string;
+  status?: string;
+}): Record<string, unknown> {
+  return {
+    id: randomUUID().replaceAll("-", "").toUpperCase(),
+    created: Math.floor(Date.now() / 1_000),
+    model: "",
+    object: "",
+    event: input.event,
+    contentType: input.contentType,
+    orderId: input.orderId,
+    parentOrderId: input.parentOrderId,
+    agentId: input.agentId,
+    agentName: input.agentName,
+    ...(input.objectType ? { objectType: input.objectType } : {}),
+    ...(input.status ? { status: input.status } : {}),
+    choices: [
+      {
+        index: 0,
+        finish_reason: "",
+        delta: { content: input.content },
+      },
+    ],
+  };
+}
+
+/** 从 RunEvent JSON 字段中安全读取字符串。 */
+export function stringData(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+/** 统计会实际展示给前端的事件字符数，避免诊断日志包含正文。 */
+export function visibleEventCharacters(event: RunEvent): number {
+  if (event.type === "leader.delta" || event.type === "delegation.output.delta") {
+    return stringData(event.data.text).length;
+  }
+  if (event.type === "delegation.progress") {
+    return stringData(event.data.message).length;
+  }
+  return 0;
+}
+
+/** 生成同一主机内稳定且便于定位的默认 Worker 实例 ID。 */
+export function defaultWorkerId(): string {
+  const host =
+    hostname().trim().replace(/[^a-zA-Z0-9_.-]/g, "-") || "unknown-host";
+  return `byclaw-super-${host}`;
+}
+
+/** 构造不包含消息正文和凭证的结构化日志字段。 */
+export function commandLogFields(
+  command: GatewayCommand,
+): Record<string, unknown> {
+  return {
+    messageId: command.header.messageId,
+    sessionId: command.header.sessionId,
+    traceId: command.header.traceId,
+    sourceAgentType: command.header.sourceAgentType,
+  };
+}
+
+/** 外部 sessionId 在验签 userCode 内绑定，避免不同用户发生碰撞。 */
+export function externalSessionBindingKey(
+  principal: CallerPrincipal,
+  externalSessionId: string,
+): string {
+  return JSON.stringify([principal.userCode, externalSessionId]);
+}
+
+/** 把未知值安全收窄为普通记录。 */
+export function recordValue(
+  value: unknown,
+): Record<string, unknown> | undefined {
+  return isRecord(value) ? value : undefined;
+}
+
+export function toError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error));
+}
+
+/** Worker 启动状态检查使用的非阻塞短轮询。 */
+export function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
