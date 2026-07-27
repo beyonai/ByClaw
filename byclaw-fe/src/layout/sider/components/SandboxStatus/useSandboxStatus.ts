@@ -30,7 +30,7 @@ export default function useSandboxStatus(userCode: string) {
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ['sandboxStatus', userCode],
-    queryFn: () => getSandboxInfo({ userCode, sandboxType: 'openclaw' }),
+    queryFn: () => getSandboxInfo({ userCode }),
     refetchInterval: POLL_INTERVAL,
     enabled: !!userCode,
   });
