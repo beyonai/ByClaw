@@ -1,4 +1,4 @@
-import { getRecorderClient, resetRecorderClient } from './recorderClient';
+import { getEnabledRecordingModes, getRecorderClient, resetRecorderClient } from './recorderClient';
 import { buildRecorderEndpoint, createHttpRecorderClient } from './byclawRecorderClient';
 import { GET, POST } from '@/service/common/request';
 
@@ -8,10 +8,35 @@ jest.mock('@/service/common/request', () => ({
 }));
 
 describe('adapter recorder client selection', () => {
+  const originalRecordingModes = process.env.RECORDER_RECORDING_MODES;
+
   afterEach(() => {
     resetRecorderClient();
     jest.clearAllMocks();
     window.sessionStorage.clear();
+    if (originalRecordingModes === undefined) {
+      delete process.env.RECORDER_RECORDING_MODES;
+    } else {
+      process.env.RECORDER_RECORDING_MODES = originalRecordingModes;
+    }
+  });
+
+  it('defaults enabled recording modes to VNC', () => {
+    delete process.env.RECORDER_RECORDING_MODES;
+
+    expect(getEnabledRecordingModes()).toEqual(['vnc']);
+  });
+
+  it('uses the configured supported recording modes', () => {
+    process.env.RECORDER_RECORDING_MODES = 'tab_projection, embedded_iframe, tab_projection';
+
+    expect(getEnabledRecordingModes()).toEqual(['tab_projection', 'embedded_iframe']);
+  });
+
+  it('falls back to VNC when configured recording modes are unsupported', () => {
+    process.env.RECORDER_RECORDING_MODES = 'unsupported';
+
+    expect(getEnabledRecordingModes()).toEqual(['vnc']);
   });
 
   it('uses the byclaw recorder HTTP client by default', async () => {
@@ -358,5 +383,186 @@ describe('adapter recorder client selection', () => {
     const result = await client.saveAdapter('draft_0', 'edited source');
 
     expect(result.data?.allSucceeded).toBe(false);
+  });
+
+  it('preserves an adapter conflict envelope rejected by the HTTP transport', async () => {
+    const conflict = {
+      ok: false,
+      schemaVersion: 'recorder.v1' as const,
+      requestId: 'save_conflict',
+      data: null,
+      error: {
+        code: 'adapter_exists',
+        message: 'An adapter already exists at this path.',
+        details: { adapterPath: '/by/.bycli/clis/example_com/search.js' },
+      },
+    };
+    (POST as jest.Mock).mockRejectedValueOnce({ response: { status: 409, data: conflict } });
+
+    const client = createHttpRecorderClient({ enabled: true, baseUrl: '/byaiService/recorder' });
+    const result = await client.saveAdapter('draft_0', 'edited source');
+
+    expect(result).toEqual(conflict);
+  });
+
+  it('preserves an adapter conflict envelope when the backend returns a null hint', async () => {
+    const conflict = {
+      ok: false,
+      schemaVersion: 'recorder.v1' as const,
+      requestId: 'save_conflict',
+      data: null,
+      error: {
+        code: 'adapter_exists',
+        message: 'CLI adapter already exists',
+        hint: null,
+        details: { adapterPath: '/by/.bycli/clis/api_juejin_cn/search_api_v1_search.js' },
+      },
+    };
+    (POST as jest.Mock).mockRejectedValueOnce({ response: { status: 409, data: conflict } });
+
+    const client = createHttpRecorderClient({ enabled: true, baseUrl: '/byaiService/recorder' });
+    const result = await client.saveAdapter('draft_0', 'edited source');
+
+    expect(result).toEqual(conflict);
+  });
+
+  it('maps a rejected adapter conflict envelope with a non-conflict status to network_error', async () => {
+    (POST as jest.Mock).mockRejectedValueOnce({
+      response: {
+        status: 500,
+        data: {
+          ok: false,
+          schemaVersion: 'recorder.v1',
+          requestId: 'save_conflict',
+          data: null,
+          error: { code: 'adapter_exists', message: 'An adapter already exists at this path.' },
+        },
+      },
+    });
+
+    const client = createHttpRecorderClient({ enabled: true, baseUrl: '/byaiService/recorder' });
+    const result = await client.saveAdapter('draft_0', 'edited source');
+
+    expect(result.error?.code).toBe('network_error');
+  });
+
+  it('maps a rejected success envelope to network_error', async () => {
+    (POST as jest.Mock).mockRejectedValueOnce({
+      response: {
+        status: 409,
+        data: {
+          ok: true,
+          schemaVersion: 'recorder.v1',
+          requestId: 'save_conflict',
+          data: null,
+          error: { code: 'adapter_exists', message: 'An adapter already exists at this path.' },
+        },
+      },
+    });
+
+    const client = createHttpRecorderClient({ enabled: true, baseUrl: '/byaiService/recorder' });
+    const result = await client.saveAdapter('draft_0', 'edited source');
+
+    expect(result.error?.code).toBe('network_error');
+  });
+
+  it('maps a rejected envelope with response data to network_error', async () => {
+    (POST as jest.Mock).mockRejectedValueOnce({
+      response: {
+        status: 409,
+        data: {
+          ok: false,
+          schemaVersion: 'recorder.v1',
+          requestId: 'save_conflict',
+          data: { unexpected: true },
+          error: { code: 'adapter_exists', message: 'An adapter already exists at this path.' },
+        },
+      },
+    });
+
+    const client = createHttpRecorderClient({ enabled: true, baseUrl: '/byaiService/recorder' });
+    const result = await client.saveAdapter('draft_0', 'edited source');
+
+    expect(result.error?.code).toBe('network_error');
+  });
+
+  it('maps a rejected envelope without an error message to network_error', async () => {
+    (POST as jest.Mock).mockRejectedValueOnce({
+      response: {
+        status: 409,
+        data: {
+          ok: false,
+          schemaVersion: 'recorder.v1',
+          requestId: 'save_conflict',
+          data: null,
+          error: { code: 'adapter_exists' },
+        },
+      },
+    });
+
+    const client = createHttpRecorderClient({ enabled: true, baseUrl: '/byaiService/recorder' });
+    const result = await client.saveAdapter('draft_0', 'edited source');
+
+    expect(result.error?.code).toBe('network_error');
+  });
+
+  it('maps a rejected envelope with an unknown error code to network_error', async () => {
+    (POST as jest.Mock).mockRejectedValueOnce({
+      response: {
+        status: 409,
+        data: {
+          ok: false,
+          schemaVersion: 'recorder.v1',
+          requestId: 'save_conflict',
+          data: null,
+          error: { code: 'not_recorder', message: 'x' },
+        },
+      },
+    });
+
+    const client = createHttpRecorderClient({ enabled: true, baseUrl: '/byaiService/recorder' });
+    const result = await client.saveAdapter('draft_0', 'edited source');
+
+    expect(result.error?.code).toBe('network_error');
+  });
+
+  it('maps a rejected envelope with malformed error details to network_error', async () => {
+    (POST as jest.Mock).mockRejectedValueOnce({
+      response: {
+        status: 409,
+        data: {
+          ok: false,
+          schemaVersion: 'recorder.v1',
+          requestId: 'save_conflict',
+          data: null,
+          error: { code: 'adapter_exists', message: 'x', details: 1 },
+        },
+      },
+    });
+
+    const client = createHttpRecorderClient({ enabled: true, baseUrl: '/byaiService/recorder' });
+    const result = await client.saveAdapter('draft_0', 'edited source');
+
+    expect(result.error?.code).toBe('network_error');
+  });
+
+  it('maps a rejected envelope with malformed error hint to network_error', async () => {
+    (POST as jest.Mock).mockRejectedValueOnce({
+      response: {
+        status: 409,
+        data: {
+          ok: false,
+          schemaVersion: 'recorder.v1',
+          requestId: 'save_conflict',
+          data: null,
+          error: { code: 'adapter_exists', message: 'x', hint: 1 },
+        },
+      },
+    });
+
+    const client = createHttpRecorderClient({ enabled: true, baseUrl: '/byaiService/recorder' });
+    const result = await client.saveAdapter('draft_0', 'edited source');
+
+    expect(result.error?.code).toBe('network_error');
   });
 });

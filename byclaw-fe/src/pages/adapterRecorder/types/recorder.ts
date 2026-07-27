@@ -57,7 +57,7 @@ export type ErrorCode =
 export interface RecorderError {
   code: ErrorCode;
   message: string;
-  hint?: string;
+  hint?: string | null;
   details?: Record<string, unknown>;
 }
 

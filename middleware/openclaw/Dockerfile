@@ -85,8 +85,8 @@ FROM ghcr.io/openclaw/openclaw:${OPENCLAW_VERSION}
 USER root
 
 ARG OPENCLAW_VERSION
-ARG OPENCLI_VERSION=2.1.11
-ARG OPENCLI_EXTENSION_VERSION=2.1.11
+ARG OPENCLI_VERSION=2.1.12
+ARG OPENCLI_EXTENSION_VERSION=2.1.12
 # 与 byclaw-be 预下载包同源同版本(byclaw-be/docker/dws/version.md);amd64 走预下载,arm64 用此版本联网 fallback。
 ARG DWS_VERSION=v1.0.52
 # buildx 目标架构(amd64/arm64),用于选择预下载二进制或 fallback。
@@ -282,7 +282,7 @@ RUN set -eux; \
     rm -f /tmp/dws-linux-amd64.tar.gz; \
     command -v dws; \
     dws --version; \
-    npm install -g "@wecom/cli@${WECOM_CLI_VERSION}" "@larksuite/cli@${LARKSUITE_CLI_VERSION}" "@sovovs/wechat-article-crawler@1.0.0"; \
+    npm install -g "@wecom/cli@${WECOM_CLI_VERSION}" "@larksuite/cli@${LARKSUITE_CLI_VERSION}"; \
     wecom-cli --version; \
     command -v lark-cli
 

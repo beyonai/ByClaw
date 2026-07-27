@@ -2,7 +2,7 @@
 // 录制会话状态机 model(@umijs/max model)。
 // 持有 SessionState + stateVersion,每个动作按 05 State Machine 校验当前态,
 // 非法转移返回 invalid_state(不调用后端),错误态走 failed。
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { createElement, useCallback, useMemo, useRef, useState } from 'react';
 import { Modal } from 'antd';
 import { getRecorderClient, type RecordingMode } from '../services/recorderClient';
 import { INVALID_STATE_HINT, isTerminalError } from '../constants/recorder';
@@ -115,6 +115,13 @@ export function applyDraftSourceEdit(draft: PipelineDraft, source: string): Pipe
   };
 }
 
+/** LLM 是可选增强，只有四项录制基础依赖全部可用时才能进入绑定会话。 */
+export function canContinueAfterHealth(health?: HealthReport): boolean {
+  return (
+    health?.localService === 'ok' && health.daemon === 'ok' && health.extension === 'ok' && health.highLevel === 'ok'
+  );
+}
+
 /** 只把终态结果绑定到实际送检的源码。 */
 export function mergeDraftVerification(
   draft: PipelineDraft,
@@ -166,21 +173,62 @@ function isAdapterExists(response: RequestEnvelope<SaveResult>): boolean {
  */
 export async function saveWithOverwriteConfirmation(
   save: (overwrite: boolean) => Promise<RequestEnvelope<SaveResult>>,
-  confirmOverwrite: () => Promise<boolean>
+  confirmOverwrite: (response: RequestEnvelope<SaveResult>) => Promise<boolean>
 ): Promise<OverwriteSaveOutcome> {
   const first = await save(false);
   if (!isAdapterExists(first)) return { response: first, cancelled: false };
-  if (!(await confirmOverwrite())) return { response: first, cancelled: true };
+  if (!(await confirmOverwrite(first))) return { response: first, cancelled: true };
   return { response: await save(true), cancelled: false };
 }
 
-function confirmAdapterOverwrite(): Promise<boolean> {
+export function formatAdapterOverwriteConfirmationContent(response: RequestEnvelope<SaveResult>): string {
+  const adapterPath = response.error?.details?.adapterPath;
+  const conflictPath = typeof adapterPath === 'string' ? adapterPath : undefined;
+  const pathContent = conflictPath !== undefined ? ` 冲突路径：${conflictPath}` : '';
+  return `当前用户沙箱中已存在同名 CLI 脚本，继续保存将覆盖原文件。${pathContent} 覆盖后原脚本将无法恢复，请确认是否继续。`;
+}
+
+export function renderAdapterOverwriteConfirmationContent(response: RequestEnvelope<SaveResult>) {
+  const adapterPath = response.error?.details?.adapterPath;
+  const conflictPath = typeof adapterPath === 'string' ? adapterPath : undefined;
+  return createElement(
+    'div',
+    null,
+    createElement('div', null, '当前用户沙箱中已存在同名 CLI 脚本，继续保存将覆盖原文件。'),
+    conflictPath !== undefined
+      ? createElement(
+          'code',
+          {
+            style: {
+              display: 'block',
+              marginTop: 12,
+              padding: '8px 12px',
+              background: '#f5f5f5',
+              borderRadius: 6,
+              wordBreak: 'break-all',
+            },
+          },
+          conflictPath
+        )
+      : null,
+    createElement('div', { style: { marginTop: 12 } }, '覆盖后原脚本将无法恢复，请确认是否继续。')
+  );
+}
+
+export function getAdapterOverwriteConfirmationCopy(response: RequestEnvelope<SaveResult>) {
+  return {
+    title: 'CLI 脚本已存在',
+    content: renderAdapterOverwriteConfirmationContent(response),
+    okText: '覆盖保存',
+    cancelText: '取消',
+    okType: 'danger' as const,
+  };
+}
+
+function confirmAdapterOverwrite(response: RequestEnvelope<SaveResult>): Promise<boolean> {
   return new Promise((resolve) => {
     Modal.confirm({
-      title: 'CLI 脚本已存在',
-      content: '是否覆盖当前用户沙箱中同名的 CLI 脚本？',
-      okText: '覆盖保存',
-      cancelText: '取消',
+      ...getAdapterOverwriteConfirmationCopy(response),
       onOk: () => resolve(true),
       onCancel: () => resolve(false),
     });
@@ -270,8 +318,22 @@ export default function useRecorderSession() {
       run(
         'health',
         () => client.health(),
-        (d) => ({ next: 'health_checked', patch: { health: d } })
+        (d) => ({ next: 'idle', patch: { health: d } })
       ),
+    // 健康结果停留在当前页供用户确认;仅四项必需依赖均通过时才显式进入绑定步骤。
+    continueAfterHealth: () => {
+      if (!canContinueAfterHealth(data.health)) {
+        setError({
+          code: 'invalid_state',
+          message: '必需健康检查尚未全部通过，请重新运行健康检查',
+          hint: INVALID_STATE_HINT,
+        });
+        return false;
+      }
+      setError(null);
+      advance('health_checked');
+      return true;
+    },
     // 新建录制会话:仅绑定浏览器 + 保存目标 URL,**不导航、不开 tab**(开 tab 推迟到「开始录制」)。
     // 若目标站点需要登录,用户在「开始录制」后打开的 byCLI 标签页内自行完成登录(Recorder 只绑定已有登录)。
     bind: (url: string, recordingMode?: RecordingMode) =>

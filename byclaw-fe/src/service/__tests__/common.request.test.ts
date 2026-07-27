@@ -84,8 +84,21 @@ import { logout } from '../user';
 import { GET, globalLogout, POST } from '../common/request';
 
 const mockAxiosCreate = (axios as any).create as jest.Mock;
+let responseErrorInterceptor: ((error: unknown) => Promise<never>) | undefined;
+
+function rejectWithResponseInterceptor(error: unknown): Promise<never> {
+  if (!responseErrorInterceptor) throw new Error('Expected Axios response error interceptor to be registered');
+  return responseErrorInterceptor(error);
+}
 
 describe('Service Common Request', () => {
+  beforeAll(() => {
+    const interceptor = mockResponseInterceptorUse.mock.calls[0]?.[1];
+    if (typeof interceptor !== 'function')
+      throw new Error('Expected Axios response error interceptor to be registered');
+    responseErrorInterceptor = interceptor as (error: unknown) => Promise<never>;
+  });
+
   beforeEach(() => {
     jest.clearAllMocks();
   });
@@ -169,6 +182,40 @@ describe('Service Common Request', () => {
 
     await expect(POST('/api/fail', { id: 1 })).rejects.toBe('boom');
     expect(showRequestErrorModal).toHaveBeenCalledWith('boom');
+  });
+
+  it('preserves an opted-in HTTP 409 error response for a caller to handle', async () => {
+    const error = {
+      status: 409,
+      config: { url: '/byaiService/recorder/save', preserveErrorResponse: true },
+      response: {
+        data: { ok: false, schemaVersion: 'recorder.v1' },
+        status: 409,
+        statusText: 'Conflict',
+      },
+    };
+
+    await expect(rejectWithResponseInterceptor(error)).rejects.toBe(error);
+  });
+
+  it('continues to stringify HTTP 409 errors without the opt-in', async () => {
+    await expect(
+      rejectWithResponseInterceptor({
+        status: 409,
+        config: { url: '/byaiService/other' },
+        response: { data: { msg: 'conflict' }, status: 409, statusText: 'Conflict' },
+      })
+    ).rejects.toBe('conflict');
+  });
+
+  it('continues to stringify opted-in errors outside HTTP 409', async () => {
+    await expect(
+      rejectWithResponseInterceptor({
+        status: 500,
+        config: { url: '/byaiService/recorder/save', preserveErrorResponse: true },
+        response: { data: { msg: 'server error' }, status: 500, statusText: 'Internal Server Error' },
+      })
+    ).rejects.toBe('server error');
   });
 
   it('redirects to login when login count exceeds the limit', async () => {

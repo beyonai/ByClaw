@@ -1,10 +1,15 @@
 import {
   applyDraftSourceEdit,
+  getAdapterOverwriteConfirmationCopy,
+  canContinueAfterHealth,
+  formatAdapterOverwriteConfirmationContent,
   mergeDraftVerification,
   mergeSaveResult,
+  renderAdapterOverwriteConfirmationContent,
   saveWithOverwriteConfirmation,
 } from './useRecorderSession';
 import type { PipelineDraft, RequestEnvelope, SaveResult } from '../types/recorder';
+import { renderToStaticMarkup } from 'react-dom/server';
 
 const draft: PipelineDraft = {
   id: 'draft_0',
@@ -26,6 +31,27 @@ const draft: PipelineDraft = {
 };
 
 describe('recorder verify-then-save state', () => {
+  it('continues after required health checks even when no LLM is available', () => {
+    expect(
+      canContinueAfterHealth({
+        localService: 'ok',
+        daemon: 'ok',
+        extension: 'ok',
+        highLevel: 'ok',
+        llmSynthesis: false,
+      })
+    ).toBe(true);
+    expect(
+      canContinueAfterHealth({
+        localService: 'ok',
+        daemon: 'down',
+        extension: 'ok',
+        highLevel: 'ok',
+        llmSynthesis: true,
+      })
+    ).toBe(false);
+  });
+
   it('invalidates local verification metadata immediately after source editing', () => {
     const edited = applyDraftSourceEdit(draft, 'edited source');
 
@@ -141,6 +167,76 @@ describe('recorder verify-then-save state', () => {
     expect(save).toHaveBeenCalledWith(false);
     expect(confirm).toHaveBeenCalledTimes(1);
     expect(outcome).toEqual({ response: conflict, cancelled: true });
+  });
+
+  it('passes the conflicting adapter path to the overwrite confirmation', async () => {
+    const conflictWithPath: RequestEnvelope<SaveResult> = {
+      ...conflict,
+      error: {
+        ...conflict.error!,
+        details: { adapterPath: '/by/.bycli/clis/example_com/search.js' },
+      },
+    };
+    const save = jest.fn().mockResolvedValue(conflictWithPath);
+    const confirm = jest.fn().mockResolvedValue(false);
+
+    await saveWithOverwriteConfirmation(save, confirm);
+
+    expect(confirm).toHaveBeenCalledWith(conflictWithPath);
+  });
+
+  it('renders an empty-string adapter path in overwrite confirmation content', () => {
+    const conflictWithEmptyPath: RequestEnvelope<SaveResult> = {
+      ...conflict,
+      error: {
+        ...conflict.error!,
+        details: { adapterPath: '' },
+      },
+    };
+
+    expect(formatAdapterOverwriteConfirmationContent(conflictWithEmptyPath)).toContain('冲突路径：');
+  });
+
+  it('renders the conflicting adapter path in overwrite confirmation content', () => {
+    const adapterPath = '/by/.bycli/clis/example_com/search.js';
+    const conflictWithPath: RequestEnvelope<SaveResult> = {
+      ...conflict,
+      error: {
+        ...conflict.error!,
+        details: { adapterPath },
+      },
+    };
+
+    expect(formatAdapterOverwriteConfirmationContent(conflictWithPath)).toContain(adapterPath);
+  });
+
+  it('warns that overwriting replaces the existing script and cannot be undone', () => {
+    expect(formatAdapterOverwriteConfirmationContent(conflict)).toContain('继续保存将覆盖原文件');
+    expect(formatAdapterOverwriteConfirmationContent(conflict)).toContain('覆盖后原脚本将无法恢复');
+  });
+
+  it('presents overwrite as an explicit dangerous action', () => {
+    expect(getAdapterOverwriteConfirmationCopy(conflict)).toEqual(
+      expect.objectContaining({
+        title: 'CLI 脚本已存在',
+        okText: '覆盖保存',
+        cancelText: '取消',
+        okType: 'danger',
+      })
+    );
+  });
+
+  it('renders the conflicting path as a separate code block', () => {
+    const adapterPath = '/by/.bycli/clis/example_com/search.js';
+    const conflictWithPath: RequestEnvelope<SaveResult> = {
+      ...conflict,
+      error: { ...conflict.error!, details: { adapterPath } },
+    };
+
+    const markup = renderToStaticMarkup(renderAdapterOverwriteConfirmationContent(conflictWithPath));
+
+    expect(markup).toContain('<code');
+    expect(markup).toContain(adapterPath);
   });
 
   it('retries the exact save operation with overwrite=true only after confirmation', async () => {
