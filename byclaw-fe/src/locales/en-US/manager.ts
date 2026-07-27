@@ -1,11 +1,13 @@
 import dashboardLocale from '@/pages/manager/pages/dashboard/locales/en-US';
 import digitalEmployeeMgrLocale from '@/pages/manager/pages/digitalEmployeeMgr/locales/en-US';
 import sandboxMgrLocale from '@/pages/manager/pages/SandboxMgr/locales/en-US';
+import systemFeedbackMgrLocale from '@/pages/manager/pages/SystemFeedbackMgr/locales/en-US';
 
 export default {
   ...dashboardLocale,
   ...digitalEmployeeMgrLocale,
   ...sandboxMgrLocale,
+  ...systemFeedbackMgrLocale,
   // Menu
   'menu.business': 'Management',
   'menu.business.field': 'Asset Directory',
@@ -22,6 +24,7 @@ export default {
   'menu.systemParams.system': 'Parameter Configuration',
   'menu.systemParams.modal': 'Model Configuration',
   'menu.systemParams.sandbox': 'Sandbox',
+  'menu.systemFeedback': 'System Feedback Management',
   'common.add': 'Add',
   'common.edit': 'Edit',
   'common.view': 'View',

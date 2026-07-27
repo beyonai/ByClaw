@@ -1,11 +1,13 @@
 import dashboardLocale from '@/pages/manager/pages/dashboard/locales/zh-CN';
 import digitalEmployeeMgrLocale from '@/pages/manager/pages/digitalEmployeeMgr/locales/zh-CN';
 import sandboxMgrLocale from '@/pages/manager/pages/SandboxMgr/locales/zh-CN';
+import systemFeedbackMgrLocale from '@/pages/manager/pages/SystemFeedbackMgr/locales/zh-CN';
 
 export default {
   ...dashboardLocale,
   ...digitalEmployeeMgrLocale,
   ...sandboxMgrLocale,
+  ...systemFeedbackMgrLocale,
 
   // Menu
   'menu.business': '资产',
@@ -23,6 +25,7 @@ export default {
   'menu.systemParams.system': '参数配置管理',
   'menu.systemParams.modal': '模型配置管理',
   'menu.systemParams.sandbox': '沙箱配置管理',
+  'menu.systemFeedback': '系统反馈管理',
   'common.add': '新增',
   'common.edit': '编辑',
   'common.view': '查看',

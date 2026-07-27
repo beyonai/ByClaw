@@ -9,6 +9,7 @@ import {
   SafetyCertificateOutlined,
   TeamOutlined,
   RadarChartOutlined,
+  CommentOutlined,
 } from '@ant-design/icons';
 import { getDcSystemConfig } from '@/pages/manager/service/session';
 
@@ -25,6 +26,7 @@ const iconByMenuCode: Record<string, any> = {
   menu_model_config: ExperimentOutlined,
   menu_sandbox_config: CodeSandboxOutlined,
   menu_ui_agent: RadarChartOutlined,
+  menu_system_feedback: CommentOutlined,
 };
 
 const localeIdByPath: Record<string, string> = {
@@ -35,6 +37,7 @@ const localeIdByPath: Record<string, string> = {
   '/manager/systemParams/system': 'menu.systemParams.system',
   '/manager/systemParams/modal': 'menu.systemParams.modal',
   '/manager/systemParams/sandbox': 'menu.systemParams.sandbox',
+  '/manager/system/feedback': 'menu.systemFeedback',
 };
 
 export const fallbackMenuConfig = [
@@ -80,6 +83,12 @@ export const fallbackMenuConfig = [
     localeId: 'menu.systemParams.sandbox',
     icon: CodeSandboxOutlined,
     adminVipOnly: true,
+  },
+  {
+    path: '/manager/system/feedback',
+    name: '系统反馈管理',
+    localeId: 'menu.systemFeedback',
+    icon: CommentOutlined,
   },
 ];
 
