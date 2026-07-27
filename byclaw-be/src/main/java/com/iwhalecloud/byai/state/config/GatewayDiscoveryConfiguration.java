@@ -1,7 +1,6 @@
 package com.iwhalecloud.byai.state.config;
 
 import com.iwhaleai.byai.framework.common.RedisClient;
-import com.iwhaleai.byai.framework.common.RedisConnectionConfig;
 import com.iwhaleai.byai.framework.core.discovery.ServiceRegistry;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
@@ -43,21 +42,6 @@ public class GatewayDiscoveryConfiguration implements ApplicationListener<Servle
         if ("AUTO".equalsIgnoreCase(this.discoveryHost)) {
             this.discoveryHost = null;
         }
-    }
-
-    /**
-     * 将 RedisClient 注册为 Bean。 特别注意：这里调用 RedisClient.init() 而非 getInstance()，以确保在 DevTools 环境下重启时重置连接池。
-     */
-    @Bean(destroyMethod = "close")
-    public RedisClient redisClient() {
-
-        log.info(">>> 初始化 RedisClient Bean (强制重新连接池)...");
-        RedisConnectionConfig config = RedisConnectionConfig.fromEnv();
-
-        log.info("config");
-
-        RedisClient.init(config);
-        return RedisClient.getInstance();
     }
 
     /**
