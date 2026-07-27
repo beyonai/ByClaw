@@ -181,7 +181,7 @@ describe("Baiying AI model config", () => {
     }) as {
       agents?: { list?: Array<{ id?: string; model?: unknown }> };
       models?: { providers?: Record<string, unknown> };
-      secrets?: { providers?: Record<string, unknown> };
+      secrets?: { providers?: Record<string, { passEnv?: string[] }> };
     };
 
     expect(cfg.agents?.list?.find((entry) => entry.id === managed.agentId)?.model).toEqual({
@@ -215,6 +215,14 @@ describe("Baiying AI model config", () => {
         args: ["/plugin/dist/aimodel-secret-resolver-cli.js"],
         jsonOnly: true,
       }),
+    );
+    expect(cfg.secrets?.providers?.["baiying-aimodel-redis"]?.passEnv).toEqual(
+      expect.arrayContaining([
+        "REDIS_MODE",
+        "REDIS_CLUSTER_HOST",
+        "REDIS_KEY_SCHEMA_VERSION",
+        "REDIS_DB",
+      ]),
     );
     expect(JSON.stringify(cfg)).not.toContain("secret-token");
   });
