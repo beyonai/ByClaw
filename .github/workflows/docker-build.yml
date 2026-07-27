@@ -29,7 +29,7 @@ jobs:
       data: ${{ steps.filter.outputs.data }}
       qa: ${{ steps.filter.outputs.qa }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dorny/paths-filter@v4
         id: filter
         with:
@@ -57,7 +57,7 @@ jobs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
       has_targets: ${{ steps.set-matrix.outputs.has_targets }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Build matrix from changed services
         id: set-matrix
         uses: actions/github-script@v9
@@ -119,7 +119,7 @@ jobs:
       matrix: ${{ fromJson(needs.prepare-matrix.outputs.matrix) }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Capture build metadata
         id: build-meta
@@ -137,7 +137,7 @@ jobs:
 
       - name: Setup Node.js (byclaw-fe only)
         if: matrix.service == 'byclaw-fe'
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: "20"
           cache: pnpm
