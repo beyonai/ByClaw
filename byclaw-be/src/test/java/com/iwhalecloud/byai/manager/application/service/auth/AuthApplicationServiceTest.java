@@ -161,10 +161,10 @@ class AuthApplicationServiceTest {
     }
 
     /**
-     * 默认超级助手即使是当前用户绑定的默认助理，也不允许编辑，避免登录初始化的底座资源被改坏。
+     * 默认超级助手允许编辑模型等运行配置，但仍禁止删除。
      */
     @Test
-    void queryResourceOperationPermissions_rejectsDefaultSuperAssistantEditAction() {
+    void queryResourceOperationPermissions_allowsDefaultSuperAssistantEditAction() {
         AuthApplicationService service = new AuthApplicationService();
         SsResourceService ssResourceService = mock(SsResourceService.class);
         ReflectionTestUtils.setField(service, "ssResourceService", ssResourceService);
@@ -186,7 +186,7 @@ class AuthApplicationServiceTest {
 
         ResourceOperationPermissionsVo vo = service.queryResourceOperationPermissions(205L);
 
-        assertThat(vo.getCanEdit()).isFalse();
+        assertThat(vo.getCanEdit()).isTrue();
         assertThat(vo.getCanDelete()).isFalse();
     }
 

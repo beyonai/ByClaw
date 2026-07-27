@@ -168,6 +168,26 @@ public class SystemConfigService {
     }
 
     /**
+     * 从数据库读取配置并刷新单项缓存。
+     *
+     * <p>用于数据库由部署脚本或人工维护、但读取端需要立即获得最新值的配置。</p>
+     *
+     * @param paramCode 配置编码
+     * @return 最新配置
+     */
+    public ByaiSystemConfig findDbAndRefreshCacheByParamCode(String paramCode) {
+        ByaiSystemConfig byaiSystemConfig = this.findByParamCode(paramCode);
+        if (byaiSystemConfig == null) {
+            RedisUtil.hmDelete(RedisConfig.SYSTEM_CONFIG_CODE_KEY, paramCode);
+            return null;
+        }
+
+        RedisUtil.hmPut(RedisConfig.SYSTEM_CONFIG_CODE_KEY, paramCode, JSON.toJSONString(byaiSystemConfig));
+        byaiSystemConfig.setParamValue(this.environmentReplace(byaiSystemConfig.getParamValue()));
+        return byaiSystemConfig;
+    }
+
+    /**
      * 数据库查找配置信息,不查缓存,暂不对外暴露
      *
      * @param paramCode 配置编码

@@ -449,6 +449,17 @@ class DigitalEmployeeApplicationServiceTest {
     }
 
     @Test
+    void validateDigitalEmployeeUpdatePermission_allowsOwnSuperAssistantWhenNotCurrentDefault() {
+        LoginInfo loginInfo = CurrentUserHolder.getLoginInfo();
+        loginInfo.setDefaultDigEmployeeId(999L);
+        SsResource superAssistant = buildDigitalEmployee(100L, OwnerType.PERSONAL_DEFAULT, 1L);
+        superAssistant.setResourceCode("zhangsan_main");
+
+        assertThatCode(() -> ReflectionTestUtils.invokeMethod(service, "validateDigitalEmployeeUpdatePermission",
+            superAssistant)).doesNotThrowAnyException();
+    }
+
+    @Test
     void updateDigitalEmployee_forcesDefaultPersonalAssistantToAssistantRuntime() {
         DigitalEmployeeDTO dto = new DigitalEmployeeDTO();
         dto.setResourceId(100L);
