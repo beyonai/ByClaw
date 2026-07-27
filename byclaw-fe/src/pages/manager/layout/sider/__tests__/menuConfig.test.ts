@@ -3,7 +3,12 @@ jest.mock('@/pages/manager/service/session', () => ({
 }));
 
 import { getDcSystemConfig } from '@/pages/manager/service/session';
-import { getManagerMenuConfig, resetManagerMenuConfigCache } from '../menuConfig';
+import {
+  fallbackMenuConfig,
+  getManagerMenuConfig,
+  normalizeManagerMenuConfig,
+  resetManagerMenuConfigCache,
+} from '../menuConfig';
 
 const mockGetDcSystemConfig = getDcSystemConfig as jest.MockedFunction<typeof getDcSystemConfig>;
 
@@ -39,5 +44,43 @@ describe('manager/layout/sider/menuConfig', () => {
         name: '组织结构管理',
       },
     ]);
+  });
+
+  it('normalizes the system feedback menu like the organization menu', () => {
+    const menus = normalizeManagerMenuConfig([
+      {
+        path: '/manager/org/orgMgr',
+        menuCode: 'menu_org',
+        menuNameCn: '组织结构管理',
+        menuOrder: 1,
+      },
+      {
+        path: '/manager/system/feedback',
+        menuCode: 'menu_system_feedback',
+        menuNameCn: '系统反馈管理',
+        menuOrder: 8,
+      },
+    ]);
+
+    expect(menus).toMatchObject([
+      {
+        path: '/manager/org/orgMgr',
+        routePath: '/manager/org/orgMgr',
+        localeId: 'menu.orgCenter.orgMgr',
+      },
+      {
+        path: '/manager/system/feedback',
+        routePath: '/manager/system/feedback',
+        localeId: 'menu.systemFeedback',
+      },
+    ]);
+    expect(fallbackMenuConfig).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: '/manager/system/feedback',
+          localeId: 'menu.systemFeedback',
+        }),
+      ])
+    );
   });
 });

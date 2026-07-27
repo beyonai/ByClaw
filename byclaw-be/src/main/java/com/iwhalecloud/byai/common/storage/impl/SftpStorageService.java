@@ -1,12 +1,15 @@
 package com.iwhalecloud.byai.common.storage.impl;
 
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import java.io.FilterInputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.util.Properties;
 
+import org.apache.commons.io.FilenameUtils;
 import org.apache.commons.lang3.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.web.multipart.MultipartFile;
@@ -18,6 +21,7 @@ import com.iwhalecloud.byai.common.storage.config.FtpConfig;
 import com.iwhalecloud.byai.common.storage.constants.StorageType;
 import com.iwhalecloud.byai.common.storage.model.FileMetadata;
 import com.iwhalecloud.byai.common.storage.model.FileStorageContext;
+import com.iwhalecloud.byai.common.storage.model.StorageLocation;
 import com.jcraft.jsch.Channel;
 import com.jcraft.jsch.ChannelSftp;
 import com.jcraft.jsch.JSch;
@@ -47,6 +51,134 @@ public class SftpStorageService extends AbstractFileIngressStorageService<Sessio
     @Override
     public String getStorageType() {
         return StorageType.SFTP;
+    }
+
+    /**
+     * Supports the common object-storage contract as well as file ingress. Some
+     * manager features store small service files directly by {@link StorageLocation},
+     * including system-feedback attachments.
+     */
+    @Override
+    public FileMetadata put(StorageLocation location, InputStream inputStream, long size, String contentType) {
+        if (inputStream == null) {
+            throw new IllegalArgumentException("SFTP upload input stream cannot be null");
+        }
+        String remotePath = resolveObjectPath(location);
+        ChannelSftp channelSftp = null;
+        Session session = null;
+        try {
+            session = getClient();
+            channelSftp = openSftpChannel(session);
+            ensureSftpAbsolutePathExists(channelSftp, parentDirectory(remotePath));
+            channelSftp.put(inputStream, remotePath);
+
+            FileMetadata metadata = new FileMetadata();
+            metadata.setBucketName(location.getBucketOrRoot());
+            metadata.setFileName(FilenameUtils.getName(location.getPath()));
+            metadata.setFileUrl(generateFileAccessUrl(location.getBucketOrRoot(), location.getPath()));
+            metadata.setFileSize(size);
+            metadata.setContentType(contentType);
+            metadata.setFileType(FilenameUtils.getExtension(location.getPath()));
+            metadata.setStorageType(getStorageType());
+            logger.info("SFTP对象写入成功, bucketName={}, objectKey={}, remotePath={}", location.getBucketOrRoot(),
+                location.getPath(), remotePath);
+            return metadata;
+        }
+        catch (Exception e) {
+            logger.error("SFTP对象写入失败, bucketName={}, objectKey={}, remotePath={}",
+                location == null ? null : location.getBucketOrRoot(), location == null ? null : location.getPath(),
+                remotePath, e);
+            throw new BaseException("SFTP对象写入失败: " + remotePath, e);
+        }
+        finally {
+            closeSftp(session, channelSftp);
+        }
+    }
+
+    /**
+     * The returned stream owns the SFTP session and closes it together with the
+     * stream so callers can keep the normal try-with-resources read pattern.
+     */
+    @Override
+    public InputStream get(StorageLocation location) {
+        String remotePath = resolveObjectPath(location);
+        Session session = null;
+        ChannelSftp channelSftp = null;
+        try {
+            session = getClient();
+            channelSftp = openSftpChannel(session);
+            InputStream inputStream = channelSftp.get(remotePath);
+            Session currentSession = session;
+            ChannelSftp currentChannelSftp = channelSftp;
+            return new FilterInputStream(inputStream) {
+                @Override
+                public void close() throws IOException {
+                    try {
+                        super.close();
+                    }
+                    finally {
+                        closeSftp(currentSession, currentChannelSftp);
+                    }
+                }
+            };
+        }
+        catch (Exception e) {
+            closeSftp(session, channelSftp);
+            logger.error("SFTP对象读取失败, bucketName={}, objectKey={}, remotePath={}",
+                location == null ? null : location.getBucketOrRoot(), location == null ? null : location.getPath(),
+                remotePath, e);
+            throw new BaseException("SFTP对象读取失败: " + remotePath, e);
+        }
+    }
+
+    @Override
+    public boolean exists(StorageLocation location) {
+        String remotePath = resolveObjectPath(location);
+        ChannelSftp channelSftp = null;
+        Session session = null;
+        try {
+            session = getClient();
+            channelSftp = openSftpChannel(session);
+            channelSftp.stat(remotePath);
+            return true;
+        }
+        catch (SftpException e) {
+            if (e.id == ChannelSftp.SSH_FX_NO_SUCH_FILE) {
+                return false;
+            }
+            throw new BaseException("SFTP对象查询失败: " + remotePath, e);
+        }
+        catch (Exception e) {
+            throw new BaseException("SFTP对象查询失败: " + remotePath, e);
+        }
+        finally {
+            closeSftp(session, channelSftp);
+        }
+    }
+
+    @Override
+    public void delete(StorageLocation location) {
+        String remotePath = resolveObjectPath(location);
+        ChannelSftp channelSftp = null;
+        Session session = null;
+        try {
+            session = getClient();
+            channelSftp = openSftpChannel(session);
+            channelSftp.rm(remotePath);
+            logger.info("SFTP对象删除成功, bucketName={}, objectKey={}, remotePath={}", location.getBucketOrRoot(),
+                location.getPath(), remotePath);
+        }
+        catch (SftpException e) {
+            if (e.id != ChannelSftp.SSH_FX_NO_SUCH_FILE) {
+                throw new BaseException("SFTP对象删除失败: " + remotePath, e);
+            }
+        }
+        catch (Exception e) {
+            throw new BaseException("SFTP对象删除失败: " + remotePath, e);
+        }
+        finally {
+            closeSftp(session, channelSftp);
+        }
     }
 
     /**
@@ -93,9 +225,7 @@ public class SftpStorageService extends AbstractFileIngressStorageService<Sessio
 
             session = this.getClient();
 
-            Channel channel = session.openChannel("sftp");
-            channel.connect();
-            shannelSftp = (ChannelSftp) channel;
+            shannelSftp = openSftpChannel(session);
 
             boolean useResourceRoot = fileStorageContext != null && fileStorageContext.isFtpUsePathResourceRoot()
                 && StringUtils.isNotBlank(ftpConfig.getPathResource());
@@ -210,14 +340,58 @@ public class SftpStorageService extends AbstractFileIngressStorageService<Sessio
      * @param sftp ChannelSftp
      */
     private void closeSftp(Session sshSession, ChannelSftp sftp) {
-        // 关闭session
-        if (sshSession != null && sshSession.isConnected()) {
-            sshSession.disconnect();
-        }
-        // 判断连接
         if (sftp != null && sftp.isConnected()) {
             sftp.disconnect();
         }
+        if (sshSession != null && sshSession.isConnected()) {
+            sshSession.disconnect();
+        }
+    }
+
+    private ChannelSftp openSftpChannel(Session session) throws Exception {
+        Channel channel = session.openChannel("sftp");
+        channel.connect();
+        return (ChannelSftp) channel;
+    }
+
+    private String resolveObjectPath(StorageLocation location) {
+        if (location == null || StringUtils.isBlank(location.getBucketOrRoot())) {
+            throw new IllegalArgumentException("SFTP storage location bucket cannot be empty");
+        }
+        String root = stripTrailingSlashes(ftpConfig.getPath());
+        if (StringUtils.isBlank(root)) {
+            throw new IllegalStateException("SFTP storage root is not configured");
+        }
+        String bucketName = normalizeSafeRelativePath(location.getBucketOrRoot());
+        String objectKey = normalizeSafeRelativePath(location.getPath());
+        return root + "/" + bucketName + "/" + objectKey;
+    }
+
+    private static String normalizeSafeRelativePath(String path) {
+        String normalized = StringUtils.trimToEmpty(path).replace('\\', '/');
+        while (normalized.startsWith("/")) {
+            normalized = normalized.substring(1);
+        }
+        while (normalized.endsWith("/")) {
+            normalized = normalized.substring(0, normalized.length() - 1);
+        }
+        if (StringUtils.isBlank(normalized)) {
+            throw new IllegalArgumentException("SFTP storage path cannot be empty");
+        }
+        for (String segment : normalized.split("/")) {
+            if (StringUtils.isBlank(segment) || ".".equals(segment) || "..".equals(segment)) {
+                throw new IllegalArgumentException("SFTP storage path contains invalid segment");
+            }
+        }
+        return normalized;
+    }
+
+    private static String parentDirectory(String path) {
+        int index = path.lastIndexOf('/');
+        if (index <= 0) {
+            throw new IllegalArgumentException("SFTP target path must contain a parent directory");
+        }
+        return path.substring(0, index);
     }
 
     /**
@@ -282,75 +456,6 @@ public class SftpStorageService extends AbstractFileIngressStorageService<Sessio
     @Override
     protected boolean doCreateBucket(String bucketName) {
         return true;
-    }
-
-    /**
-     * Object-storage style put for StorageLocation.
-     * Writes the InputStream to the resolved path on SFTP.
-     *
-     * @param location StorageLocation containing bucketOrRoot and path
-     * @param inputStream File content stream
-     * @param size Content size
-     * @param contentType MIME type
-     * @return FileMetadata
-     */
-    @Override
-    public com.iwhalecloud.byai.common.storage.model.FileMetadata put(
-        com.iwhalecloud.byai.common.storage.model.StorageLocation location,
-        InputStream inputStream,
-        long size,
-        String contentType) {
-
-        ChannelSftp channelSftp = null;
-        Session session = null;
-
-        try {
-            session = this.getClient();
-            Channel channel = session.openChannel("sftp");
-            channel.connect();
-            channelSftp = (ChannelSftp) channel;
-
-            // For SFTP, bucketOrRoot is treated as a subdirectory under ftpConfig.getPath()
-            // path is the file's relative path within that subdirectory
-            String ftpBasePath = StringUtils.defaultIfBlank(ftpConfig.getPath(), "/");
-            String bucketSubdir = StringUtils.defaultString(location.getBucketOrRoot());
-            String filePath = StringUtils.defaultString(location.getPath());
-
-            // Build full absolute path: ftpBasePath/bucketSubdir/filePath
-            String fullPath = buildFullSftpPath(ftpBasePath, bucketSubdir, filePath);
-
-            // Create parent directory if needed
-            int lastSlash = fullPath.lastIndexOf('/');
-            if (lastSlash > 0) {
-                String parentDir = fullPath.substring(0, lastSlash);
-                ensureSftpAbsolutePathExists(channelSftp, parentDir);
-                channelSftp.cd(parentDir);
-            }
-
-            String filename = lastSlash >= 0 ? fullPath.substring(lastSlash + 1) : fullPath;
-            channelSftp.put(inputStream, filename);
-
-            // Build metadata
-            com.iwhalecloud.byai.common.storage.model.FileMetadata metadata =
-                new com.iwhalecloud.byai.common.storage.model.FileMetadata();
-            metadata.setBucketName(location.getBucketOrRoot());
-            metadata.setFileName(filename);
-            metadata.setFileUrl(location.getPath());
-            metadata.setFileSize(size);
-            metadata.setContentType(contentType);
-            metadata.setFileType(org.apache.commons.io.FilenameUtils.getExtension(filename));
-            metadata.setStorageType(getStorageType());
-
-            logger.info("SFTP put success: {}", fullPath);
-            return metadata;
-        }
-        catch (Exception e) {
-            logger.error("SFTP put failed for location {}: {}", location.getPath(), e.getMessage(), e);
-            throw new BaseException("SFTP put failed: " + e.getMessage(), e);
-        }
-        finally {
-            this.closeSftp(session, channelSftp);
-        }
     }
 
     /**
