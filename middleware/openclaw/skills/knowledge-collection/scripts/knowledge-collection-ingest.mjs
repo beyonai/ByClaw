@@ -13,6 +13,7 @@ const DEFAULT_SIGNATURE_SALT = "{#@*A12^c0+}";
 const DEFAULT_BACKEND_SERVICE_NAME = "ByaiService";
 const SERVICE_DISCOVERY_INSTANCE_PREFIX = "byai_gateway:sd:instances:";
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
+const CANONICAL_LOCAL_PATH = Symbol("canonicalLocalPath");
 
 function parseArgs(argv) {
   const args = { _: [] };
@@ -650,24 +651,24 @@ function asArray(value) {
 }
 
 function sanitizeFileName(value, fallback) {
-  const raw = firstNonEmpty(value, fallback, "bycli-output");
+  const raw = firstNonEmpty(value, fallback, "knowledge-collection-output");
   const safe = raw
     .replace(/[/\\?%*:|"<>]/g, "-")
     .replace(/\s+/g, "-")
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "")
-    .slice(0, 120) || "bycli-output";
+    .slice(0, 120) || "knowledge-collection-output";
   return safe.toLowerCase().endsWith(".md") ? safe : `${safe}.md`;
 }
 
 function sanitizeResourceFileName(value, fallback, source) {
-  const raw = firstNonEmpty(value, fallback, "bycli-resource");
+  const raw = firstNonEmpty(value, fallback, "knowledge-collection-resource");
   let safe = raw
     .replace(/[/\\?%*:|"<>]/g, "-")
     .replace(/\s+/g, "-")
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "")
-    .slice(0, 120) || "bycli-resource";
+    .slice(0, 120) || "knowledge-collection-resource";
   if (!path.extname(safe)) {
     safe = `${safe}${extensionOf(source) || ".bin"}`;
   }
@@ -791,7 +792,7 @@ function normalizeResourceCandidate(raw, args, index) {
   }
   const fileName = sanitizeResourceFileName(
     typeof raw === "object" ? raw.fileName || raw.name : "",
-    fileNameFromUrl(source) || path.basename(String(source)) || `bycli-resource-${index + 1}`,
+    fileNameFromUrl(source) || path.basename(String(source)) || `knowledge-collection-resource-${index + 1}`,
     source,
   );
   const contentType = firstNonEmpty(typeof raw === "object" ? raw.contentType || raw.mimeType : "", guessContentType(fileName));
@@ -1008,7 +1009,12 @@ function normalizeItem(rawItem, args, index) {
   }
   const sourceUrl = firstNonEmpty(rawItem?.sourceUrl, rawItem?.url, pick(args, "source-url"));
   const title = firstNonEmpty(rawItem?.title, rawItem?.name, titleFromMarkdown(markdown), sourceUrl);
-  const fallbackName = firstNonEmpty(rawItem?.fileName, title, slugFromUrl(sourceUrl), `bycli-output-${index + 1}`);
+  const fallbackName = firstNonEmpty(
+    rawItem?.fileName,
+    title,
+    slugFromUrl(sourceUrl),
+    `knowledge-collection-output-${index + 1}`,
+  );
   return {
     title,
     fileName: sanitizeFileName(rawItem?.fileName, fallbackName),
@@ -1017,7 +1023,78 @@ function normalizeItem(rawItem, args, index) {
   };
 }
 
-function normalizebyCliValue(value, args) {
+function isPathInside(rootPath, candidatePath) {
+  const relative = path.relative(rootPath, candidatePath);
+  return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
+}
+
+function resolveCanonicalMarkdownPath(rootDir, rawPath, itemIndex, fieldName) {
+  const relativePath = firstNonEmpty(rawPath);
+  const label = `collection-result.json items[${itemIndex}].${fieldName}`;
+  if (!relativePath) {
+    throw new Error(`${label} 缺失；必须提供采集根目录内的相对 Markdown 路径`);
+  }
+  if (path.isAbsolute(relativePath) || path.win32.isAbsolute(relativePath)) {
+    throw new Error(`${label} 必须是采集根目录内的相对路径，不能使用绝对路径`);
+  }
+
+  const resolvedRoot = path.resolve(rootDir);
+  const resolvedPath = path.resolve(resolvedRoot, relativePath);
+  if (!isPathInside(resolvedRoot, resolvedPath)) {
+    throw new Error(`${label} 越出采集根目录，已拒绝读取: ${relativePath}`);
+  }
+
+  let realRoot;
+  let realPath;
+  try {
+    realRoot = fs.realpathSync(resolvedRoot);
+    realPath = fs.realpathSync(resolvedPath);
+  } catch {
+    throw new Error(`${label} 指向的 Markdown 文件不存在或无法读取: ${relativePath}`);
+  }
+  if (!isPathInside(realRoot, realPath)) {
+    throw new Error(`${label} 通过符号链接越出采集根目录，已拒绝读取: ${relativePath}`);
+  }
+  if (!fs.statSync(realPath).isFile()) {
+    throw new Error(`${label} 必须指向 Markdown 文件: ${relativePath}`);
+  }
+
+  return {
+    absolutePath: realPath,
+    relativePath: path.relative(resolvedRoot, resolvedPath).split(path.sep).join("/"),
+  };
+}
+
+function normalizeCanonicalItem(rawItem, args, index, rootDir) {
+  if (!rawItem || typeof rawItem !== "object" || Array.isArray(rawItem)) {
+    throw new Error(`collection-result.json items[${index}] 必须是对象`);
+  }
+  const markdownPath = resolveCanonicalMarkdownPath(rootDir, rawItem.markdown, index, "markdown");
+  const fileNamePath = resolveCanonicalMarkdownPath(rootDir, rawItem.fileName, index, "fileName");
+  if (markdownPath.absolutePath !== fileNamePath.absolutePath) {
+    throw new Error(`collection-result.json items[${index}].markdown 与 fileName 必须指向同一个 Markdown 文件`);
+  }
+  let markdown;
+  try {
+    markdown = fs.readFileSync(markdownPath.absolutePath, "utf8");
+  } catch {
+    throw new Error(`collection-result.json items[${index}].markdown 读取失败: ${rawItem.markdown}`);
+  }
+  const sourceUrl = firstNonEmpty(rawItem.url, rawItem.sourceUrl, pick(args, "source-url"));
+  const normalized = compactObject({
+    title: firstNonEmpty(rawItem.title, rawItem.name, titleFromMarkdown(markdown), sourceUrl),
+    fileName: fileNamePath.relativePath,
+    url: firstNonEmpty(rawItem.url),
+    sourceUrl,
+    author: firstNonEmpty(rawItem.author),
+    publishTime: firstNonEmpty(rawItem.publishTime),
+    markdown,
+  });
+  normalized[CANONICAL_LOCAL_PATH] = markdownPath.absolutePath;
+  return normalized;
+}
+
+function normalizeInputValue(value, args) {
   if (value === undefined || value === null || value === "") {
     return undefined;
   }
@@ -1037,7 +1114,7 @@ function normalizebyCliValue(value, args) {
     return normalizeCollectionResult(value.collectionResult, args, JSON.stringify(value));
   }
   if (value.data && typeof value.data === "object" && !Array.isArray(value.data)) {
-    return normalizebyCliValue(value.data, args);
+    return normalizeInputValue(value.data, args);
   }
   if (Array.isArray(value.markdownFiles)) {
     return {
@@ -1061,13 +1138,34 @@ function normalizebyCliValue(value, args) {
 }
 
 function normalizeCollectionResult(collectionResult, args, rawOutput) {
-  const normalized = normalizebyCliValue(collectionResult, args);
+  const normalized = normalizeInputValue(collectionResult, args);
   return compactObject({
     command: parseJson(args["command-json"], "command-json") || normalized?.command,
     outputDir: pick(args, "output-dir", normalized?.outputDir),
     rawOutput: firstNonEmpty(pick(args, "raw-output"), readRawOutputFile(args), normalized?.rawOutput, rawOutput),
     assetCount: toNumber(pick(args, "asset-count", normalized?.assetCount)) || 0,
     items: normalized?.items || [],
+  });
+}
+
+function normalizeCanonicalCollectionResult(collectionResult, args, rawOutput, rootDir) {
+  if (!collectionResult || typeof collectionResult !== "object" || Array.isArray(collectionResult)) {
+    throw new Error("collection-result.json 根节点必须是对象");
+  }
+  const items = asArray(collectionResult.items)
+    .map((item, index) => normalizeCanonicalItem(item, args, index, rootDir));
+  return compactObject({
+    schemaVersion: collectionResult.schemaVersion,
+    title: collectionResult.title,
+    source: collectionResult.source,
+    backend: collectionResult.backend,
+    url: collectionResult.url,
+    filters: collectionResult.filters,
+    command: parseJson(args["command-json"], "command-json") || collectionResult.command,
+    outputDir: pick(args, "output-dir", collectionResult.outputDir),
+    rawOutput: firstNonEmpty(pick(args, "raw-output"), readRawOutputFile(args), collectionResult.rawOutput, rawOutput),
+    assetCount: toNumber(pick(args, "asset-count", collectionResult.assetCount)) || 0,
+    items,
   });
 }
 
@@ -1099,7 +1197,7 @@ function markdownItemsFromFiles(args) {
     } catch (error) {
       throw new Error(`Markdown 文件读取失败: ${filePath}: ${error.message}`);
     }
-    const fileName = sanitizeFileName(path.basename(filePath), `bycli-output-${index + 1}`);
+    const fileName = sanitizeFileName(path.basename(filePath), `knowledge-collection-output-${index + 1}`);
     return {
       ...normalizeItem({ markdown, fileName, title: titleFromMarkdown(markdown), sourceUrl: pick(args, "source-url") }, args, index),
       localPath: expandHome(filePath),
@@ -1109,16 +1207,21 @@ function markdownItemsFromFiles(args) {
 
 function loadInputValue(args, stdinValue) {
   if (args["collection-result-json"]) {
-    return { type: "collectionResult", value: parseJson(args["collection-result-json"], "collection-result-json") };
+    const value = parseJson(args["collection-result-json"], "collection-result-json");
+    if (value?.schemaVersion !== undefined) {
+      throw new Error("--collection-result-json 仅兼容内联 Markdown；规范 collection-result.json 包含相对路径，必须使用 --collection-result-file");
+    }
+    return { type: "collection-result-inline-compat", value };
   }
   if (args["collection-result-file"]) {
-    return { type: "collectionResult", value: readJsonFile(args["collection-result-file"]) };
+    const filePath = path.resolve(expandHome(args["collection-result-file"]));
+    return { type: "collection-result-file", value: readJsonFile(filePath), rootDir: path.dirname(filePath) };
   }
   if (args["bycli-json"]) {
-    return { type: "bycli", value: parseJson(args["bycli-json"], "bycli-json") };
+    return { type: "bycli-legacy", value: parseJson(args["bycli-json"], "bycli-json") };
   }
   if (args["bycli-json-file"]) {
-    return { type: "bycli", value: readJsonFile(args["bycli-json-file"]) };
+    return { type: "bycli-legacy", value: readJsonFile(args["bycli-json-file"]) };
   }
   if (stdinValue !== undefined) {
     return { type: "stdin", value: stdinValue };
@@ -1130,10 +1233,12 @@ function buildCollectionResult(args, stdinValue) {
   const input = loadInputValue(args, stdinValue);
   const fileItems = markdownItemsFromFiles(args);
   let collectionResult;
-  if (input.type === "collectionResult") {
+  if (input.type === "collection-result-file") {
+    collectionResult = normalizeCanonicalCollectionResult(input.value, args, JSON.stringify(input.value), input.rootDir);
+  } else if (input.type === "collectionResult" || input.type === "collection-result-inline-compat") {
     collectionResult = normalizeCollectionResult(input.value, args, JSON.stringify(input.value));
   } else if (input.type !== "none") {
-    collectionResult = normalizeCollectionResult(normalizebyCliValue(input.value, args), args, typeof input.value === "string" ? input.value : JSON.stringify(input.value));
+    collectionResult = normalizeCollectionResult(normalizeInputValue(input.value, args), args, typeof input.value === "string" ? input.value : JSON.stringify(input.value));
   } else {
     collectionResult = normalizeCollectionResult({ items: [] }, args, "");
   }
@@ -1146,11 +1251,13 @@ function buildCollectionResult(args, stdinValue) {
     if (extractable.length) {
       throw new Error(`检测到 ${extractable.join("、")}（白名单外的有正文文档），请先提取为 Markdown 再用 --markdown-file 入库`);
     }
-    throw new Error("未找到可入库的 Markdown。请传 --bycli-json-file、--collection-result-file、--markdown-file、--markdown-dir 或 stdin");
+    throw new Error("未找到可入库的 Markdown。请传 --collection-result-file、--markdown-file、--markdown-dir、兼容参数 --bycli-json-file 或 stdin");
   }
   collectionResult.items = collectionResult.items.map((item, index) => ({
     ...item,
-    fileName: sanitizeFileName(item.fileName, `bycli-output-${index + 1}`),
+    fileName: input.type === "collection-result-file"
+      ? item.fileName
+      : sanitizeFileName(item.fileName, `knowledge-collection-output-${index + 1}`),
   }));
   return collectionResult;
 }
@@ -1184,12 +1291,20 @@ function buildTargetConfig(args, stdinJson, task) {
 }
 
 function toMarkdownFiles(collectionResult) {
-  return collectionResult.items.map((item) => ({
-    fileName: item.fileName,
-    markdown: item.markdown,
-    localPath: item.localPath,
-    size: Buffer.byteLength(item.markdown || "", "utf8"),
-  }));
+  return collectionResult.items.map((item) => {
+    const markdownFile = {
+      fileName: item.fileName,
+      markdown: item.markdown,
+      size: Buffer.byteLength(item.markdown || "", "utf8"),
+    };
+    if (item.localPath) {
+      markdownFile.localPath = item.localPath;
+    }
+    if (item[CANONICAL_LOCAL_PATH]) {
+      markdownFile[CANONICAL_LOCAL_PATH] = item[CANONICAL_LOCAL_PATH];
+    }
+    return markdownFile;
+  });
 }
 
 function assertImportReady(targetConfig) {
@@ -1210,8 +1325,8 @@ function resolveKnowledgeManagerScript(args) {
   const candidates = explicit
     ? [explicit]
     : [
-      path.resolve(SCRIPT_DIR, "../../知识库管理/scripts/by-knowledge-manager.mjs"),
-      path.resolve(process.cwd(), "知识库管理/scripts/by-knowledge-manager.mjs"),
+      path.resolve(SCRIPT_DIR, "../../by-knowledge-manager/scripts/by-knowledge-manager.mjs"),
+      path.resolve(process.cwd(), "middleware/openclaw/skills/by-knowledge-manager/scripts/by-knowledge-manager.mjs"),
     ];
   for (const candidate of candidates) {
     const resolved = expandHome(candidate);
@@ -1228,7 +1343,7 @@ function candidateSessionDirs(args, payloads) {
     pick(args, "output-dir"),
     payloads.collectionResult?.outputDir,
   ];
-  for (const key of ["bycli-json-file", "collection-result-file"]) {
+  for (const key of ["collection-result-file", "bycli-json-file"]) {
     const filePath = pick(args, key);
     if (filePath && filePath !== true) {
       dirs.push(path.dirname(expandHome(filePath)));
@@ -1249,7 +1364,7 @@ function candidateSessionDirs(args, payloads) {
 }
 
 function existingMarkdownPath(item, sessionDirs) {
-  const direct = firstNonEmpty(item.localPath);
+  const direct = firstNonEmpty(item[CANONICAL_LOCAL_PATH], item.localPath);
   if (direct && fs.existsSync(expandHome(direct))) {
     return expandHome(direct);
   }
@@ -1290,9 +1405,9 @@ function prepareMarkdownUploadFiles(args, payloads) {
     }
 
     if (!tempDir) {
-      tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "bycli-knowledge-ingest-"));
+      tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "knowledge-collection-ingest-"));
     }
-    const fileName = sanitizeFileName(item.fileName, `bycli-output-${index + 1}.md`);
+    const fileName = sanitizeFileName(item.fileName, `knowledge-collection-output-${index + 1}.md`);
     let filePath = path.join(tempDir, fileName);
     if (fs.existsSync(filePath)) {
       filePath = path.join(tempDir, `${index + 1}-${fileName}`);
@@ -1341,6 +1456,7 @@ async function uploadMarkdownWithKnowledgeManager(args, payloads) {
   }
   const directoryPath = firstNonEmpty(payloads.targetConfig.directoryPath, "/");
   const managerScript = resolveKnowledgeManagerScript(args);
+  const hasCanonicalArtifacts = payloads.markdownFiles.some((item) => Boolean(item[CANONICAL_LOCAL_PATH]));
   if (args["dry-run"]) {
     const sessionDirs = candidateSessionDirs(args, payloads);
     return {
@@ -1349,11 +1465,14 @@ async function uploadMarkdownWithKnowledgeManager(args, payloads) {
       command: "upload",
       resourceId,
       directoryPath,
-      sessionDirs,
       files: payloads.markdownFiles.map((item) => ({
         fileName: item.fileName,
-        existingPath: existingMarkdownPath(item, sessionDirs) || undefined,
+        source: item[CANONICAL_LOCAL_PATH] ? "validated-canonical" : undefined,
+        existingPath: item[CANONICAL_LOCAL_PATH]
+          ? undefined
+          : existingMarkdownPath(item, sessionDirs) || undefined,
       })),
+      ...(!hasCanonicalArtifacts ? { sessionDirs } : {}),
     };
   }
 
@@ -1371,17 +1490,21 @@ async function uploadMarkdownWithKnowledgeManager(args, payloads) {
       managerArgs.push("--file-path", filePath);
     }
     const result = await runNodeJson(managerScript, managerArgs);
-    return {
+    const publicResult = {
       managerScript,
       resourceId,
       directoryPath,
-      tempDir,
-      filePaths,
-      reusedFiles,
-      generatedFiles,
-      sessionDirs,
       manager: result.json,
     };
+    return hasCanonicalArtifacts
+      ? {
+        ...publicResult,
+        files: payloads.markdownFiles.map((item) => ({
+          fileName: item.fileName,
+          source: item[CANONICAL_LOCAL_PATH] ? "validated-canonical" : "runtime-generated",
+        })),
+      }
+      : { ...publicResult, tempDir, filePaths, reusedFiles, generatedFiles, sessionDirs };
   } finally {
     if (tempDir && !args["keep-temp"]) {
       fs.rmSync(tempDir, { recursive: true, force: true });
@@ -1474,28 +1597,30 @@ function summarizePayloads(payloads) {
 
 async function printHelp() {
   render({
-    name: "bycli-markdown-ingest",
+    name: "knowledge-collection-ingest",
     commands: {
       "list-kb": "调用 /spaceDir/listPersonalKb 查询可入库个人知识库",
-      normalize: "规范化 byCLI Markdown 输出，不请求后端",
+      normalize: "规范化知识采集 Markdown 输出，不请求后端",
       "upload-resource": "上传图片/音频/视频到 /chat/uploadFiles（会话文件，不进知识库）",
       "upload-doc": "文件直传知识库：/datasetController/uploadFiles + build，后端解析 pdf/docx/pptx/xlsx/csv/txt/md",
       ingest: "归一化 Markdown 后调用 by-knowledge-manager upload/build",
     },
     inputs: [
-      "--bycli-json-file <file>",
       "--collection-result-file <file>",
+      "--collection-result-json <json> (inline compatibility; relative paths require --collection-result-file)",
       "--markdown-file <file> (可重复)",
       "--markdown-dir <dir>",
+      "--bycli-json-file <file> (legacy compatibility)",
+      "--bycli-json <json> (legacy compatibility)",
       "--file-url/--image-url/--resource-url <url>",
       "--file-path/--image-path/--resource-path <path>",
       "stdin JSON 或 Markdown 文本",
     ],
     requiredForImport: ["--knowledge-base-resource-id 或 --knowledge-base-id"],
     examples: [
-      "node bycli-markdown-ingest.mjs normalize --bycli-json-file /tmp/bycli-output.json --knowledge-base-resource-id 90001",
-      "node bycli-markdown-ingest.mjs ingest --markdown-file article.md --source-url https://example.com --knowledge-base-resource-id 90001",
-      "node bycli-markdown-ingest.mjs upload-doc --file-path report.pdf --knowledge-base-resource-id 90001 --directory-path /imports",
+      "node knowledge-collection-ingest.mjs normalize --collection-result-file /tmp/knowledge-collection-result.json --knowledge-base-resource-id 90001",
+      "node knowledge-collection-ingest.mjs ingest --markdown-file article.md --source-url https://example.com --knowledge-base-resource-id 90001",
+      "node knowledge-collection-ingest.mjs upload-doc --file-path report.pdf --knowledge-base-resource-id 90001 --directory-path /imports",
     ],
     backend: await resolveBackendBaseUrl(),
     auth: authSummary(),
@@ -1562,7 +1687,7 @@ async function main() {
   }
 
   if (command === "store" || command === "import") {
-    throw new Error("store/import 命令已废弃；请使用 ingest，由 bycli 内部入库编排调用 by-knowledge-manager upload/build");
+    throw new Error("store/import 命令已废弃；请使用 ingest，由知识采集入库编排调用 by-knowledge-manager upload/build");
     return;
   }
 
