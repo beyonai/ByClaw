@@ -1234,7 +1234,6 @@ export default {
   'feedbackModal.content': '详细描述',
   'feedbackModal.contentTip': '请详细描述您遇到的问题或建议（至少10字）',
   'feedbackModal.files': '问题截图/附件',
-  'feedbackModal.uploadFailed': '附件上传失败，请重新上传后再提交反馈',
   'feedbackModal.success': '感谢您的反馈',
 
   // 助手设置

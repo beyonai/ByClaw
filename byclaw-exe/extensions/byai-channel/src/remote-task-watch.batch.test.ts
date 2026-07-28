@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   dispatch: vi.fn(),
   ensureRequest: vi.fn(),
   markAwaiting: vi.fn(),
+  markDispatched: vi.fn(),
   removeDelegatedWork: vi.fn(),
 }));
 
@@ -18,6 +19,7 @@ vi.mock("./remote-followup.js", () => ({
 vi.mock("./session-context.js", () => ({
   ensureActiveSdkRequestForDelegatedFollowup: mocks.ensureRequest,
   markActiveSdkAwaitingDelegatedFollowup: mocks.markAwaiting,
+  markActiveSdkDelegatedFollowupDispatched: mocks.markDispatched,
   removeActiveSdkDelegatedWork: mocks.removeDelegatedWork,
 }));
 
@@ -69,6 +71,7 @@ beforeEach(async () => {
   mocks.dispatch.mockReset().mockResolvedValue({ runId: "run-followup" });
   mocks.ensureRequest.mockReset();
   mocks.markAwaiting.mockReset();
+  mocks.markDispatched.mockReset();
   mocks.removeDelegatedWork.mockReset();
 });
 
@@ -123,6 +126,19 @@ describe("remote-task-watch session batches", () => {
     ).toBe(true);
 
     expect(mocks.dispatch).toHaveBeenCalledTimes(1);
+    expect(mocks.markDispatched).toHaveBeenCalledWith({
+      requesterSessionKey: "agent:main:direct:s-1",
+      runId: "run-followup",
+    });
+    expect(mocks.markAwaiting.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.dispatch.mock.invocationCallOrder[0]!,
+    );
+    expect(mocks.dispatch.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.markDispatched.mock.invocationCallOrder[0]!,
+    );
+    expect(mocks.markDispatched.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.removeDelegatedWork.mock.invocationCallOrder[0]!,
+    );
     const followup = mocks.dispatch.mock.calls[0]?.[0];
     expect(followup.tasks).toHaveLength(3);
     expect(group.every((task) => task.status === "delivered")).toBe(true);

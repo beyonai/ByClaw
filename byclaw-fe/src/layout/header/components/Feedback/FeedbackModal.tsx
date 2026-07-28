@@ -1,9 +1,38 @@
 import React, { useEffect, useState } from 'react';
 import { Form, Input, message, Modal, ModalProps, Select, Spin, Upload } from 'antd';
+import { useControllableValue } from 'ahooks';
 import { useIntl } from '@umijs/max';
 import { sendFeedback, uploadFeedbackFile } from '@/service/feedback';
 
-const normalizeUploadFileList = (event: any) => (Array.isArray(event) ? event : event?.fileList || []);
+interface UploadFileProps {
+  // eslint-disable-next-line react/no-unused-prop-types
+  value?: (string | File)[];
+  // eslint-disable-next-line react/no-unused-prop-types
+  onChange?: (value: (string | File)[]) => void;
+}
+
+const UploadFile = (props: UploadFileProps) => {
+  const [value, setValue] = useControllableValue(props);
+  const intl = useIntl();
+
+  const handleBeforeUpload = () => {
+    return false;
+  };
+
+  const handleChange = ({ fileList }: any) => {
+    setValue(fileList);
+  };
+
+  useEffect(() => {
+    console.log(value, 'value');
+  }, [value]);
+
+  return (
+    <Upload.Dragger multiple beforeUpload={handleBeforeUpload} onChange={handleChange} maxCount={3}>
+      <div>{intl.formatMessage({ id: 'common.upload' })}</div>
+    </Upload.Dragger>
+  );
+};
 
 interface FeedbackModalProps extends ModalProps {
   userId: string;
@@ -19,34 +48,35 @@ export default function FeedbackModal(props: FeedbackModalProps) {
 
   const handleSubmit = async () => {
     const { files, ...values } = await form.validateFields();
-    if (!values) {
-      return;
-    }
+    if (!values) return;
     setLoading(true);
-    try {
-      if (files?.length > 0) {
-        const uploadFiles = files.map((file: any) => file?.originFileObj || file).filter(Boolean);
-        if (uploadFiles.length !== files.length) {
-          throw new Error(intl.formatMessage({ id: 'feedbackModal.uploadFailed' }));
-        }
-        const formData = new FormData();
-        uploadFiles.forEach((file: File) => formData.append('files', file));
+    if (files?.length > 0) {
+      const formData = new FormData();
+      files.forEach((file: any) => {
+        formData.append('files', file.originFileObj);
+      });
+      try {
         const res = await uploadFeedbackFile(formData);
-        const successFiles = res?.data?.successFiles;
-        if (res?.code !== 0 || !Array.isArray(successFiles) || successFiles.length !== uploadFiles.length) {
-          throw new Error(res?.msg || intl.formatMessage({ id: 'feedbackModal.uploadFailed' }));
+        console.log(res, 'res111');
+        if (res?.data?.successFiles?.length > 0) {
+          values.fileIds = res.data.successFiles.map((item: any) => item.fileId);
+          values.attachFileIds = res.data.successFiles.map((item: any) => item.attachFileId);
         }
-        values.attachFileIds = successFiles.map((item: any) => item.attachFileId);
+      } catch (error) {
+        message.error(error instanceof Error ? error.message : String(error));
+        return;
+      } finally {
+        setLoading(false);
       }
-
+    }
+    try {
       const res = await sendFeedback({ ...values, userId });
-      if (res?.code !== 0) {
-        throw new Error(res?.msg || intl.formatMessage({ id: 'common.systemErrorRetry' }));
+      if (res.code === 0) {
+        message.success(intl.formatMessage({ id: 'feedbackModal.success' }));
+        onCancel?.();
       }
-      message.success(intl.formatMessage({ id: 'feedbackModal.success' }));
-      onCancel?.();
     } catch (error) {
-      message.error(error instanceof Error ? error.message : intl.formatMessage({ id: 'common.systemErrorRetry' }));
+      message.warning(intl.formatMessage({ id: 'common.systemErrorRetry' }));
     } finally {
       setLoading(false);
     }
@@ -110,15 +140,8 @@ export default function FeedbackModal(props: FeedbackModalProps) {
               placeholder={intl.formatMessage({ id: 'feedbackModal.contentTip' })}
             />
           </Form.Item>
-          <Form.Item
-            name="files"
-            label={intl.formatMessage({ id: 'feedbackModal.files' })}
-            valuePropName="fileList"
-            getValueFromEvent={normalizeUploadFileList}
-          >
-            <Upload.Dragger multiple beforeUpload={() => false} maxCount={3}>
-              <div>{intl.formatMessage({ id: 'common.upload' })}</div>
-            </Upload.Dragger>
+          <Form.Item name="files" label={intl.formatMessage({ id: 'feedbackModal.files' })}>
+            <UploadFile />
           </Form.Item>
         </Form>
       </Spin>

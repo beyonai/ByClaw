@@ -12,6 +12,7 @@ import {
 import {
   ensureActiveSdkRequestForDelegatedFollowup,
   markActiveSdkAwaitingDelegatedFollowup,
+  markActiveSdkDelegatedFollowupDispatched,
   removeActiveSdkDelegatedWork,
 } from "./session-context.js";
 import { byFrameworkRedisKeys } from "../../shared/src/redis-compat.js";
@@ -616,18 +617,19 @@ async function deliverReadyTaskGroup(
       language: representative.language,
       traceId: representative.traceId,
     });
+    // runtime.subagent.run 返回只表示 follow-up 已入队；同 session 的旧 run 可能尚未发
+    // lifecycle/end。先登记目标 runId，避免旧终态释放 awaitingFollowup 并提前收尾。
+    markActiveSdkDelegatedFollowupDispatched({
+      requesterSessionKey: representative.requesterSessionKey,
+      runId,
+    });
     // 回灌成功后逐个消除组内委派工作
     const deliveredAt = Date.now();
     for (const task of tasks) {
-      const request = removeActiveSdkDelegatedWork({
+      removeActiveSdkDelegatedWork({
         requesterSessionKey: task.requesterSessionKey,
         toolCallId: task.toolCallId,
       });
-      // 必须在这里同步设置 followupRunStarted。否则在执行 removeActiveSdkDelegatedWork 后，到后续的 lifecycle phase=start 事件中间，
-      // waitForSdkSessionDispatchSettled -> isRequestSettled 会判定为 true。因为这种情况下，还未通过 markActiveSdkRootLifecycleStarted 将followupRunStarted置为true
-      if (runId && request) {
-        request.followupRunStarted = true;
-      }
       task.status = "delivered";
       task.deliveredRunId = runId;
       task.deliveredAt = deliveredAt;
