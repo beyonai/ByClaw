@@ -1,7 +1,7 @@
 // @ts-nocheck
 import React, { memo, useEffect } from 'react';
 
-import { Outlet, useDispatch, useLocation } from '@umijs/max';
+import { Outlet, useDispatch, useLocation, useSelector } from '@umijs/max';
 import { getLocale } from '@umijs/max';
 import dayjs from 'dayjs';
 import 'dayjs/locale/en';
@@ -30,6 +30,7 @@ function setLanguage() {
 const ManagerLayout: React.FC = () => {
   const dispatch = useDispatch();
   const location = useLocation();
+  const userInfo = useSelector(({ user }) => user.userInfo);
   const { pathname } = location;
 
   useEffect(() => {
@@ -37,13 +38,18 @@ const ManagerLayout: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    // 菜单配置接口需要登录态，避免未登录页面先发起匿名 401。
+    if (!userInfo) {
+      return;
+    }
+
     dispatch({
       type: 'menu/getBlockedPaths',
       payload: {
         paramCode: 'BYAI_MIN_SYSTEM_MENU',
       },
     });
-  }, [dispatch]);
+  }, [dispatch, userInfo?.userId]);
 
   // Check if layout should be hidden for certain routes
   const shouldHideLayout =
