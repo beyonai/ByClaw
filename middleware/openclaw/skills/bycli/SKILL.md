@@ -49,7 +49,7 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 - Agent 调用支持格式化输出的数据 / adapter 命令时加 `-f json` 获取可解析输出；`doctor`、`daemon`、`browser` 生命周期命令以及不支持 `--format` 的子命令按其原生命令执行
 - 浏览器操作前确认 `bycli doctor` 通过（仅 COOKIE/INTERCEPT/UI 策略需要）
 - 每次执行 `bycli doctor` 后（无论成功与否）必须紧接着执行 `bycli daemon status`，确认 daemon 处于 running 且 Extension 为 connected，据此判断桥接是否正常；任一不满足则视为桥接异常，按以下阶梯升级处理：
-  1. 桥接异常 → 先按冷启动流程恢复进程与桥接（`openclaw browser start` → `bycli doctor` → `bycli daemon status`）；冷启动不包含 `bycli browser open/state`
+  1. 桥接异常 → 先执行 `openclaw browser --browser-profile openclaw status`；仅当状态明确显示浏览器未运行时执行 `/usr/local/bin/start-chrome.sh`，随后执行 `bycli doctor` → `bycli daemon status` 复检；冷启动不包含 `bycli browser open/state`
   2. 仍异常 → `bycli daemon restart`，再 `bycli daemon status` 复检
   3. `bycli daemon restart` 后仍连接不上（daemon 未 running 或 Extension 未 connected）→ **STOP，停止一切浏览器动作**，提示用户检查 Chrome 是否正常启动、byCLI 扩展插件是否已安装并启用，恢复后再重试；不得继续驱动或降级到通用工具
 - 修复 adapter 时仅修改 trace `summary.md` 里 `adapterSourcePath` 指向的文件
@@ -225,7 +225,7 @@ bycli gh pr list --limit 5         # 透传调用
 
 | 组件 | 归属 | 控制方式 |
 |------|------|---------|
-| Chromium 进程树 | OpenClaw browser plugin | `openclaw browser --browser-profile openclaw start/stop/status` |
+| Chromium 进程树 | OpenClaw browser plugin / 恢复脚本 | `openclaw browser --browser-profile openclaw status/stop`；未运行时执行 `/usr/local/bin/start-chrome.sh` |
 | byCLI Browser Bridge daemon (port 19825) | `bycli` 自身 | `bycli daemon start/restart/stop` |
 | Browser tab lease (CDP target) | `surface + session + browser context` | raw browser 用 `bycli browser <sess> ...`；adapter 由命令自身管理 |
 | Extension 握手 | 两侧都需要 | `bycli doctor` 检查 |
@@ -233,12 +233,14 @@ bycli gh pr list --limit 5         # 透传调用
 ### 冷启动
 
 ```bash
-openclaw browser --browser-profile openclaw start
+openclaw browser --browser-profile openclaw status
+# 仅当状态明确显示浏览器未运行时执行：
+/usr/local/bin/start-chrome.sh
 bycli doctor
 bycli daemon status                # doctor 后必跑：确认 daemon running + Extension connected
 ```
 
-冷启动只恢复 Chromium、daemon 和 Extension 握手，**不创建、导航或检查任务 TAB**。`bycli browser <sess> open` 是有副作用的 CDP 导航命令，不是冷启动命令；Chromium 未运行时必须先执行 `openclaw browser start`。
+冷启动只恢复 Chromium、daemon 和 Extension 握手，**不创建、导航或检查任务 TAB**。浏览器已经运行时不得再次执行 `/usr/local/bin/start-chrome.sh`。`bycli browser <sess> open` 是有副作用的 CDP 导航命令，不是冷启动命令。
 
 ### 桥接正常后的 TAB 分流
 

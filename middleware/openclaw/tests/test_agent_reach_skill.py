@@ -217,10 +217,21 @@ class AgentReachSkillContractTest(unittest.TestCase):
         ):
             self.assertIn(phrase, skill)
 
-    def test_bycli_documents_profile_explicit_openclaw_browser_commands(self):
+    def test_bycli_recovers_a_stopped_browser_with_start_chrome_script(self):
         skill = BYCLI_SKILL.read_text(encoding="utf-8")
+        cold_start = skill.split("### 冷启动", 1)[1].split("### 桥接正常后的 TAB 分流", 1)[0]
 
-        self.assertIn("openclaw browser --browser-profile openclaw start", skill)
+        expected_steps = (
+            "openclaw browser --browser-profile openclaw status",
+            "浏览器未运行",
+            "/usr/local/bin/start-chrome.sh",
+            "bycli doctor",
+            "bycli daemon status",
+        )
+        for step in expected_steps:
+            self.assertIn(step, cold_start)
+        positions = [cold_start.index(step) for step in expected_steps]
+        self.assertEqual(positions, sorted(positions))
         self.assertIn("openclaw browser --browser-profile openclaw stop", skill)
 
     def test_bycli_evals_cover_status_discovery_and_safe_login_boundaries(self):
@@ -232,7 +243,8 @@ class AgentReachSkillContractTest(unittest.TestCase):
         self.assertIn("bycli list -f json", expected[5])
         self.assertIn("bycli web read --url", expected[5])
         self.assertIn("不存在 web/read", expected[5])
-        self.assertIn("openclaw browser --browser-profile openclaw start", expected[5])
+        self.assertIn("openclaw browser --browser-profile openclaw status", expected[5])
+        self.assertIn("/usr/local/bin/start-chrome.sh", expected[5])
         self.assertIn("不得代填或提交凭据", expected[8])
 
 
