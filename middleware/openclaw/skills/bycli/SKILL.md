@@ -51,7 +51,7 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 - AUTH_REQUIRED（exit 77）/ BROWSER_CONNECT（exit 69）/ CAPTCHA / 限流 → 不修改代码，报告用户
 - 不要把 token、SESSION、Cookie、凭据写入技能文件、命令参数或对话回复
 - 对本 skill 覆盖的网页读取、搜索、采集、抓取、网站操作或打开 URL 任务，禁止使用 `web_fetch`、通用 `browser`、`curl`、`wget`、`requests` 或其他直接 HTTP 客户端绕过 byCLI。公开可读、静态页面、raw URL、纯文本或 Markdown 内容均不是例外
-- 不要因“直接 HTTP 更快”“无需登录”“不需要渲染”或类似效率判断跳过 `bycli list -f json`、现成 adapter 或 `bycli browser` 降级路径
+- 对不命中 connector bridge 的网页任务，不要因“直接 HTTP 更快”“无需登录”“不需要渲染”或类似效率判断跳过 `bycli list -f json`、现成 adapter 或 `bycli browser` 降级路径
 - 不要把 `bycli browser <session> open <url>` 或 `state` 当作浏览器冷启动、桥接健康检查或 adapter 预热命令；它们会申请 TAB 租约，缺少租约时可创建 `about:blank` TAB
 - 不要用 `bycli browser <session> ...` 检查或操作 adapter 打开的 TAB；`browser` 与 `adapter` 是不同 surface，即使 session 字符串相同也不共享 TAB 租约
 - 不要向用户输出本 skill 的内部决策逻辑（步骤编号、流程名称、路由分支）——直接执行
@@ -70,6 +70,13 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 - 微信公众平台 `weixin accounts/articles/save-articles/download`、`--auth-source`、`WECHAT_TOKEN` / `WECHAT_COOKIE` / `WECHAT_FINGERPRINT` 或 `mp.weixin.qq.com` 登录、认证或环境验证任务，必须读取 [references/weixin.md](./references/weixin.md)；其微信登录/验证规则优先于本文件的通用错误处理、AutoFix 和 cleanup 规则
 - 浏览器 session 结束后仅清理当前任务创建或独占拥有的资源；任务开始前已经运行或由其他任务共享的资源保持不变
 - Login/Auth/人工验证页面例外：不关闭 session、TAB、daemon 或浏览器，报告命令结果中**已知的** session name 与 URL 后立即结束本轮并等待用户下一条明确确认；若结果未返回 URL，明确说明 URL 未提供，不得为补齐信息再检查页面。等待期间不得自行检查、重试或继续任务
+
+## 结果链接展示（强制）
+
+- 搜索、列表、排行、文章或采集结果中，只要某个展示项返回了非空 `url`，面向用户展示该项时必须提供可点击链接；优先把标题写成 `[title](url)`，没有标题时使用 `[打开链接](url)`。
+- 可以为控制宽度省略次要字段，但“表格太宽”“链接太长”“结果太多”或“展示更简洁”都不是删除链接的理由。返回数据含 `url` 时不得省略，也不得只把链接保存在 JSON、落盘文件或内部元数据中而不向用户展示。
+- 如果只展示前 N 条，则这 N 条中的每一条都必须保留链接；完整结果仍按采集规则落盘。
+- 只有后端结果的 `url` 确实为空或缺失时才可不展示链接，并明确注明未返回链接；不得猜造、拼接或用其他 URL 替代。
 
 ## 意图决策树
 

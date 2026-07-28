@@ -1327,6 +1327,9 @@ function resolveKnowledgeManagerScript(args) {
     : [
       path.resolve(SCRIPT_DIR, "../../by-knowledge-manager/scripts/by-knowledge-manager.mjs"),
       path.resolve(process.cwd(), "middleware/openclaw/skills/by-knowledge-manager/scripts/by-knowledge-manager.mjs"),
+      path.resolve(process.cwd(), "middleware/openclaw/skills/by-knowledge-manager/scripts/by-knowledge-manager.mjs"),
+      path.resolve(process.cwd(), "by-knowledge-manager/scripts/by-knowledge-manager.mjs"),
+      path.resolve(process.cwd(), "by-knowledge-manager/scripts/by-knowledge-manager.mjs"),
     ];
   for (const candidate of candidates) {
     const resolved = expandHome(candidate);

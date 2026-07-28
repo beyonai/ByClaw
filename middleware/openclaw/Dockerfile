@@ -85,13 +85,14 @@ FROM ghcr.io/openclaw/openclaw:${OPENCLAW_VERSION}
 USER root
 
 ARG OPENCLAW_VERSION
-
+ARG OPENCLI_VERSION=2.1.13
+ARG OPENCLI_EXTENSION_VERSION=2.1.13
 # 与 byclaw-be 预下载包同源同版本(byclaw-be/docker/dws/version.md);amd64 走预下载,arm64 用此版本联网 fallback。
 ARG DWS_VERSION=v1.0.52
 # buildx 目标架构(amd64/arm64),用于选择预下载二进制或 fallback。
 ARG TARGETARCH
 ARG WECOM_CLI_VERSION=0.1.9
-ARG LARKSUITE_CLI_VERSION=1.0.67
+ARG LARKSUITE_CLI_VERSION=1.0.78
 ARG INSTALL_BROWSER_STACK=true
 
 RUN chown root:root /app
@@ -193,7 +194,7 @@ RUN set -eux; \
         rm -f /tmp/opencli-extension.zip; \
         chromium --version; \
         x11vnc -version; \
-        bycli --version; \
+        test "$(bycli --version)" = "${OPENCLI_VERSION}"; \
         test -f /opt/opencli/extension/manifest.json; \
         ;; \
     esac; \
@@ -303,8 +304,11 @@ RUN set -eux; \
     command -v dws; \
     dws --version; \
     npm install -g "@wecom/cli@${WECOM_CLI_VERSION}" "@larksuite/cli@${LARKSUITE_CLI_VERSION}"; \
-    wecom-cli --version; \
-    command -v lark-cli
+    test "$(wecom-cli --version)" = "wecom-cli ${WECOM_CLI_VERSION}"; \
+    test "$(lark-cli --version)" = "lark-cli version ${LARKSUITE_CLI_VERSION}"; \
+    wecom-cli doc smartpage_export_task --schema >/dev/null; \
+    wecom-cli doc smartpage_get_export_result --schema >/dev/null; \
+    lark-cli minutes +detail --help | grep -q -- '--output-dir'
 
 # 安装 Bun 运行环境（gbrain 必需）— 从官方镜像拷贝二进制，避免 curl 下载超时
 COPY --from=oven/bun:1-debian /usr/local/bin/bun /usr/local/bin/bun

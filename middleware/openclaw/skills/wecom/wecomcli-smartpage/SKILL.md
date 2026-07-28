@@ -18,7 +18,7 @@ metadata:
 通过 `wecom-cli` 调用，品类为 `doc`：
 
 ```bash
-wecom-cli doc <tool_name> '<json_params>'
+wecom-cli doc <tool_name> --json '<json_params>'
 ```
 
 ## 返回格式说明
@@ -49,7 +49,7 @@ wecom-cli doc <tool_name> '<json_params>'
 **命令**
 
 ```bash
-wecom-cli doc +smartpage_create '<JSON 参数>'
+wecom-cli doc +smartpage_create --json '<JSON 参数>'
 ```
 
 **参数**
@@ -77,9 +77,9 @@ wecom-cli doc +smartpage_create '<JSON 参数>'
 
 ```bash
 # 通过 docid
-wecom-cli doc smartpage_export_task '{"docid": "DOCID", "content_type": 1}'
+wecom-cli doc smartpage_export_task --json '{"docid": "DOCID", "content_type": 1}'
 # 通过 url
-wecom-cli doc smartpage_export_task '{"url": "https://doc.weixin.qq.com/smartpage/xxx", "content_type": 1}'
+wecom-cli doc smartpage_export_task --json '{"url": "https://doc.weixin.qq.com/smartpage/xxx", "content_type": 1}'
 ```
 
 | 参数 | 类型 | 必填 | 默认值 | 说明 |
@@ -91,7 +91,7 @@ wecom-cli doc smartpage_export_task '{"url": "https://doc.weixin.qq.com/smartpag
 **第二步：轮询导出结果**
 
 ```bash
-wecom-cli doc smartpage_get_export_result '{"task_id": "TASK_ID"}'
+wecom-cli doc smartpage_get_export_result --json '{"task_id": "TASK_ID"}'
 ```
 
 | 参数 | 类型 | 必填 | 默认值 | 说明 |
