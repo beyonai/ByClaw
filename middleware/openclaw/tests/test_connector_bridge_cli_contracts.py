@@ -45,8 +45,6 @@ class ConnectorBridgeCliContractsTest(unittest.TestCase):
             'test "$(bycli --version)" = "${OPENCLI_VERSION}"',
             'test "$(wecom-cli --version)" = "wecom-cli ${WECOM_CLI_VERSION}"',
             'test "$(lark-cli --version)" = "lark-cli version ${LARKSUITE_CLI_VERSION}"',
-            "wecom-cli doc smartpage_export_task --schema",
-            "wecom-cli doc smartpage_get_export_result --schema",
             "lark-cli minutes +detail --help",
             "grep -q -- '--output-dir'",
         )
@@ -56,6 +54,12 @@ class ConnectorBridgeCliContractsTest(unittest.TestCase):
                 content = path.read_text(encoding="utf-8")
                 for expected in required:
                     self.assertIn(expected, content)
+
+    def test_full_openclaw_images_do_not_probe_init_dependent_wecom_commands(self):
+        for path in DOCKERFILES:
+            with self.subTest(path=path):
+                content = path.read_text(encoding="utf-8")
+                self.assertNotIn("wecom-cli doc ", content)
 
     def test_feishu_minutes_are_materialized_as_ingest_ready_markdown(self):
         content = FEISHU_BRIDGE.read_text(encoding="utf-8")

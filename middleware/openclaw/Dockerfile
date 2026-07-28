@@ -304,8 +304,9 @@ RUN set -eux; \
     command -v dws; \
     dws --version; \
     npm install -g "@wecom/cli@${WECOM_CLI_VERSION}" "@larksuite/cli@${LARKSUITE_CLI_VERSION}"; \
-    wecom-cli --version; \
-    command -v lark-cli
+    test "$(wecom-cli --version)" = "wecom-cli ${WECOM_CLI_VERSION}"; \
+    test "$(lark-cli --version)" = "lark-cli version ${LARKSUITE_CLI_VERSION}"; \
+    lark-cli minutes +detail --help | grep -q -- '--output-dir'
 
 # 安装 Bun 运行环境（gbrain 必需）— 从官方镜像拷贝二进制，避免 curl 下载超时
 COPY --from=oven/bun:1-debian /usr/local/bin/bun /usr/local/bin/bun
