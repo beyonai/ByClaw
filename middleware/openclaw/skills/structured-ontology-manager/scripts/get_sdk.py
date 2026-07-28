@@ -1,7 +1,5 @@
 #!/usr/local/bin/python3
-"""删除已提交的对象（⚠️ 不可逆，需二次确认后调用）。
-
-同时删除工作区本地文件、OWL 数据、底层数据表和 Discovery 注册。
+"""重新获取 SDK 文件并写入本地。
 
 I/O 协议：stdin JSON → stdout JSON
 
@@ -12,7 +10,11 @@ I/O 协议：stdin JSON → stdout JSON
     }
 
 出参（stdout JSON）:
-    {"ok": true}
+    {
+        "ok":          true,
+        "entity_code": "travel_application",
+        "sdk_path":    "workspace/travel_reimbursement/sdk/travel_application_sdk.py"
+    }
 """
 
 from __future__ import annotations
@@ -20,10 +22,11 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from urllib.parse import urlencode
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from _common import post_ontology_api, stdout_json
+from _common import get_ontology_api, stdout_json
 
 
 def main() -> None:
@@ -43,10 +46,18 @@ def main() -> None:
         stdout_json({"ok": False, "error": "entity_code 不能为空"})
         sys.exit(1)
 
-    result = post_ontology_api("/workspace/object/delete", {
-        "workspace_name": workspace_name,
-        "entity_code": entity_code,
-    })
+    result = get_ontology_api(f"/workspace/{workspace_name}/sdk/{entity_code}")
+
+    # 写入本地 sdk 目录
+    sdk_content: str = result.get("sdk_content", "") if isinstance(result, dict) else ""
+    if sdk_content:
+        sdk_dir = Path("workspace") / workspace_name / "sdk"
+        sdk_dir.mkdir(parents=True, exist_ok=True)
+        sdk_path = sdk_dir / f"{entity_code}_sdk.py"
+        sdk_path.write_text(sdk_content, encoding="utf-8")
+        if isinstance(result, dict):
+            result["sdk_path"] = str(sdk_path)
+
     stdout_json(result)
 
 
@@ -56,4 +67,3 @@ if __name__ == "__main__":
     except Exception as exc:
         stdout_json({"ok": False, "error": str(exc)})
         sys.exit(1)
-

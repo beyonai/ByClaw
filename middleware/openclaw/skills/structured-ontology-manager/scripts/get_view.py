@@ -1,7 +1,5 @@
 #!/usr/local/bin/python3
-"""删除已提交的视图（⚠️ 不可逆，需二次确认后调用）。
-
-同时删除工作区本地文件、OWL 数据和 Discovery 注册。
+"""查询视图完整定义。
 
 I/O 协议：stdin JSON → stdout JSON
 
@@ -12,7 +10,14 @@ I/O 协议：stdin JSON → stdout JSON
     }
 
 出参（stdout JSON）:
-    {"ok": true}
+    {
+        "ok":           true,
+        "view_code":    "v_travel_full",
+        "view_name":    "差旅全视图",
+        "object_codes": ["travel_application", "travel_itinerary"],
+        "object_relations": [...],
+        "fields": [...]
+    }
 """
 
 from __future__ import annotations
@@ -20,10 +25,11 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from urllib.parse import urlencode
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from _common import post_ontology_api, stdout_json
+from _common import get_ontology_api, stdout_json
 
 
 def main() -> None:
@@ -43,10 +49,8 @@ def main() -> None:
         stdout_json({"ok": False, "error": "view_code 不能为空"})
         sys.exit(1)
 
-    result = post_ontology_api("/workspace/view/delete", {
-        "workspace_name": workspace_name,
-        "view_code": view_code,
-    })
+    qs = urlencode({"workspace_name": workspace_name})
+    result = get_ontology_api(f"/workspace/view/{view_code}?{qs}")
     stdout_json(result)
 
 
