@@ -1,8 +1,8 @@
 package com.iwhalecloud.byai.state.config;
 
+import com.iwhaleai.byai.framework.common.RedisConnectionConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -21,38 +21,24 @@ public class GatewayClientConfig {
 
     private static final Logger logger = LoggerFactory.getLogger(GatewayClientConfig.class);
 
-    @Value("${spring.redis.host:localhost}")
-    private String redisHost;
-
-    @Value("${spring.redis.port:6379}")
-    private int redisPort;
-
-    @Value("${spring.redis.database:0}")
-    private int redisDatabase;
-
-    @Value("${spring.redis.username:}")
-    private String redisUsername;
-
-    @Value("${spring.redis.password:}")
-    private String redisPassword;
-
-    @Bean
-    public RedisClient gatewayRedisClient() {
-        logger.info("初始化 Gateway SDK RedisClient, host: {}, port: {}, db: {}", redisHost, redisPort, redisDatabase);
-        String username = (redisUsername != null && !redisUsername.isEmpty()) ? redisUsername : null;
-        String password = (redisPassword != null && !redisPassword.isEmpty()) ? redisPassword : null;
-        return new RedisClient(redisHost, redisPort, redisDatabase, username, password);
+    @Bean(value = "redisClient", destroyMethod = "close")
+    public RedisClient redisClient() {
+        logger.info(">>> 初始化 Gateway SDK RedisClient...");
+        RedisConnectionConfig config = RedisConnectionConfig.fromEnv();
+        logger.info("RedisConnectionConfig={}", config);
+        RedisClient.init(config);
+        return RedisClient.getInstance();
     }
 
     @Bean
-    public WorkerRegistry gatewayWorkerRegistry(RedisClient gatewayRedisClient) {
+    public WorkerRegistry gatewayWorkerRegistry(RedisClient redisClient) {
         logger.info("初始化 Gateway SDK WorkerRegistry");
-        return new WorkerRegistry(gatewayRedisClient);
+        return new WorkerRegistry(redisClient);
     }
 
     @Bean
-    public GatewayClient<?> gatewayClient(RedisClient gatewayRedisClient, WorkerRegistry gatewayWorkerRegistry) {
+    public GatewayClient<?> gatewayClient(RedisClient redisClient, WorkerRegistry gatewayWorkerRegistry) {
         logger.info("初始化 GatewayClient");
-        return new GatewayClient<>(gatewayRedisClient, gatewayWorkerRegistry, new ArrayList());
+        return new GatewayClient<>(redisClient, gatewayWorkerRegistry, new ArrayList());
     }
 }

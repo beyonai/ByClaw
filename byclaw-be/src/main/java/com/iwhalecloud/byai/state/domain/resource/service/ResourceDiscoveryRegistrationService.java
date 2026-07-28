@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.state.domain.resource.service;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
+import com.iwhaleai.byai.framework.common.Constants;
 import com.iwhaleai.byai.framework.common.RedisClient;
 import com.iwhaleai.byai.framework.core.discovery.ServiceRegistry;
 import com.iwhalecloud.byai.state.domain.resource.dto.ResourceRegistrationTarget;
@@ -41,12 +42,6 @@ public class ResourceDiscoveryRegistrationService {
     private static final int DEFAULT_WEIGHT = 1;
 
     private static final int DEFAULT_HEARTBEAT_SECONDS = 5;
-
-    private static final String SD_SERVICES_KEY = "byai_gateway:sd:services";
-
-    private static final String SD_INSTANCE_DETAILS_PREFIX = "byai_gateway:sd:instances:";
-
-    private static final String SD_ACTIVE_INSTANCES_PREFIX = "byai_gateway:sd:active:";
 
     @Autowired
     private RedisClient redisClient;
@@ -183,8 +178,8 @@ public class ResourceDiscoveryRegistrationService {
 
     private void cleanupRegistryKeys(String serviceName) {
         try (Jedis jedis = redisClient.getResource()) {
-            String instancesKey = SD_INSTANCE_DETAILS_PREFIX + serviceName;
-            String activeKey = SD_ACTIVE_INSTANCES_PREFIX + serviceName;
+            String instancesKey = Constants.RegistryKeys.sdInstanceDetails(serviceName);
+            String activeKey = Constants.RegistryKeys.sdActiveInstances(serviceName);
             Map<String, String> instanceMap = jedis.hgetAll(instancesKey);
             if (instanceMap != null && !instanceMap.isEmpty()) {
                 String[] instanceIds = instanceMap.keySet().toArray(new String[0]);
@@ -193,7 +188,7 @@ public class ResourceDiscoveryRegistrationService {
             }
             jedis.del(instancesKey);
             jedis.del(activeKey);
-            jedis.srem(SD_SERVICES_KEY, serviceName);
+            jedis.srem(Constants.RegistryKeys.sdServices(), serviceName);
         }
     }
 
