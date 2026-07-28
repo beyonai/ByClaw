@@ -2,8 +2,13 @@ package com.iwhalecloud.byai.manager.domain.system.service;
 
 import com.iwhalecloud.byai.manager.mapper.system.AttachFileMapper;
 import com.iwhalecloud.byai.manager.entity.system.AttachFile;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
 
 /**
  * @author he.duming
@@ -43,4 +48,21 @@ public class AttachFileService {
         return attachFileMapper.selectById(attachFileId);
     }
 
+    /**
+     * 批量查询系统反馈的有效附件。
+     *
+     * @param feedbackIds 系统反馈ID集合
+     * @return 附件列表
+     */
+    public List<AttachFile> findFeedbackAttachments(Collection<Long> feedbackIds) {
+        if (feedbackIds == null || feedbackIds.isEmpty()) {
+            return Collections.emptyList();
+        }
+        LambdaQueryWrapper<AttachFile> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(AttachFile::getTableName, "byai_system_feedback");
+        wrapper.in(AttachFile::getTablePkValue, feedbackIds);
+        wrapper.eq(AttachFile::getState, "00A");
+        wrapper.orderByAsc(AttachFile::getCreateDate);
+        return attachFileMapper.selectList(wrapper);
+    }
 }

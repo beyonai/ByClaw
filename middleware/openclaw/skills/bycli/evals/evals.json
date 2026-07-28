@@ -22,13 +22,13 @@
     {
       "id": 4,
       "prompt": "帮我给 douban 写一个 adapter,我想抓取豆瓣电影 top250",
-      "expected_output": "进入 Adapter 编写流程:1) bycli doctor 2) 侦察站点 3) API 发现 4) 字段解码 5) 设计 columns 6) bycli browser init douban/top250 7) 编写 adapter 8) bycli browser verify",
+      "expected_output": "进入 Adapter 编写流程：1) bycli doctor 2) 紧接着执行 bycli daemon status，确认 daemon running 且 Extension connected 3) 侦察站点 4) API 发现 5) 字段解码 6) 设计 columns 7) bycli browser init douban/top250 8) 编写 adapter 9) bycli browser verify",
       "files": []
     },
     {
       "id": 5,
       "prompt": "帮我打开 https://example.com 并提取页面上的表格数据",
-      "expected_output": "进入 Browser 驱动流程:1) openclaw browser start + bycli doctor 2) bycli browser <session> open url 3) bycli browser <session> state 4) 用 network 或 extract 获取数据 5) cleanup",
+      "expected_output": "先执行 bycli list -f json 动态发现命令；存在 web/read 时优先执行 bycli web read --url https://example.com。仅在不存在 web/read 或站点专用 Adapter 时进入 raw Browser：按需执行 openclaw browser --browser-profile openclaw start、bycli doctor、bycli daemon status，再 open/state/extract；结束时只清理当前任务拥有的资源。",
       "files": []
     },
     {
@@ -46,7 +46,7 @@
     {
       "id": 8,
       "prompt": "帮我用浏览器登录 Gmail 然后查看最新邮件",
-      "expected_output": "Browser 驱动流程:open Gmail login page → fill form → submit → wait → state。如果停在登录页(MFA等),保持 session 不关闭,报告给用户",
+      "expected_output": "先用 bycli list -f json 发现 Gmail Adapter；若任务进入登录、SSO 或 MFA 页面，立即停止并保留 session、TAB、daemon 和浏览器，报告已知 session 与 URL，等待用户亲自登录；不得代填或提交凭据，也不得继续 state、重试或检查页面。用户明确确认登录完成后再继续查看邮件。",
       "files": []
     }
   ]

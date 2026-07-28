@@ -7,8 +7,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
-
 import org.apache.commons.lang3.StringUtils;
+import com.iwhaleai.byai.framework.common.Constants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -50,11 +50,6 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
 
     private static final Logger log = LoggerFactory.getLogger(SessionStreamManager.class);
 
-    /** Gateway Session Stream Key 前缀 */
-    private static final String STREAM_KEY_PREFIX = "byai_gateway:session:";
-
-    /** Stream Key 后缀 */
-    private static final String STREAM_KEY_SUFFIX = ":data_stream";
 
     /** Session 状态 Key 前缀 */
     public static final String SESSION_STATUS_KEY_PREFIX = "byai:session:";
@@ -277,7 +272,7 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
      * @return 完整的 Stream Key，格式：byai_gateway:session:{sessionId}:data_stream
      */
     public String buildStreamKey(String sessionId) {
-        return STREAM_KEY_PREFIX + sessionId + STREAM_KEY_SUFFIX;
+        return Constants.QueueNames.sessionDataStream(sessionId);
     }
 
     public String buildConsumerName(String sessionId) {
