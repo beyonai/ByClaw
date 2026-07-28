@@ -68,7 +68,7 @@
         <xmlbeans.version>5.1.1</xmlbeans.version>
         <pagehelper-spring-boot-starter.version>1.4.7</pagehelper-spring-boot-starter.version>
         <pagehelper.version>5.3.3</pagehelper.version>
-        <gateway.sdk.version>0.2.6</gateway.sdk.version>
+        <gateway.sdk.version>0.2.10-SNAPSHOT</gateway.sdk.version>
         <!-- opentelemetry -->
         <opentelemetry.instrumentation.version>2.22.0</opentelemetry.instrumentation.version>
 
