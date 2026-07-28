@@ -1,7 +1,7 @@
 import { globalLogout } from '@/service/common/request';
 import { getLoginInfo, queryMyDepartmentRange } from '@/service/user';
 
-import { setUserToken } from '@/utils/auth';
+import { getAuthSnapshot, isCurrentAuthSnapshot, setUserToken } from '@/utils/auth';
 import CookieUtil from '@/utils/cookie';
 import { isEmpty, isNil, set } from 'lodash';
 
@@ -73,10 +73,16 @@ export default {
 
   effects: {
     *initUserInfo({ success, fail }: any, { call, put }: any): any {
+      const authSnapshot = getAuthSnapshot();
       try {
         const res = yield call(getLoginInfo);
+        // currentUser 可能在重新登录前发起，成功返回也不能覆盖新会话。
+        if (!isCurrentAuthSnapshot(authSnapshot)) {
+          return null;
+        }
+
         if (isNil(res) || res?.code !== 0) {
-          globalLogout();
+          globalLogout(false, authSnapshot);
           fail?.(res);
           return res;
         }
@@ -97,7 +103,6 @@ export default {
         return res;
       } catch (error: any) {
         console.log(error?.message ?? error);
-        globalLogout();
         fail?.(error);
         return null;
       }

@@ -1,5 +1,5 @@
 import { SSEEventStatus, SSEMessageType } from '@/constants/message';
-import { getssoToken, getToken, ssotokenKey, tokenKey } from '@/utils/auth';
+import { getAuthSnapshot, ssotokenKey, tokenKey } from '@/utils/auth';
 import { fetchEventSource } from '@fortaine/fetch-event-source';
 import { getLocale } from '@umijs/max';
 import { get, isEmpty, pick, set } from 'lodash';
@@ -63,12 +63,14 @@ export default class SendHelper {
     const promise = new Promise<Record<string, unknown>>((resolve, reject) => {
       this.sendingMap.set(key, { abortController });
 
+      // SSE 生命周期可能跨越重新登录，固定发起时的凭证用于响应校验。
+      const authSnapshot = getAuthSnapshot();
       const headers = {
         'Content-Type': 'application/json',
         language: getLocale(),
         accessTerminal: 'Web',
-        [tokenKey]: getToken(),
-        [ssotokenKey]: getssoToken(),
+        [tokenKey]: authSnapshot.token,
+        [ssotokenKey]: authSnapshot.ssoToken,
       };
 
       const body = {
@@ -89,7 +91,8 @@ export default class SendHelper {
         onopen: (res) => {
           console.log('---------- onopen', res);
           if (res.status === 401 || res.status === 403) {
-            globalLogout();
+            // 流响应晚到时仍需确认它属于当前登录会话。
+            globalLogout(false, authSnapshot);
             // eslint-disable-next-line prefer-promise-reject-errors
             return Promise.reject(ERROR_STATUS.NOAUTH);
           }
