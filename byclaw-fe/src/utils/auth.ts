@@ -20,7 +20,9 @@ export const loginRedirect = (search: Record<string, string> = {}) => {
 };
 
 export const clearToken = () => {
-  cookie.clearDelete();
+  // 只清理认证相关 cookie 和 localStorage，避免影响其他业务 cookie。
+  cookie.delete(sessionKey);
+  cookie.delete(portalSessionKey);
 
   localStorage.removeItem(sessionKey);
   localStorage.removeItem(portalSessionKey);
@@ -63,6 +65,34 @@ const setssoToken = (value: string) => {
 export const getssoToken = () => {
   if (typeof window === 'undefined') return '';
   return localStorage.getItem(ssotokenKey) || '';
+};
+
+export interface AuthSnapshot {
+  sessionId: string;
+  token: string;
+  ssoToken: string;
+}
+
+// 保存请求发起时的完整凭证，用于识别登录切换前后的异步请求。
+export const getAuthSnapshot = (): AuthSnapshot => ({
+  sessionId: getSessionKey(),
+  token: getToken(),
+  ssoToken: getssoToken(),
+});
+
+export const hasAuthSnapshot = (authSnapshot: AuthSnapshot) => {
+  // 空快照表示匿名请求，不能据此退出当前登录。
+  return Boolean(authSnapshot.sessionId || authSnapshot.token || authSnapshot.ssoToken);
+};
+
+// 三项凭证必须全部一致，避免旧请求清理新登录状态。
+export const isCurrentAuthSnapshot = (authSnapshot: AuthSnapshot) => {
+  const currentAuthSnapshot = getAuthSnapshot();
+  return (
+    authSnapshot.sessionId === currentAuthSnapshot.sessionId &&
+    authSnapshot.token === currentAuthSnapshot.token &&
+    authSnapshot.ssoToken === currentAuthSnapshot.ssoToken
+  );
 };
 
 export const setUserToken = (userTokens: any) => {
