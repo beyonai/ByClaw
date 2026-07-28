@@ -186,18 +186,36 @@ WHERE e.resource_id = 14
         AND r.resource_code = 'knowledge-collection'
   );
 
--- openGauss 缺少 JSONB 聚合函数；保留既有目录并在 JSON 数组尾部追加新条目。
+-- openGauss 缺少 JSONB 聚合函数；逐项补齐内置 Skill，避免已有一项时跳过其他项。
 UPDATE byai.byai_system_config c
-SET param_value = left(rtrim(c.param_value), char_length(rtrim(c.param_value)) - 1)
-    || ',{"skillName":"knowledge-collection","skillCode":"knowledge-collection","skillDescZh":"编排跨互联网与企业平台的知识采集，统一采集产物协议、后处理及知识库入库或知识整理。","skillDescEn":"Orchestrate knowledge collection across public internet and enterprise platforms, including canonical artifacts, post-processing, and knowledge-base ingestion or organization."},{"skillName":"agent-reach","skillCode":"agent-reach","skillDescZh":"路由公开互联网渠道能力，并按 ByClaw 覆盖规则选择 byCLI 等执行器。","skillDescEn":"Route public-internet channels and select executors such as byCLI according to ByClaw override rules."}]'
+SET param_value = CASE
+        WHEN rtrim(c.param_value) = '[]' THEN '['
+        ELSE left(rtrim(c.param_value), char_length(rtrim(c.param_value)) - 1) || ','
+    END
+    || '{"skillName":"knowledge-collection","skillCode":"knowledge-collection","skillDescZh":"编排跨互联网与企业平台的知识采集，统一采集产物协议、后处理及知识库入库或知识整理。","skillDescEn":"Orchestrate knowledge collection across public internet and enterprise platforms, including canonical artifacts, post-processing, and knowledge-base ingestion or organization."}]'
 WHERE c.param_code = 'OPENCLAW_BUNDLED_SKILLS'
   AND c.param_value NOT LIKE '%"skillCode":"knowledge-collection"%';
+
+UPDATE byai.byai_system_config c
+SET param_value = left(rtrim(c.param_value), char_length(rtrim(c.param_value)) - 1)
+    || ',{"skillName":"agent-reach","skillCode":"agent-reach","skillDescZh":"路由公开互联网渠道能力，并按 ByClaw 覆盖规则选择 byCLI 等执行器。","skillDescEn":"Route public-internet channels and select executors such as byCLI according to ByClaw override rules."}]'
+WHERE c.param_code = 'OPENCLAW_BUNDLED_SKILLS'
+  AND c.param_value NOT LIKE '%"skillCode":"agent-reach"%';
+
+UPDATE byai.byai_system_config c
+SET param_value = left(rtrim(c.param_value), char_length(rtrim(c.param_value)) - 1)
+    || ',{"skillName":"bycli","skillCode":"bycli","skillDescZh":"通过浏览器与 Adapter 执行网站操作、复用或维护适配器，并返回采集结果。","skillDescEn":"Execute website operations through the browser and adapters, reuse or maintain adapters, and return collected results."}]'
+WHERE c.param_code = 'OPENCLAW_BUNDLED_SKILLS'
+  AND c.param_value NOT LIKE '%"skillCode":"bycli"%';
 
 -- 初始化独立 bycli 执行 Skill 资源，保留 knowledge-collection 作为默认编排资源。
 INSERT INTO byai.ss_resource(resource_id,system_code,resource_biz_type,resource_type,resource_name,resource_desc,resource_version_id,host_type,catalog_id,man_org_id,man_user_id,create_by,create_time,update_by,update_time,com_acct_id,resource_status,resource_d_verid,resource_r_verid,resource_code,publish_time,auth_status,publish_portal,parent_resource_id,publish_type,owner_type,impl_type,worker_agent_type)
 SELECT 25,'BYAI','SKILL','ATOM','byCLI','通过浏览器与 Adapter 执行网站操作、复用或维护适配器，并返回采集结果。','1.0','hosted',10,-1,10001,10001,CURRENT_TIMESTAMP,10001,CURRENT_TIMESTAMP,1,2,-1,-1,'bycli',CURRENT_TIMESTAMP,'passed',1,-1,'publish','enterprise','SKILL','NONE'
 WHERE NOT EXISTS (
-    SELECT 1 FROM byai.ss_resource WHERE resource_code = 'bycli'
+    SELECT 1
+    FROM byai.ss_resource
+    WHERE resource_id = 25
+       OR resource_code = 'bycli'
 );
 
 INSERT INTO byai.ss_res_ext_skill(resource_id,skill_type,source_type,version,skill_url,skill_package_format,skill_original_filename,skill_package_size,skill_package_hash,sync_status,sync_error,last_sync_time)
