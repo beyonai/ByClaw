@@ -1,3 +1,5 @@
+import type { SessionContextV1 } from "./session-context.js";
+
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
 
@@ -44,6 +46,10 @@ export interface CallerPrincipal {
 export interface Session {
   id: string;
   owner: CallerPrincipal;
+  /** 固定结构的业务 Session 环境；与 Pi transcript 分开持久化。 */
+  sessionContext: SessionContextV1;
+  /** Session 业务上下文版本，不得与 Pi contextRevision 混用。 */
+  sessionContextVersion: number;
   /** 已成功提交到长期 Pi 上下文的单调递增版本。 */
   contextRevision: number;
   createdAt: number;

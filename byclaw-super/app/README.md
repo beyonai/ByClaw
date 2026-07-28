@@ -33,6 +33,8 @@ Connector 与 Worker。迁移建议由独立 release job 执行，生产环境�
 - `GET /v1/runs/:runId`
 - `POST /v1/runs/:runId/cancel`
 - `GET /v1/runs/:runId/events`
+- `POST /v1/agent-capability-cards/compile`
+- `PUT /v1/agents/:agentId/capability-card`
 - `GET /health`
 - `GET /ready`
 

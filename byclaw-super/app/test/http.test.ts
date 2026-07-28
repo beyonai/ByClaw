@@ -8,6 +8,7 @@ import {
   InMemoryRunRepository,
   InMemorySessionRepository,
   RunService,
+  type AgentCapabilityCardRepository,
   type AgentCapabilityCompiler,
   type AgentConnector,
   type AgentProfile,
@@ -125,6 +126,130 @@ describe("Session / Run HTTP/SSE API", () => {
     expect(response.json()).toEqual({
       error: "At least one capability source is required",
     });
+    await service.dispose();
+  });
+
+  it("compiles and persists an authorized Agent capability card", async () => {
+    const service = createService();
+    const compile = vi.fn(async () => capabilityCardResult());
+    const upsert = vi.fn<AgentCapabilityCardRepository["upsert"]>(
+      async () => undefined,
+    );
+    const app = await createApp(
+      service,
+      async () => ({ userCode: "creator" }),
+      {
+        listAuthorizedAgents: async () => [
+          {
+            id: "10093429",
+            code: "BYAI_DIG_EMPLOYEE_10093429",
+            name: "自-文章创作助手",
+            execution: {
+              connectorId: "openclaw",
+              targetId: "10093429",
+            },
+          },
+        ],
+      },
+      true,
+      { compile },
+      { upsert },
+    );
+
+    const response = await app.inject({
+      method: "PUT",
+      url: "/v1/agents/10093429/capability-card",
+      headers: {
+        "Beyond-Token": "creator-token",
+        "System-Code": "BYAI",
+      },
+      payload: {
+        locale: "zh-CN",
+        sourceVersion: "1784776346288",
+        agent: {
+          code: "BYAI_DIG_EMPLOYEE_10093429",
+          name: "自-文章创作助手",
+          description: "负责文章创作、修改和校验",
+          skills: [
+            {
+              code: "by-web-search",
+              name: "联网搜索",
+              description: "检索并核验实时信息",
+            },
+          ],
+        },
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(compile).toHaveBeenCalledWith({
+      locale: "zh-CN",
+      agent: {
+        code: "BYAI_DIG_EMPLOYEE_10093429",
+        name: "自-文章创作助手",
+        description: "负责文章创作、修改和校验",
+        skills: [
+          {
+            code: "by-web-search",
+            name: "联网搜索",
+            description: "检索并核验实时信息",
+          },
+        ],
+      },
+    });
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        systemCode: "BYAI",
+        agentId: "10093429",
+        agentCode: "BYAI_DIG_EMPLOYEE_10093429",
+        agentName: "自-文章创作助手",
+        sourceVersion: "1784776346288",
+        compiled: capabilityCardResult(),
+        now: expect.any(Number),
+      }),
+    );
+    expect(response.json()).toMatchObject({
+      systemCode: "BYAI",
+      agentId: "10093429",
+      sourceVersion: "1784776346288",
+      schemaVersion: "byclaw.agent-capability-card/v1",
+    });
+    await service.dispose();
+  });
+
+  it("does not compile or persist a capability card for an unauthorized Agent", async () => {
+    const service = createService();
+    const compile = vi.fn(async () => capabilityCardResult());
+    const upsert = vi.fn<AgentCapabilityCardRepository["upsert"]>(
+      async () => undefined,
+    );
+    const app = await createApp(
+      service,
+      async () => ({ userCode: "creator" }),
+      { listAuthorizedAgents: async () => [] },
+      true,
+      { compile },
+      { upsert },
+    );
+
+    const response = await app.inject({
+      method: "PUT",
+      url: "/v1/agents/10093429/capability-card",
+      headers: {
+        "Beyond-Token": "creator-token",
+        "System-Code": "BYAI",
+      },
+      payload: {
+        agent: {
+          name: "自-文章创作助手",
+          description: "负责文章创作",
+        },
+      },
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(compile).not.toHaveBeenCalled();
+    expect(upsert).not.toHaveBeenCalled();
     await service.dispose();
   });
 
@@ -583,6 +708,56 @@ describe("Session / Run HTTP/SSE API", () => {
     await service.dispose();
   });
 
+  it("stores normalized Session context when the Session is created", async () => {
+    const service = createService();
+    const app = await createApp(service);
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/v1/sessions",
+      headers: { "Beyond-Token": "very-secret-token" },
+      payload: {
+        message: "你好",
+        context: {
+          locale: "ZH-hans-cn",
+          timezone: "asia/shanghai",
+        },
+      },
+    });
+
+    expect(created.statusCode).toBe(202);
+    const { sessionId } = created.json<{ sessionId: string }>();
+    await expect(service.getSession(sessionId)).resolves.toMatchObject({
+      sessionContext: {
+        schemaVersion: 1,
+        locale: "zh-Hans-CN",
+        timezone: "Asia/Shanghai",
+      },
+      sessionContextVersion: 1,
+      contextRevision: 0,
+    });
+    await service.dispose();
+  });
+
+  it("rejects an invalid Session timezone", async () => {
+    const service = createService();
+    const app = await createApp(service);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/sessions",
+      headers: { "Beyond-Token": "very-secret-token" },
+      payload: {
+        message: "hello",
+        context: { timezone: "Mars/Olympus" },
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({ error: expect.stringMatching(/timezone/) });
+    await service.dispose();
+  });
+
   it("requires Beyond-Token when subscribing to a Run", async () => {
     const service = createService();
     const app = await createApp(service);
@@ -607,8 +782,12 @@ async function createApp(
   capabilityCompiler: AgentCapabilityCompiler = {
     compile: async () => capabilityCardResult(),
   },
+  capabilityCards: AgentCapabilityCardRepository = {
+    upsert: async () => undefined,
+  },
 ) {
   const app = await buildHttpApp({
+    capabilityCards,
     capabilityCompiler,
     runService: service,
     corsOrigin: true,

@@ -58,7 +58,17 @@ suite("PostgreSQL persistence integration", () => {
     await database.sessions.save(first);
     await database.sessions.save(second);
 
-    expect(await database.sessions.getOwned(first.id, { userCode: "user-a" })).toBeDefined();
+    expect(
+      await database.sessions.getOwned(first.id, { userCode: "user-a" }),
+    ).toMatchObject({
+      sessionContext: {
+        schemaVersion: 1,
+        locale: "zh-CN",
+        timezone: "Asia/Shanghai",
+      },
+      sessionContextVersion: 1,
+      contextRevision: 0,
+    });
     expect(await database.sessions.getOwned(first.id, { userCode: "user-b" })).toBeUndefined();
 
     await database.bindings.bind({
@@ -392,6 +402,12 @@ function session(userCode: string): Session {
   return {
     id: randomUUID(),
     owner: { userCode },
+    sessionContext: {
+      schemaVersion: 1,
+      locale: "zh-CN",
+      timezone: "Asia/Shanghai",
+    },
+    sessionContextVersion: 1,
     contextRevision: 0,
     createdAt: now,
     updatedAt: now,

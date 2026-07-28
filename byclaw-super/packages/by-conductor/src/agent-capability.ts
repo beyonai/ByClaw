@@ -18,6 +18,7 @@ export interface AgentCapabilityExample {
 export interface AgentCapabilityCompileInput {
   locale?: string;
   agent: {
+    code?: string;
     name: string;
     description?: string;
     instructions?: string;
@@ -52,6 +53,22 @@ export interface AgentCapabilityCompileResult {
     missingInformation: string[];
     warnings: string[];
   };
+}
+
+/** 生成后写入能力卡存储的完整快照；用户权限仍由权威 Agent Catalog 管理。 */
+export interface AgentCapabilityCardUpsert {
+  systemCode: string;
+  agentId: string;
+  agentCode?: string;
+  agentName: string;
+  sourceVersion?: string;
+  compiled: AgentCapabilityCompileResult;
+  now: number;
+}
+
+/** 能力卡写存储端口；当前阶段只提供 upsert，不参与 Leader 的 Agent 查询链路。 */
+export interface AgentCapabilityCardRepository {
+  upsert(input: AgentCapabilityCardUpsert): Promise<void>;
 }
 
 export interface AgentCapabilityCompiler {
@@ -234,6 +251,9 @@ function normalizeInput(
   return {
     locale: normalizeText(input.locale ?? "zh-CN", 32) || "zh-CN",
     agent: {
+      ...(input.agent.code
+        ? { code: normalizeText(input.agent.code, 128) }
+        : {}),
       name: normalizeText(input.agent.name, 200),
       ...(input.agent.description
         ? { description: normalizeText(input.agent.description, 10_000) }

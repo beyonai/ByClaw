@@ -23,6 +23,7 @@ import type { RunIngressService } from "../ingress/run-ingress-service.js";
 import {
   closeReasoning,
   commandLogFields,
+  commandSourceAgentId,
   commandString,
   commandThinkingLevel,
   defaultWorkerId,
@@ -178,16 +179,19 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
           externalSessionId: command.header.sessionId,
         })
       : this.#externalSessionBindings.get(bindingKey);
+    const sourceAgentId = commandSourceAgentId(command);
     const run = sessionId
       ? await this.#runIngress.createRun({
           sessionId,
           message,
           thinkingLevel,
+          ...(sourceAgentId ? { sourceAgentId } : {}),
           ...auth,
         })
       : await this.#runIngress.createSessionRun({
           message,
           thinkingLevel,
+          ...(sourceAgentId ? { sourceAgentId } : {}),
           ...auth,
         });
     if (this.#sessionBindings) {

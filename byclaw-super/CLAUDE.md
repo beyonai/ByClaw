@@ -99,7 +99,7 @@ INBOUND (two paths, same ingress chain)
     ← response: { sessionId, runId, status, eventsUrl }
         ↓ enqueues into per-Session FIFO
   RunService.#pump → #execute   (lazily creates a Pi LeaderSession per Session)
-  PiLeaderSession.run           prompts Pi; only tool is delegateAgent
+  PiLeaderSession.run           prompts Pi; tools: delegateAgent + read/write/edit/grep/find/ls
   delegateAgent execute         bridges into DelegationService via activeInput
         ↓ OUTBOUND
   DelegationService.execute     re-checks authorization vs snapshot, aggregates Connector events
@@ -127,7 +127,7 @@ OUT (two paths, same RunEvent stream)
 - **Wire format is ByClaw's thinking model, not the internal event union.** Internal `RunEvent`s are translated for both out-paths: HTTP via `byclaw-sse.ts` (`reasoningLogStart/Delta/End`, `answerStart/Delta/End`, `appStreamResponse`, `error`); the Worker via `by-framework` `REASONING_LOG_*` / `ANSWER_DELTA`. Both adapters collapse raw Pi/OpenClaw reasoning into safe, stable Chinese progress text — do not leak raw upstream reasoning to clients.
 - **`/health`** = process alive; **`/ready`** = Pi model + all Connector health checks + Worker health (when `BYCLAW_WORKER_ENABLED`) pass, else 503. The OpenClaw Connector's `health()` only PINGs Redis — worker liveness is checked at dispatch time, not at `/ready`.
 
-**Pi Leader configuration** (`packages/by-conductor/src/pi-leader.ts`): extensions, skills, prompt templates, themes, context files, and all built-in tools are disabled. `delegateAgent` is the *only* tool. Compaction is off; retries (max 2) are on. Don't enable Shell, file, or MCP tools on the Leader — that breaks the security model.
+**Pi Leader configuration** (`packages/by-conductor/src/pi-leader.ts`): extensions, skills, prompt templates, themes, and context files are disabled. Tools enabled: `delegateAgent` plus Pi's built-in file/search tools (`read`/`write`/`edit`/`grep`/`find`/`ls`, via `LEADER_FILE_TOOL_NAMES` in `context/active-leader-tools.ts`). Their `cwd` is pinned to a per-Session directory under the cache root (`<sessionCacheDirectory>/<sessionId>/files`), not the repo root — so `.env`/source stay out of reach and different Sessions are file-isolated; the dir is cleaned on Session dispose. Shell (`bash`) and MCP stay disabled — `bash` would let any caller run arbitrary commands on the host. Compaction is off; retries (max 2) are on.
 
 ## ByClaw BE integration (auth + agent catalog + discovery)
 

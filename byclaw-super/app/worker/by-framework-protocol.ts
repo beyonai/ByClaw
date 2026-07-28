@@ -70,6 +70,20 @@ export function commandThinkingLevel(command: AskAgentCommand): ThinkingLevel {
   );
 }
 
+/**
+ * 从 AskAgent extraPayload 读取当前入口 Agent ID，用于排除超级助手自身。
+ * 兼容 `agent_id` 与 `agentId`，接受字符串或数字（by-framework 约定为 `string | number`），
+ * 统一 trim 成非空字符串；缺失或非法时返回空串。
+ */
+export function commandSourceAgentId(command: {
+  extraPayload?: Readonly<Record<string, unknown>>;
+}): string {
+  const extra = command.extraPayload ?? {};
+  const raw =
+    recordScalar(extra, "agent_id") ?? recordScalar(extra, "agentId");
+  return raw ?? "";
+}
+
 /** 从记录中读取大小写不敏感的非空字符串值。 */
 export function recordString(
   record: Readonly<Record<string, unknown>>,
@@ -82,6 +96,26 @@ export function recordString(
     }
   }
   return "";
+}
+
+/** 从记录中大小写不敏感地读取字符串或数字字段，统一 trim；缺失或空返回 undefined。 */
+export function recordScalar(
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+): string | undefined {
+  const expected = key.toLowerCase();
+  for (const [candidate, value] of Object.entries(record)) {
+    if (
+      candidate.toLowerCase() === expected &&
+      (typeof value === "string" || typeof value === "number")
+    ) {
+      const text = String(value).trim();
+      if (text) {
+        return text;
+      }
+    }
+  }
+  return undefined;
 }
 
 /** 关闭尚未结束的简化思考阶段，且不透传内部 reasoning。 */

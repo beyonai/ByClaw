@@ -513,6 +513,7 @@ describe("RunService", () => {
 
     const run = await service.createSessionRun({
       owner: { userCode: "first-user" },
+      context: { locale: "zh-CN", timezone: "Asia/Shanghai" },
       message: "first-message",
       thinkingLevel: "high",
       agentList: [],
@@ -531,6 +532,14 @@ describe("RunService", () => {
     });
     await waitFor(() => leaderFactory.started.includes("first-message"));
     expect(leaderFactory.thinkingLevels).toEqual(["high"]);
+    expect(leaderFactory.sessionContexts).toEqual([
+      {
+        schemaVersion: 1,
+        locale: "zh-CN",
+        timezone: "Asia/Shanghai",
+      },
+    ]);
+    expect(leaderFactory.currentTimes[0]).toEqual(expect.any(Number));
     leaderFactory.release("first-message", "done");
     await service.dispose();
   });
@@ -633,6 +642,8 @@ describe("RunService", () => {
     const session: Session = {
       id: "session-native-restart",
       owner: { userCode: "user-1" },
+      sessionContext: { schemaVersion: 1 },
+      sessionContextVersion: 1,
       contextRevision: 0,
       createdAt: 1,
       updatedAt: 1,
@@ -977,6 +988,8 @@ function createRunService(leaders: LeaderSessionFactory) {
 class ControlledLeaderFactory implements LeaderSessionFactory {
   readonly started: string[] = [];
   readonly thinkingLevels: LeaderRunInput["thinkingLevel"][] = [];
+  readonly sessionContexts: LeaderRunInput["sessionContext"][] = [];
+  readonly currentTimes: number[] = [];
   readonly createdSessionIds: string[] = [];
   aborted = 0;
   readonly #releases = new Map<string, (value: string) => void>();
@@ -988,6 +1001,8 @@ class ControlledLeaderFactory implements LeaderSessionFactory {
       run: async (input: LeaderRunInput) => {
         this.started.push(input.message);
         this.thinkingLevels.push(input.thinkingLevel);
+        this.sessionContexts.push(input.sessionContext);
+        this.currentTimes.push(input.currentTime);
         await input.onDelta(`${input.message}:delta`);
         const text = await new Promise<string>((resolve, reject) => {
           this.#releases.set(input.message, resolve);

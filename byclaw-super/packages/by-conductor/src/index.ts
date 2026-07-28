@@ -1,5 +1,6 @@
 export * from "./agent-capability.js";
 export * from "./connectors.js";
+export * from "./delegable-agents.js";
 export * from "./context/index.js";
 export * from "./delegation-service.js";
 export * from "./execution-credentials.js";
@@ -10,4 +11,5 @@ export * from "./pi-leader.js";
 export * from "./pi-session-checkpoint.js";
 export * from "./repositories.js";
 export * from "./run-service.js";
+export * from "./session-context.js";
 export * from "./types.js";

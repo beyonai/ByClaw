@@ -10,6 +10,7 @@
     "build": "pnpm run build:packages && tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "db:migrate": "tsx app/scripts/migrate.ts",
+    "capability:backfill": "tsx app/scripts/backfill-agent-capability-cards.ts",
     "smoke": "tsx app/scripts/smoke.ts",
     "typecheck": "pnpm run build:packages && pnpm -r --if-present run typecheck && tsc -p tsconfig.json --noEmit",
     "test": "pnpm run build && vitest run",

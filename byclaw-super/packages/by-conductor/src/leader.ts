@@ -1,4 +1,5 @@
 import type { PiSessionCheckpoint } from "./pi-session-checkpoint.js";
+import type { SessionContextV1 } from "./session-context.js";
 import type {
   AgentProfile,
   AgentResult,
@@ -12,6 +13,8 @@ export interface LeaderRunInput {
   message: string;
   thinkingLevel: ThinkingLevel;
   agents: AgentProfile[];
+  sessionContext: SessionContextV1;
+  currentTime: number;
   signal: AbortSignal;
   /** 接收最终可见回答的文本增量。 */
   onDelta(text: string): Promise<void> | void;

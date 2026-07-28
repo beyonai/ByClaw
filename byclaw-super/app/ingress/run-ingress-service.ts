@@ -1,12 +1,15 @@
 import type {
+  AgentProfile,
   CallerPrincipal,
   Run,
   RunPage,
   RunPageCursor,
   RunService,
   Session,
+  SessionContextInput,
   ThinkingLevel,
 } from "@byclaw/by-conductor";
+import { filterDelegableAgents } from "@byclaw/by-conductor";
 import {
   type BeyondTokenClaims,
   type BeyondTokenVerifier,
@@ -21,6 +24,12 @@ interface AuthenticatedIngressRequest {
 export interface CreateSessionRunRequest extends AuthenticatedIngressRequest {
   message: string;
   thinkingLevel?: ThinkingLevel;
+  context?: SessionContextInput;
+  /**
+   * 当前入口 Agent ID（仅 by-framework Worker 入口提供，用于排除超级助手自身）。
+   * HTTP/SSE 入口不得由调用方指定，统一走 userCode 兜底规则。
+   */
+  sourceAgentId?: string;
 }
 
 export interface AppendSessionRunRequest extends CreateSessionRunRequest {
@@ -29,7 +38,7 @@ export interface AppendSessionRunRequest extends CreateSessionRunRequest {
 
 /** 对外统一隐藏“资源不存在”和“资源属于其他调用者”的差异。 */
 export class ResourceNotFoundError extends Error {
-  constructor(resource: "Session" | "Run") {
+  constructor(resource: "Agent" | "Session" | "Run") {
     super(`${resource} not found`);
     this.name = "ResourceNotFoundError";
   }
@@ -51,9 +60,14 @@ export class RunIngressService {
   async createSessionRun(input: CreateSessionRunRequest): Promise<Run> {
     const authenticated = await this.authenticate(input);
     const principal = authenticated.principal;
-    const agentList = await this.listAgents(input);
+    const agentList = this.excludeSelf(
+      await this.listAgents(input),
+      input.sourceAgentId,
+      principal.userCode,
+    );
     return this.runService.createSessionRun({
       owner: principal,
+      ...(input.context ? { context: input.context } : {}),
       message: input.message,
       thinkingLevel: input.thinkingLevel ?? "off",
       agentList,
@@ -71,7 +85,11 @@ export class RunIngressService {
     const authenticated = await this.authenticate(input);
     const principal = authenticated.principal;
     await this.requireOwnedSession(input.sessionId, principal);
-    const agentList = await this.listAgents(input);
+    const agentList = this.excludeSelf(
+      await this.listAgents(input),
+      input.sourceAgentId,
+      principal.userCode,
+    );
     return this.runService.createRun({
       sessionId: input.sessionId,
       message: input.message,
@@ -88,6 +106,23 @@ export class RunIngressService {
   /** 验证凭证并构建 Worker binding 和 HTTP 授权共用的调用者身份。 */
   async resolvePrincipal(input: AuthenticatedIngressRequest): Promise<CallerPrincipal> {
     return (await this.authenticate(input)).principal;
+  }
+
+  /**
+   * 使用权威 Agent Catalog 校验当前 Token 对指定 Agent 的实时使用权限。
+   * 能力卡表不保存、复制或缓存用户与 Agent 的权限关系。
+   */
+  async authorizeAgent(
+    agentId: string,
+    input: AuthenticatedIngressRequest,
+  ): Promise<AgentProfile> {
+    await this.resolvePrincipal(input);
+    const agents = await this.listAgents(input);
+    const agent = agents.find((candidate) => candidate.id === agentId);
+    if (!agent) {
+      throw new ResourceNotFoundError("Agent");
+    }
+    return agent;
   }
 
   /** 一次验签同时得到 owner 与凭证有效期，避免同一请求重复验签。 */
@@ -187,6 +222,23 @@ export class RunIngressService {
     return this.agentCatalog.listAuthorizedAgents({
       beyondToken: input.beyondToken,
       ...(input.systemCode ? { systemCode: input.systemCode } : {}),
+    });
+  }
+
+  /**
+   * 应用"不可委派自身"策略：Worker 提供 sourceAgentId 时精确排除当前入口，
+   * 否则按鉴权主体的 userCode 兜底排除 `{userCode}_main`。两者并集。
+   * 过滤后为空仍允许创建 Run，由 Leader 直接回答。
+   */
+  private excludeSelf(
+    agents: AgentProfile[],
+    sourceAgentId: string | undefined,
+    principalUserCode: string,
+  ): AgentProfile[] {
+    return filterDelegableAgents({
+      agents,
+      ...(sourceAgentId ? { sourceAgentId } : {}),
+      principalUserCode,
     });
   }
 

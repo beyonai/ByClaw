@@ -85,13 +85,19 @@ Leader 的基础 system prompt 只保存稳定的 Supervisor 职责和安全边�
 `ContextCompiler` 按固定顺序编译，当前初版包含：
 
 1. `SupervisorPolicyProcessor`：规范化并校验稳定的 Leader system prompt；
-2. `AuthorizedAgentsProcessor`：把本次 Run 冻结的授权 Agent 快照编码成动态数据区；
-3. `ContextCleanupProcessor`：清理空区段并稳定最终格式。
+2. `SessionContextProcessor`：注入 Session 创建时确定的 locale、timezone 和当前本地日期；
+3. `AuthorizedAgentsProcessor`：把本次 Run 冻结的授权 Agent 快照编码成动态数据区；
+4. `ContextCleanupProcessor`：清理空区段并稳定最终格式。
 
 Pi 的 `before_agent_start` 钩子负责调用编译器。稳定规则始终位于最终 prompt 前部，动态授权
 数据位于尾部；Agent 的 Connector、执行目标和调用凭证不会进入模型上下文。真正的 Agent
 授权仍由 `DelegationService` 根据 `Run.agentList` 强制校验，prompt 只帮助模型选择，不能替代
 服务端授权。
+
+Session 上下文使用独立的 `SessionContextV1` 保存，不与 Pi transcript 的
+`contextRevision` 混用。当前版本只接受可选的 BCP 47 `locale` 和 IANA `timezone`，且仅在
+创建 Session 时写入；它不保存访问令牌、用户消息或长期记忆。当前本地日期在每次 Run
+编译上下文时根据服务器时间和该 timezone 计算，因此不会作为陈旧值持久化。
 
 每个 Run 调用 Pi 前还会根据同一份授权快照重算活动工具：`askUserQuestion` 始终可用；
 没有授权 Agent 时不向模型暴露 `delegateAgent`，存在授权 Agent 时才启用它。工具可见性
@@ -103,7 +109,7 @@ prompt。后续 Session 记忆、Skill、附件和 Step 状态应通过新增 pr
 
 ## Agent 能力路由卡 API
 
-前端创建或编辑 Agent 时，可以调用无状态能力卡接口：
+无状态预览仍可调用：
 
 ```http
 POST /v1/agent-capability-cards/compile
@@ -132,14 +138,56 @@ Content-Type: application/json
 }
 ```
 
-接口复用 Leader 已认证的 Pi 模型，但使用独立无状态调用，不创建 Session、Run 或 checkpoint。
+Agent 更新完成后，使用按 Agent 持久化的接口：
+
+```http
+PUT /v1/agents/10093429/capability-card
+Beyond-Token: TOKEN
+System-Code: BYAI
+Content-Type: application/json
+```
+
+请求体在无状态编译字段之外支持可选的 `sourceVersion`，`agent.code` 也可用于保存
+Agent 业务编码。接口先通过当前 Token 调用权威 Agent Catalog，确认目标 Agent 仍在实时
+授权列表中，再生成能力卡并 upsert 到 `byai_super_agent_capability_cards`。能力卡表不保存
+用户与 Agent 的权限关系，且当前不会参与 Leader 的 Agent 查询或路由链路。
+
+两个接口都复用 Leader 已认证的 Pi 模型，并使用独立无状态调用，不创建 Session、Run 或 checkpoint。
 模型只生成结构化草稿；服务端负责字段校验、长度限制、SHA-256 来源指纹、质量信息和不超过
 500 字符的确定性 `routingText`。响应结构版本当前固定为
-`byclaw.agent-capability-card/v1`。本服务不保存能力卡，调用方确认后应将完整响应随 Agent
-配置保存到 ByClaw BE。
+`byclaw.agent-capability-card/v1`。`POST /compile` 不保存，`PUT /v1/agents/:agentId/capability-card`
+会保存。
 
 请求必须包含 Agent 名称，并至少提供 description、instructions、skills、tools、
 knowledgeDomains 或 examples 中的一项。`Beyond-Token` 只用于鉴权，不进入模型输入和响应。
+
+### 首次能力卡回填
+
+手工创建 `byai_super_agent_capability_cards` 后，可以从现有数字员工表生成第一版能力卡：
+
+```bash
+# 先选择少量 Agent 验证；dry-run 仍会调用模型，但不会写能力卡表。
+pnpm capability:backfill --agent-id=10093429 --dry-run
+
+# 确认结果后写入指定 Agent。
+pnpm capability:backfill --agent-id=10093429
+
+# 默认最多处理 100 条；0 表示处理全部已上架数字员工。
+pnpm capability:backfill --limit=0
+```
+
+脚本读取 `ss_resource + ss_res_ext_dig_employee + ss_resource_rel_detail`。它优先使用
+`ss_res_ext_dig_employee.target_content` 中最近一次同步的标准 JSON 快照；历史数据缺少快照时，
+回退到扩展表的 `core_persona_definition/skills/ability/constraints` 等字段和有效关联资源。
+默认只处理 `resource_biz_type='DIG_EMPLOYEE' AND resource_status=2`，可用
+`--include-inactive` 扩展范围。
+
+源表默认与 `DB_SCHEMA` 位于同一 schema；不同时设置 `BYCLAW_SOURCE_SCHEMA` 或传入
+`--source-schema=NAME`。源表位于另一数据库实例时，可以用
+`BYCLAW_SOURCE_DB_HOST/PORT/DATABASE/USER/PASS/SSL` 单独配置源连接，未设置的值回退到
+对应的 `DB_*`。这是运维脚本，直接读取数据库并写能力卡，不涉及用户权限同步，也不会
+修改 Leader 当前的 Agent 查询链路。每个 Agent 独立失败，脚本会继续处理其余记录并在结尾返回
+失败计数。
 
 ## 用户交互
 
@@ -274,13 +322,21 @@ curl -X POST http://127.0.0.1:3000/v1/sessions \
   -H 'Beyond-Token: TOKEN' \
   -d '{
     "message":"请让数据分析专家分析这个问题",
-    "thinkingLevel":"high"
+    "thinkingLevel":"high",
+    "context":{
+      "locale":"zh-CN",
+      "timezone":"Asia/Shanghai"
+    }
   }'
 ```
 
 `thinkingLevel` 是单次 Run 参数，可选值为 `off`、`minimal`、`low`、`medium`、`high`、
 `xhigh`、`max`，未传时为 `off`。它应随创建 Run 的 POST 请求发送；SSE 订阅 URL
 不接收该参数。
+
+`context` 只在创建 Session 的接口中接收。`locale` 使用 BCP 47 语言标签，`timezone`
+使用 IANA 时区名称；二者均可省略。后续
+`POST /v1/sessions/:sessionId/runs` 不接受 `context`，以避免同一会话内的基础语境漂移。
 
 返回示例：
 

@@ -10,12 +10,14 @@ import {
   sessionMessagesResponse,
 } from "../http-responses.js";
 import {
+  createSessionBodySchema,
   messageBodySchema,
   sessionIdParamSchema,
   sessionMessagesQuerySchema,
 } from "../http-schemas.js";
 import type {
   BuildHttpAppOptions,
+  CreateSessionBody,
   MessageBody,
   SessionMessagesQuery,
 } from "../http-types.js";
@@ -25,9 +27,9 @@ export function registerSessionRoutes(
   app: FastifyInstance,
   options: BuildHttpAppOptions,
 ): void {
-  app.post<{ Body: MessageBody }>(
+  app.post<{ Body: CreateSessionBody }>(
     "/v1/sessions",
-    { schema: { body: messageBodySchema } },
+    { schema: { body: createSessionBodySchema } },
     async (request, reply) => {
       try {
         const auth = requestAuth(request.headers);
@@ -37,6 +39,9 @@ export function registerSessionRoutes(
         const run = await options.runIngress.createSessionRun({
           message: request.body.message,
           thinkingLevel: request.body.thinkingLevel ?? "off",
+          ...(request.body.context
+            ? { context: request.body.context }
+            : {}),
           ...auth,
         });
         return reply.code(202).send(runResponse(run));

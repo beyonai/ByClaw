@@ -32,12 +32,9 @@ import { ByFrameworkWorkerRuntime } from "./worker/by-framework-worker.js";
  * 延迟初始化 Pi，允许 HTTP 服务暴露 /ready 说明模型配置问题，
  * 而不是在 Composition Root 创建阶段直接丢失诊断上下文。
  */
-class LazyPiLeaderFactory
-  implements LeaderSessionFactory, AgentCapabilityCompiler
-{
+class LazyPiLeaderFactory implements LeaderSessionFactory, AgentCapabilityCompiler {
   readonly #factory: Promise<
-    | { factory: PiLeaderSessionFactory; error?: never }
-    | { factory?: never; error: Error }
+    { factory: PiLeaderSessionFactory; error?: never } | { factory?: never; error: Error }
   >;
 
   /** 立即启动一次模型运行时初始化，并把成功或异常缓存为稳定结果。 */
@@ -60,16 +57,12 @@ class LazyPiLeaderFactory
   }
 
   /** 复用已初始化的 Pi 模型执行无状态能力卡编译。 */
-  async compile(
-    input: AgentCapabilityCompileInput,
-  ): Promise<AgentCapabilityCompileResult> {
+  async compile(input: AgentCapabilityCompileInput): Promise<AgentCapabilityCompileResult> {
     const initialized = await this.#factory;
     if (initialized.error) {
-      throw new AgentCapabilityCompileError(
-        "Capability model is unavailable",
-        503,
-        { cause: initialized.error },
-      );
+      throw new AgentCapabilityCompileError("Capability model is unavailable", 503, {
+        cause: initialized.error,
+      });
     }
     return initialized.factory.compile(input);
   }
@@ -106,10 +99,7 @@ export interface Application {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** 收敛 Pi 模型运行时配置：provider/model/baseUrl 按是否配置条件展开。 */
-function buildPiRuntimeConfig(
-  config: AppConfig,
-  database: PostgresDatabase,
-): PiRuntimeConfig {
+function buildPiRuntimeConfig(config: AppConfig, database: PostgresDatabase): PiRuntimeConfig {
   return {
     ...(config.piProvider ? { provider: config.piProvider } : {}),
     ...(config.piModel ? { model: config.piModel } : {}),
@@ -123,10 +113,7 @@ function buildPiRuntimeConfig(
 }
 
 /** 组装 RunService 的可观测/队列/凭证运行期参数。 */
-function buildRunServiceOptions(
-  config: AppConfig,
-  database: PostgresDatabase,
-) {
+function buildRunServiceOptions(config: AppConfig, database: PostgresDatabase) {
   return {
     executionQueue: database.queue,
     checkpoints: database.checkpoints,
@@ -191,67 +178,102 @@ async function collectReadiness(input: {
  * 应用 Composition Root：创建 Port 实现、注册 Connector、组装编排服务和 HTTP 层。
  * 具体 Connector 在这里注入，因此 by-conductor 不依赖任何传输实现。
  */
-export async function createApplication(
-  config = loadConfig(),
-): Promise<Application> {
-  // 1) 持久化层：Postgres + 仓储（按配置在启动时迁移 schema）。
-  const database = new PostgresDatabase(config.database);
-  if (config.database.migrateOnStart) {
-    await database.migrate();
+export async function createApplication(config = loadConfig()): Promise<Application> {
+  function initByWorker() {
+    if (config.worker.enabled) {
+      workerRuntime = new ByFrameworkWorkerRuntime({
+        redis,
+        runService,
+        runIngress,
+        sessionBindings: database.bindings,
+        agentType: config.worker.agentType,
+        ...(config.worker.workerId ? { workerId: config.worker.workerId } : {}),
+        maxConcurrency: config.worker.maxConcurrency,
+        logger: app.log,
+      });
+    }
   }
-  const sessionRepository = database.sessions;
-  const runRepository = database.runs;
-  const delegationRepository = database.delegations;
-  const eventStore = database.events;
+
+  function initService() {
+    const runService = new RunService(
+      sessionRepository,
+      runRepository,
+      delegationRepository,
+      eventStore,
+      delegationService,
+      leaders,
+      Date.now,
+      randomUUID,
+      buildRunServiceOptions(config, database),
+    );
+    const runIngress = new RunIngressService(
+      runService,
+      createBeyondTokenVerifier(config.auth),
+      agentCatalog,
+      config.runCredentialMaxTtlMs,
+    );
+    return { runService, runIngress };
+  }
+
+  function initPi() {
+    const delegationService = new DelegationService(
+      connectors,
+      delegationRepository,
+      eventStore,
+      config.delegationTimeoutMs,
+    );
+    // 后续模型配置改为由业务系统读取；此处仍按 AppConfig 构造 Pi 运行时。
+    const leaders = new LazyPiLeaderFactory(buildPiRuntimeConfig(config, database));
+    // 数字员工授权列表由 ByClaw BE 实时提供，外部调用方不再传入 agentList。
+    const agentCatalog = new ByClawBeAgentCatalog({
+      ...config.byClawBe,
+      endpointResolver: new RedisByClawBeEndpointResolver(redis),
+    });
+    return { delegationService, leaders, agentCatalog };
+  }
+
+  function initConnector() {
+    const connectors = new ConnectorRegistry();
+    const redis = createRedis(config.redis);
+    // 初始化 openclaw 连接器，目前使用 ByFramework 来连接。
+    // Connector 回调的 sourceAgentType 必须与入站 Worker 的逻辑路由名一致。
+    const openClaw = new OpenClawByFrameworkConnector({
+      redis,
+      sourceAgentType: config.worker.agentType,
+    });
+    connectors.register(openClaw);
+    return { connectors, redis, openClaw };
+  }
+
+  async function initDatabase() {
+    const database = new PostgresDatabase(config.database);
+    if (config.database.migrateOnStart) {
+      await database.migrate();
+    }
+    const sessionRepository = database.sessions;
+    const runRepository = database.runs;
+    const delegationRepository = database.delegations;
+    const eventStore = database.events;
+    return { delegationRepository, eventStore, database, sessionRepository, runRepository };
+  }
+
+  // 1) 持久化层：Postgres + 仓储（按配置在启动时迁移 schema）。
+  const { delegationRepository, eventStore, database, sessionRepository, runRepository } =
+    await initDatabase();
 
   // 2) 出站传输：Connector 与 ByClaw BE 服务发现共用同一个 Redis 连接。
-  const connectors = new ConnectorRegistry();
-  const redis = createRedis(config.redis);
-  // 初始化 openclaw 连接器，目前使用 ByFramework 来连接。
-  // Connector 回调的 sourceAgentType 必须与入站 Worker 的逻辑路由名一致。
-  const openClaw = new OpenClawByFrameworkConnector({
-    redis,
-    sourceAgentType: config.worker.agentType,
-  });
-  connectors.register(openClaw);
+  const { connectors, redis, openClaw } = initConnector();
 
   // 3) 编排核心：委派服务 + Pi Leader + 数字员工授权目录。
-  const delegationService = new DelegationService(
-    connectors,
-    delegationRepository,
-    eventStore,
-    config.delegationTimeoutMs,
-  );
-  // 后续模型配置改为由业务系统读取；此处仍按 AppConfig 构造 Pi 运行时。
-  const leaders = new LazyPiLeaderFactory(buildPiRuntimeConfig(config, database));
-  // 数字员工授权列表由 ByClaw BE 实时提供，外部调用方不再传入 agentList。
-  const agentCatalog = new ByClawBeAgentCatalog({
-    ...config.byClawBe,
-    endpointResolver: new RedisByClawBeEndpointResolver(redis),
-  });
+  const { delegationService, leaders, agentCatalog } = initPi();
 
   // 4) Run 流水线：RunService（快照授权、调度 Leader）+ 入站鉴权与 Run 创建。
-  const runService = new RunService(
-    sessionRepository,
-    runRepository,
-    delegationRepository,
-    eventStore,
-    delegationService,
-    leaders,
-    Date.now,
-    randomUUID,
-    buildRunServiceOptions(config, database),
-  );
-  const runIngress = new RunIngressService(
-    runService,
-    createBeyondTokenVerifier(config.auth),
-    agentCatalog,
-    config.runCredentialMaxTtlMs,
-  );
+  const { runService, runIngress } = initService();
 
   // 5) HTTP 入口：/ready 同时要求 Pi、全部已注册 Connector、数据库与 Worker 健康。
   let workerRuntime: ByFrameworkWorkerRuntime | undefined;
   const app = await buildHttpApp({
+    capabilityCards: database.capabilityCards,
     capabilityCompiler: leaders,
     runService,
     corsOrigin: config.corsOrigin,
@@ -272,20 +294,9 @@ export async function createApplication(
 
   // 6) by-framework 入站 Worker：业务入口，由 Composition Root 按需注册。
   //    Connector 只承担 OpenClaw 出站传输，二者职责分离。
-  if (config.worker.enabled) {
-    workerRuntime = new ByFrameworkWorkerRuntime({
-      redis,
-      runService,
-      runIngress,
-      sessionBindings: database.bindings,
-      agentType: config.worker.agentType,
-      ...(config.worker.workerId ? { workerId: config.worker.workerId } : {}),
-      maxConcurrency: config.worker.maxConcurrency,
-      logger: app.log,
-    });
-  }
+  initByWorker();
 
-  // 8) 生命周期：先注册 Worker 再监听端口；关闭时逆序释放。
+  // 7) 生命周期：先注册 Worker 再监听端口；关闭时逆序释放。
   let closed = false;
   return {
     app,
@@ -296,9 +307,7 @@ export async function createApplication(
       await database.start();
       const databaseHealth = await database.health();
       if (!databaseHealth.healthy) {
-        throw new Error(
-          databaseHealth.message ?? "PostgreSQL persistence is not ready",
-        );
+        throw new Error(databaseHealth.message ?? "PostgreSQL persistence is not ready");
       }
       runService.start();
       await workerRuntime?.start();

@@ -1,8 +1,10 @@
 import type {
+  AgentCapabilityCardRepository,
   AgentCapabilityCompileInput,
   AgentCapabilityCompiler,
   ConnectorHealth,
   RunService,
+  SessionContextInput,
   ThinkingLevel,
   UserInteractionResponse,
 } from "@byclaw/by-conductor";
@@ -15,6 +17,10 @@ export type MessageBody = {
   thinkingLevel?: ThinkingLevel;
 };
 
+export type CreateSessionBody = MessageBody & {
+  context?: SessionContextInput;
+};
+
 /** Session 消息历史的分页参数。 */
 export type SessionMessagesQuery = {
   limit?: number;
@@ -23,9 +29,16 @@ export type SessionMessagesQuery = {
 
 export type InteractionResponseBody = UserInteractionResponse;
 export type AgentCapabilityCompileBody = AgentCapabilityCompileInput;
+export type AgentCapabilityUpsertBody = AgentCapabilityCompileInput & {
+  sourceVersion?: string;
+};
+export type AgentCapabilityParams = {
+  agentId: string;
+};
 
 /** HTTP 适配层所需依赖，统一由应用 Composition Root 注入。 */
 export interface BuildHttpAppOptions {
+  capabilityCards: AgentCapabilityCardRepository;
   capabilityCompiler: AgentCapabilityCompiler;
   runService: RunService;
   corsOrigin: string | boolean;

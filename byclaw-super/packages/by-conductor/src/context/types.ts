@@ -1,4 +1,5 @@
 import type { AgentProfile } from "../types.js";
+import type { SessionContextV1 } from "../session-context.js";
 
 /** 一次上下文编译所需的原始快照；读取外部数据应在进入编译器之前完成。 */
 export interface ContextBuildInput {
@@ -6,6 +7,10 @@ export interface ContextBuildInput {
   baseSystemPrompt: string;
   /** 当前 Run 冻结的授权 Agent 快照。 */
   authorizedAgents: readonly AgentProfile[];
+  /** 当前业务 Session 的稳定环境快照。 */
+  sessionContext: SessionContextV1;
+  /** 本轮上下文构建时间，由 Runtime 显式提供以保持可测试。 */
+  currentTime: number;
 }
 
 /** 动态追加到稳定 system prompt 后面的一个具名上下文区段。 */

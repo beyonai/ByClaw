@@ -27,9 +27,14 @@ import type {
   UserInteractionResponse,
 } from "./types.js";
 import { TERMINAL_RUN_STATUSES } from "./types.js";
+import {
+  createSessionContext,
+  type SessionContextInput,
+} from "./session-context.js";
 
 export interface CreateSessionInput {
   owner: CallerPrincipal;
+  context?: SessionContextInput;
 }
 
 export interface CreateRunInput {
@@ -156,6 +161,8 @@ export class RunService {
     const session: Session = {
       id: this.createId(),
       owner: structuredClone(input.owner),
+      sessionContext: createSessionContext(input.context),
+      sessionContextVersion: 1,
       contextRevision: 0,
       createdAt: now,
       updatedAt: now,
@@ -255,6 +262,8 @@ export class RunService {
     const session: Session = {
       id: this.createId(),
       owner: structuredClone(input.owner),
+      sessionContext: createSessionContext(input.context),
+      sessionContextVersion: 1,
       contextRevision: 0,
       createdAt: now,
       updatedAt: now,
@@ -722,6 +731,8 @@ ${JSON.stringify(response)}`;
         message: leaderMessage,
         thinkingLevel: current.thinkingLevel ?? "off",
         agents: current.agentList,
+        sessionContext: session.sessionContext,
+        currentTime: this.now(),
         signal: runController.signal,
         // Leader 的可见回答增量被规范化为 Run 事件，供 SSE 消费。
         onDelta: async (text) => {

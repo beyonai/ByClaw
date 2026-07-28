@@ -1,7 +1,10 @@
 import {
   createPiSessionCheckpoint,
   isThinkingLevel,
+  parseSessionContext,
   validatePiSessionCheckpoint,
+  type AgentCapabilityCardRepository,
+  type AgentCapabilityCardUpsert,
   type CallerPrincipal,
   type Delegation,
   type DelegationRepository,
@@ -90,6 +93,7 @@ export class PostgresDatabase {
   readonly queue: PostgresRunExecutionQueue;
   readonly checkpoints: PostgresLeaderCheckpointStore;
   readonly credentials: PostgresExecutionCredentialRepository;
+  readonly capabilityCards: PostgresAgentCapabilityCardRepository;
 
   constructor(config: PostgresDatabaseConfig) {
     this.schema = safeIdentifier(config.schema, "DB_SCHEMA");
@@ -122,6 +126,10 @@ export class PostgresDatabase {
       sessionMaxEntries: config.piSessionMaxEntries ?? 20_000,
     });
     this.credentials = new PostgresExecutionCredentialRepository(this.pool, this.schema);
+    this.capabilityCards = new PostgresAgentCapabilityCardRepository(
+      this.pool,
+      this.schema,
+    );
   }
 
   /**
@@ -208,6 +216,71 @@ export class PostgresDatabase {
   }
 }
 
+/**
+ * 只负责持久化已编译的 Agent 能力卡。
+ * 权限关系不进入此表，也不会由此仓储参与 Leader 的授权 Agent 查询。
+ */
+export class PostgresAgentCapabilityCardRepository
+  implements AgentCapabilityCardRepository
+{
+  constructor(
+    private readonly pool: Pool,
+    private readonly schema: string,
+  ) {}
+
+  async upsert(input: AgentCapabilityCardUpsert): Promise<void> {
+    await transaction(this.pool, async (client) => {
+      await advisoryLock(
+        client,
+        `agent-capability-card:${input.systemCode}:${input.agentId}`,
+      );
+      const values = [
+        input.systemCode,
+        input.agentId,
+        input.agentCode ?? null,
+        input.agentName,
+        input.compiled.schemaVersion,
+        input.compiled.generatorVersion,
+        input.sourceVersion ?? null,
+        input.compiled.sourceFingerprint,
+        JSON.stringify(input.compiled.card),
+        input.compiled.routingText,
+        JSON.stringify(input.compiled.quality),
+        date(input.now),
+      ];
+      const updated = await client.query(
+        `UPDATE ${table(this.schema, "agent_capability_cards")}
+            SET agent_code = $3,
+                agent_name = $4,
+                schema_version = $5,
+                generator_version = $6,
+                source_version = $7,
+                source_fingerprint = $8,
+                card = $9,
+                routing_text = $10,
+                quality = $11,
+                status = 'ACTIVE',
+                version = version + 1,
+                updated_at = $12
+          WHERE system_code = $1
+            AND agent_id = $2`,
+        values,
+      );
+      if (updated.rowCount === 0) {
+        await client.query(
+          `INSERT INTO ${table(this.schema, "agent_capability_cards")}
+             (system_code, agent_id, agent_code, agent_name, schema_version,
+              generator_version, source_version, source_fingerprint, card,
+              routing_text, quality, status, version, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
+                   'ACTIVE', 0, $12, $12)`,
+          values,
+        );
+      }
+    });
+  }
+}
+
 export class PostgresSessionRepository implements SessionRepository {
   constructor(
     private readonly pool: Pool,
@@ -221,6 +294,8 @@ export class PostgresSessionRepository implements SessionRepository {
         session.id,
         session.owner.userCode,
         session.owner.userName ?? null,
+        JSON.stringify(session.sessionContext),
+        session.sessionContextVersion,
         session.contextRevision,
         date(session.createdAt),
         date(session.updatedAt),
@@ -229,13 +304,17 @@ export class PostgresSessionRepository implements SessionRepository {
         `UPDATE ${table(this.schema, "sessions")}
             SET user_code = $2,
                 user_name = $3,
-                context_revision = $4,
-                updated_at = $5
+                session_context = $4,
+                session_context_version = $5,
+                context_revision = $6,
+                updated_at = $7
           WHERE id = $1`,
         [
           session.id,
           session.owner.userCode,
           session.owner.userName ?? null,
+          JSON.stringify(session.sessionContext),
+          session.sessionContextVersion,
           session.contextRevision,
           date(session.updatedAt),
         ],
@@ -243,8 +322,9 @@ export class PostgresSessionRepository implements SessionRepository {
       if (updated.rowCount === 0) {
         await client.query(
           `INSERT INTO ${table(this.schema, "sessions")}
-             (id, owner_version, user_code, user_name, status, context_revision, created_at, updated_at)
-           VALUES ($1, 1, $2, $3, 'ACTIVE', $4, $5, $6)`,
+             (id, owner_version, user_code, user_name, status, session_context,
+              session_context_version, context_revision, created_at, updated_at)
+           VALUES ($1, 1, $2, $3, 'ACTIVE', $4, $5, $6, $7, $8)`,
           values,
         );
       }
@@ -347,12 +427,15 @@ export class PostgresRunRepository implements RunRepository {
     return transaction(this.pool, async (client) => {
       await client.query(
         `INSERT INTO ${table(this.schema, "sessions")}
-           (id, owner_version, user_code, user_name, status, context_revision, created_at, updated_at)
-         VALUES ($1, 1, $2, $3, 'ACTIVE', $4, $5, $6)`,
+           (id, owner_version, user_code, user_name, status, session_context,
+            session_context_version, context_revision, created_at, updated_at)
+         VALUES ($1, 1, $2, $3, 'ACTIVE', $4, $5, $6, $7, $8)`,
         [
           session.id,
           session.owner.userCode,
           session.owner.userName ?? null,
+          JSON.stringify(session.sessionContext),
+          session.sessionContextVersion,
           session.contextRevision,
           date(session.createdAt),
           date(session.updatedAt),
@@ -1598,6 +1681,8 @@ function mapSession(row: QueryResultRow): Session {
       userCode: text(row.user_code),
       ...(row.user_name ? { userName: text(row.user_name) } : {}),
     },
+    sessionContext: parseSessionContext(row.session_context),
+    sessionContextVersion: integer(row.session_context_version),
     contextRevision: integer(row.context_revision),
     createdAt: milliseconds(row.created_at),
     updatedAt: milliseconds(row.updated_at),

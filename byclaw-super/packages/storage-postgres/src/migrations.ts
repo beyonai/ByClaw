@@ -214,6 +214,20 @@ CREATE INDEX runs_claim_idx ON ${POSTGRES_TABLE_PREFIX}runs(status, created_at)
   );
 `,
   },
+  {
+    version: 7,
+    name: "session_business_context",
+    sql: `
+ALTER TABLE ${POSTGRES_TABLE_PREFIX}sessions
+  ADD COLUMN IF NOT EXISTS session_context jsonb NOT NULL
+    DEFAULT '{"schemaVersion":1}'::jsonb;
+ALTER TABLE ${POSTGRES_TABLE_PREFIX}sessions
+  ADD COLUMN IF NOT EXISTS session_context_version bigint NOT NULL DEFAULT 1;
+ALTER TABLE ${POSTGRES_TABLE_PREFIX}sessions
+  ADD CONSTRAINT sessions_context_version_positive
+  CHECK (session_context_version > 0);
+`,
+  },
 ] as const;
 
 export const LATEST_POSTGRES_SCHEMA_VERSION =
