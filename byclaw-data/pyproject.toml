@@ -6,13 +6,13 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "python-dotenv==1.0.0",
-    "by-datacloud==0.1.41",
+    "by-datacloud==0.1.41.dev1",
     "langchain-openai==1.1.11",
-    "by-framework==0.2.2.dev6",
+    "by-framework==0.2.2.dev9",
     "by-framework-trace-langfuse==0.0.3.dev3",
     "by-framework-langgraph==0.0.3.dev3",
     "by-framework-history-byclaw==0.0.3",
-    "langfuse==2.0.0",
+    "langfuse==4.7.1",
     "deepagents==0.4.7",
 ]
 
@@ -47,8 +47,8 @@ index-strategy = "unsafe-best-match"
 
 [dependency-groups]
 dev = [
-    "pytest==8.0",
-    "httpx==0.27",
+    "pytest==8.2",
+    "httpx==0.28.1",
     "ruff==0.8",
     "pytest-asyncio==1.3.0",
     "mypy>=1.13",
