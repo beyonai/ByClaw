@@ -7,6 +7,7 @@ from pathlib import Path
 SKILLS_ROOT = Path(__file__).parents[1] / "skills"
 SKILL_ROOT = SKILLS_ROOT / "knowledge-collection"
 REPO_ROOT = Path(__file__).parents[3]
+INITDB_DML = REPO_ROOT / "deploy" / "middleware" / "initdb" / "04_dml.sql"
 V030_DML = REPO_ROOT / "deploy" / "migrations" / "versions" / "V0.3.0" / "V0.3.0__dml.sql"
 META_PROMPT_SERVICE = (
     REPO_ROOT
@@ -89,6 +90,17 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         self.assertNotIn("jsonb_agg", upgrade)
         self.assertNotIn("jsonb_array_elements", upgrade)
         self.assertNotIn("regexp_replace", upgrade)
+
+    def test_bycli_has_an_independent_platform_resource(self):
+        initdb = INITDB_DML.read_text(encoding="utf-8")
+        upgrade = V030_DML.read_text(encoding="utf-8")
+
+        self.assertRegex(initdb, r"VALUES\(25,'BYAI','SKILL','ATOM','byCLI'.*,'bycli',CURRENT_TIMESTAMP")
+        self.assertIn("VALUES(25,'inner','SYSTEM_BUILTIN'", initdb)
+        self.assertIn("resource_code IN (", initdb)
+        self.assertIn("'knowledge-collection','bycli','dws'", initdb)
+        self.assertIn("resource_code = 'bycli'", upgrade)
+        self.assertIn("resource_id = 25", upgrade)
 
     def test_meta_prompt_counts_catalog_entries_from_json(self):
         source = META_PROMPT_SERVICE.read_text(encoding="utf-8")
