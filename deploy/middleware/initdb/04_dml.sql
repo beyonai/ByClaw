@@ -4489,10 +4489,22 @@ INSERT INTO byai.byai_system_config (param_id, param_type, param_code, param_nam
 		"skillDescEn": "Provide AI agents with persistent long-term memory, knowledge graph construction and hybrid search, supporting knowledge storage, correlation analysis and intelligent query."
 	},
 	{
+		"skillName": "knowledge-collection",
+		"skillCode": "knowledge-collection",
+		"skillDescZh": "编排跨互联网与企业平台的知识采集，统一采集产物协议、后处理及知识库入库或知识整理。",
+		"skillDescEn": "Orchestrate knowledge collection across public internet and enterprise platforms, including canonical artifacts, post-processing, and knowledge-base ingestion or organization."
+	},
+	{
+		"skillName": "agent-reach",
+		"skillCode": "agent-reach",
+		"skillDescZh": "路由公开互联网渠道能力，并按 ByClaw 覆盖规则选择 byCLI 等执行器。",
+		"skillDescEn": "Route public-internet channels and select executors such as byCLI according to ByClaw override rules."
+	},
+	{
 		"skillName": "bycli",
 		"skillCode": "bycli",
-		"skillDescZh": "bycli 是一个全能力技能，把任意网站、桌面应用或外部 CLI 统一成 bycli <site>无需爬页面就能执行命令、驱动浏览器、修复或编写适配器、并将采集内容入库",
-		"skillDescEn": "bycli is an all-in-one skill that unifies any website, desktop app, or external CLI into a single bycli ‹ site> <command> interface, letting an agent run commands, drive the browser, fix or author adapters, and ingest collected content into a knowledge base without"
+		"skillDescZh": "通过浏览器与 Adapter 执行网站操作、复用或维护适配器，并返回采集结果。",
+		"skillDescEn": "Execute website operations through the browser and adapters, reuse or maintain adapters, and return collected results."
 	}
 ]', 'OpenClaw 仓库 skills/ 目录下内置（随安装分发）的 Agent Skill 元数据 JSON 数组');
 
@@ -4540,7 +4552,7 @@ INSERT INTO byai.ss_resource(resource_id,system_code,resource_biz_type,resource_
 VALUES(13,'BYAI','SKILL','ATOM','知识记忆管理','知识记忆管理技能。输入需要记录的项目背景、决策过程或人物关系，输出结构化的长期记忆资产，支持全文检索和智能关联。适用于项目经验沉淀、历史决策追溯、团队知识传承、个人知识库建设。','1.0','hosted',10,-1,10001,10001,CURRENT_TIMESTAMP,10001,CURRENT_TIMESTAMP,1,2,-1,-1,'gbrain',CURRENT_TIMESTAMP,'passed',1,-1,'publish','enterprise','SKILL','NONE');
 
 INSERT INTO byai.ss_resource(resource_id,system_code,resource_biz_type,resource_type,resource_name,resource_desc,resource_version_id,host_type,catalog_id,man_org_id,man_user_id,create_by,create_time,update_by,update_time,com_acct_id,resource_status,resource_d_verid,resource_r_verid,resource_code,publish_time,auth_status,publish_portal,parent_resource_id,publish_type,owner_type,impl_type,worker_agent_type)
-VALUES(14,'BYAI','SKILL','ATOM','知识采集','网络内容采集技能。输入任意网站链接或应用名称，输出结构化的采集内容，支持网页信息抓取、应用数据提取和内容归档入库。适用于竞品信息收集、行业动态追踪、资料批量采集、内容聚合。','1.0','hosted',10,-1,10001,10001,CURRENT_TIMESTAMP,10001,CURRENT_TIMESTAMP,1,2,-1,-1,'bycli',CURRENT_TIMESTAMP,'passed',1,-1,'publish','enterprise','SKILL','NONE');
+VALUES(14,'BYAI','SKILL','ATOM','知识采集','网络内容采集技能。输入任意网站链接或应用名称，输出结构化的采集内容，支持网页信息抓取、应用数据提取和内容归档入库。适用于竞品信息收集、行业动态追踪、资料批量采集、内容聚合。','1.0','hosted',10,-1,10001,10001,CURRENT_TIMESTAMP,10001,CURRENT_TIMESTAMP,1,2,-1,-1,'knowledge-collection',CURRENT_TIMESTAMP,'passed',1,-1,'publish','enterprise','SKILL','NONE');
 
 INSERT INTO byai.ss_resource(resource_id,system_code,resource_biz_type,resource_type,resource_name,resource_desc,resource_version_id,host_type,catalog_id,man_org_id,man_user_id,create_by,create_time,update_by,update_time,com_acct_id,resource_status,resource_d_verid,resource_r_verid,resource_code,publish_time,auth_status,publish_portal,parent_resource_id,publish_type,owner_type,impl_type,worker_agent_type)
 VALUES(15,'BYAI','SKILL','ATOM','钉钉连接器','钉钉协同办公技能。输入办公事务指令，输出钉钉平台上的待办、审批、日程、文档等协同操作结果。适用于待办同步、会议安排、审批流程、团队文档协作、考勤管理。','1.0','hosted',10,-1,10001,10001,CURRENT_TIMESTAMP,10001,CURRENT_TIMESTAMP,1,2,-1,-1,'dws',CURRENT_TIMESTAMP,'passed',1,-1,'publish','enterprise','SKILL','NONE');
@@ -4605,7 +4617,7 @@ FROM byai.ss_resource r
 WHERE e.resource_id = r.resource_id
   AND r.resource_biz_type = 'SKILL'
   AND r.owner_type = 'enterprise'
-  AND r.resource_code IN ('podcast-outline','tech-article','podcast-video','podcast-voice','podcast-script','slide-dec','unstructured-ontology-manager','structured-ontology-manager','crm-demo-showcase','github-issues-mgmt','github-code-analysis','iwhalehub','gbrain','bycli','dws','amap-visual-report-generator');
+  AND r.resource_code IN ('podcast-outline','tech-article','podcast-video','podcast-voice','podcast-script','slide-dec','unstructured-ontology-manager','structured-ontology-manager','crm-demo-showcase','github-issues-mgmt','github-code-analysis','iwhalehub','gbrain','knowledge-collection','dws','amap-visual-report-generator');
 
 -- 沙箱健康检测-默认水位模型初始化
 INSERT INTO byai.sandbox_health_watermark_model (
