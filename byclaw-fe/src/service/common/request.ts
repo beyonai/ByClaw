@@ -1,5 +1,16 @@
 import { ERROR_CODE, EXCEED_LIMITED_LOGIN_NUMBER, TOKEN_ERROR_CODE } from '@/constants/error/errorCode';
-import { clearToken, getssoToken, getToken, ssotokenKey, tokenKey, getSessionKey, loginRedirect } from '@/utils/auth';
+import {
+  type AuthSnapshot,
+  clearToken,
+  getssoToken,
+  getToken,
+  hasAuthSnapshot,
+  isCurrentAuthSnapshot,
+  ssotokenKey,
+  tokenKey,
+  getSessionKey,
+  loginRedirect,
+} from '@/utils/auth';
 import { generateSignature } from '@/utils/signature';
 import { getLocale, history, getIntl } from '@umijs/max';
 import { message } from 'antd';
@@ -7,7 +18,7 @@ import { showRequestErrorModal } from '@/utils/antdAppModal';
 import { getRootUnAuthPagePath, getModelState } from '@/utils';
 import BeyondBroadcastChannel from '@/utils/broadcastChannel';
 import axios, { AxiosProgressEvent, AxiosResponse, InternalAxiosRequestConfig, Method } from 'axios';
-import { get, isPlainObject, throttle, unset, isNil } from 'lodash';
+import { get, isPlainObject, throttle, isNil } from 'lodash';
 import { logout } from '../user';
 
 export interface ConfigType {
@@ -115,14 +126,25 @@ function checkFactoryRes(
 }
 
 // 全局退出登录
-export const globalLogout = (showLoginModal?: boolean) => {
+export const globalLogout = (showLoginModal?: boolean, expectedAuthSnapshot?: AuthSnapshot) => {
   try {
-    clearToken();
+    // 退出动作可能由旧请求延迟触发，只有请求所属会话仍然存在时才允许清理凭证。
+    const hasExpectedAuth = expectedAuthSnapshot ? hasAuthSnapshot(expectedAuthSnapshot) : false;
+    if (expectedAuthSnapshot && (!hasExpectedAuth || !isCurrentAuthSnapshot(expectedAuthSnapshot))) {
+      return Promise.resolve();
+    }
 
     const userState = getModelState('user');
-    if (!userState.userInfo) return Promise.resolve();
+    // 启动阶段 Redux 还没有 userInfo，但有效请求快照仍足以确认当前会话需要退出。
+    const shouldLogout = Boolean(userState.userInfo) || hasExpectedAuth;
+    if (!shouldLogout) return Promise.resolve();
 
-    logout();
+    if (userState.userInfo) {
+      // 在清理本地凭证前构造退出请求，确保请求仍携带当前会话凭证。
+      Promise.resolve(logout()).catch((error) => console.error(error));
+    }
+
+    clearToken();
 
     BeyondBroadcastChannel.postMessage({ type: 'logout' });
     BeyondBroadcastChannel.close();
@@ -155,11 +177,7 @@ instance.interceptors.request.use(
       const params = config.params || {};
 
       const signatureHeaders = generateSignature(method, method === 'POST' ? data : params);
-      Object.assign(config.headers, {
-        ...signatureHeaders,
-        ...config.myHeader,
-      });
-      unset(config, 'myHeader');
+      Object.assign(config.headers, signatureHeaders);
     } catch (error) {
       console.error('接口签名失败:', error);
     }
@@ -169,9 +187,10 @@ instance.interceptors.request.use(
 );
 
 const toastAuthError = throttle(
-  () => {
+  (authSnapshot: AuthSnapshot) => {
     message.error(getIntl().formatMessage({ id: 'common.loginExpired' }), 3, () => {
-      globalLogout(true);
+      // 提示期间可能已经重新登录，globalLogout 会再次校验这份旧快照。
+      globalLogout(true, authSnapshot);
     });
   },
   3 * 1000,
@@ -181,14 +200,39 @@ const toastAuthError = throttle(
   }
 );
 
+// 兼容 AxiosHeaders 和普通对象，统一读取请求中的鉴权头。
+const getHeaderValue = (headers: any, key: string) => {
+  const value = typeof headers?.get === 'function' ? headers.get(key) : headers?.[key] ?? headers?.[key.toLowerCase()];
+  return isNil(value) ? '' : String(value);
+};
+
+// 从实际发出的请求配置提取快照，而不是读取响应到达时的最新 token。
+const getRequestAuthSnapshot = (config: any): AuthSnapshot => ({
+  sessionId: getHeaderValue(config?.headers, 'x-session-id'),
+  token: getHeaderValue(config?.headers, tokenKey),
+  ssoToken: getHeaderValue(config?.headers, ssotokenKey),
+});
+
+const isLoginExpiredResponse = (status: number, responseData: unknown) => {
+  if (!(status in TOKEN_ERROR_CODE)) return false;
+
+  // 后端将“已登录但无权限访问”也返回为 401，不能因此清除整个登录态。
+  if (status === 401 && isPlainObject(responseData) && `${get(responseData, 'code')}` === '-1') {
+    return false;
+  }
+
+  return true;
+};
+
 /* 响应拦截 */
 instance.interceptors.response.use(
   (response: AxiosResponse<ResponseDataType>) => {
     return response;
   },
   (err): any => {
-    const { status, config, response } = err;
-    const { url } = config;
+    const { config, response } = err;
+    const status = err.status ?? response?.status;
+    const { url } = config || {};
     if (err.name === 'CanceledError') {
       // 请求被取消了，不用走下面的逻辑，将错误返回，给业务测判断错误类型
       return Promise.reject(err);
@@ -199,14 +243,18 @@ instance.interceptors.response.use(
      * 清除缓存并重定向到首页
      */
     if (
-      status in TOKEN_ERROR_CODE &&
+      isLoginExpiredResponse(status, response?.data) &&
       ![
         '/byaiService/system/session/loginByPhone',
         '/byaiService/system/session/loginByUsername',
         '/byaiService/system/session/registerByPhone',
       ].includes(url)
     ) {
-      toastAuthError();
+      const authSnapshot = getRequestAuthSnapshot(config);
+      // 匿名请求或属于旧会话的响应只返回业务错误，不能触发全局退出。
+      if (hasAuthSnapshot(authSnapshot) && isCurrentAuthSnapshot(authSnapshot)) {
+        toastAuthError(authSnapshot);
+      }
       return Promise.resolve('登录失效');
     }
 
@@ -248,6 +296,7 @@ export function request(url: string, data: any, cfg: ConfigType, method: Method)
       };
     }
   }
+  // 在创建 Axios 请求时固定凭证，响应晚到时仍可判断它属于哪个登录会话。
   const headers: Record<string, string> = {
     ...(config.headers || {}),
     [tokenKey]: getToken(),
@@ -258,8 +307,10 @@ export function request(url: string, data: any, cfg: ConfigType, method: Method)
     headers.language = getLocale();
   }
 
+  // 通过 Axios 标准 headers 传递认证信息，避免旧的自定义 myHeader 被单独覆盖或丢失。
   return instance
     .request({
+      ...config,
       headers,
       baseURL: '/',
       url,
@@ -267,10 +318,6 @@ export function request(url: string, data: any, cfg: ConfigType, method: Method)
       data: ['POST', 'PUT'].includes(method) ? myData : null,
       params: !['POST', 'PUT'].includes(method) ? myData : null,
       signal: cancelToken?.signal,
-      myHeader: {
-        ...headers,
-      },
-      ...config, // 用户自定义配置，可以覆盖前面的配置
     })
     .then((res) => {
       if (config && config.responseType === 'blob') {
