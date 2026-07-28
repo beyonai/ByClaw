@@ -29,6 +29,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import com.iwhaleai.byai.framework.common.Constants;
@@ -58,7 +59,6 @@ import io.github.resilience4j.retry.RetryConfig;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
-import redis.clients.jedis.Jedis;
 
 /**
  * 沙箱服务 提供沙箱环境的启动、释放、查询和自动清理等功能
@@ -133,6 +133,14 @@ public class SandboxService {
     @Lazy
     @Autowired
     private RedisClient redisClient;
+
+    /**
+     * Registry cleanup must use Spring Data Redis so the configured connection factory can be cluster-aware.
+     * The Gateway SDK RedisClient exposes a JedisPool, which is unavailable in cluster mode.
+     */
+    @Lazy
+    @Autowired
+    private StringRedisTemplate stringRedisTemplate;
 
     /** 系统参数：允许同时使用的沙箱数量上限，paramCode=ENABLE_USE_SANDBOX_NUM */
     private static final String PARAM_ENABLE_USE_SANDBOX_NUM = "ENABLE_USE_SANDBOX_NUM";
@@ -1715,19 +1723,17 @@ public class SandboxService {
     }
 
     private void cleanupSandboxRegistryKeys(String serviceName) {
-        try (Jedis jedis = redisClient.getResource()) {
-            String instancesKey = Constants.RegistryKeys.sdInstanceDetails(serviceName);
-            String activeKey = Constants.RegistryKeys.sdActiveInstances(serviceName);
-            Map<String, String> instanceMap = jedis.hgetAll(instancesKey);
-            if (instanceMap != null && !instanceMap.isEmpty()) {
-                String[] instanceIds = instanceMap.keySet().toArray(new String[0]);
-                jedis.hdel(instancesKey, instanceIds);
-                jedis.zrem(activeKey, instanceIds);
-            }
-            jedis.del(instancesKey);
-            jedis.del(activeKey);
-            jedis.srem(Constants.RegistryKeys.sdServices(), serviceName);
+        String instancesKey = Constants.RegistryKeys.sdInstanceDetails(serviceName);
+        String activeKey = Constants.RegistryKeys.sdActiveInstances(serviceName);
+        Map<Object, Object> instanceMap = stringRedisTemplate.opsForHash().entries(instancesKey);
+        if (instanceMap != null && !instanceMap.isEmpty()) {
+            Object[] instanceIds = instanceMap.keySet().toArray();
+            stringRedisTemplate.opsForHash().delete(instancesKey, instanceIds);
+            stringRedisTemplate.opsForZSet().remove(activeKey, instanceIds);
         }
+        stringRedisTemplate.delete(instancesKey);
+        stringRedisTemplate.delete(activeKey);
+        stringRedisTemplate.opsForSet().remove(Constants.RegistryKeys.sdServices(), serviceName);
     }
 
     private String buildSandboxRecordKey(String sandboxType, Long resourceId) {

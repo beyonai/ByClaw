@@ -7,6 +7,10 @@ import java.util.Map;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.data.redis.core.HashOperations;
+import org.springframework.data.redis.core.SetOperations;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import com.iwhalecloud.byai.common.feign.response.SandboxResponse;
@@ -121,6 +125,31 @@ class SandboxServiceTest {
         assertThat(result.getInstanceEndpoints())
             .containsEntry("openclaw", "http://host/proxy/18789/chat?token=persisted-token")
             .containsEntry("ui", "http://host/proxy/3000?token=persisted-token");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void cleanupSandboxRegistryKeys_usesSpringRedisTemplateForClusterConnections() {
+        SandboxService sandboxService = new SandboxService();
+        StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
+        HashOperations<String, Object, Object> hashOperations = mock(HashOperations.class);
+        ZSetOperations<String, String> zSetOperations = mock(ZSetOperations.class);
+        SetOperations<String, String> setOperations = mock(SetOperations.class);
+        when(redisTemplate.opsForHash()).thenReturn(hashOperations);
+        when(redisTemplate.opsForZSet()).thenReturn(zSetOperations);
+        when(redisTemplate.opsForSet()).thenReturn(setOperations);
+        when(hashOperations.entries("byai_gateway:sd:instances:BYCLAW_EXE_adminvip"))
+            .thenReturn(Map.of("instance-1", "{}"));
+        ReflectionTestUtils.setField(sandboxService, "stringRedisTemplate", redisTemplate);
+
+        ReflectionTestUtils.invokeMethod(sandboxService, "cleanupSandboxRegistryKeys", "BYCLAW_EXE_adminvip");
+
+        verify(hashOperations).entries("byai_gateway:sd:instances:BYCLAW_EXE_adminvip");
+        verify(hashOperations).delete("byai_gateway:sd:instances:BYCLAW_EXE_adminvip", "instance-1");
+        verify(zSetOperations).remove("byai_gateway:sd:active:BYCLAW_EXE_adminvip", "instance-1");
+        verify(redisTemplate).delete("byai_gateway:sd:instances:BYCLAW_EXE_adminvip");
+        verify(redisTemplate).delete("byai_gateway:sd:active:BYCLAW_EXE_adminvip");
+        verify(setOperations).remove("byai_gateway:sd:services", "BYCLAW_EXE_adminvip");
     }
 
     @Test

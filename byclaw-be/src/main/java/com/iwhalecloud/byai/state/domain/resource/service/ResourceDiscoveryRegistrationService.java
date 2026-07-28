@@ -11,10 +11,10 @@ import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
-import redis.clients.jedis.Jedis;
 
 import java.net.URI;
 import java.util.LinkedHashMap;
@@ -45,6 +45,12 @@ public class ResourceDiscoveryRegistrationService {
 
     @Autowired
     private RedisClient redisClient;
+
+    /**
+     * Use the Spring Data connection factory for registry cleanup; the Gateway SDK's JedisPool is not cluster-safe.
+     */
+    @Autowired
+    private StringRedisTemplate stringRedisTemplate;
 
     /**
      * 资源服务注册器缓存。
@@ -177,19 +183,17 @@ public class ResourceDiscoveryRegistrationService {
     }
 
     private void cleanupRegistryKeys(String serviceName) {
-        try (Jedis jedis = redisClient.getResource()) {
-            String instancesKey = Constants.RegistryKeys.sdInstanceDetails(serviceName);
-            String activeKey = Constants.RegistryKeys.sdActiveInstances(serviceName);
-            Map<String, String> instanceMap = jedis.hgetAll(instancesKey);
-            if (instanceMap != null && !instanceMap.isEmpty()) {
-                String[] instanceIds = instanceMap.keySet().toArray(new String[0]);
-                jedis.hdel(instancesKey, instanceIds);
-                jedis.zrem(activeKey, instanceIds);
-            }
-            jedis.del(instancesKey);
-            jedis.del(activeKey);
-            jedis.srem(Constants.RegistryKeys.sdServices(), serviceName);
+        String instancesKey = Constants.RegistryKeys.sdInstanceDetails(serviceName);
+        String activeKey = Constants.RegistryKeys.sdActiveInstances(serviceName);
+        Map<Object, Object> instanceMap = stringRedisTemplate.opsForHash().entries(instancesKey);
+        if (instanceMap != null && !instanceMap.isEmpty()) {
+            Object[] instanceIds = instanceMap.keySet().toArray();
+            stringRedisTemplate.opsForHash().delete(instancesKey, instanceIds);
+            stringRedisTemplate.opsForZSet().remove(activeKey, instanceIds);
         }
+        stringRedisTemplate.delete(instancesKey);
+        stringRedisTemplate.delete(activeKey);
+        stringRedisTemplate.opsForSet().remove(Constants.RegistryKeys.sdServices(), serviceName);
     }
 
     private ResourceRegistrationTarget buildTarget(String resourceBizType, Long resourceId, String resourceCode,
