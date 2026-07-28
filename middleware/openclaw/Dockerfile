@@ -117,8 +117,8 @@ ENV BYCLI_CONFIG_DIR=/by/.bycli \
     BYCLI_BROWSER_RECOVERY_COMMAND=/usr/local/bin/start-chrome.sh \
     BYCLI_DAEMON_HOST=0.0.0.0
 
-ARG OPENCLI_VERSION=2.1.13
-ARG OPENCLI_EXTENSION_VERSION=2.1.13
+ARG OPENCLI_VERSION=2.1.14
+ARG OPENCLI_EXTENSION_VERSION=2.1.14
 RUN set -eux; \
     if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
         sed -i 's|http://deb.debian.org/debian|https://mirrors.tuna.tsinghua.edu.cn/debian|g' /etc/apt/sources.list.d/debian.sources; \
