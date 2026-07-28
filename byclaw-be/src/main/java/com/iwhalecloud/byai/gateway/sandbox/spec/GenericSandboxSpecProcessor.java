@@ -94,26 +94,26 @@ public class GenericSandboxSpecProcessor implements SandboxSpecProcessor {
             return;
         }
 
-        // Resolve template source path if a copy-template operation is configured.
-        String templateSourceStr = null;
+        // Resolve the mounted workspace path if a copy-template operation is configured.
+        String workspaceTargetPath = workspaceHost;
         if (spec.getBootstrap().getCopyTemplate() != null) {
             CopyTemplateOp op = spec.getBootstrap().getCopyTemplate();
             String targetVolumeKey = op.getTargetVolumeKey();
-            // Find the volume by key and get its host path
             if (volumes != null && StringUtils.isNotBlank(targetVolumeKey)) {
-                templateSourceStr = volumes.stream()
+                workspaceTargetPath = volumes.stream()
                         .filter(v -> targetVolumeKey.equals(v.getKey()))
                         .findFirst()
-                        .map(v -> v.getMountPath())
-                        .orElse(null);
+                        .map(v -> resolveVolumeTargetPath(v, workspaceHost))
+                        .filter(StringUtils::isNotBlank)
+                        .orElse(workspaceHost);
             }
         }
 
         SandboxFsInitContext ctx = SandboxFsInitContext.builder()
                 .userCode(userCode)
                 .serviceKey(serviceKey)
-                .templateSourcePath(templateSourceStr != null ? Path.of(templateSourceStr) : null)
-                .workspaceTargetPath(workspaceHost)
+                .templateSourcePath(workspaceTargetPath != null ? Path.of(workspaceTargetPath) : null)
+                .workspaceTargetPath(workspaceTargetPath)
                 .userInfo(userInfo)
                 .templateJson(spec.getTemplateJson())
                 .build();
@@ -140,6 +140,21 @@ public class GenericSandboxSpecProcessor implements SandboxSpecProcessor {
             }
         }
         return result.isEmpty() ? null : result;
+    }
+
+    private String resolveVolumeTargetPath(Volume volume, String workspaceHost) {
+        if (volume == null) {
+            return workspaceHost;
+        }
+        String hostPath = volume.getHost() != null ? volume.getHost().getPath() : null;
+        if (StringUtils.isBlank(hostPath)) {
+            return workspaceHost;
+        }
+        String subPath = StringUtils.stripStart(volume.getSubPath(), "/");
+        if (StringUtils.isBlank(subPath)) {
+            return hostPath;
+        }
+        return Path.of(hostPath, subPath).normalize().toString();
     }
 
     private String renderEnvValue(String template,
