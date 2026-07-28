@@ -1,7 +1,6 @@
 ---
 name: bycli
 description: Use when the user asks to run bycli, query bycli usage, drive a browser, operate a website, repair or write adapters, or perform web search, scraping, crawling, structured data collection, DingTalk, WeCom, or Feishu data collection, login-assisted browsing, or open-URL tasks.
-cli_version: ">=1.0.15"
 allowed-tools: Bash(bycli:*), Bash(dws:*), Bash(wecom-cli:*), Bash(lark-cli:*), Bash(openclaw browser:*), Bash(gh:*), Bash(node:*), Read, Edit, Write, Grep
 metadata:
   openclaw:
