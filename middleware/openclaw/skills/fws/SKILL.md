@@ -25,7 +25,7 @@ description: 管理飞书/Lark 产品能力（IM消息/群聊/机器人/卡片�
 - 使用原生 API 命令或 `lark-cli api` 前必须先查 `lark-cli schema <service>.<resource>.<method> --format json` 或官方文档，确认 `--params` / `--data` 结构。
 - 危险操作先展示操作摘要并取得用户明确同意；如果 CLI 返回 `confirmation_required`/exit 10，再在原命令末尾追加 `--yes` 重试。
 - 批量写操作先控制规模：单批默认不超过 30 个业务对象，产品 reference 或 schema 给出更小上限时按更小上限执行。
-- OpenClaw agent 调用本 skill 时，一旦提示未检测到飞书渠道、`openclaw.json missing channels.feishu section` 或 `configure Feishu in OpenClaw first`，必须立即中断业务命令并走 OpenClaw 渠道配置缺失流程；这是渠道配置问题，不是 user 授权问题，禁止继续提示“确认授权”或执行 `auth login`。
+- OpenClaw agent 调用本 skill 时，一旦提示未检测到飞书渠道、`openclaw.json missing channels.feishu section` 或 `configure Feishu in OpenClaw first`，必须立即中断业务命令并走 OpenClaw 渠道配置缺失流程；这是渠道配置问题，不是 user 授权问题，禁止继续提示“确认授权”或执行 `auth login`。只有在随后确认当前 `lark-cli` 本地配置已有可用 App ID，且明确采用本地配置兜底时，才可按下文降级路径继续。
 - OpenClaw agent 调用本 skill 时，一旦出现 user 身份鉴权异常（401/403、登录态失效、缺少 user scope、`missing_scope`、`permission_violations`），必须立即中断当前业务命令并强制进入飞书授权 split-flow：`exec(lark-cli auth login --scope "<missing_scope>" --no-wait --json)` 或 `exec(lark-cli auth login --domain <domain> --no-wait --json)` -> `process(读取该次 exec 返回)` -> 从本次 JSON 输出提取 `verification_url` 和 `device_code` -> 用 `scripts/qrcode_data_uri.py` 生成二维码 data URI -> 返回 `[点击打开飞书授权](<verification_url>)` 和二维码并结束本轮；禁止输出 `授权链接：https://...` 裸 URL，禁止返回本地图片路径，禁止同轮执行 `--device-code`、禁止继续业务命令、禁止复用历史授权链接或 device code。
 
 ## 产品总览
@@ -107,6 +107,27 @@ Step 3 -> 执行命令；如需要确认门禁，在原 argv 末尾追加 --yes
 4. 获取真实 ID：从搜索、列表、URL resolve 或详情返回中提取 ID；多候选时让用户选择。
 5. 执行命令：业务命令加 `--format json`；写操作必要时先 `--dry-run`。
 6. 解释结果：基于 `ok == true` 和 `data` 输出用户可理解的信息，保留可点击 URL、名称、ID 和必要状态。
+
+### 配置文件与身份排查
+
+OpenClaw 和 `lark-cli` 有两套独立配置，不能混为一谈：
+
+- OpenClaw 配置：`openclaw.json` 中的 `channels.feishu`，保存渠道使用的 App ID、App Secret 和 domain。
+- `lark-cli` 本地配置：由 CLI workspace 管理，可通过 `lark-cli config show` 查看；配置目录可由 `LARKSUITE_CLI_CONFIG_DIR` 覆盖。
+- `lark-cli config bind --source openclaw` 只负责把 OpenClaw 渠道配置绑定到当前 CLI workspace；它不会把本地 CLI 配置写回 `openclaw.json`。
+
+身份选择必须跟资源归属一致：
+
+- `--as user`：搜索用户个人历史消息、通讯录、日历、邮箱、个人云空间等，需要 user 授权。
+- `--as bot`：搜索机器人所在的群/会话、发送机器人消息、访问应用自有资源等，使用 bot 权限。
+- 搜索“我今天和谁发过消息”等个人数据时必须使用 `--as user`；不要用 `--as bot` 代替。
+
+`config bind` 失败时的排查顺序：
+
+1. 先执行 `lark-cli config show` 和 `lark-cli auth status --json --verify`，确认当前 CLI workspace 是否已有可用 App ID。
+2. 仅需 bot 身份且本地配置已可用时，可跳过 bind 直接执行 bot 业务命令；不要为了 bot 业务强行要求用户授权。
+3. 需要 user 身份且本地配置已可用时，可跳过 bind，直接按“OpenClaw 鉴权异常强制策略”发起 `auth login --scope/--domain --no-wait --json`。
+4. 本地配置也不可用时，回到“OpenClaw 渠道配置缺失流程”，先完成 `channels.feishu` 或 `config init`，禁止盲目重复 bind 或 auth login。
 
 ## 命令发现（flag / 参数以 binary 为准）
 
