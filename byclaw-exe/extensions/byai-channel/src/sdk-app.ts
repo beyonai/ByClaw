@@ -1,5 +1,4 @@
 import {
-  createRedis,
   WorkerRegistry,
   WorkerRunner,
   GatewayDataEmitter,
@@ -7,6 +6,12 @@ import {
   type AskAgentCommand, WorkerHeartbeat,
   ActionType,
 } from "@byclaw/by-framework";
+import {
+  closeRedisCompatClient,
+  createByFrameworkRedisClient,
+  resolveRedisCompatConfig,
+  type RedisCompatClient,
+} from "./redis-compat.js";
 import type { OpenClawConfig } from "openclaw/plugin-sdk";
 import type { ResolvedByaiAccount, ByaiSdkInboundMessage, SdkInboundFile } from "./types.js";
 import { getByaiRuntime } from "./runtime.js";
@@ -36,26 +41,6 @@ export interface ByaiSdkAppOptions {
 }
 
 type ByaiSdkLogger = NonNullable<ByaiSdkAppOptions["log"]>;
-
-function getRedisInfo() {
-  const {
-    REDIS_USERNAME,
-    REDIS_PASSWORD,
-    REDIS_HOST,
-    REDIS_PORT,
-    REDIS_DATABASE,
-  } = process.env;
-  if (!REDIS_HOST || !REDIS_PORT) {
-    return null;
-  }
-  return {
-    username: REDIS_USERNAME,
-    password: REDIS_PASSWORD,
-    host: REDIS_HOST,
-    port: parseInt(REDIS_PORT, 10),
-    db: parseInt(REDIS_DATABASE || '0', 10),
-  };
-}
 
 function getUserCode(): string | null {
   const code = String(process.env.USER_CODE ?? "").trim();
@@ -211,7 +196,7 @@ export class ByaiSdkApp {
 
   private runner: WorkerRunner | null = null;
   private stopSubscription: (() => void) | null = null;
-  private redis: import("ioredis").Redis | null = null;
+  private redis: RedisCompatClient | null = null;
   private workerHeartbeat: WorkerHeartbeat | null = null;
 
   constructor(opts: ByaiSdkAppOptions) {
@@ -231,14 +216,14 @@ export class ByaiSdkApp {
 
     const { info, error, debug } = this.logger();
 
-    const redisInfo = getRedisInfo();
-    if (!redisInfo) {
+    const redisConfig = resolveRedisCompatConfig();
+    if (!redisConfig) {
       throw new Error(`[${this.account.accountId}] byai-channel failed to get Redis information`);
     }
 
-    debug?.(`[${this.account.accountId}] byai-channel redisInfo: ${JSON.stringify(redisInfo)}`);
+    debug?.(`[${this.account.accountId}] byai-channel redisInfo: ${JSON.stringify(redisConfig)}`);
 
-    const redis = createRedis(redisInfo);
+    const redis = createByFrameworkRedisClient();
     this.redis = redis;
 
     const userCode = getUserCode();
@@ -256,7 +241,7 @@ export class ByaiSdkApp {
     // 为 Runner 提供独立的 Redis 连接，避免轮询时的 BLOCK 指令阻塞其他操作（如 emitChunk）
     // 关键：轮询必须拥有自己的独占连接
     const runner = new WorkerRunner({ workerId, agentTypes, registry }, {
-        redisClient: createRedis(redisInfo)
+        redisClient: createByFrameworkRedisClient()
     });
     installNoGroupRecovery({
       runner,
@@ -496,7 +481,7 @@ export class ByaiSdkApp {
     }
 
     try {
-      await this.redis?.quit();
+      await closeRedisCompatClient(this.redis);
     } catch (err) {
       error?.(
         `[${this.account.accountId}] byai-channel failed to close Redis connection: ${String(err)}`,

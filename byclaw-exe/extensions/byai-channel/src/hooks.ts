@@ -1,5 +1,4 @@
 import { EventType, SseReasonMessageType } from "@byclaw/by-framework";
-import { createRedis } from "@byclaw/by-framework";
 import { enqueueAfterAgentEvents } from "./agent-event-serial.js";
 import {
   emitSdkChunkTracked,
@@ -29,6 +28,11 @@ import {
 import { getByaiRuntime } from "./runtime.js";
 import path from "node:path";
 import fs from "node:fs/promises";
+import {
+  closeRedisCompatClient,
+  createByFrameworkRedisClient,
+  resolveRedisCompatConfig,
+} from "./redis-compat.js";
 
 type BeforeMessageWriteEvent = {
   message?: unknown;
@@ -57,14 +61,6 @@ type MessageHookContext = {
   conversationId?: string;
 };
 
-type RedisInfo = {
-  username?: string;
-  password?: string;
-  host: string;
-  port: number;
-  db: number;
-};
-
 type ByaiUserInfo = {
   userId: string;
   userCode: string;
@@ -73,26 +69,6 @@ type ByaiUserInfo = {
 };
 
 const pendingWorkspaceReloadHints = new Set<string>();
-
-function getRedisInfo(): RedisInfo | null {
-  const {
-    REDIS_USERNAME,
-    REDIS_PASSWORD,
-    REDIS_HOST,
-    REDIS_PORT,
-    REDIS_DATABASE,
-  } = process.env;
-  if (!REDIS_HOST || !REDIS_PORT) {
-    return null;
-  }
-  return {
-    username: REDIS_USERNAME,
-    password: REDIS_PASSWORD,
-    host: REDIS_HOST,
-    port: parseInt(REDIS_PORT, 10),
-    db: parseInt(REDIS_DATABASE || "0", 10),
-  };
-}
 
 async function getCurrentUserCode(): Promise<string | null> {
   const runtime = getByaiRuntime();
@@ -130,12 +106,11 @@ async function readByaiUserInfoFromRedis(): Promise<ByaiUserInfo | null> {
     return null;
   }
 
-  const redisInfo = getRedisInfo();
-  if (!redisInfo) {
+  if (!resolveRedisCompatConfig()) {
     return null;
   }
 
-  const redis = createRedis(redisInfo);
+  const redis = createByFrameworkRedisClient();
   try {
     const userIdRaw = await redis.get(`SHARE_BFM_USER_CODE_${userCode}`);
     const userId = userIdRaw?.trim();
@@ -163,7 +138,7 @@ async function readByaiUserInfoFromRedis(): Promise<ByaiUserInfo | null> {
       sourceSystem: typeof parsed.sourceSystem === "string" ? parsed.sourceSystem : undefined,
     };
   } finally {
-    await redis.quit().catch(() => undefined);
+    await closeRedisCompatClient(redis);
   }
 }
 
