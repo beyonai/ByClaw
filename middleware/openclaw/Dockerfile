@@ -85,8 +85,9 @@ FROM ghcr.io/openclaw/openclaw:${OPENCLAW_VERSION}
 USER root
 
 ARG OPENCLAW_VERSION
-ARG OPENCLI_VERSION=2.1.12
-ARG OPENCLI_EXTENSION_VERSION=2.1.12
+ARG OPENCLI_VERSION=2.1.13
+ARG OPENCLI_EXTENSION_VERSION=2.1.13
+ARG AGENT_REACH_VERSION=1.5.0
 # 与 byclaw-be 预下载包同源同版本(byclaw-be/docker/dws/version.md);amd64 走预下载,arm64 用此版本联网 fallback。
 ARG DWS_VERSION=v1.0.52
 # buildx 目标架构(amd64/arm64),用于选择预下载二进制或 fallback。
@@ -210,7 +211,21 @@ RUN set -eux; \
     python3 --version | grep -q 'Python 3.12'; \
     python3 -m pip config --global set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple; \
     python3 -m pip config --global set global.trusted-host pypi.tuna.tsinghua.edu.cn; \
-    python3 -m pip install --no-cache-dir redis websockify by-framework==0.2.2.dev10; \
+    curl -fsSL \
+        "https://github.com/Panniantong/Agent-Reach/archive/f65526cbaaad3879473acc1ba6dbefd195caf2be.tar.gz" \
+        -o /tmp/agent-reach.tar.gz; \
+    echo "456a3ab86e56366ba665dc4bade5c0839c3043266e2a192efa09f4fdec415e20  /tmp/agent-reach.tar.gz" | sha256sum -c -; \
+    mkdir -p /tmp/agent-reach; \
+    tar -xzf /tmp/agent-reach.tar.gz --strip-components=1 -C /tmp/agent-reach; \
+    python3 -m pip install --no-cache-dir \
+        redis \
+        websockify \
+        by-framework==0.2.2.dev10; \
+    python3 -m pip install --no-cache-dir \
+        -c /tmp/agent-reach/constraints.txt \
+        /tmp/agent-reach; \
+    agent-reach --version | grep -q "${AGENT_REACH_VERSION}"; \
+    rm -rf /tmp/agent-reach /tmp/agent-reach.tar.gz; \
     rm -f /usr/bin/websockify; \
     ln -sf /usr/local/bin/websockify /usr/bin/websockify; \
     websockify --help >/dev/null
@@ -245,6 +260,7 @@ COPY middleware/openclaw/runtime-bootstrap.sh /usr/local/bin/openclaw-runtime-bo
 COPY middleware/openclaw/novnc-index.html /usr/local/share/openclaw/novnc-index.html
 COPY middleware/openclaw/filebrowser-ui/ /usr/local/share/openclaw/filebrowser-ui/
 COPY middleware/openclaw/filebrowser-ui-proxy.py /usr/local/bin/openclaw-filebrowser-ui-proxy
+COPY middleware/openclaw/byclaw_capability_doctor.py /usr/local/bin/byclaw-capability-doctor
 COPY middleware/openclaw/startAll.sh \
      middleware/openclaw/start-filebrowser.sh \
      middleware/openclaw/start-display.sh \
@@ -257,6 +273,7 @@ COPY middleware/openclaw/startAll.sh \
 RUN chmod +x \
     /usr/local/bin/openclaw-runtime-bootstrap \
     /usr/local/bin/openclaw-filebrowser-ui-proxy \
+    /usr/local/bin/byclaw-capability-doctor \
     /usr/local/bin/startAll.sh \
     /usr/local/bin/start-filebrowser.sh \
     /usr/local/bin/start-display.sh \

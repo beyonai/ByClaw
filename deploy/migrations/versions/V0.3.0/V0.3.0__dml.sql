@@ -157,3 +157,64 @@ INSERT INTO "byai"."sandbox_service_spec" ("service_key", "spec_json", "template
 delete from ss_resource where resource_biz_type in('SKILL') and  resource_id in(24);
 delete from ss_res_ext_skill where skill_type in('inner') and resource_id in(24);
 delete from au_privilege_grant where grant_obj_type in('SKILL') and grant_obj_id in(24);
+
+-- 知识采集默认绑定迁移到编排 Skill；仅迁移仍使用旧 bycli 绑定的内置资源。
+UPDATE byai.ss_resource
+SET resource_code = 'knowledge-collection',
+    update_time = CURRENT_TIMESTAMP
+WHERE resource_id = 14
+  AND resource_name = '知识采集'
+  AND resource_code = 'bycli';
+
+-- 同步修正运行期技能快照中的 resourceCode，保留其余 JSON 字段。
+UPDATE byai.ss_res_ext_skill e
+SET target_content = jsonb_set(
+        target_content::jsonb,
+        '{resourceCode}',
+        to_jsonb('knowledge-collection'::text),
+        false
+    )::text
+WHERE e.resource_id = 14
+  AND target_content IS NOT NULL
+  AND target_content::jsonb ->> 'resourceCode' = 'bycli'
+  AND EXISTS (
+      SELECT 1
+      FROM byai.ss_resource r
+      WHERE r.resource_id = e.resource_id
+        AND r.resource_id = 14
+        AND r.resource_name = '知识采集'
+        AND r.resource_code = 'knowledge-collection'
+  );
+
+-- 保留既有内置 Skill 目录，并同步本次新增/调整的条目。
+UPDATE byai.byai_system_config c
+SET param_value = (
+    SELECT jsonb_agg(entry ORDER BY position)
+    FROM (
+        SELECT value AS entry, ordinal AS position
+        FROM jsonb_array_elements(c.param_value::jsonb) WITH ORDINALITY AS catalog(value, ordinal)
+        WHERE value ->> 'skillCode' NOT IN ('bycli', 'agent-reach', 'knowledge-collection')
+        UNION ALL
+        SELECT jsonb_build_object(
+                   'skillName', 'knowledge-collection',
+                   'skillCode', 'knowledge-collection',
+                   'skillDescZh', '编排跨互联网与企业平台的知识采集，统一采集产物协议、后处理及知识库入库或知识整理。',
+                   'skillDescEn', 'Orchestrate knowledge collection across public internet and enterprise platforms, including canonical artifacts, post-processing, and knowledge-base ingestion or organization.'
+               ), 100001
+        UNION ALL
+        SELECT jsonb_build_object(
+                   'skillName', 'agent-reach',
+                   'skillCode', 'agent-reach',
+                   'skillDescZh', '路由公开互联网渠道能力，并按 ByClaw 覆盖规则选择 byCLI 等执行器。',
+                   'skillDescEn', 'Route public-internet channels and select executors such as byCLI according to ByClaw override rules.'
+               ), 100002
+        UNION ALL
+        SELECT jsonb_build_object(
+                   'skillName', 'bycli',
+                   'skillCode', 'bycli',
+                   'skillDescZh', '通过浏览器与 Adapter 执行网站操作、复用或维护适配器，并返回采集结果。',
+                   'skillDescEn', 'Execute website operations through the browser and adapters, reuse or maintain adapters, and return collected results.'
+               ), 100003
+    ) entries
+)::text
+WHERE c.param_code = 'OPENCLAW_BUNDLED_SKILLS';
