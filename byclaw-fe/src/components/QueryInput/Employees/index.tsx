@@ -10,6 +10,8 @@ import CarouselFile from '@/components/MessageList/components/CarouselFile';
 import QueryInputBase, { IProps as pIProps, IState as pIState } from '@/components/QueryInput/queryInputBase';
 
 import UploadFile from '../components/UploadFile';
+import ConnectorControl from '../components/ConnectorControl';
+import type { Connector } from '../components/ConnectorControl';
 
 import type { UserState } from '@/models/common/user';
 import type { IAgentCache } from '@/typescript/agent';
@@ -26,6 +28,8 @@ type IState = {
   fileList: IFile[];
   showMentionPopoverType: '' | '@' | '#';
   chatSettings: IChatSettingValue;
+  // 当前输入会话已连接的连接器，发送消息时转换为后端所需的 ID 列表。
+  connectors: Connector[];
 } & Omit<pIState, 'showAssitant'>;
 
 type IProps = {
@@ -51,13 +55,15 @@ class EmployeesInputChat extends QueryInputBase<IProps, IState> {
         functionCloud: {},
         memory: {},
       } as IChatSettingValue,
+      // 当前聊天输入独立维护连接器选择，避免污染其他输入实例。
+      connectors: [],
     };
   }
 
   getSendPayload = () => {
     const { userInfo, myAgentType } = this.props;
     const currentInputPayload = this.getCurrentInputPayload();
-    const { fileList, chatSettings, connectNetAgentId } = this.state;
+    const { fileList, chatSettings, connectNetAgentId, connectors } = this.state;
     const inputValue = currentInputPayload?.text ?? this.state.inputValue;
     const sendVal = trim(inputValue);
 
@@ -72,6 +78,8 @@ class EmployeesInputChat extends QueryInputBase<IProps, IState> {
         files: [],
         extParams: {
           files: [],
+          // 后端约定：当前轮次启用的连接器 ID 列表。
+          connectors: connectors.map((connector) => connector.id),
         },
         agentType: myAgentType,
         ...chatSettings,
@@ -211,6 +219,12 @@ class EmployeesInputChat extends QueryInputBase<IProps, IState> {
     return (
       <>
         <Space size="large" className={styles.bottomRight}>
+          {/* 连接器控制组件只负责选择，实际状态仍由聊天输入统一维护。 */}
+          <ConnectorControl
+            canAuthorize={!!this.props.userInfo}
+            value={this.state.connectors}
+            onChange={(connectors) => this.setState((prevState) => ({ ...prevState, connectors }))}
+          />
           {/* 多员工模式下 @ 入口始终保留，用于继续追加数字员工。 */}
           <MentionPopover
             type="@"
