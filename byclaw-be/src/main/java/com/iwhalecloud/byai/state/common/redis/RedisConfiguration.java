@@ -117,6 +117,9 @@ public class RedisConfiguration {
             if (StringUtils.isNotBlank(maxRedirects)) {
                 clusterConfig.setMaxRedirects(Integer.parseInt(maxRedirects));
             }
+            if (StringUtils.isNotBlank(username)) {
+                clusterConfig.setUsername(username);
+            }
             redisFactory = new JedisConnectionFactory(clusterConfig, clientConfigBuilder.build());
         }
         else if (StringUtils.isNotBlank(sentinels)) {
@@ -160,7 +163,11 @@ public class RedisConfiguration {
                 redisFactory.setPassword(password);
             }
         }
-        if (StringUtils.isNotBlank(database)) {
+        // Redis Cluster does not support SELECT/database indexes. Calling
+        // setDatabase on the cluster-backed Jedis factory would target its
+        // standalone configuration and can fail during startup.
+        if (StringUtils.isNotBlank(database) && StringUtils.isBlank(clusters)
+            && StringUtils.isBlank(sentinels)) {
             redisFactory.setDatabase(Integer.parseInt(database));
         }
     }

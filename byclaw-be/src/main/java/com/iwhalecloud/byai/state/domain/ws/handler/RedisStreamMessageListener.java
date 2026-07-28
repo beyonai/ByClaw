@@ -19,7 +19,7 @@ import com.iwhalecloud.byai.state.domain.ws.service.MultiDeviceBroadcastService;
  * <p>
  * 每个 session 在 Gateway 模式下拥有独立的监听器实例（prototype scope），
  * 通过 ApplicationContext 每次获取新的实例，避免多 session 并发写入同一实例的线程安全问题。
- * 监听 "byai_gateway:session:{sessionId}:data_stream"，在 Gateway 模式下接收响应消息并投入事件队列。
+ * 监听由 Gateway SDK 根据当前 Redis Key Schema 生成的 session Stream，在 Gateway 模式下接收响应消息并投入事件队列。
  * <p>
  * 设计要点：本监听器只负责将 Redis Stream 事件投入 {@link ChatProcessContext#gatewayEventQueue}，
  * 所有 OutputStream 写操作均由请求线程（Tomcat http-nio-* 线程）在
