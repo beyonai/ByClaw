@@ -79,35 +79,24 @@ def parse_interface(text):
 
 
 class KnowledgeCollectionSkillContractTest(unittest.TestCase):
-    def test_upgrade_migration_replaces_the_bundled_skill_catalog(self):
+    def test_upgrade_migration_does_not_reintroduce_split_collection_resources(self):
         upgrade = V030_DML.read_text(encoding="utf-8")
 
-        self.assertIn("OPENCLAW_BUNDLED_SKILLS", upgrade)
-        self.assertIn('"skillCode":"knowledge-collection"', upgrade)
-        self.assertIn('"skillCode":"agent-reach"', upgrade)
-        self.assertIn('"skillCode":"bycli"', upgrade)
-        self.assertNotIn("WITH ORDINALITY", upgrade)
-        self.assertNotIn("jsonb_build_object", upgrade)
-        self.assertNotIn("jsonb_agg", upgrade)
-        self.assertNotIn("jsonb_array_elements", upgrade)
-        self.assertNotIn("regexp_replace", upgrade)
+        self.assertNotIn("知识采集默认绑定迁移到编排 Skill", upgrade)
+        self.assertNotIn('"skillCode":"knowledge-collection"', upgrade)
+        self.assertNotIn("resource_id = 25", upgrade)
+        self.assertNotIn("grant_obj_id = 25", upgrade)
 
-    def test_bycli_has_an_independent_platform_resource(self):
+    def test_bycli_is_the_platform_knowledge_collection_resource(self):
         initdb = INITDB_DML.read_text(encoding="utf-8")
-        upgrade = V030_DML.read_text(encoding="utf-8")
 
-        self.assertRegex(initdb, r"VALUES\(25,'BYAI','SKILL','ATOM','byCLI'.*,'bycli',CURRENT_TIMESTAMP")
-        self.assertIn("VALUES(25,'inner','SYSTEM_BUILTIN'", initdb)
+        self.assertRegex(initdb, r"VALUES\(14,'BYAI','SKILL','ATOM','知识采集'.*,'bycli',CURRENT_TIMESTAMP")
+        self.assertIn("VALUES(14,'inner','SYSTEM_BUILTIN'", initdb)
+        self.assertIn('"skillCode": "bycli"', initdb)
+        self.assertNotIn('"skillCode": "knowledge-collection"', initdb)
+        self.assertNotRegex(initdb, r"VALUES\(25,'BYAI','SKILL','ATOM','byCLI'")
         self.assertIn("resource_code IN (", initdb)
-        self.assertIn("'knowledge-collection','bycli','dws'", initdb)
-        self.assertIn("resource_code = 'bycli'", upgrade)
-        self.assertIn("resource_id = 25", upgrade)
-        self.assertIn("resource_id = 25", upgrade)
-        self.assertIn("resourceCode', r.resource_code", upgrade)
-        self.assertIn("r.resource_code = 'bycli'", upgrade)
-        self.assertIn("FROM byai.au_privilege_grant g", upgrade)
-        self.assertIn("g.grant_obj_id = 14", upgrade)
-        self.assertIn("grant_obj_id = 25", upgrade)
+        self.assertIn("'gbrain','bycli','dws'", initdb)
 
     def test_meta_prompt_counts_catalog_entries_from_json(self):
         source = META_PROMPT_SERVICE.read_text(encoding="utf-8")
@@ -117,24 +106,12 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
 
 
 
-    def test_upgrade_updates_runtime_skill_target_content_without_replacing_other_json_fields(self):
-        upgrade = " ".join(V030_DML.read_text(encoding="utf-8").split())
+    def test_upgrade_does_not_rewrite_bycli_runtime_target_to_another_skill(self):
+        upgrade = V030_DML.read_text(encoding="utf-8")
 
-        self.assertRegex(
-            upgrade,
-            re.compile(
-                r"UPDATE byai\.ss_res_ext_skill e SET target_content = "
-                r"jsonb_set\(\s*target_content::jsonb, '\{resourceCode\}', "
-                r"'\"knowledge-collection\"'::jsonb, false\s*\)::text "
-                r"WHERE e\.resource_id = 14 AND target_content IS NOT NULL "
-                r"AND target_content::jsonb ->> 'resourceCode' = 'bycli' AND EXISTS \( "
-                r"SELECT 1 FROM byai\.ss_resource r "
-                r"WHERE r\.resource_id = e\.resource_id AND r\.resource_id = 14 "
-                r"AND r\.resource_name = '知识采集' "
-                r"AND r\.resource_code = 'knowledge-collection' \);",
-                re.IGNORECASE,
-            ),
-        )
+        self.assertNotIn("'{resourceCode}'", upgrade)
+        self.assertNotIn("'\"knowledge-collection\"'::jsonb", upgrade)
+        self.assertNotIn("target_content::jsonb ->> 'resourceCode' = 'bycli'", upgrade)
 
     def test_skill_has_exact_minimal_frontmatter(self):
         _, block, body, frontmatter = parse_frontmatter(SKILL_ROOT / "SKILL.md")
@@ -342,27 +319,27 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         self.assertNotIn("token", ingest.lower())
         self.assertNotIn("cookie", ingest.lower())
 
-    def test_bycli_is_an_executor_when_delegated_by_knowledge_collection(self):
+    def test_bycli_is_the_single_entry_and_owns_collection_handoff(self):
         bycli = (SKILLS_ROOT / "bycli" / "SKILL.md").read_text(encoding="utf-8")
 
         for phrase in (
-            "浏览器与 Adapter 执行层",
-            "`knowledge-collection` 负责统一持久化、产物协议、后处理与入库或知识整理",
-            "网站执行器只执行或发现、修复 Adapter",
-            "不得反向加载 `knowledge-collection`",
+            "本 skill 是唯一入口",
+            "采集后处理衔接（强制）",
+            "采集产物落盘约定（强制）",
+            "由 bycli 内部",
+            "knowledge-organizer",
             "是否把刚才的获取过程保存成一个专用 adapter",
         ):
             self.assertIn(phrase, bycli)
 
-    def test_delegated_adapter_candidate_does_not_create_a_second_question(self):
+    def test_bycli_asks_reuse_and_post_processing_as_independent_questions(self):
         bycli = (SKILLS_ROOT / "bycli" / "SKILL.md").read_text(encoding="utf-8")
-        processing = (SKILL_ROOT / "references" / "post-processing.md").read_text(encoding="utf-8")
 
-        self.assertIn("`adapterCandidate`", bycli)
-        self.assertIn("不得直接询问用户是否保存 Adapter", bycli)
-        self.assertIn("直接查询所有者（根 Agent）", bycli)
-        self.assertIn("`adapterCandidate`", processing)
-        self.assertIn("不得追加第二个选择问题", processing)
+        self.assertIn("问题 ①「复用」", bycli)
+        self.assertIn("问题 ②「处理」", bycli)
+        self.assertIn("问①与问②相互独立", bycli)
+        self.assertIn("①②**都要问**", bycli)
+        self.assertIn("都不自动执行", bycli)
 
     def test_orchestration_documents_use_named_actors(self):
         paths = (
@@ -383,19 +360,15 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         for ambiguous in ("父 Skill", "子 Skill", "调用方"):
             self.assertNotIn(ambiguous, combined)
 
-    def test_cross_skill_direct_query_and_explicit_collection_have_distinct_owners(self):
-        knowledge = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
-        agent_reach = (SKILLS_ROOT / "agent-reach" / "SKILL.md").read_text(encoding="utf-8")
+    def test_bycli_distinguishes_direct_queries_from_explicit_collection(self):
         bycli = (SKILLS_ROOT / "bycli" / "SKILL.md").read_text(encoding="utf-8")
-        processing = (SKILL_ROOT / "references" / "post-processing.md").read_text(encoding="utf-8")
 
-        self.assertIn("只有不存在显式采集意图时", knowledge)
-        self.assertIn("直接查询时由根 Agent", agent_reach)
-        self.assertIn("委派采集时由采集编排器", agent_reach)
-        self.assertIn("委派采集模式下，不直接提问", bycli)
-        self.assertEqual(1, processing.count("只询问一次：`入库 / 知识整理 / 跳过`"))
+        self.assertIn("查询 vs 采集边界", bycli)
+        self.assertIn("完成请求即可，不主动问入库或知识整理", bycli)
+        self.assertIn("视为采集任务，成功后先落盘", bycli)
+        self.assertIn("入库 / 知识整理 / 跳过", bycli)
 
-    def test_bycli_no_longer_owns_collection_orchestration(self):
+    def test_bycli_owns_collection_orchestration(self):
         bycli = (SKILLS_ROOT / "bycli" / "SKILL.md").read_text(encoding="utf-8")
 
         for phrase in (
@@ -409,17 +382,16 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             "采集产物落盘约定",
             "采集产物保留策略",
         ):
-            self.assertNotIn(phrase, bycli)
+            self.assertIn(phrase, bycli)
 
-    def test_bycli_uses_flat_weixin_executor_reference(self):
+    def test_bycli_uses_nested_weixin_and_internal_ingest_references(self):
         bycli_root = SKILLS_ROOT / "bycli"
         bycli = (bycli_root / "SKILL.md").read_text(encoding="utf-8")
-        weixin_path = bycli_root / "references" / "weixin.md"
+        weixin_path = bycli_root / "references" / "weixin" / "SKILL.md"
 
-        self.assertIn("](./references/weixin.md)", bycli)
+        self.assertIn("](./references/weixin/SKILL.md)", bycli)
         self.assertTrue(weixin_path.is_file())
-        self.assertFalse((bycli_root / "references" / "weixin" / "SKILL.md").exists())
-        self.assertFalse((bycli_root / "references" / "knowledge-ingest.md").exists())
+        self.assertTrue((bycli_root / "references" / "knowledge-ingest.md").is_file())
 
     def test_weixin_reference_keeps_executor_and_security_rules_only(self):
         weixin = (SKILLS_ROOT / "bycli" / "references" / "weixin.md").read_text(encoding="utf-8")

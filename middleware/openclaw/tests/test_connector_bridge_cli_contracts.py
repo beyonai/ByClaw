@@ -18,6 +18,9 @@ DOCKERFILES = [OPENCLAW_DIR / "Dockerfile"]
 FEISHU_BRIDGE = OPENCLAW_DIR / "skills" / "bycli" / "references" / "feishu-fws-bridge.md"
 WECOM_BRIDGE = OPENCLAW_DIR / "skills" / "bycli" / "references" / "wecom-wecomcli-bridge.md"
 BYCLI_EVALS = OPENCLAW_DIR / "skills" / "bycli" / "evals" / "evals.json"
+BYCLI_SKILL = OPENCLAW_DIR / "skills" / "bycli" / "SKILL.md"
+KNOWLEDGE_INGEST = OPENCLAW_DIR / "skills" / "bycli" / "references" / "knowledge-ingest.md"
+KNOWLEDGE_INGEST_SCRIPT = OPENCLAW_DIR / "skills" / "bycli" / "scripts" / "bycli-markdown-ingest.mjs"
 
 
 class ConnectorBridgeCliContractsTest(unittest.TestCase):
@@ -84,6 +87,27 @@ class ConnectorBridgeCliContractsTest(unittest.TestCase):
             self.assertIn(expected, evals[9])
         for expected in ("--transcript", "--output-dir", "transcript.md", "bycli_filter", "knowledge-ingest"):
             self.assertIn(expected, evals[10])
+
+    def test_bycli_entry_routes_wecom_and_feishu_collection_to_connectors(self):
+        content = BYCLI_SKILL.read_text(encoding="utf-8")
+        required = (
+            "Bash(wecom-cli:*)",
+            "Bash(lark-cli:*)",
+            "wecom-wecomcli-bridge.md",
+            "feishu-fws-bridge.md",
+            "企业微信相关采集",
+            "飞书相关采集",
+        )
+        for expected in required:
+            self.assertIn(expected, content)
+
+    def test_knowledge_ingest_resolves_current_manager_skill_and_session_markdown(self):
+        script = KNOWLEDGE_INGEST_SCRIPT.read_text(encoding="utf-8")
+        reference = KNOWLEDGE_INGEST.read_text(encoding="utf-8")
+        self.assertIn('../../by-knowledge-manager/scripts/by-knowledge-manager.mjs', script)
+        self.assertIn("by-knowledge-manager/scripts/by-knowledge-manager.mjs upload", reference)
+        self.assertIn("<YYYYMMDD_HHMMSS>/\n  bycli-output.json\n  <fileName>.md", reference)
+        self.assertIn("append Markdown files to the same session directory", reference)
 
 
 if __name__ == "__main__":

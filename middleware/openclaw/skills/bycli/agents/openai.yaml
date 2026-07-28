@@ -1,4 +1,4 @@
 interface:
-  display_name: "byCLI 网站执行器"
-  short_description: "执行已路由的网站与浏览器任务，并发现、修复或编写 Adapter"
-  default_prompt: "使用 $bycli 执行这个已路由的网站任务。"
+  display_name: "byCLI 浏览器驱动与采集"
+  short_description: "驱动浏览器采集数据、修复失败的 adapter、编写新 adapter"
+  default_prompt: "用 bycli 帮我采集这个网站的数据"
