@@ -38,8 +38,13 @@ type NativeAgentJson = {
 export type ProviderBundle = {
   baseUrl: string;
   apiKey: unknown;
-  api: "openai-completions";
+  api: "openai-completions" | "openai-responses" | "anthropic-messages";
   modelId: string;
+  modelName?: string;
+  contextWindow?: number;
+  maxTokens?: number;
+  input?: Array<"text" | "image">;
+  reasoning?: boolean;
 };
 
 export type AdaptedManagedAgent = {

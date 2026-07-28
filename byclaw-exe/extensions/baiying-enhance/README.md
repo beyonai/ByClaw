@@ -13,6 +13,7 @@
 
 1. 从 Redis 按授权读取百应数字员工 JSON：`USER:RESOURCES:AUTH:{userId}` 决定当前可见数字员工，插件只读取对应 `DIG_EMPLOYEE_{resourceId}`；授权不存在或为空时不注册任何数字员工。
 2. 将条目合并进**当前网关配置文件**中的托管 Agent（`baiying-agent-*`）与 OpenAI 兼容的 `models.providers`（`baiying-m-*`），并保留已有 **`agents.list[].workspace`**；新建托管 Agent 才使用状态目录下的默认路径（托管体为 `<stateDir>/workspace-<agentId>/`；与 OpenClaw 默认一致时，`main` 对应 `<stateDir>/workspace/` 而非 `workspace-main`，见 `src/workspace-paths.ts`）。
+   同时从 Redis `byai:aimodel:typelist` 的 `LLM` 字段动态注册当前可用模型 provider、模型能力与默认模型；模型 token 通过 `secrets.providers` 的 exec resolver 运行时读取，不写入 `openclaw.json`。
 3. 可选地在每次同步后初始化工作区（`workspaceAutoSeed`，默认开启）：由 `seedManagedAgentWorkspace`（`src/workspace-seed.ts`）创建目录并按 JSON 写入或更新带托管标记的 `SOUL.md` / `AGENTS.md` / `IDENTITY.md` / `USER.md` / `TOOLS.md`（以及可选的 `BYAI_BUSINESS_EXTENSIONS.md`）；插件不再初始化 `BOOTSTRAP.md`，首次引导由 OpenClaw 的 `agents.defaults.skipBootstrap` 配置控制。冷启动时会清理历史版本生成的、带 `baiying-enhance` 托管标记的 `BOOTSTRAP.md` 残留。
 4. 授权移除时默认把对应托管 workspace 从 `<stateDir>/workspace-baiying-agent-*` 移到状态目录上级的隐藏归档目录（默认 `<dirname(stateDir)>/.baiying-workspaces/`，例如 `/by/.baiying-workspaces/`），避免未授权数字员工数据继续留在 `.openclaw` 下；重新授权时会先恢复目录，再用最新 JSON 更新插件托管的 Markdown。
 5. 为每个托管 Agent 动态挂载工具 **`baiying_call`**，把百应关联的知识库、toolkit、MCP、下游 agent 等资源暴露给大模型。
@@ -43,7 +44,7 @@
     "entries": {
       "baiying-enhance": {
         "enabled": true,
-        "config": {
+      "config": {
           "watchDebounceMs": 500,
           "mainParentAgentId": "main",
           "mergeAllowSpawnForMain": true,
@@ -58,6 +59,8 @@
   }
 }
 ```
+
+模型配置无需在 `openclaw.json` 中写死。插件默认读取 `byai:aimodel:typelist` 的 `LLM` 字段；如部署使用自定义 Redis key/字段，可配置 `aimodelTypeListRedisKey`、`aimodelTypeListField`，完整模型记录 key 可通过 `aimodelConfigRedisKey` 覆盖。请保留 `/by/.openclaw` 为可写目录，因为插件需要写入动态 provider 和 OpenClaw 的 secret provider 配置。
 
 字段含义与默认值以插件清单中的 `configSchema`（`openclaw.plugin.json`）为准。历史上的 `agentConfigDir` / `executorResourcesDir` 仍被配置校验接受，但当前运行时不再用它们读取数字员工或关联资源 JSON；权威来源是 Redis。**`config` 允许额外键**（例如历史遗留的 `watchAgentDir`、`skillDirs`、`pollIntervalMs`），不会因「未知字段」导致插件校验失败；已声明的字段仍会按类型校验，建议仍以文档列出的键为主以免笔误。
 

@@ -1,5 +1,6 @@
 import { homedir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import type {
   OpenClawPluginApi,
 } from "openclaw/plugin-sdk/compat";
@@ -20,6 +21,14 @@ import {
   seedMainAgentAgentsMd,
 } from "./src/main-workspace-seed.js";
 import type { BaiyingEnhancePluginConfig } from "./src/types.js";
+import {
+  resolveAimodelSecretProviderName,
+  resolveBaiyingAimodelProvidersFromTypeList,
+  resolveDefaultBaiyingAimodelProviderBundle,
+} from "./src/aimodel-config.js";
+import { mergeDynamicAimodelsIntoConfig } from "./src/agent-registry.js";
+import { registerBaiyingAimodelRuntimeProvider } from "./src/aimodel-runtime-provider.js";
+import { registerBaiyingDefaultModelHook } from "./src/aimodel-default-hook.js";
 
 /** Resolve a path, treating `~` as home dir and relative paths relative to ~/.openclaw/. */
 function resolvePluginPath(api: OpenClawPluginApi, raw: string): string {
@@ -96,6 +105,52 @@ export function resolveConfigSyncHotPrefixes(cfg: BaiyingEnhancePluginConfig): s
 }
 
 const registry = new AgentRegistryState();
+const pluginRuntimeDir = path.dirname(fileURLToPath(import.meta.url));
+
+async function syncDynamicAimodelConfig(params: {
+  api: OpenClawPluginApi;
+  redisJsonStore: ReturnType<typeof createRedisJsonStore>;
+  pluginConfig: BaiyingEnhancePluginConfig;
+}): Promise<void> {
+  const log = {
+    warn: (message: string) => params.api.logger.warn(message),
+    info: (message: string) => params.api.logger.info(message),
+  };
+  const secretProviderName = resolveAimodelSecretProviderName(params.pluginConfig.aimodelSecretProviderName);
+  const models = await resolveBaiyingAimodelProvidersFromTypeList({
+    redisJsonStore: params.redisJsonStore,
+    redisKey: params.pluginConfig.aimodelTypeListRedisKey,
+    modelType: params.pluginConfig.aimodelTypeListField,
+    secretProviderName,
+    log,
+  });
+  if (models.length === 0) {
+    params.api.logger.info("baiying-enhance: Redis dynamic model catalog is empty; keeping current model config");
+    return;
+  }
+  const defaultModel = await resolveDefaultBaiyingAimodelProviderBundle({
+    redisJsonStore: params.redisJsonStore,
+    redisKey: params.pluginConfig.aimodelTypeListRedisKey,
+    modelType: params.pluginConfig.aimodelTypeListField,
+    secretProviderName,
+    log,
+  });
+  const next = mergeDynamicAimodelsIntoConfig({
+    base: params.api.runtime.config.loadConfig(),
+    models,
+    defaultModel,
+    mainParentAgentId: params.pluginConfig.mainParentAgentId ?? "main",
+    aimodelConfigRedisKey: params.pluginConfig.aimodelConfigRedisKey,
+    aimodelTypeListRedisKey: params.pluginConfig.aimodelTypeListRedisKey,
+    aimodelSecretProviderName: secretProviderName,
+    aimodelSecretResolverCommand: process.execPath,
+    aimodelSecretResolverArgs: [path.join(pluginRuntimeDir, "aimodel-secret-resolver-cli.cjs")],
+  });
+  await params.api.runtime.config.writeConfigFile(next);
+  params.api.logger.info(
+    `baiying-enhance: dynamically registered ${models.length} Redis model(s); default=${defaultModel?.modelRef ?? "unresolved"}`,
+  );
+}
 
 console.log("============Baiying Enhance module imported============");
 const plugin = {
@@ -112,6 +167,7 @@ const plugin = {
       },
     });
     const pluginCfg = (api.pluginConfig ?? {}) as BaiyingEnhancePluginConfig;
+    registerBaiyingAimodelRuntimeProvider(api, pluginCfg);
     api.registerReload({
       hotPrefixes: resolveConfigSyncHotPrefixes(pluginCfg),
     });
@@ -125,6 +181,12 @@ const plugin = {
       },
     });
     setSharedRedisJsonStore(redisJsonStore);
+    registerBaiyingDefaultModelHook({
+      api,
+      redisJsonStore,
+      pluginConfig: pluginCfg,
+      ensureConfig: () => syncDynamicAimodelConfig({ api, redisJsonStore, pluginConfig: pluginCfg }),
+    });
 
     registerBaiyingHttpRoutes({ api, registry });
 
@@ -218,6 +280,13 @@ const plugin = {
             getAuthorizedSourceKeys: () => digEmployeeAuthWatch?.getAuthorizedIds(),
           },
         });
+        try {
+          await syncDynamicAimodelConfig({ api, redisJsonStore, pluginConfig: pluginCfg });
+        } catch (err) {
+          api.logger.warn(
+            `baiying-enhance: dynamic model sync skipped: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
         if (pub.subscribe) {
           digEmployeeChangeSubscriber = createDigEmployeeChangeSubscriber({
             logger: {

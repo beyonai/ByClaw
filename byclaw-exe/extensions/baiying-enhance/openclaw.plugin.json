@@ -140,6 +140,22 @@
         "type": "boolean",
         "description": "When true (default), ignore Pub/Sub events until dig-employee auth returns a Set of authorized resource ids. Set false to process events without auth filter."
       },
+      "aimodelConfigRedisKey": {
+        "type": "string",
+        "description": "Redis hash containing full AI model records. Default: byai:aimodel:config."
+      },
+      "aimodelTypeListRedisKey": {
+        "type": "string",
+        "description": "Redis hash containing model lists. Default: byai:aimodel:typelist."
+      },
+      "aimodelTypeListField": {
+        "type": "string",
+        "description": "Model-list field to register dynamically. Default: LLM."
+      },
+      "aimodelSecretProviderName": {
+        "type": "string",
+        "description": "OpenClaw exec secret provider name used for Redis-backed dynamic model tokens."
+      },
       "configSyncHotPluginEntriesPrefixes": {
         "type": "array",
         "items": {

@@ -21,6 +21,7 @@ export type RedisJsonPayload = {
 
 export type BaiyingRedisJsonStore = {
   getJsonByKey: (key: string) => Promise<RedisJsonPayload | null>;
+  getHashJson?: (params: { key: string; field: string }) => Promise<RedisJsonPayload | null>;
   getDigEmployeeJson: (resourceId: string) => Promise<RedisJsonPayload | null>;
   getResourceJson: (params: { resourceBizType: string; resourceId: string }) => Promise<RedisJsonPayload | null>;
   close: () => Promise<void>;
@@ -159,8 +160,39 @@ export function createRedisJsonStore(params: { logger?: LoggerLike } = {}): Baiy
     return parsed;
   };
 
+  const getHashJson = async (paramsIn: { key: string; field: string }): Promise<RedisJsonPayload | null> => {
+    const key = paramsIn.key.trim();
+    const field = paramsIn.field.trim();
+    if (!key || !field) {
+      return null;
+    }
+    const client = await connect();
+    if (!client) {
+      return null;
+    }
+    let content: string | null;
+    try {
+      content = await client.hget(key, field);
+    } catch (err) {
+      params.logger?.warn?.(
+        `baiying-enhance: Redis HGET failed key=${key} field=${field}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return null;
+    }
+    if (!content) {
+      return null;
+    }
+    const parsed = parsePayload(`${key}[${field}]`, content);
+    if (!parsed) {
+      params.logger?.warn?.(`baiying-enhance: Redis hash JSON parse failed key=${key} field=${field}`);
+      return null;
+    }
+    return parsed;
+  };
+
   return {
     getJsonByKey,
+    getHashJson,
     getDigEmployeeJson: (resourceId) => getJsonByKey(digEmployeeRedisKey(resourceId)),
     getResourceJson: ({ resourceBizType, resourceId }) =>
       getJsonByKey(resourceRedisKey(resourceBizType, resourceId)),

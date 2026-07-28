@@ -115,6 +115,14 @@ export type BaiyingEnhancePluginConfig = {
    * Set false to flush on every event without an auth filter (high load).
    */
   digEmployeeChangeSubscribeStrictAuth?: boolean;
+  /** Redis hash containing full AI model records; defaults to byai:aimodel:config. */
+  aimodelConfigRedisKey?: string;
+  /** Redis hash containing active model list records; defaults to byai:aimodel:typelist. */
+  aimodelTypeListRedisKey?: string;
+  /** Redis field containing the chat model list; defaults to LLM. */
+  aimodelTypeListField?: string;
+  /** Provider name used by OpenClaw's dynamic model authentication hook. */
+  aimodelSecretProviderName?: string;
   /**
    * Public gateway base URL used to build PAGE-agent callback URLs.
    * Configure this when the browser frontend is not on the same host as the gateway.
