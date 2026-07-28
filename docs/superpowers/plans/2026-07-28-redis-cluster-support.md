@@ -24,6 +24,7 @@
 - Modify: `.env.example`
 - Modify: `byclaw-be/config/application.properties`
 - Modify: `byclaw-be/pom.xml`
+- Modify: `byclaw-be/src/main/java/com/iwhalecloud/byai/state/common/redis/RedisConfiguration.java`
 - Modify: `byclaw-be/src/main/java/com/iwhalecloud/byai/state/config/GatewayClientConfig.java`
 - Modify: `byclaw-be/src/main/java/com/iwhalecloud/byai/state/config/GatewayDiscoveryConfiguration.java`
 - Modify: `byclaw-be/src/main/java/com/iwhalecloud/byai/gateway/sandbox/service/SandboxService.java`
@@ -61,11 +62,8 @@ Expected: PASS.
 **Files:**
 - Create: `byclaw-exe/extensions/byai-channel/src/redis-compat.ts`
 - Create: `byclaw-exe/extensions/byai-channel/src/redis-compat.test.ts`
-- Modify: `byclaw-exe/extensions/byai-channel/src/cron.ts`
 - Modify: `byclaw-exe/extensions/byai-channel/src/hooks.ts`
 - Modify: `byclaw-exe/extensions/byai-channel/src/sdk-app.ts`
-- Modify: `byclaw-exe/extensions/byai-channel/src/telemetry/sinks/redis-stats.ts`
-- Modify: `byclaw-exe/extensions/byai-channel/src/utils.ts`
 
 **Interfaces:**
 - Produces: `resolveRedisCompatConfig`, `createRedisCompatClient`, `createByFrameworkRedisClient`, `closeRedisCompatClient`, `RedisCompatKeys`, and `patchByFrameworkRedisKeys`.
@@ -99,7 +97,6 @@ Expected: PASS.
 **Files:**
 - Create: `byclaw-exe/extensions/baiying-enhance/src/redis-compat.ts`
 - Create: `byclaw-exe/extensions/baiying-enhance/src/redis-compat.test.ts`
-- Create: `byclaw-exe/extensions/baiying-enhance/src/redis-cluster-smoke.test.ts`
 - Modify: `byclaw-exe/extensions/baiying-enhance/src/backend-service-discovery.ts`
 - Modify: `byclaw-exe/extensions/baiying-enhance/src/dig-employee-auth-watch.ts`
 - Modify: `byclaw-exe/extensions/baiying-enhance/src/dig-employee-change-subscriber.ts`
@@ -131,9 +128,9 @@ Expected: FAIL because the compatibility module and cluster-aware call sites are
 
 Use the same env semantics and v2 key mapping as `byai-channel`; replace direct Redis construction, `scan` assumptions, and `quit()` calls in the listed paths.
 
-- [ ] **Step 4: Add optional real-cluster smoke coverage**
+- [ ] **Step 4: Run optional real-cluster smoke coverage**
 
-Keep the smoke test skipped unless `RUN_REDIS_CLUSTER_SMOKE=1`, and cover key/hash, pub/sub, control Stream, and session Stream operations when enabled.
+When the environment is available, source `envs/203/.env` without printing its values and run a non-mutating Cluster `PING` smoke check.
 
 - [ ] **Step 5: Run focused baiying tests**
 
@@ -141,35 +138,34 @@ Run: `cd byclaw-exe/extensions/baiying-enhance && pnpm exec vitest run src/redis
 
 Expected: PASS.
 
-### Task 4: Wonfong's child-process and compatibility fixes
+### Task 4: Wonfong's applicable compatibility fixes
 
 **Files:**
-- Modify: `byclaw-exe/extensions/baiying-enhance/src/agent-registry.ts`
-- Modify: `byclaw-exe/extensions/baiying-enhance/src/aimodel-config.test.ts`
+- Modify: `byclaw-exe/extensions/baiying-enhance/src/dig-employee-auth-watch.ts`
+- Modify: `byclaw-exe/extensions/baiying-enhance/src/dig-employee-auth-watch.test.ts`
+- Modify: `byclaw-exe/extensions/baiying-enhance/src/redis-env.ts`
 - Modify: `byclaw-exe/extensions/byai-channel/src/redis-compat.ts`
 - Modify: `byclaw-exe/extensions/baiying-enhance/src/redis-compat.ts`
 
-- [ ] **Step 1: Write the failing secret environment assertion**
+- [ ] **Step 1: Write failing Cluster listener/config assertions**
 
-Assert that the generated managed-model secret provider forwards `REDIS_MODE`, `REDIS_CLUSTER_HOST`, `REDIS_KEY_SCHEMA_VERSION`, and `REDIS_DB`.
+Assert that Cluster config is returned even without standalone host variables, Cluster mode rejects v1 keys, and the digital-employee auth watcher disables keyspace notifications in Cluster mode.
 
-- [ ] **Step 2: Run the focused model-config test and verify RED**
+- [ ] **Step 2: Run the focused tests and verify RED**
 
-Run: `cd byclaw-exe/extensions/baiying-enhance && pnpm exec vitest run src/aimodel-config.test.ts`
+Run: `cd byclaw-exe/extensions/baiying-enhance && pnpm exec vitest run src/dig-employee-auth-watch.test.ts src/redis-compat.test.ts`
 
-Expected: FAIL because only standalone Redis variables are forwarded.
+- [ ] **Step 3: Allow all Redis topology variables in the runtime env loader**
 
-- [ ] **Step 3: Forward all Redis topology variables**
-
-Extend the child-process `passEnv` list with the cluster, schema, and DB alias variables.
+Extend the `.env` allowlist with the cluster, schema, mode, and DB alias variables.
 
 - [ ] **Step 4: Fix cluster config return behavior**
 
 Return a valid cluster config before standalone host/port validation in both compatibility modules so `REDIS_CLUSTER_HOST` alone does not incorrectly resolve to `null`.
 
-- [ ] **Step 5: Run the focused model/config tests**
+- [ ] **Step 5: Run the focused compatibility tests**
 
-Run: `cd byclaw-exe/extensions/baiying-enhance && pnpm exec vitest run src/aimodel-config.test.ts src/redis-compat.test.ts`
+Run: `cd byclaw-exe/extensions/baiying-enhance && pnpm exec vitest run src/dig-employee-auth-watch.test.ts src/redis-compat.test.ts`
 
 Expected: PASS.
 
