@@ -8,7 +8,12 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), "bycli-markdown-ingest.mjs");
+const TEST_DIR = path.dirname(fileURLToPath(import.meta.url));
+const SCRIPT = path.join(TEST_DIR, "knowledge-collection-ingest.mjs");
+const KNOWLEDGE_MANAGER_SCRIPT = path.resolve(
+  TEST_DIR,
+  "../../by-knowledge-manager/scripts/by-knowledge-manager.mjs",
+);
 
 function createServer() {
   const requests = [];
@@ -129,6 +134,7 @@ function runCli(args, input, port) {
         HOST: `http://127.0.0.1:${port}`,
         REDIS_HOST: "",
         BEYOND_TOKEN: "system-token",
+        BY_KNOWLEDGE_MANAGER_SCRIPT: KNOWLEDGE_MANAGER_SCRIPT,
       },
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -152,6 +158,271 @@ function runCli(args, input, port) {
       reject(new Error(`CLI timed out: ${args.join(" ")}`));
     }, 10000).unref();
   });
+}
+
+async function testHelpUsesMigratedIdentityAndCanonicalInputFirst() {
+  const result = await runCli(["--help"], undefined, 0);
+  assert.equal(result.code, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /knowledge-collection-ingest/);
+  assert.match(result.stdout, /--collection-result-file <file>/);
+  assert.match(result.stdout, /--collection-result-json <json> \(inline compatibility; relative paths require --collection-result-file\)/);
+  assert.match(result.stdout, /--bycli-json-file <file> \(legacy compatibility\)/);
+  assert.match(result.stdout, /--bycli-json <json> \(legacy compatibility\)/);
+}
+
+async function testCanonicalCollectionResultPreservesMarkdownFrontmatter() {
+  const fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), "knowledge-collection-fixture-"));
+  const fixturePath = path.join(fixtureDir, "collection-result.json");
+  const relativeMarkdownPath = "sanitized/items/tea.md";
+  const markdownPath = path.join(fixtureDir, relativeMarkdownPath);
+  const markdown = "---\ncollection_filters:\n  - 茶叶\n---\n\n# Tea collection\n\n龙井";
+  fs.mkdirSync(path.dirname(markdownPath), { recursive: true });
+  fs.writeFileSync(markdownPath, markdown);
+  fs.writeFileSync(fixturePath, JSON.stringify({
+    schemaVersion: "1.0",
+    title: "Tea collection",
+    source: "xiaohongshu",
+    backend: "bycli",
+    url: "https://example.com/collection/tea",
+    filters: ["茶叶"],
+    items: [{
+      title: "Tea collection",
+      url: "https://example.com/tea",
+      author: "Tea author",
+      publishTime: "2026-07-27T00:00:00Z",
+      fileName: relativeMarkdownPath,
+      markdown: relativeMarkdownPath,
+    }],
+  }));
+  try {
+    const result = await runCli(["normalize", "--collection-result-file", fixturePath], undefined, 0);
+    assert.equal(result.code, 0, result.stderr || result.stdout);
+    assert.equal(result.json?.payloads?.collectionResult?.items?.length, 1);
+    const normalized = result.json?.payloads?.collectionResult;
+    assert.equal(normalized?.items?.[0]?.fileName, relativeMarkdownPath);
+    assert.equal(normalized?.items?.[0]?.markdown, markdown);
+    assert.equal(normalized?.schemaVersion, "1.0");
+    assert.equal(normalized?.title, "Tea collection");
+    assert.equal(normalized?.source, "xiaohongshu");
+    assert.equal(normalized?.backend, "bycli");
+    assert.equal(normalized?.url, "https://example.com/collection/tea");
+    assert.deepEqual(normalized?.filters, ["茶叶"]);
+    assert.equal(normalized?.items?.[0]?.sourceUrl, "https://example.com/tea");
+    assert.equal(normalized?.items?.[0]?.author, "Tea author");
+    assert.equal(normalized?.items?.[0]?.publishTime, "2026-07-27T00:00:00Z");
+    assert.equal(normalized?.items?.[0]?.localPath, undefined);
+    assert.doesNotMatch(result.stdout, new RegExp(fixtureDir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.match(normalized?.items?.[0]?.markdown || "", /collection_filters:\n  - 茶叶/);
+  } finally {
+    fs.rmSync(fixtureDir, { recursive: true, force: true });
+  }
+}
+
+async function testCanonicalCollectionResultRejectsUnsafeOrMissingMarkdownPaths() {
+  const fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), "knowledge-collection-path-safety-"));
+  const outsidePath = path.join(path.dirname(fixtureDir), `outside-${path.basename(fixtureDir)}.md`);
+  const symlinkPath = path.join(fixtureDir, "escaped.md");
+  fs.writeFileSync(outsidePath, "# must not be read");
+  fs.symlinkSync(outsidePath, symlinkPath);
+  const cases = [
+    {
+      name: "traversal",
+      markdown: `../${path.basename(outsidePath)}`,
+      fileName: `../${path.basename(outsidePath)}`,
+      error: /越出采集根目录/,
+    },
+    {
+      name: "absolute",
+      markdown: outsidePath,
+      fileName: outsidePath,
+      error: /不能使用绝对路径/,
+    },
+    {
+      name: "missing",
+      markdown: "sanitized/items/missing.md",
+      fileName: "sanitized/items/missing.md",
+      error: /不存在或无法读取/,
+    },
+    {
+      name: "symlink-escape",
+      markdown: "escaped.md",
+      fileName: "escaped.md",
+      error: /符号链接越出采集根目录/,
+    },
+  ];
+  try {
+    for (const testCase of cases) {
+      const fixturePath = path.join(fixtureDir, `${testCase.name}.json`);
+      fs.writeFileSync(fixturePath, JSON.stringify({
+        items: [{ title: testCase.name, markdown: testCase.markdown, fileName: testCase.fileName }],
+      }));
+      const result = await runCli(["normalize", "--collection-result-file", fixturePath], undefined, 0);
+      assert.equal(result.code, 1, result.stderr || result.stdout);
+      assert.match(String(result.json?.error || ""), testCase.error);
+      assert.doesNotMatch(result.stdout, /must not be read/);
+      if (testCase.name === "absolute") {
+        assert.doesNotMatch(result.stdout, new RegExp(outsidePath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+      }
+    }
+  } finally {
+    fs.rmSync(fixtureDir, { recursive: true, force: true });
+    fs.rmSync(outsidePath, { force: true });
+  }
+}
+
+async function testCanonicalCollectionResultRejectsMismatchedMarkdownAndFileName() {
+  const fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), "knowledge-collection-mismatch-"));
+  const fixturePath = path.join(fixtureDir, "collection-result.json");
+  fs.writeFileSync(path.join(fixtureDir, "a.md"), "# Preview A");
+  fs.writeFileSync(path.join(fixtureDir, "b.md"), "# Ingest B");
+  fs.writeFileSync(fixturePath, JSON.stringify({
+    schemaVersion: "1.0",
+    items: [{ title: "Mismatch", markdown: "a.md", fileName: "b.md" }],
+  }));
+  try {
+    const result = await runCli(["normalize", "--collection-result-file", fixturePath], undefined, 0);
+    assert.equal(result.code, 1, result.stderr || result.stdout);
+    assert.match(String(result.json?.error || ""), /必须指向同一个 Markdown 文件/);
+    assert.doesNotMatch(result.stdout, new RegExp(fixtureDir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  } finally {
+    fs.rmSync(fixtureDir, { recursive: true, force: true });
+  }
+}
+
+async function testCollectionResultJsonIsExplicitInlineCompatibilityOnly() {
+  const canonicalJson = JSON.stringify({
+    schemaVersion: "1.0",
+    items: [{ title: "Canonical path", markdown: "sanitized/item.md", fileName: "sanitized/item.md" }],
+  });
+  const canonicalResult = await runCli(["normalize", "--collection-result-json", canonicalJson], undefined, 0);
+  assert.equal(canonicalResult.code, 1, canonicalResult.stderr || canonicalResult.stdout);
+  assert.match(String(canonicalResult.json?.error || ""), /--collection-result-file/);
+
+  const inlineJson = JSON.stringify({ items: [{ title: "Inline compatibility", markdown: "# Inline compatibility" }] });
+  const inlineResult = await runCli(["normalize", "--collection-result-json", inlineJson], undefined, 0);
+  assert.equal(inlineResult.code, 0, inlineResult.stderr || inlineResult.stdout);
+  assert.equal(inlineResult.json?.payloads?.collectionResult?.items?.[0]?.markdown, "# Inline compatibility");
+}
+
+async function testCanonicalIngestUsesValidatedRootArtifactDespiteDirectoryOverrides() {
+  const fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), "knowledge-collection-canonical-ingest-"));
+  const overrideDir = fs.mkdtempSync(path.join(os.tmpdir(), "knowledge-collection-override-"));
+  const relativeMarkdownPath = "sanitized/items/article.md";
+  const canonicalMarkdownPath = path.join(fixtureDir, relativeMarkdownPath);
+  const overrideMarkdownPath = path.join(overrideDir, relativeMarkdownPath);
+  fs.mkdirSync(path.dirname(canonicalMarkdownPath), { recursive: true });
+  fs.mkdirSync(path.dirname(overrideMarkdownPath), { recursive: true });
+  fs.writeFileSync(canonicalMarkdownPath, "# Canonical artifact");
+  fs.writeFileSync(overrideMarkdownPath, "# Untrusted override");
+  const fixturePath = path.join(fixtureDir, "collection-result.json");
+  fs.writeFileSync(fixturePath, JSON.stringify({
+    schemaVersion: "1.0",
+    items: [{ title: "Canonical", markdown: relativeMarkdownPath, fileName: relativeMarkdownPath }],
+  }));
+  try {
+    const result = await runCli([
+      "ingest",
+      "--dry-run",
+      "--collection-result-file", fixturePath,
+      "--output-dir", overrideDir,
+      "--session-dir", overrideDir,
+      "--knowledge-base-resource-id", "90001",
+    ], undefined, 0);
+    assert.equal(result.code, 0, result.stderr || result.stdout);
+    assert.equal(result.json?.upload?.files?.[0]?.fileName, relativeMarkdownPath);
+    assert.equal(result.json?.upload?.files?.[0]?.source, "validated-canonical");
+    assert.equal(result.json?.upload?.files?.[0]?.existingPath, undefined);
+    assert.doesNotMatch(result.stdout, new RegExp(fixtureDir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.doesNotMatch(result.stdout, new RegExp(overrideDir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.equal(result.json?.payloads, undefined);
+  } finally {
+    fs.rmSync(fixtureDir, { recursive: true, force: true });
+    fs.rmSync(overrideDir, { recursive: true, force: true });
+  }
+}
+
+async function testCanonicalActualIngestKeepsValidatedPathPrivate() {
+  const server = createServer();
+  const port = await server.listen();
+  const fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), "knowledge-collection-private-ingest-"));
+  const overrideDir = fs.mkdtempSync(path.join(os.tmpdir(), "knowledge-collection-private-override-"));
+  const relativeMarkdownPath = "sanitized/items/private.md";
+  const canonicalMarkdownPath = path.join(fixtureDir, relativeMarkdownPath);
+  const overrideMarkdownPath = path.join(overrideDir, relativeMarkdownPath);
+  fs.mkdirSync(path.dirname(canonicalMarkdownPath), { recursive: true });
+  fs.mkdirSync(path.dirname(overrideMarkdownPath), { recursive: true });
+  fs.writeFileSync(canonicalMarkdownPath, "# Canonical private artifact");
+  fs.writeFileSync(overrideMarkdownPath, "# Untrusted private override");
+  const fixturePath = path.join(fixtureDir, "collection-result.json");
+  fs.writeFileSync(fixturePath, JSON.stringify({
+    schemaVersion: "1.0",
+    items: [{ title: "Private", markdown: relativeMarkdownPath, fileName: relativeMarkdownPath }],
+  }));
+  try {
+    const result = await runCli([
+      "ingest",
+      "--collection-result-file", fixturePath,
+      "--session-dir", overrideDir,
+      "--knowledge-base-resource-id", "90001",
+    ], undefined, port);
+    assert.equal(result.code, 0, result.stderr || result.stdout);
+    const upload = server.requests.find((request) => request.url === "/byaiService/datasetController/uploadFiles");
+    assert.ok(upload, "expected canonical Markdown to be uploaded");
+    assert.match(upload.bodyText, /Canonical private artifact/);
+    assert.doesNotMatch(upload.bodyText, /Untrusted private override/);
+    assert.equal(result.json?.uploaded?.files?.[0]?.source, "validated-canonical");
+    assert.doesNotMatch(result.stdout, /localPath/);
+    assert.doesNotMatch(result.stdout, new RegExp(fixtureDir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.doesNotMatch(result.stdout, new RegExp(overrideDir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  } finally {
+    fs.rmSync(fixtureDir, { recursive: true, force: true });
+    fs.rmSync(overrideDir, { recursive: true, force: true });
+    await server.close();
+  }
+}
+
+async function testCanonicalInputPrecedesLegacyAndLegacyRemainsSupported() {
+  const fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), "knowledge-collection-precedence-"));
+  const canonicalPath = path.join(fixtureDir, "canonical.json");
+  const canonicalMarkdownPath = path.join(fixtureDir, "sanitized/canonical.md");
+  const legacyPath = path.join(fixtureDir, "legacy.json");
+  fs.mkdirSync(path.dirname(canonicalMarkdownPath), { recursive: true });
+  fs.writeFileSync(canonicalMarkdownPath, "# Canonical");
+  fs.writeFileSync(canonicalPath, JSON.stringify({
+    items: [{ title: "Canonical", markdown: "sanitized/canonical.md", fileName: "sanitized/canonical.md" }],
+  }));
+  fs.writeFileSync(legacyPath, JSON.stringify({ items: [{ title: "Legacy", markdown: "# Legacy" }] }));
+  try {
+    const precedenceResult = await runCli([
+      "normalize",
+      "--bycli-json-file",
+      legacyPath,
+      "--collection-result-file",
+      canonicalPath,
+    ], undefined, 0);
+    assert.equal(precedenceResult.code, 0, precedenceResult.stderr || precedenceResult.stdout);
+    assert.equal(precedenceResult.json?.payloads?.collectionResult?.items?.[0]?.markdown, "# Canonical");
+
+    const legacyResult = await runCli(["normalize", "--bycli-json-file", legacyPath], undefined, 0);
+    assert.equal(legacyResult.code, 0, legacyResult.stderr || legacyResult.stdout);
+    assert.equal(legacyResult.json?.payloads?.collectionResult?.items?.[0]?.markdown, "# Legacy");
+  } finally {
+    fs.rmSync(fixtureDir, { recursive: true, force: true });
+  }
+}
+
+async function testLegacyInlineBycliJsonRemainsSupported() {
+  const legacyJson = JSON.stringify({
+    items: [{
+      title: "Legacy inline",
+      content: "# Legacy inline\n\n正文",
+    }],
+  });
+  const result = await runCli(["normalize", "--bycli-json", legacyJson], undefined, 0);
+  assert.equal(result.code, 0, result.stderr || result.stdout);
+  assert.equal(result.json?.payloads?.collectionResult?.items?.length, 1);
+  assert.equal(result.json?.payloads?.collectionResult?.items?.[0]?.title, "Legacy inline");
+  assert.equal(result.json?.payloads?.collectionResult?.items?.[0]?.markdown, "# Legacy inline\n\n正文");
 }
 
 async function testMarkdownIngestListsKnowledgeBasesBeforeImport() {
@@ -375,7 +646,7 @@ async function testIngestInlineMarkdownUploadsThroughManager() {
     assert.equal(result.json?.action, "ingest");
     assert.equal(result.json?.uploaded?.reusedFiles?.length, 0);
     assert.equal(result.json?.uploaded?.generatedFiles?.length, 1);
-    assert.match(result.json?.uploaded?.generatedFiles?.[0] || "", /bycli-knowledge-ingest-/);
+    assert.match(result.json?.uploaded?.generatedFiles?.[0] || "", /knowledge-collection-ingest-/);
     const upload = server.requests.find((r) => r.url === "/byaiService/datasetController/uploadFiles");
     assert.ok(upload, "expected manager upload request");
     assert.match(upload.bodyText, /filename="Article\.md"/);
@@ -446,6 +717,15 @@ async function testUploadDocAcceptsUppercaseExtension() {
   }
 }
 
+await testHelpUsesMigratedIdentityAndCanonicalInputFirst();
+await testCanonicalCollectionResultPreservesMarkdownFrontmatter();
+await testCanonicalCollectionResultRejectsUnsafeOrMissingMarkdownPaths();
+await testCanonicalCollectionResultRejectsMismatchedMarkdownAndFileName();
+await testCollectionResultJsonIsExplicitInlineCompatibilityOnly();
+await testCanonicalIngestUsesValidatedRootArtifactDespiteDirectoryOverrides();
+await testCanonicalActualIngestKeepsValidatedPathPrivate();
+await testCanonicalInputPrecedesLegacyAndLegacyRemainsSupported();
+await testLegacyInlineBycliJsonRemainsSupported();
 await testMarkdownIngestListsKnowledgeBasesBeforeImport();
 await testImageUrlUploadsToChatFilesAndStops();
 await testVideoUrlUploadsToChatFilesAndStops();
@@ -460,4 +740,4 @@ await testIngestInlineMarkdownUploadsThroughManager();
 await testUploadResourceFileKindGoesToChatFiles();
 await testUploadDocEmptyUploadItemsErrors();
 await testUploadDocAcceptsUppercaseExtension();
-console.log("bycli-markdown-ingest tests passed");
+console.log("knowledge-collection-ingest tests passed");

@@ -17,6 +17,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
@@ -1042,10 +1043,32 @@ public class MetaPromptService {
             counts.getOrDefault("KG_DOC", 0L).intValue() + counts.getOrDefault("KG_QA", 0L).intValue()
                 + counts.getOrDefault("KG_DB", 0L).intValue() + counts.getOrDefault("KG_TERM", 0L).intValue());
         summary.setAvailableAgentCount(counts.getOrDefault("AGENT", 0L).intValue());
-        if (StringUtils.isNotBlank(bundledSkills)) {
-            summary.setBundledSkillCount(StringUtils.countMatches(bundledSkills, "\"name\""));
-        }
+        summary.setBundledSkillCount(countBundledSkills(bundledSkills));
         return summary;
+    }
+
+    private int countBundledSkills(String bundledSkills) {
+        if (StringUtils.isBlank(bundledSkills)) {
+            return 0;
+        }
+        try {
+            JsonNode catalog = OBJECT_MAPPER.readTree(bundledSkills);
+            if (!catalog.isArray()) {
+                return 0;
+            }
+            int count = 0;
+            for (JsonNode skill : catalog) {
+                if (skill.isObject()
+                    && skill.path("skillName").isTextual()
+                    && skill.path("skillCode").isTextual()) {
+                    count++;
+                }
+            }
+            return count;
+        } catch (JsonProcessingException e) {
+            log.warn("Failed to parse bundled skills catalog for meta-prompt context summary", e);
+            return 0;
+        }
     }
 
     // ======================== System Prompt ========================
