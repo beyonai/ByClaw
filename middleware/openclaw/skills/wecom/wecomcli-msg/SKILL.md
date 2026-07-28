@@ -68,7 +68,7 @@ wecom-cli msg send_message '{"chat_type": 1, "chatid": "zhangsan", "msgtype": "t
      - 精确匹配唯一结果：直接使用
      - 模糊匹配多个结果：展示候选列表让用户选择
      - 无匹配结果：告知用户未找到
-- **chat_type 判断**：`get_msg_chat_list` 返回中不含会话类型字段，需根据上下文推断：用户明确提到「群」时使用 `chat_type=2`，否则默认 `chat_type=1`（单聊）
+- **chat_type 判断**：优先使用后端返回的类型；后端未返回时，只能依据用户明确说明的单聊/群聊意图，或本 skill/reference 已明确记录的 ID 格式确定类型。禁止在没有依据时默认单聊；无法可靠判断时展示或记录未解析会话并停止该会话的 `get_message` 调用，不得试错后把空结果当作成功。
 
 ### userid 转 name
 **流程**：
