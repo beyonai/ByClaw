@@ -383,7 +383,7 @@ async function handleLifecycleEvent(
     return;
   }
   if (phase === "start") {
-    const activeRequest = markActiveSdkRootLifecycleStarted(sessionKey) ?? request;
+    const activeRequest = markActiveSdkRootLifecycleStarted(sessionKey, event.runId) ?? request;
     cancelActiveSdkCompletionCheck(activeRequest.sessionKey);
     registerAgentRunEndPromise(event.runId);
     return;
@@ -391,7 +391,13 @@ async function handleLifecycleEvent(
   if (phase !== "end" && phase !== "error") {
     return;
   }
-  const activeRequest = markActiveSdkRootLifecycleFinished(sessionKey, phase) ?? request;
+  const activeRequest = markActiveSdkRootLifecycleFinished(sessionKey, phase, event.runId);
+  if (!activeRequest) {
+    api.logger.debug?.(
+      `[byai-channel] ignored stale root lifecycle terminal: sessionKey=${sessionKey}, runId=${event.runId}, phase=${phase}`,
+    );
+    return;
+  }
   if (phase === "error") {
     const errorText = typeof data?.error === "string" ? data.error : "Agent run failed";
     await emitSdkChunk(request, errorText, {

@@ -1238,7 +1238,6 @@ export default {
   'feedbackModal.content': 'Detailed Description',
   'feedbackModal.contentTip': 'Please describe the problem or suggestion in detail (at least 10 words)',
   'feedbackModal.files': 'Problem Screenshot/Attachment',
-  'feedbackModal.uploadFailed': 'Attachment upload failed. Please upload again before submitting feedback.',
   'feedbackModal.success': 'Thank you for your feedback',
 
   // 助手设置

@@ -1,4 +1,0 @@
-interface:
-  display_name: "知识采集"
-  short_description: "跨互联网与企业平台采集、归档资料，并衔接知识库入库或知识整理"
-  default_prompt: "Use $knowledge-collection to collect these sources and prepare the results for my chosen post-processing action."

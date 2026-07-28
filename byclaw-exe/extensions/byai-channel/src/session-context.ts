@@ -142,6 +142,10 @@ export interface ActiveSdkRequest {
   awaitingFollowupSince?: number;
   deferredForFollowup: boolean;
   followupRunStarted: boolean;
+  /** 当前已收到 lifecycle/start、尚未收到匹配终态的 root run。 */
+  activeRootRunId?: string;
+  /** 已由 remote-task-watch 派发、但尚未收到 lifecycle/start 的 delegated follow-up run。 */
+  pendingDelegatedFollowupRunId?: string;
   compactionRetryPending: boolean;
   modelFallbackPending: boolean;
   rootLifecyclePhase?: "end" | "error";
@@ -781,6 +785,8 @@ export function registerActiveSdkRequest(params: {
         awaitingFollowup: false,
         deferredForFollowup: false,
         followupRunStarted: false,
+        activeRootRunId: undefined,
+        pendingDelegatedFollowupRunId: undefined,
         compactionRetryPending: false,
         modelFallbackPending: false,
         rootLifecyclePhase: undefined,
@@ -933,6 +939,7 @@ export function markActiveSdkRequestDeferred(
 
 export function markActiveSdkRootLifecycleStarted(
     sessionKey: string | undefined,
+    runId?: string,
 ): ActiveSdkRequest | undefined {
     if (!sessionKey || !isRootSessionKey(sessionKey)) {
         return undefined;
@@ -941,10 +948,15 @@ export function markActiveSdkRootLifecycleStarted(
     if (!request) {
         return undefined;
     }
+    const normalizedRunId = normalizeAlias(runId);
+    request.activeRootRunId = normalizedRunId;
+    if (normalizedRunId && request.pendingDelegatedFollowupRunId === normalizedRunId) {
+        request.pendingDelegatedFollowupRunId = undefined;
+    }
     request.rootLifecyclePhase = undefined;
     request.compactionRetryPending = false;
     request.modelFallbackPending = false;
-    if (request.awaitingFollowup) {
+    if (request.awaitingFollowup || request.followupRunStarted) {
         request.awaitingFollowup = false;
         request.deferredForFollowup = true;
         request.followupRunStarted = true;
@@ -955,6 +967,7 @@ export function markActiveSdkRootLifecycleStarted(
 export function markActiveSdkRootLifecycleFinished(
     sessionKey: string | undefined,
     phase: "end" | "error",
+    runId?: string,
 ): ActiveSdkRequest | undefined {
     if (!sessionKey || !isRootSessionKey(sessionKey)) {
         return undefined;
@@ -963,9 +976,22 @@ export function markActiveSdkRootLifecycleFinished(
     if (!request) {
         return undefined;
     }
+    const normalizedRunId = normalizeAlias(runId);
+    // 同一 session 可以在旧 run 收尾前排入 delegated follow-up。旧 run 的迟到终态不能
+    // 清掉新 run 的完成门，也不能覆盖新 run 已经开始后的 lifecycle 状态。
+    if (
+        normalizedRunId &&
+        request.activeRootRunId &&
+        request.activeRootRunId !== normalizedRunId
+    ) {
+        return undefined;
+    }
     request.rootLifecyclePhase = phase;
-    request.awaitingFollowup = false;
-    request.followupRunStarted = false;
+    request.activeRootRunId = undefined;
+    if (!request.pendingDelegatedFollowupRunId) {
+        request.awaitingFollowup = false;
+        request.followupRunStarted = false;
+    }
     // 2026.6.1 的 overflow 压缩在同一 run 内静默续跑，压缩后不再发新的 lifecycle start，
     // compactionRetryPending 就没有信号来清；而单 run 只压缩一次（overflowRecoveryAttempted
     // 一次性护栏），压缩之后到来的终态 end/error 必为真终态，此处释放该门安全。不清的话
@@ -1193,6 +1219,7 @@ export function shouldCompleteActiveSdkRequest(request: ActiveSdkRequest): boole
       request.pendingChildSessionKeys.size === 0 &&
       // 还有委派工作未回灌结果 ⇒ 任务尚未结束，挂住完成门等待所有委派任务完成。
       request.delegatedWorkToolCallIds.size === 0 &&
+      !request.pendingDelegatedFollowupRunId &&
       request.pendingOutboundCount === 0 &&
       !awaitingBlocks &&
       !request.followupRunStarted &&
@@ -1429,6 +1456,33 @@ export function markActiveSdkAwaitingDelegatedFollowup(params: {
 }
 
 /**
+ * 记录 remote follow-up dispatch 返回的 runId。dispatch 只表示 run 已排入 session lane；
+ * lifecycle/start 可能要等旧 run 完成后才到，因此这段窗口必须由 runId 级状态持续挡住完成门。
+ */
+export function markActiveSdkDelegatedFollowupDispatched(params: {
+  requesterSessionKey: string | undefined;
+  runId: string | undefined;
+}): ActiveSdkRequest | undefined {
+  const request = locateActiveSdkRequestForDelegated(params);
+  const normalizedRunId = normalizeAlias(params.runId);
+  if (!request || !normalizedRunId) {
+    return request;
+  }
+  if (request.activeRootRunId === normalizedRunId) {
+    request.pendingDelegatedFollowupRunId = undefined;
+    request.awaitingFollowup = false;
+    request.deferredForFollowup = true;
+    request.followupRunStarted = true;
+    return request;
+  }
+  request.pendingDelegatedFollowupRunId = normalizedRunId;
+  request.awaitingFollowup = true;
+  request.awaitingFollowupSince = Date.now();
+  request.followupRunStarted = false;
+  return request;
+}
+
+/**
  * 委派工作结果回灌成功后消除对应 toolCallId。定位同 locateActiveSdkRequestForDelegated。
  * 返回被消除的 request（若命中），供调用方决定是否触发一次完成检查。
  */
@@ -1460,6 +1514,8 @@ export async function completeActiveSdkFollowupBySessionKey(
     }
     request.awaitingFollowup = false;
     request.followupRunStarted = false;
+    request.activeRootRunId = undefined;
+    request.pendingDelegatedFollowupRunId = undefined;
     request.rootLifecyclePhase = "end";
     request.modelFallbackPending = false;
     return await completeActiveSdkRequest(request);

@@ -57,11 +57,6 @@ export default [
             component: './manager/pages/SandboxMgr',
           },
           {
-            path: '/manager/system/feedback',
-            name: 'managerSystemFeedback',
-            component: './manager/pages/SystemFeedbackMgr',
-          },
-          {
             path: '/manager/asset/digitalEmployee',
             name: 'managerDigitalEmployee',
             component: './manager/pages/digitalEmployeeMgr',

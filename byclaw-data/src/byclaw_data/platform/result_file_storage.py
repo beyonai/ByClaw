@@ -9,12 +9,12 @@ from typing import Any
 from urllib.parse import urlparse
 
 import httpx
+from redis.asyncio import Redis
 
 from by_framework.core.discovery import DiscoveryClient
 from by_framework.util.discovery_http_client import DiscoveryHttpClient
 from by_framework.util.http_client import RetryConfig
 
-from byclaw_data.redis_client import create_redis_client
 from datacloud_data_sdk.file_storage.base import ResultFileStorage
 
 import logging
@@ -36,8 +36,6 @@ def build_result_file_storage(settings: Any) -> Any:
 
 class ByclawResultFileStorage(ResultFileStorage):
     """Store exported result files through byclaw backend HTTP/discovery APIs."""
-
-    _create_discovery_redis = staticmethod(create_redis_client)
 
     _WRITE_TXT_PATH = "/writeTxt"
     _APPEND_TXT_PATH = "/appendTxt"
@@ -166,6 +164,23 @@ class ByclawResultFileStorage(ResultFileStorage):
         logger = logging.getLogger(__name__)
         logger.info(f"byaiService服务调用结果：{response.data}")
         return response.data
+
+    @staticmethod
+    def _create_discovery_redis() -> Redis:
+        redis_host = os.getenv("DATACLOUD_GATEWAY_REDIS_HOST", "localhost")
+        redis_port = int(os.getenv("DATACLOUD_GATEWAY_REDIS_PORT", 6379))
+        redis_db = int(os.getenv("DATACLOUD_GATEWAY_REDIS_DB", 0))
+        redis_password = os.getenv("DATACLOUD_GATEWAY_REDIS_PASSWORD")
+        redis_username = os.getenv("DATACLOUD_GATEWAY_REDIS_USERNAME")
+
+        return Redis(
+            host=redis_host,
+            port=redis_port,
+            db=redis_db,
+            password=redis_password or None,
+            username=redis_username or None,
+            decode_responses=True,
+        )
 
     @staticmethod
     def _is_complete_url(value: str) -> bool:
