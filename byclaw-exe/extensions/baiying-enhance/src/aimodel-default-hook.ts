@@ -38,7 +38,12 @@ export function registerBaiyingDefaultModelHook(params: {
   params.api.on("before_model_resolve", async (_event, ctx) => {
     const mainAgentId = params.pluginConfig.mainParentAgentId?.trim() || "main";
     const agentId = ctx?.agentId?.trim();
-    if (agentId && agentId !== mainAgentId) return undefined;
+    const cfg = currentConfig(params.api);
+    const agentEntry = agentId
+      ? cfg.agents?.list?.find((entry: any) => entry?.id === agentId)
+      : undefined;
+    const explicitAgentModel = Boolean(agentEntry?.model?.primary);
+    if (agentId && agentId !== mainAgentId && explicitAgentModel) return undefined;
 
     const resolved = await resolveDefaultBaiyingAimodelProviderBundle({
       redisJsonStore: params.redisJsonStore,
@@ -49,7 +54,6 @@ export function registerBaiyingDefaultModelHook(params: {
     });
     if (!resolved) return undefined;
 
-    const cfg = currentConfig(params.api);
     const configuredPrimary = cfg.agents?.defaults?.model?.primary;
     const mainEntry = cfg.agents?.list?.find((entry: any) => entry?.id === mainAgentId);
     const mainPrimary = mainEntry?.model?.primary;

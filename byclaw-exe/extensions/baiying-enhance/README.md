@@ -60,7 +60,7 @@
 }
 ```
 
-模型配置无需在 `openclaw.json` 中写死。插件默认读取 `byai:aimodel:typelist` 的 `LLM` 字段；如部署使用自定义 Redis key/字段，可配置 `aimodelTypeListRedisKey`、`aimodelTypeListField`，完整模型记录 key 可通过 `aimodelConfigRedisKey` 覆盖。请保留 `/by/.openclaw` 为可写目录，因为插件需要写入动态 provider 和 OpenClaw 的 secret provider 配置。
+模型配置无需在 `openclaw.json` 中写死。插件默认读取 `byai:aimodel:typelist` 的 `LLM` 字段；如部署使用自定义 Redis key/字段，可配置 `aimodelTypeListRedisKey`、`aimodelTypeListField`，完整模型记录 key 可通过 `aimodelConfigRedisKey` 覆盖。未显式绑定模型的托管数字员工会在每次运行前解析 Redis 当前默认 LLM；仅显式配置了自身模型的 Agent 不会被默认模型覆盖。请保留 `/by/.openclaw` 为可写目录，因为插件需要写入动态 provider 和 OpenClaw 的 secret provider 配置。
 
 字段含义与默认值以插件清单中的 `configSchema`（`openclaw.plugin.json`）为准。历史上的 `agentConfigDir` / `executorResourcesDir` 仍被配置校验接受，但当前运行时不再用它们读取数字员工或关联资源 JSON；权威来源是 Redis。**`config` 允许额外键**（例如历史遗留的 `watchAgentDir`、`skillDirs`、`pollIntervalMs`），不会因「未知字段」导致插件校验失败；已声明的字段仍会按类型校验，建议仍以文档列出的键为主以免笔误。
 

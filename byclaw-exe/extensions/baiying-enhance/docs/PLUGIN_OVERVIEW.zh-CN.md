@@ -15,7 +15,7 @@
 | 能力 | 说明 |
 |------|------|
 | **Agent 同步** | 扫描 `agentConfigDir` 下的 `*.json` 或子目录中的 `config.json`，解析并适配为 OpenClaw `agents.list` 条目与 `models.providers`，写回当前生效配置文件（通常为 `openclaw.json`）。 |
-| **动态模型注册** | 读取 Redis `byai:aimodel:typelist` 的 `LLM` 字段，生成 `baiying-m-*` provider/model 与主 Agent 默认模型；token 通过 `secrets.providers` exec resolver 按需从 Redis 读取，配置文件不保存明文 token。 |
+| **动态模型注册** | 读取 Redis `byai:aimodel:typelist` 的 `LLM` 字段，生成 `baiying-m-*` provider/model 与默认模型；未显式绑定模型的托管 Agent 在每次运行前解析 Redis 当前默认 LLM，显式模型不被覆盖；token 通过 `secrets.providers` exec resolver 按需从 Redis 读取，配置文件不保存明文 token。 |
 | **授权过滤** | 通过 Redis 中 `USER_CODE` 关联的 dig-employee 授权集合，仅同步当前用户可见的数字员工；授权集合变化会触发全量工作区再种子化（`fullWorkspaceReseed`）。 |
 | **Redis Pub/Sub** | 订阅 `digEmployeeChangeChannel`（默认 `byai:pub:dig_employee_change`），合并去抖后触发与目录扫描一致的 flush（含 `DIG_EMPLOYEE_DELETED` 等）。 |
 | **内容索引** | 可选持久化各 Agent 源 JSON 的 SHA-256（`agent-content-index-*.json`），减少网关重启后的无意义全量写盘。 |
