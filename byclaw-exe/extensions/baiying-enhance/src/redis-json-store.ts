@@ -1,5 +1,10 @@
 import { createHash } from "node:crypto";
-import Redis from "ioredis";
+import {
+  closeRedisCompatClient,
+  createRedisCompatClient,
+  resolveRedisCompatConfig,
+  type RedisCompatClient,
+} from "./redis-compat.js";
 
 type LoggerLike = {
   info?: (message: string) => void;
@@ -47,14 +52,6 @@ export function resourceRedisKey(resourceBizType: unknown, resourceId: unknown):
   return `${typePart}_${normalizeId(resourceId)}`;
 }
 
-function parseRedisPort(): number {
-  return Number.parseInt(process.env.REDIS_PORT?.trim() || "", 10);
-}
-
-function parseRedisDb(): number {
-  return Number.parseInt(process.env.REDIS_DATABASE?.trim() || "", 10);
-}
-
 function parsePayload(key: string, content: string): RedisJsonPayload | null {
   try {
     const raw = JSON.parse(content) as unknown;
@@ -70,9 +67,7 @@ function parsePayload(key: string, content: string): RedisJsonPayload | null {
 }
 
 export function createRedisJsonStore(params: { logger?: LoggerLike } = {}): BaiyingRedisJsonStore {
-  const host = process.env.REDIS_HOST?.trim();
-  const port = parseRedisPort();
-  const db = parseRedisDb();
+  const config = resolveRedisCompatConfig();
   const connectTimeout = Math.max(
     500,
     Number.parseInt(process.env.BAIYING_REDIS_JSON_CONNECT_TIMEOUT_MS || "3000", 10),
@@ -82,13 +77,13 @@ export function createRedisJsonStore(params: { logger?: LoggerLike } = {}): Baiy
     Number.parseInt(process.env.BAIYING_REDIS_JSON_RETRY_DELAY_MS || "2000", 10),
   );
 
-  let redis: Redis | null = null;
-  let connectPromise: Promise<Redis | null> | null = null;
+  let redis: RedisCompatClient | null = null;
+  let connectPromise: Promise<RedisCompatClient | null> | null = null;
   let warnedMissingEnv = false;
   let warnedConnect = false;
 
-  const connect = async (): Promise<Redis | null> => {
-    if (!host || Number.isNaN(port) || Number.isNaN(db)) {
+  const connect = async (): Promise<RedisCompatClient | null> => {
+    if (!config) {
       if (!warnedMissingEnv) {
         warnedMissingEnv = true;
         params.logger?.warn?.("baiying-enhance: Redis JSON store disabled (REDIS_HOST/REDIS_PORT/REDIS_DATABASE missing)");
@@ -101,12 +96,7 @@ export function createRedisJsonStore(params: { logger?: LoggerLike } = {}): Baiy
     if (connectPromise) {
       return connectPromise;
     }
-    redis = new Redis({
-      host,
-      port,
-      db,
-      username: process.env.REDIS_USERNAME?.trim() || undefined,
-      password: process.env.REDIS_PASSWORD?.trim() || undefined,
+    redis = createRedisCompatClient({
       lazyConnect: true,
       enableOfflineQueue: false,
       connectTimeout,
@@ -132,7 +122,7 @@ export function createRedisJsonStore(params: { logger?: LoggerLike } = {}): Baiy
             `baiying-enhance: Redis JSON store connect failed: ${err instanceof Error ? err.message : String(err)}`,
           );
         }
-        await redis?.quit().catch(() => undefined);
+        await closeRedisCompatClient(redis);
         redis = null;
         connectPromise = null;
         return null;
@@ -176,7 +166,7 @@ export function createRedisJsonStore(params: { logger?: LoggerLike } = {}): Baiy
       getJsonByKey(resourceRedisKey(resourceBizType, resourceId)),
     close: async () => {
       connectPromise = null;
-      await redis?.quit().catch(() => undefined);
+      await closeRedisCompatClient(redis);
       redis = null;
     },
   };

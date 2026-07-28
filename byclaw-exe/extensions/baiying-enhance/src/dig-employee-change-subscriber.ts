@@ -1,4 +1,9 @@
-import Redis from "ioredis";
+import {
+  closeRedisCompatClient,
+  createRedisCompatClient,
+  resolveRedisCompatConfig,
+  type RedisCompatClient,
+} from "./redis-compat.js";
 import type { AgentFlushNowOptions } from "./agent-watchdog.js";
 
 type LoggerLike = {
@@ -152,15 +157,16 @@ export function createDigEmployeeChangeSubscriber(params: {
   getAuthorizedIds: () => Set<string> | undefined;
   flushNow: (opts?: AgentFlushNowOptions) => Promise<void>;
 }): DigEmployeeChangeSubscriber {
-  const host = process.env.REDIS_HOST?.trim();
-  const port = Number.parseInt(process.env.REDIS_PORT?.trim() || "", 10);
-  const db = Number.parseInt(process.env.REDIS_DATABASE?.trim() || "", 10);
+  const redisConfig = resolveRedisCompatConfig();
+  const host = redisConfig?.host;
+  const port = redisConfig?.port ?? Number.NaN;
+  const db = redisConfig?.db ?? Number.NaN;
   const connectTimeout = Math.max(
     500,
     Number.parseInt(process.env.BAIYING_DIG_CHANGE_REDIS_CONNECT_TIMEOUT_MS || "3000", 10),
   );
 
-  let subscriber: Redis | null = null;
+  let subscriber: RedisCompatClient | null = null;
   let stopped = false;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let strictAuthWarned = false;
@@ -300,12 +306,7 @@ export function createDigEmployeeChangeSubscriber(params: {
       );
       return;
     }
-    subscriber = new Redis({
-      host,
-      port,
-      db,
-      username: process.env.REDIS_USERNAME?.trim() || undefined,
-      password: process.env.REDIS_PASSWORD?.trim() || undefined,
+    subscriber = createRedisCompatClient({
       lazyConnect: true,
       enableOfflineQueue: false,
       connectTimeout,
@@ -335,7 +336,7 @@ export function createDigEmployeeChangeSubscriber(params: {
       params.logger.warn(
         `baiying-enhance: dig-employee SUBSCRIBE failed: ${err instanceof Error ? err.message : String(err)}`,
       );
-      await subscriber.quit().catch(() => undefined);
+      await closeRedisCompatClient(subscriber);
       subscriber = null;
       scheduleReconnect();
       return;
@@ -361,7 +362,7 @@ export function createDigEmployeeChangeSubscriber(params: {
         debounceTimer = null;
       }
       pendingQueue.length = 0;
-      await subscriber?.quit().catch(() => undefined);
+      await closeRedisCompatClient(subscriber);
       subscriber = null;
     },
   };

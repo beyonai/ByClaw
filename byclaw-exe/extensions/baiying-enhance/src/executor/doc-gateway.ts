@@ -32,7 +32,6 @@
  *   call modes.
  */
 
-import type { Redis } from "ioredis";
 import {
   ActionType,
   AskAgentCommand,
@@ -40,8 +39,13 @@ import {
   type DataMessage,
   MessageHeader,
   QueueNames,
-  createRedis,
 } from "@byclaw/by-framework";
+import {
+  closeRedisCompatClient,
+  createByFrameworkRedisClient,
+  RedisCompatKeys,
+  type RedisCompatClient,
+} from "../redis-compat.js";
 import type { Capability, Dict, ExecutorFailure, ExecutorResponse } from "./types.js";
 import { makeError } from "./errors.js";
 import {
@@ -56,7 +60,7 @@ import {
 } from "./doc-shared.js";
 
 export type SdkGatewayContext = {
-  redis: Redis;
+  redis: RedisCompatClient;
   client: ByaiGatewayClient;
 };
 
@@ -68,13 +72,7 @@ export type SdkGatewayContext = {
 export function createSdkGatewayClient(
   config: RedisConfig = readRedisConfig(),
 ): SdkGatewayContext {
-  const redis = createRedis({
-    host: config.host,
-    port: config.port,
-    db: config.db,
-    username: config.username,
-    password: config.password,
-  });
+  const redis = createByFrameworkRedisClient();
   const client = new ByaiGatewayClient([], undefined, redis);
   return { redis, client };
 }
@@ -188,7 +186,7 @@ export async function sendDocAsyncMessageViaSdk(
       /* waitForReply */ false,
       params.extraPayload,
     );
-    const streamName = `byai_gateway:ctrl:capability:${params.targetWorkerId}`;
+    const streamName = RedisCompatKeys.capabilityCtrlStream(params.targetWorkerId);
     const res = await client.sendCommand(command, streamName);
     if (!res.success) {
       return {
@@ -397,7 +395,7 @@ export async function executeDocViaSdk(
       target: buildTarget(input, input.sendParams),
     };
   } finally {
-    await ctx.redis.quit().catch(() => undefined);
+    await closeRedisCompatClient(ctx.redis);
   }
 }
 

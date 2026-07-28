@@ -20,11 +20,14 @@
  * built by `buildOntologyMcpHeaders` in `ontology-headers.ts`.
  */
 
-import { createRedis } from "@byclaw/by-framework";
 import { isRecord } from "./types.js";
-import { readRedisConfig } from "./doc-shared.js";
+import {
+  closeRedisCompatClient,
+  createRedisCompatClient,
+  RedisCompatKeys,
+} from "../redis-compat.js";
 
-const DATACLOUD_REDIS_KEY = "byai_gateway:sd:instances:byclaw-datacloud";
+const DATACLOUD_REDIS_KEY = "byclaw-datacloud";
 
 /**
  * TTL for the in-process cache, in milliseconds. Keeps Redis traffic sane
@@ -90,18 +93,14 @@ export async function resolveDatacloudMcpServerUrl(options?: {
     return cachedUrl;
   }
 
-  const cfg = readRedisConfig();
-  let redis: ReturnType<typeof createRedis>;
+  const key = RedisCompatKeys.serviceDiscoveryInstances(DATACLOUD_REDIS_KEY);
+  let redis: ReturnType<typeof createRedisCompatClient>;
   try {
-    // `createRedis` only forwards a subset of ioredis options; for timeout /
-    // retry tuning we rely on the node default TCP timeout and wrap the
-    // single HGETALL in `Promise.race` below.
-    redis = createRedis({
-      host: cfg.host,
-      port: cfg.port,
-      db: cfg.db,
-      username: cfg.username,
-      password: cfg.password,
+    redis = createRedisCompatClient({
+      lazyConnect: true,
+      enableOfflineQueue: false,
+      maxRetriesPerRequest: 1,
+      retryStrategy: () => null,
     });
   } catch {
     return "";
@@ -111,8 +110,9 @@ export async function resolveDatacloudMcpServerUrl(options?: {
   const bound = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 5_000;
 
   try {
+    await redis.connect();
     const hash = await Promise.race<Record<string, string>>([
-      redis.hgetall(DATACLOUD_REDIS_KEY) as Promise<Record<string, string>>,
+      redis.hgetall(key) as Promise<Record<string, string>>,
       new Promise<Record<string, string>>((_, reject) =>
         setTimeout(() => reject(new Error("datacloud SD lookup timed out")), bound),
       ),
@@ -126,7 +126,7 @@ export async function resolveDatacloudMcpServerUrl(options?: {
   } catch {
     return "";
   } finally {
-    await redis.quit().catch(() => undefined);
+    await closeRedisCompatClient(redis);
   }
 }
 

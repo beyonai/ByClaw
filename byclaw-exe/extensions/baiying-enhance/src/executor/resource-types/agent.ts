@@ -3,13 +3,15 @@ import { homedir } from "node:os";
 import fs from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import {
-  createRedis,
   GatewayDataEmitter,
   EventType,
   SseReasonMessageType,
   SseMessageType,
 } from "@byclaw/by-framework";
-import type { Redis } from "ioredis";
+import {
+  createByFrameworkRedisClient,
+  type RedisCompatClient,
+} from "../../redis-compat.js";
 import { GatewayClient } from "openclaw/plugin-sdk/gateway-runtime";
 import type { Capability, Dict, ExecutorResponse } from "../types.js";
 import { asString, isRecord } from "../types.js";
@@ -18,7 +20,7 @@ import { applyEnvAuthOverrides, mergeAuthHeaders, normalizeCustomHeaders } from 
 import { makeError } from "../errors.js";
 import { readSseEvents } from "../http.js";
 import { logBaiyingRequest, type BaiyingEnhanceLogger } from "../debug-channel.js";
-import { getCommonGatewayMetadata, readRedisConfig } from "../doc-shared.js";
+import { getCommonGatewayMetadata } from "../doc-shared.js";
 
 function resolvePersonalAgentDir(): string {
   const stateDir = process.env.OPENCLAW_STATE_DIR?.trim();
@@ -649,15 +651,8 @@ function extractTextContentFromEventData(data: Dict) {
   return content;
 }
 
-function createRedisInst() {
-  const config = readRedisConfig();
-  return createRedis({
-    host: config.host,
-    port: config.port,
-    db: config.db,
-    username: config.username,
-    password: config.password,
-  }) as Redis;
+function createRedisInst(): RedisCompatClient {
+  return createByFrameworkRedisClient();
 }
 
 function generateByFrameworkEmitter() {

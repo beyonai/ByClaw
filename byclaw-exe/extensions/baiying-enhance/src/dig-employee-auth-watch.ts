@@ -1,4 +1,9 @@
-import Redis from "ioredis";
+import {
+  closeRedisCompatClient,
+  createRedisCompatClient,
+  resolveRedisCompatConfig,
+  type RedisCompatClient,
+} from "./redis-compat.js";
 
 type LoggerLike = {
   info: (message: string) => void;
@@ -69,6 +74,13 @@ export function isRedisKeyspaceNotificationsEnabled(notifyKeyspaceEvents: string
   return /[K$]/.test(value);
 }
 
+export function shouldUseDigEmployeeAuthKeyspaceNotifications(
+  mode: "standalone" | "cluster",
+  notifyKeyspaceEvents: string,
+): boolean {
+  return mode !== "cluster" && isRedisKeyspaceNotificationsEnabled(notifyKeyspaceEvents);
+}
+
 function isSameSet(a: Set<string>, b: Set<string>): boolean {
   if (a.size !== b.size) {
     return false;
@@ -86,9 +98,10 @@ export function createDigEmployeeAuthWatch(params: {
   onChange: (authorizedIds: Set<string>) => Promise<void> | void;
 }): DigEmployeeAuthWatch {
   const userCode = process.env.USER_CODE?.trim() || "";
-  const host = process.env.REDIS_HOST?.trim();
-  const port = Number.parseInt(process.env.REDIS_PORT?.trim() || "", 10);
-  const db = Number.parseInt(process.env.REDIS_DATABASE?.trim() || "", 10);
+  const redisConfig = resolveRedisCompatConfig();
+  const host = redisConfig?.host;
+  const port = redisConfig?.port ?? Number.NaN;
+  const db = redisConfig?.db ?? Number.NaN;
   const configuredPollMs = Number.parseInt(process.env.BAIYING_DIG_AUTH_POLL_MS || "", 500);
   const connectTimeout = Math.max(
     500,
@@ -99,8 +112,8 @@ export function createDigEmployeeAuthWatch(params: {
     Number.parseInt(process.env.BAIYING_DIG_AUTH_KEY_MISSING_GRACE_MS || "15000", 10),
   );
   let pollMs = Number.isNaN(configuredPollMs) ? 5000 : Math.max(2000, configuredPollMs);
-  let redis: Redis | null = null;
-  let subscriber: Redis | null = null;
+  let redis: RedisCompatClient | null = null;
+  let subscriber: RedisCompatClient | null = null;
   let pollTimer: ReturnType<typeof setTimeout> | null = null;
   let stopped = false;
   let userId = "";
@@ -266,6 +279,7 @@ export function createDigEmployeeAuthWatch(params: {
       }
       if (
         !userCode ||
+        !redisConfig ||
         !host ||
         Number.isNaN(port) ||
         Number.isNaN(db) ||
@@ -276,69 +290,72 @@ export function createDigEmployeeAuthWatch(params: {
         );
         return;
       }
-      redis = new Redis({
-        host,
-        port,
-        db,
-        username: process.env.REDIS_USERNAME?.trim() || undefined,
-        password: process.env.REDIS_PASSWORD?.trim() || undefined,
+      redis = createRedisCompatClient({
         lazyConnect: true,
         enableOfflineQueue: false,
         connectTimeout,
         retryStrategy: () => null,
         maxRetriesPerRequest: 2,
       });
-      subscriber = new Redis({
-        host,
-        port,
-        db,
-        username: process.env.REDIS_USERNAME?.trim() || undefined,
-        password: process.env.REDIS_PASSWORD?.trim() || undefined,
-        lazyConnect: true,
-        enableOfflineQueue: false,
-        connectTimeout,
-        retryStrategy: () => null,
-        maxRetriesPerRequest: 2,
-      });
+      subscriber =
+        redisConfig.mode === "cluster"
+          ? null
+          : createRedisCompatClient({
+              lazyConnect: true,
+              enableOfflineQueue: false,
+              connectTimeout,
+              retryStrategy: () => null,
+              maxRetriesPerRequest: 2,
+            });
       try {
         await redis.connect();
-        await subscriber.connect();
+        await subscriber?.connect();
       } catch (err) {
         params.logger.warn(
           `baiying-enhance: dig-employee auth watch connect failed: ${
             err instanceof Error ? err.message : String(err)
           }`,
         );
-        await redis.quit().catch(() => undefined);
-        await subscriber.quit().catch(() => undefined);
+        await closeRedisCompatClient(redis);
+        await closeRedisCompatClient(subscriber);
         redis = null;
         subscriber = null;
         return;
       }
-      try {
-        const notifyReply = await redis.config("GET", "notify-keyspace-events");
-        const notifyValue = Array.isArray(notifyReply) ? String(notifyReply[1] ?? "") : "";
-        keyspaceEnabled = isRedisKeyspaceNotificationsEnabled(notifyValue);
-        if (!keyspaceEnabled) {
-          if (Number.isNaN(configuredPollMs)) {
-            pollMs = 2000;
-          }
-          params.logger.warn(
-            `baiying-enhance: Redis notify-keyspace-events is empty/disabled; dig-employee auth watch uses poll-only mode (interval=${pollMs}ms). Configure Redis with notify-keyspace-events including Kh$ for instant hash updates.`,
-          );
-        }
-      } catch (err) {
+      if (redisConfig.mode === "cluster") {
         keyspaceEnabled = false;
         if (Number.isNaN(configuredPollMs)) {
           pollMs = 2000;
         }
         params.logger.warn(
-          `baiying-enhance: unable to read Redis notify-keyspace-events; using poll-only mode (interval=${pollMs}ms): ${
-            err instanceof Error ? err.message : String(err)
-          }`,
+          `baiying-enhance: Redis Cluster detected; dig-employee auth watch uses poll-only mode (interval=${pollMs}ms)`,
         );
+      } else {
+        try {
+          const notifyReply = await redis.config("GET", "notify-keyspace-events");
+          const notifyValue = Array.isArray(notifyReply) ? String(notifyReply[1] ?? "") : "";
+          keyspaceEnabled = shouldUseDigEmployeeAuthKeyspaceNotifications(redisConfig.mode, notifyValue);
+          if (!keyspaceEnabled) {
+            if (Number.isNaN(configuredPollMs)) {
+              pollMs = 2000;
+            }
+            params.logger.warn(
+              `baiying-enhance: Redis notify-keyspace-events is empty/disabled; dig-employee auth watch uses poll-only mode (interval=${pollMs}ms). Configure Redis with notify-keyspace-events including Kh$ for instant hash updates.`,
+            );
+          }
+        } catch (err) {
+          keyspaceEnabled = false;
+          if (Number.isNaN(configuredPollMs)) {
+            pollMs = 2000;
+          }
+          params.logger.warn(
+            `baiying-enhance: unable to read Redis notify-keyspace-events; using poll-only mode (interval=${pollMs}ms): ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        }
       }
-      if (keyspaceEnabled) {
+      if (keyspaceEnabled && subscriber) {
         subscriber.on("pmessage", (_pattern, _channel, message) => {
           const event = normalizeId(message).toLowerCase();
           if (HASH_CHANGE_EVENTS.has(event)) {
@@ -359,8 +376,8 @@ export function createDigEmployeeAuthWatch(params: {
         clearTimeout(pollTimer);
         pollTimer = null;
       }
-      await subscriber?.quit().catch(() => undefined);
-      await redis?.quit().catch(() => undefined);
+      await closeRedisCompatClient(subscriber);
+      await closeRedisCompatClient(redis);
       subscriber = null;
       redis = null;
     },
