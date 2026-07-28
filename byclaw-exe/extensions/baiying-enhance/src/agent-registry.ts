@@ -60,12 +60,18 @@ function buildAimodelSecretProviderConfig(params: {
     source: "exec",
     command: params.command,
     args: params.args,
+    // The secret resolver runs in a child process, so every Redis topology setting must be
+    // forwarded explicitly. Otherwise a cluster-configured gateway can fall back to standalone.
     passEnv: [
       "REDIS_HOST",
       "REDIS_PORT",
       "REDIS_USERNAME",
       "REDIS_PASSWORD",
       "REDIS_DATABASE",
+      "REDIS_DB",
+      "REDIS_MODE",
+      "REDIS_CLUSTER_HOST",
+      "REDIS_KEY_SCHEMA_VERSION",
       "BAIYING_ENV_FILE",
       "OPENCLAW_STATE_DIR",
       "BAIYING_REDIS_JSON_CONNECT_TIMEOUT_MS",

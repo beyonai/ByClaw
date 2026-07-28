@@ -185,7 +185,7 @@
                 AND creator_id = #{qo.creatorId}
             </if>
             <if test="qo.keyword != null and qo.keyword != ''">
-                AND message_content LIKE REPLACE(REPLACE(#{qo.keyword}, '*', '%'), '?', '_')
+                AND UPPER(message_content) LIKE CONCAT('%', UPPER(REPLACE(REPLACE(#{qo.keyword}, '*', '%'), '?', '_')), '%')
             </if>
         </where>
         ORDER BY create_time DESC

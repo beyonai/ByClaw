@@ -373,7 +373,7 @@ export interface FileItem {
  * @param params.resourceId 资源ID（可选，用于指定数字员工等资源关联）
  * @returns Promise<FileItem[]> 文件列表数组
  */
-export const listUserSpace = async (params: { prefix: string; resourceId?: string | number }) => {
+export const listUserSpace = async (params: { prefix: string; resourceId?: string | number; keyword?: string }) => {
   return await POST<any>('/byaiService/tool/listUserSpace', params);
 };
 
