@@ -1,20 +1,39 @@
 import { THINKING_LEVELS } from "@byclaw/by-conductor";
 
 /** HTTP 输入校验集中在此文件，路由只保留业务流程。 */
+
+/**
+ * 单个 HTTP 附件引用。HTTP 入口只接受 fileId 类引用，**不接受 `url`/`path`**
+ * （由 schema 的 additionalProperties:false 直接拒绝），避免 SSRF 与宿主机路径暴露。
+ */
+const attachmentItemSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    id: { type: "string", minLength: 1, maxLength: 200 },
+    name: { type: "string", minLength: 1, maxLength: 500 },
+    mediaType: { type: "string", maxLength: 200 },
+    size: { type: "integer", minimum: 0 },
+    sourceType: { type: "string", maxLength: 100 },
+    useType: { type: "string", maxLength: 100 },
+    datasetId: { type: "string", maxLength: 200 },
+  },
+} as const;
+
 export const messageBodySchema = {
   type: "object",
   additionalProperties: false,
-  required: ["message"],
   properties: {
-    message: { type: "string", minLength: 1, maxLength: 100_000 },
+    // message 可选：允许"仅附件"请求；"至少一个非空"由 ingress 守门。
+    message: { type: "string", minLength: 0, maxLength: 100_000 },
     thinkingLevel: { type: "string", enum: THINKING_LEVELS },
+    attachments: { type: "array", maxItems: 20, items: attachmentItemSchema },
   },
 } as const;
 
 export const createSessionBodySchema = {
   type: "object",
   additionalProperties: false,
-  required: ["message"],
   properties: {
     ...messageBodySchema.properties,
     context: {

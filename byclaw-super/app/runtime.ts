@@ -14,10 +14,16 @@ import {
 } from "@byclaw/by-conductor";
 import { createRedis } from "@byclaw/by-framework";
 import { OpenClawByFrameworkConnector } from "@byclaw/connector-openclaw-by-framework";
+import { ThirdPartyA2aConnector } from "@byclaw/connector-third-party-a2a";
+import { ExecutionDescriptorClient } from "@byclaw/connector-third-party-common";
+import { ThirdPartyInterfaceSseConnector } from "@byclaw/connector-third-party-interface-sse";
+import { ThirdPartyPageConnector } from "@byclaw/connector-third-party-page";
 import { PostgresDatabase } from "@byclaw/storage-postgres";
 import type { FastifyInstance } from "fastify";
 import { createBeyondTokenVerifier } from "./auth/beyond-token.js";
 import { ByClawBeAgentCatalog } from "./business/agent-catalog.js";
+import { ByClawBeGroupChatContextProvider } from "./business/group-chat-context.js";
+import { ByAiAttachmentResolver } from "./business/byai-attachment-resolver.js";
 import { loadConfig, type AppConfig } from "./config/index.js";
 import { RedisByClawBeEndpointResolver } from "./business/endpoint-resolver.js";
 import { RunIngressService } from "./ingress/run-ingress-service.js";
@@ -194,7 +200,16 @@ export async function createApplication(config = loadConfig()): Promise<Applicat
     }
   }
 
-  function initService() {
+  function initService(endpointResolver: RedisByClawBeEndpointResolver) {
+    // 附件读取边界：按 fileId 经 BE 下载，凭 Run 短期凭证鉴权；契约见 .dev/attachments-be-read-contract.md。
+    const attachmentResolver = new ByAiAttachmentResolver({
+      ...config.byClawBe,
+      endpointResolver,
+      ...(config.attachments.tempDir ? { tempDir: config.attachments.tempDir } : {}),
+      maxFileBytes: config.attachments.maxFileBytes,
+      maxTextChars: config.attachments.maxTextChars,
+      maxStructureChars: config.attachments.maxStructureChars,
+    });
     const runService = new RunService(
       sessionRepository,
       runRepository,
@@ -204,18 +219,22 @@ export async function createApplication(config = loadConfig()): Promise<Applicat
       leaders,
       Date.now,
       randomUUID,
-      buildRunServiceOptions(config, database),
+      {
+        ...buildRunServiceOptions(config, database),
+        attachmentResolver,
+      },
     );
     const runIngress = new RunIngressService(
       runService,
       createBeyondTokenVerifier(config.auth),
       agentCatalog,
       config.runCredentialMaxTtlMs,
+      groupChatContexts,
     );
     return { runService, runIngress };
   }
 
-  function initPi() {
+  function initPi(endpointResolver: RedisByClawBeEndpointResolver) {
     const delegationService = new DelegationService(
       connectors,
       delegationRepository,
@@ -227,14 +246,23 @@ export async function createApplication(config = loadConfig()): Promise<Applicat
     // 数字员工授权列表由 ByClaw BE 实时提供，外部调用方不再传入 agentList。
     const agentCatalog = new ByClawBeAgentCatalog({
       ...config.byClawBe,
-      endpointResolver: new RedisByClawBeEndpointResolver(redis),
+      endpointResolver,
+      thirdPartyDirect: {
+        mode: config.thirdPartyAgents.directMode,
+        allowlist: config.thirdPartyAgents.allowlist,
+      },
     });
-    return { delegationService, leaders, agentCatalog };
+    const groupChatContexts = new ByClawBeGroupChatContextProvider({
+      ...config.byClawBe,
+      endpointResolver,
+    });
+    return { delegationService, leaders, agentCatalog, groupChatContexts };
   }
 
   function initConnector() {
     const connectors = new ConnectorRegistry();
     const redis = createRedis(config.redis);
+    const endpointResolver = new RedisByClawBeEndpointResolver(redis);
     // 初始化 openclaw 连接器，目前使用 ByFramework 来连接。
     // Connector 回调的 sourceAgentType 必须与入站 Worker 的逻辑路由名一致。
     const openClaw = new OpenClawByFrameworkConnector({
@@ -242,7 +270,46 @@ export async function createApplication(config = loadConfig()): Promise<Applicat
       sourceAgentType: config.worker.agentType,
     });
     connectors.register(openClaw);
-    return { connectors, redis, openClaw };
+    const descriptors = new ExecutionDescriptorClient({
+      ...config.byClawBe,
+      pathPrefix: config.thirdPartyAgents.descriptorPath,
+      ...(config.thirdPartyAgents.serviceCredential
+        ? {
+            serviceCredential:
+              config.thirdPartyAgents.serviceCredential,
+          }
+        : {}),
+      resolveBaseUrl: () => endpointResolver.resolve(),
+      allowInsecureExternalHttp:
+        config.thirdPartyAgents.allowInsecureExternalHttp,
+      allowedExternalHosts:
+        config.thirdPartyAgents.allowedExternalHosts,
+    });
+    connectors.register(
+      new ThirdPartyInterfaceSseConnector({
+        descriptors,
+        requestTimeoutMs:
+          config.thirdPartyAgents.requestTimeoutMs,
+      }),
+    );
+    connectors.register(
+      new ThirdPartyA2aConnector({
+        descriptors,
+        requestTimeoutMs:
+          config.thirdPartyAgents.requestTimeoutMs,
+        allowInsecureExternalHttp:
+          config.thirdPartyAgents.allowInsecureExternalHttp,
+        allowedExternalHosts:
+          config.thirdPartyAgents.allowedExternalHosts,
+      }),
+    );
+    connectors.register(new ThirdPartyPageConnector({ descriptors }));
+    return {
+      connectors,
+      redis,
+      openClaw,
+      endpointResolver,
+    };
   }
 
   async function initDatabase() {
@@ -262,13 +329,23 @@ export async function createApplication(config = loadConfig()): Promise<Applicat
     await initDatabase();
 
   // 2) 出站传输：Connector 与 ByClaw BE 服务发现共用同一个 Redis 连接。
-  const { connectors, redis, openClaw } = initConnector();
+  const {
+    connectors,
+    redis,
+    openClaw,
+    endpointResolver,
+  } = initConnector();
 
   // 3) 编排核心：委派服务 + Pi Leader + 数字员工授权目录。
-  const { delegationService, leaders, agentCatalog } = initPi();
+  const {
+    delegationService,
+    leaders,
+    agentCatalog,
+    groupChatContexts,
+  } = initPi(endpointResolver);
 
   // 4) Run 流水线：RunService（快照授权、调度 Leader）+ 入站鉴权与 Run 创建。
-  const { runService, runIngress } = initService();
+  const { runService, runIngress } = initService(endpointResolver);
 
   // 5) HTTP 入口：/ready 同时要求 Pi、全部已注册 Connector、数据库与 Worker 健康。
   let workerRuntime: ByFrameworkWorkerRuntime | undefined;

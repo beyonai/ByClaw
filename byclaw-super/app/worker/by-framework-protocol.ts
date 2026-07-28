@@ -1,9 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { hostname } from "node:os";
 import {
+  parseGroupChatRef,
+  type GroupChatRefV1,
   THINKING_LEVELS,
   isThinkingLevel,
+  normalizeRunAttachments,
   type CallerPrincipal,
+  type RunAttachment,
   type RunEvent,
   type ThinkingLevel,
 } from "@byclaw/by-conductor";
@@ -42,6 +46,84 @@ export function extractMessage(content: unknown): string {
   return extractMessage(content.content);
 }
 
+/** Worker 从用户输入解析出的文本与附件。 */
+export interface WorkerUserInput {
+  message: string;
+  attachments: RunAttachment[];
+}
+
+/**
+ * 从 AskAgent content 同时提取最后一条用户消息的文本与附件。
+ *
+ * 规则：
+ * - 兼容纯字符串 content。
+ * - 数组中选最后一条 `role === "user"`，从其 content 的同一对象读 text 与 files，
+ *   避免跨历史消息拼接附件；无 user 角色时回退到旧递归文本提取（不带附件）。
+ * - files 存在但格式非法时由 normalizeRunAttachments 抛错，调用方转为失败事件，
+ *   不静默丢弃。
+ * - message 可能为空（仅有附件），由 ingress 的 resolveRunMessage 兜底成稳定提示。
+ */
+export function extractUserInput(content: unknown): WorkerUserInput {
+  if (typeof content === "string") {
+    return { message: content.trim(), attachments: [] };
+  }
+  if (Array.isArray(content)) {
+    for (let index = content.length - 1; index >= 0; index -= 1) {
+      const entry = content[index];
+      if (isRecord(entry) && entry.role === "user") {
+        return readTextAndFiles(entry.content);
+      }
+    }
+    return { message: extractMessage(content), attachments: [] };
+  }
+  if (isRecord(content)) {
+    return readTextAndFiles(content);
+  }
+  return { message: "", attachments: [] };
+}
+
+/** 从 text/files 节点（或其 .content 子节点）读取文本与附件。 */
+function readTextAndFiles(node: unknown): WorkerUserInput {
+  if (typeof node === "string") {
+    return { message: node.trim(), attachments: [] };
+  }
+  if (!isRecord(node)) {
+    return { message: "", attachments: [] };
+  }
+  // 下钻到承载 text/files 的节点：当前节点有 text 或 files 即采用，否则沿 .content 查找
+  const target = hasTextOrFiles(node) ? node : resolveContentNode(node.content);
+  if (!target) {
+    return { message: extractMessage(node), attachments: [] };
+  }
+  const text = typeof target.text === "string" ? target.text.trim() : "";
+  const files = target.files;
+  if (files === undefined || files === null) {
+    return { message: text, attachments: [] };
+  }
+  return {
+    message: text,
+    attachments: normalizeRunAttachments(files, "by-framework"),
+  };
+}
+
+/** 节点是否承载 text 或 files（任一即可，支持"仅附件"消息）。 */
+function hasTextOrFiles(node: Record<string, unknown>): boolean {
+  return typeof node.text === "string" || "files" in node;
+}
+
+/** 沿 .content 下钻到承载 text/files 的节点。 */
+function resolveContentNode(
+  node: unknown,
+): Record<string, unknown> | undefined {
+  if (!isRecord(node)) {
+    return undefined;
+  }
+  if (hasTextOrFiles(node)) {
+    return node;
+  }
+  return resolveContentNode(node.content);
+}
+
 /** 按大小写不敏感方式从 command metadata 或 extraPayload 读取字符串字段。 */
 export function commandString(
   command: {
@@ -68,6 +150,23 @@ export function commandThinkingLevel(command: AskAgentCommand): ThinkingLevel {
   throw new Error(
     `AskAgent extraPayload.thinkingLevel must be one of ${THINKING_LEVELS.join(", ")}`,
   );
+}
+
+/** 只接受群聊定位引用；Gateway 透传的历史正文不会进入 Super。 */
+export function commandGroupChatRef(
+  command: AskAgentCommand,
+): GroupChatRefV1 | undefined {
+  const value = command.extraPayload.groupChat;
+  if (value === undefined) {
+    return undefined;
+  }
+  const reference = parseGroupChatRef(value);
+  if (reference.conversationKey !== command.header.sessionId) {
+    throw new Error(
+      "AskAgent extraPayload.groupChat.conversationKey must match header.sessionId",
+    );
+  }
+  return reference;
 }
 
 /**

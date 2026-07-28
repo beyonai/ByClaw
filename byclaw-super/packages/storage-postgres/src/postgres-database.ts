@@ -1,7 +1,10 @@
 import {
   createPiSessionCheckpoint,
+  fingerprintGroupChatContext,
   isThinkingLevel,
+  LEADER_CHECKPOINT_TOOL_NAMES,
   parseSessionContext,
+  parseGroupChatContext,
   validatePiSessionCheckpoint,
   type AgentCapabilityCardRepository,
   type AgentCapabilityCardUpsert,
@@ -15,6 +18,8 @@ import {
   type LeaderCheckpointStore,
   type PiSessionCheckpoint,
   type Run,
+  type RunAttachment,
+  type RunIngressContextV1,
   type RunEvent,
   type RunEventStore,
   type RunExecutionClaim,
@@ -50,6 +55,7 @@ const TERMINAL_EVENT_TYPES = new Set([
   "run.failed",
   "run.cancelled",
 ]);
+const ALLOWED_PI_TOOL_NAMES = new Set<string>(LEADER_CHECKPOINT_TOOL_NAMES);
 
 export interface PostgresDatabaseConfig {
   host: string;
@@ -1643,7 +1649,7 @@ function validateCheckpointLimits(
   }
 }
 
-/** 当前 Leader 只暴露 delegateAgent，数据库恢复时同样 fail closed。 */
+/** 仅允许运行时显式暴露的 Leader 工具进入数据库 checkpoint，未知工具继续 fail closed。 */
 function validatePiEntryContent(value: unknown): void {
   if (Array.isArray(value)) {
     for (const item of value) {
@@ -1657,15 +1663,13 @@ function validatePiEntryContent(value: unknown): void {
   const record = value as Record<string, unknown>;
   if (
     record.type === "toolCall" &&
-    record.name !== "delegateAgent" &&
-    record.name !== "askUserQuestion"
+    !ALLOWED_PI_TOOL_NAMES.has(String(record.name))
   ) {
     throw new Error(`Unsupported Pi tool call: ${String(record.name)}`);
   }
   if (
     record.role === "toolResult" &&
-    record.toolName !== "delegateAgent" &&
-    record.toolName !== "askUserQuestion"
+    !ALLOWED_PI_TOOL_NAMES.has(String(record.toolName))
   ) {
     throw new Error(`Unsupported Pi tool result: ${String(record.toolName)}`);
   }
@@ -1696,6 +1700,8 @@ function runValues(run: Run): unknown[] {
     run.input,
     run.thinkingLevel ?? "off",
     JSON.stringify(run.agentList),
+    JSON.stringify(run.attachments ?? []),
+    run.ingressContext ? JSON.stringify(run.ingressContext) : null,
     run.status,
     run.baseContextRevision,
     run.attemptNo,
@@ -1759,11 +1765,13 @@ async function writeRun(
   }
   await client.query(
     `INSERT INTO ${table(schema, "runs")} (
-       id, session_id, input, thinking_level, agent_snapshot, status, base_context_revision,
+       id, session_id, input, thinking_level, agent_snapshot, attachments, ingress_context,
+       status, base_context_revision,
        attempt_no, execution_stage, lease_fencing_token, final_answer,
        error_message, version, created_at, updated_at, started_at, finished_at
      ) VALUES (
-       $1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
+       $1, $2, $3, $4, $5::jsonb, $6::jsonb, $7::jsonb, $8, $9, $10, $11,
+       $12, $13, $14, $15, $16, $17, $18, $19
      )`,
     values,
   );
@@ -1774,10 +1782,13 @@ function mapRun(row: QueryResultRow): Run {
   if (!isThinkingLevel(thinkingLevel)) {
     throw new Error(`Invalid persisted Run thinking level: ${String(thinkingLevel)}`);
   }
+  const ingressContext = readIngressContext(row.ingress_context);
   return {
     id: text(row.id),
     sessionId: text(row.session_id),
     input: text(row.input),
+    attachments: readAttachments(row.attachments),
+    ...(ingressContext ? { ingressContext } : {}),
     thinkingLevel,
     agentList: row.agent_snapshot as Run["agentList"],
     status: row.status as Run["status"],
@@ -1837,6 +1848,50 @@ function mapRunEvent(row: QueryResultRow): RunEvent {
     runId: text(row.run_id),
     type: row.type as RunEvent["type"],
     data: row.data as Record<string, JsonValue>,
+  };
+}
+
+/**
+ * 读取并校验持久化的附件：必须是数组，且每个元素至少有字符串 id/name，否则整体降级为 []。
+ * 数据库异常 JSON 不得直接进入 Connector。
+ */
+function readAttachments(raw: unknown): RunAttachment[] {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  return raw.filter(
+    (entry): entry is RunAttachment =>
+      entry !== null &&
+      typeof entry === "object" &&
+      !Array.isArray(entry) &&
+      typeof (entry as Record<string, unknown>).id === "string" &&
+      typeof (entry as Record<string, unknown>).name === "string",
+  );
+}
+
+/** 持久化的入口上下文仍按公开契约重新校验，避免损坏 JSON 进入模型上下文。 */
+function readIngressContext(raw: unknown): RunIngressContextV1 | undefined {
+  if (raw === null || raw === undefined) {
+    return undefined;
+  }
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error("Invalid persisted Run ingress context");
+  }
+  const record = raw as Record<string, unknown>;
+  if (record.groupChat === undefined) {
+    return undefined;
+  }
+  const groupChat = parseGroupChatContext(record.groupChat);
+  const fingerprint = fingerprintGroupChatContext(groupChat);
+  if (
+    record.groupChatFingerprint !== undefined &&
+    record.groupChatFingerprint !== fingerprint
+  ) {
+    throw new Error("Persisted Run group chat context fingerprint mismatch");
+  }
+  return {
+    groupChat,
+    groupChatFingerprint: fingerprint,
   };
 }
 

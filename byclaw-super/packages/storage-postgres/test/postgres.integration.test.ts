@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  fingerprintGroupChatContext,
   ConnectorRegistry,
   DelegationService,
   RunService,
@@ -100,7 +101,14 @@ suite("PostgreSQL persistence integration", () => {
       }),
     ).resolves.toBe(second.id);
 
-    const run = queuedRun(first.id, "high");
+    const groupChat = groupChatContext();
+    const run = {
+      ...queuedRun(first.id, "high"),
+      ingressContext: {
+        groupChat,
+        groupChatFingerprint: fingerprintGroupChatContext(groupChat),
+      },
+    };
     await database.runs.createWithEvent?.(run, {
       runId: run.id,
       timestamp: Date.now(),
@@ -167,6 +175,12 @@ suite("PostgreSQL persistence integration", () => {
         id: run.id,
         input: "hello",
         thinkingLevel: "high",
+        ingressContext: {
+          groupChat: {
+            conversationKey: "conversation-1",
+            snapshot: { beforeMessageId: "message-2" },
+          },
+        },
         finalAnswer: "done",
       }],
       hasMore: false,
@@ -248,6 +262,10 @@ suite("PostgreSQL persistence integration", () => {
       data: { status: "QUEUED" },
     });
     const entryId = randomUUID();
+    const inspectCallEntryId = randomUUID();
+    const inspectResultEntryId = randomUUID();
+    const lsCallEntryId = randomUUID();
+    const lsResultEntryId = randomUUID();
     const checkpoint = createPiSessionCheckpoint({
       piSdkVersion: "0.80.10",
       header: {
@@ -257,18 +275,74 @@ suite("PostgreSQL persistence integration", () => {
         timestamp: new Date().toISOString(),
         cwd: "/srv/byclaw-super",
       },
-      entries: [{
-        type: "message",
-        id: entryId,
-        parentId: null,
-        timestamp: new Date().toISOString(),
-        message: {
-          role: "user",
-          content: "persistent-context",
-          timestamp: Date.now(),
+      entries: [
+        {
+          type: "message",
+          id: entryId,
+          parentId: null,
+          timestamp: new Date().toISOString(),
+          message: {
+            role: "user",
+            content: "persistent-context",
+            timestamp: Date.now(),
+          },
         },
-      }] as PiSessionCheckpoint["entries"],
-      activeLeafId: entryId,
+        {
+          type: "message",
+          id: inspectCallEntryId,
+          parentId: entryId,
+          timestamp: new Date().toISOString(),
+          message: {
+            role: "assistant",
+            content: [{
+              type: "toolCall",
+              id: "inspect-call",
+              name: "inspectAttachment",
+              arguments: { attachmentId: "file-1" },
+            }],
+          },
+        },
+        {
+          type: "message",
+          id: inspectResultEntryId,
+          parentId: inspectCallEntryId,
+          timestamp: new Date().toISOString(),
+          message: {
+            role: "toolResult",
+            toolCallId: "inspect-call",
+            toolName: "inspectAttachment",
+            content: [{ type: "text", text: "download failed" }],
+          },
+        },
+        {
+          type: "message",
+          id: lsCallEntryId,
+          parentId: inspectResultEntryId,
+          timestamp: new Date().toISOString(),
+          message: {
+            role: "assistant",
+            content: [{
+              type: "toolCall",
+              id: "ls-call",
+              name: "ls",
+              arguments: {},
+            }],
+          },
+        },
+        {
+          type: "message",
+          id: lsResultEntryId,
+          parentId: lsCallEntryId,
+          timestamp: new Date().toISOString(),
+          message: {
+            role: "toolResult",
+            toolCallId: "ls-call",
+            toolName: "ls",
+            content: [{ type: "text", text: "empty directory" }],
+          },
+        },
+      ] as PiSessionCheckpoint["entries"],
+      activeLeafId: lsResultEntryId,
     });
 
     await database.checkpoints.stagePending({
@@ -429,6 +503,35 @@ function queuedRun(sessionId: string, thinkingLevel: ThinkingLevel = "off"): Run
     version: 0,
     createdAt: now,
     updatedAt: now,
+  };
+}
+
+function groupChatContext() {
+  return {
+    schemaVersion: "byclaw.group-chat-context/v1" as const,
+    conversationKey: "conversation-1",
+    snapshot: {
+      beforeMessageId: "message-2",
+      generatedAt: 1_000,
+    },
+    messages: [
+      {
+        messageId: "message-1",
+        sequence: 1,
+        createdAt: 100,
+        role: "assistant" as const,
+        speaker: {
+          type: "agent" as const,
+          agentId: "agent-a",
+          agentName: "Agent A",
+        },
+        content: "A 的结论",
+      },
+    ],
+    truncation: {
+      truncated: false,
+      omittedMessageCount: 0,
+    },
   };
 }
 

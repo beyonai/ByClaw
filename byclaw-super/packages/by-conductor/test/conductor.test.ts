@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  ATTACHMENT_INSPECTION_ERROR_CODES,
+  AttachmentInspectionError,
   ConnectorNotFoundError,
   ConnectorRegistry,
   DelegationService,
@@ -12,13 +14,18 @@ import {
   UnauthorizedAgentError,
   type AgentConnector,
   type AgentProfile,
+  type AttachmentInspection,
+  type AttachmentResolver,
   type ConnectorEvent,
+  type ExecutionCredential,
   type ExternalExecutionRef,
   type ExecutionCredentialRepository,
+  type GroupChatContextV1,
   type LeaderRunInput,
   type LeaderSession,
   type LeaderSessionFactory,
   type Run,
+  type RunAttachment,
   type Session,
 } from "../src/index.js";
 
@@ -517,6 +524,10 @@ describe("RunService", () => {
       message: "first-message",
       thinkingLevel: "high",
       agentList: [],
+      ingressContext: {
+        groupChat: groupChatContext(),
+        groupChatFingerprint: "frozen-fingerprint",
+      },
     });
 
     expect(run.thinkingLevel).toBe("high");
@@ -540,6 +551,11 @@ describe("RunService", () => {
       },
     ]);
     expect(leaderFactory.currentTimes[0]).toEqual(expect.any(Number));
+    expect(leaderFactory.groupChatContexts).toEqual([groupChatContext()]);
+    expect((await service.getRun(run.id))?.ingressContext).toEqual({
+      groupChat: groupChatContext(),
+      groupChatFingerprint: "frozen-fingerprint",
+    });
     leaderFactory.release("first-message", "done");
     await service.dispose();
   });
@@ -962,6 +978,271 @@ describe("RunService", () => {
   });
 });
 
+describe("RunService inspectAttachment 接线", () => {
+  const attachmentA: RunAttachment = {
+    id: "123",
+    name: "a.txt",
+    mediaType: "text/plain",
+    size: 5,
+    provenance: "http",
+  };
+
+  /** 组装带附件 Resolver 的 RunService，并捕获 Leader 收到的运行输入。 */
+  function createInspectHarness(resolver?: AttachmentResolver) {
+    const sessions = new InMemorySessionRepository();
+    const runs = new InMemoryRunRepository(sessions);
+    const delegations = new InMemoryDelegationRepository();
+    const events = new InMemoryRunEventStore();
+    const registry = new ConnectorRegistry();
+    registry.register(
+      fakeConnector(async function* () {
+        yield completed("ok");
+      }),
+    );
+    const delegationService = new DelegationService(registry, delegations, events, 1_000);
+    const captured: { input?: LeaderRunInput } = {};
+    const leaders: LeaderSessionFactory = {
+      async create() {
+        return {
+          contextRevision: 0,
+          run: async (leaderInput: LeaderRunInput) => {
+            captured.input = leaderInput;
+            return { text: "done" };
+          },
+          abort: async () => undefined,
+          checkpoint: () => undefined,
+          markCommitted: () => undefined,
+          dispose: () => undefined,
+        };
+      },
+      async health() {
+        return { healthy: true };
+      },
+    };
+    const service = new RunService(
+      sessions,
+      runs,
+      delegations,
+      events,
+      delegationService,
+      leaders,
+      undefined,
+      undefined,
+      resolver ? { attachmentResolver: resolver } : {},
+    );
+    return { captured, service };
+  }
+
+  /** 启动一个携带附件与凭证的 Run 并等待完成，返回捕获的 Leader 输入。 */
+  async function runWithAttachments(
+    harness: ReturnType<typeof createInspectHarness>,
+    metadata?: Record<string, unknown>,
+  ) {
+    const session = await harness.service.createSession({
+      owner: { userCode: "user-1" },
+    });
+    const run = await harness.service.createRun({
+      sessionId: session.id,
+      message: "read it",
+      agentList: [],
+      attachments: [attachmentA],
+      ...(metadata ? { metadata } : {}),
+    });
+    await waitFor(async () => {
+      const current = await harness.service.getRun(run.id);
+      return current?.status === "COMPLETED";
+    });
+    expect(harness.captured.input).toBeDefined();
+    return { input: harness.captured.input!, session, run };
+  }
+
+  it("注入 Resolver 时 Leader 输入携带附件与 inspectAttachment 回调", async () => {
+    const inspect = vi.fn(
+      async (
+        args: Parameters<AttachmentResolver["inspect"]>[0],
+      ): Promise<AttachmentInspection> => ({
+        attachmentId: args.attachment.id,
+        name: args.attachment.name,
+        mode: args.mode,
+        text: "bounded",
+        truncated: false,
+      }),
+    );
+    const harness = createInspectHarness({ inspect });
+    const { input, session } = await runWithAttachments(harness, {
+      "Beyond-Token": "token-1",
+    });
+
+    expect(input.attachments).toEqual([attachmentA]);
+    expect(input.inspectAttachment).toBeDefined();
+    const inspection = await input.inspectAttachment!({ attachmentId: "123" });
+    expect(inspection.text).toBe("bounded");
+    expect(inspect).toHaveBeenCalledOnce();
+    const call = inspect.mock.calls[0]![0];
+    expect(call.attachment).toEqual(attachmentA);
+    expect(call.principal).toEqual(session.owner);
+    expect(call.credential).toBe("token-1");
+    expect(call.mode).toBe("text");
+    await harness.service.dispose();
+  });
+
+  it("显式 mode 透传给 Resolver", async () => {
+    const inspect = vi.fn(
+      async (
+        args: Parameters<AttachmentResolver["inspect"]>[0],
+      ): Promise<AttachmentInspection> => ({
+        attachmentId: args.attachment.id,
+        name: args.attachment.name,
+        mode: args.mode,
+        truncated: false,
+      }),
+    );
+    const harness = createInspectHarness({ inspect });
+    const { input } = await runWithAttachments(harness, {
+      "Beyond-Token": "token-1",
+    });
+    await input.inspectAttachment!({ attachmentId: "123", mode: "structure" });
+    expect(inspect.mock.calls[0]![0].mode).toBe("structure");
+    await harness.service.dispose();
+  });
+
+  it("attachmentId 不在本轮附件集合时拒绝且不触达 Resolver", async () => {
+    const inspect = vi.fn() as unknown as AttachmentResolver["inspect"];
+    const harness = createInspectHarness({ inspect });
+    const { input } = await runWithAttachments(harness, {
+      "Beyond-Token": "token-1",
+    });
+    await expect(
+      input.inspectAttachment!({ attachmentId: "not-in-run" }),
+    ).rejects.toMatchObject({
+      name: "AttachmentInspectionError",
+      code: ATTACHMENT_INSPECTION_ERROR_CODES.NOT_FOUND,
+    });
+    expect(inspect).not.toHaveBeenCalled();
+    await harness.service.dispose();
+  });
+
+  it("缺少 Beyond-Token 凭证时返回 CREDENTIAL_MISSING", async () => {
+    const inspect = vi.fn() as unknown as AttachmentResolver["inspect"];
+    const harness = createInspectHarness({ inspect });
+    const { input } = await runWithAttachments(harness);
+    await expect(
+      input.inspectAttachment!({ attachmentId: "123" }),
+    ).rejects.toMatchObject({
+      name: "AttachmentInspectionError",
+      code: ATTACHMENT_INSPECTION_ERROR_CODES.CREDENTIAL_MISSING,
+    });
+    expect(inspect).not.toHaveBeenCalled();
+    await harness.service.dispose();
+  });
+
+  it("未注入 Resolver 时 inspectAttachment 不暴露", async () => {
+    const harness = createInspectHarness();
+    const { input } = await runWithAttachments(harness, {
+      "Beyond-Token": "token-1",
+    });
+    expect(input.attachments).toEqual([attachmentA]);
+    expect(input.inspectAttachment).toBeUndefined();
+    await harness.service.dispose();
+  });
+
+  it("接管路径从凭证仓库恢复 Beyond-Token，附件解析可基于持久 Run 重做", async () => {
+    const inspect = vi.fn(
+      async (
+        args: Parameters<AttachmentResolver["inspect"]>[0],
+      ): Promise<AttachmentInspection> => ({
+        attachmentId: args.attachment.id,
+        name: args.attachment.name,
+        mode: args.mode,
+        text: "resumed",
+        truncated: false,
+      }),
+    );
+    const sessions = new InMemorySessionRepository();
+    const runs = new InMemoryRunRepository(sessions);
+    const delegations = new InMemoryDelegationRepository();
+    const events = new InMemoryRunEventStore();
+    const registry = new ConnectorRegistry();
+    registry.register(
+      fakeConnector(async function* () {
+        yield completed("ok");
+      }),
+    );
+    const stored = new Map<string, ExecutionCredential>();
+    const credentials: ExecutionCredentialRepository = {
+      save: async (credential) => {
+        stored.set(credential.runId, credential);
+      },
+      loadForLease: async ({ runId }) => stored.get(runId),
+      delete: async (runId) => {
+        stored.delete(runId);
+      },
+      deleteExpired: async () => 0,
+    };
+    const captured: { input?: LeaderRunInput } = {};
+    const leaders: LeaderSessionFactory = {
+      async create() {
+        return {
+          contextRevision: 0,
+          run: async (leaderInput: LeaderRunInput) => {
+            captured.input = leaderInput;
+            return { text: "done" };
+          },
+          abort: async () => undefined,
+          checkpoint: () => undefined,
+          markCommitted: () => undefined,
+          dispose: () => undefined,
+        };
+      },
+      async health() {
+        return { healthy: true };
+      },
+    };
+    const service = new RunService(
+      sessions,
+      runs,
+      delegations,
+      events,
+      new DelegationService(registry, delegations, events, 1_000),
+      leaders,
+      Date.now,
+      undefined,
+      {
+        executionQueue: new InMemoryRunExecutionQueue(),
+        credentials,
+        attachmentResolver: { inspect },
+        queuePollMs: 5,
+        instanceId: "takeover-instance",
+      },
+    );
+    const session = await service.createSession({
+      owner: { userCode: "user-9" },
+    });
+    // 不传 metadata：模拟另一实例接管，内存中没有 ephemeral Beyond-Token，
+    // 执行路径必须经 credentials.loadForLease 恢复凭证。
+    const run = await service.createRun({
+      sessionId: session.id,
+      message: "takeover",
+      agentList: [],
+      attachments: [attachmentA],
+      executionCredential: { secret: "lease-secret", expiresAt: Date.now() + 60_000 },
+    });
+
+    service.start();
+    await waitFor(async () => {
+      const current = await service.getRun(run.id);
+      return current?.status === "COMPLETED";
+    });
+
+    const input = captured.input!;
+    expect(input.attachments).toEqual([attachmentA]);
+    const inspection = await input.inspectAttachment!({ attachmentId: "123" });
+    expect(inspection.text).toBe("resumed");
+    expect(inspect.mock.calls[0]![0].credential).toBe("lease-secret");
+    await service.dispose();
+  });
+});
+
 function createRunService(leaders: LeaderSessionFactory) {
   const sessions = new InMemorySessionRepository();
   const runs = new InMemoryRunRepository(sessions);
@@ -990,6 +1271,7 @@ class ControlledLeaderFactory implements LeaderSessionFactory {
   readonly thinkingLevels: LeaderRunInput["thinkingLevel"][] = [];
   readonly sessionContexts: LeaderRunInput["sessionContext"][] = [];
   readonly currentTimes: number[] = [];
+  readonly groupChatContexts: Array<GroupChatContextV1 | undefined> = [];
   readonly createdSessionIds: string[] = [];
   aborted = 0;
   readonly #releases = new Map<string, (value: string) => void>();
@@ -1003,6 +1285,7 @@ class ControlledLeaderFactory implements LeaderSessionFactory {
         this.thinkingLevels.push(input.thinkingLevel);
         this.sessionContexts.push(input.sessionContext);
         this.currentTimes.push(input.currentTime);
+        this.groupChatContexts.push(input.groupChatContext);
         await input.onDelta(`${input.message}:delta`);
         const text = await new Promise<string>((resolve, reject) => {
           this.#releases.set(input.message, resolve);
@@ -1034,6 +1317,35 @@ class ControlledLeaderFactory implements LeaderSessionFactory {
     }
     release(text);
   }
+}
+
+function groupChatContext(): GroupChatContextV1 {
+  return {
+    schemaVersion: "byclaw.group-chat-context/v1",
+    conversationKey: "conversation-1",
+    snapshot: {
+      beforeMessageId: "message-2",
+      generatedAt: 1_000,
+    },
+    messages: [
+      {
+        messageId: "message-1",
+        sequence: 1,
+        createdAt: 100,
+        role: "assistant",
+        speaker: {
+          type: "agent",
+          agentId: "agent-a",
+          agentName: "Agent A",
+        },
+        content: "A 的结论",
+      },
+    ],
+    truncation: {
+      truncated: false,
+      omittedMessageCount: 0,
+    },
+  };
 }
 
 function fakeConnector(events: () => AsyncIterable<ConnectorEvent>): AgentConnector {

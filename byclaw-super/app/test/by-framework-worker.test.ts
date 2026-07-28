@@ -242,6 +242,48 @@ describe("ByClawSuperGatewayWorker", () => {
     expect(result.content).toBe("汇总答案");
   });
 
+  it("maps an external PAGE interaction to the existing 2010 agent card", async () => {
+    const emitEvent = vi.fn(async () => undefined);
+    const worker = createWorker({
+      createSessionRun: vi.fn(async () => run()),
+      cancelRun: vi.fn(),
+      streamEvents: () => pageInteractionEvents(),
+      emitEvent,
+    });
+
+    await worker.processCommand(askCommand(), contextMock());
+
+    expect(emitEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: EventType.ANSWER_DELTA,
+        messageId: "interaction-page-1",
+        parentMessageId: "delegation-page-1",
+        data: expect.objectContaining({
+          event: EventType.ANSWER_DELTA,
+          contentType: "2010",
+          agentId: "agent-page-1",
+          agentName: "页面员工",
+          choices: [
+            expect.objectContaining({
+              delta: {
+                content: JSON.stringify({
+                  agentId: "agent-page-1",
+                  agentName: "页面员工",
+                  runId: "run-1",
+                }),
+              },
+            }),
+          ],
+        }),
+        metadata: {
+          parent_run_id: "run-1",
+          interaction_id: "interaction-page-1",
+          delegation_id: "delegation-page-1",
+        },
+      }),
+    );
+  });
+
   it("reuses the internal Session for the same by-framework session", async () => {
     const createSessionRun = vi.fn(async () => run());
     const createRun = vi.fn(async () => run());
@@ -360,6 +402,50 @@ describe("ByClawSuperGatewayWorker", () => {
     );
   });
 
+  it("passes a validated group chat reference to ingress", async () => {
+    const createSessionRun = vi.fn(async () => run());
+    const worker = createWorker({
+      createSessionRun,
+      cancelRun: vi.fn(),
+      streamEvents: () => completedEvents(),
+    });
+    const groupChat = {
+      schemaVersion: "byclaw.group-chat-ref/v1",
+      conversationKey: "session-1",
+      beforeMessageId: "message-1",
+    };
+
+    await worker.processCommand(
+      askCommand("secret-token", undefined, groupChat),
+      contextMock(),
+    );
+
+    expect(createSessionRun).toHaveBeenCalledWith(
+      expect.objectContaining({ groupChatRef: groupChat }),
+    );
+  });
+
+  it("rejects a group chat reference for a different conversation", async () => {
+    const createSessionRun = vi.fn(async () => run());
+    const worker = createWorker({
+      createSessionRun,
+      cancelRun: vi.fn(),
+      streamEvents: () => completedEvents(),
+    });
+
+    await expect(
+      worker.processCommand(
+        askCommand("secret-token", undefined, {
+          schemaVersion: "byclaw.group-chat-ref/v1",
+          conversationKey: "another-session",
+          beforeMessageId: "message-1",
+        }),
+        contextMock(),
+      ),
+    ).rejects.toThrow("conversationKey must match header.sessionId");
+    expect(createSessionRun).not.toHaveBeenCalled();
+  });
+
   it("rejects an invalid AskAgent thinkingLevel", async () => {
     const worker = createWorker({
       createSessionRun: vi.fn(),
@@ -421,12 +507,19 @@ function createWorker(options: {
 }
 
 /** 构造携带有效 Token 和 systemCode 的 AskAgent 命令。 */
-function askCommand(token = "secret-token", thinkingLevel?: unknown): AskAgentCommand {
+function askCommand(
+  token = "secret-token",
+  thinkingLevel?: unknown,
+  groupChat?: unknown,
+): AskAgentCommand {
   return new AskAgentCommand(
     header(token),
     [{ role: "user", content: { text: "请分析数据" } }],
     true,
-    thinkingLevel === undefined ? {} : { thinkingLevel },
+    {
+      ...(thinkingLevel === undefined ? {} : { thinkingLevel }),
+      ...(groupChat === undefined ? {} : { groupChat }),
+    },
   );
 }
 
@@ -506,6 +599,27 @@ async function* delegatedEvents(): AsyncIterable<RunEvent> {
   yield event(6, "run.completed", {
     status: "COMPLETED",
     finalAnswer: "汇总答案",
+  });
+}
+
+async function* pageInteractionEvents(): AsyncIterable<RunEvent> {
+  yield event(1, "interaction.requested", {
+    interactionId: "interaction-page-1",
+    delegationId: "delegation-page-1",
+    request: {
+      kind: "external_page",
+      questions: [],
+      uiPayload: {
+        agentId: "agent-page-1",
+        agentName: "页面员工",
+        runId: "run-1",
+      },
+    },
+  });
+  yield event(2, "leader.delta", { text: "请完成页面操作" });
+  yield event(3, "run.completed", {
+    status: "COMPLETED",
+    finalAnswer: "请完成页面操作",
   });
 }
 

@@ -17,6 +17,22 @@ export interface AppConfig {
   redis: RedisConnectionConfig;
   auth: BeyondTokenVerifierOptions;
   byClawBe: Omit<ByClawBeAgentCatalogOptions, "fetchImpl">;
+  thirdPartyAgents: {
+    directMode: "off" | "allowlist" | "all";
+    allowlist: string[];
+    descriptorPath: string;
+    serviceCredential?: string;
+    requestTimeoutMs: number;
+    allowInsecureExternalHttp: boolean;
+    allowedExternalHosts: string[];
+  };
+  /** inspectAttachment 附件读取的边界配置（临时目录与各类上限）。 */
+  attachments: {
+    tempDir?: string;
+    maxFileBytes: number;
+    maxTextChars: number;
+    maxStructureChars: number;
+  };
   worker: ByFrameworkWorkerConfig;
   database: PostgresDatabaseConfig & { migrateOnStart: boolean };
   instanceId: string;
@@ -104,6 +120,67 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
         "BYCLAW_BE_TIMEOUT_MS",
         1,
         300_000,
+      ),
+    },
+    thirdPartyAgents: {
+      directMode: thirdPartyDirectMode(
+        env.THIRD_PARTY_AGENT_DIRECT_MODE ??
+          defaults.thirdPartyAgents.directMode,
+      ),
+      allowlist: commaSeparated(
+        env.THIRD_PARTY_AGENT_ALLOWLIST ??
+          defaults.thirdPartyAgents.allowlist,
+      ),
+      descriptorPath: nonEmpty(
+        env.THIRD_PARTY_AGENT_DESCRIPTOR_PATH ??
+          defaults.thirdPartyAgents.descriptorPath,
+        "THIRD_PARTY_AGENT_DESCRIPTOR_PATH",
+      ),
+      ...(env.THIRD_PARTY_AGENT_SERVICE_CREDENTIAL?.trim()
+        ? {
+            serviceCredential:
+              env.THIRD_PARTY_AGENT_SERVICE_CREDENTIAL.trim(),
+          }
+        : {}),
+      requestTimeoutMs: integer(
+        env.THIRD_PARTY_AGENT_REQUEST_TIMEOUT_MS ??
+          String(defaults.thirdPartyAgents.requestTimeoutMs),
+        "THIRD_PARTY_AGENT_REQUEST_TIMEOUT_MS",
+        1,
+        3_600_000,
+      ),
+      allowInsecureExternalHttp: booleanValue(
+        env.THIRD_PARTY_AGENT_ALLOW_INSECURE_HTTP ??
+          String(defaults.thirdPartyAgents.allowInsecureExternalHttp),
+        "THIRD_PARTY_AGENT_ALLOW_INSECURE_HTTP",
+      ),
+      allowedExternalHosts: commaSeparated(
+        env.THIRD_PARTY_AGENT_ALLOWED_HOSTS ??
+          defaults.thirdPartyAgents.allowedExternalHosts,
+      ).map((host) => host.toLowerCase()),
+    },
+    attachments: {
+      ...(env.ATTACHMENT_TEMP_DIR?.trim()
+        ? { tempDir: env.ATTACHMENT_TEMP_DIR.trim() }
+        : {}),
+      maxFileBytes: integer(
+        env.ATTACHMENT_MAX_FILE_BYTES ?? String(defaults.attachments.maxFileBytes),
+        "ATTACHMENT_MAX_FILE_BYTES",
+        1_024,
+        1_073_741_824,
+      ),
+      maxTextChars: integer(
+        env.ATTACHMENT_MAX_TEXT_CHARS ?? String(defaults.attachments.maxTextChars),
+        "ATTACHMENT_MAX_TEXT_CHARS",
+        100,
+        1_000_000,
+      ),
+      maxStructureChars: integer(
+        env.ATTACHMENT_MAX_STRUCTURE_CHARS ??
+          String(defaults.attachments.maxStructureChars),
+        "ATTACHMENT_MAX_STRUCTURE_CHARS",
+        100,
+        1_000_000,
       ),
     },
     worker: {
@@ -293,4 +370,20 @@ function integer(raw: string, name: string, min: number, max: number): number {
     throw new Error(`${name} must be an integer between ${min} and ${max}, received: ${raw}`);
   }
   return value;
+}
+
+function thirdPartyDirectMode(
+  raw: string,
+): "off" | "allowlist" | "all" {
+  const value = raw.trim().toLowerCase();
+  if (value === "off" || value === "allowlist" || value === "all") {
+    return value;
+  }
+  throw new Error(
+    `THIRD_PARTY_AGENT_DIRECT_MODE must be off, allowlist or all, received: ${raw}`,
+  );
+}
+
+function commaSeparated(raw: string): string[] {
+  return [...new Set(raw.split(",").map((value) => value.trim()).filter(Boolean))];
 }

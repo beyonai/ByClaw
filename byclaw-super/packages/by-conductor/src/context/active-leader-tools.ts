@@ -2,6 +2,8 @@ import type { AgentProfile } from "../types.js";
 
 export const DELEGATE_AGENT_TOOL_NAME = "delegateAgent";
 export const ASK_USER_QUESTION_TOOL_NAME = "askUserQuestion";
+/** Leader 读取当前 Run 附件内容的受控工具；仅允许引用本轮附件 ID。 */
+export const INSPECT_ATTACHMENT_TOOL_NAME = "inspectAttachment";
 // Ask User 暂时下线：保留实现和协议链路，待前端交互问题修复后可集中恢复。
 export const ASK_USER_QUESTION_ENABLED = false;
 
@@ -17,6 +19,17 @@ export const LEADER_FILE_TOOL_NAMES = [
   "grep",
   "find",
   "ls",
+] as const;
+
+/**
+ * 允许进入长期 Pi checkpoint 的完整 Leader 工具白名单。
+ * 持久化层必须与运行时实际暴露的工具保持同步，同时继续拒绝任意未知工具。
+ */
+export const LEADER_CHECKPOINT_TOOL_NAMES = [
+  DELEGATE_AGENT_TOOL_NAME,
+  ASK_USER_QUESTION_TOOL_NAME,
+  INSPECT_ATTACHMENT_TOOL_NAME,
+  ...LEADER_FILE_TOOL_NAMES,
 ] as const;
 
 /**

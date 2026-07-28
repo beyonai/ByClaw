@@ -1,5 +1,11 @@
 import { randomUUID } from "node:crypto";
+import {
+  ATTACHMENT_INSPECTION_ERROR_CODES,
+  AttachmentInspectionError,
+  type AttachmentResolver,
+} from "./attachment-inspection.js";
 import { DelegationService } from "./delegation-service.js";
+import type { RunIngressContextV1 } from "./group-chat-context.js";
 import type { LeaderSession, LeaderSessionFactory } from "./leader.js";
 import { LeaderSessionCache } from "./leader-session-cache.js";
 import type {
@@ -19,6 +25,7 @@ import type {
   CallerPrincipal,
   JsonValue,
   Run,
+  RunAttachment,
   RunEvent,
   RunStatus,
   Session,
@@ -27,6 +34,7 @@ import type {
   UserInteractionResponse,
 } from "./types.js";
 import { TERMINAL_RUN_STATUSES } from "./types.js";
+import { resolveAttachmentSelection } from "./attachments.js";
 import {
   createSessionContext,
   type SessionContextInput,
@@ -42,6 +50,8 @@ export interface CreateRunInput {
   message: string;
   thinkingLevel?: ThinkingLevel;
   agentList: AgentProfile[];
+  attachments?: RunAttachment[];
+  ingressContext?: RunIngressContextV1;
   metadata?: Record<string, unknown>;
   /** 仅写入专用短期凭证表，不写入 Run、Event 或 Pi Session。 */
   executionCredential?: {
@@ -54,6 +64,8 @@ export interface CreateSessionRunInput extends CreateSessionInput {
   message: string;
   thinkingLevel?: ThinkingLevel;
   agentList: AgentProfile[];
+  attachments?: RunAttachment[];
+  ingressContext?: RunIngressContextV1;
   metadata?: Record<string, unknown>;
   executionCredential?: {
     secret: string;
@@ -81,6 +93,11 @@ export interface RunServiceRuntimeOptions {
   leaderCacheIdleTtlMs?: number;
   /** 清理已过期执行凭证的周期；默认 60 秒。 */
   credentialCleanupIntervalMs?: number;
+  /**
+   * 附件读取边界；注入后 Leader 可通过 inspectAttachment 用 Run 短期凭证
+   * 经 BE 安全读取本轮附件内容。未注入时 inspectAttachment 工具不暴露。
+   */
+  attachmentResolver?: AttachmentResolver;
 }
 
 /**
@@ -101,6 +118,7 @@ export class RunService {
   readonly #queuePollMs: number;
   readonly #maxConcurrentRuns: number;
   readonly #credentialCleanupIntervalMs: number;
+  readonly #attachmentResolver: AttachmentResolver | undefined;
   #persistentActive = 0;
   #claimLoop: Promise<void> | undefined;
   #pollTimer: ReturnType<typeof setInterval> | undefined;
@@ -126,6 +144,7 @@ export class RunService {
     this.#maxConcurrentRuns = runtime.maxConcurrentRuns ?? 10;
     this.#credentialCleanupIntervalMs =
       runtime.credentialCleanupIntervalMs ?? 60_000;
+    this.#attachmentResolver = runtime.attachmentResolver;
     this.#leaderCache = new LeaderSessionCache(leaders, {
       maxEntries: runtime.leaderCacheMaxEntries ?? 100,
       idleTtlMs: runtime.leaderCacheIdleTtlMs ?? 1_800_000,
@@ -272,6 +291,10 @@ export class RunService {
       id: this.createId(),
       sessionId: session.id,
       input: input.message,
+      attachments: structuredClone(input.attachments ?? []),
+      ...(input.ingressContext
+        ? { ingressContext: structuredClone(input.ingressContext) }
+        : {}),
       thinkingLevel: input.thinkingLevel ?? "off",
       agentList: structuredClone(input.agentList),
       status: "QUEUED",
@@ -336,6 +359,10 @@ export class RunService {
       id: this.createId(),
       sessionId: session.id,
       input: input.message,
+      attachments: structuredClone(input.attachments ?? []),
+      ...(input.ingressContext
+        ? { ingressContext: structuredClone(input.ingressContext) }
+        : {}),
       thinkingLevel: input.thinkingLevel ?? "off",
       agentList: structuredClone(input.agentList),
       status: "QUEUED",
@@ -729,10 +756,15 @@ ${JSON.stringify(response)}`;
       current = await this.#setStatus(latest, "RUNNING");
       const result = await leader.run({
         message: leaderMessage,
+        attachments: current.attachments,
         thinkingLevel: current.thinkingLevel ?? "off",
         agents: current.agentList,
         sessionContext: session.sessionContext,
+        ...(current.ingressContext?.groupChat
+          ? { groupChatContext: current.ingressContext.groupChat }
+          : {}),
         currentTime: this.now(),
+        user: session.owner,
         signal: runController.signal,
         // Leader 的可见回答增量被规范化为 Run 事件，供 SSE 消费。
         onDelta: async (text) => {
@@ -772,6 +804,11 @@ ${JSON.stringify(response)}`;
             agents: current.agentList,
             agentId: delegationInput.agentId,
             task: delegationInput.task,
+            // 只能从当前 Run 的附件集合按 ID 选择；未知 ID 在解析阶段被拒绝。
+            attachments: resolveAttachmentSelection(
+              current.attachments,
+              delegationInput.attachmentIds,
+            ),
             ...(delegationInput.expectedOutput
               ? { expectedOutput: delegationInput.expectedOutput }
               : {}),
@@ -863,6 +900,45 @@ ${JSON.stringify(response)}`;
           }
           return response;
         },
+        // inspectAttachment 用 Run 短期凭证经 Resolver 安全读取本轮附件；
+        // 工具层只能传 attachmentId，附件对象必须在 current.attachments 中命中。
+        ...(this.#attachmentResolver
+          ? {
+              inspectAttachment: async ({
+                attachmentId,
+                mode,
+                signal,
+              }: {
+                attachmentId: string;
+                mode?: "metadata" | "text" | "structure";
+                signal?: AbortSignal;
+              }) => {
+                const attachment = current.attachments.find(
+                  (item) => item.id === attachmentId,
+                );
+                if (!attachment) {
+                  throw new AttachmentInspectionError(
+                    ATTACHMENT_INSPECTION_ERROR_CODES.NOT_FOUND,
+                    `unknown attachmentId: ${attachmentId}`,
+                  );
+                }
+                const credential = readBeyondToken(metadata);
+                if (!credential) {
+                  throw new AttachmentInspectionError(
+                    ATTACHMENT_INSPECTION_ERROR_CODES.CREDENTIAL_MISSING,
+                    "execution credential is not available for attachment inspection",
+                  );
+                }
+                return this.#attachmentResolver!.inspect({
+                  attachment,
+                  principal: session.owner,
+                  credential,
+                  mode: mode ?? "text",
+                  signal: signal ?? runController.signal,
+                });
+              },
+            }
+          : {}),
       });
 
       if (runController.signal.aborted) {
@@ -1171,4 +1247,10 @@ function validateAgentList(agentList: AgentProfile[]): void {
     }
     seen.add(agent.id);
   }
+}
+
+/** 从 Run 执行上下文 metadata 中读取短期 Beyond-Token；缺失或非字符串返回空串。 */
+function readBeyondToken(metadata: Record<string, unknown>): string {
+  const value = metadata["Beyond-Token"];
+  return typeof value === "string" ? value.trim() : "";
 }

@@ -1,7 +1,9 @@
 import type {
   AgentProfile,
   CallerPrincipal,
+  GroupChatRefV1,
   Run,
+  RunAttachment,
   RunPage,
   RunPageCursor,
   RunService,
@@ -9,12 +11,18 @@ import type {
   SessionContextInput,
   ThinkingLevel,
 } from "@byclaw/by-conductor";
-import { filterDelegableAgents } from "@byclaw/by-conductor";
+import {
+  excludeAgentFromGroupChatContext,
+  filterDelegableAgents,
+  fingerprintGroupChatContext,
+  resolveRunMessage,
+} from "@byclaw/by-conductor";
 import {
   type BeyondTokenClaims,
   type BeyondTokenVerifier,
 } from "../auth/beyond-token.js";
 import type { AuthorizedAgentCatalog } from "../business/agent-catalog.js";
+import type { GroupChatContextProvider } from "../business/group-chat-context.js";
 
 interface AuthenticatedIngressRequest {
   beyondToken: string;
@@ -22,14 +30,21 @@ interface AuthenticatedIngressRequest {
 }
 
 export interface CreateSessionRunRequest extends AuthenticatedIngressRequest {
-  message: string;
+  /**
+   * 用户文本。可选以支持"仅附件"请求；最终消息由 ingress 用 resolveRunMessage 兜底。
+   */
+  message?: string;
   thinkingLevel?: ThinkingLevel;
   context?: SessionContextInput;
+  /** 已规范化的附件（由各入口在调用前 normalize）；缺省为空数组。 */
+  attachments?: RunAttachment[];
   /**
    * 当前入口 Agent ID（仅 by-framework Worker 入口提供，用于排除超级助手自身）。
    * HTTP/SSE 入口不得由调用方指定，统一走 userCode 兜底规则。
    */
   sourceAgentId?: string;
+  /** Gateway 只提供定位引用；正文由 Super 使用当前 Token 从 BE 权威读取。 */
+  groupChatRef?: GroupChatRefV1;
 }
 
 export interface AppendSessionRunRequest extends CreateSessionRunRequest {
@@ -54,23 +69,29 @@ export class RunIngressService {
     private readonly verifyBeyondToken: BeyondTokenVerifier,
     private readonly agentCatalog: AuthorizedAgentCatalog,
     private readonly credentialMaxTtlMs = 7_200_000,
+    private readonly groupChatContexts?: GroupChatContextProvider,
   ) {}
 
   /** 创建新 Session，并在其中创建首个 Run。 */
   async createSessionRun(input: CreateSessionRunRequest): Promise<Run> {
     const authenticated = await this.authenticate(input);
     const principal = authenticated.principal;
+    const attachments = input.attachments ?? [];
+    const message = resolveRunMessage(input.message, attachments);
     const agentList = this.excludeSelf(
       await this.listAgents(input),
       input.sourceAgentId,
       principal.userCode,
     );
+    const ingressContext = await this.loadIngressContext(input);
     return this.runService.createSessionRun({
       owner: principal,
       ...(input.context ? { context: input.context } : {}),
-      message: input.message,
+      message,
+      attachments,
       thinkingLevel: input.thinkingLevel ?? "off",
       agentList,
+      ...(ingressContext ? { ingressContext } : {}),
       // Token 同时写入专用短期凭证表，供其他实例在 lease 接管后恢复。
       metadata: { "Beyond-Token": input.beyondToken },
       executionCredential: {
@@ -85,16 +106,21 @@ export class RunIngressService {
     const authenticated = await this.authenticate(input);
     const principal = authenticated.principal;
     await this.requireOwnedSession(input.sessionId, principal);
+    const attachments = input.attachments ?? [];
+    const message = resolveRunMessage(input.message, attachments);
     const agentList = this.excludeSelf(
       await this.listAgents(input),
       input.sourceAgentId,
       principal.userCode,
     );
+    const ingressContext = await this.loadIngressContext(input);
     return this.runService.createRun({
       sessionId: input.sessionId,
-      message: input.message,
+      message,
+      attachments,
       thinkingLevel: input.thinkingLevel ?? "off",
       agentList,
+      ...(ingressContext ? { ingressContext } : {}),
       metadata: { "Beyond-Token": input.beyondToken },
       executionCredential: {
         secret: input.beyondToken,
@@ -143,6 +169,37 @@ export class RunIngressService {
     return {
       principal,
       credentialExpiresAt: Math.min(maxExpiresAt, jwtExpiresAt),
+    };
+  }
+
+  private async loadIngressContext(
+    input: CreateSessionRunRequest,
+  ): Promise<
+    | {
+        groupChat: Awaited<ReturnType<GroupChatContextProvider["load"]>>;
+        groupChatFingerprint: string;
+      }
+    | undefined
+  > {
+    if (!input.groupChatRef) {
+      return undefined;
+    }
+    if (!this.groupChatContexts) {
+      throw new Error("Group chat context provider is not configured");
+    }
+    const loaded = await this.groupChatContexts.load({
+      conversationKey: input.groupChatRef.conversationKey,
+      beforeMessageId: input.groupChatRef.beforeMessageId,
+      beyondToken: input.beyondToken,
+      ...(input.systemCode ? { systemCode: input.systemCode } : {}),
+    });
+    const groupChat = excludeAgentFromGroupChatContext(
+      loaded,
+      input.sourceAgentId,
+    );
+    return {
+      groupChat,
+      groupChatFingerprint: fingerprintGroupChatContext(groupChat),
     };
   }
 

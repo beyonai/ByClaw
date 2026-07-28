@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { normalizeRunAttachments } from "@byclaw/by-conductor";
 import {
   authError,
   requestAuth,
@@ -36,8 +37,13 @@ export function registerSessionRoutes(
         if (!auth) {
           return authError(reply, "Beyond-Token header is required");
         }
+        const attachments = normalizeRunAttachments(
+          request.body.attachments ?? [],
+          "http",
+        );
         const run = await options.runIngress.createSessionRun({
-          message: request.body.message,
+          ...(request.body.message ? { message: request.body.message } : {}),
+          ...(attachments.length > 0 ? { attachments } : {}),
           thinkingLevel: request.body.thinkingLevel ?? "off",
           ...(request.body.context
             ? { context: request.body.context }
@@ -65,9 +71,14 @@ export function registerSessionRoutes(
         if (!auth) {
           return authError(reply, "Beyond-Token header is required");
         }
+        const attachments = normalizeRunAttachments(
+          request.body.attachments ?? [],
+          "http",
+        );
         const run = await options.runIngress.createRun({
           sessionId: request.params.sessionId,
-          message: request.body.message,
+          ...(request.body.message ? { message: request.body.message } : {}),
+          ...(attachments.length > 0 ? { attachments } : {}),
           thinkingLevel: request.body.thinkingLevel ?? "off",
           ...auth,
         });

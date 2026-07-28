@@ -1,7 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
-import type { AgentProfile, Run, RunService, Session } from "@byclaw/by-conductor";
+import type {
+  AgentProfile,
+  GroupChatContextV1,
+  Run,
+  RunService,
+  Session,
+} from "@byclaw/by-conductor";
 import type { BeyondTokenVerifier } from "../auth/beyond-token.js";
 import type { AuthorizedAgentCatalog } from "../business/agent-catalog.js";
+import type { GroupChatContextProvider } from "../business/group-chat-context.js";
 import { RunIngressService } from "../ingress/run-ingress-service.js";
 
 const PRINCIPAL_TOKEN = "creator-token";
@@ -130,5 +137,85 @@ describe("RunIngressService self-exclusion", () => {
     expect(runService.createRun.mock.calls[0][0].agentList.map((a: AgentProfile) => a.id)).toEqual([
       "maintainer",
     ]);
+  });
+});
+
+describe("RunIngressService group chat snapshot", () => {
+  it("loads once, removes Super's own answer, and freezes the result on the Run", async () => {
+    const runService = fakeRunService();
+    const verify: BeyondTokenVerifier = async () => ({ userCode: "creator" });
+    const load = vi.fn(async (): Promise<GroupChatContextV1> => ({
+      schemaVersion: "byclaw.group-chat-context/v1",
+      conversationKey: "conversation-1",
+      snapshot: {
+        beforeMessageId: "message-3",
+        generatedAt: 1_000,
+      },
+      messages: [
+        {
+          messageId: "message-1",
+          sequence: 1,
+          createdAt: 100,
+          role: "assistant",
+          speaker: {
+            type: "agent",
+            agentId: "agent-a",
+            agentName: "Agent A",
+          },
+          content: "A 的结论",
+        },
+        {
+          messageId: "message-2",
+          sequence: 2,
+          createdAt: 200,
+          role: "assistant",
+          speaker: {
+            type: "agent",
+            agentId: "super",
+            agentName: "超级助手",
+          },
+          content: "Super 的旧回答",
+        },
+      ],
+      truncation: {
+        truncated: false,
+        omittedMessageCount: 0,
+      },
+    }));
+    const groupChatContexts: GroupChatContextProvider = { load };
+    const ingress = new RunIngressService(
+      runService.impl,
+      verify,
+      catalog([agent("agent-a")]),
+      7_200_000,
+      groupChatContexts,
+    );
+
+    await ingress.createSessionRun({
+      beyondToken: PRINCIPAL_TOKEN,
+      systemCode: "BYAI",
+      message: "请规划",
+      sourceAgentId: "super",
+      groupChatRef: {
+        schemaVersion: "byclaw.group-chat-ref/v1",
+        conversationKey: "conversation-1",
+        beforeMessageId: "message-3",
+      },
+    });
+
+    expect(load).toHaveBeenCalledWith({
+      conversationKey: "conversation-1",
+      beforeMessageId: "message-3",
+      beyondToken: PRINCIPAL_TOKEN,
+      systemCode: "BYAI",
+    });
+    const ingressContext =
+      runService.createSessionRun.mock.calls[0][0].ingressContext;
+    expect(
+      ingressContext.groupChat.messages.map(
+        (message: { messageId: string }) => message.messageId,
+      ),
+    ).toEqual(["message-1"]);
+    expect(ingressContext.groupChatFingerprint).toMatch(/^[a-f0-9]{64}$/);
   });
 });

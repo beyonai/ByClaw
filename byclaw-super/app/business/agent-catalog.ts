@@ -1,5 +1,8 @@
 import type { AgentProfile } from "@byclaw/by-conductor";
 import { OPENCLAW_BY_FRAMEWORK_CONNECTOR_ID } from "@byclaw/connector-openclaw-by-framework";
+import { THIRD_PARTY_A2A_CONNECTOR_ID } from "@byclaw/connector-third-party-a2a";
+import { THIRD_PARTY_INTERFACE_SSE_CONNECTOR_ID } from "@byclaw/connector-third-party-interface-sse";
+import { THIRD_PARTY_PAGE_CONNECTOR_ID } from "@byclaw/connector-third-party-page";
 import type { ByClawBeEndpointResolver } from "./endpoint-resolver.js";
 
 const DISCOVER_PATH = "/byaiService/api/v2/digitEmploy/discover";
@@ -26,6 +29,8 @@ type DiscoverAgent = {
   resourceDesc?: string;
   tagName?: string;
   skills?: string;
+  createType?: string;
+  integrationType?: string;
   usesPermissions?: boolean;
 };
 
@@ -49,6 +54,10 @@ export interface ByClawBeAgentCatalogOptions {
   timeoutMs: number;
   fetchImpl?: FetchLike;
   endpointResolver?: ByClawBeEndpointResolver;
+  thirdPartyDirect?: {
+    mode: "off" | "allowlist" | "all";
+    allowlist: readonly string[];
+  };
 }
 
 export class ByClawBeAgentCatalogError extends Error {
@@ -68,6 +77,9 @@ export class ByClawBeAgentCatalog implements AuthorizedAgentCatalog {
   readonly #timeoutMs: number;
   readonly #fetch: FetchLike;
   readonly #endpointResolver: ByClawBeEndpointResolver | undefined;
+  readonly #thirdPartyDirect: NonNullable<
+    ByClawBeAgentCatalogOptions["thirdPartyDirect"]
+  >;
 
   /** 固定 discover 地址和超时，允许测试注入 fetch 实现。 */
   constructor(options: ByClawBeAgentCatalogOptions) {
@@ -75,6 +87,10 @@ export class ByClawBeAgentCatalog implements AuthorizedAgentCatalog {
     this.#timeoutMs = options.timeoutMs;
     this.#fetch = options.fetchImpl ?? globalThis.fetch;
     this.#endpointResolver = options.endpointResolver;
+    this.#thirdPartyDirect = options.thirdPartyDirect ?? {
+      mode: "off",
+      allowlist: [],
+    };
   }
 
   /** 携带 Beyond-Token 调用发现接口，并只保留 usesPermissions 为真的数字员工。 */
@@ -118,7 +134,7 @@ export class ByClawBeAgentCatalog implements AuthorizedAgentCatalog {
         `ByClaw BE discover returned invalid result${result.msg ? `: ${result.msg}` : ""}`,
       );
     }
-    return toAuthorizedAgents(result.data.list);
+    return toAuthorizedAgents(result.data.list, this.#thirdPartyDirect);
   }
 }
 
@@ -132,8 +148,16 @@ async function parseResponse(response: Response): Promise<DiscoverResponse> {
 }
 
 /** 过滤无权限或字段不完整的记录，并转换为 by-conductor AgentProfile。 */
-function toAuthorizedAgents(items: DiscoverAgent[]): AgentProfile[] {
+function toAuthorizedAgents(
+  items: DiscoverAgent[],
+  thirdPartyDirect: NonNullable<
+    ByClawBeAgentCatalogOptions["thirdPartyDirect"]
+  >,
+): AgentProfile[] {
   const agents = new Map<string, AgentProfile>();
+  const allowlist = new Set(
+    thirdPartyDirect.allowlist.map((value) => String(value).trim()).filter(Boolean),
+  );
   for (const item of items) {
     if (item.usesPermissions !== true) {
       continue;
@@ -150,12 +174,40 @@ function toAuthorizedAgents(items: DiscoverAgent[]): AgentProfile[] {
       name,
       ...(description ? { description } : {}),
       execution: {
-        connectorId: OPENCLAW_BY_FRAMEWORK_CONNECTOR_ID,
+        connectorId: resolveConnectorId(item, id, thirdPartyDirect.mode, allowlist),
         targetId: id,
       },
     });
   }
   return [...agents.values()];
+}
+
+/** 灰度开关关闭或员工不在 allowlist 时，保持旧 OpenClaw 执行链路。 */
+function resolveConnectorId(
+  item: DiscoverAgent,
+  id: string,
+  mode: "off" | "allowlist" | "all",
+  allowlist: ReadonlySet<string>,
+): string {
+  const directEnabled =
+    mode === "all" || (mode === "allowlist" && allowlist.has(id));
+  if (!directEnabled || normalizeEnum(item.createType) !== "FROM_THIRD") {
+    return OPENCLAW_BY_FRAMEWORK_CONNECTOR_ID;
+  }
+  switch (normalizeEnum(item.integrationType)) {
+    case "INTERFACE":
+      return THIRD_PARTY_INTERFACE_SSE_CONNECTOR_ID;
+    case "A2A":
+      return THIRD_PARTY_A2A_CONNECTOR_ID;
+    case "PAGE":
+      return THIRD_PARTY_PAGE_CONNECTOR_ID;
+    default:
+      return OPENCLAW_BY_FRAMEWORK_CONNECTOR_ID;
+  }
+}
+
+function normalizeEnum(value: unknown): string {
+  return stringValue(value).toUpperCase();
 }
 
 /** 汇总数字员工描述、类型和技能编码，作为 Leader 路由时可见的能力说明。 */

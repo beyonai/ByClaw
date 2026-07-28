@@ -1,8 +1,12 @@
+import type { AttachmentInspection, AttachmentInspectionMode } from "./attachment-inspection.js";
 import type { PiSessionCheckpoint } from "./pi-session-checkpoint.js";
 import type { SessionContextV1 } from "./session-context.js";
+import type { GroupChatContextV1 } from "./group-chat-context.js";
 import type {
   AgentProfile,
   AgentResult,
+  CallerPrincipal,
+  RunAttachment,
   ThinkingLevel,
   UserInteractionQuestion,
   UserInteractionResponse,
@@ -11,10 +15,16 @@ import type {
 /** Leader 执行单次 Run 所需的授权快照和边界回调。 */
 export interface LeaderRunInput {
   message: string;
+  /** 本次 Run 的附件；Leader 可据此生成摘要，工具按 ID 引用，不直接抓取内容。 */
+  attachments: readonly RunAttachment[];
   thinkingLevel: ThinkingLevel;
   agents: AgentProfile[];
   sessionContext: SessionContextV1;
+  /** 当前 Run 冻结的群聊快照；只进入本轮动态 system context。 */
+  groupChatContext?: GroupChatContextV1;
   currentTime: number;
+  /** 当前调用者身份；经 before_agent_start 临时注入 system prompt，不进入长期 transcript。 */
+  user?: CallerPrincipal;
   signal: AbortSignal;
   /** 接收最终可见回答的文本增量。 */
   onDelta(text: string): Promise<void> | void;
@@ -25,6 +35,8 @@ export interface LeaderRunInput {
     agentId: string;
     task: string;
     expectedOutput?: string;
+    /** 选中要随委派透传的附件 ID；undefined=全部，[]=不带，未知 ID 会被拒绝。 */
+    attachmentIds?: readonly string[];
     signal?: AbortSignal;
   }): Promise<AgentResult>;
   /** 暂停当前工具调用，等待用户通过固定 UI 回答结构化问题。 */
@@ -33,6 +45,15 @@ export interface LeaderRunInput {
     questions: UserInteractionQuestion[];
     signal?: AbortSignal;
   }): Promise<UserInteractionResponse>;
+  /**
+   * 受控读取当前 Run 某个附件的有界内容。仅当本轮存在附件且注入了 Resolver 时可用；
+   * 工具层只能传 attachmentId，真正的附件对象由服务端从本轮附件集合解析。
+   */
+  inspectAttachment?(input: {
+    attachmentId: string;
+    mode?: AttachmentInspectionMode;
+    signal?: AbortSignal;
+  }): Promise<AttachmentInspection>;
 }
 
 /** Leader 单次 Run 的最终可见结果。 */

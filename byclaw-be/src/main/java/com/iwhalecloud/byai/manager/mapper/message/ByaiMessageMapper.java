@@ -92,6 +92,18 @@ public interface ByaiMessageMapper extends BaseMapper<ByaiMessage> {
      */
     List<ByaiMessage> selectByQo(@Param("qo") MessageHotQo qo);
 
+    /**
+     * 查询严格早于当前用户消息的最近可见群聊消息，按时间倒序返回。
+     */
+    List<ByaiMessage> selectVisibleBeforeMessageId(@Param("sessionId") Long sessionId,
+        @Param("beforeMessageId") Long beforeMessageId, @Param("limit") Integer limit);
+
+    /**
+     * 统计严格早于当前用户消息的可见群聊消息，供截断信息使用。
+     */
+    Long countVisibleBeforeMessageId(@Param("sessionId") Long sessionId,
+        @Param("beforeMessageId") Long beforeMessageId);
+
 
     /**
      * 根据查询条件删除消息

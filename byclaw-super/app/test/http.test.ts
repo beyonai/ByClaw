@@ -322,6 +322,103 @@ describe("Session / Run HTTP/SSE API", () => {
     await service.dispose();
   });
 
+  it("accepts attachment references and reports attachmentCount", async () => {
+    const service = createService();
+    const verifyBeyondToken = vi.fn(async () => ({ userCode: "user" }));
+    const agentCatalog = { listAuthorizedAgents: vi.fn(async () => []) };
+    const app = await createApp(service, verifyBeyondToken, agentCatalog);
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/v1/sessions",
+      headers: { "Beyond-Token": "very-secret-token" },
+      payload: {
+        message: "总结这份报告",
+        attachments: [
+          {
+            id: "123",
+            name: "report.pdf",
+            mediaType: "application/pdf",
+            size: 245_760,
+          },
+        ],
+      },
+    });
+    expect(created.statusCode).toBe(202);
+    const body = created.json<{ runId: string; attachmentCount: number }>();
+    expect(body.attachmentCount).toBe(1);
+    const run = await service.getRun(body.runId);
+    expect(run?.attachments).toEqual([
+      {
+        id: "123",
+        name: "report.pdf",
+        mediaType: "application/pdf",
+        size: 245_760,
+        provenance: "http",
+      },
+    ]);
+    await service.dispose();
+  });
+
+  it("creates a Run from attachments only using the stable default prompt", async () => {
+    const service = createService();
+    const app = await createApp(
+      service,
+      async () => ({ userCode: "user" }),
+      { listAuthorizedAgents: async () => [] },
+    );
+    const created = await app.inject({
+      method: "POST",
+      url: "/v1/sessions",
+      headers: { "Beyond-Token": "very-secret-token" },
+      payload: { attachments: [{ id: "a", name: "note.txt" }] },
+    });
+    expect(created.statusCode).toBe(202);
+    const run = await service.getRun(
+      created.json<{ runId: string }>().runId,
+    );
+    expect(run?.input).toBe("请处理本次上传的附件");
+    expect(run?.attachments).toHaveLength(1);
+    await service.dispose();
+  });
+
+  it("rejects empty message and attachments with 400", async () => {
+    const service = createService();
+    const app = await createApp(
+      service,
+      async () => ({ userCode: "user" }),
+      { listAuthorizedAgents: async () => [] },
+    );
+    const created = await app.inject({
+      method: "POST",
+      url: "/v1/sessions",
+      headers: { "Beyond-Token": "very-secret-token" },
+      payload: {},
+    });
+    expect(created.statusCode).toBe(400);
+    await service.dispose();
+  });
+
+  it("rejects attachment carrying url or path (HTTP locator policy)", async () => {
+    const service = createService();
+    const app = await createApp(
+      service,
+      async () => ({ userCode: "user" }),
+      { listAuthorizedAgents: async () => [] },
+    );
+    const rejected = await app.inject({
+      method: "POST",
+      url: "/v1/sessions",
+      headers: { "Beyond-Token": "very-secret-token" },
+      payload: {
+        message: "x",
+        attachments: [{ id: "a", name: "n", url: "https://evil/x" }],
+      },
+    });
+    expect(rejected.statusCode).toBe(400);
+    await service.dispose();
+  });
+
   it("accepts a per-Run thinkingLevel and rejects unsupported values", async () => {
     const service = createService();
     const app = await createApp(service);

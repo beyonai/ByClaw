@@ -228,6 +228,22 @@ ALTER TABLE ${POSTGRES_TABLE_PREFIX}sessions
   CHECK (session_context_version > 0);
 `,
   },
+  {
+    version: 8,
+    name: "run_attachments",
+    sql: `
+ALTER TABLE ${POSTGRES_TABLE_PREFIX}runs
+  ADD COLUMN IF NOT EXISTS attachments jsonb NOT NULL DEFAULT '[]'::jsonb;
+`,
+  },
+  {
+    version: 9,
+    name: "run_ingress_context",
+    sql: `
+ALTER TABLE ${POSTGRES_TABLE_PREFIX}runs
+  ADD COLUMN IF NOT EXISTS ingress_context jsonb NULL;
+`,
+  },
 ] as const;
 
 export const LATEST_POSTGRES_SCHEMA_VERSION =

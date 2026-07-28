@@ -11,7 +11,8 @@ pnpm dev
 ```
 
 应用启动时装配 PostgreSQL 持久化 adapter、Pi Leader、
-Connector Registry、OpenClaw Connector，以及位于 `worker/` 的 by-framework 入站 Worker。
+Connector Registry、OpenClaw Connector、三方 INTERFACE/A2A/PAGE Connector，以及位于
+`worker/` 的 by-framework 入站 Worker。
 Worker 属于业务入口，不属于 Connector 包。生产 Composition Root 不使用内存 Repository。
 
 首次部署先运行：
@@ -32,6 +33,7 @@ Connector 与 Worker。迁移建议由独立 release job 执行，生产环境�
 - `GET /v1/sessions/:sessionId/messages`
 - `GET /v1/runs/:runId`
 - `POST /v1/runs/:runId/cancel`
+- `POST /v1/runs/:runId/interactions/:interactionId/respond`
 - `GET /v1/runs/:runId/events`
 - `POST /v1/agent-capability-cards/compile`
 - `PUT /v1/agents/:agentId/capability-card`
@@ -62,6 +64,8 @@ V1 不使用 tenantId、namespace 或 System-Code。不存在或越权统一返�
 
 - Session owner V1 只使用验签 JWT 的 `userCode`，不接受请求体覆盖；
 - Agent 列表由 ByClaw BE `discover` 接口提供，只保留 `usesPermissions=true` 的记录；
+- 三方员工直连默认关闭；开启后按 `FROM_THIRD + integrationType` 选择专用 Connector，
+  endpoint/header 只通过内部 execution descriptor API 短期获取；
 - ByClaw BE 地址优先读取 Redis `byai_gateway:sd:instances:ByaiService`，没有有效实例时回退 `BYCLAW_BE_BASE_URL`；
 - Pi 的 `delegateAgent` 在执行前仍会服务端校验 Agent ID；
 - 所有 Session/Run API 都要求通过请求头传入 `Beyond-Token`，本服务按 ByClaw 登录 JWT 公钥验签后再转发给 Connector；

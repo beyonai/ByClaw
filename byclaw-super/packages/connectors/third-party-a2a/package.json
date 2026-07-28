@@ -1,0 +1,25 @@
+{
+  "name": "@byclaw/connector-third-party-a2a",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Direct A2A connector for third-party digital employees",
+  "files": ["dist"],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "dependencies": {
+    "@byclaw/by-conductor": "workspace:*",
+    "@byclaw/connector-third-party-common": "workspace:*"
+  }
+}

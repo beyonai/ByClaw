@@ -1,7 +1,8 @@
-import type {
-  ArtifactRef,
-  Delegation,
-  Run,
+import {
+  toSafeAttachmentSummary,
+  type ArtifactRef,
+  type Delegation,
+  type Run,
 } from "@byclaw/by-conductor";
 
 /** 创建 Run 后返回的轻量响应。 */
@@ -11,6 +12,7 @@ export function runResponse(run: Run) {
     runId: run.id,
     status: run.status,
     thinkingLevel: run.thinkingLevel ?? "off",
+    attachmentCount: run.attachments.length,
     eventsUrl: `/v1/runs/${run.id}/events`,
   };
 }
@@ -93,6 +95,9 @@ export function sessionMessagesResponse(
       role: "user" as const,
       content: run.input,
       createdAt: run.createdAt,
+      ...(run.attachments.length > 0
+        ? { attachments: toSafeAttachmentSummary(run.attachments) }
+        : {}),
       ...(run.error ? { error: run.error } : {}),
     };
     if (run.finalAnswer === undefined) {

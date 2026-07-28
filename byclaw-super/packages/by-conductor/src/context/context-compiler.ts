@@ -2,8 +2,10 @@ import { createHash } from "node:crypto";
 import { performance } from "node:perf_hooks";
 import { AuthorizedAgentsProcessor } from "./processors/authorized-agents.js";
 import { ContextCleanupProcessor } from "./processors/cleanup.js";
+import { GroupChatContextProcessor } from "./processors/group-chat-context.js";
 import { SessionContextProcessor } from "./processors/session-context.js";
 import { SupervisorPolicyProcessor } from "./processors/supervisor-policy.js";
+import { UserContextProcessor } from "./processors/user-context.js";
 import type {
   CompiledContext,
   ContextBuildInput,
@@ -34,6 +36,8 @@ export class ContextCompiler {
     private readonly processors: readonly ContextProcessor[] = [
       new SupervisorPolicyProcessor(),
       new SessionContextProcessor(),
+      new UserContextProcessor(),
+      new GroupChatContextProcessor(),
       new AuthorizedAgentsProcessor(),
       new ContextCleanupProcessor(),
     ],

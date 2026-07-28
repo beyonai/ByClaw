@@ -10,6 +10,10 @@
   "references": [
     { "path": "packages/by-conductor" },
     { "path": "packages/connectors/openclaw-by-framework" },
+    { "path": "packages/connectors/third-party-common" },
+    { "path": "packages/connectors/third-party-interface-sse" },
+    { "path": "packages/connectors/third-party-a2a" },
+    { "path": "packages/connectors/third-party-page" },
     { "path": "packages/storage-postgres" }
   ]
 }

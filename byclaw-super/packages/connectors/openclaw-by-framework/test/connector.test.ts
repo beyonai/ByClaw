@@ -386,6 +386,74 @@ describe("OpenClawByFrameworkConnector", () => {
       },
     ]);
   });
+
+  it("forwards attachments as by-framework {text, files} content without fileIp", async () => {
+    const sendMessage = vi.fn(async () => ({
+      success: true,
+      message_id: "message-1",
+      trace_id: "trace-1",
+      target_worker_id: "worker-1",
+      timestamp: Date.now(),
+      status: "QUEUED",
+    }));
+    const connector = new OpenClawByFrameworkConnector({
+      redis: {
+        xread: vi.fn(async () => [
+          [
+            "stream",
+            [
+              ["1-0", ["data", dataMessage("appStreamResponse", "", "trace-1")]],
+            ],
+          ],
+        ]),
+        ping: vi.fn(async () => "PONG"),
+        quit: vi.fn(async () => "OK"),
+        status: "ready",
+      } as never,
+      gatewayClient: {
+        sendMessage,
+        cancelTask: vi.fn(async () => ({ success: true })),
+      },
+      readBlockMs: 1,
+      sourceAgentType: "CUSTOM_MAESTRO",
+    });
+    const req = request();
+    req.attachments = [
+      {
+        id: "123",
+        name: "report.xlsx",
+        mediaType: "application/vnd.openxmlformats",
+        size: 1024,
+        url: "https://files/report.xlsx",
+        path: "/data/report.xlsx",
+        provenance: "by-framework",
+      },
+    ];
+    const execution = await connector.start(req, {
+      signal: new AbortController().signal,
+    });
+    for await (const _event of execution.events) {
+      void _event;
+    }
+    const sent = sendMessage.mock.calls[0][0] as { content: unknown };
+    expect(Array.isArray(sent.content)).toBe(true);
+    type UserMessage = {
+      role: string;
+      content: { text: string; files: Record<string, unknown>[] };
+    };
+    const message = (sent.content as UserMessage[])[0];
+    expect(message.role).toBe("user");
+    expect(message.content.text).toBe("analyze");
+    expect(message.content.files[0]).toMatchObject({
+      fileId: "123",
+      fileName: "report.xlsx",
+      fileType: "application/vnd.openxmlformats",
+      fileSize: 1024,
+      fileUrl: "https://files/report.xlsx",
+      filePath: "/data/report.xlsx",
+    });
+    expect(JSON.stringify(message.content.files[0])).not.toContain("fileIp");
+  });
 });
 
 function request(): ConnectorRequest {
@@ -402,6 +470,7 @@ function request(): ConnectorRequest {
       execution: { connectorId: "openclaw-by-framework", targetId: "1001" },
     },
     task: "analyze",
+    attachments: [],
     metadata: { "Beyond-Token": "token-value" },
   };
 }

@@ -12,6 +12,7 @@
 - 只包含 `delegateAgent`、`askUserQuestion` 的安全工具集合；
 - `@byclaw/connector-openclaw-by-framework`；
 - OpenClaw externalRef + Redis Stream cursor 恢复；
+- 三方数字员工 `INTERFACE`、`A2A`、`PAGE` 专用 Connector，支持按 resourceId 灰度直连；
 - 专用数据库表短期保存执行凭证，Run 终态立即删除；
 - 默认注册为 by-framework `BY_SUPER` Worker，可通过 by-framework 发起入站任务；
 - HTTP Run API、数据库 SSE 事件回放、超时与级联取消。
@@ -41,6 +42,10 @@ packages/by-conductor/                       编排核心、Pi Leader、Connecto
 packages/connectors/openclaw-by-framework/
 ├── src/index.ts                             OpenClaw 投递、恢复和 Redis Stream 消费
 └── src/by-framework-codec.ts                by-framework 消息解析和交互表单转换
+packages/connectors/third-party-common/       执行描述、SSE 解析和外部 URL/header 安全边界
+packages/connectors/third-party-interface-sse/普通三方 HTTP/SSE 协议
+packages/connectors/third-party-a2a/          A2A Agent Card + message/stream
+packages/connectors/third-party-page/         PAGE 卡片与持久用户交互
 packages/storage-postgres/                   PostgreSQL migration 与持久化 adapter
 e2e/                                        HTTP/SSE 端到端测试
 ```
@@ -56,6 +61,9 @@ app → by-conductor
 app → storage-postgres → by-conductor
 app → connector-openclaw-by-framework → by-conductor
                                       → by-framework
+app → connector-third-party-* → by-conductor
+                              → ByClaw BE execution descriptor
+                              → third-party endpoint
 ```
 
 新增 Hermes、Codex 等 Runtime 时，实现新的 `AgentConnector` 包并在 `app` 注册，不修改 Pi Leader。
@@ -237,6 +245,10 @@ OPENAI_API_KEY=
 # REDIS_PASSWORD=
 # DB_EVENT_LISTEN_ENABLED=false
 # DB_MIGRATE_ON_START=true
+# 三方员工直连默认关闭；生产先使用 allowlist 灰度。
+# THIRD_PARTY_AGENT_DIRECT_MODE=allowlist
+# THIRD_PARTY_AGENT_ALLOWLIST=1001,1002
+# THIRD_PARTY_AGENT_ALLOWED_HOSTS=vendor.example.com
 ```
 
 完整的可选变量示例见 [`.env.example`](.env.example)。数据库密码和模型密钥等安全配置
@@ -254,6 +266,13 @@ Token 调用 ByClaw BE 获取，调用方不再传入这两个字段。
 本服务没有 Java session，因此只走 `Beyond-Token` JWT 验签，并要求 Token 中必须
 包含 `userCode`。然后调用 `/byaiService/api/v2/digitEmploy/discover`，只把返回结果中
 `usesPermissions=true` 的数字员工注入本次 Run。
+
+三方员工直连由 `THIRD_PARTY_AGENT_DIRECT_MODE=off|allowlist|all` 控制。只有
+`createType=FROM_THIRD` 且 `integrationType=INTERFACE|A2A|PAGE` 的员工会选择专用
+Connector；其余员工继续走 OpenClaw。直连 Connector 在执行时通过内部 execution descriptor
+API 按 resourceId 重新校验权限并获取短期 endpoint/header，这些字段不会进入 Run、
+Delegation、RunEvent、Pi transcript 或日志。当前默认 `off`，在 ByClaw BE 提供 descriptor
+契约前不得切换为 `all`。
 
 ByClaw BE 地址优先从当前 Redis 读取：
 

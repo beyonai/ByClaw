@@ -13,7 +13,8 @@
       "Bash(echo \"=== refix exit $? ===\")",
       "Bash(npx stylelint *)",
       "Bash(echo \"=== stylelint exit $? ===\")",
-      "Bash(pnpm install *)"
+      "Bash(pnpm install *)",
+      "Bash(pnpm exec *)"
     ]
   },
   "enabledMcpjsonServers": [

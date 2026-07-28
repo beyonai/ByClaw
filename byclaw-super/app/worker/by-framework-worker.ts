@@ -22,6 +22,7 @@ import { BeyondTokenAuthError } from "../auth/beyond-token.js";
 import type { RunIngressService } from "../ingress/run-ingress-service.js";
 import {
   closeReasoning,
+  commandGroupChatRef,
   commandLogFields,
   commandSourceAgentId,
   commandString,
@@ -30,6 +31,7 @@ import {
   delay,
   externalSessionBindingKey,
   extractMessage,
+  extractUserInput,
   isDelegationReasoningEvent,
   progressMessage,
   protocolMessage,
@@ -153,16 +155,14 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
       throw new Error(`Unsupported by-framework command: ${command.actionType}`);
     }
 
-    const message = extractMessage(command.content);
-    if (!message) {
-      throw new Error("AskAgent content must contain a non-empty message");
-    }
+    const { message, attachments } = extractUserInput(command.content);
     const beyondToken = commandString(command, "Beyond-Token");
     if (!beyondToken) {
       throw new BeyondTokenAuthError("Beyond-Token metadata is required");
     }
     const systemCode = commandString(command, "System-Code");
     const thinkingLevel = commandThinkingLevel(command);
+    const groupChatRef = commandGroupChatRef(command);
 
     await context.checkCancelled();
     this.#logger?.info(commandLogFields(command), "开始处理 by-framework 入站任务");
@@ -185,13 +185,17 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
           sessionId,
           message,
           thinkingLevel,
+          ...(attachments.length > 0 ? { attachments } : {}),
           ...(sourceAgentId ? { sourceAgentId } : {}),
+          ...(groupChatRef ? { groupChatRef } : {}),
           ...auth,
         })
       : await this.#runIngress.createSessionRun({
           message,
           thinkingLevel,
+          ...(attachments.length > 0 ? { attachments } : {}),
           ...(sourceAgentId ? { sourceAgentId } : {}),
+          ...(groupChatRef ? { groupChatRef } : {}),
           ...auth,
         });
     if (this.#sessionBindings) {
@@ -490,7 +494,7 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
     }
   }
 
-  /** 将统一交互事件输出为前端既有的 3013 表单卡片。 */
+  /** 将统一交互事件输出为 3013 表单或 2010 PAGE 数字员工卡片。 */
   async #forwardInteractionEvent(
     event: RunEvent,
     context: AgentContext,
@@ -500,6 +504,7 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
     }
     const interactionId = stringData(event.data.interactionId);
     const request = recordValue(event.data.request);
+    const externalPage = stringData(request?.kind) === "external_page";
     const uiPayload =
       recordValue(request?.uiPayload) ?? {
         formStatus: 0,
@@ -507,22 +512,34 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
       };
     const delegationId = stringData(event.data.delegationId);
     const content = JSON.stringify(uiPayload);
-    await this.#emitWithTiming(event, "user_interaction", content.length, () =>
+    const eventType = externalPage
+      ? EventType.ANSWER_DELTA
+      : EventType.REASONING_LOG_DELTA;
+    const contentType = externalPage ? "2010" : "3013";
+    await this.#emitWithTiming(
+      event,
+      externalPage ? "external_page_interaction" : "user_interaction",
+      content.length,
+      () =>
       this.#protocolEmitter.emitEvent({
         sessionId: context.sessionId,
         traceId: context.traceId,
-        eventType: EventType.REASONING_LOG_DELTA,
+        eventType,
         sourceAgentType: this.#agentType,
         messageId: interactionId,
         parentMessageId: delegationId || "-1",
         data: protocolMessage({
-          event: EventType.REASONING_LOG_DELTA,
+          event: eventType,
           content,
-          contentType: "3013",
+          contentType,
           orderId: interactionId,
           parentOrderId: delegationId || "-1",
-          agentId: "",
-          agentName: "",
+          agentId: externalPage
+            ? stringData(uiPayload.agentId)
+            : "",
+          agentName: externalPage
+            ? stringData(uiPayload.agentName)
+            : "",
         }),
         metadata: {
           parent_run_id: event.runId,

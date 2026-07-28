@@ -11,10 +11,22 @@ import type {
 import type { FastifyBaseLogger } from "fastify";
 import type { RunIngressService } from "../ingress/run-ingress-service.js";
 
+/** HTTP 入口的附件引用；与 schema 一致，不含 `url`/`path`。 */
+export interface HttpAttachmentInput {
+  id?: string;
+  name?: string;
+  mediaType?: string;
+  size?: number;
+  sourceType?: string;
+  useType?: string;
+  datasetId?: string;
+}
+
 /** 创建或追加 Run 时接收的 HTTP 请求体。 */
 export type MessageBody = {
-  message: string;
+  message?: string;
   thinkingLevel?: ThinkingLevel;
+  attachments?: HttpAttachmentInput[];
 };
 
 export type CreateSessionBody = MessageBody & {

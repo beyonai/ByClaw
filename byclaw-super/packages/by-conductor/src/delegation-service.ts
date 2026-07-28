@@ -13,6 +13,7 @@ import type {
   Delegation,
   DelegationStatus,
   JsonValue,
+  RunAttachment,
   Session,
   UserInteractionRequest,
   UserInteractionResponse,
@@ -35,6 +36,8 @@ export interface ExecuteDelegationInput {
   agentId: string;
   task: string;
   expectedOutput?: string;
+  /** 本次委派选中的附件；由编排层从当前 Run 的附件集合按 ID 解析后注入。 */
+  attachments?: readonly RunAttachment[];
   metadata: Record<string, unknown>;
   signal: AbortSignal;
   leaseClaim?: RunExecutionClaim;
@@ -87,6 +90,16 @@ export class DelegationService {
     }
 
     const connector = this.connectors.require(agent.execution.connectorId);
+    if (
+      input.attachments &&
+      input.attachments.length > 0 &&
+      !connector.capabilities.attachments
+    ) {
+      // 连接器不支持附件时明确报错，绝不静默降级为纯文本委派。
+      throw new Error(
+        `ATTACHMENTS_UNSUPPORTED: connector ${connector.id} cannot forward attachments`,
+      );
+    }
     const historical = await this.delegations.listByRun(input.runId);
     if (input.reuseCompleted) {
       const completed = historical
@@ -201,6 +214,7 @@ export class DelegationService {
           delegationId,
           agent,
           task: input.task,
+          attachments: [...(input.attachments ?? [])],
           ...(input.expectedOutput ? { expectedOutput: input.expectedOutput } : {}),
           metadata: input.metadata,
         };

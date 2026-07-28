@@ -1,4 +1,5 @@
 import type { SessionContextV1 } from "./session-context.js";
+import type { RunIngressContextV1 } from "./group-chat-context.js";
 
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
@@ -24,6 +25,26 @@ export interface ArtifactRef {
   name?: string;
   uri: string;
   mimeType?: string;
+}
+
+/** 附件来源：by-framework Worker 入口或 HTTP 入口。 */
+export type AttachmentProvenance = "by-framework" | "http";
+
+/**
+ * 一次 Run 携带的附件引用。`url`/`path` 是连接器兼容字段，
+ * 不是超级助手自由访问网络或宿主机的授权；凭据永远不进入此结构。
+ */
+export interface RunAttachment {
+  id: string;
+  name: string;
+  mediaType?: string;
+  size?: number;
+  sourceType?: string;
+  useType?: string;
+  datasetId?: string;
+  url?: string;
+  path?: string;
+  provenance: AttachmentProvenance;
 }
 
 export type AgentResultStatus = "completed" | "failed" | "cancelled" | "timed_out";
@@ -100,6 +121,10 @@ export interface Run {
   id: string;
   sessionId: string;
   input: string;
+  /** 本次 Run 携带的附件引用；进入 Run 前已规范化，重启/接管后仍存在。 */
+  attachments: RunAttachment[];
+  /** 入口拉取并验证后冻结的动态上下文；恢复时复用，不重新访问上游。 */
+  ingressContext?: RunIngressContextV1;
   /** 本次 Run 使用的模型思考等级；未指定时为 off。 */
   thinkingLevel?: ThinkingLevel;
   agentList: AgentProfile[];
@@ -180,6 +205,8 @@ export interface UserInteractionQuestion {
 
 /** Agent 或 Connector 请求前端展示的结构化问题。 */
 export interface UserInteractionRequest {
+  /** 交互展示类型；缺失时按既有 form 处理。 */
+  kind?: "form" | "external_page";
   questions: UserInteractionQuestion[];
   /** 兼容既有 by-framework 3013 表单的原始 UI 数据。 */
   uiPayload?: Record<string, JsonValue>;

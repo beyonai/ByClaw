@@ -35,6 +35,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.LinkedBlockingQueue;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -255,8 +256,17 @@ class RouteServiceTest {
 
         routeService.route(ctx);
 
-        verify(gatewayClient).sendMessage(eq(WorkerAgentType.BY_SUPER.getCode()), eq("3"), eq("hello"), eq("u1"),
-                eq("testUser"), anyString(), eq("-1"), eq("2"), eq(ctx.getTraceId()), eq(ctx.getParams()), any());
+        ArgumentCaptor<Map<String, Object>> paramsCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(gatewayClient).sendMessage(eq(WorkerAgentType.BY_SUPER.getCode()), eq("3"), eq("hello"),
+                eq("u1"), eq("testUser"), anyString(), eq("-1"), eq("2"), eq(ctx.getTraceId()),
+                paramsCaptor.capture(), any());
+        org.assertj.core.api.Assertions.assertThat(paramsCaptor.getValue())
+                .containsEntry("worker_agent_type", WorkerAgentType.BY_SUPER.getCode());
+        org.assertj.core.api.Assertions.assertThat(paramsCaptor.getValue().get("groupChat"))
+                .isEqualTo(Map.of(
+                        "schemaVersion", "byclaw.group-chat-ref/v1",
+                        "conversationKey", "3",
+                        "beforeMessageId", "1"));
         verifyNoInteractions(sandboxService);
     }
 

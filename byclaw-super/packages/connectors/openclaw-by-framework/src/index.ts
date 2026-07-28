@@ -18,6 +18,7 @@ import type {
   ConnectorRequest,
   ExternalExecutionRef,
   JsonValue,
+  RunAttachment,
   UserInteractionResponse,
 } from "@byclaw/by-conductor";
 import {
@@ -56,6 +57,7 @@ export class OpenClawByFrameworkConnector implements AgentConnector {
     cancellation: true,
     artifacts: false,
     resumable: true,
+    attachments: true,
   };
 
   readonly #redis: RedisClient;
@@ -112,7 +114,8 @@ export class OpenClawByFrameworkConnector implements AgentConnector {
       sourceAgentType: this.#sourceAgentType,
       targetAgentType,
       sessionId: childSessionId,
-      content: request.task,
+      // 有附件时构造与 byclaw-be 一致的 {text, files} 内容；无附件保持纯字符串。
+      content: buildByFrameworkContent(request.task, request.attachments),
       userCode: request.userCode,
       ...(request.userName ? { userName: request.userName } : {}),
       requireOnlineWorker: true,
@@ -396,3 +399,49 @@ export class OpenClawByFrameworkConnector implements AgentConnector {
 }
 
 export type { RedisConnectionConfig } from "@byclaw/by-framework";
+
+/**
+ * 按 byclaw-be 兼容结构构造投递内容：无附件时为纯字符串；
+ * 有附件时为 `[{role:"user", content:{text, files}}]`。
+ *
+ * by-framework SDK 的 `MessageFile` 类型（数字 fileId、枚举 fileType）比 byclaw-be 实际
+ * 线缆格式（字符串 fileId、mimetype 等）更窄；sendMessage 只做 JSON 序列化，故按 byclaw-be
+ * 线缆格式构造后安全断言回 SDK 类型。
+ */
+function buildByFrameworkContent(
+  task: string,
+  attachments: readonly RunAttachment[],
+): SendMessageParams["content"] {
+  if (attachments.length === 0) {
+    return task;
+  }
+  return [
+    {
+      role: "user",
+      content: {
+        text: task,
+        files: toByFrameworkFiles(attachments),
+      },
+    },
+  ] as unknown as SendMessageParams["content"];
+}
+
+/**
+ * 把 RunAttachment 映射回 byclaw-be 的 MessageFileDto 字段（白名单）。
+ * 不生成 fileIp；Beyond-Token 不混入文件对象，仍只走 metadata。
+ */
+function toByFrameworkFiles(
+  attachments: readonly RunAttachment[],
+): Record<string, unknown>[] {
+  return attachments.map((attachment) => ({
+    fileId: attachment.id,
+    fileName: attachment.name,
+    ...(attachment.mediaType ? { fileType: attachment.mediaType } : {}),
+    ...(attachment.size !== undefined ? { fileSize: attachment.size } : {}),
+    ...(attachment.url ? { fileUrl: attachment.url } : {}),
+    ...(attachment.path ? { filePath: attachment.path } : {}),
+    ...(attachment.datasetId ? { datasetId: attachment.datasetId } : {}),
+    ...(attachment.sourceType ? { sourceType: attachment.sourceType } : {}),
+    ...(attachment.useType ? { useType: attachment.useType } : {}),
+  }));
+}

@@ -4,6 +4,7 @@ import type {
   ArtifactRef,
   ExternalExecutionRef,
   JsonValue,
+  RunAttachment,
   UserInteractionRequest,
   UserInteractionResponse,
 } from "./types.js";
@@ -18,6 +19,8 @@ export interface ConnectorRequest {
   agent: AgentProfile;
   task: string;
   expectedOutput?: string;
+  /** 本次委派选中的附件；由编排层从当前 Run 的附件集合中按 ID 解析，Connector 只负责透传。 */
+  attachments: RunAttachment[];
   metadata: Record<string, unknown>;
 }
 
@@ -27,6 +30,8 @@ export interface ConnectorCapabilities {
   cancellation: boolean;
   artifacts: boolean;
   resumable: boolean;
+  /** 是否支持随委派透传附件；不支持时收到附件会明确报错而非静默丢弃。 */
+  attachments: boolean;
 }
 
 /** Connector 失败事件的统一错误结构。 */

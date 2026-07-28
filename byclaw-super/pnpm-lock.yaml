@@ -17,6 +17,18 @@ importers:
       '@byclaw/connector-openclaw-by-framework':
         specifier: workspace:*
         version: link:packages/connectors/openclaw-by-framework
+      '@byclaw/connector-third-party-a2a':
+        specifier: workspace:*
+        version: link:packages/connectors/third-party-a2a
+      '@byclaw/connector-third-party-common':
+        specifier: workspace:*
+        version: link:packages/connectors/third-party-common
+      '@byclaw/connector-third-party-interface-sse':
+        specifier: workspace:*
+        version: link:packages/connectors/third-party-interface-sse
+      '@byclaw/connector-third-party-page':
+        specifier: workspace:*
+        version: link:packages/connectors/third-party-page
       '@byclaw/storage-postgres':
         specifier: workspace:*
         version: link:packages/storage-postgres
@@ -60,6 +72,35 @@ importers:
       '@byclaw/by-framework':
         specifier: 1.5.1
         version: 1.5.1
+
+  packages/connectors/third-party-a2a:
+    dependencies:
+      '@byclaw/by-conductor':
+        specifier: workspace:*
+        version: link:../../by-conductor
+      '@byclaw/connector-third-party-common':
+        specifier: workspace:*
+        version: link:../third-party-common
+
+  packages/connectors/third-party-common: {}
+
+  packages/connectors/third-party-interface-sse:
+    dependencies:
+      '@byclaw/by-conductor':
+        specifier: workspace:*
+        version: link:../../by-conductor
+      '@byclaw/connector-third-party-common':
+        specifier: workspace:*
+        version: link:../third-party-common
+
+  packages/connectors/third-party-page:
+    dependencies:
+      '@byclaw/by-conductor':
+        specifier: workspace:*
+        version: link:../../by-conductor
+      '@byclaw/connector-third-party-common':
+        specifier: workspace:*
+        version: link:../third-party-common
 
   packages/storage-postgres:
     dependencies:

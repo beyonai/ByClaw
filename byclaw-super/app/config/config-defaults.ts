@@ -38,6 +38,20 @@ export const APP_CONFIG_DEFAULTS = {
     baseUrl: "http://127.0.0.1:8086",
     timeoutMs: 10_000,
   },
+  thirdPartyAgents: {
+    directMode: "off",
+    allowlist: "",
+    descriptorPath:
+      "/byaiService/api/internal/v1/digital-employees",
+    requestTimeoutMs: 300_000,
+    allowInsecureExternalHttp: false,
+    allowedExternalHosts: "",
+  },
+  attachments: {
+    maxFileBytes: 10_485_760,
+    maxTextChars: 8_000,
+    maxStructureChars: 4_000,
+  },
   run: {
     leaseMs: 30_000,
     queuePollMs: 500,

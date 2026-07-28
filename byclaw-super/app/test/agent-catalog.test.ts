@@ -92,6 +92,68 @@ describe("ByClaw BE Agent Catalog", () => {
     );
   });
 
+  it("routes allowlisted third-party employees to their direct connector", async () => {
+    const catalog = new ByClawBeAgentCatalog({
+      baseUrl: "http://127.0.0.1:8086",
+      timeoutMs: 1_000,
+      thirdPartyDirect: {
+        mode: "allowlist",
+        allowlist: ["2001", "2002", "2003"],
+      },
+      fetchImpl: vi.fn(async () =>
+        Response.json({
+          code: 0,
+          success: true,
+          data: {
+            list: [
+              {
+                id: "2001",
+                name: "SSE",
+                createType: " from_third ",
+                integrationType: " interface ",
+                usesPermissions: true,
+              },
+              {
+                id: "2002",
+                name: "A2A",
+                createType: "FROM_THIRD",
+                integrationType: "a2a",
+                usesPermissions: true,
+              },
+              {
+                id: "2003",
+                name: "PAGE",
+                createType: "FROM_THIRD",
+                integrationType: "PAGE",
+                usesPermissions: true,
+              },
+              {
+                id: "2004",
+                name: "Not allowlisted",
+                createType: "FROM_THIRD",
+                integrationType: "INTERFACE",
+                usesPermissions: true,
+              },
+            ],
+          },
+        }),
+      ) as typeof fetch,
+    });
+
+    const agents = await catalog.listAuthorizedAgents({
+      beyondToken: "secret-token",
+    });
+
+    expect(
+      agents.map((agent) => [agent.id, agent.execution.connectorId]),
+    ).toEqual([
+      ["2001", "third-party-interface-sse"],
+      ["2002", "third-party-a2a"],
+      ["2003", "third-party-page"],
+      ["2004", "openclaw-by-framework"],
+    ]);
+  });
+
   it("falls back to BYCLAW_BE_BASE_URL when Redis has no instance", async () => {
     const fetchImpl = vi.fn(async () =>
       Response.json({ code: 0, success: true, data: { list: [] } }),
