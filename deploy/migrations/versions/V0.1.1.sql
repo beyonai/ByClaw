@@ -20,6 +20,8 @@ UPDATE "byai"."sandbox_service_spec" SET "spec_json" = '{
         "REDIS_DATABASE": "${REDIS_DATABASE}",
         "REDIS_PASSWORD": "${REDIS_PASSWORD}",
         "REDIS_USERNAME": "${REDIS_USERNAME}",
+        "REDIS_CLUSTER_HOST": "${REDIS_CLUSTER_HOST}",
+        "REDIS_KEY_SCHEMA_VERSION": "${REDIS_KEY_SCHEMA_VERSION}",
         "BAIYING_SESSION": "${BAIYING_SESSION}",
         "DATACLOUD_DB_HOST": "${DB_HOST}",
         "DATACLOUD_DB_PASS": "${DB_PASS}",
