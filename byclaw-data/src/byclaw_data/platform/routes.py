@@ -8,14 +8,13 @@ from contextlib import asynccontextmanager
 from collections.abc import Callable
 from typing import AsyncIterator
 
+from redis.asyncio import Redis
+
 from by_framework.core.discovery import ServiceRegistry
 
-from byclaw_data.redis_client import create_redis_client, get_redis_settings
 from byclaw_data.runtime import normalize_runtime_environment
 
 logger = logging.getLogger(__name__)
-
-create_discovery_redis = create_redis_client
 
 
 def _configure_platform_logging(
@@ -122,13 +121,14 @@ async def register_service(application) -> None:
         port,
         metadata,
     )
-    redis_settings = get_redis_settings()
+    redis_host = os.getenv("DATACLOUD_GATEWAY_REDIS_HOST", "localhost")
+    redis_port = int(os.getenv("DATACLOUD_GATEWAY_REDIS_PORT", 6379))
+    redis_db = int(os.getenv("DATACLOUD_GATEWAY_REDIS_DB", 0))
     logger.info(
-        "service registry redis configured: cluster_hosts=%s host=%s, port=%s, db=%s",
-        redis_settings.cluster_hosts,
-        redis_settings.host,
-        redis_settings.port,
-        redis_settings.db,
+        "service registry redis configured: host=%s, port=%s, db=%s",
+        redis_host,
+        redis_port,
+        redis_db,
     )
 
 
@@ -142,3 +142,20 @@ async def unregister_service(application) -> None:
     await registry.redis.aclose()
     del application.state.service_registry
     logger.info("Service registry unregistered")
+
+
+def create_discovery_redis() -> Redis:
+    redis_host = os.getenv("DATACLOUD_GATEWAY_REDIS_HOST", "localhost")
+    redis_port = int(os.getenv("DATACLOUD_GATEWAY_REDIS_PORT", 6379))
+    redis_db = int(os.getenv("DATACLOUD_GATEWAY_REDIS_DB", 0))
+    redis_password = os.getenv("DATACLOUD_GATEWAY_REDIS_PASSWORD")
+    redis_username = os.getenv("DATACLOUD_GATEWAY_REDIS_USERNAME")
+
+    return Redis(
+        host=redis_host,
+        port=redis_port,
+        db=redis_db,
+        password=redis_password or None,
+        username=redis_username or None,
+        decode_responses=True,
+    )

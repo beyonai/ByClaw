@@ -24,8 +24,6 @@ import java.util.Map;
 @Service
 public class StaticDataQueryApplicationService {
 
-    private static final String MANAGER_MENU_PARAM_CODE = "SYSTEM_BACKEND_MENU_MANAGE";
-
     @Autowired
     private SystemConfigService systemConfigService;
 
@@ -39,9 +37,6 @@ public class StaticDataQueryApplicationService {
      * @return ByaiSystemConfig
      */
     public ByaiSystemConfig getDcSystemConfig(String paramCode) {
-        if (MANAGER_MENU_PARAM_CODE.equals(paramCode)) {
-            return systemConfigService.findDbAndRefreshCacheByParamCode(paramCode);
-        }
         return systemConfigService.findCacheOrDbByParamCode(paramCode);
     }
 

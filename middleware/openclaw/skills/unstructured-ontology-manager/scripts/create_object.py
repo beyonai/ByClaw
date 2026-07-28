@@ -181,6 +181,8 @@ def main() -> None:
     entity_code: str = params.get("entity_code", "").strip()
     template_file_path: str = params.get("template_file_path", "").strip()
     rules_file_path: str = params.get("rules_file_path", "").strip()
+    template_file_path: str = params.get("template_file_path", "").strip()
+    rules_file_path: str = params.get("rules_file_path", "").strip()
 
     if not entity_code:
         print(json.dumps({"ok": False, "error": "entity_code 不能为空"}), flush=True)
