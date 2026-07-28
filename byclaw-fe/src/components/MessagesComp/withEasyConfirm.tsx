@@ -29,13 +29,14 @@ export default function withEasyConfirm<P extends EasyConfirmComponentProps>(Com
   const EasyConfirmComponent = (props: P) => {
     const { EventEmitter } = useGlobal();
 
+    const isThinkingProcess = !!props.thinkListItem;
+    const listItemProp = isThinkingProcess ? 'thinkListItem' : 'messageListItem';
+    const messageListProp = isThinkingProcess ? 'thinkList' : 'messageList';
+
     const updateMessageListItemContent = useCallback(
       (messageListItemContent: P['messageListItemContent']) => {
         const message = props.updateMessageListItemContent(messageListItemContent);
 
-        const isThinkingProcess = !!props.thinkListItem;
-        const listItemProp = isThinkingProcess ? 'thinkListItem' : 'messageListItem';
-        const messageListProp = isThinkingProcess ? 'thinkList' : 'messageList';
         const currentListItem = props[listItemProp];
 
         if (!currentListItem) {
@@ -62,7 +63,7 @@ export default function withEasyConfirm<P extends EasyConfirmComponentProps>(Com
 
         return message;
       },
-      [EventEmitter, props]
+      [EventEmitter, props.updateMessageListItemContent, listItemProp, messageListProp, props.messageIdx]
     );
 
     useEffect(() => {
