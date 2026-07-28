@@ -40,8 +40,38 @@ public final class StorageType {
     public static final String LOCAL = "local";
 
     /**
+     * File storage type, an alias for local filesystem storage.
+     */
+    public static final String FILE = "file";
+
+    /**
      * WHALE_AGENT 服务
      */
     public static final String WHALE_AGENT = "whale-agent";
+
+    /**
+     * Returns whether the storage type points to a local filesystem backend.
+     *
+     * @param storageType storage type
+     * @return true for local filesystem aliases
+     */
+    public static boolean isLocalFilesystem(String storageType) {
+        return LOCAL.equalsIgnoreCase(storageType) || FILE.equalsIgnoreCase(storageType);
+    }
+
+    /**
+     * Checks whether a configured storage type matches a backend storage type.
+     * Local filesystem aliases are treated as equivalent.
+     *
+     * @param requestedStorageType configured storage type
+     * @param serviceStorageType backend storage type
+     * @return true when the backend can serve the configured type
+     */
+    public static boolean matches(String requestedStorageType, String serviceStorageType) {
+        if (isLocalFilesystem(requestedStorageType) && isLocalFilesystem(serviceStorageType)) {
+            return true;
+        }
+        return serviceStorageType != null && serviceStorageType.equalsIgnoreCase(requestedStorageType);
+    }
 
 }

@@ -82,25 +82,25 @@ public class ObjectStorageConfiguration {
         ObjectStorageProperties properties = new ObjectStorageProperties();
         properties.setStorageType(storageType);
 
-        if (StorageType.MINIO.equalsIgnoreCase(this.getStorageType())) {
+        if (StorageType.MINIO.equalsIgnoreCase(storageType)) {
             properties.setMinio(this.minioConfig);
             this.initializeBucketMapping(properties);
         }
-        else if (StorageType.ALI_YUN_OSS.equalsIgnoreCase(this.getStorageType())) {
+        else if (StorageType.ALI_YUN_OSS.equalsIgnoreCase(storageType)) {
             properties.setAliyunOss(this.aliyunOssConfig);
             this.initializeBucketMapping(properties);
         }
-        else if (StorageType.FTP.equalsIgnoreCase(this.getStorageType())
-            || StorageType.SFTP.equalsIgnoreCase(this.getStorageType())) {
+        else if (StorageType.FTP.equalsIgnoreCase(storageType)
+            || StorageType.SFTP.equalsIgnoreCase(storageType)) {
             properties.setFtpConfig(this.ftpConfig);
         }
-        else if (StorageType.LOCAL.equalsIgnoreCase(this.getStorageType())
-            || StorageType.WHALE_AGENT.equalsIgnoreCase(this.getStorageType())) {
+        else if (StorageType.isLocalFilesystem(storageType)
+            || StorageType.WHALE_AGENT.equalsIgnoreCase(storageType)) {
             this.initializeBucketMapping(properties);
         }
         else {
             throw new ByAiArgumentException(CommonErrorCode.ERROR_CODE_50500,
-                I18nUtil.get("storage.configuration.unsupported.storage.type", this.storageType));
+                I18nUtil.get("storage.configuration.unsupported.storage.type", storageType));
         }
         return properties;
     }

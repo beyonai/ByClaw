@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.common.storage.impl;
 
 import com.iwhalecloud.byai.common.storage.AbstractFileIngressStorageService;
+import com.iwhalecloud.byai.common.storage.constants.StorageType;
 import com.iwhalecloud.byai.common.storage.model.FileMetadata;
 import com.iwhalecloud.byai.common.storage.model.FileStorageContext;
 import com.iwhalecloud.byai.common.storage.model.StorageLocation;
@@ -32,8 +33,14 @@ public class LocalStorageService extends AbstractFileIngressStorageService<Void>
     @Value("${file.storage.local.path:${byclaw.sandbox.base-path:/tmp/byclaw-storage}}")
     private String basePath;
 
+    @Value("${file.storage.type:local}")
+    private String configuredStorageType;
+
     @Override
     public String getStorageType() {
+        if (StorageType.FILE.equalsIgnoreCase(configuredStorageType)) {
+            return StorageType.FILE;
+        }
         return STORAGE_TYPE;
     }
 
