@@ -1,11 +1,11 @@
 ---
 name: structured-ontology-manager
-description: "开发结构化业务本体模块：选择或新建本体开发工作区，通过多轮对话定义多个结构化本体对象字段，编写跨对象 Action 脚本（脚本通过自动生成的 Mapper SDK 操作服务端数据），定义视图，本地调试验证后统一提交，发布挂载。适用于从零开发新业务对象和业务 Action，也可续接已有本体开发工作区继续开发。"
+description: "开发结构化业务本体模块：选择或新建本体开发工作区，通过多轮对话定义多个结构化本体对象字段，编写跨对象 Action 脚本（脚本通过自动生成的 Mapper SDK 操作服务端数据），本地调试验证后统一提交，发布挂载。适用于从零开发新业务对象和业务 Action，也可续接已有本体开发工作区继续开发。"
 ---
 
 # 本体开发助手
 
-通过多轮对话完成本体对象、Action 和视图的全流程开发，从选择/初始化工作区到发布挂载。
+通过多轮对话完成本体对象、Action 的全流程开发，从选择/初始化工作区到发布挂载。
 
 ## ⚠️ 执行规则（最高优先级）
 
@@ -13,12 +13,12 @@ description: "开发结构化业务本体模块：选择或新建本体开发工
 2. 每次操作前读取 `references/field-rules.md`
 3. 脚本返回 `ok:false` 时，原文告知用户，不猜测原因
 4. `missing` 非空时根据字段列表追问，不填充默认值
-5. **字段 collect 完成（missing 为空）后不 submit**，继续开发其他对象/Action/视图
+5. **字段 collect 完成（missing 为空）后不 submit**，继续开发其他对象/Action
 6. **`batch_submit.py` 只在用户明确说"提交"时才执行，禁止主动或自动触发提交**
 7. **提交前必须确认所有 Action 均已向用户交付完整说明、获得用户审阅确认并业务验收通过**；有未展示脚本、用户未确认、未测试、仅技术执行通过或业务验收失败的 Action，必须先补齐，不得跳过直接提交
 8. Action 脚本只通过注入的 mapper 实例操作数据，禁止在脚本内拼接 HTTP 请求
 9. 工作区数量可能很多，**每次会话开始前必须先列出工作区，让用户明确选择目标**
-10. **对象编码和视图编码必须以用户编码结尾**：格式为 `<business_name>_<user_code>`，其中 `user_code` 从环境变量 `USER_CODE` 读取。例如用户编码为 `u001`，对象业务名为 `travel_application`，则 `entity_code` 为 `travel_application_u001`；视图编码为 `v_travel_full_u001`。**工作区名称（`workspace_name`）不需要拼接用户编码。** 生成编码前必须先获取 `USER_CODE`，不得使用占位符。
+10. **对象编码必须以用户编码结尾**：格式为 `<business_name>_<user_code>`，其中 `user_code` 从环境变量 `USER_CODE` 读取。例如用户编码为 `u001`，对象业务名为 `travel_application`，则 `entity_code` 为 `travel_application_u001`。**工作区名称（`workspace_name`）不需要拼接用户编码。** 生成编码前必须先获取 `USER_CODE`，不得使用占位符。
 11. **Action 参数的术语绑定必须与对应对象字段保持一致**：若参数对应某字段，该字段有 `term_type_code` 则参数也必须绑定相同的 `term_type_code`，字段有 `term_values` 则参数也必须引用相同的枚举（`term_type_code: "<entity_code>_<property_code>"`），不得遗漏或另起一套。
 12. **先定义业务契约，再创建对象和 Action**：无论需求来自上传的设计文档、表格、DDL，还是用户自然语言描述，都必须先整理出需求来源、业务对象、字段语义、对象关系、业务规则、状态机和验收示例；不得直接根据零散关键词生成脚本。
 13. **需求明确时主动推进，需求不明确时精准追问**：可从上下文可靠推断的内容应给出建议并请用户确认；会影响数据模型、计算结果、状态流转、权限或数据安全的歧义必须逐项追问，禁止自行补默认业务规则。
@@ -50,9 +50,9 @@ python3 scripts/list_workspaces.py
 展示格式：
 ```
 您当前有以下工作区：
-1. travel_reimbursement（差旅报销）— 4 个对象，1 个视图，⚠️ 2 个待提交
+1. travel_reimbursement（差旅报销）— 4 个对象，⚠️ 2 个待提交
 2. hr_onboarding（入职流程）— 3 个对象，全部已提交
-3. expense_approval（费用审批）— 2 个对象，1 个视图，⚠️ 3 个待提交
+3. expense_approval（费用审批）— 2 个对象，⚠️ 3 个待提交
 
 请问您要：
 A) 续接某个工作区（输入编号）
@@ -71,8 +71,8 @@ B) 新建工作区
 
 - 有待提交的对象字段未完善（`missing` 非空）→ 提示用户补全字段
 - 有 Action 未达到业务验收通过 → 继续生成/执行验收用例，不得以“脚本能运行”为由跳过
-- 有未提交的对象/视图 → 提示可执行 `batch_submit.py`
-- 全部已提交 → 询问是否要添加新对象/Action/视图，或挂载到数字员工
+- 有未提交的对象 → 提示可执行 `batch_submit.py`
+- 全部已提交 → 询问是否要添加新对象/Action，或挂载到数字员工
 
 ---
 
@@ -84,12 +84,11 @@ B) 新建工作区
 echo $USER_CODE
 ```
 
-收集 `workspace_name`（英文 snake_case，不拼接用户编码）、描述、初始对象列表。**对象编码和视图编码在业务名后拼接用户编码**：`<business_name>_<user_code>`。
+收集 `workspace_name`（英文 snake_case，不拼接用户编码）、描述、初始对象列表。**对象编码在业务名后拼接用户编码**：`<business_name>_<user_code>`。
 
 例如用户编码为 `u001`：
 - 工作区名：`travel_reimbursement`（不拼接）
 - 对象编码：`travel_application_u001`、`travel_expense_u001`
-- 视图编码：`v_travel_full_u001`
 
 ```bash
 python3 scripts/init_workspace.py '{"workspace_name":"<n>","workspace_desc":"<d>","objects":["<code1>_<user_code>","<code2>_<user_code>"]}'
@@ -105,7 +104,7 @@ python3 scripts/init_workspace.py '{"workspace_name":"<n>","workspace_desc":"<d>
 
 - 用户上传的设计说明书、Word/PDF/HTML/Markdown、表格、DDL、CSV 模板
 - 用户在对话中的自然语言描述
-- 已存在工作区中的对象、字段、Action 和视图
+- 已存在工作区中的对象、字段、Action
 - 用户对已有需求的补充或修订
 
 #### 1. 读取并登记需求来源
@@ -920,7 +919,7 @@ python3 scripts/run_action.py '{...}'
 ⚠️ 存在未完成或失败的业务验收，请修复并复测后再提交。
 ```
 
-- 所有 Action 均已展示完整脚本、获得用户审阅确认，且所有 Action 和跨 Action 场景均为 🟢 后，提示用户：“所有 Action 已完成用户审阅和业务验收，可以进行视图定义或提交。请告诉我下一步。”
+- 所有 Action 均已展示完整脚本、获得用户审阅确认，且所有 Action 和跨 Action 场景均为 🟢 后，提示用户：“所有 Action 已完成用户审阅和业务验收，可以进行提交。请告诉我下一步。”
 - 有 ⚪/🟡/🔴 时，**不推进到提交**：
   - ⚪：生成测试契约并执行
   - 🟡：补全业务、副作用、边界、权限或流程用例
@@ -930,42 +929,16 @@ python3 scripts/run_action.py '{...}'
 
 ---
 
-### Step 5：视图定义（可选，在统一提交前完成）
-
-引导用户描述视图：包含哪些对象、对象间的关联关系。可从各对象的关联关系自动推导关联路径。
-
-```bash
-python3 scripts/collect_view.py '{
-  "workspace_name": "<name>",
-  "view_code": "<code>",
-  "view_name": "<中文名>",
-  "view_desc": "<描述>",
-  "object_codes": ["<code1>", "<code2>"],
-  "object_relations": [
-    {
-      "source_object_code": "<from_object>",
-      "source_object_field_code": "<fk_field>",
-      "target_object_code": "<to_object>",
-      "target_object_field_code": "id",
-      "relation_type": "MANY_TO_ONE"
-    }
-  ]
-}'
-```
-
-`missing` 为空后，视图定义自动写入服务端 `workspace/<name>/views/<view_code>.json`。
-
 ---
 
-### Step 6：统一提交（只有用户明确说"提交"才执行）
+### Step 5：统一提交（只有用户明确说"提交"才执行）
 
-**触发条件：用户明确说出"提交"、"提交工作区"、"batch submit"等明确提交意图。** 开发完成、业务验收通过、视图定义完成等情况均不自动触发提交。
+**触发条件：用户明确说出"提交"、"提交工作区"、"batch submit"等明确提交意图。** 开发完成、业务验收通过完成等情况均不自动触发提交。
 
 **提交前最终检查（执行 batch_submit.py 前必须确认）：**
 
 1. 所有保留的 Action 均已展示处理逻辑和完整脚本并获得用户确认；相关 Action 和跨 Action 场景均已业务验收通过（参考 Step 4 汇总，有未审阅或 ⚪/🟡/🔴 则拒绝提交并引导补全）
-2. 询问用户是否还有视图需要定义
-3. 明确说明 `batch_submit.py` 会提交对象及其已收集的 Action，并列出即将提交的对象、Action 和视图，请用户二次确认：
+2. 明确说明 `batch_submit.py` 会提交对象及其已收集的 Action，并列出即将提交的对象、Action，请用户二次确认：
 
 ```
 准备提交以下内容：
@@ -976,7 +949,6 @@ Action：
   travel_expense_u001：
     create_expense、list_expenses
   共 5 个，均已业务验收通过
-视图：v_travel_full_u001（共 1 个）
 
 确认提交？
 ```
@@ -1022,7 +994,7 @@ python3 scripts/batch_submit.py '{"workspace_name": "<name>", "only": ["travel_e
 
 ### Step 7：发布挂载
 
-每个对象和视图逐一挂载到目标数字员工：
+每个对象逐一挂载到目标数字员工：
 
 ```bash
 python3 scripts/mount_resource.py '{"agent_id": <id>, "resource_code": "<actual_code_or_entity_code>"}'
@@ -1049,10 +1021,6 @@ python3 scripts/mount_resource.py '{"agent_id": <id>, "resource_code": "<actual_
 | 查询 Action 脚本详情 | `get_action.py` |
 | 删除 Action（⚠️ 二次确认） | `delete_action.py` |
 | 调试 Action | `run_action.py` |
-| 新增/定义视图 | `collect_view.py`（多轮） |
-| 查询视图列表 | `list_views.py` |
-| 查询视图详情 | `get_view.py` |
-| 删除视图（⚠️ 二次确认） | `delete_view.py` |
 | 统一提交 | `batch_submit.py` |
 | 重新获取 SDK 文件 | `get_sdk.py` |
 | 挂载 | `mount_resource.py` |
