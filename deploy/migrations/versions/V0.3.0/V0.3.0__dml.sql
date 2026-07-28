@@ -205,3 +205,79 @@ SELECT 25,'inner','SYSTEM_BUILTIN','v0.1','','zip',NULL,NULL,NULL,'SUCCESS',NULL
 WHERE NOT EXISTS (
     SELECT 1 FROM byai.ss_res_ext_skill WHERE resource_id = 25
 );
+
+-- 修正 bycli 运行期技能快照，避免资源 ID 曾被其他技能复用时残留错误 target_content。
+UPDATE byai.ss_res_ext_skill e
+SET target_content = json_build_object(
+        'resourceId', r.resource_id,
+        'resourceCode', r.resource_code,
+        'resourceName', r.resource_name,
+        'resourceDesc', r.resource_desc,
+        'resourceBizType', r.resource_biz_type,
+        'resourceType', r.resource_type,
+        'ownerType', r.owner_type,
+        'sourceType', e.source_type,
+        'skillType', e.skill_type,
+        'skillUrl', e.skill_url,
+        'version', e.version,
+        'skillPackageFormat', e.skill_package_format,
+        'skillOriginalFilename', e.skill_original_filename,
+        'skillPackageSize', e.skill_package_size,
+        'skillPackageHash', e.skill_package_hash,
+        'syncStatus', e.sync_status,
+        'syncError', e.sync_error,
+        'lastSyncTime', to_char(e.last_sync_time, 'YYYY-MM-DD HH24:MI:SS')
+    )::text
+FROM byai.ss_resource r
+WHERE e.resource_id = 25
+  AND r.resource_id = 25
+  AND r.resource_code = 'bycli';
+
+-- 复制知识采集 Skill 的可用授权，使未传 ownerType 的技能列表也能发现 bycli。
+INSERT INTO byai.au_privilege_grant (
+    privilege_grant_id,
+    grant_type,
+    oper_type,
+    grant_obj_type,
+    grant_obj_id,
+    eff_date,
+    exp_date,
+    status_cd,
+    create_staff,
+    create_date,
+    update_staff,
+    update_date,
+    grant_to_type,
+    grant_to_obj_id,
+    grant_to_obj_type,
+    allow_unsubscribe
+)
+SELECT
+    COALESCE((SELECT MAX(privilege_grant_id) FROM byai.au_privilege_grant), 0)
+        + ROW_NUMBER() OVER (ORDER BY g.privilege_grant_id),
+    g.grant_type,
+    g.oper_type,
+    g.grant_obj_type,
+    25,
+    g.eff_date,
+    g.exp_date,
+    g.status_cd,
+    g.create_staff,
+    g.create_date,
+    g.update_staff,
+    g.update_date,
+    g.grant_to_type,
+    g.grant_to_obj_id,
+    g.grant_to_obj_type,
+    g.allow_unsubscribe
+FROM byai.au_privilege_grant g
+WHERE g.grant_obj_id = 14
+  AND NOT EXISTS (
+      SELECT 1
+      FROM byai.au_privilege_grant existing
+      WHERE existing.grant_obj_id = 25
+        AND existing.grant_type = g.grant_type
+        AND existing.grant_to_type = g.grant_to_type
+        AND existing.grant_to_obj_id = g.grant_to_obj_id
+        AND existing.grant_to_obj_type = g.grant_to_obj_type
+  );

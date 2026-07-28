@@ -101,6 +101,11 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         self.assertIn("'knowledge-collection','bycli','dws'", initdb)
         self.assertIn("resource_code = 'bycli'", upgrade)
         self.assertIn("resource_id = 25", upgrade)
+        self.assertIn("resourceCode', r.resource_code", upgrade)
+        self.assertIn("r.resource_code = 'bycli'", upgrade)
+        self.assertIn("FROM byai.au_privilege_grant g", upgrade)
+        self.assertIn("g.grant_obj_id = 14", upgrade)
+        self.assertIn("grant_obj_id = 25", upgrade)
 
     def test_meta_prompt_counts_catalog_entries_from_json(self):
         source = META_PROMPT_SERVICE.read_text(encoding="utf-8")
