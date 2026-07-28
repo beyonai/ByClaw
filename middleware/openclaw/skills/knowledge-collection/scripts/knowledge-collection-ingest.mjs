@@ -4,14 +4,22 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
+import http from "node:http";
+import https from "node:https";
 import net from "node:net";
 import { spawn } from "node:child_process";
+import { lookup as dnsLookup } from "node:dns/promises";
 import { fileURLToPath } from "node:url";
 
 const DEFAULT_CONTEXT_PATH = "/byaiService";
 const DEFAULT_SIGNATURE_SALT = "{#@*A12^c0+}";
 const DEFAULT_BACKEND_SERVICE_NAME = "ByaiService";
 const SERVICE_DISCOVERY_INSTANCE_PREFIX = "byai_gateway:sd:instances:";
+const DEFAULT_RESOURCE_TIMEOUT_MS = 15_000;
+const DEFAULT_MAX_RESOURCE_BYTES = 50 * 1024 * 1024;
+const DEFAULT_MAX_BATCH_BYTES = 100 * 1024 * 1024;
+const DEFAULT_MAX_RESOURCES = 20;
+const MAX_RESOURCE_REDIRECTS = 5;
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const CANONICAL_LOCAL_PATH = Symbol("canonicalLocalPath");
 
@@ -71,6 +79,28 @@ function toNumber(value) {
   }
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function toPositiveSafeInteger(value) {
+  if (typeof value === "number") {
+    return Number.isSafeInteger(value) && value > 0 ? value : undefined;
+  }
+  if (typeof value !== "string" || !/^[1-9]\d*$/.test(value.trim())) {
+    return undefined;
+  }
+  const parsed = Number(value.trim());
+  return Number.isSafeInteger(parsed) ? parsed : undefined;
+}
+
+function positiveSafeIntegerIfPresent(value, label) {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+  const parsed = toPositiveSafeInteger(value);
+  if (parsed === undefined) {
+    throw new Error(`${label} 必须是正安全整数`);
+  }
+  return parsed;
 }
 
 function compactObject(value) {
@@ -159,6 +189,19 @@ function parseMaybeJsonText(text) {
 
 function looksLikeHttpUrl(value) {
   return /^https?:\/\//i.test(String(value || ""));
+}
+
+function positiveIntegerEnv(name, fallback) {
+  return toPositiveSafeInteger(firstNonEmpty(process.env[name])) ?? fallback;
+}
+
+function resourceLimits() {
+  return {
+    timeoutMs: positiveIntegerEnv("KNOWLEDGE_COLLECTION_RESOURCE_TIMEOUT_MS", DEFAULT_RESOURCE_TIMEOUT_MS),
+    maxResourceBytes: positiveIntegerEnv("KNOWLEDGE_COLLECTION_MAX_RESOURCE_BYTES", DEFAULT_MAX_RESOURCE_BYTES),
+    maxBatchBytes: positiveIntegerEnv("KNOWLEDGE_COLLECTION_MAX_BATCH_BYTES", DEFAULT_MAX_BATCH_BYTES),
+    maxResources: positiveIntegerEnv("KNOWLEDGE_COLLECTION_MAX_RESOURCES", DEFAULT_MAX_RESOURCES),
+  };
 }
 
 function normalizeBaseUrl(rawBaseUrl) {
@@ -809,7 +852,7 @@ function normalizeResourceCandidate(raw, args, index) {
 }
 
 function collectResourceCandidatesFromValue(value, args) {
-  if (value === undefined || value === null || hasMarkdownPayload(value)) {
+  if (value === undefined || value === null) {
     return [];
   }
   if (typeof value === "string") {
@@ -829,7 +872,20 @@ function collectResourceCandidatesFromValue(value, args) {
     ...asArray(value.resources),
   ];
   const nested = containers.flatMap((item) => collectResourceCandidatesFromValue(item, args));
-  const direct = normalizeResourceCandidate(value, args, nested.length);
+  const directInput = hasMarkdownPayload(value)
+    ? {
+      fileUrl: value.fileUrl,
+      imageUrl: value.imageUrl,
+      iconUrl: value.iconUrl,
+      downloadUrl: value.downloadUrl,
+      path: value.path,
+      fileName: value.fileName,
+      name: value.name,
+      contentType: value.contentType,
+      mimeType: value.mimeType,
+    }
+    : value;
+  const direct = normalizeResourceCandidate(directInput, args, nested.length);
   return direct ? [direct, ...nested] : nested;
 }
 
@@ -857,26 +913,262 @@ function buildResourceCandidates(args, stdinValue) {
   return [...directCandidates, ...collectResourceCandidatesFromValue(stdinValue, args)];
 }
 
-async function resolveResourceBytes(candidate) {
-  if (looksLikeHttpUrl(candidate.source)) {
-    const response = await fetch(candidate.source);
-    if (!response.ok) {
-      throw new Error(`下载资源失败 HTTP ${response.status}: ${candidate.source}`);
+function ipv4Octets(address) {
+  const parts = String(address).split(".").map((part) => Number.parseInt(part, 10));
+  return parts.length === 4 && parts.every((part) => Number.isInteger(part) && part >= 0 && part <= 255) ? parts : undefined;
+}
+
+function mappedIpv4Address(address) {
+  const normalized = String(address).toLowerCase();
+  const dotted = normalized.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+  if (dotted) {
+    return dotted[1];
+  }
+  const hexadecimal = normalized.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+  if (!hexadecimal) {
+    return "";
+  }
+  const high = Number.parseInt(hexadecimal[1], 16);
+  const low = Number.parseInt(hexadecimal[2], 16);
+  return `${high >> 8}.${high & 255}.${low >> 8}.${low & 255}`;
+}
+
+function isUnsafeIpv4(address) {
+  const octets = ipv4Octets(address);
+  if (!octets) {
+    return true;
+  }
+  const [first, second, third] = octets;
+  return first === 0
+    || first === 10
+    || first === 127
+    || (first === 100 && second >= 64 && second <= 127)
+    || (first === 169 && second === 254)
+    || (first === 172 && second >= 16 && second <= 31)
+    || (first === 192 && second === 0)
+    || (first === 192 && second === 168)
+    || (first === 198 && (second === 18 || second === 19))
+    || (first === 198 && second === 51 && third === 100)
+    || (first === 203 && second === 0 && third === 113)
+    || first >= 224;
+}
+
+function isUnsafeIpAddress(address) {
+  const normalized = String(address).toLowerCase().replace(/^\[|\]$/g, "").split("%")[0];
+  const mapped = mappedIpv4Address(normalized);
+  if (mapped) {
+    return isUnsafeIpv4(mapped);
+  }
+  const family = net.isIP(normalized);
+  if (family === 4) {
+    return isUnsafeIpv4(normalized);
+  }
+  if (family !== 6) {
+    return true;
+  }
+  return normalized === "::"
+    || normalized === "::1"
+    || /^f[cd]/.test(normalized)
+    || /^fe[89ab]/.test(normalized)
+    || /^ff/.test(normalized)
+    || /^2001:db8(?::|$)/.test(normalized);
+}
+
+function withTimeout(promise, timeoutMs, message) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
+async function validatedRemoteTarget(rawUrl, args, timeoutMs) {
+  let url;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    throw new Error(`资源 URL 无效: ${rawUrl}`);
+  }
+  if (!new Set(["http:", "https:"]).has(url.protocol)) {
+    throw new Error(`资源 URL 只允许 http 或 https: ${url.protocol}`);
+  }
+  if (url.username || url.password) {
+    throw new Error("资源 URL 不得包含用户名或密码");
+  }
+  const allowPrivateResource = args["allow-private-resource"] === true;
+  const hostname = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  if (hostname === "localhost" || hostname.endsWith(".localhost") || hostname === "metadata.google.internal") {
+    if (!allowPrivateResource) {
+      throw new Error(`资源 URL 指向私有或保留地址: ${hostname}`);
     }
-    const bytes = Buffer.from(await response.arrayBuffer());
-    const contentType = firstNonEmpty(response.headers.get("content-type"), candidate.contentType, guessContentType(candidate.fileName));
-    return { bytes, contentType };
+  }
+  let addresses;
+  if (net.isIP(hostname)) {
+    addresses = [{ address: hostname, family: net.isIP(hostname) }];
+  } else {
+    try {
+      addresses = await withTimeout(
+        dnsLookup(hostname, { all: true, verbatim: true }),
+        timeoutMs,
+        `资源下载超时（${timeoutMs}ms）: ${url.href}`,
+      );
+    } catch (error) {
+      throw new Error(`资源主机解析失败: ${hostname}: ${error.message}`);
+    }
+  }
+  if (!addresses.length) {
+    throw new Error(`资源主机没有可用地址: ${hostname}`);
+  }
+  if (!allowPrivateResource && addresses.some((item) => isUnsafeIpAddress(item.address))) {
+    throw new Error(`资源 URL 指向私有或保留地址: ${hostname}`);
+  }
+  return { url, addresses };
+}
+
+function downloadRemoteHop(target, candidate, limits, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const transport = target.url.protocol === "https:" ? https : http;
+    const addresses = target.addresses.map((item) => ({ address: item.address, family: item.family }));
+    const request = transport.request(target.url, {
+      method: "GET",
+      headers: { Accept: "*/*" },
+      lookup(_hostname, options, callback) {
+        if (options?.all) {
+          callback(null, addresses);
+          return;
+        }
+        callback(null, addresses[0].address, addresses[0].family);
+      },
+    });
+    let settled = false;
+    const timer = setTimeout(() => {
+      request.destroy(new Error(`资源下载超时（${limits.timeoutMs}ms）: ${target.url.href}`));
+    }, timeoutMs);
+
+    function finish(error, value) {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      if (error) {
+        reject(error);
+      } else {
+        resolve(value);
+      }
+    }
+
+    request.once("error", (error) => finish(error));
+    request.once("response", async (response) => {
+      try {
+        const status = response.statusCode || 0;
+        if (status >= 300 && status < 400 && response.headers.location) {
+          response.destroy();
+          finish(undefined, { redirect: new URL(response.headers.location, target.url).href });
+          return;
+        }
+        if (status < 200 || status >= 300) {
+          response.destroy();
+          throw new Error(`下载资源失败 HTTP ${status}: ${target.url.href}`);
+        }
+        const contentLength = Number.parseInt(firstNonEmpty(response.headers["content-length"]), 10);
+        if (Number.isFinite(contentLength) && contentLength > limits.maxResourceBytes) {
+          response.destroy();
+          throw new Error(`资源超过单文件大小上限 ${limits.maxResourceBytes} 字节: ${candidate.fileName}`);
+        }
+        const chunks = [];
+        let total = 0;
+        for await (const chunk of response) {
+          total += chunk.length;
+          if (total > limits.maxResourceBytes) {
+            response.destroy();
+            throw new Error(`资源超过单文件大小上限 ${limits.maxResourceBytes} 字节: ${candidate.fileName}`);
+          }
+          chunks.push(chunk);
+        }
+        finish(undefined, {
+          bytes: Buffer.concat(chunks, total),
+          contentType: firstNonEmpty(response.headers["content-type"], candidate.contentType, guessContentType(candidate.fileName)),
+        });
+      } catch (error) {
+        finish(error);
+      }
+    });
+    request.end();
+  });
+}
+
+async function downloadRemoteResource(candidate, args, limits) {
+  let currentUrl = candidate.source;
+  const deadline = Date.now() + limits.timeoutMs;
+  for (let redirects = 0; redirects <= MAX_RESOURCE_REDIRECTS; redirects += 1) {
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) {
+      throw new Error(`资源下载超时（${limits.timeoutMs}ms）: ${candidate.source}`);
+    }
+    const target = await validatedRemoteTarget(currentUrl, args, remainingMs);
+    const afterLookupMs = deadline - Date.now();
+    if (afterLookupMs <= 0) {
+      throw new Error(`资源下载超时（${limits.timeoutMs}ms）: ${candidate.source}`);
+    }
+    const result = await downloadRemoteHop(target, candidate, limits, afterLookupMs);
+    if (!result.redirect) {
+      return result;
+    }
+    if (redirects === MAX_RESOURCE_REDIRECTS) {
+      throw new Error(`资源重定向次数超过上限 ${MAX_RESOURCE_REDIRECTS}: ${candidate.source}`);
+    }
+    currentUrl = result.redirect;
+  }
+  throw new Error(`资源重定向次数超过上限 ${MAX_RESOURCE_REDIRECTS}: ${candidate.source}`);
+}
+
+async function resolveResourceBytes(candidate, args, limits) {
+  if (looksLikeHttpUrl(candidate.source)) {
+    return downloadRemoteResource(candidate, args, limits);
   }
   const filePath = expandHome(candidate.source);
+  const stat = fs.statSync(filePath);
+  if (!stat.isFile()) {
+    throw new Error(`资源路径必须指向普通文件: ${candidate.source}`);
+  }
+  if (stat.size > limits.maxResourceBytes) {
+    throw new Error(`资源超过单文件大小上限 ${limits.maxResourceBytes} 字节: ${candidate.fileName}`);
+  }
   return { bytes: fs.readFileSync(filePath), contentType: firstNonEmpty(candidate.contentType, guessContentType(filePath)) };
+}
+
+async function resolveResourceBatch(candidates, args) {
+  const limits = resourceLimits();
+  if (candidates.length > limits.maxResources) {
+    throw new Error(`超过资源数量上限 ${limits.maxResources}`);
+  }
+  const resolved = [];
+  let totalBytes = 0;
+  for (const candidate of candidates) {
+    const resource = await resolveResourceBytes(candidate, args, limits);
+    totalBytes += resource.bytes.length;
+    if (totalBytes > limits.maxBatchBytes) {
+      throw new Error(`资源超过批次大小上限 ${limits.maxBatchBytes} 字节`);
+    }
+    resolved.push({ candidate, ...resource });
+  }
+  return resolved;
 }
 
 async function buildUploadFormData(candidates, args) {
   const formData = new FormData();
-  for (const candidate of candidates) {
-    const resolved = await resolveResourceBytes(candidate);
+  for (const resolved of await resolveResourceBatch(candidates, args)) {
     const blob = new Blob([resolved.bytes], { type: resolved.contentType });
-    formData.append("files", blob, candidate.fileName);
+    formData.append("files", blob, resolved.candidate.fileName);
   }
   formData.append("sessionType", "AGENT");
   const sessionId = firstNonEmpty(pick(args, "session-id"), pick(args, "sessionId"));
@@ -902,6 +1194,31 @@ async function uploadResources(candidates, args) {
   }
   const formData = await buildUploadFormData(candidates, args);
   return requestMultipart(uploadUrl, formData);
+}
+
+function confirmedImportTarget(resourceId, directoryPath) {
+  return {
+    knowledgeBaseResourceId: resourceId,
+    directoryPath,
+    requiredArguments: {
+      "confirmed-knowledge-base-resource-id": resourceId,
+      "confirmed-directory-path": directoryPath,
+    },
+  };
+}
+
+function assertConfirmedImportTarget(args, resourceId, directoryPath) {
+  if (args["dry-run"]) {
+    return;
+  }
+  const confirmedResourceId = toPositiveSafeInteger(args["confirmed-knowledge-base-resource-id"]);
+  const confirmedDirectoryPath = firstNonEmpty(args["confirmed-directory-path"]);
+  if (!Number.isSafeInteger(confirmedResourceId) || confirmedResourceId <= 0 || confirmedResourceId !== resourceId) {
+    throw new Error("必须提供与目标一致的 --confirmed-knowledge-base-resource-id");
+  }
+  if (confirmedDirectoryPath !== directoryPath) {
+    throw new Error("必须提供与目标一致的 --confirmed-directory-path");
+  }
 }
 
 // 文件直传知识库支持的类型（后端 byclaw-qa 解析能力：pdf/docx/pptx/xlsx/csv/txt/md）。
@@ -942,11 +1259,15 @@ function buildDocCandidates(args, stdinValue) {
 // 文件直传：POST /datasetController/uploadFiles(multipart) → 逐个 POST /datasetController/build。
 // 后端把原始文件交给 QA 服务解析成 Markdown 再切片/向量化，跳过本地提取。
 async function uploadDocsToDataset(candidates, args) {
-  const resourceId = toNumber(firstPresent(args, ["knowledge-base-resource-id", "resource-id"]));
+  const resourceId = positiveSafeIntegerIfPresent(
+    firstPresent(args, ["knowledge-base-resource-id", "resource-id"]),
+    "--knowledge-base-resource-id",
+  );
   if (!resourceId) {
     throw new Error("文件直传入库必须提供 --knowledge-base-resource-id(知识库资源 ID)；可先用 list-kb 查询并让用户选择");
   }
   const directoryPath = firstNonEmpty(pick(args, "directory-path"), "/");
+  assertConfirmedImportTarget(args, resourceId, directoryPath);
   const uploadUrl = await endpoint("/datasetController/uploadFiles");
   const buildUrl = await endpoint("/datasetController/build");
   if (args["dry-run"]) {
@@ -956,12 +1277,12 @@ async function uploadDocsToDataset(candidates, args) {
       resourceId,
       directoryPath,
       files: candidates.map((candidate) => candidate.fileName),
+      confirmation: confirmedImportTarget(resourceId, directoryPath),
     };
   }
   const formData = new FormData();
-  for (const candidate of candidates) {
-    const resolved = await resolveResourceBytes(candidate);
-    formData.append("files", new Blob([resolved.bytes], { type: resolved.contentType }), candidate.fileName);
+  for (const resolved of await resolveResourceBatch(candidates, args)) {
+    formData.append("files", new Blob([resolved.bytes], { type: resolved.contentType }), resolved.candidate.fileName);
   }
   formData.append("resourceId", String(resourceId));
   formData.append("directoryPath", directoryPath);
@@ -1028,6 +1349,58 @@ function isPathInside(rootPath, candidatePath) {
   return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
 }
 
+const CANONICAL_COLLECTION_KEYS = new Set(["schemaVersion", "title", "source", "backend", "url", "filters", "items"]);
+const CANONICAL_ITEM_KEYS = new Set(["title", "url", "author", "publishTime", "markdown", "fileName"]);
+
+function assertExactKeys(value, allowedKeys, label) {
+  const unexpected = Object.keys(value).filter((key) => !allowedKeys.has(key));
+  if (unexpected.length) {
+    throw new Error(`${label} 包含不支持的${label === "collection-result.json" ? "顶层" : ""}字段: ${unexpected.join(", ")}`);
+  }
+}
+
+function requireNonEmptyString(value, label) {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error(`${label} 必须是非空字符串`);
+  }
+}
+
+function validateCanonicalItem(rawItem, index) {
+  const label = `collection-result.json items[${index}]`;
+  if (!rawItem || typeof rawItem !== "object" || Array.isArray(rawItem)) {
+    throw new Error(`${label} 必须是对象`);
+  }
+  assertExactKeys(rawItem, CANONICAL_ITEM_KEYS, label);
+  for (const key of ["title", "url", "markdown", "fileName"]) {
+    requireNonEmptyString(rawItem[key], `${label}.${key}`);
+  }
+  for (const key of ["author", "publishTime"]) {
+    if (rawItem[key] !== undefined && typeof rawItem[key] !== "string") {
+      throw new Error(`${label}.${key} 必须是字符串`);
+    }
+  }
+}
+
+function validateCanonicalCollectionResult(collectionResult) {
+  if (!collectionResult || typeof collectionResult !== "object" || Array.isArray(collectionResult)) {
+    throw new Error("collection-result.json 根节点必须是对象");
+  }
+  assertExactKeys(collectionResult, CANONICAL_COLLECTION_KEYS, "collection-result.json");
+  if (collectionResult.schemaVersion !== "1.0") {
+    throw new Error('collection-result.json schemaVersion 必须是 "1.0"');
+  }
+  for (const key of ["title", "source", "backend", "url"]) {
+    requireNonEmptyString(collectionResult[key], `collection-result.json.${key}`);
+  }
+  if (!collectionResult.filters || typeof collectionResult.filters !== "object" || Array.isArray(collectionResult.filters)) {
+    throw new Error("collection-result.json filters 必须是对象");
+  }
+  if (!Array.isArray(collectionResult.items) || !collectionResult.items.length) {
+    throw new Error("collection-result.json items 必须是非空数组");
+  }
+  collectionResult.items.forEach(validateCanonicalItem);
+}
+
 function resolveCanonicalMarkdownPath(rootDir, rawPath, itemIndex, fieldName) {
   const relativePath = firstNonEmpty(rawPath);
   const label = `collection-result.json items[${itemIndex}].${fieldName}`;
@@ -1057,6 +1430,9 @@ function resolveCanonicalMarkdownPath(rootDir, rawPath, itemIndex, fieldName) {
   }
   if (!fs.statSync(realPath).isFile()) {
     throw new Error(`${label} 必须指向 Markdown 文件: ${relativePath}`);
+  }
+  if (![".md", ".markdown"].includes(path.extname(realPath).toLowerCase())) {
+    throw new Error(`${label} 必须指向扩展名为 .md 或 .markdown 的 Markdown 文件: ${relativePath}`);
   }
 
   return {
@@ -1149,24 +1525,24 @@ function normalizeCollectionResult(collectionResult, args, rawOutput) {
 }
 
 function normalizeCanonicalCollectionResult(collectionResult, args, rawOutput, rootDir) {
-  if (!collectionResult || typeof collectionResult !== "object" || Array.isArray(collectionResult)) {
-    throw new Error("collection-result.json 根节点必须是对象");
-  }
+  validateCanonicalCollectionResult(collectionResult);
   const items = asArray(collectionResult.items)
     .map((item, index) => normalizeCanonicalItem(item, args, index, rootDir));
-  return compactObject({
+  return {
     schemaVersion: collectionResult.schemaVersion,
     title: collectionResult.title,
     source: collectionResult.source,
     backend: collectionResult.backend,
     url: collectionResult.url,
     filters: collectionResult.filters,
-    command: parseJson(args["command-json"], "command-json") || collectionResult.command,
-    outputDir: pick(args, "output-dir", collectionResult.outputDir),
-    rawOutput: firstNonEmpty(pick(args, "raw-output"), readRawOutputFile(args), collectionResult.rawOutput, rawOutput),
-    assetCount: toNumber(pick(args, "asset-count", collectionResult.assetCount)) || 0,
     items,
-  });
+    ...compactObject({
+      command: parseJson(args["command-json"], "command-json") || collectionResult.command,
+      outputDir: pick(args, "output-dir", collectionResult.outputDir),
+      rawOutput: firstNonEmpty(pick(args, "raw-output"), readRawOutputFile(args), rawOutput),
+      assetCount: toNumber(pick(args, "asset-count")) || 0,
+    }),
+  };
 }
 
 function readRawOutputFile(args) {
@@ -1264,7 +1640,10 @@ function buildCollectionResult(args, stdinValue) {
 
 function buildTask(args, stdinJson) {
   const taskJson = parseJson(args["task-json"], "task-json") || stdinJson?.task || {};
-  const knowledgeBaseResourceId = toNumber(pick(args, "knowledge-base-resource-id", taskJson.knowledgeBaseResourceId));
+  const knowledgeBaseResourceId = positiveSafeIntegerIfPresent(
+    pick(args, "knowledge-base-resource-id", taskJson.knowledgeBaseResourceId),
+    "--knowledge-base-resource-id",
+  );
   return compactObject({
     ...taskJson,
     taskId: toNumber(pick(args, "task-id", taskJson.taskId)),
@@ -1283,7 +1662,10 @@ function buildTargetConfig(args, stdinJson, task) {
   const targetConfigJson = parseJson(args["target-config-json"], "target-config-json") || stdinJson?.targetConfig || {};
   return compactObject({
     ...targetConfigJson,
-    knowledgeBaseResourceId: toNumber(pick(args, "knowledge-base-resource-id", targetConfigJson.knowledgeBaseResourceId || task.knowledgeBaseResourceId)),
+    knowledgeBaseResourceId: positiveSafeIntegerIfPresent(
+      pick(args, "knowledge-base-resource-id", targetConfigJson.knowledgeBaseResourceId || task.knowledgeBaseResourceId),
+      "--knowledge-base-resource-id",
+    ),
     knowledgeBaseId: pick(args, "knowledge-base-id", targetConfigJson.knowledgeBaseId || task.knowledgeBaseId),
     knowledgeBaseName: pick(args, "knowledge-base-name", targetConfigJson.knowledgeBaseName || task.knowledgeBaseName),
     directoryPath: firstNonEmpty(pick(args, "directory-path"), targetConfigJson.directoryPath, "/"),
@@ -1444,17 +1826,23 @@ function runNodeJson(scriptPath, args, options = {}) {
         reject(new Error(`by-knowledge-manager upload 失败: ${detail}`));
         return;
       }
+      const expectedActions = options.expectedActions || ["upload"];
+      if (!json || typeof json !== "object" || Array.isArray(json) || json.ok !== true || !expectedActions.includes(json.action)) {
+        reject(new Error(`by-knowledge-manager ${args[0]} 未返回有效 JSON 返回契约`));
+        return;
+      }
       resolve({ code, stdout, stderr, json });
     });
   });
 }
 
 async function uploadMarkdownWithKnowledgeManager(args, payloads) {
-  const resourceId = toNumber(payloads.targetConfig.knowledgeBaseResourceId || payloads.targetConfig.knowledgeBaseId);
+  const resourceId = toPositiveSafeInteger(payloads.targetConfig.knowledgeBaseResourceId || payloads.targetConfig.knowledgeBaseId);
   if (!resourceId) {
     throw new Error("导入知识库必须提供 --knowledge-base-resource-id 或 --knowledge-base-id");
   }
   const directoryPath = firstNonEmpty(payloads.targetConfig.directoryPath, "/");
+  assertConfirmedImportTarget(args, resourceId, directoryPath);
   const managerScript = resolveKnowledgeManagerScript(args);
   const hasCanonicalArtifacts = payloads.markdownFiles.some((item) => Boolean(item[CANONICAL_LOCAL_PATH]));
   if (args["dry-run"]) {
@@ -1465,6 +1853,7 @@ async function uploadMarkdownWithKnowledgeManager(args, payloads) {
       command: "upload",
       resourceId,
       directoryPath,
+      confirmation: confirmedImportTarget(resourceId, directoryPath),
       files: payloads.markdownFiles.map((item) => ({
         fileName: item.fileName,
         source: item[CANONICAL_LOCAL_PATH] ? "validated-canonical" : undefined,
@@ -1477,19 +1866,68 @@ async function uploadMarkdownWithKnowledgeManager(args, payloads) {
   }
 
   const { tempDir, filePaths, reusedFiles, generatedFiles, sessionDirs } = prepareMarkdownUploadFiles(args, payloads);
+  let preserveTempForContinuation = false;
   try {
-    const managerArgs = [
+    const baseManagerArgs = [
       "upload",
       "--resource-id", String(resourceId),
       "--directory-path", directoryPath,
     ];
-    if (args["check-conflicts"]) {
-      managerArgs.push("--check-conflicts");
-    }
     for (const filePath of filePaths) {
-      managerArgs.push("--file-path", filePath);
+      baseManagerArgs.push("--file-path", filePath);
     }
-    const result = await runNodeJson(managerScript, managerArgs);
+    const confirmedOverwritePaths = asArray(args["confirmed-overwrite-path"])
+      .filter((item) => item !== true)
+      .map(String);
+    let result;
+    if (confirmedOverwritePaths.length) {
+      const checked = await runNodeJson(managerScript, [...baseManagerArgs, "--check-conflicts"]);
+      const actualPaths = asArray(checked.json?.overwritePaths).map(String).sort();
+      const confirmedPaths = [...new Set(confirmedOverwritePaths)].sort();
+      if (!checked.json?.needsOverwriteConfirmation || JSON.stringify(actualPaths) !== JSON.stringify(confirmedPaths)) {
+        throw new Error("--confirmed-overwrite-path 与最新冲突路径不一致，已拒绝覆盖");
+      }
+      const updateArgs = [
+        "update-file",
+        "--resource-id", String(resourceId),
+        "--directory-path", directoryPath,
+        "--skip-conflict-check",
+      ];
+      for (const filePath of filePaths) {
+        updateArgs.push("--file-path", filePath);
+      }
+      result = await runNodeJson(managerScript, updateArgs, { expectedActions: ["update-file"] });
+    } else {
+      const managerArgs = [...baseManagerArgs];
+      if (args["check-conflicts"]) {
+        managerArgs.push("--check-conflicts");
+      }
+      result = await runNodeJson(managerScript, managerArgs);
+    }
+    if (result.json?.needsOverwriteConfirmation) {
+      preserveTempForContinuation = Boolean(tempDir);
+      return {
+        action: "confirm-overwrite",
+        conflict: Boolean(result.json.conflict),
+        needsOverwriteConfirmation: true,
+        overwritePaths: asArray(result.json.overwritePaths),
+        resourceId,
+        directoryPath,
+        manager: result.json,
+        continuation: {
+          command: "ingest",
+          markdownFilePaths: filePaths,
+          resourceUploadMustNotBeReplayed: true,
+          requiredArguments: {
+            "knowledge-base-resource-id": resourceId,
+            "directory-path": directoryPath,
+            "confirmed-knowledge-base-resource-id": resourceId,
+            "confirmed-directory-path": directoryPath,
+            "confirmed-overwrite-path": asArray(result.json.overwritePaths),
+          },
+        },
+      };
+    }
     const publicResult = {
       managerScript,
       resourceId,
@@ -1506,7 +1944,7 @@ async function uploadMarkdownWithKnowledgeManager(args, payloads) {
       }
       : { ...publicResult, tempDir, filePaths, reusedFiles, generatedFiles, sessionDirs };
   } finally {
-    if (tempDir && !args["keep-temp"]) {
+    if (tempDir && !args["keep-temp"] && !preserveTempForContinuation) {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
   }
@@ -1556,6 +1994,31 @@ async function listKnowledgeBases(args, stdinJson = {}) {
   }
   const raw = await requestJson("POST", endpointUrl, payload);
   return { endpoint: endpointUrl, payload, raw, knowledgeBases: normalizeKnowledgeBases(raw) };
+}
+
+async function resolveLegacyKnowledgeBaseId(args, payloads, stdinJson) {
+  if (payloads.targetConfig.knowledgeBaseResourceId) {
+    return payloads.targetConfig.knowledgeBaseResourceId;
+  }
+  const legacyId = positiveSafeIntegerIfPresent(
+    payloads.targetConfig.knowledgeBaseId,
+    "--knowledge-base-id",
+  );
+  if (!legacyId) {
+    return undefined;
+  }
+  const listed = await listKnowledgeBases({ ...args, "page-num": "1", "page-size": "1000" }, stdinJson);
+  const matches = listed.knowledgeBases.filter((item) => (
+    toPositiveSafeInteger(item.resourceId) === legacyId
+    || toPositiveSafeInteger(item.datasetId) === legacyId
+  ));
+  if (matches.length !== 1) {
+    throw new Error(`--knowledge-base-id ${legacyId} 无法唯一解析为知识库资源 ID；请先用 list-kb 查询并改用 --knowledge-base-resource-id`);
+  }
+  const resourceId = matches[0].resourceId;
+  payloads.targetConfig.knowledgeBaseResourceId = resourceId;
+  payloads.task.knowledgeBaseResourceId = resourceId;
+  return resourceId;
 }
 
 function buildPayloads(args, stdinValue) {
@@ -1614,13 +2077,19 @@ async function printHelp() {
       "--bycli-json <json> (legacy compatibility)",
       "--file-url/--image-url/--resource-url <url>",
       "--file-path/--image-path/--resource-path <path>",
+      "--allow-private-resource (explicitly trust private-network resource URLs)",
+      "--confirmed-knowledge-base-resource-id <id> (required for writes)",
+      "--confirmed-directory-path <path> (required for writes)",
+      "--confirmed-overwrite-path <path> (repeatable; resumes a conflict after exact recheck)",
       "stdin JSON 或 Markdown 文本",
     ],
     requiredForImport: ["--knowledge-base-resource-id 或 --knowledge-base-id"],
     examples: [
       "node knowledge-collection-ingest.mjs normalize --collection-result-file /tmp/knowledge-collection-result.json --knowledge-base-resource-id 90001",
-      "node knowledge-collection-ingest.mjs ingest --markdown-file article.md --source-url https://example.com --knowledge-base-resource-id 90001",
-      "node knowledge-collection-ingest.mjs upload-doc --file-path report.pdf --knowledge-base-resource-id 90001 --directory-path /imports",
+      "node knowledge-collection-ingest.mjs ingest --dry-run --markdown-file article.md --knowledge-base-resource-id 90001 --directory-path /imports",
+      "node knowledge-collection-ingest.mjs ingest --markdown-file article.md --knowledge-base-resource-id 90001 --directory-path /imports --confirmed-knowledge-base-resource-id 90001 --confirmed-directory-path /imports",
+      "node knowledge-collection-ingest.mjs ingest --markdown-file article.md --knowledge-base-resource-id 90001 --directory-path /imports --confirmed-knowledge-base-resource-id 90001 --confirmed-directory-path /imports --confirmed-overwrite-path /imports/article.md",
+      "node knowledge-collection-ingest.mjs upload-doc --file-path report.pdf --knowledge-base-resource-id 90001 --directory-path /imports --confirmed-knowledge-base-resource-id 90001 --confirmed-directory-path /imports",
     ],
     backend: await resolveBackendBaseUrl(),
     auth: authSummary(),
@@ -1663,23 +2132,30 @@ async function main() {
   // 分流：图片 / 音频 / 视频走 /chat/uploadFiles；其余文件类型继续走下方 Markdown 入库流程。
   // upload-resource 是显式上传命令，接受任意资源；ingest 自动分流只挑图片 / 音频 / 视频，非媒体文件交给 Markdown 流程。
   const mediaCandidates = resourceCandidates.filter((candidate) => candidate.kind === "image" || candidate.kind === "video" || candidate.kind === "audio");
-  const candidatesToUpload = command === "upload-resource" ? resourceCandidates : mediaCandidates;
-  if (command === "upload-resource" || (command === "ingest" && candidatesToUpload.length)) {
-    if (!candidatesToUpload.length) {
+  if (command === "upload-resource") {
+    if (!resourceCandidates.length) {
       throw new Error("未找到可上传的图片/音频/视频地址。请传 --image-url、指向图片/音频/视频的 --file-url、--file-path，或在 stdin 中提供 fileUrl/imageUrl/downloadUrl/path");
     }
-    const uploaded = await uploadResources(candidatesToUpload, args);
+    const uploaded = await uploadResources(resourceCandidates, args);
     render({
       ok: true,
       action: "upload-resource",
       sessionType: "AGENT",
-      resources: candidatesToUpload,
+      resources: resourceCandidates,
       uploaded,
     });
     return;
   }
 
-  const payloads = buildPayloads(args, stdinValue);
+  let payloads;
+  try {
+    payloads = buildPayloads(args, stdinValue);
+  } catch (error) {
+    if (command === "ingest" && mediaCandidates.length && /未找到可入库的 Markdown/.test(error.message)) {
+      throw new Error("ingest 必须包含可入库的 Markdown；仅上传图片、音频或视频请使用 upload-resource");
+    }
+    throw error;
+  }
 
   if (command === "normalize") {
     render({ ok: true, action: "normalize", summary: summarizePayloads(payloads), payloads });
@@ -1697,8 +2173,27 @@ async function main() {
       render({ ok: true, action: "select-knowledge-base", needsKnowledgeBaseSelection: true, summary: summarizePayloads(payloads), ...listed });
       return;
     }
+    await resolveLegacyKnowledgeBaseId(args, payloads, stdinJson);
+    const resourceId = positiveSafeIntegerIfPresent(
+      payloads.targetConfig.knowledgeBaseResourceId || payloads.targetConfig.knowledgeBaseId,
+      "知识库资源 ID",
+    );
+    const directoryPath = firstNonEmpty(payloads.targetConfig.directoryPath, "/");
+    assertConfirmedImportTarget(args, resourceId, directoryPath);
+    const resourceUpload = mediaCandidates.length ? await uploadResources(mediaCandidates, args) : undefined;
     if (args["dry-run"]) {
       const uploaded = await uploadMarkdownWithKnowledgeManager(args, payloads);
+      if (resourceUpload) {
+        render({
+          ok: true,
+          action: "ingest",
+          dryRun: true,
+          summary: summarizePayloads(payloads),
+          resourceUpload,
+          knowledgeIngest: uploaded,
+        });
+        return;
+      }
       render({
         ok: true,
         action: "ingest",
@@ -1709,6 +2204,29 @@ async function main() {
       return;
     }
     const uploaded = await uploadMarkdownWithKnowledgeManager(args, payloads);
+    if (uploaded.needsOverwriteConfirmation) {
+      render({
+        ok: true,
+        action: "confirm-overwrite",
+        conflict: uploaded.conflict,
+        needsOverwriteConfirmation: true,
+        overwritePaths: uploaded.overwritePaths,
+        summary: summarizePayloads(payloads),
+        continuation: uploaded.continuation,
+        ...(resourceUpload ? { resourceUpload } : {}),
+      });
+      return;
+    }
+    if (resourceUpload) {
+      render({
+        ok: true,
+        action: "ingest",
+        summary: summarizePayloads(payloads),
+        resourceUpload,
+        knowledgeIngest: uploaded,
+      });
+      return;
+    }
     render({ ok: true, action: "ingest", summary: summarizePayloads(payloads), uploaded });
     return;
   }

@@ -31,6 +31,31 @@ function createServer() {
         return;
       }
 
+      if (req.url === "/large.png") {
+        const body = Buffer.alloc(128, 1);
+        res.setHeader("content-type", "image/png");
+        res.setHeader("content-length", String(body.length));
+        res.end(body);
+        return;
+      }
+
+      if (req.url === "/slow.png") {
+        setTimeout(() => {
+          if (!res.destroyed) {
+            res.setHeader("content-type", "image/png");
+            res.end(Buffer.from("slow-png"));
+          }
+        }, 200);
+        return;
+      }
+
+      if (req.url === "/redirect.png") {
+        res.statusCode = 302;
+        res.setHeader("location", "/redirect.png");
+        res.end();
+        return;
+      }
+
       if (req.url === "/doc.pdf" || req.url === "/empty.pdf" || req.url === "/doc.PDF") {
         res.setHeader("content-type", "application/pdf");
         res.end(Buffer.from("pdf-bytes"));
@@ -125,7 +150,7 @@ function createServer() {
   };
 }
 
-function runCli(args, input, port) {
+function runCli(args, input, port, envOverrides = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn("node", [SCRIPT, ...args], {
       cwd: process.cwd(),
@@ -135,6 +160,7 @@ function runCli(args, input, port) {
         REDIS_HOST: "",
         BEYOND_TOKEN: "system-token",
         BY_KNOWLEDGE_MANAGER_SCRIPT: KNOWLEDGE_MANAGER_SCRIPT,
+        ...envOverrides,
       },
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -158,6 +184,31 @@ function runCli(args, input, port) {
       reject(new Error(`CLI timed out: ${args.join(" ")}`));
     }, 10000).unref();
   });
+}
+
+function canonicalItem(markdown, fileName = markdown, overrides = {}) {
+  return {
+    title: "Canonical article",
+    url: "https://example.com/article",
+    author: "Author",
+    publishTime: "2026-07-28T00:00:00Z",
+    markdown,
+    fileName,
+    ...overrides,
+  };
+}
+
+function canonicalCollection(items, overrides = {}) {
+  return {
+    schemaVersion: "1.0",
+    title: "Canonical collection",
+    source: "public-internet",
+    backend: "bycli",
+    url: "https://example.com/collection",
+    filters: {},
+    items,
+    ...overrides,
+  };
 }
 
 async function testHelpUsesMigratedIdentityAndCanonicalInputFirst() {
@@ -184,7 +235,7 @@ async function testCanonicalCollectionResultPreservesMarkdownFrontmatter() {
     source: "xiaohongshu",
     backend: "bycli",
     url: "https://example.com/collection/tea",
-    filters: ["茶叶"],
+    filters: { keywords: ["茶叶"] },
     items: [{
       title: "Tea collection",
       url: "https://example.com/tea",
@@ -206,13 +257,75 @@ async function testCanonicalCollectionResultPreservesMarkdownFrontmatter() {
     assert.equal(normalized?.source, "xiaohongshu");
     assert.equal(normalized?.backend, "bycli");
     assert.equal(normalized?.url, "https://example.com/collection/tea");
-    assert.deepEqual(normalized?.filters, ["茶叶"]);
+    assert.deepEqual(normalized?.filters, { keywords: ["茶叶"] });
     assert.equal(normalized?.items?.[0]?.sourceUrl, "https://example.com/tea");
     assert.equal(normalized?.items?.[0]?.author, "Tea author");
     assert.equal(normalized?.items?.[0]?.publishTime, "2026-07-27T00:00:00Z");
     assert.equal(normalized?.items?.[0]?.localPath, undefined);
     assert.doesNotMatch(result.stdout, new RegExp(fixtureDir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     assert.match(normalized?.items?.[0]?.markdown || "", /collection_filters:\n  - 茶叶/);
+  } finally {
+    fs.rmSync(fixtureDir, { recursive: true, force: true });
+  }
+}
+
+async function testCanonicalCollectionResultRejectsInvalidContractShapes() {
+  const fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), "knowledge-collection-contract-"));
+  const markdownRelativePath = "sanitized/items/article.md";
+  const textRelativePath = "sanitized/items/article.txt";
+  fs.mkdirSync(path.join(fixtureDir, "sanitized/items"), { recursive: true });
+  fs.writeFileSync(path.join(fixtureDir, markdownRelativePath), "# Canonical article");
+  fs.writeFileSync(path.join(fixtureDir, textRelativePath), "not markdown");
+  const cases = [
+    {
+      name: "missing-version",
+      mutate(value) { delete value.schemaVersion; },
+      error: /schemaVersion.*1\.0/,
+    },
+    {
+      name: "wrong-version",
+      mutate(value) { value.schemaVersion = "2.0"; },
+      error: /schemaVersion.*1\.0/,
+    },
+    {
+      name: "extra-top-level",
+      mutate(value) { value.router = "agent-reach"; },
+      error: /不支持的顶层字段.*router/,
+    },
+    {
+      name: "invalid-filters",
+      mutate(value) { value.filters = ["tea"]; },
+      error: /filters.*对象/,
+    },
+    {
+      name: "empty-items",
+      mutate(value) { value.items = []; },
+      error: /items.*非空数组/,
+    },
+    {
+      name: "extra-item-field",
+      mutate(value) { value.items[0].localPath = "/tmp/article.md"; },
+      error: /items\[0\].*不支持的字段.*localPath/,
+    },
+    {
+      name: "non-markdown-artifact",
+      mutate(value) {
+        value.items[0].markdown = textRelativePath;
+        value.items[0].fileName = textRelativePath;
+      },
+      error: /扩展名为 \.md.*Markdown 文件/,
+    },
+  ];
+  try {
+    for (const testCase of cases) {
+      const value = canonicalCollection([canonicalItem(markdownRelativePath)]);
+      testCase.mutate(value);
+      const fixturePath = path.join(fixtureDir, `${testCase.name}.json`);
+      fs.writeFileSync(fixturePath, JSON.stringify(value));
+      const result = await runCli(["normalize", "--collection-result-file", fixturePath], undefined, 0);
+      assert.equal(result.code, 1, `${testCase.name}: ${result.stderr || result.stdout}`);
+      assert.match(String(result.json?.error || ""), testCase.error, testCase.name);
+    }
   } finally {
     fs.rmSync(fixtureDir, { recursive: true, force: true });
   }
@@ -253,9 +366,9 @@ async function testCanonicalCollectionResultRejectsUnsafeOrMissingMarkdownPaths(
   try {
     for (const testCase of cases) {
       const fixturePath = path.join(fixtureDir, `${testCase.name}.json`);
-      fs.writeFileSync(fixturePath, JSON.stringify({
-        items: [{ title: testCase.name, markdown: testCase.markdown, fileName: testCase.fileName }],
-      }));
+      fs.writeFileSync(fixturePath, JSON.stringify(canonicalCollection([
+        canonicalItem(testCase.markdown, testCase.fileName, { title: testCase.name }),
+      ])));
       const result = await runCli(["normalize", "--collection-result-file", fixturePath], undefined, 0);
       assert.equal(result.code, 1, result.stderr || result.stdout);
       assert.match(String(result.json?.error || ""), testCase.error);
@@ -275,10 +388,9 @@ async function testCanonicalCollectionResultRejectsMismatchedMarkdownAndFileName
   const fixturePath = path.join(fixtureDir, "collection-result.json");
   fs.writeFileSync(path.join(fixtureDir, "a.md"), "# Preview A");
   fs.writeFileSync(path.join(fixtureDir, "b.md"), "# Ingest B");
-  fs.writeFileSync(fixturePath, JSON.stringify({
-    schemaVersion: "1.0",
-    items: [{ title: "Mismatch", markdown: "a.md", fileName: "b.md" }],
-  }));
+  fs.writeFileSync(fixturePath, JSON.stringify(canonicalCollection([
+    canonicalItem("a.md", "b.md", { title: "Mismatch" }),
+  ])));
   try {
     const result = await runCli(["normalize", "--collection-result-file", fixturePath], undefined, 0);
     assert.equal(result.code, 1, result.stderr || result.stdout);
@@ -315,10 +427,9 @@ async function testCanonicalIngestUsesValidatedRootArtifactDespiteDirectoryOverr
   fs.writeFileSync(canonicalMarkdownPath, "# Canonical artifact");
   fs.writeFileSync(overrideMarkdownPath, "# Untrusted override");
   const fixturePath = path.join(fixtureDir, "collection-result.json");
-  fs.writeFileSync(fixturePath, JSON.stringify({
-    schemaVersion: "1.0",
-    items: [{ title: "Canonical", markdown: relativeMarkdownPath, fileName: relativeMarkdownPath }],
-  }));
+  fs.writeFileSync(fixturePath, JSON.stringify(canonicalCollection([
+    canonicalItem(relativeMarkdownPath, relativeMarkdownPath, { title: "Canonical" }),
+  ])));
   try {
     const result = await runCli([
       "ingest",
@@ -332,6 +443,8 @@ async function testCanonicalIngestUsesValidatedRootArtifactDespiteDirectoryOverr
     assert.equal(result.json?.upload?.files?.[0]?.fileName, relativeMarkdownPath);
     assert.equal(result.json?.upload?.files?.[0]?.source, "validated-canonical");
     assert.equal(result.json?.upload?.files?.[0]?.existingPath, undefined);
+    assert.equal(result.json?.upload?.confirmation?.requiredArguments?.["confirmed-knowledge-base-resource-id"], 90001);
+    assert.equal(result.json?.upload?.confirmation?.requiredArguments?.["confirmed-directory-path"], "/");
     assert.doesNotMatch(result.stdout, new RegExp(fixtureDir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     assert.doesNotMatch(result.stdout, new RegExp(overrideDir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     assert.equal(result.json?.payloads, undefined);
@@ -354,16 +467,17 @@ async function testCanonicalActualIngestKeepsValidatedPathPrivate() {
   fs.writeFileSync(canonicalMarkdownPath, "# Canonical private artifact");
   fs.writeFileSync(overrideMarkdownPath, "# Untrusted private override");
   const fixturePath = path.join(fixtureDir, "collection-result.json");
-  fs.writeFileSync(fixturePath, JSON.stringify({
-    schemaVersion: "1.0",
-    items: [{ title: "Private", markdown: relativeMarkdownPath, fileName: relativeMarkdownPath }],
-  }));
+  fs.writeFileSync(fixturePath, JSON.stringify(canonicalCollection([
+    canonicalItem(relativeMarkdownPath, relativeMarkdownPath, { title: "Private" }),
+  ])));
   try {
     const result = await runCli([
       "ingest",
       "--collection-result-file", fixturePath,
       "--session-dir", overrideDir,
       "--knowledge-base-resource-id", "90001",
+      "--confirmed-knowledge-base-resource-id", "90001",
+      "--confirmed-directory-path", "/",
     ], undefined, port);
     assert.equal(result.code, 0, result.stderr || result.stdout);
     const upload = server.requests.find((request) => request.url === "/byaiService/datasetController/uploadFiles");
@@ -388,9 +502,9 @@ async function testCanonicalInputPrecedesLegacyAndLegacyRemainsSupported() {
   const legacyPath = path.join(fixtureDir, "legacy.json");
   fs.mkdirSync(path.dirname(canonicalMarkdownPath), { recursive: true });
   fs.writeFileSync(canonicalMarkdownPath, "# Canonical");
-  fs.writeFileSync(canonicalPath, JSON.stringify({
-    items: [{ title: "Canonical", markdown: "sanitized/canonical.md", fileName: "sanitized/canonical.md" }],
-  }));
+  fs.writeFileSync(canonicalPath, JSON.stringify(canonicalCollection([
+    canonicalItem("sanitized/canonical.md", "sanitized/canonical.md", { title: "Canonical" }),
+  ])));
   fs.writeFileSync(legacyPath, JSON.stringify({ items: [{ title: "Legacy", markdown: "# Legacy" }] }));
   try {
     const precedenceResult = await runCli([
@@ -402,6 +516,7 @@ async function testCanonicalInputPrecedesLegacyAndLegacyRemainsSupported() {
     ], undefined, 0);
     assert.equal(precedenceResult.code, 0, precedenceResult.stderr || precedenceResult.stdout);
     assert.equal(precedenceResult.json?.payloads?.collectionResult?.items?.[0]?.markdown, "# Canonical");
+    assert.deepEqual(precedenceResult.json?.payloads?.collectionResult?.filters, {});
 
     const legacyResult = await runCli(["normalize", "--bycli-json-file", legacyPath], undefined, 0);
     assert.equal(legacyResult.code, 0, legacyResult.stderr || legacyResult.stdout);
@@ -425,6 +540,150 @@ async function testLegacyInlineBycliJsonRemainsSupported() {
   assert.equal(result.json?.payloads?.collectionResult?.items?.[0]?.markdown, "# Legacy inline\n\n正文");
 }
 
+async function testRemoteResourceRejectsPrivateAddressByDefault() {
+  const server = createServer();
+  const port = await server.listen();
+  try {
+    const urls = [
+      `http://127.0.0.1:${port}/asset.png`,
+      "http://10.0.0.1/resource.png",
+      "http://169.254.169.254/latest/meta-data.png",
+      "http://198.51.100.1/resource.png",
+      "http://203.0.113.1/resource.png",
+      "http://[::1]/resource.png",
+      "http://[::ffff:7f00:1]/resource.png",
+    ];
+    for (const url of urls) {
+      const result = await runCli(
+        ["upload-resource", "--file-url", url],
+        {},
+        port,
+        { KNOWLEDGE_COLLECTION_RESOURCE_TIMEOUT_MS: "20" },
+      );
+      assert.equal(result.code, 1, `${url}: ${result.stderr || result.stdout}`);
+      assert.match(String(result.json?.error || ""), /私有或保留地址/, url);
+    }
+    const explicitFalse = await runCli(
+      ["upload-resource", "--allow-private-resource=false", "--file-url", `http://127.0.0.1:${port}/asset.png`],
+      {},
+      port,
+    );
+    assert.equal(explicitFalse.code, 1, explicitFalse.stderr || explicitFalse.stdout);
+    assert.match(String(explicitFalse.json?.error || ""), /私有或保留地址/);
+    assert.equal(server.requests.some((request) => request.url === "/asset.png"), false);
+  } finally {
+    await server.close();
+  }
+}
+
+async function testRemoteResourceRejectsUrlCredentials() {
+  const server = createServer();
+  const port = await server.listen();
+  try {
+    const result = await runCli(
+      ["upload-resource", "--allow-private-resource", "--file-url", `http://user:password@127.0.0.1:${port}/asset.png`],
+      {},
+      port,
+    );
+    assert.equal(result.code, 1, result.stderr || result.stdout);
+    assert.match(String(result.json?.error || ""), /用户名或密码/);
+  } finally {
+    await server.close();
+  }
+}
+
+async function testRemoteResourceLimitsRedirects() {
+  const server = createServer();
+  const port = await server.listen();
+  try {
+    const result = await runCli(
+      ["upload-resource", "--allow-private-resource", "--file-url", `http://127.0.0.1:${port}/redirect.png`],
+      {},
+      port,
+    );
+    assert.equal(result.code, 1, result.stderr || result.stdout);
+    assert.match(String(result.json?.error || ""), /重定向次数/);
+  } finally {
+    await server.close();
+  }
+}
+
+async function testRemoteResourceEnforcesTimeoutAndSizeLimits() {
+  const server = createServer();
+  const port = await server.listen();
+  try {
+    const oversized = await runCli(
+      ["upload-resource", "--allow-private-resource", "--file-url", `http://127.0.0.1:${port}/large.png`],
+      {},
+      port,
+      { KNOWLEDGE_COLLECTION_MAX_RESOURCE_BYTES: "16" },
+    );
+    assert.equal(oversized.code, 1, oversized.stderr || oversized.stdout);
+    assert.match(String(oversized.json?.error || ""), /单文件大小上限/);
+    assert.equal(server.requests.some((request) => request.url === "/byaiService/chat/uploadFiles"), false);
+
+    const timedOut = await runCli(
+      ["upload-resource", "--allow-private-resource", "--file-url", `http://127.0.0.1:${port}/slow.png`],
+      {},
+      port,
+      { KNOWLEDGE_COLLECTION_RESOURCE_TIMEOUT_MS: "20" },
+    );
+    assert.equal(timedOut.code, 1, timedOut.stderr || timedOut.stdout);
+    assert.match(String(timedOut.json?.error || ""), /下载超时/);
+
+    const malformedLimitFallsBack = await runCli(
+      ["upload-resource", "--allow-private-resource", "--file-url", `http://127.0.0.1:${port}/large.png`],
+      {},
+      port,
+      { KNOWLEDGE_COLLECTION_MAX_RESOURCE_BYTES: "16bytes" },
+    );
+    assert.equal(malformedLimitFallsBack.code, 0, malformedLimitFallsBack.stderr || malformedLimitFallsBack.stdout);
+  } finally {
+    await server.close();
+  }
+}
+
+async function testLocalResourceEnforcesFileAndBatchLimits() {
+  const server = createServer();
+  const port = await server.listen();
+  const fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), "knowledge-collection-limits-"));
+  const firstPath = path.join(fixtureDir, "first.png");
+  const secondPath = path.join(fixtureDir, "second.png");
+  fs.writeFileSync(firstPath, Buffer.alloc(12, 1));
+  fs.writeFileSync(secondPath, Buffer.alloc(12, 2));
+  try {
+    const oversized = await runCli(
+      ["upload-resource", "--file-path", firstPath],
+      {},
+      port,
+      { KNOWLEDGE_COLLECTION_MAX_RESOURCE_BYTES: "8" },
+    );
+    assert.equal(oversized.code, 1, oversized.stderr || oversized.stdout);
+    assert.match(String(oversized.json?.error || ""), /单文件大小上限/);
+
+    const tooMany = await runCli(
+      ["upload-resource", "--file-path", firstPath, "--file-path", secondPath],
+      {},
+      port,
+      { KNOWLEDGE_COLLECTION_MAX_RESOURCES: "1" },
+    );
+    assert.equal(tooMany.code, 1, tooMany.stderr || tooMany.stdout);
+    assert.match(String(tooMany.json?.error || ""), /资源数量上限/);
+
+    const batchTooLarge = await runCli(
+      ["upload-resource", "--file-path", firstPath, "--file-path", secondPath],
+      {},
+      port,
+      { KNOWLEDGE_COLLECTION_MAX_BATCH_BYTES: "16" },
+    );
+    assert.equal(batchTooLarge.code, 1, batchTooLarge.stderr || batchTooLarge.stdout);
+    assert.match(String(batchTooLarge.json?.error || ""), /批次大小上限/);
+  } finally {
+    fs.rmSync(fixtureDir, { recursive: true, force: true });
+    await server.close();
+  }
+}
+
 async function testMarkdownIngestListsKnowledgeBasesBeforeImport() {
   const server = createServer();
   const port = await server.listen();
@@ -441,11 +700,46 @@ async function testMarkdownIngestListsKnowledgeBasesBeforeImport() {
   }
 }
 
+async function testLegacyKnowledgeBaseIdResolvesToResourceId() {
+  const server = createServer();
+  const port = await server.listen();
+  try {
+    const wrongConfirmation = await runCli(
+      [
+        "ingest",
+        "--knowledge-base-id", "80001",
+        "--confirmed-knowledge-base-resource-id", "80001",
+        "--confirmed-directory-path", "/",
+      ],
+      { content: "# Legacy target" },
+      port,
+    );
+    assert.equal(wrongConfirmation.code, 1, wrongConfirmation.stderr || wrongConfirmation.stdout);
+    assert.match(String(wrongConfirmation.json?.error || ""), /confirmed-knowledge-base-resource-id/);
+    assert.equal(server.requests.some((request) => request.url === "/byaiService/datasetController/uploadFiles"), false);
+
+    const resolved = await runCli(
+      [
+        "ingest",
+        "--knowledge-base-id", "80001",
+        "--confirmed-knowledge-base-resource-id", "90001",
+        "--confirmed-directory-path", "/",
+      ],
+      { content: "# Legacy target" },
+      port,
+    );
+    assert.equal(resolved.code, 0, resolved.stderr || resolved.stdout);
+    assert.equal(resolved.json?.uploaded?.resourceId, 90001);
+  } finally {
+    await server.close();
+  }
+}
+
 async function testImageUrlUploadsToChatFilesAndStops() {
   const server = createServer();
   const port = await server.listen();
   try {
-    const result = await runCli(["ingest", "--session-id", "42"], {
+    const result = await runCli(["upload-resource", "--allow-private-resource", "--session-id", "42"], {
       fileUrl: `http://127.0.0.1:${port}/asset.png`,
       fileName: "asset.png",
     }, port);
@@ -467,7 +761,7 @@ async function testVideoUrlUploadsToChatFilesAndStops() {
   const server = createServer();
   const port = await server.listen();
   try {
-    const result = await runCli(["ingest", "--session-id", "42"], {
+    const result = await runCli(["upload-resource", "--allow-private-resource", "--session-id", "42"], {
       fileUrl: `http://127.0.0.1:${port}/clip.mp4`,
       fileName: "clip.mp4",
     }, port);
@@ -508,7 +802,7 @@ async function testAudioUrlUploadsToChatFilesAndStops() {
   const server = createServer();
   const port = await server.listen();
   try {
-    const result = await runCli(["ingest", "--session-id", "42"], {
+    const result = await runCli(["upload-resource", "--allow-private-resource", "--session-id", "42"], {
       fileUrl: `http://127.0.0.1:${port}/clip.mp3`,
       fileName: "clip.mp3",
     }, port);
@@ -522,12 +816,105 @@ async function testAudioUrlUploadsToChatFilesAndStops() {
   }
 }
 
+async function testMixedMediaAndMarkdownIngestCompletesBothPhases() {
+  const server = createServer();
+  const port = await server.listen();
+  try {
+    const result = await runCli(
+      [
+        "ingest",
+        "--allow-private-resource",
+        "--image-url", `http://127.0.0.1:${port}/asset.png`,
+        "--knowledge-base-resource-id", "90001",
+        "--directory-path", "/imports",
+        "--confirmed-knowledge-base-resource-id", "90001",
+        "--confirmed-directory-path", "/imports",
+      ],
+      { title: "Mixed article", content: "# Mixed article\n\n正文" },
+      port,
+    );
+    assert.equal(result.code, 0, result.stderr || result.stdout);
+    assert.equal(result.json?.action, "ingest");
+    assert.equal(result.json?.resourceUpload?.sessionId, 42);
+    assert.equal(result.json?.knowledgeIngest?.manager?.action, "upload");
+    assert.equal(server.requests.some((request) => request.url === "/byaiService/chat/uploadFiles"), true);
+    assert.equal(server.requests.some((request) => request.url === "/byaiService/datasetController/uploadFiles"), true);
+  } finally {
+    await server.close();
+  }
+}
+
+async function testMixedStdinObjectKeepsMediaAndMarkdown() {
+  const server = createServer();
+  const port = await server.listen();
+  try {
+    const result = await runCli(
+      [
+        "ingest",
+        "--allow-private-resource",
+        "--knowledge-base-resource-id", "90001",
+        "--confirmed-knowledge-base-resource-id", "90001",
+        "--confirmed-directory-path", "/",
+      ],
+      {
+        title: "Mixed stdin article",
+        content: "# Mixed stdin article\n\n正文",
+        fileUrl: `http://127.0.0.1:${port}/asset.png`,
+        fileName: "asset.png",
+      },
+      port,
+    );
+    assert.equal(result.code, 0, result.stderr || result.stdout);
+    assert.equal(result.json?.action, "ingest");
+    assert.equal(result.json?.resourceUpload?.sessionId, 42);
+    assert.equal(result.json?.knowledgeIngest?.manager?.action, "upload");
+    assert.equal(server.requests.some((request) => request.url === "/byaiService/chat/uploadFiles"), true);
+    assert.equal(server.requests.some((request) => request.url === "/byaiService/datasetController/uploadFiles"), true);
+  } finally {
+    await server.close();
+  }
+}
+
+async function testMediaOnlyIngestRejectsBeforeUpload() {
+  const server = createServer();
+  const port = await server.listen();
+  try {
+    const result = await runCli(
+      [
+        "ingest",
+        "--allow-private-resource",
+        "--image-url", `http://127.0.0.1:${port}/asset.png`,
+        "--knowledge-base-resource-id", "90001",
+        "--confirmed-knowledge-base-resource-id", "90001",
+        "--confirmed-directory-path", "/",
+      ],
+      {},
+      port,
+    );
+    assert.equal(result.code, 1, result.stderr || result.stdout);
+    assert.match(String(result.json?.error || ""), /upload-resource/);
+    assert.equal(server.requests.some((request) => request.url === "/asset.png"), false);
+    assert.equal(server.requests.some((request) => request.url === "/byaiService/chat/uploadFiles"), false);
+    assert.equal(server.requests.some((request) => request.url === "/byaiService/datasetController/uploadFiles"), false);
+  } finally {
+    await server.close();
+  }
+}
+
 async function testUploadDocViaDatasetController() {
   const server = createServer();
   const port = await server.listen();
   try {
     const result = await runCli(
-      ["upload-doc", "--file-url", `http://127.0.0.1:${port}/doc.pdf`, "--knowledge-base-resource-id", "90001", "--directory-path", "/imports"],
+      [
+        "upload-doc",
+        "--allow-private-resource",
+        "--file-url", `http://127.0.0.1:${port}/doc.pdf`,
+        "--knowledge-base-resource-id", "90001",
+        "--directory-path", "/imports",
+        "--confirmed-knowledge-base-resource-id", "90001",
+        "--confirmed-directory-path", "/imports",
+      ],
       {},
       port,
     );
@@ -611,7 +998,13 @@ async function testMarkdownFileIngestSucceeds() {
   fs.writeFileSync(mdPath, "# From File\n\n正文内容");
   try {
     const result = await runCli(
-      ["ingest", "--markdown-file", mdPath, "--knowledge-base-resource-id", "90001"],
+      [
+        "ingest",
+        "--markdown-file", mdPath,
+        "--knowledge-base-resource-id", "90001",
+        "--confirmed-knowledge-base-resource-id", "90001",
+        "--confirmed-directory-path", "/",
+      ],
       {},
       port,
     );
@@ -637,7 +1030,12 @@ async function testIngestInlineMarkdownUploadsThroughManager() {
   const port = await server.listen();
   try {
     const result = await runCli(
-      ["ingest", "--knowledge-base-resource-id", "90001"],
+      [
+        "ingest",
+        "--knowledge-base-resource-id", "90001",
+        "--confirmed-knowledge-base-resource-id", "90001",
+        "--confirmed-directory-path", "/",
+      ],
       { content: "# Article\n\n正文" },
       port,
     );
@@ -662,7 +1060,7 @@ async function testUploadResourceFileKindGoesToChatFiles() {
   const port = await server.listen();
   try {
     const result = await runCli(
-      ["upload-resource", "--file-url", `http://127.0.0.1:${port}/doc.pdf`],
+      ["upload-resource", "--allow-private-resource", "--file-url", `http://127.0.0.1:${port}/doc.pdf`],
       {},
       port,
     );
@@ -684,7 +1082,14 @@ async function testUploadDocEmptyUploadItemsErrors() {
   const port = await server.listen();
   try {
     const result = await runCli(
-      ["upload-doc", "--file-url", `http://127.0.0.1:${port}/empty.pdf`, "--knowledge-base-resource-id", "90001"],
+      [
+        "upload-doc",
+        "--allow-private-resource",
+        "--file-url", `http://127.0.0.1:${port}/empty.pdf`,
+        "--knowledge-base-resource-id", "90001",
+        "--confirmed-knowledge-base-resource-id", "90001",
+        "--confirmed-directory-path", "/",
+      ],
       {},
       port,
     );
@@ -704,7 +1109,14 @@ async function testUploadDocAcceptsUppercaseExtension() {
   const port = await server.listen();
   try {
     const result = await runCli(
-      ["upload-doc", "--file-url", `http://127.0.0.1:${port}/doc.PDF`, "--knowledge-base-resource-id", "90001"],
+      [
+        "upload-doc",
+        "--allow-private-resource",
+        "--file-url", `http://127.0.0.1:${port}/doc.PDF`,
+        "--knowledge-base-resource-id", "90001",
+        "--confirmed-knowledge-base-resource-id", "90001",
+        "--confirmed-directory-path", "/",
+      ],
       {},
       port,
     );
@@ -717,8 +1129,165 @@ async function testUploadDocAcceptsUppercaseExtension() {
   }
 }
 
+async function testIngestRequiresConfirmedTargetBeforeWrite() {
+  const server = createServer();
+  const port = await server.listen();
+  try {
+    const result = await runCli(
+      [
+        "ingest",
+        "--knowledge-base-resource-id", "90001",
+        "--directory-path", "/imports",
+      ],
+      { content: "# Unconfirmed article" },
+      port,
+    );
+    assert.equal(result.code, 1, result.stderr || result.stdout);
+    assert.match(String(result.json?.error || ""), /confirmed-knowledge-base-resource-id/);
+    assert.equal(server.requests.some((request) => request.url === "/byaiService/datasetController/uploadFiles"), false);
+  } finally {
+    await server.close();
+  }
+}
+
+async function testBareResourceIdFlagsCannotConfirmTarget() {
+  const server = createServer();
+  const port = await server.listen();
+  try {
+    const result = await runCli(
+      [
+        "ingest",
+        "--knowledge-base-resource-id",
+        "--confirmed-knowledge-base-resource-id",
+        "--confirmed-directory-path", "/",
+      ],
+      { content: "# Bare flags must not write" },
+      port,
+    );
+    assert.equal(result.code, 1, result.stderr || result.stdout);
+    assert.match(String(result.json?.error || ""), /knowledge-base-resource-id/);
+    assert.equal(server.requests.some((request) => request.url === "/byaiService/datasetController/uploadFiles"), false);
+  } finally {
+    await server.close();
+  }
+}
+
+async function testUploadDocRequiresConfirmedTargetBeforeWrite() {
+  const server = createServer();
+  const port = await server.listen();
+  try {
+    const result = await runCli(
+      [
+        "upload-doc",
+        "--file-url", `http://127.0.0.1:${port}/doc.pdf`,
+        "--knowledge-base-resource-id", "90001",
+        "--directory-path", "/imports",
+      ],
+      {},
+      port,
+    );
+    assert.equal(result.code, 1, result.stderr || result.stdout);
+    assert.match(String(result.json?.error || ""), /confirmed-knowledge-base-resource-id/);
+    assert.equal(server.requests.some((request) => request.url === "/byaiService/datasetController/uploadFiles"), false);
+  } finally {
+    await server.close();
+  }
+}
+
+async function testIngestPropagatesOverwriteConfirmationAsNonTerminalState() {
+  const fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), "knowledge-collection-conflict-manager-"));
+  const managerPath = path.join(fixtureDir, "manager.mjs");
+  fs.writeFileSync(managerPath, `
+const command = process.argv[2];
+process.stdout.write(JSON.stringify(command === "update-file" ? {
+  ok: true,
+  action: "update-file",
+  uploaded: { uploadItems: [{ filePath: "/imports/Conflict-article.md" }] },
+  builds: [{ filePath: "/imports/Conflict-article.md" }],
+} : {
+  ok: true,
+  action: "upload",
+  conflict: true,
+  needsOverwriteConfirmation: true,
+  overwritePaths: ["/imports/Conflict-article.md"],
+}));
+`);
+  let continuationFiles = [];
+  try {
+    const result = await runCli(
+      [
+        "ingest",
+        "--check-conflicts",
+        "--knowledge-manager-script", managerPath,
+        "--knowledge-base-resource-id", "90001",
+        "--directory-path", "/imports",
+        "--confirmed-knowledge-base-resource-id", "90001",
+        "--confirmed-directory-path", "/imports",
+      ],
+      { title: "Conflict article", content: "# Conflict article" },
+      0,
+    );
+    assert.equal(result.code, 0, result.stderr || result.stdout);
+    assert.equal(result.json?.action, "confirm-overwrite");
+    assert.equal(result.json?.needsOverwriteConfirmation, true);
+    assert.deepEqual(result.json?.overwritePaths, ["/imports/Conflict-article.md"]);
+    assert.equal(result.json?.uploaded, undefined);
+    continuationFiles = result.json?.continuation?.markdownFilePaths || [];
+    assert.equal(continuationFiles.length, 1);
+    assert.equal(fs.existsSync(continuationFiles[0]), true, "conflict continuation must retain generated Markdown");
+    assert.equal(result.json?.continuation?.requiredArguments?.["knowledge-base-resource-id"], 90001);
+    assert.equal(result.json?.continuation?.requiredArguments?.["confirmed-knowledge-base-resource-id"], 90001);
+
+    const resumed = await runCli(
+      [
+        "ingest",
+        "--knowledge-manager-script", managerPath,
+        "--markdown-file", continuationFiles[0],
+        "--knowledge-base-resource-id", "90001",
+        "--directory-path", "/imports",
+        "--confirmed-knowledge-base-resource-id", "90001",
+        "--confirmed-directory-path", "/imports",
+        "--confirmed-overwrite-path", "/imports/Conflict-article.md",
+      ],
+      {},
+      0,
+    );
+    assert.equal(resumed.code, 0, resumed.stderr || resumed.stdout);
+    assert.equal(resumed.json?.uploaded?.manager?.action, "update-file");
+  } finally {
+    for (const filePath of continuationFiles) {
+      fs.rmSync(path.dirname(filePath), { recursive: true, force: true });
+    }
+    fs.rmSync(fixtureDir, { recursive: true, force: true });
+  }
+}
+
+async function testIngestRejectsSuccessfulManagerExitWithoutJsonContract() {
+  const fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), "knowledge-collection-empty-manager-"));
+  const managerPath = path.join(fixtureDir, "manager.mjs");
+  fs.writeFileSync(managerPath, "process.exitCode = 0;\n");
+  try {
+    const result = await runCli(
+      [
+        "ingest",
+        "--knowledge-manager-script", managerPath,
+        "--knowledge-base-resource-id", "90001",
+        "--confirmed-knowledge-base-resource-id", "90001",
+        "--confirmed-directory-path", "/",
+      ],
+      { content: "# Manager contract" },
+      0,
+    );
+    assert.equal(result.code, 1, result.stderr || result.stdout);
+    assert.match(String(result.json?.error || ""), /有效 JSON|返回契约/);
+  } finally {
+    fs.rmSync(fixtureDir, { recursive: true, force: true });
+  }
+}
+
 await testHelpUsesMigratedIdentityAndCanonicalInputFirst();
 await testCanonicalCollectionResultPreservesMarkdownFrontmatter();
+await testCanonicalCollectionResultRejectsInvalidContractShapes();
 await testCanonicalCollectionResultRejectsUnsafeOrMissingMarkdownPaths();
 await testCanonicalCollectionResultRejectsMismatchedMarkdownAndFileName();
 await testCollectionResultJsonIsExplicitInlineCompatibilityOnly();
@@ -726,10 +1295,19 @@ await testCanonicalIngestUsesValidatedRootArtifactDespiteDirectoryOverrides();
 await testCanonicalActualIngestKeepsValidatedPathPrivate();
 await testCanonicalInputPrecedesLegacyAndLegacyRemainsSupported();
 await testLegacyInlineBycliJsonRemainsSupported();
+await testRemoteResourceRejectsPrivateAddressByDefault();
+await testRemoteResourceRejectsUrlCredentials();
+await testRemoteResourceLimitsRedirects();
+await testRemoteResourceEnforcesTimeoutAndSizeLimits();
+await testLocalResourceEnforcesFileAndBatchLimits();
 await testMarkdownIngestListsKnowledgeBasesBeforeImport();
+await testLegacyKnowledgeBaseIdResolvesToResourceId();
 await testImageUrlUploadsToChatFilesAndStops();
 await testVideoUrlUploadsToChatFilesAndStops();
 await testAudioUrlUploadsToChatFilesAndStops();
+await testMixedMediaAndMarkdownIngestCompletesBothPhases();
+await testMixedStdinObjectKeepsMediaAndMarkdown();
+await testMediaOnlyIngestRejectsBeforeUpload();
 await testNonMediaFileSkipsUploadAndGoesToMarkdown();
 await testUploadDocViaDatasetController();
 await testUploadDocRejectsUnsupportedType();
@@ -740,4 +1318,9 @@ await testIngestInlineMarkdownUploadsThroughManager();
 await testUploadResourceFileKindGoesToChatFiles();
 await testUploadDocEmptyUploadItemsErrors();
 await testUploadDocAcceptsUppercaseExtension();
+await testIngestRequiresConfirmedTargetBeforeWrite();
+await testBareResourceIdFlagsCannotConfirmTarget();
+await testUploadDocRequiresConfirmedTargetBeforeWrite();
+await testIngestPropagatesOverwriteConfirmationAsNonTerminalState();
+await testIngestRejectsSuccessfulManagerExitWithoutJsonContract();
 console.log("knowledge-collection-ingest tests passed");
