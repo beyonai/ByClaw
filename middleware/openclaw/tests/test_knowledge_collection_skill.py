@@ -82,8 +82,13 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         upgrade = V030_DML.read_text(encoding="utf-8")
 
         self.assertIn("OPENCLAW_BUNDLED_SKILLS", upgrade)
-        self.assertIn("'skillCode', 'knowledge-collection'", upgrade)
-        self.assertIn("'skillCode', 'agent-reach'", upgrade)
+        self.assertIn('"skillCode":"knowledge-collection"', upgrade)
+        self.assertIn('"skillCode":"agent-reach"', upgrade)
+        self.assertNotIn("WITH ORDINALITY", upgrade)
+        self.assertNotIn("jsonb_build_object", upgrade)
+        self.assertNotIn("jsonb_agg", upgrade)
+        self.assertNotIn("jsonb_array_elements", upgrade)
+        self.assertNotIn("regexp_replace", upgrade)
 
     def test_meta_prompt_counts_catalog_entries_from_json(self):
         source = META_PROMPT_SERVICE.read_text(encoding="utf-8")
@@ -101,7 +106,7 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
             re.compile(
                 r"UPDATE byai\.ss_res_ext_skill e SET target_content = "
                 r"jsonb_set\(\s*target_content::jsonb, '\{resourceCode\}', "
-                r"to_jsonb\('knowledge-collection'::text\), false\s*\)::text "
+                r"'\"knowledge-collection\"'::jsonb, false\s*\)::text "
                 r"WHERE e\.resource_id = 14 AND target_content IS NOT NULL "
                 r"AND target_content::jsonb ->> 'resourceCode' = 'bycli' AND EXISTS \( "
                 r"SELECT 1 FROM byai\.ss_resource r "
