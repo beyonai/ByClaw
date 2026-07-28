@@ -20,6 +20,7 @@ SMARTPAGE_REFERENCE = (
 DOCKERFILES = [OPENCLAW_DIR / "Dockerfile"]
 FEISHU_BRIDGE = OPENCLAW_DIR / "skills" / "bycli" / "references" / "feishu-fws-bridge.md"
 WECOM_BRIDGE = OPENCLAW_DIR / "skills" / "bycli" / "references" / "wecom-wecomcli-bridge.md"
+WECOM_MSG_SKILL = OPENCLAW_DIR / "skills" / "wecom" / "wecomcli-msg" / "SKILL.md"
 BYCLI_EVALS = OPENCLAW_DIR / "skills" / "bycli" / "evals" / "evals.json"
 BYCLI_SKILL = OPENCLAW_DIR / "skills" / "bycli" / "SKILL.md"
 KNOWLEDGE_INGEST = OPENCLAW_DIR / "skills" / "bycli" / "references" / "knowledge-ingest.md"
@@ -165,6 +166,92 @@ class ConnectorBridgeCliContractsTest(unittest.TestCase):
             "markdown/document.md",
             "bycli_filter",
             "knowledge-ingest",
+        )
+        for expected in required:
+            self.assertIn(expected, content)
+
+    def test_wecom_bridge_parses_json_rpc_wrapped_business_json(self):
+        content = WECOM_BRIDGE.read_text(encoding="utf-8")
+        required = (
+            "JSON-RPC envelope",
+            "result.content[].text",
+            "parse the nested text as JSON",
+            "business `errcode`",
+        )
+        for expected in required:
+            self.assertIn(expected, content)
+
+    def test_wecom_bridge_limits_contacts_and_messages_to_bot_visible_scope(self):
+        content = WECOM_BRIDGE.read_text(encoding="utf-8")
+        required = (
+            "current bot-visible scope",
+            "not a personal WeCom chat archive",
+            "not a company-wide conversation archive",
+            "not the full company directory",
+            "10-person child-skill limit",
+        )
+        for expected in required:
+            self.assertIn(expected, content)
+
+    def test_wecom_bridge_records_effective_seven_day_window_and_completeness(self):
+        content = WECOM_BRIDGE.read_text(encoding="utf-8")
+        required = (
+            "requestedWindow",
+            "effectiveWindow",
+            "metadata.partial=true",
+            "recompute the end time",
+            "incremental catch-up",
+            "msg_count",
+            "retrieved message count",
+            "missing or empty `next_cursor`",
+            "no stable `message_id`",
+        )
+        for expected in required:
+            self.assertIn(expected, content)
+
+    def test_wecom_workspace_fallback_protects_sensitive_collection_data(self):
+        content = WECOM_BRIDGE.read_text(encoding="utf-8")
+        required = (
+            "`.by-sessions/`",
+            "directory mode `0700`",
+            "file mode `0600`",
+            "never stage or commit",
+        )
+        for expected in required:
+            self.assertIn(expected, content)
+
+    def test_wecom_bridge_defines_contact_and_message_artifacts(self):
+        content = WECOM_BRIDGE.read_text(encoding="utf-8")
+        required = (
+            "raw/contact-get-userlist.json",
+            "raw/msg-chat-list.json",
+            "raw/get-message-<chat>.json",
+            "markdown/contacts.md",
+            "markdown/chat-records.md",
+        )
+        for expected in required:
+            self.assertIn(expected, content)
+
+    def test_wecom_chat_type_is_never_defaulted_without_evidence(self):
+        bridge = WECOM_BRIDGE.read_text(encoding="utf-8")
+        message_skill = WECOM_MSG_SKILL.read_text(encoding="utf-8")
+        for expected in (
+            "backend-returned type",
+            "documented ID format",
+            "mark the conversation unresolved",
+            "never default to `chat_type=1`",
+        ):
+            self.assertIn(expected, bridge)
+        self.assertNotIn("否则默认 `chat_type=1`", message_skill)
+        self.assertIn("禁止在没有依据时默认单聊", message_skill)
+
+    def test_wecom_authorization_recovery_handles_expired_links(self):
+        content = WECOM_BRIDGE.read_text(encoding="utf-8")
+        required = (
+            "authorization URL can expire",
+            "polling process reports timeout",
+            "start a new initialization process",
+            "return only the new URL",
         )
         for expected in required:
             self.assertIn(expected, content)

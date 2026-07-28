@@ -31,6 +31,8 @@ Route through this bridge when the user asks bycli to collect, scrape, crawl, fe
 
 This bridge covers read, export, download, and collection operations only. Sending messages and creating, editing, cancelling, or deleting WeCom resources remain direct `wecom` write tasks and do not enter the bycli collection workflow.
 
+Treat contacts and conversations as the current bot-visible scope established by `wecom-cli init`. This is not a personal WeCom chat archive, not a company-wide conversation archive, and not the full company directory. State this boundary in collection metadata and the user-facing summary; never describe bot-visible results as the user's or company's complete data.
+
 Do not use browser driving, curl, HTTP APIs, or generic web scraping for WeCom collection. If `wecom-cli` is unavailable or explicitly reports that the operation is unsupported, report the backend result and follow the main SKILL.md exception rule; do not silently fall back. An alternative tool is allowed only after the user confirms it and then runs outside this bridge.
 
 ## Backend Selection
@@ -38,8 +40,9 @@ Do not use browser driving, curl, HTTP APIs, or generic web scraping for WeCom c
 1. Load the parent `wecom` skill.
 2. Route by URL path or product intent and load the matching child `SKILL.md` before constructing a command.
 3. Follow the child skill's exact command, parameter, polling, pagination, attachment, and safety rules. Do not invent a `--format` flag when the documented `wecom-cli` command already returns JSON.
-4. Treat `errcode == 0` as success for product responses unless the selected child skill documents a different contract.
-5. Record `metadata.backend` as `wecom-cli`.
+4. Parse the actual CLI shape before deciding success. `wecom-cli` 0.1.9 can return a JSON-RPC envelope whose business payload is a JSON string in `result.content[].text`. Parse the outer response first, select the business text content, and parse the nested text as JSON before reading the business `errcode`. Preserve the unmodified outer response in `raw/`; do not mistake JSON-RPC `isError=false` for business success.
+5. Treat business `errcode == 0` as success unless the selected child skill documents a different contract.
+6. Record `metadata.backend` as `wecom-cli` and `metadata.backendCliVersion` when known.
 
 ## Authentication Recovery
 
@@ -51,6 +54,8 @@ Only enter authorization recovery when the failed `wecom-cli` command returns a 
 4. Continue polling the same initialization process until it succeeds, times out, or exits abnormally. Returning a link is not authorization success.
 5. After success, retry the original command unchanged. If the init process was interrupted, retry the original command once before deciding authorization is still missing.
 6. Perform at most two complete authorization rounds. If no URL can be extracted, ask the user to run `wecom-cli init --noninteractive --no-open` and provide the authorization URL.
+
+The authorization URL can expire. Keep polling the process that created it; when the polling process reports timeout, discard the expired URL, start a new initialization process for the next allowed round, and return only the new URL. Never present an old URL as reusable or report authorization success before the retained process succeeds.
 
 Never expose or persist tokens, sessions, cookies, secrets, authorization cache contents, or raw credential output in chat or collection artifacts.
 
@@ -102,6 +107,8 @@ collectionRunName=wecom-wecomcli-<product>-<operation>
 
 Examples: `wecom-wecomcli-doc-export`, `wecom-wecomcli-smartpage-export`, `wecom-wecomcli-smartsheet-record-list`, and `wecom-wecomcli-msg-history`.
 
+Treat every collection directory as private because it can contain contacts, conversations, files, and identifiers. Create the run directory with directory mode `0700` and collection files with file mode `0600`. Before using the workspace fallback, verify that `.by-sessions/` is ignored by version control; if it is not ignored, warn explicitly and prefer a private path outside the repository. In all cases, never stage or commit collection artifacts, even when they appear as untracked files.
+
 ## Required Artifact Layout
 
 Write at least:
@@ -116,6 +123,24 @@ markdown/
 ```
 
 When attachments are explicitly included in the collection, also write them under `files/` and reference those paths from `metadata.json` or the relevant item. Backend temporary downloads are not ingest-ready artifacts until copied into this run directory. Never use a chat media-send directive for historical message attachments.
+
+For contact and message-history collection, prefer:
+
+```text
+bycli-output.json
+metadata.json
+raw/
+  contact-get-userlist.json
+  msg-chat-list.json
+  get-message-<chat>.json
+markdown/
+  contacts.md
+  chat-records.md
+files/
+  <confirmed-message-attachment>
+```
+
+The corresponding paths are `raw/contact-get-userlist.json`, `raw/msg-chat-list.json`, `raw/get-message-<chat>.json`, `markdown/contacts.md`, and `markdown/chat-records.md`. Keep the original JSON-RPC response auditable; if normalized business JSON is stored separately, identify both files in `metadata.json`.
 
 ## `bycli-output.json` Contract
 
@@ -165,7 +190,17 @@ For `/smartsheet/*`, first fetch the sheet list and real `sheet_id`, then fetch 
 
 ### Message history
 
-Resolve the conversation using the child skill instead of guessing `chatid` or `chat_type`. Respect the seven-day query limit. Continue with `next_cursor` until empty unless the user requested a bounded subset. Download non-text media only when the user explicitly includes attachments or confirms the child skill's download prompt; copy retained files into `files/` and report their paths.
+Resolve the conversation using the child skill instead of guessing `chatid` or `chat_type`. Determine `chat_type` only from explicit user intent, a backend-returned type, or a documented ID format in the selected child skill. If none provides evidence, mark the conversation unresolved and partial instead of calling `get_message`; never default to `chat_type=1`. Preserve a missing `chat_name` as an unnamed conversation with its real `chat_id` rather than inventing a name.
+
+Respect the seven-day query limit. If the requested range is wider, do not silently clamp it: record `metadata.requestedWindow`, the supported `metadata.effectiveWindow`, and `metadata.partial=true`, then tell the user which interval could not be collected. When authorization interrupts a relative range such as “through now,” preserve the start and recompute the end time after authorization, or run an incremental catch-up from the old end to the new end. Because this API returns no stable `message_id`, record that deduplication is best-effort and do not claim lossless merging across overlapping windows.
+
+Fetch every page of `get_msg_chat_list` while `has_more=true`, then fetch every resolved conversation until `next_cursor` is missing or empty. For each chat, compare its reported `msg_count` with the retrieved message count before claiming completeness. If counts differ, a cursor fails, or a type remains unresolved, preserve successful messages and record the chat ID and discrepancy under `metadata.partialDetails`. A missing or empty `next_cursor` means pagination is complete only for that conversation and effective time window.
+
+Normalize returned messages into `markdown/chat-records.md`, retaining `chat_id`, returned `chat_name`, `userid`, `send_time`, `msgtype`, and message content. Download non-text media only when the user explicitly includes attachments or confirms the child skill's download prompt; copy retained files into `files/` and report their paths.
+
+### Contacts
+
+Use `contact get_userlist '{}'` only for the current bot-visible scope. The contact child skill has a 10-person child-skill limit: if the response reaches 10 members, record `metadata.contacts.atSkillLimit=true` and do not infer that the company directory is complete; if it exceeds the supported limit or returns an error, preserve the backend result and mark the contact collection partial. Write the normalized display list to `markdown/contacts.md` and keep `userid` values in the private raw audit artifact unless the user needs them displayed.
 
 ## User-Facing Summary
 
