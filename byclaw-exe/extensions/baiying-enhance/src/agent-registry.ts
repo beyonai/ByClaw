@@ -2,6 +2,7 @@ import type { OpenClawConfig } from "openclaw/plugin-sdk/compat";
 import type { AdaptedManagedAgent, ProviderBundle } from "./agent-adapter.js";
 import {
   DEFAULT_AIMODEL_SECRET_PROVIDER_NAME,
+  providerKeyForBaiyingModelId,
   resolveAimodelConfigRedisKey,
   resolveAimodelSecretProviderName,
   resolveAimodelTypeListRedisKey,
@@ -104,6 +105,43 @@ function syncAimodelAllowlist(
   cfg.agents!.defaults.models = aliases;
 }
 
+function firstRegisteredProviderModelId(provider: unknown): string | undefined {
+  if (!provider || typeof provider !== "object") return undefined;
+  const candidate = provider as {
+    baseUrl?: unknown;
+    apiKey?: unknown;
+    api?: unknown;
+    models?: unknown;
+  };
+  const apiKey = candidate.apiKey;
+  const supportedApi = ["openai-completions", "openai-responses", "anthropic-messages"].includes(
+    String(candidate.api),
+  );
+  const usableApiKey =
+    typeof apiKey === "string"
+      ? Boolean(apiKey.trim())
+      : Boolean(apiKey) &&
+        typeof apiKey === "object" &&
+        !Array.isArray(apiKey) &&
+        Object.keys(apiKey).length > 0;
+  if (
+    typeof candidate.baseUrl !== "string" ||
+    !candidate.baseUrl.trim() ||
+    !supportedApi ||
+    !usableApiKey
+  ) {
+    return undefined;
+  }
+  const models = candidate.models;
+  if (!Array.isArray(models)) return undefined;
+  for (const model of models) {
+    if (!model || typeof model !== "object") continue;
+    const id = (model as { id?: unknown }).id;
+    if (typeof id === "string" && id.trim()) return id.trim();
+  }
+  return undefined;
+}
+
 /** Merge only the dynamic model catalog, preserving all existing agents. */
 export function mergeDynamicAimodelsIntoConfig(params: {
   base: OpenClawConfig;
@@ -154,6 +192,8 @@ export function mergeManagedAgentsIntoConfig(params: {
   managed: AdaptedManagedAgent[];
   defaultModel?: ManagedAimodel | null;
   dynamicModels?: ManagedAimodel[];
+  /** Provider keys from the current valid Redis model catalog that managed agents may bind to. */
+  bindableModelProviderKeys?: ReadonlySet<string>;
   mainParentAgentId: string;
   mergeAllowSpawnForMain: boolean;
   aimodelConfigRedisKey?: string;
@@ -175,6 +215,7 @@ export function mergeManagedAgentsIntoConfig(params: {
   }
 
   const providers = cfg.models.providers;
+  const bindableModelProviderKeys = params.bindableModelProviderKeys ?? new Set<string>();
   const existingList = cfg.agents.list ?? [];
   const existingWorkspaceById = new Map(
     existingList
@@ -203,9 +244,16 @@ export function mergeManagedAgentsIntoConfig(params: {
   for (const m of params.managed) {
     const workspaceDir =
       existingWorkspaceById.get(m.agentId) ?? resolveDefaultManagedWorkspacePath(m.agentId);
+    const providerKey = m.baiyingModelId
+      ? providerKeyForBaiyingModelId(m.baiyingModelId)
+      : undefined;
+    const modelId = providerKey && bindableModelProviderKeys.has(providerKey)
+      ? firstRegisteredProviderModelId(providers[providerKey])
+      : undefined;
     list.push({
       ...m.listEntry,
       workspace: workspaceDir,
+      ...(providerKey && modelId ? { model: { primary: `${providerKey}/${modelId}` } } : {}),
     });
     if (m.provider && m.providerKey) {
       providers[m.providerKey] = {

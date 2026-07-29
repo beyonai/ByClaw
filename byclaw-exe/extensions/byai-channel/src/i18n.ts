@@ -50,21 +50,21 @@ export function getLangFromEnv(): string {
 }
 
 /**
- * UI / hook i18n: prefer `LANG` env, else `metadata.language`.
- * When env wins, `languageProvided` is true so channel language templates still inject.
+ * UI / hook i18n: prefer explicit `metadata.language`, then `LANG`.
+ * `languageProvided` records whether either source supplied a non-empty value.
  */
 export function resolveInboundLanguage(metadataLanguage?: string): {
     language: Language;
     languageProvided: boolean;
 } {
-    const envLang = getLangFromEnv();
-    if (envLang) {
-        return { language: resolveLanguage(envLang), languageProvided: true };
-    }
     const raw = typeof metadataLanguage === "string" ? metadataLanguage.trim() : "";
+    if (raw) {
+        return { language: resolveLanguage(raw), languageProvided: true };
+    }
+    const envLang = getLangFromEnv();
     return {
-        language: resolveLanguage(raw),
-        languageProvided: hasExplicitLanguage(raw),
+        language: resolveLanguage(envLang),
+        languageProvided: Boolean(envLang),
     };
 }
 

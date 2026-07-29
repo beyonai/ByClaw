@@ -1,8 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { adaptAgentJson } from "./agent-adapter.js";
+import { adaptAgentJson, extractBaiyingPrologueModelId } from "./agent-adapter.js";
 import { MANAGED_AGENT_PREFIX } from "./types.js";
 
 describe("adaptAgentJson", () => {
+  it("extracts only valid top-level prologue modelId values", () => {
+    expect(extractBaiyingPrologueModelId({ prologue: JSON.stringify({ modelId: -2000 }) })).toBe(
+      "-2000",
+    );
+    expect(extractBaiyingPrologueModelId({ prologue: { modelId: " 11000161 " } })).toBe(
+      "11000161",
+    );
+    expect(extractBaiyingPrologueModelId({ prologue: "not-json" })).toBeUndefined();
+    expect(extractBaiyingPrologueModelId({ prologue: JSON.stringify({ modelInfo: { modelId: 7 } }) })).toBeUndefined();
+    expect(extractBaiyingPrologueModelId({ prologue: { modelId: "  " } })).toBeUndefined();
+  });
+
   it("maps Baiying agent_list export", () => {
     const raw = {
       agent_list: [

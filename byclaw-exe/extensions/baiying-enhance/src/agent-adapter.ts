@@ -63,6 +63,8 @@ export type AdaptedManagedAgent = {
   sourceFilePath?: string;
   /** Parsed source JSON when the authoritative copy came from Redis instead of disk. */
   sourceJson?: unknown;
+  /** Baiying `prologue.modelId`, used to resolve the registered model provider. */
+  baiyingModelId?: string;
   /** SSE endpoint for INTERFACE-type agents. */
   agentSseUrl?: string;
   /** Home URL for PAGE-type / home-page based backend agents. */
@@ -108,6 +110,32 @@ function nonEmpty(val: unknown): string {
 
 function normalizeStringList(raw: unknown): string[] {
   return Array.isArray(raw) ? raw.map((s) => String(s).trim()).filter(Boolean) : [];
+}
+
+function normalizeModelId(raw: unknown): string | undefined {
+  if (typeof raw === "string") {
+    const trimmed = raw.trim();
+    return trimmed || undefined;
+  }
+  if (typeof raw === "number" && Number.isFinite(raw)) {
+    return String(raw);
+  }
+  return undefined;
+}
+
+export function extractBaiyingPrologueModelId(raw: unknown): string | undefined {
+  if (!raw || typeof raw !== "object") {
+    return undefined;
+  }
+  const prologueRaw = (raw as Record<string, unknown>).prologue;
+  const prologue =
+    typeof prologueRaw === "string" && prologueRaw.trim()
+      ? safeJsonParse(prologueRaw)
+      : prologueRaw;
+  if (!prologue || typeof prologue !== "object") {
+    return undefined;
+  }
+  return normalizeModelId((prologue as Record<string, unknown>).modelId);
 }
 
 /** OpenClaw `agents.list[].skills`: default `[]`; fill from `relSkills` on Baiying detail / agent JSON, else legacy root `skills`. */
@@ -238,6 +266,7 @@ function adaptRawBaiyingDetail(params: {
     allowSpawnFrom: ["main"],
     listEntry,
     systemPrompt: instructions,
+    baiyingModelId: extractBaiyingPrologueModelId(detail),
     integrationType,
     agentSseUrl,
     agentHomeUrl,

@@ -283,6 +283,137 @@ describe("createAgentWatchdog", () => {
     expect(writeConfigFile).toHaveBeenCalledTimes(1);
   });
 
+  it("does not bind an employee to a valid stale provider when the fresh model catalog is empty", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "baiying-wd-fresh-model-catalog-"));
+    const content = JSON.stringify({
+      resourceId: "10000235",
+      resourceName: "Demo",
+      prologue: JSON.stringify({ modelId: -2000 }),
+    });
+    const entries = new Map<string, RedisJsonPayload>([
+      ["10000235", payloadFromContent("DIG_EMPLOYEE_10000235", content)],
+    ]);
+    const redisJsonStore: BaiyingRedisJsonStore = {
+      ...createMemoryRedisJsonStore(entries),
+      getHashJson: async () => null,
+    };
+    const writeConfigFile = vi.fn(async () => {});
+    const api = createMockApi(writeConfigFile) as any;
+    api.runtime.config.loadConfig = vi.fn(() => ({
+      agents: { list: [{ id: "main", name: "Main", identity: { name: "Main" } }] },
+      models: {
+        providers: {
+          "baiying-m-neg-2000": {
+            baseUrl: "https://model.example/v1",
+            apiKey: { source: "exec", provider: "baiying-aimodel-redis", id: "model:-2000" },
+            api: "openai-completions",
+            models: [{ id: "MiniMax-M3", name: "MiniMax-M3-2000" }],
+          },
+        },
+      },
+    }));
+
+    const wd = createAgentWatchdogBase({
+      api,
+      registry: new AgentRegistryState(),
+      redisJsonStore,
+      authorizationFilter: { getAuthorizedSourceKeys: () => new Set(["10000235"]) },
+      contentIndexPath: path.join(root, "agent-content-index.json"),
+      executorPath: path.join(root, "executor.py"),
+      pluginConfig: {
+        workspaceAutoSeed: false,
+        workspaceSkillAutoEnable: false,
+        mainWorkspaceAgentsAutoSeed: false,
+        persistAgentContentIndex: false,
+      },
+      debounceMs: 60_000,
+    });
+
+    await wd.start({ deferInitialFlush: true });
+    await wd.__flushNow!();
+    await wd.stop();
+
+    expect(writeConfigFile).toHaveBeenCalledTimes(1);
+    const entry = writeConfigFile.mock.calls[0][0].agents.list.find(
+      (candidate: any) => candidate.id === `${MANAGED_AGENT_PREFIX}10000235`,
+    );
+    expect(entry.model).toBeUndefined();
+  });
+
+  it("binds an employee only when its provider key resolves from the fresh model catalog", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "baiying-wd-fresh-model-catalog-"));
+    const content = JSON.stringify({
+      resourceId: "10000235",
+      resourceName: "Demo",
+      prologue: JSON.stringify({ modelId: -2000 }),
+    });
+    const entries = new Map<string, RedisJsonPayload>([
+      ["10000235", payloadFromContent("DIG_EMPLOYEE_10000235", content)],
+    ]);
+    const getHashJson = vi.fn(async () =>
+      payloadFromContent(
+        "byai:aimodel:typelist",
+        JSON.stringify([
+          {
+            instanceId: "-2000",
+            modelCode: "MiniMax-M3",
+            modelName: "MiniMax-M3-2000",
+            modelType: "LLM",
+            status: 1,
+            url: "https://model.example/v1",
+            authToken: "test",
+            instanceParam: {},
+          },
+        ]),
+      ),
+    );
+    const redisJsonStore: BaiyingRedisJsonStore = {
+      ...createMemoryRedisJsonStore(entries),
+      getHashJson,
+    };
+    const writeConfigFile = vi.fn(async () => {});
+    const api = createMockApi(writeConfigFile) as any;
+    api.runtime.config.loadConfig = vi.fn(() => ({
+      agents: { list: [{ id: "main", name: "Main", identity: { name: "Main" } }] },
+      models: {
+        providers: {
+          "baiying-m-neg-2000": {
+            baseUrl: "https://model.example/v1",
+            apiKey: { source: "exec", provider: "baiying-aimodel-redis", id: "model:-2000" },
+            api: "openai-completions",
+            models: [{ id: "MiniMax-M3", name: "MiniMax-M3-2000" }],
+          },
+        },
+      },
+    }));
+
+    const wd = createAgentWatchdogBase({
+      api,
+      registry: new AgentRegistryState(),
+      redisJsonStore,
+      authorizationFilter: { getAuthorizedSourceKeys: () => new Set(["10000235"]) },
+      contentIndexPath: path.join(root, "agent-content-index.json"),
+      executorPath: path.join(root, "executor.py"),
+      pluginConfig: {
+        workspaceAutoSeed: false,
+        workspaceSkillAutoEnable: false,
+        mainWorkspaceAgentsAutoSeed: false,
+        persistAgentContentIndex: false,
+      },
+      debounceMs: 60_000,
+    });
+
+    await wd.start({ deferInitialFlush: true });
+    await wd.__flushNow!();
+    await wd.stop();
+
+    expect(getHashJson).toHaveBeenCalledWith({ key: "byai:aimodel:typelist", field: "LLM" });
+    const entry = writeConfigFile.mock.calls[0][0].agents.list.find(
+      (candidate: any) => candidate.id === `${MANAGED_AGENT_PREFIX}10000235`,
+    );
+    expect(entry.model).toEqual({ primary: "baiying-m-neg-2000/MiniMax-M3" });
+  });
+
   it("touches skills reload marker when relTools changes the managed agent tool policy", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "baiying-wd-tools-"));
     const raw = {
