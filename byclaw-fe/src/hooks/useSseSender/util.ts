@@ -281,6 +281,7 @@ const isResumeContentType = (contentType: SSEMessageType) => {
     SSEMessageType.approvalForm,
     SSEMessageType.thinkRewriteQuestion,
     SSEMessageType.thinkTaskUserInput,
+    SSEMessageType.askUserQuestions,
   ];
   return contentType && resumeContentTypes.some((item) => `${item}` === `${contentType}`);
 };
