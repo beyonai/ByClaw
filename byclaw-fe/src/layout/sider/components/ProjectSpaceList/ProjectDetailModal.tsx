@@ -1,7 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Button,
+  Collapse,
+  ConfigProvider,
   DatePicker,
+  Descriptions,
   Drawer,
   Dropdown,
   Empty,
@@ -17,6 +20,7 @@ import {
   Tabs,
   Tag,
   Tooltip,
+  Upload,
   message,
   type MenuProps,
 } from 'antd';
@@ -33,6 +37,7 @@ import {
   FundProjectionScreenOutlined,
   GithubOutlined,
   LeftOutlined,
+  PlayCircleOutlined,
   PlusOutlined,
   ReloadOutlined,
   RightOutlined,
@@ -142,6 +147,175 @@ type SourceDwsStatus = {
   canAuthorize?: boolean;
   creatorName?: string;
 };
+
+// 集成测试脚本型适配器的单个生命周期阶段:每阶段一段完整可执行脚本。
+type IntegrationStage = {
+  id: string;
+  name: string;
+  interpreter: 'bash' | 'sh' | 'python' | 'node';
+  // inline: script 为脚本正文;path: script 为仓库/远程内的脚本文件路径。
+  source: 'inline' | 'path';
+  script: string;
+  workdir: string;
+  timeoutSec: number;
+  continueOnError: boolean;
+};
+
+// 被测应用的业务测试账号:E2E 用例登录用。密码不入库,只存凭据引用(实际值在 ~/.openclaw/credentials/)。
+// 编排层按 envPrefix 注入环境变量:<PREFIX>_USER / <PREFIX>_PASS,脚本直接读 $E2E_ADMIN_USER 等。
+type TestAccount = {
+  id: string;
+  role: string; // 角色说明,如 管理员 / 普通用户 / 审批人
+  envPrefix: string; // 环境变量前缀,如 E2E_ADMIN
+  username: string;
+  credentialRef: string; // 密码凭据 key,指向 ~/.openclaw/credentials/,不存明文
+};
+
+// 手动测试用例:无法自动化的场景由人工按步骤执行、逐条记录结果。
+type ManualCase = {
+  id: string;
+  title: string;
+  steps: string; // 操作步骤(多行)
+  expected: string; // 预期结果
+};
+
+// 端到端测试用例集:自动化套件是独立工程(pytest/playwright/jest…),按运行命令执行、按报告路径收结果;
+// manual 套件是人工检查清单,由测试人执行并逐条记录,平台把记录汇总成与自动化一致的套件结果。
+type TestSuite = {
+  id: string;
+  name: string;
+  runner: 'pytest' | 'playwright' | 'jest' | 'vitest' | 'custom' | 'manual';
+  // git: 独立测试工程仓库;shared: 共享空间已有的用例目录。manual 套件不需要来源仓库。
+  sourceType: 'git' | 'shared';
+  source: string;
+  branch: string;
+  runCommand: string;
+  workdir: string;
+  // 结果解析:自动化套件产出 JUnit XML,后端统一读该文件汇总通过率;manual 套件由平台按人工记录生成同构结果。
+  reportPath: string;
+  caseCount: number;
+  enabled: boolean;
+  // 仅 manual 套件:人工检查清单。
+  manualCases?: ManualCase[];
+};
+
+// 一次 E2E 运行的结果详情:对应 status.json + 各套件 JUnit + artifacts,供"查看结果"页展示。
+type IntegrationRunSuiteResult = {
+  suiteId: string;
+  name: string;
+  status: 'passed' | 'failed' | 'error' | 'skipped';
+  total: number;
+  passed: number;
+  failed: number;
+  durationSec: number;
+  reportPath: string;
+  logPath: string;
+  // 失败用例:名字 + 失败信息 + 截图/artifacts 相对路径(平台按用例ID挂上)。
+  failedCases: Array<{ caseId: string; message: string; artifacts: string[] }>;
+};
+
+type IntegrationRunResult = {
+  runId: string;
+  version: string;
+  status: 'passed' | 'failed' | 'error' | 'timeout';
+  round: number;
+  branch: string;
+  commit: string;
+  envName: string;
+  startedAt: string;
+  finishedAt: string;
+  durationSec: number;
+  totals: { total: number; passed: number; failed: number; skipped: number };
+  // 打回目标环节 + 原因(失败时;成功为空)。
+  kickbackTo: string;
+  reason: string;
+  resultDir: string;
+  suites: IntegrationRunSuiteResult[];
+};
+
+// 端到端测试"结果目录与状态"契约:展示给写脚本的人看,平台按此约定读状态,脚本按此约定写状态。
+// 平台通过环境变量把本次运行的结果根目录注入构建机/用例工程,脚本产物必须落在该目录下的约定结构里。
+const E2E_RESULT_DIR_TREE = `$BYCLAW_E2E_RESULT_DIR/        # 平台注入的本次运行结果根目录(分支+轮次唯一)
+├── status.json      # 状态真相源:状态机 + 心跳 + 汇总(最后原子写入)
+├── meta.json        # 不变信息:分支/commit/环境/触发时间/轮次(平台预写)
+├── reports/         # 各用例集产出的 JUnit XML(明细,判断哪条用例挂了)
+│   └── <suiteId>.xml
+├── logs/            # 拉码/构建/部署/各套件运行日志
+│   └── <suiteId>.log
+└── artifacts/       # 失败证据(E2E 必备:截图/录屏/trace)
+    └── <suiteId>/           # 按套件分目录,避免多套件文件重名打架
+        ├── <caseId>.png     # 截图:文件名 = 用例ID,平台按名挂到失败用例
+        ├── <caseId>.webm    # 录屏(可选)
+        └── <caseId>.zip     # Playwright trace(可选)`;
+
+const E2E_STATUS_JSON = `{
+  "schemaVersion": 1,
+  "status": "running",          // 见下方状态枚举(封闭取值)
+  "startedAt":  "2026-07-27T09:30:00+08:00",
+  "updatedAt":  "2026-07-27T09:41:12+08:00",  // 心跳:运行中定期刷新,用于判活
+  "finishedAt": null,           // 仅终态非空
+  "totals": { "total": 18, "passed": 15, "failed": 3, "skipped": 0 },
+  "suites": [
+    { "id": "suite-api", "status": "passed",  "report": "reports/suite-api.xml" },
+    { "id": "suite-web", "status": "failed",  "report": "reports/suite-web.xml",
+      "failedCases": [                        // 编排层解析 XML+artifacts 后回填,失败用例带截图
+        { "case": "test_login", "artifacts": ["artifacts/suite-web/test_login.png"] }
+      ] }
+  ],
+  "reason": "登录用例 3 条失败:跨模块调用鉴权头丢失"  // 打回原因,非失败可为空
+}`;
+
+const E2E_SCRIPT_SKELETON = `#!/usr/bin/env bash
+set -euo pipefail
+DIR="$BYCLAW_E2E_RESULT_DIR"
+mkdir -p "$DIR/reports" "$DIR/logs" "$DIR/artifacts"
+
+# 原子写状态:先写临时文件再 rename,读者永远读不到半截 JSON
+write_status() { echo "$1" > "$DIR/status.json.tmp" && mv "$DIR/status.json.tmp" "$DIR/status.json"; }
+
+write_status '{"schemaVersion":1,"status":"running","startedAt":"'"$(date -Is)"'"}'
+
+# 业务测试账号由编排层按「环境」里配的账号注入成环境变量,用例直接读,不落明文:
+#   登录 "$E2E_ADMIN_USER" / "$E2E_ADMIN_PASS"   (前缀 = 环境配置里的 envPrefix)
+
+# 运行用例集,产出 JUnit XML 到 reports/;运行中可周期性刷新 updatedAt 作为心跳
+if pytest -q --junitxml="$DIR/reports/suite-api.xml" | tee "$DIR/logs/suite-api.log"; then
+  write_status '{"schemaVersion":1,"status":"passed","finishedAt":"'"$(date -Is)"'"}'
+else
+  # 用例失败 -> failed(打回 coder);若是构建/环境错误未跑到用例 -> error
+  write_status '{"schemaVersion":1,"status":"failed","finishedAt":"'"$(date -Is)"'","reason":"用例失败"}'
+fi`;
+
+// 单套件契约:用例集作者只需保证自己这份产物的落点与退出码,整轮 status.json 由编排层汇总。
+const E2E_SUITE_CONTRACT = `# 用例集作者只需保证四件事,整轮状态由编排层汇总,无需自己写 status.json:
+
+# 1) JUnit XML 报告(平台读它汇总通过率,判断哪条用例挂了)
+#    产到运行命令里指定的报告路径,平台会收集到 $BYCLAW_E2E_RESULT_DIR/reports/<suiteId>.xml
+pytest -q --junitxml=report/junit.xml
+
+# 2) 退出码语义(平台据此判定本套件成败)
+#    0     = 全部通过
+#    非 0  = 有失败 / 运行错误
+
+# 3) 标准输出即日志,平台收集到 $BYCLAW_E2E_RESULT_DIR/logs/<suiteId>.log
+
+# 4) 失败证据(E2E 建议对失败用例必留截图):放当前工程约定目录,平台归集到 artifacts/<suiteId>/
+#    命名 = 用例ID(如 test_login.png),平台按文件名把截图挂到 JUnit 里对应的失败用例。
+#    - Playwright: use: { screenshot:'only-on-failure', video:'retain-on-failure', trace:'retain-on-failure' }
+#    - pytest+selenium: 失败钩子里 driver.save_screenshot(f"artifacts/{case_id}.png")
+#    (进阶)也可在 JUnit 用 [[ATTACHMENT|artifacts/<suiteId>/<caseId>.png]] 显式声明附件路径`;
+
+// status.json 的 status 封闭枚举:平台据此判断"没开始/准备中/测试中/通过/失败/错误/超时/取消"。
+const E2E_STATUS_ENUM: Array<{ code: string; meaning: string }> = [
+  { code: 'pending', meaning: '未开始(或 status.json 尚不存在)' },
+  { code: 'preparing', meaning: '准备中:拉码 / 构建镜像 / 部署' },
+  { code: 'running', meaning: '测试进行中(finishedAt 为 null;心跳超时未刷新则判为崩溃)' },
+  { code: 'passed', meaning: '全部通过 → 进入「提交 PR」' },
+  { code: 'failed', meaning: '有用例失败 → 打回「编码」环节' },
+  { code: 'error', meaning: '构建/部署/环境错误,未跑到用例 → 打回编码或运维介入' },
+  { code: 'timeout', meaning: '超过最大时长被终止' },
+  { code: 'cancelled', meaning: '人工取消' },
+];
 
 type RepoOption = {
   repoId: number;
@@ -564,6 +738,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const [logList, setLogList] = useState<ScanLogEntry[]>([]);
   const [logLoading, setLogLoading] = useState(false);
   const [channelPanelOpen, setChannelPanelOpen] = useState(false);
+  // 集成测试配置(环境+用例集)内容多,沿用需求渠道配置模式:入口按钮打开右侧覆盖面板。
+  const [integrationConfigOpen, setIntegrationConfigOpen] = useState(false);
   const [taskKanbanOpen, setTaskKanbanOpen] = useState(false);
   // 研发任务通过更多操作打开环节详情抽屉，不必先经整体视图。
   const [detailTask, setDetailTask] = useState<any>(null);
@@ -572,6 +748,140 @@ const ProjectDetailPanel: React.FC<Props> = ({
   // 菜单展开时保持研发任务的更多操作可见，避免鼠标移入菜单后图标闪动。
   const [openTaskActionId, setOpenTaskActionId] = useState<string>();
   const [repoModalOpen, setRepoModalOpen] = useState(false);
+  // 集成测试「新增测试用例集」弹框(静态演示态)。
+  const [integrationSuiteModalOpen, setIntegrationSuiteModalOpen] = useState(false);
+  // 查看态:弹框复用新增表单,只读展示,不给保存按钮。
+  const [integrationSuiteReadOnly, setIntegrationSuiteReadOnly] = useState(false);
+  // 手动测试执行:测试人逐条记录 通过/失败/跳过 + 备注 + 截图。
+  const [manualRunOpen, setManualRunOpen] = useState(false);
+  const [manualRunSuite, setManualRunSuite] = useState<TestSuite | null>(null);
+  const [manualRunRecords, setManualRunRecords] = useState<
+    Record<string, { result: 'pass' | 'fail' | 'skip' | ''; remark: string; shots: string[] }>
+  >({});
+  const [integrationSuiteForm, setIntegrationSuiteForm] = useState<{
+    name: string;
+    runner: TestSuite['runner'];
+    sourceType: TestSuite['sourceType'];
+    source: string;
+    branch: string;
+    runCommand: string;
+    workdir: string;
+    reportPath: string;
+    manualCases: ManualCase[];
+  }>({
+    name: '',
+    runner: 'pytest',
+    sourceType: 'git',
+    source: '',
+    branch: 'main',
+    runCommand: 'pytest -q --junitxml=report/junit.xml',
+    workdir: '.',
+    reportPath: 'report/junit.xml',
+    manualCases: [],
+  });
+  // 集成测试「关联环境」弹框(静态演示态,后端接口就绪后接真实保存)。
+  // 真实可落地的脚本型适配器配置:连接信息 + 有序生命周期阶段(每阶段完整多行脚本)。
+  const [integrationEnvModalOpen, setIntegrationEnvModalOpen] = useState(false);
+  const [integrationEnvReadOnly, setIntegrationEnvReadOnly] = useState(false);
+  const [integrationEnvTab, setIntegrationEnvTab] = useState('basic');
+  const [integrationResultOpen, setIntegrationResultOpen] = useState(false);
+  const [integrationResult, setIntegrationResult] = useState<IntegrationRunResult | null>(null);
+  const [integrationEnvForm, setIntegrationEnvForm] = useState<{
+    name: string;
+    address: string;
+    orchestrator: 'script' | 'jenkins' | 'k8s' | 'webhook';
+    connProtocol: 'ssh' | 'local';
+    connHost: string;
+    connPort: string;
+    connUser: string;
+    connAuth: 'key' | 'password';
+    connCredentialRef: string;
+    connWorkdir: string;
+    stages: IntegrationStage[];
+    testAccounts: TestAccount[];
+  }>({
+    name: '阿里云集成测试环境',
+    address: 'https://it-integration.internal:8443',
+    orchestrator: 'script',
+    connProtocol: 'ssh',
+    connHost: '10.0.12.34',
+    connPort: '22',
+    connUser: 'deploy',
+    connAuth: 'key',
+    connCredentialRef: 'it-integration-ssh-key',
+    connWorkdir: '/opt/byclaw/ci',
+    stages: [
+      {
+        id: 'checkout',
+        name: '拉取分支代码',
+        interpreter: 'bash',
+        source: 'inline',
+        script:
+          'set -e\ncd "$WORKDIR/ByClaw"\ngit fetch origin "${branch}"\ngit checkout "${branch}"\ngit reset --hard "${commit}"',
+        workdir: '/opt/byclaw/ci',
+        timeoutSec: 300,
+        continueOnError: false,
+      },
+      {
+        id: 'build',
+        name: '构建前后端镜像',
+        interpreter: 'bash',
+        source: 'inline',
+        script:
+          'set -e\ncd "$WORKDIR/byclaw-middleware"\nbash build/build-fe.sh --tag "${branch}"\nbash build/build-be.sh --tag "${branch}"',
+        workdir: '/opt/byclaw/ci',
+        timeoutSec: 1800,
+        continueOnError: false,
+      },
+      {
+        id: 'deploy',
+        name: '部署并拉起服务',
+        interpreter: 'bash',
+        source: 'inline',
+        script: 'set -e\ncd "$WORKDIR/byclaw-middleware"\nsh deploy.sh update',
+        workdir: '/opt/byclaw/ci',
+        timeoutSec: 900,
+        continueOnError: false,
+      },
+      {
+        id: 'db-migrate',
+        name: '清库 + 执行增量脚本',
+        interpreter: 'bash',
+        source: 'path',
+        script: 'deploy/db/incremental/run-all.sh',
+        workdir: '/opt/byclaw/ci',
+        timeoutSec: 300,
+        continueOnError: false,
+      },
+      {
+        id: 'health-check',
+        name: '健康检查(退出码0视为就绪)',
+        interpreter: 'python',
+        source: 'inline',
+        script:
+          'import sys, urllib.request\nurl = "${envAddress}/actuator/health"\ntry:\n    r = urllib.request.urlopen(url, timeout=5)\n    sys.exit(0 if r.status == 200 else 1)\nexcept Exception as e:\n    print(e); sys.exit(1)',
+        workdir: '/opt/byclaw/ci',
+        timeoutSec: 120,
+        continueOnError: false,
+      },
+    ],
+    testAccounts: [
+      {
+        id: 'acc-admin',
+        role: '管理员',
+        envPrefix: 'E2E_ADMIN',
+        username: 'qa_admin',
+        credentialRef: 'it-integration-e2e-admin',
+      },
+      {
+        id: 'acc-user',
+        role: '普通用户',
+        envPrefix: 'E2E_USER',
+        username: 'qa_user01',
+        credentialRef: 'it-integration-e2e-user',
+      },
+    ],
+  });
   // 仓库弹窗被渠道、手工需求共用，创建完成后按打开来源回填对应表单。
   const [repoModalTarget, setRepoModalTarget] = useState<'source' | 'manualRequirement'>('source');
   const [repoForm, setRepoForm] = useState({ repoFullName: '', repoUrl: '', defaultBranch: 'main' });
@@ -1626,6 +1936,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
       ...(showRequirementsTab ? [{ key: 'requirements', label: t('tabs.requirements') }] : []),
       { key: 'tasks', label: t('tabs.tasks') },
       { key: 'resources', label: t('tabs.resources') },
+      // 研发型项目才展示集成测试环境配置(与需求 Tab 同门禁)。
+      // ...(showRequirementsTab ? [{ key: 'integration', label: t('tabs.integration') }] : []),
       ...(showMembersTab ? [{ key: 'members', label: t('tabs.members') }] : []),
     ],
     [showMembersTab, showRequirementsTab, t]
@@ -2370,10 +2682,19 @@ const ProjectDetailPanel: React.FC<Props> = ({
     void fetchSources();
   };
 
+  const handleCloseIntegrationConfig = () => {
+    setIntegrationConfigOpen(false);
+    clearDetailPanel?.();
+  };
+
   const handleTabChange = (nextTab: string) => {
     if (nextTab !== 'requirements' && channelPanelOpen) {
       // 渠道配置大面板只服务需求页签；切换到其他页签时立即移除右侧覆盖层。
       handleCloseChannelPanel();
+    }
+    if (nextTab !== 'integration' && integrationConfigOpen) {
+      // 集成测试配置大面板只服务集成测试页签；切换到其他页签时立即移除右侧覆盖层。
+      handleCloseIntegrationConfig();
     }
     setActiveTab(nextTab);
   };
@@ -2729,7 +3050,678 @@ const ProjectDetailPanel: React.FC<Props> = ({
     </div>
   );
 
-  // 资源 Tab 顶部的“代码变更”卡片:仅研发项目有任务/分支概念,普通项目隐藏。
+  // 集成测试演示 mock 数据:环境 + 测试用例集(右侧配置面板与左侧概览共用)。
+  const integrationEnvList = [
+    {
+      id: 'env-aliyun',
+      name: '阿里云集成测试环境',
+      address: 'https://it-integration.internal:8443',
+      branchStrategy: '关联当前任务分支,清库重来',
+      status: 'ready' as const,
+      middlewares: ['PostgreSQL', 'Redis', 'Kafka', 'MinIO'],
+    },
+  ];
+
+  // 测试用例集:每个套件是一个独立工程(pytest 的 python 工程 / Playwright 的 node 工程等)。
+  const integrationSuiteList: TestSuite[] = [
+    {
+      id: 'suite-api',
+      name: '后端接口回归',
+      runner: 'pytest',
+      sourceType: 'git',
+      source: 'git@git.internal:qa/byclaw-api-e2e.git',
+      branch: 'main',
+      runCommand: 'pytest -q --maxfail=1 --junitxml=report/junit.xml',
+      workdir: '.',
+      reportPath: 'report/junit.xml',
+      caseCount: 42,
+      enabled: true,
+    },
+    {
+      id: 'suite-web',
+      name: '前端端到端(UI)',
+      runner: 'playwright',
+      sourceType: 'git',
+      source: 'git@git.internal:qa/byclaw-web-e2e.git',
+      branch: 'main',
+      runCommand: 'npx playwright test --reporter=junit',
+      workdir: '.',
+      reportPath: 'results/junit.xml',
+      caseCount: 18,
+      enabled: true,
+    },
+    {
+      id: 'suite-smoke',
+      name: '冒烟用例(共享空间)',
+      runner: 'jest',
+      sourceType: 'shared',
+      source: '/by/testcases/smoke/',
+      branch: '',
+      runCommand: 'pnpm test:smoke',
+      workdir: '.',
+      reportPath: 'junit.xml',
+      caseCount: 6,
+      enabled: false,
+    },
+    {
+      id: 'suite-manual',
+      name: '人工验收(无法自动化)',
+      runner: 'manual',
+      sourceType: 'shared',
+      source: '',
+      branch: '',
+      runCommand: '',
+      workdir: '',
+      reportPath: '',
+      caseCount: 3,
+      enabled: true,
+      manualCases: [
+        {
+          id: 'mc-pay',
+          title: '微信扫码支付到账',
+          steps: '1. 下单选微信支付\n2. 用真机微信扫二维码\n3. 完成支付',
+          expected: '订单状态变为「已支付」,后台可见到账流水',
+        },
+        {
+          id: 'mc-print',
+          title: '小票打印机出票',
+          steps: '1. 订单完成后点「打印小票」\n2. 观察连接的热敏打印机',
+          expected: '打印机正常出票,内容与订单一致',
+        },
+        {
+          id: 'mc-sms',
+          title: '短信验证码送达',
+          steps: '1. 用真实手机号注册\n2. 等待接收短信',
+          expected: '60s 内收到验证码,可正常完成注册',
+        },
+      ],
+    },
+  ];
+
+  const integrationHistoryList = [
+    {
+      runId: 'run-1-12-3',
+      version: 'v1.12.3',
+      passRate: '18/18',
+      result: 'pass' as const,
+      time: '2026-07-27 09:41',
+      round: 3,
+      kickbackTo: '',
+      reason: '',
+    },
+    {
+      runId: 'run-1-12-2',
+      version: 'v1.12.2',
+      passRate: '15/18',
+      result: 'reject' as const,
+      time: '2026-07-26 17:08',
+      round: 2,
+      kickbackTo: 'coder',
+      reason: '登录用例 3 条失败:跨模块调用鉴权头丢失',
+    },
+    {
+      runId: 'run-1-12-1',
+      version: 'v1.12.1',
+      passRate: '18/18',
+      result: 'pass' as const,
+      time: '2026-07-26 10:22',
+      round: 1,
+      kickbackTo: '',
+      reason: '',
+    },
+  ];
+
+  // 结果详情 mock:按 runId 取一次运行的完整结果(status.json + 各套件明细 + 失败截图)。
+  const integrationResultMap: Record<string, IntegrationRunResult> = {
+    'run-1-12-2': {
+      runId: 'run-1-12-2',
+      version: 'v1.12.2',
+      status: 'failed',
+      round: 2,
+      branch: 'feature/login-sso',
+      commit: 'a3f9c21',
+      envName: '阿里云集成测试环境',
+      startedAt: '2026-07-26 17:02:14',
+      finishedAt: '2026-07-26 17:08:37',
+      durationSec: 383,
+      totals: { total: 18, passed: 15, failed: 3, skipped: 0 },
+      kickbackTo: 'coder',
+      reason: '登录用例 3 条失败:跨模块调用鉴权头丢失',
+      resultDir: '/opt/byclaw/ci/e2e-results/feature-login-sso/round-2',
+      suites: [
+        {
+          suiteId: 'suite-api',
+          name: '接口回归(pytest)',
+          status: 'passed',
+          total: 8,
+          passed: 8,
+          failed: 0,
+          durationSec: 96,
+          reportPath: 'reports/suite-api.xml',
+          logPath: 'logs/suite-api.log',
+          failedCases: [],
+        },
+        {
+          suiteId: 'suite-web',
+          name: 'Web 端到端(playwright)',
+          status: 'failed',
+          total: 6,
+          passed: 3,
+          failed: 3,
+          durationSec: 214,
+          reportPath: 'reports/suite-web.xml',
+          logPath: 'logs/suite-web.log',
+          failedCases: [
+            {
+              caseId: 'test_login_sso',
+              message: 'AssertionError: 期望跳转工作台,实际停留登录页(鉴权头缺失)',
+              artifacts: ['artifacts/suite-web/test_login_sso.png', 'artifacts/suite-web/test_login_sso.webm'],
+            },
+            {
+              caseId: 'test_login_remember',
+              message: 'TimeoutError: 等待 #dashboard 超时 30s',
+              artifacts: ['artifacts/suite-web/test_login_remember.png'],
+            },
+            {
+              caseId: 'test_login_logout',
+              message: 'AssertionError: 登出后 session 未清除',
+              artifacts: ['artifacts/suite-web/test_login_logout.png'],
+            },
+          ],
+        },
+        {
+          suiteId: 'suite-smoke',
+          name: '冒烟(jest)',
+          status: 'passed',
+          total: 4,
+          passed: 4,
+          failed: 0,
+          durationSec: 73,
+          reportPath: 'reports/suite-smoke.xml',
+          logPath: 'logs/suite-smoke.log',
+          failedCases: [],
+        },
+      ],
+    },
+    'run-1-12-3': {
+      runId: 'run-1-12-3',
+      version: 'v1.12.3',
+      status: 'passed',
+      round: 3,
+      branch: 'feature/login-sso',
+      commit: 'b7e0d55',
+      envName: '阿里云集成测试环境',
+      startedAt: '2026-07-27 09:35:02',
+      finishedAt: '2026-07-27 09:41:18',
+      durationSec: 376,
+      totals: { total: 18, passed: 18, failed: 0, skipped: 0 },
+      kickbackTo: '',
+      reason: '',
+      resultDir: '/opt/byclaw/ci/e2e-results/feature-login-sso/round-3',
+      suites: [
+        {
+          suiteId: 'suite-api',
+          name: '接口回归(pytest)',
+          status: 'passed',
+          total: 8,
+          passed: 8,
+          failed: 0,
+          durationSec: 92,
+          reportPath: 'reports/suite-api.xml',
+          logPath: 'logs/suite-api.log',
+          failedCases: [],
+        },
+        {
+          suiteId: 'suite-web',
+          name: 'Web 端到端(playwright)',
+          status: 'passed',
+          total: 6,
+          passed: 6,
+          failed: 0,
+          durationSec: 209,
+          reportPath: 'reports/suite-web.xml',
+          logPath: 'logs/suite-web.log',
+          failedCases: [],
+        },
+        {
+          suiteId: 'suite-smoke',
+          name: '冒烟(jest)',
+          status: 'passed',
+          total: 4,
+          passed: 4,
+          failed: 0,
+          durationSec: 71,
+          reportPath: 'reports/suite-smoke.xml',
+          logPath: 'logs/suite-smoke.log',
+          failedCases: [],
+        },
+      ],
+    },
+  };
+
+  const openIntegrationResult = (runId: string) => {
+    const result = integrationResultMap[runId];
+    if (!result) {
+      message.info(t('integration.result.notReady'));
+      return;
+    }
+    setIntegrationResult(result);
+    setIntegrationResultOpen(true);
+  };
+
+  // 研发闭环环节:E2E 集成测试插在 tester 之后、pr 之前,失败则打回 coder。用于概览可视化本次任务当前所处环节。
+  const integrationFlowPhases = [
+    { key: 'issue', label: '需求来源', state: 'done' as const },
+    { key: 'req', label: '需求分析', state: 'done' as const },
+    { key: 'design', label: '方案设计', state: 'done' as const },
+    { key: 'coder', label: '编码', state: 'done' as const },
+    { key: 'reviewer', label: '代码审查', state: 'done' as const },
+    { key: 'tester', label: '本机自测', state: 'done' as const },
+    { key: 'e2e', label: '端到端集成测试', state: 'active' as const, isNew: true },
+    { key: 'pr', label: '提交 PR', state: 'pending' as const },
+  ];
+
+  // 环境卡片:查看/修改复用「关联环境」弹框(查看态只读),删除走确认弹框(当前演示态仅提示)。
+  const openEnvModal = (env: (typeof integrationEnvList)[number], readOnly: boolean) => {
+    setIntegrationEnvForm((prev) => ({
+      ...prev,
+      name: env.name,
+      address: env.address,
+    }));
+    setIntegrationEnvReadOnly(readOnly);
+    setIntegrationEnvTab('basic');
+    setIntegrationEnvModalOpen(true);
+  };
+
+  const handleDeleteEnv = (env: (typeof integrationEnvList)[number]) => {
+    Modal.confirm({
+      title: t('common.deleteConfirmTitle'),
+      content: t('integration.env.deleteConfirm', { name: env.name }),
+      okText: t('common.delete'),
+      okButtonProps: { danger: true },
+      zIndex: 1200,
+      onOk: () => {
+        message.info(t('integration.envModal.demoHint'));
+      },
+    });
+  };
+
+  // 用例集卡片:查看/修改复用「新增用例集」弹框(查看态只读),删除走确认弹框(当前演示态仅提示)。
+  const openSuiteModal = (suite: TestSuite, readOnly: boolean) => {
+    setIntegrationSuiteForm({
+      name: suite.name,
+      runner: suite.runner,
+      sourceType: suite.sourceType,
+      source: suite.source,
+      branch: suite.branch,
+      runCommand: suite.runCommand,
+      workdir: suite.workdir,
+      reportPath: suite.reportPath,
+      manualCases: suite.manualCases ?? [],
+    });
+    setIntegrationSuiteReadOnly(readOnly);
+    setIntegrationSuiteModalOpen(true);
+  };
+
+  const handleDeleteSuite = (suite: TestSuite) => {
+    Modal.confirm({
+      title: t('common.deleteConfirmTitle'),
+      content: t('integration.suite.deleteConfirm', { name: suite.name }),
+      okText: t('common.delete'),
+      okButtonProps: { danger: true },
+      zIndex: 1200,
+      onOk: () => {
+        message.info(t('integration.envModal.demoHint'));
+      },
+    });
+  };
+
+  // 打开手动测试执行面板:初始化每条用例的空记录。
+  const openManualRun = (suite: TestSuite) => {
+    const init: typeof manualRunRecords = {};
+    (suite.manualCases ?? []).forEach((c) => {
+      init[c.id] = { result: '', remark: '', shots: [] };
+    });
+    setManualRunRecords(init);
+    setManualRunSuite(suite);
+    setManualRunOpen(true);
+  };
+
+  const setManualRecord = (
+    caseId: string,
+    patch: Partial<{ result: 'pass' | 'fail' | 'skip' | ''; remark: string; shots: string[] }>
+  ) => setManualRunRecords((prev) => ({ ...prev, [caseId]: { ...prev[caseId], ...patch } }));
+
+  const handleToggleIntegrationConfig = () => {
+    if (integrationConfigOpen) {
+      handleCloseIntegrationConfig();
+      return;
+    }
+    setIntegrationConfigOpen(true);
+  };
+
+  const phaseLabelOf = (key: string) => integrationFlowPhases.find((p) => p.key === key)?.label ?? key;
+
+  // 左侧集成测试概览:入口按钮(打开右侧配置面板) + 闭环流程条 + 历次结果。内容多的配置移到右侧,避免左栏挤压。
+  const renderIntegration = () => (
+    <div className={styles.integrationPanel}>
+      <button type="button" className={styles.detailChannelEntry} onClick={handleToggleIntegrationConfig}>
+        <FundProjectionScreenOutlined className={styles.detailChannelEntryIcon} />
+        <span>
+          <strong>{t('integration.configEntry')}</strong>
+        </span>
+        {integrationConfigOpen ? <LeftOutlined /> : <RightOutlined />}
+      </button>
+
+      {/* 研发闭环流程条:直观展示 E2E 集成测试环节的位置与"失败打回 coder"的回路。 */}
+      <div className={styles.integrationSection}>
+        <div className={styles.integrationSectionHeader}>
+          <span className={styles.integrationSectionTitle}>{t('integration.flow.title')}</span>
+        </div>
+        <div className={styles.integrationFlow}>
+          {integrationFlowPhases.map((phase, idx) => (
+            <React.Fragment key={phase.key}>
+              <div className={`${styles.integrationFlowNode} ${styles[`integrationFlowNode_${phase.state}`]}`}>
+                <span className={styles.integrationFlowDot}>{phase.state === 'done' ? '✓' : idx + 1}</span>
+                <span className={styles.integrationFlowLabel}>
+                  {phase.label}
+                  {phase.isNew ? (
+                    <Tag color="orange" className={styles.integrationFlowNewTag}>
+                      {t('integration.flow.newTag')}
+                    </Tag>
+                  ) : null}
+                </span>
+              </div>
+              {idx < integrationFlowPhases.length - 1 ? <span className={styles.integrationFlowArrow}>→</span> : null}
+            </React.Fragment>
+          ))}
+        </div>
+        <div className={styles.integrationFlowKickback}>{t('integration.flow.kickbackHint')}</div>
+      </div>
+
+      <div className={styles.integrationSection}>
+        <div className={styles.integrationSectionHeader}>
+          <span className={styles.integrationSectionTitle}>{t('integration.history.title')}</span>
+        </div>
+        <List
+          size="small"
+          bordered
+          dataSource={integrationHistoryList}
+          renderItem={(item) => (
+            <List.Item
+              actions={[
+                <Tag key="result" color={item.result === 'pass' ? 'success' : 'error'}>
+                  {t(item.result === 'pass' ? 'integration.history.pass' : 'integration.history.reject')}
+                </Tag>,
+                <Button key="view" type="link" size="small" onClick={() => openIntegrationResult(item.runId)}>
+                  {t('integration.history.viewResult')}
+                </Button>,
+              ]}
+            >
+              <List.Item.Meta
+                title={
+                  <span>
+                    {item.version}
+                    <span className={styles.integrationHistoryRound}>
+                      {t('integration.history.round', { round: item.round })}
+                    </span>
+                  </span>
+                }
+                description={
+                  <div>
+                    <span className={styles.detailSourceTime}>
+                      {t('integration.history.passRate', { rate: item.passRate })} · {item.time}
+                    </span>
+                    {item.result === 'reject' && item.kickbackTo ? (
+                      <div className={styles.integrationHistoryKickback}>
+                        {t('integration.history.kickback', { phase: phaseLabelOf(item.kickbackTo) })}
+                        {item.reason ? ` · ${item.reason}` : ''}
+                      </div>
+                    ) : null}
+                  </div>
+                }
+              />
+            </List.Item>
+          )}
+        />
+      </div>
+
+      <div className={styles.integrationNote}>{t('integration.note')}</div>
+    </div>
+  );
+
+  // 右侧集成测试配置面板:环境信息 + 测试用例集,空间充足可容纳复杂配置。
+  const renderIntegrationConfigPanel = () => {
+    return (
+      <div className={styles.detailChannelPanel}>
+        <div className={styles.detailChannelPanelHeader}>
+          <div className={styles.detailChannelPanelTitle}>
+            <h3>{t('integration.configEntry')}</h3>
+            <p>{t('integration.configSubtitle')}</p>
+          </div>
+          <div className={styles.detailChannelPanelActions}>
+            <Tooltip title={t('common.close')} placement="top">
+              <Button icon={<CloseOutlined />} onClick={handleCloseIntegrationConfig} />
+            </Tooltip>
+          </div>
+        </div>
+        <div className={styles.detailChannelPanelBody}>
+          <div className={styles.integrationPanel}>
+            {/* 环境信息配置 */}
+            <div className={styles.integrationSection}>
+              <div className={styles.integrationSectionHeader}>
+                <span className={styles.integrationSectionTitle}>{t('integration.env.title')}</span>
+                <Button
+                  type="link"
+                  size="small"
+                  icon={<PlusOutlined />}
+                  onClick={() => {
+                    setIntegrationEnvReadOnly(false);
+                    setIntegrationEnvTab('basic');
+                    setIntegrationEnvModalOpen(true);
+                  }}
+                >
+                  {t('integration.env.add')}
+                </Button>
+              </div>
+              <div className={styles.integrationCardGrid}>
+                {integrationEnvList.map((env) => (
+                  <div className={styles.detailSourceCard} key={env.id}>
+                    <div className={styles.detailSourceHeader}>
+                      <span className={styles.detailSourceIcon}>
+                        <FundProjectionScreenOutlined />
+                      </span>
+                      <div className={styles.detailSourceTitle}>
+                        <strong>{env.name}</strong>
+                        <span>{env.address}</span>
+                      </div>
+                      <Tag color={env.status === 'ready' ? 'success' : 'default'}>
+                        {t(env.status === 'ready' ? 'integration.env.statusReady' : 'integration.env.statusUnknown')}
+                      </Tag>
+                    </div>
+                    <div className={styles.integrationCardBody}>
+                      <div className={styles.integrationField}>
+                        <span className={styles.integrationFieldLabel}>{t('integration.env.branchStrategy')}</span>
+                        <span className={styles.integrationFieldValue}>{env.branchStrategy}</span>
+                      </div>
+                      <div className={styles.integrationField}>
+                        <span className={styles.integrationFieldLabel}>{t('integration.env.middlewares')}</span>
+                        <span className={styles.integrationFieldValue}>
+                          {env.middlewares.map((m) => (
+                            <Tag key={m} className={styles.integrationMwTag}>
+                              {m}
+                            </Tag>
+                          ))}
+                        </span>
+                      </div>
+                    </div>
+                    <div className={styles.integrationCardActions}>
+                      <Button type="link" size="small" icon={<EyeOutlined />} onClick={() => openEnvModal(env, true)}>
+                        {t('common.view')}
+                      </Button>
+                      <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEnvModal(env, false)}>
+                        {t('common.edit')}
+                      </Button>
+                      <Button
+                        type="link"
+                        size="small"
+                        danger
+                        icon={<DeleteOutlined />}
+                        onClick={() => handleDeleteEnv(env)}
+                      >
+                        {t('common.delete')}
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* 测试用例集管理:每个套件是独立工程,带运行器与运行命令 */}
+            <div className={styles.integrationSection}>
+              <div className={styles.integrationSectionHeader}>
+                <span className={styles.integrationSectionTitle}>{t('integration.suite.title')}</span>
+                <Button
+                  type="link"
+                  size="small"
+                  icon={<PlusOutlined />}
+                  onClick={() => {
+                    setIntegrationSuiteReadOnly(false);
+                    setIntegrationSuiteModalOpen(true);
+                  }}
+                >
+                  {t('integration.suite.add')}
+                </Button>
+              </div>
+              <div className={styles.integrationCardGrid}>
+                {integrationSuiteList.map((suite) => (
+                  <div className={styles.detailSourceCard} key={suite.id}>
+                    <div className={styles.detailSourceHeader}>
+                      <span className={styles.detailSourceIcon}>
+                        <FileTextOutlined />
+                      </span>
+                      <div className={styles.detailSourceTitle}>
+                        <strong>{suite.name}</strong>
+                        <span>
+                          {suite.source}
+                          {suite.branch ? ` · ${suite.branch}` : ''}
+                        </span>
+                      </div>
+                      <Tag color="processing">{suite.runner}</Tag>
+                      <Tag color={suite.enabled ? 'success' : 'default'}>
+                        {t(suite.enabled ? 'integration.suite.enabled' : 'integration.suite.disabled')}
+                      </Tag>
+                    </div>
+                    <div className={styles.integrationCardBody}>
+                      {suite.runner === 'manual' ? (
+                        <div className={styles.integrationField}>
+                          <span className={styles.integrationFieldLabel}>{t('integration.suite.manualCases')}</span>
+                          <span className={styles.integrationFieldValue}>
+                            {t('integration.suite.caseCount', { count: suite.caseCount })}
+                            {' · '}
+                            {t('integration.suite.manualHint')}
+                          </span>
+                        </div>
+                      ) : (
+                        <>
+                          <div className={styles.integrationField}>
+                            <span className={styles.integrationFieldLabel}>{t('integration.suite.sourceType')}</span>
+                            <span className={styles.integrationFieldValue}>
+                              {t(
+                                suite.sourceType === 'git'
+                                  ? 'integration.suite.sourceGit'
+                                  : 'integration.suite.sourceShared'
+                              )}
+                              {' · '}
+                              {t('integration.suite.caseCount', { count: suite.caseCount })}
+                            </span>
+                          </div>
+                          <div className={styles.integrationField}>
+                            <span className={styles.integrationFieldLabel}>{t('integration.suite.runCommand')}</span>
+                            <span className={`${styles.integrationFieldValue} ${styles.integrationMono}`}>
+                              {suite.runCommand}
+                            </span>
+                          </div>
+                          <div className={styles.integrationField}>
+                            <span className={styles.integrationFieldLabel}>{t('integration.suite.reportPath')}</span>
+                            <span className={`${styles.integrationFieldValue} ${styles.integrationMono}`}>
+                              {suite.reportPath}
+                            </span>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                    <div className={styles.integrationCardActions}>
+                      {suite.runner === 'manual' ? (
+                        <Button
+                          type="link"
+                          size="small"
+                          icon={<PlayCircleOutlined />}
+                          onClick={() => openManualRun(suite)}
+                        >
+                          {t('integration.suite.runManual')}
+                        </Button>
+                      ) : null}
+                      <Button
+                        type="link"
+                        size="small"
+                        icon={<EyeOutlined />}
+                        onClick={() => openSuiteModal(suite, true)}
+                      >
+                        {t('common.view')}
+                      </Button>
+                      <Button
+                        type="link"
+                        size="small"
+                        icon={<EditOutlined />}
+                        onClick={() => openSuiteModal(suite, false)}
+                      >
+                        {t('common.edit')}
+                      </Button>
+                      <Button
+                        type="link"
+                        size="small"
+                        danger
+                        icon={<DeleteOutlined />}
+                        onClick={() => handleDeleteSuite(suite)}
+                      >
+                        {t('common.delete')}
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  useEffect(() => {
+    if (!integrationConfigOpen) return;
+    // 与渠道面板同一模式：集成测试配置内容多，用右侧覆盖层承载。
+    const overlayDetailPanelOptions = { overlay: true } as NonNullable<
+      Parameters<NonNullable<typeof setDetailPanel>>[1]
+    > & { overlay: boolean };
+    setDetailPanel?.(renderIntegrationConfigPanel(), overlayDetailPanelOptions);
+  }, [integrationConfigOpen, setDetailPanel, t]);
+
+  useEffect(() => {
+    return () => {
+      if (integrationConfigOpen) {
+        clearDetailPanel?.();
+      }
+    };
+  }, [integrationConfigOpen, clearDetailPanel]);
+
+  useEffect(() => {
+    if (!integrationConfigOpen || activeTab === 'integration') return;
+    // 兜底：非点击页签的 activeTab 切换也要关闭集成测试配置覆盖层。
+    setIntegrationConfigOpen(false);
+    clearDetailPanel?.();
+  }, [activeTab, integrationConfigOpen, clearDetailPanel]);
+
   const renderCodeChanges = () => {
     if (!isDevelopProject) return null;
     const empty = (id: string, values?: Record<string, string | number>) => (
@@ -3220,6 +4212,10 @@ const ProjectDetailPanel: React.FC<Props> = ({
       return renderTasks();
     }
     if (activeTab === 'resources') return renderResources();
+    if (activeTab === 'integration') {
+      if (showRequirementsTab) return renderIntegration();
+      return renderTasks();
+    }
     if (activeTab === 'members') {
       if (showMembersTab) {
         return (
@@ -3712,6 +4708,895 @@ const ProjectDetailPanel: React.FC<Props> = ({
     </Modal>
   );
 
+  // 集成测试「关联环境」弹框：收集环境地址 + 编排方式 + 按类型的差异字段(静态演示,暂不落库)。
+  // 新增测试用例集弹框:选运行器 + 来源 + 运行命令 + 报告路径(静态演示,暂不落库)。
+  // 单套件契约:用例集作者只需知道自己那份产物往哪写、退出码怎么判,不管整轮状态机。
+  const renderIntegrationSuiteSpec = () => (
+    <Collapse
+      size="small"
+      className={styles.integrationSpec}
+      items={[
+        {
+          key: 'suite-spec',
+          label: t('integration.suiteSpec.title'),
+          children: (
+            <div className={styles.integrationSpecBody}>
+              <div className={styles.integrationSpecHint}>{t('integration.suiteSpec.intro')}</div>
+              <pre className={styles.integrationSpecPre}>{E2E_SUITE_CONTRACT}</pre>
+            </div>
+          ),
+        },
+      ]}
+    />
+  );
+
+  // 整轮契约(run 级):编排层/环境负责建目录、写 meta、汇总各套件结果、原子写 status.json 并驱动状态机。
+  const renderIntegrationRunSpec = () => (
+    <Collapse
+      size="small"
+      defaultActiveKey={['run-spec']}
+      className={styles.integrationSpec}
+      items={[
+        {
+          key: 'run-spec',
+          label: t('integration.spec.title'),
+          children: (
+            <div className={styles.integrationSpecBody}>
+              <div className={styles.integrationSpecHint}>{t('integration.spec.intro')}</div>
+
+              <div className={styles.integrationSpecSubTitle}>{t('integration.spec.treeTitle')}</div>
+              <pre className={styles.integrationSpecPre}>{E2E_RESULT_DIR_TREE}</pre>
+
+              <div className={styles.integrationSpecSubTitle}>{t('integration.spec.statusTitle')}</div>
+              <pre className={styles.integrationSpecPre}>{E2E_STATUS_JSON}</pre>
+
+              <div className={styles.integrationSpecSubTitle}>{t('integration.spec.enumTitle')}</div>
+              <div className={styles.integrationSpecEnum}>
+                {E2E_STATUS_ENUM.map((item) => (
+                  <div className={styles.integrationSpecEnumRow} key={item.code}>
+                    <Tag className={styles.integrationMono}>{item.code}</Tag>
+                    <span>{item.meaning}</span>
+                  </div>
+                ))}
+              </div>
+
+              <div className={styles.integrationSpecSubTitle}>{t('integration.spec.scriptTitle')}</div>
+              <pre className={styles.integrationSpecPre}>{E2E_SCRIPT_SKELETON}</pre>
+            </div>
+          ),
+        },
+      ]}
+    />
+  );
+
+  const renderIntegrationSuiteModal = () => {
+    const setField = (key: keyof typeof integrationSuiteForm, value: string) =>
+      setIntegrationSuiteForm((prev) => ({ ...prev, [key]: value }));
+    // 切换运行器时给出该运行器的默认运行命令,减少手填。
+    const runnerDefaults: Record<TestSuite['runner'], { cmd: string; report: string }> = {
+      pytest: { cmd: 'pytest -q --junitxml=report/junit.xml', report: 'report/junit.xml' },
+      playwright: { cmd: 'npx playwright test --reporter=junit', report: 'results/junit.xml' },
+      jest: { cmd: 'npx jest --reporters=jest-junit', report: 'junit.xml' },
+      vitest: { cmd: 'npx vitest run --reporter=junit --outputFile=junit.xml', report: 'junit.xml' },
+      custom: { cmd: '', report: 'junit.xml' },
+      manual: { cmd: '', report: '' },
+    };
+    const isManual = integrationSuiteForm.runner === 'manual';
+    const updateCase = (id: string, patch: Partial<ManualCase>) =>
+      setIntegrationSuiteForm((prev) => ({
+        ...prev,
+        manualCases: prev.manualCases.map((c) => (c.id === id ? { ...c, ...patch } : c)),
+      }));
+    const removeCase = (id: string) =>
+      setIntegrationSuiteForm((prev) => ({
+        ...prev,
+        manualCases: prev.manualCases.filter((c) => c.id !== id),
+      }));
+    const addCase = () =>
+      setIntegrationSuiteForm((prev) => ({
+        ...prev,
+        manualCases: [...prev.manualCases, { id: `mc-${Date.now()}`, title: '', steps: '', expected: '' }],
+      }));
+    return (
+      <Modal
+        title={t(integrationSuiteReadOnly ? 'integration.suiteModal.viewTitle' : 'integration.suiteModal.title')}
+        open={integrationSuiteModalOpen}
+        onCancel={() => setIntegrationSuiteModalOpen(false)}
+        footer={[
+          <Button key="close" onClick={() => setIntegrationSuiteModalOpen(false)}>
+            {t('common.close')}
+          </Button>,
+          ...(integrationSuiteReadOnly
+            ? []
+            : [
+              <Button
+                key="save"
+                type="primary"
+                onClick={() => {
+                  message.info(t('integration.envModal.demoHint'));
+                  setIntegrationSuiteModalOpen(false);
+                }}
+              >
+                {t('integration.envModal.save')}
+              </Button>,
+            ]),
+        ]}
+        width={560}
+        zIndex={1100}
+      >
+        {/* 查看态:整块表单禁用,只读展示。 */}
+        <ConfigProvider componentDisabled={integrationSuiteReadOnly}>
+          <div className={styles.formField}>
+            <label>{t('integration.suiteModal.name')}</label>
+            <Input
+              placeholder={t('integration.suiteModal.namePlaceholder')}
+              value={integrationSuiteForm.name}
+              onChange={(e) => setField('name', e.target.value)}
+            />
+          </div>
+          <div className={styles.integrationConnRow}>
+            <div className={styles.formField} style={{ flex: 1 }}>
+              <label>{t('integration.suiteModal.runner')}</label>
+              <Select
+                value={integrationSuiteForm.runner}
+                onChange={(v: TestSuite['runner']) =>
+                  setIntegrationSuiteForm((prev) => ({
+                    ...prev,
+                    runner: v,
+                    runCommand: runnerDefaults[v].cmd,
+                    reportPath: runnerDefaults[v].report,
+                  }))
+                }
+                options={[
+                  { value: 'pytest', label: 'pytest (Python)' },
+                  { value: 'playwright', label: 'Playwright (Node)' },
+                  { value: 'jest', label: 'Jest (Node)' },
+                  { value: 'vitest', label: 'Vitest (Node)' },
+                  { value: 'custom', label: t('integration.suiteModal.runnerCustom') },
+                  { value: 'manual', label: t('integration.suiteModal.runnerManual') },
+                ]}
+                style={{ width: '100%' }}
+              />
+            </div>
+            {!isManual && (
+              <div className={styles.formField} style={{ flex: 1 }}>
+                <label>{t('integration.suiteModal.sourceType')}</label>
+                <Select
+                  value={integrationSuiteForm.sourceType}
+                  onChange={(v) => setField('sourceType', v)}
+                  options={[
+                    { value: 'git', label: t('integration.suite.sourceGit') },
+                    { value: 'shared', label: t('integration.suite.sourceShared') },
+                  ]}
+                  style={{ width: '100%' }}
+                />
+              </div>
+            )}
+          </div>
+          {!isManual && (
+            <>
+              <div className={styles.formField}>
+                <label>
+                  {t(
+                    integrationSuiteForm.sourceType === 'git'
+                      ? 'integration.suiteModal.gitUrl'
+                      : 'integration.suiteModal.sharedPath'
+                  )}
+                </label>
+                <Input
+                  placeholder={
+                    integrationSuiteForm.sourceType === 'git'
+                      ? 'git@git.internal:qa/byclaw-api-e2e.git'
+                      : '/by/testcases/smoke/'
+                  }
+                  value={integrationSuiteForm.source}
+                  onChange={(e) => setField('source', e.target.value)}
+                />
+              </div>
+              {integrationSuiteForm.sourceType === 'git' && (
+                <div className={styles.formField}>
+                  <label>{t('integration.suiteModal.branch')}</label>
+                  <Input
+                    placeholder="main"
+                    value={integrationSuiteForm.branch}
+                    onChange={(e) => setField('branch', e.target.value)}
+                  />
+                </div>
+              )}
+              <div className={styles.formField}>
+                <label>{t('integration.suiteModal.workdir')}</label>
+                <Input
+                  placeholder="."
+                  value={integrationSuiteForm.workdir}
+                  onChange={(e) => setField('workdir', e.target.value)}
+                />
+              </div>
+              <div className={styles.formField}>
+                <label>{t('integration.suite.runCommand')}</label>
+                <Input.TextArea
+                  className={styles.integrationStageScript}
+                  autoSize={{ minRows: 2, maxRows: 6 }}
+                  placeholder="pytest -q --junitxml=report/junit.xml"
+                  value={integrationSuiteForm.runCommand}
+                  onChange={(e) => setField('runCommand', e.target.value)}
+                />
+              </div>
+              <div className={styles.formField}>
+                <label>{t('integration.suite.reportPath')}</label>
+                <Input
+                  placeholder="report/junit.xml"
+                  value={integrationSuiteForm.reportPath}
+                  onChange={(e) => setField('reportPath', e.target.value)}
+                />
+              </div>
+              <div className={styles.integrationNote}>{t('integration.suiteModal.reportHint')}</div>
+              {renderIntegrationSuiteSpec()}
+            </>
+          )}
+
+          {/* 手动测试:人工检查清单编辑,每条含 标题/步骤/预期。执行时测试人逐条记录结果。 */}
+          {isManual && (
+            <>
+              <div className={styles.integrationSectionHeader}>
+                <span className={styles.integrationSectionTitle}>{t('integration.suiteModal.manualCasesTitle')}</span>
+                <Button type="link" size="small" icon={<PlusOutlined />} onClick={addCase}>
+                  {t('integration.suiteModal.addCase')}
+                </Button>
+              </div>
+              <div className={styles.integrationNote}>{t('integration.suiteModal.manualCasesHint')}</div>
+              {integrationSuiteForm.manualCases.map((c, idx) => (
+                <div className={styles.integrationStageCard} key={c.id}>
+                  <div className={styles.integrationStageHead}>
+                    <span className={styles.integrationStageIdx}>{idx + 1}</span>
+                    <Input
+                      className={styles.integrationStageName}
+                      placeholder={t('integration.suiteModal.caseTitle')}
+                      value={c.title}
+                      onChange={(e) => updateCase(c.id, { title: e.target.value })}
+                    />
+                    <Button
+                      type="link"
+                      danger
+                      size="small"
+                      icon={<DeleteOutlined />}
+                      onClick={() => removeCase(c.id)}
+                    />
+                  </div>
+                  <div className={styles.formField}>
+                    <label>{t('integration.suiteModal.caseSteps')}</label>
+                    <Input.TextArea
+                      autoSize={{ minRows: 2, maxRows: 8 }}
+                      placeholder={t('integration.suiteModal.caseStepsPlaceholder')}
+                      value={c.steps}
+                      onChange={(e) => updateCase(c.id, { steps: e.target.value })}
+                    />
+                  </div>
+                  <div className={styles.formField}>
+                    <label>{t('integration.suiteModal.caseExpected')}</label>
+                    <Input.TextArea
+                      autoSize={{ minRows: 1, maxRows: 4 }}
+                      placeholder={t('integration.suiteModal.caseExpectedPlaceholder')}
+                      value={c.expected}
+                      onChange={(e) => updateCase(c.id, { expected: e.target.value })}
+                    />
+                  </div>
+                </div>
+              ))}
+            </>
+          )}
+        </ConfigProvider>
+      </Modal>
+    );
+  };
+
+  const renderIntegrationEnvModal = () => {
+    const setField = (key: keyof typeof integrationEnvForm, value: string) =>
+      setIntegrationEnvForm((prev) => ({ ...prev, [key]: value }));
+    const orchestrator = integrationEnvForm.orchestrator;
+    const updateStage = (id: string, patch: Partial<IntegrationStage>) =>
+      setIntegrationEnvForm((prev) => ({
+        ...prev,
+        stages: prev.stages.map((s) => (s.id === id ? { ...s, ...patch } : s)),
+      }));
+    const removeStage = (id: string) =>
+      setIntegrationEnvForm((prev) => ({ ...prev, stages: prev.stages.filter((s) => s.id !== id) }));
+    const addStage = () =>
+      setIntegrationEnvForm((prev) => ({
+        ...prev,
+        stages: [
+          ...prev.stages,
+          {
+            id: `stage-${Date.now()}`,
+            name: '',
+            interpreter: 'bash',
+            source: 'inline',
+            script: '',
+            workdir: prev.connWorkdir,
+            timeoutSec: 300,
+            continueOnError: false,
+          },
+        ],
+      }));
+    const updateAccount = (id: string, patch: Partial<TestAccount>) =>
+      setIntegrationEnvForm((prev) => ({
+        ...prev,
+        testAccounts: prev.testAccounts.map((a) => (a.id === id ? { ...a, ...patch } : a)),
+      }));
+    const removeAccount = (id: string) =>
+      setIntegrationEnvForm((prev) => ({
+        ...prev,
+        testAccounts: prev.testAccounts.filter((a) => a.id !== id),
+      }));
+    const addAccount = () =>
+      setIntegrationEnvForm((prev) => ({
+        ...prev,
+        testAccounts: [
+          ...prev.testAccounts,
+          { id: `acc-${Date.now()}`, role: '', envPrefix: '', username: '', credentialRef: '' },
+        ],
+      }));
+    return (
+      <Modal
+        title={t(integrationEnvReadOnly ? 'integration.envModal.viewTitle' : 'integration.envModal.title')}
+        open={integrationEnvModalOpen}
+        onCancel={() => setIntegrationEnvModalOpen(false)}
+        footer={[
+          <Button key="close" onClick={() => setIntegrationEnvModalOpen(false)}>
+            {t('common.close')}
+          </Button>,
+          ...(integrationEnvReadOnly
+            ? []
+            : [
+              <Button
+                key="save"
+                type="primary"
+                onClick={() => {
+                  message.info(t('integration.envModal.demoHint'));
+                  setIntegrationEnvModalOpen(false);
+                }}
+              >
+                {t('integration.envModal.save')}
+              </Button>,
+            ]),
+        ]}
+        width={720}
+        zIndex={1100}
+      >
+        {/* 查看态:整块表单禁用,只读展示。内容按 基本信息/环境准备/测试账号/结果规范 分 Tab,避免又窄又长。 */}
+        <ConfigProvider componentDisabled={integrationEnvReadOnly}>
+          <Tabs
+            activeKey={integrationEnvTab}
+            onChange={setIntegrationEnvTab}
+            items={[
+              {
+                key: 'basic',
+                label: t('integration.envModal.tabBasic'),
+                children: (
+                  <>
+                    <div className={styles.formField}>
+                      <label>{t('integration.envModal.name')}</label>
+                      <Input
+                        placeholder={t('integration.envModal.namePlaceholder')}
+                        value={integrationEnvForm.name}
+                        onChange={(e) => setField('name', e.target.value)}
+                      />
+                    </div>
+                    <div className={styles.formField}>
+                      <label>{t('integration.envModal.address')}</label>
+                      <Input
+                        placeholder="https://it-integration.internal:8443"
+                        value={integrationEnvForm.address}
+                        onChange={(e) => setField('address', e.target.value)}
+                      />
+                    </div>
+                    <div className={styles.formField}>
+                      <label>{t('integration.envModal.orchestrator')}</label>
+                      <Select
+                        value={orchestrator}
+                        onChange={(v) => setField('orchestrator', v)}
+                        options={[
+                          { value: 'script', label: t('integration.envModal.orchScript') },
+                          { value: 'jenkins', label: t('integration.envModal.orchJenkins') },
+                          { value: 'k8s', label: t('integration.envModal.orchK8s') },
+                          { value: 'webhook', label: t('integration.envModal.orchWebhook') },
+                        ]}
+                        style={{ width: '100%' }}
+                      />
+                      <div className={styles.integrationNote}>{t('integration.envModal.orchHint')}</div>
+                    </div>
+                  </>
+                ),
+              },
+              {
+                key: 'prepare',
+                label: t('integration.envModal.tabPrepare'),
+                children:
+                  orchestrator !== 'script' ? (
+                    <div className={styles.integrationNote}>{t(`integration.envModal.hint.${orchestrator}`)}</div>
+                  ) : (
+                    <>
+                      {/* 连接信息:目标构建机 */}
+                      <div className={styles.integrationSectionTitle}>{t('integration.envModal.connTitle')}</div>
+                      <div className={styles.formField}>
+                        <label>{t('integration.envModal.connProtocol')}</label>
+                        <Radio.Group
+                          value={integrationEnvForm.connProtocol}
+                          onChange={(e) => setField('connProtocol', e.target.value)}
+                          options={[
+                            { value: 'ssh', label: 'SSH' },
+                            { value: 'local', label: t('integration.envModal.connLocal') },
+                          ]}
+                          optionType="button"
+                        />
+                      </div>
+                      {integrationEnvForm.connProtocol === 'ssh' && (
+                        <>
+                          <div className={styles.integrationConnRow}>
+                            <div className={styles.formField} style={{ flex: 2 }}>
+                              <label>{t('integration.envModal.connHost')}</label>
+                              <Input
+                                placeholder="10.0.12.34"
+                                value={integrationEnvForm.connHost}
+                                onChange={(e) => setField('connHost', e.target.value)}
+                              />
+                            </div>
+                            <div className={styles.formField} style={{ flex: 1 }}>
+                              <label>{t('integration.envModal.connPort')}</label>
+                              <Input
+                                placeholder="22"
+                                value={integrationEnvForm.connPort}
+                                onChange={(e) => setField('connPort', e.target.value)}
+                              />
+                            </div>
+                            <div className={styles.formField} style={{ flex: 1 }}>
+                              <label>{t('integration.envModal.connUser')}</label>
+                              <Input
+                                placeholder="deploy"
+                                value={integrationEnvForm.connUser}
+                                onChange={(e) => setField('connUser', e.target.value)}
+                              />
+                            </div>
+                          </div>
+                          <div className={styles.integrationConnRow}>
+                            <div className={styles.formField} style={{ flex: 1 }}>
+                              <label>{t('integration.envModal.connAuth')}</label>
+                              <Select
+                                value={integrationEnvForm.connAuth}
+                                onChange={(v) => setField('connAuth', v)}
+                                options={[
+                                  { value: 'key', label: t('integration.envModal.connAuthKey') },
+                                  { value: 'password', label: t('integration.envModal.connAuthPassword') },
+                                ]}
+                                style={{ width: '100%' }}
+                              />
+                            </div>
+                            <div className={styles.formField} style={{ flex: 2 }}>
+                              <label>{t('integration.envModal.connCredentialRef')}</label>
+                              <Input
+                                placeholder="it-integration-ssh-key"
+                                value={integrationEnvForm.connCredentialRef}
+                                onChange={(e) => setField('connCredentialRef', e.target.value)}
+                              />
+                            </div>
+                          </div>
+                        </>
+                      )}
+                      <div className={styles.formField}>
+                        <label>{t('integration.envModal.connWorkdir')}</label>
+                        <Input
+                          placeholder="/opt/byclaw/ci"
+                          value={integrationEnvForm.connWorkdir}
+                          onChange={(e) => setField('connWorkdir', e.target.value)}
+                        />
+                      </div>
+
+                      {/* 生命周期阶段:每阶段一段完整脚本 */}
+                      <div className={styles.repoModalDivider} />
+                      <div className={styles.integrationSectionHeader}>
+                        <span className={styles.integrationSectionTitle}>{t('integration.envModal.stagesTitle')}</span>
+                        <Button type="link" size="small" icon={<PlusOutlined />} onClick={addStage}>
+                          {t('integration.envModal.addStage')}
+                        </Button>
+                      </div>
+                      <div className={styles.integrationNote}>{t('integration.envModal.varsHint')}</div>
+                      {integrationEnvForm.stages.map((stage, idx) => (
+                        <div className={styles.integrationStageCard} key={stage.id}>
+                          <div className={styles.integrationStageHead}>
+                            <span className={styles.integrationStageIdx}>{idx + 1}</span>
+                            <Input
+                              className={styles.integrationStageName}
+                              placeholder={t('integration.envModal.stageName')}
+                              value={stage.name}
+                              onChange={(e) => updateStage(stage.id, { name: e.target.value })}
+                            />
+                            <Select
+                              size="small"
+                              value={stage.interpreter}
+                              onChange={(v) => updateStage(stage.id, { interpreter: v })}
+                              options={[
+                                { value: 'bash', label: 'bash' },
+                                { value: 'sh', label: 'sh' },
+                                { value: 'python', label: 'python' },
+                                { value: 'node', label: 'node' },
+                              ]}
+                              style={{ width: 96 }}
+                            />
+                            <Select
+                              size="small"
+                              value={stage.source}
+                              onChange={(v) => updateStage(stage.id, { source: v })}
+                              options={[
+                                { value: 'inline', label: t('integration.envModal.sourceInline') },
+                                { value: 'path', label: t('integration.envModal.sourcePath') },
+                              ]}
+                              style={{ width: 110 }}
+                            />
+                            <Button
+                              type="link"
+                              danger
+                              size="small"
+                              icon={<DeleteOutlined />}
+                              onClick={() => removeStage(stage.id)}
+                            />
+                          </div>
+                          {stage.source === 'inline' ? (
+                            <Input.TextArea
+                              className={styles.integrationStageScript}
+                              autoSize={{ minRows: 3, maxRows: 12 }}
+                              placeholder={t('integration.envModal.scriptPlaceholder')}
+                              value={stage.script}
+                              onChange={(e) => updateStage(stage.id, { script: e.target.value })}
+                            />
+                          ) : (
+                            <Input
+                              placeholder="deploy/db/incremental/run-all.sh"
+                              value={stage.script}
+                              onChange={(e) => updateStage(stage.id, { script: e.target.value })}
+                            />
+                          )}
+                          <div className={styles.integrationStageFoot}>
+                            <span>{t('integration.envModal.workdir')}</span>
+                            <Input
+                              size="small"
+                              value={stage.workdir}
+                              onChange={(e) => updateStage(stage.id, { workdir: e.target.value })}
+                              style={{ width: 200 }}
+                            />
+                            <span>{t('integration.envModal.timeout')}</span>
+                            <InputNumber
+                              size="small"
+                              min={1}
+                              value={stage.timeoutSec}
+                              onChange={(v) => updateStage(stage.id, { timeoutSec: Number(v) || 300 })}
+                              style={{ width: 90 }}
+                            />
+                            <Switch
+                              size="small"
+                              checked={stage.continueOnError}
+                              onChange={(v) => updateStage(stage.id, { continueOnError: v })}
+                            />
+                            <span>{t('integration.envModal.continueOnError')}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </>
+                  ),
+              },
+              {
+                key: 'accounts',
+                label: t('integration.envModal.tabAccounts'),
+                children: (
+                  <>
+                    {/* 被测应用的业务测试账号:E2E 登录用。密码只存凭据引用,编排层注入成环境变量供脚本读取。 */}
+                    <div className={styles.integrationSectionHeader}>
+                      <span className={styles.integrationSectionTitle}>{t('integration.envModal.accTitle')}</span>
+                      <Button type="link" size="small" icon={<PlusOutlined />} onClick={addAccount}>
+                        {t('integration.envModal.accAdd')}
+                      </Button>
+                    </div>
+                    <div className={styles.integrationNote}>{t('integration.envModal.accHint')}</div>
+                    {integrationEnvForm.testAccounts.map((acc) => (
+                      <div className={styles.integrationAccountCard} key={acc.id}>
+                        <div className={styles.integrationAccountRow}>
+                          <div className={styles.formField} style={{ flex: 1 }}>
+                            <label>{t('integration.envModal.accRole')}</label>
+                            <Input
+                              placeholder={t('integration.envModal.accRolePlaceholder')}
+                              value={acc.role}
+                              onChange={(e) => updateAccount(acc.id, { role: e.target.value })}
+                            />
+                          </div>
+                          <div className={styles.formField} style={{ flex: 1 }}>
+                            <label>{t('integration.envModal.accEnvPrefix')}</label>
+                            <Input
+                              placeholder="E2E_ADMIN"
+                              value={acc.envPrefix}
+                              onChange={(e) => updateAccount(acc.id, { envPrefix: e.target.value.toUpperCase() })}
+                            />
+                          </div>
+                          <Button
+                            type="link"
+                            danger
+                            size="small"
+                            icon={<DeleteOutlined />}
+                            onClick={() => removeAccount(acc.id)}
+                          />
+                        </div>
+                        <div className={styles.integrationAccountRow}>
+                          <div className={styles.formField} style={{ flex: 1 }}>
+                            <label>{t('integration.envModal.accUsername')}</label>
+                            <Input
+                              placeholder="qa_admin"
+                              value={acc.username}
+                              onChange={(e) => updateAccount(acc.id, { username: e.target.value })}
+                            />
+                          </div>
+                          <div className={styles.formField} style={{ flex: 1 }}>
+                            <label>{t('integration.envModal.accCredentialRef')}</label>
+                            <Input
+                              placeholder="it-integration-e2e-admin"
+                              value={acc.credentialRef}
+                              onChange={(e) => updateAccount(acc.id, { credentialRef: e.target.value })}
+                            />
+                          </div>
+                        </div>
+                        {acc.envPrefix && (
+                          <div className={styles.integrationAccountInject}>
+                            {t('integration.envModal.accInject', {
+                              user: `$${acc.envPrefix}_USER`,
+                              pass: `$${acc.envPrefix}_PASS`,
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </>
+                ),
+              },
+              {
+                key: 'spec',
+                label: t('integration.envModal.tabSpec'),
+                children: renderIntegrationRunSpec(),
+              },
+            ]}
+          />
+        </ConfigProvider>
+      </Modal>
+    );
+  };
+
+  // 套件明细:每套一个可折叠块,失败套件默认展开,列出失败用例 + 失败信息 + 截图/artifacts。
+  // 手动测试执行:测试人对每条用例判 通过/失败/跳过,填备注、贴截图。提交后平台汇总成与自动化一致的套件结果。
+  const renderManualRunModal = () => {
+    const suite = manualRunSuite;
+    const cases = suite?.manualCases ?? [];
+    const decided = cases.filter((c) => manualRunRecords[c.id]?.result).length;
+    const hasFail = cases.some((c) => manualRunRecords[c.id]?.result === 'fail');
+    const allDecided = cases.length > 0 && decided === cases.length;
+    return (
+      <Modal
+        title={
+          suite
+            ? t('integration.manualRun.title', { name: suite.name })
+            : t('integration.manualRun.title', { name: '' })
+        }
+        open={manualRunOpen}
+        onCancel={() => setManualRunOpen(false)}
+        footer={[
+          <Button key="close" onClick={() => setManualRunOpen(false)}>
+            {t('common.close')}
+          </Button>,
+          <Button
+            key="submit"
+            type="primary"
+            disabled={!allDecided}
+            onClick={() => {
+              // 演示态:仅提示。真实实现把记录写成套件结果 -> status.json;有失败则整轮打回 coder。
+              message.info(t(hasFail ? 'integration.manualRun.submittedFail' : 'integration.manualRun.submittedPass'));
+              setManualRunOpen(false);
+            }}
+          >
+            {t('integration.manualRun.submit')}
+          </Button>,
+        ]}
+        width={720}
+        zIndex={1100}
+      >
+        <div className={styles.manualRunProgress}>
+          {t('integration.manualRun.progress', { decided, total: cases.length })}
+          {hasFail ? (
+            <Tag color="error" style={{ marginLeft: 8 }}>
+              {t('integration.manualRun.hasFail')}
+            </Tag>
+          ) : null}
+        </div>
+        {cases.map((c, idx) => {
+          const rec = manualRunRecords[c.id] ?? { result: '', remark: '', shots: [] };
+          return (
+            <div className={styles.manualRunCase} key={c.id}>
+              <div className={styles.manualRunCaseTitle}>
+                <span className={styles.integrationStageIdx}>{idx + 1}</span>
+                <strong>{c.title}</strong>
+              </div>
+              <div className={styles.manualRunCaseMeta}>
+                <div>
+                  <span className={styles.manualRunLabel}>{t('integration.suiteModal.caseSteps')}</span>
+                  <pre className={styles.manualRunSteps}>{c.steps}</pre>
+                </div>
+                <div>
+                  <span className={styles.manualRunLabel}>{t('integration.suiteModal.caseExpected')}</span>
+                  <div className={styles.manualRunExpected}>{c.expected}</div>
+                </div>
+              </div>
+              <Radio.Group
+                value={rec.result}
+                onChange={(e) => setManualRecord(c.id, { result: e.target.value })}
+                optionType="button"
+                buttonStyle="solid"
+                options={[
+                  { value: 'pass', label: t('integration.manualRun.pass') },
+                  { value: 'fail', label: t('integration.manualRun.fail') },
+                  { value: 'skip', label: t('integration.manualRun.skip') },
+                ]}
+              />
+              <Input.TextArea
+                autoSize={{ minRows: 1, maxRows: 4 }}
+                placeholder={t('integration.manualRun.remarkPlaceholder')}
+                value={rec.remark}
+                onChange={(e) => setManualRecord(c.id, { remark: e.target.value })}
+                style={{ marginTop: 8 }}
+              />
+              <div className={styles.manualRunShots}>
+                <Upload
+                  listType="picture-card"
+                  fileList={rec.shots.map((name, i) => ({ uid: `${c.id}-${i}`, name, status: 'done' as const }))}
+                  beforeUpload={(file) => {
+                    // 演示态:不真正上传,仅把文件名记进列表示意"截图已附加"。
+                    setManualRecord(c.id, { shots: [...rec.shots, file.name] });
+                    return false;
+                  }}
+                  onRemove={(file) => setManualRecord(c.id, { shots: rec.shots.filter((n) => n !== file.name) })}
+                >
+                  {rec.shots.length >= 6 ? null : (
+                    <div>
+                      <PlusOutlined />
+                      <div style={{ marginTop: 4 }}>{t('integration.manualRun.addShot')}</div>
+                    </div>
+                  )}
+                </Upload>
+              </div>
+            </div>
+          );
+        })}
+      </Modal>
+    );
+  };
+
+  const renderIntegrationResultSuites = (r: IntegrationRunResult) => (
+    <Collapse
+      size="small"
+      className={styles.integrationResultSuites}
+      defaultActiveKey={r.suites.filter((s) => s.status === 'failed').map((s) => s.suiteId)}
+      items={r.suites.map((s) => ({
+        key: s.suiteId,
+        label: (
+          <div className={styles.integrationResultSuiteHead}>
+            <Tag color={s.status === 'passed' ? 'success' : s.status === 'skipped' ? 'default' : 'error'}>
+              {t(`integration.result.status.${s.status}`)}
+            </Tag>
+            <span className={styles.integrationResultSuiteName}>{s.name}</span>
+            <span className={styles.integrationResultSuiteStat}>
+              {t('integration.result.passOf', { passed: s.passed, total: s.total })}
+              {` · ${t('integration.result.duration', { sec: s.durationSec })}`}
+            </span>
+          </div>
+        ),
+        children: (
+          <div className={styles.integrationResultSuiteBody}>
+            <div className={styles.integrationResultSuitePaths}>
+              <span className={styles.integrationMono}>{s.reportPath}</span>
+              <span className={styles.integrationMono}>{s.logPath}</span>
+            </div>
+            {s.failedCases.length === 0 ? (
+              <div className={styles.integrationResultAllPass}>{t('integration.result.allPass')}</div>
+            ) : (
+              s.failedCases.map((c) => (
+                <div className={styles.integrationResultCase} key={c.caseId}>
+                  <div className={styles.integrationResultCaseName}>
+                    <CloseOutlined className={styles.integrationResultCaseIcon} />
+                    <span className={styles.integrationMono}>{c.caseId}</span>
+                  </div>
+                  <div className={styles.integrationResultCaseMsg}>{c.message}</div>
+                  {c.artifacts.length > 0 ? (
+                    <div className={styles.integrationResultArtifacts}>
+                      {c.artifacts.map((a) => (
+                        <Tag key={a} className={styles.integrationResultArtifactTag}>
+                          {a.split('/').pop()}
+                        </Tag>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              ))
+            )}
+          </div>
+        ),
+      }))}
+    />
+  );
+
+  // 查看结果:展示一次 E2E 运行的整体状态 + 打回原因 + 各套件明细(失败用例带截图/artifacts)。
+  const renderIntegrationResultModal = () => {
+    const r = integrationResult;
+    const statusColor: Record<IntegrationRunResult['status'], string> = {
+      passed: 'success',
+      failed: 'error',
+      error: 'error',
+      timeout: 'warning',
+    };
+    return (
+      <Modal
+        title={
+          r ? t('integration.result.title', { version: r.version }) : t('integration.result.title', { version: '' })
+        }
+        open={integrationResultOpen}
+        onCancel={() => setIntegrationResultOpen(false)}
+        footer={[
+          <Button key="close" onClick={() => setIntegrationResultOpen(false)}>
+            {t('common.close')}
+          </Button>,
+        ]}
+        width={760}
+        zIndex={1100}
+      >
+        {r ? (
+          <div className={styles.integrationResult}>
+            {/* 概览:整体状态 + 通过率 + 耗时 */}
+            <div className={styles.integrationResultHead}>
+              <Tag color={statusColor[r.status]} className={styles.integrationResultStatusTag}>
+                {t(`integration.result.status.${r.status}`)}
+              </Tag>
+              <span className={styles.integrationResultTotals}>
+                {t('integration.result.passOf', { passed: r.totals.passed, total: r.totals.total })}
+                {r.totals.failed > 0 ? ` · ${t('integration.result.failCount', { count: r.totals.failed })}` : ''}
+              </span>
+              <span className={styles.integrationResultDuration}>
+                {t('integration.result.duration', { sec: r.durationSec })}
+              </span>
+            </div>
+
+            {/* 失败时的打回横幅:直接对应研发闭环里"打回 coder"的动作 */}
+            {r.kickbackTo ? (
+              <div className={styles.integrationResultKickback}>
+                {t('integration.result.kickback', { phase: phaseLabelOf(r.kickbackTo) })}
+                {r.reason ? ` · ${r.reason}` : ''}
+              </div>
+            ) : null}
+
+            {/* 元信息:分支/commit/环境/轮次/时间/结果目录 */}
+            <Descriptions size="small" column={2} bordered className={styles.integrationResultMeta}>
+              <Descriptions.Item label={t('integration.result.branch')}>{r.branch}</Descriptions.Item>
+              <Descriptions.Item label={t('integration.result.commit')}>{r.commit}</Descriptions.Item>
+              <Descriptions.Item label={t('integration.result.env')}>{r.envName}</Descriptions.Item>
+              <Descriptions.Item label={t('integration.result.round')}>{r.round}</Descriptions.Item>
+              <Descriptions.Item label={t('integration.result.startedAt')}>{r.startedAt}</Descriptions.Item>
+              <Descriptions.Item label={t('integration.result.finishedAt')}>{r.finishedAt}</Descriptions.Item>
+              <Descriptions.Item label={t('integration.result.resultDir')} span={2}>
+                <span className={styles.integrationMono}>{r.resultDir}</span>
+              </Descriptions.Item>
+            </Descriptions>
+
+            {/* 各套件明细:一套一块,失败套件默认展开失败用例 */}
+            <div className={styles.integrationResultSuitesTitle}>{t('integration.result.suitesTitle')}</div>
+            {renderIntegrationResultSuites(r)}
+          </div>
+        ) : (
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('integration.result.notReady')} />
+        )}
+      </Modal>
+    );
+  };
+
   const renderDwsAuthModal = () => (
     <Modal
       title={t('dws.detailTitle')}
@@ -3893,6 +5778,10 @@ const ProjectDetailPanel: React.FC<Props> = ({
       {renderAddSourceModal()}
       {renderManualRequirementModal()}
       {renderRepoModal()}
+      {renderIntegrationEnvModal()}
+      {renderIntegrationSuiteModal()}
+      {renderIntegrationResultModal()}
+      {renderManualRunModal()}
       {renderDwsAuthModal()}
       {renderLogDrawer()}
       <RenameModal

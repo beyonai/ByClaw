@@ -1,24 +1,18 @@
 #!/usr/local/bin/python3
-"""删除结构化本体对象。
+"""删除已提交的对象（⚠️ 不可逆，需二次确认后调用）。
+
+同时删除工作区本地文件、OWL 数据、底层数据表和 Discovery 注册。
 
 I/O 协议：stdin JSON → stdout JSON
 
 入参（stdin JSON）:
     {
-        "entity_code": "p_by_my_task_adminvip_a1b2c3",   # 必填
-        "user_code": "adminvip"                           # 可选，建表删除需要
+        "workspace_name": "travel_reimbursement",   # 必填
+        "entity_code":    "travel_application"      # 必填
     }
 
 出参（stdout JSON）:
-    {"ok": true, "entity_code": "..."}
-    {"ok": false, "error": "..."}
-
-删除流程（三步顺序执行，任意一步失败终止）:
-    1. delete_owl_scope("OBJECT", entity_code) — 清除术语库数据
-    2. drop_table(entity_code) — 删建表（需要通过 user_code 定位服务）
-    3. deleteResourceByCode(entity_code) — 下架本体（门户服务）
-
-所有业务逻辑由 datacloud_platform 的 ontology-manager API 提供服务。
+    {"ok": true}
 """
 
 from __future__ import annotations
@@ -29,35 +23,36 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from _common import post_ontology_api
+from _common import post_ontology_api, stdout_json
 
 
 def main() -> None:
     raw = sys.argv[1] if len(sys.argv) > 1 else sys.stdin.read().strip()
     if not raw:
-        print(json.dumps({"ok": False, "error": "缺少入参"}), flush=True)
+        stdout_json({"ok": False, "error": "缺少入参，需要 workspace_name 和 entity_code"})
         sys.exit(1)
 
     params: dict = json.loads(raw)
+    workspace_name: str = params.get("workspace_name", "").strip()
     entity_code: str = params.get("entity_code", "").strip()
 
+    if not workspace_name:
+        stdout_json({"ok": False, "error": "workspace_name 不能为空"})
+        sys.exit(1)
     if not entity_code:
-        print(json.dumps({"ok": False, "error": "entity_code 不能为空"}), flush=True)
+        stdout_json({"ok": False, "error": "entity_code 不能为空"})
         sys.exit(1)
 
-    result = post_ontology_api(
-        "/object/delete",
-        {
-            "entity_code": entity_code,
-            "user_code": params.get("user_code", ""),
-        },
-    )
-    print(json.dumps(result, ensure_ascii=False), flush=True)
+    result = post_ontology_api("/workspace/object/delete", {
+        "workspace_name": workspace_name,
+        "entity_code": entity_code,
+    })
+    stdout_json(result)
 
 
 if __name__ == "__main__":
     try:
         main()
     except Exception as exc:
-        print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False), flush=True)
+        stdout_json({"ok": False, "error": str(exc)})
         sys.exit(1)

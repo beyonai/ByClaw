@@ -6,7 +6,7 @@ jest.mock('@/utils', () => ({
 jest.mock('../cookie', () => ({
   __esModule: true,
   default: {
-    clearDelete: jest.fn(),
+    delete: jest.fn(),
     set: jest.fn(),
   },
 }));
@@ -59,7 +59,9 @@ describe('utils/auth', () => {
 
     auth.clearToken();
 
-    expect(cookie.clearDelete).toHaveBeenCalled();
+    expect(cookie.delete).toHaveBeenNthCalledWith(1, auth.sessionKey);
+    expect(cookie.delete).toHaveBeenNthCalledWith(2, auth.portalSessionKey);
+    expect(cookie.delete).toHaveBeenCalledTimes(2);
     expect(localStorage.getItem(auth.sessionKey)).toBeNull();
     expect(localStorage.getItem(auth.portalSessionKey)).toBeNull();
     expect(localStorage.getItem(auth.tokenKey)).toBeNull();
@@ -81,6 +83,23 @@ describe('utils/auth', () => {
     expect(auth.getSessionKey()).toBe('session-1');
     expect(auth.getToken()).toBe('token-1');
     expect(auth.getssoToken()).toBe('sso-1');
+  });
+
+  it('compares an auth snapshot with the current login state', () => {
+    const auth = loadAuthModule();
+
+    auth.setUserToken({
+      sessionId: 'session-1',
+      token: 'token-1',
+      ssoToken: 'sso-1',
+    });
+    const authSnapshot = auth.getAuthSnapshot();
+
+    expect(auth.hasAuthSnapshot(authSnapshot)).toBe(true);
+    expect(auth.isCurrentAuthSnapshot(authSnapshot)).toBe(true);
+
+    localStorage.setItem(auth.tokenKey, 'token-2');
+    expect(auth.isCurrentAuthSnapshot(authSnapshot)).toBe(false);
   });
 
   it('initAdminVipList caches config values from service', async () => {

@@ -9,6 +9,7 @@ SKILL_ROOT = SKILLS_ROOT / "knowledge-collection"
 REPO_ROOT = Path(__file__).parents[3]
 INITDB_DML = REPO_ROOT / "deploy" / "middleware" / "initdb" / "04_dml.sql"
 V030_DML = REPO_ROOT / "deploy" / "migrations" / "versions" / "V0.3.0" / "V0.3.0__dml.sql"
+V031_DML = REPO_ROOT / "deploy" / "migrations" / "versions" / "V0.3.1" / "V0.3.1__dml.sql"
 META_PROMPT_SERVICE = (
     REPO_ROOT
     / "byclaw-be"
@@ -79,8 +80,21 @@ def parse_interface(text):
 
 
 class KnowledgeCollectionSkillContractTest(unittest.TestCase):
+    def test_knowledge_collection_upgrade_is_isolated_in_v031(self):
+        self.assertTrue(V031_DML.is_file(), "knowledge collection migration must be versioned as V0.3.1")
+        v030 = V030_DML.read_text(encoding="utf-8")
+        v031 = V031_DML.read_text(encoding="utf-8")
+
+        for marker in (
+            "知识采集默认绑定迁移到编排 Skill",
+            '"skillCode":"knowledge-collection"',
+            "resource_id = 25",
+        ):
+            self.assertNotIn(marker, v030)
+            self.assertIn(marker, v031)
+
     def test_upgrade_migration_replaces_the_bundled_skill_catalog(self):
-        upgrade = V030_DML.read_text(encoding="utf-8")
+        upgrade = V031_DML.read_text(encoding="utf-8")
 
         self.assertIn("OPENCLAW_BUNDLED_SKILLS", upgrade)
         self.assertIn('"skillCode":"knowledge-collection"', upgrade)
@@ -94,7 +108,7 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
 
     def test_bycli_has_an_independent_platform_resource(self):
         initdb = INITDB_DML.read_text(encoding="utf-8")
-        upgrade = V030_DML.read_text(encoding="utf-8")
+        upgrade = V031_DML.read_text(encoding="utf-8")
 
         self.assertRegex(initdb, r"VALUES\(25,'BYAI','SKILL','ATOM','byCLI'.*,'bycli',CURRENT_TIMESTAMP")
         self.assertIn("VALUES(25,'inner','SYSTEM_BUILTIN'", initdb)
@@ -118,7 +132,7 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
 
 
     def test_upgrade_updates_runtime_skill_target_content_without_replacing_other_json_fields(self):
-        upgrade = " ".join(V030_DML.read_text(encoding="utf-8").split())
+        upgrade = " ".join(V031_DML.read_text(encoding="utf-8").split())
 
         self.assertRegex(
             upgrade,

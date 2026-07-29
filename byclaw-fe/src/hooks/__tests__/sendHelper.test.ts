@@ -7,8 +7,11 @@ jest.mock('@umijs/max', () => ({
 }));
 
 jest.mock('@/utils/auth', () => ({
-  getssoToken: jest.fn(() => 'sso-token'),
-  getToken: jest.fn(() => 'token-value'),
+  getAuthSnapshot: jest.fn(() => ({
+    sessionId: 'session-value',
+    token: 'token-value',
+    ssoToken: 'sso-token',
+  })),
   ssotokenKey: 'x-sso-token',
   tokenKey: 'x-token',
 }));
@@ -121,6 +124,10 @@ describe('hooks/useSseSender/sendHelper', () => {
     const { promise } = helper.send({}, {});
 
     await expect(promise).rejects.toBe(ERROR_STATUS.NOAUTH);
-    expect(globalLogout).toHaveBeenCalled();
+    expect(globalLogout).toHaveBeenCalledWith(false, {
+      sessionId: 'session-value',
+      token: 'token-value',
+      ssoToken: 'sso-token',
+    });
   });
 });

@@ -8,6 +8,12 @@ jest.mock('@/service/user', () => ({
 }));
 
 jest.mock('@/utils/auth', () => ({
+  getAuthSnapshot: jest.fn(() => ({
+    sessionId: 'session-1',
+    token: 'token-1',
+    ssoToken: 'sso-1',
+  })),
+  isCurrentAuthSnapshot: jest.fn(() => true),
   setUserToken: jest.fn(),
 }));
 
@@ -27,7 +33,8 @@ jest.mock('@/utils/websocket', () => ({
 
 import userModel from '../common/user';
 import CookieUtil from '@/utils/cookie';
-import { setUserToken } from '@/utils/auth';
+import { getAuthSnapshot, isCurrentAuthSnapshot, setUserToken } from '@/utils/auth';
+import { globalLogout } from '@/service/common/request';
 import webSocketManager from '@/utils/websocket';
 
 describe('models/common/user', () => {
@@ -36,6 +43,7 @@ describe('models/common/user', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    (isCurrentAuthSnapshot as jest.Mock).mockReturnValue(true);
   });
 
   it('save merges payload into state', () => {
@@ -120,5 +128,48 @@ describe('models/common/user', () => {
     expect(put).not.toHaveBeenCalled();
     expect(next.value).toBeUndefined();
     expect(next.done).toBe(true);
+  });
+
+  it('initUserInfo only logs out the auth snapshot used by the failed request', () => {
+    const call = jest.fn(() => 'getLoginInfo');
+    const put = jest.fn();
+    const authSnapshot = (getAuthSnapshot as jest.Mock)();
+    const effect = effects.initUserInfo({}, { call, put });
+
+    expect(effect.next().value).toBe('getLoginInfo');
+    expect(effect.next('登录失效').value).toBe('登录失效');
+    expect(globalLogout).toHaveBeenCalledWith(false, authSnapshot);
+  });
+
+  it('initUserInfo does not log out on a transient request error', () => {
+    const call = jest.fn(() => 'getLoginInfo');
+    const put = jest.fn();
+    const effect = effects.initUserInfo({}, { call, put });
+
+    effect.next();
+    expect(effect.throw(new Error('network error')).value).toBeNull();
+    expect(globalLogout).not.toHaveBeenCalled();
+  });
+
+  it('initUserInfo ignores a successful response from an old session', () => {
+    (isCurrentAuthSnapshot as jest.Mock).mockReturnValue(false);
+    const success = jest.fn();
+    const call = jest.fn(() => 'getLoginInfo');
+    const put = jest.fn();
+    const effect = effects.initUserInfo({ success }, { call, put });
+
+    expect(effect.next().value).toBe('getLoginInfo');
+    expect(
+      effect.next({
+        code: 0,
+        data: {
+          userCode: 'old-user',
+        },
+      })
+    ).toEqual({ value: null, done: true });
+
+    expect(put).not.toHaveBeenCalled();
+    expect(success).not.toHaveBeenCalled();
+    expect(globalLogout).not.toHaveBeenCalled();
   });
 });
