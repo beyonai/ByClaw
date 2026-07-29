@@ -283,11 +283,17 @@ const ConnectorControl = ({ canAuthorize, value, onChange }: ConnectorControlPro
       )}
 
       {/* 连接器设置：授权、停用连接器，并进入完整配置面板。 */}
+      {/* Antd 的 styles 会以内联样式覆盖默认 contentPadding，确保标题条贴近外框。 */}
       <Modal
         centered
         className={styles.settingsModal}
         footer={null}
         open={settingsOpen}
+        styles={{
+          content: { padding: 10 },
+          header: { marginBottom: 8, padding: 0 },
+          body: { padding: 0 },
+        }}
         title={
           <span className={styles.modalTitle}>
             <span className={styles.modalTitleIcon} aria-hidden="true">

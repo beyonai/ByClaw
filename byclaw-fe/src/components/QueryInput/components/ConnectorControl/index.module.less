@@ -23,7 +23,7 @@
   gap: 10px;
   width: 100%;
   min-height: 56px;
-  padding: 10px 14px;
+  padding: 8px 10px;
   color: #062b86;
   font-size: 16px;
   font-weight: 600;
@@ -130,13 +130,18 @@
 
 .settingsModal {
   :global(.ant-modal-content) {
-    padding: 10px;
-    border-radius: 20px;
+    // 设计稿标题条贴近外框，外层仅保留极小安全留白。
+    // Antd 默认内容区有 24px padding，需要提高优先级才能覆盖它。
+    padding: 10px !important;
+    background: #fff;
+    border: 1px solid #e7edf4;
+    border-radius: 26px;
+    box-shadow: 0 8px 24px rgba(31, 41, 55, 16%);
   }
 
   :global(.ant-modal-header) {
-    margin-bottom: 12px;
-    padding: 0;
+    margin-bottom: 8px;
+    padding: 0 !important;
     background: transparent;
   }
 }
