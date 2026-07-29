@@ -54,7 +54,11 @@ Keep these failure classes separate:
 | Bot scope missing | Do not run `auth login`; return the backend `console_url` for an administrator |
 | Resource permission, visibility, invalid token/ID, or not found | Report the backend error; do not retry authentication blindly |
 
-For the user authorization split-flow, start only the exact `lark-cli auth login --scope ... --no-wait --json` or `--domain ...` command prescribed by fws, extract `verification_url` and `device_code` only from that execution, generate the QR-code data URI with the fws script, and end the turn. Do not complete the device-code exchange in the same turn. After the user confirms authorization, finish the device-code command, verify with `lark-cli auth status --json --verify`, and retry the original collection command.
+For the user authorization split-flow, start only the exact `lark-cli auth login --scope ... --no-wait --json` or `--domain ...` command prescribed by fws, extract `verification_url` and `device_code` only from that execution, generate the QR-code data URI with the fws script, and end the turn. If QR generation fails, return the clickable `verification_url` and the QR helper error instead of blocking authorization. Do not complete the device-code exchange in the same turn. After the user confirms authorization, finish the device-code command, verify with `lark-cli auth status --json --verify`, and retry the collection command.
+
+Authorize only the exact `missing_scopes` reported by the failed command. Message search and message-body retrieval can require separate authorization rounds. With `lark-cli` 1.0.78, `im +messages-search --no-reactions` can still statically preflight `im:message.reactions:read`; treat the reported scope as a CLI compatibility requirement, and do not assume the flag suppresses that preflight.
+
+When authorization interrupts a relative time window such as “this month through now,” preserve the original start boundary but recompute the end time after authorization. Alternatively, run an incremental catch-up from the old end boundary to the new end boundary, then deduplicate by `message_id`. Do not merely retry a frozen pre-authorization window because messages created during authorization would be omitted.
 
 Never expose or persist App Secret, access/refresh tokens, device codes, sessions, cookies, credential files, or raw authorization output in chat or collection artifacts.
 
@@ -106,6 +110,8 @@ collectionRunName=feishu-fws-<product>-<operation>
 
 Examples: `feishu-fws-minutes-transcript`, `feishu-fws-docs-fetch`, `feishu-fws-base-record-list`, and `feishu-fws-drive-download`.
 
+Treat every collection directory as private because it can contain contacts, messages, files, and personal metadata. Create the run directory with directory mode `0700` and collection files with file mode `0600`. Before using the workspace fallback, verify that `.by-sessions/` is ignored by version control; if it is not ignored, warn explicitly and prefer a private path outside the repository. In all cases, never stage or commit collection artifacts, even when they appear as untracked files.
+
 ## Required Artifact Layout
 
 Write at least:
@@ -136,6 +142,22 @@ files/
 ```
 
 Only create files for products actually returned by `lark-cli`; do not invent missing AI summaries, recordings, chapters, or transcripts.
+
+For a Feishu message-history collection, prefer:
+
+```text
+bycli-output.json
+metadata.json
+raw/
+  messages-search.json
+  messages-mget.json
+markdown/
+  chat-records.md
+files/
+  <downloaded-message-resource>
+```
+
+Keep search pages and retrieved message bodies separately auditable. Do not write authorization responses or credentials below the run directory.
 
 ## `bycli-output.json` Contract
 
@@ -196,7 +218,15 @@ For Sheets, fetch workbook structure before choosing a sheet and range; do not g
 
 ### Messages and files
 
-Resolve real chat/message/resource IDs through fws and use user identity for user-visible history. Follow page tokens or cursors until complete unless the user requested a bounded subset. Put downloaded resources in `files/` and record their source message IDs in metadata.
+Load the `im` product reference and use user identity for user-visible history. For a bounded time range, run `im +messages-search` with explicit start and end times, `--page-all`, and `--format json`; use an empty query only when the user requested all messages in that range. Follow page tokens until complete unless the user requested a smaller bound, and save the complete search response as `raw/messages-search.json`.
+
+Do not assume search results contain message bodies. When the response contains `data.message_ids`, call `im +messages-mget` in batches of at most 50 IDs and save the combined responses as `raw/messages-mget.json`. Compare the unique search ID set with the retrieved `message_id` set before claiming completion. If IDs are missing, retain successful bodies, set `metadata.partial=true`, and record missing IDs or the failed batch without storing credentials.
+
+Normalize the retrieved bodies into `markdown/chat-records.md`. Preserve `message_id`, `chat_id`, sender identity when returned, `create_time`, `msg_type`, text or structured content, and `message_app_link`. Use the app link as the item URL when available. If the response has only `chat_id`, keep it and do not invent a chat name. Download requested message resources into `files/` and associate each resource with its source `message_id`.
+
+### Contacts
+
+Load the `contact` product reference and use `contact +search-user` with the user's query or supported filters. This command is search/filter based, not an unconditional full-directory export. Clarify an ambiguous request for “my contacts” before choosing filters such as recently chatted users. Treat zero results as a valid collection result, not an authentication failure, when the command succeeds without `missing_scope` or permission errors.
 
 ## User-Facing Summary
 

@@ -11,6 +11,11 @@ Docker 镜像（`Dockerfile`，已内置 DWS 支持）使用的 DWS CLI 二进�
 | 文件 | `dws-linux-amd64.tar.gz` |
 | SHA256 | `b7dfd9a4b3489211359261747ed0cb9c8c261434bb762ad3f76df33bdbabd5cb` |
 
+> 多架构说明：仓库仅预存 amd64 二进制。构建 arm64 镜像时，`Dockerfile` 通过 `TARGETARCH`
+> 走 else 分支，从同版本 npm 包在线拉取 `assets/dws-linux-arm64.tar.gz`（SHA256
+> `0d357ef0535f99f2f63b5ecbfdee9c32448be2a2c24f3096c03126b3b7570bc5`）。升级版本时同步更新
+> `Dockerfile` 的 `DWS_VERSION` 与本文件。
+
 ## 更新方法
 
 1. 拉取目标版本 npm 包并提取 linux-amd64 二进制：
