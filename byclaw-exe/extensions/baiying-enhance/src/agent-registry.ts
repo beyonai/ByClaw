@@ -192,6 +192,8 @@ export function mergeManagedAgentsIntoConfig(params: {
   managed: AdaptedManagedAgent[];
   defaultModel?: ManagedAimodel | null;
   dynamicModels?: ManagedAimodel[];
+  /** Provider keys from the current valid Redis model catalog that managed agents may bind to. */
+  bindableModelProviderKeys?: ReadonlySet<string>;
   mainParentAgentId: string;
   mergeAllowSpawnForMain: boolean;
   aimodelConfigRedisKey?: string;
@@ -213,6 +215,7 @@ export function mergeManagedAgentsIntoConfig(params: {
   }
 
   const providers = cfg.models.providers;
+  const bindableModelProviderKeys = params.bindableModelProviderKeys ?? new Set<string>();
   const existingList = cfg.agents.list ?? [];
   const existingWorkspaceById = new Map(
     existingList
@@ -244,7 +247,7 @@ export function mergeManagedAgentsIntoConfig(params: {
     const providerKey = m.baiyingModelId
       ? providerKeyForBaiyingModelId(m.baiyingModelId)
       : undefined;
-    const modelId = providerKey
+    const modelId = providerKey && bindableModelProviderKeys.has(providerKey)
       ? firstRegisteredProviderModelId(providers[providerKey])
       : undefined;
     list.push({

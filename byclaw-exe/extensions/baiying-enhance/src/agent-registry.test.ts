@@ -28,12 +28,38 @@ describe("managed model registry", () => {
         },
       } as never,
       managed: [managedAgent("-2000")],
+      bindableModelProviderKeys: new Set(["baiying-m-neg-2000"]),
       mainParentAgentId: "main",
       mergeAllowSpawnForMain: true,
     });
 
     expect(result.agents?.list?.find((entry) => entry.id === "baiying-agent-10000235")?.model)
       .toEqual({ primary: "baiying-m-neg-2000/MiniMax-M3" });
+  });
+
+  it("leaves a managed agent on the default fallback when a valid persisted provider is absent from the fresh catalog", () => {
+    const result = mergeManagedAgentsIntoConfig({
+      base: {
+        agents: { list: [{ id: "main", default: true }] },
+        models: {
+          providers: {
+            "baiying-m-neg-2000": {
+              baseUrl: "https://model.example/v1",
+              apiKey: { source: "exec", provider: "baiying-aimodel-redis", id: "model:-2000" },
+              api: "openai-completions",
+              models: [{ id: "MiniMax-M3", name: "MiniMax-M3-2000" }],
+            },
+          },
+        },
+      } as never,
+      managed: [managedAgent("-2000")],
+      bindableModelProviderKeys: new Set(),
+      mainParentAgentId: "main",
+      mergeAllowSpawnForMain: true,
+    });
+
+    expect(result.agents?.list?.find((entry) => entry.id === "baiying-agent-10000235")?.model)
+      .toBeUndefined();
   });
 
   it("leaves a managed agent on the default fallback when its requested provider lacks transport configuration", () => {
@@ -51,6 +77,7 @@ describe("managed model registry", () => {
         },
       } as never,
       managed: [managedAgent("-2000")],
+      bindableModelProviderKeys: new Set(["baiying-m-neg-2000"]),
       mainParentAgentId: "main",
       mergeAllowSpawnForMain: true,
     });

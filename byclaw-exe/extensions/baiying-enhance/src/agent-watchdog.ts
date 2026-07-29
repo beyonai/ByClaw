@@ -1,6 +1,10 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/compat";
 import { loadAgentContentIndex, saveAgentContentIndex } from "./agent-content-index.js";
 import { adaptAgentJson, type AdaptedManagedAgent } from "./agent-adapter.js";
+import {
+  resolveAimodelSecretProviderName,
+  resolveBaiyingAimodelProvidersFromTypeList,
+} from "./aimodel-config.js";
 import { mergeManagedAgentsIntoConfig } from "./agent-registry.js";
 import { AgentRegistryState } from "./agent-state.js";
 import { MANAGED_AGENT_PREFIX, type BaiyingEnhancePluginConfig } from "./types.js";
@@ -710,9 +714,20 @@ export function createAgentWatchdog(params: {
         return;
       }
 
+      const currentAimodels = await resolveBaiyingAimodelProvidersFromTypeList({
+        redisJsonStore: params.redisJsonStore,
+        redisKey: params.pluginConfig.aimodelTypeListRedisKey,
+        modelType: params.pluginConfig.aimodelTypeListField,
+        secretProviderName: resolveAimodelSecretProviderName(
+          params.pluginConfig.aimodelSecretProviderName,
+        ),
+        log: { warn: (m) => params.api.logger.warn(m) },
+      });
+      const bindableModelProviderKeys = new Set(currentAimodels.map((model) => model.providerKey));
       const next = mergeManagedAgentsIntoConfig({
         base: params.api.runtime.config.loadConfig(),
         managed: effectiveManaged,
+        bindableModelProviderKeys,
         mainParentAgentId: params.pluginConfig.mainParentAgentId ?? "main",
         mergeAllowSpawnForMain: params.pluginConfig.mergeAllowSpawnForMain !== false,
       });
