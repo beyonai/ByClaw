@@ -137,15 +137,19 @@ bycli gh pr list --limit 5
 
 ```bash
 openclaw browser --browser-profile openclaw status
-# 只有 status 明确显示浏览器未运行时才执行：
-/usr/local/bin/start-chrome.sh
+# 只有 status 明确显示浏览器未运行时才启动：
+if test -x /usr/local/bin/start-chrome.sh; then
+  /usr/local/bin/start-chrome.sh
+else
+  openclaw browser --browser-profile openclaw start
+fi
 bycli doctor
 bycli daemon status
 ```
 
 每次 `bycli doctor` 后，无论成功与否，必须紧接 `bycli daemon status`。daemon 必须 running 且 Extension 必须 connected；否则按以下阶梯：
 
-1. 先检查 OpenClaw browser status；只有未运行才冷启动，再 `doctor → daemon status` 复检。
+1. 先检查 OpenClaw browser status；只有未运行才冷启动：`/usr/local/bin/start-chrome.sh` 存在且可执行时使用它，否则执行 `openclaw browser --browser-profile openclaw start`，再 `doctor → daemon status` 复检。
 2. 仍异常时执行一次 `bycli daemon restart`，再 `bycli daemon status`。
 3. 仍未连接时 STOP：提示用户检查 Chrome 和 byCLI Extension，停止一切浏览器动作，不降级到通用工具。
 
@@ -166,22 +170,14 @@ TAB 约束：同名 session 只有在相同 surface、browser context 和存活 
 
 ### 3. 关闭和异常
 
-仅当任务完成、当前页不是登录 / 验证 / CAPTCHA / 反爬页面且没有后续复用需求时关闭：
+清理遵循“只清理当前任务创建或独占拥有的资源”原则。任务结束、当前页不是登录 / 验证 / CAPTCHA / 反爬页面且没有后续复用需求时：
 
-```bash
-bycli browser <session> close
-bycli daemon stop
-openclaw browser --browser-profile openclaw stop
-```
+- 当前任务创建或独占拥有的 TAB：执行 `bycli browser <session> close`。
+- daemon：只有当前任务启动了 daemon，且已确认没有其他任务共享它时，才执行 `bycli daemon stop`。
+- Chromium：只有当前任务启动了浏览器，且已确认该浏览器上下文没有其他任务或用户使用时，才执行 `openclaw browser --browser-profile openclaw stop`。
+- 无法确认所有权时，只释放当前任务的 TAB，保留共享 daemon 和 Chromium；不得为了清理方便停止共享资源。
 
-如果可能继续操作同站点，只执行 `browser close`，保留 daemon 和 Chromium。异常或卡死才使用 Kill-all-Chrome：
-
-```bash
-bycli browser <session> close 2>/dev/null || true
-bycli daemon stop 2>/dev/null || true
-openclaw browser --browser-profile openclaw stop
-pkill -f chromium 2>/dev/null || true
-```
+异常或卡死时，不执行全局进程终止，也不停止无法确认归属的 daemon / Chromium。先报告原始错误；仅在能精确确认资源由当前任务创建且独占时，按上面的逐层清理规则处理，否则停止并请用户或运行环境管理员手动处理。
 
 登录 / SSO / MFA、CAPTCHA、反爬或环境验证页面遵循上方“认证、人工验证和 STOP”，绝不因 cleanup 规则关闭或补查。
 

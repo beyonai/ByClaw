@@ -187,9 +187,11 @@ class AgentReachSkillContractTest(unittest.TestCase):
         skill = BYCLI_SKILL.read_text(encoding="utf-8")
 
         self.assertIn("本 skill 是唯一入口", skill)
-        self.assertIn("搜索 / 采集 / 抓取 / 网站操作 / 入库 / 知识整理", skill)
+        self.assertIn("网页读取、搜索、采集、抓取、网站操作和打开 URL", skill)
+        self.assertIn("入库 / 知识整理 / 跳过", skill)
         self.assertIn("bycli list -f json", skill)
-        self.assertIn("命中 connector bridge 的采集直接使用对应后端", skill)
+        self.assertIn("connector bridge", skill)
+        self.assertIn("使用 dws bridge", skill)
 
     def test_bycli_is_presented_as_browser_driver_and_collection_orchestrator(self):
         skill = BYCLI_SKILL.read_text(encoding="utf-8")
@@ -197,8 +199,9 @@ class AgentReachSkillContractTest(unittest.TestCase):
         frontmatter = skill.split("---", 2)[1]
 
         self.assertIn("web search, scraping, crawling, structured data collection", frontmatter)
-        self.assertIn("采集后处理衔接（强制）", skill)
-        self.assertIn("采集产物落盘约定（强制）", skill)
+        self.assertIn("## 采集成功后的收尾", skill)
+        self.assertIn("### 自动落盘", skill)
+        self.assertIn("所有采集原始产物放入会话专属目录", skill)
         self.assertIn('display_name: "byCLI 浏览器驱动与采集"', metadata)
         self.assertIn('short_description: "驱动浏览器采集数据、修复失败的 adapter、编写新 adapter"', metadata)
         self.assertIn('default_prompt: "用 bycli 帮我采集这个网站的数据"', metadata)
@@ -207,24 +210,26 @@ class AgentReachSkillContractTest(unittest.TestCase):
         skill = BYCLI_SKILL.read_text(encoding="utf-8")
 
         for phrase in (
-            "浏览器 session 结束后执行 cleanup",
-            "三层关闭，顺序重要",
+            "清理遵循“只清理当前任务创建或独占拥有的资源”原则",
+            "当前任务创建或独占拥有的 TAB",
             "bycli browser <session> close",
             "bycli daemon stop",
             "openclaw browser --browser-profile openclaw stop",
-            "入库或知识整理失败",
-            "Session 结束 | 不主动清理",
+            "入库成功且用户未要求保留时可由 knowledge-ingest 清理",
+            "session 结束不主动清理",
         ):
             self.assertIn(phrase, skill)
 
     def test_bycli_recovers_a_stopped_browser_with_start_chrome_script(self):
         skill = BYCLI_SKILL.read_text(encoding="utf-8")
-        cold_start = skill.split("### 冷启动", 1)[1].split("### 桥接正常后的 TAB 分流", 1)[0]
+        cold_start = skill.split("### 1. 冷启动和桥接检查", 1)[1].split("### 2. TAB 分流", 1)[0]
 
         expected_steps = (
             "openclaw browser --browser-profile openclaw status",
-            "浏览器未运行",
+            "status 明确显示浏览器未运行",
+            "if test -x /usr/local/bin/start-chrome.sh; then",
             "/usr/local/bin/start-chrome.sh",
+            "openclaw browser --browser-profile openclaw start",
             "bycli doctor",
             "bycli daemon status",
         )
@@ -232,6 +237,7 @@ class AgentReachSkillContractTest(unittest.TestCase):
             self.assertIn(step, cold_start)
         positions = [cold_start.index(step) for step in expected_steps]
         self.assertEqual(positions, sorted(positions))
+        self.assertIn("否则执行 `openclaw browser --browser-profile openclaw start`", cold_start)
         self.assertIn("openclaw browser --browser-profile openclaw stop", skill)
 
     def test_bycli_evals_cover_status_discovery_and_safe_login_boundaries(self):
