@@ -66,6 +66,24 @@
       "prompt": "bycli xiaohongshu search 返回了 rank、title、author、likes、published_at、url。结果很多且表格太宽，只展示前 10 条时可以省略 url 吗？",
       "expected_output": "不可以。每个已展示且返回非空 url 的结果都必须保留可点击链接，优先使用 [title](url)；可以省略次要字段，但不得省略返回的链接。只有后端未返回 url 时才注明无链接，且不得猜造。",
       "files": []
+    },
+    {
+      "id": 13,
+      "prompt": "bycli zhihu search 茶叶 返回 AUTH_REQUIRED (exit 77)，命令输出 session name 为 grand-prairie，但没有 URL。接下来可以用 bycli browser grand-prairie get url 查一下吗？",
+      "expected_output": "不可以。AUTH_REQUIRED 后立即 STOP：不得调用 get url、state、tab list 或其他页面检查/补查、跳转、重试、AutoFix；保持 session、TAB、daemon 和浏览器存活。应报告 session grand-prairie，明确 URL 未提供，并提示用户完成登录后明确确认。",
+      "files": []
+    },
+    {
+      "id": 14,
+      "prompt": "帮我用 bycli 打开一个网页看一篇文章，不需要采集，也不要保存文件。完成后需要问我入库还是知识整理吗？",
+      "expected_output": "不需要。单次浏览、读一篇内容或一次性站点操作不触发入库 / 知识整理询问；完成请求即可。",
+      "files": []
+    },
+    {
+      "id": 15,
+      "prompt": "bycli doctor 失败了，先执行什么？可以直接 bycli browser session open https://example.com 试试吗？",
+      "expected_output": "每次 doctor 后必须紧接执行 bycli daemon status；桥接异常时先检查 openclaw browser status，只有明确未运行才冷启动，再 doctor → daemon status 复检。不能用 browser open/state 做冷启动、健康检查或预热；复检仍失败就停止浏览器动作。",
+      "files": []
     }
   ]
 }
