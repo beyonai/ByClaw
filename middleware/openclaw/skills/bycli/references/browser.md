@@ -283,7 +283,9 @@ bycli browser login get value 4                    # verify (autocomplete can ea
 bycli browser login click 6                        # submit
 bycli browser login wait selector "[data-testid=account-menu]" --timeout 15000
 bycli browser login state                          # fresh refs on logged-in page
-# If still on login page (MFA), keep session alive — don't close.
+# If still on login/SSO/MFA, CAPTCHA, anti-bot, or verification page:
+# stop immediately, keep session/TAB/daemon/browser alive, do not inspect or retry,
+# and follow ../SKILL.md "认证、人工验证和 STOP".
 ```
 
 ### Pick from a long native dropdown
@@ -368,7 +370,7 @@ bycli browser checkout eval "(() => document.querySelector('input[name=cardnumbe
 
 | symptom | fix |
 |---------|-----|
-| `bycli doctor` red: "Browser not connected" | 见 SKILL.md 冷启动流程：`openclaw browser --browser-profile openclaw start` |
+| `bycli doctor` red: "Browser not connected" | 见 SKILL.md 冷启动流程：先执行 `openclaw browser --browser-profile openclaw status`；仅明确未运行时执行 `/usr/local/bin/start-chrome.sh` |
 | `Browser profile "<id>" is not connected` | 同上，Chromium 未运行 |
 | `Extension: connected` but `Connectivity: failed` | Race during cold start. Re-run `bycli doctor` after a few seconds; if persistent, `bycli daemon restart`. |
 | `attach failed: chrome-extension://...` | Disable 1Password / other CDP-hungry extensions temporarily. |
