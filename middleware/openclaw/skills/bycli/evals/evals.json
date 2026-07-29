@@ -28,7 +28,7 @@
     {
       "id": 5,
       "prompt": "帮我打开 https://example.com 并提取页面上的表格数据",
-      "expected_output": "先执行 bycli list -f json 动态发现命令；存在 web/read 时优先执行 bycli web read --url https://example.com。仅在不存在 web/read 或站点专用 Adapter 时进入 raw Browser：先执行 openclaw browser --browser-profile openclaw status，仅当浏览器未运行时执行 /usr/local/bin/start-chrome.sh，随后执行 bycli doctor、bycli daemon status，再 open/state/extract；结束时只清理当前任务拥有的资源。",
+      "expected_output": "先执行 bycli list -f json 动态发现命令；存在 web/read 时优先执行 bycli web read --url https://example.com。仅在不存在 web/read 或站点专用 Adapter 时进入 raw Browser：先执行 openclaw browser --browser-profile openclaw status；仅当浏览器明确未运行时，若 /usr/local/bin/start-chrome.sh 存在且可执行则执行它，否则执行 openclaw browser --browser-profile openclaw start；随后执行 bycli doctor、bycli daemon status，再 open/state/extract；结束时只清理当前任务拥有的资源。",
       "files": []
     },
     {
@@ -82,7 +82,7 @@
     {
       "id": 15,
       "prompt": "bycli doctor 失败了，先执行什么？可以直接 bycli browser session open https://example.com 试试吗？",
-      "expected_output": "每次 doctor 后必须紧接执行 bycli daemon status；桥接异常时先检查 openclaw browser status，只有明确未运行才冷启动，再 doctor → daemon status 复检。不能用 browser open/state 做冷启动、健康检查或预热；复检仍失败就停止浏览器动作。",
+      "expected_output": "每次 doctor 后必须紧接执行 bycli daemon status；桥接异常时先检查 openclaw browser status，只有明确未运行才冷启动：/usr/local/bin/start-chrome.sh 存在且可执行时使用它，否则回退 openclaw browser --browser-profile openclaw start，再 doctor → daemon status 复检。不能用 browser open/state 做冷启动、健康检查或预热；复检仍失败就停止浏览器动作。",
       "files": []
     }
   ]
