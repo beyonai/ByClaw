@@ -1,32 +1,74 @@
 package com.iwhalecloud.byai.manager.application.runner;
 
+import com.iwhalecloud.byai.common.util.RedisUtil;
+import com.iwhalecloud.byai.common.util.RedisUtil.RedisKVPair;
+import com.iwhalecloud.byai.manager.application.runner.digemployeestartup.DigEmployeeStartupSyncProperties;
+import com.iwhalecloud.byai.manager.application.runner.digemployeestartup.StartupSyncDlqRecorder;
+import com.iwhalecloud.byai.manager.application.runner.digemployeestartup.StartupSyncMetrics;
+import com.iwhalecloud.byai.manager.application.runner.digemployeestartup.StartupSyncLockGuard;
+import com.iwhalecloud.byai.manager.application.runner.digemployeestartup.StartupSyncLockRenewer;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.DigEmployeeRedisSyncProperties;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeApplicationService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
+import jakarta.annotation.PreDestroy;
 import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * 数字员工及其关联资源 Redis 配置快照全量初始化。
  * 实现 ApplicationRunner，在服务启动时提交异步任务，不阻塞 Spring Boot 启动。
+ * <p>
+ * <strong>PR-1 改造要点</strong>：
+ * <ul>
+ *     <li>收集一个数字员工及其关联资源的所有 (key, jsonContent) 对，
+ *         调用 {@link RedisUtil#pipelineSetStrings} 一次性 Pipeline 写入</li>
+ *     <li>支持分页内并行（{@link DigEmployeeStartupSyncProperties#getParallelism}）</li>
+ *     <li>支持 target_content 空白跳过（{@code byai.dig-employee.startup-sync.skip-blank-target-content}）</li>
+ *     <li>失败资源计入 warn 日志，但不中断整体同步（向后兼容）</li>
+ * </ul>
+ *
+ * <strong>PR-fix Major-3/4/5 改造要点</strong>（向后兼容）：
+ * <ul>
+ *     <li>新路径仅在显式配置 {@code byai.dig-employee.startup-sync.enabled=true} 时启用</li>
+ *     <li>未配置新属性（默认 null）→ 回退旧 flag {@code INIT_DIG_EMPLOYEE_REDIS_ENABLED} 行为</li>
+ *     <li>分页内并行：每页拆 {@code parallelism} 个 chunk，各自走独立 Pipeline</li>
+ * </ul>
+ *
+ * @author he.duming
+ * @date 2025-05-10
  */
 @Component
 @Order(Ordered.LOWEST_PRECEDENCE)
 public class InitDigEmployeeRedisRunner implements ApplicationRunner {
+
+    /** 启动期分布式锁 key（PR-2 约定） */
+    public static final String STARTUP_LOCK_KEY = "byai:dig-employee:startup-sync";
 
     private static final Logger logger = LoggerFactory.getLogger(InitDigEmployeeRedisRunner.class);
 
@@ -47,16 +89,51 @@ public class InitDigEmployeeRedisRunner implements ApplicationRunner {
     @Autowired
     private DigEmployeeRedisSyncProperties digEmployeeRedisSyncProperties;
 
+    /**
+     * PR-1 启动期同步优化属性。{@code DigEmployeeStartupSyncProperties.enabled} 默认为 {@code null}
+     * （未显式配置）；调用方需通过 {@link DigEmployeeStartupSyncProperties#getEnabledRaw()}
+     * 区分"未配置 vs 显式 false"。
+     */
+    @Autowired
+    private DigEmployeeStartupSyncProperties startupSyncProperties;
+
+    /**
+     * 分页内并行专用线程池（PR-1 引入）；可选注入，
+     * 未注入时分片任务回退 {@link ForkJoinPool#commonPool()}。
+     */
+    @Autowired(required = false)
+    @Qualifier("digEmployeeStartupSyncExecutor")
+    private ThreadPoolTaskExecutor digEmployeeStartupSyncExecutor;
+
+    // ====== PR-4: DLQ + Metrics 依赖 ======
+    @Autowired
+    private StartupSyncDlqRecorder startupSyncDlqRecorder;
+
+    @Autowired
+    private StartupSyncMetrics startupSyncMetrics;
+
+    // ====== PR-2: 分布式锁相关字段 ======
+    @Autowired
+    private StartupSyncLockRenewer startupSyncLockRenewer;
+
+    @Autowired
+    private StartupSyncLockGuard startupSyncLockGuard;
+
+    /** 本 Pod 的锁标识（{@code POD_NAME@POD_IP}，未设置时回退 hostname@local-ip） */
+    private final String podId = resolvePodId();
+    /** 当前是否由本 Pod 持有分布式锁 */
+    private volatile boolean lockHeld = false;
+    /** renewLock 心跳调度器（由 {@link #tryAcquireStartupLock} 启动） */
+    private volatile ScheduledExecutorService lockRenewerScheduler;
+    /** JVM shutdown hook 注册标记（避免重复注册） */
+    private final AtomicBoolean shutdownHookRegistered = new AtomicBoolean(false);
+
     @Override
     public void run(ApplicationArguments args) {
-        if (!initDigEmployeeRedisEnabled) {
-            logger.info("数字员工Redis全量初始化开关 INIT_DIG_EMPLOYEE_REDIS_ENABLED={}，跳过初始化",
-                initDigEmployeeRedisEnabled);
-            return;
-        }
         String env = System.getenv("BE_ENV");
         boolean isDev = StringUtils.isNotEmpty(env) && "development".equals(env);
         if (isDev) {
+            logger.info("BE_ENV=development 跳过数字员工Redis全量初始化");
             return;
         }
         if (digEmployeeRedisSyncProperties == null || !digEmployeeRedisSyncProperties.isJsonRedisSyncEnabled()) {
@@ -68,14 +145,464 @@ public class InitDigEmployeeRedisRunner implements ApplicationRunner {
             return;
         }
 
+        // PR-fix Major-5: 双开关显式 if/else 合并
+        boolean newPropsExplicitlyConfigured = startupSyncProperties != null
+            && startupSyncProperties.getEnabledRaw() != null;
+        boolean newEnabledValue = startupSyncProperties != null && startupSyncProperties.isEnabled();
+        boolean legacyEnabled = initDigEmployeeRedisEnabled;
+
+        boolean runAnyPath;
+        if (newPropsExplicitlyConfigured) {
+            // 显式配置新属性时，新属性为唯一权威
+            runAnyPath = newEnabledValue;
+            if (runAnyPath) {
+                logger.info("byai.dig-employee.startup-sync.enabled=true 显式启用新路径（Pipeline + 分页内并行 + 跳过开关）");
+            }
+            else {
+                logger.info("byai.dig-employee.startup-sync.enabled=false 显式禁用同步；忽略旧 env INIT_DIG_EMPLOYEE_REDIS_ENABLED={}",
+                    legacyEnabled);
+                return;
+            }
+        }
+        else {
+            // 未配置新属性 → 严格向后兼容旧 flag
+            runAnyPath = legacyEnabled;
+            logger.info("byai.dig-employee.startup-sync 未显式配置，回退旧 flag INIT_DIG_EMPLOYEE_REDIS_ENABLED={}",
+                legacyEnabled);
+            if (!runAnyPath) {
+                return;
+            }
+        }
+
+        // PR-2: 优化路径需要先抢分布式锁
+        boolean optimizedPath = newPropsExplicitlyConfigured && newEnabledValue;
+        if (optimizedPath) {
+            // PR-2-fix Major-2: Redis 异常时降级为无锁继续执行（不阻塞 Spring Boot 启动）；
+            // 启动期 Redis 不可用属于可恢复故障（Redis 抖动 / 重启），降级策略：
+            // - lockEnabled=true + Redis 异常 → 降级为无锁（不进入多 Pod 互斥模式）
+            // - lockEnabled=false → 本来就不抢锁
+            //   两种情况下 lockHeld=false，后续 releaseStartupLockIfHeld 会安全跳过
+            boolean lockAcquired;
+            try {
+                lockAcquired = tryAcquireStartupLock();
+            }
+            catch (Exception e) {
+                logger.warn("Redis 异常，启动期分布式锁获取失败，降级为无锁执行（多 Pod 场景下可能重复同步）: lockKey={}, podId={}, reason={}",
+                    STARTUP_LOCK_KEY, podId, e.getMessage(), e);
+                lockAcquired = false;
+            }
+            if (!lockAcquired) {
+                // 锁已被其他 Pod 持有 OR 降级为无锁：均直接 return（不进入 doFullInit）
+                return;
+            }
+        }
+
+        // 顶层异步任务使用 commonPool（避免与内部分片并行任务争用独立 Executor）
         CompletableFuture.runAsync(this::doFullInit);
         logger.debug("数字员工及其关联资源Redis全量初始化已提交异步执行");
     }
 
+    // ============================================================
+    // PR-2: 启动期分布式锁相关方法
+    // ============================================================
+
+    /**
+     * 解析本 Pod 唯一标识：{@code POD_NAME@POD_IP}，未设置时回退 {@code <hostname>@<local-ip>}。
+     * <p>
+     * K8s 部署场景下，{@code POD_NAME} 与 {@code POD_IP} 由 downward API 注入；
+     * 物理机/VM 部署场景下回退到 hostname。
+     */
+    static String resolvePodId() {
+        String podName = System.getenv("POD_NAME");
+        String podIp = System.getenv("POD_IP");
+        if (StringUtils.isNotEmpty(podName) && StringUtils.isNotEmpty(podIp)) {
+            return podName + "@" + podIp;
+        }
+        try {
+            String host = java.net.InetAddress.getLocalHost().getHostName();
+            String ip = java.net.InetAddress.getLocalHost().getHostAddress();
+            return StringUtils.defaultIfEmpty(host, "unknown") + "@" + StringUtils.defaultIfEmpty(ip, "local");
+        }
+        catch (Exception e) {
+            return "unknown@local";
+        }
+    }
+
+    /**
+     * 尝试抢启动期分布式锁。成功则启动 renewer + 注册 shutdown hook；失败则返回 false。
+     * <p>
+     * 锁状态由 {@link #lockHeld} 字段承载；后续 doFullInit 通过 {@link #releaseStartupLockIfHeld}
+     * 在 finally 中显式释放。
+     */
+    private boolean tryAcquireStartupLock() {
+        boolean lockEnabled = startupSyncProperties != null && startupSyncProperties.isLockEnabled();
+        if (!lockEnabled) {
+            logger.info("byai.dig-employee.startup-sync.lock-enabled=false 跳过分布式锁（多 Pod 并发同步）");
+            return true;
+        }
+        int expireSeconds = effectiveLockExpireSeconds();
+        int renewInterval = effectiveLockRenewInterval();
+        String lockKey = STARTUP_LOCK_KEY;
+
+        boolean acquired = Boolean.TRUE.equals(RedisUtil.lock(lockKey, podId, expireSeconds));
+        if (!acquired) {
+            String currentHolder = safeReadLockHolder(lockKey);
+            logger.info("分布式锁已被其他 Pod 持有，本 Pod 跳过启动期同步: lockKey={}, currentHolder={}, podId={}",
+                lockKey, currentHolder, podId);
+            return false;
+        }
+        lockHeld = true;
+        // 启动 renewer 心跳
+        lockRenewerScheduler = startupSyncLockRenewer.startRenewal(lockKey, podId, renewInterval, expireSeconds);
+        // 注册 JVM shutdown hook
+        registerShutdownHook();
+        logger.info("分布式锁获取成功: lockKey={}, podId={}, expireSeconds={}, renewIntervalSeconds={}",
+            lockKey, podId, expireSeconds, renewInterval);
+        return true;
+    }
+
+    /**
+     * 在 doFullInit 完成后（或异常路径）调用，释放锁 + 停 renewer。
+     */
+    private void releaseStartupLockIfHeld() {
+        if (!lockHeld) {
+            return;
+        }
+        // fence 全局停止信号
+        startupSyncLockGuard.requestStop();
+        // 停 renewer
+        try {
+            if (lockRenewerScheduler != null) {
+                startupSyncLockRenewer.stopRenewal(lockRenewerScheduler);
+            }
+        }
+        catch (Exception e) {
+            logger.warn("stopRenewal 异常, reason={}", e.getMessage(), e);
+        }
+        // 释放锁（CAS 校验 podId 防止误删）
+        try {
+            Boolean released = RedisUtil.releaseLock(STARTUP_LOCK_KEY, podId);
+            if (Boolean.TRUE.equals(released)) {
+                logger.info("分布式锁已释放: lockKey={}, podId={}", STARTUP_LOCK_KEY, podId);
+            }
+            else {
+                logger.warn("分布式锁 releaseLock 返回 false: lockKey={}, podId={} —— 可能已被其他 Pod 接管或已过期",
+                    STARTUP_LOCK_KEY, podId);
+            }
+        }
+        catch (Exception e) {
+            logger.warn("releaseLock 异常, reason={}", e.getMessage(), e);
+        }
+        finally {
+            lockHeld = false;
+            lockRenewerScheduler = null;
+        }
+    }
+
+    /**
+     * 在 doFullInitOptimized 每个 page 处理前校验锁仍由本 Pod 持有。
+     * 不持有时返回 false，doFullInit 应停止后续处理。
+     */
+    private boolean verifyLockStillHeld() {
+        if (startupSyncProperties == null || !startupSyncProperties.isLockEnabled()) {
+            // 锁关闭时跳过 fence 检查
+            return true;
+        }
+        return startupSyncLockGuard.mayProceed(STARTUP_LOCK_KEY, podId);
+    }
+
+    private void registerShutdownHook() {
+        if (!shutdownHookRegistered.compareAndSet(false, true)) {
+            return;
+        }
+        try {
+            Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                try {
+                    releaseStartupLockIfHeld();
+                }
+                catch (Throwable t) {
+                    logger.warn("shutdown hook 释放锁异常: {}", t.getMessage(), t);
+                }
+            }, "startup-sync-shutdown-hook"));
+        }
+        catch (Exception e) {
+            logger.warn("registerShutdownHook 失败, reason={}", e.getMessage(), e);
+        }
+    }
+
+    @PreDestroy
+    public void onShutdown() {
+        // Spring 容器销毁时也确保锁释放
+        releaseStartupLockIfHeld();
+    }
+
+    private String safeReadLockHolder(String lockKey) {
+        try {
+            return RedisUtil.getString(lockKey);
+        }
+        catch (Exception e) {
+            return "<read-failed:" + e.getMessage() + ">";
+        }
+    }
+
+    /**
+     * 锁租约（秒）：优先取 properties，缺省 600s。
+     */
+    private int effectiveLockExpireSeconds() {
+        int configured = startupSyncProperties == null ? 600 : startupSyncProperties.getLockExpireSeconds();
+        if (configured < 30) {
+            return 30; // 下限保护，防止配置错误导致锁瞬间过期
+        }
+        return Math.min(configured, 3600);
+    }
+
+    /**
+     * 续租间隔（秒）：优先取 properties，缺省 30s。
+     */
+    private int effectiveLockRenewInterval() {
+        int configured = startupSyncProperties == null ? 30 : startupSyncProperties.getLockRenewIntervalSeconds();
+        if (configured < 1) {
+            return 1;
+        }
+        return Math.min(configured, 300);
+    }
+
+    /**
+     * 主入口：检测是否走优化路径（Pipeline + 分页内并行 + 跳过开关），
+     * 其余情况走兼容旧行为（{@link #doFullInitLegacy()}）。
+     */
     private void doFullInit() {
         long startTime = System.currentTimeMillis();
         logger.debug("开始异步全量初始化数字员工及其关联资源配置到Redis...");
 
+        // 仅在新属性显式配置为 true 时走优化路径
+        boolean optimizedPath = startupSyncProperties != null
+            && Boolean.TRUE.equals(startupSyncProperties.getEnabledRaw())
+            && startupSyncProperties.isEnabled();
+
+        try {
+            if (optimizedPath) {
+                doFullInitOptimized();
+            }
+            else {
+                doFullInitLegacy();
+            }
+        }
+        catch (Exception e) {
+            logger.error("数字员工及其关联资源Redis全量初始化失败：{}", e.getMessage(), e);
+        }
+        finally {
+            // PR-2: 释放锁 + 停 renewer（若持有）
+            if (lockHeld) {
+                releaseStartupLockIfHeld();
+            }
+        }
+
+        long costTime = (System.currentTimeMillis() - startTime) / 1000;
+        logger.info("数字员工及其关联资源Redis全量初始化完成，耗时{}秒", costTime);
+    }
+
+    /**
+     * 优化路径（PR-1 + PR-3 + PR-4）。每页拆 parallelism 个 chunk，每个 chunk 独立 Pipeline 写入；
+     * chunk 失败不影响其他 chunk。
+     * <p>
+     * PR-3 关键改进：每页开始时一次性批量预取所有数字员工的 {@code target_content}
+     * （单 SQL IN 子句，避免每资源一次 findById），各 chunk 通过预取 map 引用。
+     * <p>
+     * <strong>PR-4 时长保护说明</strong>:
+     * <ul>
+     *   <li><b>总时长保护</b>：主 while 循环每轮检查累计 elapsed 与 {@code timeoutSeconds};
+     *       超时主动 break,不再进入下一 page。</li>
+     *   <li><b>per-page 超时保护</b>：通过 {@code allOf.get(perPageTimeoutSeconds, NANOSECONDS)} 强制超时,
+     *       超时后取消未完成 chunk。但 <b>超时 ≠ 立即停止 chunk 线程</b>(PR-fix Major-3):
+     *       {@code Future.cancel(true)} 仅设置中断标志 + {@code Thread.interrupt()},
+     *       而 PostgreSQL JDBC driver 阻塞 socket I/O 不会响应 interrupt。
+     *       实际语义是"逻辑取消": 已发起但未完成的 chunk 结果丢弃(通过 isCancelled 过滤),
+     *       已完成的部分保留。物理终止需要后续 PR 调小 JDBC socketTimeout(建议 5-10s)
+     *       配合 cancel 才能实现真正的硬超时。当前以软超时方式保证主流程不阻塞。</li>
+     * </ul>
+     */
+    private void doFullInitOptimized() {
+        int pipelineBatchSize = effectivePipelineBatchSize();
+        int parallelism = effectiveParallelism();
+        long totalTimeoutNanos = effectiveTimeoutNanos();
+        long perPageTimeoutNanos = effectivePerPageTimeoutNanos();
+        long startupStartNanos = System.nanoTime();
+        ExecutorService exec = digEmployeeStartupSyncExecutor != null
+            ? digEmployeeStartupSyncExecutor.getThreadPoolExecutor()
+            : ForkJoinPool.commonPool();
+
+        int totalEmployees = 0;
+        int totalKvWrites = 0;
+        int totalKvFailures = 0;
+        int totalSkippedBlank = 0;
+        int totalChunkTimeouts = 0;
+        int pageIndex = 1;
+
+        while (true) {
+            // PR-4: 总时长保护 (累积 elapsed time)
+            if (totalTimeoutNanos > 0) {
+                long elapsed = System.nanoTime() - startupStartNanos;
+                if (elapsed >= totalTimeoutNanos) {
+                    logger.warn("[PR-4 总时长保护] 启动期同步已超过 timeoutSeconds={}, 累计耗时={}ms, page={}, 主动 break 退出循环",
+                        totalTimeoutNanos / 1_000_000_000L, elapsed / 1_000_000L, pageIndex);
+                    if (startupSyncMetrics != null) {
+                        startupSyncMetrics.recordTimeout();
+                        startupSyncMetrics.recordFailure("TOTAL_TIMEOUT");
+                    }
+                    break;
+                }
+            }
+
+            // PR-2: 每个 page 前用 fencing token 校验锁
+            if (!verifyLockStillHeld()) {
+                logger.warn("fencing 检测到锁已不属于本 Pod，提前退出 doFullInitOptimized at page={}",
+                    pageIndex);
+                if (startupSyncMetrics != null) {
+                    startupSyncMetrics.recordFailure("FENCING_TOKEN_LOST");
+                }
+                break;
+            }
+
+            List<SsResource> resources = ssResourceService.pageActiveDigitalEmployees(pageIndex, batchSize);
+            if (CollectionUtils.isEmpty(resources)) {
+                break;
+            }
+
+            // PR-3: 整页预取 target_content(单 SQL IN 子句;避免每资源 findById)
+            List<Long> pageResourceIds = resources.stream()
+                .map(SsResource::getResourceId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
+            Map<Long, String> prefetchedTargetContents =
+                digitalEmployeeApplicationService.prefetchDigEmployeeTargetContents(pageResourceIds);
+            int prefetchedCount = prefetchedTargetContents.size();
+            int blankCount = pageResourceIds.size() - prefetchedCount;
+            if (blankCount > 0) {
+                logger.info("[PR-3] 本页 target_content 空白率: {}/{} ({}%); 这些资源由"
+                    + " collectDigEmployeeSyncEntriesWithPrefetch 回退路径处理",
+                    blankCount, pageResourceIds.size(),
+                    pageResourceIds.isEmpty() ? 0 : (100 * blankCount / pageResourceIds.size()));
+            }
+
+            // 1) split page into chunks
+            List<List<SsResource>> chunks = chunkSplit(resources, parallelism);
+            // 2) submit each chunk in parallel
+            List<CompletableFuture<ChunkStats>> futures = new ArrayList<>(chunks.size());
+            for (List<SsResource> chunk : chunks) {
+                futures.add(CompletableFuture.supplyAsync(
+                    () -> processChunk(chunk, pipelineBatchSize, prefetchedTargetContents),
+                    exec));
+            }
+            // 3) wait all (PR-4: per-page 超时保护,超时的 chunk 视为 timeout 计入 DLQ)
+            int pageTimeoutCount = 0;
+            try {
+                if (perPageTimeoutNanos > 0) {
+                    CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+                        .get(perPageTimeoutNanos, TimeUnit.NANOSECONDS);
+                }
+                else {
+                    CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+                }
+            }
+            catch (TimeoutException te) {
+                // Per-page 超时: 取消所有未完成的 chunk, 记录 DLQ
+                pageTimeoutCount = (int) futures.stream()
+                    .filter(f -> !f.isDone())
+                    .count();
+                for (CompletableFuture<ChunkStats> f : futures) {
+                    if (!f.isDone()) {
+                        f.cancel(true);
+                    }
+                }
+                logger.warn("[PR-4 单 page 超时] page={}, perPageTimeout={}ms, 取消 {} 个未完成 chunk, 资源进入 DLQ",
+                    pageIndex, perPageTimeoutNanos / 1_000_000L, pageTimeoutCount);
+                for (SsResource r : resources) {
+                    if (startupSyncDlqRecorder != null) {
+                        startupSyncDlqRecorder.recordFailure(
+                            r.getResourceId(), "DIG_EMPLOYEE", "PER_PAGE_TIMEOUT");
+                    }
+                }
+                if (startupSyncMetrics != null) {
+                    startupSyncMetrics.recordTimeout();
+                    startupSyncMetrics.recordFailure("PER_PAGE_TIMEOUT");
+                }
+            }
+            catch (Exception e) {
+                logger.error("[PR-4] page={} allOf 等待异常: {}", pageIndex, e.getMessage(), e);
+                if (startupSyncMetrics != null) {
+                    startupSyncMetrics.recordFailure("ALL_OF_INTERRUPTED");
+                }
+            }
+            totalChunkTimeouts += pageTimeoutCount;
+
+            // 4) aggregate
+            for (CompletableFuture<ChunkStats> f : futures) {
+                if (f.isCancelled() || f.isCompletedExceptionally()) {
+                    // 已被取消或异常完成: 视作失败, 资源已通过 DLQ 处理
+                    continue;
+                }
+                ChunkStats st;
+                try {
+                    st = f.getNow(ChunkStats.empty());
+                }
+                catch (Exception e) {
+                    continue;
+                }
+                if (st.kvFailures > 0) {
+                    // chunk 内有 kv 写入失败 -> 记录 metrics
+                    if (startupSyncMetrics != null) {
+                        startupSyncMetrics.recordFailure("CHUNK_KV_FAILURE");
+                    }
+                }
+                totalEmployees += st.total;
+                totalKvWrites += st.kvWrites;
+                totalKvFailures += st.kvFailures;
+                totalSkippedBlank += st.skippedBlank;
+            }
+
+            logger.debug("数字员工Redis全量初始化进度:page={}, 本页资源={}, 预取成功={}, 空白={}, chunks={}, "
+                    + "本批写入成功={}, 失败={}, 跳过target_content空白={}, page超时取消={}",
+                pageIndex, resources.size(), prefetchedCount, blankCount, chunks.size(),
+                futures.stream().mapToInt(f -> f.getNow(ChunkStats.empty()).kvWrites).sum(),
+                futures.stream().mapToInt(f -> f.getNow(ChunkStats.empty()).kvFailures).sum(),
+                futures.stream().mapToInt(f -> f.getNow(ChunkStats.empty()).skippedBlank).sum(),
+                pageTimeoutCount);
+
+            if (resources.size() < batchSize) {
+                break;
+            }
+            pageIndex++;
+        }
+
+        long totalCostMs = (System.nanoTime() - startupStartNanos) / 1_000_000L;
+
+        // PR-4: 上报 metrics
+        if (startupSyncMetrics != null) {
+            startupSyncMetrics.recordTotal(totalEmployees);
+            startupSyncMetrics.recordSuccess(totalKvWrites);
+            startupSyncMetrics.recordDuration(System.nanoTime() - startupStartNanos);
+            // 同步 DLQ size gauge
+            try {
+                if (startupSyncDlqRecorder != null) {
+                    startupSyncMetrics.updateDlqSize(startupSyncDlqRecorder.getDlqSize());
+                }
+            }
+            catch (Exception ignored) { }
+        }
+
+        logger.info("数字员工及其关联资源Redis全量初始化(优化路径)完成:资源{}个, 写入{}个 key/value 对, "
+                + "kv失败{}个, 跳过target_content空白{}个, page超时取消{}个 chunk, 分片并行度={}, pipeline批内大小={}, 总耗时={}ms",
+            totalEmployees, totalKvWrites, totalKvFailures, totalSkippedBlank, totalChunkTimeouts,
+            parallelism, pipelineBatchSize, totalCostMs);
+    }
+
+    /**
+     * 兼容路径：保留 PR-1 之前的原始行为（单条 Redis SET + 关联资源单条 SET），
+     * 通过 {@code syncExistingDigEmployeeConfigToRedisQuietly} 单条写入，
+     * 适配无法立刻切到 Pipeline 的环境。
+     */
+    private void doFullInitLegacy() {
         int totalEmployees = 0;
         int pageIndex = 1;
 
@@ -85,7 +612,6 @@ public class InitDigEmployeeRedisRunner implements ApplicationRunner {
                 if (CollectionUtils.isEmpty(resources)) {
                     break;
                 }
-
                 for (SsResource resource : resources) {
                     if (resource == null || resource.getResourceId() == null) {
                         continue;
@@ -96,24 +622,221 @@ public class InitDigEmployeeRedisRunner implements ApplicationRunner {
                         totalEmployees++;
                     }
                     catch (Exception e) {
-                        logger.error("全量同步数字员工Redis失败, resourceId={}, reason={}", resource.getResourceId(),
-                            e.getMessage(), e);
+                        logger.error("全量同步数字员工Redis失败, resourceId={}, reason={}",
+                            resource.getResourceId(), e.getMessage(), e);
                     }
                 }
-
-                logger.debug("数字员工Redis全量初始化进度：已处理{}个数字员工", totalEmployees);
-
+                logger.debug("数字员工Redis全量初始化（legacy）进度：已处理{}个数字员工", totalEmployees);
                 if (resources.size() < batchSize) {
                     break;
                 }
                 pageIndex++;
             }
-
-            long costTime = (System.currentTimeMillis() - startTime) / 1000;
-            logger.info("数字员工及其关联资源Redis全量初始化完成，共处理{}个数字员工，耗时{}秒", totalEmployees, costTime);
+            logger.info("数字员工及其关联资源Redis全量初始化（legacy 路径）完成：共处理{}个数字员工", totalEmployees);
         }
         catch (Exception e) {
-            logger.error("数字员工及其关联资源Redis全量初始化失败：{}", e.getMessage(), e);
+            logger.error("数字员工及其关联资源Redis全量初始化（legacy）失败：{}", e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 处理一个 chunk：遍历资源 → 收集 (key, jsonContent) → Pipeline 批量写入。
+     * <p>
+     * 单 chunk 失败（collect 异常 / Pipeline 异常）被 try/catch 隔离，记录日志后返回；
+     * 不影响其他 chunk 的执行。
+     */
+    private ChunkStats processChunk(List<SsResource> chunk, int pipelineBatchSize,
+                                    Map<Long, String> prefetchedTargetContents) {
+        // PR-2-fix Major-1: chunk 起始处 fencing 校验（PR-1 实现的分页内并行场景下，
+        // 4 个 chunk 并行执行期间锁被其他 Pod 接管时本 chunk 仍会完整写完；
+        // 在 chunk 入口前置 fence 可避免 silent data loss）。
+        if (!verifyLockStillHeld()) {
+            logger.warn("[fencing] chunk 起始处检测到锁已丢失，跳过本 chunk ({} 条)",
+                chunk == null ? 0 : chunk.size());
+            return ChunkStats.empty();
+        }
+        int total = 0;
+        int kvWrites = 0;
+        int kvFailures = 0;
+        int skippedBlank = 0;
+        List<RedisKVPair> pairs = new ArrayList<>();
+        try {
+            for (SsResource resource : chunk) {
+                if (resource == null || resource.getResourceId() == null) {
+                    continue;
+                }
+                total++;
+                Long resourceId = resource.getResourceId();
+                Map<String, String> entries;
+                try {
+                    // PR-3: 优先使用整页预取的 target_content（避免 per-resource findById）
+                    String prefetched = prefetchedTargetContents == null
+                        ? null
+                        : prefetchedTargetContents.get(resourceId);
+                    if (prefetched != null) {
+                        // 整页预取命中：使用 WithPrefetch 变体
+                        entries = digitalEmployeeApplicationService
+                            .collectDigEmployeeSyncEntriesWithPrefetch(resourceId, prefetched);
+                    }
+                    else {
+                        // 整页预取未命中（target_content 空 或 异常）：
+                        // 回退到原 collectDigEmployeeSyncEntries（包含 findDetailsById 7-10 SQL）
+                        entries = digitalEmployeeApplicationService
+                            .collectDigEmployeeSyncEntries(resourceId);
+                        skippedBlank++;
+                    }
+                }
+                catch (Exception e) {
+                    logger.error("收集数字员工Redis同步条目失败, resourceId={}, reason={}",
+                        resourceId, e.getMessage(), e);
+                    continue;
+                }
+                if (entries == null || entries.isEmpty()) {
+                    skippedBlank++;
+                    continue;
+                }
+                for (Map.Entry<String, String> entry : entries.entrySet()) {
+                    if (entry.getKey() != null && entry.getValue() != null) {
+                        pairs.add(new RedisKVPair(entry.getKey(), entry.getValue()));
+                    }
+                }
+            }
+            int writes = flushPairsByPipeline(pairs, pipelineBatchSize);
+            kvWrites += writes;
+            kvFailures += (pairs.size() - writes);
+        }
+        catch (Exception e) {
+            logger.error("chunk 处理异常, chunkSize={}, reason={}", chunk.size(), e.getMessage(), e);
+        }
+        return new ChunkStats(total, kvWrites, kvFailures, skippedBlank);
+    }
+
+    /**
+     * 将一页资源按 parallelism 拆分；当 parallelism &lt;= 1 或资源数不足时不拆分。
+     * 尽量做到余数均匀分布（前几个 chunk 多 1 条）。
+     */
+    static List<List<SsResource>> chunkSplit(List<SsResource> resources, int parallelism) {
+        if (resources == null || resources.isEmpty()) {
+            return Collections.emptyList();
+        }
+        if (parallelism <= 1 || resources.size() <= parallelism) {
+            return Collections.singletonList(new ArrayList<>(resources));
+        }
+        int nchunks = Math.min(parallelism, resources.size());
+        int baseSize = resources.size() / nchunks;
+        int remainder = resources.size() % nchunks;
+        List<List<SsResource>> chunks = new ArrayList<>(nchunks);
+        int idx = 0;
+        for (int i = 0; i < nchunks; i++) {
+            int sz = baseSize + (i < remainder ? 1 : 0);
+            chunks.add(new ArrayList<>(resources.subList(idx, idx + sz)));
+            idx += sz;
+        }
+        return chunks;
+    }
+
+    /**
+     * 按 {@code pipelineBatchSize} 大小分批写入 {@link RedisUtil#pipelineSetStrings}。
+     *
+     * @param pairs 待写入的全部 (key, value) 对
+     * @param batchSize 单批内 key 上限
+     * @return 成功写入的 key 数量（失败次数 = pairs.size() - 返回值）
+     */
+    private int flushPairsByPipeline(List<RedisKVPair> pairs, int batchSize) {
+        if (pairs == null || pairs.isEmpty()) {
+            return 0;
+        }
+        boolean pipelineEnabled = startupSyncProperties == null || startupSyncProperties.isPipelineEnabled();
+        int success = 0;
+        for (int i = 0; i < pairs.size(); i += batchSize) {
+            int end = Math.min(i + batchSize, pairs.size());
+            List<RedisKVPair> sub = new ArrayList<>(pairs.subList(i, end));
+            try {
+                if (pipelineEnabled) {
+                    RedisUtil.pipelineSetStrings(sub);
+                }
+                else {
+                    // Pipeline 关闭时降级为逐条 SET（向后兼容，便于端到端回滚）
+                    for (RedisKVPair kv : sub) {
+                        RedisUtil.setString(kv.getKey(), kv.getValue());
+                    }
+                }
+                success += sub.size();
+            }
+            catch (Exception e) {
+                logger.error("Pipeline 批量写入Redis失败, batchIndex={}, sub=[{}..{}), size={}, reason={}",
+                    i / batchSize, i, end, sub.size(), e.getMessage(), e);
+            }
+        }
+        return success;
+    }
+
+    /**
+     * 解析有效的 Pipeline 批内大小：优先从 {@link DigEmployeeStartupSyncProperties} 取，
+     * 未配置或非法值时回退到 200。
+     */
+    private int effectivePipelineBatchSize() {
+        int configured = startupSyncProperties == null ? -1 : startupSyncProperties.getPipelineBatchSize();
+        return configured > 0 ? Math.min(configured, 1000) : 200;
+    }
+
+    /**
+     * 解析有效分片并行度：上限 8、下限 1；未配置时回退到 1（保持向后兼容串行语义）。
+     */
+    private int effectiveParallelism() {
+        int configured = startupSyncProperties == null ? -1 : startupSyncProperties.getParallelism();
+        if (configured <= 0) {
+            return 1;
+        }
+        return Math.max(1, Math.min(configured, 8));
+    }
+
+    /**
+     * 解析有效总时长纳秒（PR-4）。未配置或 0 → 0（不启用总时长保护）。
+     */
+    private long effectiveTimeoutNanos() {
+        if (startupSyncProperties == null) {
+            return 0L;
+        }
+        Long sec = startupSyncProperties.getTimeoutSeconds();
+        if (sec == null || sec <= 0) {
+            return 0L;
+        }
+        return sec * 1_000_000_000L;
+    }
+
+    /**
+     * 解析有效单 page 时长纳秒（PR-4）。未配置或 0 → 0（不启用 per-page 超时）。
+     */
+    private long effectivePerPageTimeoutNanos() {
+        if (startupSyncProperties == null) {
+            return 0L;
+        }
+        Long sec = startupSyncProperties.getPerPageTimeoutSeconds();
+        if (sec == null || sec <= 0) {
+            return 0L;
+        }
+        return sec * 1_000_000_000L;
+    }
+
+    /**
+     * 单 chunk 处理结果统计。
+     */
+    static final class ChunkStats {
+        final int total;
+        final int kvWrites;
+        final int kvFailures;
+        final int skippedBlank;
+
+        ChunkStats(int total, int kvWrites, int kvFailures, int skippedBlank) {
+            this.total = total;
+            this.kvWrites = kvWrites;
+            this.kvFailures = kvFailures;
+            this.skippedBlank = skippedBlank;
+        }
+
+        static ChunkStats empty() {
+            return new ChunkStats(0, 0, 0, 0);
         }
     }
 }

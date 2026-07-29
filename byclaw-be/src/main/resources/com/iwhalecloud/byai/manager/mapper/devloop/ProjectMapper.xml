@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.devloop.ProjectMapper">
+
+    <resultMap id="BaseResultMap" type="com.iwhalecloud.byai.manager.entity.devloop.Project">
+        <id column="project_id" property="projectId"/>
+        <result column="project_name" property="projectName"/>
+        <result column="description" property="description"/>
+        <result column="resource_id" property="resourceId"/>
+        <result column="project_type" property="projectType"/>
+        <result column="is_share" property="isShare"/>
+        <result column="is_default" property="isDefault"/>
+        <result column="create_by" property="createBy"/>
+        <result column="create_time" property="createTime"/>
+        <result column="update_by" property="updateBy"/>
+        <result column="update_time" property="updateTime"/>
+        <result column="delete_flag" property="deleteFlag"/>
+    </resultMap>
+
+    <resultMap id="ProjectListDtoResultMap"
+               type="com.iwhalecloud.byai.manager.dto.devloop.ProjectListDto"
+               extends="BaseResultMap">
+        <result column="session_count" property="sessionCount"/>
+    </resultMap>
+
+    <select id="selectProjectsByQo" resultMap="ProjectListDtoResultMap">
+        SELECT a.project_id,
+               a.project_name,
+               a.description,
+               a.resource_id,
+               a.project_type,
+               a.is_share,
+               a.create_by,
+               a.create_time,
+               a.update_by,
+               a.update_time,
+               a.delete_flag,
+               b.session_count
+        FROM byai_project a
+                 LEFT JOIN (SELECT project_id, COUNT(1) AS session_count
+                            FROM byai_session
+                            where creator_id = #{createBy}
+                            GROUP BY project_id) b
+                ON a.project_id = b.project_id
+        WHERE (a.project_type = 'default' or a.project_id IN (SELECT project_id FROM byai_project_member WHERE user_id = #{createBy}))
+        <!-- 软删除项目不再返回；历史空值按未删除兼容，避免老数据被误隐藏。 -->
+        AND (a.delete_flag IS NULL OR a.delete_flag != '1')
+        <if test="keyword != null and keyword != ''">
+            AND a.project_name LIKE CONCAT('%', #{keyword}, '%')
+        </if>
+        <if test="projectType != null and projectType != ''">
+            AND a.project_type = #{projectType}
+        </if>
+        <if test="isShare != null and isShare != ''">
+            AND a.is_share = #{isShare}
+        </if>
+        ORDER BY a.create_time DESC
+    </select>
+
+</mapper>

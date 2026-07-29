@@ -16,6 +16,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
@@ -69,7 +71,7 @@ public class MetaPromptService {
         List<FieldSpec> specs = buildFieldSpecs(isChinese, skeleton);
 
         Map<String, Object> generatedFields = generateAllFields(systemPrompt,
-            buildAllFieldsUserPrompt(request, skeleton, contextBlock, specs, isChinese), modelCode);
+            buildAllFieldsUserPrompt(request, skeleton, contextBlock, specs, isChinese), modelCode, isChinese);
         Map<String, Object> fields = normalizeGeneratedFields(generatedFields, specs, skeleton, resourceContext,
             isChinese);
 
@@ -109,7 +111,8 @@ public class MetaPromptService {
         boolean isChinese = "zh".equals(lang);
         String systemPrompt = isChinese ? SKILL_SYSTEM_PROMPT_ZH : SKILL_SYSTEM_PROMPT_EN;
         String userPrompt = buildSkillUserPrompt(request, isChinese);
-        Map<String, Object> generatedFields = generateAllFields(systemPrompt, userPrompt, request.getModelCode());
+        Map<String, Object> generatedFields = generateAllFields(systemPrompt, userPrompt, request.getModelCode(),
+            isChinese);
         return normalizeSkillGeneratedResult(generatedFields, request, isChinese);
     }
 
@@ -119,14 +122,15 @@ public class MetaPromptService {
         outputStream.flush();
     }
 
-    private Map<String, Object> generateAllFields(String systemPrompt, String userPrompt, String modelCode) {
+    private Map<String, Object> generateAllFields(String systemPrompt, String userPrompt, String modelCode,
+        boolean isChinese) {
         long startTime = System.currentTimeMillis();
         boolean acquired = false;
         try {
             LLM_SEMAPHORE.acquire();
             acquired = true;
             String content = aiService.generateText(systemPrompt, userPrompt, modelCode, LLM_ALL_FIELDS_MAX_TOKENS);
-            Map<String, Object> fields = OBJECT_MAPPER.readValue(extractJsonObject(content), Map.class);
+            Map<String, Object> fields = parseOrRepairGeneratedFields(content, modelCode, isChinese);
             log.info("Meta prompt stream generated all fields in {} ms", System.currentTimeMillis() - startTime);
             return fields;
         } catch (InterruptedException e) {
@@ -154,7 +158,7 @@ public class MetaPromptService {
             String content = aiService.generateTextStream(systemPrompt, userPrompt, modelCode, LLM_ALL_FIELDS_MAX_TOKENS,
                 chunk -> writeSseEvent(outputStream, "textDelta",
                     OBJECT_MAPPER.writeValueAsString(Map.of("value", chunk))));
-            Map<String, Object> generatedFields = OBJECT_MAPPER.readValue(extractJsonObject(content), Map.class);
+            Map<String, Object> generatedFields = parseOrRepairGeneratedFields(content, modelCode, isChinese);
             Map<String, Object> normalizedFields = normalizeGeneratedFields(generatedFields, specs, skeleton,
                 resourceContext, isChinese);
             writeSseEvent(outputStream, "finalFields", OBJECT_MAPPER.writeValueAsString(normalizedFields));
@@ -179,6 +183,38 @@ public class MetaPromptService {
                 LLM_SEMAPHORE.release();
             }
         }
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> parseOrRepairGeneratedFields(String content, String modelCode, boolean isChinese)
+        throws JsonProcessingException {
+        String jsonText = extractJsonObject(content);
+        try {
+            return OBJECT_MAPPER.readValue(jsonText, Map.class);
+        } catch (JsonProcessingException e) {
+            log.warn("Meta prompt model output is not valid JSON, attempting repair once", e);
+            String repairPrompt = buildJsonRepairPrompt(jsonText, isChinese);
+            String repairedContent = aiService.generateText(buildJsonRepairSystemPrompt(isChinese), repairPrompt,
+                modelCode, LLM_ALL_FIELDS_MAX_TOKENS);
+            return OBJECT_MAPPER.readValue(extractJsonObject(repairedContent), Map.class);
+        }
+    }
+
+    private String buildJsonRepairSystemPrompt(boolean isChinese) {
+        if (isChinese) {
+            return "你是严格的 JSON 修复器。只输出一个合法 JSON 对象，不要输出 Markdown、代码块或解释。";
+        }
+        return "You are a strict JSON repair tool. Output one valid JSON object only. No Markdown, code fences, or explanations.";
+    }
+
+    private String buildJsonRepairPrompt(String content, boolean isChinese) {
+        if (isChinese) {
+            return "下面内容应当是一个 JSON 对象，但格式不合法。请在不改变字段语义和字段名的前提下，修复为严格合法的 JSON 对象。"
+                + "所有 value 保持字符串形式。只返回修复后的 JSON 对象。\n\n" + content;
+        }
+        return "The following content should be a JSON object but is invalid. Repair it into a strictly valid JSON object "
+            + "without changing field names or semantics. Keep all values as strings. Return only the repaired JSON object.\n\n"
+            + content;
     }
 
     private String buildAllFieldsUserPrompt(MetaPromptGenerateRequest request, MetaPromptSkeleton skeleton,
@@ -281,6 +317,8 @@ public class MetaPromptService {
 
     private String buildExistingConfigBlock(MetaPromptGenerateRequest request, boolean isChinese) {
         StringBuilder sb = new StringBuilder();
+        appendInputField(sb, isChinese ? "用户输入/补充描述" : "User Input / Additional Description",
+            request.getDescription());
         appendInputField(sb, isChinese ? "数字员工名称" : "Agent Name", request.getAgentName());
         appendInputField(sb, isChinese ? "简短描述/当前描述" : "Short Description / Current Description",
             request.getAgentDescription());
@@ -1005,10 +1043,32 @@ public class MetaPromptService {
             counts.getOrDefault("KG_DOC", 0L).intValue() + counts.getOrDefault("KG_QA", 0L).intValue()
                 + counts.getOrDefault("KG_DB", 0L).intValue() + counts.getOrDefault("KG_TERM", 0L).intValue());
         summary.setAvailableAgentCount(counts.getOrDefault("AGENT", 0L).intValue());
-        if (StringUtils.isNotBlank(bundledSkills)) {
-            summary.setBundledSkillCount(StringUtils.countMatches(bundledSkills, "\"name\""));
-        }
+        summary.setBundledSkillCount(countBundledSkills(bundledSkills));
         return summary;
+    }
+
+    private int countBundledSkills(String bundledSkills) {
+        if (StringUtils.isBlank(bundledSkills)) {
+            return 0;
+        }
+        try {
+            JsonNode catalog = OBJECT_MAPPER.readTree(bundledSkills);
+            if (!catalog.isArray()) {
+                return 0;
+            }
+            int count = 0;
+            for (JsonNode skill : catalog) {
+                if (skill.isObject()
+                    && skill.path("skillName").isTextual()
+                    && skill.path("skillCode").isTextual()) {
+                    count++;
+                }
+            }
+            return count;
+        } catch (JsonProcessingException e) {
+            log.warn("Failed to parse bundled skills catalog for meta-prompt context summary", e);
+            return 0;
+        }
     }
 
     // ======================== System Prompt ========================

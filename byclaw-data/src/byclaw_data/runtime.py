@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+from datacloud_platform.constants import DEFAULT_BASE_ID
 from dotenv import load_dotenv
 
 _BY_DATACLOUD_DIRNAME = "by-datacloud"
@@ -13,53 +14,8 @@ _DEFAULT_DATACLOUD_ONTOLOGY_PATH = "/workspace/byclaw-data/resource/ontology"
 _DEFAULT_DATACLOUD_MID_FTP_PATH = "/workspace/byclaw-data/resource/dig_employee"
 
 _platform_initialized = False
-_owl_loaded_path: str | None = None
-"""Track which path was last loaded into the default base, for idempotent reload."""
 _enterprise_initialized = False
 """Track whether enterprise base + CRM scene have been initialized."""
-
-
-def _load_owl_into_default_base(base_path: str) -> Any:
-    """Load OWL from *base_path* into the platform's default base via formal API.
-
-    Protocol:
-      1. ``platform.load_ontology("default", base_path)`` → OntologyLoader
-      2. ``platform.inject_virtual_actions("default", loader)`` → inject query/compute
-
-    Returns the loader handle so callers can build tools from it.
-
-    This is the **function-based** import path.  Later the same logic can be
-    exposed through an HTTP endpoint without changing the platform layer.
-    """
-    from datacloud_platform import get_platform
-
-    p = get_platform()
-    loader = p.load_ontology("default", base_path)
-    p.inject_virtual_actions("default", loader)
-    return loader
-
-
-def _load_owl_if_configured() -> Any | None:
-    """Load OWL from ``DATACLOUD_ONTOLOGY_PATH`` into the default base (idempotent).
-
-    Called once during ``_init_platform_if_needed()``.
-    Subsequent calls are no-ops unless the path changed.
-    """
-    global _owl_loaded_path
-    ontology_path = os.environ.get("DATACLOUD_ONTOLOGY_PATH", "").strip()
-    if not ontology_path:
-        return None
-    p = Path(ontology_path)
-    if not p.is_absolute():
-        p = Path.cwd() / p
-    resolved = str(p.resolve())
-    if not p.exists():
-        return None
-    if _owl_loaded_path == resolved:
-        return None  # already loaded this path
-    loader = _load_owl_into_default_base(resolved)
-    _owl_loaded_path = resolved
-    return loader
 
 
 def _init_enterprise_base_and_scene() -> None:
@@ -82,7 +38,7 @@ def _init_enterprise_base_and_scene() -> None:
     from datacloud_platform import get_platform
 
     p = get_platform()
-    enterprise_id = "enterprise"
+    enterprise_id = DEFAULT_BASE_ID
 
     # ── 1. 创建企业本体库（幂等）──
     if not p.base_exists(enterprise_id):
@@ -92,50 +48,18 @@ def _init_enterprise_base_and_scene() -> None:
             OntologyBaseEntry(
                 base_id=enterprise_id,
                 display_name="企业本体库",
-                source_type="LOCAL",
+                source_type="OPENGAUSS",
                 backend_config={
                     "ontology": {
                         "base_path": os.environ.get("DATACLOUD_ONTOLOGY_PATH", ""),
+                        "owl_path": os.environ.get("DATACLOUD_ONTOLOGY_PATH", ""),
                     }
                 },
             )
         )
 
-    # ── 2. 创建 CRM 场景（幂等）──
-    scene_id = "crm"
-    try:
-        p.create_scene(
-            enterprise_id,
-            {
-                "scene_name": "CRM客户管理",
-                "scene_code": scene_id,
-                "scene_desc": "CRM场景，包含OWL导入的全部本体",
-            },
-        )
-    except ValueError:
-        pass  # scene already exists
-
-    # ── 3. 将所有 OWL 对象和视图挂到 CRM 场景下（幂等，adapter 层去重）──
-    p.add_scene_members(
-        enterprise_id,
-        scene_id,
-        object_codes=[
-            "by_customer",
-            "by_opp_task",
-            "by_opportunity",
-            "by_project",
-            "by_project_task",
-            "by_rd_task",
-            "po_organization",
-            "po_users",
-        ],
-        view_codes=[
-            "scene_crm_comprehensive_analysis",
-            "scene_project_management",
-            "scene_rd_management",
-            "scene_sales_management",
-        ],
-    )
+    # ── 2. 确保默认场景存在（幂等）──
+    _ = p._ensure_default_scene(enterprise_id)
 
 
 def _ensure_enterprise_initialized() -> None:
@@ -158,60 +82,7 @@ def _init_platform_if_needed() -> None:
     if _platform_initialized:
         return
 
-    from datacloud_platform.adapters.data_adapter import DataCloudDataBackend
-    from datacloud_platform.adapters.knowledge_adapter import DataCloudKnowledgeBackend
-    from datacloud_platform.adapters.local_execution_adapter import LocalExecutionBackend
-    from datacloud_platform.adapters.none_adapters import (
-        _NoopExecutionBackend,
-        _NoopKnowledgeBackend,
-        _NoopStorageBackend,
-    )
-    from datacloud_platform.backends.presets import register_preset
-    from datacloud_platform.backends.registry import (
-        register_backend_type,
-        register_implementation,
-    )
-    from datacloud_platform import DatacloudPlatform, OntologyBaseEntry, OntologyBaseRegistry
-
-    register_backend_type("ontology", "datacloud-data")
-    register_backend_type("knowledge", "datacloud-knowledge")
-    register_backend_type("execution", "local-exec")
-    register_backend_type("storage", "datacloud-data")
-
-    _onto = DataCloudDataBackend()
-    _exec = LocalExecutionBackend()
-    register_implementation("ontology", "datacloud-data", lambda: _onto)
-    register_implementation("knowledge", "datacloud-knowledge", lambda: DataCloudKnowledgeBackend())
-    register_implementation("knowledge", "none", lambda: _NoopKnowledgeBackend())
-    register_implementation("execution", "local-exec", lambda: _exec)
-    register_implementation("execution", "none", lambda: _NoopExecutionBackend())
-    register_implementation("storage", "datacloud-data", lambda: _onto)
-    register_implementation("storage", "none", lambda: _NoopStorageBackend())
-
-    register_preset("LOCAL", {})
-
-    registry = OntologyBaseRegistry()
-    registry.register(
-        OntologyBaseEntry(
-            base_id="default",
-            display_name="默认本地库",
-            source_type="LOCAL",
-            backend_config={
-                "ontology": {
-                    "base_path": os.environ.get("DATACLOUD_ONTOLOGY_PATH", ""),
-                }
-            },
-        )
-    )
-    platform = DatacloudPlatform(_base_registry=registry)
-
-    import datacloud_platform
-
-    datacloud_platform._platform = platform
     _platform_initialized = True
-
-    # ── 函数式导入 OWL（后续可由 HTTP API 替换调用路径）──
-    _load_owl_if_configured()
 
     # ── 初始化企业本体库 + CRM 场景 ──
     _ensure_enterprise_initialized()

@@ -37,6 +37,10 @@ public class SignAntiReplayFilter extends OncePerRequestFilter {
 
     private static final String KEY_SEPERATOR = ":";
 
+    private static final String FEISHU_BOT_EVENT_CALLBACK_PATH = "/feishu/bot/events";
+
+    private static final String THIRD_PARTY_SKILL_INSTALL_PATH = "/tool/installThirdPartySkill";
+
 
     public static final String HEADER_SIGNATURE = "x-signature-value";
 
@@ -58,6 +62,19 @@ public class SignAntiReplayFilter extends OncePerRequestFilter {
             filterChain.doFilter(request, response);
             return;
         }
+        // 飞书开放平台回调由 Controller 内部校验 verificationToken/encryptKey，
+        // 外部平台不会携带系统签名头，必须在签名防重放过滤器中直接放行。
+        if (this.isFeishuBotEventCallback(request)) {
+            filterChain.doFilter(request, response);
+            return;
+        }
+        // 技能超市安装接口使用现有 Beyond-Token 完成用户认证；对端不持有门户通用请求签名密钥，
+        // 因此仅跳过通用签名防重放校验，登录鉴权仍由 AccessTokenVerifyInterceptor 执行。
+        if (this.isThirdPartySkillInstall(request)) {
+            filterChain.doFilter(request, response);
+            return;
+        }
+
         // 例外的地址，免登录的个别地址也得配置在这里一起噢。不然可能获取不到用户code
         String servletPath = request.getServletPath();
         if (this.matches(servletPath, signProperties.getExcludeUrlList())) {
@@ -119,6 +136,30 @@ public class SignAntiReplayFilter extends OncePerRequestFilter {
             }
         }
         return false;
+    }
+
+    private boolean isFeishuBotEventCallback(HttpServletRequest request) {
+        return endsWithFeishuBotEventPath(request.getRequestURI())
+            || endsWithFeishuBotEventPath(request.getServletPath())
+            || endsWithFeishuBotEventPath(request.getPathInfo());
+    }
+
+    private boolean isThirdPartySkillInstall(HttpServletRequest request) {
+        return endsWithPath(request.getRequestURI(), THIRD_PARTY_SKILL_INSTALL_PATH)
+            || endsWithPath(request.getServletPath(), THIRD_PARTY_SKILL_INSTALL_PATH)
+            || endsWithPath(request.getPathInfo(), THIRD_PARTY_SKILL_INSTALL_PATH);
+    }
+
+    private boolean endsWithFeishuBotEventPath(String path) {
+        return endsWithPath(path, FEISHU_BOT_EVENT_CALLBACK_PATH);
+    }
+
+    private boolean endsWithPath(String path, String expectedPath) {
+        if (StringUtils.isBlank(path)) {
+            return false;
+        }
+        String normalizedPath = path.endsWith("/") ? path.substring(0, path.length() - 1) : path;
+        return normalizedPath.endsWith(expectedPath);
     }
 
     /**

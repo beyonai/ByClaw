@@ -125,32 +125,7 @@
         WHERE a.resource_biz_type = 'DIG_EMPLOYEE'
           AND a.resource_status = '2'
           AND b.prologue IS NOT NULL
-        <choose>
-            <when test="_databaseId == 'postgresql'">
-                AND (
-                    b.prologue::jsonb->>'modelId' = CAST(#{modelId} AS TEXT)
-                    OR b.prologue::jsonb->'modelInfo'->>'modelId' = CAST(#{modelId} AS TEXT)
-                )
-            </when>
-            <when test="_databaseId == 'mysql'">
-                AND (
-                    JSON_UNQUOTE(JSON_EXTRACT(b.prologue, '$.modelId')) = CAST(#{modelId} AS CHAR)
-                    OR JSON_UNQUOTE(JSON_EXTRACT(b.prologue, '$.modelInfo.modelId')) = CAST(#{modelId} AS CHAR)
-                )
-            </when>
-            <when test="_databaseId == 'oracle'">
-                AND (
-                    JSON_VALUE(b.prologue, '$.modelId') = TO_CHAR(#{modelId})
-                    OR JSON_VALUE(b.prologue, '$.modelInfo.modelId') = TO_CHAR(#{modelId})
-                )
-            </when>
-            <otherwise>
-                AND (
-                    b.prologue::jsonb->>'modelId' = CAST(#{modelId} AS TEXT)
-                    OR b.prologue::jsonb->'modelInfo'->>'modelId' = CAST(#{modelId} AS TEXT)
-                )
-            </otherwise>
-        </choose>
+          AND b.prologue LIKE CONCAT('%', #{modelId}, '%')
     </select>
 
     <select id="selectDigitalEmployeeByQo" resultMap="digitalEmployeePageVoResultMap">
@@ -743,7 +718,9 @@
         WHERE a.resource_biz_type = 'DIG_EMPLOYEE'
           AND a.resource_status = 2
         <if test="machineChannel != null and machineChannel != ''">
-          AND b.machine_channel like concat('%', #{machineChannel}, '%')
+          <!-- machine_channel 是 JSON 文本，渠道值历史上出现过 Feishu/FeiShu 大小写差异；
+               启动扫描必须大小写不敏感，否则服务重启后飞书 encryptKey 无法加载进缓存。 -->
+          AND lower(b.machine_channel) like concat('%', lower(#{machineChannel}), '%')
         </if>
         ORDER BY a.resource_id
     </select>

@@ -27,6 +27,7 @@ import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.DingtalkUse
 import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.cards.DingtalkCardService;
 import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.cards.DingtalkCardStreamSession;
 import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.cards.DingtalkCardStreamingOutputStream;
+import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.config.DingtalkStreamProperties;
 import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.model.DingtalkCallbackMessage;
 import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.model.DingtalkMsgType;
 import com.iwhalecloud.byai.gateway.channels.service.dingtalk.stream.support.DingtalkCallbackMessageParser;
@@ -66,6 +67,7 @@ public class DingtalkBotListener implements OpenDingTalkCallbackListener<Map<Str
     private final DingtalkCardService dingtalkCardService;
     private final DingtalkCallbackMessageParser dingtalkCallbackMessageParser;
     private final DingtalkSessionService dingtalkSessionService;
+    private final DingtalkStreamProperties streamProperties;
     private final ExecutorService messageExecutor = new ThreadPoolExecutor(
             8,
             32,
@@ -86,7 +88,8 @@ public class DingtalkBotListener implements OpenDingTalkCallbackListener<Map<Str
             DingtalkReplyDispatcher dingtalkReplyDispatcher,
             DingtalkCardService dingtalkCardService,
             DingtalkCallbackMessageParser dingtalkCallbackMessageParser,
-            DingtalkSessionService dingtalkSessionService
+            DingtalkSessionService dingtalkSessionService,
+            DingtalkStreamProperties streamProperties
     ) {
         this.objectMapper = objectMapper;
         this.dingtalkUserService = dingtalkUserService;
@@ -95,6 +98,7 @@ public class DingtalkBotListener implements OpenDingTalkCallbackListener<Map<Str
         this.dingtalkCardService = dingtalkCardService;
         this.dingtalkCallbackMessageParser = dingtalkCallbackMessageParser;
         this.dingtalkSessionService = dingtalkSessionService;
+        this.streamProperties = streamProperties;
     }
 
     @Override
@@ -311,11 +315,14 @@ public class DingtalkBotListener implements OpenDingTalkCallbackListener<Map<Str
 
         DingtalkCardStreamingOutputStream outputStream =
                 new DingtalkCardStreamingOutputStream(objectMapper, dingtalkCardService, cardSession,
-                        null, CurrentUserHolder.getCurrentUserCode());
+                        null, CurrentUserHolder.getCurrentUserCode(), streamProperties.isShowReasoning());
         try {
             channelService.chat(assistantChatDto, outputStream);
-            outputStream.finish();
-            if (outputStream.hasStreamingFailed()) {
+            // Gateway mode returns after dispatching the request. The actual
+            // answer deltas and appStreamResponse arrive asynchronously, so
+            // appStreamResponse (or an idle timeout) owns finalization.
+            boolean finalOk = awaitStreamCompletion(outputStream);
+            if (!finalOk || outputStream.hasStreamingFailed()) {
                 dingtalkReplyDispatcher.sendTextMessage(sessionWebhook, DEFAULT_FALLBACK_REPLY);
             }
             return true;
@@ -328,6 +335,25 @@ public class DingtalkBotListener implements OpenDingTalkCallbackListener<Map<Str
             }
 
             throw new RuntimeException(e);
+        }
+    }
+
+    static boolean awaitStreamCompletion(DingtalkCardStreamingOutputStream outputStream) {
+        try {
+            outputStream.awaitCompletionAfterIdle(60, TimeUnit.SECONDS);
+            return true;
+        } catch (java.util.concurrent.TimeoutException e) {
+            logger.warn("Wait DingTalk appStreamResponse idle timeout, finalize current card content.");
+            try {
+                outputStream.finish();
+                return !outputStream.hasStreamingFailed();
+            } catch (Exception finishException) {
+                logger.warn("Finalize DingTalk card after idle timeout failed.", finishException);
+                return false;
+            }
+        } catch (Exception e) {
+            logger.warn("Wait DingTalk appStreamResponse failed.", e);
+            return false;
         }
     }
 

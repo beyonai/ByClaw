@@ -88,6 +88,16 @@ public class SsResExtDocService {
     }
 
     /**
+     * PR-3 (#150) 批量查询文档库扩展数据. 单 SQL IN 子句,替代循环 findById.
+     *
+     * @param resourceIds 资源ID集合(空集合/null 时返回空 List,不触发 SQL)
+     * @return 文档库扩展列表
+     */
+    public List<SsResExtDoc> findByIds(Collection<Long> resourceIds) {
+        return ssResExtDocMapper.findByIds(resourceIds);
+    }
+
+    /**
      * 查询文档库信息
      *
      * @param resourceIds 资源标识
@@ -154,37 +164,49 @@ public class SsResExtDocService {
 
         fillKnowledgeRuntimeFields(targetContent);
 
-        resourceService.add(buildKgDocService(qADomainName, "创建知识库", "POST", "/api/v1/knowledge-bases/create",
+        resourceService.add(buildKgDocService(qADomainName, "创建知识库", "POST", "/api/v1/knowledgeBases/create",
             "create_kb", "用于创建知识库。"));
-        resourceService.add(buildKgDocService(qADomainName, "删除知识库", "POST", "/api/v1/knowledge-bases/delete",
+        resourceService.add(buildKgDocService(qADomainName, "删除知识库", "POST", "/api/v1/knowledgeBases/delete",
             "delete_kb", "逻辑删除知识库。"));
+        resourceService.add(buildKgDocService(qADomainName, "修改知识库", "POST", "/api/v1/knowledgeBases/update",
+            "update_kb", "修改知识库名称或描述。"));
         resourceService
             .add(buildKgDocService(qADomainName, "写入文件到知识库", "POST", "/api/v1/write-file", "write_raw", "将原始文件写入知识库。"));
         resourceService.add(buildKgDocService(qADomainName, "写入索引到知识库", "POST", "/api/v1/write-index", "write_index",
             "将构建好的索引信息和对应的 markdown 副本写入知识库。"));
-        resourceService.add(buildKgDocService(qADomainName, "导入文件与索引", "POST", "/api/v1/knowledge-items/import",
-            "import_item", "一次性完成原文件写入、markdown 副本写入与 chunk 索引写入。"));
-        resourceService.add(buildKgDocService(qADomainName, "删除知识库文档", "POST", "/api/v1/knowledge-items/delete",
+        resourceService.add(buildKgDocService(qADomainName, "导入知识库文件", "POST", "/api/v1/knowledgeItems/import",
+            "import_item", "支持单文件与 zip 包批量导入。"));
+        resourceService.add(buildKgDocService(qADomainName, "删除知识库文档", "POST", "/api/v1/knowledgeItems/delete",
             "delete_item", "逻辑删除知识库中的单个文档。"));
-        resourceService.add(buildKgDocService(qADomainName, "检索文档 chunk", "POST", "/api/v1/knowledge-items/search",
+        resourceService.add(buildKgDocService(qADomainName, "移动知识库文件或目录", "POST",
+            "/api/v1/knowledgeItems/move", "move_items", "批量移动文件或目录。"));
+        resourceService.add(buildKgDocService(qADomainName, "查询文件引用关系", "POST",
+            "/api/v1/knowledgeItems/references", "item_references", "查询 Markdown 入站、出站引用关系。"));
+        resourceService.add(buildKgDocService(qADomainName, "读取文件内容", "POST", "/api/v1/readFile",
+            "readFile", "根据文件路径读取指定知识库下的 Markdown 内容。"));
+        resourceService.add(buildKgDocService(qADomainName, "检索文档 chunk", "POST", "/api/v1/knowledgeItems/search",
             "search_chunk", "用于执行 chunk 级混合检索。"));
         resourceService.add(
-            buildKgDocService(qADomainName, "列出知识库目录", "POST", "/api/v1/list_dir", "list_dir", "用于列出知识库中的虚拟目录内容。"));
+            buildKgDocService(qADomainName, "列出知识库目录", "POST", "/api/v1/listDir", "list_dir", "用于列出知识库中的虚拟目录内容。"));
         resourceService.add(
-            buildKgDocService(qADomainName, "正则表达式方式查找文件", "POST", "/api/v1/glob", "glob_search", "基于正则表达式查找文件、目录。"));
+            buildKgDocService(qADomainName, "按路径模式查找文件", "POST", "/api/v1/glob", "glob_search", "使用单层 * 通配规则查找文件、目录。"));
 
-        resourceService.add(buildKgDocService(qADomainName, "修改知识库名称、描述、元数据", "POST", "/api/v1/knowledge-bases/update",
-            "update_kb", "修改知识库名称、描述、元数据"));
         resourceService.add(buildKgDocService(qADomainName, "按完整路径创建目录", "POST", "/api/v1/directories/create",
             "create_dir", "按完整路径创建目录"));
         resourceService.add(buildKgDocService(qADomainName, "逻辑删除目录，可删除非空目录", "POST", "/api/v1/directories/delete",
             "delete_dir", "逻辑删除目录，可删除非空目录"));
-        resourceService.add(buildKgDocService(qADomainName, "正则表达式方式查找文件", "POST", "/api/v1/directories/update",
-            "update_dir", "基于正则表达式查找文件、目录。"));
+        resourceService.add(buildKgDocService(qADomainName, "修改目录名称", "POST", "/api/v1/directories/update",
+            "update_dir", "修改目录最后一级名称。"));
         resourceService.add(buildKgDocService(qADomainName, "修改目录名称、描述、元数据", "POST", "/api/v1/knowledge-items/update",
             "update_item", "修改目录名称、描述、元数据"));
-        resourceService
-            .add(buildKgDocService(qADomainName, "下载原文件流", "POST", "/api/v1/download-file", "download_file", "下载原文件流"));
+        resourceService.add(buildKgDocService(qADomainName, "下载文件流", "POST", "/api/v1/downloadFile",
+            "download_file", "按知识库文件路径下载文件流。"));
+        resourceService.add(buildKgDocService(qADomainName, "文件转 Markdown", "POST", "/api/v1/fileToMarkdown",
+            "file_to_markdown", "同步转换文件并返回 Markdown 文件流。"));
+        resourceService.add(buildKgDocService(qADomainName, "触发知识构建", "POST", "/api/v1/fileToMarkdownIndex",
+            "knowledge_build", "异步触发文件知识构建。"));
+        resourceService.add(buildKgDocService(qADomainName, "查询构建状态", "POST", "/api/v1/fileBuildStatus",
+            "file_build_status", "查询文件知识构建进度。"));
 
         targetContent.put("resourceService", resourceService);
         return JSON.toJSONString(targetContent);

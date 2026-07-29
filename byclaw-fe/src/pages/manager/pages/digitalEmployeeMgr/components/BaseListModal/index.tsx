@@ -122,20 +122,7 @@ function BaseListModal(props) {
       ];
     }
     if (isAskNumber) {
-      return [
-        {
-          key: 'VIEW',
-          label: intl.formatMessage({
-            id: 'baseListModal.tabs.view',
-          }),
-        },
-        {
-          key: 'OBJECT',
-          label: intl.formatMessage({
-            id: 'baseListModal.tabs.object',
-          }),
-        },
-      ];
+      return [];
     }
     return [
       {
@@ -154,18 +141,6 @@ function BaseListModal(props) {
         key: 'MCP',
         label: intl.formatMessage({
           id: 'baseListModal.tabs.mcp',
-        }),
-      },
-      {
-        key: 'VIEW',
-        label: intl.formatMessage({
-          id: 'baseListModal.tabs.view',
-        }),
-      },
-      {
-        key: 'OBJECT',
-        label: intl.formatMessage({
-          id: 'baseListModal.tabs.object',
         }),
       },
     ];

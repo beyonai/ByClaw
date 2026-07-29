@@ -179,6 +179,14 @@ function useEventEmitterHooks(props: IProps) {
   }, [sendQuery]);
 
   useEffect(() => {
+    if (process.env.NODE_ENV !== 'development' || typeof window === 'undefined') return;
+    (window as any).__BYCLAW_E2E__ = {
+      ...((window as any).__BYCLAW_E2E__ || {}),
+      sendQuery,
+    };
+  }, [sendQuery]);
+
+  useEffect(() => {
     const disabledInputHandler = (flag: boolean) => {
       setDisabledInput(flag);
     };

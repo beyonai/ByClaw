@@ -19,4 +19,8 @@ public class UploadItem {
     private String filePath;
 
     private String fileUrl;
+
+    private Boolean success;
+
+    private String error;
 }

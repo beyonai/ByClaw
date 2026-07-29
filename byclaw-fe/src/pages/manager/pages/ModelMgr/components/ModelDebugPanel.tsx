@@ -76,7 +76,7 @@ const ModelDebugPanel: React.FC<Props> = ({
         <div className={styles.debugTip}>{intl.formatMessage({ id: 'modelMgr.modal.debugTipSave' })}</div>
       </div>
 
-      <Space direction="vertical" style={{ width: '100%' }} size={12}>
+      <Space direction="vertical" className={styles.fullWidth} size={12}>
         <div className={styles.codePanel}>
           <div className={styles.codePanelHeader}>
             <span>{intl.formatMessage({ id: 'modelMgr.modal.input' })}</span>
@@ -116,7 +116,7 @@ const ModelDebugPanel: React.FC<Props> = ({
                   size="small"
                   value={rerankView}
                   options={[
-                    { label: '表格', value: 'table' },
+                    { label: intl.formatMessage({ id: 'modelMgr.modal.debugTableView' }), value: 'table' },
                     { label: 'JSON', value: 'json' },
                   ]}
                   onChange={(val) => setRerankView(val as 'table' | 'json')}
@@ -134,10 +134,10 @@ const ModelDebugPanel: React.FC<Props> = ({
               </Button>
             </Space>
           </div>
-          <div className={styles.codeArea} style={{ position: 'relative' }}>
+          <div className={styles.codeAreaRelative}>
             {debugOutputLoading ? (
               <div className={styles.outputLoading}>
-                <Spin tip="请求中…" />
+                <Spin tip={intl.formatMessage({ id: 'modelMgr.modal.debugLoading' })} />
               </div>
             ) : null}
             {shouldShowRerankTable && rerankView === 'table' ? (
@@ -151,12 +151,12 @@ const ModelDebugPanel: React.FC<Props> = ({
                 }))}
                 columns={[
                   {
-                    title: '排名',
+                    title: intl.formatMessage({ id: 'modelMgr.modal.debugTableRank' }),
                     dataIndex: 'rank',
                     width: 64,
                   },
                   {
-                    title: '文本',
+                    title: intl.formatMessage({ id: 'modelMgr.modal.debugTableText' }),
                     dataIndex: 'text',
                     ellipsis: true,
                   },

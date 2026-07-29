@@ -89,6 +89,25 @@ public class TransactionAdviceConfig {
         txMap.put("prewarmDueCronSandboxes", notSurpportedTx);
         txMap.put("callAsUser", notSurpportedTx);
         txMap.put("runAsUser", notSurpportedTx);
+        // 技能 ZIP 下载包含对象存储检查与 StreamingResponseBody 输出，不应占用数据库事务；
+        // 流式读取异常不能把请求事务标记为 rollback-only，避免最终提交阶段抛 UnexpectedRollbackException。
+        txMap.put("downloadSkillZip", notSurpportedTx);
+        // 资源包存在性检查和流式读取走对象存储，不涉及数据库事务；异常不能在事务提交阶段才暴露。
+        txMap.put("existsWithinResourceRoot", notSurpportedTx);
+        txMap.put("readWithinResourceRoot", notSurpportedTx);
+        // 元提示词生成链路只读取上下文并调用外部大模型。大模型调用失败会在业务层降级处理，
+        // 因此不要加入事务，避免内部异常被捕获后仍把外层事务标记为 rollback-only。
+        txMap.put("generateV3", notSurpportedTx);
+        txMap.put("generateV3Stream", notSurpportedTx);
+        txMap.put("generateText", notSurpportedTx);
+        txMap.put("generateTextStream", notSurpportedTx);
+        // Recorder draft generation only writes the per-user sandbox volume. Storage failures are mapped to a stable
+        // 503 response, so it must not join a database transaction that would later surface as rollback-only.
+        txMap.put("pipelineGenerate", notSurpportedTx);
+        // Recorder save must surface adapter_exists as a 409 so the UI can ask before retrying with overwrite=true.
+        // The byCLI publish port throws this business exception after a remote filesystem check; joining the global
+        // transaction would convert the handled exception into an UnexpectedRollbackException at commit time.
+        txMap.put("saveAdapter", notSurpportedTx);
         txMap.put("*", requiredTx);
 
         /* 事务管理规则，声明具备事务管理的方法名 **/

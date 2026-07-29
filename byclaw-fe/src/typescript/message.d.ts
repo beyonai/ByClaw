@@ -22,7 +22,8 @@ export type IMessageListItem = {
     parentOrderId?: string;
     orderId?: string;
     sourceAgentType?: string;
-  };
+    formStatus?: IFormStatus;
+   };
   contentType: SSEMessageType;
   status: SSEEventStatus;
   objectType?: 'function_response' | 'tool_call'; // 'function_response'-工具类回答
@@ -96,6 +97,7 @@ export type IMessage = {
   messageId?: string;
   queryMsgId?: string;
   answerMsgId?: string;
+  answerMsgIds?: string[];
   messageList?: Array<IMessageListItem>; // 各类消息
 
   messageState: IMessageState;
@@ -109,6 +111,11 @@ export type IMessage = {
 
   agentType?: IAgentType;
   agentId?: string;
+  agentCode?: string;
+  agentName?: string;
+  laneId?: string;
+  turnId?: string;
+  multiAgent?: unknown;
 
   sessionId?: string;
   usage?: '1' | '2' | '3' | '4' | '5'; // 1-用户 2-大模型 3-追问、清楚上下文 4-转发消息 5-交互消息（建群、踢人等）

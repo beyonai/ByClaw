@@ -22,10 +22,11 @@ import { chatSessionRuntimeManager } from '@/utils/chatSessionRuntimeManager';
 type IProps = {
   addSession: (newSession: ISession) => void;
   setSessionId: (sessionId: string) => void;
+  onSessionCreated?: (params: { sessionId: string; clientRequestId?: string; session: ISession }) => void;
 };
 
 function useHandler(props: IProps) {
-  const { addSession, setSessionId } = props;
+  const { addSession, setSessionId, onSessionCreated } = props;
 
   const dispatch = useDispatch();
 
@@ -67,10 +68,20 @@ function useHandler(props: IProps) {
 
       chatSessionRuntimeManager.bindSession(sseMsg.clientRequestId, newSessionId);
 
-      addSession({
+      const createdSession = {
         ...(sseRes as ISession),
         sessionId: newSessionId,
-      });
+      };
+      addSession(createdSession);
+
+      if (sseMsg.event === 'createSession') {
+        // 将创建事件中的会话数据一并传出，项目侧栏可直接写入缓存而无需重新请求列表。
+        onSessionCreated?.({
+          sessionId: newSessionId,
+          clientRequestId: sseMsg.clientRequestId,
+          session: createdSession,
+        });
+      }
 
       if (!curSessioneRef.current) {
         // 设置当前会话ID
@@ -88,7 +99,7 @@ function useHandler(props: IProps) {
 
       return onionsProps;
     },
-    [addSession, setSessionId, dispatch]
+    [addSession, setSessionId, dispatch, onSessionCreated]
   );
 
   const messageIdHandler = useCallback((onionsProps: IOnionsProps) => {
@@ -183,10 +194,7 @@ function useHandler(props: IProps) {
       if (sseRes.traceId) {
         newAnswerMsg.traceId = sseRes.traceId;
         if (sseMsg.clientRequestId) {
-          const runtimeInfo = chatSessionRuntimeManager.getByClientRequest(sseMsg.clientRequestId);
-          if (runtimeInfo) {
-            runtimeInfo.traceId = sseRes.traceId;
-          }
+          chatSessionRuntimeManager.updateTrace(sseMsg.clientRequestId, sseRes.traceId);
         }
       }
 
@@ -332,16 +340,29 @@ function useHandler(props: IProps) {
     return onionsProps;
   }, []);
 
+  const answerCompletedHandler = useCallback(
+    (onionsProps: IOnionsProps) => {
+      const { sseMsg, newAnswerMsg } = onionsProps;
+      // appStreamResponse 是一次问答的最终事件，借此通知文件/知识库等模块仅刷新一次
+      if (sseMsg?.event === 'appStreamResponse') {
+        EventEmitter.emit('chat-answer-completed', {
+          sessionId: newAnswerMsg?.sessionId,
+          messageId: newAnswerMsg?.messageId,
+        });
+      }
+      return onionsProps;
+    },
+    [EventEmitter]
+  );
+
   const browserHandler = useCallback(
     (onionsProps: IOnionsProps) => {
       const { sseRes, newAnswerMsg } = onionsProps;
-
-      if (newAnswerMsg?.sessionId !== globalContext.sessionId) return onionsProps;
+      if (newAnswerMsg?.sessionId !== curSessioneRef.current) return onionsProps;
       if (!sseRes) return onionsProps;
 
       if ([`${SSEMessageType.jsonBlock}`].includes(`${sseRes?.message?.contentType}`)) {
         const jsonStr = get(sseRes, 'message.content.substance.json', '');
-
         try {
           const jsonObj = JSON.parse(jsonStr);
           if (!jsonObj?.command?.startsWith('bycli')) return onionsProps;
@@ -377,7 +398,7 @@ function useHandler(props: IProps) {
 
       return onionsProps;
     },
-    [sandboxesInfo, globalContext.sessionId]
+    [sandboxesInfo]
   );
 
   return {
@@ -389,6 +410,7 @@ function useHandler(props: IProps) {
     textHandler,
     rewriteQuestionHandler,
     browserHandler,
+    answerCompletedHandler,
   };
 }
 

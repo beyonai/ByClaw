@@ -18,20 +18,21 @@ import useVisibleMenuKeys from './useVisibleMenuKeys';
 import styles from './index.module.less';
 import Icon from '@/components/AntdIcon/icon';
 import Feedback from '../header/components/Feedback';
+import SandboxStatusIndicator from './components/SandboxStatus';
 import useUserDropdown from '../header/useUserDropdown';
 import SiderSearch from './siderSearch';
-import useNewChat from '../header/components/NewChat/useNewChat';
 import { getDisplayUserNameInChat } from '@/utils/chat';
 import useGlobal from '@/hooks/useGlobal';
 import { clearEasyConfirmInputDraft } from '@/components/ChatLayoutComp/components/EasyConfirm';
+import { EMPLOYEE_RESOURCE_TAB_KEYS } from './employeeResourceTabs';
+import { useActiveSiderAgent } from './components/ActiveSiderAgentBar';
 
 import type { IState as IEmployeesState } from '@/models/useEmployees';
 import { SiderContentContext, DEFAULT_SIDER_CONTENT_WIDTH } from './siderContentContext';
 
 export const DEF_SIDER = 'sessions';
 
-const CENTER_TAB_KEYS = new Set(['agent', 'knowledge', 'tool', 'view', 'object', 'skill', 'file']);
-const EMPLOYEE_RESOURCE_TAB_KEYS = new Set(['knowledge', 'tool', 'view', 'object', 'skill', 'file']);
+const CENTER_TAB_KEYS = new Set(['agent', 'model', 'knowledge', 'tool', 'view', 'object', 'ontology', 'skill', 'file']);
 
 const SIDER_ACTIVE_TAB_BY_PATH: Partial<Record<string, (typeof tabItems)[number]['key']>> = {
   '/dialogueRecord': 'sessions',
@@ -39,6 +40,7 @@ const SIDER_ACTIVE_TAB_BY_PATH: Partial<Record<string, (typeof tabItems)[number]
 };
 
 const CHAT_PANEL_PATHS = ['/chat', '/dialogueRecord', '/employees', '/searchAndQuery', '/functionCloud', '/sandbox'];
+const MAX_EMPLOYEE_RESOURCE_AGENT_NAME_LENGTH = 15;
 
 const isSameOrChildPath = (pathname: string, path: string) => pathname === path || pathname.startsWith(`${path}/`);
 
@@ -81,6 +83,7 @@ const Sidebar = () => {
   const { totalUnread } = unreadInfo;
   const { token } = theme.useToken();
   const intl = useIntl();
+  const activeSiderAgent = useActiveSiderAgent();
   const currentTab = React.useMemo(() => getCurrentTabByPathname(pathname), [pathname]);
   const [activeKey, setActiveKey] = React.useState<(typeof tabItems)[number]['key']>(
     () => currentTab?.key ?? DEF_SIDER
@@ -98,8 +101,6 @@ const Sidebar = () => {
     return DEFAULT_SIDER_CONTENT_WIDTH;
   });
 
-  const handleNewChat = useNewChat();
-
   const handleMenuTabClick = React.useCallback(
     (tab: (typeof tabItems)[number]) => {
       const isChatPage = isChatPanelPath(pathname);
@@ -109,6 +110,7 @@ const Sidebar = () => {
       setActiveKey(tab.key);
       setManualSiderOpenKey(tab.key);
       setSiderCollapsed(false);
+      EventEmitter.emit('sider-menu-tab-click-refresh', { key: tab.key });
 
       if (!tab.navigatePath) {
         return;
@@ -130,7 +132,7 @@ const Sidebar = () => {
         navigate(tab.navigatePath);
       }
     },
-    [clearDetailPanel, navigate, pathname, setSiderCollapsed]
+    [EventEmitter, clearDetailPanel, navigate, pathname, setSiderCollapsed]
   );
 
   const showSearchAndQueryTab = React.useMemo(() => {
@@ -143,10 +145,10 @@ const Sidebar = () => {
   }, [agentList, employeesList, pathname]);
 
   const myTabItems = React.useMemo(() => {
+    const visibleKeySet = new Set(visibleKeys);
     return compact(
-      visibleKeys.map((key) => {
-        const tab = tabItems.find((item) => item.key === key);
-        if (!tab) {
+      tabItems.map((tab) => {
+        if (!visibleKeySet.has(tab.key)) {
           return null;
         }
         if (tab.key === 'sessions') {
@@ -175,6 +177,25 @@ const Sidebar = () => {
     [myTabItems]
   );
   const isEmployeeResourceActive = EMPLOYEE_RESOURCE_TAB_KEYS.has(activeKey);
+  const employeeResourceGroupLabel = React.useMemo(() => {
+    const label = intl.formatMessage({
+      id: 'sider.employeeResourceGroup.label',
+    });
+    if (!activeSiderAgent.name) {
+      return label;
+    }
+    const displayName =
+      activeSiderAgent.name.length > MAX_EMPLOYEE_RESOURCE_AGENT_NAME_LENGTH
+        ? `${activeSiderAgent.name.slice(0, MAX_EMPLOYEE_RESOURCE_AGENT_NAME_LENGTH)}...`
+        : activeSiderAgent.name;
+    return `${displayName} · ${label}`;
+  }, [activeSiderAgent.name, intl]);
+  const employeeResourceGroupTitle = React.useMemo(() => {
+    const label = intl.formatMessage({
+      id: 'sider.employeeResourceGroup.label',
+    });
+    return activeSiderAgent.name ? `${activeSiderAgent.name} · ${label}` : label;
+  }, [activeSiderAgent.name, intl]);
 
   const { userDropdownItems, onUserDropdownClick, userDropdownRender } = useUserDropdown(userInfo);
 
@@ -197,6 +218,25 @@ const Sidebar = () => {
       EventEmitter.off('set-sider-active-key', handleSetSiderActiveKey);
     };
   }, [EventEmitter, setSiderCollapsed]);
+
+  React.useEffect(() => {
+    const handleOntologyBindSaved = (event: Event) => {
+      const detail = (event as CustomEvent)?.detail || {};
+      if (!detail.openSider) return;
+      const refreshDetail = { ...detail, receivedAt: Date.now() };
+      (window as any).__latestOntologyBindSaved = refreshDetail;
+      setActiveKey('ontology');
+      setManualSiderOpenKey('ontology');
+      setSiderCollapsed(false);
+      setSiderContentWidth(DEFAULT_SIDER_CONTENT_WIDTH);
+      window.setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('ontologySiderRefresh', { detail: refreshDetail }));
+      }, 0);
+    };
+
+    window.addEventListener('ontologyBindSaved', handleOntologyBindSaved);
+    return () => window.removeEventListener('ontologyBindSaved', handleOntologyBindSaved);
+  }, [setSiderCollapsed]);
 
   React.useEffect(() => {
     setSiderContentWidth(shouldHideSiderContent ? 0 : DEFAULT_SIDER_CONTENT_WIDTH);
@@ -266,7 +306,7 @@ const Sidebar = () => {
     <>
       <div className={classnames(styles.siderBar, 'hideThumb')}>
         <div className={styles.logo}>
-          <img alt="BYAI" src={getFaviconIcon} />
+          <img key="BYAI" alt="BYAI" src={getFaviconIcon} />
         </div>
         <SiderSearch />
         <Tooltip placement="right" title={intl.formatMessage({ id: 'sider.newChat' })}>
@@ -275,7 +315,8 @@ const Sidebar = () => {
             onClick={() => {
               clearDetailPanel?.();
               clearEasyConfirmInputDraft();
-              handleNewChat();
+              // 项目会话组件持有当前下拉选中的项目，由它带 projectId 创建会话。
+              EventEmitter.emit('projectSpace-create-session');
             }}
           >
             <Icon type="icon-xinjianduihua-fill" style={{ color: token.colorPrimary }} />
@@ -289,7 +330,6 @@ const Sidebar = () => {
               placement="right"
               title={intl.formatMessage({
                 id: 'sider.employeeResourceGroup.tooltip',
-                defaultMessage: '知识、工具、视图、对象、技能、文件会跟随当前数字员工切换',
               })}
             >
               <div
@@ -298,11 +338,8 @@ const Sidebar = () => {
                   isEmployeeResourceActive && styles.employeeResourceGroupActive
                 )}
               >
-                <span className={styles.employeeResourceGroupLabel}>
-                  {intl.formatMessage({
-                    id: 'sider.employeeResourceGroup.label',
-                    defaultMessage: '联动资源',
-                  })}
+                <span className={styles.employeeResourceGroupLabel} title={employeeResourceGroupTitle}>
+                  {employeeResourceGroupLabel}
                 </span>
                 <div className={styles.employeeResourceGroupItems}>{employeeResourceTabItems.map(renderTabItem)}</div>
               </div>
@@ -313,6 +350,11 @@ const Sidebar = () => {
           userId={userInfo.userId}
           className={classnames(styles.smallIconWrap)}
           style={{ background: 'transparent', marginTop: 'auto' }}
+        />
+        <SandboxStatusIndicator
+          userCode={userInfo.userCode}
+          className={classnames(styles.smallIconWrap)}
+          style={{ background: 'transparent' }}
         />
         <SelectLang placement="right" style={{ fontSize: 16 }} className={styles.smallIconWrap} />
         <Dropdown

@@ -1,8 +1,11 @@
 import { Button, Empty, Space } from 'antd';
 import React from 'react';
-import type { IntlShape } from 'react-intl';
 import CardList from '@/pages/manager/components/CardList';
 import styles from '../index.module.less';
+
+type IntlShape = {
+  formatMessage: (descriptor: { id: string }, values?: Record<string, any>) => string;
+};
 
 type Props = {
   intl: IntlShape;
@@ -13,7 +16,6 @@ type Props = {
   pagination: any;
   onAdd: () => void;
   onReset: () => void;
-  onPageChange: (pagination: { pageIndex: number; pageSize: number }) => void;
   cardItemFn: (record: any) => React.ReactNode;
 };
 
@@ -26,11 +28,11 @@ const ModelCardSection: React.FC<Props> = ({
   pagination,
   onAdd,
   onReset,
-  onPageChange,
   cardItemFn,
 }) => {
+  // 模型管理页交给外层页面滚动，避免 CardList 内部滚动和页面滚动叠加。
   return (
-    <div className={styles.cardList} style={{ minHeight: 0 }}>
+    <div className={styles.cardList}>
       {!list.length && !isLoading && !actionLoading ? (
         <div className={styles.emptyState}>
           <div className={styles.emptyBadge}>AI</div>
@@ -62,8 +64,8 @@ const ModelCardSection: React.FC<Props> = ({
           dataSource={list}
           pagination={pagination}
           loading={!!isLoading || !!actionLoading}
-          showPagination
-          onPageChange={onPageChange}
+          showPagination={false}
+          contentScrollable={false}
           cardItemFn={cardItemFn}
         />
       )}

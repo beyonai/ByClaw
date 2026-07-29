@@ -1,13 +1,14 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import {
-  createRedis,
   WorkerRegistry,
   WorkerRunner,
   GatewayDataEmitter,
   type AskAgentCommand,
   WorkerHeartbeat,
   ActionType,
+  QueueNames,
+  RegistryKeys,
 } from "@byclaw/by-framework";
 import type { OpenClawConfig } from "openclaw/plugin-sdk";
 import { resolveInboundLanguage } from "./i18n.js";
@@ -18,6 +19,9 @@ import {
   registerSdkEmitter,
   clearActiveSdkRequestRecord,
   resolveSdkLocalFilePath,
+  buildSdkChunkEvent,
+  buildSdkStateEvent,
+  withSdkEmitMetadata,
 } from "./session-context.js";
 import type { ResolvedByaiAccount, ByaiSdkInboundMessage, SdkInboundFile } from "./types.js";
 import { getRedisInfo, getUserCode } from "./utils.js";
@@ -26,6 +30,17 @@ import {
   waitForBaiyingEnhanceColdStartReady,
 } from "./baiying-enhance-readiness.js";
 import { normalizeByaiAgentId } from "./session-key.js";
+import {
+  buildByaiMultiAgentLaneMessages,
+  parseByaiLaneMetadata,
+  parseByaiMultiAgentBatchMetadata,
+} from "./multi-agent.js";
+import {
+  applyByFrameworkRedisKeyPatch,
+  createRedisClient,
+  type RedisClient,
+} from "../../shared/src/redis-compat.js";
+import { releaseCancelledSessionDispatch } from "./session-dispatch-gate.js";
 
 export interface ByaiSdkAppOptions {
   account: ResolvedByaiAccount;
@@ -39,6 +54,25 @@ export interface ByaiSdkAppOptions {
 }
 
 type ByaiSdkLogger = NonNullable<ByaiSdkAppOptions["log"]>;
+
+function metadataString(metadata: Record<string, unknown> | undefined, key: string): string {
+    const value = metadata?.[key];
+    return typeof value === "string" ? value.trim() : "";
+}
+
+function buildLaneAssignmentLogItem(message: ByaiSdkInboundMessage, index: number) {
+  const lane = message.laneMetadata;
+  return {
+    index,
+    laneId: lane?.laneId ?? "",
+    agentId: lane?.agentId ?? "",
+    agentCode: lane?.agentCode ?? "",
+    agentName: lane?.agentName ?? "",
+    traceId: message.traceId,
+    messageId: message.messageId,
+    query: message.text,
+  };
+}
 
 async function getInboundMessageFromByFramework(data: AskAgentCommand) {
   let questionText = "";
@@ -84,42 +118,71 @@ async function getInboundMessageFromByFramework(data: AskAgentCommand) {
       extData?: string;
     }[] = data.extraPayload?.resource_list || [];
     const { sessionId } = data.header;
-    const baiyingCallHandledResourceTypes = ["AGENT", "TOOLKIT", "TOOL", "MCP", "OBJECT", "VIEW", "KG_DOC", "KG_DB", "KG_QA"];
+    const baiyingCallHandledResourceTypes = ["AGENT", "TOOLKIT", "TOOL", "MCP", "OBJECT", "VIEW", "KG_DOC", "KG_DB", "KG_QA", "KG_DOC_FILE", "KG_DOC_FOLDER"];
     const userCode = getUserCode();
     const runtime = getByaiRuntime();
     resourceList.forEach((item) => {
-      if (item.resourceType !== "DIG_EMPLOYEE") {
-        if (item.resourceType === "KG_DOC_FILE") {
-          remindTextArr.push(`- file: ${resolveSdkLocalFilePath(item.resourceId, sessionId)}`);
-        } else if (item.resourceType?.toLowerCase() === "skill") {
-          if (!item.extData) return;
-          let skillExt: {
-            skillUrl: string;
-            version: string;
-            skillType: "inner" | "hub";
-          };
+      if (item.resourceType === "DIG_EMPLOYEE") {
+        return;
+      }
+      if (item.resourceType === "COMMON_FILE") {
+        remindTextArr.push(`- file: ${resolveSdkLocalFilePath(item.resourceId, sessionId)}`);
+      } else if (item.resourceType === "COMMON_FOLDER") {
+        remindTextArr.push(`- folder: ${resolveSdkLocalFilePath(item.resourceId, sessionId)}`);
+      } else if (item.resourceType?.toLowerCase() === "skill") {
+        if (!item.extData) return;
+        let skillExt: {
+          skillUrl: string;
+          version: string;
+          skillType: "inner" | "hub";
+        };
+        try {
+          skillExt = JSON.parse(item.extData);
+        } catch (error) {
+          return;
+        }
+        if (skillExt.skillType === "inner") {
+          remindTextArr.push(`- skill: ${path.join("/app/skills", item.resourceCode)}`);
+        } else if (skillExt.skillType === "hub") {
+          if (userCode && skillExt.skillUrl?.includes(userCode)) {
+            const normalizeAgentId = normalizeByaiAgentId(data.extraPayload?.agent_id || "main");
+            const workspaceDir = runtime.agent.resolveAgentWorkspaceDir(getRuntimeConfig(), normalizeAgentId)
+            if (workspaceDir) {
+              remindTextArr.push(`- skill: ${path.join(workspaceDir, "skills", item.resourceCode)}`);
+            }
+          } else {
+            const skillsRoot = path.join(runtime.state.resolveStateDir(), "skills");
+            remindTextArr.push(`- skill: ${path.join(skillsRoot, item.resourceCode)}`);
+          }
+        }
+      } else {
+        let { resourceType } = item;
+        let resourceId: string | undefined;
+        if (["KG_DOC_FILE", "KG_DOC_FOLDER"].includes(resourceType)) {
+          // 知识库文件和文件夹都归类为知识库
+          resourceType = "KG_DOC";
           try {
-            skillExt = JSON.parse(item.extData);
-          } catch (error) {
+            const { datasetId } = JSON.parse(item.resourceCode);
+            // 知识库id
+            resourceId = datasetId;
+          } catch (e) {
+          }
+          if (!resourceId) {
+            console.warn(`Knowledge base resource id is empty: ${item.resourceName}`);
             return;
           }
-          if (skillExt.skillType === "inner") {
-            remindTextArr.push(`- skill: ${path.join("/app/skills", item.resourceCode)}`);
-          } else if (skillExt.skillType === "hub") {
-            if (userCode && skillExt.skillUrl?.includes(userCode)) {
-              const normalizeAgentId = normalizeByaiAgentId(data.extraPayload?.agent_id || "main");
-              const workspaceDir = runtime.agent.resolveAgentWorkspaceDir(getRuntimeConfig(), normalizeAgentId)
-              if (workspaceDir) {
-                remindTextArr.push(`- skill: ${path.join(workspaceDir, "skills", item.resourceCode)}`);
-              }
-            } else {
-              const skillsRoot = path.join(runtime.state.resolveStateDir(), "skills");
-              remindTextArr.push(`- skill: ${path.join(skillsRoot, item.resourceCode)}`);
-            }
-          }
+        }
+        if (item.resourceType === "KG_DOC_FILE") {
+          remindTextArr.push(
+            `- resource: resource_id=${resourceId}, resource_type=${resourceType}, itemName=${item.resourceName}, itemPath=${item.resourceId}`,
+          );
+        } else if (item.resourceType === "KG_DOC_FOLDER") {
+          remindTextArr.push(
+            `- resource: resource_id=${resourceId}, resource_type=${resourceType}, folderName=${item.resourceName}, folderPath=${item.resourceId}`,
+          );
         } else {
           remindTextArr.push(
-            `- resource: resource_id=${item.resourceId}, resource_type=${item.resourceType}, resource_name=${item.resourceName}`,
+            `- resource: resource_id=${resourceId}, resource_type=${resourceType}, resource_name=${item.resourceName}`,
           );
         }
       }
@@ -166,11 +229,13 @@ function isRedisNoGroupError(err: unknown): boolean {
 function installNoGroupRecovery(params: {
   runner: WorkerRunner;
   registry: WorkerRegistry;
+  redis: RedisClient;
   workerId: string;
   agentTypes: string[];
+  runnerGroupName?: string;
   log?: ByaiSdkLogger;
 }): void {
-  const { runner, registry, workerId, agentTypes, log } = params;
+  const { runner, registry, redis, workerId, agentTypes, runnerGroupName, log } = params;
   const originalPoll = runner.poll.bind(runner);
   const originalRunControlOnce = runner.runControlOnce.bind(runner);
   let recoveryPromise: Promise<void> | null = null;
@@ -184,6 +249,7 @@ function installNoGroupRecovery(params: {
         await registry.registerWorkerMembership(workerId, agentTypes);
         await registry.heartbeatWorker(workerId);
         await runner.setupStreams();
+        await setRunnerAgentTypeStreamsToLatest({ redis, agentTypes, runnerGroupName, log });
         await runner.setupControlStreams();
         log?.info?.(`[${workerId}] byai-channel Redis stream consumer groups recovered`);
       })().finally(() => {
@@ -218,6 +284,33 @@ function installNoGroupRecovery(params: {
   };
 }
 
+async function setRunnerAgentTypeStreamsToLatest(params: {
+  redis: RedisClient;
+  agentTypes: string[];
+  runnerGroupName?: string;
+  log?: ByaiSdkLogger;
+}): Promise<void> {
+  const { redis, agentTypes, runnerGroupName, log } = params;
+  if (!runnerGroupName) {
+    return;
+  }
+  for (const agentType of agentTypes) {
+    const streamName = QueueNames.ctrl_stream(agentType);
+    try {
+      await redis.xgroup("SETID", streamName, runnerGroupName, "$");
+      log?.info?.(
+        `byai-channel custom consumer group starts at latest: group=${runnerGroupName}, stream=${streamName}`,
+      );
+    } catch (err) {
+      log?.warn?.(
+        `failed to set byai-channel custom consumer group to latest: group=${runnerGroupName}, stream=${streamName}, err=${String(
+          err,
+        )}`,
+      );
+    }
+  }
+}
+
 export class ByaiSdkApp {
   private readonly account: ResolvedByaiAccount;
   private readonly log?: ByaiSdkAppOptions["log"];
@@ -225,7 +318,7 @@ export class ByaiSdkApp {
 
   private runner: WorkerRunner | null = null;
   private stopSubscription: (() => void) | null = null;
-  private redis: import("ioredis").Redis | null = null;
+  private redis: RedisClient | null = null;
   private workerHeartbeat: WorkerHeartbeat | null = null;
 
   constructor(opts: ByaiSdkAppOptions) {
@@ -251,8 +344,9 @@ export class ByaiSdkApp {
     }
 
     debug?.(`[${this.account.accountId}] byai-channel redisInfo: ${JSON.stringify(redisInfo)}`);
+    applyByFrameworkRedisKeyPatch({ QueueNames, RegistryKeys }, redisInfo);
 
-    const redis = createRedis(redisInfo);
+    const redis = createRedisClient(redisInfo);
     this.redis = redis;
 
     const userCode = getUserCode();
@@ -262,24 +356,32 @@ export class ByaiSdkApp {
 
     debug?.(`[${this.account.accountId}] byai-channel usercode: ${userCode}`);
 
-    const workerId = `byai-channel-worker-${userCode}-${Math.random().toString(16).slice(2, 6)}`;
+    // Use injected worker_id if available; otherwise fall back to deterministic id for backward compatibility
+    const workerId = process.env.BYAI_WORKER_ID || `byai-channel-worker-${userCode}`;
     const agentTypes = [`BYCLAW_EXE_${userCode}`];
 
     const registry = new WorkerRegistry(redis);
 
     // 为 Runner 提供独立的 Redis 连接，避免轮询时的 BLOCK 指令阻塞其他操作（如 emitChunk）
     // 关键：轮询必须拥有自己的独占连接
+    const consumerGroupSuffix = process.env.BYAI_CHANNEL_CONSUMER_GROUP_SUFFIX?.trim();
+    const runnerGroupName = consumerGroupSuffix
+      ? `agent_engines:${agentTypes.join(",")}:${consumerGroupSuffix}`
+      : undefined;
     const runner = new WorkerRunner(
       { workerId, agentTypes, registry },
       {
-        redisClient: createRedis(redisInfo),
+        redisClient: createRedisClient(redisInfo) as never,
+        ...(runnerGroupName ? { groupName: runnerGroupName } : {}),
       },
     );
     installNoGroupRecovery({
       runner,
       registry,
+      redis,
       workerId,
       agentTypes,
+      runnerGroupName,
       log: this.log,
     });
     const emitter = new GatewayDataEmitter(redis, {
@@ -288,6 +390,7 @@ export class ByaiSdkApp {
 
     // 1. 初始化消费组等环境（内部会执行 claimWorkerId 获取独占锁）
     await runner.initialize();
+    await setRunnerAgentTypeStreamsToLatest({ redis, agentTypes, runnerGroupName, log: this.log });
 
     // 2. 启动心跳维持组件 (Standalone Heartbeat)
     // 必须传入同一个 registry 实例，以便复用 runner 刚刚获取的 lock token
@@ -333,6 +436,11 @@ export class ByaiSdkApp {
       }
       const gatewayMsg = data as AskAgentCommand;
       const { sessionId, messageId, traceId, metadata } = gatewayMsg.header;
+      const traceParentSpanId =
+        gatewayMsg.header.traceParentSpanId || metadataString(metadata, "trace_parent_span_id");
+      const langfuseParentObservationId =
+        gatewayMsg.header.langfuseParentObservationId ||
+        metadataString(metadata, "langfuse_parent_observation_id");
       if (!gatewayMsg.content || !sessionId || !messageId) {
         await runner.ack(streamName, msgId);
         return;
@@ -354,6 +462,8 @@ export class ByaiSdkApp {
       const metadataLanguage =
         typeof metadata?.language === "string" ? metadata.language : undefined;
       const { language, languageProvided } = resolveInboundLanguage(metadataLanguage);
+      const batchMetadata = parseByaiMultiAgentBatchMetadata(gatewayMsg.extraPayload);
+      const laneMetadata = batchMetadata ? undefined : parseByaiLaneMetadata(gatewayMsg.extraPayload);
       const inbound: ByaiSdkInboundMessage = {
         files,
         text,
@@ -362,6 +472,8 @@ export class ByaiSdkApp {
         userId: userCode,
         timestamp: Date.now(),
         traceId: traceId || "",
+        traceParentSpanId,
+        langfuseParentObservationId,
         accountId: this.account.accountId,
         extraPayload: gatewayMsg.extraPayload,
         language,
@@ -372,7 +484,23 @@ export class ByaiSdkApp {
           | undefined,
         beyondToken:
           metadata?.["Beyond-Token"] ?? metadata?.request_headers?.["Beyond-Token"] ?? "",
+        laneMetadata,
       };
+      const inboundMessages = buildByaiMultiAgentLaneMessages(inbound, batchMetadata);
+      if (batchMetadata && inboundMessages.length > 1) {
+        info?.(
+          `[${this.account.accountId}] byai-channel fan-out multi-agent turn: sessionId=${sessionId}, lanes=${inboundMessages
+            .map((item) => item.laneMetadata?.laneId ?? item.laneMetadata?.agentName ?? item.traceId)
+            .join(",")}`,
+        );
+        inboundMessages.forEach((message, index) => {
+          info?.(
+            `[${this.account.accountId}] byai-channel multi-agent lane assignment: sessionId=${sessionId}, assignment=${JSON.stringify(
+              buildLaneAssignmentLogItem(message, index),
+            )}`,
+          );
+        });
+      }
 
       // 写 sessionId 到文件，供 executor.py 读取并注入 X-Session-Id header
       try {
@@ -387,21 +515,69 @@ export class ByaiSdkApp {
         debug?.(`[${this.account.accountId}] failed to write session id file: ${String(err)}`);
       }
 
-      const abortController = new AbortController();
-      try {
-        await deliverReplyToAgentViaSdk({
-          message: inbound,
-          account: this.account,
-          cfg: getRuntimeConfig(),
-          abortController,
-          log: this.log,
-          onReply: async (text, options) => {
-            if (!text) {
-              return;
-            }
-            await emitter.emitChunk(sessionId, traceId, text, options || {});
+      let emittedLaneError = false;
+      const emitSdkError = async (currentInbound: ByaiSdkInboundMessage, err: unknown) => {
+        emittedLaneError = true;
+        const currentLaneMetadata = currentInbound.laneMetadata;
+        const errorOptions = withSdkEmitMetadata(
+          {
+            eventType: "error",
+            metadata: { error: String(err) },
           },
-        });
+          {
+            laneMetadata: currentLaneMetadata,
+            traceId: currentInbound.traceId,
+          },
+        );
+        await emitter.emitState(
+          currentInbound.sessionId,
+          currentInbound.traceId || "",
+          buildSdkStateEvent("", errorOptions),
+          errorOptions,
+        );
+      };
+
+      const handleInbound = async (currentInbound: ByaiSdkInboundMessage) => {
+        const abortController = new AbortController();
+        try {
+          await deliverReplyToAgentViaSdk({
+            message: currentInbound,
+            account: this.account,
+            cfg: getRuntimeConfig(),
+            abortController,
+            log: this.log,
+            onReply: async (text, options) => {
+              if (!text) {
+                return;
+              }
+              const emitOptions = withSdkEmitMetadata(options, {
+                laneMetadata: currentInbound.laneMetadata,
+                traceId: currentInbound.traceId,
+              });
+              await emitter.emitChunk(
+                currentInbound.sessionId,
+                currentInbound.traceId,
+                buildSdkChunkEvent(text, emitOptions),
+                emitOptions,
+              );
+            },
+          });
+        } catch (err) {
+          await emitSdkError(currentInbound, err);
+          throw err;
+        }
+      };
+
+      try {
+        const results = await Promise.allSettled(
+          inboundMessages.map((currentInbound) => handleInbound(currentInbound)),
+        );
+        const rejected = results.find(
+          (result): result is PromiseRejectedResult => result.status === "rejected",
+        );
+        if (rejected) {
+          throw rejected.reason;
+        }
 
         await runner.ack(streamName, msgId);
       } catch (err) {
@@ -411,10 +587,9 @@ export class ByaiSdkApp {
           )}`,
         );
         try {
-          await emitter.emitState(sessionId, traceId || "", "", {
-            eventType: "error",
-            metadata: { error: String(err) },
-          });
+          if (!emittedLaneError) {
+            await emitSdkError(inbound, err);
+          }
         } catch {
           // ignore
         }
@@ -440,6 +615,7 @@ export class ByaiSdkApp {
       activeRequest.abortController.abort(
         new Error(`[${this.account.accountId}] task canceled, reason: ${reason}`),
       );
+      releaseCancelledSessionDispatch(activeRequest.sessionKey);
       clearActiveSdkRequestRecord(activeRequest);
     });
 

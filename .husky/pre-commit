@@ -82,8 +82,8 @@ if [ "$HAS_FE" = true ]; then
     EXIT_CODE=1
   fi
 
-  # Jest tests
-  pnpm run test --passWithNoTests 2>&1
+  # 全量前端测试在低内存开发机上限制并发，避免浏览器预览类用例因 worker 争抢而超时。
+  pnpm run test --passWithNoTests --maxWorkers=2 2>&1
   if [ $? -ne 0 ]; then
     echo "❌ [pre-commit] Frontend tests failed"
     EXIT_CODE=1

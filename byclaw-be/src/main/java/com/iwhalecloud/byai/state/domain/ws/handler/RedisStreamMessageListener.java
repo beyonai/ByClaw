@@ -13,13 +13,14 @@ import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.state.domain.chat.service.SessionStreamManager;
 import com.iwhalecloud.byai.state.domain.chat.service.SessionStreamEventRouter;
+import com.iwhalecloud.byai.state.domain.chat.service.StreamDispatchResult;
 
 /**
  * Redis Stream 数据流消息监听器。
  * <p>
  * 每个 session 在 Gateway 模式下拥有独立的监听器实例（prototype scope），
  * 通过 ApplicationContext 每次获取新的实例，避免多 session 并发写入同一实例的线程安全问题。
- * 监听 "byai_gateway:session:{sessionId}:data_stream"，在 Gateway 模式下接收响应消息并投入事件队列。
+ * 监听 Gateway SDK 当前 Key Schema 对应的 Session Stream，在 Gateway 模式下接收响应消息并投入事件队列。
  * <p>
  * 设计要点：本监听器只负责将 Redis Stream 事件投入 {@link ChatProcessContext#gatewayEventQueue}，
  * 所有 OutputStream 写操作均由请求线程（Tomcat http-nio-* 线程）在
@@ -76,8 +77,14 @@ public class RedisStreamMessageListener implements StreamListener<String, MapRec
 
         dataJson.put("stream_id", message.getId().getValue());
 
-        sessionStreamEventRouter.dispatch(dataJson);
-        acknowledge(message);
+        StreamDispatchResult result = sessionStreamEventRouter.dispatch(dataJson);
+        if (result.shouldAcknowledge()) {
+            acknowledge(message);
+        }
+        else {
+            logger.warn("Redis Stream 消息暂不 ACK, result: {}, stream: {}, messageId: {}, sessionId: {}",
+                result, message.getStream(), message.getId(), sessionId);
+        }
     }
 
     private void acknowledge(MapRecord<String, String, String> message) {

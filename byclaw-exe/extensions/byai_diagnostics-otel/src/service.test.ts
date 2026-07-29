@@ -191,6 +191,23 @@ function createContext() {
         privateData,
       );
     },
+    emitInternal(
+      event: Omit<DiagnosticEventPayload, "seq" | "ts"> & { ts?: number },
+      privateData: Record<string, unknown> = {},
+    ) {
+      if (!listener) {
+        throw new Error("diagnostic listener not registered");
+      }
+      listener(
+        {
+          seq: 1,
+          ts: event.ts ?? Date.now(),
+          ...event,
+        } as DiagnosticEventPayload,
+        { trusted: false, internal: true } as DiagnosticEventMetadata,
+        privateData,
+      );
+    },
   };
 }
 
@@ -555,6 +572,91 @@ describe("BYAI diagnostics OTel correlation", () => {
     await service.stop?.(ctx as never);
   });
 
+  it("uses 128KB and 200 items as default OTEL content limits", async () => {
+    const service = createDiagnosticsOtelService({
+      forceContentCapture: {
+        inputMessages: true,
+      },
+    });
+    const { ctx, emitTrusted } = createContext();
+    await service.start(ctx as never);
+
+    const content = "x".repeat(20 * 1024);
+    emitTrusted(
+      {
+        type: "model.call.completed",
+        runId: "run-default-content-limits",
+        sessionId: "session-default-content-limits",
+        sessionKey: "agent:main:byai-channel:direct:session-default-content-limits",
+        provider: "openai",
+        model: "gpt-5.5",
+        api: "responses",
+        durationMs: 100,
+        ts: 2000,
+      } as never,
+      {
+        modelContent: {
+          inputMessages: [{ role: "user", content }],
+        },
+      },
+    );
+
+    const attrs = span("openclaw.model.call").setAttributes.mock.calls.at(-1)?.[0] as
+      | Record<string, string>
+      | undefined;
+    expect(attrs?.["input.value"]).toContain(content);
+    expect(attrs?.["input.value"]).not.toContain("truncated");
+
+    await service.stop?.(ctx as never);
+  });
+
+  it("applies configured OTEL content limits", async () => {
+    const service = createDiagnosticsOtelService({
+      forceContentCapture: {
+        inputMessages: true,
+      },
+    });
+    const { ctx, emitTrusted } = createContext();
+    (ctx.config.diagnostics.otel as Record<string, unknown>).contentLimits = {
+      maxAttributeChars: 1024,
+      maxArrayItems: 2,
+    };
+    await service.start(ctx as never);
+
+    emitTrusted(
+      {
+        type: "model.call.completed",
+        runId: "run-configured-content-limits",
+        sessionId: "session-configured-content-limits",
+        sessionKey: "agent:main:byai-channel:direct:session-configured-content-limits",
+        provider: "openai",
+        model: "gpt-5.5",
+        api: "responses",
+        durationMs: 100,
+        ts: 2000,
+      } as never,
+      {
+        modelContent: {
+          inputMessages: [
+            { role: "user", content: "first-" + "x".repeat(4000) },
+            { role: "user", content: "second" },
+            { role: "user", content: "third" },
+          ],
+        },
+      },
+    );
+
+    const attrs = span("openclaw.model.call").setAttributes.mock.calls.at(-1)?.[0] as
+      | Record<string, string>
+      | undefined;
+    expect(attrs?.["input.value"].length).toBeLessThanOrEqual(1024);
+    expect(attrs?.["input.value"]).toContain("...(truncated)");
+    expect(attrs?.["input.value"]).toContain("second");
+    expect(attrs?.["input.value"]).not.toContain("third");
+
+    await service.stop?.(ctx as never);
+  });
+
   it("publishes the active tool span id for plugin tools and clears it after completion", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "byai-otel-bridge-"));
     vi.stubEnv("BYAI_LANGFUSE_OBSERVATION_BRIDGE_FILE", path.join(dir, "bridge.json"));
@@ -621,5 +723,122 @@ describe("BYAI diagnostics OTel correlation", () => {
 
     await service.stop?.(ctx as never);
     fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("builds inbound spans for native channels when allowlisted", async () => {
+    const service = createDiagnosticsOtelService({
+      includeDiagnosticSessionAttributes: true,
+      includeLangfuseSessionAttributes: true,
+      inboundChannels: { channels: ["webchat"] },
+    });
+    const { ctx, emitInternal } = createContext();
+    await service.start(ctx as never);
+
+    const sessionKey = "webchat:session-native";
+    const inboundTrace = {
+      traceId: "1111111111111111111111111111aaaa",
+      spanId: "11111111aaaa1111",
+      traceFlags: "01",
+    };
+    const dispatchTrace = {
+      traceId: "1111111111111111111111111111aaaa",
+      spanId: "22221111bbbb1111",
+      traceFlags: "01",
+    };
+    emitInternal({
+      type: "message.received",
+      channel: "webchat",
+      sessionId: "session-native",
+      sessionKey,
+      messageId: "message-native",
+      trace: inboundTrace,
+      ts: 100,
+    } as never);
+    emitInternal({
+      type: "message.dispatch.started",
+      channel: "webchat",
+      sessionId: "session-native",
+      sessionKey,
+      trace: dispatchTrace,
+      ts: 110,
+    } as never);
+    emitInternal({
+      type: "model.usage",
+      sessionId: "session-native",
+      sessionKey,
+      channel: "webchat",
+      provider: "openai",
+      model: "gpt-5.5",
+      usage: { input: 10, output: 5, cacheRead: 3, cacheWrite: 2, total: 20 },
+      trace: dispatchTrace,
+      ts: 200,
+    } as never);
+    emitInternal({
+      type: "message.dispatch.completed",
+      channel: "webchat",
+      sessionId: "session-native",
+      sessionKey,
+      trace: dispatchTrace,
+      outcome: "success",
+      durationMs: 150,
+      ts: 250,
+    } as never);
+
+    const inboundSpan = span("openclaw.message.inbound");
+    const messageSpan = span("openclaw.message.processed");
+    const startSpanCalls = telemetryState.tracer.startSpan.mock.calls;
+    const inboundCall = startSpanCalls.find(([name]) => name === "openclaw.message.inbound");
+    const messageProcessedCall = startSpanCalls.find(
+      ([name]) => name === "openclaw.message.processed",
+    );
+    expect(inboundCall?.[2]).toEqual({
+      spanContext: expect.objectContaining({
+        traceId: inboundTrace.traceId,
+        spanId: inboundTrace.spanId,
+        traceFlags: 1,
+      }),
+    });
+    expect(messageProcessedCall?.[2]).toEqual({
+      spanContext: inboundSpan.spanContext(),
+    });
+    expect(messageSpan.setAttributes).toHaveBeenCalledWith(
+      expect.objectContaining({
+        "byai.tokens.input": 15,
+        "byai.tokens.output": 5,
+        "byai.tokens.total": 20,
+      }),
+    );
+    expect(inboundSpan.end).toHaveBeenCalledWith(250);
+
+    await service.stop?.(ctx as never);
+  });
+
+  it("skips inbound spans for non-allowlisted channels by default", async () => {
+    const service = createDiagnosticsOtelService({
+      includeLangfuseSessionAttributes: true,
+    });
+    const { ctx, emitTrusted } = createContext();
+    await service.start(ctx as never);
+
+    emitTrusted({
+      type: "message.received",
+      channel: "webchat",
+      sessionId: "session-default",
+      sessionKey: "webchat:session-default",
+      messageId: "message-default",
+      trace: {
+        traceId: "22222222222222222222222222222222",
+        spanId: "cccccccccccccccc",
+        traceFlags: "01",
+      },
+      ts: 100,
+    } as never);
+
+    const inboundStart = telemetryState.tracer.startSpan.mock.calls.find(
+      ([name]) => name === "openclaw.message.inbound",
+    );
+    expect(inboundStart).toBeUndefined();
+
+    await service.stop?.(ctx as never);
   });
 });

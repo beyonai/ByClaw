@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+    "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.iwhalecloud.byai.manager.mapper.system.SystemFeedbackMapper">
+
+    <sql id="ManageSelectColumns">
+        f.id,
+        f.user_id,
+        f.feedback_type,
+        f.title,
+        f.content,
+        f.contact_info,
+        f.status,
+        f.priority,
+        f.system_version,
+        f.device_info,
+        f.ip_address,
+        f.screenshot_url,
+        f.create_date,
+        f.update_date,
+        f.process_user_id,
+        f.process_date,
+        f.process_comment,
+        u.user_name,
+        (
+            SELECT COUNT(1)
+            FROM byai_attach_file af
+            WHERE af.table_name = 'byai_system_feedback'
+              AND af.table_pk_value = f.id
+              AND af.state = '00A'
+        ) AS attachment_count
+    </sql>
+
+    <select id="selectManageList"
+        resultType="com.iwhalecloud.byai.manager.vo.system.SystemFeedbackManageVo">
+        SELECT
+        <include refid="ManageSelectColumns"/>
+        FROM byai_system_feedback f
+        LEFT JOIN po_users u ON u.user_id = f.user_id
+        <where>
+            <if test="qo.feedbackType != null and qo.feedbackType != ''">
+                AND f.feedback_type = #{qo.feedbackType}
+            </if>
+            <if test="qo.title != null and qo.title != ''">
+                AND UPPER(f.title) LIKE CONCAT('%', UPPER(#{qo.title}), '%')
+            </if>
+            <if test="qo.content != null and qo.content != ''">
+                AND UPPER(f.content) LIKE CONCAT('%', UPPER(#{qo.content}), '%')
+            </if>
+        </where>
+        ORDER BY f.create_date DESC, f.id DESC
+    </select>
+
+    <select id="selectManageDetail"
+        resultType="com.iwhalecloud.byai.manager.vo.system.SystemFeedbackManageVo">
+        SELECT
+        <include refid="ManageSelectColumns"/>
+        FROM byai_system_feedback f
+        LEFT JOIN po_users u ON u.user_id = f.user_id
+        WHERE f.id = #{id}
+    </select>
+</mapper>

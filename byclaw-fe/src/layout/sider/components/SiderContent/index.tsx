@@ -5,13 +5,15 @@ import classnames from 'classnames';
 import useVisibleMenuKeys from '../../useVisibleMenuKeys';
 import styles from './index.module.less';
 
-const DialogueList = lazy(() => import('@/layout/sider/components/DialogueList'));
+const ProjectSpaceList = lazy(() => import('@/layout/sider/components/ProjectSpaceList'));
 const EmployeeList = lazy(() => import('@/layout/sider/components/EmployeeList'));
 const Knowledge = lazy(() => import('@/layout/sider/components/Knowledge'));
 const ResourceSiderPanel = lazy(() => import('@/layout/sider/components/ResourceSiderPanel'));
 const SearchAndQuery = lazy(() => import('@/layout/sider/components/SearchAndQuery'));
 const FileSiderPanel = lazy(() => import('@/layout/sider/components/FileSiderPanel'));
 const ModelSiderPanel = lazy(() => import('@/layout/sider/components/ModelSiderPanel'));
+
+const OntologySiderPanel = lazy(() => import('@/layout/sider/components/OntologySiderPanel'));
 
 const ToolSiderPanel = () => <ResourceSiderPanel resourceType="TOOL" />;
 const ViewSiderPanel = () => <ResourceSiderPanel resourceType="VIEW" />;
@@ -24,8 +26,10 @@ export const tabItems: any[] = [
     icon: 'icon-cebianlan-duihuajilu',
     activeIcon: 'icon-huihua-fill',
     label: 'sider.session',
-    ChildComponent: DialogueList,
+    // 会话入口统一展示按项目归属分组的会话列表，避免与独立项目入口重复。
+    ChildComponent: ProjectSpaceList,
     navigatePath: '/chat',
+    forceRender: true,
   },
   {
     key: 'agent',
@@ -43,6 +47,14 @@ export const tabItems: any[] = [
     ChildComponent: SearchAndQuery,
     navigatePath: '/searchAndQuery',
     forceRender: true,
+  },
+  {
+    key: 'model',
+    icon: 'icon-a-Braindanao',
+    activeIcon: 'icon-brain-filled',
+    label: 'common.model',
+    ChildComponent: ModelSiderPanel,
+    navigatePath: '/models',
   },
   {
     key: 'knowledge',
@@ -81,6 +93,14 @@ export const tabItems: any[] = [
     // hideSider: true,
   },
   {
+    key: 'ontology',
+    icon: 'icon-a-yemian-line',
+    activeIcon: 'icon-yemian-fill',
+    label: 'sider.ontology',
+    ChildComponent: OntologySiderPanel,
+    navigatePath: '/ontologyCenter',
+  },
+  {
     key: 'skill',
     icon: 'icon-a-changjing-line',
     activeIcon: 'icon-changjing-fill',
@@ -97,14 +117,6 @@ export const tabItems: any[] = [
     ChildComponent: FileSiderPanel,
     navigatePath: '/files',
   },
-  {
-    key: 'model',
-    icon: 'icon-a-Braindanao',
-    activeIcon: 'icon-a-Braindanao',
-    label: 'common.model',
-    ChildComponent: ModelSiderPanel,
-    navigatePath: '/models',
-  },
 ] as const;
 
 type IProps = {
@@ -120,9 +132,8 @@ const SiderContent = (props: IProps) => {
 
   const items = useMemo(
     () =>
-      visibleKeys
-        .map((key) => tabItems.find((pageItem) => pageItem.key === key))
-        .filter((pageItem): pageItem is (typeof tabItems)[number] => !!pageItem)
+      tabItems
+        .filter((pageItem) => visibleKeys.includes(pageItem.key))
         .map((pageItem) => {
           const { key, ChildComponent, destroyOnHidden = false, disabled, forceRender = false } = pageItem;
           return {

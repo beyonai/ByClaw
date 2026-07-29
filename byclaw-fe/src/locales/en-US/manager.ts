@@ -1,11 +1,13 @@
 import dashboardLocale from '@/pages/manager/pages/dashboard/locales/en-US';
 import digitalEmployeeMgrLocale from '@/pages/manager/pages/digitalEmployeeMgr/locales/en-US';
 import sandboxMgrLocale from '@/pages/manager/pages/SandboxMgr/locales/en-US';
+import systemFeedbackMgrLocale from '@/pages/manager/pages/SystemFeedbackMgr/locales/en-US';
 
 export default {
   ...dashboardLocale,
   ...digitalEmployeeMgrLocale,
   ...sandboxMgrLocale,
+  ...systemFeedbackMgrLocale,
   // Menu
   'menu.business': 'Management',
   'menu.business.field': 'Asset Directory',
@@ -23,6 +25,7 @@ export default {
   'menu.systemParams.modal': 'Model Configuration',
   'menu.systemParams.sandbox': 'Sandbox',
   'menu.business.notification': 'Notification',
+  'menu.systemFeedback': 'System Feedback Management',
   'common.add': 'Add',
   'common.edit': 'Edit',
   'common.view': 'View',
@@ -349,6 +352,7 @@ export default {
   'modelMgr.confirmDelete': 'Confirm to delete this model?',
   'modelMgr.confirmSetDefault':
     'Set this model as the default model for its type? Other default models of the same type will become non-default.',
+  'modelMgr.default': 'Default',
   'modelMgr.setDefault': 'Set as default',
   'modelMgr.defaultModel': 'Default',
   'modelMgr.operationSuccess': 'Operation succeeded',
@@ -376,6 +380,7 @@ export default {
   'modelMgr.resultEmpty': 'No model data',
   'modelMgr.emptyTitle': 'No models to display yet',
   'modelMgr.emptyDesc': 'Create a model first, or reset the filters to review existing records.',
+  'modelMgr.system.superAssistant': 'Personal assistant',
 
   // Model Management Error Messages
   'modelMgr.error.requestFail': 'Request failed',
@@ -408,7 +413,10 @@ export default {
   'modelMgr.modal.status': 'Status',
   'modelMgr.modal.debugPanelTitle': 'Model debug',
   'modelMgr.modal.debugRunPlaceholder': 'Click "Run" to call debug API and see output',
+  'modelMgr.modal.modelFallbackTitle': 'Model',
   'modelMgr.modal.saveSuccess': 'Saved successfully',
+  'modelMgr.modal.saveWithoutId':
+    'Saved successfully, but the model ID was not returned. Reopen the dialog or refresh the list before debugging again.',
   'modelMgr.modal.saveAndContinue': 'Save and continue',
   'modelMgr.modal.saveAndClose': 'Save and close',
   'modelMgr.modal.heroDesc':
@@ -493,6 +501,10 @@ export default {
   'modelMgr.modal.footerHint': 'Finish the model basics and connection setup first, then save or debug.',
   'modelMgr.modal.copyInputSuccess': 'Request copied',
   'modelMgr.modal.copyOutputSuccess': 'Output copied',
+  'modelMgr.modal.debugTableView': 'Table',
+  'modelMgr.modal.debugLoading': 'Requesting...',
+  'modelMgr.modal.debugTableRank': 'Rank',
+  'modelMgr.modal.debugTableText': 'Text',
   // /** LLM debug input default user message */
   'modelMgr.modal.debugDefaultUserMessage': "How's the weather today?",
   // /** RERANK debug input default query */

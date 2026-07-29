@@ -159,7 +159,8 @@ const ResourceDetail: React.FC<ResourceDetailProps> = ({
   const formatDateTime = (value?: string | number) => {
     if (!value) return intl.formatMessage({ id: 'common.none' });
     const parsed = dayjs(value);
-    return parsed.isValid() ? parsed.format('YYYY-MM-DD HH:mm:ss') : String(value);
+    // 使用开始日期只展示到分钟，避免秒级信息占用详情表格空间。
+    return parsed.isValid() ? parsed.format('YYYY-MM-DD HH:mm') : String(value);
   };
 
   const renderUsedDigitalEmployees = () => {
@@ -167,9 +168,11 @@ const ResourceDetail: React.FC<ResourceDetailProps> = ({
     if (!employees.length) {
       return null;
     }
+    // 标题展示关联数字员工数量，便于用户一眼判断当前技能被多少员工使用。
+    const usedEmployeeTitle = `${intl.formatMessage({ id: 'skillDetail.usedDigitalEmployees' })}（${employees.length}）`;
 
     return renderDetailField(
-      intl.formatMessage({ id: 'skillDetail.usedDigitalEmployees' }),
+      usedEmployeeTitle,
       <Table
         size="small"
         pagination={false}
@@ -182,7 +185,8 @@ const ResourceDetail: React.FC<ResourceDetailProps> = ({
           {
             dataIndex: 'useStartTime',
             title: intl.formatMessage({ id: 'skillDetail.useStartTime' }),
-            width: 180,
+            // 日期只展示到分钟后收窄列宽，把更多横向空间留给数字员工名称。
+            width: 150,
             render: (text: string | number) => formatDateTime(text),
           },
         ]}

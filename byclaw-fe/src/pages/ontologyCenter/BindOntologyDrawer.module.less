@@ -1,0 +1,118 @@
+.detailBlock {
+  border: 0.5px solid rgba(0, 0, 0, 0.1);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+  background: rgba(0, 0, 0, 0.02);
+
+  .detailName {
+    font-size: 15px;
+    font-weight: 500;
+    color: #1d2129;
+  }
+
+  .detailCode {
+    font-size: 12px;
+    color: #999;
+    font-family: 'SFMono-Regular', Consolas, Menlo, monospace;
+    margin-top: 2px;
+  }
+
+  .detailDesc {
+    font-size: 13px;
+    color: #666;
+    line-height: 1.6;
+    margin-top: 8px;
+  }
+}
+
+.footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.bindTree {
+  :global {
+    .@{antPrefix}-tree-checkbox,
+    .@{antPrefix}-checkbox,
+    .ant-tree-checkbox,
+    .ant-checkbox {
+      border-radius: 2px !important;
+    }
+
+    .@{antPrefix}-tree-checkbox .@{antPrefix}-tree-checkbox-inner,
+    .@{antPrefix}-checkbox .@{antPrefix}-checkbox-inner,
+    .ant-tree-checkbox .ant-tree-checkbox-inner,
+    .ant-checkbox .ant-checkbox-inner,
+    .@{antPrefix}-tree-checkbox-inner {
+      border-radius: 2px !important;
+    }
+
+    .@{antPrefix}-tree-title {
+      display: block;
+      min-width: 0;
+    }
+
+    .@{antPrefix}-tree-node-content-wrapper {
+      min-width: 0;
+    }
+  }
+}
+
+.bindTreeNodeTitle {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  overflow: hidden;
+  gap: 4px;
+}
+
+.bindTreeNodeNameWrap {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.bindTreeNodeNameGap {
+  flex: none;
+  width: 4px;
+}
+
+.bindTreeNodeName {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--beyond-color-text-primary, #14161a);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bindTreeNodeNameClickable {
+  cursor: pointer;
+}
+
+.bindTreeTypeTag {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  max-width: 52px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  background-color: rgba(22, 93, 255, 0.1);
+  line-height: 1;
+}
+
+.bindTreeTypeTagText {
+  display: block;
+  overflow: hidden;
+  background: linear-gradient(90deg, #088cff 0%, #00cdd5 100%);
+  background-clip: text;
+  color: transparent;
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}

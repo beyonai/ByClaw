@@ -73,9 +73,9 @@ export default function useRender({
 
       return (
         <div className="ub ub-ac">
-          <CopyComp richText={text} text={getDisplayQuestion({ text, resourceList })} />
-          <Divider type="vertical" />
+          {/* <Divider type="vertical" /> */}
           <Space size={2}>
+            <CopyComp richText={text} text={getDisplayQuestion({ text, resourceList })} />
             <div className={classnames(styles.actionsBarItem)} role="presentation">
               <Button
                 type="text"

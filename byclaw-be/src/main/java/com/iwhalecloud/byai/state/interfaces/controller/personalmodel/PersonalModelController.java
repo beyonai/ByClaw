@@ -28,8 +28,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 /**
- * 个人模型管理控制器
- * 复用系统级 ModelManagementApplicationService，按当前用户隔离数据
+ * 个人模型管理控制器 复用系统级 ModelManagementApplicationService，按当前用户隔离数据
  */
 @Slf4j
 @Api(tags = "个人模型管理")
@@ -84,12 +83,14 @@ public class PersonalModelController {
         List<String> abilities = request.getAbilities();
         if (abilities == null || abilities.isEmpty()) {
             request.setAbilities(new ArrayList<>(List.of("3")));
-        } else if (!abilities.contains("3")) {
+        }
+        else if (!abilities.contains("3")) {
             List<String> mutable = new ArrayList<>(abilities);
             mutable.add("3");
             request.setAbilities(mutable);
         }
         Map<String, String> data = modelManagementApplicationService.upsertModel(request, currentUserId);
+
         return ResponseUtil.success(data);
     }
 
@@ -131,7 +132,8 @@ public class PersonalModelController {
 
             YearMonth nextMonth = YearMonth.now().plusMonths(1);
             quotaData.put("resetDate", nextMonth.atDay(1).toString());
-        } catch (Exception e) {
+        }
+        catch (Exception e) {
             log.warn("Token quota query failed, degrading gracefully: {}", e.getMessage());
         }
 

@@ -2,12 +2,6 @@
 cd "$(dirname "$0")"
 . ../compose-detect.sh
 
-ENV_FILE="../../.env"
-
-set -a
-. "$ENV_FILE" 2>/dev/null
-set +a
-
 if [ "$STANDALONE_MODULES" = "NONE" ]; then
     echo "STANDALONE_MODULES=NONE, no standalone services to stop."
 elif [ -n "$STANDALONE_MODULES" ]; then
@@ -21,3 +15,6 @@ else
 fi
 
 echo "Standalone services stopped."
+
+# 清理解密后的临时环境文件
+rm -f "../../.env.runtime"

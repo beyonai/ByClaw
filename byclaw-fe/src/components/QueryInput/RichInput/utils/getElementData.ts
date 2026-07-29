@@ -59,16 +59,20 @@ export default function getElementData(type: IResourceType, data: any) {
         ],
       };
     }
-    case ResourceType.digitalEmployee:
+    case ResourceType.digitalEmployee: {
+      const agentId = data.agentId || data.id || data.resourceCode || data.resourceId;
+      const name = data.name || data.resourceName || data.resourceDesc || agentId;
       return {
-        agentId: data.agentId || data.id || data.resourceCode,
-        name: data.name,
+        agentId,
+        name,
         chatAvatar: data.chatAvatar,
         agentType: data.agentType,
         type: ELEMENT_MENTION,
         resourceType: type,
-        children: [{ text: getElementDisplayText({ resourceType: type, data }) }],
+        resourceCode: data.resourceCode,
+        children: [{ text: getElementDisplayText({ resourceType: type, data: { name } }) }],
       };
+    }
     case ResourceType.agentTool: {
       let name = data.resourceName;
       if (data.agentName) {
@@ -97,8 +101,10 @@ export default function getElementData(type: IResourceType, data: any) {
     case ResourceType.tool:
     case ResourceType.OBJECT:
     case ResourceType.SKILL:
-    case ResourceType.folder:
-    case ResourceType.file:
+    case ResourceType.knowledgeFolder:
+    case ResourceType.knowledgeFile:
+    case ResourceType.commonFolder:
+    case ResourceType.commonFile:
     case ResourceType.database: {
       let idKeyField = '';
       let nameKeyField = '';
@@ -110,7 +116,12 @@ export default function getElementData(type: IResourceType, data: any) {
       ) {
         idKeyField = 'resourceId';
         nameKeyField = 'resourceName';
-      } else if (type === ResourceType.folder || type === ResourceType.file) {
+      } else if (
+        type === ResourceType.knowledgeFolder ||
+        type === ResourceType.knowledgeFile ||
+        type === ResourceType.commonFolder ||
+        type === ResourceType.commonFile
+      ) {
         idKeyField = 'id';
         nameKeyField = 'collectionName';
       } else if (type === ResourceType.database) {
@@ -130,6 +141,8 @@ export default function getElementData(type: IResourceType, data: any) {
         type: ELEMENT_RESOURCE,
         resourceName: name,
         resourceCode: data.resourceCode,
+        isFromResourceModule: data.isFromResourceModule,
+        showQuotePrefix: data.showQuotePrefix,
         // 引用XXX
         children: [{ text: getElementDisplayText({ resourceType: type, data: { name } }) }],
       };

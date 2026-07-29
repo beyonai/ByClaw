@@ -26,7 +26,7 @@ public class DingtalkStreamBotLifecycle {
     @PostConstruct
     public void start() {
         if (!properties.isEnabled()) {
-            logger.info("DingTalk stream bot is disabled. Set dingtalk.stream.enabled=true to enable it.");
+            logger.info("DingTalk stream bot is disabled. Set channel.stream.enabled=true to enable it.");
             return;
         }
         try {

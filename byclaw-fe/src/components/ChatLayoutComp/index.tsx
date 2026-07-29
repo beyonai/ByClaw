@@ -51,6 +51,7 @@ type IProps = {
   hideAction?: boolean;
   hideChatTitle?: boolean;
   sendExtraParams?: Record<string, unknown>;
+  projectId?: number;
 };
 
 // 定义MessageList组件的ref类型接口
@@ -73,6 +74,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     hideChatTitle = false,
     chatUrl,
     hideAction = false,
+    projectId,
   } = props;
   const { isBottom, setIsBottom } = props;
   const { sessionId, queryInputProps = {}, readOnly } = props;
@@ -92,6 +94,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
   /** 对话的额外参数 */
   const tempParamsRef = useRef(sendExtraParams);
   tempParamsRef.current = sendExtraParams;
+  const shouldSkipSessionListCache = Boolean(sendExtraParams?.troubleshootMessageId);
 
   const prevAgentId = useRef(agentId);
 
@@ -105,12 +108,16 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
 
   const addSession = useCallback(
     (newSession: ISession) => {
+      if (shouldSkipSessionListCache) {
+        return;
+      }
+
       dispatch({
         type: 'session/addSession',
         payload: newSession,
       });
     },
-    [dispatch]
+    [dispatch, shouldSkipSessionListCache]
   );
 
   const updateSession = useCallback(
@@ -144,15 +151,26 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
     return target;
   }, [sessionId, sessionList]);
 
+  const sessionProjectId = useMemo(() => {
+    // 路由状态在刷新或非项目列表入口时可能丢失，优先从当前会话的后端归属字段恢复。
+    const candidateProjectId = projectId ?? currentSession?.projectId;
+    const normalizedProjectId = Number(candidateProjectId);
+    return Number.isFinite(normalizedProjectId) && normalizedProjectId > 0 ? normalizedProjectId : undefined;
+  }, [currentSession?.projectId, projectId]);
+
   const onReceivedChatMessages = useCallback(
-    (metadata?: string) => {
+    (payload?: { sessionId?: string; metadata?: string }) => {
+      const { sessionId: sourceSessionId, metadata } = payload || {};
+      if (`${sourceSessionId}` !== `${sessionId}`) {
+        return;
+      }
       const agentInfo = getResponseAgentInfo({ agentList, employeesList }, metadata);
       if (agentInfo) {
         setAgentId?.(agentInfo.agentId);
         setMyAgentType(agentInfo.agentType);
       }
     },
-    [agentList, employeesList]
+    [agentList, employeesList, sessionId]
   );
 
   const {
@@ -330,6 +348,7 @@ function ChatLayoutComp(props: IProps, ref: ForwardedRef<IChatLayoutCompRef>) {
                 lastAnswer={lastAnswer}
                 currentSession={currentSession}
                 agentType={myAgentType}
+                projectId={sessionProjectId}
               />
             )}
             {isBottom && (

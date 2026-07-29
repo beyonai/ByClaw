@@ -1,0 +1,20 @@
+{
+  "name": "@byclaw/shared",
+  "version": "2026.7.7",
+  "private": true,
+  "description": "Shared remote-agent delegation closure (executeViaCallAgent, channel-session resolve, langfuse, remote-task log) used by baiying-enhance and byclaw-acp-adapter.",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@byclaw/by-framework": "1.5.1",
+    "@opentelemetry/api": "1.9.1",
+    "ioredis": "5.10.1"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.17",
+    "typescript": "5.9.2"
+  }
+}

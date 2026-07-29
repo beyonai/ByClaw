@@ -255,6 +255,14 @@ export const queryResourceDetail = (params: any) => {
   return POST<any>('/byaiService/tool/queryResourceDetail', params);
 };
 
+/**
+ * 按资源 ID 批量查询资源基础信息。
+ * 用于默认配置只保存 resourceId 时，前端补齐已选资源名称等展示字段。
+ */
+export const queryResourceDetailListByIds = (params: any) => {
+  return POST<any>('/byaiService/new/resource/queryResourceDetailListByIds', params);
+};
+
 export const queryMCPToolsList = (params: { resourceId: string }) => {
   return POST<any>('/byaiService/tool/mcp/listTools', params);
 };
@@ -528,7 +536,12 @@ export const resourceizeWorkspaceSkill = (params: WorkspaceSkillParams) => {
  * @param params 参数（包含skillPath技能路径、resourceId资源ID和可选的userCode用户编码）
  * @returns Promise<Blob> 文件流
  */
-export const downloadSkillZip = (params: { skillPath: string; resourceId?: string | number; userCode?: string }) => {
+export const downloadSkillZip = (params: {
+  skillPath?: string;
+  skillId?: string | number;
+  resourceId?: string | number;
+  userCode?: string;
+}) => {
   return POST<any>('/byaiService/tool/downloadSkillZip', params, {
     timeout: 480000,
     responseType: 'blob',

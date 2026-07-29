@@ -57,6 +57,11 @@ export default [
             component: './manager/pages/SandboxMgr',
           },
           {
+            path: '/manager/system/feedback',
+            name: 'managerSystemFeedback',
+            component: './manager/pages/SystemFeedbackMgr',
+          },
+          {
             path: '/manager/asset/digitalEmployee',
             name: 'managerDigitalEmployee',
             component: './manager/pages/digitalEmployeeMgr',
@@ -168,6 +173,16 @@ export default [
             component: './objectCenter',
           },
           {
+            path: '/ontologyCenter',
+            name: 'ontologyCenter',
+            component: './ontologyCenter',
+          },
+          {
+            path: '/ontologyBaseDetail',
+            name: 'ontologyBaseDetail',
+            component: './ontologyBaseDetail',
+          },
+          {
             path: '/skillCenter',
             name: 'skillCenter',
             component: './skillCenter',
@@ -218,6 +233,11 @@ export default [
             component: './accessTokenMgmt',
           },
           {
+            path: '/projectSpace',
+            name: 'projectSpace',
+            component: './projectSpace',
+          },
+          {
             name: 'settings',
             path: '/settings',
             component: './settings',
@@ -252,6 +272,11 @@ export default [
             path: '/iframes/employee',
             name: 'employee',
             component: './iframes/employee',
+          },
+          {
+            path: '/iframes/adapter-recorder',
+            name: 'adapterRecorder',
+            component: './adapterRecorder',
           },
         ],
       },

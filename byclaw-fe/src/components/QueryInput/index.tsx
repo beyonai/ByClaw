@@ -32,14 +32,18 @@ function QueryInput(props: IProps) {
 
   const { getMessageList } = useContext(ChatLayoutCompContext);
   const globalContext = useGlobal();
-  const { agentInfo } = globalContext;
+  const { EventEmitter, agentInfo } = globalContext;
 
   const agentIdRef = useRef(agentInfo?.agentId);
   const agentId = agentInfo?.agentId;
   agentIdRef.current = agentId;
 
-  const onReceivedChatMessages = useCallback((metadata?: string) => {
-    if (metadata) {
+  const onReceivedChatMessages = useCallback(
+    (payload?: { sessionId?: string; metadata?: string }) => {
+      const { sessionId: sourceSessionId, metadata } = payload || {};
+      if (`${sourceSessionId}` !== `${props.sessionId}` || !metadata) {
+        return;
+      }
       try {
         const metaObj = JSON.parse(metadata);
         if (metaObj.mode) {
@@ -52,11 +56,11 @@ function QueryInput(props: IProps) {
       } catch (error) {
         console.error(error);
       }
-    }
-  }, []);
+    },
+    [props.sessionId]
+  );
 
   useEffect(() => {
-    const { EventEmitter } = globalContext;
     const onSetSchema = (schema: { agentId: string; agentType: string; resourceList: any[] }) => {
       if ((!agentIdRef.current && !!schema.agentId) || (!!agentIdRef.current && !schema.agentId)) {
         // agentId从有到无，或者从无到有，都需要重新渲染输入框
@@ -75,7 +79,7 @@ function QueryInput(props: IProps) {
       EventEmitter.off('queryInput-set-schema', onSetSchema);
       EventEmitter.off('RECEIVE_SESSION_RECORDS_LAST_METADATA', onReceivedChatMessages);
     };
-  }, []);
+  }, [EventEmitter, onReceivedChatMessages]);
 
   const QueryInputComp = useMemo(() => {
     if (myAgentType === agentTypeMap.searchAndQuery) {

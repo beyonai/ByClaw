@@ -94,6 +94,20 @@ final class SandboxRuntimeRequestFactory {
         return Map.of("sandboxId", sandboxId);
     }
 
+    /**
+     * Build the WhaleAgent {@code /sandboxExternal/getSandboxEndpoint} payload used to
+     * re-hydrate a proxy endpoint URL for a specific port of an existing sandbox.
+     */
+    static Map<String, Object> buildWhaleAgentGetEndpointRequest(String sandboxId, String sandboxType, int port) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("sandboxId", sandboxId);
+        if (StringUtils.isNotBlank(sandboxType)) {
+            payload.put("sandboxType", sandboxType);
+        }
+        payload.put("port", port);
+        return payload;
+    }
+
     static WhaleAgentListSandboxesRequest buildWhaleAgentListSandboxesRequest(String userCode, String sandboxType) {
         Map<String, String> metadata = new LinkedHashMap<>();
         metadata.put("userCode", userCode);
@@ -137,7 +151,18 @@ final class SandboxRuntimeRequestFactory {
             return false;
         }
         String state = status.getState().trim().toLowerCase(java.util.Locale.ROOT);
-        return "running".equals(state) || "ready".equals(state);
+        // Use exclusion list instead of inclusion list - exclude only terminal/failed states
+        // Reusable: Pending, Running, Ready (starting/creating states can be reused)
+        // Non-reusable: Failed, Succeeded, Completed, Terminated, Stopped, Killed, Error, Unknown, Exited
+        return !"failed".equals(state)
+            && !"succeeded".equals(state)
+            && !"completed".equals(state)
+            && !"terminated".equals(state)
+            && !"stopped".equals(state)
+            && !"killed".equals(state)
+            && !"error".equals(state)
+            && !"unknown".equals(state)
+            && !"exited".equals(state);
     }
 
     static int stateRankForReuse(SandboxStatus status) {

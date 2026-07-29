@@ -86,9 +86,13 @@ const QuotaCard: React.FC<QuotaProps> = ({ quota }) => {
                   <Tooltip title={m.modelCode}>
                     <span className={styles.usageModel}>{m.displayName}</span>
                   </Tooltip>
-                  <div className={styles.usageBar}>
-                    <div className={styles.usageBarFill} style={{ width: `${barPercent}%` }} />
-                  </div>
+                  <Progress
+                    className={styles.usageProgress}
+                    percent={barPercent}
+                    size="small"
+                    strokeColor="#1677ff"
+                    showInfo={false}
+                  />
                 </div>
                 <span className={styles.usageTokens}>{formatTokens(m.tokensUsed)}</span>
               </div>

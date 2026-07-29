@@ -1,11 +1,13 @@
 import dashboardLocale from '@/pages/manager/pages/dashboard/locales/zh-CN';
 import digitalEmployeeMgrLocale from '@/pages/manager/pages/digitalEmployeeMgr/locales/zh-CN';
 import sandboxMgrLocale from '@/pages/manager/pages/SandboxMgr/locales/zh-CN';
+import systemFeedbackMgrLocale from '@/pages/manager/pages/SystemFeedbackMgr/locales/zh-CN';
 
 export default {
   ...dashboardLocale,
   ...digitalEmployeeMgrLocale,
   ...sandboxMgrLocale,
+  ...systemFeedbackMgrLocale,
 
   // Menu
   'menu.business': '资产',
@@ -24,6 +26,7 @@ export default {
   'menu.systemParams.modal': '模型配置管理',
   'menu.systemParams.sandbox': '沙箱配置管理',
   'menu.business.notification': '通知管理',
+  'menu.systemFeedback': '系统反馈管理',
   'common.add': '新增',
   'common.edit': '编辑',
   'common.view': '查看',
@@ -350,6 +353,7 @@ export default {
   'modelMgr.confirmEnable': '确认启用该模型？',
   'modelMgr.confirmDelete': '确认删除该模型？',
   'modelMgr.confirmSetDefault': '确定将该模型设置为该类型默认模型吗？设置后同类型其他默认模型将变为非默认。',
+  'modelMgr.default': '默认',
   'modelMgr.setDefault': '设为默认',
   'modelMgr.defaultModel': '默认',
   'modelMgr.operationSuccess': '操作成功',
@@ -375,6 +379,7 @@ export default {
   'modelMgr.resultEmpty': '暂无模型数据',
   'modelMgr.emptyTitle': '还没有可展示的模型',
   'modelMgr.emptyDesc': '可以先新建一个模型，或者重置筛选条件查看已有数据。',
+  'modelMgr.system.superAssistant': '个人助理',
 
   // 模型管理错误提示
   'modelMgr.error.requestFail': '请求失败',
@@ -407,7 +412,9 @@ export default {
   'modelMgr.modal.status': '状态',
   'modelMgr.modal.debugPanelTitle': '模型调试',
   'modelMgr.modal.debugRunPlaceholder': '点击“运行”调用调试接口输出结果',
+  'modelMgr.modal.modelFallbackTitle': '模型',
   'modelMgr.modal.saveSuccess': '保存成功',
+  'modelMgr.modal.saveWithoutId': '保存成功，但未拿到模型ID，继续调试前请重新打开或刷新列表确认。',
   'modelMgr.modal.saveAndContinue': '保存并继续',
   'modelMgr.modal.saveAndClose': '保存并关闭',
   'modelMgr.modal.heroDesc': '将模型基础信息、连接参数和调试输入放在同一工作台中，减少来回切换。',
@@ -483,6 +490,10 @@ export default {
   'modelMgr.modal.footerHint': '建议先完成基础信息和连接配置，再保存或调试。',
   'modelMgr.modal.copyInputSuccess': '请求已复制',
   'modelMgr.modal.copyOutputSuccess': '输出已复制',
+  'modelMgr.modal.debugTableView': '表格',
+  'modelMgr.modal.debugLoading': '请求中…',
+  'modelMgr.modal.debugTableRank': '排名',
+  'modelMgr.modal.debugTableText': '文本',
   // /** LLM 调试输入默认 user message 文案 */
   'modelMgr.modal.debugDefaultUserMessage': '今天天气如何',
   // /** RERANK 调试输入默认 query */

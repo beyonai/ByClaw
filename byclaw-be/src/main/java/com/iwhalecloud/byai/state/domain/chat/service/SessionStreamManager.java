@@ -7,8 +7,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
-
 import org.apache.commons.lang3.StringUtils;
+import com.iwhaleai.byai.framework.common.Constants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -50,11 +50,6 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
 
     private static final Logger log = LoggerFactory.getLogger(SessionStreamManager.class);
 
-    /** Gateway Session Stream Key 前缀 */
-    private static final String STREAM_KEY_PREFIX = "byai_gateway:session:";
-
-    /** Stream Key 后缀 */
-    private static final String STREAM_KEY_SUFFIX = ":data_stream";
 
     /** Session 状态 Key 前缀 */
     public static final String SESSION_STATUS_KEY_PREFIX = "byai:session:";
@@ -74,6 +69,9 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
     private static final String INIT_EVENT = "{\"event_type\":\"_init\"}";
 
     private static final long SESSION_STATUS_POLL_INTERVAL_MILLIS = 1000L;
+
+    /** 会话结束后 Session 状态监听保留时长（毫秒），期间内同一 session 重新开始可复用监听 */
+    private static final long SESSION_STATUS_LISTENER_LINGER_MILLIS = 30_000L;
 
     @Autowired
     private RedisConnectionFactory redisConnectionFactory;
@@ -102,6 +100,12 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
 
     /** sessionId -> 最近一次已推送的 Session 状态值 */
     private final Map<String, String> sessionStatusLastValues = new ConcurrentHashMap<>();
+
+    /** sessionId -> Session 状态监听延迟停止任务（会话结束后 linger 期间的待执行停止） */
+    private final Map<String, ScheduledFuture<?>> sessionStatusStopTasks = new ConcurrentHashMap<>();
+
+    /** 串行化 Session 状态监听的 start / stop / 延迟调度 / 取消，消除 linger 边界处的竞争 */
+    private final Object sessionStatusLifecycleLock = new Object();
 
     /** sessionId -> running 标记续租任务 */
     private final Map<String, ScheduledFuture<?>> keepAliveTasks = new ConcurrentHashMap<>();
@@ -193,7 +197,7 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
             }
         }
         cancelKeepAlive(sessionId);
-        stopSessionStatusListener(sessionId);
+        scheduleSessionStatusListenerStop(sessionId);
 
         // 清理 OutputStreamManager 中的上下文（确保不残留）
         OutputStreamManager outputStreamManager = applicationContext.getBean(OutputStreamManager.class);
@@ -223,6 +227,8 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
         sessionStatusTopics.clear();
         sessionStatusPollTasks.values().forEach(task -> task.cancel(false));
         sessionStatusPollTasks.clear();
+        sessionStatusStopTasks.values().forEach(task -> task.cancel(false));
+        sessionStatusStopTasks.clear();
         sessionStatusFields.clear();
         sessionStatusLastValues.clear();
         keepAliveTasks.values().forEach(task -> task.cancel(false));
@@ -266,7 +272,11 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
      * @return 完整的 Stream Key，格式：byai_gateway:session:{sessionId}:data_stream
      */
     public String buildStreamKey(String sessionId) {
-        return STREAM_KEY_PREFIX + sessionId + STREAM_KEY_SUFFIX;
+        return Constants.QueueNames.sessionDataStream(sessionId);
+    }
+
+    public String buildConsumerName(String sessionId) {
+        return CONSUMER_NAME_PREFIX + sessionId;
     }
 
     /**
@@ -300,43 +310,88 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
     }
 
     private void startSessionStatusListener(String sessionId, Long agentId) {
-        String statusField = resolveSessionStatusField(agentId);
-        String oldField = sessionStatusFields.put(sessionId, statusField);
-        if (!StringUtils.equals(oldField, statusField)) {
-            sessionStatusLastValues.remove(sessionId);
-        }
+        synchronized (sessionStatusLifecycleLock) {
+            // 取消可能挂起的延迟停止任务，linger 期间重新开始则复用监听
+            cancelSessionStatusListenerStop(sessionId);
 
-        PatternTopic topic = new PatternTopic("__keyspace@*__:" + buildSessionStatusKey(sessionId));
-        PatternTopic old = sessionStatusTopics.put(sessionId, topic);
-        SessionStatusRedisMessageListener listener =
-            applicationContext.getBean(SessionStatusRedisMessageListener.class);
-        if (old != null) {
-            redisMessageListenerContainer.removeMessageListener(listener, old);
+            String statusField = resolveSessionStatusField(agentId);
+            String oldField = sessionStatusFields.put(sessionId, statusField);
+            if (!StringUtils.equals(oldField, statusField)) {
+                sessionStatusLastValues.remove(sessionId);
+            }
+
+            PatternTopic topic = new PatternTopic("__keyspace@*__:" + buildSessionStatusKey(sessionId));
+            PatternTopic old = sessionStatusTopics.put(sessionId, topic);
+            SessionStatusRedisMessageListener listener =
+                applicationContext.getBean(SessionStatusRedisMessageListener.class);
+            if (old != null) {
+                redisMessageListenerContainer.removeMessageListener(listener, old);
+            }
+            redisMessageListenerContainer.addMessageListener(listener, topic);
+            log.info("Session 状态 Key 监听已启动, key: {}, field: {}", buildSessionStatusKey(sessionId), statusField);
+            startSessionStatusPolling(sessionId);
         }
-        redisMessageListenerContainer.addMessageListener(listener, topic);
-        log.info("Session 状态 Key 监听已启动, key: {}, field: {}", buildSessionStatusKey(sessionId), statusField);
-        startSessionStatusPolling(sessionId);
+    }
+
+    /**
+     * 安排 Session 状态监听在 linger 时长后停止。
+     * <p>
+     * 会话结束后不立即停止，保留 {@link #SESSION_STATUS_LISTENER_LINGER_MILLIS} 毫秒，
+     * 期间同一 sessionId 重新开始监听则复用并取消本任务。
+     */
+    private void scheduleSessionStatusListenerStop(String sessionId) {
+        synchronized (sessionStatusLifecycleLock) {
+            if (!sessionStatusTopics.containsKey(sessionId)) {
+                return;
+            }
+            cancelSessionStatusListenerStop(sessionId);
+            ScheduledFuture<?>[] holder = new ScheduledFuture<?>[1];
+            ScheduledFuture<?> future = sessionStatusExecutor.schedule(() -> {
+                synchronized (sessionStatusLifecycleLock) {
+                    // 仅当自己仍是当前挂起任务时才执行停止（避免被重启取消后又误停）
+                    if (sessionStatusStopTasks.get(sessionId) != holder[0]) {
+                        return;
+                    }
+                    sessionStatusStopTasks.remove(sessionId);
+                    stopSessionStatusListener(sessionId);
+                }
+            }, SESSION_STATUS_LISTENER_LINGER_MILLIS, TimeUnit.MILLISECONDS);
+            holder[0] = future;
+            sessionStatusStopTasks.put(sessionId, future);
+            log.info("Session 状态 Key 监听将于 {}ms 后停止, sessionId: {}",
+                SESSION_STATUS_LISTENER_LINGER_MILLIS, sessionId);
+        }
+    }
+
+    private void cancelSessionStatusListenerStop(String sessionId) {
+        ScheduledFuture<?> task = sessionStatusStopTasks.remove(sessionId);
+        if (task != null) {
+            task.cancel(false);
+        }
     }
 
     private void stopSessionStatusListener(String sessionId) {
-        PatternTopic topic = sessionStatusTopics.remove(sessionId);
-        if (topic != null) {
-            try {
-                SessionStatusRedisMessageListener listener =
-                    applicationContext.getBean(SessionStatusRedisMessageListener.class);
-                redisMessageListenerContainer.removeMessageListener(listener, topic);
-                log.info("Session 状态 Key 监听已停止, sessionId: {}", sessionId);
+        synchronized (sessionStatusLifecycleLock) {
+            cancelSessionStatusListenerStop(sessionId);
+            PatternTopic topic = sessionStatusTopics.remove(sessionId);
+            if (topic != null) {
+                try {
+                    SessionStatusRedisMessageListener listener =
+                        applicationContext.getBean(SessionStatusRedisMessageListener.class);
+                    redisMessageListenerContainer.removeMessageListener(listener, topic);
+                    log.info("Session 状态 Key 监听已停止, sessionId: {}", sessionId);
+                }
+                catch (Exception e) {
+                    log.warn("停止 Session 状态 Key 监听时发生异常, sessionId: {}", sessionId, e);
+                }
             }
-            catch (Exception e) {
-                log.warn("停止 Session 状态 Key 监听时发生异常, sessionId: {}", sessionId, e);
+            ScheduledFuture<?> pollTask = sessionStatusPollTasks.remove(sessionId);
+            if (pollTask != null) {
+                pollTask.cancel(false);
             }
+            sessionStatusFields.remove(sessionId);
+            sessionStatusLastValues.remove(sessionId);
         }
-        ScheduledFuture<?> pollTask = sessionStatusPollTasks.remove(sessionId);
-        if (pollTask != null) {
-            pollTask.cancel(false);
-        }
-        sessionStatusFields.remove(sessionId);
-        sessionStatusLastValues.remove(sessionId);
     }
 
     private void startSessionStatusPolling(String sessionId) {
@@ -345,12 +400,13 @@ public class SessionStreamManager implements ApplicationListener<ContextClosedEv
             oldTask.cancel(false);
         }
 
+        // 重新监听时，以当前 Redis 值为基线，忽略历史/未消费的数据，仅广播之后的变化
         String currentValue = readSessionStatusValue(sessionId);
         if (currentValue == null) {
             sessionStatusLastValues.remove(sessionId);
         }
         else {
-            dispatchSessionStatusChange(sessionId, currentValue);
+            sessionStatusLastValues.put(sessionId, currentValue);
         }
 
         ScheduledFuture<?> pollTask = sessionStatusExecutor.scheduleWithFixedDelay(() -> {

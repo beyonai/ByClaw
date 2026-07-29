@@ -2,16 +2,56 @@ import { cacheTroubleshootSession, getCachedTroubleshootSession } from './sessio
 
 describe('troubleshoot session cache', () => {
   it('returns the cached session id by trace id', () => {
-    cacheTroubleshootSession('trace-cache-hit', 'session-cache-hit');
+    cacheTroubleshootSession({
+      traceId: 'trace-cache-hit',
+      sessionId: 'session-cache-hit',
+    });
 
-    expect(getCachedTroubleshootSession('trace-cache-hit')).toBe('session-cache-hit');
+    expect(getCachedTroubleshootSession({ traceId: 'trace-cache-hit' })).toBe('session-cache-hit');
   });
 
-  it('ignores empty trace id and session id', () => {
-    cacheTroubleshootSession('', 'session-empty-trace');
-    cacheTroubleshootSession('trace-empty-session', '');
+  it('returns the cached session id by message id', () => {
+    cacheTroubleshootSession({
+      messageId: 'message-cache-hit',
+      sessionId: 'session-from-message',
+    });
 
-    expect(getCachedTroubleshootSession('')).toBeUndefined();
-    expect(getCachedTroubleshootSession('trace-empty-session')).toBeUndefined();
+    expect(getCachedTroubleshootSession({ messageId: 'message-cache-hit' })).toBe('session-from-message');
+  });
+
+  it('prefers the cached session id by message id', () => {
+    cacheTroubleshootSession({
+      traceId: 'trace-fallback',
+      sessionId: 'session-from-trace',
+    });
+    cacheTroubleshootSession({
+      messageId: 'message-priority',
+      sessionId: 'session-from-message-priority',
+    });
+
+    expect(
+      getCachedTroubleshootSession({
+        messageId: 'message-priority',
+        traceId: 'trace-fallback',
+      })
+    ).toBe('session-from-message-priority');
+  });
+
+  it('ignores empty trace id, message id and session id', () => {
+    cacheTroubleshootSession({
+      sessionId: 'session-without-key',
+    });
+    cacheTroubleshootSession({
+      traceId: 'trace-empty-session',
+      sessionId: '',
+    });
+    cacheTroubleshootSession({
+      messageId: 'message-empty-session',
+      sessionId: '',
+    });
+
+    expect(getCachedTroubleshootSession({})).toBeUndefined();
+    expect(getCachedTroubleshootSession({ traceId: 'trace-empty-session' })).toBeUndefined();
+    expect(getCachedTroubleshootSession({ messageId: 'message-empty-session' })).toBeUndefined();
   });
 });

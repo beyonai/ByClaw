@@ -5,15 +5,38 @@ from __future__ import annotations
 import logging
 import os
 from contextlib import asynccontextmanager
+from collections.abc import Callable
 from typing import AsyncIterator
-
-from redis.asyncio import Redis
 
 from by_framework.core.discovery import ServiceRegistry
 
+from byclaw_data.redis_client import create_redis_client, get_redis_settings
 from byclaw_data.runtime import normalize_runtime_environment
 
 logger = logging.getLogger(__name__)
+
+create_discovery_redis = create_redis_client
+
+
+def _configure_platform_logging(
+    *,
+    setup_logging_func: Callable[..., None] | None = None,
+) -> None:
+    """Initialize application loggers for the platform HTTP service."""
+    if setup_logging_func is None:
+        from datacloud_analysis.logging_setup import setup_logging  # noqa: PLC0415
+
+        setup_logging_func = setup_logging
+
+    log_level = (
+        os.environ.get("DATACLOUD_DATA_SERVICE_LOG_LEVEL")
+        or os.environ.get("DATACLOUD_LOG_LEVEL")
+        or "info"
+    ).upper()
+    setup_logging_func(
+        level=log_level,
+        extra_namespaces=("byclaw_data", "datacloud_knowledge"),
+    )
 
 
 def _get_service_port() -> int:
@@ -27,21 +50,34 @@ def _get_service_port() -> int:
 def create_app(**kwargs):
     """Create the byclaw MCP app on top of datacloud_platform."""
 
+    os.environ.setdefault("DATACLOUD_LOG_DIR", "logs/service")
+    from datacloud_analysis.logging_setup import setup_logging  # noqa: PLC0415
+    setup_logging(extra_namespaces=("byclaw_data",))
+
     normalize_runtime_environment()
+    _configure_platform_logging()
+
+    # Inject ByClaw result_file_storage BEFORE get_platform() initialises the singleton.
+    # loader_runtime._configure_runtime_services() reads build_result_file_storage at
+    # platform-init time, so the override must be in place before that call.
+    import datacloud_platform.platform_file_storage as pf_storage
+    from byclaw_data.platform.result_file_storage import build_result_file_storage
+
+    pf_storage.build_result_file_storage = build_result_file_storage
 
     from datacloud_platform import get_platform
     from datacloud_platform.api.server import create_app as create_platform_app
 
     platform = get_platform()
 
-    # Inject ByClaw result_file_storage before creating app
-    import datacloud_platform.platform_file_storage as pf_storage
-    from byclaw_data.platform.result_file_storage import build_result_file_storage
-
-    pf_storage.build_result_file_storage = build_result_file_storage
-
     app = create_platform_app(platform, **kwargs)
     _wrap_lifespan_with_discovery(app)
+
+    # 挂载代码查询路由（无需额外端口）
+    from byclaw_data.code_api import _mount_code_api
+
+    _mount_code_api(app)
+
     return app
 
 
@@ -86,14 +122,13 @@ async def register_service(application) -> None:
         port,
         metadata,
     )
-    redis_host = os.getenv("DATACLOUD_GATEWAY_REDIS_HOST", "localhost")
-    redis_port = int(os.getenv("DATACLOUD_GATEWAY_REDIS_PORT", 6379))
-    redis_db = int(os.getenv("DATACLOUD_GATEWAY_REDIS_DB", 0))
+    redis_settings = get_redis_settings()
     logger.info(
-        "service registry redis configured: host=%s, port=%s, db=%s",
-        redis_host,
-        redis_port,
-        redis_db,
+        "service registry redis configured: cluster_hosts=%s host=%s, port=%s, db=%s",
+        redis_settings.cluster_hosts,
+        redis_settings.host,
+        redis_settings.port,
+        redis_settings.db,
     )
 
 
@@ -107,20 +142,3 @@ async def unregister_service(application) -> None:
     await registry.redis.aclose()
     del application.state.service_registry
     logger.info("Service registry unregistered")
-
-
-def create_discovery_redis() -> Redis:
-    redis_host = os.getenv("DATACLOUD_GATEWAY_REDIS_HOST", "localhost")
-    redis_port = int(os.getenv("DATACLOUD_GATEWAY_REDIS_PORT", 6379))
-    redis_db = int(os.getenv("DATACLOUD_GATEWAY_REDIS_DB", 0))
-    redis_password = os.getenv("DATACLOUD_GATEWAY_REDIS_PASSWORD")
-    redis_username = os.getenv("DATACLOUD_GATEWAY_REDIS_USERNAME")
-
-    return Redis(
-        host=redis_host,
-        port=redis_port,
-        db=redis_db,
-        password=redis_password or None,
-        username=redis_username or None,
-        decode_responses=True,
-    )

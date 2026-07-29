@@ -1,9 +1,15 @@
 package com.iwhalecloud.byai.state.application.service.session;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
+import com.sun.net.httpserver.HttpServer;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeApplicationService;
+import com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeRuntimeRefreshService;
 import com.iwhalecloud.byai.manager.domain.resource.enums.ResourceArtifactTypeEnum;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtSkillService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceArtifactService;
@@ -16,13 +22,17 @@ import com.iwhalecloud.byai.state.domain.resource.service.ResourceArtifactStorag
 import com.iwhalecloud.byai.state.domain.session.dto.ByClawSkillDto;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import java.io.ByteArrayOutputStream;
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
+import org.apache.commons.codec.digest.DigestUtils;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.MessageSource;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -32,8 +42,12 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -48,6 +62,7 @@ class ByClawSkillResourceApplicationServiceTest {
     private ResourceArtifactStorageService resourceArtifactStorageService;
     private SequenceService sequenceService;
     private DigitalEmployeeApplicationService digitalEmployeeApplicationService;
+    private DigitalEmployeeRuntimeRefreshService digitalEmployeeRuntimeRefreshService;
     private AuthApplicationService authApplicationService;
     private ByClawSkillResourceApplicationService service;
 
@@ -60,6 +75,7 @@ class ByClawSkillResourceApplicationServiceTest {
         resourceArtifactStorageService = mock(ResourceArtifactStorageService.class);
         sequenceService = mock(SequenceService.class);
         digitalEmployeeApplicationService = mock(DigitalEmployeeApplicationService.class);
+        digitalEmployeeRuntimeRefreshService = mock(DigitalEmployeeRuntimeRefreshService.class);
         authApplicationService = mock(AuthApplicationService.class);
 
         service = new ByClawSkillResourceApplicationService();
@@ -70,6 +86,8 @@ class ByClawSkillResourceApplicationServiceTest {
         ReflectionTestUtils.setField(service, "resourceArtifactStorageService", resourceArtifactStorageService);
         ReflectionTestUtils.setField(service, "sequenceService", sequenceService);
         ReflectionTestUtils.setField(service, "digitalEmployeeApplicationService", digitalEmployeeApplicationService);
+        ReflectionTestUtils.setField(service, "digitalEmployeeRuntimeRefreshService",
+            digitalEmployeeRuntimeRefreshService);
         ReflectionTestUtils.setField(service, "authApplicationService", authApplicationService);
         prepareI18nUtil();
 
@@ -141,7 +159,9 @@ class ByClawSkillResourceApplicationServiceTest {
         verify(ssResourceArtifactService).upsertArtifact(eq(7001L), eq("SKILL"),
             eq(ResourceArtifactTypeEnum.STANDARD_JSON.name()), eq("minio"), eq("skill/SKILL_7001.json"),
             eq("chat-upload-skill-json"));
-        verify(digitalEmployeeApplicationService).synOpenClawWorkSpace(9001L);
+        verify(digitalEmployeeApplicationService).rebuildAndSaveDigitalEmployeeRelSkills(9001L);
+        verify(digitalEmployeeRuntimeRefreshService).scheduleSkillRuntimeRefreshAfterCommit(
+            org.mockito.ArgumentMatchers.argThat(ids -> ids.size() == 1 && ids.contains(9001L)));
     }
 
     @Test
@@ -162,7 +182,164 @@ class ByClawSkillResourceApplicationServiceTest {
             List.of(uploadedSkill))).isInstanceOf(IllegalArgumentException.class);
 
         verify(ssResourceService, never()).saveResource(any(SsResource.class));
-        verify(digitalEmployeeApplicationService, never()).synOpenClawWorkSpace(anyLong());
+        verify(digitalEmployeeRuntimeRefreshService, never()).scheduleSkillRuntimeRefreshAfterCommit(any());
+    }
+
+    @Test
+    void rebuildAndScheduleSkillRuntimeRefresh_doesNotScheduleWhenRelSkillsRebuildFails() {
+        doThrow(new IllegalStateException("rebuild failed"))
+            .when(digitalEmployeeApplicationService).rebuildAndSaveDigitalEmployeeRelSkills(9001L);
+
+        assertThatThrownBy(() -> ReflectionTestUtils.invokeMethod(service,
+            "rebuildAndScheduleSkillRuntimeRefresh", new java.util.LinkedHashSet<>(List.of(9001L))))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("rebuild failed");
+
+        verify(digitalEmployeeRuntimeRefreshService, never()).scheduleSkillRuntimeRefreshAfterCommit(any());
+    }
+
+    @Test
+    void registerChatUploadedSkills_overwritesAllHistoricalDuplicateSkillsWithoutChangingOwnerType() {
+        MockMultipartFile uploadFile = new MockMultipartFile("files", "demo-skill.zip", "application/zip",
+            skillZipBytes("demo-skill"));
+        ByClawSkillDto uploadedSkill = new ByClawSkillDto("demo-skill",
+            "/.openclaw/workspace-baiying-agent-9001/skills/demo-skill",
+            "/.openclaw/workspace-baiying-agent-9001/skills/demo-skill/SKILL.md");
+        SsResource existingEnterpriseSkill = new SsResource();
+        existingEnterpriseSkill.setResourceId(7002L);
+        existingEnterpriseSkill.setSystemCode("BYAI");
+        existingEnterpriseSkill.setResourceBizType("SKILL");
+        existingEnterpriseSkill.setResourceCode("demo-skill");
+        existingEnterpriseSkill.setResourceName("企业旧技能");
+        existingEnterpriseSkill.setOwnerType("enterprise");
+        SsResource historicalPersonalSkill = new SsResource();
+        historicalPersonalSkill.setResourceId(7005L);
+        historicalPersonalSkill.setSystemCode("BYAI");
+        historicalPersonalSkill.setResourceBizType("SKILL");
+        historicalPersonalSkill.setResourceCode("demo-skill");
+        historicalPersonalSkill.setResourceName("历史个人技能");
+        historicalPersonalSkill.setOwnerType("personal");
+        SsResource digitalEmployee = new SsResource();
+        digitalEmployee.setResourceId(9001L);
+        digitalEmployee.setResourceName("测试数字员工");
+        digitalEmployee.setResourceBizType("DIG_EMPLOYEE");
+        SsResource otherDigitalEmployee = new SsResource();
+        otherDigitalEmployee.setResourceId(9002L);
+        otherDigitalEmployee.setResourceBizType("DIG_EMPLOYEE");
+        SsResourceRelDetail currentRelation = new SsResourceRelDetail();
+        currentRelation.setResourceId(9001L);
+        currentRelation.setRelResourceId(7002L);
+        SsResourceRelDetail historicalRelation = new SsResourceRelDetail();
+        historicalRelation.setResourceId(9002L);
+        historicalRelation.setRelResourceId(7005L);
+        SsResExtSkill existingExtSkill = new SsResExtSkill();
+        existingExtSkill.setResourceId(7002L);
+        existingExtSkill.setVersion("v0.1");
+        SsResExtSkill historicalExtSkill = new SsResExtSkill();
+        historicalExtSkill.setResourceId(7005L);
+        historicalExtSkill.setVersion("v0.3");
+
+        when(ssResourceService.findById(9001L)).thenReturn(digitalEmployee);
+        when(authApplicationService.hasResourceManagePermission(digitalEmployee)).thenReturn(true);
+        when(ssResourceService.getResourceListByCode(List.of("demo-skill")))
+            .thenReturn(List.of(existingEnterpriseSkill, historicalPersonalSkill));
+        when(authApplicationService.hasResourceManagePermission(existingEnterpriseSkill)).thenReturn(true);
+        when(authApplicationService.hasResourceManagePermission(historicalPersonalSkill)).thenReturn(true);
+        when(ssResourceService.updateResourceEntity(any(SsResource.class)))
+            .thenAnswer(invocation -> invocation.getArgument(0));
+        when(ssResExtSkillService.findById(7002L)).thenReturn(existingExtSkill);
+        when(ssResExtSkillService.findById(7005L)).thenReturn(historicalExtSkill);
+        when(ssResExtSkillService.nextVersion("v0.1")).thenReturn("v0.2");
+        when(ssResExtSkillService.nextVersion("v0.3")).thenReturn("v0.4");
+        when(ssResourceRelDetailService.find(9001L, 7002L)).thenReturn(List.of());
+        when(ssResourceRelDetailService.list(
+            org.mockito.ArgumentMatchers.<com.baomidou.mybatisplus.core.conditions.Wrapper<SsResourceRelDetail>>any()))
+                .thenReturn(List.of(currentRelation), List.of(historicalRelation));
+        when(ssResourceService.findByIdList(List.of(9001L))).thenReturn(List.of(digitalEmployee));
+        when(ssResourceService.findByIdList(List.of(9002L))).thenReturn(List.of(otherDigitalEmployee));
+        when(sequenceService.nextVal()).thenReturn(8002L);
+
+        service.registerChatUploadedSkills("user001", 9001L, List.of(uploadFile), List.of(uploadedSkill));
+
+        ArgumentCaptor<SsResource> resourceCaptor = ArgumentCaptor.forClass(SsResource.class);
+        verify(ssResourceService, times(2)).updateResourceEntity(resourceCaptor.capture());
+        assertThat(resourceCaptor.getAllValues()).extracting(SsResource::getOwnerType)
+            .containsExactly("enterprise", "personal");
+        verify(ssResourceService, never()).saveResource(any(SsResource.class));
+
+        ArgumentCaptor<SsResExtSkill> extCaptor = ArgumentCaptor.forClass(SsResExtSkill.class);
+        verify(ssResExtSkillService, times(2)).saveOrUpdate(extCaptor.capture());
+        assertThat(extCaptor.getAllValues()).extracting(SsResExtSkill::getVersion).containsExactly("v0.2", "v0.4");
+        verify(ssResourceRelDetailService, never()).find(9001L, 7005L);
+        verify(digitalEmployeeApplicationService).rebuildAndSaveDigitalEmployeeRelSkills(9001L);
+        verify(digitalEmployeeApplicationService).rebuildAndSaveDigitalEmployeeRelSkills(9002L);
+        verify(digitalEmployeeRuntimeRefreshService).scheduleSkillRuntimeRefreshAfterCommit(
+            org.mockito.ArgumentMatchers.argThat(ids -> ids.size() == 2 && ids.containsAll(List.of(9001L, 9002L))));
+    }
+
+    @Test
+    void registerChatUploadedSkills_rejectsOverwriteWhenExistingSkillIsNotManageable() {
+        MockMultipartFile uploadFile = new MockMultipartFile("files", "demo-skill.zip", "application/zip",
+            skillZipBytes("demo-skill"));
+        ByClawSkillDto uploadedSkill = new ByClawSkillDto("demo-skill",
+            "/.openclaw/workspace-baiying-agent-9001/skills/demo-skill",
+            "/.openclaw/workspace-baiying-agent-9001/skills/demo-skill/SKILL.md");
+        SsResource existingEnterpriseSkill = new SsResource();
+        existingEnterpriseSkill.setResourceId(7003L);
+        existingEnterpriseSkill.setSystemCode("BYAI");
+        existingEnterpriseSkill.setResourceBizType("SKILL");
+        existingEnterpriseSkill.setResourceCode("demo-skill");
+        existingEnterpriseSkill.setResourceName("企业旧技能");
+        existingEnterpriseSkill.setOwnerType("enterprise");
+        SsResource digitalEmployee = new SsResource();
+        digitalEmployee.setResourceId(9001L);
+
+        when(ssResourceService.findById(9001L)).thenReturn(digitalEmployee);
+        when(authApplicationService.hasResourceManagePermission(digitalEmployee)).thenReturn(true);
+        when(ssResourceService.getResourceListByCode(List.of("demo-skill")))
+            .thenReturn(List.of(existingEnterpriseSkill));
+        when(authApplicationService.hasResourceManagePermission(existingEnterpriseSkill)).thenReturn(false);
+
+        assertThatThrownBy(() -> service.registerChatUploadedSkills("user001", 9001L, List.of(uploadFile),
+            List.of(uploadedSkill))).isInstanceOf(IllegalArgumentException.class);
+
+        verify(ssResourceService, never()).saveResource(any(SsResource.class));
+        verify(ssResourceService, never()).updateResourceEntity(any(SsResource.class));
+        verify(ssResExtSkillService, never()).saveOrUpdate(any(SsResExtSkill.class));
+    }
+
+    @Test
+    void registerChatUploadedSkills_rejectsOverwriteForInnerSkill() {
+        MockMultipartFile uploadFile = new MockMultipartFile("files", "demo-skill.zip", "application/zip",
+            skillZipBytes("demo-skill"));
+        ByClawSkillDto uploadedSkill = new ByClawSkillDto("demo-skill",
+            "/.openclaw/workspace-baiying-agent-9001/skills/demo-skill",
+            "/.openclaw/workspace-baiying-agent-9001/skills/demo-skill/SKILL.md");
+        SsResource innerSkill = new SsResource();
+        innerSkill.setResourceId(7004L);
+        innerSkill.setSystemCode("BYAI");
+        innerSkill.setResourceBizType("SKILL");
+        innerSkill.setResourceCode("demo-skill");
+        innerSkill.setResourceName("内置技能");
+        innerSkill.setOwnerType("enterprise");
+        SsResource digitalEmployee = new SsResource();
+        digitalEmployee.setResourceId(9001L);
+        SsResExtSkill innerExtSkill = new SsResExtSkill();
+        innerExtSkill.setResourceId(7004L);
+        innerExtSkill.setSkillType(SsResExtSkillService.INNER_SKILL_TYPE);
+
+        when(ssResourceService.findById(9001L)).thenReturn(digitalEmployee);
+        when(authApplicationService.hasResourceManagePermission(digitalEmployee)).thenReturn(true);
+        when(ssResourceService.getResourceListByCode(List.of("demo-skill"))).thenReturn(List.of(innerSkill));
+        when(authApplicationService.hasResourceManagePermission(innerSkill)).thenReturn(true);
+        when(ssResExtSkillService.findById(7004L)).thenReturn(innerExtSkill);
+
+        assertThatThrownBy(() -> service.registerChatUploadedSkills("user001", 9001L, List.of(uploadFile),
+            List.of(uploadedSkill))).isInstanceOf(IllegalArgumentException.class);
+
+        verify(ssResourceService, never()).saveResource(any(SsResource.class));
+        verify(ssResourceService, never()).updateResourceEntity(any(SsResource.class));
+        verify(ssResExtSkillService, never()).saveOrUpdate(any(SsResExtSkill.class));
     }
 
     @Test
@@ -177,6 +354,7 @@ class ByClawSkillResourceApplicationServiceTest {
             return resource;
         });
         when(ssResExtSkillService.findById(7101L)).thenReturn(null);
+        when(ssResourceService.findById(9001L)).thenThrow(new RuntimeException("数字员工日志查询异常"));
 
         var result = service.importSkillZips(new org.springframework.web.multipart.MultipartFile[] {uploadFile}, 10L,
             "enterprise");
@@ -203,25 +381,41 @@ class ByClawSkillResourceApplicationServiceTest {
     }
 
     @Test
-    void importSkillZips_duplicateSkillCodeOverwritesExistingSkill() {
+    void importSkillZips_duplicateSkillCodeOverwritesAllHistoricalDuplicateSkills() {
         MockMultipartFile uploadFile = new MockMultipartFile("file", "enterprise-skill.zip", "application/zip",
             skillZipBytes("enterprise-skill"));
 
         SsResource existingResource = new SsResource();
         existingResource.setResourceId(7102L);
+        existingResource.setSystemCode("BYAI");
         existingResource.setResourceCode("enterprise-skill");
         existingResource.setResourceName("Old Skill");
         existingResource.setResourceBizType("SKILL");
         existingResource.setOwnerType("enterprise");
+        SsResource historicalResource = new SsResource();
+        historicalResource.setResourceId(7103L);
+        historicalResource.setSystemCode("BYAI");
+        historicalResource.setResourceCode("enterprise-skill");
+        historicalResource.setResourceName("Historical Skill");
+        historicalResource.setResourceBizType("SKILL");
+        historicalResource.setOwnerType("enterprise");
 
         SsResExtSkill existingExt = new SsResExtSkill();
         existingExt.setResourceId(7102L);
         existingExt.setVersion("v0.1");
+        SsResExtSkill historicalExt = new SsResExtSkill();
+        historicalExt.setResourceId(7103L);
+        historicalExt.setVersion("v0.3");
 
-        when(ssResourceService.getResourceListByCode(List.of("enterprise-skill"))).thenReturn(List.of(existingResource));
+        when(ssResourceService.getResourceListByCode(List.of("enterprise-skill")))
+            .thenReturn(List.of(existingResource, historicalResource));
+        when(authApplicationService.hasResourceManagePermission(existingResource)).thenReturn(true);
+        when(authApplicationService.hasResourceManagePermission(historicalResource)).thenReturn(true);
         when(ssResourceService.updateResourceEntity(any(SsResource.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(ssResExtSkillService.findById(7102L)).thenReturn(existingExt);
+        when(ssResExtSkillService.findById(7103L)).thenReturn(historicalExt);
         when(ssResExtSkillService.nextVersion("v0.1")).thenReturn("v0.2");
+        when(ssResExtSkillService.nextVersion("v0.3")).thenReturn("v0.4");
 
         var result = service.importSkillZips(new org.springframework.web.multipart.MultipartFile[] {uploadFile}, 10L,
             "enterprise");
@@ -231,13 +425,185 @@ class ByClawSkillResourceApplicationServiceTest {
         assertThat(result.getUpdatedCount()).isEqualTo(1);
         assertThat(result.getUpdatedItems()).hasSize(1);
         assertThat(result.getUpdatedItems().get(0).getMessage()).contains("覆盖更新成功");
-        verify(ssResourceService).updateResourceEntity(existingResource);
+        verify(ssResourceService, times(2)).updateResourceEntity(any(SsResource.class));
         verify(ssResourceService, never()).saveResource(any(SsResource.class));
 
         ArgumentCaptor<SsResExtSkill> extCaptor = ArgumentCaptor.forClass(SsResExtSkill.class);
+        verify(ssResExtSkillService, times(2)).saveOrUpdate(extCaptor.capture());
+        assertThat(extCaptor.getAllValues()).extracting(SsResExtSkill::getVersion).containsExactly("v0.2", "v0.4");
+        assertThat(extCaptor.getAllValues()).extracting(SsResExtSkill::getSkillUrl)
+            .containsOnly("/byclaw/resource/skill/org-hub/enterprise-skill.zip");
+    }
+
+    @Test
+    void importSkillZips_adminVipCanOverwriteEnterpriseInnerSkill() {
+        MockMultipartFile uploadFile = new MockMultipartFile("file", "enterprise-skill.zip", "application/zip",
+            skillZipBytes("enterprise-skill"));
+        SsResource existingResource = new SsResource();
+        existingResource.setResourceId(7103L);
+        existingResource.setSystemCode("BYAI");
+        existingResource.setResourceCode("enterprise-skill");
+        existingResource.setResourceName("内置技能");
+        existingResource.setResourceBizType("SKILL");
+        existingResource.setOwnerType("enterprise");
+        SsResExtSkill existingExt = new SsResExtSkill();
+        existingExt.setResourceId(7103L);
+        existingExt.setSkillType(SsResExtSkillService.INNER_SKILL_TYPE);
+        existingExt.setVersion("v0.1");
+
+        LoginInfo loginInfo = CurrentUserHolder.getLoginInfo();
+        loginInfo.setUserCode("adminvip");
+        when(ssResourceService.getResourceListByCode(List.of("enterprise-skill"))).thenReturn(List.of(existingResource));
+        when(ssResourceService.updateResourceEntity(any(SsResource.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(ssResExtSkillService.findById(7103L)).thenReturn(existingExt);
+        when(ssResExtSkillService.nextVersion("v0.1")).thenReturn("v0.2");
+
+        var result = service.importSkillZips(new org.springframework.web.multipart.MultipartFile[] {uploadFile}, 10L,
+            "enterprise");
+
+        assertThat(result.getSuccess()).isEqualTo(1);
+        assertThat(result.getUpdatedCount()).isEqualTo(1);
+        verify(ssResourceService).updateResourceEntity(existingResource);
+        verify(ssResExtSkillService).saveOrUpdate(any(SsResExtSkill.class));
+    }
+
+    @Test
+    void importSkillZips_adminVipCanOverwritePersonalInnerSkill() {
+        MockMultipartFile uploadFile = new MockMultipartFile("file", "personal-skill.zip", "application/zip",
+            skillZipBytes("personal-skill"));
+        SsResource existingResource = new SsResource();
+        existingResource.setResourceId(7104L);
+        existingResource.setSystemCode("BYAI");
+        existingResource.setResourceCode("personal-skill");
+        existingResource.setResourceName("个人内置技能");
+        existingResource.setResourceBizType("SKILL");
+        existingResource.setOwnerType("personal");
+        SsResExtSkill existingExt = new SsResExtSkill();
+        existingExt.setResourceId(7104L);
+        existingExt.setSkillType(SsResExtSkillService.INNER_SKILL_TYPE);
+        existingExt.setVersion("v0.1");
+
+        CurrentUserHolder.getLoginInfo().setUserCode("adminvip");
+        when(ssResourceService.getResourceListByCode(List.of("personal-skill"))).thenReturn(List.of(existingResource));
+        when(ssResourceService.updateResourceEntity(any(SsResource.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(ssResExtSkillService.findById(7104L)).thenReturn(existingExt);
+        when(ssResExtSkillService.nextVersion("v0.1")).thenReturn("v0.2");
+
+        var result = service.importSkillZips(new org.springframework.web.multipart.MultipartFile[] {uploadFile}, 10L,
+            "personal");
+
+        assertThat(result.getSuccess()).isEqualTo(1);
+        assertThat(result.getUpdatedCount()).isEqualTo(1);
+        verify(ssResourceService).updateResourceEntity(existingResource);
+        verify(ssResExtSkillService).saveOrUpdate(any(SsResExtSkill.class));
+    }
+
+    @Test
+    void importSkillZip_rejectsOverwriteWhenCurrentUserCannotManageSkill() {
+        MockMultipartFile uploadFile = new MockMultipartFile("file", "enterprise-skill.zip", "application/zip",
+            skillZipBytes("enterprise-skill"));
+        SsResource existingResource = new SsResource();
+        existingResource.setResourceId(7104L);
+        existingResource.setSystemCode("BYAI");
+        existingResource.setResourceCode("enterprise-skill");
+        existingResource.setResourceName("Existing Skill");
+        existingResource.setResourceBizType("SKILL");
+        existingResource.setOwnerType("enterprise");
+        SsResource manageableHistoricalResource = new SsResource();
+        manageableHistoricalResource.setResourceId(7108L);
+        manageableHistoricalResource.setSystemCode("BYAI");
+        manageableHistoricalResource.setResourceCode("enterprise-skill");
+        manageableHistoricalResource.setResourceName("Manageable Historical Skill");
+        manageableHistoricalResource.setResourceBizType("SKILL");
+        manageableHistoricalResource.setOwnerType("enterprise");
+
+        when(ssResourceService.getResourceListByCode(List.of("enterprise-skill")))
+            .thenReturn(List.of(manageableHistoricalResource, existingResource));
+        when(authApplicationService.hasResourceManagePermission(manageableHistoricalResource)).thenReturn(true);
+        when(authApplicationService.hasResourceManagePermission(existingResource)).thenReturn(false);
+
+        assertThatThrownBy(() -> service.importSkillZip(uploadFile, 10L, "enterprise", "SKILL_MANAGE_IMPORT"))
+            .isInstanceOf(IllegalArgumentException.class);
+
+        verify(ssResourceService, never()).updateResourceEntity(any(SsResource.class));
+        verify(ssResExtSkillService, never()).saveOrUpdate(any(SsResExtSkill.class));
+        verify(digitalEmployeeRuntimeRefreshService, never()).scheduleSkillRuntimeRefreshAfterCommit(any());
+    }
+
+    @Test
+    void importSkillZip_overwriteRefreshesRuntimeForBoundDigitalEmployees() {
+        MockMultipartFile uploadFile = new MockMultipartFile("file", "enterprise-skill.zip", "application/zip",
+            skillZipBytes("enterprise-skill"));
+        SsResource existingResource = new SsResource();
+        existingResource.setResourceId(7105L);
+        existingResource.setSystemCode("BYAI");
+        existingResource.setResourceCode("enterprise-skill");
+        existingResource.setResourceName("Existing Skill");
+        existingResource.setResourceBizType("SKILL");
+        existingResource.setOwnerType("enterprise");
+        SsResExtSkill existingExt = new SsResExtSkill();
+        existingExt.setResourceId(7105L);
+        existingExt.setVersion("v0.1");
+        existingExt.setSourceType("SKILL_MANAGE_IMPORT");
+
+        SsResourceRelDetail relation = new SsResourceRelDetail();
+        relation.setResourceId(9001L);
+        relation.setRelResourceId(7105L);
+        SsResource digitalEmployee = new SsResource();
+        digitalEmployee.setResourceId(9001L);
+        digitalEmployee.setResourceBizType("DIG_EMPLOYEE");
+
+        when(ssResourceService.getResourceListByCode(List.of("enterprise-skill"))).thenReturn(List.of(existingResource));
+        when(authApplicationService.hasResourceManagePermission(existingResource)).thenReturn(true);
+        when(ssResourceService.updateResourceEntity(any(SsResource.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(ssResExtSkillService.findById(7105L)).thenReturn(existingExt);
+        when(ssResExtSkillService.nextVersion("v0.1")).thenReturn("v0.2");
+        when(ssResourceRelDetailService.list(
+            org.mockito.ArgumentMatchers.<com.baomidou.mybatisplus.core.conditions.Wrapper<SsResourceRelDetail>>any()))
+            .thenReturn(List.of(relation));
+        when(ssResourceService.findByIdList(List.of(9001L))).thenReturn(List.of(digitalEmployee));
+
+        service.importSkillZip(uploadFile, 10L, "enterprise", "SKILL_MANAGE_IMPORT");
+
+        verify(digitalEmployeeApplicationService).rebuildAndSaveDigitalEmployeeRelSkills(9001L);
+        verify(digitalEmployeeRuntimeRefreshService).scheduleSkillRuntimeRefreshAfterCommit(
+            org.mockito.ArgumentMatchers.argThat(ids -> ids.size() == 1 && ids.contains(9001L)));
+    }
+
+    @Test
+    void importSkillZip_overwriteKeepsChatUploadWorkspaceMetadata() {
+        MockMultipartFile uploadFile = new MockMultipartFile("file", "demo-skill.zip", "application/zip",
+            skillZipBytes("demo-skill"));
+        SsResource existingResource = new SsResource();
+        existingResource.setResourceId(7106L);
+        existingResource.setSystemCode("BYAI");
+        existingResource.setResourceCode("demo-skill");
+        existingResource.setResourceName("Demo Skill");
+        existingResource.setResourceBizType("SKILL");
+        existingResource.setOwnerType("personal");
+        existingResource.setCreateBy(10001L);
+        SsResExtSkill existingExt = new SsResExtSkill();
+        existingExt.setResourceId(7106L);
+        existingExt.setVersion("v0.1");
+        existingExt.setSourceType("CHAT_UPLOAD");
+        existingExt.setTargetContent("{\"skillPath\":\"/.openclaw/workspace-baiying-agent-9001/skills/demo-skill\","
+            + "\"skillDocObjectKey\":\"/.openclaw/workspace-baiying-agent-9001/skills/demo-skill/SKILL.md\"}");
+
+        when(ssResourceService.getResourceListByCode(List.of("demo-skill"))).thenReturn(List.of(existingResource));
+        when(authApplicationService.hasResourceManagePermission(existingResource)).thenReturn(true);
+        when(ssResourceService.updateResourceEntity(any(SsResource.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(ssResExtSkillService.findById(7106L)).thenReturn(existingExt);
+        when(ssResExtSkillService.nextVersion("v0.1")).thenReturn("v0.2");
+        when(ssResourceRelDetailService.list(
+            org.mockito.ArgumentMatchers.<com.baomidou.mybatisplus.core.conditions.Wrapper<SsResourceRelDetail>>any()))
+                .thenReturn(List.of());
+
+        service.importSkillZip(uploadFile, 10L, "personal", "SKILL_MANAGE_IMPORT");
+
+        ArgumentCaptor<SsResExtSkill> extCaptor = ArgumentCaptor.forClass(SsResExtSkill.class);
         verify(ssResExtSkillService).saveOrUpdate(extCaptor.capture());
-        assertThat(extCaptor.getValue().getVersion()).isEqualTo("v0.2");
-        assertThat(extCaptor.getValue().getSkillUrl()).isEqualTo("/byclaw/resource/skill/org-hub/enterprise-skill.zip");
+        assertThat(extCaptor.getValue().getSourceType()).isEqualTo("CHAT_UPLOAD");
+        assertThat(extCaptor.getValue().getTargetContent()).contains("\"skillPath\":\"/.openclaw/workspace-baiying-agent-9001/skills/demo-skill\"");
     }
 
     @Test
@@ -247,6 +613,7 @@ class ByClawSkillResourceApplicationServiceTest {
 
         SsResource existingResource = new SsResource();
         existingResource.setResourceId(7103L);
+        existingResource.setSystemCode("BYAI");
         existingResource.setResourceCode("enterprise-skill");
         existingResource.setResourceName("Existing Skill");
         existingResource.setResourceDesc("old desc");
@@ -254,6 +621,7 @@ class ByClawSkillResourceApplicationServiceTest {
         existingResource.setOwnerType("enterprise");
 
         when(ssResourceService.getResourceListByCode(List.of("enterprise-skill"))).thenReturn(List.of(existingResource));
+        when(authApplicationService.hasResourceManagePermission(existingResource)).thenReturn(true);
 
         var result = service.previewSkillZipImportConflicts(
             new org.springframework.web.multipart.MultipartFile[] {uploadFile}, "enterprise");
@@ -265,6 +633,37 @@ class ByClawSkillResourceApplicationServiceTest {
         verify(ssResourceService, never()).saveResource(any(SsResource.class));
         verify(ssResourceService, never()).updateResourceEntity(any(SsResource.class));
         verify(ssResExtSkillService, never()).saveOrUpdate(any(SsResExtSkill.class));
+    }
+
+    @Test
+    void importSkillZip_personalImportOverwritesManageableEnterpriseSkillWithSameNaturalKey() {
+        MockMultipartFile uploadFile = new MockMultipartFile("file", "shared-skill.zip", "application/zip",
+            skillZipBytes("shared-skill"));
+        SsResource existingEnterpriseSkill = new SsResource();
+        existingEnterpriseSkill.setResourceId(7107L);
+        existingEnterpriseSkill.setSystemCode("BYAI");
+        existingEnterpriseSkill.setResourceBizType("SKILL");
+        existingEnterpriseSkill.setResourceCode("shared-skill");
+        existingEnterpriseSkill.setResourceName("企业技能");
+        existingEnterpriseSkill.setOwnerType("enterprise");
+
+        when(ssResourceService.getResourceListByCode(List.of("shared-skill")))
+            .thenReturn(List.of(existingEnterpriseSkill));
+        when(authApplicationService.hasResourceManagePermission(existingEnterpriseSkill)).thenReturn(true);
+        when(ssResourceService.updateResourceEntity(any(SsResource.class)))
+            .thenAnswer(invocation -> invocation.getArgument(0));
+        when(ssResExtSkillService.findById(7107L)).thenReturn(null);
+        when(ssResourceRelDetailService.list(
+            org.mockito.ArgumentMatchers.<com.baomidou.mybatisplus.core.conditions.Wrapper<SsResourceRelDetail>>any()))
+                .thenReturn(List.of());
+
+        var result = service.importSkillZip(uploadFile, 10L, "personal", "SKILL_MANAGE_IMPORT");
+
+        assertThat(result.updated()).isTrue();
+        ArgumentCaptor<SsResource> resourceCaptor = ArgumentCaptor.forClass(SsResource.class);
+        verify(ssResourceService).updateResourceEntity(resourceCaptor.capture());
+        assertThat(resourceCaptor.getValue().getOwnerType()).isEqualTo("enterprise");
+        verify(ssResourceService, never()).saveResource(any(SsResource.class));
     }
 
     @Test
@@ -303,6 +702,130 @@ class ByClawSkillResourceApplicationServiceTest {
         verify(ssResourceArtifactService).upsertArtifact(eq(7201L), eq("SKILL"),
             eq(ResourceArtifactTypeEnum.STANDARD_JSON.name()), eq("minio"), eq("skill/SKILL_7201.json"),
             eq("chat-upload-skill-json"));
+    }
+
+    @Test
+    void installThirdPartySkill_createsWhaleAgentSkillBindsEmployeeAndRefreshesRuntime() {
+        String downloadUrl = "https://market.example/market-skill.zip";
+        String resourceCode = DigestUtils.sha256Hex(downloadUrl);
+        ByClawSkillResourceApplicationService installService = spy(service);
+        doReturn(skillZipBytes("market-skill")).when(installService)
+            .downloadThirdPartySkillPackage(downloadUrl);
+        SsResource digitalEmployee = new SsResource();
+        digitalEmployee.setResourceId(9001L);
+        digitalEmployee.setResourceBizType("DIG_EMPLOYEE");
+        when(ssResourceService.findById(9001L)).thenReturn(digitalEmployee);
+        when(authApplicationService.hasResourceManagePermission(digitalEmployee)).thenReturn(true);
+        when(ssResourceService.findByImportIdentity("WHALE_AGENT", "SKILL", resourceCode)).thenReturn(null);
+        when(ssResourceService.saveResource(any(SsResource.class))).thenAnswer(invocation -> {
+            SsResource resource = invocation.getArgument(0);
+            resource.setResourceId(7301L);
+            return resource;
+        });
+        when(ssResourceRelDetailService.find(9001L, 7301L)).thenReturn(List.of());
+        when(sequenceService.nextVal()).thenReturn(8301L);
+
+        var result = installService.installThirdPartySkill(9001L, downloadUrl);
+
+        assertThat(result.updated()).isFalse();
+        ArgumentCaptor<SsResource> resourceCaptor = ArgumentCaptor.forClass(SsResource.class);
+        verify(ssResourceService).saveResource(resourceCaptor.capture());
+        assertThat(resourceCaptor.getValue().getSystemCode()).isEqualTo("WHALE_AGENT");
+        assertThat(resourceCaptor.getValue().getResourceCode()).isEqualTo(resourceCode);
+        assertThat(resourceCaptor.getValue().getResourceName()).isEqualTo("market-skill");
+        assertThat(resourceCaptor.getValue().getOwnerType()).isEqualTo("personal");
+        verify(authApplicationService).ensureCreatorDefaultPrivileges(resourceCaptor.getValue());
+        verify(ssResourceRelDetailService).save(any(SsResourceRelDetail.class));
+        verify(resourceArtifactStorageService).uploadToSubdirectory(any(byte[].class), eq("skill/user001-hub"),
+            eq("market-skill.zip"), eq("application/zip"));
+        ArgumentCaptor<SsResExtSkill> extCaptor = ArgumentCaptor.forClass(SsResExtSkill.class);
+        verify(ssResExtSkillService).saveOrUpdate(extCaptor.capture());
+        assertThat(extCaptor.getValue().getTargetContent()).contains("\"sourceDownloadUrl\":\"" + downloadUrl + "\"");
+        verify(digitalEmployeeApplicationService).rebuildAndSaveDigitalEmployeeRelSkills(9001L);
+        verify(digitalEmployeeRuntimeRefreshService).scheduleSkillRuntimeRefreshAfterCommit(
+            org.mockito.ArgumentMatchers.argThat(ids -> ids.size() == 1 && ids.contains(9001L)));
+    }
+
+    @Test
+    void installThirdPartySkill_sameDownloadUrlUpdatesExistingResourceWhenPackageNameChanges() {
+        String downloadUrl = "https://market.example/stable-skill-package.zip";
+        String resourceCode = DigestUtils.sha256Hex(downloadUrl);
+        ByClawSkillResourceApplicationService installService = spy(service);
+        doReturn(skillZipBytes("renamed-skill")).when(installService).downloadThirdPartySkillPackage(downloadUrl);
+
+        SsResource digitalEmployee = new SsResource();
+        digitalEmployee.setResourceId(9001L);
+        digitalEmployee.setResourceBizType("DIG_EMPLOYEE");
+        when(ssResourceService.findById(9001L)).thenReturn(digitalEmployee);
+        when(authApplicationService.hasResourceManagePermission(digitalEmployee)).thenReturn(true);
+
+        SsResource existing = new SsResource();
+        existing.setResourceId(7302L);
+        existing.setResourceCode(resourceCode);
+        existing.setResourceName("old-skill-name");
+        existing.setOwnerType("personal");
+        when(ssResourceService.findByImportIdentity("WHALE_AGENT", "SKILL", resourceCode)).thenReturn(existing);
+        when(authApplicationService.hasResourceManagePermission(existing)).thenReturn(true);
+        when(ssResourceService.updateResourceEntity(existing)).thenReturn(existing);
+        when(ssResourceRelDetailService.find(9001L, 7302L)).thenReturn(List.of());
+        when(sequenceService.nextVal()).thenReturn(8302L);
+
+        var result = installService.installThirdPartySkill(9001L, downloadUrl);
+
+        assertThat(result.updated()).isTrue();
+        assertThat(result.resource().getResourceId()).isEqualTo(7302L);
+        assertThat(result.resource().getResourceCode()).isEqualTo(resourceCode);
+        assertThat(result.resource().getResourceName()).isEqualTo("renamed-skill");
+        verify(ssResourceService).updateResourceEntity(existing);
+        verify(ssResourceService, never()).saveResource(any(SsResource.class));
+        verify(authApplicationService, never()).ensureCreatorDefaultPrivileges(existing);
+    }
+
+    @Test
+    void downloadThirdPartySkillPackage_logsDetailedHttpFailure() throws Exception {
+        byte[] errorBody = "{\"error\":\"skill not found\",\"code\":\"SKILL_404\"}"
+            .getBytes(StandardCharsets.UTF_8);
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/download", exchange -> {
+            exchange.getResponseHeaders().set("Content-Type", "application/json;charset=UTF-8");
+            exchange.sendResponseHeaders(502, errorBody.length);
+            try (var output = exchange.getResponseBody()) {
+                output.write(errorBody);
+            }
+        });
+        server.start();
+        String downloadUrl = "http://127.0.0.1:" + server.getAddress().getPort()
+            + "/download?skillIds=821937217247941&token=raw-token";
+        Logger serviceLogger = (Logger)LoggerFactory.getLogger(ByClawSkillResourceApplicationService.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        serviceLogger.addAppender(appender);
+        appender.start();
+
+        try {
+            assertThatThrownBy(() -> service.downloadThirdPartySkillPackage(downloadUrl))
+                .isInstanceOf(IllegalArgumentException.class);
+
+            assertThat(appender.list).anySatisfy(event -> {
+                assertThat(event.getLevel()).isEqualTo(Level.ERROR);
+                assertThat(event.getFormattedMessage()).contains(
+                    "第三方技能包下载失败",
+                    "userCode=user001",
+                    "downloadUrl=" + downloadUrl,
+                    "stage=VALIDATE_HTTP_STATUS",
+                    "httpStatus=502",
+                    "contentType=application/json;charset=UTF-8",
+                    "contentLength=" + errorBody.length,
+                    "downloadedBytes=0",
+                    "errorResponse={\"error\":\"skill not found\",\"code\":\"SKILL_404\"}",
+                    "exceptionType=java.lang.IllegalArgumentException");
+                assertThat(event.getThrowableProxy()).isNotNull();
+            });
+        }
+        finally {
+            serviceLogger.detachAppender(appender);
+            appender.stop();
+            server.stop(0);
+        }
     }
 
     private byte[] skillZipBytes(String skillName) {

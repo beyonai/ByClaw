@@ -93,4 +93,9 @@ public class ByaiSession {
      * 会话状态信息(JSON 或文本)
      */
     private String state;
+
+    /**
+     * 会话关联项目
+     */
+    private Long projectId;
 }

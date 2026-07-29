@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 // @ts-ignore
 import { useDispatch, useIntl, useNavigate, useSelector } from '@umijs/max';
 import { Badge, Dropdown, Input, Popconfirm } from 'antd';
@@ -69,10 +69,19 @@ const MyBadge = (props: { item: ISession }) => {
 const DialogueCard = ({
   item,
   onSelect,
+  onSessionEditOptimistic,
+  onSessionEditRollback,
+  onSessionDeleteOptimistic,
+  onSessionDeleteRollback,
   cannotActionList = [],
 }: {
   item: ISession;
   onSelect?: (item: ISession) => void;
+  // 项目空间使用独立缓存，编辑和删除时由父级立即更新，并在接口失败后回滚。
+  onSessionEditOptimistic?: (payload: { sessionId: string; sessionName: string }) => void;
+  onSessionEditRollback?: (payload: { sessionId: string; sessionName: string }) => void;
+  onSessionDeleteOptimistic?: (session: ISession) => void;
+  onSessionDeleteRollback?: (session: ISession) => void;
   cannotActionList?: string[];
 }) => {
   const intl = useIntl();
@@ -90,19 +99,71 @@ const DialogueCard = ({
 
   const [editName, setEditName] = React.useState('');
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
-  const onRemove = (payload: { sessionId: string }): any => {
+  const [isOptimisticallyDeleted, setIsOptimisticallyDeleted] = useState(false);
+  const onRemove = useCallback((payload: { sessionId: string }): any => {
     return dispatch({
       type: 'session/deleteSession',
       payload,
     });
-  };
+  }, [dispatch]);
+
+  const handleDelete = useCallback(() => {
+    const rollbackDelete = () => {
+      setIsOptimisticallyDeleted(false);
+      onSessionDeleteRollback?.(item);
+    };
+
+    // 删除确认后立即隐藏卡片；接口失败时恢复原会话，避免列表长时间停留在旧状态。
+    setIsOptimisticallyDeleted(true);
+    onSessionDeleteOptimistic?.(item);
+    void Promise.resolve(onRemove({ sessionId: item.sessionId }))
+      .then((deletedSessionId) => {
+        if (!deletedSessionId) {
+          rollbackDelete();
+          return;
+        }
+        if (sessionId === item.sessionId) {
+          setSessionId?.('');
+        }
+      })
+      .catch(() => {
+        rollbackDelete();
+      });
+  }, [item, onRemove, onSessionDeleteOptimistic, onSessionDeleteRollback, sessionId, setSessionId]);
 
   const onEdit = (payload: { sessionName: string; sessionId: string }) => {
-    dispatch({
-      type: 'session/editSession',
-      payload,
-    });
+    const previousSessionName = item.sessionName || '';
+    const updateSessionName = (sessionName: string) => {
+      dispatch({
+        type: 'session/updateSession',
+        payload: {
+          ...item,
+          sessionName,
+        },
+      });
+    };
+    const rollbackSessionName = () => {
+      const rollbackPayload = { ...payload, sessionName: previousSessionName };
+      updateSessionName(previousSessionName);
+      onSessionEditRollback?.(rollbackPayload);
+    };
+
+    // 先回写可见列表，接口失败时再恢复保存前名称，避免编辑期间持续展示旧值。
+    updateSessionName(payload.sessionName);
+    onSessionEditOptimistic?.(payload);
     setEditingSessionId(null);
+    void Promise.resolve(
+      dispatch({
+        type: 'session/editSession',
+        payload,
+      })
+    ).then((editedSessionId) => {
+      if (!editedSessionId) {
+        rollbackSessionName();
+      }
+    }).catch(() => {
+      rollbackSessionName();
+    });
   };
 
   const renderTitle = (item: ISession) => {
@@ -180,12 +241,8 @@ const DialogueCard = ({
             onConfirm={(e: any) => {
               e.preventDefault();
               e.stopPropagation();
-              if (delLoading) return;
-              onRemove({ sessionId: item.sessionId }).then(() => {
-                if (sessionId === item.sessionId) {
-                  setSessionId?.('');
-                }
-              });
+              if (delLoading || isOptimisticallyDeleted) return;
+              handleDelete();
             }}
           >
             <span className={styles.menuItem}>
@@ -199,7 +256,11 @@ const DialogueCard = ({
     }
 
     return items;
-  }, [cannotActionList, delLoading, editLoading, sessionLoading, sessionId, item]);
+  }, [cannotActionList, delLoading, editLoading, sessionLoading, item, isOptimisticallyDeleted, handleDelete]);
+
+  if (isOptimisticallyDeleted) {
+    return null;
+  }
 
   return (
     <div

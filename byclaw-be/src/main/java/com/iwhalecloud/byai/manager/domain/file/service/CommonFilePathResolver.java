@@ -25,4 +25,13 @@ public class CommonFilePathResolver {
     public StorageLocation arbitrary(String bucketName, String path) {
         return StorageLocation.of(NAMESPACE, bucketName, path);
     }
+
+    public StorageLocation arbitrary(String bucketName, String path, String shareType) {
+        return StorageLocation.of(NAMESPACE, bucketName, path, shareType);
+    }
+
+    public StorageLocation projectShare(String path) {
+        return StorageLocation.of(NAMESPACE, Constants.BUCKET_NAME_PROJECT_SHARE, path,
+            WhaleAgentStorageService.SHARE_TYPE_PUBLIC);
+    }
 }

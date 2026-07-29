@@ -14,6 +14,9 @@ import {
   createFolder,
   getDataList,
   queryDirAndFileByLevel,
+  moveKnowledgeItems,
+  queryKnowledgeItemReferences,
+  globKnowledgeItems,
 } from '../knowledgeCenter';
 import { callDomainServiceByMultipart } from '../file';
 import { GET, POST } from '@/service/common/request';
@@ -264,6 +267,48 @@ describe('Knowledge Center Service', () => {
           hideErrorTips: true,
         },
       });
+    });
+  });
+
+  describe('moveKnowledgeItems', () => {
+    it('should call the knowledge item move proxy without adding language fields', () => {
+      const data = {
+        resourceId: 10014248,
+        sourcePath: ['/制度/考勤.pdf', '/制度/图片'],
+        targetDirectoryPath: '/归档/人事',
+        overwrite: false,
+      };
+
+      moveKnowledgeItems(data);
+
+      expect(mockPOST).toHaveBeenCalledWith('/byaiService/datasetController/moveKnowledgeItems', data, {
+        languageConf: false,
+        responseCfg: {
+          hideErrorTips: true,
+        },
+      });
+    });
+  });
+
+  describe('latest QA knowledge item APIs', () => {
+    it('should query markdown references through the dataset proxy', () => {
+      const data = {
+        resourceId: 10014248,
+        filePath: '/制度/请假.md',
+        direction: 'all' as const,
+      };
+
+      queryKnowledgeItemReferences(data);
+
+      expect(mockPOST).toHaveBeenCalledWith('/byaiService/datasetController/knowledgeItems/references', data);
+    });
+
+    it('should execute glob matching through the dataset proxy', () => {
+      const data = { resourceId: 10014248, pathRule: '/制度/*/*.pdf' };
+
+      globKnowledgeItems(data);
+
+      expect(mockPOST).toHaveBeenCalledWith('/byaiService/datasetController/glob', data);
     });
   });
 });

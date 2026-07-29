@@ -5,9 +5,14 @@ import { defineBundledChannelEntry } from "openclaw/plugin-sdk/channel-entry-con
 import handleAgentEvent from "./src/agent-event.js";
 import { enqueueAfterAgentEvents, replaceAgentEventSubscription } from "./src/agent-event-serial.js";
 import { byaiChannelPlugin } from "./src/channel.js";
+import {
+  BYCLAW_CHAT_CONTEXT_TOOL_NAME,
+  createByclawChatContextTool,
+} from "./src/chat-context-tool.js";
 import { registerByaiHooks } from "./src/hooks.js";
 import { registerContextSnapshotHook } from "./src/context-snapshot.js";
 import { registerByaiSessionStatusRoute } from "./src/session-status-route.js";
+import { registerRemoteTaskWatchService } from "./src/remote-task-watch.js";
 import { setByaiRuntime } from "./src/runtime.js";
 import {
   markActiveSdkRequestSubagentEnded,
@@ -45,6 +50,9 @@ async function enqueueAgentEvent(api: OpenClawPluginApi, event: AgentEvent): Pro
 }
 
 function registerFull(api: OpenClawPluginApi) {
+  api.registerTool((ctx) => createByclawChatContextTool(ctx as Record<string, unknown> | undefined), {
+    name: BYCLAW_CHAT_CONTEXT_TOOL_NAME,
+  });
   replaceAgentEventSubscription(api, () => api.runtime.events.onAgentEvent((event) => {
     // Keep SDK streaming completely outside OpenClaw's synchronous agent-event
     // dispatch stack. 2026.5.x releases the embedded session lock while the
@@ -61,6 +69,7 @@ function registerFull(api: OpenClawPluginApi) {
 
   registerContextSnapshotHook(api);
   registerByaiSessionStatusRoute(api);
+  registerRemoteTaskWatchService(api);
 
   api.on("subagent_spawned", async (event: {
     runId: string;
@@ -120,6 +129,13 @@ export default defineBundledChannelEntry({
 // 重新导出 channel 插件对象
 export { byaiChannelPlugin };
 export { setByaiRuntime };
+export {
+  buildRemoteTaskFollowupIdempotencyKey,
+  buildRemoteTaskResultMessage,
+  classifyRemoteTaskFollowupError,
+  dispatchRemoteTaskFollowup,
+  RemoteTaskFollowupSessionMissingError,
+} from "./src/remote-followup.js";
 
 // 重新导出类型
 export type {
@@ -129,3 +145,10 @@ export type {
   ByaiSdkInboundMessage,
   ByaiProbe,
 } from "./src/types.js";
+export type {
+  RemoteTaskFollowup,
+  RemoteTaskFollowupDeliveryClass,
+  RemoteTaskFollowupDispatchResult,
+  RemoteTaskFollowupItem,
+  RemoteTaskFollowupStatus,
+} from "./src/remote-followup.js";

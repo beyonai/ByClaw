@@ -177,6 +177,11 @@ const OrgMember = (props, ref) => {
   renderCountRef.current += 1;
 
   const filterRef = useRef(filter);
+  const canOperateMember = (record) => {
+    const isPlatformManager = userInfo.userType === 'PLAT_MAN' || userInfo.userType === 'PLAT_DEVOPS';
+    const managedOrgIds = (userInfo.orgIds || []).map((orgId) => `${orgId}`);
+    return canEdit || isPlatformManager || managedOrgIds.includes(`${record?.orgId}`);
+  };
 
   const getUsersByOrgId = (params) => {
     const requestId = ++requestSeqRef.current;
@@ -329,9 +334,7 @@ const OrgMember = (props, ref) => {
       width: 180,
       render: (_, record) => (
         <>
-          {userInfo.userType === 'PLAT_MAN' ||
-          userInfo.userType === 'PLAT_DEVOPS' ||
-          (userInfo.orgIds && userInfo.orgIds.includes(record.orgId)) ? (
+          {canOperateMember(record) ? (
             <div>
               <Button
                 type="link"

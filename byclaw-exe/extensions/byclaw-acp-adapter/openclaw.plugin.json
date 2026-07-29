@@ -1,0 +1,55 @@
+{
+  "id": "byclaw-acp-adapter",
+  "name": "ByClaw ACP Adapter",
+  "description": "Adapt ByClaw Redis digital-employee metadata into OpenClaw ACP Claude Code agent teams, workflows, and loops.",
+  "version": "2026.6.29",
+  "enabledByDefault": true,
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": [
+      "byclawAcpPlan",
+      "byclawAcpRun",
+      "call_acp_agent"
+    ],
+    "gatewayMethods": [
+      "byclaw.acp.registry",
+      "byclaw.acp.plan",
+      "byclaw.acp.run",
+      "byclaw.acp.runs.list",
+      "byclaw.acp.runs.show"
+    ],
+    "httpRoutes": [
+      "/plugins/byclaw-acp-adapter/registry",
+      "/plugins/byclaw-acp-adapter/plan",
+      "/plugins/byclaw-acp-adapter/run"
+    ]
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": true,
+    "properties": {
+      "defaultAcpAgentId": {
+        "type": "string"
+      },
+      "defaultAcpClientType": {
+        "type": "string"
+      },
+      "defaultCwd": {
+        "type": "string"
+      },
+      "sqlitePath": {
+        "type": "string"
+      },
+      "httpPathPrefix": {
+        "type": "string",
+        "default": "/plugins/byclaw-acp-adapter"
+      },
+      "redis": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    }
+  }
+}

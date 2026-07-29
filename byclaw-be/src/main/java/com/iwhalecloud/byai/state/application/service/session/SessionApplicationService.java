@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.state.application.service.session;
 
+import java.util.Date;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadFactory;
@@ -8,6 +9,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import com.iwhalecloud.byai.common.message.qo.MessageHotDelQo;
 import com.iwhalecloud.byai.common.message.service.ByaiMessageHotService;
+import com.iwhalecloud.byai.manager.domain.devloop.service.ScanLogService;
 import com.iwhalecloud.byai.manager.dto.session.ByaiSessionDto;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
 import com.iwhalecloud.byai.manager.qo.session.ByaiSessionQo;
@@ -58,6 +60,9 @@ public class SessionApplicationService {
     private SessionService sessionService;
 
     @Autowired
+    private ScanLogService scanLogService;
+
+    @Autowired
     private SessionExtService sessionExtService;
 
     @Autowired
@@ -65,8 +70,6 @@ public class SessionApplicationService {
 
     @Autowired
     private ByaiMessageHotService byaiMessageHotService;
-
-
 
     @Autowired
     private SsSuperassistSubAgentService ssSuperassistSubAgentService;
@@ -188,8 +191,7 @@ public class SessionApplicationService {
         if (enterpriseId != null) {
             byaiSession.setEnterpriseId(enterpriseId);
         }
-        if (StringUtils.isBlank(byaiSession.getSessionName())
-            && StringUtils.isBlank(byaiSession.getSessionContent())
+        if (StringUtils.isBlank(byaiSession.getSessionName()) && StringUtils.isBlank(byaiSession.getSessionContent())
             && byaiSession.getEnterpriseId() == null) {
             log.debug("Skip empty session update, sessionId={}", sessionOpeartorDto.getSessionId());
             return byaiSession;
@@ -236,6 +238,9 @@ public class SessionApplicationService {
         messageHotDelQo.setSessionId(sessionId);
         byaiMessageHotService.deleteByQo(messageHotDelQo);
 
+        // 删除关联扫描项
+        scanLogService.deleteItemBySessionId(sessionId);
+
     }
 
     /**
@@ -254,7 +259,7 @@ public class SessionApplicationService {
                 session.setSessionName(ChatUtils.truncateString(assistantChatDto.getChatContent(), 10));
             }
             else {
-            session.setSessionName(ChatUtils.truncateString(pointAgent.getName(), 10));
+                session.setSessionName(ChatUtils.truncateString(pointAgent.getName(), 10));
             }
         }
         else {

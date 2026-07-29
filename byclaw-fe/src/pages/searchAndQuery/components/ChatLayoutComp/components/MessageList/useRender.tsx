@@ -37,6 +37,7 @@ import type { IMessage, IExtParams } from '@/typescript/message';
 import styles from '@/components/MessageList/index.module.less';
 
 const { Paragraph } = Typography;
+const SHOW_SAVE_TO_WORKSPACE_ENTRY = false;
 
 export default function useRender({
   updateMessage,
@@ -64,7 +65,7 @@ export default function useRender({
       return (
         <div className="ub ub-ac">
           <CopyComp richText={text} text={getDisplayQuestion({ text, resourceList })} />
-          <Divider type="vertical" />
+          {/* <Divider type="vertical" /> */}
           <MoreActions deleteMessage={deleteMessage} msg={msg} />
         </div>
       );
@@ -80,7 +81,9 @@ export default function useRender({
         <div className="full-width ub ub-ver" style={{ position: 'relative' }}>
           <div className={classnames('ub ub-ac ub-wrap', styles.beyondAnswerActions)} style={{ gap: '6px 0' }}>
             <Space size={1}>
-              {[IMessageState.Done, IMessageState.Cancel].includes(messageState) && <SaveToWorkSpace msg={msg} />}
+              {SHOW_SAVE_TO_WORKSPACE_ENTRY && [IMessageState.Done, IMessageState.Cancel].includes(messageState) && (
+                <SaveToWorkSpace msg={msg} />
+              )}
               <MoreActions deleteMessage={deleteMessage} msg={msg} />
             </Space>
             <Divider type="vertical" size="small" />

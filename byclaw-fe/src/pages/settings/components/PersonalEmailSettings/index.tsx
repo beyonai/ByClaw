@@ -171,11 +171,13 @@ const PersonalEmailSettings: React.FC = () => {
       {
         title: 'IMAP',
         dataIndex: 'imap',
+        width: 240,
         render: (imap) => `${imap?.host || '-'}:${imap?.port || '-'} / ${imap?.encryption || '-'}`,
       },
       {
         title: 'SMTP',
         dataIndex: 'smtp',
+        width: 240,
         render: (smtp) => `${smtp?.host || '-'}:${smtp?.port || '-'} / ${smtp?.encryption || '-'}`,
       },
       {
@@ -202,6 +204,7 @@ const PersonalEmailSettings: React.FC = () => {
         title: intl.formatMessage({ id: 'common.operation' }),
         key: 'action',
         width: 190,
+        fixed: 'right',
         render: (_, record) => (
           <Space>
             {!record.default && (
@@ -245,6 +248,7 @@ const PersonalEmailSettings: React.FC = () => {
           columns={columns}
           dataSource={accounts}
           pagination={false}
+          scroll={{ x: 1470 }}
           locale={{ emptyText: <Empty description={intl.formatMessage({ id: 'settings.email.empty' })} /> }}
         />
       </Card>

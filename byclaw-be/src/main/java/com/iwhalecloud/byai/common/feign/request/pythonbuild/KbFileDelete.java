@@ -6,7 +6,7 @@ import lombok.Setter;
 /**
  * @author he.duming
  * @date 2026-04-02
- * @description 删除文档请求体（POST /api/v1/knowledge-items/delete）
+ * @description 删除文档请求体（POST /api/v1/knowledgeItems/delete）
  */
 @Getter
 @Setter

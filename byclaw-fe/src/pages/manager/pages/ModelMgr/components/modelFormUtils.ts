@@ -372,7 +372,7 @@ export function buildAutoDebugRequestText(options: {
       prevHeaders: prevObj?.headers,
     });
     const modelNoOrCode = `${formValues?.model_no ?? formValues?.modelCode ?? ''}`.trim();
-    const defaultMessages = [{ role: 'user', content: defaultUserMessage ?? '今天天气如何' }];
+    const defaultMessages = [{ role: 'user', content: defaultUserMessage ?? "How's the weather today?" }];
     const messages =
       !isTypeSwitch && Array.isArray(prevObj?.messages) && prevObj.messages.length
         ? prevObj.messages
@@ -413,15 +413,15 @@ export function buildAutoDebugRequestText(options: {
       prevHeaders: prevObj?.headers,
     });
     const modelNoOrCode = `${formValues?.model_no ?? formValues?.modelCode ?? ''}`.trim();
-    const defaultQuery = defaultRerankQuery ?? '北京旅游攻略';
+    const defaultQuery = defaultRerankQuery ?? 'Beijing travel guide';
     const defaultDocs =
       defaultRerankDocs && defaultRerankDocs.length >= 4
         ? defaultRerankDocs
         : [
-          { text: '北京美食推荐', metadata: { id: 0 }, score: 0 },
-          { text: '天津旅游攻略', metadata: { id: 1 }, score: 0 },
-          { text: '小白开发教程', metadata: { id: 2 }, score: 0 },
-          { text: '故宫游玩攻略', metadata: { id: 3 }, score: 0 },
+          { text: 'Beijing food recommendation', metadata: { id: 0 }, score: 0 },
+          { text: 'Tianjin travel guide', metadata: { id: 1 }, score: 0 },
+          { text: 'Beginner dev tutorial', metadata: { id: 2 }, score: 0 },
+          { text: 'Forbidden City travel guide', metadata: { id: 3 }, score: 0 },
         ];
 
     const query =
@@ -466,7 +466,7 @@ export function buildAutoDebugRequestText(options: {
       prevHeaders: prevObj?.headers,
     });
     const modelNoOrCode = `${formValues?.model_no ?? formValues?.modelCode ?? ''}`.trim();
-    const defaultInput = '今天天气如何';
+    const defaultInput = defaultUserMessage ?? "How's the weather today?";
     const inputText =
       !isTypeSwitch && typeof prevObj?.input === 'string' && prevObj.input.trim() ? prevObj.input : defaultInput;
 

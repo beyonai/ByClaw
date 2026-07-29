@@ -10,9 +10,11 @@ import AntdIcon from '@/components/AntdIcon';
 import CarouselFile from '@/components/MessageList/components/CarouselFile';
 import QueryInputBase, { IProps as pIProps, IState as pIState } from '@/components/QueryInput/queryInputBase';
 import { chatModeMap } from '@/constants/query';
+import { ResourceTypeMap } from '@/constants/resource';
 
 import UploadFile from '../components/UploadFile';
-import FileBrowserEntry from '../components/FileBrowserEntry';
+import ConnectorControl from '../components/ConnectorControl';
+import type { Connector } from '../components/ConnectorControl';
 
 import type { UserInfo } from '@/models/common/user';
 import type { IFile } from '@/typescript/file';
@@ -31,6 +33,8 @@ type IState = {
 
   beyondSmartModePopoverOpen: boolean;
   selectedResourceAgentIds: string;
+  // 当前输入会话已连接的连接器，发送消息时转换为后端所需的 ID 列表。
+  connectors: Connector[];
 } & pIState;
 
 type IProps = {
@@ -60,6 +64,8 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
       resourceList: [],
       beyondSmartModePopoverOpen: false,
       selectedResourceAgentIds: '',
+      // 连接器属于当前聊天输入状态，切换会话组件时不沿用旧选择。
+      connectors: [],
     };
   }
 
@@ -97,7 +103,10 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
 
   // @ts-ignore
   getSendPayload = () => {
-    const { inputValue, fileList, deepThink, chatSettings, connectNet } = this.state;
+    const currentInputPayload = this.getCurrentInputPayload();
+    const { fileList, deepThink, chatSettings, connectNet, connectors } = this.state;
+    const inputValue = currentInputPayload?.text ?? this.state.inputValue;
+    const resourceList = currentInputPayload?.resourceList ?? this.state.resourceList;
     const { userInfo, chatMode, myAgentType } = this.props;
     const { agentId } = this.props.globalContext;
 
@@ -105,9 +114,12 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
     if (!sendVal) return null;
 
     const enterpriseInformation = !!get(chatSettings, 'dataCloud.internalKnowledgeBase'); // 原本的企业资料
+    const hasInlineDigitalEmployee = (resourceList || []).some(
+      (item) => `${item.resourceType}` === ResourceTypeMap.digitalEmployee
+    );
 
     let mode = chatMode;
-    if (chatMode === chatModeMap.expert && !agentId) {
+    if (chatMode === chatModeMap.expert && !agentId && !hasInlineDigitalEmployee) {
       // 如果是专家模式，但没有引用数字员工，改成base
       mode = chatModeMap.base;
     }
@@ -121,6 +133,8 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
         files: [],
         extParams: {
           files: [],
+          // 后端约定：当前轮次启用的连接器 ID 列表。
+          connectors: connectors.map((connector) => connector.id),
         },
         mode,
         agentType: myAgentType,
@@ -133,7 +147,7 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
           fileList: [],
         },
       },
-      resourceList: this.state.resourceList,
+      resourceList,
     };
 
     try {
@@ -252,7 +266,7 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
       return selectedResourceAgentIds;
     }
 
-    return undefined;
+    return this.getQuoteAgentId();
   };
 
   checkShowOnlineSearchBtn = () => {
@@ -297,15 +311,22 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
       chatMode,
     } = this.props;
     const { showMentionPopoverType } = this.state;
+    const quoteAgentId = this.getQuoteAgentId();
     const mentionDigitalEmployeeTip = getIntl().formatMessage({ id: 'queryInput.tooltip.mentionDigitalEmployee' });
 
     return (
       <>
         <Space size="large" className={styles.bottomRight}>
-          <FileBrowserEntry />
+          {/* 连接器控制组件只负责选择，实际状态仍由聊天输入统一维护。 */}
+          <ConnectorControl
+            canAuthorize={!!this.props.userInfo}
+            value={this.state.connectors}
+            onChange={(connectors) => this.setState((prevState) => ({ ...prevState, connectors }))}
+          />
+          {/* 多员工模式下 @ 入口始终保留，用于继续追加数字员工。 */}
           <MentionPopover
             type="@"
-            chatMode={chatMode}
+            chatMode={chatModeMap.expert}
             agentId={agentId}
             sessionId={sessionId}
             onSelect={this.onSelectMentionPopoverItem}
@@ -333,7 +354,7 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
             <MentionPopover
               type="#"
               chatMode={chatMode}
-              agentId={agentId}
+              agentId={quoteAgentId}
               sessionId={sessionId}
               resourceAgentIds={this.getResourceAgentIds()}
               onSelect={this.onSelectMentionPopoverItem}

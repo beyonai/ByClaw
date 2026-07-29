@@ -18,6 +18,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -59,6 +60,16 @@ public class SsResExtMcpService {
 
     public SsResExtMcp findById(Long resourceId) {
         return ssResExtMcpMapper.selectById(resourceId);
+    }
+
+    /**
+     * PR-3 (#150) 批量查询 MCP 扩展数据. 单 SQL IN 子句,替代循环 findById.
+     *
+     * @param resourceIds 资源ID集合(空集合/null 时返回空 List,不触发 SQL)
+     * @return MCP 扩展列表
+     */
+    public List<SsResExtMcp> findByIds(Collection<Long> resourceIds) {
+        return ssResExtMcpMapper.findByIds(resourceIds);
     }
 
     /**

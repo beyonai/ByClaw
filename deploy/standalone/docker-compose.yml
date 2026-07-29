@@ -20,7 +20,7 @@ services:
     image: ${IMAGE_BE:-ghcr.io/beyonai/byclaw/byclaw-be:main}
     #image: byclaw-be:local
     container_name: byclaw-be-${CONTAINER_SUFFIX:-standalone}
-    user: root
+    user: "1001:1001"
     ports:
       - "${BE_SERVER_PORT:-8086}:${BE_SERVER_PORT:-8086}"
       - "${BE_WS_PORT:-8082}:${BE_WS_PORT:-8082}"
@@ -32,6 +32,8 @@ services:
       - /etc/localtime:/etc/localtime:ro
       - ../config:/app/config
       - ./logs/be:/app/logs
+      # dws 登录态（file-DEK 加密），持久化后重启无需重新钉钉授权。
+      - byclaw-dws-auth:/home/appuser/.dws
       - ${BYCLAW_SANDBOX_FILE_VOLUME_ROOT:-/mnt/byclaw-file}:${BYCLAW_SANDBOX_FILE_VOLUME_ROOT:-/mnt/byclaw-file}
     networks:
       - byclaw-network
@@ -40,7 +42,7 @@ services:
   qa-manager:
     image: ${IMAGE_QA:-ghcr.io/beyonai/byclaw/byclaw-qa:main}
     container_name: byclaw-qa-manager-${CONTAINER_SUFFIX:-standalone}
-    user: root
+    user: "1001:1001"
     command: api
     ports:
       - "${BYCLAW_QA_PORT:-8000}:${BYCLAW_QA_PORT:-8000}"
@@ -57,7 +59,7 @@ services:
   qa-worker:
     image: ${IMAGE_QA:-ghcr.io/beyonai/byclaw/byclaw-qa:main}
     container_name: byclaw-qa-worker-${CONTAINER_SUFFIX:-standalone}
-    user: root
+    user: "1001:1001"
     command: worker
     env_file:
       - ../../.env
@@ -72,7 +74,7 @@ services:
   data:
     image: ${IMAGE_DATA:-ghcr.io/beyonai/byclaw/byclaw-data:main}
     container_name: byclaw-data-${CONTAINER_SUFFIX:-standalone}
-    user: root
+    user: "1001:1001"
     ports:
       - "${DATACLOUD_PORT:-8087}:${DATACLOUD_PORT:-8087}"
     env_file:
@@ -93,7 +95,7 @@ services:
     container_name: byclaw-demo-${CONTAINER_SUFFIX:-standalone}
     profiles:
       - demo
-    user: root
+    user: "1001:1001"
     ports:
       - "${APIDEMO_PORT:-8999}:${APIDEMO_PORT:-8999}"
     env_file:
@@ -110,3 +112,8 @@ networks:
   byclaw-network:
     name: byclaw-network-${CONTAINER_SUFFIX:-default}
     driver: bridge
+
+volumes:
+  # dws 钉钉登录态持久卷（file-DEK 加密），跨容器重启保留授权
+  byclaw-dws-auth:
+    name: byclaw-dws-auth-${CONTAINER_SUFFIX:-standalone}

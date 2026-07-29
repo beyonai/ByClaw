@@ -10,6 +10,8 @@ import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
 import com.iwhalecloud.byai.state.domain.chat.dto.SuggestionQuestionVo;
 import com.iwhalecloud.byai.state.domain.chat.model.ChatResponse;
 import com.iwhalecloud.byai.state.domain.chat.model.MessageContext;
+import org.apache.commons.lang3.StringUtils;
+
 import java.io.OutputStream;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -17,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.atomic.AtomicBoolean;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -26,6 +29,13 @@ import lombok.Setter;
 @Getter
 @Setter
 public class ChatProcessContext {
+
+    /**
+     * 停止会话哨兵事件类型。stopChat 同 pod + HTTP SSE 场景下，向 {@link #gatewayEventQueue}
+     * 投递携带该 event_type 的事件，使阻塞在队列上的请求线程退出循环并按正常完成落库。
+     */
+    public static final String STOP_SENTINEL_EVENT = "__byclaw_stop_sentinel__";
+
     /** SSE响应输出流 */
     public OutputStream res;
 
@@ -137,9 +147,25 @@ public class ChatProcessContext {
     public boolean asyncResponse = false;
 
     /**
+     * 后台恢复模式：只聚合 Redis Stream 并最终入库，不向当前 OutputStream 或 WebSocket Channel 写出。
+     */
+    public boolean recoveryOnly = false;
+
+    /**
+     * 恢复 / 历史批次续聚合时的水位线：快照已聚合到的最后一条 Stream 消息 ID。
+     * stream_id &lt;= 该值的事件已计入快照，续聚合时应跳过，避免重复拼接。
+     */
+    public String hydratedStreamId;
+
+    /**
      * 消息发往 gateway 的targetAgentType
      */
     public String targetAgentType;
+
+    /**
+     * 多泳道请求中允许作为主回答的 targetAgentType 集合。
+     */
+    public Set<String> targetAgentTypes = new HashSet<>();
 
     /**
      * 当前聊天入口的传输方式。
@@ -155,6 +181,26 @@ public class ChatProcessContext {
      * 当前正在处理的 Redis Stream 事件 ID，用于前端恢复运行中会话时按版本合并快照和实时流。
      */
     public String currentStreamId;
+
+    /**
+     * 多智能体泳道请求中，每个 traceId 对应的泳道元数据。
+     */
+    public Map<String, JSONObject> multiAgentLaneMetadataByTraceId = new HashMap<>();
+
+    /**
+     * 多智能体泳道请求中，每个 traceId 独立聚合自己的回答内容。
+     */
+    public Map<String, MessageContext> multiAgentMessageContextsByTraceId = new HashMap<>();
+
+    /**
+     * 多智能体泳道请求中本次请求等待的所有 traceId。
+     */
+    public Set<String> multiAgentTraceIds = new HashSet<>();
+
+    /**
+     * 多智能体泳道请求中已经收到结束事件的 traceId。
+     */
+    public Set<String> completedMultiAgentTraceIds = new HashSet<>();
 
     /**
      * 当前请求写入 Redis 运行态标记时使用的所有者 token，用于结束时只清理自己创建的标记。
@@ -188,5 +234,71 @@ public class ChatProcessContext {
 
     public boolean isWebSocketTransport() {
         return ChatTransport.WEBSOCKET.equals(transport);
+    }
+
+    /**
+     * 消息持久化一次性闸门：保证一次对话的 storeMessage / 异常落库只执行一次。
+     * <p>
+     * 用户停止会话（stopChat）时可能主动触发落库，而 owner pod 的请求线程在
+     * gatewayEventQueue.poll 超时或随后收到事件时也会走落库路径，两者竞争同一份累积内容，
+     * 通过该闸门去重，避免重复 insert byai_message。
+     */
+    public final transient AtomicBoolean messagePersisted = new AtomicBoolean(false);
+
+    /**
+     * 尝试占用落库闸门。
+     *
+     * @return true 表示本次调用方抢到落库权，应执行持久化；false 表示已被其他线程落库，应跳过。
+     */
+    public boolean tryBeginPersist() {
+        return messagePersisted.compareAndSet(false, true);
+    }
+
+    public boolean isCurrentTrace(String receivedTraceId) {
+        if (StringUtils.isBlank(receivedTraceId)) {
+            return false;
+        }
+        return receivedTraceId.equals(traceId) || multiAgentTraceIds.contains(receivedTraceId);
+    }
+
+    public JSONObject getMultiAgentLaneMetadata(String receivedTraceId) {
+        if (StringUtils.isBlank(receivedTraceId)) {
+            return null;
+        }
+        return multiAgentLaneMetadataByTraceId.get(receivedTraceId);
+    }
+
+    public MessageContext resolveMessageContext(String receivedTraceId) {
+        if (StringUtils.isNotBlank(receivedTraceId)) {
+            MessageContext laneContext = multiAgentMessageContextsByTraceId.get(receivedTraceId);
+            if (laneContext != null) {
+                return laneContext;
+            }
+        }
+        return messageContext;
+    }
+
+    public boolean isMultiAgentRequest() {
+        return !multiAgentTraceIds.isEmpty();
+    }
+
+    public boolean markTraceComplete(String receivedTraceId) {
+        if (!isMultiAgentRequest()) {
+            return true;
+        }
+        if (StringUtils.isNotBlank(receivedTraceId) && multiAgentTraceIds.contains(receivedTraceId)) {
+            completedMultiAgentTraceIds.add(receivedTraceId);
+        }
+        return completedMultiAgentTraceIds.containsAll(multiAgentTraceIds);
+    }
+
+    public boolean isTargetAgentType(String sourceAgentType) {
+        if (StringUtils.isBlank(sourceAgentType)) {
+            return true;
+        }
+        if (!targetAgentTypes.isEmpty()) {
+            return targetAgentTypes.contains(sourceAgentType);
+        }
+        return StringUtils.isBlank(targetAgentType) || sourceAgentType.equals(targetAgentType);
     }
 }

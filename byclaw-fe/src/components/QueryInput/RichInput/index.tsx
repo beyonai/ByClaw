@@ -27,6 +27,7 @@ import getElementData, { getElementDisplayText } from './utils/getElementData';
 import { withMention, withEditableNavigation } from './plugins';
 import { Props, ParagraphElementType, PayloadType, IResourceType, MentionTriggerInfo, Resource } from './types';
 import { createKeyboardHandler } from './utils/keyboardHandler';
+import type { ResourceElementType } from './elements/resource';
 import useDefaultAgentPlaceholder from './useDefaultAgentPlaceholder';
 import { setAgentCache } from './agentCache';
 import useDefaultAgentElement from './useDefaultAgentElement';
@@ -34,6 +35,14 @@ import useOnPaste from './useOnPaste';
 import useGlobal from '@/hooks/useGlobal';
 
 type SetTextParams = string | Parameters<typeof getDescendantValueByDefaultValue>[0];
+
+const isAgentToolNode = (node: unknown): node is ResourceElementType => {
+  if (!node || typeof node !== 'object') {
+    return false;
+  }
+  const candidate = node as { type?: unknown; isAgentTool?: unknown };
+  return candidate.type === ELEMENT_RESOURCE && candidate.isAgentTool === true;
+};
 
 /** 带 aria-label 的 Editable 根元素，用于无障碍与测试定位（slate-react 未将 aria-label 透传到 DOM） */
 const EditableRootWithAria = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>((props, ref) => (
@@ -89,7 +98,7 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
 
     if (defaultAgentElement?.agentType) {
       // 当前切到了慧笔｜问数，inAgentRoute为true，则展示各自的placeholder
-      return getAgentPlaceholder(intl, defaultAgentElement.agentType);
+      return getAgentPlaceholder(intl);
     }
     // 其余情况根据chatMode来显示
     if (chatMode === chatModeMap.expert) {
@@ -123,19 +132,11 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
       return false;
     }
     if (chatMode === chatModeMap.expert) {
-      const text = Editor.string(editor, []);
-      const atNodes = Editor.nodes(editor, {
-        at: [],
-        mode: 'lowest',
-        match: (ele) => Element.isElement(ele) && ele.type === ELEMENT_MENTION,
-      });
-      // 专家模式只允许@一次
-      if (!atNodes.next().done) return false;
       if (isInputting) {
-        // 输入中，必须有输入个@在前面
-        return !!text && text.startsWith('@');
+        return true;
       }
       // drop进来的，必须是没有内容
+      const text = Editor.string(editor, []);
       return !text;
     }
 
@@ -283,16 +284,24 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
   const insertItem = (item: any, type: IResourceType) => {
     let node = getElementData(type, item);
 
-    // 如果选择的是数字员工类型，那就用一个map来缓存。这样，专家模式时，就可以直接利用这个map来渲染输入框最前面默认的agent了
     if (type === ResourceType.digitalEmployee) {
+      // 支持连续 @ 多个数字员工：手动选择的数字员工作为正文 mention，不切换默认 agent。
       setAgentCache(node);
       node = {
         ...node,
         // @ts-ignore
-        isDefaultAgent: checkIsDefaultAgent(item),
+        isDefaultAgent: false,
       };
-    } else if (type === ResourceType.agentTool) {
-      if (chatMode === chatModeMap.expert && !agentId) {
+    } else if (type === ResourceType.agentTool && isAgentToolNode(node)) {
+      const hasInlineAgent =
+        !!node.agentId &&
+        getResourceList(value).some(
+          (resource) =>
+            resource.resourceType === ResourceType.digitalEmployee && `${resource.resourceId}` === `${node.agentId}`
+        );
+      const isSelectedAgentSkill = (!!agentId && `${agentId}` === `${node.agentId}`) || hasInlineAgent;
+
+      if (chatMode === chatModeMap.expert && !agentId && !isSelectedAgentSkill) {
         // 当前没有@任何数字员工，但是直接选择了某个数字员工的技能，那么拆分成两步：
         // 1. 先@这个数字员工
         // 2. 再选择技能
@@ -309,10 +318,10 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
         });
         return;
       }
-      if (agentId && `${agentId}` === `${node.agentId}`) {
-        // 当前模式是专家模式，并且选择了当前数字员工的技能，那么就不需要展示数字员工的名称，直接展示技能名称就好
+      if (isSelectedAgentSkill) {
+        // 当前输入框已经引用该数字员工时，仅展示技能名称，避免重复展示数字员工。
         node.name = node.resourceName;
-        delete node.chatAvatar;
+        node.chatAvatar = undefined;
         node.children = [{ text: getElementDisplayText({ resourceType: type, data: { name: node.resourceName } }) }];
       }
     }

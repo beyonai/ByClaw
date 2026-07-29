@@ -16,7 +16,13 @@
     margin-left: 0;
   }
 
-  &:global(.default-agent):hover {
+  // 多 @ 员工的普通 mention 也可以点击退出，但保留原有标签底色。
+  &.removableMention {
+    cursor: pointer;
+  }
+
+  &:global(.default-agent):hover,
+  &.removableMention:hover {
     background: var(~'--@{antPrefix}-color-primary-bg') !important;
 
     .deleteIcon {

@@ -17,6 +17,22 @@
   }
 }
 
+// 给需要页面级滚动的业务页使用，避免 CardList 内部再生成第二个滚动条。
+.cardListAutoHeight {
+  height: auto;
+
+  :global {
+    .@{antPrefix}-spin-nested-loading,
+    .@{antPrefix}-spin-container {
+      height: auto;
+    }
+  }
+}
+
+.cardListAutoContent {
+  height: auto;
+}
+
 .flexLayout {
   height: 50px;
   display: flex;
@@ -54,6 +70,11 @@
     align-items: center;
     display: flex;
   }
+}
+
+.tabAutoHeight {
+  height: auto;
+  overflow: visible;
 }
 
 .cardItem {

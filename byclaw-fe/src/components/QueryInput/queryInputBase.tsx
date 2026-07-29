@@ -7,6 +7,7 @@ import classNames from 'classnames';
 import { agentTypeMap } from '@/constants/agent';
 import { IMessageState } from '@/constants/message';
 import { chatModeMap, IChatModeType } from '@/constants/query';
+import { ResourceTypeMap } from '@/constants/resource';
 import type { ISendProps } from '@/hooks/useChat';
 import type { IAgentCache, IAgentType } from '@/typescript/agent';
 import type { IFile } from '@/typescript/file';
@@ -147,9 +148,9 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
   };
 
   setCommonStateBySchema = (schema: any) => {
-    const { queryQuestion, inputSchema, mentionItem, payload: { files } = {} } = schema;
+    const { queryQuestion, inputSchema = {}, mentionItem, payload: { files } = {} } = schema;
 
-    const inputValue = inputSchema.text || queryQuestion || '';
+    const inputValue = inputSchema?.text || queryQuestion || '';
 
     this.setState((prevState) => ({
       ...prevState,
@@ -203,6 +204,39 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
   extendRender = (): null | React.ReactNode => null;
 
   getAssitantTrigger = (): React.ReactNode => null;
+
+  getCurrentInputPayload = () => {
+    return this.richInputRef.current?.getPayload?.();
+  };
+
+  // # 引用只能按唯一员工 ID 查询；多 @ 员工时返回多个 ID，用于隐藏 # 入口。
+  getCurrentResourceList = () => {
+    return this.getCurrentInputPayload()?.resourceList || this.state.resourceList || [];
+  };
+
+  getInlineDigitalEmployeeList = () => {
+    return this.getCurrentResourceList().filter(
+      (item) => `${item.resourceType}` === ResourceTypeMap.digitalEmployee && item.resourceId
+    );
+  };
+
+  getQuoteAgentIds = (): string[] => {
+    const inlineAgentIds = this.getInlineDigitalEmployeeList()
+      .map((item) => `${item.resourceId}`)
+      .filter(Boolean);
+    const uniqueInlineAgentIds = Array.from(new Set(inlineAgentIds));
+    if (uniqueInlineAgentIds.length) {
+      return uniqueInlineAgentIds;
+    }
+
+    const { agentId } = this.props.globalContext;
+    return agentId ? [`${agentId}`] : [];
+  };
+
+  getQuoteAgentId = (): string | undefined => {
+    const agentIds = this.getQuoteAgentIds();
+    return agentIds.length === 1 ? agentIds[0] : undefined;
+  };
 
   autoSend = () => {
     if (this.autoSendRunner) {
@@ -308,7 +342,9 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
   };
 
   getSendPayload = () => {
-    const { inputValue, resourceList } = this.state;
+    const currentInputPayload = this.getCurrentInputPayload();
+    const inputValue = currentInputPayload?.text ?? this.state.inputValue;
+    const resourceList = currentInputPayload?.resourceList ?? this.state.resourceList;
     const { myAgentType } = this.props;
     const sendVal = trim(inputValue);
 
@@ -326,6 +362,10 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
   // 所有子类的onSend都从父类这里触发，这里需要额外加一些公共的参数
   finallySendQuery = (data: any) => {
     let { resourceList = [] } = this.state;
+    const currentInputPayload = this.getCurrentInputPayload();
+    if (currentInputPayload?.resourceList) {
+      resourceList = currentInputPayload.resourceList;
+    }
 
     if (resourceList.length) {
       set(data, 'resourceList', resourceList);
@@ -358,7 +398,8 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
   };
 
   checkCanSend() {
-    const { inputValue } = this.state;
+    const currentInputPayload = this.getCurrentInputPayload();
+    const inputValue = currentInputPayload?.text ?? this.state.inputValue;
     const trimInputValue = trim(inputValue || '');
     return trimInputValue?.length > 0;
   }
@@ -527,18 +568,26 @@ class QueryInputBase<P = Record<string, any>, S = Record<string, any>> extends R
 
   checkCanQuote = () => {
     const { employeesList } = this.props;
-    const { agentId } = this.props.globalContext;
+    const quoteAgentId = this.getQuoteAgentId();
 
-    if (!agentId || !employeesList) return false;
+    if (!quoteAgentId || !employeesList) return false;
     // 页面集成类型的数字员工，不允许#技能
-    const integrationType = employeesList?.find((item) => `${item.agentId}` === `${agentId}`)?.integrationType;
+    const integrationType = employeesList?.find(
+      (item) =>
+        `${item.agentId}` === `${quoteAgentId}` ||
+        `${item.id}` === `${quoteAgentId}` ||
+        `${item.resourceId}` === `${quoteAgentId}` ||
+        `${item.resourceCode}` === `${quoteAgentId}`
+    )?.integrationType;
     if (integrationType === 'PAGE') return false;
     return true;
   };
 
   chechCannotAt = () => this.props.cannotAt;
 
-  getResourceAgentIds = (): string | undefined => undefined;
+  getResourceAgentIds = (): string | undefined => {
+    return this.getQuoteAgentId();
+  };
 
   renderInput() {
     const { cannotAt, myAgentType, setMyAgentType, chatMode, isBottom, placeholder } = this.props;

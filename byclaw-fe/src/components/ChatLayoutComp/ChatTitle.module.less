@@ -40,6 +40,29 @@ nav.chatTitle {
     align-items: center;
     flex-direction: row;
 
+    .projectSessionActions {
+      // 两个项目会话操作单独留出更清晰的点击间距，不影响右侧其他标题操作。
+      gap: 10px;
+      display: inline-flex;
+      align-items: center;
+    }
+
+    .projectActionButton {
+      width: 32px;
+      height: 32px;
+      padding: 0;
+      border: 0;
+      color: #526075;
+      box-shadow: none;
+
+      // 鼠标点击不保留高亮，键盘聚焦时仍提供清晰的可访问性反馈。
+      &:hover,
+      &:focus-visible {
+        color: #246bfe;
+        background: #f0f5ff;
+      }
+    }
+
     .btn {
       cursor: pointer;
       gap: 4px;

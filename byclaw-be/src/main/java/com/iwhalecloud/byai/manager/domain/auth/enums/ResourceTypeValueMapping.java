@@ -49,6 +49,12 @@ public enum ResourceTypeValueMapping {
     // 对象资源
     OBJECT(ResourceBizTypeEnum.OBJECT.name(), "OBJECT"),
 
+    // 本体库资源
+    ONTOLOGY_BASE(ResourceBizTypeEnum.ONTOLOGY_BASE.name(), "ONTOLOGY_BASE"),
+
+    // 场景资源
+    SCENE(ResourceBizTypeEnum.SCENE.name(), "SCENE"),
+
     // 视图资源
     VIEW(ResourceBizTypeEnum.VIEW.name(), "VIEW"),
 

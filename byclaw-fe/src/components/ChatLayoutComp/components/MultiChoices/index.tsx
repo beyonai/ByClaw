@@ -23,6 +23,7 @@ import {
   referenceToOpenClawHandler,
   referenceToWisdomPenHandler,
 } from '@/components/ChatLayoutComp/components/MultiChoices/util';
+import getDisplayAnswer, { getSubstanceText } from '@/components/QueryInput/getDisplayAnswer';
 import { getMessageText } from '@/utils/messgae';
 
 import { uploadFiles } from '@/service/file';
@@ -49,6 +50,8 @@ type IProps = {
   setMyAgentType: React.Dispatch<React.SetStateAction<IAgentType>>;
   notificationMessage: NotificationInstance;
 };
+
+const SHOW_SAVE_TO_WORKSPACE_ENTRY = false;
 
 function MultiChoices(props: IProps) {
   const {
@@ -114,7 +117,7 @@ function MultiChoices(props: IProps) {
       const sender = ['1', '4'].includes(`${msg?.usage || ''}`)
         ? intl.formatMessage({ id: 'multiChoices.export.senderUser' })
         : intl.formatMessage({ id: 'multiChoices.export.senderAssistant' });
-      const content = getMessageText(msg) || '';
+      const content = getDisplayAnswer(msg?.messageList) || getSubstanceText(msg?.text) || getMessageText(msg) || '';
       const resourceName = metadata?.resourceName || msg?.resourceList?.[0]?.resourceName || '';
       const resourceType = metadata?.resourceType || msg?.resourceList?.[0]?.resourceType || '';
 
@@ -161,6 +164,10 @@ function MultiChoices(props: IProps) {
           setWorkspaceModalOpen(false);
 
           EventEmitter.emit('beyond-resourceList-resourceType-reload', 'SPACE');
+          EventEmitter.emit('fileBrowser-session-files-updated', {
+            sessionId: payload.sessionId,
+            filePath: payload.filePath,
+          });
         })
         .catch((error) => {
           console.error('Failed to save to workspace:', error);
@@ -241,118 +248,120 @@ function MultiChoices(props: IProps) {
                 >
                   {intl.formatMessage({ id: 'multiChoices.saveToKnowledge' })}
                 </Button>
-                <Button
-                  icon={<AntdIcon type="icon-a-View-listxiangqingliebiao" style={{ fontSize: '16px' }} />}
-                  onClick={() => {
-                    try {
-                      const userCode = userInfo?.userCode || '';
-                      const userName = userInfo?.userName || '';
-                      if (!userCode) {
-                        message.error(intl.formatMessage({ id: 'multiChoices.saveToWorkspace.userInfoFailed' }));
-                        return;
-                      }
-
-                      // 根据数字员工ID查询数字员工名称
-                      const agent = [...agentList, ...employeesList].find(
-                        (item) => `${item.agentId}` === `${currentSession.objectId}`
-                      );
-                      const agentName = agent?.name || intl.formatMessage({ id: 'common.digitalEmployee' });
-
-                      // 生成默认文件名
-                      const now = new Date();
-                      const timestamp =
-                        now.getFullYear() +
-                        String(now.getMonth() + 1).padStart(2, '0') +
-                        String(now.getDate()).padStart(2, '0') +
-                        '_' +
-                        String(now.getHours()).padStart(2, '0') +
-                        String(now.getMinutes()).padStart(2, '0') +
-                        String(now.getSeconds()).padStart(2, '0');
-                      const defaultFileName = intl.formatMessage(
-                        { id: 'multiChoices.saveToKnowledge.defaultFileName' },
-                        { userName, agentName, timestamp }
-                      );
-
-                      const selectedMessages = multiChoicesMsgId
-                        .map((msgId) => messageList.find((item) => item.msgId === msgId))
-                        .filter(Boolean);
-
-                      let content = '';
-                      selectedMessages.forEach((msg, index) => {
-                        if (msg) {
-                          const messageInfo = getExportMessageInfo(msg);
-                          content += `# ${intl.formatMessage(
-                            { id: 'multiChoices.export.messageTitle' },
-                            { index: index + 1 }
-                          )}\n`;
-                          content += `**${intl.formatMessage({ id: 'multiChoices.export.messageId' })}**: ${
-                            messageInfo.messageId
-                          }\n`;
-                          content += `**${intl.formatMessage({ id: 'multiChoices.export.sessionId' })}**: ${
-                            messageInfo.sessionId
-                          }\n`;
-                          content += `**${intl.formatMessage({ id: 'multiChoices.export.sender' })}**: ${
-                            messageInfo.sender
-                          }\n`;
-                          content += `**${intl.formatMessage({ id: 'common.time' })}**: ${messageInfo.createTime}\n`;
-                          if (messageInfo.resourceName || messageInfo.resourceType) {
-                            content += `**${intl.formatMessage({ id: 'multiChoices.export.resource' })}**: ${
-                              messageInfo.resourceName || '-'
-                            }${messageInfo.resourceType ? ` (${messageInfo.resourceType})` : ''}\n`;
-                          }
-                          content += `**${intl.formatMessage({ id: 'multiChoices.export.content' })}**:\n${
-                            messageInfo.content || ''
-                          }\n\n`;
+                {SHOW_SAVE_TO_WORKSPACE_ENTRY && (
+                  <Button
+                    icon={<AntdIcon type="icon-a-View-listxiangqingliebiao" style={{ fontSize: '16px' }} />}
+                    onClick={() => {
+                      try {
+                        const userCode = userInfo?.userCode || '';
+                        const userName = userInfo?.userName || '';
+                        if (!userCode) {
+                          message.error(intl.formatMessage({ id: 'multiChoices.saveToWorkspace.userInfoFailed' }));
+                          return;
                         }
-                      });
 
-                      setWorkspaceFileName(defaultFileName);
-                      setCountdown(30);
-                      setWorkspaceSaveData({
-                        userCode,
-                        sessionId,
-                        content,
-                      });
-                      // 启动倒计时
-                      if (countdownTimer) {
-                        clearInterval(countdownTimer);
-                        setCountdownTimer(null);
-                      }
-                      const currentSaveData = {
-                        userCode,
-                        sessionId,
-                        content,
-                      };
-                      const currentFileName = defaultFileName;
-                      const timer = setInterval(() => {
-                        setCountdown((prev) => {
-                          if (prev <= 1) {
-                            clearInterval(timer);
-                            setCountdownTimer(null);
-                            setWorkspaceModalOpen(false);
-                            writeTxtHandler({
-                              userCode: currentSaveData.userCode,
-                              sessionId: currentSaveData.sessionId,
-                              filePath: currentFileName + '.md',
-                              content: currentSaveData.content,
-                            });
+                        // 根据数字员工ID查询数字员工名称
+                        const agent = [...agentList, ...employeesList].find(
+                          (item) => `${item.agentId}` === `${currentSession.objectId}`
+                        );
+                        const agentName = agent?.name || intl.formatMessage({ id: 'common.digitalEmployee' });
 
-                            return 0;
+                        // 生成默认文件名
+                        const now = new Date();
+                        const timestamp =
+                          now.getFullYear() +
+                          String(now.getMonth() + 1).padStart(2, '0') +
+                          String(now.getDate()).padStart(2, '0') +
+                          '_' +
+                          String(now.getHours()).padStart(2, '0') +
+                          String(now.getMinutes()).padStart(2, '0') +
+                          String(now.getSeconds()).padStart(2, '0');
+                        const defaultFileName = intl.formatMessage(
+                          { id: 'multiChoices.saveToKnowledge.defaultFileName' },
+                          { userName, agentName, timestamp }
+                        );
+
+                        const selectedMessages = multiChoicesMsgId
+                          .map((msgId) => messageList.find((item) => item.msgId === msgId))
+                          .filter(Boolean);
+
+                        let content = '';
+                        selectedMessages.forEach((msg, index) => {
+                          if (msg) {
+                            const messageInfo = getExportMessageInfo(msg);
+                            content += `# ${intl.formatMessage(
+                              { id: 'multiChoices.export.messageTitle' },
+                              { index: index + 1 }
+                            )}\n`;
+                            content += `**${intl.formatMessage({ id: 'multiChoices.export.messageId' })}**: ${
+                              messageInfo.messageId
+                            }\n`;
+                            content += `**${intl.formatMessage({ id: 'multiChoices.export.sessionId' })}**: ${
+                              messageInfo.sessionId
+                            }\n`;
+                            content += `**${intl.formatMessage({ id: 'multiChoices.export.sender' })}**: ${
+                              messageInfo.sender
+                            }\n`;
+                            content += `**${intl.formatMessage({ id: 'common.time' })}**: ${messageInfo.createTime}\n`;
+                            if (messageInfo.resourceName || messageInfo.resourceType) {
+                              content += `**${intl.formatMessage({ id: 'multiChoices.export.resource' })}**: ${
+                                messageInfo.resourceName || '-'
+                              }${messageInfo.resourceType ? ` (${messageInfo.resourceType})` : ''}\n`;
+                            }
+                            content += `**${intl.formatMessage({ id: 'multiChoices.export.content' })}**:\n${
+                              messageInfo.content || ''
+                            }\n\n`;
                           }
-                          return prev - 1;
                         });
-                      }, 1000);
-                      setCountdownTimer(timer);
-                      setWorkspaceModalOpen(true);
-                    } catch (error) {
-                      console.error('Failed to save to workspace:', error);
-                      message.error(intl.formatMessage({ id: 'multiChoices.saveToWorkspace.failed' }));
-                    }
-                  }}
-                  disabled={isEmpty(multiChoicesMsgId)}
-                >
-                  {intl.formatMessage({ id: 'multiChoices.saveToWorkspace' })}
-                </Button>
+
+                        setWorkspaceFileName(defaultFileName);
+                        setCountdown(30);
+                        setWorkspaceSaveData({
+                          userCode,
+                          sessionId,
+                          content,
+                        });
+                        // 启动倒计时
+                        if (countdownTimer) {
+                          clearInterval(countdownTimer);
+                          setCountdownTimer(null);
+                        }
+                        const currentSaveData = {
+                          userCode,
+                          sessionId,
+                          content,
+                        };
+                        const currentFileName = defaultFileName;
+                        const timer = setInterval(() => {
+                          setCountdown((prev) => {
+                            if (prev <= 1) {
+                              clearInterval(timer);
+                              setCountdownTimer(null);
+                              setWorkspaceModalOpen(false);
+                              writeTxtHandler({
+                                userCode: currentSaveData.userCode,
+                                sessionId: currentSaveData.sessionId,
+                                filePath: currentFileName + '.md',
+                                content: currentSaveData.content,
+                              });
+
+                              return 0;
+                            }
+                            return prev - 1;
+                          });
+                        }, 1000);
+                        setCountdownTimer(timer);
+                        setWorkspaceModalOpen(true);
+                      } catch (error) {
+                        console.error('Failed to save to workspace:', error);
+                        message.error(intl.formatMessage({ id: 'multiChoices.saveToWorkspace.failed' }));
+                      }
+                    }}
+                    disabled={isEmpty(multiChoicesMsgId)}
+                  >
+                    {intl.formatMessage({ id: 'multiChoices.saveToWorkspace' })}
+                  </Button>
+                )}
               </Space>
             )}
             {multiChoicesList.includes('shared') && (
@@ -495,6 +504,7 @@ function MultiChoices(props: IProps) {
         onClose={() => setSaveToKnowledgeOpen(false)}
         multiChoicesMsgId={multiChoicesMsgId}
         messageList={messageList}
+        resourceId={currentSession?.objectId}
         agentName={
           [...agentList, ...employeesList].find((item) => `${item.agentId}` === `${currentSession.objectId}`)?.name ||
           intl.formatMessage({ id: 'common.digitalEmployee' })

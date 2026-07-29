@@ -74,7 +74,7 @@ public class ChatService {
     public void llmChat(ChannelHandlerContext ctx, ChatMessage message) {
         LoginInfo currentUser = ctx.channel().attr(Constant.ATT_USER_INFO).get();
 
-        // Token 月度限额检查（仅对公共模型和TokenServer模型生效）
+        // Token 月度限额检查（仅对公共模型和 TokenSaver 模型生效）
         try {
             if (currentUser != null
                     && tokenQuotaService.isModelSubjectToQuota(message.getAgentId())
@@ -153,6 +153,8 @@ public class ChatService {
             stopChatDto.setAgentCode(message.getAgentCode());
             stopChatDto.setSessionId(message.getSessionId());
             stopChatDto.setMessageId(message.getMessageId());
+            stopChatDto.setTraceId(message.getTraceId());
+            stopChatDto.setLaneId(message.getLaneId());
             stopChatDto.setClientRequestId(message.getClientRequestId());
             fillStopChatFromRunningInfo(stopChatDto);
             assistantChatApplicationService.stopChat(stopChatDto);
@@ -192,6 +194,12 @@ public class ChatService {
         }
         if (stopChatDto.getClientRequestId() == null) {
             stopChatDto.setClientRequestId(runningInfo.getClientRequestId());
+        }
+        if (stopChatDto.getTraceId() == null) {
+            stopChatDto.setTraceId(runningInfo.getTraceId());
+        }
+        if (stopChatDto.getLaneId() == null) {
+            stopChatDto.setLaneId(runningInfo.getLaneId());
         }
     }
 }

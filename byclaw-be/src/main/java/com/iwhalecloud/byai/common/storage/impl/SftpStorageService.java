@@ -1,12 +1,15 @@
 package com.iwhalecloud.byai.common.storage.impl;
 
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import java.io.FilterInputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.util.Properties;
 
+import org.apache.commons.io.FilenameUtils;
 import org.apache.commons.lang3.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.web.multipart.MultipartFile;
@@ -18,6 +21,7 @@ import com.iwhalecloud.byai.common.storage.config.FtpConfig;
 import com.iwhalecloud.byai.common.storage.constants.StorageType;
 import com.iwhalecloud.byai.common.storage.model.FileMetadata;
 import com.iwhalecloud.byai.common.storage.model.FileStorageContext;
+import com.iwhalecloud.byai.common.storage.model.StorageLocation;
 import com.jcraft.jsch.Channel;
 import com.jcraft.jsch.ChannelSftp;
 import com.jcraft.jsch.JSch;
@@ -47,6 +51,134 @@ public class SftpStorageService extends AbstractFileIngressStorageService<Sessio
     @Override
     public String getStorageType() {
         return StorageType.SFTP;
+    }
+
+    /**
+     * Supports the common object-storage contract as well as file ingress. Some
+     * manager features store small service files directly by {@link StorageLocation},
+     * including system-feedback attachments.
+     */
+    @Override
+    public FileMetadata put(StorageLocation location, InputStream inputStream, long size, String contentType) {
+        if (inputStream == null) {
+            throw new IllegalArgumentException("SFTP upload input stream cannot be null");
+        }
+        String remotePath = resolveObjectPath(location);
+        ChannelSftp channelSftp = null;
+        Session session = null;
+        try {
+            session = getClient();
+            channelSftp = openSftpChannel(session);
+            ensureSftpAbsolutePathExists(channelSftp, parentDirectory(remotePath));
+            channelSftp.put(inputStream, remotePath);
+
+            FileMetadata metadata = new FileMetadata();
+            metadata.setBucketName(location.getBucketOrRoot());
+            metadata.setFileName(FilenameUtils.getName(location.getPath()));
+            metadata.setFileUrl(generateFileAccessUrl(location.getBucketOrRoot(), location.getPath()));
+            metadata.setFileSize(size);
+            metadata.setContentType(contentType);
+            metadata.setFileType(FilenameUtils.getExtension(location.getPath()));
+            metadata.setStorageType(getStorageType());
+            logger.info("SFTP对象写入成功, bucketName={}, objectKey={}, remotePath={}", location.getBucketOrRoot(),
+                location.getPath(), remotePath);
+            return metadata;
+        }
+        catch (Exception e) {
+            logger.error("SFTP对象写入失败, bucketName={}, objectKey={}, remotePath={}",
+                location == null ? null : location.getBucketOrRoot(), location == null ? null : location.getPath(),
+                remotePath, e);
+            throw new BaseException("SFTP对象写入失败: " + remotePath, e);
+        }
+        finally {
+            closeSftp(session, channelSftp);
+        }
+    }
+
+    /**
+     * The returned stream owns the SFTP session and closes it together with the
+     * stream so callers can keep the normal try-with-resources read pattern.
+     */
+    @Override
+    public InputStream get(StorageLocation location) {
+        String remotePath = resolveObjectPath(location);
+        Session session = null;
+        ChannelSftp channelSftp = null;
+        try {
+            session = getClient();
+            channelSftp = openSftpChannel(session);
+            InputStream inputStream = channelSftp.get(remotePath);
+            Session currentSession = session;
+            ChannelSftp currentChannelSftp = channelSftp;
+            return new FilterInputStream(inputStream) {
+                @Override
+                public void close() throws IOException {
+                    try {
+                        super.close();
+                    }
+                    finally {
+                        closeSftp(currentSession, currentChannelSftp);
+                    }
+                }
+            };
+        }
+        catch (Exception e) {
+            closeSftp(session, channelSftp);
+            logger.error("SFTP对象读取失败, bucketName={}, objectKey={}, remotePath={}",
+                location == null ? null : location.getBucketOrRoot(), location == null ? null : location.getPath(),
+                remotePath, e);
+            throw new BaseException("SFTP对象读取失败: " + remotePath, e);
+        }
+    }
+
+    @Override
+    public boolean exists(StorageLocation location) {
+        String remotePath = resolveObjectPath(location);
+        ChannelSftp channelSftp = null;
+        Session session = null;
+        try {
+            session = getClient();
+            channelSftp = openSftpChannel(session);
+            channelSftp.stat(remotePath);
+            return true;
+        }
+        catch (SftpException e) {
+            if (e.id == ChannelSftp.SSH_FX_NO_SUCH_FILE) {
+                return false;
+            }
+            throw new BaseException("SFTP对象查询失败: " + remotePath, e);
+        }
+        catch (Exception e) {
+            throw new BaseException("SFTP对象查询失败: " + remotePath, e);
+        }
+        finally {
+            closeSftp(session, channelSftp);
+        }
+    }
+
+    @Override
+    public void delete(StorageLocation location) {
+        String remotePath = resolveObjectPath(location);
+        ChannelSftp channelSftp = null;
+        Session session = null;
+        try {
+            session = getClient();
+            channelSftp = openSftpChannel(session);
+            channelSftp.rm(remotePath);
+            logger.info("SFTP对象删除成功, bucketName={}, objectKey={}, remotePath={}", location.getBucketOrRoot(),
+                location.getPath(), remotePath);
+        }
+        catch (SftpException e) {
+            if (e.id != ChannelSftp.SSH_FX_NO_SUCH_FILE) {
+                throw new BaseException("SFTP对象删除失败: " + remotePath, e);
+            }
+        }
+        catch (Exception e) {
+            throw new BaseException("SFTP对象删除失败: " + remotePath, e);
+        }
+        finally {
+            closeSftp(session, channelSftp);
+        }
     }
 
     /**
@@ -93,9 +225,7 @@ public class SftpStorageService extends AbstractFileIngressStorageService<Sessio
 
             session = this.getClient();
 
-            Channel channel = session.openChannel("sftp");
-            channel.connect();
-            shannelSftp = (ChannelSftp) channel;
+            shannelSftp = openSftpChannel(session);
 
             boolean useResourceRoot = fileStorageContext != null && fileStorageContext.isFtpUsePathResourceRoot()
                 && StringUtils.isNotBlank(ftpConfig.getPathResource());
@@ -210,14 +340,58 @@ public class SftpStorageService extends AbstractFileIngressStorageService<Sessio
      * @param sftp ChannelSftp
      */
     private void closeSftp(Session sshSession, ChannelSftp sftp) {
-        // 关闭session
-        if (sshSession != null && sshSession.isConnected()) {
-            sshSession.disconnect();
-        }
-        // 判断连接
         if (sftp != null && sftp.isConnected()) {
             sftp.disconnect();
         }
+        if (sshSession != null && sshSession.isConnected()) {
+            sshSession.disconnect();
+        }
+    }
+
+    private ChannelSftp openSftpChannel(Session session) throws Exception {
+        Channel channel = session.openChannel("sftp");
+        channel.connect();
+        return (ChannelSftp) channel;
+    }
+
+    private String resolveObjectPath(StorageLocation location) {
+        if (location == null || StringUtils.isBlank(location.getBucketOrRoot())) {
+            throw new IllegalArgumentException("SFTP storage location bucket cannot be empty");
+        }
+        String root = stripTrailingSlashes(ftpConfig.getPath());
+        if (StringUtils.isBlank(root)) {
+            throw new IllegalStateException("SFTP storage root is not configured");
+        }
+        String bucketName = normalizeSafeRelativePath(location.getBucketOrRoot());
+        String objectKey = normalizeSafeRelativePath(location.getPath());
+        return root + "/" + bucketName + "/" + objectKey;
+    }
+
+    private static String normalizeSafeRelativePath(String path) {
+        String normalized = StringUtils.trimToEmpty(path).replace('\\', '/');
+        while (normalized.startsWith("/")) {
+            normalized = normalized.substring(1);
+        }
+        while (normalized.endsWith("/")) {
+            normalized = normalized.substring(0, normalized.length() - 1);
+        }
+        if (StringUtils.isBlank(normalized)) {
+            throw new IllegalArgumentException("SFTP storage path cannot be empty");
+        }
+        for (String segment : normalized.split("/")) {
+            if (StringUtils.isBlank(segment) || ".".equals(segment) || "..".equals(segment)) {
+                throw new IllegalArgumentException("SFTP storage path contains invalid segment");
+            }
+        }
+        return normalized;
+    }
+
+    private static String parentDirectory(String path) {
+        int index = path.lastIndexOf('/');
+        if (index <= 0) {
+            throw new IllegalArgumentException("SFTP target path must contain a parent directory");
+        }
+        return path.substring(0, index);
     }
 
     /**
@@ -282,6 +456,183 @@ public class SftpStorageService extends AbstractFileIngressStorageService<Sessio
     @Override
     protected boolean doCreateBucket(String bucketName) {
         return true;
+    }
+
+    /**
+     * Build full SFTP absolute path from base, bucket subdirectory, and file path.
+     * Normalizes slashes and removes duplicate slashes.
+     */
+    private String buildFullSftpPath(String ftpBasePath, String bucketSubdir, String filePath) {
+        StringBuilder sb = new StringBuilder();
+
+        // Start with base path (should be absolute, e.g., /data/nfs/byclaw-storage)
+        String base = stripTrailingSlashes(ftpBasePath);
+        if (!base.startsWith("/")) {
+            base = "/" + base;
+        }
+        sb.append(base);
+
+        // Add bucket subdirectory if present
+        String bucket = normalizeRelativeSubdir(bucketSubdir);
+        if (!bucket.isEmpty()) {
+            sb.append("/").append(bucket);
+        }
+
+        // Add file path
+        String file = normalizeRelativeSubdir(filePath);
+        if (!file.isEmpty()) {
+            sb.append("/").append(file);
+        }
+
+        return sb.toString();
+    }
+
+    /**
+     * List objects with the given prefix.
+     *
+     * @param prefix StoragePrefix containing bucketOrRoot, prefix path, and recursive flag
+     * @param maxDepth Maximum depth for recursive listing (null = unlimited)
+     * @return List of StorageObject entries
+     */
+    @Override
+    public java.util.List<com.iwhalecloud.byai.common.storage.model.StorageObject> list(
+        com.iwhalecloud.byai.common.storage.model.StoragePrefix prefix,
+        Integer maxDepth) {
+
+        java.util.List<com.iwhalecloud.byai.common.storage.model.StorageObject> result = new java.util.ArrayList<>();
+        ChannelSftp channelSftp = null;
+        Session session = null;
+
+        try {
+            session = this.getClient();
+            Channel channel = session.openChannel("sftp");
+            channel.connect();
+            channelSftp = (ChannelSftp) channel;
+
+            String bucketOrRoot = prefix.getBucketOrRoot();
+            String prefixPath = prefix.getPrefix();
+            boolean recursive = prefix.isRecursive();
+
+            // Build full SFTP path
+            String ftpBasePath = StringUtils.defaultIfBlank(ftpConfig.getPath(), "/");
+            String fullPath = buildFullSftpPath(ftpBasePath, bucketOrRoot, prefixPath);
+
+            // Check if directory exists
+            try {
+                channelSftp.stat(fullPath);
+            } catch (SftpException e) {
+                if (e.id == ChannelSftp.SSH_FX_NO_SUCH_FILE) {
+                    // Directory doesn't exist, return empty list
+                    logger.debug("SFTP directory does not exist: {}", fullPath);
+                    return result;
+                }
+                throw e;
+            }
+
+            // List files
+            if (recursive) {
+                listRecursive(channelSftp, fullPath, bucketOrRoot, prefixPath, result, 0,
+                    maxDepth != null ? maxDepth : Integer.MAX_VALUE);
+            } else {
+                listNonRecursive(channelSftp, fullPath, bucketOrRoot, prefixPath, result);
+            }
+
+            logger.info("SFTP list success: {} objects found at {}", result.size(), fullPath);
+            return result;
+        }
+        catch (Exception e) {
+            logger.error("SFTP列举对象失败: {}", prefix.getPrefix(), e);
+            throw new BaseException(e.getMessage(), e);
+        }
+        finally {
+            this.closeSftp(session, channelSftp);
+        }
+    }
+
+    /**
+     * Non-recursive listing of current directory.
+     */
+    private void listNonRecursive(ChannelSftp sftp, String currentPath, String bucketOrRoot,
+                                   String prefixPath, java.util.List<com.iwhalecloud.byai.common.storage.model.StorageObject> result)
+        throws SftpException {
+
+        @SuppressWarnings("unchecked")
+        java.util.Vector<ChannelSftp.LsEntry> entries = sftp.ls(currentPath);
+        if (entries == null) {
+            return;
+        }
+
+        for (ChannelSftp.LsEntry entry : entries) {
+            String fileName = entry.getFilename();
+            if (".".equals(fileName) || "..".equals(fileName)) {
+                continue;
+            }
+
+            // Build relative path from prefix (strip trailing slash to avoid double-slash)
+            String base = org.apache.commons.lang3.StringUtils.stripEnd(prefixPath, "/");
+            String relativePath = StringUtils.isNotBlank(base)
+                ? base + "/" + fileName
+                : fileName;
+
+            com.iwhalecloud.byai.common.storage.model.StorageObject obj =
+                com.iwhalecloud.byai.common.storage.model.StorageObject.builder()
+                    .bucketOrRoot(bucketOrRoot)
+                    .path(relativePath)
+                    .size(entry.getAttrs().getSize())
+                    .isDir(entry.getAttrs().isDir())
+                    .lastModified(String.valueOf(entry.getAttrs().getMTime()))
+                    .build();
+
+            result.add(obj);
+        }
+    }
+
+    /**
+     * Recursive directory listing with depth control.
+     */
+    private void listRecursive(ChannelSftp sftp, String currentPath, String bucketOrRoot,
+                               String prefixPath, java.util.List<com.iwhalecloud.byai.common.storage.model.StorageObject> result,
+                               int currentDepth, int maxDepth) throws SftpException {
+
+        if (currentDepth >= maxDepth) {
+            return;
+        }
+
+        @SuppressWarnings("unchecked")
+        java.util.Vector<ChannelSftp.LsEntry> entries = sftp.ls(currentPath);
+        if (entries == null) {
+            return;
+        }
+
+        for (ChannelSftp.LsEntry entry : entries) {
+            String fileName = entry.getFilename();
+            if (".".equals(fileName) || "..".equals(fileName)) {
+                continue;
+            }
+
+            // Build relative path from prefix (strip trailing slash to avoid double-slash)
+            String base = org.apache.commons.lang3.StringUtils.stripEnd(prefixPath, "/");
+            String relativePath = StringUtils.isNotBlank(base)
+                ? base + "/" + fileName
+                : fileName;
+
+            com.iwhalecloud.byai.common.storage.model.StorageObject obj =
+                com.iwhalecloud.byai.common.storage.model.StorageObject.builder()
+                    .bucketOrRoot(bucketOrRoot)
+                    .path(relativePath)
+                    .size(entry.getAttrs().getSize())
+                    .isDir(entry.getAttrs().isDir())
+                    .lastModified(String.valueOf(entry.getAttrs().getMTime()))
+                    .build();
+
+            result.add(obj);
+
+            // Recurse into subdirectories
+            if (entry.getAttrs().isDir()) {
+                String subPath = currentPath + "/" + fileName;
+                listRecursive(sftp, subPath, bucketOrRoot, relativePath, result, currentDepth + 1, maxDepth);
+            }
+        }
     }
 
 }

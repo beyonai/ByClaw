@@ -1,7 +1,7 @@
 // tslint:disable:ordered-imports
 import React, { useEffect, useMemo, useReducer, useState } from 'react';
 // @ts-ignore
-import { useDispatch, useIntl, useSelector, getLocale, useNavigate, useSearchParams } from '@umijs/max';
+import { useDispatch, useIntl, useSelector, useNavigate, useSearchParams } from '@umijs/max';
 import { Spin, Tabs, message } from 'antd';
 import classnames from 'classnames';
 import { compact, head, isEmpty, size } from 'lodash';
@@ -20,7 +20,7 @@ import ResourceCard from '@/components/Resources/components/ResourceCard';
 import { IAgentCache, IAgent } from '@/typescript/agent';
 import styles from './index.module.less';
 import useGlobal from '@/hooks/useGlobal';
-import { canJumpAgent, getAgentChatAvatar, getAgentPath } from '@/utils/agent';
+import { getAgentChatAvatar, getAgentPath } from '@/utils/agent';
 import useTracker from '@/hooks/useTracker';
 import AuthListDrawer from '@/pages/manager/components/AuthListDrawer';
 import UseApplyAuditDrawer from '@/pages/manager/components/UseApplyAuditDrawer';
@@ -72,7 +72,6 @@ function AllDigitalEmployees(
 ) {
   const { searchName, dropdownParam, buildFilterParam } = props;
 
-  const local = getLocale();
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const intl = useIntl();
@@ -100,12 +99,8 @@ function AllDigitalEmployees(
 
   const hasMore = paginationInfo.total > size(list);
 
-  const isEN = React.useMemo(() => {
-    return local.includes('en');
-  }, [local]);
-  const defaultBannerUrl = getRuntimeActualUrl(isEN ? '/beyond/market-en.png' : '/beyond/market.png');
   const customBannerUrl = getBannerUrl(bannerList, [intl.formatMessage({ id: 'digitalEmployees.title' }), '数字员工']);
-  const bannerUrl = customBannerUrl ? getRuntimeActualUrl(customBannerUrl) : defaultBannerUrl;
+  const bannerUrl = customBannerUrl ? getRuntimeActualUrl(customBannerUrl) : '';
 
   useEffect(() => {
     getDcSystemConfig({ paramCode: 'BYAI_BANNER' })
@@ -316,10 +311,26 @@ function AllDigitalEmployees(
     };
   }, [EventEmitter, curActiveLink, dropdownParam, getSearch, searchName]);
 
+  const showNoUsePermissionWarning = React.useCallback(() => {
+    message.destroy();
+    message.warning(intl.formatMessage({ id: 'digitalEmployees.noUsePermissionApplyFirst' }));
+  }, [intl]);
+
   const onClickEmployee = React.useCallback(
     (employee: IAgentCache) => {
-      if (employee.agentId && canJumpAgent(employee)) {
+      if (employee.canApplyUse) {
+        showNoUsePermissionWarning();
+        return;
+      }
+
+      if (employee.agentId) {
         trackerEmployeeClick(employee, 'marketAgentRedirect');
+        dispatch({
+          type: 'employees/updateEmployee',
+          payload: {
+            employee,
+          },
+        });
         setAgentId?.(`${employee.agentId}`);
         setSessionId?.('');
         const nextSearchParams = new URLSearchParams({
@@ -333,7 +344,16 @@ function AllDigitalEmployees(
       message.destroy();
       message.error(intl.formatMessage({ id: 'digitalEmployees.noPermission' }));
     },
-    [curActiveLink, intl, navigate, setAgentId, setSessionId, trackerEmployeeClick]
+    [
+      curActiveLink,
+      dispatch,
+      intl,
+      navigate,
+      setAgentId,
+      setSessionId,
+      showNoUsePermissionWarning,
+      trackerEmployeeClick,
+    ]
   );
 
   const onEditEmployee = React.useCallback(
@@ -408,7 +428,11 @@ function AllDigitalEmployees(
 
   return (
     <div className="full-width full-height ub ub-ver">
-      <div className="mb-16">{bannerLoaded && <img className={styles.marketBg} src={bannerUrl} alt="poster" />}</div>
+      {bannerLoaded && bannerUrl && (
+        <div className="mb-16">
+          <img className={styles.marketBg} src={bannerUrl} alt="poster" />
+        </div>
+      )}
       <div
         id="guideStep2-5"
         className={classnames('ub ub-ac gap8', styles.body)}
@@ -484,7 +508,9 @@ function AllDigitalEmployees(
                         avatarNode={
                           <div className={styles.employeeAvatar}>{getAgentChatAvatar(employee.chatAvatar)}</div>
                         }
-                        onCardClick={() => onClickEmployee(employee)}
+                        onCardClick={(resource) => onClickEmployee((resource as IAgentCache) || employee)}
+                        cardClickDisabled={(resource) => !!resource.canApplyUse}
+                        onCardClickDisabled={showNoUsePermissionWarning}
                         actionConfig={{
                           scene: 'enterprise',
                           onEdit: () => onEditEmployee(employee),

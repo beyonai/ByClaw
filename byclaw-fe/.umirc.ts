@@ -4,6 +4,7 @@ import path from 'path';
 import routes from './config/route.config';
 import getUmiConfig from './config/getUmiConfig';
 import { loadMonorepoEnvForUmi } from './config/loadMonorepoEnvForUmi';
+import { buildFileRemoteProxy } from './config/buildFileRemoteProxy';
 
 const getArgvOptions = require('./config/getArgvOptions');
 const argvOptions = getArgvOptions();
@@ -78,6 +79,9 @@ export default defineConfig({
       changeOrigin: true,
       ws: true,
     },
+    // file 存储 + 本地 BE 时，读远程文件/文件夹的接口单独转发到远程后端（有 NFS）。
+    // 必须放在通配的 byaiService 规则之前，否则会被它先吃掉、走本地空目录。
+    ...buildFileRemoteProxy(routerBase),
     [`${routerBase}byaiService`]: {
       target,
       changeOrigin: true,

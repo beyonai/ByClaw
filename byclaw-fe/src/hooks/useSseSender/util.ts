@@ -124,6 +124,34 @@ const approvalFormHandler = (sseDataObj: any) => {
   };
 };
 
+const askUserQuestionsHandler = (sseDataObj: any) => {
+  const sourceAgentType = get(sseDataObj, 'agentId');
+  const metadata = get(sseDataObj, 'metadata');
+
+  const content = get(sseDataObj, 'choices.0.delta.content', '');
+
+  let resp: Record<string, any> = {};
+
+  try {
+    resp = JSON.parse(content) || {};
+  } catch (e) {
+    console.error(e, content);
+  }
+
+  return {
+    message: {
+      contentType: SSEMessageType.askUserQuestions,
+      content: {
+        sourceAgentType,
+        metadata,
+        ...omit(resp, ['questions']),
+        substance: resp,
+      },
+      status: SSEEventStatus.done,
+    },
+  };
+};
+
 const botHandler = (sseDataObj: any) => {
   const contentType = get(sseDataObj, 'contentType');
   const stepId = get(sseDataObj, 'stepId');
@@ -240,6 +268,7 @@ const sseTypeHandlerMap = new Map<string, (sseDataObj: any, msgEvent?: string) =
   [`${SSEMessageType.approvalForm}`, approvalFormHandler],
   [`${SSEMessageType.botCard}`, botHandler],
   [`${SSEMessageType.thinkTaskUserInput}`, thinkTaskUserInputHandler],
+  [`${SSEMessageType.askUserQuestions}`, askUserQuestionsHandler],
   [`${SSEMessageType.application}`, thinkTaskUserInputHandler],
   [`${SSEMessageType.slientHandler}`, thinkTaskUserInputHandler],
   [`${SSEMessageType.thinkRewriteQuestion}`, thinkRewriteQuestionHandler],
@@ -252,6 +281,7 @@ const isResumeContentType = (contentType: SSEMessageType) => {
     SSEMessageType.approvalForm,
     SSEMessageType.thinkRewriteQuestion,
     SSEMessageType.thinkTaskUserInput,
+    SSEMessageType.askUserQuestions,
   ];
   return contentType && resumeContentTypes.some((item) => `${item}` === `${contentType}`);
 };

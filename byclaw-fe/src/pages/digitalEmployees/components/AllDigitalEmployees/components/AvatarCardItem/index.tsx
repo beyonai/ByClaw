@@ -2,7 +2,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 // @ts-ignore
-import { useIntl, useNavigate } from '@umijs/max';
+import { useDispatch, useIntl, useNavigate } from '@umijs/max';
 import { Skeleton, Typography, message } from 'antd';
 import classnames from 'classnames';
 import { debounce, noop } from 'lodash';
@@ -45,6 +45,7 @@ const RenderContent = (props: IProps) => {
   const { employee, disableActionList, allowDelete } = props;
 
   const navigate = useNavigate();
+  const dispatch = useDispatch();
   const intl = useIntl();
 
   const { trackerEmployeeClick } = useTracker();
@@ -58,6 +59,12 @@ const RenderContent = (props: IProps) => {
     (employee: IAgentCache) => {
       if (employee.agentId && canJumpAgent(employee)) {
         trackerEmployeeClick(employee, 'marketAgentRedirect');
+        dispatch({
+          type: 'employees/updateEmployee',
+          payload: {
+            employee,
+          },
+        });
 
         setAgentId?.(`${employee.agentId}`);
         setSessionId?.('');
@@ -67,7 +74,7 @@ const RenderContent = (props: IProps) => {
         message.error(intl.formatMessage({ id: 'digitalEmployees.noPermission' }));
       }
     },
-    [setAgentId, setSessionId]
+    [dispatch, intl, navigate, setAgentId, setSessionId, trackerEmployeeClick]
   );
 
   return (

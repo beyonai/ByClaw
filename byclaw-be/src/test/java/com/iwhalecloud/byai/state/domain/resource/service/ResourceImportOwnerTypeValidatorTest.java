@@ -61,6 +61,14 @@ class ResourceImportOwnerTypeValidatorTest {
             .hasMessage("已有相同编码（R001）的存量资源是在企业的知识下，请到企业的知识下导入或修改");
     }
 
+    @Test
+    void validate_allowsDifferentOwnerTypeForWhaleAgentImport() {
+        SsResource existing = buildResource(OwnerType.ENTERPRISE, ResourceBizType.KG_DOC.getCode());
+
+        assertThatCode(() -> ResourceImportOwnerTypeValidator.validate(existing, OwnerType.PERSONAL, "R001",
+            "导入知识", ResourceBizType.KG_DOC.getCode(), "WHALE_AGENT")).doesNotThrowAnyException();
+    }
+
     private SsResource buildResource(String ownerType, String resourceBizType) {
         SsResource resource = new SsResource();
         resource.setResourceCode("R001");

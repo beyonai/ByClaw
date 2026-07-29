@@ -314,6 +314,63 @@ describe("adaptAgentJson", () => {
         ]);
     });
 
+    it("extracts path-based inner skills without treating resourceCode as an OpenClaw skill", () => {
+        const raw = {
+            resourceId: "10026039",
+            resourceName: "Extra Skill Demo",
+            relSkills: [
+                { skillCode: "dws", skillType: "inner" },
+                {
+                    resourceId: 123,
+                    skillCode: "resource-code-not-filter-name",
+                    skillType: "inner",
+                    targetContent: JSON.stringify({
+                        skillPath: "/.openclaw/workspace-baiying-agent-10026039/skills/uploaded-folder",
+                        skillDocObjectKey:
+                            "/.openclaw/workspace-baiying-agent-10026039/skills/uploaded-folder/SKILL.md",
+                    }),
+                },
+            ],
+            extraSkills: [
+                {
+                    skillPath: "/.openclaw/workspace-baiying-agent-10026039/skills/second-extra",
+                },
+            ],
+        };
+        const res = adaptAgentJson({
+            raw,
+            fileName: "DIG_EMPLOYEE_10026039.json",
+            embedApiKeysFromJson: false,
+        });
+        expect("error" in res).toBe(false);
+        if ("error" in res) {
+            return;
+        }
+        expect(res.listEntry.skills).toEqual(["dws"]);
+        expect(res.extraSkillPaths).toEqual([
+            "/.openclaw/workspace-baiying-agent-10026039/skills/uploaded-folder",
+            "/.openclaw/workspace-baiying-agent-10026039/skills/second-extra",
+        ]);
+    });
+
+    it("accepts JSON-string skills and relSkills snapshots", () => {
+        const res = adaptAgentJson({
+            raw: {
+                resourceId: "10026041",
+                resourceName: "String Skill Snapshot",
+                relSkills: JSON.stringify([{ skillCode: "json-rel", skillType: "inner" }]),
+                skills: JSON.stringify(["legacy-json"]),
+            },
+            fileName: "DIG_EMPLOYEE_10026041.json",
+            embedApiKeysFromJson: false,
+        });
+        expect("error" in res).toBe(false);
+        if ("error" in res) {
+            return;
+        }
+        expect(res.listEntry.skills).toEqual(["json-rel"]);
+    });
+
     it("falls back to legacy skills when relSkills has no usable skill codes", () => {
         const raw = {
             resourceId: "10026040",
@@ -351,7 +408,7 @@ describe("adaptAgentJson", () => {
             return;
         }
         expect(res.listEntry.tools).toEqual({
-            allow: ["*", "read", "write", "baiying_call"],
+            allow: ["*", "read", "write", "baiying_call", "byclaw_chat_context"],
         });
         expect(res.listEntry.experimental).toEqual({ localModelLean: false });
     });
@@ -372,7 +429,7 @@ describe("adaptAgentJson", () => {
             return;
         }
         expect(res.listEntry.tools).toEqual({
-            alsoAllow: ["baiying_call", "code_to_wiki"],
+            alsoAllow: ["baiying_call", "byclaw_chat_context", "code_to_wiki"],
         });
     });
 
@@ -393,7 +450,7 @@ describe("adaptAgentJson", () => {
             return;
         }
         expect(res.listEntry.tools).toEqual({
-            allow: ["read", "baiying_call", "code_to_wiki"],
+            allow: ["read", "baiying_call", "byclaw_chat_context", "code_to_wiki"],
         });
     });
 

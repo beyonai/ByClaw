@@ -66,8 +66,8 @@ const DROPPED_OTEL_ATTRIBUTE_KEYS = new Set([
   "openclaw.trace_id",
 ]);
 const LOW_CARDINALITY_VALUE_RE = /^[A-Za-z0-9_.:-]{1,120}$/u;
-const MAX_OTEL_CONTENT_ATTRIBUTE_CHARS = 16 * 1024;
-const MAX_OTEL_CONTENT_ARRAY_ITEMS = 50;
+const DEFAULT_OTEL_CONTENT_ATTRIBUTE_CHARS = 128 * 1024;
+const DEFAULT_OTEL_CONTENT_ARRAY_ITEMS = 200;
 const MAX_OTEL_LOG_BODY_CHARS = 4 * 1024;
 const MAX_OTEL_LOG_ATTRIBUTE_COUNT = 64;
 const MAX_OTEL_LOG_ATTRIBUTE_VALUE_CHARS = 4 * 1024;
@@ -111,6 +111,27 @@ export type DiagnosticsOtelForcedContentCapture = {
   toolDefinitions?: boolean;
 };
 
+export type DiagnosticsOtelContentLimitsConfig = {
+  maxAttributeChars?: unknown;
+  maxArrayItems?: unknown;
+};
+
+/**
+ * Which diagnostic events should build the outer `openclaw.message.inbound`
+ * SERVER span (and be treated as "inbound-owning" by dispatch handlers).
+ *
+ * Accepts either a bare channel-id array (sources default to
+ * `byai-channel-sdk`) or a `{ channels, sources }` object. Omitting the option
+ * keeps the historical BYAI-only behavior:
+ *   channels = ["byai-channel"], sources = ["byai-channel-sdk"].
+ */
+export type DiagnosticsOtelInboundChannelConfig =
+  | ReadonlyArray<string>
+  | {
+      channels?: ReadonlyArray<string>;
+      sources?: ReadonlyArray<string>;
+    };
+
 export type DiagnosticsOtelServiceOptions = {
   id?: string;
   exporterName?: string;
@@ -120,7 +141,10 @@ export type DiagnosticsOtelServiceOptions = {
   /** Env var for default Langfuse user id when events omit userId (default: USER_CODE). */
   langfuseUserIdEnvVar?: string;
   forceContentCapture?: DiagnosticsOtelForcedContentCapture;
+  contentLimits?: DiagnosticsOtelContentLimitsConfig;
   assignToolContentIoAttributes?: boolean;
+  /** Channels/sources that should build the outer message.inbound SERVER span. */
+  inboundChannels?: DiagnosticsOtelInboundChannelConfig;
 };
 
 type LangfuseUserContext = {
@@ -133,6 +157,11 @@ type OtelModelCallContent = {
   outputMessages?: unknown;
   systemPrompt?: string;
   toolDefinitions?: unknown;
+};
+
+type OtelContentLimits = {
+  maxAttributeChars: number;
+  maxArrayItems: number;
 };
 
 type MessageDeliveryDiagnosticEvent = Extract<
@@ -791,6 +820,46 @@ function normalizeOtelLogString(value: string, maxChars: number): string {
   return clampOtelLogText(redactSensitiveText(value), maxChars);
 }
 
+function readPositiveInteger(value: unknown, fallback: number): number {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+    return Math.trunc(value);
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return Math.trunc(parsed);
+    }
+  }
+  return fallback;
+}
+
+function readRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function resolveOtelContentLimits(
+  otel: unknown,
+  fallbackLimits?: DiagnosticsOtelContentLimitsConfig,
+): OtelContentLimits {
+  const config = readRecord(otel);
+  const limits = {
+    ...readRecord(fallbackLimits),
+    ...readRecord(config?.contentLimits),
+  };
+  return {
+    maxAttributeChars: readPositiveInteger(
+      limits?.maxAttributeChars ?? config?.maxContentAttributeChars,
+      DEFAULT_OTEL_CONTENT_ATTRIBUTE_CHARS,
+    ),
+    maxArrayItems: readPositiveInteger(
+      limits?.maxArrayItems ?? config?.maxContentArrayItems,
+      DEFAULT_OTEL_CONTENT_ARRAY_ITEMS,
+    ),
+  };
+}
+
 function resolveContentCapturePolicy(value: unknown): OtelContentCapturePolicy {
   if (value === true) {
     return {
@@ -844,22 +913,22 @@ function hasPreloadedOtelSdk(): boolean {
   return process.env[PRELOADED_OTEL_SDK_ENV] === "1";
 }
 
-function normalizeOtelContentValue(value: unknown): string | undefined {
+function normalizeOtelContentValue(value: unknown, limits: OtelContentLimits): string | undefined {
   if (typeof value === "string") {
-    return normalizeOtelLogString(value, MAX_OTEL_CONTENT_ATTRIBUTE_CHARS);
+    return normalizeOtelLogString(value, limits.maxAttributeChars);
   }
   if (Array.isArray(value)) {
     const items: string[] = [];
-    for (const item of value.slice(0, MAX_OTEL_CONTENT_ARRAY_ITEMS)) {
+    for (const item of value.slice(0, limits.maxArrayItems)) {
       if (typeof item === "string") {
         items.push(item);
       }
     }
     if (items.length > 0) {
-      return normalizeOtelLogString(items.join("\n"), MAX_OTEL_CONTENT_ATTRIBUTE_CHARS);
+      return normalizeOtelLogString(items.join("\n"), limits.maxAttributeChars);
     }
   }
-  const json = safeJsonString(value, MAX_OTEL_CONTENT_ATTRIBUTE_CHARS);
+  const json = safeJsonString(value, limits);
   if (json) {
     return json;
   }
@@ -868,15 +937,7 @@ function normalizeOtelContentValue(value: unknown): string | undefined {
 
 const TRUNCATED_JSON_TEXT_SUFFIX = "...(truncated)";
 const JSON_TRUNCATION_STRING_BUDGETS = [8192, 4096, 2048, 1024, 512, 256, 128, 64, 32] as const;
-const JSON_TRUNCATION_ARRAY_ITEM_BUDGETS = [
-  MAX_OTEL_CONTENT_ARRAY_ITEMS,
-  100,
-  50,
-  25,
-  10,
-  5,
-  1,
-] as const;
+const JSON_TRUNCATION_ARRAY_ITEM_BUDGETS = [100, 50, 25, 10, 5, 1] as const;
 const JSON_TRUNCATION_MAX_OBJECT_FIELDS = 64;
 const JSON_TRUNCATION_MAX_DEPTH = 8;
 
@@ -888,15 +949,30 @@ type JsonTruncationOptions = {
   seen: WeakSet<object>;
 };
 
-function safeJsonString(value: unknown, maxChars: number): string | undefined {
+function jsonTruncationArrayItemBudgets(maxArrayItems: number): number[] {
+  const budgets = [maxArrayItems, ...JSON_TRUNCATION_ARRAY_ITEM_BUDGETS].filter(
+    (item) => item > 0 && item <= maxArrayItems,
+  );
+  return [...new Set(budgets)];
+}
+
+function safeJsonString(value: unknown, limits: OtelContentLimits): string | undefined {
   if (value === undefined || typeof value === "function" || typeof value === "symbol") {
     return undefined;
   }
   const exact = stringifyJsonForOtelAttribute(value);
-  if (exact && exact.length <= maxChars) {
-    return exact;
+  const structurallyBounded = truncateJsonValueForOtelAttribute(value, {
+    maxArrayItems: limits.maxArrayItems,
+    maxDepth: JSON_TRUNCATION_MAX_DEPTH,
+    maxObjectFields: JSON_TRUNCATION_MAX_OBJECT_FIELDS,
+    maxStringChars: limits.maxAttributeChars,
+    seen: new WeakSet<object>(),
+  });
+  const structurallyBoundedJson = stringifyJsonForOtelAttribute(structurallyBounded);
+  if (structurallyBoundedJson && structurallyBoundedJson.length <= limits.maxAttributeChars) {
+    return structurallyBoundedJson;
   }
-  for (const maxArrayItems of JSON_TRUNCATION_ARRAY_ITEM_BUDGETS) {
+  for (const maxArrayItems of jsonTruncationArrayItemBudgets(limits.maxArrayItems)) {
     for (const maxStringChars of JSON_TRUNCATION_STRING_BUDGETS) {
       const candidate = truncateJsonValueForOtelAttribute(value, {
         maxArrayItems,
@@ -906,7 +982,7 @@ function safeJsonString(value: unknown, maxChars: number): string | undefined {
         seen: new WeakSet<object>(),
       });
       const json = stringifyJsonForOtelAttribute(candidate);
-      if (json && json.length <= maxChars) {
+      if (json && json.length <= limits.maxAttributeChars) {
         return json;
       }
     }
@@ -916,7 +992,7 @@ function safeJsonString(value: unknown, maxChars: number): string | undefined {
     reason: exact ? "max_attribute_size" : "unserializable_value",
     type: describeJsonValue(value),
   });
-  return summary && summary.length <= maxChars ? summary : undefined;
+  return summary && summary.length <= limits.maxAttributeChars ? summary : undefined;
 }
 
 function stringifyJsonForOtelAttribute(value: unknown): string | undefined {
@@ -1040,7 +1116,7 @@ function toolCallResponsePart(part: Record<string, unknown>): Record<string, unk
   };
 }
 
-function contentParts(value: unknown): Record<string, unknown>[] {
+function contentParts(value: unknown, limits: OtelContentLimits): Record<string, unknown>[] {
   if (typeof value === "string") {
     return value.length > 0 ? [textPart(value)] : [];
   }
@@ -1051,7 +1127,7 @@ function contentParts(value: unknown): Record<string, unknown>[] {
     if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
       return [textPart(String(value))];
     }
-    const json = safeJsonString(value, MAX_OTEL_CONTENT_ATTRIBUTE_CHARS);
+    const json = safeJsonString(value, limits);
     return json ? [textPart(json)] : [];
   }
   const parts: Record<string, unknown>[] = [];
@@ -1086,7 +1162,7 @@ function contentParts(value: unknown): Record<string, unknown>[] {
         ...(part.arguments !== undefined ? { arguments: part.arguments } : {}),
       });
     } else if (part.type === "tool_call_response") {
-      parts.push(toolCallResponsePart(part));
+        parts.push(toolCallResponsePart(part));
     } else if (part.type === "image") {
       const data = typeof part.data === "string" ? part.data : undefined;
       parts.push({
@@ -1103,6 +1179,7 @@ function contentParts(value: unknown): Record<string, unknown>[] {
 
 function normalizeGenAiMessage(
   value: unknown,
+  limits: OtelContentLimits,
   fallbackRole = "user",
 ): Record<string, unknown> | undefined {
   if (typeof value === "string") {
@@ -1115,7 +1192,7 @@ function normalizeGenAiMessage(
   const role = rawRole === "toolResult" ? "tool" : rawRole;
   let parts: Record<string, unknown>[];
   if (role === "tool") {
-    const explicitParts = contentParts(value.parts);
+    const explicitParts = contentParts(value.parts, limits);
     parts =
       explicitParts.length > 0
         ? explicitParts
@@ -1126,7 +1203,7 @@ function normalizeGenAiMessage(
             }),
           ];
   } else {
-    parts = contentParts(value.parts ?? value.content);
+    parts = contentParts(value.parts ?? value.content, limits);
   }
   if (parts.length === 0) {
     return undefined;
@@ -1140,11 +1217,15 @@ function normalizeGenAiMessage(
   };
 }
 
-function normalizeGenAiMessages(value: unknown, fallbackRole: "user" | "assistant") {
+function normalizeGenAiMessages(
+  value: unknown,
+  fallbackRole: "user" | "assistant",
+  limits: OtelContentLimits,
+) {
   const source = Array.isArray(value) ? value : value === undefined ? [] : [value];
   const messages: Record<string, unknown>[] = [];
-  for (const item of source.slice(0, MAX_OTEL_CONTENT_ARRAY_ITEMS)) {
-    const message = normalizeGenAiMessage(item, fallbackRole);
+  for (const item of source.slice(0, limits.maxArrayItems)) {
+    const message = normalizeGenAiMessage(item, limits, fallbackRole);
     if (message) {
       messages.push(message);
     }
@@ -1164,12 +1245,12 @@ function normalizeGenAiToolDefinition(value: unknown): Record<string, unknown> |
   };
 }
 
-function normalizeGenAiToolDefinitions(value: unknown) {
+function normalizeGenAiToolDefinitions(value: unknown, limits: OtelContentLimits) {
   if (!Array.isArray(value)) {
     return [];
   }
   const definitions: Record<string, unknown>[] = [];
-  for (const item of value.slice(0, MAX_OTEL_CONTENT_ARRAY_ITEMS)) {
+  for (const item of value.slice(0, limits.maxArrayItems)) {
     const definition = normalizeGenAiToolDefinition(item);
     if (definition) {
       definitions.push(definition);
@@ -1182,8 +1263,9 @@ function assignJsonAttribute(
   attributes: Record<string, string | number | boolean>,
   key: string,
   value: unknown,
+  limits: OtelContentLimits,
 ): void {
-  const json = safeJsonString(value, MAX_OTEL_CONTENT_ATTRIBUTE_CHARS);
+  const json = safeJsonString(value, limits);
   if (json) {
     attributes[key] = json;
   }
@@ -1193,30 +1275,31 @@ function assignGenAiModelContentAttributes(
   attributes: Record<string, string | number | boolean>,
   content: OtelModelCallContent | undefined,
   policy: OtelContentCapturePolicy,
+  limits: OtelContentLimits,
 ): void {
   if (policy.systemPrompt && typeof content?.systemPrompt === "string") {
     const systemInstructions = [textPart(content.systemPrompt)];
-    assignJsonAttribute(attributes, ATTR_GEN_AI_SYSTEM_INSTRUCTIONS, systemInstructions);
+    assignJsonAttribute(attributes, ATTR_GEN_AI_SYSTEM_INSTRUCTIONS, systemInstructions, limits);
   }
   if (policy.inputMessages) {
-    const inputMessages = normalizeGenAiMessages(content?.inputMessages, "user");
+    const inputMessages = normalizeGenAiMessages(content?.inputMessages, "user", limits);
     if (inputMessages.length > 0) {
-      assignJsonAttribute(attributes, ATTR_GEN_AI_INPUT_MESSAGES, inputMessages);
-      assignJsonAttribute(attributes, "input.value", inputMessages);
+      assignJsonAttribute(attributes, ATTR_GEN_AI_INPUT_MESSAGES, inputMessages, limits);
+      assignJsonAttribute(attributes, "input.value", inputMessages, limits);
       attributes["input.mime_type"] = "application/json";
     }
   }
   if (policy.toolDefinitions) {
-    const toolDefinitions = normalizeGenAiToolDefinitions(content?.toolDefinitions);
+    const toolDefinitions = normalizeGenAiToolDefinitions(content?.toolDefinitions, limits);
     if (toolDefinitions.length > 0) {
-      assignJsonAttribute(attributes, ATTR_GEN_AI_TOOL_DEFINITIONS, toolDefinitions);
+      assignJsonAttribute(attributes, ATTR_GEN_AI_TOOL_DEFINITIONS, toolDefinitions, limits);
     }
   }
   if (policy.outputMessages) {
-    const outputMessages = normalizeGenAiMessages(content?.outputMessages, "assistant");
+    const outputMessages = normalizeGenAiMessages(content?.outputMessages, "assistant", limits);
     if (outputMessages.length > 0) {
-      assignJsonAttribute(attributes, ATTR_GEN_AI_OUTPUT_MESSAGES, outputMessages);
-      assignJsonAttribute(attributes, "output.value", outputMessages);
+      assignJsonAttribute(attributes, ATTR_GEN_AI_OUTPUT_MESSAGES, outputMessages, limits);
+      assignJsonAttribute(attributes, "output.value", outputMessages, limits);
       attributes["output.mime_type"] = "application/json";
     }
   }
@@ -1226,8 +1309,9 @@ function assignOtelContentAttribute(
   attributes: Record<string, string | number | boolean>,
   key: string,
   value: unknown,
+  limits: OtelContentLimits,
 ): boolean {
-  const normalized = normalizeOtelContentValue(value);
+  const normalized = normalizeOtelContentValue(value, limits);
   if (normalized) {
     attributes[key] = normalized;
     return true;
@@ -1239,13 +1323,15 @@ function assignOtelModelContentAttributes(
   attributes: Record<string, string | number | boolean>,
   content: OtelModelCallContent | undefined,
   policy: OtelContentCapturePolicy,
+  limits: OtelContentLimits,
 ): void {
-  assignGenAiModelContentAttributes(attributes, content, policy);
+  assignGenAiModelContentAttributes(attributes, content, policy, limits);
   if (policy.inputMessages) {
     assignOtelContentAttribute(
       attributes,
       "openclaw.content.input_messages",
       content?.inputMessages,
+      limits,
     );
   }
   if (policy.toolDefinitions) {
@@ -1253,6 +1339,7 @@ function assignOtelModelContentAttributes(
       attributes,
       "openclaw.content.tool_definitions",
       content?.toolDefinitions,
+      limits,
     );
   }
   if (policy.outputMessages) {
@@ -1260,10 +1347,16 @@ function assignOtelModelContentAttributes(
       attributes,
       "openclaw.content.output_messages",
       content?.outputMessages,
+      limits,
     );
   }
   if (policy.systemPrompt) {
-    assignOtelContentAttribute(attributes, "openclaw.content.system_prompt", content?.systemPrompt);
+    assignOtelContentAttribute(
+      attributes,
+      "openclaw.content.system_prompt",
+      content?.systemPrompt,
+      limits,
+    );
   }
 }
 
@@ -1294,6 +1387,7 @@ function assignOtelToolContentAttributes(
   event: Record<string, unknown>,
   policy: OtelContentCapturePolicy,
   options: Pick<DiagnosticsOtelServiceOptions, "assignToolContentIoAttributes">,
+  limits: OtelContentLimits,
   privateData?: Record<string, unknown>,
 ): void {
   const toolContent = readOtelToolCallContent(event, privateData);
@@ -1302,9 +1396,10 @@ function assignOtelToolContentAttributes(
       attributes,
       "openclaw.content.tool_input",
       toolContent.toolInput,
+      limits,
     );
     if (assigned && options.assignToolContentIoAttributes) {
-      assignOtelContentAttribute(attributes, "input.value", toolContent.toolInput);
+      assignOtelContentAttribute(attributes, "input.value", toolContent.toolInput, limits);
       attributes["input.mime_type"] = "application/json";
     }
   }
@@ -1313,9 +1408,10 @@ function assignOtelToolContentAttributes(
       attributes,
       "openclaw.content.tool_output",
       toolContent.toolOutput,
+      limits,
     );
     if (assigned && options.assignToolContentIoAttributes) {
-      assignOtelContentAttribute(attributes, "output.value", toolContent.toolOutput);
+      assignOtelContentAttribute(attributes, "output.value", toolContent.toolOutput, limits);
       attributes["output.mime_type"] = "application/json";
     }
   }
@@ -1431,8 +1527,24 @@ function contextForTraceContext(traceContext: DiagnosticTraceContext | undefined
 function contextForTrustedTraceContext(
   evt: DiagnosticEventPayload,
   metadata: DiagnosticEventMetadata,
+  isConfiguredNativeChannel?: boolean,
 ) {
-  return metadata.trusted ? contextForTraceContext(evt.trace) : undefined;
+  // Allow trace context propagation for both trusted events (BYAI SDK) AND
+  // configured native channels (webchat, etc.) that are explicitly listed in
+  // the inbound allowlist. This ensures the OpenClaw-generated traceId from
+  // the diagnostic event is used, not a fresh SDK-generated one.
+  return metadata.trusted || isConfiguredNativeChannel
+    ? contextForTraceContext(evt.trace)
+    : undefined;
+}
+
+/** Wrapper that auto-detects configured native channels for trace propagation. */
+function contextForTrustedOrNativeTraceContext(
+  evt: DiagnosticEventPayload,
+  metadata: DiagnosticEventMetadata,
+  isConfiguredNativeChannelEvent: (evt: { channel?: string }) => boolean,
+) {
+  return contextForTrustedTraceContext(evt, metadata, isConfiguredNativeChannelEvent(evt));
 }
 
 function addTraceAttributes(
@@ -1464,8 +1576,60 @@ function readDiagnosticExtraNumber(evt: DiagnosticEventPayload, key: string): nu
   return nonNegativeFiniteNumber((evt as unknown as Record<string, unknown>)[key]);
 }
 
-function isByaiSdkDiagnosticEvent(evt: { channel?: string; source?: string }): boolean {
-  return evt.channel === BYAI_CHANNEL_ID || evt.source === BYAI_SDK_DIAGNOSTIC_SOURCE;
+type InboundChannelAllowlist = { channels: Set<string>; sources: Set<string> };
+
+function collectNonEmptyStrings(
+  values: ReadonlyArray<string> | undefined,
+): Set<string> | undefined {
+  if (!values) {
+    return undefined;
+  }
+  const out = new Set<string>();
+  for (const raw of values) {
+    if (typeof raw !== "string") {
+      continue;
+    }
+    const trimmed = raw.trim();
+    if (trimmed) {
+      out.add(trimmed);
+    }
+  }
+  return out;
+}
+
+/**
+ * Resolve the inbound-span allowlist. Semantics:
+ * - option omitted: BYAI-only defaults (backwards compatible).
+ * - bare string array: overrides channels only; sources fall back to the BYAI SDK default
+ *   (so opting a native channel in does not silently disable SDK-based detection).
+ * - object form: each field independently overrides; a field that is absent falls back
+ *   to the BYAI default, an explicitly empty array disables that dimension entirely.
+ */
+function resolveInboundChannelAllowlist(
+  options: Pick<DiagnosticsOtelServiceOptions, "inboundChannels">,
+): InboundChannelAllowlist {
+  const defaults: InboundChannelAllowlist = {
+    channels: new Set([BYAI_CHANNEL_ID]),
+    sources: new Set([BYAI_SDK_DIAGNOSTIC_SOURCE]),
+  };
+  const raw = options.inboundChannels;
+  if (raw === undefined) {
+    return defaults;
+  }
+  if (Array.isArray(raw)) {
+    return {
+      channels: collectNonEmptyStrings(raw) ?? defaults.channels,
+      sources: defaults.sources,
+    };
+  }
+  if (raw && typeof raw === "object") {
+    const config = raw as { channels?: ReadonlyArray<string>; sources?: ReadonlyArray<string> };
+    return {
+      channels: collectNonEmptyStrings(config.channels) ?? defaults.channels,
+      sources: collectNonEmptyStrings(config.sources) ?? defaults.sources,
+    };
+  }
+  return defaults;
 }
 
 export function createDiagnosticsOtelService(
@@ -1510,7 +1674,19 @@ export function createDiagnosticsOtelService(
 
       const cfg = ctx.config.diagnostics;
       const otel = cfg?.otel;
+      // Loud beacon: written via console.warn so it survives the plugin
+      // logger config. Prints the actual values that gate this service.
+      console.warn(
+        `[byai-diagnostics-otel] start() called serviceId=${serviceId} diagnostics.enabled=${
+          cfg?.enabled ?? "undefined"
+        } otel.enabled=${otel?.enabled ?? "undefined"} traces=${
+          otel?.traces ?? "undefined"
+        } metrics=${otel?.metrics ?? "undefined"} logs=${otel?.logs ?? "undefined"}`,
+      );
       if (!cfg || cfg.enabled === false || !otel?.enabled) {
+        console.warn(
+          `[byai-diagnostics-otel] start() early-return because diagnostics/otel not fully enabled`,
+        );
         return;
       }
 
@@ -1564,10 +1740,12 @@ export function createDiagnosticsOtelService(
       const serviceName =
         otel.serviceName?.trim() || process.env.OTEL_SERVICE_NAME || DEFAULT_SERVICE_NAME;
       const sampleRate = resolveSampleRate(otel.sampleRate);
+
       const contentCapturePolicy = applyForcedContentCapturePolicy(
         resolveContentCapturePolicy(otel.captureContent),
         options.forceContentCapture,
       );
+      const contentLimits = resolveOtelContentLimits(otel, options.contentLimits);
       const sdkPreloaded = hasPreloadedOtelSdk();
 
       const resource = resourceFromAttributes({
@@ -1691,6 +1869,30 @@ export function createDiagnosticsOtelService(
       };
       const activeByaiInboundSpansBySessionKey = new Map<string, ActiveByaiInboundSpan>();
       const activeByaiInboundSpansByRunId = new Map<string, ActiveByaiInboundSpan>();
+      const inboundAllowlist = resolveInboundChannelAllowlist(options);
+      const isInboundChannelDiagnosticEvent = (evt: { channel?: string; source?: string }) =>
+        (typeof evt.channel === "string" && inboundAllowlist.channels.has(evt.channel)) ||
+        (typeof evt.source === "string" && inboundAllowlist.sources.has(evt.source));
+      // Native openclaw channels (webchat, etc.) emit message.received /
+      // message.dispatch.* through `emitInternalDiagnosticEvent`, which flags
+      // the event as internal + trusted=false. Allow those events past the
+      // trusted-gate ONLY when the operator opted the channel into the
+      // inbound allowlist AND it is not the BYAI SDK channel — BYAI itself
+      // stays behind the trusted gate because its SDK emits trusted events.
+      const isConfiguredNativeChannelEvent = (evt: { channel?: string }) =>
+        typeof evt.channel === "string" &&
+        evt.channel !== BYAI_CHANNEL_ID &&
+        inboundAllowlist.channels.has(evt.channel);
+      const passesInboundTrustGate = (
+        evt: { channel?: string; source?: string },
+        metadata: DiagnosticEventMetadata,
+      ) =>
+        isInboundChannelDiagnosticEvent(evt) &&
+        (metadata.trusted || isConfiguredNativeChannelEvent(evt));
+      const passesCorrelatedSpanGate = (
+        evt: { channel?: string; source?: string },
+        metadata: DiagnosticEventMetadata,
+      ) => metadata.trusted || isConfiguredNativeChannelEvent(evt);
       const langfuseUserContext: LangfuseUserContext = {
         defaultUserId: resolveDefaultLangfuseUserId(options),
         sessionUserIdsBySessionKey: new Map<string, string>(),
@@ -2080,7 +2282,11 @@ export function createDiagnosticsOtelService(
               attributes: redactOtelAttributes(attributes, options),
               timestamp: evt.ts,
             };
-            const logContext = contextForTrustedTraceContext(evt, metadata);
+            const logContext = contextForTrustedOrNativeTraceContext(
+              evt,
+              metadata,
+              isConfiguredNativeChannelEvent,
+            );
             if (logContext) {
               logRecord.context = logContext;
             }
@@ -2140,11 +2346,15 @@ export function createDiagnosticsOtelService(
         evt: DiagnosticEventPayload,
         metadata: DiagnosticEventMetadata,
       ) => (metadata.trusted ? normalizeTraceContext(evt.trace) : undefined);
+      const correlatedTraceContext = (
+        evt: DiagnosticEventPayload,
+        metadata: DiagnosticEventMetadata,
+      ) => (passesCorrelatedSpanGate(evt, metadata) ? normalizeTraceContext(evt.trace) : undefined);
       const activeTrustedParentContext = (
         evt: DiagnosticEventPayload,
         metadata: DiagnosticEventMetadata,
       ) => {
-        const parentSpanId = trustedTraceContext(evt, metadata)?.parentSpanId;
+        const parentSpanId = correlatedTraceContext(evt, metadata)?.parentSpanId;
         if (!parentSpanId) {
           return undefined;
         }
@@ -2160,7 +2370,7 @@ export function createDiagnosticsOtelService(
         metadata: DiagnosticEventMetadata,
         span: ReturnType<typeof tracer.startSpan>,
       ) => {
-        const spanId = trustedTraceContext(evt, metadata)?.spanId;
+        const spanId = correlatedTraceContext(evt, metadata)?.spanId;
         if (spanId) {
           activeTrustedSpans.set(spanId, span);
         }
@@ -2231,7 +2441,7 @@ export function createDiagnosticsOtelService(
         evt: DiagnosticEventPayload,
         metadata: DiagnosticEventMetadata,
       ) => {
-        const spanId = trustedTraceContext(evt, metadata)?.spanId;
+        const spanId = correlatedTraceContext(evt, metadata)?.spanId;
         if (!spanId) {
           return undefined;
         }
@@ -2578,11 +2788,23 @@ export function createDiagnosticsOtelService(
           "openclaw.channel": lowCardinalityAttr(evt.channel),
           "openclaw.source": lowCardinalityAttr(evt.source),
         });
-        if (!tracesEnabled || !metadata.trusted || !isByaiSdkDiagnosticEvent(evt)) {
+        // Webchat inbound message log - console.warn for docker logs visibility
+        const evtAny = evt as { channel?: string; source?: string; sessionKey?: unknown; messageId?: unknown; input?: unknown };
+        if (evtAny.channel === "webchat") {
+          const inputPreview = evtAny.input != null ? (typeof evtAny.input === "string" ? evtAny.input.slice(0, 100) : JSON.stringify(evtAny.input).slice(0, 100)) : "";
+          ctx.logger.info(`${serviceId}: [WEBCHAT INBOUND] channel=${evtAny.channel} source=${evtAny.source} sessionKey=${String(evtAny.sessionKey ?? "").slice(0, 24)} messageId=${evtAny.messageId !== undefined ? String(evtAny.messageId) : "-"} input=${inputPreview}`);
+          console.warn(`[byai-diagnostics-otel] [WEBCHAT INBOUND] channel=${evtAny.channel} source=${evtAny.source}`);
+        }
+        if (!tracesEnabled || !passesInboundTrustGate(evt, metadata)) {
           return;
         }
         const sessionKey = readOtelSessionValue(evt.sessionKey);
         if (!sessionKey) {
+          ctx.logger.info(
+            `${serviceId}: message.received passed gate but sessionKey is empty — skipping inbound span (channel=${
+              evt.channel ?? "-"
+            })`,
+          );
           return;
         }
         pruneExpiredByaiInboundSpans(evt.ts);
@@ -2598,6 +2820,17 @@ export function createDiagnosticsOtelService(
           "openclaw.source": lowCardinalityAttr(evt.source),
         };
         assignLangfuseTraceAttributes(spanAttrs, evt, options, langfuseUserContext);
+
+        // For non-byai-channel inbound messages (e.g., webchat), set trace name to "channel:USER_CODE"
+        // and override userId with USER_CODE from environment if available.
+        const isNonByaiChannel = evt.channel && evt.channel !== "byai-channel";
+        const userCode = process.env.USER_CODE?.trim();
+        if (isNonByaiChannel && userCode) {
+          spanAttrs["langfuse.trace.name"] = `${evt.channel}:${userCode}`;
+          spanAttrs["langfuse.user.id"] = userCode;
+          spanAttrs["user.id"] = userCode;
+        }
+
         if (evt.messageId !== undefined) {
           spanAttrs["byai.messageId"] = String(evt.messageId);
         }
@@ -2607,7 +2840,11 @@ export function createDiagnosticsOtelService(
         }
         const span = spanWithDuration("openclaw.message.inbound", spanAttrs, undefined, {
           kind: SpanKind.SERVER,
-          parentContext: contextForTrustedTraceContext(evt, metadata),
+          parentContext: contextForTrustedTraceContext(
+            evt,
+            metadata,
+            isConfiguredNativeChannelEvent(evt),
+          ),
           startTimeMs: evt.ts,
         });
         activeByaiInboundSpansBySessionKey.set(sessionKey, {
@@ -2617,6 +2854,13 @@ export function createDiagnosticsOtelService(
           startedAtMs: evt.ts,
           lastSeenAtMs: evt.ts,
         });
+        ctx.logger.info(
+          `${serviceId}: opened openclaw.message.inbound span channel=${
+            evt.channel ?? "-"
+          } sessionKey=${sessionKey.slice(0, 24)} messageId=${
+            evt.messageId !== undefined ? String(evt.messageId) : "-"
+          }`,
+        );
       };
 
       const recordMessageDispatchStarted = (
@@ -2628,10 +2872,10 @@ export function createDiagnosticsOtelService(
           "openclaw.source": lowCardinalityAttr(evt.source),
         };
         messageDispatchStartedCounter.add(1, attrs);
-        if (!tracesEnabled || !metadata.trusted || !isByaiSdkDiagnosticEvent(evt)) {
+        if (!tracesEnabled || !passesInboundTrustGate(evt, metadata)) {
           return;
         }
-        const traceContext = trustedTraceContext(evt, metadata);
+        const traceContext = correlatedTraceContext(evt, metadata);
         if (!traceContext?.spanId || activeTrustedSpans.has(traceContext.spanId)) {
           return;
         }
@@ -2644,7 +2888,7 @@ export function createDiagnosticsOtelService(
         const span = spanWithDuration("openclaw.message.processed", spanAttrs, undefined, {
             parentContext:
               byaiInboundParentContext(byaiInboundSpan) ??
-              contextForTrustedTraceContext(evt, metadata),
+              contextForTrustedOrNativeTraceContext(evt, metadata, isConfiguredNativeChannelEvent),
             startTimeMs: evt.ts,
           });
         trackTrustedSpan(evt, metadata, span);
@@ -2663,7 +2907,7 @@ export function createDiagnosticsOtelService(
         };
         messageDispatchCompletedCounter.add(1, attrs);
         messageDispatchDurationHistogram.record(evt.durationMs, attrs);
-        if (!tracesEnabled || !metadata.trusted || !isByaiSdkDiagnosticEvent(evt)) {
+        if (!tracesEnabled || !passesInboundTrustGate(evt, metadata)) {
           return;
         }
         const sessionKey = readOtelSessionValue(evt.sessionKey);
@@ -2710,7 +2954,7 @@ export function createDiagnosticsOtelService(
         const byaiInboundSpan = sessionKey
           ? activeByaiInboundSpansBySessionKey.get(sessionKey)
           : undefined;
-        const trustedTrace = trustedTraceContext(evt, metadata);
+        const trustedTrace = correlatedTraceContext(evt, metadata);
         const trackedSpan = trustedTrace?.spanId
           ? activeTrustedSpans.get(trustedTrace.spanId)
           : undefined;
@@ -2722,7 +2966,7 @@ export function createDiagnosticsOtelService(
             parentContext:
               activeTrustedParentContext(evt, metadata) ??
               byaiInboundParentContext(byaiInboundSpan) ??
-              contextForTrustedTraceContext(evt, metadata),
+              contextForTrustedOrNativeTraceContext(evt, metadata, isConfiguredNativeChannelEvent),
             endTimeMs: evt.ts,
           });
         setSpanAttrs(span, spanAttrs);
@@ -2801,7 +3045,7 @@ export function createDiagnosticsOtelService(
         evt: Extract<DiagnosticEventPayload, { type: "run.started" }>,
         metadata: DiagnosticEventMetadata,
       ) => {
-        if (!tracesEnabled || !metadata.trusted) {
+        if (!tracesEnabled || !passesCorrelatedSpanGate(evt, metadata)) {
           return;
         }
         const byaiInboundSpan = activeByaiInboundSpanForRun(evt);
@@ -2819,7 +3063,7 @@ export function createDiagnosticsOtelService(
             startTimeMs: evt.ts,
           }),
         );
-        const parentSpanId = trustedTraceContext(evt, metadata)?.parentSpanId;
+        const parentSpanId = correlatedTraceContext(evt, metadata)?.parentSpanId;
         if (parentSpanId && !activeTrustedSpans.has(parentSpanId)) {
           activeTrustedSpanAliases.set(parentSpanId, span);
         }
@@ -2925,7 +3169,7 @@ export function createDiagnosticsOtelService(
       });
 
       const recordTalkEvent = (evt: TalkDiagnosticEvent, metadata: DiagnosticEventMetadata) => {
-        if (!metadata.trusted) {
+        if (!passesCorrelatedSpanGate(evt, metadata)) {
           return;
         }
         const attrs = talkEventAttrs(evt);
@@ -3128,7 +3372,7 @@ export function createDiagnosticsOtelService(
         if (byaiInboundSpan) {
           spanAttrs["byai.inbound.linked"] = true;
         }
-        const trustedTrace = trustedTraceContext(evt, metadata);
+        const trustedTrace = correlatedTraceContext(evt, metadata);
         const trackedSpan = trustedTrace?.spanId
           ? activeTrustedSpans.get(trustedTrace.spanId)
           : undefined;
@@ -3200,7 +3444,7 @@ export function createDiagnosticsOtelService(
         evt: Extract<DiagnosticEventPayload, { type: "harness.run.started" }>,
         metadata: DiagnosticEventMetadata,
       ) => {
-        if (!tracesEnabled || !metadata.trusted) {
+        if (!tracesEnabled || !passesCorrelatedSpanGate(evt, metadata)) {
           return;
         }
         const spanAttrs: Record<string, string | number | boolean> = harnessRunMetricAttrs(evt);
@@ -3209,7 +3453,9 @@ export function createDiagnosticsOtelService(
           evt,
           metadata,
           spanWithDuration("openclaw.harness.run", spanAttrs, undefined, {
-            parentContext: activeTrustedParentContext(evt, metadata),
+            parentContext:
+              activeTrustedParentContext(evt, metadata) ??
+              contextForTrustedOrNativeTraceContext(evt, metadata, isConfiguredNativeChannelEvent),
             startTimeMs: evt.ts,
           }),
         );
@@ -3243,7 +3489,9 @@ export function createDiagnosticsOtelService(
         const span =
           takeTrackedTrustedSpan(evt, metadata) ??
           spanWithDuration("openclaw.harness.run", spanAttrs, evt.durationMs, {
-            parentContext: activeTrustedParentContext(evt, metadata),
+            parentContext:
+              activeTrustedParentContext(evt, metadata) ??
+              contextForTrustedOrNativeTraceContext(evt, metadata, isConfiguredNativeChannelEvent),
             endTimeMs: evt.ts,
           });
         setSpanAttrs(span, spanAttrs);
@@ -3407,7 +3655,7 @@ export function createDiagnosticsOtelService(
         evt: Extract<DiagnosticEventPayload, { type: "model.call.started" }>,
         metadata: DiagnosticEventMetadata,
       ) => {
-        if (!tracesEnabled || !metadata.trusted) {
+        if (!tracesEnabled || !passesCorrelatedSpanGate(evt, metadata)) {
           return;
         }
         const spanAttrs: Record<string, string | number | boolean> = {
@@ -3427,7 +3675,9 @@ export function createDiagnosticsOtelService(
           metadata,
           spanWithDuration(modelCallSpanName(evt), spanAttrs, undefined, {
             kind: modelCallSpanKind(),
-            parentContext: activeTrustedParentContext(evt, metadata),
+            parentContext:
+              activeTrustedParentContext(evt, metadata) ??
+              contextForTrustedOrNativeTraceContext(evt, metadata, isConfiguredNativeChannelEvent),
             startTimeMs: evt.ts,
           }),
         );
@@ -3462,7 +3712,12 @@ export function createDiagnosticsOtelService(
         }
         assignModelCallSizeTimingAttrs(spanAttrs, evt);
         assignLangfuseCompletionStartTimeAttr(spanAttrs, evt);
-        assignOtelModelContentAttributes(spanAttrs, modelContent, contentCapturePolicy);
+        assignOtelModelContentAttributes(
+          spanAttrs,
+          modelContent,
+          contentCapturePolicy,
+          contentLimits,
+        );
         assignLangfuseGenAiUsageAttrs(spanAttrs, readAssistantUsageFromModelCallContent(modelContent));
         const span =
           takeTrackedTrustedSpan(evt, metadata) ??
@@ -3517,7 +3772,12 @@ export function createDiagnosticsOtelService(
         }
         assignModelCallSizeTimingAttrs(spanAttrs, evt);
         assignLangfuseCompletionStartTimeAttr(spanAttrs, evt);
-        assignOtelModelContentAttributes(spanAttrs, modelContent, contentCapturePolicy);
+        assignOtelModelContentAttributes(
+          spanAttrs,
+          modelContent,
+          contentCapturePolicy,
+          contentLimits,
+        );
         assignLangfuseGenAiUsageAttrs(spanAttrs, readAssistantUsageFromModelCallContent(modelContent));
         const span =
           takeTrackedTrustedSpan(evt, metadata) ??
@@ -3591,7 +3851,7 @@ export function createDiagnosticsOtelService(
         metadata: DiagnosticEventMetadata,
         privateData?: Record<string, unknown>,
       ) => {
-        if (!tracesEnabled || !metadata.trusted) {
+        if (!tracesEnabled || !passesCorrelatedSpanGate(evt, metadata)) {
           return;
         }
         const spanAttrs = toolExecutionBaseAttrs(evt);
@@ -3601,10 +3861,13 @@ export function createDiagnosticsOtelService(
           evt as unknown as Record<string, unknown>,
           contentCapturePolicy,
           options,
+          contentLimits,
           privateData,
         );
         const span = spanWithDuration("openclaw.tool.execution", spanAttrs, undefined, {
-          parentContext: activeTrustedParentContext(evt, metadata),
+          parentContext:
+            activeTrustedParentContext(evt, metadata) ??
+            contextForTrustedOrNativeTraceContext(evt, metadata, isConfiguredNativeChannelEvent),
           startTimeMs: evt.ts,
         });
         trackTrustedSpan(evt, metadata, span);
@@ -3637,6 +3900,7 @@ export function createDiagnosticsOtelService(
           evt as unknown as Record<string, unknown>,
           contentCapturePolicy,
           options,
+          contentLimits,
           privateData,
         );
         const span =
@@ -3680,6 +3944,7 @@ export function createDiagnosticsOtelService(
           evt as unknown as Record<string, unknown>,
           contentCapturePolicy,
           options,
+          contentLimits,
           privateData,
         );
         const span =
@@ -3907,15 +4172,37 @@ export function createDiagnosticsOtelService(
 
       const subscribe = ctx.internalDiagnostics?.onEvent;
       if (!subscribe) {
+        console.warn(`[byai-diagnostics-otel] internal diagnostics capability unavailable`);
         ctx.logger.error(`${serviceId}: internal diagnostics capability unavailable`);
         return;
       }
+      console.warn(
+        `[byai-diagnostics-otel] internal diagnostics subscribed (traces=${tracesEnabled}, metrics=${metricsEnabled}, logs=${logsEnabled}, sdkPreloaded=${sdkPreloaded}, endpoint=${
+          endpoint ? "configured" : "default"
+        })`,
+      );
       ctx.logger.info(
         `${serviceId}: internal diagnostics subscribed (traces=${tracesEnabled}, metrics=${metricsEnabled}, logs=${logsEnabled}, sdkPreloaded=${sdkPreloaded}, endpoint=${endpoint ? "configured" : "default"})`,
       );
 
       unsubscribe = subscribe((evt, metadata, privateData) => {
         try {
+          // Tap: dump every diagnostic event that reaches the exporter with
+          // enough context to explain why an inbound span was / was not built.
+          // Filtered to the message-lifecycle types so the log stays useful.
+          if (
+            evt.type === "message.received" ||
+            evt.type === "message.queued" ||
+            evt.type === "message.dispatch.started" ||
+            evt.type === "message.dispatch.completed" ||
+            evt.type === "message.processed"
+          ) {
+            const anyEvt = evt as {
+              channel?: unknown;
+              source?: unknown;
+              sessionKey?: unknown;
+            };
+          }
           switch (evt.type) {
             case "model.usage":
               recordModelUsage(evt, metadata);

@@ -580,4 +580,161 @@ class SandboxServiceTest {
         verify(sandboxService).launchSandbox("user001", SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
     }
 
+    @Test
+    void buildSandboxWorkerId_returnsServiceKeyDashUserCode() {
+        SandboxService sandboxService = new SandboxService();
+
+        String result = ReflectionTestUtils.invokeMethod(sandboxService, "buildSandboxWorkerId",
+            "user001", "openclaw");
+
+        assertThat(result).isEqualTo("openclaw-user001");
+    }
+
+    @Test
+    void buildSandboxWorkerId_worksForAnyServiceKey() {
+        SandboxService sandboxService = new SandboxService();
+
+        String result = ReflectionTestUtils.invokeMethod(sandboxService, "buildSandboxWorkerId",
+            "user002", "byclaw-code-agent");
+
+        assertThat(result).isEqualTo("byclaw-code-agent-user002");
+    }
+
+    @Test
+    void buildSandboxWorkerId_worksForCustomServiceKeys() {
+        SandboxService sandboxService = new SandboxService();
+
+        String result = ReflectionTestUtils.invokeMethod(sandboxService, "buildSandboxWorkerId",
+            "user003", "custom-service");
+
+        assertThat(result).isEqualTo("custom-service-user003");
+    }
+
+    @Test
+    void buildSandboxWorkerId_returnsNullWhenUserCodeIsNull() {
+        SandboxService sandboxService = new SandboxService();
+
+        String result = ReflectionTestUtils.invokeMethod(sandboxService, "buildSandboxWorkerId",
+            null, "openclaw");
+
+        assertThat(result).isNull();
+    }
+
+    @Test
+    void buildSandboxWorkerId_returnsNullWhenUserCodeIsBlank() {
+        SandboxService sandboxService = new SandboxService();
+
+        String result = ReflectionTestUtils.invokeMethod(sandboxService, "buildSandboxWorkerId",
+            "  ", "openclaw");
+
+        assertThat(result).isNull();
+    }
+
+    @Test
+    void buildSandboxWorkerId_returnsNullWhenServiceKeyIsNull() {
+        SandboxService sandboxService = new SandboxService();
+
+        String result = ReflectionTestUtils.invokeMethod(sandboxService, "buildSandboxWorkerId",
+            "user001", null);
+
+        assertThat(result).isNull();
+    }
+
+    @Test
+    void buildSandboxWorkerId_returnsNullWhenServiceKeyIsBlank() {
+        SandboxService sandboxService = new SandboxService();
+
+        String result = ReflectionTestUtils.invokeMethod(sandboxService, "buildSandboxWorkerId",
+            "user001", "");
+
+        assertThat(result).isNull();
+    }
+
+    @Test
+    void doLaunchSandbox_injectsByaiWorkerIdIntoEnvs() {
+        SandboxLaunchContextFactory sandboxLaunchContextFactory = mock(SandboxLaunchContextFactory.class);
+        SsSandboxRecordMapper sandboxRecordMapper = mock(SsSandboxRecordMapper.class);
+        SandboxLifecycleFacade sandboxLifecycleFacade = mock(SandboxLifecycleFacade.class);
+        SandboxMetadataCache sandboxMetadataCache = mock(SandboxMetadataCache.class);
+        com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService systemConfigService =
+            mock(com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService.class);
+        SandboxService sandboxService = new SandboxService();
+        ReflectionTestUtils.setField(sandboxService, "sandboxLaunchContextFactory", sandboxLaunchContextFactory);
+        ReflectionTestUtils.setField(sandboxService, "sandboxRecordMapper", sandboxRecordMapper);
+        ReflectionTestUtils.setField(sandboxService, "sandboxLifecycleFacade", sandboxLifecycleFacade);
+        ReflectionTestUtils.setField(sandboxService, "sandboxMetadataCache", sandboxMetadataCache);
+        ReflectionTestUtils.setField(sandboxService, "byaiSystemConfigService", systemConfigService);
+
+        SandboxLaunchRouting routing = new SandboxLaunchRouting("openclaw",
+            SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
+        Map<String, String> envs = new java.util.HashMap<>();
+        envs.put("MODEL_BASE_URL", "https://model.example");
+        SandboxLaunchContext launchContext = new SandboxLaunchContext("openclaw", envs, Map.of(), "gateway-token");
+        when(sandboxLaunchContextFactory.buildContext("user001", 100L, "openclaw")).thenReturn(launchContext);
+        doAnswer(invocation -> {
+            SsSandboxRecord record = invocation.getArgument(0);
+            record.setId(99L);
+            return 1;
+        }).when(sandboxRecordMapper).insert(any(SsSandboxRecord.class));
+
+        ArgumentCaptor<com.iwhalecloud.byai.common.feign.request.sandbox.SandboxLaunchRequest> requestCaptor =
+            ArgumentCaptor.forClass(com.iwhalecloud.byai.common.feign.request.sandbox.SandboxLaunchRequest.class);
+        SandboxLaunchData launchData = new SandboxLaunchData();
+        launchData.setSandboxId("sandbox-1");
+        launchData.setEndpoint("http://host/proxy/18789/chat?token=gateway-token");
+        when(sandboxLifecycleFacade.launchSandbox(requestCaptor.capture())).thenReturn(SandboxResponse.success(launchData));
+        when(sandboxRecordMapper.updateLaunchSuccess(eq(99L), eq("sandbox-1"), any(), eq("gateway-token"),
+            any(), any(), any(), any(), any(), eq(0))).thenReturn(1);
+
+        ReflectionTestUtils.invokeMethod(sandboxService, "doLaunchSandbox",
+            "user001", 100L, routing);
+
+        com.iwhalecloud.byai.common.feign.request.sandbox.SandboxLaunchRequest captured = requestCaptor.getValue();
+        assertThat(captured.getEnvs())
+            .containsEntry("BYAI_WORKER_ID", "openclaw-user001")
+            .containsEntry("MODEL_BASE_URL", "https://model.example");
+    }
+
+    @Test
+    void doLaunchSandbox_doesNotInjectByaiWorkerIdWhenUserCodeIsBlank() {
+        SandboxLaunchContextFactory sandboxLaunchContextFactory = mock(SandboxLaunchContextFactory.class);
+        SsSandboxRecordMapper sandboxRecordMapper = mock(SsSandboxRecordMapper.class);
+        SandboxLifecycleFacade sandboxLifecycleFacade = mock(SandboxLifecycleFacade.class);
+        SandboxMetadataCache sandboxMetadataCache = mock(SandboxMetadataCache.class);
+        com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService systemConfigService =
+            mock(com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService.class);
+        SandboxService sandboxService = new SandboxService();
+        ReflectionTestUtils.setField(sandboxService, "sandboxLaunchContextFactory", sandboxLaunchContextFactory);
+        ReflectionTestUtils.setField(sandboxService, "sandboxRecordMapper", sandboxRecordMapper);
+        ReflectionTestUtils.setField(sandboxService, "sandboxLifecycleFacade", sandboxLifecycleFacade);
+        ReflectionTestUtils.setField(sandboxService, "sandboxMetadataCache", sandboxMetadataCache);
+        ReflectionTestUtils.setField(sandboxService, "byaiSystemConfigService", systemConfigService);
+
+        // Use blank userCode so buildSandboxWorkerId returns null
+        SandboxLaunchRouting routing = new SandboxLaunchRouting("openclaw",
+            SandboxLaunchRouting.DEFAULT_RESOURCE_ID);
+        SandboxLaunchContext launchContext = new SandboxLaunchContext("openclaw", null, Map.of(), "gateway-token");
+        when(sandboxLaunchContextFactory.buildContext("", 100L, "openclaw")).thenReturn(launchContext);
+        doAnswer(invocation -> {
+            SsSandboxRecord record = invocation.getArgument(0);
+            record.setId(99L);
+            return 1;
+        }).when(sandboxRecordMapper).insert(any(SsSandboxRecord.class));
+
+        ArgumentCaptor<com.iwhalecloud.byai.common.feign.request.sandbox.SandboxLaunchRequest> requestCaptor =
+            ArgumentCaptor.forClass(com.iwhalecloud.byai.common.feign.request.sandbox.SandboxLaunchRequest.class);
+        SandboxLaunchData launchData = new SandboxLaunchData();
+        launchData.setSandboxId("sandbox-2");
+        launchData.setEndpoint("http://host/proxy/18789/chat?token=gateway-token");
+        when(sandboxLifecycleFacade.launchSandbox(requestCaptor.capture())).thenReturn(SandboxResponse.success(launchData));
+        when(sandboxRecordMapper.updateLaunchSuccess(eq(99L), eq("sandbox-2"), any(), eq("gateway-token"),
+            any(), any(), any(), any(), any(), eq(0))).thenReturn(1);
+
+        ReflectionTestUtils.invokeMethod(sandboxService, "doLaunchSandbox",
+            "", 100L, routing);
+
+        com.iwhalecloud.byai.common.feign.request.sandbox.SandboxLaunchRequest captured = requestCaptor.getValue();
+        assertThat(captured.getEnvs()).doesNotContainKey("BYAI_WORKER_ID");
+    }
+
 }

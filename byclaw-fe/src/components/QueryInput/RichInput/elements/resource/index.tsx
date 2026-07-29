@@ -21,6 +21,7 @@ export type ResourceElementType = {
   resourceType: IResourceType;
   isAgentTool?: boolean;
   isFromResourceModule?: boolean;
+  showQuotePrefix?: boolean;
   children: { text: string }[];
 };
 
@@ -44,12 +45,13 @@ const ResourceElement = ({ attributes, children, element }: RenderElementProps) 
     <span {...attributes} className={styles.mention}>
       <span contentEditable={false}>
         {prefix}
-        {!(
-          el.isFromResourceModule ||
-          el.resourceType === 'TOOL' ||
-          el.resourceType === 'OBJECT' ||
-          el.resourceType === 'VIEW'
-        ) && <span style={{ color: '#00000080', marginRight: 2 }}>{intl.formatMessage({ id: 'quote' })}</span>}
+        {(el.showQuotePrefix ||
+          !(
+            el.isFromResourceModule ||
+            el.resourceType === 'TOOL' ||
+            el.resourceType === 'OBJECT' ||
+            el.resourceType === 'VIEW'
+          )) && <span style={{ color: '#00000080', marginRight: 2 }}>{intl.formatMessage({ id: 'quote' })}</span>}
         {name}
       </span>
       {children}

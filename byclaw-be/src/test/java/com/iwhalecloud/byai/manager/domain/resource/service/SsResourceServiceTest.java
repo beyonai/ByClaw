@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.domain.resource.service;
 
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
@@ -64,5 +65,23 @@ class SsResourceServiceTest {
         assertThat(saved.getUpdateTime()).isEqualTo(saved.getCreateTime());
         assertThat(saved.getCreateBy()).isEqualTo(11L);
         assertThat(saved.getUpdateBy()).isEqualTo(saved.getCreateBy());
+    }
+
+    @Test
+    void findByImportIdentity_filtersBySystemBizTypeAndResourceCode() {
+        SsResource expected = new SsResource();
+        expected.setResourceId(1002L);
+        when(ssResourceMapper.selectOne(any())).thenReturn(expected);
+
+        SsResource actual = service.findByImportIdentity("BYCLAW", "KG_DOC", "824794494620293");
+
+        assertThat(actual).isSameAs(expected);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<QueryWrapper<SsResource>> captor = ArgumentCaptor.forClass(QueryWrapper.class);
+        verify(ssResourceMapper).selectOne(captor.capture());
+        QueryWrapper<SsResource> query = captor.getValue();
+        assertThat(query.getSqlSegment()).contains("system_code", "resource_biz_type", "resource_code");
+        assertThat(query.getParamNameValuePairs().values())
+            .containsExactlyInAnyOrder("BYCLAW", "KG_DOC", "824794494620293");
     }
 }

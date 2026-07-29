@@ -124,7 +124,8 @@ public class WebSecurityConfig {
             // 使用securityMatcher限定当前配置作用的路径,其他所有请求拦截
             http.securityMatcher("/system/session/loginByUsername", "/system/session/loginByPhone",
                 "/system/session/registerByPhone", "/system/social/iwhaleCallback", "/system/social/dingtalkCallback",
-                "/system/session/loginBySso", "/system/social/feiLianCallback", "/system/social/casCallback", "/system/social/appleLogin", "/commonFile/view")
+                "/system/session/loginBySso", "/system/social/feiLianCallback", "/system/social/casCallback",
+                "/system/social/appleLogin", "/commonFile/view", "/feishu/bot/events")
                 .authorizeHttpRequests(authorize -> authorize.anyRequest().permitAll());
 
             PathPatternRequestMatcher.Builder pathPattern = PathPatternRequestMatcher.withDefaults();

@@ -255,7 +255,7 @@ wheels = [
 
 [[package]]
 name = "by-framework"
-version = "0.2.2.dev5"
+version = "0.2.2.dev9"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "dill" },
@@ -263,9 +263,9 @@ dependencies = [
     { name = "redis" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/53/d6/fa6399190bd6cd158a61c915dbbd12a088cfd78e390a7dbd994ec70f9092/by_framework-0.2.2.dev5.tar.gz", hash = "sha256:b5f7ee569722852af7461017cb6a893788b1bf1effd3597120ce5b859d82c07d", size = 1162628, upload-time = "2026-06-13T04:10:26.835Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ac/0e/0c77ed1addda14129d72af555bf84ccc90f7ed29632b09667ee379fd8cf3/by_framework-0.2.2.dev9.tar.gz", hash = "sha256:b432640091b18be9dc6a1413e00d96b4cb5a2614d5ca8fbca267a11ee8119cce", size = 1261356, upload-time = "2026-07-08T09:38:29.198Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e1/e6/3c7573e677cc95b1377b4c5796c2124b534fd77ca6791351525c1bd0f197/by_framework-0.2.2.dev5-py3-none-any.whl", hash = "sha256:abf3cb913f910c6567af04f14fde04bd2937e27ebfe5725c6ca88ad6dce9f362", size = 189370, upload-time = "2026-06-13T04:10:25.478Z" },
+    { url = "https://files.pythonhosted.org/packages/72/4f/c5170c49723e04a9c0d11fd709566106f8cd4e6a22982127d8a11371e45d/by_framework-0.2.2.dev9-py3-none-any.whl", hash = "sha256:2e80a349930752570db778d02d7f9b8b3ad8b57a267d92f7e6069c05aba031f4", size = 217818, upload-time = "2026-07-08T09:38:27.854Z" },
 ]
 
 [[package]]
@@ -298,7 +298,7 @@ wheels = [
 
 [[package]]
 name = "by-qa"
-version = "0.1.15"
+version = "0.2.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -306,9 +306,9 @@ dependencies = [
     { name = "pydantic-settings" },
     { name = "python-dotenv" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/69/02/91a972e89ce6b119f799166a36c63f6c769dd76a6ab92e6f5d2b1577ceec/by_qa-0.1.15.tar.gz", hash = "sha256:9f36a13b99d5ad8bf09f34638b318d4d015781eec922cf6ec3a2e6dc1a343b00", size = 352141, upload-time = "2026-06-18T07:37:41.193Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/97/df/375a896f5d077492c27fcb60e8817f4ed409dd7cf9a5731f1e3e9e719b39/by_qa-0.2.2.tar.gz", hash = "sha256:956e15785906ce7d1989377c10747251f96ab99e7d97baf7be273463e7381b1d", size = 376930, upload-time = "2026-07-19T04:08:39.052Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f9/fd/d624f15354d1417a4570087951cbcc44faabaf4fcfc266e30d34a6a46607/by_qa-0.1.15-py3-none-any.whl", hash = "sha256:279c81fda64d3d58448f9ce90d425b2d26e0c14144ef5f6781342aac3341a4b3", size = 192721, upload-time = "2026-06-18T07:37:39.783Z" },
+    { url = "https://files.pythonhosted.org/packages/02/40/53ee7bde1f76a9c1c6488ae09617a5a657d2ec54fcfb4dadb0a783b72ea5/by_qa-0.2.2-py3-none-any.whl", hash = "sha256:28fcd7bf12138aa363a0e7ed311a28e9807b5c7d30c5a548e215c715d3178a14", size = 221982, upload-time = "2026-07-19T04:08:37.263Z" },
 ]
 
 [package.optional-dependencies]
@@ -336,6 +336,7 @@ all = [
     { name = "python-pptx" },
     { name = "urllib3" },
     { name = "uvicorn", extra = ["standard"] },
+    { name = "xlrd" },
 ]
 
 [[package]]
@@ -358,17 +359,17 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "by-framework", specifier = "==0.2.2.dev5" },
+    { name = "by-framework", specifier = "==0.2.2.dev9" },
     { name = "by-framework-langgraph", specifier = "==0.0.3.dev2" },
     { name = "by-framework-trace-langfuse", specifier = "==0.0.3.dev2" },
-    { name = "by-qa", extras = ["all"], specifier = "==0.1.15" },
+    { name = "by-qa", extras = ["all"], specifier = "==0.2.2" },
     { name = "langfuse", specifier = "==4.3.1" },
 ]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "pytest", specifier = ">=9.0.3" },
-    { name = "pytest-asyncio", specifier = ">=1.3.0" },
+    { name = "pytest", specifier = "==9.0.3" },
+    { name = "pytest-asyncio", specifier = "==1.3.0" },
 ]
 
 [[package]]
@@ -2434,6 +2435,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/79/d9/7cfd5a312760ac4dd8bf0184a6ee9e43c33e47f3dadc303032ce012b8fa3/wrapt-1.17.3-cp314-cp314t-win_amd64.whl", hash = "sha256:73d496de46cd2cdbdbcce4ae4bcdb4afb6a11234a1df9c085249d55166b95116", size = 41334, upload-time = "2025-08-12T05:53:14.178Z" },
     { url = "https://files.pythonhosted.org/packages/46/78/10ad9781128ed2f99dbc474f43283b13fea8ba58723e98844367531c18e9/wrapt-1.17.3-cp314-cp314t-win_arm64.whl", hash = "sha256:f38e60678850c42461d4202739f9bf1e3a737c7ad283638251e79cc49effb6b6", size = 38471, upload-time = "2025-08-12T05:52:57.784Z" },
     { url = "https://files.pythonhosted.org/packages/1f/f6/a933bd70f98e9cf3e08167fc5cd7aaaca49147e48411c0bd5ae701bb2194/wrapt-1.17.3-py3-none-any.whl", hash = "sha256:7171ae35d2c33d326ac19dd8facb1e82e5fd04ef8c6c0e394d7af55a55051c22", size = 23591, upload-time = "2025-08-12T05:53:20.674Z" },
+]
+
+[[package]]
+name = "xlrd"
+version = "2.0.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/07/5a/377161c2d3538d1990d7af382c79f3b2372e880b65de21b01b1a2b78691e/xlrd-2.0.2.tar.gz", hash = "sha256:08b5e25de58f21ce71dc7db3b3b8106c1fa776f3024c54e45b45b374e89234c9", size = 100167, upload-time = "2025-06-14T08:46:39.039Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/1a/62/c8d562e7766786ba6587d09c5a8ba9f718ed3fa8af7f4553e8f91c36f302/xlrd-2.0.2-py2.py3-none-any.whl", hash = "sha256:ea762c3d29f4cca48d82df517b6d89fbce4db3107f9d78713e48cd321d5c9aa9", size = 96555, upload-time = "2025-06-14T08:46:37.766Z" },
 ]
 
 [[package]]

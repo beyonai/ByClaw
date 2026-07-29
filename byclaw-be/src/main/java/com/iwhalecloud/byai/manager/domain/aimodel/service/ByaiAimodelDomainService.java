@@ -1,12 +1,14 @@
 package com.iwhalecloud.byai.manager.domain.aimodel.service;
 
 import com.alibaba.fastjson.JSONObject;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.github.pagehelper.PageHelper;
 import com.iwhalecloud.byai.common.constants.Constants;
 import com.iwhalecloud.byai.common.util.ListUtil;
 import com.iwhalecloud.byai.manager.domain.aimodel.enums.ModelStatusEnum;
 import com.iwhalecloud.byai.manager.domain.tag.service.ByaiTagRelationService;
 import com.iwhalecloud.byai.manager.qo.aimodel.DefaultAiModelQo;
+import com.iwhalecloud.byai.manager.qo.aimodel.FindAiModelQo;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import com.iwhalecloud.byai.manager.dto.aimodel.ModelListRequest;
 import com.iwhalecloud.byai.manager.dto.aimodel.ModelRequest;
@@ -26,7 +28,6 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -50,6 +51,16 @@ public class ByaiAimodelDomainService {
 
     @Autowired
     private ByaiTagRelationService byaiTagRelationService;
+
+    /**
+     * 查找模型标识
+     *
+     * @param modelId 模型
+     * @return ByaiAimodel
+     */
+    public ByaiAimodel findById(Long modelId) {
+        return byaiAimodelMapper.selectById(modelId);
+    }
 
     /**
      * 按条件分页查询（使用 PageHelper 实现分页，与项目现有分页方式一致）
@@ -312,13 +323,6 @@ public class ByaiAimodelDomainService {
         return byaiAimodelMapper.listModel(request);
     }
 
-    public List<ByaiAimodel> listModelInner(ModelRequest request) {
-        if (request.getTagId() == null) {
-            return Collections.emptyList();
-        }
-        return byaiAimodelMapper.listModelInner(request);
-    }
-
     /**
      * 列出默认模型
      *
@@ -328,6 +332,44 @@ public class ByaiAimodelDomainService {
     public ByaiAimodel getDefaultAiModel(DefaultAiModelQo defaultAiModelQo) {
         List<ByaiAimodel> byaiAiModels = byaiAimodelMapper.listDefaultAiModel(defaultAiModelQo);
         return ListUtil.isNotEmpty(byaiAiModels) ? byaiAiModels.getFirst() : null;
+    }
+
+    /**
+     * 按条件查询单个模型（非空字段参与等值匹配）。
+     *
+     * @param findAiModelQo 查询条件
+     * @return 匹配的模型，不存在返回 null
+     */
+    public List<ByaiAimodel> findAiModelByQo(FindAiModelQo findAiModelQo) {
+        if (findAiModelQo == null) {
+            return null;
+        }
+        LambdaQueryWrapper<ByaiAimodel> queryWrapper = new LambdaQueryWrapper<>();
+        if (findAiModelQo.getModelId() != null) {
+            queryWrapper.eq(ByaiAimodel::getModelId, findAiModelQo.getModelId());
+        }
+        if (StringUtil.isNotEmpty(findAiModelQo.getModelType())) {
+            queryWrapper.eq(ByaiAimodel::getModelType, findAiModelQo.getModelType());
+        }
+        if (StringUtil.isNotEmpty(findAiModelQo.getModelNo())) {
+            queryWrapper.eq(ByaiAimodel::getModelNo, findAiModelQo.getModelNo());
+        }
+        if (StringUtil.isNotEmpty(findAiModelQo.getModelProtocol())) {
+            queryWrapper.eq(ByaiAimodel::getModelProtocol, findAiModelQo.getModelProtocol());
+        }
+        if (StringUtil.isNotEmpty(findAiModelQo.getOwnerType())) {
+            queryWrapper.eq(ByaiAimodel::getOwnerType, findAiModelQo.getOwnerType());
+        }
+        if (StringUtil.isNotEmpty(findAiModelQo.getSourceType())) {
+            queryWrapper.eq(ByaiAimodel::getSourceType, findAiModelQo.getSourceType());
+        }
+        if (findAiModelQo.getCreateBy() != null) {
+            queryWrapper.eq(ByaiAimodel::getCreateBy, findAiModelQo.getCreateBy());
+        }
+        if (StringUtil.isNotEmpty(findAiModelQo.getStatus())) {
+            queryWrapper.eq(ByaiAimodel::getStatus, findAiModelQo.getStatus());
+        }
+        return byaiAimodelMapper.selectList(queryWrapper);
     }
 
 }

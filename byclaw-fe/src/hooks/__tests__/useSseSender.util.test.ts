@@ -113,4 +113,50 @@ describe('hooks/useSseSender/util', () => {
     expect(compareStreamId('1710000000000-1', '1710000000000-2')).toBe(-1);
     expect(compareStreamId('1710000000000-2', '1710000000000-2')).toBe(0);
   });
+
+  it('preserves lane metadata from stream metadata JSON', () => {
+    const parsed = parseChatStreamMessage({
+      event: 'answerDelta',
+      data: JSON.stringify({
+        contentType: SSEMessageType.text,
+        metadata: JSON.stringify({
+          clientRequestId: 'q1_a2',
+          laneId: 'lane-b',
+          turnId: 'turn-1',
+          agentId: 'agent-b',
+          agentName: 'Agent B',
+        }),
+        choices: [{ delta: { content: 'hello' } }],
+      }),
+    });
+
+    expect(parsed?.clientRequestId).toBe('q1_a2');
+    expect(parsed?.laneId).toBe('lane-b');
+    expect(parsed?.turnId).toBe('turn-1');
+    expect(parsed?.agentId).toBe('agent-b');
+    expect(parsed?.agentName).toBe('Agent B');
+    expect(parsed?.formattedPayload).toMatchObject({
+      clientRequestId: 'q1_a2',
+      laneId: 'lane-b',
+      turnId: 'turn-1',
+      agentId: 'agent-b',
+      agentName: 'Agent B',
+    });
+  });
+
+  it('prefers lane clientRequestId from stream data over broadcast wrapper', () => {
+    const parsed = parseChatStreamMessage({
+      event: 'answerDelta',
+      clientRequestId: 'primary-lane-client',
+      data: JSON.stringify({
+        contentType: SSEMessageType.text,
+        clientRequestId: 'lane-b-client',
+        laneId: 'lane-b',
+        choices: [{ delta: { content: 'hello' } }],
+      }),
+    });
+
+    expect(parsed?.clientRequestId).toBe('lane-b-client');
+    expect(parsed?.laneId).toBe('lane-b');
+  });
 });

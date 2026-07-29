@@ -11,6 +11,7 @@ import java.util.Set;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -38,6 +39,9 @@ public class SandboxWorkspaceBootstrapInitializer {
     );
 
     private final UserFS userFS;
+
+    @Value("${file.storage.type:minio}")
+    private String storageType;
 
     public SandboxWorkspaceBootstrapInitializer(UserFS userFS) {
         this.userFS = userFS;
@@ -72,9 +76,26 @@ public class SandboxWorkspaceBootstrapInitializer {
         if (ctx == null || StringUtils.isBlank(ctx.getWorkspaceTargetPath())) {
             return;
         }
+        // Only create local directories if using local/mounted storage (not SFTP/FTP/remote).
+        // For remote storage, directories will be created automatically during file write operations.
+        if (isRemoteStorage()) {
+            log.debug("Skipping local directory creation for remote storage type: {}", storageType);
+            return;
+        }
         Path workspaceRoot = Path.of(ctx.getWorkspaceTargetPath()).normalize();
         createSharedDirectory(workspaceRoot);
         createSharedDirectory(workspaceRoot.resolve(".sessions"));
+    }
+
+    /**
+     * Check if current storage type is remote (SFTP/FTP).
+     */
+    private boolean isRemoteStorage() {
+        if (StringUtils.isBlank(storageType)) {
+            return false;
+        }
+        String type = storageType.toLowerCase();
+        return type.contains("sftp") || type.contains("ftp");
     }
 
     private void createSharedDirectory(Path directory) {
@@ -91,10 +112,10 @@ public class SandboxWorkspaceBootstrapInitializer {
     }
 
     private void writeBootstrapFile(SandboxFsInitContext ctx, String filename, byte[] bytes, String relativeFilePath) {
-        if (writeWorkspaceFile(ctx, bytes, relativeFilePath)) {
-            return;
+        // For remote storage, skip local file write attempt and go directly to UserFS (SFTP/FTP)
+        if (isRemoteStorage() || !writeWorkspaceFile(ctx, bytes, relativeFilePath)) {
+            userFS.write(toMultipartFile(filename, bytes), relativeFilePath);
         }
-        userFS.write(toMultipartFile(filename, bytes), relativeFilePath);
     }
 
     private boolean writeWorkspaceFile(SandboxFsInitContext ctx, byte[] bytes, String relativeFilePath) {

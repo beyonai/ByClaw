@@ -16,7 +16,7 @@ public class ModelVO implements Serializable {
     private static final long serialVersionUID = 1L;
 
     /** 模型 ID */
-    private String id;
+    private Long id;
 
     /** 模型名称（前端标题） */
     private String displayName;

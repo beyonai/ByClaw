@@ -6,10 +6,14 @@ const fileIconTypeGroups: Record<string, string[]> = {
   Word: ['word', 'doc', 'docx'],
   PDF: ['paper', 'pdf'],
   Image: ['image', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'tiff', 'ico', 'svg'],
+  html: ['html', 'htm'],
+  json: ['json'],
+  sql1: ['sql'],
+  java: ['java'],
   shipin: ['mp4', 'avi', 'mov', 'mkv', 'webm'],
   yinpin: ['mp3', 'wav', 'flac'],
   'a-Data-fileshujuwenjian': ['zip', 'rar', '7z', 'tar', 'gz', 'other'],
-  'a-Codedaima': ['js', 'ts', 'jsx', 'tsx', 'py', 'java', 'c', 'cpp', 'go', 'rs', 'rb', 'sh'],
+  'a-Codedaima': ['js', 'ts', 'jsx', 'tsx', 'py', 'c', 'cpp', 'go', 'rs', 'rb', 'sh'],
   wenjianjialanse: ['folder', 'chat'],
 };
 

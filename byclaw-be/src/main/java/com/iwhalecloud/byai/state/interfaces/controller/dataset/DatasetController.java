@@ -1,18 +1,26 @@
 package com.iwhalecloud.byai.state.interfaces.controller.dataset;
 
 import java.nio.charset.StandardCharsets;
+import java.net.URLEncoder;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbDirectoryCreate;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbDirectoryUpdate;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.FileToMarkdownResult;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.feign.request.knowledge.FolderDelete;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.ProcessStatus;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetBuild;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetDto;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetIdDto;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeReadFileRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeGlobRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeItemReferencesRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileSearchRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeItemsMoveRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeSearchRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeUploadConflictCheckRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeUploadConflictCheckResponse;
 import com.iwhalecloud.byai.manager.dto.resource.RemoveFileDto;
@@ -27,6 +35,11 @@ import com.iwhalecloud.byai.state.domain.resource.dto.ObjectZipImportResult;
 import com.iwhalecloud.byai.state.domain.resource.vo.DatasetDetailVo;
 import com.iwhalecloud.byai.state.domain.resource.vo.DatasetVo;
 import com.iwhalecloud.byai.state.domain.resource.vo.KnowledgeCapabilityVo;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbFileReadResult;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileSearchResult;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeItemReferencesResult;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeSearchResult;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeItemsMoveResult;
 import com.iwhalecloud.byai.common.feign.request.knowledge.Folder;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
@@ -43,6 +56,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.state.application.service.dataset.DatasetApplicationService;
 import com.iwhalecloud.byai.state.application.service.dataset.OpenClawKnowledgeDocumentService;
@@ -177,6 +191,31 @@ public class DatasetController {
     }
 
     /**
+     * 批量移动知识库文件或目录。
+     */
+    @PostMapping("/moveKnowledgeItems")
+    public ResponseUtil<KnowledgeItemsMoveResult> moveKnowledgeItems(
+        @Valid @RequestBody KnowledgeItemsMoveRequest request) {
+        return ResponseUtil.successResponse(I18nUtil.get("dataset.items.move.success"),
+            datasetApplicationService.moveKnowledgeItems(request));
+    }
+
+    /** 查询 Markdown 文件的入站、出站引用关系。 */
+    @PostMapping("/knowledgeItems/references")
+    public ResponseUtil<KnowledgeItemReferencesResult> knowledgeItemReferences(
+        @Valid @RequestBody KnowledgeItemReferencesRequest request) {
+        return ResponseUtil.successResponse(I18nUtil.get("dataset.dir.file.query.success"),
+            datasetApplicationService.knowledgeItemReferences(request));
+    }
+
+    /** 按 QA glob 单层通配规则匹配文件或目录。 */
+    @PostMapping("/glob")
+    public ResponseUtil<List<DirAndFileVo>> globKnowledgeItems(@Valid @RequestBody KnowledgeGlobRequest request) {
+        return ResponseUtil.successResponse(I18nUtil.get("dataset.dir.file.query.success"),
+            datasetApplicationService.globKnowledgeItems(request));
+    }
+
+    /**
      * 列出文件资源
      *
      * @return ResponseUtil
@@ -231,7 +270,7 @@ public class DatasetController {
 
             directoryPath = new String(directoryPath.getBytes(StandardCharsets.ISO_8859_1), StandardCharsets.UTF_8);
             UploadResult uploadResult = datasetApplicationService.uploadFiles(files, resourceId, directoryPath,
-                fileDescription, Boolean.valueOf(processFrontMatter), Boolean.valueOf(overwrite));
+                fileDescription, parseOptionalBoolean(processFrontMatter), Boolean.valueOf(overwrite));
             return ResponseUtil.successResponse(I18nUtil.get("dataset.file.upload.success"), uploadResult);
         }
         catch (Exception e) {
@@ -250,6 +289,30 @@ public class DatasetController {
     public ResponseUtil<Void> build(@RequestBody DatasetBuild datasetBuild) {
         datasetApplicationService.build(datasetBuild);
         return ResponseUtil.success(I18nUtil.get("dataset.build.success"));
+    }
+
+    /**
+     * 原始文件同步转换为 Markdown 文件流。只执行转换，不落知识库、不创建构建任务、不切片、不向量化。
+     *
+     * @param fileContent 原始文件二进制内容
+     * @return Markdown 文件流
+     */
+    @PostMapping(value = "/fileToMarkdown", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<StreamingResponseBody> fileToMarkdown(@RequestPart("fileContent") MultipartFile fileContent) {
+        try {
+            FileToMarkdownResult result = datasetApplicationService.fileToMarkdown(fileContent);
+            StreamingResponseBody responseBody = outputStream -> outputStream.write(result.getContent());
+            return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(result.getContentType()))
+                .header("Content-Disposition", buildContentDisposition(result.getFileName()))
+                .body(responseBody);
+        }
+        catch (Exception e) {
+            logger.error("文件转Markdown失败", e);
+            String errorMessage = e.getMessage() == null ? "文件转Markdown失败" : e.getMessage();
+            return ResponseEntity.badRequest().contentType(MediaType.parseMediaType("text/plain; charset=UTF-8"))
+                .body(outputStream -> outputStream.write(errorMessage.getBytes(StandardCharsets.UTF_8)));
+        }
     }
 
     /**
@@ -288,6 +351,41 @@ public class DatasetController {
     public void download(@RequestParam("resourceId") Long resourceId,
         @RequestParam("directoryPath") String directoryPath, HttpServletResponse response) {
         datasetApplicationService.download(resourceId, directoryPath, response);
+    }
+
+    /**
+     * 读取知识库文件 Markdown 内容，供技能侧按资源 ID 调用。
+     *
+     * @param request 文件读取参数
+     * @return 文件内容
+     */
+    @PostMapping(value = "/readFile")
+    public ResponseUtil<KbFileReadResult> readFile(@RequestBody KnowledgeReadFileRequest request) {
+        return ResponseUtil.successResponse(I18nUtil.get("dataset.dir.file.query.success"),
+            datasetApplicationService.readFile(request));
+    }
+
+    /**
+     * 知识库 chunk 检索，供技能侧按资源 ID 列表调用。
+     *
+     * @param request 检索参数
+     * @return chunk 检索结果
+     */
+    @PostMapping(value = "/knowledgeItems/search")
+    public ResponseUtil<KnowledgeSearchResult> searchKnowledgeItems(
+        @Valid @RequestBody KnowledgeSearchRequest request) {
+        return ResponseUtil.successResponse(I18nUtil.get("dataset.dir.file.query.success"),
+            datasetApplicationService.searchKnowledgeItems(request));
+    }
+
+    /**
+     * Agent DSL 文件级语义检索，按当前用户可访问的知识库资源范围执行。
+     */
+    @PostMapping(value = "/knowledgeItems/searchFile")
+    public ResponseUtil<KnowledgeFileSearchResult> searchKnowledgeFiles(
+        @RequestBody @Valid KnowledgeFileSearchRequest request) {
+        return ResponseUtil.successResponse(I18nUtil.get("dataset.file.search.success"),
+            datasetApplicationService.searchKnowledgeFiles(request));
     }
 
     /**
@@ -393,6 +491,16 @@ public class DatasetController {
         result.setUpdatedCount(updatedItems.size());
         result.setCreatedItems(new ArrayList<>(createdItems));
         result.setUpdatedItems(new ArrayList<>(updatedItems));
+    }
+
+    private String buildContentDisposition(String fileName) {
+        String resolvedFileName = fileName == null || fileName.isBlank() ? "converted.md" : fileName;
+        String encoded = URLEncoder.encode(resolvedFileName, StandardCharsets.UTF_8).replace("+", "%20");
+        return "attachment; filename=\"" + encoded + "\"; filename*=UTF-8''" + encoded;
+    }
+
+    private Boolean parseOptionalBoolean(String value) {
+        return value == null || value.isBlank() ? null : Boolean.valueOf(value);
     }
 
     /**

@@ -74,6 +74,15 @@ describe("resolveAssistantEventKind", () => {
     ).toBe("answer");
   });
 
+  it("prefers answer delta over cumulative text snapshots", () => {
+    const event = assistantEvent({
+      text: "初稿已写入工作区。以下是正文：",
+      delta: "以下是正文：",
+    });
+
+    expect(resolveAssistantEventText(event, "answer")).toBe("以下是正文：");
+  });
+
   it("routes normalized thinking events to reasoning", () => {
     const event = agentEvent({
       stream: "agent",

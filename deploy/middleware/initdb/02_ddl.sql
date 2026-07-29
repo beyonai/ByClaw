@@ -497,3 +497,1226 @@ COMMENT ON COLUMN byai.ss_sandbox_record.lock_version IS '乐观锁版本号';
 ALTER TABLE byai.ss_sandbox_record
     ADD COLUMN gateway_token character varying(128);
 COMMENT ON COLUMN byai.ss_sandbox_record.gateway_token IS '绑定到沙箱实例的网关访问token';
+
+-- ========== V0.1.0 (merged at 2026-07-06 10:27:58) ==========
+DROP TABLE IF EXISTS byai.bykc_ec_import_record CASCADE;
+
+
+DROP TABLE IF EXISTS byai.bykc_ec_artifact_signal CASCADE;
+
+
+DROP TABLE IF EXISTS byai.bykc_ec_artifact CASCADE;
+
+
+DROP TABLE IF EXISTS byai.bykc_ec_sync_run_step CASCADE;
+
+
+DROP TABLE IF EXISTS byai.bykc_ec_sync_run CASCADE;
+
+
+DROP TABLE IF EXISTS byai.bykc_ec_sync_task CASCADE;
+
+
+DROP TABLE IF EXISTS byai.bykc_ec_connection CASCADE;
+
+
+DROP TABLE IF EXISTS byai.bykc_ec_collector_agent CASCADE;
+
+
+DROP TABLE IF EXISTS byai.bykc_ec_connector CASCADE;
+
+
+
+CREATE TABLE IF NOT EXISTS byai.bykc_ec_collector_agent (
+                                                            agent_id BIGINT PRIMARY KEY,
+                                                            user_id BIGINT NOT NULL,
+                                                            agent_name VARCHAR(128) NOT NULL,
+    runtime_name VARCHAR(64) NOT NULL DEFAULT 'ByClaw Browser Bridge',
+    runtime_version VARCHAR(64),
+    browser_bridge_status VARCHAR(32),
+    chrome_profile VARCHAR(128),
+    site_sessions JSONB NOT NULL DEFAULT CAST('[]' AS JSONB),
+    status VARCHAR(32) NOT NULL DEFAULT 'OFFLINE',
+    last_heartbeat_time TIMESTAMP WITH TIME ZONE,
+    create_time TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    update_time TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
+    );
+
+
+
+CREATE TABLE IF NOT EXISTS byai.bykc_ec_connection (
+                                                       connection_id BIGINT PRIMARY KEY,
+                                                       connector_code VARCHAR(64) NOT NULL,
+    owner_type VARCHAR(32) NOT NULL DEFAULT 'PERSONAL',
+    auth_type VARCHAR(32) NOT NULL,
+    connection_name VARCHAR(128) NOT NULL,
+    run_location VARCHAR(32) NOT NULL,
+    credential_config JSONB NOT NULL DEFAULT CAST('{}' AS JSONB),
+    runtime_config JSONB NOT NULL DEFAULT CAST('{}' AS JSONB),
+    site_sessions JSONB NOT NULL DEFAULT CAST('[]' AS JSONB),
+    status VARCHAR(32) NOT NULL DEFAULT 'CREATED',
+    last_check_time TIMESTAMP WITH TIME ZONE,
+    created_by BIGINT NOT NULL,
+    create_time TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    update_time TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
+    );
+
+
+
+CREATE TABLE IF NOT EXISTS byai.bykc_ec_sync_task (
+                                                      task_id BIGINT PRIMARY KEY,
+                                                      task_name VARCHAR(255) NOT NULL,
+    connector_code VARCHAR(64) NOT NULL,
+    connection_id BIGINT,
+    owner_type VARCHAR(32) NOT NULL DEFAULT 'PERSONAL',
+    run_location VARCHAR(32) NOT NULL,
+    source_url VARCHAR(2048),
+    scope_config JSONB NOT NULL DEFAULT CAST('{}' AS JSONB),
+    target_type VARCHAR(64) NOT NULL,
+    target_config JSONB NOT NULL DEFAULT CAST('{}' AS JSONB),
+    signal_config JSONB NOT NULL DEFAULT CAST('[]' AS JSONB),
+    schedule_type VARCHAR(32) NOT NULL DEFAULT 'MANUAL',
+    schedule_config JSONB NOT NULL DEFAULT CAST('{}' AS JSONB),
+    next_run_time TIMESTAMP WITH TIME ZONE,
+    last_scheduled_run_time TIMESTAMP WITH TIME ZONE,
+                                          options JSONB NOT NULL DEFAULT CAST('{}' AS JSONB),
+    status VARCHAR(32) NOT NULL DEFAULT 'CREATED',
+    created_by BIGINT NOT NULL,
+    create_time TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    update_time TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
+    );
+
+
+
+CREATE TABLE IF NOT EXISTS byai.bykc_ec_sync_run (
+                                                     run_id BIGINT PRIMARY KEY,
+                                                     task_id BIGINT NOT NULL,
+                                                     trigger_type VARCHAR(32) NOT NULL DEFAULT 'MANUAL',
+    status VARCHAR(32) NOT NULL,
+    current_step VARCHAR(64),
+    total_count INTEGER NOT NULL DEFAULT 0,
+    markdown_count INTEGER NOT NULL DEFAULT 0,
+    asset_count INTEGER NOT NULL DEFAULT 0,
+    failed_count INTEGER NOT NULL DEFAULT 0,
+    need_action_type VARCHAR(64),
+    need_action_payload JSONB NOT NULL DEFAULT CAST('{}' AS JSONB),
+    storage_path VARCHAR(1024),
+    started_at TIMESTAMP WITH TIME ZONE,
+    finished_at TIMESTAMP WITH TIME ZONE,
+    create_time TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
+    );
+
+
+
+CREATE TABLE IF NOT EXISTS byai.bykc_ec_sync_run_step (
+                                                          step_id BIGINT PRIMARY KEY,
+                                                          run_id BIGINT NOT NULL,
+                                                          step_code VARCHAR(64) NOT NULL,
+    step_name VARCHAR(128) NOT NULL,
+    status VARCHAR(32) NOT NULL,
+    message VARCHAR(2048),
+    step_order INTEGER NOT NULL,
+    started_at TIMESTAMP WITH TIME ZONE,
+    finished_at TIMESTAMP WITH TIME ZONE,
+    create_time TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
+    );
+
+
+
+CREATE TABLE IF NOT EXISTS byai.bykc_ec_artifact (
+                                                     artifact_id BIGINT PRIMARY KEY,
+                                                     run_id BIGINT NOT NULL,
+                                                     artifact_type VARCHAR(32),
+    artifact_name VARCHAR(512),
+    source_url VARCHAR(2048),
+    title VARCHAR(512),
+    markdown_path VARCHAR(1024),
+    raw_path VARCHAR(1024),
+    asset_dir VARCHAR(1024),
+    manifest_path VARCHAR(1024),
+    item_count INTEGER NOT NULL DEFAULT 0,
+    file_id BIGINT,
+    file_url VARCHAR(2048),
+    content_type VARCHAR(128),
+    file_system_type VARCHAR(32),
+    status VARCHAR(32) NOT NULL DEFAULT 'CREATED',
+    create_time TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
+    );
+
+
+
+CREATE TABLE IF NOT EXISTS byai.bykc_ec_artifact_signal (
+                                                            signal_id BIGINT PRIMARY KEY,
+                                                            artifact_id BIGINT,
+                                                            run_id BIGINT NOT NULL,
+                                                            signal_type VARCHAR(64) NOT NULL,
+    signal_type_name VARCHAR(128),
+    signal_code VARCHAR(128) NOT NULL,
+    signal_name VARCHAR(255) NOT NULL,
+    confidence NUMERIC(5, 4),
+    signal_source VARCHAR(32) NOT NULL,
+    create_time TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
+    );
+
+
+
+CREATE TABLE IF NOT EXISTS byai.bykc_ec_import_record (
+                                                          import_id BIGINT PRIMARY KEY,
+                                                          run_id BIGINT NOT NULL,
+                                                          artifact_id BIGINT,
+                                                          target_type VARCHAR(64) NOT NULL,
+    target_id VARCHAR(128),
+    target_path VARCHAR(1024),
+    status VARCHAR(32) NOT NULL,
+    create_time TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
+    );
+
+
+
+CREATE INDEX IF NOT EXISTS idx_bykc_ec_sync_task_created_by ON byai.bykc_ec_sync_task (created_by);
+
+
+CREATE INDEX IF NOT EXISTS idx_bykc_ec_connection_created_by ON byai.bykc_ec_connection (created_by);
+
+
+CREATE INDEX IF NOT EXISTS idx_bykc_ec_connection_connector ON byai.bykc_ec_connection (connector_code);
+
+
+CREATE INDEX IF NOT EXISTS idx_bykc_ec_sync_task_next_run_time ON byai.bykc_ec_sync_task (status, next_run_time);
+
+
+CREATE INDEX IF NOT EXISTS idx_bykc_ec_sync_run_task_id ON byai.bykc_ec_sync_run (task_id);
+
+
+CREATE INDEX IF NOT EXISTS idx_bykc_ec_sync_run_step_run_id ON byai.bykc_ec_sync_run_step (run_id);
+
+
+CREATE INDEX IF NOT EXISTS idx_bykc_ec_artifact_run_id ON byai.bykc_ec_artifact (run_id);
+
+
+CREATE INDEX IF NOT EXISTS idx_bykc_ec_artifact_signal_run_id ON byai.bykc_ec_artifact_signal (run_id);
+
+
+CREATE INDEX IF NOT EXISTS idx_bykc_ec_import_record_run_id ON byai.bykc_ec_import_record (run_id);
+
+
+
+COMMENT ON TABLE byai.bykc_ec_collector_agent IS 'ByKC Browser Bridge连接状态表';
+
+
+COMMENT ON COLUMN byai.bykc_ec_collector_agent.agent_id IS 'Browser Bridge客户端主键';
+
+
+COMMENT ON COLUMN byai.bykc_ec_collector_agent.user_id IS '所属用户ID';
+
+
+COMMENT ON COLUMN byai.bykc_ec_collector_agent.agent_name IS 'Browser Bridge客户端名称';
+
+
+COMMENT ON COLUMN byai.bykc_ec_collector_agent.runtime_name IS 'Browser Bridge运行时名称';
+
+
+COMMENT ON COLUMN byai.bykc_ec_collector_agent.runtime_version IS 'Browser Bridge版本';
+
+
+COMMENT ON COLUMN byai.bykc_ec_collector_agent.browser_bridge_status IS 'Browser Bridge连接状态';
+
+
+COMMENT ON COLUMN byai.bykc_ec_collector_agent.chrome_profile IS '绑定的浏览器Profile标识';
+
+
+COMMENT ON COLUMN byai.bykc_ec_collector_agent.site_sessions IS 'Browser Bridge上报的目标站点登录态列表，JSON数组';
+
+
+COMMENT ON COLUMN byai.bykc_ec_collector_agent.status IS 'Browser Bridge在线状态，ONLINE在线，OFFLINE离线';
+
+
+COMMENT ON COLUMN byai.bykc_ec_collector_agent.last_heartbeat_time IS '最近一次心跳时间';
+
+
+COMMENT ON COLUMN byai.bykc_ec_collector_agent.create_time IS '创建时间';
+
+
+COMMENT ON COLUMN byai.bykc_ec_collector_agent.update_time IS '更新时间';
+
+
+
+COMMENT ON TABLE byai.bykc_ec_connection IS 'ByKC生态采集用户连接配置表';
+
+
+COMMENT ON COLUMN byai.bykc_ec_connection.connection_id IS '用户连接主键';
+
+
+COMMENT ON COLUMN byai.bykc_ec_connection.connector_code IS '运行时生态能力编码，来自OpenCLI manifest或ByClaw Browser Bridge虚拟能力';
+
+
+COMMENT ON COLUMN byai.bykc_ec_connection.owner_type IS '连接归属类型，PERSONAL个人，ENTERPRISE企业';
+
+
+COMMENT ON COLUMN byai.bykc_ec_connection.auth_type IS '认证方式，例如BROWSER、TOKEN、OAUTH、IMAP、PUBLIC_URL';
+
+
+COMMENT ON COLUMN byai.bykc_ec_connection.connection_name IS '用户连接名称';
+
+
+COMMENT ON COLUMN byai.bykc_ec_connection.run_location IS '连接运行位置，LOCAL用户浏览器桥接侧，SERVER平台侧';
+
+
+COMMENT ON COLUMN byai.bykc_ec_connection.credential_config IS '连接凭证配置，JSON结构，敏感信息不在查询接口明文返回';
+
+
+COMMENT ON COLUMN byai.bykc_ec_connection.runtime_config IS '连接运行配置，JSON结构，例如Browser Bridge绑定信息或OpenCLI运行参数';
+
+
+COMMENT ON COLUMN byai.bykc_ec_connection.site_sessions IS 'Browser Bridge上报的站点登录态状态，JSON数组';
+
+
+COMMENT ON COLUMN byai.bykc_ec_connection.status IS '连接状态，例如CREATED、READY、NEED_AUTH、FAILED';
+
+
+COMMENT ON COLUMN byai.bykc_ec_connection.last_check_time IS '最近一次连接检测时间';
+
+
+COMMENT ON COLUMN byai.bykc_ec_connection.created_by IS '创建用户ID';
+
+
+COMMENT ON COLUMN byai.bykc_ec_connection.create_time IS '创建时间';
+
+
+COMMENT ON COLUMN byai.bykc_ec_connection.update_time IS '更新时间';
+
+
+
+COMMENT ON TABLE byai.bykc_ec_sync_task IS 'ByKC生态采集同步任务表';
+
+
+COMMENT ON COLUMN byai.bykc_ec_sync_task.task_id IS '采集任务主键';
+
+
+COMMENT ON COLUMN byai.bykc_ec_sync_task.task_name IS '采集任务名称';
+
+
+COMMENT ON COLUMN byai.bykc_ec_sync_task.connector_code IS '运行时生态能力编码';
+
+
+COMMENT ON COLUMN byai.bykc_ec_sync_task.connection_id IS '用户连接ID，P1连接管理使用';
+
+
+COMMENT ON COLUMN byai.bykc_ec_sync_task.owner_type IS '任务归属类型，personal个人，enterprise企业';
+
+
+COMMENT ON COLUMN byai.bykc_ec_sync_task.run_location IS '任务运行位置，LOCAL用户浏览器桥接侧，SERVER平台侧';
+
+
+COMMENT ON COLUMN byai.bykc_ec_sync_task.source_url IS '采集来源链接';
+
+
+COMMENT ON COLUMN byai.bykc_ec_sync_task.scope_config IS '采集范围配置，JSON结构';
+
+
+COMMENT ON COLUMN byai.bykc_ec_sync_task.target_type IS '入库目标类型，例如knowledgeBase、space';
+
+
+COMMENT ON COLUMN byai.bykc_ec_sync_task.target_config IS '入库目标配置，JSON结构';
+
+
+COMMENT ON COLUMN byai.bykc_ec_sync_task.signal_config IS '任务级信号配置，JSON数组';
+
+
+COMMENT ON COLUMN byai.bykc_ec_sync_task.schedule_type IS '调度类型，例如manual手动、once单次、daily每天、weekly每周';
+
+
+COMMENT ON COLUMN byai.bykc_ec_sync_task.schedule_config IS '调度配置，JSON结构';
+
+
+COMMENT ON COLUMN byai.bykc_ec_sync_task.next_run_time IS '下一次计划运行时间';
+
+
+COMMENT ON COLUMN byai.bykc_ec_sync_task.last_scheduled_run_time IS '最近一次计划调度运行时间';
+
+
+COMMENT ON COLUMN byai.bykc_ec_sync_task.options IS '采集高级选项，JSON结构';
+
+
+COMMENT ON COLUMN byai.bykc_ec_sync_task.status IS '任务状态，例如CREATED已创建、RUNNING运行中、SUCCESS成功、FAILED失败、DISABLED停用、ARCHIVED归档';
+
+
+COMMENT ON COLUMN byai.bykc_ec_sync_task.created_by IS '创建用户ID';
+
+
+COMMENT ON COLUMN byai.bykc_ec_sync_task.create_time IS '创建时间';
+
+
+COMMENT ON COLUMN byai.bykc_ec_sync_task.update_time IS '更新时间';
+
+
+
+COMMENT ON TABLE byai.bykc_ec_sync_run IS 'ByKC生态采集运行记录表';
+
+
+COMMENT ON COLUMN byai.bykc_ec_sync_run.run_id IS '采集运行主键';
+
+
+COMMENT ON COLUMN byai.bykc_ec_sync_run.task_id IS '所属采集任务ID';
+
+
+COMMENT ON COLUMN byai.bykc_ec_sync_run.trigger_type IS '触发方式，例如MANUAL手动、SCHEDULED计划调度、RETRY重试、SKILL技能入口、CHAT聊天入口';
+
+
+COMMENT ON COLUMN byai.bykc_ec_sync_run.status IS '运行状态，例如SUCCESS成功、FAILED失败、RUNNING运行中、SKIPPED已跳过';
+
+
+COMMENT ON COLUMN byai.bykc_ec_sync_run.current_step IS '当前运行步骤编码';
+
+
+COMMENT ON COLUMN byai.bykc_ec_sync_run.total_count IS '采集条目总数';
+
+
+COMMENT ON COLUMN byai.bykc_ec_sync_run.markdown_count IS '生成Markdown文件数量';
+
+
+COMMENT ON COLUMN byai.bykc_ec_sync_run.asset_count IS '归档附件数量';
+
+
+COMMENT ON COLUMN byai.bykc_ec_sync_run.failed_count IS '失败条目数量';
+
+
+COMMENT ON COLUMN byai.bykc_ec_sync_run.need_action_type IS '需要用户处理的动作类型，例如BROWSER_BRIDGE、USER_BROWSER_BRIDGE_WAITING';
+
+
+COMMENT ON COLUMN byai.bykc_ec_sync_run.need_action_payload IS '需要用户处理的动作详情，JSON结构';
+
+
+COMMENT ON COLUMN byai.bykc_ec_sync_run.storage_path IS '本次采集产物对象存储基础路径';
+
+
+COMMENT ON COLUMN byai.bykc_ec_sync_run.started_at IS '运行开始时间';
+
+
+COMMENT ON COLUMN byai.bykc_ec_sync_run.finished_at IS '运行结束时间';
+
+
+COMMENT ON COLUMN byai.bykc_ec_sync_run.create_time IS '创建时间';
+
+
+
+COMMENT ON TABLE byai.bykc_ec_sync_run_step IS 'ByKC生态采集运行步骤表';
+
+
+COMMENT ON COLUMN byai.bykc_ec_sync_run_step.step_id IS '运行步骤主键';
+
+
+COMMENT ON COLUMN byai.bykc_ec_sync_run_step.run_id IS '所属采集运行ID';
+
+
+COMMENT ON COLUMN byai.bykc_ec_sync_run_step.step_code IS '步骤编码';
+
+
+COMMENT ON COLUMN byai.bykc_ec_sync_run_step.step_name IS '步骤名称';
+
+
+COMMENT ON COLUMN byai.bykc_ec_sync_run_step.status IS '步骤状态，例如SUCCESS、FAILED、SKIPPED、CREATED';
+
+
+COMMENT ON COLUMN byai.bykc_ec_sync_run_step.message IS '步骤执行说明';
+
+
+COMMENT ON COLUMN byai.bykc_ec_sync_run_step.step_order IS '步骤排序';
+
+
+COMMENT ON COLUMN byai.bykc_ec_sync_run_step.started_at IS '步骤开始时间';
+
+
+COMMENT ON COLUMN byai.bykc_ec_sync_run_step.finished_at IS '步骤结束时间';
+
+
+COMMENT ON COLUMN byai.bykc_ec_sync_run_step.create_time IS '创建时间';
+
+
+
+COMMENT ON TABLE byai.bykc_ec_artifact IS 'ByKC生态采集产物表';
+
+
+COMMENT ON COLUMN byai.bykc_ec_artifact.artifact_id IS '采集产物主键';
+
+
+COMMENT ON COLUMN byai.bykc_ec_artifact.run_id IS '所属采集运行ID';
+
+
+COMMENT ON COLUMN byai.bykc_ec_artifact.artifact_type IS '产物类型，例如MARKDOWN、RAW、ASSET、MANIFEST';
+
+
+COMMENT ON COLUMN byai.bykc_ec_artifact.artifact_name IS '产物名称';
+
+
+COMMENT ON COLUMN byai.bykc_ec_artifact.source_url IS '来源站点链接';
+
+
+COMMENT ON COLUMN byai.bykc_ec_artifact.title IS '来源内容标题';
+
+
+COMMENT ON COLUMN byai.bykc_ec_artifact.markdown_path IS 'Markdown产物存储路径';
+
+
+COMMENT ON COLUMN byai.bykc_ec_artifact.raw_path IS '原始数据产物存储路径';
+
+
+COMMENT ON COLUMN byai.bykc_ec_artifact.asset_dir IS '附件资产存储路径';
+
+
+COMMENT ON COLUMN byai.bykc_ec_artifact.manifest_path IS 'manifest清单存储路径';
+
+
+COMMENT ON COLUMN byai.bykc_ec_artifact.item_count IS '产物包含的条目数量';
+
+
+COMMENT ON COLUMN byai.bykc_ec_artifact.file_id IS '关联byai_files文件ID';
+
+
+COMMENT ON COLUMN byai.bykc_ec_artifact.file_url IS '对象存储文件访问地址';
+
+
+COMMENT ON COLUMN byai.bykc_ec_artifact.content_type IS '文件MIME类型';
+
+
+COMMENT ON COLUMN byai.bykc_ec_artifact.file_system_type IS '文件存储系统类型，例如minio、local、sftp';
+
+
+COMMENT ON COLUMN byai.bykc_ec_artifact.status IS '产物状态，例如CREATED、SUCCESS、FAILED';
+
+
+COMMENT ON COLUMN byai.bykc_ec_artifact.create_time IS '创建时间';
+
+
+
+COMMENT ON TABLE byai.bykc_ec_artifact_signal IS 'ByKC生态采集产物信号表';
+
+
+COMMENT ON COLUMN byai.bykc_ec_artifact_signal.signal_id IS '信号记录主键';
+
+
+COMMENT ON COLUMN byai.bykc_ec_artifact_signal.artifact_id IS '关联采集产物ID';
+
+
+COMMENT ON COLUMN byai.bykc_ec_artifact_signal.run_id IS '所属采集运行ID';
+
+
+COMMENT ON COLUMN byai.bykc_ec_artifact_signal.signal_type IS '信号类型编码，例如source、object、topic、privacy';
+
+
+COMMENT ON COLUMN byai.bykc_ec_artifact_signal.signal_type_name IS '信号类型名称';
+
+
+COMMENT ON COLUMN byai.bykc_ec_artifact_signal.signal_code IS '信号编码';
+
+
+COMMENT ON COLUMN byai.bykc_ec_artifact_signal.signal_name IS '信号名称';
+
+
+COMMENT ON COLUMN byai.bykc_ec_artifact_signal.confidence IS '信号置信度，0到1';
+
+
+COMMENT ON COLUMN byai.bykc_ec_artifact_signal.signal_source IS '信号来源，例如connector、user、rule、model';
+
+
+COMMENT ON COLUMN byai.bykc_ec_artifact_signal.create_time IS '创建时间';
+
+
+
+COMMENT ON TABLE byai.bykc_ec_import_record IS 'ByKC生态采集入库记录表';
+
+
+COMMENT ON COLUMN byai.bykc_ec_import_record.import_id IS '入库记录主键';
+
+
+COMMENT ON COLUMN byai.bykc_ec_import_record.run_id IS '所属采集运行ID';
+
+
+COMMENT ON COLUMN byai.bykc_ec_import_record.artifact_id IS '关联采集产物ID';
+
+
+COMMENT ON COLUMN byai.bykc_ec_import_record.target_type IS '入库目标类型，例如knowledgeBase、space';
+
+
+COMMENT ON COLUMN byai.bykc_ec_import_record.target_id IS '入库目标ID或目标名称';
+
+
+COMMENT ON COLUMN byai.bykc_ec_import_record.target_path IS '入库目标路径';
+
+
+COMMENT ON COLUMN byai.bykc_ec_import_record.status IS '入库状态，例如SUCCESS、FAILED、SKIPPED';
+
+
+COMMENT ON COLUMN byai.bykc_ec_import_record.create_time IS '创建时间';
+
+-- ========== V0.1.1 (merged at 2026-07-06 10:27:58) ==========
+CREATE SEQUENCE IF NOT EXISTS byai.ss_sandbox_resize_record_id_seq;
+
+
+
+CREATE OR REPLACE FUNCTION byai.add_column_if_missing(
+    p_schema_name TEXT,
+    p_table_name TEXT,
+    p_column_name TEXT,
+    p_column_definition TEXT
+) RETURNS VOID AS $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = p_schema_name
+          AND table_name = p_table_name
+          AND column_name = p_column_name
+    ) THEN
+        EXECUTE 'ALTER TABLE ' || quote_ident(p_schema_name) || '.' || quote_ident(p_table_name)
+            || ' ADD COLUMN ' || quote_ident(p_column_name) || ' ' || p_column_definition;
+    END IF;
+END;
+$$ LANGUAGE plpgsql;
+
+
+
+SELECT byai.add_column_if_missing('byai', 'sandbox_service_spec', 'service_type', 'VARCHAR(128)');
+
+
+SELECT byai.add_column_if_missing('byai', 'sandbox_service_spec', 'display_name', 'VARCHAR(128)');
+
+
+SELECT byai.add_column_if_missing('byai', 'sandbox_service_spec', 'enabled', 'INTEGER DEFAULT 1');
+
+
+SELECT byai.add_column_if_missing('byai', 'sandbox_service_spec', 'default_profile_key', 'VARCHAR(64)');
+
+
+SELECT byai.add_column_if_missing('byai', 'sandbox_service_spec', 'autoscale_enabled', 'INTEGER DEFAULT 0');
+
+
+
+CREATE TABLE IF NOT EXISTS byai.sandbox_service_profile (
+    id BIGINT NOT NULL DEFAULT nextval('byai.seq_any_table'::regclass),
+    service_type VARCHAR(128) NOT NULL,
+    profile_key VARCHAR(64) NOT NULL,
+    resource_requests JSONB,
+    resource_limits JSONB,
+    template_patch_json JSONB,
+    resize_enabled INTEGER DEFAULT 0,
+    resize_strategy VARCHAR(32) DEFAULT 'IN_PLACE',
+    enabled INTEGER DEFAULT 1,
+    sort_order INTEGER DEFAULT 0,
+    updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT pg_systimestamp(),
+    CONSTRAINT pk_sandbox_service_profile PRIMARY KEY (id)
+);
+
+
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_sandbox_service_profile_type_key
+    ON byai.sandbox_service_profile (service_type, profile_key);
+
+
+
+SELECT byai.add_column_if_missing('byai', 'ss_sandbox_record', 'service_type', 'VARCHAR(128)');
+
+
+SELECT byai.add_column_if_missing('byai', 'ss_sandbox_record', 'profile_key', 'VARCHAR(64)');
+
+
+SELECT byai.add_column_if_missing('byai', 'ss_sandbox_record', 'resource_requests', 'JSONB');
+
+
+SELECT byai.add_column_if_missing('byai', 'ss_sandbox_record', 'resource_limits', 'JSONB');
+
+
+SELECT byai.add_column_if_missing('byai', 'ss_sandbox_record', 'resize_status', 'VARCHAR(32)');
+
+
+SELECT byai.add_column_if_missing('byai', 'ss_sandbox_record', 'last_resize_at', 'TIMESTAMP(6) WITHOUT TIME ZONE');
+
+
+SELECT byai.add_column_if_missing('byai', 'ss_sandbox_record', 'last_resize_reason', 'TEXT');
+
+
+SELECT byai.add_column_if_missing('byai', 'ss_sandbox_record', 'last_resize_duration_ms', 'BIGINT');
+
+
+SELECT byai.add_column_if_missing('byai', 'ss_sandbox_record', 'last_resize_success', 'INTEGER');
+
+
+SELECT byai.add_column_if_missing('byai', 'ss_sandbox_record', 'last_resize_from_profile', 'VARCHAR(64)');
+
+
+SELECT byai.add_column_if_missing('byai', 'ss_sandbox_record', 'last_resize_to_profile', 'VARCHAR(64)');
+
+
+SELECT byai.add_column_if_missing('byai', 'ss_sandbox_record', 'last_resize_error', 'TEXT');
+
+
+
+CREATE TABLE IF NOT EXISTS byai.ss_sandbox_resize_record (
+    id BIGINT NOT NULL DEFAULT nextval('byai.ss_sandbox_resize_record_id_seq'::regclass),
+    sandbox_record_id BIGINT NOT NULL,
+    sandbox_id VARCHAR(128),
+    user_code VARCHAR(500) NOT NULL,
+    service_type VARCHAR(128),
+    from_profile_key VARCHAR(64),
+    to_profile_key VARCHAR(64),
+    from_resource_requests JSONB,
+    from_resource_limits JSONB,
+    to_resource_requests JSONB,
+    to_resource_limits JSONB,
+    trigger_source VARCHAR(64),
+    reason_code VARCHAR(128),
+    reason_detail TEXT,
+    resize_type VARCHAR(32),
+    status VARCHAR(32) NOT NULL DEFAULT 'REQUESTED',
+    success INTEGER,
+    started_at TIMESTAMP(6) WITHOUT TIME ZONE,
+    finished_at TIMESTAMP(6) WITHOUT TIME ZONE,
+    duration_ms BIGINT,
+    opensandbox_request_id VARCHAR(128),
+    opensandbox_response JSONB,
+    error_message TEXT,
+    create_time TIMESTAMP(6) WITHOUT TIME ZONE NOT NULL DEFAULT pg_systimestamp(),
+    update_time TIMESTAMP(6) WITHOUT TIME ZONE NOT NULL DEFAULT pg_systimestamp(),
+    CONSTRAINT pk_ss_sandbox_resize_record PRIMARY KEY (id)
+);
+
+
+
+CREATE INDEX IF NOT EXISTS idx_ss_sandbox_resize_record_record
+    ON byai.ss_sandbox_resize_record (sandbox_record_id, started_at DESC);
+
+
+CREATE INDEX IF NOT EXISTS idx_ss_sandbox_resize_record_user
+    ON byai.ss_sandbox_resize_record (user_code, started_at DESC);
+
+
+CREATE INDEX IF NOT EXISTS idx_ss_sandbox_resize_record_sandbox
+    ON byai.ss_sandbox_resize_record (sandbox_id);
+
+
+CREATE INDEX IF NOT EXISTS idx_ss_sandbox_resize_record_status
+    ON byai.ss_sandbox_resize_record (status, started_at);
+
+
+
+DROP FUNCTION byai.add_column_if_missing(TEXT, TEXT, TEXT, TEXT);
+
+-- ========== V0.2.0 (merged at 2026-07-06 10:27:58) ==========
+-- 个人中心-个人邮箱账号表
+-- 用于保存当前用户的多个邮箱账号配置；授权码只保存加密值，接口不返回明文。
+CREATE TABLE IF NOT EXISTS byai.po_user_mail_account (
+    account_id BIGINT PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    account_name VARCHAR(64) NOT NULL,
+    email VARCHAR(254) NOT NULL,
+    display_name VARCHAR(128),
+    default_flag CHAR(1) NOT NULL DEFAULT 'N',
+    imap_host VARCHAR(255) NOT NULL,
+    imap_port INTEGER NOT NULL,
+    imap_encryption VARCHAR(16) NOT NULL,
+    smtp_host VARCHAR(255) NOT NULL,
+    smtp_port INTEGER NOT NULL,
+    smtp_encryption VARCHAR(16) NOT NULL,
+    auth_code_cipher TEXT,
+    auth_code_last4 VARCHAR(16),
+    status VARCHAR(16) NOT NULL DEFAULT 'NORMAL',
+    last_check_time TIMESTAMP,
+    create_by BIGINT,
+    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    update_by BIGINT,
+    update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    delete_flag CHAR(1) NOT NULL DEFAULT '0'
+    );
+
+
+
+COMMENT ON TABLE byai.po_user_mail_account IS '个人中心-个人邮箱账号表';
+
+
+COMMENT ON COLUMN byai.po_user_mail_account.account_id IS '邮箱账号主键ID';
+
+
+COMMENT ON COLUMN byai.po_user_mail_account.user_id IS '所属用户ID';
+
+
+COMMENT ON COLUMN byai.po_user_mail_account.account_name IS '邮箱账号名称，如QQ邮箱、Gmail';
+
+
+COMMENT ON COLUMN byai.po_user_mail_account.email IS '邮箱地址';
+
+
+COMMENT ON COLUMN byai.po_user_mail_account.display_name IS '发件展示名称';
+
+
+COMMENT ON COLUMN byai.po_user_mail_account.default_flag IS '是否默认邮箱账号，Y是，N否';
+
+
+COMMENT ON COLUMN byai.po_user_mail_account.imap_host IS 'IMAP服务器地址';
+
+
+COMMENT ON COLUMN byai.po_user_mail_account.imap_port IS 'IMAP服务器端口';
+
+
+COMMENT ON COLUMN byai.po_user_mail_account.imap_encryption IS 'IMAP加密方式，如tls、ssl、starttls、none';
+
+
+COMMENT ON COLUMN byai.po_user_mail_account.smtp_host IS 'SMTP服务器地址';
+
+
+COMMENT ON COLUMN byai.po_user_mail_account.smtp_port IS 'SMTP服务器端口';
+
+
+COMMENT ON COLUMN byai.po_user_mail_account.smtp_encryption IS 'SMTP加密方式，如tls、ssl、starttls、none';
+
+
+COMMENT ON COLUMN byai.po_user_mail_account.auth_code_cipher IS '邮箱授权码密文';
+
+
+COMMENT ON COLUMN byai.po_user_mail_account.auth_code_last4 IS '邮箱授权码后四位，用于前端提示';
+
+
+COMMENT ON COLUMN byai.po_user_mail_account.status IS '账号状态，NORMAL正常';
+
+
+COMMENT ON COLUMN byai.po_user_mail_account.last_check_time IS '最近一次连通性检查时间，当前阶段预留';
+
+
+COMMENT ON COLUMN byai.po_user_mail_account.create_by IS '创建人ID';
+
+
+COMMENT ON COLUMN byai.po_user_mail_account.create_time IS '创建时间';
+
+
+COMMENT ON COLUMN byai.po_user_mail_account.update_by IS '更新人ID';
+
+
+COMMENT ON COLUMN byai.po_user_mail_account.update_time IS '更新时间';
+
+
+COMMENT ON COLUMN byai.po_user_mail_account.delete_flag IS '逻辑删除标识，0未删除，1已删除';
+
+
+
+CREATE INDEX IF NOT EXISTS idx_po_user_mail_account_user
+    ON byai.po_user_mail_account (user_id, delete_flag, update_time DESC);
+
+
+
+CREATE UNIQUE INDEX IF NOT EXISTS uk_po_user_mail_account_default
+    ON byai.po_user_mail_account (user_id)
+    WHERE default_flag = 'Y' AND delete_flag = '0';
+
+
+
+-- 删除生态采集不用的库表脚本（功能代码已经删掉）
+DROP TABLE IF EXISTS byai.bykc_ec_import_record CASCADE;
+DROP TABLE IF EXISTS byai.bykc_ec_artifact_signal CASCADE;
+DROP TABLE IF EXISTS byai.bykc_ec_artifact CASCADE;
+DROP TABLE IF EXISTS byai.bykc_ec_sync_run_step CASCADE;
+DROP TABLE IF EXISTS byai.bykc_ec_sync_run CASCADE;
+DROP TABLE IF EXISTS byai.bykc_ec_sync_task CASCADE;
+DROP TABLE IF EXISTS byai.bykc_ec_connection CASCADE;
+DROP TABLE IF EXISTS byai.bykc_ec_collector_agent CASCADE;
+DROP TABLE IF EXISTS byai.bykc_ec_connector CASCADE;
+
+ALTER TABLE byai.byai_aimodel ADD COLUMN model_protocol VARCHAR(64) DEFAULT null;
+
+-- 技能扩展表
+CREATE TABLE byai.ss_res_ext_skill (
+    resource_id int8 NOT NULL,
+    skill_type varchar(32) NOT NULL DEFAULT 'hub',
+    source_type varchar(64) NOT NULL,
+    version varchar(50) NOT NULL DEFAULT 'v0.1',
+    skill_url varchar(500) ,
+    skill_package_format varchar(32) NOT NULL DEFAULT 'zip',
+    skill_original_filename varchar(255),
+    skill_package_size int8,
+    skill_package_hash varchar(128),
+    target_content text,
+    sync_status varchar(32),
+    sync_error text,
+    last_sync_time timestamp,
+    CONSTRAINT pk_ss_res_ext_skill PRIMARY KEY (resource_id)
+);
+
+COMMENT ON TABLE byai.ss_res_ext_skill IS '技能资源扩展表';
+COMMENT ON COLUMN byai.ss_res_ext_skill.resource_id IS '资源ID，关联 byai.ss_resource.resource_id';
+COMMENT ON COLUMN byai.ss_res_ext_skill.skill_type IS '技能类型：hub=来自个人技能/企业技能管理的技能，inner=系统内置技能';
+COMMENT ON COLUMN byai.ss_res_ext_skill.source_type IS '技能来源类型：SYSTEM_BUILTIN=系统内置，SKILL_MANAGE_IMPORT=技能管理导入，CHAT_UPLOAD=对话框技能上传，FILE_MANAGE_UPLOAD=文件管理上传';
+COMMENT ON COLUMN byai.ss_res_ext_skill.version IS '技能版本号，初始值v0.1，每次有效变更自动递增，如v0.2';
+COMMENT ON COLUMN byai.ss_res_ext_skill.skill_url IS '技能压缩包在MinIO/对象存储中的内部路径(object key)，非外部下载URL';
+COMMENT ON COLUMN byai.ss_res_ext_skill.skill_package_format IS '技能压缩包格式，当前固定为zip';
+COMMENT ON COLUMN byai.ss_res_ext_skill.skill_original_filename IS '技能压缩包上传时的原始文件名';
+COMMENT ON COLUMN byai.ss_res_ext_skill.skill_package_size IS '技能压缩包大小，单位字节';
+COMMENT ON COLUMN byai.ss_res_ext_skill.skill_package_hash IS '技能压缩包内容哈希，用于重复上传、变更识别或审计';
+COMMENT ON COLUMN byai.ss_res_ext_skill.target_content IS '技能资源JSON内容，包含ss_resource基础字段和ss_res_ext_skill扩展字段，用于同步给下游运行环境';
+COMMENT ON COLUMN byai.ss_res_ext_skill.sync_status IS '同步状态：PENDING=待同步，SUCCESS=同步成功，FAILED=同步失败';
+COMMENT ON COLUMN byai.ss_res_ext_skill.sync_error IS '最近一次同步失败原因';
+COMMENT ON COLUMN byai.ss_res_ext_skill.last_sync_time IS '最近一次同步时间';
+
+CREATE OR REPLACE FUNCTION byai.add_column_if_missing(
+    p_schema_name TEXT,
+    p_table_name TEXT,
+    p_column_name TEXT,
+    p_column_definition TEXT
+) RETURNS VOID AS $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = p_schema_name
+          AND table_name = p_table_name
+          AND column_name = p_column_name
+    ) THEN
+        EXECUTE 'ALTER TABLE ' || quote_ident(p_schema_name) || '.' || quote_ident(p_table_name)
+            || ' ADD COLUMN ' || quote_ident(p_column_name) || ' ' || p_column_definition;
+    END IF;
+END;
+$$ LANGUAGE plpgsql;
+
+SELECT byai.add_column_if_missing('byai', 'ss_sandbox_resize_record', 'idempotency_key', 'VARCHAR(512)');
+SELECT byai.add_column_if_missing('byai', 'ss_sandbox_resize_record', 'skip_reason', 'TEXT');
+
+CREATE INDEX IF NOT EXISTS idx_ss_sandbox_resize_record_idempotency
+    ON byai.ss_sandbox_resize_record (idempotency_key, started_at DESC);
+
+COMMENT ON COLUMN byai.ss_sandbox_resize_record.idempotency_key IS '扩缩容动作幂等键';
+COMMENT ON COLUMN byai.ss_sandbox_resize_record.skip_reason IS '扩缩容动作跳过原因';
+
+DROP FUNCTION byai.add_column_if_missing(TEXT, TEXT, TEXT, TEXT);
+
+-- 个人中心-个人参数配置表
+-- 数据库保存密文，Redis 同步运行期明文缓存，供外部按用户 key 读取。
+CREATE TABLE IF NOT EXISTS byai.po_user_private_param (
+    param_id BIGINT PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    param_key VARCHAR(128) NOT NULL,
+    param_value_cipher TEXT NOT NULL,
+    param_value_last4 VARCHAR(16),
+    description VARCHAR(512),
+    status VARCHAR(32) NOT NULL DEFAULT 'NORMAL',
+    create_by BIGINT,
+    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    update_by BIGINT,
+    update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    delete_flag CHAR(1) NOT NULL DEFAULT '0'
+);
+
+COMMENT ON TABLE byai.po_user_private_param IS '个人中心-个人参数配置表';
+COMMENT ON COLUMN byai.po_user_private_param.param_id IS '个人参数主键ID';
+COMMENT ON COLUMN byai.po_user_private_param.user_id IS '所属用户ID';
+COMMENT ON COLUMN byai.po_user_private_param.param_key IS '参数名，环境变量格式';
+COMMENT ON COLUMN byai.po_user_private_param.param_value_cipher IS '参数值密文';
+COMMENT ON COLUMN byai.po_user_private_param.param_value_last4 IS '参数值后四位，用于前端提示';
+COMMENT ON COLUMN byai.po_user_private_param.description IS '参数说明';
+COMMENT ON COLUMN byai.po_user_private_param.status IS '参数状态，NORMAL正常，DISABLED停用';
+COMMENT ON COLUMN byai.po_user_private_param.create_by IS '创建人ID';
+COMMENT ON COLUMN byai.po_user_private_param.create_time IS '创建时间';
+COMMENT ON COLUMN byai.po_user_private_param.update_by IS '更新人ID';
+COMMENT ON COLUMN byai.po_user_private_param.update_time IS '更新时间';
+COMMENT ON COLUMN byai.po_user_private_param.delete_flag IS '逻辑删除标识，0未删除，1已删除';
+
+CREATE INDEX IF NOT EXISTS idx_po_user_private_param_user
+    ON byai.po_user_private_param (user_id, delete_flag, update_time DESC);
+
+CREATE INDEX IF NOT EXISTS idx_po_user_private_param_status
+    ON byai.po_user_private_param (user_id, delete_flag, status, update_time DESC);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uk_po_user_private_param_key
+    ON byai.po_user_private_param (user_id, param_key)
+    WHERE delete_flag = '0';
+
+-- 沙箱健康检测-水位模型配置表
+CREATE TABLE IF NOT EXISTS byai.sandbox_health_watermark_model (
+    id BIGSERIAL PRIMARY KEY,
+    model_name VARCHAR(128) NOT NULL,
+    service_type VARCHAR(64) NOT NULL,
+    profile_key VARCHAR(64),
+    enabled INTEGER NOT NULL DEFAULT 1,
+    priority INTEGER NOT NULL DEFAULT 0,
+    idle_memory_limit_ratio NUMERIC(8,4) NOT NULL,
+    busy_memory_limit_ratio NUMERIC(8,4) NOT NULL,
+    critical_memory_limit_ratio NUMERIC(8,4) NOT NULL,
+    busy_cpu_request_ratio NUMERIC(8,4) NOT NULL,
+    critical_cpu_request_ratio NUMERIC(8,4) NOT NULL,
+    consecutive_busy_samples INTEGER NOT NULL DEFAULT 2,
+    recover_samples INTEGER NOT NULL DEFAULT 2,
+    sample_interval_seconds INTEGER NOT NULL DEFAULT 30,
+    snapshot_ttl_seconds INTEGER NOT NULL DEFAULT 120,
+    watch_ttl_seconds INTEGER NOT NULL DEFAULT 90,
+    remark VARCHAR(512),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+COMMENT ON TABLE byai.sandbox_health_watermark_model IS '沙箱健康检测-水位模型配置表';
+COMMENT ON COLUMN byai.sandbox_health_watermark_model.id IS '主键ID';
+COMMENT ON COLUMN byai.sandbox_health_watermark_model.model_name IS '水位模型名称';
+COMMENT ON COLUMN byai.sandbox_health_watermark_model.service_type IS '沙箱服务类型，例如openclaw；default表示兜底模型';
+COMMENT ON COLUMN byai.sandbox_health_watermark_model.profile_key IS '沙箱规格Key，例如xs/s/m/l；为空表示服务类型默认模型';
+COMMENT ON COLUMN byai.sandbox_health_watermark_model.enabled IS '是否启用，1启用，0停用';
+COMMENT ON COLUMN byai.sandbox_health_watermark_model.priority IS '匹配优先级，同一匹配范围内数值越大优先级越高';
+COMMENT ON COLUMN byai.sandbox_health_watermark_model.idle_memory_limit_ratio IS '空闲内存limit水位阈值';
+COMMENT ON COLUMN byai.sandbox_health_watermark_model.busy_memory_limit_ratio IS '繁忙内存limit水位阈值';
+COMMENT ON COLUMN byai.sandbox_health_watermark_model.critical_memory_limit_ratio IS '阻断内存limit水位阈值';
+COMMENT ON COLUMN byai.sandbox_health_watermark_model.busy_cpu_request_ratio IS '繁忙CPU request水位阈值';
+COMMENT ON COLUMN byai.sandbox_health_watermark_model.critical_cpu_request_ratio IS '阻断CPU request水位阈值';
+COMMENT ON COLUMN byai.sandbox_health_watermark_model.consecutive_busy_samples IS '连续繁忙采样次数';
+COMMENT ON COLUMN byai.sandbox_health_watermark_model.recover_samples IS '连续恢复采样次数';
+COMMENT ON COLUMN byai.sandbox_health_watermark_model.sample_interval_seconds IS '采样周期，单位秒';
+COMMENT ON COLUMN byai.sandbox_health_watermark_model.snapshot_ttl_seconds IS '健康快照Redis TTL，单位秒';
+COMMENT ON COLUMN byai.sandbox_health_watermark_model.watch_ttl_seconds IS '健康检测watch Redis TTL，单位秒';
+COMMENT ON COLUMN byai.sandbox_health_watermark_model.remark IS '备注';
+COMMENT ON COLUMN byai.sandbox_health_watermark_model.created_at IS '创建时间';
+COMMENT ON COLUMN byai.sandbox_health_watermark_model.updated_at IS '更新时间';
+
+CREATE UNIQUE INDEX IF NOT EXISTS uk_sandbox_health_watermark_enabled
+    ON byai.sandbox_health_watermark_model (service_type, COALESCE(profile_key, ''))
+    WHERE enabled = 1;
+
+CREATE INDEX IF NOT EXISTS idx_sandbox_health_watermark_scope
+    ON byai.sandbox_health_watermark_model (service_type, profile_key, enabled, priority DESC);
+
+alter table byai.ss_res_ext_dig_employee alter column tag_name type varchar(255);
+
+
+-- 模型表新增 owner_type 字段: 区分个人模型 (PERSONAL) 和公共模型 (PUBLIC)
+ALTER TABLE byai.byai_aimodel ADD COLUMN owner_type VARCHAR(20) DEFAULT 'PUBLIC';
+COMMENT ON COLUMN byai.byai_aimodel.owner_type IS '模型归属: PUBLIC(公共) / PERSONAL(个人)';
+
+-- 模型表新增 source_type 字段: 区分模型来源
+ALTER TABLE byai.byai_aimodel ADD COLUMN source_type VARCHAR(32) DEFAULT NULL;
+COMMENT ON COLUMN byai.byai_aimodel.source_type IS '模型来源: null(用户创建) / TOKEN_SAVER(系统分配)';
+
+-- 用户 Token 额度配置表（管理员可为每位用户分配独立额度）
+CREATE TABLE IF NOT EXISTS byai.po_user_token_quota (
+    quota_id BIGINT PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    monthly_quota_limit BIGINT NOT NULL,
+    remark VARCHAR(512),
+    create_by BIGINT,
+    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    update_by BIGINT,
+    update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    delete_flag CHAR(1) NOT NULL DEFAULT '0'
+);
+
+COMMENT ON TABLE byai.po_user_token_quota IS '用户Token额度配置表';
+COMMENT ON COLUMN byai.po_user_token_quota.quota_id IS '主键ID';
+COMMENT ON COLUMN byai.po_user_token_quota.user_id IS '用户ID（关联po_users.user_id）';
+COMMENT ON COLUMN byai.po_user_token_quota.monthly_quota_limit IS '月度Token限额';
+COMMENT ON COLUMN byai.po_user_token_quota.remark IS '备注';
+COMMENT ON COLUMN byai.po_user_token_quota.create_by IS '创建人ID';
+COMMENT ON COLUMN byai.po_user_token_quota.create_time IS '创建时间';
+COMMENT ON COLUMN byai.po_user_token_quota.update_by IS '更新人ID';
+COMMENT ON COLUMN byai.po_user_token_quota.update_time IS '更新时间';
+COMMENT ON COLUMN byai.po_user_token_quota.delete_flag IS '逻辑删除标识，0未删除，1已删除';
+
+CREATE UNIQUE INDEX IF NOT EXISTS uk_po_user_token_quota_user
+    ON byai.po_user_token_quota (user_id) WHERE delete_flag = '0';
+
+-- ========== V0.3.0 (merged at 2026-07-28 18:10:57) ==========
+-- V0.3.0 需求收集模块
+-- 项目表
+CREATE TABLE IF NOT EXISTS byai.byai_project (
+    project_id      BIGINT          NOT NULL,
+    project_name    VARCHAR(100)    NOT NULL,
+    description     VARCHAR(500),
+    resource_id     BIGINT,
+    project_type    VARCHAR(20)     NOT NULL DEFAULT 'normal',
+    is_share        VARCHAR(10)     NOT NULL DEFAULT 'N',
+    create_by       BIGINT,
+    create_time     TIMESTAMP       DEFAULT CURRENT_TIMESTAMP,
+    update_by       BIGINT,
+    update_time     TIMESTAMP       DEFAULT CURRENT_TIMESTAMP,
+    delete_flag     CHAR(1)         DEFAULT '0',
+    CONSTRAINT pk_byai_project PRIMARY KEY (project_id)
+);
+
+COMMENT ON TABLE byai.byai_project IS '项目表';
+COMMENT ON COLUMN byai.byai_project.project_id IS '项目ID';
+COMMENT ON COLUMN byai.byai_project.project_name IS '项目名称';
+COMMENT ON COLUMN byai.byai_project.description IS '项目描述';
+COMMENT ON COLUMN byai.byai_project.resource_id IS '关联Agent资源ID';
+COMMENT ON COLUMN byai.byai_project.project_type IS '项目类型：normal普通项目，develop研发项目';
+COMMENT ON COLUMN byai.byai_project.is_share IS '是否分享：N-不分享，Y-可分享';
+COMMENT ON COLUMN byai.byai_project.create_by IS '创建人';
+COMMENT ON COLUMN byai.byai_project.create_time IS '创建时间';
+COMMENT ON COLUMN byai.byai_project.update_by IS '更新人';
+COMMENT ON COLUMN byai.byai_project.update_time IS '更新时间';
+COMMENT ON COLUMN byai.byai_project.delete_flag IS '删除标记 0正常 1删除';
+
+-- 项目关联会话
+ALTER TABLE byai_session ADD COLUMN project_id BIGINT NOT NULL DEFAULT -1;
+COMMENT ON COLUMN byai_session.project_id IS '项目ID,-1代表无归属项目,即默认项目';
+
+-- 项目关联成员
+CREATE TABLE IF NOT EXISTS byai.byai_project_member
+(
+    member_id   BIGINT NOT NULL,
+    project_id  BIGINT NOT NULL,
+    user_id     BIGINT,
+    role        VARCHAR(32) DEFAULT 'member',
+    agent_id    BIGINT,
+    create_time TIMESTAMP   DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT pk_byai_project_member PRIMARY KEY (member_id)
+);
+
+COMMENT ON TABLE byai.byai_project_member IS '项目成员表';
+COMMENT ON COLUMN byai.byai_project_member.member_id IS '记录ID';
+COMMENT ON COLUMN byai.byai_project_member.project_id IS '项目ID';
+COMMENT ON COLUMN byai.byai_project_member.user_id IS '用户ID';
+COMMENT ON COLUMN byai.byai_project_member.role IS '角色: owner/member';
+COMMENT ON COLUMN byai.byai_project_member.agent_id IS '关联的默认数字员工ID';
+COMMENT ON COLUMN byai.byai_project_member.create_time IS '加入时间';
+
+CREATE INDEX IF NOT EXISTS idx_project_member_project ON byai.byai_project_member (project_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_project_member_unique ON byai.byai_project_member (project_id, user_id);
+
+-- 项目仓库关联表
+CREATE TABLE IF NOT EXISTS byai.byai_project_repo (
+    repo_id         BIGINT          NOT NULL,
+    project_id      BIGINT          NOT NULL,
+    repo_full_name  VARCHAR(200)    NOT NULL,
+    repo_url        VARCHAR(500),
+    default_branch  VARCHAR(100)    DEFAULT 'main',
+    create_by       VARCHAR(64),
+    create_time     TIMESTAMP       DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT pk_byai_project_repo PRIMARY KEY (repo_id)
+);
+
+COMMENT ON TABLE byai.byai_project_repo IS '项目仓库关联表';
+COMMENT ON COLUMN byai.byai_project_repo.repo_id IS '仓库记录ID';
+COMMENT ON COLUMN byai.byai_project_repo.project_id IS '所属项目ID';
+COMMENT ON COLUMN byai.byai_project_repo.repo_full_name IS '仓库全名 owner/repo';
+COMMENT ON COLUMN byai.byai_project_repo.repo_url IS '仓库地址';
+COMMENT ON COLUMN byai.byai_project_repo.default_branch IS '默认分支';
+
+-- 项目空间共享文件表
+CREATE TABLE IF NOT EXISTS byai.byai_project_share_file
+(
+    share_id    BIGINT PRIMARY KEY NOT NULL,
+    project_id  BIGINT,
+    file_id     BIGINT             NOT NULL,
+    share_link  VARCHAR(1000),
+    create_by   BIGINT,
+    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+COMMENT ON TABLE byai.byai_project_share_file IS '项目空间共享文件表';
+COMMENT ON COLUMN byai.byai_project_share_file.share_id IS '共享记录ID';
+COMMENT ON COLUMN byai.byai_project_share_file.project_id IS '项目ID';
+COMMENT ON COLUMN byai.byai_project_share_file.file_id IS '文件ID';
+COMMENT ON COLUMN byai.byai_project_share_file.share_link IS '分享链接';
+COMMENT ON COLUMN byai.byai_project_share_file.create_by IS '创建人';
+COMMENT ON COLUMN byai.byai_project_share_file.create_time IS '创建时间';
+
+-- 需求扫描源配置表
+CREATE TABLE IF NOT EXISTS byai.byai_scan_source (
+    source_id       BIGINT          NOT NULL,
+    project_id      BIGINT          NOT NULL,
+    source_name     VARCHAR(100)    NOT NULL,
+    source_type     VARCHAR(30)     NOT NULL,
+    config          TEXT,
+    cron_expr       VARCHAR(100),
+    enabled         CHAR(1)         DEFAULT '1',
+    repo_id         BIGINT,
+    confirm_mode    VARCHAR(16)     DEFAULT 'manual',
+    score_threshold INT             DEFAULT 70,
+    last_scan_time  TIMESTAMP,
+    create_by       VARCHAR(64),
+    create_time     TIMESTAMP       DEFAULT CURRENT_TIMESTAMP,
+    update_by       VARCHAR(64),
+    update_time     TIMESTAMP       DEFAULT CURRENT_TIMESTAMP,
+    delete_flag     CHAR(1)         DEFAULT '0',
+    CONSTRAINT pk_byai_scan_source PRIMARY KEY (source_id)
+);
+
+COMMENT ON TABLE byai.byai_scan_source IS '需求扫描源配置表';
+COMMENT ON COLUMN byai.byai_scan_source.source_id IS '扫描源ID';
+COMMENT ON COLUMN byai.byai_scan_source.project_id IS '所属项目ID';
+COMMENT ON COLUMN byai.byai_scan_source.source_name IS '扫描源名称';
+COMMENT ON COLUMN byai.byai_scan_source.source_type IS '扫描源类型 dingtalk/github_issue/ci_failure';
+COMMENT ON COLUMN byai.byai_scan_source.config IS '配置JSON';
+COMMENT ON COLUMN byai.byai_scan_source.cron_expr IS 'Cron表达式';
+COMMENT ON COLUMN byai.byai_scan_source.enabled IS '是否启用 1启用 0停用';
+COMMENT ON COLUMN byai.byai_scan_source.repo_id IS '关联目标仓库ID byai_project_repo.repo_id，扫来的需求据此确定开发仓库';
+COMMENT ON COLUMN byai.byai_scan_source.confirm_mode IS '需求确认规则 manual人工确认/auto全自动派生/score按分数阈值派生';
+COMMENT ON COLUMN byai.byai_scan_source.score_threshold IS 'score模式下自动派生的最低综合分，默认70';
+COMMENT ON COLUMN byai.byai_scan_source.last_scan_time IS '最近扫描时间';
+COMMENT ON COLUMN byai.byai_scan_source.delete_flag IS '删除标记 0正常 1删除';
+
+-- 扫描执行日志表
+CREATE TABLE IF NOT EXISTS byai.byai_scan_log (
+    log_id          BIGINT          NOT NULL,
+    source_id       BIGINT          NOT NULL,
+    project_id      BIGINT          NOT NULL,
+    scan_time       TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    found_count     INT             DEFAULT 0,
+    created_count   INT             DEFAULT 0,
+    status          VARCHAR(20)     DEFAULT 'success',
+    error_msg       VARCHAR(1000),
+    CONSTRAINT pk_byai_scan_log PRIMARY KEY (log_id)
+);
+
+COMMENT ON TABLE byai.byai_scan_log IS '扫描执行日志表';
+COMMENT ON COLUMN byai.byai_scan_log.log_id IS '日志ID';
+COMMENT ON COLUMN byai.byai_scan_log.source_id IS '扫描源ID';
+COMMENT ON COLUMN byai.byai_scan_log.project_id IS '项目ID';
+COMMENT ON COLUMN byai.byai_scan_log.scan_time IS '扫描时间';
+COMMENT ON COLUMN byai.byai_scan_log.found_count IS '发现数量';
+COMMENT ON COLUMN byai.byai_scan_log.created_count IS '创建数量';
+COMMENT ON COLUMN byai.byai_scan_log.status IS '状态 success/failed';
+COMMENT ON COLUMN byai.byai_scan_log.error_msg IS '错误信息';
+
+-- 扫描结果明细表
+CREATE TABLE IF NOT EXISTS byai.byai_scan_log_item (
+    item_id         BIGINT          NOT NULL,
+    log_id          BIGINT          NOT NULL,
+    source_id       BIGINT          NOT NULL,
+    title           VARCHAR(500)    NOT NULL,
+    content         TEXT,
+    origin_id       VARCHAR(200),
+    origin_url      VARCHAR(500),
+    action          VARCHAR(20)     NOT NULL,
+    session_id      BIGINT,
+    score           INT,
+    priority        VARCHAR(8),
+    score_detail    TEXT,
+    parent_item_id  BIGINT,
+    content_hash    VARCHAR(64),
+    dedup_status    VARCHAR(20)     DEFAULT 'normal',
+    duplicate_of_item_id BIGINT,
+    create_time     TIMESTAMP       DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT pk_byai_scan_log_item PRIMARY KEY (item_id)
+);
+
+COMMENT ON TABLE byai.byai_scan_log_item IS '扫描结果明细表';
+COMMENT ON COLUMN byai.byai_scan_log_item.item_id IS '明细ID';
+COMMENT ON COLUMN byai.byai_scan_log_item.log_id IS '所属日志ID';
+COMMENT ON COLUMN byai.byai_scan_log_item.source_id IS '扫描源ID';
+COMMENT ON COLUMN byai.byai_scan_log_item.title IS '需求标题';
+COMMENT ON COLUMN byai.byai_scan_log_item.content IS '需求内容';
+COMMENT ON COLUMN byai.byai_scan_log_item.origin_id IS '来源原始ID(issue号/消息ID)';
+COMMENT ON COLUMN byai.byai_scan_log_item.origin_url IS '来源链接';
+COMMENT ON COLUMN byai.byai_scan_log_item.action IS '处理动作 created/duplicate/deferred/split(被拆分的原始条,不派发)';
+COMMENT ON COLUMN byai.byai_scan_log_item.session_id IS '已启动会话ID(byai_session.session_id)，标记需求已启动';
+COMMENT ON COLUMN byai.byai_scan_log_item.score IS 'AI综合评分 0-100';
+COMMENT ON COLUMN byai.byai_scan_log_item.priority IS 'AI优先级 P0/P1/P2';
+COMMENT ON COLUMN byai.byai_scan_log_item.score_detail IS 'AI评分明细JSON:各维度得分/风险/AI整理需求';
+COMMENT ON COLUMN byai.byai_scan_log_item.parent_item_id IS '拆分溯源:子需求指向被拆分的原始item;未拆分为空';
+COMMENT ON COLUMN byai.byai_scan_log_item.content_hash IS '归一化内容指纹,二期去重用';
+COMMENT ON COLUMN byai.byai_scan_log_item.dedup_status IS '去重状态 normal/suspected_dup/confirmed_dup/not_dup';
+COMMENT ON COLUMN byai.byai_scan_log_item.duplicate_of_item_id IS '疑似/确认重复时指向的原始item';
+
+-- 索引
+CREATE INDEX IF NOT EXISTS idx_scan_source_project ON byai.byai_scan_source(project_id);
+CREATE INDEX IF NOT EXISTS idx_scan_log_source ON byai.byai_scan_log(source_id);
+CREATE INDEX IF NOT EXISTS idx_scan_log_item_log ON byai.byai_scan_log_item(log_id);
+CREATE INDEX IF NOT EXISTS idx_scan_log_item_hash ON byai.byai_scan_log_item(content_hash);
+CREATE INDEX IF NOT EXISTS idx_scan_log_item_dedup ON byai.byai_scan_log_item(dedup_status);
+CREATE INDEX IF NOT EXISTS idx_scan_log_item_parent ON byai.byai_scan_log_item(parent_item_id);
+CREATE INDEX IF NOT EXISTS idx_project_repo_project ON byai.byai_project_repo(project_id);
+CREATE INDEX IF NOT EXISTS idx_project_share_file_project ON byai.byai_project_share_file(project_id);
+CREATE INDEX IF NOT EXISTS idx_project_share_file_file ON byai.byai_project_share_file(file_id);
+CREATE INDEX IF NOT EXISTS idx_project_share_file_create_by ON byai.byai_project_share_file(create_by);

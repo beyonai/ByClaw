@@ -9,10 +9,14 @@ import asyncio
 import json
 import logging
 import os
-import threading
 from typing import Any
+from redis.asyncio import Redis
+from dataclasses import dataclass
+
 
 logger = logging.getLogger(__name__)
+
+_shared_loop = asyncio.new_event_loop()
 
 # 服务发现目标：对应后端自动注册的服务名
 _SERVICE_NAME = "ByaiService"
@@ -20,16 +24,37 @@ _DEFAULT_ONTOLOGY_SERVICE = "byclaw-datacloud"
 
 
 def _init_discovery_redis() -> None:
-    """全局初始化服务发现 Redis（幂等）。"""
+    """全局初始化服务发现 Redis（幂等）。
+
+    集群模式：优先读 DATACLOUD_GATEWAY_REDIS_CLUSTER_HOST，再 fallback REDIS_CLUSTER_HOST。
+    单机模式：优先读 DATACLOUD_GATEWAY_REDIS_* 系列，再 fallback REDIS_* 系列。
+    """
+    from by_framework.common.config import RedisConfig  # type: ignore[import-untyped]
     from by_framework.common.redis_client import init_redis  # type: ignore[import-untyped]
 
-    init_redis(
-        host=os.getenv("DATACLOUD_GATEWAY_REDIS_HOST", os.getenv("REDIS_HOST", "localhost")),
-        port=int(os.getenv("DATACLOUD_GATEWAY_REDIS_PORT", os.getenv("REDIS_PORT", "6379"))),
-        db=int(os.getenv("DATACLOUD_GATEWAY_REDIS_DATABASE", os.getenv("REDIS_DATABASE", "0"))),
-        password=os.getenv("DATACLOUD_GATEWAY_REDIS_PASSWORD", os.getenv("REDIS_PASSWORD")) or None,
-        username=os.getenv("DATACLOUD_GATEWAY_REDIS_USERNAME", os.getenv("REDIS_USERNAME")) or None,
+    cluster_hosts = (
+        os.getenv("DATACLOUD_GATEWAY_REDIS_CLUSTER_HOST", "").strip()
+        or os.getenv("REDIS_CLUSTER_HOST", "").strip()
     )
+    cluster_nodes = None
+    if cluster_hosts:
+        cluster_nodes = [
+            (host, int(port) if port else 6379)
+            for node in cluster_hosts.split(",")
+            if node.strip()
+            for host, _, port in (node.strip().rpartition(":"),)
+        ]
+
+    redis_config = RedisConfig(
+            cluster_nodes=cluster_nodes,
+            mode="cluster" if cluster_nodes else "standalone",
+            host=os.getenv("DATACLOUD_GATEWAY_REDIS_HOST", os.getenv("REDIS_HOST", "localhost")),
+            port=int(os.getenv("DATACLOUD_GATEWAY_REDIS_PORT") or os.getenv("REDIS_PORT") or "6379"),
+            db=int(os.getenv("DATACLOUD_GATEWAY_REDIS_DB") or os.getenv("REDIS_DATABASE") or "0"),
+            password=os.getenv("DATACLOUD_GATEWAY_REDIS_PASSWORD", os.getenv("REDIS_PASSWORD", "")),
+            username=os.getenv("DATACLOUD_GATEWAY_REDIS_USERNAME", os.getenv("REDIS_USERNAME")) or None,
+        )
+    init_redis(config=redis_config)
 
 
 async def _post_via_discovery(
@@ -39,21 +64,27 @@ async def _post_via_discovery(
     headers: dict[str, str],
 ) -> Any:
     from by_framework.core.discovery import DiscoveryClient  # type: ignore[import-untyped]
-    from by_framework.util.discovery_http_client import DiscoveryHttpClient  # type: ignore[import-untyped]
+    from by_framework.util.discovery_http_client import (
+        DiscoveryHttpClient,  # type: ignore[import-untyped]
+    )
     from by_framework.util.http_client import RetryConfig  # type: ignore[import-untyped]
 
     _init_discovery_redis()
     discovery_client = DiscoveryClient(cache_interval=5)
     retry_config = RetryConfig(max_attempts=3, retry_on_status_codes={502, 503, 504})
     try:
-        async with DiscoveryHttpClient(discovery_client, retry_config=retry_config, health_threshold_ms=-1) as client:
+        async with DiscoveryHttpClient(
+            discovery_client, retry_config=retry_config, health_threshold_ms=-1
+        ) as client:
             response = await client.post(service_name, path, headers=headers, json=payload)
     finally:
         await discovery_client.close()
 
     body: dict[str, Any] = response.data if isinstance(response.data, dict) else {}
     if not response.is_success or body.get("code", 0) != 0:
-        raise ValueError(f"HTTP {response.status_code} {service_name}{path}: {body.get('msg', body)}")
+        raise ValueError(
+            f"HTTP {response.status_code} {service_name}{path}: {body.get('msg', body)}"
+        )
     if body and "data" in body:
         return body["data"]
     return body
@@ -75,15 +106,53 @@ def post_json(path: str, payload: dict[str, Any], service_env: str = "BE_DOMAINN
     return _run_async_in_thread(_post_via_discovery(_SERVICE_NAME, path, payload, headers))
 
 
+_base_id_cache: list[str] = []
+
+
+def get_default_base_id() -> str:
+    """静默获取用户第一个个人本体库 ID，结果缓存。
+
+    调用门户服务 /byaiService/ontology/base/list，
+    取返回列表第一项的 baseId。失败时返回空字符串，
+    此时平台将回落至 _default_base_id()。
+    """
+    if _base_id_cache:
+        return _base_id_cache[0]
+
+    try:
+        data = post_json(
+            path="/byaiService/ontology/base/list",
+            payload={"ownerType": "personal", "queryKeyword": ""},
+        )
+        items: list[dict] = []
+        if isinstance(data, list):
+            items = data
+        elif isinstance(data, dict):
+            items = data.get("list", data.get("data", []))
+        if items:
+            base_id = str(items[0].get("baseId", "") or items[0].get("id", ""))
+            if base_id:
+                _base_id_cache.append(base_id)
+    except Exception:
+        logger.warning("获取本体库列表失败，将使用平台默认库", exc_info=True)
+
+    return _base_id_cache[0] if _base_id_cache else ""
+
+
 def post_ontology_api(path: str, payload: dict[str, Any]) -> Any:
-    """调用 datacloud_data_service 的 ontology-manager API。
+    """调用 datacloud_platform 的 ontology-manager API。
 
     通过 DATACLOUD_SERVICE_NAME 环境变量指定服务发现名，默认 byclaw-datacloud。
+    自动注入 base_id（静默从门户服务获取第一个个人本体库 ID）。
 
     Args:
         path: API 路径，如 "/object/collect"
         payload: 请求体
     """
+    # 自动注入 base_id
+    if "base_id" not in payload:
+        payload["base_id"] = get_default_base_id()
+
     service_name = os.environ.get("DATACLOUD_SERVICE_NAME", _DEFAULT_ONTOLOGY_SERVICE).strip()
 
     token = os.environ.get("BEYOND_TOKEN", "").strip()
@@ -99,26 +168,13 @@ def post_ontology_api(path: str, payload: dict[str, Any]) -> Any:
 
 
 def _run_async_in_thread(coro: Any) -> Any:
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(coro)
+    """运行协程：使用模块级持久 event loop 避免多次 asyncio.run() 的 loop 交叉污染。
 
-    result: dict[str, Any] = {}
-    error: dict[str, BaseException] = {}
-
-    def runner() -> None:
-        try:
-            result["value"] = asyncio.run(coro)
-        except BaseException as exc:
-            error["exc"] = exc
-
-    thread = threading.Thread(target=runner, daemon=True)
-    thread.start()
-    thread.join()
-    if "exc" in error:
-        raise error["exc"]
-    return result.get("value")
+    每次 asyncio.run() 创建新 loop → Redis connection pool 的 Future 绑在旧 loop 上，
+    下次 asyncio.run() 访问这些 Future 时触发 "got Future attached to a different loop"。
+    用单个 loop 避免此问题。
+    """
+    return _shared_loop.run_until_complete(coro)
 
 
 def delete_resource_by_code(resource_code: str) -> None:
@@ -153,14 +209,7 @@ def load_embedding_model_from_redis() -> bool:
         return False
 
     try:
-        client = _redis.Redis(
-            host=os.getenv("DATACLOUD_GATEWAY_REDIS_HOST", os.getenv("REDIS_HOST", "localhost")),
-            port=int(os.getenv("DATACLOUD_GATEWAY_REDIS_PORT", os.getenv("REDIS_PORT", "6379"))),
-            db=int(os.getenv("DATACLOUD_GATEWAY_REDIS_DATABASE", os.getenv("REDIS_DATABASE", "0"))),
-            password=os.getenv("DATACLOUD_GATEWAY_REDIS_PASSWORD", os.getenv("REDIS_PASSWORD")) or None,
-            username=os.getenv("DATACLOUD_GATEWAY_REDIS_USERNAME", os.getenv("REDIS_USERNAME")) or None,
-            decode_responses=True,
-        )
+        client = create_sync_redis_client(get_redis_settings())
 
         raw = client.hget("byai:aimodel:typelist", "EMBEDDING")
         if not raw:
@@ -206,3 +255,129 @@ def load_embedding_model_from_redis() -> bool:
     except Exception:
         logger.warning("从 Redis 加载 Embedding 模型失败，向量回填将跳过", exc_info=True)
         return False
+
+
+@dataclass(frozen=True)
+class RedisSettings:
+    """Resolved Redis connection settings."""
+
+    cluster_hosts: tuple[tuple[str, int], ...]
+    host: str
+    port: int
+    db: int
+    username: str
+    password: str
+
+
+def _first_non_empty(*keys: str, default: str = "") -> str:
+    for key in keys:
+        value = os.getenv(key, "").strip()
+        if value:
+            return value
+    return default
+
+
+def _parse_cluster_hosts(value: str) -> tuple[tuple[str, int], ...]:
+    nodes: list[tuple[str, int]] = []
+    for raw_node in value.split(","):
+        node = raw_node.strip()
+        if not node:
+            continue
+        host, separator, port = node.rpartition(":")
+        if not separator:
+            host, port = node, "6379"
+        nodes.append((host, int(port) if port else 6379))
+    return tuple(nodes)
+
+
+def get_redis_settings() -> RedisSettings:
+    """Resolve Redis settings using DataCloud variables before generic ones."""
+
+    cluster_hosts = _first_non_empty(
+        "DATACLOUD_GATEWAY_REDIS_CLUSTER_HOST",
+        "REDIS_CLUSTER_HOST",
+    )
+    return RedisSettings(
+        cluster_hosts=_parse_cluster_hosts(cluster_hosts),
+        host=_first_non_empty(
+            "DATACLOUD_GATEWAY_REDIS_HOST",
+            "REDIS_HOST",
+            default="localhost",
+        ),
+        port=int(
+            _first_non_empty(
+                "DATACLOUD_GATEWAY_REDIS_PORT",
+                "REDIS_PORT",
+                default="6379",
+            )
+        ),
+        db=int(
+            _first_non_empty(
+                "DATACLOUD_GATEWAY_REDIS_DB",
+                "REDIS_DATABASE",
+                default="0",
+            )
+        ),
+        username=_first_non_empty(
+            "DATACLOUD_GATEWAY_REDIS_USERNAME",
+            "REDIS_USERNAME",
+        ),
+        password=_first_non_empty(
+            "DATACLOUD_GATEWAY_REDIS_PASSWORD",
+            "REDIS_PASSWORD",
+        ),
+    )
+
+
+def create_redis_client(settings: RedisSettings | None = None) -> Any:
+    """Create an async standalone or cluster Redis client."""
+
+    resolved = settings or get_redis_settings()
+    if resolved.cluster_hosts:
+        from redis.asyncio.cluster import ClusterNode
+        from redis.asyncio.cluster import RedisCluster
+
+        return RedisCluster(
+            startup_nodes=[
+                ClusterNode(host, port) for host, port in resolved.cluster_hosts
+            ],
+            username=resolved.username,
+            password=resolved.password,
+            decode_responses=True,
+        )
+
+    return Redis(
+        host=resolved.host,
+        port=resolved.port,
+        db=resolved.db,
+        username=resolved.username,
+        password=resolved.password,
+        decode_responses=True,
+    )
+
+
+def create_sync_redis_client(settings: RedisSettings | None = None) -> Any:
+    """Create a synchronous standalone or cluster Redis client."""
+
+    import redis
+    from redis.cluster import ClusterNode, RedisCluster
+
+    resolved = settings or get_redis_settings()
+    if resolved.cluster_hosts:
+        return RedisCluster(
+            startup_nodes=[
+                ClusterNode(host, port) for host, port in resolved.cluster_hosts
+            ],
+            username=resolved.username,
+            password=resolved.password,
+            decode_responses=True,
+        )
+
+    return redis.Redis(
+        host=resolved.host,
+        port=resolved.port,
+        db=resolved.db,
+        username=resolved.username,
+        password=resolved.password,
+        decode_responses=True,
+    )

@@ -1,7 +1,9 @@
 import { Button, Col, Empty, Input, message, Pagination, Row, Spin, Tabs } from 'antd';
 import { PlusOutlined, SearchOutlined } from '@ant-design/icons';
-import React, { useCallback, useEffect, useState } from 'react';
-import { useIntl } from '@umijs/max';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useIntl, useLocation, useSelector } from '@umijs/max';
+import useGlobal from '@/hooks/useGlobal';
+import { getCompositeAppInfo } from '@/service/digitalEmployees';
 import useShowModal from '@/pages/manager/hooks/useShowModal';
 import QuotaCard from './components/QuotaCard';
 import ModelCard from './components/ModelCard';
@@ -12,10 +14,79 @@ import styles from './index.module.less';
 
 const PAGE_SIZE = 12;
 
+type CurrentModelInfo = {
+  model?: string;
+  modelId?: string | number;
+  modelCode?: string;
+  modelNo?: string;
+};
+
+function unwrapData(res: any) {
+  if (!res) return res;
+  if (Object.prototype.hasOwnProperty.call(res, 'data')) return res.data;
+  return res;
+}
+
+function safeJsonParse(value: any) {
+  if (!value) return {};
+  if (typeof value === 'object') return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return {};
+  }
+}
+
+function normalizeModelValue(value: any) {
+  return `${value ?? ''}`.trim();
+}
+
+function isCurrentModel(record: any, currentModelInfo?: CurrentModelInfo | null) {
+  if (!record || !currentModelInfo) return false;
+  const currentModelId = normalizeModelValue(currentModelInfo.modelId);
+  if (currentModelId && normalizeModelValue(record.id) === currentModelId) return true;
+
+  const currentValues = [currentModelInfo.modelCode, currentModelInfo.modelNo, currentModelInfo.model]
+    .map(normalizeModelValue)
+    .filter(Boolean);
+  if (!currentValues.length) return false;
+
+  return [record.modelCode, record.modelNo, record.displayName, record.modelName]
+    .map(normalizeModelValue)
+    .some((value) => value && currentValues.includes(value));
+}
+
+function getModelSortWeight(record: any, currentModelInfo?: CurrentModelInfo | null) {
+  if (isCurrentModel(record, currentModelInfo)) return 0;
+  if (record?.status === 'ENABLED') return 1;
+  return 2;
+}
+
+function sortModelList(list: any[], currentModelInfo?: CurrentModelInfo | null) {
+  return [...list].sort((prev, next) => {
+    const prevWeight = getModelSortWeight(prev, currentModelInfo);
+    const nextWeight = getModelSortWeight(next, currentModelInfo);
+    return prevWeight - nextWeight;
+  });
+}
+
 const ModelsPage: React.FC = () => {
   const intl = useIntl();
+  const location = useLocation();
   const [formState, formAction] = useShowModal();
+  const { handleShow } = formAction;
   const [activeTab, setActiveTab] = useState<string>('mine');
+
+  const { agentId } = useGlobal();
+  const { defaultDigEmployeeId, userInfo } = useSelector(({ employees, user }: any) => ({
+    defaultDigEmployeeId: employees?.defaultDigEmployeeId,
+    userInfo: user?.userInfo,
+  }));
+  const resourceId = useMemo(
+    () => `${agentId || defaultDigEmployeeId || userInfo?.defaultDigEmployeeId || ''}`,
+    [agentId, defaultDigEmployeeId, userInfo?.defaultDigEmployeeId]
+  );
+  const [currentModelInfo, setCurrentModelInfo] = useState<CurrentModelInfo | null>(null);
 
   const [list, setList] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -90,6 +161,34 @@ const ModelsPage: React.FC = () => {
   }, [fetchList, fetchQuota]);
 
   useEffect(() => {
+    let cancelled = false;
+    if (!resourceId) {
+      setCurrentModelInfo(null);
+      return undefined;
+    }
+    (async () => {
+      try {
+        const res = await getCompositeAppInfo({ resourceId });
+        const modelInfo = safeJsonParse(unwrapData(res)?.prologue)?.modelInfo || {};
+        if (!cancelled) setCurrentModelInfo(modelInfo);
+      } catch {
+        if (!cancelled) setCurrentModelInfo(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [resourceId]);
+
+  const sortedList = useMemo(() => {
+    return sortModelList(list, currentModelInfo);
+  }, [list, currentModelInfo]);
+
+  const sortedPublicList = useMemo(() => {
+    return sortModelList(publicList, currentModelInfo);
+  }, [publicList, currentModelInfo]);
+
+  useEffect(() => {
     if (activeTab === 'public') {
       fetchPublicList();
     }
@@ -99,16 +198,23 @@ const ModelsPage: React.FC = () => {
     formAction.handleShow('add');
   };
 
-  const handleEdit = async (record: any) => {
+  const handleEdit = useCallback(async (record: any) => {
     try {
       const res = await getMyModelDetail({ id: record.id });
       if (res?.data) {
-        formAction.handleShow('edit', res.data);
+        handleShow('edit', res.data);
       }
     } catch {
       message.error('Failed to load model detail');
     }
-  };
+  }, [handleShow]);
+
+  useEffect(() => {
+    const state = (location.state || {}) as { editModelId?: string | number; editModelRequestId?: number };
+    if (!state.editModelId) return;
+    setActiveTab('mine');
+    handleEdit({ id: state.editModelId });
+  }, [handleEdit, location.state]);
 
   const handleDebug = async (record: any) => {
     try {
@@ -122,13 +228,23 @@ const ModelsPage: React.FC = () => {
   };
 
   const handleDelete = async (record: any) => {
-    const res = await deleteMyModel({ id: record.id });
-    if (res?.code !== 0) {
-      message.error(res?.msg || intl.formatMessage({ id: 'personalModel.delete.confirm' }));
-      return;
+    try {
+      const res = await deleteMyModel({ id: record.id });
+      if (res?.code !== 0 || res?.success === false) {
+        message.error(res?.msg || intl.formatMessage({ id: 'personalModel.delete.failed' }), 5);
+        return;
+      }
+      message.success(intl.formatMessage({ id: 'personalModel.delete.success' }));
+      fetchList(pagination.pageNum);
+    } catch (error: any) {
+      const errorMsg =
+        error?.response?.data?.msg ||
+        error?.data?.msg ||
+        error?.msg ||
+        error?.message ||
+        (typeof error === 'string' ? error : '');
+      message.error(errorMsg || intl.formatMessage({ id: 'personalModel.delete.failed' }), 5);
     }
-    message.success(intl.formatMessage({ id: 'personalModel.delete.success' }));
-    fetchList(pagination.pageNum);
   };
 
   const handleSetStatus = async (record: any, status: string) => {
@@ -146,7 +262,6 @@ const ModelsPage: React.FC = () => {
   };
 
   const handleSaved = () => {
-    formAction.onCancel();
     fetchList(pagination.pageNum);
   };
 
@@ -154,40 +269,57 @@ const ModelsPage: React.FC = () => {
     <div className={styles.container}>
       <QuotaCard quota={quota} />
 
-      <Tabs
-        activeKey={activeTab}
-        onChange={setActiveTab}
-        items={[
-          { key: 'mine', label: intl.formatMessage({ id: 'personalModel.tab.mine' }) },
-          { key: 'public', label: intl.formatMessage({ id: 'personalModel.tab.public' }) },
-        ]}
-      />
-
-      {activeTab === 'mine' && (
-        <>
-          <div className={styles.toolbar}>
+      <div className={styles.headerBar}>
+        <Tabs
+          activeKey={activeTab}
+          onChange={setActiveTab}
+          items={[
+            { key: 'mine', label: intl.formatMessage({ id: 'personalModel.tab.mine' }) },
+            { key: 'public', label: intl.formatMessage({ id: 'personalModel.tab.public' }) },
+          ]}
+          className={styles.tabs}
+        />
+        <div className={styles.toolbar}>
+          {activeTab === 'mine' ? (
+            <>
+              <Input
+                placeholder={intl.formatMessage({ id: 'personalModel.search.placeholder' })}
+                prefix={<SearchOutlined />}
+                allowClear
+                value={keyword}
+                onChange={(e) => setKeyword(e.target.value)}
+                onPressEnter={() => fetchList(1)}
+                className={styles.searchInput}
+              />
+              <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>
+                {intl.formatMessage({ id: 'personalModel.add' })}
+              </Button>
+            </>
+          ) : (
             <Input
               placeholder={intl.formatMessage({ id: 'personalModel.search.placeholder' })}
               prefix={<SearchOutlined />}
               allowClear
-              value={keyword}
-              onChange={(e) => setKeyword(e.target.value)}
-              onPressEnter={() => fetchList(1)}
-              style={{ width: 260 }}
+              value={publicKeyword}
+              onChange={(e) => setPublicKeyword(e.target.value)}
+              onPressEnter={() => fetchPublicList(1)}
+              className={styles.searchInput}
             />
-            <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>
-              {intl.formatMessage({ id: 'personalModel.add' })}
-            </Button>
-          </div>
+          )}
+        </div>
+      </div>
 
+      {activeTab === 'mine' && (
+        <>
           <Spin spinning={loading}>
             {list.length > 0 ? (
               <>
                 <Row gutter={[16, 16]} className={styles.grid}>
-                  {list.map((item) => (
+                  {sortedList.map((item) => (
                     <Col key={item.id} xs={24} sm={12} md={8} lg={6}>
                       <ModelCard
                         data={item}
+                        current={isCurrentModel(item, currentModelInfo)}
                         onEdit={() => handleEdit(item)}
                         onDebug={() => handleDebug(item)}
                         onDelete={() => handleDelete(item)}
@@ -222,25 +354,13 @@ const ModelsPage: React.FC = () => {
 
       {activeTab === 'public' && (
         <>
-          <div className={styles.toolbar}>
-            <Input
-              placeholder={intl.formatMessage({ id: 'personalModel.search.placeholder' })}
-              prefix={<SearchOutlined />}
-              allowClear
-              value={publicKeyword}
-              onChange={(e) => setPublicKeyword(e.target.value)}
-              onPressEnter={() => fetchPublicList(1)}
-              style={{ width: 260 }}
-            />
-          </div>
-
           <Spin spinning={publicLoading}>
             {publicList.length > 0 ? (
               <>
                 <Row gutter={[16, 16]} className={styles.grid}>
-                  {publicList.map((item) => (
+                  {sortedPublicList.map((item) => (
                     <Col key={item.id} xs={24} sm={12} md={8} lg={6}>
-                      <PublicModelCard record={item} />
+                      <PublicModelCard record={item} current={isCurrentModel(item, currentModelInfo)} />
                     </Col>
                   ))}
                 </Row>

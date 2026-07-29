@@ -210,6 +210,12 @@ public class SandboxController {
                 if (sandboxType != null && !sandboxType.equalsIgnoreCase(sandbox.getSandboxType())) {
                     continue;
                 }
+
+                // 查询数据库记录获取完整状态
+                SsSandboxRecord record = sandboxRecordMapper.selectLatestBySandboxId(
+                    userCode, sandbox.getSandboxType(), sandbox.getSandboxId()
+                );
+
                 Map<String, Object> result = new HashMap<>();
                 result.put("userCode", userCode);
                 result.put("sandboxType", sandbox.getSandboxType());
@@ -217,6 +223,7 @@ public class SandboxController {
                 result.put("endpoints", sandbox.getEndpoints());
                 result.put("instanceEndpoints", sandbox.getInstanceEndpoints());
                 result.put("token", sandbox.getGatewayToken());
+                result.put("status", record != null ? record.getStatus() : "UNKNOWN");
                 data.add(result);
             }
         }
@@ -290,9 +297,11 @@ public class SandboxController {
             SandboxLaunchData data = sandboxUserContextRunner.callAsUser(userCode,
                 () -> sandboxService.launchSandboxWithServiceKey(userCode, finalServiceKey));
 
-            // 持久化用户首选 serviceKey（非默认类型时）
+            // 持久化用户首选 serviceKey（非默认类型时）；显式回到默认类型时清除旧映射
             if (finalServiceKey != null && !SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE.equals(finalServiceKey)) {
                 sandboxService.savePreferredServiceKey(userCode, finalServiceKey);
+            } else if (SandboxLaunchRouting.DEFAULT_SANDBOX_TYPE.equals(finalServiceKey)) {
+                sandboxService.removePreferredServiceKey(userCode);
             }
 
             if (data == null) {

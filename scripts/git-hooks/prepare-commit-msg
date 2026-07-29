@@ -36,9 +36,18 @@ is_from_develop() {
     git merge-base --is-ancestor "$MERGE_HEAD" "refs/heads/develop" 2>/dev/null
 }
 
-# ── 约束1: 在 datacloud 上合并 → 来源必须是 develop ──
+# 判断 MERGE_HEAD 是否属于 origin/datacloud（远程跟踪分支）
+is_from_origin_datacloud() {
+    local origin_head
+    origin_head=$(git rev-parse refs/remotes/origin/datacloud 2>/dev/null)
+    [ -z "$origin_head" ] && return 1
+    [ "$MERGE_HEAD" = "$origin_head" ] && return 0
+    git merge-base --is-ancestor "$MERGE_HEAD" "refs/remotes/origin/datacloud" 2>/dev/null
+}
+
+# ── 约束1: 在 datacloud 上合并 → 来源必须是 develop 或 datacloud ──
 if [ "$CURRENT_BRANCH" = "datacloud" ]; then
-    if is_from_develop; then
+    if is_from_develop || is_from_datacloud || is_from_origin_datacloud; then
         exit 0
     fi
     cat <<EOF >&2
@@ -47,11 +56,12 @@ if [ "$CURRENT_BRANCH" = "datacloud" ]; then
 ║  ⛔  合并被拒绝  —  datacloud 入向保护                  ║
 ╠══════════════════════════════════════════════════════════╣
 ║                                                        ║
-║  datacloud 分支只接受来自 develop 分支的合并。          ║
-║  当前合并来源不属于 develop 的提交历史。                ║
+║  datacloud 分支只接受来自 develop 或 datacloud 的合并。 ║
+║  当前合并来源不属于 develop/datacloud 的提交历史。      ║
 ║                                                        ║
 ║  ✅ 正确的操作:                                         ║
 ║     git merge develop                                  ║
+║     git pull origin datacloud                          ║
 ║                                                        ║
 ║  ↩️  撤销: git merge --abort                            ║
 ║                                                        ║

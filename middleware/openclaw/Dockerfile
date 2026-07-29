@@ -1,3 +1,5 @@
+ARG OPENCLAW_VERSION=2026.6.6
+
 FROM node:22-slim AS ext-builder
 
 WORKDIR /build
@@ -24,6 +26,9 @@ COPY byclaw-exe/extensions/byai_diagnostics-otel/package.json \
 COPY byclaw-exe/extensions/byclaw-sqlite/package.json \
      byclaw-exe/extensions/byclaw-sqlite/package-lock.json \
      ./src/byclaw-sqlite/
+COPY byclaw-exe/extensions/byclaw-acp-adapter/package.json \
+     byclaw-exe/extensions/byclaw-acp-adapter/package-lock.json \
+     ./src/byclaw-acp-adapter/
 COPY byclaw-exe/extensions/byclaw-wiki/package.json \
      ./src/byclaw-wiki/
 
@@ -45,11 +50,7 @@ RUN --mount=type=cache,target=/root/.npm \
     done; \
     for pid in $pids; do wait "$pid"; done
 
-COPY byclaw-exe/extensions/baiying-enhance/ ./src/baiying-enhance/
-COPY byclaw-exe/extensions/byai-channel/ ./src/byai-channel/
-COPY byclaw-exe/extensions/byai_diagnostics-otel/ ./src/byai_diagnostics-otel/
-COPY byclaw-exe/extensions/byclaw-sqlite/ ./src/byclaw-sqlite/
-COPY byclaw-exe/extensions/byclaw-wiki/ ./src/byclaw-wiki/
+COPY byclaw-exe/extensions/ ./src/
 
 RUN set -eux; \
     mkdir -p /build/out; \
@@ -79,23 +80,45 @@ RUN set -eux; \
 
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS python312
 
-FROM ghcr.io/openclaw/openclaw:2026.6.6
+FROM ghcr.io/openclaw/openclaw:${OPENCLAW_VERSION}
 
 USER root
 
-ARG OPENCLI_VERSION=1.8.0
-ARG OPENCLI_EXTENSION_VERSION=1.0.15
+ARG OPENCLAW_VERSION
+ARG OPENCLI_VERSION=2.1.13
+ARG OPENCLI_EXTENSION_VERSION=2.1.13
+# 与 byclaw-be 预下载包同源同版本(byclaw-be/docker/dws/version.md);amd64 走预下载,arm64 用此版本联网 fallback。
+ARG DWS_VERSION=v1.0.52
+# buildx 目标架构(amd64/arm64),用于选择预下载二进制或 fallback。
+ARG TARGETARCH
+ARG WECOM_CLI_VERSION=0.1.9
+ARG LARKSUITE_CLI_VERSION=1.0.78
 ARG INSTALL_BROWSER_STACK=true
 
 RUN chown root:root /app
 
+RUN set -eux; \
+    if getent group byclaw >/dev/null; then \
+        test "$(getent group byclaw | cut -d: -f3)" = "999"; \
+    else \
+        groupadd --gid 999 byclaw; \
+    fi; \
+    usermod -aG byclaw root
+
 ENV PIP_BREAK_SYSTEM_PACKAGES=1 \
     PIP_ROOT_USER_ACTION=ignore \
     OPENCLAW_BUNDLED_PLUGINS_DIR=/app/dist/extensions \
-    OPENCLAW_STATE_DIR=/root/.openclaw \
+    OPENCLAW_STATE_DIR=/by/.openclaw \
     OPENCLAW_VNC_WEB_PORT=8081 \
     OPENCLAW_VNC_PORT=5901
 
+# bycli dashboard相关系统配置
+ENV BYCLI_CONFIG_DIR=/by/.bycli \
+    BYCLI_BROWSER_RECOVERY_COMMAND=/usr/local/bin/start-chrome.sh \
+    BYCLI_DAEMON_HOST=0.0.0.0
+
+ARG OPENCLI_VERSION=2.1.14
+ARG OPENCLI_EXTENSION_VERSION=2.1.14
 RUN set -eux; \
     if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
         sed -i 's|http://deb.debian.org/debian|https://mirrors.tuna.tsinghua.edu.cn/debian|g' /etc/apt/sources.list.d/debian.sources; \
@@ -166,12 +189,12 @@ RUN set -eux; \
         npm install -g "@sovovs/bycli@${OPENCLI_VERSION}"; \
         mkdir -p /opt/opencli/extension; \
         curl -fsSL -o /tmp/opencli-extension.zip \
-            "https://github.com/jackwener/OpenCLI/releases/download/v${OPENCLI_VERSION}/opencli-extension-v${OPENCLI_EXTENSION_VERSION}.zip"; \
+            "https://github.com/sovovs/byCLI/releases/download/v${OPENCLI_EXTENSION_VERSION}/bycli-extension-v${OPENCLI_EXTENSION_VERSION}.zip"; \
         unzip -q /tmp/opencli-extension.zip -d /opt/opencli/extension; \
         rm -f /tmp/opencli-extension.zip; \
         chromium --version; \
         x11vnc -version; \
-        bycli --version; \
+        test "$(bycli --version)" = "${OPENCLI_VERSION}"; \
         test -f /opt/opencli/extension/manifest.json; \
         ;; \
     esac; \
@@ -183,13 +206,30 @@ COPY --from=python312 /usr/local/bin/python3.12 /usr/local/bin/pip3.12 /usr/loca
 COPY --from=python312 /usr/local/lib/libpython3.12.so* /usr/local/lib/
 COPY --from=python312 /usr/local/lib/python3.12 /usr/local/lib/python3.12
 
+ARG AGENT_REACH_VERSION=1.5.0
+ARG AGENT_REACH_COMMIT=f65526cbaaad3879473acc1ba6dbefd195caf2be
+ARG AGENT_REACH_SHA256=456a3ab86e56366ba665dc4bade5c0839c3043266e2a192efa09f4fdec415e20
 RUN set -eux; \
     ln -sf /usr/local/bin/python3.12 /usr/local/bin/python3; \
     ln -sf /usr/local/bin/python3.12 /usr/bin/python3; \
     python3 --version | grep -q 'Python 3.12'; \
     python3 -m pip config --global set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple; \
     python3 -m pip config --global set global.trusted-host pypi.tuna.tsinghua.edu.cn; \
-    python3 -m pip install --no-cache-dir redis websockify by-framework; \
+    curl -fsSL \
+        "https://github.com/Panniantong/Agent-Reach/archive/${AGENT_REACH_COMMIT}.tar.gz" \
+        -o /tmp/agent-reach.tar.gz; \
+    echo "${AGENT_REACH_SHA256}  /tmp/agent-reach.tar.gz" | sha256sum -c -; \
+    mkdir -p /tmp/agent-reach; \
+    tar -xzf /tmp/agent-reach.tar.gz --strip-components=1 -C /tmp/agent-reach; \
+    python3 -m pip install --no-cache-dir \
+        redis \
+        websockify \
+        by-framework==0.2.2.dev10; \
+    python3 -m pip install --no-cache-dir \
+        -c /tmp/agent-reach/constraints.txt \
+        /tmp/agent-reach; \
+    agent-reach --version | grep -q "${AGENT_REACH_VERSION}"; \
+    rm -rf /tmp/agent-reach /tmp/agent-reach.tar.gz; \
     rm -f /usr/bin/websockify; \
     ln -sf /usr/local/bin/websockify /usr/bin/websockify; \
     websockify --help >/dev/null
@@ -224,6 +264,7 @@ COPY middleware/openclaw/runtime-bootstrap.sh /usr/local/bin/openclaw-runtime-bo
 COPY middleware/openclaw/novnc-index.html /usr/local/share/openclaw/novnc-index.html
 COPY middleware/openclaw/filebrowser-ui/ /usr/local/share/openclaw/filebrowser-ui/
 COPY middleware/openclaw/filebrowser-ui-proxy.py /usr/local/bin/openclaw-filebrowser-ui-proxy
+COPY middleware/openclaw/byclaw_capability_doctor.py /usr/local/bin/byclaw-capability-doctor
 COPY middleware/openclaw/startAll.sh \
      middleware/openclaw/start-filebrowser.sh \
      middleware/openclaw/start-display.sh \
@@ -236,6 +277,7 @@ COPY middleware/openclaw/startAll.sh \
 RUN chmod +x \
     /usr/local/bin/openclaw-runtime-bootstrap \
     /usr/local/bin/openclaw-filebrowser-ui-proxy \
+    /usr/local/bin/byclaw-capability-doctor \
     /usr/local/bin/startAll.sh \
     /usr/local/bin/start-filebrowser.sh \
     /usr/local/bin/start-display.sh \
@@ -245,18 +287,45 @@ RUN chmod +x \
     /usr/local/bin/start-openclaw.sh \
     /usr/local/bin/start-gbrain.sh
 
-RUN curl -fsSL https://raw.githubusercontent.com/DingTalk-Real-AI/dingtalk-workspace-cli/main/scripts/install.sh | sh
+# DWS CLI:amd64 用 byclaw-be 预下载的 v1.0.52 二进制(与后端同源,避免构建时联网下载);
+# arm64 无预下载包,回退到官方 install.sh(按 DWS_VERSION 安装)。
+COPY byclaw-be/docker/dws/dws-linux-amd64.tar.gz /tmp/dws-linux-amd64.tar.gz
+RUN set -eux; \
+    export DWS_VERSION="${DWS_VERSION}"; \
+    if [ "${TARGETARCH}" = "amd64" ]; then \
+        tar -xzf /tmp/dws-linux-amd64.tar.gz -C /usr/local/bin dws; \
+        chmod +x /usr/local/bin/dws; \
+    else \
+        echo ">>> no prebuilt dws for ${TARGETARCH}, falling back to install.sh"; \
+        curl -fsSL https://raw.githubusercontent.com/DingTalk-Real-AI/dingtalk-workspace-cli/main/scripts/install.sh \
+            | DWS_INSTALL_DIR=/usr/local/bin sh; \
+    fi; \
+    rm -f /tmp/dws-linux-amd64.tar.gz; \
+    command -v dws; \
+    dws --version; \
+    npm install -g "@wecom/cli@${WECOM_CLI_VERSION}" "@larksuite/cli@${LARKSUITE_CLI_VERSION}"; \
+    wecom-cli --version; \
+    command -v lark-cli
 
 # 安装 Bun 运行环境（gbrain 必需）— 从官方镜像拷贝二进制，避免 curl 下载超时
 COPY --from=oven/bun:1-debian /usr/local/bin/bun /usr/local/bin/bun
 RUN ln -sf /usr/local/bin/bun /usr/local/bin/bunx
-ENV PATH="/root/.bun/bin:/usr/local/bin:$PATH"
+ENV BUN_INSTALL=/usr/local \
+    PATH="/usr/local/bin:$PATH"
 
-# add gbrain（官方原版）
+# add gbrain（官方原版）— BUN_INSTALL=/usr/local 使 gbrain 安装到 /usr/local/bin
 RUN bun install -g github:garrytan/gbrain
 
 # rm
 RUN rm -fr /root/.agents/skills
+
+RUN groupadd --gid 1001 appgroup && \
+    useradd --uid 1001 --gid appgroup --create-home --shell /bin/bash appuser && \
+    mkdir -p /by/.bycli && \
+    chown -R appuser:appgroup /home/appuser /by && \
+    { [ -d /usr/share/novnc ] && chown -R appuser:appgroup /usr/share/novnc || true; }
+
+USER appuser
 
 EXPOSE 8081
 

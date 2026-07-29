@@ -55,7 +55,11 @@ Every fact written to a brain page must carry an inline `[Source: ...]` citation
 
 ## Phases
 
-> **Router note:** This skill is a router. For specialized ingestion, see: idea-ingest, media-ingest, meeting-ingestion.
+> **Router note:** This skill is a router. For specialized ingestion, see: idea-ingest, media-ingest, meeting-ingestion, **document-object-split**.
+>
+> **Ontology 文档拆分（优先走 document-object-split，不要走 generic ingest）：**
+> 用户说「整理文档」「拆分文档」「按对象拆分」「拆需求/bug」等 →
+> 读 `references/document-object-split/SKILL.md` 全文并按 Phase 执行。
 
 1. **Parse the source.** Extract people, companies, dates, and events from the input.
 2. **For each entity mentioned:**

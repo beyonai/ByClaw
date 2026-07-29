@@ -68,6 +68,25 @@
     margin-bottom: -8px; // Offset the row gap so the visual bottom margin stays at 4px.
   }
 
+  .agentMentionTrigger {
+    padding: 0 2px;
+    color: inherit;
+    font: inherit;
+    line-height: inherit;
+    background: transparent;
+    border: 0;
+    border-radius: 4px;
+    cursor: pointer;
+
+    &:hover,
+    &:focus-visible {
+      color: var(~'--@{antPrefix}-color-primary');
+      outline: none;
+      text-decoration: underline;
+      text-underline-offset: 3px;
+    }
+  }
+
   .assistantMark {
     padding: 0 4px;
     border-radius: 4px;
@@ -120,12 +139,6 @@
       column-gap: 4px;
       cursor: pointer;
 
-      .actionsBarText {
-        font-size: 12px;
-        color: var(--beyond-color-text-tertiary);
-        line-height: 1;
-        min-width: max-content;
-      }
       .icon {
         font-size: 14px;
         color: var(--beyond-color-text-tertiary);
@@ -144,6 +157,18 @@
 
 .moreActions {
   column-gap: 2px;
+}
+
+.copyIcon {
+  font-size: 16px;
+  color: var(--beyond-color-text-tertiary);
+}
+
+.actionsBarText {
+  font-size: 12px;
+  color: var(--beyond-color-text-tertiary);
+  line-height: 1;
+  min-width: max-content;
 }
 
 .messageRow[data-frombeyond='true'] {
@@ -204,7 +229,7 @@
 }
 
 .fileList {
-  margin: 12px 0;
+  // margin: 12px 0;
 }
 
 .beyondLogo {

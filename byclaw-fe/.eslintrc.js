@@ -3,6 +3,7 @@ module.exports = {
   rules: {
     'react/react-in-jsx-scope': 'off',
     'react/jsx-uses-react': 'off',
+    'react/no-unknown-property': [2, { ignore: ['fetchPriority'] }],
     semi: 2,
     'lines-around-comment': 2,
     'react/jsx-indent': [2, 2],

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  releaseCancelledSessionDispatch,
   resetSessionDispatchGateForTest,
   runSessionDispatchExclusive,
   sessionDispatchQueueDepth,
@@ -55,5 +56,37 @@ describe("session-dispatch-gate", () => {
 
     expect(overlap).toBe(true);
     expect(sessionDispatchQueueDepth("agent:main:direct:a")).toBe(0);
+  });
+
+  it("allows the next task to start when the current session dispatch is cancelled", async () => {
+    resetSessionDispatchGateForTest();
+    const sessionKey = "agent:main:direct:cancelled";
+    const order: string[] = [];
+    let finishFirst!: () => void;
+
+    const first = runSessionDispatchExclusive(sessionKey, async () => {
+      order.push("first-start");
+      await new Promise<void>((resolve) => {
+        finishFirst = resolve;
+      });
+      order.push("first-end");
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const second = runSessionDispatchExclusive(sessionKey, async () => {
+      order.push("second-start");
+      order.push("second-end");
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(order).toEqual(["first-start"]);
+    expect(releaseCancelledSessionDispatch(sessionKey)).toBe(true);
+    await second;
+    expect(order).toEqual(["first-start", "second-start", "second-end"]);
+
+    finishFirst();
+    await first;
+    expect(order).toEqual(["first-start", "second-start", "second-end", "first-end"]);
+    expect(sessionDispatchQueueDepth(sessionKey)).toBe(0);
   });
 });

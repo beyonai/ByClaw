@@ -17,6 +17,9 @@ public class UploadResult {
 
     public UploadResult() {
         this.uploadItems = new ArrayList<>();
+        this.failedItems = new ArrayList<>();
+        this.summary = new Summary();
+        this.postProcessErrors = new ArrayList<>();
     }
 
     private Long resourceId;
@@ -26,4 +29,22 @@ public class UploadResult {
     private String resourceName;
 
     private List<UploadItem> uploadItems;
+
+    /** QA 返回的逐文件失败项，不混入 uploadItems，避免下游继续触发构建。 */
+    private List<UploadItem> failedItems;
+
+    private Summary summary;
+
+    private List<String> postProcessErrors;
+
+    @Getter
+    @Setter
+    public static class Summary {
+
+        private Integer total = 0;
+
+        private Integer succeeded = 0;
+
+        private Integer failed = 0;
+    }
 }

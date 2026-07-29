@@ -3,7 +3,7 @@ import React, { Suspense, useCallback } from 'react';
 import { ArrowRightOutlined, InfoCircleOutlined } from '@ant-design/icons';
 // @ts-ignore
 import { useIntl, useSelector } from '@umijs/max';
-import { Divider, Space, Tooltip, Typography, Button } from 'antd';
+import { Space, Tooltip, Typography, Button } from 'antd';
 import classnames from 'classnames';
 import { get, isArray, isEmpty, noop, compact } from 'lodash';
 
@@ -33,6 +33,7 @@ import { agentTypeMap } from '@/constants/agent';
 import { getPublicPath } from '@/utils';
 
 import { getAgentChatAvatar } from '@/utils/agent';
+import { ResourceType } from '@/components/QueryInput/RichInput/utils/constants';
 
 import { IMessageState, SSEMessageType } from '@/constants/message';
 
@@ -45,7 +46,7 @@ import styles from './index.module.less';
 import getDisplayQuestion from '../QueryInput/getDisplayQuestion';
 import getDisplayAnswer from '../QueryInput/getDisplayAnswer';
 import { getDisplayUserNameInChat } from '@/utils/chat';
-import { getDisplayDateTime, getResponseAgentInfo } from './utils';
+import { getDigitalEmployeeMentionItem, getDisplayDateTime, getResponseAgentInfoByMessage } from './utils';
 import { getSystemConfigByStorage } from '@/utils/system';
 import AntdIcon from '../AntdIcon';
 
@@ -56,7 +57,7 @@ export default function useRender({
   deleteMessage,
   sessionId,
 }: {
-  updateMessage: (message: IMessage) => void;
+  updateMessage: (message: IMessage) => IMessage;
   deleteMessage: (message: IMessage) => void;
   sessionId?: string;
 }) {
@@ -75,15 +76,28 @@ export default function useRender({
   const { canRefrence } = useCanRefrence();
 
   const { userId } = userInfo || {};
+
+  const insertAgentMention = useCallback(
+    (agentInfo: ReturnType<typeof getResponseAgentInfoByMessage>) => {
+      const mentionItem = getDigitalEmployeeMentionItem(agentInfo);
+      if (!mentionItem) return;
+
+      EventEmitter.emit('queryInput-insert-item', {
+        item: mentionItem,
+        type: ResourceType.digitalEmployee,
+      });
+    },
+    [EventEmitter]
+  );
+
   const userQueryActions = useCallback(
     (msg: IMessage) => {
       const { text, resourceList, msgId } = msg;
 
       return (
         <div className="ub ub-ac">
-          <CopyComp richText={text} text={getDisplayQuestion({ text, resourceList })} />
-          <Divider type="vertical" />
           <Space size={2}>
+            <CopyComp richText={text} text={getDisplayQuestion({ text, resourceList })} />
             {canRefrence && (
               <div className={classnames(styles.actionsBarItem)} role="presentation">
                 <Button
@@ -127,7 +141,8 @@ export default function useRender({
       return (
         <div className="full-width ub ub-ver" style={{ position: 'relative' }}>
           <div className={classnames('ub ub-ac ub-wrap', styles.beyondAnswerActions)} style={{ gap: '6px 0' }}>
-            <Space size={1}>
+            <Space size={2}>
+              <CopyComp text={getDisplayAnswer(messageList)} showText />
               {[IMessageState.Done, IMessageState.Cancel].includes(messageState) && (
                 <>
                   {canRefrence && (
@@ -159,26 +174,30 @@ export default function useRender({
                     </Button>
                   </div> */}
                   <div className={classnames(styles.actionsBarItem)} role="presentation">
-                    <Button
-                      type="text"
-                      size="small"
-                      icon={<AntdIcon type="icon-a-Starxingxing" className={styles.icon} />}
-                      onClick={() => {
-                        EventEmitter.emit('beyond-messageList-set-multichoices-msgid', [msgId]);
-                        EventEmitter.emit('beyond-messageList-open-multichoices', ['collect']);
-                      }}
-                    >
-                      <span className={styles.actionsBarText}>{intl.formatMessage({ id: 'common.save' })}</span>
-                    </Button>
+                    <Tooltip title={intl.formatMessage({ id: 'messageList.saveMessage' })}>
+                      <Button
+                        type="text"
+                        size="small"
+                        icon={<AntdIcon type="icon-a-Starxingxing" className={styles.icon} />}
+                        onClick={() => {
+                          EventEmitter.emit('beyond-messageList-set-multichoices-msgid', [msgId]);
+                          EventEmitter.emit('beyond-messageList-open-multichoices', ['collect']);
+                        }}
+                      >
+                        <span className={styles.actionsBarText}>{intl.formatMessage({ id: 'common.save' })}</span>
+                      </Button>
+                    </Tooltip>
                   </div>
                   {/* <Memory msg={msg} /> */}
                 </>
               )}
-              <MoreActions deleteMessage={deleteMessage} msg={msg} />
-            </Space>
-            <Divider type="vertical" size="small" />
-            <Space size="small">
-              <CopyComp text={getDisplayAnswer(messageList)} />
+              <MoreActions
+                deleteMessage={deleteMessage}
+                msg={msg}
+                employeesList={employeesList}
+                agentList={agentList}
+                showTroubleshoot
+              />
               {[IMessageState.Done, IMessageState.Cancel].includes(messageState) && (
                 <ThumbUp updateMessage={updateMessage} msg={msg} />
               )}
@@ -188,7 +207,7 @@ export default function useRender({
         </div>
       );
     },
-    [deleteMessage, updateMessage, canRefrence]
+    [deleteMessage, updateMessage, canRefrence, employeesList, agentList]
   );
 
   const uploadFileRender = useCallback((fileList?: IFile[], msg?: IMessage) => {
@@ -333,7 +352,7 @@ export default function useRender({
       } = msg;
 
       const { showRelatedQuestions = false, hideAction } = param || {};
-      const agentInfo = getResponseAgentInfo({ employeesList, agentList }, msg.metadata);
+      const agentInfo = getResponseAgentInfoByMessage({ employeesList, agentList }, msg);
       const isLeftSide = fromBeyond || fromOtherUser;
       const isSuperAssistant = fromBeyond && !!agentInfo?.isSuperAssistant;
 
@@ -378,6 +397,29 @@ export default function useRender({
         displayCreateTime = getDisplayDateTime(createTime);
       }
 
+      const canMentionLeftAgent = isLeftSide && !!agentInfo?.agentId;
+      const mentionLeftAgentTitle = canMentionLeftAgent
+        ? intl.formatMessage({ id: 'messageList.mentionDigitalEmployee' }, { name: leftName })
+        : '';
+      const leftNameNode = canMentionLeftAgent ? (
+        <Tooltip title={mentionLeftAgentTitle}>
+          <button
+            type="button"
+            className={styles.agentMentionTrigger}
+            aria-label={mentionLeftAgentTitle}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              insertAgentMention(agentInfo);
+            }}
+          >
+            {leftName}
+          </button>
+        </Tooltip>
+      ) : (
+        leftName
+      );
+
       return (
         <div
           key={msgId}
@@ -390,7 +432,7 @@ export default function useRender({
           {isLeftSide && leftSideLogo}
           {isLeftSide && (
             <div className={styles.name}>
-              {leftName}
+              {leftNameNode}
               {isSuperAssistant && (
                 <div className={styles.assistantMark}>
                   <span>{intl.formatMessage({ id: 'common.digitalClone' })}</span>
@@ -467,7 +509,19 @@ export default function useRender({
         </div>
       );
     },
-    [agentList, userId, employeesList, attachmentListRender, citeMsgRender, updateMessage, beyondAnswerActions]
+    [
+      agentList,
+      userId,
+      employeesList,
+      intl,
+      attachmentListRender,
+      citeMsgRender,
+      updateMessage,
+      beyondAnswerActions,
+      userQueryActions,
+      insertAgentMention,
+      relatedQuestionsRender,
+    ]
   );
 
   const extendsRender = <>{ModalNode}</>;

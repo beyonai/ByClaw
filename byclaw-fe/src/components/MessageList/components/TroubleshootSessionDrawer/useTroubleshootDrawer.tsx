@@ -18,6 +18,7 @@ let troubleshootAgentIdRequest: Promise<string> | null = null;
 type DrawerPayload = {
   agentId: string;
   initialText: string;
+  messageId?: string;
   sessionId?: string;
   traceId?: string;
 };
@@ -52,9 +53,9 @@ export default function useTroubleshootDrawer() {
   const [payload, setPayload] = React.useState<DrawerPayload | null>(null);
 
   const open = React.useCallback(
-    async (traceId?: string) => {
+    async ({ messageId, sessionId, traceId }: { messageId?: string; sessionId?: string; traceId?: string } = {}) => {
       const initialText = intl.formatMessage({ id: 'messageList.troubleshootPrompt' }, { traceId: traceId || '' });
-      const cachedSessionId = getCachedTroubleshootSession(traceId);
+      const cachedSessionId = sessionId || getCachedTroubleshootSession({ messageId, traceId });
 
       try {
         setLoading(true);
@@ -71,6 +72,7 @@ export default function useTroubleshootDrawer() {
         setPayload({
           agentId,
           initialText: cachedSessionId ? '' : initialText,
+          messageId,
           sessionId: cachedSessionId,
           traceId,
         });
@@ -86,9 +88,10 @@ export default function useTroubleshootDrawer() {
 
   const placeholder = payload ? (
     <TroubleshootSessionDrawer
-      key={payload.sessionId || payload.traceId || payload.agentId}
+      key={payload.sessionId || payload.messageId || payload.traceId || payload.agentId}
       agentId={payload.agentId}
       initialText={payload.initialText}
+      messageId={payload.messageId}
       initialSessionId={payload.sessionId}
       open={!!payload}
       onClose={() => setPayload(null)}

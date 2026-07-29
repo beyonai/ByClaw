@@ -28,10 +28,12 @@ import {
   buildDataset,
   deleteFolder,
   getFileBuildStatus,
+  moveKnowledgeItems,
   queryDirAndFileByLevel as queryDirAndFileByLevelService,
   removeFile,
   searchDirAndFile,
   type BuildDatasetPayload,
+  type KnowledgeItemsMoveResult,
 } from '@/service/knowledgeCenter';
 import { downloadFile } from '@/utils/file';
 import { getFileIconType } from '@/constants/icon';
@@ -42,6 +44,7 @@ import {
 import DirectoryEmpty from '../components/DirectoryEmpty';
 import MoveModal from '../components/MoveModal';
 import RenameModal from '../components/RenameModal';
+import { collapseNestedMoveSources, type MoveSource } from './moveUtils';
 import styles from './index.module.less';
 
 const PreViewFile = lazy(() =>
@@ -51,6 +54,8 @@ const PreViewFile = lazy(() =>
 export interface DirectoryManageRef {
   getDirectoryList: (params: Record<string, any>) => void;
   buildSelectedFiles: () => void;
+  deleteSelected: () => void;
+  moveSelected: () => void;
 }
 
 interface IProps {
@@ -64,6 +69,7 @@ interface IProps {
   folderPath: { id: string; title: string }[];
   setFolderPath: React.Dispatch<React.SetStateAction<IProps['folderPath']>>;
   onBuildSelectionChange?: (count: number) => void;
+  onSelectionCountChange?: (count: number) => void;
 }
 
 type ActionItem = {
@@ -307,6 +313,7 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
     uploadLoading,
     setUploadLoading,
     onBuildSelectionChange,
+    onSelectionCountChange,
   } = props;
 
   const { folderPath, setFolderPath } = props;
@@ -319,14 +326,18 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
   const { setDetailPanel, clearDetailPanel } = useContext(SiderContentContext);
   // 移动弹窗
   const [moveModalVisible, setMoveModalVisible] = useState(false);
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [curRecord, setCurRecord] = useState<any>({});
+  const [moveSources, setMoveSources] = useState<MoveSource[]>([]);
+  const [moving, setMoving] = useState(false);
+  const moveSourceDirectoryPaths = useMemo(
+    () => moveSources.filter((source) => source.isDirectory).map((source) => source.path),
+    [moveSources]
+  );
   const [buildingFileIds, setBuildingFileIds] = useState<string[]>([]);
   const [fileBuildStatusMap, setFileBuildStatusMap] = useState<Record<string, IFileBuildStatus>>({});
   const [queryingBuildStatusIds, setQueryingBuildStatusIds] = useState<string[]>([]);
   const [pollingFileIds, setPollingFileIds] = useState<string[]>([]);
   const [visibleFileIds, setVisibleFileIds] = useState<string[]>([]);
-  const [selectedBuildRowKeys, setSelectedBuildRowKeys] = useState<React.Key[]>([]);
+  const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const fileRefs = useRef<Record<string, HTMLTableRowElement | null>>({});
   const queryingFileIdsRef = useRef<Set<string>>(new Set());
@@ -502,19 +513,29 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
     [buildingFileIds, fileRecords, getFileRowKey]
   );
 
-  const selectedBuildFileRecords = useMemo(
-    () => buildableFileRecords.filter((record: any) => selectedBuildRowKeys.includes(getFileRowKey(record))),
-    [buildableFileRecords, getFileRowKey, selectedBuildRowKeys]
+  const selectedRecords = useMemo(
+    () => displayDirectoryList.filter((record: any) => selectedRowKeys.includes(getFileRowKey(record))),
+    [displayDirectoryList, getFileRowKey, selectedRowKeys]
   );
 
+  const selectedBuildFileRecords = useMemo(
+    () => buildableFileRecords.filter((record: any) => selectedRowKeys.includes(getFileRowKey(record))),
+    [buildableFileRecords, getFileRowKey, selectedRowKeys]
+  );
+
+  // 列表变化后剔除已不存在的选中行（目录 + 文件通用，不再局限于可构建文件）
   useEffect(() => {
-    const buildableRowKeys = buildableFileRecords.map((record: any) => getFileRowKey(record));
-    setSelectedBuildRowKeys((prev) => prev.filter((key) => buildableRowKeys.includes(`${key}`)));
-  }, [buildableFileRecords, getFileRowKey]);
+    const allRowKeys = displayDirectoryList.map((record: any) => getFileRowKey(record));
+    setSelectedRowKeys((prev) => prev.filter((key) => allRowKeys.includes(`${key}`)));
+  }, [displayDirectoryList, getFileRowKey]);
 
   useEffect(() => {
     onBuildSelectionChange?.(selectedBuildFileRecords.length);
   }, [onBuildSelectionChange, selectedBuildFileRecords.length]);
+
+  useEffect(() => {
+    onSelectionCountChange?.(selectedRecords.length);
+  }, [onSelectionCountChange, selectedRecords.length]);
 
   const pollingFileIdsKey = useMemo(() => pollingFileIds.map((item) => `${item}`).join(','), [pollingFileIds]);
 
@@ -929,13 +950,154 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
     });
   }, [intl, message, selectedBuildFileRecords, submitBuildTasks]);
 
+  const deleteSelected = useCallback(() => {
+    if (selectedRecords.length === 0) {
+      message.warning(intl.formatMessage({ id: 'directoryManage.selectItemsToDelete' }));
+      return;
+    }
+    const rid = baseInfo?.resourceId;
+    if (rid === null || rid === undefined || rid === '') {
+      message.error(intl.formatMessage({ id: 'directoryManage.missingKnowledgeBaseInfo' }));
+      return;
+    }
+    // 若同时选中父目录与其子项，子项会被父目录递归删除，这里先剔除被包含的子项，避免重复删除报错。
+    const selectedDirPaths = selectedRecords
+      .filter((record: any) => record?.type === 'directory')
+      .map((record: any) => normalizeDirectoryPath(getBuildDirectoryPath(record)));
+    const isUnderSelectedDir = (path: string) =>
+      selectedDirPaths.some((dir) => dir !== path && (path === dir || path.startsWith(`${dir}/`)));
+    const targets = selectedRecords.filter(
+      (record: any) => !isUnderSelectedDir(normalizeDirectoryPath(getBuildDirectoryPath(record)))
+    );
+
+    Modal.confirm({
+      title: intl.formatMessage({ id: 'common.deleteTips' }),
+      content: intl.formatMessage({ id: 'directoryManage.batchDeleteConfirm' }, { count: selectedRecords.length }),
+      onOk: async () => {
+        const results = await Promise.allSettled(
+          targets.map((record: any) => {
+            const directoryPath = getBuildDirectoryPath(record);
+            if (record?.type === 'directory') {
+              return deleteFolder({ resourceId: Number(rid), directoryPath });
+            }
+            return removeFile({ directoryPath, resourceId: String(rid) });
+          })
+        );
+        let success = 0;
+        let failed = 0;
+        results.forEach((result) => {
+          if (result.status === 'fulfilled' && result.value?.success !== false) success += 1;
+          else failed += 1;
+        });
+        const notify = failed ? message.warning : message.success;
+        notify(intl.formatMessage({ id: 'directoryManage.batchDeleteResult' }, { success, failed }));
+        setSelectedRowKeys([]);
+        getDirectoryList({ pageIndex: 1 });
+      },
+    });
+  }, [baseInfo?.resourceId, getBuildDirectoryPath, getDirectoryList, intl, message, selectedRecords]);
+
+  const openMoveModal = useCallback(
+    (records: any[]) => {
+      const sources = collapseNestedMoveSources(
+        records.map((record) => ({
+          path: getBuildDirectoryPath(record),
+          isDirectory: record?.type === 'directory',
+        }))
+      );
+      if (sources.length === 0) {
+        message.warning(intl.formatMessage({ id: 'directoryManage.resolveFilePathFailed' }));
+        return;
+      }
+      setMoveSources(sources);
+      setMoveModalVisible(true);
+    },
+    [getBuildDirectoryPath, intl, message]
+  );
+
+  const moveSelected = useCallback(() => {
+    if (selectedRecords.length === 0) {
+      message.warning(intl.formatMessage({ id: 'directoryManage.selectItemsToMove' }));
+      return;
+    }
+    openMoveModal(selectedRecords);
+  }, [intl, message, openMoveModal, selectedRecords]);
+
+  const handleMoveConfirm = useCallback(
+    async (targetDirectoryPath: string) => {
+      const rid = baseInfo?.resourceId;
+      if (rid === null || rid === undefined || rid === '' || moveSources.length === 0) {
+        message.error(intl.formatMessage({ id: 'directoryManage.missingKnowledgeBaseInfo' }));
+        return;
+      }
+
+      setMoving(true);
+      try {
+        const result: KnowledgeItemsMoveResult = await moveKnowledgeItems({
+          resourceId: Number(rid),
+          sourcePath: moveSources.map((source) => source.path),
+          targetDirectoryPath,
+          overwrite: false,
+        });
+        const data = Array.isArray(result?.data) ? result.data : [];
+        const succeeded = Number(result?.summary?.succeeded ?? data.filter((item) => item.success).length);
+        const failed = Number(result?.summary?.failed ?? data.filter((item) => !item.success).length);
+        const total = Number(result?.summary?.total ?? succeeded + failed);
+        const failureItems = data.filter((item) => !item.success);
+
+        if (total === 0) {
+          throw new Error(intl.formatMessage({ id: 'directoryManage.moveFailed' }));
+        }
+
+        if (succeeded > 0) {
+          setMoveModalVisible(false);
+          setMoveSources([]);
+          setSelectedRowKeys([]);
+          await getDirectoryList({ pageIndex: 1 });
+        }
+
+        if (failed > 0) {
+          appModal.warning({
+            title: intl.formatMessage({
+              id: succeeded > 0 ? 'directoryManage.movePartialTitle' : 'directoryManage.moveFailed',
+            }),
+            content: (
+              <div>
+                <div>{intl.formatMessage({ id: 'directoryManage.moveResult' }, { success: succeeded, failed })}</div>
+                {failureItems.length > 0 && (
+                  <div style={{ maxHeight: 240, marginTop: 12, overflow: 'auto' }}>
+                    {failureItems.map((item) => (
+                      <div key={item.sourcePath} style={{ marginBottom: 8, wordBreak: 'break-word' }}>
+                        {item.sourcePath}: {item.error || intl.formatMessage({ id: 'directoryManage.moveFailed' })}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ),
+          });
+        } else {
+          message.success(intl.formatMessage({ id: 'directoryManage.moveSuccess' }, { count: total }));
+        }
+      } catch (error: any) {
+        const errorMessage = typeof error === 'string' ? error : error?.message || error?.msg;
+        message.error(errorMessage || intl.formatMessage({ id: 'directoryManage.moveFailed' }));
+      } finally {
+        setMoving(false);
+      }
+    },
+    [appModal, baseInfo?.resourceId, getDirectoryList, intl, message, moveSources]
+  );
+
   useImperativeHandle(
     ref,
     () => ({
       getDirectoryList,
       buildSelectedFiles: handleBatchBuild,
+      deleteSelected,
+      moveSelected,
     }),
-    [getDirectoryList, handleBatchBuild]
+    [getDirectoryList, handleBatchBuild, deleteSelected, moveSelected]
   );
 
   const renderPreviewPanel = useCallback(
@@ -987,6 +1149,7 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
     },
     [baseInfo?.resourceId, clearDetailPanel, getBuildDirectoryPath, intl, message, renderPreviewPanel]
   );
+
   const checkDirectoryHasChildren = useCallback(async (resourceId: number, directoryPath: string) => {
     const res = await queryDirAndFileByLevelService({
       resourceId,
@@ -1000,7 +1163,7 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
       case 'top':
         break;
       case 'move':
-        setMoveModalVisible(true);
+        openMoveModal([record]);
         break;
       case 'rename':
         modalAction.handleShow('edit', record);
@@ -1127,6 +1290,15 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
       let actionList: ActionItem[] = [];
 
       if (canManage) {
+        actionList.push({
+          label: intl.formatMessage({ id: 'directoryManage.move' }),
+          key: 'move',
+          icon: (
+            <Tooltip title={intl.formatMessage({ id: 'directoryManage.move' })}>
+              <span className="iconfont icon-a-Dragtuozhuai" />
+            </Tooltip>
+          ),
+        });
         actionList.push({
           label: intl.formatMessage({ id: 'common.delete' }),
           key: 'delete',
@@ -1355,21 +1527,22 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
     ]
   );
 
-  const buildRowSelection = useMemo(
+  const rowSelection = useMemo(
     () =>
       canManage
         ? {
           type: 'checkbox' as const,
-          selectedRowKeys: selectedBuildRowKeys,
-          onChange: (selectedRowKeys: React.Key[]) => {
-            setSelectedBuildRowKeys(selectedRowKeys);
+          selectedRowKeys,
+          onChange: (keys: React.Key[]) => {
+            setSelectedRowKeys(keys);
           },
+          // 目录与文件都可勾选（用于批量移动/删除）；仅搜索态下的合成父目录节点不可选。
           getCheckboxProps: (record: any) => ({
-            disabled: record?.type !== 'file' || buildingFileIds.includes(getFileRowKey(record)),
+            disabled: Boolean(record?.__synthetic),
           }),
         }
         : undefined,
-    [buildingFileIds, canManage, getFileRowKey, selectedBuildRowKeys]
+    [canManage, selectedRowKeys]
   );
 
   const handleBreadcrumbClick = (index: number) => {
@@ -1388,7 +1561,7 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
           dataSource={displayDirectoryList}
           columns={columns}
           rowKey={getFileRowKey}
-          rowSelection={buildRowSelection}
+          rowSelection={rowSelection}
           emptyLocale={{
             emptyText: (
               <DirectoryEmpty
@@ -1412,15 +1585,17 @@ const DirectoryManage = (props: IProps, ref: ForwardedRef<DirectoryManageRef>) =
       {moveModalVisible && (
         <MoveModal
           visible={moveModalVisible}
-          onCancel={() => setMoveModalVisible(false)}
-          onOk={() => {
+          resourceId={Number(baseInfo?.resourceId)}
+          sourceDirectoryPaths={moveSourceDirectoryPaths}
+          loading={moving}
+          onCancel={() => {
+            if (moving) return;
             setMoveModalVisible(false);
-            setTimeout(() => {
-              getDirectoryList({ pageIndex: 1 });
-            }, 100);
+            setMoveSources([]);
           }}
-          onAdd={() => {}}
-          baseInfo={baseInfo}
+          onOk={(targetDirectoryPath) => {
+            void handleMoveConfirm(targetDirectoryPath);
+          }}
         />
       )}
       <RenameModal

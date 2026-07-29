@@ -200,6 +200,11 @@ public class AssistantChatDto {
     private String traceId;
 
     /**
+     * 多智能体并行对话中的前端泳道标识。
+     */
+    private String laneId;
+
+    /**
      * 前端生成的本轮回答关联标识，通常等于 answerMsg.msgId，用于将 WebSocket 流式事件关联回本地消息。
      */
     private String clientRequestId;
@@ -212,6 +217,11 @@ public class AssistantChatDto {
     /**
      * 是否是故障排除会话。需要支持按照messageId反查会话信息
      */
-    private Boolean isTroubleshootSession = false;
+    private String troubleshootMessageId;
+
+    /**
+     * 会话关联项目
+     */
+    private Long projectId;
 
 }

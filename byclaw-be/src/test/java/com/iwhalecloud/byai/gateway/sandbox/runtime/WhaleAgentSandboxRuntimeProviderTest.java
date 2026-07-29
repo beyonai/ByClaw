@@ -221,4 +221,59 @@ class WhaleAgentSandboxRuntimeProviderTest {
         assertThat(provider.exists("user001", "byclaw-code-agent", SandboxInfo.builder().sandboxId("sandbox-1").build()))
             .isFalse();
     }
+
+    @Test
+    void resolveEndpoints_shortCircuitsWhenInstanceAlreadyHasEndpoints() {
+        FeignWhaleAgentService feignWhaleAgentService = mock(FeignWhaleAgentService.class);
+        WhaleAgentSandboxRuntimeProvider provider = new WhaleAgentSandboxRuntimeProvider(feignWhaleAgentService);
+
+        SandboxRuntimeInstance instance = SandboxRuntimeInstance.builder()
+            .sandboxId("sb-1")
+            .endpoints(List.of("http://sandbox.example/proxy/18789"))
+            .build();
+        SandboxServiceSpec spec = new SandboxServiceSpec();
+        spec.setServicePort(18789);
+
+        List<String> endpoints = provider.resolveEndpoints(instance, spec, CreateSandboxRequest.builder().build());
+
+        assertThat(endpoints).containsExactly("http://sandbox.example/proxy/18789");
+        verify(feignWhaleAgentService, never()).getSandboxEndpoint(anyMap());
+    }
+
+    @Test
+    void resolveEndpoints_fetchesFromServerWhenInstanceHasNoEndpoints() {
+        FeignWhaleAgentService feignWhaleAgentService = mock(FeignWhaleAgentService.class);
+        when(feignWhaleAgentService.getSandboxEndpoint(anyMap()))
+            .thenReturn(KnowledgeResponse.success("http://sandbox.example/proxy/18789"));
+        WhaleAgentSandboxRuntimeProvider provider = new WhaleAgentSandboxRuntimeProvider(feignWhaleAgentService);
+
+        SandboxRuntimeInstance instance = SandboxRuntimeInstance.builder()
+            .sandboxId("sb-2")
+            .metadata(Map.of("userCode", "user001"))
+            .build();
+        SandboxServiceSpec spec = new SandboxServiceSpec();
+        spec.setServicePort(18789);
+        PortSpec portSpec = new PortSpec();
+        portSpec.setPort(18789);
+        portSpec.setInstance("openclaw");
+        spec.setPorts(List.of(portSpec));
+
+        List<String> endpoints = provider.resolveEndpoints(instance, spec,
+            CreateSandboxRequest.builder().metadata(Map.of("userCode", "user001", "serviceKey", "openclaw")).build());
+
+        assertThat(endpoints).containsExactly("http://sandbox.example/proxy/18789");
+        assertThat(instance.getEndpoints()).containsExactly("http://sandbox.example/proxy/18789");
+        assertThat(instance.getInstanceEndpoints()).containsEntry("openclaw", "http://sandbox.example/proxy/18789");
+        verify(feignWhaleAgentService).getSandboxEndpoint(anyMap());
+    }
+
+    @Test
+    void resolveEndpoints_returnsEmptyWhenInstanceIsNull() {
+        FeignWhaleAgentService feignWhaleAgentService = mock(FeignWhaleAgentService.class);
+        WhaleAgentSandboxRuntimeProvider provider = new WhaleAgentSandboxRuntimeProvider(feignWhaleAgentService);
+
+        assertThat(provider.resolveEndpoints(null, new SandboxServiceSpec(),
+            CreateSandboxRequest.builder().build())).isEmpty();
+        verify(feignWhaleAgentService, never()).getSandboxEndpoint(anyMap());
+    }
 }

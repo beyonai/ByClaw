@@ -48,6 +48,9 @@ public class ConversationExportService {
 
     private static final Logger logger = LoggerFactory.getLogger(ConversationExportService.class);
 
+    /** Excel 单元格文本上限 32767，预留截断标记长度。 */
+    private static final int EXCEL_MAX_CELL_CHARS = 32767;
+    private static final String TRUNCATE_SUFFIX = "...[truncated]";
 
     @Autowired
     private ConversationService conversationService;
@@ -245,8 +248,19 @@ public class ConversationExportService {
      */
     private void createCell(Row row, int columnIndex, String value, CellStyle style) {
         Cell cell = row.createCell(columnIndex);
-        cell.setCellValue(Objects.requireNonNullElse(value, ""));
+        cell.setCellValue(truncateForExcel(Objects.requireNonNullElse(value, "")));
         cell.setCellStyle(style);
+    }
+
+    /**
+     * Excel 单元格文本上限为 32767，超长内容截断并追加标记。
+     */
+    private static String truncateForExcel(String text) {
+        if (text.length() <= EXCEL_MAX_CELL_CHARS) {
+            return text;
+        }
+        int keep = EXCEL_MAX_CELL_CHARS - TRUNCATE_SUFFIX.length();
+        return text.substring(0, keep) + TRUNCATE_SUFFIX;
     }
 
     /**

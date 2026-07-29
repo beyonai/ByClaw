@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
@@ -122,6 +123,7 @@ public class StandardSandboxLifecycleService implements SandboxLifecycleFacade {
                 userCode, sandboxType, launchRequest.getEnvs(), launchRequest.getUserInfo(), spec);
             String idempotencyKey = buildIdempotencyKey(userCode, sandboxType, launchRequest.getMetadata());
             mergeLaunchMetadata(request, launchRequest.getMetadata());
+            mergeSystemEnvs(request, launchRequest.getEnvs());
 
             Optional<SandboxRuntimeInstance> reusable = Boolean.TRUE.equals(launchRequest.getSkipReusableSandbox())
                 ? Optional.empty()
@@ -336,6 +338,28 @@ public class StandardSandboxLifecycleService implements SandboxLifecycleFacade {
         }
     }
 
+    /**
+     * Merge system-level env vars from launchEnvs into the CreateSandboxRequest.
+     * System env vars (e.g. BYAI_WORKER_ID) are injected for all containers regardless of spec declarations.
+     */
+    private static final Set<String> SYSTEM_ENV_KEYS = java.util.Set.of("BYAI_WORKER_ID");
+
+    private static void mergeSystemEnvs(CreateSandboxRequest request, Map<String, String> launchEnvs) {
+        if (request == null || launchEnvs == null || launchEnvs.isEmpty()) {
+            return;
+        }
+        Map<String, String> env = request.getEnv() != null
+            ? new LinkedHashMap<>(request.getEnv())
+            : new LinkedHashMap<>();
+        for (String key : SYSTEM_ENV_KEYS) {
+            String value = launchEnvs.get(key);
+            if (value != null && !value.isBlank()) {
+                env.put(key, value);
+            }
+        }
+        request.setEnv(env.isEmpty() ? null : env);
+    }
+
     private static void mergeLaunchMetadata(CreateSandboxRequest request, Map<String, String> launchMetadata) {
         if (request == null || launchMetadata == null || launchMetadata.isEmpty()) {
             return;
@@ -354,9 +378,13 @@ public class StandardSandboxLifecycleService implements SandboxLifecycleFacade {
 
     private static String buildIdempotencyKey(String userCode, String sandboxType, Map<String, String> metadata) {
         String resourceId = metadata != null ? Objects.toString(metadata.get("resourceId"), "") : "";
-        String recordId = metadata != null ? Objects.toString(metadata.get("recordId"), "") : "";
+        // Fixed: remove recordId from idempotency key calculation
+        // recordId is the DB primary key generated after insert, which causes each request to have a different
+        // idempotencyKey, preventing OpenSandbox from recognizing duplicate requests and reusing existing sandboxes.
+        // The idempotency key should only depend on request parameters (userCode, sandboxType, resourceId),
+        // not on execution results (recordId).
         String raw = Objects.toString(userCode, "") + "\0" + Objects.toString(sandboxType, "")
-            + "\0" + resourceId + "\0" + recordId;
+            + "\0" + resourceId;
         try {
             MessageDigest md = MessageDigest.getInstance("SHA-256");
             byte[] digest = md.digest(raw.getBytes(StandardCharsets.UTF_8));

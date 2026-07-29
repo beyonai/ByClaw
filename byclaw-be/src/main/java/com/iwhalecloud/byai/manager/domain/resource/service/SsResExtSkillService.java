@@ -93,6 +93,16 @@ public class SsResExtSkillService {
     }
 
     /**
+     * PR-3 (#150) 批量查询技能扩展数据. 单 SQL IN 子句,替代循环 findById.
+     *
+     * @param resourceIds 资源ID集合(空集合/null 时返回空 List,不触发 SQL)
+     * @return 技能扩展列表
+     */
+    public List<SsResExtSkill> findByIds(Collection<Long> resourceIds) {
+        return ssResExtSkillMapper.findByIds(resourceIds);
+    }
+
+    /**
      * 查询技能版本号
      *
      * @param resourceId 资源ID
@@ -149,4 +159,5 @@ public class SsResExtSkillService {
         }
         return ssResExtSkillMapper.findBySkillCodes(skillCodes);
     }
+
 }

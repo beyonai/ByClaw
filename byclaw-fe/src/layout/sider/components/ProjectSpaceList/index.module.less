@@ -1,0 +1,3857 @@
+.projectSpaceList {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  // 项目列表外层留白与会话模块的 8px 内边距保持一致。
+  padding: 8px;
+  background: #fff;
+}
+
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  // 外层已统一使用 8px 留白，搜索框顶部不再叠加额外间距。
+  padding: 0 0 8px;
+}
+
+.searchInput {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  // 搜索框和会话列表保持同一套 Antd 默认尺寸，只覆盖透明背景。
+  :global {
+    .@{antPrefix}-input-affix-wrapper {
+      background-color: transparent;
+    }
+  }
+
+  & > input:first-child {
+    flex: 1 0 auto;
+  }
+}
+
+.scopeRow {
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+  border: 1px solid #dfe6f0;
+  border-radius: 10px;
+  padding: 0 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #1f2633;
+  background: #fff;
+  font-size: 14px;
+  font-weight: 400;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.2s, box-shadow 0.2s;
+
+  &:hover {
+    border-color: #b8cdfd;
+  }
+}
+
+.scopeTitle {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.scopeMeta {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #7b8798;
+  font-size: 14px;
+  font-weight: 400;
+}
+
+.scopeDropdown {
+  :global {
+    .@{antPrefix}-dropdown-menu {
+      min-width: 240px;
+      padding: 8px;
+    }
+
+    .@{antPrefix}-dropdown-menu-item {
+      min-width: 0;
+    }
+
+    .@{antPrefix}-dropdown-menu-title-content {
+      min-width: 0;
+      width: 100%;
+    }
+  }
+}
+
+.scopeMenuLabel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 220px;
+  width: 100%;
+}
+
+.scopeMenuName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scopeMenuTag {
+  margin-left: auto;
+}
+
+// 项目下拉和新建项目按钮共用一行，保持新建按钮固定在下拉框右侧。
+.scopeActionRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 36px;
+  gap: 8px;
+}
+
+// 与员工侧栏“发现数字员工”一致的项目详情快捷入口，保持项目选择器下方的信息层级。
+.enterProjectDetail {
+  width: 100%;
+  border: 0;
+  border-radius: 6px;
+  padding: 8px;
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 2px;
+  color: inherit;
+  font-family: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  background: #f2f6fa;
+}
+
+.enterProjectDetailIcon {
+  flex-shrink: 0;
+  margin-right: 6px;
+  color: inherit;
+  font-size: 16px;
+}
+
+.enterProjectDetailText {
+  // 仅文案使用中等字重，避免右侧箭头随文本变粗。
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.enterProjectDetailArrow {
+  flex-shrink: 0;
+  margin-left: auto;
+  color: inherit;
+  font-size: 16px;
+  font-weight: 400;
+}
+
+// 新建项目与详情顶部更多入口共用同一图标按钮规格，保持项目侧栏操作样式一致。
+.newProjectButton,
+.detailIconButton {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  color: #667085;
+  font-size: 16px;
+  background: transparent;
+  box-shadow: none;
+
+  &:focus,
+  &:active {
+    color: #667085;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  // 放在焦点态之后，鼠标仍停留在按钮上时继续展示 hover 反馈。
+  &:hover {
+    color: #246bfe;
+    background: #eaf2ff;
+  }
+}
+
+.spin {
+  min-height: 0;
+  flex: 1;
+
+  :global {
+    .@{antPrefix}-spin-container {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      min-height: 0;
+    }
+  }
+}
+
+.projectList {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  // 这里直接承载会话卡片，沿用会话模块的连续列表间距。
+  gap: 0;
+  padding: 4px 0 8px;
+  background: #fff;
+  // 父子滚动同时触发时隔离绘制层，避免展开会话列表透到下方项目缝隙里。
+  isolation: isolate;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+.projectItem {
+  position: relative;
+  z-index: 1;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  padding: 2px;
+  background: transparent;
+  transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+}
+
+.projectItemExpanded {
+  z-index: 0;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  border-color: #dfe6f0;
+  background: #fff;
+  box-shadow: 0 8px 20px rgba(31, 45, 77, 0.08);
+}
+
+.projectTop {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  background: #fff;
+  border-radius: 8px;
+  padding: 3px 4px;
+  transition: background-color 0.2s;
+
+  &:hover {
+    background: #f7f9fd;
+
+    .projectHeader {
+      padding-right: 28px;
+    }
+
+    .projectAction {
+      opacity: 1;
+      pointer-events: auto;
+    }
+  }
+}
+
+.projectItemExpanded .projectTop {
+  border-bottom: 1px solid #edf1f7;
+  border-radius: 8px 8px 0 0;
+}
+
+.projectHeader {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  box-sizing: border-box;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  text-align: left;
+  cursor: pointer;
+  transition: padding-right 0.2s;
+}
+
+.projectAction {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #7c8798;
+  background: transparent;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%);
+  transition: opacity 0.2s, background-color 0.2s;
+
+  &:hover {
+    background: rgba(0, 0, 0, 0.04);
+  }
+}
+
+.expandIcon {
+  flex: 0 0 12px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #7c8798;
+  font-size: 10px;
+}
+
+.projectMain {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.projectTitleRow {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.projectName,
+.projectDesc,
+.sessionTitle,
+.sessionDesc {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.projectName {
+  color: #1f2633;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 17px;
+}
+
+.projectDesc {
+  color: #78859a;
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.projectTag {
+  height: 18px;
+  line-height: 18px;
+  flex-shrink: 0;
+  margin-inline-end: 0;
+  padding: 0 5px;
+  border-radius: 6px;
+  // 项目类型标签使用较小字号，避免在窄侧栏中抢占项目名称空间。
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.projectHeaderTag {
+  margin-left: auto;
+}
+
+// 个人项目使用蓝色标签，和左侧系统主色保持一致。
+.projectTagPersonal {
+  color: #246bfe;
+  background: #eaf2ff;
+}
+
+// 共享项目使用绿色标签，便于与个人项目区分。
+.projectTagShared {
+  color: #14865a;
+  background: #e9f8f0;
+}
+
+// 默认项目使用中性灰色标签，弱化其系统兜底属性。
+.projectTagDefault {
+  color: #596579;
+  background: #f1f4f8;
+}
+
+// 研发项目使用紫色标签，突出研发项目类型。
+.projectTagDevelopment {
+  color: #7a3fd1;
+  background: #f3ecff;
+}
+
+.sessionList {
+  position: relative;
+  z-index: 0;
+  margin-top: 0;
+  // 项目头和会话列表共用外层卡片，这里只负责卡片内部会话区域滚动。
+  padding: 6px 4px 8px;
+  max-height: min(520px, calc(100vh - 350px));
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: #fff;
+  overscroll-behavior: contain;
+  contain: paint;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+.sessionItem {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  border-radius: 12px;
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+  color: #1f2633;
+  background: transparent;
+  cursor: pointer;
+  transition: background-color 0.2s;
+
+  &:hover {
+    background: rgba(0, 0, 0, 0.04);
+  }
+}
+
+.sessionItemActive {
+  background: rgba(0, 0, 0, 0.04);
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+}
+
+.sessionAvatar {
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
+  line-height: 1;
+  display: flex;
+}
+
+.sessionMain {
+  min-width: 0;
+  flex: 1;
+}
+
+.sessionTextWrap {
+  position: relative;
+  display: block;
+  min-width: 0;
+  width: 100%;
+}
+
+.sessionTitle {
+  display: block;
+  padding-right: 44px;
+  color: #14161a;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 22px;
+}
+
+.sessionDesc {
+  display: block;
+  padding-right: 44px;
+  color: #707680;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 20px;
+}
+
+.sessionTime {
+  position: absolute;
+  top: 0;
+  right: 0;
+  color: #a4aab2;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 20px;
+}
+
+.sessionSkeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 8px;
+}
+
+.sessionEmpty {
+  min-height: 120px;
+  margin: 0;
+  padding: 24px 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+
+  :global {
+    .@{antPrefix}-empty-image {
+      height: 54px;
+      margin-bottom: 8px;
+    }
+
+    .@{antPrefix}-empty-description {
+      color: #8a96a8;
+      font-size: 14px;
+      line-height: 20px;
+    }
+  }
+}
+
+.sessionMoreLoading {
+  width: 100%;
+  height: 28px;
+  color: #a4aab2;
+  font-size: 12px;
+  line-height: 28px;
+  text-align: center;
+}
+
+.emptyWrap {
+  min-height: 220px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.projectDetailPanel {
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  margin: -8px -8px 0;
+  background: #fff;
+
+  :global {
+    .@{antPrefix}-tabs-nav {
+      margin: 0;
+      padding: 0;
+    }
+
+    .@{antPrefix}-tabs-nav::before,
+    .@{antPrefix}-tabs-ink-bar {
+      display: none;
+    }
+
+    .@{antPrefix}-tabs-nav-list {
+      width: 100%;
+      display: grid !important;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      padding: 3px;
+      border-radius: 8px;
+      background: #f1f3f8;
+    }
+
+    .@{antPrefix}-tabs-tab {
+      justify-content: center;
+      margin: 0 !important;
+      padding: 6px 0;
+      border-radius: 8px;
+      color: #6f7c90;
+      font-size: 13px;
+      font-weight: 400;
+    }
+
+    .@{antPrefix}-tabs-tab-active {
+      background: #fff;
+      box-shadow: 0 6px 16px rgba(28, 48, 90, 0.08);
+    }
+
+    .@{antPrefix}-tabs-tab-btn {
+      color: inherit;
+    }
+
+    .@{antPrefix}-tabs-tab-active .@{antPrefix}-tabs-tab-btn {
+      color: #246bfe;
+    }
+  }
+
+  &.projectDetailPanelTabCount2 {
+    :global {
+      .@{antPrefix}-tabs-nav-list {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+  }
+
+  &.projectDetailPanelTabCount3 {
+    :global {
+      .@{antPrefix}-tabs-nav-list {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+    }
+  }
+}
+
+.detailPanelHeader {
+  flex-shrink: 0;
+  // 移除项目描述后按单行标题收紧详情头部，给下方列表保留更多高度。
+  min-height: 56px;
+  padding: 8px 10px;
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  align-items: center;
+  // 单行项目标题与返回入口保持紧凑间距，避免左侧留白过大。
+  gap: 4px;
+  border-bottom: 1px solid #edf1f7;
+}
+
+.detailBackButton {
+  // 返回入口与新建项目按钮保持同一尺寸和默认图标颜色。
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 6px;
+  color: #667085;
+  font-size: 16px;
+  background: transparent;
+  box-shadow: none;
+
+  &:hover,
+  &:focus,
+  &:active {
+    // 返回入口交互时只改变图标颜色，不显示按钮背景色或阴影。
+    border-color: transparent;
+    color: #246bfe;
+    background-color: transparent !important;
+    box-shadow: none;
+  }
+}
+
+.detailPanelTitle {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+
+  h3 {
+    min-width: 0;
+    flex: 0 1 auto;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  h3 {
+    margin: 0;
+    color: #1f2633;
+    font-size: 14px;
+    font-weight: 700;
+    line-height: 20px;
+  }
+}
+
+.detailProjectSceneTag {
+  // 项目名称过长时标签保持可见，标题文本在剩余空间内省略。
+  flex-shrink: 0;
+}
+
+.detailPanelActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.detailAddButton {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 0;
+  color: #6f7c90;
+  background: transparent;
+
+  &:hover {
+    color: #246bfe;
+    background: #f2f6ff;
+  }
+}
+
+.detailTabsWrap {
+  flex-shrink: 0;
+  padding: 12px 10px 8px;
+}
+
+.detailCountRow {
+  flex-shrink: 0;
+  padding: 0 10px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid #edf1f7;
+
+  span {
+    min-width: 0;
+    height: 24px;
+    padding: 0 8px;
+    border-radius: 7px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: #66758a;
+    background: #f5f7fb;
+    font-size: 12px;
+    font-weight: 400;
+    line-height: 24px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+}
+
+.detailSpin {
+  min-height: 0;
+  flex: 1;
+
+  :global {
+    .@{antPrefix}-spin-container {
+      min-height: 0;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+    }
+  }
+}
+
+.detailHeaderPanel {
+  padding: 22px 24px 16px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid #edf1f7;
+
+  h3 {
+    margin: 0 0 4px;
+    color: #1f2633;
+    font-size: 18px;
+    font-weight: 700;
+  }
+
+  p {
+    margin: 0;
+    color: #7c8798;
+    font-size: 13px;
+    line-height: 20px;
+  }
+}
+
+.detailHeaderActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.detailBodyPanel {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 8px 20px;
+  background: #fff;
+}
+
+// 需求、任务、成员均复用同一内容滚动容器，仅隐藏轨道，不阻断滚轮与触控滚动。
+.detailBodyPanelScrollbarHidden {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+// 需求 Tab 的外层不参与滚动，固定头部与内部需求列表分离。
+.detailRequirementsBodyPanel {
+  display: flex;
+  overflow: hidden;
+  padding-bottom: 8px;
+}
+
+// 任务 Tab 与需求 Tab 一样固定筛选栏，仅让数据列表在内部滚动。
+.detailTasksBodyPanel {
+  display: flex;
+  overflow: hidden;
+  // 与需求、资源 Tab 共用首个元素的 8px 顶部间距。
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
+// 成员 Tab 固定搜索工具栏，仅让成员数据列表在内部滚动并支持触底加载。
+.detailMembersBodyPanel {
+  display: flex;
+  overflow: hidden;
+  padding-bottom: 8px;
+}
+
+.detailRequirementsPanel {
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.detailRequirementsToolbar {
+  flex-shrink: 0;
+}
+
+// 成员搜索与添加操作收敛为单行，减少详情面板顶部占用。
+.detailMemberToolbar {
+  flex-shrink: 0;
+  margin: 0 4px 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.detailMemberSearch {
+  min-width: 0;
+  flex: 1;
+  margin: 0;
+}
+
+// 成员添加、手工录入需求、需求刷新、任务刷新和任务视图统一使用同一套紧凑图标按钮规格。
+.detailMemberAddButton,
+.detailManualRequirementAddButton,
+.detailRequirementRefreshButton,
+.detailTaskRefreshButton,
+.detailTaskViewButton {
+  flex: 0 0 28px;
+  width: 28px;
+  min-width: 28px;
+  padding: 0;
+  justify-content: center;
+}
+
+// 需求搜索工具栏与成员 Tab 共用横向边距、列表间距和图标操作布局。
+.detailRequirementHeader {
+  flex-shrink: 0;
+  margin: 0 4px 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.detailRequirementSearch {
+  min-width: 0;
+  flex: 1;
+}
+
+// 需求列表独立滚动，保持此前隐藏滚动条的体验并承接触底加载。
+.detailRequirementScroll {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+.detailEmbeddedContent {
+  // 项目详情复用 /devloop 的任务和成员能力，这里只约束外层，让它适配左侧窄面板。
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  min-width: 0;
+  overflow: hidden;
+
+  :global {
+    .@{antPrefix}-btn {
+      max-width: 100%;
+      white-space: nowrap;
+    }
+
+    .@{antPrefix}-list-item {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 8px;
+    }
+
+    .@{antPrefix}-list-item-meta {
+      width: 100%;
+      min-width: 0;
+    }
+
+    .@{antPrefix}-list-item-meta-content {
+      min-width: 0;
+    }
+
+    .@{antPrefix}-list-item-meta-title,
+    .@{antPrefix}-list-item-meta-description {
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+
+    .@{antPrefix}-list-item-action {
+      width: 100%;
+      margin-inline-start: 0;
+      display: flex;
+      justify-content: flex-end;
+    }
+
+    .@{antPrefix}-list-item-action > li {
+      padding: 0 4px;
+    }
+
+    .@{antPrefix}-list-item.project-member-row {
+      position: relative;
+      width: 100%;
+      flex-direction: column;
+      gap: 10px;
+      // 成员卡片直接复用需求卡片的容器规格，不再保留成员专属底色或尺寸。
+      min-height: 64px;
+      align-items: stretch;
+      padding: 8px 10px;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      justify-content: center;
+      background: transparent;
+      cursor: default;
+      transition: background-color 0.2s, border-color 0.2s;
+
+      &:hover {
+        background: #f5f7fa;
+      }
+    }
+
+    .project-member-list .@{antPrefix}-list-items {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .project-member-avatar {
+      // 成员头像保持系统用户头像尺寸和圆角，并使用系统主色 #165dff。
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      flex-shrink: 0;
+      color: #fff;
+      text-align: center;
+      line-height: 32px;
+      font-size: 12px;
+      font-weight: 400;
+      background: #165dff;
+
+      // 创建者和当前用户仅通过身份标签区分，头像统一对齐系统左下角用户头像。
+    }
+
+    .project-member-title {
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .project-member-name {
+      min-width: 0;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+
+    .project-member-role-tag {
+      flex-shrink: 0;
+      margin-inline-end: 0;
+      padding-inline: 4px;
+      font-size: 11px;
+      line-height: 18px;
+    }
+
+    .project-member-more {
+      width: 28px;
+      height: 28px;
+      padding: 0;
+      color: #6b778c;
+      border-radius: 6px;
+
+      &:hover {
+        color: #246bfe;
+        background: #f2f6ff;
+      }
+    }
+  }
+}
+
+// 成员搜索工具栏固定，列表区域独立滚动，避免触底加载时带动顶部搜索框。
+.detailMemberPanel {
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.detailMemberScroll {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+.detailSourceList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.detailSourceCard {
+  border: 1px solid #dfe6f0;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.integrationPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 4px 2px;
+}
+
+.integrationSection {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.integrationSectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.integrationSectionTitle {
+  color: #1f2633;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+// 右侧配置面板空间充足：环境/用例集卡片按卡片网格排布，不再铺满整行。
+.integrationCardGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 12px;
+}
+
+.integrationCardBody {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.integrationField {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.integrationFieldLabel {
+  flex-shrink: 0;
+  width: 120px;
+  color: #7c8798;
+  font-size: 13px;
+  line-height: 24px;
+}
+
+.integrationFieldValue {
+  flex: 1;
+  min-width: 0;
+  color: #1f2633;
+  font-size: 13px;
+  line-height: 24px;
+}
+
+.integrationMwTag {
+  margin-inline-end: 6px;
+  margin-bottom: 4px;
+}
+
+.integrationScriptInput {
+  flex: 1;
+}
+
+// 研发闭环流程条:横向环节 + 箭头,自动折行。
+.integrationFlow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 4px;
+  padding: 12px;
+  border: 1px solid #dfe6f0;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.integrationFlowNode {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid #e2e8f2;
+  background: #f5f7fa;
+  font-size: 12px;
+  color: #7c8798;
+}
+
+.integrationFlowNode_done {
+  border-color: #b7ebc6;
+  background: #f6ffed;
+  color: #389e0d;
+}
+
+.integrationFlowNode_active {
+  border-color: #ffd591;
+  background: #fff7e6;
+  color: #d46b08;
+  font-weight: 600;
+  box-shadow: 0 0 0 2px rgba(250, 140, 22, 0.12);
+}
+
+.integrationFlowNode_pending {
+  border-style: dashed;
+}
+
+.integrationFlowDot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.06);
+  font-size: 11px;
+  line-height: 1;
+}
+
+.integrationFlowLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.integrationFlowNewTag {
+  margin-inline: 0;
+  line-height: 16px;
+  transform: scale(0.85);
+}
+
+.integrationFlowArrow {
+  color: #c0c8d4;
+  font-size: 13px;
+}
+
+.integrationFlowKickback {
+  margin-top: 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #fff1f0;
+  border: 1px solid #ffccc7;
+  color: #cf1322;
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.integrationHistoryRound {
+  margin-inline-start: 8px;
+  padding: 0 6px;
+  border-radius: 6px;
+  background: #eef2f8;
+  color: #7c8798;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.integrationHistoryKickback {
+  margin-top: 4px;
+  color: #cf1322;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+// 环境/用例集卡片底部的查看/修改/删除操作行。
+.integrationCardActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  padding: 4px 8px;
+  border-top: 1px solid #eef2f8;
+}
+
+// 结果目录与状态规范折叠区。
+.integrationSpec {
+  margin-top: 12px;
+}
+
+.integrationSpecBody {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.integrationSpecHint {
+  color: #526075;
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.integrationSpecSubTitle {
+  margin-top: 4px;
+  color: #1f2633;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.integrationSpecPre {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #e2e8f0;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre;
+  overflow-x: auto;
+}
+
+.integrationSpecEnum {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.integrationSpecEnumRow {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  color: #526075;
+  line-height: 20px;
+}
+
+.integrationNote {
+  color: #a0aabb;
+  font-size: 12px;
+  line-height: 18px;
+  padding: 0 2px;
+}
+
+.integrationConnRow {
+  display: flex;
+  gap: 10px;
+}
+
+.integrationMono {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.integrationAccountCard {
+  border: 1px solid #dfe6f0;
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  background: #fbfcfe;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.integrationAccountRow {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.integrationAccountInject {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 12px;
+  color: #5a6b85;
+  background: #eef3fb;
+  border-radius: 6px;
+  padding: 4px 8px;
+}
+
+.integrationResult {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.integrationResultHead {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.integrationResultStatusTag {
+  font-size: 13px;
+  padding: 2px 10px;
+}
+
+.integrationResultTotals {
+  font-weight: 600;
+  color: #1f2d3d;
+}
+
+.integrationResultDuration {
+  color: #8a93a2;
+  font-size: 12px;
+}
+
+.integrationResultKickback {
+  background: #fff2f0;
+  border: 1px solid #ffccc7;
+  border-radius: 8px;
+  padding: 8px 12px;
+  color: #cf1322;
+  font-size: 13px;
+}
+
+.integrationResultMeta {
+  margin-top: 2px;
+}
+
+.integrationResultSuitesTitle {
+  font-weight: 600;
+  color: #1f2d3d;
+  margin-top: 4px;
+}
+
+.integrationResultSuiteHead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.integrationResultSuiteName {
+  font-weight: 600;
+}
+
+.integrationResultSuiteStat {
+  color: #8a93a2;
+  font-size: 12px;
+}
+
+.integrationResultSuiteBody {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.integrationResultSuitePaths {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  color: #8a93a2;
+}
+
+.integrationResultAllPass {
+  color: #52a852;
+  font-size: 13px;
+}
+
+.integrationResultCase {
+  border: 1px solid #ffd9d4;
+  border-radius: 8px;
+  padding: 8px 12px;
+  background: #fffaf9;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.integrationResultCaseName {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+
+.integrationResultCaseIcon {
+  color: #cf1322;
+  font-size: 12px;
+}
+
+.integrationResultCaseMsg {
+  color: #5a6b85;
+  font-size: 13px;
+  word-break: break-word;
+}
+
+.integrationResultArtifacts {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.integrationResultArtifactTag {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 12px;
+}
+
+.manualRunProgress {
+  margin-bottom: 12px;
+  font-weight: 600;
+  color: #1f2d3d;
+}
+
+.manualRunCase {
+  border: 1px solid #dfe6f0;
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  background: #fbfcfe;
+}
+
+.manualRunCaseTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 14px;
+}
+
+.manualRunCaseMeta {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.manualRunLabel {
+  display: block;
+  color: #8a93a2;
+  font-size: 12px;
+  margin-bottom: 2px;
+}
+
+.manualRunSteps {
+  margin: 0;
+  white-space: pre-wrap;
+  font-family: inherit;
+  font-size: 13px;
+  color: #3a4a5f;
+}
+
+.manualRunExpected {
+  font-size: 13px;
+  color: #3a4a5f;
+}
+
+.manualRunShots {
+  margin-top: 10px;
+}
+
+.integrationStageCard {
+  border: 1px solid #dfe6f0;
+  border-radius: 10px;
+  padding: 10px;
+  margin-bottom: 10px;
+  background: #fbfcfe;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.integrationStageHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.integrationStageIdx {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #eaf2ff;
+  color: #246bfe;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.integrationStageName {
+  flex: 1;
+}
+
+.integrationStageScript {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 12px;
+}
+
+.integrationStageFoot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  color: #7c8798;
+  font-size: 12px;
+}
+
+.detailSourceHeader {
+  padding: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid #edf1f7;
+}
+
+.detailSourceIcon {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #246bfe;
+  background: #eaf2ff;
+  flex-shrink: 0;
+  font-size: 15px;
+}
+
+.detailAiIcon {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  background: #243550;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.detailSourceTitle {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+
+  strong {
+    color: #1f2633;
+    font-size: 14px;
+    line-height: 20px;
+  }
+
+  span {
+    color: #7c8798;
+    font-size: 13px;
+    line-height: 20px;
+  }
+}
+
+.detailSourceActions {
+  padding: 6px 12px 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+
+  :global {
+    .@{antPrefix}-tag {
+      margin-inline-end: 0;
+      font-size: 13px;
+    }
+
+    .@{antPrefix}-btn-link {
+      height: 28px;
+      padding: 0 8px;
+      border: 1px solid #dfe6f0;
+      border-radius: 7px;
+      background: #fff;
+      font-size: 13px;
+
+      &:hover {
+        border-color: rgba(36, 107, 254, 0.35);
+        background: #f2f6ff;
+      }
+    }
+  }
+}
+
+.detailSourceButtonGroup {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.detailSourceActionsPanel {
+  .detailSourceButtonGroup {
+    flex-basis: 100%;
+  }
+}
+
+.detailSourceAuth {
+  padding: 14px 12px 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+
+  :global {
+    .@{antPrefix}-tag {
+      margin-inline-end: 0;
+      font-size: 13px;
+      line-height: 22px;
+      padding: 0 8px;
+    }
+  }
+}
+
+.detailSourceFrequencyTag {
+  color: #7c8798;
+  border-color: transparent;
+  background: transparent;
+}
+
+.detailSourceDwsTag {
+  font-size: 12px !important;
+}
+
+.detailSourceDwsTagClickable {
+  cursor: pointer;
+}
+
+.detailSourceTime {
+  color: #7c8798;
+  font-size: 13px;
+  line-height: 24px;
+}
+
+.detailSourceTags {
+  padding: 12px;
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+}
+
+.detailSourceTag {
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 8px;
+  color: #526075;
+  background: #fff;
+  border-color: #dfe6f0;
+  flex-shrink: 0;
+}
+
+.detailSourceRunning {
+  color: #14865a;
+  font-weight: 600;
+}
+
+.detailChannelEntry {
+  // 补偿需求内容区 8px 与顶部 Tab 区 10px 的水平内边距差，保持两者同宽。
+  width: calc(100% - 4px);
+  min-height: 38px;
+  // 与顶部 Tab 到渠道配置入口的 16px 间距保持一致，统一需求工具栏的纵向节奏。
+  margin: 0 2px 16px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  color: #1f2633;
+  background: #f2f6fa;
+  text-align: left;
+  cursor: pointer;
+  font-weight: 500;
+  transition: background-color 0.2s;
+
+  &:hover {
+    background: #eef3f8;
+  }
+
+  > span {
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  strong {
+    color: #1f2633;
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 20px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  :global {
+    .anticon {
+      flex-shrink: 0;
+      color: #1f2633;
+      font-size: 14px;
+
+      &:last-child {
+        margin-left: auto;
+      }
+    }
+  }
+}
+
+.detailChannelEntryIcon {
+  flex-shrink: 0;
+  font-size: 18px;
+  color: #1f2633;
+}
+
+.detailChannelPanel {
+  height: 100%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+}
+
+.detailChannelPanelHeader {
+  flex-shrink: 0;
+  min-height: 72px;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid #edf1f7;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.detailChannelPanelTitle {
+  min-width: 0;
+
+  h3,
+  p {
+    margin: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  h3 {
+    color: #1f2633;
+    font-size: 15px;
+    font-weight: 700;
+    line-height: 22px;
+  }
+
+  p {
+    color: #7c8798;
+    font-size: 13px;
+    line-height: 20px;
+  }
+}
+
+.detailChannelPanelActions {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+
+  :global {
+    .@{antPrefix}-btn {
+      height: 34px;
+      border-radius: 9px;
+    }
+  }
+}
+
+.detailChannelPanelBody {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 12px 24px;
+  background: #fff;
+}
+
+.detailChannelSourceList {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+
+  .detailSourceCard {
+    min-height: 178px;
+  }
+}
+
+.detailHeaderActionButton {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #526075;
+  font-size: 13px;
+}
+
+.detailRequirementList {
+  display: flex;
+  flex-direction: column;
+  // 需求卡片列表保持紧凑，减少相邻数据之间的垂直留白。
+  gap: 3px;
+}
+
+.detailRequirementMore {
+  height: 28px;
+  color: #8a96a8;
+  font-size: 12px;
+  line-height: 28px;
+  text-align: center;
+}
+
+// 需求列表与任务列表共用无边框、悬浮浅灰底色的卡片状态。
+.detailRequirementItem {
+  position: relative;
+  min-width: 0;
+  min-height: 64px;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  // 最小高度多出的空间均分到内容上下，避免卡片下方留白更大。
+  justify-content: center;
+  gap: 10px;
+  background: transparent;
+  cursor: pointer;
+  transition: background-color 0.2s, border-color 0.2s;
+
+  &:hover {
+    background: #f5f7fa;
+
+    .detailTaskMoreAction {
+      opacity: 1;
+      pointer-events: auto;
+    }
+  }
+}
+
+.detailRequirementItemWithAction:hover .detailRequirementMoreAction {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.detailRequirementSummary {
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  // 英文按钮和标题长度不固定，操作列必须允许收缩，避免卡片撑出详情面板宽度。
+  grid-template-columns: 32px minmax(0, 1fr) minmax(0, auto);
+  align-items: center;
+  column-gap: 10px;
+  overflow: hidden;
+}
+
+.detailRequirementActions {
+  // 与任务卡片一致：三点按钮绝对定位，悬停时通过右内边距为其让位，默认不留空白。
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  justify-content: flex-end;
+  transition: padding-right 0.2s;
+}
+
+.detailRequirementItemWithAction:hover .detailRequirementActions,
+.detailRequirementActionsOpen {
+  padding-right: 28px;
+}
+
+// 需求列表复用会话列表的图标规格，评分信息收敛到右侧详情抽屉。
+.detailRequirementIcon {
+  width: 32px;
+  height: 32px;
+  // 需求与任务图标统一使用圆形背景块，避免与列表卡片圆角混淆。
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #1677ff;
+  font-size: 16px;
+  flex-shrink: 0;
+  background: #edf4ff;
+}
+
+/* 需求详情抽屉：标题状态与字段分区 */
+.requirementDetailDrawer {
+  :global {
+    .@{antPrefix}-drawer-body {
+      padding: 16px;
+      background: #f7f9fc;
+    }
+  }
+}
+
+.requirementDetailDrawerContent {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.requirementDetailTitle {
+  min-width: 0;
+  flex: 1;
+  color: #1f2633;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 24px;
+  // 长英文、路径等无空格内容按可用宽度断行，避免溢出详情抽屉。
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.requirementDetailTitleRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.requirementDetailSection {
+  padding: 14px;
+  border: 1px solid #e6ebf2;
+  border-radius: 8px;
+  background: #fff;
+
+  h3 {
+    margin: 0 0 12px;
+    color: #344056;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 20px;
+  }
+}
+
+.requirementDetailInfoGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+}
+
+.requirementDetailInfoItem {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+
+  label {
+    color: #8a96a8;
+    font-size: 12px;
+    line-height: 18px;
+  }
+
+  span,
+  a {
+    overflow: hidden;
+    color: #344056;
+    font-size: 13px;
+    line-height: 20px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  a {
+    color: #246bfe;
+  }
+}
+
+.requirementDetailInfoItemFull {
+  grid-column: 1 / -1;
+}
+
+.requirementDetailText {
+  color: #526075;
+  font-size: 13px;
+  line-height: 22px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 需求评分维度网格（抽屉内） */
+.detailScoreDimGrid {
+  display: grid;
+  // 宽度足够时一行展示三项，空间不足时自动降为两项或单项。
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.detailScoreDimItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border: 1px solid #eef0f4;
+  border-radius: 6px;
+
+  span {
+    color: #667085;
+    font-size: 12px;
+  }
+
+  strong {
+    font-size: 13px;
+    color: #1f2937;
+  }
+}
+
+.detailScoreRisk {
+  color: #cf1322 !important;
+}
+
+.detailRequirementMain {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+
+  strong,
+  span {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  strong {
+    color: #1f2633;
+    font-size: 13px;
+    // 与任务列表标题使用同一字重，避免需求标题显得过粗。
+    font-weight: 500;
+    line-height: 18px;
+  }
+
+  span {
+    color: #7c8798;
+    font-size: 12px;
+    line-height: 18px;
+  }
+}
+
+.detailRequirementAction {
+  // 需求列表操作保持紧凑，三字状态文案仍保留必要的点击面积。
+  flex-shrink: 0;
+  min-width: 40px;
+  height: 26px;
+  padding: 0 5px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 24px;
+  white-space: nowrap;
+}
+
+.detailRequirementMoreAction {
+  // 与任务卡片更多按钮一致，透明态仍可通过 opacity 平滑淡入且不参与布局。
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  z-index: 1;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: 6px;
+  color: #7c8798;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%);
+  transition: opacity 0.2s, background-color 0.2s;
+
+  &:hover,
+  &:focus {
+    color: #526075;
+    background: rgba(0, 0, 0, 0.04);
+  }
+}
+
+.detailRequirementMoreActionOpen {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.detailRequirementStartAction {
+  // 启动按钮使用浅蓝标签态，和“已启动”保持同一视觉规格但用色区分可点击状态。
+  color: #246bfe;
+  border-color: #b9ccff;
+  background: #eef4ff;
+
+  &:hover,
+  &:focus {
+    color: #1557d9;
+    border-color: #8fb0ff;
+    background: #e4edff;
+  }
+}
+
+.detailRequirementStartedAction {
+  // 已启动代表不能重复操作，使用浅灰禁用态弱化可点击感。
+  &,
+  &:disabled,
+  &[disabled] {
+    color: #8a96a8;
+    border-color: #d8dee8;
+    background: #f4f6f9;
+    opacity: 1;
+    cursor: not-allowed;
+  }
+}
+
+.detailTaskPanel {
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.detailTaskHeader {
+  // 搜索框与研发项目专用筛选分两行展示，窄侧栏也能完整显示各控件。
+  // 搜索行的边距交给子项处理，和成员 Tab 的搜索工具栏保持一致。
+  margin: 0 0 8px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  // 日期筛选行与搜索框间距对齐搜索框到顶部 Tab 切换行的 16px 间距。
+  gap: 16px;
+  color: #526075;
+  font-size: 13px;
+  font-weight: 400;
+}
+
+.detailTaskSearch {
+  min-width: 0;
+  flex: 1;
+}
+
+// 任务搜索和刷新操作共用成员 Tab 的 4px 横向边距，搜索框在窄侧栏内优先收缩。
+.detailTaskSearchRow {
+  width: calc(100% - 8px);
+  margin: 0 4px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.detailTaskHeaderActions {
+  width: calc(100% - 8px);
+  margin: 0 4px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+
+  :global {
+    .@{antPrefix}-picker {
+      // 日期筛选与上方搜索框共用剩余宽度，保证两行输入控件右侧对齐。
+      flex: 1 1 0;
+      width: auto;
+      min-width: 0;
+      max-width: none;
+      height: 32px;
+      box-sizing: border-box;
+      overflow: hidden;
+    }
+
+    // 左侧窄面板需完整容纳两个日期，缩小输入字号并压缩中间分隔符留白。
+    .@{antPrefix}-picker-input {
+      min-width: 0;
+    }
+
+    .@{antPrefix}-picker-input > input {
+      // 日期值使用更小字号，确保开始和结束日期在窄侧栏内完整展示。
+      font-size: 13px;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .@{antPrefix}-picker-range-separator {
+      font-size: 12px;
+    }
+
+    .@{antPrefix}-picker-range-separator {
+      padding: 0 4px;
+    }
+  }
+
+  // 任务视图与搜索行的刷新按钮保持右侧对齐，日期筛选始终贴左展示。
+  .detailTaskViewButton {
+    margin-left: auto;
+  }
+}
+
+.detailTaskList {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+// 任务列表触底加载时只滚动列表本身，避免日期筛选随内容一起滚出可视区。
+.detailTaskScroll {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+.detailTaskLoadingMore {
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.detailTaskCard {
+  position: relative;
+  min-height: 56px;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  align-items: center;
+  column-gap: 10px;
+  background: transparent;
+  cursor: pointer;
+  transition: background-color 0.2s, border-color 0.2s;
+
+  &:hover {
+    background: #f5f7fa;
+  }
+
+  // 与会话列表 activeItem 保持一致，突出最近一次点击的任务。
+  &.detailTaskCardActive {
+    background: rgba(0, 0, 0, 0.04);
+    box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  }
+}
+
+.detailTaskCard:hover .detailTaskMoreAction {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.detailTaskCard:hover .detailTaskCardHeaderWithAction,
+.detailTaskCardHeaderWithActionOpen {
+  padding-right: 28px;
+}
+
+.detailTaskIcon {
+  width: 32px;
+  height: 32px;
+  // 任务采用绿色进度图标，与需求的蓝色文档图标区分。
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #1c9b68;
+  font-size: 16px;
+  background: #eaf8f0;
+}
+
+.detailTaskCardHeader {
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+  // 状态标签作为独立右列，相对任务标题和描述两行的整体垂直居中。
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 8px;
+}
+
+.detailTaskCardHeaderWithAction {
+  transition: padding-right 0.2s;
+}
+
+.detailTaskMain {
+  min-width: 0;
+  width: 100%;
+}
+
+.detailTaskTitleRow {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.detailTaskTitle {
+  min-width: 0;
+  flex: 1;
+  margin: 0;
+  color: #14161a;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 18px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.detailTaskStatusTag {
+  flex-shrink: 0;
+  margin-inline-end: 0;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 20px;
+}
+
+// 研发任务的详情入口仅在卡片悬停或下拉菜单展开时展示，避免干扰会话主操作。
+.detailTaskMoreAction {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  z-index: 1;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: 6px;
+  color: #7c8798;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%);
+  transition: opacity 0.2s, background-color 0.2s;
+
+  &:hover {
+    color: #526075;
+    background: rgba(0, 0, 0, 0.04);
+  }
+}
+
+.detailTaskMoreActionOpen {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+// 任务状态标签与任务视图使用同一状态层级，只在列表内采用紧凑尺寸。
+.detailTaskStatusPending {
+  // 待开始改为浅蓝灰，和任务卡片选中时的中性灰底色拉开层级。
+  color: #52667d;
+  background: #e8eff8;
+}
+
+.detailTaskStatusRunning {
+  color: #246bfe;
+  background: #edf4ff;
+}
+
+.detailTaskStatusPaused {
+  color: #b7791f;
+  background: #fff7e6;
+}
+
+.detailTaskStatusDone {
+  color: #16835b;
+  background: #e9f8f0;
+}
+
+.detailTaskDescription {
+  min-width: 0;
+  width: 100%;
+  margin: 3px 0 0;
+  overflow: hidden;
+  color: #707680;
+  font-size: 12px;
+  line-height: 17px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.detailTaskInlineDetail {
+  grid-column: 1 / -1;
+  width: 100%;
+  padding-top: 10px;
+  border-top: 1px dashed #dfe6f0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 10px;
+
+  span {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  label {
+    color: #8a96a8;
+    font-size: 12px;
+    line-height: 16px;
+    cursor: inherit;
+  }
+
+  strong {
+    min-width: 0;
+    color: #1f2633;
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 18px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+}
+
+.detailTaskInlineWide {
+  grid-column: span 2;
+}
+
+// 任务展开详情的操作按钮独占一行，并分别贴靠左右两侧。
+.detailTaskInlineActions {
+  grid-column: span 2;
+  display: flex;
+  justify-content: space-between;
+  padding-top: 2px;
+}
+
+.detailTaskChatButton {
+  padding: 0;
+  background: transparent;
+
+  &:hover,
+  &:focus {
+    background: transparent;
+  }
+}
+
+.detailSourceGrid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.detailResourcePanel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+// 代码变更卡片对齐共享文件空间的边框、标题栏和内容留白，保留 Git 状态信息。
+.codeChangeCard {
+  border: 1px solid #dfe6f0;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.codeChangeHeader {
+  min-height: 42px;
+  padding: 8px 10px;
+  border-bottom: 1px solid #edf1f7;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  background: #f7f9fc;
+}
+
+.codeChangeHeaderMain {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  strong {
+    flex-shrink: 0;
+    color: #1f2533;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 20px;
+    white-space: nowrap;
+  }
+}
+
+.codeChangeBranch {
+  min-width: 0;
+  flex: 1;
+  font-size: 12px;
+  color: #728096;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+// 分支名可点时超链到 GitHub 比对页,复用分支样式,仅加交互色。
+.codeChangeBranchLink {
+  cursor: pointer;
+
+  &:hover {
+    color: #246bfe;
+    text-decoration: underline;
+  }
+}
+
+// 本地来源标记:含未推送/未提交改动,用弱化的胶囊标签,不抢分支名视觉。
+.codeChangeLocalBadge {
+  flex-shrink: 0;
+  padding: 0 6px;
+  height: 18px;
+  line-height: 18px;
+  border-radius: 4px;
+  font-size: 11px;
+  color: #b7791f;
+  background: #fdf3e0;
+}
+
+.codeChangeCount {
+  flex-shrink: 0;
+  min-width: 18px;
+  color: #728096;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 18px;
+  text-align: right;
+}
+
+.codeChangeRefresh {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #728096;
+  background: transparent;
+  cursor: pointer;
+  transition: color 0.2s, background-color 0.2s;
+
+  &:hover {
+    color: #246bfe;
+    background: #eaf2ff;
+  }
+}
+
+.codeChangeEmpty {
+  min-height: 120px;
+  padding: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #8a96a8;
+  font-size: 13px;
+  line-height: 20px;
+  text-align: center;
+  word-break: break-word;
+
+  :global {
+    .@{antPrefix}-empty {
+      margin: 0;
+    }
+  }
+}
+
+.codeChangeList {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: clamp(120px, 28vh, 320px);
+  overflow-y: auto;
+  padding: 4px 8px 8px;
+}
+
+.codeChangeItem {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 10px;
+  padding: 8px 6px;
+  border-radius: 6px;
+  color: inherit;
+
+  &:hover {
+    background: #f5f7fa;
+  }
+}
+
+// 可点击行(带 blobUrl)本身是 <a>,去掉链接默认下划线/配色,交互沿用悬浮底色。
+.codeChangeItemLink {
+  cursor: pointer;
+  text-decoration: none;
+
+  &:hover {
+    text-decoration: none;
+    color: inherit;
+  }
+}
+
+// 本地变更行是 <button>,清掉按钮默认样式,保持与列表行一致的网格布局。
+.codeChangeItemButton {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  font: inherit;
+}
+
+.codeChangeBadge {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.fileChangeAdded {
+  color: #1c9b68;
+  background: #eaf8f0;
+}
+
+.fileChangeModified {
+  color: #b7791f;
+  background: #fdf3e0;
+}
+
+.fileChangeRemoved {
+  color: #d9432f;
+  background: #fdeceb;
+}
+
+.fileChangeRenamed {
+  color: #246bfe;
+  background: #eaf2ff;
+}
+
+.codeChangeInfo {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.codeChangeName {
+  font-size: 13px;
+  font-weight: 500;
+  color: #1f2633;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.codeChangePath {
+  font-size: 12px;
+  color: #8a96a8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  // 深层目录省略头部、保留尾部(离文件更近的目录名更有辨识度):rtl 让省略号出现在左端,
+  // bdi 方向内联覆盖保证路径本身仍按从左到右阅读。hover 时 title 显示全路径。
+  direction: rtl;
+  text-align: left;
+  unicode-bidi: plaintext;
+}
+
+.codeChangeStat {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+}
+
+.codeChangeAdd {
+  color: #1c9b68;
+}
+
+.codeChangeDel {
+  color: #d9432f;
+}
+
+.detailResourceBlock {
+  border: 1px solid #dfe6f0;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.detailResourceBlockHeader {
+  min-height: 58px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #edf1f7;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  :global {
+    .@{antPrefix}-segmented {
+      flex-shrink: 0;
+      height: 30px;
+      padding: 2px;
+      border-radius: 8px;
+      display: inline-flex;
+      align-items: center;
+      background: #eef2f7;
+    }
+
+    .@{antPrefix}-segmented-item {
+      height: 26px;
+      min-height: 26px;
+      border-radius: 7px;
+      display: inline-flex;
+      align-items: center;
+      color: #6f7c90;
+      font-size: 12px;
+      line-height: 1;
+    }
+
+    .@{antPrefix}-segmented-item-label {
+      height: 26px;
+      min-height: 0;
+      padding: 0 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 1;
+    }
+
+    .@{antPrefix}-segmented-item-selected {
+      color: #246bfe;
+      background: #fff;
+    }
+  }
+}
+
+.detailResourceBlockTitle {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+
+  strong,
+  span {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  strong {
+    color: #1f2633;
+    font-size: 14px;
+    font-weight: 700;
+    line-height: 20px;
+  }
+
+  span {
+    color: #8592a6;
+    font-size: 12px;
+    line-height: 16px;
+  }
+}
+
+.detailResourceBlockCount {
+  flex-shrink: 0;
+  min-width: 18px;
+  color: #728096;
+  font-size: 13px;
+  line-height: 18px;
+  text-align: right;
+}
+
+.detailResourceFileList {
+  min-height: 120px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.detailResourceFileItem {
+  min-width: 0;
+  height: 30px;
+  padding: 0 6px;
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #526075;
+
+  &:hover {
+    background: #f5f8fd;
+  }
+}
+
+.detailResourceFileIcon {
+  flex-shrink: 0;
+  font-size: 16px;
+}
+
+.detailResourceFileName {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.detailResourceEmpty {
+  min-height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #9aa6b8;
+  font-size: 13px;
+  text-align: center;
+}
+
+.detailSessionResourceList {
+  min-height: 160px;
+}
+
+.detailSessionResourceGroup {
+  border-top: 1px solid #edf1f7;
+
+  &:first-child {
+    border-top: 0;
+  }
+}
+
+.detailSessionResourceHeader {
+  height: 34px;
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #344056;
+  background: #f6f8fb;
+}
+
+.detailSessionResourceArrow {
+  flex-shrink: 0;
+  color: #8b98aa;
+  font-size: 10px;
+}
+
+.detailSessionResourceName {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 20px;
+}
+
+.detailSessionResourceCount {
+  flex-shrink: 0;
+  color: #8a96a8;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.detailResourceCard {
+  min-height: 104px;
+  padding: 12px;
+  border: 1px solid #dfe6f0;
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: #fff;
+
+  strong,
+  span {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  strong {
+    color: #1f2633;
+    font-size: 14px;
+  }
+
+  span {
+    color: #7c8798;
+    font-size: 12px;
+  }
+}
+
+.detailResourceIcon {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #246bfe;
+  background: #eaf2ff;
+}
+
+.detailMemberAvatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  background: #246bfe;
+}
+
+.formField {
+  margin-bottom: 14px;
+
+  // 仅字段标题用 block，避免波及内部 antd 组件的 label（如 Radio.Button 的 .ant-radio-button-wrapper）导致竖排
+  > label {
+    display: block;
+    margin-bottom: 6px;
+    color: #526075;
+    font-size: 13px;
+    font-weight: 600;
+  }
+}
+
+/* 收集源表单双列布局：两列等宽，跨列项用 .formFieldFull */
+.formGrid {
+  display: grid;
+  // 禁止新增表单中带按钮的仓库选择器以固有宽度挤占左列。
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  column-gap: 16px;
+
+  > .formField {
+    // 允许字段内的 Select、Input 等控件在各自等宽列中正常收缩。
+    min-width: 0;
+  }
+}
+
+.formFieldFull {
+  grid-column: 1 / -1;
+}
+
+.sourceModal {
+  :global {
+    .@{antPrefix}-modal-content {
+      // 收集源编辑字段较多时只滚动弹窗内容，避免撑出页面级滚动条。
+      max-height: calc(100vh - 96px);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .@{antPrefix}-modal-header,
+    .@{antPrefix}-modal-footer {
+      flex-shrink: 0;
+    }
+
+    .@{antPrefix}-modal-body {
+      min-height: 0;
+      // 收集源表单滚动区单独限高，保证底部操作按钮始终完整露出。
+      max-height: calc(100vh - 260px);
+      overflow-y: auto;
+      padding-right: 20px;
+    }
+
+    .@{antPrefix}-input,
+    .@{antPrefix}-input-affix-wrapper,
+    .@{antPrefix}-input-number,
+    .@{antPrefix}-select,
+    .@{antPrefix}-space-compact {
+      width: 100%;
+      box-sizing: border-box;
+    }
+  }
+}
+
+.sourceSelectPopup {
+  min-width: 180px;
+
+  :global {
+    .@{antPrefix}-select-item-option-content {
+      white-space: normal;
+      overflow: visible;
+      text-overflow: clip;
+      line-height: 20px;
+    }
+  }
+}
+
+.sourceRepoAddButton {
+  width: auto;
+  min-width: 78px;
+  height: 34px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex: 0 0 auto;
+
+  :global {
+    .@{antPrefix}-btn-icon {
+      width: 16px;
+      height: 16px;
+      margin-inline-end: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex: 0 0 16px;
+    }
+  }
+}
+
+.sourceRepoCompact {
+  width: 100%;
+  min-width: 0;
+
+  :global {
+    // 覆盖弹窗内 Select 的全宽规则，让仓库下拉和添加按钮只占用当前表单列。
+    .@{antPrefix}-select {
+      width: auto;
+      min-width: 0;
+      height: 34px;
+      flex: 1 1 0;
+    }
+
+    // 新增渠道的仓库下拉与右侧添加按钮统一使用 34px 高度，并校正单选文本垂直居中。
+    .@{antPrefix}-select-single .@{antPrefix}-select-selector {
+      height: 34px;
+    }
+
+    .@{antPrefix}-select-single .@{antPrefix}-select-selector .@{antPrefix}-select-selection-item,
+    .@{antPrefix}-select-single .@{antPrefix}-select-selector .@{antPrefix}-select-selection-placeholder {
+      line-height: 32px;
+    }
+
+    // 收集源弹窗的全宽控件规则会作用到紧凑组合，添加按钮必须固定宽度以避免图标与文字重叠。
+    .@{antPrefix}-btn {
+      width: auto;
+      min-width: 78px;
+      flex: 0 0 auto;
+    }
+  }
+}
+
+.sourceRepoSelect {
+  min-width: 0;
+  flex: 1 1 0;
+}
+
+.sourceScoreRule {
+  margin-top: 8px;
+  // 得分阈值说明与输入框保持同一行，避免后半句在弹窗内单独换行。
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+
+.sourceScoreRuleInput {
+  // 输入框保持固定宽度，不因两侧说明文字而被压缩。
+  flex: 0 0 80px;
+  width: 80px;
+  margin: 0 8px;
+}
+
+.sourceConfirmHint {
+  margin-top: 6px;
+  color: #999;
+  font-size: 12px;
+}
+
+.dwsAuthorizationInstruction,
+.dwsAuthorizationDeviceCode {
+  margin: 4px 0;
+}
+
+.dwsAuthorizationDeviceCode {
+  color: #666;
+}
+
+.repoDescription {
+  color: #999;
+}
+
+.manualRequirementModal {
+  :global {
+    .@{antPrefix}-modal-content {
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    .@{antPrefix}-modal-header {
+      margin-bottom: 20;
+    }
+
+    .@{antPrefix}-modal-body {
+      padding: 12px 0px 0px;
+    }
+
+    .@{antPrefix}-modal-footer {
+      border-top: 0;
+    }
+
+    .@{antPrefix}-btn {
+      height: 34px;
+      border-radius: 9px;
+    }
+
+    .@{antPrefix}-input,
+    .@{antPrefix}-select-selector {
+      border-radius: 8px;
+    }
+  }
+}
+
+.manualRequirementTitle {
+  h3 {
+    margin: 0 0 6px;
+    color: #1f2633;
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 22px;
+  }
+
+  p {
+    margin: 0;
+    color: #75839a;
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 18px;
+  }
+}
+
+.manualRequirementForm {
+  // 原始来源独占一行，影响分支和关联仓库各占一半，需求名称及长内容字段跨整行展示。
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  column-gap: 16px;
+
+  .formField {
+    min-width: 0;
+    margin-bottom: 12px;
+  }
+}
+
+.manualRequirementFormFull {
+  grid-column: 1 / -1;
+}
+
+.manualRequirementSourceField {
+  // 原始来源独占第一行但保持左侧 50% 宽度，右侧保留空白。
+  grid-column: 1 / -1;
+  width: 50%;
+}
+
+.manualRequirementRepoCompact {
+  width: 100%;
+  min-width: 0;
+
+  :global {
+    // 仓库选择框需为右侧新增按钮预留空间，避免在需求弹窗中被全宽规则挤压。
+    .@{antPrefix}-select {
+      width: auto;
+      min-width: 0;
+      height: 34px;
+      flex: 1 1 0;
+    }
+
+    // 需求弹窗内按钮统一为 34px，仓库下拉同步该高度并校正单选文本的垂直居中。
+    .@{antPrefix}-select-single .@{antPrefix}-select-selector {
+      height: 34px;
+    }
+
+    .@{antPrefix}-select-single .@{antPrefix}-select-selector .@{antPrefix}-select-selection-item,
+    .@{antPrefix}-select-single .@{antPrefix}-select-selector .@{antPrefix}-select-selection-placeholder {
+      line-height: 32px;
+    }
+  }
+}
+
+.manualRequirementRepoSelect {
+  min-width: 0;
+  flex: 1 1 0;
+}
+
+.manualRequirementSourceType {
+  // 原始来源字段位于表单左侧 50% 列，Tab 容器铺满该列，整体切换区域保持 50% 宽度。
+  display: flex;
+  width: 100%;
+  max-width: 100%;
+  white-space: nowrap;
+
+  :global {
+    // 三个来源选项等分填满左侧 50% 区域，避免切换控件右侧出现空白。
+    .@{antPrefix}-radio-button-wrapper {
+      min-width: 0;
+      flex: 1 1 0;
+      padding: 0 8px;
+      text-align: center;
+    }
+  }
+}
+
+.manualRequirementTextArea {
+  // 字数提示放在文本框外侧右下方，预留空间避免和下一字段重叠。
+  position: relative;
+  padding-bottom: 24px;
+}
+
+.manualRequirementTextCount {
+  // 计数与文本框底边右侧对齐，效果与输入框原生字数提示保持一致。
+  position: absolute;
+  z-index: 1;
+  top: auto;
+  right: 0;
+  bottom: 0;
+  left: auto;
+  color: #98a2b3;
+  font-size: 12px;
+  line-height: 18px;
+  pointer-events: none;
+}
+
+.repoModalDivider {
+  margin: 16px 0 12px;
+  border-top: 1px solid #f0f0f0;
+}
+
+.dwsAuthDetail {
+  line-height: 2.2;
+
+  p {
+    margin: 0;
+  }
+}
+
+.agentSearchInput {
+  margin-bottom: 16px;
+}
+
+.agentList {
+  height: 400px;
+  overflow-y: auto;
+}
+
+.agentListAvatar {
+  width: 40px;
+  height: 40px;
+}
+
+// 绑定数字员工弹窗中的描述最多展示一行，避免长文本撑高单个列表项。
+.agentListDescription {
+  display: -webkit-box;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  line-height: 20px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
+}
+
+/* 整体任务视图看板样式（只读） */
+.taskBoardDrawer {
+  :global {
+    .@{antPrefix}-drawer-body {
+      padding: 0;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+  }
+}
+
+.kanbanToolbar {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  // 任务范围与日期筛选固定在工具栏左侧。
+  justify-content: flex-start;
+  gap: 16px;
+  min-height: var(--task-board-toolbar-height);
+  box-sizing: border-box;
+  padding: 10px 20px;
+  background: #fff;
+  border-bottom: 1px solid #f0f0f0;
+
+  :global {
+    // 整体任务视图的日期筛选提高点击高度，和工具栏视觉规格保持一致。
+    .@{antPrefix}-picker {
+      height: 32px;
+    }
+  }
+}
+
+.kanbanBoard {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 16px;
+  align-items: stretch;
+  // 顶部留白下移到列头，确保状态列头与筛选工具栏对齐。
+  padding: 0 20px 20px;
+  // 四列不足以容纳时仅允许横向滚动，纵向滚动由每个状态列独立处理。
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+.kanbanColumn {
+  flex: 1;
+  min-width: 260px;
+  max-width: 320px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: #fafafa;
+  border-radius: 10px;
+  padding: 0 12px 12px;
+  transition: background-color 0.2s, box-shadow 0.2s;
+}
+
+.kanbanColumnDragOver {
+  background: #f0f6ff;
+  box-shadow: inset 0 0 0 1px #91caff;
+}
+
+.kanbanColHeader {
+  // 列头在列滚动区之外，始终显示在当前状态列顶部。
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 0 8px;
+  margin-bottom: 12px;
+  background: #fafafa;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.kanbanColumnContent {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+.kanbanColumnSpin {
+  min-height: 100%;
+
+  :global {
+    .@{antPrefix}-spin-container {
+      min-height: 100%;
+    }
+  }
+}
+
+.kanbanColumnLoadingMore {
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.kanbanColIcon {
+  width: 14px;
+  display: inline-flex;
+  justify-content: center;
+}
+
+.kanbanColIconPending {
+  color: #8c8c8c;
+}
+
+.kanbanColIconRunning {
+  color: #1677ff;
+}
+
+.kanbanColIconPaused {
+  color: #faad14;
+}
+
+.kanbanColIconDone {
+  color: #52c41a;
+}
+
+.kanbanColTitle {
+  color: #333;
+}
+
+.kanbanColCount {
+  color: #8c8c8c;
+  font-weight: 400;
+}
+
+.kanbanCard {
+  min-width: 0;
+  background: #fff;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 10px;
+  cursor: grab;
+  transition: box-shadow 0.2s, opacity 0.2s, transform 0.2s;
+
+  &:hover {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  }
+
+  &:active {
+    cursor: grabbing;
+  }
+}
+
+.kanbanCardDragging {
+  opacity: 0.55;
+  transform: scale(0.98);
+}
+
+.kanbanCardTitle {
+  display: -webkit-box;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+  margin: 0 0 6px;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+.kanbanCardMeta {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: #595959;
+
+  :global {
+    .@{antPrefix}-tag {
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+  }
+}
+
+.kanbanPhaseTag {
+  margin-inline-end: 4px;
+}
+
+.kanbanWarningTag {
+  margin-top: 4px;
+}
+
+.kanbanCardFooter {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: #8c8c8c;
+
+  span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  span:last-child {
+    flex-shrink: 0;
+  }
+}
+
+/* 任务详情复用需求详情的抽屉层级、背景色和信息卡规范。 */
+.taskDetailDrawer {
+  :global {
+    .@{antPrefix}-drawer-body {
+      padding: 16px;
+      background: #f7f9fc;
+    }
+  }
+}
+
+.taskDetailDrawerContent {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.taskDetailTitle {
+  color: #1f2633;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 24px;
+  word-break: break-word;
+}
+
+/* 任务详情 - Agent 执行概览 */
+.taskHero {
+  padding: 16px;
+  border-radius: 8px;
+  background: #f7f9fc;
+}
+
+.taskHeroAgent {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+
+  small {
+    display: block;
+    font-size: 12px;
+    line-height: 18px;
+    color: #8a96a8;
+  }
+
+  strong {
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 24px;
+    color: #344056;
+  }
+}
+
+.taskHeroAvatar {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  // 复用数字员工真实头像时按圆形裁切，保持和会话、员工列表一致。
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: #fff;
+}
+
+.taskHeroProgressBar {
+  width: 100%;
+  height: 8px;
+  display: block;
+  appearance: none;
+  border: 0;
+  border-radius: 4px;
+  color: #246bfe;
+  background: #dce9ff;
+  overflow: hidden;
+
+  &::-webkit-progress-bar {
+    background: #dce9ff;
+    border-radius: 4px;
+  }
+
+  &::-webkit-progress-value {
+    background: #246bfe;
+    border-radius: 4px;
+  }
+
+  &::-moz-progress-bar {
+    background: #246bfe;
+    border-radius: 4px;
+  }
+}
+
+.taskHeroProgress p {
+  margin: 8px 0 0;
+  font-size: 13px;
+  line-height: 20px;
+  color: #526075;
+}
+
+/* 任务详情 - 执行上下文网格 */
+.taskContextGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+}
+
+.taskContextItem {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+
+  label {
+    font-size: 12px;
+    line-height: 18px;
+    color: #8a96a8;
+  }
+
+  strong {
+    font-size: 13px;
+    font-weight: 400;
+    line-height: 20px;
+    color: #344056;
+    word-break: break-word;
+  }
+}
+
+// 关联需求跨越两列，其余上下文字段仍保持两列各占 50% 的布局。
+.taskContextItemFull {
+  grid-column: 1 / -1;
+}
+
+/* 任务详情 - 研发环节竖向流程 */
+.phaseSection {
+  padding: 14px;
+  border: 1px solid #e6ebf2;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.phaseSectionTitle {
+  margin: 0 0 12px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+  color: #344056;
+}
+
+.phaseFlow {
+  display: flex;
+  flex-direction: column;
+}
+
+.phaseNode {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+
+  /* 环节间竖向连接线 */
+  &:not(:last-child)::after {
+    content: '';
+    position: absolute;
+    left: 13px;
+    top: 34px;
+    bottom: -10px;
+    width: 2px;
+    background: #e6ebf2;
+  }
+}
+
+.phaseNodeMark {
+  z-index: 1;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+  background: #d9d9d9;
+}
+
+.phaseNodeBody {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.4;
+
+  strong {
+    font-size: 14px;
+    font-weight: 600;
+    color: #344056;
+  }
+
+  small {
+    font-size: 12px;
+    color: #8a96a8;
+  }
+}
+
+.phaseCurrentDot {
+  color: #1677ff;
+  font-weight: 600;
+}
+
+.phaseDone .phaseNodeMark {
+  background: #52c41a;
+}
+
+.phaseActive .phaseNodeMark {
+  background: #1677ff;
+}
+
+.phasePaused .phaseNodeMark {
+  // 暂停状态使用橙色，与完成、执行中和异常状态保持清晰区分。
+  background: #faad14;
+}
+
+.phaseRejected .phaseNodeMark {
+  background: #ff4d4f;
+}
+
+.phaseWaiting .phaseNodeMark {
+  background: #d9d9d9;
+}
+
+.kickbackList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.kickbackItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.kickbackRound {
+  font-size: 12px;
+  color: #8a96a8;
+}
+
+.kickbackReason {
+  font-size: 12px;
+  color: #526075;
+}
+
+// 文件 diff modal:标题含文件名+全路径,正文等宽字体逐行渲染 unified diff。
+.diffModalTitle {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.diffModalName {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1f2633;
+}
+
+.diffModalPath {
+  font-size: 12px;
+  color: #8a96a8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+  unicode-bidi: plaintext;
+}
+
+.diffModalEmpty {
+  padding: 40px 0;
+  text-align: center;
+  color: #8a96a8;
+  font-size: 13px;
+}
+
+.diffModalBody {
+  max-height: 65vh;
+  overflow: auto;
+  border: 1px solid #e6ebf2;
+  border-radius: 6px;
+  background: #fbfcfe;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.diffLine {
+  padding: 0 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+// git 客户端配色:新增绿底、删除红底、hunk 头蓝灰、上下文常态。
+.diffLineAdd {
+  background: #e6ffec;
+  color: #1c7c3c;
+}
+
+.diffLineDel {
+  background: #ffebe9;
+  color: #b31d28;
+}
+
+.diffLineHunk {
+  background: #eef2f7;
+  color: #5a6b86;
+}
+
+.diffLineContext {
+  color: #444c5a;
+}

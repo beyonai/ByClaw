@@ -30,14 +30,23 @@ class SandboxControllerTest {
     @Test
     void getSandboxInfo_returnsGatewayToken() {
         SandboxService sandboxService = mock(SandboxService.class);
+        SsSandboxRecordMapper sandboxRecordMapper = mock(SsSandboxRecordMapper.class);
         SandboxController controller = new SandboxController();
         ReflectionTestUtils.setField(controller, "sandboxService", sandboxService);
+        ReflectionTestUtils.setField(controller, "sandboxRecordMapper", sandboxRecordMapper);
+
         when(sandboxService.sandboxInfo("user001")).thenReturn(List.of(SandboxInfo.builder()
             .sandboxId("sandbox-1")
             .sandboxType("openclaw")
             .endpoints(List.of("http://host/proxy/18789/chat?token=0123456789abcdef0123456789abcdef"))
             .gatewayToken("0123456789abcdef0123456789abcdef")
             .build()));
+
+        // Mock database record to return RUNNING status
+        SsSandboxRecord record = new SsSandboxRecord();
+        record.setStatus("RUNNING");
+        when(sandboxRecordMapper.selectLatestBySandboxId("user001", "openclaw", "sandbox-1"))
+            .thenReturn(record);
 
         ResponseUtil response = controller.getSandboxIdByUserCode(Map.of("userCode", "user001"));
 
@@ -47,6 +56,7 @@ class SandboxControllerTest {
         assertThat(data).hasSize(1);
         assertThat(data.get(0))
             .containsEntry("token", "0123456789abcdef0123456789abcdef")
+            .containsEntry("status", "RUNNING")
             .doesNotContainKey("gatewayToken");
     }
 
@@ -80,8 +90,9 @@ class SandboxControllerTest {
     void listRecords_returnsOpenclawEndpointForJsonStorage() {
         SandboxController controller = new SandboxController();
         SsSandboxRecordMapper sandboxRecordMapper = mock(SsSandboxRecordMapper.class);
+        ByaiSystemConfigService byaiSystemConfigService = mock(ByaiSystemConfigService.class);
         ReflectionTestUtils.setField(controller, "sandboxRecordMapper", sandboxRecordMapper);
-        ReflectionTestUtils.setField(controller, "byaiSystemConfigService", mock(ByaiSystemConfigService.class));
+        ReflectionTestUtils.setField(controller, "byaiSystemConfigService", byaiSystemConfigService);
 
         SsSandboxRecord record = new SsSandboxRecord();
         record.setId(1L);
@@ -90,6 +101,7 @@ class SandboxControllerTest {
         record.setCreateTime(new Date());
         when(sandboxRecordMapper.selectByPage(null, null, 0, 20)).thenReturn(List.of(record));
         when(sandboxRecordMapper.countByCondition(null, null)).thenReturn(1);
+        when(byaiSystemConfigService.getDcSystemConfigValueByCode("WEB_BASE_URL")).thenReturn("");
 
         ResponseUtil response = controller.listRecords(Map.of());
 

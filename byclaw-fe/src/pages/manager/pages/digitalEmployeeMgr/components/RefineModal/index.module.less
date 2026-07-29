@@ -3,15 +3,30 @@
   flex-direction: column;
   height: 100%;
   max-height: 80vh;
+  min-height: 360px;
 }
 
 .formContainer {
   flex: 1;
+  min-height: 0;
   overflow: auto;
 }
 
 .refineModal {
   // 弹窗整体样式
+  :global {
+    .ant-modal-content {
+      max-height: 88vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .ant-modal-body {
+      flex: 1;
+      min-height: 0;
+      overflow: hidden;
+    }
+  }
 }
 
 .descInput {
@@ -26,10 +41,12 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  padding: 60px 24px;
-  gap: 16px;
-  min-height: 360px;
+  justify-content: flex-start;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  padding: 40px 24px 24px;
+  gap: 12px;
 }
 
 .loadingHint {
@@ -37,60 +54,53 @@
   font-size: 13px;
 }
 
+.streamProgress {
+  color: #9aa0a6;
+  font-size: 12px;
+  line-height: 20px;
+}
+
 .streamResultList {
   width: 100%;
-  max-width: 560px;
-  max-height: 260px;
+  max-height: 360px;
   overflow: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 8px;
+  margin-top: 4px;
+  padding-right: 4px;
 }
 
 .streamWaiting {
-  color: #9aa1ad;
+  color: #9aa0a6;
   font-size: 13px;
+  line-height: 22px;
   text-align: center;
 }
 
-.streamTextOutput {
-  padding: 12px;
-  border: 1px solid #edf0f5;
-  border-radius: 6px;
-  background: #fafbfc;
-  color: #2f3542;
-  font-size: 12px;
-  line-height: 18px;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
 .streamResultItem {
-  padding: 10px 12px;
-  border: 1px solid #edf0f5;
-  border-radius: 6px;
-  background: #fafbfc;
+  padding: 10px 0;
+  border-bottom: 1px solid #f0f1f5;
 }
 
 .streamResultTitle {
-  color: #2f3542;
+  color: #2b2f36;
   font-size: 13px;
   font-weight: 500;
   line-height: 20px;
 }
 
 .streamResultText {
+  margin-top: 4px;
   color: #707680;
   font-size: 12px;
-  line-height: 18px;
-  margin-top: 4px;
+  line-height: 20px;
   word-break: break-word;
 }
 
 .footerBtns {
+  flex-shrink: 0;
   display: flex;
   justify-content: flex-end;
-  margin-top: 24px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #f0f1f5;
   gap: 8px;
 }
