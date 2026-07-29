@@ -47,7 +47,7 @@ def _fix_framework_log_handler() -> None:
 
 _fix_framework_log_handler()
 
-from byclaw_data.runtime import normalize_runtime_environment
+from byclaw_data.runtime import normalize_runtime_environment  # noqa: E402
 
 logger = logging.getLogger(__name__)
 

@@ -47,13 +47,11 @@ from by_framework.core.protocol.content_type import SseMessageType, SseReasonMes
 from by_framework.core.protocol.results import AgentTaskResult, normalize_process_result
 from by_framework.worker.sandbox.hook_sandbox import active_workspace
 
-from datacloud_analysis.agent import create_agent
 from datacloud_platform.constants import DEFAULT_BASE_ID
 from datacloud_analysis.command_plugins import CommandPluginManager
 from datacloud_analysis.logging_setup import setup_logging
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.checkpoint.base import BaseCheckpointSaver
-from langgraph.types import Command
 
 from byclaw_data.byclaw_data_clarification import ByclawDataClarification
 
@@ -1815,9 +1813,6 @@ class DataCloudWorker(GatewayWorker):
             )
 
         # 动态路径：通过 LoaderRuntimeManager 获取 loader，收口到 platform 层
-        from datacloud_platform.loader_runtime import (  # noqa: PLC0415
-            LoaderRuntimeManager,
-        )
         from datacloud_platform import get_platform  # noqa: PLC0415
         from datacloud_platform.config import get_settings  # noqa: PLC0415
         from datacloud_platform.constants import DEFAULT_BASE_ID
