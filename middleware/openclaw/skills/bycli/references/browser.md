@@ -4,7 +4,7 @@ The first reader of this CLI is an agent, not a human. Every subcommand returns 
 
 This reference is for **driving a live browser** to accomplish an agent task. If you are building a reusable adapter under `~/.bycli/clis/<site>/` see [adapter-author.md](./adapter-author.md) instead.
 
-> **浏览器生命周期（冷启动 / 关闭 / Login 例外 / Kill-all-Chrome）** 已在 [SKILL.md](../SKILL.md) 主文件中详述，此处不重复。本文件聚焦命令参考和操作细节。
+> **浏览器生命周期（冷启动 / 资源所有权 / 关闭 / Login 例外）** 已在 [SKILL.md](../SKILL.md) 主文件中详述，此处不重复。本文件聚焦命令参考和操作细节。
 
 ---
 
@@ -270,7 +270,7 @@ bycli browser hn open "https://news.ycombinator.com" \
 
 ## Recipes
 
-> **冷启动 / 关闭 / Kill-all-Chrome 流程** 见 [SKILL.md](../SKILL.md) "浏览器生命周期" 章节。
+> **冷启动 / 资源所有权 / 关闭流程** 见 [SKILL.md](../SKILL.md) "浏览器生命周期" 章节。
 
 ### Fill a login form
 
@@ -283,7 +283,9 @@ bycli browser login get value 4                    # verify (autocomplete can ea
 bycli browser login click 6                        # submit
 bycli browser login wait selector "[data-testid=account-menu]" --timeout 15000
 bycli browser login state                          # fresh refs on logged-in page
-# If still on login page (MFA), keep session alive — don't close.
+# If still on login/SSO/MFA, CAPTCHA, anti-bot, or verification page:
+# stop immediately, keep session/TAB/daemon/browser alive, do not inspect or retry,
+# and follow ../SKILL.md "认证、人工验证和 STOP".
 ```
 
 ### Pick from a long native dropdown
@@ -368,7 +370,7 @@ bycli browser checkout eval "(() => document.querySelector('input[name=cardnumbe
 
 | symptom | fix |
 |---------|-----|
-| `bycli doctor` red: "Browser not connected" | 见 SKILL.md 冷启动流程：`openclaw browser --browser-profile openclaw start` |
+| `bycli doctor` red: "Browser not connected" | 见 SKILL.md 冷启动流程：先执行 `openclaw browser --browser-profile openclaw status`；仅明确未运行时启动，优先使用存在且可执行的 `/usr/local/bin/start-chrome.sh`，否则回退 `openclaw browser --browser-profile openclaw start` |
 | `Browser profile "<id>" is not connected` | 同上，Chromium 未运行 |
 | `Extension: connected` but `Connectivity: failed` | Race during cold start. Re-run `bycli doctor` after a few seconds; if persistent, `bycli daemon restart`. |
 | `attach failed: chrome-extension://...` | Disable 1Password / other CDP-hungry extensions temporarily. |

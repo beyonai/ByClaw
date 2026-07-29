@@ -8,7 +8,7 @@
 
 ## 活例子：convertible.js
 
-> **注意（2026-05 起）**：下面这份 `convertible.js` 的 limit clamp 和 `CliError('HTTP_ERROR' / 'NO_DATA')` 是 grandfathered 写法（在 [`scripts/typed-error-lint-baseline.json`](../../../scripts/typed-error-lint-baseline.json) 里）。结构布局（cli 声明 / args / columns / map）仍然是好范本，但 **error 处理 + limit 校验请按下文 §3 + [`typed-errors.md`](./typed-errors.md) 写**。新写 adapter 抄这个文件别连 `Math.max(1, Math.min(...))` 和 `CliError(...)` 一起抄过去。
+> **注意（2026-05 起）**：下面这份 `convertible.js` 的 limit clamp 和 `CliError('HTTP_ERROR' / 'NO_DATA')` 属于历史兼容写法。结构布局（cli 声明 / args / columns / map）仍然是好范本，但 **error 处理 + limit 校验请按下文 §3 + [`typed-errors.md`](./typed-errors.md) 写**。新写 adapter 抄这个文件别连 `Math.max(1, Math.min(...))` 和 `CliError(...)` 一起抄过去。
 
 ```javascript
 // eastmoney convertible — on-market convertible bond listing.
@@ -118,7 +118,7 @@ columns: ['rank', 'bondCode', 'bondName', /* ... */ ],
 - `default` 必填（缺失的命令会拒绝启动）
 - `columns` 数组必须跟 `func` 返回的 object keys 完全对上，顺序也一致（决定表格列顺序）
 - 列名 camelCase，跟 `cli({...})` 其他 adapter 保持统一
-- **中间解析对象 key 不能跟 columns 任一项重叠** —— 否则 `silent-column-drop` audit 会把它当 row 候选误判。`{pid, html, start}` 这类中间结构改成 `{postId, body, offset}`，最后在 push row 时再 destructure aliasing 回 column 命名。背景：PR #1329 R1 codex-mini0 catch 的（[before](https://github.com/sovovs/byCLI/blob/384bcd6fdd93f3075bd2c835e82689c42bfe4b2f/clis/1point3acres/thread.js#L50-L63) → [after](../../../clis/1point3acres/thread.js#L50-L65)）
+- **中间解析对象 key 不能跟 columns 任一项重叠** —— 否则 `silent-column-drop` audit 会把它当 row 候选误判。`{pid, html, start}` 这类中间结构改成 `{postId, body, offset}`，最后在 push row 时再 destructure aliasing 回 column 命名。背景：PR #1329 R1 codex-mini0 catch 的（[before](https://github.com/sovovs/byCLI/blob/384bcd6fdd93f3075bd2c835e82689c42bfe4b2f/clis/1point3acres/thread.js#L50-L63) → after）
 
 ### 3. func — 主体
 
@@ -159,7 +159,7 @@ func: async (args) => {
 },
 ```
 
-**站点级 helper**：≥ 2 个同站 adapter 都做相同 limit / page 校验时，把校验抽成 `clis/<site>/utils.js` 的 `normalizeLimit(value, default, max, label)` / `normalizePositiveInteger(value, default, label, { min })`，避免每个 adapter 都 inline 一遍。模板见 [`typed-errors.md` §2](./typed-errors.md) 和 [`clis/1point3acres/utils.js`](../../../clis/1point3acres/utils.js)。1 个 adapter 用就直接 inline，不要为 1 处单点抽 helper。
+**站点级 helper**：≥ 2 个同站 adapter 都做相同 limit / page 校验时，把校验抽成 `clis/<site>/utils.js` 的 `normalizeLimit(value, default, max, label)` / `normalizePositiveInteger(value, default, label, { min })`，避免每个 adapter 都 inline 一遍。模板见 [`typed-errors.md` §2](./typed-errors.md)。1 个 adapter 用就直接 inline，不要为 1 处单点抽 helper。
 
 **参数形态**（**踩过最多次的坑**：搞反签名后 `args` 实际是 `debug` flag，所有 `args.foo` 静默 undefined → fallback 到 default。#1329 upstream 之前 8 个 non-browser adapter 写错过签名，全部 silently fallback 到默认参数）：
 

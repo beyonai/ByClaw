@@ -265,11 +265,11 @@ const ModelSiderPanel: React.FC = () => {
                       {current
                         ? intl.formatMessage({ id: 'fileBrowserEntry.debug.currentModel' })
                         : intl.formatMessage({
-                            id:
+                          id:
                               item.status === 'ENABLED'
                                 ? 'personalModel.action.enable'
                                 : 'personalModel.action.disable',
-                          })}
+                        })}
                     </Tag>
                   </div>
                   <div className={styles.modelCode}>{item.modelCode || '-'}</div>
