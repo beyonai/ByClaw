@@ -1,14 +1,18 @@
-import { createRedis, EventType, SseReasonMessageType } from "@byclaw/by-framework";
 import { enqueueAfterAgentEvents } from "./agent-event-serial.js";
+import { EventType, SseReasonMessageType } from "@byclaw/by-framework";
 import {
+  markActiveSdkContextWindow,
   emitSdkChunkTracked,
   markActiveSdkOutboundSent,
   markActiveSdkOutboundSending,
+  markActiveSdkOverflowContinuePending,
+  markActiveSdkOverflowLength,
   resolveActiveSdkRequestBySessionKey,
   resolveActiveSdkRequestByTarget,
   resolveActiveSdkRunBinding,
-  resolveSdkEmitter,
   getAgentRunEndPromiseResolver,
+  resolveSdkEmitter,
+  registerAgentRunEndPromise,
 } from "./session-context.js";
 import {
   cancelActiveSdkCompletionCheck,
@@ -20,6 +24,7 @@ import type { Language, PluginHookAgentContext, PluginHookAgentEndEvent } from "
 import {
   BYAI_USER_MD_SECTION_END,
   BYAI_USER_MD_SECTION_START,
+  buildByclawAcpLanguagePrompt,
   buildChannelExtensionPrompt,
   buildCompactionNoticeText,
   buildLanguagePrompt,
@@ -30,13 +35,21 @@ import {
   buildUserMdReloadPrompt,
   resolveInboundLanguage,
 } from "./i18n.js";
+import { isContextPressureLength } from "./overflow-length.js";
 import { getByaiRuntime } from "./runtime.js";
 import { resolveAgentIdFromSessionKey } from "openclaw/plugin-sdk/routing";
 import { takePromptInjectionSnapshot } from "./prompt-injection-snapshot.js";
+import { buildByclawChatContextToolPrompt } from "./chat-context-prompt.js";
 import {
   consumeWorkspaceReloadHint,
   markWorkspaceReloadHint,
 } from "./workspace-reload-hints.js";
+import {
+  createRedisClient,
+  hasRedisConnectionConfig,
+  readRedisConfig,
+  type RedisConnectionConfig,
+} from "../../shared/src/redis-compat.js";
 import {
   resolveByaiAgentIdFromSessionKey,
   resolveByaiSessionIdFromSessionKey,
@@ -129,13 +142,7 @@ type LlmOutputHookContext = PluginHookAgentContext & {
   contextWindowReferenceTokens?: number;
 };
 
-type RedisInfo = {
-  username?: string;
-  password?: string;
-  host: string;
-  port: number;
-  db: number;
-};
+type RedisInfo = RedisConnectionConfig;
 
 type ByaiUserInfo = {
   userId: string;
@@ -398,23 +405,11 @@ async function refreshRunStartSessionStatusRedis(sessionKey: string | undefined)
 }
 
 function getRedisInfo(): RedisInfo | null {
-  const {
-    REDIS_USERNAME,
-    REDIS_PASSWORD,
-    REDIS_HOST,
-    REDIS_PORT,
-    REDIS_DATABASE,
-  } = process.env;
-  if (!REDIS_HOST || !REDIS_PORT) {
+  const config = readRedisConfig();
+  if (!hasRedisConnectionConfig(config)) {
     return null;
   }
-  return {
-    username: REDIS_USERNAME,
-    password: REDIS_PASSWORD,
-    host: REDIS_HOST,
-    port: parseInt(REDIS_PORT, 10),
-    db: parseInt(REDIS_DATABASE || "0", 10),
-  };
+  return config;
 }
 
 async function getCurrentUserCode(): Promise<string | null> {
@@ -458,7 +453,7 @@ async function readByaiUserInfoFromRedis(): Promise<ByaiUserInfo | null> {
     return null;
   }
 
-  const redis = createRedis(redisInfo);
+  const redis = createRedisClient(redisInfo);
   try {
     const userIdRaw = await redis.get(`SHARE_BFM_USER_CODE_${userCode}`);
     const userId = userIdRaw?.trim();
@@ -638,12 +633,16 @@ export function registerByaiHooks(api: OpenClawPluginApi): void {
       const request = resolveActiveSdkRequestBySessionKey(ctx.sessionKey);
       if (request?.sessionId) {
         sections.push(buildSessionFilesPrompt(request.sessionId, request.language));
+        sections.push(buildByclawChatContextToolPrompt(request.language));
       }
       if (request) {
         sections.push(buildSkillInstallPrompt(normalizedWorkspace, request.language));
       }
       if (request?.languageProvided) {
         sections.push(buildLanguagePrompt(request.language));
+      }
+      if (request) {
+        sections.push(buildByclawAcpLanguagePrompt(request.language, request.languageProvided, request.sessionId));
       }
       const channelExtPrompt = buildChannelExtensionPrompt(
         request?.channelExtension,
@@ -719,6 +718,39 @@ export function registerByaiHooks(api: OpenClawPluginApi): void {
     });
   });
 
+  // core 不把 contextTokenBudget 透传进 agent_end 的 ctx，但 model_call_started 的 event/ctx 都带。
+  // 在每次 model 调用开始时按 sessionKey 暂存有效窗口，供 agent_end 判别 length 截断是否属上下文压力。
+  api.on(
+    "model_call_started",
+    (
+      event: {
+        runId?: string;
+        sessionKey?: string;
+        contextTokenBudget?: number;
+        contextWindowReferenceTokens?: number;
+      },
+      ctx: {
+        sessionKey?: string;
+        contextTokenBudget?: number;
+        contextWindowReferenceTokens?: number;
+      },
+    ) => {
+      const sessionKey = ctx.sessionKey ?? event.sessionKey;
+      if (!sessionKey) {
+        return;
+      }
+      const budget = event.contextTokenBudget ?? ctx.contextTokenBudget;
+      // 用原生参考窗口优先于 budget（budget 可能被 cap 收窄），作为 threshold 判据的分母。
+      const window =
+        event.contextWindowReferenceTokens ??
+        ctx.contextWindowReferenceTokens ??
+        budget;
+      if (typeof window === "number" && window > 0) {
+        markActiveSdkContextWindow(sessionKey, window, budget);
+      }
+    },
+  );
+
   api.on("llm_output", (event: LlmOutputHookEvent, ctx: LlmOutputHookContext) => {
     void refreshRealtimeSessionStatusRedis(event, ctx).catch((err) => {
       api.logger.warn(`[byai-channel] llm_output session status refresh failed: ${String(err)}`);
@@ -726,9 +758,6 @@ export function registerByaiHooks(api: OpenClawPluginApi): void {
   });
 
   api.on("agent_end", (event: PluginHookAgentEndEvent, ctx: PluginHookAgentContext) => {
-    api.logger.info(
-      `agent_end hook emits, runId=${ctx.runId}, success=${event.success}, error=${event.error}`,
-    );
     const { runId } = ctx;
     if (!runId) {
       return;
@@ -753,16 +782,51 @@ export function registerByaiHooks(api: OpenClawPluginApi): void {
         const {
           stopReason,
           errorMessage,
+          usage,
         } = lastAssistant as {
           stopReason?: string;
           errorMessage?: string;
+          usage?: {
+            input?: number;
+            output?: number;
+            cacheRead?: number;
+            cacheWrite?: number;
+            total?: number;
+            totalTokens?: number;
+          };
         }
         if (errorMessage) {
           _success = false;
           _error = errorMessage;
         } else if (stopReason === "length") {
-          _success = false;
-          _error = buildMaxTokenErrorText(language);
+          // 区分两类 length 截断：
+          // - 上下文压力型（length + 上下文已越过 core 压缩阈值 totalTokens > window-reserveTokens）：
+          //   core 不会自动续写，但会在下一条消息 pre-prompt 触发 threshold 压缩。标记之，让 under-gate
+          //   自动续跑并 emit 真答案；run-end 不带 error（这一截断 run 无可交付答案，避免 emit 误导文案）。
+          // - 真·maxToken 截断（模型写得多、被输出上限切断，上下文未越阈值）：保留原「调高 maxToken」提示。
+          // contextWindow 来自 model_call_started hook 的快照（core 不把它透传进 agent_end 的 ctx）。
+          const contextWindow = runBinding?.request?.lastContextWindow;
+          if (isContextPressureLength({ stopReason, usage, contextWindow })) {
+            markActiveSdkOverflowLength(sessionKey, true, {
+              stopReason,
+              usage,
+              contextWindow,
+            });
+            // 同步阻断完成门：截断 run 的 lifecycle-end 会 schedule 一个 200ms debounce 的完成
+            // 检查；必须在它触发前挡住，否则截断收尾、丢掉续跑答案。under-gate 编排会在续跑
+            // 结束（或放弃续跑）后释放该门。
+            markActiveSdkOverflowContinuePending(sessionKey, true);
+            api.logger.info(
+              `[byai-channel] context-pressure length detected: sessionKey=${sessionKey ?? ""} ` +
+                `runId=${runId} stopReason=${stopReason} ` +
+                `contextWindow=${contextWindow ?? "unknown"} usage=${JSON.stringify(usage ?? {})}`,
+            );
+            _success = true;
+            _error = undefined;
+          } else {
+            _success = false;
+            _error = buildMaxTokenErrorText(language);
+          }
         } else if (stopReason === "aborted") {
           // 兜底。正常来说 stopReason=aborted 时，error=true, 且有 errorMessage
           _success = false;
@@ -770,7 +834,15 @@ export function registerByaiHooks(api: OpenClawPluginApi): void {
         }
       }
     }
-    if (resolve) {
+    api.logger.info(
+      `agent_end hook emits, runId=${ctx.runId}, success=${_success}, error=${_error}`,
+    );
+    if (!resolve) {
+      registerAgentRunEndPromise(runId, {
+        success: _success,
+        error: _error,
+      });
+    } else {
       resolve({
         success: _success,
         error: _error,

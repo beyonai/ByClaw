@@ -75,6 +75,13 @@ const PCAgentId = 'pcAgentId';
 
 const myEventEmitter = new EventEmitter$Cls();
 
+if (process.env.NODE_ENV === 'development' && typeof window !== 'undefined') {
+  (window as any).__BYCLAW_E2E_EVENT_EMITTER__ = myEventEmitter;
+  (window as any).__BYCLAW_E2E__ = {
+    EventEmitter: myEventEmitter,
+  };
+}
+
 const PCLayout = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const location = useLocation();
@@ -84,13 +91,16 @@ const PCLayout = () => {
   const [siderContentWidth, setSiderContentWidth] = React.useState(DEFAULT_SIDER_CONTENT_WIDTH);
   const [detailPanel, setDetailPanel] = React.useState<React.ReactNode>(null);
   const [detailPanelWidth, setDetailPanelWidth] = React.useState<React.CSSProperties['width']>();
+  const [detailPanelOverlay, setDetailPanelOverlay] = React.useState(false);
   const openDetailPanel = useCallback((panel: React.ReactNode, options?: DetailPanelOptions) => {
     setDetailPanel(panel);
     setDetailPanelWidth(options?.width);
+    setDetailPanelOverlay(!!options?.overlay);
   }, []);
   const clearDetailPanel = useCallback(() => {
     setDetailPanel(null);
     setDetailPanelWidth(undefined);
+    setDetailPanelOverlay(false);
   }, []);
 
   React.useEffect(() => {
@@ -146,6 +156,22 @@ const PCLayout = () => {
         : detailPanelWidth === HALF_MAIN_CONTENT_DETAIL_PANEL_WIDTH
           ? `${mainContentHalfWidth}px`
           : detailPanelWidth;
+
+  React.useEffect(() => {
+    if (process.env.NODE_ENV !== 'development' || typeof window === 'undefined') return;
+    (window as any).__BYCLAW_E2E__ = {
+      ...((window as any).__BYCLAW_E2E__ || {}),
+      EventEmitter: myEventEmitter,
+      resetChat: () => {
+        setSessionId('');
+        setAgentId('');
+      },
+      getState: () => ({
+        sessionId,
+        agentId,
+      }),
+    };
+  }, [agentId, sessionId]);
 
   useEffect(() => {
     const layoutElement = layoutRef.current;
@@ -343,23 +369,28 @@ const PCLayout = () => {
                     >
                       <Outlet />
                     </Content>
-                    {detailPanel && (
-                      <Resizable left limit={{ minWidth: 360, maxWidth: '70vw' }}>
-                        <aside
-                          className={styles.detailPanel}
-                          style={
-                            detailPanelBasis
-                              ? {
-                                flex: '0 0 auto',
-                                width: detailPanelBasis,
-                              }
-                              : undefined
-                          }
-                        >
+                    {detailPanel &&
+                      (detailPanelOverlay ? (
+                        <aside className={classNames(styles.detailPanel, styles.detailPanelOverlay)}>
                           {detailPanel}
                         </aside>
-                      </Resizable>
-                    )}
+                      ) : (
+                        <Resizable left limit={{ minWidth: 360, maxWidth: '70vw' }}>
+                          <aside
+                            className={styles.detailPanel}
+                            style={
+                              detailPanelBasis
+                                ? {
+                                  flex: '0 0 auto',
+                                  width: detailPanelBasis,
+                                }
+                                : undefined
+                            }
+                          >
+                            {detailPanel}
+                          </aside>
+                        </Resizable>
+                      ))}
                   </SiderContentContext.Provider>
                   <MainDrawer />
                 </Layout>

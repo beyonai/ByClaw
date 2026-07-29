@@ -89,7 +89,7 @@ function SaveToKnowledgeModal(props: SaveToKnowledgeModalProps) {
           resourceId: Number(kb.resourceId),
           directoryPath: nextDirectoryPath,
         });
-        const data = res?.data ?? res ?? [];
+        const data = res ?? [];
         const nextFolders = Array.isArray(data)
           ? data.filter((item: QueryDirAndFileByLevelItem) => item.type === 'directory')
           : [];
@@ -113,7 +113,7 @@ function SaveToKnowledgeModal(props: SaveToKnowledgeModalProps) {
           resourceId: Number(kb.resourceId),
           directoryPath: nextDirectoryPath,
         });
-        const data = res?.data ?? res ?? [];
+        const data = res ?? [];
         return Array.isArray(data) ? data.filter((item: QueryDirAndFileByLevelItem) => item.type === 'directory') : [];
       } catch (e: any) {
         message.error(e?.message || intl.formatMessage({ id: 'fileBrowser.error.loadFailed' }));

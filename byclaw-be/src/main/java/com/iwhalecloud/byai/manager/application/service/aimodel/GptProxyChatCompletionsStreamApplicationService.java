@@ -47,7 +47,7 @@ public class GptProxyChatCompletionsStreamApplicationService {
         OkHttpClient client = OkHttpUtil.getHttpClient();
         Request request = buildStreamRequest(body);
         AtomicReference<EventSource> ref = new AtomicReference<>();
-        registerEmitterCallbacks(emitter, ref, modelId, statusUpdated);
+        // registerEmitterCallbacks(emitter, ref, modelId, statusUpdated);
         ref.set(EventSources.createFactory(client).newEventSource(request,
             createStreamListener(emitter, modelId, statusUpdated)));
         return emitter;
@@ -113,7 +113,7 @@ public class GptProxyChatCompletionsStreamApplicationService {
             @Override
             public void onFailure(EventSource eventSource, Throwable t, Response response) {
                 if (modelId != null && statusUpdated.compareAndSet(false, true)) {
-                    modelManagementApplicationService.updateModelStatusAfterDebug(modelId, false);
+                  // modelManagementApplicationService.updateModelStatusAfterDebug(modelId, false);
                 }
                 // 以 BaseException 抛出调用接口报的错，禁止透传堆栈/内部信息
                 BaseException baseEx = buildUpstreamFailureException(t, response);

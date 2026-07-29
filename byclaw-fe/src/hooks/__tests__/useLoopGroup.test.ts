@@ -4,6 +4,9 @@ jest.mock('@umijs/max', () => ({
 
 jest.mock('@/models/useMessageStore', () => ({
   fetchMessage: jest.fn(),
+  sortMessagesByTimeline: jest.fn((list: any[]) =>
+    [...list].sort((left, right) => Number(left.messageId) - Number(right.messageId))
+  ),
 }));
 
 import { renderHook, act } from '@testing-library/react';

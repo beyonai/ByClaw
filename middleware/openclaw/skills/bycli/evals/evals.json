@@ -22,13 +22,13 @@
     {
       "id": 4,
       "prompt": "帮我给 douban 写一个 adapter,我想抓取豆瓣电影 top250",
-      "expected_output": "进入 Adapter 编写流程:1) bycli doctor 2) 侦察站点 3) API 发现 4) 字段解码 5) 设计 columns 6) bycli browser init douban/top250 7) 编写 adapter 8) bycli browser verify",
+      "expected_output": "进入 Adapter 编写流程：1) bycli doctor 2) 紧接着执行 bycli daemon status，确认 daemon running 且 Extension connected 3) 侦察站点 4) API 发现 5) 字段解码 6) 设计 columns 7) bycli browser init douban/top250 8) 编写 adapter 9) bycli browser verify",
       "files": []
     },
     {
       "id": 5,
       "prompt": "帮我打开 https://example.com 并提取页面上的表格数据",
-      "expected_output": "进入 Browser 驱动流程:1) openclaw browser start + bycli doctor 2) bycli browser <session> open url 3) bycli browser <session> state 4) 用 network 或 extract 获取数据 5) cleanup",
+      "expected_output": "先执行 bycli list -f json 动态发现命令；存在 web/read 时优先执行 bycli web read --url https://example.com。仅在不存在 web/read 或站点专用 Adapter 时进入 raw Browser：先执行 openclaw browser --browser-profile openclaw status，仅当浏览器未运行时执行 /usr/local/bin/start-chrome.sh，随后执行 bycli doctor、bycli daemon status，再 open/state/extract；结束时只清理当前任务拥有的资源。",
       "files": []
     },
     {
@@ -46,7 +46,25 @@
     {
       "id": 8,
       "prompt": "帮我用浏览器登录 Gmail 然后查看最新邮件",
-      "expected_output": "Browser 驱动流程:open Gmail login page → fill form → submit → wait → state。如果停在登录页(MFA等),保持 session 不关闭,报告给用户",
+      "expected_output": "先用 bycli list -f json 发现 Gmail Adapter；若任务进入登录、SSO 或 MFA 页面，立即停止并保留 session、TAB、daemon 和浏览器，报告已知 session 与 URL，等待用户亲自登录；不得代填或提交凭据，也不得继续 state、重试或检查页面。用户明确确认登录完成后再继续查看邮件。",
+      "files": []
+    },
+    {
+      "id": 9,
+      "prompt": "用 bycli 采集这个企业微信智能文档 https://doc.weixin.qq.com/smartpage/abc",
+      "expected_output": "读取 wecom-wecomcli-bridge.md，加载 wecom 与 wecomcli-smartpage；使用 smartpage_export_task --json 提交任务并用 smartpage_get_export_result --json 轮询，成功后把返回 content 写成带 bycli_filter 的 Markdown，由 bycli 落盘并可把 Markdown 路径交给 knowledge-ingest；询问入库 / 知识整理 / 跳过，不走 browser 且不询问保存 adapter",
+      "files": []
+    },
+    {
+      "id": 10,
+      "prompt": "用 bycli 采集一份飞书妙记逐字稿",
+      "expected_output": "读取 feishu-fws-bridge.md，加载 fws 与 vc 产品参考，通过 lark-cli 定位妙记并以 --transcript --output-dir 把逐字稿限定到本次 run；读取真实返回文件并归一化为带 bycli_filter 的 markdown/transcript.md，保留 speaker/timestamp，并可把 Markdown 路径交给 knowledge-ingest；按 fws 区分渠道配置、user 授权和 bot scope，由 bycli 落盘并询问入库 / 知识整理 / 跳过，不走 browser 且不询问保存 adapter",
+      "files": []
+    },
+    {
+      "id": 12,
+      "prompt": "bycli xiaohongshu search 返回了 rank、title、author、likes、published_at、url。结果很多且表格太宽，只展示前 10 条时可以省略 url 吗？",
+      "expected_output": "不可以。每个已展示且返回非空 url 的结果都必须保留可点击链接，优先使用 [title](url)；可以省略次要字段，但不得省略返回的链接。只有后端未返回 url 时才注明无链接，且不得猜造。",
       "files": []
     }
   ]

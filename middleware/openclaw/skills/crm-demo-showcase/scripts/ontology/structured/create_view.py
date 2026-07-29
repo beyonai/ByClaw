@@ -86,14 +86,11 @@ def main() -> None:
             },
         )
         if not result.get("ok", True):
-            result['view_code'] = view_code
             print(json.dumps(result, ensure_ascii=False), flush=True)
             return
         missing = result.pop("missing", []) if isinstance(result.get("missing"), list) else []
-        output_state = dict(result)
-        output_state['view_code'] = view_code
         print(
-            json.dumps({"ok": True, "state": output_state, "missing": missing}, ensure_ascii=False),
+            json.dumps({"ok": True, "state": dict(result), "missing": missing}, ensure_ascii=False),
             flush=True,
         )
 
@@ -115,6 +112,9 @@ def main() -> None:
 if __name__ == "__main__":
     try:
         main()
-    except Exception as exc:
-        print(json.dumps({"ok": False, "error": str(traceback.format_exc())}, ensure_ascii=False), flush=True)
+    except Exception:
+        print(
+            json.dumps({"ok": False, "error": str(traceback.format_exc())}, ensure_ascii=False),
+            flush=True,
+        )
         sys.exit(1)

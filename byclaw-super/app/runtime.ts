@@ -185,6 +185,15 @@ async function collectReadiness(input: {
  * 具体 Connector 在这里注入，因此 by-conductor 不依赖任何传输实现。
  */
 export async function createApplication(config = loadConfig()): Promise<Application> {
+  let ingressWarningSink:
+    | ((bindings: Record<string, unknown>, message: string) => void)
+    | undefined;
+  const ingressLogger = {
+    warn(bindings: Record<string, unknown>, message: string) {
+      ingressWarningSink?.(bindings, message);
+    },
+  };
+
   function initByWorker() {
     if (config.worker.enabled) {
       workerRuntime = new ByFrameworkWorkerRuntime({
@@ -230,6 +239,7 @@ export async function createApplication(config = loadConfig()): Promise<Applicat
       agentCatalog,
       config.runCredentialMaxTtlMs,
       groupChatContexts,
+      ingressLogger,
     );
     return { runService, runIngress };
   }
@@ -368,6 +378,7 @@ export async function createApplication(config = loadConfig()): Promise<Applicat
         },
       }),
   });
+  ingressWarningSink = (bindings, message) => app.log.warn(bindings, message);
 
   // 6) by-framework 入站 Worker：业务入口，由 Composition Root 按需注册。
   //    Connector 只承担 OpenClaw 出站传输，二者职责分离。

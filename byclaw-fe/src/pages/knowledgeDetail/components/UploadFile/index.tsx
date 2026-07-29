@@ -34,7 +34,6 @@ const UploadFile = (props: IProps) => {
 
   const handlePick = async () => {
     const files = await pick({
-      accept: '.doc, .docx, .xls, .xlsx, .pdf, .txt, .ppt, .pptx, .csv, .md',
       count: 10, // 最多选择10个文件
       multiple: true,
       totalSize: 1024 * 1024 * 200, // 总共不能超过200MB
@@ -74,8 +73,25 @@ const UploadFile = (props: IProps) => {
 
     try {
       setUploadLoading(true);
-      await uploadFiles(formData);
-      message.success(intl.formatMessage({ id: 'knowledgeDetail.uploadSuccess' }));
+      const result = await uploadFiles(formData);
+      const succeeded = Number(result?.summary?.succeeded || 0);
+      const failed = Number(result?.summary?.failed || 0);
+      const postProcessErrorCount = result?.postProcessErrors?.length || 0;
+      if (failed > 0) {
+        const content = intl.formatMessage({ id: 'knowledgeDetail.uploadPartial' }, { succeeded, failed });
+        if (succeeded === 0) {
+          message.error(content);
+        } else {
+          message.warning(content);
+        }
+      } else if (postProcessErrorCount > 0) {
+        message.warning(
+          intl.formatMessage({ id: 'knowledgeDetail.uploadPostProcessWarning' }, { count: postProcessErrorCount })
+        );
+      } else {
+        message.success(intl.formatMessage({ id: 'knowledgeDetail.uploadSuccess' }));
+      }
+      if (succeeded === 0 && failed > 0) return;
       setConfirmOpen(false);
       setPendingFiles([]);
       setUploadConflicts([]);

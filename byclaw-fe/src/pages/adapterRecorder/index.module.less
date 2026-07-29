@@ -1,0 +1,752 @@
+// Recorder workbench styles are scoped by the CSS Module root. The visual
+// language follows Chat: a quiet canvas, white surfaces, and one blue-purple accent.
+
+@brand: #6d5dfc;
+@brand-strong: #5848e8;
+@brand-soft: #f0edff;
+@line: #e6ebf3;
+@line-brand: #d9d4ff;
+@canvas: #f6f8fc;
+@surface: #ffffff;
+@surface-soft: #f9fbff;
+@text: #172033;
+@text-dim: #64748b;
+@text-faint: #94a3b8;
+@danger: #e05b68;
+
+.workbench {
+  --beyond-color-text: @text;
+  --beyond-color-text-heading: @text;
+  --beyond-color-text-secondary: @text-dim;
+  --beyond-color-text-tertiary: @text-faint;
+  --beyond-color-text-quaternary: fade(@text-faint, 72%);
+  --beyond-color-fill: @brand-soft;
+  --beyond-color-fill-secondary: #f6f4ff;
+  --beyond-color-fill-tertiary: #f8faff;
+  --beyond-color-fill-quaternary: #fbfcff;
+  --beyond-color-border: @line;
+  --beyond-color-border-secondary: #edf0f6;
+  --beyond-color-bg-container: @surface;
+  --beyond-color-bg-elevated: @surface;
+  --beyond-color-bg-layout: @canvas;
+  box-sizing: border-box;
+  height: 100%;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: hidden;
+  padding: clamp(8px, 1vw, 12px) clamp(12px, 2vw, 28px);
+  color: @text;
+  background: @canvas;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+
+  :global(.wb-statebar) {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  :global(.wb-chip) {
+    display: inline-flex;
+    max-width: 320px;
+    align-items: center;
+    gap: 7px;
+    padding: 6px 11px;
+    border: 1px solid @line;
+    border-radius: 999px;
+    background: @surface;
+    color: @text;
+    font-size: 12px;
+    line-height: 1;
+    box-shadow: 0 4px 14px rgba(50, 65, 95, 0.05);
+  }
+
+  :global(.wb-chip__k) {
+    color: @text-faint;
+  }
+
+  :global(.wb-chip__v) {
+    overflow: hidden;
+    color: @text;
+    font-family: 'Fira Code', monospace;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  :global(.wb-chip__v--muted) {
+    color: @text-faint;
+  }
+
+  :global(.wb-chip--state) {
+    border-color: @line-brand;
+  }
+
+  :global(.wb-chip__dot) {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: @brand;
+  }
+
+  :global(.wb-chip--err) {
+    border-color: fade(@danger, 36%);
+  }
+
+  :global(.wb-chip--err .wb-chip__dot) {
+    background: @danger;
+  }
+
+  :global(.wb-rail) {
+    display: flex;
+    margin: 0;
+    padding: 6px 0;
+    list-style: none;
+  }
+
+  :global(.wb-step) {
+    position: relative;
+    display: flex;
+    min-width: 0;
+  }
+
+  :global(.wb-step::before) {
+    content: '';
+    position: absolute;
+    z-index: 0;
+    background: @line;
+  }
+
+  :global(.wb-step__dot) {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    width: 30px;
+    height: 30px;
+    place-items: center;
+    border: 1px solid #dce3ef;
+    border-radius: 50%;
+    background: @surface;
+    color: @text-faint;
+    font-size: 13px;
+    font-weight: 600;
+    transition: background 160ms ease, border-color 160ms ease, color 160ms ease, box-shadow 160ms ease;
+  }
+
+  :global(.wb-step__label) {
+    color: @text-faint;
+    font-size: 13px;
+    transition: color 160ms ease;
+  }
+
+  :global(.wb-step--done::before),
+  :global(.wb-step--active::before) {
+    background: linear-gradient(180deg, @brand, #9b8fff);
+  }
+
+  :global(.wb-step--done .wb-step__dot) {
+    border-color: #bdb5ff;
+    background: @brand-soft;
+    color: @brand;
+  }
+
+  :global(.wb-step--done .wb-step__label) {
+    color: @text-dim;
+  }
+
+  :global(.wb-step--active .wb-step__dot) {
+    border-color: @brand;
+    background: @brand;
+    color: #fff;
+    box-shadow: 0 0 0 4px @brand-soft;
+  }
+
+  :global(.wb-step--active .wb-step__label) {
+    color: @brand-strong;
+    font-weight: 650;
+  }
+
+  :global(.wb-step--failed .wb-step__dot) {
+    border-color: @danger;
+    background: #fff2f3;
+    color: @danger;
+  }
+
+  :global(.wb-step--failed .wb-step__label) {
+    color: @danger;
+  }
+
+  :global(.code) {
+    color: @text;
+    font-family: 'Fira Code', 'SFMono-Regular', Consolas, monospace;
+  }
+
+  :global(.ant-btn-primary:not(.ant-btn-dangerous)),
+  :global(.beyond-btn-primary:not(.beyond-btn-dangerous)) {
+    border: none;
+    background: linear-gradient(135deg, @brand, #4d8fff);
+    color: #fff;
+    font-weight: 600;
+    box-shadow: 0 8px 18px fade(@brand, 22%);
+
+    &:hover {
+      background: linear-gradient(135deg, @brand-strong, #397ff1);
+      color: #fff;
+    }
+  }
+
+  :global(.ant-progress-circle .ant-progress-text),
+  :global(.beyond-progress-circle .beyond-progress-text) {
+    color: @text;
+  }
+
+  :global(:focus-visible) {
+    outline: 2px solid @brand;
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  :global(.ant-card),
+  :global(.beyond-card) {
+    position: relative;
+    --beyond-card-actions-bg: transparent;
+    --beyond-card-extra-color: @text-dim;
+    overflow: hidden;
+    border: 1px solid @line;
+    border-radius: 16px;
+    background: @surface;
+    color: @text;
+    box-shadow: 0 18px 48px -34px rgba(50, 65, 95, 0.3);
+  }
+
+  :global(.ant-card + .ant-card),
+  :global(.beyond-card + .beyond-card),
+  .stage > div + div {
+    margin-top: 16px;
+  }
+
+  :global(.ant-card::after),
+  :global(.beyond-card::after) {
+    content: '';
+    position: absolute;
+    inset: 0 0 auto;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, @brand, transparent);
+    opacity: 0.28;
+  }
+
+  :global(.ant-card-head),
+  :global(.beyond-card-head) {
+    min-height: auto;
+    padding: 16px 22px;
+    border-bottom: 1px solid @line;
+    background: transparent;
+  }
+
+  :global(.ant-card-head-title),
+  :global(.beyond-card-head-title) {
+    color: @text;
+    font-size: 15px;
+    font-weight: 650;
+  }
+
+  :global(.ant-card-body),
+  :global(.beyond-card-body) {
+    padding: 22px;
+    color: @text;
+  }
+
+  :global(.ant-form-item-label > label),
+  :global(.beyond-form-item-label > label) {
+    color: @text-dim;
+  }
+
+  :global(.ant-form-item-control-input-content),
+  :global(.beyond-form-item-control-input-content) {
+    color: @text-dim;
+  }
+
+  :global(.ant-space),
+  :global(.beyond-space),
+  :global(.ant-space-item),
+  :global(.beyond-space-item) {
+    color: inherit;
+  }
+
+  :global(.ant-input),
+  :global(.beyond-input),
+  :global(.ant-input-affix-wrapper),
+  :global(.beyond-input-affix-wrapper) {
+    border-color: #dfe5ef;
+    background: @surface;
+    color: @text;
+  }
+
+  :global(.ant-input:hover),
+  :global(.beyond-input:hover),
+  :global(.ant-input-affix-wrapper:hover),
+  :global(.beyond-input-affix-wrapper:hover),
+  :global(.ant-input:focus),
+  :global(.beyond-input:focus),
+  :global(.ant-input-focused),
+  :global(.beyond-input-focused),
+  :global(.ant-input-affix-wrapper-focused),
+  :global(.beyond-input-affix-wrapper-focused) {
+    border-color: @brand;
+    background: @surface;
+    box-shadow: 0 0 0 2px @brand-soft;
+  }
+
+  :global(.ant-input-affix-wrapper > input.ant-input),
+  :global(.beyond-input-affix-wrapper > input.beyond-input) {
+    background: transparent;
+    color: @text;
+    box-shadow: none;
+  }
+
+  :global(.ant-input::placeholder),
+  :global(.beyond-input::placeholder) {
+    color: @text-faint;
+  }
+
+  :global(.ant-input-prefix),
+  :global(.beyond-input-prefix) {
+    color: @text-dim;
+  }
+
+  :global(.ant-segmented),
+  :global(.beyond-segmented) {
+    border: 1px solid @line;
+    background: @surface-soft;
+    color: @text-dim;
+  }
+
+  :global(.ant-segmented-thumb),
+  :global(.beyond-segmented-thumb),
+  :global(.ant-segmented-item-selected),
+  :global(.beyond-segmented-item-selected) {
+    background: @brand-soft;
+    box-shadow: inset 0 0 0 1px @line-brand;
+  }
+
+  :global(.ant-segmented-item),
+  :global(.beyond-segmented-item) {
+    color: @text-dim;
+  }
+
+  :global(.ant-segmented-item:hover:not(.ant-segmented-item-selected)),
+  :global(.beyond-segmented-item:hover:not(.beyond-segmented-item-selected)),
+  :global(.ant-segmented-item:focus-visible:not(.ant-segmented-item-selected)),
+  :global(.beyond-segmented-item:focus-visible:not(.beyond-segmented-item-selected)) {
+    background: #f4f2ff;
+    color: @text;
+  }
+
+  :global(.ant-segmented-item:hover .ant-segmented-item-label),
+  :global(.beyond-segmented-item:hover .beyond-segmented-item-label),
+  :global(.ant-segmented-item:focus-visible .ant-segmented-item-label),
+  :global(.beyond-segmented-item:focus-visible .beyond-segmented-item-label) {
+    color: @text;
+  }
+
+  :global(.ant-segmented-item-selected),
+  :global(.beyond-segmented-item-selected),
+  :global(.ant-segmented-item-selected .ant-segmented-item-label),
+  :global(.beyond-segmented-item-selected .beyond-segmented-item-label) {
+    color: @brand-strong;
+  }
+
+  :global(.ant-alert-info),
+  :global(.beyond-alert-info) {
+    border-color: @line-brand;
+    background: @brand-soft;
+  }
+
+  :global(.ant-alert-info .ant-alert-icon),
+  :global(.beyond-alert-info .beyond-alert-icon) {
+    color: @brand;
+  }
+
+  :global(.ant-alert-message),
+  :global(.beyond-alert-message) {
+    color: @text;
+  }
+
+  :global(.ant-alert-description),
+  :global(.beyond-alert-description) {
+    color: @text-dim;
+  }
+
+  :global(.ant-switch),
+  :global(.beyond-switch) {
+    background: #cbd5e1;
+  }
+
+  :global(.ant-switch:hover:not(.ant-switch-disabled)),
+  :global(.beyond-switch:hover:not(.beyond-switch-disabled)) {
+    background: #aebbd0;
+  }
+
+  :global(.ant-switch-checked),
+  :global(.beyond-switch-checked),
+  :global(.ant-switch-checked:hover:not(.ant-switch-disabled)),
+  :global(.beyond-switch-checked:hover:not(.beyond-switch-disabled)) {
+    background: @brand;
+  }
+
+  :global(.ant-switch-handle::before),
+  :global(.beyond-switch-handle::before) {
+    background: #fff;
+  }
+
+  :global(.ant-list),
+  :global(.beyond-list),
+  :global(.ant-list-item),
+  :global(.beyond-list-item),
+  :global(.ant-list-item-meta-title),
+  :global(.beyond-list-item-meta-title) {
+    color: @text;
+  }
+
+  :global(.ant-list-item-meta-description),
+  :global(.beyond-list-item-meta-description),
+  :global(.ant-badge-status-text),
+  :global(.beyond-badge-status-text) {
+    color: @text-dim;
+  }
+
+  :global(.ant-typography),
+  :global(.beyond-typography) {
+    color: inherit;
+  }
+
+  :global(.ant-typography strong),
+  :global(.beyond-typography strong),
+  strong {
+    color: @text;
+  }
+
+  :global(.ant-typography-secondary),
+  :global(.beyond-typography-secondary),
+  :global(.ant-typography.code),
+  :global(.beyond-typography.code) {
+    color: @text-dim;
+  }
+}
+
+.shell {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  max-width: 1480px;
+  margin: 0 auto;
+}
+
+.head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+
+.heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  width: 100%;
+}
+
+.title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0;
+  color: @text;
+  font-size: clamp(21px, 2vw, 26px);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.title::before {
+  content: '';
+  width: 4px;
+  height: 1.1em;
+  border-radius: 4px;
+  background: linear-gradient(180deg, @brand, #8d7fff);
+}
+
+.subtitle {
+  margin: 0;
+  color: @text-dim;
+  font-size: 12px;
+}
+
+.body {
+  display: grid;
+  flex: 1 1 auto;
+  grid-template-columns: 180px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  align-items: stretch;
+  gap: 18px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.sidebar {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  padding: 14px 8px 10px;
+  border: 1px solid @line;
+  border-radius: 16px;
+  background: fade(@surface, 72%);
+}
+
+.sidebar,
+.stage {
+  box-sizing: border-box;
+  height: 100%;
+}
+
+.sidebarIntro {
+  display: grid;
+  gap: 5px;
+  padding: 0 6px 8px;
+}
+
+.sidebarEyebrow {
+  color: @brand-strong;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+.sidebarHint {
+  color: @text-dim;
+  font-size: 12px;
+}
+
+.sidebar > :global(.wb-rail) {
+  position: relative;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 6px;
+}
+
+.sidebar > :global(.wb-rail .wb-step) {
+  flex: 0 0 auto;
+  flex-direction: row;
+  align-items: center;
+  gap: 11px;
+  min-height: 44px;
+}
+
+.sidebar > :global(.wb-rail .wb-step::before) {
+  top: auto;
+  right: auto;
+  bottom: 50%;
+  left: 14px;
+  width: 2px;
+  height: 100%;
+}
+
+.sidebar > :global(.wb-rail .wb-step:first-child::before) {
+  display: none;
+}
+
+.sidebar > :global(.wb-rail .wb-step__label) {
+  text-align: left;
+}
+
+.stage {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  padding: 18px;
+  border: 1px solid @line;
+  border-radius: 16px;
+  background: @surface;
+  box-shadow: 0 20px 55px -38px rgba(50, 65, 95, 0.34);
+}
+
+.recordingWorkbench {
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+
+  .shell {
+    height: calc(100dvh - clamp(12px, 1.5vw, 20px) * 2);
+    min-height: 0;
+  }
+
+  .body {
+    min-height: 0;
+  }
+}
+
+.recordingStage {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.stepStage {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+
+  > :global(.ant-card),
+  > :global(.beyond-card) {
+    display: flex;
+    min-height: 0;
+    flex: 1 1 auto;
+    flex-direction: column;
+  }
+
+  > :global(.ant-card) > :global(.ant-card-body),
+  > :global(.beyond-card) > :global(.beyond-card-body) {
+    min-height: 0;
+    flex: 1 1 auto;
+    overflow-y: auto;
+  }
+}
+
+.nextStep {
+  margin-top: 10px;
+  flex: 0 0 auto;
+
+  :global(.ant-card-head),
+  :global(.beyond-card-head) {
+    padding: 10px 14px;
+  }
+
+  :global(.ant-card-body),
+  :global(.beyond-card-body) {
+    padding: 12px 14px;
+  }
+
+  :global(.ant-typography),
+  :global(.beyond-typography) {
+    margin-bottom: 8px;
+  }
+}
+
+@media (max-width: 900px) {
+  .body {
+    grid-template-columns: 170px minmax(0, 1fr);
+    gap: 18px;
+  }
+
+  .stage {
+    padding: 20px;
+  }
+}
+
+@media (max-width: 767px) {
+  .workbench {
+    padding: 18px 14px 28px;
+  }
+
+  .shell {
+    gap: 18px;
+  }
+
+  .heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .body {
+    display: flex;
+    min-height: 0;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .sidebar {
+    height: auto;
+    padding: 14px 10px 10px;
+  }
+
+  .sidebarIntro {
+    padding-bottom: 8px;
+  }
+
+  .sidebar > :global(.wb-rail) {
+    flex-direction: row;
+    overflow-x: auto;
+    gap: 8px;
+    padding: 6px 4px 10px;
+    scrollbar-width: thin;
+  }
+
+  .sidebar > :global(.wb-rail .wb-step) {
+    min-width: 108px;
+    flex-direction: column;
+    justify-content: flex-start;
+    gap: 7px;
+    min-height: 68px;
+    padding: 2px 4px;
+  }
+
+  .sidebar > :global(.wb-rail .wb-step::before) {
+    top: 15px;
+    right: 50%;
+    bottom: auto;
+    left: auto;
+    width: 100%;
+    height: 2px;
+  }
+
+  .sidebar > :global(.wb-rail .wb-step:first-child::before) {
+    display: none;
+  }
+
+  .sidebar > :global(.wb-rail .wb-step__label) {
+    text-align: center;
+    white-space: nowrap;
+  }
+
+  .stage {
+    height: auto;
+    padding: 14px;
+    border-radius: 16px;
+  }
+
+  .recordingWorkbench {
+    height: auto;
+    min-height: 100vh;
+    overflow: visible;
+
+    .shell {
+      height: auto;
+    }
+  }
+
+  .recordingStage {
+    display: block;
+    height: auto;
+    overflow: visible;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workbench {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      scroll-behavior: auto !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}

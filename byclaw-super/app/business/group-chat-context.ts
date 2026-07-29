@@ -70,7 +70,7 @@ export class ByClawBeGroupChatContextProvider
     );
     let response: Response;
     try {
-      response = await this.#fetch(url, {
+      response = await this.#fetch(`127.0.0.1:8086/byaiServoce/internal/api/v1/group-chat/context`, {
         method: "POST",
         headers: {
           "content-type": "application/json",

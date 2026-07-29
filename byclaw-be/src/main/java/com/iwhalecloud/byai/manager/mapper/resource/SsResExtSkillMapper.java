@@ -26,4 +26,18 @@ public interface SsResExtSkillMapper extends BaseMapper<SsResExtSkill> {
      */
     List<SsResExtSkillDto> findBySkillCodes(@Param("skillCodes") Collection<String> skillCodes);
 
+    /**
+     * PR-3 (#150) 批量查询技能扩展数据. 内部委托 MyBatis-Plus {@code selectBatchIds}
+     * (单 SQL IN 子句),用于替代启动期循环 {@code findById} 触发的 N+1.
+     *
+     * @param resourceIds 资源ID列表(空集合时返回空 List,不会触发 SQL)
+     * @return 技能扩展列表
+     */
+    default List<SsResExtSkill> findByIds(Collection<Long> resourceIds) {
+        if (resourceIds == null || resourceIds.isEmpty()) {
+            return java.util.Collections.emptyList();
+        }
+        return selectBatchIds(resourceIds);
+    }
+
 }

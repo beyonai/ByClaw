@@ -24,6 +24,10 @@ import {
 import type { AuthorizedAgentCatalog } from "../business/agent-catalog.js";
 import type { GroupChatContextProvider } from "../business/group-chat-context.js";
 
+interface RunIngressLogger {
+  warn(bindings: Record<string, unknown>, message: string): void;
+}
+
 interface AuthenticatedIngressRequest {
   beyondToken: string;
   systemCode?: string;
@@ -70,6 +74,7 @@ export class RunIngressService {
     private readonly agentCatalog: AuthorizedAgentCatalog,
     private readonly credentialMaxTtlMs = 7_200_000,
     private readonly groupChatContexts?: GroupChatContextProvider,
+    private readonly logger?: RunIngressLogger,
   ) {}
 
   /** 创建新 Session，并在其中创建首个 Run。 */
@@ -185,22 +190,48 @@ export class RunIngressService {
       return undefined;
     }
     if (!this.groupChatContexts) {
-      throw new Error("Group chat context provider is not configured");
+      this.warnGroupChatContextUnavailable(
+        input,
+        new Error("Group chat context provider is not configured"),
+      );
+      return undefined;
     }
-    const loaded = await this.groupChatContexts.load({
-      conversationKey: input.groupChatRef.conversationKey,
-      beforeMessageId: input.groupChatRef.beforeMessageId,
-      beyondToken: input.beyondToken,
-      ...(input.systemCode ? { systemCode: input.systemCode } : {}),
-    });
-    const groupChat = excludeAgentFromGroupChatContext(
-      loaded,
-      input.sourceAgentId,
+    try {
+      const loaded = await this.groupChatContexts.load({
+        conversationKey: input.groupChatRef.conversationKey,
+        beforeMessageId: input.groupChatRef.beforeMessageId,
+        beyondToken: input.beyondToken,
+        ...(input.systemCode ? { systemCode: input.systemCode } : {}),
+      });
+      const groupChat = excludeAgentFromGroupChatContext(
+        loaded,
+        input.sourceAgentId,
+      );
+      return {
+        groupChat,
+        groupChatFingerprint: fingerprintGroupChatContext(groupChat),
+      };
+    } catch (error) {
+      this.warnGroupChatContextUnavailable(input, error);
+      return undefined;
+    }
+  }
+
+  /** 群聊是可选增强；回源失败只告警，不记录 Token/正文，也不阻断主 Run。 */
+  private warnGroupChatContextUnavailable(
+    input: CreateSessionRunRequest,
+    error: unknown,
+  ): void {
+    const normalized = error instanceof Error ? error : new Error(String(error));
+    this.logger?.warn(
+      {
+        conversationKey: input.groupChatRef?.conversationKey,
+        beforeMessageId: input.groupChatRef?.beforeMessageId,
+        errorName: normalized.name,
+        errorMessage: normalized.message,
+      },
+      "群聊上下文不可用，本次按普通对话继续",
     );
-    return {
-      groupChat,
-      groupChatFingerprint: fingerprintGroupChatContext(groupChat),
-    };
   }
 
   /** 校验当前调用者是否拥有 Session；不存在和越权统一抛出 ResourceNotFoundError。 */

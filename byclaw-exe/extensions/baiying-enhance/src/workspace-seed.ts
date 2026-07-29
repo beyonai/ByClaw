@@ -397,7 +397,7 @@ export function buildToolsMd(item: BaiyingAgentItem, fallbackAgentId?: string): 
     "",
     "- `TOOLKIT` and `MCP` resources may expose child actions discovered from Redis snapshots or remote metadata.",
     "- For DOC resources (`KG_DOC`/`KG_DB`/`KG_QA`), executor requires `agent_id`. `baiying_call` will auto-fill it from the current agent.json `resourceId` and send it as top-level payload `agent_id`.",
-    "- `OBJECT` and `VIEW` resources are dispatched through SDK `callAgent` to `BYCLAW_DATA`; `baiying_call` fills `call_object_ids` / `call_view_ids` from the selected resource code.",
+    "- `OBJECT` and `VIEW` resources are dispatched through SDK `callAgent` to `BYCLAW_DATA`; `baiying_call` fills `call_object_ids` / `call_view_ids` from the selected resource code and `resource_ids` from the selected resource id.",
     "- For large `OBJECT`/`VIEW` results, backend may return `file_url`, and `file_url` is a local file path; treat it as the authoritative full payload and use this local path for downstream business processing.",
     "- If both inline summary fields and `file_url` are present, prefer the local-file content from `file_url` for detailed reasoning; if unavailable, explicitly state the limitation in your response.",
     "- IMPORTANT: when `file_url` is returned, reading it is mandatory; because file write/publication can lag, retry at least 3 times with a 1-2 second interval before deciding the file is unavailable.",

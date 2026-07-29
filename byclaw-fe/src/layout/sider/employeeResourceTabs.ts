@@ -1,6 +1,15 @@
 import { ResourceTypeMap } from '@/constants/resource';
 
-export const EMPLOYEE_RESOURCE_TAB_KEYS = new Set(['model', 'knowledge', 'tool', 'view', 'object', 'skill', 'file']);
+export const EMPLOYEE_RESOURCE_TAB_KEYS = new Set([
+  'model',
+  'knowledge',
+  'tool',
+  'view',
+  'object',
+  'ontology',
+  'skill',
+  'file',
+]);
 
 export const employeeResourceBizTypeListByTabKey: Record<string, string[]> = {
   knowledge: [ResourceTypeMap.knowledgeBase, ResourceTypeMap.knowledgeBaseQa, ResourceTypeMap.knowledgeBaseTerm],

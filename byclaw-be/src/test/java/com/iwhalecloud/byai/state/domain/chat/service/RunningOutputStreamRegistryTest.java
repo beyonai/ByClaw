@@ -16,16 +16,19 @@ class RunningOutputStreamRegistryTest {
 
     private RedisTemplate<String, Object> redisTemplate;
     private ValueOperations<String, Object> valueOperations;
+    private ChatRuntimeStateService chatRuntimeStateService;
     private RunningOutputStreamRegistry runningOutputStreamRegistry;
 
     @BeforeEach
     void setUp() {
         redisTemplate = mock(RedisTemplate.class);
         valueOperations = mock(ValueOperations.class);
+        chatRuntimeStateService = mock(ChatRuntimeStateService.class);
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
 
         runningOutputStreamRegistry = new RunningOutputStreamRegistry();
         ReflectionTestUtils.setField(runningOutputStreamRegistry, "redisTemplate", redisTemplate);
+        ReflectionTestUtils.setField(runningOutputStreamRegistry, "chatRuntimeStateService", chatRuntimeStateService);
     }
 
     @Test
@@ -36,6 +39,7 @@ class RunningOutputStreamRegistryTest {
         runningOutputStreamRegistry.release(10L, 20L);
 
         verify(redisTemplate).delete("byai:chat:running:10");
+        verify(chatRuntimeStateService).delete(10L);
     }
 
     @Test
@@ -46,5 +50,6 @@ class RunningOutputStreamRegistryTest {
         runningOutputStreamRegistry.release(10L, 20L);
 
         verify(redisTemplate, never()).delete(eq("byai:chat:running:10"));
+        verify(chatRuntimeStateService, never()).delete(10L);
     }
 }

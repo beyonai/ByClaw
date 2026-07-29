@@ -62,13 +62,16 @@ public class SessionStreamEventRouter {
     @Autowired
     private CronService cronService;
 
+    @Autowired
+    private ChatContextRecoveryService chatContextRecoveryService;
+
     /**
      * Redis Stream 统一入口。HTTP SSE 投递到请求线程队列，WebSocket 直接推送到已登记的 Channel。
      */
-    public void dispatch(JSONObject dataJson) {
+    public StreamDispatchResult dispatch(JSONObject dataJson) {
         String sessionId = dataJson == null ? null : dataJson.getString("session_id");
         if (StringUtils.isBlank(sessionId)) {
-            return;
+            return StreamDispatchResult.INTENTIONALLY_IGNORED;
         }
         if (isBackgroundAnswerMessageEvent(dataJson.getString("event_type"))) {
             try {
@@ -76,13 +79,17 @@ public class SessionStreamEventRouter {
             }
             catch (Exception e) {
                 log.warn("处理后台会话 answer 事件失败, sessionId: {}, dataJson: {}", sessionId, dataJson, e);
+                return StreamDispatchResult.ERROR;
             }
-            return;
+            return StreamDispatchResult.HANDLED;
         }
 
         ChatProcessContext ctx = outputStreamManager.getContext(sessionId);
         if (ctx == null) {
-            return;
+            ctx = chatContextRecoveryService.recoverIfNecessary(dataJson);
+        }
+        if (ctx == null) {
+            return StreamDispatchResult.MISSING_CONTEXT;
         }
         ctx.currentStreamId = dataJson.getString("stream_id");
 
@@ -91,12 +98,13 @@ public class SessionStreamEventRouter {
             if (ctx.gatewayEventQueue != null) {
                 ctx.gatewayEventQueue.offer(dataJson);
             }
-            return;
+            return StreamDispatchResult.HANDLED;
         }
 
         if (routeWebSocketEvent(ctx, dataJson)) {
             broadcastToOtherDevices(ctx, dataJson);
         }
+        return StreamDispatchResult.HANDLED;
     }
 
     private boolean routeWebSocketEvent(ChatProcessContext ctx, JSONObject dataJson) {
@@ -114,7 +122,7 @@ public class SessionStreamEventRouter {
         }
 
         if (SseResponseEventEnum.error.equals(eventType)) {
-            handleWebSocketError(ctx, metadata);
+            handleWebSocketError(ctx, dataJson, metadata);
             return true;
         }
 
@@ -123,40 +131,100 @@ public class SessionStreamEventRouter {
         lineJson.put("event", eventType);
         lineJson.put("data", eventData);
 
-        pythonSseService.getContentFromPythonStreamV3(lineJson.toJSONString(), ctx.res,
-            ctx.messageContext, ctx.getAgentIds(), ctx);
-        runningChatSnapshotService.save(ctx);
+        String receivedTraceId = dataJson.getString("trace_id");
+        MessageContext messageContext = ctx.resolveMessageContext(receivedTraceId);
+        if (ctx.recoveryOnly) {
+            boolean alreadyHydrated = StreamIdUtil.isProcessedByWatermark(ctx.currentStreamId, ctx.hydratedStreamId);
+            if (!alreadyHydrated) {
+                pythonSseService.accumulateEvent(lineJson.toJSONString(), ctx.messageContext);
+            }
+            else {
+                log.info("恢复事件已计入快照，跳过续聚合, sessionId: {}, traceId: {}, streamId: {}", ctx.sessionId,
+                    ctx.traceId, ctx.currentStreamId);
+            }
+            // 推进内存水位线，保证单调不退：避免重新投递的旧 pending 把快照水位线拉低，
+            // 导致下次重启时已聚合区间被重复 append。
+            ctx.hydratedStreamId = StreamIdUtil.max(ctx.hydratedStreamId, ctx.currentStreamId, ctx.hydratedStreamId);
+            runningChatSnapshotService.save(ctx, receivedTraceId, messageContext);
+        }
+        else {
+            pythonSseService.getContentFromPythonStreamV3(lineJson.toJSONString(), ctx.res,
+                messageContext, ctx.getAgentIds(), ctx);
+            runningChatSnapshotService.save(ctx, receivedTraceId, messageContext);
+        }
 
         if (SseResponseEventEnum.appStreamResponse.equals(eventType)) {
-            if (ctx.messageContext != null) {
-                ctx.messageContext.setComplete(true);
+            if (messageContext != null) {
+                messageContext.setComplete(true);
             }
-            scriptService.completeAsyncGatewayContext(ctx);
-            runningChatSnapshotService.delete(ctx);
+            if (ctx.markTraceComplete(receivedTraceId)) {
+                if (ctx.messageContext != null) {
+                    ctx.messageContext.setComplete(true);
+                }
+                scriptService.completeAsyncGatewayContext(ctx);
+                runningChatSnapshotService.delete(ctx);
+            }
         }
         return true;
     }
 
-    private void handleWebSocketError(ChatProcessContext ctx, JSONObject metadata) {
+    private void handleWebSocketError(ChatProcessContext ctx, JSONObject dataJson, JSONObject metadata) {
         String errorMsg = metadata != null ? metadata.getString("error") : "unknown gateway error";
+        if (ctx.recoveryOnly) {
+            ctx.gatewayError = true;
+            scriptService.completeAsyncGatewayContext(ctx);
+            runningChatSnapshotService.delete(ctx);
+            return;
+        }
         JSONObject errorPayload = new JSONObject();
         errorPayload.put("message", errorMsg);
         errorPayload.put("traceback", errorMsg);
         errorPayload.put("sessionId", String.valueOf(ctx.sessionId));
+        gatewayStreamEventProcessor.enrichLaneMetadata(ctx, dataJson, metadata, errorPayload);
         CompletionsUtils.responseWrite(ctx.res, SseResponseEventEnum.error, errorPayload.toJSONString(),
             ctx.sessionId);
-        ctx.gatewayError = true;
-        scriptService.completeAsyncGatewayContext(ctx);
-        runningChatSnapshotService.delete(ctx);
+        ctx.gatewayError = !ctx.isMultiAgentRequest() || ctx.getMultiAgentTraceIds().size() == 1;
+        if (ctx.markTraceComplete(dataJson == null ? null : dataJson.getString("trace_id"))) {
+            scriptService.completeAsyncGatewayContext(ctx);
+            runningChatSnapshotService.delete(ctx);
+        }
     }
 
     private void broadcastToOtherDevices(ChatProcessContext ctx, JSONObject dataJson) {
         try {
-            multiDeviceBroadcastService.broadcastRawEvent(ctx.getUserId(), ctx.getSessionId(), dataJson,
-                ctx.getSenderChannel(), ctx.getClientRequestId());
+            JSONObject broadcastEvent = buildBroadcastEvent(ctx, dataJson);
+            multiDeviceBroadcastService.broadcastRawEvent(ctx.getUserId(), ctx.getSessionId(),
+                broadcastEvent, ctx.getSenderChannel(), resolveBroadcastClientRequestId(ctx, broadcastEvent));
         }
         catch (Exception e) {
             log.warn("多端广播异常, sessionId: {}", ctx.sessionId, e);
+        }
+    }
+
+    private JSONObject buildBroadcastEvent(ChatProcessContext ctx, JSONObject dataJson) {
+        if (dataJson == null) {
+            return null;
+        }
+        JSONObject broadcastJson = new JSONObject(dataJson);
+        JSONObject metadata = dataJson.getJSONObject("metadata");
+        if (metadata == null) {
+            metadata = new JSONObject();
+        }
+        broadcastJson.put("data", gatewayStreamEventProcessor.buildEventData(ctx, dataJson, metadata));
+        return broadcastJson;
+    }
+
+    private String resolveBroadcastClientRequestId(ChatProcessContext ctx, JSONObject broadcastJson) {
+        if (broadcastJson == null) {
+            return ctx == null ? null : ctx.getClientRequestId();
+        }
+        try {
+            JSONObject payload = JSON.parseObject(broadcastJson.getString("data"));
+            String clientRequestId = payload == null ? null : payload.getString("clientRequestId");
+            return StringUtils.defaultIfBlank(clientRequestId, ctx == null ? null : ctx.getClientRequestId());
+        }
+        catch (Exception e) {
+            return ctx == null ? null : ctx.getClientRequestId();
         }
     }
 
@@ -205,6 +273,10 @@ public class SessionStreamEventRouter {
         LoginInfo previousLoginInfo = CurrentUserHolder.getLoginInfo();
         try {
             CurrentUserHolder.setLoginInfo(buildBackgroundLoginInfo(sessionId, payload));
+
+            // 同步更新会话的updateTime
+            sessionService.touchUpdateTime(sessionId);
+
             return memoryMessageService.save(sessionId, ChatUseageEnum.SYSTEM_RESPONSE.getCode(), messageContext,
                 assistantChatDto);
         }
@@ -327,7 +399,8 @@ public class SessionStreamEventRouter {
         wsMessage.put("type", "NEW_MESSAGE");
         wsMessage.put("sessionId", String.valueOf(sessionId));
         wsMessage.put("data", JSON.toJSON(message));
-        multiDeviceBroadcastService.broadcastRawToUser(userId, sessionId, wsMessage);
+        // 后台事件，发送给所有的活跃通道
+        multiDeviceBroadcastService.broadcastRawToUser(userId, wsMessage, null);
     }
 
     public void broadcastSessionStatus(String sessionIdValue, String statusValue) {
@@ -345,7 +418,7 @@ public class SessionStreamEventRouter {
         wsMessage.put("type", "SESSION_STATUS");
         wsMessage.put("sessionId", String.valueOf(sessionId));
         wsMessage.put("data", parseSessionStatusPayload(statusValue));
-        multiDeviceBroadcastService.broadcastRawToUser(userId, wsMessage);
+        multiDeviceBroadcastService.broadcastRawToUser(userId, wsMessage, null);
     }
 
     private Object parseSessionStatusPayload(String statusValue) {

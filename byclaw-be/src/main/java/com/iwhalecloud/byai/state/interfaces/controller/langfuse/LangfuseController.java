@@ -1,16 +1,10 @@
 package com.iwhalecloud.byai.state.interfaces.controller.langfuse;
 
-import com.iwhalecloud.byai.state.domain.langfuse.service.LangfuseService;
-import com.iwhalecloud.byai.state.interfaces.controller.langfuse.dto.LangfuseQueryDto;
-import com.iwhalecloud.byai.state.common.exception.BdpRuntimeException;
-import com.iwhalecloud.byai.common.i18n.I18nUtil;
-import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
-import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.Parameter;
-import io.swagger.v3.oas.annotations.responses.ApiResponse;
-import io.swagger.v3.oas.annotations.responses.ApiResponses;
-import io.swagger.v3.oas.annotations.tags.Tag;
-import lombok.extern.slf4j.Slf4j;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -20,10 +14,19 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+
+import com.iwhalecloud.byai.common.i18n.I18nUtil;
+import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
+import com.iwhalecloud.byai.state.common.exception.BdpRuntimeException;
+import com.iwhalecloud.byai.state.domain.langfuse.service.LangfuseAuthorizationService;
+import com.iwhalecloud.byai.state.domain.langfuse.service.LangfuseService;
+import com.iwhalecloud.byai.state.interfaces.controller.langfuse.dto.LangfuseQueryDto;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * Langfuse控制器 提供查询Traces和Observations的REST API接口
@@ -36,6 +39,9 @@ public class LangfuseController {
 
     @Autowired
     private LangfuseService langfuseService;
+
+    @Autowired
+    private LangfuseAuthorizationService langfuseAuth;
 
     /**
      * 查询Traces列表
@@ -52,6 +58,14 @@ public class LangfuseController {
     })
     public ResponseUtil queryTraces(@RequestBody LangfuseQueryDto queryDto) {
         try {
+            // /traces requires a sessionId today (LangfuseService delegates to local messages by sessionId).
+            // Validate ownership when the caller scopes the query by session.
+            if (queryDto != null && StringUtils.isNotBlank(queryDto.getSessionId())) {
+                langfuseAuth.verifySessionOwner(queryDto.getSessionId());
+            }
+            else {
+                langfuseAuth.requireLogin();
+            }
             log.info("Querying traces with parameters: {}", queryDto);
             Map<String, Object> result = langfuseService.queryTraces(queryDto);
 
@@ -85,9 +99,7 @@ public class LangfuseController {
         @Parameter(description = "Trace ID", required = true) @PathVariable("traceId") String traceId,
         @RequestBody LangfuseQueryDto queryDto) {
 
-        if (StringUtils.isBlank(traceId)) {
-            throw new BdpRuntimeException(I18nUtil.get("langfuse.trace.id.not.empty"));
-        }
+        langfuseAuth.verifyTraceOwner(traceId);
 
         try {
             log.info("Querying observations for trace: {} with parameters: {}", traceId, queryDto);
@@ -120,6 +132,13 @@ public class LangfuseController {
     })
     public ResponseUtil queryObservations(@RequestBody LangfuseQueryDto queryDto) {
         try {
+            // When the query is scoped by session, validate ownership; otherwise just require login.
+            if (queryDto != null && StringUtils.isNotBlank(queryDto.getSessionId())) {
+                langfuseAuth.verifySessionOwner(queryDto.getSessionId());
+            }
+            else {
+                langfuseAuth.requireLogin();
+            }
             log.info("Querying observations with parameters: {}", queryDto);
             Map<String, Object> result = langfuseService.queryObservations(queryDto);
 
@@ -151,9 +170,7 @@ public class LangfuseController {
     public ResponseUtil getTraceById(
         @Parameter(description = "Trace ID", required = true) @PathVariable("traceId") String traceId) {
 
-        if (StringUtils.isBlank(traceId)) {
-            throw new BdpRuntimeException(I18nUtil.get("langfuse.trace.id.not.empty"));
-        }
+        langfuseAuth.verifyTraceOwner(traceId);
 
         try {
             log.info("Getting trace details for ID: {}", traceId);
@@ -188,9 +205,7 @@ public class LangfuseController {
         @Parameter(description = "Trace ID", required = true) @PathVariable("traceId") String traceId,
         @RequestBody LangfuseQueryDto queryDto) {
 
-        if (StringUtils.isBlank(traceId)) {
-            throw new BdpRuntimeException(I18nUtil.get("langfuse.trace.id.not.empty"));
-        }
+        langfuseAuth.verifyTraceOwner(traceId);
 
         try {
             log.info("getTraceTimelineBasicInfo for traceId: {}", traceId);
@@ -226,6 +241,9 @@ public class LangfuseController {
         if (StringUtils.isBlank(observationId)) {
             throw new BdpRuntimeException(I18nUtil.get("langfuse.observation.id.not.empty"));
         }
+        // Observation IDs are Langfuse-internal; we cannot tie them back to a local message
+        // without an extra round-trip, so enforce login only.
+        langfuseAuth.requireLogin();
 
         try {
             log.info("Getting observation details for ID: {}", observationId);
@@ -256,6 +274,7 @@ public class LangfuseController {
     })
     public ResponseUtil getLangfuseConfig() {
         try {
+            langfuseAuth.requireLogin();
             log.info("Getting Langfuse configuration");
             String host = langfuseService.getLangfuseHost();
             String environment = langfuseService.getLangfuseEnv();
@@ -264,6 +283,7 @@ public class LangfuseController {
             boolean hasPublicKey = StringUtils.isNotBlank(langfuseService.getLangfusePublicKey());
             boolean enabled = StringUtils.isNotBlank(host) && hasSecretKey && hasPublicKey;
 
+            // Use HashMap because Map.of rejects null values and is immutable.
             Map<String, Object> config = new HashMap<>();
             config.put("host", host);
             config.put("environment", environment);
@@ -297,9 +317,7 @@ public class LangfuseController {
         @Parameter(description = "会话ID", required = true) @PathVariable("sessionId") String sessionId,
         @RequestBody(required = false) LangfuseQueryDto queryDto) {
 
-        if (StringUtils.isBlank(sessionId)) {
-            throw new BdpRuntimeException(I18nUtil.get("langfuse.session.id.not.empty"));
-        }
+        langfuseAuth.verifySessionOwner(sessionId);
 
         try {
             log.info("Querying traces by sessionId: {} with parameters: {}", sessionId, queryDto);
@@ -335,9 +353,7 @@ public class LangfuseController {
         @Parameter(description = "会话ID", required = true) @PathVariable("sessionId") String sessionId,
         @RequestBody(required = false) LangfuseQueryDto queryDto) {
 
-        if (StringUtils.isBlank(sessionId)) {
-            throw new BdpRuntimeException(I18nUtil.get("langfuse.session.id.not.empty"));
-        }
+        langfuseAuth.verifySessionOwner(sessionId);
 
         try {
             log.info("Querying session flow by sessionId: {} with parameters: {}", sessionId, queryDto);
@@ -371,9 +387,7 @@ public class LangfuseController {
     public ResponseUtil getSessionStatisticsBySessionId(
         @Parameter(description = "会话ID", required = true) @PathVariable("sessionId") String sessionId) {
 
-        if (StringUtils.isBlank(sessionId)) {
-            throw new BdpRuntimeException(I18nUtil.get("langfuse.session.id.not.empty"));
-        }
+        langfuseAuth.verifySessionOwner(sessionId);
 
         try {
             log.info("Getting session statistics for sessionId: {}", sessionId);
@@ -409,9 +423,7 @@ public class LangfuseController {
         @Parameter(description = "会话ID", required = true) @PathVariable("sessionId") String sessionId,
         @Parameter(description = "限制数量", required = false) @RequestParam(defaultValue = "10") Integer limit) {
 
-        if (StringUtils.isBlank(sessionId)) {
-            throw new BdpRuntimeException(I18nUtil.get("langfuse.session.id.not.empty"));
-        }
+        langfuseAuth.verifySessionOwner(sessionId);
 
         try {
             log.info("Getting recent sessions for sessionId: {} with limit: {}", sessionId, limit);
@@ -447,9 +459,7 @@ public class LangfuseController {
         @Parameter(description = "会话ID", required = true) @PathVariable("sessionId") String sessionId,
         @RequestBody(required = false) LangfuseQueryDto queryDto) {
 
-        if (StringUtils.isBlank(sessionId)) {
-            throw new BdpRuntimeException(I18nUtil.get("langfuse.session.id.not.empty"));
-        }
+        langfuseAuth.verifySessionOwner(sessionId);
 
         try {
             log.info("Querying observations by sessionId: {} with parameters: {}", sessionId, queryDto);

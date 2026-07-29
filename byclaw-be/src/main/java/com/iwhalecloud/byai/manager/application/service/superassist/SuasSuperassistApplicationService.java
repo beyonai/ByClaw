@@ -4,9 +4,15 @@ import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
 import com.iwhalecloud.byai.common.constants.Constants;
-import com.iwhalecloud.byai.common.constants.resource.ImplType;
 import com.iwhalecloud.byai.common.constants.resource.ResourceBizType;
+import com.iwhalecloud.byai.common.ecrypt.Sm4Util;
+import com.iwhalecloud.byai.common.feign.client.FeignTokenSaverService;
 import com.iwhalecloud.byai.common.feign.request.conversation.AgentPrologueDto;
+import com.iwhalecloud.byai.common.feign.request.token.TokenSaveRequest;
+import com.iwhalecloud.byai.common.feign.response.token.TokenApiResponse;
+import com.iwhalecloud.byai.common.feign.response.token.TokenDto;
+import com.iwhalecloud.byai.common.feign.response.token.TokenKeyResult;
+import com.iwhalecloud.byai.common.feign.response.token.TokenPageResult;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
@@ -15,27 +21,35 @@ import com.iwhalecloud.byai.common.util.MapParamUtil;
 import com.iwhalecloud.byai.common.util.RedisUtil;
 import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.manager.application.service.digitemploy.DigitalEmployeeApplicationService;
+import com.iwhalecloud.byai.manager.domain.aimodel.enums.ModelOwnerType;
 import com.iwhalecloud.byai.manager.domain.aimodel.enums.ModelProtocol;
+import com.iwhalecloud.byai.manager.domain.aimodel.enums.ModelSourceType;
 import com.iwhalecloud.byai.manager.domain.aimodel.service.ByaiAimodelDomainService;
 import com.iwhalecloud.byai.manager.domain.auth.enums.Color;
 import com.iwhalecloud.byai.manager.domain.auth.enums.GrantToObjType;
 import com.iwhalecloud.byai.manager.domain.auth.enums.GrantType;
 import com.iwhalecloud.byai.manager.domain.auth.enums.OperType;
 import com.iwhalecloud.byai.manager.domain.auth.service.PrivilegeGrantService;
+import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtDigEmployeeService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtSkillService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceRelDetailService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
+import com.iwhalecloud.byai.manager.dto.aimodel.ModelQuota;
+import com.iwhalecloud.byai.manager.dto.aimodel.TokenSaver;
 import com.iwhalecloud.byai.manager.dto.digitemploy.DigitalEmployeeDTO;
 import com.iwhalecloud.byai.manager.dto.digitemploy.RelResourceInfo;
+import com.iwhalecloud.byai.manager.dto.digitemploy.SsResourceDTO;
 import com.iwhalecloud.byai.manager.dto.resource.SsResExtSkillDto;
 import com.iwhalecloud.byai.manager.entity.aimodel.ByaiAimodel;
 import com.iwhalecloud.byai.manager.entity.auth.PrivilegeGrant;
+import com.iwhalecloud.byai.manager.entity.resource.SsResExtDigEmployee;
 import com.iwhalecloud.byai.manager.entity.resource.SsResExtSkill;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
 import com.iwhalecloud.byai.manager.entity.resource.SsResourceRelDetail;
 import com.iwhalecloud.byai.manager.entity.superassist.SuasSuperassist;
 import com.iwhalecloud.byai.manager.domain.superassist.service.SuasSuperassistService;
 import com.iwhalecloud.byai.manager.qo.aimodel.DefaultAiModelQo;
+import com.iwhalecloud.byai.manager.qo.aimodel.FindAiModelQo;
 import com.iwhalecloud.byai.state.application.service.dataset.DatasetApplicationService;
 import java.util.ArrayList;
 import java.util.Date;
@@ -75,6 +89,9 @@ public class SuasSuperassistApplicationService {
     private ByaiAimodelDomainService byaiAimodelService;
 
     @Autowired
+    private FeignTokenSaverService feignTokenSaverService;
+
+    @Autowired
     private SuasSuperassistService suasSuperassistService;
 
     @Autowired
@@ -82,6 +99,9 @@ public class SuasSuperassistApplicationService {
 
     @Autowired
     private DatasetApplicationService datasetApplicationService;
+
+    @Autowired
+    private SsResExtDigEmployeeService ssResExtDigEmployeeService;
 
     @Autowired
     private SsResourceRelDetailService ssResourceRelDetailService;
@@ -190,7 +210,10 @@ public class SuasSuperassistApplicationService {
             return defaultDigEmployeeId;
         }
 
+        // 解析模型中的数字员工
+        Map<String, AgentPrologueDto.ModelInfo> modelInfoMap = new HashMap<>();
         for (int i = 0; i < initTemplates.size(); i++) {
+
             JSONObject jsonObject = initTemplates.getJSONObject(i);
 
             String resourceCode = jsonObject.getString("resourceCode");
@@ -199,54 +222,211 @@ public class SuasSuperassistApplicationService {
             String relToolCodes = jsonObject.getString("relToolCodes");
             String isRelDefaultDataset = jsonObject.getString("isRelDefaultDataset");
 
+            // 先从当前map获取，没有再查或者创建，不用重复查询
+            AgentPrologueDto.ModelInfo modelInfo = modelInfoMap.get(modelProtocol);
+            if (modelInfo == null) {
+                modelInfo = this.buildDefaultModelInfo(modelProtocol);
+                modelInfoMap.put(modelProtocol, modelInfo);
+            }
+
             // 如果已经存在了，不再进行初始化
             SsResource ssResource = ssResourceService.findByIdOrCode(null, resourceCode);
             if (ssResource != null) {
+                // 对技能进行对比
+                this.compareDigEmployee(ssResource, jsonObject, loginInfo);
+
                 continue;
             }
 
             DigitalEmployeeDTO digitalEmployeeDTO = new DigitalEmployeeDTO();
             MapParamUtil.copyProperties(jsonObject, digitalEmployeeDTO);
+            digitalEmployeeDTO.setRelIds(new ArrayList<>());
+            digitalEmployeeDTO.setRelResourceInfoList(new ArrayList<>());
 
-            // 如果是超级助手，设置超级助手关联默认初始化知识库
-            if (Constants.YES_VALUE_T.equalsIgnoreCase(digitalEmployeeDTO.getOpenSuperHelper())) {
+            // 其他类型数字员工设置默认模型
+            String prologue = digitalEmployeeDTO.getPrologue();
 
-                digitalEmployeeDTO.setImplType(ImplType.ASK_AGENT.getCode());
+            // 是否关联默认知识库
+            if (Constants.YES_VALUE_Y.equalsIgnoreCase(isRelDefaultDataset)) {
                 digitalEmployeeDTO.setRelIds(List.of(defaultDatasetId));
-
-                // 超级助手要关联默认知识库
-                String resourceDesc = digitalEmployeeDTO.getResourceDesc();
-                digitalEmployeeDTO
-                    .setPrologue(this.buildAssistantPrologue(resourceDesc, modelProtocol, defaultDatasetId));
-
-                // 保存数字员工
-                SsResource retSsResource = digitalEmployeeApplicationService.saveDigitalEmployee(digitalEmployeeDTO);
-
-                defaultDigEmployeeId = retSsResource.getResourceId();
+                digitalEmployeeDTO.setPrologue(this.buildPrologue(prologue, modelInfo, defaultDatasetId));
             }
             else {
-
-                // 其他类型数字员工设置默认模型
-                String prologue = digitalEmployeeDTO.getPrologue();
-                digitalEmployeeDTO.setPrologue(this.buildPrologue(prologue, modelProtocol));
-
-                // 是否关联默认知识库
-                if (Constants.YES_VALUE_Y.equalsIgnoreCase(isRelDefaultDataset)) {
-                    digitalEmployeeDTO.setRelIds(List.of(defaultDatasetId));
-                }
-
-                // 关联工具agent|tool|view
-                this.handleRelToolCodes(digitalEmployeeDTO, relToolCodes, userId);
-
-                // 处理关联技能
-                this.handleRelSkillCodes(digitalEmployeeDTO, relSkillCodes, userId);
-
-                // 保存数字员工
-                digitalEmployeeApplicationService.saveDigitalEmployee(digitalEmployeeDTO);
+                digitalEmployeeDTO.setRelIds(new ArrayList<>());
+                digitalEmployeeDTO.setPrologue(this.buildPrologue(prologue, modelInfo, null));
             }
+
+            // 关联工具agent|tool|view
+            this.handleRelToolCodes(digitalEmployeeDTO, relToolCodes, userId);
+
+            // 处理关联技能
+            this.handleRelSkillCodes(digitalEmployeeDTO, relSkillCodes, userId);
+
+            // 保存数字员工
+            ssResource = digitalEmployeeApplicationService.saveDigitalEmployee(digitalEmployeeDTO);
+
+            // 如果是超级助手
+            if (Constants.YES_VALUE_T.equalsIgnoreCase(digitalEmployeeDTO.getOpenSuperHelper())) {
+                defaultDigEmployeeId = ssResource.getResourceId();
+            }
+
+            // 同步openClaw工作空间：透传原始入参，relTools / relPrompt 等不入 DB 的运行期字段需要从入参直接进 JSON。
+            digitalEmployeeApplicationService.synOpenClawWorkSpace(ssResource.getResourceId(), digitalEmployeeDTO);
         }
 
         return defaultDigEmployeeId;
+    }
+
+    /**
+     * 对比初始化的数字员工
+     *
+     * @param ssResource 资源信息
+     * @param jsonObject 模板资源配置
+     * @param loginInfo 登陆信息
+     */
+    private void compareDigEmployee(SsResource ssResource, JSONObject jsonObject, LoginInfo loginInfo) {
+
+        try {
+            String resourceDesc = jsonObject.getString("resourceDesc");
+            if (StringUtil.isNotEmpty(resourceDesc) && StringUtil.isEmpty(ssResource.getResourceDesc())) {
+                ssResourceService.update(ssResource);
+            }
+
+            SsResExtDigEmployee ssResExtDigEmployee = ssResExtDigEmployeeService.findById(ssResource.getResourceId());
+            // 如果不为空，则更新
+            if (ssResExtDigEmployee != null) {
+
+                boolean isChange = this.compareExtDigEmployee(ssResExtDigEmployee, jsonObject, loginInfo);
+
+                if (isChange) {
+                    ssResExtDigEmployeeService.update(ssResExtDigEmployee);
+                }
+
+            }
+            else {
+
+                ssResExtDigEmployee = new SsResExtDigEmployee();
+                ssResExtDigEmployee.setResourceId(ssResource.getResourceId());
+
+                this.compareExtDigEmployee(ssResExtDigEmployee, jsonObject, loginInfo);
+
+                ssResExtDigEmployeeService.save(ssResExtDigEmployee);
+            }
+
+            digitalEmployeeApplicationService.syncExistingDigEmployeeConfigToRedisQuietly(ssResource.getResourceId());
+        }
+        catch (Exception e) {
+            logger.error(e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 添加关联关系
+     *
+     * @param resourceId 资源
+     * @param relResourceId 关联资源
+     * @param userId 用户
+     * @param comAcctId 企业标识
+     */
+    private void saveSsResourceRelDetail(Long resourceId, Long relResourceId, Long userId, Long comAcctId) {
+        SsResourceRelDetail ssResourceRelDetail = new SsResourceRelDetail();
+        ssResourceRelDetail.setResourceRelDetailId(sequenceService.nextVal());
+        ssResourceRelDetail.setResourceId(resourceId);
+        ssResourceRelDetail.setRelResourceId(relResourceId);
+        ssResourceRelDetail.setRelStatus(1);
+        ssResourceRelDetail.setCreateTime(new Date());
+        ssResourceRelDetail.setCreateBy(userId);
+        ssResourceRelDetail.setComAcctId(comAcctId);
+        ssResourceRelDetailService.save(ssResourceRelDetail);
+    }
+
+    /**
+     * 对比数字员工扩展属性
+     *
+     * @param ssResExtDigEmployee 数据员工扩展信息
+     * @param jsonObject 当前模板数据
+     * @return boolean
+     */
+    private boolean compareExtDigEmployee(SsResExtDigEmployee ssResExtDigEmployee, JSONObject jsonObject,
+        LoginInfo loginInfo) {
+
+        Long userId = loginInfo.getUserId();
+        Long comAcctId = loginInfo.getComAcctId();
+        Long resourceId = ssResExtDigEmployee.getResourceId();
+
+        String prologue = jsonObject.getString("prologue");
+        String relToolCodes = jsonObject.getString("relToolCodes");
+        String coreCompetencies = jsonObject.getString("coreCompetencies");
+        String corePersonaDefinition = jsonObject.getString("corePersonaDefinition");
+
+        boolean isChange = false;
+        if (StringUtil.isNotEmpty(prologue) && StringUtil.isEmpty(ssResExtDigEmployee.getPrologue())) {
+            ssResExtDigEmployee.setPrologue(prologue);
+            isChange = true;
+        }
+        if (StringUtil.isNotEmpty(coreCompetencies) && StringUtil.isEmpty(ssResExtDigEmployee.getCoreCompetencies())) {
+            ssResExtDigEmployee.setCoreCompetencies(coreCompetencies);
+            isChange = true;
+        }
+
+        if (StringUtil.isNotEmpty(corePersonaDefinition)
+            && StringUtil.isEmpty(ssResExtDigEmployee.getCorePersonaDefinition())) {
+            ssResExtDigEmployee.setCorePersonaDefinition(corePersonaDefinition);
+            isChange = true;
+        }
+
+        Map<String, SsResourceDTO> relResourceMap = new HashMap<>(10);
+        List<SsResourceDTO> relResources = ssResourceService.findRelResource(resourceId);
+        for (SsResourceDTO ssResourceDTO : relResources) {
+            relResourceMap.put(ssResourceDTO.getResourceCode(), ssResourceDTO);
+        }
+
+        // 关联技能
+        String relSkillCodes = jsonObject.getString("relSkillCodes");
+        List<String> splitSkillCodes = StringUtil.splitStr(relSkillCodes, ",");
+        List<SsResExtSkillDto> ssResExtSkillDtos = ssResExtSkillService.findBySkillCodes(splitSkillCodes);
+        for (SsResExtSkillDto ssResExtSkillDto : ssResExtSkillDtos) {
+            String resourceCode = ssResExtSkillDto.getResourceCode();
+
+            // 如果存在关联表不存在的技能，授权添加关联关系
+            SsResourceDTO ssResourceDTO = relResourceMap.get(resourceCode);
+            if (ssResourceDTO == null) {
+
+                // 授权技能
+                this.authResource(ssResExtSkillDto, userId);
+
+                // 关联技能
+                this.saveSsResourceRelDetail(resourceId, ssResExtSkillDto.getResourceId(), userId, comAcctId);
+
+                isChange = true;
+            }
+
+        }
+        // 设置关联技能的json信息
+        ssResExtDigEmployee.setSkills(this.buildJsonBySkillDto(ssResExtSkillDtos));
+
+        // 关联工具
+        List<String> splitToolCodes = StringUtil.splitStr(relToolCodes, ",");
+        for (String toolCode : splitToolCodes) {
+            SsResourceDTO ssResourceDTO = relResourceMap.get(toolCode);
+            if (ssResourceDTO == null) {
+                SsResource relSsResource = ssResourceService.findByIdOrCode(null, toolCode);
+
+                if (relSsResource == null) {
+                    continue;
+                }
+
+                // 授权工具
+                this.authResource(relSsResource, userId);
+
+                // 关联工具
+                this.saveSsResourceRelDetail(resourceId, relSsResource.getResourceId(), userId, comAcctId);
+
+                isChange = true;
+            }
+        }
+
+        return isChange;
     }
 
     /**
@@ -315,7 +495,7 @@ public class SuasSuperassistApplicationService {
         }
 
         // 写入技能
-        digitalEmployeeDTO.setSkills(this.buildJsonSkillByCode(ssResExtSkills));
+        digitalEmployeeDTO.setSkills(this.buildJsonBySkillDto(ssResExtSkills));
     }
 
     /**
@@ -351,7 +531,7 @@ public class SuasSuperassistApplicationService {
      * @param ssResExtSkills 关联技能
      * @return String
      */
-    private String buildJsonSkillByCode(List<SsResExtSkillDto> ssResExtSkills) {
+    private String buildJsonBySkillDto(List<SsResExtSkillDto> ssResExtSkills) {
         if (ListUtil.isEmpty(ssResExtSkills)) {
             return null;
         }
@@ -380,44 +560,28 @@ public class SuasSuperassistApplicationService {
      * 设置其他初始化数字员工模型信息
      *
      * @param prologue 描述
-     * @param modelProtocol 默认模型协议
+     * @param modelInfo 默认模型协议
      * @return String
      */
-    private String buildPrologue(String prologue, String modelProtocol) {
+    private String buildPrologue(String prologue, AgentPrologueDto.ModelInfo modelInfo, Long defaultDatasetId) {
+        if (StringUtil.isEmpty(prologue)) {
+            return null;
+        }
+
         AgentPrologueDto agentPrologueDto = JSON.parseObject(prologue, AgentPrologueDto.class);
-        agentPrologueDto.setModelInfo(this.buildDefaultModelInfo(modelProtocol));
+        agentPrologueDto.setModelId(modelInfo.getModelId());
+        agentPrologueDto.setModelInfo(modelInfo);
+        // 添加默认知识库
+        if (defaultDatasetId != null) {
+            AgentPrologueDto.DatasetSearchConfig datasetSearchConfig = new AgentPrologueDto.DatasetSearchConfig();
+            datasetSearchConfig.setSearchMode("embedding");
+            datasetSearchConfig.setSimilarity(0.6);
+            datasetSearchConfig.setLimit(5);
+            agentPrologueDto.setDatasetSearchConfig(datasetSearchConfig);
+            agentPrologueDto.setDefaultDatasetId(defaultDatasetId);
+        }
+
         return JSON.toJSONString(agentPrologueDto);
-    }
-
-    /**
-     * 设置超级助手模型信息
-     *
-     * @param resourceDesc 描述信息
-     * @param modelProtocol 模型协议
-     * @param defaultDatasetId 默认知识库标识
-     * @return String
-     */
-    private String buildAssistantPrologue(String resourceDesc, String modelProtocol, Long defaultDatasetId) {
-
-        AgentPrologueDto prologue = new AgentPrologueDto();
-        prologue.setDescText(resourceDesc);
-        prologue.setRole(resourceDesc);
-        prologue.setBackground(resourceDesc);
-
-        prologue.setOpeningQuestion(
-            JSON.toJSONString(List.of(I18nUtil.get("digemployee.default.super.assistant.opening.question.intro"),
-                I18nUtil.get("digemployee.default.super.assistant.opening.question.summary"))));
-        AgentPrologueDto.DatasetSearchConfig datasetSearchConfig = new AgentPrologueDto.DatasetSearchConfig();
-        datasetSearchConfig.setSearchMode("embedding");
-        datasetSearchConfig.setSimilarity(0.6);
-        datasetSearchConfig.setLimit(5);
-        prologue.setDatasetSearchConfig(datasetSearchConfig);
-
-        prologue.setDefaultDatasetId(defaultDatasetId);
-
-        prologue.setModelInfo(this.buildDefaultModelInfo(modelProtocol));
-
-        return JSON.toJSONString(prologue);
     }
 
     /**
@@ -427,14 +591,37 @@ public class SuasSuperassistApplicationService {
      */
     private AgentPrologueDto.ModelInfo buildDefaultModelInfo(String modelProtocol) {
 
+        String modelQuotaJson = byaiSystemConfigService.findByParamCode("MODEL_QUOTA");
+
+        ModelQuota modelQuota = JSON.parseObject(modelQuotaJson, ModelQuota.class);
+        TokenSaver tokenSaver = modelQuota.getTokenSaver();
+
         ByaiAimodel byaiAimodel = null;
-        if (ModelProtocol.ANTHROPIC.equalsIgnoreCase(modelProtocol)) {
+        if (tokenSaver != null && tokenSaver.getEnabled()) {
+            FindAiModelQo findAiModelQo = new FindAiModelQo();
+            findAiModelQo.setModelType(Constants.DEFAULT_MODEL_TYPE_LLM);
+            findAiModelQo.setModelProtocol(modelProtocol);
+            findAiModelQo.setCreateBy(CurrentUserHolder.getCurrentUserId());
+            findAiModelQo.setOwnerType(ModelOwnerType.PERSONAL);
+            findAiModelQo.setSourceType(ModelSourceType.TOKEN_SAVER);
+            List<ByaiAimodel> tokenSaverModels = byaiAimodelService.findAiModelByQo(findAiModelQo);
+
+            // 如果没有初始化过，则调用接口创建
+            if (ListUtil.isNotEmpty(tokenSaverModels)) {
+                byaiAimodel = tokenSaverModels.getFirst();
+            }
+            else {
+                byaiAimodel = this.createTokenSaverModel(tokenSaver, modelProtocol);
+            }
+        }
+        else if (ModelProtocol.ANTHROPIC.equalsIgnoreCase(modelProtocol)) {
             DefaultAiModelQo defaultAiModelQo = new DefaultAiModelQo();
             defaultAiModelQo.setModelProtocol(modelProtocol);
             defaultAiModelQo.setModelType(Constants.DEFAULT_MODEL_TYPE_LLM);
             defaultAiModelQo.setStatus(Constants.STATUS_ENABLED);
             byaiAimodel = byaiAimodelService.getDefaultAiModel(defaultAiModelQo);
         }
+
         else {
             DefaultAiModelQo defaultAiModelQo = new DefaultAiModelQo();
             defaultAiModelQo.setModelProtocol(modelProtocol);
@@ -452,10 +639,109 @@ public class SuasSuperassistApplicationService {
         AgentPrologueDto.ModelInfo modelInfo = new AgentPrologueDto.ModelInfo();
         modelInfo.setMaxToken(byaiAimodel.getMaxContentToken());
         modelInfo.setModelId(byaiAimodel.getModelId());
-        modelInfo.setTemperature(byaiAimodel.getInparamTemplate());
-        modelInfo.setModel(byaiAimodel.getModelNo());
+        modelInfo.setModel(byaiAimodel.getModelName());
         modelInfo.setHistory(6);
         return modelInfo;
+    }
+
+    /**
+     * 创建TokenSaver模型
+     *
+     * @return ByaiAimodel
+     */
+    private ByaiAimodel createTokenSaverModel(TokenSaver tokenSaver, String modelProtocol) {
+
+        String tokenName = "ByClaw_".concat(CurrentUserHolder.getCurrentUserCode());
+
+        if (ModelProtocol.ANTHROPIC.equalsIgnoreCase(modelProtocol)) {
+            tokenName = tokenName + "_" + modelProtocol;
+        }
+
+        // 创建tokenSaver
+        TokenSaveRequest tokenSaveRequest = new TokenSaveRequest();
+        tokenSaveRequest.setName(tokenName);
+        tokenSaveRequest.setUnlimitedQuota(true);
+        tokenSaveRequest.setExpiredTime(-1L);
+        TokenApiResponse<Void> token = feignTokenSaverService.createToken(tokenSaveRequest);
+        logger.info("创建tokenSaver模型:{}", JSON.toJSONString(token));
+
+        // 获取tokenSaver标识
+        TokenApiResponse<TokenPageResult> tokenApiResponse = feignTokenSaverService.searchTokens(tokenName, null, 1, 1);
+        TokenPageResult tokenPageResult = tokenApiResponse.getData();
+        logger.info("获取模型标识tokenPageResult:{}", JSON.toJSONString(tokenPageResult));
+        List<TokenDto> items = tokenPageResult.getItems();
+        TokenDto tokenDto = items.getFirst();
+
+        // 获取tokenSaver的apiKey
+        TokenApiResponse<TokenKeyResult> tokenKeyResult = feignTokenSaverService.getTokenKey(tokenDto.getId());
+        TokenKeyResult data = tokenKeyResult.getData();
+        logger.info("获取模型apiKey:{}", JSON.toJSONString(tokenKeyResult));
+
+        // 创建对应的模型
+        ByaiAimodel newByaiAimodel = new ByaiAimodel();
+        newByaiAimodel.setModelName(tokenName);
+        if (ModelProtocol.ANTHROPIC.equalsIgnoreCase(modelProtocol)) {
+            newByaiAimodel.setUrl(tokenSaver.getAnthropicApiUrl());
+        }
+        else {
+            newByaiAimodel.setUrl(tokenSaver.getApiUrl());
+        }
+        newByaiAimodel.setModelProtocol(modelProtocol);
+        newByaiAimodel.setOwnerType(ModelOwnerType.PERSONAL);
+        newByaiAimodel.setSourceType(ModelSourceType.TOKEN_SAVER);
+        newByaiAimodel.setModelType(Constants.DEFAULT_MODEL_TYPE_LLM);
+        newByaiAimodel.setModelNo(tokenSaver.getModelCode());
+        newByaiAimodel.setAuthToken(Sm4Util.encrypt(data.getKey()));
+        newByaiAimodel.setCreateTime(new Date());
+        newByaiAimodel.setCreateBy(CurrentUserHolder.getCurrentUserId());
+        newByaiAimodel.setStatus("OOA");
+        newByaiAimodel.setMaxContentToken(200000);
+        newByaiAimodel.setInParams(this.buildInParams(modelProtocol, data.getKey()));
+        byaiAimodelService.upsert(newByaiAimodel);
+        return newByaiAimodel;
+    }
+
+    /**
+     * 模型内置参数
+     *
+     * @param modelProtocol 模型端点
+     * @param apiKey 密钥
+     * @return String
+     */
+    private String buildInParams(String modelProtocol, String apiKey) {
+        Map<String, Object> inParams = new HashMap<>();
+        // 基础字段
+        if (ModelProtocol.ANTHROPIC.equalsIgnoreCase(modelProtocol)) {
+            Map<String, String> keyMap = Map.of("key", "x-api-key", "value", apiKey);
+            Map<String, String> contentTypeMap = Map.of("key", "Content-Type", "value", "application/json");
+            inParams.put("headers", List.of(keyMap, contentTypeMap));
+        }
+        else {
+            inParams.put("headers", List.of(Map.of("key", "", "value", "")));
+        }
+        inParams.put("connectTimeoutSec", 32);
+        inParams.put("modelProtocol", modelProtocol);
+        inParams.put("readTimeoutSec", 60);
+        inParams.put("topP", 0.9);
+        inParams.put("abilities", List.of("3"));
+        inParams.put("presencePenalty", 0.0);
+        inParams.put("maxRetries", 3);
+        inParams.put("systems", List.of("BYAI"));
+        inParams.put("temperature", 0.7);
+        inParams.put("maxTokens", 2000000);
+
+        // 嵌套 reasoningConfig
+        Map<String, Object> reasoningConfig = new HashMap<>();
+        reasoningConfig.put("capability", "unsupported");
+        reasoningConfig.put("compatFormat", "auto");
+        reasoningConfig.put("defaultLevel", "off");
+        reasoningConfig.put("enabled", false);
+        inParams.put("reasoningConfig", reasoningConfig);
+        inParams.put("retryIntervalSec", 1);
+        inParams.put("frequencyPenalty", 0.0);
+        inParams.put("providerName", "OpenAI");
+
+        return JSON.toJSONString(inParams);
     }
 
     /**

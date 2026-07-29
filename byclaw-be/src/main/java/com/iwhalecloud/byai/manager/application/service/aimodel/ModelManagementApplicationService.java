@@ -4,17 +4,26 @@ import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import com.baomidou.mybatisplus.core.toolkit.CollectionUtils;
+import com.iwhalecloud.byai.common.feign.client.FeignTokenSaverService;
+import com.iwhalecloud.byai.common.feign.request.token.TokenSaveRequest;
+import com.iwhalecloud.byai.common.feign.response.token.TokenApiResponse;
+import com.iwhalecloud.byai.common.feign.response.token.TokenDto;
+import com.iwhalecloud.byai.common.feign.response.token.TokenPageResult;
+import com.iwhalecloud.byai.common.util.ListUtil;
 import com.iwhalecloud.byai.common.util.MapParamUtil;
+import com.iwhalecloud.byai.manager.domain.aimodel.enums.ModelSourceType;
 import com.iwhalecloud.byai.manager.domain.aimodel.enums.ModelStatusEnum;
 import com.iwhalecloud.byai.manager.domain.aimodel.service.ByaiAimodelDomainService;
 import com.iwhalecloud.byai.manager.domain.tag.service.ByaiTagRelationService;
 import com.iwhalecloud.byai.manager.dto.aimodel.ModelDefault;
 import com.iwhalecloud.byai.manager.dto.aimodel.ModelListRequest;
 import com.iwhalecloud.byai.manager.dto.aimodel.ModelListResponse;
+import com.iwhalecloud.byai.manager.dto.aimodel.ModelQuota;
 import com.iwhalecloud.byai.manager.dto.aimodel.ModelRequest;
 import com.iwhalecloud.byai.manager.dto.aimodel.ModelReasoningConfig;
 import com.iwhalecloud.byai.manager.dto.aimodel.ModelUpsertRequest;
 import com.iwhalecloud.byai.manager.dto.aimodel.ModelVO;
+import com.iwhalecloud.byai.manager.dto.aimodel.TokenSaver;
 import com.iwhalecloud.byai.manager.entity.aimodel.ByaiAimodel;
 import com.iwhalecloud.byai.common.constants.errorcode.CommonErrorCode;
 import com.iwhalecloud.byai.common.ecrypt.Sm4Util;
@@ -34,10 +43,12 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
-
 import com.iwhalecloud.byai.manager.entity.tag.ByaiTagRelation;
+import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.collections.MapUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -72,6 +83,8 @@ public class ModelManagementApplicationService {
     private static final List<String> REASONING_COMPAT_FORMATS = List.of("auto", "openai", "qwen", "qwen-chat-template",
         "deepseek", "openrouter", "together", "zai", "anthropic");
 
+    private static final Logger logger = LoggerFactory.getLogger(ModelManagementApplicationService.class);
+
     @Autowired
     private ByaiAimodelDomainService byaiAimodelDomainService;
 
@@ -80,6 +93,12 @@ public class ModelManagementApplicationService {
 
     @Autowired
     private SsResExtDigEmployeeMapper ssResExtDigEmployeeMapper;
+
+    @Autowired
+    private ByaiSystemConfigService byaiSystemConfigService;
+
+    @Autowired
+    private FeignTokenSaverService feignTokenSaverService;
 
     /**
      * 分页列表（列表仅返回 apiTokenMasked，不返回明文 apiToken）
@@ -118,13 +137,15 @@ public class ModelManagementApplicationService {
         String displayName = request.getDisplayName() != null ? request.getDisplayName().trim() : "";
         if (StringUtil.isNotEmpty(displayName)) {
             if (StringUtil.isEmpty(request.getId())) {
-                if (!"PERSONAL".equalsIgnoreCase(request.getOwnerType()) && byaiAimodelDomainService.existsByModelNameExcludeId(displayName, null)) {
+                if (!"PERSONAL".equalsIgnoreCase(request.getOwnerType())
+                    && byaiAimodelDomainService.existsByModelNameExcludeId(displayName, null)) {
                     throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40002, "aimodel.name.duplicate");
                 }
             }
             else {
                 Long modelId = parseModelId(request.getId());
-                if (byaiAimodelDomainService.existsByModelNameExcludeId(displayName, modelId) && !"PERSONAL".equalsIgnoreCase(request.getOwnerType())) {
+                if (byaiAimodelDomainService.existsByModelNameExcludeId(displayName, modelId)
+                    && !"PERSONAL".equalsIgnoreCase(request.getOwnerType())) {
                     throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40002, "aimodel.name.duplicate");
                 }
             }
@@ -141,6 +162,11 @@ public class ModelManagementApplicationService {
             entity.setModelId(modelId);
             entity.setCreateBy(existing.getCreateBy());
             entity.setCreateTime(existing.getCreateTime());
+            entity.setSourceType(existing.getSourceType());
+            entity.setOwnerType(existing.getOwnerType());
+
+            // 更新TokenSaver模型名称
+            this.updateTokenSaverModelName(existing);
         }
         else {
             entity = requestToEntity(request, currentUserId);
@@ -159,6 +185,41 @@ public class ModelManagementApplicationService {
     }
 
     /**
+     * 根据旧的名称去TokenSaver系统更新
+     *
+     * @param existing 存在
+     */
+    private void updateTokenSaverModelName(ByaiAimodel existing) {
+
+        // 看看自定义tokenSaver模型是否开启
+        String modelQuotaJson = byaiSystemConfigService.findByParamCode("MODEL_QUOTA");
+        ModelQuota modelQuota = JSON.parseObject(modelQuotaJson, ModelQuota.class);
+        TokenSaver tokenSaver = modelQuota.getTokenSaver();
+
+        if (tokenSaver != null && tokenSaver.getEnabled()
+            && ModelSourceType.TOKEN_SAVER.equals(existing.getSourceType())) {
+            // 获取tokenSaver标识
+            TokenApiResponse<TokenPageResult> tokenApiResponse = feignTokenSaverService
+                .searchTokens(existing.getModelName(), null, 1, 1);
+            TokenPageResult tokenPageResult = tokenApiResponse.getData();
+            logger.info("获取模型标识tokenPageResult:{}", JSON.toJSONString(tokenPageResult));
+
+            List<TokenDto> items = tokenPageResult.getItems();
+            if (ListUtil.isEmpty(items)) {
+                return;
+            }
+
+            TokenDto tokenDto = items.getFirst();
+            TokenSaveRequest tokenSaveRequest = new TokenSaveRequest();
+            tokenSaveRequest.setId(tokenDto.getId());
+            tokenSaveRequest.setName(existing.getModelName());
+            TokenApiResponse<TokenDto> updateApiResponse = feignTokenSaverService.updateToken(tokenSaveRequest);
+            logger.info("更新apiKey结果:{}", JSON.toJSONString(updateApiResponse));
+        }
+
+    }
+
+    /**
      * 删除模型；启用中的模型不允许删除，需先停用后再删。
      */
     @Transactional(rollbackFor = Exception.class)
@@ -171,6 +232,26 @@ public class ModelManagementApplicationService {
         validateModelNotCurrentRequiredDefault(entity, "aimodel.default_model.delete.forbidden");
         validateModelNotUsedByActiveDigitalEmployee(modelId, "aimodel.delete.digital.employee.in.use");
         byaiAimodelDomainService.deleteById(modelId);
+
+        // 看看自定义tokenSaver模型是否开启
+        String modelQuotaJson = byaiSystemConfigService.findByParamCode("MODEL_QUOTA");
+        ModelQuota modelQuota = JSON.parseObject(modelQuotaJson, ModelQuota.class);
+        TokenSaver tokenSaver = modelQuota.getTokenSaver();
+        if (tokenSaver != null && tokenSaver.getEnabled()
+            && ModelSourceType.TOKEN_SAVER.equals(entity.getSourceType())) {
+            // 获取tokenSaver标识
+            TokenApiResponse<TokenPageResult> tokenApiResponse = feignTokenSaverService
+                .searchTokens(entity.getModelName(), null, 1, 1);
+            TokenPageResult tokenPageResult = tokenApiResponse.getData();
+            logger.info("获取模型标识tokenPageResult:{}", JSON.toJSONString(tokenPageResult));
+
+            List<TokenDto> items = tokenPageResult.getItems();
+            if (ListUtil.isNotEmpty(items)) {
+                TokenDto tokenDto = items.getFirst();
+                TokenApiResponse<Void> voidTokenApiResponse = feignTokenSaverService.deleteToken(tokenDto.getId());
+                logger.info("删除apiKey结果:{}", JSON.toJSONString(voidTokenApiResponse));
+            }
+        }
         return Boolean.TRUE;
     }
 
@@ -324,7 +405,7 @@ public class ModelManagementApplicationService {
 
     /** 填充 ModelVO 基础字段（id、displayName、modelCode、status、token 等） */
     private void fillModelVOBasic(ModelVO vo, ByaiAimodel entity, boolean forList) {
-        vo.setId(entity.getModelId() != null ? String.valueOf(entity.getModelId()) : null);
+        vo.setId(entity.getModelId());
         vo.setDisplayName(entity.getModelName());
         /// 先设置为model_name
         vo.setModelCode(entity.getModelNo());
@@ -630,7 +711,6 @@ public class ModelManagementApplicationService {
         return byaiAimodelDomainService.listModel(request);
     }
 
-
     public String getDefaultModelId() {
         return getDefaultModelId(DEFAULT_MODEL_TYPE_LLM);
     }
@@ -663,11 +743,26 @@ public class ModelManagementApplicationService {
         if (modelDefault == null || modelDefault.getModelId() == null) {
             throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40001, "aimodel.modelId.required");
         }
+
+        Long tagId = modelDefault.getTagId();
         Long modelId = modelDefault.getModelId();
-        ByaiAimodel target = byaiAimodelDomainService.getById(modelId);
+        // 设置redis中默认模型信息
+        ByaiAimodel target = byaiAimodelDomainService.findById(modelId);
         if (target == null) {
             throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40004, "aimodel.not.found");
         }
+        else {
+            target.setIsDefault(1);
+            byaiAimodelDomainService.syncToRedis(target);
+        }
+
+        // 查询关联标签
+        List<ByaiTagRelation> aiModels = byaiTagRelationService.findTagRelation(Constants.OBJ_TYPE_AIMODEL, tagId);
+        Map<Long, ByaiTagRelation> byaiTagRelationMap = new HashMap<>(aiModels.size());
+        for (ByaiTagRelation byaiTagRelation : aiModels) {
+            byaiTagRelationMap.put(byaiTagRelation.getObjId(), byaiTagRelation);
+        }
+
         String targetModelType = normalizeModelType(target.getModelType(), DEFAULT_MODEL_TYPE_LLM);
         String modelType = normalizeModelType(modelDefault.getModelType(), targetModelType);
         if (!modelType.equals(targetModelType)) {
@@ -676,6 +771,29 @@ public class ModelManagementApplicationService {
         validateDefaultModelType(modelType);
         if (!ModelStatusEnum.isEnabledDb(target.getStatus())) {
             throw new BaseException(CommonErrorCode.AIMODEL_ERROR_CODE_40001, "aimodel.default_model.enabled.required");
+        }
+
+        // 删除其他模型的默认对话标签
+        for (ByaiTagRelation tempTagRelation : byaiTagRelationMap.values()) {
+
+            Long objId = tempTagRelation.getObjId();
+            Long relationId = tempTagRelation.getRelationId();
+            byaiTagRelationService.removeById(relationId);
+
+            // 获取模型信息
+            ByaiAimodel byaiAimodel = byaiAimodelDomainService.findById(objId);
+            if (byaiAimodel == null) {
+                continue;
+            }
+
+            // 同步更新redis中的状态
+            if (ModelStatusEnum.isEnabledDb(byaiAimodel.getStatus())) {
+                byaiAimodel.setIsDefault(0);
+                byaiAimodelDomainService.syncToRedis(byaiAimodel);
+            }
+            else {
+                byaiAimodelDomainService.removeFromRedis(modelId);
+            }
         }
         assignDefaultModelForType(target, modelType);
     }

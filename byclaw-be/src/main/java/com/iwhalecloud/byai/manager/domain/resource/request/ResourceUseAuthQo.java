@@ -18,6 +18,9 @@ public class ResourceUseAuthQo extends AuthQo implements Serializable {
     @ApiModelProperty(value = "资源类型", required = true)
     private List<String> resourceBizTypeList;
 
+    @ApiModelProperty(value = "来源系统编码列表", required = false)
+    private List<String> systemCodes;
+
     @ApiModelProperty(value = "目录ID", required = true)
     private Long catalogId;
 

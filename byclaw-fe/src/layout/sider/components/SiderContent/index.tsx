@@ -5,13 +5,15 @@ import classnames from 'classnames';
 import useVisibleMenuKeys from '../../useVisibleMenuKeys';
 import styles from './index.module.less';
 
-const DialogueList = lazy(() => import('@/layout/sider/components/DialogueList'));
+const ProjectSpaceList = lazy(() => import('@/layout/sider/components/ProjectSpaceList'));
 const EmployeeList = lazy(() => import('@/layout/sider/components/EmployeeList'));
 const Knowledge = lazy(() => import('@/layout/sider/components/Knowledge'));
 const ResourceSiderPanel = lazy(() => import('@/layout/sider/components/ResourceSiderPanel'));
 const SearchAndQuery = lazy(() => import('@/layout/sider/components/SearchAndQuery'));
 const FileSiderPanel = lazy(() => import('@/layout/sider/components/FileSiderPanel'));
 const ModelSiderPanel = lazy(() => import('@/layout/sider/components/ModelSiderPanel'));
+
+const OntologySiderPanel = lazy(() => import('@/layout/sider/components/OntologySiderPanel'));
 
 const ToolSiderPanel = () => <ResourceSiderPanel resourceType="TOOL" />;
 const ViewSiderPanel = () => <ResourceSiderPanel resourceType="VIEW" />;
@@ -24,8 +26,10 @@ export const tabItems: any[] = [
     icon: 'icon-cebianlan-duihuajilu',
     activeIcon: 'icon-huihua-fill',
     label: 'sider.session',
-    ChildComponent: DialogueList,
+    // 会话入口统一展示按项目归属分组的会话列表，避免与独立项目入口重复。
+    ChildComponent: ProjectSpaceList,
     navigatePath: '/chat',
+    forceRender: true,
   },
   {
     key: 'agent',
@@ -87,6 +91,14 @@ export const tabItems: any[] = [
     ChildComponent: ObjectSiderPanel,
     navigatePath: '/objectCenter',
     // hideSider: true,
+  },
+  {
+    key: 'ontology',
+    icon: 'icon-a-yemian-line',
+    activeIcon: 'icon-yemian-fill',
+    label: 'sider.ontology',
+    ChildComponent: OntologySiderPanel,
+    navigatePath: '/ontologyCenter',
   },
   {
     key: 'skill',

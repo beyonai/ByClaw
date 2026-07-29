@@ -27,6 +27,7 @@ import PublishModal from '../components/PublishModal';
 import RefineModal from '../components/RefineModal';
 import LogInfoDrawer from './components/LogInfoDrawer';
 import ConfigForm from './ConfigForm';
+import OntologyResourceSelectorDrawer, { normalizeOntologyResource } from './ConfigForm/OntologyResourceSelectorDrawer';
 import { normalizeRobotConfig } from './ConfigForm/robotConfig';
 import { DEFAULT_PERSONALITY_DEFINITION } from './personalityDefinitionDefault';
 import styles from './index.module.less';
@@ -132,6 +133,12 @@ export const skillHandler = (it) => {
 
   return p;
 };
+
+const normalizeOntologyResourceForEdit = (item, fallbackOwnerType) =>
+  normalizeOntologyResource(item, fallbackOwnerType);
+
+const isOntologyResource = (item) =>
+  ['VIEW', 'OBJECT'].includes(`${item?.grantResourceType || item?.resourceBizType || ''}`.toUpperCase());
 
 const parseBundledSkills = (value) => {
   const normalizeBundledSkillItems = (items = []) =>
@@ -393,6 +400,20 @@ const extractPromptFieldsFromCorePersonaDefinition = (value) => {
   return { systemFieldValues, customPromptTabs, customPromptValues };
 };
 
+const parseMaybeArray = (value) => {
+  if (Array.isArray(value)) return value;
+  if (!value) return [];
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value || '[]');
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+};
+
 const getDigitalEmployeeTemplate = (templates, ownerType, agentType) => {
   const effectiveOwnerType = ownerType === 'personal' ? 'personal' : 'enterprise';
   const findTemplate = (list) =>
@@ -609,6 +630,10 @@ const EmployeeDetail = ({ loading }) => {
   const [issues, setIssues] = useState([]);
 
   const [selectedTools, setSelectedTools] = useState([]);
+  const [savedRelOntology, setSavedRelOntology] = useState([]);
+  const [selectedOntologyResources, setSelectedOntologyResources] = useState([]);
+  const [ontologyResourcesDirty, setOntologyResourcesDirty] = useState(false);
+  const [ontologyDrawerOpen, setOntologyDrawerOpen] = useState(false);
   const [coreCompetenciesState, setCoreCompetenciesState] = useState([]);
   const [memoryRules, setMemoryRules] = useState([]);
 
@@ -774,6 +799,7 @@ const EmployeeDetail = ({ loading }) => {
             robotChannelConfigList: robotChannelConfigListRaw,
             catalogId,
             relTools,
+            relOntology,
             relIds: detailRelIds,
           } = res || {};
 
@@ -846,6 +872,16 @@ const EmployeeDetail = ({ loading }) => {
               console.warn('tagsList parse error', error);
             }
             setTagOptions(tags?.map((it) => ({ label: it, value: it })));
+            const relOntologyRows = parseMaybeArray(relOntology)
+              .map((item) => normalizeOntologyResourceForEdit(item, detailOwnerType || ownerType))
+              .filter(isOntologyResource);
+            const relOntologyResources = (relResourceList || [])
+              .map((item) => normalizeOntologyResourceForEdit(item, detailOwnerType || ownerType))
+              .filter(isOntologyResource);
+            const nextOntologyResources = relOntologyResources.length > 0 ? relOntologyResources : relOntologyRows;
+            setSelectedOntologyResources(nextOntologyResources);
+            setSavedRelOntology(nextOntologyResources);
+            setOntologyResourcesDirty(false);
 
             let myHomeType = homeType;
             if (homeType === intl.formatMessage({ id: 'thirdPartyCreateModel.defaultTemplate' })) {
@@ -1149,11 +1185,7 @@ const EmployeeDetail = ({ loading }) => {
             setResourceStatus(res?.resourceStatus);
             prologueRef.current = prologueTemp;
             const relResourceSkills = (relResourceList || [])
-              .filter((it) =>
-                ['AGENT', 'TOOLKIT', 'TOOL', 'MCP', 'VIEW', 'OBJECT'].includes(
-                  it.grantResourceType || it.resourceBizType
-                )
-              )
+              .filter((it) => ['AGENT', 'TOOLKIT', 'TOOL', 'MCP'].includes(it.grantResourceType || it.resourceBizType))
               .map(skillHandler);
             const relToolSkills = (Array.isArray(relTools) ? relTools : [])
               .filter(Boolean)
@@ -1424,6 +1456,11 @@ const EmployeeDetail = ({ loading }) => {
             relResourceInfoList.push(p);
           }
         });
+        selectedOntologyResources.forEach((it) => {
+          if (it?.resourceId !== undefined && it.resourceId !== null && it.resourceId !== '') {
+            relIds.push(`${it.resourceId}`);
+          }
+        });
         knowledgeBases.forEach((it) => {
           it.items.forEach((i) => {
             relIds.push(`${i.resourceId}`);
@@ -1568,7 +1605,7 @@ const EmployeeDetail = ({ loading }) => {
                 resourceBizType: 'DIG_EMPLOYEE',
                 isFrontAccess: _isFrontAccess,
               },
-          success: (resp, data) => {
+          success: async (resp, data) => {
             const savedResourceId = resp?.resourceId || resp?.id || currentResourceId || resp;
             const savedData = resp && typeof resp === 'object' ? resp : {};
 
@@ -1598,6 +1635,12 @@ const EmployeeDetail = ({ loading }) => {
             setSubmitLoading(false);
             setAuditLoading(false);
             setIsConfigChanged(false);
+            const savedOntologyResources = selectedOntologyResources
+              .map((item) => normalizeOntologyResourceForEdit(item, effectiveOwnerType))
+              .filter(isOntologyResource);
+            setSelectedOntologyResources(savedOntologyResources);
+            setSavedRelOntology(savedOntologyResources);
+            setOntologyResourcesDirty(false);
 
             setUpdateTime(dayjs().format('HH:mm:ss'));
 
@@ -1656,6 +1699,7 @@ const EmployeeDetail = ({ loading }) => {
       form,
       questionList,
       selectedTools,
+      selectedOntologyResources,
       knowledgeBases,
       avatar,
       managementAddresses,
@@ -1665,6 +1709,7 @@ const EmployeeDetail = ({ loading }) => {
       uuid,
       effectiveDigitalType,
       effectiveAgentType,
+      effectiveOwnerType,
       systemCode,
       ownerType,
       EventEmitter,
@@ -1686,6 +1731,18 @@ const EmployeeDetail = ({ loading }) => {
   const onValuesChange = useCallback(() => {
     setIsConfigChanged(true);
   }, []);
+
+  const handleOntologyResourceSelect = useCallback(
+    (resources = []) => {
+      const nextResources = resources.map((item) => normalizeOntologyResourceForEdit(item, effectiveOwnerType));
+      setSelectedOntologyResources(nextResources);
+      setSavedRelOntology(nextResources);
+      setOntologyResourcesDirty(true);
+      setOntologyDrawerOpen(false);
+      setIsConfigChanged(true);
+    },
+    [effectiveOwnerType]
+  );
 
   // 顶部
   const renderHeader = (
@@ -1961,6 +2018,9 @@ const EmployeeDetail = ({ loading }) => {
                 terminalTypeList={terminalTypeList}
                 initialCoreCompetencies={coreCompetenciesState}
                 ownerType={effectiveOwnerType}
+                savedRelOntology={savedRelOntology}
+                ontologyResourcesDirty={ontologyResourcesDirty}
+                onOpenOntologyDrawer={() => setOntologyDrawerOpen(true)}
               />
             </div>
 
@@ -2130,12 +2190,22 @@ const EmployeeDetail = ({ loading }) => {
           }}
         />
       )}
+      <OntologyResourceSelectorDrawer
+        open={ontologyDrawerOpen}
+        ownerType={effectiveOwnerType}
+        selectedResources={selectedOntologyResources}
+        onCancel={() => setOntologyDrawerOpen(false)}
+        onOk={handleOntologyResourceSelect}
+      />
       <RefineModal
         visible={refineModalOpen}
         form={form}
         questionList={questionList}
         skills={selectedTools}
         knowledgeBases={knowledgeBases}
+        agentType={effectiveAgentType}
+        resourceId={agentId}
+        modelCode={modelName}
         onOk={(formValue, myQuestionList) => {
           setQuestionList(myQuestionList);
           form.setFieldsValue(formValue);

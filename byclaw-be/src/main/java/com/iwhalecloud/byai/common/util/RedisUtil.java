@@ -18,12 +18,23 @@ import org.springframework.stereotype.Component;
 
 import com.baomidou.mybatisplus.core.toolkit.CollectionUtils;
 import jakarta.annotation.PostConstruct;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.data.redis.RedisSystemException;
+import org.springframework.data.redis.core.RedisOperations;
+import org.springframework.data.redis.core.SessionCallback;
+
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * REDIS 工具类
  */
 @Component
 public class RedisUtil {
+
+    private static final Logger logger = LoggerFactory.getLogger(RedisUtil.class);
 
     private static RedisUtil instance;
 
@@ -428,6 +439,84 @@ public class RedisUtil {
             return;
         }
         instance.stringRedisTemplate.opsForValue().set(key, value, seconds, TimeUnit.SECONDS);
+    }
+
+    /**
+     * 简单的 (key, value) 不可变绑定，用于 Pipeline 批量写入。RedisKVPair 是内部类，
+     * 复用现有 RedisUtil 公共命名空间，避免引入额外依赖。
+     */
+    public static final class RedisKVPair {
+        private final String key;
+        private final String value;
+
+        public RedisKVPair(String key, String value) {
+            this.key = key;
+            this.value = value;
+        }
+
+        public String getKey() {
+            return key;
+        }
+
+        public String getValue() {
+            return value;
+        }
+    }
+
+    /**
+     * Redis Pipeline 批量写入（SET）。
+     * <p>
+     * 使用 {@link SessionCallback} + {@code executePipelined} 把多个 {@code opsForValue().set}
+     * 在一次网络往返中发出，显著降低大数量级启动期同步的 RTT 开销。
+     * <p>
+     * 行为约定：
+     * <ul>
+     *     <li>{@code null} 或空集合：直接返回（no-op）</li>
+     *     <li>任一 key 的 value 字节数 > 1MB：记录 warn 日志但仍执行（不降级跳过；上层需自行监控）</li>
+     *     <li>Redis 抛出异常时：捕获后记录失败 key 列表，重新抛包装异常（含失败 key 数 + 总 key 数）</li>
+     * </ul>
+     *
+     * @param kvs key/value 集合（不可为 null）
+     * @throws RedisSystemException 当 Pipeline 执行失败时抛出包装异常
+     */
+    public static void pipelineSetStrings(java.util.Collection<RedisKVPair> kvs) {
+        if (kvs == null || kvs.isEmpty()) {
+            return;
+        }
+        final List<String> attemptedKeys = new ArrayList<>(kvs.size());
+        for (RedisKVPair kv : kvs) {
+            attemptedKeys.add(kv.getKey());
+        }
+        try {
+            instance.stringRedisTemplate.executePipelined(new SessionCallback<Object>() {
+                @Override
+                public Object execute(RedisOperations operations) {
+                    for (RedisKVPair kv : kvs) {
+                        if (kv == null || StringUtil.isEmpty(kv.getKey())) {
+                            continue;
+                        }
+                        String val = kv.getValue();
+                        int bytes = val == null ? 0 : val.getBytes(StandardCharsets.UTF_8).length;
+                        if (bytes > 1024 * 1024) {
+                            logger.warn("Pipeline 单 key > 1MB, key={}, size={}bytes; 仍执行但建议拆分",
+                                kv.getKey(), bytes);
+                        }
+                        operations.opsForValue().set(kv.getKey(), val);
+                    }
+                    return null;
+                }
+            });
+        }
+        catch (RuntimeException e) {
+            logger.error("pipelineSetStrings failed, totalKeys={}, firstFailureKey={}, reason={}",
+                attemptedKeys.size(),
+                attemptedKeys.isEmpty() ? "<none>" : attemptedKeys.get(0),
+                e.getMessage(), e);
+            throw new RedisSystemException(
+                "pipelineSetStrings 失败: totalKeys=" + attemptedKeys.size()
+                    + ", attemptedKeys=" + attemptedKeys,
+                e);
+        }
     }
 
     /**

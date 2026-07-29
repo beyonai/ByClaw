@@ -30,7 +30,8 @@ export interface PersonalParamPageResult {
 export const queryPersonalParams = (params?: PersonalParamQuery) =>
   GET<PersonalParamPageResult>('/byaiService/userPrivateParam/list', params);
 
-export const savePersonalParam = (data: PersonalParam) => POST<PersonalParam>('/byaiService/userPrivateParam/save', data);
+export const savePersonalParam = (data: PersonalParam) =>
+  POST<PersonalParam>('/byaiService/userPrivateParam/save', data);
 
 export const deletePersonalParam = (paramId: number | string) =>
   POST<boolean>('/byaiService/userPrivateParam/delete', { paramId });

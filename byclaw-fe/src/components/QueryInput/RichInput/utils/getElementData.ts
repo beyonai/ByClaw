@@ -59,16 +59,20 @@ export default function getElementData(type: IResourceType, data: any) {
         ],
       };
     }
-    case ResourceType.digitalEmployee:
+    case ResourceType.digitalEmployee: {
+      const agentId = data.agentId || data.id || data.resourceCode || data.resourceId;
+      const name = data.name || data.resourceName || data.resourceDesc || agentId;
       return {
-        agentId: data.agentId || data.id || data.resourceCode,
-        name: data.name,
+        agentId,
+        name,
         chatAvatar: data.chatAvatar,
         agentType: data.agentType,
         type: ELEMENT_MENTION,
         resourceType: type,
-        children: [{ text: getElementDisplayText({ resourceType: type, data }) }],
+        resourceCode: data.resourceCode,
+        children: [{ text: getElementDisplayText({ resourceType: type, data: { name } }) }],
       };
+    }
     case ResourceType.agentTool: {
       let name = data.resourceName;
       if (data.agentName) {
@@ -137,6 +141,8 @@ export default function getElementData(type: IResourceType, data: any) {
         type: ELEMENT_RESOURCE,
         resourceName: name,
         resourceCode: data.resourceCode,
+        isFromResourceModule: data.isFromResourceModule,
+        showQuotePrefix: data.showQuotePrefix,
         // 引用XXX
         children: [{ text: getElementDisplayText({ resourceType: type, data: { name } }) }],
       };

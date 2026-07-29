@@ -5,10 +5,7 @@ import logging
 import os
 from typing import Any
 
-try:
-    import redis
-except ImportError:  # pragma: no cover - only used when dependency is missing locally
-    redis = None
+from byclaw_data.redis_client import create_sync_redis_client
 
 logger = logging.getLogger(__name__)
 
@@ -28,17 +25,7 @@ def _as_int(key: str, default: int) -> int:
     return int(raw) if raw else default
 
 
-def build_redis_client():
-    if redis is None:
-        raise RuntimeError("redis package is not installed")
-    return redis.Redis(
-        host=os.environ.get("DATACLOUD_GATEWAY_REDIS_HOST", ""),
-        port=_as_int("DATACLOUD_GATEWAY_REDIS_PORT", 6379),
-        db=_as_int("DATACLOUD_GATEWAY_REDIS_DB", 0),
-        username=os.environ.get("DATACLOUD_GATEWAY_REDIS_USERNAME", ""),
-        password=os.environ.get("DATACLOUD_GATEWAY_REDIS_PASSWORD", ""),
-        decode_responses=True,
-    )
+build_redis_client = create_sync_redis_client
 
 
 def get_models_by_type(client, model_type: str) -> list[dict[str, Any]]:
@@ -60,80 +47,100 @@ def get_models_by_ability(client, model_type: str, ability: str) -> list[dict[st
 
 def get_model_by_instance_id(client, instance_id: str | int) -> dict[str, Any] | None:
     """从 Redis LLM 列表中按 instanceId 精确匹配模型。未找到返回 None。"""
+    owns_client = client is None
     if client is None:
         client = build_redis_client()
-    target = str(instance_id).strip()
-    for model in get_models_by_type(client, "LLM"):
-        if str(model.get("instanceId") or "").strip() == target:
-            return model
-    return None
+    try:
+        target = str(instance_id).strip()
+        for model in get_models_by_type(client, "LLM"):
+            if str(model.get("instanceId") or "").strip() == target:
+                return model
+        return None
+    finally:
+        if owns_client:
+            client.close()
 
 
 def get_default_llm(client) -> dict[str, Any] | None:
+    owns_client = client is None
     if client is None:
         client = build_redis_client()
 
-    dc_models = get_models_by_ability(client, "LLM", ABILITY_DATA_CLOUD)
-    if dc_models:
-        logger.debug(
-            "[model_env] get_default_llm: found %d DATA_CLOUD LLM(s), using first: instanceId=%s modelCode=%s",
-            len(dc_models),
-            dc_models[0].get("instanceId"),
-            dc_models[0].get("modelCode"),
-        )
-        return dc_models[0]
-
-    llm_models = get_models_by_type(client, "LLM")
-    logger.debug(
-        "[model_env] get_default_llm: no DATA_CLOUD LLM found, scanning %d LLM(s) for default",
-        len(llm_models),
-    )
-    for model in llm_models:
-        if model.get("isDefault") == 1:
+    try:
+        dc_models = get_models_by_ability(client, "LLM", ABILITY_DATA_CLOUD)
+        if dc_models:
             logger.debug(
-                "[model_env] get_default_llm: using isDefault model instanceId=%s modelCode=%s",
-                model.get("instanceId"),
-                model.get("modelCode"),
+                "[model_env] get_default_llm: found %d DATA_CLOUD LLM(s), using first: instanceId=%s modelCode=%s",
+                len(dc_models),
+                dc_models[0].get("instanceId"),
+                dc_models[0].get("modelCode"),
             )
-            return model
-    result = llm_models[0] if llm_models else None
-    if result:
+            return dc_models[0]
+
+        llm_models = get_models_by_type(client, "LLM")
         logger.debug(
-            "[model_env] get_default_llm: fallback to first LLM instanceId=%s modelCode=%s",
-            result.get("instanceId"),
-            result.get("modelCode"),
+            "[model_env] get_default_llm: no DATA_CLOUD LLM found, scanning %d LLM(s) for default",
+            len(llm_models),
         )
-    else:
-        logger.warning("[model_env] get_default_llm: no LLM model found in Redis")
-    return result
+        for model in llm_models:
+            if model.get("isDefault") == 1:
+                logger.debug(
+                    "[model_env] get_default_llm: using isDefault model instanceId=%s modelCode=%s",
+                    model.get("instanceId"),
+                    model.get("modelCode"),
+                )
+                return model
+        result = llm_models[0] if llm_models else None
+        if result:
+            logger.debug(
+                "[model_env] get_default_llm: fallback to first LLM instanceId=%s modelCode=%s",
+                result.get("instanceId"),
+                result.get("modelCode"),
+            )
+        else:
+            logger.warning("[model_env] get_default_llm: no LLM model found in Redis")
+        return result
+    finally:
+        if owns_client:
+            client.close()
 
 
 def get_default_embedding(client) -> dict[str, Any] | None:
+    owns_client = client is None
     if client is None:
         client = build_redis_client()
-    embedding_models = get_models_by_ability(client, "EMBEDDING", ABILITY_DATA_CLOUD)
-    if embedding_models:
-        return embedding_models[0]
+    try:
+        embedding_models = get_models_by_ability(client, "EMBEDDING", ABILITY_DATA_CLOUD)
+        if embedding_models:
+            return embedding_models[0]
 
-    embedding_models = get_models_by_type(client, "EMBEDDING")
-    for model in embedding_models:
-        if model.get("isDefault") == 1:
-            return model
-    return embedding_models[0] if embedding_models else None
+        embedding_models = get_models_by_type(client, "EMBEDDING")
+        for model in embedding_models:
+            if model.get("isDefault") == 1:
+                return model
+        return embedding_models[0] if embedding_models else None
+    finally:
+        if owns_client:
+            client.close()
 
 
 def get_default_rerank(client) -> dict[str, Any] | None:
+    owns_client = client is None
     if client is None:
         client = build_redis_client()
-    rerank_models = get_models_by_ability(client, "RERANK", ABILITY_DATA_CLOUD)
-    if rerank_models:
-        return rerank_models[0]
+    try:
+        rerank_models = get_models_by_ability(client, "RERANK", ABILITY_DATA_CLOUD)
+        if rerank_models:
+            return rerank_models[0]
 
-    rerank_models = get_models_by_type(client, "RERANK")
-    for model in rerank_models:
-        if model.get("isDefault") == 1:
-            return model
-    return rerank_models[0] if rerank_models else None
+        rerank_models = get_models_by_type(client, "RERANK")
+        for model in rerank_models:
+            if model.get("isDefault") == 1:
+                return model
+        return rerank_models[0] if rerank_models else None
+    finally:
+        if owns_client:
+            client.close()
 
 
 def _apply_config_to_environment(config: dict[str, Any]) -> dict[str, str]:
@@ -184,6 +191,10 @@ def build_llm_config(model: dict[str, Any] | None) -> dict[str, Any] | None:
         config["DATACLOUD_LLM_MODEL_KWARGS"] = json.dumps(
             instance_param.get("extendParam"), ensure_ascii=False
         )
+    # 透传模型上下文窗口上限，用于 _trim_messages_window 按比例计算预算
+    max_content_token = model.get("maxContentToken")
+    if max_content_token:
+        config["DATACLOUD_LLM_MAX_CONTENT_TOKEN"] = str(max_content_token)
     applied = _apply_config_to_environment(config)
     logger.debug("[model_env] build_llm_config: applied env keys=%s", sorted(applied.keys()))
     return applied
@@ -238,9 +249,11 @@ def build_rerank_config(model: dict[str, Any] | None) -> dict[str, Any] | None:
 
 def main() -> None:
     client = build_redis_client()
-
-    build_llm_config(get_default_llm(client))
-    build_embedding_config(get_default_embedding(client))
+    try:
+        build_llm_config(get_default_llm(client))
+        build_embedding_config(get_default_embedding(client))
+    finally:
+        client.close()
 
 
 if __name__ == "__main__":

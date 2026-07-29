@@ -56,6 +56,48 @@ export function getFileIcon(name: string, isDir: boolean): React.ReactNode {
   return EXT_ICON_MAP[ext] || <FileOutlined />;
 }
 
+// 常见代码/配置文本扩展名:预览走 shiki 语法高亮(见 Preview/Twins),命中不了具体语言时退化为纯文本。
+export const CODE_TEXT_EXTENSIONS = [
+  'ts',
+  'tsx',
+  'js',
+  'jsx',
+  'mjs',
+  'cjs',
+  'java',
+  'kt',
+  'kts',
+  'py',
+  'go',
+  'rs',
+  'c',
+  'h',
+  'cpp',
+  'cc',
+  'hpp',
+  'cs',
+  'php',
+  'rb',
+  'swift',
+  'scala',
+  'sh',
+  'bash',
+  'zsh',
+  'sql',
+  'vue',
+  'css',
+  'less',
+  'scss',
+  'yaml',
+  'yml',
+  'toml',
+  'ini',
+  'properties',
+  'conf',
+  'gradle',
+  'dockerfile',
+];
+
 const PREVIEWABLE_EXTENSIONS = new Set([
   'md',
   'txt',
@@ -81,6 +123,7 @@ const PREVIEWABLE_EXTENSIONS = new Set([
   'avi',
   'mov',
   'mkv',
+  ...CODE_TEXT_EXTENSIONS,
 ]);
 
 export function isPreviewable(name: string): boolean {
@@ -126,6 +169,8 @@ const MIME_MAP: Record<string, string> = {
   json: 'application/json',
   html: 'text/html',
   xml: 'text/xml',
+  // 代码/配置文件按纯文本取回,交给预览层做语法高亮。
+  ...Object.fromEntries(CODE_TEXT_EXTENSIONS.map((ext) => [ext, 'text/plain'])),
 };
 
 export function getMimeType(name: string): string {

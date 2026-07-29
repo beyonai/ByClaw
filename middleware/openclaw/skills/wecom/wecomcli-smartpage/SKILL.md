@@ -9,6 +9,8 @@ metadata:
 
 # 企业微信智能文档管理
 
+开始任何任务前，必须先阅读上级共享政策 [operating-policy.md](../references/operating-policy.md)；共享政策优先于本文件中的示例和局部规则。
+
 > `wecom-cli` 是企业微信提供的命令行程序，所有操作通过执行 `wecom-cli` 命令完成。
 
 资源型技能，负责**智能文档**（原名智能主页，`/smartpage/*`）的创建与内容导出。
@@ -18,7 +20,7 @@ metadata:
 通过 `wecom-cli` 调用，品类为 `doc`：
 
 ```bash
-wecom-cli doc <tool_name> '<json_params>'
+wecom-cli doc <tool_name> --json '<json_params>'
 ```
 
 ## 返回格式说明
@@ -49,7 +51,7 @@ wecom-cli doc <tool_name> '<json_params>'
 **命令**
 
 ```bash
-wecom-cli doc +smartpage_create '<JSON 参数>'
+wecom-cli doc +smartpage_create --json '<JSON 参数>'
 ```
 
 **参数**
@@ -77,9 +79,9 @@ wecom-cli doc +smartpage_create '<JSON 参数>'
 
 ```bash
 # 通过 docid
-wecom-cli doc smartpage_export_task '{"docid": "DOCID", "content_type": 1}'
+wecom-cli doc smartpage_export_task --json '{"docid": "DOCID", "content_type": 1}'
 # 通过 url
-wecom-cli doc smartpage_export_task '{"url": "https://doc.weixin.qq.com/smartpage/xxx", "content_type": 1}'
+wecom-cli doc smartpage_export_task --json '{"url": "https://doc.weixin.qq.com/smartpage/xxx", "content_type": 1}'
 ```
 
 | 参数 | 类型 | 必填 | 默认值 | 说明 |
@@ -91,7 +93,7 @@ wecom-cli doc smartpage_export_task '{"url": "https://doc.weixin.qq.com/smartpag
 **第二步：轮询导出结果**
 
 ```bash
-wecom-cli doc smartpage_get_export_result '{"task_id": "TASK_ID"}'
+wecom-cli doc smartpage_get_export_result --json '{"task_id": "TASK_ID"}'
 ```
 
 | 参数 | 类型 | 必填 | 默认值 | 说明 |

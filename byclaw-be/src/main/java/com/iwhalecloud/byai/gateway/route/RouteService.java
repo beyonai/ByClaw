@@ -5,6 +5,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.commons.collections.CollectionUtils;
@@ -35,12 +36,15 @@ import com.iwhalecloud.byai.state.common.exception.BdpRuntimeException;
 import com.iwhalecloud.byai.state.domain.agent.enums.AgentMetaEnum;
 import com.iwhalecloud.byai.state.domain.chat.enums.ChatTransport;
 import com.iwhalecloud.byai.state.domain.chat.dto.AssistantChatDto;
+import com.iwhalecloud.byai.state.domain.chat.dto.MultiAgentMetadata;
+import com.iwhalecloud.byai.state.domain.chat.model.MessageContext;
 import com.iwhalecloud.byai.state.domain.chat.model.MessageFileDto;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatProcessContext;
 import com.iwhalecloud.byai.state.domain.chat.service.ChatStreamRuntimeCoordinator;
 import com.iwhalecloud.byai.state.domain.chat.service.GatewayStreamEventProcessor;
 import com.iwhalecloud.byai.state.domain.chat.service.PythonSseService;
 import com.iwhalecloud.byai.state.domain.chat.service.TargetAgentResolver;
+import com.iwhalecloud.byai.state.domain.chat.service.TraceIdCodec;
 import com.iwhalecloud.byai.state.domain.resource.dto.ResourceVo;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
 import com.iwhalecloud.byai.state.infrastructure.common.constants.SseResponseEventEnum;
@@ -155,19 +159,17 @@ public class RouteService {
 
         AssistantChatDto chatDto = ctx.getAssistantChatDto();
         // openclaw的workerId，固定这样拼接，在openclaw的channel实现中要保持一致
-        String targetAgentType = MapParamUtil.getStringValue(ctx.getParams(), "worker_agent_type") ;
+        String workerAgentType = MapParamUtil.getStringValue(ctx.getParams(), "worker_agent_type");
         String content = ctx.assistantChatDto.getChatContent();
         Long agentId = ctx.assistantChatDto.getAgentId();
         List<ResourceVo> resourceList = chatDto.getResourceList();
 
-        targetAgentType = targetAgentResolver.resolveAgentType(targetAgentType, agentId, chatDto.getSourceAgentType(),
-                userCode);
+        String targetAgentType = targetAgentResolver.resolveAgentType(workerAgentType, agentId,
+            chatDto.getSourceAgentType(), userCode);
         ctx.targetAgentType = targetAgentType;
 
         // 处理 content 中的资源占位符替换，如 {{DIG_EMPLOYEE_10812779}} 替换为 @xxxxx
         content = replaceResourcePlaceholders(content, resourceList);
-
-        boolean runtimeStarted = chatStreamRuntimeCoordinator.startIfNecessary(ctx);
 
         String answerMessageId = StringUtils.isNotEmpty(ctx.assistantChatDto.getResumeMessageId())
             ? ctx.assistantChatDto.getResumeMessageId()
@@ -175,10 +177,15 @@ public class RouteService {
         String traceId = ctx.traceId;
 
         String reqMetadata = ctx.assistantChatDto.getMetadata();
+        MultiAgentMetadata multiAgentMetadata = MultiAgentMetadata.fromExtParams(chatDto.getExtParams());
+        List<MultiAgentLaneRoute> laneRoutes = buildMultiAgentLaneRoutes(ctx, multiAgentMetadata, workerAgentType,
+            agentId, answerMessageId, traceId, userCode);
+        registerMultiAgentContext(ctx, laneRoutes);
 
-        GatewayClient.SendResponse response;
+        boolean runtimeStarted = chatStreamRuntimeCoordinator.startIfNecessary(ctx);
         try {
-            response = sendMessageWithWorkerRetry(
+            if (laneRoutes.isEmpty()) {
+                GatewayClient.SendResponse response = sendMessageWithWorkerRetry(
                     userCode,
                     sessionId,
                     content,
@@ -190,14 +197,33 @@ public class RouteService {
                     targetAgentType,
                     agentId,
                     ctx
-            );
+                );
+                log.info("Gateway SDK 消息发送成功, messageId: {}, targetWorker: {}, sessionId: {}, content: {}",
+                    response.getMessageId(), response.getTargetWorkerId(), sessionId, content);
+            }
+            else {
+                Map<String, Object> multiAgentParams = buildMultiAgentGatewayParams(ctx.getParams(),
+                    multiAgentMetadata, laneRoutes);
+                GatewayClient.SendResponse response = sendMessageWithWorkerRetry(
+                    userCode,
+                    sessionId,
+                    content,
+                    chatDto,
+                    multiAgentParams,
+                    answerMessageId,
+                    traceId,
+                    reqMetadata,
+                    targetAgentType,
+                    agentId,
+                    ctx
+                );
+                log.info("Gateway SDK 多泳道批量消息发送成功, lanes: {}, messageId: {}, targetWorker: {}, sessionId: {}",
+                    laneRoutes.size(), response.getMessageId(), response.getTargetWorkerId(), sessionId);
+            }
         } catch (Exception e) {
             chatStreamRuntimeCoordinator.stopIfStarted(sessionId, runtimeStarted);
             throw e;
         }
-
-        log.info("Gateway SDK 消息发送成功, messageId: {}, targetWorker: {}, sessionId: {}, content: {}",
-                response.getMessageId(), response.getTargetWorkerId(), sessionId, content);
 
         if (ctx.sendByFrameworkMsgOnly) {
             log.info("会话复用已有 Redis Stream 监听，本次仅发送 Gateway 消息完成, sessionId: {}, traceId: {}",
@@ -255,11 +281,16 @@ public class RouteService {
                     errorPayload.put("message", errorMsg);
                     errorPayload.put("traceback", errorMsg);
                     errorPayload.put("sessionId", sessionId);
+                    gatewayStreamEventProcessor.enrichLaneMetadata(ctx, dataJson, metadata, errorPayload);
                     CompletionsUtils.responseWrite(ctx.res, SseResponseEventEnum.error, errorPayload.toJSONString());
-                    ctx.gatewayError = true;
-                    log.error("收到 Gateway error 事件，退出事件循环, sessionId: {}", sessionId);
-                    chatStreamRuntimeCoordinator.stopIfStarted(sessionId, runtimeStarted);
-                    break;
+                    ctx.gatewayError = !ctx.isMultiAgentRequest() || ctx.getMultiAgentTraceIds().size() == 1;
+                    log.error("收到 Gateway error 事件, sessionId: {}, traceId: {}", sessionId,
+                        dataJson.getString("trace_id"));
+                    if (ctx.markTraceComplete(dataJson.getString("trace_id"))) {
+                        chatStreamRuntimeCoordinator.stopIfStarted(sessionId, runtimeStarted);
+                        break;
+                    }
+                    continue;
                 }
 
                 // 其他事件（answerDelta / answerStart / answerEnd 等）：
@@ -269,17 +300,24 @@ public class RouteService {
                 lineJson.put("event", eventType);
                 lineJson.put("data", eventData);
 
+                String receivedTraceId = dataJson.getString("trace_id");
+                MessageContext messageContext = ctx.resolveMessageContext(receivedTraceId);
                 pythonSseService.getContentFromPythonStreamV3(lineJson.toJSONString(), ctx.res,
-                        ctx.messageContext, ctx.getAgentIds(), ctx);
+                    messageContext, ctx.getAgentIds(), ctx);
 
                 // 任务正常结束：storeMessage() 将在请求线程中写出含完整数据的 appStreamResponse
                 if (SseResponseEventEnum.appStreamResponse.equals(eventType)) {
-                    if (ctx.messageContext != null) {
-                        ctx.messageContext.setComplete(true);
+                    if (messageContext != null) {
+                        messageContext.setComplete(true);
                     }
-                    log.info("收到 appStreamResponse，退出事件循环, sessionId: {}", sessionId);
-                    chatStreamRuntimeCoordinator.stopIfStarted(sessionId, runtimeStarted);
-                    break;
+                    if (ctx.markTraceComplete(receivedTraceId)) {
+                        if (ctx.messageContext != null) {
+                            ctx.messageContext.setComplete(true);
+                        }
+                        log.info("收到 appStreamResponse，退出事件循环, sessionId: {}", sessionId);
+                        chatStreamRuntimeCoordinator.stopIfStarted(sessionId, runtimeStarted);
+                        break;
+                    }
                 }
             }
         } finally {
@@ -371,6 +409,148 @@ public class RouteService {
             replacement = "@" + replacement;
         }
         return replacement;
+    }
+
+    private List<MultiAgentLaneRoute> buildMultiAgentLaneRoutes(ChatProcessContext ctx,
+        MultiAgentMetadata multiAgentMetadata, String workerAgentType, Long fallbackAgentId, String fallbackAnswerMessageId,
+        String fallbackTraceId, String userCode) {
+        if (multiAgentMetadata == null || !multiAgentMetadata.hasLanes()) {
+            return Collections.emptyList();
+        }
+
+        List<MultiAgentLaneRoute> routes = new ArrayList<>();
+        for (MultiAgentMetadata.Lane lane : multiAgentMetadata.orderedLanes()) {
+            LaneAgentInfo laneAgentInfo = resolveLaneAgentInfo(lane, ctx.getParams(), fallbackAgentId);
+            String laneAnswerMessageId = StringUtils.defaultIfBlank(lane.getAnswerMessageId(), fallbackAnswerMessageId);
+            String laneTraceId = resolveLaneTraceId(lane, fallbackTraceId);
+            String laneTargetAgentType = targetAgentResolver.resolveAgentType(workerAgentType,
+                laneAgentInfo.agentId, ctx.getAssistantChatDto().getSourceAgentType(), userCode);
+            Map<String, Object> laneParams = buildLaneParams(ctx.getParams(), multiAgentMetadata, lane,
+                laneAgentInfo, laneTraceId);
+            JSONObject laneMetadata = multiAgentMetadata.buildLanePayload(lane, laneTraceId);
+            routes.add(new MultiAgentLaneRoute(lane, laneAgentInfo, laneParams, laneTargetAgentType,
+                laneAnswerMessageId, laneTraceId, laneMetadata));
+        }
+        return routes;
+    }
+
+    private void registerMultiAgentContext(ChatProcessContext ctx, List<MultiAgentLaneRoute> laneRoutes) {
+        if (ctx == null || laneRoutes == null || laneRoutes.isEmpty()) {
+            return;
+        }
+        for (MultiAgentLaneRoute laneRoute : laneRoutes) {
+            if (StringUtils.isNotBlank(laneRoute.traceId)) {
+                ctx.getMultiAgentTraceIds().add(laneRoute.traceId);
+                ctx.getMultiAgentLaneMetadataByTraceId().put(laneRoute.traceId, laneRoute.laneMetadata);
+                if (ctx.getMessageContext() != null) {
+                    ctx.getMultiAgentMessageContextsByTraceId().put(laneRoute.traceId,
+                        new MessageContext(ctx.getMessageContext().getType(), sequenceService.nextVal(),
+                            ctx.getMessageContext().getTaskId()));
+                }
+            }
+            if (StringUtils.isNotBlank(laneRoute.targetAgentType)) {
+                ctx.getTargetAgentTypes().add(laneRoute.targetAgentType);
+            }
+        }
+    }
+
+    private Map<String, Object> buildLaneParams(Map<String, Object> baseParams, MultiAgentMetadata multiAgentMetadata,
+        MultiAgentMetadata.Lane lane, LaneAgentInfo laneAgentInfo, String traceId) {
+        Map<String, Object> laneParams = new HashMap<>(baseParams == null ? Collections.emptyMap() : baseParams);
+        JSONObject lanePayload = multiAgentMetadata.buildLanePayload(lane, traceId);
+        laneParams.put("agent_id", laneAgentInfo.agentId);
+        laneParams.put("agent_code", laneAgentInfo.agentCode);
+        laneParams.put("agent_name", laneAgentInfo.agentName);
+        laneParams.put(MultiAgentMetadata.EXT_KEY_SNAKE, lanePayload);
+        return laneParams;
+    }
+
+    private Map<String, Object> buildMultiAgentGatewayParams(Map<String, Object> baseParams,
+        MultiAgentMetadata multiAgentMetadata, List<MultiAgentLaneRoute> laneRoutes) {
+        Map<String, Object> params = new HashMap<>(baseParams == null ? Collections.emptyMap() : baseParams);
+        JSONObject payload = new JSONObject();
+        if (multiAgentMetadata != null) {
+            if (StringUtils.isNotBlank(multiAgentMetadata.getTurnId())) {
+                payload.put("turnId", multiAgentMetadata.getTurnId());
+            }
+            if (StringUtils.isNotBlank(multiAgentMetadata.getMode())) {
+                payload.put("mode", multiAgentMetadata.getMode());
+            }
+        }
+        JSONArray lanes = new JSONArray();
+        for (MultiAgentLaneRoute laneRoute : laneRoutes) {
+            lanes.add(laneRoute.laneMetadata);
+        }
+        payload.put("lanes", lanes);
+        params.put(MultiAgentMetadata.EXT_KEY_SNAKE, payload);
+        return params;
+    }
+
+    private String resolveLaneTraceId(MultiAgentMetadata.Lane lane, String fallbackTraceId) {
+        Long queryMessageId = parseLong(lane == null ? null : lane.getQueryMessageId());
+        Long answerMessageId = parseLong(lane == null ? null : lane.getAnswerMessageId());
+        if (queryMessageId != null && answerMessageId != null) {
+            return TraceIdCodec.encode(queryMessageId, answerMessageId);
+        }
+        String laneKey = StringUtils.defaultIfBlank(lane == null ? null : lane.getClientRequestId(),
+            lane == null ? null : lane.getLaneId());
+        if (StringUtils.isBlank(laneKey) && lane != null && lane.getOrder() != null) {
+            laneKey = String.valueOf(lane.getOrder());
+        }
+        if (StringUtils.isNotBlank(laneKey)) {
+            return StringUtils.defaultString(fallbackTraceId, "multi-agent") + ":lane:" + laneKey;
+        }
+        return fallbackTraceId;
+    }
+
+    private LaneAgentInfo resolveLaneAgentInfo(MultiAgentMetadata.Lane lane, Map<String, Object> params,
+        Long fallbackAgentId) {
+        Long laneAgentId = lane.getAgentId() == null ? fallbackAgentId : lane.getAgentId();
+        String fallbackAgentCode = params == null ? null : MapParamUtil.getStringValue(params, "agent_code");
+        String fallbackAgentName = params == null ? null : MapParamUtil.getStringValue(params, "agent_name");
+        String laneAgentCode = StringUtils.defaultIfBlank(lane.getAgentCode(), fallbackAgentCode);
+        String laneAgentName = StringUtils.defaultIfBlank(lane.getAgentName(), fallbackAgentName);
+
+        AgentResourceChatInfoDto matchedAgent = findLaneAgent(lane, params, laneAgentId);
+        if (matchedAgent != null) {
+            laneAgentId = matchedAgent.getId() == null ? laneAgentId : matchedAgent.getId();
+            laneAgentCode = StringUtils.defaultIfBlank(laneAgentCode, matchedAgent.getCode());
+            laneAgentName = StringUtils.defaultIfBlank(laneAgentName, matchedAgent.getName());
+        }
+        return new LaneAgentInfo(laneAgentId, laneAgentCode, laneAgentName);
+    }
+
+    @SuppressWarnings("unchecked")
+    private AgentResourceChatInfoDto findLaneAgent(MultiAgentMetadata.Lane lane, Map<String, Object> params,
+        Long laneAgentId) {
+        if (params == null || !(params.get("agent_list") instanceof List)) {
+            return null;
+        }
+        List<AgentResourceChatInfoDto> agentList = (List<AgentResourceChatInfoDto>) params.get("agent_list");
+        if (CollectionUtils.isEmpty(agentList)) {
+            return null;
+        }
+        for (AgentResourceChatInfoDto agent : agentList) {
+            if (agent == null) {
+                continue;
+            }
+            if (laneAgentId != null && Objects.equals(agent.getId(), laneAgentId)) {
+                return agent;
+            }
+            if (StringUtils.isNotBlank(lane.getAgentCode()) && lane.getAgentCode().equals(agent.getCode())) {
+                return agent;
+            }
+        }
+        return null;
+    }
+
+    private Long parseLong(String value) {
+        try {
+            return StringUtils.isBlank(value) ? null : Long.valueOf(value);
+        }
+        catch (Exception e) {
+            return null;
+        }
     }
 
     private GatewayClient.SendResponse sendMessageWithWorkerRetry(String userCode,
@@ -489,6 +669,8 @@ public class RouteService {
 
         for (int round = 1; round <= SANDBOX_STARTUP_WAIT_ROUNDS; round++) {
             if (sandboxService.waitWorkerReadySync(targetAgentType, WORKER_READY_TIMEOUT_MS)) {
+                sendSandboxProgressMessage(ctx, SseResponseEventEnum.reasoningLogEnd,
+                    I18nUtil.get("sandbox.launch.progress.ready"));
                 return;
             }
             if (round < SANDBOX_STARTUP_WAIT_ROUNDS) {
@@ -544,6 +726,49 @@ public class RouteService {
 
     private boolean isUserSandboxAgentType(String targetAgentType, String userCode) {
         return targetAgentResolver.isUserSandboxAgentType(targetAgentType, userCode);
+    }
+
+    private static class LaneAgentInfo {
+
+        private final Long agentId;
+
+        private final String agentCode;
+
+        private final String agentName;
+
+        private LaneAgentInfo(Long agentId, String agentCode, String agentName) {
+            this.agentId = agentId;
+            this.agentCode = agentCode;
+            this.agentName = agentName;
+        }
+    }
+
+    private static class MultiAgentLaneRoute {
+
+        private final MultiAgentMetadata.Lane lane;
+
+        private final LaneAgentInfo agentInfo;
+
+        private final Map<String, Object> params;
+
+        private final String targetAgentType;
+
+        private final String answerMessageId;
+
+        private final String traceId;
+
+        private final JSONObject laneMetadata;
+
+        private MultiAgentLaneRoute(MultiAgentMetadata.Lane lane, LaneAgentInfo agentInfo, Map<String, Object> params,
+            String targetAgentType, String answerMessageId, String traceId, JSONObject laneMetadata) {
+            this.lane = lane;
+            this.agentInfo = agentInfo;
+            this.params = params;
+            this.targetAgentType = targetAgentType;
+            this.answerMessageId = answerMessageId;
+            this.traceId = traceId;
+            this.laneMetadata = laneMetadata;
+        }
     }
 
 }

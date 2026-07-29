@@ -1,11 +1,13 @@
 import dashboardLocale from '@/pages/manager/pages/dashboard/locales/zh-CN';
 import digitalEmployeeMgrLocale from '@/pages/manager/pages/digitalEmployeeMgr/locales/zh-CN';
 import sandboxMgrLocale from '@/pages/manager/pages/SandboxMgr/locales/zh-CN';
+import systemFeedbackMgrLocale from '@/pages/manager/pages/SystemFeedbackMgr/locales/zh-CN';
 
 export default {
   ...dashboardLocale,
   ...digitalEmployeeMgrLocale,
   ...sandboxMgrLocale,
+  ...systemFeedbackMgrLocale,
 
   // Menu
   'menu.business': '资产',
@@ -24,6 +26,7 @@ export default {
   'menu.systemParams.modal': '模型配置管理',
   'menu.systemParams.sandbox': '沙箱配置管理',
   'menu.business.notification': '通知管理',
+  'menu.systemFeedback': '系统反馈管理',
   'common.add': '新增',
   'common.edit': '编辑',
   'common.view': '查看',
@@ -72,7 +75,7 @@ export default {
   'common.reset': '重置',
   'common.clear': '清空',
   'common.all': '全部',
-  'common.saveToWorkSpace': '保存到会话空间',
+  'common.saveToWorkSpace': '保存到会话文件夹',
   'form.name': '名称',
   'form.desc': '描述',
   'form.required': '必填项',
@@ -350,6 +353,7 @@ export default {
   'modelMgr.confirmEnable': '确认启用该模型？',
   'modelMgr.confirmDelete': '确认删除该模型？',
   'modelMgr.confirmSetDefault': '确定将该模型设置为该类型默认模型吗？设置后同类型其他默认模型将变为非默认。',
+  'modelMgr.default': '默认',
   'modelMgr.setDefault': '设为默认',
   'modelMgr.defaultModel': '默认',
   'modelMgr.operationSuccess': '操作成功',

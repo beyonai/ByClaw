@@ -9,7 +9,9 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
+import com.alibaba.fastjson2.JSON;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -65,6 +67,7 @@ import com.iwhalecloud.byai.state.domain.resource.qo.DownloadSkillZipQo;
 import com.iwhalecloud.byai.state.domain.resource.qo.GenerateResourceImageQo;
 import com.iwhalecloud.byai.state.domain.resource.qo.PersonalAgentArchiveQo;
 import com.iwhalecloud.byai.state.domain.resource.qo.ResourceDetailQo;
+import com.iwhalecloud.byai.state.domain.resource.qo.ThirdPartySkillInstallQo;
 import com.iwhalecloud.byai.state.domain.resource.qo.UpdateResourceBasicInfoQo;
 import com.iwhalecloud.byai.state.domain.resource.qo.WorkspaceSkillQo;
 import com.iwhalecloud.byai.state.domain.resource.service.ResourceApplicationService;
@@ -482,6 +485,67 @@ public class ToolManController {
             return ResponseUtil
                 .fail(e.getMessage() != null ? e.getMessage() : I18nUtil.get("byclaw.skill.upload.failed"));
         }
+    }
+
+    /** 第三方技能超市：按下载地址安装技能到指定数字员工。 */
+    @PostMapping("/installThirdPartySkill")
+    public ResponseUtil<ObjectZipImportResult> installThirdPartySkill(@RequestBody ThirdPartySkillInstallQo request) {
+        long startNanos = System.nanoTime();
+        String userCode = CurrentUserHolder.getCurrentUserCode();
+        Long digId = request == null ? null : request.getDigId();
+        String downloadUrl = request == null ? null : request.getDownloadUrl();
+        String requestBody = serializeThirdPartySkillInstallRequest(request);
+        String downloadUrlHash = StringUtils.isBlank(downloadUrl) ? "" : DigestUtils.sha256Hex(downloadUrl.trim());
+        logger.info(
+            "第三方技能安装接口调用开始，userCode={}, requestBody={}, downloadUrlHash={}",
+            userCode, requestBody, downloadUrlHash);
+        try {
+            if (request == null) {
+                throw new IllegalArgumentException(I18nUtil.get("param.cannot.be.null"));
+            }
+            ByClawSkillResourceApplicationService.SkillImportResult itemResult =
+                byClawSkillResourceApplicationService.installThirdPartySkill(digId, downloadUrl);
+            ObjectZipImportResult result =
+                byClawSkillResourceApplicationService.buildSingleSkillImportResult(itemResult);
+            SsResource resource = itemResult.resource();
+            SsResExtSkill extSkill = itemResult.extSkill();
+            logger.info(
+                "第三方技能安装接口调用成功，userCode={}, digId={}, operation={}, resourceId={}, resourceCode={}, "
+                    + "resourceName={}, version={}, skillUrl={}, packageSize={}, requestBody={}, downloadUrlHash={}, "
+                    + "durationMs={}",
+                userCode, digId, itemResult.updated() ? "UPDATE" : "CREATE",
+                resource == null ? null : resource.getResourceId(),
+                resource == null ? null : resource.getResourceCode(),
+                resource == null ? null : resource.getResourceName(),
+                extSkill == null ? null : extSkill.getVersion(),
+                extSkill == null ? null : extSkill.getSkillUrl(),
+                extSkill == null ? null : extSkill.getSkillPackageSize(),
+                requestBody, downloadUrlHash, elapsedMillis(startNanos));
+            return ResponseUtil.successResponse(I18nUtil.get("byclaw.third.party.skill.install.success"),
+                result);
+        }
+        catch (IllegalArgumentException | BdpRuntimeException e) {
+            logger.warn(
+                "第三方技能安装接口调用失败，userCode={}, digId={}, requestBody={}, downloadUrlHash={}, reason={}, "
+                    + "durationMs={}",
+                userCode, digId, requestBody, downloadUrlHash, e.getMessage(), elapsedMillis(startNanos));
+            return ResponseUtil.fail(e.getMessage());
+        }
+        catch (Exception e) {
+            logger.error(
+                "第三方技能安装接口调用异常，userCode={}, digId={}, requestBody={}, downloadUrlHash={}, durationMs={}",
+                userCode, digId, requestBody, downloadUrlHash, elapsedMillis(startNanos), e);
+            return ResponseUtil.fail(e.getMessage() != null ? e.getMessage()
+                : I18nUtil.get("byclaw.third.party.skill.install.failed"));
+        }
+    }
+
+    static String serializeThirdPartySkillInstallRequest(ThirdPartySkillInstallQo request) {
+        return request == null ? "null" : JSON.toJSONString(request);
+    }
+
+    private static long elapsedMillis(long startNanos) {
+        return (System.nanoTime() - startNanos) / 1_000_000L;
     }
 
     /**
@@ -1097,6 +1161,7 @@ public class ToolManController {
         if (extSkill == null || StringUtils.isBlank(extSkill.getVersion())) {
             return ResponseUtil.fail(I18nUtil.get("byclaw.skill.version.notfound"));
         }
+        logSkillVersionDownload(resolvedSkillId, extSkill);
         boolean innerSkill = StringUtils.equalsIgnoreCase(extSkill.getSkillType(),
             SsResExtSkillService.INNER_SKILL_TYPE);
         Map<String, Object> data = new LinkedHashMap<>();
@@ -1108,6 +1173,38 @@ public class ToolManController {
         data.put("needDownload", !innerSkill);
         data.put("skillUrl", innerSkill ? "" : buildSkillDownloadUrl(resolvedSkillId));
         return ResponseUtil.successResponse(I18nUtil.get("byclaw.skill.version.query.success"), data);
+    }
+
+    private void logSkillVersionDownload(Long skillId, SsResExtSkill extSkill) {
+        Long digitalEmployeeId = null;
+        String digitalEmployeeName = "";
+        try {
+            digitalEmployeeId = suasSuperassistApplicationService.resolveCurrentUserDefaultDigitalEmployeeId();
+            if (digitalEmployeeId != null) {
+                SsResource digitalEmployee = ssResourceService.findById(digitalEmployeeId);
+                digitalEmployeeName = digitalEmployee == null ? "" : digitalEmployee.getResourceName();
+            }
+        }
+        catch (Exception e) {
+            // 审计日志补充数字员工信息失败时，不应影响技能版本查询。
+            logger.warn("获取技能版本下载审计信息失败, digitalEmployeeId={}, skillId={}", digitalEmployeeId, skillId, e);
+        }
+        logger.info("数字员工正在下载技能, digitalEmployeeName={}, digitalEmployeeId={}, skillId={}, version={}, skillPath={}",
+            digitalEmployeeName, digitalEmployeeId, skillId, extSkill.getVersion(),
+            extractSkillPathFromTargetContent(extSkill.getTargetContent()));
+    }
+
+    private String extractSkillPathFromTargetContent(String targetContent) {
+        if (StringUtils.isBlank(targetContent)) {
+            return "";
+        }
+        try {
+            return StringUtils.defaultString(JSON.parseObject(targetContent).getString("skillPath"));
+        }
+        catch (Exception e) {
+            logger.warn("解析技能扩展信息中的 skillPath 失败");
+            return "";
+        }
     }
 
     private String buildSkillDownloadUrl(Long skillId) {

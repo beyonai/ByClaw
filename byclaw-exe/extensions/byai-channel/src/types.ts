@@ -32,6 +32,20 @@ export interface ByaiProbe {
 // keep the same with byclaw-be [I18nUtil]
 export type Language = "zh_CN" | "en_US";
 
+export interface ByaiLaneMetadata {
+  turnId?: string;
+  laneId?: string;
+  mode?: string;
+  traceId?: string;
+  agentId?: string;
+  agentCode?: string;
+  agentName?: string;
+  clientRequestId?: string;
+  answerMessageId?: string;
+  queryMessageId?: string;
+  taskText?: string;
+}
+
 /** SDK 模式入站消息（来自 Redis） */
 export interface ByaiSdkInboundMessage {
   messageId: string;
@@ -51,6 +65,7 @@ export interface ByaiSdkInboundMessage {
   /** Optional `metadata.channelExtension` from gateway (object or string). */
   channelExtension?: Record<string, unknown> | string;
   beyondToken?: string;
+  laneMetadata?: ByaiLaneMetadata;
 }
 
 export type SdkInboundFile = {

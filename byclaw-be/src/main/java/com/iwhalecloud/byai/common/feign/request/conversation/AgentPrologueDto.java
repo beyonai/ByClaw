@@ -10,6 +10,9 @@ import lombok.Data;
  */
 @Data
 public class AgentPrologueDto {
+
+    private Long modelId;
+
     /**
      * 模型配置
      */

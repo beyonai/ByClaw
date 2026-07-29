@@ -218,4 +218,73 @@ describe("RunIngressService group chat snapshot", () => {
     ).toEqual(["message-1"]);
     expect(ingressContext.groupChatFingerprint).toMatch(/^[a-f0-9]{64}$/);
   });
+
+  it("continues creating the first Run when the group chat API fails", async () => {
+    const runService = fakeRunService();
+    const verify: BeyondTokenVerifier = async () => ({ userCode: "creator" });
+    const load = vi.fn(async (): Promise<GroupChatContextV1> => {
+      throw new Error("BE unavailable");
+    });
+    const warn = vi.fn();
+    const ingress = new RunIngressService(
+      runService.impl,
+      verify,
+      catalog([agent("agent-a")]),
+      7_200_000,
+      { load },
+      { warn },
+    );
+
+    const run = await ingress.createSessionRun({
+      beyondToken: PRINCIPAL_TOKEN,
+      message: "请规划",
+      groupChatRef: {
+        schemaVersion: "byclaw.group-chat-ref/v1",
+        conversationKey: "conversation-1",
+        beforeMessageId: "message-3",
+      },
+    });
+
+    expect(run).toBeDefined();
+    expect(runService.createSessionRun).toHaveBeenCalledOnce();
+    expect(runService.createSessionRun.mock.calls[0][0].ingressContext).toBeUndefined();
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversationKey: "conversation-1",
+        beforeMessageId: "message-3",
+        errorMessage: "BE unavailable",
+      }),
+      "群聊上下文不可用，本次按普通对话继续",
+    );
+  });
+
+  it("continues appending a Run when the group chat API fails", async () => {
+    const runService = fakeRunService();
+    const verify: BeyondTokenVerifier = async () => ({ userCode: "creator" });
+    const load = vi.fn(async (): Promise<GroupChatContextV1> => {
+      throw new Error("BE timeout");
+    });
+    const ingress = new RunIngressService(
+      runService.impl,
+      verify,
+      catalog([agent("agent-a")]),
+      7_200_000,
+      { load },
+    );
+
+    const run = await ingress.createRun({
+      beyondToken: PRINCIPAL_TOKEN,
+      sessionId: "session-1",
+      message: "继续规划",
+      groupChatRef: {
+        schemaVersion: "byclaw.group-chat-ref/v1",
+        conversationKey: "conversation-1",
+        beforeMessageId: "message-4",
+      },
+    });
+
+    expect(run).toBeDefined();
+    expect(runService.createRun).toHaveBeenCalledOnce();
+    expect(runService.createRun.mock.calls[0][0].ingressContext).toBeUndefined();
+  });
 });

@@ -276,7 +276,6 @@ CREATE INDEX IF NOT EXISTS idx_sandbox_health_watermark_scope
 alter table byai.ss_res_ext_dig_employee alter column tag_name type varchar(255);
 alter table byai.ss_res_ext_dig_employee alter column machine_channel type text;
 
-
 -- 模型表新增 owner_type 字段: 区分个人模型 (PERSONAL) 和公共模型 (PUBLIC)
 ALTER TABLE byai.byai_aimodel ADD COLUMN owner_type VARCHAR(20) DEFAULT 'PUBLIC';
 COMMENT ON COLUMN byai.byai_aimodel.owner_type IS '模型归属: PUBLIC(公共) / PERSONAL(个人)';
@@ -311,3 +310,38 @@ COMMENT ON COLUMN byai.po_user_token_quota.delete_flag IS '逻辑删除标识，
 
 CREATE UNIQUE INDEX IF NOT EXISTS uk_po_user_token_quota_user
     ON byai.po_user_token_quota (user_id) WHERE delete_flag = '0';
+
+-- ========== 本体（Ontology）资源化改造 ==========
+-- 本体库/场景/对象/视图统一登记为 ss_resource；本体库、场景、对象、视图分别写各自扩展表。
+-- 本体库编码存 ss_res_ext_ontology.pid；场景/对象/视图的所属本体库编码存各自扩展表 target_content.ontologyBaseCode。
+-- 1. 添加 source_content 列
+ALTER TABLE byai.ss_res_ext_ontology ADD source_content text;
+-- 2. 添加 target_content 列
+ALTER TABLE byai.ss_res_ext_ontology ADD target_content text;
+-- 3. 为 source_content 添加注释
+COMMENT ON COLUMN byai.ss_res_ext_ontology.source_content IS '来源内容：预留给后续本体导入（OWL/批量导入）的原始内容';
+-- 4. 为 target_content 添加注释
+COMMENT ON COLUMN byai.ss_res_ext_ontology.target_content IS '目标内容：本体实体元数据明细 JSON 镜像，冗余 ownerType/baseId/sceneId/code 供 Worker 运行期消费';
+-- 5. 修改已有列 pid 的注释
+COMMENT ON COLUMN byai.ss_res_ext_ontology.pid IS '本体库编码：ONTOLOGY_BASE 资源专用；场景/对象/视图使用各自扩展表';
+-- 6. 创建索引
+CREATE INDEX IF NOT EXISTS idx_ss_res_ext_ontology_pid
+    ON byai.ss_res_ext_ontology (pid);
+
+
+
+-- ========== 本体的场景扩展表 ==========
+CREATE TABLE byai.ss_res_ext_scene (
+    resource_id int8 NULL,
+    scene_code varchar2(32),
+    source_content text NULL,
+    target_content text NULL,
+    CONSTRAINT pk_ss_res_ext_scene PRIMARY KEY (resource_id)
+);
+COMMENT ON COLUMN byai.ss_res_ext_scene.scene_code IS '场景编码';
+COMMENT ON COLUMN byai.ss_res_ext_scene.source_content IS '来源内容：预留给后续本体场景导入（OWL/批量导入）的原始内容';
+COMMENT ON COLUMN byai.ss_res_ext_scene.target_content IS '目标内容';
+
+
+ALTER TABLE byai.byai_session ALTER COLUMN session_content TYPE TEXT;
+COMMENT ON COLUMN byai.byai_session.session_content IS '会话内容';

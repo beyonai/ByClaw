@@ -1,6 +1,7 @@
 import { EmitOptions, EventType, SseReasonMessageType } from "@byclaw/by-framework";
 import {
   ActiveSdkRequest,
+  addActiveSdkDelegatedWork,
   bindActiveSdkRequestRunId,
   emitSdkChunkTracked,
   getLastSdkEmitChunk,
@@ -15,6 +16,7 @@ import {
   markActiveSdkRequestSubagentSpawned,
   registerAgentRunEndPromise,
 } from "./session-context";
+import { appendByclawAssistantContextDelta } from "./chat-context-store.js";
 import { registerPendingMessageToolSend } from "./pending-message-tool.js";
 import {
   cancelActiveSdkCompletionCheck,
@@ -30,13 +32,22 @@ import {
 import { AgentEvent } from "./types";
 import type { OpenClawPluginApi } from "@openclaw/plugin-sdk/core";
 import { isSubagentSessionKey } from "openclaw/plugin-sdk/routing";
-import { emitIncrementalText, generateRandomId, getAgentNameById, normalizeReasoningPreviewText } from "./utils";
+import {
+  appendIncrementalTextSnapshot,
+  clearIncrementalTextSnapshot,
+  emitIncrementalText,
+  generateRandomId,
+  getAgentNameById,
+  normalizeReasoningPreviewText,
+  rememberIncrementalTextSnapshot,
+} from "./utils";
 import {
   buildCompactionNoticeText,
   buildThinkingEndText,
   buildToolResultTitle as buildLocalizedToolResultTitle,
   buildToolStartTitle as buildLocalizedToolStartTitle,
 } from "./i18n.js";
+import { DELEGATED_TASK_STATUS } from "../../shared/src/delegated-tool-details.js"; 
 
 type AgentStreamState = {
   seq: number;
@@ -137,6 +148,7 @@ function stringValue(value: unknown): string {
 async function handleToolEvent(
   request: ActiveSdkRequest,
   event: AgentEvent,
+  resolvedSessionKey: string | undefined,
 ) {
   const sdkEmitter = resolveSdkEmitter(request.accountId);
   if (!sdkEmitter) {
@@ -203,6 +215,18 @@ async function handleToolEvent(
       eventType: EventType.REASONING_LOG_DELTA,
       contentType: SseReasonMessageType.json_block,
     });
+    // 委派工作登记：baiying_call 返回 DELEGATED_TASK_STATUS 表示已把任务派给外部
+    // RemoteAgent（redis 驱动，非原生 subagent），随后本 agent 会 sessions_yield。登记该
+    // tool_call_id 到 request 挂住完成门，等委派结果经 dispatchRemoteTaskFollowup 回灌后消除。
+    // 仅在「委派 tool call 所在会话不是 subagent key」时登记——避免把 subagent 内部再派生的
+    // 委派也算进外层完成门（那层由 subagent 自己的 request / 原生 subagent 机制处理）。
+    if (
+      data.result?.details?.status === DELEGATED_TASK_STATUS &&
+      toolCallId &&
+      !isSubagentSessionKey(resolvedSessionKey)
+    ) {
+      addActiveSdkDelegatedWork(resolvedSessionKey ?? request.sessionKey, toolCallId);
+    }
     if (data.name === "baiying_call") {
       setToBeEmittedChunkViaBaiyingCallTool(data.result);
     } else if (data.name === "sessions_spawn" && data.result?.details && !data.isError) {
@@ -254,14 +278,41 @@ async function handleAssistantEvent(
       ? previousEmit.messageId
       : generateRandomId(),
   };
+  const answerStreamKey = `${event.runId}:assistant:answer`;
+  const explicitDelta = stringValue(event.data?.delta);
+  const cumulativeText = stringValue(event.data?.text);
+  const isReplacement = event.data?.replace === true;
+  const emitAnswerDelta = async (answerDelta: string) => {
+    appendByclawAssistantContextDelta({
+      request,
+      id: request.laneMetadata?.answerMessageId ?? `${event.runId}:assistant`,
+      text: answerDelta,
+      agentId: request.laneMetadata?.agentId ?? event.agentId,
+      agentName: request.laneMetadata?.agentName,
+    });
+    await emitSdkChunk(request, answerDelta, answerOptions);
+  };
+  if (explicitDelta && !isReplacement) {
+    if (cumulativeText) {
+      rememberIncrementalTextSnapshot({
+        key: answerStreamKey,
+        rawText: cumulativeText,
+      });
+    } else {
+      appendIncrementalTextSnapshot({
+        key: answerStreamKey,
+        delta: explicitDelta,
+      });
+    }
+    await emitAnswerDelta(explicitDelta);
+    return;
+  }
   // assistant 流是权威可见源，按 runId 做简单前缀增量即可（sendText 的去重改由
   // message tool 事件驱动，不再和 assistant 流抢同一缓冲）。
   await emitIncrementalText({
-    key: `${event.runId}:assistant:answer`,
-    rawText: stringValue(event.data?.text) || text,
-    emit: async (answerDelta) => {
-      await emitSdkChunk(request, answerDelta, answerOptions);
-    },
+    key: answerStreamKey,
+    rawText: text,
+    emit: async (answerDelta) => emitAnswerDelta(answerDelta),
   });
 }
 
@@ -332,7 +383,7 @@ async function handleLifecycleEvent(
     return;
   }
   if (phase === "start") {
-    const activeRequest = markActiveSdkRootLifecycleStarted(sessionKey) ?? request;
+    const activeRequest = markActiveSdkRootLifecycleStarted(sessionKey, event.runId) ?? request;
     cancelActiveSdkCompletionCheck(activeRequest.sessionKey);
     registerAgentRunEndPromise(event.runId);
     return;
@@ -340,13 +391,20 @@ async function handleLifecycleEvent(
   if (phase !== "end" && phase !== "error") {
     return;
   }
-  const activeRequest = markActiveSdkRootLifecycleFinished(sessionKey, phase) ?? request;
+  const activeRequest = markActiveSdkRootLifecycleFinished(sessionKey, phase, event.runId);
+  if (!activeRequest) {
+    api.logger.debug?.(
+      `[byai-channel] ignored stale root lifecycle terminal: sessionKey=${sessionKey}, runId=${event.runId}, phase=${phase}`,
+    );
+    return;
+  }
   if (phase === "error") {
     const errorText = typeof data?.error === "string" ? data.error : "Agent run failed";
     await emitSdkChunk(request, errorText, {
       eventType: EventType.ANSWER_DELTA,
     });
   }
+  clearIncrementalTextSnapshot(`${event.runId}:`);
   const completionReason =
     phase === "error" && isOpenClawContextOverflowDispatchError(data?.error)
       ? "root_lifecycle_context_overflow_error"
@@ -495,7 +553,7 @@ export default async function handleAgentEvent(api: OpenClawPluginApi, event: Ag
   }
   lastAgentAssistantEvent.stream = currentStream;
   if (event.stream === 'tool') {
-    await handleToolEvent(request, event);
+    await handleToolEvent(request, event, resolvedSessionKey);
   } else if (event.stream === 'assistant') {
     if (currentStream === "assistant" && previousStream !== "assistant" && toBeEmittedChunkAfterBaiyingCallTool) {
       // 无论是主agent还是subagent，开始输出正文前，先把baiying_call工具缓存起来的chunk emit出来

@@ -153,6 +153,8 @@ public class ChatService {
             stopChatDto.setAgentCode(message.getAgentCode());
             stopChatDto.setSessionId(message.getSessionId());
             stopChatDto.setMessageId(message.getMessageId());
+            stopChatDto.setTraceId(message.getTraceId());
+            stopChatDto.setLaneId(message.getLaneId());
             stopChatDto.setClientRequestId(message.getClientRequestId());
             fillStopChatFromRunningInfo(stopChatDto);
             assistantChatApplicationService.stopChat(stopChatDto);
@@ -192,6 +194,12 @@ public class ChatService {
         }
         if (stopChatDto.getClientRequestId() == null) {
             stopChatDto.setClientRequestId(runningInfo.getClientRequestId());
+        }
+        if (stopChatDto.getTraceId() == null) {
+            stopChatDto.setTraceId(runningInfo.getTraceId());
+        }
+        if (stopChatDto.getLaneId() == null) {
+            stopChatDto.setLaneId(runningInfo.getLaneId());
         }
     }
 }

@@ -39,7 +39,8 @@ public final class EnvConfigKey {
     public static final String RERANKER_BASE_URL = "sys.reranker_base_url";
 
     /**
-     * langfuse相关配置
+     * langfuse相关配置 —— 与 application.properties 中 langfuse.* 保持一致，
+     * 由环境变量 LANGFUSE_* 注入，避免同一批凭据存在多套 key。
      */
     public static final String LANGFUSE_SECRET_KEY = "langfuse.secret-key";
 

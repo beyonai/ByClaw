@@ -328,9 +328,10 @@ public class ToolManService {
             ownerType = root.getString("ownerType");
         }
 
-        // 5. 以 resourceCode 作为幂等键：存在则更新，不存在则新增。
-        SsResource existing = resolveUniqueResourceByCode(resourceCode, "对象");
-        ResourceImportOwnerTypeValidator.validate(existing, ownerType, resourceCode, resourceName, resourceBizType);
+        // 5. 以 systemCode + resourceBizType + resourceCode 作为幂等键：存在则更新，不存在则新增。
+        SsResource existing = ssResourceService.findByImportIdentity(systemCode, resourceBizType, resourceCode);
+        ResourceImportOwnerTypeValidator.validate(existing, ownerType, resourceCode, resourceName, resourceBizType,
+            systemCode);
         validateImportUpdatePermission(existing, resourceCode);
         boolean updated = existing != null;
         String oldTargetContent = updated ? findTargetContentByBizType(resourceBizType, existing.getResourceId())
@@ -449,8 +450,9 @@ public class ToolManService {
 
         if (StringUtils.startsWithIgnoreCase(resourceBizType, "KG_")) {
             String resourceCode = StringUtils.trimToEmpty(root.getString("resourceCode"));
-            SsResource existing = StringUtils.isBlank(resourceCode) ? null
-                : ssResourceService.findByIdOrCode(null, resourceCode);
+            String systemCode = StringUtils.trimToEmpty(root.getString("systemCode"));
+            SsResource existing = StringUtils.isAnyBlank(systemCode, resourceBizType, resourceCode) ? null
+                : ssResourceService.findByImportIdentity(systemCode, resourceBizType, resourceCode);
             Long resourceId = datasetApplicationService.importDatasetJson(ownerType, catalogId, multipartFile);
             Map<String, Object> data = new HashMap<>(4);
             data.put("resourceId", String.valueOf(resourceId));

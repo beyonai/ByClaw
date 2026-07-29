@@ -37,6 +37,7 @@ type NativeAgentJson = {
 
 const CODE_TO_WIKI_EMPLOYEE_NAME = "百应平台赋能助手";
 const CODE_TO_WIKI_TOOL_NAME = "code_to_wiki";
+const BYCLAW_CHAT_CONTEXT_TOOL_NAME = "byclaw_chat_context";
 
 function isSkillRelResource(raw: Record<string, unknown>): boolean {
     const t = String(raw.resourceBizType ?? raw.resourceType ?? "").trim().toUpperCase();
@@ -340,10 +341,10 @@ function normalizeAgentListTools(
             : [];
     return allow.length > 0
         ? {
-              allow: Array.from(new Set([...allow, "baiying_call", ...extraTools])),
+              allow: Array.from(new Set([...allow, "baiying_call", BYCLAW_CHAT_CONTEXT_TOOL_NAME, ...extraTools])),
           }
         : {
-              alsoAllow: Array.from(new Set(["baiying_call", ...extraTools])),
+              alsoAllow: Array.from(new Set(["baiying_call", BYCLAW_CHAT_CONTEXT_TOOL_NAME, ...extraTools])),
           };
 }
 

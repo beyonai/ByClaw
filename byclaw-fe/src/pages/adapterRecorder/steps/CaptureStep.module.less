@@ -1,0 +1,74 @@
+.recordingStep {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.recordingCard {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+
+  :global(.ant-card-body),
+  :global(.beyond-card-body) {
+    display: flex;
+    min-height: 0;
+    flex: 1;
+    flex-direction: column;
+  }
+
+  :global(.ant-card-head-title) {
+    min-width: 0;
+  }
+}
+
+.recordingHeader {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 12px;
+}
+
+.recordingHeaderMeta {
+  flex: none;
+}
+
+.recordingSeed {
+  min-width: 180px;
+  flex: 1;
+}
+
+.recordingContent,
+.recordingPreview {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.recordingFooter {
+  position: sticky;
+  z-index: 1;
+  bottom: 0;
+  flex: none;
+  margin-top: 12px;
+  padding-top: 12px;
+  background: inherit;
+}
+
+.footer {
+  margin-top: 12px;
+}
+
+@media (max-width: 767px) {
+  .recordingHeader {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .recordingSeed {
+    width: 100%;
+  }
+}

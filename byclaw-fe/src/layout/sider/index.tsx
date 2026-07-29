@@ -18,9 +18,9 @@ import useVisibleMenuKeys from './useVisibleMenuKeys';
 import styles from './index.module.less';
 import Icon from '@/components/AntdIcon/icon';
 import Feedback from '../header/components/Feedback';
+import SandboxStatusIndicator from './components/SandboxStatus';
 import useUserDropdown from '../header/useUserDropdown';
 import SiderSearch from './siderSearch';
-import useNewChat from '../header/components/NewChat/useNewChat';
 import { getDisplayUserNameInChat } from '@/utils/chat';
 import useGlobal from '@/hooks/useGlobal';
 import { clearEasyConfirmInputDraft } from '@/components/ChatLayoutComp/components/EasyConfirm';
@@ -32,7 +32,7 @@ import { SiderContentContext, DEFAULT_SIDER_CONTENT_WIDTH } from './siderContent
 
 export const DEF_SIDER = 'sessions';
 
-const CENTER_TAB_KEYS = new Set(['agent', 'model', 'knowledge', 'tool', 'view', 'object', 'skill', 'file']);
+const CENTER_TAB_KEYS = new Set(['agent', 'model', 'knowledge', 'tool', 'view', 'object', 'ontology', 'skill', 'file']);
 
 const SIDER_ACTIVE_TAB_BY_PATH: Partial<Record<string, (typeof tabItems)[number]['key']>> = {
   '/dialogueRecord': 'sessions',
@@ -100,8 +100,6 @@ const Sidebar = () => {
 
     return DEFAULT_SIDER_CONTENT_WIDTH;
   });
-
-  const handleNewChat = useNewChat();
 
   const handleMenuTabClick = React.useCallback(
     (tab: (typeof tabItems)[number]) => {
@@ -222,6 +220,25 @@ const Sidebar = () => {
   }, [EventEmitter, setSiderCollapsed]);
 
   React.useEffect(() => {
+    const handleOntologyBindSaved = (event: Event) => {
+      const detail = (event as CustomEvent)?.detail || {};
+      if (!detail.openSider) return;
+      const refreshDetail = { ...detail, receivedAt: Date.now() };
+      (window as any).__latestOntologyBindSaved = refreshDetail;
+      setActiveKey('ontology');
+      setManualSiderOpenKey('ontology');
+      setSiderCollapsed(false);
+      setSiderContentWidth(DEFAULT_SIDER_CONTENT_WIDTH);
+      window.setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('ontologySiderRefresh', { detail: refreshDetail }));
+      }, 0);
+    };
+
+    window.addEventListener('ontologyBindSaved', handleOntologyBindSaved);
+    return () => window.removeEventListener('ontologyBindSaved', handleOntologyBindSaved);
+  }, [setSiderCollapsed]);
+
+  React.useEffect(() => {
     setSiderContentWidth(shouldHideSiderContent ? 0 : DEFAULT_SIDER_CONTENT_WIDTH);
     clearDetailPanel?.();
   }, [activeKey, shouldHideSiderContent]);
@@ -298,7 +315,8 @@ const Sidebar = () => {
             onClick={() => {
               clearDetailPanel?.();
               clearEasyConfirmInputDraft();
-              handleNewChat();
+              // 项目会话组件持有当前下拉选中的项目，由它带 projectId 创建会话。
+              EventEmitter.emit('projectSpace-create-session');
             }}
           >
             <Icon type="icon-xinjianduihua-fill" style={{ color: token.colorPrimary }} />
@@ -332,6 +350,11 @@ const Sidebar = () => {
           userId={userInfo.userId}
           className={classnames(styles.smallIconWrap)}
           style={{ background: 'transparent', marginTop: 'auto' }}
+        />
+        <SandboxStatusIndicator
+          userCode={userInfo.userCode}
+          className={classnames(styles.smallIconWrap)}
+          style={{ background: 'transparent' }}
         />
         <SelectLang placement="right" style={{ fontSize: 16 }} className={styles.smallIconWrap} />
         <Dropdown

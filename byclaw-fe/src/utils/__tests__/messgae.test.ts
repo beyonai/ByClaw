@@ -33,6 +33,7 @@ import {
   fetchMessageHandler,
   getMessageText,
   getMsgId,
+  hasVisibleMessageContent,
   initAnswerMessage,
   initQueryMessage,
   isTextContentType,
@@ -198,6 +199,32 @@ describe('utils/messgae', () => {
         ],
       } as any)
     ).toBe('world');
+  });
+
+  it('hasVisibleMessageContent ignores answer records that only contain a think title', () => {
+    expect(
+      hasVisibleMessageContent({
+        fromBeyond: true,
+        messageList: [
+          {
+            contentType: SSEMessageType.thinkTitle,
+            content: { substance: 'ByClaw coder 智能体已就绪' },
+          },
+        ],
+      } as any)
+    ).toBe(false);
+
+    expect(
+      hasVisibleMessageContent({
+        fromBeyond: true,
+        messageList: [
+          {
+            contentType: SSEMessageType.text,
+            content: { substance: '可见回答' },
+          },
+        ],
+      } as any)
+    ).toBe(true);
   });
 
   it('checkQueryMessageCanMemory and checkAnswerMessageCanMemory enforce single agent rules', () => {

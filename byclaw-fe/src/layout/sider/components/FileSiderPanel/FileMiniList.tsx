@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Collapse, Input, Modal, Upload, message } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
-import { useIntl } from '@umijs/max';
+import { useIntl, useSelector } from '@umijs/max';
 import type { UploadConfirmFile } from '@/components/UploadConfirmModal';
 import { DragType } from '@/components/QueryInput/withDrag';
 import employeeStyles from '@/layout/sider/components/EmployeeList/index.module.less';
 import useGlobal from '@/hooks/useGlobal';
+import { isAdminVip } from '@/utils/auth';
 import { copyTextToClipboard } from '@/utils/copy';
 import {
   createFolder as createFileBrowserFolder,
@@ -29,10 +30,9 @@ import useFilePreviewActions from './hooks/useFilePreviewActions';
 import useSaveToKnowledge from './hooks/useSaveToKnowledge';
 import {
   BYKC_FILE_PATH,
-  LOG_FILE_PATH,
+  getVisibleFileCategories,
   ROOT_FILE_PATH,
   SESSION_FILE_PATH,
-  SHARED_FILE_PATH,
   type FileActionKey,
   type FileCategoryItem,
   type FileCategoryKey,
@@ -86,6 +86,7 @@ interface FileCategoryCache {
 const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
   const intl = useIntl();
   const { EventEmitter, sessionId } = useGlobal();
+  const userInfo = useSelector(({ user }: any) => user?.userInfo);
   const clickTimerRef = useRef<number | null>(null);
   const categoryCacheRef = useRef<Partial<Record<FileCategoryKey, FileCategoryCache>>>({});
   const activeCategoryKeyRef = useRef<FileCategoryKey | undefined>('root');
@@ -135,32 +136,8 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
   }, [messageSessionId, sessionId]);
 
   const fileCategories = useMemo<FileCategoryItem[]>(() => {
-    return [
-      {
-        key: 'root',
-        titleId: 'fileBrowser.category.root',
-        path: ROOT_FILE_PATH,
-      },
-      {
-        key: 'session',
-        titleId: 'fileBrowser.category.session',
-        path: SESSION_FILE_PATH,
-        ensure: true,
-      },
-      {
-        key: 'shared',
-        titleId: 'fileBrowser.category.shared',
-        path: SHARED_FILE_PATH,
-        ensure: true,
-      },
-      {
-        key: 'log',
-        titleId: 'fileBrowser.category.log',
-        path: LOG_FILE_PATH,
-        ensure: true,
-      },
-    ];
-  }, []);
+    return getVisibleFileCategories(isAdminVip(userInfo));
+  }, [userInfo]);
 
   const activeCategory = useMemo(() => {
     return fileCategories.find((item) => item.key === activeCategoryKey);
@@ -377,7 +354,11 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
   }, [isSearching]);
 
   useEffect(() => {
-    const defaultCategoryKey = getDefaultFileCategoryKey(activeSessionId);
+    const preferredCategoryKey = getDefaultFileCategoryKey(activeSessionId);
+    const defaultCategoryKey = fileCategories.some((item) => item.key === preferredCategoryKey)
+      ? preferredCategoryKey
+      : fileCategories[0]?.key;
+    if (!defaultCategoryKey) return;
     const defaultCategory = fileCategories.find((item) => item.key === defaultCategoryKey);
     const defaultCategoryPath = defaultCategory
       ? getCategoryActivePath(defaultCategory, activeSessionId)
@@ -739,8 +720,25 @@ const FileMiniList: React.FC<FileMiniListProps> = ({ resourceId }) => {
       formData.append('processFrontMatter', String(processFrontMatter));
       formData.append('overwrite', String(Boolean(options.overwrite)));
 
-      await uploadKnowledgeFiles(formData);
-      message.success(intl.formatMessage({ id: 'fileBrowser.upload.knowledgeBuildSuccess' }));
+      const result = await uploadKnowledgeFiles(formData);
+      const succeeded = Number(result?.summary?.succeeded || 0);
+      const failed = Number(result?.summary?.failed || 0);
+      const postProcessErrorCount = result?.postProcessErrors?.length || 0;
+      if (failed > 0) {
+        const content = intl.formatMessage({ id: 'knowledgeDetail.uploadPartial' }, { succeeded, failed });
+        if (succeeded === 0) {
+          message.error(content);
+        } else {
+          message.warning(content);
+        }
+      } else if (postProcessErrorCount > 0) {
+        message.warning(
+          intl.formatMessage({ id: 'knowledgeDetail.uploadPostProcessWarning' }, { count: postProcessErrorCount })
+        );
+      } else {
+        message.success(intl.formatMessage({ id: 'fileBrowser.upload.knowledgeBuildSuccess' }));
+      }
+      if (succeeded === 0 && failed > 0) return;
       setUploadConfirmOpen(false);
       setPendingUploadFiles([]);
       setPendingUploadPath('');

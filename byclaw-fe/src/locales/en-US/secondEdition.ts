@@ -259,10 +259,11 @@ export default {
   // FileBrowser
   'fileBrowser.title': 'File Management',
   'fileBrowser.root': 'Root',
-  'fileBrowser.category.root': 'Root Folder',
-  'fileBrowser.category.session': 'Session Folder',
-  'fileBrowser.category.shared': 'Shared Folder',
-  'fileBrowser.category.log': 'Log Folder',
+  'fileBrowser.category.root': 'Root Directory Space',
+  'fileBrowser.category.session': 'Session Space',
+  'fileBrowser.category.shared': 'Shared File Space',
+  'fileBrowser.category.project': 'Project Space',
+  'fileBrowser.category.log': 'Log Space',
   'fileBrowser.empty': 'No files',
   'fileBrowser.error.loadFailed': 'Failed to load file list',
   'fileBrowser.column.name': 'Name',
@@ -298,6 +299,7 @@ export default {
   'fileBrowser.copy.success': 'Copied successfully',
   'fileBrowser.copy.failed': 'Copy failed',
   'fileBrowser.upload.changeDirectory': 'Change Directory',
+  'fileBrowser.upload.underConstruction': 'Under construction',
   'fileBrowser.upload.selectDirectoryTitle': 'Select Upload Directory',
   'fileBrowser.upload.directoryScopeTip':
     'Only the current directory, its child directories, or sibling directories can be selected. Parent directories and root are not allowed.',
@@ -343,4 +345,5 @@ export default {
   'fileSider.saveToKnowledge.noManagePermission':
     'You do not have management permission for knowledge bases under the current digital employee.',
   'context.used.format': '{percent}% context used, {usedTokens} / {contextTokens}',
+  'easyConfirm.pagination.title': 'Please select the operation step',
 };

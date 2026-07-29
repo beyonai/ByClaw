@@ -20,6 +20,16 @@ const PreViewFile = React.lazy(() =>
   import('@/components/Preview/Twins').then((module) => ({ default: module.PreViewFile }))
 );
 
+const MyPreViewFile = (props: Record<string, unknown>) => {
+  return (
+    <div className="ub fulle-width full-height">
+      <React.Suspense>
+        <PreViewFile {...props} />
+      </React.Suspense>
+    </div>
+  );
+};
+
 export type IDrawerMessage = Partial<IMessage> & {
   messageId: string;
 };
@@ -112,7 +122,7 @@ function MainDrawer() {
     }
 
     if (drawerType === 'preview') {
-      return PreViewFile;
+      return MyPreViewFile;
     }
 
     return FragmentComp;

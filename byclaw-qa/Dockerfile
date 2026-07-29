@@ -10,13 +10,18 @@ COPY pyproject.toml uv.lock README.md ./
 RUN uv sync --frozen --no-dev --no-install-project
 
 # Override by-qa on develop/qa branches to track ByKC main during integration.
-# GitHub's archive URL serves a redirect that Docker's ADD caches — when ByKC main
-# receives new commits, the redirect target changes and the layer is re-executed.
-ARG BRANCH=""
+# Clone from GitHub directly, then install from the local checkout. This avoids
+# third-party archive mirrors such as githubfast.com.
+ARG BRANCH="develop"
 RUN if [ "${BRANCH}" = "develop" ] || [ "${BRANCH}" = "qa" ]; then \
-        echo "BRANCH=${BRANCH}: reinstalling by-qa from ByKC main branch"; \
+        echo "BRANCH=${BRANCH}: cloning by-qa from ByKC main branch"; \
+        apt-get update; \
+        apt-get install -y --no-install-recommends git ca-certificates; \
+        git clone --depth 1 --branch main \
+            https://github.com/beyonai/ByKC.git /tmp/bykc; \
         uv pip install --python .venv/bin/python --force-reinstall \
-            "by-qa[all] @ https://github.com/beyonai/ByKC/archive/refs/heads/main.tar.gz"; \
+            "/tmp/bykc[all]"; \
+        rm -rf /tmp/bykc /var/lib/apt/lists/*; \
     fi
 
 # Strip build-time bloat from the venv
@@ -28,6 +33,13 @@ FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app/src
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        libreoffice-writer-nogui \
+        libreoffice-impress-nogui \
+        fonts-wqy-microhei \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 

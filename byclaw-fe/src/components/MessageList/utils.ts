@@ -4,6 +4,7 @@ import type { IState as useEmployeesIState } from '@/models/useEmployees';
 import { agentMap } from '@/constants/agent';
 import { IAgentType } from '@/typescript/agent';
 import { getIntl } from '@umijs/max';
+import type { IMessage } from '@/typescript/message';
 
 export function getDisplayDateTime(dateTime: string | number) {
   const createTimeDayjsObj = dayjs(Number(dateTime) ? Number(dateTime) : dateTime);
@@ -82,4 +83,80 @@ export function getResponseAgentInfo(
   } catch (e) {
     return null;
   }
+}
+
+export type ResponseAgentInfo = NonNullable<ReturnType<typeof getResponseAgentInfo>>;
+
+type MentionableAgentInfo = Partial<ResponseAgentInfo> & {
+  agentId?: string;
+  name?: string;
+  resourceDesc?: string;
+};
+
+export function getResponseAgentInfoByMessage(
+  agentDatas: Pick<useEmployeesIState, 'employeesList' | 'agentList'>,
+  message?: Pick<IMessage, 'metadata' | 'agentId' | 'resourceList'> & {
+    agentCode?: string;
+    agentName?: string;
+  }
+) {
+  const inlineDigitalEmployee = (message?.resourceList || []).find(
+    (item) => `${item.resourceType}` === ResourceTypeMap.digitalEmployee
+  );
+
+  if (inlineDigitalEmployee) {
+    const resourceAgentId = inlineDigitalEmployee.resourceId || inlineDigitalEmployee.resourceCode;
+    if (resourceAgentId) {
+      const agentInfo = getResponseAgentInfo(
+        agentDatas,
+        JSON.stringify({
+          agentId: resourceAgentId,
+        })
+      );
+      return {
+        ...agentInfo,
+        agentId: `${agentInfo?.agentId || resourceAgentId}`,
+        name: inlineDigitalEmployee.resourceName || agentInfo?.name || `${resourceAgentId}`,
+        chatAvatar: inlineDigitalEmployee.chatAvatar || agentInfo?.chatAvatar,
+        resourceDesc: agentInfo?.resourceDesc || '',
+        resourceCode: inlineDigitalEmployee.resourceCode || agentInfo?.resourceCode,
+        isSuperAssistant: agentInfo?.isSuperAssistant || false,
+        agentType: agentInfo?.agentType,
+      };
+    }
+  }
+
+  const messageAgentId = message?.agentId || message?.agentCode;
+  if (messageAgentId) {
+    const agentInfo = getResponseAgentInfo(
+      agentDatas,
+      JSON.stringify({
+        agentId: messageAgentId,
+      })
+    );
+    if (agentInfo) {
+      return {
+        ...agentInfo,
+        name: message?.agentName || agentInfo.name,
+      };
+    }
+  }
+
+  return getResponseAgentInfo(agentDatas, message?.metadata);
+}
+
+export function getDigitalEmployeeMentionItem(agentInfo?: MentionableAgentInfo | null) {
+  const agentId = agentInfo?.agentId;
+  if (!agentId) return null;
+
+  const name = agentInfo.name || agentInfo.resourceDesc || `${agentId}`;
+
+  return {
+    ...agentInfo,
+    agentId: `${agentId}`,
+    id: `${agentId}`,
+    resourceId: `${agentId}`,
+    resourceName: name,
+    name,
+  };
 }

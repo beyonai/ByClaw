@@ -13,7 +13,7 @@ const ThinkingProcessItemRender = (props: {
   thinkListItem: NewIMessageListItem;
   compKey: string;
   message: IMessage;
-  updateMessageListItem: (path: string, val: any) => void;
+  updateMessageListItem: (path: string, val: any) => IMessage;
   messageIdx: number;
 }) => {
   const { thinkListItem, compKey, updateMessageListItem, message, messageIdx } = props;
@@ -25,7 +25,7 @@ const ThinkingProcessItemRender = (props: {
 
   const updateMessageListItemContent = React.useCallback(
     (content: IMessageListItem['content']) => {
-      updateMessageListItem('content', content);
+      return updateMessageListItem('content', content);
     },
     [updateMessageListItem]
   );

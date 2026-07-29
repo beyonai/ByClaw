@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { CloseCircleFilled } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import { Button, Checkbox, Divider, Empty, message, Modal, Spin } from 'antd';
 import classnames from 'classnames';
-import { isEmpty, size, isNumber } from 'lodash';
+import { isEmpty, size, isNumber, uniqBy } from 'lodash';
 
 import InfiniteScroll from '../InfiniteScroll';
 import CheckboxRender from './CheckboxRender';
@@ -42,12 +42,15 @@ const PersonnelModel = (props) => {
 
   const intl = useIntl();
   const [selectList, setSelectList] = useState([]);
+  const valueKey = (value || []).map((item) => item?.[itemKey]).join('|');
+  const lastValueKeyRef = useRef('');
 
   useEffect(() => {
-    if (value) {
-      setSelectList(value);
-    }
-  }, [value]);
+    if (lastValueKeyRef.current === valueKey) return;
+    lastValueKeyRef.current = valueKey;
+    // 只在外部默认值实际变化时同步，避免弹窗内部翻页/面包屑变化时因新数组引用重置已选项。
+    setSelectList(Array.isArray(value) ? value : []);
+  });
 
   const onChange = useCallback(
     (vals) => {
@@ -55,13 +58,14 @@ const PersonnelModel = (props) => {
       // eslint-disable-next-line no-param-reassign
       vals = vals.filter((item) => !disabledIds.includes(item));
 
-      const oldSelectList = selectList.filter((item) => !dataList.find((i) => i[itemKey] === item[itemKey]));
+      const currentDataList = dataList || [];
+      const oldSelectList = selectList.filter((item) => !currentDataList.find((i) => i[itemKey] === item[itemKey]));
       const result = vals.map((item) => ({
         [itemKey]: item,
-        ...(dataList.find((user) => user[itemKey] === item) || {}),
+        ...(currentDataList.find((user) => user[itemKey] === item) || {}),
       }));
 
-      setSelectList([...oldSelectList, ...result]);
+      setSelectList(uniqBy([...oldSelectList, ...result], itemKey));
     },
     [selectList, dataList, itemKey, disabledIds]
   );

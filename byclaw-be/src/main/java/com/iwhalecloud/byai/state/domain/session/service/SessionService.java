@@ -11,6 +11,7 @@ import java.util.Map;
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.convert.Convert;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.github.pagehelper.Page;
 import com.github.pagehelper.PageHelper;
 import com.iwhalecloud.byai.manager.entity.session.ByaiSession;
@@ -153,6 +154,22 @@ public class SessionService {
         byaiSession.setUpdateTime(new Date());
         byaiSessionMapper.updateById(byaiSession);
         return byaiSession;
+    }
+
+    /**
+     * 刷新会话更新时间。
+     *
+     * @param sessionId 会话标识
+     * @return 是否更新成功
+     */
+    public boolean touchUpdateTime(Long sessionId) {
+        if (sessionId == null) {
+            return false;
+        }
+        LambdaUpdateWrapper<ByaiSession> updateWrapper = new LambdaUpdateWrapper<>();
+        updateWrapper.eq(ByaiSession::getSessionId, sessionId)
+            .set(ByaiSession::getUpdateTime, new Date());
+        return byaiSessionMapper.update(null, updateWrapper) > 0;
     }
 
     /**

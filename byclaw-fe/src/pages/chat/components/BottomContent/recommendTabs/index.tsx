@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Button, Dropdown, App, Skeleton, Row, Col } from 'antd';
+import { Button, Dropdown, App, Skeleton, Row, Col, Tabs } from 'antd';
 import classNames from 'classnames';
-import { useIntl, useSelector } from '@umijs/max';
+import { useIntl, useSelector, getLocale } from '@umijs/max';
 import useGlobal from '@/hooks/useGlobal';
 import AntdIcon from '@/components/AntdIcon';
 import { isAdminVip } from '@/utils/auth';
@@ -13,6 +13,7 @@ import { get } from 'lodash';
 import TemplateModal from '@/components/ChatLayoutComp/components/CreateTemplate';
 import NullableAntdCompWithAnim from '@/components/NullableAntdCompWithAnim';
 import useAppStore from '@/models/common/useAppStore';
+import { getTemplateTypes } from '@/service/auth';
 import { downloadMinIOFileURL } from '@/service/file';
 
 import styles from './index.module.less';
@@ -28,6 +29,22 @@ interface ITemplateItem {
   coverResourceId?: string | number;
   coverDirectoryPath?: string;
   datasetId?: string | number;
+}
+
+interface ITemplateTabItem {
+  paramValue: string;
+  paramName: string;
+  paramEnName?: string;
+}
+
+function uniqueTemplateTabs(data: ITemplateTabItem[] = []) {
+  const tabMap = new Map<string, ITemplateTabItem>();
+  data.forEach((item) => {
+    if (item?.paramValue && !tabMap.has(item.paramValue)) {
+      tabMap.set(item.paramValue, item);
+    }
+  });
+  return Array.from(tabMap.values());
 }
 
 function buildTemplateCoverDownloadUrl(item: ITemplateItem): string {
@@ -84,10 +101,13 @@ export default function RecommendTabs() {
   const { modal, message } = App.useApp();
   const [loadingItems, setLoadingItems] = useState<React.Key[]>([]);
   const [templateList, setTemplateList] = useState<ITemplateItem[]>([]);
+  const [tabList, setTabList] = useState<ITemplateTabItem[]>([]); // 模板分类列表
+  const [currentTab, setCurrentTab] = useState(''); // 当前选中的分类
   const [isLoadingList, setIsLoadingList] = useState(false);
   const [imageErrors, setImageErrors] = useState<string[]>([]);
 
   const { setLoginModalOpen } = useAppStore();
+  const local = getLocale();
 
   const [templateModalProps, setTemplateModalProps] = useState<{
     open: boolean;
@@ -98,25 +118,36 @@ export default function RecommendTabs() {
   });
 
   // 获取模板数据
-  const fetchTemplateData = useCallback(async () => {
-    setIsLoadingList(true);
-    setTemplateList([]);
-    try {
-      const res = await getTemplateList({
-        terminals: isAdminVip(userInfo) ? ['ALL', 'PC', 'APP'] : ['ALL', 'PC'],
-      });
+  const fetchTemplateData = useCallback(
+    async (tabKey: string) => {
+      setTemplateList([]);
+      if (!tabKey) {
+        return;
+      }
+      setIsLoadingList(true);
+      try {
+        const res = await getTemplateList({
+          templateTypes: tabKey,
+          terminals: isAdminVip(userInfo) ? ['ALL', 'PC', 'APP'] : ['ALL', 'PC'],
+        });
 
-      setTemplateList((res as any)?.list || []);
-    } catch (error) {
-      console.error('获取模板数据失败:', error);
-    } finally {
-      setIsLoadingList(false);
-    }
-  }, [userInfo]);
+        setTemplateList((res as any)?.list || []);
+      } catch (error) {
+        console.error('获取模板数据失败:', error);
+      } finally {
+        setIsLoadingList(false);
+      }
+    },
+    [userInfo]
+  );
 
   useEffect(() => {
-    fetchTemplateData();
-  }, [fetchTemplateData]);
+    fetchTemplateData(currentTab);
+  }, [currentTab, fetchTemplateData]);
+
+  const isEN = React.useMemo(() => {
+    return local.includes('en');
+  }, [local]);
 
   // 监听userInfo变化，当用户登录后重新加载失败的图片
   useEffect(() => {
@@ -188,8 +219,30 @@ export default function RecommendTabs() {
     [intl, modal, message]
   );
 
+  useEffect(() => {
+    // 模板分类列表
+    getTemplateTypes({
+      standType: 'TEMPLATE_TYPE',
+    }).then((data = []) => {
+      const nextTabList = uniqueTemplateTabs(data || []);
+      setTabList(nextTabList);
+      if (nextTabList.length) {
+        setCurrentTab(nextTabList[0]?.paramValue);
+      }
+    });
+  }, []);
+
   return (
     <div className={styles.tabsWrap} id="guideStep3-1">
+      <Tabs
+        centered
+        activeKey={currentTab}
+        onChange={setCurrentTab}
+        items={(tabList || [])?.map?.((tab) => ({
+          key: tab.paramValue,
+          label: isEN ? tab.paramEnName || tab.paramName : tab.paramName,
+        }))}
+      />
       <Row gutter={[16, 16]}>
         {isLoadingList &&
           // 显示3个骨架屏
@@ -309,7 +362,7 @@ export default function RecommendTabs() {
           {...templateModalProps}
           onClose={() => {
             setTemplateModalProps({ open: false, sessionId: '' });
-            fetchTemplateData();
+            fetchTemplateData(currentTab);
           }}
         />
       </NullableAntdCompWithAnim>

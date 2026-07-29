@@ -13,11 +13,15 @@ public class RunningChatInfo {
 
     private String traceId;
 
+    private String laneId;
+
     private String clientRequestId;
 
     private Long userMessageId;
 
     private Long modelAnswerMessageId;
+
+    private Long taskId;
 
     private String transport;
 

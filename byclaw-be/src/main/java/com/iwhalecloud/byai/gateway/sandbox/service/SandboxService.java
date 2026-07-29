@@ -1,10 +1,10 @@
 package com.iwhalecloud.byai.gateway.sandbox.service;
 
-import java.time.Duration;
-import java.time.Instant;
 import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.Date;
@@ -24,7 +24,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
-import com.iwhalecloud.byai.common.util.OkHttpUtil;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -34,19 +33,22 @@ import org.springframework.context.annotation.Lazy;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhaleai.byai.framework.common.Constants;
 import com.iwhaleai.byai.framework.common.RedisClient;
 import com.iwhaleai.byai.framework.core.WorkerRegistry;
 import com.iwhaleai.byai.framework.core.discovery.ServiceRegistry;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.common.constants.resource.WorkerAgentType;
 import com.iwhalecloud.byai.common.feign.request.sandbox.SandboxLaunchRequest;
 import com.iwhalecloud.byai.common.feign.response.SandboxResponse;
 import com.iwhalecloud.byai.common.feign.response.sandbox.SandboxLaunchData;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
+import com.iwhalecloud.byai.common.util.OkHttpUtil;
 import com.iwhalecloud.byai.common.util.RedisUtil;
+import com.iwhalecloud.byai.gateway.sandbox.client.OpenSandboxClient;
+import com.iwhalecloud.byai.gateway.sandbox.client.model.SandboxDetail;
 import com.iwhalecloud.byai.gateway.sandbox.model.SandboxInfo;
 import com.iwhalecloud.byai.gateway.sandbox.model.SandboxLeasePolicy;
 import com.iwhalecloud.byai.gateway.sandbox.runtime.SandboxRuntimeInstance;
@@ -123,6 +125,10 @@ public class SandboxService {
     @Lazy
     @Autowired
     private SandboxLifecycleFacade sandboxLifecycleFacade;
+
+    @Lazy
+    @Autowired
+    private OpenSandboxClient openSandboxClient;
 
     @Lazy
     @Autowired
@@ -293,7 +299,7 @@ public class SandboxService {
     }
 
     /**
-     * 清除用户首选 serviceKey
+     * 清除用户首选 serviceKey，并同步释放对应的沙箱实例（STARTING/RUNNING 均释放）。
      *
      * @param userCode 用户工号
      */
@@ -301,8 +307,27 @@ public class SandboxService {
         if (StringUtils.isBlank(userCode)) {
             return;
         }
+        String preferred = getPreferredServiceKey(userCode);
+        if (preferred != null) {
+            try {
+                SsSandboxRecord active = sandboxRecordMapper.selectActiveByUserAndResource(userCode, preferred, null);
+                if (active != null) {
+                    String releaseReason = manualReleaseReason(userCode);
+                    if (STATUS_STARTING.equals(active.getStatus())) {
+                        markStartingSandboxReleased(active, releaseReason);
+                    } else if (STATUS_RUNNING.equals(active.getStatus())) {
+                        doRemoveSandbox(active, releaseReason);
+                    }
+                    LOGGER.info("随首选 serviceKey 清除同步释放沙箱: userCode={}, sandboxType={}, recordId={}",
+                        userCode, preferred, active.getId());
+                }
+            } catch (Exception e) {
+                LOGGER.warn("清除首选 serviceKey 时释放沙箱实例失败（忽略，继续清除缓存）: userCode={}, preferred={}",
+                    userCode, preferred, e);
+            }
+        }
         RedisUtil.removeKey(PREFERRED_SERVICE_KEY_PREFIX + userCode);
-        LOGGER.info("清除用户首选 serviceKey: userCode={}", userCode);
+        LOGGER.info("清除用户首选 serviceKey: userCode={}, preferred={}", userCode, preferred);
     }
 
     /**
@@ -366,6 +391,7 @@ public class SandboxService {
                 incrementVersions(existingRecord, true);
                 sandboxMetadataCache.evict(existingRecord.getUserCode(), existingRecord.getSandboxType());
                 unregisterSandboxEndpoint(existingRecord.getUserCode(), existingRecord.getSandboxType());
+                cleanupWorkerRegistryForSandbox(existingRecord);
                 LOGGER.warn("远端沙箱退出，已清理远端并终结旧沙箱记录：{}", sandboxRef(existingRecord));
             }
 
@@ -609,7 +635,17 @@ public class SandboxService {
         SandboxLeasePolicy leasePolicy = resolveDefaultLeasePolicy();
         Integer autoRelease = leasePolicy == SandboxLeasePolicy.REMOTE_AUTO_EXPIRE
             ? AUTO_RELEASE_REMOTE : AUTO_RELEASE_MANUAL;
-        request.setEnvs(launchContext.getEnvs());
+        // Inject deterministic worker_id for by-framework worker registry alignment
+        String workerId = buildSandboxWorkerId(userCode, launchContext.getSandboxType());
+        Map<String, String> envs = launchContext.getEnvs() != null
+            ? new LinkedHashMap<>(launchContext.getEnvs())
+            : new LinkedHashMap<>();
+        if (StringUtils.isNotBlank(workerId)) {
+            envs.put("BYAI_WORKER_ID", workerId);
+            LOGGER.debug("Injecting BYAI_WORKER_ID for sandbox launch: userCode={}, sandboxType={}, workerId={}",
+                userCode, launchContext.getSandboxType(), workerId);
+        }
+        request.setEnvs(envs);
         request.setUserInfo(launchContext.getUserInfo());
         request.setSkipReusableSandbox(skipReusableSandbox);
         String gatewayToken = launchContext.getGatewayToken();
@@ -1667,6 +1703,48 @@ public class SandboxService {
         if (!orphanSamples.isEmpty()) {
             LOGGER.warn("沙箱一致性检测发现远端孤儿候选，userCode：{}，sandboxType：{}，样例：{}",
                 group.getUserCode(), group.getSandboxType(), orphanSamples);
+
+            // Auto-cleanup orphan sandboxes:
+            // 1. Terminal states (failed/error/terminated/etc.) - cleanup immediately
+            // 2. Pending state for more than 30 minutes - likely creation timeout
+            for (SandboxRuntimeInstance orphan : remoteBySandboxId.values()) {
+                if (orphan == null || dbBySandboxId.containsKey(orphan.getSandboxId())) {
+                    continue;
+                }
+                if (orphan.getCreatedAt() == null) {
+                    continue;
+                }
+
+                String state = orphan.getState();
+                if (state == null || state.isBlank()) {
+                    continue;
+                }
+
+                String normalizedState = state.trim().toLowerCase(java.util.Locale.ROOT);
+                long ageMinutes = java.time.Duration.between(orphan.getCreatedAt(), java.time.OffsetDateTime.now()).toMinutes();
+
+                // Check if orphan is in a terminal state that should be cleaned up
+                boolean isTerminalState = "failed".equals(normalizedState)
+                    || "succeeded".equals(normalizedState)
+                    || "completed".equals(normalizedState)
+                    || "terminated".equals(normalizedState)
+                    || "stopped".equals(normalizedState)
+                    || "killed".equals(normalizedState)
+                    || "error".equals(normalizedState)
+                    || "unknown".equals(normalizedState)
+                    || "exited".equals(normalizedState);
+
+                // Check if orphan is stuck in Pending for too long
+                boolean isPendingTimeout = "pending".equals(normalizedState) && ageMinutes > 30;
+
+                if (isTerminalState || isPendingTimeout) {
+                    String reason = buildCleanupReason("orphan", orphan);
+                    LOGGER.info("自动清理孤儿沙箱，sandboxId：{}，状态：{}，cleanupReason：{}，创建时间：{}，已存在：{} 分钟",
+                        orphan.getSandboxId(), orphan.getState(), reason, orphan.getCreatedAt(), ageMinutes);
+                    cleanupRemoteSandboxQuietly(group.getUserCode(), group.getSandboxType(),
+                        orphan.getSandboxId(), reason);
+                }
+            }
         }
     }
 
@@ -1816,6 +1894,7 @@ public class SandboxService {
         incrementVersions(record, true);
         sandboxMetadataCache.evict(record.getUserCode(), record.getSandboxType());
         unregisterSandboxEndpoint(record.getUserCode(), record.getSandboxType());
+        cleanupWorkerRegistryForSandbox(record);
         LOGGER.info("沙箱释放完成：{}，releaseReason：{}", sandboxRef(record), releaseReason);
     }
 
@@ -1851,6 +1930,114 @@ public class SandboxService {
         cleanupRemoteSandboxQuietly(record, "cancelled-launch", true);
     }
 
+    /**
+     * Build fine-grained cleanup reason based on sandbox runtime state.
+     * Format: <trigger>:<state>:<reason>
+     * Examples: orphan:failed:oomkilled, orphan:pending:timeout-30m
+     *
+     * @param trigger cleanup trigger source: orphan/reconcile/expired/manual
+     * @param instance sandbox runtime instance
+     * @return cleanup reason string in format <trigger>:<state>:<reason>
+     */
+    private String buildCleanupReason(String trigger, SandboxRuntimeInstance instance) {
+        if (instance == null) {
+            return trigger + ":unknown:unknown";
+        }
+        String state = normalizeState(instance.getState());
+        String reason = "unknown";
+
+        // Try to fetch detailed status from OpenSandbox
+        try {
+            if (instance.getSandboxId() != null) {
+                SandboxDetail detail = openSandboxClient.getSandboxIfExists(instance.getSandboxId());
+                if (detail != null && detail.getStatus() != null) {
+                    reason = normalizeReason(detail.getStatus().getReason());
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.debug("获取沙箱详细状态失败：{}，error={}", instance.getSandboxId(), e.getMessage());
+        }
+
+        // Special handling for Pending timeout
+        if ("pending".equals(state) && instance.getCreatedAt() != null) {
+            long ageMinutes = Duration.between(instance.getCreatedAt(), OffsetDateTime.now()).toMinutes();
+            if (ageMinutes > 30) {
+                reason = "timeout-" + ageMinutes + "m";
+            }
+        }
+
+        return String.format("%s:%s:%s", trigger, state, reason);
+    }
+
+    /**
+     * Build fine-grained cleanup reason from sandbox ID directly.
+     * Queries OpenSandbox for detailed status before cleanup.
+     *
+     * @param trigger cleanup trigger source
+     * @param sandboxId sandbox ID
+     * @return cleanup reason string
+     */
+    private String buildCleanupReasonById(String trigger, String sandboxId) {
+        try {
+            SandboxDetail detail = openSandboxClient.getSandboxIfExists(sandboxId);
+            if (detail != null) {
+                String state = normalizeState(detail.getStatus() != null ? detail.getStatus().getState() : null);
+                String reason = normalizeReason(detail.getStatus() != null ? detail.getStatus().getReason() : null);
+
+                // Special handling for Pending timeout
+                if ("pending".equals(state) && detail.getCreatedAt() != null) {
+                    long ageMinutes = Duration.between(detail.getCreatedAt(), OffsetDateTime.now()).toMinutes();
+                    if (ageMinutes > 30) {
+                        reason = "timeout-" + ageMinutes + "m";
+                    }
+                }
+
+                return String.format("%s:%s:%s", trigger, state, reason);
+            }
+        } catch (Exception e) {
+            LOGGER.debug("获取沙箱详细状态失败：{}，error={}", sandboxId, e.getMessage());
+        }
+        return trigger + ":unknown:unknown";
+    }
+
+    /**
+     * Normalize sandbox state to lowercase and remove special characters.
+     * @param state raw state from OpenSandbox (e.g., "Pending", "Failed", "Running")
+     * @return normalized state (e.g., "pending", "failed", "running", "unknown")
+     */
+    private String normalizeState(String state) {
+        if (state == null || state.isBlank()) {
+            return "unknown";
+        }
+        return state.toLowerCase().replaceAll("[^a-z0-9]", "");
+    }
+
+    /**
+     * Normalize sandbox reason to lowercase and map to known Kubernetes container state reasons.
+     * @param reason raw reason from OpenSandbox (e.g., "OOMKilled", "ImagePullBackOff")
+     * @return normalized reason (e.g., "oomkilled", "imagepullbackoff", "crashloop")
+     */
+    private String normalizeReason(String reason) {
+        if (reason == null || reason.isBlank()) {
+            return "unknown";
+        }
+        // Normalize: lowercase + remove special characters
+        String normalized = reason.toLowerCase().replaceAll("[^a-z0-9]", "");
+
+        // Map common Kubernetes container state reasons
+        return switch (normalized) {
+            case "oomkilled" -> "oomkilled";
+            case "imagepullbackoff", "errimagepull" -> "imagepullbackoff";
+            case "crashloopbackoff" -> "crashloop";
+            case "evicted" -> "evicted";
+            case "forbidden" -> "forbidden";
+            case "nodelost", "nodenotready" -> "nodelost";
+            case "containercreating", "creating" -> "creating";
+            case "running" -> "running";
+            default -> normalized.isEmpty() ? "unknown" : normalized;
+        };
+    }
+
     void cleanupRemoteSandboxQuietly(String userCode, String sandboxType, String sandboxId, String reason) {
         SsSandboxRecord record = new SsSandboxRecord();
         record.setUserCode(userCode);
@@ -1876,13 +2063,31 @@ public class SandboxService {
         if (record == null || StringUtils.isBlank(record.getSandboxId())) {
             return;
         }
+
+        // Query sandbox state before deletion for audit logging
+        String state = "unknown";
+        String stateReason = "unknown";
+        String stateMessage = "";
+        try {
+            SandboxDetail detail = openSandboxClient.getSandboxIfExists(record.getSandboxId());
+            if (detail != null && detail.getStatus() != null) {
+                state = detail.getStatus().getState() != null ? detail.getStatus().getState() : "unknown";
+                stateReason = detail.getStatus().getReason() != null ? detail.getStatus().getReason() : "unknown";
+                stateMessage = detail.getStatus().getMessage() != null ? detail.getStatus().getMessage() : "";
+            }
+        } catch (Exception e) {
+            LOGGER.debug("查询沙箱状态失败（继续删除）：{}，error={}", sandboxRef(record), e.getMessage());
+        }
+
         SandboxResponse<Void> response = sandboxLifecycleFacade.removeSandbox(toSandboxInfo(record));
         if (response == null || !response.isSuccess()) {
             String message = response != null ? response.getMessage() : "响应为空";
-            LOGGER.warn("清理远端沙箱返回失败：{}，reason={}，原因：{}", sandboxRef(record), reason, message);
+            LOGGER.warn("清理远端沙箱返回失败：{}，reason={}，state={}，stateReason={}，原因：{}",
+                sandboxRef(record), reason, state, stateReason, message);
             throw new IllegalStateException("failed to cleanup remote sandbox before restart: " + message);
         }
-        LOGGER.info("清理远端沙箱完成：{}，reason={}", sandboxRef(record), reason);
+        LOGGER.info("清理远端沙箱完成：{}，cleanupReason={}，state={}，stateReason={}，stateMessage={}",
+            sandboxRef(record), reason, state, stateReason, stateMessage);
     }
 
     private void removeRemoteSandboxesForServiceTypeOrThrow(String userCode, String sandboxType, String serviceType,
@@ -1989,6 +2194,38 @@ public class SandboxService {
         return sandboxType + "_" + userCode;
     }
 
+    private String buildSandboxWorkerId(String userCode, String serviceKey) {
+        if (StringUtils.isBlank(userCode) || StringUtils.isBlank(serviceKey)) {
+            return null;
+        }
+        return serviceKey + "-" + userCode;
+    }
+
+    private void cleanupWorkerRegistryForSandbox(SsSandboxRecord record) {
+        if (record == null) {
+            return;
+        }
+        String workerId = buildSandboxWorkerId(record.getUserCode(), record.getSandboxType());
+        if (StringUtils.isBlank(workerId)) {
+            LOGGER.debug("Skipping worker registry cleanup: cannot build worker_id for sandbox {}", sandboxRef(record));
+            return;
+        }
+        try {
+            gatewayWorkerRegistry.markWorkerInactive(workerId);
+            LOGGER.info("Cleaned up worker_online_lease on sandbox release: workerId={}, sandbox={}", workerId, sandboxRef(record));
+        }
+        catch (Exception e) {
+            LOGGER.error("Failed to mark worker inactive on sandbox release: workerId={}, sandbox={}", workerId, sandboxRef(record), e);
+        }
+        try {
+            gatewayWorkerRegistry.unregisterWorkerMembership(workerId);
+            LOGGER.info("Cleaned up worker membership on sandbox release: workerId={}, sandbox={}", workerId, sandboxRef(record));
+        }
+        catch (Exception e) {
+            LOGGER.error("Failed to unregister worker membership on sandbox release: workerId={}, sandbox={}", workerId, sandboxRef(record), e);
+        }
+    }
+
     private void cleanupSandboxRegistryKeys(String serviceName) {
         try (Jedis jedis = redisClient.getResource()) {
             String instancesKey = Constants.RegistryKeys.sdInstanceDetails(serviceName);
@@ -2001,7 +2238,7 @@ public class SandboxService {
             }
             jedis.del(instancesKey);
             jedis.del(activeKey);
-            jedis.srem(Constants.RegistryKeys.SD_SERVICES, serviceName);
+            jedis.srem(Constants.RegistryKeys.sdServices(), serviceName);
         }
     }
 

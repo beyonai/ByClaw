@@ -101,6 +101,13 @@ public class TransactionAdviceConfig {
         txMap.put("generateV3Stream", notSurpportedTx);
         txMap.put("generateText", notSurpportedTx);
         txMap.put("generateTextStream", notSurpportedTx);
+        // Recorder draft generation only writes the per-user sandbox volume. Storage failures are mapped to a stable
+        // 503 response, so it must not join a database transaction that would later surface as rollback-only.
+        txMap.put("pipelineGenerate", notSurpportedTx);
+        // Recorder save must surface adapter_exists as a 409 so the UI can ask before retrying with overwrite=true.
+        // The byCLI publish port throws this business exception after a remote filesystem check; joining the global
+        // transaction would convert the handled exception into an UnexpectedRollbackException at commit time.
+        txMap.put("saveAdapter", notSurpportedTx);
         txMap.put("*", requiredTx);
 
         /* 事务管理规则，声明具备事务管理的方法名 **/

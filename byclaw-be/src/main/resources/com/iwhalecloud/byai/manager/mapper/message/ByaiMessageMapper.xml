@@ -69,14 +69,14 @@
         SELECT <include refid="Base_Column_List" />
         FROM byai_message
         WHERE session_id = #{sessionId}
-        ORDER BY create_time DESC
+        ORDER BY create_time DESC, message_id DESC
     </select>
 
     <select id="selectByTaskId" resultMap="BaseResultMap">
         SELECT <include refid="Base_Column_List" />
         FROM byai_message
         WHERE task_id = #{taskId}
-        ORDER BY create_time DESC
+        ORDER BY create_time DESC, message_id DESC
     </select>
 
     <select id="selectByMessageId" resultMap="BaseResultMap">
@@ -165,7 +165,7 @@
             <if test="qo.sessionId != null">AND session_id = #{qo.sessionId}</if>
             <if test="qo.creatorId != null">AND creator_id = #{qo.creatorId}</if>
         </where>
-        ORDER BY create_time DESC
+        ORDER BY create_time DESC, message_id DESC
     </select>
 
     <select id="selectByQo" resultMap="BaseResultMap">
@@ -188,7 +188,7 @@
                 AND message_content LIKE REPLACE(REPLACE(#{qo.keyword}, '*', '%'), '?', '_')
             </if>
         </where>
-        ORDER BY create_time DESC
+        ORDER BY create_time DESC, message_id DESC
         <if test="qo.topK != null">
             LIMIT #{qo.topK}
         </if>

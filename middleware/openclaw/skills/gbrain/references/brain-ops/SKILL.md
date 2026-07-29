@@ -111,6 +111,7 @@ ingest event.
 - Person mentioned → check brain, create/enrich if needed (spawn background)
 - Company mentioned → same
 - Link shared → ingest it (delegate to idea-ingest)
+- **整理/拆分文档、按对象拆 PRD/会议** → delegate to `references/document-object-split/SKILL.md`
 - Data shared → delegate to appropriate skill
 
 **Rules:**

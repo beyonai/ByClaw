@@ -1,4 +1,4 @@
-import { Button, message, Space } from 'antd';
+import { Button, message, Space, Tooltip } from 'antd';
 import classnames from 'classnames';
 import { get, isEmpty, pullAllBy, trim } from 'lodash';
 // @ts-ignore
@@ -10,13 +10,15 @@ import CarouselFile from '@/components/MessageList/components/CarouselFile';
 import QueryInputBase, { IProps as pIProps, IState as pIState } from '@/components/QueryInput/queryInputBase';
 
 import UploadFile from '../components/UploadFile';
-import FileBrowserEntry from '../components/FileBrowserEntry';
+import ConnectorControl from '../components/ConnectorControl';
+import type { Connector } from '../components/ConnectorControl';
 
 import type { UserState } from '@/models/common/user';
 import type { IAgentCache } from '@/typescript/agent';
 import type { IChatSettingValue } from '@/typescript/cloud';
 import type { IFile, IQueryFile } from '@/typescript/file';
 
+import { chatModeMap } from '@/constants/query';
 import { getDownloadOpenClawFileUrl, isOpenClawAgent, uploadFileToOpenClaw } from '@/utils/openClaw/utils';
 import queryStyles from '../index.module.less';
 import MentionPopover from '../RichInput/mentionPopover';
@@ -26,6 +28,8 @@ type IState = {
   fileList: IFile[];
   showMentionPopoverType: '' | '@' | '#';
   chatSettings: IChatSettingValue;
+  // 当前输入会话已连接的连接器，发送消息时转换为后端所需的 ID 列表。
+  connectors: Connector[];
 } & Omit<pIState, 'showAssitant'>;
 
 type IProps = {
@@ -51,12 +55,16 @@ class EmployeesInputChat extends QueryInputBase<IProps, IState> {
         functionCloud: {},
         memory: {},
       } as IChatSettingValue,
+      // 当前聊天输入独立维护连接器选择，避免污染其他输入实例。
+      connectors: [],
     };
   }
 
   getSendPayload = () => {
     const { userInfo, myAgentType } = this.props;
-    const { fileList, inputValue, chatSettings, connectNetAgentId } = this.state;
+    const currentInputPayload = this.getCurrentInputPayload();
+    const { fileList, chatSettings, connectNetAgentId, connectors } = this.state;
+    const inputValue = currentInputPayload?.text ?? this.state.inputValue;
     const sendVal = trim(inputValue);
 
     const { agentId } = this.props.globalContext;
@@ -70,6 +78,8 @@ class EmployeesInputChat extends QueryInputBase<IProps, IState> {
         files: [],
         extParams: {
           files: [],
+          // 后端约定：当前轮次启用的连接器 ID 列表。
+          connectors: connectors.map((connector) => connector.id),
         },
         agentType: myAgentType,
         ...chatSettings,
@@ -198,20 +208,57 @@ class EmployeesInputChat extends QueryInputBase<IProps, IState> {
       sessionId,
       dispatch,
       globalContext: { agentId, setSessionId },
+      chatMode,
     } = this.props;
     const { showMentionPopoverType } = this.state;
 
     const canQuote = this.checkCanQuote();
+    const quoteAgentId = this.getQuoteAgentId();
+    const mentionDigitalEmployeeTip = getIntl().formatMessage({ id: 'queryInput.tooltip.mentionDigitalEmployee' });
 
     return (
       <>
         <Space size="large" className={styles.bottomRight}>
-          <FileBrowserEntry />
+          {/* 连接器控制组件只负责选择，实际状态仍由聊天输入统一维护。 */}
+          <ConnectorControl
+            canAuthorize={!!this.props.userInfo}
+            value={this.state.connectors}
+            onChange={(connectors) => this.setState((prevState) => ({ ...prevState, connectors }))}
+          />
+          {/* 多员工模式下 @ 入口始终保留，用于继续追加数字员工。 */}
+          <MentionPopover
+            type="@"
+            chatMode={chatModeMap.expert}
+            agentId={agentId}
+            sessionId={sessionId}
+            onSelect={this.onSelectMentionPopoverItem}
+            popoverPos={showMentionPopoverType === '@' ? staticEmptyObject : undefined}
+            onClose={() => this.setState((prev) => ({ ...prev, showMentionPopoverType: '' }))}
+          >
+            <Tooltip title={mentionDigitalEmployeeTip}>
+              <span
+                aria-label={mentionDigitalEmployeeTip}
+                className={styles.attachment}
+                role="button"
+                tabIndex={0}
+                onClick={() => this.setState((prev) => ({ ...prev, showMentionPopoverType: '@' }))}
+                onKeyDown={(event) => {
+                  if (event.key !== 'Enter' && event.key !== ' ') return;
+                  event.preventDefault();
+                  this.setState((prev) => ({ ...prev, showMentionPopoverType: '@' }));
+                }}
+              >
+                @
+              </span>
+            </Tooltip>
+          </MentionPopover>
           {canQuote && (
             <MentionPopover
               type="#"
-              agentId={agentId}
+              chatMode={chatMode}
+              agentId={quoteAgentId}
               sessionId={sessionId}
+              resourceAgentIds={this.getResourceAgentIds()}
               onSelect={this.onSelectMentionPopoverItem}
               popoverPos={showMentionPopoverType === '#' ? staticEmptyObject : undefined}
               onClose={() => this.setState((prev) => ({ ...prev, showMentionPopoverType: '' }))}

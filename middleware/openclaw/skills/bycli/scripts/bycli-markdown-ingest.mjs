@@ -1210,7 +1210,10 @@ function resolveKnowledgeManagerScript(args) {
   const candidates = explicit
     ? [explicit]
     : [
+      path.resolve(SCRIPT_DIR, "../../by-knowledge-manager/scripts/by-knowledge-manager.mjs"),
       path.resolve(SCRIPT_DIR, "../../知识库管理/scripts/by-knowledge-manager.mjs"),
+      path.resolve(process.cwd(), "middleware/openclaw/skills/by-knowledge-manager/scripts/by-knowledge-manager.mjs"),
+      path.resolve(process.cwd(), "by-knowledge-manager/scripts/by-knowledge-manager.mjs"),
       path.resolve(process.cwd(), "知识库管理/scripts/by-knowledge-manager.mjs"),
     ];
   for (const candidate of candidates) {

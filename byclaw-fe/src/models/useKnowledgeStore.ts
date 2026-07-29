@@ -123,6 +123,7 @@ const useKnowledgeStore = create<IState>()(
                 collectionName: row.name,
               }));
               cacheSet({ directoryList });
+              return directoryList;
             } catch (e) {
               console.error(e);
               cacheSet({ directoryList: [] });

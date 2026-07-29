@@ -158,8 +158,18 @@ public class DefaultResourceJsonConnectivityValidationService implements Resourc
         return StringUtils.equalsIgnoreCase("BYCLAW_CODE", context.root().path("systemCode").asText());
     }
 
+    private boolean isInternalDatasetResource(JSONObject root) {
+        return root != null && StringUtils.equalsIgnoreCase("dataset", root.getString("systemCode"));
+    }
+
     private void validateKnowledgeCreateThenDelete(ResourceJsonValidationContext context) {
         JSONObject root = JSON.parseObject(context.json(), Feature.OrderedField);
+        // 个人知识库由当前应用内部创建，dataset 模板只描述目录、文件和检索等运行时接口，
+        // 不包含外部知识库的 create_kb/delete_kb 生命周期接口，因此不应执行该闭环校验。
+        if (isInternalDatasetResource(root)) {
+            LOGGER.debug("跳过内部 dataset 知识库的 create/delete 连通性校验");
+            return;
+        }
         // 先遍历校验所有 openapiSchema 的基本结构，防止 JSON 虽然能连通但接口描述不可被下游解析。
         validateKnowledgeOpenApiSchemas(root);
 

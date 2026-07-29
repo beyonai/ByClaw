@@ -80,6 +80,11 @@
       "description": "Ingest meeting transcripts with attendee enrichment, entity propagation, and timeline merge."
     },
     {
+      "name": "document-object-split",
+      "path": "document-object-split/SKILL.md",
+      "description": "Split documents using get_object_detail.py (POST /ontology/object/detail) for Ontology types; classify, extract, one page per instance, optional workspace export."
+    },
+    {
       "name": "citation-fixer",
       "path": "citation-fixer/SKILL.md",
       "description": "Audit and fix citation formatting across brain pages."

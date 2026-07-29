@@ -33,6 +33,7 @@ import {
   QuestionCircleOutlined,
   EyeOutlined,
   ExclamationCircleOutlined,
+  PlusOutlined,
 } from '@ant-design/icons';
 import classnames from 'classnames';
 import { compact, set, trim } from 'lodash';
@@ -196,6 +197,70 @@ const parseDigitalEmployeeTemplates = (value: any) => {
     }
   }
   return [value];
+};
+
+const parseMaybeArray = (value: any) => {
+  if (Array.isArray(value)) return value;
+  if (!value) return [];
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value || '[]');
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+};
+
+const getOntologyResourceType = (row: any) =>
+  `${row?.grantResourceType || row?.resourceBizType || row?.level || ''}`.toUpperCase();
+
+const getOntologyResourceKey = (row: any) => {
+  const resourceId = row?.resourceId ?? row?.relResourceId ?? row?.id;
+  if (resourceId !== undefined && resourceId !== null && resourceId !== '') {
+    return `${resourceId}`;
+  }
+  return `${getOntologyResourceType(row)}:${row?.resourceCode || row?.viewCode || row?.objectCode || ''}`;
+};
+
+const normalizeOntologySummaryResource = (row: any = {}) => {
+  const resourceBizType = getOntologyResourceType(row);
+  const resourceCode = row?.resourceCode || row?.viewCode || row?.objectCode || row?.code || '';
+  const resourceName = row?.resourceName || row?.viewName || row?.objectName || row?.name || resourceCode;
+  return {
+    ...row,
+    key: getOntologyResourceKey(row),
+    resourceBizType,
+    resourceCode,
+    resourceName,
+    description: row?.description ?? row?.resourceDesc ?? row?.viewDesc ?? row?.objectDesc ?? row?.remark ?? '',
+  };
+};
+
+const buildOntologyConfigSummary = (savedRelOntology: any, ontologyResourcesDirty?: boolean) => {
+  const resourceMap = new Map<string, any>();
+  parseMaybeArray(savedRelOntology)
+    .map(normalizeOntologySummaryResource)
+    .filter((row: any) => ['VIEW', 'OBJECT'].includes(row.resourceBizType))
+    .forEach((row: any) => {
+      resourceMap.set(row.key, row);
+    });
+  const resources = Array.from(resourceMap.values());
+  const totals = resources.reduce(
+    (acc, row) => ({
+      views: acc.views + (row.resourceBizType === 'VIEW' ? 1 : 0),
+      objects: acc.objects + (row.resourceBizType === 'OBJECT' ? 1 : 0),
+    }),
+    { views: 0, objects: 0 }
+  );
+  return {
+    resources,
+    totals,
+    hasBinding: resources.length > 0,
+    hasPending: Boolean(ontologyResourcesDirty),
+    isCleared: Boolean(ontologyResourcesDirty) && resources.length === 0,
+  };
 };
 
 const getDigitalEmployeeTemplate = (templates: any[] = [], ownerType?: string, agentType?: string) => {
@@ -586,6 +651,9 @@ const ConfigForm = (props) => {
     initialCoreCompetencies = [],
     ownerType,
     agentType,
+    onOpenOntologyDrawer,
+    savedRelOntology = [],
+    ontologyResourcesDirty = false,
   } = props;
 
   const intl = useIntl();
@@ -609,6 +677,10 @@ const ConfigForm = (props) => {
   const [agentTypeOptions, setAgentTypeOptions] = useState([]);
   const [bundledSkillOptions, setBundledSkillOptions] = useState([]);
   const [bundledSkillLoading, setBundledSkillLoading] = useState(false);
+  const ontologySummary = useMemo(
+    () => buildOntologyConfigSummary(savedRelOntology, ontologyResourcesDirty),
+    [savedRelOntology, ontologyResourcesDirty]
+  );
   const [bundledSkillModalOpen, setBundledSkillModalOpen] = useState(false);
   const [bundledSkillSearchName, setBundledSkillSearchName] = useState('');
   const [bundledSkillPagination, setBundledSkillPagination] = useState({
@@ -2688,7 +2760,7 @@ const ConfigForm = (props) => {
               )}
 
               {/* 配置工具 */}
-              {employeeType !== '006' && (
+              {employeeType !== '006' && employeeType !== '005' && (
                 <div className={styles.skillsSection}>
                   <div className={styles.sectionHeader}>
                     <span className={styles.sectionTitle}>
@@ -2777,6 +2849,91 @@ const ConfigForm = (props) => {
                   </div>
                 </div>
               )}
+
+              {/* 配置本体 */}
+              <div className={styles.skillsSection}>
+                <div className={styles.sectionHeader}>
+                  <span className={styles.sectionTitle}>
+                    {intl.formatMessage({
+                      id: 'employeeDetail.configureOntology',
+                    })}
+                  </span>
+                  {onOpenOntologyDrawer && (
+                    <Button
+                      type="link"
+                      size="small"
+                      icon={<PlusOutlined />}
+                      onClick={onOpenOntologyDrawer}
+                      disabled={isReadOnly}
+                    >
+                      {intl.formatMessage({ id: 'employeeDetail.ontology.addOntology' })}
+                    </Button>
+                  )}
+                </div>
+                <Card
+                  className={classnames(styles.configCard, styles.ontologyConfigCard, {
+                    [styles.ontologyEmptyCard]: !ontologySummary.hasBinding,
+                  })}
+                >
+                  <div className={styles.ontologyConfigHeader}>
+                    <div className={styles.ontologyIconBox}>
+                      <AntdIcon type="icon-a-Application-oneyingyong3" />
+                    </div>
+                    <div className={styles.ontologyConfigMain}>
+                      <div className={styles.ontologyConfigTitle}>
+                        {ontologySummary.hasBinding
+                          ? intl.formatMessage(
+                              { id: 'employeeDetail.ontology.boundSummary' },
+                              {
+                                viewCount: ontologySummary.totals.views,
+                                objectCount: ontologySummary.totals.objects,
+                              }
+                            )
+                          : ontologySummary.isCleared
+                          ? intl.formatMessage({ id: 'employeeDetail.ontology.clearedTitle' })
+                          : intl.formatMessage({ id: 'employeeDetail.ontology.emptyTitle' })}
+                        {ontologySummary.hasPending && (
+                          <Tag className={styles.ontologyStatusTag} color="orange">
+                            {intl.formatMessage({ id: 'employeeDetail.ontology.pendingSave' })}
+                          </Tag>
+                        )}
+                      </div>
+                      <div className={styles.ontologyConfigDesc}>
+                        {ontologySummary.hasBinding
+                          ? intl.formatMessage({ id: 'employeeDetail.ontology.boundTip' })
+                          : ontologySummary.isCleared
+                          ? intl.formatMessage({ id: 'employeeDetail.ontology.clearedDesc' })
+                          : intl.formatMessage({ id: 'employeeDetail.ontology.emptyDesc' })}
+                      </div>
+                      <Space size={6} wrap className={styles.ontologyTypeTags}>
+                        <Tag>{intl.formatMessage({ id: 'employeeDetail.ontology.view' })}</Tag>
+                        <Tag>{intl.formatMessage({ id: 'employeeDetail.ontology.object' })}</Tag>
+                      </Space>
+                    </div>
+                  </div>
+                  {ontologySummary.hasBinding && (
+                    <div className={styles.ontologyPreviewList}>
+                      {ontologySummary.resources.slice(0, 3).map((resource) => (
+                        <Tooltip
+                          key={resource.key}
+                          title={`${resource.resourceName}${
+                            resource.resourceCode ? `（${resource.resourceCode}）` : ''
+                          }`}
+                        >
+                          <Tag className={styles.ontologyResourcePreviewTag}>
+                            <span>{resource.resourceName}</span>
+                          </Tag>
+                        </Tooltip>
+                      ))}
+                      {ontologySummary.resources.length > 3 && (
+                        <Tag className={styles.ontologyResourcePreviewMore}>
+                          +{ontologySummary.resources.length - 3}
+                        </Tag>
+                      )}
+                    </div>
+                  )}
+                </Card>
+              </div>
 
               {/* 配置技能 */}
               <div className={styles.skillsSection}>
@@ -3501,6 +3658,7 @@ const ConfigForm = (props) => {
                         key={item.value}
                         className={classnames(styles.bundledSkillModalCard, {
                           [styles.selectedBundledSkillModalCard]: isSelected,
+                          // 只有存在标签时才给标题行预留右上角标签空间，避免普通卡片标题过早省略。
                           [styles.hasBundledSkillPosterTag]: !!tagText,
                         })}
                       >

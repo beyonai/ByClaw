@@ -8,6 +8,7 @@ import type {
     ProviderBundle,
 } from "./agent-adapter.js";
 import { rememberAimodelAuthToken } from "./aimodel-auth-cache.js";
+import { decryptBaiyingAimodelAuthTokenSafely } from "./aimodel-token-crypto.js";
 import type { BaiyingRedisJsonStore, RedisJsonPayload } from "./redis-json-store.js";
 import { MANAGED_PROVIDER_PREFIX } from "./types.js";
 
@@ -588,7 +589,7 @@ export function readAuthTokenFromAimodelPayload(payload: RedisJsonPayload | null
     if (normalizeStatus(raw.status) !== 1) {
         return null;
     }
-    const token = nonEmptyString(raw.authToken);
+    const token = decryptBaiyingAimodelAuthTokenSafely(nonEmptyString(raw.authToken));
     return token || null;
 }
 
@@ -611,7 +612,7 @@ export function readAuthTokenFromAimodelTypeListPayload(
         if (normalizeStatus(raw.status) !== 1) {
             return null;
         }
-        const token = nonEmptyString(raw.authToken);
+        const token = decryptBaiyingAimodelAuthTokenSafely(nonEmptyString(raw.authToken));
         return token || null;
     }
     return null;

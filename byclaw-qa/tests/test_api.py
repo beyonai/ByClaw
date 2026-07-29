@@ -1,6 +1,5 @@
 """Tests for api.py — the three ByResourceId endpoints."""
 
-import json
 import os
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock

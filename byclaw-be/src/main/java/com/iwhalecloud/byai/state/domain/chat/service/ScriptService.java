@@ -153,13 +153,13 @@ public class ScriptService extends AbstractChatProcess {
             ctx.assistantChatDto.setLlmMessageId(getModelAnswerMessageIdByTraceId(ctx.assistantChatDto.getTraceId()));
         }
 
-        // @TODO 需要删掉这些 UPDATE FEEDBACK 的逻辑。更新消息全部统一走 continueRunningTrace。必须保证 messageId 和 traceId 的唯一性和一致性。
-
         // 判断是否更新任务
         if (ctx.continueRunningTrace) {
-            ctx.taskId = Optional.ofNullable(ctx.assistantChatDto).map(AssistantChatDto::getExtParams)
-                .filter(params -> params.containsKey("beyondTaskId"))
-                .map(params -> MapParamUtil.getLongValue(params, "beyondTaskId")).orElseGet(sequenceService::nextVal);
+            if (ctx.taskId == null) {
+                ctx.taskId = Optional.ofNullable(ctx.assistantChatDto).map(AssistantChatDto::getExtParams)
+                    .filter(params -> params.containsKey("beyondTaskId"))
+                    .map(params -> MapParamUtil.getLongValue(params, "beyondTaskId")).orElseGet(sequenceService::nextVal);
+            }
         }
         else if (TaskOperateTypeEnum.UPDATE.equals(ctx.assistantChatDto.getTaskOperateType())
             || TaskOperateTypeEnum.RERUN.equals(ctx.assistantChatDto.getTaskOperateType())
@@ -268,7 +268,8 @@ public class ScriptService extends AbstractChatProcess {
         sessionExtService.save(byaiSessionExt);
     }
 
-    private void resolveRunningTraceState(ChatProcessContext ctx) {        if (ctx == null || ctx.sessionId == null) {
+    private void resolveRunningTraceState(ChatProcessContext ctx) {
+        if (ctx == null || ctx.sessionId == null) {
             return;
         }
 
@@ -285,11 +286,15 @@ public class ScriptService extends AbstractChatProcess {
 
         ctx.sendByFrameworkMsgOnly = true;
         ctx.continueRunningTrace = true;
-        ctx.userMessageId = getUserMessageIdByTraceId(runningTraceId);
+        ctx.userMessageId = runningInfo.getUserMessageId();
         ctx.modelAnswerMessageId = runningInfo.getModelAnswerMessageId();
+        if (ctx.userMessageId == null) {
+            ctx.userMessageId = getUserMessageIdByTraceId(runningTraceId);
+        }
         if (ctx.modelAnswerMessageId == null) {
             ctx.modelAnswerMessageId = getModelAnswerMessageIdByTraceId(runningTraceId);
         }
+        ctx.taskId = runningInfo.getTaskId();
         ctx.traceId = runningTraceId;
     }
 
@@ -335,12 +340,12 @@ public class ScriptService extends AbstractChatProcess {
                 return;
             }
             JSONObject userMsg = new JSONObject();
-            userMsg.put("messageId", ctx.userMessageId);
+            userMsg.put("type", "NEW_MESSAGE");
             userMsg.put("sessionId", ctx.sessionId);
-            userMsg.put("chatContent", ctx.assistantChatDto.getChatContent());
-            userMsg.put("metadata", ctx.assistantChatDto.getMetadata());
-            multiDeviceBroadcastService.broadcastToUserDevices(ctx.userId, ctx.sessionId, "userMessage",
-                userMsg.toJSONString(), ctx.senderChannel);
+            userMsg.put("data", JSON.toJSON(ctx.askMsg));
+            userMsg.put("clientRequestId", ctx.assistantChatDto.getClientRequestId());
+            userMsg.put("agentId", ctx.assistantChatDto.getAgentId());
+            multiDeviceBroadcastService.broadcastRawToUser(ctx.userId, userMsg, ctx.senderChannel);
         }
         catch (Exception e) {
             log.warn("多端广播 userMessage 事件异常, sessionId: {}", ctx.sessionId, e);
@@ -377,10 +382,17 @@ public class ScriptService extends AbstractChatProcess {
             log.info("storeMessage 跳过：消息已落库, sessionId: {}, traceId: {}", ctx.sessionId, ctx.traceId);
             return;
         }
+        if (ctx.isMultiAgentRequest() && !ctx.getMultiAgentMessageContextsByTraceId().isEmpty()) {
+            storeMultiAgentMessages(ctx);
+            return;
+        }
         // Netty群聊中使用保存消息路径
         if (ctx.gatewayError) {
             // Gateway error 事件已由 Redis 监听器写入前端，此处仅持久化消息，不再写流
             resolveMemory(ctx, ctx.assistantChatDto, ctx.sessionId, ctx.messageContext, ctx.resMsg);
+        }
+        else if (ctx.recoveryOnly || ctx.res == null) {
+            ctx.chatResponse = resolveMemory(ctx, ctx.assistantChatDto, ctx.sessionId, ctx.messageContext, ctx.resMsg);
         }
         else {
             // 原始路径：持久化 + 向前端写 appStreamResponse
@@ -393,12 +405,159 @@ public class ScriptService extends AbstractChatProcess {
         }
     }
 
+    private void storeMultiAgentMessages(ChatProcessContext ctx) {
+        for (String traceId : orderedMultiAgentTraceIds(ctx)) {
+            MessageContext laneMessageContext = ctx.resolveMessageContext(traceId);
+            if (laneMessageContext == null || !Boolean.TRUE.equals(laneMessageContext.getComplete())) {
+                continue;
+            }
+
+            ChatProcessContext laneCtx = buildMultiAgentLaneStoreContext(ctx, traceId, laneMessageContext);
+            ChatResponse laneResponse = resolveMemory(laneCtx, laneCtx.assistantChatDto, laneCtx.sessionId,
+                laneMessageContext, laneCtx.resMsg);
+            JSONObject payload = JSON.parseObject(JSON.toJSONString(laneResponse));
+            mergeMultiAgentLaneFields(payload, ctx.getMultiAgentLaneMetadata(traceId));
+            payload.put("traceId", traceId);
+            ctx.chatResponse = laneResponse;
+
+            if (!ctx.gatewayError) {
+                CompletionsUtils.responseWrite(ctx.res, SseResponseEventEnum.appStreamResponse,
+                    payload.toJSONString(), ctx.sessionId);
+                broadcastMultiAgentAppStreamResponse(ctx, payload);
+            }
+        }
+    }
+
+    private List<String> orderedMultiAgentTraceIds(ChatProcessContext ctx) {
+        List<String> traceIds = new ArrayList<>(ctx.getMultiAgentTraceIds());
+        traceIds.sort((left, right) -> {
+            Integer leftOrder = Optional.ofNullable(ctx.getMultiAgentLaneMetadata(left))
+                .map(metadata -> metadata.getInteger("order")).orElse(null);
+            Integer rightOrder = Optional.ofNullable(ctx.getMultiAgentLaneMetadata(right))
+                .map(metadata -> metadata.getInteger("order")).orElse(null);
+            if (leftOrder == null && rightOrder == null) {
+                return left.compareTo(right);
+            }
+            if (leftOrder == null) {
+                return 1;
+            }
+            if (rightOrder == null) {
+                return -1;
+            }
+            return leftOrder.compareTo(rightOrder);
+        });
+        return traceIds;
+    }
+
+    private ChatProcessContext buildMultiAgentLaneStoreContext(ChatProcessContext ctx, String traceId,
+        MessageContext laneMessageContext) {
+        AssistantChatDto laneDto = buildMultiAgentLaneDto(ctx.assistantChatDto,
+            ctx.getMultiAgentLaneMetadata(traceId), traceId, laneMessageContext);
+        ChatProcessContext laneCtx = new ChatProcessContext(ctx.res, laneDto);
+        laneCtx.sessionId = ctx.sessionId;
+        laneCtx.traceId = traceId;
+        laneCtx.taskId = ctx.taskId;
+        laneCtx.userId = ctx.userId;
+        laneCtx.loginInfo = ctx.loginInfo;
+        laneCtx.askMsg = ctx.askMsg;
+        laneCtx.suggestionQuestion = ctx.suggestionQuestion;
+        laneCtx.resMsg = new ByaiMessageHotDtoDto();
+        laneCtx.messageContext = laneMessageContext;
+        try {
+            TraceIdCodec.TraceMessageIds messageIds = TraceIdCodec.decode(traceId);
+            laneCtx.userMessageId = messageIds.getUserMessageId();
+            laneCtx.modelAnswerMessageId = messageIds.getModelAnswerMessageId();
+        }
+        catch (Exception e) {
+            laneCtx.userMessageId = ctx.userMessageId;
+            laneCtx.modelAnswerMessageId = laneMessageContext.getMessageId();
+        }
+        return laneCtx;
+    }
+
+    private AssistantChatDto buildMultiAgentLaneDto(AssistantChatDto source, JSONObject laneMetadata, String traceId,
+        MessageContext laneMessageContext) {
+        AssistantChatDto laneDto = new AssistantChatDto();
+        BeanUtils.copyProperties(source, laneDto);
+        laneDto.setTraceId(traceId);
+        laneDto.setLlmMessageId(laneMessageContext.getMessageId());
+        if (laneMetadata != null) {
+            laneDto.setLaneId(laneMetadata.getString("laneId"));
+            laneDto.setClientRequestId(laneMetadata.getString("clientRequestId"));
+            Long agentId = laneMetadata.getLong("agentId");
+            if (agentId != null) {
+                laneDto.setAgentId(agentId);
+            }
+            String agentCode = laneMetadata.getString("agentCode");
+            if (StringUtils.isNotBlank(agentCode)) {
+                laneDto.setAgentCode(agentCode);
+            }
+            laneDto.setMetadata(mergeMetadata(laneDto.getMetadata(), laneMetadata));
+        }
+        return laneDto;
+    }
+
+    private String mergeMetadata(String metadata, JSONObject laneMetadata) {
+        JSONObject merged = new JSONObject();
+        if (StringUtils.isNotBlank(metadata)) {
+            try {
+                JSONObject parsed = JSON.parseObject(metadata);
+                if (parsed != null) {
+                    merged.putAll(parsed);
+                }
+            }
+            catch (Exception e) {
+                log.warn("解析消息 metadata 失败，使用泳道 metadata 兜底: {}", metadata);
+            }
+        }
+        mergeMultiAgentLaneFields(merged, laneMetadata);
+        normalizeMultiAgentLaneRole(merged);
+        return merged.toJSONString();
+    }
+
+    private void normalizeMultiAgentLaneRole(JSONObject metadata) {
+        if (metadata == null) {
+            return;
+        }
+        String agentId = metadata.getString("agentId");
+        if (StringUtils.isBlank(agentId)) {
+            return;
+        }
+        Long userId = CurrentUserHolder.getCurrentUserId();
+        if (userId == null) {
+            return;
+        }
+        metadata.put(Constants.MSG_ROLE, Constants.MSG_AGENT + agentId + Constants.MSG_SPLICE + userId);
+    }
+
+    private void mergeMultiAgentLaneFields(JSONObject target, JSONObject laneMetadata) {
+        if (target == null || laneMetadata == null) {
+            return;
+        }
+        for (String key : laneMetadata.keySet()) {
+            Object value = laneMetadata.get(key);
+            if (value != null) {
+                target.put(key, value);
+            }
+        }
+    }
+
+    private void broadcastMultiAgentAppStreamResponse(ChatProcessContext ctx, JSONObject payload) {
+        try {
+            multiDeviceBroadcastService.broadcastToUserDevices(ctx.userId, ctx.sessionId,
+                SseResponseEventEnum.appStreamResponse, payload.toJSONString(), ctx.senderChannel);
+        }
+        catch (Exception e) {
+            log.warn("多端广播多智能体 appStreamResponse 事件异常, sessionId: {}", ctx.sessionId, e);
+        }
+    }
+
     /**
      * 初始化事件 1.用户消息id 2.大模型消息Id
      *
      * @param ctx
      */
-    private void initEvent(ChatProcessContext ctx) {
+    private ChatInitializationDto initEvent(ChatProcessContext ctx) {
         ChatInitializationDto chatInitializationDto = new ChatInitializationDto();
 
         Map<String, Object> metadata;
@@ -411,6 +570,7 @@ public class ScriptService extends AbstractChatProcess {
         chatInitializationDto.setTraceId(ctx.traceId);
         CompletionsUtils.responseWrite(ctx.res, SseResponseEventEnum.initialization,
             JSON.toJSONString(chatInitializationDto));
+        return chatInitializationDto;
     }
 
     /**
@@ -863,14 +1023,21 @@ public class ScriptService extends AbstractChatProcess {
             messageFactory.updateMessageIndex(ctx.taskMessageIndex.getRelId(), ctx.taskId, ctx.askMsg, ctx.resMsg);
         }
         else {
-            if (ctx.resMsg.getMessageId() == null) {
+            boolean hasPersistableResponse = ctx.messageContext != null && ctx.messageContext.hasPersistableContent();
+            if (ctx.resMsg.getMessageId() == null && hasPersistableResponse) {
                 ctx.resMsg = memoryMessageService.save(ctx.sessionId, SYSTEM_RESPONSE.getCode(), ctx.messageContext,
                     ctx.assistantChatDto);
             }
             float taskDueTime = (System.currentTimeMillis() - ctx.startTime) / 1000.0f;
-            // byai_message_hotcold\relobj
-            messageFactory.saveMessageIndex(ctx.taskId, ctx.askMsg, ctx.resMsg, taskDueTime,
-                Constants.ResponseStatus.SUCCESS, ctx);
+            if (hasPersistableResponse) {
+                // byai_message_hotcold\relobj
+                messageFactory.saveMessageIndex(ctx.taskId, ctx.askMsg, ctx.resMsg, taskDueTime,
+                    Constants.ResponseStatus.SUCCESS, ctx);
+            }
+            else {
+                logger.info("跳过空系统回复入库, sessionId: {}, userMessageId: {}, traceId: {}", ctx.sessionId,
+                    ctx.userMessageId, ctx.traceId);
+            }
         }
 
         // 更新会话记录数

@@ -5,11 +5,86 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from datacloud_platform.constants import DEFAULT_BASE_ID
 from dotenv import load_dotenv
 
 _BY_DATACLOUD_DIRNAME = "by-datacloud"
 _DEFAULT_DATACLOUD_ONTOLOGY_PATH = "/workspace/byclaw-data/resource/ontology"
 _DEFAULT_DATACLOUD_MID_FTP_PATH = "/workspace/byclaw-data/resource/dig_employee"
+
+_platform_initialized = False
+_enterprise_initialized = False
+"""Track whether enterprise base + CRM scene have been initialized."""
+
+
+def _init_enterprise_base_and_scene() -> None:
+    """Create enterprise ontology base and CRM scene, then attach OWL
+    objects and views as scene members.
+
+    Object/view codes are hardcoded from the OWL resource layout;
+    no filesystem scanning.
+
+    Idempotent at every step:
+    - ``create_base`` guarded by ``base_exists``
+    - ``create_scene`` catches ``ValueError`` for duplicates
+    - ``add_scene_members`` deduplicates internally (adapter level)
+
+    Workflow:
+      1. ``platform.create_base(\"enterprise\", ...)`` — 企业本体库
+      2. ``platform.create_scene(\"enterprise\", scene)`` — CRM 场景
+      3. ``platform.add_scene_members(enterprise, crm, objects, views)`` — 挂载
+    """
+    from datacloud_platform import get_platform
+
+    p = get_platform()
+    enterprise_id = DEFAULT_BASE_ID
+
+    # ── 1. 创建企业本体库（幂等）──
+    if not p.base_exists(enterprise_id):
+        from datacloud_platform.base_entry import OntologyBaseEntry
+
+        p.create_base(
+            OntologyBaseEntry(
+                base_id=enterprise_id,
+                display_name="企业本体库",
+                source_type="OPENGAUSS",
+                backend_config={
+                    "ontology": {
+                        "base_path": os.environ.get("DATACLOUD_ONTOLOGY_PATH", ""),
+                        "owl_path": os.environ.get("DATACLOUD_ONTOLOGY_PATH", ""),
+                    }
+                },
+            )
+        )
+
+    # ── 2. 确保默认场景存在（幂等）──
+    _ = p._ensure_default_scene(enterprise_id)
+
+
+def _ensure_enterprise_initialized() -> None:
+    """Idempotent wrapper: initialize enterprise base + CRM scene once per process."""
+    global _enterprise_initialized
+    if _enterprise_initialized:
+        return
+    _init_enterprise_base_and_scene()
+    _enterprise_initialized = True
+
+
+def _init_platform_if_needed() -> None:
+    """Register 4-dimension backends + default base; inject global platform singleton (idempotent).
+
+    Must be called before any ``import datacloud_analysis``, otherwise
+    ``ontology_agent.py`` module load triggers
+    ``get_platform()._default_base_id()`` → ``RuntimeError``.
+    """
+    global _platform_initialized
+    if _platform_initialized:
+        return
+
+    _platform_initialized = True
+
+    # ── 初始化企业本体库 + CRM 场景 ──
+    _ensure_enterprise_initialized()
 
 
 def load_env_if_exists(*paths: Path) -> None:
@@ -59,6 +134,9 @@ def normalize_runtime_environment() -> None:
 
     _set_if_empty("DATACLOUD_ONTOLOGY_PATH", _DEFAULT_DATACLOUD_ONTOLOGY_PATH)
     _set_if_empty("DATACLOUD_MID_FTP_PATH", _DEFAULT_DATACLOUD_MID_FTP_PATH)
+
+    _init_platform_if_needed()
+
     _set_first("DATACLOUD_DB_URL", "DB_URL")
     _set_first("DATACLOUD_DB_USER", "DB_USER")
     _set_first("DATACLOUD_DB_PASSWORD", "DATACLOUD_DB_PASS", "DB_PASS", "DB_PASSWORD")

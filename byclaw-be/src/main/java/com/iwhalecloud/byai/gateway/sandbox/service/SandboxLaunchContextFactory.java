@@ -10,9 +10,11 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Lazy;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import com.alibaba.fastjson.JSON;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iwhalecloud.byai.common.constants.resource.WorkerAgentType;
 import com.iwhalecloud.byai.common.feign.response.knowledge.ModelDto;
 import com.iwhalecloud.byai.common.jwt.JwtService;
@@ -20,6 +22,7 @@ import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.util.StringUtil;
 import com.iwhalecloud.byai.manager.application.service.aimodel.ModelManagementApplicationService;
 import com.iwhalecloud.byai.manager.application.service.login.LoginApplicationService;
+import com.iwhalecloud.byai.manager.application.service.user.UserPrivateParamApplicationService;
 import com.iwhalecloud.byai.manager.domain.aimodel.service.AiModelService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResExtDigEmployeeService;
 import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
@@ -38,6 +41,8 @@ import com.iwhalecloud.byai.state.domain.sys.service.ByaiSystemConfigService;
 public class SandboxLaunchContextFactory {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(SandboxLaunchContextFactory.class);
+
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     @Value("${sandbox.model_provider_name:iwhalecloud}")
     private String modelProviderName;
@@ -77,6 +82,10 @@ public class SandboxLaunchContextFactory {
     @Lazy
     @Autowired
     private SandboxService sandboxService;
+
+    @Lazy
+    @Autowired
+    private StringRedisTemplate stringRedisTemplate;
 
     /**
      * 根据 resourceId 解析沙箱路由。
@@ -199,6 +208,10 @@ public class SandboxLaunchContextFactory {
         Map<String, String> envs = new HashMap<>(8);
 
         loadEnvFile(envs);
+
+        // 加载个人设置的 env（优先级高于系统环境变量）
+        loadPersonalEnvSettings(envs, userCode);
+
         envs.put("gateway_token", gatewayToken);
         envs.put("OPENCLAW_GATEWAY_TOKEN", gatewayToken);
         applyCurrentUserAuthEnv(envs, userCode);
@@ -251,6 +264,47 @@ public class SandboxLaunchContextFactory {
         }
 
         return envs;
+    }
+
+    /**
+     * 从 Redis 加载用户的个人设置 env。
+     * 个人设置的 env 优先级高于系统环境变量。
+     * 只有在 spec.env 中声明的 key 才会最终注入到沙箱。
+     */
+    private void loadPersonalEnvSettings(Map<String, String> envs, String userCode) {
+        if (StringUtils.isBlank(userCode)) {
+            return;
+        }
+
+        try {
+            String redisKey = UserPrivateParamApplicationService.buildPrivateParamRedisKey(userCode);
+            String cacheJson = stringRedisTemplate.opsForValue().get(redisKey);
+
+            if (StringUtils.isBlank(cacheJson)) {
+                LOGGER.debug("用户 {} 没有个人环境变量设置", userCode);
+                return;
+            }
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> cacheData = OBJECT_MAPPER.readValue(cacheJson, Map.class);
+            @SuppressWarnings("unchecked")
+            Map<String, String> params = (Map<String, String>) cacheData.get("params");
+
+            if (params == null || params.isEmpty()) {
+                LOGGER.debug("用户 {} 的个人环境变量为空", userCode);
+                return;
+            }
+
+            int count = 0;
+            for (Map.Entry<String, String> entry : params.entrySet()) {
+                envs.put(entry.getKey(), entry.getValue());
+                count++;
+            }
+
+            LOGGER.info("用户 {} 加载了 {} 个个人环境变量", userCode, count);
+        } catch (Exception e) {
+            LOGGER.error("加载用户 {} 的个人环境变量异常", userCode, e);
+        }
     }
 
     private void applyCurrentUserAuthEnv(Map<String, String> envs, String userCode) {

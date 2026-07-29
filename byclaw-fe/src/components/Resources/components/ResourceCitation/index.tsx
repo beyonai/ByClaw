@@ -17,6 +17,7 @@ import {
   queryDigEmployeeRelResourceAuth,
   queryResourceMembers,
   qryByClawFileByUserCode,
+  queryWorkspaceSkillList,
   readFile,
   deleteSkill,
 } from '@/pages/manager/service/resources';
@@ -25,11 +26,11 @@ import SkillDetailDrawer from '@/pages/manager/components/SkillDetailDrawer/Skil
 import { batchHandleAuth, listAuthDetail } from '@/pages/manager/service/DigitalResourceMgr';
 import { uninstallDigitalEmployeeRelResources } from '@/pages/manager/service/DigitalEmployeeMgr';
 import {
+  mapWorkspaceSkillRows,
   isWorkspaceSkill,
   SKILL_DISPLAY_SOURCE_USER_DEVELOPED,
   type WorkspaceSkillItem,
 } from '@/components/Resources/workspaceSkill/utils';
-import { queryDigitalEmployeeSkillResources } from '@/components/Resources/workspaceSkill/queryDigitalEmployeeSkillResources';
 import { useWorkspaceSkillActions } from '@/components/Resources/workspaceSkill/useWorkspaceSkillActions';
 import useGlobal from '@/hooks/useGlobal';
 
@@ -81,6 +82,11 @@ interface Props {
   /** 渲染形态：grid（默认，卡片网格）或 list（列表，用于小面板弹窗） */
   layout?: 'grid' | 'list';
 }
+
+type ResourceReloadPayload = string | { resourceType?: string };
+
+const getReloadResourceType = (payload?: ResourceReloadPayload) =>
+  typeof payload === 'string' ? payload : payload?.resourceType;
 
 const getGrantItem = (item: any) => ({
   ...item,
@@ -206,10 +212,7 @@ const ResourceList = (props: Props) => {
   }, [defaultResources, keyword, resourceType, resources]);
 
   const pageSize = 100;
-  const getReloadResourceType = (payload?: string | { resourceType?: string }) =>
-    typeof payload === 'string' ? payload : payload?.resourceType;
-
-  const loadResources = async (reset = false, resourceTypePayload?: string | { resourceType?: string }) => {
+  const loadResources = async (reset = false, resourceTypePayload?: ResourceReloadPayload) => {
     if (resources) {
       return;
     }
@@ -220,6 +223,7 @@ const ResourceList = (props: Props) => {
 
     try {
       let rows: any[] = [];
+      // 兼容刷新事件传字符串或对象，避免对象 payload 被当作资源类型直接使用。
       const myResourceType = getReloadResourceType(resourceTypePayload) || resourceType;
       const currentResourceBizTypeList =
         Array.isArray(resourceBizTypeList) && resourceBizTypeList.length
@@ -248,33 +252,43 @@ const ResourceList = (props: Props) => {
       } else {
         const currentPage = reset ? 1 : pageIndex;
         if (normalizedAgentId) {
-          if (myResourceType === 'SKILL') {
-            const skillResult = await queryDigitalEmployeeSkillResources({
-              resourceId: normalizedAgentId,
-              pageSize,
-              pageNum: currentPage,
-              keyword: searchValue.current.trim(),
-              userCode: userInfo?.userCode,
-              includeWorkspace: reset,
-            });
-            rows = skillResult.rows;
-          } else {
-            const response = await queryDigEmployeeRelResourceAuth({
-              resourceId: normalizedAgentId,
-              pageSize,
-              pageNum: currentPage,
-              keyword: searchValue.current.trim(),
-              resourceBizTypeList: currentResourceBizTypeList,
-            });
-            const allRows = Array.isArray(response?.rows)
-              ? response.rows
-              : Array.isArray(response?.list)
-                ? response.list
-                : [];
-            rows =
-              Array.isArray(currentResourceBizTypeList) && currentResourceBizTypeList.length
-                ? allRows.filter((item: any) => currentResourceBizTypeList.includes(item.resourceBizType))
-                : allRows;
+          const response = await queryDigEmployeeRelResourceAuth({
+            resourceId: normalizedAgentId,
+            pageSize,
+            pageNum: currentPage,
+            keyword: searchValue.current.trim(),
+            resourceBizTypeList: currentResourceBizTypeList,
+          });
+          const allRows = Array.isArray(response?.rows)
+            ? response.rows
+            : Array.isArray(response?.list)
+              ? response.list
+              : [];
+          rows =
+            Array.isArray(currentResourceBizTypeList) && currentResourceBizTypeList.length
+              ? allRows.filter((item: any) => currentResourceBizTypeList.includes(item.resourceBizType))
+              : allRows;
+          // 与左侧“技能中心”同口径：技能 tab 首屏在“已绑定技能”之外，合并“用户开发（工作空间未绑定）”技能。
+          if (myResourceType === 'SKILL' && reset) {
+            try {
+              const workspaceSkillResponse: any = await queryWorkspaceSkillList({
+                resourceId: normalizedAgentId,
+                userCode: userInfo?.userCode,
+                keyword: searchValue.current.trim(),
+              });
+              const workspaceRaw = Array.isArray(workspaceSkillResponse)
+                ? workspaceSkillResponse
+                : Array.isArray(workspaceSkillResponse?.data)
+                  ? workspaceSkillResponse.data
+                  : Array.isArray(workspaceSkillResponse?.rows)
+                    ? workspaceSkillResponse.rows
+                    : Array.isArray(workspaceSkillResponse?.list)
+                      ? workspaceSkillResponse.list
+                      : [];
+              rows = [...rows, ...mapWorkspaceSkillRows(workspaceRaw)];
+            } catch (error) {
+              console.warn('query workspace skills failed', error);
+            }
           }
         } else {
           const response = await listResourceUseAuth({
@@ -1039,7 +1053,7 @@ const ResourceList = (props: Props) => {
   };
 
   useEffect(() => {
-    const reload = (payload?: string | { resourceType?: string }) => {
+    const reload = (payload?: ResourceReloadPayload) => {
       const nextResourceType = getReloadResourceType(payload);
       if (nextResourceType !== resourceType) {
         return;
@@ -1052,7 +1066,7 @@ const ResourceList = (props: Props) => {
     return () => {
       EventEmitter.off('beyond-resourceList-resourceType-reload', reload);
     };
-  }, [EventEmitter, loadResources]);
+  }, [EventEmitter, loadResources, resourceType]);
 
   return (
     <div className={styles.container} style={style}>

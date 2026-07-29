@@ -13,6 +13,7 @@ const FragmentComp = () => null;
 
 const ApplicationSession = React.lazy(() => import('@/components/ApplicationSession'));
 const ReplayTemplate = React.lazy(() => import('@/components/ReplayTemplate'));
+const ReadonlySession = React.lazy(() => import('@/components/ReadonlySession'));
 
 type IProps = {
   getContainer?: () => HTMLElement | null;
@@ -38,7 +39,9 @@ function FullAbsoluteDrawer(props: IProps) {
 
   const { canClose, title } = drawerCfg;
 
-  const ContentComp = React.useMemo(() => {
+  // 各内容组件 props 各异(iframe 要 url、会话类要 sessionInfo),这里按 drawerType 动态选组件并统一透传,
+  // 用 ComponentType<any> 消除联合 props 的交叉类型冲突。
+  const ContentComp = React.useMemo<React.ComponentType<any>>(() => {
     if (drawerType === 'application') {
       return ApplicationSession;
     }
@@ -47,6 +50,9 @@ function FullAbsoluteDrawer(props: IProps) {
     }
     if (drawerType === 'replaytmplate') {
       return ReplayTemplate;
+    }
+    if (drawerType === 'readonlysession') {
+      return ReadonlySession;
     }
 
     return FragmentComp;

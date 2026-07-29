@@ -28,6 +28,10 @@ public class ModelDto {
 
     private String modelCode;
 
+    private String providerName;
+
+    private String modelProtocol;
+
     private String modelName;
 
     private Integer status;

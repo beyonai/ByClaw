@@ -5,7 +5,6 @@ import com.iwhalecloud.byai.manager.domain.resource.service.SsResourceService;
 import jakarta.servlet.ServletOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
-import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
@@ -15,6 +14,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.security.SecureRandom;
 import com.iwhalecloud.byai.manager.entity.men.MenResCom;
 import com.iwhalecloud.byai.manager.entity.men.MenTask;
 import com.iwhalecloud.byai.manager.entity.resource.SsResource;
@@ -491,17 +491,19 @@ public class AssistantChatService {
         Long newSessionId = sequenceService.nextVal();
         // 设置会话基本信息
         sessionMembersDto.setSessionId(newSessionId);
+        sessionMembersDto.setProjectId(assistantChatDto.getProjectId());
         sessionMembersDto.setSessionContent(assistantChatDto.getChatContent());
         sessionMembersDto.setObjectType(ConversationObjectType.DIGITAL_EMPLOYEES);
         sessionMembersDto.setObjectId(assistantChatDto.getAgentId());
 
         String chatContent = assistantChatDto.getChatContent();
-        sessionMembersDto.setSessionName(ChatUtils.truncateString(chatContent.replaceAll("\\{\\{[^}]*+\\}\\}", ""), 10));
+        sessionMembersDto
+            .setSessionName(ChatUtils.truncateString(chatContent.replaceAll("\\{\\{[^}]*+\\}\\}", ""), 10));
         sessionMembersDto.setCreatorId(CurrentUserHolder.getCurrentUserId());
         sessionMembersDto.setEnterpriseId(CurrentUserHolder.getEnterpriseId());
         sessionMembersDto.setSessionType(SessionType.H_AS.getCode());
         sessionMembersDto.setIsDebug(assistantChatDto.getIsDebug());
-        
+
         if (StringUtils.isNotBlank(assistantChatDto.getTroubleshootMessageId())) {
             sessionMembersDto.setIsDebug(1);
         }
@@ -666,7 +668,8 @@ public class AssistantChatService {
             // 转换为无符号 32 位整数（0 ~ 2^32-1）
             long unsigned = randomInt & 0xFFFFFFFFL;
             return Long.toString(unsigned);
-        } catch (Exception e) {
+        }
+        catch (Exception e) {
             // 降级方案：时间戳反转取前 10 位
             String timestamp = Long.toString(System.currentTimeMillis());
             String reversed = new StringBuilder(timestamp).reverse().toString();

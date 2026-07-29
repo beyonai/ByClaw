@@ -21,6 +21,7 @@ from by_framework import (
     StreamChunkEvent,
 )
 from by_framework.core.protocol.content_type import SseMessageType
+from datacloud_platform.constants import DEFAULT_BASE_ID
 from dotenv import load_dotenv
 
 from byclaw_data.runtime import (
@@ -134,6 +135,7 @@ class InitDataCloudDigitalEmployeePlugin(Plugin):
         self._last_snapshot: dict[str, str] = {}
         self._agent_file_index: dict[str, Path] = {}
         self._watch_task: asyncio.Task[None] | None = None
+        self._runtime_manager: Any = None
         self._watch_poll_interval = float(
             os.environ.get("DATACLOUD_AGENT_RELOAD_POLL_INTERVAL", "3").strip() or "3"
         )
@@ -151,9 +153,13 @@ class InitDataCloudDigitalEmployeePlugin(Plugin):
             logger.info("[InitPlugin] Loaded project env: path=%s", project_env_path)
         normalize_runtime_environment()
 
+    def set_runtime_manager(self, runtime_manager: Any) -> None:
+        """Receive the LoaderRuntimeManager from the worker's start_heartbeat."""
+        self._runtime_manager = runtime_manager
+
     async def on_worker_startup(self, worker: Any) -> None:
-        if self._watch_task is None:
-            self._watch_task = asyncio.create_task(self._watch_agent_files(worker))
+        # 文件加载已废弃，统一从 Redis 加载（对标 QA worker）
+        pass
 
     async def on_worker_shutdown(self, worker: Any) -> None:
         _ = worker
@@ -337,15 +343,11 @@ class InitDataCloudDigitalEmployeePlugin(Plugin):
         return data
 
     async def register_agent_configs(self, agent_context: Any) -> list[AgentConfig]:
-        """Load digital-employee configs during plugin initialization."""
-        result = await self.reload_agents(
-            registry=None,
-            current_configs=agent_context.list_agent_configs(),
-            reason="startup_register",
-            target_agent_id=None,
-            strict=False,
-        )
-        return result.agent_configs
+        """文件加载已废弃，统一从 Redis 加载（对标 QA worker）。
+
+        返回空列表，不再从本地 JSON 文件加载 AgentConfig。
+        """
+        return []
 
     async def reload_agents(
         self,
@@ -356,23 +358,12 @@ class InitDataCloudDigitalEmployeePlugin(Plugin):
         target_agent_id: str | None = None,
         strict: bool = False,
     ) -> AgentReloadResult:
-        """Reload all or part of the digital employee config set."""
-
-        async with self._reload_lock:
-            baseline_configs = (
-                list(current_configs)
-                if current_configs is not None
-                else list(getattr(registry, "agent_configs", []) or [])
-            )
-            result = self._build_reload_result(
-                baseline_configs=baseline_configs,
-                reason=reason,
-                target_agent_id=target_agent_id,
-                strict=strict,
-            )
-            if registry is not None:
-                registry._agent_configs = list(result.agent_configs)
-            return result
+        """文件加载已废弃，统一从 Redis 加载（对标 QA worker）。"""
+        _ = reason, target_agent_id, strict
+        return AgentReloadResult(
+            agent_configs=current_configs or [],
+            loaded_agent_ids=[],
+        )
 
     def _build_reload_result(
         self,
@@ -623,6 +614,18 @@ class InitDataCloudDigitalEmployeePlugin(Plugin):
         rel_resource_list = detail_data.get("relResourceList") or []
         if not isinstance(rel_resource_list, list):
             rel_resource_list = []
+
+        # 读取 extResourceList → ext_codes（加载到 TOOL_POOL，初始 LOCKED，LLM 不可见）
+        ext_resource_list = detail_data.get("extResourceList") or []
+        if not isinstance(ext_resource_list, list):
+            ext_resource_list = []
+        self._ext_codes = [
+            r.get("resourceCode") for r in ext_resource_list
+            if isinstance(r, dict)
+            and r.get("resourceBizType") in {"OBJECT", "VIEW", "SCENE", "ONTOLOGY_BASE"}
+            and r.get("resourceCode")
+        ]
+
         dynamic_tools, build_diag = self._build_dynamic_tools_with_diagnostics(
             agent_id=agent_id,
             rel_resource_list=rel_resource_list,
@@ -638,12 +641,44 @@ class InitDataCloudDigitalEmployeePlugin(Plugin):
             snapshot = self._rel_resource_snapshot(rel)
             resource_biz_type = snapshot["resourceBizType"]
             resource_code = snapshot["resourceCode"]
-            if resource_biz_type in {"OBJECT", "VIEW"} and resource_code:
+            if resource_biz_type in {"OBJECT", "VIEW", "SCENE", "ONTOLOGY_BASE"} and resource_code:
                 mounted_objects.append(resource_code)
 
         shared_loader: Any = None
-        if mounted_objects:
-            shared_loader = self._build_shared_loader(rel_resource_list)
+        if mounted_objects and self._runtime_manager is not None:
+            snapshot = self._runtime_manager.get_loader(DEFAULT_BASE_ID)
+            shared_loader = snapshot.loader
+
+        # SCENE 工具注册（本地/远程统一，platform 自动路由）
+        for rel in rel_resource_list:
+            snapshot = self._rel_resource_snapshot(rel)
+            if snapshot["resourceBizType"] != "SCENE":
+                continue
+            base_code = str(rel.get("ontologyBaseCode") or "").strip()
+            if not base_code:
+                continue
+
+            scene_id = snapshot["resourceCode"]
+            from datacloud_analysis.tools.ontology_tool_loader import (  # noqa: PLC0415
+                OntologyToolLoader as _OntologyToolLoader,
+            )
+            from datacloud_analysis.tools.tool_pool import register_tool  # noqa: PLC0415
+
+            try:
+                scene_tools = _OntologyToolLoader(
+                    scene_ids=[scene_id],
+                    base_id=base_code,
+                    loader=shared_loader,
+                ).load()
+            except Exception:
+                logger.warning(
+                    "[InitPlugin] SCENE tool loading failed: agent_id=%s scene_id=%s",
+                    agent_id, scene_id, exc_info=True,
+                )
+                continue
+
+            for tool_name, tool_obj in scene_tools.items():
+                register_tool(tool_name, tool_obj, object_code=scene_id)
 
         # 始终注册 data_query_{code}：LLM 不直接调用，由 query_clarification_plugin
         # before_callback redirect 决策从 tools_map 中查找并执行。
@@ -660,7 +695,7 @@ class InitDataCloudDigitalEmployeePlugin(Plugin):
                 snapshot = self._rel_resource_snapshot(rel)
                 resource_code = snapshot["resourceCode"]
                 resource_biz_type = snapshot["resourceBizType"]
-                if resource_biz_type not in {"OBJECT", "VIEW"} or not resource_code:
+                if resource_biz_type not in {"OBJECT", "VIEW", "SCENE", "ONTOLOGY_BASE"} or not resource_code:
                     continue
                 tool_name = f"data_query_{resource_code}"
                 try:
@@ -761,6 +796,7 @@ class InitDataCloudDigitalEmployeePlugin(Plugin):
             extra={
                 "tool_metadata": tool_metadata,
                 "mounted_objects": mounted_objects,
+                "rel_resource_list": rel_resource_list,  # 原始资源列表（含 bizType + base_code）
                 "loader": shared_loader,  # OntologyLoader 实例，供 create_agent 动态生成工具
                 "skip_action_families": skip_action_families,
                 # data_query_* 工具仅供 redirect，不暴露给 LLM，通过此字段传递到 tools_map
@@ -842,7 +878,7 @@ class InitDataCloudDigitalEmployeePlugin(Plugin):
         for rel in rel_resource_list:
             snapshot = self._rel_resource_snapshot(rel)
             biz_type = snapshot["resourceBizType"]
-            if biz_type in {"OBJECT", "VIEW"}:
+            if biz_type in {"OBJECT", "VIEW", "SCENE", "ONTOLOGY_BASE"}:
                 ontology_candidates.append(snapshot)
             elif biz_type == "AGENT":
                 delegate_candidates.append(snapshot)
@@ -946,6 +982,59 @@ class InitDataCloudDigitalEmployeePlugin(Plugin):
                     "OBJECT/VIEW use generic query_objects tool",
                     agent_id,
                     snapshot["resourceCode"],
+                )
+                continue
+
+            # SCENE 类型：由 OntologyToolLoader(scene_ids=...) 统一加载（本地/远程自动路由）
+            if resource_biz_type == "SCENE":
+                base_code = str(rel.get("ontologyBaseCode") or "").strip()
+                if not base_code:
+                    report["skipped"].append(
+                        {**snapshot, "reason": "scene_missing_ontology_base_code"}
+                    )
+                    continue
+                from datacloud_analysis.tools.ontology_tool_loader import (  # noqa: PLC0415
+                    OntologyToolLoader as _OntologyToolLoader,
+                )
+
+                scene_id = snapshot["resourceCode"]
+                try:
+                    scene_tools = _OntologyToolLoader(
+                        scene_ids=[scene_id],
+                        base_id=base_code,
+                    ).load()
+                except Exception:
+                    logger.warning(
+                        "[InitPlugin] SCENE tool loading failed: agent_id=%s scene=%s",
+                        agent_id, scene_id, exc_info=True,
+                    )
+                    report["failed"].append(
+                        {**snapshot, "reason": "scene_tool_load_exception"}
+                    )
+                    continue
+
+                for tool_name, tool_obj in scene_tools.items():
+                    tools[tool_name] = tool_obj
+                    from datacloud_analysis.tools.tool_pool import (  # noqa: PLC0415
+                        register_tool,
+                    )
+                    register_tool(tool_name, tool_obj, object_code=scene_id)
+
+                report["built"].append(
+                    {**snapshot, "tool_count": len(scene_tools)}
+                )
+                continue
+
+            # TODO: ONTOLOGY_BASE 工具注册待实现
+            if resource_biz_type == "ONTOLOGY_BASE":
+                logger.warning(
+                    "[InitPlugin][ToolLoad][Ontology] agent_id=%s resource_code=%s "
+                    "ONTOLOGY_BASE 工具注册暂未实现，但已识别到该资源类型",
+                    agent_id,
+                    snapshot["resourceCode"],
+                )
+                report["skipped"].append(
+                    {**snapshot, "reason": "ontology_base_not_implemented"}
                 )
                 continue
 
@@ -1240,88 +1329,6 @@ class InitDataCloudDigitalEmployeePlugin(Plugin):
         )
         _tool._is_agent_delegate = True  # type: ignore[attr-defined]
         return _tool
-
-    def _build_shared_loader(
-        self, rel_resource_list: list[dict[str, Any]]
-    ) -> Any | None:
-        """Create and configure a shared OntologyLoader for all OBJECT/VIEW resources.
-
-        Uses the first available scene path (same fixed candidates as _resolve_scene_path).
-        OWL loading and virtual-action injection are delegated to OntologyToolLoader._build_loader.
-        Returns None on failure so callers can degrade gracefully.
-        """
-        try:
-            # Find scene path using first resource for logging context
-            first_rel = rel_resource_list[0] if rel_resource_list else {}
-            scene_path = self._resolve_scene_path(first_rel)
-            if not scene_path:
-                logger.warning(
-                    "[InitPlugin] _build_shared_loader: no valid scene_path found, "
-                    "OntologyToolLoader will have no loader"
-                )
-                return None
-
-            from datacloud_analysis.tools.ontology_tool_loader import (  # noqa: PLC0415
-                OntologyToolLoader as _OntologyToolLoader,
-                configure_loader,
-            )
-            resources = [resource.get("resourceCode") for resource in rel_resource_list or [] if resource.get("resourceBizType") in ["OBJECT", "VIEW"]]
-
-            loader = _OntologyToolLoader._build_loader(Path(scene_path), resources)
-            logger.info(
-                "[InitPlugin] _build_shared_loader: OWL load + inject done scene_path=%s",
-                scene_path,
-            )
-
-            # 与动态路径（worker.py 构造 OntologyAgent 时）保持一致：
-            # 静态路径 loader 同样用 byclaw 后端 HTTP 文件存储，
-            # 让大结果集 CSV 走 /writeTxt 上传而非落本地盘。
-            # 构造失败时降级为 None，由 configure_loader 自动回退至 LocalResultFileStorage。
-            result_file_storage: Any = None
-            try:
-                from byclaw_data.mcp.result_file_storage import (  # noqa: PLC0415
-                    build_result_file_storage,
-                )
-                from datacloud_data_service.config import get_settings  # noqa: PLC0415
-
-                result_file_storage = build_result_file_storage(settings=get_settings())
-            except Exception as _rfs_exc:  # noqa: BLE001
-                logger.warning(
-                    "[InitPlugin] _build_shared_loader: build_result_file_storage failed,"
-                    " fallback to local storage: %s",
-                    _rfs_exc,
-                )
-
-            configure_loader(
-                loader,
-                model=os.environ.get(
-                    "DATACLOUD_LLM_CODING_MODEL",
-                    os.environ.get("DATACLOUD_LLM_MODEL", "Qwen/Qwen3-235B-A22B"),
-                ),
-                base_url=os.environ.get("DATACLOUD_LLM_API_BASE"),
-                api_key=os.environ.get("DATACLOUD_LLM_API_KEY"),
-                temperature=0.0,
-                model_kwargs=(
-                    _load_model_kwargs("DATACLOUD_LLM_CODING_MODEL_KWARGS")
-                    or _load_model_kwargs("DATACLOUD_LLM_MODEL_KWARGS")
-                    or None
-                ),
-                csv_base_dir=os.environ.get(
-                    "DATACLOUD_GATEWAY_WORKSPACE_DIR", self._default_workspace_dir()
-                ),
-                sql_execution_mode="internal",
-                result_file_storage=result_file_storage,
-            )
-            logger.info(
-                "[InitPlugin] _build_shared_loader: loader ready scene_path=%s",
-                scene_path,
-            )
-            return loader
-        except Exception as exc:
-            logger.warning(
-                "[InitPlugin] _build_shared_loader: failed to create loader: %s", exc
-            )
-            return None
 
     def _resolve_scene_path(self, rel: dict[str, Any]) -> str:
         """Resolve ontology scene path.
