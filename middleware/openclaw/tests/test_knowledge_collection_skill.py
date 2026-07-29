@@ -222,6 +222,27 @@ class KnowledgeCollectionSkillContractTest(unittest.TestCase):
         self.assertIn(f"]({relative_path})", skill)
         self.assertTrue(bridge_path.is_file(), relative_path)
 
+    def test_agent_reach_enterprise_collection_routes_to_source_bridges(self):
+        collection_skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        agent_reach = (SKILLS_ROOT / "agent-reach" / "SKILL.md").read_text(encoding="utf-8")
+
+        self.assertIn("企业来源的采集、归档、批量搜索或入库请求", agent_reach)
+        self.assertIn("采集编排器 `knowledge-collection`", agent_reach)
+        self.assertIn("不得作为公共互联网任务交给 `bycli`", agent_reach)
+
+        bridges = {
+            "references/sources/wecom-wecomcli.md": "`wecomcli` skill",
+            "references/sources/feishu-fws.md": "`fws` skill",
+        }
+        for relative_path, child_skill in bridges.items():
+            with self.subTest(relative_path=relative_path):
+                bridge = (SKILL_ROOT / relative_path).read_text(encoding="utf-8")
+                self.assertIn(f"]({relative_path})", collection_skill)
+                self.assertIn("委派采集模式", bridge)
+                self.assertIn(child_skill, bridge)
+                self.assertIn("`knowledge-collection` 负责", bridge)
+                self.assertIn("浏览器、curl、直接 HTTP/API", bridge)
+
     def test_child_skill_routes_resolve_to_expected_frontmatter_names(self):
         for relative_path, expected_name in CHILD_SKILLS.items():
             with self.subTest(relative_path=relative_path):

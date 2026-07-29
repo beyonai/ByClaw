@@ -39,6 +39,17 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 - 委派模式下若浏览器降级过程值得复用，返回 `adapterCandidate` 与判断依据给采集编排器，不得直接询问用户是否保存 Adapter。
   非委派的直接查询中，只有直接查询所有者（根 Agent）可以按下方规则询问 Adapter 复用。
 
+## 规则优先级
+
+规则冲突时，按以下顺序处理：
+
+1. 用户明确的当前操作范围和安全边界。
+2. 微信任务的专属认证与验证规则。
+3. 本 Skill 的 STOP / 认证 / 浏览器生命周期规则。
+4. 已选择工作流的详细 reference。
+
+遇到认证、人工验证、桥接不可用或其他 STOP 条件时，停止当前工作流；不得为了补充信息扩大操作范围。
+
 ## 严格禁止 (NEVER DO)
 
 - 不要硬编码 adapter 列表，始终用 `bycli list -f json` 动态发现
@@ -61,7 +72,7 @@ byCLI skill 封装 byCLI —— byCLI 把任意网站、Electron 桌面应用或
 - Agent 调用支持格式化输出的数据 / adapter 命令时加 `-f json` 获取可解析输出；`doctor`、`daemon`、`browser` 生命周期命令以及不支持 `--format` 的子命令按其原生命令执行
 - 浏览器操作前确认 `bycli doctor` 通过（仅 COOKIE/INTERCEPT/UI 策略需要）
 - 每次执行 `bycli doctor` 后（无论成功与否）必须紧接着执行 `bycli daemon status`，确认 daemon 处于 running 且 Extension 为 connected，据此判断桥接是否正常；任一不满足则视为桥接异常，按以下阶梯升级处理：
-  1. 桥接异常 → 先按冷启动流程恢复进程与桥接（`openclaw browser --browser-profile openclaw start` → `bycli doctor` → `bycli daemon status`）；冷启动不包含 `bycli browser open/state`
+  1. 桥接异常 → 先执行 `openclaw browser --browser-profile openclaw status`。若 Chromium 未运行，`/usr/local/bin/start-chrome.sh` 存在且可执行时使用该恢复脚本；否则执行 `openclaw browser --browser-profile openclaw start`，再执行 `bycli doctor` → `bycli daemon status`。冷启动不包含 `bycli browser open/state`
   2. 仍异常 → `bycli daemon restart`，再 `bycli daemon status` 复检
   3. `bycli daemon restart` 后仍连接不上（daemon 未 running 或 Extension 未 connected）→ **STOP，停止一切浏览器动作**，提示用户检查 Chrome 是否正常启动、byCLI 扩展插件是否已安装并启用，恢复后再重试；不得继续驱动或降级到通用工具
 - 修复 adapter 时仅修改 trace `summary.md` 里 `adapterSourcePath` 指向的文件
@@ -163,6 +174,14 @@ bycli gh pr list --limit 5         # 透传调用
 
 命令失败时加 `--trace retain-on-failure` 重跑，读取 trace `summary.md`，进入 AutoFix 流程。微信登录/验证的 `TIMEOUT`、`AUTH_REQUIRED`、CAPTCHA 或环境验证除外，按 `references/weixin.md` 停止并等待用户。
 
+## 认证、人工验证与 STOP
+
+命中 `AUTH_REQUIRED`、登录 / SSO / MFA、CAPTCHA、反爬、限流或环境验证时，不修改 adapter、不自动降级、不重试。保持当前
+session、TAB、daemon 与浏览器存活；不得调用 `state`、`tab list`、`get url` 或其他页面补查，不得跳转、bind、重试、AutoFix 或重跑 trace。
+
+只使用已经返回的结果：报告错误类型、已知 session name 与已返回 URL；若 URL 未返回，明确说明“URL 未提供”。提示用户亲自完成验证后
+结束本轮，等待其明确确认。微信任务优先遵循 [references/weixin.md](./references/weixin.md) 的专属规则。
+
 ## 错误处理
 
 | 错误类型 | Agent 行为 |
@@ -190,12 +209,16 @@ bycli gh pr list --limit 5         # 透传调用
 ### 冷启动
 
 ```bash
+# 先只读检查 Chromium 状态
+openclaw browser --browser-profile openclaw status
+
+# 仅在未运行时恢复：若 /usr/local/bin/start-chrome.sh 存在且可执行，优先用它；否则使用标准启动命令
 openclaw browser --browser-profile openclaw start
 bycli doctor
 bycli daemon status                # doctor 后必跑：确认 daemon running + Extension connected
 ```
 
-冷启动只恢复 Chromium、daemon 和 Extension 握手，**不创建、导航或检查任务 TAB**。`bycli browser <sess> open` 是有副作用的 CDP 导航命令，不是冷启动命令；Chromium 未运行时必须先执行 `openclaw browser --browser-profile openclaw start`。
+冷启动只恢复 Chromium、daemon 和 Extension 握手，**不创建、导航或检查任务 TAB**。`bycli browser <sess> open` 是有副作用的 CDP 导航命令，不是冷启动命令；Chromium 未运行时先检查 `/usr/local/bin/start-chrome.sh` 是否存在且可执行，存在则使用它，否则执行 `openclaw browser --browser-profile openclaw start`。不得把不存在的固定路径当作唯一恢复方法。
 
 ### 桥接正常后的 TAB 分流
 

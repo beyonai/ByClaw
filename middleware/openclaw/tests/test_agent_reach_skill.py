@@ -223,6 +223,21 @@ class AgentReachSkillContractTest(unittest.TestCase):
         self.assertIn("`openclaw browser --browser-profile openclaw start`", skill)
         self.assertIn("`openclaw browser --browser-profile openclaw stop`", skill)
 
+    def test_bycli_groups_priority_and_stop_rules_without_relaxing_ownership(self):
+        skill = BYCLI_SKILL.read_text(encoding="utf-8")
+
+        for phrase in (
+            "## 规则优先级",
+            "用户明确的当前操作范围和安全边界",
+            "STOP / 认证 / 浏览器生命周期规则",
+            "## 认证、人工验证与 STOP",
+            "不得调用 `state`、`tab list`、`get url`",
+            "不得跳转、bind、重试、AutoFix 或重跑 trace",
+            "只使用已经返回的结果",
+            "不得执行 `pkill`、kill-all 或停止共享进程",
+        ):
+            self.assertIn(phrase, skill)
+
     def test_bycli_evals_cover_status_discovery_and_safe_login_boundaries(self):
         evals = json.loads((BYCLI_SKILL.parent / "evals" / "evals.json").read_text(encoding="utf-8"))
         expected = {item["id"]: item["expected_output"] for item in evals["evals"]}
@@ -234,6 +249,11 @@ class AgentReachSkillContractTest(unittest.TestCase):
         self.assertIn("不存在 web/read", expected[5])
         self.assertIn("openclaw browser --browser-profile openclaw start", expected[5])
         self.assertIn("不得代填或提交凭据", expected[8])
+        self.assertIn("可点击链接", expected[12])
+        self.assertIn("不得调用 get url、state、tab list", expected[13])
+        self.assertIn("不需要", expected[14])
+        self.assertIn("/usr/local/bin/start-chrome.sh 存在且可执行", expected[15])
+        self.assertIn("openclaw browser --browser-profile openclaw start", expected[15])
 
 
 if __name__ == "__main__":

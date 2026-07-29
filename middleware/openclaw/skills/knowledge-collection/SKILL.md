@@ -19,8 +19,8 @@ description: Use when the user asks to collect, crawl, batch-search, archive, in
 - 公共互联网：加载并遵循 `agent-reach` skill。
 - `agent-reach` 选择 `bycli`，或用户显式要求 byCLI、浏览器或 Adapter 执行：加载并遵循 `bycli` skill。
 - 钉钉/DingTalk：加载并遵循 `dws` skill，并遵循 [DingTalk DWS 采集桥接](references/sources/dingtalk-dws.md)。
-- 飞书/Lark：加载并遵循 `fws` skill。
-- 企业微信/WeCom：加载并遵循 `wecomcli` skill。
+- 飞书/Lark：加载并遵循 `fws` skill，并遵循 [Feishu 采集桥接](references/sources/feishu-fws.md)。
+- 企业微信/WeCom：加载并遵循 `wecomcli` skill，并遵循 [WeCom 采集桥接](references/sources/wecom-wecomcli.md)。
 
 Agent Reach 直接后端与 `bycli` 后端返回的结果必须统一进入同一套 collection contract，不得按执行后端分叉产物协议。
 
