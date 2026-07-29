@@ -107,7 +107,32 @@ function syncAimodelAllowlist(
 
 function firstRegisteredProviderModelId(provider: unknown): string | undefined {
   if (!provider || typeof provider !== "object") return undefined;
-  const models = (provider as { models?: unknown }).models;
+  const candidate = provider as {
+    baseUrl?: unknown;
+    apiKey?: unknown;
+    api?: unknown;
+    models?: unknown;
+  };
+  const apiKey = candidate.apiKey;
+  const supportedApi = ["openai-completions", "openai-responses", "anthropic-messages"].includes(
+    String(candidate.api),
+  );
+  const usableApiKey =
+    typeof apiKey === "string"
+      ? Boolean(apiKey.trim())
+      : Boolean(apiKey) &&
+        typeof apiKey === "object" &&
+        !Array.isArray(apiKey) &&
+        Object.keys(apiKey).length > 0;
+  if (
+    typeof candidate.baseUrl !== "string" ||
+    !candidate.baseUrl.trim() ||
+    !supportedApi ||
+    !usableApiKey
+  ) {
+    return undefined;
+  }
+  const models = candidate.models;
   if (!Array.isArray(models)) return undefined;
   for (const model of models) {
     if (!model || typeof model !== "object") continue;

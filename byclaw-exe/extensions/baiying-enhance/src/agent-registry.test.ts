@@ -19,6 +19,9 @@ describe("managed model registry", () => {
         models: {
           providers: {
             "baiying-m-neg-2000": {
+              baseUrl: "https://model.example/v1",
+              apiKey: { source: "exec", provider: "baiying-aimodel-redis", id: "model:-2000" },
+              api: "openai-completions",
               models: [{ id: "MiniMax-M3", name: "MiniMax-M3-2000" }],
             },
           },
@@ -33,9 +36,20 @@ describe("managed model registry", () => {
       .toEqual({ primary: "baiying-m-neg-2000/MiniMax-M3" });
   });
 
-  it("leaves a managed agent on the default fallback when its requested provider is missing", () => {
+  it("leaves a managed agent on the default fallback when its requested provider lacks transport configuration", () => {
     const result = mergeManagedAgentsIntoConfig({
-      base: { agents: { list: [{ id: "main", default: true }] }, models: { providers: {} } } as never,
+      base: {
+        agents: { list: [{ id: "main", default: true }] },
+        models: {
+          providers: {
+            "baiying-m-neg-2000": {
+              apiKey: { source: "exec", provider: "baiying-aimodel-redis", id: "model:-2000" },
+              api: "openai-completions",
+              models: [{ id: "MiniMax-M3" }],
+            },
+          },
+        },
+      } as never,
       managed: [managedAgent("-2000")],
       mainParentAgentId: "main",
       mergeAllowSpawnForMain: true,
