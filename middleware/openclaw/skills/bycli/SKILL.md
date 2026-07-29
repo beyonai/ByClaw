@@ -30,6 +30,10 @@ byCLI 将网站、Electron 应用和外部 CLI 统一为 `bycli <site> <command>
 
 任何命令返回认证、人工验证、桥接不可用或安全相关 STOP 条件时，停止当前 workflow，不为“补充信息”自行扩大操作范围。
 
+## 规则优先级
+
+规则冲突时，按以下顺序处理：用户明确的当前操作范围和安全边界；本 Skill 的 STOP / 认证 / 浏览器生命周期规则；最后才是所选 workflow reference。遇到 STOP 条件时停止当前工作流，不为了补充信息扩大操作范围。
+
 ## 硬规则
 
 ### 1. 路由与命令边界
@@ -51,7 +55,7 @@ byCLI 将网站、Electron 应用和外部 CLI 统一为 `bycli <site> <command>
 - 不在 browser 命令中硬编码 CSS selector；按 [references/browser.md](./references/browser.md) 使用实时 ref 和 target contract。
 - 不确定 TAB 目标时停止并请用户确认；不得猜测后导航、自动换 session 或新建 TAB。
 
-### 3. 认证、人工验证和 STOP
+## 认证、人工验证与 STOP
 
 以下情况不修改 adapter、不自动降级、不重试：
 
@@ -99,12 +103,12 @@ Weixin 任务必须优先读取 [references/weixin/SKILL.md](./references/weixin
 | 已有 Markdown 内容请求入库 | 直接交给 knowledge-ingest | [knowledge-ingest.md](./references/knowledge-ingest.md) |
 | 已有内容请求知识整理 | 委派 knowledge-organizer，不执行入库 | 对应 knowledge-organizer skill |
 
-### 查询与采集边界
+### 查询 vs 采集边界
 
 | 场景 | 行为 |
 |---|---|
-| 查一个事实、看一个页面、打开网页、登录、读一篇内容、一次站点操作 | 完成请求，不主动问入库或知识整理 |
-| “采集 / 抓取 / 爬取 / 批量获取 / 搜索结果 / 多篇正文 / 存知识库”，或结构化多条结果 / 批量正文 | 视为采集任务：成功后先落盘，再问处理动作 |
+| 查一个事实、看一个页面、打开网页、登录、读一篇内容、一次站点操作 | 完成请求即可，不主动问入库或知识整理 |
+| “采集 / 抓取 / 爬取 / 批量获取 / 搜索结果 / 多篇正文 / 存知识库”，或结构化多条结果 / 批量正文 | 视为采集任务，成功后先落盘，再问处理动作 |
 | “保存文件 / 下载” | 只做本地文件保存，不触发知识处理询问 |
 | “记住这个” | 按对话记忆或用户指定机制处理，不触发 knowledge-ingest / knowledge-organizer |
 
@@ -154,6 +158,7 @@ bycli daemon status
 3. 仍未连接时 STOP：提示用户检查 Chrome 和 byCLI Extension，停止一切浏览器动作，不降级到通用工具。
 
 冷启动不包含 `bycli browser open` / `state` / `tab list`，浏览器已运行时不得重复执行启动脚本。
+浏览器恢复不得执行 `openclaw browser --browser-profile openclaw stop`；共享 daemon 和 Chromium 也不得停止。
 
 ### 2. TAB 分流
 
@@ -170,11 +175,13 @@ TAB 约束：同名 session 只有在相同 surface、browser context 和存活 
 
 ### 3. 关闭和异常
 
-清理遵循“采集或浏览任务结束时只关闭当前任务使用的浏览器 Tab”原则。当前页不是登录 / 验证 / CAPTCHA / 反爬页面且没有后续复用需求时：
+清理遵循“只清理当前任务创建或独占拥有的资源”原则。采集或浏览任务结束时只关闭当前任务使用的浏览器 Tab。当前页不是登录 / 验证 / CAPTCHA / 反爬页面且没有后续复用需求时：
 
 - 当前任务创建或独占拥有的 TAB：执行 `bycli browser <session> close`。
 - 永远不要主动停止 daemon 或 Chromium；Chrome 实例由运行环境负责管理并保持存活。
 - 无法确认 TAB 所有权时，不关闭该 TAB；不得为了清理方便关闭用户或共享资源。
+- 不得执行 `bycli daemon stop` 或 `openclaw browser --browser-profile openclaw stop`。
+- 不得执行 `pkill`、kill-all 或停止共享进程。
 
 异常或卡死时，不执行全局进程终止，不停止 daemon 或 Chromium，也不关闭无法确认归属的 TAB。先报告原始错误；仅在能精确确认 TAB 由当前任务创建或独占使用时，才释放该 TAB，否则停止并请用户或运行环境管理员手动处理。
 
@@ -245,6 +252,16 @@ TAB 约束：同名 session 只有在相同 surface、browser context 和存活 
 保留策略：落盘后保留；入库成功且用户未要求保留时可由 knowledge-ingest 清理已归档时间戳目录；知识整理成功、任一处理失败、用户跳过或明确要求保留时均保留；session 结束不主动清理。
 
 用户明确要求清理时，先列出目标时间戳目录（降序），默认保留最近 10 次，`audit_required=true` 不可删，二次确认后只删目录内容、不删目录本身。
+
+### 采集编排与收尾问题
+
+bycli 是网页和采集入口；采集后处理衔接（强制）与采集产物落盘约定（强制）由 bycli 内部遵守。产物使用 `bycli-output.json` 和 `bycli_filter`，入库交给 `knowledge-ingest.md`，知识整理交给 `knowledge-organizer`；旧版 `bycli-markdown-ingest.mjs` 仅作兼容参考。
+
+问题 ①「复用」：是否把刚才的获取过程保存成一个专用 adapter？
+
+问题 ②「处理」：是否选择入库 / 知识整理 / 跳过？
+
+问①与问②相互独立；①②**都要问**时，按顺序询问，但都不自动执行。采集产物保留策略遵循上方处理动作与保留规则。
 
 ## 结果展示
 
