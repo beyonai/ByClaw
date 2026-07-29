@@ -1,7 +1,50 @@
 import { describe, expect, it } from "vitest";
 import { mergeManagedAgentsIntoConfig } from "./agent-registry.js";
 
+const managedAgent = (baiyingModelId?: string) => ({
+  sourceKey: "10000235",
+  agentId: "baiying-agent-10000235",
+  providerKey: "",
+  modelRef: "",
+  allowSpawnFrom: ["main"],
+  listEntry: { id: "baiying-agent-10000235", name: "Knowledge assistant" },
+  baiyingModelId,
+});
+
 describe("managed model registry", () => {
+  it("binds a managed agent to the registered model id for a negative Baiying model id", () => {
+    const result = mergeManagedAgentsIntoConfig({
+      base: {
+        agents: { list: [{ id: "main", default: true }] },
+        models: {
+          providers: {
+            "baiying-m-neg-2000": {
+              models: [{ id: "MiniMax-M3", name: "MiniMax-M3-2000" }],
+            },
+          },
+        },
+      } as never,
+      managed: [managedAgent("-2000")],
+      mainParentAgentId: "main",
+      mergeAllowSpawnForMain: true,
+    });
+
+    expect(result.agents?.list?.find((entry) => entry.id === "baiying-agent-10000235")?.model)
+      .toEqual({ primary: "baiying-m-neg-2000/MiniMax-M3" });
+  });
+
+  it("leaves a managed agent on the default fallback when its requested provider is missing", () => {
+    const result = mergeManagedAgentsIntoConfig({
+      base: { agents: { list: [{ id: "main", default: true }] }, models: { providers: {} } } as never,
+      managed: [managedAgent("-2000")],
+      mainParentAgentId: "main",
+      mergeAllowSpawnForMain: true,
+    });
+
+    expect(result.agents?.list?.find((entry) => entry.id === "baiying-agent-10000235")?.model)
+      .toBeUndefined();
+  });
+
   it("replaces stale managed providers while preserving static providers", () => {
     const result = mergeManagedAgentsIntoConfig({
       base: {

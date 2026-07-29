@@ -2,6 +2,7 @@ import type { OpenClawConfig } from "openclaw/plugin-sdk/compat";
 import type { AdaptedManagedAgent, ProviderBundle } from "./agent-adapter.js";
 import {
   DEFAULT_AIMODEL_SECRET_PROVIDER_NAME,
+  providerKeyForBaiyingModelId,
   resolveAimodelConfigRedisKey,
   resolveAimodelSecretProviderName,
   resolveAimodelTypeListRedisKey,
@@ -104,6 +105,18 @@ function syncAimodelAllowlist(
   cfg.agents!.defaults.models = aliases;
 }
 
+function firstRegisteredProviderModelId(provider: unknown): string | undefined {
+  if (!provider || typeof provider !== "object") return undefined;
+  const models = (provider as { models?: unknown }).models;
+  if (!Array.isArray(models)) return undefined;
+  for (const model of models) {
+    if (!model || typeof model !== "object") continue;
+    const id = (model as { id?: unknown }).id;
+    if (typeof id === "string" && id.trim()) return id.trim();
+  }
+  return undefined;
+}
+
 /** Merge only the dynamic model catalog, preserving all existing agents. */
 export function mergeDynamicAimodelsIntoConfig(params: {
   base: OpenClawConfig;
@@ -203,9 +216,16 @@ export function mergeManagedAgentsIntoConfig(params: {
   for (const m of params.managed) {
     const workspaceDir =
       existingWorkspaceById.get(m.agentId) ?? resolveDefaultManagedWorkspacePath(m.agentId);
+    const providerKey = m.baiyingModelId
+      ? providerKeyForBaiyingModelId(m.baiyingModelId)
+      : undefined;
+    const modelId = providerKey
+      ? firstRegisteredProviderModelId(providers[providerKey])
+      : undefined;
     list.push({
       ...m.listEntry,
       workspace: workspaceDir,
+      ...(providerKey && modelId ? { model: { primary: `${providerKey}/${modelId}` } } : {}),
     });
     if (m.provider && m.providerKey) {
       providers[m.providerKey] = {
