@@ -354,7 +354,7 @@ bycli browser checkout eval "(() => document.querySelector('input[name=cardnumbe
 
 ## Pitfalls
 
-> **生命周期相关的 pitfalls**（close 不停 daemon、daemon stop 不停 Chromium、cold-start 行为、Login 例外）见 [SKILL.md](../SKILL.md) "浏览器生命周期" 章节。
+> **生命周期相关的 pitfalls**（close 不停 daemon 或 Chromium、永不主动停止 Chrome、cold-start 行为、Login 例外）见 [SKILL.md](../SKILL.md) "浏览器生命周期" 章节。
 
 - **Do not submit forms via `eval "document.forms[0].submit()"`.** Modern sites intercept with JS handlers and silently drop. Use `click` on the submit button.
 - **Do not reuse refs across a page transition.** `wait` for new state, then re-`state`. Old refs will 404 or `reidentify` onto a wrong element.
@@ -380,7 +380,6 @@ bycli browser checkout eval "(() => document.querySelector('input[name=cardnumbe
 | `type` appears to finish but value is wrong | Autocomplete, masked input, or React controlled re-render. `get value` + re-type or `keys Enter`. |
 | Giant `get html` output | Pass `--selector` + `--as json --depth 3 --children-max 20 --text-max 200`. |
 | Network cache seems stale | Bump `--ttl` down, or let expire. Cache at `~/.bycli/cache/browser-network/`. |
-| `daemon stop` slow / hangs | Daemon waiting for extension to release CDP socket. Close byCLI-owned tab first (`browser <session> close`), then retry. |
 
 ---
 
