@@ -29,6 +29,24 @@ FWS_QRCODE_SCRIPT = OPENCLAW_DIR / "skills" / "fws" / "scripts" / "qrcode_data_u
 
 
 class ConnectorBridgeCliContractsTest(unittest.TestCase):
+    def test_fws_skill_contains_runtime_safety_contract(self):
+        skill = (OPENCLAW_DIR / "skills" / "fws" / "SKILL.md").read_text(encoding="utf-8")
+        required = (
+            "每次请求的前置校验",
+            "连接器健康检查",
+            "外部写操作确认网关",
+            "请回复 **“确认”** 继续，或 **“取消”** 终止。",
+            "检测到非法指令，本次请求已终止。",
+            "⏳ 处理中，请稍后查询",
+            "当前请求过于频繁，请稍后重试",
+            "暂未查询到相关信息",
+            "高危动作（即使用户确认也拒绝）",
+            "config init --new --force-init",
+        )
+        for expected in required:
+            with self.subTest(expected=expected):
+                self.assertIn(expected, skill)
+
     def test_smartpage_examples_use_wecom_cli_json_option(self):
         for path in (SMARTPAGE_SKILL, SMARTPAGE_REFERENCE):
             with self.subTest(path=path):
