@@ -394,6 +394,12 @@
   background: #f3ecff;
 }
 
+// 运营项目沿用原型的青绿色标签，与研发项目和普通共享项目形成稳定区分；标签优先级由 index.tsx 控制。
+.projectTagOperation {
+  color: #0f766e;
+  background: #e6f5f2;
+}
+
 .sessionList {
   position: relative;
   z-index: 0;
@@ -2392,6 +2398,11 @@
 .detailTaskStatusPaused {
   color: #b7791f;
   background: #fff7e6;
+}
+
+.detailTaskStatusFailed {
+  color: #cf1322;
+  background: #fff1f0;
 }
 
 .detailTaskStatusDone {

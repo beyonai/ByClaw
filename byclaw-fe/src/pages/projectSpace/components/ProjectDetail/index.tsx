@@ -1,6 +1,7 @@
 import { Button, Segmented, Spin, Typography } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import { useEffect, useMemo, useState } from 'react';
+import { useIntl } from '@umijs/max';
 import { PROJECT_DETAIL_SECTIONS, type ProjectDetailSection } from '../../constants';
 import { useProjectSessions } from '../../hooks/useProjectSessions';
 import { useProjectTypeConfig } from '../../hooks/useProjectTypeConfig';
@@ -20,35 +21,41 @@ interface Props {
 }
 
 const ProjectDetail: React.FC<Props> = ({ project, loading, onRefresh, onOpenSession }) => {
+  const intl = useIntl();
   const [activeSection, setActiveSection] = useState<ProjectDetailSection>('sessions');
   const { sessions, total } = useProjectSessions(project);
-  const { isDevelopProjectEnabled } = useProjectTypeConfig();
-  // 研发能力以静态参数为准，未配置研发项目时普通共享项目也不展示研发专属分区。
+  const { isDevelopProjectEnabled, isOperationProjectEnabled } = useProjectTypeConfig();
+  // 研发和运营能力均以静态参数为准，避免未启用环境误展示对应的业务分区。
   const isDevelopProject = isDevelopProjectEnabled && project?.projectType === 'develop';
+  const isOperationProject = isOperationProjectEnabled && project?.projectType === 'operation';
+  // 运营项目只保留任务、资源和成员，研发项目才展示需求；普通共享项目仍可查看成员。
   const showRequirementsSection = isDevelopProject;
-  const showMembersSection = isDevelopProject;
+  const showMembersSection = isDevelopProject || isOperationProject || !!project?.sharedFlag;
+  const showSessionsSection = !isOperationProject;
   const detailSections = useMemo(
     () =>
       PROJECT_DETAIL_SECTIONS.filter((item) => {
+        if (item.key === 'sessions') return showSessionsSection;
         if (item.key === 'members') return showMembersSection;
         if (item.key === 'requirements') return showRequirementsSection;
         return true;
       }),
-    [showMembersSection, showRequirementsSection]
+    [showMembersSection, showRequirementsSection, showSessionsSection]
   );
 
   useEffect(() => {
-    // 默认项目/普通未共享项目会隐藏部分 tab，若当前停留在隐藏 tab，则回到会话列表。
+    // 运营项目不展示会话页，其他项目隐藏成员或需求页时回退到首个可见分区。
     const currentTabHidden =
+      (!showSessionsSection && activeSection === 'sessions') ||
       (!showMembersSection && activeSection === 'members') ||
       (!showRequirementsSection && activeSection === 'requirements');
     if (currentTabHidden) {
-      setActiveSection('sessions');
+      setActiveSection(showSessionsSection ? 'sessions' : 'tasks');
     }
-  }, [activeSection, showMembersSection, showRequirementsSection]);
+  }, [activeSection, showMembersSection, showRequirementsSection, showSessionsSection]);
 
   if (!project) {
-    return <div className={styles.detailEmpty}>请选择一个项目空间</div>;
+    return <div className={styles.detailEmpty}>{intl.formatMessage({ id: 'projectSpace.selectProject' })}</div>;
   }
 
   const renderSessionList = () => (
@@ -73,16 +80,25 @@ const ProjectDetail: React.FC<Props> = ({ project, loading, onRefresh, onOpenSes
         <div>
           <Typography.Title level={3}>{project.projectName}</Typography.Title>
           <Typography.Text type="secondary">
-            {project.description || '暂无项目描述'} · {total} 个会话
+            {project.description || intl.formatMessage({ id: 'projectSpace.projectCard.emptyDescription' })}
+            {showSessionsSection && (
+              <>
+                {' · '}
+                {intl.formatMessage({ id: 'projectSpace.projectCard.sessionCount' }, { count: total })}
+              </>
+            )}
           </Typography.Text>
         </div>
         <div className={styles.detailHeaderActions}>
           <Button icon={<ReloadOutlined />} onClick={onRefresh}>
-            刷新详情
+            {intl.formatMessage({ id: 'projectSpace.detail.refresh' })}
           </Button>
           <Segmented
             value={activeSection}
-            options={detailSections.map((item) => ({ label: item.label, value: item.key }))}
+            options={detailSections.map((item) => ({
+              label: intl.formatMessage({ id: item.labelId }),
+              value: item.key,
+            }))}
             onChange={(value) => setActiveSection(value as ProjectDetailSection)}
           />
         </div>

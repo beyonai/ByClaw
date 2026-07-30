@@ -97,6 +97,7 @@ const ProjectFormModal: React.FC<Props> = ({
   const localizedProjectTypeLabels = useMemo(
     () => ({
       normal: formT('type.normal'),
+      operation: formT('type.operation'),
       develop: formT('type.develop'),
       default: formT('type.default'),
     }),
@@ -114,6 +115,8 @@ const ProjectFormModal: React.FC<Props> = ({
   const projectType = Form.useWatch('projectType', form);
   const sharedFlag = Form.useWatch('sharedFlag', form);
   const isDevelopProject = isDevelopProjectEnabled && projectType === 'develop';
+  const isOperationProject = projectType === 'operation';
+  const isForcedSharedProject = isDevelopProject || isOperationProject;
   const formInitialValues = useMemo(() => {
     const values = {
       projectName: '',
@@ -131,7 +134,7 @@ const ProjectFormModal: React.FC<Props> = ({
   }, [initialValues]);
   const isEditingDefaultProject = !!projectId && formInitialValues.projectType === 'default';
   const isDefaultProject = projectType === 'default' || isEditingDefaultProject;
-  const isProjectShared = !isDefaultProject && (isDevelopProject || !!sharedFlag);
+  const isProjectShared = !isDefaultProject && (isForcedSharedProject || !!sharedFlag);
   const normalizeProjectShareMember = useCallback(
     (member: any): ProjectShareMember => {
       const normalizedMember = normalizeShareMember(member);
@@ -155,7 +158,7 @@ const ProjectFormModal: React.FC<Props> = ({
     }
 
     if (!selectableOptions.some((option) => option.value === formInitialValues.projectType)) {
-      // 历史研发项目在未配置研发类型的环境中仅允许回显，避免 Select 出现空值。
+      // 历史业务项目在当前环境未配置对应类型时仅允许回显，避免 Select 出现空值。
       return [
         {
           label:
@@ -209,10 +212,10 @@ const ProjectFormModal: React.FC<Props> = ({
   }, [memberT, normalizeProjectShareMember, open, projectId]);
 
   useEffect(() => {
-    if (!open || !isDevelopProject) return;
-    // 研发项目按规则必须共享，切换到研发时强制打开开关并保留已选共享成员。
+    if (!open || !isForcedSharedProject) return;
+    // 研发项目和运营项目必须共享，切换类型时强制打开开关并保留已选成员。
     form.setFieldValue('sharedFlag', true);
-  }, [form, isDevelopProject, open]);
+  }, [form, isForcedSharedProject, open]);
 
   useEffect(() => {
     if (!open || !isDefaultProject) return;
@@ -318,7 +321,12 @@ const ProjectFormModal: React.FC<Props> = ({
 
   const handleSubmit = (values: ProjectFormValues) => {
     const submitIsDevelopProject = isDevelopProjectEnabled && values.projectType === 'develop';
-    const submitSharedFlag = values.projectType === 'default' ? false : submitIsDevelopProject || values.sharedFlag;
+    const submitIsOperationProject = values.projectType === 'operation';
+    // 提交时再强制校正共享标记，避免表单回显或异步配置导致强制共享项目被保存为不共享。
+    const submitSharedFlag =
+      values.projectType === 'default'
+        ? false
+        : submitIsDevelopProject || submitIsOperationProject || values.sharedFlag;
     // 共享成员由成员 tab 同源数据维护，提交时合并进表单值，避免未注册字段丢失。
     onSubmit({
       ...values,
@@ -363,11 +371,12 @@ const ProjectFormModal: React.FC<Props> = ({
             loading={projectTypeLoading}
             options={visibleProjectTypeOptions}
             onChange={(value: ProjectSpace['projectType']) => {
-              if (isDevelopProjectEnabled && value === 'develop') {
+              const isForcedSharedType = (isDevelopProjectEnabled && value === 'develop') || value === 'operation';
+              if (isForcedSharedType) {
                 form.setFieldValue('sharedFlag', true);
                 return;
               }
-              // 切回普通项目时恢复默认不共享，避免沿用研发项目的强制共享状态。
+              // 切回普通项目时恢复默认不共享，避免沿用强制共享项目的状态。
               form.setFieldValue('sharedFlag', false);
               form.setFields([{ name: 'shareMembers', errors: [] }]);
             }}
@@ -375,7 +384,7 @@ const ProjectFormModal: React.FC<Props> = ({
         </Form.Item>
         <Form.Item name="sharedFlag" label={formT('field.shared')} valuePropName="checked">
           <Switch
-            disabled={isDevelopProject || isDefaultProject}
+            disabled={isForcedSharedProject || isDefaultProject}
             onChange={(checked) => {
               if (!checked) {
                 form.setFields([{ name: 'shareMembers', errors: [] }]);

@@ -55,7 +55,7 @@ export const normalizeProject = (item: any): ProjectSpace => ({
   projectName: item?.projectName || '',
   description: item?.description,
   resourceId: item?.resourceId,
-  // 后端项目类型字段按接口文档使用 normal/develop，这里兼容旧前端 development 值。
+  // 后端项目类型统一使用 normal/operation/develop，这里继续兼容旧前端 development 值，保证历史项目仍能进入对应详情页。
   projectType: item?.projectType === 'development' ? 'develop' : item?.projectType || 'normal',
   isShare: item?.isShare === 'Y' || item?.sharedFlag === true ? 'Y' : 'N',
   sharedFlag: item?.isShare === 'Y' || item?.sharedFlag === true,

@@ -62,6 +62,72 @@ const mergeProjectSessions = (cachedSessions: ProjectSession[] = [], nextSession
   return Array.from(sessionMap.values());
 };
 
+// 运营会话可能在会话本身或嵌套任务中返回工作流；此方法只提取适合侧栏一行展示的当前节点名称。
+const getWorkflowStageName = (workflow: unknown): string | undefined => {
+  if (Array.isArray(workflow)) {
+    // 运营工作流优先展示正在执行或等待处理的节点，全部结束时回退到最后一个节点。
+    const runningStatuses = new Set(['doing', 'in_progress', 'running']);
+    const waitingStatuses = new Set(['waiting', 'waiting_confirmation']);
+    const findStepByStatuses = (statuses: Set<string>) =>
+      workflow.find((step) => {
+        if (!step || typeof step !== 'object') return false;
+        const status = `${(step as Record<string, unknown>).status || ''}`.toLowerCase();
+        return statuses.has(status);
+      });
+    const currentStep =
+      findStepByStatuses(runningStatuses) || findStepByStatuses(waitingStatuses) || workflow[workflow.length - 1];
+    return getWorkflowStageName(currentStep);
+  }
+
+  if (!workflow || typeof workflow !== 'object') {
+    return typeof workflow === 'string' ? trim(workflow) || undefined : undefined;
+  }
+
+  const workflowRecord = workflow as Record<string, unknown>;
+  const nestedStageName =
+    getWorkflowStageName(workflowRecord.currentStage) ||
+    getWorkflowStageName(workflowRecord.currentStep) ||
+    getWorkflowStageName(workflowRecord.stage);
+  if (nestedStageName) return nestedStageName;
+
+  const directStageName = [
+    workflowRecord.stageName,
+    workflowRecord.name,
+    workflowRecord.title,
+    workflowRecord.label,
+  ].find((value) => typeof value === 'string' && trim(value));
+  if (typeof directStageName === 'string') return trim(directStageName);
+
+  return getWorkflowStageName(workflowRecord.steps);
+};
+
+// 运营项目侧栏优先展示工作流进度，接口没有工作流数据时再回退到原会话摘要。
+const getOperationSessionDescription = (session: ProjectSession): string | undefined => {
+  const sessionWithWorkflow = session as ProjectSession & {
+    currentStage?: unknown;
+    currentStageName?: unknown;
+    workflow?: unknown;
+    workflowStage?: unknown;
+    workflowSteps?: unknown;
+    task?: unknown;
+  };
+  const task =
+    sessionWithWorkflow.task && typeof sessionWithWorkflow.task === 'object'
+      ? (sessionWithWorkflow.task as Record<string, unknown>)
+      : undefined;
+
+  return (
+    getWorkflowStageName(sessionWithWorkflow.currentStage) ||
+    getWorkflowStageName(sessionWithWorkflow.currentStageName) ||
+    getWorkflowStageName(sessionWithWorkflow.workflowStage) ||
+    getWorkflowStageName(sessionWithWorkflow.workflow) ||
+    getWorkflowStageName(sessionWithWorkflow.workflowSteps) ||
+    getWorkflowStageName(task?.currentStage) ||
+    getWorkflowStageName(task?.workflow) ||
+    session.sessionContent
+  );
+};
+
 const getProjectScene = (project: ProjectSpace, t: ProjectSpaceTranslate) => {
   if (project.projectType === 'default') {
     return { classSuffix: 'Default', text: t('scene.default') };
@@ -70,6 +136,11 @@ const getProjectScene = (project: ProjectSpace, t: ProjectSpaceTranslate) => {
   // 研发项目即使强制共享，列表也优先展示业务类型标签。
   if (project.projectType === 'develop') {
     return { classSuffix: 'Development', text: t('scene.development') };
+  }
+
+  // 运营项目与研发项目一致，强制共享时仍优先展示业务类型标签。
+  if (project.projectType === 'operation') {
+    return { classSuffix: 'Operation', text: t('scene.operation') };
   }
 
   if (project.sharedFlag) {
@@ -175,8 +246,9 @@ const ProjectSpaceList: React.FC = () => {
   const { EventEmitter, setAgentId, setSessionId } = useGlobal();
   const { clearDetailPanel } = React.useContext(SiderContentContext);
   const { projects, loading, fetchProjects } = useProjectList();
-  // 项目类型配置决定研发闭环能力是否开放，侧栏表单和详情使用同一份结果。
-  const { projectTypeOptions, projectTypeLoading, isDevelopProjectEnabled } = useProjectTypeConfig();
+  // 项目类型配置决定研发、运营能力是否开放，侧栏表单和详情使用同一份结果。
+  const { projectTypeOptions, projectTypeLoading, isDevelopProjectEnabled, isOperationProjectEnabled } =
+    useProjectTypeConfig();
   const [projectScopeId, setProjectScopeId] = useState<string | undefined>(() => getStoredProjectScopeId());
   const [sessionKeyword, setSessionKeyword] = useState('');
   const [projectDetailMap, setProjectDetailMap] = useState<Record<string, ProjectSpace>>({});
@@ -829,8 +901,12 @@ const ProjectSpaceList: React.FC = () => {
     projectSavingRef.current = true;
     setProjectCreating(true);
     const submitIsDevelopProject = isDevelopProjectEnabled && values.projectType === 'develop';
-    // 默认项目固定不共享，研发项目是否强制共享取决于当前环境是否启用研发类型。
-    const submitSharedFlag = values.projectType === 'default' ? false : submitIsDevelopProject || values.sharedFlag;
+    const submitIsOperationProject = isOperationProjectEnabled && values.projectType === 'operation';
+    // 默认项目固定不共享，研发项目和运营项目在对应能力启用时必须共享。
+    const submitSharedFlag =
+      values.projectType === 'default'
+        ? false
+        : submitIsDevelopProject || submitIsOperationProject || values.sharedFlag;
     const shareMembers = submitSharedFlag ? values.shareMembers || [] : [];
     let createdProjectId = '';
     try {
@@ -1120,7 +1196,11 @@ const ProjectSpaceList: React.FC = () => {
 
     if (!sessions.length) {
       return (
-        <Empty className={styles.sessionEmpty} image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('emptySessions')} />
+        <Empty
+          className={styles.sessionEmpty}
+          image={Empty.PRESENTED_IMAGE_SIMPLE}
+          description={t(project.projectType === 'operation' ? 'emptyOperationSessions' : 'emptySessions')}
+        />
       );
     }
 
@@ -1128,18 +1208,20 @@ const ProjectSpaceList: React.FC = () => {
       <>
         {sessions.map((session) => {
           // 项目会话复用会话模块卡片，保持头像、摘要、时间和选中态一致。
+          const displaySession =
+            project.projectType === 'operation'
+              ? { ...session, sessionContent: getOperationSessionDescription(session) }
+              : session;
           return (
             <DialogueCard
               key={session.sessionId}
-              item={session as any}
+              item={displaySession as any}
               // 项目会话沿用普通会话的编辑、删除操作，悬停时展示标准三点菜单。
-              onSelect={(item) => handleOpenSession(project, item as ProjectSession)}
+              onSelect={() => handleOpenSession(project, session)}
               onSessionEditOptimistic={(payload) => handleProjectSessionNameChange(project, payload)}
               onSessionEditRollback={(payload) => handleProjectSessionNameChange(project, payload)}
-              onSessionDeleteOptimistic={(item) =>
-                handleProjectSessionDeleteOptimistic(project, item as ProjectSession)
-              }
-              onSessionDeleteRollback={(item) => handleProjectSessionDeleteRollback(project, item as ProjectSession)}
+              onSessionDeleteOptimistic={() => handleProjectSessionDeleteOptimistic(project, session)}
+              onSessionDeleteRollback={() => handleProjectSessionDeleteRollback(project, session)}
             />
           );
         })}
@@ -1159,6 +1241,7 @@ const ProjectSpaceList: React.FC = () => {
           onProjectSharedChange={handleProjectSharedChange}
           onCurrentUserRemoved={handleCurrentUserRemovedFromProject}
           developProjectEnabled={isDevelopProjectEnabled}
+          operationProjectEnabled={isOperationProjectEnabled}
         />
       ) : (
         <>
