@@ -84,4 +84,32 @@ describe('RichInput', () => {
 
     expect(mockEventEmitter.emit).not.toHaveBeenCalledWith('queryInput-set-schema', expect.anything());
   });
+
+  it('keeps all mentioned digital employees after sending and clears only the question text', async () => {
+    const inputRef = createRef<RichInputRef>();
+
+    render(<RichInput ref={inputRef} chatMode={chatModeMap.expert} canQuote />);
+
+    await act(async () => {
+      inputRef.current?.insertItem({ agentId: 'agent-1', name: 'Employee One' }, ResourceType.digitalEmployee);
+      inputRef.current?.insertItem({ agentId: 'agent-2', name: 'Employee Two' }, ResourceType.digitalEmployee);
+      inputRef.current?.appendText('Please handle this task');
+    });
+
+    await waitFor(() => {
+      expect(inputRef.current?.getPayload().resourceList).toHaveLength(2);
+    });
+
+    await act(async () => {
+      inputRef.current?.clearAfterSend();
+    });
+
+    await waitFor(() => {
+      const payload = inputRef.current?.getPayload();
+      expect(payload?.resourceList.map((item) => item.resourceId)).toEqual(['agent-1', 'agent-2']);
+      expect(payload?.displayText).toContain('@Employee One');
+      expect(payload?.displayText).toContain('@Employee Two');
+      expect(payload?.displayText).not.toContain('Please handle this task');
+    });
+  });
 });

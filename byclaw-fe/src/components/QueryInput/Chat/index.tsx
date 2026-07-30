@@ -411,13 +411,17 @@ class QueryInputChat extends QueryInputBase<IProps, IState> {
 
     if (!payload || isEmpty(payload)) return false;
 
+    // Chat 覆盖了父类发送逻辑，因此同样要在清空问题前保存手动 @ 的员工。
+    const persistentMentionDraft = this.getPersistentMentionDraft();
     this.finallySendQuery(payload);
 
     this.setState((prevState) => ({
       ...prevState,
-      inputValue: '',
+      inputValue: persistentMentionDraft.text,
       fileList: [],
+      resourceList: persistentMentionDraft.resourceList,
     }));
+    this.props.onInputDraftChange?.(persistentMentionDraft);
 
     return true;
   };

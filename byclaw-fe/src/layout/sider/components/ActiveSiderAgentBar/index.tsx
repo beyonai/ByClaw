@@ -18,7 +18,7 @@ const matchAgentById = (item: IAgentCache, resourceId?: string | number) => {
 };
 
 export const useActiveSiderAgent = (): ActiveSiderAgent => {
-  const { agentId, agentInfo } = useGlobal();
+  const { agentId, agentInfo, siderAgentId } = useGlobal();
   const { userInfo, defaultDigEmployeeId, employeesList, agentList } = useSelector(
     ({ user, employees }: { user: any; employees: IEmployeesState }) => ({
       userInfo: user.userInfo,
@@ -29,18 +29,22 @@ export const useActiveSiderAgent = (): ActiveSiderAgent => {
   );
 
   return useMemo(() => {
-    const selectedAgentId = agentId || agentInfo?.agentId;
+    // 输入框存在手动 @ 时优先跟随最后一个员工，否则回退到当前会话或默认员工。
+    const selectedAgentId = siderAgentId || agentId || agentInfo?.agentId;
     const resourceId = selectedAgentId || defaultDigEmployeeId || userInfo?.defaultDigEmployeeId;
     const allAgents = [...(agentList || []), ...(employeesList || [])];
     const matchedAgent = allAgents.find((item) => matchAgentById(item, resourceId));
+    const selectedGlobalAgent = agentInfo && matchAgentById(agentInfo, selectedAgentId) ? agentInfo : undefined;
     const name =
-      (selectedAgentId ? agentInfo?.resourceName || agentInfo?.name : '') ||
+      selectedGlobalAgent?.resourceName ||
+      selectedGlobalAgent?.name ||
       matchedAgent?.resourceName ||
       matchedAgent?.name ||
       matchedAgent?.resourceCode ||
       `${resourceId || ''}`;
     const avatar =
-      (selectedAgentId ? agentInfo?.chatAvatar || agentInfo?.avatar : '') ||
+      selectedGlobalAgent?.chatAvatar ||
+      selectedGlobalAgent?.avatar ||
       matchedAgent?.chatAvatar ||
       matchedAgent?.avatar;
 
@@ -49,7 +53,15 @@ export const useActiveSiderAgent = (): ActiveSiderAgent => {
       name,
       avatar,
     };
-  }, [agentId, agentInfo, agentList, defaultDigEmployeeId, employeesList, userInfo?.defaultDigEmployeeId]);
+  }, [
+    agentId,
+    agentInfo,
+    agentList,
+    defaultDigEmployeeId,
+    employeesList,
+    siderAgentId,
+    userInfo?.defaultDigEmployeeId,
+  ]);
 };
 
 interface ActiveSiderAgentBarProps {
