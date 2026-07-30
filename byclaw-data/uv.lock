@@ -360,7 +360,7 @@ wheels = [
 
 [[package]]
 name = "by-datacloud"
-version = "0.3.0"
+version = "0.3.1"
 source = { registry = "https://pypi.org/simple/" }
 dependencies = [
     { name = "aiochclient", extra = ["aiohttp"] },
@@ -397,9 +397,9 @@ dependencies = [
     { name = "uvicorn" },
     { name = "watchfiles" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/af/c8/043baabbe4b2ad3ccf096459d3d97d7ae753f6b31b5d5767a648632c00c4/by_datacloud-0.3.0.tar.gz", hash = "sha256:27020d23426113e64544437baa899dc7400c2a8e65928d9061206fbbf1252a3e", size = 8968234, upload-time = "2026-07-29T02:26:28.163Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/82/03/b952a72c1296d3400b89ec38d281fdbd341844dde9a2544b0208fdb3462e/by_datacloud-0.3.1.tar.gz", hash = "sha256:5d02b6c5649317efd5669a18033dfbc53b8e3584d651c9affddd575da6ba9bff", size = 8965797, upload-time = "2026-07-30T07:12:12.888Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/5e/19/37e7861cf0ff1e7e9399391bff519973bb859e41a2b61679d2601389b418/by_datacloud-0.3.0-py3-none-any.whl", hash = "sha256:fb9ace9cf71f5c0a9cda87212b9c806f33063c25098538ca0245ffbe0a8df2c1", size = 1358407, upload-time = "2026-07-29T02:26:26.532Z" },
+    { url = "https://files.pythonhosted.org/packages/2a/eb/64aab1e047a383a8311749df382b374b0f5916fd445ab6bda77c928e0977/by_datacloud-0.3.1-py3-none-any.whl", hash = "sha256:2c6d58a37b7ad3d348c1eb64bbf288b9305132f6d85c8041a8a4a2cd7c94762d", size = 1355936, upload-time = "2026-07-30T07:12:10.415Z" },
 ]
 
 [[package]]
@@ -484,7 +484,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "by-datacloud", specifier = "==0.3.0" },
+    { name = "by-datacloud", specifier = "==0.3.1" },
     { name = "by-framework", specifier = "==0.2.2.dev9" },
     { name = "by-framework-history-byclaw", specifier = "==0.0.3" },
     { name = "by-framework-langgraph", specifier = "==0.0.3.dev3" },
@@ -498,7 +498,7 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "httpx", specifier = "==0.28.1" },
-    { name = "mypy", specifier = ">=1.13" },
+    { name = "mypy", specifier = "==2.3.0" },
     { name = "pytest", specifier = "==8.2" },
     { name = "pytest-asyncio", specifier = "==1.3.0" },
     { name = "ruff", specifier = "==0.8" },
