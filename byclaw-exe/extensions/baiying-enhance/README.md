@@ -143,6 +143,8 @@ Redis Pub/Sub 默认启用；如需关闭，可设置 `digEmployeeChangeSubscrib
 
 生产注册路径不会从 `DIG_EMPLOYEE_{resourceId}` 读取或写出模型密钥。插件优先解析数字员工 JSON 中的 `prologue.modelId`，再从 Redis Hash `byai:aimodel:config`（可用 `aimodelConfigRedisKey` 覆盖）按 field `<modelId>` 读取模型详情。若数字员工没有配置 `modelId`，则读取 Redis Hash `byai:aimodel:typelist`（可用 `aimodelTypeListRedisKey` 覆盖）的 `LLM` field，选择可用默认 LLM，并同时写入 `agents.defaults.model.primary` 供 main agent 使用。
 
+动态写入的 `models.providers.baiying-m-*` 会自动设置 `timeoutSeconds`，默认 `600` 秒；如果网关进程环境中存在非空的 `BYCLAW_LLM_IDLE_TIME`，则使用其正整数值覆盖默认值。该 Provider 超时用于模型请求/LLM idle watchdog，不会设置 Agent Run 的总时长；后者仍由 `agents.defaults.timeoutSeconds` 控制。
+
 模型详情映射到托管 `models.providers.baiying-m-*`：
 
 - `url` → `baseUrl`

@@ -6,6 +6,7 @@ import {
   buildChannelExtensionPrompt,
   buildLanguagePrompt,
   buildSessionFilesPrompt,
+  buildSkillInstallPrompt,
   buildUserMdReloadPrompt,
   isEnglishLanguage,
 } from "./i18n.js";
@@ -245,6 +246,7 @@ export function buildPromptInjectionSnapshot(params: {
       }),
     }));
   }
+  sections.push(buildSkillInstallPrompt(normalizedWorkspace, params.request.language));
   if (params.request.languageProvided) {
     sections.push(buildLanguagePrompt(params.request.language));
   }

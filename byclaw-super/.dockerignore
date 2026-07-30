@@ -1,0 +1,14 @@
+node_modules
+dist
+packages/**/node_modules
+packages/**/dist
+app/test
+e2e
+packages/**/test
+coverage
+.env
+.env.*
+!.env.example
+.git
+.DS_Store
+dev-chat.html

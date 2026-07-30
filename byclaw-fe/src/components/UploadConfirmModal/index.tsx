@@ -67,13 +67,31 @@ const UploadConfirmModal: React.FC<UploadConfirmModalProps> = ({
       onCancel={onCancel}
       destroyOnClose
       width="50vw"
-      style={{ minWidth: 640, maxWidth: 960 }}
+      style={{ minWidth: 640, maxWidth: 960, top: 32 }}
+      styles={{
+        body: {
+          maxHeight: 'calc(100vh - 220px)',
+          overflow: 'hidden',
+        },
+      }}
     >
-      <Space direction="vertical" size={12} style={{ width: '100%' }}>
-        <Space
-          direction="vertical"
-          size={12}
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 12,
+          width: '100%',
+          maxHeight: 'calc(100vh - 220px)',
+          minHeight: 0,
+        }}
+      >
+        <div
           style={{
+            display: 'flex',
+            flex: '1 1 auto',
+            flexDirection: 'column',
+            gap: 12,
+            minHeight: 0,
             width: '100%',
             padding: 16,
             border: '1px solid #f0f0f0',
@@ -104,10 +122,30 @@ const UploadConfirmModal: React.FC<UploadConfirmModalProps> = ({
             </Typography.Text>
           </div>
 
-          <div style={{ width: '100%', padding: 12, borderRadius: 10, background: '#fff' }}>
-            <Space direction="vertical" size={8} style={{ width: '100%' }}>
+          <div
+            style={{
+              display: 'flex',
+              flex: '1 1 auto',
+              flexDirection: 'column',
+              minHeight: 0,
+              width: '100%',
+              padding: 12,
+              borderRadius: 10,
+              background: '#fff',
+            }}
+          >
+            <div style={{ display: 'flex', flex: '1 1 auto', flexDirection: 'column', gap: 8, minHeight: 0 }}>
               <Typography.Text strong>{intl.formatMessage({ id: 'knowledgeDetail.fileList' })}</Typography.Text>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 240, overflowY: 'auto' }}>
+              <div
+                style={{
+                  display: 'flex',
+                  flex: '1 1 auto',
+                  flexDirection: 'column',
+                  gap: 6,
+                  minHeight: 0,
+                  overflowY: 'auto',
+                }}
+              >
                 {files.map((file, index) => (
                   <div
                     key={`${file.name}-${file.size || 0}-${index}`}
@@ -132,9 +170,9 @@ const UploadConfirmModal: React.FC<UploadConfirmModalProps> = ({
                   </div>
                 ))}
               </div>
-            </Space>
+            </div>
           </div>
-        </Space>
+        </div>
 
         {hasConflicts && (
           <Alert
@@ -186,7 +224,7 @@ const UploadConfirmModal: React.FC<UploadConfirmModalProps> = ({
             />
           </Space>
         )}
-      </Space>
+      </div>
     </Modal>
   );
 };

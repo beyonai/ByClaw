@@ -1,0 +1,1729 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>byclaw-super · dev chat</title>
+    <style>
+      :root {
+        --bg: #f3f4f6;
+        --panel: #ffffff;
+        --panel-hover: #f9fafb;
+        --panel-active: #eff6ff;
+        --border: #e5e7eb;
+        --text: #111827;
+        --muted: #6b7280;
+        --accent: #2563eb;
+        --accent-hover: #1d4ed8;
+        --reasoning: #4b5563;
+        --reasoning-bg: #f3f4f6;
+        --user-bg: #2563eb;
+        --user-text: #ffffff;
+        --err: #ef4444;
+        --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+        --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+      }
+      body {
+        background: var(--bg);
+        color: var(--text);
+        font:
+          14px/1.6 -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          "PingFang SC",
+          "Microsoft YaHei",
+          sans-serif;
+        display: flex;
+        flex-direction: column;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+      }
+      ::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #d1d5db;
+        border-radius: 4px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: #9ca3af;
+      }
+
+      header {
+        display: flex;
+        gap: 16px;
+        align-items: center;
+        padding: 12px 24px;
+        background: var(--panel);
+        border-bottom: 1px solid var(--border);
+        box-shadow: var(--shadow-sm);
+        flex-wrap: wrap;
+        z-index: 10;
+      }
+      header h1 {
+        font-size: 16px;
+        margin: 0 16px 0 0;
+        font-weight: 700;
+        color: var(--accent);
+        white-space: nowrap;
+        letter-spacing: -0.3px;
+      }
+      header label {
+        color: var(--text);
+        font-size: 13px;
+        font-weight: 500;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      header input {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        color: var(--text);
+        padding: 8px 12px;
+        border-radius: 8px;
+        font: inherit;
+        font-weight: 400;
+        transition: all 0.2s;
+        box-shadow: var(--shadow-sm);
+      }
+      header input:focus {
+        outline: none;
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+      }
+      header input.url {
+        width: 240px;
+      }
+      header input.token {
+        width: 340px;
+      }
+      header .saved {
+        color: #10b981;
+        font-size: 12px;
+        font-weight: 500;
+        opacity: 0;
+        transition: opacity 0.3s;
+      }
+      header .saved.show {
+        opacity: 1;
+      }
+
+      .main {
+        flex: 1;
+        display: flex;
+        min-height: 0;
+      }
+
+      aside {
+        width: 280px;
+        background: var(--panel);
+        border-right: 1px solid var(--border);
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        z-index: 5;
+      }
+      aside .new-btn {
+        margin: 16px;
+        padding: 10px;
+        background: var(--panel);
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        cursor: pointer;
+        font-weight: 600;
+        transition: all 0.2s;
+        box-shadow: var(--shadow-sm);
+      }
+      aside .new-btn:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+        background: var(--panel-hover);
+      }
+      aside .list {
+        overflow-y: auto;
+        padding: 0 12px 16px;
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      aside .item {
+        padding: 10px 12px;
+        border-radius: 8px;
+        cursor: pointer;
+        color: var(--text);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
+        transition: all 0.2s;
+        border: 1px solid transparent;
+      }
+      aside .item:hover {
+        background: var(--panel-hover);
+      }
+      aside .item.active {
+        background: var(--panel-active);
+        color: var(--accent-hover);
+        border-color: #bfdbfe;
+        font-weight: 500;
+      }
+      aside .item .t {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        flex: 1;
+      }
+      aside .item .del {
+        color: var(--muted);
+        opacity: 0;
+        font-size: 14px;
+        line-height: 1;
+        padding: 2px 6px;
+        border-radius: 4px;
+        transition: all 0.2s;
+      }
+      aside .item:hover .del {
+        opacity: 1;
+      }
+      aside .item .del:hover {
+        color: var(--err);
+        background: #fee2e2;
+      }
+      aside .empty {
+        color: var(--muted);
+        font-size: 13px;
+        padding: 12px;
+        text-align: center;
+      }
+
+      section.chat {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        background: var(--bg);
+      }
+      .messages {
+        flex: 1;
+        overflow-y: auto;
+        padding: 32px 20px;
+        display: flex;
+        flex-direction: column;
+        gap: 24px;
+      }
+
+      .empty-chat-placeholder {
+        margin: auto;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        color: var(--muted);
+        text-align: center;
+        gap: 12px;
+      }
+      .empty-chat-placeholder svg {
+        width: 48px;
+        height: 48px;
+        color: #d1d5db;
+      }
+      .empty-chat-placeholder h3 {
+        margin: 0;
+        font-size: 16px;
+        font-weight: 600;
+        color: var(--text);
+      }
+      .empty-chat-placeholder p {
+        margin: 0;
+        font-size: 14px;
+        max-width: 320px;
+      }
+
+      .msg {
+        max-width: 820px;
+        width: 100%;
+        margin: 0 auto;
+        display: flex;
+        flex-direction: column;
+      }
+      .msg.user {
+        align-items: flex-end;
+      }
+      .msg.assistant {
+        align-items: flex-start;
+      }
+      .msg .who {
+        font-size: 12px;
+        color: var(--muted);
+        margin-bottom: 6px;
+        font-weight: 500;
+        padding: 0 4px;
+      }
+      .msg.user .bubble {
+        background: var(--user-bg);
+        color: var(--user-text);
+        padding: 12px 16px;
+        border-radius: 16px 16px 4px 16px;
+        white-space: pre-wrap;
+        word-break: break-word;
+        box-shadow: 0 2px 5px rgba(37, 99, 235, 0.2);
+        max-width: 85%;
+        line-height: 1.6;
+      }
+      .msg.assistant .reasoning {
+        color: var(--reasoning);
+        font-size: 13px;
+        background: var(--reasoning-bg);
+        border: 1px solid var(--border);
+        border-left: 3px solid var(--muted);
+        border-radius: 8px;
+        padding: 10px 14px;
+        margin-bottom: 12px;
+        white-space: pre-wrap;
+        max-width: 100%;
+        line-height: 1.5;
+      }
+      .msg.assistant .reasoning:empty {
+        display: none;
+      }
+      .msg.assistant .delegations {
+        width: 100%;
+        margin: 0 0 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .msg.assistant .delegations-title {
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 600;
+        padding: 0 4px;
+      }
+      .interactions {
+        margin: 12px 0;
+      }
+      .interaction-card {
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 14px;
+        background: var(--panel);
+      }
+      .interaction-card + .interaction-card {
+        margin-top: 10px;
+      }
+      .interaction-field {
+        display: grid;
+        gap: 6px;
+        margin-bottom: 12px;
+      }
+      .interaction-field label {
+        font-size: 13px;
+        font-weight: 600;
+      }
+      .interaction-field small {
+        color: var(--muted);
+      }
+      .interaction-field select,
+      .interaction-field input,
+      .interaction-field textarea {
+        width: 100%;
+        box-sizing: border-box;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 9px 10px;
+        font: inherit;
+        background: var(--panel);
+        color: var(--text);
+      }
+      .interaction-submit {
+        border: 0;
+        border-radius: 8px;
+        padding: 8px 14px;
+        color: #fff;
+        background: var(--accent);
+        cursor: pointer;
+      }
+      .interaction-submit:disabled {
+        opacity: 0.55;
+        cursor: default;
+      }
+      .msg.assistant .delegation {
+        width: 100%;
+        background: #fffbeb;
+        border: 1px solid #fde68a;
+        border-left: 3px solid #f59e0b;
+        border-radius: 8px;
+        overflow: hidden;
+      }
+      .msg.assistant .delegation summary {
+        cursor: pointer;
+        padding: 9px 12px;
+        color: #92400e;
+        font-size: 13px;
+        font-weight: 600;
+        user-select: none;
+      }
+      .msg.assistant .delegation-output {
+        margin: 0;
+        padding: 10px 12px;
+        border-top: 1px solid #fde68a;
+        background: #fffdf5;
+        color: #78350f;
+        white-space: pre-wrap;
+        word-break: break-word;
+        font: inherit;
+        font-size: 13px;
+        max-height: 360px;
+        overflow: auto;
+      }
+      .msg.assistant .delegation-meta {
+        padding: 0 12px 10px;
+        background: #fffdf5;
+        color: var(--muted);
+        font-size: 11px;
+      }
+      .msg.assistant .answer {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        padding: 14px 18px;
+        border-radius: 16px 16px 16px 4px;
+        white-space: pre-wrap;
+        word-break: break-word;
+        box-shadow: var(--shadow-sm);
+        max-width: 100%;
+        line-height: 1.6;
+      }
+      .msg .status {
+        font-size: 11px;
+        color: var(--muted);
+        margin-top: 8px;
+        padding: 0 4px;
+      }
+      .msg .status.err {
+        color: var(--err);
+      }
+      .cursor::after {
+        content: "▋";
+        color: var(--accent);
+        animation: blink 1s steps(2) infinite;
+        margin-left: 2px;
+      }
+      @keyframes blink {
+        50% {
+          opacity: 0;
+        }
+      }
+
+      .composer {
+        background: var(--panel);
+        padding: 16px 24px 20px;
+        border-top: 1px solid var(--border);
+        box-shadow: 0 -4px 6px -1px rgba(0, 0, 0, 0.02);
+      }
+      .attach-pending {
+        max-width: 820px;
+        margin: 0 auto 8px;
+        display: none;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .attach-pending.show {
+        display: flex;
+      }
+      .attach-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        border: 1px solid var(--border);
+        background: var(--panel-hover);
+        border-radius: 16px;
+        padding: 4px 10px;
+        font-size: 12px;
+        color: var(--text);
+        max-width: 280px;
+      }
+      .attach-chip .n {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .attach-chip .s {
+        color: var(--muted);
+        flex-shrink: 0;
+      }
+      .attach-chip .x {
+        cursor: pointer;
+        color: var(--muted);
+        font-weight: 600;
+        flex-shrink: 0;
+      }
+      .attach-chip .x:hover {
+        color: var(--err);
+      }
+      .attach-chip.uploading {
+        opacity: 0.6;
+      }
+      .msg.user .attach-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        justify-content: flex-end;
+        margin-bottom: 6px;
+      }
+      .msg.user .attach-list .attach-chip {
+        background: rgba(37, 99, 235, 0.08);
+        border-color: rgba(37, 99, 235, 0.25);
+      }
+      .composer .icon-btn {
+        padding: 0 14px;
+        height: 46px;
+        background: #f3f4f6;
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        cursor: pointer;
+        font-size: 16px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.2s;
+      }
+      .composer .icon-btn:hover:not(:disabled) {
+        background: #e5e7eb;
+      }
+      .composer .icon-btn:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+      .composer .row {
+        max-width: 820px;
+        margin: 0 auto;
+        display: flex;
+        gap: 12px;
+        align-items: flex-end;
+      }
+      .composer textarea {
+        flex: 1;
+        resize: none;
+        max-height: 200px;
+        background: var(--panel);
+        border: 1px solid var(--border);
+        color: var(--text);
+        border-radius: 12px;
+        padding: 12px 16px;
+        font: inherit;
+        line-height: 1.5;
+        transition: all 0.2s;
+        box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.02);
+      }
+      .composer textarea:focus {
+        outline: none;
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+      }
+      .composer textarea::placeholder {
+        color: #9ca3af;
+      }
+      .composer .actions {
+        display: flex;
+        gap: 8px;
+      }
+      .composer button {
+        padding: 0 20px;
+        height: 46px;
+        background: var(--accent);
+        color: #fff;
+        border: none;
+        border-radius: 10px;
+        cursor: pointer;
+        font-weight: 600;
+        font-size: 14px;
+        transition: all 0.2s;
+        box-shadow: var(--shadow-sm);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .composer button:hover:not(:disabled) {
+        background: var(--accent-hover);
+        transform: translateY(-1px);
+        box-shadow: var(--shadow);
+      }
+      .composer button:active:not(:disabled) {
+        transform: translateY(0);
+      }
+      .composer button:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+      .composer button.stop {
+        background: #f3f4f6;
+        color: var(--text);
+        border: 1px solid var(--border);
+      }
+      .composer button.stop:hover:not(:disabled) {
+        background: #e5e7eb;
+      }
+      .hint {
+        max-width: 820px;
+        margin: 12px auto 0;
+        color: #9ca3af;
+        font-size: 12px;
+        text-align: center;
+      }
+      .load-more-wrap {
+        text-align: center;
+        margin-bottom: 16px;
+      }
+      .load-more-btn {
+        background: transparent;
+        border: none;
+        color: var(--accent);
+        font-size: 13px;
+        cursor: pointer;
+        padding: 8px 16px;
+        border-radius: 20px;
+        transition: background 0.2s;
+      }
+      .load-more-btn:hover {
+        background: var(--panel-hover);
+      }
+      .load-more-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>byclaw-super</h1>
+      <label
+        >Service
+        <input class="url" id="url" placeholder="http://127.0.0.1:10001" />
+      </label>
+      <label
+        >Beyond-Token
+        <input class="token" id="token" type="password" placeholder="粘贴 Beyond-Token (JWT)" />
+      </label>
+      <label
+        >BE
+        <input class="url" id="beUrl" placeholder="http://127.0.0.1:8086" style="width: 190px" />
+      </label>
+      <span class="saved" id="saved">已保存</span>
+    </header>
+
+    <div class="main">
+      <aside>
+        <button class="new-btn" id="newBtn">＋ 新对话</button>
+        <div class="list" id="list"></div>
+      </aside>
+
+      <section class="chat">
+        <div class="messages" id="messages"></div>
+        <div class="composer">
+          <div class="attach-pending" id="attachPending"></div>
+          <div class="row">
+            <input type="file" id="fileInput" multiple hidden />
+            <button id="attachBtn" class="icon-btn" title="上传附件（经 BE 获取 fileId）">📎</button>
+            <button id="attachIdBtn" class="icon-btn" title="手动填写已有 fileId" style="font-size: 12px">＋ID</button>
+            <textarea
+              id="input"
+              rows="1"
+              placeholder="输入消息，Enter 发送，Shift+Enter 换行；可只发附件"
+            ></textarea>
+            <div class="actions">
+              <button id="stopBtn" class="stop" disabled>停止</button>
+              <button id="sendBtn">发送</button>
+            </div>
+          </div>
+          <div class="hint">
+            同一对话复用 sessionId，每轮生成新的 runId；子 Agent 输出通过持久 SSE 实时展示。附件经 BE
+            上传后以 fileId 引用随消息发送。
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <script>
+      "use strict";
+
+      const LS_KEY = "byclaw-super-dev-chat";
+      const state = {
+        url: "http://127.0.0.1:9090",
+        beUrl: "http://127.0.0.1:8086",
+        token: "",
+        conversations: [],
+        activeId: null,
+      };
+      /** 待发送附件：{id, name, mediaType?, size?}，发送成功后清空。 */
+      let pendingAttachments = [];
+
+      // ---------- persistence ----------
+      function load() {
+        try {
+          const raw = JSON.parse(localStorage.getItem(LS_KEY) || "{}");
+          state.url = raw.url || state.url;
+          state.beUrl = raw.beUrl || state.beUrl;
+          state.token = raw.token || "";
+          state.conversations = Array.isArray(raw.conversations)
+            ? raw.conversations.map((c) => ({
+                id: c.id,
+                title: c.title,
+                createdAt: c.createdAt,
+                sessionId: c.sessionId || c.conversationId || null,
+                nextCursor: c.nextCursor || null,
+                messages: [],
+              }))
+            : [];
+          state.activeId = raw.activeId ?? null;
+        } catch {
+          /* ignore */
+        }
+      }
+      function save() {
+        const convsToSave = state.conversations.map((c) => ({
+          id: c.id,
+          title: c.title,
+          createdAt: c.createdAt,
+          sessionId: c.sessionId,
+          nextCursor: c.nextCursor,
+        }));
+        localStorage.setItem(
+          LS_KEY,
+          JSON.stringify({
+            url: state.url,
+            beUrl: state.beUrl,
+            token: state.token,
+            conversations: convsToSave,
+            activeId: state.activeId,
+          }),
+        );
+      }
+      const $ = (id) => document.getElementById(id);
+      const baseUrl = () => state.url.replace(/\/+$/, "");
+
+      const TERMINAL_UI_STATUSES = new Set([
+        "error",
+        "已完成",
+        "已停止",
+        "已中断",
+        "已失效",
+        "已取消",
+        "失败",
+        "恢复失败",
+      ]);
+      const TERMINAL_RUN_API_STATUSES = ["COMPLETED", "FAILED", "CANCELLED"];
+
+      // ---------- header wiring ----------
+      function bindHeader() {
+        const urlEl = $("url");
+        const tokEl = $("token");
+        const beEl = $("beUrl");
+        const saved = $("saved");
+        urlEl.value = state.url;
+        tokEl.value = state.token;
+        beEl.value = state.beUrl;
+        const persist = () => {
+          state.url = urlEl.value.trim() || "http://127.0.0.1:3000";
+          state.beUrl = beEl.value.trim() || "http://127.0.0.1:8086";
+          state.token = tokEl.value.trim();
+          save();
+          saved.classList.add("show");
+          setTimeout(() => saved.classList.remove("show"), 1200);
+        };
+        urlEl.addEventListener("change", persist);
+        tokEl.addEventListener("change", persist);
+        beEl.addEventListener("change", persist);
+      }
+
+      // ---------- sidebar ----------
+      function renderSidebar() {
+        const list = $("list");
+        list.innerHTML = "";
+        if (state.conversations.length === 0) {
+          const empty = document.createElement("div");
+          empty.className = "empty";
+          empty.textContent = "暂无历史";
+          list.appendChild(empty);
+          return;
+        }
+        [...state.conversations]
+          .sort((a, b) => b.createdAt - a.createdAt)
+          .forEach((c) => {
+            const item = document.createElement("div");
+            item.className = "item" + (c.id === state.activeId ? " active" : "");
+            const t = document.createElement("span");
+            t.className = "t";
+            t.textContent = c.title || "(空对话)";
+            const del = document.createElement("span");
+            del.className = "del";
+            del.textContent = "✕";
+            del.title = "删除";
+            del.addEventListener("click", (e) => {
+              e.stopPropagation();
+              state.conversations = state.conversations.filter((x) => x.id !== c.id);
+              if (state.activeId === c.id) state.activeId = null;
+              save();
+              renderSidebar();
+              renderMessages();
+            });
+            item.appendChild(t);
+            item.appendChild(del);
+            item.addEventListener("click", () => {
+              state.activeId = c.id;
+              save();
+              renderSidebar();
+              renderMessages();
+              syncActiveHistory();
+            });
+            list.appendChild(item);
+          });
+      }
+
+      function activeConv() {
+        return state.conversations.find((c) => c.id === state.activeId) || null;
+      }
+
+      function newConversation() {
+        const c = {
+          id: crypto.randomUUID(),
+          title: "",
+          createdAt: Date.now(),
+          messages: [],
+          sessionId: null,
+        };
+        state.conversations.push(c);
+        state.activeId = c.id;
+        save();
+        renderSidebar();
+        renderMessages();
+        $("input").focus();
+      }
+
+      // ---------- messages ----------
+      function renderMessages(skipScroll = false) {
+        const root = $("messages");
+        root.innerHTML = "";
+        const conv = activeConv();
+        if (!conv || conv.messages.length === 0) {
+          const ph = document.createElement("div");
+          ph.className = "empty-chat-placeholder";
+          ph.innerHTML = `
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+            </svg>
+            <h3>${conv ? "新对话已就绪" : "欢迎使用"}</h3>
+            <p>${conv ? "在下方输入框中输入消息开始测试" : "点击左侧「+ 新对话」开始，并确保已在顶部填入 Beyond-Token。"}</p>
+          `;
+          root.appendChild(ph);
+          return;
+        }
+
+        if (conv.nextCursor) {
+          const wrap = document.createElement("div");
+          wrap.className = "load-more-wrap";
+          const btn = document.createElement("button");
+          btn.className = "load-more-btn";
+          btn.textContent = "加载更早历史";
+          btn.onclick = () => {
+            btn.textContent = "加载中...";
+            btn.disabled = true;
+            fetchHistory(conv, conv.nextCursor);
+          };
+          wrap.appendChild(btn);
+          root.appendChild(wrap);
+        }
+
+        for (const m of conv.messages) {
+          const wrap = document.createElement("div");
+          wrap.className = "msg " + m.role;
+
+          const who = document.createElement("div");
+          who.className = "who";
+          who.textContent = m.role === "user" ? "你" : "助手";
+          wrap.appendChild(who);
+
+          if (m.role === "assistant") {
+            const reasoning = document.createElement("div");
+            reasoning.className = "reasoning";
+            reasoning.textContent = m.reasoning || "";
+            wrap.appendChild(reasoning);
+
+            if (Array.isArray(m.delegations) && m.delegations.length > 0) {
+              const delegations = document.createElement("div");
+              delegations.className = "delegations";
+              const title = document.createElement("div");
+              title.className = "delegations-title";
+              title.textContent = `子 Agent 输出（${m.delegations.length}）`;
+              delegations.appendChild(title);
+
+              for (const delegation of m.delegations) {
+                const card = document.createElement("details");
+                card.className = "delegation";
+                card.open = delegation.status === "RUNNING" || delegation.status === "COMPLETED";
+
+                const summary = document.createElement("summary");
+                const agentLabel =
+                  delegation.agentName || delegation.agentId || delegation.delegationId;
+                summary.textContent = `${agentLabel} · ${mapDelegationStatus(delegation.status)}`;
+                card.appendChild(summary);
+
+                const output = document.createElement("pre");
+                output.className = "delegation-output";
+                output.textContent =
+                  delegation.output ||
+                  delegation.progress ||
+                  (delegation.status === "RUNNING" ? "等待子 Agent 输出…" : "暂无文本输出");
+                card.appendChild(output);
+
+                const metaParts = [];
+                if (delegation.truncated) metaParts.push("输出已按服务端上限截断");
+                if (delegation.artifactCount) {
+                  metaParts.push(`产物 ${delegation.artifactCount} 个`);
+                }
+                if (metaParts.length > 0) {
+                  const meta = document.createElement("div");
+                  meta.className = "delegation-meta";
+                  meta.textContent = metaParts.join(" · ");
+                  card.appendChild(meta);
+                }
+                delegations.appendChild(card);
+              }
+              wrap.appendChild(delegations);
+            }
+
+            if (Array.isArray(m.interactions) && m.interactions.length > 0) {
+              const interactions = document.createElement("div");
+              interactions.className = "interactions";
+              for (const interaction of m.interactions) {
+                const card = document.createElement("form");
+                card.className = "interaction-card";
+                const fields = Array.isArray(interaction.form?.pluginMachineFields)
+                  ? interaction.form.pluginMachineFields
+                  : [];
+                for (const field of fields) {
+                  const row = document.createElement("div");
+                  row.className = "interaction-field";
+                  const label = document.createElement("label");
+                  label.textContent = field.fieldName || "补充信息";
+                  row.appendChild(label);
+                  if (field.description) {
+                    const description = document.createElement("small");
+                    description.textContent = field.description;
+                    row.appendChild(description);
+                  }
+                  let control;
+                  if (field.formType === "select") {
+                    control = document.createElement("select");
+                    const placeholder = document.createElement("option");
+                    placeholder.value = "";
+                    placeholder.textContent = "请选择";
+                    control.appendChild(placeholder);
+                    for (const option of Array.isArray(field.optional) ? field.optional : []) {
+                      const item = document.createElement("option");
+                      item.value =
+                        typeof option === "object"
+                          ? String(option.value ?? option.label ?? "")
+                          : String(option);
+                      item.textContent =
+                        typeof option === "object"
+                          ? String(option.label ?? option.value ?? "")
+                          : String(option);
+                      control.appendChild(item);
+                    }
+                  } else if (field.formType === "textarea") {
+                    control = document.createElement("textarea");
+                    control.rows = 3;
+                  } else {
+                    control = document.createElement("input");
+                  }
+                  control.name = field.fieldCode || field.fieldName;
+                  control.required = field.required !== false;
+                  control.disabled = interaction.status !== "pending";
+                  row.appendChild(control);
+                  card.appendChild(row);
+                }
+                const submit = document.createElement("button");
+                submit.type = "submit";
+                submit.className = "interaction-submit";
+                submit.disabled = interaction.status !== "pending";
+                submit.textContent =
+                  interaction.status === "submitted" ? "已提交" : "提交并继续";
+                card.appendChild(submit);
+                card.addEventListener("submit", async (event) => {
+                  event.preventDefault();
+                  submit.disabled = true;
+                  submit.textContent = "提交中…";
+                  const values = Object.fromEntries(new FormData(card).entries());
+                  try {
+                    const response = await fetch(
+                      `${baseUrl()}/v1/runs/${encodeURIComponent(m.runId)}/interactions/${encodeURIComponent(interaction.id)}/respond`,
+                      {
+                        method: "POST",
+                        headers: {
+                          "content-type": "application/json",
+                          "Beyond-Token": state.token,
+                        },
+                        body: JSON.stringify({
+                          action: "submit",
+                          answers: values,
+                          text: JSON.stringify(values),
+                        }),
+                      },
+                    );
+                    if (!response.ok) {
+                      throw new Error(`提交失败 (${response.status})`);
+                    }
+                    interaction.status = "submitted";
+                    m.status = "已提交，正在继续…";
+                    save();
+                    renderMessages();
+                  } catch (error) {
+                    submit.disabled = false;
+                    submit.textContent = "重试提交";
+                    alert(error instanceof Error ? error.message : String(error));
+                  }
+                });
+                interactions.appendChild(card);
+              }
+              wrap.appendChild(interactions);
+            }
+          }
+
+          const body = document.createElement("div");
+          body.className = m.role === "user" ? "bubble" : "answer";
+          if (m.role === "assistant" && m.streaming) body.classList.add("cursor");
+          body.textContent = m.content || "";
+          if (m.role === "user" && Array.isArray(m.attachments) && m.attachments.length > 0) {
+            const list = document.createElement("div");
+            list.className = "attach-list";
+            for (const att of m.attachments) {
+              const chip = document.createElement("span");
+              chip.className = "attach-chip";
+              const name = document.createElement("span");
+              name.className = "n";
+              name.textContent = att.name || att.id;
+              name.title = `fileId: ${att.id}`;
+              chip.appendChild(name);
+              const size = document.createElement("span");
+              size.className = "s";
+              size.textContent = formatSize(att.size);
+              chip.appendChild(size);
+              list.appendChild(chip);
+            }
+            wrap.appendChild(list);
+          }
+          if (m.role === "user" && !m.content) body.style.display = "none";
+          wrap.appendChild(body);
+
+          if (m.role === "assistant" && (m.status || m.streaming)) {
+            const st = document.createElement("div");
+            st.className = "status" + (m.status === "error" ? " err" : "");
+            st.textContent = m.status === "error" ? "失败：" + (m.error || "") : m.status || "";
+            wrap.appendChild(st);
+          }
+          root.appendChild(wrap);
+        }
+        if (!skipScroll) {
+          root.scrollTop = root.scrollHeight;
+        }
+      }
+
+      function mapRunStatus(status) {
+        if (status === "COMPLETED") return "已完成";
+        if (status === "CANCELLED") return "已取消";
+        if (status === "FAILED") return "失败";
+        return "运行中…";
+      }
+
+      function mapDelegationStatus(status) {
+        const labels = {
+          CREATED: "已创建",
+          QUEUED: "排队中",
+          RUNNING: "执行中",
+          COMPLETED: "已完成",
+          FAILED: "失败",
+          CANCELLED: "已取消",
+          TIMED_OUT: "已超时",
+        };
+        return labels[status] || status || "未知状态";
+      }
+
+      function normalizeDelegations(run) {
+        return Array.isArray(run && run.delegations)
+          ? run.delegations.map((delegation) => ({
+              delegationId: delegation.delegationId,
+              agentId: delegation.agentId,
+              agentName: delegation.agentName,
+              status: delegation.status,
+              output: delegation.output || "",
+              truncated: Boolean(delegation.truncated),
+              artifactCount: Number(delegation.artifactCount) || 0,
+              artifacts: Array.isArray(delegation.artifacts) ? delegation.artifacts : [],
+            }))
+          : [];
+      }
+
+      function ensureDelegation(assistant, data) {
+        if (!Array.isArray(assistant.delegations)) assistant.delegations = [];
+        const delegationId = data.delegationId || data.messageId;
+        let delegation = assistant.delegations.find(
+          (candidate) => candidate.delegationId === delegationId,
+        );
+        if (!delegation) {
+          delegation = {
+            delegationId,
+            agentId: data.agentId || "",
+            agentName: data.agentName || "",
+            status: "QUEUED",
+            output: "",
+            truncated: false,
+            artifactCount: 0,
+            artifacts: [],
+          };
+          assistant.delegations.push(delegation);
+        }
+        if (data.agentId) delegation.agentId = data.agentId;
+        if (data.agentName) delegation.agentName = data.agentName;
+        return delegation;
+      }
+
+      async function refreshDelegations(assistant, render = true) {
+        if (!assistant.runId || !state.token) return;
+        const resp = await fetch(`${baseUrl()}/v1/runs/${encodeURIComponent(assistant.runId)}`, {
+          headers: { "Beyond-Token": state.token },
+        });
+        if (!resp.ok) return;
+        const run = await resp.json();
+        assistant.delegations = normalizeDelegations(run);
+        if (render) refreshLastAssistant();
+      }
+
+      async function fetchHistory(conv, beforeCursor = null) {
+        if (!conv.sessionId || !state.token) return;
+        try {
+          let url = `${baseUrl()}/v1/sessions/${encodeURIComponent(conv.sessionId)}/messages?limit=50`;
+          if (beforeCursor) url += `&before=${encodeURIComponent(beforeCursor)}`;
+
+          const resp = await fetch(url, {
+            headers: { "Beyond-Token": state.token },
+          });
+          if (resp.status === 404) return;
+          if (!resp.ok) return;
+
+          const data = await resp.json();
+          const items = data.items || [];
+          const newMsgs = [];
+
+          for (let i = 0; i < items.length; i++) {
+            const item = items[i];
+            newMsgs.push({
+              role: item.role,
+              content: item.content || "",
+              runId: item.runId,
+              status: item.role === "assistant" ? mapRunStatus(item.runStatus) : undefined,
+              streaming:
+                item.role === "assistant"
+                  ? !TERMINAL_RUN_API_STATUSES.includes(item.runStatus)
+                  : false,
+              ...(item.role === "user" &&
+              Array.isArray(item.attachments) &&
+              item.attachments.length > 0
+                ? { attachments: item.attachments }
+                : {}),
+            });
+
+            if (item.role === "user") {
+              const nextItem = items[i + 1];
+              const hasAssistant =
+                nextItem && nextItem.runId === item.runId && nextItem.role === "assistant";
+              if (!hasAssistant) {
+                // 进行中、失败、取消等无 assistant 回答的 Run，补一个状态气泡；
+                // 失败时附带后端返回的 error，复用实时发送的错误样式（红色）。
+                const isTerminal = TERMINAL_RUN_API_STATUSES.includes(item.runStatus);
+                newMsgs.push({
+                  role: "assistant",
+                  content: "",
+                  runId: item.runId,
+                  status:
+                    isTerminal && item.runStatus === "FAILED"
+                      ? "error"
+                      : mapRunStatus(item.runStatus),
+                  streaming: !isTerminal,
+                  ...(item.error ? { error: item.error } : {}),
+                });
+              }
+            }
+          }
+
+          if (beforeCursor) {
+            const root = $("messages");
+            const oldScrollHeight = root.scrollHeight;
+            conv.messages = [...newMsgs, ...conv.messages];
+            conv.nextCursor = data.nextCursor;
+            save();
+            if (state.activeId === conv.id) {
+              renderMessages(true);
+              const newScrollHeight = root.scrollHeight;
+              root.scrollTop = newScrollHeight - oldScrollHeight;
+            }
+          } else {
+            const hasStreaming = conv.messages.some((m) => m.streaming);
+            if (!hasStreaming) {
+              conv.messages = newMsgs;
+              conv.nextCursor = data.nextCursor;
+              save();
+              if (state.activeId === conv.id) {
+                renderMessages();
+              }
+            }
+          }
+        } catch (e) {
+          console.error("fetchHistory err:", e);
+        }
+      }
+
+      async function syncActiveHistory() {
+        const conv = activeConv();
+        if (!conv || !conv.sessionId) return;
+        if (conv.messages.some((m) => m.streaming)) return;
+        await fetchHistory(conv);
+
+        const last = conv.messages[conv.messages.length - 1];
+        if (last && last.role === "assistant" && last.streaming && last.runId && state.token) {
+          resumeRun(last);
+        }
+      }
+
+      function refreshLastAssistant() {
+        renderMessages();
+      }
+
+      let active = null;
+
+      // ---------- attachments ----------
+      const beBaseUrl = () => state.beUrl.replace(/\/+$/, "");
+
+      function formatSize(bytes) {
+        if (!Number.isFinite(bytes) || bytes < 0) return "";
+        if (bytes < 1024) return `${bytes} B`;
+        if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+        return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+      }
+
+      /** 渲染输入框上方的待发送附件 chips。 */
+      function renderPendingAttachments() {
+        const box = $("attachPending");
+        box.innerHTML = "";
+        box.classList.toggle("show", pendingAttachments.length > 0);
+        pendingAttachments.forEach((att, index) => {
+          const chip = document.createElement("span");
+          chip.className = "attach-chip" + (att.uploading ? " uploading" : "");
+          const name = document.createElement("span");
+          name.className = "n";
+          name.textContent = att.uploading ? `${att.name}（上传中…）` : att.name;
+          name.title = `fileId: ${att.id || "上传中"}`;
+          chip.appendChild(name);
+          const size = document.createElement("span");
+          size.className = "s";
+          size.textContent = formatSize(att.size);
+          chip.appendChild(size);
+          const remove = document.createElement("span");
+          remove.className = "x";
+          remove.textContent = "✕";
+          remove.title = "移除";
+          remove.addEventListener("click", () => {
+            pendingAttachments.splice(index, 1);
+            renderPendingAttachments();
+          });
+          chip.appendChild(remove);
+          box.appendChild(chip);
+        });
+      }
+
+      /** 逐个上传到 BE /chat/uploadFiles 换取 fileId；失败的文件明确报错、不进待发送列表。 */
+      async function uploadAttachments(fileList) {
+        if (!state.token) {
+          alert("请先在顶部填入 Beyond-Token");
+          return;
+        }
+        for (const file of fileList) {
+          const marker = {
+            id: "",
+            name: file.name,
+            ...(file.type ? { mediaType: file.type } : {}),
+            size: file.size,
+            uploading: true,
+          };
+          pendingAttachments.push(marker);
+          renderPendingAttachments();
+          try {
+            const form = new FormData();
+            form.append("files", file, file.name);
+            const resp = await fetch(`${beBaseUrl()}/byaiService/chat/uploadFiles`, {
+              method: "POST",
+              headers: { "Beyond-Token": state.token },
+              body: form,
+            });
+            const payload = await resp.json().catch(() => null);
+            const item = payload && payload.data && Array.isArray(payload.data.uploadItems)
+              ? payload.data.uploadItems[0]
+              : null;
+            if (!resp.ok || !item || item.fileId === undefined || item.fileId === null) {
+              const detail = payload && payload.msg ? payload.msg : `HTTP ${resp.status}`;
+              throw new Error(detail);
+            }
+            marker.id = String(item.fileId);
+            marker.uploading = false;
+          } catch (error) {
+            pendingAttachments = pendingAttachments.filter((att) => att !== marker);
+            alert(
+              `附件「${file.name}」上传失败：${
+                error && error.message ? error.message : String(error)
+              }\n（若 BE 未对本页面开放 CORS，可改用「＋ID」手动填写已有 fileId）`,
+            );
+          }
+          renderPendingAttachments();
+        }
+      }
+
+      /** 手动登记已有 fileId（用于测试 by-framework 侧已存在的文件）。 */
+      function addManualAttachment() {
+        const raw = prompt("输入 BE 文件 fileId（数字）：");
+        if (raw === null) return;
+        const fileId = raw.trim();
+        if (!/^\d+$/.test(fileId)) {
+          alert("fileId 必须是数字");
+          return;
+        }
+        if (pendingAttachments.some((att) => att.id === fileId)) {
+          alert("该 fileId 已在待发送列表中");
+          return;
+        }
+        const nameRaw = prompt("文件名（可选，留空用 fileId 代替）：");
+        const name = (nameRaw || "").trim() || `file-${fileId}`;
+        pendingAttachments.push({ id: fileId, name });
+        renderPendingAttachments();
+      }
+
+      /** 待发送附件转成 HTTP 接口接受的安全载荷（只含白名单字段）。 */
+      function attachmentPayload() {
+        return pendingAttachments
+          .filter((att) => att.id && !att.uploading)
+          .map((att) => ({
+            id: att.id,
+            name: att.name,
+            ...(att.mediaType ? { mediaType: att.mediaType } : {}),
+            ...(Number.isInteger(att.size) && att.size >= 0 ? { size: att.size } : {}),
+          }));
+      }
+
+      // ---------- sending ----------
+      async function send() {
+        const input = $("input");
+        const text = input.value.trim();
+        if (pendingAttachments.some((att) => att.uploading)) {
+          alert("附件仍在上传中，请等待上传完成");
+          return;
+        }
+        const attachments = attachmentPayload();
+        if (!text && attachments.length === 0) return;
+        if (!state.token) {
+          alert("请先在顶部填入 Beyond-Token");
+          return;
+        }
+        let conv = activeConv();
+        if (!conv) {
+          newConversation();
+          conv = activeConv();
+        }
+        const userMsg = { role: "user", content: text };
+        if (attachments.length > 0) {
+          userMsg.attachments = attachments.map((att) => ({ ...att }));
+        }
+        conv.messages.push(userMsg);
+        const assistant = {
+          role: "assistant",
+          content: "",
+          reasoning: "",
+          delegations: [],
+          interactions: [],
+          runId: null,
+          status: "排队中…",
+          streaming: true,
+        };
+        conv.messages.push(assistant);
+        if (!conv.title) {
+          conv.title = text
+            ? text.slice(0, 24)
+            : `附件：${attachments.map((att) => att.name).join("、").slice(0, 24)}`;
+        }
+        input.value = "";
+        autoGrow();
+        setSending(true);
+        renderSidebar();
+        renderMessages();
+
+        const controller = new AbortController();
+        active = { controller, runId: null, assistant };
+        let data;
+        try {
+          const body = { message: text };
+          if (attachments.length > 0) body.attachments = attachments;
+          const endpoint = conv.sessionId
+            ? `/v1/sessions/${encodeURIComponent(conv.sessionId)}/runs`
+            : "/v1/sessions";
+          const resp = await fetch(`${baseUrl()}${endpoint}`, {
+            method: "POST",
+            headers: { "content-type": "application/json", "Beyond-Token": state.token },
+            body: JSON.stringify(body),
+            signal: controller.signal,
+          });
+          if (!resp.ok) {
+            const detail = await resp.text().catch(() => "");
+            throw new Error(`创建 Run 失败 (${resp.status}) ${detail}`);
+          }
+          data = await resp.json();
+          assistant.runId = data.runId;
+          active.runId = data.runId;
+          if (data.sessionId) conv.sessionId = data.sessionId;
+          assistant.status = "运行中…";
+          pendingAttachments = [];
+          renderPendingAttachments();
+          save();
+          refreshLastAssistant();
+        } catch (err) {
+          assistant.streaming = false;
+          assistant.status = "error";
+          assistant.error = err && err.message ? err.message : String(err);
+          if (active && active.assistant === assistant) active = null;
+          refreshLastAssistant();
+          save();
+          setSending(false);
+          return;
+        }
+        await streamToCompletion(assistant, `${baseUrl()}${data.eventsUrl}`, controller);
+      }
+
+      async function streamToCompletion(assistant, eventsUrl, controller) {
+        try {
+          const terminalEvent = await streamEvents(eventsUrl, assistant, controller.signal);
+          if (terminalEvent === "error") {
+            return;
+          }
+          if (terminalEvent !== "appStreamResponse") {
+            throw new Error(`SSE 未收到完成事件（终态：${terminalEvent || "unknown"}）`);
+          }
+        } catch (err) {
+          if (err && err.name === "AbortError") {
+            assistant.status = assistant.cancelledByUser ? "已停止" : "已中断";
+          } else {
+            assistant.status = "error";
+            assistant.error = err && err.message ? err.message : String(err);
+          }
+        } finally {
+          assistant.streaming = false;
+          try {
+            // 终态快照用于校准 Artifact、截断标记和最终 Delegation 状态；
+            // 实时文本已经由 subAgentOutputDelta SSE 驱动，不再轮询。
+            await refreshDelegations(assistant, false);
+          } catch (error) {
+            console.debug("final refreshDelegations err:", error);
+          }
+          if (active && active.assistant === assistant) active = null;
+          refreshLastAssistant();
+          save();
+          setSending(false);
+        }
+      }
+
+      async function resumeRun(assistant) {
+        if (!assistant.runId) return;
+        let resp;
+        try {
+          resp = await fetch(`${baseUrl()}/v1/runs/${assistant.runId}`, {
+            headers: { "Beyond-Token": state.token },
+          });
+        } catch (err) {
+          assistant.streaming = false;
+          assistant.status = "恢复失败";
+          assistant.error = err && err.message ? err.message : String(err);
+          refreshLastAssistant();
+          save();
+          return;
+        }
+        if (resp.status === 404) {
+          assistant.streaming = false;
+          assistant.status = "已失效";
+          refreshLastAssistant();
+          save();
+          return;
+        }
+        if (!resp.ok) {
+          assistant.streaming = false;
+          assistant.status = "error";
+          assistant.error = `恢复失败 (${resp.status})`;
+          refreshLastAssistant();
+          save();
+          return;
+        }
+        const run = await resp.json().catch(() => ({}));
+        assistant.delegations = normalizeDelegations(run);
+        if (TERMINAL_RUN_API_STATUSES.includes(run.status)) {
+          assistant.streaming = false;
+          assistant.status =
+            run.status === "COMPLETED" ? "已完成" : run.status === "CANCELLED" ? "已取消" : "失败";
+          if (run.finalAnswer) assistant.content = run.finalAnswer;
+          if (run.error) assistant.error = run.error;
+          refreshLastAssistant();
+          save();
+          return;
+        }
+        assistant.content = "";
+        assistant.reasoning = "";
+        assistant.streaming = true;
+        assistant.status = "恢复中…";
+        const controller = new AbortController();
+        active = { controller, runId: assistant.runId, assistant };
+        setSending(true);
+        refreshLastAssistant();
+        await streamToCompletion(
+          assistant,
+          `${baseUrl()}/v1/runs/${assistant.runId}/events`,
+          controller,
+        );
+      }
+
+      async function streamEvents(eventsUrl, assistant, signal) {
+        const resp = await fetch(eventsUrl, {
+          method: "GET",
+          headers: { "Beyond-Token": state.token, Accept: "text/event-stream" },
+          signal,
+        });
+        if (!resp.ok || !resp.body) {
+          throw new Error(`订阅事件失败 (${resp.status})`);
+        }
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let terminalEvent = null;
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) {
+            // HTTP 流关闭本身不代表 Run 成功；只有明确的 SSE 终态事件才可结束 UI 状态。
+            if (!terminalEvent) {
+              throw new Error("SSE 连接在收到终态事件前已关闭");
+            }
+            return terminalEvent;
+          }
+          buffer += decoder.decode(value, { stream: true });
+          let idx;
+          while ((idx = buffer.indexOf("\n\n")) !== -1) {
+            const frame = buffer.slice(0, idx);
+            buffer = buffer.slice(idx + 2);
+            const eventName = handleFrame(frame, assistant);
+            if (eventName === "appStreamResponse" || eventName === "error") {
+              terminalEvent = eventName;
+            }
+          }
+        }
+      }
+
+      function handleFrame(raw, assistant) {
+        const evt = parseFrame(raw);
+        if (!evt) return null;
+        const data = evt.data || {};
+        const choiceText = () =>
+          data && data.choices && data.choices[0] && data.choices[0].delta
+            ? data.choices[0].delta.content || ""
+            : "";
+        let mutated = false;
+        switch (evt.event) {
+          case "reasoningLogStart":
+          case "reasoningLogEnd":
+            break;
+          case "reasoningLogDelta":
+            if (String(data.contentType || "") === "3013") {
+              try {
+                const form = JSON.parse(choiceText());
+                if (!Array.isArray(assistant.interactions)) assistant.interactions = [];
+                const interactionId = data.messageId || data.orderId;
+                if (
+                  interactionId &&
+                  !assistant.interactions.some((item) => item.id === interactionId)
+                ) {
+                  assistant.interactions.push({
+                    id: interactionId,
+                    form,
+                    status: "pending",
+                  });
+                }
+                assistant.status = "等待你补充信息";
+              } catch {
+                assistant.reasoning += choiceText();
+              }
+            } else {
+              assistant.reasoning += choiceText();
+            }
+            mutated = true;
+            break;
+          case "answerStart":
+          case "answerEnd":
+            break;
+          case "answerDelta":
+            assistant.content += choiceText();
+            assistant.status = "回答中…";
+            mutated = true;
+            break;
+          case "subAgentStart": {
+            const delegation = ensureDelegation(assistant, data);
+            delegation.status = data.status || "RUNNING";
+            mutated = true;
+            break;
+          }
+          case "subAgentProgress": {
+            const delegation = ensureDelegation(assistant, data);
+            delegation.status = "RUNNING";
+            delegation.progress = choiceText();
+            mutated = true;
+            break;
+          }
+          case "subAgentOutputDelta": {
+            const delegation = ensureDelegation(assistant, data);
+            delegation.status = "RUNNING";
+            delegation.output += choiceText();
+            mutated = true;
+            break;
+          }
+          case "subAgentEnd": {
+            const delegation = ensureDelegation(assistant, data);
+            delegation.status = data.status || "COMPLETED";
+            delegation.artifactCount = Number(data.artifactCount) || 0;
+            mutated = true;
+            break;
+          }
+          case "subAgentError": {
+            const delegation = ensureDelegation(assistant, data);
+            delegation.status = data.status || "FAILED";
+            delegation.error = choiceText();
+            mutated = true;
+            break;
+          }
+          case "appStreamResponse":
+            assistant.status = "已完成";
+            mutated = true;
+            break;
+          case "error":
+            assistant.status = "error";
+            assistant.error = data.message || evt.event;
+            mutated = true;
+            break;
+          default:
+            break;
+        }
+        if (mutated) refreshLastAssistant();
+        return evt.event;
+      }
+
+      function parseFrame(raw) {
+        let id = null;
+        let event = null;
+        const dataLines = [];
+        for (const line of raw.split("\n")) {
+          if (!line || line.startsWith(":")) continue;
+          if (line.startsWith("id:")) id = line.slice(3).trim();
+          else if (line.startsWith("event:")) event = line.slice(6).trim();
+          else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+        }
+        if (!event && !id) return null;
+        let data = {};
+        if (dataLines.length) {
+          try {
+            data = JSON.parse(dataLines.join("\n"));
+          } catch {
+            data = { raw: dataLines.join("\n") };
+          }
+        }
+        return { id, event, data };
+      }
+
+      function setSending(on) {
+        $("sendBtn").disabled = on;
+        $("stopBtn").disabled = !on;
+      }
+
+      async function stopRun() {
+        const current = active;
+        if (!current) {
+          return;
+        }
+        current.assistant.cancelledByUser = true;
+        current.assistant.status = "已停止";
+        current.assistant.streaming = false;
+        active = null;
+        setSending(false);
+        refreshLastAssistant();
+        save();
+        try {
+          current.controller.abort();
+        } catch {}
+        if (current.runId) {
+          try {
+            await fetch(`${baseUrl()}/v1/runs/${current.runId}/cancel`, {
+              method: "POST",
+              headers: { "Beyond-Token": state.token },
+            });
+          } catch {}
+        }
+      }
+
+      function autoGrow() {
+        const el = $("input");
+        el.style.height = "auto";
+        el.style.height = Math.min(el.scrollHeight, 200) + "px";
+      }
+
+      function boot() {
+        load();
+        bindHeader();
+        $("newBtn").addEventListener("click", newConversation);
+        $("sendBtn").addEventListener("click", send);
+        $("stopBtn").addEventListener("click", stopRun);
+        $("attachBtn").addEventListener("click", () => $("fileInput").click());
+        $("attachIdBtn").addEventListener("click", addManualAttachment);
+        $("fileInput").addEventListener("change", (event) => {
+          uploadAttachments([...event.target.files]);
+          event.target.value = "";
+        });
+        const input = $("input");
+        input.addEventListener("input", autoGrow);
+        input.addEventListener("keydown", (e) => {
+          if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            send();
+          }
+        });
+        renderSidebar();
+        renderMessages();
+        renderPendingAttachments();
+        syncActiveHistory();
+      }
+      boot();
+    </script>
+  </body>
+</html>

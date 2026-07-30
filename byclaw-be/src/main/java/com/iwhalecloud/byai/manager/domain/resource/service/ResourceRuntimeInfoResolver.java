@@ -20,6 +20,8 @@ import org.springframework.stereotype.Service;
 @Service
 public class ResourceRuntimeInfoResolver {
 
+    private static final String DEFAULT_SUPER_ASSISTANT_RESOURCE_CODE_SUFFIX = "_main";
+
     /**
      * 解析 TOOLKIT / MCP / AGENT JSON 导入时的运行时注册信息。
      *
@@ -65,12 +67,17 @@ public class ResourceRuntimeInfoResolver {
     }
 
     /**
-     * 根据数字员工类型解析运行时注册信息。
+     * 根据数字员工类型和资源编码解析运行时注册信息。
+     * 默认超级助手 {@code {userCode}_main} 固定路由到公共 {@code BY_SUPER} Worker。
      *
      * @author qin.guoquan
      * @date 2026-04-26 13:10:00
      */
-    public ResourceRuntimeInfo resolveDigitalEmployee(String agentType, Long resourceId) {
+    public ResourceRuntimeInfo resolveDigitalEmployee(String agentType, Long resourceId, String resourceCode) {
+        if (StringUtils.endsWith(StringUtils.trimToEmpty(resourceCode),
+            DEFAULT_SUPER_ASSISTANT_RESOURCE_CODE_SUFFIX)) {
+            return new ResourceRuntimeInfo(ImplType.ASK_AGENT.getCode(), WorkerAgentType.BY_SUPER.getCode());
+        }
         String normalizedAgentType = StringUtils.trimToEmpty(agentType);
         if (StringUtils.equals(normalizedAgentType, DigitalEmployType.AGENT_TYPE_QA.getCode())) {
             return new ResourceRuntimeInfo(ImplType.ASK_AGENT.getCode(), WorkerAgentType.BYCLAW_QA.getCode());

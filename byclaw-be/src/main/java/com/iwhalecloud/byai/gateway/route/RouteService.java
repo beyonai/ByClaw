@@ -19,6 +19,7 @@ import com.alibaba.fastjson.JSONObject;
 import com.iwhaleai.byai.framework.client.GatewayClient;
 import com.iwhaleai.byai.framework.core.protocol.ActionType;
 import com.iwhaleai.byai.framework.core.protocol.ExecutionStatus;
+import com.iwhalecloud.byai.common.constants.resource.WorkerAgentType;
 import com.iwhalecloud.byai.common.feign.request.manager.AgentResourceChatInfoDto;
 import com.iwhalecloud.byai.common.feign.response.sandbox.SandboxLaunchData;
 import com.iwhalecloud.byai.common.i18n.I18nUtil;
@@ -600,6 +601,16 @@ public class RouteService {
             messageContent = contentObjects;
         }
 
+        Map<String, Object> gatewayParams = params == null ? new HashMap<>() : new HashMap<>(params);
+        if (WorkerAgentType.BY_SUPER.getCode().equalsIgnoreCase(targetAgentType)
+                && ctx != null && ctx.getUserMessageId() != null) {
+            Map<String, Object> groupChat = new HashMap<>();
+            groupChat.put("schemaVersion", "byclaw.group-chat-ref/v1");
+            groupChat.put("conversationKey", sessionId);
+            groupChat.put("beforeMessageId", String.valueOf(ctx.getUserMessageId()));
+            gatewayParams.put("groupChat", groupChat);
+        }
+
         while (true) {
             GatewayClient.SendResponse response = gatewayClient.sendMessage(
                 targetAgentType,
@@ -611,7 +622,7 @@ public class RouteService {
                 "-1",
                 answerMessageId,
                 traceId,
-                params,
+                gatewayParams,
                 metadata
             );
 

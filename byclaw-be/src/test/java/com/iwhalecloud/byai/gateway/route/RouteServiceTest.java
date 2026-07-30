@@ -39,6 +39,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.LinkedBlockingQueue;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -250,6 +251,32 @@ class RouteServiceTest {
         org.assertj.core.api.Assertions.assertThat(targetAgentTypeCaptor.getAllValues())
                 .containsExactly("BYCLAW_CODE_u1", "BYCLAW_CODE_u1");
         verify(sandboxService, times(1)).restartSandboxAfterRemoteExitWithoutWait("u1", 123L, "BYCLAW_CODE_u1");
+    }
+
+    @Test
+    void route_sendsDefaultSuperAssistantToBySuperWithoutUserSuffix() throws Exception {
+        ChatProcessContext ctx = buildContext(WorkerAgentType.BY_SUPER.getCode(), 1001L);
+        when(gatewayClient.sendMessage(anyString(), anyString(), any(), anyString(), any(),
+                anyString(), anyString(), anyString(), anyString(), any(), any()))
+                .thenAnswer(invocation -> {
+                    ctx.gatewayEventQueue.offer(currentTraceDoneEvent(ctx));
+                    return successResponse();
+                });
+
+        routeService.route(ctx);
+
+        ArgumentCaptor<Map<String, Object>> paramsCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(gatewayClient).sendMessage(eq(WorkerAgentType.BY_SUPER.getCode()), eq("3"), eq("hello"),
+                eq("u1"), eq("testUser"), anyString(), eq("-1"), eq("2"), eq(ctx.getTraceId()),
+                paramsCaptor.capture(), any());
+        org.assertj.core.api.Assertions.assertThat(paramsCaptor.getValue())
+                .containsEntry("worker_agent_type", WorkerAgentType.BY_SUPER.getCode());
+        org.assertj.core.api.Assertions.assertThat(paramsCaptor.getValue().get("groupChat"))
+                .isEqualTo(Map.of(
+                        "schemaVersion", "byclaw.group-chat-ref/v1",
+                        "conversationKey", "3",
+                        "beforeMessageId", "1"));
+        verifyNoInteractions(sandboxService);
     }
 
     @Test

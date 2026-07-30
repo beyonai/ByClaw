@@ -12,7 +12,12 @@
       "Bash(echo \"=== eslint exit $? ===\")",
       "Bash(echo \"=== refix exit $? ===\")",
       "Bash(npx stylelint *)",
-      "Bash(echo \"=== stylelint exit $? ===\")"
+      "Bash(echo \"=== stylelint exit $? ===\")",
+      "Bash(pnpm install *)",
+      "Bash(pnpm exec *)"
     ]
-  }
+  },
+  "enabledMcpjsonServers": [
+    "code-review-graph"
+  ]
 }

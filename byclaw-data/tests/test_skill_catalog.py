@@ -10,8 +10,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-import pytest
-
 from byclaw_data.worker import _extract_rel_skills
 from datacloud_analysis.skills.catalog import (
     _SKILL_CATALOG_CACHE,

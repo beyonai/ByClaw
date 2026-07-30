@@ -284,9 +284,9 @@ const ProjectSpaceList: React.FC = () => {
       const cachedProject = projectDetailMap[project.projectId];
       if (!cachedProject) return project;
       return {
-        ...cachedProject,
         ...project,
-        // 详情页内添加成员会先本地回写共享状态，列表标签需要优先使用详情缓存避免刷新前滞后。
+        // 详情缓存包含编辑后的名称、成员和仓库等最新本地状态，列表刷新返回旧数据时不能覆盖它。
+        ...cachedProject,
         isShare: cachedProject.isShare,
         sharedFlag: cachedProject.sharedFlag,
         repos: cachedProject.repos,
@@ -954,6 +954,18 @@ const ProjectSpaceList: React.FC = () => {
             shareTargets: [],
           },
         }));
+        // 编辑项目时同步当前已打开的详情对象，立即刷新详情页头部名称。
+        setDetailProject((prev) => {
+          if (!prev || `${prev.projectId}` !== `${editingProject?.projectId}`) return prev;
+          return {
+            ...prev,
+            projectName,
+            description: values.description?.trim(),
+            projectType: values.projectType,
+            isShare: submitSharedFlag ? 'Y' : 'N',
+            sharedFlag: submitSharedFlag,
+          };
+        });
       } else {
         const res = await createProject({
           projectName,

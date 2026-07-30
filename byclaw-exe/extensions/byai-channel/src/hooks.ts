@@ -30,6 +30,7 @@ import {
   buildLanguagePrompt,
   buildMaxTokenErrorText,
   buildSessionFilesPrompt,
+  buildSkillInstallPrompt,
   buildUserMdByaiUserSection,
   buildUserMdReloadPrompt,
   resolveInboundLanguage,
@@ -633,6 +634,9 @@ export function registerByaiHooks(api: OpenClawPluginApi): void {
       if (request?.sessionId) {
         sections.push(buildSessionFilesPrompt(request.sessionId, request.language));
         sections.push(buildByclawChatContextToolPrompt(request.language));
+      }
+      if (request) {
+        sections.push(buildSkillInstallPrompt(normalizedWorkspace, request.language));
       }
       if (request?.languageProvided) {
         sections.push(buildLanguagePrompt(request.language));
