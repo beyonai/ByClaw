@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 
 from by_qa.core import logger
-from by_qa.knowledge_base.infrastructure.storage import StorageLocation, StoredObject
+from by_qa.knowledge_base.infrastructure.storage import (
+    StorageConfigurationError,
+    StorageLocation,
+    StoredObject,
+)
 
 from byclaw_userfs_storage import (
     ByClawUserFsKnowledgeStorageProvider,
@@ -24,6 +29,43 @@ class ByClawKnowledgeStorageProvider(ByClawUserFsKnowledgeStorageProvider):
     """Store canonical knowledge files by resource, with a temporary UserFS fallback."""
 
     provider_name: str = "byclaw-knowledge-resource"
+
+    async def read_kg_doc_config(self, resource_id: str | int) -> dict:
+        normalized_resource_id = str(resource_id).strip()
+        if (
+            not normalized_resource_id.isdigit()
+            or int(normalized_resource_id) <= 0
+        ):
+            raise StorageConfigurationError(
+                "invalid ByClaw resourceId for knowledge resource config"
+            )
+        content = await self._download_bytes(
+            path=f"{_BASE_PATH}/files/get",
+            headers=build_byclaw_userfs_headers(),
+            params={
+                "spaceType": _RESOURCE_SPACE_TYPE,
+                "resourceId": normalized_resource_id,
+                "path": (
+                    f"/resource/doc/KG_DOC_{normalized_resource_id}.json"
+                ),
+            },
+        )
+        try:
+            config = json.loads(content)
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise StorageConfigurationError(
+                "invalid KG_DOC resource config JSON"
+            ) from exc
+        if not isinstance(config, dict):
+            raise StorageConfigurationError(
+                "KG_DOC resource config must be a JSON object"
+            )
+        config_resource_id = str(config.get("resourceId") or "").strip()
+        if config_resource_id != normalized_resource_id:
+            raise StorageConfigurationError(
+                "KG_DOC resource config resourceId mismatch"
+            )
+        return config
 
     def _resource_target(self, location: StorageLocation) -> tuple[str, str] | None:
         resource_id = get_byclaw_resource_id()
@@ -135,7 +177,12 @@ def build_byclaw_knowledge_storage_provider() -> ByClawKnowledgeStorageProvider:
     return ByClawKnowledgeStorageProvider()
 
 
+async def get_kg_doc_from_resourcefs(resource_id: str | int) -> dict:
+    return await ByClawKnowledgeStorageProvider().read_kg_doc_config(resource_id)
+
+
 __all__ = [
     "ByClawKnowledgeStorageProvider",
     "build_byclaw_knowledge_storage_provider",
+    "get_kg_doc_from_resourcefs",
 ]

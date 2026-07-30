@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.common.exception.BaseException;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileDownload;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileToMarkdownIndex;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
@@ -56,6 +57,26 @@ class FeignPythonBuildServiceTest {
         assertThat((JSONObject) payload)
             .containsEntry("resourceId", 10001L)
             .containsEntry("filePath", "/docs/a.pdf")
+            .doesNotContainKey("knCode");
+    }
+
+    @Test
+    void localKnowledgeDownload_usesResourceEndpointAndResourcePayload() {
+        FeignPythonBuildService service = new FeignPythonBuildService();
+        KbFileDownload request = new KbFileDownload();
+        request.setKnCode("155");
+        request.setFilePath("/门户设计/api.md");
+
+        String path = ReflectionTestUtils.invokeMethod(service, "resolveLocalRequestPath",
+            KnowledgeServiceOperation.DOWNLOAD_FILE, 11029731L, "/api/v1/downloadFile");
+        Object payload = ReflectionTestUtils.invokeMethod(service, "buildLocalPayload",
+            KnowledgeServiceOperation.DOWNLOAD_FILE, 11029731L, request);
+
+        assertThat(path).isEqualTo("/api/v1/downloadFileByResourceId");
+        assertThat(payload).isInstanceOf(JSONObject.class);
+        assertThat((JSONObject) payload)
+            .containsEntry("resourceId", 11029731L)
+            .containsEntry("filePath", "/门户设计/api.md")
             .doesNotContainKey("knCode");
     }
 

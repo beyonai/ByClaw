@@ -413,9 +413,11 @@ async def test_non_success_business_code_translates_to_operation_error(monkeypat
 
 def test_factory_returns_knowledge_storage_provider():
     from by_qa.knowledge_base.infrastructure.storage import KnowledgeStorageProvider
+    from byclaw_knowledge_storage import ByClawKnowledgeStorageProvider
     from byclaw_userfs_storage import build_byclaw_userfs_storage_provider
 
     provider = build_byclaw_userfs_storage_provider()
 
     assert isinstance(provider, KnowledgeStorageProvider)
-    assert provider.provider_name == "byclaw-userfs"
+    assert isinstance(provider, ByClawKnowledgeStorageProvider)
+    assert provider.provider_name == "byclaw-knowledge-resource"

@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import pytest
 
-from by_qa.knowledge_base.infrastructure.storage import StorageLocation
+from by_qa.knowledge_base.infrastructure.storage import (
+    StorageConfigurationError,
+    StorageLocation,
+)
 
 from byclaw_knowledge_storage import ByClawKnowledgeStorageProvider
 from byclaw_userfs_storage import (
@@ -80,6 +83,55 @@ async def test_read_uses_resource_id_for_permission_and_path(monkeypatch):
         "resourceId": "10001",
         "path": "/resource/kg_doc/KG_DOC_10001/.bykc/KB001/raw/origin/a.txt",
     }
+
+
+@pytest.mark.asyncio
+async def test_read_kg_doc_config_uses_resource_config_path(monkeypatch):
+    monkeypatch.setenv("BE_DOMAINNAME", "ByaiService")
+    transport = FakeTransport(
+        [
+            {
+                "status_code": 200,
+                "content": b'{"resourceId":10001,"resourceCode":"KB001"}',
+            }
+        ]
+    )
+    provider = ByClawKnowledgeStorageProvider(transport=transport)
+    token = set_byclaw_userfs_headers({"beyond-token": "token-123"})
+    try:
+        config = await provider.read_kg_doc_config("10001")
+    finally:
+        reset_byclaw_userfs_headers(token)
+
+    assert config["resourceCode"] == "KB001"
+    assert transport.calls[0]["params"] == {
+        "spaceType": "RESOURCE",
+        "resourceId": "10001",
+        "path": "/resource/doc/KG_DOC_10001.json",
+    }
+
+
+@pytest.mark.asyncio
+async def test_read_kg_doc_config_rejects_resource_id_mismatch(monkeypatch):
+    monkeypatch.setenv("BE_DOMAINNAME", "ByaiService")
+    transport = FakeTransport(
+        [
+            {
+                "status_code": 200,
+                "content": b'{"resourceId":20002,"resourceCode":"KB001"}',
+            }
+        ]
+    )
+    provider = ByClawKnowledgeStorageProvider(transport=transport)
+    token = set_byclaw_userfs_headers({"beyond-token": "token-123"})
+    try:
+        with pytest.raises(
+            StorageConfigurationError,
+            match="resourceId mismatch",
+        ):
+            await provider.read_kg_doc_config("10001")
+    finally:
+        reset_byclaw_userfs_headers(token)
 
 
 @pytest.mark.asyncio

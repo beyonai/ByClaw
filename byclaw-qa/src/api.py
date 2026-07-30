@@ -21,7 +21,9 @@ Usage in start.sh:  uvicorn api:app --host ... --port ...
 from __future__ import annotations
 
 import asyncio
+import io
 import json
+import zipfile
 from typing import Any
 
 import mimetypes
@@ -47,6 +49,12 @@ from by_qa.knowledge_base.services.errors import (
     KnowledgeBaseConfigurationError,
     KnowledgeBaseValidationError,
 )
+from by_qa.knowledge_base.services.zip_batch_import_service import ZipBatchImportService
+from by_qa.knowledge_base.infrastructure.storage import (
+    StorageError,
+    StorageNotFoundError,
+)
+from byclaw_knowledge_storage import get_kg_doc_from_resourcefs
 from byclaw_userfs_storage import (
     RESOURCE_ID_HEADER,
     bind_byclaw_resource_id,
@@ -103,15 +111,44 @@ def _error(result_msg: str, result_object: dict[str, Any] | None = None) -> JSON
 
 
 async def _resolve_kn_code(resource_id: str) -> str | None:
-    """Look up resourceCode from Redis KG_DOC_{resource_id}. Returns None on failure."""
-    config = await get_kg_doc_from_redis(_redis, resource_id)
-    if config is None:
+    """Resolve resourceCode from canonical ResourceFS, with legacy Redis fallback."""
+    source = "ResourceFS"
+    try:
+        config = await get_kg_doc_from_resourcefs(resource_id)
+    except StorageNotFoundError:
+        logger.info(
+            "KG_DOC config not found in ResourceFS: resourceId=%s; "
+            "falling back to Redis",
+            resource_id,
+        )
+        config = None
+    except StorageError as exc:
+        logger.warning(
+            "Failed to read KG_DOC config from ResourceFS: resourceId=%s, "
+            "error=%s",
+            resource_id,
+            exc,
+        )
         return None
+    if config is None:
+        source = "Redis"
+        config = await get_kg_doc_from_redis(_redis, resource_id)
+        if config is None:
+            return None
     code = config.get("resourceCode")
     if not code:
-        logger.warning("KG_DOC config from Redis key=%s missing resourceCode field", f"KG_DOC_{resource_id}")
+        logger.warning(
+            "KG_DOC config from %s missing resourceCode field: resourceId=%s",
+            source,
+            resource_id,
+        )
         return None
-    logger.info("Resolved knCode from Redis: resourceId=%s -> knCode=%s", resource_id, code)
+    logger.info(
+        "Resolved knCode from %s: resourceId=%s -> knCode=%s",
+        source,
+        resource_id,
+        code,
+    )
     return str(code)
 
 
@@ -135,6 +172,7 @@ async def import_by_resource_id(
     resource_id: str | None = Form(None, alias="resourceId"),
     file_path: str | None = Form(None, alias="filePath"),
     file_description: str | None = Form(None, alias="fileDescription"),
+    process_front_matter: bool = Form(True, alias="processFrontMatter"),
     file_content: UploadFile | None = File(None, alias="fileContent"),
 ):
     if not resource_id:
@@ -151,6 +189,7 @@ async def import_by_resource_id(
                 "knCode": kn_code,
                 "filePath": file_path,
                 "fileDescription": file_description,
+                "processFrontMatter": process_front_matter,
                 "fileContent": payload,
                 "fileName": file_content.filename if file_content is not None else None,
                 "contentType": file_content.content_type if file_content is not None else None,
@@ -162,6 +201,25 @@ async def import_by_resource_id(
     try:
         with bind_byclaw_resource_id(resource_id):
             service = await resolve_knowledge_item_ingestion_service()
+            filename = file_content.filename if file_content is not None else ""
+            if filename.lower().endswith(".zip"):
+                if not zipfile.is_zipfile(io.BytesIO(payload or b"")):
+                    return _error("invalid zip file")
+                batch_service = ZipBatchImportService(ingestion_service=service)
+                result = await batch_service.import_zip(
+                    kb_code=request.kb_code,
+                    target_dir=request.file_path,
+                    zip_bytes=payload,
+                    process_front_matter=request.process_front_matter,
+                    file_description=request.file_description,
+                )
+                result_object = {
+                    "data": [item.model_dump(by_alias=True) for item in result.data],
+                    "summary": result.summary.model_dump(by_alias=True),
+                }
+                if result.post_process_errors:
+                    result_object["postProcessErrors"] = result.post_process_errors
+                return _success(result_object)
             await service.upload_file(request)
     except KnowledgeBaseConfigurationError:
         logger.exception("importByResourceId configuration error: resourceId=%s", resource_id)
@@ -173,7 +231,19 @@ async def import_by_resource_id(
         logger.exception("importByResourceId unexpected error: resourceId=%s", resource_id)
         return _error("internal error")
 
-    return _success()
+    normalized_path = "/" + request.file_path.strip("/")
+    return _success(
+        {
+            "data": [
+                {
+                    "filePath": normalized_path,
+                    "success": True,
+                    "error": None,
+                }
+            ],
+            "summary": {"total": 1, "succeeded": 1, "failed": 0},
+        }
+    )
 
 
 # -- fileToMarkdownIndexByResourceId -------------------------------------------

@@ -368,8 +368,15 @@ class ByClawUserFsKnowledgeStorageProvider:
         _ensure_json_success(response, "move")
 
 
-def build_byclaw_userfs_storage_provider() -> ByClawUserFsKnowledgeStorageProvider:
-    return ByClawUserFsKnowledgeStorageProvider()
+def build_byclaw_userfs_storage_provider():
+    """Compatibility alias for deployments that still configure the legacy factory."""
+    from byclaw_knowledge_storage import ByClawKnowledgeStorageProvider
+
+    logger.warning(
+        "BY_QA_STORAGE_PROVIDER uses deprecated byclaw_userfs_storage factory; "
+        "enabling resource-aware knowledge storage compatibility"
+    )
+    return ByClawKnowledgeStorageProvider()
 
 
 __all__ = [
