@@ -36,6 +36,8 @@ export interface ConnectorConnection {
   accountName?: string;
 }
 
+export type ConnectorEnableFlag = ConnectorListItem['enableFlag'];
+
 export interface StartConnectorAuthorizationPayload {
   connectorId: ConnectorId;
   // 后端在授权完成后回跳前端时使用，实际换取 token 的回调仍由后端完成。

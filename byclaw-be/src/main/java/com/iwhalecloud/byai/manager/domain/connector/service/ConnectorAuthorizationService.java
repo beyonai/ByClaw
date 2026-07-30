@@ -2,6 +2,7 @@ package com.iwhalecloud.byai.manager.domain.connector.service;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
+import com.iwhalecloud.byai.manager.domain.devloop.service.DwsAuthService;
 import com.iwhalecloud.byai.manager.dto.connector.ConnectorAuthorizationDto;
 import com.iwhalecloud.byai.manager.dto.connector.StartConnectorAuthorizationRequest;
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
@@ -10,6 +11,7 @@ import org.springframework.util.StringUtils;
 
 import java.net.URI;
 import java.util.Date;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -18,12 +20,15 @@ import java.util.concurrent.ConcurrentHashMap;
 public class ConnectorAuthorizationService {
 
     private static final long AUTHORIZATION_TTL_MILLIS = 10 * 60 * 1000L;
+    private static final String DINGTALK_CONNECTOR_ID = "dingtalk";
 
     private final ConnectorInfoService connectorInfoService;
+    private final DwsAuthService dwsAuthService;
     private final ConcurrentHashMap<String, AuthorizationSession> sessions = new ConcurrentHashMap<>();
 
-    public ConnectorAuthorizationService(ConnectorInfoService connectorInfoService) {
+    public ConnectorAuthorizationService(ConnectorInfoService connectorInfoService, DwsAuthService dwsAuthService) {
         this.connectorInfoService = connectorInfoService;
+        this.dwsAuthService = dwsAuthService;
     }
 
     public ConnectorAuthorizationDto start(StartConnectorAuthorizationRequest request, String userId) {
@@ -31,6 +36,9 @@ public class ConnectorAuthorizationService {
         ConnectorInfo connector = connectorInfoService.findByCode(request.getConnectorId());
         if (connector == null || !"00A".equals(connector.getStatusCd())) {
             return failed(request.getConnectorId(), "连接器不存在或已失效");
+        }
+        if (DINGTALK_CONNECTOR_ID.equals(request.getConnectorId())) {
+            return startDingtalkAuthorization(request.getConnectorId(), userId);
         }
         if ("NONE".equals(connector.getAuthMode())) {
             return connected(request.getConnectorId());
@@ -61,7 +69,36 @@ public class ConnectorAuthorizationService {
             result.setStatus("expired");
             return result;
         }
+        if (DINGTALK_CONNECTOR_ID.equals(session.connectorId())) {
+            Map<String, Object> dwsStatus = dwsAuthService.getAuthStatus(Long.valueOf(session.userId()));
+            if (Boolean.TRUE.equals(dwsStatus.get("tokenValid"))) {
+                sessions.remove(authorizationId);
+                return connected(session.connectorId());
+            }
+        }
         return pending(authorizationId, session.connectorId(), session.expiresAt());
+    }
+
+    private ConnectorAuthorizationDto startDingtalkAuthorization(String connectorId, String userId) {
+        try {
+            Long.valueOf(userId);
+        }
+        catch (NumberFormatException e) {
+            return failed(connectorId, "当前用户标识无效");
+        }
+
+        Map<String, Object> dwsResult = dwsAuthService.startDeviceAuth();
+        if (!Boolean.TRUE.equals(dwsResult.get("success"))) {
+            return failed(connectorId, String.valueOf(dwsResult.getOrDefault("message", "钉钉授权启动失败")));
+        }
+
+        String authorizationId = UUID.randomUUID().toString();
+        Date expiresAt = new Date(System.currentTimeMillis() + AUTHORIZATION_TTL_MILLIS);
+        sessions.put(authorizationId, new AuthorizationSession(userId, connectorId, expiresAt));
+
+        ConnectorAuthorizationDto result = pending(authorizationId, connectorId, expiresAt);
+        result.setAuthorizationUrl((String) dwsResult.get("verificationUrl"));
+        return result;
     }
 
     private void validateRequest(StartConnectorAuthorizationRequest request) {

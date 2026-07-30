@@ -6,6 +6,7 @@ import {
   FileTextOutlined,
   GlobalOutlined,
   LinkOutlined,
+  LoadingOutlined,
   QrcodeOutlined,
   SettingOutlined,
 } from '@ant-design/icons';
@@ -18,6 +19,7 @@ import {
   queryConnectorList,
   startConnectorAuthorization,
   type ConnectorAuthorization,
+  type ConnectorEnableFlag,
   type ConnectorId,
   type ConnectorListItem,
 } from '@/service/connector';
@@ -34,6 +36,7 @@ export type Connector = {
   description: string;
   authType: 'qrcode' | 'oauth';
   icon: React.ReactNode;
+  enableFlag: ConnectorEnableFlag;
 };
 
 type ConnectorControlProps = {
@@ -49,9 +52,6 @@ const connectorIconMap: Record<string, React.ReactNode> = {
   lark: <AntdIcon type="icon-feishu" />,
 };
 
-// 设置弹窗优先展示这三个企业协作平台，缺少时再按接口顺序使用其他连接器补足三条。
-const preferredConnectorCodes = ['dingtalk', 'lark', 'wecom'];
-
 const getConnectorIcon = (connectorCode: string) => connectorIconMap[connectorCode] || <ApiOutlined />;
 
 // 不再过滤接口数据，所有连接器都保留后端的 ID、编码、名称和描述。
@@ -62,6 +62,7 @@ const mapConnectorListItem = (item: ConnectorListItem): Connector => ({
   description: item.description,
   authType: 'oauth',
   icon: getConnectorIcon(item.connectorCode),
+  enableFlag: item.enableFlag,
 });
 
 const ConnectorIcon = ({ connector }: { connector: Connector }) => (
@@ -102,6 +103,7 @@ const ConnectorControl = ({ canAuthorize, value, onChange }: ConnectorControlPro
   // 分别控制设置列表、完整配置、授权说明和真实授权进度的显示状态。
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [configurationOpen, setConfigurationOpen] = useState(false);
+  const [catalogRefreshing, setCatalogRefreshing] = useState(false);
   const [authorizingConnector, setAuthorizingConnector] = useState<Connector>();
   // 一次性授权任务由后端创建，包含真实二维码或第三方授权链接。
   const [authorizationSession, setAuthorizationSession] = useState<ConnectorAuthorization>();
@@ -115,15 +117,7 @@ const ConnectorControl = ({ canAuthorize, value, onChange }: ConnectorControlPro
 
   // value 仅表示本轮聊天实际携带到 payload 的连接器，不等同于账号已完成授权。
   const selectedIds = useMemo(() => new Set(value.map((item) => item.id)), [value]);
-  const previewConnectors = useMemo(() => {
-    const connectorByCode = new Map(connectors.map((connector) => [connector.code, connector]));
-    const preferredConnectors = preferredConnectorCodes
-      .map((connectorCode) => connectorByCode.get(connectorCode))
-      .filter((connector): connector is Connector => !!connector);
-    const fallbackConnectors = connectors.filter((connector) => !preferredConnectorCodes.includes(connector.code));
-
-    return [...preferredConnectors, ...fallbackConnectors].slice(0, 3);
-  }, [connectors]);
+  const previewConnectors = useMemo(() => connectors.slice(0, 3), [connectors]);
 
   const setSelected = useCallback(
     (connector: Connector, selected: boolean) => {
@@ -189,7 +183,12 @@ const ConnectorControl = ({ canAuthorize, value, onChange }: ConnectorControlPro
   }, [authorizationSession, checkAuthorizationStatus]);
 
   const loadAuthorizedConnectors = useCallback(async () => {
-    setLoadingConnectors(true);
+    const hasCachedConnectors = connectors.length > 0;
+    if (hasCachedConnectors) {
+      setCatalogRefreshing(true);
+    } else {
+      setLoadingConnectors(true);
+    }
     try {
       // 文档要求分页请求，这里一次取足当前全部连接器，并原样转换为页面数据。
       const response = await queryConnectorList({ pageNum: 1, pageSize: 100, keyword: '' });
@@ -210,11 +209,22 @@ const ConnectorControl = ({ canAuthorize, value, onChange }: ConnectorControlPro
         )
       );
     } catch {
-      message.error('连接器列表加载失败，请稍后重试');
+      if (!hasCachedConnectors) {
+        message.error('连接器列表加载失败，请稍后重试');
+      }
     } finally {
-      setLoadingConnectors(false);
+      if (hasCachedConnectors) {
+        setCatalogRefreshing(false);
+      } else {
+        setLoadingConnectors(false);
+      }
     }
-  }, [onChange]);
+  }, [connectors.length, onChange]);
+
+  const openSettings = () => {
+    setSettingsOpen(true);
+    void loadAuthorizedConnectors();
+  };
 
   const beginAuthorization = (connector: Connector) => {
     // 先展示权限说明，再进入对应平台的授权步骤。
@@ -253,6 +263,41 @@ const ConnectorControl = ({ canAuthorize, value, onChange }: ConnectorControlPro
   // 未登录或功能开关关闭时，不在聊天框显示连接器入口。
   if (!CONNECTOR_ENTRY_VISIBLE || !canAuthorize) return null;
 
+  const renderConnectorAction = (connector: Connector, selected: boolean) => {
+    if (catalogRefreshing) {
+      return (
+        <span aria-label={`${connector.name}状态刷新中`} className={styles.refreshingIcon} role="status">
+          <LoadingOutlined />
+        </span>
+      );
+    }
+    if (selected) {
+      return (
+        <Switch
+          checked
+          aria-label={`停用${connector.name}`}
+          onChange={(checked) => setSelected(connector, checked)}
+          size="small"
+        />
+      );
+    }
+    if (connector.enableFlag === 'Y' || authorizedIds.has(connector.id)) {
+      return (
+        <Button type="link" onClick={() => setSelected(connector, true)}>
+          使用
+        </Button>
+      );
+    }
+    if (canAuthorize) {
+      return (
+        <Button type="link" onClick={() => beginAuthorization(connector)}>
+          连接
+        </Button>
+      );
+    }
+    return null;
+  };
+
   const renderConnectorItem = (connector: Connector, compact = false) => {
     const selected = selectedIds.has(connector.id);
     return (
@@ -262,23 +307,7 @@ const ConnectorControl = ({ canAuthorize, value, onChange }: ConnectorControlPro
           <strong>{connector.name}</strong>
           <span>{connector.description}</span>
         </div>
-        {selected ? (
-          <Switch
-            checked
-            aria-label={`停用${connector.name}`}
-            onChange={(checked) => setSelected(connector, checked)}
-            size="small"
-          />
-        ) : authorizedIds.has(connector.id) ? (
-          // 历史已授权时无需重复走 OAuth，只需选中以用于当前消息。
-          <Button type="link" onClick={() => setSelected(connector, true)}>
-            使用
-          </Button>
-        ) : canAuthorize ? (
-          <Button type="link" onClick={() => beginAuthorization(connector)}>
-            连接
-          </Button>
-        ) : null}
+        <div className={styles.connectorAction}>{renderConnectorAction(connector, selected)}</div>
       </div>
     );
   };
@@ -287,24 +316,10 @@ const ConnectorControl = ({ canAuthorize, value, onChange }: ConnectorControlPro
     <>
       {/* 未连接时显示入口；已有连接时直接回显图标并打开同一设置面板。 */}
       {value.length ? (
-        <ConnectorSelection
-          value={value}
-          onOpen={() => {
-            setSettingsOpen(true);
-            void loadAuthorizedConnectors();
-          }}
-        />
+        <ConnectorSelection value={value} onOpen={openSettings} />
       ) : (
         <Tooltip title="连接器">
-          <button
-            className={styles.trigger}
-            type="button"
-            aria-label="连接器设置"
-            onClick={() => {
-              setSettingsOpen(true);
-              void loadAuthorizedConnectors();
-            }}
-          >
+          <button className={styles.trigger} type="button" aria-label="连接器设置" onClick={openSettings}>
             <LinkOutlined />
           </button>
         </Tooltip>

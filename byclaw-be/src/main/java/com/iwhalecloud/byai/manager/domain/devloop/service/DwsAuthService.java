@@ -1,5 +1,25 @@
 package com.iwhalecloud.byai.manager.domain.devloop.service;
 
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+import org.apache.commons.lang3.StringUtils;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -12,23 +32,8 @@ import com.iwhalecloud.byai.manager.application.service.user.UserBucketNamingSer
 import com.iwhalecloud.byai.manager.entity.users.UserPrivateParam;
 import com.iwhalecloud.byai.manager.mapper.users.UserPrivateParamMapper;
 import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
-import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.lang3.StringUtils;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Service;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
-import java.util.*;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * DWS CLI 认证管理服务
@@ -63,13 +68,13 @@ public class DwsAuthService {
     private String fileStorageRoot;
 
     /** 用户私有工作区目录名,dws 配置(profiles)放到 {bucket}/by/.dws,与 .sessions 平级。 */
-    private static final String DWS_CONFIG_SEGMENT = "by/.dws";
+    private static final String DWS_CONFIG_SEGMENT = "by/.dws/config";
 
     /**
      * dws 登录态(DEK/token 密文)实际存在 $HOME/.local/share/dws-cli,dws 只认 HOME,不认 XDG_DATA_HOME/DWS_CONFIG_DIR。
      * 这才是隔离的关键:每个用户单独一份 HOME,放到 {bucket}/by/.dws-home;共用 HOME 会导致一人授权全员"已授权"。
      */
-    private static final String DWS_HOME_SEGMENT = "by/.dws-home";
+    private static final String DWS_HOME_SEGMENT = "by/.dws";
 
     @Autowired
     private UserPrivateParamMapper userPrivateParamMapper;
