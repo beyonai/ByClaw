@@ -52,6 +52,8 @@ EditableRootWithAria.displayName = 'EditableRootWithAria';
 
 export interface RichInputRef {
   setText: (val: SetTextParams) => void;
+  clearAfterSend: () => void;
+  getPersistentMentionDraft: () => { text: string; resourceList: Resource[] };
   appendText: (text: string) => void;
   insertItem: (item: any, type: IResourceType) => any;
   getPayload: () => PayloadType;
@@ -147,13 +149,14 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
 
   const checkMentionTrigger = createCheckMentionTrigger(editor, checkIfCanAt, checkIfCanQuote);
 
-  const setText = (val: SetTextParams) => {
-    // 保留 isDefaultAgent=true 的 mention 节点，清空其后内容
+  const replaceText = (val: SetTextParams, preserveDigitalEmployees = false) => {
+    // 发送后保留所有已 @ 的数字员工；其它赋值场景只保留默认数字员工。
     const paragraph = editor.children[0];
     if (Element.isElement(paragraph) && paragraph.children) {
-      // 找到所有需要保留的节点（isDefaultAgent=true 的 mention 节点）
       const nodesToKeep = paragraph.children.filter(
-        (child: any) => child.type === ELEMENT_MENTION && child.isDefaultAgent
+        (child: any) =>
+          child.type === ELEMENT_MENTION &&
+          (child.isDefaultAgent || (preserveDigitalEmployees && child.resourceType === ResourceType.digitalEmployee))
       );
 
       let newNodes: Descendant[] = [];
@@ -183,6 +186,38 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
       Transforms.select(editor, Editor.end(editor, []));
       ReactEditor.focus(editor); // 聚焦
     }
+  };
+
+  const setText = (val: SetTextParams) => replaceText(val);
+
+  // 触发发送后只清空本轮问题和其它引用，保留用户手动 @ 的数字员工，便于继续追问。
+  const clearAfterSend = () => replaceText('', true);
+
+  // 草稿只保存手动 @ 的员工；路由自带的默认员工由 agentId 恢复，不能重复写入输入框。
+  const getPersistentMentionDraft = () => {
+    const mentionNodes = Array.from(
+      Editor.nodes(editor, {
+        at: [],
+        mode: 'lowest',
+        match: (node) =>
+          Element.isElement(node) &&
+          node.type === ELEMENT_MENTION &&
+          node.resourceType === ResourceType.digitalEmployee &&
+          !node.isDefaultAgent,
+      })
+    ).map(([node]) => node);
+    const resourceList = getResourceList([
+      {
+        type: 'paragraph',
+        children: mentionNodes,
+      } as ParagraphElementType,
+    ]);
+
+    return {
+      // 使用与普通输入草稿一致的资源占位符，输入框重挂载时可以还原为 mention 节点。
+      text: mentionNodes.map((node: any) => `{{${getNodeResourceData(node).id}}}`).join(''),
+      resourceList,
+    };
   };
 
   const getPayload = (): PayloadType => {
@@ -219,7 +254,7 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
     isComposing,
     onSend,
     getPayload,
-    setText,
+    clearAfterSend,
     canSend,
   });
 
@@ -431,6 +466,8 @@ const RichInput = forwardRef<RichInputRef, Props>((props, ref) => {
 
   useImperativeHandle(ref, () => ({
     setText,
+    clearAfterSend,
+    getPersistentMentionDraft,
     insertItem,
     appendText: (text: string) => {
       Transforms.insertText(editor, text);
