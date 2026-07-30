@@ -1,3 +1,5 @@
+SET search_path TO byai;
+
 -- 连接器基础元信息（平台连接器模板）
 CREATE TABLE IF NOT EXISTS byai.byai_connector_info
 (
@@ -17,8 +19,11 @@ CREATE TABLE IF NOT EXISTS byai.byai_connector_info
     update_time    TIMESTAMP
 );
 
-ALTER TABLE byai.byai_connector_info
-    ADD CONSTRAINT uk_byai_connector_info_code UNIQUE (connector_code);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_byai_connector_info_code
+    ON byai.byai_connector_info (connector_code);
+
+CREATE INDEX IF NOT EXISTS idx_byai_connector_info_status_sort
+    ON byai.byai_connector_info (status_cd, sort, create_time);
 
 COMMENT ON TABLE byai.byai_connector_info IS '连接器基础元信息（平台连接器模板）';
 COMMENT ON COLUMN byai.byai_connector_info.connector_id IS '主键，Long类型连接器ID，业务层生成';
@@ -54,6 +59,24 @@ CREATE TABLE IF NOT EXISTS byai.byai_connector_auth
     create_time     TIMESTAMP   NOT NULL DEFAULT NOW(),
     update_time     TIMESTAMP
 );
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'fk_byai_connector_auth_connector'
+    ) THEN
+        ALTER TABLE byai.byai_connector_auth
+            ADD CONSTRAINT fk_byai_connector_auth_connector
+                FOREIGN KEY (connector_id)
+                    REFERENCES byai.byai_connector_info (connector_id);
+    END IF;
+END
+$$;
+
+CREATE INDEX IF NOT EXISTS idx_byai_connector_auth_user_connector
+    ON byai.byai_connector_auth (user_id, connector_id, status_cd, enable_flag, expire_time);
 
 COMMENT ON TABLE byai.byai_connector_auth IS '用户连接器授权绑定记录';
 COMMENT ON COLUMN byai.byai_connector_auth.auth_id IS '主键，Long类型授权记录ID，业务层生成';

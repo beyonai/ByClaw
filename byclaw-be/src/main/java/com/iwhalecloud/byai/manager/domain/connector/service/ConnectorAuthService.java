@@ -1,5 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.connector.service;
 
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorAuth;
 import com.iwhalecloud.byai.manager.mapper.connector.ConnectorAuthMapper;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,6 +22,7 @@ public class ConnectorAuthService {
      * @param connectorAuth 授权实体
      */
     public void save(ConnectorAuth connectorAuth) {
+        connectorAuth.setUserId(currentUserId());
         connectorAuthMapper.insert(connectorAuth);
     }
 
@@ -29,7 +32,9 @@ public class ConnectorAuthService {
      * @param connectorAuth 授权实体
      */
     public void update(ConnectorAuth connectorAuth) {
-        connectorAuthMapper.updateById(connectorAuth);
+        connectorAuth.setUserId(currentUserId());
+        QueryWrapper<ConnectorAuth> ownerQuery = ownerQuery(connectorAuth.getAuthId());
+        connectorAuthMapper.update(connectorAuth, ownerQuery);
     }
 
     /**
@@ -39,6 +44,17 @@ public class ConnectorAuthService {
      * @return 授权实体，不存在时返回 null
      */
     public ConnectorAuth findById(Long authId) {
-        return connectorAuthMapper.selectById(authId);
+        return connectorAuthMapper.selectOne(ownerQuery(authId));
+    }
+
+    private QueryWrapper<ConnectorAuth> ownerQuery(Long authId) {
+        return new QueryWrapper<ConnectorAuth>()
+            .eq("auth_id", authId)
+            .eq("user_id", currentUserId())
+            .eq("status_cd", "00A");
+    }
+
+    private String currentUserId() {
+        return String.valueOf(CurrentUserHolder.getCurrentUserId());
     }
 }
