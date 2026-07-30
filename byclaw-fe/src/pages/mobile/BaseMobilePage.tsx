@@ -9,7 +9,11 @@ import useGlobal from '@/hooks/useGlobal';
 import useChat, { ISendProps } from '@/hooks/useChat';
 import useEventEmitterHooks from '@/components/ChatLayoutComp/hooks/useEventEmitterHooks';
 
-import { getResponseAgentInfo } from '@/components/MessageList/utils';
+import {
+  getResponseAgentInfo,
+  isMultiAgentResponsePayload,
+  type ResponseMetadataPayload,
+} from '@/components/MessageList/utils';
 
 import EmployeeDrawer from './EmployeeDrawer';
 import ChatLayoutCompContext from '@/components/ChatLayoutComp/hooks/useContext';
@@ -85,9 +89,13 @@ export default function Mobile(props: { hideHeader?: boolean }) {
   }, [sessionId, sessionList]);
 
   const onReceivedChatMessages = useCallback(
-    (payload?: { sessionId?: string; metadata?: string }) => {
+    (payload?: ResponseMetadataPayload) => {
       const { sessionId: sourceSessionId, metadata } = payload || {};
       if (`${sourceSessionId}` !== `${sessionId}`) {
+        return;
+      }
+      if (isMultiAgentResponsePayload(payload)) {
+        // 移动端与 PC 保持一致，多员工回答不能把输入框切成最后完成的单个员工。
         return;
       }
       const agentInfo = getResponseAgentInfo({ agentList, employeesList }, metadata);
