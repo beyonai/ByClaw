@@ -48,6 +48,12 @@ COPY --from=build /app/.venv /app/.venv
 COPY start.sh ./
 COPY src/ ./src/
 
+RUN groupadd -g 1001 appuser \
+    && useradd -m -u 1001 -g 1001 appuser \
+    && chown -R 1001:1001 /app
+
+USER appuser
+
 ARG BUILD_VERSION=unknown
 ARG BUILD_BRANCH=unknown
 ARG BUILD_COMMIT=unknown
