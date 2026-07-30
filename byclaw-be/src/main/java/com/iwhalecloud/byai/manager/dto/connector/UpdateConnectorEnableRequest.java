@@ -3,12 +3,12 @@ package com.iwhalecloud.byai.manager.dto.connector;
 import lombok.Getter;
 import lombok.Setter;
 
-/** 前端授权请求，connectorId 使用数据库主键。 */
+/** 更新当前用户的连接器全局启用状态。 */
 @Getter
 @Setter
-public class StartConnectorAuthorizationRequest {
+public class UpdateConnectorEnableRequest {
 
     private Long connectorId;
 
-    private String redirectUrl;
+    private Boolean enabled;
 }

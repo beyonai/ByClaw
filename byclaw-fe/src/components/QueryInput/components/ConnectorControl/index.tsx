@@ -16,8 +16,10 @@ import classNames from 'classnames';
 import AntdIcon from '@/components/AntdIcon';
 import {
   getConnectorAuthorization,
+  cancelConnectorAuthorization,
   queryConnectorList,
   startConnectorAuthorization,
+  updateConnectorEnable,
   type ConnectorAuthorization,
   type ConnectorEnableFlag,
   type ConnectorId,
@@ -112,6 +114,7 @@ const ConnectorControl = ({ canAuthorize, value, onChange }: ConnectorControlPro
   // 列表完全由后端返回，避免请求完成前短暂展示静态假数据。
   const [connectors, setConnectors] = useState<Connector[]>([]);
   const [loadingConnectors, setLoadingConnectors] = useState(false);
+  const [updatingConnectorIds, setUpdatingConnectorIds] = useState<Set<ConnectorId>>(new Set());
   const [startingAuthorization, setStartingAuthorization] = useState(false);
   const [checkingAuthorization, setCheckingAuthorization] = useState(false);
 
@@ -232,6 +235,29 @@ const ConnectorControl = ({ canAuthorize, value, onChange }: ConnectorControlPro
     setAuthorizationSession(undefined);
   };
 
+  const updateConnectorEnableFlag = async (connector: Connector, enabled: boolean) => {
+    setUpdatingConnectorIds((ids) => new Set([...ids, connector.id]));
+    try {
+      await updateConnectorEnable(connector.id, enabled);
+      setConnectors((items) =>
+        items.map((item) => (item.id === connector.id ? { ...item, enableFlag: enabled ? 'Y' : 'N' } : item))
+      );
+      if (enabled) {
+        if (!selectedIds.has(connector.id)) onChange([...value, connector]);
+      } else {
+        onChange(value.filter((item) => item.id !== connector.id));
+      }
+    } catch {
+      message.error('连接器启用状态更新失败，请稍后重试');
+    } finally {
+      setUpdatingConnectorIds((ids) => {
+        const nextIds = new Set(ids);
+        nextIds.delete(connector.id);
+        return nextIds;
+      });
+    }
+  };
+
   const startAuthorization = async () => {
     if (!authorizingConnector) return;
 
@@ -260,10 +286,22 @@ const ConnectorControl = ({ canAuthorize, value, onChange }: ConnectorControlPro
     }
   };
 
+  const cancelAuthorization = async () => {
+    if (authorizationSession) {
+      try {
+        await cancelConnectorAuthorization(authorizationSession.authorizationId);
+      } catch {
+        message.error('后台授权取消失败，请稍后重试');
+      }
+    }
+    setAuthorizationSession(undefined);
+    setAuthorizingConnector(undefined);
+  };
+
   // 未登录或功能开关关闭时，不在聊天框显示连接器入口。
   if (!CONNECTOR_ENTRY_VISIBLE || !canAuthorize) return null;
 
-  const renderConnectorAction = (connector: Connector, selected: boolean) => {
+  const renderConnectorAction = (connector: Connector) => {
     if (catalogRefreshing) {
       return (
         <span aria-label={`${connector.name}状态刷新中`} className={styles.refreshingIcon} role="status">
@@ -271,26 +309,28 @@ const ConnectorControl = ({ canAuthorize, value, onChange }: ConnectorControlPro
         </span>
       );
     }
-    if (selected) {
+    if (connector.enableFlag === 'Y' || authorizedIds.has(connector.id)) {
+      let switchLabel = `使用${connector.name}`;
+      if (connector.enableFlag === 'Y') {
+        switchLabel = `停用${connector.name}`;
+      }
       return (
         <Switch
-          checked
-          aria-label={`停用${connector.name}`}
-          onChange={(checked) => setSelected(connector, checked)}
-          size="small"
+          checked={connector.enableFlag === 'Y'}
+          aria-label={switchLabel}
+          loading={updatingConnectorIds.has(connector.id)}
+          onChange={(checked) => void updateConnectorEnableFlag(connector, checked)}
+          // size="small"
         />
-      );
-    }
-    if (connector.enableFlag === 'Y' || authorizedIds.has(connector.id)) {
-      return (
-        <Button type="link" onClick={() => setSelected(connector, true)}>
-          使用
-        </Button>
       );
     }
     if (canAuthorize) {
       return (
-        <Button type="link" onClick={() => beginAuthorization(connector)}>
+        <Button
+          type="text"
+          onClick={() => beginAuthorization(connector)}
+          style={{ color: 'var(--beyond-color-primary)' }}
+        >
           连接
         </Button>
       );
@@ -299,7 +339,6 @@ const ConnectorControl = ({ canAuthorize, value, onChange }: ConnectorControlPro
   };
 
   const renderConnectorItem = (connector: Connector, compact = false) => {
-    const selected = selectedIds.has(connector.id);
     return (
       <div className={classNames(styles.connectorItem, { [styles.compactItem]: compact })} key={connector.id}>
         <ConnectorIcon connector={connector} />
@@ -307,7 +346,7 @@ const ConnectorControl = ({ canAuthorize, value, onChange }: ConnectorControlPro
           <strong>{connector.name}</strong>
           <span>{connector.description}</span>
         </div>
-        <div className={styles.connectorAction}>{renderConnectorAction(connector, selected)}</div>
+        <div className={styles.connectorAction}>{renderConnectorAction(connector)}</div>
       </div>
     );
   };
@@ -422,10 +461,7 @@ const ConnectorControl = ({ canAuthorize, value, onChange }: ConnectorControlPro
         open={!!authorizingConnector && !!authorizationSession}
         zIndex={1200}
         width={470}
-        onCancel={() => {
-          setAuthorizationSession(undefined);
-          setAuthorizingConnector(undefined);
-        }}
+        onCancel={() => void cancelAuthorization()}
       >
         {authorizingConnector && authorizationSession && (
           <div className={styles.qrContent}>
@@ -457,13 +493,7 @@ const ConnectorControl = ({ canAuthorize, value, onChange }: ConnectorControlPro
             <Button block loading={checkingAuthorization} type="link" onClick={() => void checkAuthorizationStatus()}>
               我已完成授权，立即检查
             </Button>
-            <Button
-              type="link"
-              onClick={() => {
-                setAuthorizationSession(undefined);
-                setAuthorizingConnector(undefined);
-              }}
-            >
+            <Button type="link" onClick={() => void cancelAuthorization()}>
               取消连接
             </Button>
           </div>

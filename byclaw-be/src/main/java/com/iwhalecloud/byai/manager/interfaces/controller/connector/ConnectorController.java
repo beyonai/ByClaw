@@ -4,10 +4,13 @@ import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.application.service.connector.ConnectorApplicationService;
 import com.iwhalecloud.byai.manager.domain.connector.service.ConnectorAuthorizationService;
+import com.iwhalecloud.byai.manager.domain.connector.service.ConnectorAuthService;
 import com.iwhalecloud.byai.manager.dto.connector.ConnectorAuthorizationDto;
+import com.iwhalecloud.byai.manager.dto.connector.CancelConnectorAuthorizationRequest;
 import com.iwhalecloud.byai.manager.dto.connector.ConnectorConnectionDto;
 import com.iwhalecloud.byai.manager.dto.connector.ConnectorListDto;
 import com.iwhalecloud.byai.manager.dto.connector.StartConnectorAuthorizationRequest;
+import com.iwhalecloud.byai.manager.dto.connector.UpdateConnectorEnableRequest;
 import com.iwhalecloud.byai.manager.interfaces.response.ResponseUtil;
 import com.iwhalecloud.byai.manager.qo.connector.ConnectorQo;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -33,6 +36,9 @@ public class ConnectorController {
 
     @Autowired
     private ConnectorAuthorizationService connectorAuthorizationService;
+
+    @Autowired
+    private ConnectorAuthService connectorAuthService;
 
     /**
      * 分页查询连接器列表。
@@ -60,6 +66,23 @@ public class ConnectorController {
     public ResponseUtil<ConnectorAuthorizationDto> getAuthorizationStatus(
         @RequestParam(value = "authorizationId", required = false) String authorizationId) {
         return ResponseUtil.successResponse(connectorAuthorizationService.status(authorizationId, currentUserId()));
+    }
+
+    @PostMapping("/authorization/cancel")
+    public ResponseUtil<Boolean> cancelAuthorization(@RequestBody CancelConnectorAuthorizationRequest request) {
+        if (request == null || request.getAuthorizationId() == null || request.getAuthorizationId().trim().isEmpty()) {
+            throw new IllegalArgumentException("authorizationId不能为空");
+        }
+        return ResponseUtil.successResponse(connectorAuthorizationService.cancel(request.getAuthorizationId(), currentUserId()));
+    }
+
+    @PostMapping("/enable")
+    public ResponseUtil<Boolean> updateEnable(@RequestBody UpdateConnectorEnableRequest request) {
+        if (request == null || request.getConnectorId() == null || request.getEnabled() == null) {
+            throw new IllegalArgumentException("connectorId和enabled不能为空");
+        }
+        connectorAuthService.updateEnableFlag(request.getConnectorId(), request.getEnabled());
+        return ResponseUtil.successResponse(true);
     }
 
     private String currentUserId() {

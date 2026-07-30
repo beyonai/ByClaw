@@ -59,6 +59,9 @@ export interface ConnectorAuthorization {
 export const queryConnectorList = (data: ConnectorListQuery) =>
   POST<ConnectorListPage>('/byaiService/connector/listAll', data);
 
+export const updateConnectorEnable = (connectorId: ConnectorId, enabled: boolean) =>
+  POST<boolean>('/byaiService/connector/enable', { connectorId, enabled });
+
 // 创建一次性授权任务，后端返回平台二维码或跳转地址，并负责保存任务与三方回调结果。
 export const startConnectorAuthorization = (data: StartConnectorAuthorizationPayload) =>
   POST<ConnectorAuthorization>('/byaiService/connector/authorization/start', data);
@@ -66,3 +69,6 @@ export const startConnectorAuthorization = (data: StartConnectorAuthorizationPay
 // 按授权任务 ID 读取状态，供前端轮询并在 connected 后回显连接器。
 export const getConnectorAuthorization = (authorizationId: string) =>
   GET<ConnectorAuthorization>('/byaiService/connector/authorization/status', { authorizationId });
+
+export const cancelConnectorAuthorization = (authorizationId: string) =>
+  POST<boolean>('/byaiService/connector/authorization/cancel', { authorizationId });

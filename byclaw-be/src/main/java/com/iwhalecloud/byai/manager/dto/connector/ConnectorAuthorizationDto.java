@@ -12,7 +12,7 @@ public class ConnectorAuthorizationDto {
 
     private String authorizationId;
 
-    private String connectorId;
+    private Long connectorId;
 
     private String status;
 

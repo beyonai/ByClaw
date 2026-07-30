@@ -90,6 +90,7 @@ public class DwsAuthService {
 
     // 后台运行的 device flow 进程
     private final AtomicReference<Process> deviceFlowProcess = new AtomicReference<>(null);
+    private final AtomicReference<Long> deviceFlowUserId = new AtomicReference<>(null);
 
     /** 解析用户 bucket 的绝对路径根 {fileStorageRoot}/byclaw-{userCode};失败返回 null。 */
     private String resolveBucketBase(Long userId) {
@@ -182,6 +183,7 @@ public class DwsAuthService {
         try {
             // 如果已有进程在跑，先 kill
             Process existing = deviceFlowProcess.getAndSet(null);
+            deviceFlowUserId.set(null);
             if (existing != null && existing.isAlive()) {
                 existing.destroyForcibly();
             }
@@ -192,6 +194,7 @@ public class DwsAuthService {
             ProcessBuilder pb = newDwsProcess(authUserId, cmd);
             Process process = pb.start();
             deviceFlowProcess.set(process);
+            deviceFlowUserId.set(authUserId);
 
             // 读取前几行输出，提取 userCode 和 verificationUrl
             // dws 会先输出设备码信息，然后 block 轮询
@@ -233,6 +236,7 @@ public class DwsAuthService {
                 log.error("[DwsAuth] failed to parse device flow output: {}", fullOutput);
                 process.destroyForcibly();
                 deviceFlowProcess.set(null);
+                deviceFlowUserId.set(null);
                 return Map.of("success", false, "message", I18nUtil.get("devloop.dws.device.code.failed"));
             }
 
@@ -257,6 +261,7 @@ public class DwsAuthService {
                     log.debug("[DwsAuth] device flow wait interrupted");
                 } finally {
                     deviceFlowProcess.compareAndSet(bgProcess, null);
+                    deviceFlowUserId.compareAndSet(authUserId, null);
                 }
             }, "dws-device-flow-waiter");
             waitThread.setDaemon(true);
@@ -272,6 +277,20 @@ public class DwsAuthService {
             return Map.of("success", false,
                 "message", I18nUtil.get("devloop.dws.device.auth.start.failed", e.getMessage()));
         }
+    }
+
+    /** 取消指定用户正在进行的 Device Flow 授权。 */
+    public boolean cancelDeviceAuth(Long userId) {
+        if (userId == null || !userId.equals(deviceFlowUserId.get())) {
+            return false;
+        }
+        Process process = deviceFlowProcess.getAndSet(null);
+        deviceFlowUserId.compareAndSet(userId, null);
+        if (process != null && process.isAlive()) {
+            process.destroyForcibly();
+            return true;
+        }
+        return false;
     }
 
     /**

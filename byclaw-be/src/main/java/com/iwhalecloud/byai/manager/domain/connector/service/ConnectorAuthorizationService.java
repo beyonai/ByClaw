@@ -5,7 +5,11 @@ import com.alibaba.fastjson.JSONObject;
 import com.iwhalecloud.byai.manager.domain.devloop.service.DwsAuthService;
 import com.iwhalecloud.byai.manager.dto.connector.ConnectorAuthorizationDto;
 import com.iwhalecloud.byai.manager.dto.connector.StartConnectorAuthorizationRequest;
+import com.iwhalecloud.byai.manager.entity.connector.ConnectorAuth;
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
+import com.iwhalecloud.byai.manager.mapper.connector.ConnectorAuthMapper;
+import com.iwhalecloud.byai.state.domain.sys.service.SequenceService;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -24,21 +28,26 @@ public class ConnectorAuthorizationService {
 
     private final ConnectorInfoService connectorInfoService;
     private final DwsAuthService dwsAuthService;
+    private final ConnectorAuthMapper connectorAuthMapper;
+    private final SequenceService sequenceService;
     private final ConcurrentHashMap<String, AuthorizationSession> sessions = new ConcurrentHashMap<>();
 
-    public ConnectorAuthorizationService(ConnectorInfoService connectorInfoService, DwsAuthService dwsAuthService) {
+    public ConnectorAuthorizationService(ConnectorInfoService connectorInfoService, DwsAuthService dwsAuthService,
+        ConnectorAuthMapper connectorAuthMapper, SequenceService sequenceService) {
         this.connectorInfoService = connectorInfoService;
         this.dwsAuthService = dwsAuthService;
+        this.connectorAuthMapper = connectorAuthMapper;
+        this.sequenceService = sequenceService;
     }
 
     public ConnectorAuthorizationDto start(StartConnectorAuthorizationRequest request, String userId) {
         validateRequest(request);
-        ConnectorInfo connector = connectorInfoService.findByCode(request.getConnectorId());
+        ConnectorInfo connector = connectorInfoService.findById(request.getConnectorId());
         if (connector == null || !"00A".equals(connector.getStatusCd())) {
             return failed(request.getConnectorId(), "连接器不存在或已失效");
         }
-        if (DINGTALK_CONNECTOR_ID.equals(request.getConnectorId())) {
-            return startDingtalkAuthorization(request.getConnectorId(), userId);
+        if (DINGTALK_CONNECTOR_ID.equals(connector.getConnectorCode())) {
+            return startDingtalkAuthorization(connector, userId);
         }
         if ("NONE".equals(connector.getAuthMode())) {
             return connected(request.getConnectorId());
@@ -50,7 +59,7 @@ public class ConnectorAuthorizationService {
         }
         String authorizationId = UUID.randomUUID().toString();
         Date expiresAt = new Date(System.currentTimeMillis() + AUTHORIZATION_TTL_MILLIS);
-        sessions.put(authorizationId, new AuthorizationSession(userId, request.getConnectorId(), expiresAt));
+        sessions.put(authorizationId, new AuthorizationSession(userId, connector.getConnectorId(), connector.getConnectorCode(), expiresAt));
 
         ConnectorAuthorizationDto result = pending(authorizationId, request.getConnectorId(), expiresAt);
         result.setAuthorizationUrl(authorizationUrl);
@@ -69,9 +78,10 @@ public class ConnectorAuthorizationService {
             result.setStatus("expired");
             return result;
         }
-        if (DINGTALK_CONNECTOR_ID.equals(session.connectorId())) {
+        if (DINGTALK_CONNECTOR_ID.equals(session.connectorCode())) {
             Map<String, Object> dwsStatus = dwsAuthService.getAuthStatus(Long.valueOf(session.userId()));
             if (Boolean.TRUE.equals(dwsStatus.get("tokenValid"))) {
+                saveEnabledAuthorization(session.userId(), session.connectorId());
                 sessions.remove(authorizationId);
                 return connected(session.connectorId());
             }
@@ -79,7 +89,20 @@ public class ConnectorAuthorizationService {
         return pending(authorizationId, session.connectorId(), session.expiresAt());
     }
 
-    private ConnectorAuthorizationDto startDingtalkAuthorization(String connectorId, String userId) {
+    public boolean cancel(String authorizationId, String userId) {
+        AuthorizationSession session = sessions.get(authorizationId);
+        if (session == null || !session.userId().equals(userId)) {
+            throw new IllegalArgumentException("授权任务不存在");
+        }
+        sessions.remove(authorizationId, session);
+        if (DINGTALK_CONNECTOR_ID.equals(session.connectorCode())) {
+            return dwsAuthService.cancelDeviceAuth(Long.valueOf(userId));
+        }
+        return true;
+    }
+
+    private ConnectorAuthorizationDto startDingtalkAuthorization(ConnectorInfo connector, String userId) {
+        Long connectorId = connector.getConnectorId();
         try {
             Long.valueOf(userId);
         }
@@ -94,7 +117,7 @@ public class ConnectorAuthorizationService {
 
         String authorizationId = UUID.randomUUID().toString();
         Date expiresAt = new Date(System.currentTimeMillis() + AUTHORIZATION_TTL_MILLIS);
-        sessions.put(authorizationId, new AuthorizationSession(userId, connectorId, expiresAt));
+        sessions.put(authorizationId, new AuthorizationSession(userId, connectorId, connector.getConnectorCode(), expiresAt));
 
         ConnectorAuthorizationDto result = pending(authorizationId, connectorId, expiresAt);
         result.setAuthorizationUrl((String) dwsResult.get("verificationUrl"));
@@ -102,7 +125,7 @@ public class ConnectorAuthorizationService {
     }
 
     private void validateRequest(StartConnectorAuthorizationRequest request) {
-        if (request == null || !StringUtils.hasText(request.getConnectorId())) {
+        if (request == null || request.getConnectorId() == null) {
             throw new IllegalArgumentException("connectorId不能为空");
         }
         if (!StringUtils.hasText(request.getRedirectUrl())) {
@@ -127,7 +150,31 @@ public class ConnectorAuthorizationService {
         }
     }
 
-    private ConnectorAuthorizationDto connected(String connectorId) {
+    private void saveEnabledAuthorization(String userId, Long connectorId) {
+        ConnectorAuth existing = connectorAuthMapper.selectOne(new LambdaQueryWrapper<ConnectorAuth>()
+            .eq(ConnectorAuth::getUserId, userId)
+            .eq(ConnectorAuth::getConnectorId, connectorId)
+            .eq(ConnectorAuth::getStatusCd, "00A")
+            .orderByDesc(ConnectorAuth::getUpdateTime)
+            .last("LIMIT 1"));
+        if (existing != null) {
+            existing.setEnableFlag("Y");
+            existing.setUpdateTime(new Date());
+            connectorAuthMapper.updateById(existing);
+            return;
+        }
+        ConnectorAuth auth = new ConnectorAuth();
+        auth.setAuthId(sequenceService.nextVal());
+        auth.setUserId(userId);
+        auth.setConnectorId(connectorId);
+        auth.setEnableFlag("Y");
+        auth.setStatusCd("00A");
+        auth.setCreateBy(userId);
+        auth.setCreateTime(new Date());
+        connectorAuthMapper.insert(auth);
+    }
+
+    private ConnectorAuthorizationDto connected(Long connectorId) {
         ConnectorAuthorizationDto result = new ConnectorAuthorizationDto();
         result.setAuthorizationId(UUID.randomUUID().toString());
         result.setConnectorId(connectorId);
@@ -135,7 +182,7 @@ public class ConnectorAuthorizationService {
         return result;
     }
 
-    private ConnectorAuthorizationDto pending(String authorizationId, String connectorId, Date expiresAt) {
+    private ConnectorAuthorizationDto pending(String authorizationId, Long connectorId, Date expiresAt) {
         ConnectorAuthorizationDto result = new ConnectorAuthorizationDto();
         result.setAuthorizationId(authorizationId);
         result.setConnectorId(connectorId);
@@ -144,7 +191,7 @@ public class ConnectorAuthorizationService {
         return result;
     }
 
-    private ConnectorAuthorizationDto failed(String connectorId, String errorMessage) {
+    private ConnectorAuthorizationDto failed(Long connectorId, String errorMessage) {
         ConnectorAuthorizationDto result = new ConnectorAuthorizationDto();
         result.setConnectorId(connectorId);
         result.setStatus("failed");
@@ -152,6 +199,6 @@ public class ConnectorAuthorizationService {
         return result;
     }
 
-    private record AuthorizationSession(String userId, String connectorId, Date expiresAt) {
+    private record AuthorizationSession(String userId, Long connectorId, String connectorCode, Date expiresAt) {
     }
 }

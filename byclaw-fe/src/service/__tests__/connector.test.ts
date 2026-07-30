@@ -1,4 +1,4 @@
-import { listConnectors } from '../connector';
+import { queryConnectorList } from '../connector';
 
 jest.mock('@/service/common/request', () => ({
   GET: jest.fn(),
@@ -14,9 +14,10 @@ describe('connector service', () => {
     jest.clearAllMocks();
   });
 
-  it('loads the current user connector catalog from the list endpoint', () => {
-    listConnectors();
+  it('loads the connector catalog with pagination from the list endpoint', () => {
+    const query = { pageNum: 1, pageSize: 100, keyword: '' };
+    queryConnectorList(query);
 
-    expect(mockPOST).toHaveBeenCalledWith('/byaiService/connector/listAll', {});
+    expect(mockPOST).toHaveBeenCalledWith('/byaiService/connector/listAll', query);
   });
 });
