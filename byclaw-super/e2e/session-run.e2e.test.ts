@@ -14,25 +14,25 @@ describe("byclaw-super HTTP/SSE E2E", () => {
   it("reports liveness, readiness and authentication failures over HTTP", async () => {
     const service = await start(false);
 
-    const health = await fetch(`${service.baseUrl}/health`);
+    const health = await fetch(`${service.baseUrl}/byclawSuper/health`);
     expect(health.status).toBe(200);
     await expect(health.json()).resolves.toEqual({ status: "ok" });
 
-    const ready = await fetch(`${service.baseUrl}/ready`);
+    const ready = await fetch(`${service.baseUrl}/byclawSuper/ready`);
     expect(ready.status).toBe(503);
     await expect(ready.json()).resolves.toMatchObject({
       ready: false,
       pi: { healthy: false, message: "model unavailable" },
     });
 
-    const missingToken = await fetch(`${service.baseUrl}/v1/sessions`, {
+    const missingToken = await fetch(`${service.baseUrl}/byclawSuper/v1/sessions`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ message: "hello" }),
     });
     expect(missingToken.status).toBe(401);
 
-    const invalidToken = await fetch(`${service.baseUrl}/v1/sessions`, {
+    const invalidToken = await fetch(`${service.baseUrl}/byclawSuper/v1/sessions`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -48,7 +48,7 @@ describe("byclaw-super HTTP/SSE E2E", () => {
     const ownerToken = service.token("owner-a");
     const otherToken = service.token("owner-b");
 
-    const createdResponse = await fetch(`${service.baseUrl}/v1/sessions`, {
+    const createdResponse = await fetch(`${service.baseUrl}/byclawSuper/v1/sessions`, {
       method: "POST",
       headers: jsonHeaders(ownerToken),
       body: JSON.stringify({ message: "hello e2e", thinkingLevel: "high" }),
@@ -78,7 +78,7 @@ describe("byclaw-super HTTP/SSE E2E", () => {
     expect(events).not.toContain(ownerToken);
 
     const historyResponse = await fetch(
-      `${service.baseUrl}/v1/sessions/${created.sessionId}/messages`,
+      `${service.baseUrl}/byclawSuper/v1/sessions/${created.sessionId}/messages`,
       { headers: tokenHeaders(ownerToken) },
     );
     expect(historyResponse.status).toBe(200);
@@ -110,9 +110,9 @@ describe("byclaw-super HTTP/SSE E2E", () => {
     expect(replay).toContain("event: appStreamResponse");
 
     for (const path of [
-      `/v1/runs/${created.runId}`,
-      `/v1/runs/${created.runId}/events`,
-      `/v1/sessions/${created.sessionId}/messages`,
+      `/byclawSuper/v1/runs/${created.runId}`,
+      `/byclawSuper/v1/runs/${created.runId}/events`,
+      `/byclawSuper/v1/sessions/${created.sessionId}/messages`,
     ]) {
       const response = await fetch(`${service.baseUrl}${path}`, {
         headers: tokenHeaders(otherToken),

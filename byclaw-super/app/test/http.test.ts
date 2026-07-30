@@ -41,7 +41,7 @@ describe("Session / Run HTTP/SSE API", () => {
 
     const response = await app.inject({
       method: "POST",
-      url: "/v1/agent-capability-cards/compile",
+      url: "/byclawSuper/v1/agent-capability-cards/compile",
       headers: { "Beyond-Token": "creator-token" },
       payload: {
         locale: "zh-CN",
@@ -84,7 +84,7 @@ describe("Session / Run HTTP/SSE API", () => {
 
     const response = await app.inject({
       method: "POST",
-      url: "/v1/agent-capability-cards/compile",
+      url: "/byclawSuper/v1/agent-capability-cards/compile",
       payload: {
         agent: {
           name: "经营分析助手",
@@ -117,7 +117,7 @@ describe("Session / Run HTTP/SSE API", () => {
 
     const response = await app.inject({
       method: "POST",
-      url: "/v1/agent-capability-cards/compile",
+      url: "/byclawSuper/v1/agent-capability-cards/compile",
       headers: { "Beyond-Token": "creator-token" },
       payload: { agent: { name: "万能助手" } },
     });
@@ -158,7 +158,7 @@ describe("Session / Run HTTP/SSE API", () => {
 
     const response = await app.inject({
       method: "PUT",
-      url: "/v1/agents/10093429/capability-card",
+      url: "/byclawSuper/v1/agents/10093429/capability-card",
       headers: {
         "Beyond-Token": "creator-token",
         "System-Code": "BYAI",
@@ -234,7 +234,7 @@ describe("Session / Run HTTP/SSE API", () => {
 
     const response = await app.inject({
       method: "PUT",
-      url: "/v1/agents/10093429/capability-card",
+      url: "/byclawSuper/v1/agents/10093429/capability-card",
       headers: {
         "Beyond-Token": "creator-token",
         "System-Code": "BYAI",
@@ -261,7 +261,7 @@ describe("Session / Run HTTP/SSE API", () => {
 
     const created = await app.inject({
       method: "POST",
-      url: "/v1/sessions",
+      url: "/byclawSuper/v1/sessions",
       headers: { "Beyond-Token": "very-secret-token" },
       payload: { message: "hello" },
     });
@@ -276,7 +276,7 @@ describe("Session / Run HTTP/SSE API", () => {
       runId: string;
       eventsUrl: string;
     }>();
-    expect(response.eventsUrl).toBe(`/v1/runs/${response.runId}/events`);
+    expect(response.eventsUrl).toBe(`/byclawSuper/v1/runs/${response.runId}/events`);
     expect((await service.getRun(response.runId))?.sessionId).toBe(response.sessionId);
     expect(JSON.stringify(await service.getRun(response.runId))).not.toContain(
       "very-secret-token",
@@ -309,7 +309,7 @@ describe("Session / Run HTTP/SSE API", () => {
 
     const snapshot = await app.inject({
       method: "GET",
-      url: `/v1/runs/${response.runId}`,
+      url: `/byclawSuper/v1/runs/${response.runId}`,
       headers: { "Beyond-Token": "very-secret-token" },
     });
     expect(snapshot.statusCode).toBe(200);
@@ -330,7 +330,7 @@ describe("Session / Run HTTP/SSE API", () => {
 
     const created = await app.inject({
       method: "POST",
-      url: "/v1/sessions",
+      url: "/byclawSuper/v1/sessions",
       headers: { "Beyond-Token": "very-secret-token" },
       payload: {
         message: "总结这份报告",
@@ -369,7 +369,7 @@ describe("Session / Run HTTP/SSE API", () => {
     );
     const created = await app.inject({
       method: "POST",
-      url: "/v1/sessions",
+      url: "/byclawSuper/v1/sessions",
       headers: { "Beyond-Token": "very-secret-token" },
       payload: { attachments: [{ id: "a", name: "note.txt" }] },
     });
@@ -391,7 +391,7 @@ describe("Session / Run HTTP/SSE API", () => {
     );
     const created = await app.inject({
       method: "POST",
-      url: "/v1/sessions",
+      url: "/byclawSuper/v1/sessions",
       headers: { "Beyond-Token": "very-secret-token" },
       payload: {},
     });
@@ -408,7 +408,7 @@ describe("Session / Run HTTP/SSE API", () => {
     );
     const rejected = await app.inject({
       method: "POST",
-      url: "/v1/sessions",
+      url: "/byclawSuper/v1/sessions",
       headers: { "Beyond-Token": "very-secret-token" },
       payload: {
         message: "x",
@@ -425,7 +425,7 @@ describe("Session / Run HTTP/SSE API", () => {
 
     const created = await app.inject({
       method: "POST",
-      url: "/v1/sessions",
+      url: "/byclawSuper/v1/sessions",
       headers: { "Beyond-Token": "token" },
       payload: { message: "think deeply", thinkingLevel: "high" },
     });
@@ -438,7 +438,7 @@ describe("Session / Run HTTP/SSE API", () => {
 
     const invalid = await app.inject({
       method: "POST",
-      url: "/v1/sessions",
+      url: "/byclawSuper/v1/sessions",
       headers: { "Beyond-Token": "token" },
       payload: { message: "invalid", thinkingLevel: "unlimited" },
     });
@@ -534,7 +534,7 @@ describe("Session / Run HTTP/SSE API", () => {
 
     const snapshot = await app.inject({
       method: "GET",
-      url: `/v1/runs/${owned.runId}`,
+      url: `/byclawSuper/v1/runs/${owned.runId}`,
       headers: { "Beyond-Token": "very-secret-token" },
     });
     expect(snapshot.statusCode).toBe(200);
@@ -557,7 +557,7 @@ describe("Session / Run HTTP/SSE API", () => {
 
     const sse = await app.inject({
       method: "GET",
-      url: `/v1/runs/${owned.runId}/events`,
+      url: `/byclawSuper/v1/runs/${owned.runId}/events`,
       headers: { "Beyond-Token": "very-secret-token" },
     });
     expect(sse.statusCode).toBe(200);
@@ -579,7 +579,7 @@ describe("Session / Run HTTP/SSE API", () => {
     const first = await createSession(app, "owner-token", "first");
     const secondResponse = await app.inject({
       method: "POST",
-      url: `/v1/sessions/${first.sessionId}/runs`,
+      url: `/byclawSuper/v1/sessions/${first.sessionId}/runs`,
       headers: { "Beyond-Token": "owner-token" },
       payload: { message: "second" },
     });
@@ -603,13 +603,13 @@ describe("Session / Run HTTP/SSE API", () => {
     const first = await createSession(app, "owner-token", "first");
     const secondResponse = await app.inject({
       method: "POST",
-      url: `/v1/sessions/${first.sessionId}/runs`,
+      url: `/byclawSuper/v1/sessions/${first.sessionId}/runs`,
       headers: { "Beyond-Token": "owner-token" },
       payload: { message: "second" },
     });
     const thirdResponse = await app.inject({
       method: "POST",
-      url: `/v1/sessions/${first.sessionId}/runs`,
+      url: `/byclawSuper/v1/sessions/${first.sessionId}/runs`,
       headers: { "Beyond-Token": "owner-token" },
       payload: { message: "third" },
     });
@@ -628,7 +628,7 @@ describe("Session / Run HTTP/SSE API", () => {
 
     const latestResponse = await app.inject({
       method: "GET",
-      url: `/v1/sessions/${first.sessionId}/messages?limit=2`,
+      url: `/byclawSuper/v1/sessions/${first.sessionId}/messages?limit=2`,
       headers: { "Beyond-Token": "owner-token" },
     });
     expect(latestResponse.statusCode).toBe(200);
@@ -654,7 +654,7 @@ describe("Session / Run HTTP/SSE API", () => {
 
     const olderResponse = await app.inject({
       method: "GET",
-      url: `/v1/sessions/${first.sessionId}/messages?limit=2&before=${encodeURIComponent(
+      url: `/byclawSuper/v1/sessions/${first.sessionId}/messages?limit=2&before=${encodeURIComponent(
         latest.nextCursor ?? "",
       )}`,
       headers: { "Beyond-Token": "owner-token" },
@@ -685,39 +685,39 @@ describe("Session / Run HTTP/SSE API", () => {
 
     const appendForeign = await app.inject({
       method: "POST",
-      url: `/v1/sessions/${owned.sessionId}/runs`,
+      url: `/byclawSuper/v1/sessions/${owned.sessionId}/runs`,
       headers: { "Beyond-Token": "b-token" },
       payload: { message: "steal" },
     });
     const appendMissing = await app.inject({
       method: "POST",
-      url: "/v1/sessions/missing-session/runs",
+      url: "/byclawSuper/v1/sessions/missing-session/runs",
       headers: { "Beyond-Token": "b-token" },
       payload: { message: "missing" },
     });
     const queryForeign = await app.inject({
       method: "GET",
-      url: `/v1/runs/${owned.runId}`,
+      url: `/byclawSuper/v1/runs/${owned.runId}`,
       headers: { "Beyond-Token": "b-token" },
     });
     const queryMissing = await app.inject({
       method: "GET",
-      url: "/v1/runs/missing-run",
+      url: "/byclawSuper/v1/runs/missing-run",
       headers: { "Beyond-Token": "b-token" },
     });
     const streamForeign = await app.inject({
       method: "GET",
-      url: `/v1/runs/${owned.runId}/events`,
+      url: `/byclawSuper/v1/runs/${owned.runId}/events`,
       headers: { "Beyond-Token": "b-token" },
     });
     const cancelForeign = await app.inject({
       method: "POST",
-      url: `/v1/runs/${owned.runId}/cancel`,
+      url: `/byclawSuper/v1/runs/${owned.runId}/cancel`,
       headers: { "Beyond-Token": "b-token" },
     });
     const historyForeign = await app.inject({
       method: "GET",
-      url: `/v1/sessions/${owned.sessionId}/messages`,
+      url: `/byclawSuper/v1/sessions/${owned.sessionId}/messages`,
       headers: { "Beyond-Token": "b-token" },
     });
 
@@ -744,7 +744,7 @@ describe("Session / Run HTTP/SSE API", () => {
 
     const response = await app.inject({
       method: "POST",
-      url: `/v1/sessions/${owned.sessionId}/runs`,
+      url: `/byclawSuper/v1/sessions/${owned.sessionId}/runs`,
       headers: {
         "Beyond-Token": "owner-token",
         "System-Code": "system-b",
@@ -762,17 +762,19 @@ describe("Session / Run HTTP/SSE API", () => {
 
     const missingToken = await app.inject({
       method: "POST",
-      url: "/v1/sessions",
+      url: "/byclawSuper/v1/sessions",
       payload: { message: "hello" },
     });
     const missingHistoryToken = await app.inject({
       method: "GET",
-      url: "/v1/sessions/missing/messages",
+      url: "/byclawSuper/v1/sessions/missing/messages",
     });
     expect(missingToken.statusCode).toBe(401);
     expect(missingToken.json()).toMatchObject({ resultCode: 401, type: 1 });
     expect(missingHistoryToken.statusCode).toBe(401);
-    expect((await app.inject({ method: "GET", url: "/ready" })).statusCode).toBe(503);
+    expect((await app.inject({ method: "GET", url: "/byclawSuper/ready" })).statusCode).toBe(503);
+    expect((await app.inject({ method: "GET", url: "/ready" })).statusCode).toBe(404);
+    expect((await app.inject({ method: "POST", url: "/v1/sessions" })).statusCode).toBe(404);
     await service.dispose();
   });
 
@@ -783,7 +785,7 @@ describe("Session / Run HTTP/SSE API", () => {
 
     const forged = await app.inject({
       method: "POST",
-      url: "/v1/sessions",
+      url: "/byclawSuper/v1/sessions",
       headers: { "Beyond-Token": "very-secret-token" },
       payload: {
         message: "hello",
@@ -794,7 +796,7 @@ describe("Session / Run HTTP/SSE API", () => {
     });
     const oldApi = await app.inject({
       method: "POST",
-      url: "/v1/runs",
+      url: "/byclawSuper/v1/runs",
       headers: { "Beyond-Token": "very-secret-token" },
       payload: { message: "hello" },
     });
@@ -811,7 +813,7 @@ describe("Session / Run HTTP/SSE API", () => {
 
     const created = await app.inject({
       method: "POST",
-      url: "/v1/sessions",
+      url: "/byclawSuper/v1/sessions",
       headers: { "Beyond-Token": "very-secret-token" },
       payload: {
         message: "你好",
@@ -842,7 +844,7 @@ describe("Session / Run HTTP/SSE API", () => {
 
     const response = await app.inject({
       method: "POST",
-      url: "/v1/sessions",
+      url: "/byclawSuper/v1/sessions",
       headers: { "Beyond-Token": "very-secret-token" },
       payload: {
         message: "hello",
@@ -862,7 +864,7 @@ describe("Session / Run HTTP/SSE API", () => {
 
     const response = await app.inject({
       method: "GET",
-      url: `/v1/runs/${run.runId}/events`,
+      url: `/byclawSuper/v1/runs/${run.runId}/events`,
     });
 
     expect(response.statusCode).toBe(401);
@@ -931,7 +933,7 @@ async function createSession(
 ) {
   const response = await app.inject({
     method: "POST",
-    url: "/v1/sessions",
+    url: "/byclawSuper/v1/sessions",
     headers: {
       "Beyond-Token": token,
       ...(systemCode ? { "System-Code": systemCode } : {}),

@@ -130,7 +130,7 @@ prompt。后续 Session 记忆、Skill 和 Step 状态应通过新增 processor 
 无状态预览仍可调用：
 
 ```http
-POST /v1/agent-capability-cards/compile
+POST /byclawSuper/v1/agent-capability-cards/compile
 Beyond-Token: TOKEN
 Content-Type: application/json
 ```
@@ -159,7 +159,7 @@ Content-Type: application/json
 Agent 更新完成后，使用按 Agent 持久化的接口：
 
 ```http
-PUT /v1/agents/10093429/capability-card
+PUT /byclawSuper/v1/agents/10093429/capability-card
 Beyond-Token: TOKEN
 System-Code: BYAI
 Content-Type: application/json
@@ -173,7 +173,8 @@ Agent 业务编码。接口先通过当前 Token 调用权威 Agent Catalog，�
 两个接口都复用 Leader 已认证的 Pi 模型，并使用独立无状态调用，不创建 Session、Run 或 checkpoint。
 模型只生成结构化草稿；服务端负责字段校验、长度限制、SHA-256 来源指纹、质量信息和不超过
 500 字符的确定性 `routingText`。响应结构版本当前固定为
-`byclaw.agent-capability-card/v1`。`POST /compile` 不保存，`PUT /v1/agents/:agentId/capability-card`
+`byclaw.agent-capability-card/v1`。`POST /compile` 不保存，
+`PUT /byclawSuper/v1/agents/:agentId/capability-card`
 会保存。
 
 请求必须包含 Agent 名称，并至少提供 description、instructions、skills、tools、
@@ -331,11 +332,11 @@ pnpm dev
 检查服务与依赖：
 
 ```bash
-curl http://127.0.0.1:3000/health
-curl -i http://127.0.0.1:3000/ready
+curl http://127.0.0.1:3000/byclawSuper/health
+curl -i http://127.0.0.1:3000/byclawSuper/ready
 ```
 
-`/ready` 会同时返回 PostgreSQL schema、事件 listener、Pi、Connector 和 Worker 健康状态。
+`/byclawSuper/ready` 会同时返回 PostgreSQL schema、事件 listener、Pi、Connector 和 Worker 健康状态。
 正常时可看到类似：
 
 ```json
@@ -361,7 +362,7 @@ pnpm start
 创建一个 Session，并原子创建首个 Run：
 
 ```bash
-curl -X POST http://127.0.0.1:3000/v1/sessions \
+curl -X POST http://127.0.0.1:3000/byclawSuper/v1/sessions \
   -H 'content-type: application/json' \
   -H 'Beyond-Token: TOKEN' \
   -d '{
@@ -381,7 +382,7 @@ curl -X POST http://127.0.0.1:3000/v1/sessions \
 `context` 只在创建 Session 的接口中接收。`locale` 使用 BCP 47 语言标签，`timezone`
 使用 IANA 时区名称；兼容既有 i18n 客户端的 `zh_CN`、`en_US` 写法，持久化时会规范化为
 `zh-CN`、`en-US`。二者均可省略。后续
-`POST /v1/sessions/:sessionId/runs` 不接受 `context`，以避免同一会话内的基础语境漂移。
+`POST /byclawSuper/v1/sessions/:sessionId/runs` 不接受 `context`，以避免同一会话内的基础语境漂移。
 
 返回示例：
 
@@ -390,14 +391,14 @@ curl -X POST http://127.0.0.1:3000/v1/sessions \
   "sessionId": "SESSION_ID",
   "runId": "RUN_ID",
   "status": "QUEUED",
-  "eventsUrl": "/v1/runs/RUN_ID/events"
+  "eventsUrl": "/byclawSuper/v1/runs/RUN_ID/events"
 }
 ```
 
 要在同一个 Session 中继续对话，使用响应中的 `sessionId` 创建新的 Run：
 
 ```bash
-curl -X POST http://127.0.0.1:3000/v1/sessions/SESSION_ID/runs \
+curl -X POST http://127.0.0.1:3000/byclawSuper/v1/sessions/SESSION_ID/runs \
   -H 'content-type: application/json' \
   -H 'Beyond-Token: TOKEN' \
   -d '{
@@ -412,7 +413,7 @@ curl -X POST http://127.0.0.1:3000/v1/sessions/SESSION_ID/runs \
 读取 Session 历史消息：
 
 ```bash
-curl 'http://127.0.0.1:3000/v1/sessions/SESSION_ID/messages?limit=50' \
+curl 'http://127.0.0.1:3000/byclawSuper/v1/sessions/SESSION_ID/messages?limit=50' \
   -H 'Beyond-Token: TOKEN'
 ```
 
@@ -451,7 +452,7 @@ assistant 消息。首屏返回最近一页，但 `items` 内保持时间正序�
 
 ```bash
 curl -N --no-buffer \
-  http://127.0.0.1:3000/v1/runs/RUN_ID/events \
+  http://127.0.0.1:3000/byclawSuper/v1/runs/RUN_ID/events \
   -H 'Beyond-Token: TOKEN'
 ```
 
@@ -459,7 +460,7 @@ curl -N --no-buffer \
 
 ```bash
 curl -X POST \
-  http://127.0.0.1:3000/v1/runs/RUN_ID/interactions/INTERACTION_ID/respond \
+  http://127.0.0.1:3000/byclawSuper/v1/runs/RUN_ID/interactions/INTERACTION_ID/respond \
   -H 'content-type: application/json' \
   -H 'Beyond-Token: TOKEN' \
   -d '{
@@ -478,8 +479,8 @@ curl -X POST \
 统一返回 404，避免泄露 ID 是否真实存在。取消和查询使用：
 
 ```text
-GET  /v1/runs/:runId
-POST /v1/runs/:runId/cancel
+GET  /byclawSuper/v1/runs/:runId
+POST /byclawSuper/v1/runs/:runId/cancel
 ```
 
 SSE 事件使用 ByClaw 现有思考模型格式：

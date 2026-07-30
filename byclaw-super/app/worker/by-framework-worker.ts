@@ -601,7 +601,7 @@ export class ByFrameworkWorkerRuntime {
     }
   }
 
-  /** 查询当前 Worker 是否仍持有在线租约，供 /ready 聚合。 */
+  /** 查询当前 Worker 是否仍持有在线租约，供 /byclawSuper/ready 聚合。 */
   async health(): Promise<{ healthy: boolean; message?: string }> {
     if (this.#runFailure) {
       return { healthy: false, message: this.#runFailure.message };

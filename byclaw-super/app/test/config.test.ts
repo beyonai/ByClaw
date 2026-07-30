@@ -31,6 +31,16 @@ describe("应用配置", () => {
     expect(config.runLeaseMs).toBe(APP_CONFIG_DEFAULTS.run.leaseMs);
     expect(config.piProvider).toBe(APP_CONFIG_DEFAULTS.pi.provider);
     expect(config.piModel).toBe(APP_CONFIG_DEFAULTS.pi.model);
+    expect(config.serviceDiscovery).toMatchObject({
+      enabled: true,
+      serviceName: "ByclawSuperService",
+      protocol: "http",
+      host: "byclaw-super.by-service.svc.cluster.local",
+      port: 3_000,
+      pathPrefix: "/byclawSuper",
+      weight: 1,
+      heartbeatIntervalMs: 5_000,
+    });
   });
 
   it("解析数据库 idle timeout 和执行凭证清理周期", () => {
@@ -56,6 +66,10 @@ describe("应用配置", () => {
       PI_MODEL: "gpt-test",
       OPENAI_BASE_URL: "https://model.example.test/v1",
       ARK_BASE_URL: "https://ark.example.test/api/v3",
+      BYCLAW_SUPER_DISCOVERY_HOST: "byclaw-super.internal",
+      BYCLAW_SUPER_DISCOVERY_PORT: "3443",
+      BYCLAW_SUPER_DISCOVERY_PROTOCOL: "https",
+      BYCLAW_SUPER_DISCOVERY_WEIGHT: "3",
     });
 
     expect(config.database.host).toBe("postgres.internal");
@@ -65,6 +79,12 @@ describe("应用配置", () => {
     expect(config.piModel).toBe("gpt-test");
     expect(config.openAiBaseUrl).toBe("https://model.example.test/v1");
     expect(config.arkBaseUrl).toBe("https://ark.example.test/api/v3");
+    expect(config.serviceDiscovery).toMatchObject({
+      host: "byclaw-super.internal",
+      port: 3_443,
+      protocol: "https",
+      weight: 3,
+    });
   });
 
   it("没有基础设施配置时启动配置失败", () => {

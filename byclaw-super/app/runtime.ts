@@ -26,6 +26,7 @@ import { ByClawBeGroupChatContextProvider } from "./business/group-chat-context.
 import { ByAiAttachmentResolver } from "./business/byai-attachment-resolver.js";
 import { loadConfig, type AppConfig } from "./config/index.js";
 import { RedisByClawBeEndpointResolver } from "./business/endpoint-resolver.js";
+import { RedisServiceRegistrar } from "./business/service-registrar.js";
 import { RunIngressService } from "./ingress/run-ingress-service.js";
 import { buildHttpApp } from "./server/app.js";
 import { ByFrameworkWorkerRuntime } from "./worker/by-framework-worker.js";
@@ -35,7 +36,7 @@ import { ByFrameworkWorkerRuntime } from "./worker/by-framework-worker.js";
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * 延迟初始化 Pi，允许 HTTP 服务暴露 /ready 说明模型配置问题，
+ * 延迟初始化 Pi，允许 HTTP 服务暴露 /byclawSuper/ready 说明模型配置问题，
  * 而不是在 Composition Root 创建阶段直接丢失诊断上下文。
  */
 class LazyPiLeaderFactory implements LeaderSessionFactory, AgentCapabilityCompiler {
@@ -135,7 +136,7 @@ function buildRunServiceOptions(config: AppConfig, database: PostgresDatabase) {
   };
 }
 
-/** 聚合 /ready 需要的健康信号：数据库、Pi、连接器与 Worker。 */
+/** 聚合 /byclawSuper/ready 需要的健康信号：数据库、Pi、连接器与 Worker。 */
 async function collectReadiness(input: {
   runService: RunService;
   connectors: ConnectorRegistry;
@@ -387,6 +388,18 @@ export async function createApplication(config = loadConfig()): Promise<Applicat
   });
   ingressInfoSink = (bindings, message) => app.log.info(bindings, message);
   ingressWarningSink = (bindings, message) => app.log.warn(bindings, message);
+  const serviceRegistrar = new RedisServiceRegistrar(
+    redis,
+    {
+      ...config.serviceDiscovery,
+      instanceId: config.instanceId,
+      metadata: {
+        framework: "node",
+        service: "byclaw-super",
+      },
+    },
+    app.log,
+  );
 
   // 6) by-framework 入站 Worker：业务入口，由 Composition Root 按需注册。
   //    Connector 只承担 OpenClaw 出站传输，二者职责分离。
@@ -409,6 +422,7 @@ export async function createApplication(config = loadConfig()): Promise<Applicat
       await workerRuntime?.start();
       try {
         await app.listen({ host: config.host, port: config.port });
+        await serviceRegistrar.start();
       } catch (error) {
         await workerRuntime?.close();
         throw error;
@@ -422,6 +436,7 @@ export async function createApplication(config = loadConfig()): Promise<Applicat
       closed = true;
       await workerRuntime?.close();
       await runService.dispose();
+      await serviceRegistrar.close();
       await app.close();
       await openClaw.close();
       await redis.quit();
