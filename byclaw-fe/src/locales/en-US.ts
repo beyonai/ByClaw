@@ -1722,6 +1722,26 @@ export default {
   'projectSpace.detail.integration.flow.newTag': 'New',
   'projectSpace.detail.integration.flow.kickbackHint':
     'When E2E integration tests fail, the task is automatically kicked back to the Coding phase (round +1) and only proceeds to Submit PR once all tests pass.',
+  'projectSpace.detail.reqIntegration.trigger.title': 'Scheduled integration · dedicated tester',
+  'projectSpace.detail.reqIntegration.trigger.desc':
+    'E2E no longer runs per task; a dedicated tester agent runs it in scheduled batches. The schedule is a throttle — a requirement only runs once all of its subtasks are coded.',
+  'projectSpace.detail.reqIntegration.nextRun': 'Next run {time}',
+  'projectSpace.detail.reqIntegration.title': 'Requirement Integration View',
+  'projectSpace.detail.reqIntegration.group.attention': 'Needs attention',
+  'projectSpace.detail.reqIntegration.group.working': 'In progress',
+  'projectSpace.detail.reqIntegration.group.done': 'Passed',
+  'projectSpace.detail.reqIntegration.status.waitingReady': 'Not ready',
+  'projectSpace.detail.reqIntegration.status.ready': 'Ready',
+  'projectSpace.detail.reqIntegration.status.running': 'Running',
+  'projectSpace.detail.reqIntegration.status.failed': 'Integration failed',
+  'projectSpace.detail.reqIntegration.status.passed': 'Integration passed',
+  'projectSpace.detail.reqIntegration.readyOf': '{coded}/{total} tasks coded',
+  'projectSpace.detail.reqIntegration.round': 'Round {round}',
+  'projectSpace.detail.reqIntegration.lastRun': 'Last {rate} · {time}',
+  'projectSpace.detail.reqIntegration.waitingHint': 'Some subtasks not coded yet; skipped this run',
+  'projectSpace.detail.reqIntegration.kickback': 'Kicked back to {repo} · {branch}',
+  'projectSpace.detail.reqIntegration.kickbackHint':
+    'On failure, the dependency graph attributes the failure to the responsible task and kicks the round back to that repo\'s coding phase (round +1). When attribution is unclear, a new "integration defect" task is created instead of forcing it onto a completed task.',
   'projectSpace.detail.integration.history.title': 'Integration Test History',
   'projectSpace.detail.integration.history.pass': 'Passed',
   'projectSpace.detail.integration.history.reject': 'Rejected',
@@ -1787,8 +1807,14 @@ export default {
   'projectSpace.detail.integration.suiteModal.caseStepsPlaceholder': '1. Open…\n2. Click…\n3. Observe…',
   'projectSpace.detail.integration.suiteModal.caseExpected': 'Expected',
   'projectSpace.detail.integration.suiteModal.caseExpectedPlaceholder': 'Should show… / status should become…',
+  'projectSpace.detail.integration.suiteModal.manualFile': 'Checklist file path (in repo)',
+  'projectSpace.detail.integration.suiteModal.manualFileHint':
+    'Manual checklists follow the same "cases live in the repo, we only call the entry point" rule: the checklist is maintained as a file (e.g. Markdown) in the code repo. The platform only registers the path and reads it — it does not edit case content in-system.',
+  'projectSpace.detail.integration.suiteModal.manualPreviewTitle': 'Checklist preview (read from repo file, read-only)',
+  'projectSpace.detail.integration.suiteModal.manualPreviewEmpty':
+    'No checklist content read yet; the platform parses it from the repo file after saving.',
   'projectSpace.detail.integration.suite.manualCases': 'Manual cases',
-  'projectSpace.detail.integration.suite.manualHint': 'No script, run by hand',
+  'projectSpace.detail.integration.suite.manualHint': 'Checklist in repo, run by hand',
   'projectSpace.detail.integration.suite.runManual': 'Run manual',
   'projectSpace.detail.integration.manualRun.title': 'Manual test · {name}',
   'projectSpace.detail.integration.manualRun.progress': '{decided}/{total} decided',
@@ -1850,6 +1876,13 @@ export default {
   'projectSpace.detail.integration.envModal.continueOnError': 'Continue on error',
   'projectSpace.detail.integration.envModal.orchHint':
     'After choosing the orchestrator, configure the connection and lifecycle stages on the "Environment prep" tab.',
+  'projectSpace.detail.integration.envModal.schedule': 'Schedule (Cron)',
+  'projectSpace.detail.integration.envModal.scheduleHint':
+    'The dedicated tester wakes on this schedule to run integrations in batches. The schedule is a throttle; only requirements whose subtasks are all coded actually run, so half-finished requirements do not waste build resources.',
+  'projectSpace.detail.integration.envModal.runnerEmployee': 'Testing agent',
+  'projectSpace.detail.integration.envModal.runnerEmployeePlaceholder': 'e.g. e2e-tester',
+  'projectSpace.detail.integration.envModal.runnerEmployeeHint':
+    'Run by a dedicated tester agent whose only skill is calling test entry points — it cannot touch product code, structurally eliminating "write the code and fake the test" false passes.',
   'projectSpace.detail.integration.envModal.tabBasic': 'Basics',
   'projectSpace.detail.integration.envModal.tabPrepare': 'Environment prep',
   'projectSpace.detail.integration.envModal.tabAccounts': 'Test accounts',

@@ -264,6 +264,8 @@ const ProjectSpaceList: React.FC = () => {
   const sessionSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // 新建项目的列表响应可能稍后才返回，期间保留待选 ID，避免被无效本地存储回退逻辑提前清除。
   const pendingCreatedProjectIdRef = useRef<string>();
+  // 首次进入项目空间时自动展开项目详情，避免用户每次都需要手动点击"进入项目详情"。
+  const hasAutoOpenedDetailRef = useRef(false);
 
   const updateProjectScopeId = useCallback((projectId?: string | number) => {
     const normalizedProjectId = `${projectId ?? ''}`.trim();
@@ -714,6 +716,18 @@ const ProjectSpaceList: React.FC = () => {
       setDetailProject((current) => (`${current?.projectId || ''}` === targetProjectId ? detail : current));
     });
   };
+
+  useEffect(() => {
+    // 首次进入项目空间时自动展开项目详情，避免用户每次都需要手动点击"进入项目详情"。
+    // ref 保证仅在组件挂载后首次选中项目时触发，之后用户主动返回会话列表不会被重新拉回。
+    if (hasAutoOpenedDetailRef.current || !activeScopeProject) return;
+    hasAutoOpenedDetailRef.current = true;
+    setDetailProject(activeScopeProject);
+    void fetchProjectFullDetail(activeScopeProject, true).then((detail) => {
+      const targetProjectId = `${activeScopeProject.projectId}`;
+      setDetailProject((current) => (`${current?.projectId || ''}` === targetProjectId ? detail : current));
+    });
+  }, [activeScopeProject, fetchProjectFullDetail]);
 
   const handleProjectSharedChange = useCallback(
     (projectId: string | number) => {

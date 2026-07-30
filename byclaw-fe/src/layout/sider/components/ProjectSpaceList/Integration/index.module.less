@@ -1,0 +1,737 @@
+.integrationPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 4px 2px;
+}
+
+.integrationSection {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.integrationSectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.integrationSectionTitle {
+  color: #1f2633;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+// 右侧配置面板空间充足：环境/用例集卡片按卡片网格排布，不再铺满整行。
+.integrationCardGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 12px;
+}
+
+.integrationCardBody {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.integrationField {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.integrationFieldLabel {
+  flex-shrink: 0;
+  width: 120px;
+  color: #7c8798;
+  font-size: 13px;
+  line-height: 24px;
+}
+
+.integrationFieldValue {
+  flex: 1;
+  min-width: 0;
+  color: #1f2633;
+  font-size: 13px;
+  line-height: 24px;
+}
+
+.integrationMwTag {
+  margin-inline-end: 6px;
+  margin-bottom: 4px;
+}
+
+.integrationScriptInput {
+  flex: 1;
+}
+
+// 研发闭环流程条:横向环节 + 箭头,自动折行。
+.integrationFlow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 4px;
+  padding: 12px;
+  border: 1px solid #dfe6f0;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.integrationFlowNode {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid #e2e8f2;
+  background: #f5f7fa;
+  font-size: 12px;
+  color: #7c8798;
+}
+
+.integrationFlowNode_done {
+  border-color: #b7ebc6;
+  background: #f6ffed;
+  color: #389e0d;
+}
+
+.integrationFlowNode_active {
+  border-color: #ffd591;
+  background: #fff7e6;
+  color: #d46b08;
+  font-weight: 600;
+  box-shadow: 0 0 0 2px rgba(250, 140, 22, 0.12);
+}
+
+.integrationFlowNode_pending {
+  border-style: dashed;
+}
+
+.integrationFlowDot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.06);
+  font-size: 11px;
+  line-height: 1;
+}
+
+.integrationFlowLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.integrationFlowNewTag {
+  margin-inline: 0;
+  line-height: 16px;
+  transform: scale(0.85);
+}
+
+.integrationFlowArrow {
+  color: #c0c8d4;
+  font-size: 13px;
+}
+
+.integrationFlowKickback {
+  margin-top: 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #fff1f0;
+  border: 1px solid #ffccc7;
+  color: #cf1322;
+  font-size: 12px;
+  line-height: 20px;
+}
+
+// 左侧窄面板里 antd List.Item 默认横排(Meta 左、actions 右),空间不足时会 wrap-reverse
+// 把 actions 翻到上面、Meta 文字挤到下面。强制纵向堆叠:Meta 占满整行在上,操作行左对齐在下。
+.integrationHistoryList {
+  :global {
+    .@{antPrefix}-list-item {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 6px;
+    }
+
+    .@{antPrefix}-list-item-meta {
+      width: 100%;
+      min-width: 0;
+    }
+
+    .@{antPrefix}-list-item-action {
+      margin-inline-start: 0;
+    }
+  }
+}
+
+.integrationHistoryRound {
+  margin-inline-start: 8px;
+  padding: 0 6px;
+  border-radius: 6px;
+  background: #eef2f8;
+  color: #7c8798;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+// V2:定时触发说明条(概览顶部)。
+.integrationTriggerBanner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #f0f7ff;
+  border: 1px solid #bcd8ff;
+}
+
+.integrationTriggerIcon {
+  margin-top: 2px;
+  color: #246bfe;
+  font-size: 16px;
+}
+
+.integrationTriggerText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+
+  strong {
+    color: #1f3556;
+    font-size: 13px;
+  }
+
+  span {
+    color: #5a6b85;
+    font-size: 12px;
+    line-height: 18px;
+  }
+}
+
+// 触发条右侧的下次运行时间徽标(对标运行状态显性化)。
+.integrationNextRun {
+  margin-inline-start: auto;
+  align-self: center;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: #eef3fb;
+  color: #3a5a86;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+// 对标 Vibe Kanban/Nimbalyst 的状态泳道:分组标题 + 计数 + 组内卡片列表。
+.reqIntegrationGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+
+  & + & {
+    margin-top: 14px;
+  }
+}
+
+.reqIntegrationGroupHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #5a6b85;
+}
+
+.reqIntegrationGroupDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #c4ccda;
+}
+
+.reqIntegrationGroupCount {
+  min-width: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #eef2f8;
+  color: #7c8798;
+  font-size: 11px;
+  text-align: center;
+}
+
+// 「需要处理」泳道用红色强调,一眼可辨。
+.reqIntegrationGroup_attention {
+  color: #cf1322;
+
+  .reqIntegrationGroupDot {
+    background: #ff4d4f;
+  }
+
+  .reqIntegrationGroupCount {
+    background: #fff1f0;
+    color: #cf1322;
+  }
+}
+
+.reqIntegrationGroup_working .reqIntegrationGroupDot {
+  background: #1677ff;
+}
+
+.reqIntegrationGroup_done .reqIntegrationGroupDot {
+  background: #52c41a;
+}
+
+// V2:需求级集成视图列表。
+.reqIntegrationList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.reqIntegrationCard {
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid #e5eaf2;
+  background: #fff;
+}
+
+.reqIntegrationHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.reqIntegrationTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+
+  strong {
+    color: #1f3556;
+    font-size: 13px;
+  }
+}
+
+.reqIntegrationNo {
+  padding: 0 6px;
+  border-radius: 6px;
+  background: #eef2f8;
+  color: #7c8798;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+// 需求→多任务→多仓库:任务芯片。
+.reqIntegrationTasks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.reqIntegrationTaskChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  border: 1px solid transparent;
+}
+
+.reqIntegrationTaskChipReady {
+  background: #f6ffed;
+  border-color: #b7eb8f;
+  color: #389e0d;
+}
+
+.reqIntegrationTaskChipPending {
+  background: #f5f7fa;
+  border-color: #d9e0ea;
+  color: #8794a8;
+}
+
+.reqIntegrationTaskDot {
+  font-weight: 600;
+}
+
+.reqIntegrationTaskBranch {
+  color: #98a4b6;
+  font-family: 'SF Mono', 'Menlo', monospace;
+  font-size: 11px;
+}
+
+.reqIntegrationMeta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 10px;
+  font-size: 12px;
+}
+
+.reqIntegrationReady {
+  color: #246bfe;
+  font-weight: 500;
+}
+
+.reqIntegrationKickback {
+  margin-top: 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #fff1f0;
+  border: 1px solid #ffccc7;
+}
+
+.reqIntegrationKickbackItem {
+  color: #cf1322;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.reqIntegrationActions {
+  margin-top: 4px;
+  text-align: right;
+}
+
+.integrationHistoryKickback {
+  margin-top: 4px;
+  color: #cf1322;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+// 环境/用例集卡片底部的查看/修改/删除操作行。
+.integrationCardActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  padding: 4px 8px;
+  border-top: 1px solid #eef2f8;
+}
+
+// 结果目录与状态规范折叠区。
+.integrationSpec {
+  margin-top: 12px;
+}
+
+.integrationSpecBody {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.integrationSpecHint {
+  color: #526075;
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.integrationSpecSubTitle {
+  margin-top: 4px;
+  color: #1f2633;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.integrationSpecPre {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #e2e8f0;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre;
+  overflow-x: auto;
+}
+
+.integrationSpecEnum {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.integrationSpecEnumRow {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  color: #526075;
+  line-height: 20px;
+}
+
+.integrationNote {
+  color: #a0aabb;
+  font-size: 12px;
+  line-height: 18px;
+  padding: 0 2px;
+}
+
+.integrationConnRow {
+  display: flex;
+  gap: 10px;
+}
+
+.integrationMono {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.integrationAccountCard {
+  border: 1px solid #dfe6f0;
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  background: #fbfcfe;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.integrationAccountRow {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.integrationAccountInject {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 12px;
+  color: #5a6b85;
+  background: #eef3fb;
+  border-radius: 6px;
+  padding: 4px 8px;
+}
+
+.integrationResult {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.integrationResultHead {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.integrationResultStatusTag {
+  font-size: 13px;
+  padding: 2px 10px;
+}
+
+.integrationResultTotals {
+  font-weight: 600;
+  color: #1f2d3d;
+}
+
+.integrationResultDuration {
+  color: #8a93a2;
+  font-size: 12px;
+}
+
+.integrationResultKickback {
+  background: #fff2f0;
+  border: 1px solid #ffccc7;
+  border-radius: 8px;
+  padding: 8px 12px;
+  color: #cf1322;
+  font-size: 13px;
+}
+
+.integrationResultMeta {
+  margin-top: 2px;
+}
+
+.integrationResultSuitesTitle {
+  font-weight: 600;
+  color: #1f2d3d;
+  margin-top: 4px;
+}
+
+.integrationResultSuiteHead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.integrationResultSuiteName {
+  font-weight: 600;
+}
+
+.integrationResultSuiteStat {
+  color: #8a93a2;
+  font-size: 12px;
+}
+
+.integrationResultSuiteBody {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.integrationResultSuitePaths {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  color: #8a93a2;
+}
+
+.integrationResultAllPass {
+  color: #52a852;
+  font-size: 13px;
+}
+
+.integrationResultCase {
+  border: 1px solid #ffd9d4;
+  border-radius: 8px;
+  padding: 8px 12px;
+  background: #fffaf9;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.integrationResultCaseName {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+
+.integrationResultCaseIcon {
+  color: #cf1322;
+  font-size: 12px;
+}
+
+.integrationResultCaseMsg {
+  color: #5a6b85;
+  font-size: 13px;
+  word-break: break-word;
+}
+
+.integrationResultArtifacts {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.integrationResultArtifactTag {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 12px;
+}
+
+.manualRunProgress {
+  margin-bottom: 12px;
+  font-weight: 600;
+  color: #1f2d3d;
+}
+
+.manualRunCase {
+  border: 1px solid #dfe6f0;
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  background: #fbfcfe;
+}
+
+.manualRunCaseTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 14px;
+}
+
+.manualRunCaseMeta {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.manualRunLabel {
+  display: block;
+  color: #8a93a2;
+  font-size: 12px;
+  margin-bottom: 2px;
+}
+
+.manualRunSteps {
+  margin: 0;
+  white-space: pre-wrap;
+  font-family: inherit;
+  font-size: 13px;
+  color: #3a4a5f;
+}
+
+.manualRunExpected {
+  font-size: 13px;
+  color: #3a4a5f;
+}
+
+.manualRunShots {
+  margin-top: 10px;
+}
+
+.integrationStageCard {
+  border: 1px solid #dfe6f0;
+  border-radius: 10px;
+  padding: 10px;
+  margin-bottom: 10px;
+  background: #fbfcfe;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.integrationStageHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.integrationStageIdx {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #eaf2ff;
+  color: #246bfe;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.integrationStageName {
+  flex: 1;
+}
+
+.integrationStageScript {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 12px;
+}
+
+.integrationStageFoot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  color: #7c8798;
+  font-size: 12px;
+}
