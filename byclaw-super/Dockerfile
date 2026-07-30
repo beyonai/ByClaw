@@ -11,8 +11,7 @@ ENV NPM_CONFIG_REGISTRY=${NPM_REGISTRY} \
 
 RUN npm config set registry "${NPM_REGISTRY}" --global \
     && npm config set replace-registry-host "${NPM_REPLACE_REGISTRY_HOST}" --global \
-    && npm install --global pnpm \
-    && pnpm config set registry "${NPM_REGISTRY}" --global
+    && npm install --global pnpm
 
 COPY . .
 
