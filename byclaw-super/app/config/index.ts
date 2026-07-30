@@ -148,7 +148,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       ),
       host: nonEmpty(
         env.BYCLAW_SUPER_DISCOVERY_HOST ??
-          discoveryHost(env.HOST, hostname()),
+          defaults.serviceDiscovery.host,
         "BYCLAW_SUPER_DISCOVERY_HOST",
       ),
       port: integer(
@@ -405,14 +405,6 @@ function booleanValue(raw: string, name: string): boolean {
     return false;
   }
   throw new Error(`${name} must be true, false, 1 or 0, received: ${raw}`);
-}
-
-/** 注册地址不能使用监听通配符；未显式配置时使用当前主机名。 */
-function discoveryHost(bindHost: string | undefined, fallback: string): string {
-  const candidate = bindHost?.trim();
-  return candidate && candidate !== "0.0.0.0" && candidate !== "::"
-    ? candidate
-    : fallback;
 }
 
 /** 服务注册仅支持 HTTP(S) 协议。 */

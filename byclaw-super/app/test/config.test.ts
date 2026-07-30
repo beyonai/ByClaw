@@ -35,7 +35,7 @@ describe("应用配置", () => {
       enabled: true,
       serviceName: "ByclawSuperService",
       protocol: "http",
-      host: hostname(),
+      host: "byclaw-super.by-service.svc.cluster.local",
       port: 3_000,
       pathPrefix: "/byclawSuper",
       weight: 1,

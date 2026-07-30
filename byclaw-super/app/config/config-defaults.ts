@@ -32,6 +32,7 @@ export const APP_CONFIG_DEFAULTS = {
     enabled: true,
     serviceName: "ByclawSuperService",
     protocol: "http",
+    host: "byclaw-super.by-service.svc.cluster.local",
     pathPrefix: "/byclawSuper",
     weight: 1,
     heartbeatIntervalMs: 5_000,
