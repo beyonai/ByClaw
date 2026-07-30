@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  ApiOutlined,
   CheckCircleFilled,
   DatabaseOutlined,
   FileTextOutlined,
@@ -8,16 +9,17 @@ import {
   QrcodeOutlined,
   SettingOutlined,
 } from '@ant-design/icons';
-import { Button, Drawer, Modal, Switch, Tooltip, message } from 'antd';
+import { Button, Drawer, Empty, Modal, Spin, Switch, Tooltip, message } from 'antd';
 import classNames from 'classnames';
 
 import AntdIcon from '@/components/AntdIcon';
 import {
   getConnectorAuthorization,
-  listConnectorConnections,
+  queryConnectorList,
   startConnectorAuthorization,
   type ConnectorAuthorization,
   type ConnectorId,
+  type ConnectorListItem,
 } from '@/service/connector';
 
 import styles from './index.module.less';
@@ -27,6 +29,7 @@ export const CONNECTOR_ENTRY_VISIBLE = true;
 
 export type Connector = {
   id: ConnectorId;
+  code: string;
   name: string;
   description: string;
   authType: 'qrcode' | 'oauth';
@@ -39,30 +42,27 @@ type ConnectorControlProps = {
   onChange: (connectors: Connector[]) => void;
 };
 
-// 产品当前只开放这三个企业协作平台，后续扩展时在此补充目录及官方 iconfont 图标。
-const connectorCatalog: Connector[] = [
-  {
-    id: 'dingtalk',
-    name: '钉钉',
-    description: '获取会议纪要、日志、聊天记录等信息',
-    authType: 'oauth',
-    icon: <AntdIcon type="icon-dingding1" />,
-  },
-  {
-    id: 'wecom',
-    name: '企业微信',
-    description: '获取消息、文档、日程和会议等内容',
-    authType: 'oauth',
-    icon: <AntdIcon type="icon-qiyeweixin" />,
-  },
-  {
-    id: 'feishu',
-    name: '飞书',
-    description: '获取飞书消息、日历、云文档等信息',
-    authType: 'oauth',
-    icon: <AntdIcon type="icon-feishu" />,
-  },
-];
+// 已有官方图标的连接器按接口编码匹配，其余平台使用统一图标，列表内容完全以后端返回为准。
+const connectorIconMap: Record<string, React.ReactNode> = {
+  dingtalk: <AntdIcon type="icon-dingding1" />,
+  wecom: <AntdIcon type="icon-qiyeweixin" />,
+  lark: <AntdIcon type="icon-feishu" />,
+};
+
+// 设置弹窗优先展示这三个企业协作平台，缺少时再按接口顺序使用其他连接器补足三条。
+const preferredConnectorCodes = ['dingtalk', 'lark', 'wecom'];
+
+const getConnectorIcon = (connectorCode: string) => connectorIconMap[connectorCode] || <ApiOutlined />;
+
+// 不再过滤接口数据，所有连接器都保留后端的 ID、编码、名称和描述。
+const mapConnectorListItem = (item: ConnectorListItem): Connector => ({
+  id: item.connectorId,
+  code: item.connectorCode,
+  name: item.connectorName,
+  description: item.description,
+  authType: 'oauth',
+  icon: getConnectorIcon(item.connectorCode),
+});
 
 const ConnectorIcon = ({ connector }: { connector: Connector }) => (
   <span className={styles.connectorIcon}>{connector.icon}</span>
@@ -107,11 +107,23 @@ const ConnectorControl = ({ canAuthorize, value, onChange }: ConnectorControlPro
   const [authorizationSession, setAuthorizationSession] = useState<ConnectorAuthorization>();
   // 历史已授权与本轮消息选择分离，避免用户每次发消息都被强制附带所有连接器。
   const [authorizedIds, setAuthorizedIds] = useState<Set<ConnectorId>>(new Set());
+  // 列表完全由后端返回，避免请求完成前短暂展示静态假数据。
+  const [connectors, setConnectors] = useState<Connector[]>([]);
+  const [loadingConnectors, setLoadingConnectors] = useState(false);
   const [startingAuthorization, setStartingAuthorization] = useState(false);
   const [checkingAuthorization, setCheckingAuthorization] = useState(false);
 
   // value 仅表示本轮聊天实际携带到 payload 的连接器，不等同于账号已完成授权。
   const selectedIds = useMemo(() => new Set(value.map((item) => item.id)), [value]);
+  const previewConnectors = useMemo(() => {
+    const connectorByCode = new Map(connectors.map((connector) => [connector.code, connector]));
+    const preferredConnectors = preferredConnectorCodes
+      .map((connectorCode) => connectorByCode.get(connectorCode))
+      .filter((connector): connector is Connector => !!connector);
+    const fallbackConnectors = connectors.filter((connector) => !preferredConnectorCodes.includes(connector.code));
+
+    return [...preferredConnectors, ...fallbackConnectors].slice(0, 3);
+  }, [connectors]);
 
   const setSelected = useCallback(
     (connector: Connector, selected: boolean) => {
@@ -127,7 +139,7 @@ const ConnectorControl = ({ canAuthorize, value, onChange }: ConnectorControlPro
 
   const completeAuthorization = useCallback(
     (authorization: ConnectorAuthorization) => {
-      const connector = connectorCatalog.find((item) => item.id === authorization.connectorId);
+      const connector = connectors.find((item) => item.id === authorization.connectorId);
       if (!connector) return;
 
       // 仅在后端确认 connected 后回显连接器并允许消息携带该连接器 ID。
@@ -137,7 +149,7 @@ const ConnectorControl = ({ canAuthorize, value, onChange }: ConnectorControlPro
       setAuthorizingConnector(undefined);
       message.success(`${connector.name} 已连接`);
     },
-    [setSelected]
+    [connectors, setSelected]
   );
 
   const checkAuthorizationStatus = useCallback(
@@ -177,16 +189,32 @@ const ConnectorControl = ({ canAuthorize, value, onChange }: ConnectorControlPro
   }, [authorizationSession, checkAuthorizationStatus]);
 
   const loadAuthorizedConnectors = useCallback(async () => {
+    setLoadingConnectors(true);
     try {
-      const connections = await listConnectorConnections();
-      // 历史授权仅决定“可使用”状态，是否附带在本轮消息中仍由用户开关决定。
-      setAuthorizedIds(
-        new Set(connections.filter((item) => item.status === 'connected').map((item) => item.connectorId))
+      // 文档要求分页请求，这里一次取足当前全部连接器，并原样转换为页面数据。
+      const response = await queryConnectorList({ pageNum: 1, pageSize: 100, keyword: '' });
+      const list = response.list || [];
+      const connectorList = list.map(mapConnectorListItem);
+      setConnectors(connectorList);
+
+      // enableFlag 非空表示已经绑定，Y 表示默认启用；N 仍可通过“使用”加入本轮消息。
+      const connectedIds = list
+        .filter((item) => item.enableFlag === 'Y' || item.enableFlag === 'N')
+        .map((item) => item.connectorId);
+      setAuthorizedIds(new Set(connectedIds));
+
+      // 将后端标记为 Y 的连接器同步到聊天输入，保证设置面板与聊天框回显一致。
+      onChange(
+        connectorList.filter((connector) =>
+          list.some((item) => item.enableFlag === 'Y' && item.connectorId === connector.id)
+        )
       );
     } catch {
-      message.error('连接器服务暂未接入或加载失败，请稍后重试');
+      message.error('连接器列表加载失败，请稍后重试');
+    } finally {
+      setLoadingConnectors(false);
     }
-  }, []);
+  }, [onChange]);
 
   const beginAuthorization = (connector: Connector) => {
     // 先展示权限说明，再进入对应平台的授权步骤。
@@ -304,9 +332,13 @@ const ConnectorControl = ({ canAuthorize, value, onChange }: ConnectorControlPro
         }
         onCancel={() => setSettingsOpen(false)}
       >
-        <div className={styles.connectorList}>
-          {connectorCatalog.map((connector) => renderConnectorItem(connector))}
-        </div>
+        <Spin spinning={loadingConnectors}>
+          <div className={styles.connectorList}>
+            {previewConnectors.length
+              ? previewConnectors.map((connector) => renderConnectorItem(connector))
+              : !loadingConnectors && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无连接器" />}
+          </div>
+        </Spin>
         <button
           className={styles.viewAllButton}
           type="button"
@@ -431,9 +463,13 @@ const ConnectorControl = ({ canAuthorize, value, onChange }: ConnectorControlPro
         width={Math.min(980, window.innerWidth - 24)}
         onClose={() => setConfigurationOpen(false)}
       >
-        <div className={styles.configurationGrid}>
-          {connectorCatalog.map((connector) => renderConnectorItem(connector, true))}
-        </div>
+        <Spin spinning={loadingConnectors}>
+          <div className={styles.configurationGrid}>
+            {connectors.length
+              ? connectors.map((connector) => renderConnectorItem(connector, true))
+              : !loadingConnectors && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无连接器" />}
+          </div>
+        </Spin>
       </Drawer>
     </>
   );

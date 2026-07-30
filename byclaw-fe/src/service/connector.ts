@@ -1,7 +1,31 @@
 import { GET, POST } from '@/service/common/request';
 
-// 前后端约定：连接器 ID 仅允许三种企业协作平台，避免聊天 payload 传入未知平台。
-export type ConnectorId = 'dingtalk' | 'wecom' | 'feishu';
+// 连接器 ID 直接使用列表接口返回的数值，避免前端维护一份不完整的平台白名单。
+export type ConnectorId = number;
+
+export interface ConnectorListQuery {
+  pageNum: number;
+  pageSize: number;
+  keyword: string;
+}
+
+export interface ConnectorListItem {
+  connectorCode: string;
+  connectorId: number;
+  connectorName: string;
+  connectorType: 'SYSTEM' | 'CUSTOM';
+  description: string;
+  // Y=当前用户已连接，N=已连接但关闭，null=当前用户未绑定。
+  enableFlag: 'Y' | 'N' | null;
+}
+
+export interface ConnectorListPage {
+  list: ConnectorListItem[];
+  pageNum: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+}
 
 // 后端保存的连接状态；connected 表示可以被当前用户用于聊天检索。
 export type ConnectorConnectionStatus = 'connected' | 'pending' | 'failed' | 'expired';
@@ -29,9 +53,9 @@ export interface ConnectorAuthorization {
   errorMessage?: string;
 }
 
-// 以下路径是连接器前后端接口契约；后端实现完成后前端无需再修改授权交互代码。
-// 查询当前用户可用的历史授权，用于区分“已授权”和“本轮聊天已选中”。
-export const listConnectorConnections = () => GET<ConnectorConnection[]>('/byaiService/connector/connections');
+// 文档接口：查询连接器列表；request 层会自动解包 code=0 响应中的 data 字段。
+export const queryConnectorList = (data: ConnectorListQuery) =>
+  POST<ConnectorListPage>('/byaiService/connector/listAll', data);
 
 // 创建一次性授权任务，后端返回平台二维码或跳转地址，并负责保存任务与三方回调结果。
 export const startConnectorAuthorization = (data: StartConnectorAuthorizationPayload) =>
