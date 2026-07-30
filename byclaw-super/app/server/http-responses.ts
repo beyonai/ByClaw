@@ -4,6 +4,7 @@ import {
   type Delegation,
   type Run,
 } from "@byclaw/by-conductor";
+import { HTTP_API_PREFIX } from "./http-paths.js";
 
 /** 创建 Run 后返回的轻量响应。 */
 export function runResponse(run: Run) {
@@ -13,7 +14,7 @@ export function runResponse(run: Run) {
     status: run.status,
     thinkingLevel: run.thinkingLevel ?? "off",
     attachmentCount: run.attachments.length,
-    eventsUrl: `/v1/runs/${run.id}/events`,
+    eventsUrl: `${HTTP_API_PREFIX}/v1/runs/${run.id}/events`,
   };
 }
 

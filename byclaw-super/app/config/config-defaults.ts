@@ -28,6 +28,14 @@ export const APP_CONFIG_DEFAULTS = {
     baseUrl: "http://127.0.0.1:8086",
     timeoutMs: 10_000,
   },
+  serviceDiscovery: {
+    enabled: true,
+    serviceName: "ByclawSuperService",
+    protocol: "http",
+    pathPrefix: "/byclawSuper",
+    weight: 1,
+    heartbeatIntervalMs: 5_000,
+  },
   thirdPartyAgents: {
     directMode: "off",
     allowlist: "",

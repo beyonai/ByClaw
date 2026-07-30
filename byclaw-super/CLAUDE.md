@@ -68,7 +68,7 @@ app/                              Composition Root + HTTP/Worker adapters (this 
     byai-attachment-resolver.ts   downloads Run attachments from BE by fileId, Run-credential auth
     endpoint-resolver.ts          resolves ByClaw BE endpoint from Redis service registry
   server/
-    app.ts                        Fastify HTTP: route registration, /ready aggregation, CORS
+    app.ts                        Fastify HTTP: /byclawSuper route registration, readiness aggregation, CORS
     byclaw-sse.ts                 RunEvent → ByClaw thinking/answer SSE frame serializer
     http-request-utils.ts         header/auth/error helpers
     http-responses.ts             outbound DTOs + pagination cursors
@@ -113,8 +113,8 @@ Single process with **two inbound entry points** that funnel through one `RunIng
 
 ```
 INBOUND (two paths, same ingress chain)
-  A) HTTP:   POST /v1/sessions {message}                    atomic: Session + first Run + credential + run.created
-             POST /v1/sessions/:sessionId/runs {message}    append a Run
+  A) HTTP:   POST /byclawSuper/v1/sessions {message}                    atomic: Session + first Run + credential + run.created
+             POST /byclawSuper/v1/sessions/:sessionId/runs {message}    append a Run
         │
   B) Worker: by-framework AskAgent → app/worker/by-framework-worker.ts
              (targetAgentType = BYCLAW_WORKER_AGENT_TYPE; Beyond-Token in metadata;
@@ -142,7 +142,7 @@ INBOUND (two paths, same ingress chain)
         (Run terminal + Pi checkpoint COMMIT + sessions.context_revision + credential delete, one txn)
 
 OUT (two paths, same RunEvent stream, both DB-backed)
-  A) HTTP:   GET /v1/runs/:runId/events → owner check → byclaw-sse.ts → ByClaw SSE frames
+  A) HTTP:   GET /byclawSuper/v1/runs/:runId/events → owner check → byclaw-sse.ts → ByClaw SSE frames
   B) Worker: worker #forwardRunEvents → by-framework reasoningLog*/answerDelta protocol
   Event store: LISTEN/NOTIFY lowers latency; consumers ALWAYS re-poll by DB cursor.
 ```
@@ -151,18 +151,18 @@ OUT (two paths, same RunEvent stream, both DB-backed)
 
 | Endpoint | Role |
 | --- | --- |
-| `POST /v1/sessions` | Create Session + first Run atomically (same txn writes credential + `run.created`) |
-| `POST /v1/sessions/:sessionId/runs` | Append a Run to an existing Session |
-| `GET /v1/sessions/:sessionId/messages` | Paginated user/assistant history (opaque `before` cursor; `limit` counts Runs) |
-| `GET /v1/runs/:runId` | Status snapshot: current status, final answer, or error |
-| `POST /v1/runs/:runId/cancel` | Request cancel of a QUEUED or executing Run |
-| `GET /v1/runs/:runId/events` | SSE: replay from `Last-Event-ID` then live-subscribe persisted events |
-| `POST /v1/agent-capability-cards/compile` | Compile a capability card via the Pi capability compiler |
-| `PUT /v1/agents/:agentId/capability-card` | Compile + upsert a capability card |
-| `GET /health` | Process alive |
-| `GET /ready` | DB schema + event listener + Pi + all Connectors + Worker (when enabled) |
+| `POST /byclawSuper/v1/sessions` | Create Session + first Run atomically (same txn writes credential + `run.created`) |
+| `POST /byclawSuper/v1/sessions/:sessionId/runs` | Append a Run to an existing Session |
+| `GET /byclawSuper/v1/sessions/:sessionId/messages` | Paginated user/assistant history (opaque `before` cursor; `limit` counts Runs) |
+| `GET /byclawSuper/v1/runs/:runId` | Status snapshot: current status, final answer, or error |
+| `POST /byclawSuper/v1/runs/:runId/cancel` | Request cancel of a QUEUED or executing Run |
+| `GET /byclawSuper/v1/runs/:runId/events` | SSE: replay from `Last-Event-ID` then live-subscribe persisted events |
+| `POST /byclawSuper/v1/agent-capability-cards/compile` | Compile a capability card via the Pi capability compiler |
+| `PUT /byclawSuper/v1/agents/:agentId/capability-card` | Compile + upsert a capability card |
+| `GET /byclawSuper/health` | Process alive |
+| `GET /byclawSuper/ready` | DB schema + event listener + Pi + all Connectors + Worker (when enabled) |
 
-`GET /v1/runs/:runId` is a status snapshot; `GET /events` is a replayable event stream — neither substitutes for the other.
+`GET /byclawSuper/v1/runs/:runId` is a status snapshot; `GET /events` is a replayable event stream — neither substitutes for the other.
 
 ## Key invariants (enforced in code; preserve these)
 
@@ -178,7 +178,7 @@ OUT (two paths, same RunEvent stream, both DB-backed)
 - **SSE is replay-capable and connection-stateless.** `Last-Event-ID` resumes after the stored event id; client disconnect does NOT cancel the Run and does NOT migrate the TCP connection to another instance. A client reconnects to any healthy instance and PostgreSQL replays subsequent events. Terminal status closes the stream; a 15s heartbeat comment keeps proxies alive.
 - **Wire format is ByClaw's thinking model, not the internal event union.** Internal `RunEvent`s are translated for both out-paths: HTTP via `byclaw-sse.ts`; the Worker via `by-framework` `REASONING_LOG_*` / `ANSWER_DELTA`. Both adapters collapse raw Pi/OpenClaw reasoning into safe, stable Chinese progress text — do not leak raw upstream reasoning to clients.
 - **`userCode`/`agentId` are NOT request body fields.** `userCode` comes from verified JWT claims; `agentId` is chosen by the Leader from the server-fetched snapshot. Request bodies contain only `message` (and attachment references).
-- **`/health`** = process alive; **`/ready`** = DB schema version + event listener + Pi model + all Connector health checks + Worker health (when `BYCLAW_WORKER_ENABLED`) pass, else 503. The OpenClaw Connector's `health()` only PINGs Redis — worker liveness is checked at dispatch time, not at `/ready`.
+- **`/byclawSuper/health`** = process alive; **`/byclawSuper/ready`** = DB schema version + event listener + Pi model + all Connector health checks + Worker health (when `BYCLAW_WORKER_ENABLED`) pass, else 503. The OpenClaw Connector's `health()` only PINGs Redis — worker liveness is checked at dispatch time, not at `/byclawSuper/ready`.
 
 ## Persistence and multi-instance execution
 
@@ -219,7 +219,7 @@ Adding a new context region = a new processor in this pipeline, not a prompt str
 - **Auth**: `auth/beyond-token.ts` verifies the `Beyond-Token` JWT with RS256 using the same login public key as ByClaw BE (`LOGIN_JWT_PUBLIC_KEY`; override only if the parent deployment does). There is no Java session. The token must carry a `userCode` claim.
 - **Agent catalog**: `ByClawBeAgentCatalog.listAuthorizedAgents()` calls `/byaiService/api/v2/digitEmploy/discover` carrying the same token, keeping only `usesPermissions=true` entries. Catalog errors map to HTTP 401 (auth) or 502 (upstream).
 - **Attachments**: `ByAiAttachmentResolver` downloads Run attachments by `fileId` from BE, authenticating with the Run's short-lived credential; bounded by `ATTACHMENT_MAX_FILE_BYTES` / `ATTACHMENT_MAX_TEXT_CHARS` / `ATTACHMENT_MAX_STRUCTURE_CHARS`.
-- **Capability cards**: compiled via the Pi capability compiler (`POST /v1/agent-capability-cards/compile`, `PUT /v1/agents/:agentId/capability-card`) and back-filled from source employee tables via `pnpm capability:backfill` (source schema/DB overridable via `BYCLAW_SOURCE_*`).
+- **Capability cards**: compiled via the Pi capability compiler (`POST /byclawSuper/v1/agent-capability-cards/compile`, `PUT /byclawSuper/v1/agents/:agentId/capability-card`) and back-filled from source employee tables via `pnpm capability:backfill` (source schema/DB overridable via `BYCLAW_SOURCE_*`).
 - **Endpoint discovery**: `RedisByClawBeEndpointResolver` reads Redis hash `byai_gateway:sd:instances:ByaiService` (field `ByaiService:{instanceId}`), assembles origins from each instance's `protocol/host/port/path_prefix`, and load-balances by `weight`. It falls back to `BYCLAW_BE_BASE_URL` when the hash is empty, an instance is invalid, Redis throws, or the read times out.
 
 ## Domain types and state machines

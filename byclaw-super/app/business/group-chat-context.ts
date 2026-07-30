@@ -7,8 +7,6 @@ import {
 import type { ByClawBeEndpointResolver } from "./endpoint-resolver.js";
 
 const GROUP_CHAT_CONTEXT_PATH = "/byaiService/internal/api/v1/group-chat/context";
-const LOCAL_GROUP_CHAT_CONTEXT_URL =
-  `http://127.0.0.1:8086${GROUP_CHAT_CONTEXT_PATH}`;
 
 type FetchLike = typeof globalThis.fetch;
 
@@ -46,12 +44,16 @@ export class ByClawBeGroupChatContextError extends Error {
 export class ByClawBeGroupChatContextProvider
   implements GroupChatContextProvider
 {
+  readonly #fallbackBaseUrl: URL;
   readonly #timeoutMs: number;
   readonly #fetch: FetchLike;
+  readonly #endpointResolver: ByClawBeEndpointResolver | undefined;
 
   constructor(options: ByClawBeGroupChatContextProviderOptions) {
+    this.#fallbackBaseUrl = normalizeBaseUrl(options.baseUrl);
     this.#timeoutMs = options.timeoutMs;
     this.#fetch = options.fetchImpl ?? globalThis.fetch;
+    this.#endpointResolver = options.endpointResolver;
   }
 
   async load(input: {
@@ -60,9 +62,15 @@ export class ByClawBeGroupChatContextProvider
     beyondToken: string;
     systemCode?: string;
   }): Promise<GroupChatContextV1> {
+    const discoveredBaseUrl = await this.#endpointResolver?.resolve();
+    const url = buildGroupChatContextUrl(
+      discoveredBaseUrl
+        ? normalizeBaseUrl(discoveredBaseUrl)
+        : this.#fallbackBaseUrl,
+    );
     let response: Response;
     try {
-      response = await this.#fetch(LOCAL_GROUP_CHAT_CONTEXT_URL, {
+      response = await this.#fetch(url, {
         method: "POST",
         headers: {
           "content-type": "application/json",
@@ -127,6 +135,27 @@ export class ByClawBeGroupChatContextProvider
     }
     return context;
   }
+}
+
+/** 校验并标准化 ByClaw BE 根地址，同时保留服务发现返回的 path_prefix。 */
+function normalizeBaseUrl(value: string): URL {
+  const url = new URL(value);
+  url.pathname =
+    url.pathname === "/"
+      ? "/"
+      : `/${url.pathname.replace(/^\/+|\/+$/g, "")}`;
+  url.search = "";
+  url.hash = "";
+  return url;
+}
+
+/** 在环境变量或服务发现根地址后拼接固定的群聊上下文 API 路径。 */
+function buildGroupChatContextUrl(baseUrl: URL): URL {
+  const url = new URL(baseUrl);
+  const prefix =
+    url.pathname === "/" ? "" : url.pathname.replace(/\/$/, "");
+  url.pathname = `${prefix}${GROUP_CHAT_CONTEXT_PATH}`;
+  return url;
 }
 
 async function parseResponse(

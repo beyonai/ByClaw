@@ -1,5 +1,6 @@
 import cors from "@fastify/cors";
 import Fastify, { type FastifyInstance, type FastifyLoggerOptions } from "fastify";
+import { HTTP_API_PREFIX } from "./http-paths.js";
 import type { BuildHttpAppOptions } from "./http-types.js";
 import { registerCapabilityRoutes } from "./routes/capability-routes.js";
 import { registerHealthRoutes } from "./routes/health-routes.js";
@@ -23,10 +24,15 @@ export async function buildHttpApp(
   });
   await app.register(cors, { origin: options.corsOrigin });
 
-  registerHealthRoutes(app, options);
-  registerCapabilityRoutes(app, options);
-  registerSessionRoutes(app, options);
-  registerRunRoutes(app, options);
+  await app.register(
+    async (api) => {
+      registerHealthRoutes(api, options);
+      registerCapabilityRoutes(api, options);
+      registerSessionRoutes(api, options);
+      registerRunRoutes(api, options);
+    },
+    { prefix: HTTP_API_PREFIX },
+  );
 
   return app;
 }

@@ -22,34 +22,35 @@ pnpm db:migrate
 ```
 
 应用启动会校验 schema 版本，并在配置启用时建立 RunEvent `LISTEN/NOTIFY` 连接；不支持
-`LISTEN` 的兼容数据库可显式使用轮询。`/ready` 同时聚合数据库、listener/poller、Pi、
+`LISTEN` 的兼容数据库可显式使用轮询。`/byclawSuper/ready` 同时聚合数据库、listener/poller、Pi、
 Connector 与 Worker。迁移建议由独立 release job 执行，生产环境保持
 `DB_MIGRATE_ON_START=false`。
 
 ## API
 
-- `POST /v1/sessions`
-- `POST /v1/sessions/:sessionId/runs`
-- `GET /v1/sessions/:sessionId/messages`
-- `GET /v1/runs/:runId`
-- `POST /v1/runs/:runId/cancel`
-- `POST /v1/runs/:runId/interactions/:interactionId/respond`
-- `GET /v1/runs/:runId/events`
-- `POST /v1/agent-capability-cards/compile`
-- `PUT /v1/agents/:agentId/capability-card`
-- `GET /health`
-- `GET /ready`
+- `POST /byclawSuper/v1/sessions`
+- `POST /byclawSuper/v1/sessions/:sessionId/runs`
+- `GET /byclawSuper/v1/sessions/:sessionId/messages`
+- `GET /byclawSuper/v1/runs/:runId`
+- `POST /byclawSuper/v1/runs/:runId/cancel`
+- `POST /byclawSuper/v1/runs/:runId/interactions/:interactionId/respond`
+- `GET /byclawSuper/v1/runs/:runId/events`
+- `POST /byclawSuper/v1/agent-capability-cards/compile`
+- `PUT /byclawSuper/v1/agents/:agentId/capability-card`
+- `GET /byclawSuper/health`
+- `GET /byclawSuper/ready`
 
 除 HTTP 外，应用默认把 `BYCLAW_WORKER_AGENT_TYPE`（缺省 `BY_SUPER`）注册到
 by-framework。AskAgent 会进入与 HTTP 相同的 Token、Agent Catalog 和 Run 创建链路；
 Resume 只完成子 Agent 回调，不会创建重复 Run。同一 owner scope 下的 by-framework
 `sessionId` 会复用内部 Session。设置 `BYCLAW_WORKER_ENABLED=false` 可关闭。
 
-`POST /v1/sessions` 接收必填 `message` 和可选的单次 Run 参数 `thinkingLevel`，返回
+`POST /byclawSuper/v1/sessions` 接收必填 `message` 和可选的单次 Run 参数 `thinkingLevel`，返回
 `sessionId + runId`。`thinkingLevel` 支持 `off|minimal|low|medium|high|xhigh|max`，
 默认 `off`。后续向
-`POST /v1/sessions/:sessionId/runs` 提交新消息，会复用同一个 Pi LeaderSession 并返回新的
-`runId`。`GET /v1/sessions/:sessionId/messages` 从 Run 的 `input/finalAnswer` 返回前端历史，
+`POST /byclawSuper/v1/sessions/:sessionId/runs` 提交新消息，会复用同一个 Pi LeaderSession 并返回新的
+`runId`。`GET /byclawSuper/v1/sessions/:sessionId/messages` 从 Run 的 `input/finalAnswer`
+返回前端历史，
 支持 `limit` 和不透明 `before` 游标；不直接暴露 Pi 原生 entries。创建、追加、历史查询、
 Run 查询、取消与订阅都必须携带 `Beyond-Token`。
 SSE 支持 `Last-Event-ID` 回放，连接断开不会取消任务。

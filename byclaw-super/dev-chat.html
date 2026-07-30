@@ -972,7 +972,7 @@
                   const values = Object.fromEntries(new FormData(card).entries());
                   try {
                     const response = await fetch(
-                      `${baseUrl()}/v1/runs/${encodeURIComponent(m.runId)}/interactions/${encodeURIComponent(interaction.id)}/respond`,
+                      `${baseUrl()}/byclawSuper/v1/runs/${encodeURIComponent(m.runId)}/interactions/${encodeURIComponent(interaction.id)}/respond`,
                       {
                         method: "POST",
                         headers: {
@@ -1105,7 +1105,7 @@
 
       async function refreshDelegations(assistant, render = true) {
         if (!assistant.runId || !state.token) return;
-        const resp = await fetch(`${baseUrl()}/v1/runs/${encodeURIComponent(assistant.runId)}`, {
+        const resp = await fetch(`${baseUrl()}/byclawSuper/v1/runs/${encodeURIComponent(assistant.runId)}`, {
           headers: { "Beyond-Token": state.token },
         });
         if (!resp.ok) return;
@@ -1117,7 +1117,7 @@
       async function fetchHistory(conv, beforeCursor = null) {
         if (!conv.sessionId || !state.token) return;
         try {
-          let url = `${baseUrl()}/v1/sessions/${encodeURIComponent(conv.sessionId)}/messages?limit=50`;
+          let url = `${baseUrl()}/byclawSuper/v1/sessions/${encodeURIComponent(conv.sessionId)}/messages?limit=50`;
           if (beforeCursor) url += `&before=${encodeURIComponent(beforeCursor)}`;
 
           const resp = await fetch(url, {
@@ -1386,8 +1386,8 @@
           const body = { message: text };
           if (attachments.length > 0) body.attachments = attachments;
           const endpoint = conv.sessionId
-            ? `/v1/sessions/${encodeURIComponent(conv.sessionId)}/runs`
-            : "/v1/sessions";
+            ? `/byclawSuper/v1/sessions/${encodeURIComponent(conv.sessionId)}/runs`
+            : "/byclawSuper/v1/sessions";
           const resp = await fetch(`${baseUrl()}${endpoint}`, {
             method: "POST",
             headers: { "content-type": "application/json", "Beyond-Token": state.token },
@@ -1456,7 +1456,7 @@
         if (!assistant.runId) return;
         let resp;
         try {
-          resp = await fetch(`${baseUrl()}/v1/runs/${assistant.runId}`, {
+          resp = await fetch(`${baseUrl()}/byclawSuper/v1/runs/${assistant.runId}`, {
             headers: { "Beyond-Token": state.token },
           });
         } catch (err) {
@@ -1504,7 +1504,7 @@
         refreshLastAssistant();
         await streamToCompletion(
           assistant,
-          `${baseUrl()}/v1/runs/${assistant.runId}/events`,
+          `${baseUrl()}/byclawSuper/v1/runs/${assistant.runId}/events`,
           controller,
         );
       }
@@ -1684,7 +1684,7 @@
         } catch {}
         if (current.runId) {
           try {
-            await fetch(`${baseUrl()}/v1/runs/${current.runId}/cancel`, {
+            await fetch(`${baseUrl()}/byclawSuper/v1/runs/${current.runId}/cancel`, {
               method: "POST",
               headers: { "Beyond-Token": state.token },
             });

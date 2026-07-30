@@ -17,6 +17,16 @@ export interface AppConfig {
   redis: RedisConnectionConfig;
   auth: BeyondTokenVerifierOptions;
   byClawBe: Omit<ByClawBeAgentCatalogOptions, "fetchImpl">;
+  serviceDiscovery: {
+    enabled: boolean;
+    serviceName: string;
+    protocol: "http" | "https";
+    host: string;
+    port: number;
+    pathPrefix: string;
+    weight: number;
+    heartbeatIntervalMs: number;
+  };
   thirdPartyAgents: {
     directMode: "off" | "allowlist" | "all";
     allowlist: string[];
@@ -119,6 +129,52 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
         "BYCLAW_BE_TIMEOUT_MS",
         1,
         300_000,
+      ),
+    },
+    serviceDiscovery: {
+      enabled: booleanValue(
+        env.BYCLAW_SUPER_DISCOVERY_ENABLED ??
+          String(defaults.serviceDiscovery.enabled),
+        "BYCLAW_SUPER_DISCOVERY_ENABLED",
+      ),
+      serviceName: nonEmpty(
+        env.BYCLAW_SUPER_SERVICE_NAME ??
+          defaults.serviceDiscovery.serviceName,
+        "BYCLAW_SUPER_SERVICE_NAME",
+      ),
+      protocol: discoveryProtocol(
+        env.BYCLAW_SUPER_DISCOVERY_PROTOCOL ??
+          defaults.serviceDiscovery.protocol,
+      ),
+      host: nonEmpty(
+        env.BYCLAW_SUPER_DISCOVERY_HOST ??
+          discoveryHost(env.HOST, hostname()),
+        "BYCLAW_SUPER_DISCOVERY_HOST",
+      ),
+      port: integer(
+        env.BYCLAW_SUPER_DISCOVERY_PORT ?? String(port),
+        "BYCLAW_SUPER_DISCOVERY_PORT",
+        1,
+        65_535,
+      ),
+      pathPrefix: pathPrefix(
+        env.BYCLAW_SUPER_DISCOVERY_PATH_PREFIX ??
+          defaults.serviceDiscovery.pathPrefix,
+        "BYCLAW_SUPER_DISCOVERY_PATH_PREFIX",
+      ),
+      weight: integer(
+        env.BYCLAW_SUPER_DISCOVERY_WEIGHT ??
+          String(defaults.serviceDiscovery.weight),
+        "BYCLAW_SUPER_DISCOVERY_WEIGHT",
+        1,
+        10_000,
+      ),
+      heartbeatIntervalMs: integer(
+        env.BYCLAW_SUPER_DISCOVERY_HEARTBEAT_MS ??
+          String(defaults.serviceDiscovery.heartbeatIntervalMs),
+        "BYCLAW_SUPER_DISCOVERY_HEARTBEAT_MS",
+        1_000,
+        30_000,
       ),
     },
     thirdPartyAgents: {
@@ -349,6 +405,34 @@ function booleanValue(raw: string, name: string): boolean {
     return false;
   }
   throw new Error(`${name} must be true, false, 1 or 0, received: ${raw}`);
+}
+
+/** 注册地址不能使用监听通配符；未显式配置时使用当前主机名。 */
+function discoveryHost(bindHost: string | undefined, fallback: string): string {
+  const candidate = bindHost?.trim();
+  return candidate && candidate !== "0.0.0.0" && candidate !== "::"
+    ? candidate
+    : fallback;
+}
+
+/** 服务注册仅支持 HTTP(S) 协议。 */
+function discoveryProtocol(raw: string): "http" | "https" {
+  const value = raw.trim().toLowerCase();
+  if (value === "http" || value === "https") {
+    return value;
+  }
+  throw new Error(
+    `BYCLAW_SUPER_DISCOVERY_PROTOCOL must be http or https, received: ${raw}`,
+  );
+}
+
+/** 校验并标准化服务发现路径前缀。 */
+function pathPrefix(raw: string, name: string): string {
+  const value = raw.trim();
+  if (!value.startsWith("/") || value.includes("?") || value.includes("#")) {
+    throw new Error(`${name} must be an absolute path without query or hash`);
+  }
+  return value === "/" ? "/" : `/${value.replace(/^\/+|\/+$/g, "")}`;
 }
 
 /** 校验必须存在的文本环境变量，并返回去除首尾空白后的值。 */

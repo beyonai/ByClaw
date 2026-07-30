@@ -39,9 +39,11 @@ function contextResponse() {
 }
 
 describe("ByClaw BE group chat context provider", () => {
-  it("uses the temporary local endpoint, current credentials, and a bounded request", async () => {
+  it("uses the discovered endpoint, current credentials, and a bounded request", async () => {
     const fetchImpl = vi.fn(async () => Response.json(contextResponse()));
-    const resolve = vi.fn(async () => "http://byclaw-be.internal:8086");
+    const resolve = vi.fn(
+      async () => "http://byclaw-be.internal:8086/service-prefix",
+    );
     const provider = new ByClawBeGroupChatContextProvider({
       baseUrl: "http://127.0.0.1:8086",
       timeoutMs: 1_000,
@@ -61,9 +63,9 @@ describe("ByClaw BE group chat context provider", () => {
     expect(context.messages[0]?.content).toBe("A 的结论");
     const [url, init] = fetchImpl.mock.calls[0] ?? [];
     expect(String(url)).toBe(
-      "http://127.0.0.1:8086/byaiService/internal/api/v1/group-chat/context",
+      "http://byclaw-be.internal:8086/service-prefix/byaiService/internal/api/v1/group-chat/context",
     );
-    expect(resolve).not.toHaveBeenCalled();
+    expect(resolve).toHaveBeenCalledOnce();
     expect(init?.headers).toMatchObject({
       "Beyond-Token": "secret-token",
       "System-Code": "BYAI",
@@ -74,6 +76,28 @@ describe("ByClaw BE group chat context provider", () => {
       maxMessages: 60,
       maxCharacters: 30_000,
     });
+  });
+
+  it("falls back to the configured endpoint when service discovery has no instance", async () => {
+    const fetchImpl = vi.fn(async () => Response.json(contextResponse()));
+    const provider = new ByClawBeGroupChatContextProvider({
+      baseUrl: "http://127.0.0.1:8086",
+      timeoutMs: 1_000,
+      fetchImpl: fetchImpl as typeof fetch,
+      endpointResolver: {
+        resolve: vi.fn(async () => undefined),
+      },
+    });
+
+    await provider.load({
+      conversationKey: "conversation-1",
+      beforeMessageId: "message-3",
+      beyondToken: "secret-token",
+    });
+
+    expect(String(fetchImpl.mock.calls[0]?.[0])).toBe(
+      "http://127.0.0.1:8086/byaiService/internal/api/v1/group-chat/context",
+    );
   });
 
   it("rejects a snapshot for a different request boundary", async () => {
