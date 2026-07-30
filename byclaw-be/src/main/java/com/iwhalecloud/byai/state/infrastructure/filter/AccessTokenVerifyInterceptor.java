@@ -221,7 +221,31 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
         logger.info(
             "第三方技能安装接口强制Beyond-Token鉴权，requestUri={}, systemCode={}, beyondToken={}",
             request.getRequestURI(), systemCode, beyondToken);
-        return jwtTokenFilter.doFilter(systemCode, beyondToken);
+        boolean authenticated = jwtTokenFilter.doFilter(systemCode, beyondToken);
+        if (!authenticated) {
+            return false;
+        }
+
+        LoginInfo tokenLoginInfo = CurrentUserHolder.getLoginInfo();
+        if (tokenLoginInfo == null || StringUtils.isBlank(tokenLoginInfo.getUserCode())) {
+            throw new RuntimeException("Beyond-Token中缺少用户编码");
+        }
+        Long tokenUserId = tokenLoginInfo.getUserId();
+        String tokenUserCode = tokenLoginInfo.getUserCode();
+
+        // Beyond-Token 只负责确认调用用户身份；资源权限统一使用门户本地用户主键、角色和组织关系。
+        // 这里按 Token 中的 userCode 重新加载完整 LoginInfo，不依赖对端 system-code，也不回退到 Cookie/Session。
+        LoginInfo localLoginInfo = loginApplicationService.getLoginInfo(tokenUserCode);
+        if (localLoginInfo == null || localLoginInfo.getUserId() == null) {
+            throw new RuntimeException("Beyond-Token对应的门户用户不存在");
+        }
+        CurrentUserHolder.setLoginInfo(localLoginInfo);
+        logger.info(
+            "第三方技能安装用户身份归一化完成，tokenUserId={}, tokenUserCode={}, localUserId={}, "
+                + "localUserCode={}, userName={}",
+            tokenUserId, tokenUserCode, localLoginInfo.getUserId(), localLoginInfo.getUserCode(),
+            localLoginInfo.getUserName());
+        return true;
     }
 
     private boolean isThirdPartySkillInstallRequest(HttpServletRequest request) {
