@@ -4,6 +4,7 @@ import com.github.pagehelper.Page;
 import com.github.pagehelper.PageHelper;
 import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.common.util.PageHelperUtil;
+import com.iwhalecloud.byai.manager.dto.connector.ConnectorConnectionDto;
 import com.iwhalecloud.byai.manager.dto.connector.ConnectorListDto;
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
 import com.iwhalecloud.byai.manager.mapper.connector.ConnectorInfoMapper;
@@ -26,10 +27,21 @@ public class ConnectorInfoService {
      * @param qo 查询条件
      * @return 分页结果
      */
-    public PageInfo<ConnectorListDto> listAll(ConnectorQo qo) {
+    public PageInfo<ConnectorListDto> listAll(ConnectorQo qo, String userId) {
+        if (qo == null) {
+            qo = new ConnectorQo();
+        }
         Page<ConnectorListDto> page = PageHelper.startPage(qo.getPageNum(), qo.getPageSize());
-        connectorInfoMapper.selectConnectorListByQo(qo);
+        connectorInfoMapper.selectConnectorListByQo(qo, userId);
         return PageHelperUtil.toPageInfo(page);
+    }
+
+    public ConnectorInfo findByCode(String connectorCode) {
+        return connectorInfoMapper.selectByConnectorCode(connectorCode);
+    }
+
+    public java.util.List<ConnectorConnectionDto> listConnections(String userId) {
+        return connectorInfoMapper.selectConnectionsByUserId(userId);
     }
 
     /**

@@ -10,7 +10,4 @@ import lombok.Setter;
 @Getter
 @Setter
 public class ConnectorQo extends QueryObject {
-
-    /** 当前用户ID（应用层注入，用于关联授权表） */
-    private String userId;
 }

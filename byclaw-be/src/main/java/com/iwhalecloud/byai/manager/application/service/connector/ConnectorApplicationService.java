@@ -3,6 +3,7 @@ package com.iwhalecloud.byai.manager.application.service.connector;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.page.PageInfo;
 import com.iwhalecloud.byai.manager.domain.connector.service.ConnectorInfoService;
+import com.iwhalecloud.byai.manager.dto.connector.ConnectorConnectionDto;
 import com.iwhalecloud.byai.manager.dto.connector.ConnectorListDto;
 import com.iwhalecloud.byai.manager.qo.connector.ConnectorQo;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -27,7 +28,17 @@ public class ConnectorApplicationService {
      * @return 分页结果
      */
     public PageInfo<ConnectorListDto> listAll(ConnectorQo qo) {
-        qo.setUserId(String.valueOf(CurrentUserHolder.getCurrentUserId()));
-        return connectorInfoService.listAll(qo);
+        if (qo == null) {
+            qo = new ConnectorQo();
+        }
+        return connectorInfoService.listAll(qo, currentUserId());
+    }
+
+    public java.util.List<ConnectorConnectionDto> listConnections() {
+        return connectorInfoService.listConnections(currentUserId());
+    }
+
+    private String currentUserId() {
+        return String.valueOf(CurrentUserHolder.getCurrentUserId());
     }
 }

@@ -3,7 +3,9 @@ package com.iwhalecloud.byai.manager.domain.connector.service;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorAuth;
+import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
 import com.iwhalecloud.byai.manager.mapper.connector.ConnectorAuthMapper;
+import com.iwhalecloud.byai.manager.mapper.connector.ConnectorInfoMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -16,12 +18,16 @@ public class ConnectorAuthService {
     @Autowired
     private ConnectorAuthMapper connectorAuthMapper;
 
+    @Autowired
+    private ConnectorInfoMapper connectorInfoMapper;
+
     /**
      * 新增用户连接器授权记录。
      *
      * @param connectorAuth 授权实体
      */
     public void save(ConnectorAuth connectorAuth) {
+        validate(connectorAuth);
         connectorAuth.setUserId(currentUserId());
         connectorAuthMapper.insert(connectorAuth);
     }
@@ -32,6 +38,7 @@ public class ConnectorAuthService {
      * @param connectorAuth 授权实体
      */
     public void update(ConnectorAuth connectorAuth) {
+        validate(connectorAuth);
         connectorAuth.setUserId(currentUserId());
         QueryWrapper<ConnectorAuth> ownerQuery = ownerQuery(connectorAuth.getAuthId());
         connectorAuthMapper.update(connectorAuth, ownerQuery);
@@ -56,5 +63,45 @@ public class ConnectorAuthService {
 
     private String currentUserId() {
         return String.valueOf(CurrentUserHolder.getCurrentUserId());
+    }
+
+    private void validate(ConnectorAuth connectorAuth) {
+        if (connectorAuth == null || connectorAuth.getConnectorId() == null) {
+            throw new IllegalArgumentException("connectorId不能为空");
+        }
+        ConnectorInfo connectorInfo = connectorInfoMapper.selectById(connectorAuth.getConnectorId());
+        if (connectorInfo == null || !"00A".equals(connectorInfo.getStatusCd())) {
+            throw new IllegalArgumentException("连接器不存在或已失效");
+        }
+        String authMode = connectorInfo.getAuthMode();
+        if (authMode != null && !java.util.Set.of("NONE", "OAUTH2", "AK_SK", "PASSWORD", "TOKEN")
+            .contains(authMode)) {
+            throw new IllegalArgumentException("authMode不受支持");
+        }
+        if (connectorAuth.getAuthMode() != null && !java.util.Objects.equals(authMode, connectorAuth.getAuthMode())) {
+            throw new IllegalArgumentException("authMode与连接器模板不一致");
+        }
+        if (!"NONE".equals(authMode) && !org.springframework.util.StringUtils.hasText(connectorAuth.getAuthCredential())) {
+            throw new IllegalArgumentException("授权凭证不能为空");
+        }
+        if ("NONE".equals(authMode) && org.springframework.util.StringUtils.hasText(connectorAuth.getAuthCredential())) {
+            throw new IllegalArgumentException("NONE授权方式不能携带授权凭证");
+        }
+        if (connectorAuth.getExpireTime() != null
+            && connectorAuth.getExpireTime().before(new java.util.Date())
+            && "Y".equals(connectorAuth.getEnableFlag())) {
+            throw new IllegalArgumentException("启用授权的expireTime不能早于当前时间");
+        }
+        if (connectorAuth.getEnableFlag() != null && !java.util.Set.of("Y", "N")
+            .contains(connectorAuth.getEnableFlag())) {
+            throw new IllegalArgumentException("enableFlag只能为Y或N");
+        }
+        connectorAuth.setAuthMode(authMode);
+        if (connectorAuth.getEnableFlag() == null) {
+            connectorAuth.setEnableFlag("N");
+        }
+        if (connectorAuth.getStatusCd() == null) {
+            connectorAuth.setStatusCd("00A");
+        }
     }
 }
