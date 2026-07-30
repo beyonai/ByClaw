@@ -5,10 +5,14 @@ FROM base AS builder
 WORKDIR /workspace
 
 ARG NPM_REGISTRY=https://registry.npmmirror.com
-ENV NPM_CONFIG_REGISTRY=${NPM_REGISTRY}
+ARG NPM_REPLACE_REGISTRY_HOST=always
+ENV NPM_CONFIG_REGISTRY=${NPM_REGISTRY} \
+    NPM_CONFIG_REPLACE_REGISTRY_HOST=${NPM_REPLACE_REGISTRY_HOST}
 
-RUN corepack enable \
-    && corepack prepare pnpm@11.3.0 --activate
+RUN npm config set registry "${NPM_REGISTRY}" --global \
+    && npm config set replace-registry-host "${NPM_REPLACE_REGISTRY_HOST}" --global \
+    && npm install --global pnpm \
+    && pnpm config set registry "${NPM_REGISTRY}" --global
 
 COPY . .
 
