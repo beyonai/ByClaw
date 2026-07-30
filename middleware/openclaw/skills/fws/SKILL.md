@@ -26,7 +26,7 @@ description: 管理飞书/Lark 产品能力（IM消息/群聊/机器人/卡片�
 - 危险操作先展示操作摘要并取得用户明确同意；如果 CLI 返回 `confirmation_required`/exit 10，再在原命令末尾追加 `--yes` 重试。
 - 批量写操作先控制规模：单批默认不超过 30 个业务对象，产品 reference 或 schema 给出更小上限时按更小上限执行。
 - OpenClaw agent 调用本 skill 时，一旦提示未检测到飞书渠道、`openclaw.json missing channels.feishu section` 或 `configure Feishu in OpenClaw first`，必须立即中断业务命令并走 OpenClaw 渠道配置缺失流程；这是渠道配置问题，不是 user 授权问题，禁止继续提示“确认授权”或执行 `auth login`。
-- OpenClaw agent 调用本 skill 时，一旦出现 user 身份鉴权异常（401/403、登录态失效、缺少 user scope、`missing_scope`、`permission_violations`），必须立即中断当前业务命令并强制进入飞书授权 split-flow：`exec(lark-cli auth login --scope "<missing_scope>" --no-wait --json)` 或 `exec(lark-cli auth login --domain <domain> --no-wait --json)` -> `process(读取该次 exec 返回)` -> 从本次 JSON 输出提取 `verification_url` 和 `device_code` -> 用 `scripts/qrcode_data_uri.py` 生成二维码 data URI -> 返回 `[点击打开飞书授权](<verification_url>)` 和二维码并结束本轮；禁止输出 `授权链接：https://...` 裸 URL，禁止返回本地图片路径，禁止同轮执行 `--device-code`、禁止继续业务命令、禁止复用历史授权链接或 device code。
+- OpenClaw agent 调用本 skill 时，一旦出现 user 身份鉴权异常（401/403、登录态失效、缺少 user scope、`missing_scope`、`permission_violations`），必须立即中断当前业务命令并强制进入飞书授权 split-flow：`exec(lark-cli auth login --scope "<missing_scope>" --no-wait --json)` 或 `exec(lark-cli auth login --domain <domain> --no-wait --json)` -> `process(读取该次 exec 返回)` -> 从本次 JSON 输出提取本次授权生成的 `verification_url` 和 `device_code` -> 用 `scripts/qrcode_data_uri.py` 生成二维码 data URI -> 返回 `[点击打开飞书授权](<verification_url>)` 和二维码并结束本轮；禁止输出 `授权链接：https://...` 裸 URL，禁止返回本地图片路径，禁止同轮执行 `--device-code`、禁止继续业务命令、禁止复用历史授权链接或 device code。用户回复“已授权”不等于登录成功，必须在后续轮执行 `--device-code` 并通过 `auth status --json --verify` 验证。
 
 ## 产品总览
 
@@ -162,6 +162,8 @@ lark-cli schema <service>.<resource>.<method> --format json
 - 二维码：必须用 `python3 scripts/qrcode_data_uri.py "<verification_url>" --alt "飞书授权二维码"` 把二维码转成 `data:image/png;base64,...`，并把脚本返回的 `markdownImage` 嵌入回复。ByClaw/OpenClaw 聊天页不能访问 agent 本地相对路径图片，所以禁止返回 `![飞书授权二维码](relative.png)`、`file://...` 或任意本地路径；二维码脚本失败时只返回可点击授权链接和失败原因，不得返回破图占位。
 - 返回规范：本轮必须用 Markdown 超链接返回授权入口，格式为 `[点击打开飞书授权](<verification_url>)`，并在下面返回 data URI 二维码；配置应用入口格式为 `[点击打开飞书应用配置](<config_url>)`。禁止输出 `授权链接：https://...`、`配置链接：https://...` 这类裸 URL；禁止提示“扫描下方二维码”但返回本地图片路径。返回后提示“授权完成后回复我，我会继续完成登录”；禁止在同一轮执行 `lark-cli auth login --device-code <device_code>`。
 - 后续确认：用户回复已授权后，才可执行 `lark-cli auth login --device-code <device_code> --json`，成功后再执行 `lark-cli auth status --json --verify`，确认登录态有效再恢复原业务命令。
+- 授权码生命周期：`device_code`、`verification_url` 和二维码只属于本次授权会话；用户回复过晚、`device_code` 过期、已使用、无效或 `--device-code` 返回授权失败时，必须丢弃整组旧凭证，重新执行 `auth login --scope/--domain --no-wait --json` 生成新的链接和 `device_code`，禁止重试旧 `device_code`。
+- 重试上限：单个业务请求最多执行两轮完整授权流程（生成新链接 → 用户授权 → `--device-code` → `auth status --json --verify`）；第二轮仍失败时停止自动重试，报告最新错误并要求用户重新发起授权。不得在未确认登录态有效前恢复原业务命令。
 - bot 分流：当前身份为 `bot` 或错误说明 bot scope 不足时，禁止执行 `auth login`；必须返回错误中的 `console_url`，让管理员在飞书开放平台开通权限并发布/生效。
 - 禁止事项：禁止交互式 `lark-cli auth login`、禁止复用历史 `verification_url`/`device_code`、禁止使用非 `lark-cli` 通道补救、禁止同轮阻塞轮询授权状态。
 

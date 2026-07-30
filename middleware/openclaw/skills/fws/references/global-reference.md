@@ -114,7 +114,9 @@ lark-cli auth login --device-code <device_code> --json
 - 不要修改、拼接、编码/解码授权 URL。
 - 不要在同一轮展示 URL 后立刻阻塞轮询 `--device-code`；用户看不到 URL 会导致流程卡住。
 - 不要复用历史 `verification_url` 或 `device_code`；每次重新授权都重新生成。`device_code` 只允许用于本次授权会话的后续确认轮。
-- 用户回复已授权后，由 agent 执行 `lark-cli auth login --device-code <device_code> --json`，成功后再用 `lark-cli auth status --json --verify` 确认登录态。
+- 用户回复已授权后，由 agent 执行 `lark-cli auth login --device-code <device_code> --json`，成功后再用 `lark-cli auth status --json --verify` 确认登录态；用户回复“已授权”本身不代表登录成功。
+- `verification_url`、二维码和 `device_code` 只属于本次授权会话。若 `device_code` 已过期、已使用、无效或登录命令失败，必须丢弃旧授权信息，重新执行 `auth login --scope/--domain --no-wait --json` 生成全新的链接和 `device_code`，禁止重试旧值。
+- 单个业务请求最多执行两轮完整授权流程；第二轮仍失败时停止自动重试，报告最新错误并要求用户重新发起授权。未通过 `auth status --json --verify` 前不得恢复原业务命令。
 - bot 身份缺少 scope 时禁止执行 `auth login`；直接返回错误 envelope 中的 `console_url`，让管理员在飞书开放平台开通权限并发布/生效。
 
 ## 全局 flags
