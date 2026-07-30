@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@byclaw/by-framework':
-        specifier: 1.5.0
-        version: 1.5.0
+        specifier: 1.5.2
+        version: 1.5.2
       '@opentelemetry/api':
         specifier: 1.9.1
         version: 1.9.1
@@ -24,8 +24,8 @@ importers:
 
 packages:
 
-  '@byclaw/by-framework@1.5.0':
-    resolution: {integrity: sha512-gVqpeVnK/3vOZxC1xsMXe8NH2b1h4WNivKUmvr+mpX276ftCygedufJeUNUIwniRlUHzrF4uuZUvwMAUuKbzaw==}
+  '@byclaw/by-framework@1.5.2':
+    resolution: {integrity: sha512-Ojbx3HnyFEWoPFycouAh5xNdxFLJcwpf0Kdk6xuAk6eFyOb0RhxWHWYMhK2mzw6PqVRnJBTQhKEPn0Rea9K5Nw==}
 
   '@esbuild/aix-ppc64@0.25.12':
     resolution: {integrity: sha512-Hhmwd6CInZ3dwpuGTF8fJG6yoWmsToE+vYgD4nytZVxcu1ulHpUQRAB1UJ8+N1Am3Mz4+xOByoQoSZf4D+CpkA==}
@@ -254,7 +254,7 @@ packages:
 
 snapshots:
 
-  '@byclaw/by-framework@1.5.0':
+  '@byclaw/by-framework@1.5.2':
     dependencies:
       ioredis: 5.10.1
       uuid: 9.0.1
