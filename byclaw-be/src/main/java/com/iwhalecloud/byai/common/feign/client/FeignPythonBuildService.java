@@ -36,8 +36,10 @@ import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbDirectoryDelete;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbDirectoryUpdate;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileDownload;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileImport;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileMetadataGet;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileRead;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileToMarkdownIndex;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileUpdate;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeFileSearch;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeItemReferences;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeSearch;
@@ -49,6 +51,8 @@ import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileDelete;
 import com.iwhalecloud.byai.common.feign.response.PythonBuildResponse;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbFileReadResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbImportResult;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbFileUpdateResult;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbFileMetadataResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeBaseInfo;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileSearchResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeItemReferencesResult;
@@ -88,6 +92,10 @@ public class FeignPythonBuildService {
         .retryOnStatusCodes(Set.of(502, 503, 504)).build();
 
     private static final int MAX_DOWNLOAD_ERROR_BODY_BYTES = 64 * 1024;
+
+    static final String RESOURCE_ID_HEADER = "X-Byclaw-Resource-Id";
+
+    private static final String RESOURCE_BUILD_PATH = "/api/v1/fileToMarkdownIndexByResourceId";
 
     @Value("${spring.application.qADomainName:byclaw-qa-manager}")
     private String serviceName;
@@ -145,9 +153,13 @@ public class FeignPythonBuildService {
      * @throws BaseException 调用失败
      */
     public PythonBuildResponse<Void> deleteKnowledgeBase(KbKnowledgeDelete kbKnowledgeDelete) {
+        return deleteKnowledgeBase(kbKnowledgeDelete, null);
+    }
+
+    public PythonBuildResponse<Void> deleteKnowledgeBase(KbKnowledgeDelete kbKnowledgeDelete, Long resourceId) {
         return post(KnowledgeServiceOperation.DELETE_KB, kbKnowledgeDelete,
             new TypeReference<PythonBuildResponse<Void>>() {
-            });
+            }, resourceId);
     }
 
     /**
@@ -171,9 +183,13 @@ public class FeignPythonBuildService {
      * @throws BaseException 调用失败
      */
     public PythonBuildResponse<Void> createDirectory(KbDirectoryCreate kbDirectoryCreate) {
+        return createDirectory(kbDirectoryCreate, null);
+    }
+
+    public PythonBuildResponse<Void> createDirectory(KbDirectoryCreate kbDirectoryCreate, Long resourceId) {
         return post(KnowledgeServiceOperation.CREATE_DIR, kbDirectoryCreate,
             new TypeReference<PythonBuildResponse<Void>>() {
-            });
+            }, resourceId);
     }
 
     /**
@@ -184,9 +200,13 @@ public class FeignPythonBuildService {
      * @throws BaseException 调用失败
      */
     public PythonBuildResponse<Void> deleteDirectory(KbDirectoryDelete kbDirectoryDelete) {
+        return deleteDirectory(kbDirectoryDelete, null);
+    }
+
+    public PythonBuildResponse<Void> deleteDirectory(KbDirectoryDelete kbDirectoryDelete, Long resourceId) {
         return post(KnowledgeServiceOperation.DELETE_DIR, kbDirectoryDelete,
             new TypeReference<PythonBuildResponse<Void>>() {
-            });
+            }, resourceId);
     }
 
     /**
@@ -197,9 +217,13 @@ public class FeignPythonBuildService {
      * @throws BaseException 调用失败
      */
     public PythonBuildResponse<Void> updateDirectory(KbDirectoryUpdate kbDirectoryUpdate) {
+        return updateDirectory(kbDirectoryUpdate, null);
+    }
+
+    public PythonBuildResponse<Void> updateDirectory(KbDirectoryUpdate kbDirectoryUpdate, Long resourceId) {
         return post(KnowledgeServiceOperation.EDIT_DIR, kbDirectoryUpdate,
             new TypeReference<PythonBuildResponse<Void>>() {
-            });
+            }, resourceId);
     }
 
     /**
@@ -209,16 +233,24 @@ public class FeignPythonBuildService {
      * @return PythonBuildResponse<DirOrFile>
      */
     public PythonBuildResponse<Data> listDir(KbListDir kbListDir) {
+        return listDir(kbListDir, null);
+    }
+
+    public PythonBuildResponse<Data> listDir(KbListDir kbListDir, Long resourceId) {
         return post(KnowledgeServiceOperation.LIST_DIR, kbListDir, new TypeReference<PythonBuildResponse<Data>>() {
-        });
+        }, resourceId);
     }
 
     /**
      * 按 QA glob 规则匹配知识库文件或目录。
      */
     public PythonBuildResponse<Data> glob(KbGlob request) {
+        return glob(request, null);
+    }
+
+    public PythonBuildResponse<Data> glob(KbGlob request, Long resourceId) {
         return post(KnowledgeServiceOperation.GLOB, request, new TypeReference<PythonBuildResponse<Data>>() {
-        });
+        }, resourceId);
     }
 
     /**
@@ -229,6 +261,10 @@ public class FeignPythonBuildService {
      * @throws BaseException 调用失败
      */
     public PythonBuildResponse<KbImportResult> importKnowledgeItem(KbFileImport kbFileImport) {
+        return importKnowledgeItem(kbFileImport, null);
+    }
+
+    public PythonBuildResponse<KbImportResult> importKnowledgeItem(KbFileImport kbFileImport, Long resourceId) {
         try {
 
             // 文件信息
@@ -255,9 +291,56 @@ public class FeignPythonBuildService {
                     });
             }
             HttpResponse httpResponse = discoveryHttpClient.upload(endpoint.getServiceName(), requestPath,
-                originalFilename, "fileContent", streamSupplier, this.buildUploadHeaders(), formFields).get();
+                originalFilename, "fileContent", streamSupplier, this.buildUploadHeaders(resourceId), formFields).get();
 
             return this.parseResponse(httpResponse, new TypeReference<PythonBuildResponse<KbImportResult>>() {
+            }, requestPath);
+        }
+        catch (BaseException e) {
+            throw e;
+        }
+        catch (Exception e) {
+            logger.error(e.getMessage(), e);
+            throw new BaseException("调用 Python 构建服务失败: ", e);
+        }
+    }
+
+    /**
+     * 更新已存在知识库文档（multipart/form-data）。更新不会自动触发知识构建。
+     *
+     * @param kbFileUpdate 更新参数
+     * @return 成功时含单文件更新结果
+     */
+    public PythonBuildResponse<KbFileUpdateResult> updateKnowledgeItem(KbFileUpdate kbFileUpdate) {
+        return updateKnowledgeItem(kbFileUpdate, null);
+    }
+
+    public PythonBuildResponse<KbFileUpdateResult> updateKnowledgeItem(KbFileUpdate kbFileUpdate, Long resourceId) {
+        try {
+            MultipartFile multipartFile = kbFileUpdate.getMultipartFile();
+            String originalFilename = multipartFile.getOriginalFilename();
+            ByHttpClient.InputStreamSupplier streamSupplier = () -> multipartFile.getInputStream();
+
+            Map<String, String> formFields = new HashMap<>();
+            formFields.put("knCode", kbFileUpdate.getKnCode());
+            formFields.put("filePath", kbFileUpdate.getFilePath());
+            if (kbFileUpdate.getFileDescription() != null) {
+                formFields.put("fileDescription", kbFileUpdate.getFileDescription());
+            }
+            if (kbFileUpdate.getProcessFrontMatter() != null) {
+                formFields.put("processFrontMatter", String.valueOf(kbFileUpdate.getProcessFrontMatter()));
+            }
+
+            String requestPath = resolvePath(kbFileUpdate, KnowledgeServiceOperation.UPDATE_FILE);
+            KnowledgeServiceEndpoint endpoint = resolveRoute(kbFileUpdate);
+            if (endpoint.isDirectUrl()) {
+                return directUpload(endpoint.getBaseUrl(), requestPath, originalFilename, multipartFile, formFields,
+                    new TypeReference<PythonBuildResponse<KbFileUpdateResult>>() {
+                    });
+            }
+            HttpResponse httpResponse = discoveryHttpClient.upload(endpoint.getServiceName(), requestPath,
+                originalFilename, "fileContent", streamSupplier, this.buildUploadHeaders(resourceId), formFields).get();
+            return this.parseResponse(httpResponse, new TypeReference<PythonBuildResponse<KbFileUpdateResult>>() {
             }, requestPath);
         }
         catch (BaseException e) {
@@ -277,8 +360,12 @@ public class FeignPythonBuildService {
      * @throws BaseException 调用失败
      */
     public PythonBuildResponse<Void> deleteKnowledgeItem(KbFileDelete temDelete) {
+        return deleteKnowledgeItem(temDelete, null);
+    }
+
+    public PythonBuildResponse<Void> deleteKnowledgeItem(KbFileDelete temDelete, Long resourceId) {
         return post(KnowledgeServiceOperation.DELETE_FILE, temDelete, new TypeReference<PythonBuildResponse<Void>>() {
-        });
+        }, resourceId);
     }
 
     /**
@@ -288,9 +375,27 @@ public class FeignPythonBuildService {
      * @return 文件内容
      */
     public PythonBuildResponse<KbFileReadResult> readFile(KbFileRead kbFileRead) {
+        return readFile(kbFileRead, null);
+    }
+
+    public PythonBuildResponse<KbFileReadResult> readFile(KbFileRead kbFileRead, Long resourceId) {
         return post(KnowledgeServiceOperation.READ_FILE, kbFileRead,
             new TypeReference<PythonBuildResponse<KbFileReadResult>>() {
-            });
+            }, resourceId);
+    }
+
+    /**
+     * 查询指定知识库文件当前已入库的元数据。
+     */
+    public PythonBuildResponse<KbFileMetadataResult> getKnowledgeFileMetadata(KbFileMetadataGet request) {
+        return getKnowledgeFileMetadata(request, null);
+    }
+
+    public PythonBuildResponse<KbFileMetadataResult> getKnowledgeFileMetadata(KbFileMetadataGet request,
+        Long resourceId) {
+        return post(KnowledgeServiceOperation.GET_FILE_METADATA, request,
+            new TypeReference<PythonBuildResponse<KbFileMetadataResult>>() {
+            }, resourceId);
     }
 
     /**
@@ -300,9 +405,14 @@ public class FeignPythonBuildService {
      * @return 各源路径的移动结果与汇总
      */
     public PythonBuildResponse<KnowledgeItemsMoveResult> moveKnowledgeItems(KbKnowledgeItemsMove request) {
+        return moveKnowledgeItems(request, null);
+    }
+
+    public PythonBuildResponse<KnowledgeItemsMoveResult> moveKnowledgeItems(KbKnowledgeItemsMove request,
+        Long resourceId) {
         return post(KnowledgeServiceOperation.MOVE_KNOWLEDGE_ITEMS, request,
             new TypeReference<PythonBuildResponse<KnowledgeItemsMoveResult>>() {
-            });
+            }, resourceId);
     }
 
     /**
@@ -310,9 +420,14 @@ public class FeignPythonBuildService {
      */
     public PythonBuildResponse<KnowledgeItemReferencesResult> knowledgeItemReferences(
         KbKnowledgeItemReferences request) {
+        return knowledgeItemReferences(request, null);
+    }
+
+    public PythonBuildResponse<KnowledgeItemReferencesResult> knowledgeItemReferences(
+        KbKnowledgeItemReferences request, Long resourceId) {
         return post(KnowledgeServiceOperation.KNOWLEDGE_ITEM_REFERENCES, request,
             new TypeReference<PythonBuildResponse<KnowledgeItemReferencesResult>>() {
-            });
+            }, resourceId);
     }
 
     /**
@@ -370,9 +485,14 @@ public class FeignPythonBuildService {
      * @throws BaseException 调用失败
      */
     public PythonBuildResponse<Void> fileToMarkdownIndex(KbFileToMarkdownIndex kbFileToMarkdownIndex) {
+        return fileToMarkdownIndex(kbFileToMarkdownIndex, null);
+    }
+
+    public PythonBuildResponse<Void> fileToMarkdownIndex(KbFileToMarkdownIndex kbFileToMarkdownIndex,
+        Long resourceId) {
         return post(KnowledgeServiceOperation.KNOWLEDGE_BUILD, kbFileToMarkdownIndex,
             new TypeReference<PythonBuildResponse<Void>>() {
-            });
+            }, resourceId);
     }
 
     /**
@@ -383,6 +503,10 @@ public class FeignPythonBuildService {
      * @throws BaseException 调用失败
      */
     public InputStream fileDownload(KbFileDownload kbFileDownload) {
+        return fileDownload(kbFileDownload, null);
+    }
+
+    public InputStream fileDownload(KbFileDownload kbFileDownload, Long resourceId) {
         try {
             String requestPath = resolvePath(kbFileDownload, KnowledgeServiceOperation.DOWNLOAD_FILE);
             KnowledgeServiceEndpoint endpoint = resolveRoute(kbFileDownload);
@@ -392,7 +516,7 @@ public class FeignPythonBuildService {
             }
 
             CompletableFuture<InputStream> completableFuture = discoveryHttpClient.download("POST",
-                endpoint.getServiceName(), requestPath, this.buildHeaders(), null, kbFileDownload, null);
+                endpoint.getServiceName(), requestPath, this.buildHeaders(resourceId), null, kbFileDownload, null);
             // 提取文件流
             return validateDownloadResponse(completableFuture.get(), requestPath);
         }
@@ -459,9 +583,13 @@ public class FeignPythonBuildService {
      * @return PythonBuildResponse
      */
     public PythonBuildResponse<ProcessStatus> fileBuildStatus(FileBuildStatus fileBuildStatus) {
+        return fileBuildStatus(fileBuildStatus, null);
+    }
+
+    public PythonBuildResponse<ProcessStatus> fileBuildStatus(FileBuildStatus fileBuildStatus, Long resourceId) {
         return post(KnowledgeServiceOperation.FILE_BUILD_STATUS, fileBuildStatus,
             new TypeReference<PythonBuildResponse<ProcessStatus>>() {
-            });
+            }, resourceId);
     }
 
     /**
@@ -475,8 +603,13 @@ public class FeignPythonBuildService {
      */
     private <T> PythonBuildResponse<T> post(KnowledgeServiceOperation operation, Object payload,
         TypeReference<PythonBuildResponse<T>> type) {
+        return post(operation, payload, type, (Long)null);
+    }
+
+    private <T> PythonBuildResponse<T> post(KnowledgeServiceOperation operation, Object payload,
+        TypeReference<PythonBuildResponse<T>> type, Long resourceId) {
         try {
-            return doPost(operation, payload, type);
+            return doPost(operation, payload, type, resourceId);
         }
         catch (BaseException e) {
             throw e;
@@ -489,7 +622,7 @@ public class FeignPythonBuildService {
     private <T> PythonBuildResponse<T> post(KnowledgeServiceOperation operation, Object payload,
         TypeReference<PythonBuildResponse<T>> type, boolean throwExceptions) {
         try {
-            return doPost(operation, payload, type);
+            return doPost(operation, payload, type, null);
         }
         catch (BaseException e) {
             if (throwExceptions) {
@@ -517,16 +650,36 @@ public class FeignPythonBuildService {
      * 统一执行知识库 POST 请求，根据路由结果决定走服务发现还是第三方直连。
      */
     private <T> PythonBuildResponse<T> doPost(KnowledgeServiceOperation operation, Object payload,
-        TypeReference<PythonBuildResponse<T>> type) throws Exception {
+        TypeReference<PythonBuildResponse<T>> type, Long resourceId) throws Exception {
         String requestPath = resolvePath(payload, operation);
         KnowledgeServiceEndpoint endpoint = resolveRoute(payload);
         if (endpoint.isDirectUrl()) {
             return directPost(endpoint.getBaseUrl(), requestPath, payload, type);
         }
+        requestPath = resolveLocalRequestPath(operation, resourceId, requestPath);
+        Object localPayload = buildLocalPayload(operation, resourceId, payload);
         HttpResponse response = discoveryHttpClient
-            .post(endpoint.getServiceName(), requestPath, buildHeaders(), payload, null)
+            .post(endpoint.getServiceName(), requestPath, buildHeaders(resourceId), localPayload, null)
             .get(this.gatewaySecondTimeOut, TimeUnit.SECONDS);
         return parseResponse(response, type, requestPath);
+    }
+
+    private String resolveLocalRequestPath(KnowledgeServiceOperation operation, Long resourceId,
+        String defaultPath) {
+        if (operation == KnowledgeServiceOperation.KNOWLEDGE_BUILD && resourceId != null) {
+            return RESOURCE_BUILD_PATH;
+        }
+        return defaultPath;
+    }
+
+    private Object buildLocalPayload(KnowledgeServiceOperation operation, Long resourceId, Object payload) {
+        if (operation != KnowledgeServiceOperation.KNOWLEDGE_BUILD || resourceId == null) {
+            return payload;
+        }
+        JSONObject resourcePayload = JSON.parseObject(JSON.toJSONString(payload));
+        resourcePayload.remove("knCode");
+        resourcePayload.put("resourceId", resourceId);
+        return resourcePayload;
     }
 
     /**
@@ -568,9 +721,13 @@ public class FeignPythonBuildService {
      * @return 请求头
      */
     private Map<String, String> buildHeaders() {
+        return buildHeaders(null);
+    }
+
+    private Map<String, String> buildHeaders(Long resourceId) {
         Map<String, String> headers = new HashMap<>();
         headers.put("Content-Type", "application/json");
-        return this.addAuth(headers);
+        return this.addResourceContext(this.addAuth(headers), resourceId);
     }
 
     /**
@@ -579,9 +736,20 @@ public class FeignPythonBuildService {
      * @return Map
      */
     private Map<String, String> buildUploadHeaders() {
+        return buildUploadHeaders(null);
+    }
+
+    private Map<String, String> buildUploadHeaders(Long resourceId) {
         Map<String, String> headers = new HashMap<>();
         headers.put("Content-Type", "multipart/form-data");
-        return this.addAuth(headers);
+        return this.addResourceContext(this.addAuth(headers), resourceId);
+    }
+
+    private Map<String, String> addResourceContext(Map<String, String> headers, Long resourceId) {
+        if (resourceId != null) {
+            headers.put(RESOURCE_ID_HEADER, String.valueOf(resourceId));
+        }
+        return headers;
     }
 
     /***

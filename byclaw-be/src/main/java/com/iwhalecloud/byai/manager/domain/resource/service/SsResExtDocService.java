@@ -184,6 +184,8 @@ public class SsResExtDocService {
             "/api/v1/knowledgeItems/references", "item_references", "查询 Markdown 入站、出站引用关系。"));
         resourceService.add(buildKgDocService(qADomainName, "读取文件内容", "POST", "/api/v1/readFile",
             "readFile", "根据文件路径读取指定知识库下的 Markdown 内容。"));
+        resourceService.add(buildKgDocService(qADomainName, "查看文件元数据", "POST",
+            "/api/v1/knowledgeItems/metadata/get", "get_file_metadata", "查看指定文件当前已入库的元数据值。"));
         resourceService.add(buildKgDocService(qADomainName, "检索文档 chunk", "POST", "/api/v1/knowledgeItems/search",
             "search_chunk", "用于执行 chunk 级混合检索。"));
         resourceService.add(
@@ -197,8 +199,8 @@ public class SsResExtDocService {
             "delete_dir", "逻辑删除目录，可删除非空目录"));
         resourceService.add(buildKgDocService(qADomainName, "修改目录名称", "POST", "/api/v1/directories/update",
             "update_dir", "修改目录最后一级名称。"));
-        resourceService.add(buildKgDocService(qADomainName, "修改目录名称、描述、元数据", "POST", "/api/v1/knowledge-items/update",
-            "update_item", "修改目录名称、描述、元数据"));
+        resourceService.add(buildKgDocService(qADomainName, "更新知识库文件", "POST", "/api/v1/knowledgeItems/update",
+            "update_item", "更新已存在文件内容，不创建构建任务。"));
         resourceService.add(buildKgDocService(qADomainName, "下载文件流", "POST", "/api/v1/downloadFile",
             "download_file", "按知识库文件路径下载文件流。"));
         resourceService.add(buildKgDocService(qADomainName, "文件转 Markdown", "POST", "/api/v1/fileToMarkdown",

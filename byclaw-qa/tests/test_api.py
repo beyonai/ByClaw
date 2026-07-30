@@ -111,9 +111,18 @@ class TestFileToMarkdownIndexByResourceId:
 
     @pytest.mark.asyncio
     async def test_success(self, client, _patch_redis_config):
+        from byclaw_userfs_storage import build_byclaw_userfs_headers, get_byclaw_resource_id
+
         _patch_redis_config.return_value = {"resourceCode": "5"}
         mock_service = AsyncMock()
         mock_service.create_file_to_markdown_index_task.return_value = "task-1"
+        background_context = {}
+
+        async def capture_background_context(*args, **kwargs):
+            background_context["headers"] = build_byclaw_userfs_headers()
+            background_context["resource_id"] = get_byclaw_resource_id()
+
+        mock_service.execute_file_to_markdown_index_task.side_effect = capture_background_context
         with (
             patch("api.resolve_knowledge_item_ingestion_service", return_value=mock_service),
             patch("api.resolve_document_chunking_service", return_value=AsyncMock()),
@@ -121,11 +130,19 @@ class TestFileToMarkdownIndexByResourceId:
             resp = await client.post(
                 "/api/v1/fileToMarkdownIndexByResourceId",
                 json={"resourceId": "100", "filePath": "/docs/test.pdf"},
+                headers={"Beyond-Token": "token-123"},
             )
         body = resp.json()
         assert body["resultCode"] == "0"
         call_args = mock_service.create_file_to_markdown_index_task.call_args[0][0]
         assert call_args.kb_code == "5"
+        assert background_context == {
+            "headers": {
+                "system-code": "BYCLAW-QA",
+                "beyond-token": "token-123",
+            },
+            "resource_id": "100",
+        }
 
 
 # ---------------------------------------------------------------------------

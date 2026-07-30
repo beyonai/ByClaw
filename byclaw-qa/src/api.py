@@ -47,7 +47,13 @@ from by_qa.knowledge_base.services.errors import (
     KnowledgeBaseConfigurationError,
     KnowledgeBaseValidationError,
 )
-from byclaw_userfs_storage import reset_byclaw_userfs_headers, set_byclaw_userfs_headers
+from byclaw_userfs_storage import (
+    RESOURCE_ID_HEADER,
+    bind_byclaw_resource_id,
+    build_byclaw_userfs_headers,
+    reset_byclaw_userfs_headers,
+    set_byclaw_userfs_headers,
+)
 from by_qa.main import (
     app,
     resolve_knowledge_base_service,
@@ -60,8 +66,13 @@ from redis_agent_config import get_kg_doc_from_redis
 from redis_runtime import init_shared_redis_from_env
 
 @app.middleware("http")
-async def byclaw_userfs_header_context_middleware(request, call_next):
-    token = set_byclaw_userfs_headers({"beyond-token": request.headers.get("beyond-token", "")})
+async def byclaw_storage_header_context_middleware(request, call_next):
+    token = set_byclaw_userfs_headers(
+        {
+            "beyond-token": request.headers.get("beyond-token", ""),
+            RESOURCE_ID_HEADER: request.headers.get(RESOURCE_ID_HEADER, ""),
+        }
+    )
     try:
         return await call_next(request)
     finally:
@@ -149,8 +160,9 @@ async def import_by_resource_id(
         return _error("request validation failed", {"errors": json.loads(exc.json())})
 
     try:
-        service = await resolve_knowledge_item_ingestion_service()
-        await service.upload_file(request)
+        with bind_byclaw_resource_id(resource_id):
+            service = await resolve_knowledge_item_ingestion_service()
+            await service.upload_file(request)
     except KnowledgeBaseConfigurationError:
         logger.exception("importByResourceId configuration error: resourceId=%s", resource_id)
         return _error("knowledge base configuration error")
@@ -188,16 +200,23 @@ async def file_to_markdown_index_by_resource_id(
         return _error("request validation failed", {"errors": json.loads(exc.json())})
 
     try:
-        service = await resolve_knowledge_item_ingestion_service()
-        build_task_id = await service.create_file_to_markdown_index_task(request)
+        with bind_byclaw_resource_id(resource_id):
+            service = await resolve_knowledge_item_ingestion_service()
+            build_task_id = await service.create_file_to_markdown_index_task(request)
+            background_headers = build_byclaw_userfs_headers()
 
         async def _run_task():
-            chunking_service = await resolve_document_chunking_service()
-            await service.execute_file_to_markdown_index_task(
-                request,
-                document_chunking_service=chunking_service,
-                build_task_id=build_task_id,
-            )
+            context_token = set_byclaw_userfs_headers(background_headers)
+            try:
+                with bind_byclaw_resource_id(resource_id):
+                    chunking_service = await resolve_document_chunking_service()
+                    await service.execute_file_to_markdown_index_task(
+                        request,
+                        document_chunking_service=chunking_service,
+                        build_task_id=build_task_id,
+                    )
+            finally:
+                reset_byclaw_userfs_headers(context_token)
 
         background_tasks.add_task(_run_task)
     except KnowledgeBaseConfigurationError:
@@ -278,8 +297,9 @@ async def create_directory_by_resource_id(body: dict[str, Any] = Body(...)):
         return _error("request validation failed", {"errors": json.loads(exc.json())})
 
     try:
-        service = await resolve_knowledge_base_service()
-        await service.create_directory(request)
+        with bind_byclaw_resource_id(resource_id):
+            service = await resolve_knowledge_base_service()
+            await service.create_directory(request)
     except KnowledgeBaseConfigurationError as exc:
         logger.exception("createDirectoryByResourceId configuration error: resourceId=%s", resource_id)
         return _error(str(exc))
@@ -311,8 +331,9 @@ async def update_directory_by_resource_id(body: dict[str, Any] = Body(...)):
         return _error("request validation failed", {"errors": json.loads(exc.json())})
 
     try:
-        service = await resolve_knowledge_base_service()
-        await service.update_directory(request)
+        with bind_byclaw_resource_id(resource_id):
+            service = await resolve_knowledge_base_service()
+            await service.update_directory(request)
     except KnowledgeBaseConfigurationError as exc:
         logger.exception("updateDirectoryByResourceId configuration error: resourceId=%s", resource_id)
         return _error(str(exc))
@@ -344,8 +365,9 @@ async def delete_directory_by_resource_id(body: dict[str, Any] = Body(...)):
         return _error("request validation failed", {"errors": json.loads(exc.json())})
 
     try:
-        service = await resolve_knowledge_base_service()
-        await service.delete_directory(request)
+        with bind_byclaw_resource_id(resource_id):
+            service = await resolve_knowledge_base_service()
+            await service.delete_directory(request)
     except KnowledgeBaseConfigurationError as exc:
         logger.exception("deleteDirectoryByResourceId configuration error: resourceId=%s", resource_id)
         return _error(str(exc))
@@ -377,8 +399,9 @@ async def list_dir_by_resource_id(body: dict[str, Any] = Body(...)):
         return _error("request validation failed", {"errors": json.loads(exc.json())})
 
     try:
-        service = await resolve_knowledge_base_service()
-        result = await service.list_dir(request)
+        with bind_byclaw_resource_id(resource_id):
+            service = await resolve_knowledge_base_service()
+            result = await service.list_dir(request)
     except KnowledgeBaseConfigurationError as exc:
         logger.exception("listDirByResourceId configuration error: resourceId=%s", resource_id)
         return _error(str(exc))
@@ -430,8 +453,9 @@ async def read_file_by_resource_id(body: dict[str, Any] = Body(...)):
         return _error("request validation failed", {"errors": json.loads(exc.json())})
 
     try:
-        service = await resolve_knowledge_base_service()
-        result = await service.read_file(request)
+        with bind_byclaw_resource_id(resource_id):
+            service = await resolve_knowledge_base_service()
+            result = await service.read_file(request)
     except KnowledgeBaseConfigurationError as exc:
         logger.exception("readFileByResourceId configuration error: resourceId=%s", resource_id)
         return _error(str(exc))
@@ -465,8 +489,9 @@ async def download_file_by_resource_id(body: dict[str, Any] = Body(...)):
         return _error("request validation failed", {"errors": json.loads(exc.json())})
 
     try:
-        service = await resolve_knowledge_base_service()
-        result = await service.download_file(request)
+        with bind_byclaw_resource_id(resource_id):
+            service = await resolve_knowledge_base_service()
+            result = await service.download_file(request)
     except KnowledgeBaseConfigurationError as exc:
         logger.exception("downloadFileByResourceId configuration error: resourceId=%s", resource_id)
         return _error(str(exc))

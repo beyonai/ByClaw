@@ -26,8 +26,10 @@ import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbDirectoryCreate;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbDirectoryDelete;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbDirectoryUpdate;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileDownload;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileMetadataGet;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileRead;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileToMarkdownIndex;
+import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileUpdate;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeFileSearch;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeItemReferences;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeSearch;
@@ -36,6 +38,8 @@ import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbKnowledgeUpdate;
 import com.iwhalecloud.byai.common.feign.request.pythonbuild.KbFileDelete;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.FileToMarkdownResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbFileReadResult;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbFileUpdateResult;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbFileMetadataResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeSearchItem;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileSearchItem;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileSearchResult;
@@ -58,6 +62,7 @@ import com.iwhalecloud.byai.manager.domain.resource.util.DigEmployeeRedisKeys;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetBuild;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetDto;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeReadFileRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileMetadataRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeGlobRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeItemReferencesRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeItemsMoveRequest;
@@ -408,7 +413,7 @@ public class DatasetApplicationService {
         KbKnowledgeDelete knowledgeDel = new KbKnowledgeDelete();
         knowledgeDel.setKnCode(ssResource.getResourceCode());
         logger.info("删除知识库入参:{}", JSON.toJSONString(knowledgeDel));
-        PythonBuildResponse<Void> ret = feignPythonBuildService.deleteKnowledgeBase(knowledgeDel);
+        PythonBuildResponse<Void> ret = feignPythonBuildService.deleteKnowledgeBase(knowledgeDel, resourceId);
         logger.info("删除知识库返回:{}", JSON.toJSONString(ret));
 
         logger.info("知识库软删除完成，准备反注册资源服务, resourceBizType={}, resourceId={}, resourceCode={}",
@@ -586,7 +591,8 @@ public class DatasetApplicationService {
             // 为空时不发送该表单字段，由 QA 按最新接口默认值 true 处理。
             kbFileImport.setProcessFrontMatter(processFrontMatter);
             kbFileImport.setMultipartFile(multipartFile);
-            PythonBuildResponse<KbImportResult> importRet = feignPythonBuildService.importKnowledgeItem(kbFileImport);
+            PythonBuildResponse<KbImportResult> importRet =
+                feignPythonBuildService.importKnowledgeItem(kbFileImport, resourceId);
             logger.info("导入文件:{}", JSON.toJSONString(importRet));
             assertPythonBuildSuccess(importRet, "上传知识库文件");
 
@@ -667,7 +673,8 @@ public class DatasetApplicationService {
         kbFileToMarkdownIndex.setFilePath(datasetBuild.getDirectoryPath());
 
         logger.info("知识构建入参是:{}", JSON.toJSONString(kbFileToMarkdownIndex));
-        PythonBuildResponse<Void> buildRet = feignPythonBuildService.fileToMarkdownIndex(kbFileToMarkdownIndex);
+        PythonBuildResponse<Void> buildRet =
+            feignPythonBuildService.fileToMarkdownIndex(kbFileToMarkdownIndex, datasetBuild.getResourceId());
         logger.info("构建结果是:{}", JSON.toJSONString(buildRet));
         assertPythonBuildSuccess(buildRet, "构建知识库文件");
 
@@ -710,7 +717,7 @@ public class DatasetApplicationService {
 
         String fileName = this.getLastSplitName(kbFileDownload.getFilePath());
         // 下载文件
-        try (InputStream inputStream = feignPythonBuildService.fileDownload(kbFileDownload)) {
+        try (InputStream inputStream = feignPythonBuildService.fileDownload(kbFileDownload, resourceId)) {
             // 设置ContentType，响应内容为二进制数据流，编码为utf-8，此处设定的编码是文件内容的编码
             response.setContentType(MediaType.APPLICATION_OCTET_STREAM_VALUE);
             // 以（Content-Disposition: attachment; filename="filename.jpg"）格式设定默认文件名，设定utf编码，此处的编码是文件名的编码，使能正确显示中文文件名
@@ -739,16 +746,17 @@ public class DatasetApplicationService {
 
         try (
             ZipOutputStream zipOutputStream = new ZipOutputStream(response.getOutputStream(), StandardCharsets.UTF_8)) {
-            addKnowledgeDirectoryToZip(ssResource.getResourceCode(), normalizedDirectoryPath, "", zipOutputStream);
+            addKnowledgeDirectoryToZip(ssResource.getResourceId(), ssResource.getResourceCode(),
+                normalizedDirectoryPath, "", zipOutputStream);
         }
         catch (IOException e) {
             throw new BaseException("下载知识库目录失败：" + e.getMessage(), e);
         }
     }
 
-    private void addKnowledgeDirectoryToZip(String knCode, String directoryPath, String relativePrefix,
-        ZipOutputStream zipOutputStream) throws IOException {
-        List<DirAndFileVo> children = listKnowledgeDir(knCode, directoryPath);
+    private void addKnowledgeDirectoryToZip(Long resourceId, String knCode, String directoryPath,
+        String relativePrefix, ZipOutputStream zipOutputStream) throws IOException {
+        List<DirAndFileVo> children = listKnowledgeDir(resourceId, knCode, directoryPath);
         for (DirAndFileVo child : children) {
             String entryName = sanitizeZipEntryName(child.getName());
             if (StringUtils.isBlank(entryName)) {
@@ -758,7 +766,8 @@ public class DatasetApplicationService {
                 String directoryEntryName = relativePrefix + entryName + "/";
                 zipOutputStream.putNextEntry(new ZipEntry(directoryEntryName));
                 zipOutputStream.closeEntry();
-                addKnowledgeDirectoryToZip(knCode, child.getDirectoryPath(), directoryEntryName, zipOutputStream);
+                addKnowledgeDirectoryToZip(resourceId, knCode, child.getDirectoryPath(), directoryEntryName,
+                    zipOutputStream);
                 continue;
             }
 
@@ -768,7 +777,7 @@ public class DatasetApplicationService {
             kbFileDownload.setFilePath(filePath);
             zipOutputStream
                 .putNextEntry(new ZipEntry(relativePrefix + sanitizeZipEntryName(getLastSplitName(filePath))));
-            try (InputStream inputStream = feignPythonBuildService.fileDownload(kbFileDownload)) {
+            try (InputStream inputStream = feignPythonBuildService.fileDownload(kbFileDownload, resourceId)) {
                 IOUtils.copy(inputStream, zipOutputStream);
             }
             zipOutputStream.closeEntry();
@@ -793,6 +802,39 @@ public class DatasetApplicationService {
     }
 
     /**
+     * 更新已存在知识库文件。更新后不会自动触发 Markdown 转换、切片或向量化。
+     */
+    public KbFileUpdateResult updateKnowledgeFile(Long resourceId, String filePath, String fileDescription,
+        Boolean processFrontMatter, MultipartFile fileContent) {
+        SsResource ssResource = loadDatasetResource(resourceId);
+        validateDatasetManagePermission(ssResource);
+
+        KbFileUpdate kbFileUpdate = new KbFileUpdate();
+        kbFileUpdate.setKnCode(ssResource.getResourceCode());
+        kbFileUpdate.setFilePath(normalizeKnowledgeFilePath(filePath));
+        kbFileUpdate.setFileDescription(fileDescription);
+        kbFileUpdate.setProcessFrontMatter(processFrontMatter);
+        kbFileUpdate.setMultipartFile(fileContent);
+
+        PythonBuildResponse<KbFileUpdateResult> response =
+            feignPythonBuildService.updateKnowledgeItem(kbFileUpdate, resourceId);
+        assertPythonBuildSuccess(response, "更新知识库文件");
+
+        KbFileUpdateResult result = response.getResultObject();
+        if (result == null) {
+            return new KbFileUpdateResult();
+        }
+        if (result.getData() != null) {
+            for (KbFileUpdateResult.Item item : result.getData()) {
+                if (item != null) {
+                    item.setKnCode(String.valueOf(resourceId));
+                }
+            }
+        }
+        return result;
+    }
+
+    /**
      * 删除知识库文件。覆盖上传时复用该逻辑，保证手动删除和覆盖删除走同一套 QA 响应校验。
      */
     private void deleteKnowledgeFile(SsResource ssResource, String filePath, String operationName) {
@@ -800,7 +842,8 @@ public class DatasetApplicationService {
         kbFileDelete.setKnCode(ssResource.getResourceCode());
         kbFileDelete.setFilePath(filePath);
         logger.info("删除文件入参:{}", JSON.toJSONString(kbFileDelete));
-        PythonBuildResponse<Void> removeResponse = feignPythonBuildService.deleteKnowledgeItem(kbFileDelete);
+        PythonBuildResponse<Void> removeResponse =
+            feignPythonBuildService.deleteKnowledgeItem(kbFileDelete, ssResource.getResourceId());
         logger.info("删除文件返回:{}", JSON.toJSONString(removeResponse));
         assertPythonBuildSuccess(removeResponse, operationName);
 
@@ -827,7 +870,7 @@ public class DatasetApplicationService {
         kbDirectoryCreate.setDirectoryPath(buildKnowledgeFilePath(directoryPath, directoryName));
         kbDirectoryCreate.setDirectoryDescription(folder.getDirectoryDescription());
 
-        PythonBuildResponse<Void> ret = feignPythonBuildService.createDirectory(kbDirectoryCreate);
+        PythonBuildResponse<Void> ret = feignPythonBuildService.createDirectory(kbDirectoryCreate, resourceId);
         logger.info("创建目录:{}", JsonUtil.toJSONString(ret));
         assertPythonBuildSuccess(ret, "创建知识库目录");
 
@@ -849,7 +892,8 @@ public class DatasetApplicationService {
         kbDirectoryUpdate.setDirectoryPath(folder.getDirectoryPath());
         kbDirectoryUpdate.setDirectoryName(folder.getDirectoryName());
 
-        PythonBuildResponse<Void> ret = feignPythonBuildService.updateDirectory(kbDirectoryUpdate);
+        PythonBuildResponse<Void> ret =
+            feignPythonBuildService.updateDirectory(kbDirectoryUpdate, folder.getResourceId());
         logger.info("修改目录:{}", JsonUtil.toJSONString(ret));
         assertPythonBuildSuccess(ret, "重命名知识库目录");
 
@@ -870,7 +914,8 @@ public class DatasetApplicationService {
         kbDirectoryDelete.setKnCode(ssResource.getResourceCode());
         kbDirectoryDelete.setDirectoryPath(folderDelete.getDirectoryPath());
 
-        PythonBuildResponse<Void> ret = feignPythonBuildService.deleteDirectory(kbDirectoryDelete);
+        PythonBuildResponse<Void> ret =
+            feignPythonBuildService.deleteDirectory(kbDirectoryDelete, folderDelete.getResourceId());
         logger.info("删除目录:{}", JsonUtil.toJSONString(ret));
         assertPythonBuildSuccess(ret, "删除知识库目录");
 
@@ -899,7 +944,8 @@ public class DatasetApplicationService {
         qaRequest.setTargetFilePath(request.getTargetFilePath());
         qaRequest.setOverwrite(Boolean.FALSE);
 
-        PythonBuildResponse<KnowledgeItemsMoveResult> response = feignPythonBuildService.moveKnowledgeItems(qaRequest);
+        PythonBuildResponse<KnowledgeItemsMoveResult> response =
+            feignPythonBuildService.moveKnowledgeItems(qaRequest, request.getResourceId());
         logger.info("移动知识库文件或目录:{}", JsonUtil.toJSONString(response));
         assertPythonBuildSuccess(response, "移动知识库文件或目录");
         return response.getResultObject() == null ? new KnowledgeItemsMoveResult() : response.getResultObject();
@@ -918,7 +964,7 @@ public class DatasetApplicationService {
         qaRequest.setDirection(StringUtils.defaultIfBlank(request.getDirection(), "inbound"));
 
         PythonBuildResponse<KnowledgeItemReferencesResult> response = feignPythonBuildService
-            .knowledgeItemReferences(qaRequest);
+            .knowledgeItemReferences(qaRequest, request.getResourceId());
         assertPythonBuildSuccess(response, "查询知识库文件引用关系");
         return response.getResultObject() == null ? new KnowledgeItemReferencesResult() : response.getResultObject();
     }
@@ -934,7 +980,7 @@ public class DatasetApplicationService {
         qaRequest.setKnCode(ssResource.getResourceCode());
         qaRequest.setPathRule(normalizeKnowledgeGlobRule(request.getPathRule()));
 
-        PythonBuildResponse<Data> response = feignPythonBuildService.glob(qaRequest);
+        PythonBuildResponse<Data> response = feignPythonBuildService.glob(qaRequest, request.getResourceId());
         assertPythonBuildSuccess(response, "按路径匹配知识库文件或目录");
         return mapKnowledgeDirItems(response.getResultObject());
     }
@@ -959,7 +1005,7 @@ public class DatasetApplicationService {
         }
 
         String listDirectoryPath = normalizeKnowledgeDirectoryPath(dirAndFileQo.getDirectoryPath());
-        return listKnowledgeDir(knCode, listDirectoryPath);
+        return listKnowledgeDir(dirAndFileQo.getResourceId(), knCode, listDirectoryPath);
     }
 
     /**
@@ -977,7 +1023,8 @@ public class DatasetApplicationService {
 
         String knCode = resolveKnowledgeCode(dirAndFileQo, ssResource);
         String rootDirectoryPath = normalizeKnowledgeDirectoryPath(dirAndFileQo.getDirectoryPath());
-        searchKnowledgeDir(knCode, rootDirectoryPath, keyword.toLowerCase(), 0, resultList);
+        searchKnowledgeDir(dirAndFileQo.getResourceId(), knCode, rootDirectoryPath, keyword.toLowerCase(), 0,
+            resultList);
         return resultList;
     }
 
@@ -988,13 +1035,13 @@ public class DatasetApplicationService {
         return ssResource.getResourceCode();
     }
 
-    private void searchKnowledgeDir(String knCode, String directoryPath, String keyword, int depth,
+    private void searchKnowledgeDir(Long resourceId, String knCode, String directoryPath, String keyword, int depth,
         List<DirAndFileVo> resultList) {
         if (depth > KNOWLEDGE_DIR_SEARCH_MAX_DEPTH || resultList.size() >= KNOWLEDGE_DIR_SEARCH_MAX_RESULT_SIZE) {
             return;
         }
 
-        List<DirAndFileVo> currentLevelItems = listKnowledgeDir(knCode, directoryPath);
+        List<DirAndFileVo> currentLevelItems = listKnowledgeDir(resourceId, knCode, directoryPath);
         for (DirAndFileVo item : currentLevelItems) {
             if (resultList.size() >= KNOWLEDGE_DIR_SEARCH_MAX_RESULT_SIZE) {
                 return;
@@ -1004,16 +1051,16 @@ public class DatasetApplicationService {
                 resultList.add(item);
             }
             if ("directory".equalsIgnoreCase(item.getType())) {
-                searchKnowledgeDir(knCode, item.getDirectoryPath(), keyword, depth + 1, resultList);
+                searchKnowledgeDir(resourceId, knCode, item.getDirectoryPath(), keyword, depth + 1, resultList);
             }
         }
     }
 
-    private List<DirAndFileVo> listKnowledgeDir(String knCode, String directoryPath) {
+    private List<DirAndFileVo> listKnowledgeDir(Long resourceId, String knCode, String directoryPath) {
         KbListDir kbListDir = new KbListDir();
         kbListDir.setKnCode(knCode);
         kbListDir.setDirectoryPath(normalizeKnowledgeDirectoryPath(directoryPath));
-        PythonBuildResponse<Data> response = feignPythonBuildService.listDir(kbListDir);
+        PythonBuildResponse<Data> response = feignPythonBuildService.listDir(kbListDir, resourceId);
         assertPythonBuildSuccess(response, "查询知识库目录");
         return mapKnowledgeDirItems(response.getResultObject());
     }
@@ -1066,7 +1113,8 @@ public class DatasetApplicationService {
         KbListDir kbListDir = new KbListDir();
         kbListDir.setKnCode(ssResource.getResourceCode());
         kbListDir.setDirectoryPath(normalizeKnowledgeDirectoryPath(directoryPath));
-        PythonBuildResponse<Data> response = feignPythonBuildService.listDir(kbListDir);
+        PythonBuildResponse<Data> response =
+            feignPythonBuildService.listDir(kbListDir, ssResource.getResourceId());
         assertPythonBuildSuccess(response, "检查知识库同名文件");
 
         List<String> existingFilePaths = new ArrayList<>();
@@ -1368,7 +1416,8 @@ public class DatasetApplicationService {
         FileBuildStatus fileBuildStatus = new FileBuildStatus();
         fileBuildStatus.setKnCode(ssResource.getResourceCode());
         fileBuildStatus.setFilePath(directoryPath);
-        PythonBuildResponse<ProcessStatus> ret = feignPythonBuildService.fileBuildStatus(fileBuildStatus);
+        PythonBuildResponse<ProcessStatus> ret =
+            feignPythonBuildService.fileBuildStatus(fileBuildStatus, resourceId);
         assertPythonBuildSuccess(ret, "查询知识库文件构建状态");
         return ret.getResultObject();
 
@@ -1391,7 +1440,8 @@ public class DatasetApplicationService {
         kbFileRead.setStartLine(request.getStartLine());
         kbFileRead.setEndLine(request.getEndLine());
 
-        PythonBuildResponse<KbFileReadResult> ret = feignPythonBuildService.readFile(kbFileRead);
+        PythonBuildResponse<KbFileReadResult> ret =
+            feignPythonBuildService.readFile(kbFileRead, request.getResourceId());
         assertPythonBuildSuccess(ret, "读取知识库文件内容");
 
         KbFileReadResult result = ret.getResultObject();
@@ -1399,6 +1449,24 @@ public class DatasetApplicationService {
             result.setKnCode(String.valueOf(request.getResourceId()));
         }
         return result;
+    }
+
+    /**
+     * 查询知识库文件已入库的元数据。对外使用 ByClaw resourceId，内部转为 QA knCode。
+     */
+    public KbFileMetadataResult getKnowledgeFileMetadata(KnowledgeFileMetadataRequest request) {
+        SsResource ssResource = loadDatasetResource(request.getResourceId());
+        validateDatasetReadablePermission(ssResource);
+
+        KbFileMetadataGet qaRequest = new KbFileMetadataGet();
+        qaRequest.setKnCode(ssResource.getResourceCode());
+        qaRequest.setFilePath(normalizeKnowledgeFilePath(request.getFilePath()));
+        qaRequest.setMetadataFieldList(request.getMetadataFieldList());
+
+        PythonBuildResponse<KbFileMetadataResult> response =
+            feignPythonBuildService.getKnowledgeFileMetadata(qaRequest, request.getResourceId());
+        assertPythonBuildSuccess(response, "查询知识库文件元数据");
+        return response.getResultObject() == null ? new KbFileMetadataResult() : response.getResultObject();
     }
 
     /**
