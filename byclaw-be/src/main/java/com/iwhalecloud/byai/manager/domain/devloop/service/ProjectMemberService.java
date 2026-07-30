@@ -111,14 +111,15 @@ public class ProjectMemberService {
     }
 
     /**
-     * 按项目ID联查成员列表，补充用户工号/名称及绑定数字员工名称。
+     * 按项目 ID 联查成员列表，创建者、当前登录用户及其他成员按固定优先级返回。
      *
-     * @param projectId 项目ID
+     * @param projectId 项目 ID
      * @param userName 用户名
+     * @param currentUserId 当前登录用户 ID
      * @return 成员列表 DTO；无成员时返回空列表
      */
-    public List<ProjectMemberListDto> listProjectMembers(Long projectId, String userName) {
-        return memberMapper.listProjectMembers(projectId, userName);
+    public List<ProjectMemberListDto> listProjectMembers(Long projectId, String userName, Long currentUserId) {
+        return memberMapper.listProjectMembers(projectId, userName, currentUserId);
     }
 
     /**

@@ -1506,7 +1506,8 @@ export default {
   'projectSpace.detail.integration.configSubtitle': '维护集成测试环境与端到端测试用例集',
   'projectSpace.detail.integration.env.title': '集成测试环境',
   'projectSpace.detail.integration.env.add': '关联环境',
-  'projectSpace.detail.integration.env.deleteConfirm': '确认解除关联环境「{name}」？该操作不会删除环境本身,仅移除本项目的关联配置。',
+  'projectSpace.detail.integration.env.deleteConfirm':
+    '确认解除关联环境「{name}」？该操作不会删除环境本身,仅移除本项目的关联配置。',
   'projectSpace.detail.integration.env.statusReady': '已就绪',
   'projectSpace.detail.integration.env.statusUnknown': '未检测',
   'projectSpace.detail.integration.env.branchStrategy': '分支策略',
@@ -1517,7 +1518,8 @@ export default {
   'projectSpace.detail.integration.script.testcase': '测试用例路径',
   'projectSpace.detail.integration.flow.title': '研发闭环环节',
   'projectSpace.detail.integration.flow.newTag': '新增',
-  'projectSpace.detail.integration.flow.kickbackHint': '端到端集成测试失败时,自动打回「编码」环节重做,轮次 +1,直至全部通过才进入「提交 PR」。',
+  'projectSpace.detail.integration.flow.kickbackHint':
+    '端到端集成测试失败时,自动打回「编码」环节重做,轮次 +1,直至全部通过才进入「提交 PR」。',
   'projectSpace.detail.integration.history.title': '历次集成测试结果',
   'projectSpace.detail.integration.history.pass': '通过',
   'projectSpace.detail.integration.history.reject': '打回',
@@ -1548,7 +1550,8 @@ export default {
   'projectSpace.detail.integration.result.allPass': '本套件全部通过,无失败用例。',
   'projectSpace.detail.integration.suite.title': '测试用例集',
   'projectSpace.detail.integration.suite.add': '新增用例集',
-  'projectSpace.detail.integration.suite.deleteConfirm': '确认删除测试用例集「{name}」？删除后该套件将不再参与端到端集成测试。',
+  'projectSpace.detail.integration.suite.deleteConfirm':
+    '确认删除测试用例集「{name}」？删除后该套件将不再参与端到端集成测试。',
   'projectSpace.detail.integration.suite.enabled': '启用',
   'projectSpace.detail.integration.suite.disabled': '停用',
   'projectSpace.detail.integration.suite.sourceType': '来源',
@@ -1568,11 +1571,13 @@ export default {
   'projectSpace.detail.integration.suiteModal.sharedPath': '共享空间路径',
   'projectSpace.detail.integration.suiteModal.branch': '分支',
   'projectSpace.detail.integration.suiteModal.workdir': '工作目录（相对用例工程根）',
-  'projectSpace.detail.integration.suiteModal.reportHint': '多数运行器可产出 JUnit XML，后端读该报告统一汇总通过率；自定义运行器需自行产出兼容报告。',
+  'projectSpace.detail.integration.suiteModal.reportHint':
+    '多数运行器可产出 JUnit XML，后端读该报告统一汇总通过率；自定义运行器需自行产出兼容报告。',
   'projectSpace.detail.integration.suiteModal.runnerManual': '手动测试（人工执行）',
   'projectSpace.detail.integration.suiteModal.manualCasesTitle': '人工检查清单',
   'projectSpace.detail.integration.suiteModal.addCase': '新增用例',
-  'projectSpace.detail.integration.suiteModal.manualCasesHint': '无法自动化的场景（如真机支付、硬件出票、短信送达）在此定义步骤与预期，执行时由测试人逐条判定并记录。',
+  'projectSpace.detail.integration.suiteModal.manualCasesHint':
+    '无法自动化的场景（如真机支付、硬件出票、短信送达）在此定义步骤与预期，执行时由测试人逐条判定并记录。',
   'projectSpace.detail.integration.suiteModal.caseTitle': '用例标题',
   'projectSpace.detail.integration.suiteModal.caseSteps': '操作步骤',
   'projectSpace.detail.integration.suiteModal.caseStepsPlaceholder': '1. 打开…\n2. 点击…\n3. 观察…',
@@ -1590,8 +1595,10 @@ export default {
   'projectSpace.detail.integration.manualRun.remarkPlaceholder': '备注（失败时建议写清现象，便于研发定位）',
   'projectSpace.detail.integration.manualRun.addShot': '加截图',
   'projectSpace.detail.integration.manualRun.submit': '提交结果',
-  'projectSpace.detail.integration.manualRun.submittedPass': '静态演示：手测结果将汇总进本轮 status.json，全部通过则本套件计为通过。',
-  'projectSpace.detail.integration.manualRun.submittedFail': '静态演示：存在失败用例，真实实现会把本轮打回编码环节（coder）。',
+  'projectSpace.detail.integration.manualRun.submittedPass':
+    '静态演示：手测结果将汇总进本轮 status.json，全部通过则本套件计为通过。',
+  'projectSpace.detail.integration.manualRun.submittedFail':
+    '静态演示：存在失败用例，真实实现会把本轮打回编码环节（coder）。',
   'projectSpace.detail.integration.suiteSpec.title': '本套件产物约定（用例集作者必读）',
   'projectSpace.detail.integration.suiteSpec.intro':
     '你只负责这一个测试工程:产出 JUnit 报告 + 用退出码表达成败即可。整轮的目录、状态机、status.json 由编排层（在「关联环境」里约定）统一维护，无需你自己写。',
@@ -1625,7 +1632,8 @@ export default {
   'projectSpace.detail.integration.envModal.connWorkdir': '远程工作目录',
   'projectSpace.detail.integration.envModal.stagesTitle': '生命周期阶段（按顺序执行）',
   'projectSpace.detail.integration.envModal.addStage': '新增阶段',
-  'projectSpace.detail.integration.envModal.varsHint': '脚本可用变量：${branch} ${commit} ${repoUrl} ${envAddress}，以及连接里的 $WORKDIR。',
+  'projectSpace.detail.integration.envModal.varsHint':
+    '脚本可用变量：${branch} ${commit} ${repoUrl} ${envAddress}，以及连接里的 $WORKDIR。',
   'projectSpace.detail.integration.envModal.stageName': '阶段名称，如 build-fe',
   'projectSpace.detail.integration.envModal.sourceInline': '内联脚本',
   'projectSpace.detail.integration.envModal.sourcePath': '脚本路径',
@@ -1640,21 +1648,30 @@ export default {
   'projectSpace.detail.integration.envModal.tabSpec': '结果规范',
   'projectSpace.detail.integration.envModal.accTitle': '业务测试账号（E2E 登录用）',
   'projectSpace.detail.integration.envModal.accAdd': '新增账号',
-  'projectSpace.detail.integration.envModal.accHint': '被测应用的登录账号,按角色配多个。密码不入库,只填凭据引用(实际值放 ~/.openclaw/credentials/);运行时编排层注入成环境变量供脚本读取。',
+  'projectSpace.detail.integration.envModal.accHint':
+    '被测应用的登录账号,按角色配多个。密码不入库,只填凭据引用(实际值放 ~/.openclaw/credentials/);运行时编排层注入成环境变量供脚本读取。',
   'projectSpace.detail.integration.envModal.accRole': '角色说明',
   'projectSpace.detail.integration.envModal.accRolePlaceholder': '管理员 / 普通用户 / 审批人',
   'projectSpace.detail.integration.envModal.accEnvPrefix': '环境变量前缀',
   'projectSpace.detail.integration.envModal.accUsername': '用户名',
   'projectSpace.detail.integration.envModal.accCredentialRef': '密码凭据引用',
   'projectSpace.detail.integration.envModal.accInject': '脚本读取:{user} / {pass}',
-  'projectSpace.detail.integration.envModal.hint.jenkins': '将填写 Jenkins 地址、Job 名、API Token（存凭据目录）、分支参数名。此处为静态演示，暂不展开。',
-  'projectSpace.detail.integration.envModal.hint.k8s': '将填写 kubeconfig/命名空间、Deployment 名、镜像仓库。此处为静态演示，暂不展开。',
-  'projectSpace.detail.integration.envModal.hint.webhook': '将填写触发 URL、状态查询/回调约定、鉴权头。此处为静态演示，暂不展开。',
+  'projectSpace.detail.integration.envModal.hint.jenkins':
+    '将填写 Jenkins 地址、Job 名、API Token（存凭据目录）、分支参数名。此处为静态演示，暂不展开。',
+  'projectSpace.detail.integration.envModal.hint.k8s':
+    '将填写 kubeconfig/命名空间、Deployment 名、镜像仓库。此处为静态演示，暂不展开。',
+  'projectSpace.detail.integration.envModal.hint.webhook':
+    '将填写触发 URL、状态查询/回调约定、鉴权头。此处为静态演示，暂不展开。',
   'projectSpace.detail.integration.envModal.save': '保存',
   'projectSpace.detail.integration.envModal.demoHint': '静态演示：保存能力将在后端接口就绪后接入。',
   'projectSpace.detail.project.detailTitle': '项目详情',
   'projectSpace.detail.project.edit': '编辑项目',
   'projectSpace.detail.project.delete': '删除项目',
+  'projectSpace.detail.project.exit': '退出项目',
+  'projectSpace.detail.project.exitConfirm': '退出后将无法继续访问该项目，确定退出吗？',
+  'projectSpace.detail.project.exitSuccess': '已退出项目',
+  'projectSpace.detail.project.exitFailed': '退出项目失败',
+  'projectSpace.detail.project.exitMemberNotFound': '未找到当前用户的项目成员记录',
   'projectSpace.detail.resource.currentSession': '当前会话',
   'projectSpace.detail.resource.allSessions': '全部会话',
   'projectSpace.detail.resource.scope.current': '当前',

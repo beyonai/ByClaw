@@ -352,6 +352,7 @@ describe('AskUserQuestions', () => {
     );
   });
 
+  // 全量测试以双 worker 运行时，Ant Design 状态更新可能超过 Jest 默认的 5 秒超时。
   it('does not finish or emit when persistence fails', async () => {
     const onUpdate = jest.fn();
     updateMessageStructByIdMock.mockRejectedValue(new Error('save failed'));
@@ -386,5 +387,5 @@ describe('AskUserQuestions', () => {
     expect(mockEmit).not.toHaveBeenCalled();
 
     jest.restoreAllMocks();
-  });
+  }, 15000);
 });

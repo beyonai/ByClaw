@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.manager.domain.devloop.service;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.dto.devloop.ProjectShareFileListDto;
 import com.iwhalecloud.byai.manager.entity.devloop.ProjectShareFile;
@@ -53,5 +54,30 @@ public class ProjectShareFileService {
      */
     public List<ProjectShareFileListDto> listSpaceFiles(Long projectId) {
         return shareFileMapper.listSpaceFiles(projectId);
+    }
+
+    /**
+     * 判断文件是否仍关联在指定项目的共享空间内，避免跨项目操作文件。
+     *
+     * @param projectId 项目 ID
+     * @param fileId 文件 ID
+     * @return 是否存在关联记录
+     */
+    public boolean existsByProjectAndFile(Long projectId, Long fileId) {
+        return shareFileMapper.selectCount(new LambdaQueryWrapper<ProjectShareFile>()
+            .eq(ProjectShareFile::getProjectId, projectId)
+            .eq(ProjectShareFile::getFileId, fileId)) > 0;
+    }
+
+    /**
+     * 删除项目与共享文件的关联记录。
+     *
+     * @param projectId 项目 ID
+     * @param fileId 文件 ID
+     */
+    public void removeByProjectAndFile(Long projectId, Long fileId) {
+        shareFileMapper.delete(new LambdaQueryWrapper<ProjectShareFile>()
+            .eq(ProjectShareFile::getProjectId, projectId)
+            .eq(ProjectShareFile::getFileId, fileId));
     }
 }

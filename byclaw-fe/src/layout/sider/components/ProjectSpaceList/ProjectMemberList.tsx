@@ -515,7 +515,7 @@ const ProjectMemberList: React.FC<ProjectMemberListProps> = ({
   const getAgentAvatar = (agent: any) => agent.chatAvatar || agent.avatar || agent.icon || agent.resourceLogoUrl;
 
   const renderMemberActionMenu = (member: any) => {
-    // 创建者可管理全部成员；普通成员仅可管理自己的数字员工绑定和退出项目入口。
+    // 创建者可管理全部成员；普通成员仅可维护自己的数字员工绑定，退出入口统一放在项目菜单。
     const canOperateMember = isCurrentUserProjectCreator || isCurrentUserMember(member);
     if (!canOperateMember) return null;
 
@@ -535,7 +535,8 @@ const ProjectMemberList: React.FC<ProjectMemberListProps> = ({
               icon: <RobotOutlined />,
               label: member.agentId ? t('changeAgent') : t('bindAgent'),
             },
-            ...(!isProjectOwnerMember(member, creatorId)
+            // 普通成员不能在成员列表中直接移除自己，避免与项目菜单“退出项目”入口重复。
+            ...(isCurrentUserProjectCreator && !isProjectOwnerMember(member, creatorId)
               ? [
                 {
                   key: 'remove',
