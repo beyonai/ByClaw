@@ -201,6 +201,9 @@
 }
 
 .integrationTriggerText {
+  // 占满图标右侧剩余宽度,min-width:0 允许内部长文本正常换行而非撑破容器。
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -217,10 +220,18 @@
   }
 }
 
+.integrationTriggerTitleRow {
+  // 标题占左、胶囊靠右,同行两端对齐;gap 保证窄面板下二者不贴死。
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 // 触发条右侧的下次运行时间徽标(对标运行状态显性化)。
 .integrationNextRun {
-  margin-inline-start: auto;
-  align-self: center;
+  // 位置由父级标题行 space-between 决定,不再自撑边距;flex-shrink:0 防止窄面板挤压变形。
+  flex-shrink: 0;
   padding: 2px 10px;
   border-radius: 999px;
   background: #eef3fb;
@@ -734,4 +745,124 @@
   flex-wrap: wrap;
   color: #7c8798;
   font-size: 12px;
+}
+
+// 独立测试数字员工配置卡片:头像+员工信息在上,定时/准入/打回三条事实在下。
+.testerCard {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #dfe6f0;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.testerAgent {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.testerAvatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border-radius: 10px;
+  font-size: 20px;
+  color: #1677ff;
+  background: rgba(22, 119, 255, 0.1);
+}
+
+.testerAgentInfo {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.testerAgentName {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  strong {
+    font-size: 14px;
+  }
+}
+
+.testerAgentSkills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.testerSkillTag {
+  margin: 0;
+  font-size: 11px;
+  color: #7c8798;
+  background: #f5f7fa;
+  border-color: #e2e8f2;
+}
+
+.testerFacts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px dashed #e2e8f2;
+}
+
+.testerFact {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.testerFactIcon {
+  color: #1677ff;
+}
+
+.testerFactLabel {
+  flex-shrink: 0;
+  width: 56px;
+  color: #7c8798;
+}
+
+.testerFactValue {
+  flex: 1;
+  min-width: 0;
+  color: #1f2633;
+}
+
+.testerNote {
+  font-size: 12px;
+  line-height: 1.6;
+  color: #7c8798;
+}
+
+// 弹框里的开关行:标签在左、Switch 在右。
+.testerFormRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+
+  label {
+    font-size: 13px;
+    color: #1f2633;
+  }
+}
+
+.testerFormHint {
+  margin: -4px 0 12px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #7c8798;
 }

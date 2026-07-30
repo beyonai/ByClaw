@@ -1,3 +1,48 @@
+// V2:独立测试数字员工。E2E 从「每个任务各自跑」收敛到「需求级、由一个独立测试员工定时批量执行」。
+// 这个配置回答三件事:谁来测(绑定的数字员工)、什么时候测(定时节流 + 就绪准入)、失败怎么办(打回策略)。
+export type TesterAgentOption = {
+  agentId: string;
+  name: string;
+  // 头像:数字员工的展示头像 URL(演示态用占位)。
+  avatar?: string;
+  // 擅长栈,仅用于挑选时展示,不参与逻辑。
+  skills: string[];
+};
+
+// 定时节流:cron 决定「多久看一次」,不是「到点必跑」。到点时只挑「已就绪」的需求批量测。
+export type TesterSchedule = {
+  cron: string; // 标准 5 段 cron,如 0 2 * * *(每日 02:00)
+  cronLabel: string; // 人话展示,如 每日 02:00
+  timezone: string; // 计算下次运行用的时区,如 Asia/Shanghai
+};
+
+// 就绪准入:定时到点后,一个需求要满足这些条件才纳入本轮批量集成。
+export type TesterAdmission = {
+  // 就绪门禁:需求下所有子任务都完成编码(coded)才纳入。关掉则只要有任务 coded 就试跑(不推荐)。
+  requireAllCoded: boolean;
+  // 单轮最多并行几个需求的 E2E,防止把集成环境打满。
+  maxConcurrentReqs: number;
+};
+
+// 失败打回策略:集成失败后如何归因、回灌到 dev-loop。
+export type TesterKickback = {
+  // 按依赖图自动归因到责任任务并打回其编码环节(轮次 +1)。
+  autoAttribute: boolean;
+  // 归因不清时新建「集成缺陷」任务,而不是硬塞给已完成的任务。
+  createDefectWhenUnclear: boolean;
+  // 同一需求最多自动打回多少轮,超过则升级为人工介入,避免死循环。
+  maxRounds: number;
+};
+
+// V2:独立测试员工总配置。挂在需求级集成之上,是「定时集成」那条 banner 背后的真实配置。
+export type TesterConfig = {
+  enabled: boolean; // 关掉则退回人工触发集成,不自动定时
+  agentId: string; // 绑定的独立测试数字员工
+  schedule: TesterSchedule;
+  admission: TesterAdmission;
+  kickback: TesterKickback;
+};
+
 export type IntegrationStage = {
   id: string;
   name: string;

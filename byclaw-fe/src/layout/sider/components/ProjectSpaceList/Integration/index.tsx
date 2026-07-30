@@ -30,12 +30,22 @@ import {
   PlayCircleOutlined,
   PlusOutlined,
   RightOutlined,
+  RobotOutlined,
+  ThunderboltOutlined,
 } from '@ant-design/icons';
 import { useIntl } from '@umijs/max';
 import { SiderContentContext } from '@/layout/sider/siderContentContext';
 import styles from './index.module.less'; // 集成测试专用类
 import parentStyles from '../index.module.less'; // 共享 chrome 类(与渠道/来源卡片共用,DRY 保留在父级)
-import { E2E_RESULT_DIR_TREE, E2E_SCRIPT_SKELETON, E2E_STATUS_ENUM, E2E_STATUS_JSON, E2E_SUITE_CONTRACT } from './mock';
+import {
+  DEFAULT_TESTER_CONFIG,
+  E2E_RESULT_DIR_TREE,
+  E2E_SCRIPT_SKELETON,
+  E2E_STATUS_ENUM,
+  E2E_STATUS_JSON,
+  E2E_SUITE_CONTRACT,
+  TESTER_AGENT_OPTIONS,
+} from './mock';
 import type {
   IntegrationRunResult,
   IntegrationStage,
@@ -43,6 +53,7 @@ import type {
   RequirementIntegration,
   RequirementIntegrationStatus,
   TestAccount,
+  TesterConfig,
   TestSuite,
 } from './types';
 
@@ -61,6 +72,11 @@ const Integration: React.FC<IntegrationProps> = ({ active }) => {
   const { setDetailPanel, clearDetailPanel } = React.useContext(SiderContentContext);
   // 集成测试配置(环境+用例集)内容多,沿用需求渠道配置模式:入口按钮打开右侧覆盖面板。
   const [integrationConfigOpen, setIntegrationConfigOpen] = useState(false);
+  // V2:独立测试数字员工配置(谁测 / 何时测 / 失败怎么打回),静态演示态,后端就绪后接入。
+  const [testerConfig, setTesterConfig] = useState<TesterConfig>(DEFAULT_TESTER_CONFIG);
+  const [testerModalOpen, setTesterModalOpen] = useState(false);
+  // 弹框内的草稿:确认才写回 testerConfig,取消不改。
+  const [testerDraft, setTesterDraft] = useState<TesterConfig>(DEFAULT_TESTER_CONFIG);
   // 集成测试「新增测试用例集」弹框(静态演示态)。
   const [integrationSuiteModalOpen, setIntegrationSuiteModalOpen] = useState(false);
   // 查看态:弹框复用新增表单,只读展示,不给保存按钮。
@@ -555,8 +571,24 @@ const Integration: React.FC<IntegrationProps> = ({ active }) => {
     }))
     .filter((group) => group.items.length > 0);
 
-  // 定时批量触发的下次运行时间(演示态)。真实实现由 schedule 解析,这里固定展示。
-  const integrationNextRunAt = '明日 02:00';
+  // 定时批量触发的下次运行时间(演示态)。真实实现由 cron 解析,这里跟着配置的可读标签走;关掉定时则显示手动。
+  const integrationNextRunAt = testerConfig.enabled
+    ? `明日 ${testerConfig.schedule.cronLabel.replace(/^每日\s*/, '')}`
+    : t('tester.manualTrigger');
+
+  // 当前绑定的独立测试员工(找不到时兜底第一个,保证卡片有内容)。
+  const boundTesterAgent =
+    TESTER_AGENT_OPTIONS.find((agent) => agent.agentId === testerConfig.agentId) ?? TESTER_AGENT_OPTIONS[0];
+
+  const openTesterModal = () => {
+    setTesterDraft(testerConfig);
+    setTesterModalOpen(true);
+  };
+
+  const handleSaveTester = () => {
+    setTesterConfig(testerDraft);
+    setTesterModalOpen(false);
+  };
 
   const renderReqIntegrationCard = (req: RequirementIntegration) => {
     const statusMeta = reqIntegrationStatusMeta[req.status];
@@ -722,11 +754,14 @@ const Integration: React.FC<IntegrationProps> = ({ active }) => {
       <div className={styles.integrationTriggerBanner}>
         <ClockCircleOutlined className={styles.integrationTriggerIcon} />
         <div className={styles.integrationTriggerText}>
-          <strong>{t('reqIntegration.trigger.title')}</strong>
+          <div className={styles.integrationTriggerTitleRow}>
+            <strong>{t('reqIntegration.trigger.title')}</strong>
+            <span className={styles.integrationNextRun}>
+              {t('reqIntegration.nextRun', { time: integrationNextRunAt })}
+            </span>
+          </div>
           <span>{t('reqIntegration.trigger.desc')}</span>
         </div>
-        {/* 对标运行状态显性化:定时批量触发显示下次运行时间,而非静态说明。 */}
-        <span className={styles.integrationNextRun}>{t('reqIntegration.nextRun', { time: integrationNextRunAt })}</span>
       </div>
 
       {/* V2:需求级集成视图。集成挂在需求(而非单任务),展示需求下多仓库任务的就绪度、上次结果与失败分发。 */}
@@ -816,6 +851,71 @@ const Integration: React.FC<IntegrationProps> = ({ active }) => {
         </div>
         <div className={parentStyles.detailChannelPanelBody}>
           <div className={styles.integrationPanel}>
+            {/* V2:独立测试数字员工配置。这是「定时集成」banner 背后的真实配置:谁测/何时测/失败怎么打回。 */}
+            <div className={styles.integrationSection}>
+              <div className={styles.integrationSectionHeader}>
+                <span className={styles.integrationSectionTitle}>{t('tester.title')}</span>
+                <Button type="link" size="small" icon={<EditOutlined />} onClick={openTesterModal}>
+                  {t('common.edit')}
+                </Button>
+              </div>
+              <div className={styles.testerCard}>
+                <div className={styles.testerAgent}>
+                  <span className={styles.testerAvatar}>
+                    <RobotOutlined />
+                  </span>
+                  <div className={styles.testerAgentInfo}>
+                    <div className={styles.testerAgentName}>
+                      <strong>{boundTesterAgent?.name ?? t('tester.noAgent')}</strong>
+                      <Tag color={testerConfig.enabled ? 'success' : 'default'}>
+                        {t(testerConfig.enabled ? 'tester.enabled' : 'tester.disabled')}
+                      </Tag>
+                    </div>
+                    <div className={styles.testerAgentSkills}>
+                      {(boundTesterAgent?.skills ?? []).map((skill) => (
+                        <Tag key={skill} className={styles.testerSkillTag}>
+                          {skill}
+                        </Tag>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                <div className={styles.testerFacts}>
+                  <div className={styles.testerFact}>
+                    <ClockCircleOutlined className={styles.testerFactIcon} />
+                    <span className={styles.testerFactLabel}>{t('tester.schedule')}</span>
+                    <span className={styles.testerFactValue}>
+                      {testerConfig.enabled
+                        ? `${testerConfig.schedule.cronLabel} · ${testerConfig.schedule.timezone}`
+                        : t('tester.manualTrigger')}
+                    </span>
+                  </div>
+                  <div className={styles.testerFact}>
+                    <ThunderboltOutlined className={styles.testerFactIcon} />
+                    <span className={styles.testerFactLabel}>{t('tester.admission')}</span>
+                    <span className={styles.testerFactValue}>
+                      {testerConfig.admission.requireAllCoded
+                        ? t('tester.admissionAllCoded')
+                        : t('tester.admissionAnyCoded')}
+                      {' · '}
+                      {t('tester.concurrency', { count: testerConfig.admission.maxConcurrentReqs })}
+                    </span>
+                  </div>
+                  <div className={styles.testerFact}>
+                    <RightOutlined className={styles.testerFactIcon} />
+                    <span className={styles.testerFactLabel}>{t('tester.kickback')}</span>
+                    <span className={styles.testerFactValue}>
+                      {testerConfig.kickback.autoAttribute ? t('tester.kickbackAuto') : t('tester.kickbackManual')}
+                      {testerConfig.kickback.createDefectWhenUnclear ? ` · ${t('tester.kickbackDefect')}` : ''}
+                      {' · '}
+                      {t('tester.maxRounds', { count: testerConfig.kickback.maxRounds })}
+                    </span>
+                  </div>
+                </div>
+                <div className={styles.testerNote}>{t('tester.cardNote')}</div>
+              </div>
+            </div>
+
             {/* 环境信息配置 */}
             <div className={styles.integrationSection}>
               <div className={styles.integrationSectionHeader}>
@@ -1013,7 +1113,8 @@ const Integration: React.FC<IntegrationProps> = ({ active }) => {
       Parameters<NonNullable<typeof setDetailPanel>>[1]
     > & { overlay: boolean };
     setDetailPanel?.(renderIntegrationConfigPanel(), overlayDetailPanelOptions);
-  }, [integrationConfigOpen, setDetailPanel, t]);
+    // testerConfig 变更后重推面板快照,右侧覆盖层里的测试员工卡片才会跟着刷新。
+  }, [integrationConfigOpen, setDetailPanel, t, testerConfig]);
 
   useEffect(() => {
     return () => {
@@ -1921,6 +2022,142 @@ const Integration: React.FC<IntegrationProps> = ({ active }) => {
     );
   };
 
+  // 独立测试员工配置弹框:绑定员工 + 定时 + 就绪准入 + 打回策略(静态演示,确认只写本地状态)。
+  const renderTesterModal = () => (
+    <Modal
+      title={t('tester.modalTitle')}
+      open={testerModalOpen}
+      onCancel={() => setTesterModalOpen(false)}
+      onOk={handleSaveTester}
+      okText={t('integration.envModal.save')}
+      cancelText={t('common.cancel')}
+      width={560}
+      zIndex={1100}
+    >
+      <div className={styles.testerFormRow}>
+        <label>{t('tester.enable')}</label>
+        <Switch
+          checked={testerDraft.enabled}
+          onChange={(enabled) => setTesterDraft((prev) => ({ ...prev, enabled }))}
+        />
+      </div>
+
+      <div className={parentStyles.formField}>
+        <label>{t('tester.agent')}</label>
+        <Select
+          value={testerDraft.agentId}
+          onChange={(agentId) => setTesterDraft((prev) => ({ ...prev, agentId }))}
+          style={{ width: '100%' }}
+          options={TESTER_AGENT_OPTIONS.map((agent) => ({
+            value: agent.agentId,
+            label: `${agent.name} · ${agent.skills.join(' / ')}`,
+          }))}
+        />
+        <p className={styles.testerFormHint}>{t('tester.agentHint')}</p>
+      </div>
+
+      <div className={styles.integrationConnRow}>
+        <div className={parentStyles.formField} style={{ flex: 1 }}>
+          <label>{t('tester.cron')}</label>
+          <Input
+            placeholder="0 2 * * *"
+            value={testerDraft.schedule.cron}
+            onChange={(e) =>
+              setTesterDraft((prev) => ({
+                ...prev,
+                schedule: { ...prev.schedule, cron: e.target.value },
+              }))
+            }
+          />
+        </div>
+        <div className={parentStyles.formField} style={{ flex: 1 }}>
+          <label>{t('tester.cronLabel')}</label>
+          <Input
+            placeholder={t('tester.cronLabelPlaceholder')}
+            value={testerDraft.schedule.cronLabel}
+            onChange={(e) =>
+              setTesterDraft((prev) => ({
+                ...prev,
+                schedule: { ...prev.schedule, cronLabel: e.target.value },
+              }))
+            }
+          />
+        </div>
+      </div>
+      <p className={styles.testerFormHint}>{t('tester.cronHint')}</p>
+
+      <div className={styles.testerFormRow}>
+        <label>{t('tester.requireAllCoded')}</label>
+        <Switch
+          checked={testerDraft.admission.requireAllCoded}
+          onChange={(requireAllCoded) =>
+            setTesterDraft((prev) => ({
+              ...prev,
+              admission: { ...prev.admission, requireAllCoded },
+            }))
+          }
+        />
+      </div>
+      <p className={styles.testerFormHint}>{t('tester.requireAllCodedHint')}</p>
+
+      <div className={styles.integrationConnRow}>
+        <div className={parentStyles.formField} style={{ flex: 1 }}>
+          <label>{t('tester.maxConcurrent')}</label>
+          <InputNumber
+            min={1}
+            max={10}
+            value={testerDraft.admission.maxConcurrentReqs}
+            onChange={(value) =>
+              setTesterDraft((prev) => ({
+                ...prev,
+                admission: { ...prev.admission, maxConcurrentReqs: value ?? 1 },
+              }))
+            }
+            style={{ width: '100%' }}
+          />
+        </div>
+        <div className={parentStyles.formField} style={{ flex: 1 }}>
+          <label>{t('tester.maxRoundsField')}</label>
+          <InputNumber
+            min={1}
+            max={10}
+            value={testerDraft.kickback.maxRounds}
+            onChange={(value) =>
+              setTesterDraft((prev) => ({
+                ...prev,
+                kickback: { ...prev.kickback, maxRounds: value ?? 1 },
+              }))
+            }
+            style={{ width: '100%' }}
+          />
+        </div>
+      </div>
+
+      <div className={styles.testerFormRow}>
+        <label>{t('tester.autoAttribute')}</label>
+        <Switch
+          checked={testerDraft.kickback.autoAttribute}
+          onChange={(autoAttribute) =>
+            setTesterDraft((prev) => ({ ...prev, kickback: { ...prev.kickback, autoAttribute } }))
+          }
+        />
+      </div>
+      <div className={styles.testerFormRow}>
+        <label>{t('tester.createDefect')}</label>
+        <Switch
+          checked={testerDraft.kickback.createDefectWhenUnclear}
+          onChange={(createDefectWhenUnclear) =>
+            setTesterDraft((prev) => ({
+              ...prev,
+              kickback: { ...prev.kickback, createDefectWhenUnclear },
+            }))
+          }
+        />
+      </div>
+      <p className={styles.testerFormHint}>{t('tester.kickbackHint')}</p>
+    </Modal>
+  );
+
   return (
     <>
       {active ? renderIntegration() : null}
@@ -1928,6 +2165,7 @@ const Integration: React.FC<IntegrationProps> = ({ active }) => {
       {renderIntegrationSuiteModal()}
       {renderIntegrationResultModal()}
       {renderManualRunModal()}
+      {renderTesterModal()}
     </>
   );
 };

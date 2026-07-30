@@ -491,6 +491,14 @@ const ProjectSpaceList: React.FC = () => {
       projectName: selectedProject.projectName,
     });
     setSessionKeyword('');
+    // 详情视图内通过下拉切换项目时，同步刷新详情面板。
+    if (detailProject) {
+      setDetailProject(selectedProject);
+      void fetchProjectFullDetail(selectedProject, true).then((detail) => {
+        const targetProjectId = `${selectedProject.projectId}`;
+        setDetailProject((current) => (`${current?.projectId || ''}` === targetProjectId ? detail : current));
+      });
+    }
     const cachedPage = projectSessionPageMap[key];
     if (cachedPage && !cachedPage.keyword) {
       // 项目会话已按默认条件加载过，切回时直接复用前端缓存。
@@ -718,9 +726,9 @@ const ProjectSpaceList: React.FC = () => {
   };
 
   useEffect(() => {
-    // 首次进入项目空间时自动展开项目详情，避免用户每次都需要手动点击"进入项目详情"。
-    // ref 保证仅在组件挂载后首次选中项目时触发，之后用户主动返回会话列表不会被重新拉回。
-    if (hasAutoOpenedDetailRef.current || !activeScopeProject) return;
+    // 研发项目首次进入项目空间时自动展开项目详情，避免用户每次都需要手动点击"进入项目详情"。
+    // ref 保证仅在组件挂载后首次选中研发项目时触发，之后用户主动返回会话列表不会被重新拉回。
+    if (hasAutoOpenedDetailRef.current || !activeScopeProject || activeScopeProject.projectType !== 'develop') return;
     hasAutoOpenedDetailRef.current = true;
     setDetailProject(activeScopeProject);
     void fetchProjectFullDetail(activeScopeProject, true).then((detail) => {
@@ -1261,6 +1269,8 @@ const ProjectSpaceList: React.FC = () => {
       {detailProject ? (
         <ProjectDetailPanel
           project={detailProject}
+          projects={mergedProjects}
+          onSwitchProject={(projectId) => handleSelectProjectScope({ key: `${projectId}` })}
           onBack={() => setDetailProject(undefined)}
           onEditProject={isProjectCreator(detailProject) ? handleOpenEditProject : undefined}
           onDeleteProject={isProjectCreator(detailProject) ? handleDeleteProject : undefined}

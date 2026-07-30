@@ -136,6 +136,8 @@ import { SiderContentContext } from '@/layout/sider/siderContentContext';
 import { ResourceTypeMap } from '@/constants/resource';
 import ProjectMemberList from './ProjectMemberList';
 import Integration from './Integration';
+import RequirementSplitModal from './RequirementSplitModal';
+import type { SplitTaskDraft } from './RequirementSplitModal/types';
 import ListEndMessage from './ListEndMessage';
 import styles from './index.module.less';
 import operationStyles from './operation/index.module.less';
@@ -464,6 +466,8 @@ type ProjectSpaceFileTreeItem = FileTreeItem & ProjectSpaceFileItem;
 
 type Props = {
   project?: ProjectSpace;
+  projects?: ProjectSpace[];
+  onSwitchProject?: (projectId: string | number) => void;
   onBack: () => void;
   onEditProject?: (project: ProjectSpace) => void;
   onDeleteProject?: (project: ProjectSpace) => void;
@@ -660,6 +664,8 @@ const getResourceSessionIdByPath = (path: string) => {
 
 const ProjectDetailPanel: React.FC<Props> = ({
   project,
+  projects,
+  onSwitchProject,
   onBack,
   onEditProject,
   onDeleteProject,
@@ -693,6 +699,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
   const [visibleRequirementCount, setVisibleRequirementCount] = useState(REQUIREMENT_PAGE_SIZE);
   const [detailReq, setDetailReq] = useState<RequirementItem | null>(null);
   const [startingRequirementIds, setStartingRequirementIds] = useState<Set<number>>(() => new Set());
+  // 拆单弹窗:点「启动」先弹此窗确认多仓库任务拆分,确认后再走真实启动(演示态)。
+  const [splitRequirement, setSplitRequirement] = useState<RequirementItem | null>(null);
   const [tasks, setTasks] = useState<any[]>([]);
   const [hasMoreTasks, setHasMoreTasks] = useState(false);
   const [taskDateRange, setTaskDateRange] = useState<TaskDateRange>(null);
@@ -2546,6 +2554,15 @@ const ProjectDetailPanel: React.FC<Props> = ({
     }
   };
 
+  // 拆单确认:演示态下拆分结果尚无后端多任务接口,仍走原有单任务启动;真实实现将按 tasks 批量建任务。
+  const handleConfirmSplit = async (splitTasks: SplitTaskDraft[]) => {
+    const requirement = splitRequirement;
+    if (!requirement) return;
+    setSplitRequirement(null);
+    void splitTasks;
+    await handleStartTask(requirement);
+  };
+
   const handleGroupSearch = (value: string) => {
     if (!value || value.length < 2) {
       setGroupOptions([]);
@@ -2894,6 +2911,29 @@ const ProjectDetailPanel: React.FC<Props> = ({
     clearDetailPanel?.();
   }, [activeTab, clearDetailPanel, operationAccountPanelOpen]);
 
+  // 详情抽屉底部启动入口:与列表「启动」按钮同源,读完需求内容可直接启动,无需退回列表 hover。
+  const renderRequirementDetailFooter = (requirement: RequirementItem) => {
+    const isStarting = startingRequirementIds.has(requirement.itemId);
+    const isStarted = requirement.sessionId !== undefined && requirement.sessionId !== null;
+    return (
+      <div className={styles.requirementDetailFooter}>
+        {isStarted ? (
+          <Button disabled>{t('requirement.started')}</Button>
+        ) : (
+          <Button
+            type="primary"
+            loading={isStarting}
+            disabled={isStarting}
+            // V2:同样先弹拆单窗确认多仓库任务,确认后再启动。
+            onClick={() => setSplitRequirement(requirement)}
+          >
+            {t(isStarting ? 'requirement.starting' : 'requirement.start')}
+          </Button>
+        )}
+      </div>
+    );
+  };
+
   // 需求列表保持紧凑，完整字段统一在右侧抽屉展示。
   const renderRequirementDetailDrawer = () => {
     if (!detailReq) return null;
@@ -2916,6 +2956,7 @@ const ProjectDetailPanel: React.FC<Props> = ({
         open={!!detailReq}
         onClose={() => setDetailReq(null)}
         width={640}
+        footer={renderRequirementDetailFooter(detailReq)}
       >
         <div className={styles.requirementDetailDrawerContent}>
           <div className={styles.requirementDetailTitleRow}>
@@ -3121,7 +3162,8 @@ const ProjectDetailPanel: React.FC<Props> = ({
                             disabled={isStarting}
                             onClick={(event) => {
                               event.stopPropagation();
-                              void handleStartTask(item);
+                              // V2:先弹拆单窗确认多仓库任务,确认后再启动。
+                              setSplitRequirement(item);
                             }}
                           >
                             {t(isStarting ? 'requirement.starting' : 'requirement.start')}
@@ -4546,8 +4588,24 @@ const ProjectDetailPanel: React.FC<Props> = ({
       <div className={styles.detailPanelHeader}>
         <Button className={styles.detailBackButton} icon={<LeftOutlined />} onClick={onBack} />
         <div className={styles.detailPanelTitle}>
-          {/* 左侧详情头部仅保留项目名称，避免描述占用会话列表空间。 */}
-          <h3>{project?.projectName || t('project.detailTitle')}</h3>
+          {/* 详情头部项目名称改为下拉选择，切换后直接刷新当前详情面板。 */}
+          {onSwitchProject && projects && projects.length > 0 ? (
+            <Select
+              className={styles.detailProjectSelect}
+              variant="borderless"
+              showSearch
+              optionFilterProp="label"
+              value={project?.projectId}
+              onChange={(value) => onSwitchProject(value)}
+              options={projects.map((p) => ({
+                value: p.projectId,
+                label: p.projectName,
+              }))}
+              optionLabelProp="label"
+            />
+          ) : (
+            <h3>{project?.projectName || t('project.detailTitle')}</h3>
+          )}
           {projectScene && (
             <Tag
               bordered={false}
@@ -4584,6 +4642,19 @@ const ProjectDetailPanel: React.FC<Props> = ({
       </Spin>
       {renderAddSourceModal()}
       {renderManualRequirementModal()}
+      <RequirementSplitModal
+        open={splitRequirement !== null}
+        requirement={
+          splitRequirement
+            ? { title: splitRequirement.title, description: getRequirementDetailText(splitRequirement, t) }
+            : null
+        }
+        repos={repos}
+        members={operationAssigneeOptions}
+        confirmLoading={splitRequirement ? startingRequirementIds.has(splitRequirement.itemId) : false}
+        onCancel={() => setSplitRequirement(null)}
+        onConfirm={handleConfirmSplit}
+      />
       {renderRepoModal()}
       {renderDwsAuthModal()}
       {renderLogDrawer()}
