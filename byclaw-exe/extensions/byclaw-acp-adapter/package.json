@@ -20,7 +20,7 @@
     "smoke": "node scripts/smoke-openclaw-gateway.mjs"
   },
   "dependencies": {
-    "@byclaw/by-framework": "1.5.1",
+    "@byclaw/by-framework": "1.5.2",
     "@opentelemetry/api": "1.9.1",
     "ioredis": "5.10.1"
   },
