@@ -44,6 +44,8 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
 
     private static final String FEISHU_BOT_EVENT_CALLBACK_PATH = "/feishu/bot/events";
 
+    private static final String THIRD_PARTY_SKILL_INSTALL_PATH = "/tool/installThirdPartySkill";
+
     @Value("${byai.access.urlpatterns:}")
     private String urlPattenrs;
 
@@ -148,6 +150,12 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
             if (this.isFeishuBotEventCallback(request)) {
                 return true;
             }
+            if (this.isThirdPartySkillInstallRequest(request)) {
+                if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
+                    return true;
+                }
+                return this.authenticateThirdPartySkillInstall(request);
+            }
             if (this.checkUrlByRegex(url)) {
                 return true;
             }
@@ -198,6 +206,28 @@ public class AccessTokenVerifyInterceptor implements HandlerInterceptor {
             this.setLoginError(response, e.getMessage());
             return false;
         }
+    }
+
+    /**
+     * 技能超市安装必须以调用方显式传入的 Beyond-Token 作为当前用户身份。
+     * 即使请求同时携带门户 Cookie，也不能使用 Cookie/Session 覆盖 Token 中的用户。
+     */
+    private boolean authenticateThirdPartySkillInstall(HttpServletRequest request) {
+        String systemCode = request.getHeader("system-code");
+        String beyondToken = request.getHeader("Beyond-Token");
+        if (StringUtils.isBlank(beyondToken)) {
+            throw new RuntimeException("第三方技能安装接口必须通过 Beyond-Token 鉴权");
+        }
+        logger.info(
+            "第三方技能安装接口强制Beyond-Token鉴权，requestUri={}, systemCode={}, beyondToken={}",
+            request.getRequestURI(), systemCode, beyondToken);
+        return jwtTokenFilter.doFilter(systemCode, beyondToken);
+    }
+
+    private boolean isThirdPartySkillInstallRequest(HttpServletRequest request) {
+        String requestUri = request == null ? null : request.getRequestURI();
+        return StringUtils.endsWith(requestUri, THIRD_PARTY_SKILL_INSTALL_PATH)
+            || StringUtils.endsWith(requestUri, THIRD_PARTY_SKILL_INSTALL_PATH + "/");
     }
 
     /**

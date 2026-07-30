@@ -5,6 +5,7 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.sun.net.httpserver.HttpServer;
+import com.iwhalecloud.byai.common.constants.resource.OwnerType;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.common.login.bean.LoginInfo;
 import com.iwhalecloud.byai.manager.application.service.auth.AuthApplicationService;
@@ -702,6 +703,61 @@ class ByClawSkillResourceApplicationServiceTest {
         verify(ssResourceArtifactService).upsertArtifact(eq(7201L), eq("SKILL"),
             eq(ResourceArtifactTypeEnum.STANDARD_JSON.name()), eq("minio"), eq("skill/SKILL_7201.json"),
             eq("chat-upload-skill-json"));
+    }
+
+    @Test
+    void installThirdPartySkill_logsPermissionContextWhenManagePermissionIsDenied() {
+        SsResource digitalEmployee = new SsResource();
+        digitalEmployee.setResourceId(9001L);
+        digitalEmployee.setResourceCode("user001_main");
+        digitalEmployee.setResourceName("测试用户的超级助手");
+        digitalEmployee.setResourceBizType("DIG_EMPLOYEE");
+        digitalEmployee.setOwnerType(OwnerType.PERSONAL_DEFAULT);
+        digitalEmployee.setCreateBy(20002L);
+        digitalEmployee.setManUserId("20002");
+        digitalEmployee.setManOrgId(30003L);
+        digitalEmployee.setComAcctId(1L);
+        when(ssResourceService.findById(9001L)).thenReturn(digitalEmployee);
+        when(authApplicationService.hasResourceManagePermission(digitalEmployee)).thenReturn(false);
+
+        Logger serviceLogger = (Logger)LoggerFactory.getLogger(ByClawSkillResourceApplicationService.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        serviceLogger.addAppender(appender);
+        appender.start();
+
+        try {
+            assertThatThrownBy(() ->
+                service.installThirdPartySkill(9001L, "https://market.example/download?skillIds=123"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("digemployee.skill.install.no.manage.permission");
+
+            assertThat(appender.list).anySatisfy(event -> {
+                assertThat(event.getLevel()).isEqualTo(Level.INFO);
+                assertThat(event.getFormattedMessage()).contains(
+                    "第三方技能安装数字员工权限校验详情",
+                    "operationSource=SKILL_MARKET_INSTALL",
+                    "requestedDigitalEmployeeId=9001",
+                    "currentUserId=10001",
+                    "currentUserCode=user001",
+                    "defaultDigitalEmployeeId=9001",
+                    "creatorMatched=false",
+                    "personalDefaultOwnerTypeMatched=true",
+                    "defaultDigitalEmployeeMatched=true",
+                    "defaultSuperAssistantCodeMatched=true",
+                    "baseManagePermission=false",
+                    "platformAdmin=false",
+                    "organizationAdminRole=false",
+                    "businessAdmin=false",
+                    "superAdmin=false",
+                    "managePermission=false",
+                    "\"resourceName\":\"测试用户的超级助手\"",
+                    "\"createBy\":20002");
+            });
+        }
+        finally {
+            serviceLogger.detachAppender(appender);
+            appender.stop();
+        }
     }
 
     @Test
