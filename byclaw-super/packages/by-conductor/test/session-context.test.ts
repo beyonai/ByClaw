@@ -18,6 +18,13 @@ describe("SessionContextV1", () => {
     });
   });
 
+  it("accepts underscore-separated locale values from existing i18n clients", () => {
+    expect(createSessionContext({ locale: "en_US" })).toEqual({
+      schemaVersion: 1,
+      locale: "en-US",
+    });
+  });
+
   it("omits blank optional fields", () => {
     expect(createSessionContext({ locale: " ", timezone: "" })).toEqual({
       schemaVersion: 1,

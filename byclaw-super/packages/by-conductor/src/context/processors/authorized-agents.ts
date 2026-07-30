@@ -18,7 +18,9 @@ export class AuthorizedAgentsProcessor implements ContextProcessor {
   ): ContextBuildState {
     const section: SystemContextSection = {
       id: SECTION_ID,
-      content: renderAuthorizedAgents(input.authorizedAgents),
+      content: input.authorizedAgentsUnavailable
+        ? "因系统故障，当前暂时无法查询到可用的数字员工列表"
+        : renderAuthorizedAgents(input.authorizedAgents),
     };
     return {
       ...state,

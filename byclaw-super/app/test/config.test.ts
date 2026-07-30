@@ -4,8 +4,17 @@ import { APP_CONFIG_DEFAULTS } from "../config/config-defaults.js";
 import { loadConfig } from "../config/index.js";
 
 const required = {
+  REDIS_MODE: "standalone",
+  REDIS_HOST: "redis.internal",
+  REDIS_PORT: "6379",
+  REDIS_DATABASE: "0",
+  DB_HOST: "postgres.internal",
+  DB_PORT: "5432",
+  DB_DATABASE: "byclaw",
+  DB_SCHEMA: "byai",
   DB_USER: "byclaw",
   DB_PASS: "test-only",
+  DB_SSL: "false",
 };
 
 describe("应用配置", () => {
@@ -15,7 +24,7 @@ describe("应用配置", () => {
     expect(config.instanceId).toBe(
       `byclaw-super-${hostname()}-${process.pid}`,
     );
-    expect(config.database.host).toBe(APP_CONFIG_DEFAULTS.database.host);
+    expect(config.database.host).toBe("postgres.internal");
     expect(config.database.maxConnections).toBe(
       APP_CONFIG_DEFAULTS.database.maxConnections,
     );
@@ -46,6 +55,7 @@ describe("应用配置", () => {
       PI_PROVIDER: "openai",
       PI_MODEL: "gpt-test",
       OPENAI_BASE_URL: "https://model.example.test/v1",
+      ARK_BASE_URL: "https://ark.example.test/api/v3",
     });
 
     expect(config.database.host).toBe("postgres.internal");
@@ -54,12 +64,45 @@ describe("应用配置", () => {
     expect(config.piProvider).toBe("openai");
     expect(config.piModel).toBe("gpt-test");
     expect(config.openAiBaseUrl).toBe("https://model.example.test/v1");
+    expect(config.arkBaseUrl).toBe("https://ark.example.test/api/v3");
   });
 
-  it("没有数据库账号时启动配置失败", () => {
+  it("没有基础设施配置时启动配置失败", () => {
     expect(() =>
       loadConfig({}),
-    ).toThrow("DB_USER must not be empty");
+    ).toThrow("REDIS_MODE must not be empty");
+  });
+
+  it("缺少数据库或 Redis 连接定位时启动配置失败", () => {
+    expect(() =>
+      loadConfig({ ...required, DB_HOST: undefined }),
+    ).toThrow("DB_HOST must not be empty");
+    expect(() =>
+      loadConfig({ ...required, REDIS_HOST: undefined }),
+    ).toThrow("REDIS_HOST must not be empty");
+  });
+
+  it("集群 Redis 必须显式提供节点列表", () => {
+    expect(() =>
+      loadConfig({
+        ...required,
+        REDIS_MODE: "cluster",
+        REDIS_HOST: undefined,
+        REDIS_PORT: undefined,
+      }),
+    ).toThrow("REDIS_CLUSTER_HOST or REDIS_CLUSTER_NODES must be configured");
+
+    const config = loadConfig({
+      ...required,
+      REDIS_MODE: "cluster",
+      REDIS_HOST: undefined,
+      REDIS_PORT: undefined,
+      REDIS_CLUSTER_HOST: "redis-a.internal:6379,redis-b.internal:6380",
+    });
+    expect(config.redis.clusterNodes).toEqual([
+      { host: "redis-a.internal", port: 6379 },
+      { host: "redis-b.internal", port: 6380 },
+    ]);
   });
 
   it("解析三方员工直连灰度和安全配置", () => {

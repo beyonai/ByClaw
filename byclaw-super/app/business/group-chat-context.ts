@@ -7,6 +7,8 @@ import {
 import type { ByClawBeEndpointResolver } from "./endpoint-resolver.js";
 
 const GROUP_CHAT_CONTEXT_PATH = "/byaiService/internal/api/v1/group-chat/context";
+const LOCAL_GROUP_CHAT_CONTEXT_URL =
+  `http://127.0.0.1:8086${GROUP_CHAT_CONTEXT_PATH}`;
 
 type FetchLike = typeof globalThis.fetch;
 
@@ -44,16 +46,12 @@ export class ByClawBeGroupChatContextError extends Error {
 export class ByClawBeGroupChatContextProvider
   implements GroupChatContextProvider
 {
-  readonly #fallbackBaseUrl: URL;
   readonly #timeoutMs: number;
   readonly #fetch: FetchLike;
-  readonly #endpointResolver: ByClawBeEndpointResolver | undefined;
 
   constructor(options: ByClawBeGroupChatContextProviderOptions) {
-    this.#fallbackBaseUrl = normalizeBaseUrl(options.baseUrl);
     this.#timeoutMs = options.timeoutMs;
     this.#fetch = options.fetchImpl ?? globalThis.fetch;
-    this.#endpointResolver = options.endpointResolver;
   }
 
   async load(input: {
@@ -62,15 +60,9 @@ export class ByClawBeGroupChatContextProvider
     beyondToken: string;
     systemCode?: string;
   }): Promise<GroupChatContextV1> {
-    const discoveredBaseUrl = await this.#endpointResolver?.resolve();
-    const url = buildContextUrl(
-      discoveredBaseUrl
-        ? normalizeBaseUrl(discoveredBaseUrl)
-        : this.#fallbackBaseUrl,
-    );
     let response: Response;
     try {
-      response = await this.#fetch(`127.0.0.1:8086/byaiServoce/internal/api/v1/group-chat/context`, {
+      response = await this.#fetch(LOCAL_GROUP_CHAT_CONTEXT_URL, {
         method: "POST",
         headers: {
           "content-type": "application/json",
@@ -157,22 +149,4 @@ async function parseResponse(
       "ByClaw BE group chat returned invalid JSON",
     );
   }
-}
-
-function normalizeBaseUrl(value: string): URL {
-  const url = new URL(value);
-  url.pathname =
-    url.pathname === "/"
-      ? "/"
-      : `/${url.pathname.replace(/^\/+|\/+$/g, "")}`;
-  url.search = "";
-  url.hash = "";
-  return url;
-}
-
-function buildContextUrl(baseUrl: URL): URL {
-  const url = new URL(baseUrl);
-  const prefix = url.pathname === "/" ? "" : url.pathname.replace(/\/$/, "");
-  url.pathname = `${prefix}${GROUP_CHAT_CONTEXT_PATH}`;
-  return url;
 }

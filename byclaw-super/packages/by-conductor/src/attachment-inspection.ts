@@ -67,6 +67,18 @@ export interface AttachmentInspection {
 }
 
 /**
+ * downloadAttachment 落盘结果。`relativePath` 相对于当前 Pi Session 的工作目录，
+ * 不暴露宿主机绝对路径、下载 URL 或执行凭证。
+ */
+export interface MaterializedAttachment {
+  attachmentId: string;
+  name: string;
+  mediaType?: string;
+  byteSize: number;
+  relativePath: string;
+}
+
+/**
  * 传输无关的附件读取边界。首个实现为 app 层的 `ByAiAttachmentResolver`：
  * 用 Run 短期执行凭证调 BE，由 BE 按 fileId + 当前用户校验归属后返回有界内容，
  * 绝不信任客户端自报的 `url`。
@@ -80,4 +92,16 @@ export interface AttachmentResolver {
     mode: AttachmentInspectionMode;
     signal: AbortSignal;
   }): Promise<AttachmentInspection>;
+  /**
+   * 把附件原始字节下载到调用方提供的可信会话目录。可选以兼容仅支持 inspect
+   * 的 Resolver；工具参数不会向模型暴露 destinationDirectory。
+   */
+  materialize?(input: {
+    attachment: RunAttachment;
+    principal: CallerPrincipal;
+    /** Run 短期执行凭证（Beyond-Token）；仅本次调用内存可见。 */
+    credential: string;
+    destinationDirectory: string;
+    signal: AbortSignal;
+  }): Promise<MaterializedAttachment>;
 }

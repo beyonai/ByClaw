@@ -68,6 +68,8 @@ export interface GroupChatContextV1 {
 export interface RunIngressContextV1 {
   groupChat?: GroupChatContextV1;
   groupChatFingerprint?: string;
+  /** Agent 目录回源失败时保留的诊断；Run 仍可由 Leader 降级执行。 */
+  agentCatalogError?: string;
 }
 
 export function parseGroupChatRef(value: unknown): GroupChatRefV1 {
@@ -79,12 +81,12 @@ export function parseGroupChatRef(value: unknown): GroupChatRefV1 {
   }
   return {
     schemaVersion: GROUP_CHAT_REF_SCHEMA_VERSION,
-    conversationKey: boundedString(
+    conversationKey: boundedIdentifier(
       record.conversationKey,
       "groupChat.conversationKey",
       512,
     ),
-    beforeMessageId: boundedString(
+    beforeMessageId: boundedIdentifier(
       record.beforeMessageId,
       "groupChat.beforeMessageId",
       512,
@@ -99,7 +101,7 @@ export function parseGroupChatContext(value: unknown): GroupChatContextV1 {
       `group chat context schemaVersion must be ${GROUP_CHAT_CONTEXT_SCHEMA_VERSION}`,
     );
   }
-  const conversationKey = boundedString(
+  const conversationKey = boundedIdentifier(
     record.conversationKey,
     "group chat context conversationKey",
     512,
@@ -108,17 +110,17 @@ export function parseGroupChatContext(value: unknown): GroupChatContextV1 {
     record.snapshot,
     "group chat context snapshot",
   );
-  const beforeMessageId = boundedString(
+  const beforeMessageId = boundedIdentifier(
     snapshotRecord.beforeMessageId,
     "group chat context snapshot.beforeMessageId",
     512,
   );
   const snapshot = {
     beforeMessageId,
-    ...(snapshotRecord.lastIncludedMessageId === undefined
+    ...(snapshotRecord.lastIncludedMessageId == null
       ? {}
       : {
-          lastIncludedMessageId: boundedString(
+          lastIncludedMessageId: boundedIdentifier(
             snapshotRecord.lastIncludedMessageId,
             "group chat context snapshot.lastIncludedMessageId",
             512,
@@ -163,7 +165,7 @@ export function parseGroupChatContext(value: unknown): GroupChatContextV1 {
   );
   const reason = truncationRecord.reason;
   if (
-    reason !== undefined &&
+    reason != null &&
     reason !== "message_limit" &&
     reason !== "character_limit"
   ) {
@@ -233,7 +235,7 @@ function parseMessage(value: unknown, index: number): GroupChatMessageV1 {
         `group chat message ${index}.speaker.userCode`,
         256,
       ),
-      ...(speakerRecord.displayName === undefined
+      ...(speakerRecord.displayName == null
         ? {}
         : {
             displayName: boundedString(
@@ -261,14 +263,14 @@ function parseMessage(value: unknown, index: number): GroupChatMessageV1 {
     throw new Error(`group chat message ${index}.speaker.type is invalid`);
   }
 
-  const target = record.target === undefined
+  const target = record.target == null
     ? undefined
     : parseTarget(record.target, index);
-  const attachments = record.attachments === undefined
+  const attachments = record.attachments == null
     ? undefined
     : parseAttachments(record.attachments, index);
   return {
-    messageId: boundedString(
+    messageId: boundedIdentifier(
       record.messageId,
       `group chat message ${index}.messageId`,
       512,
@@ -309,7 +311,7 @@ function parseTarget(
       `group chat message ${index}.target.agentId`,
       256,
     ),
-    ...(record.agentName === undefined
+    ...(record.agentName == null
       ? {}
       : {
           agentName: boundedString(
@@ -346,7 +348,7 @@ function parseAttachments(
         `group chat message ${messageIndex}.attachments.${attachmentIndex}.fileName`,
         512,
       ),
-      ...(record.mediaType === undefined
+      ...(record.mediaType == null
         ? {}
         : {
             mediaType: boundedString(
@@ -398,6 +400,21 @@ function boundedString(
     throw new Error(`${name} must contain at most ${maxLength} characters`);
   }
   return normalized;
+}
+
+/** BE 的 Long ID 可能被 JSON 序列化为数字；安全整数统一规范化为字符串。 */
+function boundedIdentifier(
+  value: unknown,
+  name: string,
+  maxLength: number,
+): string {
+  if (typeof value === "number") {
+    if (!Number.isSafeInteger(value) || value < 0) {
+      throw new Error(`${name} must be a string or non-negative safe integer`);
+    }
+    return String(value);
+  }
+  return boundedString(value, name, maxLength);
 }
 
 function nonNegativeNumber(value: unknown, name: string): number {

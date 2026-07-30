@@ -148,8 +148,9 @@ export function toSafeAttachmentSummary(
 }
 
 /**
- * 生成给 Leader 看的附件摘要文本块：只含 `id`/`name`/`mediaType`/`size`，
- * 绝不写入 `url`/`path`/`datasetId`。无附件时返回空串。
+ * 生成附加到本轮 user message 的附件摘要文本块：只含
+ * `id`/`name`/`mediaType`/`size`，绝不写入 `url`/`path`/`datasetId`。
+ * 无附件时返回空串。
  */
 export function formatAttachmentSummary(
   attachments: readonly RunAttachment[],
@@ -170,6 +171,18 @@ export function formatAttachmentSummary(
     "委派时通过 attachmentIds 指定目标 Agent 需要接收的附件。",
     "</attachments>",
   ].join("\n");
+}
+
+/**
+ * 将安全附件摘要作为本轮输入数据附加到 user message。
+ * 附件属于用户本轮提供的内容，不进入 system prompt。
+ */
+export function formatUserMessageWithAttachments(
+  message: string,
+  attachments: readonly RunAttachment[],
+): string {
+  const attachmentSummary = formatAttachmentSummary(attachments);
+  return attachmentSummary ? `${message}\n\n${attachmentSummary}` : message;
 }
 
 /**

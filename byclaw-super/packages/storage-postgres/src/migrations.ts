@@ -69,7 +69,6 @@ CREATE TABLE ${POSTGRES_TABLE_PREFIX}delegations (
   external_ref jsonb NULL,
   connector_cursor text NULL,
   result jsonb NULL,
-  partial_output text NULL,
   error text NULL,
   version bigint NOT NULL DEFAULT 0,
   created_at timestamptz NOT NULL,
@@ -167,7 +166,7 @@ CREATE INDEX run_credentials_expiry_idx ON ${POSTGRES_TABLE_PREFIX}run_execution
     version: 2,
     name: "delegation_resume_partial_output",
     sql: `
-ALTER TABLE ${POSTGRES_TABLE_PREFIX}delegations ADD COLUMN IF NOT EXISTS partial_output text NULL;
+ALTER TABLE ${POSTGRES_TABLE_PREFIX}delegations ADD COLUMN partial_output text NULL;
 `,
   },
   {
@@ -188,7 +187,7 @@ CREATE INDEX run_credentials_expiry_idx ON ${POSTGRES_TABLE_PREFIX}run_execution
     version: 4,
     name: "delegation_agent_name",
     sql: `
-ALTER TABLE ${POSTGRES_TABLE_PREFIX}delegations ADD COLUMN IF NOT EXISTS agent_name text NULL;
+ALTER TABLE ${POSTGRES_TABLE_PREFIX}delegations ADD COLUMN agent_name text NULL;
 `,
   },
   {
@@ -196,7 +195,7 @@ ALTER TABLE ${POSTGRES_TABLE_PREFIX}delegations ADD COLUMN IF NOT EXISTS agent_n
     name: "run_thinking_level",
     sql: `
 ALTER TABLE ${POSTGRES_TABLE_PREFIX}runs
-  ADD COLUMN IF NOT EXISTS thinking_level text NOT NULL DEFAULT 'off';
+  ADD COLUMN thinking_level text NOT NULL DEFAULT 'off';
 ALTER TABLE ${POSTGRES_TABLE_PREFIX}runs
   ADD CONSTRAINT runs_thinking_level_check
   CHECK (thinking_level IN ('off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'));
@@ -219,10 +218,10 @@ CREATE INDEX runs_claim_idx ON ${POSTGRES_TABLE_PREFIX}runs(status, created_at)
     name: "session_business_context",
     sql: `
 ALTER TABLE ${POSTGRES_TABLE_PREFIX}sessions
-  ADD COLUMN IF NOT EXISTS session_context jsonb NOT NULL
+  ADD COLUMN session_context jsonb NOT NULL
     DEFAULT '{"schemaVersion":1}'::jsonb;
 ALTER TABLE ${POSTGRES_TABLE_PREFIX}sessions
-  ADD COLUMN IF NOT EXISTS session_context_version bigint NOT NULL DEFAULT 1;
+  ADD COLUMN session_context_version bigint NOT NULL DEFAULT 1;
 ALTER TABLE ${POSTGRES_TABLE_PREFIX}sessions
   ADD CONSTRAINT sessions_context_version_positive
   CHECK (session_context_version > 0);
@@ -233,7 +232,7 @@ ALTER TABLE ${POSTGRES_TABLE_PREFIX}sessions
     name: "run_attachments",
     sql: `
 ALTER TABLE ${POSTGRES_TABLE_PREFIX}runs
-  ADD COLUMN IF NOT EXISTS attachments jsonb NOT NULL DEFAULT '[]'::jsonb;
+  ADD COLUMN attachments jsonb NOT NULL DEFAULT '[]'::jsonb;
 `,
   },
   {
@@ -241,7 +240,7 @@ ALTER TABLE ${POSTGRES_TABLE_PREFIX}runs
     name: "run_ingress_context",
     sql: `
 ALTER TABLE ${POSTGRES_TABLE_PREFIX}runs
-  ADD COLUMN IF NOT EXISTS ingress_context jsonb NULL;
+  ADD COLUMN ingress_context jsonb NULL;
 `,
   },
 ] as const;

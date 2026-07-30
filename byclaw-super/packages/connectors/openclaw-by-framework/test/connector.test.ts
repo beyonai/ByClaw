@@ -153,6 +153,41 @@ describe("OpenClawByFrameworkConnector", () => {
     ]);
   });
 
+  it("dispatches to the worker selected by the agent catalog", async () => {
+    const sendMessage = vi.fn(async () => ({
+      success: true,
+      message_id: "message-1",
+      trace_id: "trace-1",
+      target_worker_id: "worker-1",
+      timestamp: Date.now(),
+      status: "QUEUED",
+    }));
+    const redis = {
+      xread: vi.fn(),
+      ping: vi.fn(async () => "PONG"),
+      quit: vi.fn(async () => "OK"),
+      status: "ready",
+    };
+    const connector = new OpenClawByFrameworkConnector({
+      redis: redis as never,
+      gatewayClient: {
+        sendMessage,
+        cancelTask: vi.fn(),
+      },
+    });
+    const input = request();
+    input.agent.execution.targetAgentType = "BYCLAW_QA";
+
+    await connector.start(input, { signal: new AbortController().signal });
+
+    expect(sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        targetAgentType: "BYCLAW_QA",
+        extraPayload: expect.objectContaining({ agent_id: "1001" }),
+      }),
+    );
+  });
+
   it("uses by-framework finalAnswer when the worker emitted no answerDelta", async () => {
     const redis = {
       xread: vi

@@ -48,26 +48,13 @@ describe("ByClawSuperGatewayWorker", () => {
     expect(JSON.stringify(logger.info.mock.calls)).not.toContain("请分析数据");
     expect(logger.info).toHaveBeenCalledWith(
       expect.objectContaining({
-        diagnostic: "stream_timing",
-        stage: "by_framework_emit_completed",
+        userCode: "user-1",
+        sessionId: "session-1",
         runId: "run-1",
-        eventType: "leader.delta",
-        outputType: "answer_delta",
-        characters: 2,
+        status: "completed",
+        finalAnswer: "最终答案",
       }),
-      "[stream_timing] by-framework 流事件发送完成",
-    );
-    expect(logger.info).toHaveBeenCalledWith(
-      expect.objectContaining({
-        diagnostic: "stream_timing",
-        stage: "stream_summary",
-        runId: "run-1",
-        terminalStatus: "completed",
-        eventCount: 5,
-        visibleDeltaCount: 2,
-        visibleCharacterCount: 4,
-      }),
-      "[stream_timing] by-framework 流式转发结束",
+      "Run 结束",
     );
   });
 
@@ -402,6 +389,32 @@ describe("ByClawSuperGatewayWorker", () => {
     );
   });
 
+  it("persists frontend language and timezone when creating a Session", async () => {
+    const createSessionRun = vi.fn(async () => run());
+    const worker = createWorker({
+      createSessionRun,
+      cancelRun: vi.fn(),
+      streamEvents: () => completedEvents(),
+    });
+
+    await worker.processCommand(
+      askCommand("secret-token", undefined, undefined, {
+        language: "en_US",
+        timezone: "America/New_York",
+      }),
+      contextMock(),
+    );
+
+    expect(createSessionRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        context: {
+          locale: "en_US",
+          timezone: "America/New_York",
+        },
+      }),
+    );
+  });
+
   it("passes a validated group chat reference to ingress", async () => {
     const createSessionRun = vi.fn(async () => run());
     const worker = createWorker({
@@ -511,9 +524,10 @@ function askCommand(
   token = "secret-token",
   thinkingLevel?: unknown,
   groupChat?: unknown,
+  environment?: { language?: string; timezone?: string },
 ): AskAgentCommand {
   return new AskAgentCommand(
-    header(token),
+    header(token, environment),
     [{ role: "user", content: { text: "请分析数据" } }],
     true,
     {
@@ -524,13 +538,18 @@ function askCommand(
 }
 
 /** 构造测试命令共用的 by-framework 消息头。 */
-function header(token = "secret-token"): MessageHeader {
+function header(
+  token = "secret-token",
+  environment?: { language?: string; timezone?: string },
+): MessageHeader {
   return new MessageHeader("message-1", "session-1", "trace-1", {
     sourceAgentType: "BY_PARENT",
     targetAgentType: "BY_SUPER",
     metadata: {
       "Beyond-Token": token,
       "System-Code": "system-1",
+      ...(environment?.language ? { language: environment.language } : {}),
+      ...(environment?.timezone ? { timezone: environment.timezone } : {}),
     },
   });
 }

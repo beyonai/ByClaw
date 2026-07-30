@@ -23,8 +23,10 @@ import {
 } from "../auth/beyond-token.js";
 import type { AuthorizedAgentCatalog } from "../business/agent-catalog.js";
 import type { GroupChatContextProvider } from "../business/group-chat-context.js";
+import { truncateForLog } from "../log-format.js";
 
 interface RunIngressLogger {
+  info(bindings: Record<string, unknown>, message: string): void;
   warn(bindings: Record<string, unknown>, message: string): void;
 }
 
@@ -83,13 +85,17 @@ export class RunIngressService {
     const principal = authenticated.principal;
     const attachments = input.attachments ?? [];
     const message = resolveRunMessage(input.message, attachments);
+    const catalog = await this.listAgentsForRun(input);
     const agentList = this.excludeSelf(
-      await this.listAgents(input),
+      catalog.agents,
       input.sourceAgentId,
       principal.userCode,
     );
-    const ingressContext = await this.loadIngressContext(input);
-    return this.runService.createSessionRun({
+    const ingressContext = this.mergeIngressContext(
+      await this.loadIngressContext(input),
+      catalog.error,
+    );
+    const run = await this.runService.createSessionRun({
       owner: principal,
       ...(input.context ? { context: input.context } : {}),
       message,
@@ -104,6 +110,15 @@ export class RunIngressService {
         expiresAt: authenticated.credentialExpiresAt,
       },
     });
+    this.logRunReceived(
+      principal,
+      run.sessionId,
+      run.id,
+      message,
+      agentList.length,
+      attachments.length,
+    );
+    return run;
   }
 
   /** 校验 Session owner 后，在同一 Session/Pi 上下文中追加一个 Run。 */
@@ -113,13 +128,17 @@ export class RunIngressService {
     await this.requireOwnedSession(input.sessionId, principal);
     const attachments = input.attachments ?? [];
     const message = resolveRunMessage(input.message, attachments);
+    const catalog = await this.listAgentsForRun(input);
     const agentList = this.excludeSelf(
-      await this.listAgents(input),
+      catalog.agents,
       input.sourceAgentId,
       principal.userCode,
     );
-    const ingressContext = await this.loadIngressContext(input);
-    return this.runService.createRun({
+    const ingressContext = this.mergeIngressContext(
+      await this.loadIngressContext(input),
+      catalog.error,
+    );
+    const run = await this.runService.createRun({
       sessionId: input.sessionId,
       message,
       attachments,
@@ -132,6 +151,15 @@ export class RunIngressService {
         expiresAt: authenticated.credentialExpiresAt,
       },
     });
+    this.logRunReceived(
+      principal,
+      run.sessionId,
+      run.id,
+      message,
+      agentList.length,
+      attachments.length,
+    );
+    return run;
   }
 
   /** 验证凭证并构建 Worker binding 和 HTTP 授权共用的调用者身份。 */
@@ -234,6 +262,29 @@ export class RunIngressService {
     );
   }
 
+  /** 记录一次 Run 入站请求，便于在日志中追踪“谁、发了什么、会话维度”。不记录 Token 与凭证。 */
+  private logRunReceived(
+    principal: CallerPrincipal,
+    sessionId: string,
+    runId: string,
+    message: string,
+    agentCount: number,
+    attachments: number,
+  ): void {
+    this.logger?.info(
+      {
+        userCode: principal.userCode,
+        ...(principal.userName ? { userName: principal.userName } : {}),
+        sessionId,
+        runId,
+        message: truncateForLog(message, 200),
+        agentCount,
+        attachments,
+      },
+      "收到 Run 请求",
+    );
+  }
+
   /** 校验当前调用者是否拥有 Session；不存在和越权统一抛出 ResourceNotFoundError。 */
   async authorizeSession(
     sessionId: string,
@@ -311,6 +362,41 @@ export class RunIngressService {
       beyondToken: input.beyondToken,
       ...(input.systemCode ? { systemCode: input.systemCode } : {}),
     });
+  }
+
+  /**
+   * Agent 目录是 Run 的可选增强：回源失败时用空授权快照继续，
+   * 由 Leader 直接回答，同时把错误保留为用户可见提示。
+   */
+  private async listAgentsForRun(
+    input: AuthenticatedIngressRequest,
+  ): Promise<{ agents: AgentProfile[]; error?: string }> {
+    try {
+      return { agents: await this.listAgents(input) };
+    } catch (error) {
+      const normalized = error instanceof Error ? error : new Error(String(error));
+      this.logger?.warn(
+        {
+          errorName: normalized.name,
+          errorMessage: normalized.message,
+        },
+        "数字员工列表不可用，本次由超级助手直接处理",
+      );
+      return { agents: [], error: normalized.message };
+    }
+  }
+
+  private mergeIngressContext(
+    context: Awaited<ReturnType<RunIngressService["loadIngressContext"]>>,
+    agentCatalogError: string | undefined,
+  ) {
+    if (!context && !agentCatalogError) {
+      return undefined;
+    }
+    return {
+      ...(context ?? {}),
+      ...(agentCatalogError ? { agentCatalogError } : {}),
+    };
   }
 
   /**

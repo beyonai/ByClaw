@@ -1,4 +1,4 @@
-import { mkdtemp, readdir } from "node:fs/promises";
+import { mkdtemp, readFile, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -105,7 +105,9 @@ describe("ByAiAttachmentResolver", () => {
     expect(result.text).toBe("hello attachment");
     expect(result.truncated).toBe(false);
     const [url, init] = (fetchImpl as ReturnType<typeof vi.fn>).mock.calls[0]!;
-    expect(String(url)).toBe("http://127.0.0.1:8086/commonFile/download?fileId=12345");
+    expect(String(url)).toBe(
+      "http://127.0.0.1:8086/byaiService/commonFile/download?fileId=12345",
+    );
     expect((init as RequestInit).headers).toMatchObject({
       "Beyond-Token": "run-scoped-token",
     });
@@ -149,6 +151,36 @@ describe("ByAiAttachmentResolver", () => {
     expect(result.structure).toContain("2 列");
     expect(result.structure).toContain("2 行数据");
     expect(result.structure).toContain("name | age");
+  });
+
+  it("materialize 下载原始二进制到会话目录并返回安全相对路径", async () => {
+    const bytes = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x00, 0xff]);
+    const fetchImpl = vi.fn(async () => streamResponse([bytes]));
+    const resolver = resolverOf(fetchImpl as unknown as typeof fetch);
+    const destinationDirectory = join(tempRoot, "session");
+
+    const result = await resolver.materialize({
+      attachment: attachmentOf({
+        name: "../../report.pdf",
+        mediaType: "application/pdf",
+      }),
+      principal: PRINCIPAL,
+      credential: "run-scoped-token",
+      destinationDirectory,
+      signal: new AbortController().signal,
+    });
+
+    expect(result).toEqual({
+      attachmentId: "12345",
+      name: "../../report.pdf",
+      mediaType: "application/pdf",
+      byteSize: bytes.byteLength,
+      relativePath: "attachments/12345/report.pdf",
+    });
+    expect(
+      new Uint8Array(await readFile(join(destinationDirectory, result.relativePath))),
+    ).toEqual(bytes);
+    expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
   it("非数字 attachment id 无法经 BE 解析，返回明确失败", async () => {
@@ -302,7 +334,7 @@ describe("ByAiAttachmentResolver", () => {
     await resolver.inspect(inspectInput());
     const [url] = (fetchImpl as ReturnType<typeof vi.fn>).mock.calls[0]!;
     expect(String(url)).toBe(
-      "http://byclaw-be.svc:9000/prefix/commonFile/download?fileId=12345",
+      "http://byclaw-be.svc:9000/prefix/byaiService/commonFile/download?fileId=12345",
     );
   });
 

@@ -46,6 +46,7 @@ export interface AppConfig {
   piProvider?: string;
   piModel?: string;
   openAiBaseUrl?: string;
+  arkBaseUrl?: string;
 }
 
 /** by-framework 入站 Worker 的业务层配置。 */
@@ -80,22 +81,20 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   if ((env.PI_PROVIDER && !env.PI_MODEL) || (!env.PI_PROVIDER && env.PI_MODEL)) {
     throw new Error("PI_PROVIDER and PI_MODEL must be configured together");
   }
+  const redisMode = redisConnectionMode(requiredEnv(env, "REDIS_MODE"));
   const redis: RedisConnectionConfig = {
-    host: env.REDIS_HOST ?? defaults.redis.host,
-    port: integer(
-      env.REDIS_PORT ?? String(defaults.redis.port),
-      "REDIS_PORT",
-      1,
-      65_535,
-    ),
-    db: integer(
-      env.REDIS_DATABASE ??
-        env.REDIS_DB ??
-        String(defaults.redis.database),
-      "REDIS_DATABASE",
-      0,
-      15,
-    ),
+    mode: redisMode,
+    ...(redisMode === "standalone"
+      ? {
+          host: requiredEnv(env, "REDIS_HOST"),
+          port: integer(requiredEnv(env, "REDIS_PORT"), "REDIS_PORT", 1, 65_535),
+        }
+      : {
+          clusterNodes: redisClusterNodes(
+            requiredEnvEither(env, ["REDIS_CLUSTER_HOST", "REDIS_CLUSTER_NODES"]),
+          ),
+        }),
+    db: integer(requiredEnv(env, "REDIS_DATABASE"), "REDIS_DATABASE", 0, 15),
     ...(env.REDIS_USERNAME ? { username: env.REDIS_USERNAME } : {}),
     ...(env.REDIS_PASSWORD ? { password: env.REDIS_PASSWORD } : {}),
   };
@@ -202,23 +201,17 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       ),
     },
     database: {
-      host: nonEmpty(env.DB_HOST ?? defaults.database.host, "DB_HOST"),
+      host: requiredEnv(env, "DB_HOST"),
       port: integer(
-        env.DB_PORT ?? String(defaults.database.port),
+        requiredEnv(env, "DB_PORT"),
         "DB_PORT",
         1,
         65_535,
       ),
-      database: nonEmpty(
-        env.DB_DATABASE ?? defaults.database.database,
-        "DB_DATABASE",
-      ),
-      schema: nonEmpty(
-        env.DB_SCHEMA ?? defaults.database.schema,
-        "DB_SCHEMA",
-      ),
-      user: nonEmpty(env.DB_USER ?? "", "DB_USER"),
-      password: nonEmpty(env.DB_PASS ?? "", "DB_PASS"),
+      database: requiredEnv(env, "DB_DATABASE"),
+      schema: requiredEnv(env, "DB_SCHEMA"),
+      user: requiredEnv(env, "DB_USER"),
+      password: requiredEnv(env, "DB_PASS"),
       maxConnections: integer(
         env.DB_POOL_MAX ?? String(defaults.database.maxConnections),
         "DB_POOL_MAX",
@@ -246,7 +239,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
         3_600_000,
       ),
       ssl: booleanValue(
-        env.DB_SSL ?? String(defaults.database.ssl),
+        requiredEnv(env, "DB_SSL"),
         "DB_SSL",
       ),
       eventListenEnabled: booleanValue(
@@ -339,6 +332,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       env.OPENAI_BASE_URL ?? defaults.pi.openAiBaseUrl,
       "OPENAI_BASE_URL",
     ),
+    arkBaseUrl: nonEmpty(
+      env.ARK_BASE_URL ?? defaults.pi.arkBaseUrl,
+      "ARK_BASE_URL",
+    ),
   };
 }
 
@@ -361,6 +358,55 @@ function nonEmpty(raw: string, name: string): string {
     throw new Error(`${name} must not be empty`);
   }
   return value;
+}
+
+function requiredEnv(env: NodeJS.ProcessEnv, name: string): string {
+  return nonEmpty(env[name] ?? "", name);
+}
+
+function requiredEnvEither(
+  env: NodeJS.ProcessEnv,
+  names: readonly string[],
+): string {
+  for (const name of names) {
+    const value = env[name]?.trim();
+    if (value) {
+      return value;
+    }
+  }
+  throw new Error(`${names.join(" or ")} must be configured`);
+}
+
+function redisConnectionMode(raw: string): "standalone" | "cluster" {
+  const value = raw.trim().toLowerCase();
+  if (value === "standalone" || value === "cluster") {
+    return value;
+  }
+  throw new Error(
+    `REDIS_MODE must be standalone or cluster, received: ${raw}`,
+  );
+}
+
+function redisClusterNodes(
+  raw: string,
+): Array<{ host: string; port: number }> {
+  return raw.split(",").map((entry) => {
+    const value = entry.trim();
+    const separator = value.lastIndexOf(":");
+    if (separator <= 0) {
+      throw new Error(
+        `Redis cluster node must use host:port format, received: ${value}`,
+      );
+    }
+    const host = nonEmpty(value.slice(0, separator), "Redis cluster node host");
+    const port = integer(
+      value.slice(separator + 1),
+      "Redis cluster node port",
+      1,
+      65_535,
+    );
+    return { host, port };
+  });
 }
 
 /** 解析带上下界的整数环境变量，并在启动阶段给出明确错误。 */

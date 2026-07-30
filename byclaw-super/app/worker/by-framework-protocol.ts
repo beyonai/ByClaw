@@ -9,6 +9,7 @@ import {
   type CallerPrincipal,
   type RunAttachment,
   type RunEvent,
+  type SessionContextInput,
   type ThinkingLevel,
 } from "@byclaw/by-conductor";
 import {
@@ -136,6 +137,30 @@ export function commandString(
     recordString(command.header.metadata, key) ||
     recordString(command.extraPayload ?? {}, key)
   );
+}
+
+/**
+ * 从 by-framework metadata/extraPayload 读取前端环境信息。
+ * `language` 兼容既有 i18n 头，`locale` 为规范字段；时区必须由调用端显式传递，
+ * 避免根据语言猜测用户所在地区。
+ */
+export function commandSessionContext(command: {
+  header: { metadata: Readonly<Record<string, unknown>> };
+  extraPayload?: Readonly<Record<string, unknown>>;
+}): SessionContextInput | undefined {
+  const locale =
+    commandString(command, "locale") || commandString(command, "language");
+  const timezone =
+    commandString(command, "timezone") ||
+    commandString(command, "time-zone") ||
+    commandString(command, "time_zone");
+  if (!locale && !timezone) {
+    return undefined;
+  }
+  return {
+    ...(locale ? { locale } : {}),
+    ...(timezone ? { timezone } : {}),
+  };
 }
 
 /** 思考等级属于调用业务参数，只从 AskAgent extraPayload 读取。 */
@@ -285,17 +310,6 @@ export function protocolMessage(input: {
 /** 从 RunEvent JSON 字段中安全读取字符串。 */
 export function stringData(value: unknown): string {
   return typeof value === "string" ? value : "";
-}
-
-/** 统计会实际展示给前端的事件字符数，避免诊断日志包含正文。 */
-export function visibleEventCharacters(event: RunEvent): number {
-  if (event.type === "leader.delta" || event.type === "delegation.output.delta") {
-    return stringData(event.data.text).length;
-  }
-  if (event.type === "delegation.progress") {
-    return stringData(event.data.message).length;
-  }
-  return 0;
 }
 
 /** 生成同一主机内稳定且便于定位的默认 Worker 实例 ID。 */

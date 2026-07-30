@@ -81,6 +81,41 @@ function makeIngress(
 }
 
 describe("RunIngressService self-exclusion", () => {
+  it("continues with an empty agent list and exposes the catalog error when discover fails", async () => {
+    const runService = fakeRunService();
+    const verify: BeyondTokenVerifier = async () => ({ userCode: "creator" });
+    const warn = vi.fn();
+    const ingress = new RunIngressService(
+      runService.impl,
+      verify,
+      {
+        listAuthorizedAgents: async () => {
+          throw new Error("ByClaw BE discover request failed: fetch failed");
+        },
+      },
+      7_200_000,
+      undefined,
+      { info: vi.fn(), warn },
+    );
+
+    const run = await ingress.createSessionRun({
+      beyondToken: PRINCIPAL_TOKEN,
+      message: "hi",
+    });
+
+    expect(run).toBeDefined();
+    expect(runService.createSessionRun.mock.calls[0][0].agentList).toEqual([]);
+    expect(runService.createSessionRun.mock.calls[0][0].ingressContext).toEqual({
+      agentCatalogError: "ByClaw BE discover request failed: fetch failed",
+    });
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        errorMessage: "ByClaw BE discover request failed: fetch failed",
+      }),
+      "数字员工列表不可用，本次由超级助手直接处理",
+    );
+  });
+
   it("HTTP path: falls back to {userCode}_main when sourceAgentId is absent", async () => {
     const { ingress, runService } = makeIngress(
       [agent("self", "creator_main"), agent("finance", "finance")],
@@ -232,7 +267,7 @@ describe("RunIngressService group chat snapshot", () => {
       catalog([agent("agent-a")]),
       7_200_000,
       { load },
-      { warn },
+      { info: vi.fn(), warn },
     );
 
     const run = await ingress.createSessionRun({

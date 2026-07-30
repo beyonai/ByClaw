@@ -1878,8 +1878,15 @@ function readIngressContext(raw: unknown): RunIngressContextV1 | undefined {
     throw new Error("Invalid persisted Run ingress context");
   }
   const record = raw as Record<string, unknown>;
+  const agentCatalogError =
+    typeof record.agentCatalogError === "string" && record.agentCatalogError.trim()
+      ? record.agentCatalogError.trim()
+      : undefined;
+  if (record.agentCatalogError !== undefined && !agentCatalogError) {
+    throw new Error("Invalid persisted Run agent catalog error");
+  }
   if (record.groupChat === undefined) {
-    return undefined;
+    return agentCatalogError ? { agentCatalogError } : undefined;
   }
   const groupChat = parseGroupChatContext(record.groupChat);
   const fingerprint = fingerprintGroupChatContext(groupChat);
@@ -1892,6 +1899,7 @@ function readIngressContext(raw: unknown): RunIngressContextV1 | undefined {
   return {
     groupChat,
     groupChatFingerprint: fingerprint,
+    ...(agentCatalogError ? { agentCatalogError } : {}),
   };
 }
 

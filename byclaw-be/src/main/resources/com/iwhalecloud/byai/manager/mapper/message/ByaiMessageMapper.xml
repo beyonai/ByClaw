@@ -202,7 +202,6 @@
           AND archived_at IS NULL
           AND "usage" IN (1, 2)
           AND message_content IS NOT NULL
-          AND message_content &lt;&gt; ''
         ORDER BY create_time DESC, message_id DESC
         LIMIT #{limit}
     </select>
@@ -215,7 +214,6 @@
           AND archived_at IS NULL
           AND "usage" IN (1, 2)
           AND message_content IS NOT NULL
-          AND message_content &lt;&gt; ''
     </select>
 
 

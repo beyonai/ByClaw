@@ -110,6 +110,7 @@ function buildPiRuntimeConfig(config: AppConfig, database: PostgresDatabase): Pi
     ...(config.piProvider ? { provider: config.piProvider } : {}),
     ...(config.piModel ? { model: config.piModel } : {}),
     ...(config.openAiBaseUrl ? { openAiBaseUrl: config.openAiBaseUrl } : {}),
+    ...(config.arkBaseUrl ? { arkBaseUrl: config.arkBaseUrl } : {}),
     checkpointStore: database.checkpoints,
     instanceId: config.instanceId,
     ...(config.piSessionCacheDirectory
@@ -185,10 +186,16 @@ async function collectReadiness(input: {
  * 具体 Connector 在这里注入，因此 by-conductor 不依赖任何传输实现。
  */
 export async function createApplication(config = loadConfig()): Promise<Application> {
+  let ingressInfoSink:
+    | ((bindings: Record<string, unknown>, message: string) => void)
+    | undefined;
   let ingressWarningSink:
     | ((bindings: Record<string, unknown>, message: string) => void)
     | undefined;
   const ingressLogger = {
+    info(bindings: Record<string, unknown>, message: string) {
+      ingressInfoSink?.(bindings, message);
+    },
     warn(bindings: Record<string, unknown>, message: string) {
       ingressWarningSink?.(bindings, message);
     },
@@ -378,6 +385,7 @@ export async function createApplication(config = loadConfig()): Promise<Applicat
         },
       }),
   });
+  ingressInfoSink = (bindings, message) => app.log.info(bindings, message);
   ingressWarningSink = (bindings, message) => app.log.warn(bindings, message);
 
   // 6) by-framework 入站 Worker：业务入口，由 Composition Root 按需注册。

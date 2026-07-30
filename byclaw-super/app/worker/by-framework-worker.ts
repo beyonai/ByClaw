@@ -1,4 +1,5 @@
 import {
+  type CallerPrincipal,
   type IngressSessionBindingRepository,
   type RunEvent,
   type RunService,
@@ -24,6 +25,7 @@ import {
   closeReasoning,
   commandGroupChatRef,
   commandLogFields,
+  commandSessionContext,
   commandSourceAgentId,
   commandString,
   commandThinkingLevel,
@@ -39,8 +41,8 @@ import {
   recordValue,
   stringData,
   toError,
-  visibleEventCharacters,
 } from "./by-framework-protocol.js";
+import { truncateForLog } from "../log-format.js";
 
 type RedisClient = ReturnType<typeof createRedis>;
 type WorkerRunService = Pick<
@@ -163,6 +165,7 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
     const systemCode = commandString(command, "System-Code");
     const thinkingLevel = commandThinkingLevel(command);
     const groupChatRef = commandGroupChatRef(command);
+    const sessionContext = commandSessionContext(command);
 
     await context.checkCancelled();
     this.#logger?.info(commandLogFields(command), "开始处理 by-framework 入站任务");
@@ -193,6 +196,7 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
       : await this.#runIngress.createSessionRun({
           message,
           thinkingLevel,
+          ...(sessionContext ? { context: sessionContext } : {}),
           ...(attachments.length > 0 ? { attachments } : {}),
           ...(sourceAgentId ? { sourceAgentId } : {}),
           ...(groupChatRef ? { groupChatRef } : {}),
@@ -220,7 +224,7 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
         await this.#runService.cancelRun(run.id, "by-framework task cancelled");
         await context.checkCancelled();
       }
-      return await this.#forwardRunEvents(run.id, context);
+      return await this.#forwardRunEvents(run, principal, context);
     } finally {
       this.#activeRuns.delete(command.header.messageId);
     }
@@ -246,45 +250,19 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
     await this.#runService.cancelRun(runId, command.reason || "by-framework task cancelled");
   }
 
-  /** 订阅内部事件流，并只输出简化进度与 Leader 最终回答。 */
-  async #forwardRunEvents(runId: string, context: AgentContext): Promise<AgentTaskResult> {
+  /** 订阅内部事件流，并只输出简化进度与 Leader 最终回答；终态时记录一条业务返回日志。 */
+  async #forwardRunEvents(
+    run: { id: string; sessionId: string; createdAt: number },
+    principal: CallerPrincipal,
+    context: AgentContext,
+  ): Promise<AgentTaskResult> {
     let reasoningStarted = false;
     let reasoningEnded = false;
     let answer = "";
-    const streamStartedAt = Date.now();
-    let previousEventHandledAt = streamStartedAt;
-    let eventCount = 0;
-    let visibleDeltaCount = 0;
-    let visibleCharacterCount = 0;
-    let firstVisibleEventMs: number | undefined;
 
-    for await (const event of this.#runService.streamEvents(runId)) {
-      const eventArrivedAt = Date.now();
-      const visibleCharacters = visibleEventCharacters(event);
-      eventCount += 1;
-      if (visibleCharacters > 0) {
-        visibleDeltaCount += 1;
-        visibleCharacterCount += visibleCharacters;
-        firstVisibleEventMs ??= eventArrivedAt - streamStartedAt;
-      }
-      this.#logger?.info(
-        {
-          diagnostic: "stream_timing",
-          stage: "internal_event_received",
-          runId,
-          eventId: event.eventId,
-          eventType: event.type,
-          eventCount,
-          visibleCharacters,
-          streamElapsedMs: eventArrivedAt - streamStartedAt,
-          waitForNextEventMs: eventArrivedAt - previousEventHandledAt,
-          persistedEventAgeMs: Math.max(0, eventArrivedAt - event.timestamp),
-        },
-        "[stream_timing] 收到内部流事件",
-      );
-
+    for await (const event of this.#runService.streamEvents(run.id)) {
       if (context.isCancelRequested()) {
-        await this.#runService.cancelRun(runId, "by-framework task cancelled");
+        await this.#runService.cancelRun(run.id, "by-framework task cancelled");
         await context.checkCancelled();
       }
 
@@ -292,9 +270,7 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
         isDelegationReasoningEvent(event) &&
         (!reasoningStarted || reasoningEnded)
       ) {
-        await this.#emitWithTiming(event, "reasoning_start", 0, () =>
-          context.emitState("", EventType.REASONING_LOG_START),
-        );
+        await context.emitState("", EventType.REASONING_LOG_START);
         reasoningStarted = true;
         reasoningEnded = false;
       }
@@ -304,30 +280,22 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
       const progress = progressMessage(event);
       if (progress) {
         if (!reasoningStarted || reasoningEnded) {
-          await this.#emitWithTiming(event, "reasoning_start", 0, () =>
-            context.emitState("", EventType.REASONING_LOG_START),
-          );
+          await context.emitState("", EventType.REASONING_LOG_START);
           reasoningStarted = true;
           reasoningEnded = false;
         }
-        await this.#emitWithTiming(event, "reasoning_delta", progress.length, () =>
-          context.emitState(progress, EventType.REASONING_LOG_DELTA),
-        );
+        await context.emitState(progress, EventType.REASONING_LOG_DELTA);
       }
 
       if (event.type === "leader.delta") {
         if (reasoningStarted && !reasoningEnded) {
-          await this.#emitWithTiming(event, "reasoning_end", 0, () =>
-            context.emitState("", EventType.REASONING_LOG_END),
-          );
+          await context.emitState("", EventType.REASONING_LOG_END);
           reasoningEnded = true;
         }
         const delta = stringData(event.data.text);
         if (delta) {
           answer += delta;
-          await this.#emitWithTiming(event, "answer_delta", delta.length, () =>
-            context.emitChunk(delta, EventType.ANSWER_DELTA),
-          );
+          await context.emitChunk(delta, EventType.ANSWER_DELTA);
         }
       }
 
@@ -335,134 +303,65 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
         const finalAnswer = stringData(event.data.finalAnswer);
         if (!answer && finalAnswer) {
           answer = finalAnswer;
-          await this.#emitWithTiming(
-            event,
-            "answer_delta_fallback",
-            finalAnswer.length,
-            () => context.emitChunk(finalAnswer, EventType.ANSWER_DELTA),
-          );
+          await context.emitChunk(finalAnswer, EventType.ANSWER_DELTA);
         }
         await closeReasoning(context, reasoningStarted, reasoningEnded);
-        this.#logStreamSummary({
-          runId,
-          terminalStatus: "completed",
-          streamStartedAt,
-          eventCount,
-          visibleDeltaCount,
-          visibleCharacterCount,
-          firstVisibleEventMs,
-        });
+        this.#logRunFinished(principal, run, "completed", run.createdAt, finalAnswer);
         return new AgentTaskResult({
           status: AgentState.COMPLETED,
           content: answer || finalAnswer,
-          replyData: { runId },
+          replyData: { runId: run.id },
         });
       }
 
       if (event.type === "run.cancelled") {
         await closeReasoning(context, reasoningStarted, reasoningEnded);
         await context.checkCancelled();
-        this.#logStreamSummary({
-          runId,
-          terminalStatus: "cancelled",
-          streamStartedAt,
-          eventCount,
-          visibleDeltaCount,
-          visibleCharacterCount,
-          firstVisibleEventMs,
-        });
+        const reason = stringData(event.data.reason) || "run cancelled";
+        this.#logRunFinished(principal, run, "cancelled", run.createdAt, reason);
         return new AgentTaskResult({
           status: AgentState.CANCELLED,
           content: "",
-          replyData: { runId, reason: stringData(event.data.reason) || "run cancelled" },
+          replyData: { runId: run.id, reason },
         });
       }
 
       if (event.type === "run.failed") {
         await closeReasoning(context, reasoningStarted, reasoningEnded);
-        this.#logStreamSummary({
-          runId,
-          terminalStatus: "failed",
-          streamStartedAt,
-          eventCount,
-          visibleDeltaCount,
-          visibleCharacterCount,
-          firstVisibleEventMs,
-        });
-        throw new Error(stringData(event.data.error) || "Run failed");
+        const error = stringData(event.data.error) || "Run failed";
+        this.#logRunFinished(principal, run, "failed", run.createdAt, error);
+        throw new Error(error);
       }
-
-      previousEventHandledAt = Date.now();
     }
 
-    throw new Error(`Run event stream ended without a terminal event: ${runId}`);
+    throw new Error(`Run event stream ended without a terminal event: ${run.id}`);
   }
 
-  /** 计量一次 by-framework 写入，区分上游事件等待和 Redis/协议发送阻塞。 */
-  async #emitWithTiming(
-    event: RunEvent,
-    outputType: string,
-    characters: number,
-    emit: () => Promise<unknown>,
-  ): Promise<void> {
-    const startedAt = Date.now();
-    try {
-      await emit();
-      this.#logger?.info(
-        {
-          diagnostic: "stream_timing",
-          stage: "by_framework_emit_completed",
-          runId: event.runId,
-          eventId: event.eventId,
-          eventType: event.type,
-          outputType,
-          characters,
-          emitDurationMs: Date.now() - startedAt,
-        },
-        "[stream_timing] by-framework 流事件发送完成",
-      );
-    } catch (error) {
-      this.#logger?.error(
-        {
-          diagnostic: "stream_timing",
-          stage: "by_framework_emit_failed",
-          runId: event.runId,
-          eventId: event.eventId,
-          eventType: event.type,
-          outputType,
-          characters,
-          emitDurationMs: Date.now() - startedAt,
-          error: toError(error).message,
-        },
-        "[stream_timing] by-framework 流事件发送失败",
-      );
-      throw error;
-    }
-  }
-
-  /** 输出单次 Run 的流式诊断汇总，不记录正文或调用凭证。 */
-  #logStreamSummary(input: {
-    runId: string;
-    terminalStatus: string;
-    streamStartedAt: number;
-    eventCount: number;
-    visibleDeltaCount: number;
-    visibleCharacterCount: number;
-    firstVisibleEventMs: number | undefined;
-  }): void {
+  /** 记录 Run 终态，便于在日志中追踪“谁、返回什么、会话维度”。不记录 Token 与凭证。 */
+  #logRunFinished(
+    principal: CallerPrincipal,
+    run: { id: string; sessionId: string },
+    status: "completed" | "cancelled" | "failed",
+    startedAt: number,
+    payload: string,
+  ): void {
+    const detailField =
+      status === "completed"
+        ? { finalAnswer: truncateForLog(payload, 200) }
+        : status === "failed"
+          ? { error: truncateForLog(payload, 200) }
+          : { reason: truncateForLog(payload, 200) };
     this.#logger?.info(
       {
-        diagnostic: "stream_timing",
-        stage: "stream_summary",
-        runId: input.runId,
-        terminalStatus: input.terminalStatus,
-        totalDurationMs: Date.now() - input.streamStartedAt,
-        eventCount: input.eventCount,
-        visibleDeltaCount: input.visibleDeltaCount,
-        visibleCharacterCount: input.visibleCharacterCount,
-        firstVisibleEventMs: input.firstVisibleEventMs ?? null,
+        userCode: principal.userCode,
+        ...(principal.userName ? { userName: principal.userName } : {}),
+        sessionId: run.sessionId,
+        runId: run.id,
+        status,
+        durationMs: Date.now() - startedAt,
+        ...detailField,
       },
-      "[stream_timing] by-framework 流式转发结束",
+      "Run 结束",
     );
   }
 
@@ -516,38 +415,32 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
       ? EventType.ANSWER_DELTA
       : EventType.REASONING_LOG_DELTA;
     const contentType = externalPage ? "2010" : "3013";
-    await this.#emitWithTiming(
-      event,
-      externalPage ? "external_page_interaction" : "user_interaction",
-      content.length,
-      () =>
-      this.#protocolEmitter.emitEvent({
-        sessionId: context.sessionId,
-        traceId: context.traceId,
-        eventType,
-        sourceAgentType: this.#agentType,
-        messageId: interactionId,
-        parentMessageId: delegationId || "-1",
-        data: protocolMessage({
-          event: eventType,
-          content,
-          contentType,
-          orderId: interactionId,
-          parentOrderId: delegationId || "-1",
-          agentId: externalPage
-            ? stringData(uiPayload.agentId)
-            : "",
-          agentName: externalPage
-            ? stringData(uiPayload.agentName)
-            : "",
-        }),
-        metadata: {
-          parent_run_id: event.runId,
-          interaction_id: interactionId,
-          ...(delegationId ? { delegation_id: delegationId } : {}),
-        },
+    await this.#protocolEmitter.emitEvent({
+      sessionId: context.sessionId,
+      traceId: context.traceId,
+      eventType,
+      sourceAgentType: this.#agentType,
+      messageId: interactionId,
+      parentMessageId: delegationId || "-1",
+      data: protocolMessage({
+        event: eventType,
+        content,
+        contentType,
+        orderId: interactionId,
+        parentOrderId: delegationId || "-1",
+        agentId: externalPage
+          ? stringData(uiPayload.agentId)
+          : "",
+        agentName: externalPage
+          ? stringData(uiPayload.agentName)
+          : "",
       }),
-    );
+      metadata: {
+        parent_run_id: event.runId,
+        interaction_id: interactionId,
+        ...(delegationId ? { delegation_id: delegationId } : {}),
+      },
+    });
   }
 
   /** 输出可由前端按同一 orderId 原位更新的 Agent 调用状态节点。 */
@@ -563,31 +456,29 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
     const agentId = stringData(event.data.agentId);
     const agentName = stringData(event.data.agentName);
     const content = `正在调用 Agent：${agentName || agentId || "Agent"}`;
-    await this.#emitWithTiming(event, "delegation_status", content.length, () =>
-      this.#protocolEmitter.emitEvent({
-        sessionId: context.sessionId,
-        traceId: context.traceId,
-        eventType: EventType.REASONING_LOG_DELTA,
-        sourceAgentType: this.#agentType,
-        messageId: delegationId,
-        parentMessageId: "-1",
-        data: protocolMessage({
-          event: EventType.REASONING_LOG_DELTA,
-          content,
-          contentType: "3009",
-          orderId: delegationId,
-          parentOrderId: "-1",
-          agentId,
-          agentName,
-          objectType: "tool_call",
-          status,
-        }),
-        metadata: {
-          parent_run_id: event.runId,
-          delegation_id: delegationId,
-        },
+    await this.#protocolEmitter.emitEvent({
+      sessionId: context.sessionId,
+      traceId: context.traceId,
+      eventType: EventType.REASONING_LOG_DELTA,
+      sourceAgentType: this.#agentType,
+      messageId: delegationId,
+      parentMessageId: "-1",
+      data: protocolMessage({
+        event: EventType.REASONING_LOG_DELTA,
+        content,
+        contentType: "3009",
+        orderId: delegationId,
+        parentOrderId: "-1",
+        agentId,
+        agentName,
+        objectType: "tool_call",
+        status,
       }),
-    );
+      metadata: {
+        parent_run_id: event.runId,
+        delegation_id: delegationId,
+      },
+    });
   }
 
   /** 原样输出子 Agent 正文，并用 parentOrderId 挂到对应 Agent 调用节点。 */
@@ -602,29 +493,27 @@ export class ByClawSuperGatewayWorker extends GatewayWorker {
     }
     const agentId = stringData(event.data.agentId);
     const agentName = stringData(event.data.agentName);
-    await this.#emitWithTiming(event, "delegation_output_delta", text.length, () =>
-      this.#protocolEmitter.emitEvent({
-        sessionId: context.sessionId,
-        traceId: context.traceId,
-        eventType: EventType.REASONING_LOG_DELTA,
-        sourceAgentType: this.#agentType,
-        messageId: `${delegationId}:output`,
-        parentMessageId: delegationId,
-        data: protocolMessage({
-          event: EventType.REASONING_LOG_DELTA,
-          content: text,
-          contentType: "1002",
-          orderId: `${delegationId}:output`,
-          parentOrderId: delegationId,
-          agentId,
-          agentName,
-        }),
-        metadata: {
-          parent_run_id: event.runId,
-          delegation_id: delegationId,
-        },
+    await this.#protocolEmitter.emitEvent({
+      sessionId: context.sessionId,
+      traceId: context.traceId,
+      eventType: EventType.REASONING_LOG_DELTA,
+      sourceAgentType: this.#agentType,
+      messageId: `${delegationId}:output`,
+      parentMessageId: delegationId,
+      data: protocolMessage({
+        event: EventType.REASONING_LOG_DELTA,
+        content: text,
+        contentType: "1002",
+        orderId: `${delegationId}:output`,
+        parentOrderId: delegationId,
+        agentId,
+        agentName,
       }),
-    );
+      metadata: {
+        parent_run_id: event.runId,
+        delegation_id: delegationId,
+      },
+    });
   }
 }
 

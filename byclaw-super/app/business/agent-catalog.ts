@@ -29,6 +29,7 @@ type DiscoverAgent = {
   resourceDesc?: string;
   tagName?: string;
   skills?: string;
+  agentType?: string;
   createType?: string;
   integrationType?: string;
   usesPermissions?: boolean;
@@ -168,6 +169,7 @@ function toAuthorizedAgents(
       continue;
     }
     const description = buildDescription(item);
+    const targetAgentType = resolveTargetAgentType(item.agentType);
     agents.set(id, {
       id,
       ...(stringValue(item.resourceCode) ? { code: stringValue(item.resourceCode) } : {}),
@@ -176,6 +178,7 @@ function toAuthorizedAgents(
       execution: {
         connectorId: resolveConnectorId(item, id, thirdPartyDirect.mode, allowlist),
         targetId: id,
+        ...(targetAgentType ? { targetAgentType } : {}),
       },
     });
   }
@@ -203,6 +206,21 @@ function resolveConnectorId(
       return THIRD_PARTY_PAGE_CONNECTOR_ID;
     default:
       return OPENCLAW_BY_FRAMEWORK_CONNECTOR_ID;
+  }
+}
+
+/**
+ * 与 ByClaw BE ResourceRuntimeInfoResolver 的数字员工路由保持一致。
+ * 普通数字员工不写目标类型，由 Connector 继续路由到用户隔离的 BYCLAW_EXE Worker。
+ */
+function resolveTargetAgentType(agentType: string | undefined): string | undefined {
+  switch (stringValue(agentType)) {
+    case "005":
+      return "BYCLAW_DATA";
+    case "006":
+      return "BYCLAW_QA";
+    default:
+      return undefined;
   }
 }
 

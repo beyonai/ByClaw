@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { AttachmentInputError } from "@byclaw/by-conductor";
-import { commandSourceAgentId, extractUserInput } from "../worker/by-framework-protocol.js";
+import {
+  commandSessionContext,
+  commandSourceAgentId,
+  extractUserInput,
+} from "../worker/by-framework-protocol.js";
 
 describe("extractUserInput", () => {
   it("reads message from a plain string content with no attachments", () => {
@@ -110,5 +114,34 @@ describe("commandSourceAgentId", () => {
     expect(
       commandSourceAgentId({ extraPayload: { agent_id: null } }),
     ).toBe("");
+  });
+});
+
+describe("commandSessionContext", () => {
+  it("reads the existing language metadata and timezone aliases", () => {
+    expect(
+      commandSessionContext({
+        header: {
+          metadata: {
+            Language: "zh_CN",
+            "Time-Zone": "Asia/Shanghai",
+          },
+        },
+      }),
+    ).toEqual({
+      locale: "zh_CN",
+      timezone: "Asia/Shanghai",
+    });
+  });
+
+  it("prefers locale and returns undefined when no environment metadata exists", () => {
+    expect(
+      commandSessionContext({
+        header: { metadata: { language: "zh-CN", locale: "en-US" } },
+      }),
+    ).toEqual({ locale: "en-US" });
+    expect(
+      commandSessionContext({ header: { metadata: {} }, extraPayload: {} }),
+    ).toBeUndefined();
   });
 });

@@ -21,11 +21,12 @@ import {
   type AgentCapabilityCompileResult,
   type AgentCapabilityCompiler,
 } from "./agent-capability.js";
-import { formatAttachmentSummary } from "./attachments.js";
+import { formatUserMessageWithAttachments } from "./attachments.js";
 import {
   ASK_USER_QUESTION_ENABLED,
   ASK_USER_QUESTION_TOOL_NAME,
   DELEGATE_AGENT_TOOL_NAME,
+  DOWNLOAD_ATTACHMENT_TOOL_NAME,
   INSPECT_ATTACHMENT_TOOL_NAME,
   LEADER_FILE_TOOL_NAMES,
   resolveActiveLeaderToolNames,
@@ -44,6 +45,7 @@ import {
 } from "./pi-session-checkpoint.js";
 import { shouldPreflightCompact } from "./pi-compaction.js";
 import { SUPER_ASSISTANT_SYSTEM_PROMPT } from "./context/super-assistant-system-prompt.js";
+import { adaptVolcengineArkResponsesPayload } from "./volcengine-ark.js";
 import type {
   LeaderRunInput,
   LeaderRunResult,
@@ -55,6 +57,7 @@ export interface PiRuntimeConfig {
   provider?: string;
   model?: string;
   openAiBaseUrl?: string;
+  arkBaseUrl?: string;
   cwd?: string;
   systemPrompt?: string;
   contextCompiler?: ContextCompiler;
@@ -100,7 +103,7 @@ export class PiLeaderSessionFactory
       throw new Error("PI_PROVIDER and PI_MODEL must be configured together");
     }
     const runtime = await ModelRuntime.create();
-    if (config.openAiBaseUrl) {
+    if (config.provider === "zhipu" && config.openAiBaseUrl) {
       runtime.registerProvider("zhipu", {
         name: "ZAI",
         baseUrl: config.openAiBaseUrl,
@@ -117,6 +120,37 @@ export class PiLeaderSessionFactory
             contextWindow: 1_000_000,
             maxTokens: 128_000,
             compat: { supportsDeveloperRole: false, supportsReasoningEffort: false },
+          },
+        ],
+      });
+    }
+    if (config.provider === "volcengine-ark" && config.arkBaseUrl) {
+      runtime.registerProvider("volcengine-ark", {
+        name: "Volcengine Ark",
+        baseUrl: config.arkBaseUrl,
+        apiKey: "$ARK_API_KEY",
+        authHeader: true,
+        api: "openai-responses",
+        models: [
+          {
+            id: "deepseek-v4-pro-260425",
+            name: "DeepSeek V4 Pro 260425",
+            reasoning: true,
+            input: ["text"],
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+            contextWindow: 1_000_000,
+            maxTokens: 384_000,
+            // Ark Responses 不接受 reasoning.effort="none"；off 必须完全省略 reasoning。
+            // 其余内部档位收敛到该模型实际支持的 low/medium/high。
+            thinkingLevelMap: {
+              off: null,
+              minimal: "low",
+              low: "low",
+              medium: "medium",
+              high: "high",
+              xhigh: "high",
+              max: "high",
+            },
           },
         ],
       });
@@ -383,6 +417,47 @@ class PiLeaderSession implements LeaderSession {
         };
       },
     });
+    const downloadAttachment = defineTool({
+      name: DOWNLOAD_ATTACHMENT_TOOL_NAME,
+      label: "Download Attachment",
+      description:
+        "Download one original attachment from the current Run into this session's isolated workspace. Use the returned relativePath with local file tools or pass the attachment to a specialist.",
+      promptSnippet:
+        "Download an original current-Run attachment into the isolated session workspace.",
+      parameters: Type.Object({
+        attachmentId: Type.String({
+          description: "Exact id from the current Run's <attachments> list",
+        }),
+      }),
+      execute: async (_toolCallId, params, signal) => {
+        const active = wrapper?.activeInput;
+        if (!active) {
+          throw new Error("No active Leader run is available for attachment download");
+        }
+        // 模型只控制附件 ID；落盘根目录固定为该 Pi Session 的 cwd。
+        const attachment = active.attachments.find(
+          (item) => item.id === params.attachmentId,
+        );
+        if (!attachment) {
+          throw new Error(`unknown attachmentId: ${params.attachmentId}`);
+        }
+        if (!active.downloadAttachment) {
+          throw new Error("attachment download is not available for this run");
+        }
+        const downloaded = await active.downloadAttachment({
+          attachmentId: params.attachmentId,
+          destinationDirectory: cwd,
+          ...(signal ? { signal } : {}),
+        });
+        return {
+          content: [{ type: "text", text: JSON.stringify(downloaded) }],
+          details: {
+            relativePath: downloaded.relativePath,
+            byteSize: downloaded.byteSize,
+          },
+        };
+      },
+    });
     const settingsManager = SettingsManager.inMemory({
       compaction,
       retry: { enabled: true, maxRetries: 2 },
@@ -408,18 +483,25 @@ class PiLeaderSession implements LeaderSession {
               const context = contextCompiler.compile({
                 baseSystemPrompt: event.systemPrompt,
                 authorizedAgents: active.agents,
+                ...(active.authorizedAgentsUnavailable
+                  ? { authorizedAgentsUnavailable: true }
+                  : {}),
                 sessionContext: active.sessionContext,
                 currentTime: active.currentTime,
                 ...(active.user ? { user: active.user } : {}),
               });
-              // 附件摘要作为本轮临时上下文追加，只含 id/name/mediaType/size，
-              // 不含 url/path/datasetId，不写入长期 system prompt 模板。
-              const attachmentBlock = formatAttachmentSummary(active.attachments);
-              return {
-                systemPrompt: attachmentBlock
-                  ? `${context.systemPrompt}\n\n${attachmentBlock}`
-                  : context.systemPrompt,
-              };
+              return { systemPrompt: context.systemPrompt };
+            });
+          },
+        },
+        {
+          name: "byclaw-volcengine-ark-responses",
+          factory: (pi) => {
+            pi.on("before_provider_request", (event, context) => {
+              if (context.model?.provider !== "volcengine-ark") {
+                return undefined;
+              }
+              return adaptVolcengineArkResponsesPayload(event.payload);
             });
           },
         },
@@ -438,11 +520,13 @@ class PiLeaderSession implements LeaderSession {
         ...(ASK_USER_QUESTION_ENABLED ? [ASK_USER_QUESTION_TOOL_NAME] : []),
         ...LEADER_FILE_TOOL_NAMES,
         INSPECT_ATTACHMENT_TOOL_NAME,
+        DOWNLOAD_ATTACHMENT_TOOL_NAME,
       ],
       customTools: [
         delegateAgent,
         ...(ASK_USER_QUESTION_ENABLED ? [askUserQuestion] : []),
         inspectAttachment,
+        downloadAttachment,
       ],
       resourceLoader,
       sessionManager,
@@ -478,7 +562,18 @@ class PiLeaderSession implements LeaderSession {
         const delta = event.assistantMessageEvent.delta;
         deltaWrites = deltaWrites.then(() => input.onDelta(delta));
       } else if (event.type === "message_end" && event.message.role === "assistant") {
-        if (currentAssistant.trim()) {
+        const finalizedText = event.message.content
+          .map((content) => (content.type === "text" ? content.text : ""))
+          .join("");
+        if (finalizedText.trim()) {
+          // 部分 Provider 不发送 text_delta，只在 message_end 给出完整文本。
+          // 此时补发一次增量，确保 SSE 与最终答案都不会静默为空。
+          if (!currentAssistant) {
+            deltaWrites = deltaWrites.then(() => input.onDelta(finalizedText));
+          }
+          currentAssistant = finalizedText;
+          lastAssistant = finalizedText;
+        } else if (currentAssistant.trim()) {
           lastAssistant = currentAssistant;
         }
         // 模型调用失败（如 429 限额）时 Pi 以 stopReason:"error" 结束消息；
@@ -511,15 +606,31 @@ class PiLeaderSession implements LeaderSession {
         ...(input.attachments.length > 0 && input.inspectAttachment
           ? [INSPECT_ATTACHMENT_TOOL_NAME]
           : []),
+        ...(input.attachments.length > 0 && input.downloadAttachment
+          ? [DOWNLOAD_ATTACHMENT_TOOL_NAME]
+          : []),
       ]);
       // 群聊只把未见过的消息作为 Pi custom message 追加；cursor 和 compaction
       // 都由原生 checkpoint 持久化，下一轮不会重新导入或重新压缩同一段历史。
       await this.syncGroupChatMemory(input);
-      await this.compactBeforePromptIfNeeded(input.message);
+      // 附件是用户本轮提供的输入数据，安全摘要应跟随 user message，而不是进入 system prompt。
+      const userMessage = formatUserMessageWithAttachments(
+        input.message,
+        input.attachments,
+      );
+      await this.compactBeforePromptIfNeeded(userMessage);
       // Agent 授权快照通过 before_agent_start 临时注入 system prompt，不进入长期 transcript。
-      await this.session.prompt(input.message, { source: "rpc" });
+      await this.session.prompt(userMessage, { source: "rpc" });
       await Promise.all([deltaWrites, checkpointWrites]);
-      return { text: lastAssistant || currentAssistant };
+      const text = lastAssistant || currentAssistant;
+      if (!text.trim()) {
+        throw new Error(
+          modelErrorMessage
+            ? `Leader model call failed: ${modelErrorMessage}`
+            : "Leader returned an empty response",
+        );
+      }
+      return { text };
     } finally {
       input.signal.removeEventListener("abort", onAbort);
       unsubscribe();

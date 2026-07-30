@@ -48,10 +48,15 @@ export function parseSessionContext(value: unknown): SessionContextV1 {
 }
 
 function optionalLocale(value: string | undefined): string | undefined {
-  const normalized = value?.trim();
-  if (!normalized) {
+  // 兼容部分既有 i18n 链路使用的 zh_CN/en_US，同时持久化为标准 BCP 47。
+  const trimmed = value?.trim();
+  if (!trimmed) {
     return undefined;
   }
+  const normalized =
+    /^[A-Za-z]{2,3}(?:_[A-Za-z]{4})?_(?:[A-Za-z]{2}|\d{3})$/.test(trimmed)
+      ? trimmed.replaceAll("_", "-")
+      : trimmed;
   try {
     return new Intl.Locale(normalized).toString();
   } catch {

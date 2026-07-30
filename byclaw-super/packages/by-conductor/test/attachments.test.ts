@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   AttachmentInputError,
+  formatUserMessageWithAttachments,
   normalizeRunAttachments,
   resolveAttachmentSelection,
   toSafeAttachmentSummary,
@@ -154,6 +155,39 @@ describe("toSafeAttachmentSummary", () => {
     expect("url" in summary).toBe(false);
     expect("path" in summary).toBe(false);
     expect("datasetId" in summary).toBe(false);
+  });
+});
+
+describe("formatUserMessageWithAttachments", () => {
+  it("keeps the original user message unchanged when there are no attachments", () => {
+    expect(formatUserMessageWithAttachments("分析本月收入", [])).toBe("分析本月收入");
+  });
+
+  it("appends only safe attachment metadata to the user message", () => {
+    const attachments = normalizeRunAttachments(
+      [
+        {
+          id: "report",
+          name: "收入报表.xlsx",
+          mediaType: "application/vnd.openxmlformats",
+          size: 2048,
+          url: "https://files.example/report.xlsx",
+          path: "/private/report.xlsx",
+          datasetId: "dataset-secret",
+        },
+      ],
+      "http",
+    );
+
+    const message = formatUserMessageWithAttachments("分析异常原因", attachments);
+
+    expect(message).toContain("分析异常原因\n\n<attachments>");
+    expect(message).toContain(
+      "- [report] 收入报表.xlsx (application/vnd.openxmlformats, 2 KB)",
+    );
+    expect(message).not.toContain("https://files.example");
+    expect(message).not.toContain("/private/report.xlsx");
+    expect(message).not.toContain("dataset-secret");
   });
 });
 

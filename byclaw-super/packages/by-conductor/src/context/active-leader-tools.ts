@@ -4,6 +4,8 @@ export const DELEGATE_AGENT_TOOL_NAME = "delegateAgent";
 export const ASK_USER_QUESTION_TOOL_NAME = "askUserQuestion";
 /** Leader 读取当前 Run 附件内容的受控工具；仅允许引用本轮附件 ID。 */
 export const INSPECT_ATTACHMENT_TOOL_NAME = "inspectAttachment";
+/** Leader 把当前 Run 附件原始字节下载到会话工作区的受控工具。 */
+export const DOWNLOAD_ATTACHMENT_TOOL_NAME = "downloadAttachment";
 // Ask User 暂时下线：保留实现和协议链路，待前端交互问题修复后可集中恢复。
 export const ASK_USER_QUESTION_ENABLED = false;
 
@@ -27,8 +29,9 @@ export const LEADER_FILE_TOOL_NAMES = [
  */
 export const LEADER_CHECKPOINT_TOOL_NAMES = [
   DELEGATE_AGENT_TOOL_NAME,
-  ASK_USER_QUESTION_TOOL_NAME,
+  // ASK_USER_QUESTION_TOOL_NAME,
   INSPECT_ATTACHMENT_TOOL_NAME,
+  DOWNLOAD_ATTACHMENT_TOOL_NAME,
   ...LEADER_FILE_TOOL_NAMES,
 ] as const;
 

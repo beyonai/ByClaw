@@ -2,13 +2,13 @@ import "dotenv/config";
 import { PostgresDatabase } from "@byclaw/storage-postgres";
 
 const database = new PostgresDatabase({
-  host: required("DB_HOST", "127.0.0.1"),
-  port: integer("DB_PORT", "5432"),
-  database: required("DB_DATABASE", "postgres"),
-  schema: required("DB_SCHEMA", "byai"),
+  host: required("DB_HOST"),
+  port: integer("DB_PORT"),
+  database: required("DB_DATABASE"),
+  schema: required("DB_SCHEMA"),
   user: required("DB_USER"),
   password: required("DB_PASS"),
-  ssl: booleanValue("DB_SSL", "false"),
+  ssl: booleanValue("DB_SSL"),
 });
 
 try {
@@ -24,16 +24,16 @@ try {
   await database.close();
 }
 
-function required(name: string, fallback?: string): string {
-  const value = process.env[name] ?? fallback;
+function required(name: string): string {
+  const value = process.env[name];
   if (!value?.trim()) {
     throw new Error(`${name} is required`);
   }
   return value.trim();
 }
 
-function integer(name: string, fallback: string): number {
-  const raw = required(name, fallback);
+function integer(name: string): number {
+  const raw = required(name);
   const value = Number(raw);
   if (!Number.isInteger(value) || value <= 0) {
     throw new Error(`${name} must be a positive integer`);
@@ -41,8 +41,8 @@ function integer(name: string, fallback: string): number {
   return value;
 }
 
-function booleanValue(name: string, fallback: string): boolean {
-  const value = required(name, fallback).toLowerCase();
+function booleanValue(name: string): boolean {
+  const value = required(name).toLowerCase();
   if (value === "true" || value === "1") {
     return true;
   }

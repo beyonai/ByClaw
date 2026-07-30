@@ -1,4 +1,6 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyBaseLogger, FastifyInstance } from "fastify";
+import type { RunEvent, Session } from "@byclaw/by-conductor";
+import { truncateForLog } from "../../log-format.js";
 import { createByClawSseSerializer } from "../byclaw-sse.js";
 import {
   authError,
@@ -127,11 +129,16 @@ export function registerRunRoutes(
       if (!auth) {
         return authError(reply, "Beyond-Token header is required");
       }
-      try {
-        await options.runIngress.authorizeRun(request.params.runId, auth);
-      } catch (error) {
-        return requestError(reply, error);
+      const owned = await options.runIngress
+        .authorizeRun(request.params.runId, auth)
+        .catch((error: unknown) => {
+          void requestError(reply, error);
+          return null;
+        });
+      if (owned === null) {
+        return;
       }
+      const { run, session } = owned;
 
       const afterEventId = parseLastEventId(request.headers["last-event-id"]);
       const controller = new AbortController();
@@ -164,6 +171,7 @@ export function registerRunRoutes(
           controller.signal,
         )) {
           reply.raw.write(serializeSse(event));
+          logTerminalRunEvent(request.log, event, session, run.createdAt);
         }
       } finally {
         clearInterval(heartbeat);
@@ -171,4 +179,49 @@ export function registerRunRoutes(
       }
     },
   );
+}
+
+/** 在 SSE 流式转发到终态事件时打一条业务返回日志，记录调用者与会话维度。不记录 Token 与凭证。 */
+function logTerminalRunEvent(
+  log: FastifyBaseLogger,
+  event: RunEvent,
+  session: Session,
+  startedAt: number,
+): void {
+  if (
+    event.type !== "run.completed" &&
+    event.type !== "run.failed" &&
+    event.type !== "run.cancelled"
+  ) {
+    return;
+  }
+  const owner = session.owner;
+  const fields: Record<string, unknown> = {
+    source: "http",
+    userCode: owner.userCode,
+    ...(owner.userName ? { userName: owner.userName } : {}),
+    sessionId: session.id,
+    runId: event.runId,
+    status:
+      event.type === "run.completed"
+        ? "completed"
+        : event.type === "run.cancelled"
+          ? "cancelled"
+          : "failed",
+    durationMs: Date.now() - startedAt,
+  };
+  if (event.type === "run.completed") {
+    fields.finalAnswer = truncateForLog(textFieldValue(event, "finalAnswer"), 200);
+  } else if (event.type === "run.failed") {
+    fields.error = truncateForLog(textFieldValue(event, "error"), 200);
+  } else {
+    fields.reason = truncateForLog(textFieldValue(event, "reason"), 200);
+  }
+  log.info(fields, "Run 结束");
+}
+
+/** 从 RunEvent.data 里安全读取字符串字段（与 byclaw-sse 一致的提取方式）。 */
+function textFieldValue(event: RunEvent, key: string): string {
+  const value = event.data[key];
+  return typeof value === "string" ? value : "";
 }

@@ -5,3 +5,5 @@ dist/
 coverage/
 *.log
 .dev/
+.workbuddy/
+.claude/

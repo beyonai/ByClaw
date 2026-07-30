@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { adaptVolcengineArkResponsesPayload } from "./volcengine-ark.js";
 
 const SCHEMA_VERSION = "byclaw.agent-capability-card/v1";
 const GENERATOR_VERSION = "1.0.0";
@@ -186,6 +187,9 @@ ${jsonForPrompt(input.agent)}
           timeoutMs: this.timeoutMs,
           signal: AbortSignal.timeout(this.timeoutMs),
           maxRetries: 1,
+          ...(this.model.provider === "volcengine-ark"
+            ? { onPayload: adaptVolcengineArkResponsesPayload }
+            : {}),
         },
       );
     } catch (cause) {

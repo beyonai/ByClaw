@@ -94,8 +94,8 @@ export interface RunServiceRuntimeOptions {
   /** 清理已过期执行凭证的周期；默认 60 秒。 */
   credentialCleanupIntervalMs?: number;
   /**
-   * 附件读取边界；注入后 Leader 可通过 inspectAttachment 用 Run 短期凭证
-   * 经 BE 安全读取本轮附件内容。未注入时 inspectAttachment 工具不暴露。
+   * 附件读取边界；注入后 Leader 可通过 inspectAttachment / downloadAttachment
+   * 用 Run 短期凭证经 BE 安全读取本轮附件。未实现对应能力时工具不暴露。
    */
   attachmentResolver?: AttachmentResolver;
 }
@@ -759,6 +759,9 @@ ${JSON.stringify(response)}`;
         attachments: current.attachments,
         thinkingLevel: current.thinkingLevel ?? "off",
         agents: current.agentList,
+        ...(current.ingressContext?.agentCatalogError
+          ? { authorizedAgentsUnavailable: true }
+          : {}),
         sessionContext: session.sessionContext,
         ...(current.ingressContext?.groupChat
           ? { groupChatContext: current.ingressContext.groupChat }
@@ -937,6 +940,43 @@ ${JSON.stringify(response)}`;
                   signal: signal ?? runController.signal,
                 });
               },
+              ...(this.#attachmentResolver.materialize
+                ? {
+                    downloadAttachment: async ({
+                      attachmentId,
+                      destinationDirectory,
+                      signal,
+                    }: {
+                      attachmentId: string;
+                      destinationDirectory: string;
+                      signal?: AbortSignal;
+                    }) => {
+                      const attachment = current.attachments.find(
+                        (item) => item.id === attachmentId,
+                      );
+                      if (!attachment) {
+                        throw new AttachmentInspectionError(
+                          ATTACHMENT_INSPECTION_ERROR_CODES.NOT_FOUND,
+                          `unknown attachmentId: ${attachmentId}`,
+                        );
+                      }
+                      const credential = readBeyondToken(metadata);
+                      if (!credential) {
+                        throw new AttachmentInspectionError(
+                          ATTACHMENT_INSPECTION_ERROR_CODES.CREDENTIAL_MISSING,
+                          "execution credential is not available for attachment download",
+                        );
+                      }
+                      return this.#attachmentResolver!.materialize!({
+                        attachment,
+                        principal: session.owner,
+                        credential,
+                        destinationDirectory,
+                        signal: signal ?? runController.signal,
+                      });
+                    },
+                  }
+                : {}),
             }
           : {}),
       });
@@ -944,6 +984,9 @@ ${JSON.stringify(response)}`;
       if (runController.signal.aborted) {
         await this.#finishCancelled(current, "run cancelled");
         return;
+      }
+      if (!result.text.trim()) {
+        throw new Error("Leader returned an empty response");
       }
       const finished: Run = {
         ...current,

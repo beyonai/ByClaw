@@ -1,7 +1,16 @@
 import { createWriteStream } from "node:fs";
-import { mkdir, mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rename,
+  rm,
+  stat,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join, relative } from "node:path";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import {
@@ -21,12 +30,12 @@ import type { ByClawBeEndpointResolver } from "./endpoint-resolver.js";
  *   绝不使用客户端自报的 `url`/`path`，不直接访问对象存储。
  * - 临时文件名由 `mkdtemp` 生成，与附件名无关；不解压任何压缩包、不创建符号链接，
  *   因此路径穿越 / 符号链接 / 压缩炸弹在构造上不成立。
- * - 白名单只放通文本族格式（txt/md/json/csv/log/yaml/xml）；二进制文档、图片、
- *   压缩包返回结构化 `ATTACHMENT_TYPE_UNSUPPORTED`，Leader 可解释或改委派。
+ * - inspect 白名单只放通文本族格式（txt/md/json/csv/log/yaml/xml）；原文件下载
+ *   不解析内容，因此允许二进制文档、图片和压缩包，但仍受统一字节上限约束。
  * - 每次 inspect 使用独立临时目录并在 finally 中清理；进程崩溃残留由启动后首次
  *   inspect 触发的惰性清扫（24h 前的 `inspect-*` 目录）回收。
- * - 输出有界：单文件字节上限 + 文本/结构输出字符上限；不返回 Token、内部路径、
- *   下载 URL。
+ * - 输出有界：单文件字节上限 + 文本/结构输出字符上限；不返回 Token、内部绝对
+ *   路径或下载 URL，原文件下载仅返回会话工作区内的相对路径。
  *
  * 已知缺口：BE `/commonFile/download` 暂无 `createBy` 归属校验（IDOR），
  * 需 BE 侧补齐，见契约文档"已知缺口"一节。
@@ -34,6 +43,9 @@ import type { ByClawBeEndpointResolver } from "./endpoint-resolver.js";
 
 type FetchLike = typeof globalThis.fetch;
 type InspectInput = Parameters<AttachmentResolver["inspect"]>[0];
+type MaterializeInput = Parameters<
+  NonNullable<AttachmentResolver["materialize"]>
+>[0];
 
 export interface ByAiAttachmentResolverOptions {
   baseUrl: string;
@@ -130,6 +142,56 @@ export class ByAiAttachmentResolver implements AttachmentResolver {
       return mode === "structure"
         ? structureInspection(attachment, text, byteSize, this.#maxStructureChars)
         : textInspection(attachment, text, byteSize, this.#maxTextChars);
+    } finally {
+      await rm(workDir, { recursive: true, force: true }).catch(() => undefined);
+    }
+  }
+
+  /**
+   * 下载附件原始字节到当前 Pi Session 的隔离目录。文件名只取安全 basename，
+   * 定位始终使用服务端校验过的 fileId，不信任附件自报的 url/path。
+   */
+  async materialize(input: MaterializeInput) {
+    const { attachment } = input;
+    const fileId = backendFileId(attachment);
+    const fileName = safeAttachmentName(attachment.name);
+    const attachmentDirectory = join(
+      input.destinationDirectory,
+      "attachments",
+      fileId,
+    );
+    const destination = join(attachmentDirectory, fileName);
+
+    await mkdir(attachmentDirectory, { recursive: true, mode: 0o700 });
+    const workDir = await mkdtemp(join(attachmentDirectory, ".download-"));
+    try {
+      const payloadPath = join(workDir, "payload.bin");
+      const byteSize = await this.#download({
+        fileId,
+        credential: input.credential,
+        signal: input.signal,
+        destination: payloadPath,
+      });
+      if (byteSize === 0) {
+        throw new AttachmentInspectionError(
+          ATTACHMENT_INSPECTION_ERROR_CODES.NOT_FOUND,
+          "attachment content is empty or does not exist",
+        );
+      }
+      await chmod(payloadPath, 0o600);
+      // 只有新文件完整下载成功后才替换旧副本，避免失败时留下半文件。
+      await rm(destination, { force: true });
+      await rename(payloadPath, destination);
+      return {
+        attachmentId: attachment.id,
+        name: attachment.name,
+        ...(attachment.mediaType ? { mediaType: attachment.mediaType } : {}),
+        byteSize,
+        relativePath: relative(input.destinationDirectory, destination).replaceAll(
+          "\\",
+          "/",
+        ),
+      };
     } finally {
       await rm(workDir, { recursive: true, force: true }).catch(() => undefined);
     }
@@ -444,6 +506,17 @@ function backendFileId(attachment: RunAttachment): string {
     );
   }
   return attachment.id;
+}
+
+/** 只保留附件名的最后一段，并移除控制字符，防止路径穿越与异常文件名。 */
+function safeAttachmentName(name: string): string {
+  const leaf = basename(name.replaceAll("\\", "/"))
+    .replace(/[\u0000-\u001f\u007f]/g, "_")
+    .trim();
+  if (!leaf || leaf === "." || leaf === "..") {
+    return "attachment";
+  }
+  return leaf.slice(0, 255);
 }
 
 /** 读取落盘文件并做文本真实性校验（NUL 嗅探 + 严格 UTF-8 解码）。 */

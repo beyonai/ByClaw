@@ -93,26 +93,36 @@ Leader 的基础 system prompt 只保存稳定的 Supervisor 职责和安全边�
 `ContextCompiler` 按固定顺序编译，当前初版包含：
 
 1. `SupervisorPolicyProcessor`：规范化并校验稳定的 Leader system prompt；
-2. `SessionContextProcessor`：注入 Session 创建时确定的 locale、timezone 和当前本地日期；
-3. `AuthorizedAgentsProcessor`：把本次 Run 冻结的授权 Agent 快照编码成动态数据区；
-4. `ContextCleanupProcessor`：清理空区段并稳定最终格式。
+2. `SessionContextProcessor`：注入 Session 创建时确定的 locale、timezone，以及每次 Run
+   根据该时区实时计算的当前本地日期时间和默认回答语言；
+3. `UserContextProcessor`：注入经过认证的 userCode 和可选 userName；
+4. `GroupChatContextProcessor`：支持把冻结的群聊快照编码为不可信数据区；
+5. `AuthorizedAgentsProcessor`：把本次 Run 冻结的授权 Agent 快照编码成动态数据区；
+6. `ContextCleanupProcessor`：清理空区段并稳定最终格式。
+
+固定 Supervisor 策略会先把请求分为简单、一般和复杂三类：简单请求由 Leader 直接回答；
+一般请求必须委派给合适的授权 Agent；复杂请求先向用户给出执行计划并等待确认，确认后才开始
+委派。子 Agent 提出的新问题只有在答案已由用户请求、确认计划或可信上下文明确定义时，Leader
+才可代答，否则必须回问用户。委派失败时直接说明失败原因，不允许 Leader 改为自行解决。
 
 Pi 的 `before_agent_start` 钩子负责调用编译器。稳定规则始终位于最终 prompt 前部，动态授权
 数据位于尾部；Agent 的 Connector、执行目标和调用凭证不会进入模型上下文。真正的 Agent
 授权仍由 `DelegationService` 根据 `Run.agentList` 强制校验，prompt 只帮助模型选择，不能替代
-服务端授权。
+服务端授权。附件属于用户本轮提供的输入，安全摘要只包含 id、name、mediaType 和 size，并
+附加到本轮 user message，不进入 system prompt；url、path 和 datasetId 不会暴露给模型。
 
 Session 上下文使用独立的 `SessionContextV1` 保存，不与 Pi transcript 的
 `contextRevision` 混用。当前版本只接受可选的 BCP 47 `locale` 和 IANA `timezone`，且仅在
-创建 Session 时写入；它不保存访问令牌、用户消息或长期记忆。当前本地日期在每次 Run
-编译上下文时根据服务器时间和该 timezone 计算，因此不会作为陈旧值持久化。
+创建 Session 时写入；它不保存访问令牌、用户消息或长期记忆。当前本地日期时间在每次 Run
+编译上下文时根据服务器时间和该 timezone 重新计算，因此不会作为陈旧值持久化。locale
+同时用于确定默认回答语言；用户明确要求使用其他语言时仍遵循用户要求。
 
 每个 Run 调用 Pi 前还会根据同一份授权快照重算活动工具：`askUserQuestion` 始终可用；
 没有授权 Agent 时不向模型暴露 `delegateAgent`，存在授权 Agent 时才启用它。工具可见性
 用于避免无效调用，`DelegationService` 的执行期校验仍是最终安全边界。
 
 编译结果同时返回 SHA-256 指纹、字符数、粗略 token 估算及各 processor 耗时，不保存完整
-prompt。后续 Session 记忆、Skill、附件和 Step 状态应通过新增 processor 扩展，不在
+prompt。后续 Session 记忆、Skill 和 Step 状态应通过新增 processor 扩展，不在
 `pi-leader.ts` 中继续拼接字符串。Pi transcript、checkpoint 和 compaction 仍由 Pi 原生机制负责。
 
 ## Agent 能力路由卡 API
@@ -215,32 +225,47 @@ cancel 等生命周期动作只由 UI/runtime 发出。
 
 ## 环境配置
 
-本项目只读取根目录这一份运行配置：
+源码方式本地启动时，项目读取根目录这一份运行配置：
 
 ```text
 byclaw-super/.env
 ```
 
-外层 `ByClaw/.env` 不属于本服务，`app/` 下也不需要创建 `.env`。初始化配置：
+`app/` 下不需要创建 `.env`。初始化配置：
 
 ```bash
 cp .env.example .env
 ```
 
-稳定默认值统一定义在 [`app/config/config-defaults.ts`](app/config/config-defaults.ts)，同名环境变量优先。
-`.env` 只需保存没有安全默认值的必填项，以及当前部署确实不同的配置：
+通过 `deploy/standalone` 或 `deploy/k3s` 部署时，不需要把这份文件复制进镜像；部署脚本会从
+外层 `ByClaw/.env`（k3s 环境使用对应的 `env.k3s`）注入同名变量。模型密钥等敏感值只写在
+私有环境文件中，镜像和示例文件不保存真实值。部署配置固定设置
+`DB_MIGRATE_ON_START=false`，数据库表结构由现有数据库初始化流程负责。
+
+稳定运行参数的默认值统一定义在 [`app/config/config-defaults.ts`](app/config/config-defaults.ts)。
+数据库和 Redis 的连接定位没有代码默认值，必须在 `.env` 中显式填写，避免部署时静默连接
+localhost 或错误实例：
 
 ```dotenv
-# PostgreSQL 账号
+DB_HOST=
+DB_PORT=
+DB_DATABASE=
+DB_SCHEMA=
 DB_USER=
 DB_PASS=
+DB_SSL=
+
+REDIS_MODE=standalone
+REDIS_HOST=
+REDIS_PORT=
+REDIS_DATABASE=
+# cluster 模式改填：REDIS_CLUSTER_HOST=redis-1:6379,redis-2:6379
 
 # 默认 Pi 模型的凭证
 OPENAI_API_KEY=
 
 # 只在部署值与代码默认值不同时填写，例如：
 # PORT=10001
-# REDIS_HOST=10.0.0.10
 # REDIS_USERNAME=
 # REDIS_PASSWORD=
 # DB_EVENT_LISTEN_ENABLED=false
@@ -251,8 +276,8 @@ OPENAI_API_KEY=
 # THIRD_PARTY_AGENT_ALLOWED_HOSTS=vendor.example.com
 ```
 
-完整的可选变量示例见 [`.env.example`](.env.example)。数据库密码和模型密钥等安全配置
-不设代码默认值。其他稳定参数均采用“环境变量优先，代码常量兜底”的规则。
+完整配置示例见 [`.env.example`](.env.example)。数据库、Redis 等基础设施连接配置及密码、
+模型密钥不设代码默认值；超时、容量和功能开关等稳定参数仍采用“环境变量优先，代码常量兜底”。
 
 创建 Session/Run、查询、取消和订阅 SSE 都必须通过请求头传入 `Beyond-Token`。为了让其他实例
 在故障接管后继续执行非终态 Run，Token 会写入专用凭证表；只有持有当前 Session lease 和有效
@@ -354,7 +379,8 @@ curl -X POST http://127.0.0.1:3000/v1/sessions \
 不接收该参数。
 
 `context` 只在创建 Session 的接口中接收。`locale` 使用 BCP 47 语言标签，`timezone`
-使用 IANA 时区名称；二者均可省略。后续
+使用 IANA 时区名称；兼容既有 i18n 客户端的 `zh_CN`、`en_US` 写法，持久化时会规范化为
+`zh-CN`、`en-US`。二者均可省略。后续
 `POST /v1/sessions/:sessionId/runs` 不接受 `context`，以避免同一会话内的基础语境漂移。
 
 返回示例：
@@ -487,6 +513,8 @@ by-framework 投递时需要满足：
 - ByClaw BE 中默认超级助手资源 `{userCode}_main` 的 `worker_agent_type` 为 `BY_SUPER`；
 - `content` 是任务文本，也兼容 BaiYing message 数组；
 - `metadata` 或 `extraPayload` 中必须包含 `Beyond-Token`；
+- 创建新 Session 时可在 `metadata` 或 `extraPayload` 中传 `locale`（兼容 `language`）
+  和 `timezone`，用于实时本地时间与默认回答语言；
 - 单次 Run 的 `thinkingLevel` 放在 `extraPayload`，未传时为 `off`；
 - 上游与本服务连接同一个 Redis/database。
 
@@ -497,7 +525,11 @@ await client.sendMessage({
   targetAgentType: "BY_SUPER",
   sessionId,
   content: "请分析这个问题",
-  metadata: { "Beyond-Token": token },
+  metadata: {
+    "Beyond-Token": token,
+    language: "zh-CN",
+    timezone: "Asia/Shanghai",
+  },
   extraPayload: { thinkingLevel: "high" },
 });
 ```

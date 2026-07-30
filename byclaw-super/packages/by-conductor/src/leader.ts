@@ -1,4 +1,8 @@
-import type { AttachmentInspection, AttachmentInspectionMode } from "./attachment-inspection.js";
+import type {
+  AttachmentInspection,
+  AttachmentInspectionMode,
+  MaterializedAttachment,
+} from "./attachment-inspection.js";
 import type { PiSessionCheckpoint } from "./pi-session-checkpoint.js";
 import type { SessionContextV1 } from "./session-context.js";
 import type { GroupChatContextV1 } from "./group-chat-context.js";
@@ -19,6 +23,8 @@ export interface LeaderRunInput {
   attachments: readonly RunAttachment[];
   thinkingLevel: ThinkingLevel;
   agents: AgentProfile[];
+  /** Agent 目录回源失败时为 true，供动态系统上下文替换正常的授权列表。 */
+  authorizedAgentsUnavailable?: boolean;
   sessionContext: SessionContextV1;
   /** 当前 Run 冻结的群聊快照；只进入本轮动态 system context。 */
   groupChatContext?: GroupChatContextV1;
@@ -54,6 +60,15 @@ export interface LeaderRunInput {
     mode?: AttachmentInspectionMode;
     signal?: AbortSignal;
   }): Promise<AttachmentInspection>;
+  /**
+   * 下载当前 Run 的原始附件到可信会话目录。工具层只接收 attachmentId；
+   * destinationDirectory 由 Pi Leader 注入，不由模型控制。
+   */
+  downloadAttachment?(input: {
+    attachmentId: string;
+    destinationDirectory: string;
+    signal?: AbortSignal;
+  }): Promise<MaterializedAttachment>;
 }
 
 /** Leader 单次 Run 的最终可见结果。 */

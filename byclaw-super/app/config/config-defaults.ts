@@ -11,22 +11,12 @@ export const APP_CONFIG_DEFAULTS = {
   },
   database: {
     type: "postgresql",
-    host: "127.0.0.1",
-    port: 5_432,
-    database: "postgres",
-    schema: "byai",
-    ssl: false,
     eventListenEnabled: true,
     maxConnections: 20,
     connectionTimeoutMs: 5_000,
     idleTimeoutMs: 30_000,
     statementTimeoutMs: 30_000,
     migrateOnStart: false,
-  },
-  redis: {
-    host: "127.0.0.1",
-    port: 6_379,
-    database: 0,
   },
   delegationTimeoutMs: 1_800_000,
   worker: {
@@ -69,5 +59,6 @@ export const APP_CONFIG_DEFAULTS = {
     provider: "zhipu",
     model: "glm-5.2",
     openAiBaseUrl: "https://open.bigmodel.cn/api/coding/paas/v4",
+    arkBaseUrl: "https://ark.cn-beijing.volces.com/api/v3",
   },
 } as const;

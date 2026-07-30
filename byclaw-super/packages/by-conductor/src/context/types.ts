@@ -8,6 +8,8 @@ export interface ContextBuildInput {
   baseSystemPrompt: string;
   /** 当前 Run 冻结的授权 Agent 快照。 */
   authorizedAgents: readonly AgentProfile[];
+  /** Agent 目录回源失败；此时授权快照为空不代表用户确实没有可用数字员工。 */
+  authorizedAgentsUnavailable?: boolean;
   /** 当前业务 Session 的稳定环境快照。 */
   sessionContext: SessionContextV1;
   /** 已在入口读取、校验并持久化的本轮群聊快照。 */

@@ -39,14 +39,15 @@ function contextResponse() {
 }
 
 describe("ByClaw BE group chat context provider", () => {
-  it("uses service discovery, current credentials, and a bounded request", async () => {
+  it("uses the temporary local endpoint, current credentials, and a bounded request", async () => {
     const fetchImpl = vi.fn(async () => Response.json(contextResponse()));
+    const resolve = vi.fn(async () => "http://byclaw-be.internal:8086");
     const provider = new ByClawBeGroupChatContextProvider({
       baseUrl: "http://127.0.0.1:8086",
       timeoutMs: 1_000,
       fetchImpl: fetchImpl as typeof fetch,
       endpointResolver: {
-        resolve: async () => "http://byclaw-be.internal:8086",
+        resolve,
       },
     });
 
@@ -60,8 +61,9 @@ describe("ByClaw BE group chat context provider", () => {
     expect(context.messages[0]?.content).toBe("A 的结论");
     const [url, init] = fetchImpl.mock.calls[0] ?? [];
     expect(String(url)).toBe(
-      "http://byclaw-be.internal:8086/byaiService/internal/api/v1/group-chat/context",
+      "http://127.0.0.1:8086/byaiService/internal/api/v1/group-chat/context",
     );
+    expect(resolve).not.toHaveBeenCalled();
     expect(init?.headers).toMatchObject({
       "Beyond-Token": "secret-token",
       "System-Code": "BYAI",

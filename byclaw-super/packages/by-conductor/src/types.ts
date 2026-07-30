@@ -8,6 +8,8 @@ export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue
 export interface AgentExecutionTarget {
   connectorId: string;
   targetId: string;
+  /** by-framework 的逻辑 Worker 路由名；未指定时由 Connector 使用默认个人 OpenClaw Worker。 */
+  targetAgentType?: string;
 }
 
 /** 一次 Run 可授权给 Leader 的 Agent 描述。 */

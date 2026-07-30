@@ -92,6 +92,50 @@ describe("ByClaw BE Agent Catalog", () => {
     );
   });
 
+  it("maps data and QA employees to their dedicated by-framework workers", async () => {
+    const catalog = new ByClawBeAgentCatalog({
+      baseUrl: "http://127.0.0.1:8086",
+      timeoutMs: 1_000,
+      fetchImpl: vi.fn(async () =>
+        Response.json({
+          code: 0,
+          success: true,
+          data: {
+            list: [
+              {
+                id: "3001",
+                name: "问数助手",
+                agentType: "005",
+                usesPermissions: true,
+              },
+              {
+                id: "3002",
+                name: "问答助手",
+                agentType: "006",
+                usesPermissions: true,
+              },
+            ],
+          },
+        }),
+      ) as typeof fetch,
+    });
+
+    const agents = await catalog.listAuthorizedAgents({
+      beyondToken: "secret-token",
+    });
+
+    expect(
+      agents.map((agent) => [
+        agent.id,
+        agent.execution.connectorId,
+        agent.execution.targetAgentType,
+      ]),
+    ).toEqual([
+      ["3001", "openclaw-by-framework", "BYCLAW_DATA"],
+      ["3002", "openclaw-by-framework", "BYCLAW_QA"],
+    ]);
+  });
+
   it("routes allowlisted third-party employees to their direct connector", async () => {
     const catalog = new ByClawBeAgentCatalog({
       baseUrl: "http://127.0.0.1:8086",

@@ -64,6 +64,7 @@ try {
       ...(config.openAiBaseUrl
         ? { openAiBaseUrl: config.openAiBaseUrl }
         : {}),
+      ...(config.arkBaseUrl ? { arkBaseUrl: config.arkBaseUrl } : {}),
       instanceId: `${config.instanceId}-capability-backfill`,
       ...(config.piSessionCacheDirectory
         ? { sessionCacheDirectory: config.piSessionCacheDirectory }

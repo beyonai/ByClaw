@@ -94,7 +94,9 @@ export class OpenClawByFrameworkConnector implements AgentConnector {
       request.runId,
       request.delegationId,
     ].join(":");
-    const targetAgentType = `BYCLAW_EXE_${request.userCode}`;
+    const targetAgentType =
+      request.agent.execution.targetAgentType?.trim() ||
+      `BYCLAW_EXE_${request.userCode}`;
     const beyondToken = stringMetadata(request.metadata, "Beyond-Token");
     const extraPayload: Record<string, unknown> = {
       agent_id: request.agent.execution.targetId,

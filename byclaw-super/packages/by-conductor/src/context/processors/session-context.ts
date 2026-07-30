@@ -7,7 +7,7 @@ import type {
 
 const SECTION_ID = "session-context";
 
-/** 注入可信的 Session locale/timezone，并按显式时间计算用户当地日期。 */
+/** 注入可信的 Session locale/timezone，并按显式时间计算用户当地日期时间。 */
 export class SessionContextProcessor implements ContextProcessor {
   readonly name = "session-context";
 
@@ -37,15 +37,16 @@ function renderSessionContext(
     "<session_context>",
     "This is trusted session metadata.",
     ...(locale ? [`User interface locale: ${locale}`] : []),
+    ...(locale ? [`User response language: ${responseLanguage(locale)}`] : []),
     ...(timezone
       ? [
           `User timezone: ${timezone}`,
-          `Current local date: ${localDate(input.currentTime, timezone)}`,
+          `Current local date and time: ${localDateTime(input.currentTime, timezone)}`,
         ]
       : []),
     ...(locale
       ? [
-          `Reply in the language used by the user. When the user's language is ambiguous, prefer ${locale}.`,
+          `Respond in ${responseLanguage(locale)} by default. Use another language only when the user explicitly requests it.`,
         ]
       : []),
     "</session_context>",
@@ -53,7 +54,7 @@ function renderSessionContext(
   return { id: SECTION_ID, content: lines.join("\n") };
 }
 
-function localDate(timestamp: number, timezone: string): string {
+function localDateTime(timestamp: number, timezone: string): string {
   if (!Number.isFinite(timestamp)) {
     throw new Error("Context currentTime must be a finite timestamp");
   }
@@ -62,14 +63,32 @@ function localDate(timestamp: number, timezone: string): string {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
   }).formatToParts(new Date(timestamp));
   const value = (type: Intl.DateTimeFormatPartTypes) =>
     parts.find((part) => part.type === type)?.value;
   const year = value("year");
   const month = value("month");
   const day = value("day");
-  if (!year || !month || !day) {
-    throw new Error("Unable to format Session local date");
+  const hour = value("hour");
+  const minute = value("minute");
+  const second = value("second");
+  if (!year || !month || !day || !hour || !minute || !second) {
+    throw new Error("Unable to format Session local date and time");
   }
-  return `${year}-${month}-${day}`;
+  return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
+}
+
+function responseLanguage(locale: string): string {
+  const language = new Intl.Locale(locale).language.toLowerCase();
+  if (language === "zh") {
+    return "Chinese";
+  }
+  if (language === "en") {
+    return "English";
+  }
+  return locale;
 }

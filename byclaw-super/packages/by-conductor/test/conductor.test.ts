@@ -24,6 +24,7 @@ import {
   type LeaderRunInput,
   type LeaderSession,
   type LeaderSessionFactory,
+  type MaterializedAttachment,
   type Run,
   type RunAttachment,
   type Session,
@@ -514,6 +515,66 @@ describe("DelegationService", () => {
 });
 
 describe("RunService", () => {
+  it("marks an empty Leader answer as failed instead of silently completing", async () => {
+    const leaderFactory: LeaderSessionFactory = {
+      async create() {
+        return {
+          contextRevision: 0,
+          async run() {
+            return { text: "" };
+          },
+          checkpoint: () => undefined,
+          markCommitted: () => undefined,
+          abort: async () => undefined,
+          dispose: () => undefined,
+        };
+      },
+      async health() {
+        return { healthy: true };
+      },
+    };
+    const { service } = createRunService(leaderFactory);
+
+    const run = await service.createSessionRun({
+      owner: { userCode: "first-user" },
+      message: "must-answer",
+      agentList: [],
+    });
+
+    await waitFor(async () => (await service.getRun(run.id))?.status === "FAILED");
+    expect(await service.getRun(run.id)).toMatchObject({
+      status: "FAILED",
+      error: "Leader returned an empty response",
+    });
+    await service.dispose();
+  });
+
+  it("passes Agent catalog unavailability to the Leader without injecting a direct answer", async () => {
+    const leaderFactory = new ControlledLeaderFactory();
+    const { events, service } = createRunService(leaderFactory);
+    const catalogError = "ByClaw BE discover request failed: fetch failed";
+
+    const run = await service.createSessionRun({
+      owner: { userCode: "first-user" },
+      message: "continue-anyway",
+      agentList: [],
+      ingressContext: { agentCatalogError: catalogError },
+    });
+
+    await waitFor(() => leaderFactory.started.includes("continue-anyway"));
+    expect(
+      (await events.list(run.id))
+        .filter((event) => event.type === "leader.delta")
+        .map((event) => event.data.text),
+    ).toEqual(["continue-anyway:delta"]);
+    expect(leaderFactory.authorizedAgentsUnavailable).toEqual([true]);
+
+    leaderFactory.release("continue-anyway", "done");
+    await waitFor(async () => (await service.getRun(run.id))?.status === "COMPLETED");
+    expect((await service.getRun(run.id))?.finalAnswer).toBe("done");
+    await service.dispose();
+  });
+
   it("原子入口创建首个 Session、Run 和 run.created 事件", async () => {
     const leaderFactory = new ControlledLeaderFactory();
     const { events, service } = createRunService(leaderFactory);
@@ -1086,6 +1147,38 @@ describe("RunService inspectAttachment 接线", () => {
     await harness.service.dispose();
   });
 
+  it("Resolver 支持 materialize 时注入 downloadAttachment 并固定解析本轮附件", async () => {
+    const inspect = vi.fn() as unknown as AttachmentResolver["inspect"];
+    const materialize = vi.fn(
+      async (
+        args: Parameters<NonNullable<AttachmentResolver["materialize"]>>[0],
+      ): Promise<MaterializedAttachment> => ({
+        attachmentId: args.attachment.id,
+        name: args.attachment.name,
+        byteSize: 5,
+        relativePath: "attachments/123/a.txt",
+      }),
+    );
+    const harness = createInspectHarness({ inspect, materialize });
+    const { input, session } = await runWithAttachments(harness, {
+      "Beyond-Token": "token-1",
+    });
+
+    expect(input.downloadAttachment).toBeDefined();
+    const downloaded = await input.downloadAttachment!({
+      attachmentId: "123",
+      destinationDirectory: "/isolated/session",
+    });
+    expect(downloaded.relativePath).toBe("attachments/123/a.txt");
+    expect(materialize).toHaveBeenCalledOnce();
+    const call = materialize.mock.calls[0]![0];
+    expect(call.attachment).toEqual(attachmentA);
+    expect(call.principal).toEqual(session.owner);
+    expect(call.credential).toBe("token-1");
+    expect(call.destinationDirectory).toBe("/isolated/session");
+    await harness.service.dispose();
+  });
+
   it("显式 mode 透传给 Resolver", async () => {
     const inspect = vi.fn(
       async (
@@ -1272,6 +1365,7 @@ class ControlledLeaderFactory implements LeaderSessionFactory {
   readonly sessionContexts: LeaderRunInput["sessionContext"][] = [];
   readonly currentTimes: number[] = [];
   readonly groupChatContexts: Array<GroupChatContextV1 | undefined> = [];
+  readonly authorizedAgentsUnavailable: Array<boolean | undefined> = [];
   readonly createdSessionIds: string[] = [];
   aborted = 0;
   readonly #releases = new Map<string, (value: string) => void>();
@@ -1286,6 +1380,7 @@ class ControlledLeaderFactory implements LeaderSessionFactory {
         this.sessionContexts.push(input.sessionContext);
         this.currentTimes.push(input.currentTime);
         this.groupChatContexts.push(input.groupChatContext);
+        this.authorizedAgentsUnavailable.push(input.authorizedAgentsUnavailable);
         await input.onDelta(`${input.message}:delta`);
         const text = await new Promise<string>((resolve, reject) => {
           this.#releases.set(input.message, resolve);
