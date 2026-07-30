@@ -16,6 +16,7 @@ import com.iwhalecloud.byai.manager.dto.resource.DatasetBuild;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetDto;
 import com.iwhalecloud.byai.manager.dto.resource.DatasetIdDto;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeReadFileRequest;
+import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileMetadataRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeGlobRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeItemReferencesRequest;
 import com.iwhalecloud.byai.manager.dto.resource.KnowledgeFileSearchRequest;
@@ -36,6 +37,8 @@ import com.iwhalecloud.byai.state.domain.resource.vo.DatasetDetailVo;
 import com.iwhalecloud.byai.state.domain.resource.vo.DatasetVo;
 import com.iwhalecloud.byai.state.domain.resource.vo.KnowledgeCapabilityVo;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbFileReadResult;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbFileUpdateResult;
+import com.iwhalecloud.byai.common.feign.response.pythonbuild.KbFileMetadataResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeFileSearchResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeItemReferencesResult;
 import com.iwhalecloud.byai.common.feign.response.pythonbuild.KnowledgeSearchResult;
@@ -366,6 +369,16 @@ public class DatasetController {
     }
 
     /**
+     * 查询指定知识库文件已入库的元数据，供技能侧按资源 ID 调用。
+     */
+    @PostMapping(value = "/knowledgeItems/metadata/get")
+    public ResponseUtil<KbFileMetadataResult> getKnowledgeFileMetadata(
+        @Valid @RequestBody KnowledgeFileMetadataRequest request) {
+        return ResponseUtil.successResponse(I18nUtil.get("dataset.file.metadata.query.success"),
+            datasetApplicationService.getKnowledgeFileMetadata(request));
+    }
+
+    /**
      * 知识库 chunk 检索，供技能侧按资源 ID 列表调用。
      *
      * @param request 检索参数
@@ -386,6 +399,21 @@ public class DatasetController {
         @RequestBody @Valid KnowledgeFileSearchRequest request) {
         return ResponseUtil.successResponse(I18nUtil.get("dataset.file.search.success"),
             datasetApplicationService.searchKnowledgeFiles(request));
+    }
+
+    /**
+     * 更新已存在知识库文件的内容。该操作不会自动触发知识构建。
+     */
+    @PostMapping(value = "/knowledgeItems/update", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseUtil<KbFileUpdateResult> updateKnowledgeItem(@RequestPart("resourceId") Long resourceId,
+        @RequestPart("filePath") String filePath,
+        @RequestPart(value = "fileDescription", required = false) String fileDescription,
+        @RequestPart(value = "processFrontMatter", required = false) String processFrontMatter,
+        @RequestPart("fileContent") MultipartFile fileContent) {
+        String normalizedFilePath = new String(filePath.getBytes(StandardCharsets.ISO_8859_1), StandardCharsets.UTF_8);
+        KbFileUpdateResult result = datasetApplicationService.updateKnowledgeFile(resourceId, normalizedFilePath,
+            fileDescription, parseOptionalBoolean(processFrontMatter), fileContent);
+        return ResponseUtil.successResponse(I18nUtil.get("dataset.file.update.success"), result);
     }
 
     /**
