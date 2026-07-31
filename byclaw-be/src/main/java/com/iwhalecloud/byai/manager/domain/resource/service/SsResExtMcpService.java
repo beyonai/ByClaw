@@ -10,6 +10,7 @@ import com.iwhalecloud.byai.manager.mapper.resource.SsResExtMcpMapper;
 import io.modelcontextprotocol.client.McpClient;
 import io.modelcontextprotocol.client.McpSyncClient;
 import io.modelcontextprotocol.client.transport.HttpClientSseClientTransport;
+import io.modelcontextprotocol.client.transport.HttpClientStreamableHttpTransport;
 import io.modelcontextprotocol.spec.McpClientTransport;
 import io.modelcontextprotocol.spec.McpSchema;
 import org.slf4j.Logger;
@@ -107,20 +108,32 @@ public class SsResExtMcpService {
         // MCP 的服务端点在 metaContent.mcpServerUrl 中；写入前校验没有 resourceId，所以直接从原始 JSON 构建 transport。
         JSONObject metaContent = jsonObject.getJSONObject("metaContent");
         if (metaContent == null) {
-            throw new IllegalArgumentException(I18nUtil.get(
-                "resource.json.connectivity.validation.mcp.meta.content.missing"));
+            throw new IllegalArgumentException(
+                I18nUtil.get("resource.json.connectivity.validation.mcp.meta.content.missing"));
         }
+
+        String mcpType = metaContent.getString("mcpType");
         String mcpServerUrl = metaContent.getString("mcpServerUrl");
 
-        return HttpClientSseClientTransport.builder(domainURL)
-            .connectTimeout(MCP_VALIDATION_CONNECT_TIMEOUT)
-            .sseEndpoint(mcpServerUrl)
-            .httpRequestCustomizer((builder, method, uri, body, context) -> {
-                Set<Map.Entry<String, Object>> entrySet = safeHeaders.entrySet();
-                for (Map.Entry<String, Object> entry : entrySet) {
-                    builder.header(entry.getKey(), String.valueOf(entry.getValue()));
-                }
-            }).build();
+        if ("sse".equalsIgnoreCase(mcpType)) {
+            return HttpClientSseClientTransport.builder(domainURL).connectTimeout(MCP_VALIDATION_CONNECT_TIMEOUT)
+                .sseEndpoint(mcpServerUrl).httpRequestCustomizer((builder, method, uri, body, context) -> {
+                    Set<Map.Entry<String, Object>> entrySet = safeHeaders.entrySet();
+                    for (Map.Entry<String, Object> entry : entrySet) {
+                        builder.header(entry.getKey(), String.valueOf(entry.getValue()));
+                    }
+                }).build();
+        }
+        else {
+            return HttpClientStreamableHttpTransport.builder(domainURL).connectTimeout(MCP_VALIDATION_CONNECT_TIMEOUT)
+                .endpoint(mcpServerUrl).openConnectionOnStartup(false).resumableStreams(false)
+                .httpRequestCustomizer((builder, method, uri, body, context) -> {
+                    Set<Map.Entry<String, Object>> entrySet = headers.entrySet();
+                    for (Map.Entry<String, Object> entry : entrySet) {
+                        builder.header(entry.getKey(), String.valueOf(entry.getValue()));
+                    }
+                }).build();
+        }
     }
 
     /**
@@ -130,59 +143,53 @@ public class SsResExtMcpService {
         McpClientTransport mcpClientTransport = this.buildMcpClientTransport(sourceContent);
 
         try (McpSyncClient client = McpClient.sync(mcpClientTransport)
-            .initializationTimeout(MCP_VALIDATION_REQUEST_TIMEOUT)
-            .requestTimeout(MCP_VALIDATION_REQUEST_TIMEOUT)
+            .initializationTimeout(MCP_VALIDATION_REQUEST_TIMEOUT).requestTimeout(MCP_VALIDATION_REQUEST_TIMEOUT)
             .build()) {
             // 先 initialize/listTools 验证 MCP 协议链路可用，再只调用一个读/查类优先的 tool 控制耗时和副作用范围。
             client.initialize();
             McpSchema.ListToolsResult listToolsResult = client.listTools();
             if (listToolsResult == null || listToolsResult.tools() == null || listToolsResult.tools().isEmpty()) {
-                throw new IllegalArgumentException(I18nUtil.get(
-                    "resource.json.connectivity.validation.mcp.tools.empty"));
+                throw new IllegalArgumentException(
+                    I18nUtil.get("resource.json.connectivity.validation.mcp.tools.empty"));
             }
 
             McpSchema.Tool validationTool = resolveValidationTool(listToolsResult.tools());
             // 根据 inputSchema 生成最小可调用参数，避免校验逻辑依赖页面测试按钮传入的人工参数。
             Map<String, Object> arguments = buildMcpToolArguments(validationTool.inputSchema());
-            McpSchema.CallToolResult callToolResult = client.callTool(
-                new McpSchema.CallToolRequest(validationTool.name(), arguments));
+            McpSchema.CallToolResult callToolResult = client
+                .callTool(new McpSchema.CallToolRequest(validationTool.name(), arguments));
             if (callToolResult == null) {
-                throw new IllegalArgumentException(I18nUtil.get(
-                    "resource.json.connectivity.validation.mcp.tool.result.empty", validationTool.name()));
+                throw new IllegalArgumentException(
+                    I18nUtil.get("resource.json.connectivity.validation.mcp.tool.result.empty", validationTool.name()));
             }
             if (Boolean.TRUE.equals(callToolResult.isError())) {
-                throw new IllegalArgumentException(I18nUtil.get(
-                    "resource.json.connectivity.validation.mcp.tool.call.failed", validationTool.name()));
+                throw new IllegalArgumentException(
+                    I18nUtil.get("resource.json.connectivity.validation.mcp.tool.call.failed", validationTool.name()));
             }
         }
         catch (IllegalArgumentException e) {
             throw e;
         }
         catch (Exception e) {
-            throw new IllegalArgumentException(I18nUtil.get(
-                "resource.json.connectivity.validation.mcp.connectivity.failed", e.getMessage()), e);
+            throw new IllegalArgumentException(
+                I18nUtil.get("resource.json.connectivity.validation.mcp.connectivity.failed", e.getMessage()), e);
         }
     }
 
     private McpSchema.Tool resolveValidationTool(List<McpSchema.Tool> tools) {
         if (tools == null || tools.isEmpty()) {
-            throw new IllegalArgumentException(I18nUtil.get(
-                "resource.json.connectivity.validation.mcp.tools.empty"));
+            throw new IllegalArgumentException(I18nUtil.get("resource.json.connectivity.validation.mcp.tools.empty"));
         }
         // 优先选择读/查类 tool，依据 tool.name/description 中的动词判断；没有明确读类时再退回第一个，保持兼容。
-        return tools.stream()
-            .filter(this::isReadOnlyTool)
-            .findFirst()
-            .orElse(tools.get(0));
+        return tools.stream().filter(this::isReadOnlyTool).findFirst().orElse(tools.get(0));
     }
 
     private boolean isReadOnlyTool(McpSchema.Tool tool) {
         if (tool == null) {
             return false;
         }
-        String haystack = String.join(" ",
-            String.valueOf(tool.name()),
-            String.valueOf(tool.description())).toLowerCase();
+        String haystack = String.join(" ", String.valueOf(tool.name()), String.valueOf(tool.description()))
+            .toLowerCase();
         if (WRITE_TOOL_KEYWORDS.stream().anyMatch(haystack::contains)) {
             return false;
         }
@@ -195,8 +202,7 @@ public class SsResExtMcpService {
             return arguments;
         }
         List<String> required = inputSchema.required();
-        Set<String> selectedKeys = required == null || required.isEmpty()
-            ? inputSchema.properties().keySet()
+        Set<String> selectedKeys = required == null || required.isEmpty() ? inputSchema.properties().keySet()
             : Set.copyOf(required);
         // 有 required 时只填必填字段；没有 required 时填全部字段，尽量满足工具的最小调用条件。
         for (String key : selectedKeys) {

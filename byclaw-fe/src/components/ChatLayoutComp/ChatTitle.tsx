@@ -5,7 +5,6 @@ import AntdIcon from '@/components/AntdIcon';
 import useGlobal from '@/hooks/useGlobal';
 import ChatAvatar from '@/components/ChatAvatar';
 import { ISession } from '@/typescript/session';
-import { SessionType } from '@/constants/session';
 import CreateTemplate from '@/components/ChatLayoutComp/components/CreateTemplate';
 import styles from './ChatTitle.module.less';
 import { IAgentType } from '@/typescript/agent';
@@ -31,12 +30,6 @@ export default function ChatTitle(props: ChatTitleProps) {
 
   const [openTemplate, setOpenTemplate] = React.useState<boolean>(false);
 
-  const onToggleAchievements = () => {
-    achievementRef.current?.toggle();
-  };
-
-  const isSimpleSession = currentSession?.sessionType === SessionType.simple;
-
   return (
     <>
       <nav className={styles.chatTitle}>
@@ -51,11 +44,6 @@ export default function ChatTitle(props: ChatTitleProps) {
                 <span className={styles.btn} onClick={() => setOpenTemplate(true)} style={{ padding: '0 8px' }}>
                   <AntdIcon type="icon-a-View-grid-listliebiaochakanmoshi" />
                   <span>{intl.formatMessage({ id: 'chatTitle.saveAsTemplate' })}</span>
-                </span>
-              )}
-              {!isSimpleSession && (
-                <span className={styles.btn} onClick={onToggleAchievements}>
-                  <AntdIcon type="icon-a-Folder-withdrawal-onetuichuwenjianjia1" />
                 </span>
               )}
             </div>
