@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ApiOutlined,
   CheckCircleFilled,
@@ -67,6 +67,20 @@ const mapConnectorListItem = (item: ConnectorListItem): Connector => ({
   enableFlag: item.enableFlag,
 });
 
+const authorizationTerminalMessages: Partial<Record<ConnectorAuthorization['status'], string>> = {
+  failed: '授权未完成，请重新发起连接',
+  expired: '授权任务已失效，请重新发起连接',
+  cancelled: '授权已取消，请重新发起连接',
+};
+
+export const getConnectorAuthorizationTerminalError = (
+  authorization: Pick<ConnectorAuthorization, 'status' | 'errorMessage'>
+) => {
+  const fallbackMessage = authorizationTerminalMessages[authorization.status];
+  if (!fallbackMessage) return undefined;
+  return authorization.errorMessage || fallbackMessage;
+};
+
 const ConnectorIcon = ({ connector }: { connector: Connector }) => (
   <span className={styles.connectorIcon}>{connector.icon}</span>
 );
@@ -117,6 +131,55 @@ const ConnectorControl = ({ canAuthorize, value, onChange }: ConnectorControlPro
   const [updatingConnectorIds, setUpdatingConnectorIds] = useState<Set<ConnectorId>>(new Set());
   const [startingAuthorization, setStartingAuthorization] = useState(false);
   const [checkingAuthorization, setCheckingAuthorization] = useState(false);
+  const activeAuthorizationIdRef = useRef<string>();
+  const checkingAuthorizationIdRef = useRef<string>();
+  const startAuthorizationGenerationRef = useRef(0);
+  const authorizationTimerRef = useRef<number>();
+  const cancelledAuthorizationIdsRef = useRef<Set<string>>(new Set());
+
+  const clearAuthorizationTimer = useCallback(() => {
+    if (authorizationTimerRef.current === undefined) return;
+    window.clearInterval(authorizationTimerRef.current);
+    authorizationTimerRef.current = undefined;
+  }, []);
+
+  const invalidateAuthorizationRequests = useCallback(() => {
+    startAuthorizationGenerationRef.current += 1;
+    activeAuthorizationIdRef.current = undefined;
+    checkingAuthorizationIdRef.current = undefined;
+    clearAuthorizationTimer();
+  }, [clearAuthorizationTimer]);
+
+  const closeLocalAuthorization = useCallback(() => {
+    invalidateAuthorizationRequests();
+    setStartingAuthorization(false);
+    setCheckingAuthorization(false);
+    setAuthorizationSession(undefined);
+    setAuthorizingConnector(undefined);
+  }, [invalidateAuthorizationRequests]);
+
+  const cancelAuthorizationInBackground = useCallback((authorizationId: string, reportFailure = true) => {
+    if (cancelledAuthorizationIdsRef.current.has(authorizationId)) return;
+
+    cancelledAuthorizationIdsRef.current.add(authorizationId);
+    const cancellationGeneration = startAuthorizationGenerationRef.current;
+    void cancelConnectorAuthorization(authorizationId).catch(() => {
+      if (reportFailure && startAuthorizationGenerationRef.current === cancellationGeneration) {
+        message.error('后台授权取消失败，请稍后重试');
+      }
+    });
+  }, []);
+
+  useEffect(
+    () => () => {
+      invalidateAuthorizationRequests();
+    },
+    [invalidateAuthorizationRequests]
+  );
+
+  useEffect(() => {
+    if (!canAuthorize) closeLocalAuthorization();
+  }, [canAuthorize, closeLocalAuthorization]);
 
   // value 仅表示本轮聊天实际携带到 payload 的连接器，不等同于账号已完成授权。
   const selectedIds = useMemo(() => new Set(value.map((item) => item.id)), [value]);
@@ -140,50 +203,78 @@ const ConnectorControl = ({ canAuthorize, value, onChange }: ConnectorControlPro
       if (!connector) return;
 
       // 仅在后端确认 connected 后回显连接器并允许消息携带该连接器 ID。
+      clearAuthorizationTimer();
+      activeAuthorizationIdRef.current = undefined;
       setAuthorizedIds((ids) => new Set([...ids, connector.id]));
       setSelected(connector, true);
       setAuthorizationSession(undefined);
       setAuthorizingConnector(undefined);
       message.success(`${connector.name} 已连接`);
     },
-    [connectors, setSelected]
+    [clearAuthorizationTimer, connectors, setSelected]
   );
 
   const checkAuthorizationStatus = useCallback(
     async (silently = false) => {
       if (!authorizationSession) return;
 
+      const authorizationId = authorizationSession.authorizationId;
+      if (
+        activeAuthorizationIdRef.current !== authorizationId ||
+        checkingAuthorizationIdRef.current === authorizationId
+      ) {
+        return;
+      }
+
+      checkingAuthorizationIdRef.current = authorizationId;
       setCheckingAuthorization(true);
       try {
-        const authorization = await getConnectorAuthorization(authorizationSession.authorizationId);
+        const authorization = await getConnectorAuthorization(authorizationId);
+        if (activeAuthorizationIdRef.current !== authorizationId) return;
+
         if (authorization.status === 'connected') {
           // 只有查询到最终成功状态，才允许把连接器加入本轮聊天选择。
           completeAuthorization(authorization);
           return;
         }
-        if (authorization.status === 'failed' || authorization.status === 'expired') {
+        const terminalError = getConnectorAuthorizationTerminalError(authorization);
+        if (terminalError) {
+          clearAuthorizationTimer();
+          activeAuthorizationIdRef.current = undefined;
           setAuthorizationSession(undefined);
           setAuthorizingConnector(undefined);
-          message.error(authorization.errorMessage || '授权未完成，请重新发起连接');
+          message.error(terminalError);
           return;
         }
         if (!silently) message.info('尚未检测到授权完成，请完成授权后重试');
       } catch {
-        if (!silently) message.error('授权状态查询失败，请稍后重试');
+        if (activeAuthorizationIdRef.current === authorizationId && !silently) {
+          message.error('授权状态查询失败，请稍后重试');
+        }
       } finally {
-        setCheckingAuthorization(false);
+        if (checkingAuthorizationIdRef.current === authorizationId) {
+          checkingAuthorizationIdRef.current = undefined;
+          setCheckingAuthorization(false);
+        }
       }
     },
-    [authorizationSession, completeAuthorization]
+    [authorizationSession, clearAuthorizationTimer, completeAuthorization]
   );
 
   useEffect(() => {
+    clearAuthorizationTimer();
     if (!authorizationSession || authorizationSession.status !== 'pending') return undefined;
 
     // 后端负责处理三方回调，前端只轮询本次授权任务的状态。
     const timer = window.setInterval(() => void checkAuthorizationStatus(true), 3000);
-    return () => window.clearInterval(timer);
-  }, [authorizationSession, checkAuthorizationStatus]);
+    authorizationTimerRef.current = timer;
+    return () => {
+      window.clearInterval(timer);
+      if (authorizationTimerRef.current === timer) {
+        authorizationTimerRef.current = undefined;
+      }
+    };
+  }, [authorizationSession, checkAuthorizationStatus, clearAuthorizationTimer]);
 
   const loadAuthorizedConnectors = useCallback(async () => {
     const hasCachedConnectors = connectors.length > 0;
@@ -231,6 +322,8 @@ const ConnectorControl = ({ canAuthorize, value, onChange }: ConnectorControlPro
 
   const beginAuthorization = (connector: Connector) => {
     // 先展示权限说明，再进入对应平台的授权步骤。
+    invalidateAuthorizationRequests();
+    setStartingAuthorization(false);
     setAuthorizingConnector(connector);
     setAuthorizationSession(undefined);
   };
@@ -261,6 +354,8 @@ const ConnectorControl = ({ canAuthorize, value, onChange }: ConnectorControlPro
   const startAuthorization = async () => {
     if (!authorizingConnector) return;
 
+    const requestGeneration = startAuthorizationGenerationRef.current + 1;
+    startAuthorizationGenerationRef.current = requestGeneration;
     setStartingAuthorization(true);
     try {
       // 三方密钥、回调 code 换 token 均由后端处理，前端只使用一次性授权任务信息。
@@ -268,34 +363,46 @@ const ConnectorControl = ({ canAuthorize, value, onChange }: ConnectorControlPro
         connectorId: authorizingConnector.id,
         redirectUrl: `${window.location.origin}${window.location.pathname}`,
       });
+      if (startAuthorizationGenerationRef.current !== requestGeneration) {
+        if (authorization.status === 'pending' && authorization.authorizationId) {
+          cancelAuthorizationInBackground(authorization.authorizationId, false);
+        }
+        return;
+      }
+
       if (authorization.status === 'connected') {
         completeAuthorization(authorization);
         return;
       }
-      if (authorization.status === 'failed' || authorization.status === 'expired') {
-        throw new Error(authorization.errorMessage || '授权任务已失效，请重新发起连接');
+      const terminalError = getConnectorAuthorizationTerminalError(authorization);
+      if (terminalError) {
+        activeAuthorizationIdRef.current = undefined;
+        setAuthorizationSession(undefined);
+        message.error(terminalError);
+        return;
       }
       if (!authorization.authorizationUrl && !authorization.qrCodeUrl) {
         throw new Error('授权服务未返回授权链接或二维码');
       }
+      activeAuthorizationIdRef.current = authorization.authorizationId;
       setAuthorizationSession(authorization);
     } catch (error) {
+      if (startAuthorizationGenerationRef.current !== requestGeneration) return;
       message.error(error instanceof Error ? error.message : '发起授权失败，请稍后重试');
     } finally {
-      setStartingAuthorization(false);
+      if (startAuthorizationGenerationRef.current === requestGeneration) {
+        setStartingAuthorization(false);
+      }
     }
   };
 
-  const cancelAuthorization = async () => {
-    if (authorizationSession) {
-      try {
-        await cancelConnectorAuthorization(authorizationSession.authorizationId);
-      } catch {
-        message.error('后台授权取消失败，请稍后重试');
-      }
-    }
-    setAuthorizationSession(undefined);
-    setAuthorizingConnector(undefined);
+  const cancelAuthorization = () => {
+    const authorizationId = authorizationSession?.authorizationId;
+    if (authorizationId && cancelledAuthorizationIdsRef.current.has(authorizationId)) return;
+
+    closeLocalAuthorization();
+    if (!authorizationId) return;
+    cancelAuthorizationInBackground(authorizationId);
   };
 
   // 未登录或功能开关关闭时，不在聊天框显示连接器入口。
@@ -415,7 +522,7 @@ const ConnectorControl = ({ canAuthorize, value, onChange }: ConnectorControlPro
         open={!!authorizingConnector && !authorizationSession}
         zIndex={1200}
         width={570}
-        onCancel={() => setAuthorizingConnector(undefined)}
+        onCancel={() => void cancelAuthorization()}
       >
         {authorizingConnector && (
           <div className={styles.authorizationContent}>

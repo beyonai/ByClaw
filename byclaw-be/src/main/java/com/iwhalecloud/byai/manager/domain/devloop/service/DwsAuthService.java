@@ -1,6 +1,7 @@
 package com.iwhalecloud.byai.manager.domain.devloop.service;
 
 import java.io.BufferedReader;
+import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -10,8 +11,10 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -67,14 +70,14 @@ public class DwsAuthService {
     @Value("${file.storage.local.path:${byclaw.sandbox.volume.file-root:/tmp/byclaw-storage}}")
     private String fileStorageRoot;
 
-    /** 用户私有工作区目录名,dws 配置(profiles)放到 {bucket}/by/.dws,与 .sessions 平级。 */
-    private static final String DWS_CONFIG_SEGMENT = "by/.dws/config";
+    /** 用户私有连接器工作区目录名,dws 配置(profiles)放到 {bucket}/by/.connector-auth/.dws/config。 */
+    private static final String DWS_CONFIG_SEGMENT = "by/.connector-auth/.dws/config";
 
     /**
      * dws 登录态(DEK/token 密文)实际存在 $HOME/.local/share/dws-cli,dws 只认 HOME,不认 XDG_DATA_HOME/DWS_CONFIG_DIR。
-     * 这才是隔离的关键:每个用户单独一份 HOME,放到 {bucket}/by/.dws-home;共用 HOME 会导致一人授权全员"已授权"。
+     * 这才是隔离的关键:每个用户单独一份 HOME,放到 {bucket}/by/.connector-auth/.dws;共用 HOME 会导致一人授权全员"已授权"。
      */
-    private static final String DWS_HOME_SEGMENT = "by/.dws";
+    private static final String DWS_HOME_SEGMENT = "by/.connector-auth/.dws";
 
     @Autowired
     private UserPrivateParamMapper userPrivateParamMapper;
@@ -88,9 +91,34 @@ public class DwsAuthService {
     @Autowired
     private LoginApplicationService loginApplicationService;
 
-    // 后台运行的 device flow 进程
-    private final AtomicReference<Process> deviceFlowProcess = new AtomicReference<>(null);
-    private final AtomicReference<Long> deviceFlowUserId = new AtomicReference<>(null);
+    @FunctionalInterface
+    interface DwsProcessLauncher {
+
+        Process start(ProcessBuilder builder) throws IOException;
+    }
+
+    static record DeviceFlowRegistration(Long userId, Process process) {
+    }
+
+    private static final class DeviceFlowStartLock {
+
+        private final ReentrantLock lock = new ReentrantLock();
+        private final AtomicInteger users = new AtomicInteger();
+    }
+
+    private final DwsProcessLauncher processLauncher;
+
+    // 后台运行的 device flow 进程，按授权任务隔离。
+    final ConcurrentHashMap<String, DeviceFlowRegistration> deviceFlowRegistrations = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, DeviceFlowStartLock> deviceFlowStartLocks = new ConcurrentHashMap<>();
+
+    public DwsAuthService() {
+        this(ProcessBuilder::start);
+    }
+
+    DwsAuthService(DwsProcessLauncher processLauncher) {
+        this.processLauncher = processLauncher;
+    }
 
     /** 解析用户 bucket 的绝对路径根 {fileStorageRoot}/byclaw-{userCode};失败返回 null。 */
     private String resolveBucketBase(Long userId) {
@@ -167,7 +195,9 @@ public class DwsAuthService {
     private ProcessBuilder newDwsProcess(Long userId, List<String> cmd) {
         ProcessBuilder pb = new ProcessBuilder(cmd);
         pb.redirectErrorStream(true);
-        applyUserDwsEnv(pb.environment(), userId);
+        if (!applyUserDwsEnv(pb.environment(), userId)) {
+            throw new IllegalStateException("Unable to isolate DWS environment for userId=" + userId);
+        }
         return pb;
     }
 
@@ -178,38 +208,61 @@ public class DwsAuthService {
      * 前端拿到 URL 后 window.open() 让用户授权，然后轮询 /dws/authStatus 等成功。
      */
     public Map<String, Object> startDeviceAuth() {
-        // 授权归属当前登录用户:token 落到该用户 bucket 的 .dws,后台线程也据此记录,不再"取最近一条"猜人。
-        final Long authUserId = CurrentUserHolder.getCurrentUserId();
-        try {
-            // 如果已有进程在跑，先 kill
-            Process existing = deviceFlowProcess.getAndSet(null);
-            deviceFlowUserId.set(null);
-            if (existing != null && existing.isAlive()) {
-                existing.destroyForcibly();
-            }
+        Long userId = CurrentUserHolder.getCurrentUserId();
+        return startDeviceAuth(userId, legacyAuthorizationId(userId));
+    }
 
+    /**
+     * 为指定用户和授权任务启动 Device Flow 认证。
+     */
+    public Map<String, Object> startDeviceAuth(Long userId, String authorizationId) {
+        if (!isValidUserId(userId) || StringUtils.isBlank(authorizationId)) {
+            return Map.of("success", false, "message", "Invalid user or authorization id");
+        }
+
+        final Long authUserId = userId;
+        final String authId = authorizationId.trim();
+        DeviceFlowStartLock startLock = acquireStartLock(authId);
+        try {
+            return startDeviceAuthLocked(authUserId, authId);
+        } finally {
+            releaseStartLock(authId, startLock);
+        }
+    }
+
+    private Map<String, Object> startDeviceAuthLocked(Long authUserId, String authId) {
+        DeviceFlowRegistration existing = deviceFlowRegistrations.get(authId);
+        if (existing != null && existing.process() != null && existing.process().isAlive()) {
+            return Map.of("success", false, "message", "Authorization is already in progress");
+        }
+        if (existing != null) {
+            deviceFlowRegistrations.remove(authId, existing);
+        }
+
+        DeviceFlowRegistration registration = null;
+        BufferedReader reader = null;
+        boolean drainStarted = false;
+        try {
             List<String> cmd = List.of(DWS_BIN, "auth", "login", "--device", "-y");
-            log.info("[DwsAuth] starting device flow for userId={}: {}", authUserId, String.join(" ", cmd));
+            log.info("[DwsAuth] starting device flow, authorizationId={}, userId={}", authId, authUserId);
 
             ProcessBuilder pb = newDwsProcess(authUserId, cmd);
-            Process process = pb.start();
-            deviceFlowProcess.set(process);
-            deviceFlowUserId.set(authUserId);
+            Process process = processLauncher.start(pb);
+            registration = new DeviceFlowRegistration(authUserId, process);
+            deviceFlowRegistrations.put(authId, registration);
 
             // 读取前几行输出，提取 userCode 和 verificationUrl
             // dws 会先输出设备码信息，然后 block 轮询
-            BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
+            reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
             String userCode = null;
             String verificationUrl = null;
 
             long startTime = System.currentTimeMillis();
-            StringBuilder fullOutput = new StringBuilder();
 
             while (System.currentTimeMillis() - startTime < 10000) {
                 if (reader.ready()) {
                     String line = reader.readLine();
                     if (line == null) break;
-                    fullOutput.append(line).append("\n");
 
                     // 解析 authorization code
                     Matcher codeMatcher = USER_CODE_PATTERN.matcher(line);
@@ -233,35 +286,43 @@ public class DwsAuthService {
             }
 
             if (userCode == null || verificationUrl == null) {
-                log.error("[DwsAuth] failed to parse device flow output: {}", fullOutput);
-                process.destroyForcibly();
-                deviceFlowProcess.set(null);
-                deviceFlowUserId.set(null);
-                return Map.of("success", false, "message", I18nUtil.get("devloop.dws.device.code.failed"));
+                log.error("[DwsAuth] failed to parse device flow output, authorizationId={}, userId={}",
+                    authId, authUserId);
+                removeAndDestroy(authId, registration);
+                closeReader(reader, authId, authUserId);
+                return Map.of("success", false,
+                    "message", safeI18n("devloop.dws.device.code.failed", "获取设备码失败"));
             }
 
-            log.info("[DwsAuth] device flow started: userCode={}, url={}", userCode, verificationUrl);
+            log.info("[DwsAuth] device flow started, authorizationId={}, userId={}", authId, authUserId);
+            startOutputDrain(reader, authId, authUserId);
+            drainStarted = true;
 
             // 启动后台线程等待进程结束，处理授权完成/超时
-            final Process bgProcess = process;
+            final DeviceFlowRegistration bgRegistration = registration;
+            final Process bgProcess = bgRegistration.process();
             Thread waitThread = new Thread(() -> {
                 try {
                     boolean finished = bgProcess.waitFor(900, TimeUnit.SECONDS);
                     if (finished && bgProcess.exitValue() == 0) {
-                        log.info("[DwsAuth] device flow completed successfully for userId={}", authUserId);
+                        log.info("[DwsAuth] device flow completed successfully, authorizationId={}, userId={}",
+                            authId, authUserId);
                         // 记录授权到 DB:用发起授权的用户身份,不再取最近一条猜人。
                         recordAuthToDbForUser(authUserId);
                     } else if (!finished) {
-                        log.warn("[DwsAuth] device flow timed out (900s)");
+                        log.warn("[DwsAuth] device flow timed out (900s), authorizationId={}, userId={}",
+                            authId, authUserId);
                         bgProcess.destroyForcibly();
                     } else {
-                        log.warn("[DwsAuth] device flow exited with code: {}", bgProcess.exitValue());
+                        log.warn("[DwsAuth] device flow exited, authorizationId={}, userId={}, exitCode={}",
+                            authId, authUserId, bgProcess.exitValue());
                     }
                 } catch (InterruptedException e) {
-                    log.debug("[DwsAuth] device flow wait interrupted");
+                    Thread.currentThread().interrupt();
+                    log.debug("[DwsAuth] device flow wait interrupted, authorizationId={}, userId={}",
+                        authId, authUserId);
                 } finally {
-                    deviceFlowProcess.compareAndSet(bgProcess, null);
-                    deviceFlowUserId.compareAndSet(authUserId, null);
+                    deviceFlowRegistrations.remove(authId, bgRegistration);
                 }
             }, "dws-device-flow-waiter");
             waitThread.setDaemon(true);
@@ -273,24 +334,116 @@ public class DwsAuthService {
                 "verificationUrl", verificationUrl
             );
         } catch (Exception e) {
-            log.error("[DwsAuth] startDeviceAuth failed", e);
+            removeAndDestroy(authId, registration);
+            if (!drainStarted) {
+                closeReader(reader, authId, authUserId);
+            }
+            log.error("[DwsAuth] startDeviceAuth failed, authorizationId={}, userId={}, errorType={}",
+                authId, authUserId, e.getClass().getSimpleName());
             return Map.of("success", false,
-                "message", I18nUtil.get("devloop.dws.device.auth.start.failed", e.getMessage()));
+                "message", safeI18n("devloop.dws.auth.start.failed", "启动授权失败"));
         }
     }
 
-    /** 取消指定用户正在进行的 Device Flow 授权。 */
-    public boolean cancelDeviceAuth(Long userId) {
-        if (userId == null || !userId.equals(deviceFlowUserId.get())) {
+    /** 取消指定授权任务，且仅允许任务所属用户取消。 */
+    public boolean cancelDeviceAuth(String authorizationId, Long userId) {
+        if (StringUtils.isBlank(authorizationId) || !isValidUserId(userId)) {
             return false;
         }
-        Process process = deviceFlowProcess.getAndSet(null);
-        deviceFlowUserId.compareAndSet(userId, null);
-        if (process != null && process.isAlive()) {
-            process.destroyForcibly();
-            return true;
+        String authId = authorizationId.trim();
+        DeviceFlowRegistration registration = deviceFlowRegistrations.get(authId);
+        if (registration == null || !userId.equals(registration.userId())) {
+            return false;
         }
-        return false;
+        if (!deviceFlowRegistrations.remove(authId, registration)) {
+            return false;
+        }
+        destroyIfAlive(registration);
+        return true;
+    }
+
+    /** 取消指定用户当前登记的全部 Device Flow 授权。 */
+    public boolean cancelDeviceAuth(Long userId) {
+        if (!isValidUserId(userId)) {
+            return false;
+        }
+        return cancelDeviceAuth(legacyAuthorizationId(userId), userId);
+    }
+
+    private String legacyAuthorizationId(Long userId) {
+        return "legacy-dws-user-" + userId;
+    }
+
+    private boolean isValidUserId(Long userId) {
+        return userId != null && userId > 0;
+    }
+
+    private void removeAndDestroy(String authorizationId, DeviceFlowRegistration registration) {
+        if (registration != null) {
+            deviceFlowRegistrations.remove(authorizationId, registration);
+            destroyIfAlive(registration);
+        }
+    }
+
+    private void destroyIfAlive(DeviceFlowRegistration registration) {
+        if (registration != null && registration.process() != null && registration.process().isAlive()) {
+            registration.process().destroyForcibly();
+        }
+    }
+
+    private DeviceFlowStartLock acquireStartLock(String authorizationId) {
+        DeviceFlowStartLock startLock = deviceFlowStartLocks.compute(authorizationId, (key, existing) -> {
+            DeviceFlowStartLock current = existing == null ? new DeviceFlowStartLock() : existing;
+            current.users.incrementAndGet();
+            return current;
+        });
+        startLock.lock.lock();
+        return startLock;
+    }
+
+    private void releaseStartLock(String authorizationId, DeviceFlowStartLock startLock) {
+        startLock.lock.unlock();
+        deviceFlowStartLocks.computeIfPresent(authorizationId, (key, current) -> {
+            if (current != startLock) {
+                return current;
+            }
+            return current.users.decrementAndGet() == 0 ? null : current;
+        });
+    }
+
+    private void startOutputDrain(BufferedReader reader, String authorizationId, Long userId) {
+        Thread drainThread = new Thread(() -> {
+            try (BufferedReader ownedReader = reader) {
+                while (ownedReader.readLine() != null) {
+                    // Drain without retaining or logging device-flow output.
+                }
+            } catch (IOException e) {
+                log.debug("[DwsAuth] device flow output drain ended, authorizationId={}, userId={}, errorType={}",
+                    authorizationId, userId, e.getClass().getSimpleName());
+            }
+        }, "dws-device-flow-output-drain");
+        drainThread.setDaemon(true);
+        drainThread.start();
+    }
+
+    private void closeReader(BufferedReader reader, String authorizationId, Long userId) {
+        if (reader == null) {
+            return;
+        }
+        try {
+            reader.close();
+        } catch (IOException e) {
+            log.debug("[DwsAuth] device flow reader close failed, authorizationId={}, userId={}, errorType={}",
+                authorizationId, userId, e.getClass().getSimpleName());
+        }
+    }
+
+    private String safeI18n(String key, String fallback) {
+        try {
+            return I18nUtil.get(key);
+        } catch (RuntimeException e) {
+            return fallback;
+        }
     }
 
     /**

@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS byai.byai_connector_info
     icon_url       VARCHAR(512),
     description    TEXT,
     connector_type VARCHAR(32)  NOT NULL,
+    provider_code  VARCHAR(64),
     auth_mode      VARCHAR(32),
     auth_config    VARCHAR(4096),
     request_config VARCHAR(4096),
@@ -32,7 +33,8 @@ COMMENT ON COLUMN byai.byai_connector_info.connector_name IS '连接器展示名
 COMMENT ON COLUMN byai.byai_connector_info.icon_url IS '连接器图标地址';
 COMMENT ON COLUMN byai.byai_connector_info.description IS '连接器功能简介';
 COMMENT ON COLUMN byai.byai_connector_info.connector_type IS '连接器类型：SYSTEM=系统内置，CUSTOM=自定义连接器';
-COMMENT ON COLUMN byai.byai_connector_info.auth_mode IS '授权方式：NONE、OAUTH2、AK_SK、PASSWORD、TOKEN，允许为空';
+COMMENT ON COLUMN byai.byai_connector_info.provider_code IS '授权 Provider 路由编码';
+COMMENT ON COLUMN byai.byai_connector_info.auth_mode IS '授权方式：NONE、OAUTH2、AK_SK、PASSWORD、TOKEN、DEVICE_FLOW、CLI_INIT，允许为空';
 COMMENT ON COLUMN byai.byai_connector_info.auth_config IS '连接器通用授权模板配置，JSON字符串';
 COMMENT ON COLUMN byai.byai_connector_info.request_config IS '连接器公共请求配置，JSON字符串';
 COMMENT ON COLUMN byai.byai_connector_info.sort IS '前端页面排序权重';
@@ -78,12 +80,41 @@ $$;
 CREATE INDEX IF NOT EXISTS idx_byai_connector_auth_user_connector
     ON byai.byai_connector_auth (user_id, connector_id, status_cd, enable_flag, expire_time);
 
+WITH ranked_active_authorizations AS (
+    SELECT auth_id,
+           ROW_NUMBER() OVER (
+               PARTITION BY user_id, connector_id
+               ORDER BY CASE
+                            WHEN enable_flag = 'Y'
+                                 AND (expire_time IS NULL OR expire_time > CURRENT_TIMESTAMP)
+                                THEN 0
+                            ELSE 1
+                        END ASC,
+                        update_time DESC NULLS LAST,
+                        create_time DESC NULLS LAST,
+                        auth_id DESC NULLS LAST
+           ) AS row_num
+    FROM byai.byai_connector_auth
+    WHERE status_cd = '00A'
+)
+UPDATE byai.byai_connector_auth AS duplicate_auth
+SET status_cd = '00X',
+    enable_flag = 'N',
+    update_time = CURRENT_TIMESTAMP
+FROM ranked_active_authorizations AS ranked
+WHERE duplicate_auth.auth_id = ranked.auth_id
+  AND ranked.row_num > 1;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uk_byai_connector_auth_active_user_connector
+    ON byai.byai_connector_auth (user_id, connector_id)
+    WHERE status_cd = '00A';
+
 COMMENT ON TABLE byai.byai_connector_auth IS '用户连接器授权绑定记录';
 COMMENT ON COLUMN byai.byai_connector_auth.auth_id IS '主键，Long类型授权记录ID，业务层生成';
 COMMENT ON COLUMN byai.byai_connector_auth.user_id IS '归属用户ID';
 COMMENT ON COLUMN byai.byai_connector_auth.connector_id IS '关联byai.byai_connector_info.connector_id';
 COMMENT ON COLUMN byai.byai_connector_auth.auth_name IS '用户自定义授权账号别名';
-COMMENT ON COLUMN byai.byai_connector_auth.auth_mode IS '授权方式（冗余，与连接器模板保持一致）：NONE、OAUTH2、AK_SK、PASSWORD、TOKEN，允许为空';
+COMMENT ON COLUMN byai.byai_connector_auth.auth_mode IS '授权方式（冗余，与连接器模板保持一致）：NONE、OAUTH2、AK_SK、PASSWORD、TOKEN、DEVICE_FLOW、CLI_INIT，允许为空';
 COMMENT ON COLUMN byai.byai_connector_auth.auth_credential IS '加密后的授权凭证JSON，禁止明文存储密钥';
 COMMENT ON COLUMN byai.byai_connector_auth.expire_time IS '凭证过期时间';
 COMMENT ON COLUMN byai.byai_connector_auth.enable_flag IS '连接启用标识：Y=开启连接，N=关闭连接，新建默认关闭';

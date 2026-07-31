@@ -30,7 +30,7 @@ public class ConnectorAuth {
     /** 用户自定义授权账号别名 */
     private String authName;
 
-    /** 授权方式（冗余）：NONE、OAUTH2、AK_SK、PASSWORD、TOKEN，允许为空 */
+    /** 授权方式（冗余）：NONE、OAUTH2、AK_SK、PASSWORD、TOKEN、DEVICE_FLOW、CLI_INIT，允许为空 */
     private String authMode;
 
     /** 加密后的授权凭证JSON，禁止明文存储密钥 */

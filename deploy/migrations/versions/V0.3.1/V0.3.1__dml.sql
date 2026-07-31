@@ -1,3 +1,61 @@
+-- 初始化企业协作平台连接器元信息，仅补充缺失记录。
+INSERT INTO byai.byai_connector_info (
+    connector_id,
+    connector_code,
+    connector_name,
+    description,
+    connector_type,
+    provider_code,
+    auth_mode,
+    auth_config,
+    request_config,
+    sort
+)
+SELECT
+    nextval('byai.seq_any_table'),
+    seed.connector_code,
+    seed.connector_name,
+    seed.description,
+    'SYSTEM',
+    seed.provider_code,
+    seed.auth_mode,
+    seed.auth_config,
+    '{}',
+    seed.sort
+FROM (
+    SELECT 'dingtalk' AS connector_code,
+           '钉钉' AS connector_name,
+           '通过 DWS 连接钉钉工作空间' AS description,
+           'dws-dingtalk' AS provider_code,
+           'DEVICE_FLOW' AS auth_mode,
+           '{}' AS auth_config,
+           10 AS sort
+    UNION ALL
+    SELECT 'lark', '飞书', '通过 lark-cli 连接飞书工作空间', 'lark-cli', 'DEVICE_FLOW',
+           '{"domains":["docs","drive","wiki"]}', 20
+    UNION ALL
+    SELECT 'wecom', '企业微信', '企业微信授权能力即将开放', 'wecom-cli', 'CLI_INIT', '{}', 30
+) seed
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM byai.byai_connector_info existing
+    WHERE existing.connector_code = seed.connector_code
+);
+
+-- 统一修正新增和已有连接器的 Provider 路由与授权方式。
+UPDATE byai.byai_connector_info
+SET provider_code = CASE connector_code
+        WHEN 'dingtalk' THEN 'dws-dingtalk'
+        WHEN 'lark' THEN 'lark-cli'
+        WHEN 'wecom' THEN 'wecom-cli'
+    END,
+    auth_mode = CASE connector_code
+        WHEN 'dingtalk' THEN 'DEVICE_FLOW'
+        WHEN 'lark' THEN 'DEVICE_FLOW'
+        WHEN 'wecom' THEN 'CLI_INIT'
+    END
+WHERE connector_code IN ('dingtalk', 'lark', 'wecom');
+
 -- 知识采集默认绑定迁移到编排 Skill；仅迁移仍使用旧 bycli 绑定的内置资源。
 UPDATE byai.ss_resource
 SET resource_code = 'knowledge-collection',

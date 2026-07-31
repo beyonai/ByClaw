@@ -22,5 +22,7 @@ public class ConnectorAuthorizationDto {
 
     private Date expiresAt;
 
+    private String errorCode;
+
     private String errorMessage;
 }

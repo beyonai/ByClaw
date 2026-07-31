@@ -28,7 +28,7 @@ export interface ConnectorListPage {
 }
 
 // 后端保存的连接状态；connected 表示可以被当前用户用于聊天检索。
-export type ConnectorConnectionStatus = 'connected' | 'disabled' | 'pending' | 'failed' | 'expired';
+export type ConnectorConnectionStatus = 'connected' | 'disabled' | 'pending' | 'failed' | 'expired' | 'cancelled';
 
 export interface ConnectorConnection {
   connectorId: ConnectorId;
@@ -52,6 +52,7 @@ export interface ConnectorAuthorization {
   qrCodeUrl?: string;
   authorizationUrl?: string;
   expiresAt?: string;
+  errorCode?: string;
   errorMessage?: string;
 }
 

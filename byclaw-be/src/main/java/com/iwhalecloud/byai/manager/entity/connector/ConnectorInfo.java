@@ -24,6 +24,9 @@ public class ConnectorInfo {
     /** 连接器业务编码，全局唯一 */
     private String connectorCode;
 
+    /** 授权 Provider 路由编码 */
+    private String providerCode;
+
     /** 连接器展示名称 */
     private String connectorName;
 
@@ -36,7 +39,7 @@ public class ConnectorInfo {
     /** 连接器类型：SYSTEM=系统内置，CUSTOM=自定义连接器 */
     private String connectorType;
 
-    /** 授权方式：NONE、OAUTH2、AK_SK、PASSWORD、TOKEN，允许为空 */
+    /** 授权方式：NONE、OAUTH2、AK_SK、PASSWORD、TOKEN、DEVICE_FLOW、CLI_INIT，允许为空 */
     private String authMode;
 
     /** 连接器通用授权模板配置，JSON字符串 */

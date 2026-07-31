@@ -1,6 +1,9 @@
 package com.iwhalecloud.byai.manager.domain.connector.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONObject;
+import com.iwhalecloud.byai.common.ecrypt.Sm4Util;
 import com.iwhalecloud.byai.common.login.auth.CurrentUserHolder;
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorAuth;
 import com.iwhalecloud.byai.manager.entity.connector.ConnectorInfo;
@@ -8,12 +11,19 @@ import com.iwhalecloud.byai.manager.mapper.connector.ConnectorAuthMapper;
 import com.iwhalecloud.byai.manager.mapper.connector.ConnectorInfoMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
+
+import java.util.Set;
 
 /**
  * 用户连接器授权绑定领域服务。
  */
 @Service
 public class ConnectorAuthService {
+
+    private static final Set<String> CLI_AUTH_MODES = Set.of("DEVICE_FLOW", "CLI_INIT");
+    private static final Set<String> CLI_CREDENTIAL_KEYS = Set.of(
+        "providerCode", "authorizationId", "credentialReference", "accountId", "accountName");
 
     @Autowired
     private ConnectorAuthMapper connectorAuthMapper;
@@ -90,7 +100,8 @@ public class ConnectorAuthService {
             throw new IllegalArgumentException("连接器不存在或已失效");
         }
         String authMode = connectorInfo.getAuthMode();
-        if (authMode != null && !java.util.Set.of("NONE", "OAUTH2", "AK_SK", "PASSWORD", "TOKEN")
+        if (authMode != null && !java.util.Set.of(
+                "NONE", "OAUTH2", "AK_SK", "PASSWORD", "TOKEN", "DEVICE_FLOW", "CLI_INIT")
             .contains(authMode)) {
             throw new IllegalArgumentException("authMode不受支持");
         }
@@ -102,6 +113,9 @@ public class ConnectorAuthService {
         }
         if ("NONE".equals(authMode) && org.springframework.util.StringUtils.hasText(connectorAuth.getAuthCredential())) {
             throw new IllegalArgumentException("NONE授权方式不能携带授权凭证");
+        }
+        if (CLI_AUTH_MODES.contains(authMode)) {
+            validateCliCredential(connectorAuth.getAuthCredential());
         }
         if (connectorAuth.getExpireTime() != null
             && connectorAuth.getExpireTime().before(new java.util.Date())
@@ -119,5 +133,37 @@ public class ConnectorAuthService {
         if (connectorAuth.getStatusCd() == null) {
             connectorAuth.setStatusCd("00A");
         }
+    }
+
+    private void validateCliCredential(String credentialCipher) {
+        try {
+            JSONObject credential = JSON.parseObject(Sm4Util.decrypt(credentialCipher));
+            if (credential == null || !CLI_CREDENTIAL_KEYS.containsAll(credential.keySet())) {
+                throw invalidCliCredential();
+            }
+            validateCredentialValue(credential, "providerCode", true);
+            validateCredentialValue(credential, "credentialReference", false);
+            validateCredentialValue(credential, "accountId", false);
+            validateCredentialValue(credential, "accountName", false);
+        } catch (RuntimeException e) {
+            throw invalidCliCredential();
+        }
+    }
+
+    private void validateCredentialValue(JSONObject credential, String key, boolean required) {
+        if (!credential.containsKey(key)) {
+            if (required) {
+                throw invalidCliCredential();
+            }
+            return;
+        }
+        Object value = credential.get(key);
+        if (!(value instanceof String text) || !StringUtils.hasText(text)) {
+            throw invalidCliCredential();
+        }
+    }
+
+    private IllegalArgumentException invalidCliCredential() {
+        return new IllegalArgumentException("授权凭证格式无效");
     }
 }
