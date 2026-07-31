@@ -70,11 +70,11 @@ export interface ByFrameworkWorkerConfig {
 /** 从环境变量加载并校验应用配置，避免无效端口或半配置模型进入运行期。 */
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const defaults = APP_CONFIG_DEFAULTS;
-  if (
-    (env.DB_TYPE ?? defaults.database.type).toLowerCase() !==
-    defaults.database.type
-  ) {
-    throw new Error("DB_TYPE must be postgresql");
+  const databaseType = (
+    env.DB_TYPE ?? defaults.database.type
+  ).toLowerCase();
+  if (!["postgresql", "opengauss"].includes(databaseType)) {
+    throw new Error("DB_TYPE must be postgresql or opengauss");
   }
   const port = integer(
     env.PORT ?? String(defaults.http.port),

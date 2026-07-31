@@ -56,6 +56,15 @@ describe("应用配置", () => {
     expect(config.instanceId).toBe("instance-a");
   });
 
+  it("OpenGauss 使用 PostgreSQL 协议驱动", () => {
+    const config = loadConfig({
+      ...required,
+      DB_TYPE: "opengauss",
+    });
+
+    expect(config.database.host).toBe("postgres.internal");
+  });
+
   it("环境变量优先于代码默认值", () => {
     const config = loadConfig({
       ...required,
