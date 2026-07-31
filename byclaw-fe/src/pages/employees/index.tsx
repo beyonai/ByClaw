@@ -19,6 +19,7 @@ import { getAgentChatAvatar, agentHandler, isSandboxAgent } from '@/utils/agent'
 import { AgentInfo } from '@/pages/digitalEmployees/components/AllDigitalEmployees/components/AvatarCardItem';
 // import useAppStore from '@/models/common/useAppStore';
 import { getAllDigitalEmployeesV2 } from '@/service/digitalEmployees';
+import { getStoredProjectScopeId } from '@/pages/projectSpace/constants';
 
 import RenderRightTop from '../digitalEmployees/components/AllDigitalEmployees/RenderRightTop';
 import RenderRightBottom from '../digitalEmployees/components/AllDigitalEmployees/RenderRightBottom';
@@ -30,6 +31,20 @@ import { canShowEmployeeChat, type EmployeeUsePermission } from './chatPermissio
 import styles from './index.module.less';
 
 const { Paragraph } = Typography;
+const DEFAULT_PROJECT_ID = -1;
+
+type ProjectChatContext = {
+  projectId?: number;
+  projectName?: string;
+};
+
+const isValidProjectContextId = (projectId: number) =>
+  Number.isFinite(projectId) && (projectId === DEFAULT_PROJECT_ID || projectId > 0);
+
+const getStoredProjectChatContext = (): ProjectChatContext => {
+  const projectId = Number(getStoredProjectScopeId());
+  return isValidProjectContextId(projectId) ? { projectId } : {};
+};
 
 const Employees = () => {
   // const { ENV } = useAppStore();
@@ -49,6 +64,8 @@ const Employees = () => {
 
   const [isBottom, setIsBottom] = useState(!!sessionId);
   const [isLoading, setIsLoading] = useState(true);
+  // 员工页首次打开时从已恢复的项目选择读取归属，避免首条消息回退到默认项目。
+  const [projectChatContext, setProjectChatContext] = useState<ProjectChatContext>(getStoredProjectChatContext);
 
   const [appInfo, setAppInfo] = useState<Record<string, any>>({});
   const [coreCompetencies, setCoreCompetencies] = useState<any[]>([]);
@@ -160,6 +177,34 @@ const Employees = () => {
   useEffect(() => {
     setIsBottom(!!sessionId);
   }, [sessionId]);
+
+  useEffect(() => {
+    const handleActiveProjectChange = (payload: { projectId?: string | number; projectName?: string }) => {
+      const projectId = Number(payload?.projectId);
+      if (!isValidProjectContextId(projectId)) {
+        setProjectChatContext({});
+        return;
+      }
+      setProjectChatContext({
+        projectId,
+        projectName: payload?.projectName,
+      });
+    };
+
+    // 项目下拉切换后同步员工页，保证尚未创建的会话使用新的项目归属。
+    EventEmitter.on('projectSpace-active-project-change', handleActiveProjectChange);
+    return () => {
+      EventEmitter.off('projectSpace-active-project-change', handleActiveProjectChange);
+    };
+  }, [EventEmitter]);
+
+  const projectChatExtraParams = useMemo(() => {
+    // 已存在会话不应因左侧项目切换而改变归属，仅新会话首条消息携带项目。
+    if (sessionId || !projectChatContext.projectId) {
+      return {};
+    }
+    return projectChatContext;
+  }, [projectChatContext, sessionId]);
 
   useEffect(() => {
     if (employeeTab !== 'enterprise' || !employeeResourceId) {
@@ -368,6 +413,7 @@ const Employees = () => {
                 }}
                 isBottom={isBottom}
                 setIsBottom={setIsBottom}
+                sendExtraParams={projectChatExtraParams}
               />
             </div>
           )}

@@ -93,8 +93,8 @@
                 </foreach>
             </if>
             <if test="searchKeyword != null and searchKeyword != ''">
-                AND (a.session_name LIKE CONCAT('%', #{searchKeyword}, '%')
-                     OR a.session_content LIKE CONCAT('%', #{searchKeyword}, '%'))
+                AND (UPPER(a.session_name) LIKE CONCAT('%', UPPER(#{searchKeyword}), '%')
+                     OR UPPER(a.session_content) LIKE CONCAT('%', UPPER(#{searchKeyword}), '%'))
             </if>
         </where>
         ORDER BY COALESCE(a.update_time, a.create_time) DESC,a.create_time DESC

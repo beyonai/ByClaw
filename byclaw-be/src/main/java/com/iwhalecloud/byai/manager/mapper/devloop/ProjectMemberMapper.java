@@ -24,7 +24,9 @@ public interface ProjectMemberMapper extends BaseMapper<ProjectMember> {
      *
      * @param projectId 项目ID
      * @param userName 成员姓名关键词
+     * @param currentUserId 当前登录用户 ID，用于成员列表固定排序
      * @return 成员列表 DTO
      */
-    List<ProjectMemberListDto> listProjectMembers(@Param("projectId") Long projectId, @Param("userName") String userName);
+    List<ProjectMemberListDto> listProjectMembers(@Param("projectId") Long projectId, @Param("userName") String userName,
+        @Param("currentUserId") Long currentUserId);
 }

@@ -8,7 +8,13 @@ import { batchReadMessages } from '@/service/session';
 import { getDcSystemConfigListByStandType as fetchDcSystemConfigListByStandType } from '@/pages/manager/service/session';
 import { IMessageState, SSEMessageType } from '@/constants/message';
 
-import { addSessionHandler, updateSessionHandler, formatByUpdateTime, sessionHandler } from '@/utils/session';
+import {
+  addSessionHandler,
+  updateSessionHandler,
+  formatByUpdateTime,
+  getSessionsCreatedDuringRequest,
+  sessionHandler,
+} from '@/utils/session';
 import { IMessage } from '@/typescript/message';
 import type { IFile } from '@/typescript/file';
 
@@ -237,6 +243,10 @@ const sessionModel: SessionModelType = {
     *querySessionList({ payload }: any, { call, put, select }): any {
       const { searchKeyword = '', sessionType = 'all', pageNum } = payload;
 
+      // 记录请求发起时已有的会话，接口返回后据此识别请求期间由 createSession 新增的数据。
+      const requestStartState = yield select((state: any) => state.session);
+      const sessionsAtRequestStart = [...(requestStartState.sessionList || [])];
+
       yield put({ type: 'updateState', payload: { sessionLoading: true } });
       try {
         const res = yield call(qryConversations, {
@@ -261,11 +271,21 @@ const sessionModel: SessionModelType = {
 
         // 构建更新的缓存数据
         let updatedList = compact(mySessionList);
+        let sessionsCreatedDuringRequest: ISession[] = [];
+        if (pageNum === 1 && !`${searchKeyword || ''}`.trim()) {
+          // 首次加载第一页时不能让稍晚返回的列表请求覆盖新聊天；搜索结果仍严格按关键字展示。
+          sessionsCreatedDuringRequest = getSessionsCreatedDuringRequest(
+            sessionsAtRequestStart,
+            targetList,
+            updatedList
+          );
+          updatedList = [...sessionsCreatedDuringRequest, ...updatedList];
+        }
         let updatedPagination = {
           ...targetPagination,
           pageIndex: Number(newPageNum),
           pageCount: Number(totalPages),
-          total: Number(total),
+          total: Number(total) + sessionsCreatedDuringRequest.length,
         };
 
         if (pageNum !== 1) {

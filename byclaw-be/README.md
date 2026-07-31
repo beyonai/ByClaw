@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/byclaw/byclaw-be/actions/workflows/ci.yml/badge.svg)](https://github.com/byclaw/byclaw-be/actions)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Java](https://img.shields.io/badge/Java-17%2B-orange)](https://openjdk.org/)
+[![Java](https://img.shields.io/badge/Java-21%2B-orange)](https://openjdk.org/)
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.x-brightgreen)](https://spring.io/projects/spring-boot)
 
 ## 简介
@@ -159,7 +159,7 @@ byclaw-be/
 
 ### 环境要求
 
-- Java 17+
+- Java 21+
 - Maven 3.8+
 - MySQL 8.0+ / PostgreSQL / OpenGauss
 - Redis 5.0+
