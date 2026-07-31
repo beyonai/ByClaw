@@ -1,4 +1,5 @@
 import { themes } from '@/constants/theme';
+import dayjs from 'dayjs';
 import { size, omit } from 'lodash';
 import { getRandomNumber } from '@/utils/math';
 
@@ -7,7 +8,20 @@ import type { ISession } from '@/typescript/session';
 
 export const formatByUpdateTime = (sessionList: ISession[]) => {
   return sessionList.sort((a, b) => {
-    return Number(b.updateTime) - Number(a.updateTime);
+    const getTimestamp = (time?: string) => {
+      if (!time) return 0;
+
+      const numericTime = Number(time);
+      if (Number.isFinite(numericTime)) return numericTime;
+
+      const parsedTime = dayjs(time);
+      return parsedTime.isValid() ? parsedTime.valueOf() : 0;
+    };
+
+    const updateTimeDiff = getTimestamp(b.updateTime || b.createTime) - getTimestamp(a.updateTime || a.createTime);
+    if (updateTimeDiff !== 0) return updateTimeDiff;
+
+    return getTimestamp(b.createTime) - getTimestamp(a.createTime);
   });
 };
 

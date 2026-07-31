@@ -1,5 +1,6 @@
 package com.iwhalecloud.byai.state.application.service.session;
 
+import java.util.Date;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadFactory;
@@ -65,8 +66,6 @@ public class SessionApplicationService {
 
     @Autowired
     private ByaiMessageHotService byaiMessageHotService;
-
-
 
     @Autowired
     private SsSuperassistSubAgentService ssSuperassistSubAgentService;
@@ -184,6 +183,8 @@ public class SessionApplicationService {
         // 设置当前企业ID，确保数据隔离和权限控制
         byaiSession.setEnterpriseId(CurrentUserHolder.getEnterpriseId());
         // 调用会话服务执行更新操作
+        byaiSession.setUpdateBy(CurrentUserHolder.getCurrentUserId());
+        byaiSession.setUpdateTime(new Date());
         sessionService.update(byaiSession);
 
         return byaiSession;
@@ -243,7 +244,7 @@ public class SessionApplicationService {
                 session.setSessionName(ChatUtils.truncateString(assistantChatDto.getChatContent(), 10));
             }
             else {
-            session.setSessionName(ChatUtils.truncateString(pointAgent.getName(), 10));
+                session.setSessionName(ChatUtils.truncateString(pointAgent.getName(), 10));
             }
         }
         else {
