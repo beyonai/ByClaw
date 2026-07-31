@@ -35,6 +35,7 @@ describe("ByClawSuperGatewayWorker", () => {
     expect(createSessionRun).toHaveBeenCalledWith({
       message: "请分析数据",
       thinkingLevel: "off",
+      externalSessionId: "session-1",
       beyondToken: "secret-token",
       systemCode: "system-1",
     });
@@ -287,6 +288,7 @@ describe("ByClawSuperGatewayWorker", () => {
     expect(createSessionRun).toHaveBeenCalledWith({
       message: "请分析数据",
       thinkingLevel: "off",
+      externalSessionId: "session-1",
       beyondToken: "secret-token",
       systemCode: "system-1",
     });
@@ -294,6 +296,7 @@ describe("ByClawSuperGatewayWorker", () => {
       sessionId: "session-1",
       message: "请分析数据",
       thinkingLevel: "off",
+      externalSessionId: "session-1",
       beyondToken: "secret-token",
       systemCode: "system-1",
     });
@@ -326,6 +329,7 @@ describe("ByClawSuperGatewayWorker", () => {
       sessionId: "a-session",
       message: "请分析数据",
       thinkingLevel: "off",
+      externalSessionId: "session-1",
       beyondToken: "a-token",
       systemCode: "system-1",
     });

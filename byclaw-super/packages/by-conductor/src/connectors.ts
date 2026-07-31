@@ -21,6 +21,12 @@ export interface ConnectorRequest {
   expectedOutput?: string;
   /** 本次委派选中的附件；由编排层从当前 Run 的附件集合中按 ID 解析，Connector 只负责透传。 */
   attachments: RunAttachment[];
+  /**
+   * by-framework 入站 Session 的外部 ID；仅当 Run 来自 by-framework 入站时由编排层从
+   * ephemeral metadata 透传过来（与 Beyond-Token 同路径，不持久化）。Connector 据此向子 agent
+   * 声明会话工作区，缺失（HTTP 入站）则不附加任何提示。
+   */
+  externalSessionId?: string;
   metadata: Record<string, unknown>;
 }
 
@@ -39,6 +45,8 @@ export interface ConnectorError {
   code: string;
   message: string;
   retryable: boolean;
+  /** 该失败是否由 Connector 自身的明确超时边界触发。 */
+  timedOut?: boolean;
   details?: Record<string, JsonValue>;
 }
 

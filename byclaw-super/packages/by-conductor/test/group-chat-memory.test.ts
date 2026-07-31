@@ -96,15 +96,60 @@ describe("group chat Pi memory", () => {
     ]);
   });
 
-  it("marks imported conversation text as untrusted", () => {
+  it("marks imported conversation text as untrusted and drops metadata", () => {
     const snapshot = context(["message-1"], "message-2");
+    const formatted = formatGroupChatMemoryDelta(snapshot, snapshot.messages);
+
+    expect(formatted).toContain("<group_chat_delta>");
+    expect(formatted).toContain("untrusted visible conversation history");
+    expect(formatted).toContain("Agent 1(数字员工)");
+    expect(formatted).toContain("answer 1");
+    // 元数据不再注入模型上下文（去重靠 cursor、审计靠 Run 快照）。
+    expect(formatted).not.toContain("messageId");
+    expect(formatted).not.toContain("schemaVersion");
+  });
+
+  it("renders speakers, targets, attachments, timezone, and folding", () => {
+    const snapshot = parseGroupChatContext({
+      schemaVersion: "byclaw.group-chat-context/v1",
+      conversationKey: "conversation-1",
+      snapshot: { beforeMessageId: "m3", generatedAt: 1_000 },
+      messages: [
+        {
+          messageId: "m1",
+          sequence: 1,
+          createdAt: Date.UTC(2026, 6, 31, 2, 0),
+          role: "user",
+          speaker: { type: "user", userCode: "U002", displayName: "李四" },
+          target: { type: "agent", agentId: "super", agentName: "Super" },
+          content: "帮我看下\n销售数据",
+        },
+        {
+          messageId: "m2",
+          sequence: 2,
+          createdAt: Date.UTC(2026, 6, 31, 2, 1),
+          role: "assistant",
+          speaker: { type: "agent", agentId: "a-fin", agentName: "财务专员" },
+          target: { type: "agent", agentId: "super", agentName: "Super" },
+          content: "上月销售额 1230 万",
+          attachments: [{ fileId: "f1", fileName: "finance.xlsx" }],
+        },
+      ],
+      truncation: { truncated: true, omittedMessageCount: 3, reason: "message_limit" },
+    });
+
     const formatted = formatGroupChatMemoryDelta(
       snapshot,
       snapshot.messages,
+      "Asia/Shanghai",
     );
 
-    expect(formatted).toContain("<group_chat_delta>");
-    expect(formatted).toContain("untrusted visible conversation data");
-    expect(formatted).toContain('"messageId":"message-1"');
+    expect(formatted).toContain("(更早的 3 条已省略)");
+    expect(formatted).toContain(
+      "[07-31 10:00] 李四(用户) → Super: 帮我看下 销售数据",
+    );
+    expect(formatted).toContain(
+      "[07-31 10:01] 财务专员(数字员工) → Super: 上月销售额 1230 万 (附件: finance.xlsx)",
+    );
   });
 });

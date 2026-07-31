@@ -392,6 +392,157 @@ describe("DelegationService", () => {
     expect((await delegations.listByRun("run-timeout"))[0]?.status).toBe("TIMED_OUT");
   });
 
+  it("maps a connector first-event timeout to a timed-out delegation", async () => {
+    const registry = new ConnectorRegistry();
+    registry.register(
+      fakeConnector(async function* () {
+        yield {
+          type: "failed",
+          error: {
+            code: "OPENCLAW_FIRST_EVENT_TIMEOUT",
+            message: "OpenClaw first event timed out",
+            retryable: true,
+            timedOut: true,
+          },
+        };
+      }),
+    );
+    const delegations = new InMemoryDelegationRepository();
+    const service = new DelegationService(
+      registry,
+      delegations,
+      new InMemoryRunEventStore(),
+      1_000,
+    );
+
+    const result = await service.execute({
+      session: {
+        id: "session-1",
+        owner: { userCode: "user-1" },
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      runId: "run-first-event-timeout",
+      agents: [agent],
+      agentId: agent.id,
+      task: "wait for first event",
+      metadata: {},
+      signal: new AbortController().signal,
+    });
+
+    expect(result.status).toBe("timed_out");
+    expect(
+      (await delegations.listByRun("run-first-event-timeout"))[0]?.status,
+    ).toBe("TIMED_OUT");
+  });
+
+  it("reports active delegation cancellation failures", async () => {
+    const registry = new ConnectorRegistry();
+    let resolveStarted: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => {
+      resolveStarted = resolve;
+    });
+    const controller = new AbortController();
+    registry.register({
+      ...fakeConnector(async function* () {}),
+      async start(_request, context) {
+        return {
+          ref: { connectorId: "fake", executionId: "external-cancel-failure" },
+          events: (async function* (): AsyncIterable<ConnectorEvent> {
+            resolveStarted?.();
+            await new Promise<void>((resolve) => {
+              context.signal.addEventListener("abort", () => resolve(), {
+                once: true,
+              });
+            });
+            throw context.signal.reason;
+          })(),
+          cancel: vi.fn(async () => {
+            throw new Error("downstream cancellation failed");
+          }),
+        };
+      },
+    });
+    const service = new DelegationService(
+      registry,
+      new InMemoryDelegationRepository(),
+      new InMemoryRunEventStore(),
+      1_000,
+    );
+    const execution = service
+      .execute({
+        session: {
+          id: "session-1",
+          owner: { userCode: "user-1" },
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        runId: "run-cancel-failure",
+        agents: [agent],
+        agentId: agent.id,
+        task: "cancel me",
+        metadata: {},
+        signal: controller.signal,
+      })
+      .catch((error: unknown) => error);
+    await started;
+
+    await expect(
+      service.cancelRun("run-cancel-failure", "user cancelled"),
+    ).rejects.toThrow("Failed to cancel 1 active delegation");
+
+    controller.abort(new Error("user cancelled"));
+    await execution;
+  });
+
+  it("cancels a persisted delegation after the active execution is lost", async () => {
+    const registry = new ConnectorRegistry();
+    const cancel = vi.fn(async () => undefined);
+    const resume = vi.fn(async () => ({
+      ref: { connectorId: "fake", executionId: "external-persisted" },
+      events: (async function* (): AsyncIterable<ConnectorEvent> {})(),
+      cancel,
+    }));
+    registry.register({
+      ...fakeConnector(async function* () {}),
+      capabilities: {
+        streaming: true,
+        cancellation: true,
+        artifacts: false,
+        resumable: true,
+        attachments: false,
+      },
+      resume,
+    });
+    const delegations = new InMemoryDelegationRepository();
+    await delegations.save({
+      id: "delegation-persisted",
+      runId: "run-persisted",
+      agentId: agent.id,
+      connectorId: "fake",
+      task: "cancel after restart",
+      status: "RUNNING",
+      externalRef: {
+        connectorId: "fake",
+        executionId: "external-persisted",
+      },
+      version: 1,
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    const service = new DelegationService(
+      registry,
+      delegations,
+      new InMemoryRunEventStore(),
+      1_000,
+    );
+
+    await service.cancelRun("run-persisted", "user cancelled");
+
+    expect(resume).toHaveBeenCalledOnce();
+    expect(cancel).toHaveBeenCalledWith("user cancelled");
+  });
+
   it("resumes a persisted delegation from its cursor and partial output", async () => {
     const registry = new ConnectorRegistry();
     const start = vi.fn();
@@ -1035,6 +1186,44 @@ describe("RunService", () => {
 
     expect(cancelled?.status).toBe("CANCELLED");
     expect(leaderFactory.aborted).toBe(1);
+    await service.dispose();
+  });
+
+  it("keeps a Run cancelling when downstream cancellation fails", async () => {
+    const leaderFactory = new ControlledLeaderFactory();
+    const sessions = new InMemorySessionRepository();
+    const runs = new InMemoryRunRepository(sessions);
+    const delegations = new InMemoryDelegationRepository();
+    const events = new InMemoryRunEventStore();
+    const delegationService = {
+      cancelRun: vi.fn(async () => {
+        throw new Error("downstream cancellation failed");
+      }),
+    };
+    const service = new RunService(
+      sessions,
+      runs,
+      delegations,
+      events,
+      delegationService as never,
+      leaderFactory,
+    );
+    const session = await service.createSession({
+      owner: { userCode: "user" },
+    });
+    const run = await service.createRun({
+      sessionId: session.id,
+      message: "cancel-failure",
+      agentList: [],
+    });
+    await waitFor(() => leaderFactory.started.includes("cancel-failure"));
+
+    await expect(service.cancelRun(run.id)).rejects.toThrow(
+      "downstream cancellation failed",
+    );
+    await waitFor(async () => (await service.getRun(run.id))?.status === "CANCELLING");
+
+    expect((await service.getRun(run.id))?.status).toBe("CANCELLING");
     await service.dispose();
   });
 });
